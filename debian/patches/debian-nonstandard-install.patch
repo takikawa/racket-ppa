@@ -1,0 +1,11 @@
+--- drscheme-301.orig/install
++++ drscheme-301/install
+@@ -39,7 +39,7 @@
+   exit 1
+ fi
+ 
+-exec "$mz" -qC "$0" "$@"
++LD_LIBRARY_PATH="$pltdir/lib" exec "$mz" -qC "$0" "$@"
+ exit 1
+ |#
+ 

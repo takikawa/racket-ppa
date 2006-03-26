@@ -1,0 +1,89 @@
+#
+#    Translators, if you are not familiar with the PO format, gettext
+#    documentation is worth reading, especially sections dedicated to
+#    this format, e.g. by running:
+#         info -n '(gettext)PO Files'
+#         info -n '(gettext)Header Entry'
+#
+#    Some information specific to po-debconf are available at
+#            /usr/share/doc/po-debconf/README-trans
+#         or http://www.debian.org/intl/l10n/po-debconf/README-trans
+#
+#    Developers do not need to manually edit POT or PO files.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: drscheme 1.206p1-1\n"
+"Report-Msgid-Bugs-To: ari@debian.org\n"
+"POT-Creation-Date: 2006-02-05 22:22+0000\n"
+"PO-Revision-Date: 2004-04-16 11:51+0100\n"
+"Last-Translator: Luk Claes <luk.claes@ugent.be>\n"
+"Language-Team: Debian l10n Dutch <debian-l10n-dutch@lists.debian.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=iso-8859-1\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#. Type: boolean
+#. Description
+#: ../drscheme.templates:4
+msgid "Create .zo files now?"
+msgstr ".zo-bestanden nu aanmaken?"
+
+#. Type: boolean
+#. Description
+#: ../drscheme.templates:4
+msgid ""
+"PLT software starts up much faster with .zo files, but creating .zo files "
+"now takes a few minutes and requires about 5MB of additional disk space. You "
+"can create .zo files later by running debian-plt."
+msgstr ""
+"PLT-software start veel sneller op met .zo-bestanden, maar het aanmaken van ."
+"zo-bestanden duurt enkele minuten en vereist ongeveer 5MB bijkomende "
+"schijfruimte. U kunt de .zo-bestanden later aanmaken door debian-plt uit te "
+"voeren."
+
+#. Type: note
+#. Description
+#: ../drscheme.templates:11
+msgid "PLT installation done"
+msgstr "PLT-installatie beëindigd"
+
+#. Type: note
+#. Description
+#: ../drscheme.templates:11
+msgid ""
+"Run DrScheme as drscheme. For Help, select `Help Desk' from DrScheme's "
+"`Help' menu, or run help-desk."
+msgstr ""
+"Voer DrScheme uit als drscheme. Voor Help, selecteer `Help Desk' in het "
+"`Help'-menu van DrScheme, of voer help-desk uit."
+
+#. Type: boolean
+#. Description
+#: ../mzscheme.templates:4
+msgid "Run the web server?"
+msgstr "De webserver draaien?"
+
+#. Type: boolean
+#. Description
+#: ../mzscheme.templates:4
+msgid ""
+"PLT includes a fully-functional web server implementation. This server may "
+"be started and will continue to be brought on-line at boot time.  If so, you "
+"should make sure you configure the web server by visiting http://localhost "
+"with your web browser and following the configuration steps."
+msgstr ""
+"PLT heeft een volledig functionele webserverimplementatie. Deze server kan "
+"gestart worden en zal verder online gebracht worden bij het opstarten. U "
+"kunt dan de webserver configureren door http://localhost te bezoeken met uw "
+"webbrowser en de configuratiestappen te volgen."
+
+#~ msgid "/usr/local is read-only.  Skipping..."
+#~ msgstr "/usr/local is alleen lezen. Overslaan..."
+
+#~ msgid ""
+#~ "You will need to use debian-plt to install packages since setup-plt is "
+#~ "configured to write to /usr/local."
+#~ msgstr ""
+#~ "U zult debian-plt moeten gebruiken om pakketten te installeren omdat "
+#~ "setup-plt geconfigureerd is om te schrijven in /usr/local."

@@ -1,0 +1,63 @@
+.\" dummy line
+.TH DRSCHEME 1 "1 October 2000"
+.UC 4
+.SH NAME
+debian-plt \- The Debian PLT Setup Utility
+.SH SYNOPSIS
+.B debian-plt
+[
+.I Xflag ...
+]
+[
+.I file ...
+]
+.SH DESCRIPTION
+.I debian-plt
+is the Debian Setup Utility for Rice University's PLT Scheme.
+.PP
+.I debian-plt
+installs the .plt files given as command-line arguments.
+It installs the files into the non-root PLT directory
+(/usr/local/lib/plt on Debian systems) and compiles the source
+into *.zo files.
+.pp
+This utility should be used by local Debian administrators to install
+non-dpkg-controlled PLT files under /usr/local/lib/plt.
+.pp
+For further information on
+.I MzScheme,
+.I DrScheme,
+or any of its components (such as setup-plt) please 
+consult the on-line documentation and other information 
+available at
+.PP
+.ce 1
+http://www.cs.rice.edu/CS/PLT/packages/drscheme/
+.SH FILES
+.I DrScheme
+looks for its libraries using the environment variables
+PLTHOME and PLTCOLLECTS.  If this variable is not defined,
+the installation directory is assumed ("/usr/lib/plt/" on
+Debian systems). See the documentation for details.
+.PP
+Please consult your local administrator to determine whether
+the on-line documentation has been installed locally.
+.SH BUGS
+Submit bug reports via
+.ce 1
+Help Desk (encouraged),
+or via the web
+.ce 1
+http://www.cs.rice.edu/CS/PLT/Bugs/ (discouraged)
+or by e-mail to
+.ce 1
+plt-bugs@cs.rice.edu (discouraged)
+.SH AUTHOR
+.I DrScheme
+was implemented by Robby Findler (robby@cs.rice.edu),
+Shriram Krishnamurthi (shriram@cs.rice.edu), Cormac Flanagan 
+(cormac@cs.rice.edu), Matthew Flatt (mflatt@cs.rice.edu),
+and Paul Steckler (steck@cs.rice.edu).
+.SH SEE ALSO
+.BR mred(1),
+.BR mzscheme(1)

@@ -1,0 +1,19 @@
+--- drscheme-301.orig/collects/web-server/configuration-table
++++ drscheme-301/collects/web-server/configuration-table
+@@ -1,4 +1,4 @@
+-((port 80)
++((port 8000)
+  (max-waiting 40)
+  (initial-connection-timeout 30)
+  (default-host-table
+--- drscheme-301.orig/collects/web-server/monitor-server.ss
++++ drscheme-301/collects/web-server/monitor-server.ss
+@@ -9,7 +9,7 @@
+            default-poll-frequency-seconds
+            default-server-response-timeout-seconds)
+   
+-  (define default-server-port 80)
++  (define default-server-port 8000)
+   (define default-poll-frequency-seconds 3600)
+   (define default-server-response-timeout-seconds 75)
+   

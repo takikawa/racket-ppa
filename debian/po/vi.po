@@ -1,0 +1,90 @@
+#
+#    Translators, if you are not familiar with the PO format, gettext
+#    documentation is worth reading, especially sections dedicated to
+#    this format, e.g. by running:
+#         info -n '(gettext)PO Files'
+#         info -n '(gettext)Header Entry'
+#
+#    Some information specific to po-debconf are available at
+#            /usr/share/doc/po-debconf/README-trans
+#         or http://www.debian.org/intl/l10n/po-debconf/README-trans
+#
+#    Developers do not need to manually edit POT or PO files.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: drscheme 1/209-5\n"
+"Report-Msgid-Bugs-To: ari@debian.org\n"
+"POT-Creation-Date: 2006-02-05 22:22+0000\n"
+"PO-Revision-Date: 2005-06-14 22:13+0930\n"
+"Last-Translator: Clytie Siddall <clytie@riverland.net.au>\n"
+"Language-Team: Vietnamese <gnomevi-list@lists.sourceforge.net>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0\n"
+
+#. Type: boolean
+#. Description
+#: ../drscheme.templates:4
+msgid "Create .zo files now?"
+msgstr "Tạo tập tin .zo ngay bây giờ không?"
+
+#. Type: boolean
+#. Description
+#: ../drscheme.templates:4
+msgid ""
+"PLT software starts up much faster with .zo files, but creating .zo files "
+"now takes a few minutes and requires about 5MB of additional disk space. You "
+"can create .zo files later by running debian-plt."
+msgstr ""
+"Phần mềm PLT khởi chạy nhanh hơn nhiều khi dùng tập tin .zo, nhưng mà tạo "
+"tập tin .zo ấy ngay bây giờ sẽ mất vài phục và cần đến khoảng 5MB thêm chỗ "
+"trên đĩa. Hoặc bạn có thể tạo tập tin .zo vào một lúc sau, bằng cách chạy "
+"«debian-plt»."
+
+#. Type: note
+#. Description
+#: ../drscheme.templates:11
+msgid "PLT installation done"
+msgstr "Cài đặt PLT rồi."
+
+#. Type: note
+#. Description
+#: ../drscheme.templates:11
+msgid ""
+"Run DrScheme as drscheme. For Help, select `Help Desk' from DrScheme's "
+"`Help' menu, or run help-desk."
+msgstr ""
+"Hãy chạy DrScheme là drscheme. Để tìm Trợ giúp, hãy chọn «bàn trợ giúp» "
+"trong trình đơn «Trợ giúp» của DrScheme, hay chạy «help-desk»."
+
+#. Type: boolean
+#. Description
+#: ../mzscheme.templates:4
+msgid "Run the web server?"
+msgstr "Chạy trình phục vụ Mạng không?"
+
+#. Type: boolean
+#. Description
+#: ../mzscheme.templates:4
+msgid ""
+"PLT includes a fully-functional web server implementation. This server may "
+"be started and will continue to be brought on-line at boot time.  If so, you "
+"should make sure you configure the web server by visiting http://localhost "
+"with your web browser and following the configuration steps."
+msgstr ""
+"PLT bao gồm một trình phục vụ Mạng có chức năng đầy đủ. Có thể tự động khởi "
+"chạy trình phục vụ này khi khởi động máy. Bạn có thể cấu hình trình ấy bằng "
+"cách sử dụng trình duyệt Mạng để tham gia địa chỉ «http://localhost» (máy "
+"địa phương) rồi theo những bước cấu hình tại đó."
+
+#~ msgid "/usr/local is read-only.  Skipping..."
+#~ msgstr "Thư mục «/usr/local» chỉ cho phép đọc nên bỏ qua..."
+
+#~ msgid ""
+#~ "You will need to use debian-plt to install packages since setup-plt is "
+#~ "configured to write to /usr/local."
+#~ msgstr ""
+#~ "Bạn sẽ cần phải sử dụng «debian-plt» để cài đặt gói tin vì «setup-plt» "
+#~ "được cấu hình để ghi vào «usr/local». "

@@ -1,0 +1,4 @@
+debian/README.Debian
+debian/README.slib
+debian/TODO.Debian
+notes/mzscheme/*.txt

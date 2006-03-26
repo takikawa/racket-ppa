@@ -1,0 +1,46 @@
+Source: drscheme
+Section: interpreters
+Priority: optional
+Maintainer: Ari Pollak <ari@debian.org>
+Uploaders: James Vega <jamessan@debian.org>
+Standards-Version: 3.6.1
+Build-Depends: cdbs, debhelper (>= 4.1.16), patchutils,
+ libfreetype6-dev, libjpeg62-dev, libpng12-dev, libssl-dev, libxaw8-dev,
+ libxft-dev, perl5-base, xlibmesa-gl-dev | libgl-dev,
+ libglu1-xorg-dev | libglu-dev, libx11-dev, libxrender-dev, libcairo2-dev
+ 
+Package: drscheme
+Architecture: alpha amd64 hppa i386 m68k mips mipsel powerpc sparc
+Depends: mzscheme (= ${Source-Version}), ${shlibs:Depends}
+Suggests: menu (>= 1.5)
+Conflicts: mzscheme (<< 1:301-6)
+Replaces: mzscheme (<< 1:301-6)
+Description: PLT Scheme Programming Environment
+ This is a Scheme Programming Environment, designed for use within
+ an educational setting.  The faculty and staff at Rice University
+ developed this package to be used in programming curricula, as a
+ supplement to mathematics courses, or for general programming
+ instruction in a liberal arts setting.
+ .
+ It includes its own IDE (which runs under X) and is similar in
+ some respects to Emacs (most noticably in its keybindings).
+ .
+ It has an integrated help system and can run one of four
+ modes (beginning, intermediate, advanced, complete).  Each
+ level exposes successively more features and options to the
+ user.  The goal of this configuration is to protect novice users
+ from the more arcane behavior of Scheme under certain cases.
+
+Package: mzscheme
+Architecture: alpha amd64 hppa i386 m68k mips mipsel powerpc sparc
+Depends: gcc | c-compiler, debconf | debconf-2.0, ${shlibs:Depends}
+Conflicts: slib (<< 3a2-5)
+Suggests: drscheme, slib
+Replaces: mzscheme-dev, drscheme (<< 1:301-9)
+Provides: httpd
+Description: PLT Scheme Interpreter
+ This scheme implementation forms the foundation for the DrScheme
+ programming environment.  The faculty and staff at Rice University
+ developed this package to be used as a stand-alone interpreter,
+ for embedding in other applications, and for use with the
+ DrScheme graphical environment.

@@ -1,0 +1,6 @@
+/usr/lib/plt/bin/drscheme /usr/bin/drscheme
+/usr/lib/plt/bin/games /usr/bin/plt-games
+/usr/lib/plt/bin/help-desk /usr/bin/help-desk
+/usr/lib/plt/bin/mred /usr/bin/mred
+/usr/lib/plt/bin/slideshow /usr/bin/slideshow
+/usr/share/doc/mzscheme /usr/share/doc/drscheme

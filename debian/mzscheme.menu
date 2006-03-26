@@ -1,0 +1,5 @@
+?package(mzscheme):needs="text" \
+	section="Apps/Programming" title="MzScheme" \
+	hints="Scheme Environment" \
+  	command="/usr/bin/mzscheme"
+	

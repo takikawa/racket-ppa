@@ -1,0 +1,3 @@
+drscheme: image-file-in-usr-lib /usr/lib/plt/collects
+drscheme: extra-license-file /usr/lib/plt/collects/profj/classpath/COPYING
+drscheme: extra-license-file /usr/lib/plt/collects/profj/classpath/LICENSE

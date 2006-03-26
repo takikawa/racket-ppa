@@ -1,0 +1,9 @@
+--- drscheme-301.orig/src/mzscheme/gc2/my_qsort.c
++++ drscheme-301/src/mzscheme/gc2/my_qsort.c
+@@ -1,5 +1,5 @@
+ 
+-#if defined(sparc) || defined(__sparc) || defined(__sparc__)
++#if defined(sun)
+ /* Sun's qsort() is broken. */
+ 
+ #define MAXSTACK 100
