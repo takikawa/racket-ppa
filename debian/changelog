@@ -2,6 +2,7 @@ drscheme (1:301-13) UNRELEASED; urgency=low
 
   * Move packaging to cdbs + simple-patchsys
   * Add James Vega to Uploaders list
+  * Move libxaw8 back to libxaw7 because libxaw8 is going to be removed
   * debian/patches/file.c-warning-fix.patch:
     - Fix compile warning in src/mzscheme/src/list.c
 
