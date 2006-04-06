@@ -5,8 +5,11 @@ drscheme (1:301-13) UNRELEASED; urgency=low
   * Move libxaw8 back to libxaw7 because libxaw8 is going to be removed
   * debian/patches/file.c-warning-fix.patch:
     - Fix compile warning in src/mzscheme/src/list.c
+  * debian/patches/slatex-bug361027.patch:
+    - Added to support RequirePackage to start a LaTeX document
+      when running slatex. Patch accepted upstream (Closes: #361027)
 
- -- Ari Pollak <ari@debian.org>  Sat, 25 Mar 2006 13:11:26 -0500
+ -- Ari Pollak <ari@debian.org>  Thu,  6 Apr 2006 15:53:19 -0400
 
 drscheme (1:301-12) unstable; urgency=low
 
