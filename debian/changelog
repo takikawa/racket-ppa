@@ -1,4 +1,4 @@
-drscheme (1:301-13) UNRELEASED; urgency=low
+drscheme (1:301-13) unstable; urgency=low
 
   * Move packaging to cdbs + simple-patchsys
   * Add James Vega to Uploaders list
