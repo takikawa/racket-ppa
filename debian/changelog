@@ -3,7 +3,7 @@ drscheme (1:301-13) unstable; urgency=low
   * Move packaging to cdbs + simple-patchsys
   * Add James Vega to Uploaders list
   * Move libxaw8 back to libxaw7 because libxaw8 is going to be removed
-  * debian/patches/file.c-warning-fix.patch:
+  * debian/patches/list.c-warning-fix.patch:
     - Fix compile warning in src/mzscheme/src/list.c
   * debian/patches/slatex-bug361027.patch:
     - Added to support RequirePackage to start a LaTeX document
