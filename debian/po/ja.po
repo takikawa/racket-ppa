@@ -16,48 +16,13 @@ msgid ""
 msgstr ""
 "Project-Id-Version: drscheme 1:207-3\n"
 "Report-Msgid-Bugs-To: ari@debian.org\n"
-"POT-Creation-Date: 2006-02-05 22:22+0000\n"
+"POT-Creation-Date: 2006-04-16 16:10-0400\n"
 "PO-Revision-Date: 2004-09-24 15:33+0900\n"
 "Last-Translator: Hideki Yamane <henrich@samba.gr.jp>\n"
 "Language-Team: Japanese <debian-japanese@lists.debian.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=EUC-JP\n"
 "Content-Transfer-Encoding: 8bit\n"
-
-#. Type: boolean
-#. Description
-#: ../drscheme.templates:4
-msgid "Create .zo files now?"
-msgstr ".zo ファイルを作成しますか?"
-
-#. Type: boolean
-#. Description
-#: ../drscheme.templates:4
-msgid ""
-"PLT software starts up much faster with .zo files, but creating .zo files "
-"now takes a few minutes and requires about 5MB of additional disk space. You "
-"can create .zo files later by running debian-plt."
-msgstr ""
-"PLT ソフトウェアは .zo ファイルがあると速く起動するようになりますが、.zo ファ"
-"イルの作成には数分の時間と約 5MB の空き容量が必要になります。後ほど debian-"
-"plt を実行して .zo ファイルを作成できます。"
-
-#. Type: note
-#. Description
-#: ../drscheme.templates:11
-msgid "PLT installation done"
-msgstr "PLT のインストールが完了しました"
-
-#. Type: note
-#. Description
-#: ../drscheme.templates:11
-msgid ""
-"Run DrScheme as drscheme. For Help, select `Help Desk' from DrScheme's "
-"`Help' menu, or run help-desk."
-msgstr ""
-"DrScheme の実行には drscheme としてください。ヘルプを参照するには、DrScheme "
-"の `Help' メニューから `Help Desk' を選択するか help-desk と実行してくださ"
-"い。"
 
 #. Type: boolean
 #. Description
@@ -71,19 +36,10 @@ msgstr "web サーバを起動しますか?"
 msgid ""
 "PLT includes a fully-functional web server implementation. This server may "
 "be started and will continue to be brought on-line at boot time.  If so, you "
-"should make sure you configure the web server by visiting http://localhost "
-"with your web browser and following the configuration steps."
+"should make sure you configure the web server by visiting http://"
+"localhost:8000 with your web browser and following the configuration steps."
 msgstr ""
 "PLT は全ての機能を備えた web サーバ実装を含んでいます。このサーバはシステム起"
 "動時に開始し、オンラインにもできます。その場合、web ブラウザで http://"
-"localhost を参照して web サーバを確認し、設定の手順を踏む必要があります。"
-
-#~ msgid "/usr/local is read-only.  Skipping..."
-#~ msgstr "/usr/local は読み取り専用です。スキップします…"
-
-#~ msgid ""
-#~ "You will need to use debian-plt to install packages since setup-plt is "
-#~ "configured to write to /usr/local."
-#~ msgstr ""
-#~ "setup-plt が /usr/local に書き込みをするように設定されているので、パッケー"
-#~ "ジのインストールには debian-plt を使う必要があります。"
+"localhost:8000 を参照して web サーバを確認し、設定の手順を踏む必要がありま"
+"す。"

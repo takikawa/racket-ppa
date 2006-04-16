@@ -1,3 +1,19 @@
+drscheme (1:301-16) UNRELEASED; urgency=low
+
+  * Correct debconf web-server question to say http://localhost:8000
+    instead of http://localhost
+  * Remove old leftover drscheme debconf templates
+  * Remove Spanish debconf translation since it hadn't been updated
+    in ages
+
+ -- Ari Pollak <ari@debian.org>  Sun, 16 Apr 2006 16:06:51 -0400
+
+drscheme (1:301-15) unstable; urgency=low
+
+  * Build-depend on xlibs-data to fix FTBFS
+
+ -- Ari Pollak <ari@debian.org>  Wed, 12 Apr 2006 10:21:08 -0400
+
 drscheme (1:301-14) unstable; urgency=low
 
   * Switching to CDBS added -O2 to the compilation flags without

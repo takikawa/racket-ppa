@@ -15,49 +15,13 @@ msgid ""
 msgstr ""
 "Project-Id-Version: drscheme_205-4\n"
 "Report-Msgid-Bugs-To: ari@debian.org\n"
-"POT-Creation-Date: 2006-02-05 22:22+0000\n"
+"POT-Creation-Date: 2006-04-16 16:10-0400\n"
 "PO-Revision-Date: 2003-09-13 13:34+0200\n"
 "Last-Translator: Christian Perrier <bubulle@debian.org>\n"
 "Language-Team: French <debian-l10n-french@lists.debian.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=iso-8859-1\n"
 "Content-Transfer-Encoding: 8bit\n"
-
-#. Type: boolean
-#. Description
-#: ../drscheme.templates:4
-msgid "Create .zo files now?"
-msgstr "Faut-il créer les fichiers .zo maintenant ?"
-
-#. Type: boolean
-#. Description
-#: ../drscheme.templates:4
-msgid ""
-"PLT software starts up much faster with .zo files, but creating .zo files "
-"now takes a few minutes and requires about 5MB of additional disk space. You "
-"can create .zo files later by running debian-plt."
-msgstr ""
-"Le logiciel PLT démarre bien plus rapidement s'il utilise des fichiers .zo. "
-"Leur création immédiate prendra quelques minutes et nécessitera 5 Mo "
-"supplémentaires d'espace disque. Vous pouvez créer les fichiers .zo avec la "
-"commande « debian-plt »."
-
-#. Type: note
-#. Description
-#: ../drscheme.templates:11
-msgid "PLT installation done"
-msgstr "Installation de PLT terminée"
-
-#. Type: note
-#. Description
-#: ../drscheme.templates:11
-msgid ""
-"Run DrScheme as drscheme. For Help, select `Help Desk' from DrScheme's "
-"`Help' menu, or run help-desk."
-msgstr ""
-"Veuillez utiliser la commande « drscheme » pour lancer DrScheme. Pour "
-"obtenir de l'aide, vous pouvez choisir « Help Desk » depuis le menu d'Aide "
-"(« Help ») de DrScheme, ou utiliser la commande « help-desk »."
 
 #. Type: boolean
 #. Description
@@ -71,20 +35,10 @@ msgstr "Faut-il démarrer le serveur web ?"
 msgid ""
 "PLT includes a fully-functional web server implementation. This server may "
 "be started and will continue to be brought on-line at boot time.  If so, you "
-"should make sure you configure the web server by visiting http://localhost "
-"with your web browser and following the configuration steps."
+"should make sure you configure the web server by visiting http://"
+"localhost:8000 with your web browser and following the configuration steps."
 msgstr ""
 "PLT comporte un serveur web complet. Ce serveur peut être démarré et "
 "redeviendra actif à chaque démarrage. Dans ce cas, vous devrez veiller à le "
-"configurer en pointant votre navigateur vers l'adresse http://localhost puis "
-"en suivant les étapes de la configuration."
-
-#~ msgid "/usr/local is read-only.  Skipping..."
-#~ msgstr "Impossible d'écrire dans /usr/local. Opération abandonnée..."
-
-#~ msgid ""
-#~ "You will need to use debian-plt to install packages since setup-plt is "
-#~ "configured to write to /usr/local."
-#~ msgstr ""
-#~ "Comme setup-plt est prévu pour écrire dans /usr/local, vous devrez "
-#~ "utiliser debian-plt pour installer les paquets."
+"configurer en pointant votre navigateur vers l'adresse http://localhost:8000 "
+"puis en suivant les étapes de la configuration."
