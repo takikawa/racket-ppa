@@ -1,12 +1,12 @@
 This package was debianized by Brent A. Fulgham bfulgham@debian.org on
 Fri, 4 Feb 2000 22:10:09 -0700.
 
-It was downloaded from
-http://download.plt-scheme.org/bundles/209/plt/plt-209-src-unix.tgz
+It was downloaded from http://download.plt-scheme.org/drscheme/
 
 Upstream Authors: PLT Scheme Inc.
 
 Copyright: GNU Lesser General Public License (LGPL)
 
 Note:  These files are not included with the distribution, since
-they are verbatim copies of /usr/share/common-licenses/LGPL
+they is a verbatim copy in /usr/share/common-licenses/LGPL
+on Debian systems
