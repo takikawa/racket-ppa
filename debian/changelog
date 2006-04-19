@@ -4,7 +4,7 @@ drscheme (1:301-16) UNRELEASED; urgency=low
   * Correct debconf web-server question to say http://localhost:8000
     instead of http://localhost
   * Remove old leftover drscheme debconf templates
-  * Remove Spanish and German debconf translations since they hadn't been
+  * Remove German debconf translation since it hasn't been
     updated in ages
 
  -- Ari Pollak <ari@debian.org>  Sun, 16 Apr 2006 16:06:51 -0400
