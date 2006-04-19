@@ -23,7 +23,7 @@ Description: PLT Scheme Programming Environment
  instruction in a liberal arts setting.
  .
  It includes its own IDE (which runs under X) and is similar in
- some respects to Emacs (most noticably in its keybindings).
+ some respects to Emacs (most noticeably in its keybindings).
  .
  It has an integrated help system and can run one of four
  modes (beginning, intermediate, advanced, complete).  Each

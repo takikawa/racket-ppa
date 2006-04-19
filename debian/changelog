@@ -1,5 +1,6 @@
 drscheme (1:301-16) UNRELEASED; urgency=low
 
+  * Fix small spelling mistake in package description (Closes: #363300)
   * Correct debconf web-server question to say http://localhost:8000
     instead of http://localhost
   * Remove old leftover drscheme debconf templates
