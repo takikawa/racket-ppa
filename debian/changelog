@@ -1,6 +1,5 @@
 drscheme (1:301-16) UNRELEASED; urgency=low
 
-  [ Ari Pollak ]
   * Fix small spelling mistake in package description (Closes: #363300)
   * Correct debconf web-server question to say http://localhost:8000
     instead of http://localhost
@@ -8,11 +7,7 @@ drscheme (1:301-16) UNRELEASED; urgency=low
   * Remove German debconf translation since it hasn't been
     updated in ages
 
-  [ James Vega ]
-  * Build-depend on autotools-dev to ensure we have up-to-date
-    config.{sub,guess}.
-
- -- James Vega <jamessan@debian.org>  Wed, 19 Apr 2006 00:00:12 -0400
+ -- Ari Pollak <ari@debian.org>  Sun, 16 Apr 2006 16:06:51 -0400
 
 drscheme (1:301-15) unstable; urgency=low
 
