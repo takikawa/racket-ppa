@@ -8,5 +8,5 @@ Upstream Authors: PLT Scheme Inc.
 Copyright: GNU Lesser General Public License (LGPL)
 
 Note:  These files are not included with the distribution, since
-they is a verbatim copy in /usr/share/common-licenses/LGPL
+there is a verbatim copy in /usr/share/common-licenses/LGPL
 on Debian systems
