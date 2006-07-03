@@ -14,63 +14,20 @@ else ifeq (m68k,$(shell dpkg-architecture -qDEB_BUILD_ARCH_CPU))
 endif
 
 DEB_CONFIGURE_SCRIPT := $(CURDIR)/src/configure
-DEB_CONFIGURE_NORMAL_ARGS := --prefix=$(PLTDIR)
+DEB_CONFIGURE_NORMAL_ARGS := --prefix=/usr --mandir='$${prefix}'/share/man
 CFLAGS = -g -Wall -fPIC
 CXXFLAGS = -g -Wall -fPIC
 
 DEB_BUILDDIR := $(DEB_SRCDIR)/build
 DEB_DESTDIR := $(CURDIR)/debian/drscheme/
-DEB_MAKE_INSTALL_TARGET := install prefix=$(DEB_DESTDIR)$(PLTDIR)
+DEB_MAKE_INSTALL_TARGET := install prefix=$(DEB_DESTDIR)/usr
 
 DEB_INSTALL_CHANGELOGS_drscheme := --no-act
 DEB_INSTALL_DOCS_drscheme := --no-act
 DEB_SHLIBDEPS_EXCLUDE_drscheme := debian/drscheme/plot
 
-install/drscheme::
-	# Correct paths in the .zo cache to point to actual target directory
-	perl -pi -e 's#"/.*?/debian/drscheme(.*?)"#"$$1"#g' \
-		debian/drscheme/usr/lib/plt/collects/info-domain/compiled/cache.ss
-
-	# Modify paths in the startup scripts to make sense on a Debian system
-	cd debian/drscheme/$(PLTDIR)/bin; \
-	for val in drscheme games gmzc help-desk mzc mzpp mztext pdf-slatex \
-		planet setup-plt slatex slideshow swindle tex2page web-server \
-		web-server-monitor web-server-text; \
-	do \
-		if [ -f $${val} ] ; then \
-			sed -i 's/PLTHOME=.*/PLTHOME="\/usr\/lib\/plt"/' $${val}; \
-		fi; \
-	done
-
-	# Install mzscheme & mred wrapper scripts
-	mv debian/drscheme/$(PLTDIR)/bin/mred \
-		debian/drscheme/$(PLTDIR)/bin/mred.bin
-	install debian/mred.sh debian/drscheme/$(PLTDIR)/bin/mred
-	mv debian/drscheme/$(PLTDIR)/bin/mzscheme \
-		debian/drscheme/$(PLTDIR)/bin/mzscheme.bin
-	install debian/mzscheme.sh debian/drscheme/$(PLTDIR)/bin/mzscheme
-
-	# Move manpages to real target
-	mv debian/drscheme/$(PLTDIR)/man/man1/* \
-		debian/drscheme/usr/share/man/man1/
-	cd debian/drscheme/$(PLTDIR); rmdir -p man/man1
-
-	install -m 644 debian/drscheme.lintian-override `pwd`/debian/drscheme/usr/share/lintian/overrides/drscheme
-
-	# Move mzscheme-only stuff to the mzscheme package
-	dh_movefiles --sourcedir=debian/drscheme
-
 install/mzscheme::
-	# Copy documentation
-	for i in drscheme mred mzscheme stepper teachpack; do \
-		cp notes/$$i/HISTORY \
-			debian/mzscheme/usr/share/doc/mzscheme/HISTORY.$$i; \
-	done
-
-	# Install the debian-specific install script
-	cp debian/debian-plt debian/mzscheme/usr/bin/
-
-	install -m 644 debian/mzscheme.lintian-override `pwd`/debian/mzscheme/usr/share/lintian/overrides/mzscheme
+	dh_movefiles --sourcedir=debian/drscheme -pmzscheme
 
 cleanbuilddir/drscheme::
 	rm -rf build

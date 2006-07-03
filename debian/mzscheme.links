@@ -1,8 +1,1 @@
-/usr/lib/plt/bin/mzscheme		/usr/bin/mzscheme
-/usr/lib/plt/bin/mzc		/usr/bin/mzc
-/usr/lib/plt/bin/pdf-slatex /usr/bin/pdf-slatex
-/usr/lib/plt/bin/slatex /usr/bin/slatex
-/usr/lib/plt/bin/tex2page /usr/bin/tex2page
-/usr/lib/plt/bin/web-server /usr/bin/web-server
-/usr/lib/plt/bin/web-server-monitor /usr/bin/web-server-monitor
-/usr/lib/plt/bin/setup-plt      /usr/bin/setup-plt
+/usr/share/plt/doc/release-notes	/usr/share/doc/mzscheme/release-notes

@@ -1,5 +1,6 @@
-drscheme (1:301-16) UNRELEASED; urgency=low
+drscheme (1:350-1) UNRELEASED; urgency=low
 
+  [ Ari Pollak ]
   IMPORTANT NOTE: The following things should happen before the next release:
    - Add a debian/rules target to make a DFSG-free tarball, which
      doesn't include the r5rs and t-y-scheme docs. In lieu of these docs,
@@ -16,7 +17,20 @@ drscheme (1:301-16) UNRELEASED; urgency=low
   * Remove German debconf translation since it hasn't been
     updated in ages
 
- -- Ari Pollak <ari@debian.org>  Mon, 12 Jun 2006 18:11:21 -0400
+  [ James Vega ]
+  * New upstream release
+    - Update debian/patches/debian-nonstandard-install.patch to apply against
+      src/Makefile.in instead of install.
+    - Remove debian/patches/debian-slib.patch, merged upstream.
+    - Remove debian/patches/sparc-compile-fix.patch, merged upstream.
+    - Remove debian/patches/slatex-bug361027.patch, merged upstream.
+  * Rework packaging since upstream is using a saner build system now
+    - Remove debian-plt and references to it.
+    - Remove the mred and mzscheme wrapper scripts
+    - Move debian/{dr,mz}scheme.lintian-override to
+      debian/overrides/{dr,mz}scheme and install using dh_install.
+
+ -- James Vega <jamessan@debian.org>  Mon,  3 Jul 2006 03:09:48 -0400
 
 drscheme (1:301-15) unstable; urgency=low
 
