@@ -1,11 +1,12 @@
---- drscheme-301.orig/install
-+++ drscheme-301/install
-@@ -39,7 +39,7 @@
-   exit 1
- fi
+diff -Nur drscheme-350/src/Makefile.in drscheme-350.new/src/Makefile.in
+--- drscheme-350/src/Makefile.in	2006-06-16 03:28:12.000000000 +0000
++++ drscheme-350.new/src/Makefile.in	2006-06-22 17:18:08.000000000 +0000
+@@ -49,7 +49,7 @@
+ mredinstall-stub: @MAKE_MREDINSTALL@
  
--exec "$mz" -qC "$0" "$@"
-+LD_LIBRARY_PATH="$pltdir/lib" exec "$mz" -qC "$0" "$@"
- exit 1
- |#
+ setup-plt:
+-	$(prefix)/bin/mzscheme -mvqM setup
++	LD_LIBRARY_PATH="$(prefix)/lib" $(prefix)/bin/mzscheme -mvqM setup
  
+ plain-install-3m:
+ 	$(MAKE) install-normal
