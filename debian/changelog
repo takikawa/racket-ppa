@@ -29,6 +29,10 @@ drscheme (1:350-1) UNRELEASED; urgency=low
     - Remove the mred and mzscheme wrapper scripts
     - Move debian/{dr,mz}scheme.lintian-override to
       debian/overrides/{dr,mz}scheme and install using dh_install.
+  * Override DEB_OPT_FLAGS instead of DEB_CONFIGURE_NORMAL_ARGS to avoid
+    having optimizations enabled.  This also causes configure to be properly
+    called with the --build option which allows hppa to be built with the
+    foreign interface again.
 
  -- James Vega <jamessan@debian.org>  Mon,  3 Jul 2006 03:09:48 -0400
 
