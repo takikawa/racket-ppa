@@ -2,11 +2,9 @@ drscheme (1:350-1) UNRELEASED; urgency=low
 
   [ Ari Pollak ]
   IMPORTANT NOTE: The following things should happen before the next release:
-   - Add a debian/rules target to make a DFSG-free tarball, which
-     doesn't include the r5rs and t-y-scheme docs. In lieu of these docs,
-     we should Suggests: r5rs-doc, and make a note in README.Debian
-     about the removed docs and that they can be downloaded in .plt package
-     form from: http://download.plt-scheme.org/doc/
+    - Add note to debian/changelog that R5RS has a different license, 
+      and the authors have clarified its freeness. Also, that the SRFI license
+      is not LGPL.
 
   * New upstream release
     - Changes documentation license to LGPL (Closes: #356124, #356478)
