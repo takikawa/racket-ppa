@@ -1,4 +1,3 @@
-mzscheme: image-file-in-usr-lib /usr/lib/plt/collects
 mzscheme: extra-license-file /usr/lib/plt/collects/help/servlets/release/license.ss
 mzscheme: extra-license-file /usr/lib/plt/collects/help/servlets/release/compiled/license.zo
 mzscheme: extra-license-file /usr/lib/plt/collects/help/servlets/release/compiled/license.dep
