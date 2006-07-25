@@ -1,8 +1,11 @@
 drscheme (1:351-1) UNRELEASED; urgency=low
 
-  TODO!!!! Do something about debian/patches/debian-collects.patch so that
-   it actually does the right thing to add /usr/local/lib/plt/collects to
-   (find-library-collection-paths)
+  TODO!!!!!:
+   - Do something about debian/patches/debian-collects.patch so that
+     it actually does the right thing to add /usr/local/lib/plt/collects to
+     (find-library-collection-paths)
+   - Fix setup-plt so it will regenerate /usr/local/lib/plt/collects 
+     but not /usr/lib/plt/collects?
 
   [ Ari Pollak ]
   * New upstream release
