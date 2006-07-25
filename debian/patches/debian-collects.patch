@@ -5,5 +5,5 @@ diff -Nur drscheme-350/collects/config/config.ss drscheme-350.new/collects/confi
  ;; code at install time.
  (module config (lib "configtab.ss" "setup")
    ;; An empty table means that all defaults apply
-+  (define extra-collects-dirs "/usr/local/lib/plt/collects")
++  (define extra-collects-dirs (list "/usr/local/lib/plt/collects"))
    )

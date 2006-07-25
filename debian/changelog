@@ -1,4 +1,8 @@
-drscheme (1:351-1) unstable; urgency=low
+drscheme (1:351-1) UNRELEASED; urgency=low
+
+  TODO!!!! Do something about debian/patches/debian-collects.patch so that
+   it actually does the right thing to add /usr/local/lib/plt/collects to
+   (find-library-collection-paths)
 
   [ Ari Pollak ]
   * New upstream release
