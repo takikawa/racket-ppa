@@ -18,7 +18,6 @@ DEB_OPT_FLAG := -fPIC
 
 DEB_BUILDDIR := $(DEB_SRCDIR)/build
 DEB_DESTDIR := $(CURDIR)/debian/drscheme/
-DEB_MAKE_INSTALL_TARGET := install prefix=$(DEB_DESTDIR)/usr
 
 DEB_INSTALL_CHANGELOGS_drscheme := --no-act
 DEB_INSTALL_DOCS_drscheme := --no-act

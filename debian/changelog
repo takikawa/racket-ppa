@@ -4,6 +4,7 @@ drscheme (1:351-1) UNRELEASED; urgency=low
   * New upstream release
     - Changes PLT documentation license to LGPL, and updates the license for
       R5RS and SRFIs (Closes: #356124, #356478)
+  * Change build-depends on xlibs-data to xbitmaps
   * Fix small spelling mistake in package description (Closes: #363300)
   * Correct debconf web-server question to say http://localhost:8000
     instead of http://localhost
@@ -20,7 +21,8 @@ drscheme (1:351-1) UNRELEASED; urgency=low
     - Remove debian/patches/slatex-bug361027.patch, merged upstream.
   * Rework packaging since upstream is using a saner build system now
     - Remove debian-plt and references to it.
-    - Remove the mred and mzscheme wrapper scripts
+    - Remove the mred and mzscheme wrapper scripts to override PLTCOLLECTS;
+      instead, define our local collects path in collects/config/config.ss.
     - Move debian/{dr,mz}scheme.lintian-override to
       debian/overrides/{dr,mz}scheme and install using dh_install.
   * Override DEB_OPT_FLAGS instead of DEB_CONFIGURE_NORMAL_ARGS to avoid

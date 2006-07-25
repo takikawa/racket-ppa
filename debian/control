@@ -6,7 +6,7 @@ Uploaders: James Vega <jamessan@debian.org>
 Standards-Version: 3.6.1
 Build-Depends: cdbs, debhelper (>= 4.1.16), patchutils,
  libfreetype6-dev, libjpeg62-dev, libpng12-dev, libssl-dev, libxaw7-dev,
- xlibs-data, libxft-dev, perl5-base, xlibmesa-gl-dev | libgl-dev,
+ xbitmaps, libxft-dev, perl5-base, xlibmesa-gl-dev | libgl-dev,
  libglu1-xorg-dev | libglu-dev, libx11-dev, libxrender-dev, libcairo2-dev
 
 Package: drscheme
