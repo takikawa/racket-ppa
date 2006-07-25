@@ -1,13 +1,9 @@
 drscheme (1:351-1) UNRELEASED; urgency=low
 
   [ Ari Pollak ]
-  IMPORTANT NOTE: The following things should happen before the next release:
-    - Add note to debian/changelog that R5RS has a different license, 
-      and the authors have clarified its freeness. Also, that the SRFI license
-      is not LGPL.
-
   * New upstream release
-    - Changes documentation license to LGPL (Closes: #356124, #356478)
+    - Changes PLT documentation license to LGPL, and updates the license for
+      R5RS and SRFIs (Closes: #356124, #356478)
   * Fix small spelling mistake in package description (Closes: #363300)
   * Correct debconf web-server question to say http://localhost:8000
     instead of http://localhost
