@@ -4,13 +4,15 @@ drscheme (1:351-1) UNRELEASED; urgency=low
    - Do something about debian/patches/debian-collects.patch so that
      it actually does the right thing to add /usr/local/lib/plt/collects to
      (find-library-collection-paths)
-   - Fix setup-plt so it will regenerate /usr/local/lib/plt/collects 
+   - Fix setup-plt so it will regenerate /usr/local/lib/plt/collects
      but not /usr/lib/plt/collects?
 
   [ Ari Pollak ]
   * New upstream release
     - Changes PLT documentation license to LGPL, and updates the license for
       R5RS and SRFIs (Closes: #356124, #356478)
+  * debian/patches/amd64-compile-fix.patch: 
+     - Add patch from upstream SVN to fix compilation on amd64
   * Change build-depends on xlibs-data to xbitmaps
   * Fix small spelling mistake in package description (Closes: #363300)
   * Correct debconf web-server question to say http://localhost:8000
@@ -37,7 +39,7 @@ drscheme (1:351-1) UNRELEASED; urgency=low
     called with the --build option which allows hppa to be built with the
     foreign interface again.
 
- -- Ari Pollak <ari@debian.org>  Mon, 24 Jul 2006 23:53:22 -0400
+ -- Ari Pollak <ari@debian.org>  Wed, 26 Jul 2006 14:00:52 -0400
 
 drscheme (1:301-15) unstable; urgency=low
 
