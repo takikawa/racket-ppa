@@ -1,9 +1,0 @@
-diff -Nur drscheme-350/collects/config/config.ss drscheme-350.new/collects/config/config.ss
---- drscheme-350/collects/config/config.ss	2006-05-19 02:44:44.000000000 -0400
-+++ drscheme-350.new/collects/config/config.ss	2006-07-24 23:01:47.000000000 -0400
-@@ -5,4 +5,5 @@
- ;; code at install time.
- (module config (lib "configtab.ss" "setup")
-   ;; An empty table means that all defaults apply
-+  (define extra-collects-dirs (list "/usr/local/lib/plt/collects"))
-   )

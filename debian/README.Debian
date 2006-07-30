@@ -23,9 +23,8 @@ MJ Ray <markj@cloaked.freeserve.co.uk>
 
 NOTES:
 
-1.  You should place any PLT packages not under the control of dpkg
-in /usr/local/lib/plt/collect or ~/.plt-scheme.  Otherwise, they may be
-overwritten on your next upgrade.
+1.  You should place any PLT packages not under the control of dkg
+in ~/.plt-scheme.  Otherwise, they may be overwritten on your next upgrade.
 
 2.  A note on naming schemes:
 

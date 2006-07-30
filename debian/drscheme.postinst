@@ -2,7 +2,7 @@
 
 case "$1" in
     configure)
-		# if /usr/share/doc/gimp-help-en is a directory, it's probably
+		# if /usr/share/doc/drscheme is a directory, it's probably
 		# from an older package, so remove it and make the symlink
 		if [ ! -L /usr/share/doc/drscheme -a  -d /usr/share/doc/drscheme ];
 		then

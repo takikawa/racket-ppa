@@ -1,12 +1,5 @@
 drscheme (1:352-1) UNRELEASED; urgency=low
 
-  TODO!!!!!:
-   - Do something about debian/patches/debian-collects.patch so that
-     it actually does the right thing to add /usr/local/lib/plt/collects to
-     (find-library-collection-paths)
-   - Fix setup-plt so it will regenerate /usr/local/lib/plt/collects
-     but not /usr/lib/plt/collects?
-
   [ Ari Pollak ]
   * New upstream release
     - Changes PLT documentation license to LGPL, and updates the license for
@@ -28,8 +21,7 @@ drscheme (1:352-1) UNRELEASED; urgency=low
     - Remove debian/patches/slatex-bug361027.patch, merged upstream.
   * Rework packaging since upstream is using a saner build system now
     - Remove debian-plt and references to it.
-    - Remove the mred and mzscheme wrapper scripts to override PLTCOLLECTS;
-      instead, define our local collects path in collects/config/config.ss.
+    - Remove the mred and mzscheme wrapper scripts to override PLTCOLLECTS
     - Move debian/{dr,mz}scheme.lintian-override to
       debian/overrides/{dr,mz}scheme and install using dh_install.
   * Override DEB_OPT_FLAGS instead of DEB_CONFIGURE_NORMAL_ARGS to avoid
