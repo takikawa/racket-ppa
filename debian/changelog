@@ -1,3 +1,10 @@
+drscheme (1:352-2) UNRELEASED; urgency=low
+
+  * Add debian/patches/05_slibinit-fix.patch to fix an
+    slib initialization error (Closes: #380702)
+
+ -- Ari Pollak <ari@debian.org>  Mon, 31 Jul 2006 23:11:49 -0400
+
 drscheme (1:352-1) unstable; urgency=low
 
   [ Ari Pollak ]
