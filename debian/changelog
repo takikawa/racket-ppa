@@ -1,3 +1,9 @@
+drscheme (1:352-3) unstable; urgency=low
+
+  * Add debian/watch file.
+
+ -- James Vega <jamessan@debian.org>  Fri, 25 Aug 2006 20:52:27 -0400
+
 drscheme (1:352-2) unstable; urgency=low
 
   * Add debian/patches/05_slibinit-fix.patch to fix an
