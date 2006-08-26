@@ -1,8 +1,14 @@
 drscheme (1:352-3) unstable; urgency=low
 
+  [ Ari Pollak ]
+  * patches/06_stack-direction-fix.patch:
+    - Add patch to fix complation on any architecture where the stack grows up
+      instead of down (namely, hppa)
+
+  [ James Vega ]
   * Add debian/watch file.
 
- -- James Vega <jamessan@debian.org>  Fri, 25 Aug 2006 20:52:27 -0400
+ -- Ari Pollak <ari@debian.org>  Fri, 25 Aug 2006 21:04:56 -0400
 
 drscheme (1:352-2) unstable; urgency=low
 
