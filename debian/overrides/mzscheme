@@ -1,5 +1,4 @@
 mzscheme: extra-license-file /usr/lib/plt/collects/help/servlets/release/license.ss
 mzscheme: extra-license-file /usr/lib/plt/collects/help/servlets/release/compiled/license.zo
 mzscheme: extra-license-file /usr/lib/plt/collects/help/servlets/release/compiled/license.dep
-mzscheme: library-not-linked-against-libc /usr/lib/plt/collects/readline/compiled/native
 mzscheme: shared-lib-without-dependency-information /usr/lib/plt/collects

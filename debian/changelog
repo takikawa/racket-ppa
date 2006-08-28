@@ -1,3 +1,10 @@
+drscheme (1:352-4) UNRELEASED; urgency=low
+
+  * Remove an outdated lintian override for readline, since we no longer ship
+    it.
+
+ -- Ari Pollak <ari@debian.org>  Mon, 28 Aug 2006 01:25:33 -0400
+
 drscheme (1:352-3) unstable; urgency=low
 
   [ Ari Pollak ]
