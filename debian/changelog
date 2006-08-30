@@ -1,5 +1,6 @@
-drscheme (1:352-4) UNRELEASED; urgency=low
+drscheme (1:352-4) unstable; urgency=low
 
+  * Fix a forgotten semicolon in 06_stack-direction-fix.patch.
   * Remove an outdated lintian override for readline, since we no longer ship
     it.
 
