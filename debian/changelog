@@ -1,3 +1,9 @@
+drscheme (1:352-5) UNRELEASED; urgency=low
+
+  * Fix web-server path in init script (Closes: #386596)
+
+ -- Ari Pollak <ari@debian.org>  Sat,  9 Sep 2006 01:14:53 -0400
+
 drscheme (1:352-4) unstable; urgency=low
 
   * Fix a forgotten semicolon in 06_stack-direction-fix.patch.
