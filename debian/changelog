@@ -1,8 +1,11 @@
-drscheme (1:352-5) UNRELEASED; urgency=low
+drscheme (1:352-5) unstable; urgency=low
 
   * Fix web-server path in init script (Closes: #386596)
+  * Don't include a trailing slash in DESTDIR, which should fix
+    modules that use (this-expression-source-directory) such as tex2page.
+    Thanks to Soeren D. Schulze for the fix. (Closes: #390753, #386485)
 
- -- Ari Pollak <ari@debian.org>  Sat,  9 Sep 2006 01:14:53 -0400
+ -- Ari Pollak <ari@debian.org>  Tue,  3 Oct 2006 11:27:13 -0400
 
 drscheme (1:352-4) unstable; urgency=low
 
