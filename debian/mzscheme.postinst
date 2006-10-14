@@ -8,11 +8,21 @@ set -e
 PLTHOME=/usr/lib/plt
 export PLTHOME
 
+setupdir() {
+    if [ ! -e $1 ]; then
+	if mkdir $1 2>/dev/null; then
+	    chown root:staff $1
+	    chmod 2755 $1
+	fi
+    fi
+}
+
 case "$1" in
     configure)
 
-	mkdir -p /usr/local/lib/plt/collects || /bin/true
-	
+	setupdir /usr/local/lib/plt
+	setupdir /usr/local/lib/plt/collects
+
 	# Build a catalog file for SLIB (if it's installed)
 	if [ -d /usr/share/slib ]; then
 		echo "Cataloging SLIB routines..."

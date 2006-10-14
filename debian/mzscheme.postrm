@@ -5,15 +5,10 @@ PLTHOME=/usr/lib/plt
 
 case "$1" in purge|remove)
 
-	if [ -d /usr/local/lib/plt/collects ]; then
-		rmdir --ignore-fail-on-non-empty \
-			/usr/local/lib/plt/collects /usr/local/lib/plt
-	fi
-
 	if [ -e $PLTHOME/slibcat ]; then
 		rm -f $PLTHOME/slibcat
 	fi
-		
+
 esac
 
 #DEBHELPER#
