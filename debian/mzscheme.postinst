@@ -11,7 +11,7 @@ export PLTHOME
 case "$1" in
     configure)
 
-	mkdir -p /usr/local/lib/plt/collects
+	mkdir -p /usr/local/lib/plt/collects || /bin/true
 	
 	# Build a catalog file for SLIB (if it's installed)
 	if [ -d /usr/share/slib ]; then
