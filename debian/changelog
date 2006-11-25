@@ -1,3 +1,11 @@
+drscheme (1:352-7) unstable; urgency=low
+
+  * 07_slib.patch:
+    - Define slib:features instead of *features* to work with new
+      version of slib (Closes: #399926)
+
+ -- Ari Pollak <ari@debian.org>  Sat, 25 Nov 2006 18:21:41 -0500
+
 drscheme (1:352-6) unstable; urgency=medium
 
   * Fail gracefully if creating /usr/local/lib/plt/collects fails
