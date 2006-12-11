@@ -2,7 +2,6 @@ Source: drscheme
 Section: interpreters
 Priority: optional
 Maintainer: Ari Pollak <ari@debian.org>
-Uploaders: James Vega <jamessan@debian.org>
 Standards-Version: 3.6.1
 Build-Depends: cdbs, debhelper (>= 4.1.16), patchutils,
  libfreetype6-dev, libjpeg62-dev, libpng12-dev, libssl-dev, libxaw7-dev,

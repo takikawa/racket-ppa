@@ -1,3 +1,9 @@
+drscheme (1:352-8) UNRELEASED; urgency=low
+
+  * Remove James Vega from Uploaders field at his request
+
+ -- Ari Pollak <ari@debian.org>  Mon, 11 Dec 2006 09:13:44 -0500
+
 drscheme (1:352-7) unstable; urgency=low
 
   * 07_slib.patch:
