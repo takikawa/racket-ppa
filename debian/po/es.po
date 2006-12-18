@@ -49,6 +49,6 @@ msgid ""
 "should make sure you configure the web server by visiting http://"
 "localhost:8000 with your web browser and following the configuration steps."
 msgstr ""
-"PLT incluye una implementación completa de un servidor web. Este servidor se puede iniciar y continuar 
-ejecutandose desde el arranque del sistema. Si lo hace, asegúrese de configurarlo visitando 
-http://localhost:8000 con su navegador web y siga los pasos de configuración."
+"PLT incluye una implementación completa de un servidor web. Este servidor se puede iniciar y continuar "
+"ejecutandose desde el arranque del sistema. Si lo hace, asegúrese de configurarlo visitando "
+"http://localhost:8000 con su navegador web y siga los pasos de configuración."
