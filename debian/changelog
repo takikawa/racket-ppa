@@ -1,3 +1,10 @@
+drscheme (1:352-10) unstable; urgency=low
+
+  * Apply German po-debconf translation update from Matthis Julius
+    (Closes: #406148)
+
+ -- Ari Pollak <ari@debian.org>  Wed, 24 Jan 2007 22:43:03 -0500
+
 drscheme (1:352-9) unstable; urgency=low
 
   * Fix for Spanish debconf translation from Christian Perrier
