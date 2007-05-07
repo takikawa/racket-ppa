@@ -13,6 +13,7 @@ drscheme (1:360-1) unstable; urgency=low
     - Remove 06_stack-direction-fix.patch from series, it's also
       been applied upstream.
     - Add 08_360p1.patch from upstream to fix a problem with X.
+      (Closes: #409197)
 
  -- Christine Spang <christine@debian.org>  Mon, 07 May 2007 16:38:30 -0400
 
