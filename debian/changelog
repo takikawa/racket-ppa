@@ -10,9 +10,11 @@ drscheme (1:360-1) unstable; urgency=low
     - Remove 05_slibinit-fix.patch from series but leave it in
       debian/; it looks like the fix has been incorporated upstream
       but let's just make sure before deleting it.
+    - Remove 06_stack-direction-fix.patch from series, it's also
+      been applied upstream.
     - Add 08_360p1.patch from upstream to fix a problem with X.
 
- -- Christine Spang <christine@debian.org>  Mon, 07 May 2007 15:46:43 -0400
+ -- Christine Spang <christine@debian.org>  Mon, 07 May 2007 16:38:30 -0400
 
 drscheme (1:352-10) unstable; urgency=low
 
