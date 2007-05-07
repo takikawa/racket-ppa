@@ -1,0 +1,7 @@
+00_debian-nonstandard-install.patch
+01_debian-web-server.patch
+02_alpha-compile-fix.patch
+03_freetype-compile-fix.patch
+04_list.c-warning-fix.patch
+06_stack-direction-fix.patch
+07_slib.patch

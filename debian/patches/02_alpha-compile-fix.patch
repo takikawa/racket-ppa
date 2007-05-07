@@ -1,6 +1,8 @@
---- drscheme-301.orig/src/configure 2006-03-25 20:27:36
-+++ drscheme-301/src/configure 2006-03-25 20:27:36
-@@ -8525,7 +8525,7 @@
+Index: drscheme-360/src/configure
+===================================================================
+--- drscheme-360.orig/src/configure	2006-08-28 05:42:12.000000000 -0400
++++ drscheme-360/src/configure	2007-04-02 20:56:37.000000000 -0400
+@@ -5369,7 +5369,7 @@
         fi
         ;;
        alpha)
@@ -9,8 +11,10 @@
         ;;
        *)
         ;;
---- drscheme-301.orig/src/mzscheme/src/Makefile.in 2006-03-25 20:27:36
-+++ drscheme-301/src/mzscheme/src/Makefile.in 2006-03-25 20:27:36
+Index: drscheme-360/src/mzscheme/src/Makefile.in
+===================================================================
+--- drscheme-360.orig/src/mzscheme/src/Makefile.in	2006-10-13 18:03:29.000000000 -0400
++++ drscheme-360/src/mzscheme/src/Makefile.in	2007-04-02 20:56:37.000000000 -0400
 @@ -6,6 +6,7 @@
  builddir = @builddir@
  
@@ -19,7 +23,7 @@
  PERL = @PERL@
  
  XMAKE = $(MAKE) $(EXPORT)
-@@ -217,7 +218,7 @@
+@@ -221,7 +222,7 @@
  	$(CC) $(CFLAGS) -c $(srcdir)/vector.c -o vector.@LTO@
  
  gmp_alpha_gcc.@LTO@: $(srcdir)/gmp/gmp_alpha_gcc.s

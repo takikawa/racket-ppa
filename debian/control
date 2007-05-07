@@ -2,8 +2,8 @@ Source: drscheme
 Section: interpreters
 Priority: optional
 Maintainer: Ari Pollak <ari@debian.org>
-Standards-Version: 3.6.1
-Build-Depends: cdbs, debhelper (>= 4.1.16), patchutils,
+Standards-Version: 3.7.2.2
+Build-Depends: cdbs, quilt, debhelper (>= 4.1.16), patchutils,
  libfreetype6-dev, libjpeg62-dev, libpng12-dev, libssl-dev, libxaw7-dev,
  xbitmaps, libxft-dev, perl5-base, xlibmesa-gl-dev | libgl-dev,
  libglu1-xorg-dev | libglu-dev, libx11-dev, libxrender-dev, libcairo2-dev

@@ -1,3 +1,19 @@
+drscheme (1:360-1) unstable; urgency=low
+
+  * Non-maintainer upload with permission of the semi-maintainer.
+  * New upstream version.
+  * Bump to Standards-Version 3.7.2.2.
+  * Use quilt rather than simple-patchsys to manage patches.
+    - Refresh and/or fix patches 00_debian-nonstandard-install.patch,
+      01_debian-web-server.patch, 02_alpha-compile-fix.patch,
+      06_stack-direction-fix.patch, 07_slib.patch
+    - Remove 05_slibinit-fix.patch from series but leave it in
+      debian/; it looks like the fix has been incorporated upstream
+      but let's just make sure before deleting it.
+    - Add 08_360p1.patch from upstream to fix a problem with X.
+
+ -- Christine Spang <christine@debian.org>  Mon, 07 May 2007 15:46:43 -0400
+
 drscheme (1:352-10) unstable; urgency=low
 
   * Apply German po-debconf translation update from Matthis Julius
