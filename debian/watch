@@ -3,5 +3,5 @@
 # to check for upstream updates and more.
 # Site		Directory		Pattern			Version	Script
 version=3
-opts=filenamemangle=s/.*-(\d+)-.*/drscheme-$1.tar.gz/ \
-ftp://infogroep.be/pub/plt/bundles/(\d{3})/plt/plt-(\d{3})-src-unix.tgz
+opts=filenamemangle=s/.*-([0-9.]+)-.*/drscheme-$1.tar.gz/ \
+ftp://download.plt-scheme.org/pub/plt/bundles/([0-9.]+)/plt/plt-([0-9.]+)-src-unix.tgz

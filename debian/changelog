@@ -1,3 +1,9 @@
+drscheme (1:360-2) UNRELEASED; urgency=low
+
+  * Update watch file
+
+ -- Ari Pollak <ari@debian.org>  Wed, 19 Sep 2007 11:32:19 -0400
+
 drscheme (1:360-1) unstable; urgency=low
 
   * Non-maintainer upload with permission of the semi-maintainer.
