@@ -1,6 +1,8 @@
 drscheme (1:360-2) UNRELEASED; urgency=low
 
   * Update watch file (Closes: #450066)
+  * Remove 08_360p1.patch, which wasn't actually applied anyway
+  * Add XS-Vcs- fields to control file
 
  -- Ari Pollak <ari@debian.org>  Wed, 19 Sep 2007 11:32:19 -0400
 

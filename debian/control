@@ -7,6 +7,8 @@ Build-Depends: cdbs, quilt, debhelper (>= 4.1.16), patchutils,
  libfreetype6-dev, libjpeg62-dev, libpng12-dev, libssl-dev, libxaw7-dev,
  xbitmaps, libxft-dev, perl5-base, xlibmesa-gl-dev | libgl-dev,
  libglu1-xorg-dev | libglu-dev, libx11-dev, libxrender-dev, libcairo2-dev
+XS-Vcs-Svn: svn://svn.debian.org/svn/pkt-plt-scheme/drscheme/
+XS-Vcs-Browser: http://svn.debian.org/wsvn/pkg-plt-scheme/drscheme/
 
 Package: drscheme
 Architecture: alpha amd64 hppa i386 m68k mips mipsel powerpc sparc
