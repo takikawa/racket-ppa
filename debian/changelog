@@ -1,6 +1,6 @@
 drscheme (1:360-2) UNRELEASED; urgency=low
 
-  * Update watch file
+  * Update watch file (Closes: #450066)
 
  -- Ari Pollak <ari@debian.org>  Wed, 19 Sep 2007 11:32:19 -0400
 
