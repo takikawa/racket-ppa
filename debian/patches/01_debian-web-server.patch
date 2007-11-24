@@ -1,23 +1,10 @@
-Index: drscheme-360/collects/web-server/configuration-table
+Index: drscheme-371/collects/web-server/default-web-root/configuration-table.ss
 ===================================================================
---- drscheme-360.orig/collects/web-server/configuration-table	2006-08-31 15:19:46.000000000 -0400
-+++ drscheme-360/collects/web-server/configuration-table	2007-04-02 20:50:59.000000000 -0400
+--- drscheme-371.orig/collects/web-server/default-web-root/configuration-table.ss	2007-11-21 22:59:02.000000000 +0000
++++ drscheme-371/collects/web-server/default-web-root/configuration-table.ss	2007-11-21 22:59:11.000000000 +0000
 @@ -1,4 +1,4 @@
 -((port 80)
 +((port 8000)
   (max-waiting 40)
   (initial-connection-timeout 30)
   (default-host-table
-Index: drscheme-360/collects/web-server/private/monitor-server.ss
-===================================================================
---- drscheme-360.orig/collects/web-server/private/monitor-server.ss	2006-09-18 19:32:39.000000000 -0400
-+++ drscheme-360/collects/web-server/private/monitor-server.ss	2007-04-02 20:50:59.000000000 -0400
-@@ -5,7 +5,7 @@
-   (require "monitor-poke-web-server.ss"
-            "monitor-emailer.ss")
-   
--  (define default-server-port 80)
-+  (define default-server-port 8000)
-   (define default-poll-frequency-seconds 3600)
-   (define default-server-response-timeout-seconds 75)
-   

@@ -7,9 +7,10 @@ usr/bin/tex2page
 usr/lib/libmzgc*
 usr/lib/libmzscheme*
 usr/lib/plt/buildinfo
-usr/lib/plt/mzdyn.o
+usr/lib/plt/mzdyn3m.o
 usr/include
 usr/lib/plt/collects/compiler
+usr/lib/plt/collects/combinator-parser
 usr/lib/plt/collects/config
 usr/lib/plt/collects/dynext
 usr/lib/plt/collects/errortrace
@@ -28,7 +29,6 @@ usr/lib/plt/collects/preprocessor
 usr/lib/plt/collects/r5rs
 usr/lib/plt/collects/setup
 usr/lib/plt/collects/slatex
-usr/lib/plt/collects/slibinit
 usr/lib/plt/collects/srfi
 usr/lib/plt/collects/swindle
 usr/lib/plt/collects/syntax
