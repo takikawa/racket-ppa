@@ -10,10 +10,6 @@ case "$1" in purge|remove)
 			/usr/local/lib/plt/collects /usr/local/lib/plt
 	fi
 
-	if [ -e $PLTHOME/slibcat ]; then
-		rm -f $PLTHOME/slibcat
-	fi
-		
 esac
 
 #DEBHELPER#

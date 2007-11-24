@@ -13,18 +13,6 @@ case "$1" in
 
 	mkdir -p /usr/local/lib/plt/collects || /bin/true
 	
-	# Build a catalog file for SLIB (if it's installed)
-	if [ -d /usr/share/slib ]; then
-		echo "Cataloging SLIB routines..."
-		# do stuff
-		if [ -e $PLTHOME/slibcat ]; then
-				# Remove old slibcat data, since we are
-				# regenerating it.
-				rm $PLTHOME/slibcat
-		fi
-		/usr/bin/mzscheme -vm -L load.ss slibinit -e "(require 'new-catalog)"
-	fi
-
 	db_get mzscheme/run_webserver
 	if [ "$RET" = "true" ]; then
 		sed -i "s/\s*RUN_HTTPD=.*$/RUN_HTTPD=Yes/" /etc/default/mzscheme
