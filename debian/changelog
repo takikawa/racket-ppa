@@ -6,6 +6,9 @@ drscheme (1:371-1) UNRELEASED; urgency=low
     because the upstream got rid of slibinit
   * New collects: combinator-parser and wxme
   * New garbage collector (3m)
+  * Portuguese translation for drscheme's debconf messages.
+    Translator: Américo Monteiro <a_monteiro@netcabo.pt>
+    (Closes: #435507)
 
  -- Artem Baguinski <artm@v2.nl>  Wed, 21 Nov 2007 21:45:04 +0000
 
