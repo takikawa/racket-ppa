@@ -2,6 +2,7 @@ Source: drscheme
 Section: interpreters
 Priority: optional
 Maintainer: Ari Pollak <ari@debian.org>
+Uploaders: Artem Baguinski <artm@v2.nl>
 Standards-Version: 3.7.2.2
 Build-Depends: cdbs, quilt, debhelper (>= 4.1.16), patchutils,
  libfreetype6-dev, libjpeg62-dev, libpng12-dev, libssl-dev, libxaw7-dev,
@@ -14,8 +15,6 @@ Package: drscheme
 Architecture: alpha amd64 hppa i386 m68k mips mipsel powerpc sparc
 Depends: mzscheme (= ${Source-Version}), ${shlibs:Depends}
 Suggests: menu (>= 1.5)
-Conflicts: mzscheme (<< 1:301-6)
-Replaces: mzscheme (<< 1:301-6)
 Description: PLT Scheme Programming Environment
  This is a Scheme Programming Environment, designed for use within
  an educational setting.  The faculty and staff at Rice University
@@ -36,8 +35,7 @@ Package: mzscheme
 Architecture: alpha amd64 hppa i386 m68k mips mipsel powerpc sparc
 Depends: gcc | c-compiler, debconf | debconf-2.0, ${shlibs:Depends}
 Conflicts: slib (<< 3a4-1)
-Suggests: drscheme, slib
-Replaces: mzscheme-dev, drscheme (<< 1:301-9)
+Suggests: drscheme
 Provides: httpd
 Description: PLT Scheme Interpreter
  This scheme implementation forms the foundation for the DrScheme
