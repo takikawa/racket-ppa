@@ -1,3 +1,12 @@
+drscheme (1:371-2) UNRELEASED; urgency=low
+
+  * Don't build with 3m GC on architectures other than i386/amd64,
+    since it was causing crashes in mzscheme
+  * Remove Conflicts: slib
+  * TODO: prerm?
+
+ -- Ari Pollak <ari@debian.org>  Mon, 26 Nov 2007 23:54:40 -0500
+
 drscheme (1:371-1) unstable; urgency=low
 
   [ Artem Baguinski ]

@@ -34,7 +34,6 @@ Description: PLT Scheme Programming Environment
 Package: mzscheme
 Architecture: alpha amd64 hppa i386 m68k mips mipsel powerpc sparc
 Depends: gcc | c-compiler, debconf | debconf-2.0, ${shlibs:Depends}
-Conflicts: slib (<< 3a4-1)
 Suggests: drscheme
 Provides: httpd
 Description: PLT Scheme Interpreter
