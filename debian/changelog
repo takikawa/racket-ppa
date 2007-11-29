@@ -5,7 +5,7 @@ drscheme (1:371-1) unstable; urgency=low
   * Removed patches 05_slibinit-fix.patch and 07_slib.patch
     because the upstream got rid of slibinit
   * New collects: combinator-parser and wxme
-  * New garbage collector (3m)
+  * New garbage collector (3m), only enabled on i386/amd64 at the moment
   * Portuguese translation for drscheme's debconf messages.
     Translator: Américo Monteiro <a_monteiro@netcabo.pt>
     (Closes: #435507)

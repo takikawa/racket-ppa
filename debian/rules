@@ -11,6 +11,15 @@ ifeq (m68k,$(shell dpkg-architecture -qDEB_BUILD_ARCH_CPU))
 	DEB_CONFIGURE_EXTRA_FLAGS += --disable-foreign
 endif
 
+# At the moment 3m only builds on amd64 and i386
+ifneq (amd64,$(shell dpkg-architecture -qDEB_BUILD_ARCH_CPU))
+  ifneq (i386,$(shell dpkg-architecture -qDEB_BUILD_ARCH_CPU))
+	DEB_CONFIGURE_EXTRA_FLAGS += --enable-cgcdefault
+  endif
+endif
+
+
+
 DEB_CONFIGURE_SCRIPT := $(CURDIR)/src/configure
 # Optimizations cause build failures on powerpc/alpha, so we'll override the
 # standard optimizations and have it hold "-fPIC" instead
