@@ -2,12 +2,12 @@ drscheme (1:372-1) UNRELEASED; urgency=low
 
   [ Artem Baguinski ]
   * New upstream release
+  * Removed mzscheme.prerm as mzscheme.postrm does the same thing
   * Don't build with 3m GC on architectures other than i386/amd64,
     since it was causing crashes in mzscheme
 
   [ Ari Pollak ]
   * Remove Conflicts: slib
-  * TODO: prerm?
 
  -- Ari Pollak <ari@debian.org>  Wed, 02 Jan 2008 13:20:31 -0500
 
