@@ -2,21 +2,11 @@
 #
 set -e
 
-# Source debconf library.
-. /usr/share/debconf/confmodule
-
-PLTHOME=/usr/lib/plt
-export PLTHOME
-
 case "$1" in
     configure)
 
-	mkdir -p /usr/local/lib/plt/collects || /bin/true
+        mkdir -p /usr/local/lib/plt/collects || /bin/true
 	
-	db_get mzscheme/run_webserver
-	if [ "$RET" = "true" ]; then
-		sed -i "s/\s*RUN_HTTPD=.*$/RUN_HTTPD=Yes/" /etc/default/mzscheme
-	fi
     ;;
 
     abort-upgrade|abort-deconfigure|abort-remove)

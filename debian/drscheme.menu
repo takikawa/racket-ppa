@@ -1,11 +1,5 @@
 ?package(drscheme):needs="x11"					\
-	section="Apps/Programming" title="DrScheme"		\
+	section="Applications/Programming" title="DrScheme"		\
   	command="/usr/bin/drscheme"                		\
 	hints="Development Environment"				\
 	icon="/usr/lib/plt/collects/icons/plt.xpm"
-?package(drscheme):needs="x11"					\
-	section="Apps/Programming" title="DrScheme Help Desk"	\
-  	command="/usr/bin/help-desk"				\
-	hints="Help Browser"					\
-	icon="/usr/lib/plt/collects/icons/help32x32.xpm"
-	

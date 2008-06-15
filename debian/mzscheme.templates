@@ -1,9 +1,0 @@
-Template: mzscheme/run_webserver
-Type: boolean
-Default: false
-_Description: Run the web server?
- PLT includes a fully-functional web server implementation. This server
- may be started and will continue to be brought on-line
- at boot time.  If so, you should make sure you configure the
- web server by visiting http://localhost:8000 with your web browser and
- following the configuration steps.

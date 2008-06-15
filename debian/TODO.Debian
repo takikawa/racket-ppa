@@ -2,14 +2,4 @@
   would prefer.
 
 - Create plt-scheme-data, and mzscheme-data arch-independent
-  packages for stuff like /usr/lib/plt/collects/doc (change this 
-  location if possible) and the .zo/.dep files
-
-- Clean up man pages (especially URLs)
-
-- Handle web-server better (e.g. put logs in /var/log, configuration in /etc,
-  better documentation, don't put stuff that will be overwritten at runtime in
-  /usr/lib) so it runs properly out-of-the-box. Don't run it as root. 
-  Improve the init script.
-  This should probably be done upstream eventually.
-
+  packages for stuff like /usr/share/plt/doc and the .zo/.dep files

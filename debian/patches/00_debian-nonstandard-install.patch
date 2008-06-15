@@ -1,66 +1,52 @@
-Index: drscheme-371/src/Makefile.in
+Index: drscheme-4.0/src/Makefile.in
 ===================================================================
---- drscheme-371.orig/src/Makefile.in	2007-11-22 11:53:24.000000000 +0100
-+++ drscheme-371/src/Makefile.in	2007-11-23 20:02:32.000000000 +0100
-@@ -74,10 +74,11 @@
+--- drscheme-4.0.orig/src/Makefile.in
++++ drscheme-4.0/src/Makefile.in
+@@ -81,7 +81,8 @@ no-run:
  	cd .
  
  copytree-run:
--	mzscheme/mzscheme@CGC@ -mvxqu \
--          "$(srcdir)/../collects/setup/unixstyle-install.ss" \
--          make-install-copytree "$(srcdir)/.." \
--          $(ALLDIRINFO) "@INSTALL_ORIG_TREE@"
+-	mzscheme/mzscheme@CGC@ -u \
 +	LD_LIBRARY_PATH="${LD_LIBRARY_PATH}${LD_LIBRARY_PATH:+:}$(DESTDIR)$(libdir)" \
-+	  mzscheme/mzscheme@CGC@ -mvxqu \
-+            "$(srcdir)/../collects/setup/unixstyle-install.ss" \
-+            make-install-copytree "$(srcdir)/.." \
-+            $(ALLDIRINFO) "@INSTALL_ORIG_TREE@"
- 
- install-mred-post-collects:
- 	cd mred; $(MAKE) install-post-collects
-@@ -87,10 +88,11 @@
++          mzscheme/mzscheme@CGC@ -u \
+           "$(srcdir)/../collects/setup/unixstyle-install.ss" \
+           make-install-copytree "$(srcdir)/.." \
+           $(ALLDIRINFO) "@INSTALL_ORIG_TREE@"
+@@ -94,6 +95,7 @@ install-no-post-collects:
  
  fix-paths:
  	if [ "$(DESTDIR)" != "" ]; then \
--          mzscheme/mzscheme@CGC@ -mvxqu \
--            "$(srcdir)/../collects/setup/unixstyle-install.ss" \
--            make-install-destdir-fix "$(srcdir)/.." \
--            $(ALLDIRINFO) "@INSTALL_ORIG_TREE@"; \
-+	    LD_LIBRARY_PATH="${LD_LIBRARY_PATH}${LD_LIBRARY_PATH:+:}$(DESTDIR)$(libdir)" \
-+              mzscheme/mzscheme@CGC@ -mvxqu \
-+                "$(srcdir)/../collects/setup/unixstyle-install.ss" \
-+                make-install-destdir-fix "$(srcdir)/.." \
-+                $(ALLDIRINFO) "@INSTALL_ORIG_TREE@"; \
-         fi
++		LD_LIBRARY_PATH="${LD_LIBRARY_PATH}${LD_LIBRARY_PATH:+:}$(DESTDIR)$(libdir)" \
+           mzscheme/mzscheme@CGC@ -u \
+             "$(srcdir)/../collects/setup/unixstyle-install.ss" \
+             make-install-destdir-fix "$(srcdir)/.." \
+@@ -110,7 +112,8 @@ install-3m-common:
  
- # 3m install ----------------------------------------
-@@ -100,7 +102,8 @@
- 	cd mzscheme; $(MAKE) install-3m
- 	$(MAKE) install-@MAKE_MRED@-3m
- 	$(MAKE) install-common-middle
+ install-3m:
+ 	$(MAKE) install-3m-common
 -	mzscheme/mzscheme@MMM@ $(SETUP_ARGS)
 +	LD_LIBRARY_PATH="${LD_LIBRARY_PATH}${LD_LIBRARY_PATH:+:}$(DESTDIR)$(libdir)" \
 +		mzscheme/mzscheme@MMM@ $(SETUP_ARGS)
  	$(MAKE) install-common-last
  
- install-no-3m:
-@@ -116,7 +119,8 @@
- 	cd mzscheme; $(MAKE) install-cgc
- 	$(MAKE) install-@MAKE_MRED@-cgc
- 	$(MAKE) install-common-middle
+ plain-install-3m:
+@@ -133,7 +136,8 @@ install-cgc-common:
+ 
+ install-cgc:
+ 	$(MAKE) install-cgc-common
 -	mzscheme/mzscheme@CGC@ $(SETUP_ARGS)
 +	LD_LIBRARY_PATH="${LD_LIBRARY_PATH}${LD_LIBRARY_PATH:+:}$(DESTDIR)$(libdir)" \
 +		mzscheme/mzscheme@CGC@ $(SETUP_ARGS)
  	$(MAKE) install-common-last
  
- install-no-cgc:
-@@ -132,7 +136,8 @@
- 	cd mzscheme; $(MAKE) install-both
- 	$(MAKE) install-@MAKE_MRED@-both
- 	$(MAKE) install-common-middle
+ plain-install-cgc:
+@@ -156,7 +160,8 @@ install-both-common:
+ 
+ install-both:
+ 	$(MAKE) install-both-common
 -	mzscheme/mzscheme@MAIN_VARIANT@ $(SETUP_ARGS)
 +	LD_LIBRARY_PATH="${LD_LIBRARY_PATH}${LD_LIBRARY_PATH:+:}$(DESTDIR)$(libdir)" \
 +		mzscheme/mzscheme@MAIN_VARIANT@ $(SETUP_ARGS)
  	$(MAKE) install-common-last
  
- install-no-both:
+ plain-install-both:

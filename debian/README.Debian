@@ -1,39 +1,7 @@
 DrScheme for DEBIAN
 ----------------------
 
-This is a Scheme environment originally created by the Computer Science
-department at Rice University, and now maintained by the PLT project
-(a group of former Rice faculty and students spread across a range of
-Universities and professional organizations.)
-
-DrScheme consists of a graphical environment (under X) with emacs-style
-keybindings.  It provides various levels of "strictness" with respect to
-its parsing of Scheme so that beginners can be presented with more specific
-error messages than a standard Scheme environment.
-
-The how's and why of DrScheme are discussed in a paper available
-on-line at: http://www.plt-scheme.org/software/drscheme.
-
-The homepage is at: http://www.plt-scheme.org/software/drscheme.
-
-Happy Schemeing! :-)
-
-Brent A. Fulgham <bfulgham@debian.org>  Tue, 21 May 2002 21:30:18 -0700
-MJ Ray <markj@cloaked.freeserve.co.uk>
-
 NOTES:
 
-1.  You should place any PLT packages not under the control of dkg
+1.  You should place any PLT packages not included with the distribution
 in ~/.plt-scheme.  Otherwise, they may be overwritten on your next upgrade.
-
-2.  A note on naming schemes:
-
-Stable releases are ### (e.g., 206)
-Urgent patched releases are ###p# (e.g., 206p1)
-
-3.  Web Server
-
-To start the web server at boot time (on port 8000 by default), modify the
-/etc/default/mzscheme file to say "RUN_HTTPD=Yes", rather than the default
-"RUN_HTTPD=No."  The post install script does this automatically if you answer
-the debconfig web server question in the affirmative.

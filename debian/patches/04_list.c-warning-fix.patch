@@ -1,7 +1,7 @@
-Index: drscheme-371/src/mzscheme/src/list.c
+Index: drscheme-4.0/src/mzscheme/src/list.c
 ===================================================================
---- drscheme-371.orig/src/mzscheme/src/list.c	2007-06-08 08:03:06.000000000 +0000
-+++ drscheme-371/src/mzscheme/src/list.c	2007-11-21 23:09:28.000000000 +0000
+--- drscheme-4.0.orig/src/mzscheme/src/list.c
++++ drscheme-4.0/src/mzscheme/src/list.c
 @@ -24,6 +24,7 @@
  */
  

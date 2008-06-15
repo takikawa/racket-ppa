@@ -1,2 +1,0 @@
-# Run mzscheme httpd server at startup ?
-RUN_HTTPD=No

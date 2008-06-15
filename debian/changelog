@@ -1,3 +1,15 @@
+drscheme (2:4.0-1) unstable; urgency=medium
+
+  * New upstream version
+  * Use older memory management on all architectures to be consistent
+    (Closes: #473212)
+  * Add new epoch since upstream changed versioning scheme
+  * Move readline to mzscheme package, and add note in copyright file about it
+    (Closes: #460466)
+  * Remove obsolete manpages and init script for web-server
+
+ -- Ari Pollak <ari@debian.org>  Sat, 14 Jun 2008 11:17:57 -0400
+
 drscheme (1:372-1) unstable; urgency=low
 
   [ Artem Baguinski ]

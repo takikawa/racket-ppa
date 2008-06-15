@@ -3,13 +3,24 @@ Fri, 4 Feb 2000 22:10:09 -0700.
 
 It was downloaded from http://download.plt-scheme.org/drscheme/
 
-Upstream Authors: PLT Scheme Inc.
+Upstream Authors/Copyright: PLT Scheme Inc.
 
 Copyright: 
 Everything in this package is licensed under the GNU Lesser General Public
-License (LGPL), except for the R5RS and SRFI docs, of which the copyright
-follows below.  The text of the LGPL is not included in this file, because
-there is a verbatim copy in /usr/share/common-licenses/LGPL on Debian systems.
+License (LGPL), except for the readline module and the R5RS and SRFI docs, of
+which the copyrights follow below.  The text of the LGPL is not included in
+this file, because there is a verbatim copy in /usr/share/common-licenses/LGPL
+on Debian systems.
+
+-------------------------------
+
+readline module notes:
+GNU's readline library is covered by the GPL (found at
+/usr/share/common-licenses/GPL on Debian systems), and that applies to
+code that links with it.  PLT Scheme is LGPL, so this code is not used by
+default; you should explicitly enable it if you want to.  Also, be aware that
+if you write code that uses this library, it will make your code link to the
+readline library when invoked, with the usual GPL implications.
 
 -------------------------------
 

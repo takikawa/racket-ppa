@@ -1,6 +1,2 @@
-debian/mzc.1
 debian/pdf-slatex.1
-debian/setup-plt.1
 debian/slatex.1
-debian/web-server.1
-debian/web-server-monitor.1
