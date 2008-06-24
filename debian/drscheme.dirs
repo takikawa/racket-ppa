@@ -1,9 +1,0 @@
-usr/bin
-usr/lib/plt
-usr/lib/plt/collects
-usr/lib/plt/collects/icons
-usr/lib/plt/collects/doc
-usr/lib/plt/notes
-usr/lib/plt/bin
-usr/share/lintian/overrides
-usr/share/man/man1

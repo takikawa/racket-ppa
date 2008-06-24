@@ -4,4 +4,4 @@
 # Site		Directory		Pattern			Version	Script
 version=3
 opts=filenamemangle=s/.*-([0-9.]+)-.*/drscheme-$1.tar.gz/ \
-http://download.plt-scheme.org/bundles/([0-9.]+)/plt/plt-([0-9.]+)-src-unix.tgz
+http://download.plt-scheme.org/bundles/([0-9]\.[0-9.]+)/plt/plt-([0-9]\.[0-9.]+)-src-unix.tgz

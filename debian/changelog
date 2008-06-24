@@ -1,3 +1,13 @@
+drscheme (2:4.0.1-1) unstable; urgency=low
+
+  * New upstream version
+  * Update watch file
+  * Apply patch from upstream to fix doc paths being hardcoded as the
+    temporary package installation directory instead of the configured path
+    (Closes: #486513)
+
+ -- Ari Pollak <ari@debian.org>  Tue, 24 Jun 2008 19:01:58 -0400
+
 drscheme (2:4.0-1) unstable; urgency=medium
 
   * New upstream version

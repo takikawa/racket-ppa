@@ -1,7 +1,7 @@
-Index: drscheme-4.0/src/configure
+Index: drscheme-4.0.1/src/configure
 ===================================================================
---- drscheme-4.0.orig/src/configure
-+++ drscheme-4.0/src/configure
+--- drscheme-4.0.1.orig/src/configure
++++ drscheme-4.0.1/src/configure
 @@ -5798,7 +5798,7 @@ case $OS in
         fi
         ;;
@@ -11,10 +11,10 @@ Index: drscheme-4.0/src/configure
         ;;
        *)
         ;;
-Index: drscheme-4.0/src/mzscheme/src/Makefile.in
+Index: drscheme-4.0.1/src/mzscheme/src/Makefile.in
 ===================================================================
---- drscheme-4.0.orig/src/mzscheme/src/Makefile.in
-+++ drscheme-4.0/src/mzscheme/src/Makefile.in
+--- drscheme-4.0.1.orig/src/mzscheme/src/Makefile.in
++++ drscheme-4.0.1/src/mzscheme/src/Makefile.in
 @@ -6,6 +6,7 @@ srcdir = @srcdir@
  builddir = @builddir@
  

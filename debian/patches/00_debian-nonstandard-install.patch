@@ -1,7 +1,7 @@
-Index: drscheme-4.0/src/Makefile.in
+Index: drscheme-4.0.1/src/Makefile.in
 ===================================================================
---- drscheme-4.0.orig/src/Makefile.in
-+++ drscheme-4.0/src/Makefile.in
+--- drscheme-4.0.1.orig/src/Makefile.in
++++ drscheme-4.0.1/src/Makefile.in
 @@ -81,7 +81,8 @@ no-run:
  	cd .
  

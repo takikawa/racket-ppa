@@ -1,7 +1,7 @@
-Index: drscheme-4.0/src/mred/wxs/Makefile.in
+Index: drscheme-4.0.1/src/mred/wxs/Makefile.in
 ===================================================================
---- drscheme-4.0.orig/src/mred/wxs/Makefile.in
-+++ drscheme-4.0/src/mred/wxs/Makefile.in
+--- drscheme-4.0.1.orig/src/mred/wxs/Makefile.in
++++ drscheme-4.0.1/src/mred/wxs/Makefile.in
 @@ -29,8 +29,8 @@ WXINC_wx_mac = -I$(PLTSRCDIR)/wxmac/incl
  WXINC = $(WXINC_@WXVARIANT@)
  NOGCINC = $(WXINC) -I$(PLTSRCDIR)/mred/wxme/ -I$(PLTBUILDDIR)/mzscheme/ -I$(PLTSRCDIR)/mzscheme/include/
@@ -13,10 +13,10 @@ Index: drscheme-4.0/src/mred/wxs/Makefile.in
  LDFLAGS = $(XLIB)
  ###########################
  
-Index: drscheme-4.0/src/wxxt/src/Makefile.in
+Index: drscheme-4.0.1/src/wxxt/src/Makefile.in
 ===================================================================
---- drscheme-4.0.orig/src/wxxt/src/Makefile.in
-+++ drscheme-4.0/src/wxxt/src/Makefile.in
+--- drscheme-4.0.1.orig/src/wxxt/src/Makefile.in
++++ drscheme-4.0.1/src/wxxt/src/Makefile.in
 @@ -25,8 +25,8 @@ WBUILD = @WBUILD@
  WXINC = $(PLTSRCDIR)/wxxt/src/AIAI-include -I$(PLTSRCDIR)/wxxt/src
  NOGCINC = -I$(WXINC) -I$(PLTSRCDIR)/mred/wxme/ -I$(PLTBUILDDIR)/mzscheme/ -I$(PLTSRCDIR)/mzscheme/include/

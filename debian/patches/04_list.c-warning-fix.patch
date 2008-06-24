@@ -1,7 +1,7 @@
-Index: drscheme-4.0/src/mzscheme/src/list.c
+Index: drscheme-4.0.1/src/mzscheme/src/list.c
 ===================================================================
---- drscheme-4.0.orig/src/mzscheme/src/list.c
-+++ drscheme-4.0/src/mzscheme/src/list.c
+--- drscheme-4.0.1.orig/src/mzscheme/src/list.c
++++ drscheme-4.0.1/src/mzscheme/src/list.c
 @@ -24,6 +24,7 @@
  */
  

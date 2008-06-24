@@ -1,7 +1,0 @@
-etc/default
-usr/bin
-usr/lib/plt/notes
-usr/lib/plt/collects
-usr/share/lintian/overrides
-usr/share/man/man1
-usr/share/doc/mzscheme
