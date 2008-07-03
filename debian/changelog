@@ -1,4 +1,4 @@
-plt-scheme (2:4.0.1-2) UNRELEASED; urgency=low
+plt-scheme (4.0.1-2) UNRELEASED; urgency=low
 
   * Rename package to plt-scheme, combining the drscheme and mzscheme
     packages, following advice from upstream (Closes: #488247)
