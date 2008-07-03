@@ -4,15 +4,10 @@ include /usr/share/cdbs/1/rules/debhelper.mk
 include /usr/share/cdbs/1/class/autotools.mk
 include /usr/share/cdbs/1/rules/patchsys-quilt.mk
 
-PLTDIR := /usr/lib/plt
-
 DEB_CONFIGURE_EXTRA_FLAGS := --enable-shared
 ifeq (m68k,$(shell dpkg-architecture -qDEB_BUILD_ARCH_CPU))
 	DEB_CONFIGURE_EXTRA_FLAGS += --disable-foreign
 endif
-
-# The new memory management doesn't work on all architectures, so use old one
-DEB_CONFIGURE_EXTRA_FLAGS += --enable-cgcdefault
 
 DEB_CONFIGURE_SCRIPT := $(CURDIR)/src/configure
 # Optimizations cause build failures on powerpc/alpha, so we'll override the
@@ -20,15 +15,13 @@ DEB_CONFIGURE_SCRIPT := $(CURDIR)/src/configure
 DEB_OPT_FLAG := -fPIC
 
 DEB_BUILDDIR := $(DEB_SRCDIR)/build
-DEB_DESTDIR := $(CURDIR)/debian/drscheme
 
-DEB_INSTALL_CHANGELOGS_drscheme := --no-act
-DEB_INSTALL_DOCS_drscheme := --no-act
-DEB_SHLIBDEPS_EXCLUDE_drscheme := debian/drscheme/plot
+#DEB_SHLIBDEPS_EXCLUDE_plt-scheme := debian/plt-scheme/plot
 
-install/mzscheme::
-	dh_movefiles --sourcedir=debian/drscheme -pmzscheme
+install/plt-scheme-doc::
+	# release-notes get installed into plt-scheme
+	rm -rf debian/plt-scheme-doc/usr/share/plt/doc/release-notes
 
-cleanbuilddir/drscheme::
+cleanbuilddir/plt-scheme::
 	rm -rf build
 	rm -rf include # This got created at build-time

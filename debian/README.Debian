@@ -1,7 +1,0 @@
-DrScheme for DEBIAN
-----------------------
-
-NOTES:
-
-1.  You should place any PLT packages not included with the distribution
-in ~/.plt-scheme.  Otherwise, they may be overwritten on your next upgrade.

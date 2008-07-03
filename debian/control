@@ -11,18 +11,16 @@ XS-Vcs-Svn: svn://svn.debian.org/svn/pkt-plt-scheme/drscheme/
 XS-Vcs-Browser: http://svn.debian.org/wsvn/pkg-plt-scheme/drscheme/
 Homepage: http://www.plt-scheme.org/
 
-Package: drscheme
-Architecture: alpha amd64 hppa i386 m68k mips mipsel powerpc sparc
-Depends: mzscheme (= ${Source-Version}), ${shlibs:Depends}
+Package: plt-scheme
+Architecture: all
+Depends: ${shlibs:Depends}
+Recommends: plt-scheme-doc
+Conflicts: mzscheme (<< 2:4.0.1-2), drscheme (<< 2:4.0.1-2)
+Replaces: mzscheme (<< 2:4.0.1-2), drscheme (<< 2:4.0.1-2)
 Description: PLT Scheme Programming Environment
  This is a Scheme Programming Environment, designed for use within
- an educational setting.  The faculty and staff at Rice University
- developed this package to be used in programming curricula, as a
- supplement to mathematics courses, or for general programming
- instruction in a liberal arts setting.
- .
- It includes its own IDE (which runs under X) and is similar in
- some respects to Emacs (most noticeably in its keybindings).
+ an educational setting. It includes its own IDE (which runs under X) and is
+ similar in some respects to Emacs (most noticeably in its keybindings).
  .
  It has an integrated help system and can run one of four
  modes (beginning, intermediate, advanced, complete).  Each
@@ -30,16 +28,12 @@ Description: PLT Scheme Programming Environment
  user.  The goal of this configuration is to protect novice users
  from the more arcane behavior of Scheme under certain cases.
 
-Package: mzscheme
-Architecture: alpha amd64 hppa i386 m68k mips mipsel powerpc sparc
-Depends: gcc | c-compiler, debconf | debconf-2.0, ${shlibs:Depends}
-Suggests: drscheme
-Provides: httpd
-Conflicts: drscheme (<< 2:4.0-1)
-Replaces: drscheme (<< 2:4.0-1)
-Description: PLT Scheme Interpreter
- This scheme implementation forms the foundation for the DrScheme
- programming environment.  The faculty and staff at Rice University
- developed this package to be used as a stand-alone interpreter,
- for embedding in other applications, and for use with the
- DrScheme graphical environment.
+Package: plt-scheme-doc
+Architecture: all
+Depends: ${shlibs:Depends}
+Recommends: plt-scheme
+Conflicts: mzscheme (<< 2:4.0.1-2), drscheme (<< 2:4.0.1-2)
+Replaces: mzscheme (<< 2:4.0.1-2), drscheme (<< 2:4.0.1-2)
+Enhances: plt-scheme-doc
+Description: PLT Scheme Documentation
+ This package includes all of the documentation for PLT Scheme.

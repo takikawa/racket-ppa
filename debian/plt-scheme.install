@@ -1,0 +1,2 @@
+debian/overrides/plt-scheme	usr/share/lintian/overrides/
+usr/share/plt/doc/release-notes

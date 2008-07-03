@@ -1,0 +1,3 @@
+plt-scheme: extra-license-file /usr/lib/plt/collects/profj/classpath/COPYING
+plt-scheme: extra-license-file /usr/lib/plt/collects/profj/classpath/LICENSE
+plt-scheme: shared-lib-without-dependency-information /usr/lib/plt/collects

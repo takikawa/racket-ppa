@@ -1,5 +1,0 @@
-- Rename drscheme to plt-scheme, since apparently this is what upstream
-  would prefer.
-
-- Create plt-scheme-data, and mzscheme-data arch-independent
-  packages for stuff like /usr/share/plt/doc and the .zo/.dep files

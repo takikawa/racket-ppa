@@ -1,3 +1,12 @@
+plt-scheme (2:4.0.1-2) UNRELEASED; urgency=low
+
+  * Rename package to plt-scheme, combining the drscheme and mzscheme
+    packages, following advice from upstream (Closes: #488247)
+  * Add plt-scheme-doc package
+  * Fix the package description, removing references to Rice University
+
+ -- Ari Pollak <ari@debian.org>  Sat, 28 Jun 2008 17:25:26 -0400
+
 drscheme (2:4.0.1-1) unstable; urgency=low
 
   * New upstream version

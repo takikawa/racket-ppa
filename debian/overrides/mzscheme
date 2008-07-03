@@ -1,4 +1,0 @@
-mzscheme: extra-license-file /usr/lib/plt/collects/help/servlets/release/license.ss
-mzscheme: extra-license-file /usr/lib/plt/collects/help/servlets/release/compiled/license.zo
-mzscheme: extra-license-file /usr/lib/plt/collects/help/servlets/release/compiled/license.dep
-mzscheme: shared-lib-without-dependency-information /usr/lib/plt/collects
