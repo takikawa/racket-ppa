@@ -18,7 +18,12 @@ DEB_BUILDDIR := $(DEB_SRCDIR)/build
 
 #DEB_SHLIBDEPS_EXCLUDE_plt-scheme := debian/plt-scheme/plot
 
-install/plt-scheme-doc::
+binary-post-install/plt-scheme::
+	rm -f debian/plt-scheme/usr/lib/plt/collects/profj/classpath/COPYING
+	rm -f debian/plt-scheme/usr/lib/plt/collects/profj/classpath/LICENSE
+	rmdir debian/plt-scheme/usr/lib/plt/collects/profj/classpath
+
+binary-post-install/plt-scheme-doc::
 	# release-notes get installed into plt-scheme
 	rm -rf debian/plt-scheme-doc/usr/share/plt/doc/release-notes
 
