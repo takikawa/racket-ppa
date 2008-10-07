@@ -1,14 +1,11 @@
-plt-scheme (4.0.1-3) UNRELEASED; urgency=low
+plt-scheme (4.1.1-1) unstable; urgency=low
 
-  * debian/patches/06_4.0.2.patch:
-    - Add only change from PLT Scheme 4.0.2, which fixes PLaneT packages
-      installing abnormally slowly.
   * Make sure cdbs' and dpkg-buildpackage's CFLAGS and CXXFLAGS aren't passed
     through to configure and make, so we don't get surprising behavior that
     upstream isn't expecting.
   * Update package description from PLT website (Closes: #491636)
 
- -- Ari Pollak <ari@debian.org>  Sat, 05 Jul 2008 20:10:29 -0400
+ -- Ari Pollak <ari@debian.org>  Sun, 05 Oct 2008 16:45:08 -0400
 
 plt-scheme (4.0.1-2) unstable; urgency=low
 
