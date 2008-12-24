@@ -3,13 +3,16 @@ Fri, 4 Feb 2000 22:10:09 -0700.
 
 It was downloaded from http://download.plt-scheme.org/drscheme/
 
-Upstream Authors/Copyright: PLT Scheme Inc.
+Upstream Authors/Copyright:
+	- Main code: PLT Scheme Inc.
+	- Embedded copy of GMP: Free Software Foundation
 
 Copyright: 
 Everything in this package is licensed under the GNU Lesser General Public
-License (LGPL), except for the the R5RS and SRFI docs, of which the copyrights
-follow below. The text of the LGPL is not included in this file, because
-there is a verbatim copy in /usr/share/common-licenses/LGPL on Debian systems.
+License (LGPL) v2.1 or later, except for the the R5RS and SRFI docs, of which
+the copyrights follow below. The text of the LGPL is not included in this file,
+because there is a verbatim copy in /usr/share/common-licenses/LGPL on Debian
+systems.
 
 -------------------------------
 
