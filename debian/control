@@ -1,5 +1,5 @@
 Source: plt-scheme
-Section: interpreters
+Section: lisp 
 Priority: optional
 Maintainer: Ari Pollak <ari@debian.org>
 Standards-Version: 3.8.0
