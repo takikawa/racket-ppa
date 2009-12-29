@@ -2,13 +2,14 @@ Source: plt-scheme
 Section: lisp 
 Priority: optional
 Maintainer: Ari Pollak <ari@debian.org>
+Uploaders: James Vega <jamessan@debian.org>
 Standards-Version: 3.8.0
 Build-Depends: cdbs, quilt, debhelper (>= 7.0.0), patchutils,
  libfreetype6-dev, libjpeg62-dev, libpng12-dev, libssl-dev, libxaw7-dev,
  xbitmaps, libxft-dev, libgl1-mesa-dev | libgl-dev,
  libglu1-mesa-dev | libglu-dev, libx11-dev, libxrender-dev, libcairo2-dev
-XS-Vcs-Svn: svn://svn.debian.org/svn/pkt-plt-scheme/drscheme/
-XS-Vcs-Browser: http://svn.debian.org/wsvn/pkg-plt-scheme/drscheme/
+Vcs-Svn: svn://svn.debian.org/svn/pkg-plt-scheme/plt-scheme/
+Vcs-Browser: http://svn.debian.org/wsvn/pkg-plt-scheme/plt-scheme/
 Homepage: http://www.plt-scheme.org/
 
 Package: plt-scheme
