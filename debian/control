@@ -32,8 +32,7 @@ Description: PLT Scheme Programming Environment
  .
  It supports the creation of new programming languages through a
  rich, expressive syntax system. Example languages include Typed Scheme,
- ACL2, FrTime, Lazy Scheme, and ProfessorJ (which is a pedagogical
- dialect of Java).
+ ACL2, FrTime, and Lazy Scheme.
 
 Package: plt-scheme-doc
 Section: doc

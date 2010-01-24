@@ -8,6 +8,7 @@ plt-scheme (4.2.1-2) UNRELEASED; urgency=low
     - Add myself to Uploaders.
     - Change XS-Vcs-* to Vcs-* and correct a typo in the URLs.
     - Add ${misc:Depends}.
+    - Remove description of ProfessorJ.
   * debian/rules:
     - Remove binary-post-install/plt-scheme target since collects/profj
       no longer exists.
