@@ -7,15 +7,10 @@ DEB_CONFIGURE_SCRIPT := $(CURDIR)/src/configure
 # Upstream does funky things with assembly, so we'll have to trust their 
 # compilation settings and override cdbs/dpkg-buildpackage defaults for
 # configure and make
-DEB_CONFIGURE_SCRIPT_ENV = CFLAGS="" CXXFLAGS=""
-DEB_MAKE_ENVVARS = CFLAGS="" CXXFLAGS=""
+DEB_CONFIGURE_SCRIPT_ENV = CFLAGS="-g" CXXFLAGS=""
+DEB_MAKE_ENVVARS = CFLAGS="-g" CXXFLAGS=""
 
 DEB_BUILDDIR := $(DEB_SRCDIR)/build
-
-binary-post-install/plt-scheme::
-	rm -f debian/plt-scheme/usr/lib/plt/collects/profj/classpath/COPYING
-	rm -f debian/plt-scheme/usr/lib/plt/collects/profj/classpath/LICENSE
-	rmdir debian/plt-scheme/usr/lib/plt/collects/profj/classpath
 
 binary-post-install/plt-scheme-doc::
 	# release-notes get installed into plt-scheme

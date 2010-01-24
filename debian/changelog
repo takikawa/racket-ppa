@@ -7,6 +7,10 @@ plt-scheme (4.2.1-2) UNRELEASED; urgency=low
   * debian/control:
     - Add myself to Uploaders.
     - Change XS-Vcs-* to Vcs-* and correct a typo in the URLs.
+  * debian/rules:
+    - Remove binary-post-install/plt-scheme target since collects/profj
+      no longer exists.
+    - Add -g to CFLAGS.
 
  -- Ari Pollak <ari@debian.org>  Sat, 21 Nov 2009 22:12:28 -0500
 
