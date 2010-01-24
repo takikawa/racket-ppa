@@ -14,7 +14,7 @@ Homepage: http://www.plt-scheme.org/
 
 Package: plt-scheme
 Architecture: any
-Depends: ${shlibs:Depends}
+Depends: ${misc:Depends}, ${shlibs:Depends}
 Recommends: plt-scheme-doc (>= ${source:Upstream-Version})
 Conflicts: mzscheme (<< 2:4.0.1+fake.1), drscheme (<< 2:4.0.1+fake.1)
 Replaces: mzscheme (<< 2:4.0.1+fake.1), drscheme (<< 2:4.0.1+fake.1)
@@ -38,7 +38,7 @@ Description: PLT Scheme Programming Environment
 Package: plt-scheme-doc
 Section: doc
 Architecture: all
-Depends: ${shlibs:Depends}
+Depends: ${misc:Depends}, ${shlibs:Depends}
 Recommends: plt-scheme (>= ${source:Upstream-Version})
 Conflicts: mzscheme (<< 2:4.0.1+fake.1), drscheme (<< 2:4.0.1+fake.1)
 Replaces: mzscheme (<< 2:4.0.1+fake.1), drscheme (<< 2:4.0.1+fake.1)
