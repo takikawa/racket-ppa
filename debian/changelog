@@ -13,6 +13,8 @@ plt-scheme (4.2.1-2) UNRELEASED; urgency=low
     - Remove binary-post-install/plt-scheme target since collects/profj
       no longer exists.
     - Add -g to CFLAGS.
+  * debian/overrides/plt-scheme: Add an override for the embedded-zlib while
+    working with upstream to find a fix they'll agree to.
 
  -- Ari Pollak <ari@debian.org>  Sat, 21 Nov 2009 22:12:28 -0500
 
