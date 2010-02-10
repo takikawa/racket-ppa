@@ -1,3 +1,9 @@
+plt-scheme (4.2.4-2) UNRELEASED; urgency=low
+
+  * Pull patch from upstream to fix building on Sparc.
+
+ -- James Vega <jamessan@debian.org>  Wed, 10 Feb 2010 08:57:16 -0500
+
 plt-scheme (4.2.4-1) unstable; urgency=low
 
   [ Ari Pollak ]
