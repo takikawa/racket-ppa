@@ -1,6 +1,7 @@
 plt-scheme (4.2.4-2) UNRELEASED; urgency=low
 
   * Pull patch from upstream to fix building on Sparc.
+  * debian/control: Change libjpeg62-dev Build-Depends to libjpeg-dev.
 
  -- James Vega <jamessan@debian.org>  Wed, 10 Feb 2010 08:57:16 -0500
 
