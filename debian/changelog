@@ -1,3 +1,9 @@
+plt-scheme (5.0-1) unstable; urgency=low
+
+  * New Upsteam version
+
+ -- David Bremner <bremner@unb.ca>  Sun, 13 Jun 2010 12:39:06 -0300
+
 plt-scheme (4.2.4-2) unstable; urgency=low
 
   * Pull patch from upstream to fix building on Sparc.
