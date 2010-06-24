@@ -1,0 +1,90 @@
+This package should be ready to build when the source package is
+unpackaged via "dpkg-source -x".
+
+The Debian packaging for racket (previously known as plt-scheme) is now stored in git.
+
+* Branch Layout
+
+  Currently there are four main branches
+
+  - release contains the upstream history. Because of the structure of
+    upstreams git repository, this is stitched together by merging
+    tgether upstream tags.  Relevant tags are release/$ver where $ver
+    is an upstream release.  Note that these tags are created after
+    merging upstream.
+
+  - upstream contains the release branch history, along with file
+    deletions to make it match the upstream release tar balls. Tags
+    are upstream/$ver where $ver is an upstream version.
+
+ - debian contains packaging commits.
+
+   Tags are packaging/$debian_ver where $debian_ver is a debian
+   version.
+
+ - master is merged debian and upstream.
+
+   Tags are debian/$debian_ver where $debian_ver is a debian version.
+
+There is also a branch pristine-tar contains information used by the
+pristine-tar utility to reconstruct bit identical upstream tarball.
+
+The master branch is a debianized source tree, and should be buildable
+by any number of tools (including dpkg-buildpackage).
+
+* gitpkg and sbuild basics
+
+  My (David's) preferred workflow is based on gitpkg and sbuild.  To
+  tell gitpkg to use the tarballs from git,
+
+  % git config gitpkg.pre-export-hook /usr/share/gitpkg/hooks/pristine-tar-pre-export-hook
+
+** Make a source package
+
+  % gitpkg master
+
+** Build existing debian version
+   - gitpkg debian/$version
+
+** Problems with pristine-tar?
+   pristine-tar Needs a large TMPDIR.  I found even 180M free in /tmp
+   is not enough. Try
+
+     export TMPDIR=/var/tmp
+
+* New upstream version
+** Update release branch
+   - git checkout release
+   - git merge -s recursive -X theirs $upstream_tag
+   - Optionally auto resolve file addition/deletion conflicts (or use git mergetool)
+    - git status -s | egrep '^(UD|AU|DD)' | cut -f2 -d' ' | xargs git rm -f
+    - git status -s | egrep '^(UA|DU)' | cut -f2 -d' ' | xargs git add
+    - git commit
+   - git tag release/$version
+
+** Update upstream branch
+   - git checkout upstream
+   - git merge -s recursive -X theirs release/$version
+   - optionally auto resolve file deletion conflicts:
+     - git status -s | egrep '^(DU|UA| U|U |UD)' | cut -c4- | xargs git rm --ignore-unmatch DUMMY$$
+     - git commit
+
+** Import upstream tarball
+   The manual import does some slightly dangerous things. It is
+   preferable to understand what one is typing.  In principle
+   git-import-orig (from git-buildpackage) ought to work as well.
+   - Manual import:
+     - git checkout upstream
+     - git clean -fxd
+     - git ls-files -z | xargs -0 rm -f
+     - tar --strip-components=1 -zxf $tarball
+     - git add -A
+     - git commit -m 'Importing '`basename $tarball`
+     - pristine-tar commit $tarball
+   - git tag upstream/$version
+
+** Update master branch
+   - git checkout master
+   - git merge upstream/$version
+
+ -- David Bremner <bremner@unb.ca>, Sun,  4 Jul 2010 11:10:35 -0300
