@@ -8,9 +8,9 @@ Build-Depends: cdbs, quilt, debhelper (>= 7.0.0), patchutils,
  libfreetype6-dev, libjpeg-dev, libpng12-dev, libssl-dev, libxaw7-dev,
  xbitmaps, libxft-dev, libgl1-mesa-dev | libgl-dev,
  libglu1-mesa-dev | libglu-dev, libx11-dev, libxrender-dev, libcairo2-dev
-Vcs-Svn: svn://svn.debian.org/svn/pkg-plt-scheme/plt-scheme/
-Vcs-Browser: http://svn.debian.org/wsvn/pkg-plt-scheme/plt-scheme/
-Homepage: http://www.plt-scheme.org/
+Vcs-Git: git://git.debian.org/git/collab-maint/racket
+Vcs-Browser: http://git.debian.org/?p=collab-maint/syncevolution.git;a=summary
+Homepage: http://www.racket-lang.org/
 
 Package: plt-scheme
 Architecture: any
