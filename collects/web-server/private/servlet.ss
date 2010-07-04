@@ -4,8 +4,7 @@
          web-server/http)
 
 (define servlet-prompt (make-continuation-prompt-tag 'servlet))
-(define-struct servlet (custodian namespace manager directory handler)
-  #:mutable)
+(define-struct servlet (custodian namespace manager directory [handler #:mutable]))
 (define-struct execution-context (request))
 
 (define current-servlet (make-parameter #f))
@@ -22,7 +21,7 @@
           [namespace namespace?]
           [manager manager?]
           [directory path-string?]
-          [handler (request? . -> . response?)])]
+          [handler (request? . -> . response/c)])]
  [struct execution-context 
          ([request request?])]
  [current-servlet (parameter/c (or/c false/c servlet?))]

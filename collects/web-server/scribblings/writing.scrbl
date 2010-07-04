@@ -18,7 +18,9 @@ There are two API sets provided by the Web Server. One is for standard servlets,
 
 This API provides: 
 @itemize{
+         @item{@schememodname[net/url],}
          @item{@schememodname[web-server/servlet/web-cells],}
+         @item{@schememodname[web-server/dispatch],}
          @item{@schememodname[web-server/http/bindings],}
          @item{@schememodname[web-server/http],}
          @item{@schememodname[web-server/servlet/servlet-structs], and}
@@ -32,7 +34,9 @@ This API provides:
 This API provides:
 @itemize{
          @item{@schememodname[net/url],}
+         @item{@schememodname[web-server/dispatch],}
          @item{@schememodname[web-server/http],}
+         @item{@schememodname[web-server/stuffers],}
          @item{@schememodname[web-server/lang/abort-resume],}
          @item{@schememodname[web-server/lang/web],}
          @item{@schememodname[web-server/lang/web-cells],}
@@ -56,7 +60,7 @@ Equivalent to @scheme[string?].
 Example: @scheme["http://localhost:8080/servlets;1*1*20131636/examples/add.ss"]}
 
 @defthing[response-generator/c contract?]{
-Equivalent to @scheme[(k-url? . -> . response?)].
+Equivalent to @scheme[(k-url? . -> . response/c)].
            
 Example: @schemeblock[(lambda (k-url)
                         `(html 
@@ -66,7 +70,7 @@ Example: @schemeblock[(lambda (k-url)
 }
 
 @defthing[expiration-handler/c contract?]{
-Equivalent to @scheme[(or/c false/c (request? . -> . response?))].
+Equivalent to @scheme[(or/c false/c (request? . -> . response/c))].
            
 Example: @schemeblock[(lambda (req)
                         `(html (head (title "Expired"))
@@ -76,7 +80,7 @@ Example: @schemeblock[(lambda (req)
 }
 
 @defthing[embed/url/c contract?]{
-Equivalent to @scheme[(((request? . -> . any/c)) (expiration-handler/c) . opt-> . string?)].
+Equivalent to @scheme[((request? . -> . any) . -> . string?)].
 
 This is what @scheme[send/suspend/dispatch] gives to its function argument.
 }
@@ -164,6 +168,8 @@ things in the Web Language, they are sensitive to source code modification.
 }
 
 @; ------------------------------------------------------------
+@include-section["dispatch.scrbl"]
 @include-section["formlets.scrbl"]
 @include-section["templates.scrbl"]
 @include-section["managers.scrbl"]
+@include-section["stuffers.scrbl"]

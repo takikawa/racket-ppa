@@ -1,7 +1,7 @@
 #lang scheme/gui
 
 (provide/contract [dot-positioning (-> (is-a?/c pasteboard%) string? boolean? void?)]
-                  [find-dot (-> (or/c string? false/c))])
+                  [find-dot (-> (or/c path? false/c))])
       
 (require scheme/system)
 
@@ -11,6 +11,9 @@
 (define neato-hier-label "neato – hier")
 (define neato-ipsep-label "neato – ipsep")
 
+;; these paths are explicitly checked (when find-executable-path
+;; fails) because starting drscheme from the finder (or the doc) 
+;; under mac os x generally does not get the path right.
 (define dot-paths 
   '("/usr/bin"
     "/bin"
@@ -18,10 +21,17 @@
     "/opt/local/bin/"))
 
 (define (find-dot [neato? #f])
-  (ormap (λ (x) (and (file-exists? (build-path x "dot"))
-                     (file-exists? (build-path x "neato"))
-                     (path->string (build-path x (if neato? "neato" "dot")))))
-         dot-paths))
+  (cond
+    [(and (find-executable-path "dot")
+          (find-executable-path "neato"))
+     (if neato?
+         (find-executable-path "neato")
+         (find-executable-path "dot"))]
+    [else
+     (ormap (λ (x) (and (file-exists? (build-path x "dot"))
+                        (file-exists? (build-path x "neato"))
+                        (build-path x (if neato? "neato" "dot"))))
+            dot-paths)]))
 
 (define (dot-positioning pb option overlap?)
   (let ([info (snip-info pb)])
@@ -92,7 +102,7 @@
      (λ ()
        (parameterize ([current-input-port in1]
                       [current-output-port out2])
-         (system (format "~a -Tplain" (find-dot (regexp-match #rx"neato" option)))))
+         (system (format "~a -Tplain" (path->string (find-dot (regexp-match #rx"neato" option))))))
        (close-output-port out2)
        (close-input-port in1)))
     (parse-plain in2)))
@@ -123,7 +133,7 @@
             [w (list-ref line 2)]
             [h (list-ref line 3)]
             [children (list-ref line 4)])
-       (printf " ~a [width=~a height=~a shape=box label=\"\"]\n" 
+       (printf "  ~a [width=~a height=~a shape=box label=\"\"]\n" 
                (num->id id) 
                (format-number (pixels->inches w))
                (format-number (pixels->inches h)))
@@ -210,7 +220,10 @@
       void))
         
   (define (parse-edge line)
+    (define (give-up)
+      (error 'redex "could not parse edge line:\n  ~s\n" line))
     (let* ([m (regexp-match #rx"edge ([^ ]+) ([^ ]+) ([0-9]+) (.*)$" line)]
+           [_ (unless m (give-up))]
            [from (list-ref m 1)]
            [to (list-ref m 2)]
            [point-count (string->number (list-ref m 3))]
@@ -220,7 +233,8 @@
                        [rest rest])
               (if (zero? pts) 
                   '()
-                  (let* ([m (regexp-match #rx"^([0-9.]+) ([0-9.]+) (.*)$" rest)]
+                  (let* ([m (regexp-match #rx"^([-0-9.]+) ([-0-9.]+) (.*)$" rest)]
+                         [_ (unless m (give-up))]
                          [x (string->number (list-ref m 1))]
                          [y (string->number (list-ref m 2))])
                     (set! max-y (max y max-y))

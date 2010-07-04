@@ -46,7 +46,8 @@
 [null (-val null)]
 [number? (make-pred-ty N)]
 [char? (make-pred-ty -Char)]
-[integer? (make-pred-ty -Integer)]
+[integer? (Univ . -> . B : (list (make-Latent-Restrict-Effect N)) (list (make-Latent-Remove-Effect -Integer)))]
+[exact-integer? (make-pred-ty -Integer)]
 [boolean? (make-pred-ty B)]
 [add1 (cl->* (-> -Integer -Integer)
              (-> N N))]
@@ -156,11 +157,11 @@
 
 [sleep (N . -> . -Void)]
 
-[= (->* (list N N) N B)]
+[=  (->* (list N N) N B)]
 [>= (->* (list N N) N B)]
-[< (->* (list N N) N B)]
+[<  (->* (list N N) N B)]
 [<= (->* (list N N) N B)]
-[> (->* (list N) N B)]
+[>  (->* (list N N) N B)]
 [zero? (N . -> . B)]
 [* (cl->* (->* '() -Integer -Integer) (->* '() N N))]
 [/ (cl->* (->* (list N) N N))]
@@ -394,10 +395,10 @@
 [lcm  (null -Integer . ->* . -Integer)]
 
 [arithmetic-shift (-Integer -Integer . -> . -Integer)]
-[bitwise-and (null N . ->* . N)]
-[bitwise-ior (null N . ->* . N)]
-[bitwise-not (null N . ->* . N)]
-[bitwise-xor (null N . ->* . N)]
+[bitwise-and (null -Integer . ->* . -Integer)]
+[bitwise-ior (null -Integer . ->* . -Integer)]
+[bitwise-not (null -Integer . ->* . -Integer)]
+[bitwise-xor (null -Integer . ->* . -Integer)]
 
 [vector (-poly (a) (->* (list) a (-vec a)))]
 [make-string (cl-> [(-Integer) -String] [(-Integer -Char) -String])]
@@ -516,8 +517,8 @@
 [expand (-> (-Syntax Univ) (-Syntax Univ))]
 [expand-once (-> (-Syntax Univ) (-Syntax Univ))]
 
-[syntax-source (-poly (a) (-> (-Syntax a) Univ))]
-[syntax-position (-poly (a) (-> (-Syntax a) (-opt N)))]
+[syntax-source (-> (-Syntax Univ) Univ)]
+[syntax-position (-> (-Syntax Univ) (-opt N))]
 [datum->syntax (cl->*
                 (-> (-opt (-Syntax Univ)) Sym (-Syntax Sym))
                 (-> (-opt (-Syntax Univ)) Univ (-Syntax Univ)))]
@@ -536,6 +537,15 @@
 [read-accept-reader (-Param B B)]
 
 [maybe-print-message (-String . -> . -Void)]
+
+[list->string ((-lst -Char) . -> . -String)]
+[string->list (-String . -> . (-lst -Char))]
+[sort (-poly (a) ((-lst a) (a a . -> . B) . -> . (-lst a)))]
+
+;; scheme/list
+[last-pair (-poly (a) ((-mu x (Un a (-val '()) (-pair a x)))
+                       . -> . 
+                       (Un (-pair a a) (-pair a (-val '())))))]
 
 ;; scheme/tcp
 [tcp-listener? (make-pred-ty -TCP-Listener)]

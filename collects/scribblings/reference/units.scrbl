@@ -19,6 +19,8 @@
 
 @title[#:tag "mzlib:unit" #:style 'toc]{Units}
 
+@guideintro["units"]{units}
+
 @deftech{Units} organize a program into separately compilable and
 reusable components. The imports and exports of a unit are grouped
 into a @deftech{signature}, which can include ``static'' information
@@ -150,7 +152,7 @@ the corresponding import. Each @scheme[tagged-sig-id] in an
 @scheme[import] clause.}
 
 @defform/subs[
-#:literals (define-syntaxes define-values open extends)
+#:literals (define-syntaxes define-values open extends contracted)
 (define-signature id extension-decl
   (sig-elem ...))
 
@@ -162,6 +164,7 @@ the corresponding import. Each @scheme[tagged-sig-id] in an
   id
   (define-syntaxes (id ...) expr)
   (define-values (value-id ...) expr) 
+  (contracted [id contract] ...)
   (open sig-spec) 
   (sig-form-id . datum)])]{
 
@@ -175,7 +178,7 @@ of bindings for import or export:
  @scheme[id]. That is, @scheme[id] is available for use in units
  importing the signature, and @scheme[id] must be defined by units
  exporting the signature.}
-
+      
  @item{Each @scheme[define-syntaxes] form in a signature declaration
  introduces a macro to that is available for use in any unit that
  imports the signature.  Free variables in the definition's
@@ -187,6 +190,17 @@ of bindings for import or export:
  introduces code that effectively prefixes every unit that imports the
  signature.  Free variables in the definition's @scheme[expr] are
  treated the same as for @scheme[define-syntaxes].}
+
+ @item{Each @scheme[contracted] form in a signature declaration means
+ that a unit exporting the signature must supply a variable definition
+ for each @scheme[id] in that form.  If the signature is imported, then
+ uses of @scheme[id] inside the unit are protected by the appropriate
+ contracts using the unit as the negative blame.  If the signature is
+ exported, then the exported values are protected by the appropriate
+ contracts which use the unit as the positive blame, but internal uses
+ of the exported identifiers are not protected.  Variables in the
+ @scheme[contract] expressions are treated the same as for
+ @scheme[define-syntaxes].}
 
  @item{Each @scheme[(open sig-spec)] adds to the signature everything
  specified by @scheme[sig-spec].}
@@ -204,6 +218,7 @@ the extended signature. Furthermore, any implementation of the new
 signature can be used as an implementation of the extended signature.}
 
 @defkeywords[[(open sig-spec) _sig-elem define-signature]
+             [(contracted [id contract] ...) _sig-elem define-signature]
              [(only sig-spec id ...) _sig-spec unit]
              [(except sig-spec id ...) _sig-spec unit]
              [(rename sig-spec (id id) ...) _sig-spec unit]
@@ -563,6 +578,28 @@ each of the bindings implied by an @scheme[export]
 Like @scheme[unit/new-import-export], but binds static information to
 @scheme[unit-id] like @scheme[define-unit].}
 
+@defform[
+#:literals (import export)
+(unit/s
+  (import tagged-sig-spec ...)
+  (export tagged-sig-spec ...)
+  init-depends-decl
+  unit-id)]{
+
+Like @scheme[unit/new-import-export], but the linking clause is
+inferred, so @scheme[unit-id] must have the appropriate static
+information.}
+@defform[
+#:literals (import export)
+(define-unit/s name-id
+  (import tagged-sig-spec ...)
+  (export tagged-sig-spec ...)
+  init-depends-decl
+  unit-id)]{
+
+Like @scheme[unit/s], but binds static information to @scheme[name-id]
+like @scheme[define-unit].}
+
 @; ------------------------------------------------------------------------
 
 @section[#:tag "define-sig-form"]{Extending the Syntax of Signatures}
@@ -601,6 +638,20 @@ would be bound by @scheme[(define-struct id (field ...) option ...)],
 where the extra option @scheme[#:omit-constructor] omits the
 @schemeidfont{make-}@scheme[id] identifier.}
 
+@defform/subs[
+(struct/ctc id ([field contract-expr] ...) option ...) 
+
+([field id
+        [id #:mutable]]
+ [option #:mutable
+         #:omit-constructor
+         #:omit-define-syntaxes
+         #:omit-define-values])]{
+
+For use with @scheme[define-signature]. The @scheme[struct/ctc] form works
+similarly to @scheme[struct], but the constructor, predicate, field
+accessors, and field mutators are contracted appropriately.}
+
 @; ------------------------------------------------------------------------
 
 @section{Unit Utilities}
@@ -615,6 +666,41 @@ Returns @scheme[#t] if @scheme[v] is a unit, @scheme[#f] otherwise.}
 Expands to a @scheme[provide] of all identifiers implied by the
 @scheme[sig-spec]s. See @scheme[unit] for the grammar of
 @scheme[sig-spec].}
+
+@; ------------------------------------------------------------------------
+
+@section[#:tag "unitcontracts"]{Unit Contracts}
+
+@defform/subs[#:literals (import export)
+              (unit/c (import sig-block ...) (export sig-block ...))
+              ([sig-block (tagged-sig-id [id contract] ...)
+                          tagged-sig-id])]{
+
+A @deftech{unit contract} wraps a unit and checks both its imported and
+exported identifiers to ensure that they match the appropriate contracts.
+This allows the programmer to add contract checks to a single unit value
+without adding contracts to the imported and exported signatures.
+
+The unit value must import a subset of the import signatures and export a
+superset of the export signatures listed in the unit contract.  Any
+identifier which is not listed for a given signature is left alone.
+Variables used in a given @scheme[contract] expression first refer to other
+variables in the same signature, and then to the context of the 
+@scheme[unit/c] expression.}
+                                          
+@defform/subs[#:literals (import export)
+              (define-unit/contract unit-id
+                (import sig-spec-block ...)
+                (export sig-spec-block ...)
+                init-depends-decl
+                unit-body-expr-or-defn
+                ...)
+              ([sig-spec-block (tagged-sig-spec [id contract] ...)
+                               tagged-sig-spec])]{
+The @scheme[define-unit/contract] form defines an unit compatible with
+link inference whose imports and exports are contracted with a unit
+contract.  The unit name is used for the positive blame of the contract.}
+
 
 @; ------------------------------------------------------------------------
 

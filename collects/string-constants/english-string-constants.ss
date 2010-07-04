@@ -192,6 +192,7 @@ please adhere to these guidelines:
  (cs-status-loading-docs-index "Check Syntax: loading documentation index")
  (cs-mouse-over-import "binding ~s imported from ~s")
  (cs-view-docs "View documentation for ~a")
+ (cs-view-docs-from "~a from ~a")  ;; a completed version of the line above (cs-view-docs) is put into the first ~a and a list of modules (separated by commas) is put into the second ~a. Use check syntax and right-click on a documented variable (eg, 'require') to see this in use
   
  (cs-lexical-variable "lexical variable")
  (cs-imported-variable "imported variable")
@@ -242,6 +243,11 @@ please adhere to these guidelines:
  (erase-log-directory-contents "Erase contents of log directory: ~a?")
  (error-erasing-log-directory "Error erasing log directory contents.\n\n~a\n")
 
+  ;; menu items connected to the logger -- also in a button in the planet status line in the drs frame
+  (show-log "Show &Log")
+  (hide-log "Hide &Log")
+  (logging-all "All") ;; in the logging window in drscheme, shows all logs simultaneously
+  
  ;; modes
  (mode-submenu-label "Modes")
  (scheme-mode "Scheme mode")
@@ -721,10 +727,10 @@ please adhere to these guidelines:
   (prev-tab "Previous Tab")
 
  (view-menu-label "&View")
- (show-overview "Show Program Contour") 
- (hide-overview "Hide Program Contour")
- (show-module-browser "Show Module Browser")
- (hide-module-browser "Hide Module Browser")
+ (show-overview "Show &Program Contour") 
+ (hide-overview "Hide &Program Contour")
+ (show-module-browser "Show &Module Browser")
+ (hide-module-browser "Hide &Module Browser")
 
   (help-menu-label "&Help")
  (about-info "Credits and details for this application")
@@ -980,7 +986,7 @@ please adhere to these guidelines:
  (constructor-printing-style "Constructor")
  (quasiquote-printing-style "Quasiquote")
  (write-printing-style "write")
- (print-printing-style "current-print")
+ (print-printing-style "print")
  (sharing-printing-label "Show sharing in values")
  (use-pretty-printer-label "Insert newlines in printed values")
  (input-syntax "Input Syntax")
@@ -1040,7 +1046,8 @@ please adhere to these guidelines:
   (no-language-chosen "No language chosen")
  
  (module-language-one-line-summary "Run creates a REPL in the context of the module, including the module's declared language")
-  
+  (module-language-auto-text "Automatic #lang line") ;; shows up in the details section of the module language
+   
   ;;; from the `not a language language' used initially in drscheme.
   (must-choose-language "DrScheme cannot process programs until you choose a programming language.")
   
@@ -1172,7 +1179,7 @@ please adhere to these guidelines:
  (module-browser-progress "Module Browser: ~a") ;; prefix in the status line
  (module-browser-compiling-defns "Module Browser: compiling definitions")
  (module-browser-show-lib-paths/short "Follow lib requires") ;; check box label in show module browser pane in drscheme window.
- (module-browser-show-planet-paths/short "Follow planet requires") ;; check box label in show module browser pane in drscheme window.
+ (module-browser-show-planet-paths/short "Follow PLaneT requires") ;; check box label in show module browser pane in drscheme window.
  (module-browser-refresh "Refresh") ;; button label in show module browser pane in drscheme window.
  (module-browser-only-in-plt-and-module-langs
   "The module browser is only available for programs in the PLT languages and in the module language (and only for programs that have modules in them).")
@@ -1430,6 +1437,11 @@ please adhere to these guidelines:
   (bug-track-forget "Forget")
   (bug-track-forget-all "Forget All")
     
+  ;; planet status messages in the bottom of the drscheme window; the ~a is filled with the name of the package
+  (planet-downloading "PLaneT: Downloading ~a...")
+  (planet-installing "PLaneT: Installing ~a...")
+  (planet-finished "PLaneT: Finished with ~a.")
+  (planet-no-status "PLaneT") ;; this can happen when there is status shown in a different and then the user switches to a tab where planet hasn't been used
   
   ;; string normalization. To see this, paste some text with a ligature into DrScheme
   ;; the first three strings are in the dialog that appears. The last one is in the preferences dialog

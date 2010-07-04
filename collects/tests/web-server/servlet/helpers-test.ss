@@ -1,5 +1,5 @@
 #lang scheme/base
-(require (planet "test.ss" ("schematics" "schemeunit.plt" 2))
+(require (planet schematics/schemeunit:3)
          web-server/servlet)
 (provide helpers-tests)
 
@@ -24,18 +24,21 @@
    
    (test-suite
     "redirect-to"
+    (test-exn "Empty"
+              exn:fail:contract?
+              (lambda () (redirect-to "")))
     (test-equal? "Code (temp)"  
                  (response/basic-code (redirect-to "http://test.com/foo"))
                  302)
     (test-equal? "Message (temp)" 
                  (response/basic-message (redirect-to "http://test.com/foo"))
-                 "Moved Temporarily")
+                 #"Moved Temporarily")
     (test-equal? "Code" 
                  (response/basic-code (redirect-to "http://test.com/foo" permanently))
                  301)
     (test-equal? "Message" 
                  (response/basic-message (redirect-to "http://test.com/foo" permanently))
-                 "Moved Permanently")
+                 #"Moved Permanently")
     (test-equal? "URL"
                  (dehead (response/basic-headers (redirect-to "http://test.com/foo")))
                  (list (list #"Location" #"http://test.com/foo")))
@@ -49,3 +52,6 @@
     (test-case "permanently" (check-true (redirection-status? permanently)))
     (test-case "temporarily" (check-true (redirection-status? temporarily)))
     (test-case "see-other" (check-true (redirection-status? see-other))))))
+
+;(require (planet schematics/schemeunit:3/text-ui))
+;(run-tests helpers-tests)

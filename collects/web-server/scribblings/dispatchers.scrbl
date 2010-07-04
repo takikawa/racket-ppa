@@ -158,7 +158,7 @@ URLs to paths on the filesystem.
 @a-dispatcher[web-server/dispatchers/dispatch-lift
               @elem{defines a dispatcher constructor.}]{
 
-@defproc[(make (proc (request? . -> . response?)))
+@defproc[(make (proc (request? . -> . response/c)))
          dispatcher/c]{
  Constructs a dispatcher that calls @scheme[proc] on the request
  object, and outputs the response to the connection.
@@ -184,7 +184,7 @@ URLs to paths on the filesystem.
                    for invoking a particular procedure when a request is given to a particular
                    URL path.}]{
 
-@defproc[(make (path string?) (proc (request? . -> . response?)))
+@defproc[(make (path string?) (proc (request? . -> . response/c)))
          dispatcher/c]{
  Checks if the request URL path as a string is equal to @scheme[path]
  and if so, calls @scheme[proc] for a response.
@@ -237,7 +237,11 @@ a URL that refreshes the password file, servlet cache, etc.}
  Formats a request like Apache's default.
 }
 
-@defproc[(log-format->format [id symbol?])
+@defthing[log-format/c contract?]{
+ Equivalent to @scheme[(symbols 'parenthesized-default 'extended 'apache-default)].
+}
+
+@defproc[(log-format->format [id log-format/c])
          format-req/c]{
  Maps @scheme['parenthesized-default] to @scheme[paren-format],
  @scheme['extended] to @scheme[extended-format], and
@@ -270,7 +274,7 @@ a URL that refreshes the password file, servlet cache, etc.}
 @defproc[(make [denied? denied?/c]
                [#:authentication-responder
                 authentication-responder
-                (url? header? . -> . response?)
+                (url? header? . -> . response/c)
                 (gen-authentication-responder "forbidden.html")])
          dispatcher/c]{
  A dispatcher that checks if the request is denied based on @scheme[denied?]. If so, then 
@@ -359,11 +363,11 @@ a URL that refreshes the password file, servlet cache, etc.}
 @defproc[(make [url->servlet url->servlet/c]
                [#:responders-servlet-loading
                 responders-servlet-loading
-                (url? exn? . -> . response?)
+                (url? exn? . -> . response/c)
                 servlet-loading-responder]
                [#:responders-servlet
                 responders-servlet
-                (url? exn? . -> . response?)
+                (url? exn? . -> . response/c)
                 servlet-error-responder])
          dispatcher/c]{
  This dispatcher runs Scheme servlets, using @scheme[url->servlet] to resolve URLs to the underlying servlets.
@@ -435,21 +439,22 @@ Consider this example:
             (output-response/method
              conn
              (make-response/full
-              200 "Okay"
+              200 #"Okay"
               (current-seconds) TEXT/HTML-MIME-TYPE
               empty
-              (list (format "hello world ~a"
+              (list (string->bytes/utf-8
+                     (format "hello world ~a"
                             (sort (build-list 100000 (λ x (random 1000)))
-                                  <))))
+                                  <)))))
              (request-method req)))
           #:over-limit 'block))
         (lambda (conn req)          
           (output-response/method
            conn
-           (make-response/full 200 "Okay"
+           (make-response/full 200 #"Okay"
                                (current-seconds) TEXT/HTML-MIME-TYPE
                                empty
-                               (list "<html><body>Unlimited</body></html>"))
+                               (list #"<html><body>Unlimited</body></html>"))
            (request-method req))))
        #:port 8080)
 

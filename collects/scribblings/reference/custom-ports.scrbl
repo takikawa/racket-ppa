@@ -693,7 +693,8 @@ s
                            [buffer-mode (or/c (case-> 
                                                ((or/c 'block 'line 'none) . -> . any)
                                                (-> (or/c 'block 'line 'none #f)))
-                                              #f)])
+                                              #f)
+                                        #f])
           output-port?]{
 
 Creates an output port, which is immediately open for
@@ -891,7 +892,7 @@ procedures.
     result is the number of bytes written.
 
     If @scheme[get-write-evt] is @scheme[#f], then
-    @scheme[port-writes-atomic?] will produce @scheme[#f] with applied
+    @scheme[port-writes-atomic?] will produce @scheme[#f] when applied
     to the port, and the port will not be a valid argument to
     procedures such as @scheme[write-bytes-avail-evt].
 

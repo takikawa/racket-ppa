@@ -1,8 +1,8 @@
-#lang scheme/base
-(require mzlib/contract
-         mzlib/list
-         net/url)
-(require web-server/http/response-structs
+#lang scheme
+(require scheme/runtime-path
+         net/url
+         web-server/private/xexpr
+         web-server/http/response-structs
          web-server/http/request-structs)
 
 (define (format-stack-trace trace)
@@ -19,6 +19,10 @@
                             (srcloc-source (cdr item)))
                     "<unknown location>")))))
 
+(define-runtime-path default-error-style-sheet
+  (list 'lib
+        "web-server/default-web-root/htdocs/error.css"))
+
 (define (pretty-exception-response url exn)
   `(html
     (head
@@ -29,7 +33,9 @@
           (div ([class "title"]) "Exception")
           (p
            "The application raised an exception with the message:"
-           (pre ,(exn-message exn)))
+           (pre ,(if (exn:pretty? exn)
+                     (exn:pretty-xexpr exn)
+                     (exn-message exn))))
           (p
            "Stack trace:"
            ,(format-stack-trace
@@ -56,7 +62,7 @@
 ; gen-servlet-not-found : str -> url -> response
 (define (gen-servlet-not-found file-not-found-file)
   (lambda (url)
-    (file-response 404 "Servlet not found" file-not-found-file)))
+    (file-response 404 #"Servlet not found" file-not-found-file)))
 
 ; servlet-error-response : url exn -> response
 (define (servlet-error-responder url exn)
@@ -71,53 +77,53 @@
     ((error-display-handler)
      (format "Servlet (@ ~a) exception:\n~e\n" (url->string url) (exn-message exn))
      exn)
-    (file-response 500 "Servlet error" servlet-error-file)))
+    (file-response 500 #"Servlet error" servlet-error-file)))
 
 ; gen-servlets-refreshed : str -> -> response
 (define (gen-servlets-refreshed servlet-refresh-file)
   (lambda ()
-    (file-response 200 "Servlet cache refreshed" servlet-refresh-file)))
+    (file-response 200 #"Servlet cache refreshed" servlet-refresh-file)))
 
 ; gen-passwords-refreshed : str -> -> response
 (define (gen-passwords-refreshed password-refresh-file)
   (lambda ()
-    (file-response 200 "Passwords refreshed" password-refresh-file)))
+    (file-response 200 #"Passwords refreshed" password-refresh-file)))
 
 ; gen-authentication-responder : str -> url (cons sym str) -> response
 (define (gen-authentication-responder access-denied-file)
   (lambda (uri recommended-header)
-    (file-response 401 "Authorization Required" access-denied-file
+    (file-response 401 #"Authorization Required" access-denied-file
                    recommended-header)))
 
 ; gen-protocol-responder : str -> str -> response
 (define (gen-protocol-responder protocol-file)
   (lambda (error-message)
-    (file-response 400 "Malformed Request" protocol-file)))
+    (file-response 400 #"Malformed Request" protocol-file)))
 
 ; gen-file-not-found-responder : str -> req -> response
 (define (gen-file-not-found-responder file-not-found-file)
   (lambda (req)
-    (file-response 404 "File not found" file-not-found-file)))
+    (file-response 404 #"File not found" file-not-found-file)))
 
 ; gen-collect-garbage-responder : str -> -> response
 (define (gen-collect-garbage-responder file)
   (lambda ()
-    (file-response 200 "Garbage collected" file)))
+    (file-response 200 #"Garbage collected" file)))
 
 ; read-file : str -> str
 (define (read-file path)
   (call-with-input-file path
-    (lambda (in) (read-string (file-size path) in))))
+    (lambda (in) (read-bytes (file-size path) in))))
 
 (provide/contract
- [file-response ((natural-number/c string? path-string?) (listof header?) . ->* . (response?))]
- [servlet-loading-responder (url? exn? . -> . response?)]
- [gen-servlet-not-found (path-string? . -> . (url? . -> . response?))]
- [servlet-error-responder (url? exn? . -> . response?)]
- [gen-servlet-responder (path-string? . -> . (url? exn? . -> . response?))]
- [gen-servlets-refreshed (path-string? . -> . (-> response?))]
- [gen-passwords-refreshed (path-string? . -> . (-> response?))]
- [gen-authentication-responder (path-string? . -> . (url? header? . -> . response?))]
- [gen-protocol-responder (path-string? . -> . (url? . -> . response?))]
- [gen-file-not-found-responder (path-string? . -> . (request? . -> . response?))]
- [gen-collect-garbage-responder (path-string? . -> . (-> response?))])
+ [file-response ((natural-number/c bytes? path-string?) () #:rest (listof header?) . ->* . response/c)]
+ [servlet-loading-responder (url? exn? . -> . response/c)]
+ [gen-servlet-not-found (path-string? . -> . (url? . -> . response/c))]
+ [servlet-error-responder (url? exn? . -> . response/c)]
+ [gen-servlet-responder (path-string? . -> . (url? exn? . -> . response/c))]
+ [gen-servlets-refreshed (path-string? . -> . (-> response/c))]
+ [gen-passwords-refreshed (path-string? . -> . (-> response/c))]
+ [gen-authentication-responder (path-string? . -> . (url? header? . -> . response/c))]
+ [gen-protocol-responder (path-string? . -> . (url? . -> . response/c))]
+ [gen-file-not-found-responder (path-string? . -> . (request? . -> . response/c))]
+ [gen-collect-garbage-responder (path-string? . -> . (-> response/c))])

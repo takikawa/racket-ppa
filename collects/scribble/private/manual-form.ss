@@ -106,6 +106,9 @@
     [(_ #:literals lits [spec ...] desc ...)
      (syntax/loc stx
        (defform*/subs #:literals lits [spec ...] () desc ...))]
+    [(_ #:id id [spec ...] desc ...)
+     (syntax/loc stx
+       (defform*/subs #:id id [spec ...] () desc ...))]
     [(_ [spec ...] desc ...)
      (syntax/loc stx
        (defform*/subs [spec ...] () desc ...))]))
@@ -153,7 +156,7 @@
                  (syntax->list #'(lit ...)))
        #'(with-togetherable-scheme-variables
           (lit ...)
-          ([form spec])
+          ([form/none spec])
           (*defforms #f
                      '(spec) (list (lambda (ignored) (schemeblock0/form spec)))
                      null null

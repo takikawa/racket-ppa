@@ -133,7 +133,10 @@
                    #:colors [colors '()]
                    #:layout [layout void]
                    #:edge-label-font [edge-label-font #f]
-                   )
+                   #:edge-labels? [edge-labels? #t]
+                   #:graph-pasteboard-mixin [extra-graph-pasteboard-mixin values]
+                   #:filter [term-filter (lambda (x y) #t)]
+                   #:post-process [post-process void])
   (let-values ([(graph-pb canvas)
                 (traces reductions pre-exprs
                         #:no-show-frame? #t
@@ -143,7 +146,11 @@
                         #:scheme-colors? scheme-colors?
                         #:colors colors
                         #:layout layout
-                        #:edge-label-font edge-label-font)])
+                        #:edge-label-font edge-label-font
+                        #:edge-labels? edge-labels?
+                        #:graph-pasteboard-mixin extra-graph-pasteboard-mixin
+                        #:filter term-filter)])
+    (post-process graph-pb)
     (print-to-ps graph-pb canvas filename)))
 
 (define (print-to-ps graph-pb canvas filename)
@@ -231,11 +238,15 @@
                 #:scheme-colors? [scheme-colors? #t]
                 #:layout [layout void]
                 #:edge-label-font [edge-label-font #f]
+                #:edge-labels? [edge-labels? #t]
+                #:filter [term-filter (lambda (x y) #t)]
+                #:graph-pasteboard-mixin [extra-graph-pasteboard-mixin values]
                 #:no-show-frame? [no-show-frame? #f])
   (define exprs (if multiple? pre-exprs (list pre-exprs)))
   (define main-eventspace (current-eventspace))
   (define saved-parameterization (current-parameterization))
-  (define graph-pb (new graph-pasteboard% [layout layout] [edge-label-font edge-label-font]))
+  (define graph-pb (new (extra-graph-pasteboard-mixin graph-pasteboard%) [layout layout] [edge-label-font edge-label-font] [edge-labels? edge-labels?]))
+  (define user-char-width (initial-char-width))
   (define f (instantiate red-sem-frame% ()
               (label "PLT Redex Reduction Graph")
               (style '(toolbar-button))
@@ -329,6 +340,7 @@
   (define default-colors (list (dark-pen-color) (light-pen-color) 
                                (dark-text-color) (light-text-color)
                                (dark-brush-color) (light-brush-color)))
+      
   
   ;; only changed on the reduction thread
   ;; frontier : (listof (is-a?/c graph-editor-snip%))
@@ -337,8 +349,10 @@
      (λ (x) x)
      (map (lambda (expr) (apply build-snip
                                 snip-cache #f expr pred pp #f scheme-colors?
+                                (get-user-char-width user-char-width expr)
                                 default-colors))
           exprs)))
+  
   
   ;; set-font-size : number -> void
   ;; =eventspace main thread=
@@ -400,13 +414,15 @@
                            (let-values ([(name sexp) (apply values red+sexp)])
                              (call-on-eventspace-main-thread
                               (λ ()
-                                (let-values ([(dark-arrow-color light-arrow-color dark-label-color light-label-color
-                                                                dark-pen-color
-                                                                light-pen-color) 
-                                              (red->colors name)])
-                                  (build-snip snip-cache snip sexp pred pp name scheme-colors? 
-                                              light-arrow-color dark-arrow-color dark-label-color light-label-color
-                                              dark-pen-color light-pen-color))))))
+                                (and (term-filter sexp name)
+                                     (let-values ([(dark-arrow-color light-arrow-color dark-label-color light-label-color
+                                                                     dark-pen-color
+                                                                     light-pen-color) 
+                                                   (red->colors name)])
+                                       (build-snip snip-cache snip sexp pred pp name scheme-colors? 
+                                                   (get-user-char-width user-char-width sexp)
+                                                   light-arrow-color dark-arrow-color dark-label-color light-label-color
+                                                   dark-pen-color light-pen-color)))))))
                          (apply-reduction-relation/tag-with-names reductions (send snip get-expr))))]
                   [new-y 
                    (call-on-eventspace-main-thread
@@ -467,23 +483,59 @@
     (send reduce-button set-label "Reducing...")
     (thread
      (lambda ()
-       (do-some-reductions)
-       (queue-callback
-        (lambda () ;; =eventspace main thread=
-          (send graph-pb begin-edit-sequence)
-          (send graph-pb re-run-layout)
-          (send graph-pb end-edit-sequence)
-          (when show-all-at-once? (send graph-pb end-edit-sequence))
-          (scroll-to-rightmost-snip)
-          (send reduce-button set-label "Reduce")
-          (cond
-            [(null? frontier)
-             (send status-message set-label (term-count (count-snips)))]
-            [else
-             (send status-message set-label 
-                   (string-append (term-count (count-snips))
-                                  "(possibly more to find)"))
-             (send reduce-button enable #t)]))))))
+       (let ([update-gui
+              (λ (failed?)
+                (queue-callback
+                 (lambda () ;; =eventspace main thread=
+                   (send graph-pb begin-edit-sequence)
+                   (send graph-pb re-run-layout)
+                   (send graph-pb end-edit-sequence)
+                   (when show-all-at-once? (send graph-pb end-edit-sequence))
+                   (scroll-to-rightmost-snip)
+                   (send reduce-button set-label "Reduce")
+                   (cond
+                     [failed? 
+                      (send status-message set-label "Error while reducing")]
+                     [(null? frontier)
+                      (send status-message set-label (term-count (count-snips)))]
+                     [else
+                      (send status-message set-label 
+                            (string-append (term-count (count-snips))
+                                           "(possibly more to find)"))
+                      (send reduce-button enable #t)]))))])
+         (with-handlers ((exn:fail? (λ (x) (update-gui #t) (raise x))))
+           (do-some-reductions)
+           (update-gui #f))))))
+  
+  #;
+  (define (reduce-button-callback show-all-at-once?)
+    (when show-all-at-once? (send graph-pb begin-edit-sequence))
+    (send reduce-button enable #f)
+    (send reduce-button set-label "Reducing...")
+    (thread
+     (lambda ()
+       (let ([update-gui
+              (λ (failed?)
+                (queue-callback
+                 (lambda () ;; =eventspace main thread=
+                   (scroll-to-rightmost-snip)
+                   (cond
+                     [failed? 
+                      (send status-message set-label "Error while reducing")
+                      (send reduce-button set-label "Reduce")]
+                     [else
+                      (send reduce-button set-label "Reduce")
+                      (cond
+                        [(null? frontier)
+                         (send status-message set-label (term-count (count-snips)))]
+                        [else
+                         (send status-message set-label 
+                               (string-append (term-count (count-snips))
+                                              "(possibly more to find)"))
+                         (send reduce-button enable #t)])]))))])
+         (with-handlers ((exn:fail? (λ (x) (update-gui #t) (raise x))))
+           (do-some-reductions)
+           (update-gui #f))))))
   
   (define (term-count n)
     (format "found ~a term~a" n (if (equal? n 1) "" "s")))
@@ -716,12 +768,13 @@
 ;;              sexp -> boolean
 ;;              (any port number -> void)
 ;;              (union #f string)
+;;              number
 ;;              color^6
 ;;           -> (union #f (is-a?/c graph-editor-snip%))
 ;; returns #f if a snip corresponding to the expr has already been created.
 ;; also adds in the links to the parent snip
 ;; =eventspace main thread=
-(define (build-snip cache parent-snip expr pred pp name scheme-colors?
+(define (build-snip cache parent-snip expr pred pp name scheme-colors? cw
                     light-arrow-color dark-arrow-color dark-label-color light-label-color
                     dark-brush-color light-brush-color)
   (let-values ([(snip new?)
@@ -730,7 +783,7 @@
                            cache
                            expr
                            (lambda ()
-                             (let ([new-snip (make-snip parent-snip expr pred pp scheme-colors?)])
+                             (let ([new-snip (make-snip parent-snip expr pred pp scheme-colors? cw)])
                                (hash-set! cache expr new-snip)
                                (k new-snip #t))))
                           #f))])
@@ -772,13 +825,15 @@
 ;;             sexp 
 ;;             sexp -> boolean
 ;;             (any port number -> void)
+;;             boolean
+;;             number
 ;;          -> (is-a?/c graph-editor-snip%)
 ;; unconditionally creates a new graph-editor-snip
 ;; =eventspace main thread=
-(define (make-snip parent-snip expr pred pp scheme-colors?)
+(define (make-snip parent-snip expr pred pp scheme-colors? cw)
   (let* ([text (new program-text%)]
          [es (instantiate graph-editor-snip% ()
-               (char-width (initial-char-width))
+               (char-width cw)
                (editor text)
                (my-eventspace (current-eventspace))
                (pp pp)

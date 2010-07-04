@@ -18,6 +18,11 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#ifndef WAIT_FOR_GDB
+# define WAIT_FOR_GDB 0
+#endif
+
+#if WAIT_FOR_GDB
 static void launchgdb() {
   pid_t pid = getpid();
   char inbuffer[10];
@@ -31,13 +36,16 @@ static void launchgdb() {
     }
   }
 }
+#endif
 
 void fault_handler(int sn, struct siginfo *si, void *ctx)
 {
   void *p = si->si_addr;
   if (si->si_code != SEGV_ACCERR) { /*SEGV_MAPERR*/
     printf("SIGSEGV fault on %p\n", p);
+#if WAIT_FOR_GDB
     launchgdb();
+#endif
     abort();
   }
 
@@ -149,14 +157,17 @@ static void initialize_signal_handler(GCTYPE *gc)
 # ifdef NEED_SIGWIN
   {
     HMODULE hm;
+    PVOID (WINAPI*aveh)(ULONG, gcPVECTORED_EXCEPTION_HANDLER);
 
     hm = LoadLibrary("kernel32.dll");
-    if (hm) {
-      PVOID (WINAPI*aveh)(ULONG, gcPVECTORED_EXCEPTION_HANDLER);
+    if (hm)
       aveh = (PVOID (WINAPI*)(ULONG, gcPVECTORED_EXCEPTION_HANDLER))GetProcAddress(hm, "AddVectoredExceptionHandler");
+    else
+      aveh = NULL;
+    
+    if (aveh)
       aveh(TRUE, fault_handler);
-    }
-    else  /* WINDOWS 95 */
+    else  /* older than Windows XP */
       gc->generations_available = 0;
   }
 # endif

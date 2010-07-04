@@ -191,7 +191,9 @@ subdirectory.
          "config.ss"
          "private/planet-shared.ss"
          "private/linkage.ss"
-         "parsereq.ss")
+         "parsereq.ss"
+         
+         "terse-info.ss") 
 
 (provide (rename resolver planet-module-name-resolver)
          resolve-planet-path
@@ -207,8 +209,6 @@ subdirectory.
 
 ;; if #f, will not install packages and instead give an error
 (define install? (make-parameter #t))
-
-
 
 ;; =============================================================================
 ;; DIAMOND PROPERTY STUFF
@@ -423,15 +423,19 @@ subdirectory.
   (let ([p (lookup-package pkg-spec (UNINSTALLED-PACKAGE-CACHE))])
     (if (and p (file-exists? (build-path (pkg-path p)
                                          (pkg-spec-name pkg-spec))))
-      (success-k
-       ;; note: it's a little sloppy that lookup-pkg returns PKG structures,
-       ;; since it doesn't actually know whether or not the package is
-       ;; installed. hence I have to convert what appears to be an installed
-       ;; package into an uninstalled package
-       (make-uninstalled-pkg (build-path (pkg-path p) (pkg-spec-name pkg-spec))
-                             pkg-spec
-                             (pkg-maj p)
-                             (pkg-min p)))
+        (begin
+          (planet-log "found local, uninstalled copy of package at ~a"
+                      (build-path (pkg-path p)
+                                  (pkg-spec-name pkg-spec)))
+          (success-k
+           ;; note: it's a little sloppy that lookup-pkg returns PKG structures,
+           ;; since it doesn't actually know whether or not the package is
+           ;; installed. hence I have to convert what appears to be an installed
+           ;; package into an uninstalled package
+           (make-uninstalled-pkg (build-path (pkg-path p) (pkg-spec-name pkg-spec))
+                                 pkg-spec
+                                 (pkg-maj p)
+                                 (pkg-min p))))
       (failure-k void void (λ (x) x)))))
 
 ;; save-to-uninstalled-pkg-cache! : uninstalled-pkg -> path[file]
@@ -470,6 +474,7 @@ subdirectory.
       [(string? p)
        ;; replace any existing error message with the server download error
        ;; message
+       (planet-log p)
        (failure-k void void (λ (_) p))])))
 
 ;; get-package-from-server : FULL-PKG-SPEC -> PKG-PROMISE | #f | string[error message]
@@ -536,6 +541,7 @@ subdirectory.
               "Internal PLaneT error: trying to install already-installed package"
               (current-continuation-marks)))
       (begin
+        (planet-terse-log 'install (pkg-spec->string pkg))
         (with-logging
          (LOG-FILE)
          (lambda ()
@@ -548,6 +554,7 @@ subdirectory.
                                          'install-planet-package)])
                (ipp path the-dir (list owner (pkg-spec-name pkg)
                                        extra-path maj min))))))
+        (planet-terse-log 'finish (pkg-spec->string pkg))
         (make-pkg (pkg-spec-name pkg) (pkg-spec-path pkg)
                   maj min the-dir 'normal)))))
 
@@ -560,6 +567,13 @@ subdirectory.
 ;; raises an exception if some protocol failure occurs in the download process
 (define (download-package/planet pkg)
 
+  (define stupid-internal-define-syntax 
+    (let ([msg (format "downloading ~a from ~a via planet protocol" 
+                       (pkg-spec->string pkg)
+                       (PLANET-SERVER-NAME))])
+      (planet-terse-log 'download (pkg-spec->string pkg))
+      (planet-log msg)))
+  
   (define-values (ip op) (tcp-connect (PLANET-SERVER-NAME) (PLANET-SERVER-PORT)))
 
   (define (close-ports) (close-input-port ip) (close-output-port op))
@@ -610,7 +624,8 @@ subdirectory.
   (define (state:failure msg) (list #f msg))
 
   (with-handlers ([void (lambda (e) (close-ports) (raise e))])
-    (begin0 (state:initialize)
+    (begin0 
+      (state:initialize)
       (close-ports))))
 
 ;; ------------------------------------------------------------
@@ -650,6 +665,15 @@ subdirectory.
     (let loop ([attempts 1])
       (when (> attempts 5)
         (return "Download failed too many times (possibly due to an unreliable network connection)"))
+
+      (let ([msg (format "downloading ~a from ~a via HTTP~a" 
+                         (pkg-spec->string pkg)
+                         (PLANET-SERVER-NAME)
+                         (if (= attempts 1)
+                             ""
+                             (format ", attempt #~a" attempts)))])
+        (planet-terse-log 'download (pkg-spec->string pkg))
+        (planet-log "~a" msg))
 
       (with-handlers ([exn:fail:network? (λ (e) (return (exn-message e)))])
         (let* ([target            (pkg->download-url pkg)]
@@ -706,6 +730,23 @@ subdirectory.
              (abort (format "Internal error (unknown HTTP response code ~a)"
                             response-code))]))))))
 
+;; formats the pkg-spec back into a string the way the user typed it in.
+;; assumes that the pkg-spec comes from the command-line
+(define (pkg-spec->string pkg)
+  (format "~a/~a~a~a"
+          (if (pair? (pkg-spec-path pkg))
+              (car (pkg-spec-path pkg))
+              "<<unknown>>") ;; this shouldn't happen
+          (regexp-replace #rx"\\.plt$" (pkg-spec-name pkg) "")
+          (if (pkg-spec-maj pkg) 
+              (format ":~a" (pkg-spec-maj pkg))
+              "")
+          (cond
+            [(and (pkg-spec-maj pkg)
+                  (pkg-spec-minor-lo pkg))
+             (format ".~a" (pkg-spec-minor-lo pkg))]
+            [else ""])))
+  
 ;; =============================================================================
 ;; MODULE MANAGEMENT
 ;; Handles interaction with the module system

@@ -42,12 +42,106 @@
 (test (render-metafunction S)
       "metafunction.png")
 
+(define-metafunction lang
+  [(T x y)
+   1
+   (side-condition (not (eq? (term x) (term y))))]
+  [(T x x) 
+   n
+   (where n 2)])
+
+;; in this test, the metafunction has 2 clauses 
+;; with a side-condition on the first clause
+;; and a 'where' in the second clause
+(test (render-metafunction T) "metafunction-T.png")
+
 ;; in this test, teh `x' is italic and the 'z' is sf, since 'x' is in the grammar, and 'z' is not.
 (test (render-lw 
        lang 
        (to-lw ((λ (x) (x x))
                (λ (z) (z z)))))
       "lw.png")
+
+(define-metafunction lang
+  [(TL 1) (a
+           ,(term-let ((x (term 1)))
+                      (term x))
+           below-only)]
+  [(TL 2) (a
+           ,(term-let ((x (term 1)))
+                      (term x)) beside
+           below)])
+
+;; this tests that term-let is sucked away properly
+;; when the metafunction is rendered
+(test (render-metafunction TL) "metafunction-TL.png")
+
+(define-metafunction lang
+  [(Name (name x-arg arg)) 
+   ,(term-let ((x-term-let (term 1)))
+              (term (x-where x-term-let)))
+   (where x-where 2)])
+
+;; this tests that the three variable bindings
+;; (x-arg, x-term-let, and x-where) 
+;; all show up in the output.
+(test (render-metafunction Name) "metafunction-Name.png")
+
+;; same as previous, but with vertical organization of the bindings
+(test (parameterize ([metafunction-pict-style 'up-down/vertical-side-conditions])
+        (render-metafunction Name))
+      "metafunction-Name-vertical.png")
+
+;; makes sure that there is no overlap inside or across metafunction calls  
+;; or when there are unquotes involved
+(define-metafunction lang
+  [(multi-arg a
+              b
+              c)
+   ((multi-arg a 
+               b 
+               c)
+    (multi-arg a 
+               b 
+               c))]
+  [(multi-arg unquote-test)
+   (,@(term (multi-arg with-unquote))
+    ,@(term (multi-arg with-unquote))
+    ,@(term (multi-arg with-unquote)))])
+
+(test (render-metafunction multi-arg) "metafunction-multi-arg.png")
+
+;; makes sure that the LHS and RHS of metafunctions are appropriately
+;; rewritten
+
+(define-metafunction lang
+  subst : e x e -> e
+  [(subst x x e) e]
+  [(subst number x e) number]
+  [(subst x_1 x_2 e) x_1]
+  [(subst (e_1 e_2) x e)
+   ((subst e_1 x e) (subst e_2 x e))]
+  [(subst (λ (x) e_b) x e)
+   (λ (x) e)]
+  [(subst (λ (x_f) e_f) x_a e_a)
+   (λ (x_f) (subst e_f x_a e_a))])
+
+(define (subst-rw lws)
+  (list ""
+        (list-ref lws 2)
+        "{"
+        (list-ref lws 3)
+        ":="
+        (list-ref lws 4)
+        "}"))
+
+(test (with-compound-rewriter 'subst subst-rw
+        (render-metafunction subst))
+      "metafunction-subst.png")
+
+
+;; make sure two metafunctions simultaneously rewritten line up properly
+(test (render-metafunctions S T TL) "metafunctions-multiple.png")
 
 (printf "bitmap-test.ss: ")
 (done)

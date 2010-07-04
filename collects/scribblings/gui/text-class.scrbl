@@ -344,7 +344,7 @@ Changes the style for a region in the editor by applying a style delta
  then @method[editor<%> set-modified] is not called after applying the
  style change.
 
-When @scheme[style] is provided: @InStyleListNote[]
+When @scheme[style] is provided: @InStyleListNote[@scheme[style]]
 
 }
 
@@ -959,7 +959,7 @@ Returns the distance from the top of the editor to the alignment
  baseline of the top line. This method is primarily used when an
  editor is an @techlink{item} within another editor.
 
-@|OVD| @|FCAME|
+@|OVD| @FCAME[]
 
 }
 

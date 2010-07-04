@@ -16,7 +16,11 @@
 
     (init-field dest-dir
                 [refer-to-existing-files #f]
-                [root-path #f])
+                [root-path #f]
+                [prefix-file #f]
+                [style-file #f]
+                [style-extra-files null]
+                [extra-files null])
 
     (define/public (get-dest-directory [create? #f])
       (when (and dest-dir create? (not (directory-exists? dest-dir)))
@@ -41,10 +45,42 @@
                 (substring s 0 (sub1 (string-length s))))
               sep)))
 
-    (field [report-output? #f])
-    (define/public (report-output!)
-      (set! report-output? #t))
+    (field [report-output?? #f])
+    (define/public (report-output?) report-output??)
+    (define/public (report-output!) (set! report-output?? #t))
 
+    ;; ----------------------------------------
+
+    (define/public (extract-part-style-files d ri tag stop-at-part?)
+      (let loop ([p d][up? #t][only-up? #f])
+        (let ([s (part-style p)])
+          (apply
+           append
+           (if up?
+               (let ([p (collected-info-parent (part-collected-info p ri))])
+                 (if p
+                     (loop p #t #t)
+                     null))
+               null)
+           (if (list? s)
+               (filter
+                values
+                (map (lambda (s)
+                       (and (list? s)
+                            (= 2 (length s))
+                            (eq? (car s) tag)
+                            (path-string? (cadr s))
+                            (cadr s)))
+                     s))
+               null)
+           (if only-up?
+               null
+               (map (lambda (p)
+                      (if (stop-at-part? p)
+                          null
+                          (loop p #f #f)))
+                    (part-parts p)))))))
+  
     ;; ----------------------------------------
 
     (define root (make-mobile-root root-path))
@@ -313,10 +349,16 @@
     ;; ----------------------------------------
     ;; render methods
 
+    (define/public (install-extra-files)
+      (for ([fn extra-files]) (install-file fn)))
+
     (define/public (render ds fns ri)
+      ;; maybe this should happen even if fns is empty or all #f?
+      ;; or maybe it should happen for each file rendered (when d is not #f)?
+      (unless (andmap not ds) (install-extra-files))
       (map (lambda (d fn)
              (define (one) (render-one d ri fn))
-             (when report-output? (printf " [Output to ~a]\n" fn))
+             (when (report-output?) (printf " [Output to ~a]\n" fn))
              (if fn
                (with-output-to-file fn #:exists 'truncate/replace one)
                ;; a #f filename means return the contents as a string

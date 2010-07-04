@@ -44,7 +44,7 @@
 
 (define-struct decl (name super app-mixins intfs ranges mk-head body))
 (define-struct constructor (def))
-(define-struct meth (names mode desc def))
+(define-struct meth (names mode def))
 (define-struct spec (def))
 (define-struct impl (def))
 
@@ -155,7 +155,7 @@
 (define (build-body decl body)
   `(,@(map (lambda (i)
              (cond [(constructor? i) ((constructor-def i))]
-                   [(meth? i) ((meth-def i) (meth-desc i))]
+                   [(meth? i) ((meth-def i))]
                    [else i]))
            body)
     ,(make-delayed-block (lambda (r d ri) (make-inherited-table r d ri decl)))))
@@ -173,11 +173,20 @@
     (make-decl-collect decl)
     (append
      ((decl-mk-head decl) #f)
-     (list
-      (make-blockquote
-       "leftindent"
-       (flow-paragraphs
-        (decode-flow (build-body decl (decl-body decl))))))))))
+     (let-values ([(pre post)
+                   (let loop ([l (decl-body decl)][accum null])
+                     (cond
+                      [(null? l) (values (reverse accum) null)]
+                      [(or (constructor? (car l)) (meth? (car l)))
+                       (values (reverse accum) l)]
+                      [else (loop (cdr l) (cons (car l) accum))]))])
+       (append
+        (flow-paragraphs (decode-flow pre))
+        (list
+         (make-blockquote
+          "leftindent"
+          (flow-paragraphs
+           (decode-flow (build-body decl post)))))))))))
 
 (define (*class-doc kind stx-id super intfs ranges whole-page? make-index-desc)
   (make-table
@@ -417,16 +426,14 @@
          #'(make-meth '(name ...)
                       'mode
                       (lambda ()
-                        (make-splice
-                         (append-map (lambda (f)
-                                       (cond [(impl? f) ((impl-def f))]
-                                             [(spec? f) ((spec-def f))]
-                                             [else (list f)]))
-                                     (list extra ... desc ...))))
-                      (lambda (desc-splice)
                         (defproc* #:mode send #:within cname
                           ([(name arg ...) result-type] ...)
-                          (desc-splice))))))]
+                          (make-splice
+                           (append-map (lambda (f)
+                                         (cond [(impl? f) ((impl-def f))]
+                                               [(spec? f) ((spec-def f))]
+                                               [else (list f)]))
+                                       (list extra ... desc ...))))))))]
     [(_ ([(name arg ...) result-type] ...) desc ...)
      #'(defmethod* #:mode public ([(name arg ...) result-type] ...) desc ...)]))
 

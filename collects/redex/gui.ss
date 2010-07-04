@@ -9,6 +9,7 @@
          "private/matcher.ss"
          "private/reduction-semantics.ss"
          "private/size-snip.ss"
+         mrlib/graph
          scheme/contract
          scheme/class
          scheme/gui/base)
@@ -36,7 +37,10 @@
                #:colors (listof (list/c string? string?))
                #:scheme-colors? boolean?
                #:layout (-> any/c any/c)
-               #:edge-label-font (or/c #f (is-a?/c font%)))
+               #:edge-label-font (or/c #f (is-a?/c font%))
+               #:edge-labels? boolean?
+               #:filter (-> any/c (or/c #f string?) any/c)
+               #:graph-pasteboard-mixin (make-mixin-contract graph-pasteboard<%>))
               any)]
  [traces/ps (->* (reduction-relation?
                   any/c
@@ -48,7 +52,11 @@
                   #:pp pp-contract
                   #:colors (listof any/c)
                   #:layout (-> any/c any/c)
-                  #:edge-label-font (or/c #f (is-a?/c font%)))
+                  #:edge-label-font (or/c #f (is-a?/c font%))
+                  #:edge-labels? boolean?
+                  #:filter (-> any/c (or/c #f string?) any/c)
+                  #:graph-pasteboard-mixin (make-mixin-contract graph-pasteboard<%>)
+                  #:post-process (-> (is-a?/c graph-pasteboard<%>) any/c))
                  any)]
  
  [term-node? (-> any/c boolean?)]
@@ -84,7 +92,7 @@
  [dark-text-color (parameter/c (or/c string? (is-a?/c color%)))]
  [light-text-color (parameter/c (or/c string? (is-a?/c color%)))]
  [initial-font-size (parameter/c number?)]
- [initial-char-width (parameter/c number?)])
+ [initial-char-width (parameter/c (or/c number? (-> any/c number?)))])
          
 (provide reduction-steps-cutoff
          default-pretty-printer)

@@ -1022,7 +1022,11 @@ static long equal_hash_key(Scheme_Object *o, long k, Hash_Info *hi)
     {
 #     include "mzhashchk.inc"
       hi->depth += 2;
+      k = (k << 3) + k;
       k += equal_hash_key(SCHEME_CAR(o), 0, hi);
+      /* If it's a list, don't count cdr direction as depth: */
+      if (scheme_is_list(o))
+        hi->depth -= 2;
       o = SCHEME_CDR(o);
       break;
     }
@@ -1030,6 +1034,7 @@ static long equal_hash_key(Scheme_Object *o, long k, Hash_Info *hi)
     {
 #     include "mzhashchk.inc"
       hi->depth += 2;
+      k = (k << 3) + k;
       k += equal_hash_key(SCHEME_CAR(o), 0, hi);
       o = SCHEME_CDR(o);
       break;
@@ -1306,7 +1311,7 @@ long scheme_equal_hash_key2(Scheme_Object *o)
 
 long scheme_eqv_hash_key(Scheme_Object *o)
 {
-  if (!SCHEME_INTP(o) && SCHEME_NUMBERP(o))
+  if (!SCHEME_INTP(o) && (SCHEME_NUMBERP(o) || SCHEME_CHARP(o)))
     return scheme_equal_hash_key(o);
   else
     return (PTR_TO_LONG(o) >> 2);
@@ -1314,7 +1319,7 @@ long scheme_eqv_hash_key(Scheme_Object *o)
 
 long scheme_eqv_hash_key2(Scheme_Object *o)
 {
-  if (!SCHEME_INTP(o) && SCHEME_NUMBERP(o))
+  if (!SCHEME_INTP(o) && (SCHEME_NUMBERP(o) || SCHEME_CHARP(o)))
     return scheme_equal_hash_key2(o);
   else
     return (PTR_TO_LONG(o) >> 3);

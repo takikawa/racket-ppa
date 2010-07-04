@@ -269,7 +269,7 @@ This unit has no imports, so we can always invoke it:
 
 @; ----------------------------------------
 
-@section{First-Class Units}
+@section[#:tag "firstclassunits"]{First-Class Units}
 
 The @scheme[define-unit] form combines @scheme[define] with a
 @scheme[unit] form, similar to the way that @scheme[(define (f x)
@@ -455,6 +455,126 @@ scheme/unit
 The unit @scheme[simple-factory@] is automatically provided from the
 module, inferred from the filename @filepath{simple-factory-unit.ss} by
 replacing the @filepath{-unit.ss} suffix with @schemeidfont["@"].
+
+@; ----------------------------------------
+
+@(interaction-eval #:eval toy-eval (require scheme/contract))
+
+@section{Contracts for Units}
+
+There are a couple of ways of protecting units with contracts.  One way
+is useful when writing new signatures, and the other handles the case
+when a unit must conform to an already existing signature.
+
+@subsection{Adding Contracts to Signatures}
+
+When contracts are added to a signature, then all units which implement
+that signature are protected by those contracts.  The following version
+of the @scheme[toy-factory^] signature adds the contracts previously
+written in comments:
+
+@schememod/eval[[#:file
+"contracted-toy-factory-sig.ss"
+scheme]
+
+(define-signature contracted-toy-factory^
+  ((contracted
+    [build-toys (-> integer? (listof toy?))]
+    [repaint    (-> toy? symbol? toy?)]
+    [toy?       (-> any/c boolean?)]
+    [toy-color  (-> toy? symbol?)])))
+
+(provide contracted-toy-factory^)]
+
+Now we take the previous implementation of @scheme[simple-factory@] and
+implement this version of @scheme[toy-factory^] instead:
+
+@schememod/eval[[#:file
+"contracted-simple-factory-unit.ss"
+scheme
+
+(require "contracted-toy-factory-sig.ss")]
+
+(define-unit contracted-simple-factory@
+  (import)
+  (export contracted-toy-factory^)
+
+  (printf "Factory started.\n")
+
+  (define-struct toy (color) #:transparent)
+
+  (define (build-toys n)
+    (for/list ([i (in-range n)])
+      (make-toy 'blue)))
+
+  (define (repaint t col)
+    (make-toy col)))
+
+(provide contracted-simple-factory@)
+]
+
+As before, we can invoke our new unit and bind the exports so
+that we can use them.  This time, however, misusing the exports
+causes the appropriate contract errors.
+
+@interaction[
+#:eval toy-eval
+(eval:alts (require "contracted-simple-factory-unit.ss") (void))
+(define-values/invoke-unit/infer contracted-simple-factory@)
+(build-toys 3)
+(build-toys #f)
+(repaint 3 'blue)
+]
+
+@subsection{Adding Contracts to Units}
+
+However, sometimes we may have a unit that must conform to an
+already existing signature that is not contracted.  In this case,
+we can create a unit contract with @scheme[unit/c] or use
+the @scheme[define-unit/contract] form, which defines a unit which
+has been wrapped with a unit contract.
+
+For example, here's a version of @scheme[toy-factory@] which still
+implements the regular @scheme[toy-factory^], but whose exports
+have been protected with an appropriate unit contract.
+
+@schememod/eval[[#:file
+"wrapped-simple-factory-unit.ss"
+scheme
+
+(require "toy-factory-sig.ss")]
+
+(define-unit/contract wrapped-simple-factory@
+  (import)
+  (export (toy-factory^
+           [build-toys (-> integer? (listof toy?))]
+           [repaint    (-> toy? symbol? toy?)]
+           [toy?       (-> any/c boolean?)]
+           [toy-color  (-> toy? symbol?)]))
+
+  (printf "Factory started.\n")
+
+  (define-struct toy (color) #:transparent)
+
+  (define (build-toys n)
+    (for/list ([i (in-range n)])
+      (make-toy 'blue)))
+
+  (define (repaint t col)
+    (make-toy col)))
+
+(provide contracted-simple-factory@)
+]
+
+@interaction[
+#:eval toy-eval
+(eval:alts (require "wrapped-simple-factory-unit.ss") (void))
+(define-values/invoke-unit/infer wrapped-simple-factory@)
+(build-toys 3)
+(build-toys #f)
+(repaint 3 'blue)
+]
+
 
 @; ----------------------------------------
 

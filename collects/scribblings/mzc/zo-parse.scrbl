@@ -13,11 +13,62 @@
 @defproc[(zo-parse [in input-port?]) compilation-top?]{
 
 Parses a port (typically the result of opening a @filepath{.zo} file)
-containing byte. The parsed bytecode is returned in a
-@scheme[compilation-top] structure.
+containing byte. Beware that the structure types used to represent the
+bytecode are subject to frequent changes across PLT Scheme versons.
 
-Beware that the structure types used to represent the bytecode are
-subject to frequent changes across PLT Scheme versons.}
+The parsed bytecode is returned in a @scheme[compilation-top]
+structure. For a compiled module, the @scheme[compilation-top]
+structure will contain a @scheme[mod] structure. For a top-level
+sequence, it will normally contain a @scheme[seq] or @scheme[splice]
+structure with a list of top-level declarations and expressions.
+
+The bytecode representation f an expression is closer to an
+S-expression than a traditional, flat control string. For example, an
+@scheme[if] form is represented by a @scheme[branch] structure that
+has three fields: a test expression, a ``then'' expression, and an
+``else'' expression.  Similarly, a function call is represented by an
+@scheme[application] structure that has a list of argument
+expressions.
+
+Storage for local variables or intermediate values (such as the
+arguments for a function call) is explicitly specified in terms of a
+stack. For example, execution of an @scheme[application] structure
+reserves space on the stack for each argument result. Similarly, when
+a @scheme[let-one] structure (for a simple @scheme[let]) is executed,
+the value obtained by evaluating the right-hand side expression is
+pushed onto the stack, and then the body is evaluated. Local variables
+are always accessed as offsets from the current stack position. When a
+function is called, its arguments are passed on the stack. A closure
+is created by transferring values from the stack to a flat closure
+record, and when a closure is applied, the saved values are restored
+on the stack (though possibly in a different order and likely in a
+more compact layout than when they were captured).
+
+When a sub-expression produces a value, then the stack pointer is
+restored to its location from before evaluating the
+sub-expression. For example, evaluating the right-hand size for a
+@scheme[let-one] structure may temporarily push values onto the stack,
+but the stack is restored to its pre-@scheme[let-one] position before
+pushing the resulting value and continuing with the body. In addition,
+a tail call resets the stack pointer to the position that follows the
+enclosing function's arguments, and then the tail call continues by
+pushing onto the stack the arguments for the tail-called function.
+
+Values for global and module-level variables are not put directly on
+the stack, but instead stored in ``buckets,'' and an array of
+accessible buckets is kept on the stack. When a closure body needs to
+access a global variable, the closure captures and later restores the
+bucket array in the same way that it captured and restores a local
+variable. Mutable local variables are boxed similarly to global
+variables, but individual boxes are referenced from the stack and
+closures.
+
+Quoted syntax (in the sense of @scheme[quote-syntax]) is treated like
+a global variable, because it must be instantiated for an appropriate
+phase. A @scheme[prefix] structure within a @scheme[compilation-top]
+or @scheme[mod] structure indicates the list of global variables and
+quoted syntax that need to be instantiated (and put into an array on
+the stack) before evaluating expressions that might use them.}
 
 @; --------------------------------------------------
 @section{Prefix}
@@ -191,8 +242,9 @@ only other things that can be expressions).}
 
 
 @defstruct+[(lam expr) ([name (or/c symbol? vector?)]
-                        [flags exact-integer?]
+                        [flags (listof (or/c 'preserves-marks 'is-method 'single-result))]
                         [num-params exact-nonnegative-integer?]
+                        [param-types (listof (or/c 'val 'ref))]
                         [rest? boolean?]
                         [closure-map (vectorof exact-nonnegative-integer?)]
                         [max-let-depth exact-nonnegative-integer?]
@@ -203,8 +255,12 @@ for debugging purposes. The @scheme[num-params] field indicates the
 number of arguments accepted by the procedure, not counting a rest
 argument; the @scheme[rest?] field indicates whether extra arguments
 are accepted and collected into a ``rest'' variable. The
-@scheme[closure-map] field is a vector of stack positions that are
-captured when evaluating the @scheme[lambda] form to create a closure.
+@scheme[param-types] list contains @scheme[num-params] symbols
+indicating the type of each argumet, either @scheme['val] for a normal
+argument or @scheme['ref] for a boxed argument (representing a mutable
+local variable). The @scheme[closure-map] field is a vector of stack
+positions that are captured when evaluating the @scheme[lambda] form
+to create a closure.
 
 When the function is called, the rest-argument list (if any) is pushed
 onto the stack, then the normal arguments in reverse order, then the
@@ -213,8 +269,8 @@ run, the first value on the stack is the first value captured by the
 @scheme[closure-map] array, and so on.
 
 The @scheme[max-let-depth] field indicates the maximum stack depth
-created by @scheme[body] (not including arguments and closure-captured
-values pushed onto the stack). The @scheme[body] field is the
+created by @scheme[body] plus the arguments and closure-captured
+values pushed onto the stack. The @scheme[body] field is the
 expression for the closure's body.}
 
 
@@ -299,14 +355,17 @@ the value so that it can be mutated later.}
 
 @defstruct+[(localref expr) ([unbox? boolean?]
                              [pos nonnegative-exact-integer?]
-                             [clear? boolean?])]{
+                             [clear? boolean?]
+                             [other-clears? boolean?])]{
 
 Represents a local-variable reference; it accesses the value in the
 stack slot after the first @scheme[pos] slots. If @scheme[unbox?]  is
 @scheme[#t], the stack slot contains a box, and a value is extracted
 from the box. If @scheme[clear?] is @scheme[#t], then after the value
 is obtained, the stack slot is cleared (to avoid retaining a reference
-that can prevent reclamation of the value as garbage).}
+that can prevent reclamation of the value as garbage). If
+@scheme[other-clears?] is @scheme[#t], then some later reference to
+the same stack slot may clear after reading.}
 
 
 @defstruct+[(toplevel expr) ([depth nonnegative-exact-integer?]
@@ -400,7 +459,7 @@ Represents @scheme[(call-with-values (lambda () args-expr) proc)],
 which is handled specially by the run-time system.}
 
 
-@defstruct+[(primval expr) ([id symbol?])]{
+@defstruct+[(primval expr) ([id exact-nonnegative-integer?])]{
 
 Represents a direct reference to a variable imported from the run-time
 kernel.}

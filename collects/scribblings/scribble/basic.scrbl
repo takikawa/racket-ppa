@@ -23,7 +23,7 @@
 @(define-syntax def-style-proc
    (syntax-rules ()
      [(_ id)
-      @def-elem-proc[id]{Like @scheme[elem], but with style @scheme['id]}]))
+      @def-elem-proc[id]{Like @scheme[elem], but with style @scheme['id].}]))
 
 @title[#:tag "basic"]{Basic Document Forms}
 
@@ -102,11 +102,13 @@ removed.}
  unnumbered section heading (for when the nesting gets too deep to
  include in a table of contents).}
 
-@defproc[(itemize [itm (or/c whitespace? an-item?)] ...) itemization?]{
+@defproc[(itemize [itm (or/c whitespace? an-item?)] ...
+                  [#:style style any/c #f]) itemization?]{
 
- Constructs an itemization given a sequence of items constructed by
- @scheme[item]. Whitespace strings among the @scheme[itm]s are
- ignored.
+ Constructs an @scheme[itemization] or (when @scheme[style] is not
+ @scheme[#f]) @scheme[styled-itemization] given a sequence of items
+ constructed by @scheme[item]. Whitespace strings among the
+ @scheme[itm]s are ignored.
 
  }
 
@@ -151,8 +153,12 @@ using @scheme[path->main-collects-relative].}
 
 @section{Text Styles}
 
-@def-elem-proc[elem]{ Wraps the @tech{decode}d @scheme[pre-content] as
-an element with style @scheme[#f].}
+@defproc[(elem [pre-content any/c] ...
+               [#:style style any/c #f])
+        element?]{
+
+Wraps the @tech{decode}d @scheme[pre-content] as an element with style
+@scheme[style].}
 
 @def-elem-proc[aux-elem]{Like @scheme[elem], but creates an
 @scheme[aux-element].}
@@ -162,6 +168,10 @@ an element with style @scheme[#f].}
 @def-style-proc[tt]
 @def-style-proc[subscript]
 @def-style-proc[superscript]
+
+@def-elem-proc[smaller]{Like @scheme[elem], but with style
+@scheme["smaller"].  When uses of @scheme[smaller] are nested, text
+gets progressively smaller.}
 
 @defproc[(hspace [n exact-nonnegative-integer?]) element?]{
 

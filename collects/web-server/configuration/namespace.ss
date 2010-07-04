@@ -1,8 +1,13 @@
-#lang scheme/base
-(require mzlib/list
-         scheme/contract)
+#lang scheme
+(require scheme/runtime-path)
 
-(define default-to-be-copied-module-specs '(mzscheme mred))
+(define-runtime-module-path mzscheme-module-spec mzscheme)
+#;(define-runtime-module-path mred-module-spec mred) ; XXX Sometimes I need these, but not always
+(define mred-module-spec 'mred)
+
+(define default-to-be-copied-module-specs (list mzscheme-module-spec mred-module-spec))
+
+(define-runtime-module-path scheme/base-module-spec scheme/base)
 
 (define (make-make-servlet-namespace
          #:to-be-copied-module-specs [to-be-copied-module-specs empty])    
@@ -21,7 +26,7 @@
     (define new-namespace (make-base-empty-namespace))
     (define additional-names (map get-name additional-specs))
     (parameterize ([current-namespace new-namespace])
-      (namespace-require 'scheme/base)
+      (namespace-require scheme/base-module-spec)
       (for-each (lambda (name)
                   (with-handlers ([exn? void])
                     (when name
@@ -32,12 +37,12 @@
 
 (define make-servlet-namespace/c
   (->* ()
-       (#:additional-specs (listof module-path?))
+       (#:additional-specs (listof (or/c resolved-module-path? module-path?)))
        namespace?))
 
 (provide/contract
  [make-servlet-namespace/c contract?]
  [make-make-servlet-namespace 
   (->* ()
-       (#:to-be-copied-module-specs (listof module-path?))
+       (#:to-be-copied-module-specs (listof (or/c resolved-module-path? module-path?)))
        make-servlet-namespace/c)])

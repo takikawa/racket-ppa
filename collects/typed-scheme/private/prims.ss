@@ -24,6 +24,8 @@ This file defines two sorts of primitives. All of them are provided into any mod
 
 (require (except-in "../utils/utils.ss" extend))
 (require (for-syntax 
+          stxclass
+	  stxclass/util
           scheme/base
           (rep type-rep)
           mzlib/match
@@ -31,7 +33,7 @@ This file defines two sorts of primitives. All of them are provided into any mod
           syntax/struct
           syntax/stx
           scheme/struct-info
-	  (utils utils tc-utils)
+	  (except-in (utils utils tc-utils) id)
           (env type-name-env)
           "type-contract.ss"))
 
@@ -53,73 +55,50 @@ This file defines two sorts of primitives. All of them are provided into any mod
 
 
 
-(define-syntax (require/typed stx)  
-  (syntax-case* stx (rename) (lambda (x y) (eq? (syntax-e x) (syntax-e y)))
-    [(_ lib [nm ty] ...)
+(define-syntax (require/typed stx)
+  (define-syntax-class opt-rename
+    #:attributes (nm spec)
+    (pattern nm:id
+             #:with spec #'nm)
+    (pattern (orig-nm:id internal-nm:id)
+	     #:with spec #'(orig-nm internal-nm)
+	     #:with nm #'internal-nm))
+  (syntax-parse stx
+    [(_ lib [nm:opt-rename ty] ...)
      #'(begin (require/typed nm ty lib) ...)]
-    [(_ nm ty lib #:struct-maker parent)
-     (with-syntax ([(cnt*) (generate-temporaries #'(nm))])
-       (quasisyntax/loc stx (begin 
-                              #,(syntax-property (syntax-property #'(define cnt* #f)
-                                                                  'typechecker:contract-def/maker #'ty)
-                                                 'typechecker:ignore #t)
-                              #,(internal #'(require/typed-internal nm ty #:struct-maker parent))
-                              #,(syntax-property #'(require/contract nm cnt* lib)
-                                                 'typechecker:ignore #t))))]
-    [(_ nm ty lib)
-     (identifier? #'nm)
-     (with-syntax ([(cnt*) (generate-temporaries #'(nm))])
-       (quasisyntax/loc stx (begin 
-                              #,(syntax-property (syntax-property #'(define cnt* #f)
-                                                                  'typechecker:contract-def #'ty)
-                                                 'typechecker:ignore #t)
-                              #,(internal #'(require/typed-internal nm ty))
-                              #,(syntax-property #'(require/contract nm cnt* lib)
-                                                 'typechecker:ignore #t))))]
-    [(_ (orig-nm nm) ty lib)
-     (and (identifier? #'nm)
-          (identifier? #'orig-nm))
-     (with-syntax ([(cnt*) (syntax->datum #'(nm))])
-       (quasisyntax/loc stx (begin 
-                              #,(syntax-property (syntax-property #'(define cnt* #f)
-                                                                  'typechecker:contract-def #'ty)
-                                                 'typechecker:ignore #t)
-                              #,(internal #'(require/typed-internal nm ty))
-                              #,(syntax-property #'(require/contract (orig-nm nm) cnt* lib)
-                                                 'typechecker:ignore #t))))]))      
+    [(_ nm:opt-rename ty lib (~or [#:struct-maker parent] #:opt) ...)
+     (with-syntax ([cnt* (generate-temporary #'nm.nm)]
+		   [sm (if #'parent
+                           #'(#:struct-maker parent)
+                           #'())])
+       (let ([prop-name (if #'parent
+                            'typechecker:contract-def/maker
+                            'typechecker:contract-def)])
+         (quasisyntax/loc stx 
+           (begin 
+             #,(syntax-property (syntax-property #'(define cnt #f)
+                                                 prop-name #'ty)
+                                'typechecker:ignore #t)
+             #,(internal #'(require/typed-internal nm.nm ty . sm))
+             #,(syntax-property #'(require/contract nm.spec cnt lib)
+                                'typechecker:ignore #t)))))]))
 
 (define-syntax (require/opaque-type stx)
-  (syntax-case stx ()
-    [(_ ty pred lib #:name-exists)
-     (begin
-       (unless (identifier? #'ty)
-         (raise-syntax-error #f "opaque type name must be an identifier" stx #'ty))
-       (unless (identifier? #'pred)
-         (raise-syntax-error #f "opaque type predicate must be an identifier" stx #'pred))
-       (register-type-name #'ty (make-Opaque #'pred (syntax-local-certifier)))
-       (quasisyntax/loc stx
-         (begin 
-           #,(syntax-property #'(define pred-cnt (any/c . c-> . boolean?))
-                              'typechecker:ignore #t)
-           #,(internal #'(require/typed-internal pred (Any -> Boolean : (Opaque pred))))
-           #,(internal (syntax/loc stx (define-type-alias-internal ty (Opaque pred))))
-           #,(syntax-property #'(require/contract pred pred-cnt lib)
-                              'typechecker:ignore #t))))]
-    [(_ ty pred lib)
-     (begin
-       (unless (identifier? #'ty)
-         (raise-syntax-error #f "opaque type name must be an identifier" stx #'ty))
-       (unless (identifier? #'pred)
-         (raise-syntax-error #f "opaque type predicate must be an identifier" stx #'pred))
-       (register-type-name #'ty (make-Opaque #'pred (syntax-local-certifier)))
-       (quasisyntax/loc stx
-         (begin 
-           #,(syntax-property #'(define pred-cnt (any/c . c-> . boolean?))
-                              'typechecker:ignore #t)
-           #,(internal #'(require/typed-internal pred (Any -> Boolean : (Opaque pred))))
-           (define-type-alias ty (Opaque pred))
-           #,(syntax-property #'(require/contract pred pred-cnt lib)
-                              'typechecker:ignore #t))))]))
+  (define-syntax-class name-exists-kw
+    (pattern #:name-exists))
+  (syntax-parse stx
+    [(_ ty:id pred:id lib (~or [ne:name-exists-kw] #:opt) ...)
+     (register-type-name #'ty (make-Opaque #'pred (syntax-local-certifier)))
+     (quasisyntax/loc stx
+       (begin 
+         #,(syntax-property #'(define pred-cnt (any/c . c-> . boolean?))
+                            'typechecker:ignore #t)
+         #,(internal #'(require/typed-internal pred (Any -> Boolean : (Opaque pred))))
+         #,(if #'ne
+               (internal (syntax/loc stx (define-type-alias-internal ty (Opaque pred))))
+               (syntax/loc stx (define-type-alias ty (Opaque pred))))
+         #,(syntax-property #'(require/contract pred pred-cnt lib)
+                            'typechecker:ignore #t)))]))
 
 (define-for-syntax (formal-annotation-error stx src)
   (let loop ([stx stx])
@@ -356,7 +335,8 @@ This file defines two sorts of primitives. All of them are provided into any mod
      (identifier? #'nm)
      (with-syntax* ([(struct-info maker pred sel ...) (build-struct-names #'nm (syntax->list #'(fld ...)) #f #t)]
                     [(mut ...) (map (lambda _ #'#f) (syntax->list #'(sel ...)))])
-                   #`(begin
+                   (quasisyntax/loc stx
+                     (begin
                        (require (only-in lib struct-info))
                        (define-syntax nm (make-struct-info 
                                           (lambda ()
@@ -371,7 +351,7 @@ This file defines two sorts of primitives. All of them are provided into any mod
                        #,(internal #'(require/typed-internal pred (Any -> Boolean : nm)))
                        (require/typed maker nm lib #:struct-maker #f)
                        (require/typed lib 
-                         [sel (nm -> ty)]) ...))]
+                         [sel (nm -> ty)]) ...)))]
     [(_ (nm parent) ([fld : ty] ...) lib)
      (and (identifier? #'nm) (identifier? #'parent))
      (with-syntax* ([(struct-info maker pred sel ...) (build-struct-names #'nm (syntax->list #'(fld ...)) #f #t)]
@@ -422,3 +402,9 @@ This file defines two sorts of primitives. All of them are provided into any mod
                       (begin e1 e2 ...)
                       (begin c ... (doloop step ...)))))]))]))
 
+(define-syntax (provide: stx)
+  (syntax-parse stx
+    [(_ [i:id t] ...)
+     (syntax/loc stx
+       (begin (: i t) ...
+              (provide i ...)))]))

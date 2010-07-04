@@ -16,8 +16,10 @@ up a web server, how to generate dynamic web content, and how to
 interact with the user.
 
 The target audience for this tutorial are students who've gone through
-the design and use of structures in @link["http://htdp.org/"]{How to Design Programs}, with some 
-higher-order functions, @scheme[local], and a minor bit of mutation.
+the design and use of structures in
+@italic{@link["http://www.htdp.org/"]{How to Design Programs}}, with
+some higher-order functions, @scheme[local], and a minor bit of
+mutation.
 
 @section{Getting Started}
 
@@ -946,12 +948,11 @@ So, in the next section, we'll talk about how to use an SQL database to store ou
                                   web-server/scribblings/tutorial/examples/dummy-3
                                   web-server/scribblings/tutorial/dummy-sqlite)]
 @(require (for-label web-server/scribblings/tutorial/dummy-sqlite))
-@;@(require (prefix-in sqlite: (for-label (planet jaymccarthy/sqlite:3/sqlite))))
 
-Our next task is to employ an SQL database for the blog model. We'll be using SQLite with the @schememodname[(planet jaymccarthy/sqlite:3/sqlite)] PLaneT package. We add the following to the top of our model:
+Our next task is to employ an SQL database for the blog model. We'll be using SQLite with the @schememodname[(planet jaymccarthy/sqlite:4)] PLaneT package. We add the following to the top of our model:
 
 @schemeblock[
-(require (prefix-in sqlite: (planet jaymccarthy/sqlite:3/sqlite)))
+(require (prefix-in sqlite: (planet jaymccarthy/sqlite:4)))
 ]
 
 We now have the following bindings:
@@ -959,7 +960,7 @@ We now have the following bindings:
 @defthing[sqlite:db? (any/c . -> . boolean?)]
 @defthing[sqlite:open (path? . -> . sqlite:db?)]
 @defthing[sqlite:exec/ignore (sqlite:db? string? . -> . void)]
-@defthing[sqlite:select (sqlite:db? string? . -> . (listof vector?))]
+@defthing[sqlite:select (sqlite:db? string? . -> . (listof (vectorof (or/c integer? number? string? bytes? false/c))))]
 @defthing[sqlite:insert (sqlite:db? string? . -> . integer?)]
 
 
@@ -1038,7 +1039,7 @@ We used @scheme[blog-insert-post!] and @scheme[post-insert-comment!] to initiali
 
 @centerline{------------}
 
-A user could submit a post with a title like, @scheme{null', 'null') and INSERT INTO accounts (username, password) VALUES ('ur','hacked} and get our simple @scheme[sqlite:insert] to make two INSERTs instead of one. 
+A user could submit a post with a title like, @scheme["null', 'null') and INSERT INTO accounts (username, password) VALUES ('ur','hacked"] and get our simple @scheme[sqlite:insert] to make two INSERTs instead of one. 
 
  This is called an SQL injection attack. It can be resolved by using
  prepared statements that let SQLite do the proper quoting for us. Refer
@@ -1066,8 +1067,7 @@ The only function that creates posts is @scheme[blog-posts]:
   (local [(define (row->post a-row)
             (make-post 
              a-blog
-             (string->number
-              (vector-ref a-row 0))))
+             (vector-ref a-row 0)))
           (define rows (sqlite:select
                         (blog-db a-blog)
                         "SELECT id FROM posts"))]
@@ -1140,7 +1140,7 @@ to
 scheme
 
 (require web-server/servlet)
-(provide/contract (start (request? . -> . response?)))
+(provide/contract (start (request? . -> . response/c)))
 ]
 
 Second, add the following at the bottom of your application:
@@ -1153,7 +1153,7 @@ Second, add the following at the bottom of your application:
                #:listen-ip #f
                #:port 8000 
                #:extra-files-paths
-               (list (build-path _path "htdocs"))
+               (list (build-path _your-path-here "htdocs"))
                #:servlet-path
                "/servlets/APPLICATION.ss")
 ]
@@ -1162,7 +1162,7 @@ You can change the value of the @scheme[#:port] parameter to use a different por
 
 @scheme[#:listen-ip] is set to @scheme[#f] so that the server will listen on @emph{all} available IPs.
 
-You should change @scheme[_path] to be the path to the parent of your @scheme[htdocs] directory.
+You should change @scheme[_your-path-here] to be the path to the parent of your @scheme[htdocs] directory.
 
 You should change @scheme["APPLICATION.ss"] to be the name of your application.
 
