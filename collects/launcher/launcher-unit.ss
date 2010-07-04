@@ -3,14 +3,15 @@
 
 (require scheme/path
          scheme/file
+         scheme/list
 
          compiler/embed
          setup/dirs
-         (lib "variant.ss" "setup")
+         setup/variant
 
          "launcher-sig.ss"
 
-         (lib "winutf16.ss" "compiler" "private"))
+         compiler/private/winutf16)
 
 (import)
 (export launcher^)
@@ -582,7 +583,7 @@
                                     d))])
                          (list
                           (cons 'file-types d)
-                          (cons 'resource-files icon-files))))))))))
+                          (cons 'resource-files (remove-duplicates icon-files)))))))))))
        (let ([l (try 'file-types #".utiexports")])
          (if (null? l)
              l

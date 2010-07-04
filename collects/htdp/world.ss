@@ -1,3 +1,19 @@
+#lang scheme/base
+
+#|
+ workshop experience: 
+
+   stop-when should have a different signature:
+    stop-when : (World -> Boolean) (World -> Image) 
+
+   (stop-when C F) should have this semantics:
+    on each assignment to world,
+    (begin 
+      (set! current-world new-world)
+      (when (C current-world) (render (F current-world))))
+|#
+;; Tue Aug 12 08:54:45 EDT 2008: ke=? changed to key=? 
+;; Fri Jul  4 10:25:47 EDT 2008: added ke=? and key-event? 
 ;; Mon Jun 16 15:38:14 EDT 2008: removed end-of-time and provided stop-when 
 ;;                               also allow repeated setting of callbacks now
 ;;                               If this is changed back, stop-when will fail
@@ -45,16 +61,17 @@ Matthew
 ;; Sat Dec 10 19:39:03 EST 2005: fixed name, changed interface to on-key-event
 ;; Fri Dec  9 21:39:03 EST 2005: remoevd (update ... produce ...); added on-redraw 
 ;; Thu Dec  1 17:03:03 EST 2005: fixed place-image; all coordinates okay now
-#lang scheme
-(require mzlib/class
-         mzlib/kw
-         mzlib/etc
+
+(require scheme/class
+         scheme/local
+         scheme/bool
          mred
          htdp/error
          htdp/image
          (only-in lang/htdp-beginner image?)
          mrlib/cache-image-snip
-         lang/prim)
+         lang/prim
+         (for-syntax scheme/base))
 
 (require mrlib/gif)
 (require mzlib/runtime-path)
@@ -111,6 +128,11 @@ Matthew
 ;; KeyEvent is one of: 
 ;; -- Char 
 ;; -- Symbol 
+
+(provide
+  key-event? ;; Any -> Boolean
+  key=? ;; KeyEvent KeyEvent -> Boolean
+ )
 
 (provide-higher-order-primitive
  on-key-event (control) ;; (World KeyEvent -> World) -> true
@@ -272,6 +294,14 @@ Matthew
   (set-redraw-callback f)
   (redraw-callback)
   #t)
+
+(define (key-event? k)
+  (or (char? k) (symbol? k)))
+
+(define (key=? k m)
+  (check-arg 'key=? (key-event? k) 'KeyEvent "first" k)
+  (check-arg 'key=? (key-event? m) 'KeyEvent "first" m)
+  (eqv? k m))
 
 (define (on-key-event f)
   (check-proc 'on-key-event f 2 "on-key-event" "two arguments")
@@ -627,8 +657,8 @@ Matthew
 ;; adds the stop animation and image creation button, 
 ;; whose callbacks runs as a thread in the custodian
 (define IMAGES "Images")
-(define-runtime-path s:pth '(lib "break.png" "icons"))
-(define-runtime-path i:pth '(lib "file.gif" "icons"))
+(define-runtime-path s:pth '(lib "icons/break.png"))
+(define-runtime-path i:pth '(lib "icons/file.gif"))
 (define (add-stop-and-image-buttons  frame the-play-back-custodian)
   (define p (new horizontal-pane% [parent frame][alignment '(center center)]))
   (define S ((bitmap-label-maker (string-constant break-button-label) s:pth) '_))
@@ -699,6 +729,15 @@ Matthew
 (define (add-event type . stuff)
   (set! event-history (cons (cons type stuff) event-history)))
 
+
+;; zfill: natural-number natural-number -> string
+;; Converts a-num to a string, adding leading zeros to make it at least as long as a-len.
+(define (zfill a-num a-len)
+  (let ([n (number->string a-num)])
+    (string-append (build-string (max (- a-len (string-length n)) 0)
+                                 (lambda (i) #\0))
+                   n)))
+
 ;; --> Void
 ;; re-play the history of events, creating a png per step, create animated gif
 ;; effect: write to user-chosen file 
@@ -725,7 +764,7 @@ Matthew
     (define bm (make-bitmap)) 
     (set! bitmap-list (cons bm bitmap-list))
     (set! image-count (+ image-count 1))
-    (send bm save-file (format "i~a.png" image-count) 'png))
+    (send bm save-file (format "i~a.png" (zfill image-count (string-length (number->string total)))) 'png))
   ;; --- choose place 
   (define target:dir
     (let* ([cd (current-directory)]
@@ -752,7 +791,7 @@ Matthew
   (define intv (if (> +inf.0 *the-delta* 0) (inexact->exact (floor (* 100 *the-delta*))) 5))
   (when (file-exists? ANIMATED-GIF-FILE)
     (delete-file ANIMATED-GIF-FILE))
-  (write-animated-gif bitmap-list intv ANIMATED-GIF-FILE #;one-at-a-time? #t))
+  (write-animated-gif bitmap-list intv ANIMATED-GIF-FILE #:one-at-a-time? #t #:last-frame-delay 500))
 
 (define ANIMATED-GIF-FILE "i-animated.gif")
 

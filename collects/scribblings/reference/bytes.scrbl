@@ -5,8 +5,6 @@
 
 @guideintro["bytestrings"]{byte strings}
 
-@local-table-of-contents[]
-
 A @deftech{byte string} is a fixed-length array of bytes. A
  @pidefterm{byte} is an exact integer between @scheme[0] and
  @scheme[255] inclusive.
@@ -153,7 +151,7 @@ string.
 
 @defproc[(bytes->list [bstr bytes?]) (listof byte?)]{ Returns a new
  list of bytes coresponding to the content of @scheme[bstr]. That is,
- the length of the list is @scheme[(bytes-length @scheme[bstr])], and the
+ the length of the list is @scheme[(bytes-length bstr)], and the
  sequence of bytes of @scheme[bstr] are in the same sequence in the
  result list.
 
@@ -162,7 +160,7 @@ string.
 
 @defproc[(list->bytes [lst (listof byte?)]) bytes?]{ Returns a new
  mutable bytes whose content is the list of bytes in @scheme[lst].
- That is, the length of the bytes is @scheme[(length @scheme[lst])], and
+ That is, the length of the bytes is @scheme[(length lst)], and
  the sequence of bytes in @scheme[lst] is in the same sequence in
  the result bytes.
 
@@ -425,15 +423,15 @@ Closes the given converter, so that it can no longer be used with
 
 @defproc[(bytes-convert [converter bytes-converter?]
                         [src-bstr bytes?]
-                        [src-start-pos nonnegative-exact-integer? 0]
-                        [src-end-pos nonnegative-exact-integer? (bytes-length src-bstr)]
+                        [src-start-pos exact-nonnegative-integer? 0]
+                        [src-end-pos exact-nonnegative-integer? (bytes-length src-bstr)]
                         [dest-bstr (or/c bytes? false/c) #f]
-                        [dest-start-pos nonnegative-exact-integer? 0]
-                        [dest-end-pos (or/c nonnegative-exact-integer? false/c)
+                        [dest-start-pos exact-nonnegative-integer? 0]
+                        [dest-end-pos (or/c exact-nonnegative-integer? false/c)
                                       (and dest-bstr
                                            (bytes-length dest-bstr))])
-          (values (or/c bytes? nonnegative-exact-integer?)
-                  nonnegative-exact-integer?
+          (values (or/c bytes? exact-nonnegative-integer?)
+                  exact-nonnegative-integer?
                   (one-of 'complete 'continues 'aborts 'error))]{
 
 Converts the bytes from @scheme[src-start-pos] to @scheme[src-end-pos]
@@ -501,11 +499,11 @@ sequence and reset the converter, use @scheme[bytes-convert-end].}
 
 @defproc[(bytes-convert-end [converter bytes-converter?]
                             [dest-bstr (or/c bytes? false/c) #f]
-                            [dest-start-pos nonnegative-exact-integer? 0]
-                            [dest-end-pos (or/c nonnegative-exact-integer? false/c)
+                            [dest-start-pos exact-nonnegative-integer? 0]
+                            [dest-end-pos (or/c exact-nonnegative-integer? false/c)
                                           (and dest-bstr
                                                (bytes-length dest-bstr))])
-          (values (or/c bytes? nonnegative-exact-integer?)
+          (values (or/c bytes? exact-nonnegative-integer?)
                   (one-of 'complete 'continues))]{
 
 Like @scheme[bytes-convert], but instead of converting bytes, this

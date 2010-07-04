@@ -74,11 +74,7 @@ all of the names in the tools library, for use defining keybindings
        created empty namespace. This namespace has the following modules 
        copied (with @scheme[namespace-attach-module])
        from DrScheme's original namespace:
-       @itemize{
-       @item{ @scheme['mzscheme]
-       }@item{ @scheme['(lib "mred.ss" "mred")]
-       }}
-     
+       @itemize{@item{@scheme['mzscheme]}@item{@scheme['mred]}}
      }@item{
        @scheme[read-curly-brace-as-paren]
        is @scheme[#t],
@@ -144,8 +140,11 @@ all of the names in the tools library, for use defining keybindings
      @scheme[#t].
      
      This function calls
-     @scheme[drscheme:language:language front-end/complete-program<%>]
-     to expand the program.
+     @method[drscheme:language:language<%> front-end/complete-program]
+     to expand the program. Unlike when the @onscreen{Run} is clicked,
+     however, it does not call 
+     @method[drscheme:language:language<%> front-end/finished-complete-program].
+     
      
      The first argument to @scheme[iter] is the expanded program
      (represented as syntax) or eof.
@@ -976,37 +975,68 @@ all of the names in the tools library, for use defining keybindings
         [res void?])
    @{Registers a new capability with a default value for each language
      and a contract on the values the capability might have.
-     
+
      By default, these capabilities are registered as DrScheme starts up:
-     @itemize{
-     @item{ @scheme[(drscheme:language:register-capability 'drscheme:check-syntax-button (flat-contract boolean?) #t)]
-     --- controls the visiblity of the check syntax button
-     }@item{ @scheme[(drscheme:language:register-capability 'drscheme:language-menu-title (flat-contract string?) (string-constant scheme-menu-name))]
-      --- controls the name of the menu just to the right of the language menu (defaultly named ``Scheme'')
-     }@item{ @scheme[(drscheme:language:register-capability 'drscheme:define-popup (or/c (cons/c string? string?) false/c) (cons "(define" "(define ...)"))]
-      --- specifies the prefix that the define popup should look for and what label it should have,
-     or @scheme[#f] if it should not appear at all.
-     }@item{ @scheme[(drscheme:language:register-capability 'drscheme:special:insert-fraction (flat-contract boolean?) #t)]
-      --- determines if the insert fraction menu item in the special menu is visible
-     }@item{ @scheme[(drscheme:language:register-capability 'drscheme:special:insert-lambda (flat-contract boolean?) #t)]
-      --- determines if the insert lambda menu item in the special menu is visible
-     }@item{ @scheme[(drscheme:language:register-capability 'drscheme:special:insert-large-letters (flat-contract boolean?) #t)]
-      --- determines if the insert large letters menu item in the special menu is visible
-     }@item{ @scheme[(drscheme:language:register-capability 'drscheme:special:insert-image (flat-contract boolean?) #t)]
-      --- determines if the insert image menu item in the special menu is visible
-     }@item{ @scheme[(drscheme:language:register-capability 'drscheme:special:insert-comment-box (flat-contract boolean?) #t)]
-      --- determines if the insert comment box menu item in the special menu is visible
-     }@item{ @scheme[(drscheme:language:register-capability 'drscheme:special:insert-gui-tool (flat-contract boolean?) #t)]
-      --- determines if the insert gui menu item in the special menu is visible
-     }@item{ @scheme[(drscheme:language:register-capability 'drscheme:special:slideshow-menu-item (flat-contract boolean?) #t)]
-      --- determines if the insert pict box menu item in the special menu is visible
-     }@item{ @scheme[(drscheme:language:register-capability 'drscheme:special:insert-text-box (flat-contract boolean?) #t)]
-      --- determines if the insert text box menu item in the special menu is visible
-     }@item{ @scheme[(drscheme:language:register-capability 'drscheme:special:xml-menus (flat-contract boolean?) #t)]
-      --- determines if the insert scheme box, insert scheme splice box, and the insert xml box menu item ins the special menu are visible
-     }@item{ @scheme[(drscheme:language:register-capability 'drscheme:autocomplete-words (listof string?) '())]
-      --- determines the list of words that are used when completing words in this language
-      }}})
+     @(let-syntax ([cap (syntax-rules ()
+                          [(cap key contract default desc ...)
+                           (item @scheme['key : contract = default]
+                                 "--- " desc ...)])])
+        (itemize
+         @cap[drscheme:check-syntax-button boolean? #t]{
+           controls the visiblity of the check syntax button}
+         @cap[drscheme:language-menu-title
+              string?
+              (string-constant scheme-menu-name)]{
+           controls the name of the menu just to the right of the language
+           menu (defaultly named ``Scheme'')}
+         @cap[drscheme:define-popup
+              (or/c (cons/c string? string?) false/c)
+              (cons "(define" "(define ...)")]{
+           specifies the prefix that the define popup should look for and what
+           label it should have, or @scheme[#f] if it should not appear at all}
+         @cap[drscheme:help-context-term (or/c false/c string?) #f]{
+           specifies a context query for documentation searches that are
+           initiated in this language, can be @scheme[#f] (no change to the
+           user's setting) or a string to be used as a context query (note: the
+           context is later maintained as a cookie, @scheme[""] is different
+           from @scheme[#f] in that it clears the stored context)}
+         @cap[drscheme:special:insert-fraction boolean? #t]{
+           determines if the insert fraction menu item in the special menu is
+           visible}
+         @cap[drscheme:special:insert-lambda boolean? #t]{
+           determines if the insert lambda menu item in the special menu is
+           visible}
+         @cap[drscheme:special:insert-large-letters boolean? #t]{
+           determines if the insert large letters menu item in the special menu
+           is visible}
+         @cap[drscheme:special:insert-image boolean? #t]{
+           determines if the insert image menu item in the special menu is
+           visible}
+         @cap[drscheme:special:insert-comment-box boolean? #t]{
+           determines if the insert comment box menu item in the special menu
+           is visible}
+         @cap[drscheme:special:insert-gui-tool boolean? #t]{
+           determines if the insert gui menu item in the special menu is
+           visible}
+         @cap[drscheme:special:slideshow-menu-item boolean? #t]{
+           determines if the insert pict box menu item in the special menu is
+           visible}
+         @cap[drscheme:special:insert-text-box boolean? #t]{
+           determines if the insert text box menu item in the special menu is
+           visible}
+         @cap[drscheme:special:xml-menus boolean? #t]{
+           determines if the insert scheme box, insert scheme splice box, and
+           the insert xml box menu item in the special menu are visible}
+         @cap[drscheme:autocomplete-words (listof string?) '()]{
+           determines the list of words that are used when completing words in
+           this language}
+         @cap[drscheme:tabify-menu-callback
+              (or/c false/c (-> (is-a?/c text%) number? number? void?))
+              (λ (t a b) (send t tabify-selection a b))]{
+           is used as the callback when the ``Reindent'' or ``Reindent All''
+           menu is selected. The first argument is the editor, and the second
+           and third are a range in the editor.}
+         ))})
 
   (proc-doc/names
    drscheme:language:capability-registered? 

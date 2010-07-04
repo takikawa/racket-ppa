@@ -184,18 +184,19 @@ Displays a message to the user in a (modal) dialog, using
 The style must include exactly one of the following:
 @itemize{
 
- @item{@scheme['ok] --- the dialog only has an ``OK'' button and always
- returns @scheme['ok].}
+ @item{@scheme['ok] --- the dialog only has an @onscreen{OK} button
+ and always returns @scheme['ok].}
 
- @item{@scheme['ok-cancel] --- the message dialog has ``Cancel'' and
- ``OK'' buttons. If the user clicks ``Cancel'', the result is
- @scheme['cancel], otherwise the result is @scheme['ok].}
+ @item{@scheme['ok-cancel] --- the message dialog has
+ @onscreen{Cancel} and @onscreen{OK} buttons. If the user clicks
+ @onscreen{Cancel}, the result is @scheme['cancel], otherwise the
+ result is @scheme['ok].}
 
- @item{@scheme['yes-no] --- the message dialog has ``Yes'' and ``No''
- buttons. If the user clicks ``Yes'', the result is @scheme['yes],
- otherwise the result is @scheme['no]. Note: instead of a
- ``Yes''/``No'' dialog, best-practice GUI design is to use
- @scheme[message-box/custom] and give the buttons meaningful
+ @item{@scheme['yes-no] --- the message dialog has @onscreen{Yes} and
+ @onscreen{No} buttons. If the user clicks @onscreen{Yes}, the result
+ is @scheme['yes], otherwise the result is @scheme['no]. Note: instead
+ of a @onscreen{Yes}/@onscreen{No} dialog, best-practice GUI design is
+ to use @scheme[message-box/custom] and give the buttons meaningful
  labels, so that the user does not have to read the message text
  carefully to make a selection.}
 
@@ -247,7 +248,7 @@ If the user clicks the button labelled @scheme[button1-label], a @scheme[1]
  does not contain @scheme['disallow-close]---then the result is the
  value of @scheme[close-result]. For example, the user can usually close
  a dialog by typing an Escape. Often, @scheme[2] is an appropriate value
- for @scheme[close-result], especially when Button 2 is a ``Cancel''
+ for @scheme[close-result], especially when Button 2 is a @onscreen{Cancel}
  button.
 
 If @scheme[style] does not include @scheme['number-order], the order of
@@ -256,14 +257,15 @@ If @scheme[style] does not include @scheme['number-order], the order of
 @itemize{
 
  @item{Button 1 is the normal action, and it is usually the default
- button. For example, if the dialog has an ``OK'' button, it is this
- one. Under Windows and X, this button is leftmost; under
- Mac OS X, it is rightmost. Use this button for dialogs that
- contain only one button.}
+ button. For example, if the dialog has an @onscreen{OK} button, it is
+ this one. Under Windows, this button is leftmost; under X and Mac OS
+ X, it is rightmost. (See also
+ @scheme[system-position-ok-before-cancel?].) Use this button for
+ dialogs that contain only one button.}
 
  @item{Button 2 is next to Button 1, and it often plays the role of
- ``Cancel'' (even when the default action is to cancel, such as when
- confirming a file replacement).}
+ @onscreen{Cancel} (even when the default action is to cancel, such as
+ when confirming a file replacement).}
 
  @item{Button 3 tends to be separated from the other two (under
  Mac OS X, it is left-aligned in the dialog). Use this button only
@@ -377,9 +379,9 @@ If @scheme[style] includes @scheme['password], the dialog's text field
                                 [message (or/c string? false/c)]
                                 [choices (listof string?)]
                                 [parent (or/c (is-a?/c frame%) (is-a?/c dialog%) false/c) #f]
-                                [init-choices (listof nonnegative-exact-integer?) null]
+                                [init-choices (listof exact-nonnegative-integer?) null]
                                 [style (listof (one-of/c 'single 'multiple 'extended)) '(single)])
-         (or/c (listof nonnegative-exact-integer?) false/c)]{
+         (or/c (listof exact-nonnegative-integer?) false/c)]{
 
 Gets a list box selection from the user via a modal dialog, using
  @scheme[parent] as the parent window if it is specified. The dialog's

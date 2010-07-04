@@ -14,7 +14,7 @@
   (require mzlib/unit
 	   mzlib/class
            mzlib/file
-	   (lib "mred-sig.ss" "mred")
+	   mred/mred-sig
            framework
            mzlib/process)
 
@@ -33,13 +33,13 @@
 	   net/base64-sig
 	   net/mime-sig
 	   net/qp-sig
-           (lib "htmltext.ss" "browser"))
+           browser/htmltext)
 
-  (require (lib "hierlist-sig.ss" "hierlist"))
+  (require mrlib/hierlist/hierlist-sig)
 
   (require net/sendurl)
 
-  (require (lib "mzssl.ss" "openssl"))
+  (require openssl/mzssl)
 
   ;; Constant for messages without a title:
   (define no-subject-string "<No subject>")
@@ -1050,9 +1050,8 @@
 	(set! icon #f))
       
       (define sm-super-frame%
-        (frame:searchable-mixin
-         (frame:standard-menus-mixin
-          frame:basic%)))
+        (frame:standard-menus-mixin
+         frame:basic%))
       
       (define sm-frame%
 	(class sm-super-frame%
@@ -1140,8 +1139,6 @@
           ;; -------------------- Misc. --------------------
           
           (inherit get-edit-target-object)
-          (define/override (get-text-to-search) 
-            (send message get-editor))
           
           [define/override on-size
             (lambda (w h)

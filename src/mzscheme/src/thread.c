@@ -162,8 +162,6 @@ Scheme_Thread_Set *thread_set_top;
 
 static int num_running_threads = 1;
 
-void *scheme_deepest_stack_start;
-
 #ifdef LINK_EXTENSIONS_BY_TABLE
 Scheme_Thread **scheme_current_thread_ptr;
 volatile int *scheme_fuel_counter_ptr;
@@ -208,11 +206,16 @@ Scheme_Object *scheme_exn_handler_key;
 Scheme_Object *scheme_break_enabled_key;
 
 long scheme_total_gc_time;
-static long start_this_gc_time;
+static long start_this_gc_time, end_this_gc_time;
+#ifndef MZ_PRECISE_GC
 extern MZ_DLLIMPORT void (*GC_collect_start_callback)(void);
 extern MZ_DLLIMPORT void (*GC_collect_end_callback)(void);
+#endif
 static void get_ready_for_GC(void);
 static void done_with_GC(void);
+#ifdef MZ_PRECISE_GC
+static void inform_GC(int major_gc, long pre_used, long post_used);
+#endif
 
 static volatile short delayed_break_ready = 0;
 static Scheme_Thread *main_break_target_thread;
@@ -423,7 +426,7 @@ typedef struct {
 static int num_nsos = 0;
 static Scheme_NSO *namespace_options = NULL;
 
-#define SETJMP(p) scheme_setjmpup(&p->jmpup_buf, p, ADJUST_STACK_START(p->stack_start))
+#define SETJMP(p) scheme_setjmpup(&p->jmpup_buf, p, p->stack_start)
 #define LONGJMP(p) scheme_longjmpup(&p->jmpup_buf)
 #define RESETJMP(p) scheme_reset_jmpup_buf(&p->jmpup_buf)
 
@@ -2081,8 +2084,6 @@ static Scheme_Thread *make_thread(Scheme_Config *config,
 
   process->so.type = scheme_thread_type;
 
-  process->stack_start = 0;
-
   if (!scheme_main_thread) {
     /* Creating the first thread... */
 #ifdef MZ_PRECISE_GC
@@ -2109,20 +2110,32 @@ static Scheme_Thread *make_thread(Scheme_Config *config,
 
     GC_collect_start_callback = get_ready_for_GC;
     GC_collect_end_callback = done_with_GC;
+#ifdef MZ_PRECISE_GC
+    GC_collect_inform_callback = inform_GC;
+#endif
 
 #ifdef LINK_EXTENSIONS_BY_TABLE
     scheme_current_thread_ptr = &scheme_current_thread;
     scheme_fuel_counter_ptr = &scheme_fuel_counter;
 #endif
-
-#ifdef MZ_PRECISE_GC
+    
+    /* Before a thread can be used stack_start must be set 
+     * this code sets stack_start for the main_thread 
+     * which is created with scheme_make_thread.
+     *
+     * make_subprocess is the only other caller of make_thread
+     * and it sets stack_start */
+#if defined(MZ_PRECISE_GC) || defined(USE_SENORA_GC)
     {
       void *ss;
       ss = (void *)GC_get_stack_base();
       process->stack_start = ss;
     }
     GC_get_thread_stack_base = get_current_stack_start;
+#else
+    process->stack_start = GC_stackbottom;
 #endif
+
   } else {
     prefix = 1;
   }
@@ -2814,13 +2827,6 @@ static void start_child(Scheme_Thread * volatile child,
   }
 }
 
-void scheme_ensure_stack_start(void *d)
-{
-  if (!scheme_deepest_stack_start
-      || (STK_COMP((unsigned long)scheme_deepest_stack_start, (unsigned long)d)))
-    scheme_deepest_stack_start = d;
-}
-
 static Scheme_Object *make_subprocess(Scheme_Object *child_thunk,
 				      void *child_start, 
 				      Scheme_Config *config,
@@ -2833,8 +2839,6 @@ static Scheme_Object *make_subprocess(Scheme_Object *child_thunk,
   int turn_on_multi;
  
   turn_on_multi = !scheme_first_thread->next;
-  
-  scheme_ensure_stack_start(child_start);
   
   if (!config)
     config = scheme_current_config();
@@ -3073,9 +3077,7 @@ Scheme_Object *scheme_thread_w_details(Scheme_Object *thunk,
 				       int suspend_to_kill)
 {
   Scheme_Object *result;
-#ifndef MZ_PRECISE_GC
-  long dummy;
-#endif
+  void *stack_marker;
 
 #ifdef DO_STACK_CHECK
   /* Make sure the thread starts out with a reasonable stack size, so
@@ -3098,12 +3100,7 @@ Scheme_Object *scheme_thread_w_details(Scheme_Object *thunk,
   }
 #endif
 
-  result = make_subprocess(thunk, 
-#ifdef MZ_PRECISE_GC
-			   (void *)&__gc_var_stack__,
-#else
-			   (void *)&dummy, 
-#endif
+  result = make_subprocess(thunk, PROMPT_STACK(stack_marker),
 			   config, cells, break_cell, mgr, !suspend_to_kill);
 
   /* Don't get rid of `result'; it keeps the
@@ -3192,8 +3189,6 @@ Scheme_Object *scheme_call_as_nested_thread(int argc, Scheme_Object *argv[], voi
   }
   np->tail_buffer_size = p->tail_buffer_size;
 
-  scheme_ensure_stack_start(max_bottom);
-  
   np->list_stack = p->list_stack;
   np->list_stack_pos = p->list_stack_pos;
 
@@ -6674,7 +6669,18 @@ void scheme_add_namespace_option(Scheme_Object *key, void (*f)(Scheme_Env *))
 
 Scheme_Object *scheme_make_namespace(int argc, Scheme_Object *argv[])
 {
-  return (Scheme_Object *)scheme_make_empty_env();
+  Scheme_Env *genv, *env;
+  long phase;
+
+  genv = scheme_get_env(NULL);
+  env = scheme_make_empty_env();
+  
+  for (phase = genv->phase; phase--; ) {
+    scheme_prepare_exp_env(env);
+    env = env->exp_env;
+  }
+
+  return (Scheme_Object *)env;
 }
 
 static Scheme_Object *namespace_p(int argc, Scheme_Object **argv)
@@ -7186,8 +7192,23 @@ static void done_with_GC()
   scheme_block_child_signals(0);
 #endif
 
-  scheme_total_gc_time += (scheme_get_process_milliseconds() - start_this_gc_time);
+  end_this_gc_time = scheme_get_process_milliseconds();
+  scheme_total_gc_time += (end_this_gc_time - start_this_gc_time);
 }
+
+#ifdef MZ_PRECISE_GC
+static void inform_GC(int major_gc, long pre_used, long post_used)
+{
+  if (scheme_main_logger)
+    scheme_log(scheme_main_logger,
+               SCHEME_LOG_INFO, 0,
+               "GC [%s] at %ld bytes; %ld collected in %ld msec",
+               (major_gc ? "major" : "minor"),
+               pre_used, pre_used - post_used,
+               end_this_gc_time - start_this_gc_time);
+}
+#endif
+
 
 #ifdef MZ_XFORM
 END_XFORM_SKIP;
@@ -7229,7 +7250,7 @@ static Scheme_Object *current_stats(int argc, Scheme_Object *argv[])
 	  /* C stack */
 	  if (t == scheme_current_thread) {
 	    void *stk_start, *stk_end;
-	    stk_start = ADJUST_STACK_START(t->stack_start);
+	    stk_start = t->stack_start;
 	    stk_end = (void *)&stk_end;
 #         ifdef STACK_GROWS_UP
 	    sz = (long)stk_end XFORM_OK_MINUS (long)stk_start;
@@ -7354,7 +7375,7 @@ static unsigned long get_current_stack_start(void)
 {
   Scheme_Thread *p;
   p = scheme_current_thread;
-  return (unsigned long)ADJUST_STACK_START(p->stack_start);
+  return (unsigned long)p->stack_start;
 }
 #endif
 

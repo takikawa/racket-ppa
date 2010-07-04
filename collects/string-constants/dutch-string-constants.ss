@@ -224,7 +224,6 @@
  (display-line-numbers "Toon regelnummers (geen letternummers) in buffer") ; -- 'buffer' is not wrong, but unclear
  (enable-keybindings-in-menus "Gebruik sneltoetsen in menus")
  (automatically-to-ps "Automatically print to postscript file")
- (separate-dialog-for-searching "Use separate dialog for searching")
  (reuse-existing-frames "Reuse existing frames when opening new files")
  (default-fonts "Verstek-lettertypen")
  
@@ -274,7 +273,6 @@
  (dock "Aanhaken")
  (undock "Zweven")
  (replace&find-again "Vervang && Zoek opnieuw") ;;; need double & to get a single &
- (replace-to-end "Vervang tot einde")
  (forward "Voorwaarts")
  (backward "Terug")
  (hide "Sluiten")
@@ -628,7 +626,7 @@
  (advanced-student "Gevorderde")
  (advanced-one-line-summary "Middenmoot, plus lambda en mutatie")
  (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
- (pretty-big-scheme "Vrij groot (bevat MrEd en Gevorderde)")
+ (pretty-big-scheme "Vrij groot")
  (pretty-big-scheme-one-line-summary "Inclusief syntaxis and functies van de HtDP-talen")
  (r5rs-language-name "R5RS")
  (r5rs-one-line-summary "R5RS, kaal")

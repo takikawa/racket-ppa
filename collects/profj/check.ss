@@ -37,7 +37,7 @@
   
   ;;Environment variable properties
   ;;(make-properties bool bool bool bool bool bool)
-  (define-struct properties (parm? field? static? settable? final? usable? set?) #:transparent #:mutable)
+  (define-struct properties (parm? field? static? settable? final? usable? (set? #:mutable)) #:transparent)
   (define parm (make-properties #t #f #f #t #f #t #t))
   (define final-parm (make-properties #t #f #f #f #t #t #t))
   (define method-var (make-properties #f #f #f #t #f #t #f))
@@ -1201,7 +1201,7 @@
       (when (ref-type? type)
         (add-required c-class (ref-type-class/iface type) (ref-type-path type) type-recs))
       (when (eq? 'string type)
-        (add-required c-class "String" '("java" "lang")))
+        (add-required c-class "String" '("java" "lang") type-recs))
       (when (and in-env? (not (properties-field? (var-type-properties in-env?))))
         (illegal-redefinition (field-name local) (field-src local)))
       (if is-var-init?
@@ -1562,6 +1562,11 @@
                         (check-test-exprs exp
                                           check-sub-expr
                                           env level type-recs)))
+        ((test-id? exp)
+         (set-expr-type exp
+                        (check-test-var (test-id-id exp)
+                                        (expr-src exp)
+                                        env)))
          )))
 
   ;;check-bin-op: symbol exp exp (exp env -> type/env) env src-loc symbol type-records -> type/env
@@ -2291,7 +2296,7 @@
       (member s `("if" "return"))))
   
   (define (error-file-exists? class type-recs) #f)
-  (define (call-provided-error) null)
+  (define (call-provided-error a b c) null)
   
   ;check-method-args: (list type) (list type) id type src type-records -> void
   (define (check-method-args args atypes name exp-type src type-recs)
@@ -2794,7 +2799,16 @@
                           check-sub-expr
                           env
                           (expr-src exp)
-                          type-recs))))
+                          type-recs))
+      ((check-effect? exp)
+       (check-test-effect (check-effect-vars exp)
+                          (check-effect-conds exp)
+                          (check-effect-test exp)
+                          check-sub-expr
+                          env
+                          (expr-src exp)
+                          type-recs))
+      (else (error 'internal-error (format "Unknown check expression ~a" exp)))))
   
   ;check-test-expr: exp exp (U #f exp) (exp env -> type/env) env symbol src src type-records-> type/env
   (define (check-test-expect test actual range check-e env level ta-src src type-recs)
@@ -2914,44 +2928,47 @@
                     (set-check-by-compare! exp meth)))])
              (make-type/env 'boolean new-env)))])))
   
-  ;check-test-rand: exp exp (exp env -> type/env) env symbol src type-records -> type/env
+  ;check-test-rand: exp [listof exp] (exp env -> type/env) env symbol src type-records -> type/env
   (define (check-test-rand actual expt-range check-e env level src type-recs)
     (let* ([actual-te (check-e actual env)]
            [actual-t (type/env-t actual-te)]
-           [expt-range-te (check-e expt-range (type/env-e actual-te))]
-           [er-t (type/env-t expt-range-te)]
-           [res (make-type/env 'boolean (type/env-e expt-range-te))])
+           [expt-range-te 
+            (foldr (lambda (e acc)
+                     (let* ([env (car acc)]
+                            [curr (check-e e env)])
+                       (cons (type/env-e curr)
+                             (cons (type/env-t curr) (cdr acc)))))
+                   (list (type/env-e actual-te))
+                   expt-range)
+            #;(check-e expt-range (type/env-e actual-te))]
+           [er-ts (cdr expt-range-te)]
+           [res (make-type/env 'boolean (car expt-range-te))])
       (when (eq? actual-t 'void)
-        (check-rand-type-error 'void level actual-t er-t (expr-src actual)))
-      (when (eq? er-t 'void)
-        (check-rand-type-error 'void level actual-t er-t (expr-src expt-range)))
-      (when (not (array-type? er-t))
-        (check-rand-type-error 'not-array level actual-t er-t (expr-src expt-range)))
-      (let ([er-a-t
-             (cond
-               [(eq? (array-type-dim er-t) 1) (array-type-type er-t)]
-               [else (make-array-type (array-type-type er-t) (sub1 (array-type-dim er-t)))])])
-        (cond
-          ((and (eq? 'boolean actual-t)
-                (eq? 'boolean er-a-t)) res)
-          ((and (prim-numeric-type? actual-t)
-                (prim-numeric-type? er-a-t))
-           res)
-          ((and (memq level '(advanced full))
-                (reference-type? actual-t) (reference-type? er-a-t))
+        (check-rand-type-error 'void level actual-t er-ts (expr-src actual)))
+      (when (null? er-ts)
+        (check-rand-type-error 'empty level actual-t 'none src))
+      
+      (and
+       (andmap
+        (lambda (er-t er)
            (cond
-             ((castable? er-a-t actual-t type-recs) res)
-             (else (check-rand-type-error 'cast level actual-t er-a-t src))))
-          ((and (memq level '(advanced full))
-                (or (array-type? actual-t) (array-type? er-a-t)))
-           (cond
-             ((castable? er-a-t actual-t type-recs) res)
+             [(eq? er-t 'void)
+              (check-rand-type-error 'void level actual-t er-t (expr-src er))]
+             [(and (eq? 'boolean actual-t) (eq? 'boolean er-t)) #t]
+             [(and (prim-numeric-type? actual-t) (prim-numeric-type? er-t)) #t]
+             [(and (memq level '(advanced full))
+                   (reference-type? actual-t) (reference-type? er-t))
+              (or (castable? er-t actual-t type-recs)
+                  (check-rand-type-error 'cast level actual-t er-t (expr-src er)))]
+             [(and (memq level '(advanced full))
+                   (or (array-type? actual-t) (array-type? er-t)))
+              (or (castable? er-t actual-t type-recs)
+                  (check-rand-type-error 'cast level actual-t er-t (expr-src er)))]
              (else
-              (check-rand-type-error 'cast level actual-t er-a-t src))))
-          (else
-           (check-rand-type-error (if (memq level '(advanced full)) 'cast 'subtype)
-                                  level
-                                  actual-t er-a-t src))))))
+              (check-rand-type-error (if (memq level '(advanced full)) 'cast 'subtype)
+                                     level
+                                     actual-t er-t (expr-src er))))) er-ts expt-range)
+       res)))
  
   
   ;check-test-mutate: exp exp (exp env -> type/env) env src type-records -> type/env
@@ -2969,6 +2986,57 @@
       (make-type/env 'boolean (type/env-e checker-type))))
   
     
+  ;check-test-effect: (list access) (list exp) (list exp) (exp env -> type/env) env src type-records -> type/env
+  (define (check-test-effect vars conds test check-e env src type-recs)
+    (for-each (lambda (id) 
+                (with-handlers ((exn? (lambda (e) (effect-vars-error (local-access-name (access-name id))
+                                                                     (expr-src id)))))
+                  (check-e id env))) vars)
+    (let* ([t-ts/e
+           (foldr (lambda (e acc)
+                    (let* ([env (car acc)]
+                           [curr (check-e e env)])
+                      (cons (type/env-e curr)
+                            (cons (type/env-t curr) (cdr acc)))))
+                  (list env)
+                  test)]
+           [conds-env 
+            (let loop ([test-vars vars] [env (car t-ts/e)])
+              (cond
+                [(null? test-vars) env]
+                [else 
+                 (loop
+                  (cdr test-vars)
+                  (add-var-to-env (string-append (id-string (local-access-name (access-name (car vars)))) "@")
+                                  (expr-types (car test-vars))
+                                  final-parm
+                                  env))]))]
+           [c-ts/e
+            (foldr (lambda (e acc)
+                     (let* ([env (car acc)]
+                            [curr (check-e e env)])
+                       (cons (type/env-e curr)
+                             (cons (type/env-t curr) (cdr acc)))))
+                   (list conds-env)
+                   conds)])
+      (unless (andmap (lambda (te) (eq? 'boolean te)) (cdr c-ts/e))
+        (check-test-effect-error 'bad-cond-type))
+      (make-type/env 'boolean (unnest-var env (car c-ts/e)))))
+
+  (define (check-test-var id src env)
+    (let ([t (lookup-var-in-env id env)])
+      (unless t (check-test-effect-error 'test-var))
+      (make-type/env (var-type-type t) env)))
+  
+  (define (effect-vars-error id src)
+    (let ([var (id->ext-name id)])
+      (raise-error
+       var
+       (format "Effect variables in 'checkEffect' must be previously defined. ~a is undefined." var)
+       'checkEffect src)))
+     
+  (define check-test-effect-error error)
+  
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;Expression Errors
 
@@ -3729,16 +3797,16 @@
        [(and (eq? kind 'void) (eq? actual-type 'void))
         "The test of a 'check' expression must produce a value. Current expression does not."]
        [(and (eq? kind 'void) (eq? expt-type 'void))
-        "The expected result of a 'check' 'within' expression must be an array of values. Current expression is not a value."]
-       [(eq? kind 'not-array)
-        (string-append "The expected result of a 'check' 'within' expression must be an array of possible values.\n"
+        "Each possible result of a 'check' 'oneOf' expression must be a value. Current expression is not a value."]
+       [(eq? kind 'empty)
+        (string-append "The expected result of a 'check' 'oneOf' expression must be a list of possible values.\n"
                        (format "Found ~a, which is not appropriate in this expression." (type->ext-name expt-type)))]
        [else
-        (string-append "A 'check' 'within' expession compares the test expression with an array of possible answers.\n"
-                       (format "Found an array of ~a which is not comparable to ~a."
+        (string-append "Each possible result of a 'check' 'oneOf' expession must be comparable with the test expression.\n"
+                       (format "Found a ~a which is not comparable to ~a."
                                (type->ext-name expt-type)
                                (type->ext-name actual-type)))])
-     'within src))
+     'oneOf src))
 
   (define (check-by-==-error t-type a-type src)
     (raise-error

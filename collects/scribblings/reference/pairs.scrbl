@@ -44,6 +44,8 @@
 
 @title[#:tag "pairs"]{Pairs and Lists}
 
+@guideintro["pairs"]{pairs and lists}
+
 @local-table-of-contents[]
 
 A @deftech{pair} combines exactly two values. The first value is
@@ -115,12 +117,12 @@ is the value produced by @scheme[(proc _i)].
 @section{List Operations}
 
 @defproc[(length [lst list?])
-         nonnegative-exact-integer?]{
+         exact-nonnegative-integer?]{
 
 Returns the number of elements in @scheme[lst].}
 
 
-@defproc[(list-ref [lst any/c] [pos nonnegative-exact-integer?])
+@defproc[(list-ref [lst any/c] [pos exact-nonnegative-integer?])
          any/c]{
 
 Returns the element of @scheme[lst] at position @scheme[pos], where
@@ -132,7 +134,7 @@ The @scheme[lst] argument need not actually be a list; @scheme[lst]
 must merely start with a chain of at least @scheme[pos] pairs.}
 
 
-@defproc[(list-tail [lst any/c] [pos nonnegative-exact-integer?])
+@defproc[(list-tail [lst any/c] [pos exact-nonnegative-integer?])
          any/c]{
 
 Returns the list after the first @scheme[pos] elements of
@@ -166,13 +168,10 @@ reverse order.}
          list?]{
 
 Applies @scheme[proc] to the elements of the @scheme[lst]s from the
- first elements to the last, returning @scheme[#f] as soon as any
- application returns @scheme[#f]. The @scheme[proc] argument must
- accept the same number of arguments as the number of supplied
- @scheme[lst]s, and all @scheme[lst]s must have the same number of
- elements.  The result is a list containing each result of
- @scheme[proc].}
-
+ first elements to the last. The @scheme[proc] argument must accept
+ the same number of arguments as the number of supplied @scheme[lst]s,
+ and all @scheme[lst]s must have the same number of elements.  The
+ result is a list containing each result of @scheme[proc] in order.}
 
 @defproc[(andmap [proc procedure?] [lst list?] ...+)
           any]{
@@ -316,16 +315,16 @@ Like @scheme[remove], but removes from @scheme[lst] every instance of
 every element of @scheme[v-lst].}
 
 
-@defproc[(remq* [v any/c] [lst list?])
+@defproc[(remq* [v-lst list?] [lst list?])
          list?]{
 
-Returns @scheme[(remove* v lst eq?)].}
+Returns @scheme[(remove* v-lst lst eq?)].}
 
 
-@defproc[(remv* [v any/c] [lst list?])
+@defproc[(remv* [v-lst list?] [lst list?])
          list?]{
 
-Returns @scheme[(remove* v lst eqv?)].}
+Returns @scheme[(remove* v-lst lst eqv?)].}
 
 
 @defproc[(sort [lst list?] [less-than? (any/c any/c . -> . any/c)]
@@ -516,11 +515,7 @@ Like @scheme[assoc], but finds an element using the predicate
 @defproc[(last-pair [p pair?]) pair?]{
 Returns the last pair of a (possibly improper) list.}
 
-@defproc[(drop [lst any/c] [pos nonnegative-exact-integer?]) list?]{
-Synonym for @scheme[list-tail].
-}
-
-@defproc[(take [lst any/c] [pos nonnegative-exact-integer?]) list?]{
+@defproc[(take [lst any/c] [pos exact-nonnegative-integer?]) list?]{
 Returns a fresh list whose elements are the first @scheme[pos] elements of
 @scheme[lst].  If @scheme[lst] has fewer than
 @scheme[pos] elements, the @exnraise[exn:fail:contract].
@@ -532,6 +527,51 @@ must merely start with a chain of at least @scheme[pos] pairs.
  (take '(1 2 3 4) 2)
  (take 'non-list 0)
 ]}
+
+@defproc[(drop [lst any/c] [pos exact-nonnegative-integer?]) any/c]{
+Just like @scheme[list-tail].}
+
+@defproc[(split-at [lst any/c] [pos exact-nonnegative-integer?])
+         (values list? any/c)]{
+Returns the same result as
+
+@schemeblock[(values (take lst pos) (drop lst pos))]
+
+except that it can be faster.}
+
+@defproc[(take-right [lst any/c] [pos exact-nonnegative-integer?]) any/c]{
+Returns the @scheme[list]'s @scheme[pos]-length tail. If @scheme[lst]
+has fewer than @scheme[pos] elements, then the
+@exnraise[exn:fail:contract].
+
+The @scheme[lst] argument need not actually be a list; @scheme[lst]
+must merely end with a chain of at least @scheme[pos] pairs.
+
+@examples[#:eval list-eval
+ (take-right '(1 2 3 4) 2)
+ (take-right 'non-list 0)
+]}
+
+@defproc[(drop-right [lst any/c] [pos exact-nonnegative-integer?]) list?]{
+Returns a fresh list whose elements are the prefix of @scheme[lst],
+dropping its @scheme[pos]-length tail. If @scheme[lst] has fewer than
+@scheme[pos] elements, then the @exnraise[exn:fail:contract].
+
+The @scheme[lst] argument need not actually be a list; @scheme[lst]
+must merely end with a chain of at least @scheme[pos] pairs.
+
+@examples[#:eval list-eval
+ (drop-right '(1 2 3 4) 2)
+ (drop-right 'non-list 0)
+]}
+
+@defproc[(split-at-right [lst any/c] [pos exact-nonnegative-integer?])
+         (values list? any/c)]{
+Returns the same result as
+
+@schemeblock[(values (drop-right lst pos) (take-right lst pos))]
+
+except that it can be faster.}
 
 @defproc[(add-between [lst list?] [v any/c]) list?]{
 
@@ -650,8 +690,8 @@ the resulting graph, where at most one copy is created for any given
 value.
 
 Since the copied vales can be immutable, and since the copy is also
-immutable, @scheme[make-reader-graph] can cycles involving only
-immutable pairs, vectors, boxes, and hash tables. 
+immutable, @scheme[make-reader-graph] can create cycles involving only
+immutable pairs, vectors, boxes, and hash tables.
 
 Only the following kinds of values are copied and traversed to detect
 placeholders:
@@ -659,8 +699,6 @@ placeholders:
 @itemize{
 
  @item{pairs}
-
- @item{immutable pairs (as created by @scheme[mcons])}
 
  @item{vectors, both mutable and immutable}
 

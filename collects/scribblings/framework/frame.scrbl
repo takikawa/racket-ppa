@@ -1,8 +1,7 @@
-#lang scribble/doc
-@(require scribble/manual scribble/extract)
-@(require (for-label framework))
-@(require (for-label scheme/gui))
-@title{Frame}
+#lang scribble/doc @(require scribble/manual
+scribble/extract scheme/include) @(require (for-label
+framework)) @(require (for-label scheme/gui)) @(require
+(for-syntax (prefix-in s: scribble/reader))) @title{Frame}
 
 @definterface[frame:basic<%> (frame%)]{
   Classes matching this interface support the basic 
@@ -36,7 +35,8 @@
     @schemeblock[
     (class ...
       ...
-     (rename [super-make-root-area-container make-root-area-container])
+     (rename [super-make-root-area-container 
+              make-root-area-container])
      (field
        [status-panel #f])
      (define/override (make-root-area-container cls parent)
@@ -44,7 +44,7 @@
              (super-make-root-area-container vertical-panel% parent))
        (let ([root (make-object cls status-panel)])
 
-          ; ... add other children to status-panel ...
+          (code:comment "... add other children to status-panel ...")
 
           root))
       ...)]
@@ -74,14 +74,14 @@
               (show #f)))])]
 
   }
-  @defmethod*[(((editing-this-file? (filename path)) boolean))]{
+  @defmethod*[(((editing-this-file? (filename path)) boolean?))]{
     Indicates if this frame contains this buffer (and can edit
     that file).
 
 
     Returns @scheme[#f].
   }
-  @defmethod*[(((get-filename (temp (union |#f| (box boolean)) |#f|)) (union |#f| path)))]{
+  @defmethod*[(((get-filename (temp (union |#f| (box boolean?)) |#f|)) (union |#f| path)))]{
     This returns the filename that the frame is currently being saved as,
     or @scheme[#f] if there is no appropriate filename.
 
@@ -117,7 +117,7 @@
 
   See also
   @scheme[frame:reorder-menus].
-  @defmethod*[#:mode override (((show (on? boolean)) void))]{
+  @defmethod*[#:mode override (((show (on? boolean?)) void))]{
 
     Calls the super method.
 
@@ -125,7 +125,7 @@
     frame group and when it is @scheme[#f], removes the frame
     from the group.
   }
-  @defmethod*[#:mode override (((can-exit?) boolean))]{
+  @defmethod*[#:mode override (((can-exit?) boolean?))]{
 
     This, together with
     @method[frame:basic-mixin on-exit]
@@ -252,7 +252,7 @@
     frames open, it calls
     @scheme[exit:exit].
   }
-  @defmethod*[#:mode override (((on-activate (on? boolean)) void))]{
+  @defmethod*[#:mode override (((on-activate (on? boolean?)) void))]{
 
     Calls
     @method[group:% set-active-frame]
@@ -382,7 +382,7 @@
     @method[frame:info<%> is-info-hidden?].
 
   }
-  @defmethod*[(((is-info-hidden?) boolean))]{
+  @defmethod*[(((is-info-hidden?) boolean?))]{
     Result indicates if the show info panel has been explicitly hidden with
     @method[frame:info<%> hide-info].
 
@@ -414,7 +414,7 @@
   constructed with
   @scheme[editor:info-mixin]
   and display it.
-  @defmethod*[(((set-macro-recording (on? boolean)) void))]{
+  @defmethod*[(((set-macro-recording (on? boolean?)) void))]{
     Shows/hides the icon in the info bar that indicates if a
     macro recording is in progress.
 
@@ -465,1319 +465,9 @@
 @defmixin[frame:pasteboard-info-mixin (frame:basic<%>) (frame:pasteboard-info<%>)]{
 
 }
-@definterface[frame:standard-menus<%> (frame:basic<%>)]{
-  @itemize{
-  @item{
-  @method[frame:standard-menus<%> file-menu:new-callback],
-  @method[frame:standard-menus<%> file-menu:create-new?],
-  @method[frame:standard-menus<%> file-menu:new-string],
-  @method[frame:standard-menus<%> file-menu:new-help-string],
-  @method[frame:standard-menus<%> file-menu:new-on-demand],
-  @method[frame:standard-menus<%> file-menu:get-new-item]}
 
-  @item{
-  @method[frame:standard-menus<%> file-menu:between-new-and-open]}
+@(include/reader "standard-menus.scrbl" s:read-syntax)
 
-  @item{
-  @method[frame:standard-menus<%> file-menu:open-callback],
-  @method[frame:standard-menus<%> file-menu:create-open?],
-  @method[frame:standard-menus<%> file-menu:open-string],
-  @method[frame:standard-menus<%> file-menu:open-help-string],
-  @method[frame:standard-menus<%> file-menu:open-on-demand],
-  @method[frame:standard-menus<%> file-menu:get-open-item]}
-
-  @item{
-  @method[frame:standard-menus<%> file-menu:open-recent-callback],
-  @method[frame:standard-menus<%> file-menu:create-open-recent?],
-  @method[frame:standard-menus<%> file-menu:open-recent-string],
-  @method[frame:standard-menus<%> file-menu:open-recent-help-string],
-  @method[frame:standard-menus<%> file-menu:open-recent-on-demand],
-  @method[frame:standard-menus<%> file-menu:get-open-recent-item]}
-
-  @item{
-  @method[frame:standard-menus<%> file-menu:between-open-and-revert]}
-
-  @item{
-  @method[frame:standard-menus<%> file-menu:revert-callback],
-  @method[frame:standard-menus<%> file-menu:create-revert?],
-  @method[frame:standard-menus<%> file-menu:revert-string],
-  @method[frame:standard-menus<%> file-menu:revert-help-string],
-  @method[frame:standard-menus<%> file-menu:revert-on-demand],
-  @method[frame:standard-menus<%> file-menu:get-revert-item]}
-
-  @item{
-  @method[frame:standard-menus<%> file-menu:between-revert-and-save]}
-
-  @item{
-  @method[frame:standard-menus<%> file-menu:save-callback],
-  @method[frame:standard-menus<%> file-menu:create-save?],
-  @method[frame:standard-menus<%> file-menu:save-string],
-  @method[frame:standard-menus<%> file-menu:save-help-string],
-  @method[frame:standard-menus<%> file-menu:save-on-demand],
-  @method[frame:standard-menus<%> file-menu:get-save-item]}
-
-  @item{
-  @method[frame:standard-menus<%> file-menu:save-as-callback],
-  @method[frame:standard-menus<%> file-menu:create-save-as?],
-  @method[frame:standard-menus<%> file-menu:save-as-string],
-  @method[frame:standard-menus<%> file-menu:save-as-help-string],
-  @method[frame:standard-menus<%> file-menu:save-as-on-demand],
-  @method[frame:standard-menus<%> file-menu:get-save-as-item]}
-
-  @item{
-  @method[frame:standard-menus<%> file-menu:between-save-as-and-print]}
-
-  @item{
-  @method[frame:standard-menus<%> file-menu:print-callback],
-  @method[frame:standard-menus<%> file-menu:create-print?],
-  @method[frame:standard-menus<%> file-menu:print-string],
-  @method[frame:standard-menus<%> file-menu:print-help-string],
-  @method[frame:standard-menus<%> file-menu:print-on-demand],
-  @method[frame:standard-menus<%> file-menu:get-print-item]}
-
-  @item{
-  @method[frame:standard-menus<%> file-menu:between-print-and-close]}
-
-  @item{
-  @method[frame:standard-menus<%> file-menu:close-callback],
-  @method[frame:standard-menus<%> file-menu:create-close?],
-  @method[frame:standard-menus<%> file-menu:close-string],
-  @method[frame:standard-menus<%> file-menu:close-help-string],
-  @method[frame:standard-menus<%> file-menu:close-on-demand],
-  @method[frame:standard-menus<%> file-menu:get-close-item]}
-
-  @item{
-  @method[frame:standard-menus<%> file-menu:between-close-and-quit]}
-
-  @item{
-  @method[frame:standard-menus<%> file-menu:quit-callback],
-  @method[frame:standard-menus<%> file-menu:create-quit?],
-  @method[frame:standard-menus<%> file-menu:quit-string],
-  @method[frame:standard-menus<%> file-menu:quit-help-string],
-  @method[frame:standard-menus<%> file-menu:quit-on-demand],
-  @method[frame:standard-menus<%> file-menu:get-quit-item]}
-
-  @item{
-  @method[frame:standard-menus<%> file-menu:after-quit]}
-
-  @item{
-  @method[frame:standard-menus<%> edit-menu:undo-callback],
-  @method[frame:standard-menus<%> edit-menu:create-undo?],
-  @method[frame:standard-menus<%> edit-menu:undo-string],
-  @method[frame:standard-menus<%> edit-menu:undo-help-string],
-  @method[frame:standard-menus<%> edit-menu:undo-on-demand],
-  @method[frame:standard-menus<%> edit-menu:get-undo-item]}
-
-  @item{
-  @method[frame:standard-menus<%> edit-menu:redo-callback],
-  @method[frame:standard-menus<%> edit-menu:create-redo?],
-  @method[frame:standard-menus<%> edit-menu:redo-string],
-  @method[frame:standard-menus<%> edit-menu:redo-help-string],
-  @method[frame:standard-menus<%> edit-menu:redo-on-demand],
-  @method[frame:standard-menus<%> edit-menu:get-redo-item]}
-
-  @item{
-  @method[frame:standard-menus<%> edit-menu:between-redo-and-cut]}
-
-  @item{
-  @method[frame:standard-menus<%> edit-menu:cut-callback],
-  @method[frame:standard-menus<%> edit-menu:create-cut?],
-  @method[frame:standard-menus<%> edit-menu:cut-string],
-  @method[frame:standard-menus<%> edit-menu:cut-help-string],
-  @method[frame:standard-menus<%> edit-menu:cut-on-demand],
-  @method[frame:standard-menus<%> edit-menu:get-cut-item]
-
-  }@item{
-  @method[frame:standard-menus<%> edit-menu:between-cut-and-copy]
-
-  }@item{
-  @method[frame:standard-menus<%> edit-menu:copy-callback],
-  @method[frame:standard-menus<%> edit-menu:create-copy?],
-  @method[frame:standard-menus<%> edit-menu:copy-string],
-  @method[frame:standard-menus<%> edit-menu:copy-help-string],
-  @method[frame:standard-menus<%> edit-menu:copy-on-demand],
-  @method[frame:standard-menus<%> edit-menu:get-copy-item]
-
-  }@item{
-  @method[frame:standard-menus<%> edit-menu:between-copy-and-paste]
-
-  }@item{
-  @method[frame:standard-menus<%> edit-menu:paste-callback],
-  @method[frame:standard-menus<%> edit-menu:create-paste?],
-  @method[frame:standard-menus<%> edit-menu:paste-string],
-  @method[frame:standard-menus<%> edit-menu:paste-help-string],
-  @method[frame:standard-menus<%> edit-menu:paste-on-demand],
-  @method[frame:standard-menus<%> edit-menu:get-paste-item]
-
-  }@item{
-  @method[frame:standard-menus<%> edit-menu:between-paste-and-clear]
-
-  }@item{
-  @method[frame:standard-menus<%> edit-menu:clear-callback],
-  @method[frame:standard-menus<%> edit-menu:create-clear?],
-  @method[frame:standard-menus<%> edit-menu:clear-string],
-  @method[frame:standard-menus<%> edit-menu:clear-help-string],
-  @method[frame:standard-menus<%> edit-menu:clear-on-demand],
-  @method[frame:standard-menus<%> edit-menu:get-clear-item]
-
-  }@item{
-  @method[frame:standard-menus<%> edit-menu:between-clear-and-select-all]
-
-  }@item{
-  @method[frame:standard-menus<%> edit-menu:select-all-callback],
-  @method[frame:standard-menus<%> edit-menu:create-select-all?],
-  @method[frame:standard-menus<%> edit-menu:select-all-string],
-  @method[frame:standard-menus<%> edit-menu:select-all-help-string],
-  @method[frame:standard-menus<%> edit-menu:select-all-on-demand],
-  @method[frame:standard-menus<%> edit-menu:get-select-all-item]
-
-  }@item{
-  @method[frame:standard-menus<%> edit-menu:between-select-all-and-find]
-
-  }@item{
-  @method[frame:standard-menus<%> edit-menu:find-callback],
-  @method[frame:standard-menus<%> edit-menu:create-find?],
-  @method[frame:standard-menus<%> edit-menu:find-string],
-  @method[frame:standard-menus<%> edit-menu:find-help-string],
-  @method[frame:standard-menus<%> edit-menu:find-on-demand],
-  @method[frame:standard-menus<%> edit-menu:get-find-item]
-
-  }@item{
-  @method[frame:standard-menus<%> edit-menu:find-again-callback],
-  @method[frame:standard-menus<%> edit-menu:create-find-again?],
-  @method[frame:standard-menus<%> edit-menu:find-again-string],
-  @method[frame:standard-menus<%> edit-menu:find-again-help-string],
-  @method[frame:standard-menus<%> edit-menu:find-again-on-demand],
-  @method[frame:standard-menus<%> edit-menu:get-find-again-item]
-
-  }@item{
-  @method[frame:standard-menus<%> edit-menu:replace-and-find-again-callback],
-  @method[frame:standard-menus<%> edit-menu:create-replace-and-find-again?],
-  @method[frame:standard-menus<%> edit-menu:replace-and-find-again-string],
-  @method[frame:standard-menus<%> edit-menu:replace-and-find-again-help-string],
-  @method[frame:standard-menus<%> edit-menu:replace-and-find-again-on-demand],
-  @method[frame:standard-menus<%> edit-menu:get-replace-and-find-again-item]
-
-  }@item{
-  @method[frame:standard-menus<%> edit-menu:between-find-and-preferences]
-
-  }@item{
-  @method[frame:standard-menus<%> edit-menu:preferences-callback],
-  @method[frame:standard-menus<%> edit-menu:create-preferences?],
-  @method[frame:standard-menus<%> edit-menu:preferences-string],
-  @method[frame:standard-menus<%> edit-menu:preferences-help-string],
-  @method[frame:standard-menus<%> edit-menu:preferences-on-demand],
-  @method[frame:standard-menus<%> edit-menu:get-preferences-item]
-
-  }@item{
-  @method[frame:standard-menus<%> edit-menu:after-preferences]
-
-  }@item{
-  @method[frame:standard-menus<%> help-menu:before-about]
-
-  }@item{
-  @method[frame:standard-menus<%> help-menu:about-callback],
-  @method[frame:standard-menus<%> help-menu:create-about?],
-  @method[frame:standard-menus<%> help-menu:about-string],
-  @method[frame:standard-menus<%> help-menu:about-help-string],
-  @method[frame:standard-menus<%> help-menu:about-on-demand],
-  @method[frame:standard-menus<%> help-menu:get-about-item]
-
-  }@item{
-  @method[frame:standard-menus<%> help-menu:after-about]}}
-
-  @defmethod*[(((get-menu%) (subclass?/c menu:can-restore-underscore-menu%)))]{
-    The result of this method is used as the class
-    for creating the result of these methods:
-    @method[frame:standard-menus<%> get-file-menu], 
-    @method[frame:standard-menus<%> get-edit-menu], 
-    @method[frame:standard-menus<%> get-help-menu]. 
-
-
-    defaultly returns
-    @scheme[menu%]
-  }
-  @defmethod*[(((get-menu-item%) (subclass?/c menu-item%)))]{
-    The result of this method is used as the class for creating
-    the menu items in this frame (see 
-    @scheme[frame:standard-menus%]
-    for a list).
-
-
-    defaultly returns
-    @scheme[menu:can-restore-menu-item%].
-  }
-  @defmethod*[(((get-checkable-menu-item%) (subclass?/c checkable-menu-item%)))]{
-    The result of this method is used as the class for creating
-    checkable menu items in this class (see 
-    @scheme[frame:standard-menus%]
-    for a list).
-
-
-    defaultly returns
-    @scheme[menu:can-restore-checkable-menu-item%].
-  }
-  @defmethod*[(((get-file-menu) (instance (subclass?/c menu%))))]{
-    Returns the file menu
-    See also
-    @method[frame:standard-menus<%> get-menu%]
-
-  }
-  @defmethod*[(((get-edit-menu) (instance (subclass?/c menu%))))]{
-    Returns the edit menu
-    See also
-    @method[frame:standard-menus<%> get-menu%]
-
-  }
-  @defmethod*[(((get-help-menu) (instance (subclass?/c menu%))))]{
-    Returns the help menu
-    See also
-    @method[frame:standard-menus<%> get-menu%]
-
-  }
-  @defmethod*[(((file-menu:new-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the new menu-item of the file-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (item control) (handler:edit-file #f) #t)]
-  }
-  @defmethod*[(((file-menu:get-new-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((file-menu:new-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(string-constant new-menu-item)"
-  }
-  @defmethod*[(((file-menu:new-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant new-info)].
-  }
-  @defmethod*[(((file-menu:new-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (menu-item) (void))]
-  }
-  @defmethod*[(((file-menu:create-new?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns #t
-  }
-  @defmethod*[(((file-menu:between-new-and-open (menu (instance (subclass?/c menu%)))) void))]{
-    This method is called between the addition of the new menu-item
-    and before the addition of the open menu-item to the file-menu menu.
-    Override it to add additional menus at that point.
-
-
-    Does nothing.
-  }
-  @defmethod*[(((file-menu:open-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the open menu-item of the file-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (item control) (handler:open-file) #t)]
-  }
-  @defmethod*[(((file-menu:get-open-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((file-menu:open-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(string-constant open-menu-item)"
-  }
-  @defmethod*[(((file-menu:open-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant open-info)]
-  }
-  @defmethod*[(((file-menu:open-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (menu-item) (void))]
-  }
-  @defmethod*[(((file-menu:create-open?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns #t
-  }
-  @defmethod*[(((file-menu:open-recent-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the open-recent menu-item of the file-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (x y) (void))]
-
-  }
-  @defmethod*[(((file-menu:get-open-recent-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((file-menu:open-recent-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(string-constant open-recent-menu-item)"
-  }
-  @defmethod*[(((file-menu:open-recent-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant open-recent-info)]
-  }
-  @defmethod*[(((file-menu:open-recent-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (menu) (handler:install-recent-items menu))]
-  }
-  @defmethod*[(((file-menu:create-open-recent?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns #t
-  }
-  @defmethod*[(((file-menu:between-open-and-revert (menu (instance (subclass?/c menu%)))) void))]{
-    This method is called between the addition of the open menu-item
-    and before the addition of the revert menu-item to the file-menu menu.
-    Override it to add additional menus at that point.
-
-
-    Does nothing.
-  }
-  @defmethod*[(((file-menu:revert-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the revert menu-item of the file-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (item control) (void))]
-  }
-  @defmethod*[(((file-menu:get-revert-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((file-menu:revert-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(string-constant revert-menu-item)"
-  }
-  @defmethod*[(((file-menu:revert-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant revert-info)]
-  }
-  @defmethod*[(((file-menu:revert-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (menu-item) (void))]
-  }
-  @defmethod*[(((file-menu:create-revert?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns @scheme[#f]
-  }
-  @defmethod*[(((file-menu:between-revert-and-save (menu (instance (subclass?/c menu%)))) void))]{
-    This method is called between the addition of the revert menu-item
-    and before the addition of the save menu-item to the file-menu menu.
-    Override it to add additional menus at that point.
-
-
-    Does nothing.
-  }
-  @defmethod*[(((file-menu:save-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the save menu-item of the file-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (item control) (void))]
-  }
-  @defmethod*[(((file-menu:get-save-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((file-menu:save-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(string-constant save-menu-item)"
-  }
-  @defmethod*[(((file-menu:save-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant save-info)]
-  }
-  @defmethod*[(((file-menu:save-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (menu-item) (void))]
-  }
-  @defmethod*[(((file-menu:create-save?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns @scheme[#f]
-  }
-  @defmethod*[(((file-menu:save-as-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the save-as menu-item of the file-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (item control) (void))]
-
-  }
-  @defmethod*[(((file-menu:get-save-as-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((file-menu:save-as-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(string-constant save-as-menu-item)"
-  }
-  @defmethod*[(((file-menu:save-as-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant save-as-info)]
-  }
-  @defmethod*[(((file-menu:save-as-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (menu-item) (void))]
-  }
-  @defmethod*[(((file-menu:create-save-as?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns @scheme[#f]
-  }
-  @defmethod*[(((file-menu:between-save-as-and-print (menu (instance (subclass?/c menu%)))) void))]{
-    This method is called between the addition of the save-as menu-item
-    and before the addition of the print menu-item to the file-menu menu.
-    Override it to add additional menus at that point.
-
-
-    Does nothing.
-  }
-  @defmethod*[(((file-menu:print-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the print menu-item of the file-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (item control) (void))]
-
-  }
-  @defmethod*[(((file-menu:get-print-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((file-menu:print-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(string-constant print-menu-item)"
-  }
-  @defmethod*[(((file-menu:print-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant print-info)]
-  }
-  @defmethod*[(((file-menu:print-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (menu-item) (void))]
-  }
-  @defmethod*[(((file-menu:create-print?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns @scheme[#f]
-  }
-  @defmethod*[(((file-menu:between-print-and-close (menu (instance (subclass?/c menu%)))) void))]{
-    This method is called between the addition of the print menu-item
-    and before the addition of the close menu-item to the file-menu menu.
-    Override it to add additional menus at that point.
-
-
-    Adds a separator menu item.
-  }
-  @defmethod*[(((file-menu:close-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the close menu-item of the file-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (item control) (when (can-close?) (on-close) (show #f)) #t)]
-
-  }
-  @defmethod*[(((file-menu:get-close-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((file-menu:close-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(string-constant close-menu-item)"
-  }
-  @defmethod*[(((file-menu:close-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant close-info)]
-  }
-  @defmethod*[(((file-menu:close-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (menu-item) (void))]
-  }
-  @defmethod*[(((file-menu:create-close?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns #t
-  }
-  @defmethod*[(((file-menu:between-close-and-quit (menu (instance (subclass?/c menu%)))) void))]{
-    This method is called between the addition of the close menu-item
-    and before the addition of the quit menu-item to the file-menu menu.
-    Override it to add additional menus at that point.
-
-
-    Does nothing.
-  }
-  @defmethod*[(((file-menu:quit-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the quit menu-item of the file-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (item control) (when (exit:user-oks-exit) (exit:exit)))]
-
-  }
-  @defmethod*[(((file-menu:get-quit-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((file-menu:quit-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(if (eq? (system-type) (quote windows)) (string-constant quit-menu-item-windows) (string-constant quit-menu-item-others))"
-  }
-  @defmethod*[(((file-menu:quit-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant quit-info)]
-  }
-  @defmethod*[(((file-menu:quit-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (menu-item) (void))]
-  }
-  @defmethod*[(((file-menu:create-quit?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns (not (current-eventspace-has-standard-menus?))
-  }
-  @defmethod*[(((file-menu:after-quit (menu (instance (subclass?/c menu%)))) void))]{
-    This method is called after the addition of the quit menu-item
-    to the file-menu menu.
-    Override it to add additional menus at that point.
-
-
-    Does nothing.
-  }
-  @defmethod*[(((edit-menu:undo-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the undo menu-item of the edit-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (menu evt)
-      (let ((edit (get-edit-target-object)))
-        (when (and edit (is-a? edit editor<%>))
-          (send edit do-edit-operation 'undo)))
-      #t)]
-
-  }
-  @defmethod*[(((edit-menu:get-undo-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((edit-menu:undo-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(string-constant undo-menu-item)"
-  }
-  @defmethod*[(((edit-menu:undo-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant undo-info)]
-  }
-  @defmethod*[(((edit-menu:undo-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (item) (let* ((editor (get-edit-target-object)) (enable? (and editor (is-a? editor editor<%>) (send editor can-do-edit-operation? (quote undo))))) (send item enable enable?)))]
-  }
-  @defmethod*[(((edit-menu:create-undo?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns #t
-  }
-  @defmethod*[(((edit-menu:redo-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the redo menu-item of the edit-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (menu evt)
-      (let ((edit (get-edit-target-object)))
-        (when (and edit (is-a? edit editor<%>))
-          (send edit do-edit-operation 'redo)))
-      #t)]
-
-  }
-  @defmethod*[(((edit-menu:get-redo-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((edit-menu:redo-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(string-constant redo-menu-item)"
-  }
-  @defmethod*[(((edit-menu:redo-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant redo-info)]
-  }
-  @defmethod*[(((edit-menu:redo-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (item) (let* ((editor (get-edit-target-object)) (enable? (and editor (is-a? editor editor<%>) (send editor can-do-edit-operation? (quote redo))))) (send item enable enable?)))]
-  }
-  @defmethod*[(((edit-menu:create-redo?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns #t
-  }
-  @defmethod*[(((edit-menu:between-redo-and-cut (menu (instance (subclass?/c menu%)))) void))]{
-    This method is called between the addition of the redo menu-item
-    and before the addition of the cut menu-item to the edit-menu menu.
-    Override it to add additional menus at that point.
-
-
-    Adds a separator menu item.
-  }
-  @defmethod*[(((edit-menu:cut-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the cut menu-item of the edit-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (menu evt)
-      (let ((edit (get-edit-target-object)))
-        (when (and edit (is-a? edit editor<%>))
-          (send edit do-edit-operation 'cut)))
-      #t)]
-
-  }
-  @defmethod*[(((edit-menu:get-cut-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((edit-menu:cut-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(string-constant cut-menu-item)"
-  }
-  @defmethod*[(((edit-menu:cut-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant cut-info)]
-  }
-  @defmethod*[(((edit-menu:cut-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (item) (let* ((editor (get-edit-target-object)) (enable? (and editor (is-a? editor editor<%>) (send editor can-do-edit-operation? (quote cut))))) (send item enable enable?)))]
-  }
-  @defmethod*[(((edit-menu:create-cut?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns #t
-  }
-  @defmethod*[(((edit-menu:between-cut-and-copy (menu (instance (subclass?/c menu%)))) void))]{
-    This method is called between the addition of the cut menu-item
-    and before the addition of the copy menu-item to the edit-menu menu.
-    Override it to add additional menus at that point.
-
-
-    Does nothing.
-  }
-  @defmethod*[(((edit-menu:copy-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the copy menu-item of the edit-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (menu evt)
-      (let ((edit (get-edit-target-object)))
-        (when (and edit (is-a? edit editor<%>))
-          (send edit do-edit-operation 'copy)))
-      #t)]
-
-  }
-  @defmethod*[(((edit-menu:get-copy-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((edit-menu:copy-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(string-constant copy-menu-item)"
-  }
-  @defmethod*[(((edit-menu:copy-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant copy-info)]
-  }
-  @defmethod*[(((edit-menu:copy-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (item) (let* ((editor (get-edit-target-object)) (enable? (and editor (is-a? editor editor<%>) (send editor can-do-edit-operation? (quote copy))))) (send item enable enable?)))]
-  }
-  @defmethod*[(((edit-menu:create-copy?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns #t
-  }
-  @defmethod*[(((edit-menu:between-copy-and-paste (menu (instance (subclass?/c menu%)))) void))]{
-    This method is called between the addition of the copy menu-item
-    and before the addition of the paste menu-item to the edit-menu menu.
-    Override it to add additional menus at that point.
-
-
-    Does nothing.
-  }
-  @defmethod*[(((edit-menu:paste-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the paste menu-item of the edit-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (menu evt)
-      (let ((edit (get-edit-target-object)))
-        (when (and edit (is-a? edit editor<%>))
-          (send edit do-edit-operation 'paste)))
-      #t)]
-
-  }
-  @defmethod*[(((edit-menu:get-paste-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((edit-menu:paste-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(string-constant paste-menu-item)"
-  }
-  @defmethod*[(((edit-menu:paste-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant paste-info)]
-  }
-  @defmethod*[(((edit-menu:paste-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (item) (let* ((editor (get-edit-target-object)) (enable? (and editor (is-a? editor editor<%>) (send editor can-do-edit-operation? (quote paste))))) (send item enable enable?)))]
-  }
-  @defmethod*[(((edit-menu:create-paste?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns #t
-  }
-  @defmethod*[(((edit-menu:between-paste-and-clear (menu (instance (subclass?/c menu%)))) void))]{
-    This method is called between the addition of the paste menu-item
-    and before the addition of the clear menu-item to the edit-menu menu.
-    Override it to add additional menus at that point.
-
-
-    Does nothing.
-  }
-  @defmethod*[(((edit-menu:clear-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the clear menu-item of the edit-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (menu evt)
-      (let ((edit (get-edit-target-object)))
-        (when (and edit (is-a? edit editor<%>))
-          (send edit do-edit-operation 'clear)))
-      #t)]
-
-  }
-  @defmethod*[(((edit-menu:get-clear-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((edit-menu:clear-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(if (eq? (system-type) (quote windows)) (string-constant clear-menu-item-windows) (string-constant clear-menu-item-windows))"
-  }
-  @defmethod*[(((edit-menu:clear-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant clear-info)]
-  }
-  @defmethod*[(((edit-menu:clear-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (item) (let* ((editor (get-edit-target-object)) (enable? (and editor (is-a? editor editor<%>) (send editor can-do-edit-operation? (quote clear))))) (send item enable enable?)))]
-  }
-  @defmethod*[(((edit-menu:create-clear?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns #t
-  }
-  @defmethod*[(((edit-menu:between-clear-and-select-all (menu (instance (subclass?/c menu%)))) void))]{
-    This method is called between the addition of the clear menu-item
-    and before the addition of the select-all menu-item to the edit-menu menu.
-    Override it to add additional menus at that point.
-
-
-    Does nothing.
-  }
-  @defmethod*[(((edit-menu:select-all-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the select-all menu-item of the edit-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (menu evt)
-      (let ((edit (get-edit-target-object)))
-        (when (and edit (is-a? edit editor<%>))
-          (send edit do-edit-operation 'select-all)))
-      #t)]
-
-  }
-  @defmethod*[(((edit-menu:get-select-all-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((edit-menu:select-all-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(string-constant select-all-menu-item)"
-  }
-  @defmethod*[(((edit-menu:select-all-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant select-all-info)]
-  }
-  @defmethod*[(((edit-menu:select-all-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (item) (let* ((editor (get-edit-target-object)) (enable? (and editor (is-a? editor editor<%>) (send editor can-do-edit-operation? (quote select-all))))) (send item enable enable?)))]
-  }
-  @defmethod*[(((edit-menu:create-select-all?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns #t
-  }
-  @defmethod*[(((edit-menu:between-select-all-and-find (menu (instance (subclass?/c menu%)))) void))]{
-    This method is called between the addition of the select-all menu-item
-    and before the addition of the find menu-item to the edit-menu menu.
-    Override it to add additional menus at that point.
-
-
-    Adds a separator menu item.
-  }
-  @defmethod*[(((edit-menu:find-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the find menu-item of the edit-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (item control) (void))]
-
-  }
-  @defmethod*[(((edit-menu:get-find-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((edit-menu:find-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(string-constant find-menu-item)"
-  }
-  @defmethod*[(((edit-menu:find-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant find-info)]
-  }
-  @defmethod*[(((edit-menu:find-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (item) (send item enable (let ((target (get-edit-target-object))) (and target (is-a? target editor<%>)))))]
-  }
-  @defmethod*[(((edit-menu:create-find?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns @scheme[#f]
-  }
-  @defmethod*[(((edit-menu:find-again-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the find-again menu-item of the edit-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (item control) (void))]
-
-  }
-  @defmethod*[(((edit-menu:get-find-again-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((edit-menu:find-again-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(string-constant find-again-menu-item)"
-  }
-  @defmethod*[(((edit-menu:find-again-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant find-again-info)]
-  }
-  @defmethod*[(((edit-menu:find-again-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (item) (send item enable (let ((target (get-edit-target-object))) (and target (is-a? target editor<%>)))))]
-  }
-  @defmethod*[(((edit-menu:create-find-again?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns @scheme[#f]
-  }
-  @defmethod*[(((edit-menu:replace-and-find-again-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the replace-and-find-again menu-item of the edit-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (item control) (void))]
-
-  }
-  @defmethod*[(((edit-menu:get-replace-and-find-again-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((edit-menu:replace-and-find-again-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(string-constant replace-and-find-again-menu-item)"
-  }
-  @defmethod*[(((edit-menu:replace-and-find-again-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant replace-and-find-again-info)]
-  }
-  @defmethod*[(((edit-menu:replace-and-find-again-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (item) (send item enable (let ((target (get-edit-target-object))) (and target (is-a? target editor<%>)))))]
-  }
-  @defmethod*[(((edit-menu:create-replace-and-find-again?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns @scheme[#f]
-  }
-  @defmethod*[(((edit-menu:between-find-and-preferences (menu (instance (subclass?/c menu%)))) void))]{
-    This method is called between the addition of the find menu-item
-    and before the addition of the preferences menu-item to the edit-menu menu.
-    Override it to add additional menus at that point.
-
-
-    Adds a separator except when @scheme[current-eventspace-has-standard-menus?] returns @scheme[#t].
-  }
-  @defmethod*[(((edit-menu:preferences-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the preferences menu-item of the edit-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (item control) (preferences:show-dialog) #t)]
-
-  }
-  @defmethod*[(((edit-menu:get-preferences-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((edit-menu:preferences-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(string-constant preferences-menu-item)"
-  }
-  @defmethod*[(((edit-menu:preferences-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant preferences-info)]
-  }
-  @defmethod*[(((edit-menu:preferences-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (menu-item) (void))]
-  }
-  @defmethod*[(((edit-menu:create-preferences?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns (not (current-eventspace-has-standard-menus?))
-  }
-  @defmethod*[(((edit-menu:after-preferences (menu (instance (subclass?/c menu%)))) void))]{
-    This method is called after the addition of the preferences menu-item
-    to the edit-menu menu.
-    Override it to add additional menus at that point.
-
-
-    Does nothing.
-  }
-  @defmethod*[(((help-menu:before-about (menu (instance (subclass?/c menu%)))) void))]{
-    This method is called before the addition of the about menu-item
-    to the help-menu menu.
-    Override it to add additional menus at that point.
-
-
-    Does nothing.
-  }
-  @defmethod*[(((help-menu:about-callback (item (instance (subclass?/c menu-item%))) (evt (instance control-event%))) void))]{
-    This method is called when the about menu-item of the help-menu menu is selected.
-
-
-    Defaultly bound to:
-    @schemeblock[
-    (λ (item control) (void))]
-
-  }
-  @defmethod*[(((help-menu:get-about-item) (instance menu-item%)))]{
-    This method returns the @scheme[menu-item%] that corresponds
-    to this menu item.
-
-  }
-  @defmethod*[(((help-menu:about-string) string))]{
-    The result of this method is the name of this menu.
-
-    defaultly returns "(string-constant about-menu-item)"
-  }
-  @defmethod*[(((help-menu:about-help-string) string))]{
-    This result of this method is used as the help string when the
-    @scheme[menu-item%]
-    object is created.
-
-
-    Defaultly returns @scheme[(string-constant about-info)]
-  }
-  @defmethod*[(((help-menu:about-on-demand (item menu-item%)) void))]{
-    The menu item's on-demand method calls this method
-
-
-    Defaultly is this:
-    @scheme[(λ (menu-item) (void))]
-  }
-  @defmethod*[(((help-menu:create-about?) boolean))]{
-    The result of this method determines if the
-    corresponding menu-item is created. Override this
-    to control the creation of the menu-item.
-
-
-    defaultly returns @scheme[#f]
-  }
-  @defmethod*[(((help-menu:after-about (menu (instance (subclass?/c menu%)))) void))]{
-    This method is called after the addition of the about menu-item
-    to the help-menu menu.
-    Override it to add additional menus at that point.
-
-
-    Does nothing.
-  }
-}
 @defmixin[frame:standard-menus-mixin (frame:basic<%>) (frame:standard-menus<%>)]{
   The result of this mixin implements
   @scheme[frame:standard-menus<%>].
@@ -1849,7 +539,7 @@
 
 
 
-    Calls @scheme[(make-object @method[frame:editor<%> get-editor%])].
+    Calls @scheme[(make-object #, @method[frame:editor<%> get-editor%])].
 
   }
   @defmethod*[(((revert) void))]{
@@ -1859,7 +549,7 @@
     is a
     @scheme[text%], the start and end positions are restored.
   }
-  @defmethod*[(((save (format (union (quote guess) (quote standard) (quote text) (quote text-force-cr) (quote same) (quote copy)) (quote same))) boolean))]{
+  @defmethod*[(((save (format (union (quote guess) (quote standard) (quote text) (quote text-force-cr) (quote same) (quote copy)) (quote same))) boolean?))]{
     Saves the file being edited, possibly calling
     @method[frame:editor<%> save-as]
     if the editor has no filename yet.
@@ -1870,7 +560,7 @@
     the user is prompted for a new filename) and returns
     @scheme[#t] if not.
   }
-  @defmethod*[(((save-as (format (union (quote guess) (quote standard) (quote text) (quote text-force-cr) (quote same) (quote copy)) (quote same))) boolean))]{
+  @defmethod*[(((save-as (format (union (quote guess) (quote standard) (quote text) (quote text-force-cr) (quote same) (quote copy)) (quote same))) boolean?))]{
     Queries the use for a file name and saves the file with that name.
 
 
@@ -1908,7 +598,7 @@
     Returns the filename in the editor returned by
     @method[frame:editor<%> get-editor].
   }
-  @defmethod*[#:mode override (((editing-this-file? (filename path)) boolean))]{
+  @defmethod*[#:mode override (((editing-this-file? (filename path)) boolean?))]{
 
     Returns @scheme[#t] if the filename is the file that this
     frame is editing.
@@ -1952,7 +642,7 @@
     if they still want to continue, calls
     @method[frame:editor<%> revert].
   }
-  @defmethod*[#:mode override (((file-menu:create-revert?) boolean))]{
+  @defmethod*[#:mode override (((file-menu:create-revert?) boolean?))]{
 
     returns #t
   }
@@ -1960,7 +650,7 @@
 
     Saves the file in the editor.
   }
-  @defmethod*[#:mode override (((file-menu:create-save?) boolean))]{
+  @defmethod*[#:mode override (((file-menu:create-save?) boolean?))]{
 
     returns #t
   }
@@ -1971,7 +661,7 @@
     @method[frame:editor<%> save-as]
     with no arguments.
   }
-  @defmethod*[#:mode override (((file-menu:create-save-as?) boolean))]{
+  @defmethod*[#:mode override (((file-menu:create-save-as?) boolean?))]{
 
     returns #t
   }
@@ -1987,7 +677,7 @@
     @scheme[preferences:get]
     with @scheme['framework:print-output-mode].
   }
-  @defmethod*[#:mode override (((file-menu:create-print?) boolean))]{
+  @defmethod*[#:mode override (((file-menu:create-print?) boolean?))]{
 
     returns #t
   }
@@ -2014,7 +704,7 @@
 
     Returns the result of (@scheme[application:current-app-name])
   }
-  @defmethod*[#:mode override (((help-menu:create-about?) boolean))]{
+  @defmethod*[#:mode override (((help-menu:create-about?) boolean?))]{
 
     returns #t
   }
@@ -2079,7 +769,7 @@
     @method[group:% get-open-here-frame]
     is @scheme[eq?] to @scheme[this].
   }
-  @defmethod*[#:mode override (((on-activate (on? boolean)) void))]{
+  @defmethod*[#:mode override (((on-activate (on? boolean?)) void))]{
 
     When @scheme[on?] is @scheme[#t], calls
     @method[group:% set-open-here-frame]
@@ -2102,7 +792,7 @@
   }
   @defmethod*[#:mode override (((get-editor<%>) interface))]{
 
-    Returns @scheme[(class->interface @scheme[text%])].
+    Returns @scheme[(class->interface text%)].
   }
 }
 @definterface[frame:pasteboard<%> (frame:editor<%>)]{
@@ -2120,7 +810,7 @@
   }
   @defmethod*[#:mode override (((get-editor<%>) interface))]{
 
-    Returns @scheme[(class->interface @scheme[pasteboard%])].
+    Returns @scheme[(class->interface pasteboard%)].
   }
 }
 @definterface[frame:delegate<%> (frame:status-line<%> frame:text<%>)]{
@@ -2133,7 +823,7 @@
     Returns the delegate text.
 
   }
-  @defmethod*[(((delegated-text-shown?) boolean))]{
+  @defmethod*[(((delegated-text-shown?) boolean?))]{
     Returns @scheme[#t] if the delegate is visible, and
     @scheme[#f] if it isn't.
 
@@ -2194,120 +884,104 @@
 }
 @definterface[frame:searchable<%> (frame:basic<%>)]{
   Frames that implement this interface support searching.
-  @defmethod*[(((get-text-to-search) (instance (subclass?/c text%))))]{
-    Override this method to specify which text to search.
+  @defmethod[(search (direction (symbols 'forward 'backward))) void?]{
+    Searches for the text in the search edit in the result of
+    @method[frame:searchable<%> get-text-to-search]. 
 
+    If the text is found and it sets the selection to the
+    found text. 
+  }
+  @defmethod*[(((replace&search) boolean?))]{
+    If the selection is currently active and set to a 
+    region that matches the search string, this method
+    replaces the selected region with the contents of
+    the replace editor and then does another search.
+  }
+  @defmethod*[(((replace-all) void?))]{
+    Loops through the text from the beginning to the end, replacing
+    all occurrences of the search string with the contents of the replace
+    edit. 
+  }
+  @defmethod*[(((can-replace?) boolean?))]{
+    Returns @scheme[#t] if a replace command would succeed
+    in replacing the current selection with the replace string.
 
-    Returns the result of
-    @method[frame:editor<%> get-editor].
+    Specifically, returns @scheme[#t] when the selected text
+    in the result of @method[frame:searchable<%>
+    get-text-to-search] is the same as the text in the find
+    text and the replace editor is visible.
+  }
+  @defmethod*[(((get-text-to-search) (is-a?/c (subclass?/c text%))))]{
+    Returns the last value passed to 
+    @method[frame:searchable<%> set-text-to-search].
+  }
+  @defmethod[(set-text-to-search [txt (or/c false/c (is-a?/c (subclass?/c text%)))]) void?]{
+    Sets the current text to be searched.
+  }
+  @defmethod[(search-hidden?) boolean?]{
+    Returns @scheme[#t] if the search subwindow is visiable and @scheme[#f] otherwise.
   }
   @defmethod*[(((hide-search) void))]{
     This method hides the searching information on the bottom of the
     frame.
 
   }
-  @defmethod*[(((unhide-search) void))]{
-    When the searching sub window is hidden, makes it visible.
-
+  @defmethod*[(((unhide-search [move-focus? boolean? #f]) void))]{
+    When the searching sub window is hidden, makes it visible. If 
+    @scheme[move-focus?] is @scheme[#f], the focus is not moved,
+    but if it is any other value, the focus is moved to the find
+    window.
   }
-  @defmethod*[(((set-search-direction (dir (union -1 1))) void))]{
-    Sets the direction that future searches will be performed.
-
-
-    If @scheme[dir] is @scheme[1] searches will be performed forwards and if 
-    @scheme[dir] is @scheme[-1] searches will be performed backwards.
+  @defmethod[(get-case-sensitive-search?) boolean?]{
+    Returns @scheme[#t] if the search is currently case-sensitive.
+    (This method's value depends on the preference 
+     @scheme['framework:case-sensitive-search?], but 
+     the preference is only consulted when the frame is created.)
   }
-  @defmethod*[(((replace&search) boolean))]{
-    Calls
-    @method[frame:searchable<%> replace]
-    and if it returns @scheme[#t], calls 
-    @method[frame:searchable<%> search-again].
+  @defmethod[(search-results-changed) void?]{
 
+    This method is called to notify the frame when the
+    search results have changed somehow. It triggers an
+    update to the red highlighting in the search window (if
+    there are no hits, but yet there is a string to search
+    for) and to the number of matches reported.
   }
-  @defmethod*[(((replace-all) void))]{
-    Loops through the text from the current position to the end, replacing
-    all occurrences of the search string with the contents of the replace
-    edit. Only searches forward, does not loop around to the beginning of
-    the text.
 
-  }
-  @defmethod*[(((replace) boolean))]{
-    If the selected text matches the search string, this method replaces
-    the text with the contents of the replace text. If the replace was
-    successful, @scheme[#t] is returned. Otherwise, @scheme[#f] is returned.
-
-  }
-  @defmethod*[(((can-replace?) boolean))]{
-    Returns @scheme[#t] if a replace command would succeed. 
-
-
-    Defaultly is @scheme[#t] when the selected text in the result of
-    @method[frame:searchable<%> get-text-to-search]
-    is the same as the text in the find text.
-  }
-  @defmethod*[(((toggle-search-focus) void))]{
-    Toggles the keyboard focus between the searching edit, the replacing edit and the result of
-    @method[frame:searchable<%> get-text-to-search].
-
-  }
-  @defmethod*[(((move-to-search-or-search) (union boolean void)))]{
-    This method moves the focus to the text that contains the search
-    string, or if the focus is there already, performs a forward search.
-
-    It returns void if the focus was not to the search text, otherwise it
-    returns a boolean indicating the success of the search.
-
-
-  }
-  @defmethod*[(((move-to-search-or-reverse-search) (union boolean void)))]{
-    This method moves the focus to the text that contains the search
-    string, or if the focus is there already, performs a reverse search.
-
-    It returns void if the focus was not to the search text, otherwise it
-    returns a boolean indicating the success of the search.
-
-  }
-  @defmethod*[(((search-again (direction Symbol (rm previous searching direction)) (beep? bool |#t|)) boolean))]{
-    Searches for the text in the search edit in the result of
-    @method[frame:searchable<%> get-text-to-search]. 
-
-
-    Returns @scheme[#t] if the text is found and sets the selection to the
-    found text. If the text is not found it returns @scheme[#f].
-  }
 }
 @defmixin[frame:searchable-mixin (frame:standard-menus<%>) (frame:searchable<%>)]{
   This mixin adds support for searching in the
   @scheme[editor<%>]
   in this frame.
 
-  The result of this mixin uses the same initialization arguments as the
-  mixin's argument.
-  @defmethod*[#:mode override (((edit-menu:find-callback (item (is-a?/c menu-item%)) (evt (is-a?/c control-event%))) void))]{
-
-    Calls
-    @method[frame:searchable<%> move-to-search-or-search].
+  @defmethod*[#:mode override (((edit-menu:find-callback) boolean?))]{
+     Toggles the focus between the find window and the window being searched.
+     When moving to the window with the search string, selects the entire
+     range in the buffer.
   }
-  @defmethod*[#:mode override (((edit-menu:create-find?) boolean))]{
-
-    returns #t
+  @defmethod*[#:mode override (((edit-menu:create-find?) boolean?))]{
+    returns @scheme[#t].
   }
-  @defmethod*[#:mode override (((edit-menu:find-again-callback) boolean))]{
 
-    Returns @scheme[#t], and searches for the same text that was last
-    searched for in the text.
+  @defmethod*[#:mode override (((edit-menu:find-again-callback (item (is-a?/c menu-item%)) (evt (is-a?/c control-event%))) void?))]{
+
+    Calls @method[frame:searchable unhide-search] and then 
+    @method[frame:searchable<%> search].
   }
-  @defmethod*[#:mode override (((edit-menu:create-find-again?) boolean))]{
-
-    returns #t
+  @defmethod*[#:mode override (((edit-menu:create-find-again?) boolean?))]{
+    returns @scheme[#t].
   }
-  @defmethod*[#:mode override (((edit-menu:replace-and-find-again-callback) boolean))]{
+  @defmethod*[#:mode override (((edit-menu:find-again-backwards-callback (item (is-a?/c menu-item%)) (evt (is-a?/c control-event%))) void?))]{
 
-    Returns @scheme[#t], and if the selected text matches the current text
-    in the find box, replaces it with the contents of the replace box and
-    searches for the next occurrence of the text in the find box.
+    Calls @method[frame:searchable unhide-search] and then 
+    @method[frame:searchable<%> search].
+  }
+  @defmethod*[#:mode override (((edit-menu:create-find-again-backwards?) boolean?))]{
+    returns @scheme[#t].
+  }
 
-
+  @defmethod*[#:mode override (((edit-menu:replace-and-find-again-callback) boolean?))]{
+    Calls @method[frame:searchable unhide-search] and then 
+    calls @method[frame:searchable<%> replace&search].
   }
   @defmethod*[#:mode override (((edit-menu:replace-and-find-again-on-demand (item menu-item%)) void))]{
 
@@ -2316,17 +990,59 @@
     returns @scheme[#f] and enables it when that method returns
     @scheme[#t].
   }
-  @defmethod*[#:mode override (((edit-menu:create-replace-and-find-again?) boolean))]{
+  @defmethod*[#:mode override (((edit-menu:create-replace-and-find-again?) boolean?))]{
 
-    returns @scheme[#t]
+    returns @scheme[#t].
   }
+
+  @defmethod*[#:mode override (((edit-menu:replace-and-find-again-backwards-callback) boolean?))]{
+    Calls @method[frame:searchable unhide-search] and then 
+    calls @method[frame:searchable<%> replace&search].
+  }
+  @defmethod*[#:mode override (((edit-menu:replace-and-find-again-backwards-on-demand (item menu-item%)) void))]{
+
+    Disables @scheme[item] when
+    @method[frame:searchable<%> can-replace?]
+    returns @scheme[#f] and enables it when that method returns
+    @scheme[#t].
+  }
+  @defmethod*[#:mode override (((edit-menu:create-replace-and-find-again-backwards?) boolean?))]{
+
+    returns @scheme[#t].
+  }
+
+  @defmethod*[#:mode override (((edit-menu:replace-all-callback) boolean?))]{
+    Calls @method[frame:searchable<%> replace-all].
+  }
+  @defmethod*[#:mode override (((edit-menu:replace-all-on-demand (item menu-item%)) void))]{
+
+    Disables @scheme[item] when
+    @method[frame:searchable<%> can-replace?]
+    returns @scheme[#f] and enables it when that method returns
+    @scheme[#t].
+  }
+  @defmethod*[#:mode override (((edit-menu:create-replace-all?) boolean?))]{
+    returns @scheme[#t].
+  }
+
+  @defmethod*[#:mode override (((edit-menu:find-case-sensitive-callback) boolean?))]{
+     Updates the state of the case-sensitive searching for this frame,
+     and sets the @scheme['framework:case-sensitive-search?] preference
+     for later frames.
+  }
+  @defmethod*[#:mode override (((edit-menu:find-case-sensitive-on-demand (item menu-item%)) void))]{
+
+    Checks @scheme[item] when searching is case-sensitive and unchecks
+    it otherwise.
+  }
+  @defmethod*[#:mode override (((edit-menu:create-find-case-sensitive?) boolean?))]{
+
+    returns @scheme[#t].
+  }
+
   @defmethod*[#:mode override (((make-root-area-container) (is-a?/c area-container<%>)))]{
 
     Builds a panel for the searching information.
-  }
-  @defmethod*[#:mode override (((on-activate) void))]{
-
-    When the frame is activated, searches will take place in this frame.
   }
   @defmethod*[#:mode augment (((on-close) void))]{
 
@@ -2338,7 +1054,7 @@
 }
 @defmixin[frame:searchable-text-mixin (frame:text<%> frame:searchable<%>) (frame:searchable-text<%>)]{
 
-  @defmethod*[#:mode override (((get-text-to-search) (instanceof text%)))]{
+  @defmethod*[#:mode override-final (((get-text-to-search) (instanceof text%)))]{
 
     Returns the result of
     @method[frame:editor<%> get-editor].
@@ -2351,7 +1067,7 @@
   @defmethod*[#:mode override (((get-editor%) (is-a?/c editor<%>)))]{
 
     Returns
-    @scheme[text:searching%].
+    @scheme[(text:searching-mixin (super get-editor%))].
   }
 }
 @defclass[frame:basic% (frame:register-group-mixin (frame:basic-mixin frame%)) ()]{}
@@ -2368,4 +1084,4 @@
 @defclass[frame:delegate% (frame:delegate-mixin frame:searchable%) ()]{}
 @defclass[frame:pasteboard% (frame:pasteboard-mixin frame:open-here%) ()]{}
 
-@(include-extracted (lib "main.ss" "framework") #rx"^frame:")
+@(include-previously-extracted "main-extracts.ss" #rx"^frame:")

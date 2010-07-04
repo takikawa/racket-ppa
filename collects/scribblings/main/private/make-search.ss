@@ -9,6 +9,7 @@
          scheme/list
          scheme/string
          scheme/match
+         scheme/path
          net/url
          (only-in scheme/class send)
          (only-in xml xexpr->string)
@@ -19,6 +20,11 @@
 (provide make-search)
 
 (define-runtime-path search-script "search.js")
+
+;; this file is used as a trampoline to set a context (a pre-filter cookie) and
+;; then hop over to the search page (the search page can do it itself, but it's
+;; to heavy to load twice).
+(define-runtime-path search-context-page "search-context.html")
 
 (define (quote-string str)
   (define (hex4 ch)
@@ -116,7 +122,7 @@
                               (error "internal error: unexpected tooltip"))]
                            [else body])])
                (values (compact-url href) (compact-body body)))]
-            [else (error "something bad happened")])))
+            [else (error "unexpected value rendered: ~e" e)])))
       (define (lib->name lib)
         (quote-string (let loop ([lib lib])
                         (match lib
@@ -166,17 +172,21 @@
                  (add-between ms ",\n  "))};
           @||})))
 
-  (let ([js (build-path dest-dir "search.js")])
-    (when (file-exists? js) (delete-file js))
-    (copy-file search-script js))
-
-  (list
-   (script-ref "plt-index.js"
-     #:noscript @list{Sorry, you must have JavaScript to use this page.})
-   (script-ref "search.js")
-   (make-element (make-with-attributes #f '((id . "plt_search_container")))
-                 null)))
+  (for ([src (list search-script search-context-page)])
+    (define dest (build-path dest-dir (file-name-from-path src)))
+    (when (file-exists? dest) (delete-file dest))
+    (copy-file src dest)))
 
 (define (make-search user-dir?)
-  (make-delayed-block (lambda (r s i)
-                        (make-paragraph (make-script user-dir? r s i)))))
+  (make-splice
+   (list
+    (make-paragraph
+     (list
+      (script-ref "plt-index.js"
+                  #:noscript
+                  @list{Sorry, you must have JavaScript to use this page.})
+      (script-ref "search.js")
+      (make-render-element null null
+                           (lambda (r s i) (make-script user-dir? r s i)))))
+    (make-styled-paragraph '()
+                           (make-with-attributes 'div '([id . "plt_search_container"]))))))

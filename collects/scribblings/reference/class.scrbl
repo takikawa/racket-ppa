@@ -444,17 +444,17 @@ The values bound to initialization variables are
 }
 
 If an initialization argument is not provided for an initialization
-variable that has an associated @scheme[default-value-expr], then the
-@scheme[default-value-expr] expression is evaluated to obtain a value
-for the variable. A @scheme[default-value-expr] is only evaluated when
+variable that has an associated @scheme[_default-value-expr], then the
+@scheme[_default-value-expr] expression is evaluated to obtain a value
+for the variable. A @scheme[_default-value-expr] is only evaluated when
 an argument is not provided for its variable. The environment of
-@scheme[default-value-expr] includes all of the initialization
+@scheme[_default-value-expr] includes all of the initialization
 variables, all of the fields, and all of the methods of the class. If
-multiple @scheme[default-value-expr]s are evaluated, they are
+multiple @scheme[_default-value-expr]s are evaluated, they are
 evaluated from left to right. Object creation and field initialization
 are described in detail in @secref["objcreation"].
 
-If an initialization variable has no @scheme[default-value-expr], then
+If an initialization variable has no @scheme[_default-value-expr], then
 the object creation or superclass initialization call must supply an
 argument for the variable, otherwise the @exnraise[exn:fail:object].
 
@@ -1472,7 +1472,7 @@ the @scheme[interface-expr]s, and the @scheme[class-clause]s are as in
 
 This forms can only be used at the top level, either within a module
 or outside. The @scheme[class-id] identifier is bound to the new
-class, and @scheme[deserialize-info:@scheme[class-id]] is also
+class, and @schemeidfont{deserialize-info:}@scheme[class-id] is also
 defined; if the definition is within a module, then the latter is
 provided from the module.
 
@@ -1627,7 +1627,7 @@ methods whose names are local (i.e., declared with
 @scheme[define-local-member-names]).}
 
 
-@defproc[(object-method-arity-includes? [object object?][sym symbol?][cnt nonnegative-exact-integer?])
+@defproc[(object-method-arity-includes? [object object?][sym symbol?][cnt exact-nonnegative-integer?])
          boolean?]{
 
 Returns @scheme[#t] if @scheme[object] has a method named @scheme[sym]
@@ -1662,10 +1662,10 @@ K%
 
 @defproc[(class-info [class class?])
          (values symbol?
-                 nonnegative-exact-integer?
+                 exact-nonnegative-integer?
                  (listof symbol?)
-                 (any/c nonnegative-exact-integer? . -> . any/c)
-                 (any/c nonnegative-exact-integer? any/c . -> . any/c)
+                 (any/c exact-nonnegative-integer? . -> . any/c)
+                 (any/c exact-nonnegative-integer? any/c . -> . any/c)
                  (or/c class? false/c)
                  boolean?)]{
 

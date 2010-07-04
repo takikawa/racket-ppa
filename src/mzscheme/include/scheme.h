@@ -415,7 +415,8 @@ typedef long (*Scheme_Secondary_Hash_Proc)(Scheme_Object *obj, void *cycle_data)
 
 #define SCHEME_NULLP(obj)    SAME_OBJ(obj, scheme_null)
 #define SCHEME_PAIRP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_pair_type)
-#define SCHEME_MUTABLE_PAIRP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_mutable_pair_type)
+#define SCHEME_MPAIRP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_mutable_pair_type)
+#define SCHEME_MUTABLE_PAIRP(obj)    SCHEME_MPAIRP(obj)
 #define SCHEME_LISTP(obj)    (SCHEME_NULLP(obj) || SCHEME_PAIRP(obj))
 
 #define SCHEME_RPAIRP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_raw_pair_type)
@@ -528,6 +529,9 @@ typedef long (*Scheme_Secondary_Hash_Proc)(Scheme_Object *obj, void *cycle_data)
 #define SCHEME_CADR(obj)     (SCHEME_CAR (SCHEME_CDR (obj)))
 #define SCHEME_CAAR(obj)     (SCHEME_CAR (SCHEME_CAR (obj)))
 #define SCHEME_CDDR(obj)     (SCHEME_CDR (SCHEME_CDR (obj)))
+
+#define SCHEME_MCAR(obj)      (((Scheme_Simple_Object *)(obj))->u.pair_val.car)
+#define SCHEME_MCDR(obj)      (((Scheme_Simple_Object *)(obj))->u.pair_val.cdr)
 
 #define SCHEME_VEC_SIZE(obj) (((Scheme_Vector *)(obj))->size)
 #define SCHEME_VEC_ELS(obj)  (((Scheme_Vector *)(obj))->els)
@@ -1006,7 +1010,7 @@ typedef struct Scheme_Thread {
 
   struct Scheme_Marshal_Tables *current_mt;
 
-  char skip_error;
+  Scheme_Object *constant_folding; /* compiler hack */
 
   Scheme_Object *(*overflow_k)(void);
   Scheme_Object *overflow_reply;
@@ -1206,6 +1210,8 @@ enum {
 
   MZCONFIG_EXPAND_OBSERVE,
 
+  MZCONFIG_LOGGER,
+
   __MZCONFIG_BUILTIN_COUNT__
 };
 
@@ -1325,6 +1331,14 @@ struct Scheme_Output_Port
 #else
 # include "../src/schexn.h"
 #endif
+
+#define SCHEME_LOG_FATAL   1
+#define SCHEME_LOG_ERROR   2
+#define SCHEME_LOG_WARNING 3
+#define SCHEME_LOG_INFO    4
+#define SCHEME_LOG_DEBUG   5
+
+typedef struct Scheme_Logger Scheme_Logger;
 
 /*========================================================================*/
 /*                               security                                 */
@@ -1630,8 +1644,10 @@ MZ_EXTERN void scheme_set_binary_mode_stdio(int);
 MZ_EXTERN void scheme_set_startup_use_jit(int);
 MZ_EXTERN void scheme_set_startup_load_on_demand(int);
 MZ_EXTERN void scheme_set_ignore_user_paths(int);
+MZ_EXTERN void scheme_set_logging(int syslog_level, int stderr_level);
 
 MZ_EXTERN int scheme_get_allow_set_undefined();
+
 
 MZ_EXTERN Scheme_Thread *scheme_current_thread;
 MZ_EXTERN Scheme_Thread *scheme_first_thread;
@@ -1687,18 +1703,17 @@ MZ_EXTERN void scheme_check_threads(void);
 MZ_EXTERN void scheme_wake_up(void);
 MZ_EXTERN int scheme_get_external_event_fd(void);
 
-/* image dump enabling startup: */
-MZ_EXTERN int scheme_image_main(int argc, char **argv);
-MZ_EXTERN int (*scheme_actual_main)(int argc, char **argv);
-MZ_EXTERN void scheme_set_actual_main(int (*m)(int argc, char **argv));
-
 /* GC registration: */
 MZ_EXTERN void scheme_set_stack_base(void *base, int no_auto_statics);
 MZ_EXTERN void scheme_set_stack_bounds(void *base, void *deepest, int no_auto_statics);
 
+/* Stack-preparation start-up: */
+typedef int (*Scheme_Nested_Main)(void *data);
+MZ_EXTERN int scheme_main_stack_setup(int no_auto_statics, Scheme_Nested_Main _main, void *data);
+
 /* More automatic start-up: */
-typedef int (*Scheme_Main)(Scheme_Env *env, int argc, char **argv);
-MZ_EXTERN int scheme_main_setup(int no_auto_statics, Scheme_Main _main, int argc, char **argv);
+typedef int (*Scheme_Env_Main)(Scheme_Env *env, int argc, char **argv);
+MZ_EXTERN int scheme_main_setup(int no_auto_statics, Scheme_Env_Main _main, int argc, char **argv);
 
 
 MZ_EXTERN void scheme_register_static(void *ptr, long size);

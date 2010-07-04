@@ -84,7 +84,7 @@ collection.  The following fields are used:
        effectively ignore the collection for
        compilation). Automatically omitted files and directories are
        @filepath{compiled}, @filepath{doc}, and those whose names
-       start with @litchar{.}
+       start with @litchar{.}.
 
        Files that are required by other files, however, are always
        compiled in the process of compiling the requiring file---even
@@ -359,7 +359,7 @@ The unit imports @scheme[compiler:option^], @scheme[dynext:compile^],
 
 @defmodule[compiler/option-unit]
 
-@defthing[option@ unit?]{
+@defthing[compiler:option@ unit?]{
 
 Provides the exports of @schememodname[compiler/option] in unit
 form. It imports no signatures, and exports

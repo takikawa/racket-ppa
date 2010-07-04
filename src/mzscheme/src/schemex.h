@@ -138,6 +138,10 @@ void (*scheme_signal_error)(const char *msg, ...);
 void (*scheme_raise_exn)(int exnid, ...);
 void (*scheme_warning)(char *msg, ...);
 void (*scheme_raise)(Scheme_Object *exn);
+int (*scheme_log_level_p)(Scheme_Logger *logger, int level);
+void (*scheme_log)(Scheme_Logger *logger, int level, int flags,
+                          char *msg, ...);
+void (*scheme_log_message)(Scheme_Logger *logger, int level, char *buffer, long len, Scheme_Object *data);
 void (*scheme_wrong_count)(const char *name, int minc, int maxc,
 				  int argc, Scheme_Object **argv);
 void (*scheme_wrong_count_m)(const char *name, int minc, int maxc,
@@ -667,6 +671,7 @@ Scheme_Object *(*scheme_write_special_evt_via_write_special)(Scheme_Output_Port 
 								    Scheme_Object *special);
 Scheme_Object *(*scheme_open_input_file)(const char *name, const char *who);
 Scheme_Object *(*scheme_open_output_file)(const char *name, const char *who);
+Scheme_Object *(*scheme_open_input_output_file)(const char *name, const char *who, Scheme_Object **oport);
 Scheme_Object *(*scheme_open_output_file_with_mode)(const char *name, const char *who, int text);
 Scheme_Object *(*scheme_make_file_input_port)(FILE *fp);
 Scheme_Object *(*scheme_make_named_file_input_port)(FILE *fp, Scheme_Object *name);

@@ -176,6 +176,11 @@ MZ_EXTERN void scheme_warning(char *msg, ...);
 
 MZ_EXTERN void scheme_raise(Scheme_Object *exn);
 
+MZ_EXTERN int scheme_log_level_p(Scheme_Logger *logger, int level);
+MZ_EXTERN void scheme_log(Scheme_Logger *logger, int level, int flags,
+                          char *msg, ...);
+MZ_EXTERN void scheme_log_message(Scheme_Logger *logger, int level, char *buffer, long len, Scheme_Object *data);
+
 MZ_EXTERN void scheme_wrong_count(const char *name, int minc, int maxc,
 				  int argc, Scheme_Object **argv);
 MZ_EXTERN void scheme_wrong_count_m(const char *name, int minc, int maxc,
@@ -791,6 +796,7 @@ MZ_EXTERN Scheme_Object *scheme_write_special_evt_via_write_special(Scheme_Outpu
 
 MZ_EXTERN Scheme_Object *scheme_open_input_file(const char *name, const char *who);
 MZ_EXTERN Scheme_Object *scheme_open_output_file(const char *name, const char *who);
+MZ_EXTERN Scheme_Object *scheme_open_input_output_file(const char *name, const char *who, Scheme_Object **oport);
 MZ_EXTERN Scheme_Object *scheme_open_output_file_with_mode(const char *name, const char *who, int text);
 
 MZ_EXTERN Scheme_Object *scheme_make_file_input_port(FILE *fp);

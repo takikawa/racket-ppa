@@ -407,7 +407,6 @@ please adhere to these guidelines:
  (enable-keybindings-in-menus "メニューのキーバインドを有効にする")
  (automatically-to-ps "自動的に PostScript ファイルに印刷する")
  (command-as-meta "Command キーを Meta キーとして処理する") ;; macos/macos x only
- (separate-dialog-for-searching "検索に別のダイアログを使う")
  (reuse-existing-frames "新しいファイルを開くときに既存のフレームを再利用する")
  (default-fonts "既定のフォント")
  (basic-gray-paren-match-color "基本グレー括弧の強調表示カラー") ; in prefs dialog
@@ -486,7 +485,6 @@ please adhere to these guidelines:
  (dock "結合")
  (undock "分離")
  (replace&find-again "置換＋再検索") ;;; need double & to get a single &
- (replace-to-end "最後まで置換")
  (forward "前方")
  (backward "後方")
  (hide "隠す")
@@ -649,7 +647,7 @@ please adhere to these guidelines:
  (keybindings-choose-user-defined-file "キーバインドを記述したファイルを選択してください")
 
  (user-defined-keybinding-error "キーバインド ~a\n\n~a を実行中にエラーが発生しました")
- (user-defined-keybinding-malformed-file "ファイル ~a には、言語 (lib \"keybinding-lang.ss\" \"framework\") で書かれたモジュールが含まれていません。")
+ (user-defined-keybinding-malformed-file "ファイル ~a には、言語 framework/keybinding-lang で書かれたモジュールが含まれていません。")
 
  ;; menu items in the "special" menu
  (insert-text-box-item "テキストボックスを挿入")
@@ -955,7 +953,7 @@ please adhere to these guidelines:
  (advanced-student "Advanced Student")
  (advanced-one-line-summary "Intermediate ＋ lambda と mutation")
  (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
- (pretty-big-scheme "Pretty Big (MrEd と Advanced Student を含む)")
+ (pretty-big-scheme "Pretty Big")
  (pretty-big-scheme-one-line-summary "syntax と HtDP 言語の関数を追加")
  (r5rs-language-name "R5RS")
  (r5rs-one-line-summary "純粋な R5RS")

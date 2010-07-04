@@ -2,8 +2,8 @@
 
 function GetCookie(key, def) {
   if (document.cookie.length <= 0) return def;
-  var cookiestrs = document.cookie.split(/; */);
-  for (var i in cookiestrs) {
+  var i, cookiestrs = document.cookie.split(/; */);
+  for (i = 0; i < cookiestrs.length; i++) {
     var cur = cookiestrs[i];
     var eql = cur.indexOf('=');
     if (eql >= 0 && cur.substring(0,eql) == key)
@@ -44,15 +44,22 @@ function NormalizePath(path) {
   return path;
 }
 
-function DoSearchKey(event, field, ver) {
+function DoSearchKey(event, field, ver, top_path) {
   var val = field.value;
-  if (event && event.keyCode == 13 && val.indexOf("...search...") < 0) {
+  if (event && event.keyCode == 13) {
     var u = GetCookie("PLT_Root."+ver, null);
-    if (u == null) u = "../"; // default: go up
+    if (u == null) u = top_path; // default: go to the top path
     location = u + "search/index.html" + "?q=" + escape(val);
     return false;
   }
   return true;
+}
+
+function TocviewToggle(glyph,id) {
+  var s = document.getElementById(id).style;
+  var expand = s.display == "none";
+  s.display = expand ? "block" : "none";
+  glyph.innerHTML = expand ? "&#9660;" : "&#9658;";
 }
 
 // `noscript' is problematic in some browsers (always renders as a

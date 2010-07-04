@@ -21,14 +21,15 @@ module browser threading seems wrong.
            (only-in mzlib/etc compose)
            string-constants
            framework
-           (lib "name-message.ss" "mrlib")
-           (lib "bitmap-label.ss" "mrlib")
-           (lib "include-bitmap.ss" "mrlib")
+           mrlib/name-message
+           mrlib/bitmap-label
+           mrlib/include-bitmap
            "drsig.ss"
            "auto-language.ss"
            "insert-large-letters.ss"
            mrlib/switchable-button
-           
+           mrlib/cache-image-snip
+
            (prefix-in drscheme:arrow: "../arrow.ss")
            
            mred
@@ -112,60 +113,117 @@ module browser threading seems wrong.
                     (or (is-a? text (get-definitions-text%))
                         (is-a? text drscheme:rep:text%))
                     (is-a? event mouse-event%))
-           (let* ([end (send text get-end-position)]
-                  [start (send text get-start-position)])
-             (unless (= 0 (send text last-position))
-               (let ([str (if (= end start)
-                              (find-symbol
-                               text
-                               (call-with-values
-                                (λ ()
-                                  (send text dc-location-to-editor-location
-                                        (send event get-x)
-                                        (send event get-y)))
-                                (λ (x y)
-                                  (send text find-position x y))))
-                              (send text get-text start end))]
-                     [language
-                      (let ([canvas (send text get-canvas)])
-                        (and canvas
-                             (let ([tlw (send canvas get-top-level-window)])
-                               (and (is-a? tlw -frame<%>)
-                                    (send (send tlw get-definitions-text)
-                                          get-next-settings)))))])
-                 (unless (string=? str "")
-                   (make-object separator-menu-item% menu)
-                   (make-object menu-item%
-                     (gui-utils:format-literal-label (string-constant search-help-desk-for) 
-                             (shorten-str 
-                              str 
-                              (- 200 (string-length (string-constant search-help-desk-for)))))
-                     menu
-                     (λ x (help-desk:help-desk str)))
-                   (void)))))))))
+           
+           (let ([add-sep
+                  (let ([added? #f])
+                    (λ ()
+                      (unless added?
+                        (set! added? #t)
+                        (new separator-menu-item% [parent menu]))))])
+             
+             (let* ([end (send text get-end-position)]
+                    [start (send text get-start-position)])
+               (unless (= 0 (send text last-position))
+                 (let* ([str (if (= end start)
+                                 (find-symbol
+                                  text
+                                  (call-with-values
+                                   (λ ()
+                                     (send text dc-location-to-editor-location
+                                           (send event get-x)
+                                           (send event get-y)))
+                                   (λ (x y)
+                                     (send text find-position x y))))
+                                 (send text get-text start end))]
+                        ;; almost the same code as "search-help-desk" in "rep.ss"
+                        [l (send text get-canvas)]
+                        [l (and l (send l get-top-level-window))]
+                        [l (and l (is-a? l -frame<%>) (send l get-definitions-text))]
+                        [l (and l (send l get-next-settings))]
+                        [l (and l (drscheme:language-configuration:language-settings-language l))]
+                        [ctxt (and l (send l capability-value 'drscheme:help-context-term))]
+                        [name (and l (send l get-language-name))])
+                   (unless (string=? str "")
+                     (add-sep)
+                     (make-object menu-item%
+                       (gui-utils:format-literal-label
+                        (string-constant search-help-desk-for) 
+                        (shorten-str 
+                         str 
+                         (- 200 (string-length (string-constant search-help-desk-for)))))
+                       menu
+                       (λ x (help-desk:help-desk str (list ctxt name))))))))
+           
+           (when (is-a? text editor:basic<%>)
+             (let-values ([(pos text) (send text get-pos/text event)])
+               (when (and pos (is-a? text text%))
+                 (send text split-snip pos)
+                 (send text split-snip (+ pos 1))
+                 (let ([snip (send text find-snip pos 'after-or-none)])
+                   (when (or (is-a? snip image-snip%)
+                             (is-a? snip cache-image-snip%))
+                     (add-sep)
+                     (new menu-item%
+                          [parent menu]
+                          [label (string-constant save-image)]
+                          [callback
+                           (λ (_1 _2)
+                             (let ([fn (put-file #f 
+                                                 (send text get-top-level-window)
+                                                 #f "untitled.png" "png")])
+                               (when fn
+                                 (let ([kind (filename->kind fn)])
+                                   (cond
+                                     [kind
+                                      (send (send snip get-bitmap) save-file fn kind)]
+                                     [else
+                                      (message-box 
+                                       (string-constant drscheme)
+                                       "Must choose a filename that ends with either .png, .jpg, .xbm, or .xpm")])))))]))))))
+           
+           (void))))))
+    
+    (define (filename->kind fn)
+      (let ([ext (filename-extension fn)])
+        (and ext
+             (let ([sym (string->symbol (bytes->string/utf-8 ext))])
+               (ormap (λ (pr) (and (eq? sym (car pr)) (cadr pr)))
+                      allowed-extensions)))))
+    
+    (define allowed-extensions '((png png)
+                                 (jpg jpeg)
+                                 (xbm xbm)
+                                 (xpm xpm)))
+    
+    
     
     ;; find-symbol : number -> string
     ;; finds the symbol around the position `pos' (approx)
     (define (find-symbol text pos)
-      (let* ([before
-              (let loop ([i (- pos 1)]
-                         [chars null])
-                (if (< i 0)
-                    chars
-                    (let ([char (send text get-character i)])
-                      (if (non-letter? char)
+      (send text split-snip pos)
+      (send text split-snip (+ pos 1))
+      (let ([snip (send text find-snip pos 'after-or-none)])
+        (if (is-a? snip string-snip%)
+            (let* ([before
+                    (let loop ([i (- pos 1)]
+                               [chars null])
+                      (if (< i 0)
                           chars
-                          (loop (- i 1)
-                                (cons char chars))))))]
-             [after
-              (let loop ([i pos])
-                (if (< i (send text last-position))
-                    (let ([char (send text get-character i)])
-                      (if (non-letter? char)
-                          null
-                          (cons char (loop (+ i 1)))))
-                    null))])
-        (apply string (append before after))))
+                          (let ([char (send text get-character i)])
+                            (if (non-letter? char)
+                                chars
+                                (loop (- i 1)
+                                      (cons char chars))))))]
+                   [after
+                    (let loop ([i pos])
+                      (if (< i (send text last-position))
+                          (let ([char (send text get-character i)])
+                            (if (non-letter? char)
+                                null
+                                (cons char (loop (+ i 1)))))
+                          null))])
+              (apply string (append before after)))
+            "")))
     
     ;; non-letter? : char -> boolean
     ;; returns #t if the character belongs in a symbol (approx) and #f it is
@@ -293,7 +351,7 @@ module browser threading seems wrong.
                       (let ([interactions-text (send f get-interactions-text)]) 
                         (when (object? interactions-text) 
                           (send interactions-text reset-highlighting)))))) 
-                
+                                
                 (define/augment (after-insert x y) 
                   (reset-highlighting) 
                   (inner (void) after-insert x y)) 
@@ -381,7 +439,7 @@ module browser threading seems wrong.
                        (λ (x) x)
                        text:info%)))))))))])
         (class* definitions-super% (definitions-text<%>)
-          (inherit get-top-level-window is-locked? lock)
+          (inherit get-top-level-window is-locked? lock while-unlocked)
           
           (define interactions-text #f)
           (define/public (set-interactions-text it)
@@ -426,7 +484,7 @@ module browser threading seems wrong.
           
           (define save-file-metadata #f)
           
-          (define/pubment (begin-metadata-changes) 
+          (define/pubment (begin-metadata-changes)
             (set! ignore-edits? #t)
             (inner (void) begin-metadata-changes))
           (define/pubment (end-metadata-changes)
@@ -445,7 +503,9 @@ module browser threading seems wrong.
                   (let ([locked? (is-locked?)])
                     (when locked? (lock #f))
                     (set! save-file-metadata metadata)
-                    (insert metadata 0 0)
+                    (while-unlocked
+                     (λ ()
+                       (insert metadata 0 0)))
                     (when locked? (lock #t)))))))
           (define/private (filename->modname filename)
             (let-values ([(base name dir) (split-path filename)])
@@ -466,7 +526,9 @@ module browser threading seems wrong.
               (let ([modified? (is-modified?)]
                     [locked? (is-locked?)])
                 (when locked? (lock #f))
-                (delete 0 (string-length save-file-metadata))
+                (while-unlocked
+                 (λ ()
+                   (delete 0 (string-length save-file-metadata))))
                 (when locked? (lock #t))
                 (set! save-file-metadata #f)
                 ;; restore modification status to where it was before the metadata is removed
@@ -557,6 +619,8 @@ module browser threading seems wrong.
                  drscheme:language-configuration:settings-preferences-symbol
                  next-settings))
               
+              (remove-auto-text)
+              (insert-auto-text)
               (after-set-next-settings _next-settings)))
           
           (define/pubment (after-set-next-settings s)
@@ -589,14 +653,18 @@ module browser threading seems wrong.
             already-warned-state)
           (define/pubment (already-warned)
             (set! already-warned-state #t))
-          
+
+          (define really-modified? #f)
           (define ignore-edits? #f)
+
           (define/augment (after-insert x y)
-            (unless ignore-edits? 
+            (unless ignore-edits?
+              (set! really-modified? #t)
               (set! needs-execution-state (string-constant needs-execute-defns-edited)))
             (inner (void) after-insert x y))
           (define/augment (after-delete x y)
             (unless ignore-edits?
+              (set! really-modified? #t)
               (set! needs-execution-state (string-constant needs-execute-defns-edited)))
             (inner (void) after-delete x y))
           
@@ -659,6 +727,47 @@ module browser threading seems wrong.
                             [(xr yr) (dc-location-to-editor-location xr-off yr-off)])
                 (values (/ (+ xl xr) 2)
                         (/ (+ yl yr) 2)))))
+
+          (define/public (still-untouched?)
+            (and (or (= (last-position) 0) (not really-modified?))
+                 (not (is-modified?))
+                 (not (get-filename))))
+          ;; inserts the auto-text if any, and executes the text if so
+          (define/private (insert-auto-text)
+            (define lang
+              (drscheme:language-configuration:language-settings-language
+               next-settings))
+            (define auto-text
+              (and (not really-modified?)
+                   (not (get-filename))
+                   (is-a? lang drscheme:module-language:module-language<%>)
+                   (send lang get-auto-text
+                         (drscheme:language-configuration:language-settings-settings
+                          next-settings))))
+            (when auto-text
+              (begin-edit-sequence #f)
+              (insert auto-text)
+              (set-modified #f)
+              (end-edit-sequence)
+              (set! really-modified? #f)
+              ;; HACK: click run; would be better to override on-execute and
+              ;; make it initialize a working repl, but the problem is that
+              ;; doing that in module-language.ss means that it'll either need
+              ;; to find if the current text is the auto-text and analyze it to
+              ;; get this initialization, or it will need to do that for all
+              ;; possible contents, which means that it'll work when opening
+              ;; exiting files too (it might be feasible once we have a #lang
+              ;; parser).
+              (send (get-top-level-window) execute-callback)))
+          (define/private (remove-auto-text)
+            (when (and (not really-modified?)
+                       (not (get-filename))
+                       (> (last-position) 0))
+              (begin-edit-sequence #f)
+              (send this erase)
+              (set-modified #f)
+              (end-edit-sequence)
+              (set! really-modified? #f)))
           
           (inherit invalidate-bitmap-cache)
           (define/public (set-error-arrows arrows)
@@ -668,6 +777,9 @@ module browser threading seems wrong.
           (define error-arrows #f)
           
           (super-new)
+          
+          ;; insert the default-text
+          (queue-callback (lambda () (insert-auto-text)))
           
           (inherit set-max-undo-history)
           (set-max-undo-history 'forever))))
@@ -774,10 +886,13 @@ module browser threading seems wrong.
         (unless (is-a? frame -frame<%>)
           (error 'func-defs-canvas "frame is not a drscheme:unit:frame<%>"))
         
-        (define sort-by-name? #f)
-        (define sorting-name (string-constant sort-by-name))
+        (define sort-by-name? (preferences:get 'drscheme:defns-popup-sort-by-name?))
+        (define sorting-name (if sort-by-name?
+                                 (string-constant sort-by-position) 
+                                 (string-constant sort-by-name)))
         (define/private (change-sorting-order)
           (set! sort-by-name? (not sort-by-name?))
+          (preferences:set 'drscheme:defns-popup-sort-by-name? sort-by-name?)
           (set! sorting-name (if sort-by-name?
                                  (string-constant sort-by-position) 
                                  (string-constant sort-by-name))))
@@ -1185,6 +1300,9 @@ module browser threading seems wrong.
                  get-area-container
                  update-info
                  get-file-menu
+                 search-hidden?
+                 unhide-search
+                 hide-search
                  file-menu:get-close-item
                  file-menu:get-save-item
                  file-menu:get-save-as-item
@@ -1463,10 +1581,6 @@ module browser threading seems wrong.
         (define/public (make-searchable canvas)
           (update-info)
           (set! search-canvas canvas))
-        (define/override (get-text-to-search)
-          (if search-canvas
-              (send search-canvas get-editor)
-              (get-editor)))
         
         (define was-locked? #f)
         
@@ -1512,10 +1626,11 @@ module browser threading seems wrong.
                                            (drscheme:language-configuration:language-settings-settings settings))
                                      ""
                                      (string-append " " (string-constant custom)))))
-            (let ([label (send scheme-menu get-label)]
-                  [new-label (send language capability-value 'drscheme:language-menu-title)])
-              (unless (equal? label new-label)
-                (send scheme-menu set-label new-label)))))
+            (when (is-a? scheme-menu menu%)
+              (let ([label (send scheme-menu get-label)]
+                    [new-label (send language capability-value 'drscheme:language-menu-title)])
+                (unless (equal? label new-label)
+                  (send scheme-menu set-label new-label))))))
         
         (define/public (get-language-menu) scheme-menu)
         
@@ -1650,9 +1765,7 @@ module browser threading seems wrong.
         
         (define/override (get-editor%) (drscheme:get/extend:get-definitions-text))
         (define/public (still-untouched?)
-          (and (= (send definitions-text last-position) 0)
-               (not (send definitions-text is-modified?))
-               (not (send definitions-text get-filename))
+          (and (send definitions-text still-untouched?)
                (let* ([prompt (send interactions-text get-prompt)]
                       [first-prompt-para
                        (let loop ([n 0])
@@ -1751,7 +1864,7 @@ module browser threading seems wrong.
         
         (inherit get-edit-target-window)
         
-        (define/private (split)
+        (define/public (split)
           (let ([canvas-to-be-split (get-edit-target-window)])
             (cond
               [(memq canvas-to-be-split definitions-canvases)
@@ -1905,7 +2018,7 @@ module browser threading seems wrong.
                     (unbox bw)
                     (unbox bh))))
         
-        (define/private (collapse)
+        (define/public (collapse)
           (let* ([target (get-edit-target-window)])
             (cond
               [(memq target definitions-canvases)
@@ -2145,7 +2258,7 @@ module browser threading seems wrong.
             (let ([start 0])
               (send definitions-text split-snip start)
               (let* ([name (send definitions-text get-port-name)]
-                     [text-port (open-input-text-editor definitions-text start 'end values name)])
+                     [text-port (open-input-text-editor definitions-text start 'end values name #t)])
                 (port-count-lines! text-port)
                 (let* ([line (send definitions-text position-paragraph start)]
                        [column (- start (send definitions-text paragraph-start-position line))]
@@ -2385,6 +2498,7 @@ module browser threading seems wrong.
                    (list x y w h)))
                (send txt get-canvases)))
         
+        (inherit set-text-to-search)
         (define/private (restore-visible-tab-regions)
           (define (set-visible-regions txt regions ints?)
             (when regions
@@ -2431,8 +2545,12 @@ module browser threading seems wrong.
             (set-visible-regions definitions-text vd #f)
             (set-visible-regions interactions-text vi #t))
           (case (send current-tab get-focus-d/i)
-            [(defs) (send (car definitions-canvases) focus)]
-            [(ints) (send (car interactions-canvases) focus)]))
+            [(defs) 
+             (send (car definitions-canvases) focus)
+             (set-text-to-search (send (car definitions-canvases) get-editor))]
+            [(ints)
+             (send (car interactions-canvases) focus)
+             (set-text-to-search (send (car interactions-canvases) get-editor))]))
         
         (define/private (pathname-equal? p1 p2)
           (with-handlers ([exn:fail:filesystem? (λ (x) #f)])
@@ -2869,6 +2987,7 @@ module browser threading seems wrong.
           (super file-menu:between-print-and-close file-menu))
         
         (define/override (edit-menu:between-find-and-preferences edit-menu)
+          (super edit-menu:between-find-and-preferences edit-menu)
           (new menu-item%
                [label (string-constant complete-word)]
                [shortcut #\/]
@@ -2881,7 +3000,6 @@ module browser threading seems wrong.
                                (is-a? ed text:autocomplete<%>)))))]
                [callback (λ (x y)
                            (send (get-edit-target-object) auto-complete))])
-          (super edit-menu:between-find-and-preferences edit-menu)
           (add-modes-submenu edit-menu))
         
         ;; capability-menu-items : hash-table[menu -o> (listof (list menu-item number key)))
@@ -2896,13 +3014,12 @@ module browser threading seems wrong.
               (hash-set! capability-menu-items menu (cons this-one old-ones)))))
         
         (define/private (update-items/capability menu)
-          (let ([new-items (get-items/capability menu)])
+          (let ([new-items (begin '(get-items/capability menu)
+                                  (send menu get-items))])
             (for-each (λ (i) (send i delete)) (send menu get-items))
             (for-each (λ (i) (send i restore)) new-items)))
         (define/private (get-items/capability menu)
-          (let loop ([capability-items 
-                      (reverse
-                       (hash-ref capability-menu-items menu (λ () '())))]
+          (let loop ([capability-items (reverse (hash-ref capability-menu-items menu '()))]
                      [all-items (send menu get-items)]
                      [i 0])
             (cond
@@ -3048,7 +3165,8 @@ module browser threading seems wrong.
                           (method text)))))]
                  [show/hide-capability-menus
                   (λ ()
-                    (for-each (λ (menu) (update-items/capability menu)) (send (get-menu-bar) get-items)))])
+                    (for-each (λ (menu) (update-items/capability menu))
+                              (send (get-menu-bar) get-items)))])
             
             (make-object menu:can-restore-menu-item%
               (string-constant choose-language-menu-item-label)
@@ -3064,17 +3182,17 @@ module browser threading seems wrong.
                     #\t
                     (string-constant execute-menu-item-help-string)))
             (make-object menu:can-restore-menu-item%
-              (string-constant break-menu-item-label)
+              (string-constant ask-quit-menu-item-label)
               scheme-menu
               (λ (_1 _2) (send current-tab break-callback))
               #\b
-              (string-constant break-menu-item-help-string))
+              (string-constant ask-quit-menu-item-help-string))
             (make-object menu:can-restore-menu-item%
-              (string-constant kill-menu-item-label)
+              (string-constant force-quit-menu-item-label)
               scheme-menu
               (λ (_1 _2) (send interactions-text kill-evaluation))
               #\k
-              (string-constant kill-menu-item-help-string))
+              (string-constant force-quit-menu-item-help-string))
             (when (custodian-memory-accounting-available?)
               (new menu-item%
                    [label (string-constant limit-memory-menu-item-label)]
@@ -3088,10 +3206,10 @@ module browser threading seems wrong.
                         (when num
                           (cond
                             [(eq? num #t)
-                             (preferences:set 'drscheme:limit-memory #f)
+                             (preferences:set 'drscheme:memory-limit #f)
                              (send interactions-text set-custodian-limit #f)]
                             [else
-                             (preferences:set 'drscheme:limit-memory 
+                             (preferences:set 'drscheme:memory-limit 
                                               (* 1024 1024 num))
                              (send interactions-text set-custodian-limit
                                    (* 1024 1024 num))]))))]))
@@ -3117,15 +3235,38 @@ module browser threading seems wrong.
               scheme-menu
               (λ (x y) (drscheme:module-overview:module-overview this)))
             (make-object separator-menu-item% scheme-menu)
-            (make-object menu:can-restore-menu-item%
-              (string-constant reindent-menu-item-label)
-              scheme-menu
-              (send-method (λ (x) (send x tabify-selection))))
-            (make-object menu:can-restore-menu-item%
-              (string-constant reindent-all-menu-item-label)
-              scheme-menu
-              (send-method (λ (x) (send x tabify-all)))
-              #\i)
+            
+            (let ([cap-val
+                   (λ ()
+                     (let* ([tab (get-current-tab)]
+                            [defs (send tab get-defs)]
+                            [settings (send defs get-next-settings)]
+                            [language (drscheme:language-configuration:language-settings-language settings)])
+                       (send language capability-value 'drscheme:tabify-menu-callback)))])
+              (new menu:can-restore-menu-item%
+                   [label (string-constant reindent-menu-item-label)]
+                   [parent scheme-menu]
+                   [demand-callback (λ (m) (send m enable (cap-val)))]
+                   [callback (send-method 
+                              (λ (x)
+                                (let ([f (cap-val)])
+                                  (when f
+                                    (f x
+                                       (send x get-start-position)
+                                       (send x get-end-position))))))])
+              
+              (new menu:can-restore-menu-item%
+                   [label (string-constant reindent-all-menu-item-label)]
+                   [parent scheme-menu]
+                   [callback 
+                    (send-method 
+                     (λ (x)
+                       (let ([f (cap-val)])
+                         (when f
+                           (f x 0 (send x last-position))))))]
+                   [shortcut #\i]
+                   [demand-callback (λ (m) (send m enable (cap-val)))]))
+            
             (make-object menu:can-restore-menu-item%
               (string-constant box-comment-out-menu-item-label)
               scheme-menu
@@ -3233,16 +3374,16 @@ module browser threading seems wrong.
             (make-object separator-menu-item% (get-show-menu))
             
             (new menu:can-restore-menu-item%
-                 (shortcut (if (eq? (system-type) 'macosx) #\r #\m))
+                 (shortcut (if (eq? (system-type) 'macosx) #f #\m))
                  (label (string-constant split-menu-item-label))
                  (parent (get-show-menu))
-                 (shortcut-prefix (if (eq? (system-type) 'macosx) 
-                                      (cons 'shift (get-default-shortcut-prefix))
-                                      (get-default-shortcut-prefix)))
                  (callback (λ (x y) (split)))
                  (demand-callback (λ (item) (split-demand item))))
             (new menu:can-restore-menu-item% 
-                 (shortcut #\r)
+                 (shortcut (if (eq? (system-type) 'macosx) #f #\m))
+                 (shortcut-prefix (if (eq? (system-type) 'macosx) 
+                                      (get-default-shortcut-prefix)
+                                      (cons 'shift (get-default-shortcut-prefix))))
                  (label (string-constant collapse-menu-item-label))
                  (parent (get-show-menu))
                  (callback (λ (x y) (collapse)))
@@ -3466,9 +3607,9 @@ module browser threading seems wrong.
         (set! newest-frame this)
         (send definitions-canvas focus)))
     
-    (define running-bitmap (include-bitmap (lib "b-run.png" "icons")))
-    (define waiting-bitmap (include-bitmap (lib "b-wait.png" "icons")))
-    (define waiting2-bitmap (include-bitmap (lib "b-wait2.png" "icons")))
+    (define running-bitmap (include-bitmap (lib "icons/b-run.png")))
+    (define waiting-bitmap (include-bitmap (lib "icons/b-wait.png")))
+    (define waiting2-bitmap (include-bitmap (lib "icons/b-wait2.png")))
     (define running/waiting-bitmaps (list running-bitmap waiting-bitmap waiting2-bitmap))
     (define running-canvas%
       (class canvas%

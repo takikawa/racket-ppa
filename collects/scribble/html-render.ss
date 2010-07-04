@@ -106,6 +106,12 @@
 
 (define-serializable-struct literal-anchor (string))
 
+(define (style->attribs raw-style)
+  (if (with-attributes? raw-style)
+      (map (lambda (p) (list (car p) (cdr p)))
+           (with-attributes-assoc raw-style))
+      null))
+
 #; ; no need for these index-local searches
 #reader scribble/reader (begin ; easier to format
 
@@ -189,20 +195,29 @@
 
 )
 
-(define (search-index-box) ; appears on every page
-  (let ([sa string-append])
+(define (make-search-box top-path) ; appears on every page
+  (let ([sa         string-append]
+        [emptylabel "...search manuals..."]
+        [dimcolor   "#888"])
     `(input
-      ([style ,(sa "font-size: 75%; margin: 0px; padding: 0px; border: 1px;"
-                   " background-color: #eee; color: #888;")]
+      ([style ,(sa "width: 16em; margin: 0px; padding: 0px;"
+                   " background-color: #eee; color: "dimcolor";"
+                   " border: 1px solid #ddd;"
+                   " text-align: center; vertical-align: middle;")]
        [type "text"]
-       [value "...search..."]
-       [onkeypress ,(format "return DoSearchKey(event, this, ~s);" (version))]
-       [onfocus ,(sa "this.style.color=\"black\";"
-                     " if (this.value.indexOf(\"...search...\")>=0)"
-                     " this.value=\"\";")]
+       [value ,emptylabel]
+       [title "Enter a search string to search the manuals"]
+       [onkeypress ,(format "return DoSearchKey(event, this, ~s, ~s);"
+                            (version) top-path)]
+       [onfocus ,(sa "this.style.color=\"black\"; "
+                     "this.style.textAlign=\"left\"; "
+                     "if (this.value == \""emptylabel"\") this.value=\"\";")]
        [onblur ,(sa "if (this.value.match(/^ *$/)) {"
-                    " this.style.color=\"#888\";"
-                    " this.value=\"...search...\"; }")]))))
+                    " this.style.color=\""dimcolor"\";"
+                    " this.style.textAlign=\"center\";"
+                    " this.value=\""emptylabel"\"; }")]))))
+(define search-box (make-search-box "../"))
+(define top-search-box (make-search-box ""))
 
 ;; ----------------------------------------
 ;;  main mixin
@@ -333,69 +348,100 @@
 
     ;; ----------------------------------------
 
-    (define/private (reveal-subparts? p)
+    (define/private (reveal-subparts? p) ;!!! need to use this
       (part-style? p 'reveal))
 
     (define/public (toc-wrap table)
       null)
 
     (define/public (render-toc-view d ri)
-      (define-values (top mine)
-        (let loop ([d d] [mine d])
-          (let ([p (collected-info-parent (part-collected-info d ri))])
-            (if p
-              (loop p (if (reveal-subparts? d) mine d))
-              (values d mine)))))
-      (define (do-part pp)
-        (let ([p (car pp)] [show-number? (cdr pp)])
-          `(tr (td ([align "right"])
-                 ,@(if show-number?
-                     (format-number
-                      (collected-info-number (part-collected-info p ri))
-                      '((tt nbsp)))
-                     '("-" nbsp)))
-               (td (a ([href
-                        ,(let ([dest (resolve-get p ri (car (part-tags p)))])
-                           (format "~a~a~a"
-                                   (from-root (relative->path (dest-path dest))
-                                              (get-dest-directory))
-                                   (if (dest-page? dest) "" "#")
-                                   (if (dest-page? dest)
-                                     ""
-                                     (anchor-name (dest-anchor dest)))))]
-                       [class ,(if (eq? p mine)
-                                 "tocviewselflink" "tocviewlink")])
-                     ,@(render-content (or (part-title-content p) '("???"))
-                                       d ri))))))
-      (define toc-content
-        (parameterize ([extra-breaking? #t])
-          (map do-part
-               (let loop ([l (map (lambda (v) (cons v #t)) (part-parts top))])
-                 (cond [(null? l) null]
-                       [(reveal-subparts? (caar l))
-                        (cons (car l)
-                              (loop (append (map (lambda (v) (cons v #f))
-                                                 (part-parts (caar l)))
-                                            (cdr l))))]
-                       [else (cons (car l) (loop (cdr l)))])))))
+      (define has-sub-parts?
+        (pair? (part-parts d)))
+      (define sub-parts-on-other-page?
+        (and (pair? (part-parts d))
+             (part-whole-page? (car (part-parts d)) ri)))
+      (define toc-chain
+        (let loop ([d d] [r (if has-sub-parts? (list d) '())])
+          (cond [(collected-info-parent (part-collected-info d ri))
+                 => (lambda (p) (loop p (cons p r)))]
+                [(pair? r) r]
+                ;; we have no toc, so use just the current part
+                [else (list d)])))
+      (define top (car toc-chain))
+      (define (toc-item->title+num t show-mine?)
+        (values
+         `((a ([href ,(let ([dest (resolve-get t ri (car (part-tags t)))])
+                        (format "~a~a~a"
+                                (from-root (relative->path (dest-path dest))
+                                           (get-dest-directory))
+                                (if (dest-page? dest) "" "#")
+                                (if (dest-page? dest)
+                                  ""
+                                  (anchor-name (dest-anchor dest)))))]
+               [class ,(if (or (eq? t d) (and show-mine? (memq t toc-chain)))
+                         "tocviewselflink"
+                         "tocviewlink")])
+              ,@(render-content (or (part-title-content t) '("???")) d ri)))
+         (format-number (collected-info-number (part-collected-info t ri))
+                        '(nbsp))))
+      (define (toc-item->block t i)
+        (define-values (title num) (toc-item->title+num t #f))
+        (define children (part-parts t)) ; note: might be empty
+        (define id (format "tocview_~a" i))
+        (define last? (eq? t (last toc-chain)))
+        (define expand? (or (and last? 
+                                 (or (not has-sub-parts?)
+                                     sub-parts-on-other-page?))
+                            (and has-sub-parts?
+                                 (not sub-parts-on-other-page?)
+                                 ;; next-to-last?
+                                 (let loop ([l toc-chain])
+                                   (cond
+                                    [(null? l) #f]
+                                    [(eq? t (car l))
+                                     (and (pair? (cdr l)) (null? (cddr l)))]
+                                    [else (loop (cdr l))])))))
+        (define top? (eq? t top))
+        (define header
+          `(table ([cellspacing "0"] [cellpadding "0"])
+             (tr ()
+               (td ([style "width: 1em;"])
+                 ,(if (null? children)
+                    'bull
+                    `(a ([href "javascript:void(0);"]
+                         [title "Expand/Collapse"]
+                         [class "tocviewtoggle"]
+                         [onclick ,(format "TocviewToggle(this,\"~a\");" id)])
+                       ,(if expand? 9660 9658))))
+               (td () ,@num)
+               (td () ,@title))))
+        `(div ([class "tocviewlist"]
+               ,@(if top? `([style "margin-bottom: 1em;"]) '()))
+           ,(if top? `(div ([class "tocviewtitle"]) ,header) header)
+           ,(if (null? children)
+              ""
+              `(div ([class ,(cond
+                              [(and top? last?) "tocviewsublistonly"]
+                              [top? "tocviewsublisttop"]
+                              [last? "tocviewsublistbottom"]
+                              [else "tocviewsublist"])]
+                     [style ,(format "display: ~a;" (if expand? 'block 'none))]
+                     [id ,id])
+                 (table ([cellspacing "0"] [cellpadding "0"])
+                   ,@(for/list ([c children])
+                       (let-values ([(t n) (toc-item->title+num c #t)])
+                         `(tr () (td ([align "right"]) ,@n) (td () ,@t)))))))))
+      (define (toc-content)
+        ;; no links -- the code constructs links where needed
+        (parameterize ([current-no-links #t]
+                       [extra-breaking? #t])
+          (for/list ([t toc-chain] [i (in-naturals)])
+            (toc-item->block t i))))
       `((div ([class "tocset"])
           ,@(if (part-style? d 'no-toc)
               null
-              (let* ([content (render-content
-                               (or (part-title-content top) '("???"))
-                               d ri)]
-                     [content (if (null? toc-content)
-                                content
-                                `((a ([href "index.html"] [class "tocviewlink"])
-                                     ,@content)))])
-                `((div ([class "tocview"])
-                       (div ([class "tocviewtitle"]) ,@content)
-                       (div nbsp)
-                       ,@(if (null? toc-content)
-                           '()
-                           (toc-wrap
-                            `(table ([class "tocviewlist"] [cellspacing "0"])
-                                    ,@toc-content)))))))
+              ;; toc-wrap determines if we get the toc or just the title !!!
+              `((div ([class "tocview"]) ,@(toc-content))))
           ,@(render-onthispage-contents
              d ri top (if (part-style? d 'no-toc) "tocview" "tocsub"))
           ,@(parameterize ([extra-breaking? #t])
@@ -528,13 +574,14 @@
                  ,title
                  ,(scribble-css-contents style-file  css-path)
                  ,(scribble-js-contents  script-file script-path))
-               (body () ,@(render-toc-view d ri)
+               (body ()
+                 ,@(render-toc-view d ri)
                  (div ([class "maincolumn"])
                    (div ([class "main"])
                      ,@(render-version d ri)
-                     ,@(navigation d ri #f)
+                     ,@(navigation d ri #t)
                      ,@(render-part d ri)
-                     ,@(navigation d ri #t))))))))))
+                     ,@(navigation d ri #f))))))))))
 
     (define/private (part-parent d ri)
       (collected-info-parent (part-collected-info d ri)))
@@ -552,16 +599,17 @@
             (values prev (and (pair? (cdr l)) (cadr l)))
             (loop (cdr l) (car l))))))
 
+    (define top-content      '("top"))
     (define contents-content '("contents"))
-    (define index-content '("index"))
-    (define prev-content '(larr " prev"))
-    (define up-content '("up"))
-    (define next-content '("next " rarr))
-    (define sep-element (make-element #f '(nbsp nbsp)))
+    (define index-content    '("index"))
+    (define prev-content     '(larr " prev"))
+    (define up-content       '("up"))
+    (define next-content     '("next " rarr))
+    (define sep-element      (make-element #f '(nbsp nbsp)))
 
     (define/public (derive-filename d) "bad.html")
 
-    (define/private (navigation d ri pre-space?)
+    (define/private (navigation d ri top?)
       (define parent (part-parent d ri))
       (define-values (prev0 next0) (find-siblings d ri))
       (define prev
@@ -589,66 +637,91 @@
                      (let ([d (last subs)])
                        (and (part-style? d 'index)
                             d))))))))
-      (define (render . content) (render-content content d ri))
-      (if (not (or prev next parent index up-path))
-        null
-        `(,@(if pre-space? '((p nbsp)) null)
-          (div ([class "navleft"])
-            ,@(render (make-element
-                       (if parent
-                         (make-target-url "index.html" #f)
-                         "nonavigation")
-                       contents-content))
-            ,@(if index
-                `(nbsp
-                  ,@(render (if (eq? d index)
-                              (make-element "nonavigation" index-content)
-                              (make-link-element
-                               #f index-content (car (part-tags index)))))
-                  #; ; no need for these index-local searches
-                  ,@(if (eq? d index)
-                      null
-                      `((span ([class "smaller"]) nbsp ,(search-index-box)))))
-                null)
-            ,@(if up-path
-                `(nbsp (span ([class "smaller"]) ,(search-index-box)))
-                null))
-          (div ([class "navright"])
-            ,@(render
-               (make-element
-                (if parent
-                  (make-target-url (if prev (derive-filename prev) "index.html")
-                                   #f)
-                  "nonavigation")
-                prev-content)
-               sep-element
-               (make-element
-                (cond
-                  ;; up-path = #t => go up to the start page, using
-                  ;; cookies to get to the user's version of it (see
-                  ;; scribblings/main/private/utils for the code that
-                  ;; creates these cookies.)
-                  [(and (eq? #t up-path) (not parent))
-                   (make-target-url
-                    "../index.html"
-                    (make-with-attributes
-                     #f `([onclick . ,(format "return GotoPLTRoot(\"~a\");"
-                                              (version))])))]
-                  [(or parent up-path)
-                   (make-target-url
-                    (cond [(not parent) up-path]
-                          [(and (toc-part? parent) (part-parent parent ri))
-                           (derive-filename parent)]
-                          [else "index.html"])
-                    #f)]
-                  [else "nonavigation"])
-                up-content)
-               sep-element
-               (make-element (if next
-                               (make-target-url (derive-filename next) #f)
-                               "nonavigation")
-                             next-content)))
-          (p nbsp))))
+      (define (render . content)
+        (render-content (filter values content) d ri))
+      (define (titled-url label x #:title-from [tfrom #f] . more)
+        (define-values (url title)
+          (cond [(part? x)
+                 (values
+                  (derive-filename x)
+                  (string-append
+                   "\""
+                   (content->string
+                    (append (format-number (collected-info-number
+                                            (part-collected-info x ri))
+                                           '(" "))
+                            (part-title-content x)))
+                   "\""))]
+                [(equal? x "index.html") (values x "the manual top")]
+                [(equal? x "../index.html") (values x "the documentation top")]
+                [(string? x) (values x #f)]
+                [else (error 'navigation "internal error ~e" x)]))
+        (define title*
+          (if (and tfrom (part? tfrom))
+            (string-append
+             "\"" (content->string (part-title-content tfrom)) "\"")
+            title))
+        (make-target-url url
+          (make-with-attributes #f
+            `([title . ,(if title* (string-append label " to " title*) label)]
+              ,@more))))
+      (define top-link
+        (titled-url
+         "up" "../index.html"
+         `[onclick . ,(format "return GotoPLTRoot(\"~a\");" (version))]))
+      (define navleft
+        `(span ([class "navleft"])
+           ,(if up-path search-box top-search-box)
+           ,@(render
+              sep-element
+              (and up-path (make-element top-link top-content))
+              ;; sep-element
+              ;; (make-element
+              ;;  (if parent (make-target-url "index.html" #f) "nonavigation")
+              ;;  contents-content)
+              ;; sep-element
+              ;; (if (or (not index) (eq? d index))
+              ;;   (make-element "nonavigation" index-content)
+              ;;   (make-link-element #f index-content (car (part-tags index))))
+              )))
+      (define navright
+        (if (not (or parent up-path next))
+          ""
+          `(span ([class "navright"])
+             ,@(render
+                (make-element
+                 (cond [(not parent) "nonavigation"]
+                       [prev (titled-url "backward" prev)]
+                       [else (titled-url "backward" "index.html"
+                                         #:title-from
+                                         (and (part? parent) parent))])
+                 prev-content)
+                sep-element
+                (make-element
+                 (cond
+                   [(and (part? parent) (toc-part? parent)
+                         (part-parent parent ri))
+                    (titled-url "up" parent)]
+                   [parent (titled-url "up" "index.html" #:title-from parent)]
+                   ;; up-path = #t => go up to the start page, using
+                   ;; cookies to get to the user's version of it (see
+                   ;; scribblings/main/private/utils for the code that
+                   ;; creates these cookies.)
+                   [(eq? #t up-path) top-link]
+                   [up-path (titled-url "up" up-path)]
+                   [else "nonavigation"])
+                 up-content)
+                sep-element
+                (make-element
+                 (if next (titled-url "forward" next) "nonavigation")
+                 next-content)))))
+      (define navbar
+        `(div ([class "navset"]
+               [style ,(let ([v (if top? 'bottom 'top)])
+                         (format "margin-~a: 2em; border-~a: ~a"
+                                 v v "2px solid #e0e0c0;"))])
+           ,navleft ,navright nbsp)) ; need nbsp to make the navset bg visible
+      (list navbar))
 
     (define/override (render-one d ri fn)
       (render-one-part d ri fn null))
@@ -707,10 +780,22 @@
       (render-flow* p part ri start-inline? #t))
 
     (define/override (render-paragraph p part ri)
-      `((p ,(if (styled-paragraph? p)
-              `([class ,(styled-paragraph-style p)])
-              `())
-          ,@(super render-paragraph p part ri))))
+      ;; HACK: for the search, we need to be able to render a `div'
+      ;; with an `id' attribute, `p' will probably work fine instead
+      ;; of `div' since it's a block element.  Do this for now.
+      (let* ([contents (super render-paragraph p part ri)]
+             [raw-style (and (styled-paragraph? p) 
+                             (flatten-style (styled-paragraph-style p)))]
+             [style (if (with-attributes? raw-style)
+                        (with-attributes-style raw-style)
+                        raw-style)])
+        `((,(if (eq? style 'div) 'div 'p)
+           ,(append
+             (if (string? style)
+                 `([class ,style]) 
+                 `()) 
+             (style->attribs raw-style))
+           ,@contents))))
 
     (define/override (render-element e part ri)
       (cond
@@ -768,18 +853,17 @@
                      ,@(if (null? (element-content e))
                          `(,(format "~s" (tag-key (link-element-tag e) ri)))
                          (render-plain-element e part ri))))))))]
-        [else (render-plain-element e part ri)]))
+        [else 
+         (when (render-element? e)
+           ((render-element-render e) this part ri))
+         (render-plain-element e part ri)]))
 
     (define/private (render-plain-element e part ri)
       (let* ([raw-style (flatten-style (and (element? e) (element-style e)))]
              [style (if (with-attributes? raw-style)
-                      (with-attributes-style raw-style)
-                      raw-style)])
-        (define (attribs)
-          (if (with-attributes? raw-style)
-            (map (lambda (p) (list (car p) (cdr p)))
-                 (with-attributes-assoc raw-style))
-            null))
+                        (with-attributes-style raw-style)
+                        raw-style)])
+        (define (attribs) (style->attribs raw-style))
         (define (render* [x 'span])
           ;; x can be a tag name, or a list of attributes, or a tag followed by
           ;; a list of attributes (internal use: no error checking!)
@@ -874,11 +958,13 @@
           [else (render*)])))
 
     (define/override (render-table t part ri need-inline?)
-      (define t-style (table-style t))
+      (define raw-style (flatten-style (table-style t)))
+      (define t-style (if (with-attributes? raw-style)
+                          (with-attributes-style raw-style)
+                          raw-style))
       (define t-style-get (if (and (pair? t-style) (list? t-style))
                             (lambda (k) (assoc k t-style))
                             (lambda (k) #f)))
-      (define index? (eq? 'index t-style))
       (define (make-row flows style)
         `(tr (,@(if style `([class ,style]) null))
            ,@(let loop ([ds flows]
@@ -915,11 +1001,9 @@
                                null))
                           ,@(render-flow d part ri #f))
                      (loop (cdr ds) (cdr as) (cdr vas))))]))))
-      `(#; ; no need for these index-local searches
-        ,@(if index? `(,search-script ,search-field) '())
-        (table ([cellspacing "0"]
+      `((table ([cellspacing "0"]
                 ,@(if need-inline?
-                    '([style "display: inline; vertical-align: top;"])
+                    '([style "display: inline-table; vertical-align: text-top;"])
                     null)
                 ,@(case t-style
                     [(boxed)    '([class "boxed"])]
@@ -929,7 +1013,8 @@
                     [else null])
                 ,@(let ([a (t-style-get 'style)])
                     (if (and a (string? (cadr a))) `([class ,(cadr a)]) null))
-                ,@(if (string? t-style) `([class ,t-style]) null))
+                ,@(if (string? t-style) `([class ,t-style]) null)
+                ,@(style->attribs raw-style))
           ,@(map make-row
                  (table-flowss t)
                  (cdr (or (t-style-get 'row-styles)
@@ -966,8 +1051,16 @@
                       `(span ([class "mywbr"]) " "))
                     (render-other (substring i (cdar m)) part ri))
              (ascii-ize i)))]
-        [(eq? i 'mdash) `(" " ndash " ")]
-        [(symbol? i) (list i)]
+        [(symbol? i)
+         (case i
+           [(mdash) '(" " ndash " ")]
+           ;; use "single left/right-pointing angle quotation mark"
+           ;; -- it's not a correct choice, but works best for now
+           ;;    (see the "Fonts with proper angle brackets"
+           ;;    discussion on the mailing list from June 2008)
+           [(lang) '(8249)]
+           [(rang) '(8250)]
+           [else (list i)])]
         [else (list (format "~s" i))]))
 
     (define/private (ascii-ize s)
@@ -1125,11 +1218,12 @@
   (define d-in? (and d (in-plt? e-d)))
   ;; use an absolute link if the link is from outside the plt tree
   ;; going in (or if d is #f)
-  (if (not (and d (cond [(equal? p-in? d-in?) #t]
-                        [d-in? (error 'from-root
-                                      "got a link from the PLT going out; ~e"
-                                      p)]
-                        [else #f])))
+  (if (not (and d (cond
+                    [(equal? p-in? d-in?) #t]
+                    [d-in? (error 'from-root
+                                  "got a link from the PLT tree going out; ~e"
+                                  p)]
+                    [else #f])))
     (url->string (path->url (path->complete-path p)))
     (let loop ([e-d e-d] [e-p e-p])
       (cond

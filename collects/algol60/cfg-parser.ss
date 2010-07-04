@@ -35,7 +35,7 @@
            mzlib/etc)
   (require-for-syntax syntax/boundmap
                       mzlib/list
-		      (lib "token-syntax.ss" "parser-tools" "private-lex"))
+		      parser-tools/private-lex/token-syntax)
 
   (provide cfg-parser)
   
@@ -686,7 +686,7 @@
 				   #f
 				   "bad grammar clause"
 				   stx
-				   (car #f))]
+				   (car clauses))]
 				 [_else
 				  (loop (cdr clauses)
 					cfg-start

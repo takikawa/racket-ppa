@@ -391,6 +391,9 @@ please adhere to these guidelines:
  (yes "Yes")
  (no "No")
  
+ ;; saving image (right click on an image to see the text)
+  (save-image "Save image...")
+  
  ;;; preferences
  (preferences "Preferences")
  (error-saving-preferences "Error saving preferences: ~a")
@@ -422,7 +425,6 @@ please adhere to these guidelines:
  (enable-keybindings-in-menus "Enable keybindings in menus")
  (automatically-to-ps "Automatically print to PostScript file")
  (command-as-meta "Treat command key as meta") ;; macos/macos x only
- (separate-dialog-for-searching "Use separate dialog for searching")
  (reuse-existing-frames "Reuse existing frames when opening new files")
  (default-fonts "Default Fonts")
  (basic-gray-paren-match-color "Basic gray parenthesis highlight color") ; in prefs dialog
@@ -505,12 +507,12 @@ please adhere to these guidelines:
  (replace "Replace")
  (dock "Dock")
  (undock "Undock")
- (replace&find-again "Replace && Find Again") ;;; need double & to get a single &
- (replace-to-end "Replace to End")
+ (replace&find "Replace && Find") ;;; need double & to get a single &
  (forward "Forward")
  (backward "Backward")
  (hide "Hide")
  (find-case-sensitive "Case sensitive")  ;; the check box in both the docked & undocked search
+  (find-anchor-based "Search using anchors")
   
  ;;; multi-file-search
  (mfs-multi-file-search-menu-item "Search in Files...")
@@ -644,15 +646,27 @@ please adhere to these guidelines:
  (select-all-info "Select the entire document")
  (select-all-menu-item "Select A&ll")
  
- (find-info "Search for a string")
- (find-menu-item "Find...")
-
- (find-again-info "Search for the same string as before")
+  (find-menu-item "Find") ;; menu item
+  (find-info "Toggles the keyboard focus between the window being searched and the search bar")
+  
+ (find-again-info "Skip to the next occurrence of the string in the find window")
  (find-again-menu-item "Find Again")
- 
- (replace-and-find-again-info "Replace the current text and search for the same string as before")
+  
+  (find-again-backwards-info "Skip to the previous occurrence of the string in the find window")
+ (find-again-backwards-menu-item "Find Again Backwards")
+  
+ (replace-and-find-again-info "Replace the current text and skip to the next occurrence")
  (replace-and-find-again-menu-item "Replace && Find Again")
 
+ (replace-and-find-again-backwards-info "Replace the current text and skip to the previous occurrence")
+ (replace-and-find-again-backwards-menu-item "Replace && Find Again Backwards")
+  
+  (replace-all-info "Replace all occurrences of the search string")
+  (replace-all-menu-item "Replace All")
+  
+  (find-case-sensitive-info "Toggles between case-sensitive and case-insensitive search")
+  (find-case-sensitive-menu-item "Find Case Sensitive")
+  
   (complete-word "Complete Word") ; the complete word menu item in the edit menu
   (no-completions "... no completions available") ; shows up in the completions menu when there are no completions (in italics)
   
@@ -677,7 +691,7 @@ please adhere to these guidelines:
  (keybindings-error-installing-file "Error when installing the keybindings ~a:\n\n~a")
   
  (user-defined-keybinding-error "Error running keybinding ~a\n\n~a")
- (user-defined-keybinding-malformed-file "The file ~a does not contain a module written in the (lib \"keybinding-lang.ss\" \"framework\") language.")  
+ (user-defined-keybinding-malformed-file "The file ~a does not contain a module written in the framework/keybinding-lang language.")  
   
  ;; menu items in the "special" menu
  (insert-text-box-item "Insert Text Box")
@@ -700,7 +714,7 @@ please adhere to these guidelines:
  (show-module-browser "Show Module Browser")
  (hide-module-browser "Hide Module Browser")
 
- (help-menu-label "&Help")
+  (help-menu-label "&Help")
  (about-info "Credits and details for this application")
  (about-menu-item "About...")
  
@@ -833,11 +847,11 @@ please adhere to these guidelines:
  (scheme-menu-name "S&cheme")
  (execute-menu-item-label "Run")
  (execute-menu-item-help-string "Restart the program in the definitions window")
- (break-menu-item-label "Stop")
- (break-menu-item-help-string "Break the current evaluation")
- (kill-menu-item-label "Kill")
- (kill-menu-item-help-string "Kill the current evaluation")
- (limit-memory-menu-item-label "Limit memory...")
+ (ask-quit-menu-item-label "Ask the Program to Quit")
+ (ask-quit-menu-item-help-string "Uses break-thread to stop the primary thread of the current evaluation")
+ (force-quit-menu-item-label "Force the Program to Quit")
+ (force-quit-menu-item-help-string "Uses custodian-shutdown-all to abort the current evaluation")
+ (limit-memory-menu-item-label "Limit Memory...")
  (limit-memory-msg-1 "The limit will take effect the next time the program")
  (limit-memory-msg-2 "is Run, and it must be at least 100 megabytes.")
  (limit-memory-unlimited "Unlimited")
@@ -998,8 +1012,8 @@ please adhere to these guidelines:
  (advanced-student "Advanced Student")
  (advanced-one-line-summary "Intermediate plus lambda and mutation")
  (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
- (pretty-big-scheme "Pretty Big (includes MrEd and Advanced Student)")
- (pretty-big-scheme-one-line-summary "Adds syntax and functions from the HtDP languages")
+ (pretty-big-scheme "Pretty Big")
+ (pretty-big-scheme-one-line-summary "Adds syntax and functions from the HtDP languages, mzscheme, & mred/mred")
  (r5rs-language-name "R5RS")
  (r5rs-one-line-summary "R5RS, with no frills")
  (expander "Expander")

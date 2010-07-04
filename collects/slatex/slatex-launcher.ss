@@ -1,8 +1,11 @@
 
-(module slatex-launcher mzscheme
-  (require "slatex-wrapper.ss")
+(module slatex-launcher scheme/base
+  (require "slatex-wrapper.ss"
+           scheme/cmdline)
 
   (define argv (current-command-line-arguments))
+  
+  (define no-latex (make-parameter #f))
   
   (case (system-type)
     [(macos)
@@ -12,12 +15,19 @@
      
      (for-each slatex (vector->list argv))]
     [(windows unix macosx)
-     (when (eq? (vector) argv)
-       (fprintf (current-error-port) "slatex: expected a file on the command line\n")
-       (exit 1))
-     (let ([result
-            (parameterize ([error-escape-handler exit])
-              (slatex (vector-ref argv 0)))])
+     (let* ([filename
+             (command-line
+              #:program "slatex"
+              #:once-each
+              [("-n" "--no-latex") "Just preprocess, don't run LaTeX"
+                                   (no-latex #t)]
+              #:args (filename)
+              filename)]
+             [result
+              (parameterize ([error-escape-handler exit])
+                (if (no-latex)
+                    (slatex/no-latex filename)
+                    (slatex filename)))])
        (if result
            (exit)
            (exit 1)))]))

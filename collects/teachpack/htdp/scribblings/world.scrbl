@@ -1,13 +1,18 @@
 #lang scribble/doc
 
-@(require scribble/manual
+@(require scribble/manual "shared.ss"
           (for-label scheme
-		     teachpack/htdp/image
-		     teachpack/htdp/world
-		     lang/private/imageeq))
+                     teachpack/htdp/image
+                     teachpack/htdp/world
+                     lang/private/imageeq))
 
-@title[#:tag "world"]{Simulations and Animations: world.ss}
+@teachpack["world"]{Simulations and Animations}
 
+@emph{Note}: For a quick and educational introduction to the teachpack, see
+@link["http://www.ccs.neu.edu/home/matthias/HtDP/Prologue/book.html"]{How
+to Design Programs, Second Edition: Prologue}. The purpose of this
+documentation is to give experienced Schemers a concise overview for using
+the library and for incorporating it elsewhere. 
 
 The teachpack provides two sets of tools. The first allows students to
 create and display a series of animated scenes, i.e., a simulation. The
@@ -20,33 +25,38 @@ second one generalizes the first by adding interactive GUI features.
 The teachpack assumes working knowledge of the basic image manipulation
 primitives and introduces a special kind of image: a scene. 
 
-@deftech{Scene}@schemeblock[(and/c image?
-			           (lambda (i)
-				     (and (= (pinhole-x i) 0) (= (pinhole-y i) 0))))]
+@deftech{Scene}@;
+@schemeblock[
+;; Image -> Boolean 
+(define (focus-at-0-0 i)	     
+  (and (= (pinhole-x i) 0) (= (pinhole-y i) 0)))
+
+(and/c image? focus-at-0-0)]
 
 The teachpack can display only @tech{Scene}s, which are images whose
 pinholes are at position @scheme[(0,0)].
 
 @defproc[(empty-scene [width natural-number/c]
-	   [height natural-number/c])
-	 (unsyntax @tech{Scene})]
-{Creates a @scheme[width] x @scheme[height] @tech{Scene}.} 
+                      [height natural-number/c])
+         (unsyntax @tech{Scene})]
+{Creates a @scheme[width] x @scheme[height] @tech{Scene}.}
 
-@defproc[(place-image [img image?] [x number?][y number?]
-	   [s (unsyntax @tech{Scene})]) (unsyntax @tech{Scene})]
+@defproc[(place-image [img image?] [x number?] [y number?]
+                      [s (unsyntax @tech{Scene})])
+         (unsyntax @tech{Scene})]
 {Creates a scene by placing @scheme[img] at @scheme[(x,y)] into @scheme[s];
- @scheme[(x,y)] are comp. graph. coordinates, i.e., they count left and
+ @scheme[(x,y)] are comp. graph. coordinates, i.e., they count right and
  down from the upper-left corner.}
 
 @section[#:tag "simulations"]{Simple Simulations}
 
 @defproc[(run-simulation
-	   [w natural-number/c]
-	   [h natural-number/c]
-	   [r number?]
-	   [create-image (-> natural-number/c scene)]
-	   [gifs? boolean? #f])
-	 true]{
+           [w natural-number/c]
+           [h natural-number/c]
+           [r number?]
+           [create-image (-> natural-number/c scene)]
+           [gifs? boolean? #f])
+         true]{
    creates and shows a canvas of width @scheme[w] and height @scheme[h] , 
    starts a clock, making it tick every @scheme[r] (usually fractional)
    seconds. Every time the clock ticks, drscheme applies @scheme[create-image] to
@@ -61,7 +71,7 @@ pinholes are at position @scheme[(0,0)].
    for describing students work.  
 }
 
-In addition, 
+In addition,
 @schemeblock[
 (define (create-UFO-scene height)
   (place-image UFO 50 height (empty-scene 100 100)))
@@ -97,8 +107,8 @@ which is called every time your program should visualize the current world.
 )]{
    Creates and displays a @scheme[width] x @scheme[height] canvas,
    starts the clock, 
-   makes it tick every n seconds, 
-   and makes @scheme[w] the current world. 
+   makes it tick every @scheme[r] seconds, 
+   and makes @scheme[world0] the current world. 
    If it is called with five instead of four arguments and the last one
    (@scheme[animated-gif?]) is @scheme[true], the teachpack allows the
    generation of images from the animation, including an animated GIF image. }
@@ -116,7 +126,13 @@ A @tech{KeyEvent} represents key board events, e.g., keys pressed or
    @scheme['release] denote arrow keys or special events, such as releasing
    the key on the keypad.
 
-@defproc[(on-key-event [change (-> (unsyntax @tech{World}) (unsyntax @tech{KeyEvent}) (unsyntax @tech{World}))]) true]{
+@defproc[(key-event? [x any]) boolean?]{
+   is @scheme[x] a @tech{KeyEvent}}
+
+@defproc[(ke=? [x key-event?][y key-event?]) boolean?]{
+   compares two @tech{KeyEvent} for equality}
+
+@defproc[(on-key-event [change (-> (unsyntax @tech{World}) key-event? (unsyntax @tech{World}))]) true]{
    Tell DrScheme to call @scheme[change] on the current world and a 
    @tech{KeyEvent} for every keystroke the user of the computer makes. The result
    of the call becomes the current world.
@@ -127,12 +143,11 @@ A @tech{KeyEvent} represents key board events, e.g., keys pressed or
 (schemeblock
 (define (change w a-key-event)
   (cond
-    [(char? a-key-event) w]
-    ;; else (symbol? a-key-event) holds
-    [(symbol=? a-key-event 'left)  (world-go w -DELTA)]
-    [(symbol=? a-key-event 'right) (world-go w +DELTA)]
-    [(symbol=? a-key-event 'up)    (world-go w -DELTA)]
-    [(symbol=? a-key-event 'down)  (world-go w +DELTA)]
+    [(ke=? a-key-event 'left)  (world-go w -DELTA)]
+    [(ke=? a-key-event 'right) (world-go w +DELTA)]
+    [(char? a-key-event) w] ;; to demonstrate order-free checking 
+    [(ke=? a-key-event 'up)    (world-go w -DELTA)]
+    [(ke=? a-key-event 'down)  (world-go w +DELTA)]
     [else w]))
 ))
 

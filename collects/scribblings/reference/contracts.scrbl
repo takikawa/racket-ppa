@@ -145,7 +145,7 @@ between @scheme[j] and @scheme[k], inclusive.}
 A flat contract that requires the input to be an exact non-negative integer.}
 
 
-@defproc[(string-len/c [len nonnegative-exact-integer?]) flat-contract?]{
+@defproc[(string-len/c [len exact-nonnegative-integer?]) flat-contract?]{
 
 Returns a flat contract that recognizes strings that have fewer than
 @scheme[len] characters.}
@@ -399,7 +399,7 @@ return multiple values. If present, the @scheme[rest-expr]
 contract governs the arguments in the rest parameter.
 
 As an example, the contract 
-@schemeblock[(->* () (boolean? #:x integer?) #:rest (listof symbol?) (symbol?))] 
+@schemeblock[(->* () (boolean? #:x integer?) #:rest (listof symbol?) symbol?)] 
 matches functions that optionally accept a boolean, an
 integer keyword argument @scheme[#:x] and arbitrarily more
 symbols, and that return a symbol.
@@ -453,6 +453,10 @@ If the identifier position of the range contract is
 expressions are evaluated when the function is called (and
 the underscore is not bound in the range). Otherwise the
 range expressions are evaluated when the function returns.
+
+If there are optional arguments that are not supplied, then 
+the corresponding variables will be bound to a special value
+called the @scheme[unsupplied-arg] value.
 }
 
 @defform*/subs[#:literals (any values ->)

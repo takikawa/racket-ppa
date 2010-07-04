@@ -1,5 +1,5 @@
 
-(module slatex-wrapper mzscheme
+(module slatex-wrapper scheme/base
   (require mzlib/file
 	   mzlib/process
 	   mzlib/sendevent
@@ -7,7 +7,7 @@
 
   (provide slatex latex pdf-slatex pdf-latex slatex/no-latex
            filename->latex-filename)
-
+  
   (define (add-suffix p s)
     (path->string
      (bytes->path 
@@ -15,7 +15,7 @@
        (path->bytes (if (string? p) (string->path p) p)) s))))
 
   (define (filename->latex-filename input-file)
-    (let ([norm (normalize-path input-file)])
+    (let* ([norm (normalize-path input-file)])
       (cond
         [(file-exists? norm) input-file]
         [(file-exists? (add-suffix norm #".tex"))

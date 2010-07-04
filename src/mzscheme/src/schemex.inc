@@ -83,6 +83,9 @@
   scheme_extension_table->scheme_raise_exn = scheme_raise_exn;
   scheme_extension_table->scheme_warning = scheme_warning;
   scheme_extension_table->scheme_raise = scheme_raise;
+  scheme_extension_table->scheme_log_level_p = scheme_log_level_p;
+  scheme_extension_table->scheme_log = scheme_log;
+  scheme_extension_table->scheme_log_message = scheme_log_message;
   scheme_extension_table->scheme_wrong_count = scheme_wrong_count;
   scheme_extension_table->scheme_wrong_count_m = scheme_wrong_count_m;
   scheme_extension_table->scheme_case_lambda_wrong_count = scheme_case_lambda_wrong_count;
@@ -445,6 +448,7 @@
   scheme_extension_table->scheme_write_special_evt_via_write_special = scheme_write_special_evt_via_write_special;
   scheme_extension_table->scheme_open_input_file = scheme_open_input_file;
   scheme_extension_table->scheme_open_output_file = scheme_open_output_file;
+  scheme_extension_table->scheme_open_input_output_file = scheme_open_input_output_file;
   scheme_extension_table->scheme_open_output_file_with_mode = scheme_open_output_file_with_mode;
   scheme_extension_table->scheme_make_file_input_port = scheme_make_file_input_port;
   scheme_extension_table->scheme_make_named_file_input_port = scheme_make_named_file_input_port;

@@ -155,6 +155,11 @@ A @deftech{block} is either a @techlink{table}, an
                          the browser, or for rendering to other
                          formats.}
 
+                   @item{An instance of @scheme[render-element] has a
+                         procedure that is called in the
+                         @techlink{render pass} of document
+                         processing.}
+
              }}}}
 
        @item{A @deftech{delayed block} is an instance of
@@ -269,6 +274,12 @@ are as follows:
 
  @item{@scheme['hidden] --- the part title is not shown in rendered output.}
 
+ @item{@scheme['quiet] --- in HTML output and most other output modes,
+       hides entries for sub-parts of this part in a
+       @scheme[table-of-contents] or @scheme[local-table-of-contents]
+       listing except when those sub-parts are top-level entries in
+       the listing.}
+
  @item{@scheme['no-toc] --- as a style for the main part of a
        document, causes the HTML output to not include a margin box
        for the main table of contents; the ``on this page'' box that
@@ -325,10 +336,22 @@ A @techlink{paragraph} has a list of @tech{elements}.
 
 @defstruct[(styled-paragraph paragraph) ([style any/c])]{
 
-The @scheme[style] is normally a string that corresponds to a CSS
-class for HTML output.
+The @scheme[style] can be
 
-}
+@itemize[
+
+ @item{A string that corresponds to a CSS class for HTML output or a
+       macro for Latex output.}
+
+ @item{An instance of @scheme[with-attributes], which combines a base
+       style with a set of additional HTML attributes.}
+
+ @item{The symbol @scheme['div], which generates @tt{<div>} HTML
+       output instead of @tt{<p>}. For Latex output, a string for a
+       macro name is extracted from the @scheme['class] mapping of a
+       @scheme[with-attributes] wrapper, if one is present.}
+
+]}
 
 
 @defstruct[table ([style any/c]
@@ -339,7 +362,43 @@ the table can span multiple columns by using @scheme['cont] instead of
 a flow in the following columns (i.e., for all but the first in a set
 of cells that contain a single flow).
 
-}
+The @scheme[style] can be any of the following:
+
+@itemize[
+
+ @item{A string that corresponds to a CSS class for
+       HTML output.}
+
+ @item{@scheme['boxed] to render as a definition.}
+
+ @item{@scheme['centered] to render centered horizontally.}
+
+ @item{@scheme['at-left] to render left-aligned (HTML only).}
+
+ @item{@scheme['at-right] to render right-aligned (HTML only).}
+
+ @item{An association list with the following optional mappings:
+
+       @itemize[ 
+ 
+         @item{@scheme['style] to a string for a CSS class for HTML output.}
+
+         @item{@scheme['row-styles] to a list of association lists,
+               one for each row in the table. Each of these nested
+               association lists maps @scheme['alignment] and
+               @scheme['valignment] to a list of symbols an
+               @scheme[#f]s, one for each column. The symbols in an
+               @scheme['alignment] list can be @scheme['left],
+               @scheme['right], or @scheme['center]. The symbols in a
+               @scheme['valignment] list can be @scheme['top],
+               @scheme['baseline], or @scheme['bottom].}
+
+         ]}
+
+  @item{An instance of @scheme[with-attributes], which combines a base
+       style with a set of additional HTML attributes.}
+
+]}
 
 
 @defstruct[itemization ([flows (listof flow?)])]{
@@ -546,11 +605,24 @@ element remains intact (i.e., it is not replaced) by either the
 
 }
 
+@defstruct[(render-element element) ([render (any/c part? resolve-info? . -> . any)])]{
+
+Like @scheme[delayed-element], but the @scheme[render] procedure is called
+during the @techlink{render pass}.
+
+If a @scheme[render-element] instance is serialized (such as when
+saving collected info), it is reduced to a @scheme[element] instance.
+
+}
+
 @defstruct[with-attributes ([style any/c]
                             [assoc (listof (cons/c symbol? string?))])]{
 
 Used for an @scheme[element]'s style to combine a base style with
-arbitrary HTML attributes.}
+arbitrary HTML attributes. When the @scheme[style] field is itself an
+instance of @scheme[with-attributes], its content is automatically
+flattened into the enclosing @scheme[with-attributes] when it is used
+(when, e.g., rendering an @tech{element} or a styled @tech{paragraph}).}
 
 
 @defstruct[collected-info ([number (listof (or/c false/c integer?))]
@@ -623,14 +695,14 @@ Like @scheme[content->string], but for a single @tech{element}.
 
 }
 
-@defproc[(element-width (element any/c)) nonnegative-exact-integer?]{
+@defproc[(element-width (element any/c)) exact-nonnegative-integer?]{
 
 Returns the width in characters of the given @tech{element}.
 
 }
 
 
-@defproc[(block-width (e block?)) nonnegative-exact-integer?]{
+@defproc[(block-width (e block?)) exact-nonnegative-integer?]{
 
 Returns the width in characters of the given @tech{block}.}
 

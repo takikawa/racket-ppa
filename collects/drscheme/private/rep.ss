@@ -34,8 +34,6 @@ TODO
 
 (provide rep@ with-stacktrace-name)
 
-(define-struct unsaved-editor (editor))
-
 (define stacktrace-runtime-name
   (string->uninterned-symbol "this-is-the-funny-name"))
 
@@ -134,7 +132,7 @@ TODO
       ;; (disable buttons, menus, etc)
       
       disable-evaluation ;; (-> void)
-      ;; make the context enable all methods of evaluation
+      ;; make the context disable all methods of evaluation
       ;; (disable buttons, menus, etc)
       
       set-breakables ;; (union thread #f) (union custodian #f) -> void
@@ -254,93 +252,45 @@ TODO
            (eq? fn-name stacktrace-runtime-name))))
   
   (define drs-bindings-keymap (make-object keymap:aug-keymap%))
+
+  (let* ([get-frame
+          (λ (obj)
+            (and (is-a? obj editor<%>)
+                 (let ([canvas (send obj get-canvas)])
+                   (and canvas
+                        (let ([frame (send canvas get-top-level-window)])
+                          (and (is-a? frame drscheme:unit:frame%)
+                               frame))))))]
+         [add-drs-function
+          (λ (name f)
+            (send drs-bindings-keymap add-function name
+                  (λ (obj evt) (cond [(get-frame obj) => f]))))])
+    (send drs-bindings-keymap add-function "search-help-desk"
+          (λ (obj evt)
+            (if (not (and (is-a? obj text%) (get-frame obj))) ; is `get-frame' needed?
+              (drscheme:help-desk:help-desk)
+              (let* ([start (send obj get-start-position)]
+                     [end (send obj get-end-position)]
+                     [str (if (= start end)
+                            (drscheme:unit:find-symbol obj start)
+                            (send obj get-text start end))])
+                (if (or (not str) (equal? "" str))
+                  (drscheme:help-desk:help-desk)
+                  (let* ([l (send obj get-canvas)]
+                         [l (and l (send l get-top-level-window))]
+                         [l (and l (is-a? l drscheme:unit:frame<%>) (send l get-definitions-text))]
+                         [l (and l (send l get-next-settings))]
+                         [l (and l (drscheme:language-configuration:language-settings-language l))]
+                         [ctxt (and l (send l capability-value 'drscheme:help-context-term))]
+                         [name (and l (send l get-language-name))])
+                    (drscheme:help-desk:help-desk
+                     str (and ctxt (list ctxt name)))))))))
+    (add-drs-function "execute"  (λ (frame) (send frame execute-callback)))
+    (add-drs-function "next-tab" (λ (frame) (send frame next-tab)))
+    (add-drs-function "prev-tab" (λ (frame) (send frame prev-tab)))
+    (add-drs-function "collapse" (λ (frame) (send frame collapse)))
+    (add-drs-function "split"    (λ (frame) (send frame split))))
   
-  (let ([with-drs-frame
-         (λ (obj f)
-           (when (is-a? obj editor<%>)
-             (let ([canvas (send obj get-canvas)])
-               (when canvas
-                 (let ([frame (send canvas get-top-level-window)])
-                   (when (is-a? frame drscheme:unit:frame%)
-                     (f frame)))))))])
-    
-    (send drs-bindings-keymap add-function
-          "search-help-desk"
-          (λ (obj evt)
-            (with-drs-frame
-             obj
-             (λ (frame)
-               (cond
-                 [(is-a? obj text%)
-                  (let* ([start (send obj get-start-position)]
-                         [end (send obj get-end-position)]
-                         [str (if (= start end)
-                                  (drscheme:unit:find-symbol obj start)
-                                  (send obj get-text start end))])
-                    (if (equal? "" str)
-                        (drscheme:help-desk:help-desk)
-                        (let ([language (let ([canvas (send obj get-canvas)])
-                                          (and canvas
-                                               (let ([tlw (send canvas get-top-level-window)])
-                                                 (and (is-a? tlw drscheme:unit:frame<%>)
-                                                      (send (send tlw get-definitions-text)
-                                                            get-next-settings)))))])
-                          (drscheme:help-desk:help-desk str))))]
-                 [else                   
-                  (drscheme:help-desk:help-desk)])))))
-    
-    (send drs-bindings-keymap add-function
-          "execute"
-          (λ (obj evt)
-            (with-drs-frame
-             obj
-             (λ (frame)
-               (send frame execute-callback)))))
-    
-    (let ([shift-focus
-           (λ (adjust frame)
-             (let ([candidates (adjust (append
-                                        (send frame get-definitions-canvases)
-                                        (send frame get-interactions-canvases)))])
-               (let loop ([cs candidates])
-                 (cond
-                   [(null? cs) (send (car candidates) focus)]
-                   [else
-                    (let ([c (car cs)])
-                      (if (send c has-focus?)
-                          (send (if (null? (cdr cs))
-                                    (car candidates)
-                                    (cadr cs))
-                                focus)
-                          (loop (cdr cs))))]))))])
-      (send drs-bindings-keymap add-function
-            "toggle-focus-between-definitions-and-interactions"
-            (λ (obj evt)
-              (with-drs-frame 
-               obj
-               (λ (frame) (shift-focus values frame)))))
-      (send drs-bindings-keymap add-function
-            "toggle-focus-between-definitions-and-interactions backwards"
-            (λ (obj evt)
-              (with-drs-frame 
-               obj
-               (λ (frame) (shift-focus reverse frame))))))
-    (send drs-bindings-keymap add-function
-          "next-tab"
-          (λ (obj evt)
-            (with-drs-frame 
-             obj
-             (λ (frame) (send frame next-tab)))))
-    (send drs-bindings-keymap add-function
-          "prev-tab"
-          (λ (obj evt)
-            (with-drs-frame 
-             obj
-             (λ (frame) (send frame prev-tab))))))
-  
-  (send drs-bindings-keymap map-function "c:x;o" "toggle-focus-between-definitions-and-interactions")
-  (send drs-bindings-keymap map-function "c:x;p" "toggle-focus-between-definitions-and-interactions backwards")
-  (send drs-bindings-keymap map-function "c:f6" "toggle-focus-between-definitions-and-interactions")
   (send drs-bindings-keymap map-function "f5" "execute")
   (send drs-bindings-keymap map-function "f1" "search-help-desk")
   (send drs-bindings-keymap map-function "c:tab" "next-tab")
@@ -349,6 +299,9 @@ TODO
   (send drs-bindings-keymap map-function "d:s:left" "prev-tab")
   (send drs-bindings-keymap map-function "c:pagedown" "next-tab")
   (send drs-bindings-keymap map-function "c:pageup" "prev-tab")
+  
+  (send drs-bindings-keymap map-function "c:x;0" "collapse")
+  (send drs-bindings-keymap map-function "c:x;2" "split")
   
   (define (get-drs-bindings-keymap) drs-bindings-keymap)
   
@@ -690,31 +643,45 @@ TODO
       (define/public (highlight-errors raw-locs raw-error-arrows)
         (let* ([cleanup-locs
                 (λ (locs)
-                  (filter (λ (loc) (and (is-a? (srcloc-source loc) text:basic<%>)
-                                        (number? (srcloc-position loc))
-                                        (number? (srcloc-span loc))))
-                          (map (λ (srcloc)
-                                 (cond
-                                   [(send definitions-text port-name-matches? (srcloc-source srcloc))
-                                    (make-srcloc definitions-text
-                                                 (srcloc-line srcloc)
-                                                 (srcloc-column srcloc)
-                                                 (srcloc-position srcloc)
-                                                 (srcloc-span srcloc))]
-                                   [(port-name-matches? (srcloc-source srcloc))
-                                    (make-srcloc this
-                                                 (srcloc-line srcloc)
-                                                 (srcloc-column srcloc)
-                                                 (srcloc-position srcloc)
-                                                 (srcloc-span srcloc))]
-                                   [(unsaved-editor? (srcloc-source srcloc))
-                                    (make-srcloc (unsaved-editor-editor (srcloc-source srcloc))
-                                                 (srcloc-line srcloc)
-                                                 (srcloc-column srcloc)
-                                                 (srcloc-position srcloc)
-                                                 (srcloc-span srcloc))]
-                                   [else srcloc]))
-                               locs)))]
+                  (let ([ht (make-hasheq)])
+                    (filter (λ (loc) (and (is-a? (srcloc-source loc) text:basic<%>)
+                                          (number? (srcloc-position loc))
+                                          (number? (srcloc-span loc))))
+                            (map (λ (srcloc)
+                                   (cond
+                                     [(hash-ref ht (srcloc-source srcloc) #f)
+                                      =>
+                                      (λ (e) 
+                                        (make-srcloc e
+                                                     (srcloc-line srcloc)
+                                                     (srcloc-column srcloc)
+                                                     (srcloc-position srcloc)
+                                                     (srcloc-span srcloc)))]
+                                     [(send definitions-text port-name-matches? (srcloc-source srcloc))
+                                      (hash-set! ht (srcloc-source srcloc) definitions-text)
+                                      (make-srcloc definitions-text
+                                                   (srcloc-line srcloc)
+                                                   (srcloc-column srcloc)
+                                                   (srcloc-position srcloc)
+                                                   (srcloc-span srcloc))]
+                                     [(port-name-matches? (srcloc-source srcloc))
+                                      (hash-set! ht (srcloc-source srcloc) definitions-text)
+                                      (make-srcloc this
+                                                   (srcloc-line srcloc)
+                                                   (srcloc-column srcloc)
+                                                   (srcloc-position srcloc)
+                                                   (srcloc-span srcloc))]
+                                     [(and (symbol? (srcloc-source srcloc))
+                                           (text:lookup-port-name (srcloc-source srcloc)))
+                                      =>
+                                      (lambda (editor)
+                                        (make-srcloc editor
+                                                     (srcloc-line srcloc)
+                                                     (srcloc-column srcloc)
+                                                     (srcloc-position srcloc)
+                                                     (srcloc-span srcloc)))]
+                                     [else srcloc]))
+                                 locs))))]
                [locs (cleanup-locs raw-locs)]
                [error-arrows (and raw-error-arrows (cleanup-locs raw-error-arrows))])
           
@@ -731,7 +698,7 @@ TODO
                                  [start (- (srcloc-position loc) 1)]
                                  [span (srcloc-span loc)]
                                  [finish (+ start span)])
-                            (send file highlight-range start finish (drscheme:debug:get-error-color) #f #f 'high)))
+                            (send file highlight-range start finish (drscheme:debug:get-error-color) #f 'high)))
                         locs)])
               
               (when (and definitions-text error-arrows)
@@ -766,8 +733,12 @@ TODO
             (when first-loc
               (send first-file set-caret-owner (get-focus-snip) 'global)))))
       
+      (define highlights-can-be-reset (make-parameter #t))
       (define/public (reset-highlighting)
-        (reset-error-ranges))
+        (when (highlights-can-be-reset) (reset-error-ranges)))
+      (define/public (call-without-reset-highlighting thunk)
+        (parameterize ([highlights-can-be-reset #f])
+          (thunk)))
       
       ;; remove-duplicate-error-arrows : (listof X) -> (listof X)
       ;; duplicate arrows point from and to the same place -- only
@@ -870,7 +841,7 @@ TODO
              (memory-killed-thread #f)
              (user-custodian #f)
              (custodian-limit (and (custodian-memory-accounting-available?)
-                                   (preferences:get 'drscheme:limit-memory)))
+                                   (preferences:get 'drscheme:memory-limit)))
              (user-eventspace-box (make-weak-box #f))
              (user-namespace-box (make-weak-box #f))
              (user-eventspace-main-thread #f)
@@ -892,29 +863,39 @@ TODO
              (ask-about-kill? #f))
       (define/public (get-in-evaluation?) in-evaluation?)
       
-      (define/private (insert-warning message)
-        (begin-edit-sequence)
-        (let ([start (get-insertion-point)])
-          (insert-before message)
-          (let ([end (get-insertion-point)])
-            (change-style warning-style-delta start end)))
-        (insert-before "\n")
-        (end-edit-sequence))
+      (define/public-final (insert-warning message)
+        (let ([locked? (is-locked?)])
+          (when locked? (lock #f))
+          (begin-edit-sequence)
+          (let ([start (get-unread-start-point)])
+            (insert-before message)
+            (let ([end (get-unread-start-point)])
+              (change-style warning-style-delta start end)
+              (insert-before "\n")))
+          (end-edit-sequence)
+          (when locked? (lock #t))))
       
-      (field (already-warned? #f))
+      (field (already-warned? #f)
+             (show-no-user-evaluation-message? #t))
+      
+      ;; use this to be able to kill the evaluator without the popup dialog
+      (define/public (set-show-no-user-evaluation-message? b)
+        (set! show-no-user-evaluation-message? b))
       
       (define/private (cleanup)
         (set! in-evaluation? #f)
         (update-running #f)
         (unless (and (get-user-thread) (thread-running? (get-user-thread)))
           (lock #t)
-          (unless shutting-down?
+          (when (and show-no-user-evaluation-message? (not shutting-down?))
             (no-user-evaluation-message
              (let ([canvas (get-active-canvas)])
                (and canvas
                     (send canvas get-top-level-window)))
              user-exit-code
-             (not (thread-running? memory-killed-thread))))))
+             (not (thread-running? memory-killed-thread))))
+          (set! show-no-user-evaluation-message? #t)))
+      
       (field (need-interaction-cleanup? #f))
       
       (define/private (no-user-evaluation-message frame exit-code memory-killed?)
@@ -946,8 +927,9 @@ TODO
                      )])
           (when (equal? ans 3)
             (set-custodian-limit new-limit)
-            (preferences:set 'drscheme:limit-memory new-limit))
-          (void)))
+            (preferences:set 'drscheme:memory-limit new-limit))
+          (set-insertion-point (last-position))
+          (insert-warning "\n[Interactions disabled]")))
       
       (define/private (cleanup-interaction) ; =Kernel=, =Handler=
         (set! need-interaction-cleanup? #f)
@@ -1125,6 +1107,8 @@ TODO
              (update-running #f)
              (cleanup)
              (flush-output (get-value-port))
+             (when complete-program?
+               (send lang front-end/finished-complete-program settings))
              (queue-system-callback/sync
               (get-user-thread)
               (λ () ; =Kernel=, =Handler= 
@@ -1157,7 +1141,6 @@ TODO
              
              (cleanup-sucessful 'not-yet-cleanup-sucessful)
              (cleanup-semaphore 'not-yet-cleanup-semaphore)
-             (thread-grace 'not-yet-thread-grace)
              (thread-killed 'not-yet-thread-killed))
       (define/private (initialize-killed-thread) ; =Kernel=
         (when (thread? thread-killed)
@@ -1172,7 +1155,13 @@ TODO
                     (λ () ; =Kernel=, =Handler=
                       (if need-interaction-cleanup?
                           (cleanup-interaction)
-                          (cleanup)))))))))
+                          (cleanup))
+                      ;; HACK: lock the interactions now; the reason for this
+                      ;; is that `cleanup-interaction' invokes
+                      ;; `enable-evaluation', and in "unit.ss" this is defined
+                      ;; to unlock the interactions which might make sense in
+                      ;; that context.
+                      (lock #t))))))))
       
       (define/public (run-in-evaluation-thread thunk) ; =Kernel=
         (semaphore-wait eval-thread-state-sema)

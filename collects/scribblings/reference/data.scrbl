@@ -133,6 +133,11 @@ for each pair of keywords is the same as using
 @; ------------------------------------------------------------
 @section[#:tag "boxes"]{Boxes}
 
+@guideintro["boxes"]{boxes}
+
+A @deftech{box} is like a single-element vector, normally used as
+minimal mutable storage.
+
 @defproc[(box? [v any/c]) boolean?]{
 
 Returns @scheme[#t] if @scheme[v] is a box, @scheme[#f] otherwise.}
@@ -150,8 +155,10 @@ Returns a new immutable box that contains @scheme[v].}
 
 @defproc[(unbox [box box?]) any/c]{
 
-Returns the content of @scheme[box]. For any @scheme[v],
-@scheme[(unbox (box @scheme[v]))] returns @scheme[v].}
+Returns the content of @scheme[box].}
+
+
+For any @scheme[v], @scheme[(unbox (box v))] returns @scheme[v].
 
 
 @defproc[(set-box! [box (and/c box? (not/c immutable?))]

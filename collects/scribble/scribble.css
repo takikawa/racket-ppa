@@ -2,7 +2,7 @@
 /* CSS seems backward: List all the classes for which we want a
    particular font, so that the font can be changed in one place.  (It
    would be nicer to reference a font definition from all the places
-   that we want it.) 
+   that we want it.)
 
    As you read the rest of the file, remember to double-check here to
    see if any font is set. */
@@ -23,6 +23,13 @@
 /* Sans-serif: */
 .version {
   font-family: sans-serif;
+}
+
+/* ---------------------------------------- */
+
+h3, h4, h5, h6, h7, h8 {
+  margin-top: 1.75em;
+  margin-bottom: 0.5em;
 }
 
 /* ---------------------------------------- */
@@ -51,18 +58,25 @@ table td {
 /* ---------------------------------------- */
 /* Navigation */
 
-.navleft { 
+.navset {
+  background-color: #f0f0e0;
+  padding: 0.25em 0 0.25em 0;
+}
+
+.navleft {
+  margin-left: 1ex;
   position: relative;
   float: left;
   white-space: nowrap;
 }
-.navright { 
+.navright {
+  margin-right: 1ex;
   position: relative;
   float: right;
   white-space: nowrap;
 }
 .nonavigation {
-  color: #EEEEEE;
+  color: #e0e0e0;
 }
 
 /* ---------------------------------------- */
@@ -109,15 +123,15 @@ table td {
 /* Table of contents, inline */
 
 .toclink {
-text-decoration: none;
-color: blue;
-font-size: 85%;
+  text-decoration: none;
+  color: blue;
+  font-size: 85%;
 }
 
 .toptoclink {
-text-decoration: none;
-color: blue;
-font-weight: bold;
+  text-decoration: none;
+  color: blue;
+  font-weight: bold;
 }
 
 /* ---------------------------------------- */
@@ -129,31 +143,48 @@ font-weight: bold;
   width: 12.5em;
   margin-right: 2em;
 }
+.tocset td {
+  vertical-align: text-top;
+}
 
 .tocview {
   text-align: left;
-  background-color: #F5F5DC;
+  background-color: #f0f0e0;
 }
 
 .tocsub {
   text-align: left;
   margin-top: 0.5em;
-  background-color: #F5F5F5;
+  background-color: #f0f0e0;
 }
 
-.tocviewtitle {
+.tocviewlist, .tocsublist {
+  margin-left: 0.2em;
+  margin-right: 0.2em;
+  padding-top: 0.2em;
+  padding-bottom: 0.2em;
+}
+.tocviewlist table {
   font-size: 82%;
+}
+
+.tocviewsublist, .tocviewsublistonly, .tocviewsublisttop, .tocviewsublistbottom {
+  margin-left: 0.4em;
+  border-left: 1px solid #bbf;
+  padding-left: 0.8em;
+}
+.tocviewsublist {
+   margin-bottom: 1em;
+}
+.tocviewsublist table, 
+.tocviewsublistonly table,
+.tocviewsublisttop table, 
+.tocviewsublistbottom table {
+  font-size: 75%;
+}
+
+.tocviewtitle * {
   font-weight: bold;
-  margin: 0.2em 0.2em 0.2em 0.2em;
-}
-
-.tocviewlist {
-  margin: 0.2em 0.2em 0.2em 0.2em;
-}
-
-.tocviewlist td {
-  font-size: 82%;
-  vertical-align: top;
 }
 
 .tocviewlink {
@@ -162,15 +193,17 @@ font-weight: bold;
 }
 
 .tocviewselflink {
+  text-decoration: underline;
   color: blue;
 }
 
-.tocsublist {
-  margin: 0.2em 0.2em 0.2em 0.2em;
+.tocviewtoggle {
+  text-decoration: none;
+  color: blue;
+  font-size: 75%; /* looks better, and avoids bounce when toggling sub-sections due to font alignments */
 }
 
 .tocsublist td {
-  vertical-align: top;
   padding-left: 1em;
   text-indent: -1em;
 }
@@ -198,14 +231,14 @@ font-weight: bold;
 .tocsubtitle {
   font-size: 82%;
   font-style: italic;
-  margin: 0.2em 0.2em 0.2em 0.2em;
+  margin: 0.2em;
 }
 
-.sepspace { 
+.sepspace {
   font-size: 40%;
 }
 
-.septitle { 
+.septitle {
   font-size: 70%;
 }
 
@@ -343,29 +376,13 @@ font-weight: bold;
   text-align: center;
 }
 
-pre {
-  margin-left: 2em;
-}
+pre { margin-left: 2em; }
+blockquote { margin-left: 2em; }
 
-blockquote {
-  margin-left: 2em;
-}
-
-ol {
-  list-style-type: decimal;
-}
-
-ol ol {
-  list-style-type: lower-alpha;
-}
-
-ol ol ol {
-  list-style-type: lower-roman;
-}
-
-ol ol ol ol {
-  list-style-type: upper-alpha;
-}
+ol          { list-style-type: decimal; }
+ol ol       { list-style-type: lower-alpha; }
+ol ol ol    { list-style-type: lower-roman; }
+ol ol ol ol { list-style-type: upper-alpha; }
 
 i {
 }
@@ -375,9 +392,9 @@ i {
   background-color: #E8E8FF;
 }
 
-.inlinetop{ 
+.inlinetop{
   display: inline;
-  vertical-align: top;
+  vertical-align: text-top;
 }
 
 .together {
@@ -385,7 +402,7 @@ i {
 }
 
 .prototype td {
-  vertical-align: top;
+  vertical-align: text-top;
 }
 .longprototype td {
   vertical-align: bottom;
@@ -396,7 +413,7 @@ i {
 }
 
 .argcontract td {
-  vertical-align: top;
+  vertical-align: text-top;
 }
 
 .ghost {
@@ -437,18 +454,18 @@ i {
   color: blue;
 }
 
-.techlink {
-  text-decoration: none;
-  color: black;
-}
+.techoutside       { text-decoration: underline; color: #b0b0b0; }
+.techoutside:hover { text-decoration: underline; color: blue; }
 
-.techlink:hover {
-  text-decoration: underline;
-  color: blue;
-}
+/* .techinside:hover doesn't work with FF, .techinside:hover>
+   .techinside doesn't work with IE, so use both (and IE doesn't
+   work with inherit in the second one, so use blue directly) */
+.techinside                    { color: black; }
+.techinside:hover              { color: blue; }
+.techoutside:hover>.techinside { color: inherit; }
 
 .bibliography td {
-  vertical-align: top;
+  vertical-align: text-top;
 }
 
 .imageleft {
@@ -456,7 +473,7 @@ i {
   margin-right: 0.3em;
 }
 
-.smaller{ 
+.smaller{
   font-size: 82%;
 }
 
@@ -466,7 +483,11 @@ i {
   font-size: 1px;
 }
 
-.compact li p { 
-  margin: 0 0 0 0;
-  padding: 0 0 0 0;
+.compact li p {
+  margin: 0em;
+  padding: 0em;
+}
+
+.noborder img {
+  border: 0;
 }

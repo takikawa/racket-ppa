@@ -86,6 +86,9 @@ inspired by Emacs.}
 @keybinding["A-C-up"]{move up out of an embedded editor}
 @keybinding["M-C-down"]{move down into an embedded editor}
 @keybinding["A-C-down"]{move down into an embedded editor}
+
+@keybinding["C-F6"]{move the cursor from the definitions
+window to the interactions window (or the search window, if it is open).}
 ]
 
 @section{Editing Operations}
@@ -136,7 +139,7 @@ inspired by Emacs.}
 @keybinding["C-x C-w"]{save file under new name}
 ]
 
-@section{Searching}
+@section{Search}
 
 @itemize[
 @keybinding["C-s"]{search for string forward}

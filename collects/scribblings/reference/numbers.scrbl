@@ -9,8 +9,6 @@
 
 @guideintro["numbers"]{numbers}
 
-@local-table-of-contents[]
-
 All numbers are @deftech{complex numbers}. Some of them are
 @deftech{real numbers}, and all of the real numbers that can be
 represented are also @deftech{rational numbers}, except for
@@ -203,7 +201,7 @@ otherwise.}
 
 @defproc*[([(- [z number?]) number?]
            [(- [z number?] [w number?] ...+) number?])]{
- When no @scheme[w]s are supplied, returns @scheme[(- 0 #, @scheme[z])].
+ When no @scheme[w]s are supplied, returns @scheme[(- 0 z)].
  Otherwise, returns the subtraction of the @scheme[w]s from @scheme[z]
  working pairwise from left to right.}
 
@@ -219,7 +217,7 @@ otherwise.}
 
 @defproc*[([(/ [z number?]) number?]
            [(/ [z number?] [w number?] ...+) number?])]{
- When no @scheme[w]s are supplied, returns @scheme[(/ 1 #, @scheme[z])].
+ When no @scheme[w]s are supplied, returns @scheme[(/ 1 z)].
  Otherwise, returns the division @scheme[z] by the var[w]s
  working pairwise from left to right.}
 
@@ -292,16 +290,18 @@ otherwise.}
 @examples[(min 1 3 2) (min 1 3 2.0)]}
 
 
-@defproc[(gcd [n integer?] ...) integer?]{ Returns the greatest common
- divisor of the @scheme[n]s. If no arguments are provided, the result is
- @scheme[0].
+@defproc[(gcd [n integer?] ...) integer?]{ Returns the
+ @as-index{greatest common divisor} (a non-negative number) of the
+ @scheme[n]s. If no arguments are provided, the result is
+ @scheme[0]. If all arguments are zero, the result is zero.
 
 @examples[(gcd 10) (gcd 12 81.0)]}
 
 
-@defproc[(lcm [n integer?] ...) integer?]{ Returns the least common
- multiple of the @scheme[n]s. If no arguments are provided, the result is
- @scheme[1].
+@defproc[(lcm [n integer?] ...) integer?]{ Returns the @as-index{least
+ common multiple} (a non-negative number) of the @scheme[n]s. If no
+ arguments are provided, the result is @scheme[1]. If any argument is
+ zero, the result is zero.
 
 @examples[(lcm 10) (lcm 3 4.0)]}
 
@@ -405,9 +405,10 @@ used.
 @; ------------------------------------------------------------------------
 @section{Powers and Roots}
 
-@defproc[(sqrt [z number?]) number?]{ Returns the principal square root
- of @scheme[z].The result is exact if @scheme[z] is exact and @scheme[z]'s
- square root is rational. See also @scheme[integer-sqrt].
+@defproc[(sqrt [z number?]) number?]{ Returns the principal
+ @as-index{square root} of @scheme[z].  The result is exact if
+ @scheme[z] is exact and @scheme[z]'s square root is rational. See
+ also @scheme[integer-sqrt].
 
 @examples[(sqrt 4/9) (sqrt 2) (sqrt -1)]}
 
@@ -570,16 +571,24 @@ produces @scheme[+nan.0] in the case that neither @scheme[y] nor
 @examples[(bitwise-not 5) (bitwise-not -1)]}
 
 
+@defproc[(bitwise-bit-set? [n exact-integer?] [m exact-nonnegative-integer?])
+         boolean?]{
+
+Returns @scheme[(not (zero? (bitwise-and n (arithmetic-shift 1 m))))],
+but normally without allocating intermediate results.
+
+@examples[(bitwise-bit-set? 5 0) (bitwise-bit-set? 5 2) (bitwise-bit-set? -5 (expt 2 700))]}
+
+
 @defproc[(arithmetic-shift [n exact-integer?] [m exact-integer?])
  exact-integer?]{ Returns the bitwise ``shift'' of @scheme[n] in its
  (semi-infinite) two's complement representation.  If @scheme[m] is
  non-negative, the integer @scheme[n] is shifted left by @scheme[m] bits;
  i.e., @scheme[m] new zeros are introduced as rightmost digits. If
- @scheme[m] is negative, @scheme[n] is shifted right by @scheme[(- #,
- @scheme[m])] bits; i.e., the rightmost @scheme[m] digits are dropped.
+ @scheme[m] is negative, @scheme[n] is shifted right by @scheme[(- m)]
+ bits; i.e., the rightmost @scheme[m] digits are dropped.
 
 @examples[(arithmetic-shift 1 10) (arithmetic-shift 255 -3)]}
-
 
 @defproc[(integer-length [n exact-integer?]) exact-integer?]{ Returns
  the number of bits in the (semi-infinite) two's complement
@@ -594,7 +603,7 @@ produces @scheme[+nan.0] in the case that neither @scheme[y] nor
 @defproc*[([(random [k (integer-in 1 4294967087)]
                     [generator pseudo-random-generator?
                                (current-pseudo-random-generator)])
-            nonnegative-exact-integer?]
+            exact-nonnegative-integer?]
            [(random [generator pseudo-random-generator?
                                (current-pseudo-random-generator)]) 
             (and/c real? inexact? (>/c 0) (</c 1))])]{  
@@ -701,7 +710,7 @@ which can be overriden by @litchar{#b}, @litchar{#o}, @litchar{#d}, or
           (string->number "111" 7)  (string->number "#b111" 7)]
 }
 
-@defproc[(real->decimal-string [n real?] [decimal-digits nonnegative-exact-integer? 2])
+@defproc[(real->decimal-string [n real?] [decimal-digits exact-nonnegative-integer? 2])
          string?]{
 
 Prints @scheme[n] into a string and returns the string. The printed

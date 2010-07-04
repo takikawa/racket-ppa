@@ -17,7 +17,7 @@
            launcher
            mred
            framework
-           (lib "syntax-browser.ss" "mrlib")
+           mrlib/syntax-browser
            compiler/distribute
            compiler/bundle-dist
            "rep.ss")
@@ -42,6 +42,7 @@
       default-settings?
       
       front-end/complete-program
+      front-end/finished-complete-program
       front-end/interaction
       config-panel
       on-execute
@@ -196,16 +197,21 @@
   ;;  annotations     : (union 'none 'debug 'debug/profile 'test-coverage)
   (define simple-settings->vector (make-->vector simple-settings))
   
-  ;; simple-module-based-language-config-panel : parent -> (case-> (-> settings) (settings -> void))
-  (define (simple-module-based-language-config-panel _parent)
+  ;; simple-module-based-language-config-panel :
+  ;;   parent [#:case-sensitive (union #f #t '?)]
+  ;;     -> (case-> (-> settings) (settings -> void))
+  (define (simple-module-based-language-config-panel
+           _parent
+           #:case-sensitive [*case-sensitive '?])
     (letrec ([parent (instantiate vertical-panel% ()
                        (parent _parent)
                        (alignment '(center center)))]
              
-             [input-panel (instantiate group-box-panel% ()
-                            (label (string-constant input-syntax))
-                            (parent parent)
-                            (alignment '(left center)))]
+             [input-panel (and (eq? *case-sensitive '?)
+                               (instantiate group-box-panel% ()
+                                 (label (string-constant input-syntax))
+                                 (parent parent)
+                                 (alignment '(left center))))]
              
              [dynamic-panel (instantiate group-box-panel% ()
                               (label (string-constant dynamic-properties))
@@ -217,10 +223,11 @@
                              (parent parent)
                              (alignment '(left center)))]
              
-             [case-sensitive (make-object check-box%
-                               (string-constant case-sensitive-label)
-                               input-panel
-                               void)]
+             [case-sensitive (and input-panel
+                                  (make-object check-box%
+                                    (string-constant case-sensitive-label)
+                                    input-panel
+                                    void))]
              [debugging (instantiate radio-box% ()
                           (label #f)
                           (choices 
@@ -240,7 +247,8 @@
                                (let ([on? (not (= (send rb get-selection) 3))])
                                  (send fraction-style enable on?)
                                  (send show-sharing enable on?)
-                                 (send insert-newlines enable on?))))]
+                                 (send insert-newlines enable on?)))
+                             '(horizontal vertical-label))]
              [fraction-style
               (make-object check-box% (string-constant decimal-notation-for-rationals)
                 output-panel
@@ -257,7 +265,9 @@
       (case-lambda
         [()
          (make-simple-settings
-          (send case-sensitive get-value)
+          (if case-sensitive
+            (send case-sensitive get-value)
+            (and *case-sensitive #t))
           (case (send output-style get-selection)
             [(0) 'constructor]
             [(1) 'quasiquote]
@@ -273,7 +283,9 @@
             [(2) 'debug/profile]
             [(3) 'test-coverage]))]
         [(settings)
-         (send case-sensitive set-value (simple-settings-case-sensitive settings))
+         (when case-sensitive
+           (send case-sensitive set-value
+                 (simple-settings-case-sensitive settings)))
          (send output-style set-selection
                (case (simple-settings-printing-style settings)
                  [(constructor) 0]
@@ -453,7 +465,7 @@
                 (print-convert value))]))
        
        ,(if (memq (simple-settings-annotations setting) '(debug debug/profile test-coverage))
-            `(require (lib "errortrace.ss" "errortrace"))
+            `(require errortrace)
             `(void))
        
        (define (init-code)
@@ -468,6 +480,9 @@
     (mixin (module-based-language<%>) (language<%>)
       (inherit get-module get-transformer-module use-namespace-require/copy-from-setting?
                get-init-code use-mred-launcher get-reader)
+      
+      (define/public (front-end/finished-complete-program settings) (void))
+      (define/public (module-based-language->language-mixin settings) (void))
       
       (define/pubment (capability-value s) 
         (inner (get-capability-default s) capability-value s))

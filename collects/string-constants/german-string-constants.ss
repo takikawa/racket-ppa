@@ -287,6 +287,9 @@
  (yes "Ja")
  (no "Nein")
  
+ ;; saving image (right click on an image to see the text)
+ (save-image "Bild abspeichern...")
+
  ;;; preferences
  (preferences "Einstellungen")
  (error-saving-preferences "Fehler beim Speichern der Einstellungen für ~a")
@@ -318,7 +321,6 @@
  (enable-keybindings-in-menus "Tastenbelegung für Menüs")
  (automatically-to-ps "Automatisch in PostScript-Datei drucken")
  (command-as-meta "Command-Taste als Meta behandeln") ;; macos/macos x only
- (separate-dialog-for-searching "Für Textsuche separaten Dialog verwenden")
  (reuse-existing-frames "Existierende Fenster für neu geöffnete Dateien wiederverwenden")
  (default-fonts "Standard-Fonts")
  (basic-gray-paren-match-color "Farbe für Klammern-Hervorhebung \"Grau Standard\"") ; in prefs dialog
@@ -403,12 +405,12 @@
  (replace "Ersetzen")
  (dock "Andocken")
  (undock "Ablegen")
- (replace&find-again "Nochmals Suchen && Ersetzen") ;;; need double & to get a single &
- (replace-to-end "Ersetzen bis zum Ende")
+ (replace&find "Ersetzen && Suchen") ;;; need double & to get a single &
  (forward "Vorwärts")
  (backward "Rückwärts")
  (hide "Ausblenden")
  (find-case-sensitive "Groß-/Kleinschreibung beachten")
+ (find-anchor-based "Suchen mit Ankern")
  
  ;;; multi-file-search
  (mfs-multi-file-search-menu-item "In Dateien suchen...")
@@ -539,17 +541,29 @@
  (clear-info "Lösche die Selektion, ohne das Clipboard dabei zu ändern oder etwas einzufügen")
  (clear-menu-item-windows "&Löschen")
 
- (select-all-info "Selektiere das gesamte Dokument")
+ (select-all-info "Gesamtes Dokument selektieren")
  (select-all-menu-item "&Alles selektieren")
  
- (find-info "Suche eine Zeichenkette")
- (find-menu-item "Suche...")
+ (find-info "Zum nächsten Vorkommen der Zeichenkette aus dem Such-Fenster springen")
+ (find-menu-item "Suchen")
 
- (find-again-info "Suche die gleiche Zeichenkette nochmal")
- (find-again-menu-item "Suche nochmal")
- 
- (replace-and-find-again-info "Ersetze den aktuellen Text und suche dann das gleiche nochmal")
+ (find-again-info "Die gleiche Zeichenkette nochmal suchen")
+ (find-again-menu-item "Nochmal suchen")
+
+ (find-again-backwards-info "Zum vorherigen Vorkommen der Zeichenkette aus dem Such-Fenster springen")
+ (find-again-backwards-menu-item "Rückwärts nochmal suchen")
+
+ (replace-and-find-again-info "Den aktuellen Text ersetzen und dann nochmal suchen")
  (replace-and-find-again-menu-item "Ersetzen && nochmal suchen")
+
+ (replace-and-find-again-backwards-info "Den aktuellen Text ersetzen und dann nochmal rückwärtssuchen")
+ (replace-and-find-again-backwards-menu-item "Ersetzen && rückwärts nochmal suchen")
+
+ (replace-all-info "Alle Vorkommen der Such-Zeichenkette ersetzen")
+ (replace-all-menu-item "Alle ersetzen")
+ 
+ (find-case-sensitive-info "Schaltet zwischen Groß-/Kleinschreibung berücksichtigendem und nicht berücksichtigendem Suchen um")
+ (find-case-sensitive-menu-item "Suchen mit Groß-/Kleinschreibung")
 
  (complete-word "Wort vervollständigen") ; the complete word menu item in the edit menu
  (no-completions "... keine Vervollständigungen verfügbar") ; shows up in the completions menu when there are no completions (in italics)
@@ -570,7 +584,7 @@
  (keybindings-choose-user-defined-file "Bitte eine Datei mit den Tastenbelegungen auswählen.")
 
  (user-defined-keybinding-error "Fehler beim Ausführen der Tastenbelegung ~a\n\n~a")
- (user-defined-keybinding-malformed-file "Die Datei ~a enthält kein Modul, das in der Sprache (lib \"keybinding-lang.ss\" \"framework\") geschrieben ist.")  
+ (user-defined-keybinding-malformed-file "Die Datei ~a enthält kein Modul, das in der Sprache framework/keybinding-lang geschrieben ist.")  
  (keybindings-planet-malformed-spec "Die PLaneT-Spezifikation ist fehlerhaft: ~a") ; the string will be what the user typed in
  (keybindings-type-planet-spec "Bitte PLaneT-require-Spezifikation eingeben (ohne das `require')")
   
@@ -729,11 +743,16 @@
  (scheme-menu-name "S&cheme")
  (execute-menu-item-label "Start")
  (execute-menu-item-help-string "Das Programm im Definitionsfenster neu starten")
+
  (break-menu-item-label "Stop")
  (break-menu-item-help-string "Momentane Auswertung unterbrechen")
  (kill-menu-item-label "Abbrechen")
  (kill-menu-item-help-string "Momentante Auswertung abbrechen")
- (limit-memory-menu-item-label "Speicherverbrauch einschänken...")
+ (ask-quit-menu-item-label "Programm bitten aufzuhören")
+ (ask-quit-menu-item-help-string "Benutzt break-thread, um den primären Thread der Auswertung zu stoppen")
+ (force-quit-menu-item-label "Programm zwingen aufzuhören")
+ (force-quit-menu-item-help-string "Benutzt custodian-shutdown-all, um die Auswertung abzubrechen")
+ (limit-memory-menu-item-label "Speicherverbrauch einschränken...")
  (limit-memory-msg-1 "Das Limit wird beim nächsten Programmstart aktiv")
  (limit-memory-msg-2 "und muß mindestens 100 Megabytes betragen.")
  (limit-memory-unlimited "nicht einschränken")
@@ -893,7 +912,7 @@
  (advanced-student "Fortgeschritten")
  (advanced-one-line-summary "Zwischenstufe plus lambda und Mutation")
  (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
- (pretty-big-scheme "Kombo (enthält MrEd and Fortgeschritten)")
+ (pretty-big-scheme "Kombo")
  (pretty-big-scheme-one-line-summary "Macht Syntax and Prozeduren der HtDP-Sprachen verfügbar")
  (r5rs-language-name "R5RS")
  (r5rs-one-line-summary "R5RS, ohne alles andere")

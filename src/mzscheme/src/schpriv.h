@@ -507,6 +507,7 @@ typedef struct Scheme_Struct_Property {
   Scheme_Object so;
   Scheme_Object *name; /* a symbol */
   Scheme_Object *guard; /* NULL or a procedure */
+  Scheme_Object *supers; /* implied properties: listof (cons <prop> <proc>) */
 } Scheme_Struct_Property;
 
 int scheme_inspector_sees_part(Scheme_Object *s, Scheme_Object *insp, int pos);
@@ -973,15 +974,10 @@ Scheme_Object *scheme_handle_stack_overflow(Scheme_Object *(*k)(void));
 extern struct Scheme_Overflow_Jmp *scheme_overflow_jmp;
 extern void *scheme_overflow_stack_start;
 
-void scheme_ensure_stack_start(void *d);
-extern void *scheme_deepest_stack_start;
-
 #ifdef MZ_PRECISE_GC
 # define PROMPT_STACK(id) &__gc_var_stack__
-# define ADJUST_STACK_START(start) (start)
 #else
 # define PROMPT_STACK(id) ((void *)(&id))
-# define ADJUST_STACK_START(start) (start ? start : scheme_deepest_stack_start)
 #endif
 
 struct Scheme_Overflow_Jmp *scheme_prune_jmpup(struct Scheme_Overflow_Jmp *jmp, void *stack_boundary);
@@ -999,12 +995,22 @@ void scheme_init_ephemerons(void);
 void scheme_flush_stack_copy_cache(void);
 #endif
 
-void *scheme_top_level_do(void *(*k)(void), int eb);
-#define scheme_top_level_do_w_thread(k, eb, p) scheme_top_level_do(k, eb)
+typedef struct Scheme_Dynamic_State {
+    struct Scheme_Comp_Env * volatile current_local_env;
+    Scheme_Object * volatile mark;
+    Scheme_Object * volatile name;
+    Scheme_Object * volatile certs;
+    Scheme_Object * volatile modidx;
+    Scheme_Env    * volatile menv;
+} Scheme_Dynamic_State;
 
-void scheme_on_next_top(struct Scheme_Comp_Env *env, Scheme_Object *mark, 
-			Scheme_Object *name, Scheme_Object *certs, 
-			Scheme_Env *menv, Scheme_Object *in_modidx);
+void scheme_set_dynamic_state(Scheme_Dynamic_State *state, struct Scheme_Comp_Env *env, Scheme_Object *mark, 
+			Scheme_Object *name, 
+			Scheme_Object *certs, 
+			Scheme_Env *menv,
+			Scheme_Object *modidx);
+void *scheme_top_level_do(void *(*k)(void), int eb);
+void *scheme_top_level_do_worker(void *(*k)(void), int eb, int newthread, Scheme_Dynamic_State *dyn_state);
 
 Scheme_Object *scheme_call_ec(int argc, Scheme_Object *argv[]);
 
@@ -1234,6 +1240,8 @@ Scheme_Object *scheme_all_current_continuation_marks(void);
 
 void scheme_about_to_move_C_stack(void);
 
+Scheme_Object *scheme_apply_multi_with_dynamic_state(Scheme_Object *rator, int num_rands, Scheme_Object **rands, Scheme_Dynamic_State *dyn_state);
+
 /*========================================================================*/
 /*                         semaphores and locks                           */
 /*========================================================================*/
@@ -1306,6 +1314,7 @@ void scheme_get_outof_line(Scheme_Channel_Syncer *ch_w);
 void scheme_post_syncing_nacks(Syncing *syncing);
 
 int scheme_try_channel_get(Scheme_Object *ch);
+int scheme_try_channel_put(Scheme_Object *ch, Scheme_Object *v);
 
 /*========================================================================*/
 /*                                 numbers                                */
@@ -1647,6 +1656,7 @@ void scheme_clear_delayed_load_cache();
 
 Scheme_Object *scheme_eval_linked_expr(Scheme_Object *expr);
 Scheme_Object *scheme_eval_linked_expr_multi(Scheme_Object *expr);
+Scheme_Object *scheme_eval_linked_expr_multi_with_dynamic_state(Scheme_Object *obj, Scheme_Dynamic_State *dyn_state);
 
 Scheme_Object *_scheme_apply_to_list (Scheme_Object *rator, Scheme_Object *rands);
 Scheme_Object *_scheme_tail_apply_to_list (Scheme_Object *rator, Scheme_Object *rands);
@@ -1765,6 +1775,7 @@ typedef struct Scheme_Compile_Expand_Info
   Scheme_Object *observer;
   char dont_mark_local_use;
   char resolve_module_ids;
+  char pre_unwrapped;
   int depth;
 } Scheme_Compile_Expand_Info;
 
@@ -1835,6 +1846,8 @@ typedef struct Optimize_Info
   int transitive_use_pos; /* set to pos + 1 when optimizing a letrec-bound procedure */
   mzshort **transitive_use;
   int *transitive_use_len;
+
+  Scheme_Object *context; /* for logging */
 } Optimize_Info;
 
 typedef struct Scheme_Object *(*Scheme_Syntax_Optimizer)(Scheme_Object *data, Optimize_Info *info);
@@ -1864,7 +1877,7 @@ typedef struct Scheme_Closure_Data
   mzshort closure_size;
   mzshort *closure_map; /* actually a Closure_Info* until resolved; if CLOS_HAS_REF_ARGS, followed by bit array */
   Scheme_Object *code;
-  Scheme_Object *name;
+  Scheme_Object *name; /* name or (vector name src line col pos span generated?) */
 #ifdef MZ_USE_JIT
   union {
     struct Scheme_Closure_Data *jit_clone;
@@ -2285,7 +2298,8 @@ void scheme_prepare_env_renames(Scheme_Env *env, int kind);
 int scheme_used_app_only(Scheme_Comp_Env *env, int which);
 int scheme_used_ever(Scheme_Comp_Env *env, int which);
 
-int scheme_omittable_expr(Scheme_Object *o, int vals, int fuel, int resolved);
+int scheme_omittable_expr(Scheme_Object *o, int vals, int fuel, int resolved,
+                          Optimize_Info *warn_info);
 
 int scheme_is_env_variable_boxed(Scheme_Comp_Env *env, int which);
 
@@ -2564,6 +2578,7 @@ Scheme_Object *scheme_tl_id_sym(Scheme_Env *env, Scheme_Object *id, Scheme_Objec
 int scheme_tl_id_is_sym_used(Scheme_Hash_Table *marked_names, Scheme_Object *sym);
 
 Scheme_Object *scheme_sys_wraps(Scheme_Comp_Env *env);
+Scheme_Object *scheme_sys_wraps_phase(Scheme_Object *phase);
 
 Scheme_Env *scheme_new_module_env(Scheme_Env *env, Scheme_Module *m, int new_exp_module_tree);
 int scheme_is_module_env(Scheme_Comp_Env *env);
@@ -2578,7 +2593,7 @@ Scheme_Object *scheme_check_accessible_in_module(Scheme_Env *env, Scheme_Object 
 						 Scheme_Object *symbol, Scheme_Object *stx, 
 						 Scheme_Object *certs, Scheme_Object *unexp_insp,
 						 int position, int want_pos,
-						 int *_protected);
+						 int *_protected, Scheme_Env *from_env);
 Scheme_Object *scheme_module_syntax(Scheme_Object *modname, Scheme_Env *env, Scheme_Object *name);
 
 Scheme_Object *scheme_modidx_shift(Scheme_Object *modidx,
@@ -2616,6 +2631,7 @@ void scheme_run_module(Scheme_Env *menv, int set_ns);
 void scheme_run_module_exptime(Scheme_Env *menv, int set_ns);
 
 Scheme_Object *scheme_module_to_namespace(Scheme_Object *name, Scheme_Env *env);
+void scheme_prep_namespace_rename(Scheme_Env *menv);
 
 /*========================================================================*/
 /*                         errors and exceptions                          */
@@ -2711,6 +2727,33 @@ Scheme_Object *scheme_get_or_check_arity(Scheme_Object *p, long a);
 int scheme_native_arity_check(Scheme_Object *closure, int argc);
 Scheme_Object *scheme_get_native_arity(Scheme_Object *closure);
 
+struct Scheme_Logger {
+  Scheme_Object so;
+  Scheme_Object *name;
+  Scheme_Logger *parent;
+  int want_level;
+  long *timestamp, local_timestamp; /* determines when want_level is up-to-date */
+  int syslog_level, stderr_level;
+  Scheme_Object *readers; /* list of weak boxes */
+};
+
+typedef struct Scheme_Log_Reader {
+  Scheme_Object so;
+  int want_level;
+  Scheme_Object *ch;
+  Scheme_Object *head, *tail;
+} Scheme_Log_Reader;
+
+extern Scheme_Logger *scheme_main_logger;
+
+char *scheme_optimize_context_to_string(Scheme_Object *context);
+
+void scheme_write_proc_context(Scheme_Object *port, int print_width,
+                               Scheme_Object *name, 
+                               Scheme_Object *src, Scheme_Object *line, 
+                               Scheme_Object *col, Scheme_Object *pos,
+                               int generated);
+
 /*========================================================================*/
 /*                         filesystem utilities                           */
 /*========================================================================*/
@@ -2763,6 +2806,7 @@ int scheme_is_special_filename(const char *_f, int not_nul);
 #endif
 
 char *scheme_get_exec_path(void);
+Scheme_Object *scheme_get_run_cmd(void);
 
 Scheme_Object *scheme_get_fd_identity(Scheme_Object *port, long fd);
 

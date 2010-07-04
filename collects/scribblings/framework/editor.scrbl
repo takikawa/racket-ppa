@@ -116,6 +116,21 @@
     returns a symbolic name (something like "Untitled").
 
   }
+
+  @defmethod[(get-pos/text [event (is-a?/c mouse-event%)])
+             (values (or/c false/c (is-a?/c editor<%>))
+	             (or/c false/c number?))]{
+
+   This method's first result is @scheme[#f] when the mouse
+   event does not correspond to a location in the editor. 
+   
+   If the first result is an @scheme[text%] object, then the
+   second result will be a position in the editor and
+   otherwise the second result will be @scheme[#f]. 
+
+   The @scheme[editor<%>] object will always be the nearest
+   enclosing editor containing the mouse click.
+  }
 }
 @defmixin[editor:basic-mixin (editor<%>) (editor:basic<%>)]{
   This provides the basic editor services required by the rest of the
@@ -185,6 +200,18 @@
     @scheme[text%]
     classes. 
   }
+  @defmethod[#:mode override (on-new-image-snip [filname (or/c path? false/c)]
+  		    	                         [kind (one-of/c 'unknown 'gif 'jpeg 'xbm 'xpm 'bmp 'pict)]
+                                                 [relative-path? any/c]
+                                                 [inline? any/c])
+                             (is-a?/c image-snip%)]{
+    @schemeblock[
+        (super on-new-image-snip 
+               (if (eq? kind 'unknown) 'unknown/mask kind) 
+               relative-path? 
+               inline?)]
+  }
+
   @defmethod*[#:mode override (((get-file (directory (or/c path-string? false/c))) string))]{
 
     Uses
@@ -428,4 +455,4 @@
   }
 }
 
-@(include-extracted (lib "main.ss" "framework") #rx"^editor:")
+@(include-previously-extracted "main-extracts.ss" #rx"^editor:")

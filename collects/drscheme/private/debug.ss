@@ -16,6 +16,7 @@ profile todo:
          scheme/gui/base
          string-constants
          framework/private/bday
+         "embedded-snip-utils.ss"
          "drsig.ss"
          "bindings-browser.ss"
          (for-syntax scheme/base))
@@ -244,7 +245,8 @@ profile todo:
                                       list))]))]
                        [_else 
                         ;; Not `begin', so proceed with normal expand and eval 
-                        (let* ([annotated (annotate-top (expand-syntax top-e) #f)])
+                        (let* ([annotated (annotate-top (expand-syntax top-e)
+                                                        (namespace-base-phase))])
                           (oe annotated))])))))])
       debug-tool-eval-handler))
   
@@ -724,7 +726,7 @@ profile todo:
                    (< (send from-text get-snip-position snip) para-end-pos))
           (send to-text insert (send snip copy))
           (loop (send snip next))))
-      (send to-text highlight-range (max 0 (- from-start 1)) from-end (get-error-color) #f #f 'high)
+      (send to-text highlight-range (max 0 (- from-start 1)) from-end (get-error-color) #f 'high)
       to-text))
   
   ;; get-filename : debug-source -> string
@@ -762,10 +764,11 @@ profile todo:
                         srclocs)]
                [frame (cond
                         [(path? debug-source) (handler:edit-file debug-source)]
-                        [(is-a? debug-source editor<%>)
-                         (let ([canvas (send debug-source get-canvas)])
-                           (and canvas
-                                (send canvas get-top-level-window)))]
+                        [(and (symbol? debug-source)
+                              (text:lookup-port-name debug-source))
+                         =>
+                         (lambda (editor)
+                           (get-enclosing-editor-frame editor))]
                         [else #f])]
                [editor (cond
                          [(path? debug-source)
@@ -775,7 +778,11 @@ profile todo:
                             [(and frame (is-a? frame frame:editor<%>))
                              (send frame get-editor)]
                             [else #f])]
-                         [(is-a? debug-source editor<%>) debug-source])]
+                         [(and (symbol? debug-source)
+                               (text:lookup-port-name debug-source))
+                          =>
+                          values]
+                         [else #f])]
                [rep (and (is-a? frame drscheme:unit:frame%)
                          (send frame get-interactions-text))])
           (when frame
@@ -784,6 +791,10 @@ profile todo:
             (when (is-a? editor text:basic<%>)
               (send rep highlight-errors same-src-srclocs '())
               (send editor set-caret-owner #f 'global)))))))
+  
+  
+  
+  
   
   
   
@@ -1999,7 +2010,6 @@ profile todo:
               (on-paint))))))
       
       (super-instantiate ())))
-  
-  
-  
+
+
   (define-values/invoke-unit/infer stacktrace@))

@@ -680,8 +680,8 @@ void scheme_install_macro(Scheme_Bucket *b, Scheme_Object *v)
 }
 
 static Scheme_Object *
-define_execute(Scheme_Object *vec, int delta, int defmacro,
-	       Resolve_Prefix *rp, Scheme_Env *dm_env)
+define_execute_with_dynamic_state(Scheme_Object *vec, int delta, int defmacro,
+	       Resolve_Prefix *rp, Scheme_Env *dm_env, Scheme_Dynamic_State *dyn_state)
 {
   Scheme_Object *name, *macro, *vals, *var;
   int i, g, show_any;
@@ -694,7 +694,7 @@ define_execute(Scheme_Object *vec, int delta, int defmacro,
     scheme_prepare_exp_env(dm_env);
 
     save_runstack = scheme_push_prefix(dm_env->exp_env, rp, NULL, NULL, 1, 1);
-    vals = scheme_eval_linked_expr_multi(vals);
+    vals = scheme_eval_linked_expr_multi_with_dynamic_state(vals, dyn_state);
     if (defmacro == 2)
       dm_env = NULL;
     else
@@ -828,7 +828,7 @@ define_execute(Scheme_Object *vec, int delta, int defmacro,
 static Scheme_Object *
 define_values_execute(Scheme_Object *data)
 {
-  return define_execute(data, 1, 0, NULL, NULL);
+  return define_execute_with_dynamic_state(data, 1, 0, NULL, NULL, NULL);
 }
 
 static Scheme_Object *clone_vector(Scheme_Object *data, int skip)
@@ -1878,6 +1878,8 @@ static void ref_validate(Scheme_Object *tl, Mz_CPort *port,
 static Scheme_Object *
 ref_optimize(Scheme_Object *tl, Optimize_Info *info)
 {
+  scheme_optimize_info_used_top(info);  
+
   info->preserves_marks = 1;
   info->single_result = 1;
 
@@ -1887,7 +1889,8 @@ ref_optimize(Scheme_Object *tl, Optimize_Info *info)
 static Scheme_Object *
 ref_shift(Scheme_Object *data, int delta, int after_depth)
 {
-  return scheme_make_syntax_compiled(REF_EXPD, data);
+  return scheme_make_syntax_compiled(REF_EXPD, 
+                                     scheme_optimize_shift(data, delta, after_depth));
 }
 
 static Scheme_Object *
@@ -3015,7 +3018,7 @@ scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline)
        to (let-values ([id e] ...) body) for simple e. */
     if ((pre_body->count != 1)
         && is_values_apply(value)
-        && scheme_omittable_expr(value, pre_body->count, -1, 0)) {
+        && scheme_omittable_expr(value, pre_body->count, -1, 0, info)) {
       if (!pre_body->count && !i) {
         /* We want to drop the clause entirely, but doing it
            here messes up the loop for letrec. So wait and 
@@ -3222,7 +3225,7 @@ scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline)
       }
     }
     if (!used
-        && scheme_omittable_expr(pre_body->value, pre_body->count, -1, 0)) {
+        && scheme_omittable_expr(pre_body->value, pre_body->count, -1, 0, info)) {
       for (j = pre_body->count; j--; ) {
         if (pre_body->flags[j] & SCHEME_WAS_USED) {
           pre_body->flags[j] -= SCHEME_WAS_USED;
@@ -3601,7 +3604,7 @@ scheme_resolve_lets(Scheme_Object *form, Resolve_Info *info)
         }
         if (j >= 0)
           break;
-        if (!scheme_omittable_expr(clv->value, clv->count, -1, 0))
+        if (!scheme_omittable_expr(clv->value, clv->count, -1, 0, NULL))
           break;
       }
       if (i < 0) {
@@ -5085,8 +5088,27 @@ do_define_syntaxes_execute(Scheme_Object *form, Scheme_Env *dm_env, int for_stx)
   if (!dm_env)
     dm_env = scheme_environment_from_dummy(dummy);
 
-  scheme_on_next_top(rhs_env, NULL, scheme_false, NULL, dm_env, dm_env->link_midx);
-  return define_execute(form, 4, for_stx ? 2 : 1, rp, dm_env);
+  {
+    Scheme_Dynamic_State dyn_state;
+    Scheme_Cont_Frame_Data cframe;
+    Scheme_Config *config;
+    Scheme_Object *result;
+
+    scheme_prepare_exp_env(dm_env);
+
+    config = scheme_extend_config(scheme_current_config(),
+				  MZCONFIG_ENV,
+				  (Scheme_Object *)dm_env->exp_env);
+    scheme_push_continuation_frame(&cframe);
+    scheme_set_cont_mark(scheme_parameterization_key, (Scheme_Object *)config);
+
+    scheme_set_dynamic_state(&dyn_state, rhs_env, NULL, scheme_false, NULL, dm_env, dm_env->link_midx);
+    result = define_execute_with_dynamic_state(form, 4, for_stx ? 2 : 1, rp, dm_env, &dyn_state);
+
+    scheme_pop_continuation_frame(&cframe);
+
+    return result;
+  }
 }
 
 static Scheme_Object *
@@ -5349,6 +5371,7 @@ do_define_syntaxes_syntax(Scheme_Object *form, Scheme_Comp_Env *env,
   rec1.value_name = NULL;
   rec1.certs = rec[drec].certs;
   rec1.observer = NULL;
+  rec1.pre_unwrapped = 0;
 
   if (for_stx) {
     names = defn_targets_syntax(names, exp_env, &rec1, 0);
@@ -5412,14 +5435,11 @@ define_for_syntaxes_expand(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Exp
 
 Scheme_Object *scheme_make_environment_dummy(Scheme_Comp_Env *env)
 { 
-  Scheme_Object *dummy;
- 
-  /* Get prefixed-based accessors for a dummy top-level buckets. It's
-     used to "link" to the right enviornment. begin_symbol is arbitrary */
-  dummy = (Scheme_Object *)scheme_global_bucket(begin_symbol, env->genv);
-  dummy = scheme_register_toplevel_in_prefix(dummy, env, NULL, 0);
-
-  return dummy;
+  /* Get a prefixed-based accessor for a dummy top-level bucket. It's
+     used to "link" to the right environment at run time. The `begin'
+     symbol is arbitrary; the top-level/prefix support handles a symbol
+     as a "toplevel" specially. */
+  return scheme_register_toplevel_in_prefix(begin_symbol, env, NULL, 0);
 }
 
 Scheme_Env *scheme_environment_from_dummy(Scheme_Object *dummy)
@@ -5459,12 +5479,26 @@ static Scheme_Object *eval_letmacro_rhs(Scheme_Object *a, Scheme_Comp_Env *rhs_e
 
   save_runstack = scheme_push_prefix(NULL, rp, NULL, NULL, phase, phase);
 
-  if (scheme_omittable_expr(a, 1, -1, 0)) {
+  if (scheme_omittable_expr(a, 1, -1, 0, NULL)) {
     /* short cut */
     a = _scheme_eval_linked_expr_multi(a);
   } else {
-    scheme_on_next_top(rhs_env, NULL, scheme_false, certs, rhs_env->genv, rhs_env->genv->link_midx);
-    a = scheme_eval_linked_expr_multi(a);
+    Scheme_Cont_Frame_Data cframe;
+    Scheme_Config *config;
+    Scheme_Dynamic_State dyn_state;
+
+    scheme_prepare_exp_env(rhs_env->genv);
+  
+    config = scheme_extend_config(scheme_current_config(),
+                                  MZCONFIG_ENV,
+                                  (Scheme_Object *)rhs_env->genv->exp_env);
+    scheme_push_continuation_frame(&cframe);
+    scheme_set_cont_mark(scheme_parameterization_key, (Scheme_Object *)config);
+  
+    scheme_set_dynamic_state(&dyn_state, rhs_env, NULL, scheme_false, certs, rhs_env->genv, rhs_env->genv->link_midx);
+    a = scheme_eval_linked_expr_multi_with_dynamic_state(a, &dyn_state);
+    
+    scheme_pop_continuation_frame(&cframe);
   }
 
   scheme_pop_prefix(save_runstack);
@@ -5528,6 +5562,7 @@ void scheme_bind_syntaxes(const char *where, Scheme_Object *names, Scheme_Object
   mrec.value_name = NULL;
   mrec.certs = certs;
   mrec.observer = NULL;
+  mrec.pre_unwrapped = 0;
 
   a = scheme_compile_expr_lift_to_let(a, eenv, &mrec, 0);
 

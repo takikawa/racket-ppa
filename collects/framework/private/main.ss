@@ -2,7 +2,7 @@
   (require mzlib/class
            "sig.ss"
            "../preferences.ss"
-           (lib "mred-sig.ss" "mred"))
+           mred/mred-sig)
   
   (import mred^
           [prefix preferences: framework:preferences^]
@@ -20,6 +20,31 @@
   
   (application-preferences-handler (λ () (preferences:show-dialog)))
   
+  (preferences:set-default 'framework:anchored-search #f boolean?)
+  
+  (let ([search/replace-string-predicate
+         (λ (l) 
+           (and (list? l)
+                (andmap 
+                 (λ (x) (or (string? x) (is-a? x snip%)))
+                 l)))])
+    (preferences:set-default 'framework:search-string 
+                             '() 
+                             search/replace-string-predicate)
+    (preferences:set-default 'framework:replace-string 
+                             '() 
+                             search/replace-string-predicate))
+  
+  ;; marshalling for this one will just lose information. Too bad.
+  (preferences:set-un/marshall 'framework:search-string 
+                               (λ (l)
+                                 (map (λ (x) 
+                                        (if (is-a? x snip%)
+                                            (send x get-text 0 (send x get-count))
+                                            x))
+                                      l))
+                               values)
+                               
   (preferences:set-default 'framework:paren-color-scheme 'basic-grey symbol?)
   
   (preferences:set-default 'framework:square-bracket:cond/offset
@@ -149,7 +174,6 @@
   (preferences:set-default 'framework:recent-items-window-h 600 number?)
   (preferences:set-default 'framework:open-here? #f boolean?)
   (preferences:set-default 'framework:show-delegate? #f boolean?)
-  (preferences:set-default 'framework:search-using-dialog? #t boolean?)
   (preferences:set-default 'framework:windows-mdi #f boolean?)
   (preferences:set-default 'framework:menu-bindings #t boolean?)
   (preferences:set-default 'framework:verify-change-format #f boolean?)

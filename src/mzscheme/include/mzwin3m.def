@@ -77,6 +77,9 @@ EXPORTS
  scheme_raise_exn
  scheme_warning
  scheme_raise
+ scheme_log_level_p
+ scheme_log
+ scheme_log_message
  scheme_wrong_count
  scheme_wrong_count_m
  scheme_case_lambda_wrong_count
@@ -399,6 +402,7 @@ EXPORTS
  scheme_write_special_evt_via_write_special
  scheme_open_input_file
  scheme_open_output_file
+ scheme_open_input_output_file
  scheme_open_output_file_with_mode
  scheme_make_file_input_port
  scheme_make_named_file_input_port

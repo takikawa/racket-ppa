@@ -66,7 +66,7 @@
  numerator denominator
  floor ceiling truncate round
  rationalize
- exp log sin cos tan asin acos atan
+ exp (rename-out [r6rs:log log]) sin cos tan asin acos atan
  sqrt (rename-out [integer-sqrt/remainder exact-integer-sqrt])
  expt
  make-rectangular make-polar real-part imag-part magnitude 
@@ -195,16 +195,22 @@
            (integer? (real-part o)))))
 
 (define (finite? n)
-  (not (or (eqv? n +inf.0)
-           (eqv? n -inf.0)
-           (eqv? n +nan.0))))
-
+  (if (real? n)
+      (not (or (eqv? n +inf.0)
+               (eqv? n -inf.0)
+               (eqv? n +nan.0)))
+      (raise-type-error 'infinite? "real" n)))
+  
 (define (infinite? n)
-  (or (eqv? n +inf.0)
-      (eqv? n -inf.0)))
+  (if (real? n)
+      (or (eqv? n +inf.0)
+          (eqv? n -inf.0))
+      (raise-type-error 'infinite? "real" n)))
 
 (define (nan? n)
-  (eqv? n +nan.0))
+  (if (real? n)
+      (eqv? n +nan.0)
+      (raise-type-error 'nan? "real" n)))
 
 ;; Someone needs to look more closely at div and mod.
 ;; I started with the code from Enger04, and poked it
@@ -226,7 +232,7 @@
         +nan.0
         1.0)]
    [else
-    (raise-type-error "real number" y)]))
+    (raise-type-error 'div "real number" y)]))
 
 (define (mod x y)
   (- x (* (div x y) y)))
@@ -290,6 +296,11 @@
                          args))
              (apply / args))]))
 
+(define r6rs:log
+  (case-lambda
+   [(n) (log n)]
+   [(n m) (/ (log n) (log m))]))
+
 (define (r6rs:angle n)
   ; because `angle' produces exact 0 for reals:
   (if (and (inexact-real? n) (positive? n))
@@ -300,8 +311,20 @@
   (number->string z radix))
 
 (define (r6rs:string->number s [radix 10])
-  (and (regexp-match? rx:number s)
-       (string->number (regexp-replace* #rx"[|][0-9]+" s "") radix)))
+  (let* ([prefix (case radix
+                   [(10) "#d"]
+                   [(16) "#x"]
+                   [(8) "#o"]
+                   [(2) "#b"]
+                   [else (raise-type-error
+                          'string->number
+                          "2, 8, 10, or 16"
+                          radix)])]
+         [s (if (regexp-match? #rx"#[dDxXoObB]" s)
+                s
+                (string-append prefix s))])
+    (and (regexp-match? rx:number s)
+         (string->number (regexp-replace* #rx"[|][0-9]+" s "")))))
 
 (define-syntax-rule (make-mapper what for for-each in-val val-length val->list list->result)
   (case-lambda

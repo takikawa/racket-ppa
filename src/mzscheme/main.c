@@ -196,7 +196,6 @@ static void user_break_hit(int ignore)
 /* Forward declarations: */
 static void do_scheme_rep(Scheme_Env *);
 static int cont_run(FinishArgs *f);
-int actual_main(int argc, char *argv[]);
 
 #if defined(WINDOWS_UNICODE_SUPPORT) && !defined(__CYGWIN32__)
 # define MAIN wmain
@@ -213,6 +212,7 @@ int actual_main(int argc, char *argv[]);
 /*          Prepare for delayload, then call main_after_dlls              */
 
 static int main_after_dlls(int argc, MAIN_char **MAIN_argv);
+static int main_after_stack(void *data);
 
 # ifdef MZ_PRECISE_GC
 START_XFORM_SKIP;
@@ -237,29 +237,39 @@ END_XFORM_SKIP;
 # endif
 
 /************************     main_after_dlls    **************************/
-/*            Phase 1 setup, then call actual_main (indirectly)           */
+/*        Prep stack for GC, then call main_after_stack (indirectly)      */
 
-static int main_after_dlls(int argc, MAIN_char **MAIN_argv)
+typedef struct {
+  int argc;
+  MAIN_char **argv;
+} Main_Args;
+
+static int main_after_dlls(int argc, MAIN_char **argv)
 {
-  void *stack_start;
+  Main_Args ma;
+  ma.argc = argc;
+  ma.argv = argv;
+  return scheme_main_stack_setup(1, main_after_stack, &ma);
+}
+
+/************************     main_after_stack    *************************/
+/*               Setup, parse command-line, and go to cont_run            */
+
+static int main_after_stack(void *data)
+{
   int rval;
+  int argc;
+  MAIN_char **MAIN_argv;
 #ifdef WINDOWS_UNICODE_MAIN
   char **argv;
 #endif
 
-  stack_start = (void *)&stack_start;
-
-#if defined(MZ_PRECISE_GC)
-  stack_start = (void *)&__gc_var_stack__;
-#endif
-
-  scheme_set_stack_base(stack_start, 1);
+  argc = ((Main_Args *)data)->argc;
+  MAIN_argv = ((Main_Args *)data)->argv;
 
 #if defined(OSKIT) && !defined(OSKIT_TEST) && !KNIT
   oskit_prepare(&argc, &argv);
 #endif
-
-  scheme_set_actual_main(actual_main);
 
 #ifdef WINDOWS_UNICODE_MAIN
  {
@@ -282,34 +292,20 @@ static int main_after_dlls(int argc, MAIN_char **MAIN_argv)
  }
 #endif
 
-  rval = scheme_image_main(argc, argv); /* calls actual_main */
-
-  /* This line ensures that __gc_var_stack__ is the
-     val of GC_variable_stack in scheme_image_main. */
-  argv = NULL;
-  return rval;
-}
-
-
-/*************************     actual_main    *****************************/
-/*      Phase 2 setup, then parse command-line and go to cont_run         */
-
-int actual_main(int argc, char *argv[])
-{
-  int exit_val;
-
 #ifndef NO_USER_BREAK_HANDLER
   MZ_SIGSET(SIGINT, user_break_hit);
 #endif
 
-  exit_val = run_from_cmd_line(argc, argv, scheme_basic_env, cont_run);
+  rval = run_from_cmd_line(argc, argv, scheme_basic_env, cont_run);
 
-  scheme_immediate_exit(exit_val);
-  return exit_val; /* shouldn't happen! */
+  scheme_immediate_exit(rval);
+  
+  /* shouldn't get here */
+  return rval;
 }
 
-/*************************       cont_run     *****************************/
-/*              Phase 3 setup (none), then go to do_scheme_rep            */
+/*************************      cont_run     ******************************/
+/*                          Go to do_scheme_rep                           */
 
 static int cont_run(FinishArgs *f)
 {
@@ -317,7 +313,7 @@ static int cont_run(FinishArgs *f)
 }
 
 /*************************   do_scheme_rep   *****************************/
-/*              Finally, do a read-eval-print-loop                       */
+/*                  Finally, do a read-eval-print-loop                   */
 
 static void do_scheme_rep(Scheme_Env *env)
 {

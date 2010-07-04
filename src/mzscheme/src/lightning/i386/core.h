@@ -48,6 +48,7 @@ struct jit_local_state {
   int   long_jumps;
   int   nextarg_geti;
 #else
+  int   tiny_jumps;
   int	framesize;
 #endif
   int	argssize;
@@ -443,8 +444,8 @@ static int jit_arg_reg_order[] = { _EDI, _ESI, _EDX, _ECX };
 #define jit_bler_ui(label, s1, s2)	jit_bra_r((s1), (s2), JBEm(label,0,0,0) )
 #define jit_bgtr_ui(label, s1, s2)	jit_bra_r((s1), (s2), JAm(label, 0,0,0) )
 #define jit_bger_ui(label, s1, s2)	jit_bra_r((s1), (s2), JAEm(label,0,0,0) )
-#define jit_bmsr_i(label, s1, s2)	(TESTLrr((s1), (s2)), JNZm(label,0,0,0), _jit.x.pc)
-#define jit_bmcr_i(label, s1, s2)	(TESTLrr((s1), (s2)), JZm(label,0,0,0),  _jit.x.pc)
+#define jit_bmsr_i(label, s1, s2)	(TESTQrr((s1), (s2)), JNZm(label,0,0,0), _jit.x.pc)
+#define jit_bmcr_i(label, s1, s2)	(TESTQrr((s1), (s2)), JZm(label,0,0,0),  _jit.x.pc)
 #define jit_boaddr_i(label, s1, s2)	(ADDLrr((s2), (s1)), JOm(label,0,0,0), _jit.x.pc)
 #define jit_bosubr_i(label, s1, s2)	(SUBLrr((s2), (s1)), JOm(label,0,0,0), _jit.x.pc)
 #define jit_boaddr_ui(label, s1, s2)	(ADDLrr((s2), (s1)), JCm(label,0,0,0), _jit.x.pc)
@@ -514,7 +515,9 @@ static int jit_arg_reg_order[] = { _EDI, _ESI, _EDX, _ECX };
 # define jit_patch_ucbranch_at(jump_pc,v) (_jitl.long_jumps ? jit_patch_long_at((jump_pc)-3, v) : jit_patch_short_at(jump_pc, v))
 # define jit_ret() (POPQr(_R13), POPQr(_R12), POPQr(_EBX), POPQr(_EBP), RET_())
 #else
-#define jit_patch_long_at(jump_pc,v)  (*_PSL((jump_pc) - sizeof(long)) = _jit_SL((jit_insn *)(v) - (jump_pc)))
+#define jit_patch_long_at(jump_pc,v)  (_jitl.tiny_jumps \
+                                       ? (*_PSC((jump_pc) - sizeof(char)) = _jit_SC((jit_insn *)(v) - (jump_pc))) \
+                                       : (*_PSL((jump_pc) - sizeof(long)) = _jit_SL((jit_insn *)(v) - (jump_pc))))
 # define jit_patch_branch_at(jump_pc,v)  jit_patch_long_at(jump_pc, v)
 # define jit_patch_ucbranch_at(jump_pc,v)  jit_patch_long_at(jump_pc, v)
 # define jit_ret() (POPLr(_EDI), POPLr(_ESI), POPLr(_EBX), POPLr(_EBP), RET_())

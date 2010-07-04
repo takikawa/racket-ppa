@@ -1,5 +1,3 @@
-;Java runtime utilities
-;Kathryn Gray 
 (module runtime scheme/base
   
   (require scheme/class
@@ -16,7 +14,7 @@
   (provide convert-to-string shift not-equal bitwise mod divide-dynamic divide-int 
            divide-float and or cast-primitive cast-reference instanceof-array nullError
            check-eq? dynamic-equal? compare compare-within check-catch check-mutate check-by
-           compare-rand)
+           compare-rand check-effect)
 
   (define (check-eq? obj1 obj2)
     (or (eq? obj1 obj2)
@@ -251,41 +249,7 @@
   
   ;compare-within: (-> val) val val (list symbol string) (U #f object) boolean . boolean -> boolean
   (define (compare-within test act range info src test-obj catch? . within?)
-    (letrec (#;(java-equal?
-              (lambda (v1 v2 visited-v1 visited-v2)
-                (or (eq? v1 v2)
-                    (already-seen? v1 v2 visited-v1 visited-v2)
-                    (cond 
-                      ((and (number? v1) (number? v2))
-                       (if (or (inexact? v1) (inexact? v2) (not (null? within?)))
-                           (<= (abs (- v1 v2)) range)
-                           (= v1 v2)))
-                      ((and (object? v1) (object? v2))
-                       (cond
-                         ((equal? "String" (send v1 my-name))
-                          (and (equal? "String" (send v2 my-name))
-                               (equal? (send v1 get-mzscheme-string) (send v2 get-mzscheme-string))))
-                         ((equal? "array" (send v1 my-name))
-                          (and (equal? "array" (send v2 my-name))
-                               (= (send v1 length) (send v2 length))
-                               (let ((v1-vals (array->list v1))
-                                     (v2-vals (array->list v2)))
-                                 (andmap (lambda (x) x)
-                                         (map java-equal? v1-vals v2-vals 
-                                              (map (lambda (v) (cons v1 visited-v1)) v1-vals)
-                                              (map (lambda (v) (cons v2 visited-v2)) v2-vals))))))
-                         (else
-                          (and (equal? (send v1 my-name) (send v2 my-name))
-                               (let ((v1-fields (send v1 field-values))
-                                     (v2-fields (send v2 field-values)))
-                                 (and (= (length v1-fields) (length v2-fields))
-                                      (andmap (lambda (x) x) 
-                                              (map java-equal? v1-fields v2-fields 
-                                                   (map (lambda (v) (cons v1 visited-v1)) v1-fields)
-                                                   (map (lambda (v) (cons v2 visited-v2)) v2-fields)))))))))
-                      ((and (not (object? v1)) (not (object? v2))) (equal? v1 v2))
-                      (else #f)))))
-             (fail? #f))
+    (let ((fail? #f))
       (set! test 
             (with-handlers ([exn? 
                              (lambda (e) 
@@ -337,7 +301,7 @@
           (report-check-result (and (not fail?) result) 'check-by info values-list src test-obj))
       (and (not fail?) result)))
   
-  ;compare-rand: (-> val) value [list string] src object -> boolean
+  ;compare-rand: (-> val) (listof value) [list string] src object -> boolean
   (define (compare-rand test range info src test-obj)
     (let* ([fail? #f]
            [test-val (with-handlers ((exn?
@@ -345,14 +309,13 @@
                                         (set! fail? #t)
                                         (list exception e))))
                        (test))]
-           [expected-vals (array->list range)]
+           [expected-vals range]
            [result
             (and (not fail?)
                  (ormap (lambda (e-v) (java-equal? test-val e-v null null 0.001 #t))
                         expected-vals))]
            [res-list (list range test-val)])
-      (if
-       (in-check-mutate?)
+      (if (in-check-mutate?)
        (stored-checks (cons (list (and (not fail?) result) 'check-rand info res-list src test-obj)
                             (stored-checks)))
        (report-check-result (and (not fail?) result) 'check-rand info res-list src test-obj))
@@ -382,6 +345,12 @@
               (report-results (cdr checks)))))
         result-value)))
   
+  ;check-effects: (-> (listof val)) (-> (listof val)) (list string) src object -> boolean
+  (define (check-effect tests checks info src test-obj)
+    (let ([app (lambda (thunk) (thunk))])
+      (for-each app tests)
+      (andmap app checks)))
+  
   (define (report-check-result res check-kind info values src test-obj)
     (when test-obj 
       (send test-obj add-check)
@@ -392,11 +361,11 @@
               src))))
 
   (define (compose-message test-obj check-kind info values mutate-message)
-    (letrec ((test-format (construct-info-msg info))
-             (eval-exception-raised? #f)
-             (comp-exception-raised? #f)
-             (exception-not-error? #f)
-             (formatted-values (map (lambda (v) 
+    (letrec ([test-format (construct-info-msg info)]
+             [eval-exception-raised? #f]
+             [comp-exception-raised? #f]
+             [exception-not-error? #f]
+             [formatted-values (map (lambda (v) 
                                       (cond
                                         [(and (pair? v) (eq? (car v) exception))
                                          (if (equal? (cadddr v) "eval")
@@ -404,18 +373,22 @@
                                              (set! comp-exception-raised? #t))
                                          (set! exception-not-error? (cadr v))
                                          (send test-obj format-value (caddr v))]
-                                        [else (send test-obj format-value v)])) values))
-             (expected-format
+                                        [(pair? v)
+                                         (map (lambda (v) (send test-obj format-value v)) v)]
+                                        [else (send test-obj format-value v)])) values)]
+             [expected-format
               (case check-kind
                 ((check-expect check-by) "to produce ")
                 ((check-rand) "to produce one of ")
-                ((check-catch) "to throw an instance of "))))
+                ((check-catch) "to throw an instance of "))])
       (cond 
         [(not (eq? 'check-by check-kind))
          (append (list (if mutate-message mutate-message "check expected ")
                        test-format
-                       expected-format
-                       (first formatted-values))
+                       expected-format)
+                 (if (eq? 'check-rand check-kind)
+                     (list-format (first formatted-values))
+                     (list (first formatted-values)))
                  (case check-kind
                    ((check-expect)
                     (append (if (= (length formatted-values) 3)
@@ -457,6 +430,20 @@
                " to compare to " (first formatted-values)
                " using " (third formatted-values)
                ". This value did not match the expectation.")])))
+  
+  (define (list-format l)
+    (cond
+      [(= (length l) 1) l]
+      [(= (length l) 2) (list (car l) "or" (cadr l))]
+      [else
+       (letrec ([ins 
+                 (lambda (l)
+                   (cond
+                     [(null? l) l]
+                     [(null? (cdr l)) (list " or" (car l))]
+                     [else 
+                      (cons (car l) (cons "," (ins (cdr l))))]))])
+         (ins l))]))
 
   ;construct-info-msg (list symbol string ...) -> string
   (define (construct-info-msg info)

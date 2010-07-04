@@ -301,7 +301,6 @@
  (enable-keybindings-in-menus "Habilita enlaces de teclas en los menús")
  (automatically-to-ps "Imprime automáticamente a un archivo en postscript")
  (option-as-meta "Tratar cualquier tecla como meta") ;; macos/macos x only
- (separate-dialog-for-searching "Use el diálogo adecuado para buscar")
  (reuse-existing-frames "Reutilizar marcos existentes cuando se abre un nuevo archivo")
  (default-fonts "Fuentes por omisión")
  (paren-match-color "Color de resaltado de paréntesis") ; in prefs dialog
@@ -367,7 +366,6 @@
  (dock "Atracar")
  (undock "Des-atracar")
  (replace&find-again "Reemplazar && Vuelve a buscar") ;;; need double & to get a single &
- (replace-to-end "Reemplazar hasta el final")
  (forward "Hacia adelante")
  (backward "Hacia atrás")
  (hide "Esconder")
@@ -521,7 +519,7 @@
  (keybindings-choose-user-defined-file "Por favor seleccione un archivo con enlaces de teclas.")
 
  (user-defined-keybinding-error "Error al ejecutar el enlace de teclas ~a\n\n~a")
- (user-defined-keybinding-malformed-file "El archivo ~a no contiene un módulo escrito usando el lenguaje (lib \"keybinding-lang.ss\" \"framework\").")  
+ (user-defined-keybinding-malformed-file "El archivo ~a no contiene un módulo escrito usando el lenguaje framework/keybinding-lang.")  
 
  (insert-text-box-item "Inserta caja de texto")
  (insert-image-item "Inserta imagen...")
@@ -792,7 +790,7 @@
  (teaching-languages "Languajes de Enseñanza")
  (experimental-languages "Languajes Experimentales") 
  (no-language-chosen "No ha seleccionado un lenguaje")
- (pretty-big-scheme "Muy Grande (incluye MrEd y Avanzado)")
+ (pretty-big-scheme "Muy Grande")
  (pretty-big-scheme-one-line-summary "Añade syntaxis y funciones de los lenguajes HtDP")
  (r5rs-language-name "R5RS")
  (r5rs-one-line-summary "R5RS, sin ornamentos")

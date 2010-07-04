@@ -334,7 +334,7 @@ OS_SEMAPHORE_TYPE scheme_break_semaphore;
 
 #ifdef MZ_FDS
 static Scheme_Object *make_fd_input_port(int fd, Scheme_Object *name, int regfile, int textmode, int *refcount, int internal);
-static Scheme_Object *make_fd_output_port(int fd, Scheme_Object *name, int regfile, int textmode, int read_too);
+static Scheme_Object *make_fd_output_port(int fd, Scheme_Object *name, int regfile, int textmode, int read_too, int flush_mode);
 #endif
 #ifdef USE_OSKIT_CONSOLE
 static Scheme_Object *make_oskit_console_input_port();
@@ -511,9 +511,10 @@ scheme_init_port (Scheme_Env *env)
 #ifdef MZ_FDS
 # ifdef WINDOWS_FILE_HANDLES
 			     : make_fd_output_port((int)GetStdHandle(STD_OUTPUT_HANDLE), 
-						   scheme_intern_symbol("stdout"), 0, 0, 0)
+						   scheme_intern_symbol("stdout"), 0, 0, 0,
+                                                   -1)
 # else
-			     : make_fd_output_port(1, scheme_intern_symbol("stdout"), 0, 0, 0)
+			     : make_fd_output_port(1, scheme_intern_symbol("stdout"), 0, 0, 0, -1)
 # endif
 #else
 			     : scheme_make_file_output_port(stdout)
@@ -525,9 +526,11 @@ scheme_init_port (Scheme_Env *env)
 #ifdef MZ_FDS
 # ifdef WINDOWS_FILE_HANDLES
 			     : make_fd_output_port((int)GetStdHandle(STD_ERROR_HANDLE), 
-						   scheme_intern_symbol("stderr"), 0, 0, 0)
+						   scheme_intern_symbol("stderr"), 0, 0, 0,
+                                                   MZ_FLUSH_ALWAYS)
 # else
-			     : make_fd_output_port(2, scheme_intern_symbol("stderr"), 0, 0, 0)
+			     : make_fd_output_port(2, scheme_intern_symbol("stderr"), 0, 0, 0,
+                                                   MZ_FLUSH_ALWAYS)
 # endif
 #else
 			     : scheme_make_file_output_port(stderr)
@@ -629,6 +632,10 @@ void scheme_init_port_config(void)
 Scheme_Object * scheme_make_eof (void)
 {
   return scheme_eof;
+}
+
+void scheme_no_dumps(char *why)
+{
 }
 
 /*========================================================================*/
@@ -3853,7 +3860,7 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
 
   regfile = S_ISREG(buf.st_mode);
   scheme_file_open_count++;
-  return make_fd_output_port(fd, scheme_make_path(filename), regfile, 0, and_read);
+  return make_fd_output_port(fd, scheme_make_path(filename), regfile, 0, and_read, -1);
 #else
 # ifdef WINDOWS_FILE_HANDLES
   if (!existsok)
@@ -3939,7 +3946,7 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
   }
 
   scheme_file_open_count++;
-  return make_fd_output_port((int)fd, scheme_make_path(filename), regfile, mode[1] == 't', and_read);
+  return make_fd_output_port((int)fd, scheme_make_path(filename), regfile, mode[1] == 't', and_read, -1);
 # else
   if (scheme_directory_exists(filename)) {
     if (!existsok)
@@ -4020,6 +4027,17 @@ Scheme_Object *scheme_open_output_file(const char *name, const char *who)
   a[0]= scheme_make_path(name);
   a[1] = truncate_replace_symbol;
   return scheme_do_open_output_file((char *)who, 0, 2, a, 0);
+}
+
+Scheme_Object *scheme_open_input_output_file(const char *name, const char *who, Scheme_Object **oport)
+{
+  Scheme_Object *a[2];
+
+  a[0]= scheme_make_path(name);
+  a[1] = truncate_replace_symbol;
+  scheme_do_open_output_file((char *)who, 0, 2, a, 1);
+  *oport = scheme_multiple_array[1];
+  return scheme_multiple_array[0];
 }
 
 Scheme_Object *scheme_open_output_file_with_mode(const char *name, const char *who, int text)
@@ -6249,7 +6267,8 @@ static int fd_output_buffer_mode(Scheme_Port *p, int mode)
 }
 
 static Scheme_Object *
-make_fd_output_port(int fd, Scheme_Object *name, int regfile, int win_textmode, int and_read)
+make_fd_output_port(int fd, Scheme_Object *name, int regfile, int win_textmode, int and_read,
+                    int flush_mode)
 {
   Scheme_FD *fop;
   unsigned char *bfr;
@@ -6276,9 +6295,8 @@ make_fd_output_port(int fd, Scheme_Object *name, int regfile, int win_textmode, 
   fop->regfile = regfile;
   fop->textmode = win_textmode;
 
-  if (fd == 2) {
-    /* No buffering for stderr: */
-    fop->flush = MZ_FLUSH_ALWAYS;
+  if (flush_mode > -1) {
+    fop->flush = flush_mode;
   } else if (is_fd_terminal(fd)) {
     /* Line-buffering for terminal: */
     fop->flush = MZ_FLUSH_BY_LINE;
@@ -6415,7 +6433,7 @@ Scheme_Object *
 scheme_make_fd_output_port(int fd, Scheme_Object *name, int regfile, int textmode, int read_too)
 {
 #ifdef MZ_FDS
-  return make_fd_output_port(fd, name, regfile, textmode, read_too);
+  return make_fd_output_port(fd, name, regfile, textmode, read_too, -1);
 #else
   return NULL;
 #endif
@@ -7451,7 +7469,7 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
   /*--------------------------------------*/
 
   in = (in ? in : make_fd_input_port(from_subprocess[0], scheme_intern_symbol("subprocess-stdout"), 0, 0, NULL, 0));
-  out = (out ? out : make_fd_output_port(to_subprocess[1], scheme_intern_symbol("subprocess-stdin"), 0, 0, 0));
+  out = (out ? out : make_fd_output_port(to_subprocess[1], scheme_intern_symbol("subprocess-stdin"), 0, 0, 0, -1));
   err = (err ? err : make_fd_input_port(err_subprocess[0], scheme_intern_symbol("subprocess-stderr"), 0, 0, NULL, 0));
 
   /*--------------------------------------*/

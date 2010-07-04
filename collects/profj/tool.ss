@@ -11,9 +11,9 @@
            profj/libs/java/lang/Object profj/libs/java/lang/array
            profj/libs/java/lang/String)
   (require "compile.ss" "parameters.ss" "parsers/lexer.ss" "parser.ss"
-           (lib "test-engine.scm" "test-engine")
-           (lib "java-tests.scm" "test-engine")
-           (lib "test-coverage.scm" "test-engine")
+           (lib "test-engine/test-engine.scm")
+           (lib "test-engine/java-tests.scm")
+           (lib "test-engine/test-coverage.scm")
            (except-in "ast.ss" for)
            "display-java.ss")
 
@@ -393,6 +393,14 @@
                    (not (= open-curlies 0))
                    is-if?))))
       
+      ;; Mixin to store type information in the repl
+      (define user-types
+        (mixin (drscheme:rep:text<%>) ()
+          (define types #f)
+          (define/public (get-user-types) types)
+          (define/public (set-user-types t) (set! types t))
+          (super-new)))
+      
       ;; matches-language : (union #f (listof string)) -> boolean
       (define (matches-language l)
         (and l (pair? l) (pair? (cdr l)) (equal? (cadr l) "ProfessorJ")))
@@ -422,6 +430,7 @@
       (define (java-lang-mixin level name number one-line dyn? manual-dirname)
         (when dyn? (dynamic? #t))
         (class* object% (drscheme:language:language<%>)
+          (define/public (front-end/finished-complete-program settings) (void))
           (define/public (extra-repl-information settings port) (void))
           (define/public (get-reader-module) #f)
           (define/public (get-metadata a b) #f)
@@ -440,6 +449,9 @@
                            '())))
                autocomplete-words]
               [(eq? s 'drscheme:language-menu-title) (string-constant profj-java)]
+              [(eq? s 'drscheme:tabify-menu-callback)
+               (lambda (ed start stop)
+                 (send ed java-tabify-selection))]
               [(memq s '(profj:special:java-comment-box 
                          profj:special:java-examples-box 
                          profjWizard:special:java-class
@@ -714,38 +726,125 @@
                      (send collect-coverage set-value (profj-settings-coverage? settings))
                      (send collect-coverage enable #f))
                  (install-classpath (profj-settings-classpath settings))])))
-                     
-          ;;Stores the types that can be used in the interactions window
-          ;;execute-types: type-record 
-          (define execute-types (create-type-record))
-          
+                               
           (define/public (front-end/complete-program port settings)
-            (set! execute-types (create-type-record))
-            (mred? #t)
-            (let ([name (object-name port)])
-              (lambda ()
-                (syntax-as-top
-                 (let ((end? (eof-object? (peek-char-or-special port))))
-                   (if end? 
-                       eof 
-                       (datum->syntax #f `(parse-java-full-program ,(parse port (get-defn-editor name) #;(quote name) level)
-                                                                   ,name) #f)))))))
-          (define/public (front-end/interaction port settings)
             (mred? #t)
             (let ([name (object-name port)]
-                  [executed? #f])
+                  [rep (drscheme:rep:current-rep)]
+                  [eventspace (current-eventspace)]
+                  [execute-types (create-type-record)])
+              (let ([name-to-require #f]
+                    [require? #f]
+                    [tests-run? #f]
+                    [tests #f]
+                    [compiled? #f]
+                    [modules null]
+                    [extras null])
               (lambda ()
-                (if executed? #;(eof-object? (peek-char-or-special port))
+                (syntax-as-top
+                 (let ([end? (eof-object? (peek-char-or-special port))])
+                   #;(if end? 
+                       eof 
+                       (datum->syntax #f `(parse-java-full-program ,(parse port name level)
+                                                                   ,name) #f))
+                   (cond
+                     [(and end? (null? modules) (null? extras) tests-run? (not require?)) eof]
+                     [(not compiled?)
+                      (execution? #t)
+                      (let* ([parsed (parse port name level)]
+                             [compilation-units (compile-ast parsed level execute-types)]
+                             [examples (if (testcase-ext?)
+                                           (list (send execute-types get-test-classes) null)
+                                           (find-examples compilation-units))])
+                          #;(printf "ProfJ compilation complete~n")
+                        (set! compiled? #t)
+                        (set! modules (order compilation-units))
+                        (when rep (send rep set-user-types execute-types))
+                        (set! extras (process-extras (send execute-types get-interactions-boxes) execute-types))
+                        (set! tests examples))
+                      (datum->syntax #f '(void) #f)]
+                     [else
+                      (cond
+                        [(and (not require?) (null? modules) (not tests-run?))
+                         (let* ([test-engine-obj 
+                                 (make-object (if (testcase-ext?) java-test-base% java-examples-engine%))]
+                                [tc-info (send test-engine-obj get-info)]
+                                [format (lambda (o break?) 
+                                          (format-java-value o (make-format-style #t 'field break?)))])
+                           (set! tests-run? #t)
+                           (datum->syntax 
+                            #f
+                            `((lambda ()
+                                (,namespace-set-variable-value! 'current~test~object% ,tc-info)
+                                (send ,test-engine-obj install-tests 
+                                      (map (lambda (c)
+                                             (list c ([current-eval] (string->symbol c)) c))
+                                           (list ,@(car tests))))
+                                (when ,(coverage?)
+                                  (send (send ,test-engine-obj get-info) add-analysis 
+                                        ,(make-object coverage-analysis%)))
+                                (send ,test-engine-obj refine-display-class 
+                                      ,(cond
+                                         [(and (testcase-ext?) (coverage?)) java-test-coverage-graphics%]
+                                         [(coverage?) java-examples-coverage-graphics%]
+                                         [(testcase-ext?) java-test-graphics%]
+                                         [else java-examples-graphics%]))
+                                #;(printf "About to run tests~n")
+                                (send ,test-engine-obj run)
+                                #;(printf "Test methods run~n")
+                                (send ,test-engine-obj setup-display ,rep ,eventspace)
+                                (send ,test-engine-obj summarize-results (current-output-port))
+                                (let ([test-objs (send ,test-engine-obj test-objects)])
+                                  (let inner-loop ((os test-objs))
+                                    (unless (null? os)
+                                      (let ((formatted (,format (car os) #f)))
+                                        (when (< 24 (,(lambda (t) (total-length t)) formatted))
+                                          (set! formatted (,format (car os) #t)))
+                                        (let loop ((out formatted))
+                                          (unless (null? out)
+                                            (write-special (car out))
+                                            (loop (cdr out))))
+                                        (newline))
+                                      (inner-loop (cdr os)))))))
+                            #f))]
+                        [(and (not require?) (null? modules) tests-run?)
+                         (begin0
+                           (car extras)
+                           (set! extras (cdr extras)))]
+                        [require? 
+                         (set! require? #f)
+                         (with-syntax ([name name-to-require])
+                           (syntax (require (quote name))))]
+                        [else 
+                         #;(printf "~a~n" (syntax->datum (car mods)))
+                         (let-values (((name syn) (get-module-name (expand (car modules)))))
+                           (set! name-to-require name)
+                           (set! require? #t)
+                           (set! modules (cdr modules))
+                           (errortrace-annotate syn))])])))))))
+          (define/public (front-end/interaction port settings)
+            (mred? #t)
+            (let* ([name (object-name port)]
+                   [executed? #f]
+                   [rep (drscheme:rep:current-rep)]
+                   [types (and rep (or (send rep get-user-types)
+                                       (begin
+                                         (send rep set-user-types (create-type-record))
+                                         (send rep get-user-types))))])
+              (lambda ()
+                (if executed? 
                     eof
                     (begin
                       (set! executed? #t)
                       (syntax-as-top
-                       (datum->syntax
+                       (compile-interactions-ast 
+                        (parse-interactions port name level)
+                        name level types  #t)
+                       
+                       #;(datum->syntax
                         #f
-                        #;`(compile-interactions-helper ,(lambda (ast) (compile-interactions-ast ast name level execute-types))
-                                                        ,(parse-interactions port name level))
-                          `(parse-java-interactions ,(parse-interactions port name level) ,name)
-                          #f)))))))
+                        `(parse-java-interactions ,(parse-interactions port name level) ,name)
+                        #f)))))))
           
           (define (get-defn-editor port-name)
             (let* ([dr-frame (and (drscheme:rep:current-rep)
@@ -922,20 +1021,20 @@
                    (coverage? (and (test-execute) (profj-settings-coverage? settings)))
                    (error-display-handler 
                     (drscheme:debug:make-debug-error-display-handler (error-display-handler)))
-                   (let ((old-current-eval (drscheme:debug:make-debug-eval-handler (current-eval))))
+                   #;(let ((old-current-eval (drscheme:debug:make-debug-eval-handler (current-eval))))
                      (current-eval 
                       (lambda (exp)
                         (syntax-case exp (parse-java-full-program parse-java-interactions)
-                          ((parse-java-full-program ex s)
+                          #;((parse-java-full-program ex s)
                            (let ((exp (old-current-eval (syntax ex)))
                                  (src (old-current-eval (syntax (quote s)))))
                              (execution? #t)
                              (set! execute-types (create-type-record))
-                             (let* ((compilation-units (compile-ast exp level execute-types))
+                             (let* ((compilation-units (time (compile-ast exp level execute-types)))
                                     (examples (if (testcase-ext?)
                                                   (list (send execute-types get-test-classes) null)
                                                   (find-examples compilation-units))))
-                               #;(printf "ProfJ compilation complete~n")
+                               (printf "ProfJ compilation complete~n")
                                (let ((name-to-require #f)
                                      (tests-run? #f))
                                  (let loop ((mods (order compilation-units))
@@ -996,9 +1095,8 @@
                                       #;(printf "~a~n" (syntax->datum (car mods)))
                                       (let-values (((name syn) (get-module-name (expand (car mods)))))
                                         (set! name-to-require name)
-                                        (syntax-as-top #;(eval (annotate-top (compile syn)))
-                                         (old-current-eval 
-                                          (errortrace-annotate syn)))
+                                        (syntax-as-top  (old-current-eval 
+                                                         (errortrace-annotate syn)))
                                         (loop (cdr mods) extras #t)))))))))
                           ((parse-java-interactions ex loc)
                            (let ((exp (syntax->datum (syntax ex))))
@@ -1168,7 +1266,7 @@
       
       ;Comment box
       ;;Comment icon
-      (define comment-gif (include-bitmap (lib "slash-slash.gif" "icons")))
+      (define comment-gif (include-bitmap (lib "icons/slash-slash.gif")))
       
       ;;The following code has been taken with small modifications from framework/private/comment-box.ss
       (define snipclass-java-comment%
@@ -1221,7 +1319,7 @@
       (drscheme:language:register-capability 'profj:special:java-comment-box (flat-contract boolean?) #f)
       
       ;;Java interactions box
-      (define ji-gif (include-bitmap (lib "j.gif" "icons")))
+      (define ji-gif (include-bitmap (lib "icons/j.gif")))
       
       (define snipclass-java-interactions%
         (class decorated-editor-snipclass%
@@ -1320,6 +1418,7 @@
       
       (drscheme:get/extend:extend-definitions-text indent-mixin)
       (drscheme:get/extend:extend-interactions-text indent-mixin)
+      (drscheme:get/extend:extend-interactions-text user-types)
       (drscheme:get/extend:extend-unit-frame java-interactions-box-mixin)
       (drscheme:language:register-capability 'profj:special:java-interactions-box (flat-contract boolean?) #t)
  

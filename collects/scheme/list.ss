@@ -10,6 +10,10 @@
 
          drop
          take
+         split-at
+         drop-right
+         take-right
+         split-at-right
 
          append*
          flatten
@@ -73,20 +77,70 @@
 (define empty? (lambda (l) (null? l)))
 (define empty '())
 
-(define drop list-tail)
+;; internal use below
+(define (drop* list n) ; no error checking, returns #f if index is too large
+  (if (zero? n) list (and (pair? list) (drop* (cdr list) (sub1 n)))))
+(define (too-large who list n)
+  (raise-mismatch-error
+   who
+   (format "index ~e too large for list~a: ~e"
+           n (if (list? list) "" " (not a proper list)") list)
+   n))
+
 (define (take list0 n0)
-  (unless (and (integer? n0) (exact? n0))
-    (raise-type-error 'take "non-negative integer" n0))
+  (unless (exact-nonnegative-integer? n0)
+    (raise-type-error 'take "non-negative exact integer" n0))
   (let loop ([list list0] [n n0])
     (cond [(zero? n) '()]
           [(pair? list) (cons (car list) (loop (cdr list) (sub1 n)))]
-          [else (raise-mismatch-error
-                 'take
-                 (format "index ~e too large for list~a: ~e"
-                         n0
-                         (if (list? list) "" " (not a proper list)")
-                         list0)
-                 n0)])))
+          [else (too-large 'take list0 n0)])))
+
+(define (drop list n)
+  ;; could be defined as `list-tail', but this is better for errors anyway
+  (unless (exact-nonnegative-integer? n)
+    (raise-type-error 'drop "non-negative exact integer" n))
+  (or (drop* list n) (too-large 'drop list n)))
+
+(define (split-at list0 n0)
+  (unless (exact-nonnegative-integer? n0)
+    (raise-type-error 'split-at "non-negative exact integer" n0))
+  (let loop ([list list0] [n n0] [pfx '()])
+    (cond [(zero? n) (values (reverse pfx) list)]
+          [(pair? list) (loop (cdr list) (sub1 n) (cons (car list) pfx))]
+          [else (too-large 'take list0 n0)])))
+
+;; take/drop-right are originally from srfi-1, uses the same lead-pointer trick
+
+(define (take-right list n)
+  (unless (exact-nonnegative-integer? n)
+    (raise-type-error 'take-right "non-negative exact integer" n))
+  (let loop ([list list]
+             [lead (or (drop* list n) (too-large 'take-right list n))])
+    ;; could throw an error for non-lists, but be more like `take'
+    (if (pair? lead)
+      (loop (cdr list) (cdr lead))
+      list)))
+
+(define (drop-right list n)
+  (unless (exact-nonnegative-integer? n)
+    (raise-type-error 'drop-right "non-negative exact integer" n))
+  (let loop ([list list]
+             [lead (or (drop* list n) (too-large 'drop-right list n))])
+    ;; could throw an error for non-lists, but be more like `drop'
+    (if (pair? lead)
+      (cons (car list) (loop (cdr list) (cdr lead)))
+      '())))
+
+(define (split-at-right list n)
+  (unless (exact-nonnegative-integer? n)
+    (raise-type-error 'split-at-right "non-negative exact integer" n))
+  (let loop ([list list]
+             [lead (or (drop* list n) (too-large 'split-at-right list n))]
+             [pfx '()])
+    ;; could throw an error for non-lists, but be more like `split-at'
+    (if (pair? lead)
+      (loop (cdr list) (cdr lead) (cons (car list) pfx))
+      (values (reverse pfx) list))))
 
 (define append*
   (case-lambda [(ls) (apply append ls)] ; optimize common case
@@ -194,7 +248,7 @@
 ;;             (values (if (pair? out) (cons x in) l) out)
 ;;             (values in (if (pair? in) (cons x out) l))))))))
 
-;; But that one is slower than this, probably due to value packages
+;; But that one is slower than this, probably due to value packaging
 (define (partition pred l)
   (unless (and (procedure? pred) (procedure-arity-includes? pred 1))
     (raise-type-error 'partition "procedure (arity 1)" pred))

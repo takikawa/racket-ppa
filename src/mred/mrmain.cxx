@@ -50,13 +50,6 @@ int wx_in_terminal; /* dummy */
 # endif
 #endif
 
-#ifdef MPW_CPLUS
-extern "C" { typedef int (*ACTUAL_MAIN_PTR)(int argc, char **argv); }
-# define CAST_ACTUAL_MAIN (ACTUAL_MAIN_PTR)
-#else
-# define CAST_ACTUAL_MAIN /* empty */
-#endif
-
 #ifdef wx_msw
 /* Hack: overwrite "y" with "n" in binary to disable checking for another
    instance of the same app. */
@@ -237,37 +230,9 @@ static void run_from_cmd_line(int argc, char **argv, Scheme_Env *(*mk_basic_env)
   run_from_cmd_line(argc, argv, mk_basic_env, do_main_loop);
 }
 
-int actual_main(int argc, char **argv)
-{
-  int r;
-
-  wxCreateApp();
-
-  r = wxEntry(argc, argv);
-
-#ifdef wx_msw
-  mred_clean_up_gdi_objects();
-#endif	
-
-  return r;
-}
-
-int main(int argc, char *argv[])
+static int main_after_stack(int argc, char *argv[])
 {
   int rval;
-  void *stack_start;
-
-  stack_start = (void *)&stack_start;
-
-  /* Set stack base and turn off auto-finding of static variables ---
-     unless this is Windows, where scheme_set_stack_base
-     is called by wxWindows. */
-#ifndef wx_msw
-# if defined(MZ_PRECISE_GC)
-  stack_start = (void *)&__gc_var_stack__;
-# endif
-  scheme_set_stack_base(stack_start, 1);
-#endif
 
 #ifdef wx_x
 # if INTERRUPT_CHECK_ON
@@ -293,18 +258,53 @@ int main(int argc, char *argv[])
   wxDrop_GetArgs(&argc, &argv, &wx_in_terminal);
 #endif
 
-  scheme_set_actual_main(actual_main);
   mred_set_run_from_cmd_line(run_from_cmd_line);
   mred_set_finish_cmd_line_run(finish_cmd_line_run);
 
-  rval = scheme_image_main(argc, argv);
+  wxCreateApp();
+  
+  rval = wxEntry(argc, argv);
 
-  /* This line ensures that __gc_var_stack__ is the
-     val of GC_variable_stack in scheme_image_main. */
-  argv = NULL;
+#ifdef wx_msw
+  mred_clean_up_gdi_objects();
+#endif	
+  
   return rval;
 }
 
+/* **************************************************************** */
+/*   Main for Unix and Mac OS X                                     */
+/* **************************************************************** */
+
+/* Just jumps to generic main. */
+
+#ifndef wx_msw 
+
+typedef struct {
+  int argc;
+  char **argv;
+} Main_Args;
+
+static int call_main_after_stack(void *data)
+{
+  Main_Args *ma = (Main_Args *)data;
+  return main_after_stack(ma->argc, ma->argv);
+}
+
+int main(int argc, char *argv[])
+{
+  Main_Args ma;
+  ma.argc = argc;
+  ma.argv = argv;
+  return scheme_main_stack_setup(1, call_main_after_stack, &ma);
+}
+#endif
+
+/* **************************************************************** */
+/*   Main for Windows                                               */
+/* **************************************************************** */
+
+/* Implements single-instance mode and otherwise initializes Windows. */
 
 #ifdef wx_msw 
 
@@ -506,11 +506,33 @@ static char *CreateUniqueName()
   return together;
 }
 
+/* To propagate args from WinMain to wxWinMain via
+   scheme_main_stack_setup: */
+typedef struct {
+  int wm_is_mred;
+  HINSTANCE hInstance;
+  HINSTANCE hPrevInstance;
+  int argc;
+  char **argv;
+  int nCmdShow;
+} WinMain_Args;
+
+static int WinMain_after_stack(void *_wma)
+{
+  WinMain_Args *wma = (WinMain_Args *)_wma;
+
+  return wxWinMain(wma->wm_is_mred, wma->hInstance, wma->hPrevInstance, 
+                   wma->argc, wma->argv, 
+                   wma->nCmdShow, 
+                   main_after_stack);
+}
+
 int APIENTRY WinMain_dlls_ready(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR ignored, int nCmdShow)
 {
   LPWSTR m_lpCmdLine;
   long argc, j, l;
   char *a, **argv, *b, *normalized_path = NULL;
+  WinMain_Args wma;
 
   /* Get command line: */
   m_lpCmdLine = GetCommandLineW();
@@ -595,7 +617,14 @@ int APIENTRY WinMain_dlls_ready(HINSTANCE hInstance, HINSTANCE hPrevInstance, LP
     }
   }
 
-  return wxWinMain(wm_is_mred, hInstance, hPrevInstance, argc, argv, nCmdShow, main);
+  wma.wm_is_mred = wm_is_mred;
+  wma.hInstance = hInstance;
+  wma.hPrevInstance = hPrevInstance;
+  wma.argc = argc;
+  wma.argv = argv;
+  wma.nCmdShow = nCmdShow;
+
+  return scheme_main_stack_setup(1, WinMain_after_stack, &wma);
 }
 
 # ifdef MZ_PRECISE_GC
