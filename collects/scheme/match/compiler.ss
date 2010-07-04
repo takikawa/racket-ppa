@@ -108,7 +108,8 @@
                           body)]))))])])
        #`[(vector? #,x)
           (case (vector-length #,x)
-            clauses ...)])]
+            clauses ...
+            [else (#,esc)])])]
     ;; it's a structure
     [(box? k)
      ;; all the rows are structures with the same predicate
@@ -430,7 +431,7 @@
                                    (if (Row-unmatch (car blocks))
                                        #`(let/ec k
                                                  (let ([#,(Row-unmatch (car blocks))
-                                                        (lambda () (k (#,esc)))])
+                                                        (lambda () (call-with-values #,esc k))])
                                                    rhs))
                                        #'rhs))])
                   ;; then compile the rest, with our name as the esc

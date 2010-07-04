@@ -46,18 +46,21 @@ continuation's frames to the marks that were present when
 @scheme[call-with-current-continuation] or
 @scheme[call-with-composable-continuation] was invoked.
 
-@defproc[(continuation-marks [cont continuation?]
+@defproc[(continuation-marks [cont (or/c continuation? thread?)]
                              [prompt-tag prompt-tag? (default-continuation-prompt-tag)])
          continuation-mark-set?]{
 
 Returns an opaque value containing the set of continuation marks for
-all keys in the continuation @scheme[cont] up to the prompt tagged by
-@scheme[prompt-tag].  If @scheme[cont] is an escape continuation (see
-@secref["prompt-model"]), then the current continuation must extend
-@scheme[cont], or the @exnraise[exn:fail:contract]. If @scheme[cont]
-was not captured with respect to @scheme[prompt-tag] and does not
-include a prompt for @scheme[prompt-tag], the
-@exnraise[exn:fail:contract].}
+all keys in the continuation @scheme[cont] (or the current
+continuation of @scheme[cont] if it is a thread) up to the prompt
+tagged by @scheme[prompt-tag].  If @scheme[cont] is an escape
+continuation (see @secref["prompt-model"]), then the current
+continuation must extend @scheme[cont], or the
+@exnraise[exn:fail:contract]. If @scheme[cont] was not captured with
+respect to @scheme[prompt-tag] and does not include a prompt for
+@scheme[prompt-tag], the @exnraise[exn:fail:contract]. If
+@scheme[cont] is a dead thread, the result is an empty set of
+continuation marks.}
 
 @defproc[(current-continuation-marks [prompt-tag prompt-tag? (default-continuation-prompt-tag)])
          continuation-mark-set?]{
@@ -111,6 +114,29 @@ Returns the first element of the list that would be returned by
 @scheme[#f] if the result would be the empty list. Typically, this
 result can be computed more quickly using
 @scheme[continuation-mark-set-first].}
+
+@defproc[(call-with-immediate-continuation-mark
+          [key-v any/c]
+          [proc (any/c . -> . any)]
+          [default-v any/c #f])
+         any]{
+
+Calls @scheme[proc] with the value associated with @scheme[key-v] in
+the first frame of the current continuation (i.e., a value that would
+be replaced if the call to
+@scheme[call-with-immediate-continuation-mark] were replaced with a
+@scheme[with-continuation-mark] form using @scheme[key-v] as the key
+expression). If no such value exists in the first frame,
+@scheme[default-v] is passed to @scheme[proc]. The @scheme[proc] is
+called in tail position with respect to the
+@scheme[call-with-immediate-continuation-mark] call.
+
+This function could be implemented with a combination of
+@scheme[with-continuation-mark], @scheme[current-continuation-marks],
+and @scheme[continuation-mark-set->list], but
+@scheme[call-with-immediate-continuation-mark] is implemented more
+efficiently; it inspects only the first frame of the current
+continuation.}
 
 @defproc[(continuation-mark-set? [v any/c]) boolean?]{
 Returns @scheme[#t] if @scheme[v] is a mark set created by

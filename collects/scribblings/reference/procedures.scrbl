@@ -25,7 +25,7 @@ arguments; otherwise, the @exnraise[exn:fail:contract]. The given
 @scheme[proc] is called in tail position with respect to the
 @scheme[apply] call.
 
-@examples[
+@mz-examples[
 (apply + '(1 2 3))
 (apply + 1 2 '(3))
 (apply + '())
@@ -40,7 +40,7 @@ composed functions can consume and produce any number of values, as
 long as each function produces as many values as the preceding
 function consumes.
 
-@examples[
+@mz-examples[
 ((compose - sqrt) 10)
 ((compose sqrt -) 10)
 ((compose list split-path) (bytes->path #"/a" 'unix))
@@ -109,7 +109,7 @@ A valid arity @scheme[_a] is one of the following:
 
 }
 
-@examples[
+@mz-examples[
 (procedure-arity cons)
 (procedure-arity list)
 (arity-at-least? (procedure-arity list))
@@ -124,7 +124,7 @@ A valid arity @scheme[_a] is one of the following:
 Returns @scheme[#t] if the procedure can accept @scheme[k] arguments
 when no keyword arguments are supplied, @scheme[#f] otherwise.
 
-@examples[
+@mz-examples[
 (procedure-arity-includes? cons 2)
 (procedure-arity-includes? display 3)
 ]}
@@ -162,7 +162,7 @@ second result is a list of accepted keywords (sorted by
 accepted. When the second result is a list, every element in the first
 list is also in the second list.
 
-@examples[
+@mz-examples[
 (procedure-keywords +)
 (procedure-keywords (lambda (#:tag t #:mode m) t))
 (procedure-keywords (lambda (#:tag t #:mode [m #f]) t))
@@ -240,7 +240,7 @@ instances can be applied as procedures. In particular, when
 an application expression, a procedure is extracted from the instance
 and used to complete the procedure call.
 
-If the @scheme[prop:procedure] property value is an integer, it
+If the @scheme[prop:procedure] property value is an exact non-negative integer, it
 designates a field within the structure that should contain a
 procedure. The integer must be between @scheme[0] (inclusive) and the
 number of non-automatic fields in the structure type (exclusive, not
@@ -303,7 +303,7 @@ Providing a procedure @scheme[proc-spec] argument to
 @scheme[prop:procedure] property (so that a specific property binding
 is disallowed).
 
-@examples[
+@mz-examples[
 (define-struct fish (weight color)
                #:mutable
                #:property 
@@ -317,7 +317,11 @@ is disallowed).
 (fish-weight wanda)
 (for-each wanda '(1 2 3))
 (fish-weight wanda)
-]}
+]
+
+If the value supplied for the @scheme[prop:procedure] property is not
+an exact non-negative integer or a procedure, the
+@exnraise[exn:fail:contract].}
 
 @defproc[(procedure-struct-type? [type struct-type?]) boolean?]{
 
@@ -414,7 +418,7 @@ applied.}
 Returns a procedure that is just like @scheme[proc], except that it
 returns the @scheme[not] of @scheme[proc]'s result.
 
-@examples[#:eval fun-eval
+@mz-examples[#:eval fun-eval
 (filter (negate symbol?) '(1 a 2 b 3 c))
 (map (negate =) '(1 2 3) '(1 1 1))
 ]}
@@ -427,7 +431,7 @@ the resulting procedure is first applied, unless it is given the
 maximum number of arguments that it can accept, the result is a
 procedure to accept additional arguments.
 
-@examples[#:eval fun-eval
+@mz-examples[#:eval fun-eval
 ((curry list) 1 2)
 ((curry cons) 1)
 ((curry cons) 1 2)
@@ -438,7 +442,7 @@ further application accumulates arguments until an acceptable number
 of arguments have been accumulated, at which point the original
 @scheme[proc] is called.
 
-@examples[#:eval fun-eval
+@mz-examples[#:eval fun-eval
 (((curry list) 1 2) 3)
 (((curry list) 1) 3)
 ((((curry foldl) +) 0) '(1 2 3))
@@ -452,7 +456,7 @@ The @scheme[curry] function provides limited support for keyworded
 functions: only the @scheme[curry] call itself can receive keyworded
 arguments to be propagated eventually to @scheme[proc].
 
-@examples[#:eval fun-eval
+@mz-examples[#:eval fun-eval
   (map ((curry +) 10) '(1 2 3))
   (map (curry + 10) '(1 2 3))
   (map (compose (curry * 2) (curry + 10)) '(1 2 3))
@@ -469,7 +473,7 @@ Like @scheme[curry], except that the arguments are collected in the
 opposite direction: the first step collects the rightmost group of
 arguments, and following steps add arguments to the left of these.
 
-@examples[#:eval fun-eval
+@mz-examples[#:eval fun-eval
   (map (curryr list 'foo) '(1 2 3))
 ]}
 

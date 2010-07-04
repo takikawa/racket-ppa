@@ -58,6 +58,8 @@ extern int scheme_num_copied_stacks;
 static unsigned long scheme_primordial_os_thread_stack_base;
 static THREAD_LOCAL unsigned long scheme_os_thread_stack_base;
 
+static Scheme_Report_Out_Of_Memory_Proc more_report_out_of_memory;
+
 #if defined(MZ_XFORM) && !defined(MZ_PRECISE_GC)
 void **GC_variable_stack;
 #endif
@@ -107,6 +109,9 @@ void scheme_set_stack_base(void *base, int no_auto_statics)
   }
 #endif
   use_registered_statics = no_auto_statics;
+#if defined(MZ_PRECISE_GC)
+  GC_report_out_of_memory = scheme_out_of_memory_abort;
+#endif
 }
 
 void scheme_set_current_os_thread_stack_base(void *base)
@@ -178,6 +183,19 @@ extern unsigned long scheme_get_stack_base()
   else
 #endif
     return (unsigned long)GC_get_stack_base();
+}
+
+void scheme_out_of_memory_abort()
+{
+  scheme_log_abort("PLT Scheme virtual machine has run out of memory; aborting");
+  if (more_report_out_of_memory)
+    more_report_out_of_memory();
+  abort();
+}
+
+void scheme_set_report_out_of_memory(Scheme_Report_Out_Of_Memory_Proc p)
+{
+  more_report_out_of_memory = p;
 }
 
 /************************************************************************/
@@ -1462,7 +1480,7 @@ static void cons_onto_list(void *p)
 # ifdef MZ_PRECISE_GC
 START_XFORM_SKIP;
 #  ifdef DOS_FILE_SYSTEM
-extern void gc_fprintf(int ignored, const char *c, ...);
+extern void gc_fprintf(FILE *ignored, const char *c, ...);
 #   define object_console_printf gc_fprintf
 #  endif
 # endif
@@ -1637,6 +1655,8 @@ static void print_tagged_value(const char *prefix,
       sprintf(t2, "#<meta-continuation>[%d;%s]", mc->pseudo, t3);
       type = t2;
       len = strlen(t2);
+    } else if (SAME_TYPE(SCHEME_TYPE(v), scheme_rt_compact_port)) {
+      
 #endif
     } else if (!scheme_strncmp(type, "#<syntax", 8)) {
       char *t2, *t3;
@@ -2039,7 +2059,7 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
         var_stack = (void **)t->jmpup_buf.gc_var_stack;
         delta = (long)t->jmpup_buf.stack_copy - (long)t->jmpup_buf.stack_from;
         /* FIXME: stack direction */
-        limit = (void *)t->jmpup_buf.stack_copy + t->jmpup_buf.stack_size;
+        limit = (char *)t->jmpup_buf.stack_copy + t->jmpup_buf.stack_size;
       }
       GC_dump_variable_stack(var_stack, delta, limit, NULL,
                              scheme_get_type_name,

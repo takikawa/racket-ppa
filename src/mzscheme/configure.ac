@@ -419,6 +419,7 @@ fi
 # If using gcc, we want all warnings:
 if test "$CC" = "gcc" ; then 
   COMPFLAGS="$COMPFLAGS -Wall"
+  XFORMFLAGS="$XFORMFLAGS --keep-lines"
 
   # Use -MMD when we have gcc and gnumake:
   is_gmake=`make -v no-such-target-we-hope 2>&1 | grep "GNU Make"`
@@ -538,6 +539,12 @@ case $OS in
     GC_THREADS_FLAG="-DGC_LINUX_THREADS"
     # PPC: X11 librares are not found
     case `$UNAME -m` in
+      #Required for CentOS 4.6
+      x86_64)
+       if test -d /usr/X11R6/lib64 ; then
+         X_LIBS="$X_LIBS -L/usr/X11R6/lib64"
+       fi
+       ;;
       ppc)
        if test -d /usr/X11R6/lib ; then
          X_LIBS="$X_LIBS -L/usr/X11R6/lib"
@@ -1303,6 +1310,7 @@ AC_SUBST(CGCOPTIONS)
 AC_SUBST(GC2OPTIONS)
 AC_SUBST(MROPTIONS)
 AC_SUBST(GCDIR)
+AC_SUBST(XFORMFLAGS)
 AC_SUBST(MZBINTARGET)
 AC_SUBST(MZINSTALLTARGET)
 AC_SUBST(EXTRA_GMP_OBJ)

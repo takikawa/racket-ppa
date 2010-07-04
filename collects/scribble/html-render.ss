@@ -91,18 +91,16 @@
 (define (anchor-name v)
   (define (encode-byte b)
     (string-append (if (< b 16) "~0" "~") (number->string b 16)))
-  (define (encode-str str)
-    (if (regexp-match? #px"[^[:ascii:]]" str)
-      (string-append* (map encode-byte (bytes->list (string->bytes/utf-8 str))))
-      (encode-byte (char->integer (string-ref str 0)))))
+  (define (encode-bytes str)
+    (string->bytes/utf-8 (encode-byte (bytes-ref str 0))))
   (if (literal-anchor? v)
     (literal-anchor-string v)
-    (let* ([v (format "~a" v)]
-           [v (regexp-replace* #rx"[A-Z.]" v ".&")]
-           [v (regexp-replace* #rx" " v "._")]
-           [v (regexp-replace* #rx"\"" v ".'")]
-           [v (regexp-replace* #rx"[^-a-zA-Z0-9_!+*'()/.,]" v encode-str)])
-      v)))
+    (let* ([v (string->bytes/utf-8 (format "~a" v))]
+           [v (regexp-replace* #rx#"[A-Z.]" v #".&")]
+           [v (regexp-replace* #rx#" " v #"._")]
+           [v (regexp-replace* #rx#"\"" v #".'")]
+           [v (regexp-replace* #rx#"[^-a-zA-Z0-9_!+*'()/.,]" v encode-bytes)])
+      (bytes->string/utf-8 v))))
 
 (define-serializable-struct literal-anchor (string))
 
@@ -199,21 +197,22 @@
   (let ([sa         string-append]
         [emptylabel "...search manuals..."]
         [dimcolor   "#888"])
-    `(input
-      ([class "searchbox"]
-       [style ,(sa "color: "dimcolor";")]
-       [type "text"]
-       [value ,emptylabel]
-       [title "Enter a search string to search the manuals"]
-       [onkeypress ,(format "return DoSearchKey(event, this, ~s, ~s);"
-                            (version) top-path)]
-       [onfocus ,(sa "this.style.color=\"black\"; "
-                     "this.style.textAlign=\"left\"; "
-                     "if (this.value == \""emptylabel"\") this.value=\"\";")]
-       [onblur ,(sa "if (this.value.match(/^ *$/)) {"
-                    " this.style.color=\""dimcolor"\";"
-                    " this.style.textAlign=\"center\";"
-                    " this.value=\""emptylabel"\"; }")]))))
+    `(form ([class "searchform"])
+       (input
+        ([class "searchbox"]
+         [style ,(sa "color: "dimcolor";")]
+         [type "text"]
+         [value ,emptylabel]
+         [title "Enter a search string to search the manuals"]
+         [onkeypress ,(format "return DoSearchKey(event, this, ~s, ~s);"
+                              (version) top-path)]
+         [onfocus ,(sa "this.style.color=\"black\"; "
+                       "this.style.textAlign=\"left\"; "
+                       "if (this.value == \""emptylabel"\") this.value=\"\";")]
+         [onblur ,(sa "if (this.value.match(/^ *$/)) {"
+                      " this.style.color=\""dimcolor"\";"
+                      " this.style.textAlign=\"center\";"
+                      " this.value=\""emptylabel"\"; }")])))))
 (define search-box (make-search-box "../"))
 (define top-search-box (make-search-box ""))
 
@@ -339,12 +338,16 @@
     (define/public (set-external-tag-path p)
       (set! external-tag-path p))
 
+    (define external-root-url #f)
+    (define/public (set-external-root-url p)
+      (set! external-root-url p))
+
     (define/public (tag->path+anchor ri tag)
       ;; Called externally; not used internally
       (let-values ([(dest ext?) (resolve-get/ext? #f ri tag)])
         (cond [(not dest) (values #f #f)]
               [(and ext? external-tag-path)
-               (values external-tag-path (format "~a" (serialize tag)))]
+               (values (string->url external-tag-path) (format "~a" (serialize tag)))]
               [else (values (relative->path (dest-path dest))
                             (and (not (dest-page? dest))
                                  (anchor-name (dest-anchor dest))))])))
@@ -821,6 +824,7 @@
 
     (define/override (render-element e part ri)
       (cond
+        [(string? e) (super render-element e part ri)] ; short-cut for common case
         [(hover-element? e)
          `((span ([title ,(hover-element-text e)])
              ,@(render-plain-element e part ri)))]
@@ -844,14 +848,41 @@
                          (resolve-get/ext? part ri (link-element-tag e))])
              (if dest
                `((a [(href
-                      ,(if (and ext? external-tag-path)
+                      ,(cond
+                        [(and ext? external-root-url
+                              (let ([rel (find-relative-path
+                                          (find-doc-dir)
+                                          (relative->path (dest-path dest)))])
+                                (and (relative-path? rel)
+                                     rel)))
+                         => (lambda (rel)
+                              (url->string
+                               (struct-copy
+                                url
+                                (combine-url/relative
+                                 (string->url external-root-url)
+                                 (string-join (map path-element->string
+                                                   (explode-path rel))
+                                              "/"))
+                                [fragment
+                                 (and (not (dest-page? dest))
+                                      (anchor-name (dest-anchor dest)))])))]
+                        [(and ext? external-tag-path)
                          ;; Redirected to search:
-                         (format "~a;tag=~a"
-                                 external-tag-path
-                                 (base64-encode
-                                  (string->bytes/utf-8
-                                   (format "~a" (serialize
-                                                 (link-element-tag e))))))
+                         (url->string
+                          (let ([u (string->url external-tag-path)])
+                            (struct-copy
+                             url
+                             u
+                             [query
+                              (cons (cons 'tag
+                                          (bytes->string/utf-8
+                                           (base64-encode
+                                            (string->bytes/utf-8
+                                             (format "~a" (serialize
+                                                           (link-element-tag e)))))))
+                                    (url-query u))])))]
+                        [else
                          ;; Normal link:
                          (format "~a~a~a"
                                  (from-root (relative->path (dest-path dest))
@@ -859,7 +890,7 @@
                                  (if (dest-page? dest) "" "#")
                                  (if (dest-page? dest)
                                    ""
-                                   (anchor-name (dest-anchor dest))))))
+                                   (anchor-name (dest-anchor dest))))]))
                      ,@(if (string? (element-style e))
                          `([class ,(element-style e)])
                          null)]
@@ -1238,9 +1269,16 @@
                           (loop (cdr path) (cdr root))))))
              roots))))
 
+(define exploded (make-weak-hash))
+(define (explode/cache p)
+  (or (hash-ref exploded p #f)
+      (let ([v (explode p)])
+        (hash-set! exploded p v)
+        v)))
+
 (define (from-root p d)
-  (define e-p (explode (path->complete-path p (current-directory))))
-  (define e-d (and d (explode (path->complete-path d (current-directory)))))
+  (define e-p (explode/cache (path->complete-path p (current-directory))))
+  (define e-d (and d (explode/cache (path->complete-path d (current-directory)))))
   (define p-in? (in-plt? e-p))
   (define d-in? (and d (in-plt? e-d)))
   ;; use an absolute link if the link is from outside the plt tree
@@ -1255,12 +1293,13 @@
     (let loop ([e-d e-d] [e-p e-p])
       (cond
         [(null? e-d)
-         (let loop ([e-p e-p])
-           (cond [(null? e-p) "/"]
-                 [(null? (cdr e-p)) (car e-p)]
-                 [(eq? 'same (car e-p)) (loop (cdr e-p))]
-                 [(eq? 'up (car e-p)) (string-append "../" (loop (cdr e-p)))]
-                 [else (string-append (car e-p) "/" (loop (cdr e-p)))]))]
+         (string-append*
+          (let loop ([e-p e-p])
+            (cond [(null? e-p) '("/")]
+                  [(null? (cdr e-p)) (list (car e-p))]
+                  [(eq? 'same (car e-p)) (loop (cdr e-p))]
+                  [(eq? 'up (car e-p)) (cons "../" (loop (cdr e-p)))]
+                  [else (cons (car e-p) (cons "/" (loop (cdr e-p))))])))]
         [(equal? (car e-d) (car e-p)) (loop (cdr e-d) (cdr e-p))]
         [(eq? 'same (car e-d)) (loop (cdr e-d) e-p)]
         [(eq? 'same (car e-p)) (loop e-d (cdr e-p))]
