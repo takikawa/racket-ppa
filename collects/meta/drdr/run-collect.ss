@@ -2,6 +2,7 @@
 (require "status.ss"
          "notify.ss"
          "rewriting.ss"
+         "dirstruct.ss"
          "cache.ss")
 
 (define (command+args+env->command+args 
@@ -12,15 +13,6 @@
                     (format "~a=~a" k v))
                   (list* cmd
                          args))))
-
-(define (read-until-evt port-evt k)
-  (if port-evt
-      (handle-evt port-evt
-                  (lambda (bs)
-                    (if (eof-object? bs)
-                        (k)
-                        (k bs))))
-      never-evt))
 
 (define (run/collect/wait 
          #:env env
@@ -39,7 +31,7 @@
   (define-values
     (the-process stdout stdin stderr)
     (apply subprocess
-           #f #f #f 
+           #f #f #f
            new-command 
            new-args))
   
@@ -48,54 +40,75 @@
   ; Run it without input
   (close-output-port stdin)
   
-  ; Wait for all the output, then the process death or timeout
+  ; Wait for all the output and the process death or timeout
   (local
     [(define the-alarm
-       (alarm-evt (+ (current-inexact-milliseconds)
-                     (* 1000 timeout))))
-     (define (slurp-output-evt loop stdout stderr log)
-       (choice-evt
-        (read-until-evt stdout
-                        (case-lambda 
-                          [() 
-                           (loop #f stderr log)]
-                          [(bs)
-                           (loop stdout stderr (list* (make-stdout bs) log))]))
-        (read-until-evt stderr
-                        (case-lambda 
-                          [() 
-                           (loop stdout #f log)]
-                          [(bs)
-                           (loop stdout stderr (list* (make-stderr bs) log))]))))
-     (define (finish-log stdout stderr log)
-       (if (or stdout stderr)
-           (sync (slurp-output-evt finish-log stdout stderr log))
-           (reverse log)))
+       (alarm-evt (+ start-time (* 1000 timeout))))
+     
+     (define line-ch (make-channel))
+     (define (read-port-t make port)
+       (thread
+        (λ ()
+          (let loop ()
+            (define l (read-bytes-line port))
+            (if (eof-object? l)
+                (channel-put line-ch l)
+                (begin (channel-put line-ch (make l))
+                       (loop)))))))
+     (define stdout-t (read-port-t make-stdout stdout))
+     (define stderr-t (read-port-t make-stderr stderr))
      
      (define final-status
-       (let loop ([stdout (read-bytes-line-evt stdout)]
-                  [stderr (read-bytes-line-evt stderr)]
+       (let loop ([open-ports 2]
+                  [end-time #f]
+                  [status #f]
                   [log empty])
-         (sync (handle-evt the-alarm
-                           (lambda (_)
-                             (define end-time 
-                               (current-inexact-milliseconds))
-                             (subprocess-kill the-process #t)
-                             (make-timeout start-time end-time command-line (finish-log stdout stderr log))))
-               (slurp-output-evt loop stdout stderr log)
-               (handle-evt the-process
-                           (lambda (_)
-                             (define end-time 
-                               (current-inexact-milliseconds))
-                             (make-exit start-time end-time command-line
-                                        (finish-log stdout stderr log)
-                                        (subprocess-status the-process)))))))]
+         (define process-done? (and end-time #t))
+         (define output-done? (zero? open-ports))
+         (if (and output-done? process-done?)
+             (if status
+                 (make-exit start-time end-time command-line (reverse log) status)
+                 (make-timeout start-time end-time command-line (reverse log)))
+             (sync (if process-done?
+                       never-evt
+                       (choice-evt 
+                        (handle-evt the-alarm
+                                    (λ (_)
+                                      (define end-time 
+                                        (current-inexact-milliseconds))
+                                      (subprocess-kill the-process #t)
+                                      (loop open-ports end-time status log)))
+                        (handle-evt the-process
+                                    (λ (_)
+                                      (define end-time 
+                                        (current-inexact-milliseconds))
+                                      (loop open-ports end-time (subprocess-status the-process) log)))))
+                   (if output-done?
+                       never-evt
+                       (handle-evt line-ch
+                                   (match-lambda
+                                     [(? eof-object?)
+                                      (loop (sub1 open-ports) end-time status log)]
+                                     [l
+                                      (loop open-ports end-time status (list* l log))])))))))]
+    
     (close-input-port stdout)
     (close-input-port stderr)
     
     (notify! "Done: ~a ~S" command args)
     
     final-status))
+
+(define-syntax regexp-replace**
+  (syntax-rules ()
+    [(_ () s) s]
+    [(_ ([pat0 subst0]
+         [pat subst]
+         ...)
+        s)
+     (regexp-replace* pat0
+                      (regexp-replace** ([pat subst] ...) s)
+                      subst0)]))
 
 (define (run/collect/wait/log log-path command 
                               #:timeout timeout 
@@ -105,8 +118,20 @@
   (cache/file
    log-path
    (lambda ()
+     (define rev (number->string (current-rev)))
+     (define home (hash-ref env "HOME"))
+     (define tmp (hash-ref env "TMPDIR"))
+     (define cwd (path->string (current-directory)))
+     (define (rewrite s)
+       (regexp-replace** ([rev "<current-rev>"]
+                          [tmp "<tmp>"]
+                          [home "<home>"]
+                          [cwd "<cwd>"])
+                         s))
+     
      (set! ran? #t)
      (rewrite-status
+      #:rewrite rewrite
       (run/collect/wait
        #:timeout timeout
        #:env env
@@ -116,6 +141,12 @@
 (provide/contract
  [command+args+env->command+args 
   (string? (listof string?) #:env (hash/c string? string?) . -> . (values string? (listof string?)))]
+ [run/collect/wait
+  (string? 
+   #:env (hash/c string? string?) 
+   #:timeout exact-nonnegative-integer? 
+   (listof string?) 
+   . -> . status?)]
  [run/collect/wait/log 
   (path-string? string? 
                 #:env (hash/c string? string?) 

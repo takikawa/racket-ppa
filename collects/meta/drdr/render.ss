@@ -5,13 +5,14 @@
          "config.ss"
          "diff.ss"
          "list-count.ss"
-         "svn.ss"
          "cache.ss"
          (except-in "dirstruct.ss"
                     revision-trunk-dir)
          "status.ss"
-         "monitor-svn.ss"
-         "metadata.ss"
+         "monitor-scm.ss"
+         (only-in "metadata.ss"
+                  PROP:command-line
+                  PROP:timeout)
          "formats.ss"
          "path-utils.ss"
          "analyze.ss")
@@ -98,69 +99,120 @@
 
 (define (svn-date->nice-date date)
   (regexp-replace "^(....-..-..)T(..:..:..).*Z$" date "\\1 \\2"))
-
+(define (git-date->nice-date date)
+  (regexp-replace "^(....-..-..) (..:..:..).*$" date "\\1 \\2"))
+(define (log->url log)
+  (define start-commit (git-push-start-commit log))
+  (define end-commit (git-push-end-commit log))
+  (if (string=? start-commit end-commit)
+      (format "http://github.com/plt/racket/commit/~a" end-commit)
+      (format "http://github.com/plt/racket/compare/~a...~a" start-commit end-commit)))
+  
 (define (format-commit-msg)
   (define pth (revision-commit-msg (current-rev)))
-  (define msg-v (read-cache* pth))
-  (match msg-v
+  (define (timestamp pth)
+    (with-handlers ([exn:fail? (lambda (x) "")])
+      (date->string (seconds->date (read-cache (build-path (revision-dir (current-rev)) pth))) #t)))
+  (define bdate/s (timestamp "checkout-done"))
+  (define bdate/e (timestamp "integrated"))
+  (match (read-cache* pth)
+    [(struct git-push (num author commits))
+     `(table ([class "data"])
+             (tr ([class "author"]) (td "Author:") (td ,author))
+             (tr ([class "date"]) (td "Build Start:") (td ,bdate/s))
+             (tr ([class "date"]) (td "Build End:") (td ,bdate/e))
+             ,@(append-map
+                (match-lambda
+                  [(struct git-merge (hash author date msg from to))
+                   #;`((tr ([class "hash"]) (td "Commit:") (td (a ([href ,(format "http://github.com/plt/racket/commit/~a" hash)]) ,hash)))
+                     (tr ([class "date"]) (td "Date:") (td ,(git-date->nice-date date)))
+                     (tr ([class "author"]) (td "Author:") (td ,author))
+                     (tr ([class "msg"]) (td "Log:") (td (pre ,@msg)))
+                     (tr ([class "merge"]) (td "Merge:") (td "From " ,from " to " ,to)))
+                   ; Don't display these "meaningless" commits
+                   empty]
+                  [(struct git-diff (hash author date msg mfiles))
+                   (define cg-id (symbol->string (gensym 'changes)))
+                   (define ccss-id (symbol->string (gensym 'changes)))
+                   `((tr ([class "hash"]) (td "Commit:") (td (a ([href ,(format "http://github.com/plt/racket/commit/~a" hash)]) ,hash)))
+                     (tr ([class "date"]) (td "Date:") (td ,(git-date->nice-date date)))
+                     (tr ([class "author"]) (td "Author:") (td ,author))
+                     (tr ([class "msg"]) (td "Log:") (td (pre ,@msg)))
+                     (tr ([class "changes"]) 
+                         (td 
+                          (a ([href ,(format "javascript:TocviewToggle(\"~a\",\"~a\");" cg-id ccss-id)])
+                             (span ([id ,cg-id]) 9658) "Changes:"))
+                         (td
+                          (div ([id ,ccss-id]
+                                [style "display: none;"])
+                               ,@(for/list ([path (in-list mfiles)])
+                                         `(p ([class "output"])
+                                             ,(if (regexp-match #rx"^collects" path)
+                                                  (local [(define path-w/o-trunk
+                                                            (apply build-path (explode-path path)))
+                                                          (define html-path
+                                                            (if (looks-like-directory? path)
+                                                                (format "~a/" path-w/o-trunk)
+                                                                path-w/o-trunk))
+                                                          (define path-url
+                                                            (path->string* html-path))
+                                                          (define path-tested?
+                                                            #t)]
+                                                    (if path-tested?
+                                                        `(a ([href ,path-url]) ,path)
+                                                        path))
+                                                  path)))))))])
+                commits))]
+     
     [(struct svn-rev-log (num author date msg changes))
      (define url (format "http://svn.plt-scheme.org/view?view=rev&revision=~a" num))
-     (define (timestamp pth)
-       (with-handlers ([exn:fail? (lambda (x) "")])
-         (date->string (seconds->date (read-cache (build-path (revision-dir (current-rev)) pth))) #t)))
-     (define bdate/s (timestamp "checkout-done"))
-     (define bdate/e (timestamp "integrated"))
      (define cg-id (symbol->string (gensym 'changes)))
      (define ccss-id (symbol->string (gensym 'changes)))
      `(table ([class "data"])
-             (tr ([class "author"]) (td "Author:") (td ,author))
-             (tr ([class "date"]) (td "Commit Date:") (td ,(svn-date->nice-date date)))
-             (tr ([class "date"]) (td "Build Start:") (td ,bdate/s))
-             (tr ([class "date"]) (td "Build End:") (td ,bdate/e))
-             (tr ([class "msg"]) (td "Log:") (td (pre ,msg)))
-             (tr ([class "changes"]) 
-                 (td 
-                  (a ([href ,(format "javascript:TocviewToggle(\"~a\",\"~a\");" cg-id ccss-id)])
-                     (span ([id ,cg-id]) 9658) "Changes:"))
-                 (td
-                  (div ([id ,ccss-id]
-                        [style "display: none;"])
-                       ,@(map (match-lambda
-                                [(struct svn-change (action path))
-                                 `(p ([class "output"])
-                                     ,(symbol->string action) " " 
-                                     ,(if (regexp-match #rx"^/trunk/collects" path)
-                                          (local [(define path-w/o-trunk
-                                                    (apply build-path (list-tail (explode-path path) 2)))
-                                                  (define html-path
-                                                    (if (looks-like-directory? path)
-                                                        (format "~a/" path-w/o-trunk)
-                                                        path-w/o-trunk))
-                                                  (define path-url
-                                                    (path->string* html-path))
-                                                  (define path-tested?
-                                                    #t)]
-                                            (if path-tested?
-                                                `(a ([href ,path-url]) ,path)
-                                                path))
-                                          path))])
-                              changes))))
-             (tr (td nbsp) (td (a ([href ,url]) "View Commit"))))]
+              (tr ([class "author"]) (td "Author:") (td ,author))
+              (tr ([class "date"]) (td "Build Start:") (td ,bdate/s))
+              (tr ([class "date"]) (td "Build End:") (td ,bdate/e))
+              (tr ([class "rev"]) (td "Commit:") (td (a ([href ,url]) ,(number->string num))))
+              (tr ([class "date"]) (td "Date:") (td ,(svn-date->nice-date date)))
+              (tr ([class "msg"]) (td "Log:") (td (pre ,msg)))
+              (tr ([class "changes"]) 
+                  (td 
+                   (a ([href ,(format "javascript:TocviewToggle(\"~a\",\"~a\");" cg-id ccss-id)])
+                      (span ([id ,cg-id]) 9658) "Changes:"))
+                  (td
+                   (div ([id ,ccss-id]
+                         [style "display: none;"])
+                        ,@(map (match-lambda
+                                 [(struct svn-change (action path))
+                                  `(p ([class "output"])
+                                      ,(symbol->string action) " " 
+                                      ,(if (regexp-match #rx"^/trunk/collects" path)
+                                           (local [(define path-w/o-trunk
+                                                     (apply build-path (list-tail (explode-path path) 2)))
+                                                   (define html-path
+                                                     (if (looks-like-directory? path)
+                                                         (format "~a/" path-w/o-trunk)
+                                                         path-w/o-trunk))
+                                                   (define path-url
+                                                     (path->string* html-path))
+                                                   (define path-tested?
+                                                     #t)]
+                                             (if path-tested?
+                                                 `(a ([href ,path-url]) ,path)
+                                                 path))
+                                           path))])
+                               changes)))))]
     [else
      'nbsp]))
 
 (define (footer)
   `(div ([id "footer"])
-        "Powered by " (a ([href "http://plt-scheme.org/"]) "PLT Scheme") ". "
+        "Powered by " (a ([href "http://racket-lang.org/"]) "Racket") ". "
         "Written by " (a ([href "http://faculty.cs.byu.edu/~jay"]) "Jay McCarthy") ". "
         (a ([href "/help"])
            "Need help?")
         (br)
         "Current time: " ,(date->string (seconds->date (current-seconds)) #t)))
-
-(define (revision-svn-url rev)
-  (format "http://svn.plt-scheme.org/view?view=rev&revision=~a"
-          rev))
 
 (define (render-event e)
   (with-handlers ([exn:fail?
@@ -182,10 +234,16 @@
         (define-values (title breadcrumb) (path->breadcrumb log-pth #f))
         (define the-base-path
           (base-path log-pth))
-        (define svn-url
-          (format "http://svn.plt-scheme.org/view/trunk/~a?view=markup&pathrev=~a"
-                  the-base-path
-                  (current-rev)))
+        (define scm-url
+          (if ((current-rev) . < . 20000)
+              (format "http://svn.plt-scheme.org/view/trunk/~a?view=markup&pathrev=~a"
+                      the-base-path
+                      (current-rev))
+              (local [(define msg (read-cache* (revision-commit-msg (current-rev))))]
+                (if msg
+                    (format "http://github.com/plt/racket/blob/~a~a"
+                            (git-push-end-commit msg) the-base-path)
+                    "#"))))
         (define prev-rev-url (format "/~a~a" (previous-rev) the-base-path))
         (define cur-rev-url (format "/~a~a" "current" the-base-path))
         (define output (map render-event output-log))
@@ -206,11 +264,11 @@
                             (tr (td "Duration:") (td ,(format-duration-ms dur)))
                             (tr (td "Timeout:") (td ,(if (timeout? log) checkmark-entity "")))
                             (tr (td "Exit Code:") (td ,(if (exit? log) (number->string (exit-code log)) "")))
-                            (tr (td nbsp) (td (a ([href ,svn-url]) "View File"))))
+                            (tr (td nbsp) (td (a ([href ,scm-url]) "View File"))))
                      ,(if (lc-zero? changed)
                           ""
                           `(div ([class "error"])
-                                  "This result of executing this file has changed since the previous revision."
+                                  "This result of executing this file has changed since the previous push."
                                   " "
                                   (a ([href ,(format "/diff/~a/~a~a" (current-rev) (previous-rev) the-base-path)])
                                      "See the difference")))
@@ -267,8 +325,8 @@
              (div ([class "dirlog, content"])
                   ,breadcrumb
                   ,(if show-commit-msg?
-                       (format-commit-msg)
-                       "")
+                        (format-commit-msg)
+                        "")
                   ,(local [(define (path->url pth)
                              (format "http://drdr.plt-scheme.org/~a~a" (current-rev) pth))
                            
@@ -403,33 +461,33 @@
           @div[[(class "help")]]{
             @h1{What is DrDr?}
             @p{DrDr is a server at @a[[(href "http://www.byu.edu")]]{Brigham Young University} that builds
-               and "tests" every revision of the PLT Scheme code base.}
+               and "tests" every push to the Racket code base.}
             
             @h1{What kind of server?}
             @p{A 64-bit Linux 2.6.28-15 server running Ubuntu 9.04 with @,(number->string (number-of-cpus)) cores.}
             
             @h1{How is the build run?}
-            @p{Every revision is built from a clean checkout with the standard separate build directory command sequence, except that @code{make}
-               is passed @code{-j} with the number of cores. Each revision also has a fresh home directory and PLaneT cache.}
+            @p{Every push is built from a clean checkout with the standard separate build directory command sequence, except that @code{make}
+               is passed @code{-j} with the number of cores. Each push also has a fresh home directory and PLaneT cache.}
                
             @h1{How long does it take for a build to start after a check-in?}
-            @p{Only one build runs at a time and when none is running the SVN repository is polled every @,(number->string (current-monitoring-interval-seconds)) seconds.}
+            @p{Only one build runs at a time and when none is running the git repository is polled every @,(number->string (current-monitoring-interval-seconds)) seconds.}
             
-            @h1{How is the revision "tested"?}
-            @p{Each file's @code{@,SVN-PROP:command-line} SVN property is consulted. If it is the empty string, the file is ignored. If it is a string, then @code{$path} is replaced with the file's path, @code{mzscheme} and @code{mzc} with their path (for the current revision), and @code{mred} and @code{mred-text} with @code{mred-text}'s path (for the current revision); then the resulting command-line is executed. 
+            @h1{How is the push "tested"?}
+            @p{Each file's @code{@,PROP:command-line} property is consulted. If it is the empty string, the file is ignored. If it is a string, then a single @code{~s} is replaced with the file's path, @code{racket} and @code{mzc} with their path (for the current push), and @code{gracket} and @code{gracket-text} with @code{gracket-text}'s path (for the current push); then the resulting command-line is executed. 
                (Currently no other executables are allowed, so you can't @code{rm -fr /}.)
-               If there is no property value, the default (@code{mzscheme -t $path}) is used if the file's suffix is @code{.ss}, @code{.scm}, or @code{.scrbl}.}
+               If there is no property value, the default (@code{mzscheme -t ~s}) is used if the file's suffix is @code{.ss}, @code{.scm}, or @code{.scrbl}.}
                     
-            @p{The command-line is always executed with a fresh empty current directory which is removed after the run. But all the files share the same home directory and X server, which are both removed after each revision's testing is complete.}
+            @p{The command-line is always executed with a fresh empty current directory which is removed after the run. But all the files share the same home directory and X server, which are both removed after each push's testing is complete.}
             
             @h1{How many files are "tested" concurrently?}
             @p{One per core, or @,(number->string (number-of-cpus)).}
             
             @h1{How long may a file run?}
-            @p{The execution timeout is @,(number->string (current-subprocess-timeout-seconds)) seconds by default, but the @code{@,SVN-PROP:timeout} property is used if @code{string->number} returns a number on it.}
+            @p{The execution timeout is @,(number->string (current-subprocess-timeout-seconds)) seconds by default, but the @code{@,PROP:timeout} property is used if @code{string->number} returns a number on it.}
             
             @h1{May these settings be set on a per-directory basis?}
-            @p{Yes; if the SVN property is set on any ancestor directory, then its value is used for its descendents when theirs is not set.
+            @p{Yes; if the property is set on any ancestor directory, then its value is used for its descendents when theirs is not set.
                }
             
             @h1{What data is gathered during these runs?}
@@ -442,7 +500,7 @@
             @p{At the most basic level, if the bytes are different. However, there are two subtleties. First, DrDr knows to ignore the result of @code{time}. Second, the standard output and standard error streams are compared independently. The difference display pages present changed lines with a @span[([class "difference"])]{unique background}.}
             
             @h1{How is this site organized?}
-            @p{Each file's test results are displayed on a separate page, with a link to the previous revision on changes. All the files in a directory are collated and indexed recursively. On these pages each column is sortable and each row is clickable. The root of a revision also includes the SVN commit message with links to the test results of the modified files. The top DrDr page displays the summary information for all the tested revisions.}
+            @p{Each file's test results are displayed on a separate page, with a link to the previous push on changes. All the files in a directory are collated and indexed recursively. On these pages each column is sortable and each row is clickable. The root of a push also includes the git commit messages with links to the test results of the modified files. The top DrDr page displays the summary information for all the tested pushes.}
             
             @h1{What is the difference between @code{Duration (Abs)} and @code{Duration (Sum)}?}
             @p{@code{Duration (Abs)} is the difference between the earliest start time and the latest end time in the collection.}
@@ -450,24 +508,24 @@
             @p{The two are often different because of parallelism in the testing process. (Long absolute durations indicate DrDr bugs waiting to get fixed.)}
             
             @h1{What do the graphs mean?}
-            @p{There is a single graph for each file, i.e., graphs are not kept for old revisions.}
-            @p{The X-axis is the revision tested. The Y-axis is the percentage of the time of the slowest revision.}
+            @p{There is a single graph for each file, i.e., graphs are not kept for old pushs.}
+            @p{The X-axis is the tested push. The Y-axis is the percentage of the time of the slowest push.}
             @p{The gray, horizontal lines show where 0%, 25%, 50%, 75%, and 100% are in the graph.}
             @p{The black line shows the times for overall running of the file. The colored lines show the results from @code{time}. For each color, the "real" time is the darkest version of it and the "cpu" and "gc" time are 50% and 25% of the darkness, respectively.}
-            @p{If the number of calls to @code{time} change from one revision to the next, then there is a gray, vertical bar at that point. Also, the scaling to the slowest time is specific to each horizontal chunk.}
-            @p{The graph is split up into panes that each contain approximately 300 revisions. The green arrowheads to the left
+            @p{If the number of calls to @code{time} change from one push to the next, then there is a gray, vertical bar at that point. Also, the scaling to the slowest time is specific to each horizontal chunk.}
+            @p{The graph is split up into panes that each contain approximately 300 pushes. The green arrowheads to the left
                and right of the image move between panes.}
-            @p{The legend at the bottom of the graph shows the current pane, as well as the revision number and any timing information from that revision.}
-            @p{Click on the graph to jump to the DrDr page for a specific revision.}
+            @p{The legend at the bottom of the graph shows the current pane, as well as the push number and any timing information from that push.}
+            @p{Click on the graph to jump to the DrDr page for a specific push.}
 
-            @h1{Why are some revisions missing?}
-            @p{Some revisions are missing because they only modify branches. Only revisions that change @code{/trunk} are tested.}
+            @h1{Why are some pushes missing?}
+            @p{Some pushes are missing because they only modify branches. Only pushes that change the @code{master} branch are tested.}
             
             @h1{How do I make the most use of DrDr?}
             @p{So DrDr can be effective with all testing packages and untested code, it only pays attention to error output and non-zero exit codes. You can make the most of this strategy by ensuring that when your tests are run successfully they have no STDERR output and exit cleanly, but have both when they fail.}
             
             @h1{How do I fix the reporting of an error in my code?}
-            @p{If you know you code does not have a bug, but DrDr thinks it does, you can probably fix it by setting its SVN properties: allow it to run longer with @code{@,SVN-PROP:timeout} (but be kind and perhaps change the program to support work load selection on the command-line) or make sure it is run with the right command-line using @code{@,SVN-PROP:command-line}.}
+            @p{If you know you code does not have a bug, but DrDr thinks it does, you can probably fix it by setting its properties: allow it to run longer with @code{@,PROP:timeout} (but be kind and perhaps change the program to support work load selection on the command-line) or make sure it is run with the right command-line using @code{@,PROP:command-line}.}
             
             @h1{How can I do the most for DrDr?}
             @p{The most important thing you can do is eliminate false positives by configuring DrDr for your code and removing spurious error output.}
@@ -485,9 +543,27 @@
   (if (eof-object? v)
       "" v))
 
+(define log->committer+title 
+  (match-lambda
+    [(struct git-push (num author commits))
+     (define lines (append-map (λ (c) (if (git-merge? c) empty (git-commit-msg c))) commits))
+     (define title
+       (if (empty? lines)
+           ""
+           (first lines)))
+     (values author title)]
+    [(struct svn-rev-log (num author date msg changes))
+     (define commit-msg (string-first-line msg))
+     (define title 
+       (format "~a - ~a"
+               (svn-date->nice-date date)
+               commit-msg))
+     (values author title)]))
+
 (require web-server/servlet-env
          web-server/http
-         web-server/dispatch)
+         web-server/dispatch
+         "scm.ss")
 (define how-many-revs 45)
 (define (show-revisions req)
   (define builds-pth (plt-build-directory))
@@ -524,30 +600,26 @@
                       "DrDr"))
           (table ([class "dirlist"])
                  (thead
-                  (tr (td "Revision")
+                  (tr (td "Push#")
                       (td "Duration (Abs)")
                       (td "Duration (Sum)")
                       (td "Timeout?")
                       (td "Unclean Exit?")
                       (td "STDERR Output")
                       (td "Changes")
-                      (td "Committer")))
+                      (td "Pusher")))
                  (tbody
                   ,@(map (match-lambda
                            [(cons 'future rev-pth)
                             (define name (path->string rev-pth))
                             (define rev (string->number name))
                             (define log (read-cache (future-record-path rev)))
-                            (define committer (svn-rev-log-author log))
-                            (define commit-msg (string-first-line (svn-rev-log-msg log)))
-                            (define title 
-                              (format "~a - ~a"
-                                      (svn-date->nice-date (svn-rev-log-date log))
-                                      commit-msg))
-                            
+                            (define-values (committer title)
+                              (log->committer+title log))
+                            (define url (log->url log))
                             `(tr ([class "dir"]
                                   [title ,title])
-                                 (td (a ([href ,(revision-svn-url name)]) ,name))
+                                 (td (a ([href ,url]) ,name))
                                  (td ([class "building"] [colspan "6"])
                                      "")
                                  (td ([class "author"]) ,committer))]
@@ -555,16 +627,13 @@
                             (define name (path->string rev-pth))
                             (define url (format "~a/" name))
                             (define rev (string->number name))
-                            (define log (read-cache (revision-commit-msg rev)))
-                            (define committer (svn-rev-log-author log))
-                            (define commit-msg (string-first-line (svn-rev-log-msg log)))
-                            (define title 
-                              (format "~a - ~a"
-                                      (svn-date->nice-date (svn-rev-log-date log))
-                                      commit-msg))
+                            (define log-pth (revision-commit-msg rev))
+                            (define log (read-cache log-pth))
+                            (define-values (committer title)
+                              (log->committer+title log))
                             (define (no-rendering-row)
                               (define mtime 
-                                (file-or-directory-modify-seconds (build-path builds-pth rev-pth)))
+                                (file-or-directory-modify-seconds log-pth))
                               
                               `(tr ([class "dir"]
                                     [title ,title])
@@ -648,7 +717,7 @@
      (div ([class "content"])
           ,breadcrumb
           (div ([class "error"])
-               "This file does not exist in revision " ,(number->string (current-rev)) " or has not been tested.")
+               "This file does not exist in push #" ,(number->string (current-rev)) " or has not been tested.")
           ,(footer)))))
 (define (dir-not-found dir-pth)
   (define-values (title breadcrumb) (path->breadcrumb dir-pth #t))
@@ -659,7 +728,7 @@
      (div ([class "content"])
           ,breadcrumb
           (div ([class "error"])
-               "This directory does not exist in revision " ,(number->string (current-rev)) " or has not been tested.")
+               "This directory does not exist in push #" ,(number->string (current-rev)) " or has not been tested.")
           ,(footer)))))
 (define (rev-not-found dir-pth path-to-file)
   (define-values (title breadcrumb) (path->breadcrumb dir-pth #t))
@@ -670,7 +739,7 @@
      (div ([class "content"])
           ,breadcrumb
           (div ([class "error"])
-               "The revision " ,(number->string (current-rev)) " does not exist or has not been tested.")
+               "Push #" ,(number->string (current-rev)) " does not exist or has not been tested.")
           ,(footer)))))
 
 (define (find-previous-rev this-rev)
@@ -743,8 +812,8 @@
                          (span ([class "this"]) 
                                "File Difference"))
                    (table ([class "data"])
-                          (tr (td "First Revision:") (td (a ([href ,(format "/~a/~a" r1 f-str)]) ,(number->string r1))))
-                          (tr (td "Second Revision:") (td (a ([href ,(format "/~a/~a" r2 f-str)]) ,(number->string r2))))
+                          (tr (td "First Push:") (td (a ([href ,(format "/~a/~a" r1 f-str)]) ,(number->string r1))))
+                          (tr (td "Second Push:") (td (a ([href ,(format "/~a/~a" r2 f-str)]) ,(number->string r2))))
                           (tr (td "File:") (td "/" ,f-str)))
                    (div ([class "output"])
                         (table ([class "diff"])

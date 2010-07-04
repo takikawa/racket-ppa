@@ -1,8 +1,8 @@
 #lang scribble/doc
 @(require "mz.ss"
-          scheme/class
-          (for-syntax scheme/base)
-          (for-label scheme/trait))
+          racket/class
+          (for-syntax racket/base)
+          (for-label racket/trait))
 
 @(begin
 
@@ -70,14 +70,14 @@
 
 )
 
-@(interaction-eval #:eval class-eval (require scheme/class))
+@(interaction-eval #:eval class-eval (require racket/class))
 
 
 @title[#:tag "mzlib:class" #:style 'toc]{Classes and Objects}
 
 @guideintro["classes"]{classes and objects}
 
-@note-lib[scheme/class #:use-sources (scheme/private/class-internal)]
+@note-lib[racket/class #:use-sources (racket/private/class-internal)]
 
 A @deftech{class} specifies
 
@@ -215,8 +215,9 @@ structure type property's guard, if any).
 
 @defexamples[
 #:eval class-eval
-(define i (interface* () ([prop:custom-write (lambda (obj port write?) (void))])
-                      method1 method2 method3))
+(define i (interface* () ([prop:custom-write 
+                           (lambda (obj port mode) (void))])
+            method1 method2 method3))
 ]}
 
 @; ------------------------------------------------------------------------
@@ -908,7 +909,7 @@ Returns @scheme[#t] for values produced by @scheme[member-name-key]
 and @scheme[generate-member-key], @scheme[#f]
 otherwise.}
 
-@defproc[(member-name-key=? [a-key member-name-key?][b-key member-name-key?]) boolean?]{
+@defproc[(member-name-key=? [a-key member-name-key?] [b-key member-name-key?]) boolean?]{
 
 Produces @scheme[#t] if member-name keys @scheme[a-key] and
 @scheme[b-key] represent the same external name, @scheme[#f]
@@ -1003,7 +1004,7 @@ initialization (unlike objects in C++).
 
 
 
-@defproc[(make-object [class class?][init-v any/c] ...) object?]{
+@defproc[(make-object [class class?] [init-v any/c] ...) object?]{
 
 Creates an instance of @scheme[class]. The @scheme[init-v]s are
 passed as initialization arguments, bound to the initialization
@@ -1275,7 +1276,7 @@ Evaluation of a @scheme[mixin] form checks that the
 
 @section[#:tag "trait"]{Traits}
 
-@note-lib-only[scheme/trait]
+@note-lib-only[racket/trait]
 
 A @deftech{trait} is a collection of methods that can be converted to
 a @tech{mixin} and then applied to a @tech{class}. Before a trait is
@@ -1284,7 +1285,7 @@ renamed, and multiple traits can be merged to form a new trait.
 
 @defform/subs[#:literals (public pubment public-final override override-final overment augment augride
                           augment-final private inherit inherit/super inherit/inner rename-super
-                          inherit-field)
+                          field inherit-field)
 
               (trait trait-clause ...)
               ([trait-clause (public maybe-renamed ...)
@@ -1512,8 +1513,8 @@ contracts for subclasses.
 Method contracts must contain an additional initial argument which corresponds
 to the implicit @scheme[this] parameter of the method.  This allows for
 contracts which discuss the state of the object when the method is called
-(or, for dependent contracts, in other parts of the contract).  Two alternative
-contract forms, @scheme[->m] and @scheme[->*m], are provided as a shorthand
+(or, for dependent contracts, in other parts of the contract).  Alternative
+contract forms, such as @scheme[->m], are provided as a shorthand
 for writing method contracts.
 
 The external contracts are as follows:
@@ -1581,6 +1582,23 @@ need to be checked.}
 Similar to @scheme[->*], except that the mandatory domain of the resulting contract contains one
 more element than the stated domain, where the first (implicit) argument is contracted with
 @scheme[any/c]. This contract is useful for writing simpler method contracts when no properties
+of @scheme[this] need to be checked.}
+
+@defform[(case->m (-> dom ... rest range) ...)]{
+Similar to @scheme[case->], except that the mandatory domain of each case of the resulting contract
+contains one more element than the stated domain, where the first (implicit) argument is contracted
+with @scheme[any/c]. This contract is useful for writing simpler method contracts when no properties
+of @scheme[this] need to be checked.}
+
+@defform[(->dm (mandatory-dependent-dom ...)
+               (optional-dependent-dom ...)
+               dependent-rest
+               pre-cond
+               dep-range)]{
+Similar to @scheme[->d], except that the mandatory domain of the resulting contract
+contains one more element than the stated domain, where the first (implicit) argument is contracted
+with @scheme[any/c]. In addition, @scheme[this] is appropriately bound in the body of the contract.
+This contract is useful for writing simpler method contracts when no properties
 of @scheme[this] need to be checked.}
 
 @defform/subs[
@@ -1829,24 +1847,36 @@ The @scheme[externalizable<%>] interface includes only the
 
 @section[#:tag "objectprinting"]{Object Printing}
 
-To customize the way that a class instance is printed by @scheme[write]
-or @scheme[display], implement the @scheme[printable<%>] interface.
+To customize the way that a class instance is printed by
+@racket[print], @scheme[write] and @scheme[display], implement the
+@scheme[printable<%>] interface.
 
 @defthing[printable<%> interface?]{
 
 The @scheme[printable<%>] interface includes only the
-@scheme[custom-write] and @scheme[custom-print] methods. Each accepts
+@scheme[custom-print], @scheme[custom-write], and
+@scheme[custom-display] methods. The @scheme[custom-print] method
+accepts two arguments: the destination port and the current
+@scheme[quaisquote] depth as an exact nonnegative integer. The
+@scheme[custom-write] and @scheme[custom-display] methods each accepts
 a single argument, which is the destination port to @scheme[write] or
 @scheme[display] the object.
 
-Calls to the @scheme[custom-write] or @scheme[custom-display] are like
-calls to a procedure attached to a structure type through the
-@scheme[prop:custom-write] property. In particular, recursive printing
-can trigger an escape from the call.
+Calls to the @racket[custom-print], @scheme[custom-write], or
+@scheme[custom-display] methods are like calls to a procedure attached
+to a structure type through the @scheme[prop:custom-write]
+property. In particular, recursive printing can trigger an escape from
+the call.
 
 See @scheme[prop:custom-write] for more information. The
 @scheme[printable<%>] interface is implemented with
 @scheme[interface*] and @scheme[prop:custom-write].}
+
+@defthing[writable<%> interface?]{
+
+Like @scheme[printable<%>], but includes only the
+@scheme[custom-write] and @scheme[custom-print] methods.
+A @racket[print] request is directed to @scheme[custom-write].}
 
 @; ------------------------------------------------------------------------
 
@@ -1878,7 +1908,7 @@ Determines if two objects are the same object, or not; this procedure uses
 @scheme[eq?], but also works properly with contracts.}
 
 
-@defproc[(object->vector [object object?][opaque-v any/c #f]) vector?]{
+@defproc[(object->vector [object object?] [opaque-v any/c #f]) vector?]{
 
 Returns a vector representing @scheme[object] that shows its
 inspectable fields, analogous to @scheme[struct->vector].}
@@ -1895,32 +1925,32 @@ Returns the interface implicitly defined by the class of
 @scheme[object].}
 
  
-@defproc[(is-a? [v any/c][type (or/c interface? class?)]) boolean?]{
+@defproc[(is-a? [v any/c] [type (or/c interface? class?)]) boolean?]{
 
 Returns @scheme[#t] if @scheme[v] is an instance of a class
 @scheme[type] or a class that implements an interface @scheme[type],
 @scheme[#f] otherwise.}
 
 
-@defproc[(subclass? [v any/c][class class?]) boolean?]{
+@defproc[(subclass? [v any/c] [class class?]) boolean?]{
 
 Returns @scheme[#t] if @scheme[v] is a class derived from (or equal
 to) @scheme[class], @scheme[#f] otherwise.}
 
 
-@defproc[(implementation? [v any/c][interface interface?]) boolean?]{
+@defproc[(implementation? [v any/c] [interface interface?]) boolean?]{
 
 Returns @scheme[#t] if @scheme[v] is a class that implements
 @scheme[interface], @scheme[#f] otherwise.}
 
 
-@defproc[(interface-extension? [v any/c][interface interface?]) boolean?]{
+@defproc[(interface-extension? [v any/c] [interface interface?]) boolean?]{
 
 Returns @scheme[#t] if @scheme[v] is an interface that extends
 @scheme[interface], @scheme[#f] otherwise.}
 
 
-@defproc[(method-in-interface? [sym symbol?][interface interface?]) boolean?]{
+@defproc[(method-in-interface? [sym symbol?] [interface interface?]) boolean?]{
 
 Returns @scheme[#t] if @scheme[interface] (or any of its ancestor
 interfaces) includes a member with the name @scheme[sym], @scheme[#f]
@@ -1935,7 +1965,7 @@ methods whose names are local (i.e., declared with
 @scheme[define-local-member-names]).}
 
 
-@defproc[(object-method-arity-includes? [object object?][sym symbol?][cnt exact-nonnegative-integer?])
+@defproc[(object-method-arity-includes? [object object?] [sym symbol?] [cnt exact-nonnegative-integer?])
          boolean?]{
 
 Returns @scheme[#t] if @scheme[object] has a method named @scheme[sym]

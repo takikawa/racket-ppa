@@ -1,11 +1,11 @@
-cd mzscheme
-devenv mzscheme.sln /Build Release
-cd ..\mred
-devenv mred.sln /Build Release
+cd racket
+devenv racket.sln /Build Release
+cd ..\gracket
+devenv gracket.sln /Build Release
 cd ..
 
 cd gc2
-..\..\..\mzschemecgc -cu make.ss
+..\..\..\racketcgc -cu make.rkt
 cd ..
 
 cd mzcom
@@ -15,11 +15,11 @@ devenv libmysterx.sln /Build Release
 cd ..
 
 cd libmysterx
-..\..\..\mzscheme -cu xform.ss
+..\..\..\racket -cu xform.rkt
 cd ..
 
 cd mzcom
-..\..\..\mzscheme -cu xform.ss
+..\..\..\racket -cu xform.rkt
 cd ..
 
 cd mzcom
@@ -34,4 +34,4 @@ cd ..\mrstart
 devenv mrstart.sln /Build Release
 cd ..
 
-..\..\mzscheme -l setup
+..\..\racket -l setup -N "raco setup"

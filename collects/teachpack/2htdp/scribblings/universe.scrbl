@@ -78,10 +78,10 @@ The simplest kind of animated @tech{world} program is a time-based
          true]{
 
  opens a canvas and starts a clock that tick 28 times per second.  Every
- time the clock ticks, DrScheme applies @scheme[create-image] to the
+ time the clock ticks, DrRacket applies @scheme[create-image] to the
  number of ticks passed since this function call. The results of these
  function calls are displayed in the canvas. The simulation runs until you
- click the @tt{Stop} button in DrScheme or close the window. At that
+ click the @tt{Stop} button in DrRacket or close the window. At that
  point, @scheme[animate] returns the number of ticks that have
  passed. 
 }
@@ -154,7 +154,7 @@ The design of a world program demands that you come up with a data
 
 @defform/subs[#:id big-bang
               #:literals 
-	      (on-tick on-draw on-key on-release on-mouse on-receive stop-when
+	      (on-tick to-draw on-draw on-key on-release on-mouse on-receive stop-when
 	      check-with register record? state name)
               (big-bang state-expr clause ...)
               ([clause
@@ -162,9 +162,9 @@ The design of a world program demands that you come up with a data
 		 (on-tick tick-expr rate-expr)
 		 (on-key key-expr)
 		 (on-release release-expr)
-		 (on-mouse key-expr)
-		 (on-draw draw-expr)
-		 (on-draw draw-expr width-expr height-expr)
+		 (on-mouse mouse-expr)
+		 (to-draw draw-expr)
+		 (to-draw draw-expr width-expr height-expr)
 		 (stop-when stop-expr) (stop-when stop-expr last-scene-expr)	   
 		 (check-with world?-expr)	   
 		 (record? boolean-expr)
@@ -183,7 +183,7 @@ The design of a world program demands that you come up with a data
  itself as a scene; when the program must shut down; where to register the
  world with a universe; and whether to record the stream of events. A world
  specification may not contain more than one @scheme[on-tick],
- @scheme[on-draw], or @scheme[register] clause. A @scheme[big-bang]
+ @scheme[to-draw], or @scheme[register] clause. A @scheme[big-bang]
  expression returns the last world when the stop condition is satisfied
  (see below) or when the programmer clicks on the @tt{Stop} button or
  closes the canvas.
@@ -196,7 +196,7 @@ The design of a world program demands that you come up with a data
          #:contracts
 	 ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech{WorldState}))])]{
 
-tell DrScheme to call the @scheme[tick-expr] function on the current
+tell DrRacket to call the @scheme[tick-expr] function on the current
 world every time the clock ticks. The result of the call becomes the
 current world. The clock ticks at the rate of 28 times per second.}}
 
@@ -206,7 +206,7 @@ current world. The clock ticks at the rate of 28 times per second.}}
               #:contracts
               ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech{WorldState}))]
                [rate-expr (and/c real? positive?)])]{
-tell DrScheme to call the @scheme[tick-expr] function on the current
+tell DrRacket to call the @scheme[tick-expr] function on the current
 world every time the clock ticks. The result of the call becomes the
 current world. The clock ticks at the rate of @scheme[rate-expr].}}
 
@@ -313,7 +313,7 @@ Second, some keys have multiple-character string representations. Strings
 @defform[(on-key key-expr)
          #:contracts
 	  ([key-expr (-> (unsyntax @tech{WorldState}) key-event? (unsyntax @tech{WorldState}))])]{
- tell DrScheme to call the @scheme[key-expr] function on the current world and a 
+ tell DrRacket to call the @scheme[key-expr] function on the current world and a 
  @tech{KeyEvent} for every keystroke the user of the computer makes. The result
  of the call becomes the current world.
 
@@ -335,7 +335,7 @@ Second, some keys have multiple-character string representations. Strings
 @defform[(on-release release-expr)
          #:contracts
 	  ([release-expr (-> (unsyntax @tech{WorldState}) key-event? (unsyntax @tech{WorldState}))])]{
- tell DrScheme to call the @scheme[release-expr] function on the current world and a 
+ tell DrRacket to call the @scheme[release-expr] function on the current world and a 
  @tech{KeyEvent} for every release event on the keyboard. A release event
  occurs when a user presses the key and then releases it. The second argument
  indicates which key has been released. The result of the function call
@@ -371,16 +371,21 @@ All @tech{MouseEvent}s are represented via strings:
 @defproc[(mouse=? [x mouse-event?][y mouse-event?]) boolean?]{
  compares two @tech{MouseEvent}s for equality}
 
-@defform[(on-mouse clack-expr)
+@defform[(on-mouse mouse-expr)
          #:contracts
 	 ([clack-expr 
            (-> (unsyntax @tech{WorldState}) 
-               natural-number/c natural-number/c (unsyntax @tech{MouseEvent}) 
+               integer? integer? (unsyntax @tech{MouseEvent}) 
                (unsyntax @tech{WorldState}))])]{
- tell DrScheme to call @scheme[clack-expr] on the current world, the current
+ tell DrRacket to call @scheme[clack-expr] on the current world, the current
  @scheme[x] and @scheme[y] coordinates of the mouse, and and a
  @tech{MouseEvent} for every (noticeable) action of the mouse by the
  computer user. The result of the call becomes the current world. 
+
+ For @scheme["leave"] and @scheme["enter"] events, the coordinates of the
+ mouse click may be outside of the (implicitly) rectangle. That is, the
+ coordinates may be negative or larger than the (implicitly) specified
+ width and height.
 
  Note: the computer's software doesn't really notice every single movement
  of the mouse (across the mouse pad). Instead it samples the movements and
@@ -389,32 +394,37 @@ All @tech{MouseEvent}s are represented via strings:
 
 @item{
  
-@defform[(on-draw render-expr)
+@defform[(to-draw render-expr)
          #:contracts
          ([render-expr (-> (unsyntax @tech{WorldState}) scene?)])]{ 
 
- tell DrScheme to call the function @scheme[render-expr] whenever the
- canvas must be drawn. The external canvas is usually re-drawn after DrScheme has
+ tell DrRacket to call the function @scheme[render-expr] whenever the
+ canvas must be drawn. The external canvas is usually re-drawn after DrRacket has
  dealt with an event. Its size is determined by the size of the first
  generated @tech{scene}.}
 
-@defform/none[#:literals (on-draw)
-              (on-draw render-expr width-expr height-expr)
+@defform/none[#:literals (to-draw)
+              (to-draw render-expr width-expr height-expr)
               #:contracts
               ([render-expr (-> (unsyntax @tech{WorldState}) scene?)]
 	       [width-expr natural-number/c]
                [height-expr natural-number/c])]{ 
 
- tell DrScheme to use a @scheme[width-expr] by @scheme[height-expr]
+ tell DrRacket to use a @scheme[width-expr] by @scheme[height-expr]
  canvas instead of one determine by the first generated @tech{scene}.
-}}
+}
+
+For compatibility reasons, the teachpack also supports the keyword
+@defidform/inline[on-draw] in lieu of @scheme[to-draw] but the latter is preferred
+now. 
+}
 
 @item{
 
 @defform[(stop-when last-world?)
          #:contracts
          ([last-world? (-> (unsyntax @tech{WorldState}) boolean?)])]{
- tell DrScheme to call the @scheme[last-world?] function whenever the canvas is
+ tell DrRacket to call the @scheme[last-world?] function whenever the canvas is
  drawn. If this call produces @scheme[true], the world program is shut
  down. Specifically, the  clock is stopped; no more
  tick events, @tech{KeyEvent}s, or @tech{MouseEvent}s are forwarded to
@@ -427,7 +437,7 @@ All @tech{MouseEvent}s are represented via strings:
          #:contracts
          ([last-world? (-> (unsyntax @tech{WorldState}) boolean?)]
  	  [last-picture (-> (unsyntax @tech{WorldState}) scene?)])]{
- tell DrScheme to call the @scheme[last-world?] function whenever the canvas is
+ tell DrRacket to call the @scheme[last-world?] function whenever the canvas is
  drawn. If this call produces @scheme[true], the world program is shut
  down after displaying the world one last time, this time using the scene
  rendered with @scheme[last-picture]. Specifically, the  clock is stopped; no more
@@ -440,7 +450,7 @@ All @tech{MouseEvent}s are represented via strings:
 @item{
 
 @defstruct[stop-with ([w (unsyntax @tech{WorldState})])]{signals to
-DrScheme that the world program should shut down. That is, any
+DrRacket that the world program should shut down. That is, any
 handler may return @scheme[(stop-with w)] provided @scheme[w] is a
 @tech{WorldState}. If it does, the state of the world becomes @scheme[w]
 and @scheme[big-bang] will close down all event handling.}
@@ -452,7 +462,7 @@ and @scheme[big-bang] will close down all event handling.}
 @defform[(check-with world-expr?)
          #:contracts
          ([world-expr? (-> Any boolean?)])]{
- tell DrScheme to call the @scheme[world-expr?] function on the result of
+ tell DrRacket to call the @scheme[world-expr?] function on the result of
  every world handler call. If this call produces @scheme[true], the result
  is considered a world; otherwise the world program signals an error. 
 }}
@@ -462,7 +472,7 @@ and @scheme[big-bang] will close down all event handling.}
 @defform[(record? boolean-expr)
          #:contracts
          ([boolean-expr boolean?])]{
- tell DrScheme to record all events and to enable a replay of the entire
+ tell DrRacket to record all events and to enable a replay of the entire
  interaction. The replay action also generates one png image per scene and
  an animated gif for the entire sequence.
 }}
@@ -472,7 +482,7 @@ and @scheme[big-bang] will close down all event handling.}
 @defform[(state boolean-expr)
          #:contracts
          ([boolean-expr boolean?])]{
- tell DrScheme to display a separate window in which the current 
+ tell DrRacket to display a separate window in which the current 
  state is rendered each time it is updated. This is useful for beginners
  who wish to see how their world evolves---without having to design a
  rendering function---plus for the debugging of world programs. 
@@ -497,7 +507,7 @@ a short-hand for three lines of code:
 ;; (run-simulation create-UFO-scene) is short for: 
 (big-bang 0 
           (on-tick add1)
-	  (on-draw create-UFO-scene))
+	  (to-draw create-UFO-scene))
 ])
 
 Exercise: Add a condition for stopping the flight of the UFO when it
@@ -689,11 +699,11 @@ As mentioned, all event handlers may return @tech{WorldState}s or
 }
 
 @defform/none[#:literals (on-mouse)
-              (on-mouse clack-expr)
+              (on-mouse mouse-expr)
               #:contracts
               ([clack-expr
                 (-> (unsyntax @tech{WorldState}) 
-                    natural-number/c natural-number/c (unsyntax @tech{MouseEvent})
+                    integer? integer? (unsyntax @tech{MouseEvent})
                     (or/c (unsyntax @tech{WorldState}) package?))])]{
 }
 
@@ -752,7 +762,7 @@ stops working, the world program stops working, too.
 
 Finally, the receipt of a message from the server is an event, just like
  tick events, keyboard events, and mouse events. Dealing with the receipt of a
- message works exactly like dealing with any other event. DrScheme
+ message works exactly like dealing with any other event. DrRacket
  applies the event handler that the world program specifies; if there is no
  clause, the message is discarded.
 
@@ -762,7 +772,7 @@ The @scheme[on-receive] clause of a @scheme[big-bang] specifies the event handle
 @defform[(on-receive receive-expr)
          #:contracts
 	 ([receive-expr (-> (unsyntax @tech{WorldState}) sexp? (or/c (unsyntax @tech{WorldState}) package?))])]{
- tell DrScheme to call @scheme[receive-expr] for every message receipt, on the current
+ tell DrRacket to call @scheme[receive-expr] for every message receipt, on the current
  @tech{WorldState} and the received message. The result of the call becomes the current
  @tech{WorldState}. 
 
@@ -953,7 +963,7 @@ The mandatory clauses of a @scheme[universe] server description are
  @defform[(on-new new-expr)
           #:contracts
           ([new-expr (-> (unsyntax @tech{UniverseState}) iworld? bundle?)])]{
- tell DrScheme to call the function @scheme[new-expr] every time another world joins the
+ tell DrRacket to call the function @scheme[new-expr] every time another world joins the
  universe. The event handler is called with the current state and the
  joining iworld, which isn't on the list yet. In particular, the handler may
  reject a @tech{world} program from participating in a @tech{universe},
@@ -964,7 +974,7 @@ The mandatory clauses of a @scheme[universe] server description are
  @defform[(on-msg msg-expr)
           #:contracts
           ([msg-expr (-> (unsyntax @tech{UniverseState}) iworld? sexp? bundle?)])]{
- tell DrScheme to apply @scheme[msg-expr] to the current state of the
+ tell DrRacket to apply @scheme[msg-expr] to the current state of the
  universe, the world 
  @scheme[w] that sent the message, and the message itself. 
  }
@@ -993,14 +1003,14 @@ optional handlers:
               (on-tick tick-expr)
               #:contracts
               ([tick-expr (-> (unsyntax @tech{UniverseState}) bundle?)])]{
- tell DrScheme to apply @scheme[tick-expr] to the current state of the universe.}
+ tell DrRacket to apply @scheme[tick-expr] to the current state of the universe.}
 
 @defform/none[#:literals (on-tick)
               (on-tick tick-expr rate-expr)
               #:contracts
               ([tick-expr (-> (unsyntax @tech{UniverseState}) bundle?)]
                [rate-expr (and/c real? positive?)])]{ 
- tell DrScheme to apply @scheme[tick-expr] as above but use the specified
+ tell DrRacket to apply @scheme[tick-expr] as above but use the specified
  clock tick rate instead of the default.}
 }
 
@@ -1008,7 +1018,7 @@ optional handlers:
  @defform[(on-disconnect dis-expr)
           #:contracts
           ([dis-expr (-> (unsyntax @tech{UniverseState}) iworld? bundle?)])]{
- tell DrScheme to invoke @scheme[dis-expr] every time a participating
+ tell DrRacket to invoke @scheme[dis-expr] every time a participating
  @tech{world} drops its connection to the server. The first argument
  is the current state of the universe server, while the second argument is
  the (representation of the) world that got disconnected. The resulting
@@ -1020,7 +1030,7 @@ optional handlers:
  @defform[(to-string render-expr)
           #:contracts
           ([render-expr (-> (unsyntax @tech{UniverseState}) string?)])]{
- tell DrScheme to render the state of the universe after each event and to
+ tell DrRacket to render the state of the universe after each event and to
  display this string in the universe console. 
  }
 }
@@ -1038,7 +1048,7 @@ optional handlers:
 @defform/none[(state boolean-expr)
          #:contracts
          ([boolean-expr boolean?])]{
- tell DrScheme to display a separate window in which the current 
+ tell DrRacket to display a separate window in which the current 
  state is rendered each time it is updated. This is mostly useful for
  debugging server programs. 
 }}
@@ -1049,7 +1059,7 @@ optional handlers:
 
 In order to explore the workings of a universe, it is necessary to launch a
  server and several world programs on one and the same computer. We
- recommend launching one server out of one DrScheme tab and as many worlds
+ recommend launching one server out of one DrRacket tab and as many worlds
  as necessary out of a second tab. For the latter, the teachpack provides a
  special form. 
 
@@ -1068,7 +1078,7 @@ Once you have designed a world program, add a function definition
 (define (main n)
   (big-bang ... (name n) ...))
 ))
- Then in DrScheme's Interactions area, use @scheme[launch-many-worlds]
+ Then in DrRacket's Interactions area, use @scheme[launch-many-worlds]
  to create several distinctively named worlds: 
 @(begin
 #reader scribble/comment-reader
@@ -1637,7 +1647,7 @@ Finally, here is the third function, which renders the state as a scene:
 (define (create-world n)
   (big-bang WORLD0
            (on-receive receive)
-	   (on-draw (draw n))
+	   (to-draw (draw n))
 	   (on-tick move)
            (name n)
 	   (register LOCALHOST)))

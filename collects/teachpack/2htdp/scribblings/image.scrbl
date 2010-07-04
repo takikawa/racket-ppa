@@ -4,7 +4,8 @@
                      2htdp/image
                      (except-in lang/htdp-beginner make-posn posn? posn-x posn-y image?)
                      lang/posn
-                     scheme/gui/base)
+                     scheme/gui/base
+                     (only-in scheme/base path-string?))
           lang/posn
           "shared.ss"
           "image-util.ss"
@@ -25,7 +26,7 @@
 The image teachpack provides a number of basic image construction functions, along with
 combinators for building more complex images out of existing images. Basic images include
 various polygons, ellipses and circles, and text, as well as bitmaps (typically bitmaps 
-come about via the @onscreen{Insert Image...} menu item in DrScheme).
+come about via the @onscreen{Insert Image...} menu item in DrRacket).
 Existing images can be rotated, scaled, and overlaid on top of each other.
 
 @section{Basic Images}
@@ -299,7 +300,7 @@ other. The top and bottom pair of angles is @scheme[angle] and the left and righ
                     (make-pen "darkslategray" 10 "solid" "projecting" "miter")))]
 }
 
-@defproc[(line [x1 real?] [y1 real?] [color image-color?]) image?]{
+@defproc[(line [x1 real?] [y1 real?] [pen-or-color (or/c pen? image-color?)]) image?]{
   Constructs an image representing a line segment that connects the points
   (0,0) to (x1,y1).
   
@@ -311,7 +312,7 @@ other. The top and bottom pair of angles is @scheme[angle] and the left and righ
 @defproc[(add-line [image image?]
                    [x1 real?] [y1 real?]
                    [x2 real?] [y2 real?]
-                   [color image-color?])
+                   [pen-or-color (or/c pen? image-color?)])
          image?]{
 
   Adds a line to the image @scheme[image], starting from the point (@scheme[x1],@scheme[y1])
@@ -332,7 +333,7 @@ other. The top and bottom pair of angles is @scheme[angle] and the left and righ
 @defproc[(add-curve [image image?] 
                     [x1 real?] [y1 real?] [angle1 angle?] [pull1 real?]
                     [x2 real?] [y2 real?] [angle2 angle?] [pull2 real?]
-                    [color image-color?])
+                    [pen-or-color (or/c pen? image-color?)])
          image?]{
 
 Adds a curve to @scheme[image], starting at the point
@@ -847,22 +848,24 @@ the parts that fit onto @scheme[scene].
 
 @section{Image Properties}
 
-@defproc[(image-width [i image?]) (and/c integer? positive? exact?)]{
+@defproc[(image-width [i image?]) (and/c integer? (not/c negative?) exact?)]{
   Returns the width of @scheme[i].
                        
   @image-examples[(image-width (ellipse 30 40 "solid" "orange"))
                   (image-width (circle 30 "solid" "orange"))
                   (image-width (beside (circle 20 "solid" "orange")
-                                       (circle 20 "solid" "purple")))]
+                                       (circle 20 "solid" "purple")))
+                  (image-width (rectangle 0 10 "solid" "purple"))]
 }
 
-@defproc[(image-height [i image?]) (and/c integer? positive? exact?)]{
+@defproc[(image-height [i image?]) (and/c integer? (not/c negative?) exact?)]{
   Returns the height of @scheme[i].
   
   @image-examples[(image-height (ellipse 30 40 "solid" "orange"))
                   (image-height (circle 30 "solid" "orange"))
                   (image-height (overlay (circle 20 "solid" "orange")
-                                         (circle 30 "solid" "purple")))]
+                                         (circle 30 "solid" "purple")))
+                  (image-height (rectangle 10 0 "solid" "purple"))]
   }
 
 @defproc[(image-baseline [i image?]) (and/c integer? positive? exact?)]{
@@ -885,7 +888,7 @@ This section lists predicates for the basic structures provided by the image lib
  like @scheme[ellipse] and @scheme[rectangle] and
  accepted by functions like @scheme[overlay] and @scheme[beside].
 
- Additionally, images inserted into a DrScheme window are treated as
+ Additionally, images inserted into a DrRacket window are treated as
  bitmap images, as are instances of @scheme[image-snip%] and @scheme[bitmap%].
  }
 
@@ -963,6 +966,10 @@ The baseline of an image is the place where the bottoms any letters line up, not
 @defproc[(side-count? [x any/c]) boolean?]{
   Determines if @scheme[x] is an integer 
   greater than or equal to @scheme[3].
+}
+
+@defproc[(step-count? [x any/c]) boolean?]{
+  Determines if @racket[x] is an integer greater than or equal to @racket[1].                                           
 }
 
 @defstruct[pen ([color image-color?]
@@ -1044,3 +1051,21 @@ pixel wide pen draws the pixels above and below the line, but each with
 a color that is half of the intensity of the given color. Using a
 @scheme[pen] with with two, colors the pixels above and below the line
 with the full intensity. 
+
+
+@;-----------------------------------------------------------------------------
+@section{Exporting Images to Disk}
+
+In order to use an image as an input to another program (Photoshop, e.g., or 
+a web browser), it is necessary to represent it in a format that these programs
+can understand. The @scheme[save-image] function provides this functionality, 
+writing an image to disk using the @tt{PNG} format. Since this
+format represents an image using a set of pixel values, an image written to disk
+generally contains less information than the image that was written, and cannot be scaled
+or manipulated as cleanly (by any image program).
+
+@defproc[(save-image [image image?] [filename path-string?]) boolean?]{
+ writes an image to the path specified by @scheme[filename], using the
+ @tt{PNG} format.}
+
+

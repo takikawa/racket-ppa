@@ -10,7 +10,7 @@
          "notify.ss"
          "path-utils.ss"
          "sema.ss"
-         "svn.ss")
+         "scm.ss")
 
 (define current-env (make-parameter (make-immutable-hash empty)))
 (define-syntax-rule (with-env ([env-expr val-expr] ...) expr ...)
@@ -43,18 +43,7 @@
                (path->string co-dir))]
        (notify! "Checking out ~a@~a into ~a"
                 repo rev to-dir)
-       (run/collect/wait/log
-        ; XXX Give it its own timeout
-        #:timeout (current-make-install-timeout-seconds)
-        #:env (current-env)
-        (build-path log-dir "svn-checkout")
-        (svn-path)
-        (list 
-         "checkout"
-         "--quiet"
-         "-r" (number->string rev)
-         repo
-         to-dir)))))
+       (scm-export-repo rev repo to-dir))))
   ;; Make the build directory
   (make-directory* build-dir)
   ;; Run Configure, Make, Make Install
@@ -90,6 +79,20 @@
      (delete-directory/files tempdir))))
 (define-syntax-rule (with-temporary-directory e)
   (call-with-temporary-directory (lambda () e)))
+
+(define (call-with-temporary-home-directory thunk)
+  (define new-dir (make-temporary-file "home~a" 'directory (current-temporary-directory)))
+  (dynamic-wind
+   (lambda ()
+     (with-handlers ([exn:fail? void])
+       (copy-directory/files (hash-ref (current-env) "HOME") new-dir)))
+   (lambda ()
+     (with-env (["HOME" (path->string new-dir)])
+       (thunk)))
+   (lambda ()
+     (delete-directory/files new-dir))))
+(define-syntax-rule (with-temporary-home-directory e)
+  (call-with-temporary-home-directory (lambda () e)))
 
 (define (with-running-program command args thunk)
   (define-values (new-command new-args)
@@ -142,14 +145,16 @@
     (revision-log-dir rev))
   (define trunk->log
     (rebase-path trunk-dir log-dir))
-  (define mzscheme-path
-    (path->string (build-path trunk-dir "bin" "mzscheme")))
+  (define racket-path
+    (path->string (build-path trunk-dir "bin" "racket")))
+  ; XXX fix
   (define mzc-path
     (path->string (build-path trunk-dir "bin" "mzc")))
-  (define mred-text-path
-    (path->string (build-path trunk-dir "bin" "mred-text")))
-  (define mred-path
-    (path->string (build-path trunk-dir "bin" "mred")))
+  (define gracket-text-path
+    (path->string (build-path trunk-dir "bin" "gracket-text")))
+  (define gracket-path
+    (path->string (build-path trunk-dir "bin" "gracket")))
+  ; XXX fix
   (define planet-path
     (path->string (build-path trunk-dir "bin" "planet")))
   (define collects-pth
@@ -181,31 +186,29 @@
                                             (match pth-cmd/general
                                               [#f
                                                #f]
-                                              [(list-rest "mzscheme" rst)
-                                               (lambda () (list* mzscheme-path rst))]
-                                              [(list-rest "mzc" rst)
+                                              [(list-rest (or 'mzscheme 'racket) rst)
+                                               (lambda () (list* racket-path rst))]
+                                              [(list-rest 'mzc rst)
                                                (lambda () (list* mzc-path rst))]
-                                              [(list-rest "mred-text" rst)
-                                               (lambda () (list* mred-text-path "-display" (format ":~a" (+ XSERVER-OFFSET (current-worker))) rst))]
-                                              [(list-rest "mred" rst)
-                                               (lambda () (list* mred-path "-display" (format ":~a" (+ XSERVER-OFFSET (current-worker))) rst))]
+                                              [(list-rest (or 'mred 'mred-text
+                                                              'gracket 'gracket-text)
+                                                          rst)
+                                               (lambda () (list* gracket-text-path "-display" (format ":~a" (+ XSERVER-OFFSET (current-worker))) rst))]
                                               [_
-                                               #f]))]       
+                                               #f]))]
                                     (if pth-cmd
                                         (submit-job!
                                          test-workers
                                          (lambda ()
                                            (define l (pth-cmd))
-                                           (with-env (["DISPLAY" (format ":~a" (+ XSERVER-OFFSET (current-worker)))]
-                                                      ["HOME" (home-dir (current-worker))])
-                                             ; XXX Maybe this should destroy the old home and copy in a new one
-                                             ;     Otherwise it is a source of randomness
-                                             (with-temporary-directory
-                                                 (run/collect/wait/log log-pth 
-                                                                       #:timeout pth-timeout
-                                                                       #:env (current-env)
-                                                                       (first l)
-                                                                       (rest l))))
+                                           (with-env (["DISPLAY" (format ":~a" (+ XSERVER-OFFSET (current-worker)))])
+                                             (with-temporary-home-directory
+                                                 (with-temporary-directory
+                                                     (run/collect/wait/log log-pth 
+                                                                           #:timeout pth-timeout
+                                                                           #:env (current-env)
+                                                                           (first l)
+                                                                           (rest l)))))
                                            (semaphore-post dir-sema)))
                                         (semaphore-post dir-sema)))))))
                       files)
@@ -232,16 +235,8 @@
    #:timeout (current-subprocess-timeout-seconds)
    #:env (current-env)
    (build-path log-dir "src" "build" "set-browser.ss")
-   mzscheme-path 
+   racket-path 
    (list "-t" (path->string* (build-path (drdr-directory) "set-browser.ss"))))
-  ; Make home directories
-  (cache/file/timestamp
-   (build-path rev-dir "homedir-dup")
-   (lambda ()
-     (notify! "Copying home directory for each worker")
-     (for ([i (in-range (number-of-cpus))])
-       (with-handlers ([exn:fail? void])
-         (copy-directory/files (hash-ref (current-env) "HOME") (home-dir i))))))
   ; And go
   (notify! "Starting testing")
   (test-directory collects-pth top-sema)
@@ -249,11 +244,6 @@
   (semaphore-wait top-sema)
   (notify! "Stopping testing")
   (stop-job-queue! test-workers))
-
-(define (home-dir i)
-  (format "~a~a"
-          (hash-ref (current-env) "HOME")
-          i))
 
 (define (recur-many i r f)
   (if (zero? i)
@@ -283,8 +273,10 @@
      (make-directory* tmp-dir)
      ; We are running inside of a test directory so that random files are stored there
      (parameterize ([current-directory test-dir]
+                    [current-temporary-directory tmp-dir]
                     [current-rev rev])
        (with-env (["PLTSTDERR" "error"]
+                  ["GIT_DIR" (path->string (plt-repository))]
                   ["TMPDIR" (path->string tmp-dir)]
                   ["PATH" 
                    (format "~a:~a"
@@ -294,7 +286,7 @@
                   ["HOME" (path->string home-dir)])
          (unless (read-cache* (revision-commit-msg rev))
            (write-cache! (revision-commit-msg rev)
-                         (svn-revision-log rev (plt-repository))))
+                         (get-scm-commit-msg rev (plt-repository))))
          (build-revision rev)
          (recur-many (number-of-cpus)
                      (lambda (j inner)

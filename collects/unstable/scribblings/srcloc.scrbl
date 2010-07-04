@@ -1,11 +1,11 @@
 #lang scribble/manual
-@(require scribble/eval "utils.ss" (for-label scheme/base unstable/srcloc))
+@(require scribble/eval "utils.rkt" (for-label racket/base unstable/srcloc unstable/location))
 
 @(define unsyntax #f)
 
 @(define (new-evaluator)
    (let* ([e (make-base-eval)])
-     (e '(require (for-syntax scheme/base)
+     (e '(require (for-syntax racket/base)
                   unstable/srcloc
                   unstable/location))
      e))
@@ -28,9 +28,9 @@ location of a particular piece of source code.
 @unstable[@author+email["Carl Eastlund" "cce@ccs.neu.edu"]]
 
 This module defines utilities for manipulating representations of source
-locations, including both @scheme[srcloc] structures and all the values accepted
-by @scheme[datum->syntax]'s third argument: syntax objects, lists, vectors, and
-@scheme[#f].
+locations, including both @racket[srcloc] structures and all the values accepted
+by @racket[datum->syntax]'s third argument: syntax objects, lists, vectors, and
+@racket[#f].
 
 @deftogether[(
 @defproc[(source-location? [x any/c]) boolean?]{}
@@ -39,8 +39,8 @@ by @scheme[datum->syntax]'s third argument: syntax objects, lists, vectors, and
 )]{
 
 These functions recognize valid source location representations.  The first,
-@scheme[source-location?], recognizes @scheme[srcloc] structures, syntax
-objects, lists, and vectors with appropriate structure, as well as @scheme[#f].
+@racket[source-location?], recognizes @racket[srcloc] structures, syntax
+objects, lists, and vectors with appropriate structure, as well as @racket[#f].
 The latter predicates recognize only valid lists and vectors, respectively.
 
 @examples[#:eval evaluator
@@ -59,9 +59,9 @@ The latter predicates recognize only valid lists and vectors, respectively.
 @defproc[(check-source-location! [name symbol?] [x any/c]) void?]{
 
 This procedure checks that its input is a valid source location.  If it is, the
-procedure returns @scheme[(void)].  If it is not,
-@scheme[check-source-location!] raises a detailed error message in terms of
-@scheme[name] and the problem with @scheme[x].
+procedure returns @racket[(void)].  If it is not,
+@racket[check-source-location!] raises a detailed error message in terms of
+@racket[name] and the problem with @racket[x].
 
 @examples[#:eval evaluator
 (check-source-location! 'this-example #f)
@@ -84,9 +84,9 @@ procedure returns @scheme[(void)].  If it is not,
 )]{
 
 These procedures combine multiple (zero or more) source locations, merging
-locations within the same source and reporting @scheme[#f] for locations that
+locations within the same source and reporting @racket[#f] for locations that
 span sources.  They also convert the result to the desired representation:
-@scheme[srcloc], list, vector, or syntax object, respectively.
+@racket[srcloc], list, vector, or syntax object, respectively.
 
 @examples[#:eval evaluator
 (build-source-location)
@@ -116,7 +116,7 @@ span sources.  They also convert the result to the desired representation:
 @defproc[(source-location-known? [loc source-location?]) boolean?]{
 
 This predicate reports whether a given source location contains more information
-than simply @scheme[#f].
+than simply @racket[#f].
 
 @examples[#:eval evaluator
 (source-location-known? #f)
@@ -158,7 +158,7 @@ These accessors extract the fields of a source location.
          (or/c exact-nonnegative-integer? #f)]{
 
 This accessor produces the end position of a source location (the sum of its
-position and span, if both are numbers) or @scheme[#f].
+position and span, if both are numbers) or @racket[#f].
 
 @examples[#:eval evaluator
 (source-location-end #f)
@@ -169,6 +169,25 @@ position and span, if both are numbers) or @scheme[#f].
 
 }
 
+@defproc[(update-source-location
+          [loc source-location?]
+          [#:source source any/c]
+          [#:line line (or/c exact-nonnegative-integer? #f)]
+          [#:column column (or/c exact-positive-integer? #f)]
+          [#:position position (or/c exact-nonnegative-integer? #f)]
+          [#:span span (or/c exact-positive-integer? #f)])
+         source-location?]{
+Produces a modified version of @racket[loc], replacing its fields with
+@racket[source], @racket[line], @racket[column], @racket[position], and/or
+@racket[span], if given.
+
+@examples[#:eval evaluator
+(update-source-location #f #:source 'here)
+(update-source-location (list 'there 1 2 3 4) #:line 20 #:column 79)
+(update-source-location (vector 'everywhere 1 2 3 4) #:position #f #:span #f)
+]
+}
+
 @deftogether[(
 @defproc[(source-location->string [loc source-location?]) string?]{}
 @defproc[(source-location->prefix [loc source-location?]) string?]{}
@@ -176,7 +195,7 @@ position and span, if both are numbers) or @scheme[#f].
 
 These procedures convert source locations to strings for use in error messages.
 The first produces a string describing the source location; the second appends
-@scheme[": "] to the string if it is non-empty.
+@racket[": "] to the string if it is non-empty.
 
 @examples[#:eval evaluator
 (source-location->string (make-srcloc 'here 1 2 3 4))
@@ -213,11 +232,13 @@ Furthermore, the examples illustrate the use of source location quoting inside
 macros, and the difference between quoting the source location of the macro
 definition itself and quoting the source location of the macro's arguments.
 
-@defform*[[(quote-srcloc) (quote-srcloc expr)]]{
+@defform*[[(quote-srcloc) (quote-srcloc form) (quote-srcloc form #:module-source expr)]]{
 
-This form quotes the source location of @scheme[expr] as a @scheme[srcloc]
-structure, using the location of the whole @scheme[(quote-srcloc)] expression if
-no @scheme[expr] is given.
+Quotes the source location of @racket[form] as a @racket[srcloc]
+structure, using the location of the whole @racket[(quote-srcloc)]
+expression if no @racket[expr] is given.  Uses relative directories
+for paths found within the collections tree, the user's collections directory,
+or the PLaneT cache.
 
 @defexamples[#:eval (new-evaluator)
 (quote-srcloc)
@@ -232,15 +253,15 @@ no @scheme[expr] is given.
 }
 
 @deftogether[(
-@defform*[[(quote-source-file) (quote-source-file expr)]]
-@defform*[[(quote-line-number) (quote-line-number expr)]]
-@defform*[[(quote-column-number) (quote-column-number expr)]]
-@defform*[[(quote-character-position) (quote-character-position expr)]]
-@defform*[[(quote-character-span) (quote-character-span expr)]]
+@defform*[[(quote-source-file) (quote-source-file form)]]
+@defform*[[(quote-line-number) (quote-line-number form)]]
+@defform*[[(quote-column-number) (quote-column-number form)]]
+@defform*[[(quote-character-position) (quote-character-position form)]]
+@defform*[[(quote-character-span) (quote-character-span form)]]
 )]{
 
-These forms quote various fields of the source location of @scheme[expr], or of
-the whole macro application if no @scheme[expr] is given.
+Quote various fields of the source location of @racket[form], or of
+the whole macro application if no @racket[form] is given.
 
 @examples[#:eval (new-evaluator)
 (list (quote-source-file)
@@ -268,69 +289,44 @@ the whole macro application if no @scheme[expr] is given.
 
 }
 
-@defform[(quote-module-path)]{
+@deftogether[(
+@defform[(quote-module-name)]
+@defform[(quote-module-path)]
+)]{
 
-This form quotes a module path suitable for use with @scheme[require] which
-refers to the module in which the macro application occurs.  If executed at the
-top level, it may return @scheme['top-level], or it may return a valid module
-path if the current namespace was constructed by @scheme[module->namespace]
-(such as at the DrScheme interactions window).
+Quote the name of the module in which the form is compiled.  The
+@racket[quote-module-name] form produces a string or a symbol, while
+@racket[quote-module-path] produces a @tech[#:doc reference-path]{module path}.
 
-This macro operates by creating a @tech[#:doc reference-path]{variable
-reference} (see @scheme[#%variable-reference]) at the point of its application.
-It thus automatically describes its final expanded position, rather than the
-module of any macro definition that happens to use it.
-
-@defexamples[#:eval (new-evaluator)
-(quote-module-path)
-(module A scheme
-  (require unstable/location)
-  (define-syntax-rule (here) (quote-module-path))
-  (define a (here))
-  (provide a here))
-(require 'A)
-a
-(module B scheme
-  (require unstable/location)
-  (require 'A)
-  (define b (here))
-  (provide b))
-(require 'B)
-b
-[current-namespace (module->namespace (quote 'A))]
-(quote-module-path)
-]
-
-}
-
-@defform[(quote-module-name)]{
-
-This form quotes the name (@tech[#:doc reference-path]{path} or @tech[#:doc
-reference-path]{symbol}) of the module in which the macro application occurs, or
-@scheme[#f] if it occurs at the top level.  As with @scheme[quote-module-path],
-@scheme[quote-module-name] uses a @tech[#:doc reference-path]{variable
-reference}, so a top level namespace created by @scheme[module->namespace] will
-be treated as a module, and the macro will always produce the module name of its
-final expanded position.
+These forms use relative names for modules found in the collections or PLaneT
+cache; their results are suitable for printing, but not for accessing libraries
+programmatically, such as via @racket[dynamic-require].
 
 @defexamples[#:eval (new-evaluator)
-(quote-module-name)
-(module A scheme
+(module A racket
   (require unstable/location)
-  (define-syntax-rule (here) (quote-module-name))
-  (define a (here))
-  (provide a here))
+  (define-syntax-rule (name) (quote-module-name))
+  (define-syntax-rule (path) (quote-module-path))
+  (define a-name (name))
+  (define a-path (path))
+  (provide (all-defined-out)))
 (require 'A)
-a
-(module B scheme
+a-name
+a-path
+(module B racket
   (require unstable/location)
   (require 'A)
-  (define b (here))
-  (provide b))
+  (define b-name (name))
+  (define b-path (path))
+  (provide (all-defined-out)))
 (require 'B)
-b
+b-name
+b-path
+(quote-module-name)
+(quote-module-path)
 [current-namespace (module->namespace (quote 'A))]
 (quote-module-name)
+(quote-module-path)
 ]
 
 }

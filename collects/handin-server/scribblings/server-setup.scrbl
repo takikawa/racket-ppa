@@ -53,8 +53,8 @@ This directory contains the following files and sub-directories:
 
   @item{@indexed-scheme[session-memory-limit] --- maximum size in
     bytes of memory allowed for per-session computation, if
-    per-session limits are supported (i.e., when using MrEd and
-    MzScheme with the (default) exact garbage collector and memory
+    per-session limits are supported (i.e., when using GRacket and
+    Racket with the (default) exact garbage collector and memory
     accounting); the default is 40000000.}
 
   @item{@indexed-scheme[default-file-name] --- the default filename
@@ -324,10 +324,10 @@ This directory contains the following files and sub-directories:
   @filepath{ATTEMPT} directory (to be copied by the cleanup process);
   see below for more details on @schememodname[handin-server/checker].
 
-  For submissions from a normal DrScheme frame, a submission file
+  For submissions from a normal DrRacket frame, a submission file
   contains a copy of the student's definitions and interactions
   windows.  The file is in a binary format (to support non-text code),
-  and opening the file directly in DrScheme shows the definitions
+  and opening the file directly in DrRacket shows the definitions
   part.  To get both the definitions and interactions parts, the file
   can be parsed with @scheme[unpack-submission] from
   @schememodname[handin-server/utils].
@@ -437,10 +437,10 @@ This directory contains the following files and sub-directories:
   will be listed and accessible.}
 ]
 
-The server can be run within either MzScheme or MrEd, but
-@schememodname[handin-server/utils] requires MrEd (which means that
+The server can be run within either Racket or GRacket, but
+@schememodname[handin-server/utils] requires GRacket (which means that
 @scheme[checker] modules will likely require the server to run under
-MrEd).  Remember that if you're not using the (default) 3m garbage
+GRacket).  Remember that if you're not using the (default) 3m garbage
 collector you don't get memory accounting.
 
 The server currently provides no mechanism for a graceful shutdown,

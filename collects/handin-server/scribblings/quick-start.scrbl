@@ -28,7 +28,8 @@
 @item{Create a file @filepath{config.ss} with the following content:
   @schemeblock[((active-dirs ("test")))]}
 
-@item{In your new directory, run @commandline{mred-text -l handin-server}}
+@item{In your new directory, run
+  @commandline{gracket-text -l handin-server}}
 
 @item{In the @filepath{handin-client} collection, edit
   @filepath{info.ss} and uncomment the lines that define
@@ -43,7 +44,7 @@
   NOTE: The command line arguments are optional, it restricts the
   setup work to the specified collection.}
 
-@item{Start DrScheme, click @onscreen{Handin} to run the client,
+@item{Start DrRacket, click @onscreen{Handin} to run the client,
   submit with username ``@tt{tester}'' and password ``@tt{pw}''.
 
   The submitted file will be @filepath{.../test/tester/handin.scm}.}

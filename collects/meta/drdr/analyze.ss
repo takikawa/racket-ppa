@@ -1,12 +1,13 @@
 #lang scheme
 (require scheme/file
          "diff.ss"
-         "svn.ss"
+         "scm.ss"
          "list-count.ss"
          "notify.ss"
          "cache.ss"
          "dirstruct.ss"
          "status.ss"
+         "metadata.ss"
          "path-utils.ss"
          "rendering.ss")
 (provide (all-from-out "rendering.ss"))
@@ -94,7 +95,7 @@
   (for/hash ([id (in-list responsible-ht-severity)])
     (define id-l
       (for*/list ([(_ ht) (in-hash diff)]
-                [f (in-list (hash-ref ht id empty))])
+                  [f (in-list (hash-ref ht id empty))])
         f))
     (values id (remove-duplicates id-l))))
 
@@ -106,7 +107,8 @@
  [responsible-ht-severity (listof symbol?)]
  [responsible-ht-id->str (hash/c symbol? string?)]
  [responsible-ht-difference (responsible-ht/c responsible-ht/c . -> . responsible-ht/c)])  
-  
+
+(define ERROR-LIMIT 50)
 (define (notify cur-rev 
                 start end
                 duration
@@ -127,13 +129,13 @@
       responsible))
   (define committer
     (with-handlers ([exn:fail? (lambda (x) #f)])
-      (svn-rev-log-author 
+      (scm-commit-author 
        (read-cache*
         (revision-commit-msg cur-rev)))))
   (define diff
     (with-handlers ([exn:fail? (lambda (x) #t)])
-       (define old (rev->responsible-ht (previous-rev)))
-       (responsible-ht-difference old responsible-ht)))
+      (define old (rev->responsible-ht (previous-rev)))
+      (responsible-ht-difference old responsible-ht)))
   (define include-committer?
     (and ; The committer can be found
      committer 
@@ -143,21 +145,26 @@
      diff
      (for*/or ([(r ht) (in-hash diff)]
                [(id ps) (in-hash ht)])
-         (and (not (empty? ps))
-              (not (symbol=? id 'changes))))))
-  (unless (andmap zero? nums)
-    (send-mail-message "drdr@plt-scheme.org"
+       (and (for/or ([p (in-list ps)])
+              ; XXX This squelch should be disabled if the committer changed this file
+              ; XXX But even then it can lead to problems
+              (not (path-random? (build-path (revision-trunk-dir cur-rev) (substring (path->string* p) 1)))))
+            (not (symbol=? id 'changes))))))
+  (define mail-recipients
+    (append (if include-committer?
+                (list committer)
+                empty)
+            responsibles)) 
+  (unless (or (andmap zero? nums)
+              (empty? mail-recipients))
+    (send-mail-message "drdr@racket-lang.org"
                        (format "[DrDr] R~a ~a"
                                cur-rev totals)
-                       (list* "jay.mccarthy@gmail.com"
-                              (map (curry format "~a@plt-scheme.org")
-                                   (append (if include-committer?
-                                               (list committer)
-                                               empty)
-                                           responsibles)))                              
+                       (map (curry format "~a@racket-lang.org")
+                            mail-recipients)                        
                        empty empty
                        (flatten
-                        (list (format "DrDr has finished building revision ~a after ~a."
+                        (list (format "DrDr has finished building push #~a after ~a."
                                       cur-rev
                                       (format-duration-ms abs-dur))
                               ""
@@ -167,28 +174,30 @@
                               (if include-committer?
                                   (list
                                    (format "~a:" committer)
-                                   (format "You are receiving this email because the DrDr test of revision ~a (which you committed) contained a NEW condition that may need inspecting." cur-rev)
+                                   (format "You are receiving this email because the DrDr test of push #~a\n(which you did) contained a NEW condition that may need inspecting." cur-rev)
                                    (let ([diff-smash (responsible-ht->status-ht diff)])
                                      (for/list ([(id paths) (in-hash diff-smash)]
                                                 #:when (not (symbol=? id 'changes)))
                                        (if (empty? paths)
                                            empty
-                                           (list (format "\t~a" id)
-                                                 (for/list ([f (in-list paths)])
-                                                   (format "\t\t~a" (path->url f)))
+                                           (list (format "  ~a" id)
+                                                 (for/list ([f (in-list paths)]
+                                                            [i (in-range ERROR-LIMIT)])
+                                                   (format "    ~a" (path->url f)))
                                                  ""))))
                                    "")
                                   empty)
                               (for/list ([r (in-list responsibles)])
                                 (list* (format "~a:" r)
-                                       "You are receiving this email because a file you are responsible for has a condition that may need inspecting."
+                                       "You are receiving this email because a file you are responsible for\nhas a condition that may need inspecting."
                                        (for/list ([(id files) (in-hash (hash-ref responsible-ht r))]
                                                   #:when (not (symbol=? id 'changes)))
-                                         (list (format "\t~a:" id)
-                                               (for/list ([f (in-list files)])
-                                                 (format "\t\t~a" (path->url f)))
+                                         (list (format "  ~a:" id)
+                                               (for/list ([f (in-list files)]
+                                                          [i (in-range ERROR-LIMIT)])
+                                                 (format "    ~a" (path->url f)))
                                                ""))
-                                      ""))))))
+                                       ""))))))
   
   (send-mail-message "drdr"
                      (format "http://drdr.plt-scheme.org/~a/" 
@@ -260,7 +269,7 @@
                     (log-different? output-log (status-output-log (read-cache prev-log-pth))))
                   #f))
             (define responsible 
-              (or (svn-property-value/root (trunk-path log-pth) plt:responsible)
+              (or (path-responsible (trunk-path log-pth))
                   (and (regexp-match #rx"/planet/" (path->string* log-pth))
                        "jay")
                   ; XXX maybe mflatt, eli, or tewk
@@ -313,8 +322,8 @@
                  (or
                   (and committer? 
                        (with-handlers ([exn:fail? (lambda (x) #f)])
-                         (svn-rev-log-author (read-cache (revision-commit-msg (current-rev))))))
-                  (or (svn-property-value/root (trunk-path dir-pth) plt:responsible)
+                         (scm-commit-author (read-cache (revision-commit-msg (current-rev))))))
+                  (or (path-responsible (trunk-path dir-pth))
                       "unknown"))
                  
                  empty)

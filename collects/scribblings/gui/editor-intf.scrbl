@@ -742,7 +742,7 @@ Gets the maximum display height for the contents of the editor; zero or
 }
 
 @defmethod[(get-max-undo-history)
-           (integer-in 0 100000)]{
+           (or/c (integer-in 0 100000) 'forever)]{
 
 Returns the maximum number of undoables that will be remembered by the
  editor. Note that undoables are counted by insertion, deletion,
@@ -905,7 +905,7 @@ See also @method[editor<%> local-to-global].
 
 }
 
-@defmethod[#:mode 'public-final (in-edit-sequence?)
+@defmethod[#:mode public-final (in-edit-sequence?)
            boolean?]{
 
 Returns @scheme[#t] if updating on this editor is currently delayed
@@ -1192,7 +1192,7 @@ Reports whether the editor is internally locked for flowing. See
 }
 
 
-@defmethod[(locked-for-read?)
+@defmethod[#:mode public-final (locked-for-read?)
            boolean?]{
 
 Reports whether the editor is internally locked for reading. See
@@ -1201,7 +1201,7 @@ Reports whether the editor is internally locked for reading. See
 }
 
 
-@defmethod[(locked-for-write?)
+@defmethod[#:mode public-final (locked-for-write?)
            boolean?]{
 
 Reports whether the editor is internally locked for writing. See
@@ -1724,7 +1724,7 @@ If @scheme[fit-on-page?] is a true value, then during printing for a
 
 The @scheme[output-mode] setting is used for Windows and Mac OS X. It
  determines whether the output is generated directly as a PostScript
- file (using PLT Scheme's built-in PostScript system) or generated
+ file (using Racket's built-in PostScript system) or generated
  using the platform-specific standard printing mechanism. The possible
  values are
 

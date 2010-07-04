@@ -873,7 +873,8 @@ Returns the starting @techlink{position} of a given snip or
 
 }
 
-@defmethod[(get-snip-position-and-location [snip (is-a?/c snip%)]
+@defmethod[#:mode public-final
+           (get-snip-position-and-location [snip (is-a?/c snip%)]
                                            [pos (or/c (box/c exact-nonnegative-integer?) #f)]
                                            [x (or/c (box/c real?) #f) #f]
                                            [y (or/c (box/c real?) #f) #f])
@@ -1019,10 +1020,11 @@ If the editor is displayed by multiple canvases and @scheme[all?] is
 
 
 @defmethod[(get-wordbreak-map)
-           (is-a?/c editor-wordbreak-map%)]{
+           (or/c (is-a?/c editor-wordbreak-map%) #f)]{
 
 Returns the wordbreaking map that is used by the standard wordbreaking
- function. See @scheme[editor-wordbreak-map%] for more information.
+ function. See @method[text% set-wordbreak-map] and 
+ @scheme[editor-wordbreak-map%] for more information.
 
 }
 

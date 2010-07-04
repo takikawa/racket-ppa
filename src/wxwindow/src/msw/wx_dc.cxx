@@ -15,7 +15,7 @@
 #include "../../../wxcommon/Region.h"
 #include "wx_pdf.h"
 #include "wx_graphics.h"
-#include "../../../mzscheme/include/scheme.h"
+#include "../../../racket/include/scheme.h"
 
 #include "../../../wxcommon/wxGLConfig.h"
 
@@ -2977,6 +2977,10 @@ Bool wxCanvasDC::GCBlit(double xdest, double ydest, double width, double height,
     return FALSE;
 }
 
+#ifdef MZ_PRECISE_GC
+START_XFORM_SKIP;
+#endif
+
 static BOOL DoPrintDlg(PRINTDLG *pd, HWND parent)
 {
   if (!pd->hwndOwner)
@@ -2984,6 +2988,10 @@ static BOOL DoPrintDlg(PRINTDLG *pd, HWND parent)
 
   return PrintDlg(pd);
 }
+
+#ifdef MZ_PRECISE_GC
+END_XFORM_SKIP;
+#endif
 
 wxPrinterDC::wxPrinterDC(wxWindow *parent, char *driver_name, char *device_name, char *file, Bool interactive)
 {

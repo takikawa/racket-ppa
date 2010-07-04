@@ -1,13 +1,13 @@
 #lang scribble/doc
 @(require (except-in "mz.ss" import export)
-          (for-syntax scheme/base)
-          (for-label scheme/require-transform
-                     scheme/require-syntax
-                     scheme/provide-transform
-                     scheme/provide-syntax))
+          (for-syntax racket/base)
+          (for-label racket/require-transform
+                     racket/require-syntax
+                     racket/provide-transform
+                     racket/provide-syntax))
 
 @(define stx-eval (make-base-eval))
-@(interaction-eval #:eval stx-eval (require (for-syntax scheme/base)))
+@(interaction-eval #:eval stx-eval (require (for-syntax racket/base)))
 
 @(define (transform-time) @t{This procedure must be called during the
 dynamic extent of a @tech{syntax transformer} application by the
@@ -67,18 +67,25 @@ A @tech{structure type property} to identify structure types that act
 as @tech{assignment transformers} like the ones created by
 @scheme[make-set!-transformer].
 
-The property value must be an exact integer or procedure of one
-argument. In the former case, the integer designates a field within
+The property value must be an exact integer or procedure of one or two
+arguments. In the former case, the integer designates a field within
 the structure that should contain a procedure; the integer must be
 between @scheme[0] (inclusive) and the number of non-automatic fields
 in the structure type (exclusive, not counting supertype fields), and
 the designated field must also be specified as immutable.
 
-If the property value is an procedure, then the procedure serves as a
-@tech{syntax transformer} and for @scheme[set!] transformations. If
-the property value is an integer, the target identifier is extracted
-from the structure instance; if the field value is not a procedure of
-one argument, then a procedure that always calls
+If the property value is an procedure of one argument, then the
+procedure serves as a @tech{syntax transformer} and for @scheme[set!]
+transformations. If the property value is a procedure of two
+arguments, then the first argument is the structure whose type has
+@scheme[prop:set!-transformer] property, and the second argument is a
+syntax object as for a @tech{syntax transformer} and for @scheme[set!]
+transformations; @scheme[set!-transformer-procedure] applied to the
+structure produces a new function that accepts just the syntax object
+and call the procedure associated through the property. Finally, if the
+property value is an integer, the target identifier is extracted from
+the structure instance; if the field value is not a procedure of one
+argument, then a procedure that always calls
 @scheme[raise-syntax-error] is used, instead.
 
 If a value has both the @scheme[prop:set!-transformer] and
@@ -496,7 +503,7 @@ within a @scheme[module] form, or if it is not a run-time expression,
 then the @exnraise[exn:fail:contract].}
 
 
-@defproc[(syntax-local-lift-require [raw-require-spec any/c][stx syntax?])
+@defproc[(syntax-local-lift-require [raw-require-spec any/c] [stx syntax?])
          syntax?]{
 
 Lifts a @scheme[#%require] form corresponding to
@@ -759,7 +766,7 @@ identifier.}
 
 @section[#:tag "require-trans"]{@scheme[require] Transformers}
 
-@note-lib-only[scheme/require-transform]
+@note-lib-only[racket/require-transform]
 
 A @tech{transformer binding} whose value is a structure with the
 @scheme[prop:require-transformer] property implements a derived
@@ -883,7 +890,7 @@ necessary to expand it.}
 
 @section[#:tag "provide-trans"]{@scheme[provide] Transformers}
 
-@note-lib-only[scheme/provide-transform]
+@note-lib-only[racket/provide-transform]
 
 A @tech{transformer binding} whose value is a structure with the
 @scheme[prop:provide-transformer] property implements a derived
