@@ -54,6 +54,10 @@
       
       ;; the pinhole's coordinates
       (init-field px py)
+      (when (inexact? px)
+        (set! px (floor (inexact->exact px))))
+      (when (inexact? py)
+        (set! py (floor (inexact->exact py))))
       (define/public (get-pinhole) (values px py))
 
       (init-field (width #f)
@@ -265,7 +269,7 @@
            [height (argb-height argb)]
            [argb-vector (argb-vector argb)]
            [bitmap (argb->bitmap argb)]
-           [mask (send bitmap get-loaded-mask)])
+           [mask (and bitmap (send bitmap get-loaded-mask))])
       (new cache-image-snip%
            (width width)
            (height height)

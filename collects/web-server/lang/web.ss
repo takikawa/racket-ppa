@@ -2,12 +2,10 @@
 (require net/url
          scheme/contract
          scheme/serialize
-         web-server/private/request-structs
-         web-server/private/response-structs
+         web-server/http
          web-server/private/define-closure
-         "../private/request-structs.ss"
+         web-server/private/servlet         
          "abort-resume.ss"
-         "../private/session.ss"
          "stuff-url.ss"
          "../private/url-param.ss")
 
@@ -48,13 +46,12 @@
 
 ;; send/suspend/hidden: (url input-field -> response) -> request
 ;; like send/suspend except the continuation is encoded in a hidden field
-;; XXX incorporate stuffing in some way
 (define (send/suspend/hidden page-maker)
   (send/suspend
    (lambda (k)
      (let ([p-cont (serialize k)])
        (page-maker
-        (session-url (current-session))
+        (request-uri (execution-context-request (current-execution-context)))
         `(input ([type "hidden"] [name "kont"] [value ,(format "~s" p-cont)])))))))
 
 ;; send/suspend/url: (url -> response) -> request
@@ -64,11 +61,11 @@
    (lambda (k)
      (page-maker
       (stuff-url k
-                 (session-url (current-session)))))))
+                 (request-uri (execution-context-request (current-execution-context))))))))
 
 (define-closure embed/url (proc) (k)
   (stuff-url (kont-append-fun k proc)
-             (session-url (current-session))))
+             (request-uri (execution-context-request (current-execution-context)))))
 (define (send/suspend/dispatch response-generator)
   (send/suspend
    (lambda (k)
@@ -88,3 +85,9 @@
      [(struct binding:form (id kont))
       (deserialize (read (open-input-bytes kont)))]
      [_ #f])))
+
+(provide/contract
+ [redirect/get (-> request?)])  
+
+(define (redirect/get)
+  (send/suspend/url (lambda (k-url) (redirect-to (url->string k-url) temporarily))))

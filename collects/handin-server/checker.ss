@@ -321,8 +321,8 @@
 (define (add-header-line! line)
   (let ([new (list line)] [cur (thread-cell-ref added-lines)])
     (if cur
-	(set-box! cur (append (unbox cur) new))
-	(thread-cell-set! added-lines (box new)))))
+      (set-box! cur (append (unbox cur) new))
+      (thread-cell-set! added-lines (box new)))))
 
 (define ((wrap-evaluator eval) expr)
   (define unknown "unknown")
@@ -450,11 +450,11 @@
                    (cond [(list? allowed)
                           (unless (member users allowed)
                             (error*
-                             "You are not registered ~a for this submission"
+                             "You are not registered for ~a submission"
                              (case (length users)
-                               [(1) "for individual submission"]
-                               [(2) "as a pair"]
-                               [else "as a group"])))]
+                               [(1) "individual"]
+                               [(2) "pair"]
+                               [else "group"])))]
                          [(procedure? allowed) (allowed users)]
                          [(not allowed) ; default is single-user submission
                           (unless (= 1 (length users))
@@ -479,7 +479,9 @@
                            (prefix-line (user-substs user student-line)))
                          (for-each prefix-line/substs extra-lines)
                          (for-each prefix-line/substs
-				   (unbox (or (thread-cell-ref added-lines) (box '()))))
+                                   (cond [(thread-cell-ref added-lines)
+                                          => unbox]
+                                         [else '()]))
                          (display submission-text))))
                    (define submission-text
                      (and create-text?
@@ -653,8 +655,25 @@
   ;; expected to be used only with identifiers
   (begin (with-handlers ([exn:fail:contract:variable?
                           (lambda (_)
+                            (error* "missing binding: ~e" (->disp 'id)))]
+                         [exn:fail:syntax?
+                          (lambda (_)
+                            (error* "bound to a syntax, expecting a value: ~e"
+                                    (->disp 'id)))])
+           (parameterize ([current-namespace (get-namespace (submission-eval))])
+             (namespace-variable-value `id)))
+         ...))
+
+(provide !syntax)
+(define-syntax-rule (!syntax id ...)
+  ;; expected to be used only with identifiers
+  (begin (with-handlers ([exn:fail:syntax? void]
+                         [exn:fail:contract:variable?
+                          (lambda (_)
                             (error* "missing binding: ~e" (->disp 'id)))])
-           ((submission-eval) `id))
+           (parameterize ([current-namespace (get-namespace (submission-eval))])
+             (namespace-variable-value `id))
+           (error* "bound to a value, expecting a syntax: ~e" (->disp 'id)))
          ...))
 
 (provide !procedure* !procedure)

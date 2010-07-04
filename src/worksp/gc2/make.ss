@@ -11,6 +11,7 @@
   (system s))
 
 (define accounting-gc? #t)
+(define backtrace-gc? #f)
 (define opt-flags "/O2 /Oy-")
 (define re:only #f)
 
@@ -169,6 +170,9 @@
 	(string-append "/D LIBMZ_EXPORTS "
 		       (if accounting-gc?
 			   "/D NEWGC_BTC_ACCOUNT "
+			   "")
+		       (if backtrace-gc?
+			   "/D MZ_GC_BACKTRACE "
 			   ""))
 	"mz.pch"
 	#f))
@@ -202,18 +206,27 @@
      #f)
 
 (c-compile "../../mzscheme/gc2/gc2.c" "xsrc/gc2.obj"
-	   (map (lambda (f) (build-path "../../mzscheme/gc2/" f))
-		'("gc2.c"
-		  "compact.c"
-		  "newgc.c"
-		  "vm_win.c"
-		  "sighand.c"
-		  "msgprint.c"))
+           (append
+	    (map (lambda (f) (build-path "../../mzscheme/" f))
+		 '("include/scheme.h"
+		   "src/stypes.h"))
+	    (map (lambda (f) (build-path "../../mzscheme/gc2/" f))
+		 '("gc2.c"
+		   "compact.c"
+		   "newgc.c"
+		   "vm_win.c"
+		   "sighand.c"
+		   "msgprint.c"
+		   "gc2.h"
+		   "gc2_obj.h")))
 	   (string-append
 	    "/D GC2_AS_EXPORT "
 	    (if accounting-gc?
 		"/D NEWGC_BTC_ACCOUNT "
 		"/D USE_COMPACT_3M_GC ")
+	    (if backtrace-gc?
+		"/D MZ_GC_BACKTRACE "
+		"")
 	    mz-inc))
 (c-compile "../../mzscheme/src/mzsj86.c" "xsrc/mzsj86.obj" '() mz-inc)
 
@@ -323,7 +336,10 @@
 	 wx-inc
 	 (and use-precomp? "xsrc/wxprecomp.h")
 	 "-DGC2_JUST_MACROS /FI../../../mzscheme/gc2/gc2.h"
-	 "-DGC2_AS_IMPORT"
+	 (string-append "-DGC2_AS_IMPORT"
+			(if backtrace-gc?
+			    " /D MZ_GC_BACKTRACE"
+			    ""))
 	 "wx.pch"
 	 indirect?)))
 

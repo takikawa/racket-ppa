@@ -517,7 +517,7 @@
                                                  (use-namespace-require/copy-from-setting? setting)))
       (define/public (extra-repl-information _1 _2) (void))
       (define/public (get-reader-module) #f)
-      (define/public (get-metadata a b c) #f)
+      (define/public (get-metadata a b) #f)
       (define/public (metadata->settings m) #f)
       (define/public (get-metadata-lines) #f)
       
@@ -1086,7 +1086,9 @@
      (λ ()
        (with-handlers ([(λ (x) #t)
                         (λ (x)
-                          (display (exn-message x))
+                          (display (if (exn? x) 
+                                       (exn-message x) 
+                                       (format "~s" x)))
                           (newline))])
          (when module-spec
            (if use-copy?

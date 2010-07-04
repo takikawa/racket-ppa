@@ -1626,6 +1626,9 @@ static int thread_val_MARK(void *p) {
   
   gcMARK(pr->blocker);
   gcMARK(pr->overflow);
+
+  gcMARK(pr->return_marks_to);
+  gcMARK(pr->returned_marks);
   
   gcMARK(pr->current_local_env);
   gcMARK(pr->current_local_mark);
@@ -1729,6 +1732,9 @@ static int thread_val_FIXUP(void *p) {
   
   gcFIXUP(pr->blocker);
   gcFIXUP(pr->overflow);
+
+  gcFIXUP(pr->return_marks_to);
+  gcFIXUP(pr->returned_marks);
   
   gcFIXUP(pr->current_local_env);
   gcFIXUP(pr->current_local_mark);
@@ -2065,6 +2071,7 @@ static int namespace_val_MARK(void *p) {
   gcMARK(e->insp);
 
   gcMARK(e->rename_set);
+  gcMARK(e->temp_marked_names);
 
   gcMARK(e->syntax);
   gcMARK(e->exp_env);
@@ -2099,6 +2106,7 @@ static int namespace_val_FIXUP(void *p) {
   gcFIXUP(e->insp);
 
   gcFIXUP(e->rename_set);
+  gcFIXUP(e->temp_marked_names);
 
   gcFIXUP(e->syntax);
   gcFIXUP(e->exp_env);
@@ -5293,8 +5301,10 @@ static int native_unclosed_proc_MARK(void *p) {
   int i;
 
   gcMARK(d->u2.name);
-  for (i = d->retain_count; i--; ) {
-    gcMARK(d->retained[i]);
+  if (d->retained) {
+    for (i = SCHEME_INT_VAL(d->retained[0]); i--; ) {
+      gcMARK(d->retained[i]);
+    }
   }
   if (d->closure_size < 0) {
     gcMARK(d->u.arities);
@@ -5309,8 +5319,10 @@ static int native_unclosed_proc_FIXUP(void *p) {
   int i;
 
   gcFIXUP(d->u2.name);
-  for (i = d->retain_count; i--; ) {
-    gcFIXUP(d->retained[i]);
+  if (d->retained) {
+    for (i = SCHEME_INT_VAL(d->retained[0]); i--; ) {
+      gcFIXUP(d->retained[i]);
+    }
   }
   if (d->closure_size < 0) {
     gcFIXUP(d->u.arities);
