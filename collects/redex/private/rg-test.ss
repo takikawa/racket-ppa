@@ -620,47 +620,6 @@
        generated)
      '((* 7 7) (+ 7 7) 7 7 7))))
 
-;; preferred productions
-(let ([make-pick-nt (λ opt (λ req (apply pick-nt (append req opt))))])
-  (define-language L
-    (e (+ e e) (* e e) 7))
-  (let ([pats (λ (L) (nt-rhs (car (compiled-lang-lang (parse-language L)))))])
-    (test 
-     (generate-term/decisions
-      L e 2 preferred-production-threshold
-      (decisions #:pref (list (λ (L) (make-immutable-hash `((e ,(car (pats L)))))))
-                 #:nt (make-pick-nt (make-random 0 0 0))))
-     '(+ (+ 7 7) (+ 7 7)))
-    (test
-     (generate-term/decisions
-      L any 2 preferred-production-threshold
-      (decisions #:nt (patterns first)
-                 #:var (list (λ _ 'x))
-                 #:any (list (λ (lang sexp) (values sexp 'sexp)))))
-     'x)
-    (test
-     (generate-term/decisions
-      L any 2 preferred-production-threshold
-      (decisions #:pref (list (λ (L) (make-immutable-hash `((e ,(car (pats L)))))))
-                 #:nt (make-pick-nt (make-random 0 0 0))
-                 #:any (list (λ (lang sexp) (values lang 'e)))))
-     '(+ (+ 7 7) (+ 7 7)))
-    (test
-     (let ([generated null])
-       (check-reduction-relation
-        (reduction-relation L (--> e e))
-        (λ (t) (set! generated (cons t generated)))
-        #:decisions (decisions #:nt (make-pick-nt (make-random)
-                                                  (λ (att rand) #t))
-                               #:pref (list (λ (_) 'dontcare)
-                                            (λ (_) 'dontcare)
-                                            (λ (_) 'dontcare)
-                                            (λ (L) (make-immutable-hash `((e ,(car (pats L))))))
-                                            (λ (L) (make-immutable-hash `((e ,(cadr (pats L))))))))
-        #:attempts 5)
-       generated)
-     '((* 7 7) (+ 7 7) 7 7 7))))
-
 ;; output : (-> (-> void) string)
 (define (output thunk)
   (let ([p (open-output-string)])

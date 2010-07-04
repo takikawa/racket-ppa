@@ -55,8 +55,8 @@
 
 ;; check-expect-maker : syntax? syntax? (listof syntax?) symbol? -> syntax?
 ;; the common part of all three test forms.
-(define-for-syntax (check-expect-maker stx checker-proc-stx embedded-stxes
-                                       hint-tag)
+(define-for-syntax (check-expect-maker
+                    stx checker-proc-stx test-expr embedded-stxes hint-tag)
   (define bogus-name
     (stepper-syntax-property #`#,(gensym 'test) 'stepper-hide-completed #t))
   (define src-info
@@ -110,8 +110,7 @@
     (raise-syntax-error 'check-expect CHECK-EXPECT-DEFN-STR stx))
   (syntax-case stx ()
     [(_ test actual)
-     (check-expect-maker stx #'check-values-expected
-                         (list #`(lambda () test) #`actual)
+     (check-expect-maker stx #'check-values-expected #`test (list #`actual)
                          'comes-from-check-expect)]
     [_ (raise-syntax-error 'check-expect CHECK-EXPECT-STR stx)]))
 
@@ -131,8 +130,7 @@
     (raise-syntax-error 'check-within CHECK-WITHIN-DEFN-STR stx))
   (syntax-case stx ()
     [(_ test actual within)
-     (check-expect-maker stx #'check-values-within
-                         (list #`(lambda () test) #`actual #`within)
+     (check-expect-maker stx #'check-values-within #`test (list #`actual #`within)
                          'comes-from-check-within)]
     [_ (raise-syntax-error 'check-within CHECK-WITHIN-STR stx)]))
 
@@ -150,8 +148,7 @@
     (raise-syntax-error 'check-error CHECK-ERROR-DEFN-STR stx))
   (syntax-case stx ()
     [(_ test error)
-     (check-expect-maker stx #'check-values-error
-                         (list #'(lambda () test) #`error)
+     (check-expect-maker stx #'check-values-error #`test (list #`error)
                          'comes-from-check-error)]
     [_ (raise-syntax-error 'check-error CHECK-ERROR-STR stx)]))
 
