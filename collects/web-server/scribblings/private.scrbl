@@ -166,8 +166,8 @@ provides the unit that actually implements a dispatching server.
 
 @; XXX Talk about how threads and custodians are used.
 
-@defthing[dispatch-server\@ (unit/c (tcp^ dispatch-server-config^) 
-                                    (dispatch-server^))]{
+@defthing[dispatch-server@ (unit/c (tcp^ dispatch-server-config^) 
+                                   (dispatch-server^))]{
  Runs the dispatching server config in a very basic way, except that it uses
  @secref["connection-manager.ss"] to manage connections.
 }
@@ -418,4 +418,16 @@ needs. They are provided by @filepath{private/util.ss}.
 @defproc[(write/string [v serializable?])
          string?]{
  @scheme[write]s @scheme[v] to a string and returns it.
+}
+
+@subsection{Bytes}
+
+@defproc[(read/bytes [b bytes?])
+         serializable?]{
+ @scheme[read]s a value from @scheme[b] and returns it.
+}
+
+@defproc[(write/bytes [v serializable?])
+         bytes?]{
+ @scheme[write]s @scheme[v] to a bytes and returns it.
 }

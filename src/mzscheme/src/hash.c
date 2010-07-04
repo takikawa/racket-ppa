@@ -490,19 +490,17 @@ void scheme_reset_hash_table(Scheme_Hash_Table *table, int *history)
   if ((table->size <= 8)
       || (table->count * FILL_FACTOR > (table->size >> 1))) {
     /* Keep same size */
-    memset(table->vals, 0, sizeof(Scheme_Object *) * table->size);
-    memset(table->keys, 0, sizeof(Scheme_Object *) * table->size);
   } else {
     /* Shrink by one step */
     Scheme_Object **ba;
     table->size >>= 1;
     ba = MALLOC_N(Scheme_Object *, table->size);
-    memcpy(ba, table->vals, sizeof(Scheme_Object *) * table->size);
     table->vals = ba;
     ba = MALLOC_N(Scheme_Object *, table->size);
-    memcpy(ba, table->keys, sizeof(Scheme_Object *) * table->size);
     table->keys = ba;
   }
+  memset(table->vals, 0, sizeof(Scheme_Object *) * table->size);
+  memset(table->keys, 0, sizeof(Scheme_Object *) * table->size);
   table->count = 0;
   table->mcount = 0;
 }
@@ -1369,16 +1367,15 @@ static long equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
   
   switch(t) {
   case scheme_integer_type:
-    return t;
+    return t - SCHEME_INT_VAL(o);
 #ifdef MZ_USE_SINGLE_FLOATS
   case scheme_float_type:
-    return t;
 #endif
   case scheme_double_type:
     {
       double d;
       int e;
-      d = SCHEME_DBL_VAL(o);
+      d = SCHEME_FLOAT_VAL(o);
       if (MZ_IS_NAN(d)
 	  || MZ_IS_POS_INFINITY(d)
 	  || MZ_IS_NEG_INFINITY(d)) {
@@ -2388,7 +2385,7 @@ int scheme_hash_tree_equal_rec(Scheme_Hash_Tree *t1, Scheme_Hash_Tree *t2, void 
   for (i = t1->count; i--; ) {
     scheme_hash_tree_index(t1, i, &k, &v);
     v2 = scheme_hash_tree_get(t2, k);
-    if (!v)
+    if (!v2)
       return 0;
     if (!scheme_recur_equal(v, v2, eql))
       return 0;

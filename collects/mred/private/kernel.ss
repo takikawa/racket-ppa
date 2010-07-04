@@ -252,6 +252,7 @@
     release-snip
     on-snip-modified
     set-modified
+    scroll-editor-to
     set-snip-data
     get-snip-data
     needs-update
@@ -808,6 +809,7 @@
     set-clickback
     set-wordbreak-func
     set-autowrap-bitmap
+    on-reflow
     on-new-tab-snip
     on-new-string-snip
     caret-hidden?
@@ -868,6 +870,7 @@
     line-end-position
     line-start-position
     line-location
+    position-locations
     position-location
     position-line
     set-between-threshold
@@ -927,6 +930,7 @@
     release-snip
     on-snip-modified
     set-modified
+    scroll-editor-to
     set-snip-data
     get-snip-data
     needs-update
@@ -1140,6 +1144,7 @@
     release-snip
     on-snip-modified
     set-modified
+    scroll-editor-to
     set-snip-data
     get-snip-data
     needs-update

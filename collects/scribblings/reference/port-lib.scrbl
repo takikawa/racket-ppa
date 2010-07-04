@@ -4,7 +4,7 @@
 
 @title{More Port Constructors and Events}
 
-@note-lib[scheme/port]
+@note-lib-only[scheme/port]
 
 @; ----------------------------------------------------------------------
 
@@ -48,13 +48,13 @@ input ports as it becomes available.}
           [get-location (or/c 
                          (->
                           (values
-                           (or/c positive-exact-integer? false/c)
-                           (or/c nonnegative-exact-integer? false/c)
-                           (or/c positive-exact-integer? false/c)))
+                           (or/c exact-positive-integer? false/c)
+                           (or/c exact-nonnegative-integer? false/c)
+                           (or/c exact-positive-integer? false/c)))
                          false/c)
                         #f]
           [count-lines! (-> any) void]
-          [init-position positive-exact-integer? 1]
+          [init-position exact-positive-integer? 1]
           [buffer-mode (or/c (case-> ((one-of/c 'block 'none) . -> . any)
                                      (-> (one-of/c 'block 'none #f)))
                              false/c)
@@ -344,16 +344,17 @@ Like @scheme[relocate-input-port], but for output ports.}
                                                  (or/c exact-nonnegative-integer? false/c)
                                                  (or/c exact-positive-integer? false/c)))
                                                false/c)]
-                                [init-pos (-> exact-positive-integer?)]
+                                [init-pos exact-positive-integer?]
                                 [close? any/c #t]
                                 [count-lines! (-> any) void])
           input-port?]{
 
 Like @scheme[relocate-input-port], except that arbitrary position
 information can be produced (when line counting is enabled) via
-@scheme[get-location]. If @scheme[get-location] is @scheme[#f], then
-the port counts lines in the usual way starting from
-@scheme[init-pos], independent of locations reported by @scheme[in].
+@scheme[get-location], which used as for @scheme[make-input-port]. If
+@scheme[get-location] is @scheme[#f], then the port counts lines in
+the usual way starting from @scheme[init-pos], independent of
+locations reported by @scheme[in].
 
 If @scheme[count-lines!] is supplied, it is called when line counting
 is enabled for the resulting port. The default is @scheme[void].}
@@ -366,7 +367,7 @@ is enabled for the resulting port. The default is @scheme[void].}
                                                   (or/c exact-nonnegative-integer? false/c)
                                                   (or/c exact-positive-integer? false/c)))
                                                 false/c)]
-                                 [init-pos (-> exact-positive-integer?)]
+                                 [init-pos exact-positive-integer?]
                                  [close? any/c #t]
                                  [count-lines! (-> any) void])
           output-port?]{

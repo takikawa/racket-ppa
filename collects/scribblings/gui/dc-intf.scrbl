@@ -199,9 +199,10 @@ See also @method[dc<%> set-smoothing] for information on the
            void?]{
 
 Draws the sub-paths of the given @scheme[dc-path%] object, adding
- @scheme[xoffset] and @scheme[yoffset] to each point. The current pen
- is used for drawing the path as a line, and the current brush is used
- for filling the area bounded by the path.
+ @scheme[xoffset] and @scheme[yoffset] to each point. (See
+ @scheme[dc-path%] for general information on paths and sub-paths.)
+ The current pen is used for drawing the path as a line, and the
+ current brush is used for filling the area bounded by the path.
 
 If both the pen and brush are non-transparent, the path is filled with
  the brush before the outline is drawn with the pen. The filling and
@@ -350,11 +351,13 @@ See also @method[dc<%> set-smoothing] for information on the
                         [y3 real?])
            void?]{
 
-Draws a spline from (@scheme[x1], @scheme[y1]) to (@scheme[x3], @scheme[y3])
- using (@scheme[x2], @scheme[y2]) as the control point.
+@index['("drawing curves")]{Draws} a spline from (@scheme[x1],
+ @scheme[y1]) to (@scheme[x3], @scheme[y3]) using (@scheme[x2],
+ @scheme[y2]) as the control point.
 
 See also @method[dc<%> set-smoothing] for information on the
-@scheme['aligned] smoothing mode.
+ @scheme['aligned] smoothing mode. See also @scheme[dc-path%] and
+ @method[dc<%> draw-path] for drawing more complex curves.
 
 @|DrawSizeNote|
 
@@ -364,7 +367,7 @@ See also @method[dc<%> set-smoothing] for information on the
                       [x real?]
                       [y real?]
                       [combine? any/c #f]
-                      [offset nonnegative-exact-integer? 0]
+                      [offset exact-nonnegative-integer? 0]
                       [angle real? 0])
            void?]{
 
@@ -557,7 +560,7 @@ set-text-background].
 @defmethod[(get-text-extent [string string?]
                             [font (or/c (is-a?/c font%) false/c) #f]
                             [combine? any/c #f]
-                            [offset nonnegative-exact-integer? 0])
+                            [offset exact-nonnegative-integer? 0])
            (values nonnegative-real? 
                    nonnegative-real?
                    nonnegative-real? 
@@ -918,7 +921,7 @@ Starts a page, relevant only when drawing to a printer or PostScript
  device (including to a PostScript file).
 
 For printer or PostScript output, an exception is raised if
- @scheme[start-doc] is called when a page is already started, or when
+ @scheme[start-page] is called when a page is already started, or when
  @method[dc<%> start-doc] has not been called, or when @method[dc<%>
  end-doc] has been called already. In addition, in the case of
  PostScript output, Encapsulated PostScript (EPS) cannot contain

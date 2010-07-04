@@ -1,3 +1,4 @@
+#lang scheme/unit
 
 #|
 
@@ -26,7 +27,6 @@ the state transitions / contracts are:
 
 |#
 
-#lang scheme/unit
 
   (require string-constants
 	   mzlib/class
@@ -34,7 +34,7 @@ the state transitions / contracts are:
            "sig.ss"
            "../gui-utils.ss"
            "../preferences.ss"
-	   (lib "mred-sig.ss" "mred")
+	   mred/mred-sig
 	   mzlib/list)
   
   (import mred^
@@ -414,10 +414,6 @@ the state transitions / contracts are:
                                (string-constant wrap-words-in-editor-buffers)
                                values values)
                    (make-check editor-panel 
-                               'framework:search-using-dialog?
-                               (string-constant separate-dialog-for-searching)
-                               values values)
-                   (make-check editor-panel 
                                'framework:open-here?
                                (string-constant reuse-existing-frames)
                                values values)
@@ -443,6 +439,10 @@ the state transitions / contracts are:
                                  (λ (b) 
                                    (if b 'postscript 'standard))
                                  (λ (n) (eq? 'postscript n))))
+                   (make-check editor-panel
+                               'framework:anchored-search
+                               (string-constant find-anchor-based)
+                               values values)
                    (editor-panel-procs editor-panel))))])
       (add-editor-checkbox-panel)))
   

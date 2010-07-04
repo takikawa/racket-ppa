@@ -30,8 +30,8 @@
          dynext/compile
          dynext/link
          scheme/pretty
-         (lib "pack.ss" "setup")
-         (lib "getinfo.ss" "setup")
+         setup/pack
+         setup/getinfo
          setup/dirs)
 
 (define dest-dir (make-parameter #f))
@@ -130,6 +130,9 @@
       [("--expand")
        ,(lambda (f) 'expand)
        ((,(format "Write macro-expanded Scheme source(s) to stdout") ""))]
+      [("--decompile")
+       ,(lambda (f) 'decompile)
+       ((,(format "Write quasi-Scheme for ~a file(s) to stdout" (extract-suffix append-zo-suffix)) ""))]
       [("-z" "--zo")
        ,(lambda (f) 'zo)
        ((,(format "Output ~a file(s) from Scheme source(s)" (extract-suffix append-zo-suffix)) ""))]
@@ -444,10 +447,23 @@
                   (unless (eof-object? e)
                     (pretty-print (syntax->datum (expand e)))
                     (loop))))))))))]
+  [(decompile)
+   (let ([zo-parse (dynamic-require 'compiler/zo-parse 'zo-parse)]
+         [decompile (dynamic-require 'compiler/decompile 'decompile)])
+     (for ([zo-file source-files])
+       (let ([zo-file (path->complete-path zo-file)])
+         (let-values ([(base name dir?) (split-path zo-file)])
+           (parameterize ([current-load-relative-directory base])
+             (pretty-print
+              (decompile
+               (call-with-input-file*
+                zo-file
+                (lambda (in)
+                  (zo-parse in))))))))))]
   [(make-zo)
    (let ([n (make-base-empty-namespace)]
-         [mc (dynamic-require 'mzlib/cm 'managed-compile-zo)]
-         [cnh (dynamic-require 'mzlib/cm 'manager-compile-notify-handler)]
+         [mc (dynamic-require 'compiler/cm 'managed-compile-zo)]
+         [cnh (dynamic-require 'compiler/cm 'manager-compile-notify-handler)]
          [did-one? #f])
      (parameterize ([current-namespace n]
                     [cnh (lambda (p)
@@ -511,11 +527,11 @@
    (unless (= 1 (length source-files))
      (error 'mzc "expected a single module source file to embed; given: ~e"
             source-files))
-   (let ([dest ((dynamic-require '(lib "embed.ss" "compiler" "private")
+   (let ([dest ((dynamic-require 'compiler/private/embed
                                  'mzc:embedding-executable-add-suffix)
                 (exe-output)
                 (eq? mode 'gui-exe))])
-     ((dynamic-require '(lib "embed.ss" "compiler" "private")
+     ((dynamic-require 'compiler/private/embed
                        'mzc:create-embedding-executable)
       dest
       #:mred? (eq? mode 'gui-exe)
@@ -542,7 +558,7 @@
    (let ([dest (mods-output)])
      (let-values ([(in out) (make-pipe)])
        (parameterize ([current-output-port out])
-         ((dynamic-require '(lib "embed.ss" "compiler") 'write-module-bundle)
+         ((dynamic-require 'compiler/embed 'write-module-bundle)
           #:modules
           (append (map (lambda (l) `(#f (file ,l))) source-files)
              (map (lambda (l) `(#t (lib ,l))) (exe-embedded-libraries)))))

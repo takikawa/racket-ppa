@@ -1,6 +1,7 @@
 #lang scribble/doc
 @(begin
 (require scribble/manual
+         (for-label drscheme/tool-lib)
          (for-label scheme/unit)
          (for-label scheme/base)
          (for-label framework/framework))
@@ -13,8 +14,10 @@
 )
 
 @title{@bold{Plugins}: Extending DrScheme}
-@(defmodule drscheme/tool-lib)
 
+@author["Robert Bruce Findler"]
+
+@(defmodule drscheme/tool-lib)
 
 This manual describes DrScheme's tools interface. It assumes
 familiarity with 

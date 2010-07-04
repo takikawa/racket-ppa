@@ -18,6 +18,7 @@
          sandbox-path-permissions
          sandbox-network-guard
          sandbox-make-inspector
+         sandbox-make-logger
          sandbox-eval-limits
          kill-evaluator
          break-evaluator
@@ -132,6 +133,8 @@
 (define sandbox-security-guard (make-parameter default-sandbox-guard))
 
 (define sandbox-make-inspector (make-parameter make-inspector))
+
+(define sandbox-make-logger (make-parameter current-logger))
 
 ;; computes permissions that are needed for require specs (`read' for all
 ;; files and "compiled" subdirs, `exists' for the base-dir)
@@ -329,16 +332,12 @@
 ;; transitive requires.
 (define (build-program language requires input-program)
   (let* ([body (append (if (and (pair? requires) (eq? 'begin (car requires)))
-                           (cdr requires)
-                           (map (lambda (r) (list #'#%require r))
-                                requires))
+                         (cdr requires)
+                         (map (lambda (r) (list #'#%require r)) requires))
                        (input->code input-program 'program 1))]
          [use-lang (lambda (lang) `(module program ,lang . ,body))])
-    (cond [(decode-language language)
-           => (lambda (l)
-                (use-lang l))]
-          [(module-path? language)
-           (use-lang language)]
+    (cond [(decode-language language) => use-lang]
+          [(module-path? language) (use-lang language)]
           [(and (list? language) (eq? 'begin (car language)))
            (append language body)]
           [else (error 'make-evaluator "bad language spec: ~e" language)])))
@@ -373,7 +372,7 @@
 
 (define (evaluate-program program limits uncovered!)
   (when uncovered!
-    (eval `(,#'#%require (lib "sandbox-coverage.ss" "mzlib" "private"))))
+    (eval `(,#'#%require scheme/private/sandbox-coverage)))
   ;; the actual evaluation happens under specified limits, if given
   (let ([run (if (and (pair? program) (eq? 'begin (car program)))
                  (lambda () (eval* (cdr program)))
@@ -586,6 +585,7 @@
     [current-security-guard (sandbox-security-guard)]
     [exit-handler (lambda x (error 'exit "user code cannot exit"))]
     [current-inspector ((sandbox-make-inspector))]
+    [current-logger ((sandbox-make-logger))]
     ;; This breaks because we need to load some libraries that are trusted
     ;; [current-code-inspector (make-inspector)]
     ;; Note the above definition of `current-eventspace': in MzScheme, it

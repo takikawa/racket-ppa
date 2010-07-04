@@ -301,6 +301,8 @@ void scheme_post_sema(Scheme_Object *o)
 	    consumed = 1;
 	  } else
 	    consumed = 0;
+          if (w->syncing->accepts && w->syncing->accepts[w->syncing_i])
+            scheme_accept_sync(w->syncing, w->syncing_i);
 	} else {
 	  /* In this case, we will remove the syncer from line, but
 	     someone else might grab the post. This is unfair, but it
@@ -481,7 +483,7 @@ static void ext_get_into_line(Scheme_Object *ch, Scheme_Schedule_Info *sinfo)
 
   get_into_line((Scheme_Sema *)ch, w);
 
-  scheme_set_sync_target(sinfo, (Scheme_Object *)w, NULL, NULL, 0, 0);
+  scheme_set_sync_target(sinfo, (Scheme_Object *)w, NULL, NULL, 0, 0, NULL);
 }
 
 void scheme_get_outof_line(Scheme_Channel_Syncer *ch_w)
@@ -637,6 +639,8 @@ int scheme_wait_semas_chs(int n, Scheme_Object **o, int just_try, Syncing *synci
 	if (semas[i]->value) {
 	  if ((semas[i]->value > 0) && (!syncing || !syncing->reposts || !syncing->reposts[i]))
 	    --semas[i]->value;
+          if (syncing && syncing->accepts && syncing->accepts[i])
+            scheme_accept_sync(syncing, i);
 	  break;
 	}
       } else if (semas[i]->so.type == scheme_never_evt_type) {
@@ -811,6 +815,8 @@ int scheme_wait_semas_chs(int n, Scheme_Object **o, int just_try, Syncing *synci
 	    if (semas[i]->value) {
 	      if ((semas[i]->value > 0) && (!syncing || !syncing->reposts || !syncing->reposts[i]))
 		--semas[i]->value;
+              if (syncing && syncing->accepts && syncing->accepts[i])
+                scheme_accept_sync(syncing, i);
 	      break;
 	    }
 	  }  else if (semas[i]->so.type == scheme_never_evt_type) {
@@ -955,6 +961,19 @@ Scheme_Object *scheme_make_channel_put_evt(Scheme_Object *ch, Scheme_Object *v)
   return (Scheme_Object *)cp;
 }
 
+int scheme_try_channel_put(Scheme_Object *ch, Scheme_Object *v)
+{
+  if (((Scheme_Channel *)ch)->get_first) {
+    Scheme_Object *a[2];
+    v = scheme_make_channel_put_evt(ch, v);
+    a[0] = scheme_make_integer(0);
+    a[1] = v;
+    v = scheme_sync_timeout(2, a);
+    return SCHEME_TRUEP(v);
+  } else
+    return 0;
+}
+
 static Scheme_Object *make_channel_put(int argc, Scheme_Object **argv)
 {
   if (!SCHEME_CHANNELP(argv[0]))
@@ -975,7 +994,7 @@ static int channel_get_ready(Scheme_Object *ch, Scheme_Schedule_Info *sinfo)
   Scheme_Object *result;
 
   if (try_channel((Scheme_Sema *)ch, (Syncing *)sinfo->current_syncing, -1, &result)) {
-    scheme_set_sync_target(sinfo, result, NULL, NULL, 0, 0);
+    scheme_set_sync_target(sinfo, result, NULL, NULL, 0, 0, NULL);
     return 1;
   }
 
@@ -1171,7 +1190,7 @@ static int thread_recv_ready(Scheme_Object *ch, Scheme_Schedule_Info *sinfo)
 
   make_mbox_sema(p);
 
-  scheme_set_sync_target(sinfo, p->mbox_sema, thread_recv_evt, NULL, 1, 1);
+  scheme_set_sync_target(sinfo, p->mbox_sema, thread_recv_evt, NULL, 1, 1, NULL);
 
   return 0;
 }

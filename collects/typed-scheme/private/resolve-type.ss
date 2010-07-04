@@ -1,7 +1,8 @@
 #lang scheme/base
+(require "../utils/utils.ss")
 
-(require "type-rep.ss"  "type-name-env.ss" "tc-utils.ss"
-         "type-utils.ss" 
+(require (rep type-rep)  (env type-name-env) (utils tc-utils)
+         "type-utils.ss"
          mzlib/plt-match
          mzlib/trace)
 

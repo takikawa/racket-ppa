@@ -585,7 +585,13 @@
                         'tech)))
 
 (define (tech #:doc [doc #f] . s)
-  (*tech make-link-element "techlink" doc s))
+  (*tech (lambda (style c tag)
+           (make-link-element
+            style
+            (list (make-element "techinside" c))
+            tag))
+         "techoutside"
+         doc s))
 
 (define (techlink #:doc [doc #f] . s)
   (*tech make-link-element #f doc s))
@@ -940,7 +946,7 @@
                        (list (list (scheme id) (schemeblock0/form clause) ...)
                              ...)))]
     [(_ [id clause ...] ...)
-     (schemegrammar #:literals () [id clause ...] ...)]))
+     (schemegrammar* #:literals () [id clause ...] ...)]))
 (define-syntax-rule (var id)
   (*var 'id))
 (define-syntax-rule (svar id)
@@ -2316,18 +2322,27 @@
      (with-syntax ([cname (syntax-parameter-value #'current-class)]
                    [name1 (car (syntax->list #'(name ...)))])
        (with-syntax ([(extra ...)
-                      (case (syntax-e #'mode)
-                        [(pubment)
-                         #'((t "Refine this method with "
-                               (scheme augment) "."))]
-                        [(override extend augment)
-                         #'((t (case (syntax-e #'mode)
-                                 [(override) "Overrides "]
-                                 [(extend) "Extends "]
-                                 [(augment) "Augments "])
-                               (*xmethod/super (quote-syntax/loc cname) 'name1)
-                               "."))]
-                        [else null])])
+                      (let ([finality
+                             (lambda ()
+                               (case (syntax-e #'mode)
+                                 [(override-final public-final extend-final)
+                                  #'(" This method is final, so it cannot be overiddden.")]
+                                 [(augment-final)
+                                  #'(" This method is final, so it cannot be augmented.")]
+                                 [else null]))])
+                        (case (syntax-e #'mode)
+                          [(pubment)
+                           #'((t "Refine this method with "
+                                 (scheme augment) "."))]
+                          [(override override-final extend augment)
+                           #`((t (case (syntax-e #'mode)
+                                   [(override override-final) "Overrides "]
+                                   [(extend extend-final) "Extends "]
+                                   [(augment augment-final) "Augments "])
+                                 (*xmethod/super (quote-syntax/loc cname) 'name1)
+                                 "."
+                                 #,@(finality)))]
+                          [else null]))])
          #'(make-meth '(name ...)
                       'mode
                       (lambda ()
@@ -2352,10 +2367,10 @@
      (defmethod #:mode public (name arg ...) result-type desc ...)]))
 
 (define-syntax-rule (methimpl body ...)
-  (make-impl (lambda () (list (italic "Default implementation:") body ...))))
+  (make-impl (lambda () (list (italic "Default implementation:") " " body ...))))
 
 (define-syntax-rule (methspec body ...)
-  (make-spec (lambda () (list (italic "Specification:") body ...))))
+  (make-spec (lambda () (list (italic "Specification:") " " body ...))))
 
 (define (*this-obj cname)
   (name-this-object cname))

@@ -1,14 +1,15 @@
 #lang scheme/base
-(require "test-utils.ss" (for-syntax scheme/base))
-(require (private planet-requires type-comparison parse-type type-rep
-                  tc-utils type-environments type-alias-env subtype
-                  type-name-env init-envs union type-utils))
+(require "test-utils.ss" "planet-requires.ss" (for-syntax scheme/base))
+(require (utils tc-utils)
+	 (env type-alias-env type-environments type-name-env init-envs)
+	 (rep type-rep)
+	 (private type-comparison parse-type subtype
+		  union type-utils)
+         (schemeunit))
 
 (require (rename-in (private type-effect-convenience) [-> t:->])
          (except-in (private base-types) Un)
          (for-template (private base-types)))
-
-(require (schemeunit))
 
 (provide parse-type-tests)
 
@@ -69,12 +70,15 @@
    [(Number -> Number) (t:-> N N)]
    [(Number -> Number) (t:-> N N)]
    [(Number Number Number Boolean -> Number) (N N N B . t:-> . N)]
-   [(Number Number Number .. -> Boolean) ((list N N) N . ->* . B)]
+   [(Number Number Number * -> Boolean) ((list N N) N . ->* . B)]
    ;[((. Number) -> Number) (->* (list) N N)] ;; not legal syntax
    [(U Number Boolean) (Un N B)]
    [(U Number Boolean Number) (Un N B)]
    [(U Number Boolean 1) (Un N B)]
    [(All (a) (Listof a)) (-poly (a) (make-Listof  a))]
+   [(All (a ...) (a ... a -> Integer)) (-polydots (a) ( (list) (a a) . ->... . -Integer))]
+   [(∀ (a) (Listof a)) (-poly (a) (make-Listof  a))]
+   [(∀ (a ...) (a ... a -> Integer)) (-polydots (a) ( (list) (a a) . ->... . -Integer))]
    [(case-lambda (Number -> Boolean) (Number Number -> Number)) (cl-> [(N) B]
                                                                       [(N N) N])]
    [1 (-val 1)]

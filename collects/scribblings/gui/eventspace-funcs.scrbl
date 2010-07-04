@@ -137,7 +137,7 @@ A second (optional) boolean argument indicates whether the callback
             boolean?]
            [(yield [v (or/c (one-of/c 'wait) evt?)])
             any/c])]{
-@;\index{pause}\index{wait}
+@;@index{pause}@index{wait}
 Yields control to event dispatching. See
  @secref["eventspaceinfo"] for details.
 
@@ -193,7 +193,7 @@ If @scheme[v] is an event in MzScheme's sense (not to be confused with
  @scheme[v] via @scheme[handle-evt], it is not called in tail position
  with respect to the @scheme[yield].
 
-Always use @scheme[(yield @scheme[v])] instead of a busy-wait loop.
+Always use @scheme[(yield v)] instead of a busy-wait loop.
 }
 
 @defproc[(sleep/yield [secs (and/c real? (not/c negative?))])

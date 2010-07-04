@@ -1,5 +1,5 @@
 #lang setup/infotab
 
-(define scribblings '(("parser-tools.scrbl" (multi-page) (parsing-library))))
+(define compile-omit-paths '("private-lex/error-tests.ss"))
 
-(define compile-omit-paths '("examples"))
+(define scribblings '(("parser-tools.scrbl" (multi-page) (parsing-library))))

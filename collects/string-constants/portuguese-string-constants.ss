@@ -403,7 +403,6 @@ please adhere to these guidelines:
  (enable-keybindings-in-menus "Activar ligações de teclas nos menus")
  (automatically-to-ps "Imprimir automaticamente para um ficheiro postscript")
  (option-as-meta "Tratar tecla option como meta") ;; macos/macos x only
- (separate-dialog-for-searching "Usar janela em separado para a procura")
  (reuse-existing-frames "Reutilizar janelas já existentes para abrir novos ficheiros")
  (default-fonts "Fontes por Defeito")
  (paren-match-color "Cor de iluminação dos parêntesis"); in prefs dialog
@@ -474,7 +473,6 @@ please adhere to these guidelines:
  (dock "Esconder")
  (undock "Não Esconder")
  (replace&find-again "Substituir && Procurar de Novo") ;;; need double & to get a single &
- (replace-to-end "Substituir até ao Fim")
  (forward "Avançar")
  (backward "Recuar")
  (hide "Esconder")
@@ -631,7 +629,7 @@ please adhere to these guidelines:
  (keybindings-choose-user-defined-file "Please choose a file containing keybindings.")
 
  (user-defined-keybinding-error "Error running keybinding ~a\n\n~a")
- (user-defined-keybinding-malformed-file "The file ~a does not contain a module written in the (lib \"keybinding-lang.ss\" \"framework\") language.")  
+ (user-defined-keybinding-malformed-file "The file ~a does not contain a module written in the framework/keybinding-lang language.")  
   
  ;; menu items in the "special" menu
  (insert-text-box-item "Inserir Caixa de Texto")
@@ -900,7 +898,7 @@ please adhere to these guidelines:
  (advanced-student "Advanced Student")
  (advanced-one-line-summary "Intermediate plus lambda and mutation")
  (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
- (pretty-big-scheme "Pretty Big (includes MrEd and Advanced)")
+ (pretty-big-scheme "Pretty Big")
  (pretty-big-scheme-one-line-summary "Adds syntax and functions from the HtDP languages")
  (r5rs-language-name "R5RS")
  (r5rs-one-line-summary "R5RS, with no frills")

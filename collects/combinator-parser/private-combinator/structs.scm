@@ -18,16 +18,16 @@
   (define-struct fail-type (chance src name used may-use) #:transparent #:mutable)
   ;(make-terminal-fail float fail-src string symbol 'a)
   (define-struct (terminal-fail fail-type) (kind found))
-  ;(make-sequence-fail float fail-src string symbol (list string) string 'a boolean string)
-  (define-struct (sequence-fail fail-type) (id kind correct expected found repeat? last-seen))
+  ;(make-sequence-fail float fail-src string symbol (list string) string 'a (-> boolean) string)
+  (define-struct (sequence-fail fail-type) (id kind correct expected found repeat? last-seen) #:transparent)
   ;(make-choice-fail float fail-src string int (list string) (list fail-type) boolean)
   (define-struct (choice-fail fail-type) (options names ended? (messages #:mutable)) #:transparent)
   ;(make-options-fail float #f #f (list fail-type))
-  (define-struct (options-fail fail-type) ((opts #:mutable)))
+  (define-struct (options-fail fail-type) ((opts #:mutable)) #:transparent)
   
   ;result = res | choice-res | repeat-res | (listof (U res choice-res))
   
-  ;(make-res (U #f (listof 'b)) (listof 'a) (U string fail-type) (U string 'a) int) [U #f fail-type] token
+  ;(make-res parse-build (listof 'a) (U string fail-type) (U string 'a) int) [U #f fail-type] token
   (define-struct res (a rest msg id used possible-error first-tok) #:transparent)
   ;make-choice-res string (listof res) fail-type)
   (define-struct choice-res (name matches errors) #:transparent)
@@ -37,6 +37,11 @@
   (define-struct lazy-opts ((matches #:mutable) errors (thunks #:mutable)) #:transparent)
   ;(make-lazy-choice (listof res) fail-type (listof (_ -> res)) string)
   (define-struct (lazy-choice lazy-opts) (name) #:transparent)
+  
+  ;parse-build = answer | none
+  ;(make-answer 'b)
+  (define-struct answer (ast))
+  (define-struct none ())
   
   (define (update-lazy-errors failc mss)
     (set-fail-type-chance! failc (max (fail-type-chance failc) (fail-type-chance mss)))

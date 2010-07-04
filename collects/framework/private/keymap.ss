@@ -1,13 +1,12 @@
-
 #lang scheme/unit
 
 (require string-constants
          mzlib/class
          mzlib/list
-         (lib "mred-sig.ss" "mred")
+         mred/mred-sig
          mzlib/match
          "../preferences.ss"
-         "tex-table.ss"
+         mrlib/tex-table
          "sig.ss")
 
   (import mred^
@@ -30,7 +29,10 @@
               [sexp (and (file-exists? path)
                          (call-with-input-file path read))])
          (match sexp
-           [`(module ,name (lib "keybinding-lang.ss" "framework") ,@(x ...)) 
+           [`(module ,name ,(or `(lib "keybinding-lang.ss" "framework")
+                                `(lib "framework/keybinding-lang.ss")
+                                `framework/keybinding-lang)
+               ,@(x ...)) 
             (let ([km (dynamic-require spec '#%keymap)])
               (hash-set! user-keybindings-files spec km)
               (send global chain-to-keymap km #t))]
@@ -948,6 +950,38 @@
               (send text lock #t)
               #t)]
            
+           [newline
+            (λ (text event)
+              (send text insert "\n")
+              #t)]
+           
+           [shift-focus
+            (λ (adjust)
+              (λ (text event)
+                (when (is-a? text editor:basic<%>)
+                (let ([frame (send text get-top-level-window)])
+                  (let ([found-one? #f])
+                    (let/ec k
+                      (let ([go
+                             (λ ()
+                               (let loop ([obj frame])
+                                 (cond
+                                   [(and found-one? 
+                                         (is-a? obj editor-canvas%)
+                                         (is-a? (send obj get-editor) editor:keymap<%>))
+                                    (send obj focus)
+                                    (k (void))]
+                                   [(and (is-a? obj window<%>) (send obj has-focus?))
+                                    (set! found-one? #t)]
+                                   [(is-a? obj area-container<%>)
+                                    (for-each loop (adjust (send obj get-children)))])))])
+                        (go)
+                        ;;; when we get here, we either didn't find the focus anywhere,
+                        ;;; or the last editor-canvas had the focus. either way,
+                        ;;; the next thing should get the focus
+                        (set! found-one? #t)
+                        (go))))))))]
+           
            [TeX-compress
             (let* ([biggest (apply max (map (λ (x) (string-length (car x))) tex-shortcut-table))])
               (λ (text event)
@@ -984,8 +1018,11 @@
                     (λ (txt evt) (send txt insert c)))))
            (string->list (string-append greek-letters Greek-letters)))
           
-          (add "TeX compress" TeX-compress)
+          (add "shift-focus" (shift-focus values))
+          (add "shift-focus-backwards" (shift-focus reverse))
           
+          (add "TeX compress" TeX-compress)
+          (add "newline" newline)
           (add "down-into-embedded-editor" down-into-embedded-editor)
           (add "up-out-of-embedded-editor" up-out-of-embedded-editor)
           (add "forward-to-next-embedded-editor" forward-to-next-embedded-editor)
@@ -1081,6 +1118,8 @@
           
           (map "~m:c:\\" "TeX compress")
           (map "~c:m:\\" "TeX compress")
+          
+          (map "c:j" "newline")
           
           (map-meta "c:down" "down-into-embedded-editor")
           (map "a:c:down" "down-into-embedded-editor")
@@ -1252,6 +1291,12 @@
           (map ":rightbuttonseq" "mouse-popup-menu")
           
           (map "c:c;c:r" "make-read-only")
+          
+          (map "c:x;o" "shift-focus")
+          (map "c:x;p" "shift-focus-backwards")
+          (map "c:f6" "shift-focus")
+          (map "a:tab" "shift-focus")
+          (map "a:s:tab" "shift-focus-backwards")
           ))))
   
   (define setup-search
@@ -1281,44 +1326,25 @@
                [add-m (λ (name func)
                         (send kmap add-function name func))])
           
-          (add "move-to-search-or-search" 
-               (send-frame (λ (f) (send f move-to-search-or-search)))) ;; key 1
-          (add "move-to-search-or-reverse-search" 
-               (send-frame (λ (f) (send f move-to-search-or-reverse-search)))) ;; key 1b, backwards
-          (add "find-string-again" 
-               (send-frame (λ (f) (send f search-again)))) ;; key 2
-          (add "toggle-search-focus" 
-               (send-frame (λ (f) (send f toggle-search-focus)))) ;; key 3
-          (add "hide-search" 
-               (send-frame (λ (f) (send f hide-search)))) ;; key 4
+          (add "search forward" 
+               (send-frame (λ (f) (send f search 'forward))))
+          (add "search backward" 
+               (send-frame (λ (f) (send f search 'backward))))
+          (add "replace & search forward" 
+               (send-frame (λ (f) (send f replace&search 'forward))))
+          (add "replace & search backward" 
+               (send-frame (λ (f) (send f replace&search 'backward))))
           
+          (add "hide-search" 
+               (send-frame (λ (f) (send f hide-search))))
+          
+          (map "c:g" "hide-search")
+          (map "f3" "search forward")
+          (map "c:s" "search forward")
+          (map "c:r" "search backward")
           (case (system-type)
             [(unix)
-             (map "c:s" "move-to-search-or-search")
-             (map-meta "%" "move-to-search-or-search")
-             (map "c:r" "move-to-search-or-reverse-search")
-             (map "f3" "find-string-again")
-             (map "c:i" "toggle-search-focus")
-             (map "c:g" "hide-search")]
-            [(windows)
-             (map "c:r" "move-to-search-or-reverse-search")
-             (map "f3" "find-string-again")
-             (map "c:g" "find-string-again")	     
-             
-             ;; covered by menu
-             ;(map "c:f" "move-to-search-or-search")
-             
-             (map "c:i" "toggle-search-focus")]
-            [(macos macosx)
-             (map "c:s" "move-to-search-or-search")
-             (map "c:g" "hide-search")
-             
-             ;; covered by menu
-             ;(map "d:f" "move-to-search-or-search")
-             
-             (map "c:r" "move-to-search-or-reverse-search")
-             (map "d:g" "find-string-again")
-             (map "c:i" "toggle-search-focus")])))))
+             (map-meta "%" "search forward")])))))
   
   (define setup-file
     (let* ([get-outer-editor ;; : text% -> text%
@@ -1385,13 +1411,13 @@
                    (string-append
                     (case (system-type)
                       [(macosx macos) "d:"]
-                      [(windows) "c:"]
-                      [(unix) "a:"]
+                      [(windows unix) "c:"]
                       [else (error 'keymap.ss "unknown platform: ~s" (system-type))])
                     key)
                    func))])
       (add/map "editor-undo" 'undo "z")
-      (add/map "editor-redo" 'redo "y")
+      (unless (eq? (system-type) 'macosx)
+	(add/map "editor-redo" 'redo "y"))
       (add/map "editor-cut" 'cut "x")
       (add/map "editor-copy" 'copy "c")
       (add/map "editor-paste" 'paste "v")

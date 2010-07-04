@@ -188,7 +188,10 @@
   
   (test/no-error '(listof any/c))
   (test/no-error '(listof (lambda (x) #t)))
+
   
+  (test/no-error '(list/c 'x "x" #t #f #\c #rx"a" #rx#"b"))
+
   
 
 ;                                                                                      
@@ -1913,6 +1916,19 @@
                'neg)
      10 +)
    55)
+  
+  (test/spec-passed/result
+   'unconstrained-domain->6
+   ((contract (unconstrained-domain-> any/c)
+              (λ (#:key k) k)
+              'pos
+              'neg)
+    #:key 1)
+   1)
+  
+  (test/pos-blame
+   'unconstrained-domain->7
+   '((contract (unconstrained-domain-> number?) (λ (#:x x) x) 'pos 'neg) #:x #f))
   
 ;                              
 ;                              
@@ -4509,8 +4525,27 @@ so that propagation occurs.
   (test-flat-contract '(string-len/c 3) "ab" "abc")
   (test-flat-contract 'natural-number/c 5 -1)
   (test-flat-contract 'false/c #f #t)
+  
+  (test-flat-contract #t #t "x")
+  (test-flat-contract #f #f "x")
+  (test-flat-contract #\a #\a #\b)
+  (test-flat-contract #\a #\a 'a)
+  (test-flat-contract ''a 'a 'b)
+  (test-flat-contract ''a 'a #\a)
+  (test-flat-contract "x" "x" "y")
+  (test-flat-contract "x" "x" 'x)
+  (test-flat-contract 1 1 2)
+  (test-flat-contract #e1 #i1.0 'x)
+  (test-flat-contract #rx".x." "axq" "x")
+  (test-flat-contract #rx#".x." #"axq" #"x")
+  (test-flat-contract #rx".x." #"axq" #"x")
+  (test-flat-contract #rx#".x." "axq" "x")
+  
   (test/spec-passed 'any/c '(contract any/c 1 'pos 'neg))
   (test-flat-contract 'printable/c (vector (cons 1 (box #f))) (lambda (x) x))
+  (let ()
+    (define-struct s (a b) #:prefab)
+    (test-flat-contract 'printable/c (make-s 1 2) (λ (x) x)))
   (test-flat-contract '(symbols 'a 'b 'c) 'a 'd)
   (test-flat-contract '(one-of/c (expt 2 65)) (expt 2 65) 12)
   (test-flat-contract '(one-of/c '#:x '#:z) '#:x '#:y)
@@ -4573,6 +4608,10 @@ so that propagation occurs.
         (with-handlers ((exn? exn:fail:syntax?)) 
           (contract-eval '(flat-murec-contract ([x y])))
           'no-err))
+  
+  ;; test flat-contract-predicate
+  (test #t (flat-contract-predicate integer?) 1)
+  (test #t (flat-contract-predicate #t) #t)
 
 
 ;                                                                                                               
@@ -4723,13 +4762,22 @@ so that propagation occurs.
   (test-name '(real-in 1 10) (real-in 1 10))
   (test-name '(string-len/c 3) (string-len/c 3))
   (test-name 'natural-number/c natural-number/c)
-  (test-name 'false/c false/c)
+  (test-name #f false/c)
+  (test-name #t #t)
+  (test-name #\a #\a)
+  (test-name "x" "x")
+  (test-name ''x 'x)
+  ;(test-name #rx"x" #rx"x")  ;; commented out because regexps don't compare via equal?
+  ;(test-name #rx#"x" #rx#"x") ;; commented out because regexps don't compare via equal?
   (test-name 'printable/c printable/c)
   (test-name '(symbols 'a 'b 'c) (symbols 'a 'b 'c))
   (test-name '(one-of/c 1 2 3) (one-of/c 1 2 3))
   (test-name '(one-of/c '() 'x 1 #f #\a (void) (letrec ([x x]) x)) 
              (one-of/c '() 'x 1 #f #\a (void) (letrec ([x x]) x)))
   
+  (test-name '(or/c #f #t #\a "x") (or/c #f #t #\a "x"))
+  ;(test-name '(or/c #f #t #\a "x" #rx"x" #rx#"x") (or/c #f #t #\a "x" #rx"x" #rx#"x")) ;; commented out because regexps don't compare via equal?
+
   (test-name '(subclass?/c class:c%) 
              (let ([c% (class object% (super-new))]) (subclass?/c c%)))
   
@@ -5118,6 +5166,12 @@ so that propagation occurs.
           (with-continuation-mark 'x 'x
             (f 1))))
 
+  (ctest #t contract-first-order-passes? (or/c 'x "x" #rx"x") 'x)
+  (ctest #t contract-first-order-passes? (or/c 'x "x" #rx"x") "x")
+  (ctest #t contract-first-order-passes? (or/c 'x "x" #rx"x.") "xy")
+  (ctest #f contract-first-order-passes? (or/c 'x "x" #rx"x.") "yx")
+  (ctest #f contract-first-order-passes? (or/c 'x "x" #rx"x.") 'y)
+  
 ;                                                                
 ;                                                                
 ;                                                                
@@ -5723,6 +5777,19 @@ so that propagation occurs.
    (λ (x)
      (and (exn? x)
           (regexp-match #rx"expected field name to be b, but found string?" (exn-message x)))))
+  
+  (contract-error-test
+   #'(begin
+       (eval '(module pce7-bug scheme/base
+                (require scheme/contract)
+                (define x 1)
+                (provide/contract [x integer?])))
+       (eval '(module pce7-bug2 scheme/base
+                (require 'pce7-bug)
+                (set! x 5))))
+   (λ (x)
+     (and (exn? x)
+          (regexp-match #rx"cannot set!" (exn-message x)))))
   
   (contract-eval `(,test 'pos guilty-party (with-handlers ((void values)) (contract not #t 'pos 'neg))))
   

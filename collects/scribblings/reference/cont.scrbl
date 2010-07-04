@@ -6,7 +6,7 @@
 See @secref["cont-model"] and @secref["prompt-model"] for general
 information about continuations. PLT Scheme's support for prompts and
 composable continuations most closely resembles Dorai Sitaram's
-@scheme[\%] and @scheme[fcontrol] operator @cite["Sitaram93"].
+@scheme[%] and @scheme[fcontrol] operator @cite["Sitaram93"].
 
 Scheme installs a @defterm{continuation barrier} around evaluation in
 the following contexts, preventing full-continuation jumps across the
@@ -95,7 +95,7 @@ argument, if supplied, is used when printing the prompt tag.}
 
 @defproc[(default-continuation-prompt-tag) continuation-prompt-tag?]{
 
-Returns a constant prompt tag for a which a prompt is installed at the
+Returns a constant prompt tag for which a prompt is installed at the
 start of every thread's continuation; the handler for each thread's
 initial prompt accepts any number of values and returns. The result of
 @scheme[default-continuation-prompt-tag] is the default tag for more

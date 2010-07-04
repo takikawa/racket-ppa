@@ -1,6 +1,6 @@
 #lang scheme/base
 
-(require scheme/match scheme/contract planet/cachepath)
+(require scheme/match scheme/contract planet/cachepath syntax/modread)
 
 ;; in addition to infodomain/compiled/cache.ss, getinfo will look in this 
 ;; file to find mappings. PLaneT uses this to put info about installed
@@ -9,9 +9,9 @@
 
 ;; get-info : (listof path-or-string) -> info/#f
 (define (get-info coll-path)
-  (let* ([coll-path (map (lambda (x) (if (path? x) (path->string x) x)) coll-path)]
-         [dir (apply collection-path coll-path)])
-    (get-info/full dir)))
+  (get-info/full (apply collection-path
+                        (map (lambda (x) (if (path? x) (path->string x) x))
+                             coll-path))))
 
 ;; get-info/full : path -> info/#f
 (define (get-info/full dir)
@@ -29,17 +29,20 @@
                       x)])
       (with-input-from-file file
         (lambda ()
-          (begin0 (read)
-            (unless (eof-object? (read))
-              (err "has multiple expressions")))))))
+          (begin0 
+           (with-module-reading-parameterization read)
+           (unless (eof-object? (read))
+             (err "has multiple expressions")))))))
   (and (file-exists? file)
        (match (contents)
          [(list 'module 'info
-                (or '(lib "infotab.ss" "setup") 'setup/infotab)
+                (or '(lib "infotab.ss" "setup")
+                    '(lib "setup/infotab.ss")
+                    'setup/infotab)
                 expr ...)
           ;; No need to set a reader-guard, since we checked it
           ;; above (a guard will see other uses of #lang for stuff
-          ;; that is required). 
+          ;; that is required).
           ;; We are, however, trusting that the bytecode form of the
           ;; file (if any) matches the source.
           (dynamic-require file '#%info-lookup)]
@@ -156,13 +159,9 @@
                (hash-set! result c #t))
              ;; Extract the relevant collections:
              (hash-map result (lambda (k v) k))))])
-    (sort unsorted
-          (lambda (a b)
-            (compare-directories (directory-record-path a)
-                                 (directory-record-path b))))))
-
-(define (compare-directories a b)
-  (bytes<? (dir->sort-key a) (dir->sort-key b)))
+    (sort unsorted bytes<?
+          #:key (lambda (dr) (dir->sort-key (directory-record-path dr)))
+          #:cache-keys? #t)))
 
 ;; dir->sort-key : path -> bytes
 ;; extracts the name of the directory, dropping any "."s it finds at the ends.

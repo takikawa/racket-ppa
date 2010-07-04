@@ -10,7 +10,7 @@
 ;;      (current-print pretty-print-handler)
 
 (module pretty mzscheme
-   (require (lib "port.ss" "mzlib" "private"))
+   (require mzlib/private/port)
 
    (provide pretty-print
 	    pretty-display
@@ -793,6 +793,7 @@
 	 (let* ([can-multi (and width
                                 (not (size-hook obj display?))
 				(or (pair? obj)
+                                    (mpair? obj)
                                     (vector? obj) 
 				    (and (box? obj) print-box?)
 				    (and (custom-write? obj)
@@ -831,12 +832,16 @@
 			   (expr-found pport graph-ref))
 			 (pre-print pport obj)
 			 (cond
-			  [(pair? obj) (pp-pair obj extra depth)]
+			  [(pair? obj) (pp-pair obj extra depth 
+                                                pair? car cdr pair-open pair-close)]
+                          [(mpair? obj) (pp-pair obj extra depth 
+                                                 mpair? mcar mcdr mpair-open mpair-close)]
 			  [(vector? obj)
 			   (out "#")
 			   (when print-vec-length?
 			     (out (number->string (vector-length obj))))
-			   (pp-list (vector->repeatless-list obj) extra pp-expr #f depth)]
+			   (pp-list (vector->repeatless-list obj) extra pp-expr #f depth
+                                    pair? car cdr pair-open pair-close)]
 			  [(and (custom-write? obj)
 				(not (struct-type? obj)))
 			   (write-custom pp* obj pport depth display? width)]
@@ -845,12 +850,14 @@
                            (let ([v (struct->vector obj)])
                              (when (prefab?! obj v)
                                (out "s"))
-                             (pp-list (vector->list v) extra pp-expr #f depth))]
+                             (pp-list (vector->list v) extra pp-expr #f depth
+                                      pair? car cdr pair-open pair-close))]
 			  [(hash-table? obj)
 			   (out (if (hash-table? obj 'equal)
                                     "#hash"
                                     "#hasheq"))
-			   (pp-list (hash-table-map obj cons) extra pp-expr #f depth)]
+			   (pp-list (hash-table-map obj cons) extra pp-expr #f depth
+                                    pair? car cdr pair-open pair-close)]
 			  [(and (box? obj) print-box?)
 			   (out "#&") 
 			   (pr (unbox obj) extra pp-pair depth)])
@@ -858,30 +865,39 @@
 	       ;; Not possible to split obj across lines; so just write directly
 	       (wr* pport obj depth display?))))
 
-       (define (pp-expr expr extra depth)
-	 (if (read-macro? expr pair? car cdr)
+       (define (pp-expr expr extra depth
+                        apair? acar acdr open close)
+	 (if (and (read-macro? expr apair? acar acdr)
+                  (equal? open "(")
+                  (not (and found (hash-table-get found (acdr expr) #f))))
 	     (begin
-	       (out (read-macro-prefix expr car))
-	       (pr (read-macro-body expr car cdr)
+	       (out (read-macro-prefix expr acar))
+	       (pr (read-macro-body expr acar acdr)
 		   extra
 		   pp-expr
 		   depth))
-	     (let ((head (car expr)))
+	     (let ((head (acar expr)))
 	       (if (or (and (symbol? head)
                             (not (size-hook head display?)))
                        ((pretty-print-remap-stylable) head))
-		   (let ((proc (style head)))
+		   (let ((proc (style head expr apair? acar acdr)))
 		     (if proc
-			 (proc expr extra depth)
-			 (if (> (string-length 
-                                 (symbol->string
-                                  (if (symbol? head)
-                                      head
-                                      ((pretty-print-remap-stylable) head))))
-				max-call-head-width)
-			     (pp-general expr extra #f #f #f pp-expr depth)
-			     (pp-list expr extra pp-expr #t depth))))
-		   (pp-list expr extra pp-expr #t depth)))))
+			 (proc expr extra depth
+                               apair? acar acdr open close)
+			 (if (and #f
+                                  ;; Why this special case? Currently disabled.
+                                  (> (string-length 
+                                      (symbol->string
+                                       (if (symbol? head)
+                                           head
+                                           ((pretty-print-remap-stylable) head))))
+                                     max-call-head-width))
+                             (pp-general expr extra #f #f #f pp-expr depth
+                                         apair? acar acdr open close)
+			     (pp-list expr extra pp-expr #t depth
+                                      apair? acar acdr open close))))
+		   (pp-list expr extra pp-expr #t depth
+                            apair? acar acdr open close)))))
 
        (define (wr obj depth)
 	 (wr* pport obj depth display?))
@@ -889,44 +905,53 @@
        ;; (head item1
        ;;       item2
        ;;       item3)
-       (define (pp-call expr extra pp-item depth)
-	 (out "(")
-	 (wr (car expr) (dsub1 depth))
+       (define (pp-call expr extra pp-item depth
+                        apair? acar acdr open close)
+	 (out open)
+	 (wr (acar expr) (dsub1 depth))
 	 (let ([col (+ (ccol) 1)])
-	   (pp-down ")" (cdr expr) col col extra pp-item #t #t depth)))
+	   (pp-down close (acdr expr) col col extra pp-item #t #t depth
+                    apair? acar acdr open close)))
 
        ;; (head item1 item2
        ;;   item3
        ;;   item4)
-       (define (pp-two-up expr extra pp-item depth)
-	 (out "(")
+       (define (pp-two-up expr extra pp-item depth
+                          apair? acar acdr open close)
+	 (out open)
 	 (let ([col (ccol)])
-	   (wr (car expr) (dsub1 depth))
+	   (wr (acar expr) (dsub1 depth))
 	   (out " ")
-	   (wr (cadr expr) (dsub1 depth))
-	   (pp-down ")" (cddr expr) (+ (ccol) 1) (+ col 1) extra pp-item #t #t depth)))
+	   (wr (acar (acdr expr)) (dsub1 depth))
+	   (pp-down close (acdr (acdr expr)) (+ (ccol) 1) (+ col 1) extra pp-item #t #t depth
+                    apair? acar acdr open close)))
 
        ;; (head item1
        ;;   item2
        ;;   item3)
-       (define (pp-one-up expr extra pp-item depth)
-	 (out "(")
+       (define (pp-one-up expr extra pp-item depth
+                          apair? acar acdr open close)
+	 (out open)
 	 (let ([col (ccol)])
-	   (wr (car expr) (dsub1 depth))
-	   (pp-down ")" (cdr expr) (+ (ccol) 1) (+ col 1) extra pp-item #t #t depth)))
+	   (wr (acar expr) (dsub1 depth))
+	   (pp-down close (acdr expr) (+ (ccol) 1) (+ col 1) extra pp-item #t #t depth
+                    apair? acar acdr open close)))
 
        ;; (item1
        ;;  item2
        ;;  item3)
-       (define (pp-list l extra pp-item check? depth)
-	 (out "(")
+       (define (pp-list l extra pp-item check? depth
+                        apair? acar acdr open close)
+	 (out open)
 	 (let ([col (ccol)])
-	   (pp-down ")" l col col extra pp-item #f check? depth)))
+	   (pp-down close l col col extra pp-item #f check? depth
+                    apair? acar acdr open close)))
 
-       (define (pp-down closer l col1 col2 extra pp-item check-first? check-rest? depth)
+       (define (pp-down closer l col1 col2 extra pp-item check-first? check-rest? depth
+                        apair? acar acdr open close)
 	 (let loop ([l l] [icol col1] [check? check-first?])
 	   (check-expr-found
-	    l pport (and check? (pair? l))
+	    l pport (and check? (apair? l))
 	    (lambda (s) 
 	      (indent col2)
 	      (out ".")
@@ -941,11 +966,11 @@
 	      (out closer))
 	    (lambda ()
 	      (cond 
-	       [(pair? l)
-		(let ([rest (cdr l)])
+	       [(apair? l)
+		(let ([rest (acdr l)])
 		  (let ([extra (if (null? rest) (+ extra 1) 0)])
 		    (indent icol)
-		    (pr (car l) extra pp-item (dsub1 depth))
+		    (pr (acar l) extra pp-item (dsub1 depth))
 		    (loop rest col2 check-rest?)))]
 	       [(null? l)
 		(out closer)]
@@ -956,12 +981,13 @@
 		(pr l (+ extra 1) pp-item (dsub1 depth))
 		(out closer)])))))
 
-       (define (pp-general expr extra named? pp-1 pp-2 pp-3 depth)
+       (define (pp-general expr extra named? pp-1 pp-2 pp-3 depth
+                           apair? acar acdr open close)
 
 	 (define (tail1 rest col1 col3)
-	   (if (and pp-1 (pair? rest))
-	       (let* ((val1 (car rest))
-		      (rest (cdr rest))
+	   (if (and pp-1 (apair? rest))
+	       (let* ((val1 (acar rest))
+		      (rest (acdr rest))
 		      (extra (if (null? rest) (+ extra 1) 0)))
 		 (indent col3)
 		 (pr val1 extra pp-1 depth)
@@ -969,9 +995,9 @@
 	       (tail2 rest col1 col3)))
 
 	 (define (tail2 rest col1 col3)
-	   (if (and pp-2 (pair? rest))
-	       (let* ((val1 (car rest))
-		      (rest (cdr rest))
+	   (if (and pp-2 (apair? rest))
+	       (let* ((val1 (acar rest))
+		      (rest (acdr rest))
 		      (extra (if (null? rest) (+ extra 1) 0)))
 		 (indent col3)
 		 (pr val1 extra pp-2 depth)
@@ -979,55 +1005,78 @@
 	       (tail3 rest col1)))
 
 	 (define (tail3 rest col1)
-	   (pp-down ")" rest col1 col1 extra pp-3 #f #t depth))
+	   (pp-down close rest col1 col1 extra pp-3 #f #t depth
+                    apair? acar acdr open close))
 
-	 (let* ([head (car expr)]
-		[rest (cdr expr)]
+	 (let* ([head (acar expr)]
+		[rest (acdr expr)]
 		[col (ccol)])
-	   (out "(")
+	   (out open)
 	   (wr head (dsub1 depth))
-	   (if (and named? (pair? rest))
-	       (let* ((name (car rest))
-		      (rest (cdr rest)))
+	   (if (and named? (apair? rest))
+	       (let* ((name (acar rest))
+		      (rest (acdr rest)))
 		 (out " ")
 		 (wr name (dsub1 depth))
 		 (tail1 rest (+ col indent-general) (+ (ccol) 1)))
 	       (tail1 rest (+ col indent-general) (+ (ccol) 1)))))
 
-       (define (pp-expr-list l extra depth)
-	 (pp-list l extra pp-expr #t depth))
+       (define (pp-expr-list l extra depth
+                             apair? acar acdr open close)
+	 (pp-list l extra pp-expr #t depth
+                  apair? acar acdr open close))
 
-       (define (pp-lambda expr extra depth)
-	 (pp-general expr extra #f pp-expr-list #f pp-expr depth))
+       (define (pp-lambda expr extra depth
+                          apair? acar acdr open close)
+	 (pp-general expr extra #f pp-expr-list #f pp-expr depth
+                     apair? acar acdr open close))
 
-       (define (pp-if expr extra depth)
-	 (pp-general expr extra #f pp-expr #f pp-expr depth))
+       (define (pp-if expr extra depth
+                      apair? acar acdr open close)
+	 (pp-general expr extra #f pp-expr #f pp-expr depth
+                     apair? acar acdr open close))
 
-       (define (pp-cond expr extra depth)
-	 (pp-list expr extra pp-expr-list #t depth))
+       (define (pp-cond expr extra depth
+                        apair? acar acdr open close)
+	 (pp-list expr extra pp-expr-list #t depth
+                  apair? acar acdr open close))
 
-       (define (pp-class expr extra depth)
-	 (pp-two-up expr extra pp-expr-list depth))
+       (define (pp-syntax-case expr extra depth
+                               apair? acar acdr open close)
+	 (pp-two-up expr extra pp-expr-list depth
+                    apair? acar acdr open close))
 
-       (define (pp-make-object expr extra depth)
-	 (pp-one-up expr extra pp-expr-list depth))
+       (define (pp-make-object expr extra depth
+                               apair? acar acdr open close)
+	 (pp-one-up expr extra pp-expr-list depth
+                    apair? acar acdr open close))
 
-       (define (pp-case expr extra depth)
-	 (pp-general expr extra #f pp-expr #f pp-expr-list depth))
+       (define (pp-case expr extra depth
+                        apair? acar acdr open close)
+	 (pp-general expr extra #f pp-expr #f pp-expr-list depth
+                     apair? acar acdr open close))
 
-       (define (pp-and expr extra depth)
-	 (pp-call expr extra pp-expr depth))
+       (define (pp-and expr extra depth
+                       apair? acar acdr open close)
+	 (pp-call expr extra pp-expr depth
+                  apair? acar acdr open close))
 
-       (define (pp-let expr extra depth)
-	 (let* ((rest (cdr expr))
-		(named? (and (pair? rest) (symbol? (do-remap (car rest))))))
-	   (pp-general expr extra named? pp-expr-list #f pp-expr depth)))
+       (define (pp-let expr extra depth
+                       apair? acar acdr open close)
+	 (let* ((rest (acdr expr))
+		(named? (and (apair? rest) (symbol? (do-remap (acar rest))))))
+	   (pp-general expr extra named? pp-expr-list #f pp-expr depth
+                       apair? acar acdr open close)))
 
-       (define (pp-begin expr extra depth)
-	 (pp-general expr extra #f #f #f pp-expr depth))
+       (define (pp-begin expr extra depth
+                         apair? acar acdr open close)
+	 (pp-general expr extra #f #f #f pp-expr depth
+                     apair? acar acdr open close))
 
-       (define (pp-do expr extra depth)
-	 (pp-general expr extra #f pp-expr-list pp-expr-list pp-expr depth))
+       (define (pp-do expr extra depth
+                      apair? acar acdr open close)
+	 (pp-general expr extra #f pp-expr-list pp-expr-list pp-expr depth
+                     apair? acar acdr open close))
 
        ;; define formatting style (change these to suit your style)
 
@@ -1035,38 +1084,59 @@
 
        (define max-call-head-width 5)
 
-       (define (style head)
+       (define (no-sharing? expr count acdr)
+         (if (and found (hash-table-get found (acdr expr) #f))
+             #f
+             (or (zero? count)
+                 (no-sharing? (acdr expr) (sub1 count) acdr))))
+
+       (define (style head expr apair? acar acdr)
          (case (look-in-style-table head)
 	   ((lambda λ define define-macro define-syntax
 		    syntax-rules
 		    shared
 		    unless when)
-	    pp-lambda)
+            (and (no-sharing? expr 1 acdr)
+                 pp-lambda))
 	   ((if set! set!-values)
-	    pp-if)
+            (and (no-sharing? expr 1 acdr)
+                 pp-if))
 	   ((cond case-lambda)
-	    pp-cond)
-	   ((case) 
-	    pp-case)
+            (and (no-sharing? expr 0 acdr)
+                 pp-cond))
+	   ((case class) 
+            (and (no-sharing? expr 1 acdr)
+                 pp-case))
 	   ((and or import export 
 		 require require-for-syntax require-for-template 
 		 provide link
 		 public private override rename inherit field init)
-	    pp-and)
+            (and (no-sharing? expr 0 acdr)
+                 pp-and))
 	   ((let letrec let*
 	      let-values letrec-values let*-values
 	      let-syntax letrec-syntax
 	      let-syntaxes letrec-syntaxes)
-	    pp-let)
+            (and (no-sharing? expr
+                              (if (and (apair? (acdr expr))
+                                       (symbol? (acar (acdr expr))))
+                                  2
+                                  1)
+                              acdr)
+                 pp-let))
 	   ((begin begin0)
-	    pp-begin)
+            (and (no-sharing? expr 0 acdr)
+                 pp-begin))
 	   ((do letrec-syntaxes+values)
-	    pp-do)
+            (and (no-sharing? expr 2 acdr)
+                 pp-do))
 
-	   ((send class syntax-case instantiate module)
-	    pp-class)
+	   ((send syntax-case instantiate module)
+            (and (no-sharing? expr 2 acdr)
+                 pp-syntax-case))
 	   ((make-object)
-	    pp-make-object)
+            (and (no-sharing? expr 1 acdr)
+                 pp-make-object))
 
 	   (else #f)))
 
@@ -1103,7 +1173,7 @@
      (and (pretty-print-abbreviate-read-macros)
           (let ((head (car l)) (tail (cdr l)))
             (case head
-              ((quote quasiquote unquote unquote-splicing syntax)
+              ((quote quasiquote unquote unquote-splicing syntax unsyntax unsyntax-splicing)
                (length1? tail))
               (else #f)))))
    

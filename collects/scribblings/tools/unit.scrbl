@@ -1,6 +1,6 @@
 #lang scribble/doc
 @(require "common.ss")
-@title{@tt{drscheme:unit}}
+@(tools-title "unit")
 
 @definterface[drscheme:unit:tab<%> (drscheme:rep:context<%>)]{
 @defmethod[(break-callback) void?]{
@@ -43,13 +43,13 @@ Enables the Run button, and the Run menu item and unlocks
            (values (or/c thread? false/c) (or/c custodian? false/c))]{}
 
 @defmethod[(get-defs)
-           (is-a?/c @scheme[drscheme:rep:text%])]{
+           (is-a?/c @scheme[drscheme:unit:definitions-text<%>])]{
 This text is initially the top half of the drscheme window and
 contains the users program.
 
 This text defaults to a @scheme[text%]
 object, but if you change
-@scheme[drscheme:get/extend:extend-interactions-text] procedure, it will use the extended class to create the text.
+@scheme[drscheme:get/extend:extend-definitions-text] procedure, it will use the extended class to create the text.
 
 }
 
@@ -79,7 +79,7 @@ Returns the frame that this tab is inside.
 }
 
 @defmethod[(get-ints)
-           (is-a?/c @scheme[drscheme:unit:definitions-text<%>])]{
+           (is-a?/c @scheme[drscheme:rep:text%])]{
 This text is initially the bottom half of the drscheme window and
 contains the users interactions with the REPL.
 
@@ -277,7 +277,7 @@ It calls
 @method[drscheme:rep:context<%> ensure-rep-shown] and then it calls
 @method[drscheme:rep:text% do-many-text-evals] passing in the result of
 @method[drscheme:unit:frame<%> get-interactions-text] and its entire range, unless the first two characters are 
-"\#!" in which case, it skips the first line.
+@litchar{#!} in which case, it skips the first line.
 
 
 }}
@@ -373,8 +373,8 @@ Returns the result of
 
 }
 
-@defmethod[#:mode override 
-           (get-canvas\%)
+@defmethod[#:mode override
+           (get-canvas%)
            (is-a?/c canvas%)]{
 
 Returns the result of
@@ -422,8 +422,8 @@ Returns the result of
 
 }
 
-@defmethod[#:mode override 
-           (get-editor\%)
+@defmethod[#:mode override
+           (get-editor%)
            (is-a?/c editor<%>)]{
 
 Returns the result of
@@ -593,7 +593,7 @@ object, but if you change the
 
 Calls result of
 @method[drscheme:unit:frame<%> get-current-tab]'s 
-@method[drscheme:unit:tab<%> get-ints] method.
+@method[drscheme:unit:tab<%> get-defs] method.
 
 
 }
@@ -602,7 +602,7 @@ Calls result of
            (is-a?/c menu%)]{
 @methspec{
 
-Returns the \scm|"Insert"| menu. 
+Returns the Insert menu.
 
 }}
 
@@ -625,7 +625,7 @@ it will use the extended class to create the canvas.
 
 Calls result of
 @method[drscheme:unit:frame<%> get-current-tab]'s 
-@method[drscheme:unit:tab<%> get-defs] method.
+@method[drscheme:unit:tab<%> get-ints] method.
 
 
 }
@@ -666,7 +666,7 @@ when the menus are cliked on).
 
 This assumes that the menu items in this menu are not moved
 around, except by the this capability. If they are, things
-can go funny ({\it i.e.}, no good checks are in place).
+can go funny (i.e., no good checks are in place).
 
 Note that the capability must be registered separately, via
 @scheme[drscheme:language:register-capability].
@@ -826,7 +826,6 @@ See also
 
 Initializes the visibility of the save button.
 
-
 }
 
-@(include-extracted (lib "tool-lib.ss" "drscheme") #rx"^drscheme:unit:")
+@(tools-include "unit")

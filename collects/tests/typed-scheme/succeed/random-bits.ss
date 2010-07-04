@@ -11,14 +11,14 @@
 ; 3. The non-generic parts (record type, time, error) are here.
 ;
 ; load the module with
-;   (require (lib "random-bits.ss" "srfi"))
+;   (require srfi/random-bits)
 ;
 ; history of this file:
 ;   SE, 17-May-2003: initial version
 
 (module random-bits typed-scheme
-  #;(require (lib "9.ss" "srfi"))
-  #;(require (lib "23.ss" "srfi"))
+  #;(require srfi/9)
+  #;(require srfi/23)
 
   (provide 
    random-integer random-real default-random-source
@@ -38,7 +38,7 @@
                                        [randomize! : ( -> Void)]
                                        [pseudo-randomize! : (Integer Integer -> Void)]
                                        [make-integers : (-> (Integer -> Integer)) ] 
-                                       [make-reals : ( Nb .. -> ( -> Number))])) 
+                                       [make-reals : ( Nb * -> ( -> Number))])) 
   (define-type-alias Random :random-source)
   (define: (:random-source-make 
             [state-ref : ( -> SpList)]
@@ -46,7 +46,7 @@
             [randomize! : ( -> Void)]
             [pseudo-randomize! : (Integer Integer -> Void)]
             [make-integers : (-> (Integer -> Integer)) ] 
-            [make-reals : (Nb .. -> (-> Number))])
+            [make-reals : (Nb * -> (-> Number))])
             : Random
     (make-:random-source state-ref state-set! randomize! pseudo-randomize! make-integers make-reals ))
   
@@ -564,7 +564,7 @@
            (mrg32k3a-random-integer state n))
           (else
            (mrg32k3a-random-large state n)))))
-     (lambda: [args : Nb] 
+     (lambda: [args : Nb *] 
        (cond
         ((null? args)
          (lambda () 
@@ -603,7 +603,7 @@
 (define: (random-source-make-integers [s : Random]): (Nb -> Nb)
   ((:random-source-make-integers s)))
 
-(define: (random-source-make-reals [s : Random] . [unit : Nb]) : ( -> Flt)
+(define: (random-source-make-reals [s : Random] . [unit : Nb *]) : ( -> Flt)
   (apply (:random-source-make-reals s)  unit))
 
 ; ---

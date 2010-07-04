@@ -1,4 +1,3 @@
-
 #lang scheme/unit
   (require string-constants
            mzlib/match
@@ -10,8 +9,8 @@
            framework
            net/url
            net/head
-           (lib "plt-installer.ss" "setup")
-           (lib "bug-report.ss" "help")
+           setup/plt-installer
+           help/bug-report
            scheme/file)
   
   (import [prefix drscheme:unit: drscheme:unit^]
@@ -90,25 +89,24 @@
                   [(meta) "m:"]
                   [(ctl) "c:"]
                   [(shift) "s:"]
-                  [(opt) "a:"]))
+                  [(opt option) "a:"]
+                  [else (error 'menu-item->prefix-string "unknown prefix ~s\n" prefix)]))
               (send item get-shortcut-prefix))))
       
-      [define/private copy-hash-table
-        (λ (ht)
-          (let ([res (make-hasheq)])
-            (hash-for-each
-             ht
-             (λ (x y) (hash-set! res x y)))
-            res))]
-      [define/private can-show-keybindings?
-        (λ ()
-          (let ([edit-object (get-edit-target-object)])
-            (and edit-object
-                 (is-a? edit-object editor<%>)
-                 (let ([keymap (send edit-object get-keymap)])
-                   (is-a? keymap keymap:aug-keymap<%>)))))]
+      (define/private (copy-hash-table ht)
+        (let ([res (make-hasheq)])
+          (hash-for-each
+           ht
+           (λ (x y) (hash-set! res x y)))
+          res))
+      (define/private (can-show-keybindings?)
+        (let ([edit-object (get-edit-target-object)])
+          (and edit-object
+               (is-a? edit-object editor<%>)
+               (let ([keymap (send edit-object get-keymap)])
+                 (is-a? keymap keymap:aug-keymap<%>)))))
       
-      [define/private (show-keybindings)
+      (define/private (show-keybindings)
         (if (can-show-keybindings?)
             (let* ([edit-object (get-edit-target-object)]
                    [keymap (send edit-object get-keymap)]
@@ -124,7 +122,7 @@
                      w/menus
                      (λ (x y) (string-ci<=? (cadr x) (cadr y))))])
               (show-keybindings-to-user structured-list this))
-            (bell))]
+            (bell)))
       
       (define/private (bound-by-menu? binding menu-table)
         (ormap (λ (constituent)
@@ -377,10 +375,20 @@
     (cond
       [cancel? (void)]
       [(from-web?)
-       (install-plt-from-url (send url-text-field get-value) parent)]
+       (install-plt-from-url (trim-whitespace (send url-text-field get-value)) parent)]
       [else 
        (parameterize ([error-display-handler drscheme:init:original-error-display-handler])
          (run-installer (string->path (send file-text-field get-value))))]))
+  
+  ;; trim-whitespace: string -> string
+  ;; Trims the whitespace surrounding a string.
+  (define (trim-whitespace a-str)
+    (cond
+      [(regexp-match #px"^\\s*(.*[^\\s])\\s*$"
+                     a-str)
+       => second]
+      [else
+       a-str]))
   
   ;; install-plt-from-url : string (union #f dialog%) -> void
   ;; downloads and installs a .plt file from the given url

@@ -14,14 +14,14 @@
   (->* (path-string?)
        (#:port (or/c false/c number?)
                #:listen-ip (or/c false/c string?)
-               #:make-servlet-namespace make-servlet-namespace?)
+               #:make-servlet-namespace make-servlet-namespace/c)
       unit?)]
  [configuration-table-sexpr->web-config@
   (->* (list?) ; XXX
       (#:web-server-root path-string?
       #:port (or/c false/c number?)
       #:listen-ip (or/c false/c string?)
-      #:make-servlet-namespace make-servlet-namespace?)
+      #:make-servlet-namespace make-servlet-namespace/c)
       unit?)])
 
 ; configuration-table->web-config@ : path -> configuration
@@ -103,7 +103,7 @@
      (let ([m (host-table-messages host-table)]
            [conf (paths-conf paths)])
        (make-responders
-        (gen-servlet-responder (build-path-unless-absolute conf (messages-servlet m)))
+        servlet-error-responder
         servlet-loading-responder
         (gen-authentication-responder (build-path-unless-absolute conf (messages-authentication m)))
         (gen-servlets-refreshed (build-path-unless-absolute conf (messages-servlets-refreshed m)))

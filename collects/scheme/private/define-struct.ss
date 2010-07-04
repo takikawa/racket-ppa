@@ -252,7 +252,7 @@
            #f
            (if (keyword? (syntax-e (car p)))
                "unrecognized struct-specification keyword"
-               "expected a struct-spefication keyword")
+               "expected a struct-specification keyword")
            stx
            (car p))])))
 
@@ -531,8 +531,8 @@
                                                   stx
                                                   #'field))]
                            [_
-                            (raise-syntax-error #f 
-                                                "expected a field update fo the form (<field-id> <expr>)" 
+                            (raise-syntax-error #f
+                                                "expected a field update of the form (<field-id> <expr>)"
                                                 stx
                                                 an)]))
                        ans)

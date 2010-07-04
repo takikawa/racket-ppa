@@ -179,7 +179,7 @@ Lesson: learn about the built-in contracts in @schememodname[scheme/contract].
 
 @ctc-section[#:tag "and-or"]{The @scheme[and/c], @scheme[or/c], and @scheme[listof] Contract Combinators}
 
-Both @scheme[and/c] and @scheme[or/c] ombine contracts and
+Both @scheme[and/c] and @scheme[or/c] combine contracts and
 they do what you expect them to do.
 
 For example, if we didn't have @scheme[natural-number/c], the
@@ -219,20 +219,19 @@ scheme
 (define (has-decimal? str)
   (define L (string-length str))
   (and (>= L 3)
-       (char=?
-        #\.
-        (string-ref result (- L 3)))))
+       (char=? #\. (string-ref result (- L 3)))))
 
 (provide/contract
   (code:comment "convert a random number to a string")
   [format-number (-> number? string?)]
-  
-  (code:comment "convert an amount into a dollar based string")
-  [format-nat (-> natural-number/c 
+
+  (code:comment "convert an amount into a string with a decimal")
+  (code:comment "point, as in an amount of US currency")
+  [format-nat (-> natural-number/c
                   (and/c string? has-decimal?))])
 ]
 The contract of the exported function @scheme[format-number] specifies that
-the function consumes a number and produces a string. 
+the function consumes a number and produces a string.
 
 The contract of the exported function @scheme[format-nat] is more
 interesting than the one of @scheme[format-number].  It consumes only
@@ -254,31 +253,64 @@ scheme
 (define (has-decimal? str)
   (define L (string-length str))
   (and (>= L 3)
-       (char=?
-        #\.
-        (string-ref result (- L 3)))))
+       (char=? #\. (string-ref result (- L 3)))))
 
 (define (is-decimal-string? str)
   (define L (string-length str))
   (and (has-decimal? str)
-       (andmap digit-char? 
+       (andmap digit-char?
                (string->list (substring result 0 (- L 3))))
        (andmap digit-char?
                (string->list (substring result (- L 2) L)))))
 
 (provide/contract
   ...
-  (code:comment "convert a random number to a string")
+  (code:comment "convert a number to a string")
   [format-number (-> number? string?)]
   
   (code:comment "convert an  amount (natural number) of cents")
   (code:comment "into a dollar based string")
   [format-nat (-> natural-number/c 
-                  (lambda (result)
-                    (and (string? result)
-                         (is-decimal-string? result))))])
+                  (and/c string? 
+                         is-decimal-string?))])
 ]
 
+
+@ctc-section[#:tag "coercion"]{Contracts coerced from other values}
+
+The contract library treates a number of Scheme values as if they are
+contracts directly. We've already seen one main use of that: predicates. Every
+function that accepts one argument can be treated as a predicate
+and thus used as a contract.
+
+But many other values also play double duty as contracts.
+For example, if your function accepts a number or @scheme[#f],
+@scheme[(or/c number? #f)] sufficies. Similarly, the @scheme[result/c] contract
+could have been written with a @scheme[0] in place of @scheme[zero?].
+
+Even better, if you use a regular expression as a contract, the contract
+accepts strings that match the regular expression. For example, 
+the @scheme[is-decimal-string?] predicate could have been written
+@scheme[#rx"[0-9]*\\.[0-9][0-9][0-9]"].
+
+@ctc-section{Contracts on Higher-order Functions}
+
+Function contracts are not just restricted to having simple
+predicates on their domains or ranges. Any of the contract
+combinators discussed here, including function contracts
+themselves, can be used as contracts on the arguments and
+results of a function.
+
+For example, 
+@schemeblock[(-> integer? (-> integer? integer?))]
+is a contract that describes a curried function. It matches
+functions that accept one argument and then return another
+function accepting a second argument before finally
+returning an integer.
+
+This contract
+@schemeblock[(-> (-> integer? integer?) integer?)]
+describes functions that accept other functions as inputs.
 
 @ctc-section{The Difference Between @scheme[any] and @scheme[any/c]}
 
@@ -304,7 +336,7 @@ example, this function:
 ]
 meets the first contract, but not the second one.}
 
-@item{Relatedly, this means that a call to a function that
+@item{This also means that a call to a function that
 has the second contract is not a tail call. So, for example,
 the following program is an infinite loop that takes only a constant
 amount of space, but if you replace @scheme[any] with

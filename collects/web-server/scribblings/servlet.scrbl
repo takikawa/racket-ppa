@@ -4,9 +4,11 @@
 @title[#:tag "servlet"
        #:style 'toc]{Scheme Servlets}
 
+@defmodule[web-server/servlet]
+                    
 The @web-server allows servlets to be written in Scheme. It
 provides the supporting API, described below, for the construction
-of these servlets. This API is provided by @filepath{servlet.ss}.
+of these servlets.
 
 @local-table-of-contents[]
 
@@ -59,9 +61,9 @@ for use in servlets.
 
 @defthing[url-transform? contract?]{Equivalent to @scheme[(k-url? . -> . k-url?)].}
 
-@defthing[expiration-handler? contract?]{Equivalent to @scheme[(or/c false/c (request? . -> . response?))].}
+@defthing[expiration-handler/c contract?]{Equivalent to @scheme[(or/c false/c (request? . -> . response?))].}
 
-@defthing[embed/url? contract?]{Equivalent to @scheme[(((request? . -> . any/c)) (expiration-handler?) . opt-> . string?)].}
+@defthing[embed/url/c contract?]{Equivalent to @scheme[(((request? . -> . any/c)) (expiration-handler/c) . opt-> . string?)].}
 
 @; ------------------------------------------------------------
 @section[#:tag "request-structs.ss"]{HTTP Requests}
@@ -101,7 +103,8 @@ related to HTTP request data structures.
  and the content @scheme[content].
 }
 
-@defproc[(bindings-assq [binds (listof binding?)])
+@defproc[(bindings-assq [id bytes?]
+                        [binds (listof binding?)])
          (or/c false/c binding?)]{
  Returns the binding with an id equal to @scheme[id] from @scheme[binds] or @scheme[#f].
 }
@@ -207,6 +210,20 @@ HTTP responses.
  As with @scheme[response/basic], except with @scheme[generator] as a function that is
  called to generate the response body, by being given an @scheme[output-response] function
  that outputs the content it is called with.
+ 
+ Here is a short example:
+ @schemeblock[
+  (make-response/incremental
+    200 "OK" (current-seconds)
+    #"application/octet-stream"
+    (list (make-header #"Content-Disposition"
+                       #"attachement; filename=\"file\""))
+    (lambda (send/bytes)
+      (send/bytes #"Some content")
+      (send/bytes)
+      (send/bytes #"Even" #"more" #"content!")
+      (send/bytes "No we're done")))
+ ]
 }
 
 @defproc[(response? [v any/c])
@@ -237,13 +254,13 @@ functions of interest for the servlet developer.}
  Sends @scheme[response] to the client.
 }
 
-@defthing[current-servlet-continuation-expiration-handler parameter?]{
- Holds the @scheme[expiration-handler?] to be used when a continuation
+@defthing[current-servlet-continuation-expiration-handler (parameter/c expiration-handler/c)]{
+ Holds the @scheme[expiration-handler/c] to be used when a continuation
  captured in this context is expired, then looked up.
 }
 
 @defproc[(send/suspend [make-response response-generator?]
-                       [exp expiration-handler? (current-servlet-continuation-expiration-handler)])
+                       [exp expiration-handler/c (current-servlet-continuation-expiration-handler)])
          request?]{
  Captures the current continuation, stores it with @scheme[exp] as the expiration
  handler, and binds it to a URL. @scheme[make-response] is called with this URL and
@@ -270,7 +287,7 @@ functions of interest for the servlet developer.}
 }
 
 @defproc[(send/forward [make-response response-generator?]
-                       [exp expiration-handler? (current-servlet-continuation-expiration-handler)])
+                       [exp expiration-handler/c (current-servlet-continuation-expiration-handler)])
          request?]{
  Calls @scheme[clear-continuation-table!], then @scheme[send/suspend].
 }
@@ -280,7 +297,7 @@ functions of interest for the servlet developer.}
  Calls @scheme[clear-continuation-table!], then @scheme[send/back].
 }
 
-@defproc[(send/suspend/dispatch [make-response (embed/url? . -> . response?)])
+@defproc[(send/suspend/dispatch [make-response (embed/url/c . -> . response?)])
          any/c]{
  Calls @scheme[make-response] with a function that, when called with a procedure from
  @scheme[request?] to @scheme[any/c] will generate a URL, that when invoked will call
@@ -306,7 +323,7 @@ functions of interest for the servlet developer.}
 }
 
 @; XXX Remove
-@defthing[current-url-transform parameter?]{
+@defthing[current-url-transform (parameter/c url-transform?)]{
  Holds a @scheme[url-transform?] function that is called by
  @scheme[send/suspend] to transform the URLs it generates.
 }
@@ -401,8 +418,6 @@ generated. For more information on their semantics, consult the paper
 @href-link["http://www.cs.brown.edu/~sk/Publications/Papers/Published/mk-int-safe-state-web/"
 "\"Interaction-Safe State for the Web\""].
 
-@; XXX Document with-frame and with-frame-after?
-
 @defproc[(web-cell? [v any/c])
          boolean?]{
  Determines if @scheme[v] is a web-cell.
@@ -425,5 +440,3 @@ generated. For more information on their semantics, consult the paper
  Binds @scheme[wc] to @scheme[v] in the current frame, shadowing any
  other bindings to @scheme[wc] in the current frame.
 }
-
-@include-section["servlet-env.scrbl"]

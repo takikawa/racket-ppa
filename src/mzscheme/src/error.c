@@ -28,17 +28,51 @@
 #ifdef DOS_FILE_SYSTEM
 # include <windows.h>
 #endif
+#ifdef USE_C_SYSLOG
+# include <syslog.h>
+# include <stdarg.h>
+#endif
 
 #define mzVA_ARG(x, y) HIDE_FROM_XFORM(va_arg(x, y))
 #define TMP_CMARK_VALUE scheme_parameterization_key
 
+#ifndef INIT_SYSLOG_LEVEL
+# define INIT_SYSLOG_LEVEL 0
+#endif
+
 /* globals */
 scheme_console_printf_t scheme_console_printf;
 scheme_console_printf_t scheme_get_console_printf() { return scheme_console_printf; }
-
-void (*scheme_console_output)(char *str, long len);
 Scheme_Exit_Proc scheme_exit;
 void scheme_set_exit(Scheme_Exit_Proc p) { scheme_exit = p; }
+
+void (*scheme_console_output)(char *str, long len);
+
+static int init_syslog_level = INIT_SYSLOG_LEVEL;
+static int init_stderr_level = SCHEME_LOG_ERROR;
+Scheme_Logger *scheme_main_logger;
+static void init_logger_config();
+
+/* readonly globals */
+const char *scheme_compile_stx_string = "compile";
+const char *scheme_expand_stx_string = "expand";
+const char *scheme_application_stx_string = "application";
+const char *scheme_set_stx_string = "set!";
+const char *scheme_var_ref_string = "#%variable-reference";
+const char *scheme_begin_stx_string = "begin";
+static Scheme_Object *fatal_symbol;
+static Scheme_Object *error_symbol; 
+static Scheme_Object *warning_symbol;
+static Scheme_Object *info_symbol;
+static Scheme_Object *debug_symbol;
+static Scheme_Object *arity_property;
+static Scheme_Object *def_err_val_proc;
+static Scheme_Object *def_error_esc_proc;
+static Scheme_Object *default_display_handler;
+static Scheme_Object *emergency_display_handler;
+Scheme_Object *scheme_def_exit_proc;
+Scheme_Object *scheme_raise_arity_error_proc;
+
 
 #ifdef MEMORY_COUNTING_ON
 long scheme_misc_count;
@@ -64,23 +98,32 @@ static Scheme_Object *emergency_error_display_proc(int, Scheme_Object *[]);
 static Scheme_Object *def_error_value_string_proc(int, Scheme_Object *[]);
 static Scheme_Object *def_exit_handler_proc(int, Scheme_Object *[]);
 
-static Scheme_Object *do_raise(Scheme_Object *arg, int need_debug, int barrier);
+static Scheme_Object *log_message(int argc, Scheme_Object *argv[]);
+static Scheme_Object *log_level_p(int argc, Scheme_Object *argv[]);
+static Scheme_Object *make_logger(int argc, Scheme_Object *argv[]);
+static Scheme_Object *logger_p(int argc, Scheme_Object *argv[]);
+static Scheme_Object *current_logger(int argc, Scheme_Object *argv[]);
+static Scheme_Object *logger_name(int argc, Scheme_Object *argv[]);
+static Scheme_Object *make_log_reader(int argc, Scheme_Object *argv[]);
+static Scheme_Object *log_reader_p(int argc, Scheme_Object *argv[]);
+static int log_reader_get(Scheme_Object *ch, Scheme_Schedule_Info *sinfo);
 
+static Scheme_Object *do_raise(Scheme_Object *arg, int need_debug, int barrier);
 static Scheme_Object *nested_exn_handler(void *old_exn, int argc, Scheme_Object *argv[]);
 
-static Scheme_Object *def_err_val_proc;
-static Scheme_Object *def_error_esc_proc;
-static Scheme_Object *default_display_handler, *emergency_display_handler;
-Scheme_Object *scheme_def_exit_proc;
+static Scheme_Logger *make_a_logger(Scheme_Logger *parent, Scheme_Object *name);
+static void update_want_level(Scheme_Logger *logger);
 
-Scheme_Object *scheme_raise_arity_error_proc;
-
-static Scheme_Object *arity_property;
 static Scheme_Object *check_arity_property_value_ok(int argc, Scheme_Object *argv[]);
 
 static char *init_buf(long *len, long *blen);
-static char *prepared_buf;
-static long prepared_buf_len;
+void scheme_set_logging(int syslog_level, int stderr_level)
+{
+  if (syslog_level > -1)
+    init_syslog_level = syslog_level;
+  if (stderr_level > -1)
+    init_stderr_level = stderr_level;
+}
 
 typedef struct {
   int args;
@@ -158,7 +201,9 @@ Scheme_Config *scheme_init_error_escape_proc(Scheme_Config *config)
        or error number for scheme_hostname_error()
 */
 
-static long sch_vsprintf(char *s, long maxlen, const char *msg, va_list args)
+static long sch_vsprintf(char *s, long maxlen, const char *msg, va_list args, char **_s)
+/* NULL for s means allocate the buffer here (and return in (_s), but this function 
+   doesn't allocate before extracting arguments from the stack. */
 {
   long i, j;
   char buf[100];
@@ -226,6 +271,11 @@ static long sch_vsprintf(char *s, long maxlen, const char *msg, va_list args)
   pp = 0;
   ip = 0;
   dp = 0;
+
+  if (!s) {
+    s = init_buf(NULL, &maxlen);
+    *_s = s;
+  }
 
   --maxlen;
 
@@ -476,7 +526,7 @@ static long scheme_sprintf(char *s, long maxlen, const char *msg, ...)
   GC_CAN_IGNORE va_list args;
 
   HIDE_FROM_XFORM(va_start(args, msg));
-  len = sch_vsprintf(s, maxlen, msg, args);
+  len = sch_vsprintf(s, maxlen, msg, args, NULL);
   HIDE_FROM_XFORM(va_end(args));
 
   return len;
@@ -491,100 +541,69 @@ void scheme_init_error(Scheme_Env *env)
 
   REGISTER_SO(scheme_raise_arity_error_proc);
 
-  scheme_add_global_constant("error",
-			     scheme_make_noncm_prim(error,
-                                                    "error",
-                                                    1, -1),
-			     env);
-  scheme_add_global_constant("raise-user-error",
-			     scheme_make_noncm_prim(raise_user_error,
-                                                    "raise-user-error",
-                                                    1, -1),
-			     env);
-  scheme_add_global_constant("raise-syntax-error",
-			     scheme_make_noncm_prim(raise_syntax_error,
-                                                    "raise-syntax-error",
-                                                    2, 4),
-			     env);
-  scheme_add_global_constant("raise-type-error",
-			     scheme_make_noncm_prim(raise_type_error,
-                                                    "raise-type-error",
-                                                    3, -1),
-			     env);
-  scheme_add_global_constant("raise-mismatch-error",
-			     scheme_make_noncm_prim(raise_mismatch_error,
-                                                    "raise-mismatch-error",
-                                                    3, 3),
-			     env);
-  scheme_raise_arity_error_proc = scheme_make_noncm_prim(raise_arity_error,
-                                                         "raise-arity-error",
-                                                         2, -1);
-  scheme_add_global_constant("raise-arity-error",
-			     scheme_raise_arity_error_proc,
-			     env);
-  scheme_add_global_constant("error-display-handler",
-			     scheme_register_parameter(error_display_handler,
-						       "error-display-handler",
-						       MZCONFIG_ERROR_DISPLAY_HANDLER),
-			     env);
-  scheme_add_global_constant("error-value->string-handler",
-			     scheme_register_parameter(error_value_string_handler,
-						       "error-value->string-handler",
-						       MZCONFIG_ERROR_PRINT_VALUE_HANDLER),
-			     env);
-  scheme_add_global_constant("error-escape-handler",
-			     scheme_register_parameter(error_escape_handler,
-						      "error-escape-handler",
-						       MZCONFIG_ERROR_ESCAPE_HANDLER),
-			     env);
-  scheme_add_global_constant("exit-handler",
-			     scheme_register_parameter(exit_handler,
-						       "exit-handler",
-						       MZCONFIG_EXIT_HANDLER),
-			     env);
-  scheme_add_global_constant("error-print-width",
-			     scheme_register_parameter(error_print_width,
-						       "error-print-width",
-						       MZCONFIG_ERROR_PRINT_WIDTH),
-			     env);
-  scheme_add_global_constant("error-print-context-length",
-			     scheme_register_parameter(error_print_context_length,
-						       "error-print-context-length",
-						       MZCONFIG_ERROR_PRINT_CONTEXT_LENGTH),
-			     env);
-  scheme_add_global_constant("error-print-source-location",
-			     scheme_register_parameter(error_print_srcloc,
-						       "error-print-source-location",
-						       MZCONFIG_ERROR_PRINT_SRCLOC),
-			     env);
-  scheme_add_global_constant("exit",
-			     scheme_make_noncm_prim(scheme_do_exit,
-                                                    "exit",
-                                                    0, 1),
-			     env);
+  /* errors */
+  GLOBAL_NONCM_PRIM("error",                      error,                 1, -1, env);
+  GLOBAL_NONCM_PRIM("raise-user-error",           raise_user_error,      1, -1, env);
+  GLOBAL_NONCM_PRIM("raise-syntax-error",         raise_syntax_error,    2,  4, env);
+  GLOBAL_NONCM_PRIM("raise-type-error",           raise_type_error,      3, -1, env);
+  GLOBAL_NONCM_PRIM("raise-mismatch-error",       raise_mismatch_error,  3,  3, env);
+
+  scheme_raise_arity_error_proc =                  scheme_make_noncm_prim(raise_arity_error, "raise-arity-error", 2, -1);
+  scheme_add_global_constant("raise-arity-error",  scheme_raise_arity_error_proc, env);
+
+  GLOBAL_PARAMETER("error-display-handler",       error_display_handler,      MZCONFIG_ERROR_DISPLAY_HANDLER,       env);
+  GLOBAL_PARAMETER("error-value->string-handler", error_value_string_handler, MZCONFIG_ERROR_PRINT_VALUE_HANDLER,   env);
+  GLOBAL_PARAMETER("error-escape-handler",        error_escape_handler,       MZCONFIG_ERROR_ESCAPE_HANDLER,        env);
+  GLOBAL_PARAMETER("exit-handler",                exit_handler,               MZCONFIG_EXIT_HANDLER,                env);
+  GLOBAL_PARAMETER("error-print-width",           error_print_width,          MZCONFIG_ERROR_PRINT_WIDTH,           env);
+  GLOBAL_PARAMETER("error-print-context-length",  error_print_context_length, MZCONFIG_ERROR_PRINT_CONTEXT_LENGTH,  env);
+  GLOBAL_PARAMETER("error-print-source-location", error_print_srcloc,         MZCONFIG_ERROR_PRINT_SRCLOC,          env);
+
+  /* logging */
+  GLOBAL_NONCM_PRIM("exit",              scheme_do_exit,  0, 1, env);
+  GLOBAL_NONCM_PRIM("log-level?",        log_level_p,     2, 2, env);
+  GLOBAL_NONCM_PRIM("make-logger",       make_logger,     0, 2, env);
+  GLOBAL_NONCM_PRIM("make-log-receiver", make_log_reader, 2, 2, env);
+
+  GLOBAL_PRIM_W_ARITY("log-message",    log_message,   4, 4, env);
+  GLOBAL_FOLDING_PRIM("logger?",        logger_p,      1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("logger-name",    logger_name,   1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("log-receiver?",  log_reader_p,  1, 1, 1, env);
+
+  GLOBAL_PARAMETER("current-logger",    current_logger, MZCONFIG_LOGGER, env);
+
+  scheme_add_evt(scheme_log_reader_type, (Scheme_Ready_Fun)log_reader_get, NULL, NULL, 1);
 
   REGISTER_SO(scheme_def_exit_proc);
-  scheme_def_exit_proc = scheme_make_prim_w_arity(def_exit_handler_proc,
-						  "default-exit-handler",
-						  1, 1);
+  scheme_def_exit_proc = scheme_make_prim_w_arity(def_exit_handler_proc, "default-exit-handler", 1, 1);
 
   REGISTER_SO(def_err_val_proc);
-  def_err_val_proc = scheme_make_prim_w_arity(def_error_value_string_proc,
-					      "default-error-value->string-handler",
-					      2, 2);
+  def_err_val_proc = scheme_make_prim_w_arity(def_error_value_string_proc, "default-error-value->string-handler", 2, 2);
 
-  REGISTER_SO(prepared_buf);
-  prepared_buf = "";
-  prepared_buf = init_buf(NULL, &prepared_buf_len);
+  REGISTER_SO(fatal_symbol);
+  REGISTER_SO(error_symbol);
+  REGISTER_SO(warning_symbol);
+  REGISTER_SO(info_symbol);
+  REGISTER_SO(debug_symbol);
+  fatal_symbol    = scheme_intern_symbol("fatal");
+  error_symbol    = scheme_intern_symbol("error");
+  warning_symbol  = scheme_intern_symbol("warning");
+  info_symbol     = scheme_intern_symbol("info");
+  debug_symbol    = scheme_intern_symbol("debug");
+
+  {
+    REGISTER_SO(scheme_main_logger);
+    scheme_main_logger = make_a_logger(NULL, NULL);
+    scheme_main_logger->syslog_level = init_syslog_level;
+    scheme_main_logger->stderr_level = init_stderr_level;
+  }
+  init_logger_config();
 
   REGISTER_SO(arity_property);
   {
     Scheme_Object *guard;
-    guard = scheme_make_prim_w_arity(check_arity_property_value_ok,
-				     "guard-for-prop:arity-string",
-				     2, 2);
-    arity_property = scheme_make_struct_type_property_w_guard(scheme_intern_symbol("arity-string"),
-                                                              guard);
+    guard = scheme_make_prim_w_arity(check_arity_property_value_ok, "guard-for-prop:arity-string", 2, 2);
+    arity_property = scheme_make_struct_type_property_w_guard(scheme_intern_symbol("arity-string"), guard);
   }
                                                             
   scheme_add_global_constant("prop:arity-string", arity_property, env);
@@ -592,23 +611,25 @@ void scheme_init_error(Scheme_Env *env)
   scheme_init_error_config();
 }
 
+static void init_logger_config()
+{
+  scheme_set_root_param(MZCONFIG_LOGGER, (Scheme_Object *)scheme_main_logger);
+}
+
 void scheme_init_error_config(void)
 {
+  init_logger_config();
+
   scheme_set_root_param(MZCONFIG_EXIT_HANDLER, scheme_def_exit_proc);
   
   REGISTER_SO(default_display_handler);
   REGISTER_SO(emergency_display_handler);
-  default_display_handler = scheme_make_prim_w_arity(def_error_display_proc,
-						     "default-error-display-handler",
-						     2, 2);
-  emergency_display_handler = scheme_make_prim_w_arity(emergency_error_display_proc,
-						       "emergency-error-display-handler",
-						       2, 2);
+
+  default_display_handler = scheme_make_prim_w_arity(def_error_display_proc, "default-error-display-handler", 2, 2);
+  emergency_display_handler = scheme_make_prim_w_arity(emergency_error_display_proc, "emergency-error-display-handler", 2, 2);
   
   scheme_set_root_param(MZCONFIG_ERROR_DISPLAY_HANDLER, default_display_handler);
-
-  scheme_set_root_param(MZCONFIG_ERROR_PRINT_VALUE_HANDLER,
-			def_err_val_proc);
+  scheme_set_root_param(MZCONFIG_ERROR_PRINT_VALUE_HANDLER, def_err_val_proc);
 }
 
 static void
@@ -631,8 +652,15 @@ scheme_inescapeable_error(const char *a, const char *b)
 static void
 call_error(char *buffer, int len, Scheme_Object *exn)
 {
-  if (scheme_current_thread->skip_error) {
-    scheme_longjmp (scheme_error_buf, 1);
+  if (scheme_current_thread->constant_folding) {
+    if (SCHEME_TRUEP(scheme_current_thread->constant_folding))
+      scheme_log(NULL,
+                 SCHEME_LOG_WARNING,
+                 0,
+                 "optimizer constant-fold attempt failed%s: %s",
+                 scheme_optimize_context_to_string(scheme_current_thread->constant_folding),
+                 buffer);
+    scheme_longjmp(scheme_error_buf, 1);
   } else {
     mz_jmp_buf savebuf;
     Scheme_Object *p[2], *display_handler, *escape_handler, *v;
@@ -729,18 +757,11 @@ static char *init_buf(long *len, long *_size)
   if (len)
     *len = print_width;
 
-  size = (3 * scheme_max_found_symbol_name + 500
-	  + 2 * print_width);
+  size = (3 * scheme_max_found_symbol_name + 500 + 2 * print_width);
   if (_size)
     *_size = size;
 
   return (char *)scheme_malloc_atomic(size);
-}
-
-void scheme_reset_prepared_error_buffer(void)
-{
-  if (prepared_buf)
-    prepared_buf = init_buf(NULL, &prepared_buf_len);
 }
 
 void
@@ -750,14 +771,9 @@ scheme_signal_error (const char *msg, ...)
   char *buffer;
   long len;
 
-  /* Precise GC: Don't allocate before getting hidden args off stack */
-  buffer = prepared_buf;
-
   HIDE_FROM_XFORM(va_start(args, msg));
-  len = sch_vsprintf(buffer, prepared_buf_len, msg, args);
+  len = sch_vsprintf(NULL, 0, msg, args, &buffer);
   HIDE_FROM_XFORM(va_end(args));
-
-  prepared_buf = init_buf(NULL, &prepared_buf_len);
 
   if (scheme_current_thread->current_local_env) {
     char *s2 = " [during expansion]";
@@ -787,20 +803,51 @@ void scheme_warning(char *msg, ...)
   char *buffer;
   long len;
 
-  /* Precise GC: Don't allocate before getting hidden args off stack */
-  buffer = prepared_buf;
-
   HIDE_FROM_XFORM(va_start(args, msg));
-  len = sch_vsprintf(buffer, prepared_buf_len, msg, args);
+  len = sch_vsprintf(NULL, 0, msg, args, &buffer);
   HIDE_FROM_XFORM(va_end(args));
-
-  prepared_buf = init_buf(NULL, &prepared_buf_len);
 
   buffer[len++] = '\n';
   buffer[len] = 0;
 
   scheme_write_byte_string(buffer, len,
 			   scheme_get_param(scheme_current_config(), MZCONFIG_ERROR_PORT));
+}
+
+void scheme_log(Scheme_Logger *logger, int level, int flags,
+                char *msg, ...)
+{
+  GC_CAN_IGNORE va_list args;
+  char *buffer;
+  long len;
+
+  if (logger) {
+    if (logger->local_timestamp == *logger->timestamp)
+      if (logger->want_level < level)
+        return;
+  }
+
+  HIDE_FROM_XFORM(va_start(args, msg));
+  len = sch_vsprintf(NULL, 0, msg, args, &buffer);
+  HIDE_FROM_XFORM(va_end(args));
+
+  buffer[len] = 0;
+
+  scheme_log_message(logger, level, buffer, len, NULL);
+}
+
+int scheme_log_level_p(Scheme_Logger *logger, int level)
+{
+  if (!logger) {
+    Scheme_Config *config;
+    config = scheme_current_config();
+    logger = (Scheme_Logger *)scheme_get_param(config, MZCONFIG_LOGGER);
+  }
+
+  if (logger->local_timestamp < *logger->timestamp)
+    update_want_level(logger);
+
+  return (logger->want_level >= level);
 }
 
 static char *error_write_to_string_w_max(Scheme_Object *v, int len, int *lenout)
@@ -1389,14 +1436,9 @@ void scheme_read_err(Scheme_Object *port,
   int show_loc;
   Scheme_Object *loc;
 
-  /* Precise GC: Don't allocate before getting hidden args off stack */
-  s = prepared_buf;
-
   HIDE_FROM_XFORM(va_start(args, detail));
-  slen = sch_vsprintf(s, prepared_buf_len, detail, args);
+  slen = sch_vsprintf(NULL, 0, detail, args, &s);
   HIDE_FROM_XFORM(va_end(args));
-
-  prepared_buf = init_buf(NULL, &prepared_buf_len);
 
   ls = "";
   fnlen = 0;
@@ -1477,13 +1519,6 @@ void scheme_read_err(Scheme_Object *port,
 		   fn, fnlen, ls,
 		   s, slen, suggests);
 }
-
-const char *scheme_compile_stx_string = "compile";
-const char *scheme_expand_stx_string = "expand";
-const char *scheme_application_stx_string = "application";
-const char *scheme_set_stx_string = "set!";
-const char *scheme_var_ref_string = "#%variable-reference";
-const char *scheme_begin_stx_string = "begin";
 
 static void do_wrong_syntax(const char *where,
                             Scheme_Object *detail_form,
@@ -1660,14 +1695,9 @@ void scheme_wrong_syntax(const char *where,
   } else {
     GC_CAN_IGNORE va_list args;
 
-    /* Precise GC: Don't allocate before getting hidden args off stack */
-    s = prepared_buf;
-
     HIDE_FROM_XFORM(va_start(args, detail));
-    slen = sch_vsprintf(s, prepared_buf_len, detail, args);
+    slen = sch_vsprintf(NULL, 0, detail, args, &s);
     HIDE_FROM_XFORM(va_end(args));
-
-    prepared_buf = init_buf(NULL, &prepared_buf_len);
   }
 
   do_wrong_syntax(where, detail_form, form, s, slen, scheme_null);
@@ -1688,14 +1718,9 @@ void scheme_wrong_syntax_with_more_sources(const char *where,
   } else {
     GC_CAN_IGNORE va_list args;
 
-    /* Precise GC: Don't allocate before getting hidden args off stack */
-    s = prepared_buf;
-
     HIDE_FROM_XFORM(va_start(args, detail));
-    slen = sch_vsprintf(s, prepared_buf_len, detail, args);
+    slen = sch_vsprintf(NULL, 0, detail, args, &s);
     HIDE_FROM_XFORM(va_end(args));
-
-    prepared_buf = init_buf(NULL, &prepared_buf_len);
   }
 
   do_wrong_syntax(where, detail_form, form, s, slen, extra_sources);
@@ -1763,14 +1788,9 @@ void scheme_wrong_return_arity(const char *where,
   } else {
     GC_CAN_IGNORE va_list args;
 
-    /* Precise GC: Don't allocate before getting hidden args off stack */
-    s = prepared_buf;
-
     HIDE_FROM_XFORM(va_start(args, detail));
-    slen = sch_vsprintf(s, prepared_buf_len, detail, args);
+    slen = sch_vsprintf(NULL, 0, detail, args, &s);
     HIDE_FROM_XFORM(va_end(args));
-
-    prepared_buf = init_buf(NULL, &prepared_buf_len);
   }
 
   buffer = init_buf(NULL, &blen);
@@ -1848,14 +1868,9 @@ void scheme_raise_out_of_memory(const char *where, const char *msg, ...)
   } else {
     GC_CAN_IGNORE va_list args;
 
-    /* Precise GC: Don't allocate before getting hidden args off stack */
-    s = prepared_buf;
-
     HIDE_FROM_XFORM(va_start(args, msg));
-    slen = sch_vsprintf(s, prepared_buf_len, msg, args);
+    slen = sch_vsprintf(NULL, 0, msg, args, &s);
     HIDE_FROM_XFORM(va_end(args));
-
-    prepared_buf = init_buf(NULL, &prepared_buf_len);
   }
 
   scheme_raise_exn(MZEXN_FAIL_OUT_OF_MEMORY,
@@ -2203,6 +2218,36 @@ static Scheme_Object *error_print_srcloc(int argc, Scheme_Object *argv[])
 			     -1, NULL, NULL, 1);
 }
 
+void scheme_write_proc_context(Scheme_Object *port, int print_width,
+                               Scheme_Object *name, 
+                               Scheme_Object *src, Scheme_Object *line, 
+                               Scheme_Object *col, Scheme_Object *pos,
+                               int generated)
+{
+  if (src) {
+    scheme_display_w_max(src, port, print_width);
+    if (line && SCHEME_TRUEP(line)) {
+      /* Line + column */
+      scheme_write_byte_string(":", 1, port);
+      scheme_display_w_max(line, port, print_width);
+      scheme_write_byte_string(":", 1, port);
+      scheme_display_w_max(col, port, print_width);
+    } else {
+      /* Position */
+      scheme_write_byte_string("::", 2, port);
+      scheme_display_w_max(pos, port, print_width);
+    }
+    
+    if (SCHEME_TRUEP(name)) {
+      scheme_write_byte_string(": ", 2, port);
+    }
+  }
+  
+  if (SCHEME_TRUEP(name)) {
+    scheme_display_w_max(name, port, print_width);
+  }
+}
+
 static Scheme_Object *
 def_error_display_proc(int argc, Scheme_Object *argv[])
 {
@@ -2260,29 +2305,20 @@ def_error_display_proc(int argc, Scheme_Object *argv[])
 	  loc = SCHEME_CDR(name);
 	  name = SCHEME_CAR(name);
 
-	  if (SCHEME_TRUEP(loc)) {
-	    Scheme_Structure *sloc = (Scheme_Structure *)loc;
-	    scheme_display_w_max(sloc->slots[0], port, print_width);
-	    if (SCHEME_TRUEP(sloc->slots[1])) {
-	      /* Line + column */
-	      scheme_write_byte_string(":", 1, port);
-	      scheme_display_w_max(sloc->slots[1], port, print_width);
-	      scheme_write_byte_string(":", 1, port);
-	      scheme_display_w_max(sloc->slots[2], port, print_width);
-	    } else {
-	      /* Position */
-	      scheme_write_byte_string("::", 2, port);
-	      scheme_display_w_max(sloc->slots[3], port, print_width);
-	    }
+          if (SCHEME_TRUEP(loc)) {
+            Scheme_Structure *sloc = (Scheme_Structure *)loc;
+            scheme_write_proc_context(port, print_width, 
+                                      name, 
+                                      sloc->slots[0], sloc->slots[1],
+                                      sloc->slots[2], sloc->slots[3],
+                                      0);
+          } else {
+            scheme_write_proc_context(port, print_width, 
+                                      name, 
+                                      NULL, NULL, NULL, NULL, 
+                                      0);
+          }
 
-	    if (SCHEME_TRUEP(name)) {
-	      scheme_write_byte_string(": ", 2, port);
-	    }
-	  }
-
-	  if (SCHEME_TRUEP(name)) {
-	    scheme_display_w_max(name, port, print_width);
-	  }
 	  scheme_write_byte_string("\n", 1, port);
 	  l = SCHEME_CDR(l);
 	  --max_cnt;
@@ -2480,6 +2516,472 @@ void scheme_immediate_exit(int status)
 
 /***********************************************************************/
 
+void update_want_level(Scheme_Logger *logger)
+{
+  Scheme_Log_Reader *lr;
+  Scheme_Object *stack = NULL, *queue, *b, *prev;
+  Scheme_Logger *parent = logger;
+  int want_level;
+
+  while (parent) {
+    stack = scheme_make_raw_pair((Scheme_Object *)parent, stack);
+
+    if (parent->local_timestamp < *parent->timestamp)
+      parent = parent->parent;
+    else
+      parent = NULL;
+  }
+
+  want_level = 0;
+  while (stack) {
+    parent = (Scheme_Logger *)SCHEME_CAR(stack);
+    
+    if (parent->local_timestamp < *parent->timestamp) {
+      queue = parent->readers;
+      prev = NULL;
+      while (queue) {
+        b = SCHEME_CAR(queue);
+        b = SCHEME_CAR(b);
+        lr = (Scheme_Log_Reader *)SCHEME_BOX_VAL(b);
+        if (lr) {
+          if (lr->want_level > want_level)
+            want_level = lr->want_level;
+          prev = queue;
+        } else {
+          if (prev)
+            SCHEME_CDR(prev) = SCHEME_CDR(queue);
+          else
+            parent->readers = SCHEME_CDR(queue);
+        }
+        queue = SCHEME_CDR(queue);
+      }
+
+      if (parent->syslog_level > want_level)
+        want_level = parent->syslog_level;
+      if (parent->stderr_level > want_level)
+        want_level = parent->stderr_level;    
+      
+      parent->want_level = want_level;
+      parent->local_timestamp = *parent->timestamp;
+    } else {
+      want_level = parent->want_level;
+    }
+
+    stack = SCHEME_CDR(stack);
+  }
+}
+
+#ifdef USE_WINDOWS_EVENT_LOG
+static int event_procs_ready;
+typedef HANDLE (WINAPI *mzRegisterEventSourceProc)(LPCTSTR lpUNCServerName, LPCTSTR lpSourceName);
+typedef BOOL (WINAPI *mzReportEventProc)(HANDLE hEventLog, WORD wType, WORD wCategory, DWORD dwEventID,
+						                 PSID lpUserSid, WORD wNumStrings, DWORD dwDataSize, LPCTSTR* lpStrings,
+							             LPVOID lpRawData);
+static mzRegisterEventSourceProc mzRegisterEventSource;
+static mzReportEventProc mzReportEvent;
+#endif
+
+void scheme_log_message(Scheme_Logger *logger, int level, char *buffer, long len, Scheme_Object *data)
+{
+  Scheme_Logger *orig_logger;
+  Scheme_Object *queue, *q, *msg = NULL, *b;
+  Scheme_Log_Reader *lr;
+
+  if (!logger) {
+    Scheme_Config *config;
+    config = scheme_current_config();
+    logger = (Scheme_Logger *)scheme_get_param(config, MZCONFIG_LOGGER);
+  }
+
+  if (logger->local_timestamp < *logger->timestamp)
+    update_want_level(logger);
+
+  orig_logger = logger;
+
+  while (logger) {
+    if (logger->want_level < level)
+      return;
+  
+    if (logger->syslog_level >= level) {
+#ifdef USE_C_SYSLOG
+      int pri;
+      switch (level) {
+      case SCHEME_LOG_FATAL:
+        pri = LOG_CRIT;
+        break;
+      case SCHEME_LOG_ERROR:
+        pri = LOG_ERR;
+        break;
+      case SCHEME_LOG_WARNING:
+        pri = LOG_WARNING;
+        break;
+      case SCHEME_LOG_INFO:
+        pri = LOG_INFO;
+        break;
+      case SCHEME_LOG_DEBUG:
+      default:
+        pri = LOG_DEBUG;
+        break;
+      }
+      if (orig_logger->name)
+        syslog(pri, "%s: %s", SCHEME_SYM_VAL(orig_logger->name), buffer);
+      else
+        syslog(pri, "%s", buffer);
+#endif
+#ifdef USE_WINDOWS_EVENT_LOG
+      if (!event_procs_ready) {
+        HMODULE hm;
+        hm = LoadLibrary("advapi32.dll");
+        if (hm) {
+          mzRegisterEventSource = (mzRegisterEventSourceProc)GetProcAddress(hm, "RegisterEventSourceA");
+          mzReportEvent = (mzReportEventProc)GetProcAddress(hm, "ReportEventA");
+        }
+        event_procs_ready = 1;
+      }
+      if (mzRegisterEventSource) {
+        static HANDLE hEventLog;
+        WORD ty;
+        unsigned long sev;
+        LPCTSTR a[1];
+
+        if (!hEventLog) {
+          Scheme_Object *cmd;
+          cmd = scheme_get_run_cmd();
+          hEventLog = mzRegisterEventSource(NULL, SCHEME_PATH_VAL(cmd));
+        }
+
+        switch (level) {
+        case SCHEME_LOG_FATAL:
+          ty = EVENTLOG_ERROR_TYPE;
+          sev = 3;
+          break;
+        case SCHEME_LOG_ERROR:
+          ty = EVENTLOG_ERROR_TYPE;
+          sev = 3;
+          break;
+        case SCHEME_LOG_WARNING:
+          ty = EVENTLOG_WARNING_TYPE;
+          sev = 2;
+          break;
+        case SCHEME_LOG_INFO:
+          ty = EVENTLOG_INFORMATION_TYPE;
+          sev = 1;
+          break;
+        case SCHEME_LOG_DEBUG:
+        default:
+          ty = EVENTLOG_AUDIT_SUCCESS;
+          sev = 0;
+          break;
+        }
+        if (orig_logger->name) {
+          char *naya;
+          long slen;
+          slen = SCHEME_SYM_LEN(orig_logger->name);
+          naya = (char *)scheme_malloc_atomic(slen + 2 + len + 1);
+          memcpy(naya, SCHEME_SYM_VAL(orig_logger->name), slen);
+          memcpy(naya + slen, ": ", 2);
+          memcpy(naya + slen + 2, buffer, len);
+          naya[slen + 2 + len] = 0;
+          buffer = naya;
+		  len += slen + 2;
+        }
+		a[0] = buffer;
+		mzReportEvent(hEventLog, ty, 1 /* category */,
+                      (sev << 30) | 2 /* message */,
+                      NULL, 
+                      1, 0,
+                      a, NULL);
+      }
+#endif
+    }
+    if (logger->stderr_level >= level) {
+      if (orig_logger->name) {
+        long slen;
+        slen = SCHEME_SYM_LEN(orig_logger->name);
+        fwrite(SCHEME_SYM_VAL(orig_logger->name), slen, 1, stderr);
+        fwrite(": ", 2, 1, stderr);
+      }
+      fwrite(buffer, len, 1, stderr);
+      fwrite("\n", 1, 1, stderr);
+    }
+
+    queue = logger->readers;
+    while (queue) {
+      b = SCHEME_CAR(queue);
+      b = SCHEME_CAR(b);
+      lr = (Scheme_Log_Reader *)SCHEME_BOX_VAL(b);
+      if (lr) {
+        if (lr->want_level >= level) {
+          if (!msg) {
+            Scheme_Object *v;
+            msg = scheme_make_vector(3, NULL);
+            switch (level) {
+            case SCHEME_LOG_FATAL:
+              v = fatal_symbol;
+              break;
+            case SCHEME_LOG_ERROR:
+              v = error_symbol;
+              break;
+            case SCHEME_LOG_WARNING:
+              v = warning_symbol;
+              break;
+            case SCHEME_LOG_INFO:
+              v = info_symbol;
+              break;
+            case SCHEME_LOG_DEBUG:
+            default:
+              v = debug_symbol;
+              break;
+            }
+            SCHEME_VEC_ELS(msg)[0] = v;
+          
+            if (orig_logger->name) {
+              /* Add logger name prefix: */
+              long slen;
+              char *cp;
+              slen = SCHEME_SYM_LEN(orig_logger->name);
+              cp = scheme_malloc_atomic(slen + len + 2);
+              memcpy(cp, SCHEME_SYM_VAL(orig_logger->name), slen);
+              memcpy(cp + slen, ": ", 2);
+              memcpy(cp + slen + 2, buffer, len + 1);
+              len += slen + 2;
+              buffer = cp;
+            }
+
+            v = scheme_make_sized_utf8_string(buffer, len);
+            SCHEME_SET_CHAR_STRING_IMMUTABLE(v);
+            SCHEME_VEC_ELS(msg)[1] = v;
+            SCHEME_VEC_ELS(msg)[2] = (data ? data : scheme_false);
+          }
+          
+          /* enqueue */
+          q = scheme_make_raw_pair(msg, NULL);
+          if (lr->tail)
+            SCHEME_CDR(lr->tail) = q;
+          else
+            lr->head = q;
+          lr->tail = q;
+          scheme_post_sema(lr->sema);
+        }
+      }
+      queue = SCHEME_CDR(queue);
+    }
+
+    logger = logger->parent;
+  }
+}
+
+static int extract_level(const char *who, int which, int argc, Scheme_Object **argv)
+{
+  Scheme_Object *v;
+  int level;
+
+  v = argv[which];
+  if (SAME_OBJ(v, fatal_symbol))
+    level = SCHEME_LOG_FATAL;
+  else if (SAME_OBJ(v, error_symbol))
+    level = SCHEME_LOG_ERROR;
+  else if (SAME_OBJ(v, warning_symbol))
+    level = SCHEME_LOG_WARNING;
+  else if (SAME_OBJ(v, info_symbol))
+    level = SCHEME_LOG_INFO;
+  else if (SAME_OBJ(v, debug_symbol))
+    level = SCHEME_LOG_DEBUG;
+  else {
+    scheme_wrong_type(who, "'fatal, 'error, 'warning, 'info, or 'debug", which, argc, argv);
+    return 0;
+  }
+  
+  return level;
+}
+
+static Scheme_Object *
+log_message(int argc, Scheme_Object *argv[])
+{
+  Scheme_Logger *logger;
+  Scheme_Object *bytes;
+  int level;
+
+  if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_logger_type))
+    scheme_wrong_type("log-message", "logger", 0, argc, argv);
+  logger = (Scheme_Logger *)argv[0];
+
+  level = extract_level("log-message", 1, argc, argv);
+
+  bytes = argv[2];
+  if (!SCHEME_CHAR_STRINGP(bytes))
+    scheme_wrong_type("log-message", "string", 2, argc, argv);
+  bytes = scheme_char_string_to_byte_string(bytes);
+  
+  scheme_log_message(logger, level, SCHEME_BYTE_STR_VAL(bytes), SCHEME_BYTE_STRLEN_VAL(bytes), argv[3]);
+
+  return scheme_void;
+}
+
+static Scheme_Object *
+log_level_p(int argc, Scheme_Object *argv[])
+{
+  Scheme_Logger *logger;
+  int level;
+
+  if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_logger_type))
+    scheme_wrong_type("log-level?", "logger", 0, argc, argv);
+  logger = (Scheme_Logger *)argv[0];
+
+  level = extract_level("log-level?", 1, argc, argv);
+
+  if (logger->local_timestamp < *logger->timestamp)
+    update_want_level(logger);
+
+  return ((logger->want_level >= level) ? scheme_true : scheme_false);
+}
+
+static Scheme_Object *
+make_logger(int argc, Scheme_Object *argv[])
+{
+  Scheme_Logger *parent;
+
+  if (argc) {
+    if (!SCHEME_FALSEP(argv[0]) && !SCHEME_SYMBOLP(argv[0]))
+      scheme_wrong_type("make-logger", "symbol or #f", 0, argc, argv);
+
+    if (argc > 1) {
+      if (SCHEME_FALSEP(argv[1]))
+        parent = NULL;
+      else {
+        if (!SAME_TYPE(SCHEME_TYPE(argv[1]), scheme_logger_type))
+          scheme_wrong_type("make-logger", "logger or #f", 1, argc, argv);
+        parent = (Scheme_Logger *)argv[1];
+      }
+    } else
+      parent = NULL;
+  } else
+    parent = NULL;
+
+  return (Scheme_Object *)make_a_logger(parent, 
+                                        (argc 
+                                         ? (SCHEME_FALSEP(argv[0]) ? NULL : argv[0])
+                                         : NULL));
+}
+
+static Scheme_Logger *make_a_logger(Scheme_Logger *parent, Scheme_Object *name)
+{
+  Scheme_Logger *logger;
+
+  logger = MALLOC_ONE_TAGGED(Scheme_Logger);
+  logger->so.type = scheme_logger_type;
+  logger->parent = parent;
+  if (parent) {
+    logger->timestamp = parent->timestamp;
+  } else {
+    long *timestamp;
+    timestamp = MALLOC_ONE_ATOMIC(long);
+    *timestamp = 1;
+    logger->timestamp = timestamp;
+  }
+  logger->name = name;
+
+  return logger;
+}
+
+static Scheme_Object *
+logger_p(int argc, Scheme_Object *argv[])
+{
+  return (SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_logger_type)
+          ? scheme_true
+          : scheme_false);
+}
+
+static Scheme_Object *
+current_logger(int argc, Scheme_Object *argv[])
+{
+  return scheme_param_config("current-logger",
+			     scheme_make_integer(MZCONFIG_LOGGER),
+			     argc, argv,
+			     -1, logger_p, "logger", 0);
+}
+
+static Scheme_Object *
+logger_name(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *name;
+
+  if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_logger_type))
+    scheme_wrong_type("logger-name", "logger", 0, argc, argv);
+
+  name = ((Scheme_Logger *)argv[0])->name;
+  return (name ? name : scheme_false);
+}
+
+static Scheme_Object *
+make_log_reader(int argc, Scheme_Object *argv[])
+{
+  Scheme_Logger *logger;
+  Scheme_Log_Reader *lr;
+  Scheme_Object *sema, *q;
+  int level;
+
+  if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_logger_type))
+    scheme_wrong_type("make-log-receiver", "logger", 0, argc, argv);
+  logger = (Scheme_Logger *)argv[0];
+
+  level = extract_level("make-log-receiver", 1, argc, argv);
+
+  lr = MALLOC_ONE_TAGGED(Scheme_Log_Reader);
+  lr->so.type = scheme_log_reader_type;
+  lr->want_level = level;
+
+  sema = scheme_make_sema(0);
+  lr->sema = sema;
+
+  /* Pair a weak reference to the reader with a strong reference to the
+     channel. Channel gets are wrapped to reference the reader. That way,
+     the link is effectively strong while a thread is sync'd on the
+     reader. */
+
+  q = scheme_make_raw_pair(scheme_make_pair(scheme_make_weak_box((Scheme_Object *)lr), 
+                                            sema),
+                           logger->readers);
+  logger->readers = q;
+  *logger->timestamp += 1;
+
+  return (Scheme_Object *)lr;
+}
+
+static Scheme_Object *
+log_reader_p(int argc, Scheme_Object *argv[])
+{
+  return (SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_log_reader_type)
+          ? scheme_true
+          : scheme_false);
+}
+
+static Scheme_Object *dequeue_log(Scheme_Object *_lr)
+{
+  Scheme_Log_Reader *lr = (Scheme_Log_Reader *)_lr;
+
+  if (lr->head) {
+    Scheme_Object *v;
+    v = SCHEME_CAR(lr->head);
+    lr->head = SCHEME_CDR(lr->head);
+    if (!lr->head)
+      lr->tail = NULL;
+    return v;
+  } else {
+    scheme_signal_error("empty log-reader queue!?");
+    return NULL;
+  }
+}
+
+static int log_reader_get(Scheme_Object *_lr, Scheme_Schedule_Info *sinfo)
+{
+  Scheme_Log_Reader *lr = (Scheme_Log_Reader *)_lr;
+  scheme_set_sync_target(sinfo, lr->sema, (Scheme_Object *)lr, NULL, 0, 1, dequeue_log);
+  return 0;
+}
+
+/***********************************************************************/
+
 void
 scheme_raise_exn(int id, ...)
 {
@@ -2491,8 +2993,6 @@ scheme_raise_exn(int id, ...)
   char *buffer;
 
   /* Precise GC: Don't allocate before getting hidden args off stack */
-  buffer = prepared_buf;
-
   HIDE_FROM_XFORM(va_start(args, id));
 
   if (id == MZEXN_OTHER)
@@ -2506,10 +3006,8 @@ scheme_raise_exn(int id, ...)
 
   msg = mzVA_ARG(args, char*);
 
-  alen = sch_vsprintf(buffer, prepared_buf_len, msg, args);
+  alen = sch_vsprintf(NULL, 0, msg, args, &buffer);
   HIDE_FROM_XFORM(va_end(args));
-
-  prepared_buf = init_buf(NULL, &prepared_buf_len);
 
 #ifndef NO_SCHEME_EXNS
   eargs[0] = scheme_make_immutable_sized_utf8_string(buffer, alen);
@@ -2700,7 +3198,20 @@ do_raise(Scheme_Object *arg, int need_debug, int eb)
 {
   Scheme_Thread *p = scheme_current_thread;
 
-  if (p->skip_error) {
+  if (p->constant_folding) {
+    if (SCHEME_TRUEP(p->constant_folding)) {
+      const char *msg;
+      if (need_debug) {
+        msg = scheme_display_to_string(((Scheme_Structure *)arg)->slots[0], NULL);
+      } else
+        msg = scheme_write_to_string(arg, NULL);
+      scheme_log(NULL,
+                 SCHEME_LOG_WARNING,
+                 0,
+                 "warning%s: optimizer constant-fold attempt failed: %s",
+                 scheme_optimize_context_to_string(p->constant_folding),
+                 msg);
+    }
     scheme_longjmp (scheme_error_buf, 1);
   }
   
@@ -2924,9 +3435,7 @@ void scheme_init_exn_config(void)
 {
   Scheme_Object *h;
 
-  h = scheme_make_prim_w_arity(def_exn_handler,
-			       "default-exception-handler",
-			       1, 1);
+  h = scheme_make_prim_w_arity(def_exn_handler, "default-exception-handler", 1, 1);
 
   scheme_set_root_param(MZCONFIG_INIT_EXN_HANDLER, h);
 }

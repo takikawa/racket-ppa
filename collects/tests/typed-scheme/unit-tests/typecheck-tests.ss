@@ -1,19 +1,20 @@
 #lang scheme/base
 
-(require "test-utils.ss" 
+(require "test-utils.ss" "planet-requires.ss"
          (for-syntax scheme/base)
          (for-template scheme/base))
-(require (private base-env))
+(require (private base-env mutated-vars type-utils union prims type-effect-convenience type-annotation)
+	 (typecheck typechecker)
+	 (rep type-rep effect-rep)
+         (utils tc-utils)
+         (env type-name-env type-environments init-envs)
+         (schemeunit))
 
-(require (private planet-requires typechecker
-                  type-rep type-effect-convenience type-env
-                  prims type-environments tc-utils union
-                  type-name-env init-envs mutated-vars
-                  effect-rep type-annotation type-utils)
-         (for-syntax (private tc-utils typechecker base-env type-env))
-         (for-template (private base-env)))
-(require (schemeunit))
-
+(require (for-syntax (utils tc-utils)
+                     (typecheck typechecker)
+	             (env type-env)
+	             (private base-env))
+         (for-template (private base-env base-types)))
 
 
 
@@ -35,7 +36,8 @@
   (syntax-case stx ()
     [(_ e)
      #`(parameterize ([delay-errors? #f]
-                      [current-namespace (namespace-anchor->namespace anch)])
+                      [current-namespace (namespace-anchor->namespace anch)]
+                      [orig-module-stx (quote-syntax e)])
          (let ([ex (expand 'e)])
            (find-mutated-vars ex)
            (tc-expr ex)))]))
@@ -157,17 +159,17 @@
                     (cond [(pair? x) 1]
                           [(null? x) 1]))
               -Integer]
-        [tc-e (lambda: ([x : Number] . [y : Number]) (car y)) (->* (list N) N N)]
-        [tc-e ((lambda: ([x : Number] . [y : Number]) (car y)) 3) N]
-        [tc-e ((lambda: ([x : Number] . [y : Number]) (car y)) 3 4 5) N]
-        [tc-e ((lambda: ([x : Number] . [y : Number]) (car y)) 3 4) N]
-        [tc-e (apply (lambda: ([x : Number] . [y : Number]) (car y)) 3 '(4)) N]
-        [tc-e (apply (lambda: ([x : Number] . [y : Number]) (car y)) 3 '(4 6 7)) N]
-        [tc-e (apply (lambda: ([x : Number] . [y : Number]) (car y)) 3 '()) N]
+        [tc-e (lambda: ([x : Number] . [y : Number *]) (car y)) (->* (list N) N N)]
+        [tc-e ((lambda: ([x : Number] . [y : Number *]) (car y)) 3) N]
+        [tc-e ((lambda: ([x : Number] . [y : Number *]) (car y)) 3 4 5) N]
+        [tc-e ((lambda: ([x : Number] . [y : Number *]) (car y)) 3 4) N]
+        [tc-e (apply (lambda: ([x : Number] . [y : Number *]) (car y)) 3 '(4)) N]
+        [tc-e (apply (lambda: ([x : Number] . [y : Number *]) (car y)) 3 '(4 6 7)) N]
+        [tc-e (apply (lambda: ([x : Number] . [y : Number *]) (car y)) 3 '()) N]
         
-        [tc-e (lambda: ([x : Number] . [y : Boolean]) (car y)) (->* (list N) B B)]
-        [tc-e ((lambda: ([x : Number] . [y : Boolean]) (car y)) 3) B]
-        [tc-e (apply (lambda: ([x : Number] . [y : Boolean]) (car y)) 3 '(#f)) B]
+        [tc-e (lambda: ([x : Number] . [y : Boolean *]) (car y)) (->* (list N) B B)]
+        [tc-e ((lambda: ([x : Number] . [y : Boolean *]) (car y)) 3) B]
+        [tc-e (apply (lambda: ([x : Number] . [y : Boolean *]) (car y)) 3 '(#f)) B]
         
         [tc-e (let: ([x : Number 3])
                     (when (number? x) #t))
@@ -222,7 +224,7 @@
                  (string-append "foo" (a v))))
          -String]
         
-        [tc-e (apply (plambda: (a) [x : a] x) '(5)) (-lst -Integer)]
+        [tc-e (apply (plambda: (a) [x : a *] x) '(5)) (-lst -Integer)]
         [tc-e (apply append (list '(1 2 3) '(4 5 6))) (-lst -Integer)]
         
         [tc-err ((case-lambda: [([x : Number]) x]
@@ -471,7 +473,7 @@
         
         ;; testing some primitives
         [tc-e (let ([app apply]
-                    [f (lambda: [x : Number] 3)])
+                    [f (lambda: [x : Number *] 3)])
                 (app f (list 1 2 3)))
               -Integer]
         [tc-e ((lambda () (call/cc (lambda: ([k : (Number -> (U))]) (if (read) 5 (k 10))))))
@@ -527,7 +529,7 @@
                   1)]
         
         [tc-e ((case-lambda:
-                [[x : Number] (+ 1 (car x))])
+                [[x : Number *] (+ 1 (car x))])
                5)
               N]
         #;
@@ -543,6 +545,43 @@
         [tc-e (if #f 1 'foo) (-val 'foo)]
         
         [tc-e (list* 1 2 3) (-pair -Integer (-pair -Integer -Integer))]
+        
+        [tc-err (apply append (list 1) (list 2) (list 3) (list (list 1) "foo"))]
+        [tc-e (apply append (list 1) (list 2) (list 3) (list (list 1) (list 1))) (-lst -Integer)]
+        [tc-e (apply append (list 1) (list 2) (list 3) (list (list 1) (list "foo"))) (-lst (Un -String -Integer))]
+        [tc-err (plambda: (b ...) [y : b ... b] (apply append (map list y)))]
+        [tc-e (plambda: (b ...) [y : (Listof Integer) ... b] (apply append y))
+              (-polydots (b) (->... (list) ((-lst -Integer) b) (-lst -Integer)))]
+        
+        [tc-err (plambda: (a ...) ([z : String] . [w : Number ... a])
+                          (apply (plambda: (b) ([x : Number] . [y : Number ... a]) x)
+                                 1 1 1 1 w))]
+        
+        [tc-err (plambda: (a ...) ([z : String] . [w : Number])
+                          (apply (plambda: (b) ([x : Number] . [y : Number ... a]) x)
+                                 1 w))]
+        
+        [tc-e (plambda: (a ...) ([z : String] . [w : Number ... a])
+                        (apply (plambda: (b ...) ([x : Number] . [y : Number ... b]) x)
+                               1 w))
+              (-polydots (a) ((list -String) (N a) . ->... . N))]
+        ;; instantiating non-dotted terms
+        [tc-e (inst (plambda: (a) ([x : a]) x) Integer)
+              (-Integer . -> . -Integer : (list (make-Latent-Var-True-Effect)) (list (make-Latent-Var-False-Effect)))]
+        [tc-e (inst (plambda: (a) [x : a *] (apply list x)) Integer)
+              ((list) -Integer . ->* . (-lst -Integer))]
+        
+        ;; instantiating dotted terms
+        [tc-e (inst (plambda: (a ...) [xs : a ... a] 3) Integer Boolean Integer)
+              (-Integer B -Integer . -> . -Integer)]
+        [tc-e (inst (plambda: (a ...) [xs : (a ... a -> Integer) ... a] 3) Integer Boolean Integer)
+              ((-Integer B -Integer . -> . -Integer)
+               (-Integer B -Integer . -> . -Integer)
+               (-Integer B -Integer . -> . -Integer)
+               . -> . -Integer)]
+        
+        [tc-e (plambda: (z x y ...) () (inst map z x y ... y))
+              (-polydots (z x y) (-> ((list ((list x) (y y) . ->... . z) (-lst x)) ((-lst y) y) . ->... . (-lst z))))]
         
         ;; error tests
         [tc-err (#%variable-reference number?)]
@@ -568,6 +607,52 @@
                              (add1 x)
                              12))]
         
+        [tc-e (filter integer? (list 1 2 3 'foo))
+              (-lst -Integer)]
+        
+        [tc-e (filter even? (filter integer? (list 1 2 3 'foo)))
+              (-lst -Integer)]
+        
+        [tc-err (plambda: (a ...) [as : a ... a]
+                          (apply fold-left (lambda: ([c : Integer] [a : Char] . [xs : a ... a]) c)
+                                 3 (list #\c) as))]
+        [tc-err (plambda: (a ...) [as : a ... a]
+                          (apply fold-left (lambda: ([c : Integer] [a : String] . [xs : a ... a]) c)
+                                 3 (list #\c) (map list as)))]
+        [tc-err (plambda: (a ...) [as : a ... a]
+                          (apply fold-left (lambda: ([c : Integer] [a : Char] . [xs : a ... a]) c)
+                                 3 (list #\c) (map list (map list as))))]
+        
+        [tc-e (plambda: (a ...) [as : a ... a]
+                        (apply fold-left (lambda: ([c : Integer] [a : Char] . [xs : a ... a]) c)
+                               3 (list #\c) (map list as)))
+              (-polydots (a) ((list) (a a) . ->... . -Integer))]
+        
+        ;; First is same as second, but with map explicitly instantiated.
+        [tc-e (plambda: (a ...) [ys : (a ... a -> Number) *]
+                (lambda: [zs : a ... a]
+                  ((inst map Number (a ... a -> Number))
+                   (lambda: ([y : (a ... a -> Number)])
+                     (apply y zs))
+                   ys)))
+              (-polydots (a) ((list) ((list) (a a) . ->... . N) . ->* . ((list) (a a) . ->... . (-lst N))))]
+        [tc-e (plambda: (a ...) [ys : (a ... a -> Number) *]
+                (lambda: [zs : a ... a]
+                  (map (lambda: ([y : (a ... a -> Number)])
+                         (apply y zs))
+                       ys)))
+              (-polydots (a) ((list) ((list) (a a) . ->... . N) . ->* . ((list) (a a) . ->... . (-lst N))))]
+        
+        ;; We need to make sure that even if a isn't free in the dotted type, that it gets replicated
+        ;; appropriately.
+        [tc-e (inst (plambda: (a ...) [ys : Number ... a]
+                              (apply + ys))
+                    Boolean String Number)
+              (N N N . -> . N)]
+        
+        [tc-e (assq 'foo #{'((a b) (foo bar)) :: (Listof (List Symbol Symbol))})
+              (Un (-val #f) (-pair Sym (-pair Sym (-val null))))]
+        
         #;[tc-err (let: ([fact : (Number -> Number) (lambda: ([n : Number]) (if (zero? n) 1 (* n (fact (- n 1)))))])
                         (fact 20))]
         
@@ -575,7 +660,8 @@
         ))
   (test-suite
    "check-type tests"
-   (test-exn "Fails correctly" exn:fail:syntax? (lambda () (check-type #'here N B)))
+   (test-exn "Fails correctly" exn:fail:syntax? (lambda () (parameterize ([orig-module-stx #'here])
+                                                             (check-type #'here N B))))
    (test-not-exn "Doesn't fail on subtypes" (lambda () (check-type #'here N Univ)))
    (test-not-exn "Doesn't fail on equal types" (lambda () (check-type #'here N N)))
    )
@@ -587,7 +673,7 @@
    (tc-l #t (-val #t))
    (tc-l "foo" -String)
    (tc-l foo (-val 'foo))
-   (tc-l #:foo -Keyword)
+   (tc-l #:foo (-val '#:foo))
    (tc-l #f (-val #f))
    (tc-l #"foo" -Bytes)
    [tc-l () (-val null)]

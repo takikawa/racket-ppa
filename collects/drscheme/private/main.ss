@@ -8,8 +8,8 @@
          mzlib/class
          mzlib/list
          scheme/path
-         (lib "external.ss" "browser")
-         (lib "plt-installer.ss" "setup"))
+         browser/external
+         setup/plt-installer)
 
 (import [prefix drscheme:app: drscheme:app^]
         [prefix drscheme:unit: drscheme:unit^]
@@ -53,6 +53,23 @@
                                (finder:default-filters)))
 (application:current-app-name (string-constant drscheme))
 
+(preferences:set-default 'drscheme:saved-bug-reports 
+                         '() 
+                         (λ (ll) 
+                           (and (list? ll)
+                                (andmap
+                                 (λ (l)
+                                   (and (list? l)
+                                        (andmap (λ (x) (and (pair? x)
+                                                            (symbol? (car x))
+                                                            (string? (cdr x))))
+                                                l)))
+                                 ll))))
+
+(preferences:set-default 'drscheme:module-language-first-line-special? #t boolean?)
+
+(preferences:set-default 'drscheme:defns-popup-sort-by-name? #f boolean?)
+
 (preferences:set-default 'drscheme:toolbar-state 
                          '(#f . top)
                          (λ (x) (and (pair? x)
@@ -77,7 +94,7 @@
                                          (number? (car x))
                                          (number? (cdr x))))))
 
-(preferences:set-default 'drscheme:limit-memory (* 1024 1024 128)
+(preferences:set-default 'drscheme:memory-limit (* 1024 1024 128)
                          (λ (x) (or (boolean? x)
                                     (integer? x)
                                     (x . >= . (* 1024 1024 100)))))
@@ -180,7 +197,7 @@
 
 (preferences:set-default 
  'drscheme:keybindings-window-size
- (cons 200 400)
+ (cons 400 600)
  (λ (x) (and (pair? x)
              (number? (car x))
              (number? (cdr x)))))
@@ -240,6 +257,11 @@
      (make-check-box 'drscheme:defs/ints-horizontal
                      (string-constant interactions-beside-definitions)
                      editor-panel)
+     
+     (make-check-box 'drscheme:module-language-first-line-special?
+                     (string-constant ml-always-show-#lang-line)
+                     editor-panel)
+     
      ;; come back to this one.
      #;
      (letrec ([hp (new horizontal-panel% 
@@ -288,10 +310,19 @@
 (install-help-browser-preference-panel)
 (drscheme:tools:add-prefs-panel)
 
+(drscheme:language:register-capability 'drscheme:tabify-menu-callback 
+                                       (or/c false/c (-> (is-a?/c text%) number? number? void?))
+                                       (λ (t a b) (send t tabify-selection a b)))
 (drscheme:language:register-capability 'drscheme:autocomplete-words (listof string?) '())
 (drscheme:language:register-capability 'drscheme:define-popup
                                        (or/c (cons/c string? string?) false/c)
                                        (cons "(define" "(define ...)"))
+
+;; The default is #f to keep whatever the user chose as their context.
+;; If it's "", then we will kill the user's choice.
+(drscheme:language:register-capability 'drscheme:help-context-term
+                                       (or/c false/c string?)
+                                       #f)
 
 (drscheme:language:register-capability 'drscheme:special:insert-fraction (flat-contract boolean?) #t)
 (drscheme:language:register-capability 'drscheme:special:insert-large-letters (flat-contract boolean?) #t)

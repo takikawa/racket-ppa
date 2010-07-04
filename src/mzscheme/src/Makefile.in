@@ -26,15 +26,16 @@ OBJS =  salloc.@LTO@ \
 	fun.@LTO@ \
         gmp.@LTO@ \
 	hash.@LTO@ \
-	image.@LTO@ \
 	jit.@LTO@ \
 	list.@LTO@ \
 	module.@LTO@ \
+	mzrt.@LTO@ \
 	network.@LTO@ \
 	numarith.@LTO@ \
 	number.@LTO@ \
 	numcomp.@LTO@ \
 	numstr.@LTO@ \
+	places.@LTO@ \
 	port.@LTO@ \
 	portfun.@LTO@ \
 	print.@LTO@ \
@@ -66,15 +67,16 @@ SRCS =  $(srcdir)/salloc.c \
 	$(srcdir)/fun.c \
 	$(srcdir)/gmp/gmp.c \
 	$(srcdir)/hash.c \
-	$(srcdir)/image.c \
 	$(srcdir)/jit.c \
 	$(srcdir)/list.c \
 	$(srcdir)/module.c \
+	$(srcdir)/mzrt.c \
 	$(srcdir)/network.c \
 	$(srcdir)/numarith.c \
 	$(srcdir)/number.c \
 	$(srcdir)/numcomp.c \
 	$(srcdir)/numstr.c \
+	$(srcdir)/places.c \
 	$(srcdir)/port.c \
 	$(srcdir)/portfun.c \
 	$(srcdir)/print.c \
@@ -170,14 +172,14 @@ gmp.@LTO@: $(srcdir)/gmp/gmp.c $(srcdir)/gmp/gmplonglong.h
 	$(CC) $(CFLAGS) -c $(srcdir)/gmp/gmp.c -o gmp.@LTO@
 hash.@LTO@: $(srcdir)/hash.c
 	$(CC) $(CFLAGS) -c $(srcdir)/hash.c -o hash.@LTO@
-image.@LTO@: $(srcdir)/image.c
-	$(CC) $(CFLAGS) -c $(srcdir)/image.c -o image.@LTO@
 jit.@LTO@: $(srcdir)/jit.c
 	$(CC) $(CFLAGS) -c $(srcdir)/jit.c -o jit.@LTO@
 list.@LTO@: $(srcdir)/list.c
 	$(CC) $(CFLAGS) -c $(srcdir)/list.c -o list.@LTO@
 module.@LTO@: $(srcdir)/module.c
 	$(CC) $(CFLAGS) -c $(srcdir)/module.c -o module.@LTO@
+mzrt.@LTO@: $(srcdir)/mzrt.c
+	$(CC) $(CFLAGS) -c $(srcdir)/mzrt.c -o mzrt.@LTO@
 network.@LTO@: $(srcdir)/network.c
 	$(CC) $(CFLAGS) -c $(srcdir)/network.c -o network.@LTO@
 numarith.@LTO@: $(srcdir)/numarith.c
@@ -188,6 +190,8 @@ numcomp.@LTO@: $(srcdir)/numcomp.c
 	$(CC) $(CFLAGS) -c $(srcdir)/numcomp.c -o numcomp.@LTO@
 numstr.@LTO@: $(srcdir)/numstr.c
 	$(CC) $(CFLAGS) -c $(srcdir)/numstr.c -o numstr.@LTO@
+places.@LTO@: $(srcdir)/places.c
+	$(CC) $(CFLAGS) -c $(srcdir)/places.c -o places.@LTO@
 port.@LTO@: $(srcdir)/port.c
 	$(CC) $(CFLAGS) -c $(srcdir)/port.c -o port.@LTO@
 portfun.@LTO@: $(srcdir)/portfun.c
@@ -276,6 +280,8 @@ numcomp.@LTO@: $(srcdir)/schpriv.h $(srcdir)/schexn.h $(SCONFIG) $(srcdir)/../in
          $(srcdir)/../src/stypes.h $(srcdir)/nummacs.h
 numstr.@LTO@: $(srcdir)/schpriv.h $(srcdir)/schexn.h $(SCONFIG) $(srcdir)/../include/scheme.h \
          $(srcdir)/../src/stypes.h  $(srcdir)/random.inc $(srcdir)/newrandom.inc
+places.@LTO@: $(srcdir)/schpriv.h $(srcdir)/schexn.h $(SCONFIG) $(srcdir)/../include/scheme.h \
+        $(srcdir)/../src/stypes.h  $(srcdir)/schfd.h $(srcdir)/mzmark.c
 port.@LTO@: $(srcdir)/schpriv.h $(srcdir)/schexn.h $(SCONFIG) $(srcdir)/../include/scheme.h \
         $(srcdir)/../src/stypes.h  $(srcdir)/schfd.h $(srcdir)/mzmark.c
 portfun.@LTO@: $(srcdir)/schpriv.h $(srcdir)/schexn.h $(SCONFIG) $(srcdir)/../include/scheme.h \

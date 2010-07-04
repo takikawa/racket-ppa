@@ -19,7 +19,9 @@
   scheme_extension_table->scheme_inherit_cells = scheme_inherit_cells;
   scheme_extension_table->scheme_current_break_cell = scheme_current_break_cell;
 #ifndef LINK_EXTENSIONS_BY_TABLE
+# ifndef MZ_USE_PLACES
   scheme_extension_table->scheme_current_thread = scheme_current_thread;
+# endif
   scheme_extension_table->scheme_fuel_counter = scheme_fuel_counter;
 #else
   scheme_extension_table->scheme_current_thread_ptr = scheme_current_thread_ptr;
@@ -83,6 +85,9 @@
   scheme_extension_table->scheme_raise_exn = scheme_raise_exn;
   scheme_extension_table->scheme_warning = scheme_warning;
   scheme_extension_table->scheme_raise = scheme_raise;
+  scheme_extension_table->scheme_log_level_p = scheme_log_level_p;
+  scheme_extension_table->scheme_log = scheme_log;
+  scheme_extension_table->scheme_log_message = scheme_log_message;
   scheme_extension_table->scheme_wrong_count = scheme_wrong_count;
   scheme_extension_table->scheme_wrong_count_m = scheme_wrong_count_m;
   scheme_extension_table->scheme_case_lambda_wrong_count = scheme_case_lambda_wrong_count;
@@ -216,6 +221,7 @@
   scheme_extension_table->GC_resolve = GC_resolve;
   scheme_extension_table->GC_mark = GC_mark;
   scheme_extension_table->GC_fixup = GC_fixup;
+  scheme_extension_table->GC_fixup_self = GC_fixup_self;
 #endif
   scheme_extension_table->scheme_malloc_immobile_box = scheme_malloc_immobile_box;
   scheme_extension_table->scheme_free_immobile_box = scheme_free_immobile_box;
@@ -445,6 +451,7 @@
   scheme_extension_table->scheme_write_special_evt_via_write_special = scheme_write_special_evt_via_write_special;
   scheme_extension_table->scheme_open_input_file = scheme_open_input_file;
   scheme_extension_table->scheme_open_output_file = scheme_open_output_file;
+  scheme_extension_table->scheme_open_input_output_file = scheme_open_input_output_file;
   scheme_extension_table->scheme_open_output_file_with_mode = scheme_open_output_file_with_mode;
   scheme_extension_table->scheme_make_file_input_port = scheme_make_file_input_port;
   scheme_extension_table->scheme_make_named_file_input_port = scheme_make_named_file_input_port;
@@ -509,7 +516,6 @@
   scheme_extension_table->scheme_read_byte_string = scheme_read_byte_string;
   scheme_extension_table->scheme_make_namespace = scheme_make_namespace;
   scheme_extension_table->scheme_add_namespace_option = scheme_add_namespace_option;
-  scheme_extension_table->scheme_require_from_original_env = scheme_require_from_original_env;
   scheme_extension_table->scheme_add_global = scheme_add_global;
   scheme_extension_table->scheme_add_global_symbol = scheme_add_global_symbol;
   scheme_extension_table->scheme_make_envunbox = scheme_make_envunbox;
@@ -603,7 +609,6 @@
   scheme_extension_table->scheme_check_proc_arity2 = scheme_check_proc_arity2;
   scheme_extension_table->scheme_make_provided_string = scheme_make_provided_string;
   scheme_extension_table->scheme_make_args_string = scheme_make_args_string;
-  scheme_extension_table->scheme_no_dumps = scheme_no_dumps;
   scheme_extension_table->scheme_system_library_subpath = scheme_system_library_subpath;
   scheme_extension_table->scheme_signal_received = scheme_signal_received;
   scheme_extension_table->scheme_char_strlen = scheme_char_strlen;

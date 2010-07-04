@@ -142,27 +142,18 @@ extern int scheme_jit_malloced;
 
 static int buffer_init_size = INIT_TB_SIZE;
 
-Scheme_Thread *scheme_current_thread = NULL;
-Scheme_Thread *scheme_main_thread = NULL;
-Scheme_Thread *scheme_first_thread = NULL;
+THREAD_LOCAL Scheme_Thread *scheme_current_thread = NULL;
+THREAD_LOCAL Scheme_Thread *scheme_main_thread = NULL;
+THREAD_LOCAL Scheme_Thread *scheme_first_thread = NULL;
 
 Scheme_Thread *scheme_get_current_thread() { return scheme_current_thread; }
+long scheme_get_multiple_count() { return scheme_current_thread->ku.multiple.count; }
+Scheme_Object **scheme_get_multiple_array() { return scheme_current_thread->ku.multiple.array; }
+void scheme_set_current_thread_ran_some() { scheme_current_thread->ran_some = 1; }
 
-typedef struct Scheme_Thread_Set {
-  Scheme_Object so;
-  struct Scheme_Thread_Set *parent;
-  Scheme_Object *first;
-  Scheme_Object *next;
-  Scheme_Object *prev;
-  Scheme_Object *search_start;
-  Scheme_Object *current;
-} Scheme_Thread_Set;
-
-Scheme_Thread_Set *thread_set_top;
+THREAD_LOCAL Scheme_Thread_Set *scheme_thread_set_top;
 
 static int num_running_threads = 1;
-
-void *scheme_deepest_stack_start;
 
 #ifdef LINK_EXTENSIONS_BY_TABLE
 Scheme_Thread **scheme_current_thread_ptr;
@@ -176,15 +167,15 @@ static int did_gc_count;
 static int init_load_on_demand = 1;
 
 #ifdef RUNSTACK_IS_GLOBAL
-Scheme_Object **scheme_current_runstack_start;
-Scheme_Object **scheme_current_runstack;
-MZ_MARK_STACK_TYPE scheme_current_cont_mark_stack;
-MZ_MARK_POS_TYPE scheme_current_cont_mark_pos;
+THREAD_LOCAL Scheme_Object **scheme_current_runstack_start;
+THREAD_LOCAL Scheme_Object **scheme_current_runstack;
+THREAD_LOCAL MZ_MARK_STACK_TYPE scheme_current_cont_mark_stack;
+THREAD_LOCAL MZ_MARK_POS_TYPE scheme_current_cont_mark_pos;
 #endif
 
-static Scheme_Custodian *main_custodian;
-static Scheme_Custodian *last_custodian;
-static Scheme_Hash_Table *limited_custodians = NULL;
+static THREAD_LOCAL Scheme_Custodian *main_custodian;
+static THREAD_LOCAL Scheme_Custodian *last_custodian;
+static THREAD_LOCAL Scheme_Hash_Table *limited_custodians = NULL;
 
 static Scheme_Object *initial_inspector;
 
@@ -199,7 +190,7 @@ extern int GC_is_marked(void *);
 /* On swap, put target in a static variable, instead of on the stack,
    so that the swapped-out thread is less likely to have a pointer
    to the target thread. */
-static Scheme_Thread *swap_target;
+static THREAD_LOCAL Scheme_Thread *swap_target;
 
 static Scheme_Object *scheduled_kills;
 
@@ -208,11 +199,16 @@ Scheme_Object *scheme_exn_handler_key;
 Scheme_Object *scheme_break_enabled_key;
 
 long scheme_total_gc_time;
-static long start_this_gc_time;
+static long start_this_gc_time, end_this_gc_time;
+#ifndef MZ_PRECISE_GC
 extern MZ_DLLIMPORT void (*GC_collect_start_callback)(void);
 extern MZ_DLLIMPORT void (*GC_collect_end_callback)(void);
+#endif
 static void get_ready_for_GC(void);
 static void done_with_GC(void);
+#ifdef MZ_PRECISE_GC
+static void inform_GC(int major_gc, long pre_used, long post_used);
+#endif
 
 static volatile short delayed_break_ready = 0;
 static Scheme_Thread *main_break_target_thread;
@@ -423,7 +419,7 @@ typedef struct {
 static int num_nsos = 0;
 static Scheme_NSO *namespace_options = NULL;
 
-#define SETJMP(p) scheme_setjmpup(&p->jmpup_buf, p, ADJUST_STACK_START(p->stack_start))
+#define SETJMP(p) scheme_setjmpup(&p->jmpup_buf, p, p->stack_start)
 #define LONGJMP(p) scheme_longjmpup(&p->jmpup_buf)
 #define RESETJMP(p) scheme_reset_jmpup_buf(&p->jmpup_buf)
 
@@ -822,18 +818,21 @@ void scheme_init_memtrace(Scheme_Env *env)
   scheme_finish_primitive_module(newenv);
 }
 
-void scheme_init_parameterization(Scheme_Env *env)
+void scheme_init_parameterization_readonly_globals()
 {
-  Scheme_Object *v;
-  Scheme_Env *newenv;
-
   REGISTER_SO(scheme_exn_handler_key);
   REGISTER_SO(scheme_parameterization_key);
   REGISTER_SO(scheme_break_enabled_key);
   scheme_exn_handler_key = scheme_make_symbol("exnh");
   scheme_parameterization_key = scheme_make_symbol("paramz");
   scheme_break_enabled_key = scheme_make_symbol("break-on?");
+}
   
+void scheme_init_parameterization(Scheme_Env *env)
+{
+  Scheme_Object *v;
+  Scheme_Env *newenv;
+
   REGISTER_SO(recycle_cell);
   REGISTER_SO(maybe_recycle_cell);
 
@@ -1867,6 +1866,7 @@ void scheme_schedule_custodian_close(Scheme_Custodian *c)
 
   scheduled_kills = scheme_make_pair((Scheme_Object *)c, scheduled_kills);
   scheme_fuel_counter = 0;
+  scheme_jit_stack_boundary = (unsigned long)-1;
 }
 
 static void check_scheduled_kills()
@@ -2072,7 +2072,8 @@ static void unschedule_in_set(Scheme_Object *s, Scheme_Thread_Set *t_set)
 static Scheme_Thread *make_thread(Scheme_Config *config, 
 				  Scheme_Thread_Cell_Table *cells,
 				  Scheme_Object *init_break_cell,
-				  Scheme_Custodian *mgr)
+				  Scheme_Custodian *mgr,
+          void *stack_base)
 {
   Scheme_Thread *process;
   int prefix = 0;
@@ -2080,8 +2081,6 @@ static Scheme_Thread *make_thread(Scheme_Config *config,
   process = MALLOC_ONE_TAGGED(Scheme_Thread);
 
   process->so.type = scheme_thread_type;
-
-  process->stack_start = 0;
 
   if (!scheme_main_thread) {
     /* Creating the first thread... */
@@ -2109,20 +2108,20 @@ static Scheme_Thread *make_thread(Scheme_Config *config,
 
     GC_collect_start_callback = get_ready_for_GC;
     GC_collect_end_callback = done_with_GC;
+#ifdef MZ_PRECISE_GC
+    GC_collect_inform_callback = inform_GC;
+#endif
 
 #ifdef LINK_EXTENSIONS_BY_TABLE
     scheme_current_thread_ptr = &scheme_current_thread;
     scheme_fuel_counter_ptr = &scheme_fuel_counter;
 #endif
-
-#ifdef MZ_PRECISE_GC
-    {
-      void *ss;
-      ss = (void *)GC_get_stack_base();
-      process->stack_start = ss;
-    }
+    
+#if defined(MZ_PRECISE_GC) || defined(USE_SENORA_GC)
     GC_get_thread_stack_base = get_current_stack_start;
 #endif
+    process->stack_start = stack_base;
+
   } else {
     prefix = 1;
   }
@@ -2164,10 +2163,10 @@ static Scheme_Thread *make_thread(Scheme_Config *config,
   }
   
   if (SAME_OBJ(process, scheme_first_thread)) {
-    REGISTER_SO(thread_set_top);
-    thread_set_top = process->t_set_parent;
-    thread_set_top->first = (Scheme_Object *)process;
-    thread_set_top->current = (Scheme_Object *)process;
+    REGISTER_SO(scheme_thread_set_top);
+    scheme_thread_set_top = process->t_set_parent;
+    scheme_thread_set_top->first = (Scheme_Object *)process;
+    scheme_thread_set_top->current = (Scheme_Object *)process;
   } else
     schedule_in_set((Scheme_Object *)process, process->t_set_parent);
     
@@ -2300,10 +2299,10 @@ static Scheme_Thread *make_thread(Scheme_Config *config,
   return process;
 }
 
-Scheme_Thread *scheme_make_thread()
+Scheme_Thread *scheme_make_thread(void *stack_base)
 {
   /* Makes the initial process. */
-  return make_thread(NULL, NULL, NULL, NULL);
+  return make_thread(NULL, NULL, NULL, NULL, stack_base);
 }
 
 static void scheme_check_tail_buffer_size(Scheme_Thread *p)
@@ -2518,7 +2517,7 @@ static void select_thread()
 
   /* Try to pick a next thread to avoid DOS attacks
      through whatever kinds of things call select_thread() */
-  o = (Scheme_Object *)thread_set_top;
+  o = (Scheme_Object *)scheme_thread_set_top;
   while (!SCHEME_THREADP(o)) {
     t_set = (Scheme_Thread_Set *)o;
     o = get_t_set_next(t_set->current);
@@ -2814,13 +2813,6 @@ static void start_child(Scheme_Thread * volatile child,
   }
 }
 
-void scheme_ensure_stack_start(void *d)
-{
-  if (!scheme_deepest_stack_start
-      || (STK_COMP((unsigned long)scheme_deepest_stack_start, (unsigned long)d)))
-    scheme_deepest_stack_start = d;
-}
-
 static Scheme_Object *make_subprocess(Scheme_Object *child_thunk,
 				      void *child_start, 
 				      Scheme_Config *config,
@@ -2834,8 +2826,6 @@ static Scheme_Object *make_subprocess(Scheme_Object *child_thunk,
  
   turn_on_multi = !scheme_first_thread->next;
   
-  scheme_ensure_stack_start(child_start);
-  
   if (!config)
     config = scheme_current_config();
   if (!cells)
@@ -2846,7 +2836,7 @@ static Scheme_Object *make_subprocess(Scheme_Object *child_thunk,
       maybe_recycle_cell = NULL;
   }
 
-  child = make_thread(config, cells, break_cell, mgr);
+  child = make_thread(config, cells, break_cell, mgr, child_start);
 
   /* Use child_thunk name, if any, for the thread name: */
   {
@@ -2953,7 +2943,7 @@ static int thread_wait_done(Scheme_Object *p, Scheme_Schedule_Info *sinfo)
        the blocking thread can be dequeued: */
     Scheme_Object *evt;
     evt = scheme_get_thread_dead((Scheme_Thread *)p);
-    scheme_set_sync_target(sinfo, evt, p, NULL, 0, 0);
+    scheme_set_sync_target(sinfo, evt, p, NULL, 0, 0, NULL);
     return 0;
   } else
     return 1;
@@ -3073,9 +3063,7 @@ Scheme_Object *scheme_thread_w_details(Scheme_Object *thunk,
 				       int suspend_to_kill)
 {
   Scheme_Object *result;
-#ifndef MZ_PRECISE_GC
-  long dummy;
-#endif
+  void *stack_marker;
 
 #ifdef DO_STACK_CHECK
   /* Make sure the thread starts out with a reasonable stack size, so
@@ -3098,12 +3086,7 @@ Scheme_Object *scheme_thread_w_details(Scheme_Object *thunk,
   }
 #endif
 
-  result = make_subprocess(thunk, 
-#ifdef MZ_PRECISE_GC
-			   (void *)&__gc_var_stack__,
-#else
-			   (void *)&dummy, 
-#endif
+  result = make_subprocess(thunk, PROMPT_STACK(stack_marker),
 			   config, cells, break_cell, mgr, !suspend_to_kill);
 
   /* Don't get rid of `result'; it keeps the
@@ -3192,8 +3175,6 @@ Scheme_Object *scheme_call_as_nested_thread(int argc, Scheme_Object *argv[], voi
   }
   np->tail_buffer_size = p->tail_buffer_size;
 
-  scheme_ensure_stack_start(max_bottom);
-  
   np->list_stack = p->list_stack;
   np->list_stack_pos = p->list_stack_pos;
 
@@ -3533,6 +3514,7 @@ START_XFORM_SKIP;
 static void timer_expired(int ignored)
 {
   scheme_fuel_counter = 0;
+  scheme_jit_stack_boundary = (unsigned long)-1;
 #  ifdef SIGSET_NEEDS_REINSTALL
   MZ_SIGSET(SIGPROF, timer_expired);
 #  endif
@@ -3792,8 +3774,10 @@ void scheme_break_thread(Scheme_Thread *p)
   p->external_break = 1;
 
   if (p == scheme_current_thread) {
-    if (scheme_can_break(p))
+    if (scheme_can_break(p)) {
       scheme_fuel_counter = 0;
+      scheme_jit_stack_boundary = (unsigned long)-1;
+    }
   }
   scheme_weak_resume_thread(p);
 # if defined(WINDOWS_PROCESSES) || defined(WINDOWS_FILE_HANDLES)
@@ -3802,15 +3786,154 @@ void scheme_break_thread(Scheme_Thread *p)
 # endif
 }
 
+static void find_next_thread(Scheme_Thread **return_arg) {
+  Scheme_Thread *next;
+  Scheme_Thread *p = scheme_current_thread;
+  Scheme_Object *next_in_set;
+  Scheme_Thread_Set *t_set;
+
+  double msecs = 0.0;
+
+  /* Find the next process. Skip processes that are definitely
+     blocked. */
+
+  /* Start from the root */
+  next_in_set = (Scheme_Object *)scheme_thread_set_top;
+  t_set = NULL; /* this will get set at the beginning of the loop */
+
+  /* Each thread may or may not be available. If it's not available,
+     we search thread by thread to find something that is available. */
+  while (1) {
+    /* next_in_set is the thread or set to try... */
+
+    /* While it's a set, go down into the set, choosing the next
+       item after the set's current. For each set, remember where we
+       started searching for something to run, so we'll know when
+       we've tried everything in the set. */
+    while (!SCHEME_THREADP(next_in_set)) {
+      t_set = (Scheme_Thread_Set *)next_in_set;
+      next_in_set = get_t_set_next(t_set->current);
+      if (!next_in_set)
+        next_in_set = t_set->first;
+      t_set->current = next_in_set;
+      t_set->search_start = next_in_set;
+    }
+
+    /* Now `t_set' is the set we're trying, and `next' will be the
+       thread to try: */
+    next = (Scheme_Thread *)next_in_set;
+
+    /* If we get back to the current thread, then
+       no other thread was ready. */
+    if (SAME_PTR(next, p)) {
+      next = NULL;
+      break;
+    }
+
+    /* Check whether `next' is ready... */
+
+    if (next->nestee) {
+      /* Blocked on nestee */
+    } else if (next->running & MZTHREAD_USER_SUSPENDED) {
+      if (next->next || (next->running & MZTHREAD_NEED_SUSPEND_CLEANUP)) {
+        /* If a non-main thread is still in the queue, 
+           it needs to be swapped in so it can clean up
+           and suspend itself. */
+        break;
+      }
+    } else if (next->running & MZTHREAD_KILLED) {
+      /* This one has been terminated. */
+      if ((next->running & MZTHREAD_NEED_KILL_CLEANUP) 
+          || next->nester
+          || !next->next) {
+        /* The thread needs to clean up. Swap it in so it can die. */
+        break;
+      } else
+        remove_thread(next);
+      break;
+    } else if (next->external_break && scheme_can_break(next)) {
+      break;
+    } else {
+      if (next->block_descriptor == GENERIC_BLOCKED) {
+        if (next->block_check) {
+          Scheme_Ready_Fun_FPC f = (Scheme_Ready_Fun_FPC)next->block_check;
+          Scheme_Schedule_Info sinfo;
+          init_schedule_info(&sinfo, next, next->sleep_end);
+          if (f(next->blocker, &sinfo))
+            break;
+          next->sleep_end = sinfo.sleep_end;
+          msecs = 0.0; /* that could have taken a while */
+        }
+      } else if (next->block_descriptor == SLEEP_BLOCKED) {
+        if (!msecs)
+          msecs = scheme_get_inexact_milliseconds();
+        if (next->sleep_end <= msecs)
+          break;
+      } else
+        break;
+    }
+
+    /* Look for the next thread/set in this set */
+    if (next->t_set_next)
+      next_in_set = next->t_set_next;
+    else
+      next_in_set = t_set->first;
+
+    /* If we run out of things to try in this set,
+       go up to find the next set. */
+    if (SAME_OBJ(next_in_set, t_set->search_start)) {
+      /* Loop to go up past exhausted sets, clearing search_start
+         from each exhausted set. */
+      while (1) {
+        t_set->search_start = NULL;
+        t_set = t_set->parent;
+
+        if (t_set) {
+          next_in_set = get_t_set_next(t_set->current);
+          if (!next_in_set)
+            next_in_set = t_set->first;
+
+          if (SAME_OBJ(next_in_set, t_set->search_start)) {
+            t_set->search_start = NULL;
+            /* continue going up */
+          } else {
+            t_set->current = next_in_set;
+            break;
+          }
+        } else
+          break;
+      }
+
+      if (!t_set) {
+        /* We ran out of things to try. If we
+           start again with the top, we should
+           land back at p. */
+        next = NULL;
+        break;
+      }
+    } else {
+      /* Set current... */
+      t_set->current = next_in_set;
+    } 
+    /* As we go back to the top of the loop, we'll check whether
+       next_in_set is a thread or set, etc. */
+  }
+
+  p           = NULL;
+  next_in_set = NULL;
+  t_set       = NULL;
+  *return_arg = next;
+  next        = NULL;
+}
+
 void scheme_thread_block(float sleep_time)
      /* If we're blocked, `sleep_time' is a max sleep time,
 	not a min sleep time. Otherwise, it's a min & max sleep time.
 	This proc auto-resets p's blocking info if an escape occurs. */
 {
   double sleep_end;
-  Scheme_Thread *next, *p = scheme_current_thread;
-  Scheme_Object *next_in_set;
-  Scheme_Thread_Set *t_set;
+  Scheme_Thread *next;
+  Scheme_Thread *p = scheme_current_thread;
 
   if (p->running & MZTHREAD_KILLED) {
     /* This thread is dead! Give up now. */
@@ -3865,142 +3988,19 @@ void scheme_thread_block(float sleep_time)
   check_scheduled_kills();
 
   if (!do_atomic && (sleep_end >= 0.0)) {
-    double msecs = 0.0;
-
-    /* Find the next process. Skip processes that are definitely
-       blocked. */
-    
-    /* Start from the root */
-    next_in_set = (Scheme_Object *)thread_set_top;
-    t_set = NULL; /* this will get set at the beginning of the loop */
-    
-    /* Each thread may or may not be available. If it's not available,
-       we search thread by thread to find something that is available. */
-    while (1) {
-      /* next_in_set is the thread or set to try... */
-
-      /* While it's a set, go down into the set, choosing the next
-	 item after the set's current. For each set, remember where we
-	 started searching for something to run, so we'll know when
-	 we've tried everything in the set. */
-      while (!SCHEME_THREADP(next_in_set)) {
-	t_set = (Scheme_Thread_Set *)next_in_set;
-	next_in_set = get_t_set_next(t_set->current);
-	if (!next_in_set)
-	  next_in_set = t_set->first;
-	t_set->current = next_in_set;
-	t_set->search_start = next_in_set;
-      }
-
-      /* Now `t_set' is the set we're trying, and `next' will be the
-         thread to try: */
-      next = (Scheme_Thread *)next_in_set;
-      
-      /* If we get back to the current thread, then
-	 no other thread was ready. */
-      if (SAME_PTR(next, p)) {
-	next = NULL;
-	break;
-      }
-
-      /* Check whether `next' is ready... */
-
-      if (next->nestee) {
-	/* Blocked on nestee */
-      } else if (next->running & MZTHREAD_USER_SUSPENDED) {
-	if (next->next || (next->running & MZTHREAD_NEED_SUSPEND_CLEANUP)) {
-	  /* If a non-main thread is still in the queue, 
-	     it needs to be swapped in so it can clean up
-	     and suspend itself. */
-	  break;
-	}
-      } else if (next->running & MZTHREAD_KILLED) {
-	/* This one has been terminated. */
-	if ((next->running & MZTHREAD_NEED_KILL_CLEANUP) 
-	    || next->nester
-	    || !next->next) {
-	  /* The thread needs to clean up. Swap it in so it can die. */
-	  break;
-	} else
-	  remove_thread(next);
-	break;
-      } else if (next->external_break && scheme_can_break(next)) {
-	break;
-      } else {
-	if (next->block_descriptor == GENERIC_BLOCKED) {
-	  if (next->block_check) {
-	    Scheme_Ready_Fun_FPC f = (Scheme_Ready_Fun_FPC)next->block_check;
-	    Scheme_Schedule_Info sinfo;
-	    init_schedule_info(&sinfo, next, next->sleep_end);
-	    if (f(next->blocker, &sinfo))
-	      break;
-	    next->sleep_end = sinfo.sleep_end;
-            msecs = 0.0; /* that could have taken a while */
-	  }
-	} else if (next->block_descriptor == SLEEP_BLOCKED) {
-          if (!msecs)
-            msecs = scheme_get_inexact_milliseconds();
-	  if (next->sleep_end <= msecs)
-	    break;
-	} else
-	  break;
-      }
-
-      /* Look for the next thread/set in this set */
-      if (next->t_set_next)
-	next_in_set = next->t_set_next;
-      else
-	next_in_set = t_set->first;
-
-      /* If we run out of things to try in this set,
-	 go up to find the next set. */
-      if (SAME_OBJ(next_in_set, t_set->search_start)) {
-	/* Loop to go up past exhausted sets, clearing search_start
-	   from each exhausted set. */
-	while (1) {
-	  t_set->search_start = NULL;
-	  t_set = t_set->parent;
-
-	  if (t_set) {
-	    next_in_set = get_t_set_next(t_set->current);
-	    if (!next_in_set)
-	      next_in_set = t_set->first;
-
-	    if (SAME_OBJ(next_in_set, t_set->search_start)) {
-	      t_set->search_start = NULL;
-	      /* continue going up */
-	    } else {
-	      t_set->current = next_in_set;
-	      break;
-	    }
-	  } else
-	    break;
-	}
-	
-	if (!t_set) {
-	  /* We ran out of things to try. If we
-	     start again with the top, we should
-	     land back at p. */
-	  next = NULL;
-	  break;
-	}
-      } else {
-	/* Set current... */
-	t_set->current = next_in_set;
-      } 
-      /* As we go back to the top of the loop, we'll check whether
-	 next_in_set is a thread or set, etc. */
-    }
+    find_next_thread(&next);
   } else
     next = NULL;
   
   if (next) {
     /* Clear out search_start fields */
+    Scheme_Thread_Set *t_set;
     t_set = next->t_set_parent;
     while (t_set) {
       t_set->search_start = NULL;
       t_set = t_set->parent;
     }
+    t_set = NULL;
   }
 
   if ((sleep_end > 0.0) && (p->block_descriptor == NOT_BLOCKED)) {
@@ -4033,8 +4033,6 @@ void scheme_thread_block(float sleep_time)
 
   if (next) {
     /* Swap in `next', but first clear references to other threads. */
-    next_in_set = NULL;
-    t_set = NULL;
     swap_target = next;
     next = NULL;
     do_swap_thread();
@@ -4105,7 +4103,8 @@ void scheme_thread_block(float sleep_time)
   if (do_atomic)
     missed_context_switch = 1;
 
-  MZTHREADELEM(p, fuel_counter) = p->engine_weight;
+  scheme_fuel_counter = p->engine_weight;
+  scheme_jit_stack_boundary = scheme_stack_boundary;
 
 #ifdef USE_ITIMER
   {
@@ -4985,11 +4984,11 @@ static int resume_suspend_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo)
 
   t = SCHEME_PTR2_VAL(o);
   if (t) {
-    scheme_set_sync_target(sinfo, o, t, NULL, 0, 0);
+    scheme_set_sync_target(sinfo, o, t, NULL, 0, 0, NULL);
     return 1;
   }
 
-  scheme_set_sync_target(sinfo, SCHEME_PTR1_VAL(o), o, NULL, 0, 1);
+  scheme_set_sync_target(sinfo, SCHEME_PTR1_VAL(o), o, NULL, 0, 1, NULL);
   return 0;
 }
 
@@ -5022,7 +5021,7 @@ Scheme_Object *scheme_get_thread_dead(Scheme_Thread *p)
 
 static int dead_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo)
 {
-  scheme_set_sync_target(sinfo, SCHEME_PTR_VAL(o), o, NULL, 0, 1);
+  scheme_set_sync_target(sinfo, SCHEME_PTR_VAL(o), o, NULL, 0, 1, NULL);
   return 0;
 }
 
@@ -5170,7 +5169,7 @@ static void *splice_ptr_array(void **a, int al, void **b, int bl, int i)
 
 static void set_sync_target(Syncing *syncing, int i, Scheme_Object *target, 
 			    Scheme_Object *wrap, Scheme_Object *nack, 
-			    int repost, int retry)
+			    int repost, int retry, Scheme_Accept_Sync accept)
 /* Not ready, deferred to target. */
 {
   Evt_Set *evt_set = syncing->set;
@@ -5207,6 +5206,16 @@ static void set_sync_target(Syncing *syncing, int i, Scheme_Object *target,
       syncing->reposts = s;
     }
     syncing->reposts[i] = 1;
+  }
+
+  if (accept) {
+    if (!syncing->accepts) {
+      Scheme_Accept_Sync *s;
+      s = (Scheme_Accept_Sync *)scheme_malloc_atomic(sizeof(Scheme_Accept_Sync) * evt_set->argc);
+      memset(s, 0, evt_set->argc * sizeof(Scheme_Accept_Sync));
+      syncing->accepts = s;
+    }
+    syncing->accepts[i] = accept;
   }
 
   if (SCHEME_EVTSETP(target) && retry) {
@@ -5264,6 +5273,19 @@ static void set_sync_target(Syncing *syncing, int i, Scheme_Object *target,
 	memcpy(s + i + wts->argc, syncing->reposts + i + 1, evt_set->argc - i - 1);
 	syncing->reposts = s;
       }
+      if (syncing->accepts) {
+	Scheme_Accept_Sync *s;
+	int len;
+	
+	len = evt_set->argc + wts->argc - 1;
+	
+	s = (Scheme_Accept_Sync *)scheme_malloc_atomic(len * sizeof(Scheme_Accept_Sync));
+	memset(s, 0, len * sizeof(Scheme_Accept_Sync));
+	
+	memcpy(s, syncing->accepts, i * sizeof(Scheme_Accept_Sync));
+	memcpy(s + i + wts->argc, syncing->accepts + i + 1, (evt_set->argc - i - 1) * sizeof(Scheme_Accept_Sync));
+	syncing->accepts = s;
+      }
 
       evt_set->argc += (wts->argc - 1);
 
@@ -5287,10 +5309,10 @@ static void set_sync_target(Syncing *syncing, int i, Scheme_Object *target,
 
 void scheme_set_sync_target(Scheme_Schedule_Info *sinfo, Scheme_Object *target, 
 			    Scheme_Object *wrap, Scheme_Object *nack, 
-			    int repost, int retry)
+			    int repost, int retry, Scheme_Accept_Sync accept)
 {
   set_sync_target((Syncing *)sinfo->current_syncing, sinfo->w_i,
-		  target, wrap, nack, repost, retry);
+		  target, wrap, nack, repost, retry, accept);
   if (retry) {
     /* Rewind one step to try new ones (or continue
        if the set was empty). */
@@ -5377,6 +5399,8 @@ static int syncing_ready(Scheme_Object *s, Scheme_Schedule_Info *sinfo)
 	    syncing->disable_break->suspend_break++;
 	  if (syncing->reposts && syncing->reposts[i])
 	    scheme_post_sema(o);
+          if (syncing->accepts && syncing->accepts[i])
+            scheme_accept_sync(syncing, i);
 	  scheme_post_syncing_nacks(syncing);
 	  result = 1;
 	  goto set_sleep_end_and_return;
@@ -5394,7 +5418,7 @@ static int syncing_ready(Scheme_Object *s, Scheme_Schedule_Info *sinfo)
       Scheme_Object *sema;
       
       sema = get_sema(o, &repost);
-      set_sync_target(syncing, i, sema, o, NULL, repost, 1);
+      set_sync_target(syncing, i, sema, o, NULL, repost, 1, NULL);
       j--; /* try again with this sema */
     }
   }
@@ -5432,6 +5456,25 @@ static int syncing_ready(Scheme_Object *s, Scheme_Schedule_Info *sinfo)
   return result;
 }
 
+void scheme_accept_sync(Syncing *syncing, int i)
+{
+  /* run atomic accept action to revise the wrap */
+  Scheme_Accept_Sync accept;
+  Scheme_Object *v, *pr;
+  
+  accept = syncing->accepts[i];
+  syncing->accepts[i] = NULL;
+  pr = syncing->wrapss[i];
+  
+  v = SCHEME_CAR(pr);
+  pr = SCHEME_CDR(pr);
+  
+  v = accept(v);
+  
+  pr = scheme_make_pair(v, pr);
+  syncing->wrapss[i] = pr;
+}
+
 static void syncing_needs_wakeup(Scheme_Object *s, void *fds)
 {
   int i;
@@ -5463,7 +5506,7 @@ Evt_Set *make_evt_set(const char *name, int argc, Scheme_Object **argv, int delt
   Evt *w, **iws, **ws;
   Evt_Set *evt_set, *subset;
   Scheme_Object **args;
-  int i, j, count = 0;
+  int i, j, count = 0, reuse = 1;
 
   iws = MALLOC_N(Evt*, argc-delta);
   
@@ -5478,7 +5521,11 @@ Evt_Set *make_evt_set(const char *name, int argc, Scheme_Object **argv, int delt
       iws[i] = w;
       count++;
     } else {
-      count += ((Evt_Set *)argv[i+delta])->argc;
+      int n;
+      n = ((Evt_Set *)argv[i+delta])->argc;
+      if (n != 1)
+        reuse = 0;
+      count += n;
     }
   }
 
@@ -5486,7 +5533,7 @@ Evt_Set *make_evt_set(const char *name, int argc, Scheme_Object **argv, int delt
   evt_set->so.type = scheme_evt_set_type;
   evt_set->argc = count;
 
-  if (count == (argc - delta))
+  if (reuse && (count == (argc - delta)))
     ws = iws;
   else
     ws = MALLOC_N(Evt*, count);
@@ -6674,7 +6721,18 @@ void scheme_add_namespace_option(Scheme_Object *key, void (*f)(Scheme_Env *))
 
 Scheme_Object *scheme_make_namespace(int argc, Scheme_Object *argv[])
 {
-  return (Scheme_Object *)scheme_make_empty_env();
+  Scheme_Env *genv, *env;
+  long phase;
+
+  genv = scheme_get_env(NULL);
+  env = scheme_make_empty_env();
+  
+  for (phase = genv->phase; phase--; ) {
+    scheme_prepare_exp_env(env);
+    env = env->exp_env;
+  }
+
+  return (Scheme_Object *)env;
 }
 
 static Scheme_Object *namespace_p(int argc, Scheme_Object **argv)
@@ -7156,6 +7214,7 @@ static void get_ready_for_GC()
 #endif
 
   scheme_fuel_counter = 0;
+  scheme_jit_stack_boundary = (unsigned long)-1;
 
 #ifdef WINDOWS_PROCESSES
   scheme_suspend_remembered_threads();
@@ -7186,8 +7245,23 @@ static void done_with_GC()
   scheme_block_child_signals(0);
 #endif
 
-  scheme_total_gc_time += (scheme_get_process_milliseconds() - start_this_gc_time);
+  end_this_gc_time = scheme_get_process_milliseconds();
+  scheme_total_gc_time += (end_this_gc_time - start_this_gc_time);
 }
+
+#ifdef MZ_PRECISE_GC
+static void inform_GC(int major_gc, long pre_used, long post_used)
+{
+  if (scheme_main_logger)
+    scheme_log(scheme_main_logger,
+               SCHEME_LOG_INFO, 0,
+               "GC [%s] at %ld bytes; %ld collected in %ld msec",
+               (major_gc ? "major" : "minor"),
+               pre_used, pre_used - post_used,
+               end_this_gc_time - start_this_gc_time);
+}
+#endif
+
 
 #ifdef MZ_XFORM
 END_XFORM_SKIP;
@@ -7229,7 +7303,7 @@ static Scheme_Object *current_stats(int argc, Scheme_Object *argv[])
 	  /* C stack */
 	  if (t == scheme_current_thread) {
 	    void *stk_start, *stk_end;
-	    stk_start = ADJUST_STACK_START(t->stack_start);
+	    stk_start = t->stack_start;
 	    stk_end = (void *)&stk_end;
 #         ifdef STACK_GROWS_UP
 	    sz = (long)stk_end XFORM_OK_MINUS (long)stk_start;
@@ -7354,7 +7428,7 @@ static unsigned long get_current_stack_start(void)
 {
   Scheme_Thread *p;
   p = scheme_current_thread;
-  return (unsigned long)ADJUST_STACK_START(p->stack_start);
+  return (unsigned long)p->stack_start;
 }
 #endif
 

@@ -485,6 +485,7 @@ static void release_context_lock(void *c)
 void *wxWithGLContext(wxGL *gl, void *thunk, void *alt_evt, int eb)
 {
   Scheme_Object **a, *wa[3], *glo, *v;
+  Scheme_Thread *thread;
   int evts;
 
   if (!context_sema) {
@@ -494,8 +495,9 @@ void *wxWithGLContext(wxGL *gl, void *thunk, void *alt_evt, int eb)
     context_sema = scheme_make_sema(1);
   }
 
+  thread = scheme_get_current_thread();
   if ((gl == context_lock_holder)
-      && (context_lock_thread == scheme_current_thread)) {
+      && (context_lock_thread == thread)) {
     /* The lock is already held by this GL context. */
     return _scheme_apply_multi((Scheme_Object *)thunk, 0, NULL);
   }
@@ -530,7 +532,7 @@ void *wxWithGLContext(wxGL *gl, void *thunk, void *alt_evt, int eb)
 
   if (v == context_sema) {
     context_lock_holder = gl;
-    context_lock_thread = scheme_current_thread;
+    context_lock_thread = scheme_get_current_thread();
 
     a[0] = (Scheme_Object *)thunk;
     a[1] = glo;
@@ -1333,6 +1335,7 @@ static Scheme_Object *wxSchemeGetFontList(int argc, Scheme_Object **argv)
 /***********************************************************************/
 
 static Scheme_Object *ps_draw_text, *ps_get_text_extent, *ps_expand_name, *ps_glyph_exists;
+static Scheme_Object *ps_record_font, *ps_fonts_string;
 
 static Scheme_Object *SetPSProcs(int, Scheme_Object *a[])
 {
@@ -1340,19 +1343,23 @@ static Scheme_Object *SetPSProcs(int, Scheme_Object *a[])
   wxREGGLOB(ps_get_text_extent);
   wxREGGLOB(ps_expand_name);
   wxREGGLOB(ps_glyph_exists);
+  wxREGGLOB(ps_record_font);
+  wxREGGLOB(ps_fonts_string);
   ps_draw_text = a[0];
   ps_get_text_extent = a[1];
   ps_expand_name = a[2];
   ps_glyph_exists = a[3];
+  ps_record_font = a[4];
+  ps_fonts_string = a[5];
   return scheme_void;
 }
 
-void wxPostScriptDrawText(Scheme_Object *f, const char *fontname,
-			  const char *text, int dt, Bool combine, int use16, 
-			  double font_size, int sym_map)
+void *wxPostScriptDrawText(Scheme_Object *f, const char *fontname,
+                           const char *text, int dt, Bool combine, int use16, 
+                           double font_size, int sym_map, void *used_fonts)
 {
   if (ps_draw_text) {
-    Scheme_Object *a[6], *v;
+    Scheme_Object *a[7], *v;
 
     v = scheme_make_utf8_string(fontname);
     a[0] = v;
@@ -1365,9 +1372,11 @@ void wxPostScriptDrawText(Scheme_Object *f, const char *fontname,
     a[3] = f;
     a[4] = (combine ? scheme_true : scheme_false);
     a[5] = (sym_map ? scheme_true : scheme_false);
+    a[6] = (used_fonts ? (Scheme_Object *)used_fonts : scheme_false);
 
-    scheme_apply(ps_draw_text, 6, a);
-  }
+    return scheme_apply(ps_draw_text, 7, a);
+  } else
+    return NULL;
 }
 
 extern void wxPostScriptGetTextExtent(const char *fontname, 
@@ -1377,6 +1386,8 @@ extern void wxPostScriptGetTextExtent(const char *fontname,
 				      int sym_map)
 {
   if (ps_get_text_extent) {
+    long multiple_count;
+    Scheme_Object **multiple_array;
     Scheme_Object *a[5], *v;
 
     v = scheme_make_utf8_string(fontname);
@@ -1392,24 +1403,27 @@ extern void wxPostScriptGetTextExtent(const char *fontname,
 
     v = scheme_apply_multi(ps_get_text_extent, 5, a);
     
+    multiple_count = scheme_get_multiple_count();
+    multiple_array = scheme_get_multiple_array();
     if (SAME_OBJ(v, SCHEME_MULTIPLE_VALUES)
-	&& (scheme_multiple_count == 4)) {
-      if (SCHEME_FLTP(scheme_multiple_array[0]))
-	*x = SCHEME_FLT_VAL(scheme_multiple_array[0]);
-      if (SCHEME_FLTP(scheme_multiple_array[1]))
-	*y = SCHEME_FLT_VAL(scheme_multiple_array[1]);
+	&& (multiple_count == 4)) {
+      if (SCHEME_FLTP(multiple_array[0]))
+	*x = SCHEME_FLT_VAL(multiple_array[0]);
+      if (SCHEME_FLTP(multiple_array[1]))
+	*y = SCHEME_FLT_VAL(multiple_array[1]);
       if (descent)
-	if (SCHEME_FLTP(scheme_multiple_array[2]))
-	  *descent = SCHEME_FLT_VAL(scheme_multiple_array[2]);
+	if (SCHEME_FLTP(multiple_array[2]))
+	  *descent = SCHEME_FLT_VAL(multiple_array[2]);
       if (topSpace)
-	if (SCHEME_FLTP(scheme_multiple_array[3]))
-	  *topSpace = SCHEME_FLT_VAL(scheme_multiple_array[3]);
+	if (SCHEME_FLTP(multiple_array[3]))
+	  *topSpace = SCHEME_FLT_VAL(multiple_array[3]);
     } else {
       *x = 0;
       *y = 0;
       if (descent) *descent = 0;
       if (topSpace) *topSpace = 0;
     }
+    multiple_array = NULL;
   }
 }
 
@@ -1440,6 +1454,32 @@ Bool wxPostScriptGlyphExists(const char *fontname, int c, int sym_map)
     return SCHEME_TRUEP(v);
   }
   return TRUE;
+}
+
+extern void *wxPostScriptRecordFont(const char *fontname, void *used_fonts)
+{
+  if (ps_record_font) {
+    Scheme_Object *a[2], *v;
+    v = scheme_make_sized_offset_utf8_string((char *)fontname, 0, -1);
+    a[0] = v;
+    a[1] = (used_fonts ? (Scheme_Object *)used_fonts : scheme_false);
+    return scheme_apply(ps_record_font, 2, a);
+  }
+  return scheme_null;
+}
+
+extern char *wxPostScriptFontsToString(void *used_fonts)
+{
+  if (ps_fonts_string && used_fonts) {
+    Scheme_Object *a[1], *s;
+    a[0] = (Scheme_Object *)used_fonts;
+    s = scheme_apply(ps_fonts_string, 1, a);
+    if (SCHEME_CHAR_STRINGP(s)) {
+      s = scheme_char_string_to_byte_string(s);
+      return SCHEME_BYTE_STR_VAL(s);
+    }
+  }
+  return "";
 }
 
 /***********************************************************************/
@@ -3269,7 +3309,7 @@ static void wxScheme_Install(Scheme_Env *global_env)
   scheme_install_xc_global("set-ps-procs",
 			   scheme_make_prim_w_arity(CAST_SP SetPSProcs,
 						    "set-ps-procs",
-						    4, 4),
+						    6, 6),
 			   global_env);
 
 

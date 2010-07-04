@@ -39,6 +39,9 @@ differences from v3:
          make-none/c 
          
          guilty-party
+         exn:fail:contract2?
+         exn:fail:contract2-srclocs
+                
          contract-violation->string
          
          contract?
@@ -58,8 +61,11 @@ differences from v3:
          
          contract-stronger?
          
-         coerce-contract 
-         flat-contract/predicate?
+         coerce-contract/f
+         coerce-contract
+         coerce-contracts
+         coerce-flat-contract
+         coerce-flat-contracts
          
          build-compound-type-name
          raise-contract-error

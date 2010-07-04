@@ -273,7 +273,7 @@ pattern (as opposed to being a pattern variable.
 @schemeblock[
 (define-syntax clock
   (syntax-id-rules (set!)
-    [(set! cock e) (put-clock! e)]
+    [(set! clock e) (put-clock! e)]
     [(clock a ...) ((get-clock) a ...)]
     [clock (get-clock)]))
 ]
@@ -304,7 +304,7 @@ Naturally, we can implement @scheme[define-get/put-id] as a macro:
 (define-syntax-rule (define-get/put-id id get put!)
   (define-syntax clock
     (syntax-id-rules (set!)
-      [(set! cock e) (put-clock! e)]
+      [(set! clock e) (put-clock! e)]
       [(clock a (... ...)) ((get-clock) a (... ...))]
       [clock (get-clock)])))
 ]
@@ -318,7 +318,7 @@ usual role in the generated macro, instead of the generating macro.
 
 @section[#:tag "pattern-macro-example"]{Extended Example: Call-by-Reference Functions}
 
-We can use pattern-matching macros to implement add a form to Scheme
+We can use pattern-matching macros to add a form to Scheme
 for defining first-order @deftech{call-by-reference} functions. When a
 call-by-reference function body mutates its formal argument, the
 mutation applies to variables that are supplied as actual arguments in

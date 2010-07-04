@@ -74,7 +74,16 @@
 
   }
   @defmethod*[(((on-close) void))]{
-    This method is called when an editor is closed. See also
+
+    This method is called when an editor is closed.
+    Typically, this method is called when the frame
+    containing the editor is closed, but in some cases an
+    editor is considered ``closed'' before the frame it is
+    in is closed (eg, when a tab in DrScheme is closed), and
+    thus @method[editor:basic<%> on-close] will be called at that point.
+    
+
+    See also
     @method[editor:basic<%> can-close?]
     and
     @method[editor:basic<%> close].
@@ -90,7 +99,7 @@
     the editor (asking if it should be saved, for example).
 
     See also
-    @method[editor:basic<%> on-close]and
+    @method[editor:basic<%> on-close] and
     @method[editor:basic<%> close].
 
 
@@ -115,6 +124,21 @@
     editor. If the editor doesn't yet have a filename, it
     returns a symbolic name (something like "Untitled").
 
+  }
+
+  @defmethod[(get-pos/text [event (is-a?/c mouse-event%)])
+             (values (or/c false/c (is-a?/c editor<%>))
+	             (or/c false/c number?))]{
+
+   This method's first result is @scheme[#f] when the mouse
+   event does not correspond to a location in the editor. 
+   
+   If the first result is an @scheme[text%] object, then the
+   second result will be a position in the editor and
+   otherwise the second result will be @scheme[#f]. 
+
+   The @scheme[editor<%>] object will always be the nearest
+   enclosing editor containing the mouse click.
   }
 }
 @defmixin[editor:basic-mixin (editor<%>) (editor:basic<%>)]{
@@ -185,6 +209,18 @@
     @scheme[text%]
     classes. 
   }
+  @defmethod[#:mode override (on-new-image-snip [filname (or/c path? false/c)]
+  		    	                         [kind (one-of/c 'unknown 'gif 'jpeg 'xbm 'xpm 'bmp 'pict)]
+                                                 [relative-path? any/c]
+                                                 [inline? any/c])
+                             (is-a?/c image-snip%)]{
+    @schemeblock[
+        (super on-new-image-snip 
+               (if (eq? kind 'unknown) 'unknown/mask kind) 
+               relative-path? 
+               inline?)]
+  }
+
   @defmethod*[#:mode override (((get-file (directory (or/c path-string? false/c))) string))]{
 
     Uses
@@ -428,4 +464,4 @@
   }
 }
 
-@(include-extracted (lib "main.ss" "framework") #rx"^editor:")
+@(include-previously-extracted "main-extracts.ss" #rx"^editor:")

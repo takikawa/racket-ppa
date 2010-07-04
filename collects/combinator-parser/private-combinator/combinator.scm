@@ -222,7 +222,9 @@
                                     (map (lambda (rst) (next-res old-answer new-id old-used tok rst))
                                          (flatten (correct-list rsts)))]
                                    [(choice-res? rsts)
-                                    (map (lambda (rst) (next-res old-answer new-id old-used tok rst))
+                                    #;(printf "next call, tail-end is choice ~a~n" rsts)
+                                    (map (lambda (rst) (next-res old-answer new-id old-used tok 
+                                                                 (update-possible-fail rst rsts)))
                                          (flatten (correct-list (choice-res-matches rsts))))]
                                    [(repeat-res? rsts)
                                     (next-res old-answer new-id old-used tok rsts)]
@@ -335,13 +337,15 @@
                                         (map 
                                          (lambda (rst)
                                            (res-msg 
-                                            (build-error rst (previous? input) (previous? return-name)
+                                            (build-error rst (lambda () (previous? input)) (previous? return-name)
                                                          (car next-preds) look-back look-back-ref used curr-id seen alts last-src)))
                                          rsts)])
                                    (fail-res input 
                                              (make-options-fail 
                                               (rank-choice (map fail-type-chance fails))
-                                              last-src
+                                              (if (equal? last-src (list 1 0 1 0))
+                                                  (map fail-type-src fails)
+                                                  last-src)
                                               seq-name
                                               (rank-choice (map fail-type-used fails))
                                               (rank-choice (map fail-type-may-use fails)) fails)))]
@@ -385,6 +389,43 @@
                          (rank-choice (map fail-type-may-use fails))
                          fails))
     
+    (define (add-to-choice-fails choice fail)
+      (let ([fails (choice-fail-messages choice)])
+        (make-choice-fail
+         (rank-choice (cons (fail-type-chance fail) (map fail-type-chance fails)))
+         (fail-type-src choice)
+         (fail-type-name choice)
+         (rank-choice (cons (fail-type-used fail) (map fail-type-used fails)))
+         (rank-choice (cons (fail-type-may-use fail) (map fail-type-may-use fails)))
+         (choice-fail-options choice)
+         (choice-fail-names choice)
+         (choice-fail-ended? choice)
+         (cons fail fails))))
+    
+    ;update-possible-rail result result -> result
+    (define (update-possible-fail res back)
+      #;(printf "update-possible-fail ~a, ~a~n" res back)
+      (cond
+        [(and (res? res) (not (res-possible-error res)))
+         (cond 
+           [(res? back)
+            (make-res (res-a res) (res-rest res) (res-msg res) (res-id res) (res-used res)
+                      (res-possible-error back) (res-first-tok res))]
+           [(choice-res? back)
+            (make-res (res-a res) (res-rest res) (res-msg res) (res-id res) (res-used res)
+                      (choice-res-errors back) (res-first-tok res))]
+           [else res])]
+        [(choice-res? res)
+         (cond 
+           [(and (choice-res? back) (choice-res-errors back) (choice-res-errors res))
+            (make-choice-res (choice-res-name res)
+                             (choice-res-matches res)
+                             (add-to-choice-fails (choice-res-errors res)
+                                                  (choice-res-errors back)))]
+           
+           [else res])]
+        [else res]))
+    
     ;build-sequence-error: result boolean result string int [U #f string] [listof string] int int -> result
     (define (sequence-error-gen name len)
       (letrec ([repeat->res
@@ -424,14 +465,16 @@
                                         stop)
                                     (res-first-tok inn))]
                          [else inn]))]
-                    [else rpt]))])
+                    [else rpt]))]
+               )
         (lambda (old-res prev prev-name next-pred look-back look-back-ref used id seen alts last-src)
           (cond
-            [(and (pair? old-res) (null? (cdr old-res)) (res? (car old-res))) (car old-res)]
+            [(and (pair? old-res) (null? (cdr old-res)) (res? (car old-res))) 
+             (update-possible-fail (car old-res) look-back)]
             [(and (pair? old-res) (null? (cdr old-res)) (repeat-res? (car old-res)))
              (repeat->res (car old-res) look-back)]
             [(or (and (res? old-res) (res-a old-res)) (choice-res? old-res) (lazy-opts? old-res))
-             old-res]
+             (update-possible-fail old-res look-back)]
             [(repeat-res? old-res) 
              #;(printf "finished on repeat-res for ~a res ~n" name #;old-res)
              (repeat->res old-res look-back)]
@@ -439,7 +482,7 @@
              #;(printf "finished on pairs of res for ~a~n" name #;old-res)
              (map (lambda (r) (repeat->res r look-back)) (flatten old-res))]
             [else
-             #;(printf "There actually was an error for ~a~n" name)
+             #;(printf "There was an error for ~a~n" name)
              #;(printf "length seen ~a length rest ~a~n" (length seen) (length (res-rest old-res)))
              (fail-res (res-rest old-res)
                        (let*-values ([(fail) (res-msg old-res)]
@@ -517,7 +560,7 @@
                                       name used 
                                       (+ used (fail-type-may-use fail) next-used)
                                       id kind (reverse seen) expected found 
-                                      (and (res? prev) (res-a prev) (res-msg prev))
+                                      prev
                                       prev-name)))]
                                 [seq-fail (seq-fail-maker fail used)]
                                 [pos-fail 
@@ -535,7 +578,7 @@
                              (printf "opt-fails ~a~n" opt-fails))
                            (if pos-fail
                                (make-options-fail (rank-choice (map fail-type-chance opt-fails))
-                                                  #f
+                                                  (map fail-type-src opt-fails)
                                                   name
                                                   (rank-choice (map fail-type-used opt-fails))
                                                   (rank-choice (map fail-type-may-use opt-fails))
@@ -707,7 +750,7 @@
               [(eq? input return-name) name]
               [else
                #;(printf "choice ~a~n" name)
-               #;(printf "possible options are ~a~n" choice-names)
+               #;(printf "possible options are ~a~n" (choice-names))
                (let*-values
                    ([(options) (map (lambda (term) (term input last-src sub-opts)) opt-list)]
                     #;[a (printf "choice-options ~a ~n ~a ~n~n~n" choice-names options)]

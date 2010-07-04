@@ -1,16 +1,11 @@
 #lang scheme/base
-(require (lib "manual.ss" "scribble")
-         (lib "eval.ss" "scribble")
+(require scribble/manual
+         scribble/eval
          (for-label scheme/base
                     scheme/contract
                     scheme/unit))
 
 (define web-server "Web Server")
-
-; XXX Format better
-(define (author x) 
-  (elem (hspace 4)
-        (bold x)))
 
 ; XXX Format better
 (define (warning . x)
@@ -20,12 +15,11 @@
 (define (href-link url label)
   (elem label " (" url ")")) 
 
-(provide (all-from-out (lib "manual.ss" "scribble"))
-         (all-from-out (lib "eval.ss" "scribble"))
+(provide (all-from-out scribble/manual)
+         (all-from-out scribble/eval)
          (for-label (all-from-out scheme/base
                                   scheme/contract
                                   scheme/unit))
          web-server
-         author
          warning
          href-link)

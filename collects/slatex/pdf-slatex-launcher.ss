@@ -1,8 +1,11 @@
 
 (module pdf-slatex-launcher mzscheme
-  (require "slatex-wrapper.ss")
+  (require "slatex-wrapper.ss"
+           scheme/cmdline)
 
   (define argv (current-command-line-arguments))
+  
+  (define no-latex (make-parameter #f))
   
   (case (system-type)
     [(macos)
@@ -10,9 +13,23 @@
      ;; set up drag and drop
      (error 'slatex "pdf-slatex not supported under Mac OS Classic")]
     [(windows unix macosx)
-     (when (eq? (vector) argv)
-       (error 'slatex "expected a file on the command line~n"))
-     (parameterize ([error-escape-handler exit])
-       (pdf-slatex (vector-ref argv 0)))
-     (exit)]))
+     (when (equal? (vector) argv)
+       (fprintf (current-error-port) "pdf-slatex: expected a file on the command line\n")
+       (exit 1))
+     (let* ([filename
+             (command-line
+              #:program "slatex"
+              #:once-each
+              [("-n" "--no-latex") "Just preprocess, don't run LaTeX"
+                                   (no-latex #t)]
+              #:args (filename)
+              filename)]
+            [result
+             (parameterize ([error-escape-handler exit])
+               (if (no-latex)
+                   (slatex/no-latex filename)
+                   (pdf-slatex filename)))])
+       (if result
+           (exit)
+           (exit 1)))]))
 

@@ -2,6 +2,7 @@
 
 (require 
  "test-utils.ss"
+ "planet-requires.ss"
  "typecheck-tests.ss"
  "subtype-tests.ss" ;; done
  "type-equal-tests.ss" ;; done
@@ -9,13 +10,15 @@
  "parse-type-tests.ss" ;; done
  "type-annotation-test.ss" ;; done
  "module-tests.ss"
+ "subst-tests.ss"
  "infer-tests.ss")
 
-(require (private planet-requires))
-
-(require (schemeunit))
+(require (r:infer infer infer-dummy)
+         (schemeunit))
 
 (provide unit-tests)
+
+(infer-param infer)
 
 (define unit-tests
   (apply

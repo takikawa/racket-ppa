@@ -214,7 +214,7 @@ Draws nothing.
 
 
 @defmethod[(find-scroll-step [y real?])
-           nonnegative-exact-integer?]{
+           exact-nonnegative-integer?]{
 
 @methspec{
 
@@ -361,7 +361,7 @@ following symbols:
 
 
 @defmethod[(get-num-scroll-steps)
-           nonnegative-exact-integer?]{
+           exact-nonnegative-integer?]{
 
 @methspec{
 
@@ -378,7 +378,7 @@ Returns @scheme[1].
 }}
 
 
-@defmethod[(get-scroll-step-offset [offset nonnegative-exact-integer?])
+@defmethod[(get-scroll-step-offset [offset exact-nonnegative-integer?])
            (and/c real? (not/c negative?))]{
 
 @methspec{
@@ -414,8 +414,8 @@ Returns the snip's style. See also @method[snip% set-style].
 }
 
 
-@defmethod[(get-text [offset nonnegative-exact-integer?]
-                     [num nonnegative-exact-integer?]
+@defmethod[(get-text [offset exact-nonnegative-integer?]
+                     [num exact-nonnegative-integer?]
                      [flattened? any/c #f])
            string?]{
 @methspec{
@@ -439,10 +439,10 @@ Returns @scheme[""].
 }}
 
 
-@defmethod[(get-text! [buffer mutable string]
-                      [offset nonnegative-exact-integer?]
-                      [num nonnegative-exact-integer?]
-                      [buffer-offset nonnegative-exact-integer?])
+@defmethod[(get-text! [buffer (and/c string? (not/c immutable?))]
+                      [offset exact-nonnegative-integer?]
+                      [num exact-nonnegative-integer?]
+                      [buffer-offset exact-nonnegative-integer?])
            void?]{
 @methspec{
 
@@ -551,7 +551,7 @@ The @scheme[x] and @scheme[y] arguments are the snip's
  @scheme[editorx] and @scheme[editory] arguments are the snip's
  @techlink{location} in editor coordinates.  To get @scheme[event]'s x
  @techlink{location} in snip coordinates, subtract @scheme[x] from
- @scheme[(send @scheme[event] get-x)].
+ @scheme[(send event get-x)].
 
 See also @indexed-scheme['handles-events] in @method[snip% get-flags].
 
@@ -581,7 +581,7 @@ The @scheme[x] and @scheme[y] arguments are the snip's
  @scheme[editorx] and @scheme[editory] arguments are the snip's
  @techlink{location} in editor coordinates.  To get @scheme[event]'s x
  @techlink{location} in snip coordinates, subtract @scheme[x] from
- @scheme[(send @scheme[event] get-x)].
+ @scheme[(send event get-x)].
 
 See also @indexed-scheme['handles-events] in @method[snip% get-flags].
 
@@ -617,7 +617,7 @@ Does nothing.
 @defmethod[(partial-offset [dc (is-a?/c dc<%>)]
                            [x real?]
                            [y real?]
-                           [len nonnegative-exact-integer?])
+                           [len exact-nonnegative-integer?])
            real?]{
 @methspec{
 
@@ -807,7 +807,7 @@ Does nothing.
 }}
 
 
-@defmethod[(split [position nonnegative-exact-integer?]
+@defmethod[(split [position exact-nonnegative-integer?]
                   [first (box/c (is-a?/c snip%))]
                   [second (box/c (is-a?/c snip%))])
            void?]{

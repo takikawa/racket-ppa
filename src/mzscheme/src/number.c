@@ -71,6 +71,7 @@ static Scheme_Object *even_p (int argc, Scheme_Object *argv[]);
 static Scheme_Object *bitwise_or (int argc, Scheme_Object *argv[]);
 static Scheme_Object *bitwise_xor (int argc, Scheme_Object *argv[]);
 static Scheme_Object *bitwise_not (int argc, Scheme_Object *argv[]);
+static Scheme_Object *bitwise_bit_set_p (int argc, Scheme_Object *argv[]);
 static Scheme_Object *integer_length (int argc, Scheme_Object *argv[]);
 static Scheme_Object *gcd (int argc, Scheme_Object *argv[]);
 static Scheme_Object *lcm (int argc, Scheme_Object *argv[]);
@@ -307,6 +308,10 @@ scheme_init_number (Scheme_Env *env)
   p = scheme_make_folding_prim(bitwise_not, "bitwise-not", 1, 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
   scheme_add_global_constant("bitwise-not", p, env);
+
+  p = scheme_make_folding_prim(bitwise_bit_set_p, "bitwise-bit-set?", 2, 2, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("bitwise-bit-set?", p, env);
 
   p = scheme_make_folding_prim(scheme_bitwise_shift, "arithmetic-shift", 2, 2, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
@@ -1081,6 +1086,9 @@ bin_lcm (Scheme_Object *n1, Scheme_Object *n2)
   Scheme_Object *d, *ret;
 
   d = scheme_bin_gcd(n1, n2);
+
+  if (scheme_is_zero(d))
+    return d;
   
   ret = scheme_bin_mult(n1, scheme_bin_quotient(n2, d));
 
@@ -1503,6 +1511,7 @@ static Scheme_Object *complex_tan(Scheme_Object *c)
 }
 
 static Scheme_Object *complex_asin(Scheme_Object *c);
+static Scheme_Object *complex_atan(Scheme_Object *c);
 
 static Scheme_Object *complex_asin(Scheme_Object *c)
 {
@@ -1511,29 +1520,32 @@ static Scheme_Object *complex_asin(Scheme_Object *c)
   one_minus_c_sq = scheme_bin_minus(scheme_make_integer(1),
 				    scheme_bin_mult(c, c));
   sqrt_1_minus_c_sq = scheme_sqrt(1, &one_minus_c_sq);
-
-  return scheme_bin_mult(scheme_minus_i,
-			 un_log(scheme_bin_plus(scheme_bin_mult(c, scheme_plus_i), 
-						sqrt_1_minus_c_sq)));
+  return scheme_bin_mult(scheme_make_integer(2),
+                         complex_atan(scheme_bin_div(c,
+                                                     scheme_bin_plus(scheme_make_integer(1),
+                                                                     sqrt_1_minus_c_sq))));
 }
 
 static Scheme_Object *complex_acos(Scheme_Object *c);
 
 static Scheme_Object *complex_acos(Scheme_Object *c)
 {
-  Scheme_Object *one_minus_c_sq, *sqrt_1_minus_c_sq;
-
-  one_minus_c_sq = scheme_bin_minus(scheme_make_integer(1),
-				    scheme_bin_mult(c, c));
-  sqrt_1_minus_c_sq = scheme_sqrt(1, &one_minus_c_sq);
-
-  return scheme_bin_mult(scheme_minus_i,
-			 un_log(scheme_bin_plus(c,
-						scheme_bin_mult(scheme_plus_i,
-								sqrt_1_minus_c_sq))));
+  Scheme_Object *a, *r;
+  a = complex_asin(c);
+  if (scheme_is_zero(_scheme_complex_imaginary_part(c))
+      && (scheme_bin_gt(_scheme_complex_real_part(c), scheme_make_integer(1))
+          || scheme_bin_lt(_scheme_complex_real_part(c), scheme_make_integer(-1)))) {
+    /* Make sure real part is 0 or pi */
+    if (scheme_is_negative(_scheme_complex_real_part(c)))
+      r = scheme_pi;
+    else
+      r = scheme_make_integer(0);
+    return scheme_make_complex(r, scheme_bin_minus(scheme_make_integer(0),
+                                                   _scheme_complex_imaginary_part(a)));
+  } else {
+    return scheme_bin_minus(scheme_half_pi, a);
+  }
 }
-
-static Scheme_Object *complex_atan(Scheme_Object *c);
 
 static Scheme_Object *complex_atan(Scheme_Object *c)
 {
@@ -1948,7 +1960,7 @@ GEN_BIN_PROT(bin_expt);
 				              scheme_real_to_complex(scheme_make_float(y))) \
                         : scheme_make_float(sch_pow((double)x, (double)y)))
 
-static GEN_BIN_OP(bin_expt, "expt", fixnum_expt, F_EXPT, FS_EXPT, scheme_generic_integer_power, scheme_rational_power, scheme_complex_power, GEN_RETURN_0_USUALLY, GEN_RETURN_1, NAN_RETURNS_NAN, NAN_RETURNS_SNAN)
+static GEN_BIN_OP(bin_expt, "expt", fixnum_expt, F_EXPT, FS_EXPT, scheme_generic_integer_power, scheme_rational_power, scheme_complex_power, GEN_RETURN_0_USUALLY, GEN_RETURN_1, NAN_RETURNS_NAN, NAN_RETURNS_SNAN, cx_NO_CHECK, cx_NO_CHECK, cx_NO_CHECK, cx_NO_CHECK)
 
 Scheme_Object *
 scheme_expt(int argc, Scheme_Object *argv[])
@@ -2488,6 +2500,57 @@ scheme_bitwise_shift(int argc, Scheme_Object *argv[])
   }
 
   return scheme_bignum_shift(v, shift);
+}
+
+static Scheme_Object *bitwise_bit_set_p (int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *so, *sb;
+
+  so = argv[0];
+  if (!SCHEME_EXACT_INTEGERP(so)) {
+    scheme_wrong_type("bitwise-bit-set?", "exact integer", 0, argc, argv);
+    ESCAPED_BEFORE_HERE;
+  }
+  sb = argv[1];
+  if (SCHEME_INTP(sb)) {
+    long v;
+    v = SCHEME_INT_VAL(sb);
+    if (v < 0) {
+      scheme_wrong_type("bitwise-bit-set?", "nonnegative exact integer", 1, argc, argv);
+      ESCAPED_BEFORE_HERE;
+    }
+    if (SCHEME_INTP(so)) {
+      if (v < (sizeof(long) * 8))
+        return ((((long)1 << v) & SCHEME_INT_VAL(so)) ? scheme_true : scheme_false);
+      else
+        return ((SCHEME_INT_VAL(so) < 0) ? scheme_true : scheme_false);
+    } else {
+      bigdig d;
+      long vd, vb;
+      vd = v / (sizeof(bigdig) * 8);
+      vb = v & ((sizeof(bigdig) * 8) - 1);
+      if (vd >= ((Scheme_Bignum *)so)->len)
+        return (SCHEME_BIGPOS(so) ? scheme_false : scheme_true);
+      if (SCHEME_BIGPOS(so)) {
+        d = ((Scheme_Bignum *)so)->digits[vd];
+        return ((((bigdig)1 << vb) & d) ? scheme_true : scheme_false);
+      } else {
+        /* Testing a bit in a negative bignum. Just use the slow way for now. */
+        Scheme_Object *bit;
+        bit = scheme_bignum_shift(scheme_make_bignum(1), v);
+        bit = scheme_bignum_and(bit, so);
+        return (SAME_OBJ(bit, scheme_make_integer(0)) ? scheme_false : scheme_true);
+      }
+    }
+  } else if (SCHEME_BIGNUMP(sb) && SCHEME_BIGPOS(sb)) {
+    if (SCHEME_INTP(so))
+      return ((SCHEME_INT_VAL(so) < 0) ? scheme_true : scheme_false);
+    else
+      return (SCHEME_BIGPOS(so) ? scheme_false : scheme_true);
+  } else {
+    scheme_wrong_type("bitwise-bit-set?", "nonnegative exact integer", 1, argc, argv);
+    ESCAPED_BEFORE_HERE;
+  }
 }
 
 static Scheme_Object *

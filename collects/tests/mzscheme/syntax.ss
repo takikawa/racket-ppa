@@ -1096,5 +1096,90 @@
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; Check that locations for lambda arguments are created
+;; one-by-one --- like `let*', and not like `letrec':
+
+(test '((1 10) (x1 10) (x2 z1))
+      'lambda-loc
+      (let ()
+        (define procs null)
+        (define again #f)
+
+        (define (f x 
+                   [y (let/cc k
+                        (unless again
+                          (set! again k))
+                        (lambda () 'done))]
+                   [z 10])
+          (set! procs
+                (cons (lambda (xv zv)
+                        (begin0
+                         (list x z)
+                         (set! x xv)
+                         (set! z zv)))
+                      procs))
+          (y))
+
+        (f 1)
+        (let/cc esc (again esc))
+
+        (list
+         ((cadr procs) 'x1 'z1)
+         ((car procs) 'x2 'z2)
+         ((cadr procs) 'x10 'z10))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(require scheme/splicing)
+
+(define abcdefg 10)
+(test 12 'splicing-letrec-syntax (splicing-letrec-syntax ([abcdefg (syntax-rules ()
+                                                                     [(_) 12])])
+                                                         (abcdefg)))
+(test 13 'splicing-letrec-syntax (splicing-letrec-syntax ([abcdefg (syntax-rules ()
+                                                                     [(_) (abcdefg 10)]
+                                                                     [(_ x) (+ 3 x)])])
+                                                         (abcdefg)))
+(test 13 'splicing-letrec-syntax (let ([abcdefg 9])
+                                   (splicing-letrec-syntax ([abcdefg (syntax-rules ()
+                                                                       [(_) (abcdefg 10)]
+                                                                       [(_ x) (+ 3 x)])])
+                                                           (abcdefg))))
+(test 12 'splicing-let-syntax (splicing-let-syntax ([abcdefg (syntax-rules ()
+                                                               [(_) 12])])
+                                                   (abcdefg)))
+(test 12 'splicing-let-syntax (let ([abcdefg (lambda () 9)])
+                                (splicing-let-syntax ([abcdefg (syntax-rules ()
+                                                                 [(_) 12])])
+                                                     (abcdefg))))
+(test 11 'splicing-let-syntax (let ([abcdefg (lambda (x) x)])
+                                (splicing-let-syntax ([abcdefg (syntax-rules ()
+                                                                 [(_) (+ 2 (abcdefg 9))]
+                                                                 [(_ ?) 77])])
+                                                     (abcdefg))))
+(splicing-let-syntax ([abcdefg (syntax-rules ()
+                                 [(_) 8])])
+                     (define hijklmn (abcdefg)))
+(test 8 'hijklmn hijklmn)
+(test 30 'local-hijklmn (let ()
+                          (splicing-let-syntax ([abcdefg (syntax-rules ()
+                                                           [(_) 8])])
+                                               (define hijklmn (abcdefg)))
+                          (define other 22)
+                          (+ other hijklmn)))
+(test 8 'local-hijklmn (let ()
+                         (splicing-let-syntax ([abcdefg (syntax-rules ()
+                                                          [(_) 8])])
+                                              (begin
+                                                (define hijklmn (abcdefg))
+                                                hijklmn))))
+
+(test 9 'splicing-letrec-syntax (let ([abcdefg (lambda () 9)])
+                                  (splicing-letrec-syntax ([abcdefg (syntax-rules ()
+                                                                      [(_) 0])])
+                                                          (define x 10))
+                                  (abcdefg)))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (report-errs)
 

@@ -11,6 +11,8 @@
 
 @title{@bold{Parser Tools}: @exec{lex} and @exec{yacc}-style Parsing}
 
+@author["Scott Owens"]
+
 This documentation assumes familiarity with @exec{lex} and @exec{yacc}
 style lexer and parser generators.
 
@@ -455,8 +457,8 @@ the right choice when using @scheme[lexer] in other situations.
 
 
    Like @scheme[define-tokens], except a each token constructor
-   @schemeidfont{token-}@scheme[token-id] take nos arguments and returns
-   @scheme[(@scheme[quote] token-id)].}
+   @schemeidfont{token-}@scheme[token-id] takes no arguments and returns
+   @scheme[(#, @scheme[quote] token-id)].}
 
 
 @defproc[(token-name [t (or/c token? symbol?)]) symbol?]{

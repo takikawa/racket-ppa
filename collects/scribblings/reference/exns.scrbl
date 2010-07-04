@@ -10,12 +10,12 @@ model. It is based on a proposal by Friedman, Haynes, and Dybvig
 
 Whenever a primitive error occurs in PLT Scheme, an exception is
 raised.  The value that is passed to the current @tech{exception
-handler} is always an instance of the @scheme[exn] structure
-type. Every @scheme[exn] structure value has a @scheme[message] field
-that is a string, the primitive error message.  The default exception
-handler recognizes exception values with the @scheme[exn?] predicate
-and passes the error message to the current error display handler (see
-@scheme[error-display-handler]).
+handler} for a primitive error is always an instance of the
+@scheme[exn] structure type. Every @scheme[exn] structure value has a
+@scheme[message] field that is a string, the primitive error message.
+The default exception handler recognizes exception values with the
+@scheme[exn?] predicate and passes the error message to the current
+error display handler (see @scheme[error-display-handler]).
 
 Primitive procedures that accept a procedure argument with a
 particular required arity (e.g., @scheme[call-with-input-file],
@@ -29,7 +29,7 @@ particular required arity (e.g., @scheme[call-with-input-file],
 
 Raises an exception, where @scheme[v] represents the exception being
 raised. The @scheme[v] argument can be anything; it is passed to the
-current @deftech{exception handler}.
+current @tech{exception handler}.
 
 If @scheme[barrier?] is true, then the call to the @tech{exception
 handler} is protected by a @tech{continuation barrier}, so that
@@ -87,7 +87,7 @@ for end users.}
 
 
 @defproc*[([(raise-type-error [name symbol?][expected string?][v any/c]) any]
-           [(raise-type-error [name symbol?][expected string?][bad-pos nonnegative-exact-integer?][v any/c]) any])]{
+           [(raise-type-error [name symbol?][expected string?][bad-pos exact-nonnegative-integer?][v any/c]) any])]{
 
 Creates an @scheme[exn:fail:contract] value and @scheme[raise]s it as
 an exception.  The @scheme[name] argument is used as the source
@@ -331,7 +331,7 @@ A parameter whose value is used as the maximum number of characters
 used to print a Scheme value that is embedded in a primitive error
 message.}
 
-@defparam[error-print-context-length cnt nonnegative-exact-integer?]{
+@defparam[error-print-context-length cnt exact-nonnegative-integer?]{
 
 A parameter whose value is used by the default error display handler
 as the maximum number of lines of context (or ``stack trace'') to
@@ -339,7 +339,7 @@ print; a single ``...'' line is printed if more lines are available
 after the first @scheme[cnt] lines. A @scheme[0] value for
 @scheme[cnt] disables context printing entirely.}
 
-@defparam[error-value->string-handler proc (any/c nonnegative-exact-integer?
+@defparam[error-value->string-handler proc (any/c exact-nonnegative-integer?
                                                   . -> .
                                                   string?)]{
 
@@ -526,10 +526,10 @@ Returns the @scheme[srcloc]-getting procedure associated with @scheme[v].}
 
 
 @defstruct[srcloc ([source any/c]
-                   [line (or/c positive-exact-integer? false/c)]
-                   [column (or/c nonnegative-exact-integer? false/c)]
-                   [position (or/c positive-exact-integer? false/c)]
-                   [span (or/c nonnegative-exact-integer? false/c)])
+                   [line (or/c exact-positive-integer? false/c)]
+                   [column (or/c exact-nonnegative-integer? false/c)]
+                   [position (or/c exact-positive-integer? false/c)]
+                   [span (or/c exact-nonnegative-integer? false/c)])
                   #:inspector #f]{
 
 The fields of an @scheme[srcloc] instance are as follows:

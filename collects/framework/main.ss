@@ -1,8 +1,8 @@
 #reader scribble/reader
 #lang scheme/gui
 
-(require (lib "mred-unit.ss" "mred")
-         (lib "mred-sig.ss" "mred")
+(require mred/mred-unit
+         mred/mred-sig
          framework/framework-unit
          framework/private/sig
          (for-syntax scheme/base)
@@ -82,8 +82,18 @@
   (manuals)
   @{Returns the list of keywords for the manuals from @scheme[manuals]
             by extracting all of the documented exports of the manuals.  The
-            symbols are meant to be module paths.  If @scheme[manuals] is false,
+            symbols are meant to be module paths, eg the quoted
+            form of the argument to @scheme[require].
+
+  If @scheme[manuals] is false,
             then all of the documented names are used.})
+ 
+ (proc-doc/names
+  text:lookup-port-name
+  (-> symbol? (or/c (is-a?/c editor:basic<%>) false/c))
+  (manuals)
+  @{Returns the editor instance whose port-name matches the given symbol.  If no
+            editor can be found, then returns @scheme[false].})
  
  (proc-doc/names
   number-snip:make-repeating-decimal-snip
@@ -902,7 +912,10 @@
  (parameter-doc
   keymap:add-to-right-button-menu
   (parameter/c
-   (-> (is-a?/c popup-menu%) (is-a?/c editor<%>) (is-a?/c event%) void?))
+   (-> (is-a?/c popup-menu%)
+       (is-a?/c editor<%>)
+       (is-a?/c event%)
+       void?))
   proc
   @{When the keymap that @scheme[keymap:get-global] returns is installed
          into an editor, this parameter's value is used for right button

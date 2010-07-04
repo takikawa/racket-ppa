@@ -116,10 +116,6 @@ additional set of operations:
 
 @itemize{
 
- @item{@schemeidfont{make-}@scheme[structid] : takes a number of
-       arguments equal to the number of fields in the structure type,
-       and creates a new instance of the structure type.}
-
  @item{@schemeidfont{set-}@scheme[structid]@schemeidfont{-}@scheme[fieldid]@schemeidfont{!}
        : takes an instance of the structure and a value, and changes
        the instance's field to the given value.}
@@ -245,13 +241,13 @@ choice provides an answer @scheme[expr] whose value is the result of
 the whole @scheme[case] expression. If none of the lines contains a
 matching choice, it is an error.}
 
-@defform/none[#:literals (cond else)
-              (cond expr [(choice ...) expr] ... [else expr])]{
+@defform/none[#:literals (case else)
+              (case expr [(choice ...) expr] ... [else expr])]{
 
 This form of @scheme[case] is similar to the prior one, except that
 the final @scheme[else] clause is always taken if no prior line
 contains a choice matching the value of the initial @scheme[expr]. In
-other words, so there is no possibility to ``fall off them end'' of
+other words, so there is no possibility to ``fall off the end'' of
 the @scheme[case] form.}
 
 @; ----------------------------------------------------------------------

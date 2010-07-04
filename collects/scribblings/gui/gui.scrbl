@@ -3,6 +3,8 @@
 
 @title{@bold{GUI}: PLT Graphics Toolkit}
 
+@author["Matthew Flatt" "Robert Bruce Findler" "John Clements"]
+
 @declare-exporting[scheme/gui/base scheme/gui #:use-sources (mred)]
 
 This reference manual describes the GUI toolbox that is part of PLT
@@ -28,6 +30,20 @@ provides; this library cannot run in MzScheme.}
 @include-section["reference.scrbl"]
 @include-section["config.scrbl"]
 @include-section["dynamic.scrbl"]
+
+
+@;------------------------------------------------------------------------
+
+@(bibliography
+
+  (bib-entry #:key "Adobe99"
+             #:author "Adobe Systems Incorporated"
+             #:title "PostScript Language Reference, third edition"
+             #:is-book? #t
+             #:url "http://partners.adobe.com/public/developer/en/ps/PLRM.pdf"
+             #:date "1999")
+
+  )
 
 @;------------------------------------------------------------------------
 

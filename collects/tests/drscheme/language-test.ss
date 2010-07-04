@@ -14,7 +14,7 @@ the settings above should match r5rs
 #lang scheme
 
 (require "drscheme-test-util.ss"
-         (lib "gui.ss" "tests" "utils")
+         tests/utils/gui
          mred
          framework
          (prefix-in fw: framework))
@@ -45,7 +45,7 @@ the settings above should match r5rs
 ;                                                                               
 
 (define (pretty-big)
-  (parameterize ([language (list "Pretty Big (includes MrEd and Advanced Student)")])
+  (parameterize ([language (list #rx"Pretty Big")])
     
     (check-top-of-repl)
     

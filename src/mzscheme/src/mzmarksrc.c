@@ -651,6 +651,8 @@ thread_val {
   gcMARK(pr->current_local_bindings);
 
   gcMARK(pr->current_mt);
+
+  gcMARK(pr->constant_folding);
   
   gcMARK(pr->overflow_reply);
 
@@ -941,6 +943,8 @@ module_val {
 
   gcMARK(m->insp);
 
+  gcMARK(m->lang_info);
+
   gcMARK(m->hints);
   gcMARK(m->ii_src);
 
@@ -1047,9 +1051,41 @@ mark_pipe {
   gcBYTES_TO_WORDS(sizeof(Scheme_Pipe));
 }
 
+mark_logger {
+ mark:
+  Scheme_Logger *l = (Scheme_Logger *)p;
+  gcMARK(l->name);
+  gcMARK(l->parent);
+  gcMARK(l->readers);
+  gcMARK(l->timestamp);
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Logger));
+}
+
+mark_log_reader {
+ mark:
+  Scheme_Log_Reader *lr = (Scheme_Log_Reader *)p;
+  gcMARK(lr->sema);
+  gcMARK(lr->head);
+  gcMARK(lr->tail);
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Log_Reader));
+}
+
 END type;
 
 /**********************************************************************/
+
+START engine;
+
+engine_val {
+ mark:
+  Scheme_Engine *en = (Scheme_Engine *)p;
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Engine));
+}
+
+END engine;
 
 START env;
 
@@ -1111,6 +1147,7 @@ mark_optimize_info {
   gcMARK(i->top_level_consts);
   gcMARK(i->transitive_use);
   gcMARK(i->transitive_use_len);
+  gcMARK(i->context);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Optimize_Info));
@@ -1272,6 +1309,19 @@ mark_rb_node {
 }
 
 END hash;
+
+/**********************************************************************/
+
+START places;
+
+place_val {
+ mark:
+  Scheme_Place *pr = (Scheme_Place *)p;
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Place));
+}
+
+END places;
 
 /**********************************************************************/
 
@@ -1676,6 +1726,7 @@ mark_syncing {
   gcMARK(w->wrapss);
   gcMARK(w->nackss);
   gcMARK(w->reposts);
+  gcMARK(w->accepts);
   gcMARK(w->disable_break);
 
  size:
@@ -1839,6 +1890,7 @@ mark_struct_property {
   Scheme_Struct_Property *i = (Scheme_Struct_Property *)p;
   gcMARK(i->name);
   gcMARK(i->guard);
+  gcMARK(i->supers);
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Struct_Property));
 }

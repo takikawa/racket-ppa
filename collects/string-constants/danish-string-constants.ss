@@ -401,7 +401,6 @@ please adhere to these guidelines:
   (enable-keybindings-in-menus "Slå tastaturgenveje i menuer til")
   (automatically-to-ps "Udskriv automatisk til postscriptfil")
   (option-as-meta "Brugtion option-tasten som meta") ;; macos/macos x only  
-  (separate-dialog-for-searching "Brug separat dialog til søgning")
   (reuse-existing-frames "Genbrug gamle vinduer, når nye filer åbnes")
   (default-fonts "Standardskrifttyper")
   (paren-match-color "Parentesfremhævningsfarve") ; in prefs dialog
@@ -473,7 +472,6 @@ please adhere to these guidelines:
   (dock "Minimer")
   (undock "Gendan")
   (replace&find-again "Erstat og Søg igen") ;;; need double & to get a single &
-  (replace-to-end "Erstat til slutning")
   (forward "Frem")
   (backward "Tilbage")
   (hide "Skjul")
@@ -637,7 +635,7 @@ please adhere to these guidelines:
   (keybindings-error-installing-file "Error when installing the keybindings ~a:\n\n~a")
   
   (user-defined-keybinding-error "Fejl ved kørsel af brugerdefineret tastebinding ~a\n\n~a")
-  (user-defined-keybinding-malformed-file "Filen ~a indeholder ikke et modul skrevet i sproget (lib \"keybinding-lang.ss\" \"framework\").")  
+  (user-defined-keybinding-malformed-file "Filen ~a indeholder ikke et modul skrevet i sproget framework/keybinding-lang.")  
   
   ;; menu items in the "special" menu
   (insert-text-box-item "Indsæt tekstkasse")
@@ -926,7 +924,7 @@ please adhere to these guidelines:
   (advanced-student "Rutineret")
   (advanced-one-line-summary "Øvet med lambda og mutation")
   (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
-  (pretty-big-scheme "Temmelig omfattende Scheme (inklusiv MrEd og Avanceret)")
+  (pretty-big-scheme "Temmelig omfattende Scheme")
   (pretty-big-scheme-one-line-summary "Grafisk, med mange standardbiblioteker")
   (r5rs-language-name "R5RS")
   (r5rs-one-line-summary "R5RS, uden dikkedarer")

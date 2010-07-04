@@ -4,13 +4,13 @@
 #lang scheme/base
 
 (require scheme/unit
-         mzlib/cm
          scheme/path
          scheme/file
          scheme/port
          scheme/match
          scheme/system
          scheme/list
+         compiler/cm
          planet/planet-archives
          planet/private/planet-shared
 
@@ -22,7 +22,8 @@
          "getinfo.ss"
          "dirs.ss"
          "main-collects.ss"
-         "private/path-utils.ss")
+         "private/path-utils.ss"
+         "private/omitted-paths.ss")
 
 (define-namespace-anchor anchor)
 
@@ -180,21 +181,12 @@
                   "'name' result from collection ~e is not a string: ~e"
                   path x)))))
     (define path-name (path->name path))
-    (define basename
-      (let-values ([(base name dir?) (split-path path)])
-        (if (path? name)
-          (path-element->string name)
-          (error 'make-cc*
-                 "Internal error: cc had invalid info-path: ~e" path))))
     (when (info 'compile-subcollections (lambda () #f))
       (setup-printf "WARNING"
-                    "ignoring `compile-subcollections' entry in info ~a\n"
+                    "ignoring `compile-subcollections' entry in info ~a"
                     path-name))
     ;; this check is also done in compiler/compiler-unit, in compile-directory
-    (and (not (or (regexp-match? #rx"^[.]" basename) 
-                  (equal? "compiled" basename)
-                  (equal? "doc" basename)
-                  (eq? 'all (info 'compile-omit-paths void))))
+    (and (not (eq? 'all (omitted-paths path)))
          (make-cc collection path
                   (if name (string-append path-name " (" name ")") path-name)
                   info root-dir info-path shadowing-policy)))
@@ -219,10 +211,6 @@
                 ;; by convention, all collections have "version" 1 0. This
                 ;; forces them to conflict with each other.
                 (list (cons 'lib (map path->string collection-p)) 1 0))))
-
-  ;; remove-falses : listof (union X #f) -> listof X
-  ;; returns the non-false elements of l in order
-  (define (remove-falses l) (filter values l))
 
   ;; planet-spec->planet-list : (list string string nat nat) -> (list path string string (listof string) nat nat) | #f
   ;; converts a planet package spec into the information needed to create a cc structure
@@ -266,11 +254,11 @@
 
   (define planet-dirs-to-compile
     (if (make-planet)
-      (remove-falses (map (lambda (spec) (apply planet->cc spec))
-                          (if no-specific-collections?
-                            (get-all-planet-packages)
-                            (remove-falses (map planet-spec->planet-list
-                                                x-specific-planet-dirs)))))
+      (filter-map (lambda (spec) (apply planet->cc spec))
+                  (if no-specific-collections?
+                    (get-all-planet-packages)
+                    (filter-map planet-spec->planet-list
+                                x-specific-planet-dirs)))
       null))
 
   (define all-collections
@@ -290,25 +278,21 @@
     (define (get-subs cc)
       (let* ([info (cc-info cc)]
              [ccp (cc-path cc)]
-             ;; note: `compile-omit-paths' can be the symbol `all', if this
-             ;; happens then this collection should not have been included in
-             ;; the first place, but we might jump in if a command-line
-             ;; argument specifies coll/subcoll
-             [omit (call-info info 'compile-omit-paths (lambda () '())
-                              (lambda (x)
-                                (unless (or (eq? 'all x) (list-of string? x))
-                                  (error 'setup-plt
-                                         "expected a list of path strings or 'all for compile-omit-paths, got: ~s"
-                                         x))))]
-             [omit (if (pair? omit) omit '())]
-             [subs (filter (lambda (p)
-                             (and (directory-exists? (build-path ccp p))
-                                  (not (member (path->string p) omit))))
-                           (directory-list ccp))])
-        (remove-falses (make-subs cc subs))))
-    (remove-falses
-     (let loop ([l collections-to-compile])
-       (apply append (map (lambda (cc) (cons cc (loop (get-subs cc)))) l)))))
+             ;; note: omit can be 'all, if this happens then this
+             ;; collection should not have been included, but we might
+             ;; jump in if a command-line argument specified a
+             ;; coll/subcoll
+             [omit (omitted-paths ccp)]
+             [subs (if (eq? 'all omit)
+                     '()
+                     (filter (lambda (p)
+                               (and (directory-exists? (build-path ccp p))
+                                    (not (member p omit))))
+                             (directory-list ccp)))])
+        (filter values (make-subs cc subs))))
+    (filter values
+            (let loop ([l collections-to-compile])
+              (append-map (lambda (cc) (cons cc (loop (get-subs cc)))) l))))
 
   (define (plt-collection-closure collections-to-compile)
     (collection-closure
@@ -386,7 +370,7 @@
       cleanup))
 
   (define (sort-collections ccs)
-    (sort ccs (lambda (a b) (string<? (cc-name a) (cc-name b)))))
+    (sort ccs string<? #:key cc-name))
 
   (define collections-to-compile
     (sort-collections
@@ -394,9 +378,8 @@
       (if no-specific-collections?
         all-collections
         (check-again-all
-         (remove-falses
-          (map (lambda (c) (collection->cc (map string->path c)))
-               x-specific-collections)))))))
+         (filter-map (lambda (c) (collection->cc (map string->path c)))
+                     x-specific-collections))))))
 
   (set! planet-dirs-to-compile
         (sort-collections
@@ -518,6 +501,7 @@
                     [else (void)])))))))
 
   (when (clean)
+    (setup-printf #f "--- cleaning collections ---")    
     (let ([dependencies (make-hash)])
       ;; Main deletion:
       (for ([cc ccs-to-compile]) (clean-collection cc dependencies))
@@ -554,6 +538,11 @@
 
   (define (do-install-part part)
     (when (if (eq? part 'post) (call-post-install) (call-install))
+      (setup-printf #f (format "--- ~ainstalling collections ---"
+                               (case part
+                                 [(pre) "pre-"]
+                                 [(general) ""]
+                                 [(post) "post-"])))
       (for ([cc ccs-to-compile])
         (let/ec k
           (begin-record-error cc (case part
@@ -658,6 +647,7 @@
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
   (when (make-zo)
+    (setup-printf #f "--- compiling collections ---")
     (with-specified-mode
      (lambda ()
        (make-it ".zos"
@@ -685,6 +675,7 @@
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
   (when (make-info-domain)
+    (setup-printf #f "--- updating info-domain tables ---")
     ;; Each ht maps a collection root dir to an info-domain table. Even when
     ;; `collections-to-compile' is a subset of all collections, we only care
     ;; about those collections that exist in the same root as the ones in
@@ -785,26 +776,25 @@
     (unless (file-exists? (build-path (collection-path "setup") "scribble.ss"))
       (make-docs #f)))
 
-  (define (doc:verbose)
+  (define (set-doc:verbose)
     (parameterize ([current-namespace (namespace-anchor->empty-namespace anchor)])
-      (dynamic-require 'setup/scribble 'verbose)))
-  (define (doc:setup-scribblings)
-    (parameterize ([current-namespace (namespace-anchor->empty-namespace anchor)])
-      (dynamic-require 'setup/scribble 'setup-scribblings)))
+      ((dynamic-require 'setup/scribble 'verbose) (verbose))))
+  (define (doc:setup-scribblings latex-dest auto-start-doc?)
+    (parameterize ([current-namespace (namespace-anchor->empty-namespace
+                                       anchor)])
+      ((dynamic-require 'setup/scribble 'setup-scribblings)
+       (if no-specific-collections? #f (map cc-path ccs-to-compile))
+       latex-dest auto-start-doc? (make-user)
+       (lambda (what go alt) (record-error what "Building docs" go alt))
+       setup-printf)))
 
   (when (make-docs)
     (setup-printf #f "--- building documentation ---")
-    ((doc:verbose) (verbose))
+    (set-doc:verbose)
     (with-handlers ([exn:fail?
                      (lambda (exn)
                        (setup-printf #f "docs failure: ~a" (exn->string exn)))])
-      ((doc:setup-scribblings)
-       (if no-specific-collections? #f (map cc-path ccs-to-compile))
-       #f
-       (not (null? (archives)))
-       (make-user)
-       (lambda (what go alt) (record-error what "Building docs" go alt))
-       setup-printf)))
+      (doc:setup-scribblings #f (not (null? (archives))))))
 
   (define (render-pdf file)
     (define cmd
@@ -845,15 +835,8 @@
           void
           (lambda ()
             (make-directory tmp-dir)
-            ((doc:verbose) (verbose))
-            ((doc:setup-scribblings)
-             (if no-specific-collections? #f (map cc-path ccs-to-compile))
-             tmp-dir
-             #f
-             (make-user)
-             (lambda (what go alt)
-               (record-error what "Building pdf docs" go alt))
-             setup-printf)
+            (set-doc:verbose)
+            (doc:setup-scribblings tmp-dir #f)
             (parameterize ([current-directory tmp-dir])
               (for ([f (directory-list)]
                     #:when (regexp-match? #rx#"[.]tex$" (path-element->bytes f)))
@@ -870,6 +853,7 @@
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
   (when (make-launchers)
+    (setup-printf #f "--- creating launchers ---")
     (let ([name-list
            (lambda (l)
              (unless (list-of relative-path-string? l)

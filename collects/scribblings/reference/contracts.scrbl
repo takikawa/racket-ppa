@@ -1,5 +1,6 @@
 #lang scribble/doc
 @(require "mz.ss")
+@(require (for-label syntax/modcollapse))
 
 @title[#:tag "contracts" #:style 'toc]{Contracts}
 
@@ -12,6 +13,11 @@ A @defterm{contract} controls the flow of values to ensure that the
 expectations of one party are met by another party.  The
 @scheme[provide/contract] form is the primary mechanism for
 associating a contract with a binding.
+
+Note that all of the combinators that accept contracts as arguments
+use @scheme[coerce-contract], meaning that symbols, booleans, strings,
+bytess, characters, numbers, regular expressions, and predicates
+are all implicitly converted into contracts.
 
 @note-lib[scheme/contract #:use-sources (scheme/private/contract-ds
                                          scheme/private/contract
@@ -32,7 +38,7 @@ Constructs a @tech{flat contract} from @scheme[predicate]. A value
 satisfies the contract if the predicate returns a true value.}
 
 
-@defproc[(flat-named-contract [type-name string?][predicate (any/c . -> . any/c)])
+@defproc[(flat-named-contract [type-name string?][predicate (any/c . -> . any)])
          flat-contract?]{
 
 Like @scheme[flat-contract], but the first argument must be a string
@@ -145,7 +151,7 @@ between @scheme[j] and @scheme[k], inclusive.}
 A flat contract that requires the input to be an exact non-negative integer.}
 
 
-@defproc[(string-len/c [len nonnegative-exact-integer?]) flat-contract?]{
+@defproc[(string-len/c [len exact-nonnegative-integer?]) flat-contract?]{
 
 Returns a flat contract that recognizes strings that have fewer than
 @scheme[len] characters.}
@@ -153,7 +159,7 @@ Returns a flat contract that recognizes strings that have fewer than
 
 @defthing[false/c flat-contract?]{
 
-A flat contract that recognizes @scheme[#f].}
+This is just @scheme[#f]. It is here for backwards compatibility.}
 
 
 @defthing[printable/c flat-contract?]{
@@ -399,7 +405,7 @@ return multiple values. If present, the @scheme[rest-expr]
 contract governs the arguments in the rest parameter.
 
 As an example, the contract 
-@schemeblock[(->* () (boolean? #:x integer?) #:rest (listof symbol?) (symbol?))] 
+@schemeblock[(->* () (boolean? #:x integer?) #:rest (listof symbol?) symbol?)] 
 matches functions that optionally accept a boolean, an
 integer keyword argument @scheme[#:x] and arbitrarily more
 symbols, and that return a symbol.
@@ -453,6 +459,10 @@ If the identifier position of the range contract is
 expressions are evaluated when the function is called (and
 the underscore is not bound in the range). Otherwise the
 range expressions are evaluated when the function returns.
+
+If there are optional arguments that are not supplied, then 
+the corresponding variables will be bound to a special value
+called the @scheme[unsupplied-arg] value.
 }
 
 @defform*/subs[#:literals (any values ->)
@@ -658,7 +668,7 @@ that definition.}
                      positive-blame-expr negative-blame-expr)
            (contract contract-expr to-protect-expr 
                      positive-blame-expr negative-blame-expr
-                     contract-source-expr)]]{
+                     contract-source-info)]]{
 
 The primitive mechanism for attaching a contract to a value. The
 purpose of @scheme[contract] is as a target for the expansion of some
@@ -676,12 +686,31 @@ The values of @scheme[positive-blame-expr] and
 blame for positive and negative positions of the contract specified by
 @scheme[contract-expr]. 
 
-If specified, @scheme[contract-source-expr], indicates where the
-contract was assumed. Its value must be a syntax object specifying the
+If specified, @scheme[contract-source-info], indicates where the
+contract was assumed. Its value must be a either:
+@itemize{
+@item{a list of two elements: @scheme[srcloc] struct and
+either a string or @scheme[#f]. The srcloc struct inidates
+where the contract was assumed. Its @tt{source} field
+should be a syntax object, and @scheme[module-path-index-resolve]
+is called on it to extract the path of syntax object.
+
+If the second element of
+the list is not @scheme[#f], it is used as the name of the
+identifier whose contract was assumed.}
+
+@item{a syntax object specifying the
 source location of the location where the contract was assumed. If the
 syntax object wraps a symbol, the symbol is used as the name of the
-primitive whose contract was assumed. If absent, it defaults to the
-source location of the @scheme[contract] expression.}
+primitive whose contract was assumed.}
+}
+
+If absent, it defaults to the source location of the
+@scheme[contract] expression with no identifying name.
+
+The second form above is not recommended, because mzscheme strips
+source location information from compiled files.
+}
 
 @; ------------------------------------------------------------------------
 
@@ -874,18 +903,44 @@ for a contract. The arguments should be either contracts or
 symbols. It wraps parenthesis around its arguments and
 extracts the names from any contracts it is supplied with.}
 
-@defform[(coerce-contract id expr)]{
+@defproc[(coerce-contract [id symbol?] [x any/c]) contract?]{
 
-Evaluates @scheme[expr] and, if the result is a
-contract, just returns it. If the result is a procedure of arity
-one, it converts that into a contract. If the result is neither, it
+If @scheme[x] is a contract, it returns it. If it is a procedure of
+arity one, it converts that into a contract by treating the result as
+a predicate. If it is a symbol, boolean, or character, it makes a
+contract that accepts values that are @scheme[eq?] to @scheme[x]. If
+@scheme[x] is a string or a bytes, it makes a contract that
+accespts values that are @scheme[equal?] to @scheme[x]. If @scheme[x]
+is a regular expression or a byte regular expression, it makes a
+contract that accepts strings and bytes, as long as they match the
+regular expression.
+
+If @scheme[x] is none of the above, @scheme[coerce-contract]
 signals an error, using the first argument in the error
-message. The message says that a contract or a procedure of
-arity one was expected.}
+message.}
 
-@defproc[(flat-contract/predicate? [val any/c]) boolean?]{
+@defproc[(coerce-contracts [id symbol?] [xs (listof any/c)]) (listof contract?)]{
 
-A predicate that indicates when @scheme[coerce-contract] will fail.}
+Coerces all of the arguments in 'xs' into contracts (via
+@scheme[coerce-contract/f]) and signals an error if any of them are not
+contracts.  The error messages assume that the function named by
+@scheme[id] got @scheme[xs] as its entire argument list.
+}
+
+@defproc[(coerce-flat-contract [id symbol?] [x any/c]) flat-contract?]{
+  Like @scheme[coerce-contract], but requires the result
+  to be a flat contract, not an arbitrary contract.
+}
+
+@defproc[(coerce-flat-contracts [id symbol?] [x (listof any/c)]) (listof/c flat-contract?)]{
+  Like @scheme[coerce-contracts], but requires the results
+  to be flat contracts, not arbitrary contracts.
+}
+
+@defproc[(coerce-contract/f [x any/c]) (or/c contract? #f)]{
+  Like @scheme[coerce-contract], but returns @scheme[#f] if
+  the value cannot be coerced to a contract.
+}
 
 @defproc[(raise-contract-error [val any/c]
                                [src-info any/c]
@@ -963,20 +1018,30 @@ name @scheme[sexp-name] when signaling a contract violation.}
 
 @defparam[contract-violation->string 
           proc 
-          (any/c any/c symbol? symbol? any/c string? . -> . string?)]{
-
+          (-> any/c any/c (or/c #f any/c) any/c string? string?)]{
 
 This is a parameter that is used when constructing a
 contract violation error. Its value is procedure that
-accepts six arguments: the value that the contract applies
-to, a syntax object representing the source location where
-the contract was established, the names of the two parties
-to the contract (as symbols) where the first one is the
-guilty one, an sexpression representing the contract, and a
-message indicating the kind of violation. The procedure then
+accepts five arguments: 
+@itemize{
+@item{the value that the contract applies to,}
+@item{a syntax object representing the source location where
+the contract was established, }
+@item{the name of the party that violated the contract (@scheme[#f] indicates that the party is not known, not that the party's name is @scheme[#f]), }
+@item{an sexpression representing the contract, and }
+@item{a message indicating the kind of violation.
+}}
+The procedure then
 returns a string that is put into the contract error
 message. Note that the value is often already included in
-the message that indicates the violation.}
+the message that indicates the violation.
+
+If the contract was establised via
+@scheme[provide/contract], the names of the party to the
+contract will be sexpression versions of the module paths
+(as returned by @scheme[collapse-module-path]).
+
+}
 
 
 @defform[(recursive-contract contract-expr)]{

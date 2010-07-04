@@ -26,7 +26,7 @@
      (list p))))
 
 (require syntax/moddep
-	 mzlib/cm)
+	 compiler/cm)
 
 (define (go mod-path rel-to target)
   (let* ([path (if target
@@ -67,8 +67,6 @@
 (go (build-path (current-load-relative-directory) "xform-mod.ss")
     #f
     "xform-collects/xform/xform-mod.ss")
-;; Needed for cm:
-(go 'mzlib/private/cm-ctime #f #f)
 ;; Readers:
 (go 'mzscheme/lang/reader #f #f)
 (go 'scheme/base/lang/reader #f #f)
