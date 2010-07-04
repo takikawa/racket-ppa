@@ -88,6 +88,7 @@
     ("omega" "ω")
     ("eta" "η")
     ("xi" "ξ")
+    ("iota" "ι")
     ("Gamma" "Γ")
     ("Lambda" "Λ")
     ("Sigma" "Σ")
@@ -135,6 +136,7 @@
     ("succ" "≻")
     ("sim" "∼")
     ("perp" "⊥")
+    ("top" "⊤")
     ("preceq" "≼")
     ("succeq" "≽")
     ("simeq" "≃")
@@ -163,10 +165,14 @@
     ("vdash" "⊢")
     ("dashv" "⊣")
     
+    ("sqrt" "√")
+    
     ("skull" "☠") 
     ("smiley" "☺")
     ("blacksmiley" "☻")
     ("frownie" "☹")
+    
+    ("S" "§")
     ))
 
 ;; checks to see if there are duplicates

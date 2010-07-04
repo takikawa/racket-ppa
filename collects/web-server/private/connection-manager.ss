@@ -45,7 +45,7 @@
 ;; kill this connection
 (define (kill-connection! conn)
   #;(printf "K: ~a~n" (connection-id conn))
-  (with-handlers ([exn? void])
+  (with-handlers ([exn:fail? void])
     (cancel-timer! (connection-timer conn)))
   (kill-connection-w/o-timer! conn))
 
@@ -59,4 +59,4 @@
 ;; adjust-connection-timeout!: connection number -> void
 ;; change the expiration time for this connection
 (define (adjust-connection-timeout! conn time)
-  (reset-timer! (connection-timer conn) time))
+  (increment-timer! (connection-timer conn) time))

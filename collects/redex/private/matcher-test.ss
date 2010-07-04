@@ -72,8 +72,8 @@
     
     (test-empty '(in-hole (name E_1 ((hide-hole hole) hole)) x)
                 `(,the-hole x)
-                (list (make-test-mtch (make-bindings (list (make-bind 'E_1 `(,the-hole ,the-hole)))) 
-                                      `(x ,the-hole)
+                (list (make-test-mtch (make-bindings (list (make-bind 'E_1 `(,the-not-hole ,the-hole)))) 
+                                      `(,the-hole x)
                                       none)))
     
 
@@ -101,6 +101,11 @@
     (test-empty '((number_!_1 ...) (number_!_1 ...)) 
                 '((17 2 3 1 5) (1 2 3 1 5))
                 (list (make-test-mtch (make-bindings (list)) '((17 2 3 1 5) (1 2 3 1 5)) none)))
+    (test-empty '((number_!_1 number_!_1) ... number_!_1 ...) '((1 1) (2 2) 1 3) #f)
+    (test-empty '((number_!_1 number_!_1) ... number_!_1 ...) '((1 1) (2 3) 1 2) #f)
+    (test-empty '((number_!_1 number_!_1) ... number_!_1 ...)
+                '((1 1) (2 3) 1 4)
+                (list (make-test-mtch (make-bindings (list)) '((1 1) (2 3) 1 4) none)))
     
     (test-ellipses '(a) '(a))
     (test-ellipses '(a ...) `(,(make-repeat 'a '() #f #f)))
@@ -114,21 +119,21 @@
     (test-ellipses '((1 (name x a)) ...)
                    `(,(make-repeat '(1 (name x a)) (list (make-bind 'x '())) #f #f)))
     (test-ellipses '((any (name x a)) ...)
-                   `(,(make-repeat '(any (name x a)) (list (make-bind 'x '())
-                                                           (make-bind 'any '())) 
+                   `(,(make-repeat '(any (name x a)) (list (make-bind 'any '())
+                                                           (make-bind 'x '())) 
                                    #f #f)))
     (test-ellipses '((number (name x a)) ...)
-                   `(,(make-repeat '(number (name x a)) (list (make-bind 'x '())
-                                                              (make-bind 'number '())) 
+                   `(,(make-repeat '(number (name x a)) (list (make-bind 'number '())
+                                                              (make-bind 'x '())) 
                                    #f #f)))
     (test-ellipses '((variable (name x a)) ...)
-                   `(,(make-repeat '(variable (name x a)) (list (make-bind 'x '())
-                                                                (make-bind 'variable '()))
+                   `(,(make-repeat '(variable (name x a)) (list (make-bind 'variable '())
+                                                                (make-bind 'x '()))
                                    #f #f)))
     (test-ellipses '(((name x a) (name y b)) ...)
-                   `(,(make-repeat '((name x a) (name y b)) (list (make-bind 'y '()) (make-bind 'x '())) #f #f)))
+                   `(,(make-repeat '((name x a) (name y b)) (list (make-bind 'x '()) (make-bind 'y '())) #f #f)))
     (test-ellipses '((name x (name y b)) ...)
-                   `(,(make-repeat '(name x (name y b)) (list (make-bind 'y '()) (make-bind 'x '())) #f #f)))
+                   `(,(make-repeat '(name x (name y b)) (list (make-bind 'x '()) (make-bind 'y '())) #f #f)))
     (test-ellipses '((in-hole (name x a) (name y b)) ...)
                    `(,(make-repeat '(in-hole (name x a) (name y b)) 
                                    (list (make-bind 'x '()) (make-bind 'y '())) #f #f)))
@@ -417,21 +422,21 @@
                             '(a (b (c (d e))))
                             none)))
     
-    (test-empty `(+ 1 (side-condition any ,(lambda (bindings) #t)))
+    (test-empty `(+ 1 (side-condition any ,(lambda (bindings) #t) #t))
                 '(+ 1 b)
                 (list (make-test-mtch (make-bindings (list (make-bind 'any 'b))) '(+ 1 b) none)))
-    (test-empty `(+ 1 (side-condition any ,(lambda (bindings) #f)))
+    (test-empty `(+ 1 (side-condition any ,(lambda (bindings) #f) #f))
                 '(+ 1 b)
                 #f)
     
-    (test-empty `(+ 1 (side-condition b ,(lambda (bindings) #t)))
+    (test-empty `(+ 1 (side-condition b ,(lambda (bindings) #t) #t))
                 '(+ 1 b)
                 (list (make-test-mtch (make-bindings '()) '(+ 1 b) none)))
-    (test-empty `(+ 1 (side-condition a ,(lambda (bindings) #t)))
+    (test-empty `(+ 1 (side-condition a ,(lambda (bindings) #t)) #t)
                 '(+ 1 b)
                 #f)
 
-    (test-empty `(side-condition (name x any) ,(lambda (bindings) (eq? (lookup-binding bindings 'x) 'a)))
+    (test-empty `(side-condition (name x any) ,(lambda (bindings) (eq? (lookup-binding bindings 'x) 'a)) (eq? (term x) 'a))
                 'a
                 (list 
                  (make-test-mtch (make-bindings (list (make-bind 'x 'a)
@@ -439,7 +444,7 @@
                             'a
                             none)))
 
-    (test-empty `(+ 1 (side-condition (name x any) ,(lambda (bindings) (eq? (lookup-binding bindings 'x) 'a))))
+    (test-empty `(+ 1 (side-condition (name x any) ,(lambda (bindings) (eq? (lookup-binding bindings 'x) 'a)) (eq? (term x) 'a)))
                 '(+ 1 a)
                 (list 
                  (make-test-mtch (make-bindings (list (make-bind 'x 'a)
@@ -447,16 +452,17 @@
                             '(+ 1 a)
                             none)))
 
-    (test-empty `(side-condition (name x any) ,(lambda (bindings) (eq? (lookup-binding bindings 'x) 'a)))
+    (test-empty `(side-condition (name x any) ,(lambda (bindings) (eq? (lookup-binding bindings 'x) 'a)) (eq? (term x) 'a))
                 'b
                 #f)
     
-    (test-empty `(+ 1 (side-condition (name x any) ,(lambda (bindings) (eq? (lookup-binding bindings 'x) 'a))))
+    (test-empty `(+ 1 (side-condition (name x any) ,(lambda (bindings) (eq? (lookup-binding bindings 'x) 'a)) (eq? (term x) 'a)))
                 '(+ 1 b)
                 #f)
     
     (test-empty `(side-condition ((any_1 ..._a) (any_2 ..._a))
-                                 ,(lambda (bindings) (error 'should-not-be-called)))
+                                 ,(lambda (bindings) (error 'should-not-be-called))
+                                 (error 'should-not-be-called))
                 '((1 2 3) (4 5))
                 #f)
     
@@ -619,15 +625,20 @@
                   "compile-pattern"
                   equal?)
     
+    (test-ellipsis-binding '((number_1 number_2) ...) '((1 2)))
+    (test-ellipsis-binding '((name x number_1) ...) '(1 2))
+    (test-ellipsis-binding '(((number_1 ...) (number_2 ...)) ...) '(((1) (2))))
+    (test-ellipsis-binding '(number ... variable) '(1 x))
+    
     (cond
       [(= failures 0)
-       (fprintf (current-error-port) "matcher-test.ss: all ~a tests passed.\n" test-count)]
+       (printf "matcher-test.ss: all ~a tests passed.\n" test-count)]
       [else
-       (fprintf (current-error-port) "matcher-test.ss: ~a test~a failed.\n" 
-                failures
-                (if (= failures 1)
-                    ""
-                    "s"))]))
+       (printf "matcher-test.ss: ~a test~a failed.\n" 
+               failures
+               (if (= failures 1)
+                   ""
+                   "s"))]))
 
   ;; mk-hasheq : (listof (cons sym any)) -> hash-table
   ;; builds a hash table that has the bindings in assoc-list
@@ -739,6 +750,27 @@
   
   (define (test-suite:non-underscore-binder? x)
     (memq x '(number any variable string)))
+  
+  ;; test-ellipsis-binding: sexp sexp -> boolean
+  ;; Checks that `extract-empty-bindings' produces bindings in the same order
+  ;; as the matcher, as required by `collapse-single-multiples'
+  (define (test-ellipsis-binding pat exp)
+    (define (binding-names bindings)
+      (map (λ (b)
+             (cond [(bind? b) (bind-name b)]
+                   [(mismatch-bind? b) (mismatch-bind-name b)]))
+           bindings))
+    (run-test
+     `(test-ellipsis-binding ,pat)
+     (binding-names
+      (bindings-table-unchecked
+       (mtch-bindings
+        (car 
+         ((compiled-pattern-cp
+           (compile-pattern (compile-language 'pict-stuff-not-used '() '()) pat #t))
+          exp
+          #t)))))
+     (binding-names (extract-empty-bindings test-suite:non-underscore-binder? pat))))
   
   ;; run-test/cmp : sexp any any (any any -> boolean)
   ;; compares ans with expected. If failure,

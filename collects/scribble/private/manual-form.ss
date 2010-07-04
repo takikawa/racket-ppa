@@ -3,7 +3,6 @@
          "../struct.ss"
          "../scheme.ss"
          "../search.ss"
-         "../config.ss"
          "../basic.ss"
          "../manual-struct.ss"
          "qsloc.ss"
@@ -18,6 +17,7 @@
          scheme/list
          (for-syntax scheme/base)
          (for-label scheme/base))
+
 
 (provide defform defform* defform/subs defform*/subs defform/none
          defidform

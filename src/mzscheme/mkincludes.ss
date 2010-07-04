@@ -46,6 +46,7 @@
 (copy-if-newer mzsrcdir "include/scheme.h" #f
                (change-regexp "/[*]III[*]/"
                               "#define INCLUDE_WITHOUT_PATHS"))
+(copy-if-newer mzsrcdir "include/schthread.h")
 (copy-if-newer mzsrcdir "src/schemef.h")
 (copy-if-newer mzsrcdir "src/schvers.h")
 (copy-if-newer mzsrcdir "src/stypes.h")
@@ -57,5 +58,6 @@
 (copy-if-newer mzsrcdir "include/mzscheme3m.exp")
 (copy-if-newer mzsrcdir "gc2/gc2.h" "schemegc2.h")
 (copy-if-newer mzsrcdir "gc2/gc2.h" "schemegc2.h")
+(copy-if-newer mzsrcdir "gc2/gc2_obj.h" "schgc2obj.h")
 
 (printf "Done.\n")

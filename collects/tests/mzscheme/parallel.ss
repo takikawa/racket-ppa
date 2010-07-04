@@ -36,6 +36,7 @@
                    [cust (list-ref custodians (sub1 n))]
                    [ql (namespace-variable-value 'quiet-load #f
                                                  (lambda () #f))])
+               (namespace-attach-module (current-namespace) 'scheme/init ns)
                (parameterize ([current-custodian cust])
                  (thread
                   (lambda ()
@@ -43,7 +44,7 @@
                      n
                      (lambda ()
                        (parameterize ([current-namespace ns])
-                         (namespace-require '(for-syntax scheme/base))
+                         (namespace-require '(lib "scheme/init"))
                          (eval `(define Section-prefix ,(format "~a:" n)))
                          (when ql
                            (eval `(define quiet-load (quote ,ql))))

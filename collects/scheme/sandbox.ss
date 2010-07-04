@@ -4,7 +4,8 @@
          scheme/list
          scheme/string
          syntax/moddep
-         scheme/gui/dynamic)
+         scheme/gui/dynamic
+         planet/config)
 
 (provide gui?
          sandbox-init-hook
@@ -266,8 +267,13 @@
                           (simplify-path* (resolve-module-path-index i path)))
                         (filter (lambda (i)
                                   (and (module-path-index? i) (not (lib? i))))
-                                (append-map cdr (module-compiled-imports
-                                                 (get-module-code path))))))
+                                (append-map cdr (let ([m (get-module-code 
+                                                          path 
+                                                          #:extension-handler 
+                                                          (lambda (path loader?) #f))])
+                                                  (if m 
+                                                      (module-compiled-imports m)
+                                                      null))))))
                (cons path r)))])))
 
 ;; Resources ----------------------------------------------------------------
@@ -838,6 +844,7 @@
     [sandbox-path-permissions
      `(,@(map (lambda (p) `(read-bytecode ,p))
               (current-library-collection-paths))
+       (read-bytecode ,(PLANET-BASE-DIR))
        (exists ,(find-system-path 'addon-dir))
        ,@(compute-permissions allow)
        ,@(sandbox-path-permissions))]

@@ -90,7 +90,7 @@ The following base types are parameteric in their type arguments.
 types @scheme[t ...].  This can only appear as the return type of a
 function.}
 @defform/none[v]{where @scheme[v] is a number, boolean or string, is the singleton type containing only that value}
-@defform/none['val]{where @scheme[val] is a Scheme value, is the singleton type containing only that value}
+@defform/none[(quote val)]{where @scheme[val] is a Scheme value, is the singleton type containing only that value}
 @defform/none[i]{where @scheme[i] is an identifier can be a reference to a type
 name or a type variable}
 @defform[(Rec n t)]{is a recursive type where @scheme[n] is bound to the
@@ -188,6 +188,12 @@ types.  In most cases, use of @scheme[:] is preferred to use of @scheme[define:]
 structure is a substructure of @scheme[parent].  When
 @scheme[maybe-type-vars] is present, the structure is polymorphic in the type
  variables @scheme[v].}
+                                 
+@defform/subs[
+(define-struct/exec: name-spec ([f : t] ...) [e : proc-t])
+([name-spec name (name parent)])]{
+ Like @scheme[define-struct:], but defines an procedural structure.  
+ The procdure @scheme[e] is used as the value for @scheme[prop:procedure], and must have type @scheme[proc-t].}
 
 @subsection{Type Aliases}
 @defform*[[(define-type-alias name t)
@@ -222,7 +228,7 @@ This is legal only in expression contexts.}
 appropriate number of type variables. This is legal only in expression
 contexts.}
 
-@schemevarfont|{#{e @ t ...}}| This is identical to @scheme[(inst e t ...)].
+@litchar|{#{e @ t ...}}| This is identical to @scheme[(inst e t ...)].
 
 @subsection{Require}
 
@@ -252,7 +258,8 @@ Scheme.
 @index["opaque"]{The fourth case} defines a new type @scheme[t].  @scheme[pred], imported from
 module @scheme[m], is a predicate for this type.  The type is defined
 as precisely those values to which @scheme[pred] produces
-@scheme[#t].  @scheme[pred] must have type @scheme[(Any -> Boolean)].
+@scheme[#t].  @scheme[pred] must have type @scheme[(Any -> Boolean)].  
+Opaque types must be required lexically before they are used.
 
 In all cases, the identifiers are protected with @rtech{contracts} which
 enforce the specified types.  If this contract fails, the module
@@ -266,7 +273,7 @@ a @scheme[require/typed] form.}
 
 The @schememodname[typed-scheme] language corresponds to the
 @schememodname[scheme/base] language---that is, any identifier provided
-by @schememodname[scheme/base], such as @scheme[mod] is available by default in
+by @schememodname[scheme/base], such as @scheme[modulo] is available by default in
 @schememodname[typed-scheme].  
 
 @schememod[typed-scheme

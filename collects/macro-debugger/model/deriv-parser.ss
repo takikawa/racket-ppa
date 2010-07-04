@@ -1,6 +1,7 @@
 
 #lang scheme/base
 (require (for-syntax scheme/base)
+         syntax/stx
          "yacc-ext.ss"
          "yacc-interrupted.ss"
          "deriv.ss"
@@ -17,14 +18,6 @@
 
 ;; PARSER
 
-(define-struct (exn:eval exn) (deriv))
-(define empty-cms
-  (call-with-continuation-prompt (lambda () (current-continuation-marks))))
-(define (create-eval-exn deriv)
-  (make-exn:eval "exception during evaluation"
-                 empty-cms
-                 deriv))
-
 (define-production-splitter production/I values values)
 
 (define-syntax (productions/I stx)
@@ -38,7 +31,7 @@
             (src-pos)
             (tokens basic-tokens prim-tokens renames-tokens)
             (end EOF)
-            #;(debug "/tmp/ryan/DEBUG-PARSER.txt")
+            #|(debug "/tmp/ryan/DEBUG-PARSER.txt")|#
             (error deriv-error))
 
    ;; tokens
@@ -60,15 +53,46 @@
     rename-one
     rename-list
     tag
-    IMPOSSIBLE)
+    IMPOSSIBLE
+    start
+    top-non-begin)
 
     ;; Entry point
    (productions
     (Expansion
      [(start EE/Lifts) $2]
-     [(start EE/Lifts/Interrupted) $2]))
+     [(start EE/Lifts/Interrupted) $2]
+     [(start ExpandCTE) $2]
+     [(start ExpandCTE/Interrupted) $2]))
 
    (productions/I
+
+    (ExpandCTE
+     [(visit start (? CheckImmediateMacro/Lifts) top-non-begin start (? EE) return)
+      (make ecte $1 $7 $3 $6)]
+     [(visit start CheckImmediateMacro/Lifts top-begin (? NextExpandCTEs) return)
+      (begin
+        (unless (list? $5)
+          (error "NextExpandCTEs returned non-list ~s" $5))
+        (make ecte $1 $6 $3
+              (make p:begin $4 $6 (list (stx-car $4)) #f
+                    (make lderiv (cdr (stx->list $4))
+                          (and $6 (cdr (stx->list $6)))
+                          #f
+                          $5))))])
+
+    (CheckImmediateMacro/Lifts
+     [((? CheckImmediateMacro))
+      $1]
+     [(CheckImmediateMacro lift-loop)
+      (let ([e1 (wderiv-e1 $1)]
+            [e2 $2])
+        (make lift-deriv e1 e2 $1 $2 (make p:stop $2 $2 null #f)))])
+
+    (NextExpandCTEs
+     (#:skipped null)
+     [() null]
+     [(next (? ExpandCTE) (? NextExpandCTEs)) (cons $2 $3)])
 
     ;; Expand with possible lifting
     (EE/Lifts
@@ -87,14 +111,9 @@
         (make lift/let-deriv initial final $1 $2 $3))])
 
     ;; Evaluation
-    ;; Answer = ?exn
+    ;; Answer = (listof LocalAction)
     (Eval
-     [() #f]
-     [(!!) $1]
-     [(start EE/Interrupted) (create-eval-exn $2)]
-     [(start EE (? Eval)) $3]
-     [(start CheckImmediateMacro/Interrupted) (create-eval-exn $2)]
-     [(start CheckImmediateMacro (? Eval)) $3])
+     [((? LocalActions)) $1])
 
     ;; Expansion of an expression to primitive form
     (CheckImmediateMacro
@@ -102,8 +121,8 @@
       ($2 $1 $3)])
     (CheckImmediateMacro/Inner
     (#:args le1 e2)
-     [()
-      (make p:stop le1 e2 null #f)]
+     [(!)
+      (make p:stop le1 e2 null $1)]
      [(visit Resolves (? MacroStep) return (? CheckImmediateMacro/Inner))
       ($3 $1 $2 ($5 $4 e2))]
      [(visit Resolves tag (? MacroStep) return (? CheckImmediateMacro/Inner))
@@ -145,9 +164,9 @@
     (MacroStep
      (#:args e1 rs next)
      [(enter-macro ! macro-pre-transform (? LocalActions)
-                   ! macro-post-transform ! exit-macro)
+                   macro-post-transform ! exit-macro)
       (make mrule e1 (and next (wderiv-e2 next)) rs $2
-            $3 $4 $6 (or $5 $7) $8 next)])
+            $3 $4 $5 $6 $7 next)])
 
     ;; Keyword resolution
     (Resolves
@@ -159,10 +178,10 @@
     (LocalActions
      (#:skipped null)
      [() null]
-     [((? LocalAction) (? LocalActions)) (cons $1 $2)]
-     [((? NotReallyLocalAction) (? LocalActions)) $2])
+     [((? LocalAction) (? LocalActions)) (cons $1 $2)])
 
     (LocalAction
+     [(!!) (make local-exn $1)]
      [(enter-local OptPhaseUp
        local-pre (? LocalExpand/Inner) OptLifted local-post
        OptOpaqueExpr exit-local)
@@ -171,14 +190,23 @@
       (make local-lift (cdr $1) (car $1))]
      [(lift-statement)
       (make local-lift-end $1)]
+     [(lift-require)
+      (make local-lift-require (car $1) (cadr $1) (cddr $1))]
+     [(lift-provide)
+      (make local-lift-provide $1)]
      [(local-bind ! rename-list)
       (make local-bind $1 $2 $3 #f)]
      [(local-bind rename-list (? BindSyntaxes))
-      (make local-bind $1 #f $2 $3)])
+      (make local-bind $1 #f $2 $3)]
+     ;; -- Not really local actions, but can occur during evaluation
+     ;; called 'expand' (not 'local-expand') within transformer
+     [(start (? EE)) #f]
+     [(start (? CheckImmediateMacro)) #f])
 
     (LocalExpand/Inner
      [(start (? EE)) $2]
      [((? CheckImmediateMacro)) $1])
+
     (OptLifted
      [(lift-loop) $1]
      [() #f])
@@ -188,11 +216,6 @@
     (OptPhaseUp
      [(phase-up) #t]
      [() #f])
-
-    (NotReallyLocalAction
-     ;; called 'expand' (not 'local-expand') within transformer
-     [(start (? EE)) #f]
-     [(start (? CheckImmediateMacro)) #f])
 
     (Prim
      (#:args e1 e2 rs)
@@ -219,8 +242,6 @@
      [((? PrimQuote)) ($1 e1 e2 rs)]
      [((? PrimQuoteSyntax)) ($1 e1 e2 rs)]
      [((? PrimRequire)) ($1 e1 e2 rs)]
-     [((? PrimRequireForSyntax)) ($1 e1 e2 rs)]
-     [((? PrimRequireForTemplate)) ($1 e1 e2 rs)]
      [((? PrimProvide)) ($1 e1 e2 rs)]
      [((? PrimVarRef)) ($1 e1 e2 rs)])
 
@@ -267,11 +288,7 @@
                   phase-up (? EE/LetLifts) (? Eval) exit-prim)
       (make p:define-syntaxes $1 $7 null $3 $5 $6)]
      [(enter-prim prim-require (? Eval) exit-prim)
-      (make p:require $1 $4 null $3)]
-     [(enter-prim prim-require-for-syntax (? Eval) exit-prim)
-      (make p:require-for-syntax $1 $4 null $3)]
-     [(enter-prim prim-require-for-template (? Eval) exit-prim)
-      (make p:require-for-template $1 $4 null $3)]
+      (make p:require $1 $4 null #f $3)]
      [()
       (make p:stop e1 e1 null #f)])
 
@@ -428,17 +445,7 @@
     (PrimRequire
      (#:args e1 e2 rs)
      [(prim-require (? Eval))
-      (make p:require e1 e2 rs $2)])
-
-    (PrimRequireForSyntax
-     (#:args e1 e2 rs)
-     [(prim-require-for-syntax (? Eval))
-      (make p:require-for-syntax e1 e2 rs $2)])
-
-    (PrimRequireForTemplate
-     (#:args e1 e2 rs)
-     [(prim-require-for-template (? Eval))
-      (make p:require-for-template e1 e2 rs $2)])
+      (make p:require e1 e2 rs #f $2)])
 
     (PrimProvide 
      (#:args e1 e2 rs)
@@ -450,8 +457,9 @@
 
     (PrimSet
      (#:args e1 e2 rs)
-     [(prim-set! ! Resolves next (? EE))
-      (make p:set! e1 e2 rs $2 $3 $5)]
+     ;; Unrolled to avoid shift/reduce
+     [(prim-set! ! resolve Resolves ! next (? EE))
+      (make p:set! e1 e2 rs $2 (cons $3 $4) $5 $7)]
      [(prim-set! Resolves (? MacroStep) (? EE))
       (make p:set!-macro e1 e2 rs #f ($3 e1 $2 $4))])
 

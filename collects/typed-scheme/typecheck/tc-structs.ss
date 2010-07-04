@@ -1,7 +1,7 @@
 #lang scheme/base
 
-(require (except-in "../utils/utils.ss" extend))
-(require (rep type-rep)
+(require "../utils/utils.ss" 
+	 (rep type-rep)
          (private parse-type)
 	 (types convenience utils union resolve abbrev)
 	 (env type-env type-environments type-name-env)
@@ -51,7 +51,7 @@
   (syntax-case nm/par ()
     [nm (identifier? #'nm) (values #'nm #f #f (syntax-e #'nm) (make-F (syntax-e #'nm)))]
     [(nm par) (let* ([parent0 (parse-type #'par)]
-                     [parent (resolve-name parent0)])
+                     [parent (if (Name? parent0) (resolve-name parent0) (tc-error/stx #'par "parent type not a valid structure name: ~a" (syntax->datum #'par)))])
                 (values #'nm parent0 parent (syntax-e #'nm) (make-F (syntax-e #'nm))))]
     [_ (int-err "not a parent: ~a" (syntax->datum nm/par))]))
 
@@ -159,7 +159,8 @@
   ;; parse the types
   (define types
     ;; add the type parameters of this structure to the tvar env
-    (parameterize ([current-tvars (extend-env tvars new-tvars (current-tvars))])
+    (parameterize ([current-tvars (extend-env tvars new-tvars (current-tvars))]
+                   [current-poly-struct `#s(poly ,nm ,new-tvars)])
       ;; parse the field types
       (map parse-type tys)))
   ;; instantiate the parent if necessary, with new-tvars

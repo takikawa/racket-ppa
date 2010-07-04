@@ -707,6 +707,7 @@ FRAMEWORK_PREFIX
 INSTALL_ORIG_TREE
 EXE_SUFFIX
 PLACE_CGC_FLAGS
+LIBATOM
 MREDLINKER
 LIBSFX
 WXLIBS
@@ -766,7 +767,8 @@ CXXFLAGS
 CCC
 CXXCPP
 XMKMF'
-ac_subdirs_all='foreign/gcc/libffi
+ac_subdirs_all='mzscheme/gc/libatomic_ops
+foreign/gcc/libffi
 wxcommon/jpeg
 wxxt/src/x/wbuild '
 
@@ -1344,8 +1346,10 @@ Optional Features:
   --enable-dynlib         same as --enable-shared
   --enable-lt=<prog>      use <prog> instead of bundled libtool
   --enable-origtree       install with original directory structure
+  --enable-jit            compile JIT support (enabled by default)
   --enable-foreign        compile foreign support (enabled by default)
   --enable-places         compile places support
+  --enable-futures        compile futures support
   --enable-cgcdefault     use CGC (Boehm or Senora) as default build
   --enable-sgc            use Senora GC instead of the Boehm GC
   --enable-sgcdebug       use Senora GC for debugging
@@ -1369,6 +1373,7 @@ Optional Features:
   --enable-libfw          install Mac OS X frameworks to /Library/Frameworks
   --enable-userfw         install Mac OS X frameworks to ~/Library/Frameworks
   --enable-macprefix      allow --prefix with a Mac OS X install
+  --enable-mac64          do not force 32-bit build
 
 Optional Packages:
   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
@@ -1878,6 +1883,14 @@ if test "${enable_origtree+set}" = set; then
 fi
 
 
+# Check whether --enable-jit was given.
+if test "${enable_jit+set}" = set; then
+  enableval=$enable_jit;
+else
+  enable_jit=yes
+fi
+
+
 # Check whether --enable-foreign was given.
 if test "${enable_foreign+set}" = set; then
   enableval=$enable_foreign;
@@ -1889,6 +1902,11 @@ fi
 # Check whether --enable-places was given.
 if test "${enable_places+set}" = set; then
   enableval=$enable_places;
+fi
+
+# Check whether --enable-futures was given.
+if test "${enable_futures+set}" = set; then
+  enableval=$enable_futures;
 fi
 
 
@@ -2015,6 +2033,11 @@ fi
 # Check whether --enable-macprefix was given.
 if test "${enable_macprefix+set}" = set; then
   enableval=$enable_macprefix;
+fi
+
+# Check whether --enable-mac64 was given.
+if test "${enable_mac64+set}" = set; then
+  enableval=$enable_mac64;
 fi
 
 
@@ -2229,7 +2252,12 @@ if test "$LIBTOOLPROG" != "" ; then
 fi
 show_explicitly_enabled "${enable_orig}" "Original install tree"
 
+show_explicitly_disabled "${enable_jit}" JIT
+
 show_explicitly_disabled "${enable_foreign}" Foreign
+
+show_explicitly_enabled "${enable_places}" Places
+show_explicitly_enabled "${enable_futures}" Futures
 
 show_explicitly_enabled "${enable_sgc}" SGC
 show_explicitly_enabled "${enable_sgcdebug}" "SGC debug mode"
@@ -2250,6 +2278,8 @@ show_explicitly_enabled "${enable_gprof}" "gprof"
 show_explicitly_enabled "${enable_gcov}" "gcov"
 
 show_explicitly_enabled "${enable_noopt}" "No-optimization"
+
+show_explicitly_enabled "${enable_mac64}" "64-bit Mac OS X"
 
 show_explicitly_enabled "${enable_libfw}" "Frameworks-to-system"
 show_explicitly_enabled "${enable_userfw}" "Frameworks-to-user"
@@ -2287,6 +2317,7 @@ PNG_A='$(PNG_A)'
 
 PREFLAGS="$CPPFLAGS"
 PLACE_CGC_FLAGS=""
+LIBATOM="LIBATOM_NONE"
 
 ar_libtool_no_undefined=""
 LIBMZSCHEME_DEP=""
@@ -2356,6 +2387,12 @@ fi
 ###### Autoconfigure #######
 
 COMPFLAGS=""
+
+ORIG_CC="${CC}"
+ORIG_CPP="${CPP}"
+ORIG_CXX="${CXX}"
+ORIG_CXXCPP="${CXXCPP}"
+SUB_CONFIGURE_EXTRAS=""
 
 if test "${enable_oskit}" = "no" ; then
   ac_ext=c
@@ -4319,7 +4356,7 @@ _ACEOF
       eval "ac_im_$ac_var=\`\${MAKE-make} $ac_var 2>/dev/null | sed -n 's/^$ac_var=//p'\`"
     done
     # Open Windows xmkmf reportedly sets LIBDIR instead of USRLIBDIR.
-    for ac_extension in a so sl; do
+    for ac_extension in a so sl dylib la dll; do
       if test ! -f "$ac_im_usrlibdir/libX11.$ac_extension" &&
 	 test -f "$ac_im_libdir/libX11.$ac_extension"; then
 	ac_im_usrlibdir=$ac_im_libdir; break
@@ -4472,7 +4509,7 @@ sed 's/^/| /' conftest.$ac_ext >&5
 for ac_dir in `echo "$ac_x_includes $ac_x_header_dirs" | sed s/include/lib/g`
 do
   # Don't even attempt the hair of trying to link an X program!
-  for ac_extension in a so sl; do
+  for ac_extension in a so sl dylib la dll; do
     if test -r "$ac_dir/libX11.$ac_extension"; then
       ac_x_libraries=$ac_dir
       break 2
@@ -5766,6 +5803,7 @@ else
   WBUILD="sh \$(PLTSRCDIR)/wxxt/src/XWidgets/dummy.wbuild"
 fi
 
+ORIG_CC_FOR_BUILD="${CC_FOR_BUILD}"
 if test "$CC_FOR_BUILD" = "" ; then
   CC_FOR_BUILD="$CC"
 fi
@@ -5781,6 +5819,7 @@ EXTRA_GMP_OBJ=
 # For MzScheme targets:
 OSX=".osx"
 NOT_OSX=""
+CGC_X86_64=""
 
 case $OS in
   SunOS)
@@ -5800,7 +5839,7 @@ case $OS in
     EXTRALIBS="-Wl,-brtl,-bE:\$(srcdir)/../mzscheme/include/mzscheme.exp"
     ;;
   FreeBSD)
-    LIBS="$LIBS -rdynamic"
+    LIBS="$LIBS -rdynamic -pthread"
     DYN_CFLAGS="-fPIC"
     ;;
   OpenBSD)
@@ -5826,6 +5865,7 @@ case $OS in
     case `$UNAME -m` in
       #Required for CentOS 4.6
       x86_64)
+       CGC_X86_64="1"
        if test -d /usr/X11R6/lib64 ; then
          X_LIBS="$X_LIBS -L/usr/X11R6/lib64"
        fi
@@ -5922,6 +5962,31 @@ case $OS in
         fi
       else
         MROPTIONS="$MROPTIONS -no-cpp-precomp"
+      fi
+    fi
+
+    # Force 32-bit build, for now
+    if test "${enable_mac64}" != "yes" ; then
+      if test `${UNAME} -m` = "i386" ; then
+        if test "${ORIG_CC}" = "" ; then
+           CC="${CC} -m32"
+           SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CC="'"'"${CC}"'"'
+        fi
+        if test "${ORIG_CPP}" = "" ; then
+           CPP="${CPP} -m32"
+           SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CPP="'"'"${CPP}"'"'
+        fi
+        if test "${ORIG_CXX}" = "" ; then
+           CXX="${CXX} -m32"
+           SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CXX="'"'"${CXX}"'"'
+        fi
+        if test "${ORIG_CXXCPP}" = "" ; then
+           CXXCPP="${CXXCPP} -m32"
+           SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CPPCXX="'"'"${CPPCXX}"'"'
+        fi
+        if test "${ORIG_CC_FOR_BUILD}" = "" ; then
+           CC_FOR_BUILD="${CC_FOR_BUILD} -m32"
+        fi
       fi
     fi
 
@@ -6525,7 +6590,7 @@ if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
 else
   ac_cv_header_stdc=no
 fi
-rm -f conftest*
+rm -f -r conftest*
 
 fi
 
@@ -6546,7 +6611,7 @@ if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
 else
   ac_cv_header_stdc=no
 fi
-rm -f conftest*
+rm -f -r conftest*
 
 fi
 
@@ -7030,6 +7095,12 @@ fi
 
 if test "${enable_memtrace}" = "yes" ; then
   GC2OPTIONS="$GC2OPTIONS -DNEWGC_MEMORY_TRACE"
+fi
+
+LFS_CFLAGS=`getconf LFS_CFLAGS 2> /dev/null`
+if test "${LFS_CFLAGS}" != "" ; then
+  echo "Large-file support: ${LFS_CFLAGS}"
+  MZOPTIONS="${MZOPTIONS} ${LFS_CFLAGS}"
 fi
 
 ###### Get data sizes, stack direction, and endianness #######
@@ -10319,6 +10390,12 @@ if test "${enable_noopt}" = "yes" ; then
   CXXFLAGS=`echo "$CXXFLAGS" | awk "$AWKPRG"`
 fi
 
+################### JIT ####################
+
+if test "${enable_jit}" = "no" ; then
+   PREFLAGS="${PREFLAGS} -DMZ_DONT_USE_JIT"
+fi
+
 ################ X OpenGL ##################
 
 if test "${enable_gl}" = "" ; then
@@ -10628,15 +10705,22 @@ fi
 if test "${enable_pthread}" = "yes" ; then
   PREFLAGS="$PREFLAGS -D_THREAD_SAFE"
   X_EXTRA_LIBS="$X_EXTRA_LIBS -pthread"
-  MZOPTIONS="$MZOPTIONS -DASSUME_FIXED_STACK_SIZE -DFIXED_STACK_SIZE=1048576 -DDONT_ITIMER"
-  GC2OPTIONS="$GC2OPTIONS -DNO_GC_SIGNALS"
+  MZOPTIONS="$MZOPTIONS -DUSE_PTHREAD_INSTEAD_OF_ITIMER"
 fi
 
 ############### places ###################
 
 if test "${enable_places}" = "yes" ; then
   PREFLAGS="$PREFLAGS -DMZ_USE_PLACES"
-  PLACE_CGC_FLAGS="$GC_THREADS_FLAG -DPARALLEL_MARK -DTHREAD_LOCAL_ALLOC"
+  PLACE_CGC_FLAGS="$GC_THREADS_FLAG -DTHREAD_LOCAL_ALLOC"
+  LDFLAGS="$LDFLAGS -pthread"
+  LIBATOM="LIBATOM_USE"
+fi
+
+############### futures ###################
+
+if test "${enable_futures}" = "yes" ; then
+  PREFLAGS="$PREFLAGS -DFUTURES_ENABLED -DUSE_PTHREAD_INSTEAD_OF_ITIMER"
   LDFLAGS="$LDFLAGS -pthread"
 fi
 
@@ -11957,6 +12041,7 @@ LIBS="$LIBS $EXTRALIBS"
 
 
 
+
 mk_needed_dir()
 {
   if test ! -d "$1" ; then
@@ -11973,6 +12058,42 @@ makefiles="Makefile
 # Make sure the --enable-shared default is propagated:
 if test "${enable_shared}" = "yes" ; then
   ac_configure_args="$ac_configure_args --enable-shared"
+fi
+
+if test "${LIBATOM}" = "LIBATOM_USE" ; then
+  ac_aux_dir=
+for ac_dir in mzscheme/gc/libatomic_ops  "$srcdir"/mzscheme/gc/libatomic_ops ; do
+  if test -f "$ac_dir/install-sh"; then
+    ac_aux_dir=$ac_dir
+    ac_install_sh="$ac_aux_dir/install-sh -c"
+    break
+  elif test -f "$ac_dir/install.sh"; then
+    ac_aux_dir=$ac_dir
+    ac_install_sh="$ac_aux_dir/install.sh -c"
+    break
+  elif test -f "$ac_dir/shtool"; then
+    ac_aux_dir=$ac_dir
+    ac_install_sh="$ac_aux_dir/shtool install -c"
+    break
+  fi
+done
+if test -z "$ac_aux_dir"; then
+  { { echo "$as_me:$LINENO: error: cannot find install-sh or install.sh in mzscheme/gc/libatomic_ops  \"$srcdir\"/mzscheme/gc/libatomic_ops " >&5
+echo "$as_me: error: cannot find install-sh or install.sh in mzscheme/gc/libatomic_ops  \"$srcdir\"/mzscheme/gc/libatomic_ops " >&2;}
+   { (exit 1); exit 1; }; }
+fi
+
+# These three variables are undocumented and unsupported,
+# and are intended to be withdrawn in a future Autoconf release.
+# They can cause serious problems if a builder's source tree is in a directory
+# whose full name contains unusual characters.
+ac_config_guess="$SHELL $ac_aux_dir/config.guess"  # Please don't use this var.
+ac_config_sub="$SHELL $ac_aux_dir/config.sub"  # Please don't use this var.
+ac_configure="$SHELL $ac_aux_dir/configure"  # Please don't use this var.
+
+
+  subdirs="$subdirs mzscheme/gc/libatomic_ops"
+
 fi
 
 FOREIGNTARGET=
@@ -12022,6 +12143,7 @@ else
   FOREIGNTARGET="foreign-nothing"
   MZOPTIONS="$MZOPTIONS -DDONT_USE_FOREIGN"
 fi
+ac_configure_args="$ac_configure_args$SUB_CONFIGURE_EXTRAS"
 
 if test "${enable_mred}" = "yes" ; then
   if test "${enable_quartz}" = "yes" ; then
@@ -12838,10 +12960,10 @@ FRAMEWORK_PREFIX!$FRAMEWORK_PREFIX$ac_delim
 INSTALL_ORIG_TREE!$INSTALL_ORIG_TREE$ac_delim
 EXE_SUFFIX!$EXE_SUFFIX$ac_delim
 PLACE_CGC_FLAGS!$PLACE_CGC_FLAGS$ac_delim
+LIBATOM!$LIBATOM$ac_delim
 MREDLINKER!$MREDLINKER$ac_delim
 LIBSFX!$LIBSFX$ac_delim
 WXLIBS!$WXLIBS$ac_delim
-WXVARIANT!$WXVARIANT$ac_delim
 _ACEOF
 
   if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 97; then
@@ -12883,6 +13005,7 @@ _ACEOF
 ac_delim='%!_!# '
 for ac_last_try in false false false false false :; do
   cat >conf$$subs.sed <<_ACEOF
+WXVARIANT!$WXVARIANT$ac_delim
 ICP!$ICP$ac_delim
 MRLIBINSTALL!$MRLIBINSTALL$ac_delim
 LIBFINISH!$LIBFINISH$ac_delim
@@ -12925,7 +13048,7 @@ LIBOBJS!$LIBOBJS$ac_delim
 LTLIBOBJS!$LTLIBOBJS$ac_delim
 _ACEOF
 
-  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 40; then
+  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 41; then
     break
   elif $ac_last_try; then
     { { echo "$as_me:$LINENO: error: could not make $CONFIG_STATUS" >&5

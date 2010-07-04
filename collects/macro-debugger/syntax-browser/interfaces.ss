@@ -1,6 +1,6 @@
 #lang scheme/base
 (require scheme/class
-         macro-debugger/util/class-iop
+         unstable/class-iop
          (for-syntax scheme/base))
 (provide (all-defined-out))
 
@@ -19,12 +19,13 @@
   (lambda (stx)
     (syntax-case stx ()
       [(_ name ...)
-       (apply append
-              (for/list ([name (syntax->list #'(name ...))])
-                (list ;; (join "init-" #'name)
-                      (join "get-" name)
-                      (join "set-" name)
-                      (join "listen-" name))))])))
+       (datum->syntax #f
+         (apply append
+                (for/list ([name (syntax->list #'(name ...))])
+                  (list ;; (join "init-" #'name)
+                   (join "get-" name)
+                   (join "set-" name)
+                   (join "listen-" name)))))])))
 
 ;; Interfaces
 
@@ -83,6 +84,11 @@
    ;; add-keymap : text snip
    add-keymap))
 
+;; keymap/popup<%>
+(define-interface keymap/popup<%> ()
+  (;; add-context-menu-items : popup-menu -> void
+   add-context-menu-items))
+
 ;; display<%>
 (define-interface display<%> ()
   (;; refresh : -> void
@@ -108,6 +114,9 @@
   (;; get-ranges : datum -> (list-of (cons number number))
    get-ranges
 
+   ;; get-treeranges : -> (listof TreeRange)
+   get-treeranges
+
    ;; all-ranges : (list-of Range)
    ;; Sorted outermost-first
    all-ranges
@@ -119,6 +128,9 @@
 ;; A Range is (make-range datum number number)
 (define-struct range (obj start end))
 
+;; A TreeRange is (make-treerange syntax nat nat (listof TreeRange))
+;; where subs are disjoint, in order, and all contained within [start, end]
+(define-struct treerange (obj start end subs))
 
 ;; syntax-prefs<%>
 (define-interface syntax-prefs<%> ()

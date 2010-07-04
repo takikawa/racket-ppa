@@ -1,8 +1,10 @@
 #lang scheme/base
-(require (for-syntax scheme/base)
+(require (for-syntax scheme/base
+                     unstable/syntax)
          scheme/dict)
 (provide id-table-position?)
 
+#|
 (require (rename-in scheme/base [car s:car]))
 (define-syntax (car stx)
   (syntax-case stx ()
@@ -12,7 +14,7 @@
                                     '#,(syntax-line stx)
                                     '#,(syntax-column stx))))
               (s:car x))]))
-
+|#
 
 (define-struct id-table-position (a b))
 
@@ -40,9 +42,6 @@
       (apply f args))
     name)
    arity))
-
-(define-for-syntax (format-id stx fmt . args)
-  (datum->syntax stx (string->symbol (apply format fmt args))))
 
 (define-syntax (make-code stx)
   (syntax-case stx ()

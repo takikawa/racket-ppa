@@ -1,7 +1,7 @@
 /*
  * @(#)regexp.c	1.3 of 18 April 87
  * Revised for PLT MzScheme, 1995-2001
- * Copyright (c) 2004-2009 PLT Scheme Inc.
+ * Copyright (c) 2004-2010 PLT Scheme Inc.
  *
  *	Copyright (c) 1986 by University of Toronto.
  *	Written by Henry Spencer.  Not derived from licensed software.
@@ -66,30 +66,30 @@ static regexp *regcomp(char *, rxpos, int, int);
 /*
  * Global work variables for regcomp().
  */
-static THREAD_LOCAL char *regstr;
-static THREAD_LOCAL char *regparsestr;
-static THREAD_LOCAL int regmatchmin;
-static THREAD_LOCAL int regmatchmax;
-static THREAD_LOCAL int regmaxbackposn;
-static THREAD_LOCAL int regsavepos;
+THREAD_LOCAL_DECL(static char *regstr);
+THREAD_LOCAL_DECL(static char *regparsestr);
+THREAD_LOCAL_DECL(static int regmatchmin);
+THREAD_LOCAL_DECL(static int regmatchmax);
+THREAD_LOCAL_DECL(static int regmaxbackposn);
+THREAD_LOCAL_DECL(static int regsavepos);
 
-static THREAD_LOCAL Scheme_Hash_Table *regbackknown; /* known/assumed backreference [non-]empty */
-static THREAD_LOCAL Scheme_Hash_Table *regbackdepends; /* backreferences required to be non-empty for the current to be non-empty */
+THREAD_LOCAL_DECL(static Scheme_Hash_Table *regbackknown); /* known/assumed backreference [non-]empty */
+THREAD_LOCAL_DECL(static Scheme_Hash_Table *regbackdepends); /* backreferences required to be non-empty for the current to be non-empty */
 
-static THREAD_LOCAL rxpos regparse;
-static THREAD_LOCAL rxpos regparse_end; /* Input-scan pointer. */
-static THREAD_LOCAL int regnpar;             /* () count. */
-static THREAD_LOCAL int regncounter;          /* {} count */
-static THREAD_LOCAL rxpos regcode;           /* Code-emit pointer, if less than regcodesize */
-static THREAD_LOCAL rxpos regcodesize;
-static THREAD_LOCAL rxpos regcodemax;
-static THREAD_LOCAL long regmaxlookback;
+THREAD_LOCAL_DECL(static rxpos regparse);
+THREAD_LOCAL_DECL(static rxpos regparse_end); /* Input-scan pointer. */
+THREAD_LOCAL_DECL(static int regnpar);       /* () count. */
+THREAD_LOCAL_DECL(static int regncounter);   /* {} count */
+THREAD_LOCAL_DECL(static rxpos regcode) ;    /* Code-emit pointer, if less than regcodesize */
+THREAD_LOCAL_DECL(static rxpos regcodesize);
+THREAD_LOCAL_DECL(static rxpos regcodemax);
+THREAD_LOCAL_DECL(static long regmaxlookback);
 
 /* caches to avoid gc */
-static THREAD_LOCAL long rx_buffer_size;
-static THREAD_LOCAL rxpos *startp_buffer_cache;
-static THREAD_LOCAL rxpos *endp_buffer_cache;
-static THREAD_LOCAL rxpos *maybep_buffer_cache;
+THREAD_LOCAL_DECL(static long rx_buffer_size);
+THREAD_LOCAL_DECL(static rxpos *startp_buffer_cache);
+THREAD_LOCAL_DECL(static rxpos *endp_buffer_cache);
+THREAD_LOCAL_DECL(static rxpos *maybep_buffer_cache);
 
 /*
  * Forward declarations for regcomp()'s friends.
@@ -125,7 +125,7 @@ regerror(char *s)
 		   "regexp: %s", s);
 }
 
-const char *failure_msg_for_read;
+THREAD_LOCAL_DECL(const char *failure_msg_for_read);
 
 static void
 regcomperror(char *s)
@@ -1962,7 +1962,7 @@ regranges(int parse_flags, int at_start)
   }
 }
 
-static char *prop_names[] = { "Cn",
+READ_ONLY static const char *prop_names[] = { "Cn",
 			      "Cc",
 			      "Cf",
 			      "Cs",
@@ -3356,6 +3356,7 @@ regmatch(Regwork *rw, rxpos prog)
 	  no_start = no_end = 0;
 	save = is;
 	if (no_end) {
+          int found = 0;
 	  for (no = no_start; no <= no_end; no++) {
 	    if (is - rw->input_start >= no) {
 	      rw->input = save - no;
@@ -3363,15 +3364,15 @@ regmatch(Regwork *rw, rxpos prog)
 		if (is == save) {
 		  /* Match */
 		  if (!t) return 0;
+                  found = 1;
 		  break;
 		}
 	      }
 	    } else {
-	      no = no_end + 1;
 	      break;
 	    }
 	  }
-	  if (no > no_end) {
+	  if (!found) {
 	    /* No matches */
 	    if (t) return 0;
 	  }

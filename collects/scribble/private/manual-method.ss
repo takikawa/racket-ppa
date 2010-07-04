@@ -6,11 +6,12 @@
          "manual-scheme.ss"
          (for-syntax scheme/base))
 
+(provide ;; public:
+         method xmethod)
+; XXX unknown contracts
 (provide *method **method
          method-tag
-         name-this-object
-         ;; public:
-         method xmethod)
+         name-this-object)
 
 (define-syntax-rule (method a b)
   (*method 'b (quote-syntax a)))
@@ -34,8 +35,8 @@
        (lambda (c mk) (mk id/tag)))
      content
      (lambda (tag)
-       (make-element "schemesymbol"
-                     (list (make-link-element "schemevaluelink" content
+       (make-element symbol-color
+                     (list (make-link-element value-link-color content
                                               (method-tag tag sym))))))))
 
 (define (method-tag vtag sym)

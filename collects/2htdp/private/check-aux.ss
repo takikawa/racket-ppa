@@ -1,8 +1,6 @@
 #lang scheme
 
-(require htdp/image
-         htdp/error
-         (only-in lang/htdp-beginner image?))
+(require htdp/error)
 
 (provide (all-defined-out))
 
@@ -34,16 +32,9 @@
 
 ;; -----------------------------------------------------------------------------
 
-;; Any -> Boolean 
-(define (scene? i)
-  (and (image? i) (internal-scene? i)))
-
-;; Image -> Boolean 
-(define (internal-scene? i) 
-  (and (= 0 (pinhole-x i)) (= 0 (pinhole-y i))))
-
-;; Number -> Integer
-(define (number->integer x)
+;; Number Symbol Symbol -> Integer
+(define (number->integer x [t ""] [p ""])
+  (check-arg t (and (number? x) (real? x)) "real number" p x)
   (inexact->exact (floor x)))
 
 ;; -----------------------------------------------------------------------------
@@ -124,6 +115,24 @@
           (read-line in) ;; read the newline 
           x))))
 
+(define REGISTER '***register***)
+(define OKAY '***okay***)
+
+;; InPort OutPort (X -> Y) -> (U Y Void)
+;; process a registration from a potential client, invoke k if it is okay
+(define (tcp-process-registration in out k)
+  (define next (tcp-receive in))
+  (when (and (pair? next) (eq? REGISTER (car next))) 
+    (tcp-send out OKAY)
+    (k (cdr next))))
+  
+
+;; InPort OutPort (U #f String) -> Void 
+;; register with the server 
+(define (tcp-register in out name)
+  (tcp-send out `(,REGISTER ,(if name name (symbol->string (gensym 'world)))))
+  (unless (eq? (tcp-receive in) OKAY) (raise tcp-eof)))
+
 ;                                                   
 ;                                                   
 ;                                                   
@@ -143,40 +152,4 @@
 ;; Symbol Any String -> Void
 (define (check-pos t c r)
   (check-arg 
-   t (and (number? c) (>= (number->integer c) 0)) "positive integer" r c))
-
-;; Symbol Any String String *-> Void
-(define (check-image tag i rank . other-message)
-  (if (and (pair? other-message) (string? (car other-message)))
-      (check-arg tag (image? i) (car other-message) rank i)
-      (check-arg tag (image? i) "image" rank i)))
-
-;; Symbol Any String -> Void
-(define (check-scene tag i rank)
-  (define error "image with pinhole at (~s,~s)")
-  (if (image? i)
-      (check-arg tag (internal-scene? i) "scene" rank (image-pins i))
-      (check-arg tag #f         "scene" rank i)))
-
-;; Symbol Any -> Void 
-(define (check-scene-result tname i)
-  (if (image? i) 
-      (check-result tname internal-scene? "scene" i (image-pins i))
-      (check-result tname (lambda (x) (image? x)) "scene" i)))
-
-(define (image-pins i)
-  (format "image with pinhole at (~s,~s)" (pinhole-x i) (pinhole-y i)))
-
-
-;; Symbol Any String -> Void
-(define (check-color tag width rank)
-  (check-arg tag (or (symbol? width) (string? width)) 
-             "color symbol or string" rank width))
-
-;; Symbol (union Symbol String) Nat -> Void
-(define (check-mode tag s rank)
-  (check-arg tag (or (eq? s 'solid)
-                     (eq? s 'outline)
-                     (string=? "solid" s)
-                     (string=? "outline" s)) "mode (solid or outline)" rank s))
-
+   t (and (real? c) (>= (number->integer c t r) 0)) "positive integer" r c))

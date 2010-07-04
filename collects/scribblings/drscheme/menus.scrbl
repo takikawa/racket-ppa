@@ -195,9 +195,13 @@ appears at any time.
  @item{@defmenuitem{Hide Program Contour} Hides the contour window.}
    
  @item{@defmenuitem{Show Module Browser} Shows the module DAG rooted
-   at the currently opened file in DrScheme.}
+   at the currently opened file in DrScheme.
+   
+   See also @secref["module-browser"].}
 
- @item{@defmenuitem{Hide Module Browser} Hides the module browser.}
+ @item{@defmenuitem{Hide Module Browser} Hides the module browser.
+        
+          See also @secref["module-browser"].}
 
  @item{@defmenuitem{Toolbar} 
 @itemize[
@@ -300,20 +304,8 @@ background that signals the source location of an error.}
   then opens a window showing the module import structure
   for the module import DAG starting at the selected module.
   
-  The module browser window contains a square for each
-  module. The squares are colored based on the number of
-  lines of code in the module. If a module has more lines of
-  code, it gets a darker color.
-  
-  In addition, for each normal import, a blue line drawn is
-  from the module to the importing module. Similarly, purple
-  lines are drawn for each for-syntax import. In the initial
-  module layout, modules to the left import modules to the
-  right, but since modules can be moved around
-  interactively, that property might not be preserved.
-
-  To open the file corresponding to the module, right-click or
-  control-click (Mac OS X) on the box for that module.}
+  See also @secref["module-browser"].
+  }
 
  @item{@defmenuitem{Reindent} Indents the selected text according to
   the standard Scheme formatting conventions. (Pressing the Tab key
@@ -366,23 +358,17 @@ background that signals the source location of an error.}
   
  @item{@defmenuitem{Insert Large Letters...} Opens a dialog for a line of
    text, and inserts a large version of the text (using semicolons and
-   spaces).}
+   spaces).
+          
+   Most of the dialog is self-explanatory: type in the top space to 
+   preview the semicolons in the bottom area. The numbers in the font
+   choice item show the (relative) widths of the letter ``w'' in the
+   given font to help you pick out the more boldfaced fonts (which
+   tend to look better).}
 
  @item{@defmenuitem{Insert @|lam-str|} Inserts the symbol @|lam-str|
    (as a Unicode character) into the program. The @|lam-str| symbol is
    normally bound the same as @scheme[lambda].}
-
- @item{@defmenuitem{Insert Java Comment Box} Inserts a box that is
-   ignored by DrScheme. Unlike the @onscreen{Insert Comment Box} menu
-   item, this is designed for the ProfessorJ language levels. See
-   @secref["profj"].}
-
- @item{@defmenuitem{Insert Java Interactions Box} Inserts a box that
-   will allows Java expressions and statements within Scheme
-   programs. The result of the box is a Scheme value corresponding to
-   the result(s) of the Java expressions. At this time, Scheme values
-   cannot enter the box. The box will accept one Java statement or
-   expression per line.}
 
  @item{@defmenuitem{Insert XML Box} Inserts an XML; see
    @secref["xml-boxes"] for more information.}

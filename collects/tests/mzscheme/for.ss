@@ -3,6 +3,8 @@
 
 (Section 'for)
 
+(require scheme/generator)
+
 (define-syntax (test-multi-generator stx)
   (syntax-case stx ()
     [(_ [(v ...) ...] gen)
@@ -11,21 +13,21 @@
                    [((v2 ...) ...)
                     (apply map list (map syntax->list (syntax->list #'((v ...) ...))))])
        #'(begin
-           (test '((v2 ...) ...) 'gen (for/list ([(id ...) gen])
+           (test `((v2 ...) ...) 'gen (for/list ([(id ...) gen])
                                         (list id ...)))
-           (test-values '((v ...) ...) (lambda ()
+           (test-values `((v ...) ...) (lambda ()
                                          (for/lists (id2 ...) ([(id ...) gen])
                                            (values id ...))))
            (test #t 'gen (for/and ([(id ...) gen])
-                           (and (member (list id ...) '((v2 ...) ...)) #t)))
+                           (and (member (list id ...) `((v2 ...) ...)) #t)))
            (test (list (for/last ([(id ...) gen])
                          (list id ...)))
                  'gen (for/and ([(id ...) gen])
-                         (member (list id ...) '((v2 ...) ...))))
+                         (member (list id ...) `((v2 ...) ...))))
            (test (for/first ([(id ...) gen])
                    (list id ...))
                  'gen (for/or ([(id ...) gen])
-                         (car (member (list id ...) '((v2 ...) ...)))))
+                         (car (member (list id ...) `((v2 ...) ...)))))
            (void)))]))
 
 (define-syntax test-generator
@@ -33,45 +35,45 @@
     [(_ [seq] gen) ; we assume that seq has at least 2 elements, and all are unique
      (begin
        ;; Some tests specific to single-values:
-       (test 'seq 'gen (for/list ([i gen]) i))
-       (test 'seq 'gen (for/list ([i gen][b gen]) i))
-       (test 'seq 'gen (for/list ([i gen][b gen]) b))
-       (test 'seq 'gen (for*/list ([i gen][b '(#t)]) i))
-       (test (map (lambda (x) #t) 'seq) 'gen (for*/list ([i gen][b '(#t)]) b))
-       (test (append 'seq 'seq) 'gen (for*/list ([b '(#f #t)][i gen]) i))
-       (test (append 'seq 'seq) 'gen (for/list ([b '(#f #t)] #:when #t [i gen]) i))
-       (test 'seq 'gen (let ([g gen]) (for/list ([i g]) i)))
-       (test 'seq 'gen (let ([r null])
+       (test `seq 'gen (for/list ([i gen]) i))
+       (test `seq 'gen (for/list ([i gen][b gen]) i))
+       (test `seq 'gen (for/list ([i gen][b gen]) b))
+       (test `seq 'gen (for*/list ([i gen][b '(#t)]) i))
+       (test (map (lambda (x) #t) `seq) 'gen (for*/list ([i gen][b '(#t)]) b))
+       (test (append `seq `seq) 'gen (for*/list ([b '(#f #t)][i gen]) i))
+       (test (append `seq `seq) 'gen (for/list ([b '(#f #t)] #:when #t [i gen]) i))
+       (test `seq 'gen (let ([g gen]) (for/list ([i g]) i)))
+       (test `seq 'gen (let ([r null])
                          (for ([i gen]) (set! r (cons i r)))
                          (reverse r)))
-       (test 'seq 'gen (reverse (for/fold ([a null]) ([i gen]) 
+       (test `seq 'gen (reverse (for/fold ([a null]) ([i gen]) 
                                   (cons i a))))
-       (test 'seq 'gen (let-values ([(more? next) (sequence-generate gen)])
+       (test `seq 'gen (let-values ([(more? next) (sequence-generate gen)])
                          (let loop ()
                            (if (more?)
                                (cons (next) (loop))
-                               null)))) 
-       (test-values '(seq seq) (lambda ()
+                               null))))
+       (test-values `(seq seq) (lambda ()
                                  (for/lists (r1 r2) ([id gen])
                                    (values id id))))
-       (test (list (for/last ([i gen]) i)) 'gen (for/and ([i gen]) (member i 'seq)))
-       (test 'seq 'gen (for/or ([i gen]) (member i 'seq)))
-       (test (for/first ([i gen]) i) 'gen (for/or ([i gen]) (and (member i 'seq) i)))
-       (test #t 'gen (for/and ([(i k) (in-parallel gen 'seq)])
+       (test (list (for/last ([i gen]) i)) 'gen (for/and ([i gen]) (member i `seq)))
+       (test `seq 'gen (for/or ([i gen]) (member i `seq)))
+       (test (for/first ([i gen]) i) 'gen (for/or ([i gen]) (and (member i `seq) i)))
+       (test #t 'gen (for/and ([(i k) (in-parallel gen `seq)])
                        (equal? i k)))
        (test #f 'gen (for/and ([i gen])
-                       (member i (cdr (reverse 'seq)))))
+                       (member i (cdr (reverse `seq)))))
        (test #f 'gen (for/or ([i gen]) (equal? i 'something-else)))
        (let ([count 0])
          (test #t 'or (for/or ([i gen]) (set! count (add1 count)) #t))
          (test 1 'count count)
          (test #f 'or (for/or ([i gen]) (set! count (add1 count)) #f))
-         (test (+ 1 (length 'seq)) 'count count)
+         (test (+ 1 (length `seq)) 'count count)
          (set! count 0)
          (let ([second (for/last ([(i pos) (in-parallel gen (in-naturals))] #:when (< pos 2))
                          (set! count (add1 count))
                          i)])
-           (test second list-ref 'seq 1)
+           (test second list-ref `seq 1)
            (test 2 values count)
            (for ([i gen] #:when (equal? i second)) (set! count (add1 count)))
            (for* ([i gen] #:when (equal? i second)) (set! count (add1 count)))
@@ -129,6 +131,13 @@
 (test-generator [(65 66 67)] (open-input-bytes #"ABC"))
 (test-generator [(65 66 67)] (in-input-port-bytes (open-input-bytes #"ABC")))
 
+(test-generator [(1 2 3)] (in-port read (open-input-string "1 2 3")))
+(test-generator [((123) 4)] (in-port read (open-input-string "(123) 4")))
+(test-generator [(65 66 67)] (in-port read-byte (open-input-string "ABC")))
+
+(test-generator [("abc" "def")] (in-lines (open-input-string "abc\ndef")))
+(test-generator [(#"abc" #"def")] (in-bytes-lines (open-input-string "abc\ndef")))
+
 (test-generator [(0 1 2 3 4 5)] (in-sequences (in-range 6)))
 (test-generator [(0 1 2 3 4 5)] (in-sequences (in-range 4) '(4 5)))
 (test-generator [(0 1 2 3 4 5)] (in-sequences (in-range 6) '()))
@@ -158,6 +167,20 @@
 (test-generator [(3 4 5)] (stop-before (in-naturals 3) (lambda (x) (= x 6))))
 
 (test-generator [(a b c) (0 1 2)] (in-indexed '(a b c)))
+
+(test-generator [(1 2 3 4 5)]
+  (parameterize ([current-input-port (open-input-string "1 2 3\n4 5")])
+    (for/list ([i (in-producer read eof)]) i)))
+(test-generator [(1 2 3 4 5)]
+  (for/list ([i (in-producer read eof (open-input-string "1 2 3\n4 5"))]) i))
+(test-generator [("1 2 3" "4 5")]
+  (for/list ([i (in-producer read-line eof-object? (open-input-string "1 2 3\n4 5"))]) i))
+(test-generator [((1 2) (3 4) (5 ,eof))]
+  (for/list ([(i j)
+              (in-producer (lambda (p) (values (read p) (read p)))
+                           (lambda (x y) (and (eof-object? x) (eof-object? y)))
+                           (open-input-string "1 2 3\n4 5"))])
+    (list i j)))
 
 (test #hash((a . 1) (b . 2) (c . 3)) 'mk-hash
       (for/hash ([v (in-naturals)]
@@ -198,5 +221,56 @@
   (test #t more?)
   (test 13 next)
   (test #f more?))
+
+(test-generator [(0 1 2)] (in-generator (yield 0) (yield 1) (yield 2)))
+(let ([g (lambda () (in-generator (yield 0) (yield 1) (yield 2)))])
+  (test-generator [(0 1 2)] (g)))
+(test '((1 0) (2 1) (3 2)) 'indexed-generator
+      (for/list ([(x i) (in-indexed (in-generator (yield 1) (yield 2) (yield 3)))])
+        (list x i)))
+
+(let ([helper (lambda (i)
+                (yield (add1 i)))])
+  (test '(1 2 3) 'parameterized-yield
+        (for/list ([x (in-generator (helper 0) (helper 1) (helper 2))])
+                  x)))
+
+(let* ([helper (lambda (pred num)
+                 (for ([i (in-range 0 3)])
+                      (yield (pred (+ i num)))))]
+       [g1 (generator
+             (helper odd? 1)
+             (yield 'odd))]
+       [g2 (generator
+             (helper even? 1)
+             (yield 'even))])
+  (test '(#t #f #f #t #t #f odd even) 'yield-helper
+        (list (g1) (g2) (g1) (g2) (g1) (g2) (g1) (g2))))
+
+(test '(1 2 3)
+      'sequence->generator-1
+      (let ([maker (sequence->generator '(1 2 3))])
+        (list (maker) (maker) (maker))))
+
+(test '(1 2 3)
+      'sequence->generator-2
+      (let ([maker (sequence->generator (in-list '(1 2 3)))])
+        (list (maker) (maker) (maker))))
+
+(test '(0 1 2 3 4)
+      'sequence->generator-3
+      (let ([maker (sequence->generator (in-range 0 5))])
+        (list (maker) (maker) (maker) (maker) (maker))))
+
+(test '(0 1 2 3 4)
+      'sequence->generator-4
+      (let ([maker (sequence->generator (in-naturals))])
+        (list (maker) (maker) (maker) (maker) (maker))))
+
+(test '(1 2 3 1 2 3)
+      'sequence->repeated-generator
+      (let ([maker (sequence->repeated-generator '(1 2 3))])
+        (list (maker) (maker) (maker)
+              (maker) (maker) (maker))))
 
 (report-errs)

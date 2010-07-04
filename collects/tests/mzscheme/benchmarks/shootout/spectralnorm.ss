@@ -5,11 +5,12 @@
 ;;   contributed by Isaac Gouy
 
 #lang scheme/base
-(require scheme/cmdline)
+(require scheme/cmdline
+         scheme/flonum)
 
 (define (Approximate n)
-  (let ([u (make-vector n 1.0)]
-        [v (make-vector n 0.0)])
+  (let ([u (make-flvector n 1.0)]
+        [v (make-flvector n 0.0)])
     ;; 20 steps of the power method
     (for ([i (in-range 10)])
       (MultiplyAtAv n u v)
@@ -17,37 +18,39 @@
     
     ;; B=AtA         A multiplied by A transposed
     ;; v.Bv /(v.v)   eigenvalue of v
-    (let loop ([i 0][vBv 0][vv 0])
+    (let loop ([i 0][vBv 0.0][vv 0.0])
       (if (= i n)
-          (sqrt (/ vBv vv))
-          (let ([vi (vector-ref v i)])
+          (flsqrt (fl/ vBv vv))
+          (let ([vi (flvector-ref v i)])
             (loop (add1 i)
-                  (+ vBv (* (vector-ref u i) vi))
-                  (+ vv (* vi vi))))))))
+                  (fl+ vBv (fl* (flvector-ref u i) vi))
+                  (fl+ vv (fl* vi vi))))))))
 
 ;; return element i,j of infinite matrix A
 (define (A i j)
-  (/ 1.0 (+ (* (+ i j) (/ (+ i (+ j 1)) 2.0)) (+ i 1))))
+  (fl/ 1.0 (fl+ (fl* (->fl (+ i j))
+                     (fl/ (->fl (+ i (+ j 1))) 2.0)) 
+                (->fl (+ i 1)))))
 
 ;; multiply vector v by matrix A
 (define (MultiplyAv n v Av)
   (for ([i (in-range n)])
-    (vector-set! Av i 
-                 (for/fold ([r 0])
-                     ([j (in-range n)])
-                   (+ r (* (A i j) (vector-ref v j)))))))
+    (flvector-set! Av i 
+                   (for/fold ([r 0.0])
+                       ([j (in-range n)])
+                     (fl+ r (fl* (A i j) (flvector-ref v j)))))))
 
 ;; multiply vector v by matrix A transposed
 (define (MultiplyAtv n v Atv)
   (for ([i (in-range n)])
-    (vector-set! Atv i
-                 (for/fold ([r 0])
-                     ([j (in-range n)])
-                   (+ r (* (A j i) (vector-ref v j)))))))
+    (flvector-set! Atv i
+                   (for/fold ([r 0.0])
+                       ([j (in-range n)])
+                     (fl+ r (fl* (A j i) (flvector-ref v j)))))))
 
 ;; multiply vector v by matrix A and then by matrix A transposed 
 (define (MultiplyAtAv n v AtAv)
-  (let ([u (make-vector n 0.0)])
+  (let ([u (make-flvector n 0.0)])
     (MultiplyAv n v u)
     (MultiplyAtv n u AtAv)))
 

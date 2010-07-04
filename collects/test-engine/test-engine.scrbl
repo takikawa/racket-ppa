@@ -19,9 +19,10 @@
 This module provides test forms for use in Scheme programs, as well
 as parameters to configure the behavior of test reports.
 
-Each check form may only occur at the top-level or within the
-definitions of a local declaration; results are collected and reported
-by the test function.
+Each check form may only occur at the top-level; results are collected
+and reported by the test function.  Note that the check forms only
+register checks to be performed.  The checks are actually run by the
+@scheme[test] function.
 
 @defproc[(check-expect (test any/c) (expected any/c)) void?]{
 
@@ -44,6 +45,18 @@ It is an error to produce a function value.}
 
 Checks that evaluating the first expression signals an error, where
 the error message matches the string.}
+
+@defform[(check-member-of (test any/c) (expected any/c) ...)]{
+
+Accepts at least two value-producing expressions. Structurally compares the first
+value to each value subsequent value specified.
+
+It is an error to produce a function value.}
+                                                                    
+@defform[(check-range (test number/c) (min number/c) (max number/c))]{
+                                       
+Accepts three number-producing expressions. Performs the following comparison:
+min <= test <= max.}
 
 @defproc[(test) void?]{
 

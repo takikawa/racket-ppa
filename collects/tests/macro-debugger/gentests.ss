@@ -61,7 +61,7 @@
         [else #f]))
 
 (define (check-hide d policy expect-ok?)
-  (let-values ([(steps defs stx2 exn)
+  (let-values ([(steps binders uses stx2 exn)
                 (parameterize ((macro-policy policy))
                   (reductions+ d))])
     (check-pred list? steps)
@@ -101,7 +101,17 @@
 (define (check-steps expected actual)
   (check-pred list? actual)
   (check-pred reduction-sequence? actual)
-  (compare-step-sequences actual expected))
+  (with-check-info (['actual-sequence-raw actual]
+                    ['actual-sequence
+                     (for/list ([thing actual])
+                       (if (misstep? thing)
+                           'error
+                           (list* (protostep-type thing)
+                                  (syntax->datum (step-term2 thing))
+                                  (map syntax->datum
+                                       (map bigframe-term (state-lctx (protostep-s1 thing)))))))]
+                    ['expected-sequence expected])
+    (compare-step-sequences actual expected)))
 
 (define (reduction-sequence? rs)
   (andmap protostep? rs))

@@ -18,14 +18,14 @@
   scheme_extension_table->scheme_get_env = scheme_get_env;
   scheme_extension_table->scheme_inherit_cells = scheme_inherit_cells;
   scheme_extension_table->scheme_current_break_cell = scheme_current_break_cell;
-#ifndef LINK_EXTENSIONS_BY_TABLE
-# ifndef MZ_USE_PLACES
+#ifndef USE_THREAD_LOCAL
+# ifndef LINK_EXTENSIONS_BY_TABLE
   scheme_extension_table->scheme_current_thread = scheme_current_thread;
-# endif
   scheme_extension_table->scheme_fuel_counter = scheme_fuel_counter;
-#else
+# else
   scheme_extension_table->scheme_current_thread_ptr = scheme_current_thread_ptr;
   scheme_extension_table->scheme_fuel_counter_ptr = scheme_fuel_counter_ptr;
+# endif
 #endif
   scheme_extension_table->scheme_get_current_thread = scheme_get_current_thread;
   scheme_extension_table->scheme_start_atomic = scheme_start_atomic;
@@ -229,7 +229,9 @@
   scheme_extension_table->scheme_gc_ptr_ok = scheme_gc_ptr_ok;
   scheme_extension_table->scheme_collect_garbage = scheme_collect_garbage;
 #ifdef MZ_PRECISE_GC
+# ifndef USE_THREAD_LOCAL
   scheme_extension_table->GC_variable_stack = GC_variable_stack;
+# endif
   scheme_extension_table->GC_register_traversers = GC_register_traversers;
   scheme_extension_table->GC_resolve = GC_resolve;
   scheme_extension_table->GC_mark = GC_mark;
@@ -337,6 +339,8 @@
   scheme_extension_table->scheme_real_to_double = scheme_real_to_double;
   scheme_extension_table->scheme_make_cptr = scheme_make_cptr;
   scheme_extension_table->scheme_make_offset_cptr = scheme_make_offset_cptr;
+  scheme_extension_table->scheme_make_external_cptr = scheme_make_external_cptr;
+  scheme_extension_table->scheme_make_offset_external_cptr = scheme_make_offset_external_cptr;
   scheme_extension_table->scheme_get_proc_name = scheme_get_proc_name;
   scheme_extension_table->scheme_utf8_decode = scheme_utf8_decode;
   scheme_extension_table->scheme_utf8_decode_as_prefix = scheme_utf8_decode_as_prefix;
@@ -569,7 +573,6 @@
   scheme_extension_table->scheme_make_struct_names = scheme_make_struct_names;
   scheme_extension_table->scheme_make_struct_type = scheme_make_struct_type;
   scheme_extension_table->scheme_make_struct_instance = scheme_make_struct_instance;
-  scheme_extension_table->scheme_make_struct_exptime = scheme_make_struct_exptime;
   scheme_extension_table->scheme_is_struct_instance = scheme_is_struct_instance;
   scheme_extension_table->scheme_struct_ref = scheme_struct_ref;
   scheme_extension_table->scheme_struct_set = scheme_struct_set;
@@ -632,4 +635,6 @@
   scheme_extension_table->scheme_make_args_string = scheme_make_args_string;
   scheme_extension_table->scheme_system_library_subpath = scheme_system_library_subpath;
   scheme_extension_table->scheme_signal_received = scheme_signal_received;
+  scheme_extension_table->scheme_signal_received_at = scheme_signal_received_at;
+  scheme_extension_table->scheme_get_signal_handle = scheme_get_signal_handle;
   scheme_extension_table->scheme_char_strlen = scheme_char_strlen;

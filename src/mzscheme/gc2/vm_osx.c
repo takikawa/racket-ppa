@@ -35,10 +35,75 @@ static int designate_modified(void *p);
 int designate_modified(void *p);
 #endif
 
-#ifdef __POWERPC__
+#if defined(MZ_USE_PLACES) && defined (MZ_PRECISE_GC)
+typedef struct OSXThreadData {
+  struct OSXThreadData *next;
+  mach_port_t thread_port_id;
+  Thread_Local_Variables  *tlvs;
+} OSXThreadData; 
+
+/* static const int OSX_THREAD_TABLE_SIZE = 256; */
+#define OSX_THREAD_TABLE_SIZE 256
+static OSXThreadData *osxthreads[OSX_THREAD_TABLE_SIZE];
+static pthread_mutex_t osxthreadsmutex = PTHREAD_MUTEX_INITIALIZER;
+
+static Thread_Local_Variables *get_mach_thread_tlvs(mach_port_t threadid) {
+  int index = threadid % OSX_THREAD_TABLE_SIZE;
+  OSXThreadData *thread;
+  Thread_Local_Variables *tlvs = NULL;
+
+  pthread_mutex_lock(&osxthreadsmutex);
+  {
+    for (thread = osxthreads[index]; thread; thread = thread->next)
+    {
+      if (thread->thread_port_id == threadid) {
+        tlvs = thread->tlvs;
+        break;
+      }
+    }
+  }
+  pthread_mutex_unlock(&osxthreadsmutex);
+
+  return tlvs;
+}
+
+static void set_thread_locals_from_mach_thread_id(mach_port_t threadid) {
+  Thread_Local_Variables *tlvs = get_mach_thread_tlvs(threadid);
+#ifdef USE_THREAD_LOCAL
+  pthread_setspecific(scheme_thread_local_key, tlvs);
+#endif
+}
+
+static void register_mach_thread() {
+  mach_port_t thread_self = mach_thread_self();
+  int index = thread_self % OSX_THREAD_TABLE_SIZE;
+  OSXThreadData * thread = malloc(sizeof(OSXThreadData));
+
+  thread->thread_port_id = thread_self;
+  thread->tlvs = scheme_get_thread_local_variables();
+
+  /* PUSH thread record onto osxthreads datastructure */
+  pthread_mutex_lock(&osxthreadsmutex);
+  {
+    thread->next = osxthreads[index];
+    osxthreads[index] = thread;
+  }
+  pthread_mutex_unlock(&osxthreadsmutex);
+}
+
+#endif
+
+#if defined(__POWERPC__)
 # define ARCH_thread_state_t ppc_thread_state_t
 # define ARCH_THREAD_STATE PPC_THREAD_STATE
 # define ARCH_THREAD_STATE_COUNT PPC_THREAD_STATE_COUNT
+#elif defined(__x86_64__)
+# define ARCH_thread_state_t x86_thread_state64_t
+# define ARCH_THREAD_STATE x86_THREAD_STATE64
+# define ARCH_THREAD_STATE_COUNT x86_THREAD_STATE64_COUNT
+# define USE_THREAD_STATE
+# include <mach/thread_status.h>
+# include <mach/exception.h>
 #else
 # define ARCH_thread_state_t i386_thread_state_t
 # define ARCH_THREAD_STATE i386_THREAD_STATE
@@ -209,7 +274,23 @@ kern_return_t GC_catch_exception_raise(mach_port_t port,
   /* kernel return value is in exception_data[0], faulting address in
      exception_data[1] */
   if(exception_data[0] == KERN_PROTECTION_FAILURE) {
-    if (designate_modified((void*)exception_data[1]))
+    void *p;
+#ifndef USE_THREAD_STATE
+    p = (void*)exception_data[1];
+#else
+    /* We have to do it this way for 64-bit mode: */
+    x86_exception_state64_t exc_state;
+    mach_msg_type_number_t exc_state_count = x86_EXCEPTION_STATE64_COUNT;
+    (void)thread_get_state(thread_port, x86_EXCEPTION_STATE64, (natural_t*)&exc_state,
+                           &exc_state_count);
+    p = (void *)exc_state.__faultvaddr;
+#endif
+
+#if defined(MZ_USE_PLACES) && defined (MZ_PRECISE_GC)
+  set_thread_locals_from_mach_thread_id(thread_port);
+#endif
+
+    if (designate_modified(p))
       return KERN_SUCCESS;
     else
       return KERN_FAILURE;
@@ -232,12 +313,16 @@ kern_return_t catch_exception_raise(mach_port_t port,
 /* this is the thread which forwards of exceptions read from the exception
    server off to our exception catchers and then back out to the other
    thread */
-void exception_thread(void)
+void exception_thread(void *shared_thread_state)
 {
   mach_msg_header_t *message;
   mach_msg_header_t *reply;
   kern_return_t retval;
-  
+
+#ifdef USE_THREAD_LOCAL
+  pthread_setspecific(scheme_thread_local_key, shared_thread_state);
+#endif
+
   /* allocate the space for the message and reply */
   message = (mach_msg_header_t*)malloc(sizeof(mach_exc_msg_t));
   reply = (mach_msg_header_t*)malloc(sizeof(mach_reply_msg_t));
@@ -257,25 +342,16 @@ void exception_thread(void)
   }
 }
 
-/* this initializes the subsystem (sets the exception port, starts the
-   exception handling thread, etc) */
-static void macosx_init_exception_handler() 
+void GC_attach_current_thread_exceptions_to_handler()
 {
   mach_port_t thread_self, exc_port_s;
   mach_msg_type_name_t type;
   kern_return_t retval;
 
-  /* get ids for ourself */
-  if(!task_self) task_self = mach_task_self();
-  thread_self = mach_thread_self();
+  if (!task_self) return;
 
-  /* allocate the port we're going to get exceptions on */
-  retval = mach_port_allocate(task_self, MACH_PORT_RIGHT_RECEIVE, &exc_port);
-  if(retval != KERN_SUCCESS) {
-    GCPRINT(GCOUTF, "Couldn't allocate exception port: %s\n", 
-	   mach_error_string(retval));
-    abort();
-  }
+  /* get ids for ourself */
+  thread_self = mach_thread_self();
 
   /* extract out the send rights for that port, which the OS needs */
   retval = mach_port_extract_right(task_self, exc_port, MACH_MSG_TYPE_MAKE_SEND,
@@ -293,10 +369,36 @@ static void macosx_init_exception_handler()
     GCPRINT(GCOUTF, "Couldn't set exception ports: %s\n", mach_error_string(retval));
     abort();
   }
+#if defined(MZ_USE_PLACES) && defined (MZ_PRECISE_GC)
+  register_mach_thread();
+#endif
+}
+
+/* this initializes the subsystem (sets the exception port, starts the
+   exception handling thread, etc) */
+static void macosx_init_exception_handler(int isMASTERGC)
+{
+  kern_return_t retval;
+
+  if (!isMASTERGC) {
+    GC_attach_current_thread_exceptions_to_handler();
+    return;
+  }
+
+  if(!task_self) task_self = mach_task_self();
+
+  /* allocate the port we're going to get exceptions on */
+  retval = mach_port_allocate(task_self, MACH_PORT_RIGHT_RECEIVE, &exc_port);
+  if(retval != KERN_SUCCESS) {
+    GCPRINT(GCOUTF, "Couldn't allocate exception port: %s\n", 
+	   mach_error_string(retval));
+    abort();
+  }
+
+  GC_attach_current_thread_exceptions_to_handler();
 
 #ifdef PPC_HAND_ROLLED_THREAD 
-  /* Old hand-rolled thread creation. pthread_create is fine for our
-     purposes. */
+  /* Old hand-rolled thread creation. */
  {
    /* set up the subthread */
    mach_port_t exc_thread;
@@ -329,7 +431,11 @@ static void macosx_init_exception_handler()
 #else
  {
    pthread_t th;
-   pthread_create(&th, NULL, (void *(*)(void *))exception_thread, NULL);
+   void *data = NULL;
+#ifdef USE_THREAD_LOCAL
+   data = pthread_getspecific(scheme_thread_local_key);
+#endif
+   pthread_create(&th, NULL, (void *(*)(void *))exception_thread, data);
  }
 #endif
 }

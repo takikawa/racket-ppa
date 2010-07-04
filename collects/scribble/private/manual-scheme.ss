@@ -15,8 +15,9 @@
          schemeblockelem
          schemeinput
          schememod
-         scheme SCHEME scheme/form schemeresult schemeid schememodname
-         indexed-scheme
+         scheme SCHEME scheme/form schemeresult schemeid 
+         schememodname
+         schememodlink indexed-scheme
          schemelink)
 
 (define-code schemeblock0 to-paragraph)
@@ -57,9 +58,9 @@
      (syntax/loc stx (schememod #:file #f lang rest ...))]))
 
 (define (to-element/result s)
-  (make-element "schemeresult" (list (to-element/no-color s))))
+  (make-element result-color (list (to-element/no-color s))))
 (define (to-element/id s)
-  (make-element "schemesymbol" (list (to-element/no-color s))))
+  (make-element symbol-color (list (to-element/no-color s))))
 
 (define-syntax (keep-s-expr stx)
   (syntax-case stx ()
@@ -104,12 +105,20 @@
     [(schememodname n)
      (as-modname-link 'n (*schememodname n))]))
 
+(define-syntax schememodlink
+  (syntax-rules (unsyntax)
+    [(schememodlink n content ...)
+     (*as-modname-link 'n (elem #:style #f content ...))]))
+
 (define (as-modname-link s e)
   (if (symbol? s)
-    (make-link-element "schememodlink"
-                       (list e)
-                       `(mod-path ,(symbol->string s)))
-    e))
+      (*as-modname-link s e)
+      e))
+
+(define (*as-modname-link s e)
+  (make-link-element module-link-color
+                     (list e)
+                     `(mod-path ,(format "~s" s))))
 
 (define-syntax-rule (indexed-scheme x)
   (add-scheme-index 'x (scheme x)))

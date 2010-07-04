@@ -18,8 +18,10 @@
          set-splash-char-observer
          set-splash-event-callback
          get-splash-event-callback
+         set-refresh-splash-on-gauge-change?!
          get-splash-width
-         get-splash-height)
+         get-splash-height
+         refresh-splash)
 
 (define splash-bitmap #f)
 (define splash-cache-bitmap #f)
@@ -43,6 +45,9 @@
 
 (define (set-splash-event-callback cb) (set! splash-event-callback cb))
 (define (get-splash-event-callback cb) splash-event-callback)
+
+(define (refresh-splash-on-gauge-change? start range) #f)
+(define (set-refresh-splash-on-gauge-change?! f) (set! refresh-splash-on-gauge-change? f))
 
 (define (refresh-splash)
   
@@ -106,7 +111,7 @@
   (set! splash-title _splash-title)
   (set! splash-max-width (max 1 (splash-get-preference (get-splash-width-preference-name) width-default)))
   (send gauge set-range splash-max-width)
-  (send splash-frame set-label splash-title)
+  (send splash-tlw set-label splash-title)
   (let/ec k
     (define (no-splash)
       (set! splash-bitmap #f)
@@ -149,8 +154,8 @@
        (no-splash)])
     
     (refresh-splash)
-    (send splash-frame center 'both)
-    (send splash-frame show #t)
+    (send splash-tlw center 'both)
+    (thread (λ () (send splash-tlw show #t)))
     (flush-display) (yield) (sleep)
     (flush-display) (yield) (sleep)))
 
@@ -166,8 +171,8 @@
   (unless (= splash-max-width splash-current-width)
     (splash-set-preference (get-splash-width-preference-name) (max 1 splash-current-width)))
   (set! quit-on-close? #f)
-  (when splash-frame
-    (send splash-frame show #f)))
+  (when splash-tlw
+    (send splash-tlw show #f)))
 
 (define (shutdown-splash)
   (set! splash-load-handler (λ (old-load f expected) (old-load f expected))))
@@ -181,14 +186,14 @@
          (= (date-month date) 12))))
 
 (define (splash-load-handler old-load f expected)
-  (let ([finalf (splitup-path f)])
-    (set! splash-current-width (+ splash-current-width 1))
-    (when (<= splash-current-width splash-max-width)
-      (send gauge set-value splash-current-width)
-      (unless (member gauge (send gauge-panel get-children))
-        ;; when the gauge is not visible, we'll redraw the canvas
-        (refresh-splash)))
-    (old-load f expected)))
+  (set! splash-current-width (+ splash-current-width 1))
+  (when (<= splash-current-width splash-max-width)
+    (send gauge set-value splash-current-width)
+    (when (or (not (member gauge (send gauge-panel get-children)))
+              ;; when the gauge is not visible, we'll redraw the canvas
+              (refresh-splash-on-gauge-change? splash-current-width splash-max-width))
+      (refresh-splash)))
+  (old-load f expected))
 
 (let-values ([(make-compilation-manager-load/use-compiled-handler
                manager-trace-handler)
@@ -272,28 +277,22 @@
 (define (splash-set-preference name value)
   (put-preferences (list name) (list value)))
 
-(define (splitup-path f)
-  (let*-values ([(absf) (if (relative-path? f)
-                            (build-path (current-directory) f)
-                            f)]
-                [(base name _1) (split-path absf)])
-    
-    (if base
-        (let-values ([(base2 name2 _2) (split-path base)])
-          (if base2
-              (let-values ([(base3 name3 _2) (split-path base2)])
-                (build-path name3 name2 name))
-              (build-path name2 name)))
-        name)))
-
 (define quit-on-close? #t)
 
-(define splash-frame%
-  (class frame%
-    (define/augment (on-close)
-      (when quit-on-close?
-        (exit)))
-    (super-new)))
+(define splash-tlw%
+  (case (system-type)
+    [(unix)
+     (class dialog%
+       (define/augment (on-close)
+         (when quit-on-close?
+           (exit)))
+       (super-new))]
+    [else
+     (class frame%
+       (define/augment (on-close)
+         (when quit-on-close?
+           (exit)))
+       (super-new [style '(no-resize-border)]))]))
 
 (define splash-canvas%
   (class canvas%
@@ -303,14 +302,13 @@
     (define/override (on-event evt) (splash-event-callback evt))
     (super-new)))
 
-(define splash-frame
+(define splash-tlw
   (parameterize ([current-eventspace splash-eventspace])
-    (instantiate splash-frame% ()
-      (label splash-title)
-      (style '(no-resize-border)))))
-(send splash-frame set-alignment 'center 'center)
+    (new splash-tlw%
+      (label splash-title))))
+(send splash-tlw set-alignment 'center 'center)
 
-(define panel (make-object vertical-pane% splash-frame))
+(define panel (make-object vertical-pane% splash-tlw))
 (define splash-canvas (new splash-canvas% [parent panel] [style '(no-autoclear)]))
 (define gauge-panel (make-object horizontal-pane% panel))
 (define gauge

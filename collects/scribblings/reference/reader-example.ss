@@ -43,7 +43,7 @@
                                         [(eof-object? v)
                                          (make-element 'italic '("nothing"))]
                                         [(string? v)
-                                         (make-element "schemevalue"
+                                         (make-element value-color
                                                        (list (schemefont 
                                                               (regexp-replace* #rx"[\\]\""
                                                                                (regexp-replace*
@@ -79,7 +79,7 @@
                                                      [(pair? v) `(cons ,(loop (car v)) ,(loop (cdr v)))]
                                                      [(bytes? v) `(bytes ,@(map loop (bytes->list v)))]
                                                      [(char? v) `(integer->char ,(char->integer v))]
-                                                     [(keyword? v) `(string->keyword ,(format "~a" v))]
+                                                     [(keyword? v) `(string->keyword ,(keyword->string v))]
                                                      [(or (regexp? v)
                                                           (byte-regexp? v))
                                                       `(,(cond

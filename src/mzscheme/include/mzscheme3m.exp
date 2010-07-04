@@ -311,6 +311,8 @@ scheme_get_unsigned_long_long_val
 scheme_real_to_double
 scheme_make_cptr
 scheme_make_offset_cptr
+scheme_make_external_cptr
+scheme_make_offset_external_cptr
 scheme_get_proc_name
 scheme_utf8_decode
 scheme_utf8_decode_as_prefix
@@ -525,7 +527,6 @@ scheme_make_struct_values
 scheme_make_struct_names
 scheme_make_struct_type
 scheme_make_struct_instance
-scheme_make_struct_exptime
 scheme_is_struct_instance
 scheme_struct_ref
 scheme_struct_set
@@ -586,4 +587,6 @@ scheme_make_provided_string
 scheme_make_args_string
 scheme_system_library_subpath
 scheme_signal_received
+scheme_signal_received_at
+scheme_get_signal_handle
 scheme_char_strlen

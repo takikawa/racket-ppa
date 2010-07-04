@@ -591,6 +591,7 @@
 (test 2 expt 4 1/2)
 (test 2.0 expt 4 0.5)
 (test (sqrt 5) expt 5 1/2)
+(test 18446744073709551616 expt (expt 2 32) 2)
 (arity-test expt 2 2)
 
 (test 31525197391593472 inexact->exact 31525197391593473.0)
@@ -849,6 +850,7 @@
 (err/rt-test (quotient 36.0+0.0i -7))
 (test 0 quotient 0 5.0)
 (test 0 quotient 0 -5.0)
+(test (expt 2 30) quotient (- (expt 2 30)) -1)
 (test 1 modulo 13 4)
 (test 1 remainder 13 4)
 (test 1.0 modulo 13 4.0)
@@ -893,6 +895,8 @@
 (test 0 modulo 0 -5.0)
 (test 0 remainder 0 5.0)
 (test 0 remainder 0 -5.0)
+(test 0 modulo (- (expt 2 30)) -1)
+(test 0 remainder (- (expt 2 30)) -1)
 (define (divtest n1 n2)
 	(= n1 (+ (* n2 (quotient n1 n2))
 		 (remainder n1 n2))))
@@ -1153,6 +1157,9 @@
 (test 1 bitwise-bit-field (- (sub1 (expt 2 101))) 0 1)
 (test 1 bitwise-bit-field (bitwise-not (expt 2 101)) 70 71)
 (test 7144187 bitwise-bit-field (expt 3 75) 0 24)
+
+(test 42 bitwise-bit-field 42 0 32)
+(test (sub1 (expt 2 32)) bitwise-bit-field -1 32 64)
 
 (arity-test bitwise-bit-field 3 3)
 (err/rt-test (bitwise-bit-field "a" 1 2))

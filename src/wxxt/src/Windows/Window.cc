@@ -4,7 +4,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2009 PLT Scheme Inc.
+ * Copyright: (C) 2004-2010 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -2513,19 +2513,22 @@ wxWindow *wxWindow::FindChildByWidget(Widget w)
   wxChildNode *node, *next;
   wxWindow *r;
 
-  if ((w == X->frame)
-      || (w == X->handle))
-    return this;
+  if (X) {
+    if ((w == X->frame)
+        || (w == X->handle))
+      return this;
+  }
 
-
-  for (node = children->First(); node; node = next) {
-    wxWindow *child;
-    next = node->Next();
-    child = (wxWindow*)(node->Data());
-    if (child) {
-      r = child->FindChildByWidget(w);
-      if (r)
-        return r;
+  if (children) {
+    for (node = children->First(); node; node = next) {
+      wxWindow *child;
+      next = node->Next();
+      child = (wxWindow*)(node->Data());
+      if (child) {
+        r = child->FindChildByWidget(w);
+        if (r)
+          return r;
+      }
     }
   }
 

@@ -1,6 +1,7 @@
 
-(module base scheme
+(module base scheme/base
   (require "slide.ss"
+           scheme/gui/base
            (only-in "core.ss"
                     sliderec?
                     just-a-comment?))

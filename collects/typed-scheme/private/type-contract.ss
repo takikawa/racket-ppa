@@ -2,22 +2,18 @@
 
 (provide type->contract define/fixup-contract? generate-contract-def change-contract-fixups)
 
-(require (except-in "../utils/utils.ss" extend))
 (require
- (rep type-rep)
+ "../utils/utils.ss"
+ (rep type-rep filter-rep object-rep)
  (typecheck internal-forms)
  (utils tc-utils require-contract)
  (env type-name-env)
  (types resolve utils)
  (prefix-in t: (types convenience))
  (private parse-type)
- scheme/match
- syntax/struct
- syntax/stx
- mzlib/trace
- scheme/list
+ scheme/match syntax/struct syntax/stx mzlib/trace unstable/syntax scheme/list
  (only-in scheme/contract -> ->* case-> cons/c flat-rec-contract provide/contract any/c)
- (for-template scheme/base scheme/contract (utils poly-c) (only-in scheme/class object% is-a?/c subclass?/c)))
+ (for-template scheme/base scheme/contract unstable/poly-c (only-in scheme/class object% is-a?/c subclass?/c)))
 
 (define (define/fixup-contract? stx)
   (or (syntax-property stx 'typechecker:contract-def)
@@ -48,7 +44,7 @@
   (= (length l) (length (remove-duplicates l))))
 
 
-(define (type->contract ty fail)
+(define (type->contract ty fail #:out [out? #f])
   (define vars (make-parameter '()))
   (let/ec exit
     (let loop ([ty ty] [pos? #t])
@@ -61,31 +57,47 @@
         [(Mu: var (Union: (list (Value: '()) (Pair: elem-ty (F: var)))))
          #`(listof #,(t->c elem-ty))]
         [(? (lambda (e) (eq? t:Any-Syntax e))) #'syntax?]
-        [(Base: sym cnt) cnt]
+        [(Base: sym cnt) #`(flat-named-contract '#,sym (flat-contract-predicate #,cnt))]
         [(Refinement: par p? cert)
          #`(and/c #,(t->c par) (flat-contract #,(cert p?)))]
-        [(Union: elems) 
-         (with-syntax 
-             ([cnts (map t->c elems)])
-           #;(printf "~a~n" (syntax-object->datum #'cnts))
-           #'(or/c . cnts))]
+        [(Union: elems)         
+         (let-values ([(vars notvars)
+                       (partition F? elems)])
+           (unless (>= 1 (length vars)) (exit (fail)))
+           (with-syntax 
+               ([cnts (append (map t->c vars) (map t->c notvars))])
+             #'(or/c . cnts)))]
         [(Function: arrs)
          (let ()           
            (define (f a)
-             (define-values (dom* rngs* rst)
+             (define-values (dom* opt-dom* rngs* rst)
                (match a
+                 [(arr: dom (Values: (list (Result: rngs (LFilterSet: '() '()) (LEmpty:)) ...)) rst #f kws)
+                  (let-values ([(mand-kws opt-kws) (partition (match-lambda [(Keyword: _ _ mand?) mand?]) kws)]
+                               [(conv) (match-lambda [(Keyword: kw kty _) (list kw (t->c/neg kty))])])
+                    (values (append (map t->c/neg dom) (append-map conv mand-kws))
+                            (append-map conv opt-kws)
+                            (map t->c rngs) 
+                            (and rst (t->c/neg rst))))]
                  [(arr: dom (Values: (list (Result: rngs _ _) ...)) rst #f '())
-                  (values (map t->c/neg dom) (map t->c rngs) (and rst (t->c/neg rst)))]
+                  (if (and out? pos?)
+                      (values (map t->c/neg dom)
+                              null
+                              (map t->c rngs)
+                              (and rst (t->c/neg rst)))
+                      (exit (fail)))]
                  [_ (exit (fail))]))
+             (trace f)
              (with-syntax 
                  ([(dom* ...) dom*]
+                  [(opt-dom* ...) opt-dom*]
                   [rng* (match rngs*
                           [(list r) r]
                           [_ #`(values #,@rngs*)])]
                   [rst* rst])
-               (if rst
-                   #'((dom* ...) () #:rest (listof rst*) . ->* . rng*)
-                   #'(dom* ...  . -> . rng*))))
+               (if (or rst (pair? (syntax-e #'(opt-dom* ...))))
+                   #'((dom* ...) (opt-dom* ...) #:rest (listof rst*) . ->* . rng*)
+                   #'(dom* ... . -> . rng*))))
            (unless (no-duplicates (for/list ([t arrs])
                                     (match t [(arr: dom _ _ _ _) (length dom)])))
              (exit (fail)))
@@ -93,9 +105,9 @@
 	     [(list e) e]
 	     [l #`(case-> #,@l)]))]
         [(Vector: t)
-         #`(vector-immutableof #,(t->c t))]
+         #`(vectorof #,(t->c t))]
         [(Box: t)
-         #`(box-immutable/c #,(t->c t))]
+         #`(box/c #,(t->c t))]
         [(Pair: t1 t2)
          #`(cons/c #,(t->c t1) #,(t->c t2))]
         [(Opaque: p? cert)
@@ -104,8 +116,8 @@
                       [else (int-err "unknown var: ~a" v)])]
 	[(Poly: vs (and b (Function: _)))
          (match-let ([(Poly-names: vs-nm _) ty])
-           (with-syntax ([(vs+ ...) (generate-temporaries (for/list ([v vs-nm]) (symbol-append v '+)))]
-			 [(vs- ...) (generate-temporaries (for/list ([v vs-nm]) (symbol-append v '-)))])
+           (with-syntax ([(vs+ ...) (generate-temporaries (for/list ([v vs-nm]) (format-symbol "~a+" v)))]
+			 [(vs- ...) (generate-temporaries (for/list ([v vs-nm]) (format-symbol "~a-" v)))])
              (parameterize ([vars (append (map list
 					       vs
 					       (syntax->list #'(vs+ ...))
@@ -127,7 +139,7 @@
         [(Syntax: t) #`(syntax/c #,(t->c t))]
         [(Value: v) #`(flat-named-contract #,(format "~a" v) (lambda (x) (equal? x '#,v)))]
         [(Param: in out) #`(parameter/c #,(t->c out))]
-	[(Hashtable: k v) #`hash?]
+	[(Hashtable: k v) #`(hash/c #,(t->c k) #,(t->c v) #:immutable 'dont-care)]
         [else          
          (exit (fail))]))))
 

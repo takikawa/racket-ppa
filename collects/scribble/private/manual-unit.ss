@@ -11,12 +11,12 @@
          "manual-bind.ss"
          "manual-ex.ss"
          "manual-proc.ss"
+         scheme/contract
          (for-syntax scheme/base)
          (for-label scheme/base))
 
 (provide defsignature
          defsignature/splice
-         signature-desc
          sigelem)
 
 (define-syntax-rule (defsignature name (super ...) body ...)
@@ -40,6 +40,9 @@
 (define-struct sig-desc (in))
 (define (signature-desc . l)
   (make-sig-desc l))
+
+(provide/contract
+ [signature-desc (() () #:rest (listof pre-flow?) . ->* . sig-desc?)])
 
 (define (*defsignature stx-id supers body-thunk indent?)
   (*defthing

@@ -5,7 +5,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2009 PLT Scheme Inc.
+ * Copyright: (C) 2004-2010 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -1217,16 +1217,20 @@ void wxWindowDC::DrawArc(double x, double y, double w, double h, double start, d
       yy = SmoothingXFormY(y);
       ww = SmoothingXFormWL(w, x);
       hh = SmoothingXFormHL(h, y);
-      
-      cairo_set_matrix_create(m);
-      cairo_current_matrix (CAIRO_DEV, m);
-      cairo_translate(CAIRO_DEV, xx, yy);
-      cairo_scale(CAIRO_DEV, ww, hh);
-      cairo_new_path(CAIRO_DEV);
-      cairo_arc_negative(CAIRO_DEV, 0.5, 0.5, 0.5, start, end);
-      cairo__set_matrix(CAIRO_DEV, m);
-      cairo_stroke(CAIRO_DEV);
-      cairo_matrix_destroy(m);
+
+      if ((ww > 0.0) && (hh > 0.0)) {
+        cairo_save(CAIRO_DEV);
+        cairo_set_matrix_create(m);
+        cairo_current_matrix (CAIRO_DEV, m);
+        cairo_translate(CAIRO_DEV, xx, yy);
+        cairo_scale(CAIRO_DEV, ww, hh);
+        cairo_new_path(CAIRO_DEV);
+        cairo_arc_negative(CAIRO_DEV, 0.5, 0.5, 0.5, start, end);
+        cairo__set_matrix(CAIRO_DEV, m);
+        cairo_stroke(CAIRO_DEV);
+        cairo_restore(CAIRO_DEV);
+        cairo_matrix_destroy(m);
+      }
     }
 
     return;

@@ -201,6 +201,16 @@
     
     (accept-drop-files #t)
     
+    (inherit set-icon)
+    (let ([icon (current-icon)])
+      (when icon
+        (if (pair? icon)
+            (let ([small (car icon)]
+                  [large (cdr icon)])
+              (set-icon small (send small get-loaded-mask) 'small)
+              (set-icon large (send large get-loaded-mask) 'large))
+            (set-icon icon (send icon get-loaded-mask) 'both))))
+    
     (let ([mb (make-object (get-menu-bar%) this)])
       (when (or (eq? (system-type) 'macos)
                 (eq? (system-type) 'macosx))
@@ -212,6 +222,8 @@
     [define panel (make-root-area-container (get-area-container%) this)]
     (define/public (get-area-container) panel)
     (set! after-init? #t)))
+
+(define current-icon (make-parameter #f))
 
 (define size-pref<%>
   (interface (basic<%>)))
@@ -1721,19 +1733,25 @@
                 (send text-to-search set-search-anchor (send text-to-search get-start-position)))))))
       (super on-focus on?))
     
+    (define timer #f)
+    (define/private (update-search/trigger-jump/later)
+      (run-after-edit-sequence 
+       (λ () 
+         (unless timer
+           (set! timer (new timer%
+                            [notify-callback
+                             (λ ()
+                               (update-searching-str)
+                               (trigger-jump))])))
+         (send timer stop)
+         (send timer start 150 #t))
+       'framework:search-frame:changed-search-string))
+    
     (define/augment (after-insert x y)
-      (run-after-edit-sequence
-       (λ ()
-         (update-searching-str)
-         (trigger-jump))
-       'searching)
+      (update-search/trigger-jump/later)
       (inner (void) after-insert x y))
     (define/augment (after-delete x y)
-      (run-after-edit-sequence
-       (λ ()
-         (update-searching-str)
-         (trigger-jump))
-       'searching)
+      (update-search/trigger-jump/later)
       (inner (void) after-delete x y))
     
     (define/private (trigger-jump)

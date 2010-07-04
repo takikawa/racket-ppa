@@ -626,7 +626,6 @@
 (syntax-test #'(delay))
 (syntax-test #'(delay . 1))
 (syntax-test #'(delay 1 . 2))
-(syntax-test #'(delay 1 2))
 
 (test '(list 3 4) 'quasiquote `(list ,(+ 1 2) 4))
 (test '(list a (quote a)) 'quasiquote (let ((name 'a)) `(list ,name ',name)))
@@ -1113,17 +1112,18 @@
           (let ([p (open-input-bytes (get-output-bytes s))])
             (read p)
             (read p))))
-  (let ([tmp-file "tmp1"])
+  (let ([tmp-file (make-temporary-file)])
+    (let-values ([(base tmp1 mbd?) (split-path tmp-file)])
     (with-output-to-file tmp-file (lambda () (display '(+ 1 2))) #:exists 'truncate/replace)
     (test '(+ 1 2) 'repl-top
           (parameterize ([current-namespace ns])
             (load tmp-file)))
-    (with-output-to-file tmp-file (lambda () (display '(module tmp1 mzscheme (provide x) (define x 12))))
+    (with-output-to-file tmp-file (lambda () (display `(module ,tmp1 mzscheme (provide x) (define x 12))))
                          #:exists 'truncate/replace)
     (test 12 'module
           (parameterize ([current-namespace ns])
-            (dynamic-require (build-path (current-directory) tmp-file) 'x)))
-    (delete-file tmp-file)))
+            (dynamic-require tmp-file 'x)))
+    (delete-file tmp-file))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

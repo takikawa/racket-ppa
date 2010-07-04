@@ -9,19 +9,17 @@
  '#%paramz
  (only-in scheme/match/runtime match:error)
  scheme/promise
- string-constants/string-constant)
+ string-constants/string-constant
+ ;(prefix-in ce: test-engine/scheme-tests)
+ (for-syntax
+  scheme/base syntax/parse
+  (utils tc-utils)
+  (env init-envs)          
+  (except-in (rep filter-rep object-rep type-rep) make-arr)
+  (types convenience union)
+  (only-in (types convenience) [make-arr* make-arr])          
+  (typecheck tc-structs)))
 
-
-
-;; these are all for constructing the types given to variables
-(require (for-syntax
-          scheme/base
-          (utils tc-utils)
-          (env init-envs)          
-          (except-in (rep filter-rep object-rep type-rep) make-arr)
-          (types convenience union)
-          (only-in (types convenience) [make-arr* make-arr])          
-          (typecheck tc-structs)))
 
 (define-for-syntax (initialize-others)
   (d-s srcloc
@@ -46,7 +44,7 @@
 
 (define-syntax (define-initial-env stx)
     (syntax-case stx ()
-      [(_ initial-env make-promise-ty language-ty qq-append-ty [id ty] ...)
+      [(_ initial-env make-promise-ty language-ty qq-append-ty cl ...)
        (with-syntax ([(_ make-promise . _)
                       (local-expand #'(delay 3)
                                     'expression
@@ -64,7 +62,7 @@
               [make-promise make-promise-ty]
               [language language-ty]
               [qq-append qq-append-ty]
-              [id ty] ...)))]))
+              cl ...)))]))
 
 
 
@@ -78,7 +76,28 @@
   (-poly (a b) 
          (cl->*
           (-> (-lst a) (-val '()) (-lst a))
-          (-> (-lst a) (-lst b) (-lst (*Un a b))))))
+          (-> (-lst a) (-lst b) (-lst (*Un a b)))))
+  ;; make-sequence
+  [(syntax-parse (local-expand #'(for ([x '()]) x) 'expression #f)
+     #:context #'make-sequence
+     #:literals (let-values quote)
+     [(let-values ([_ (m-s '(_) '())]) . _)
+      #'m-s])
+   (-poly (a) 
+          (let ([seq-vals 
+                 (lambda ([a a])
+                   (-values (list 
+                             (-> Univ a)
+                             (-> Univ Univ)
+                             Univ
+                             (-> Univ Univ)
+                             (-> a Univ)
+                             (-> Univ a Univ))))])
+            (cl->* (-> Univ (-lst a) (seq-vals))
+                   (-> Univ (-vec a) (seq-vals))
+                   (-> Univ -String (seq-vals -Char))
+                   (-> Univ -Bytes (seq-vals -Nat))
+                   (-> Univ -Input-Port (seq-vals -Nat)))))])
      
      
      

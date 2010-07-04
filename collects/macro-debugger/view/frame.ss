@@ -1,7 +1,8 @@
-
 #lang scheme/base
 (require scheme/class
-         macro-debugger/util/class-iop
+         (rename-in unstable/class-iop
+                    [define/i define:]
+                    [send/i send:])
          scheme/unit
          scheme/list
          scheme/file
@@ -21,8 +22,13 @@
          "../model/trace.ss"
          "../model/steps.ss"
          "cursor.ss"
-         "../util/notify.ss")
+         unstable/gui/notify)
 (provide macro-stepper-frame-mixin)
+
+(define-syntax override/return-false
+  (syntax-rules ()
+    [(override/return-false m ...)
+     (begin (define/override (m) #f) ...)]))
 
 (define (macro-stepper-frame-mixin base-frame%)
   (class* base-frame% (stepper-frame<%>)
@@ -33,6 +39,7 @@
     (define obsoleted? #f)
 
     (inherit get-area-container
+             get-size
              set-label
              get-menu%
              get-menu-item%
@@ -53,10 +60,16 @@
                          " - Macro stepper")
           "Macro stepper"))
 
+    ;; Grrr... we get a spurious on-size event sometime after the
+    ;; frame is created, probably when the window-manager gets around
+    ;; to doing something. Avoid unnecessary updates.
+    (define-values (w0 h0) (get-size))
     (define/override (on-size w h)
       (send: config config<%> set-width w)
       (send: config config<%> set-height h)
-      (send: widget widget<%> update/preserve-view))
+      (unless (and (= w0 w) (= h0 h))
+        (send: widget widget<%> update/preserve-view))
+      (set!-values (w0 h0) (values w h)))
 
     (define warning-panel
       (new horizontal-panel%
@@ -199,17 +212,16 @@
                               "One term at a time"
                               (get-field one-by-one? config))
       (menu-option/notify-box extras-menu
+                              "Extra navigation"
+                              (get-field extra-navigation? config))
+      #|
+      (menu-option/notify-box extras-menu
                               "Suppress warnings"
                               (get-field suppress-warnings? config))
       (menu-option/notify-box extras-menu
-                              "Extra navigation"
-                              (get-field extra-navigation? config))
-      (menu-option/notify-box extras-menu
-                              "Force block->letrec transformation"
-                              (get-field force-letrec-transformation? config))
-      (menu-option/notify-box extras-menu
                               "(Debug) Catch internal errors?"
-                              (get-field debug-catch-errors? config)))
+                              (get-field debug-catch-errors? config))
+      |#)
 
     ;; fixup-menu : menu -> void
     ;; Delete separators at beginning/end and duplicates in middle

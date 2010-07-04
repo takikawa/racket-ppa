@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -51,44 +51,46 @@
 
 /* Init options for embedding: */
 /* these are used to set initial config parameterizations */
-int scheme_square_brackets_are_parens = 1;
-int scheme_curly_braces_are_parens = 1;
-
-/* performance counter */ /* FIXME should be atomically incremented or not shared */
-int scheme_num_read_syntax_objects;
-
+SHARED_OK int scheme_square_brackets_are_parens = 1;
+SHARED_OK int scheme_curly_braces_are_parens = 1;
 /* global flag set from environment variable */
-static int use_perma_cache = 1;
+SHARED_OK static int use_perma_cache = 1;
+
+THREAD_LOCAL_DECL(int scheme_num_read_syntax_objects);
+
 
 /* read-only global symbols */
-static char *builtin_fast;  /* FIXME possible init race condition */
-static unsigned char delim[128];
+SHARED_OK static char *builtin_fast;
+SHARED_OK static unsigned char delim[128];
+SHARED_OK static unsigned char cpt_branch[256];
+
 /* Table of built-in variable refs for .zo loading: */
-static Scheme_Object **variable_references;
-static Scheme_Object *quote_symbol;
-static Scheme_Object *quasiquote_symbol;
-static Scheme_Object *unquote_symbol;
-static Scheme_Object *unquote_splicing_symbol;
-static Scheme_Object *syntax_symbol;
-static Scheme_Object *unsyntax_symbol;
-static Scheme_Object *unsyntax_splicing_symbol;
-static Scheme_Object *quasisyntax_symbol;
-static Scheme_Object *paren_shape_symbol;
-static Scheme_Object *terminating_macro_symbol;
-static Scheme_Object *non_terminating_macro_symbol;
-static Scheme_Object *dispatch_macro_symbol;
-static Scheme_Object *honu_comma;
-static Scheme_Object *honu_semicolon;
-static Scheme_Object *honu_parens;
-static Scheme_Object *honu_braces;
-static Scheme_Object *honu_brackets;
-static Scheme_Object *honu_angles;
+SHARED_OK static Scheme_Object **variable_references;
+
+ROSYM static Scheme_Object *quote_symbol;
+ROSYM static Scheme_Object *quasiquote_symbol;
+ROSYM static Scheme_Object *unquote_symbol;
+ROSYM static Scheme_Object *unquote_splicing_symbol;
+ROSYM static Scheme_Object *syntax_symbol;
+ROSYM static Scheme_Object *unsyntax_symbol;
+ROSYM static Scheme_Object *unsyntax_splicing_symbol;
+ROSYM static Scheme_Object *quasisyntax_symbol;
+ROSYM static Scheme_Object *paren_shape_symbol;
+ROSYM static Scheme_Object *terminating_macro_symbol;
+ROSYM static Scheme_Object *non_terminating_macro_symbol;
+ROSYM static Scheme_Object *dispatch_macro_symbol;
+ROSYM static Scheme_Object *honu_comma;
+ROSYM static Scheme_Object *honu_semicolon;
+ROSYM static Scheme_Object *honu_parens;
+ROSYM static Scheme_Object *honu_braces;
+ROSYM static Scheme_Object *honu_brackets;
+ROSYM static Scheme_Object *honu_angles;
 /* For matching angle brackets in Honu mode: */
-static Scheme_Object *honu_angle_open;
-static Scheme_Object *honu_angle_close;
+ROSYM static Scheme_Object *honu_angle_open;
+ROSYM static Scheme_Object *honu_angle_close;
 /* For recoginizing unresolved hash tables and commented-out graph introductions: */
-static Scheme_Object *unresolved_uninterned_symbol;
-static Scheme_Object *tainted_uninterned_symbol;
+ROSYM static Scheme_Object *unresolved_uninterned_symbol;
+ROSYM static Scheme_Object *tainted_uninterned_symbol;
 
 /* local function prototypes */
 static Scheme_Object *read_case_sensitive(int, Scheme_Object *[]);
@@ -115,6 +117,9 @@ static Scheme_Object *print_unreadable(int, Scheme_Object *[]);
 static Scheme_Object *print_pair_curly(int, Scheme_Object *[]);
 static Scheme_Object *print_mpair_curly(int, Scheme_Object *[]);
 static Scheme_Object *print_honu(int, Scheme_Object *[]);
+static Scheme_Object *print_syntax_width(int, Scheme_Object *[]);
+
+static int scheme_ellipses(mzchar* buffer, int length);
 
 #define NOT_EOF_OR_SPECIAL(x) ((x) >= 0)
 
@@ -357,8 +362,6 @@ typedef struct {
 
 void scheme_init_read(Scheme_Env *env)
 {
-  REGISTER_SO(variable_references);
-
   REGISTER_SO(quote_symbol);
   REGISTER_SO(quasiquote_symbol);
   REGISTER_SO(unquote_symbol);
@@ -371,6 +374,10 @@ void scheme_init_read(Scheme_Env *env)
 
   REGISTER_SO(unresolved_uninterned_symbol);
   REGISTER_SO(tainted_uninterned_symbol);
+  REGISTER_SO(terminating_macro_symbol);
+  REGISTER_SO(non_terminating_macro_symbol);
+  REGISTER_SO(dispatch_macro_symbol);
+  REGISTER_SO(builtin_fast);
 
   quote_symbol                  = scheme_intern_symbol("quote");
   quasiquote_symbol             = scheme_intern_symbol("quasiquote");
@@ -382,9 +389,62 @@ void scheme_init_read(Scheme_Env *env)
   quasisyntax_symbol            = scheme_intern_symbol("quasisyntax");
   paren_shape_symbol            = scheme_intern_symbol("paren-shape");
 
-  unresolved_uninterned_symbol  = scheme_make_symbol("unresolved");
-  tainted_uninterned_symbol     = scheme_make_symbol("tainted");
+  unresolved_uninterned_symbol = scheme_make_symbol("unresolved");
+  tainted_uninterned_symbol    = scheme_make_symbol("tainted");
+    
+  terminating_macro_symbol     = scheme_intern_symbol("terminating-macro");
+  non_terminating_macro_symbol = scheme_intern_symbol("non-terminating-macro");
+  dispatch_macro_symbol        = scheme_intern_symbol("dispatch-macro");
 
+  /* initialize builtin_fast */
+  {
+    int i; 
+    builtin_fast = scheme_malloc_atomic(128);
+    memset(builtin_fast, READTABLE_CONTINUING, 128);
+    for (i = 0; i < 128; i++) {
+      if (scheme_isspace(i))
+        builtin_fast[i] = READTABLE_WHITESPACE;
+    }
+    builtin_fast[';']  = READTABLE_TERMINATING;
+    builtin_fast['\''] = READTABLE_TERMINATING;
+    builtin_fast[',']  = READTABLE_TERMINATING;
+    builtin_fast['"']  = READTABLE_TERMINATING;
+    builtin_fast['|']  = READTABLE_MULTIPLE_ESCAPE;
+    builtin_fast['\\'] = READTABLE_SINGLE_ESCAPE;
+    builtin_fast['(']  = READTABLE_TERMINATING;
+    builtin_fast['[']  = READTABLE_TERMINATING;
+    builtin_fast['{']  = READTABLE_TERMINATING;
+    builtin_fast[')']  = READTABLE_TERMINATING;
+    builtin_fast[']']  = READTABLE_TERMINATING;
+    builtin_fast['}']  = READTABLE_TERMINATING;
+  }
+
+  /* initialize cpt_branch */
+  {
+    int i;
+
+    for (i = 0; i < 256; i++) {
+      cpt_branch[i] = i;
+    }
+
+#define FILL_IN(v) \
+    for (i = CPT_ ## v ## _START; i < CPT_ ## v ## _END; i++) { \
+      cpt_branch[i] = CPT_ ## v ## _START; \
+    }
+    FILL_IN(SMALL_NUMBER);
+    FILL_IN(SMALL_SYMBOL);
+    FILL_IN(SMALL_MARSHALLED);
+    FILL_IN(SMALL_LIST);
+    FILL_IN(SMALL_PROPER_LIST);
+    FILL_IN(SMALL_LOCAL);
+    FILL_IN(SMALL_LOCAL_UNBOX);
+    FILL_IN(SMALL_SVECTOR);
+    FILL_IN(SMALL_APPLICATION);
+
+    /* These two are handled specially: */
+    cpt_branch[CPT_SMALL_APPLICATION2] = CPT_SMALL_APPLICATION2;
+    cpt_branch[CPT_SMALL_APPLICATION3] = CPT_SMALL_APPLICATION3;
+  }
   
   REGISTER_SO(honu_comma);
   REGISTER_SO(honu_semicolon);
@@ -475,6 +535,7 @@ void scheme_init_read(Scheme_Env *env)
   GLOBAL_PARAMETER("print-pair-curly-braces",       print_pair_curly,       MZCONFIG_PRINT_PAIR_CURLY,            env);
   GLOBAL_PARAMETER("print-mpair-curly-braces",      print_mpair_curly,      MZCONFIG_PRINT_MPAIR_CURLY,           env);
   GLOBAL_PARAMETER("print-honu",                    print_honu,             MZCONFIG_HONU_MODE,                   env);
+  GLOBAL_PARAMETER("print-syntax-width",            print_syntax_width,     MZCONFIG_PRINT_SYNTAX_WIDTH,          env);
 
   GLOBAL_PRIM_W_ARITY("make-readtable",     make_readtable,     1, -1,      env);
   GLOBAL_FOLDING_PRIM("readtable?",         readtable_p,        1, 1, 1,    env);
@@ -484,6 +545,13 @@ void scheme_init_read(Scheme_Env *env)
     use_perma_cache = 0;
   }
 }
+
+void scheme_init_variable_references_constants()
+{
+  REGISTER_SO(variable_references);
+  variable_references = scheme_make_builtin_references_table();
+}
+
 
 static Scheme_Simple_Object *malloc_list_stack()
 {
@@ -683,6 +751,31 @@ static Scheme_Object *
 print_honu(int argc, Scheme_Object *argv[])
 {
   DO_CHAR_PARAM("print-honu", MZCONFIG_HONU_MODE);
+}
+
+static Scheme_Object *good_syntax_width(int c, Scheme_Object **argv)
+{
+  int ok;
+
+  ok = (SCHEME_INTP(argv[0]) 
+	? ((SCHEME_INT_VAL(argv[0]) > 3)
+           || !SCHEME_INT_VAL(argv[0]))
+	: (SCHEME_BIGNUMP(argv[0])
+	   ? SCHEME_BIGPOS(argv[0])
+	   : (SCHEME_FLTP(argv[0])
+              ? MZ_IS_POS_INFINITY(SCHEME_FLT_VAL(argv[0]))
+              : 0)));
+
+  return ok ? scheme_true : scheme_false;
+}
+
+static Scheme_Object *
+print_syntax_width(int argc, Scheme_Object *argv[])
+{
+  return scheme_param_config("print-syntax-width",
+			     scheme_make_integer(MZCONFIG_PRINT_SYNTAX_WIDTH),
+			     argc, argv,
+			     -1, good_syntax_width, "+inf.0, 0, or exact integer greater than three", 0);
 }
 
 #ifdef LOAD_ON_DEMAND
@@ -3580,7 +3673,8 @@ read_number_or_symbol(int init_ch, int skip_rt, Scheme_Object *port,
     return NULL;
   }
 
-  if (honu_mode && !is_symbol) {
+  /* special case for ellipses in honu */
+  if (honu_mode && !is_symbol && !scheme_ellipses(buf, i)) {
     /* Honu inexact syntax is not quite a subset of Scheme: it can end
        in an "f" or "d" to indicate the precision. We can easily check
        whether the string has the right shape, and then move the "f"
@@ -3626,7 +3720,8 @@ read_number_or_symbol(int init_ch, int skip_rt, Scheme_Object *port,
   }
 
   if (SAME_OBJ(o, scheme_false)) {
-    if (honu_mode && !is_symbol) {
+    /* special case for ellipses in honu */
+    if (honu_mode && !is_symbol && !scheme_ellipses(buf, i)) {
       scheme_read_err(port, stxsrc, line, col, pos, SPAN(port, pos), 0, indentation,
 		      "read: bad number: %5", buf);
       return NULL;
@@ -3762,6 +3857,10 @@ static int u_strcmp(mzchar *s, const char *_t)
   if (s[i] || t[i])
     return 1;
   return 0;
+}
+
+static int scheme_ellipses(mzchar* buffer, int length){
+    return u_strcmp(buffer, "...") == 0;
 }
 
 /* "#\" has been read */
@@ -4228,7 +4327,8 @@ typedef struct Scheme_Load_Delay {
   int perma_cache;
   unsigned char *cached;
   Scheme_Object *cached_port;
-  struct Scheme_Load_Delay *clear_bytes_prev, *clear_bytes_next;
+  struct Scheme_Load_Delay *clear_bytes_prev;
+  struct Scheme_Load_Delay *clear_bytes_next;
 } Scheme_Load_Delay;
 
 #define ZO_CHECK(x) if (!(x)) scheme_ill_formed_code(port);
@@ -4408,7 +4508,6 @@ static Scheme_Object *read_compact_escape(CPort *port)
   return read_inner(ep, NULL, port->ht, scheme_null, &params, 0);
 }
 
-static unsigned char cpt_branch[256];
 
 static Scheme_Object *read_compact(CPort *port, int use_stack);
 
@@ -4605,7 +4704,6 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
       }
       break;
     case CPT_STX:
-    case CPT_GSTX:
       {
 	if (!port->ut) {
           Scheme_Unmarshal_Tables *ut;
@@ -4640,7 +4738,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
                                  0, 0);
         }
 
-	v = scheme_unmarshal_datum_to_syntax(v, port->ut, ch == CPT_GSTX);
+	v = scheme_unmarshal_datum_to_syntax(v, port->ut, 0);
 	scheme_num_read_syntax_objects++;
 	if (!v)
 	  scheme_ill_formed_code(port);
@@ -4654,7 +4752,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
       break;
     case CPT_REFERENCE:
       l = read_compact_number(port);
-      RANGE_CHECK(l, < EXPECTED_PRIM_COUNT);
+      RANGE_CHECK(l, < (EXPECTED_PRIM_COUNT + EXPECTED_UNSAFE_COUNT + EXPECTED_FLFXNUM_COUNT));
       return variable_references[l];
       break;
     case CPT_LOCAL:
@@ -4706,6 +4804,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
       }
       break;
     case CPT_LET_ONE:
+    case CPT_LET_ONE_FLONUM:
       {
 	Scheme_Let_One *lo;
 	int et;
@@ -4714,12 +4813,14 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
 	lo->iso.so.type = scheme_let_one_type;
 
 	v = read_compact(port, 1);
-	lo->value = v;
+        lo->value = v;
 	v = read_compact(port, 1);
 	lo->body = v;
 	et = scheme_get_eval_type(lo->value);
-	SCHEME_LET_EVAL_TYPE(lo) = et;
-
+        if (ch == CPT_LET_ONE_FLONUM)
+          et |= LET_ONE_FLONUM;
+        SCHEME_LET_EVAL_TYPE(lo) = et;
+	
 	return (Scheme_Object *)lo;
       }
       break;
@@ -5035,7 +5136,7 @@ static Scheme_Object *read_compact_quote(CPort *port, int embedded)
 static Scheme_Object *read_marshalled(int type, CPort *port)
 {
   Scheme_Object *l;
-  Scheme_Type_Reader reader;
+  Scheme_Type_Reader2 reader;
 
   l = read_compact(port, 1);
 
@@ -5049,7 +5150,7 @@ static Scheme_Object *read_marshalled(int type, CPort *port)
     scheme_ill_formed_code(port);
   }
 
-  l = reader(l);
+  l = reader(l, port->insp);
 
   if (!l)
     scheme_ill_formed_code(port);
@@ -5092,35 +5193,6 @@ static Scheme_Object *read_compiled(Scheme_Object *port,
   Scheme_Object *dir;
   Scheme_Config *config;
 	  
-  if (!cpt_branch[1]) {
-    int i;
-
-    for (i = 0; i < 256; i++) {
-      cpt_branch[i] = i;
-    }
-
-#define FILL_IN(v) \
-    for (i = CPT_ ## v ## _START; i < CPT_ ## v ## _END; i++) { \
-      cpt_branch[i] = CPT_ ## v ## _START; \
-    }
-    FILL_IN(SMALL_NUMBER);
-    FILL_IN(SMALL_SYMBOL);
-    FILL_IN(SMALL_MARSHALLED);
-    FILL_IN(SMALL_LIST);
-    FILL_IN(SMALL_PROPER_LIST);
-    FILL_IN(SMALL_LOCAL);
-    FILL_IN(SMALL_LOCAL_UNBOX);
-    FILL_IN(SMALL_SVECTOR);
-    FILL_IN(SMALL_APPLICATION);
-
-    /* These two are handled specially: */
-    cpt_branch[CPT_SMALL_APPLICATION2] = CPT_SMALL_APPLICATION2;
-    cpt_branch[CPT_SMALL_APPLICATION3] = CPT_SMALL_APPLICATION3;
-  }
-
-  if (!variable_references)
-    variable_references = scheme_make_builtin_references_table();
-
   /* Allow delays? */
   if (params->delay_load_info) {
     delay_info = MALLOC_ONE_RT(Scheme_Load_Delay);
@@ -5301,7 +5373,7 @@ static Scheme_Object *read_compiled(Scheme_Object *port,
   return result;
 }
 
-static Scheme_Load_Delay *clear_bytes_chain;
+THREAD_LOCAL_DECL(static Scheme_Load_Delay *clear_bytes_chain);
 
 void scheme_clear_delayed_load_cache()
 {
@@ -5508,6 +5580,11 @@ void scheme_unmarshal_wrap_set(Scheme_Unmarshal_Tables *ut,
   ut->decoded[l] = 1;
 }
 
+Scheme_Object *scheme_get_cport_inspector(struct CPort *rp)
+{
+  return rp->insp;
+}
+
 /*========================================================================*/
 /*                           readtable support                            */
 /*========================================================================*/
@@ -5617,8 +5694,8 @@ static Scheme_Object *readtable_call(int w_char, int ch, Scheme_Object *proc, Re
 
   if (get_info) {
     a[0] = v;
-    if (!scheme_check_proc_arity(NULL, 1, 0, 1, a)) {
-      scheme_wrong_type("read-language", "procedure (arity 1)", -1, -1, a);
+    if (!scheme_check_proc_arity(NULL, 2, 0, 1, a)) {
+      scheme_wrong_type("read-language", "procedure (arity 2)", -1, -1, a);
     }
   }
 
@@ -5748,36 +5825,6 @@ static Scheme_Object *make_readtable(int argc, Scheme_Object **argv)
       return NULL;
     }
     orig_t = (Readtable *)argv[0];
-  }
-
-  if (!terminating_macro_symbol) {
-    REGISTER_SO(terminating_macro_symbol);
-    REGISTER_SO(non_terminating_macro_symbol);
-    REGISTER_SO(dispatch_macro_symbol);
-    REGISTER_SO(builtin_fast);
-    terminating_macro_symbol = scheme_intern_symbol("terminating-macro");
-    non_terminating_macro_symbol = scheme_intern_symbol("non-terminating-macro");
-    dispatch_macro_symbol = scheme_intern_symbol("dispatch-macro");
-    
-    fast = scheme_malloc_atomic(128);
-    memset(fast, READTABLE_CONTINUING, 128);
-    for (i = 0; i < 128; i++) {
-      if (scheme_isspace(i))
-	fast[i] = READTABLE_WHITESPACE;
-    }
-    fast[';'] = READTABLE_TERMINATING;
-    fast['\''] = READTABLE_TERMINATING;
-    fast[','] = READTABLE_TERMINATING;
-    fast['"'] = READTABLE_TERMINATING;
-    fast['|'] = READTABLE_MULTIPLE_ESCAPE;
-    fast['\\'] = READTABLE_SINGLE_ESCAPE;
-    fast['('] = READTABLE_TERMINATING;
-    fast['['] = READTABLE_TERMINATING;
-    fast['{'] = READTABLE_TERMINATING;
-    fast[')'] = READTABLE_TERMINATING;
-    fast[']'] = READTABLE_TERMINATING;
-    fast['}'] = READTABLE_TERMINATING;
-    builtin_fast = fast;
   }
 
   t = MALLOC_ONE_TAGGED(Readtable);

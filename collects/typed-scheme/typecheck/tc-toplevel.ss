@@ -3,6 +3,7 @@
 
 (require (rename-in "../utils/utils.ss" [infer r:infer]))
 (require syntax/kerncase
+	 unstable/list unstable/syntax
          mzlib/etc
          scheme/match
          "signatures.ss"
@@ -11,7 +12,8 @@
          (types utils convenience)
          (private parse-type type-annotation type-contract)
          (env type-env init-envs type-name-env type-alias-env lexical-env)
-         (utils tc-utils mutated-vars)
+	 unstable/mutated-vars
+         (utils tc-utils)
          "provide-handling.ss"
          "def-binding.ss"
          (for-template
@@ -101,7 +103,7 @@
            ;; if all the variables have types, we stick them into the environment
            [(andmap (lambda (s) (syntax-property s 'type-label)) vars)        
             (let ([ts (map get-type vars)])
-              (for-each register-type vars ts)
+              (for-each register-type-if-undefined vars ts)
               (map make-def-binding vars ts))]
            ;; if this already had an annotation, we just construct the binding reps
            [(andmap (lambda (s) (lookup-type s (lambda () #f))) vars)
@@ -172,10 +174,10 @@
       
       ;; definitions just need to typecheck their bodies
       [(define-values (var ...) expr)
-       (let* ([vars (syntax->list #'(var ...))]
-              [ts (map lookup-type vars)])
-         (tc-expr/check #'expr (ret ts)))
-       (void)]
+       (begin (let* ([vars (syntax->list #'(var ...))]
+                     [ts (map lookup-type vars)])
+                (tc-expr/check #'expr (ret ts)))
+              (void))]
       
       ;; to handle the top-level, we have to recur into begins
       [(begin) (void)]
@@ -251,9 +253,11 @@
     ;; report delayed errors
     (report-all-errors)
     ;; compute the new provides
-    (with-syntax
-        ([((new-provs ...) ...) (map (generate-prov stx-defs val-defs) provs)])
+    (with-syntax*
+        ([the-variable-reference (generate-temporary #'blame)]
+         [((new-provs ...) ...) (map (generate-prov stx-defs val-defs #'the-variable-reference) provs)])
       #`(begin
+          (define the-variable-reference (#%variable-reference))
            #,(env-init-code)
            #,(tname-env-init-code)
            #,(talias-env-init-code)

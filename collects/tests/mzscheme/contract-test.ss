@@ -11,7 +11,7 @@
         (namespace-require '(for-syntax scheme/base))
         (namespace-require '(for-template scheme/base))
         (namespace-require 'scheme/contract)
-        (namespace-require '(only scheme/private/contract-arrow procedure-accepts-and-more?))
+        (namespace-require '(only scheme/contract/private/arrow procedure-accepts-and-more?))
         (namespace-require 'scheme/class)
         (namespace-require 'scheme/promise))
       n))
@@ -189,6 +189,8 @@
   
   (test/no-error '(listof any/c))
   (test/no-error '(listof (lambda (x) #t)))
+  (test/no-error '(non-empty-listof any/c))
+  (test/no-error '(non-empty-listof (lambda (x) #t)))
 
   
   (test/no-error '(list/c 'x "x" #t #f #\c #rx"a" #rx#"b"))
@@ -1605,7 +1607,7 @@
    '((contract (->d () 
                     ([a number?])
                     #:rest rest any/c 
-                    any
+                    [_ any/c]
                     #:post-cond (equal? (list a rest) (list the-unsupplied-arg '())))
                (λ ([a 1] . rest) 1)
                'pos
@@ -2058,6 +2060,12 @@
       x)
    '(2))
 
+  (test/spec-passed
+   'or/c-hmm
+   (let ([funny/c (or/c (and/c procedure? (-> any)) (listof (-> number?)))])
+     (contract (-> funny/c any) void 'pos 'neg)))
+
+  
   
 ;                                          
 ;                                          
@@ -2280,7 +2288,53 @@
                         'neg)
               'x)
    1)
-  
+
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  ;;
+  ;;  make-proj-contract
+  ;;
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+  (contract-eval
+   '(define proj:add1->sub1
+      (make-proj-contract
+       'proj:add1->sub1
+       (lambda (pos neg src name blame)
+         (lambda (f)
+           (unless (and (procedure? f) (procedure-arity-includes? f 1))
+             (raise-contract-error f src pos name
+                                   "expected a unary function, got: ~e"
+                                   f))
+           (lambda (x)
+             (unless (and (integer? x) (exact? x))
+               (raise-contract-error x src neg name
+                                     "expected an integer, got: ~e"
+                                     x))
+             (let* ([y (f (add1 x))])
+               (unless (and (integer? y) (exact? y))
+                 (raise-contract-error y src pos name
+                                       "expected an integer, got: ~e"
+                                       y))
+               (sub1 y)))))
+       (lambda (f)
+         (and (procedure? f) (procedure-arity-includes? f 1))))))
+
+  (test/spec-passed/result
+   'make-proj-contract-1
+   '((contract proj:add1->sub1 sqrt 'pos 'neg) 15)
+   3)
+
+  (test/pos-blame
+   'make-proj-contract-2
+   '(contract proj:add1->sub1 'dummy 'pos 'neg))
+
+  (test/pos-blame
+   'make-proj-contract-3
+   '((contract proj:add1->sub1 (lambda (x) 'dummy) 'pos 'neg) 2))
+
+  (test/neg-blame
+   'make-proj-contract-4
+   '((contract proj:add1->sub1 sqrt 'pos 'neg) 'dummy))
   
 ;                                                                                           
 ;                                                                                           
@@ -2397,6 +2451,13 @@
         (if b (f m) (f #t)))
       (g #t 3)))
   
+  ;; For some of the following tests, it may not be clear
+  ;; why the blame is what it is.  The contract(s) entered
+  ;; into via with-contract are between the contracting
+  ;; region and its context.  If the context allows the
+  ;; value to flow into other regions without contracts
+  ;; that protect it from misuses in those regions, it's
+  ;; the context's fault.
   (test/spec-failed
    'define/contract12
    '(let ()
@@ -2407,7 +2468,7 @@
         (-> boolean? number? number?)
         (if b (f m) (f #t)))
       (g #f 3))
-   "(function g)")
+   "top-level")
 
   (test/spec-failed
    'define/contract13
@@ -2434,7 +2495,7 @@
 	       (require 'foo-dc14)
 	       (foo-dc14 #t)))
       (eval '(require 'bar-dc14)))
-   "'bar-dc14")
+   "'foo-dc14")
 
   (test/spec-failed
    'define/contract15
@@ -2447,7 +2508,7 @@
 		 (+ n 1))))
       (eval '(require 'foo-dc15))
       (eval '(foo-dc15 #t)))
-   "top-level")
+   "'foo-dc15")
   
   ;; Let's see how units + define/contract interact
   
@@ -2472,6 +2533,29 @@
                    (x n))
                  (foo 3))))
       (eval '(require 'foo-dc16)))
+   "(unit U@)")
+  
+  (test/spec-failed
+   'define/contract16a
+   '(begin
+      (eval '(module foo-dc16a scheme/base
+               (require scheme/contract)
+               (require scheme/unit)
+               (let ()
+                 (define/contract (foo n)
+                   (-> number? number?)
+                   (define-signature U^
+                     (x))
+                   (define-unit/contract U@
+                     (import)
+                     (export (U^ [x (-> number? number?)]))
+                     (define (x n) #t))
+                   (define-values/invoke-unit U@
+                     (import)
+                     (export U^))
+                   (x n))
+                 (foo 3))))
+      (eval '(require 'foo-dc16a)))
    "(unit U@)")
   
   (test/spec-failed
@@ -2500,7 +2584,7 @@
   (test/spec-failed
    'define/contract18
    '(begin
-      (eval '(module foo-dc17 scheme/base
+      (eval '(module foo-dc18 scheme/base
                (require scheme/contract)
                (require scheme/unit)
                (let ()
@@ -2708,6 +2792,80 @@
    '(let ()
       (define-struct/contract foo ([x number?] [y number?]) #:transparent)
       1))
+
+  (test/spec-passed
+    'define-struct/contract15
+    '(let ()
+       (define-struct foo (x))
+       (define-struct/contract (bar foo) ([z string?]))
+       (make-bar 2 "x")))
+
+  (test/spec-failed
+    'define-struct/contract16
+    '(let ()
+       (define-struct foo (x))
+       (define-struct/contract (bar foo) ([z string?]))
+       (make-bar 2 #f))
+    "top-level")
+
+  (test/spec-passed
+    'define-struct/contract17
+    '(let ()
+       (define-struct foo (x))
+       (define-struct/contract (bar foo) ([z string?]) #:mutable)
+       (set-bar-z! (make-bar 2 "x") "y")))
+
+  (test/spec-failed
+    'define-struct/contract18
+    '(let ()
+       (define-struct foo (x))
+       (define-struct/contract (bar foo) ([z string?]) #:mutable)
+       (set-bar-z! (make-bar 2 "x") #f))
+    "top-level")
+
+  (test/spec-passed
+    'define-struct/contract19
+    '(let ()
+       (define-struct foo (x))
+       (define-struct/contract (bar foo) ([z string?]))
+       (define-struct/contract (baz bar) ([x number?]))
+       (make-baz 2 "x" 5)))
+
+  (test/spec-failed
+    'define-struct/contract20
+    '(let ()
+       (define-struct foo (x))
+       (define-struct/contract (bar foo) ([z string?]))
+       (define-struct/contract (baz bar) ([x number?]))
+       (make-baz 2 "x" #f))
+    "top-level")
+
+  (test/spec-failed
+    'define-struct/contract21
+    '(let ()
+       (define-struct foo (x))
+       (define-struct/contract (bar foo) ([z string?]))
+       (define-struct/contract (baz bar) ([x number?]))
+       (make-baz 2 #f 3))
+    "top-level")
+
+  (test/spec-passed
+    'define-struct/contract21
+    '(let ()
+       (define-struct foo (x) #:mutable)
+       (define-struct/contract (bar foo) ([z string?]))
+       (set-foo-x! (make-bar 2 "x") #f)))
+
+  (test/spec-passed
+   'define-struct/contract22
+   '(define-struct/contract foo ([x number?] [y number?]) #:mutable #:transparent))
+
+  (test/spec-passed
+   'define-struct/contract23
+   '(define-struct/contract foo ([x number?] [y number?])
+                            #:mutable #:transparent
+                            #:property prop:custom-write
+                            (lambda (a b c) (void))))
 ;                                                                                  
 ;                                                                                  
 ;                                                                                  
@@ -2834,9 +2992,30 @@
   (test/spec-passed
    'with-contract9
    '(let ()
-      (with-contract region1 (f)
+      (with-contract region1 ()
         (define f 3))
       f))
+  
+  (test/spec-failed
+   'with-contract10
+   '(let ()
+      (with-contract r
+        ([x number?])
+        (define x 3)
+        (define-values () 
+          (begin (set! x #f) (values))))
+      x)
+   "(region r)")
+  
+  (test/spec-failed
+   'with-contract11
+   '(let ()
+      (with-contract r
+        ([x number?])
+        (define x 3))
+      (set! x #f)
+      x)
+   "top-level")
 
 ;                                                                                                                         
 ;                                                                                                                         
@@ -3922,6 +4101,14 @@
               #f 
               'pos
               'neg))
+  
+  (test/spec-passed
+   'immutable7
+   '(let ([ct (contract (non-empty-listof (boolean? . -> . boolean?))
+                        (list (λ (x) #t))
+                        'pos
+                        'neg)])
+      ((car ct) #f)))
   
   (test/neg-blame
    'immutable8
@@ -5065,6 +5252,88 @@
   ;;  end of define-opt/c
   ;;
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  ;;
+  ;;  opt/c and blame
+  ;;
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+  (contract-eval
+   '(begin
+
+      (define proj:blame/c
+        (make-proj-contract
+         'proj:blame/c
+         (lambda (pos neg src name blame)
+           (lambda (x)
+             (if blame 'positive 'negative)))
+         (lambda (x) #t)))
+
+      (define call*0 'dummy)
+      (define (call*1 x0) x0)
+      (define (call*2 f1 x0) (f1 x0))
+      (define (call*3 f2 x1 x0) (f2 x1 x0))))
+
+  (test/spec-passed/result
+   'opt/c-blame-0
+   '((contract
+      (-> (-> (-> proj:blame/c any/c) any/c any/c) (-> any/c any/c) any/c any/c)
+      call*3
+      'pos
+      'neg)
+     call*2
+     call*1
+     call*0)
+   'negative)
+
+  (test/spec-passed/result
+   'opt/c-blame-1
+   '((contract
+      (opt/c (-> (-> (-> proj:blame/c any/c) any/c any/c) (-> any/c any/c) any/c any/c))
+      call*3
+      'pos
+      'neg)
+     call*2
+     call*1
+     call*0)
+   'negative)
+
+  (test/spec-passed/result
+   'opt/c-blame-2
+   '((contract
+      (-> (opt/c (-> (-> proj:blame/c any/c) any/c any/c)) (-> any/c any/c) any/c any/c)
+      call*3
+      'pos
+      'neg)
+     call*2
+     call*1
+     call*0)
+   'negative)
+
+  (test/spec-passed/result
+   'opt/c-blame-3
+   '((contract
+      (-> (-> (opt/c (-> proj:blame/c any/c)) any/c any/c) (-> any/c any/c) any/c any/c)
+      call*3
+      'pos
+      'neg)
+     call*2
+     call*1
+     call*0)
+   'negative)
+
+  (test/spec-passed/result
+   'opt/c-blame-4
+   '((contract
+      (-> (-> (-> (opt/c proj:blame/c) any/c) any/c any/c) (-> any/c any/c) any/c any/c)
+      call*3
+      'pos
+      'neg)
+     call*2
+     call*1
+     call*0)
+   'negative)
   
   ;; NOT YET RELEASED
   #;
@@ -5205,10 +5474,15 @@ so that propagation occurs.
 
   (test-flat-contract '(not/c integer?) #t 1)
   (test-flat-contract '(=/c 2) 2 3)
+  (test-flat-contract '(>/c 5) 10 5)
   (test-flat-contract '(>=/c 5) 5 0)
   (test-flat-contract '(<=/c 5) 5 10)
   (test-flat-contract '(</c 5) 0 5)
-  (test-flat-contract '(>/c 5) 10 5)
+  (test-flat-contract '(=/c 2) 2 0+1i)
+  (test-flat-contract '(>/c 5) 10 0+1i)
+  (test-flat-contract '(>=/c 5) 5 0+1i)
+  (test-flat-contract '(<=/c 5) 5 0+1i)
+  (test-flat-contract '(</c 5) 0 0+1i)
   (test-flat-contract '(integer-in 0 10) 0 11)
   (test-flat-contract '(integer-in 0 10) 10 3/2)
   (test-flat-contract '(integer-in 0 10) 1 1.0)
@@ -5511,6 +5785,14 @@ so that propagation occurs.
   (test-name '(listof boolean?) (listof boolean?))
   (test-name '(listof (-> boolean? boolean?)) (listof (-> boolean? boolean?)))
   
+  (test-name '(non-empty-listof boolean?) (non-empty-listof boolean?))  
+  (test-name '(non-empty-listof any/c) (non-empty-listof any/c))
+  (test-name '(non-empty-listof boolean?) (non-empty-listof boolean?))
+  (test-name '(non-empty-listof any/c) (non-empty-listof any/c))
+  (test-name '(non-empty-listof boolean?) (non-empty-listof boolean?))
+  (test-name '(non-empty-listof (-> boolean? boolean?)) (non-empty-listof (-> boolean? boolean?)))
+
+  
   (test-name '(vectorof boolean?) (vectorof boolean?))
   (test-name '(vectorof any/c) (vectorof any/c))
   
@@ -5784,6 +6066,10 @@ so that propagation occurs.
   (ctest #t contract-first-order-passes? (listof integer?) (list 1))
   (ctest #f contract-first-order-passes? (listof integer?) #f)
 
+  (ctest #t contract-first-order-passes? (non-empty-listof integer?) (list 1))
+  (ctest #f contract-first-order-passes? (non-empty-listof integer?) (list))
+
+  
   (ctest #t contract-first-order-passes? (vector-immutableof integer?) (vector->immutable-vector (vector 1)))
   (ctest #f contract-first-order-passes? (vector-immutableof integer?) 'x)
   (ctest #f contract-first-order-passes? (vector-immutableof integer?) '())
@@ -6100,6 +6386,52 @@ so that propagation occurs.
                                  'pos
                                  'neg))
                      (f 10)))
+  
+  
+;                             
+;                             
+;                             
+;                             
+;                             
+;   ;;;;;;                    
+;        ;   ;                
+;        ;   ;                
+;        ;  ;;  ;;;;          
+;   ;;;;;;  ;  ;;;;;;         
+;        ;  ; ;;;             
+;        ;  ; ;;;             
+;        ; ;;  ;;;;;;         
+;   ;;;;;; ;    ;;;;          
+;
+;
+;
+;
+
+  (test/spec-passed
+   '∃1
+   '(contract (new-∃/c 'pair)
+              1
+              'pos
+              'neg))
+
+  (test/neg-blame
+   '∃2
+   '((contract (-> (new-∃/c 'pair) any/c)
+               (λ (x) x)
+               'pos
+               'neg)
+     1))
+  
+  (test/spec-passed/result
+   '∃3
+   '(let ([pair (new-∃/c 'pair)])
+      ((contract (-> (-> pair pair) any/c)
+                 (λ (f) (f 11))
+                 'pos
+                 'neg)
+       (λ (x) x)))
+   11)
+  
   
 ;                                                                
 ;                                                                
@@ -6631,6 +6963,104 @@ so that propagation occurs.
       (eval 'provide/contract29-res))
    (list #t 3))
 
+  ;; for this test I have to be able to track back thru the requirees to find the right 
+  ;; name for the negative blame (currently it blames m3, but it should  blame m2).
+  #;
+  (test/spec-failed
+   'provide/contract30
+   '(begin
+      (eval '(module provide/contract30-m1 scheme/base
+               (require scheme/contract)
+               (provide/contract [f (-> integer? integer?)])
+               (define (f x) x)))
+      (eval '(module provide/contract30-m2 scheme/base
+               (require 'provide/contract30-m1)
+               (provide f)))
+      (eval '(module provide/contract30-m3 scheme/base
+               (require 'provide/contract30-m2)
+               (f #f)))
+      (eval '(require 'provide/contract30-m3)))
+   "'provide/contract30-m2")
+  
+  (test/spec-passed/result
+   'provide/contract31
+   '(begin
+      (eval '(module provide/contract31-m1 scheme/base
+               (require scheme/contract)
+               (provide/contract
+                #:∃ x
+                [f (-> (-> x x) 10)])
+               (define (f g) (g 10))))
+
+      (eval '(module provide/contract31-m2 scheme/base
+               (require scheme/contract 'provide/contract31-m1)
+               (provide provide/contract31-x)
+               (define provide/contract31-x (f (λ (x) x)))))
+      
+      (eval '(require 'provide/contract31-m2))
+      (eval 'provide/contract31-x))
+   10)
+  
+  (test/spec-passed/result
+   'provide/contract32
+   '(begin
+      (eval '(module provide/contract32-m1 scheme/base
+               (require scheme/contract)
+               (provide/contract
+                #:exists x
+                [f (-> (-> x x) 10)])
+               (define (f g) (g 10))))
+
+      (eval '(module provide/contract32-m2 scheme/base
+               (require scheme/contract 'provide/contract32-m1)
+               (provide provide/contract32-x)
+               (define provide/contract32-x (f (λ (x) x)))))
+      
+      (eval '(require 'provide/contract32-m2))
+      (eval 'provide/contract32-x))
+   10)
+  
+  (test/spec-passed/result
+   'provide/contract33
+   '(begin
+      (eval '(module provide/contract33-m1 scheme/base
+               (require scheme/contract)
+               (provide/contract
+                #:exists (x)
+                [f (-> (-> x x) 10)])
+               (define (f g) (g 10))))
+
+      (eval '(module provide/contract33-m2 scheme/base
+               (require scheme/contract 'provide/contract33-m1)
+               (provide provide/contract33-x)
+               (define provide/contract33-x (f (λ (x) x)))))
+      
+      (eval '(require 'provide/contract33-m2))
+      (eval 'provide/contract33-x))
+   10)
+  
+  (test/spec-passed/result
+   'provide/contract34
+   '(begin
+      (eval '(module provide/contract34-m1 scheme/base
+               (require scheme/contract)
+               (define x integer?)
+               (define g 11)
+               (provide/contract
+                [g x]
+                #:exists (x)
+                [f (-> (-> x x) 10)])
+               (define (f g) (g 10))))
+
+      (eval '(module provide/contract34-m2 scheme/base
+               (require scheme/contract 'provide/contract34-m1)
+               (provide provide/contract34-x)
+               (define provide/contract34-x (f (λ (x) x)))))
+      
+      (eval '(require 'provide/contract34-m2))
+      (eval 'provide/contract34-x))
+   10)
+      
   (contract-error-test
    #'(begin
        (eval '(module pce1-bug scheme/base

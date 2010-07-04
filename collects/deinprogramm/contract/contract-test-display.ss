@@ -1,7 +1,7 @@
 #lang scheme/base
 
 ; DeinProgramm version of collects/test-engine/test-display.ss
-; synched with SVN rev 11385
+; synched with SVN rev 16065
 
 (provide contract-test-display%)
 
@@ -14,7 +14,8 @@
          (lib "test-engine/test-engine.scm")
 	 (lib "test-engine/print.ss")
 	 deinprogramm/contract/contract
-	 deinprogramm/contract/contract-test-engine)
+	 deinprogramm/contract/contract-test-engine
+	 deinprogramm/quickcheck/quickcheck)
 
 (define contract-test-display%
   (class* object% ()
@@ -229,13 +230,36 @@
 		 (formatter (expected-error-value fail))
 		 (expected-error-message fail))]
 	 [(message-error? fail)
-	  (for-each print-formatted (message-error-strings fail))])
+	  (for-each print-formatted (message-error-strings fail))]
+         [(not-mem? fail)
+          (print "Tatsächlicher Wert ~F ist keins der Elemente "
+                 (formatter (not-mem-test fail)))
+          (for-each (lambda (a) (print " ~F" (formatter a))) (not-mem-set fail))
+          (print ".")]
+         [(not-range? fail)
+          (print "Tatsächlicher Wert ~F liegt nicht zwischen ~F und ~F (inklusive)."
+                 (formatter (not-range-test fail))
+                 (formatter (not-range-min fail))
+                 (formatter (not-range-max fail)))]
+	 [(property-fail? fail)
+	  (print-string "Eigenschaft falsifizierbar mit")
+	  (for-each (lambda (arguments)
+		      (for-each (lambda (p)
+				  (if (car p)
+				      (print " ~a = ~F" (car p) (formatter (cdr p)))
+				      (print "~F" (formatter (cdr p)))))
+				arguments))
+		    (result-arguments-list (property-fail-result fail)))]
+	 [(property-error? fail)
+	  (print "`check-property' bekam den folgenden Fehler~n:: ~a"
+		 (property-error-message fail))])
 	(print-string "\n")))
 
     ;; make-error-link: text% check-fail exn src editor -> void
     (define (make-error-link text reason exn dest src-editor)
       (make-link text reason dest src-editor)
-      (let ((start (send text get-end-position)))
+      ;; the following code never worked
+      #;(let ((start (send text get-end-position)))
         (send text insert (string-constant test-engine-trace-error))
 	(send text insert " ")
         (when (and src-editor current-rep)

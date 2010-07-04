@@ -217,7 +217,14 @@
     (autocomplete-append-after
      autocomplete-limit
      get-completions/manuals
-     lookup-port-name))
+     lookup-port-name
+     
+     range?
+     range-start
+     range-end
+     range-caret-space? 
+     range-style 
+     range-color))
   
   (define-signature canvas-class^
     (basic<%>
@@ -287,7 +294,8 @@
      text-info-mixin
      pasteboard-info-mixin))
   (define-signature frame^ extends frame-class^
-    (reorder-menus
+    (current-icon
+     reorder-menus
      remove-empty-menus
      add-snip-menu-items
      setup-size-pref))

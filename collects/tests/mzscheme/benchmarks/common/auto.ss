@@ -12,7 +12,8 @@ exec mzscheme -qu "$0" ${1+"$@"}
            mzlib/inflate
            mzlib/date
            dynext/file
-           syntax/toplevel)
+           syntax/toplevel
+           scheme/runtime-path)
 
   ;; Implementaton-specific control functions ------------------------------
 
@@ -23,6 +24,7 @@ exec mzscheme -qu "$0" ${1+"$@"}
     (when (file-exists? (symbol->string bm))
       (delete-file (symbol->string bm)))
     (parameterize ([current-command-line-arguments (vector (symbol->string bm))])
+      (namespace-require 'scheme)
       (load script)))
 
   (define (clean-up-bin bm)
@@ -201,6 +203,13 @@ exec mzscheme -qu "$0" ${1+"$@"}
                 extract-mzscheme-times
                 clean-up-nothing
                 mutable-pair-progs)
+     (make-impl 'mzscheme3m
+                mk-mzscheme
+                (lambda (bm)
+                  (system (format "mzscheme3m -u ~a.ss" bm)))
+                extract-mzscheme-times
+                clean-up-nothing
+                mutable-pair-progs)
      (make-impl 'plt-r5rs
                 mk-plt-r5rs
                 (lambda (bm)
@@ -263,7 +272,7 @@ exec mzscheme -qu "$0" ${1+"$@"}
                 run-larceny
                 extract-larceny-times
                 clean-up-fasl
-                '(maze maze2))
+                '())
      (make-impl 'ikarus
                 mk-ikarus
                 run-ikarus
@@ -271,7 +280,7 @@ exec mzscheme -qu "$0" ${1+"$@"}
                 clean-up-nothing
                 '(fft))))
 
-  (define obsolte-impls '(mzscheme mzscheme-j mzschemecgc-tl mzc))
+  (define obsolte-impls '(mzscheme mzscheme-j mzschemecgc-tl mzc mz-old))
 
   (define benchmarks
     '(conform
@@ -309,6 +318,10 @@ exec mzscheme -qu "$0" ${1+"$@"}
       takr2
       triangle))
 
+  (define extra-benchmarks
+    '(kanren
+      psyntax))
+
   (define (run-benchmark impl bm)
     (let ([i (ormap (lambda (i)
                       (and (eq? impl (impl-name i))
@@ -341,21 +354,26 @@ exec mzscheme -qu "$0" ${1+"$@"}
                   actual-implementations-to-run 
                   num-iterations)
     (process-command-line benchmarks
+                          extra-benchmarks
                           (map impl-name impls) obsolte-impls
                           3))
+
+  (define-runtime-path bm-directory ".")
   
   ;; Benchmark-specific setup --------------------
 
-  (when (memq 'dynamic actual-benchmarks-to-run )
-    (unless (file-exists? "dynamic-input.txt")
-      (gunzip "dynamic-input.txt.gz")))
+  (parameterize ([current-directory bm-directory])
+    (when (memq 'dynamic actual-benchmarks-to-run)
+      (unless (file-exists? "dynamic-input.txt")
+        (gunzip "dynamic-input.txt.gz"))))
 
   ;; Run benchmarks -------------------------------
 
   (rprintf "; ~a\n" (date->string (seconds->date (current-seconds)) #t))
 
-  (for-each (lambda (impl)
-              (map (lambda (bm)
-                     (run-benchmark impl bm))
-                   actual-benchmarks-to-run))
-            actual-implementations-to-run))
+  (parameterize ([current-directory bm-directory])
+    (for-each (lambda (impl)
+                (map (lambda (bm)
+                       (run-benchmark impl bm))
+                     actual-benchmarks-to-run))
+              actual-implementations-to-run)))

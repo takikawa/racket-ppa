@@ -1,4 +1,4 @@
-(module rewrite-side-conditions scheme/base
+(module rewrite-side-conditions scheme
   (require (lib "list.ss")
            "underscore-allowed.ss")
   (require (for-template
@@ -42,14 +42,18 @@
          (with-syntax ([pat (loop (syntax pre-pat))])
            (let-values ([(names names/ellipses) (extract-names all-nts what bind-names? (syntax pat))])
              (with-syntax ([(name ...) names]
-                           [(name/ellipses ...) names/ellipses])
+                           [(name/ellipses ...) names/ellipses]
+                           [src-loc (parameterize ([print-syntax-width 0])
+                                      (format "~s" #'exp))])
                (syntax/loc term
                  (side-condition
                   pat
                   ,(lambda (bindings)
                      (term-let
                       ([name/ellipses (lookup-binding bindings 'name)] ...)
-                      exp)))))))]
+                      exp))
+                  ; For use in error messages.
+                  src-loc)))))]
         [(side-condition a ...) (expected-exact 'side-condition 2 term)]
         [side-condition (expected-arguments 'side-condition term)]
         [(variable-except a ...) #`(variable-except #,@(map loop (syntax->list (syntax (a ...)))))]
@@ -70,6 +74,20 @@
         [(cross a) #`(cross #,(loop #'a))]
         [(cross a ...) (expected-exact 'cross 1 term)]
         [cross (expected-arguments 'cross term)]
+        [_
+         (identifier? term)
+         (match (regexp-match #rx"^([^_]*)_.*" (symbol->string (syntax-e term)))
+           [(list _ (app string->symbol s))
+            (if (or (memq s (cons '... underscore-allowed))
+                    (memq s all-nts))
+                term
+                (raise-syntax-error
+                 what
+                 (format "before underscore must be either a non-terminal or a built-in pattern, found ~a in ~s"
+                         s (syntax-e term))
+                 orig-stx 
+                 term))]
+           [_ term])]
         [(terms ...)
          (map loop (syntax->list (syntax (terms ...))))]
         [else
@@ -101,7 +119,7 @@
                  (loop (syntax pat1)
                        (loop (syntax pat2) names depth)
                        depth)]
-                [(side-condition pat e)
+                [(side-condition pat . rest)
                  (loop (syntax pat) names depth)]
                 [(pat ...)
                  (let i-loop ([pats (syntax->list (syntax (pat ...)))]

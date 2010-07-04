@@ -1,11 +1,11 @@
 #lang scheme/unit
 
-(require (rename-in "../utils/utils.ss" [infer r:infer] [extend r:extend])
+(require (rename-in "../utils/utils.ss" [infer r:infer])
          "signatures.ss"
          "tc-metafunctions.ss"
          mzlib/trace
          scheme/list
-         stxclass/util syntax/stx
+         syntax/private/util syntax/stx
          (rename-in scheme/contract [-> -->] [->* -->*] [one-of/c -one-of/c])
          (except-in (rep type-rep) make-arr)
          (rename-in (types convenience utils union)
@@ -66,11 +66,10 @@
     (define (check-body)
       (with-lexical-env/extend 
        arg-list arg-types
-       (make lam-result (map list arg-list arg-types) null rest-ty drest 
-             (tc-exprs/check (syntax->list body) ret-ty))))
+       (make-lam-result (for/list ([al arg-list] [at arg-types] [a-ty arg-tys]) (list al at)) null rest-ty drest 
+                        (tc-exprs/check (syntax->list body) ret-ty))))
     (when (or (not (= arg-len tys-len))
-              (and rest (and (not rest-ty)
-                             (not drest))))
+              (and (or rest-ty drest) (not rest)))
       (tc-error/delayed (expected-str tys-len rest-ty drest arg-len rest)))
     (cond
       [(not rest)
@@ -221,12 +220,15 @@
     (match expected
       [(tc-result1: (Function: _)) (tc/mono-lambda/type formals bodies expected)]
       [(tc-result1: (or (Poly: _ _) (PolyDots: _ _)))
-       (tc/plambda form formals bodies expected)]))
+       (tc/plambda form formals bodies expected)]
+      [(tc-result1: (Error:)) (tc/mono-lambda/type formals bodies #f)]
+      [_ (int-err "expected not an appropriate tc-result: ~a" expected)]))
   (match expected
     [(tc-result1: (and t (Poly-names: ns expected*)))
      (let* ([tvars (let ([p (syntax-property form 'typechecker:plambda)])
                      (when (and (pair? p) (eq? '... (car (last p))))
-                       (tc-error "Expected a polymorphic function without ..., but given function had ..."))
+                       (tc-error 
+                        "Expected a polymorphic function without ..., but given function had ..."))
                      (or (and p (map syntax-e (syntax->list p)))
                          ns))]
             [literal-tvars tvars]
@@ -270,10 +272,11 @@
                      (tc/mono-lambda/type formals bodies #f))])
           ;(printf "plambda: ~a ~a ~a ~n" literal-tvars new-tvars ty)
           (make-Poly literal-tvars ty))])]
-    [_ 
-     (unless (check-below (tc/plambda form formals bodies #f) expected)
-       (tc-error/expr #:return expected "Expected a value of type ~a, but got a polymorphic function." expected))
-     expected]))
+    [(tc-result1: t) 
+     (unless (check-below (tc/plambda form formals bodies #f) t)
+       (tc-error/expr #:return expected
+                      "Expected a value of type ~a, but got a polymorphic function." t))
+     t]))
 
 ;; typecheck a sequence of case-lambda clauses, which is possibly polymorphic
 ;; tc/lambda/internal syntax syntax-list syntax-list option[type] -> tc-result

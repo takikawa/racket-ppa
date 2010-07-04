@@ -318,7 +318,7 @@ See also @scheme[module->language-info].}
 @section[#:tag "dynreq"]{Dynamic Module Access}
 
 @defproc[(dynamic-require [mod module-path?]
-                          [provided (or/c symbol? #f void?)]
+                          [provided (or/c symbol? #f 0 void?)]
                           [fail-thunk (-> any) (lambda () ....)])
          any]{
 
@@ -337,14 +337,20 @@ above the @tech{base phase}.
 
 When @scheme[provided] is a symbol, the value of the module's export
 with the given name is returned, and still the module is not
-@tech{visit}ed. If the module exports @scheme[provide] as syntax, then
-a use of the binding is expanded and evaluated in a fresh namespace to
-which the module is attached, which means that the module is
-@tech{visit}ed in the fresh namespace. If the module has no such
-exported variable or syntax, then @scheme[fail-thunk] is called; the
-default @scheme[fail-thunk] raises @scheme[exn:fail:contract]. If the
-variable named by @scheme[provided] is exported protected (see
-@secref["modprotect"]), then the @exnraise[exn:fail:contract].
+@tech{visit}ed or made @tech{available} in higher phases. If the
+module exports @scheme[provide] as syntax, then a use of the binding
+is expanded and evaluated in a fresh namespace to which the module is
+attached, which means that the module is @tech{visit}ed in the fresh
+namespace. If the module has no such exported variable or syntax, then
+@scheme[fail-thunk] is called; the default @scheme[fail-thunk] raises
+@scheme[exn:fail:contract]. If the variable named by @scheme[provided]
+is exported protected (see @secref["modprotect"]), then the
+@exnraise[exn:fail:contract].
+
+If @scheme[provided] is @scheme[0], then the module is
+@tech{instantiate}d but not @tech{visit}ed, the same as when
+@scheme[provided] is @scheme[#f]. With @scheme[0], however, the module
+is made @tech{available} in higher phases.
 
 If @scheme[provided] is @|void-const|, then the module is
 @tech{visit}ed but not @tech{instantiate}d (see @secref["mod-parse"]),
@@ -360,7 +366,8 @@ Like @scheme[dynamic-require], but in a @tech{phase} that is @math{1}
 more than the namespace's @tech{base phase}.}
 
 
-@defproc[(module->language-info [mod module-path?])
+@defproc[(module->language-info 
+          [mod (or/c module-path? path? resolved-module-path?)])
          (or/c #f (vector/c module-path? symbol? any/c))]{
 
 Returns information intended to reflect the ``language'' of the
@@ -369,3 +376,23 @@ necessarily @tech{instantiate}d or @tech{visit}ed) in the current
 namespace. The information is the same as would have been returned by
 @scheme[module-compiled-language-info] applied to the module's
 implementation as compiled code.}
+
+
+@defproc[(module->imports
+          [mod (or/c module-path? path? resolved-module-path?)])
+         (listof (cons/c (or/c exact-integer? #f) 
+                         (listof module-path-index?)))]{
+
+Like @scheme[module-compiled-imports], but produces the imports of
+@scheme[mod], which must be declared (but not necessarily
+@tech{instantiate}d or @tech{visit}ed) in the current namespace.}
+
+
+@defproc[(module->exports
+          [mod (or/c module-path? path? resolved-module-path?)])
+         (values (listof (cons/c (or/c exact-integer? #f) list?))
+                 (listof (cons/c (or/c exact-integer? #f) list?)))]{
+
+Like @scheme[module-compiled-exports], but produces the exports of
+@scheme[mod], which must be declared (but not necessarily
+@tech{instantiate}d or @tech{visit}ed) in the current namespace.}

@@ -80,10 +80,15 @@ by @scheme[kind], which must be one of the following:
 
   ]}
 
- @item{@indexed-scheme['addon-dir] --- a directory for installing PLT Scheme
- extensions. It's the same as @scheme['pref-dir], except under Mac OS
- X, where it is @filepath{Library/PLT Scheme} in the user's home
- directory. This directory might not exist.}
+ @item{@indexed-scheme['addon-dir] --- a directory for installing PLT
+ Scheme extensions. This directory is specified by the
+ @indexed-envvar{PLTADDONDIR} environment variable, and it can be
+ overridden by the @DFlag{addon} or @Flag{A} command-line flag.  If no
+ environment variable or flag is specified, or if the value is not a
+ legal path name, then this directory defaults to
+ @filepath{Library/PLT Scheme} in the user's home directory under Mac
+ OS X and @scheme['pref-dir] otherwise.  This directory might not
+ exist.}
 
  @item{@indexed-scheme['doc-dir] --- the standard directory for
  storing the current user's documents. Under Unix, it's the same as
@@ -284,6 +289,22 @@ Returns a list containing @indexed-scheme['read],
 given file or directory path. On error (e.g., if no such file exists),
 the @exnraise[exn:fail:filesystem]. Under @|AllUnix|, permissions are
 checked for the current effective user instead of the real user.}
+
+
+@defproc[(file-or-directory-identity [path path-string?]
+                                     [as-link? any/c #f]) 
+         exact-positive-integer?]{
+
+@index['("inode")]{Returns} a number that represents the identity of
+@scheme[path] in terms of the device and file or directory that it
+accesses. This function can be used to check whether two paths
+correspond to the same filesystem entity under the assumption that the
+path's entity selection does not change.
+
+If @scheme[as-link?] is a true value, then if @scheme[path] refers to
+a filesystem link, the identity of the link is returned instead of the
+identity of the referenced file or directory (if any).}
+
 
 @defproc[(file-size [path path-string?]) exact-nonnegative-integer?]{
 
@@ -577,17 +598,6 @@ Reads all characters from @scheme[path] and returns them as a
 @tech{byte string}.  The @scheme[mode-flag] argument is the same as
 for @scheme[open-input-file].}
 
-@defproc[(file->lines [path path-string?]
-                      [#:mode mode-flag (or/c 'binary 'text) 'binary]
-                      [#:line-mode line-mode (or/c 'linefeed 'return 'return-linefeed 'any 'any-one) 'any])
-         bytes?]{
-
-Read all characters from @scheme[path], breaking them into lines. The
-@scheme[line-mode] argument is the same as the second argument to
-@scheme[read-line], but the default is @scheme['any] instead of
-@scheme['linefeed]. The @scheme[mode-flag] argument is the same as for
-@scheme[open-input-file].}
-
 @defproc[(file->value [path path-string?]
                       [#:mode mode-flag (or/c 'binary 'text) 'binary])
          bytes?]{
@@ -596,10 +606,29 @@ Reads a single S-expression from @scheme[path] using @scheme[read].
 The @scheme[mode-flag] argument is the same as for
 @scheme[open-input-file].}
 
+@defproc[(file->list [path path-string?] 
+		     [proc (input-port? . -> . any/c) read]
+		     [#:mode mode-flag (or/c 'binary 'text) 'binary])
+		     (listof any/c)]{
+Repeatedly calls @scheme[proc] to consume the contents of
+@scheme[path], until @scheme[eof] is produced. The @scheme[mode-flag]
+argument is the same as for @scheme[open-input-file].  }
+
+@defproc[(file->lines [path path-string?]
+                      [#:mode mode-flag (or/c 'binary 'text) 'binary]
+                      [#:line-mode line-mode (or/c 'linefeed 'return 'return-linefeed 'any 'any-one) 'any])
+         (listof string?)]{
+
+Read all characters from @scheme[path], breaking them into lines. The
+@scheme[line-mode] argument is the same as the second argument to
+@scheme[read-line], but the default is @scheme['any] instead of
+@scheme['linefeed]. The @scheme[mode-flag] argument is the same as for
+@scheme[open-input-file].}
+
 @defproc[(file->bytes-lines [path path-string?]
                       [#:mode mode-flag (or/c 'binary 'text) 'binary]
                       [#:line-mode line-mode (or/c 'linefeed 'return 'return-linefeed 'any 'any-one) 'any])
-         bytes?]{
+         (listof bytes?)]{
 
 Like @scheme[file->lines], but reading bytes and collecting them into
 lines like @scheme[read-bytes-line].}
@@ -708,11 +737,10 @@ directory, returns a list such that
 ]}
 
 
-@defproc[(fold-files [proc (and/c (path? (or/c 'file 'dir 'link) any/c 
+@defproc[(fold-files [proc (or/c (path? (or/c 'file 'dir 'link) any/c 
                                    . -> . any/c)
-                                  (or/c procedure?
-                                        ((path? 'dir any/c) 
-                                         . -> . (values any/c any/c))))]
+                                 (path? (or/c 'file 'dir 'link) any/c 
+                                   . -> . (values any/c any/c)))]
                      [init-val any/c]
                      [start-path (or/c path-string? #f) #f]
                      [follow-links? any/c #t])
@@ -761,7 +789,9 @@ new accumulated result.  There is an exception for the case of a
 directory (when the second argument is @scheme['dir]): in this case
 the procedure may return two values, the second indicating whether the
 recursive scan should include the given directory or not.  If it
-returns a single value, the directory is scanned.
+returns a single value, the directory is scanned.  In the cases of 
+files or links (when the second argument is @scheme['file] or 
+@scheme['link]), a second value is permitted but ignored.
 
 If the @scheme[start-path] is provided but no such path exists, or if
 paths disappear during the scan, then an exception is raised.}

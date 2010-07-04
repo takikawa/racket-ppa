@@ -98,6 +98,7 @@
  (cs-view-docs-from "~a aus ~a")  ;; a completed version of the line above (cs-view-docs) is put into the first ~a and a list of modules (separated by commas) is put into the second ~a. Use check syntax and right-click on a documented variable (eg, 'require') to see this in use
   
  (cs-lexical-variable "lexikalische Variable")
+ (cs-set!d-variable "geset!zte Variable")
  (cs-imported-variable "importierte Variable")
 
  ;;; info bar at botttom of drscheme frame
@@ -131,6 +132,9 @@
  (needs-execute-defns-edited
   "WARNUNG: Die Definitionen haben sich geändert. \"Start\" drücken.")
 
+ (editor-changed-since-srcloc-recorded
+  "Dieser Editor wurde geändert seit die Quelltext-Stellen zugeordnet wurden: die markierte Region entspricht möglicherweise nicht mehr der korrekten Stelle im Quelltext.")
+
  (file-is-not-saved "Die Datei \"~a\" ist nicht gespeichert.")
  (save "Speichern")
  (close-anyway "Trotzdem schließen")
@@ -147,6 +151,7 @@
   ;; menu items connected to the logger -- also in a button in the planet status line in the drs frame
   (show-log "&Log anzeigen")
   (hide-log "&Log ausblenden")
+  (logging-all "Alle") ;; in the logging window in drscheme, shows all logs simultaneously
 
  ;; modes
  (mode-submenu-label "Modi")
@@ -406,7 +411,7 @@
  
   ;;; find/replace
  (search-next "Weiter")
- (search-next "Zurück")
+ (search-previous "Zurück")
  (search-match "Fundort")  ;;; this one and the next one are singular/plural variants of each other
  (search-matches "Fundorte") 
  (search-replace "Ersetzen")
@@ -598,6 +603,7 @@
 
  (user-defined-keybinding-error "Fehler beim Ausführen der Tastenbelegung ~a\n\n~a")
  (user-defined-keybinding-malformed-file "Die Datei ~a enthält kein Modul, das in der Sprache framework/keybinding-lang geschrieben ist.")  
+ (user-defined-keybinding-malformed-file/found-lang "Die Datei ~a enthält kein Modul, das in der Sprache framework/keybinding-lang geschrieben ist.  Stattdessen wurde Sprache ~s vorgefunden.")  
  (keybindings-planet-malformed-spec "Die PLaneT-Spezifikation ist fehlerhaft: ~a") ; the string will be what the user typed in
  (keybindings-type-planet-spec "Bitte PLaneT-require-Spezifikation eingeben (ohne das `require')")
   
@@ -761,10 +767,6 @@
  (execute-menu-item-label "Start")
  (execute-menu-item-help-string "Das Programm im Definitionsfenster neu starten")
 
- (break-menu-item-label "Stop")
- (break-menu-item-help-string "Momentane Auswertung unterbrechen")
- (kill-menu-item-label "Abbrechen")
- (kill-menu-item-help-string "Momentante Auswertung abbrechen")
  (ask-quit-menu-item-label "Programm bitten aufzuhören")
  (ask-quit-menu-item-help-string "Benutzt break-thread, um den primären Thread der Auswertung zu stoppen")
  (force-quit-menu-item-label "Programm zwingen aufzuhören")
@@ -780,8 +782,8 @@
  (clear-error-highlight-item-help-string "Entfernt die rosa Fehlermarkierung")
  (reindent-menu-item-label "&Einrücken")
  (reindent-all-menu-item-label "&Alles einrücken")
- (semicolon-comment-out-menu-item-label "Mit Semikolon auskommentieren")
- (box-comment-out-menu-item-label "Mit Kommentar-Kasten auskommentieren")
+ (semicolon-comment-out-menu-item-label "Mit &Semikolon auskommentieren")
+ (box-comment-out-menu-item-label "Mit &Kommentar-Kasten auskommentieren")
  (uncomment-menu-item-label "Einkommentieren")
 
  (convert-to-semicolon-comment "In Semikolon-Kommentar umwandeln")
@@ -909,7 +911,10 @@
  (enforce-primitives-group-box-label "Initiale Bindungen")
  (enforce-primitives-check-box-label "Änderungen von initialen Bindungen verbieten")
 
- (automatically-compile? "Quelldateien automatisch compilieren?")
+ (automatically-compile "compiled/-Verzeichnisse bestücken (für schnelleres laden)")
+ (preserve-stacktrace-information "Stack-Trace aufbewahren (einige JIT-Optimierungen werden abgeschaltet)")
+ (expression-level-stacktrace "Stack-Trace mit Ausdrücken")
+ (function-level-stacktrace "Stack-Trace mit Funktionen")
 
  ;; used in the bottom left of the drscheme frame as the label
  ;; above the programming language's name
@@ -946,7 +951,7 @@
  (initial-language-category "Sprache am Anfang")
  (no-language-chosen "Keine Sprache ausgewählt")
 
- (module-language-one-line-summary "Start erzeugt eine REPL im Kontext des Moduls inklusive der deklarierten Sprache des Moduls.")
+ (module-language-one-line-summary "List die #lang-Zeile, um die tatsächliche Sprache zu ermitteln.")
   
  (module-language-auto-text "Automatisch Zeile mit #lang") ;; shows up in the details section of the module language
 
@@ -1090,6 +1095,7 @@
  (module-browser-name-short "Kurz")
  (module-browser-name-medium "Mittel")
  (module-browser-name-long "Lang")
+ (module-browser-name-very-long "Lang mit Phasen")  ;; like 'Long' but shows the phases where this file is loaded
  (module-browser-open-all "Alle hier angezeigten Datein öffnen")
 
  (happy-birthday-matthias "Happy Birthday, Matthias!")
@@ -1147,13 +1153,19 @@
  (stepper-language-level-message
   "Der Stepper unterstützt die Sprachebene \"~a\" nicht.")
  (stepper-button-label "Stepper")
- (stepper-home "Anfang")
+
  (stepper-previous-application "|< Applikation")
  (stepper-previous "< Schritt")
  (stepper-next "Schritt >")
  (stepper-next-application "Applikation >|")
- (stepper-jump-to-end "Ende")
- (stepper-jump "Springen zu ...")
+ (stepper-jump "Springen ...")
+ (stepper-out-of-steps "Ende der Auswertung erreicht, bevor ein angemessener Schritt gefunden werden konnte.")
+ (stepper-no-such-step/title "Kein Schritt gefunden.")
+ (stepper-no-such-step "Kein Schritt gefunden, der das Kriterium erfüllt.")
+ (stepper-no-such-step/earlier "Kein früherer Schritt gefunden, der das Kriterium erfüllt.")
+ (stepper-jump-to-beginning "an den Anfang") ;; name changed from stepper-home to stepper-jump-to-beginning
+ (stepper-jump-to-end "ans Ende") ;; content changed
+ (stepper-jump-to-selected "an den Anfang des markierten Ausdrucks") ;; new
  
  (debug-tool-button-name "Debugger")
 
@@ -1290,8 +1302,6 @@
   (test-engine-must-be-tested "Dieses Programm muss noch getestet werden!")
   (test-engine-is-unchecked "Dieses Programm hat keine Checks!")
   (test-engine-tests-disabled "Tests deaktiviert.")
-  (test-engine-zero-tests-passed "Keine Tests waren erfolgreich!")
-  (test-engine-the-only-test-passed "Der einzige Test war erfolgreich.")
   (test-engine-both-tests-passed "Beide Tests waren erfolgreich.")
   ; ~a is replaced by count
   (test-engine-all-tests-passed "Alle ~a Tests waren erfolgreich!")

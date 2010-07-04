@@ -18,41 +18,34 @@
   (and (>= attempt preferred-production-threshold)
        (zero? (random 2))))
 
-;; unique-chars : (listof string) -> (listof char)
-(define (unique-chars strings)
-  (let ([uniq (make-hasheq)])
-    (for ([lit strings])
-         (for ([char lit])
-              (hash-set! uniq char #t)))
-    (hash-map uniq (λ (k v) k))))
-
 (define default-check-attempts 1000)
 
-(define ascii-chars-threshold 50)
-(define tex-chars-threshold 500)
-(define chinese-chars-threshold 2000)
+(define ascii-chars-threshold 1000)
+(define tex-chars-threshold 1500)
+(define chinese-chars-threshold 2500)
 
-(define (pick-var lang-chars lang-lits attempt [random random])
+(define (pick-var lang-lits attempt [random random])
   (let ([length (add1 (random-natural 4/5 random))])
-    (string->symbol (random-string lang-chars lang-lits length attempt random))))
+    (string->symbol (random-string lang-lits length attempt random))))
 
-(define (pick-char attempt lang-chars [random random])
-  (if (and (not (null? lang-chars)) 
-           (or (< attempt ascii-chars-threshold)
-               (not (exotic-choice? random))))
-      (pick-from-list lang-chars random)
-      (if (or (< attempt tex-chars-threshold) (not (exotic-choice? random)))
-          (let ([i (random (- #x7E #x20 1))]
-                [_ (- (char->integer #\_) #x20)])
-            (integer->char (+ #x20 (if (= i _) (add1 i) i))))
-          (if (or (< attempt chinese-chars-threshold) (not (exotic-choice? random)))
-              (car (string->list (pick-from-list (map cadr tex-shortcut-table) random)))
-              (integer->char (+ #x4E00 (random (- #x9FCF #x4E00))))))))
+(define (pick-char attempt [random random])
+  (cond [(or (< attempt ascii-chars-threshold) (not (exotic-choice? random)))
+         (let ([i (random (add1 (- (char->integer #\z) (char->integer #\a))))]
+               [cap? (zero? (random 2))])
+           (integer->char (+ i (char->integer (if cap? #\A #\a)))))]
+        [(or (< attempt tex-chars-threshold) (not (exotic-choice? random)))
+         (let ([i (random (- #x7E #x20 1))]
+               [_ (- (char->integer #\_) #x20)])
+           (integer->char (+ #x20 (if (= i _) (add1 i) i))))]
+        [(or (< attempt chinese-chars-threshold) (not (exotic-choice? random)))
+         (car (string->list (pick-from-list (map cadr tex-shortcut-table) random)))]
+        [else
+         (integer->char (+ #x4E00 (random (- #x9FCF #x4E00))))]))
 
-(define (random-string lang-chars lang-lits length attempt [random random])
+(define (random-string lang-lits length attempt [random random])
   (if (and (not (null? lang-lits)) (use-lang-literal? random))
       (pick-from-list lang-lits random)
-      (list->string (build-list length (λ (_) (pick-char attempt lang-chars random))))))
+      (list->string (build-list length (λ (_) (pick-char attempt random))))))
 
 (define (pick-any lang sexp [random random]) 
   (let ([c-lang (rg-lang-clang lang)]
@@ -61,8 +54,8 @@
         (values lang (pick-from-list (map nt-name (compiled-lang-lang c-lang)) random))
         (values sexp (nt-name (car (compiled-lang-lang c-sexp)))))))
 
-(define (pick-string lang-chars lang-lits attempt [random random])
-  (random-string lang-chars lang-lits (random-natural 1/5 random) attempt random))
+(define (pick-string lang-lits attempt [random random])
+  (random-string lang-lits (random-natural 1/5 random) attempt random))
 
 (define (pick-nt name cross? lang attempt pref-prods 
                  [random random]
@@ -172,11 +165,17 @@
          [min-size (apply min/f sizes)])
     (map cadr (filter (λ (x) (equal? min-size (car x))) (zip sizes (nt-rhs nt))))))
 
-(define-struct rg-lang (clang lits chars base-cases))
+(define-struct rg-lang (clang lits base-cases))
 (define (prepare-lang lang)
   (let ([lits (map symbol->string (compiled-lang-literals lang))]
         [parsed (parse-language lang)])
-    (make-rg-lang parsed lits (unique-chars lits) (find-base-cases parsed))))
+    (make-rg-lang parsed lits (find-base-cases parsed))))
+
+(define-struct (exn:fail:redex:generation-failure exn:fail:redex) ())
+(define (raise-gen-fail who what attempts)
+  (let ([str (format "~a: unable to generate ~a in ~a attempt~a" 
+                     who what attempts (if (= attempts 1) "" "s"))])
+    (raise (make-exn:fail:redex:generation-failure str (current-continuation-marks)))))
 
 (define (generate lang decisions@ user-gen retries what)
   (define-values/invoke-unit decisions@
@@ -238,10 +237,7 @@
                   [size init-sz]
                   [attempt init-att])
         (if (zero? remaining)
-            (redex-error what "unable to generate pattern ~s in ~a attempt~a" 
-                         name 
-                         retries
-                         (if (= retries 1) "" "s"))
+            (raise-gen-fail what (format "pattern ~a" name) retries)
             (let-values ([(term env) (gen size attempt)])
               (if (pred term env)
                   (values term env)
@@ -309,8 +305,7 @@
                         (λ (var _) (not (memq var vars)))
                         size attempt)]
         [`variable 
-         (values ((next-variable-decision)
-                  (rg-lang-chars lang) (rg-lang-lits lang) attempt)
+         (values ((next-variable-decision) (rg-lang-lits lang) attempt)
                  env)]
         [`variable-not-otherwise-mentioned
          (generate/pred 'variable
@@ -323,10 +318,10 @@
          (let-values ([(term env) (recur/pat 'variable)])
            (values (symbol-append prefix term) env))]
         [`string 
-         (values ((next-string-decision) (rg-lang-chars lang) (rg-lang-lits lang) attempt)
+         (values ((next-string-decision) (rg-lang-lits lang) attempt)
                  env)]
-        [`(side-condition ,pat ,(? procedure? condition))
-         (generate/pred (unparse-pattern pat) 
+        [`(side-condition ,pat ,(? procedure? condition) ,guard-src-loc)
+         (generate/pred `(side-condition ,(unparse-pattern pat) ,guard-src-loc) 
                         (recur/pat/size-attempt pat)
                         (λ (_ env) (condition (bindings env)))
                         size attempt)]
@@ -583,6 +578,9 @@
       [(and (? (λ (_) (not (eq? mode 'cross)))) `(cross ,(and (? (is-nt? lang)) nt)))
        (let ([nt-str (symbol->string nt)])
          (values `(cross ,(string->symbol (string-append nt-str "-" nt-str))) vars))]
+      [`(side-condition ,pat ,guard ,guard-src-loc)
+       (let-values ([(parsed vars) (recur pat vars)])
+         (values `(side-condition ,parsed ,guard ,guard-src-loc) vars))]
       [(cons first rest)
        (let-values ([(first-parsed vars) (recur first vars)])
          (let-values ([(rest-parsed vars) (recur rest vars)])
@@ -675,11 +673,13 @@
     (if m m (raise-syntax-error #f "not a metafunction" stx name))))
 
 (define (assert-nat name x)
-  (unless (and (integer? x) (>= x 0))
-    (raise-type-error name "natural number" x)))
+  (if (and (integer? x) (>= x 0))
+      x
+      (raise-type-error name "natural number" x)))
 (define (assert-rel name x)
-  (unless (reduction-relation? x)
-    (raise-type-error 'redex-check "reduction-relation" x)))
+  (if (reduction-relation? x)
+      x
+      (raise-type-error 'redex-check "reduction-relation" x)))
 
 (define (defer-all pat size in-hole acc env att recur defer) 
   (defer acc))
@@ -750,8 +750,8 @@
                                     (term-let ([name/ellipses (lookup-binding bindings 'name)] ...)
                                               property)))])
            (quasisyntax/loc stx
-             (let ([att #,attempts-stx]
-                   [ret #,retries-stx]
+             (let ([att (assert-nat 'redex-check #,attempts-stx)]
+                   [ret (assert-nat 'redex-check #,retries-stx)]
                    [custom (contract 
                             (-> any/c natural-number/c any/c any/c hash? natural-number/c
                                 (->* (any/c)
@@ -763,32 +763,21 @@
                                 (-> any/c (values any/c hash?))
                                 (values any/c hash?))
                             #,custom-stx '+ '-)])
-               (assert-nat 'redex-check att)
-               (assert-nat 'redex-check ret)
                (unsyntax
                 (if source-stx
-                    #`(let-values
-                          ([(pats srcs src-lang)
-                            #,(cond [(and (identifier? source-stx) (metafunc source-stx))
-                                     => 
-                                     (λ (m) #`(values (metafunc-proc-lhs-pats #,m)
-                                                      (metafunc-srcs #,m)
-                                                      (metafunc-proc-lang #,m)))]
-                                    [else
-                                     #`(let ([r #,source-stx])
-                                         (assert-rel 'redex-check r)
-                                         (values
-                                          (map (λ (x) ((rewrite-proc-lhs x) lang)) (reduction-relation-make-procs r))
-                                          (reduction-relation-srcs r)
-                                          (reduction-relation-lang r)))])])
-                        (check-prop-srcs
+                    #`(let-values ([(metafunc/red-rel num-cases) 
+                                    #,(cond [(and (identifier? source-stx) (metafunc source-stx))
+                                             => (λ (x) #`(values #,x (length (metafunc-proc-cases #,x))))]
+                                            [else
+                                             #`(let ([r (assert-rel 'redex-check #,source-stx)])
+                                                 (values r (length (reduction-relation-make-procs r))))])])
+                        (check-lhs-pats
                          lang
-                         pats
-                         srcs
+                         metafunc/red-rel
                          property
                          random-decisions@
                          custom
-                         (max 1 (floor (/ att (length pats))))
+                         (max 1 (floor (/ att num-cases)))
                          ret
                          'redex-check
                          show
@@ -853,8 +842,7 @@
         (let ([lang (metafunc-proc-lang m)]
               [dom (metafunc-proc-dom-pat m)]
               [decisions@ (generation-decisions)]
-              [att attempts])
-          (assert-nat 'check-metafunction-contract att)
+              [att (assert-nat 'check-metafunction-contract attempts)])
           (check-prop 
            ((generate lang decisions@ custom retries 'check-metafunction-contract)
             (if dom dom '(any (... ...))))
@@ -864,26 +852,33 @@
            att
            show))))]))
 
-(define (check-prop-srcs lang pats srcs prop decisions@ custom attempts retries what show
+(define (check-lhs-pats lang mf/rr prop decisions@ custom attempts retries what show
                          [match #f]
                          [match-fail #f])
   (let ([lang-gen (generate lang decisions@ custom retries what)])
-    (when (for/and ([pat pats] [src srcs])
-            (check
-             (lang-gen pat)
-             prop
-             attempts
-             show
-             #:source src
-             #:match match
-             #:match-fail match-fail))
-      (show
-       (format "no counterexamples in ~a (with each clause)\n"
-               (format-attempts attempts))))))
-
-(define (metafunc-srcs m)
-  (build-list (length (metafunc-proc-lhs-pats m))
-              (compose (curry format "clause #~s") add1)))
+    (let-values ([(pats srcs)
+                  (cond [(metafunc-proc? mf/rr)
+                         (values (map metafunc-case-lhs-pat (metafunc-proc-cases mf/rr))
+                                 (metafunction-srcs mf/rr))]
+                        [(reduction-relation? mf/rr)
+                         (values (map (λ (rwp) ((rewrite-proc-lhs rwp) lang)) (reduction-relation-make-procs mf/rr))
+                                 (reduction-relation-srcs mf/rr))])])
+      (when (for/and ([pat pats] [src srcs])
+              (with-handlers ([exn:fail:redex:generation-failure?
+                               ; Produce an error message that blames the LHS as a whole.
+                               (λ (_)
+                                 (raise-gen-fail what (format "LHS of ~a" src) retries))])
+                (check
+                 (lang-gen pat)
+                 prop
+                 attempts
+                 show
+                 #:source src
+                 #:match match
+                 #:match-fail match-fail)))
+        (show
+         (format "no counterexamples in ~a (with each clause)\n"
+                 (format-attempts attempts)))))))
 
 (define-syntax (check-metafunction stx)
   (syntax-case stx ()
@@ -897,13 +892,11 @@
                                    stx)]
                    [show (show-message stx)])
        (syntax/loc stx
-         (let ([att attempts]
-               [ret retries])
-           (assert-nat 'check-metafunction att)
-           (check-prop-srcs 
+         (let ([att (assert-nat 'check-metafunction attempts)]
+               [ret (assert-nat 'check-metafunction retries)])
+           (check-lhs-pats 
             (metafunc-proc-lang m)
-            (metafunc-proc-lhs-pats m)
-            (metafunc-srcs m)
+            m
             (λ (term _) (property term))
             (generation-decisions)
             custom
@@ -913,8 +906,13 @@
             show))))]))
 
 (define (reduction-relation-srcs r)
-  (map (λ (proc) (or (rewrite-proc-name proc) 'unnamed))
+  (map (λ (proc) (or (rewrite-proc-name proc)
+                     (format "clause at ~a" (rewrite-proc-lhs-src proc))))
        (reduction-relation-make-procs r)))
+
+(define (metafunction-srcs m)
+  (map (compose (curry format "clause at ~a") metafunc-case-src-loc)
+       (metafunc-proc-cases m)))
 
 (define-syntax (check-reduction-relation stx)
   (syntax-case stx ()
@@ -929,15 +927,11 @@
                    [show (show-message stx)])
        (syntax/loc stx
          (let ([att attempts]
-               [ret retries]
-               [rel relation])
-           (assert-nat 'check-reduction-relation att)
-           (assert-rel 'check-reduction-relation rel)
-           (check-prop-srcs
+               [ret (assert-nat 'check-reduction-relation retries)]
+               [rel (assert-rel 'check-reduction-relation relation)])
+           (check-lhs-pats
             (reduction-relation-lang rel)
-            (map (λ (x) ((rewrite-proc-lhs x) (reduction-relation-lang rel)))
-                 (reduction-relation-make-procs rel))
-            (reduction-relation-srcs rel)
+            rel
             (λ (term _) (property term))
             decisions@
             custom
@@ -977,7 +971,8 @@
          generate-term
          check-metafunction-contract
          check-reduction-relation
-         check-metafunction)
+         check-metafunction
+         exn:fail:redex:generation-failure?)
 
 (provide (struct-out ellipsis) 
          (struct-out mismatch)
@@ -998,5 +993,5 @@
          proportion-before-threshold post-threshold-incr
          is-nt? nt-by-name min-prods
          generation-decisions decisions^ 
-         random-string unique-chars
+         random-string
          sexp find-base-cases)

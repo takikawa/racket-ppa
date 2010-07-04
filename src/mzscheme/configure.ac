@@ -39,9 +39,12 @@ AC_ARG_ENABLE(lt,      [  --enable-lt=<prog>      use <prog> instead of bundled 
 
 AC_ARG_ENABLE(origtree,[  --enable-origtree       install with original directory structure])
 
+AC_ARG_ENABLE(jit,     [  --enable-jit            compile JIT support (enabled by default)], , enable_jit=yes)
+
 AC_ARG_ENABLE(foreign, [  --enable-foreign        compile foreign support (enabled by default)], , enable_foreign=yes)
 
 AC_ARG_ENABLE(places,  [  --enable-places         compile places support])
+AC_ARG_ENABLE(futures, [  --enable-futures        compile futures support])
 
 AC_ARG_ENABLE(cgcdefault, [  --enable-cgcdefault     use CGC (Boehm or Senora) as default build])
 AC_ARG_ENABLE(sgc,     [  --enable-sgc            use Senora GC instead of the Boehm GC])
@@ -74,6 +77,7 @@ AC_ARG_ENABLE(xonx,    [  --enable-xonx           compile X11 (not Quartz) MrEd 
 AC_ARG_ENABLE(libfw,   [  --enable-libfw          install Mac OS X frameworks to /Library/Frameworks])
 AC_ARG_ENABLE(libfw,   [  --enable-userfw         install Mac OS X frameworks to ~/Library/Frameworks])
 AC_ARG_ENABLE(macprefix, [  --enable-macprefix      allow --prefix with a Mac OS X install])
+AC_ARG_ENABLE(mac64,   [  --enable-mac64          do not force 32-bit build])
 
 
 ###### Get OS Type #######
@@ -286,7 +290,12 @@ if test "$LIBTOOLPROG" != "" ; then
 fi
 show_explicitly_enabled "${enable_orig}" "Original install tree"
 
+show_explicitly_disabled "${enable_jit}" JIT
+
 show_explicitly_disabled "${enable_foreign}" Foreign
+
+show_explicitly_enabled "${enable_places}" Places
+show_explicitly_enabled "${enable_futures}" Futures
 
 show_explicitly_enabled "${enable_sgc}" SGC
 show_explicitly_enabled "${enable_sgcdebug}" "SGC debug mode"
@@ -307,6 +316,8 @@ show_explicitly_enabled "${enable_gprof}" "gprof"
 show_explicitly_enabled "${enable_gcov}" "gcov"
 
 show_explicitly_enabled "${enable_noopt}" "No-optimization"
+
+show_explicitly_enabled "${enable_mac64}" "64-bit Mac OS X"
 
 show_explicitly_enabled "${enable_libfw}" "Frameworks-to-system"
 show_explicitly_enabled "${enable_userfw}" "Frameworks-to-user"
@@ -344,6 +355,7 @@ PNG_A='$(PNG_A)'
 
 PREFLAGS="$CPPFLAGS"
 PLACE_CGC_FLAGS=""
+LIBATOM="LIBATOM_NONE"
 
 ar_libtool_no_undefined=""
 LIBMZSCHEME_DEP=""
@@ -409,6 +421,12 @@ fi
 ###### Autoconfigure #######
 
 COMPFLAGS=""
+
+ORIG_CC="${CC}"
+ORIG_CPP="${CPP}"
+ORIG_CXX="${CXX}"
+ORIG_CXXCPP="${CXXCPP}"
+SUB_CONFIGURE_EXTRAS=""
 
 if test "${enable_oskit}" = "no" ; then
   AC_PROG_CC
@@ -495,6 +513,7 @@ else
   WBUILD="sh \$(PLTSRCDIR)/wxxt/src/XWidgets/dummy.wbuild"
 fi
 
+ORIG_CC_FOR_BUILD="${CC_FOR_BUILD}"
 if test "$CC_FOR_BUILD" = "" ; then 
   CC_FOR_BUILD="$CC"
 fi
@@ -510,6 +529,7 @@ EXTRA_GMP_OBJ=
 # For MzScheme targets:
 OSX=".osx"
 NOT_OSX=""
+CGC_X86_64=""
 
 case $OS in
   SunOS)
@@ -529,7 +549,7 @@ case $OS in
     EXTRALIBS="-Wl,-brtl,-bE:\$(srcdir)/../mzscheme/include/mzscheme.exp"
     ;;
   FreeBSD)
-    LIBS="$LIBS -rdynamic"
+    LIBS="$LIBS -rdynamic -pthread"
     DYN_CFLAGS="-fPIC"
     ;;
   OpenBSD)
@@ -555,6 +575,7 @@ case $OS in
     case `$UNAME -m` in
       #Required for CentOS 4.6
       x86_64)
+       CGC_X86_64="1"
        if test -d /usr/X11R6/lib64 ; then
          X_LIBS="$X_LIBS -L/usr/X11R6/lib64"
        fi
@@ -651,6 +672,31 @@ case $OS in
         fi
       else
         MROPTIONS="$MROPTIONS -no-cpp-precomp"
+      fi
+    fi
+
+    # Force 32-bit build, for now
+    if test "${enable_mac64}" != "yes" ; then
+      if test `${UNAME} -m` = "i386" ; then
+        if test "${ORIG_CC}" = "" ; then
+           CC="${CC} -m32"
+           SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CC="'"'"${CC}"'"'
+        fi
+        if test "${ORIG_CPP}" = "" ; then
+           CPP="${CPP} -m32"
+           SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CPP="'"'"${CPP}"'"'
+        fi
+        if test "${ORIG_CXX}" = "" ; then
+           CXX="${CXX} -m32"
+           SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CXX="'"'"${CXX}"'"'
+        fi
+        if test "${ORIG_CXXCPP}" = "" ; then
+           CXXCPP="${CXXCPP} -m32"
+           SUB_CONFIGURE_EXTRAS="${SUB_CONFIGURE_EXTRAS} CPPCXX="'"'"${CPPCXX}"'"'
+        fi
+        if test "${ORIG_CC_FOR_BUILD}" = "" ; then
+           CC_FOR_BUILD="${CC_FOR_BUILD} -m32"
+        fi
       fi
     fi
 
@@ -865,6 +911,12 @@ if test "${enable_memtrace}" = "yes" ; then
   GC2OPTIONS="$GC2OPTIONS -DNEWGC_MEMORY_TRACE"
 fi
 
+LFS_CFLAGS=`getconf LFS_CFLAGS 2> /dev/null`
+if test "${LFS_CFLAGS}" != "" ; then
+  echo "Large-file support: ${LFS_CFLAGS}"
+  MZOPTIONS="${MZOPTIONS} ${LFS_CFLAGS}"  
+fi
+
 ###### Get data sizes, stack direction, and endianness #######
 
 AC_CHECK_SIZEOF(char)
@@ -1031,6 +1083,12 @@ if test "${enable_noopt}" = "yes" ; then
   CXXFLAGS=`echo "$CXXFLAGS" | awk "$AWKPRG"`
 fi
 
+################### JIT ####################
+
+if test "${enable_jit}" = "no" ; then
+   PREFLAGS="${PREFLAGS} -DMZ_DONT_USE_JIT"
+fi
+
 ################ X OpenGL ##################
 
 if test "${enable_gl}" = "" ; then
@@ -1077,15 +1135,22 @@ fi
 if test "${enable_pthread}" = "yes" ; then
   PREFLAGS="$PREFLAGS -D_THREAD_SAFE"
   X_EXTRA_LIBS="$X_EXTRA_LIBS -pthread"
-  MZOPTIONS="$MZOPTIONS -DASSUME_FIXED_STACK_SIZE -DFIXED_STACK_SIZE=1048576 -DDONT_ITIMER"
-  GC2OPTIONS="$GC2OPTIONS -DNO_GC_SIGNALS"
+  MZOPTIONS="$MZOPTIONS -DUSE_PTHREAD_INSTEAD_OF_ITIMER"
 fi
 
 ############### places ###################
 
 if test "${enable_places}" = "yes" ; then
   PREFLAGS="$PREFLAGS -DMZ_USE_PLACES"
-  PLACE_CGC_FLAGS="$GC_THREADS_FLAG -DPARALLEL_MARK -DTHREAD_LOCAL_ALLOC"
+  PLACE_CGC_FLAGS="$GC_THREADS_FLAG -DTHREAD_LOCAL_ALLOC"
+  LDFLAGS="$LDFLAGS -pthread"
+  LIBATOM="LIBATOM_USE"
+fi
+
+############### futures ###################
+
+if test "${enable_futures}" = "yes" ; then
+  PREFLAGS="$PREFLAGS -DFUTURES_ENABLED -DUSE_PTHREAD_INSTEAD_OF_ITIMER"
   LDFLAGS="$LDFLAGS -pthread"
 fi
 
@@ -1368,6 +1433,7 @@ AC_SUBST(FRAMEWORK_PREFIX)
 AC_SUBST(INSTALL_ORIG_TREE)
 AC_SUBST(EXE_SUFFIX)
 AC_SUBST(PLACE_CGC_FLAGS)
+AC_SUBST(LIBATOM)
 
 AC_SUBST(MREDLINKER)
 AC_SUBST(LIBSFX)
@@ -1439,6 +1505,11 @@ if test "${enable_shared}" = "yes" ; then
   ac_configure_args="$ac_configure_args --enable-shared"
 fi
 
+if test "${LIBATOM}" = "LIBATOM_USE" ; then
+  AC_CONFIG_AUX_DIR( mzscheme/gc/libatomic_ops )
+  AC_CONFIG_SUBDIRS( mzscheme/gc/libatomic_ops )
+fi
+
 FOREIGNTARGET=
 FOREIGN_IF_USED="FOREIGN_NOT_USED"
 if test -d "${srcdir}/foreign" && test "${enable_foreign}" = "yes" ; then
@@ -1455,6 +1526,7 @@ else
   FOREIGNTARGET="foreign-nothing"
   MZOPTIONS="$MZOPTIONS -DDONT_USE_FOREIGN"
 fi
+ac_configure_args="$ac_configure_args$SUB_CONFIGURE_EXTRAS"
 
 if test "${enable_mred}" = "yes" ; then
   if test "${enable_quartz}" = "yes" ; then

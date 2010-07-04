@@ -55,6 +55,8 @@
            check-expect
            check-within
            check-error
+           check-member-of
+           check-range
 	   #%datum
            #%top-interaction
 	   empty true false)
@@ -64,6 +66,6 @@
    procedures
 
    (all-from-except intermediate: lang/htdp-intermediate-lambda procedures
-		    cons list* append)
+		    cons list* append random)
    (all-from advanced: lang/private/advanced-funs procedures))
   )

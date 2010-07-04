@@ -9,8 +9,8 @@
          scheme/match         
          scheme/promise
          (prefix-in c: scheme/contract)
-         (for-syntax scheme/base stxclass)
-	 (for-template scheme/base scheme/contract scheme/tcp))
+         (for-syntax scheme/base syntax/parse)
+	 (for-template scheme/base scheme/contract scheme/promise scheme/tcp))
 
 (provide (all-defined-out)
          (rename-out [make-Listof -lst]))
@@ -20,6 +20,7 @@
 
 (define -App make-App)
 (define -pair make-Pair)
+(define -mpair make-MPair)
 (define -val make-Value)
 (define -Param make-Param)
 (define -box make-Box)
@@ -49,6 +50,18 @@
                        [else #f])]
     [_ #f]))
 
+(define-match-expander Listof:
+  (lambda (stx)
+    (syntax-parse stx
+      [(_ elem-pat)
+       #'(Mu: var (Union: (list (Value: '()) (Pair: elem-pat (F: var)))))])))
+
+(define-match-expander List:
+  (lambda (stx)
+    (syntax-parse stx
+      [(_ elem-pats)
+       #'(app untuple (? values elem-pats))])))
+
 
 (d/c (-result t [f -no-lfilter] [o -no-lobj])
   (c:->* (Type/c) (LFilterSet? LatentObject?) Result?)
@@ -67,9 +80,6 @@
 
 (define -Listof (-poly (list-elem) (make-Listof list-elem)))
 
-
-(define -Number (make-Base 'Number #'number?))
-(define -Integer (make-Base 'Integer #'exact-integer?))
 (define -Boolean (make-Base 'Boolean #'boolean?))
 (define -Symbol (make-Base 'Symbol #'symbol?))
 (define -Void (make-Base 'Void #'void?))
@@ -96,15 +106,11 @@
 (define Univ (make-Univ))
 (define Err (make-Error))
 
-(define -Nat -Integer)
-(define -Real -Number)
-
 (define -Port (*Un -Output-Port -Input-Port))
 
 (define -Pathlike (*Un -String -Path))
 (define -Pathlike* (*Un -String -Path (-val 'up) (-val 'same)))
 (define -Pattern (*Un -Bytes -Regexp -PRegexp -Byte-Regexp -Byte-PRegexp -String))
-(define -Byte -Number)
 
 (define -no-lfilter (make-LFilterSet null null))
 (define -no-filter (make-FilterSet null null))
@@ -113,6 +119,26 @@
 
 (define -car (make-CarPE))
 (define -cdr (make-CdrPE))
+
+;; Numeric hierarchy
+(define -Number (make-Base 'Number #'number?))
+
+(define -Flonum (make-Base 'Flonum #'inexact-real?))
+
+(define -ExactRational 
+  (make-Base 'Exact-Rational #'(and/c number? rational? exact?)))
+(define -Integer (make-Base 'Integer #'exact-integer?))
+(define -ExactPositiveInteger
+  (make-Base 'Exact-Positive-Integer #'exact-positive-integer?))
+
+(define -Zero (-val 0))
+(define -Real (*Un -Flonum -ExactRational))
+(define -ExactNonnegativeInteger (*Un -ExactPositiveInteger -Zero))
+(define -Nat -ExactNonnegativeInteger)
+
+(define -Byte -Number)
+
+
 
 ;; convenient syntax
 
@@ -160,7 +186,7 @@
 
 (define-syntax (->* stx)
   (define-syntax-class c
-    (pattern x:id #:when (eq? ': (syntax-e #'x))))
+    (pattern x:id #:fail-unless (eq? ': (syntax-e #'x)) #f))
   (syntax-parse stx
     [(_ dom rng)       
      #'(make-Function (list (make-arr* dom rng)))]
@@ -177,7 +203,7 @@
 
 (define-syntax (-> stx)
   (define-syntax-class c
-    (pattern x:id #:when (eq? ': (syntax-e #'x))))
+    (pattern x:id #:fail-unless (eq? ': (syntax-e #'x)) #f))
   (syntax-parse stx
     [(_ dom ... rng _:c filters _:c objects)
      #'(->* (list dom ...) rng : filters : objects)]
@@ -216,7 +242,7 @@
 
 (define-syntax (->key stx)  
   (syntax-parse stx
-                [(_ ty:expr ... (~or (k:keyword kty:expr opt:boolean)) ... rng)
+                [(_ ty:expr ... (~seq k:keyword kty:expr opt:boolean) ... rng)
                  #'(make-Function
                     (list
                      (make-arr* (list ty ...)
@@ -238,15 +264,20 @@
 
 (d/c make-pred-ty
   (case-> (c:-> Type/c Type/c)
-          (c:-> (listof Type/c) Type/c Type/c Type/c))
+          (c:-> (listof Type/c) Type/c Type/c Type/c)
+          (c:-> (listof Type/c) Type/c Type/c integer? Type/c)
+          (c:-> (listof Type/c) Type/c Type/c integer? (listof PathElem?) Type/c))
   (case-lambda 
+    [(in out t n p)
+     (->* in out : (-LFS (list (-filter t p n)) (list (-not-filter t p n))))]
+    [(in out t n)
+     (->* in out : (-LFS (list (-filter t null n)) (list (-not-filter t null n))))]
     [(in out t)
-     (->* in out : (-LFS (list (-filter t)) (list (-not-filter t))))]
-    [(t) (make-pred-ty (list Univ) -Boolean t)]))
+     (make-pred-ty in out t 0)]
+    [(t) (make-pred-ty (list Univ) -Boolean t 0)]))
 
 (define true-filter (-FS (list) (list (make-Bot))))
 (define false-filter (-FS (list (make-Bot)) (list)))
-
 
 (define (opt-fn args opt-args result)
   (apply cl->* (for/list ([i (in-range (add1 (length opt-args)))])                         

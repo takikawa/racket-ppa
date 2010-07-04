@@ -613,11 +613,11 @@ corresponds to the default @tech{module name resolver}.
  @examples[
  (code:comment @#,t{@filepath{main.ss} in package @filepath{farm} by @filepath{mcdonald}:})
  (eval:alts (require (planet mcdonald/farm)) (void))
- (code:comment @#,t{@filepath{main.ss} in version >= 2.0 of package @filepath{farm} by @filepath{mcdonald}:})
+ (code:comment @#,t{@filepath{main.ss} in version >= 2.0 of @filepath{farm} by @filepath{mcdonald}:})
  (eval:alts (require (planet mcdonald/farm:2)) (void))
- (code:comment @#,t{@filepath{main.ss} in version >= 2.5 of package @filepath{farm} by @filepath{mcdonald}:})
+ (code:comment @#,t{@filepath{main.ss} in version >= 2.5 of @filepath{farm} by @filepath{mcdonald}:})
  (eval:alts (require (planet mcdonald/farm:2:5)) (void))
- (code:comment @#,t{@filepath{duck.ss} in version >= 2.5 of package @filepath{farm} by @filepath{mcdonald}:})
+ (code:comment @#,t{@filepath{duck.ss} in version >= 2.5 of @filepath{farm} by @filepath{mcdonald}:})
  (eval:alts (require (planet mcdonald/farm:2:5/duck)) (void))
  ]}
 
@@ -831,9 +831,43 @@ follows.
  specified by @scheme[phase-level] (where @scheme[#f] corresponds to the
  @tech{label phase level}). In particular, an @scheme[_id] or @scheme[rename-out] form as
  a @scheme[provide-spec] refers to a binding at @scheme[phase-level], an
- @scheme[all-define-out] exports only @scheme[phase-level]
+ @scheme[all-defined-out] exports only @scheme[phase-level]
  definitions, and an @scheme[all-from-out] exports bindings
- imported with a shift by @scheme[phase-level].}
+ imported with a shift by @scheme[phase-level].
+
+ @examples[#:eval (syntax-eval)
+   (module nest scheme
+     (define-for-syntax eggs 2)
+     (define chickens 3)
+     (provide (for-syntax eggs)
+              chickens))
+   (require 'nest)
+   (define-syntax (test-eggs stx)
+     (printf "Eggs are ~a\n" eggs)
+     #'0)
+   (test-eggs)
+   chickens
+
+   (module broken-nest scheme
+     (define eggs 2)
+     (define chickens 3)
+     (provide (for-syntax eggs)
+              chickens))
+
+   (module nest2 scheme
+    (define-for-syntax eggs 2)
+    (provide (for-syntax eggs)))
+   (require (for-meta 2 scheme/base)
+            (for-syntax 'nest2))
+   (define-syntax (test stx)
+    (define-syntax (show-eggs stx)
+     (printf "Eggs are ~a\n" eggs)
+     #'0)
+    (begin
+     (show-eggs)
+     #'0))
+    (test)
+ ]}
 
  @specsubform[#:literals (for-syntax) 
               (for-syntax provide-spec ...)]{Same as
@@ -1040,6 +1074,54 @@ aliens
               scheme/base))]
   will get the @scheme[scheme/base] bindings that match the regexp,
   and renamed to use ``camel case.''}
+
+@defform[(path-up rel-string)]{
+
+This specifies a path to a module named @scheme[rel-string] in a
+similar way to using @scheme[rel-string] directly, except that if the
+required module file is not found there, it is searched in the parent
+directory (in @filepath{../@scheme[_rel-string]}), and then in
+the grand-parent directory, going all the way up to the root.  (Note
+that the usual caveats hold for a macro that depends on files that it
+looks for to determine its expansion: the resulting path becomes part
+of the compiled form.)
+
+This form is useful in setting up a ``project environment''.  For
+example, you can write a @filepath{config.ss} file in the root
+directory of your project with:
+@verbatim[#:indent 2]{
+  #lang scheme/base
+  (require scheme/require-syntax (for-syntax "utils/in-here.ss"))
+  ;; require form for my utilities
+  (provide utils-in)
+  (define-require-syntax utils-in in-here-transformer)
+}
+and in @filepath{utils/in-here.ss} in the root:
+@verbatim[#:indent 2]{
+  #lang scheme/base
+  (require scheme/runtime-path)
+  (provide in-here-transformer)
+  (define-runtime-path here ".")
+  (define (in-here-transformer stx)
+    (syntax-case stx ()
+      [(_ sym)
+       (identifier? #'sym)
+       (let ([path (build-path here (format "~a.ss" (syntax-e #'sym)))])
+         (datum->syntax stx `(file ,(path->string path)) stx))]))
+}
+Finally, you can use it via @scheme[path-up]:
+@schemeblock[
+  (require scheme/require (path-up "config.ss") (utils-in foo))]
+Note that the order of requires in this form is important, as each of
+the first two bind the identifier used in the following.
+
+An alternative in this scenario is to use @scheme[path-up] directly to
+get to the utility module:
+@schemeblock[
+  (require scheme/require (path-up "utils/foo.ss"))]
+but then you need to be careful with subdirectories that are called
+@filepath{utils}, which will override the one in the project's root.
+In other words, the previous method requires a single unique name.}
 
 @; --------------------
 
@@ -1355,8 +1437,8 @@ expression. (In other words, variable reference is lexically scoped.)
 When multiple identifiers appear in a @scheme[kw-formals], they must
 be distinct according to @scheme[bound-identifier=?].
 
-If the procedure procedure by @scheme[lambda] is applied to fewer or
-more by-position or arguments than it accepts, to by-keyword arguments
+If the procedure produced by @scheme[lambda] is applied to fewer or
+more by-position or by-keyword arguments than it accepts, to by-keyword arguments
 that it does not accept, or without required by-keyword arguments, then
 the @exnraise[exn:fail:contract].
 
@@ -1577,6 +1659,14 @@ Combines @scheme[letrec-syntaxes] with @scheme[letrec-values]: each
 @scheme[trans-id] and @scheme[val-id] is bound in all
 @scheme[trans-expr]s and @scheme[val-expr]s.
 
+The @scheme[letrec-syntaxes+values] form is the core form for local
+compile-time bindings, since forms like @scheme[letrec-syntax] and
+internal @scheme[define-syntax] expand to it. In a fully expanded
+expression (see @secref["fully-expanded"]), the @scheme[trans-id]
+bindings are discarded and the form reduces to @scheme[letrec], but
+@scheme[letrec-syntaxes+values] can appear in the result of
+@scheme[local-expand] with an empty stop list.
+
 See also @scheme[local], which supports local bindings with
 @scheme[define], @scheme[define-syntax], and more.}
 
@@ -1694,7 +1784,7 @@ Recognized specially within forms like @scheme[cond]. A
 
 @guideintro["and+or"]{@scheme[and]}
 
-If no @scheme[expr]s are provided, then result is @scheme[#f].
+If no @scheme[expr]s are provided, then result is @scheme[#t].
 
 If a single @scheme[expr] is provided, then it is in tail position, so
 the results of the @scheme[and] expression are the results of the
@@ -1718,7 +1808,7 @@ respect to the original @scheme[and] form.
 
 @guideintro["and+or"]{@scheme[or]}
 
-If no @scheme[expr]s are provided, then result is @scheme[#t].
+If no @scheme[expr]s are provided, then result is @scheme[#f].
 
 If a single @scheme[expr] is provided, then it is in tail position, so
 the results of the @scheme[and] expression are the results of the
@@ -1888,7 +1978,12 @@ expands to a definition of the first form where the @scheme[expr] is a
 Like @scheme[define-syntax], but creates a @tech{transformer binding}
 for each @scheme[id].  The @scheme[expr] should produce as many values
 as @scheme[id]s, and each value is bound to the corresponding
-@scheme[id]. }
+@scheme[id].
+
+When @scheme[expr] produces zero values for a top-level
+@scheme[define-syntaxes] (i.e., not in a module or internal-definition
+position), then the @scheme[id]s are effectively declared without
+binding; see @secref["macro-introduced-bindings"].
 
 @defexamples[#:eval (syntax-eval)
 (define-syntaxes (foo1 foo2 foo3)
@@ -1907,7 +2002,7 @@ as @scheme[id]s, and each value is bound to the corresponding
 (foo1)
 (foo2)
 (foo3)
-]
+]}
 
 @defform*[[(define-for-syntax id expr)
            (define-for-syntax (head args) body ...+)]]{
@@ -1920,17 +2015,24 @@ Evaluation of @scheme[expr] side is @scheme[parameterize]d to set
 @scheme[current-namespace] as in @scheme[let-syntax].}
 
 @defexamples[#:eval (syntax-eval)
-(define-for-syntax foo 2)
-(define-syntax bar
-  (lambda (syntax-object)
-    (printf "foo is ~a\n" foo)
-    #'2))
-(bar)    
-(define-syntax (bar2 syntax-object)
-  (printf "foo is ~a\n" foo)
-  #'3)
-(bar2)  
-]
+(define-for-syntax helper 2)
+(define-syntax (make-two syntax-object)
+ (printf "helper is ~a\n" helper)
+ #'2)
+(make-two)
+(code:comment @#,t{`helper' is not bound in the runtime phase})
+helper
+
+(define-for-syntax (filter-ids ids)
+  (filter identifier? ids))
+(define-syntax (show-variables syntax-object)
+  (syntax-case syntax-object ()
+    [(_ expr ...)
+     (with-syntax ([(only-ids ...)
+                    (filter-ids (syntax->list #'(expr ...)))])
+       #'(list only-ids ...))]))
+(let ([a 1] [b 2] [c 3])
+  (show-variables a 5 2 b c))]
 
 @defform[(define-values-for-syntax (id ...) expr)]{
 
@@ -2175,7 +2277,7 @@ continuation's initial frame. If the frame already has a mark for the
 key, it is replaced. Finally, the @scheme[result-expr] is evaluated;
 the continuation for evaluating @scheme[result-expr] is the
 continuation of the @scheme[with-continuation-mark] expression (so the
-result of the @scheme[resultbody-expr] is the result of the
+result of the @scheme[result-expr] is the result of the
 @scheme[with-continuation-mark] expression, and @scheme[result-expr]
 is in tail position for the @scheme[with-continuation-mark]
 expression).

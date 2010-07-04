@@ -1,14 +1,14 @@
 // Globally visible bindings
 var key_handler, toggle_panel, hide_prefs, new_query, refine_query,
-    set_pre_query, set_context_query, set_show_manuals, set_show_manual_titles,
+    set_ctx_query, set_context_query, set_show_manuals, set_show_manual_titles,
     set_results_num, set_type_delay, set_highlight_color, status_line,
-    saved_status = false, pre_query_label_line;
+    saved_status = false, ctx_query_label_line;
 
 (function(){
 
 // Configuration options (use || in case a cookie exists but is empty)
-var pre_query          = GetCookie("PLT_PreQuery","");
-var pre_query_label    = GetCookie("PLT_PreQueryLabel",""); // no prefs UI
+var ctx_query          = GetCookie("PLT_ContextQuery","");
+var ctx_query_label    = GetCookie("PLT_ContextQueryLabel",""); // no prefs UI
 var manual_settings    = parseInt(GetCookie("PLT_ManualSettings",1));
 var show_manuals       = manual_settings % 10;
 var show_manual_titles = ((manual_settings - show_manuals) / 10) > 0;
@@ -25,7 +25,7 @@ var prev_page_link1, prev_page_link2, next_page_link1, next_page_link2;
 //   2 index links
 //   3 help/pref toggle
 //   4 pref widgets
-//   5 clear current pre-filter context
+//   5 clear current context-query
 //  -1 prev/next page (un-tab-able)
 
 function MakePref(label, input) {
@@ -62,9 +62,9 @@ function MakeChevrons(num, middle) {
         +'</div>';
 }
 
-function MakePreQueryItem(qry, desc) {
+function MakeContextQueryItem(qry, desc) {
   return '<li><a href="?hq='+encodeURIComponent(qry)+'" tabIndex="4"'
-              +' title="set this as your pre-filter context"'
+              +' title="set this as your context-query"'
               +' style="text-decoration: none;"'
               +' onclick="return new_query(this,\''
                                    +encodeURIComponent(desc)
@@ -169,9 +169,9 @@ function InitializeSearch() {
                                   "The color to use for highlighting exact"
                                   +" matches (a known color name or #RGB)")
                    +'>')
-        + MakePref('Pre-Query',
+        + MakePref('Context-Query',
            '<input type="text" '
-                   +PrefInputArgs("pre_query",
+                   +PrefInputArgs("ctx_query",
                      "A &ldquo;context&rdquo; query that is implicitly added"
                      +" to all searches")
                    +'>&nbsp;'
@@ -182,20 +182,20 @@ function InitializeSearch() {
       +'</div>'
       +'<div id="contexts_panel" '+panelstyle+'>'
         +'<table align="center" style="margin: 0em 2em;">'
-          + MakePref('Pre-Query',
+          + MakePref('Context-Query',
              '<input type="text" '
                      +PrefInputArgs("context_query",
                        "A &ldquo;context&rdquo; query that is implicitly added"
                        +" to all searches")
                      +'>')
         +'</table>'
-        +'Clicking the following links will set your pre-query context to a'
+        +'Clicking the following links will set your context-query to a'
         +' few common choices:'
         +'<ul style="padding: 0em; margin: 0.5em 1.5em;">'
-        +MakePreQueryItem("M:", "Bindings")
-        +MakePreQueryItem("T:reference", "Reference manual")
-        +MakePreQueryItem("M:scheme", "{{scheme}} bindings")
-        +MakePreQueryItem("M:scheme/base", "{{scheme/base}} bindings")
+        +MakeContextQueryItem("M:", "Bindings")
+        +MakeContextQueryItem("T:reference", "Reference manual")
+        +MakeContextQueryItem("M:scheme", "{{scheme}} bindings")
+        +MakeContextQueryItem("M:scheme/base", "{{scheme/base}} bindings")
         +'</ul>'
       +'</div>'
       +MakeChevrons(1,
@@ -208,12 +208,12 @@ function InitializeSearch() {
       +'</div>'
       +'<br />'
       +MakeChevrons(2,
-        '<span id="pre_query_label" style="color: #444;">&nbsp;</span>')
+        '<span id="ctx_query_label" style="color: #444;">&nbsp;</span>')
     +'</div>';
   // get the widgets we use
   query = document.getElementById("search_box");
   status_line = document.getElementById("search_status");
-  pre_query_label_line = document.getElementById("pre_query_label");
+  ctx_query_label_line = document.getElementById("ctx_query_label");
   prev_page_link1 = document.getElementById("prev_page_link1");
   prev_page_link2 = document.getElementById("prev_page_link2");
   next_page_link1 = document.getElementById("next_page_link1");
@@ -226,18 +226,9 @@ function InitializeSearch() {
   result_links.push(n);
   AdjustResultsNum();
   // get search string
-  if (location.search.length > 0) {
-    var paramstrs = location.search.substring(1).split(/[;&]/);
-    for (var i=0; i<paramstrs.length; i++) {
-      var param = paramstrs[i].split(/=/);
-      // ignores an empty "q=" (param.length will be 1)
-      if (param.length == 2 && param[0] == "q") {
-        query.value = unescape(param[1]);
-        break;
-      }
-    }
-  }
-  PreFilter();
+  var init_q = GetPageArg("q",false);
+  if (init_q && init_q != "") query.value = init_q;
+  ContextFilter();
   DoSearch();
   query.focus();
   query.select();
@@ -342,11 +333,18 @@ function UrlToManual(url) {
 //   "L:scheme" (no exact matches except for the `scheme' module)
 //   "L:schem" (only module names that match `schem')
 
+// Additional "hidden" operators:
+//   "A:{ foo bar }" -- an `and' query
+//   "O:{ foo bar }" -- an `or' query
+//   "Q:foo" -- stands for just "foo", useful for quoting Q:} inside the above
+// Note: they're "hidden" because the syntax might change, and it's intended
+// mostly for context queries.
+
 function CompileTerm(term) {
-  var op = ((term.search(/^[LMT]:/) == 0) && term.substring(0,1));
+  var op = ((term.search(/^[NLMTQ]:/) == 0) && term.substring(0,1));
   if (op) term = term.substring(2);
   term = term.toLowerCase();
-  switch(op) {
+  switch (op) {
   case "N":
     op = CompileTerm(term);
     // return C_exact if it's not found, so it doesn't disqualify exact matches
@@ -370,6 +368,7 @@ function CompileTerm(term) {
       else if (x[1].search(/\/index\.html$/) > 0) return C_rexact;
       else return C_exact;
     }
+  /* a case for "Q" is not needed -- same as the default case below */
   default:
     var words = term.split(/\b/);
     for (var i=0; i<words.length; i++)
@@ -385,6 +384,51 @@ function CompileTerm(term) {
       return r;
     }
   }
+}
+
+function CompileAndTerms(preds) {
+  return function(x) {
+    var r = C_max;
+    for (var i=0; i<preds.length; i++) {
+      r = Math.min(r, preds[i](x));
+      if (r <= C_min) return r;
+    }
+    return r;
+  };
+}
+
+function CompileOrTerms(preds) {
+  return function(x) {
+    var r = C_min;
+    for (var i=0; i<preds.length; i++) {
+      r = Math.max(r, preds[i](x));
+      if (r >= C_max) return r;
+    }
+    return r;
+  };
+}
+
+function CompileTermsR(terms, nested) {
+  var term, result = new Array();
+  while (terms.length > 0) {
+    term = terms.pop();
+    switch (term) {
+    case "A:{": result.push(CompileTermsR(terms, CompileAndTerms)); break;
+    case "O:{": result.push(CompileTermsR(terms, CompileOrTerms));  break;
+    default:
+      // "}" has terminates a compound, otherwise it's an ordinary search term
+      if (nested && (term == "}")) return nested(result);
+      else result.push(CompileTerm(term));
+    }
+  }
+  // all compound operators are implicitly terminated at the end
+  if (nested) return nested(result);
+  else return result;
+}
+
+function CompileTerms(terms, nested) {
+  terms.reverse();
+  return CompileTermsR(terms, nested)
 }
 
 function Id(x) {
@@ -421,8 +465,7 @@ function Search(data, term, is_pre, K) {
   var t = false;
   var killer = function() { if (t) clearTimeout(t); };
   // term comes with normalized spaces (trimmed, and no double spaces)
-  var preds = (term=="") ? [] : term.split(/ /);
-  for (var i=0; i<preds.length; i++) preds[i] = CompileTerm(preds[i]);
+  var preds = (term=="") ? [] : CompileTerms(term.split(/ /), false);
   if (preds.length == 0) {
     var ret = is_pre ? [0,data] : [0,[]];
     if (K) { K(ret); return killer; }
@@ -439,31 +482,32 @@ function Search(data, term, is_pre, K) {
       var r, min = C_max, max = C_min;
       for (var j=0; j<preds.length; j++) {
         r = preds[j](data[i]); min = Math.min(r, min); max = Math.max(r, max);
+        if (min <= C_min) break; // get out if it's hopeless
       }
       if (max >= C_rexact && min >= C_exact) exacts.push(data[i]);
       else if (min > C_wordmatch) matches.push(data[i]);
       else if (min > C_fail)  wordmatches.push(data[i]);
       fuel--; i++;
     }
-    if (i<data.length) t = setTimeout(DoChunk,15);
+    if (i<data.length) t = setTimeout(DoChunk,5);
     else {
       r = [exacts.length, exacts.concat(matches).concat(wordmatches)];
       if (K) K(r); else return r;
     }
   };
   if (!K) return DoChunk();
-  else { progress(0); t = setTimeout(DoChunk,15); return killer; }
+  else { progress(0); t = setTimeout(DoChunk,5); return killer; }
 }
 
 function GetContextHTML() {
   // useful only when a context is set
-  return (((pre_query_label != "") && pre_query_label)
-          ? SanitizeHTML(pre_query_label)
-          : ('&ldquo;' + SanitizeHTML(pre_query) + '&rdquo;'));
+  return (((ctx_query_label != "") && ctx_query_label)
+          ? SanitizeHTML(ctx_query_label)
+          : ('&ldquo;' + SanitizeHTML(ctx_query) + '&rdquo;'));
 }
 function GetContextClearerHTML(text) {
   return ('<a href="?hq=" tabIndex="5"'
-           +' title="Clear pre-filter context"'
+           +' title="Clear context-query"'
            +' style="text-decoration: none; color: #444;'
                   +' font-size: 82%; font-weight: bold;"'
            +' onclick="return new_query(this,\'\');">'
@@ -472,24 +516,24 @@ function GetContextClearerHTML(text) {
 }
 
 var search_data; // pre-filtered searchable index data
-function PreFilter() {
-  pre_query = NormalizeSpaces(pre_query);
-  search_data = Search(plt_search_data, pre_query, true, false)[1];
-  if (pre_query == "") {
-    pre_query_label_line.innerHTML =
+function ContextFilter() {
+  ctx_query = NormalizeSpaces(ctx_query);
+  search_data = Search(plt_search_data, ctx_query, true, false)[1];
+  if (ctx_query == "") {
+    ctx_query_label_line.innerHTML =
       '<a href="#" tabIndex="5"'
-       +' title="Edit pre-filter context"'
+       +' title="Edit context-query"'
        +' style="text-decoration: none; color: #444;'
               +' font-size: 82%; font-weight: bold;"'
        +' onclick="toggle_panel(\'contexts\'); return false;">'
        +'[set context]</a>';
   } else {
-    pre_query_label_line.innerHTML =
+    ctx_query_label_line.innerHTML =
       'Context:&nbsp;' + GetContextHTML()
       + '&nbsp;'
       + GetContextClearerHTML('[clear')
       + '/<a href="#" tabIndex="5"'
-          +' title="Edit pre-filter context"'
+          +' title="Edit context-query"'
           +' style="text-decoration: none; color: #444;'
                  +' font-size: 82%; font-weight: bold;"'
           +' onclick="toggle_panel(\'contexts\'); return false;">'
@@ -555,6 +599,7 @@ function UpdateResults() {
   if (first_search_result < 0 ||
       first_search_result >= search_results.length)
     first_search_result = 0;
+  var link_args = (page_query_string && ("?"+page_query_string));
   for (var i=0; i<result_links.length; i++) {
     var n = i + first_search_result;
     if (n < search_results.length) {
@@ -565,7 +610,7 @@ function UpdateResults() {
           note +=
             (j==0 ? "" : ", ")
             + '<a href="?q=' + encodeURIComponent("L:"+desc[j]) + '"'
-               +' class="schememod" tabIndex="2"'
+               +' class="ScmMod" tabIndex="2"'
                +' title="show bindings from the '+desc[j]+' module'
                        +' (right-click to refine current query)"'
                +' style="text-decoration: none; color: #006;"'
@@ -593,9 +638,16 @@ function UpdateResults() {
       }
       if (note)
         note = '&nbsp;&nbsp;<span class="smaller">' + note + '</span>';
+      var href = UncompactUrl(res[1]);
+      if (link_args) {
+        var hash = href.indexOf("#");
+        if (hash >= 0)
+          href = href.substring(0,hash) + link_args + href.substring(hash);
+        else
+          href = href + link_args;
+      }
       result_links[i].innerHTML =
-        '<a href="' + UncompactUrl(res[1]) + '"'
-         +' class="indexlink" tabIndex="2">'
+        '<a href="' + href + '" class="indexlink" tabIndex="2">'
         + UncompactHtml(res[2]) + '</a>' + (note || "");
       result_links[i].style.backgroundColor =
         (n < exact_results_num) ? highlight_color : background_color;
@@ -613,14 +665,14 @@ function UpdateResults() {
   if (search_results.length == 0) {
     if (last_search_term == "") status_line.innerHTML = "";
     else status_line.innerHTML = 'No matches found'
-           + ((pre_query != "")
+           + ((ctx_query != "")
               ? (' in '+GetContextHTML()
                  +' '+GetContextClearerHTML('<small>[clear]</small>'))
               : '')
            + '<br><div style="color: black; font-size: 82%;">'
            + '(Make sure your spelling is correct'
            + (last_search_term.search(/ /)>=0 ? ', or try fewer keywords' : '')
-           + ((pre_query != "") ? ', or clear the search context' : '')
+           + ((ctx_query != "") ? ', or clear the search context' : '')
            + ')</div>';
   } else if (search_results.length <= results_num)
     status_line.innerHTML = "Showing all matches" + exact;
@@ -698,8 +750,8 @@ function NewQuery(node,label) {
     DoSearch();
     return false;
   } else if ((m = href.search(/[?]hq=[^?&;]*$/)) >= 0) { // `hq' can
-    SetPreQuery(decodeURIComponent(href.substring(m+4)),
-                decodeURIComponent(label));
+    SetContextQuery(decodeURIComponent(href.substring(m+4)),
+                    decodeURIComponent(label));
     return false;
   } else {
     return true;
@@ -732,7 +784,7 @@ function TogglePanel(name) {
   }
   panel_shown = ((panel_shown != name) && name);
   if (panel_shown == "prefs") {
-    document.getElementById("pre_query_pref").value = pre_query;
+    document.getElementById("ctx_query_pref").value = ctx_query;
     document.getElementById("show_manuals_pref").selectedIndex = show_manuals;
     document.getElementById("show_manual_titles_pref").checked
                                                           = show_manual_titles;
@@ -740,12 +792,14 @@ function TogglePanel(name) {
     document.getElementById("type_delay_pref").value = type_delay;
     document.getElementById("highlight_color_pref").value = highlight_color;
   } else if (panel_shown == "contexts") {
-    document.getElementById("context_query_pref").value = pre_query;
+    document.getElementById("context_query_pref").value = ctx_query;
   }
   if (panel_shown) {
     document.getElementById(panel_shown+"_panel").style.display = "block";
     document.getElementById("close_panel").style.display = "block";
-    document.getElementById(panel_shown+"_panel").scrollIntoView();
+    // This is annoying -- would be nicer to have a way to make sure
+    // that it's in view without scrolling if not necessary.
+    // document.getElementById(panel_shown+"_panel").scrollIntoView();
   }
 }
 toggle_panel = TogglePanel;
@@ -767,23 +821,23 @@ function SetShowManuals(inp) {
 }
 set_show_manuals = SetShowManuals;
 
-function SetPreQuery(inp,label) {
+function SetContextQuery(inp,label) {
   // can be called with the input object, or with a string
   if (typeof inp != "string") inp = inp.value;
-  if (inp != pre_query) {
-    pre_query = inp;
-    SetCookie("PLT_PreQuery", pre_query);
+  if (inp != ctx_query) {
+    ctx_query = inp;
+    SetCookie("PLT_ContextQuery", ctx_query);
     label = label || "";
-    pre_query_label = label;
-    SetCookie("PLT_PreQueryLabel",label);
-    PreFilter();
-    document.getElementById("pre_query_pref").value = pre_query;
-    document.getElementById("context_query_pref").value   = pre_query;
+    ctx_query_label = label;
+    SetCookie("PLT_ContextQueryLabel",label);
+    ContextFilter();
+    document.getElementById("ctx_query_pref").value = ctx_query;
+    document.getElementById("context_query_pref").value   = ctx_query;
     DoSearch();
   }
 }
-set_pre_query     = SetPreQuery;
-set_context_query = SetPreQuery; // a different widget, same effect
+set_ctx_query     = SetContextQuery;
+set_context_query = SetContextQuery; // a different widget, same effect
 
 function SetShowManuals(inp) {
   if (inp.selectedIndex != show_manuals) {
@@ -836,6 +890,6 @@ function SetHighlightColor(inp) {
 }
 set_highlight_color = SetHighlightColor;
 
-window.onload = InitializeSearch;
+AddOnLoad(InitializeSearch);
 
 })();

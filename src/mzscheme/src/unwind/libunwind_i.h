@@ -215,10 +215,10 @@ do {									\
 # define dprintf(format...)
 #endif
 
-static ALWAYS_INLINE void
+static ALWAYS_INLINE int
 print_error (const char *string)
 {
-  write (2, string, strlen (string));
+  return write (2, string, strlen (string));
 }
 
 #define mi_init		UNWI_ARCH_OBJ(mi_init)
@@ -651,6 +651,7 @@ HIDDEN int dwarf_step (struct dwarf_cursor *c);
 
 struct unw_addr_space
   {
+    void *mem_pool;
     struct unw_accessors acc;
     unw_caching_policy_t caching_policy;
 #ifdef HAVE_ATOMIC_OPS_H

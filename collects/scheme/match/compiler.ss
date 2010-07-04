@@ -8,7 +8,8 @@
          "reorder.ss"
          scheme/struct-info
          scheme/stxparam
-         scheme/nest)
+         scheme/nest
+         unstable/syntax)
 
 (provide compile*)
 
@@ -43,12 +44,12 @@
                                  esc)])
       #`[(#,predicate-stx #,x) rhs]))
   (define (compile-con-pat accs pred pat-acc)
-    (with-syntax ([(tmps ...) (generate-temporaries accs)])
-      (with-syntax ([(accs ...) accs]
-                    [pred pred]
-                    [body (compile*
-                           (append (syntax->list #'(tmps ...)) xs)
-                           (map (lambda (row)
+    (with-syntax* ([(tmps ...) (generate-temporaries accs)]
+                   [(accs ...) accs]
+                   [pred pred]
+                   [body (compile*
+                          (append (syntax->list #'(tmps ...)) xs)
+                          (map (lambda (row)
                                   (define-values (p1 ps) (Row-split-pats row))
                                   (make-Row (append (pat-acc p1) ps)
                                             (Row-rhs row)
@@ -56,7 +57,7 @@
                                             (Row-vars-seen row)))
                                 rows)
                            esc)])
-        #`[(pred #,x) (let ([tmps (accs #,x)] ...) body)])))
+      #`[(pred #,x) (let ([tmps (accs #,x)] ...) body)]))
   (cond
     [(eq? 'box k)
      (compile-con-pat (list #'unbox) #'box? (compose list Box-p))]
@@ -116,7 +117,7 @@
             [accs (Struct-accessors s)]
             [pred (Struct-pred s)])
        (compile-con-pat accs pred Struct-ps))]
-    [else (error 'compile "bad key: ~a" k)]))
+    [else (error 'match-compile "bad key: ~a" k)]))
 
 
 ;; produces the syntax for a let clause

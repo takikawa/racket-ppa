@@ -93,13 +93,6 @@
            ((if display-like? display write) (syntax-dummy-val obj) port)]
           [else 
            (error 'pretty-print-hook "unexpected special value: ~e" obj)]))
-  (define (pp-extend-style-table)
-    (let* ([ids identifier-list]
-           [syms (map (lambda (x) (hash-ref stx=>flat x)) ids)]
-           [like-syms (map syntax-e ids)])
-      (pretty-print-extend-style-table (pp-better-style-table)
-                                       syms
-                                       like-syms)))
   (define (pp-better-style-table)
     (pretty-print-extend-style-table (pretty-print-current-style-table)
                                      (map car extended-style-list)
@@ -107,16 +100,8 @@
   (parameterize 
    ([pretty-print-size-hook pp-size-hook]
     [pretty-print-print-hook pp-print-hook]
-    [pretty-print-current-style-table (pp-extend-style-table)]
-    ;; Printing parameters (mzscheme manual 7.9.1.4)
-    [print-unreadable #t]
-    [print-graph #f]
-    [print-struct #f]
-    [print-box #t]
-    [print-vector-length #t]
-    [print-hash-table #f]
-    [print-honu #f])
-   (pretty-print datum)))
+    [pretty-print-current-style-table (pp-better-style-table)])
+   (pretty-print/defaults datum)))
 
 (define (->show-function show)
   (cond [(procedure? show)

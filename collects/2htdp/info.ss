@@ -4,5 +4,6 @@
 (define compile-omit-paths
   '("hangman-world.ss"
     "hangman-world-play.ss"
-    "test"
+    "tests"
+    "extended-key"
     "utest"))

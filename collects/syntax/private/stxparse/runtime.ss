@@ -1,7 +1,9 @@
 #lang scheme/base
-(require scheme/contract
-         scheme/match
+(require scheme/contract/base
          scheme/stxparam
+         scheme/list
+         unstable/struct
+         "minimatch.ss"
          (for-syntax scheme/base
                      syntax/stx
                      scheme/private/sc
@@ -10,25 +12,27 @@
                      "../util.ss"))
 
 (provide pattern
+         ~var
+         ~datum
+         ~literal
          ~and
          ~or
+         ~not
          ~seq
          ~bounds
          ~once
          ~optional
          ~rest
-         ~struct
-         ~!
          ~describe
+         ~!
          ~bind
          ~fail
+         ~parse
 
          current-expression
          current-macro-name
 
          this-syntax
-
-         compare-dfcs
 
          expect?
          expectation?
@@ -73,18 +77,22 @@
       (raise-syntax-error #f "keyword used out of context" stx))))
 
 (define-keyword pattern)
+(define-keyword ~var)
+(define-keyword ~datum)
+(define-keyword ~literal)
 (define-keyword ~and)
 (define-keyword ~or)
+(define-keyword ~not)
 (define-keyword ~seq)
 (define-keyword ~bounds)
 (define-keyword ~once)
 (define-keyword ~optional)
 (define-keyword ~rest)
-(define-keyword ~struct)
-(define-keyword ~!)
 (define-keyword ~describe)
+(define-keyword ~!)
 (define-keyword ~bind)
 (define-keyword ~fail)
+(define-keyword ~parse)
 
 ;; == Parameters & Syntax Parameters
 
@@ -113,21 +121,161 @@
 
 ;; == Dynamic Frontier Contexts (DFCs)
 
-;; A DFC is a list of numbers.
+(provide (struct-out dfc:empty)
+         (struct-out dfc:car)
+         (struct-out dfc:cdr)
+         (struct-out dfc:pre)
+         (struct-out dfc:post)
+         dfc-empty
+         dfc-add-car
+         dfc-add-cdr
+         dfc-add-pre
+         dfc-add-post
+         dfc-add-unbox
+         dfc-add-unvector
+         dfc-add-unpstruct
 
-;; compare-dfcs : DFC DFC -> (one-of '< '= '>)
+         dfc->index
+         dfc->stx
+         dfc-difference
+         dfc-append
+
+         invert-dfc
+         compare-idfcs
+         idfc>?
+         idfc=?)
+
+#|
+A Dynamic Frontier Context (DFC) is one of
+  - (make-dfc:empty stx)
+  - (make-dfc:car DFC stx)
+  - (make-dfc:cdr DFC positive-integer)
+  - (make-dfc:pre DFC stx)
+  - (make-dfc:post DFC stx)
+|#
+
+(define-struct dfc:empty (stx) #:prefab)
+(define-struct dfc:car (parent stx) #:prefab)
+(define-struct dfc:cdr (parent n) #:prefab)
+(define-struct dfc:pre (parent stx) #:prefab)
+(define-struct dfc:post (parent stx) #:prefab)
+
+(define (dfc-empty x) (make dfc:empty x))
+(define (dfc-add-car parent stx)
+  (make dfc:car parent stx))
+(define (dfc-add-cdr parent _)
+  (match parent
+    [(make dfc:cdr uberparent n)
+     (make dfc:cdr uberparent (add1 n))]
+    [_ (make dfc:cdr parent 1)]))
+(define (dfc-add-pre parent stx)
+  (make dfc:pre parent stx))
+(define (dfc-add-post parent stx)
+  (make dfc:post parent stx))
+
+(define (dfc-add-unbox parent stx)
+  (dfc-add-car parent stx))
+(define (dfc-add-unvector parent stx)
+  (dfc-add-car parent stx))
+(define (dfc-add-unpstruct parent stx)
+  (dfc-add-car parent stx))
+
+(define (dfc->index dfc)
+  (match dfc
+    [(make dfc:cdr parent n) n]
+    [_ 0]))
+
+(define (dfc->stx dfc)
+  (match dfc
+    [(make dfc:empty stx) stx]
+    [(make dfc:car parent stx) stx]
+    [(make dfc:cdr parent n) (dfc->stx parent)]
+    [(make dfc:pre parent stx) stx]
+    [(make dfc:post parent stx) stx]))
+
+;; dfc-difference : DFC DFC -> nat
+;; Returns N s.t. B = (dfc-add-cdr^N A)
+(define (dfc-difference a b)
+  (define (whoops)
+    (error 'dfc-difference "~e is not an extension of ~e"
+           (frontier->sexpr b) (frontier->sexpr a)))
+  (match (list a b)
+    [(list (make dfc:cdr pa na) (make dfc:cdr pb nb))
+     (unless (equal? pa pb) (whoops))
+     (- nb na)]
+    [(list pa (make dfc:cdr pb nb))
+     (unless (equal? pa pb) (whoops))
+     nb]
+    [_
+     (unless (equal? a b) (whoops))
+     0]))
+
+;; dfc-append : DFC DFC -> DFC
+;; puts A at the base, B on top
+(define (dfc-append a b)
+  (match b
+    [(make dfc:empty stx) a]
+    [(make dfc:car pb stx) (make dfc:car (dfc-append a pb) stx)]
+    [(make dfc:cdr (make dfc:empty _) nb)
+     ;; Special case to merge "consecutive" cdr frames
+     (match a
+       [(make dfc:cdr pa na) (make dfc:cdr pa (+ na nb))]
+       [_ (make dfc:cdr a nb)])]
+    [(make dfc:cdr pb nb) (make dfc:cdr (dfc-append a pb) nb)]
+    [(make dfc:pre pb stx) (make dfc:pre (dfc-append a pb) stx)]
+    [(make dfc:post pb stx) (make dfc:post (dfc-append a pb) stx)]))
+
+
+;; An Inverted DFC (IDFC) is a DFC inverted for easy comparison.
+
+(define (invert-dfc dfc)
+  (define (invert dfc acc)
+    (match dfc
+      [(make dfc:empty _) acc]
+      [(make dfc:car parent stx)
+       (invert parent (make dfc:car acc stx))]
+      [(make dfc:cdr parent n)
+       (invert parent (make dfc:cdr acc n))]
+      [(make dfc:pre parent stx)
+       (invert parent (make dfc:pre acc stx))]
+      [(make dfc:post parent stx)
+       (invert parent (make dfc:post acc stx))]))
+  (invert dfc (dfc-empty 'dummy)))
+
+;; compare-idfcs : IDFC IDFC -> (one-of '< '= '>)
 ;; Note A>B means A is "further along" than B.
-(define (compare-dfcs a b)
-  (cond [(and (null? a) (null? b))
-         '=]
-        [(and (pair? a) (null? b))
-         '>]
-        [(and (null? a) (pair? b))
-         '<]
-        [(and (pair? a) (pair? b))
-         (cond [(> (car a) (car b)) '>]
-               [(< (car a) (car b)) '<]
-               [else (compare-dfcs (cdr a) (cdr b))])]))
+;; Lexicographic generalization of PRE < CAR < CDR < POST
+(define (compare-idfcs a b)
+  (match (list a b)
+    ;; Same constructors
+    [(list (make dfc:empty _) (make dfc:empty _)) '=]
+    [(list (make dfc:car pa _) (make dfc:car pb _))
+     (compare-idfcs pa pb)]
+    [(list (make dfc:cdr pa na) (make dfc:cdr pb nb))
+     (cond [(< na nb) '<]
+           [(> na nb) '>]
+           [(= na nb) (compare-idfcs pa pb)])]
+    [(list (make dfc:pre pa _) (make dfc:pre pb _))
+     ;; FIXME: possibly just '= here, treat all sides as equiv
+     (compare-idfcs pa pb)]
+    [(list (make dfc:post pa _) (make dfc:post pb _))
+     ;; FIXME: possibly just '= here, treat all sides as equiv
+     (compare-idfcs pa pb)]
+    ;; Different constructors
+    [(list (make dfc:empty _) _) '<]
+    [(list _ (make dfc:empty _)) '>]
+    [(list (make dfc:pre _ _) _) '<]
+    [(list _ (make dfc:pre _ _)) '>]
+    [(list (make dfc:car _ _) _) '<]
+    [(list _ (make dfc:car _ _)) '>]
+    [(list (make dfc:cdr _ _) _) '<]
+    [(list _ (make dfc:cdr _ _)) '>]))
+
+(define (idfc>? a b)
+  (eq? (compare-idfcs a b) '>))
+
+(define (idfc=? a b)
+  (eq? (compare-idfcs a b) '=))
 
 ;; == Codegen internal syntax parameters
 
@@ -166,13 +314,13 @@
 ;; == Success and Failure
 
 ;; A Failure is one of
-;;   (make-failure stx DFC stx expectation/c)
+;;   (make-failure stx DFC expectation/c)
 ;;   (make-join-failures Failure Failure)
 
 (define ok? list?)
 
-(define-struct failure (stx frontier frontier-stx expectation) #:transparent)
-(define-struct join-failures (f1 f2) #:transparent)
+(define-struct failure (stx frontier expectation) #:prefab)
+(define-struct join-failures (f1 f2) #:prefab)
 
 ;; (try expr ...)
 (define-syntax (try stx)
@@ -197,7 +345,7 @@
                (lambda (f1)
                  (let ([combining-fail
                         (lambda (f2)
-                          (fail (make-join-failures f1 f2)))])
+                          (fail (make join-failures f1 f2)))])
                    (try* rest-attempts combining-fail)))])
           (first-attempt next-fail)))))
 
@@ -233,24 +381,20 @@ An Expectation is one of
   (or/c expect? (symbols 'ineffable)))
 
 (define (merge-expectations a b)
-  (make-expect:disj a b))
+  (make expect:disj a b))
 
 ;; expect->alternatives : Expectation -> (listof Expectation)/#f
 ;; #f indicates 'ineffable somewhere in expectation
 (define (expect->alternatives e)
-  (define (loop e)
+  (define (loop-onto e rest)
     (cond [(expect:disj? e)
-           (union (expect->alternatives (expect:disj-a e))
-                  (expect->alternatives (expect:disj-b e)))]
-          [else (list e)]))
-  (let ([alts (loop e)])
+           (loop-onto (expect:disj-a e)
+                      (loop-onto (expect:disj-b e) rest))]
+          [else (cons e rest)]))
+  (let ([alts (remove-duplicates (loop-onto e null))])
     (if (for/or ([alt alts]) (eq? alt 'ineffable))
         #f
         alts)))
-
-;; FIXME: n^2 use of union above
-(define (union a b)
-  (append a (for/list ([x b] #:when (not (member x a))) x)))
 
 (define (expectation-of-null? e)
   (or (equal? e '#s(expect:atom ()))
@@ -341,8 +485,11 @@ An Expectation is one of
                               #'name))))])))
 
 ;; (let/unpack (([id num] ...) expr) expr) : expr
+;; Special case: empty attrs need not match packed length
 (define-syntax (let/unpack stx)
   (syntax-case stx ()
+    [(let/unpack (() packed) body)
+     #'body]
     [(let/unpack ((a ...) packed) body)
      (with-syntax ([(tmp ...) (generate-temporaries #'(a ...))])
        #'(let-values ([(tmp ...) (apply values packed)])
@@ -380,3 +527,45 @@ An Expectation is one of
       (for ([x v]) (loop (sub1 n) x))))
   (loop n0 v0)
   v0)
+
+
+;; ----
+
+;; debugging
+
+(provide failure->sexpr
+         one-failure->sexpr
+         frontier->sexpr
+         expectation->sexpr)
+
+(define (failure->sexpr f)
+  (define fs
+    (let loop ([f f])
+      (match f
+        [(make join-failures f1 f2)
+         (append (loop f1) (loop f2))]
+        [_ (list f)])))
+  (case (length fs)
+    ((1) (one-failure->sexpr f))
+    (else `(union ,@(map one-failure->sexpr fs)))))
+
+(define (one-failure->sexpr f)
+  (match f
+    [(make failure x frontier expectation)
+     `(failure ,(frontier->sexpr frontier)
+               #:term ,(syntax->datum x)
+               #:expected ,(expectation->sexpr expectation))]))
+
+(define (frontier->sexpr dfc)
+  (match (invert-dfc dfc)
+    [(make dfc:empty _) '()]
+    [(make dfc:car p _) (cons 0 (frontier->sexpr p))]
+    [(make dfc:cdr p n) (cons n (frontier->sexpr p))]
+    [(make dfc:pre p _) (cons 'pre (frontier->sexpr p))]
+    [(make dfc:post p _) (cons 'post (frontier->sexpr p))]))
+
+(define (expectation->sexpr expectation)
+  (match expectation
+    [(make expect:thing thing '#t chained)
+     (make expect:thing thing #t (failure->sexpr chained))]
+    [_ expectation]))

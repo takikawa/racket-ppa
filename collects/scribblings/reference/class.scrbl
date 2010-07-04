@@ -186,7 +186,15 @@ implements the interface must be derived from @scheme[object%].
 Otherwise, the implementation requirement of the resulting interface
 is the most specific requirement from its superinterfaces. If the
 superinterfaces specify inconsistent derivation requirements, the
-@exnraise[exn:fail:object].}
+@exnraise[exn:fail:object].
+
+@defexamples[
+#:eval class-eval
+(define file-interface
+  (interface () open close read-byte write-byte))
+(define directory-interface
+  (interface (file-interface) file-list parent-directory))
+]}
 
 @defform[(interface* (super-interface-expr ...) 
                      ([property-expr val-expr] ...)
@@ -203,7 +211,13 @@ instantiated by instances of the class. Specifically, the property is
 attached to a structure type with zero immediate fields, which is
 extended to produce the internal structure type for instances of the
 class (so that no information about fields is accessible to the
-structure type property's guard, if any).}
+structure type property's guard, if any).
+
+@defexamples[
+#:eval class-eval
+(define i (interface* () ([prop:custom-write (lambda (obj port write?) (void))])
+                      method1 method2 method3))
+]}
 
 @; ------------------------------------------------------------------------
 
@@ -343,6 +357,7 @@ flattened for top-level and embedded definitions.
 
 Within a @scheme[class*] form for instances of the new class,
 @scheme[this] is bound to the object itself;
+@scheme[this%] is bound to the class of the object;
 @scheme[super-instantiate], @scheme[super-make-object], and
 @scheme[super-new] are bound to forms to initialize fields in the
 superclass (see @secref["objcreation"]); @scheme[super] is
@@ -353,14 +368,64 @@ calling subclass augmentations of methods (see
 
 @defform[(class superclass-expr class-clause ...)]{
 
-Like @scheme[class*], but omits the @scheme[interface-expr]s, for the case that none are needed.}
+Like @scheme[class*], but omits the @scheme[interface-expr]s, for the case that none are needed.
+
+@defexamples[
+#:eval class-eval
+(define book-class
+  (class object%
+    (field (pages 5))
+    (define/public (letters)
+      (* pages 500))
+    (super-new)))
+]}
 
 @defidform[this]{
 
 @index['("self")]{Within} a @scheme[class*] form, @scheme[this] refers
 to the current object (i.e., the object being initialized or whose
 method was called). Use outside the body of a @scheme[class*] form is
-a syntax error.}
+a syntax error.
+
+@defexamples[
+#:eval class-eval
+(define (describe obj)
+  (printf "Hello ~a\n" obj))
+(define table
+  (class object%
+    (define/public (describe-self)
+      (describe this))
+    (super-new)))
+(send (new table) describe-self)
+]}
+
+@defidform[this%]{
+                  
+Within a @scheme[class*] form, @scheme[this%] refers to the class
+of the current object (i.e., the object being initialized or whose
+method was called).  Use outside the body of a @scheme[class*] form is
+a syntax error.
+
+@defexamples[
+#:eval class-eval
+(define account%
+  (class object% 
+    (super-new)
+    (init-field balance)
+    (define/public (add n)
+      (new this% [balance (+ n balance)]))))
+(define savings%
+  (class account%
+    (super-new)
+    (inherit-field balance)
+    (define interest 0.04)
+    (define/public (add-interest)
+      (send this add (* interest balance)))))
+(let* ([acct (new savings% [balance 500])]
+       [acct (send acct add 500)]
+       [acct (send acct add-interest)])
+  (printf "Current balance: ~a\n" (get-field balance acct)))
+]}
 
 @defclassforms[
   [(inspect inspector-expr) ()]

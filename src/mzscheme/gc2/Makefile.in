@@ -48,6 +48,7 @@ OBJS =  salloc.@LTO@ \
 	eval.@LTO@ \
 	file.@LTO@ \
 	fun.@LTO@ \
+	future.@LTO@ \
 	hash.@LTO@ \
 	jit.@LTO@ \
 	list.@LTO@ \
@@ -92,6 +93,7 @@ XSRCS = $(XSRCDIR)/salloc.c \
 	$(XSRCDIR)/eval.c \
 	$(XSRCDIR)/file.c \
 	$(XSRCDIR)/fun.c \
+	$(XSRCDIR)/future.c \
 	$(XSRCDIR)/hash.c \
 	$(XSRCDIR)/jit.c \
 	$(XSRCDIR)/list.c \
@@ -136,7 +138,7 @@ xobjects: $(OBJS) main.@LTO@
 XFORMDEP = $(srcdir)/gc2.h $(srcdir)/gc2_obj.h $(srcdir)/xform.ss $(srcdir)/xform-mod.ss \
            $(srcdir)/precomp.c $(srcdir)/../src/schpriv.h $(srcdir)/../include/scheme.h \
            $(srcdir)/../sconfig.h $(srcdir)/../uconfig.h $(srcdir)/../src/schemef.h \
-           $(srcdir)/../src/stypes.h 
+           $(srcdir)/../src/stypes.h $(srcdir)/../include/schthread.h $(srcdir)/../src/mzrt.h 
 
 LIGHTNINGDEP = $(srcdir)/../src/lightning/i386/core.h $(srcdir)/../src/lightning/i386/core-common.h \
                $(srcdir)/../src/lightning/i386/asm.h $(srcdir)/../src/lightning/i386/asm-common.h \
@@ -174,6 +176,8 @@ $(XSRCDIR)/file.c: ../src/file.@LTO@ $(XFORMDEP)
 	$(XFORM) $(XSRCDIR)/file.c $(SRCDIR)/file.c
 $(XSRCDIR)/fun.c: ../src/fun.@LTO@ $(XFORMDEP)
 	$(XFORM) $(XSRCDIR)/fun.c $(SRCDIR)/fun.c
+$(XSRCDIR)/future.c: ../src/future.@LTO@ $(XFORMDEP)
+	$(XFORM) $(XSRCDIR)/future.c $(SRCDIR)/future.c
 $(XSRCDIR)/hash.c: ../src/hash.@LTO@ $(XFORMDEP)
 	$(XFORM) $(XSRCDIR)/hash.c $(SRCDIR)/hash.c
 $(XSRCDIR)/jit.c: ../src/jit.@LTO@ $(XFORMDEP) $(LIGHTNINGDEP)
@@ -255,6 +259,8 @@ file.@LTO@: $(XSRCDIR)/file.c
 	$(CC) $(CFLAGS) -c $(XSRCDIR)/file.c -o file.@LTO@
 fun.@LTO@: $(XSRCDIR)/fun.c
 	$(CC) $(CFLAGS) -c $(XSRCDIR)/fun.c -o fun.@LTO@
+future.@LTO@: $(XSRCDIR)/future.c
+	$(CC) $(CFLAGS) -c $(XSRCDIR)/future.c -o future.@LTO@
 hash.@LTO@: $(XSRCDIR)/hash.c
 	$(CC) $(CFLAGS) -c $(XSRCDIR)/hash.c -o hash.@LTO@
 jit.@LTO@: $(XSRCDIR)/jit.c
@@ -326,6 +332,7 @@ gc2.@LTO@: \
 		$(srcdir)/gc2_obj.h \
 		$(srcdir)/immobile_boxes.c \
 		$(srcdir)/../include/scheme.h \
+		$(srcdir)/../include/schthread.h \
 		$(srcdir)/../include/../sconfig.h \
 		$(srcdir)/../include/../uconfig.h \
 		$(srcdir)/../include/../src/stypes.h \
@@ -365,8 +372,10 @@ FOREIGN_USED_OBJSLIB = $(FOREIGN_OBJSLIB)
 FOREIGN_NOT_USED_LIB = 
 FOREIGN_NOT_USED_OBJSLIB = 
 
-EXTRA_OBJS_T = ../src/gmp.@LTO@ ../src/unwind.@LTO@ $(@FOREIGN_IF_USED@_LIB)
-EXTRA_OBJS_L = ../src/gmp.@LTO@ ../src/unwind.@LTO@ $(@FOREIGN_IF_USED@_OBJSLIB)
+EXTRA_GMP := $(if @EXTRA_GMP_OBJ@,../src/@EXTRA_GMP_OBJ@,)
+
+EXTRA_OBJS_T = ../src/gmp.@LTO@ $(EXTRA_GMP) ../src/unwind.@LTO@ $(@FOREIGN_IF_USED@_LIB)
+EXTRA_OBJS_L = ../src/gmp.@LTO@ $(EXTRA_GMP) ../src/unwind.@LTO@ $(@FOREIGN_IF_USED@_OBJSLIB)
 
 ../libmzscheme3m.@LIBSFX@: $(OBJS) $(EXTRA_OBJS_T) gc2.@LTO@
 	$(AR) $(ARFLAGS) ../libmzscheme3m.@LIBSFX@ $(OBJS) $(EXTRA_OBJS_L) gc2.@LTO@

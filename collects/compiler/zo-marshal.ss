@@ -21,6 +21,8 @@
                                 #f)
                               (begin
                                 (hash-set! encountered v #t)
+                                (when (closure? v)
+                                  (hash-set! shared v (add1 (hash-count shared))))
                                 #t))))])
          (traverse-prefix prefix visit)
          (traverse-form form visit))
@@ -133,14 +135,14 @@
      (void)]
     [(struct assign (id rhs undef-ok?))
      (traverse-expr rhs visit)]
-    [(struct localref (unbox? offset clear? other-clears?))
+    [(struct localref (unbox? offset clear? other-clears? flonum?))
      (void)]
     [(? lam?)
      (traverse-lam expr visit)]
     [(struct case-lam (name lams))
      (traverse-data name visit)
      (for-each (lambda (lam) (traverse-lam lam visit)) lams)]
-    [(struct let-one (rhs body))
+    [(struct let-one (rhs body flonum?))
      (traverse-expr rhs visit)
      (traverse-expr body visit)]
     [(struct let-void (count boxes? body))
@@ -197,11 +199,11 @@
 
 (define (traverse-lam expr visit)
   (match expr
-    [(struct indirect (val)) (traverse-lam expr visit)]
+    [(struct indirect (val)) (traverse-lam val visit)]
     [(struct closure (lam gen-id))
      (when (visit expr)
-       (traverse-lam expr visit))]
-    [(struct lam (name flags num-params param-types rest? closure-map max-let-depth body))
+       (traverse-lam lam visit))]
+    [(struct lam (name flags num-params param-types rest? closure-map closure-types max-let-depth body))
      (traverse-data name visit)
      (traverse-expr body visit)]))
 
@@ -221,7 +223,7 @@
 (define case-lambda-sequence-type-num 96)
 (define begin0-sequence-type-num 97)
 (define module-type-num 100)
-(define prefix-type-num 103)
+(define prefix-type-num 102)
 
 (define-syntax define-enum
   (syntax-rules ()
@@ -252,7 +254,7 @@
   CPT_VECTOR
   CPT_HASH_TABLE
   CPT_STX
-  CPT_GSTX
+  CPT_LET_ONE_FLONUM
   CPT_MARSHALLED
   CPT_QUOTE
   CPT_REFERENCE
@@ -531,8 +533,8 @@
      (out-syntax SET_EXPD
                  (cons undef-ok? (cons id rhs))
                  out)]
-    [(struct localref (unbox? offset clear? other-clears?))
-     (if (and (not clear?) (not other-clears?)
+    [(struct localref (unbox? offset clear? other-clears? flonum?))
+     (if (and (not clear?) (not other-clears?) (not flonum?)
               (offset . < . (- CPT_SMALL_LOCAL_END CPT_SMALL_LOCAL_START)))
          (out-byte (+ (if unbox?
                           CPT_SMALL_LOCAL_UNBOX_START
@@ -541,12 +543,17 @@
                    out)
          (begin
            (out-byte (if unbox? CPT_LOCAL_UNBOX CPT_LOCAL) out)
-           (if (not (or clear? other-clears?))
+           (if (not (or clear? other-clears? flonum?))
                (out-number offset out)
                (begin
                  (out-number (- (add1 offset)) out)
-                 (out-number (+ (if clear? #x1 0)
-                                (if other-clears? #x2 0))
+                 (out-number (if clear?
+                                 #x1
+                                 (if other-clears? 
+                                     #x2
+                                     (if flonum?
+                                         #x3
+                                         0)))
                              out)))))]
     [(? lam?)
      (out-lam expr out)]
@@ -567,8 +574,8 @@
                     (cons (or name null)
                           lams)
                     out)]
-    [(struct let-one (rhs body))
-     (out-byte CPT_LET_ONE out)
+    [(struct let-one (rhs body flonum?))
+     (out-byte (if flonum? CPT_LET_ONE_FLONUM CPT_LET_ONE) out)
      (out-expr (protect-quote rhs) out)
      (out-expr (protect-quote body) out)]
     [(struct let-void (count boxes? body))
@@ -643,7 +650,7 @@
 
 (define (out-lam expr out)
   (match expr
-    [(struct indirect (val)) (out-lam expr out)]
+    [(struct indirect (val)) (out-lam val out)]
     [(struct closure (lam gen-id))
      (out-shared
       expr
@@ -652,21 +659,32 @@
         (out-byte CPT_CLOSURE out)
         (out-number ((out-shared-index out) expr) out)
         (out-lam lam out)))]
-    [(struct lam (name flags num-params param-types rest? closure-map max-let-depth body))
+    [(struct lam (name flags num-params param-types rest? closure-map closure-types max-let-depth body))
      (let* ([l (protect-quote body)]
-            [any-refs? (ormap (lambda (t) (eq? t 'ref)) param-types)]
+            [any-refs? (or (ormap (lambda (t) (memq t '(ref flonum))) param-types)
+                           (ormap (lambda (t) (memq t '(flonum))) closure-types))]
+            [num-all-params ((if rest? add1 values) num-params)]
             [l (cons (make-svector (if any-refs?
                                        (list->vector
                                         (append
                                          (vector->list closure-map)
-                                         (let ([v (make-vector (ceiling (/ num-params BITS_PER_MZSHORT)))])
+                                         (let* ([v (make-vector (ceiling 
+                                                                 (/ (* 2 (+ num-params (vector-length closure-map)))
+                                                                    BITS_PER_MZSHORT)))]
+                                                [set-bit! (lambda (i bit)
+                                                            (let ([pos (quotient (* 2 i) BITS_PER_MZSHORT)])
+                                                              (vector-set! v pos
+                                                                           (bitwise-ior (vector-ref v pos)
+                                                                                        (arithmetic-shift 
+                                                                                         bit
+                                                                                         (modulo (* 2 i) BITS_PER_MZSHORT))))))])
                                            (for ([t (in-list param-types)]
                                                  [i (in-naturals)])
-                                             (when (eq? t 'ref)
-                                               (let ([pos (quotient i BITS_PER_MZSHORT)])
-                                                 (vector-set! v pos
-                                                              (bitwise-ior (vector-ref v pos)
-                                                                           (arithmetic-shift 1 (modulo i BITS_PER_MZSHORT)))))))
+                                             (when (eq? t 'ref) (set-bit! i 1))
+                                             (when (eq? t 'flonum) (set-bit! i 2)))
+                                           (for ([t (in-list closure-types)]
+                                                 [i (in-naturals num-all-params)])
+                                             (when (eq? t 'flonum) (set-bit! i 2)))
                                            (vector->list v))))
                                        closure-map))
                      l)]
@@ -680,7 +698,7 @@
                           (if (memq 'preserves-marks flags) CLOS_PRESERVES_MARKS 0)
                           (if (memq 'is-method flags) CLOS_IS_METHOD 0)
                           (if (memq 'single-result flags) CLOS_SINGLE_RESULT 0))
-                       ((if rest? add1 values) num-params)
+                       num-all-params
                        max-let-depth
                        name
                        l)
@@ -791,7 +809,10 @@
     (out-byte CPT_QUOTE out)
     (let ([s (open-output-bytes)])
       (write (if (quoted? expr) (quoted-v expr) expr) s)
-      (out-bytes (get-output-bytes s) out))]))
+      (out-byte CPT_ESCAPE out)
+      (let ([bstr (get-output-bytes s)])
+        (out-number (bytes-length bstr) out)
+        (out-bytes bstr out)))]))
 
 (define-struct quoted (v))
 (define (protect-quote v)
