@@ -4,6 +4,7 @@
          "struct.ss"
          "term.ss"
          "loc-wrapper.ss"
+	 "error.ss"
          (lib "list.ss")
          (lib "etc.ss"))
 
@@ -38,13 +39,15 @@
                      (let ([match (match-pattern cp-x exp)])
                        (when match
                          (unless (null? (cdr match))
-                           (error 'term-match "pattern ~s matched term ~e multiple ways"
-                                  'pattern
-                                  exp))
+                           (redex-error
+			    'term-match/single
+			    "pattern ~s matched term ~e multiple ways"
+			    'pattern
+			    exp))
                          (k (term-let ([names/ellipses (lookup-binding (mtch-bindings (car match)) 'names)] ...)
                               rhs))))
                      ...
-                     (error 'term-match/single "no patterns matched ~e" exp))))))))]))
+                     (redex-error 'term-match/single "no patterns matched ~e" exp))))))))]))
 
 (define-syntax (term-match stx)
   (syntax-case stx ()
@@ -778,6 +781,24 @@
     ((metafunc-proc-in-dom? mp)
      exp)))
 
+
+;                                                                                                          
+;                                                                                                          
+;                                                                                                          
+;                            ;              ;;;                                 ;    ;;                    
+;                           ;;             ;;;;                                ;;    ;;                    
+;  ;;;;;;; ;;;;    ;;;    ;;;;; ;;;;;;;   ;;;;; ;;;; ;;;; ;;;; ;;;    ;;;;;  ;;;;;        ;;;;   ;;;; ;;;  
+;  ;;;;;;;;;;;;;  ;;;;;  ;;;;;; ;;;;;;;;  ;;;;  ;;;; ;;;; ;;;;;;;;;  ;;;;;; ;;;;;; ;;;;  ;;;;;;  ;;;;;;;;; 
+;  ;;;; ;;; ;;;; ;;;; ;;  ;;;;      ;;;; ;;;;;; ;;;; ;;;; ;;;; ;;;; ;;;;;;;  ;;;;  ;;;; ;;;;;;;; ;;;; ;;;; 
+;  ;;;; ;;; ;;;; ;;;;;;;  ;;;;   ;;;;;;; ;;;;;; ;;;; ;;;; ;;;; ;;;; ;;;;     ;;;;  ;;;; ;;;; ;;; ;;;; ;;;; 
+;  ;;;; ;;; ;;;; ;;;;;    ;;;;; ;;  ;;;;  ;;;;  ;;;; ;;;; ;;;; ;;;; ;;;;;;;  ;;;;; ;;;; ;;;;;;;; ;;;; ;;;; 
+;  ;;;; ;;; ;;;;  ;;;;;;  ;;;;; ;;;;;;;;  ;;;;  ;;;;;;;;; ;;;; ;;;;  ;;;;;;  ;;;;; ;;;;  ;;;;;;  ;;;; ;;;; 
+;  ;;;; ;;; ;;;;   ;;;;    ;;;;  ;; ;;;;  ;;;;   ;;; ;;;; ;;;; ;;;;   ;;;;;   ;;;; ;;;;   ;;;;   ;;;; ;;;; 
+;                                                                                                          
+;                                                                                                          
+;                                                                                                          
+
+
 (define-syntax-set (define-metafunction define-metafunction/extension)
   
   (define (define-metafunction/proc stx)
@@ -801,7 +822,7 @@
            (raise-syntax-error syn-error-name "expected an identifier in the language position" orig-stx #'lang))
          (when (null? (syntax-e #'rest))
            (raise-syntax-error syn-error-name "no clauses" orig-stx))
-         (let-values ([(dom-ctcs codom-contract pats)
+         (let-values ([(contract-name dom-ctcs codom-contract pats)
                        (split-out-contract orig-stx syn-error-name #'rest)])
            (with-syntax ([(((name lhs-clauses ...) rhs stuff ...) ...) pats]
                          [(lhs-for-lw ...)
@@ -809,16 +830,24 @@
                             (map (λ (x) (datum->syntax #f (cdr (syntax-e x)) x))
                                  (syntax->list #'(lhs-for-lw ...))))])
              (with-syntax ([(lhs ...) #'((lhs-clauses ...) ...)]
-                           [name (let loop ([name (car (syntax->list #'(name ...)))]
-                                            [names (cdr (syntax->list #'(name ...)))])
+                           [name (let loop ([name (if contract-name
+                                                      contract-name
+                                                      (car (syntax->list #'(name ...))))]
+                                            [names (if contract-name
+                                                       (syntax->list #'(name ...))
+                                                       (cdr (syntax->list #'(name ...))))])
                                    (cond
                                      [(null? names) name]
                                      [else
                                       (unless (eq? (syntax-e name) (syntax-e (car names)))
-                                        (raise-syntax-error 'define-metafunction
-                                                            "expected each clause to use the same name"
-                                                            stx
-                                                            (list name (car names))))
+                                        (raise
+                                         (make-exn:fail:syntax
+                                          (if contract-name
+                                              "define-metafunction: expected each clause and the contract to use the same name"
+                                              "define-metafunction: expected each clause to use the same name")
+                                          (current-continuation-marks)
+                                          (list name
+                                                (car names)))))
                                       (loop name (cdr names))]))])
                
                (with-syntax ([(((tl-side-conds ...) ...) 
@@ -855,7 +884,7 @@
                                              (syntax 
                                               (λ (name bindings)
                                                 (term-let ([names/ellipses (lookup-binding bindings 'names)] ...)
-                                                          (term-let ([tl-var tl-exp] ...)
+                                                          (term-let ([tl-var (term tl-exp)] ...)
                                                                     (term-let-fn ((name name))
                                                                                  (term rhs)))))))))
                                        (syntax->list (syntax (lhs ...)))
@@ -930,7 +959,7 @@
     ;; initial test determines if a contract is specified or not
     (cond
       [(pair? (syntax-e (car (syntax->list rest))))
-       (values #f #'any (check-clauses stx syn-error-name rest))]
+       (values #f #f #'any (check-clauses stx syn-error-name rest))]
       [else
        (syntax-case rest ()
          [(id colon more ...)
@@ -946,9 +975,9 @@
                  (when (null? (cdr more))
                    (raise-syntax-error syn-error-name "expected a range contract to follow the arrow" stx (car more)))
                  (let ([doms (reverse dom-pats)]
-                       [codomain (car more)]
+                       [codomain (cadr more)]
                        [clauses (check-clauses stx syn-error-name (cddr more))])
-                   (values doms codomain clauses))]
+                   (values #'id doms codomain clauses))]
                 [else
                  (loop (cdr more) (cons (car more) dom-pats))])))]
          [_
@@ -1010,43 +1039,54 @@
                                      "expected a side-condition or where clause"
                                      (car stuff))])]))]))))
 
-(define (build-metafunction lang patterns rhss old-cps old-rhss wrap dom-contract-pat rng-contract-pat name)
+(define (build-metafunction lang patterns rhss old-cps old-rhss wrap dom-contract-pat codom-contract-pat name)
   (let ([compiled-patterns (append old-cps
                                    (map (λ (pat) (compile-pattern lang pat #t)) patterns))]
         [dom-compiled-pattern (and dom-contract-pat (compile-pattern lang dom-contract-pat #f))]
-        [rng-compiled-pattern (compile-pattern lang rng-contract-pat #t)])
+        [codom-compiled-pattern (compile-pattern lang codom-contract-pat #f)])
     (values
      (wrap
-      (letrec ([metafunc
+      (letrec ([cache (make-hash)]
+               [not-in-cache (gensym)]
+               [metafunc
                 (λ (exp)
-                  (when dom-compiled-pattern
-                    (unless (match-pattern dom-compiled-pattern exp)
-                      (error name
-                             "~s is not in my domain"
-                             `(,name ,@exp))))
-                  (let loop ([patterns compiled-patterns]
-                             [rhss (append old-rhss rhss)]
-                             [num (- (length old-cps))])
+                  (let ([cache-ref (hash-ref cache exp not-in-cache)])
                     (cond
-                      [(null? patterns) 
-                       (error name "no clauses matched for ~s" `(,name . ,exp))]
-                      [else
-                       (let ([pattern (car patterns)]
-                             [rhs (car rhss)])
-                         (let ([mtchs (match-pattern pattern exp)])
-                           (cond
-                             [(not mtchs) (loop (cdr patterns)
-                                                (cdr rhss)
-                                                (+ num 1))]
-                             [(not (null? (cdr mtchs)))
-                              (error name "~a matched ~s ~a different ways" 
-                                     (if (< num 0)
-                                         "a clause from an extended metafunction"
-                                         (format "clause ~a" num))
-                                     `(,name ,@exp)
-                                     (length mtchs))]
-                             [else
-                              (rhs metafunc (mtch-bindings (car mtchs)))])))])))])
+                      [(eq? cache-ref not-in-cache)
+                       (when dom-compiled-pattern
+                         (unless (match-pattern dom-compiled-pattern exp)
+                           (redex-error name
+                                        "~s is not in my domain"
+                                        `(,name ,@exp))))
+                       (let loop ([patterns compiled-patterns]
+                                  [rhss (append old-rhss rhss)]
+                                  [num (- (length old-cps))])
+                         (cond
+                           [(null? patterns) 
+                            (redex-error name "no clauses matched for ~s" `(,name . ,exp))]
+                           [else
+                            (let ([pattern (car patterns)]
+                                  [rhs (car rhss)])
+                              (let ([mtchs (match-pattern pattern exp)])
+                                (cond
+                                  [(not mtchs) (loop (cdr patterns)
+                                                     (cdr rhss)
+                                                     (+ num 1))]
+                                  [(not (null? (cdr mtchs)))
+                                   (redex-error name "~a matched ~s ~a different ways" 
+                                                (if (< num 0)
+                                                    "a clause from an extended metafunction"
+                                                    (format "clause ~a" num))
+                                                `(,name ,@exp)
+                                                (length mtchs))]
+                                  [else
+                                   (let ([ans (rhs metafunc (mtch-bindings (car mtchs)))])
+                                     (unless (match-pattern codom-compiled-pattern ans)
+                                       (redex-error name "codomain test failed for ~s, call was ~s" ans `(,name ,@exp)))
+                                     (hash-set! cache exp ans)
+                                     ans)])))]))]
+                      [else 
+                       cache-ref])))])
         metafunc)
       compiled-patterns
       rhss)
@@ -1096,27 +1136,37 @@
                                 stx
                                 name)]))])))
 
+;; check-rhss-not-empty : syntax (listof syntax) -> void
+(define-for-syntax (check-rhss-not-empty def-lang-stx nt-def-stxs)
+  (for-each 
+   (λ (nt-def-stx)
+     (when (null? (cdr (syntax-e nt-def-stx)))
+       (raise-syntax-error 'define-language "non-terminal with no productions" def-lang-stx nt-def-stx)))
+   nt-def-stxs))
+
 (define-syntax (define-language stx)
   (syntax-case stx ()
     [(_ name (names rhs ...) ...)
      (identifier? (syntax name))
-     (with-syntax ([((nt-names orig) ...) (pull-out-names 'define-language stx #'(names ...))])
-       (with-syntax ([(subst-names ...) (generate-temporaries (syntax->list #'(nt-names ...)))])
-         (syntax/loc stx
-           (begin
-             (define-syntax name
-               (make-set!-transformer
-                (make-language-id
-                 (case-lambda
-                   [(stx)
-                    (syntax-case stx (set!)
-                      [(set! x e) (raise-syntax-error 'define-language "cannot set! identifier" stx #'e)]
-                      [(x e (... ...)) #'(define-language-name e (... ...))]
-                      [x 
-                       (identifier? #'x)
-                       #'define-language-name])])
-                 '(nt-names ...))))
-             (define define-language-name (language name (names rhs ...) ...))))))]))
+     (begin
+       (check-rhss-not-empty stx (cddr (syntax-e stx)))
+       (with-syntax ([((nt-names orig) ...) (pull-out-names 'define-language stx #'(names ...))])
+         (with-syntax ([(subst-names ...) (generate-temporaries (syntax->list #'(nt-names ...)))])
+           (syntax/loc stx
+             (begin
+               (define-syntax name
+                 (make-set!-transformer
+                  (make-language-id
+                   (case-lambda
+                     [(stx)
+                      (syntax-case stx (set!)
+                        [(set! x e) (raise-syntax-error 'define-language "cannot set! identifier" stx #'e)]
+                        [(x e (... ...)) #'(define-language-name e (... ...))]
+                        [x 
+                         (identifier? #'x)
+                         #'define-language-name])])
+                   '(nt-names ...))))
+               (define define-language-name (language name (names rhs ...) ...)))))))]))
 
 (define-struct binds (source binds))
 
@@ -1296,6 +1346,7 @@
          (raise-syntax-error 'define-extended-langauge "expected an identifier" stx #'name))
        (unless (identifier? (syntax orig-lang))
          (raise-syntax-error 'define-extended-langauge "expected an identifier" stx #'orig-lang))
+       (check-rhss-not-empty stx (cdddr (syntax-e stx)))
        (let ([old-names (language-id-nts #'orig-lang 'define-extended-language)])
          (with-syntax ([((new-nt-names orig) ...) (append (pull-out-names 'define-language stx #'(names ...)) 
                                                           (map (λ (x) #`(#,x #f)) old-names))])
@@ -1599,8 +1650,8 @@
   (unless (pred arg)
     (inc-failures)
     (print-failed srcinfo)
-    (fprintf (current-error-port) "  ~v\ndid not elicit ~v from ~v\n" 
-             arg #t pred)))
+    (fprintf (current-error-port) "  ~v does not hold for\n  ~v\n" 
+             pred arg)))
 
 (define-syntax (test-equal stx)
   (syntax-case stx ()

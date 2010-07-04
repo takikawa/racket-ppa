@@ -1,11 +1,12 @@
 #lang scheme/base
 
-(require "test-utils.ss")
+(require "test-utils.ss" "planet-requires.ss")
 
-(require (private subtype type-rep type-effect-convenience 
-                  planet-requires init-envs type-environments union infer infer-dummy))
-
-(require (schemeunit)
+(require (private subtype type-effect-convenience union)
+	 (rep type-rep)
+	 (env init-envs type-environments)
+	 (r:infer infer infer-dummy)
+         (schemeunit)
          (for-syntax scheme/base))
 
 (provide subtype-tests)

@@ -12,6 +12,8 @@
 
 @title[#:tag "top"]{@bold{Typed Scheme}: Scheme with Static Types}
 
+@author["Sam Tobin-Hochstadt"]
+
 @(defmodulelang typed-scheme)
 
 Typed Scheme is a Scheme-like language, with a type system that
@@ -39,7 +41,8 @@ easy to start using Typed Scheme.
 
 The following program defines the Fibonacci function in PLT Scheme:
 
-@schememod[scheme
+@schememod[
+scheme
 (define (fib n)
   (cond [(= 0 n) 1]
 	[(= 1 n) 1]
@@ -48,7 +51,8 @@ The following program defines the Fibonacci function in PLT Scheme:
 
 This program defines the same program using Typed Scheme.
  
-@schememod[typed-scheme
+@schememod[
+typed-scheme
 (: fib (Number -> Number))
 (define (fib n)
   (cond [(= 0 n) 1]
@@ -74,7 +78,8 @@ PLT Scheme program to transform it into a Typed Scheme program.
 Other typed binding forms are also available.  For example, we could have
 rewritten our fibonacci program as follows:
 
-@schememod[typed-scheme
+@schememod[
+typed-scheme
 (: fib (Number -> Number))
 (define (fib n)
   (let ([base? (or (= 0 n) (= 1 n))])
@@ -89,7 +94,8 @@ annotations are required.  Typed Scheme infers the type of
 
 We can also define mutually-recursive functions:
 
-@schememod[typed-scheme
+@schememod[
+typed-scheme
 (: my-odd? (Number -> Boolean))
 (define (my-odd? n)
   (if (= 0 n) #f
@@ -114,7 +120,8 @@ to PLT Scheme structures.  The following program defines a date
 structure and a function that formats a date as a string, using PLT
 Scheme's built-in @scheme[format] function.
 
-@schememod[typed-scheme
+@schememod[
+typed-scheme
 (define-struct: Date ([day : Number] [month : String] [year : Number]))
 
 (: format-date (Date -> String))
@@ -139,7 +146,8 @@ we would have with @scheme[define-struct].
 Many data structures involve multiple variants.  In Typed Scheme, we
 represent these using @italic{union types}, written @scheme[(U t1 t2 ...)].
 
-@schememod[typed-scheme
+@schememod[
+typed-scheme
 (define-type-alias Tree (U leaf node))
 (define-struct: leaf ([val : Number]))
 (define-struct: node ([left : Tree] [right : Tree]))
@@ -193,7 +201,8 @@ Virtually every Scheme program uses lists and sexpressions.  Fortunately, Typed
 Scheme can handle these as well.  A simple list processing program can be
 written like this:
 
-@schememod[typed-scheme
+@schememod[
+typed-scheme
 (: sum-list ((Listof Number) -> Number))
 (define (sum-list l)
   (cond [(null? l) 0]
@@ -210,7 +219,8 @@ want.
 We can define our own type constructors as well.  For example, here is
 an analog of the @tt{Maybe} type constructor from Haskell:
 
-@schememod[typed-scheme
+@schememod[
+typed-scheme
 (define-struct: Nothing ())
 (define-struct: (a) Just ([v : a]))
 
@@ -256,7 +266,8 @@ Sometimes functions over polymorphic data structures only concern
 themselves with the form of the structure.  For example, one might
 write a function that takes the length of a list of numbers:
 
-@schememod[typed-scheme
+@schememod[
+typed-scheme
 (: list-number-length ((Listof Number) -> Integer))
 (define (list-number-length l)
   (if (null? l)
@@ -265,7 +276,8 @@ write a function that takes the length of a list of numbers:
 
 and also a function that takes the length of a list of strings:
 
-@schememod[typed-scheme
+@schememod[
+typed-scheme
 (: list-string-length ((Listof String) -> Integer))
 (define (list-string-length l)
   (if (null? l)
@@ -279,7 +291,8 @@ definition.
 
 We can abstract over the type of the element as follows:
 
-@schememod[typed-scheme
+@schememod[
+typed-scheme
 (: list-length (All (A) ((Listof A) -> Integer)))
 (define (list-length l)
   (if (null? l)
@@ -299,7 +312,8 @@ Typed Scheme can handle some uses of rest arguments.
 In Scheme, one can write a function that takes an arbitrary
 number of arguments as follows:
 
-@schememod[scheme
+@schememod[
+scheme
 (define (sum . xs)
   (if (null? xs)
       0
@@ -316,7 +330,8 @@ to the rest parameter.  So the examples above evaluate to
 
 We can define such functions in Typed Scheme as well:
 
-@schememod[typed-scheme
+@schememod[
+typed-scheme
 (: sum (Number * -> Number))
 (define (sum . xs)
   (if (null? xs)
@@ -331,7 +346,8 @@ of the rest parameter is used at the same type.
 However, the rest argument may be used as a heterogeneous list.
 Take this (simplified) definition of the Scheme function @scheme[map]:
 
-@schememod[scheme
+@schememod[
+scheme
 (define (map f as . bss)
   (if (or (null? as)
           (ormap null? bss))
@@ -356,7 +372,8 @@ The example uses of @scheme[map] evaluate to @schemeresult[(list 2 3 4 5)],
 
 In Typed Scheme, we can define @scheme[map] as follows:
 
-@schememod[typed-scheme
+@schememod[
+typed-scheme
 (: map 
    (All (C A B ...)
         ((A B ... B -> C) (Listof A) (Listof B) ... B
@@ -411,6 +428,9 @@ The following base types are parameteric in their type arguments.
 @defform[(Boxof t)]{A @gtech{box} of @scheme[t]}
 @defform[(Vectorof t)]{Homogenous @gtech{vectors} of @scheme[t]}
 @defform[(Option t)]{Either @scheme[t] of @scheme[#f]}
+@defform*[[(Parameter t)
+           (Parameter s t)]]{A @rtech{parameter} of @scheme[t].  If two type arguments are supplied, 
+                               the first is the type the parameter accepts, and the second is the type returned.}
 @defform[(Pair s t)]{is the pair containing @scheme[s] as the @scheme[car]
   and @scheme[t] as the @scheme[cdr]}
 
@@ -419,13 +439,16 @@ The following base types are parameteric in their type arguments.
 @defform*[#:id -> #:literals (* ...)
 	       [(dom ... -> rng)
 	        (dom ... rest * -> rng)
-		(dom ... rest ... bound -> rng)]]{is the type of functions from the (possibly-empty)
+		(dom ... rest ... bound -> rng)
+                (dom -> rng : pred)]]{is the type of functions from the (possibly-empty)
   sequence @scheme[dom ...] to the @scheme[rng] type.  The second form
   specifies a uniform rest argument of type @scheme[rest], and the
   third form specifies a non-uniform rest argument of type
   @scheme[rest] with bound @scheme[bound].  In the third form, the
   second occurrence of @scheme[...] is literal, and @scheme[bound]
-  must be an identifier denoting a type variable.}
+  must be an identifier denoting a type variable. In the fourth form, 
+  there must be only one @scheme[dom] and @scheme[pred] is the type 
+  checked by the predicate.}
 @defform[(U t ...)]{is the union of the types @scheme[t ...]}
 @defform[(case-lambda fun-ty ...)]{is a function that behaves like all of
   the @scheme[fun-ty]s.  The @scheme[fun-ty]s must all be function
@@ -500,6 +523,10 @@ types.  In most cases, use of @scheme[:] is preferred to use of @scheme[define:]
 (define-struct: (name parent) ([f : t] ...))
 (define-struct: (v ...) name ([f : t] ...))
 (define-struct: (v ...) (name parent) ([f : t] ...))]]
+{Defines a @rtech{structure} with the name @scheme[name], where the fields 
+         @scheme[f] have types @scheme[t].  The second and fourth forms define @scheme[name]
+         to be a substructure of @scheme[parent].  The last two forms define structures that 
+         are polymorphic in the type variables @scheme[v].}
 
 @subsection{Type Aliases}
 @defform*[[(define-type-alias name t)

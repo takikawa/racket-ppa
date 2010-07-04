@@ -397,8 +397,16 @@
     (define-metafunction empty-language
       [(f (number_1 number_2))
        number_3
-       (where number_3 (+ (term number_1) (term number_2)))])
+       (where number_3 ,(+ (term number_1) (term number_2)))])
     (test (term (f (11 17))) 28))
+  
+  (let ()
+    (define-metafunction empty-language
+      [(f variable) 
+       (x x)
+       (where x (variable variable))])
+    (test (term (f z)) 
+          (term ((z z) (z z)))))
   
   (let ()
     (define-language x-lang
@@ -408,6 +416,52 @@
       [(f x_1 x_2) x_1])
     (test (term (f p q)) (term p))
     (test (in-domain? (f p q)) #t))
+  
+  (let ()
+    (define-metafunction empty-language
+      [(err number_1 ... number_2 ...) 1])
+    (test (term (err)) 1)
+    (test (with-handlers ((exn:fail:redex? (λ (x) 'right-exn))
+                          ((λ (x) #t) (λ (x) 'wrong-exn)))
+            (term (err 1 2))
+            'no-exn)
+          'right-exn))
+  
+  (let ()
+    (define-metafunction empty-language
+      err : number ... -> number
+      [(err number ...) 1])
+    (test (with-handlers ((exn:fail:redex? (λ (x) 'right-exn))
+                          ((λ (x) #t) (λ (x) 'wrong-exn)))
+            (term (err #f #t))
+            'no-exn)
+          'right-exn))
+  
+  (let ()
+    (define-metafunction empty-language
+      err : number ... -> number
+      [(err number ...) #f])
+    (test (with-handlers ((exn:fail:redex? (λ (x) 'right-exn))
+                          ((λ (x) #t) (λ (x) 'wrong-exn)))
+            (term (err 1 2))
+            'no-exn)
+          'right-exn))
+  
+  (let ()
+    (define-metafunction empty-language
+      err : number ... -> (number number)
+      [(err number ...) (number ...)])
+    (test (with-handlers ((exn:fail:redex? (λ (x) 'right-exn))
+                          ((λ (x) #t) (λ (x) 'wrong-exn)))
+            (term (err 1 2))
+            'no-exn)
+          'no-exn)
+    (test (with-handlers ((exn:fail:redex? (λ (x) 'right-exn))
+                          ((λ (x) #t) (λ (x) 'wrong-exn)))
+            (term (err 1 1))
+            'no-exn)
+          'no-exn))
+    
   
 
 ;                                                                                                                                
@@ -425,6 +479,7 @@
 ;                                                                                                                                
 ;                                                                                                                                
 
+  
   
   (test (apply-reduction-relation
          (reduction-relation 
@@ -635,6 +690,11 @@
   (test-syn-err (define-language bad-lang1 (e name)) #rx"name")
   (test-syn-err (define-language bad-lang2 (name x)) #rx"name")
   (test-syn-err (define-language bad-lang3 (x_y x)) #rx"x_y")
+  (test-syn-err (define-language bad-lang4 (a 1 2) (b)) #rx"no productions")
+  (test-syn-err (let ()
+                  (define-language good-lang (a 1 2))
+                  (define-extended-language bad-lang5 good-lang (a) (b 2)))
+                #rx"no productions")
   
   ;; expect union with duplicate names to fail
   (test (with-handlers ((exn? (λ (x) 'passed)))
@@ -869,7 +929,7 @@
   (require (lib "list.ss"))
   (let ()
     (define-metafunction lc-lang
-      free-vars : e -> (listof x)
+      free-vars : e -> (x ...)
       [(free-vars (e_1 e_2 ...))
        (∪ (free-vars e_1) (free-vars e_2) ...)]
       [(free-vars x) (x)]
@@ -938,6 +998,28 @@
          '(x y))
         '(x . y))
   
+
+  (test (with-handlers ((exn:fail:redex? (λ (x) 'right-exn))
+                        ((λ (x) #t) (λ (x) 'wrong-exn)))
+          ((term-match/single empty-language
+                              [(number_1 ... number_2 ...) 1])
+           '(1 2 3))
+          'no-exn)
+        'right-exn)
+  
+  (test (with-handlers ((exn:fail:redex? (λ (x) 'right-exn))
+                        ((λ (x) #t) (λ (x) 'wrong-exn)))
+          ((term-match/single empty-language
+                              [(number_1 ... number_2 ...) 1])
+           'x)
+          'no-exn)
+        'right-exn)
+  
+  (test ((term-match empty-language
+                     [(number_1 ... number_2 ...) 1])
+         'x)
+        '())
+                             
   (define-language x-is-1-language
     [x 1])
   

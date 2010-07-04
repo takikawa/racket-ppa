@@ -8,17 +8,37 @@
          (lib "mred.ss" "mred")
          (lib "mrpict.ss" "texpict"))
 
+(define reduction-rule-style/c
+  (symbols 'compact-vertical
+           'vertical 
+           'vertical-overlapping-side-conditions
+           'horizontal))
+
+(provide reduction-rule-style/c)
+
 (provide/contract 
  [render-reduction-relation
-  (case-> (-> reduction-relation? pict?)
-          (-> reduction-relation? (or/c string? path?) void?))]
- [reduction-relation->pict (-> reduction-relation? pict?)]
+  (->d ([rel reduction-relation?])
+       ([file (or/c false/c path-string?)]
+        #:style [style reduction-rule-style/c])
+       [result (if (path-string? file)
+                   void?
+                   pict?)])]
+ [reduction-relation->pict (->* (reduction-relation?)
+                                (#:style reduction-rule-style/c)
+                                pict?)]
  [render-reduction-relation-rules (parameter/c (or/c false/c (listof (or/c symbol? string?))))]
  
- [language->pict (-> compiled-lang? pict?)]
+ [language->pict (->* (compiled-lang?)
+                      (#:nts (or/c false/c (listof (or/c string? symbol?))))
+                      pict?)]
  [render-language
-  (case-> (-> compiled-lang? pict?)
-          (-> compiled-lang? (or/c path? string?) void?))])
+  (->d ([lang compiled-lang?])
+       ([file (or/c false/c path-string?)]
+        #:nts [nts (or/c false/c (listof (or/c string? symbol?)))])
+       [result (if (path-string? file)
+                   void?
+                   pict?)])])
 
 ; syntax
 (provide metafunction->pict
@@ -37,14 +57,13 @@
  [non-terminal-style (parameter/c text-style/c)]
  [non-terminal-subscript-style (parameter/c text-style/c)]
  [linebreaks (parameter/c (or/c false/c (listof boolean?)))]
- [curly-quotes-for-strings (parameter/c boolean?)])
+ [curly-quotes-for-strings (parameter/c boolean?)]
+ [white-bracket-sizing (parameter/c
+                        (-> string? number? (values number? number? number? number?)))])
 
 (provide/contract
  [rule-pict-style 
-  (parameter/c (symbols 'compact-vertical
-                        'vertical 
-                        'vertical-overlapping-side-conditions
-                        'horizontal))]
+  (parameter/c reduction-rule-style/c)]
  [arrow-space (parameter/c natural-number/c)]
  [label-space (parameter/c natural-number/c)]
  [metafunction-pict-style 
@@ -81,4 +100,6 @@
  [set-arrow-pict! (-> symbol? (-> pict?) void?)]
  
  [lw->pict
+  (-> (or/c (listof symbol?) compiled-lang?) lw? pict?)]
+ [render-lw
   (-> (or/c (listof symbol?) compiled-lang?) lw? pict?)])

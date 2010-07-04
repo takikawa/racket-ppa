@@ -11,7 +11,7 @@ A top-level window is either a @scheme[frame%] or @scheme[dialog%]
            boolean?]{
 
 Called just before the window might be closed (e.g., by the window
- manager). If @scheme[#f] is returned, the window is not\/ closed,
+ manager). If @scheme[#f] is returned, the window is not closed,
  otherwise @method[top-level-window<%> on-close] is called and the
  window is closed (i.e., the window is hidden, like calling
  @method[window<%> show] with @scheme[#f]).
@@ -278,7 +278,7 @@ In a dialog, if @scheme[event] is an Escape key event, the event is
 @item{
 If @scheme[event] is an alphanumeric key event and the current top-level
  window contains a control with a mnemonic matching the key (which is
- installed via a label that contains ``\&''; see
+ installed via a label that contains @litchar{&}; see
  @method[window<%> get-label] for more information), then the
  keyboard focus is moved to the matching control. Furthermore, if the
  matching control is a @scheme[button%], @scheme[check-box%], or

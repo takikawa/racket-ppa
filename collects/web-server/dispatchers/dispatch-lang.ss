@@ -17,13 +17,13 @@
          "../configuration/responders.ss")
 
 (provide/contract
- [interface-version dispatcher-interface-version?]
+ [interface-version dispatcher-interface-version/c]
  [make
-  (->* (#:url->path url-path?)
-       (#:make-servlet-namespace make-servlet-namespace?
+  (->* (#:url->path url-path/c)
+       (#:make-servlet-namespace make-servlet-namespace/c
                                   #:responders-servlet-loading (url? any/c . -> . response?)
                                   #:responders-servlet (url? any/c . -> . response?))
-       dispatcher?)])
+       dispatcher/c)])
 
 ; XXX url->servlet
 ; XXX optional session manager
@@ -31,7 +31,7 @@
 (define (make #:url->path url->path
               #:make-servlet-namespace [make-servlet-namespace (make-make-servlet-namespace)]
               #:responders-servlet-loading [responders-servlet-loading servlet-loading-responder]
-              #:responders-servlet [responders-servlet (gen-servlet-responder "servlet-error.html")])
+              #:responders-servlet [responders-servlet servlet-error-responder])
   
   ;; dispatch : connection request -> void
   (define (dispatch conn req)

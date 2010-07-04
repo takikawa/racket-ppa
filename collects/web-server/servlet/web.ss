@@ -2,8 +2,7 @@
 (require net/url
          mzlib/list
          mzlib/plt-match
-         mzlib/contract
-         mzlib/etc)
+         scheme/contract)
 (require "../managers/manager.ss"
          "../private/util.ss"
          "../private/servlet.ss"
@@ -12,6 +11,8 @@
          "../servlet/servlet-structs.ss"
          "../private/response-structs.ss"
          "../private/request-structs.ss")
+
+(provide servlet-prompt)
 
 ;; ************************************************************
 ;; HELPERS
@@ -67,17 +68,17 @@
     in-url)))   
 
 (provide/contract
- [current-url-transform parameter?]
- [current-servlet-continuation-expiration-handler parameter?]
+ [current-url-transform (parameter/c url-transform/c)]
+ [current-servlet-continuation-expiration-handler (parameter/c expiration-handler/c)]
  [redirect/get (-> request?)]
  [redirect/get/forget (-> request?)]
  [adjust-timeout! (number? . -> . void?)]
  [clear-continuation-table! (-> void?)]
  [send/back (response? . -> . void?)]
  [send/finish (response? . -> . void?)]
- [send/suspend ((response-generator?) (expiration-handler?) . opt-> . request?)]
- [send/forward ((response-generator?) (expiration-handler?) . opt-> . request?)]
- [send/suspend/dispatch ((embed/url? . -> . response?) . -> . any/c)])
+ [send/suspend ((response-generator/c) (expiration-handler/c) . ->* . request?)]
+ [send/forward ((response-generator/c) (expiration-handler/c) . ->* . request?)]
+ [send/suspend/dispatch ((embed/url/c . -> . response?) . -> . any/c)])
 
 ;; ************************************************************
 ;; EXPORTS
@@ -113,30 +114,32 @@
 
 ;; send/suspend: (url -> response) [(request -> response)] -> request
 ;; send a response and apply the continuation to the next request
-(define send/suspend
-  (opt-lambda (response-generator [expiration-handler (current-servlet-continuation-expiration-handler)])
-    (with-frame-after
-     (call-with-composable-continuation
-      (lambda (k)
-        (define instance-id (current-servlet-instance-id))
-        (define ctxt (current-execution-context))
-        (define k-embedding ((manager-continuation-store! (current-servlet-manager))
-                             instance-id
-                             (make-custodian-box (current-custodian) k)
-                             expiration-handler))
-        (define k-url ((current-url-transform)
-                       (embed-ids 
-                        (list* instance-id k-embedding)
-                        (request-uri (execution-context-request ctxt)))))
-        (send/back (response-generator k-url)))
-      servlet-prompt))))
+(define (send/suspend response-generator
+                      [expiration-handler (current-servlet-continuation-expiration-handler)])
+  (define wcs (capture-web-cell-set))
+  (begin0
+    (call-with-composable-continuation
+     (lambda (k)
+       (define instance-id (current-servlet-instance-id))
+       (define ctxt (current-execution-context))
+       (define k-embedding ((manager-continuation-store! (current-servlet-manager))
+                            instance-id
+                            (make-custodian-box (current-custodian) k)
+                            expiration-handler))
+       (define k-url ((current-url-transform)
+                      (embed-ids 
+                       (list* instance-id k-embedding)
+                       (request-uri (execution-context-request ctxt)))))
+       (send/back (response-generator k-url)))
+     servlet-prompt)
+    (restore-web-cell-set! wcs)))
 
 ;; send/forward: (url -> response) [(request -> response)] -> request
 ;; clear the continuation table, then behave like send/suspend
-(define send/forward
-  (opt-lambda (response-generator [expiration-handler (current-servlet-continuation-expiration-handler)])
-    (clear-continuation-table!)
-    (send/suspend response-generator expiration-handler)))
+(define (send/forward response-generator
+                      [expiration-handler (current-servlet-continuation-expiration-handler)])
+  (clear-continuation-table!)
+  (send/suspend response-generator expiration-handler))
 
 ;; send/suspend/dispatch : ((proc -> url) -> response) [(request -> response)] -> request
 ;; send/back a response generated from a procedure that may convert
@@ -150,10 +153,14 @@
           (lambda (k0)
             (send/back
              (response-generator
-              (opt-lambda (proc [expiration-handler (current-servlet-continuation-expiration-handler)])
+              (lambda (proc [expiration-handler (current-servlet-continuation-expiration-handler)])
                 (let/ec k1 
-                  (let ([new-request (send/suspend k1 expiration-handler)])
-                    (k0 (lambda () (proc new-request)))))))))
+                  ; This makes the second continuation captured by send/suspend smaller
+                  (call-with-continuation-prompt
+                   (lambda ()
+                     (let ([new-request (send/suspend k1 expiration-handler)])
+                       (k0 (lambda () (proc new-request)))))
+                   servlet-prompt))))))
           servlet-prompt)])
     (thunk)))
 

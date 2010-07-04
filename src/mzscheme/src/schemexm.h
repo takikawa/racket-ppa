@@ -19,7 +19,9 @@
 #define scheme_inherit_cells (scheme_extension_table->scheme_inherit_cells)
 #define scheme_current_break_cell (scheme_extension_table->scheme_current_break_cell)
 #ifndef LINK_EXTENSIONS_BY_TABLE
+# ifndef MZ_USE_PLACES
 #define scheme_current_thread (scheme_extension_table->scheme_current_thread)
+# endif
 #define scheme_fuel_counter (scheme_extension_table->scheme_fuel_counter)
 #else
 #define scheme_current_thread_ptr (scheme_extension_table->scheme_current_thread_ptr)
@@ -219,6 +221,7 @@
 #define GC_resolve (scheme_extension_table->GC_resolve)
 #define GC_mark (scheme_extension_table->GC_mark)
 #define GC_fixup (scheme_extension_table->GC_fixup)
+#define GC_fixup_self (scheme_extension_table->GC_fixup_self)
 #endif
 #define scheme_malloc_immobile_box (scheme_extension_table->scheme_malloc_immobile_box)
 #define scheme_free_immobile_box (scheme_extension_table->scheme_free_immobile_box)
@@ -513,7 +516,6 @@
 #define scheme_read_byte_string (scheme_extension_table->scheme_read_byte_string)
 #define scheme_make_namespace (scheme_extension_table->scheme_make_namespace)
 #define scheme_add_namespace_option (scheme_extension_table->scheme_add_namespace_option)
-#define scheme_require_from_original_env (scheme_extension_table->scheme_require_from_original_env)
 #define scheme_add_global (scheme_extension_table->scheme_add_global)
 #define scheme_add_global_symbol (scheme_extension_table->scheme_add_global_symbol)
 #define scheme_make_envunbox (scheme_extension_table->scheme_make_envunbox)
@@ -607,7 +609,6 @@
 #define scheme_check_proc_arity2 (scheme_extension_table->scheme_check_proc_arity2)
 #define scheme_make_provided_string (scheme_extension_table->scheme_make_provided_string)
 #define scheme_make_args_string (scheme_extension_table->scheme_make_args_string)
-#define scheme_no_dumps (scheme_extension_table->scheme_no_dumps)
 #define scheme_system_library_subpath (scheme_extension_table->scheme_system_library_subpath)
 #define scheme_signal_received (scheme_extension_table->scheme_signal_received)
 #define scheme_char_strlen (scheme_extension_table->scheme_char_strlen)

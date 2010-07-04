@@ -51,13 +51,13 @@
     See also
     @method[text:basic<%> unhighlight-range].
   }
-  @defmethod*[(((unhighlight-range
+  @defmethod[(unhighlight-range
                    (start exact-nonnegative-integer?)
                    (end exact-nonnegative-integer?)
                    (color (or/c string? (is-a?/c color%)))
                    (caret-space boolean? #f)
                    (style (symbols 'rectangle 'ellipse 'hollow-ellipse) 'rectangle))
- void))]{
+               void?]{
     This method removes the highlight from a region of text in
     the buffer. 
 
@@ -167,9 +167,88 @@
 
   }
 }
+
+@definterface[text:first-line<%> (text%)]{
+
+  Objects implementing this interface, when
+  @method[text:first-line<%> highlight-first-line]
+  is invoked with @scheme[#t], always show their
+  first line, even with scrolled (as long as
+  @method[text:first-line<%> first-line-currently-drawn-specially?]
+  returns @scheme[#t]).
+
+  @defmethod[#:mode public-final (highlight-first-line [on? boolean?]) void?]{
+    Call this method to enable special treatment of the first line in the editor.
+  }
+
+  @defmethod[#:mode public-final (first-line-currently-drawn-specially?) boolean?]{
+     Returns @scheme[#t] if @method[text:first-line<%> is-special-first-line?]
+     returned @scheme[#t] for the current first line
+     and if the buffer is scrolled down so that the first
+     line would not (ordinarily) be visible.
+  }
+
+  @defmethod[#:mode public-final (get-first-line-height) number?]{
+   Returns the height, in pixels, of the first line.
+  }
+
+  @defmethod[(is-special-first-line? [line string?]) boolean?]{
+   Override this method to control when the first line is always
+   visible. The argument is the first line, as a string.
+  }
+
+}
+
+@defmixin[text:first-line-mixin (text%) (text:first-line<%>)]{
+  Provides the implementation of @scheme[text:first-line<%>].
+  Does so by just painting the text of the first
+  line over top of what is already there and overriding
+  @method[text:first-line-mixin scroll-editor-to] to patch
+  up scrolling and
+  @method[text:first-line-mixin on-event] to patch up
+  mouse handling.
+
+  @defmethod[#:mode override
+             (on-paint [before? any/c]
+		       [dc (is-a?/c dc<%>)]
+		       [left real?]
+		       [top real?]
+		       [right real?]
+		       [bottom real?]
+		       [dx real?]
+		       [dy real?]
+		       [draw-caret (one-of/c 'no-caret 'show-inactive-caret 'show-caret)])
+	     void?]{
+
+  Based on the various return values of the methods in @scheme[text:first-line],
+  draws the first actual line of the editor over top of the first
+  visible line in the editor.
+  }
+
+  @defmethod[#:mode override
+	     (on-event [event (is-a?/c mouse-event%)])
+	     void?]{
+    Clicks in the first line cause the editor to scroll to the
+    actual first line.
+  }
+	     
+  @defmethod[#:mode override 
+	     (scroll-editor-to [localx real?]
+			       [localy real?]
+			       [width (and/c real? (not/c negative?))]
+			       [height (and/c real? (not/c negative?))]
+			       [refresh? any/c]
+			       [bias (one-of/c 'start 'end 'none)])
+	     void?]{
+   Scrolls a little bit more, when a scroll would be requested
+   that scrolls something so that it is line underneath the first line.
+ }
+}
+
 @definterface[text:foreground-color<%> (text:basic<%> editor:standard-style-list<%>)]{
 
 }
+
 @defmixin[text:foreground-color-mixin (text:basic<%> editor:standard-style-list<%>) (text:foreground-color<%>)]{
   This mixin changes the default text style to have
   the foreground color controlled by
@@ -226,7 +305,17 @@
 @definterface[text:searching<%> (editor:keymap<%> text:basic<%>)]{
   Any object matching this interface can be searched.
 
-@defmethod[(set-searching-str [str (or/c false/c string?)] [cs? boolean? #t]) void?]{
+  Searches using this class has a non-traditional feature
+  for performance reasons. Specifically, multiple adjacent
+  hits are coalesced into a single search results when
+  bubbles are drawn. This means, for example, that searching
+  for a space in a file with 80,000 spaces (as one file in
+  the PLT Scheme code base has) is still tractable, since
+  many of those spaces will be next to each other and thus
+  there will be far fewer bubbles (the file in question has
+  only 20,000 such bubbles).
+
+@defmethod[(set-searching-state [str (or/c false/c string?)] [cs? boolean?] [replace-start (or/c false/c number?)]) void?]{
 
   If @scheme[str] is not @scheme[#f], then this method highlights
   every occurrence of @scheme[str] in the editor. If @scheme[str] is
@@ -234,15 +323,50 @@
 
   If @scheme[cs?] is @scheme[#f], the search is case-insensitive, and
   otherwise it is case-sensitive.
-}
-@defmethod[(get-search-hits) number?]{
-  Returns the number of hits for the search in the buffer, based on the
-  count found last time that a search happened. 
+
+  If the @scheme[replace-start] argument is @scheme[#f],
+  then the search is not in replacement mode. If it is a
+  number, then the first search hit after that position in
+  the editor is where the next replacement will take place.
+
 }
 @defmethod[(set-search-anchor [position (or/c false/c number?)]) void?]{
   Sets the anchor's position in the editor. Only takes effect if
   the @scheme['framework:anchored-search] preference is on.
 }
+@defmethod[(get-search-hit-count) number?]{
+  Returns the number of hits for the search in the buffer, based on the
+  count found last time that a search happened. 
+}
+
+@defmethod[(set-replace-start [pos (or/c false/c number?)]) void?]{
+  Sets the position where replacement next occurs. This is equivalent
+  to calling @method[text:searching<%> set-searching-state] with
+  a new @scheme[replace-start] argument, but the other arguments the same
+  as the last call to @method[text:searching<%> set-searching-state],
+  but is more efficient (since @method[text:searching<%> set-searching-state]
+  will search the entire buffer and re-build all of the bubbles).
+}
+
+@defmethod[(get-search-bubbles) 
+           (listof (list/c (cons/c number number) 
+                           (list/c number number number)))]{
+  Returns information about the search bubbles in the editor. Each
+  item in the outermost list corresponds to a single bubble. The pair
+  of numbers is the range of the bubble and the triple of numbers is
+  the color of the bubble, in RGB coordinates.
+
+  If @tt{replace-start} has been set (via
+  @method[text:searching<%> set-replace-start]) and the
+  closest search hit following @tt{replace-start} does not
+  collapse with an adjacent bubble,the result will include
+  that bubble. If the the closest search hit after
+  @tt{replace-start} is collpased with another bubble, then
+  the search hit is not reflected in the result.
+
+  This method is intended for use in test suites.
+}
+
 }
 @defmixin[text:searching-mixin (editor:keymap<%> text:basic<%>) (text:searching<%>)]{
   This 
@@ -426,15 +550,27 @@
   This mixin provides an implementation of the
   @scheme[text:delegate<%>]
   interface.
-  @defmethod*[#:mode override (((highlight-range (start exact-integer) (end exact-integer) (color (instance color%)) (bitmap (union |#f| (instance bitmap%))) (caret-space boolean |#f|) (priority (union (quote high) (quote low)) (quote low))) (-> void)))]{
+  @defmethod*[#:mode override (((highlight-range (start exact-integer)
+                                 (end exact-nonnegative-integer?)
+                                 (color (or/c string? (is-a?/c color%)))
+                                 (caret-space boolean? #f)
+                                 (priority (symbols 'high 'low) 'low)
+                                 (style (symbols 'rectangle 'ellipse 'hollow-ellipse 'dot) 'rectangle))
+                                 (-> void)))]{
 
     In addition to calling the super method,
     @method[text:basic<%> highlight-range], this method forwards the highlighting to
     the delegatee.
   }
-  @defmethod*[#:mode override (((unhighlight-range (start exact-integer) (end exact-integer) (color (instance color%)) (bitmap (union |#f| (instance bitmap%)) |#f|) (caret-space boolean |#f|)) void))]{
-    This method propagates the call to the delegate.
-
+  @defmethod[#:mode override
+             (unhighlight-range
+                   (start exact-nonnegative-integer?)
+                   (end exact-nonnegative-integer?)
+                   (color (or/c string? (is-a?/c color%)))
+                   (caret-space boolean? #f)
+                   (style (symbols 'rectangle 'ellipse 'hollow-ellipse) 'rectangle))
+               void?]{
+    This method propagates the call to the delegate and calls the super method.
   }
   @defmethod*[#:mode override (((on-paint (before? any/c) (dc (is-a?/c dc<%>)) (left real?) (top real?) (right real?) (bottom real?) (dx real?) (dy real?) (draw-caret (one-of/c (quote no-caret) (quote show-inactive-caret) (quote show-caret)))) void))]{
 

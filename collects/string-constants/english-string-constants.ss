@@ -501,18 +501,23 @@ please adhere to these guidelines:
   (repl-value-color "Values")
   (repl-error-color "Errors")
   
- ;;; find/replace
- (find-and-replace "Find and Replace")
- (find "Find")
- (replace "Replace")
- (dock "Dock")
- (undock "Undock")
- (replace&find "Replace && Find") ;;; need double & to get a single &
- (forward "Forward")
- (backward "Backward")
- (hide "Hide")
- (find-case-sensitive "Case sensitive")  ;; the check box in both the docked & undocked search
+  ;;; find/replace
+  (search-next "Next")
+  (search-previous "Prev")
+  (search-match "Match")  ;;; this one and the next one are singular/plural variants of each other
+  (search-matches "Matches") 
+  (search-replace "Replace")
+  (search-skip "Skip")
+  (search-show-replace "Show Replace")
+  (search-hide-replace "Hide Replace")
+  (find-case-sensitive "Case sensitive")  ;; the check box in both the docked & undocked search
   (find-anchor-based "Search using anchors")
+
+  ;; these string constants used to be used by searching,
+  ;; but aren't anymore. They are still used by other tools, tho.
+  (hide "Hide")
+  (dock "Dock")
+  (undock "Undock")
   
  ;;; multi-file-search
  (mfs-multi-file-search-menu-item "Search in Files...")
@@ -649,17 +654,18 @@ please adhere to these guidelines:
   (find-menu-item "Find") ;; menu item
   (find-info "Toggles the keyboard focus between the window being searched and the search bar")
   
- (find-again-info "Skip to the next occurrence of the string in the find window")
- (find-again-menu-item "Find Again")
+ (find-next-info "Skip to the next occurrence of the string in the find window")
+ (find-next-menu-item "Find Next")
   
-  (find-again-backwards-info "Skip to the previous occurrence of the string in the find window")
- (find-again-backwards-menu-item "Find Again Backwards")
+ (find-previous-info "Skip to the previous occurrence of the string in the find window")
+ (find-previous-menu-item "Find Previous")
   
- (replace-and-find-again-info "Replace the current text and skip to the next occurrence")
- (replace-and-find-again-menu-item "Replace && Find Again")
+  (show-replace-menu-item "Show Replace")
+  (hide-replace-menu-item "Hide Replace")
+  (show/hide-replace-info "Toggles the visibility of the replace panel")
 
- (replace-and-find-again-backwards-info "Replace the current text and skip to the previous occurrence")
- (replace-and-find-again-backwards-menu-item "Replace && Find Again Backwards")
+  (replace-menu-item "Replace")
+  (replace-info "Replace the search hit in the dark circle")
   
   (replace-all-info "Replace all occurrences of the search string")
   (replace-all-menu-item "Replace All")
@@ -928,7 +934,9 @@ please adhere to these guidelines:
  (whole-part "Whole Part")
  (numerator "Numerator")
  (denominator "Denominator")
- (invalid-number "Invalid number: must be an exact, real, non-integral number.")
+ (insert-number/bad-whole-part "The whole part of the number must be an integral number")
+ (insert-number/bad-numerator "The numerator part of the number must be a non-negative, integral number")
+ (insert-number/bad-denominator "The denominator part of the number must be a positive, integral number")
  (insert-fraction-menu-item-label "Insert Fraction...")
 
  ;; number snip popup menu
@@ -1263,6 +1271,8 @@ please adhere to these guidelines:
   (ml-cp-remove "Remove")
   (ml-cp-raise "Raise")
   (ml-cp-lower "Lower")
+  
+  (ml-always-show-#lang-line "Always show #lang line in the Module language")
 
   ;; Profj
   (profj-java "Java")
@@ -1402,4 +1412,16 @@ please adhere to these guidelines:
   (gui-tool-show-gui-toolbar "Show GUI Toolbar")
   (gui-tool-hide-gui-toolbar "Hide GUI Toolbar")
   (gui-tool-insert-gui "Insert GUI")
+
+  ;; contract violation tracking
+  
+  ; tooltip for new planet icon in drscheme window (must have a planet violation logged to see it)
+  (show-planet-contract-violations "Show PLaneT contract violations")
+
+  ; buttons in the dialog that lists the recorded bug reports
+  (bug-track-report "File Ticket")
+  (bug-track-forget "Forget")
+  (bug-track-forget-all "Forget All")
+    
+
   )

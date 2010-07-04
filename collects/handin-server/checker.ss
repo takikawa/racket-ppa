@@ -1,16 +1,17 @@
-#lang mzscheme
+#lang scheme/base
 
-(require "utils.ss" mzlib/file mzlib/list mzlib/class mred)
+(require (for-syntax scheme/base) "utils.ss" scheme/file scheme/list scheme/class mred)
 
-(provide (all-from-except mzscheme #%module-begin) (all-from "utils.ss"))
+(provide (except-out (all-from-out scheme/base) #%module-begin)
+         (all-from-out "utils.ss"))
 
-(provide (rename module-begin~ #%module-begin))
+(provide (rename-out [module-begin~ #%module-begin]))
 (define-syntax (module-begin~ stx)
   (let ([e (if (syntax? stx) (syntax-e stx) stx)])
     (if (pair? e)
-      (with-syntax ([user-pre (datum->syntax-object stx 'user-pre stx)]
-                    [user-post (datum->syntax-object stx 'user-post stx)])
-        (datum->syntax-object
+      (with-syntax ([user-pre (datum->syntax stx 'user-pre stx)]
+                    [user-post (datum->syntax stx 'user-post stx)])
+        (datum->syntax
          (quote-syntax here)
          (list* (quote-syntax #%plain-module-begin)
                 #'(define user-pre #f)
@@ -35,7 +36,7 @@
                          (path->string (current-directory)))])
     (if m
       (cadr m)
-      (error* "internal error: unexpected directory name: ~a"
+      (error* "internal error: unexpected directory name: \"~a\""
               (current-directory)))))
 
 (provide user-data)
@@ -77,7 +78,7 @@
     (let ([line (bytes->string/utf-8 line)])
       (unless (or (< (string-length line) len)
                   (< (string-width line) len))
-        (error* "~a \"~a\" in ~a is longer than ~a characters"
+        (error* "~a \"~a\" in \"~a\" is longer than ~a characters"
                 (if n (format "Line #~a" n) "The line")
                 (regexp-replace #rx"^[ \t]*(.*?)[ \t]*$" line "\\1")
                 (currently-processed-file-name)
@@ -104,7 +105,7 @@
            (format "~a" (or (send x get-text 0 (send x get-count) #t) x))]
           [(special-comment? x)
            (format "#| ~a |#" (special-comment-value x))]
-          [(syntax? x) (syntax-object->datum x)]
+          [(syntax? x) (syntax->datum x)]
           [else x]))
   (let-values ([(filter) (if (pair? filter) (car filter) item->text)]
                [(in out) (make-pipe 4096)])
@@ -163,7 +164,7 @@
                [line (if (and untabify? (regexp-match? #rx"\t" line))
                        (untabify line) line)])
           (when (and bad-re (regexp-match? bad-re line))
-            (error* "You cannot use \"~a\" in ~a!~a"
+            (error* "You cannot use \"~a\" in \"~a\"!~a"
                     (if (regexp? bad-re) (object-name bad-re) bad-re)
                     (currently-processed-file-name)
                     (if textualize? "" (format " (line ~a)" n))))
@@ -179,10 +180,10 @@
   (let-values ([(defs inters) (unpack-submission submission)])
     (parameterize ([current-input-port
                     (if textualize?
-                      (input-port->text-input-port (open-input-text-editor
-                                                    defs 0 'end snip->text))
+                      (input-port->text-input-port
+                       (open-input-text-editor defs 0 'end snip->text))
                       (open-input-text-editor defs))]
-                   [current-output-port (open-output-string)])
+                   [current-output-port (open-output-bytes)])
       (input->process->output maxwidth textualize? untabify? bad-re)
       (get-output-bytes (current-output-port)))))
 
@@ -190,10 +191,8 @@
 ;; This code will hack textualization of text boxes
 
 (define (insert-to-editor editor . xs)
-  (for-each (lambda (x)
-              (send editor insert
-                    (if (string? x) x (make-object editor-snip% x))))
-            xs))
+  (for ([x (in-list xs)])
+    (send editor insert (if (string? x) x (make-object editor-snip% x)))))
 
 ;; support for "text-box%"
 (define text-box-sc
@@ -283,10 +282,9 @@
                                 '(ok-cancel caution)))))
         (error* "Aborting...")))
     ;; This will create copies of the original files
-    ;; (for-each (lambda (file)
-    ;;             (with-output-to-file (car file)
-    ;;               (lambda () (display (cadr file)) (flush-output))))
-    ;;           files)
+    ;; (for ([file (in-list files)])
+    ;;   (with-output-to-file (car file)
+    ;;     (lambda () (display (cadr file)) (flush-output))))
     (let* ([pfx-len  (string-length markup-prefix)]
            [line-len (- maxwidth pfx-len)]
            [=s       (lambda (n) (if (<= 0 n) (make-string n #\=) ""))]
@@ -300,14 +298,12 @@
         (display ===)
         (newline))
       (parameterize ([current-output-port (open-output-bytes)])
-        (for-each (lambda (file)
-                    (sep (car file))
-                    (parameterize ([current-input-port
-                                    (open-input-bytes (cadr file))]
-                                   [current-processed-file (car file)])
-                      (input->process->output
-                       maxwidth textualize? untabify? prefix-re)))
-                  files)
+        (for ([file (in-list files)])
+          (sep (car file))
+          (parameterize ([current-input-port (open-input-bytes (cadr file))]
+                         [current-processed-file (car file)])
+            (input->process->output
+             maxwidth textualize? untabify? prefix-re)))
         (get-output-bytes (current-output-port))))))
 
 ;; ============================================================================
@@ -317,7 +313,7 @@
 (define submission-eval (make-parameter #f))
 
 ;; without this the primitive eval is not available
-(provide (rename eval prim-eval))
+(provide (rename-out [eval prim-eval]))
 
 ;; for adding lines in the checker
 (define added-lines (make-thread-cell #f))
@@ -344,19 +340,20 @@
 
 (provide check:)
 (define-syntax (check: stx)
-  (define (id s) (datum->syntax-object stx s stx))
+  (define (id s) (datum->syntax stx s stx))
   (let loop ([stx (syntax-case stx () [(_ x ...) #'(x ...)])]
              [keyvals '()]
              [got null])
     (define (get key . default)
-      (cond [(assq key keyvals) => (lambda (x) (set! got (cons x got)) (caddr x))]
+      (cond [(assq key keyvals)
+             => (lambda (x) (set! got (cons x got)) (caddr x))]
             [(pair? default) (car default)]
             [else #f]))
     (syntax-case stx ()
       [(key val x ...)
        (and (identifier? #'key)
             (regexp-match? #rx"^:" (symbol->string (syntax-e #'key))))
-       (loop #'(x ...) 
+       (loop #'(x ...)
              (cons (list (syntax-e #'key) #'key #'val) keyvals)
              (cons (syntax-e #'key) got))]
       [(body ...)
@@ -364,6 +361,7 @@
            ([users*         (get ':users         #'#f)]
             [eval?*         (get ':eval?         #'#t)]
             [language*      (get ':language      #'#f)]
+            [requires*      (get ':requires      #''())]
             [teachpacks*    (get ':teachpacks    #''())]
             [create-text?*  (get ':create-text?  #'#t)]
             [untabify?*     (get ':untabify?     #'#t)]
@@ -393,10 +391,9 @@
             [user-post      (id 'user-post)]
             [(body ...) (syntax-case #'(body ...) ()
                           [() #'(void)] [_ #'(body ...)])])
-         (for-each (lambda (x)
-                     (unless (memq (car x) got)
-                       (raise-syntax-error #f "unknown keyword" stx (cadr x))))
-                   keyvals)
+         (for ([x (in-list keyvals)])
+           (unless (memq (car x) got)
+             (raise-syntax-error #f "unknown keyword" stx (cadr x))))
          #'(begin
              (provide checker)
              (define checker
@@ -410,6 +407,7 @@
                                   us))]
                      [eval?          eval?*]
                      [language       language*]
+                     [requires       requires*]
                      [teachpacks     teachpacks*]
                      [create-text?   create-text?*]
                      [untabify?      untabify?*]
@@ -473,17 +471,14 @@
                      (prefix-line (subst str generic-substs)))
                    (define (write-text)
                      (set-run-status "creating text file")
-                     (with-output-to-file text-file
+                     (with-output-to-file text-file #:exists 'truncate
                        (lambda ()
-                         (for-each (lambda (user)
-                                     (prefix-line
-                                      (user-substs user student-line)))
-                                   users)
+                         (for ([user (in-list users)])
+                           (prefix-line (user-substs user student-line)))
                          (for-each prefix-line/substs extra-lines)
                          (for-each prefix-line/substs
                                    (or (thread-cell-ref added-lines) '()))
-                         (display submission-text))
-                       'truncate))
+                         (display submission-text))))
                    (define submission-text
                      (and create-text?
                           (begin (set-run-status "reading submission")
@@ -516,7 +511,8 @@
                                           (error* uem m)]
                                          [else (error* "~a" uem)])))])
                                (call-with-evaluator/submission
-                                language teachpacks submission values))])
+                                language (append requires teachpacks)
+                                submission values))])
                         (set-run-status "running tests")
                         (parameterize ([submission-eval (wrap-evaluator eval)])
                           (let-syntax ([with-submission-bindings
@@ -544,11 +540,13 @@
                                    "`untabify?' without `maxwidth'"]
                                   [(and (not eval?) coverage?)
                                    "`coverage?' without `eval?'"]
+                                  [(and (pair? requires) (pair? teachpacks))
+                                   "`requires' and `teachpacks'"]
                                   ;; [(and textualize? coverage?)
                                   ;;  "`textualize?' and `coverage?'"]
                                   [else #f])])
                    (when bad
-                     (error* "bad checker specifications: ~a" bad)))
+                     (error* "bad checker specifications: ~e" bad)))
                  ;; ========================================
                  (list pre check post)))))])))
 
@@ -557,7 +555,7 @@
     [(_ get (var ...) body ...)
      (with-syntax ([(>var ...)
                     (map (lambda (v)
-                           (datum->syntax-object
+                           (datum->syntax
                             v
                             (string->symbol
                              (string-append
@@ -572,7 +570,7 @@
   (let ([make-pre/post:
          (lambda (what)
            (lambda (stx)
-             (define (id s) (datum->syntax-object stx s stx))
+             (define (id s) (datum->syntax stx s stx))
              (syntax-case stx ()
                [(_ body ...)
                 (with-syntax ([users      (id 'users)]
@@ -655,56 +653,54 @@
   (and (procedure? proc) (procedure-arity-includes? proc arity)))
 
 (provide !defined)
-(define-syntax !defined
-  (syntax-rules ()
-    ;; expected to be used only with identifiers
-    [(_ id ...) (begin (with-handlers
-                           ([exn:fail:contract:variable?
-                             (lambda (_)
-                               (error* "missing binding: ~a" (->disp 'id)))])
-                         ((submission-eval) `id))
-                       ...)]))
+(define-syntax-rule (!defined id ...)
+  ;; expected to be used only with identifiers
+  (begin (with-handlers ([exn:fail:contract:variable?
+                          (lambda (_)
+                            (error* "missing binding: ~e" (->disp 'id)))])
+           ((submission-eval) `id))
+         ...))
 
 (provide !procedure* !procedure)
 (define-syntax !procedure*
   (syntax-rules ()
     [(_ expr)
      (unless (procedure? ((submission-eval) `expr))
-       (error* "~a is expected to be bound to a procedure" (->disp 'expr)))]
+       (error* "~e is expected to be bound to a procedure" (->disp 'expr)))]
     [(_ expr arity)
      (let ([ar  arity]
            [val ((submission-eval) `expr)])
        (unless (procedure? val)
-         (error* "~a is expected to be bound to a procedure" (->disp 'expr)))
+         (error* "~e is expected to be bound to a procedure" (->disp 'expr)))
        (unless (procedure-arity-includes? val ar)
-         (error* "~a is expected to be bound to a procedure of ~s arguments"
+         (error* "~e is expected to be bound to a procedure of ~s arguments"
                  (->disp 'expr) ar)))]))
 (define-syntax !procedure
   (syntax-rules ()
-    [(_ expr) (begin (!defined expr) (!procedure* expr))]
-    [(_ expr arity) (begin (!defined expr) (!procedure* expr arity))]))
+    [(_ id) (begin (!defined id) (!procedure* id))]
+    [(_ id arity) (begin (!defined id) (!procedure* id arity))]))
 
 (provide !integer* !integer)
-(define-syntax !integer*
-  (syntax-rules ()
-    [(_ expr)
-     (unless (integer? ((submission-eval) `expr))
-       (error* "~a is expected to be bound to an integer" (->disp 'expr)))]))
-(define-syntax !integer
-  (syntax-rules ()
-    [(_ expr) (begin (!defined expr) (!integer* expr))]))
+(define-syntax-rule (!integer* expr)
+  (unless (integer? ((submission-eval) `expr))
+    (error* "~e is expected to be bound to an integer" (->disp 'expr))))
+(define-syntax-rule (!integer id)
+  (begin (!defined id) (!integer* id)))
+
+(provide !eval)
+(define-syntax-rule (!eval expr) ((submission-eval) `expr))
 
 (provide !test)
 (define-syntax !test
   (syntax-rules ()
     [(_ expr)
      (unless ((submission-eval) `expr)
-       (error* "your code failed a test: ~a is false" (->disp 'expr)))]
+       (error* "your code failed a test: ~e is false" (->disp 'expr)))]
     [(_ expr result) (!test expr result equal?)]
     [(_ expr result equal?)
      (let ([val ((submission-eval) `expr)])
        (unless (equal? result val)
-         (error* "your code failed a test: ~a evaluated to ~a, expecting ~a"
+         (error* "your code failed a test: ~e evaluated to ~e, expecting ~e"
                  (->disp 'expr) (->disp val) (->disp result))))]))
 
 (provide !all-covered)

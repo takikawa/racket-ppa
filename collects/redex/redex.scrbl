@@ -7,7 +7,7 @@
 	  	     scheme/gui
                      scheme/pretty
                      scheme/contract
-		     (only-in slideshow/pict text dc-for-text-size)
+		     (only-in slideshow/pict pict? text dc-for-text-size)
 		     redex))
 
 @(define-syntax (defpattech stx)
@@ -47,7 +47,9 @@
      #'((tech "term") args ...)]
     [x (identifier? #'x) #'(tech "term")]))
 
-@title{@bold{PLT Redex}: an embedded DSL for debugging operational semantics}
+@title{@bold{Redex}: Debugging Operational Semantics}
+
+@author["Robert Bruce Findler"]
 
 PLT Redex consists of a domain-specific language for specifying
 reduction semantics, plus a suite of tools for working with the
@@ -467,6 +469,9 @@ expressions and checks them against each pattern. The
 function returns the expression behind the first sucessful
 match. If that pattern produces multiple matches, an error
 is signaled. If no patterns match, an error is signaled.
+
+Raises an exception recognized by @scheme[exn:fail:redex?] if
+no clauses match or if one of the clauses matches multiple ways.
 }
 
 @defproc[(plug [context any?] [expression any?]) any]{
@@ -494,6 +499,11 @@ argument.
 
 Does not expect the input symbols to be distinct, but does
 produce variables that are always distinct.
+}
+
+@defproc[(exn:fail:redex? [v any/c]) boolean?]{
+  Returns @scheme[#t] if its argument is a Redex exception record, and
+  @scheme[#f] otherwise.
 }
 
 @section{Languages}
@@ -597,12 +607,14 @@ all non-GUI portions of Redex) and also exported by
 
 @defform/subs[#:literals (--> fresh side-condition where) 
               (reduction-relation language reduction-case ...)
-              ((reduction-case (--> #, @|ttpattern| #, @|tttterm| extras ...))
-               (extras name
+              ([reduction-case (--> #, @|ttpattern| #, @|tttterm| extras ...)]
+               [extras name
                        (fresh fresh-clause ...)
                        (side-condition scheme-expression ...)
-                       (where tl-pat scheme-expression))
-               (fresh-clause var ((var1 ...) (var2 ...))))]{
+                       (where tl-pat #, @|tttterm|)]
+                [fresh-clause var ((var1 ...) (var2 ...))]
+                [tl-pat identifier (tl-pat-ele ...)]
+                [tl-pat-ele tl-pat (code:line tl-pat ... (code:comment "a literal ellipsis"))])]{
 
 Defines a reduction relation casewise, one case for each of the
 clauses beginning with @scheme[-->]. Each of the @scheme[pattern]s
@@ -633,7 +645,7 @@ determine the number of variables generated and var2 must be
 bound by the left-hand side of the rule.
 
 The side-conditions are expected to all hold, and have the
-format of the second argument to the side-condition pattern,
+format of the second argument to the @pattech[side-condition] pattern,
 described above.
 
 Each @scheme[where] clauses binds a variable and the side-conditions
@@ -801,10 +813,14 @@ all non-GUI portions of Redex) and also exported by
 @defform/subs[#:literals (: ->)
               (define-metafunction language-exp
                contract
-               [(name #, @|ttpattern| ...) #, @|tttterm| (side-condition scheme-expression) ...] 
+               [(name #, @|ttpattern| ...) #, @|tttterm| extras ...] 
                ...)
                ([contract (code:line) 
-                          (code:line id : #, @|ttpattern| ... -> #, @|ttpattern|)])]{
+                          (code:line id : #, @|ttpattern| ... -> #, @|ttpattern|)]
+                [extras (side-condition scheme-expression)
+                        (where tl-pat #, @|tttterm|)]
+                [tl-pat identifier (tl-pat-ele ...)]
+                [tl-pat-ele tl-pat (code:line tl-pat ... (code:comment "a literal ellipsis"))])]{
 
 The @scheme[define-metafunction] form builds a function on
 sexpressions according to the pattern and right-hand-side
@@ -820,12 +836,21 @@ argument to each side-condition should be a Scheme
 expression, and the pattern variables in the <pattern> are
 bound in that expression.
 
+Raises an exception recognized by @scheme[exn:fail:redex?] if
+no clauses match, if one of the clauses matches multiple ways, or
+if the contract is violated.
+
+Note that metafunctions are assumed to always return the same results
+for the same inputs, and their results are cached. Accordingly, if a
+metafunction is called with the same inputs twice, then its body is
+only evaluated a single time.
+
 As an example, these metafunctions finds the free variables in
 an expression in the lc-lang above:
 
 @schemeblock[
     (define-metafunction lc-lang
-      free-vars : e -> (listof x)
+      free-vars : e -> (x ...)
       [(free-vars (e_1 e_2 ...))
        (∪ (free-vars e_1) (free-vars e_2) ...)]
       [(free-vars x) (x)]
@@ -925,7 +950,7 @@ that just get stuck when viewed in a `traces' window.
 The best way to debug such programs is to find an expression
 that looks like it should reduce but doesn't and try to find
 out what pattern is failing to match. To do so, use the
-redex-match special form, described above.
+@scheme[redex-match] special form, described above.
 
 In particular, first ceck to see if the term matches the
 main non-terminal for your system (typically the expression
@@ -1118,6 +1143,13 @@ These four parameters control the color of the edges in the graph.
 This is the default value of @scheme[pp] used by @scheme[traces] and
 @scheme[stepper] and it uses
 @scheme[pretty-print].
+
+It sets the @scheme[pretty-print-columns] parameter to
+@scheme[width], and it sets @scheme[pretty-print-size-hook]
+and @scheme[pretty-print-print-hook] to print holes and the
+symbol @scheme['hole] to match the way they are input in a
+@scheme[term] expression.
+
 }
 
 @section{Typesetting}
@@ -1140,60 +1172,77 @@ This section documents two classes of operations, one for
 direct use of creating postscript figures for use in papers
 and for use in DrScheme to easily adjust the typesetting:
 @scheme[render-language],
-@scheme[render-reduction-relation], and
-@scheme[render-metafunction], and one
+@scheme[render-reduction-relation], 
+@scheme[render-metafunction], and
+@scheme[render-lw], 
+and one
 for use in combination with other libraries that operate on picts
 @scheme[language->pict],
-@scheme[reduction-relation->pict], and
-@scheme[metafunction->pict].
+@scheme[reduction-relation->pict],
+@scheme[metafunction->pict], and
+@scheme[lw->pict].
 The primary difference between these functions is that the former list
 sets @scheme[dc-for-text-size] and the latter does not.
 
-@defthing[render-language (case-> (-> compiled-lang? 
-                                      pict?) 
-                                  (-> compiled-lang?
-                                      (or/c string? path?)
-                                      void?))]{
+@defproc[(render-language [lang compiled-lang?]
+                          [file (or/c false/c path-string?) #f]
+                          [#:nts nts (or/c false/c (listof (or/c string? symbol?)))
+                           (render-language-nts)])
+         (if file void? pict?)]{
 
-This function renders a language. If it receives just a
-single argument, it produces a pict and if it receives two
-arguments, it saves PostScript in the provided filename.
+Renders a language. If @scheme[file] is @scheme[#f],
+it produces a pict; if @scheme[file] is a path, it saves
+Encapsulated PostScript in the provided filename. See
+@scheme[render-language-nts] for information on the
+@scheme[nts] argument.
 
-That this function calls @scheme[dc-for-text-size] to set
-the dc to a relevant dc (either a @scheme[bitmap-dc%] or a
-@scheme[ps-dc%] depending if the function is called with one
-or two arguments, respectively). 
+This function parameterizes @scheme[dc-for-text-size] to install a
+relevant dc: a @scheme[bitmap-dc%] or a @scheme[post-script-dc%], depending on
+whether @scheme[file] is a path.
 
-See @scheme[language->pict] if you are using slideshow or
+See @scheme[language->pict] if you are using Slideshow or
 are otherwise setting @scheme[dc-for-text-size].  }
 
-@defproc[(language->pict (lang compiled-lang?)) pict?]{
-This function turns a languages into a picts. It is
-primarily designed to be used with Slideshow, or with
-other tools that combine picts together. It does not
-set @scheme[dc-for-text-size].
+@defproc[(language->pict (lang compiled-lang?)
+                         [#:nts nts (or/c false/c (listof (or/c string? symbol?)))
+                          (render-language-nts)])
+         pict?]{
+
+Produce a pict like @scheme[render-language], but without
+adjust @scheme[dc-for-text-size].
+
+This function is primarily designed to be used with
+Slideshow or with other tools that combine picts together.
 }
 
-@defthing[render-reduction-relation (case-> (-> reduction-relation?
-                                                pict?)
-                                            (-> reduction-relation?
-                                                (or/c string? path?)
-                                                void?))]{
+@defproc[(render-reduction-relation [rel reduction-relation?]
+                                    [file (or/c false/c path-string?) #f]
+                                    [#:style style reduction-rule-style/c (rule-pict-style)])
+         (if file void? pict?)]{
 
-If provided with one argument, @scheme[render-reduction-relation]
-produces a pict that renders properly in the definitions
-window in DrScheme. If given two argument, it writes
-postscript into the file named by its second argument.
+Renders a reduction relation. If @scheme[file] is @scheme[#f],
+it produces a pict; if @scheme[file] is a path, it saves
+Encapsulated PostScript in the provided filename. See
+@scheme[rule-pict-style] for information on the
+@scheme[style] argument.
 
-This function sets @scheme[dc-for-text-size]. See also
+This function parameterizes @scheme[dc-for-text-size] to install a
+relevant dc: a @scheme[bitmap-dc%] or a @scheme[post-script-dc%], depending on
+whether @scheme[file] is a path. See also
 @scheme[reduction-relation->pict].
 
 }
 
-@defproc[(reduction-relation->pict (r reduction-relation?)) pict?]{
-  This produces a pict, but without setting @scheme[dc-for-text-size].
-  It is suitable for use in Slideshow or other libraries that combine
-  picts.
+@defproc[(reduction-relation->pict (r reduction-relation?)
+                                   [#:style style reduction-rule-style/c (rule-pict-style)])
+         pict?]{
+
+  Produces a pict like @scheme[render-reduction-relation], but 
+  without setting @scheme[dc-for-text-size].
+
+This function is
+primarily designed to be used with Slideshow or with
+other tools that combine picts together.
 }
 
 @deftogether[[
@@ -1221,7 +1270,7 @@ This function sets @scheme[dc-for-text-size]. See also
 
 @defparam[render-language-nts nts (or/c false/c (listof symbol?))]{
   The value of this parameter controls which non-terminals
-  @scheme[render-language] and @scheme[language->pict] render. If it
+  @scheme[render-language] and @scheme[language->pict] render by default. If it
   is @scheme[#f] (the default), all non-terminals are rendered.
   If it is a list of symbols, only the listed symbols are rendered.
 
@@ -1248,21 +1297,30 @@ multi-line right-hand sides.
   will be rendered.
 }
 
-@defparam[rule-pict-style style
-               (symbols 'vertical 
-                        'compact-vertical
-                        'vertical-overlapping-side-conditions
-                        'horizontal)]{
+@defparam[rule-pict-style style reduction-rule-style/c]{
 
-This parameter controls the style used for the reduction
-relation. It can be either horizontal, where the left and
+This parameter controls the style used by default for the reduction
+relation. It can be @scheme['horizontal], where the left and
 right-hand sides of the reduction rule are beside each other
-or vertical, where the left and right-hand sides of the
-reduction rule are above each other. The vertical mode also
-has a variant where the side-conditions don't contribute to
+or @scheme['vertical], where the left and right-hand sides of the
+reduction rule are above each other. 
+The @scheme['compact-vertical] style moves the reduction arrow
+to the second line and uses less space between lines.
+Finally, in the @scheme['vertical-overlapping-side-conditions] variant, the side-conditions don't contribute to
 the width of the pict, but are just overlaid on the second
 line of each rule.
 }
+
+@defthing[reduction-rule-style/c flat-contract?]{
+
+A contract equivalent to
+
+@schemeblock[
+(symbols 'vertical 
+         'compact-vertical
+         'vertical-overlapping-side-conditions
+         'horizontal)
+]}
 
 @defparam[arrow-space space natural-number/c]{
 
@@ -1354,6 +1412,44 @@ symbol. When typesetting a reduction relation that uses the
 symbol, the thunk will be invoked to get a pict to render
 it. The thunk may be invoked multiple times when rendering a
 single reduction relation.
+}
+
+@defparam[white-bracket-sizing proc (-> string? number? (values number? number? number? number?))]{
+
+  This parameter is used when typesetting metafunctions to
+  determine how to create the @"\u301a\u301b"
+  characters. Rather than using those characters directory
+  (since glyphs tend not to be available in PostScript
+  fonts), they are created by combining two ‘[’ characters
+  or two ‘]’ characters together.
+  
+  The procedure accepts a string that is either @scheme["["]
+  or @scheme["]"], and returns four numbers. The first two
+  numbers determine the offset (from the left and from the
+  right respectively) for the second square bracket, and the
+  second two two numbers determine the extra space added (to
+  the left and to the right respectively).
+
+  The default value of the parameter is: @schemeblock[
+     (λ (str size)
+       (let ([inset-amt (floor/even (max 4 (* size 1/2)))])
+         (cond
+           [(equal? str "[")
+            (values inset-amt
+                    0
+                    0
+                    (/ inset-amt 2))]
+           [else
+            (values 0
+                    inset-amt
+                    (/ inset-amt 2)
+                    0)])))]
+
+ where @scheme[floor/even] returns the nearest even number
+ below its argument.  This means that for sizes 9, 10, and
+ 11, @scheme[inset-amt] will be 4, and for 12, 13, 14, and
+ 15, @scheme[inset-amt] will be 6.
+
 }
 
 @deftech{Removing the pink background from PLT Redex rendered picts and ps files}
@@ -1570,6 +1666,30 @@ corresponds to these structs:
 and the @scheme['spring] causes there to be no space between
 the empty string and the @scheme[x] in the typeset output.
 
+}
+
+@defproc[(render-lw (language/nts (or/c (listof symbol?) compiled-lang?))
+                    (lw lw?)) pict?]{
+
+  Produces a pict that corresponds to the @scheme[lw] object
+  argument, using @scheme[language/nts] to determine which
+  of the identifiers in the @scheme[lw] argument are
+  non-terminals.
+
+  This function sets @scheme[dc-for-text-size]. See also
+  @scheme[lw->pict].
+}
+
+@defproc[(lw->pict (language/ntw (or/c (listof symbol?) compiled-lang?))
+                   (lw lw?)) pict?]{
+
+  Produces a pict that corresponds to the @scheme[lw] object
+  argument, using @scheme[language/nts] to determine which
+  of the identifiers in the @scheme[lw] argument are
+  non-terminals.
+
+  This does not set the @scheme[dc-for-text-size] parameter. See also
+  @scheme[render-lw].
 }
 
 @deftogether[[

@@ -1,14 +1,15 @@
 #lang scheme/base
-(require "test-utils.ss" (for-syntax scheme/base))
-(require (private planet-requires type-comparison parse-type type-rep
-                  tc-utils type-environments type-alias-env subtype
-                  type-name-env init-envs union type-utils))
+(require "test-utils.ss" "planet-requires.ss" (for-syntax scheme/base))
+(require (utils tc-utils)
+	 (env type-alias-env type-environments type-name-env init-envs)
+	 (rep type-rep)
+	 (private type-comparison parse-type subtype
+		  union type-utils)
+         (schemeunit))
 
 (require (rename-in (private type-effect-convenience) [-> t:->])
          (except-in (private base-types) Un)
          (for-template (private base-types)))
-
-(require (schemeunit))
 
 (provide parse-type-tests)
 

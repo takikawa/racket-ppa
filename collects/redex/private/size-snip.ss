@@ -2,7 +2,8 @@
   (require (lib "mred.ss" "mred")
            (lib "class.ss")
            (lib "pretty.ss")
-           (lib "framework.ss" "framework"))
+           (lib "framework.ss" "framework")
+           "matcher.ss")
   
   (provide reflowing-snip<%>
            size-editor-snip%
@@ -13,7 +14,20 @@
   (define initial-char-width (make-parameter 30))
   
   (define (default-pretty-printer v port w spec)
-    (parameterize ([pretty-print-columns w])
+    (parameterize ([pretty-print-columns w]
+                   [pretty-print-size-hook
+                    (λ (val display? op)
+                      (cond
+                        [(hole? val) 4]
+                        [(eq? val 'hole) 6]
+                        [else #f]))]
+                   [pretty-print-print-hook
+                    (λ (val display? op)
+                      (cond
+                        [(hole? val)
+                         (display "hole" op)]
+                        [(eq? val 'hole) 
+                         (display ",'hole" op)]))])
       (pretty-print v port)))
   
   (define reflowing-snip<%>

@@ -167,13 +167,15 @@ static Scheme_Object *abort_continuation_proc;
 static Scheme_Object *internal_call_cc_prim;
 
 /* CACHES NEED TO BE THREAD LOCAL */
-static Scheme_Prompt *available_prompt, *available_cws_prompt, *available_regular_prompt;
-static Scheme_Dynamic_Wind *available_prompt_dw;
-static Scheme_Meta_Continuation *available_prompt_mc;
-static Scheme_Object *cached_beg_stx;
-static Scheme_Object *cached_dv_stx;
-static Scheme_Object *cached_ds_stx;
-static int cached_stx_phase;
+static THREAD_LOCAL Scheme_Prompt *available_prompt;
+static THREAD_LOCAL Scheme_Prompt *available_cws_prompt;
+static THREAD_LOCAL Scheme_Prompt *available_regular_prompt;
+static THREAD_LOCAL Scheme_Dynamic_Wind *available_prompt_dw;
+static THREAD_LOCAL Scheme_Meta_Continuation *available_prompt_mc;
+static THREAD_LOCAL Scheme_Object *cached_beg_stx;
+static THREAD_LOCAL Scheme_Object *cached_dv_stx;
+static THREAD_LOCAL Scheme_Object *cached_ds_stx;
+static THREAD_LOCAL int cached_stx_phase;
 
 /* NEED TO BE THREAD LOCAL */
 static Scheme_Cont *offstack_cont;
@@ -956,6 +958,8 @@ scheme_optimize_closure_compilation(Scheme_Object *_data, Optimize_Info *info)
 
   info = scheme_optimize_info_add_frame(info, data->num_params, data->num_params,
 					SCHEME_LAMBDA_FRAME);
+
+  /* For reporting warnings: */
   if (info->context && SCHEME_PAIRP(info->context))
     ctx = scheme_make_pair((Scheme_Object *)data,
                            SCHEME_CDR(info->context));
@@ -1809,8 +1813,8 @@ static void initialize_prompt(Scheme_Thread *p, Scheme_Prompt *prompt, void *sta
 
 typedef Scheme_Object *(*Overflow_K_Proc)(void);
 
-Scheme_Overflow_Jmp *scheme_overflow_jmp;
-void *scheme_overflow_stack_start;
+THREAD_LOCAL Scheme_Overflow_Jmp *scheme_overflow_jmp;
+THREAD_LOCAL void *scheme_overflow_stack_start;
 
 /* private, but declared public to avoid inlining: */
 void scheme_really_create_overflow(void *stack_base)
@@ -1830,7 +1834,7 @@ void scheme_really_create_overflow(void *stack_base)
   scheme_init_jmpup_buf(&jmp->cont);
   if (scheme_setjmpup(&jmp->cont, jmp, stack_base)) {
     /* A jump into here is a request to handle overflow.
-       The way to continue is in scheme_overflow_k.
+       The way to continue is in p->overflow_k.
        When we get back, put the result into
        scheme_overflow_reply. The route to return is
        in the thread's `overflow' field. */
@@ -1850,7 +1854,7 @@ void scheme_really_create_overflow(void *stack_base)
     } else {
       void *p1, *p2, *p3, *p4, *p5;
       long i1, i2, i3, i4;
-      Overflow_K_Proc f = scheme_overflow_k;
+      Overflow_K_Proc f = p->overflow_k;
       Scheme_Object *reply;
 
       p1 = p->ku.k.p1;
@@ -8229,6 +8233,14 @@ static Scheme_Object *write_compiled_closure(Scheme_Object *obj)
   svec_size = data->closure_size;
   if (SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_REF_ARGS) {
     svec_size += (data->num_params + BITS_PER_MZSHORT - 1) / BITS_PER_MZSHORT;
+  }
+
+  if (SCHEME_RPAIRP(data->code)) {
+    /* This can happen if loaded bytecode is printed out and the procedure
+       body has never been needed before.
+       It's also possible in non-JIT mode if an empty closure is embedded 
+       as a 3-D value in compiled code. */
+    scheme_delay_load_closure(data);
   }
 
   /* If the body is simple enough, write it directly.

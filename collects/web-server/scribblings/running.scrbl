@@ -4,10 +4,50 @@
 @title[#:tag "run.ss"
        #:style 'toc]{Running the Web Server}
 
-There are a number of ways to run the Web Server. The two primary ways
-are through a command-line tool or through a function call.
+There are a number of ways to run the Web Server. They are given in order of simplest to most advanced.
 
 @local-table-of-contents[]
+
+@; ------------------------------------------------------------
+@section[#:tag "insta"]{Instant Servlets}
+@(require (for-label (only-in web-server/insta/insta
+                              no-web-browser static-files-path)))
+@defmodulelang[web-server/insta]
+
+The fastest way to get a servlet running in the Web server is to use the 
+"Insta" language in DrScheme. Enter the following into DrScheme:
+
+@schememod[
+web-server/insta
+
+(define (start request)
+  `(html (head (title "Hello world!"))
+         (body (p "Hey out there!"))))
+]
+
+And press @onscreen["Run"]. A Web browser will open up showing your new servlet.
+
+Behind the scenes, DrScheme has used @scheme[serve/servlet] to start a new server
+that uses your @scheme[start] function as the servlet. 
+You are given the entire @schememodname[web-server/servlet] API.
+
+@subsection{Customization API}
+
+@defmodule[web-server/insta/insta]
+
+The following API is provided to customize the server instance:
+
+@defproc[(no-web-browser) void]{
+ Calling this will instruct DrScheme to @emph{not} start a Web browser when you press
+  @onscreen["Run"].
+}
+
+@defproc[(static-files-path [path path?]) void]{
+ This instructs the Web server to serve static files, such as stylesheet and images, from @scheme[path].
+}
+
+@; ------------------------------------------------------------
+@include-section["servlet-env.scrbl"]
 
 @; ------------------------------------------------------------
 @section[#:tag "command-line-tools"]{Command-line Tools}
@@ -44,7 +84,7 @@ of the @web-server in other applications, or loading a custom
 dispatcher. See @filepath{run.ss} for an example of such a script.
 
 @defproc[(serve [#:dispatch dispatch dispatcher?]
-                [#:tcp\@ tcp\@ tcp-unit^ raw:tcp\@]
+                [#:tcp@ tcp@ tcp-unit^ raw:tcp@]
                 [#:port port integer? 80]
                 [#:listen-ip listen-ip (or/c string? false/c) #f]
                 [#:max-waiting max-waiting integer? 40]
@@ -52,6 +92,8 @@ dispatcher. See @filepath{run.ss} for an example of such a script.
          (-> void)]{
  Constructs an appropriate @scheme[dispatch-config^], invokes the
  @scheme[dispatch-server@], and calls its @scheme[serve] function.
+ 
+ The @scheme[#:tcp@] keyword is provided for building an SSL server. See @secref["faq:https"].
 }
 
 @; XXX Not the right `server' above.
@@ -64,7 +106,7 @@ from a given path:
 
 @schemeblock[
 (define (start-file-server base)
-  (serve 
+  (serve
    #:dispatch
    (files:make
     #:url->path (make-url->path base)
@@ -72,10 +114,10 @@ from a given path:
     (lambda (path)
       #"application/octet-stream"))
    #:port 8080))
-]            
-                   
+]
+
 @defproc[(serve/ports [#:dispatch dispatch dispatcher?]
-                      [#:tcp\@ tcp\@ tcp-unit^ raw:tcp\@]
+                      [#:tcp@ tcp@ tcp-unit^ raw:tcp@]
                       [#:ports ports (listof integer?) (list 80)]
                       [#:listen-ip listen-ip (or/c string? false/c) #f]
                       [#:max-waiting max-waiting integer? 40]
@@ -86,7 +128,7 @@ from a given path:
 }
 
 @defproc[(serve/ips+ports [#:dispatch dispatch dispatcher?]
-                          [#:tcp\@ tcp\@ tcp-unit^ raw:tcp\@]
+                          [#:tcp@ tcp@ tcp-unit^ raw:tcp@]
                           [#:ips+ports ips+ports (listof (cons/c (or/c string? false/c) (listof integer?))) (list (cons #f (list 80)))]
                           [#:max-waiting max-waiting integer? 40]
                           [#:initial-connection-timeout initial-connection-timeout integer? 60])
@@ -94,6 +136,7 @@ from a given path:
  Calls @scheme[serve/ports] multiple times, once for each @scheme[ip], and returns
  a function that shuts down all of the server instances.
 }
+                  
 
 @defproc[(do-not-return) void]{
  This function does not return. If you are writing a script to load the @web-server

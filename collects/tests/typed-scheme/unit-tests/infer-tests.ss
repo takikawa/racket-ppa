@@ -1,8 +1,10 @@
 #lang scheme/base
-(require "test-utils.ss" (for-syntax scheme/base))
-(require (private planet-requires type-effect-convenience type-rep union infer type-utils)
-         (prefix-in table: (private tables)))
-(require (schemeunit)) 
+(require "test-utils.ss" "planet-requires.ss" (for-syntax scheme/base))
+(require (rep type-rep)
+	 (r:infer infer)
+	 (private type-effect-convenience union type-utils)
+         (prefix-in table: (utils tables))
+         (schemeunit))
 
 
 

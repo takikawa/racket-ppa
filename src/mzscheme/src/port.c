@@ -30,6 +30,7 @@
    ports. */
 
 #include "schpriv.h"
+#include "schmach.h"
 #ifdef UNISTD_INCLUDE
 # include <unistd.h>
 #endif
@@ -242,9 +243,9 @@ typedef struct Scheme_FD {
 
 /* globals */
 Scheme_Object scheme_eof[1];
-Scheme_Object *scheme_orig_stdout_port;
-Scheme_Object *scheme_orig_stderr_port;
-Scheme_Object *scheme_orig_stdin_port;
+THREAD_LOCAL Scheme_Object *scheme_orig_stdout_port;
+THREAD_LOCAL Scheme_Object *scheme_orig_stderr_port;
+THREAD_LOCAL Scheme_Object *scheme_orig_stdin_port;
 
 Scheme_Object *(*scheme_make_stdin)(void) = NULL;
 Scheme_Object *(*scheme_make_stdout)(void) = NULL;
@@ -284,7 +285,8 @@ Scheme_Object *scheme_redirect_output_port_type;
 
 int scheme_force_port_closed;
 
-static int flush_out, flush_err;
+static int flush_out;
+static int flush_err;
 
 #if defined(FILES_HAVE_FDS)
 static int external_event_fd, put_external_event_fd;
@@ -487,6 +489,57 @@ scheme_init_port (Scheme_Env *env)
   }
 #endif
 
+  scheme_init_port_places();
+
+  flush_out = SCHEME_TRUEP(scheme_terminal_port_p(1, &scheme_orig_stdout_port));
+  flush_err = SCHEME_TRUEP(scheme_terminal_port_p(1, &scheme_orig_stderr_port));
+
+#ifdef MZ_FDS
+  scheme_add_atexit_closer(flush_if_output_fds);
+  /* Note: other threads might continue to write even after
+     the flush completes, but that's the threads' problem.
+     All writing by the main thread will get flushed on exit
+     (but not, of course, if the thread is shutdown via a
+     custodian). */
+#endif
+
+#if defined(FILES_HAVE_FDS)
+# ifndef USE_OSKIT_CONSOLE
+  /* Set up a pipe for signalling external events: */
+  {
+    int fds[2];
+    if (!pipe(fds)) {
+      external_event_fd = fds[0];
+      put_external_event_fd = fds[1];
+      fcntl(external_event_fd, F_SETFL, MZ_NONBLOCKING);
+      fcntl(put_external_event_fd, F_SETFL, MZ_NONBLOCKING);
+    }
+  }
+# endif
+#endif
+
+  register_port_wait();
+
+  scheme_add_global_constant("subprocess", scheme_make_prim_w_arity2(subprocess, "subprocess", 4, -1, 4, 4), env);
+  scheme_add_global_constant("subprocess-status", scheme_make_prim_w_arity(subprocess_status, "subprocess-status", 1, 1), env);
+  scheme_add_global_constant("subprocess-kill", scheme_make_prim_w_arity(subprocess_kill, "subprocess-kill", 2, 2), env);
+  scheme_add_global_constant("subprocess-pid", scheme_make_prim_w_arity(subprocess_pid, "subprocess-pid", 1, 1), env);
+  scheme_add_global_constant("subprocess?", scheme_make_prim_w_arity(subprocess_p, "subprocess?", 1, 1), env);
+  scheme_add_global_constant("subprocess-wait", scheme_make_prim_w_arity(subprocess_wait, "subprocess-wait", 1, 1), env);
+
+
+  register_subprocess_wait();
+
+  scheme_add_global_constant("shell-execute", scheme_make_prim_w_arity(sch_shell_execute, "shell-execute", 5, 5), env);
+
+  REGISTER_SO(read_string_byte_buffer);
+
+  scheme_add_evt(scheme_progress_evt_type, (Scheme_Ready_Fun)progress_evt_ready, NULL, NULL, 1);
+  scheme_add_evt(scheme_write_evt_type, (Scheme_Ready_Fun)rw_evt_ready, rw_evt_wakeup, NULL, 1);
+}
+
+void scheme_init_port_places(void)
+{
   scheme_orig_stdin_port = (scheme_make_stdin
 			    ? scheme_make_stdin()
 #ifdef USE_OSKIT_CONSOLE
@@ -536,83 +589,6 @@ scheme_init_port (Scheme_Env *env)
 			     : scheme_make_file_output_port(stderr)
 #endif
 			     );
-
-  flush_out = SCHEME_TRUEP(scheme_terminal_port_p(1, &scheme_orig_stdout_port));
-  flush_err = SCHEME_TRUEP(scheme_terminal_port_p(1, &scheme_orig_stderr_port));
-
-#ifdef MZ_FDS
-  scheme_add_atexit_closer(flush_if_output_fds);
-  /* Note: other threads might continue to write even after
-     the flush completes, but that's the threads' problem.
-     All writing by the main thread will get flushed on exit
-     (but not, of course, if the thread is shutdown via a
-     custodian). */
-#endif
-
-#if defined(FILES_HAVE_FDS)
-# ifndef USE_OSKIT_CONSOLE
-  /* Set up a pipe for signalling external events: */
-  {
-    int fds[2];
-    if (!pipe(fds)) {
-      external_event_fd = fds[0];
-      put_external_event_fd = fds[1];
-      fcntl(external_event_fd, F_SETFL, MZ_NONBLOCKING);
-      fcntl(put_external_event_fd, F_SETFL, MZ_NONBLOCKING);
-    }
-  }
-# endif
-#endif
-
-  scheme_init_port_config();
-
-  register_port_wait();
-
-  scheme_add_global_constant("subprocess",
-			     scheme_make_prim_w_arity2(subprocess,
-						       "subprocess",
-						       4, -1,
-						       4, 4),
-			     env);
-  scheme_add_global_constant("subprocess-status",
-			     scheme_make_prim_w_arity(subprocess_status,
-						      "subprocess-status",
-						      1, 1),
-			     env);
-  scheme_add_global_constant("subprocess-kill",
-			     scheme_make_prim_w_arity(subprocess_kill,
-						      "subprocess-kill",
-						      2, 2),
-			     env);
-  scheme_add_global_constant("subprocess-pid",
-			     scheme_make_prim_w_arity(subprocess_pid,
-						      "subprocess-pid",
-						      1, 1),
-			     env);
-  scheme_add_global_constant("subprocess?",
-			     scheme_make_prim_w_arity(subprocess_p,
-						      "subprocess?",
-						      1, 1),
-			     env);
-  scheme_add_global_constant("subprocess-wait",
-			     scheme_make_prim_w_arity(subprocess_wait,
-						      "subprocess-wait",
-						      1, 1),
-			     env);
-
-
-  register_subprocess_wait();
-
-  scheme_add_global_constant("shell-execute",
-			     scheme_make_prim_w_arity(sch_shell_execute,
-						      "shell-execute",
-						      5, 5),
-			     env);
-
-  REGISTER_SO(read_string_byte_buffer);
-
-  scheme_add_evt(scheme_progress_evt_type, (Scheme_Ready_Fun)progress_evt_ready, NULL, NULL, 1);
-  scheme_add_evt(scheme_write_evt_type, (Scheme_Ready_Fun)rw_evt_ready, rw_evt_wakeup, NULL, 1);
 }
 
 void scheme_init_port_config(void)
@@ -621,21 +597,14 @@ void scheme_init_port_config(void)
 
   config = scheme_current_config();
 
-  scheme_set_param(config, MZCONFIG_INPUT_PORT,
-		   scheme_orig_stdin_port);
-  scheme_set_param(config, MZCONFIG_OUTPUT_PORT,
-		   scheme_orig_stdout_port);
-  scheme_set_param(config, MZCONFIG_ERROR_PORT,
-		   scheme_orig_stderr_port);
+  scheme_set_param(config, MZCONFIG_INPUT_PORT,   scheme_orig_stdin_port);
+  scheme_set_param(config, MZCONFIG_OUTPUT_PORT,  scheme_orig_stdout_port);
+  scheme_set_param(config, MZCONFIG_ERROR_PORT,   scheme_orig_stderr_port);
 }
 
 Scheme_Object * scheme_make_eof (void)
 {
   return scheme_eof;
-}
-
-void scheme_no_dumps(char *why)
-{
 }
 
 /*========================================================================*/
@@ -2139,7 +2108,7 @@ Scheme_Object *scheme_progress_evt(Scheme_Object *port)
 
 static int progress_evt_ready(Scheme_Object *evt, Scheme_Schedule_Info *sinfo)
 {
-  scheme_set_sync_target(sinfo, SCHEME_PTR2_VAL(evt), evt, NULL, 0, 1);
+  scheme_set_sync_target(sinfo, SCHEME_PTR2_VAL(evt), evt, NULL, 0, 1, NULL);
   return 0;
 }
 
@@ -2646,7 +2615,7 @@ static int rw_evt_ready(Scheme_Object *_rww, Scheme_Schedule_Info *sinfo)
 
     v = ws(op, rww->v, 1);
     if (v) {
-      scheme_set_sync_target(sinfo, scheme_true, NULL, NULL, 0, 0);
+      scheme_set_sync_target(sinfo, scheme_true, NULL, NULL, 0, 0, NULL);
       return 1;
     } else	
       return 0;
@@ -2659,7 +2628,7 @@ static int rw_evt_ready(Scheme_Object *_rww, Scheme_Schedule_Info *sinfo)
     else if (!v && rww->size)
       return 0;
     else {
-      scheme_set_sync_target(sinfo, scheme_make_integer(v), NULL, NULL, 0, 0);
+      scheme_set_sync_target(sinfo, scheme_make_integer(v), NULL, NULL, 0, 0, NULL);
       return 1;
     }
   }
@@ -6667,15 +6636,55 @@ scheme_make_null_output_port(int can_write_special)
 /*                         redirect output ports                          */
 /*========================================================================*/
 
+static Scheme_Object *redirect_write_bytes_k(void);
+
 static long
 redirect_write_bytes(Scheme_Output_Port *op,
 		     const char *str, long d, long len,
 		     int rarely_block, int enable_break)
 {
+  /* arbitrary nesting means we can overflow the stack */
+#ifdef DO_STACK_CHECK
+# include "mzstkchk.h"
+  {
+    Scheme_Thread *p = scheme_current_thread;
+    Scheme_Object *n;
+
+    p->ku.k.p1 = (void *)op;
+    p->ku.k.p2 = (void *)str;
+    p->ku.k.i1 = d;
+    p->ku.k.i2 = len;
+    p->ku.k.i3 = rarely_block;
+    p->ku.k.i4 = enable_break;
+
+    n = scheme_handle_stack_overflow(redirect_write_bytes_k);
+    return SCHEME_INT_VAL(n);
+  }
+#endif
+
   return scheme_put_byte_string("redirect-output",
 				(Scheme_Object *)op->port_data,
 				str, d, len,
 				rarely_block);
+}
+
+static Scheme_Object *redirect_write_bytes_k(void)
+{
+  Scheme_Thread *p = scheme_current_thread;
+  Scheme_Output_Port *op = (Scheme_Output_Port *)p->ku.k.p1;
+  const char *str = (const char *)p->ku.k.p2;
+  long d = p->ku.k.i1;
+  long len = p->ku.k.i2;
+  int rarely_block = p->ku.k.i3;
+  int enable_break = p->ku.k.i4;
+  long n;
+
+  p->ku.k.p1 = NULL;
+  p->ku.k.p2 = NULL;
+
+  n = redirect_write_bytes(op, str, d, len, rarely_block, enable_break);
+
+  return scheme_make_integer(n);
 }
 
 static void
@@ -8102,6 +8111,7 @@ static long ITimer(void)
   while (1) {
     if (WaitForSingleObject(itimer_semaphore, itimer_delay / 1000) == WAIT_TIMEOUT) {
       scheme_fuel_counter = 0;
+      scheme_jit_stack_boundary = (unsigned long)-1;
       WaitForSingleObject(itimer_semaphore, INFINITE);
     }
   }
@@ -8144,7 +8154,8 @@ static void *run_itimer(void *p)
   while (1) {
     usleep(itimer_delay);
     scheme_fuel_counter = 0;
-    
+    scheme_jit_stack_boundary = (unsigned long)-1;
+
     pthread_mutex_lock(&itimer_mutex);
     if (itimer_continue) {
       itimer_continue = 0;

@@ -943,6 +943,8 @@ module_val {
 
   gcMARK(m->insp);
 
+  gcMARK(m->lang_info);
+
   gcMARK(m->hints);
   gcMARK(m->ii_src);
 
@@ -1063,7 +1065,7 @@ mark_logger {
 mark_log_reader {
  mark:
   Scheme_Log_Reader *lr = (Scheme_Log_Reader *)p;
-  gcMARK(lr->ch);
+  gcMARK(lr->sema);
   gcMARK(lr->head);
   gcMARK(lr->tail);
  size:
@@ -1073,6 +1075,17 @@ mark_log_reader {
 END type;
 
 /**********************************************************************/
+
+START engine;
+
+engine_val {
+ mark:
+  Scheme_Engine *en = (Scheme_Engine *)p;
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Engine));
+}
+
+END engine;
 
 START env;
 
@@ -1296,6 +1309,19 @@ mark_rb_node {
 }
 
 END hash;
+
+/**********************************************************************/
+
+START places;
+
+place_val {
+ mark:
+  Scheme_Place *pr = (Scheme_Place *)p;
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Place));
+}
+
+END places;
 
 /**********************************************************************/
 
@@ -1700,6 +1726,7 @@ mark_syncing {
   gcMARK(w->wrapss);
   gcMARK(w->nackss);
   gcMARK(w->reposts);
+  gcMARK(w->accepts);
   gcMARK(w->disable_break);
 
  size:

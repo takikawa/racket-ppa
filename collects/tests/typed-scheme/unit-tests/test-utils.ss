@@ -1,28 +1,16 @@
 #lang scheme/base
 (provide (all-defined-out))
 
-(require scheme/require-syntax
+(require "planet-requires.ss"
+         scheme/require-syntax
          scheme/match
+	 typed-scheme/utils/utils
          (for-syntax scheme/base))
 
-(define-require-syntax private
-  (lambda (stx)
-    (syntax-case stx ()
-      [(_ id ...)
-       (andmap identifier? (syntax->list #'(id ...)))
-       (with-syntax ([(id* ...) (map (lambda (id) (datum->syntax 
-                                                   id 
-                                                   (string->symbol 
-                                                    (string-append 
-                                                     "typed-scheme/private/" 
-                                                     (symbol->string (syntax-e id))))
-                                                   id id))
-                                     (syntax->list #'(id ...)))])
-         (syntax/loc stx (combine-in id* ...)))])))
 
-(require (private planet-requires type-comparison utils type-utils))
-
-(require (schemeunit))
+(require (private type-comparison type-utils)
+         (schemeunit))
+(provide private typecheck (rename-out [infer r:infer]) utils env rep)
 
 (define (mk-suite ts)
   (match (map (lambda (f) (f)) ts)

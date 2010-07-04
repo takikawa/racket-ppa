@@ -833,7 +833,9 @@
     id
     always-evt ;; assuming that it never blocks!
     (lambda (bytes start end can-block/buffer? enable-break?)
-      (write! bytes start end))
+      (if (= start end)
+          0
+          (write! bytes start end)))
     (or close void)
     #f
     #f
@@ -862,8 +864,10 @@
                     (bytes-utf-8-length bytes #f start end))
                ;; No old bytes saved, and bytes to write form a complete
                ;; UTF-8 encoding, so we can write directly:
-               (let ([s (bytes->string/utf-8 bytes #f start end)])
-                 (write! s 0 (string-length s)))
+               (let* ([s (bytes->string/utf-8 bytes #f start end)]
+                      [len (string-length s)])
+                 (when (positive? len)
+                   (write! s 0 len)))
                ;; Partial or need to use existing bytes, so use pipe
                (begin
                  (write-bytes bytes out start end)
@@ -877,8 +881,10 @@
                        (let-values ([(amt used status) (bytes-convert c buffer 0 n cvt-buffer)])
                          (when (positive? amt)
                            (read-bytes! buffer in 0 amt)
-                           (let ([s (bytes->string/utf-8 buffer #f 0 amt)])
-                             (write! s 0 (string-length s))))
+                           (let* ([s (bytes->string/utf-8 buffer #f 0 amt)]
+                                  [len (string-length s)])
+                             (when (positive? len)
+                               (write! s 0 (string-length s)))))
                          (when (eq? status 'error)
                            ;; Discard an erroneous byte
                            (read-byte in))
@@ -959,9 +965,9 @@
                               [else 9])))]
                      [(char? v)
                       (case v
-                        [(#\x7) 7] ; #\alarm
-                        [(#\x1B) 5] ; #\esc
-                        [(#\x7F) 8] ; #\delete
+                        [(#\u7) 7] ; #\alarm
+                        [(#\u1B) 5] ; #\esc
+                        [(#\u7F) 8] ; #\delete
                         [else (and (not (char-graphic? v))
                                    (+ 3
                                       (if ((char->integer v) . < . #x10000)
@@ -1008,9 +1014,9 @@
                       (write-char #\" p)]
                      [(char? v)
                       (case v
-                        [(#\x7) (display "#\\alarm" p)]
-                        [(#\x1B) (display "#\\esc" p)]
-                        [(#\x7F) (display "#\\delete" p)]
+                        [(#\u7) (display "#\\alarm" p)]
+                        [(#\u1B) (display "#\\esc" p)]
+                        [(#\u7F) (display "#\\delete" p)]
                         [else 
                          (display "#\\x" p)
                          (let ([n (number->string (char->integer v) 16)])

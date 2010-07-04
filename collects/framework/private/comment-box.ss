@@ -1,13 +1,18 @@
+#lang scheme/base
 
-#lang scheme/unit
+(require (for-syntax scheme/base)
+         scheme/unit
+         scheme/class
+         scheme/gui/base
+         scheme/runtime-path
+         "sig.ss"
+         "../decorated-editor-snip.ss"
+         string-constants)
 
-  (require mzlib/class
-           mzlib/etc
-           mred
-           "sig.ss"
-           "../decorated-editor-snip.ss"
-           mrlib/include-bitmap
-           string-constants)
+(define-runtime-path semicolon-bitmap-path '(lib "icons/semicolon.gif"))
+(provide comment-box@)
+
+(define-unit comment-box@
   
   (import [prefix text: framework:text^]
           [prefix scheme: framework:scheme^]
@@ -25,13 +30,7 @@
   (send snipclass set-classname (format "~s" '(lib "comment-snip.ss" "framework")))
   (send (get-the-snip-class-list) add snipclass)
   
-  (define bm (include-bitmap (lib "icons/semicolon.gif")))
-  
-  (define (editor-keymap-mixin %)
-    (class %
-      (define/override (get-keymaps)
-        (cons (keymap:get-file) (super get-keymaps)))
-      (super-instantiate ())))
+  (define bm (make-object bitmap% semicolon-bitmap-path))
   
   (define scheme+copy-self% #f)
   (define (get-scheme+copy-self%)
@@ -43,7 +42,9 @@
                 (let ([ed (new scheme+copy-self%)])
                   (copy-self-to ed)
                   ed))
-              (super-new))))
+              (super-new)
+              (inherit set-max-undo-history)
+              (set-max-undo-history 'forever))))
     scheme+copy-self%)
   
   (define -snip%
@@ -55,13 +56,12 @@
       (define/override (get-corner-bitmap) bm)
       (define/override (get-position) 'left-top)
       
-      (define/override get-text
-        (opt-lambda (offset num [flattened? #t])
-          (let* ([super-res (super get-text offset num flattened?)]
-                 [replaced (string-append "; " (regexp-replace* "\n" super-res "\n; "))])
-            (if (char=? #\newline (string-ref replaced (- (string-length replaced) 1)))
-                replaced
-                (string-append replaced "\n")))))
+      (define/override (get-text offset num [flattened? #t])
+        (let* ([super-res (super get-text offset num flattened?)]
+               [replaced (string-append "; " (regexp-replace* "\n" super-res "\n; "))])
+          (if (char=? #\newline (string-ref replaced (- (string-length replaced) 1)))
+              replaced
+              (string-append replaced "\n"))))
       
       
       (define/override (get-menu)
@@ -122,4 +122,4 @@
         (make-special-comment "comment"))
       (super-instantiate ())
       (inherit set-snipclass)
-      (set-snipclass snipclass)))
+      (set-snipclass snipclass))))

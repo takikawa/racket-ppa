@@ -3,6 +3,7 @@
 (require (for-syntax (rename-in r6rs/private/base-for-syntax
                                 [syntax-rules r6rs:syntax-rules])
                      scheme/base)
+         scheme/splicing
          r6rs/private/qq-gen
          r6rs/private/exns
          (prefix-in r5rs: r5rs)
@@ -68,7 +69,7 @@
  rationalize
  exp (rename-out [r6rs:log log]) sin cos tan asin acos atan
  sqrt (rename-out [integer-sqrt/remainder exact-integer-sqrt])
- expt
+ (rename-out [r6rs:expt expt])
  make-rectangular make-polar real-part imag-part magnitude 
  (rename-out [r6rs:angle angle]
              [r6rs:number->string number->string]
@@ -276,9 +277,9 @@
             #'(let ([a expr1]
                     [b expr2])
                 (cond
-                 [(and (eq? b 0) (inexact-real? a))
+                 [(and (eq? b 0) (number? a) (inexact? a))
                   (/ a 0.0)]
-                 [(and (eq? a 0) (inexact-real? b))
+                 [(and (eq? a 0) (number? b) (inexact? b))
                   (/ 0.0 b)]
                  [else (/ a b)]))]
            [(_ . args) 
@@ -288,7 +289,7 @@
   (case-lambda
    [(n) (/ n)]
    [(a b) (r6rs:/ a b)]
-   [args (if (ormap inexact-real? args)
+   [args (if (ormap (lambda (x) (and (number? x) (inexact? x))) args)
              (apply /
                     (map (lambda (v) (if (eq? v 0)
                                          0.0
@@ -300,6 +301,28 @@
   (case-lambda
    [(n) (log n)]
    [(n m) (/ (log n) (log m))]))
+
+(define (r6rs:expt base power)
+  (cond
+   [(and (number? base)
+         (zero? base)
+         (number? power))
+    (if (zero? power)
+        (if (and (eq? base 0)
+                 (exact? power))
+            1
+            1.0)
+        (if (positive? (real-part power))
+            (if (and (eq? base 0)
+                     (exact? power))
+                0
+                0.0)
+            (expt base power)))]
+   [(and (eq? base 1)
+         (number? power) 
+         (inexact? power))
+    (expt (exact->inexact base) power)]
+   [else (expt base power)]))
 
 (define (r6rs:angle n)
   ; because `angle' produces exact 0 for reals:
@@ -524,54 +547,20 @@
 
 ;; ----------------------------------------
 
-;; let[rec]-syntax needs to be splicing, ad it needs the
+;; let[rec]-syntax needs to be splicing, and it needs the
 ;; same transformer wrapper as in `define-syntax'
 
-(define-for-syntax (do-let-syntax stx rec?)
+(define-syntax (r6rs:let-syntax stx)
   (syntax-case stx ()
     [(_ ([id expr] ...) body ...)
-     (if (eq? 'expression (syntax-local-context))
-         (with-syntax ([let-stx (if rec?
-                                    #'letrec-syntax
-                                    #'let-syntax)])
-           (syntax/loc stx
-             (let-stx ([id (wrap-as-needed expr)] ...)
-               (#%expression body)
-               ...)))
-         (let ([sli (if (list? (syntax-local-context))
-                        syntax-local-introduce
-                        values)])
-           (let ([ids (map sli (syntax->list #'(id ...)))]
-                 [def-ctx (syntax-local-make-definition-context)]
-                 [ctx (list (gensym 'intdef))])
-             (syntax-local-bind-syntaxes ids #f def-ctx)
-             (let* ([add-context
-                     (lambda (expr)
-                       (let ([q (local-expand #`(quote #,expr)
-                                              ctx
-                                              (list #'quote)
-                                              def-ctx)])
-                         (syntax-case q ()
-                           [(_ expr) #'expr])))])
-               (with-syntax ([(id ...)
-                              (map sli (map add-context ids))]
-                             [(expr ...)
-                              (let ([exprs (syntax->list #'(expr ...))])
-                                (if rec?
-                                    (map add-context exprs)
-                                    exprs))]
-                             [(body ...)
-                              (map add-context (syntax->list #'(body ...)))])
-                 #'(begin
-                     (define-syntax id (wrap-as-needed expr))
-                     ...
-                     body ...))))))]))
-
-(define-syntax (r6rs:let-syntax stx)
-  (do-let-syntax stx #f))
+     (syntax/loc stx
+       (splicing-let-syntax ([id (wrap-as-needed expr)] ...) body ...))]))
 
 (define-syntax (r6rs:letrec-syntax stx)
-  (do-let-syntax stx #t))
+  (syntax-case stx ()
+    [(_ ([id expr] ...) body ...)
+     (syntax/loc stx
+       (splicing-letrec-syntax ([id (wrap-as-needed expr)] ...) body ...))]))
 
 ;; ----------------------------------------
 

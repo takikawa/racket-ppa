@@ -1,8 +1,9 @@
 #lang scheme/base
 
-(require "test-utils.ss" (for-syntax scheme/base))
-(require (private planet-requires type-utils type-effect-convenience type-rep))
-(require (schemeunit))
+(require "test-utils.ss" "planet-requires.ss" (for-syntax scheme/base))
+(require (rep type-rep)
+	 (private type-utils type-effect-convenience)
+         (schemeunit))
 
 (define-syntax-rule (s img var tgt result)
   (test-eq? "test" (substitute img 'var tgt) result))

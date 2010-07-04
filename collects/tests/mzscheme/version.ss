@@ -5,16 +5,29 @@
 
 (require version/utils)
 
+;; sanity check
+(unless (and (< (string->number (car (regexp-match #rx"^[0-9]+" (version)))) 49)
+             (integer? (version->integer (version))))
+  ;; When this happens, we got to numbers that can be confused with old version
+  ;; numbers, and the version/utils code should be modified.  With the current
+  ;; rate of changes, this should happen in more 150 years.  Either programming
+  ;; is probably done with a direct brain link, or this software has nobody to
+  ;; fix it because everybody went back to the trees.
+  (error 'version/utils.ss "this file should be updated"))
+
 (test #t valid-version? (version))
 (for-each (lambda (v+i) (test (cadr v+i) version->integer (car v+i)))
           '(;; legacy version scheme
             ["372"           372000000]
             ["372.0"         #f] ; should be just "372"
-            ["372.1"         372001000]
-            ["372.12"        372012000]
-            ["123.4"         123004000]
+            ["372.1"         372000001]
+            ["372.12"        372000012]
+            ["123.4"         123000004]
             ["49"             49000000] ; oldest legacy-version supported
             ["103"           103000000]
+            ["103p1"         103001000] ; pN used as sub-sub-version
+            ["380"           #f] ; old style, but these versions never existed
+            ["400"           #f]
             ;; new version scheme
             ["4.0"           400000000]
             ["4"             #f] ; must have one decimal digit
@@ -47,6 +60,7 @@
             ["foo"           #f]
             ["x.y"           #f]
             ["0"             #f]
+            ["00"            #f]
             ))
 
 (report-errs)

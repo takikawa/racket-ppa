@@ -30,7 +30,7 @@
              class?
              mixin
              interface interface?
-             object% object? externalizable<%>
+             object% object? externalizable<%> printable<%>
              object=?
              new make-object instantiate
              send send/apply send* class-field-accessor class-field-mutator with-method
@@ -1726,6 +1726,7 @@
 			beta-methods   ; vector of vector of methods
 			meth-flags     ; vector: #f => primitive-implemented
                                        ;         'final => final
+                                       ;         'augmentable => can augment
 
 			field-width    ; total number of fields
 			field-ht       ; maps public field names to (cons class pos)
@@ -1835,7 +1836,8 @@
 	   [no-new-methods? (null? public-names)]
 	   [no-method-changes? (and (null? public-names)
 				    (null? override-names)
-				    (null? augride-names))]
+				    (null? augride-names)
+                                    (null? final-names))]
 	   [no-new-fields? (null? public-field-names)]
 	   [xappend (lambda (a b) (if (null? b) a (append a b)))])
 
@@ -2017,6 +2019,7 @@
 		   [dispatcher (lambda (obj n)
 				 ;; Extract method:
 				 (vector-ref (class-methods (object-ref obj)) n))])
+
 	      (setup-all-implemented! i)
 	      (vector-set! (class-supers c) (add1 (class-pos super)) c)
 
@@ -2038,6 +2041,13 @@
 						   ;; Map object property to class:
 						   (append
 						    (list (cons prop:object c))
+                                                    (if (interface-extension? i printable<%>)
+                                                        (list (cons prop:custom-write
+                                                                    (lambda (obj port write?)
+                                                                      (if write?
+                                                                          (send obj custom-write port)
+                                                                          (send obj custom-display port)))))
+                                                        null)
 						    (if deserialize-id
 							(list
 							 (cons prop:serializable
@@ -2077,7 +2087,7 @@
 		      (hash-set! field-ht (car ids) (cons c pos))
 		      (loop (cdr ids) (add1 pos))))
 
-		  ;; -- Extract superclass methods and make rename-inners ---
+                  ;; -- Extract superclass methods and make rename-inners ---
 		  (let ([rename-supers (map (lambda (index mname)
 					(let ([vec (vector-ref (class-beta-methods super) index)])
 					  (if (positive? (vector-length vec))
@@ -2095,7 +2105,7 @@
 					 (define (get-depth index)
 					   (+ (if (index . < . (class-method-width super))
 						  (vector-length (vector-ref (class-beta-methods super) 
-									     index))
+                                                                             index))
 						  0)
 					      (if (vector-ref new-augonly index) 0 -1)))
 					 ;; To compute `rename-inner' indices, we need to know which methods
@@ -2103,21 +2113,32 @@
 					 (for-each (lambda (id)
 						     (vector-set! new-augonly (hash-ref method-ht id) #t))
 						   (append pubment-names overment-names))
-					 (for-each (lambda (mname index)
-						     (let ([depth (get-depth index)])
-						       (when (negative? depth)
-							 (obj-error 'class* 
-								    (string-append
-								     "superclass method for augride, augment, inherit/inner, "
-								     "or rename-inner method is not augmentable: ~a~a")
-								    mname
-								    (for-class name)))))
-						   (append augride-normal-names
-							   augment-final-names
-							   rename-inner-names)
-						   (append (get-indices method-ht "augride" augride-normal-names)
-							   refine-final-indices
-							   rename-inner-indices))
+                                         (let ([check-aug
+                                                (lambda (maybe-here?)
+                                                  (lambda (mname index)
+                                                    (let ([aug-ok?
+                                                           (or (if (index . < . (class-method-width super))
+                                                                   (eq? (vector-ref (class-meth-flags super) index) 'augmentable)
+                                                                   #f)
+                                                               (and maybe-here?
+                                                                    (or (memq mname pubment-names)
+                                                                        (memq mname overment-names))))])
+                                                      (unless aug-ok?
+                                                        (obj-error 'class* 
+                                                                   (string-append
+                                                                    "superclass method for augride, augment, inherit/inner, "
+                                                                    "or rename-inner method is not augmentable: ~a~a")
+                                                                   mname
+                                                                   (for-class name))))))])
+                                           (for-each (check-aug #f) 
+                                                     augride-normal-names
+                                                     (get-indices method-ht "augride" augride-normal-names))
+                                           (for-each (check-aug #f) 
+                                                     augment-final-names
+                                                     refine-final-indices)
+                                           (for-each (check-aug #t) 
+                                                     rename-inner-names
+                                                     rename-inner-indices))
 					 ;; Now that checking is done, add `augment':
 					 (for-each (lambda (id)
 						     (vector-set! new-augonly (hash-ref method-ht id) #t))
@@ -2157,14 +2178,14 @@
 			   (lambda (name index)
 			     (vector-set! methods index (vector-ref (class-methods super) index))
 			     (vector-set! beta-methods index (vector-ref (class-beta-methods super) index))
-			     (vector-set! meth-flags index (vector-ref (class-meth-flags super) index)))))
-			;; Add new methods:
+                             (vector-set! meth-flags index (vector-ref (class-meth-flags super) index)))))
+                        ;; Add new methods:
 			(for-each (lambda (index method)
 				    (vector-set! methods index method)
 				    (vector-set! beta-methods index (vector)))
 				  (append new-augonly-indices new-final-indices new-normal-indices)
 				  new-methods)
-			;; Override old methods:
+                        ;; Override old methods:
 			(for-each (lambda (index method id)
 				    (when (eq? 'final (vector-ref meth-flags index))
 				      (obj-error 'class* 
@@ -2179,12 +2200,21 @@
 					  (let ([v (list->vector (vector->list v))])
 					    (vector-set! v (sub1 (vector-length v)) method)
 					    (vector-set! beta-methods index v))))
-				    (vector-set! meth-flags index (not make-struct:prim)))
+                                    (when (not (vector-ref meth-flags index))
+                                      (vector-set! meth-flags index (not make-struct:prim))))
 				  (append replace-augonly-indices replace-final-indices replace-normal-indices
 					  refine-augonly-indices refine-final-indices refine-normal-indices)
 				  (append override-methods augride-methods)
 				  (append override-names augride-names))
-			;; Expand `rename-inner' vector, adding a #f to indicate that
+                        ;; Update 'augmentable flags:
+                        (unless no-method-changes?
+                          (for-each (lambda (id)
+                                      (vector-set! meth-flags (hash-ref method-ht id) 'augmentable))
+                                    (append overment-names pubment-names))
+                          (for-each (lambda (id)
+                                      (vector-set! meth-flags (hash-ref method-ht id) #t))
+                                    augride-normal-names))
+                        ;; Expand `rename-inner' vector, adding a #f to indicate that
 			;;  no rename-inner function is available, so far
 			(for-each (lambda (id)
 				    (let ([index (hash-ref method-ht id)])
@@ -3671,6 +3701,9 @@
   (define externalizable<%>
     (_interface () externalize internalize))
 
+  (define printable<%>
+    (_interface () custom-write custom-display))
+
   ;; Providing traced versions:
   (provide class-traced
            class*-traced
@@ -3712,7 +3745,7 @@
            class?
            mixin
 	   (rename-out [_interface interface]) interface?
-	   object% object? object=? externalizable<%>
+	   object% object? object=? externalizable<%> printable<%>
            new make-object instantiate
            get-field field-bound? field-names
 	   send send/apply send* class-field-accessor class-field-mutator with-method

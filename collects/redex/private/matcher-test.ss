@@ -42,6 +42,8 @@
     (test-empty '(variable-except x) 1 #f)
     (test-empty '(variable-except x) 'x #f)
     (test-empty '(variable-except x) 'y (list (make-test-mtch (make-bindings null) 'y none)))
+    (test-lang 'x 'y (list (make-mtch (make-bindings (list (make-bind 'x 'y))) 'y none))
+               (list (make-nt 'x (list (make-rhs '(variable-except x) '())))))
     (test-empty '(variable-prefix x:) 'x: (list (make-test-mtch (make-bindings null) 'x: none)))
     (test-empty '(variable-prefix x:) 'x:x (list (make-test-mtch (make-bindings null) 'x:x none)))
     (test-empty '(variable-prefix x:) ': #f)
@@ -290,10 +292,16 @@
                                       '((1 1) (1 1)) 
                                       none)))
     
+    (test-empty '((variable_1 variable_1) ...)
+                '((x y))
+                #f)
+    
+    
     (test-empty '(number ...) '()
                 (list (make-test-mtch (make-bindings (list (make-bind 'number '()))) '() none)))
     (test-ab '(aa ...) '()
              (list (make-test-mtch (make-bindings (list (make-bind 'aa '()))) '() none)))
+    
     
     ;; testing block-in-hole
     (test-empty '(hide-hole a) 'b #f)
@@ -508,24 +516,24 @@
                            (make-rhs '(+ exp ctxt) '())
                            (make-rhs 'hole '())))))
      (list
-      (make-nt 'exp-exp 
-               (list (make-rhs 'hole '()) 
-                     (make-rhs `(+ (cross exp-exp) exp) '()) 
-                     (make-rhs `(+ exp (cross exp-exp)) '())))
-      (make-nt 'exp-ctxt
-               (list (make-rhs `(+ (cross exp-ctxt) exp) '())
-                     (make-rhs `(+ ctxt (cross exp-exp)) '())
-                     (make-rhs `(+ (cross exp-exp) ctxt) '())
-                     (make-rhs `(+ exp (cross exp-ctxt)) '())))
-      (make-nt 'ctxt-exp
-               (list (make-rhs `(+ (cross ctxt-exp) exp) '())
-                     (make-rhs `(+ exp (cross ctxt-exp)) '())))
       (make-nt 'ctxt-ctxt
                (list (make-rhs 'hole '())
                      (make-rhs `(+ (cross ctxt-ctxt) exp) '())
                      (make-rhs `(+ ctxt (cross ctxt-exp)) '())
                      (make-rhs `(+ (cross ctxt-exp) ctxt) '())
-                     (make-rhs `(+ exp (cross ctxt-ctxt)) '())))))
+                     (make-rhs `(+ exp (cross ctxt-ctxt)) '())))
+      (make-nt 'ctxt-exp
+               (list (make-rhs `(+ (cross ctxt-exp) exp) '())
+                     (make-rhs `(+ exp (cross ctxt-exp)) '())))
+      (make-nt 'exp-ctxt
+               (list (make-rhs `(+ (cross exp-ctxt) exp) '())
+                     (make-rhs `(+ ctxt (cross exp-exp)) '())
+                     (make-rhs `(+ (cross exp-exp) ctxt) '())
+                     (make-rhs `(+ exp (cross exp-ctxt)) '())))
+      (make-nt 'exp-exp 
+               (list (make-rhs 'hole '()) 
+                     (make-rhs `(+ (cross exp-exp) exp) '()) 
+                     (make-rhs `(+ exp (cross exp-exp)) '())))))
     
     (run-test
      'compatible-context-language2
@@ -534,15 +542,7 @@
       (list (make-nt 'm (list (make-rhs '(m m) '()) (make-rhs '(+ m m) '()) (make-rhs 'v '())))
             (make-nt 'v (list (make-rhs 'number '()) (make-rhs '(lambda (x) m) '())))))
      (list
-      (make-nt 'm-m
-               (list
-                (make-rhs 'hole '())
-                (make-rhs (list (list 'cross 'm-m) 'm) '())
-                (make-rhs (list 'm (list 'cross 'm-m)) '())
-                (make-rhs (list '+ (list 'cross 'm-m) 'm) '())
-                (make-rhs (list '+ 'm (list 'cross 'm-m)) '())
-                (make-rhs (list 'cross 'm-v) '())))
-      (make-nt 'm-v (list (make-rhs (list 'lambda (list 'x) (list 'cross 'm-m)) '())))
+      (make-nt 'v-v (list (make-rhs 'hole '()) (make-rhs (list 'lambda (list 'x) (list 'cross 'v-m)) '())))
       (make-nt 'v-m
                (list
                 (make-rhs (list (list 'cross 'v-m) 'm) '())
@@ -550,7 +550,15 @@
                 (make-rhs (list '+ (list 'cross 'v-m) 'm) '())
                 (make-rhs (list '+ 'm (list 'cross 'v-m)) '())
                 (make-rhs (list 'cross 'v-v) '())))
-      (make-nt 'v-v (list (make-rhs 'hole '()) (make-rhs (list 'lambda (list 'x) (list 'cross 'v-m)) '())))))
+      (make-nt 'm-v (list (make-rhs (list 'lambda (list 'x) (list 'cross 'm-m)) '())))
+      (make-nt 'm-m
+               (list
+                (make-rhs 'hole '())
+                (make-rhs (list (list 'cross 'm-m) 'm) '())
+                (make-rhs (list 'm (list 'cross 'm-m)) '())
+                (make-rhs (list '+ (list 'cross 'm-m) 'm) '())
+                (make-rhs (list '+ 'm (list 'cross 'm-m)) '())
+                (make-rhs (list 'cross 'm-v) '())))))
     
     (run-test
      'compatible-context-language3
@@ -560,12 +568,25 @@
             (make-nt 'seven (list (make-rhs 7 '())))))
      `(,(make-nt
          'm-m
-         `(,(make-rhs 'hole '()) ,(make-rhs `((cross m-m) seven m) '()) ,(make-rhs `(m (cross m-seven) m) '()) ,(make-rhs `(m seven (cross m-m)) '())))
-       ,(make-nt 'm-seven `())
+         `(,(make-rhs 'hole '()) ,(make-rhs `((cross m-m) seven m) '()) ,(make-rhs `(m seven (cross m-m)) '())))
        ,(make-nt
          'seven-m
          `(,(make-rhs `((cross seven-m) seven m) '()) ,(make-rhs `(m (cross seven-seven) m) '()) ,(make-rhs `(m seven (cross seven-m)) '())))
        ,(make-nt 'seven-seven `(,(make-rhs 'hole '())))))
+    
+    (run-test
+     'compatible-context-language4
+     (build-compatible-context-language
+      (mk-hasheq '((a . ()) (b . ()) (c . ())))
+      (list (make-nt 'a (list (make-rhs 'b '())))
+            (make-nt 'b (list (make-rhs 'c '())))
+            (make-nt 'c (list (make-rhs 3 '())))))
+     (list (make-nt 'c-c (list (make-rhs 'hole '())))
+           (make-nt 'c-b (list (make-rhs '(cross c-c) '())))
+           (make-nt 'c-a (list (make-rhs '(cross c-b) '())))
+           (make-nt 'b-b (list (make-rhs 'hole '())))
+           (make-nt 'b-a (list (make-rhs '(cross b-b) '())))
+           (make-nt 'a-a (list (make-rhs 'hole '())))))
     
     #;
     (test-xab '(in-hole (cross exp) (+ number number))
@@ -609,6 +630,17 @@
       (compile-pattern (compile-language 'pict-stuff-not-used '() '()) pat #t)
       exp)
      ans))
+  
+  ;; test-lang : sexp[pattern] sexp[term] answer (list/c nt) -> void
+  ;; returns #t if pat matching exp with the language defined by the given nts
+  (define (test-lang pat exp ans nts)
+    (let ([nt-map (map (λ (x) (list (nt-name x))) nts)])
+      (run-match-test
+       `(match-pattern (compile-pattern (compile-language 'pict-stuff-not-used ',nts ',nt-map) ',pat #t) ',exp)
+       (match-pattern 
+        (compile-pattern (compile-language 'pict-stuff-not-used nts nt-map) pat #t)
+        exp)
+       ans)))
   
   (define xab-lang #f)
   ;; test-xab : sexp[pattern] sexp[term] answer -> void

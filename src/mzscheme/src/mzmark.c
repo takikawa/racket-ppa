@@ -2348,6 +2348,8 @@ static int module_val_MARK(void *p) {
 
   gcMARK(m->insp);
 
+  gcMARK(m->lang_info);
+
   gcMARK(m->hints);
   gcMARK(m->ii_src);
 
@@ -2389,6 +2391,8 @@ static int module_val_FIXUP(void *p) {
   gcFIXUP(m->et_accessible);
 
   gcFIXUP(m->insp);
+
+  gcFIXUP(m->lang_info);
 
   gcFIXUP(m->hints);
   gcFIXUP(m->ii_src);
@@ -2677,7 +2681,7 @@ static int mark_log_reader_SIZE(void *p) {
 
 static int mark_log_reader_MARK(void *p) {
   Scheme_Log_Reader *lr = (Scheme_Log_Reader *)p;
-  gcMARK(lr->ch);
+  gcMARK(lr->sema);
   gcMARK(lr->head);
   gcMARK(lr->tail);
   return
@@ -2686,7 +2690,7 @@ static int mark_log_reader_MARK(void *p) {
 
 static int mark_log_reader_FIXUP(void *p) {
   Scheme_Log_Reader *lr = (Scheme_Log_Reader *)p;
-  gcFIXUP(lr->ch);
+  gcFIXUP(lr->sema);
   gcFIXUP(lr->head);
   gcFIXUP(lr->tail);
   return
@@ -2700,6 +2704,31 @@ static int mark_log_reader_FIXUP(void *p) {
 #endif  /* TYPE */
 
 /**********************************************************************/
+
+#ifdef MARKS_FOR_ENGINE_C
+
+static int engine_val_SIZE(void *p) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Engine));
+}
+
+static int engine_val_MARK(void *p) {
+  Scheme_Engine *en = (Scheme_Engine *)p;
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Engine));
+}
+
+static int engine_val_FIXUP(void *p) {
+  Scheme_Engine *en = (Scheme_Engine *)p;
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Engine));
+}
+
+#define engine_val_IS_ATOMIC 0
+#define engine_val_IS_CONST_SIZE 1
+
+
+#endif  /* ENGINE */
 
 #ifdef MARKS_FOR_ENV_C
 
@@ -3216,6 +3245,33 @@ static int mark_rb_node_FIXUP(void *p) {
 
 
 #endif  /* HASH */
+
+/**********************************************************************/
+
+#ifdef MARKS_FOR_PLACES_C
+
+static int place_val_SIZE(void *p) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Place));
+}
+
+static int place_val_MARK(void *p) {
+  Scheme_Place *pr = (Scheme_Place *)p;
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Place));
+}
+
+static int place_val_FIXUP(void *p) {
+  Scheme_Place *pr = (Scheme_Place *)p;
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Place));
+}
+
+#define place_val_IS_ATOMIC 0
+#define place_val_IS_CONST_SIZE 1
+
+
+#endif  /* PLACES */
 
 /**********************************************************************/
 
@@ -4183,6 +4239,7 @@ static int mark_syncing_MARK(void *p) {
   gcMARK(w->wrapss);
   gcMARK(w->nackss);
   gcMARK(w->reposts);
+  gcMARK(w->accepts);
   gcMARK(w->disable_break);
 
   return
@@ -4196,6 +4253,7 @@ static int mark_syncing_FIXUP(void *p) {
   gcFIXUP(w->wrapss);
   gcFIXUP(w->nackss);
   gcFIXUP(w->reposts);
+  gcFIXUP(w->accepts);
   gcFIXUP(w->disable_break);
 
   return

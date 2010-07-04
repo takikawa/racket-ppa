@@ -1,3 +1,5 @@
+#lang scheme/base
+
 #|
 
 profile todo:
@@ -6,9 +8,8 @@ profile todo:
 
 |#
 
-#lang scheme/base
-
 (require scheme/unit
+         scheme/contract
          errortrace/stacktrace
          scheme/class
          scheme/path
@@ -19,6 +20,10 @@ profile todo:
          "embedded-snip-utils.ss"
          "drsig.ss"
          "bindings-browser.ss"
+         net/sendurl
+         net/url
+         scheme/match
+         mrlib/include-bitmap
          (for-syntax scheme/base))
 
 (define orig (current-output-port))
@@ -167,25 +172,23 @@ profile todo:
       (super-make-object str)))
   
   ;; make-note% : string -> (union class #f)
-  (define (make-note% filename flag)
-    (let ([bitmap (make-object bitmap% 
-                    (build-path (collection-path "icons") filename)
-                    flag)])
-      (and (send bitmap ok?)
-           (letrec ([note%
-                     (class clickable-image-snip%
-                       (inherit get-callback)
-                       (define/public (get-image-name) filename)
-                       (define/override (copy) 
-                         (let ([n (new note%)])
-                           (send n set-callback (get-callback))
-                           n))
-                       (super-make-object bitmap))])
-             note%))))
+  (define (make-note% filename bitmap)
+    (and (send bitmap ok?)
+         (letrec ([note%
+                   (class clickable-image-snip%
+                     (inherit get-callback)
+                     (define/public (get-image-name) filename)
+                     (define/override (copy) 
+                       (let ([n (new note%)])
+                         (send n set-callback (get-callback))
+                         n))
+                     (super-make-object bitmap))])
+           note%)))
   
-  (define bug-note% (make-note% "stop-multi.png" 'png/mask))
-  (define mf-note% (make-note% "mf.gif" 'gif))
-  (define file-note% (make-note% "stop-22x22.png" 'png/mask))
+  (define bug-note% (make-note% "stop-multi.png" (include-bitmap (lib "icons/stop-multi.png") 'png/mask)))
+  (define mf-note% (make-note% "mf.gif" (include-bitmap (lib "icons/mf.gif") 'gif)))
+  (define file-note% (make-note% "stop-22x22.png" (include-bitmap (lib "icons/stop-22x22.png") 'png/mask)))
+  (define planet-note% (make-note% "small-planet.png" (include-bitmap (lib "icons/small-planet.png") 'png/mask)))
   
   ;; display-stats : (syntax -> syntax)
   ;; count the number of syntax expressions & number of with-continuation-marks in an 
@@ -268,6 +271,7 @@ profile todo:
     debug-error-display-handler)
   
   ;; error-display-handler/stacktrace : string any (listof srcloc) -> void
+  ;; =User=
   (define (error-display-handler/stacktrace msg exn [pre-stack #f])
     (let* ([stack (or pre-stack
                       (if (exn? exn)
@@ -278,6 +282,7 @@ profile todo:
                          (if (null? stack)
                              '()
                              (list (car stack))))])
+      (print-planet-icon-to-stderr exn)
       (unless (null? stack)
         (print-bug-to-stderr msg stack))
       (display-srclocs-in-error src-locs)
@@ -297,6 +302,64 @@ profile todo:
                ;; and still running here?
                (send rep highlight-errors src-locs stack))))))))
   
+  ;; =User=
+  (define (print-planet-icon-to-stderr exn)
+    (when (exn:fail:contract2? exn)
+      (let ([table (parse-gp exn (guilty-party exn))])
+        (when table
+          (let ([gp-url (bug-info->ticket-url table)])
+            (when planet-note%
+              (when (port-writes-special? (current-error-port))
+                (let ([note (new planet-note%)])
+                  (send note set-callback (λ () 
+                                            ;; =Kernel= =Handler=
+                                            (drscheme:unit:forget-saved-bug-report table)
+                                            (send-url (url->string gp-url))))
+                  (parameterize ([current-eventspace drscheme:init:system-eventspace])
+                    (queue-callback
+                     (λ ()
+                       (drscheme:unit:record-saved-bug-report table))))
+                  (write-special note (current-error-port))
+                  (display #\space (current-error-port))))))))))
+  
+  ;; =Kernel= =User=
+  (define (bug-info->ticket-url table)
+    (make-url 
+     "http"
+     #f
+     "planet.plt-scheme.org"
+     #f
+     #t
+     (list (make-path/param "trac" '())
+           (make-path/param "newticket" '()))
+     table
+     #f))
+  
+  ;; =User=
+  (define (parse-gp exn gp)
+    (match gp
+      [`(planet ,fn (,user ,package ,planet-version ...))
+       (list (cons 'component (format "~a/~a" user package))
+             (cons 'keywords "contract violation")
+             (cons 'pltversion (version))
+             (cons 'planetversion
+                   (cond
+                     [(null? planet-version) ""]
+                     [(null? (cdr planet-version))
+                      (format "~s" `(,(car planet-version) ?))]
+                     [else
+                      (format "~s" `(,(car planet-version) ,(cadr planet-version)))]))
+             (cons 'description (exn->trace exn)))]
+      [else #f]))
+  
+  ;; =User=
+  (define (exn->trace exn)
+    (let ([sp (open-output-string)])
+      (parameterize ([current-error-port sp])
+        (drscheme:init:original-error-display-handler (exn-message exn) exn))
+      (get-output-string sp)))
+  
+  ;; =User=
   (define (print-bug-to-stderr msg cms)
     (when (port-writes-special? (current-error-port))
       (let ([note% (if (mf-bday?) mf-note% bug-note%)])
@@ -754,9 +817,10 @@ profile todo:
           (or (send editor get-filename) 
               untitled))))
   
-  ;; open-and-highlight-in-file : srcloc -> void
-  (define (open-and-highlight-in-file srclocs)
-    (let ([sources (filter values (map srcloc-source srclocs))])
+  ;; open-and-highlight-in-file : (or/c srcloc (listof srcloc)) -> void
+  (define (open-and-highlight-in-file raw-srcloc)
+    (let* ([srclocs (if (srcloc? raw-srcloc) (list raw-srcloc) raw-srcloc)]
+           [sources (filter values (map srcloc-source srclocs))])
       (unless (null? sources)
         (let* ([debug-source (car sources)]
                [same-src-srclocs
@@ -791,9 +855,6 @@ profile todo:
             (when (is-a? editor text:basic<%>)
               (send rep highlight-errors same-src-srclocs '())
               (send editor set-caret-owner #f 'global)))))))
-  
-  
-  
   
   
   
@@ -938,10 +999,11 @@ profile todo:
       (super-new)))
   
   (define test-covered-style-delta (make-object style-delta%))
-  (send test-covered-style-delta set-delta-foreground "forest green")
-  
   (define test-not-covered-style-delta (make-object style-delta%))
-  (send test-not-covered-style-delta set-delta-foreground "firebrick")
+  
+  ;; test colors chosen to try to be color-blindness friendly
+  (send test-covered-style-delta set-delta-foreground "forest green")
+  (send test-not-covered-style-delta set-delta-foreground "maroon")
   
   (define erase-test-coverage-style-delta (make-object style-delta% 'change-normal-color))
   
@@ -1186,7 +1248,7 @@ profile todo:
   ;; initialize-profile-point : sym syntax syntax -> void
   ;; called during compilation to register this point as
   ;; a profile point. 
-  ;; =user=
+  ;; =User=
   ;; imported into errortrace
   (define (initialize-profile-point key name expr)
     (unless (thread-cell-ref current-profile-info)
@@ -1205,7 +1267,7 @@ profile todo:
     (void))
   
   ;; register-profile-start : sym -> (union #f number)
-  ;; =user=
+  ;; =User=
   ;; imported into errortrace
   (define (register-profile-start key)
     (let ([ht (thread-cell-ref current-profile-info)])
@@ -1219,7 +1281,7 @@ profile todo:
                 (current-process-milliseconds)))))))
   
   ;; register-profile-done : sym (union #f number) -> void
-  ;; =user=
+  ;; =User=
   ;; imported into errortrace
   (define (register-profile-done key start)
     (when start

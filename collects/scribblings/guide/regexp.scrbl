@@ -181,7 +181,7 @@ separating the substrings.
 (regexp-split #rx" " "pea soup")
 ]
 
-If the first argument match empty strings, then the list of all the
+If the first argument matches empty strings, then the list of all the
 single-character substrings is returned.
 
 @interaction[
@@ -276,9 +276,9 @@ The @tech{metacharacter} @litchar{.} matches @emph{any} character
 (regexp-match #rx"p.t" "pet")
 ]
 
-The above patternalso matches @litchar["pat"], @litchar["pit"],
-@litchar["pot"], @litchar["put"], and @litchar["p8t"], but not
-@litchar["peat"] or @litchar["pfffft"].
+The above pattern also matches @litchar{pat}, @litchar{pit},
+@litchar{pot}, @litchar{put}, and @litchar{p8t}, but not
+@litchar{peat} or @litchar{pfffft}.
 
 A @deftech{character class} matches any one character from a set of
 characters.  A typical format for this is the @deftech{bracketed
@@ -450,8 +450,8 @@ finer-tuned quantification than is possible with @litchar{*},
 ]
 
 It is evident that @litchar{+} and @litchar{?} are abbreviations for
-@litchar["{1,}"] and @litchar["{0,1}"] respectively, and @litchar{*}
-abbreviates @litchar["{,}"], which is the same as @litchar["{0,}"].
+@litchar{{1,}} and @litchar{{0,1}} respectively, and @litchar{*}
+abbreviates @litchar{{,}}, which is the same as @litchar{{0,}}.
 
 @interaction[
 (regexp-match #px"[aeiou]{3}" "vacuous")
@@ -769,7 +769,7 @@ fruitless.  A nonbacktracking regexp is enclosed in
 (regexp-match #rx"(?>a+)." "aaaa")
 ]
 
-In this call, the subregexp @litchar{?>a*} greedily matches all four
+In this call, the subregexp @litchar{?>a+} greedily matches all four
 @litchar{a}'s, and is denied the opportunity to backtrack.  So, the
 overall match is denied.  The effect of the regexp is therefore to
 match one or more @litchar{a}'s followed by something that is
@@ -933,7 +933,7 @@ ensure there @emph{is} a digit other than zero.
 ]
 
 Or we could use negative lookahead to ensure that what's ahead isn't
-composed of {\em only} zeros and dots.
+composed of @emph{only} zeros and dots.
 
 @interaction[
 #:eval ex-eval

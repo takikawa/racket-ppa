@@ -1,19 +1,20 @@
 #lang scheme/base
 
-(require "test-utils.ss" 
+(require "test-utils.ss" "planet-requires.ss"
          (for-syntax scheme/base)
          (for-template scheme/base))
-(require (private base-env))
+(require (private base-env mutated-vars type-utils union prims type-effect-convenience type-annotation)
+	 (typecheck typechecker)
+	 (rep type-rep effect-rep)
+         (utils tc-utils)
+         (env type-name-env type-environments init-envs)
+         (schemeunit))
 
-(require (private planet-requires typechecker
-                  type-rep type-effect-convenience type-env
-                  prims type-environments tc-utils union
-                  type-name-env init-envs mutated-vars
-                  effect-rep type-annotation type-utils)
-         (for-syntax (private tc-utils typechecker base-env type-env))
+(require (for-syntax (utils tc-utils)
+                     (typecheck typechecker)
+	             (env type-env)
+	             (private base-env))
          (for-template (private base-env base-types)))
-(require (schemeunit))
-
 
 
 
@@ -649,6 +650,9 @@
                     Boolean String Number)
               (N N N . -> . N)]
         
+        [tc-e (assq 'foo #{'((a b) (foo bar)) :: (Listof (List Symbol Symbol))})
+              (Un (-val #f) (-pair Sym (-pair Sym (-val null))))]
+        
         #;[tc-err (let: ([fact : (Number -> Number) (lambda: ([n : Number]) (if (zero? n) 1 (* n (fact (- n 1)))))])
                         (fact 20))]
         
@@ -669,7 +673,7 @@
    (tc-l #t (-val #t))
    (tc-l "foo" -String)
    (tc-l foo (-val 'foo))
-   (tc-l #:foo -Keyword)
+   (tc-l #:foo (-val '#:foo))
    (tc-l #f (-val #f))
    (tc-l #"foo" -Bytes)
    [tc-l () (-val null)]

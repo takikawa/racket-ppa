@@ -22,20 +22,20 @@ This file defines two sorts of primitives. All of them are provided into any mod
 (provide (all-defined-out)
 	 (rename-out [define-typed-struct define-struct:]))
 
+(require (except-in "../utils/utils.ss" extend))
 (require (for-syntax 
           scheme/base
-          "type-rep.ss"
+          (rep type-rep)
           mzlib/match
           "parse-type.ss"
           syntax/struct
           syntax/stx
-          "utils.ss"
-          "tc-utils.ss"
-          "type-name-env.ss"
+	  (utils utils tc-utils)
+          (env type-name-env)
           "type-contract.ss"))
 
 (require "require-contract.ss"
-         "internal-forms.ss"
+         (typecheck internal-forms)
          (except-in mzlib/contract ->)
          (only-in mzlib/contract [-> c->])
          mzlib/struct
@@ -82,8 +82,11 @@ This file defines two sorts of primitives. All of them are provided into any mod
 (define-syntax (require/opaque-type stx)
   (syntax-case stx ()
     [(_ ty pred lib)
-     (and (identifier? #'ty) (identifier? #'pred))
      (begin
+       (unless (identifier? #'ty)
+         (raise-syntax-error #f "opaque type name must be an identifier" stx #'ty))
+       (unless (identifier? #'pred)
+         (raise-syntax-error #f "opaque type predicate must be an identifier" stx #'pred))
        (register-type-name #'ty (make-Opaque #'pred (syntax-local-certifier)))
        (quasisyntax/loc stx
          (begin 
@@ -298,7 +301,7 @@ This file defines two sorts of primitives. All of them are provided into any mod
                                       (syntax->list #'(pred? ...)))]
                    [(action* ...)
                     (map (lambda (s) (syntax-property s 'typechecker:exn-handler #t)) (syntax->list #'(action ...)))]
-                   [body* (syntax-property #'(begin . body) 'typechecker:exn-body #t)])
+                   [body* (syntax-property #'(let-values () . body) 'typechecker:exn-body #t)])
        (syntax-property #'(with-handlers ([pred?* action*] ...) body*)
                         'typechecker:with-handlers
                         #t))]))

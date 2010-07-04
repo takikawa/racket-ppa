@@ -1,4 +1,5 @@
-(module sig scheme/base
+#lang scheme/base
+  
   (require scheme/unit)
   
   (provide (prefix-out framework: (except-out (all-defined-out) framework^))
@@ -158,6 +159,7 @@
   
   (define-signature text-class^
     (basic<%>
+     first-line<%>
      foreground-color<%>
      hide-caret/selection<%>
      nbsp->space<%>
@@ -191,6 +193,7 @@
      input-box%
      
      basic-mixin
+     first-line-mixin
      foreground-color-mixin
      hide-caret/selection-mixin
      nbsp->space-mixin
@@ -456,5 +459,4 @@
      (open (prefix frame: frame^))
      (open (prefix handler: handler^))
      (open (prefix scheme: scheme^))
-     (open (prefix main: main^)))))
-
+     (open (prefix main: main^))))

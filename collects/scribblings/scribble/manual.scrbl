@@ -122,7 +122,10 @@ without insetting the code.}
 
 @defform[(schememod lang datum ...)]{Like @scheme[schemeblock], but
 the @scheme[datum] are typeset inside a @schememodfont{#lang}-form
-module whose language is @scheme[lang].}
+module whose language is @scheme[lang]. The source location of
+@scheme[lang] (relative to the body @scheme[datum]s) determines the
+relative positioning of the @schememodfont{#lang} line in the typeset
+output.}
 
 @defform[(scheme datum ...)]{Like @scheme[schemeblock], but typeset on
 a single line and wrapped with its enclosing paragraph, independent of
@@ -255,7 +258,8 @@ Like @scheme[defmodulelang*], but without expanding to
 
 
 @defform/subs[(declare-exporting mod-path ... maybe-sources)
-              ([maybe-sources #:use-sources (mod-path ...)])]{
+              ([maybe-sources code:blank
+                              (code:line #:use-sources (mod-path ...))])]{
                                  
 Associates the @scheme[mod-path]s to all bindings defined within the
 enclosing section, except as overridden by other
@@ -955,20 +959,20 @@ combination of @scheme[envvar] and @scheme[as-index].}
 Links to a bibliography entry, using @scheme[key] both to indicate the
 bibliography entry and, in square brackets, as the link text.}
 
-@defproc[(bibliography [#:tag string? "doc-bibliography"]
+@defproc[(bibliography [#:tag tag string? "doc-bibliography"]
                        [entry bib-entry?] ...)
          part?]{
 
 Creates a bibliography part containing the given entries, each of
 which is created with @scheme[bib-entry]. The entries are typeset in
-order as given}
+order as given.}
 
 @defproc[(bib-entry [#:key key string?]
                     [#:title title any/c]
                     [#:is-book? is-book? any/c #f]
-                    [#:author author any/c]
-                    [#:location location any/c]
-                    [#:date date any/c] 
+                    [#:author author any/c #f]
+                    [#:location location any/c #f]
+                    [#:date date any/c #f] 
                     [#:url url any/c #f])
          bib-entry?]{
 
@@ -986,18 +990,21 @@ the entry:
        order (as opposed to ``last, first''), and separate multiple
        names with commas using ``and'' before the last name (where
        there are multiple names). The @scheme[author] is typeset in
-       the bibliography as given.}
+       the bibliography as given, or it is omitted if given as
+       @scheme[#f].}
 
  @item{@scheme[location] names the publication venue, such as a
        conference name or a journal with volume, number, and
        pages. The @scheme[location] is typeset in the bibliography as
-       given.}
+       given, or it is omitted if given as @scheme[#f].}
 
  @item{@scheme[date] is a date, usually just a year (as a string). It
-       is typeset in the bibliography as given.}
+       is typeset in the bibliography as given, or it is omitted if
+       given as @scheme[#f].}
 
  @item{@scheme[url] is an optional URL. It is typeset in the
-       bibliography using @scheme[tt] and hyperlinked.}
+       bibliography using @scheme[tt] and hyperlinked, or it is
+       omitted if given as @scheme[#f].}
 
 }}
 

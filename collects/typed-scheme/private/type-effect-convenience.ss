@@ -1,17 +1,24 @@
 #lang scheme/base  
-(require "type-rep.ss" 
-         "effect-rep.ss"
+(require "../utils/utils.ss")
+
+(require (rep type-rep effect-rep)
+         (utils tc-utils)
          scheme/match
          "type-comparison.ss"
          "type-effect-printer.ss"
          "union.ss"
          "subtype.ss"
          "type-utils.ss" 
-         "tc-utils.ss"
          scheme/promise
+         (for-syntax macro-debugger/stxclass/stxclass)
          (for-syntax scheme/base))
 
-(provide (all-defined-out))
+(provide (all-defined-out) 
+         ;; these should all eventually go away
+         make-Name make-ValuesDots make-Function make-top-arr make-Latent-Restrict-Effect make-Latent-Remove-Effect)
+
+(define (one-of/c . args)
+  (apply Un (map -val args)))
 
 (define (-vet id) (make-Var-True-Effect id))
 (define (-vef id) (make-Var-False-Effect id))
@@ -33,7 +40,7 @@
     [(Latent-Remove-Effect: t) (make-Remove-Effect t v)]
     [(True-Effect:) eff]
     [(False-Effect:) eff]
-    [_ (error 'internal-tc-error "can't add var to effect ~a" eff)]))
+    [_ (int-err "can't add var ~a to effect ~a" v eff)]))
 
 (define-syntax (-> stx)
   (syntax-case* stx (:) (lambda (a b) (eq? (syntax-e a) (syntax-e b)))
@@ -78,17 +85,34 @@
       [(Function: as) as]))
   (make-Function (map car (map funty-arities args))))
 
+(define-syntax (->key stx)
+  (syntax-parse stx
+                [(_ ty:expr ... ((k:keyword kty:expr opt:boolean)) ...* rng)
+                 #'(make-Function
+                    (list
+                     (make-arr* (list ty ...)
+                                rng
+                                #f
+                                #f
+                                (list (make-Keyword 'k kty opt) ...)
+                                null
+                                null)))]))
+
 (define make-arr*
-  (case-lambda [(dom rng) (make-arr* dom rng #f (list) (list))]
-               [(dom rng rest) (make-arr dom rng rest #f (list) (list))]
-               [(dom rng rest eff1 eff2) (make-arr dom rng rest #f eff1 eff2)]
-               [(dom rng rest drest eff1 eff2) (make-arr dom rng rest drest eff1 eff2)]))
+  (case-lambda [(dom rng) (make-arr dom rng #f #f null (list) (list))]
+               [(dom rng rest) (make-arr dom rng rest #f null (list) (list))]
+               [(dom rng rest eff1 eff2) (make-arr dom rng rest #f null eff1 eff2)]
+               [(dom rng rest drest eff1 eff2) (make-arr dom rng rest drest null eff1 eff2)]
+               [(dom rng rest drest kws eff1 eff2)
+                (make-arr dom rng rest drest (sort #:key Keyword-kw kws keyword<?) eff1 eff2)]))
 
 (define (make-arr-dots dom rng dty dbound)
   (make-arr* dom rng #f (cons dty dbound) null null))
 
-(define (make-promise-ty t)
-  (make-Struct (string->uninterned-symbol "Promise") #f (list t) #f #f #'promise? values))
+(define make-promise-ty
+  (let ([s (string->uninterned-symbol "Promise")])
+    (lambda (t)
+      (make-Struct s #f (list t) #f #f #'promise? values))))
 
 (define N (make-Base 'Number))
 (define -Integer (make-Base 'Integer))
@@ -187,6 +211,8 @@
 
 (define (-Tuple l)
   (foldr -pair (-val '()) l))
+(define -box make-Box)
+(define -vec make-Vector)
 
 (define Any-Syntax 
   (-mu x

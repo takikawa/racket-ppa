@@ -1591,14 +1591,14 @@ of the contract library does not change over time.
    '(let ()
       (define/contract i (-> integer? integer?) (lambda (x) 1))
       (i #f))
-   "")
+   "<<unknown>>")
   
   (test/spec-failed
    'define/contract5
    '(let ()
       (define/contract i (-> integer? integer?) (lambda (x) (i #t)))
       (i 1))
-   "")
+   "<<unknown>>")
   
   (test/spec-passed
    'define/contract6
@@ -4162,7 +4162,7 @@ so that propagation occurs.
   (test-name '(real-in 1 10) (real-in 1 10))
   (test-name '(string-len/c 3) (string/len 3))
   (test-name 'natural-number/c natural-number/c)
-  (test-name 'false/c false/c)
+  (test-name #f false/c)
   (test-name 'printable/c printable/c)
   (test-name '(symbols 'a 'b 'c) (symbols 'a 'b 'c))
   (test-name '(one-of/c 1 2 3) (one-of/c 1 2 3))

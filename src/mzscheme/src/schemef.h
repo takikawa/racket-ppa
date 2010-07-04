@@ -68,7 +68,9 @@ MZ_EXTERN Scheme_Object *scheme_current_break_cell();
 /*========================================================================*/
 
 #ifndef LINK_EXTENSIONS_BY_TABLE
-MZ_EXTERN Scheme_Thread *scheme_current_thread;
+# ifndef MZ_USE_PLACES
+MZ_EXTERN THREAD_LOCAL Scheme_Thread *scheme_current_thread;
+# endif
 MZ_EXTERN volatile int scheme_fuel_counter;
 #else
 MZ_EXTERN Scheme_Thread **scheme_current_thread_ptr;
@@ -394,6 +396,7 @@ MZ_EXTERN void GC_register_traversers(short tag, Size_Proc size, Mark_Proc mark,
 MZ_EXTERN void *GC_resolve(void *p);
 MZ_EXTERN void GC_mark(const void *p);
 MZ_EXTERN void GC_fixup(void *p);
+MZ_EXTERN void *GC_fixup_self(void *p);
 #endif
 
 MZ_EXTERN void **scheme_malloc_immobile_box(void *p);
@@ -888,8 +891,6 @@ MZ_EXTERN Scheme_Object *scheme_read_byte_string(Scheme_Object *port);
 MZ_EXTERN Scheme_Object *scheme_make_namespace(int argc, Scheme_Object *argv[]);
 MZ_EXTERN void scheme_add_namespace_option(Scheme_Object *key, void (*f)(Scheme_Env *));
 
-MZ_EXTERN void scheme_require_from_original_env(Scheme_Env *env, int syntax_only);
-
 MZ_EXTERN void scheme_add_global(const char *name, Scheme_Object *val, Scheme_Env *env);
 MZ_EXTERN void scheme_add_global_symbol(Scheme_Object *name, Scheme_Object *val,
 			      Scheme_Env *env);
@@ -1062,8 +1063,6 @@ MZ_EXTERN int scheme_check_proc_arity2(const char *where, int a,
 
 MZ_EXTERN char *scheme_make_provided_string(Scheme_Object *o, int count, int *len);
 MZ_EXTERN char *scheme_make_args_string(char *s, int which, int argc, Scheme_Object **argv, long *len);
-
-MZ_EXTERN void scheme_no_dumps(char *why);
 
 MZ_EXTERN const char *scheme_system_library_subpath();
 

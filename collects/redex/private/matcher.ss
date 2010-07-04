@@ -1,3 +1,5 @@
+#lang scheme/base
+
 #|
 
 Note: the patterns described in the doc.txt file are
@@ -9,12 +11,10 @@ reduction (And other) macros do this transformation
 before the pattern compiler is invoked.
 
 |#
-(module matcher mzscheme
-  (require (lib "list.ss")
-           (lib "match.ss")
-           (lib "etc.ss")
-           (lib "contract.ss")
-           "underscore-allowed.ss")
+(require scheme/list
+         scheme/match
+         scheme/contract
+         "underscore-allowed.ss")
   
   (define-struct compiled-pattern (cp))
 
@@ -24,8 +24,8 @@ before the pattern compiler is invoked.
   ;; nt = (make-nt sym (listof rhs))
   ;; rhs = (make-rhs single-pattern (listof var-info??))
   ;; single-pattern = sexp
-  (define-struct nt (name rhs) (make-inspector))
-  (define-struct rhs (pattern var-info) (make-inspector))
+  (define-struct nt (name rhs) #:inspector (make-inspector))
+  (define-struct rhs (pattern var-info) #:inspector  (make-inspector))
   
   ;; var = (make-var sym sexp)
   ;; patterns are sexps with `var's embedded
@@ -39,7 +39,7 @@ before the pattern compiler is invoked.
   ;;       by merge-multiples/remove, a helper function called from match-pattern
   (define-values (make-bindings bindings-table bindings?)
     (let () 
-      (define-struct bindings (table) (make-inspector)) ;; for testing, add inspector
+      (define-struct bindings (table) #:inspector (make-inspector)) ;; for testing, add inspector
       (values (lambda (table)
                 (unless (and (list? table)
                              (andmap (λ (x) (or (bind? x) (mismatch-bind? x))) table))
@@ -48,18 +48,18 @@ before the pattern compiler is invoked.
               bindings-table
               bindings?)))
   
-  (define-struct bind (name exp) (make-inspector)) ;; for testing, add inspector
-  (define-struct mismatch-bind (name exp) (make-inspector)) ;; for testing, add inspector
+  (define-struct bind (name exp) #:inspector (make-inspector)) ;; for testing, add inspector
+  (define-struct mismatch-bind (name exp) #:inspector (make-inspector)) ;; for testing, add inspector
 
   ;; repeat = (make-repeat compiled-pattern (listof rib) (union #f symbol) boolean)
-  (define-struct repeat (pat empty-bindings suffix mismatch?) (make-inspector)) ;; inspector for tests below
+  (define-struct repeat (pat empty-bindings suffix mismatch?) #:inspector (make-inspector)) ;; inspector for tests below
   
   ;; compiled-pattern : exp (union #f none sym) -> (union #f (listof mtch))
   ;; mtch = (make-mtch bindings sexp[context w/none-inside for the hole] (union none sexp[hole]))
   ;; mtch is short for "match"
   (define-values (mtch-bindings mtch-context mtch-hole make-mtch mtch?)
     (let ()
-      (define-struct mtch (bindings context hole) (make-inspector))
+      (define-struct mtch (bindings context hole) #:inspector (make-inspector))
       (values mtch-bindings
               mtch-context
               mtch-hole
@@ -77,12 +77,12 @@ before the pattern compiler is invoked.
   (define (none? x) (eq? x none))
   
   ;; compiled-lang : (make-compiled-lang (listof nt) 
-  ;;                                     hash-table[sym -o> compiled-pattern]
-  ;;                                     hash-table[sym -o> compiled-pattern]
-  ;;                                     hash-table[sym -o> compiled-pattern]
-  ;;                                     hash-table[sym -o> boolean])
-  ;;                                     hash-table[sexp[pattern] -o> (cons compiled-pattern boolean)]
-  ;;                                     hash-table[sexp[pattern] -o> (cons compiled-pattern boolean)]
+  ;;                                     hash[sym -o> compiled-pattern]
+  ;;                                     hash[sym -o> compiled-pattern]
+  ;;                                     hash[sym -o> compiled-pattern]
+  ;;                                     hash[sym -o> boolean])
+  ;;                                     hash[sexp[pattern] -o> (cons compiled-pattern boolean)]
+  ;;                                     hash[sexp[pattern] -o> (cons compiled-pattern boolean)]
   ;;                                     pict-builder
   ;;                                     (listof symbol)
   ;;                                     (listof (listof symbol))) -- keeps track of `primary' non-terminals
@@ -90,35 +90,35 @@ before the pattern compiler is invoked.
   ;;               #f means we're not in a `in-hole' context
   ;;               none means we're looking for a hole
   
-  (define-struct compiled-lang (lang ht list-ht across-ht across-list-ht has-hole-ht
-                                     cache bind-names-cache pict-builder literals
-                                     nt-map))
+  (define-struct compiled-lang (lang cclang ht list-ht across-ht across-list-ht
+                                     has-hole-ht cache bind-names-cache pict-builder
+                                     literals nt-map))
   
   ;; lookup-binding : bindings (union sym (cons sym sym)) [(-> any)] -> any
-  (define lookup-binding 
-    (opt-lambda (bindings
-		 sym
-		 [fail (lambda () (error 'lookup-binding "didn't find ~e in ~e" sym bindings))])
-      (let loop ([ribs (bindings-table bindings)])
-        (cond
-          [(null? ribs) (fail)]
-          [else
-           (let ([rib (car ribs)])
-             (if (and (bind? rib) (equal? (bind-name rib) sym))
-                 (bind-exp rib)
-                 (loop (cdr ribs))))]))))
+  (define (lookup-binding bindings
+                          sym
+                          [fail (lambda () 
+                                  (error 'lookup-binding "didn't find ~e in ~e" sym bindings))])
+    (let loop ([ribs (bindings-table bindings)])
+      (cond
+        [(null? ribs) (fail)]
+        [else
+         (let ([rib (car ribs)])
+           (if (and (bind? rib) (equal? (bind-name rib) sym))
+               (bind-exp rib)
+               (loop (cdr ribs))))])))
   
   ;; compile-language : language-pict-info[see pict.ss] (listof nt) (listof (listof sym)) -> compiled-lang
   (define (compile-language pict-info lang nt-map)
-    (let* ([clang-ht (make-hash-table)]
-           [clang-list-ht (make-hash-table)]
-           [across-ht (make-hash-table)]
-           [across-list-ht (make-hash-table)]
+    (let* ([clang-ht (make-hasheq)]
+           [clang-list-ht (make-hasheq)]
+           [across-ht (make-hasheq)]
+           [across-list-ht (make-hasheq)]
            [has-hole-ht (build-has-hole-ht lang)]
-           [cache (make-hash-table 'equal)]
-           [bind-names-cache (make-hash-table 'equal)]
+           [cache (make-hash)]
+           [bind-names-cache (make-hash)]
            [literals (extract-literals lang)]
-           [clang (make-compiled-lang lang clang-ht clang-list-ht 
+           [clang (make-compiled-lang lang #f clang-ht clang-list-ht 
                                       across-ht across-list-ht
                                       has-hole-ht 
                                       cache bind-names-cache
@@ -137,27 +137,29 @@ before the pattern compiler is invoked.
                                   (compile-pattern/cross? clang (rhs-pattern rhs) prefix-cross? #f)])
                       (let ([add-to-ht
                              (lambda (ht)
-                               (hash-table-put!
+                               (hash-set!
                                 ht
                                 (nt-name nt)
-                                (cons compiled-pattern (hash-table-get ht (nt-name nt)))))])
-                        (when (may-be-non-list-pattern? (rhs-pattern rhs)
-                                                        non-list-nt-table)
-                          (add-to-ht ht))
-                        (when (may-be-list-pattern? (rhs-pattern rhs) 
-                                                    list-nt-table)
-                          (add-to-ht list-ht)))))
+                                (cons compiled-pattern (hash-ref ht (nt-name nt)))))]
+                            [may-be-non-list? (may-be-non-list-pattern? (rhs-pattern rhs) non-list-nt-table)]
+                            [may-be-list? (may-be-list-pattern? (rhs-pattern rhs) list-nt-table)])
+                        (when may-be-non-list? (add-to-ht ht))
+                        (when may-be-list? (add-to-ht list-ht))
+                        (unless (or may-be-non-list? may-be-list?)
+                          (error 'compile-language 
+                                 "internal error: unable to determine whether pattern matches lists, non-lists, or both: ~s"
+                                 (rhs-pattern rhs))))))
                   (nt-rhs nt)))
                lang))]
            [init-ht
             (lambda (ht)
-              (for-each (lambda (nt) (hash-table-put! ht (nt-name nt) null))
+              (for-each (lambda (nt) (hash-set! ht (nt-name nt) null))
                         lang))])
       
       (init-ht clang-ht)
       (init-ht clang-list-ht)
       
-      (hash-table-for-each
+      (hash-for-each
        clang-ht
        (lambda (nt rhs)
          (when (has-underscore? nt)
@@ -166,22 +168,22 @@ before the pattern compiler is invoked.
       (let ([compatible-context-language
              (build-compatible-context-language clang-ht lang)])
         (for-each (lambda (nt)
-                    (hash-table-put! across-ht (nt-name nt) null)
-                    (hash-table-put! across-list-ht (nt-name nt) null))
+                    (hash-set! across-ht (nt-name nt) null)
+                    (hash-set! across-list-ht (nt-name nt) null))
                   compatible-context-language)
         (do-compilation clang-ht clang-list-ht lang #t)
         (do-compilation across-ht across-list-ht compatible-context-language #f)
-        clang)))
+        (struct-copy compiled-lang clang [cclang compatible-context-language]))))
   
   ;; extract-literals : (listof nt) -> (listof symbol)
   (define (extract-literals nts)
-    (let ([literals-ht (make-hash-table)]
+    (let ([literals-ht (make-hasheq)]
           [nt-names (map nt-name nts)])
       (for-each (λ (nt) 
                   (for-each (λ (rhs) (extract-literals/pat nt-names (rhs-pattern rhs) literals-ht))
                             (nt-rhs nt)))
                 nts)
-      (hash-table-map literals-ht (λ (x y) x))))
+      (hash-map literals-ht (λ (x y) x))))
   
   ;; extract-literals/pat : (listof sym) pattern ht -> void
   ;; inserts the literals mentioned in pat into ht
@@ -200,7 +202,7 @@ before the pattern compiler is invoked.
          (unless (regexp-match #rx"_" (symbol->string s))
            (unless (regexp-match #rx"^\\.\\.\\." (symbol->string s))
              (unless (memq s nts)
-               (hash-table-put! ht s #t))))]
+               (hash-set! ht s #t))))]
 	[`(name ,name ,pat) (loop pat)]
 	[`(in-hole ,p1 ,p2) 
          (loop p1)
@@ -215,7 +217,7 @@ before the pattern compiler is invoked.
              (loop (car l-pat))
              (l-loop (cdr l-pat))))])))
   
-  ; build-has-hole-ht : (listof nt) -> hash-table[symbol -o> boolean]
+  ; build-has-hole-ht : (listof nt) -> hash[symbol -o> boolean]
   ; produces a map of nonterminal -> whether that nonterminal could produce a hole
   (define (build-has-hole-ht lang)
     (build-nt-property 
@@ -226,7 +228,7 @@ before the pattern compiler is invoked.
          [`number #f]
          [`string #f]
          [`variable #f] 
-         [`(variable-except ,@(vars ...)) #f]
+         [`(variable-except ,vars ...) #f]
          [`(variable-prefix ,var) #f]
          [`variable-not-otherwise-mentioned #f]
          [`hole #t]
@@ -248,31 +250,31 @@ before the pattern compiler is invoked.
      (lambda (lst) (ormap values lst))))
   
   ;; build-nt-property : lang (pattern[not-non-terminal] (pattern -> boolean) -> boolean) boolean
-  ;;                  -> hash-table[symbol[nt] -> boolean]
+  ;;                  -> hash[symbol[nt] -> boolean]
   (define (build-nt-property lang test-rhs conservative-answer combine-rhss)
-    (let ([ht (make-hash-table)]
-          [rhs-ht (make-hash-table)])
+    (let ([ht (make-hasheq)]
+          [rhs-ht (make-hasheq)])
       (for-each
        (lambda (nt)
-         (hash-table-put! rhs-ht (nt-name nt) (nt-rhs nt))
-         (hash-table-put! ht (nt-name nt) 'unknown))
+         (hash-set! rhs-ht (nt-name nt) (nt-rhs nt))
+         (hash-set! ht (nt-name nt) 'unknown))
        lang)
       (let ()
         (define (check-nt nt-sym)
-          (let ([current (hash-table-get ht nt-sym)])
+          (let ([current (hash-ref ht nt-sym)])
             (case current
               [(unknown)
-               (hash-table-put! ht nt-sym 'computing)
+               (hash-set! ht nt-sym 'computing)
                (let ([answer (combine-rhss 
                               (map (lambda (x) (check-rhs (rhs-pattern x)))
-                                   (hash-table-get rhs-ht nt-sym)))])
-                 (hash-table-put! ht nt-sym answer)
+                                   (hash-ref rhs-ht nt-sym)))])
+                 (hash-set! ht nt-sym answer)
                  answer)]
               [(computing) conservative-answer]
               [else current])))
         (define (check-rhs rhs)
           (cond
-            [(hash-table-maps? ht rhs)
+            [(hash-maps? ht rhs)
              (check-nt rhs)]
             [else (test-rhs rhs check-rhs)]))
         (for-each (lambda (nt) (check-nt (nt-name nt)))
@@ -281,22 +283,52 @@ before the pattern compiler is invoked.
           
   ;; build-compatible-context-language : lang -> lang
   (define (build-compatible-context-language clang-ht lang)
-    (apply
-     append
-     (map 
-      (lambda (nt1)
-        (map
-         (lambda (nt2)
-           (let ([compat-nt (build-compatible-contexts/nt clang-ht (nt-name nt1) nt2)])
-             (if (eq? (nt-name nt1) (nt-name nt2))
-                 (make-nt (nt-name compat-nt)
-                          (cons
-                           (make-rhs 'hole '())
-                           (nt-rhs compat-nt)))
-                 compat-nt)))
-         lang))
-      lang)))
+    (remove-empty-compatible-contexts
+     (apply
+      append
+      (map 
+       (lambda (nt1)
+         (map
+          (lambda (nt2)
+            (let ([compat-nt (build-compatible-contexts/nt clang-ht (nt-name nt1) nt2)])
+              (if (eq? (nt-name nt1) (nt-name nt2))
+                  (make-nt (nt-name compat-nt)
+                           (cons
+                            (make-rhs 'hole '())
+                            (nt-rhs compat-nt)))
+                  compat-nt)))
+          lang))
+       lang))))
+  
+  ;; remove-empty-compatible-contexts : lang -> lang
+  ;; Removes the empty compatible context non-terminals and the 
+  ;; rhss that reference them.
+  (define (remove-empty-compatible-contexts lang)
+    (define (has-cross? pattern crosses)
+      (match pattern
+        [`(cross ,(? symbol? nt)) (memq nt crosses)]
+        [(list-rest p '... rest) (has-cross? rest crosses)]
+        [(cons first rest) (or (has-cross? first crosses)
+                               (has-cross? rest crosses))]
+        [_ #f]))
+    (define (delete-empty nts)
+      (for/fold ([deleted null] [kept null]) ([nt nts])
+                (if (null? (nt-rhs nt))
+                    (values (cons nt deleted) kept)
+                    (values deleted (cons nt kept)))))
+    (define (delete-references deleted-names remaining-nts)
+      (map (λ (nt) 
+             (make-nt (nt-name nt)
+                      (filter (λ (rhs) (not (has-cross? (rhs-pattern rhs) deleted-names))) 
+                              (nt-rhs nt))))
+           remaining-nts))
     
+    (let loop ([nts lang])
+      (let-values ([(deleted kept) (delete-empty nts)])
+        (if (null? deleted)
+            kept
+            (loop (delete-references (map nt-name deleted) kept))))))
+  
   ;; build-compatible-contexts : clang-ht prefix nt -> nt
   ;; constructs the compatible closure evaluation context from nt.
   (define (build-compatible-contexts/nt clang-ht prefix nt)
@@ -342,14 +374,14 @@ before the pattern compiler is invoked.
            [`number (lambda (l) 'number)]
            [`string (lambda (l) 'string)]
            [`variable (lambda (l) 'variable)] 
-           [`(variable-except ,@(vars ...)) (lambda (l) pattern)]
+           [`(variable-except ,vars ...) (lambda (l) pattern)]
            [`(variable-prefix ,var) (lambda (l) pattern)]
            [`variable-not-otherwise-mentioned (λ (l) pattern)]
            [`hole  (lambda (l) 'hole)]
            [(? string?) (lambda (l) pattern)]
            [(? symbol?) 
             (cond
-              [(hash-table-get clang-ht pattern #f)
+              [(hash-ref clang-ht pattern #f)
                (set! count (+ count 1))
                (lambda (l)
                  (let ([fst (car (unbox l))])
@@ -423,7 +455,7 @@ before the pattern compiler is invoked.
             (lambda (l) pattern)]))
        count)))
   
-  ;; build-list-nt-label : lang -> hash-table[symbol -o> boolean]
+  ;; build-list-nt-label : lang -> hash[symbol -o> boolean]
   (define (build-list-nt-label lang)
     (build-nt-property 
      lang
@@ -439,7 +471,7 @@ before the pattern compiler is invoked.
       (may-be-list-pattern?/internal
        pattern
        (lambda (sym) 
-         (hash-table-get list-nt-table (symbol->nt sym) #t))
+         (hash-ref list-nt-table (symbol->nt sym) #t))
        loop)))
   
   (define (may-be-list-pattern?/internal pattern handle-symbol recur)
@@ -448,7 +480,7 @@ before the pattern compiler is invoked.
       [`number #f]
       [`string #f]
       [`variable #f] 
-      [`(variable-except ,@(vars ...)) #f]
+      [`(variable-except ,vars ...) #f]
       [`variable-not-otherwise-mentioned #f]
       [`(variable-prefix ,var) #f]
       [`hole  #t]
@@ -470,7 +502,7 @@ before the pattern compiler is invoked.
        (or (null? pattern) (pair? pattern))]))
 
   
-  ;; build-non-list-nt-label : lang -> hash-table[symbol -o> boolean]
+  ;; build-non-list-nt-label : lang -> hash[symbol -o> boolean]
   (define (build-non-list-nt-label lang)
     (build-nt-property 
      lang
@@ -486,7 +518,7 @@ before the pattern compiler is invoked.
       (may-be-non-list-pattern?/internal
        pattern
        (lambda (sym)
-         (hash-table-get non-list-nt-table (symbol->nt sym) #t))
+         (hash-ref non-list-nt-table (symbol->nt sym) #t))
        loop)))
   
   (define (may-be-non-list-pattern?/internal pattern handle-sym recur)
@@ -495,7 +527,7 @@ before the pattern compiler is invoked.
       [`number #t]
       [`string #t]
       [`variable #t] 
-      [`(variable-except ,@(vars ...)) #t]
+      [`(variable-except ,vars ...) #t]
       [`variable-not-otherwise-mentioned #t]
       [`(variable-prefix ,prefix) #t]
       [`hole #t]
@@ -542,10 +574,10 @@ before the pattern compiler is invoked.
     (let/ec fail
       (let (
             ;; match-ht : sym -o> sexp
-            [match-ht (make-hash-table 'equal)]
+            [match-ht (make-hash)]
             
-            ;; mismatch-ht : sym -o> hash-table[sexp -o> #t]
-            [mismatch-ht (make-hash-table 'equal)]
+            ;; mismatch-ht : sym -o> hash[sexp -o> #t]
+            [mismatch-ht (make-hash)]
             
             [ribs (bindings-table (mtch-bindings match))])
         (for-each
@@ -554,39 +586,38 @@ before the pattern compiler is invoked.
              [(bind? rib)
               (let ([name (bind-name rib)]
                     [exp (bind-exp rib)])
-                (let ([previous-exp (hash-table-get match-ht name uniq)])
+                (let ([previous-exp (hash-ref match-ht name uniq)])
                   (cond
                     [(eq? previous-exp uniq)
-                     (hash-table-put! match-ht name exp)]
+                     (hash-set! match-ht name exp)]
                     [else
                      (unless (equal? exp previous-exp)
                        (fail #f))])))]
              [(mismatch-bind? rib)
               (let* ([name (mismatch-bind-name rib)]
                      [exp (mismatch-bind-exp rib)]
-                     [priors (hash-table-get mismatch-ht name uniq)])
+                     [priors (hash-ref mismatch-ht name uniq)])
                 (when (eq? priors uniq)
-                  (let ([table (make-hash-table 'equal)])
-                    (hash-table-put! mismatch-ht name table)
+                  (let ([table (make-hash)])
+                    (hash-set! mismatch-ht name table)
                     (set! priors table)))
-                (when (hash-table-get priors exp #f)
+                (when (hash-ref priors exp #f)
                   (fail #f))
-                (hash-table-put! priors exp #t))]))
+                (hash-set! priors exp #t))]))
          ribs)
         (make-mtch
-         (make-bindings (hash-table-map match-ht make-bind))
+         (make-bindings (hash-map match-ht make-bind))
          (mtch-context match)
          (mtch-hole match)))))
   
   ;; compile-pattern : compiled-lang pattern boolean (listof sym) -> compiled-pattern
-  (define compile-pattern
-    (opt-lambda (clang pattern bind-names?)
-      (let-values ([(pattern has-hole?) (compile-pattern/cross? clang pattern #t bind-names?)])
-        (make-compiled-pattern pattern))))
+  (define (compile-pattern clang pattern bind-names?)
+    (let-values ([(pattern has-hole?) (compile-pattern/cross? clang pattern #t bind-names?)])
+      (make-compiled-pattern pattern)))
 
-  ;; name-to-key/binding : hash-table[symbol -o> key-wrap]
-  (define name-to-key/binding (make-hash-table))
-  (define-struct key-wrap (sym) (make-inspector))
+  ;; name-to-key/binding : hash[symbol -o> key-wrap]
+  (define name-to-key/binding (make-hasheq))
+  (define-struct key-wrap (sym) #:inspector (make-inspector))
   
   ;; compile-pattern/cross? : compiled-lang pattern boolean boolean -> (values compiled-pattern boolean)
   (define (compile-pattern/cross? clang pattern prefix-cross? bind-names?)
@@ -603,13 +634,13 @@ before the pattern compiler is invoked.
                                  (compiled-lang-cache clang))))
     
     (define (compile-pattern/cache pattern compiled-pattern-cache)
-      (let ([compiled-cache (hash-table-get compiled-pattern-cache pattern uniq)])
+      (let ([compiled-cache (hash-ref compiled-pattern-cache pattern uniq)])
         (cond 
           [(eq? compiled-cache uniq)
            (let-values ([(compiled-pattern has-hole?)
                          (true-compile-pattern pattern)])
              (let ([val (list (memoize compiled-pattern has-hole?) has-hole?)])
-               (hash-table-put! compiled-pattern-cache pattern val)
+               (hash-set! compiled-pattern-cache pattern val)
                (apply values val)))]
           [else
            (apply values compiled-cache)])))
@@ -618,7 +649,7 @@ before the pattern compiler is invoked.
       (match pattern
         [(? (lambda (x) (eq? x '....)))
          (error 'compile-language "the pattern .... can only be used in extend-language")]
-        [`(variable-except ,@(vars ...))
+        [`(variable-except ,vars ...)
           (values
            (lambda (exp hole-info)
              (and (symbol? exp)
@@ -666,11 +697,11 @@ before the pattern compiler is invoked.
            [(has-underscore? pattern)
             (let*-values ([(binder before-underscore)
                            (let ([before (split-underscore pattern)])
-                             (unless (or (hash-table-maps? clang-ht before)
+                             (unless (or (hash-maps? clang-ht before)
                                          (memq before underscore-allowed))
                                (error 'compile-pattern "before underscore must be either a non-terminal ~a or a built-in pattern, found ~a in ~s" 
                                       before
-                                      (format "~s" (list* 'one 'of: (hash-table-map clang-ht (λ (x y) x))))
+                                      (format "~s" (list* 'one 'of: (hash-map clang-ht (λ (x y) x))))
                                       pattern))
                              (values pattern before))]
                           [(match-raw-name has-hole?)
@@ -689,11 +720,11 @@ before the pattern compiler is invoked.
                         (symbol-append pre-id '- pre-id)
                         pre-id)])
             (cond
-              [(hash-table-maps? across-ht id)
+              [(hash-maps? across-ht id)
                (values
                 (lambda (exp hole-info)
-                  (match-nt (hash-table-get across-list-ht id)
-                            (hash-table-get across-ht id)
+                  (match-nt (hash-ref across-list-ht id)
+                            (hash-ref across-ht id)
                             id exp hole-info))
                 #t)]
               [else
@@ -763,7 +794,7 @@ before the pattern compiler is invoked.
     
     (define (non-underscore-binder? pattern)
       (and bind-names?
-           (or (hash-table-maps? clang-ht pattern)
+           (or (hash-maps? clang-ht pattern)
                (memq pattern underscore-allowed))))
     
     ;; compile-id-pattern : symbol[with-out-underscore] -> (values <compiled-pattern-proc> boolean)
@@ -776,10 +807,10 @@ before the pattern compiler is invoked.
         [(? is-non-terminal?)
          (values
           (lambda (exp hole-info)
-            (match-nt (hash-table-get clang-list-ht pat)
-                      (hash-table-get clang-ht pat)
+            (match-nt (hash-ref clang-list-ht pat)
+                      (hash-ref clang-ht pat)
                       pat exp hole-info))
-          (hash-table-get has-hole-ht pat))]
+          (hash-ref has-hole-ht pat))]
         [else
          (values
           (lambda (exp hole-info) 
@@ -789,7 +820,7 @@ before the pattern compiler is invoked.
                                   none))))
           #f)]))
     
-    (define (is-non-terminal? sym) (hash-table-maps? clang-ht sym))
+    (define (is-non-terminal? sym) (hash-maps? clang-ht sym))
 
     ;; simple-match : sym (any -> bool) -> (values <compiled-pattern> boolean)
     ;; does a match based on a built-in Scheme predicate
@@ -861,9 +892,9 @@ before the pattern compiler is invoked.
   (define cache-size 350)
   (define (set-cache-size! cs) (set! cache-size cs))
   
-  ;; original version, but without closure allocation in hash-table lookup
+  ;; original version, but without closure allocation in hash lookup
   (define (memoize/key f key-fn statsbox)
-    (let ([ht (make-hash-table 'equal)]
+    (let ([ht (make-hash)]
           [entries 0])
       (lambda (x y)
         (if cache-size
@@ -871,40 +902,40 @@ before the pattern compiler is invoked.
               ;(record-cache-test! statsbox)
               (unless (< entries cache-size)
                 (set! entries 0)
-                (set! ht (make-hash-table 'equal)))
-              (let ([ans (hash-table-get ht key uniq)])
+                (set! ht (make-hash)))
+              (let ([ans (hash-ref ht key uniq)])
                 (cond
                   [(eq? ans uniq)
                    ;(record-cache-miss! statsbox)
                    (set! entries (+ entries 1))
                    (let ([res (f x y)])
-                     (hash-table-put! ht key res)
+                     (hash-set! ht key res)
                      res)]
                   [else
                    ans])))
             (f x y)))))
   
-  ;; hash-table version, but with an extra hash-table that tells when to evict cache entries
+  ;; hash version, but with an extra hash that tells when to evict cache entries
   #;
   (define (memoize/key f key-fn statsbox)
     (let* ([cache-size 50]
-           [ht (make-hash-table 'equal)]
+           [ht (make-hash)]
            [uniq (gensym)]
-           [when-to-evict-table (make-hash-table)]
+           [when-to-evict-table (make-hasheq)]
            [pointer 0])
       (lambda (x y)
         (record-cache-test! statsbox)
         (let* ([key (key-fn x y)]
-               [value-in-cache (hash-table-get ht key uniq)])
+               [value-in-cache (hash-ref ht key uniq)])
           (cond
             [(eq? value-in-cache uniq)
              (record-cache-miss! statsbox)
              (let ([res (f x y)])
-               (let ([to-remove (hash-table-get when-to-evict-table pointer uniq)])
+               (let ([to-remove (hash-ref when-to-evict-table pointer uniq)])
                  (unless (eq? uniq to-remove)
-                   (hash-table-remove! ht to-remove)))
-               (hash-table-put! when-to-evict-table pointer key)
-               (hash-table-put! ht key res)
+                   (hash-remove! ht to-remove)))
+               (hash-set! when-to-evict-table pointer key)
+               (hash-set! ht key res)
                (set! pointer (modulo (+ pointer 1) cache-size))
                res)]
             [else
@@ -978,25 +1009,25 @@ before the pattern compiler is invoked.
                           ;; didnt hit yet, continue searchign
                           (loop previous1 current (cdr current) (+ i 1))]))]))])])))))
   
-  ;; hash-table version, but with a vector that tells when to evict cache entries
+  ;; hash version, but with a vector that tells when to evict cache entries
   #;
   (define (memoize/key f key-fn statsbox)
     (let* ([cache-size 50]
-           [ht (make-hash-table 'equal)]
+           [ht (make-hash)]
            [uniq (gensym)]
-           [vector (make-vector cache-size uniq)] ;; vector is only used to evict things from the hash-table
+           [vector (make-vector cache-size uniq)] ;; vector is only used to evict things from the hash
            [pointer 0])
       (lambda (x y)
         (let* ([key (key-fn x y)]
-               [value-in-cache (hash-table-get ht key uniq)])
+               [value-in-cache (hash-ref ht key uniq)])
           (cond
             [(eq? value-in-cache uniq)
              (let ([res (f x y)])
                (let ([to-remove (vector-ref vector pointer)])
                  (unless (eq? uniq to-remove)
-                   (hash-table-remove! ht to-remove)))
+                   (hash-remove! ht to-remove)))
                (vector-set! vector pointer key)
-               (hash-table-put! ht key res)
+               (hash-set! ht key res)
                (set! pointer (modulo (+ pointer 1) cache-size))
                res)]
             [else
@@ -1038,7 +1069,7 @@ before the pattern compiler is invoked.
   ;; original version
   #;
   (define (memoize/key f key-fn statsbox)
-    (let ([ht (make-hash-table 'equal)]
+    (let ([ht (make-hash)]
           [entries 0])
       (lambda (x y)
         (record-cache-test! statsbox)
@@ -1048,12 +1079,12 @@ before the pattern compiler is invoked.
                   (set! entries (+ entries 1))
                   (record-cache-miss! statsbox)
                   (let ([res (f x y)])
-                    (hash-table-put! ht key res)
+                    (hash-set! ht key res)
                     res))])
           (unless (< entries 200) ; 10000 was original size
             (set! entries 0)
-            (set! ht (make-hash-table 'equal)))
-          (hash-table-get ht key compute/cache)))))
+            (set! ht (make-hash)))
+          (hash-ref ht key compute/cache)))))
   
   (define (record-cache-miss! statsbox)
     (set-cache-stats-hits! statsbox (sub1 (cache-stats-hits statsbox)))
@@ -1062,7 +1093,7 @@ before the pattern compiler is invoked.
   (define (record-cache-test! statsbox)
     (set-cache-stats-hits! statsbox (add1 (cache-stats-hits statsbox))))
   
-  (define-struct cache-stats (name misses hits))
+  (define-struct cache-stats (name misses hits) #:mutable)
   (define (new-cache-stats name) (make-cache-stats name 0 0))
   
   (define w/hole (new-cache-stats "hole"))
@@ -1270,30 +1301,30 @@ before the pattern compiler is invoked.
                 (map
                  (lambda (single-match)
                    (let ([single-bindings (mtch-bindings single-match)])
-                     (let ([rib-ht (make-hash-table 'equal)]
-                           [mismatch-rib-ht (make-hash-table 'equal)])
+                     (let ([rib-ht (make-hash)]
+                           [mismatch-rib-ht (make-hash)])
                        (for-each
                         (lambda (multiple-rib)
                           (cond
                             [(bind? multiple-rib)
-                             (hash-table-put! rib-ht (bind-name multiple-rib) (bind-exp multiple-rib))]
+                             (hash-set! rib-ht (bind-name multiple-rib) (bind-exp multiple-rib))]
                             [(mismatch-bind? multiple-rib)
-                             (hash-table-put! mismatch-rib-ht (mismatch-bind-name multiple-rib) (mismatch-bind-exp multiple-rib))]))
+                             (hash-set! mismatch-rib-ht (mismatch-bind-name multiple-rib) (mismatch-bind-exp multiple-rib))]))
                         (bindings-table multiple-bindings))
                        (for-each
                         (lambda (single-rib)
                           (cond
                             [(bind? single-rib)
                              (let* ([key (bind-name single-rib)]
-                                    [rst (hash-table-get rib-ht key '())])
-                               (hash-table-put! rib-ht key (cons (bind-exp single-rib) rst)))]
+                                    [rst (hash-ref rib-ht key '())])
+                               (hash-set! rib-ht key (cons (bind-exp single-rib) rst)))]
                             [(mismatch-bind? single-rib)
                              (let* ([key (mismatch-bind-name single-rib)]
-                                    [rst (hash-table-get mismatch-rib-ht key '())])
-                               (hash-table-put! mismatch-rib-ht key (cons (mismatch-bind-exp single-rib) rst)))]))
+                                    [rst (hash-ref mismatch-rib-ht key '())])
+                               (hash-set! mismatch-rib-ht key (cons (mismatch-bind-exp single-rib) rst)))]))
                         (bindings-table single-bindings))
-                       (make-mtch (make-bindings (append (hash-table-map rib-ht make-bind)
-                                                         (hash-table-map mismatch-rib-ht make-mismatch-bind)))
+                       (make-mtch (make-bindings (append (hash-map rib-ht make-bind)
+                                                         (hash-map mismatch-rib-ht make-mismatch-bind)))
                                   (build-cons-context
                                    (mtch-context single-match)
                                    (mtch-context multiple-match))
@@ -1307,9 +1338,7 @@ before the pattern compiler is invoked.
     (cond
       [(eq? none s1) s2]
       [(eq? none s2) s1]
-      ;; MF: error message simplified because it is too close to
-      ;; implementation matters. 
-      [(error 'matcher.ss "found two holes" #;s1 #;s2)]))
+      [(error 'matcher.ss "found two holes")]))
   
   ;; reverse-multiples : (listof mtch[to-lists]) -> (listof mtch[to-lists])
   ;; reverses the rhs of each rib in the bindings and reverses the context.
@@ -1341,14 +1370,14 @@ before the pattern compiler is invoked.
       (cond
         [(null? rhss) 
          (if ht
-             (hash-table-map ht (λ (k v) k))
+             (hash-map ht (λ (k v) k))
              #f)]
         [else
          (let ([mth (remove-bindings/filter ((car rhss) term hole-info))])
            (cond
              [mth
-              (let ([ht (or ht (make-hash-table 'equal))])
-                (for-each (λ (x) (hash-table-put! ht x #t)) mth)
+              (let ([ht (or ht (make-hash))])
+                (for-each (λ (x) (hash-set! ht x #t)) mth)
                 (loop (cdr rhss) ht))]
              [else 
               (loop (cdr rhss) ht)]))])))
@@ -1417,7 +1446,7 @@ before the pattern compiler is invoked.
     (let loop ([pattern pattern]
                [ribs null])
       (match pattern
-        [`(variable-except ,@(vars ...)) ribs]
+        [`(variable-except ,vars ...) ribs]
         [`(variable-prefix ,vars) ribs]
         [`variable-not-otherwise-mentioned ribs]
         
@@ -1482,8 +1511,8 @@ before the pattern compiler is invoked.
        fst)
       mtchs))
   
-  (define (hash-table-maps? ht key)
-    (not (eq? (hash-table-get ht key uniq) uniq)))
+  (define (hash-maps? ht key)
+    (not (eq? (hash-ref ht key uniq) uniq)))
   
   
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1510,7 +1539,7 @@ before the pattern compiler is invoked.
   (define (context? x) #t)
   (define-values (the-hole hole?)
     (let ()
-      (define-struct hole () #f)
+      (define-struct hole () #:inspector #f)
       (define the-hole (make-hole))
       (values the-hole hole?)))
   
@@ -1544,11 +1573,11 @@ before the pattern compiler is invoked.
   ;;
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   
-  ;; used in hash-table lookups to tell when something isn't in the table
+  ;; used in hash lookups to tell when something isn't in the table
   (define uniq (gensym))
   
   (provide/contract
-   (match-pattern (compiled-pattern? any/c . -> . (union false/c (listof mtch?))))
+   (match-pattern (compiled-pattern? any/c . -> . (or/c false/c (listof mtch?))))
    (compile-pattern (-> compiled-lang? any/c boolean?
                         compiled-pattern?))
 
@@ -1562,7 +1591,7 @@ before the pattern compiler is invoked.
    (make-mtch (bindings? any/c any/c . -> . mtch?))
    (mtch-bindings (mtch? . -> . bindings?))
    (mtch-context (mtch? . -> . any/c))
-   (mtch-hole (mtch? . -> . (union none? any/c)))
+   (mtch-hole (mtch? . -> . (or/c none? any/c)))
    
    (make-bind (symbol? any/c . -> . bind?))
    (bind? (any/c . -> . boolean?))
@@ -1570,6 +1599,7 @@ before the pattern compiler is invoked.
    (bind-exp (bind? . -> . any/c))
    (compile-language (-> any/c (listof nt?) (listof (listof symbol?)) compiled-lang?))
    (symbol->nt (symbol? . -> . symbol?))
+   (has-underscore? (symbol? . -> . boolean?))
    (split-underscore (symbol? . -> . symbol?)))
   (provide compiled-pattern? 
            print-stats)
@@ -1579,10 +1609,9 @@ before the pattern compiler is invoked.
            build-flat-context
            context?)
   
-  (provide (struct nt (name rhs))
-           (struct rhs (pattern var-info))
-           (struct compiled-lang 
-                   (lang ht list-ht across-ht across-list-ht has-hole-ht cache pict-builder literals nt-map))
+  (provide (struct-out nt)
+           (struct-out rhs)
+           (struct-out compiled-lang)
            
            lookup-binding
            
@@ -1594,4 +1623,4 @@ before the pattern compiler is invoked.
            make-repeat
            the-hole hole?
            rewrite-ellipses
-           build-compatible-context-language))
+           build-compatible-context-language)

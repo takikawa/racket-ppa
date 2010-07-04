@@ -1,16 +1,19 @@
+#lang scheme/base
 
-(module core-layout mzscheme
-  (require "loc-wrapper.ss"
-           "matcher.ss"
-           "reduction-semantics.ss"
-           (lib "list.ss")
-           (lib "utils.ss" "texpict")
-           (lib "mrpict.ss" "texpict")
-           (lib "etc.ss")
-           (lib "mred.ss" "mred")
-           (lib "struct.ss"))
+(require "loc-wrapper.ss"
+         "matcher.ss"
+         "reduction-semantics.ss"
+         
+         texpict/utils
+         texpict/mrpict
+         
+         scheme/gui/base
+         scheme/class)
+
+(require (for-syntax scheme/base))
   
   (provide find-enclosing-loc-wrapper
+           render-lw
            lw->pict
            basic-text
            metafunction-text
@@ -32,13 +35,14 @@
            with-compound-rewriter
            with-atomic-rewriter
            STIX?
+           white-bracket-sizing
            
            ;; for test suite
            build-lines
-           (struct token (column span))
-           (struct string-token (string style))
-           (struct pict-token (pict))
-           (struct spacer-token ())
+           (struct-out token)
+           (struct-out string-token)
+           (struct-out pict-token)
+           (struct-out spacer-token)
            
            current-text)
   
@@ -116,25 +120,29 @@
   
   ;; token = string-token | spacer-token | pict-token | align-token
   
-  (define-struct token (column span) (make-inspector))
+  (define-struct token (column span) #:inspector (make-inspector))
   
   ;; string : string
   ;; style : valid third argument to mrpict.ss's `text' function
-  (define-struct (string-token token) (string style) (make-inspector))
+  (define-struct (string-token token) (string style) #:inspector (make-inspector))
   
   ;; width : number
   ;; pict : pict
-  (define-struct (pict-token token) (pict) (make-inspector))
+  (define-struct (pict-token token) (pict) #:inspector (make-inspector))
   
   ;; spacer : number
-  (define-struct (spacer-token token) () (make-inspector))
+  (define-struct (spacer-token token) () #:inspector (make-inspector))
 
   ;; pict : pict
   ;; this token always appears at the beginning of a line and its width
   ;; is the x-coordinate of the pict inside itself (which must appear on
   ;; an earlier line)
-  (define-struct align-token (pict) (make-inspector))
+  (define-struct align-token (pict) #:inspector (make-inspector))
 
+  (define (render-lw nts lw)
+    (parameterize ([dc-for-text-size (make-object bitmap-dc% (make-object bitmap% 1 1))])
+      (lw->pict nts lw)))
+  
   (define (lw->pict nts lw)
     (lines->pict 
      (setup-lines 
@@ -155,13 +163,13 @@
                      ((current-unquote-rewriter) w-out-term-let)
                      w-out-term-let)])
            (if (equal? rewritten an-lw)
-               (copy-struct lw
+               (struct-copy lw
                             an-lw
-                            [lw-e (ar/e (lw-e an-lw)
-                                        (lw-line an-lw)
-                                        (lw-line-span an-lw)
-                                        (lw-column an-lw)
-                                        (lw-column-span an-lw))])
+                            [e (ar/e (lw-e an-lw)
+                                     (lw-line an-lw)
+                                     (lw-line-span an-lw)
+                                     (lw-column an-lw)
+                                     (lw-column-span an-lw))])
                (ar/lw rewritten)))]))
     
     (define (remove-term-let an-lw)
@@ -171,9 +179,9 @@
                      (pair? (cdr content))
                      (lw? (cadr content))
                      (equal? 'term-let (lw-e (cadr content))))
-                (copy-struct lw
+                (struct-copy lw
                              an-lw
-                             [lw-e (lw-e (second-to-last content))])
+                             [e (lw-e (second-to-last content))])
                 an-lw))
           an-lw))
     
@@ -216,8 +224,8 @@
         [(and (pair? e)
               (pair? (cdr e))
               (lw? (cadr e))
-              (lw-metafunction-name (cadr e)))
-         (map ar/lw (adjust-spacing (rewrite-metafunction-app (lw-metafunction-name (cadr e)) e)
+              (lw-metafunction? (cadr e)))
+         (map ar/lw (adjust-spacing (rewrite-metafunction-app e)
                                     line line-span col col-span 
                                     (lw-e (cadr e))))]
         [else
@@ -237,34 +245,21 @@
                             snd
                             (car l))]))]))
     
-  (define (rewrite-metafunction-app kind lst)
-    (case kind
-      [(single) 
-       (list* (hbl-append
-               (metafunction-text (symbol->string (lw-e (cadr lst))))
-               (open-white-square-bracket))
-              (let loop ([lst (cddr lst)])
-                (cond
-                  [(null? lst) null]
-                  [(null? (cdr lst))
-                   (let ([last (car lst)])
-                     (list (just-before (close-white-square-bracket) last)))]
-                  [else (cons (car lst) (loop (cdr lst)))])))]
-      [(multi)
-       (cons (hbl-append 
-              (metafunction-text (symbol->string (lw-e (cadr lst))))
-              (open-white-square-bracket))
-             (let loop ([lst (cddr lst)])
-               (cond
-                 [(null? lst) null]
-                 [(null? (cdr lst))
-                  (let ([last (car lst)])
-                    (list (just-before (close-white-square-bracket) last)))]
-                 [(null? (cddr lst))
-                  (cons (car lst) (loop (cdr lst)))]
-                 [else (list* (car lst) 
-                              (basic-text ", " (default-style))
-                              (loop (cdr lst)))])))]))
+  (define (rewrite-metafunction-app lst)
+    (cons (hbl-append 
+           (metafunction-text (symbol->string (lw-e (cadr lst))))
+           (open-white-square-bracket))
+          (let loop ([lst (cddr lst)])
+            (cond
+              [(null? lst) null]
+              [(null? (cdr lst))
+               (let ([last (car lst)])
+                 (list (just-before (close-white-square-bracket) last) ""))]
+              [(null? (cddr lst))
+               (cons (car lst) (loop (cdr lst)))]
+              [else (list* (car lst) 
+                           (basic-text ", " (default-style))
+                           (loop (cdr lst)))]))))
   
   (define (just-before what lw)
     (build-lw (if (symbol? what)
@@ -345,10 +340,10 @@
                           (- next-lw-column init-column))])
                  (list* (build-lw to-wrap1 line 0 new-lw-col 0)
                         (build-lw (blank)
-                                           line
-                                           (- next-lw-line line)
-                                           new-lw-col 
-                                           new-lw-col-span)
+                                  line
+                                  (- next-lw-line line)
+                                  new-lw-col 
+                                  new-lw-col-span)
                         (build-lw to-wrap2 next-lw-line 0 (+ new-lw-col new-lw-col-span) 0)
                         (if after-next-lw
                             (cons next-lw (loop after-next-lw next-line next-column))
@@ -673,15 +668,48 @@
   
   (define (open-white-square-bracket) (white-bracket "["))
   (define (close-white-square-bracket) (white-bracket "]"))
+
+  #;"\u301a\u301b" ;; white square brackets
   
+  ;; white-bracket : string -> pict
+  ;; puts two of `str' next to each other to make 
+  ;; a `white' version of the bracket.
   (define (white-bracket str)
-    (let ([inset-amt
-           (case (default-font-size)
-             [(9 10 11 12) -2]
-             [else
-              (- (floor (max 2 (* 2 (/ (default-font-size) 10)))))])])
-      (hbl-append (basic-text str (default-style))
-                  (inset (basic-text str (default-style)) inset-amt 0 0 0))))
+    (let-values ([(left-inset-amt right-inset-amt left-space right-space)
+                  ((white-bracket-sizing) str 
+                                          (default-font-size))])
+      (let ([main-bracket (basic-text str (default-style))])
+        (inset (refocus (cbl-superimpose main-bracket
+                                         (hbl-append (blank left-inset-amt)
+                                                     (basic-text str (default-style))
+                                                     (blank right-inset-amt)))
+                        main-bracket)
+               left-space
+               0
+               right-space
+               0))))
+  
+  (define white-bracket-sizing 
+    (make-parameter
+     (λ (str size)
+       (let ([inset-amt (floor/even (max 4 (* size 1/2)))])
+         (cond
+           [(equal? str "[")
+            (values inset-amt
+                    0
+                    0
+                    (/ inset-amt 2))]
+           [else
+            (values 0
+                    inset-amt
+                    (/ inset-amt 2)
+                    0)])))))
+
+  (define (floor/even x)
+    (let ([x (floor x)])
+      (if (odd? x)
+          (- x 1)
+          x)))
   
   (define (pink-background p)
     (refocus
@@ -735,5 +763,3 @@
     
     (find/e in-lws)
     lws)
-
-  )

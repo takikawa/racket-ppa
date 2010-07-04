@@ -56,6 +56,10 @@
           collection not found
           Interactions disabled}
       #t)
+(test @t{#lang scheme
+         3}
+      #f
+      "3")
 (test @t{(module m mzscheme (provide x) (define x 1))}
       @t{x}
       "1")
@@ -213,10 +217,7 @@
 (test @t{#lang setup/infotab}
       #f
       ;; test the complete buffer, to make sure that there is no error
-      (regexp (string-append "^Welcome to DrScheme, [^\n]*\n"
-                             "Language: Module[^\n]*\n\n"
-                             "Interactions disabled: setup/infotab does not"
-                             " support a REPL \\(no #%top-interaction\\)\n*$"))
+      "\nInteractions disabled: setup/infotab does not support a REPL (no #%top-interaction)"
       #t)
 
 ;; test scheme/load behavior
@@ -235,6 +236,24 @@
          (flush-output)}
       #f
       "4")
+
+(test @t{#lang scheme
+         (define-syntax (f stx)
+           (syntax-case stx ()
+             [(f)
+              (raise (make-exn:fail:syntax "both" (current-continuation-marks) (list #'f stx)))]))}
+      @t{(f)}
+      #<<--
+> (f)
+. . both in:
+  f
+  (f)
+--
+      #t
+      #:error-ranges 
+      (λ (defs ints)
+        (list (make-srcloc ints 3 3 107 1)
+              (make-srcloc ints 3 2 106 3))))
 
 ;; test protection against user-code changing the namespace
 (test @t{#lang scheme/base

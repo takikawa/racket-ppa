@@ -181,25 +181,25 @@
 (test (list blue blue blue
             blue white blue
             blue blue blue)
-      'color-list2
+      'color-list3
       (image->color-list (rectangle 3 3 "outline" 'blue)))
 
 (test #t
-      'color-list
+      'color-list4
       (image=? (color-list->image (list blue blue blue blue) 2 2 0 0)
-               (rectangle 2 2 'solid 'blue)))
+               (p00 (rectangle 2 2 'solid 'blue))))
 (test #f
-      'color-list
+      'color-list5
       (image=? (color-list->image (list blue blue blue blue) 2 2 0 0)
                (rectangle 1 4 'solid 'blue)))
 (test #t
-      'color-list
+      'color-list6
       (image=? (color-list->image (list blue blue blue blue) 1 4 0 0)
-               (rectangle 1 4 'solid 'blue)))
+               (p00 (rectangle 1 4 'solid 'blue))))
 (test #t
-      'color-list
+      'color-list7
       (image=? (color-list->image (list 'blue 'blue 'blue 'blue) 2 2 0 0)
-               (rectangle 2 2 'solid 'blue)))
+               (p00 (rectangle 2 2 'solid 'blue))))
 
 (test #t
       'alpha-color-list1
@@ -283,6 +283,17 @@
       (image=? (alpha-color-list->image (list (make-alpha-color 200 100 150 175)) 1 1 0 0)
                (alpha-color-list->image (list (make-alpha-color 200 100 150 175)) 1 1 0 0)))
 
+;; different pinholes => different images
+(test #f
+      'image=?1b
+      (image=? (alpha-color-list->image (list (make-alpha-color 200 100 150 175)) 1 1 1 0)
+               (alpha-color-list->image (list (make-alpha-color 200 100 150 175)) 1 1 0 0)))
+
+(test #f
+      'image=?1c
+      (image=? (alpha-color-list->image (list (make-alpha-color 200 100 150 175)) 1 1 0 0)
+               (alpha-color-list->image (list (make-alpha-color 200 100 150 175)) 1 1 0 1)))
+
 (test #t
       'image=?2
       (image=? (alpha-color-list->image (list (make-alpha-color 255 100 100 100)) 1 1 0 0)
@@ -364,9 +375,9 @@
 (test #t
       'overlay/xy4
       (image=? (color-list->image (list blue blue red red) 2 2 0 0)
-               (overlay/xy (p00 (rectangle 2 1 'solid 'red))
-                           0 -1
-                           (p00 (rectangle 2 1 'solid 'blue)))))
+               (p00 (overlay/xy (p00 (rectangle 2 1 'solid 'red))
+                                0 -1
+                                (p00 (rectangle 2 1 'solid 'blue))))))
 
 (test #t
       'overlay/xy/white
@@ -503,14 +514,6 @@
       'image-height
       (image-height (rectangle 5 7 'solid 'red)))
 
-(test 10 image-width (rectangle 10 0 'solid 'red))
-(test 0 image-height (rectangle 10 0 'solid 'red))
-(test 0 image-width (rectangle 0 10 'solid 'red))
-(test 10 image-height (rectangle 0 10 'solid 'red))
-
-(test 0 image-width (text "" 12 'black))
-(test #t 'not-zero-empty-string-height (not (zero? (image-height (text "" 12 'black)))))
-
 (test 1 'color-red (color-red (make-color 1 2 3)))
 (test 2 'color-green (color-green (make-color 1 2 3)))
 (test 3 'color-blue (color-blue (make-color 1 2 3)))
@@ -547,7 +550,7 @@
 ;; I developed them under macos x. -robby
 (test #t
       'triangle1
-      (image=? (triangle 3 'outline 'red)
+      (image=? (p00 (triangle 3 'outline 'red))
                (color-list->image 
                 (list white red   white
                       white red   white
@@ -560,7 +563,7 @@
 
 (test #t
       'triangle2
-      (image=? (triangle 3 'solid 'red)
+      (image=? (p00 (triangle 3 'solid 'red))
                (color-list->image 
                 (list white red   white
                       white red   white
@@ -603,19 +606,19 @@
       'add-line1
       (image=? (overlay (p00 (rectangle 5 4 'solid 'black))
                         (p00 (rectangle 1 4 'solid 'red)))
-               (add-line (p00 (rectangle 4 4 'solid 'black))
-                         -1 0
-                         -1 3
-                         'red)))
+               (p00 (add-line (p00 (rectangle 4 4 'solid 'black))
+                              -1 0
+                              -1 3
+                              'red))))
 
 (test #t
       'add-line2
       (image=? (overlay (p00 (rectangle 4 5 'solid 'black))
                         (p00 (rectangle 4 1 'solid 'red)))
-               (add-line (p00 (rectangle 4 4 'solid 'black))
-                         0 -1
-                         3 -1
-                         'red)))
+               (p00 (add-line (p00 (rectangle 4 4 'solid 'black))
+                              0 -1
+                              3 -1
+                              'red))))
 
 (test 7
       'add-line3
@@ -918,6 +921,29 @@
                  (shrink (shrink (rectangle 11 11 'solid 'red)
                                  5 5 5 5)
                          1 1 1 1))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  test images with zero width or zero height 
+;;  for various things
+;;
+
+
+(test 10 image-width (rectangle 10 0 'solid 'red))
+(test 0 image-height (rectangle 10 0 'solid 'red))
+(test 0 image-width (rectangle 0 10 'solid 'red))
+(test 10 image-height (rectangle 0 10 'solid 'red))
+
+(test 0 image-width (text "" 12 'black))
+(test #t 'not-zero-empty-string-height (not (zero? (image-height (text "" 12 'black)))))
+
+(test '() image->color-list (rectangle 0 10 'solid 'red))
+(test '() image->color-list (rectangle 10 0 'solid 'red))
+(test '() image->color-list (rectangle 0 0 'solid 'red))
+
+(test '() image->alpha-color-list (rectangle 0 10 'solid 'red))
+(test '() image->alpha-color-list (rectangle 10 0 'solid 'red))
+(test '() image->alpha-color-list (rectangle 0 0 'solid 'red))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;

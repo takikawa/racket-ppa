@@ -1,4 +1,4 @@
-
+#lang scheme/base
 #|
 
 closing:
@@ -11,7 +11,6 @@ module browser threading seems wrong.
 
 |#
 
-(module unit scheme/base
   (require scheme/contract
            scheme/unit
            scheme/class
@@ -29,7 +28,11 @@ module browser threading seems wrong.
            "insert-large-letters.ss"
            mrlib/switchable-button
            mrlib/cache-image-snip
-
+           mrlib/include-bitmap
+           
+           net/sendurl
+           net/url
+           
            (prefix-in drscheme:arrow: "../arrow.ss")
            
            mred
@@ -59,7 +62,8 @@ module browser threading seems wrong.
             [prefix drscheme:eval: drscheme:eval^]
             [prefix drscheme:init: drscheme:init^]
             [prefix drscheme:module-language: drscheme:module-language^]
-            [prefix drscheme:modes: drscheme:modes^])
+            [prefix drscheme:modes: drscheme:modes^]
+            [prefix drscheme:debug: drscheme:debug^])
     (export (rename drscheme:unit^
                     [-frame% frame%]
                     [-frame<%> frame<%>]))
@@ -202,7 +206,7 @@ module browser threading seems wrong.
     (define (find-symbol text pos)
       (send text split-snip pos)
       (send text split-snip (+ pos 1))
-      (let ([snip (send text find-snip pos 'after-or-none)])
+      (let ([snip (send text find-snip pos 'after)])
         (if (is-a? snip string-snip%)
             (let* ([before
                     (let loop ([i (- pos 1)]
@@ -276,25 +280,29 @@ module browser threading seems wrong.
                       [whole-s (if (string=? (send whole get-value) "")
                                    0
                                    (string->number (send whole get-value)))])
-                  (if (and num-s den-s whole-s)
-                      (let ([ans (+ whole-s (/ num-s den-s))])
-                        (if (and (exact? ans)
-                                 (real? ans)
-                                 (not (integer? ans)))
-                            ans
-                            #f))
-                      #f)))]
+                  (cond
+                    [(or (not whole-s) (not (integer? whole-s)))
+                     (string-constant insert-number/bad-whole-part)]
+                    [(or (not num-s) (not (integer? num-s)) (< num-s 0))
+                     (string-constant insert-number/bad-numerator)]
+                    [(or (not den-s) (not (integer? den-s)) (<= den-s 0))
+                     (string-constant insert-number/bad-denominator)]
+                    [else
+                     (if (< whole-s 0)
+                         (- whole-s (/ num-s den-s))
+                         (+ whole-s (/ num-s den-s)))])))]
              [ok-callback
               (λ () 
-                (cond
-                  [(validate-number)
-                   (set! ok? #t)
-                   (send dlg show #f)]
-                  [else 
-                   (message-box
-                    (string-constant drscheme)
-                    (string-constant invalid-number)
-                    dlg)]))]
+                (let ([v (validate-number)])
+                  (cond
+                    [(number? v)
+                     (set! ok? #t)
+                     (send dlg show #f)]
+                    [else 
+                     (message-box
+                      (string-constant drscheme)
+                      v
+                      dlg)])))]
              [cancel-callback 
               (λ () (send dlg show #f))])
         (let-values ([(ok cancel) 
@@ -307,7 +315,10 @@ module browser threading seems wrong.
             (send num-m min-width mw))
           (send bp set-alignment 'right 'center)
           (send dlg show #t)
-          (and ok? (validate-number)))))
+          (and ok?
+               (let ([v (validate-number)])
+                 (and (number? v)
+                      v))))))
     
     ;; create-executable : (instanceof drscheme:unit:frame<%>) -> void
     (define (create-executable frame)
@@ -428,18 +439,19 @@ module browser threading seems wrong.
     (define (make-definitions-text%)
       (let ([definitions-super%
               ((get-program-editor-mixin)
-               (drscheme:module-language:module-language-put-file-mixin
-                (scheme:text-mixin
-                 (color:text-mixin
-                  (drscheme:rep:drs-bindings-keymap-mixin
-                   (mode:host-text-mixin
-                    (text:delegate-mixin
-                     (text:foreground-color-mixin
-                      (drscheme:rep:drs-autocomplete-mixin
-                       (λ (x) x)
-                       text:info%)))))))))])
+               (text:first-line-mixin
+                (drscheme:module-language:module-language-put-file-mixin
+                 (scheme:text-mixin
+                  (color:text-mixin
+                   (drscheme:rep:drs-bindings-keymap-mixin
+                    (mode:host-text-mixin
+                     (text:delegate-mixin
+                      (text:foreground-color-mixin
+                       (drscheme:rep:drs-autocomplete-mixin
+                        (λ (x) x)
+                        text:info%))))))))))])
         (class* definitions-super% (definitions-text<%>)
-          (inherit get-top-level-window is-locked? lock while-unlocked)
+          (inherit get-top-level-window is-locked? lock while-unlocked highlight-first-line)
           
           (define interactions-text #f)
           (define/public (set-interactions-text it)
@@ -588,40 +600,42 @@ module browser threading seems wrong.
           
           
           (define/pubment (get-next-settings) next-settings)
-          (define/pubment set-next-settings
-            (lambda (_next-settings [update-prefs? #t])
-              (when (or (send (drscheme:language-configuration:language-settings-language _next-settings)
-                              get-reader-module)
-                        (send (drscheme:language-configuration:language-settings-language next-settings)
-                              get-reader-module))
-                (set-modified #t))
-              (set! next-settings _next-settings)
-              (change-mode-to-match)
-              
-              (let ([f (get-top-level-window)])
-                (when (and f
-                           (is-a? f -frame<%>))
-                  (send f language-changed)))
-              
-              (let ([lang (drscheme:language-configuration:language-settings-language next-settings)]
-                    [sets (drscheme:language-configuration:language-settings-settings next-settings)])
-                (preferences:set
-                 'drscheme:recent-language-names
-                 (limit-length
-                  (remove-duplicate-languages
-                   (cons (cons (send lang get-language-name)
-                               (send lang marshall-settings sets))
-                         (preferences:get 'drscheme:recent-language-names)))
-                  10)))
-              
-              (when update-prefs?
-                (preferences:set
-                 drscheme:language-configuration:settings-preferences-symbol
-                 next-settings))
-              
-              (remove-auto-text)
-              (insert-auto-text)
-              (after-set-next-settings _next-settings)))
+          (define/pubment (set-next-settings _next-settings [update-prefs? #t])
+            (when (or (send (drscheme:language-configuration:language-settings-language _next-settings)
+                            get-reader-module)
+                      (send (drscheme:language-configuration:language-settings-language next-settings)
+                            get-reader-module))
+              (set-modified #t))
+            (set! next-settings _next-settings)
+            (change-mode-to-match)
+            (let ([f (get-top-level-window)])
+              (when (and f
+                         (is-a? f -frame<%>))
+                (send f language-changed)))
+            
+            (highlight-first-line
+             (is-a? (drscheme:language-configuration:language-settings-language _next-settings)
+                    drscheme:module-language:module-language<%>))
+            
+            (let ([lang (drscheme:language-configuration:language-settings-language next-settings)]
+                  [sets (drscheme:language-configuration:language-settings-settings next-settings)])
+              (preferences:set
+               'drscheme:recent-language-names
+               (limit-length
+                (remove-duplicate-languages
+                 (cons (cons (send lang get-language-name)
+                             (send lang marshall-settings sets))
+                       (preferences:get 'drscheme:recent-language-names)))
+                10)))
+            
+            (when update-prefs?
+              (preferences:set
+               drscheme:language-configuration:settings-preferences-symbol
+               next-settings))
+            
+            (remove-auto-text)
+            (insert-auto-text)
+            (after-set-next-settings _next-settings))
           
           (define/pubment (after-set-next-settings s)
             (inner (void) after-set-next-settings s))
@@ -667,6 +681,10 @@ module browser threading seems wrong.
               (set! really-modified? #t)
               (set! needs-execution-state (string-constant needs-execute-defns-edited)))
             (inner (void) after-delete x y))
+          
+          (define/override (is-special-first-line? l) 
+            (and (preferences:get 'drscheme:module-language-first-line-special?)
+                 (is-lang-line? l)))
           
           (inherit get-filename)
           (field
@@ -780,9 +798,37 @@ module browser threading seems wrong.
           
           ;; insert the default-text
           (queue-callback (lambda () (insert-auto-text)))
-          
+          (highlight-first-line
+           (is-a? (drscheme:language-configuration:language-settings-language next-settings)
+                  drscheme:module-language:module-language<%>))
           (inherit set-max-undo-history)
           (set-max-undo-history 'forever))))
+    
+    ;; is-lang-line? : string -> boolean
+    ;; given the first line in the editor, this returns #t if it is a #lang line.
+    (define (is-lang-line? l)
+      (let ([m (regexp-match #rx"^#(!|(lang ))([-+_/a-zA-Z0-9]+)(.|$)" l)])
+        (and m
+             (let ([lang-name (list-ref m 3)]
+                   [last-char (list-ref m 4)])
+               (and (not (char=? #\/ (string-ref lang-name 0)))
+                    (not (char=? #\/ (string-ref lang-name (- (string-length lang-name) 1))))
+                    (or (string=? "" last-char)
+                        (char-whitespace? (string-ref last-char 0))))))))
+    
+    ;; test cases for is-lang-line?
+    #;
+    (list (is-lang-line? "#lang x")
+          (is-lang-line? "#lang scheme")
+          (is-lang-line? "#lang scheme ")
+          (not (is-lang-line? "#lang schemeα"))
+          (not (is-lang-line? "#lang scheme/ "))
+          (not (is-lang-line? "#lang /scheme "))
+          (is-lang-line? "#lang sch/eme ")
+          (is-lang-line? "#lang r6rs")
+          (is-lang-line? "#!r6rs")
+          (is-lang-line? "#!r6rs ")
+          (not (is-lang-line? "#!/bin/sh")))
     
     (define (get-module-language/settings)
       (let* ([module-language
@@ -806,20 +852,24 @@ module browser threading seems wrong.
     
     
     
-    ;      ;           ;; ;                             
-    ;       ;          ;                                 
-    ;       ;          ;                                 
-    ;    ;;; ;   ;;;   ;;;  ;   ; ;;;    ;;;              
-    ;   ;   ;;  ;   ;   ;   ;   ;;   ;  ;   ;             
-    ;   ;    ;  ;   ;   ;   ;   ;    ;  ;   ;             
-    ;   ;    ;  ;;;;;   ;   ;   ;    ;  ;;;;;             
-    ;   ;    ;  ;       ;   ;   ;    ;  ;                 
-    ;   ;   ;;  ;       ;   ;   ;    ;  ;                 
-    ;   ;;; ;   ;;;;   ;   ;   ;    ;   ;;;;  ;   ;   ;  
-    ;                                                    
-    ;                                                   
-    
-    
+
+;                                                       
+;                                                       
+;                                                       
+;                                                       
+;      ;;;          ;;;;;;;                             
+;      ;;;         ;;;                                  
+;   ;; ;;;   ;;;; ;;;;; ;;; ;;; ;;    ;;;;              
+;  ;;;;;;;  ;; ;;;;;;;; ;;; ;;;;;;;  ;; ;;;             
+;  ;;; ;;; ;;; ;;; ;;;  ;;; ;;; ;;; ;;; ;;;             
+;  ;;; ;;; ;;;;;;; ;;;  ;;; ;;; ;;; ;;;;;;;             
+;  ;;; ;;; ;;;     ;;;  ;;; ;;; ;;; ;;;     ;;; ;;; ;;; 
+;  ;;;;;;;  ;;;;;; ;;;  ;;; ;;; ;;;  ;;;;;; ;;; ;;; ;;; 
+;   ;; ;;;   ;;;;  ;;;  ;;; ;;; ;;;   ;;;;  ;;; ;;; ;;; 
+;                                                       
+;                                                       
+;                                                       
+;                                                       
     
     ;; get-pos : text mouse-event% -> (union #f number)
     (define (get-pos text event)
@@ -1079,19 +1129,25 @@ module browser threading seems wrong.
     
     
     
-    ;;                               
-    ;                                 
-    ;                                 
-    ;;;  ; ;;  ;;;   ; ;;; ;;     ;;;  
-    ;   ;;   ;   ;  ;;  ;;  ;   ;   ; 
-    ;   ;        ;  ;   ;   ;   ;   ; 
-    ;   ;     ;;;;  ;   ;   ;   ;;;;; 
-    ;   ;    ;   ;  ;   ;   ;   ;     
-    ;   ;    ;   ;  ;   ;   ;   ;     
-    ;   ;     ;;;;; ;   ;   ;    ;;;; 
-    
-    
-    
+
+;                                        
+;                                        
+;                                        
+;                                        
+;   ;;;;                                 
+;  ;;;                                   
+;  ;;;; ;;; ;;;;;;;  ;;; ;; ;;;    ;;;;  
+;  ;;;; ;;;;;;;;;;;; ;;;;;;;;;;;  ;; ;;; 
+;  ;;;  ;;;  ;;  ;;; ;;; ;;; ;;; ;;; ;;; 
+;  ;;;  ;;;    ;;;;; ;;; ;;; ;;; ;;;;;;; 
+;  ;;;  ;;;  ;;; ;;; ;;; ;;; ;;; ;;;     
+;  ;;;  ;;;  ;;; ;;; ;;; ;;; ;;;  ;;;;;; 
+;  ;;;  ;;;   ;;;;;; ;;; ;;; ;;;   ;;;;  
+;                                        
+;                                        
+;                                        
+;                                        
+
     (define dragable/def-int-mixin
       (mixin (panel:dragable<%>) ()
         (init-field unit-frame)
@@ -1290,6 +1346,8 @@ module browser threading seems wrong.
         get-language-menu
         register-toolbar-button
         get-tabs))
+    
+    
     
     (define frame-mixin
       (mixin (drscheme:frame:<%> frame:searchable-text<%> frame:delegate<%> frame:open-here<%>)
@@ -1800,6 +1858,7 @@ module browser threading seems wrong.
             [else (send definitions-text clear)])
           (send definitions-canvas focus))
         
+     
         
         
         
@@ -2221,6 +2280,7 @@ module browser threading seems wrong.
           (when logging
             (stop-logging))
           (remove-show-status-line-callback)
+          (remove-bug-icon-callback)
           (send interactions-text on-close))
         
         ;; execute-callback : -> void
@@ -2747,7 +2807,7 @@ module browser threading seems wrong.
                     (remq module-browser-panel l)))))
         
         (define/private (can-browse-language?)
-          (let* ([lang/config (preferences:get (drscheme:language-configuration:get-settings-preferences-symbol))]
+          (let* ([lang/config (send (get-definitions-text) get-next-settings)]
                  [lang (drscheme:language-configuration:language-settings-language lang/config)]
                  [strs (send lang get-language-position)]
                  [can-browse?
@@ -3063,15 +3123,7 @@ module browser threading seems wrong.
         (define scheme-menu 'scheme-menu-not-yet-init)
         (define insert-menu 'insert-menu-not-yet-init)
         (define/public (get-insert-menu) insert-menu)
-        (define/public (get-special-menu) 
-          (define context (continuation-mark-set->context (current-continuation-marks)))
-          (fprintf (current-error-port) 
-                   "called get-special-menu: ~a\n"
-                   (if (and (pair? context)
-                            (pair? (cdr context)))
-                       (format "~s ~s" (car (cadr context)) (cdr (cadr context)))
-                       "<<unknown caller>>"))
-          insert-menu)
+        (define/public (get-special-menu) insert-menu)
         
         (define/public (choose-language-callback)
           (let ([new-settings (drscheme:language-configuration:language-dialog
@@ -3535,6 +3587,30 @@ module browser threading seems wrong.
         (define running-canvas
           (new running-canvas% [parent (get-info-panel)]))
         
+        (define bug-icon
+          (let* ([info-panel (get-info-panel)]
+                 [btn 
+                  (new switchable-button%
+                       [parent info-panel]
+                       [callback (λ (x) (show-saved-bug-reports-window))]
+                       [bitmap very-small-planet-bitmap]
+                       [vertical-tight? #t]
+                       [label (string-constant show-planet-contract-violations)])])
+            (send btn set-label-visible #f)
+            (send info-panel change-children 
+                  (λ (l)
+                    (cons btn (remq* (list btn) l))))
+            btn))
+        (define/private (set-bug-label v)
+          (if (null? v)
+              (send bug-icon show #f)
+              (send bug-icon show #t)))
+        (set-bug-label (preferences:get 'drscheme:saved-bug-reports))
+        (define remove-bug-icon-callback
+          (preferences:add-callback
+           'drscheme:saved-bug-reports
+           (λ (p v)
+             (set-bug-label v))))
         
         [define func-defs-canvas (new func-defs-canvas% 
                                       (parent name-panel)
@@ -3606,6 +3682,26 @@ module browser threading seems wrong.
         (set-label-prefix (string-constant drscheme))
         (set! newest-frame this)
         (send definitions-canvas focus)))
+    
+    
+;                                                   
+;                                                   
+;                                                   
+;                                                   
+;                               ;;;                 
+;                                                   
+;  ;;; ;;;; ;;; ;;; ;;  ;;; ;;  ;;; ;;; ;;   ;; ;;; 
+;  ;;;;;;;; ;;; ;;;;;;; ;;;;;;; ;;; ;;;;;;; ;;;;;;; 
+;  ;;;  ;;; ;;; ;;; ;;; ;;; ;;; ;;; ;;; ;;; ;;; ;;; 
+;  ;;;  ;;; ;;; ;;; ;;; ;;; ;;; ;;; ;;; ;;; ;;; ;;; 
+;  ;;;  ;;; ;;; ;;; ;;; ;;; ;;; ;;; ;;; ;;; ;;; ;;; 
+;  ;;;  ;;;;;;; ;;; ;;; ;;; ;;; ;;; ;;; ;;; ;;;;;;; 
+;  ;;;   ;; ;;; ;;; ;;; ;;; ;;; ;;; ;;; ;;;  ;; ;;; 
+;                                               ;;; 
+;                                           ;;;;;;  
+;                                                   
+;                                                   
+
     
     (define running-bitmap (include-bitmap (lib "icons/b-run.png")))
     (define waiting-bitmap (include-bitmap (lib "icons/b-wait.png")))
@@ -3869,6 +3965,166 @@ module browser threading seems wrong.
         (inherit set-allow-shrinking)
         (set-allow-shrinking 100)))
     
+    
+    
+;                                                                            
+;                                                                            
+;                                                                            
+;                                                                            
+;  ;;;                                                             ;         
+;  ;;;                                                           ;;;         
+;  ;;; ;;  ;;; ;;;  ;; ;;;     ;;; ;; ;;;;  ;;; ;;    ;;;   ;;; ;;;;;  ;;;;  
+;  ;;;;;;; ;;; ;;; ;;;;;;;     ;;;;; ;; ;;; ;;;;;;;  ;;;;;  ;;;;;;;;; ;;; ;; 
+;  ;;; ;;; ;;; ;;; ;;; ;;;     ;;;  ;;; ;;; ;;; ;;; ;;; ;;; ;;;  ;;;  ;;;    
+;  ;;; ;;; ;;; ;;; ;;; ;;;     ;;;  ;;;;;;; ;;; ;;; ;;; ;;; ;;;  ;;;   ;;;;  
+;  ;;; ;;; ;;; ;;; ;;; ;;;     ;;;  ;;;     ;;; ;;; ;;; ;;; ;;;  ;;;     ;;; 
+;  ;;;;;;; ;;;;;;; ;;;;;;;     ;;;   ;;;;;; ;;;;;;;  ;;;;;  ;;;  ;;;; ;; ;;; 
+;  ;;; ;;   ;; ;;;  ;; ;;;     ;;;    ;;;;  ;;; ;;    ;;;   ;;;   ;;;  ;;;;  
+;                      ;;;                  ;;;                              
+;                  ;;;;;;                   ;;;                              
+;                                                                            
+;                                                                            
+
+    
+    ;; record-saved-bug-report : (listof (cons symbol string)) -> void
+    ;; =Kernel= =Handler=
+    (define (record-saved-bug-report table)
+      (let ([recorded (preferences:get 'drscheme:saved-bug-reports)])
+        (unless (member table recorded)
+          (preferences:set 'drscheme:saved-bug-reports (shorten-to (cons table recorded) 15)))))
+    
+    ;; shorten-to : (listof X) number -> (listof X)
+    ;; drops items from the end of the list to bring it back down to `n' items
+    (define (shorten-to l n)
+      (let loop ([l l]
+                 [n n])
+        (cond
+          [(zero? n) '()]
+          [(null? l) '()]
+          [else (cons (car l) (loop (cdr l) (- n 1)))])))
+
+    (define very-small-planet-bitmap (include-bitmap (lib "icons/very-small-planet.png") 'png/mask))
+    
+    (define saved-bug-reports-window #f)
+    (define saved-bug-reports-panel #f)
+    (define (init-saved-bug-reports-window)
+      (unless saved-bug-reports-window
+        (let ()
+          (define stupid-internal-define-syntax1
+            (set! saved-bug-reports-window (new frame:basic% [label (string-constant drscheme)] [width 600])))
+          (define stupid-internal-define-syntax2
+            (set! saved-bug-reports-panel
+                  (new vertical-panel% [parent (send saved-bug-reports-window get-area-container)])))
+          (define hp (new horizontal-panel% 
+                          [parent (send saved-bug-reports-window get-area-container)] 
+                          [stretchable-width #f] 
+                          [alignment '(right center)]))
+          (define forget-all (new button% 
+                                  [label (string-constant bug-track-forget-all)] 
+                                  [callback 
+                                   (λ (_1 _2)
+                                     (send saved-bug-reports-window show #f)
+                                     (preferences:set 'drscheme:saved-bug-reports '()))]
+                                  [parent hp]))
+          (void))))
+    
+    (preferences:add-callback
+     'drscheme:saved-bug-reports
+     (λ (p v)
+       (when saved-bug-reports-window
+         (when (send saved-bug-reports-window is-shown?)
+           (cond
+             [(null? v)
+              (send saved-bug-reports-window show #f)]
+             [else
+              (refresh-saved-bug-reports-window v)])))))
+    
+    (define (refresh-saved-bug-reports-window pref)
+      (send saved-bug-reports-window begin-container-sequence)
+      (send saved-bug-reports-panel change-children (λ (l) '()))
+      (for-each
+       (λ (item)
+         (let ()
+           (define (lookup k [default ""])
+             (let loop ([item item])
+               (cond
+                 [(null? item) default]
+                 [else (let ([rib (car item)])
+                         (if (eq? (car rib) k)
+                             (cdr rib)
+                             (loop (cdr item))))])))
+           (define vp
+             (new vertical-panel% 
+                  [style '(border)]
+                  [parent saved-bug-reports-panel]
+                  [stretchable-height #f]))
+           (define hp
+             (new horizontal-panel% 
+                  [parent vp]
+                  [stretchable-height #f]))
+           (define first-line-msg 
+             (let ([desc (lookup 'description #f)])
+               (and desc
+                    (new message%
+                         [label (read-line (open-input-string desc))]
+                         [parent vp]
+                         [stretchable-width #t]
+                         [font (send (send (editor:get-standard-style-list) find-named-style "Standard") get-font)]))))
+           (define msg (new message% 
+                            [stretchable-width #t]
+                            [label (string-append (lookup 'component "<<unknown component>>")
+                                                  (let ([v (lookup 'version #f)])
+                                                    (if v
+                                                        (string-append " " v)
+                                                        "")))]
+                            [parent hp]))
+           (define forget (new button% 
+                                [parent hp] 
+                                [callback (λ (x y) (forget-saved-bug-report item))]
+                                [label (string-constant bug-track-forget)]))
+           (define report (new button% 
+                               [parent hp] 
+                               [callback (λ (x y) 
+                                           (forget-saved-bug-report item)
+                                           (send-url
+                                            (url->string
+                                             (drscheme:debug:bug-info->ticket-url item))))]
+                               [label (string-constant bug-track-report)]))
+           (void)))
+       pref) ;; reverse list so first elements end up on top of list
+      (send saved-bug-reports-window reflow-container)
+      (send saved-bug-reports-window end-container-sequence))
+    
+    (define (forget-saved-bug-report item)
+      (preferences:set 'drscheme:saved-bug-reports (remove item (preferences:get 'drscheme:saved-bug-reports))))
+    
+    (define (show-saved-bug-reports-window)
+      (init-saved-bug-reports-window)
+      (unless (send saved-bug-reports-window is-shown?)
+        (refresh-saved-bug-reports-window (preferences:get 'drscheme:saved-bug-reports)))
+      (send saved-bug-reports-window show #t))
+    
+    
+    
+;                                                    
+;                                                    
+;                                                    
+;                                                    
+;   ;;;;                                   ;;    ;   
+;  ;;;                                    ;  ;  ;    
+;  ;;;; ;;; ;;;;;;;  ;;; ;; ;;;    ;;;;   ;  ;  ;    
+;  ;;;; ;;;;;;;;;;;; ;;;;;;;;;;;  ;; ;;;  ;  ; ;     
+;  ;;;  ;;;  ;;  ;;; ;;; ;;; ;;; ;;; ;;;   ;; ;; ;;  
+;  ;;;  ;;;    ;;;;; ;;; ;;; ;;; ;;;;;;;      ; ;  ; 
+;  ;;;  ;;;  ;;; ;;; ;;; ;;; ;;; ;;;         ;  ;  ; 
+;  ;;;  ;;;  ;;; ;;; ;;; ;;; ;;;  ;;;;;;     ;  ;  ; 
+;  ;;;  ;;;   ;;;;;; ;;; ;;; ;;;   ;;;;     ;    ;;  
+;                                                    
+;                                                    
+;                                                    
+;                                                    
+
+    
     (define -frame% (frame-mixin super-frame%))
     
     (define module-browser-dragable-panel%
@@ -3959,4 +4215,4 @@ module browser threading seems wrong.
         (send frame update-toolbar-visibility)
         (send frame show #t)
         (set! first-frame? #f)
-        frame))))
+        frame)))

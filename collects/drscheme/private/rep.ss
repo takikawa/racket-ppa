@@ -665,7 +665,7 @@ TODO
                                                    (srcloc-position srcloc)
                                                    (srcloc-span srcloc))]
                                      [(port-name-matches? (srcloc-source srcloc))
-                                      (hash-set! ht (srcloc-source srcloc) definitions-text)
+                                      (hash-set! ht (srcloc-source srcloc) this)
                                       (make-srcloc this
                                                    (srcloc-line srcloc)
                                                    (srcloc-column srcloc)
@@ -929,7 +929,7 @@ TODO
             (set-custodian-limit new-limit)
             (preferences:set 'drscheme:memory-limit new-limit))
           (set-insertion-point (last-position))
-          (insert-warning "\n[Interactions disabled]")))
+          (insert-warning "\nInteractions disabled")))
       
       (define/private (cleanup-interaction) ; =Kernel=, =Handler=
         (set! need-interaction-cleanup? #f)
@@ -1103,12 +1103,20 @@ TODO
               (default-continuation-prompt-tag)
               (λ args (void)))
              
+             (when complete-program?
+               (call-with-continuation-prompt
+                (λ ()
+                  (call-with-break-parameterization
+                   user-break-parameterization
+                   (λ ()
+                     (send lang front-end/finished-complete-program settings))))
+                (default-continuation-prompt-tag)
+                (λ args (void))))
+             
              (set! in-evaluation? #f)
              (update-running #f)
              (cleanup)
              (flush-output (get-value-port))
-             (when complete-program?
-               (send lang front-end/finished-complete-program settings))
              (queue-system-callback/sync
               (get-user-thread)
               (λ () ; =Kernel=, =Handler= 

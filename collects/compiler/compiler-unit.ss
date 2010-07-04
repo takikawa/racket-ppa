@@ -10,25 +10,22 @@
 
 #lang scheme/base
 
-(require mzlib/unit
+(require scheme/unit
 
          "sig.ss"
          dynext/file-sig
          dynext/link-sig
          dynext/compile-sig
 
-         make/make-sig
-         make/collection-sig
-
          syntax/toplevel
          syntax/moddep
 
-         mzlib/list
          scheme/file
          mzlib/compile ; gets compile-file
-         mzlib/cm
+         compiler/cm
          setup/getinfo
-         setup/main-collects)
+         setup/main-collects
+         setup/private/omitted-paths)
 
 (provide compiler@)
 
@@ -139,24 +136,7 @@
 
   (define (compile-directory dir info #:verbose [verbose? #t])
     (define info* (or info (lambda (key mk-default) (mk-default))))
-    (define make (c-dynamic-require 'make/make-unit 'make@))
-    (define coll (c-dynamic-require 'make/collection-unit 'make:collection@))
-    (define init (unit (import make^ make:collection^) (export)
-                       (values make-collection make-notify-handler)))
-    (define-values (make-collection make-notify-handler)
-      (invoke-unit
-       (compound-unit
-        (import (DFILE : dynext:file^)
-                (OPTION : compiler:option^)
-                (COMPILER : compiler^))
-        (export)
-        (link [((MAKE : make^)) make]
-              [((COLL : make:collection^)) coll MAKE DFILE OPTION COMPILER]
-              [() init MAKE COLL]))
-       (import dynext:file^ compiler:option^ compiler^)))
-    (define nothing (lambda () null))
-    (define omit-paths (info* 'compile-omit-paths nothing))
-    (define omit-files (info* 'compile-omit-files nothing))
+    (define omit-paths (omitted-paths dir))
     (unless (eq? 'all omit-paths)
       (parameterize ([current-directory dir]
                      [current-load-relative-directory dir]
@@ -166,32 +146,20 @@
                                                 (manager-trace-handler))]
                      [manager-compile-notify-handler
                       (lambda (path) ((compile-notify-handler) path))])
-        ;; Compile the collection files via make-collection
         (let* ([sses (append
                       ;; Find all .ss/.scm files:
                       (filter extract-base-filename/ss (directory-list))
                       ;; Add specified doc sources:
-                      (map car (info* 'scribblings nothing)))]
-               [sses (remove* (map string->path omit-paths) sses)]
-               [sses (remove* (map string->path omit-files) sses)])
+                      (map car (info* 'scribblings (lambda () null))))]
+               [sses (remove* omit-paths sses)])
           (for-each (make-caching-managed-compile-zo) sses)))
       (when (compile-subcollections)
         (when (info* 'compile-subcollections (lambda () #f))
           (printf "Warning: ignoring `compile-subcollections' entry in info ~a\n"
                   dir))
         (for ([p (directory-list dir)])
-          (let ([p* (build-path dir p)]
-                [s  (path->string p)])
-            (when (and
-                   (directory-exists? p*)
-                   (not
-                    ;; this is the same check that setup/setup-unit is
-                    ;; doing in `make-cc*'
-                    (or (regexp-match? #rx"^[.]" s)
-                        (equal? "compiled" s)
-                        (and (equal? "doc" s)
-                             (not (pair? (path->main-collects-relative p*))))
-                        (and (pair? omit-paths) (member s omit-paths)))))
+          (let ([p* (build-path dir p)])
+            (when (and (directory-exists? p*) (not (member p omit-paths)))
               (compile-directory p* (get-info/full p*))))))))
 
   (define (compile-collection-zos collection . cp)

@@ -17,6 +17,8 @@ scheme_inherit_cells
 scheme_current_break_cell
 scheme_current_thread
 scheme_fuel_counter
+scheme_current_thread_ptr
+scheme_fuel_counter_ptr
 scheme_get_current_thread
 scheme_start_atomic
 scheme_end_atomic
@@ -199,6 +201,7 @@ GC_register_traversers
 GC_resolve
 GC_mark
 GC_fixup
+GC_fixup_self
 scheme_malloc_immobile_box
 scheme_free_immobile_box
 scheme_make_bucket_table
@@ -471,7 +474,6 @@ scheme_print_string
 scheme_read_byte_string
 scheme_make_namespace
 scheme_add_namespace_option
-scheme_require_from_original_env
 scheme_add_global
 scheme_add_global_symbol
 scheme_make_envunbox
@@ -563,7 +565,6 @@ scheme_check_proc_arity
 scheme_check_proc_arity2
 scheme_make_provided_string
 scheme_make_args_string
-scheme_no_dumps
 scheme_system_library_subpath
 scheme_signal_received
 scheme_char_strlen

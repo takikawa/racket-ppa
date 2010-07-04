@@ -1,5 +1,4 @@
-
-(module drsig scheme/base
+#lang scheme/base
   (require scheme/unit)
   
   (provide drscheme:eval^
@@ -54,7 +53,7 @@
     (make-debug-error-display-handler
      make-debug-eval-handler
      error-display-handler/stacktrace
-     
+     bug-info->ticket-url
      test-coverage-enabled
      profiling-enabled
 
@@ -158,6 +157,8 @@
      find-symbol
      get-program-editor-mixin
      add-to-program-editor-mixin
+     forget-saved-bug-report
+     record-saved-bug-report
      (struct teachpack-callbacks (get-names remove add))))
   
   (define-signature drscheme:frame-cm^
@@ -313,5 +314,4 @@
      (open (prefix drscheme:language: drscheme:language^))
      (open (prefix drscheme:help-desk: drscheme:help-desk^))
      (open (prefix drscheme:eval: drscheme:eval^))
-     (open (prefix drscheme:modes: drscheme:modes^)))))
-  
+     (open (prefix drscheme:modes: drscheme:modes^))))

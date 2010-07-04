@@ -547,10 +547,10 @@
           (define/public (set-tab t) (set! tab t))
           
           (define/private (stx-source->breakpoints src)
-            (send (send (if src (filename->defs src) this) get-tab) get-breakpoints))
+            (send (send (or (and src (filename->defs src)) this) get-tab) get-breakpoints))
           
           (define/private (stx-source->pos-vec src)
-            (send (send (if src (filename->defs src) this) get-tab) get-pos-vec))
+            (send (send (or (and src (filename->defs src)) this) get-tab) get-pos-vec))
           
           ;; make-debug-eval-handler : (sexp -> value) -> sexp -> value
           ;; adds debugging information to `sexp' and calls `oe'
@@ -1060,9 +1060,8 @@
               (cond
                 [(eq? tab (send tab get-master))
                  (set! debug? #t)
-                 (send (get-current-tab) prepare-execution debug?)
-                 (set! debug? #f)
-                 (execute-callback)]
+                 (execute-callback)
+                 (set! debug? #f)]
                 [else
                  (already-debugging tab)])))
           
@@ -1070,6 +1069,7 @@
             (let ([tab (get-current-tab)])
               (cond
                 [(eq? tab (send tab get-master))
+                 (send (get-current-tab) prepare-execution debug?)
                  (super execute-callback)]
                 [else
                  (already-debugging tab)])))

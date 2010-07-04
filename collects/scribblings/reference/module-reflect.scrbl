@@ -154,20 +154,21 @@ the form of a @deftech{module path index}. A @tech{module path index}
 is a semi-interned (multiple references to the same relative module
 tend to use the same @tech{module path index} value, but not always)
 opaque value that encodes a module path (see @scheme[module-path?])
-and another @tech{module path index} to which it is relative.
+and either a @tech{resolved module path} or another @tech{module path
+index} to which it is relative.
 
 A @tech{module path index} that uses both @scheme[#f] for its path and
 base @tech{module path index} represents ``self''---i.e., the module
 declaration that was the source of the @tech{module path index}---and
-such a @tech{module path index} is always used as the root for a chain
-of @tech{module path index}. For example, when extracting information
-about an identifier's binding within a module, if the identifier is
-bound by a definition within the same module, the identifier's source
-module is reported using the ``self'' @tech{module path index}. If the
-identifier is instead defined in a module that is imported via a
-module path (as opposed to a literal module name), then the
-identifier's source module will be reported using a @tech{module path
-index} that contains the @scheme[require]d module path and the
+such a @tech{module path index} can be used as the root for a chain of
+@tech{module path index}es at compile time. For example, when
+extracting information about an identifier's binding within a module,
+if the identifier is bound by a definition within the same module, the
+identifier's source module is reported using the ``self'' @tech{module
+path index}. If the identifier is instead defined in a module that is
+imported via a module path (as opposed to a literal module name), then
+the identifier's source module will be reported using a @tech{module
+path index} that contains the @scheme[require]d module path and the
 ``self'' @tech{module path index}.
 
 
@@ -204,7 +205,7 @@ resolved name can depend on the value of
 
 @defproc[(module-path-index-split [mpi module-path-index?])
          (values (or/c module-path? false/c)
-                 (or/c module-path-index? false/c))]{
+                 (or/c module-path-index? resolved-module-path? false/c))]{
 
 Returns two values: a module path, and a base @tech{module path index}
 or @scheme[#f] to which the module path is relative.
@@ -219,7 +220,7 @@ second result, and means that @scheme[mpi] represents ``self'' (see
 above).}
 
 @defproc[(module-path-index-join [path (or/c module-path? false/c)]
-                                 [mpi (or/c module-path-index? false/c)])
+                                 [mpi (or/c module-path-index? resolved-module-path? false/c)])
          module-path-index?]{
 
 Combines @scheme[path] and @scheme[mpi] to create a new @tech{module
@@ -292,6 +293,25 @@ explicitly the import, the import @tech{phase level} shift (where
 name of the re-exported binding, and the @tech{phase level} of the
 import.}
 
+@defproc[(module-compiled-language-info [compiled-module-code compiled-module-expression?])
+         (or/c false/c (vector/c module-path? symbol? any/c))]{
+
+Returns information intended to reflect the ``language'' of the
+module's implementation as originally attached to the syntax of the
+module's declaration though the @indexed-scheme['module-language]
+@tech{syntax property}. See also @scheme[module].
+
+If no information is available for the module, the result is
+@scheme[#f]. Otherwise, the result is @scheme[(vector _mp _name _val)]
+such that @scheme[((dynamic-require _mp _name) _val)] should return
+function that takes a single argument. The function's argument is a
+key for reflected information, and the result is a value associated
+with that key.  Acceptable keys and the interpretation of results is
+up to external tools, such as DrScheme.  If no information is
+available for a given key, the result should be @scheme[#f].
+
+See also @scheme[module->language-info].}
+
 
 @;------------------------------------------------------------------------
 @section[#:tag "dynreq"]{Dynamic Module Access}
@@ -328,3 +348,14 @@ If @scheme[provided] is @|void-const|, then the module is
          any]{
 
 Like @scheme[dynamic-require], but in @tech{phase} 1.}
+
+
+@defproc[(module->language-info [mod module-path?])
+         (or/c false/c (vector/c module-path? symbol? any/c))]{
+
+Returns information intended to reflect the ``language'' of the
+implementation of @scheme[mod], which must be declared (but not
+necessarily @tech{instantiate}d or @tech{visit}ed) in the current
+namespace. The information is the same as would have been returned by
+@scheme[module-compiled-language-info] applied to the module's
+implementation as compiled code.}

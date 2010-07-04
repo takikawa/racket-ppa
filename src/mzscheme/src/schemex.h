@@ -54,7 +54,9 @@ Scheme_Object *(*scheme_current_break_cell)();
 /*                                threads                                 */
 /*========================================================================*/
 #ifndef LINK_EXTENSIONS_BY_TABLE
+# ifndef MZ_USE_PLACES
 Scheme_Thread *scheme_current_thread;
+# endif
 volatile int scheme_fuel_counter;
 #else
 Scheme_Thread **scheme_current_thread_ptr;
@@ -320,6 +322,7 @@ void (*GC_register_traversers)(short tag, Size_Proc size, Mark_Proc mark, Fixup_
 void *(*GC_resolve)(void *p);
 void (*GC_mark)(const void *p);
 void (*GC_fixup)(void *p);
+void *(*GC_fixup_self)(void *p);
 #endif
 void **(*scheme_malloc_immobile_box)(void *p);
 void (*scheme_free_immobile_box)(void **b);
@@ -743,7 +746,6 @@ Scheme_Object *(*scheme_read_byte_string)(Scheme_Object *port);
 /*========================================================================*/
 Scheme_Object *(*scheme_make_namespace)(int argc, Scheme_Object *argv[]);
 void (*scheme_add_namespace_option)(Scheme_Object *key, void (*f)(Scheme_Env *));
-void (*scheme_require_from_original_env)(Scheme_Env *env, int syntax_only);
 void (*scheme_add_global)(const char *name, Scheme_Object *val, Scheme_Env *env);
 void (*scheme_add_global_symbol)(Scheme_Object *name, Scheme_Object *val,
 			      Scheme_Env *env);
@@ -876,7 +878,6 @@ int (*scheme_check_proc_arity2)(const char *where, int a,
 				       int false_ok);
 char *(*scheme_make_provided_string)(Scheme_Object *o, int count, int *len);
 char *(*scheme_make_args_string)(char *s, int which, int argc, Scheme_Object **argv, long *len);
-void (*scheme_no_dumps)(char *why);
 const char *(*scheme_system_library_subpath)();
 void (*scheme_signal_received)(void);
 int (*scheme_char_strlen)(const mzchar *s);

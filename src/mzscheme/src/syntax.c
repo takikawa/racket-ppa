@@ -2719,11 +2719,24 @@ static void bangboxenv_validate(Scheme_Object *data, Mz_CPort *port,
 /*                  let, let-values, letrec, etc.                     */
 /**********************************************************************/
 
-static int is_liftable(Scheme_Object *o, int bind_count, int fuel)
+static int is_liftable_prim(Scheme_Object *v)
+{
+  if (SCHEME_PRIMP(v)) {
+    if ((((Scheme_Primitive_Proc *)v)->pp.flags & SCHEME_PRIM_OPT_MASK)
+        >= SCHEME_PRIM_OPT_IMMEDIATE)
+      return 1;
+  }
+
+  return 0;
+}
+
+static int is_liftable(Scheme_Object *o, int bind_count, int fuel, int as_rator)
 {
   Scheme_Type t = SCHEME_TYPE(o);
 
   switch (t) {
+  case scheme_compiled_unclosed_procedure_type:
+    return !as_rator;
   case scheme_compiled_toplevel_type:
     return 1;
   case scheme_local_type:
@@ -2733,9 +2746,9 @@ static int is_liftable(Scheme_Object *o, int bind_count, int fuel)
   case scheme_branch_type:
     if (fuel) {
       Scheme_Branch_Rec *b = (Scheme_Branch_Rec *)o;
-      if (is_liftable(b->test, bind_count, fuel - 1)
-	  && is_liftable(b->tbranch, bind_count, fuel - 1)
-	  && is_liftable(b->fbranch, bind_count, fuel - 1))
+      if (is_liftable(b->test, bind_count, fuel - 1, 0)
+	  && is_liftable(b->tbranch, bind_count, fuel - 1, as_rator)
+	  && is_liftable(b->fbranch, bind_count, fuel - 1, as_rator))
 	return 1;
     }
     break;
@@ -2743,8 +2756,12 @@ static int is_liftable(Scheme_Object *o, int bind_count, int fuel)
     {
       Scheme_App_Rec *app = (Scheme_App_Rec *)o;
       int i;
+      if (!is_liftable_prim(app->args[0]))
+        return 0;
+      if (bind_count >= 0)
+        bind_count += app->num_args;
       for (i = app->num_args + 1; i--; ) {
-	if (!is_liftable(app->args[i], bind_count + app->num_args, fuel - 1))
+	if (!is_liftable(app->args[i], bind_count, fuel - 1, 1))
 	  return 0;
       }
       return 1;
@@ -2752,16 +2769,24 @@ static int is_liftable(Scheme_Object *o, int bind_count, int fuel)
   case scheme_application2_type:
     {
       Scheme_App2_Rec *app = (Scheme_App2_Rec *)o;
-      if (is_liftable(app->rator, bind_count + 1, fuel - 1)
-	  && is_liftable(app->rand, bind_count + 1, fuel - 1))
+      if (!is_liftable_prim(app->rator))
+        return 0;
+      if (bind_count >= 0)
+        bind_count += 1;
+      if (is_liftable(app->rator, bind_count, fuel - 1, 1)
+	  && is_liftable(app->rand, bind_count, fuel - 1, 1))
 	return 1;
     }
   case scheme_application3_type:
     {
       Scheme_App3_Rec *app = (Scheme_App3_Rec *)o;
-      if (is_liftable(app->rator, bind_count + 2, fuel - 1)
-	  && is_liftable(app->rand1, bind_count + 2, fuel - 1)
-	  && is_liftable(app->rand2, bind_count + 2, fuel - 1))
+      if (!is_liftable_prim(app->rator))
+        return 0;
+      if (bind_count >= 0)
+        bind_count += 2;
+      if (is_liftable(app->rator, bind_count, fuel - 1, 1)
+	  && is_liftable(app->rand1, bind_count, fuel - 1, 1)
+	  && is_liftable(app->rand2, bind_count, fuel - 1, 1))
 	return 1;
     }
   default:
@@ -2915,6 +2940,11 @@ static int expr_size(Scheme_Object *o)
     return 1;
 }
 
+static int might_invoke_call_cc(Scheme_Object *value)
+{
+  return !is_liftable(value, -1, 10, 0);
+}
+
 Scheme_Object *
 scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline)
 {
@@ -3010,7 +3040,8 @@ scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline)
 
     if (is_rec && !not_simply_let_star) {
       /* Keep track of whether we can simplify to let*: */
-      if (scheme_optimize_any_uses(rhs_info, pos, head->count))
+      if (might_invoke_call_cc(value)
+          || scheme_optimize_any_uses(rhs_info, pos, head->count))
         not_simply_let_star = 1;
     }
 
@@ -3103,7 +3134,7 @@ scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline)
 	&& !body_info->letrec_not_twice
 	&& ((i < 1) 
 	    || (!scheme_is_compiled_procedure(((Scheme_Compiled_Let_Value *)pre_body->body)->value, 1, 1)
-		&& !is_liftable(((Scheme_Compiled_Let_Value *)pre_body->body)->value, head->count, 5)))) {
+		&& !is_liftable(((Scheme_Compiled_Let_Value *)pre_body->body)->value, head->count, 5, 1)))) {
       if (did_set_value) {
 	/* Next RHS ends a reorderable sequence. 
 	   Re-optimize from retry_start to pre_body, inclusive.
@@ -3321,7 +3352,7 @@ static int is_closed_reference(Scheme_Object *v)
 {
   /* Look for a converted function (possibly with no new arguments)
      that is accessed directly as a closure, instead of through a
-  top-level reference. */
+     top-level reference. */
   if (SCHEME_RPAIRP(v)) {
     v = SCHEME_CAR(v);
     return SCHEME_PROCP(v);
@@ -3420,7 +3451,7 @@ scheme_resolve_lets(Scheme_Object *form, Resolve_Info *info)
         if (is_proc)
           is_lift = 0;
         else
-          is_lift = is_liftable(clv->value, head->count, 5);
+          is_lift = is_liftable(clv->value, head->count, 5, 1);
       
         if (!is_proc && !is_lift) {
           recbox = 1;
@@ -4433,6 +4464,9 @@ Scheme_Object *scheme_compile_sequence(Scheme_Object *forms,
 				       Scheme_Comp_Env *env, 
 				       Scheme_Compile_Info *rec, int drec)
 {
+#if 0
+  /* This attempt at a shortcut is wrong, because the sole expression might expand
+     to a `begin' that needs to be spliced into an internal-definition context. */
  try_again:
 
   if (SCHEME_STX_PAIRP(forms) && SCHEME_STX_NULLP(SCHEME_STX_CDR(forms))) {
@@ -4440,7 +4474,7 @@ Scheme_Object *scheme_compile_sequence(Scheme_Object *forms,
     Scheme_Object *first, *val;
 
     first = SCHEME_STX_CAR(forms);
-    first = scheme_check_immediate_macro(first, env, rec, drec, 0, &val, NULL, NULL);
+    first = scheme_check_immediate_macro(first, env, rec, drec, 1, &val, NULL, NULL);
 
     if (SAME_OBJ(val, scheme_begin_syntax) && SCHEME_STX_PAIRP(first)) {      
       /* Flatten begin: */
@@ -4454,17 +4488,18 @@ Scheme_Object *scheme_compile_sequence(Scheme_Object *forms,
     }
 
     return scheme_compile_expr(first, env, rec, drec);
+  }
+#endif
+
+  if (scheme_stx_proper_list_length(forms) < 0) {
+    scheme_wrong_syntax(scheme_begin_stx_string, NULL, 
+                        scheme_datum_to_syntax(cons(begin_symbol, forms), forms, forms, 0, 0),
+                        "bad syntax (" IMPROPER_LIST_FORM ")");
+    return NULL;
   } else {
-    if (scheme_stx_proper_list_length(forms) < 0) {
-      scheme_wrong_syntax(scheme_begin_stx_string, NULL, 
-			  scheme_datum_to_syntax(cons(begin_symbol, forms), forms, forms, 0, 0),
-			  "bad syntax (" IMPROPER_LIST_FORM ")");
-      return NULL;
-    } else {
-      Scheme_Object *body;
-      body = scheme_compile_block(forms, env, rec, drec);
-      return scheme_make_sequence_compilation(body, 1);
-    }
+    Scheme_Object *body;
+    body = scheme_compile_block(forms, env, rec, drec);
+    return scheme_make_sequence_compilation(body, 1);
   }
 }
 

@@ -835,8 +835,8 @@
                ;; So we can ignore them:
                
                strlen cos sin exp pow log sqrt atan2 
-               isnan isinf fpclass _fpclass _isnan __isfinited __isnanl 
-               __isinff __isinfl isnanf isinff __isinfd __isnanf __isnand
+               isnan isinf fpclass _fpclass _isnan __isfinited __isnanl __isnan
+               __isinff __isinfl isnanf isinff __isinfd __isnanf __isnand __isinf
                floor ceil round fmod fabs __maskrune _errno __errno
                isalpha isdigit isspace tolower toupper
                fread fwrite socket fcntl setsockopt connect send recv close
@@ -2676,7 +2676,7 @@
                                                           (eq? semi (tok-n (cadr e))))
                                                       (tok-n (car e))
                                                       (loop (cdr e))))])
-                                       (unless (eq? '|::| (tok-n (cadar body)))
+                                       (unless (or (eq? '|::| type) (eq? '|::| (tok-n (cadar body)))) ;; $patch vs2008 - goetter
                                          (log-error "[DECL] ~a in ~a: Variable declaration (~a ~a) not at the beginning of a block."
                                                     (tok-line (caar body)) (tok-file (caar body))
                                                     type var))))

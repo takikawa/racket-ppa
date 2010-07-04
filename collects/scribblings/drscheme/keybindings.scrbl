@@ -119,11 +119,13 @@ window to the interactions window (or the search window, if it is open).}
 @keybinding["M-("]{wrap selection in parentheses}
 @keybinding["M-["]{wrap selection in square brackets}
 @keybinding["M-{"]{wrap selection in curly brackets}
-@keybinding["M-S-L"]{wrap selection in @litchar["(lambda\u20()\u20"]...@litchar{)} 
+@keybinding["M-S-L"]{wrap selection in @litchar{(lambda () }...@litchar{)}
                      and put the insertion point in the arglist of the lambda}
 
 @keybinding["C-c C-o"]{the sexpression following the
   insertion point is put in place of its containing sexpression}
+@keybinding["C-c C-e"]{the first and last characters (usually parentheses)
+  of the containing expression are removed}
 @keybinding["C-c C-l"]{wraps a let around the
   sexpression following the insertion point and puts a printf in at
   that point (useful for debugging).}

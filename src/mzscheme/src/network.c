@@ -1567,7 +1567,7 @@ make_tcp_input_port(void *data, const char *name)
   
   ip = scheme_make_input_port(scheme_tcp_input_port_type,
 			      data,
-			      scheme_make_immutable_sized_utf8_string((char *)name, -1),
+			      scheme_intern_symbol(name),
 			      tcp_get_string,
 			      NULL,
 			      scheme_progress_evt_via_get,
@@ -1589,7 +1589,7 @@ make_tcp_output_port(void *data, const char *name)
 
   op = scheme_make_output_port(scheme_tcp_output_port_type,
 						  data,
-						  scheme_make_immutable_sized_utf8_string((char *)name, -1),
+						  scheme_intern_symbol(name),
 						  scheme_write_evt_via_write,
 						  tcp_write_string,
 						  (Scheme_Out_Ready_Fun)tcp_check_write,
@@ -2220,8 +2220,8 @@ tcp_accept(int argc, Scheme_Object *argv[])
 
     tcp = make_tcp_port_data(s, 2);
 
-    v[0] = make_tcp_input_port(tcp, "[accepted]");
-    v[1] = make_tcp_output_port(tcp, "[accepted]");
+    v[0] = make_tcp_input_port(tcp, "tcp-accepted");
+    v[1] = make_tcp_output_port(tcp, "tcp-accepted");
 
     scheme_file_open_count++;
     REGISTER_SOCKET(s);
@@ -2465,7 +2465,7 @@ static int tcp_check_accept_evt(Scheme_Object *ae, Scheme_Schedule_Info *sinfo)
     tcp_accept(1, a);
     a[0] = scheme_current_thread->ku.multiple.array[0];
     a[1] = scheme_current_thread->ku.multiple.array[1];
-    scheme_set_sync_target(sinfo, scheme_build_list(2, a), NULL, NULL, 0, 0);
+    scheme_set_sync_target(sinfo, scheme_build_list(2, a), NULL, NULL, 0, 0, NULL);
     return 1;
   } else
     return 0;
@@ -3359,7 +3359,7 @@ static int udp_evt_check_ready(Scheme_Object *_uw, Scheme_Schedule_Info *sinfo)
       if (do_udp_recv("udp-receive!-evt", uw->udp, 
 		      uw->str, uw->offset, uw->offset + uw->len, 
 		      0, v)) {
-	scheme_set_sync_target(sinfo, scheme_build_list(3, v), NULL, NULL, 0, 0);
+	scheme_set_sync_target(sinfo, scheme_build_list(3, v), NULL, NULL, 0, 0, NULL);
 	return 1;
       } else
 	return 0;
@@ -3374,7 +3374,7 @@ static int udp_evt_check_ready(Scheme_Object *_uw, Scheme_Schedule_Info *sinfo)
 			 uw->dest_addr, uw->dest_addr_len,
 			 0);
       if (SCHEME_TRUEP(r)) {
-	scheme_set_sync_target(sinfo, scheme_void, NULL, NULL, 0, 0);
+	scheme_set_sync_target(sinfo, scheme_void, NULL, NULL, 0, 0, NULL);
 	return 1;
       } else
 	return 0;
