@@ -2,4 +2,5 @@
   (define name "Test Suite")
   (define tools '(("tool.ss")))
   (define tool-names (list "The Test Suite Tool"))
-  (define tool-icons (list '("question-mark.png" "test-suite" "private" "icons"))))
+  (define tool-icons (list '("question-mark.png" "test-suite" "private" "icons")))
+  )
