@@ -44,7 +44,7 @@ Meanwhile, in addition to defining @scheme[_struct-id],
 @scheme[define-struct] also defines a number of identifiers that are
 built from @scheme[_struct-id] and the @scheme[_field-id]s:
 
-@itemize{
+@itemize[
 
  @item{@schemeidfont{make-}@scheme[_struct-id] : a
        @deftech{constructor} function that takes as many arguments as
@@ -74,7 +74,7 @@ built from @scheme[_struct-id] and the @scheme[_field-id]s:
        @scheme[#:super], as discussed later in
        @secref["struct-options"]).}
 
-}
+]
 
 A @scheme[define-struct] form places no constraints on the kinds of
 values that can appear for fields in an instance of the structure
@@ -218,15 +218,15 @@ keyword, @scheme[prop:equal+hash], and then a list of three functions:
   #:property
   prop:equal+hash
   (list (lambda (a b equal?-recur) 
-          (code:comment #, @t{compare @scheme[a] and @scheme[b]})
+          (code:comment @#,t{compare @scheme[a] and @scheme[b]})
           (and (equal?-recur (lead-width a) (lead-width b))
                (equal?-recur (lead-height a) (lead-height b))))
         (lambda (a hash-recur)
-          (code:comment #, @t{compute primary hash code of @scheme[a]})
+          (code:comment @#,t{compute primary hash code of @scheme[a]})
           (+ (hash-recur (lead-width a))
              (* 3 (hash-recur (lead-height a)))))
         (lambda (a hash2-recur)
-          (code:comment #, @t{compute secondary hash code of @scheme[a]})
+          (code:comment @#,t{compute secondary hash code of @scheme[a]})
           (+ (hash2-recur (lead-width a))
              (hash2-recur (lead-height a))))))
 (equal? (make-lead 1 2) (make-lead 1 2))
@@ -343,7 +343,7 @@ than the one with a single field:
 @interaction[
 #:eval posn-eval
 (sprout? #s(sprout bean #f 17))
-(code:line (define-struct sprout (kind yummy? count) #:prefab) (code:comment #, @t{redefine}))
+(code:line (define-struct sprout (kind yummy? count) #:prefab) (code:comment @#,t{redefine}))
 (sprout? #s(sprout bean #f 17))
 (sprout? lunch)
 ]
@@ -368,7 +368,7 @@ or existing examples. Overall, the different options for structure
 types offer a spectrum of possibilities from more abstract to more
 convenient:
 
-@itemize{
+@itemize[
 
  @item{@tech{Opaque} (the default) : Instances cannot be inspected or
        forged without access to the structure-type declaration. As
@@ -394,7 +394,7 @@ convenient:
        manufacture instances directly. The instance cannot have a
        @tech{constructor guard} or @tech{properties}.}
 
-}
+]
 
 Since the expression reader can generate @tech{prefab} instances, they
 are useful when convenient @tech{serialization} is more important than

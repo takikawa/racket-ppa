@@ -8,7 +8,7 @@
 
 The syntax of a Scheme program is defined by
 
-@itemize{
+@itemize[
 
  @item{a @deftech{read} phase that processes a character stream into a
        @tech{syntax object}; and}
@@ -16,7 +16,7 @@ The syntax of a Scheme program is defined by
  @item{an @deftech{expand} phase that processes a syntax object to
        produce one that is fully parsed.}
 
-}
+]
 
 For details on the @tech{read} phase, see @secref["reader"]. Source
 code is normally read in @scheme[read-syntax] mode, which produces a
@@ -97,7 +97,7 @@ dependency.
 If an identifier has a @tech{local binding}, then it is the same for
 all phase levels, though the reference is allowed only at a particular
 phase level. Attempting to reference a @tech{local binding} in a
-different @tech{phase level} than the binding's context produces a
+different @tech{phase level} from the binding's context produces a
 syntax error. If an identifier has a @tech{top-level binding} or
 @tech{module binding}, then it can have different such bindings in
 different phase levels.
@@ -214,7 +214,7 @@ the binding (according to @scheme[free-identifier=?]) matters.}
       (letrec-values (((id ...) expr) ...)
         expr ...+)
       (set! id expr)
-      (#, @scheme[quote] datum)
+      (@#,scheme[quote] datum)
       (quote-syntax datum)
       (with-continuation-mark expr expr expr)
       (#%plain-app expr ...+)
@@ -259,7 +259,7 @@ In a recursive expansion, each single step in expanding a @tech{syntax
 object} at a particular @tech{phase level} depends on the immediate shape of
 the @tech{syntax object} being expanded:
 
-@itemize{
+@itemize[
 
  @item{If it is an @tech{identifier} (i.e., a syntax-object symbol),
        then a @tech{binding} is determined by the @tech{identifier}'s
@@ -305,13 +305,13 @@ the @tech{syntax object} being expanded:
        @tech{lexical information} as the original pair), and the
        @schemeidfont{#%datum} @tech{binding} is used to continue.}
 
-}
+]
 
 Thus, the possibilities that do not fail lead to an @tech{identifier}
 with a particular @tech{binding}. This binding refers to one of three
 things:
 
-@itemize{
+@itemize[
 
  @item{A @tech{transformer binding}, such as introduced by
        @scheme[define-syntax] or @scheme[let-syntax]. If the
@@ -343,7 +343,7 @@ things:
        introduce @tech{bindings} that determine the parsing of
        sub-forms.}
 
-}
+]
 
 @;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 @subsection[#:tag "expand-context-model"]{Expansion Context}
@@ -354,7 +354,7 @@ different @tech{contexts}. For example, a @scheme[module] form is
 allowed only in a @tech{top-level context}, and it fails in other
 contexts. The possible @tech{contexts} are as follows:
 
-@itemize{
+@itemize[
 
  @item{@deftech{top-level context} : outside of any module, definition, or
        expression, except that sub-expressions of a top-level
@@ -372,7 +372,7 @@ contexts. The possible @tech{contexts} are as follows:
  @item{@deftech{expression context} : in a context where only
        expressions are allowed.}
 
-}
+]
 
 Different core @tech{syntactic forms} parse sub-forms using different
 @tech{contexts}. For example, a @scheme[let] form always parses the
@@ -386,7 +386,7 @@ context}.
 @tech{Bindings} are introduced during @tech{expansion} when certain
 core syntactic forms are encountered:
 
-@itemize{
+@itemize[
 
  @item{When a @scheme[require] form is encountered at the top level or
        module level, all lexical information derived from the top
@@ -446,7 +446,7 @@ core syntactic forms are encountered:
  @item{Definitions in @scheme[internal-definition contexts] introduce
        bindings as described in @secref["intdef-body"].}
 
-}
+]
 
 A new binding in lexical information maps to a new variable. The
 identifiers mapped to this variable are those that currently have the
@@ -531,19 +531,28 @@ is the one left with a mark, and the reference @scheme[x] has no mark,
 so the binding @scheme[x] is not @scheme[bound-identifier=?] to the
 body @scheme[x].
 
-The @scheme[set!] form and the @scheme[make-set!-transformer]
-procedure work together to support @deftech{assignment transformers}
-that transformer @scheme[set!] expression. @tech{Assignment
-transformers} are applied by @scheme[set!] in the same way as a normal
+The @scheme[set!] form works with the @scheme[make-set!-transformer]
+and @scheme[prop:set!-transformer] property to support
+@deftech{assignment transformers} that transform @scheme[set!]
+expressions. An @tech{assignment transformer} contains a procedure
+that is applied by @scheme[set!] in the same way as a normal
 transformer by the expander.
 
-The @scheme[make-rename-transformer] procedure creates a value that is
-also handled specially by the expander and by @scheme[set!] as a
+The @scheme[make-rename-transformer] procedure or
+@scheme[prop:rename-transformer] property creates a value that is also
+handled specially by the expander and by @scheme[set!] as a
 transformer binding's value. When @scheme[_id] is bound to a
 @deftech{rename transformer} produced by
-@scheme[make-rename-transformer], it is replaced with the identifier
-passed to @scheme[make-rename-transformer]. Furthermore, the binding
-is also specially handled by @scheme[syntax-local-value] and
+@scheme[make-rename-transformer], it is replaced with the target
+identifier passed to @scheme[make-rename-transformer]. In addition, as
+long as the target identifier does not have a true value for the
+@scheme['not-free-identifier=?] @tech{syntax property}, the lexical information that
+contains the binding of @scheme[_id] is also enriched so that
+@scheme[_id] is @scheme[free-identifier=?] to the target identifier,
+@scheme[identifier-binding] returns the same results for both
+identifiers, and @scheme[provide] exports @scheme[_id] as the target
+identifier. Finally, the binding is treated specially by
+@scheme[syntax-local-value], and
 @scheme[syntax-local-make-delta-introducer] as used by @tech{syntax
 transformer}s.
 
@@ -593,7 +602,7 @@ definitions starts by expanding its first form in an
 internal-definition context, but only partially. That is, it
 recursively expands only until the form becomes one of the following:
 
-@itemize{
+@itemize[
 
  @item{A @scheme[define-values] or @scheme[define-syntaxes] form, for
        any form other than the last one: The definition form is not
@@ -627,7 +636,7 @@ recursively expands only until the form becomes one of the following:
        expansion continues with the first of the newly-spliced forms
        (or the next form, if the @scheme[begin] had no sub-forms).}
 
-}
+]
 
 If the last expression form turns out to be a @scheme[define-values]
 or @scheme[define-syntaxes] form, expansion fails with a syntax error.
@@ -638,29 +647,46 @@ or @scheme[define-syntaxes] form, expansion fails with a syntax error.
 A @scheme[require] form not only introduces @tech{bindings} at
 expansion time, but also @deftech{visits} the referenced module when
 it is encountered by the expander. That is, the expander
-@tech{instantiate}s any @scheme[define-for-syntax]ed variables defined
+instantiates any @scheme[define-for-syntax]ed variables defined
 in the module, and also evaluates all expressions for
 @scheme[define-syntaxes] @tech{transformer bindings}.
 
 Module @tech{visits} propagate through @scheme[require]s in the same
 way as module @tech{instantiation}. Moreover, when a module is
-@tech{visit}ed, any module that it @scheme[require]s
-@scheme[for-syntax] is @tech{instantiate}d at @tech{phase} 1, with the
-adjustment that @scheme[require] @scheme[for-template]s leading back
-to @tech{phase} 0 causes the required module to be merely visited at
-@tech{phase} 0, not @tech{instantiate}d.
+@tech{visit}ed at @tech{phase} 0, any module that it @scheme[require]s
+@scheme[for-syntax] is @tech{instantiate}d at @tech{phase} 1, while
+further @scheme[require]s @scheme[for-template] leading back
+to @tech{phase} 0 causes the required module to be visited at
+@tech{phase} 0 (i.e., not @tech{instantiate}d).
 
-When the expander encounters @scheme[(require (for-syntax ....))], it
-immediately instantiates the required module at @tech{phase} 1, in
-addition to adding bindings scheme @tech{phase level} 1 (i.e., the
-@tech{transformer environment}).
+During compilation, the top-level of module context is itself
+implicitly @tech{visit}ed. Thus, when the expander encounters
+@scheme[(require (for-syntax ....))], it immediately
+@tech{instantiate}s the required module at @tech{phase} 1, in addition
+to adding bindings at @tech{phase level} 1 (i.e., the
+@tech{transformer environment}). Similarly, the expander immediately
+evaluates any @scheme[define-values-for-syntax] form that it
+encounters.
+
+@tech{Phases} beyond 0 are @tech{visit}ed on demand. For example,
+when the right-hand side of a @tech{phase}-0 @scheme[let-syntax] is to
+be expanded, then modules that are @tech{available} at @tech{phase} 1
+are visited. More generally, initiating expansion at @tech{phase}
+@math{n} @tech{visit}s modules at @tech{phase} @math{n}, which in turn
+@tech{instantiates} modules at @tech{phase} @math{n+1}. These
+@tech{visits} and @tech{instantiations} apply to @tech{available}
+modules in the enclosing @tech{namespace}.
 
 When the expander encounters @scheme[require] and @scheme[(require
 (for-syntax ....))] within a @tech{module context}, the resulting
 @tech{visits} and @tech{instantiations} are specific to the expansion
 of the enclosing module, and are kept separate from @tech{visits} and
 @tech{instantiations} triggered from a @tech{top-level context} or
-from the expansion of a different module.
+from the expansion of a different module. Along the same lines, when a
+module is attached to a namespace through
+@scheme[namespace-attach-module], modules that it @scheme[require]s
+are transitively attached, but instances are attached only at
+phases at or below the namespace's @tech{base phase}.
 
 @;------------------------------------------------------------------------
 @section[#:tag "compilation-model"]{Compilation}
@@ -698,7 +724,7 @@ instances and top-level variables.
 For expansion purposes, a namespace maps each symbol in each
 @tech{phase level} to one of three possible bindings:
 
-@itemize{
+@itemize[
 
  @item{a particular @tech{module binding} from a particular module}
 
@@ -706,7 +732,7 @@ For expansion purposes, a namespace maps each symbol in each
 
  @item{a top-level variable named by the symbol}
 
-}
+]
 
 An ``empty'' namespace maps all symbols to top-level variables.
 Certain evaluations extend a namespace for future expansions;
@@ -733,10 +759,11 @@ reflective operations such as @scheme[eval] and
 After a namespace is created, module instances from existing
 namespaces can be attached to the new namespace.  In terms of the
 evaluation model, top-level variables from different namespaces
-essentially correspond to definitions with different prefixes.
-Furthermore, the first step in evaluating any compiled expression is
-to link its top-level variable and module-level variable references to
-specific variables in the namespace.
+essentially correspond to definitions with different prefixes, but
+attaching a module uses the same prefix for the module's definitions
+in namespaces where it is attached.  The first step in evaluating any
+compiled expression is to link its top-level variable and module-level
+variable references to specific variables in the namespace.
 
 At all times during evaluation, some namespace is designated as the
 @deftech{current namespace}. The current namespace has no particular
@@ -750,15 +777,15 @@ and to start evaluating expanded/compiled code.
 
 @examples[
 (code:line
- (define x 'orig) (code:comment #, @t{define in the original namespace}))
-(code:comment #, @t{The following @scheme[let] expression is compiled in the original})
-(code:comment #, @t{namespace, so direct references to @scheme[x] see @scheme['orig].})
+ (define x 'orig) (code:comment @#,t{define in the original namespace}))
+(code:comment @#,t{The following @scheme[let] expression is compiled in the original})
+(code:comment @#,t{namespace, so direct references to @scheme[x] see @scheme['orig].})
 (code:line
- (let ([n (make-base-namespace)]) (code:comment #, @t{make new namespace})
+ (let ([n (make-base-namespace)]) (code:comment @#,t{make new namespace})
    (parameterize ([current-namespace n]) 
-     (eval '(define x 'new)) (code:comment #, @t{evals in the new namespace})
-     (display x) (code:comment #, @t{displays @scheme['orig]})
-     (display (eval 'x)))) (code:comment #, @t{displays @scheme['new]}))
+     (eval '(define x 'new)) (code:comment @#,t{evals in the new namespace})
+     (display x) (code:comment @#,t{displays @scheme['orig]})
+     (display (eval 'x)))) (code:comment @#,t{displays @scheme['new]}))
 ]
 
 A @tech{namespace} is purely a top-level entity, not to be confused

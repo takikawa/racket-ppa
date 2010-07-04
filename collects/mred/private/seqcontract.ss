@@ -245,7 +245,7 @@ Matthew
             (not (locked-for-read?)))
        (set-position [(x) (x y) (x y z) (x y z p) (x y z p q)] unlocked)
        (set-autowrap-bitmap [(bitmap)] unlocked)
-       (print-to-dc [(dc)] unlocked)
+       (print-to-dc [(dc) (dc page)] unlocked)
        (move-position [(code?) (code? extend) (code? extend kind)] unlocked)
        (split-snip [(pos)] unlocked)
        (set-line-spacing [(space)] unlocked)
@@ -259,7 +259,8 @@ Matthew
                (interactive? fit-on-page?)
                (interactive? fit-on-page? output-mode)
                (interactive? fit-on-page? output-mode parent)
-               (interactive? fit-on-page? output-mode parent force-ps-page-bbox?)]
+               (interactive? fit-on-page? output-mode parent force-ps-page-bbox?)
+               (interactive? fit-on-page? output-mode parent force-ps-page-bbox? as-eps?)]
               unlocked)
        
        (get-text [() (x) (x y) (x y z) (x y z p)] unlocked)

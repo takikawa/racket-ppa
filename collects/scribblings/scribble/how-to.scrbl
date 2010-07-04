@@ -20,7 +20,7 @@ documents.
 
 To document a collection or @|PLaneT| package:
 
-@itemize{
+@itemize[
 
   @item{Create a file in your collection or planet package with the
         file extension @filepath{.scrbl}. Beware that the file name
@@ -80,7 +80,7 @@ To document a collection or @|PLaneT| package:
         documentation is generated as @filepath{manual/index.html} in
         the installation's main @filepath{doc} directory.}
 
-}
+]
 
 @; ----------------------------------------
 @section[#:tag "how-to:reader"]{Document Syntax}
@@ -89,7 +89,7 @@ Whether in ``text'' mode or Scheme mode, @litchar["@"] in a document
 provides an escape to Scheme mode. The syntax of @litchar["@"] is
 
 @schemeblock[
- #, @BNF-seq[@litchar["@"]
+ @#,BNF-seq[@litchar["@"]
              @nonterm{cmd}
              @litchar{[} @kleenestar{@nonterm{datum}} @litchar{]}
              @litchar["{"] @nonterm{text-body} @litchar["}"]]
@@ -98,7 +98,7 @@ provides an escape to Scheme mode. The syntax of @litchar["@"] is
 where all three parts after @litchar["@"] are optional, but at least
 one must be present. No spaces are allowed between
 
-@itemize{
+@itemize[
 
  @item{@litchar["@"] and @nonterm{cmd}, @litchar{[}, or @litchar["{"]}
 
@@ -106,7 +106,7 @@ one must be present. No spaces are allowed between
 
  @item{@litchar{]} and @litchar["{"].}
 
-}
+]
 
 A @nonterm{cmd} or @nonterm{datum} is a Scheme datum, while a
 @nonterm{text-body} is itself in text mode.
@@ -114,14 +114,14 @@ A @nonterm{cmd} or @nonterm{datum} is a Scheme datum, while a
 The expansion of @litchar["@"]@nonterm{cmd} into Scheme code is
 
 @schemeblock[
-  #, @nonterm{cmd}
+  @#,nonterm{cmd}
 ]
 
 When either @litchar{[} @litchar{]} or @litchar["{"] @litchar["}"]
 are used, the expansion is
 
 @schemeblock[
-  (#, @nonterm{cmd} #, @kleenestar{@nonterm{datum}} #, @kleenestar{@nonterm{parsed-body}})
+  (@#,nonterm{cmd} @#,kleenestar{@nonterm{datum}} @#,kleenestar{@nonterm{parsed-body}})
 ]
 
 where @kleenestar{@nonterm{parsed-body}} is the parse result of the
@@ -364,7 +364,7 @@ guarantees a result that is a list where none of the elements are
 Some things to notice in this example and the documentation that it
 generates:
 
-@itemize{
+@itemize[
 
  @item{The @scheme[list?], @scheme[listof], @|etc| elements of
        contracts are hyperlinked to their documentation.}
@@ -388,7 +388,7 @@ generates:
        (for-label ....))] of @filepath{helper.ss}, then the
        reference is hyperlinked to the definition above.}
 
-}
+]
 
 See @scheme[defproc*], @scheme[defform], @|etc| for more information
 on forms to document Scheme bindings.

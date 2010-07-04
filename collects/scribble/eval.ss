@@ -6,6 +6,7 @@
            "decode.ss"
            scheme/file
            scheme/sandbox
+           scheme/promise
            mzlib/string
            (for-syntax scheme/base))
 
@@ -23,6 +24,8 @@
            as-examples
            
            make-base-eval
+           make-base-eval-factory
+           make-eval-factory
            close-eval
 
            scribble-eval-handler)
@@ -238,31 +241,63 @@
     (call-with-trusted-sandbox-configuration
      (lambda ()
        (parameterize ([sandbox-output 'string]
-                      [sandbox-error-output 'string])
-         (make-evaluator '(begin (require scheme/base)))))))
+                      [sandbox-error-output 'string]
+                      [sandbox-propagate-breaks #f])
+         (make-evaluator '(begin))))))
+
+  (define (make-base-eval-factory mod-paths)
+    (let ([ns (delay (let ([ns (make-base-empty-namespace)])
+                       (parameterize ([current-namespace ns])
+                         (for-each
+                          (lambda (mod-path)
+                            (dynamic-require mod-path #f))
+                          mod-paths))
+                       ns))])
+      (lambda ()
+        (let ([ev (make-base-eval)]
+              [ns (force ns)])
+          ((scribble-eval-handler) 
+           ev #f
+           `(,(lambda ()
+                (for-each (lambda (mod-path) 
+                            (namespace-attach-module ns mod-path))
+                          mod-paths))))
+          ev))))
+
+  (define (make-eval-factory mod-paths)
+    (let ([base-factory (make-base-eval-factory mod-paths)])
+      (lambda ()
+        (let ([ev (base-factory)])
+          ((scribble-eval-handler) 
+           ev #f
+           `(,(lambda ()
+                (for-each (lambda (mod-path) (namespace-require mod-path))
+                          mod-paths))))
+          ev))))
 
   (define (close-eval e)
     (kill-evaluator e)
     "")
 
   (define (do-plain-eval ev s catching-exns?)
-    (call-with-values (lambda () 
-                        ((scribble-eval-handler) 
-                         ev
-                         catching-exns? 
-                         (let ([s (strip-comments s)])
-                           (cond
-                            [(syntax? s)
-                             (syntax-case s (module)
-                               [(module . _rest)
-                                (syntax->datum s)]
-                               [_else s])]
-                            [(bytes? s)
-                             `(begin ,s)]
-                            [(string? s)
-                             `(begin ,s)]
-                            [else s]))))
-      list))
+    (parameterize ([sandbox-propagate-breaks #f])
+      (call-with-values (lambda () 
+                          ((scribble-eval-handler) 
+                           ev
+                           catching-exns? 
+                           (let ([s (strip-comments s)])
+                             (cond
+                              [(syntax? s)
+                               (syntax-case s (module)
+                                 [(module . _rest)
+                                  (syntax->datum s)]
+                                 [_else s])]
+                              [(bytes? s)
+                               `(begin ,s)]
+                              [(string? s)
+                               `(begin ,s)]
+                              [else s]))))
+        list)))
 
   (define-syntax-rule (quote-expr e) 'e)
 
@@ -357,8 +392,9 @@
     (syntax-rules ()
       [(_ #:eval ev def e ...)
        (let ([eva ev])
-         (make-splice (list (schemeblock+eval #:eval eva def)
-                            (interaction #:eval eva e ...))))]
+         (column (list (schemeblock+eval #:eval eva def)
+                       blank-line
+                       (interaction #:eval eva e ...))))]
       [(_ def e ...) 
        (def+int #:eval (make-base-eval) def e ...)]))
 
@@ -366,19 +402,28 @@
     (syntax-rules ()
       [(_ #:eval ev [def ...] e ...)
        (let ([eva ev])
-         (make-splice (list (schemeblock+eval #:eval eva def ...)
-                            (interaction #:eval eva e ...))))]
+         (column (list (schemeblock+eval #:eval eva def ...)
+                       blank-line
+                       (interaction #:eval eva e ...))))]
       [(_ [def ...] e ...)
        (defs+int #:eval (make-base-eval) [def ...] e ...)]))
 
   (define example-title
+    (make-paragraph (list "Example:")))
+  (define examples-title
     (make-paragraph (list "Examples:")))
+
+  (define-syntax pick-example-title
+    (syntax-rules ()
+      [(_ e) example-title]
+      [(_ . _) examples-title]))
+
   (define-syntax examples
     (syntax-rules ()
       [(_ #:eval ev e ...)
-       (titled-interaction #:eval ev example-title schemeinput* e ...)]
+       (titled-interaction #:eval ev (pick-example-title e ...) schemeinput* e ...)]
       [(_ e ...)
-       (titled-interaction example-title schemeinput* e ...)]))
+       (titled-interaction (pick-example-title e ...)  schemeinput* e ...)]))
   (define-syntax examples*
     (syntax-rules ()
       [(_ #:eval ev example-title e ...)
@@ -388,15 +433,23 @@
   (define-syntax defexamples
     (syntax-rules ()
       [(_ #:eval ev e ...)
-       (titled-interaction #:eval ev example-title schemedefinput* e ...)]
+       (titled-interaction #:eval ev (pick-example-title e ...)  schemedefinput* e ...)]
       [(_ e ...)
-       (titled-interaction example-title schemedefinput* e ...)]))
+       (titled-interaction (pick-example-title e ...)  schemedefinput* e ...)]))
   (define-syntax defexamples*
     (syntax-rules ()
       [(_ #:eval ev example-title e ...)
        (titled-interaction #:eval ev example-title schemedefinput* e ...)]
       [(_ example-title e ...)
        (titled-interaction example-title schemedefinput* e ...)]))
+
+  (define blank-line (make-paragraph (list 'nbsp)))
+
+  (define (column l)
+    (make-table #f (map
+                    (lambda (t)
+                      (list (make-flow (list t))))
+                    l)))
 
   (define (do-splice l)
     (cond
@@ -407,7 +460,7 @@
 
   (define as-examples
     (case-lambda
-     [(t) (as-examples example-title t)]
+     [(t) (as-examples examples-title t)]
      [(example-title t)
       (make-table #f
                   (list

@@ -123,6 +123,7 @@
       (table? p)
       (itemization? p)
       (blockquote? p)
+      (compound-paragraph? p)
       (delayed-block? p)))
 
 (define (string-without-newline? s)
@@ -151,6 +152,8 @@
  [(styled-itemization itemization) ([style any/c])]
  [blockquote ([style any/c]
               [paragraphs (listof block?)])]
+ [compound-paragraph ([style any/c]
+                      [blocks (listof block?)])]
  ;; content = list of elements
  [element ([style any/c]
            [content list?])]
@@ -376,26 +379,35 @@
 (define deserialize-generated-tag
   (make-deserialize-info values values))
 
-(provide generate-tag tag-key)
+(provide generate-tag tag-key
+         current-tag-prefixes
+         add-current-tag-prefix)
 
 (define (generate-tag tg ci)
   (if (generated-tag? (cadr tg))
-    (let ([t (cadr tg)])
-      (list (car tg)
-            (let ([tags (collect-info-tags ci)])
-              (or (hash-ref tags t #f)
-                  (let ([key (list* 'gentag
-                                    (hash-count tags)
-                                    (collect-info-gen-prefix ci))])
-                    (hash-set! tags t key)
-                    key)))))
-    tg))
+      (let ([t (cadr tg)])
+        (list (car tg)
+              (let ([tags (collect-info-tags ci)])
+                (or (hash-ref tags t #f)
+                    (let ([key (list* 'gentag
+                                      (hash-count tags)
+                                      (collect-info-gen-prefix ci))])
+                      (hash-set! tags t key)
+                      key)))))
+      tg))
 
 (define (tag-key tg ri)
   (if (generated-tag? (cadr tg))
-    (list (car tg)
-          (hash-ref (collect-info-tags (resolve-info-ci ri)) (cadr tg)))
-    tg))
+      (list (car tg)
+            (hash-ref (collect-info-tags (resolve-info-ci ri)) (cadr tg)))
+      tg))
+
+(define current-tag-prefixes (make-parameter null))
+(define (add-current-tag-prefix t)
+  (let ([l (current-tag-prefixes)])
+    (if (null? l)
+        t
+        (cons (car t) (append l (cdr t))))))
 
 ;; ----------------------------------------
 
@@ -478,6 +490,7 @@
     [(table? p) (table-width p)]
     [(itemization? p) (itemization-width p)]
     [(blockquote? p) (blockquote-width p)]
+    [(compound-paragraph? p) (compound-paragraph-width p)]
     [(delayed-block? p) 1]))
 
 (define (table-width p)
@@ -494,7 +507,10 @@
   (apply max 0 (map flow-width (itemization-flows p))))
 
 (define (blockquote-width p)
-  (+ 4 (apply max 0 (map paragraph-width (blockquote-paragraphs p)))))
+  (+ 4 (apply max 0 (map block-width (blockquote-paragraphs p)))))
+
+(define (compound-paragraph-width p)
+  (apply max 0 (map block-width (compound-paragraph-blocks p))))
 
 ;; ----------------------------------------
 

@@ -11,6 +11,7 @@
          framework
          string-constants
          "drsig.ss"
+         "rep.ss"
          scheme/contract)
 
 (define op (current-output-port))
@@ -234,7 +235,7 @@
           (parameterize ([current-namespace (current-namespace)])
             ;; the prompt makes it continue after an error
             (call-with-continuation-prompt
-             (λ () (dynamic-require modspec #f))))
+             (λ () (with-stack-checkpoint (dynamic-require modspec #f)))))
           (current-namespace (module->namespace modspec))
           (check-interactive-language))
         ;; here's where they're all combined with the module expression
@@ -281,7 +282,7 @@
                               (namespace-require 'scheme/base)
                               (compile 
                                `(namespace-require '',(string->symbol (path->string short-program-name))))))
-                          #:cmdline null))))
+                          #:cmdline '("-U" "--")))))
                     (let ([make-launcher (if gui? make-mred-launcher make-mzscheme-launcher)])
                       (make-launcher (list "-qt-" (path->string program-filename))
                                      executable-filename))))))))

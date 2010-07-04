@@ -55,6 +55,7 @@
   scheme_extension_table->scheme_cancel_sleep = scheme_cancel_sleep;
   scheme_extension_table->scheme_start_sleeper_thread = scheme_start_sleeper_thread;
   scheme_extension_table->scheme_end_sleeper_thread = scheme_end_sleeper_thread;
+  scheme_extension_table->scheme_notify_sleep_progress = scheme_notify_sleep_progress;
   scheme_extension_table->scheme_make_thread_cell = scheme_make_thread_cell;
   scheme_extension_table->scheme_thread_cell_get = scheme_thread_cell_get;
   scheme_extension_table->scheme_thread_cell_set = scheme_thread_cell_set;
@@ -64,6 +65,7 @@
   scheme_extension_table->scheme_make_custodian = scheme_make_custodian;
   scheme_extension_table->scheme_add_managed = scheme_add_managed;
   scheme_extension_table->scheme_custodian_check_available = scheme_custodian_check_available;
+  scheme_extension_table->scheme_custodian_is_available = scheme_custodian_is_available;
   scheme_extension_table->scheme_remove_managed = scheme_remove_managed;
   scheme_extension_table->scheme_close_managed = scheme_close_managed;
   scheme_extension_table->scheme_schedule_custodian_close = scheme_schedule_custodian_close;
@@ -457,6 +459,7 @@
   scheme_extension_table->scheme_make_port_type = scheme_make_port_type;
   scheme_extension_table->scheme_make_input_port = scheme_make_input_port;
   scheme_extension_table->scheme_make_output_port = scheme_make_output_port;
+  scheme_extension_table->scheme_set_next_port_custodian = scheme_set_next_port_custodian;
   scheme_extension_table->scheme_set_port_location_fun = scheme_set_port_location_fun;
   scheme_extension_table->scheme_set_port_count_lines_fun = scheme_set_port_count_lines_fun;
   scheme_extension_table->scheme_progress_evt_via_get = scheme_progress_evt_via_get;
@@ -620,6 +623,7 @@
   scheme_extension_table->scheme_get_milliseconds = scheme_get_milliseconds;
   scheme_extension_table->scheme_get_inexact_milliseconds = scheme_get_inexact_milliseconds;
   scheme_extension_table->scheme_get_process_milliseconds = scheme_get_process_milliseconds;
+  scheme_extension_table->scheme_get_thread_milliseconds = scheme_get_thread_milliseconds;
   scheme_extension_table->scheme_banner = scheme_banner;
   scheme_extension_table->scheme_version = scheme_version;
   scheme_extension_table->scheme_check_proc_arity = scheme_check_proc_arity;

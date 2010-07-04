@@ -7,11 +7,11 @@
 
 A Scheme @deftech{number} is either exact or inexact:
 
-@itemize{
+@itemize[
 
  @item{An @defterm{exact} number is either
 
-       @itemize{
+       @itemize[
 
        @item{an arbitrarily large or small integer, such as @scheme[5],
              @scheme[99999999999999999], or @scheme[-17];}
@@ -24,11 +24,11 @@ A Scheme @deftech{number} is either exact or inexact:
              (where the imaginary part is not zero), such as @scheme[1+2i] or
              @scheme[1/2+3/4i].}
 
-       }}
+       ]}
 
  @item{An @defterm{inexact} number is either
 
-       @itemize{
+       @itemize[
 
         @item{an IEEE floating-point representation of a number, such
               as @scheme[2.0] or @scheme[3.14e87], where the IEEE
@@ -42,8 +42,8 @@ A Scheme @deftech{number} is either exact or inexact:
               special case, an inexact complex number can have an
               exact zero real part with an inexact imaginary part.}
 
-        }}
-}
+        ]}
+]
 
 Inexact numbers print with a decimal point or exponent specifier, and
 exact numbers print as integers and fractions.  The same conventions
@@ -57,8 +57,8 @@ interpretation of digits.
 
 @examples[
 0.5
-(eval:alts #, @schemevalfont{#e0.5} 1/2)
-(eval:alts #, @schemevalfont{#x03BB} #x03BB)
+(eval:alts @#,schemevalfont{#e0.5} 1/2)
+(eval:alts @#,schemevalfont{#x03BB} #x03BB)
 ]
 
 Computations that involve an inexact number produce inexact results,
@@ -82,8 +82,8 @@ representing real numbers that are not rational. Scheme can represent
 only rational numbers and complex numbers with rational parts.
 
 @examples[
-(code:line (sin 0)   (code:comment #, @t{rational...}))
-(code:line (sin 1/2) (code:comment #, @t{not rational...}))
+(code:line (sin 0)   (code:comment @#,t{rational...}))
+(code:line (sin 1/2) (code:comment @#,t{not rational...}))
 ]
 
 In terms of performance, computations with small integers are

@@ -9,8 +9,7 @@
 
 (provide omitted-paths)
 
-(require scheme/path scheme/list "../dirs.ss" "../getinfo.ss"
-         (prefix-in planet: planet/config))
+(require scheme/path scheme/list "../dirs.ss" "lib-roots.ss")
 
 ;; An entry for each collections root that holds a hash table.  The hash table
 ;; maps a reversed list of subpath elements to the exploded omitted-paths
@@ -20,31 +19,11 @@
 ;; main collection tree (it is not used there for documentation, and there is
 ;; at least one place where it contains code: scribble/doc).
 (define roots
-  (map
-   (lambda (p)
-     (list (explode-path p) (make-hash)
-           ;; don't omit "doc" in the main tree
-           (not (equal? (find-collects-dir) p))))
-   `(,@(current-library-collection-paths)
-     ,(planet:CACHE-DIR)
-     ;; add planet links, each as a root (if there is a change in
-     ;; the format, this will just ignore these paths, but these
-     ;; collections will throw an error in setup-plt)
-     ,@(with-handlers ([exn? (lambda (e)
-                               (printf "WARNING: bad planet links at ~a:\n ~a"
-                                       (planet:HARD-LINK-FILE) (exn-message e))
-                               '())])
-         (if (not (file-exists? (planet:HARD-LINK-FILE)))
-           '()
-           (with-input-from-file (planet:HARD-LINK-FILE)
-             (lambda ()
-               (let loop ([r '()])
-                 (let ([x (read)])
-                   (if (eof-object? x)
-                     (reverse r)
-                     (let* ([x (and (list? x) (= 7 (length x)) (list-ref x 4))]
-                            [x (and (bytes? x) (simplify-path (bytes->path x)))])
-                       (loop (if x (cons x r) r)))))))))))))
+  (map (lambda (p)
+         (list (explode-path (car p)) (make-hash)
+               ;; don't omit "doc" in the main tree
+               (not (equal? (find-collects-dir) (car p)))))
+       library-roots))
 
 ;; if `x' has `y' as a prefix, return the tail,
 ;; eg (relative-from '(1 2 3 4) '(1 2)) => '(3 4)
@@ -55,7 +34,7 @@
         [else #f]))
 
 (define-syntax-rule (with-memo t x expr)
-  (hash-ref t x (lambda () (let ([r expr]) (hash-set! t x r) r))))
+  (hash-ref! t x (lambda () expr)))
 
 (define ((implicit-omit? omit-doc?) path)
   (let ([str (path-element->string path)])
@@ -63,7 +42,7 @@
         (and omit-doc? (equal? "doc" str))
         (regexp-match? #rx"^[.]" str))))
 
-(define (compute-omitted dir accumulated implicit-omit?)
+(define (compute-omitted dir accumulated implicit-omit? get-info/full)
   (define info (or (get-info/full dir) (lambda _ '())))
   (define explicit
     (let ([omit (info 'compile-omit-paths (lambda () '()))])
@@ -84,12 +63,12 @@
                   (map list (filter implicit-omit? (directory-list dir)))
                   accumulated)]))
 
-(define (accumulate-omitted rsubs root t omit-doc?)
+(define (accumulate-omitted get-info/full rsubs root t omit-doc?)
   (define dir (apply build-path root))
   (define implicit? (implicit-omit? omit-doc?))
   (let loop ([rsubs rsubs])
     (if (null? rsubs)
-      (compute-omitted dir '() implicit?)
+      (compute-omitted dir '() implicit? get-info/full)
       (with-memo t rsubs
         (let ([acc (loop (cdr rsubs))])
           (if (or (eq? 'all acc) (member (list (car rsubs)) acc))
@@ -99,9 +78,10 @@
                                         #:when (equal? (car up) (car rsubs)))
                                ;; must have non-null cdr: see `member' check
                                (cdr up))
-                             implicit?)))))))
+                             implicit?
+                             get-info/full)))))))
 
-(define (omitted-paths* dir)
+(define (omitted-paths* dir get-info/full)
   (unless (and (path-string? dir) (complete-path? dir) (directory-exists? dir))
     (raise-type-error 'omitted-paths
                       "complete path to an existing directory" dir))
@@ -109,8 +89,8 @@
          [r (ormap (lambda (root+table)
                      (let ([r (relative-from dir* (car root+table))])
                        (and r (cons (reverse r) root+table))))
-                 roots)]
-         [r (and r (apply accumulate-omitted r))])
+                   roots)]
+         [r (and r (apply accumulate-omitted get-info/full r))])
     (unless r
       (error 'omitted-paths
              "given directory path is not in any collection root: ~e" dir))
@@ -120,5 +100,5 @@
 
 (define omitted-paths-memo (make-hash))
 
-(define (omitted-paths dir)
-  (with-memo omitted-paths-memo dir (omitted-paths* dir)))
+(define (omitted-paths dir get-info/full)
+  (with-memo omitted-paths-memo dir (omitted-paths* dir get-info/full)))

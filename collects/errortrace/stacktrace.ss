@@ -80,17 +80,26 @@
       ;; expressions with test suite coverage information.  Returning the
       ;; first argument means no tests coverage information is collected.
 
-      ;; test-coverage-point : syntax syntax -> syntax
+      ;; test-coverage-point : syntax syntax phase -> syntax
       ;; sets a test coverage point for a single expression
       (define (test-coverage-point body expr phase)
-        (if (and (test-coverage-enabled) (zero? phase))
-            (let ([key (gensym 'test-coverage-point)])
+        (if (and (test-coverage-enabled)
+                 (zero? phase)
+                 (syntax-position expr))
+            (let* ([key (gensym 'test-coverage-point)])
               (initialize-test-coverage-point key expr)
-              (with-syntax ([key (datum->syntax
-                                  #f key (quote-syntax here))]
-                            [body body]
-                            [test-covered test-covered])
-                #'(begin (#%plain-app test-covered 'key) body)))
+              (let ([thunk (test-covered key)])
+                (cond
+                  [(procedure? thunk)
+                   (with-syntax ([body body]
+                                 [thunk thunk])
+                     #'(begin (#%plain-app thunk) body))]
+                  [(syntax? thunk)
+                   (with-syntax ([body body]
+                                 [thunk thunk])
+                     #'(begin thunk body))]
+                  [else
+                   body])))
             body))
 
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -344,14 +353,29 @@
              [(define-values names rhs)
               top?
               ;; Can't put annotation on the outside
-              (let ([marked (with-mark expr
-                                       (annotate-named
-                                        (one-name #'names)
-                                        (syntax rhs)
-                                        phase))])
+              (let* ([marked 
+                      (with-mark expr
+                                 (annotate-named
+                                  (one-name #'names)
+                                  (syntax rhs)
+                                  phase))]
+                     [with-coverage
+                      (let loop ([stx #'names]
+                                 [obj marked])
+                        (cond
+                          [(not (syntax? stx)) obj]
+                          [(identifier? stx)
+                           (test-coverage-point obj stx phase)]
+                          [(pair? (syntax-e stx))
+                           (loop (car (syntax-e stx))
+                                 (loop (cdr (syntax-e stx))
+                                       obj))]
+                          [else obj]))])
                 (certify
                  expr
-                 (rebuild expr (list (cons #'rhs marked)))))]
+                 (rebuild 
+                  expr 
+                  (list (cons #'rhs with-coverage)))))]
              [(begin . exprs)
               top?
               (certify

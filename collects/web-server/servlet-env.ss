@@ -1,17 +1,11 @@
 ; Derived from plai/web/server, which was based on an older version of this
 ; Also derived from planet/untyped/instaservlet
 #lang scheme
-(require (prefix-in net: net/sendurl)
-         scheme/contract
+(require scheme/contract
          scheme/list
-         scheme/unit
          scheme/serialize
-         net/tcp-unit
-         net/tcp-sig
-         scheme/runtime-path
-         net/ssl-tcp-unit)
-(require web-server/web-server
-         web-server/managers/lru
+         scheme/runtime-path)
+(require web-server/managers/lru
          web-server/managers/manager
          web-server/configuration/namespace
          web-server/http
@@ -19,7 +13,7 @@
          web-server/configuration/responders
          web-server/private/mime-types
          web-server/servlet/setup
-         web-server/dispatchers/dispatch
+         web-server/servlet-dispatch
          (prefix-in lift: web-server/dispatchers/dispatch-lift)
          (prefix-in fsmap: web-server/dispatchers/filesystem-map)
          (prefix-in sequencer: web-server/dispatchers/dispatch-sequencer)
@@ -27,8 +21,6 @@
          (prefix-in filter: web-server/dispatchers/dispatch-filter)
          (prefix-in servlets: web-server/dispatchers/dispatch-servlets)
          (prefix-in log: web-server/dispatchers/dispatch-log))
-
-(define send-url (make-parameter net:send-url))
 
 (define (quit-server sema)
   (lift:make
@@ -45,23 +37,6 @@
         "web-server/default-web-root"))
 
 (provide/contract
- [dispatch/servlet (((request? . -> . response/c))
-                    (#:regexp regexp?
-                     #:current-directory path-string?
-                     #:namespace (listof module-path?)
-                     #:stateless? boolean?
-                     #:stuffer (stuffer/c serializable? bytes?)
-                     #:manager manager?)
-                    . ->* .
-                    dispatcher/c)]
- [serve/launch/wait (((semaphore? . -> . dispatcher/c))
-                     (#:launch-path (or/c false/c string?)
-                      #:banner? boolean?
-                      #:listen-ip (or/c false/c string?)
-                      #:port number?
-                      #:ssl-keys (or/c false/c (cons/c path-string? path-string?)))
-                     . ->* .
-                     void)]
  [serve/servlet (((request? . -> . response/c))
                  (#:command-line? boolean?
                   #:launch-browser? boolean?
@@ -70,6 +45,8 @@
                   #:listen-ip (or/c false/c string?)
                   #:port number?
                   #:ssl? boolean?
+                  #:ssl-cert (or/c false/c path-string?)
+                  #:ssl-key (or/c false/c path-string?)
                   #:manager manager?
                   #:servlet-namespace (listof module-path?)
                   #:server-root-path path-string?
@@ -95,95 +72,6 @@
           [(list? (car ds)) (loop (append (car ds) (cdr ds)) r)]
           [else (loop (cdr ds) (cons (car ds) r))])))
 
-(define (dispatch/servlet 
-         start
-         #:regexp
-         [servlet-regexp #rx""]
-         #:current-directory 
-         [servlet-current-directory (current-directory)]
-         #:namespace 
-         [servlet-namespace empty]                  
-         #:stateless? 
-         [stateless? #f]
-         #:stuffer
-         [stuffer default-stuffer]
-         #:manager
-         [manager
-          (make-threshold-LRU-manager
-           (lambda (request)
-             `(html (head (title "Page Has Expired."))
-                    (body (p "Sorry, this page has expired. Please go back."))))
-           (* 64 1024 1024))])
-  (define servlet-box (box #f))
-  (define make-servlet-namespace
-    (make-make-servlet-namespace #:to-be-copied-module-specs servlet-namespace))
-  (filter:make
-   servlet-regexp
-   (servlets:make
-    (lambda (url)
-      (or (unbox servlet-box)
-          (let ([servlet
-                 (parameterize ([current-custodian (make-custodian)]
-                                [current-namespace
-                                 (make-servlet-namespace
-                                  #:additional-specs
-                                  default-module-specs)])
-                   (if stateless?
-                       (make-stateless.servlet servlet-current-directory stuffer start)
-                       (make-v2.servlet servlet-current-directory manager start)))])
-            (set-box! servlet-box servlet)
-            servlet))))))
-
-(define (serve/launch/wait
-         dispatcher
-         
-         #:launch-path
-         [launch-path #f]          
-         #:banner?
-         [banner? #t]
-         
-         #:listen-ip
-         [listen-ip "127.0.0.1"]
-         #:port
-         [port 8000]
-         #:ssl-keys
-         [ssl-keys #f])
-  (define ssl? (pair? ssl-keys))
-  (define server-url
-    (string-append (if ssl? "https" "http")
-                   "://localhost"
-                   (if (and (not ssl?) (= port 80))
-                     "" (format ":~a" port))))
-  (define sema (make-semaphore 0))
-  (define shutdown-server
-    (serve #:dispatch (dispatcher sema)
-           #:listen-ip listen-ip
-           #:port port
-           #:tcp@ (if ssl?
-                    (let ()
-                      (define-unit-binding ssl-tcp@
-                        (make-ssl-tcp@
-                         (car ssl-keys) (cdr ssl-keys)
-                         #f #f #f #f #f)
-                        (import) (export tcp^))
-                      ssl-tcp@)
-                    tcp@)))
-  (when launch-path
-    ((send-url) (string-append server-url launch-path) #t))
-  (when banner?
-    (printf "Your Web application is running at ~a.\n" 
-            (if launch-path 
-                (string-append server-url launch-path)
-                server-url))
-    (printf "Click 'Stop' at any time to terminate the Web Server.\n"))
-  (let ([bye (lambda ()
-               (when banner? (printf "\nWeb Server stopped.\n"))
-               (shutdown-server))])
-    (with-handlers ([exn:break? (lambda (exn) (bye))])
-      (semaphore-wait/enable-break sema)
-      ;; We can get here if a /quit url is visited
-      (bye))))
-
 (define (serve/servlet
          start
          #:command-line?
@@ -198,9 +86,7 @@
          #:listen-ip
          [listen-ip "127.0.0.1"]
          #:port
-         [the-port 8000]
-         #:ssl?
-         [ssl? #f]
+         [the-port 8000]         
 
          #:manager
          [manager
@@ -208,7 +94,7 @@
            (lambda (request)
              `(html (head (title "Page Has Expired."))
                     (body (p "Sorry, this page has expired. Please go back."))))
-           (* 64 1024 1024))]
+           (* 128 1024 1024))]
 
          #:servlet-path
          [servlet-path "/servlets/standalone.ss"]
@@ -238,6 +124,13 @@
                             (if (file-exists? p)
                               p
                               (build-path default-web-root "mime.types")))]
+         
+         #:ssl?
+         [ssl? #f]
+         #:ssl-cert
+         [ssl-cert (and ssl? (build-path server-root-path "server-cert.pem"))]
+         #:ssl-key
+         [ssl-key (and ssl? (build-path server-root-path "private-key.pem"))]
 
          #:log-file
          [log-file #f]
@@ -283,8 +176,5 @@
    #:banner? banner?   
    #:listen-ip listen-ip
    #:port the-port
-   #:ssl-keys
-   (if ssl?
-       (cons (build-path server-root-path "server-cert.pem")
-             (build-path server-root-path "private-key.pem"))
-       #f)))
+   #:ssl-cert ssl-cert
+   #:ssl-key ssl-key))

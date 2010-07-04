@@ -117,7 +117,7 @@ The same binding as @scheme[#%app].  (This binding was not present in
                 ([head id
                        (head args)]
                  [args (code:line arg-id ...)
-                       (code:line arg-id ... #, @schemeparenfont{.} rest-id)])]{
+                       (code:line arg-id ... @#,schemeparenfont{.} rest-id)])]{
 
 Like @|base-define| in @schememodname[scheme/base], but without
 support for keyword arguments or optional arguments.}
@@ -344,7 +344,7 @@ exception is raised.}
 Creates and returns a new hash table. If provided, each @scheme[flag]
 must one of the following:
 
- @itemize{
+ @itemize[
 
   @item{@indexed-scheme['weak] --- creates a hash table with
    weakly-held keys via @scheme[make-weak-hash],
@@ -358,7 +358,7 @@ must one of the following:
    keys using @scheme[eqv?] instead of @scheme[eq?] using
    @scheme[make-hasheqv] or @scheme[make-weak-hasheqv].}
 
- }
+ ]
 
 By default, key comparisons use @scheme[eq?] (i.e., the hash table is
 created with @scheme[make-hasheq]). If the second @scheme[flag] is

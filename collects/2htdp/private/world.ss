@@ -3,6 +3,7 @@
 (require "check-aux.ss"
          "timer.ss"
          "last.ss"
+         "checked-cell.ss"
          htdp/image
          htdp/error
          mzlib/runtime-path
@@ -52,6 +53,7 @@
        world0            ;; World
        (name #f)         ;; (U #f Symbol)
        (register #f)     ;; (U #f IP)
+       (check-with True) ;; Any -> Boolean 
        (tick K))         ;; (U (World -> World) (list (World -> World) Nat))
       
       (init
@@ -63,67 +65,62 @@
        (record? #f)      ;; Boolean 
        )
       ;; -----------------------------------------------------------------------
-      (field (world  world0))
-      
-      ;; (U World Package) -> Boolean 
-      ;; does the new world differ from the old? 
-      ;; effect: if so, set world
-      (define/private (set-world new-world)
-        (when (package? new-world)
-          (broadcast (package-message new-world))
-          (set! new-world (package-world new-world)))
-        (if (equal? world new-world)
-            #t
-            (begin
-              (set! world new-world)
-              #f)))
+      (field
+       (world
+        (new checked-cell% [msg "World"] [value0 world0] [ok? check-with])))
       
       ;; -----------------------------------------------------------------------
       (field [*out* #f] ;; (U #f OutputPort), where to send messages to 
              [*rec* (make-custodian)]) ;; Custodian, monitor traffic)
       
       (define/private (register-with-host)
-        (define FMTtry "unable to register with ~a after ~s tries")
-        (define FMTcom "unable to register with ~a due to protocol problems")
-        ;; try to register with the server n times 
-        (define (do-register n)
-          (printf "trying to register with ~a ...\n" register)
-          (with-handlers ((tcp-eof? 
-                           (lambda (x) 
-                             (error 'register FMTcom register)))
-                          (exn:fail:network? 
-                           (lambda (x)
-                             (if (= n 1) 
-                                 (error 'register FMTtry register TRIES)
-                                 (begin (sleep PAUSE)
-                                        (do-register (- n 1)))))))
-            (define-values (in out) (tcp-connect register SQPORT))
-            (tcp-send out `(REGISTER ,(if name name (gensym 'world))))
-            (if (eq? (tcp-receive in) 'okay) 
-                (values in out)
-                (raise tcp-eof))))
-        ;; --- now register, obtain connection, and spawn a thread for receiving
-        (parameterize ([current-custodian *rec*])
-          (define-values (in out) (do-register TRIES))
-          (define dis (text "the universe disappeared" 11 'red))
+        (define FMT "\nworking off-line\n")
+        (define FMTtry 
+          (string-append "unable to register with ~a after ~s tries" 
+                         FMT))                         
+        (define FMTcom 
+          (string-append "unable to register with ~a due to protocol problems" 
+                         FMT))
+        ;; Input-Port -> [-> Void]
+        ;; create closure (for thread) to receive messages and signal events
+        (define (RECEIVE in)
           (define (RECEIVE)
             (sync 
              (handle-evt
               in
               (lambda (in) 
-                (with-handlers ((tcp-eof? (compose (handler #f)
-                                                   (lambda (e)
-                                                     (set! draw (lambda (w) dis))
-                                                     (pdraw)
-                                                     e))))
+                (define dis (text "the universe disappeared" 11 'red))
+                (with-handlers ((tcp-eof? 
+                                 (compose (handler #f)
+                                          (lambda (e)
+                                            (set! draw (lambda (w) dis))
+                                            (pdraw)
+                                            e))))
                   ;; --- "the universe disconnected" should come from here ---
                   (define msg (tcp-receive in))
                   (cond
                     [(sexp? msg) (prec msg) (RECEIVE)] ;; break loop if EOF
                     [#t (error 'RECEIVE "sexp expected, received: ~e" msg)]))))))
-          (printf "... successful registered and ready to receive\n")
-          (set! *out* out)
-          (thread RECEIVE)))
+          RECEIVE)
+        ;; --- now register, obtain connection, and spawn a thread for receiving
+        (parameterize ([current-custodian *rec*])
+          ;; try to register with the server n times 
+          (let try ([n TRIES])
+              (printf "trying to register with ~a ...\n" register)
+              (with-handlers ((tcp-eof? (lambda (x) (printf FMTcom register)))
+                              (exn:fail:network? 
+                               (lambda (x)
+                                 (if (= n 1) 
+                                     (printf FMTtry register TRIES)
+                                     (begin (sleep PAUSE) (try (- n 1)))))))
+                (define-values (in out) (tcp-connect register SQPORT))
+                (tcp-send
+                 out
+                 `(REGISTER ,(if name name (symbol->string (gensym 'world)))))
+                (unless (eq? (tcp-receive in) 'okay) (raise tcp-eof))
+                (printf "... successful registered and ready to receive\n")
+                (set! *out* out)
+                (thread (RECEIVE in))))))
       
       (define/private (broadcast msg)
         (when *out* 
@@ -170,7 +167,7 @@
                  (super-new)
                  ;; deal with keyboard events 
                  (define/override (on-char e) 
-                   (when live (pkey (send e get-key-code))))
+                   (when live (pkey (key-event->parts e))))
                  ;; deal with mouse events if live and within range 
                  (define/override (on-event e)
                    (define-values (x y me) (mouse-event->parts e))
@@ -216,13 +213,18 @@
           (queue-callback 
            (lambda ()
              (with-handlers ([exn:break? (handler #f)][exn? (handler #t)])
-               (define changed-world? (set-world (transform world arg ...)))
-               (unless changed-world? 
-                 (when draw (pdraw))
-                 (when (pstop) 
-                   (callback-stop! 'name)
-                   (enable-images-button)))
-               changed-world?)))))
+               (define tag (format "~a callback" 'transform))
+               (define nw (transform (send world get) arg ...))
+               (when (package? nw)
+                 (broadcast (package-message nw))
+                 (set! nw (package-world nw)))
+               (let ([changed-world? (send world set tag nw)])
+                 (unless changed-world?
+                   (when draw (pdraw))
+                   (when (pstop) 
+                     (callback-stop! 'name)
+                     (enable-images-button)))
+                 changed-world?))))))
       
       ;; tick, tock : deal with a tick event for this world 
       (def/pub-cback (ptock) tick)
@@ -241,26 +243,26 @@
       (define/private (pdraw) (show (ppdraw)))
       
       (define/private (ppdraw)
-        (check-scene-result (name-of draw 'your-draw) (draw world)))
+        (check-scene-result (name-of draw 'your-draw) (draw (send world get))))
       
       ;; -----------------------------------------------------------------------
       ;; stop-when 
       (field [stop  stop-when])
       
       (define/private (pstop)
-        (define result (stop world))
+        (define result (stop (send world get)))
         (check-result (name-of stop 'your-stop-when) boolean? "boolean" result)
         result)
       
       ;; -----------------------------------------------------------------------
       ;; start & stop
       (define/public (callback-stop! msg)
-        (stop! world))
+        (stop! (send world get)))
       
       (define (handler re-raise)
         (lambda (e)
           (disable-images-button)
-          (stop! (if re-raise e world))))
+          (stop! (if re-raise e (send world get)))))
       
       (define/public (start!)
         (when draw (show-canvas))
@@ -274,7 +276,7 @@
       ;; initialize the world and run 
       (super-new)
       (start!)
-      (when (stop-when world) (stop! world))))))
+      (when (stop-when (send world get)) (stop! (send world get)))))))
 
 ;; -----------------------------------------------------------------------------
 (define-runtime-path break-btn:path '(lib "icons/break.png"))

@@ -10,9 +10,15 @@
 @title[#:tag "manual" #:style 'toc]{Manual Forms}
 
 @defmodule[scribble/manual]{The @schememodname[scribble/manual]
-library provides all of @schememodname[scribble/basic], plus
-additional functions that are relatively specific to writing PLT
-Scheme documentation.}
+library provides all of @schememodname[scribble/basic] plus additional
+functions, including many that are relatively specific to writing PLT
+Scheme documentation.
+
+The @schememodname[scribble/manual] name can also be used as a
+language with @hash-lang[]. It acts like the
+@schememodname[scribble/doc] language, except that the
+@schememodname[scribble/manual] library is also required into
+the module.}
 
 @local-table-of-contents[]
 
@@ -79,7 +85,7 @@ instead of @scheme[unsyntax].
 
 A few other escapes are recognized symbolically:
 
-@itemize{
+@itemize[
 
  @item{@scheme[(#,(scheme code:line) _datum ...)] typesets as the
        sequence of @scheme[_datum]s (i.e., without the
@@ -92,8 +98,12 @@ A few other escapes are recognized symbolically:
        produces a paragraph using @scheme[t]: 
 
        @verbatim[#:indent 2]|{
-         (code:comment #, @t{this is a comment})
-       }|}
+         (code:comment @#,t{this is a comment})
+       }|
+
+       (Note that @litchar|{@#,foo{...}}| reads as
+       @SCHEME[(unsyntax (foo "..."))].)
+       }
 
  @item{@schemeidfont{code:blank} typesets as a blank space.}
 
@@ -104,7 +114,7 @@ A few other escapes are recognized symbolically:
        non-terminal via @scheme[defform], a variable via
        @scheme[defproc], etc.}
 
-}
+]
 
 See also @schememodname[scribble/comment-reader].
 }
@@ -324,7 +334,7 @@ is documented by each @scheme[defform], @scheme[defproc], or similar
 form within the section that contains the @scheme[declare-exporting]
 declaration:
 
-@itemize{
+@itemize[
 
  @item{If no @scheme[#:use-sources] clause is supplied, then the
        documentation applies to the given name as exported by the first
@@ -338,7 +348,7 @@ declaration:
        as the identifier as exported by the first @scheme[mod-path] in
        the @scheme[declare-exporting] declaration.}
 
-}
+]
 
 The initial @scheme[mod-path]s sequence can be empty if
 @scheme[mod-path]s are given with @scheme[#:use-sources]. In that
@@ -366,8 +376,8 @@ sub-sections.}
                          (keyword arg-id contract-expr-datum default-expr)
                          ellipses
                          ellipses+]
-               [ellipses #, @lit-ellipses]
-               [ellipses+ #, @lit-ellipses+])]{
+               [ellipses @#,lit-ellipses]
+               [ellipses+ @#,lit-ellipses+])]{
 
 Produces a sequence of flow elements (encapsulated in a
 @scheme[splice]) to document a procedure named @scheme[id]. Nesting
@@ -402,13 +412,13 @@ Each @scheme[arg-spec] must have one of the following forms:
        Like the previous case, but with a default
        value.}
 
-@specsubform[#, @lit-ellipses]{Any number of the preceding argument.  This
+@specsubform[@#,lit-ellipses]{Any number of the preceding argument.  This
        form is normally used at the end, but keyword-based arguments
        can sensibly appear afterward. See also the documentation for
        @scheme[append] for a use of @lit-ellipses before the last
        argument.}
 
-@specsubform[#, @lit-ellipses+]{One or more of the preceding argument
+@specsubform[@#,lit-ellipses+]{One or more of the preceding argument
        (normally at the end, like @lit-ellipses).}
 
 The @scheme[result-contract-expr-datum] is typeset via
@@ -855,14 +865,14 @@ typewriter font with two leading @litchar{+}s).}
 @defproc[(math [pre-content any/c] ...) element?]{The @tech{decode}d
 @scheme[pre-content] is further transformed:
 
- @itemize{
+ @itemize[
 
   @item{Any immediate @scheme['rsquo] is converted to @scheme['prime].}
 
   @item{Parentheses and sequences of decimal digits in immediate
         strings are left as-is, but any other immediate string is
         italicized.}
- }
+ ]
 
 Extensions to @scheme[math] are likely, such as recognizing @litchar{_}
 and @litchar{^} for subscripts and superscripts.}
@@ -872,6 +882,7 @@ and @litchar{^} for subscripts and superscripts.}
 
 @defproc[(secref [tag string?]
                  [#:doc module-path (or/c module-path? false/c) #f]
+                 [#:tag-prefixes prefixes (or/c (listof string?) false/c) #f]
                  [#:underline? underline? any/c #t])
          element?]{
 
@@ -879,13 +890,21 @@ Inserts the hyperlinked title of the section tagged @scheme[tag], but
 @schemeidfont{aux-element} items in the title content are omitted in the
 hyperlink label.
 
-If @scheme[module-path] is provided, the @scheme[tag] refers to a tag
-with a prefix determined by @scheme[module-path]. When
+If @scheme[#:doc module-path] is provided, the @scheme[tag] refers to
+a tag with a prefix determined by @scheme[module-path]. When
 @exec{setup-plt} renders documentation, it automatically adds a tag
 prefix to the document based on the source module. Thus, for example,
 to refer to a section of the PLT Scheme reference,
 @scheme[module-path] would be @scheme['(lib
 "scribblings/reference/reference.scrbl")].
+
+The @scheme[#:tag-prefixes prefixes] argument similarly supports
+selecting a particular section as determined by a path of tag
+prefixes. When a @scheme[#:doc] argument is provided, then
+@scheme[prefixes] should trace a path of tag-prefixed subsections to
+reach the @scheme[tag] section. When @scheme[#:doc] is not provided,
+the @scheme[prefixes] path is relative to any enclosing section (i.e.,
+the youngest ancestor that produces a match).
 
 If @scheme[underline?] is @scheme[#f], then the hyperlink is rendered
 in HTML without an underline.}
@@ -893,6 +912,7 @@ in HTML without an underline.}
 
 @defproc[(seclink [tag string?] 
                   [#:doc module-path (or/c module-path? false/c) #f]
+                  [#:tag-prefixes prefixes (or/c (listof string?) false/c) #f]
                   [#:underline? underline? any/c #t]
                   [pre-content any/c] ...) element?]{
 
@@ -949,7 +969,7 @@ The @scheme[content->string] result of the @tech{decode}d
 @scheme[pre-content] is used as a key for references, but normalized
 as follows:
 
-@itemize{
+@itemize[
 
  @item{A trailing ``ies'' is replaced by ``y''.}
 
@@ -958,7 +978,7 @@ as follows:
  @item{Consecutive hyphens and whitespaces are all replaced by a
        single space.}
 
-}
+]
 
 These normalization steps help support natural-language references
 that differ slightly from a defined form. For example, a definition of
@@ -968,17 +988,21 @@ If @scheme[style?] is true, then @scheme[defterm] is used on
 @scheme[pre-content].}
 
 @defproc[(tech [pre-content any/c] ...
-               [#:doc module-path (or/c module-path? false/c) #f])
+               [#:doc module-path (or/c module-path? false/c) #f]
+               [#:tag-prefixes prefixes (or/c (listof string?) false/c) #f])
          element?]{
 
 Produces an element for the @tech{decode}d @scheme[pre-content], and
 hyperlinks it to the definition of the content as established by
 @scheme[deftech]. The content's string form is normalized in the same
-way as for @scheme[deftech]. The @scheme[#:doc] argument supports
-cross-document references, like in @scheme[secref].
+way as for @scheme[deftech]. The @scheme[#:doc] and
+@scheme[#:tag-prefixes] arguments support cross-document and
+section-specific references, like in @scheme[secref].
 
-The hyperlink is relatively quiet, in that underlining in HTML output
-appears only when the mouse is moved over the term.
+With the default style files, the hyperlink created by @scheme[tech]
+is somewhat quieter than most hyperlinks: the underline in HTML output
+is gray, instead of blue, and the term and underline turn blue only
+when the mouse is moved over the term.
 
 In some cases, combining both natural-language uses of a term and
 proper linking can require some creativity, even with the
@@ -987,7 +1011,8 @@ defined, but a sentence uses the term ``binding,'' the latter can be
 linked to the former using @schemefont["@tech{bind}ing"].}
 
 @defproc[(techlink [pre-content any/c] ...
-                   [#:doc module-path (or/c module-path? false/c) #f]) 
+                   [#:doc module-path (or/c module-path? false/c) #f]
+                   [#:tag-prefixes prefixes (or/c (listof string?) false/c) #f]) 
          element?]{
 
 Like @scheme[tech], but the link is not a quiet. For example, in HTML
@@ -1002,7 +1027,7 @@ the link.}
 A combination of @scheme[scheme] and @scheme[as-index], with the
 following special cases when a single @scheme[datum] is provided:
 
- @itemize{
+ @itemize[
 
  @item{If @scheme[datum] is a @scheme[quote] form, then the quote is
        removed from the key (so that it's sorted using its unquoted
@@ -1011,7 +1036,7 @@ following special cases when a single @scheme[datum] is provided:
  @item{If @scheme[datum] is a string, then quotes are removed from the
        key (so that it's sorted using the string content).}
 
-}}
+]}
 
 @defproc[(idefterm [pre-content any/c] ...) element?]{Combines
 @scheme[as-index] and @scheme[defterm]. The content normally should be
@@ -1056,6 +1081,8 @@ combination of @scheme[envvar] and @scheme[as-index].}
 @; ------------------------------------------------------------------------
 @section{Bibliography}
 
+@margin-note{See also @schememodname[scriblib/autobib].}
+
 @defproc[(cite [key string?]) element?]{
 
 Links to a bibliography entry, using @scheme[key] both to indicate the
@@ -1082,7 +1109,7 @@ Creates a bibliography entry. The @scheme[key] is used to refer to the
 entry via @scheme[cite]. The other arguments are used as elements in
 the entry:
 
-@itemize{
+@itemize[
 
  @item{@scheme[title] is the title of the cited work. It will be
        surrounded by quotes in typeset form if @scheme[is-book?] is
@@ -1108,7 +1135,7 @@ the entry:
        bibliography using @scheme[tt] and hyperlinked, or it is
        omitted if given as @scheme[#f].}
 
-}}
+]}
 
 
 @defproc[(bib-entry? [v any/c]) boolean?]{
@@ -1140,8 +1167,8 @@ centered table with the @scheme[pre-flow] parsed by
 @defproc[(commandline [pre-content any/c] ...) paragraph?]{Produces
 an inset command-line example (e.g., in typewriter font).}
 
-@defproc[(margin-note [pre-content any/c] ...) paragraph?]{Produces
-a paragraph to be typeset in the margin instead of inlined.}
+@defproc[(margin-note [pre-content any/c] ...) blockquote?]{Produces
+a @tech{blockquote} to be typeset in the margin instead of inlined.}
 
 @; ------------------------------------------------------------------------
 @section[#:tag "index-entries"]{Index-Entry Descriptions}

@@ -1,14 +1,11 @@
 #lang scribble/doc
 @(require "web-server.ss")
 
-@title[#:tag "http"
-       #:style 'toc]{HTTP}
+@title[#:tag "http"]{HTTP: Hypertext Transfer Protocol}
 
 @defmodule[web-server/http]
 
 The @web-server implements many HTTP RFCs that are provided by this module.
-
-@local-table-of-contents[]
 
 @; ------------------------------------------------------------
 @section[#:tag "request-structs.ss"]{Requests}
@@ -202,7 +199,9 @@ Here is an example typical of what you will find in many applications:
            ([generator ((() () #:rest (listof bytes?) . ->* . any) . -> . any)])]{
  As with @scheme[response/basic], except with @scheme[generator] as a function that is
  called to generate the response body, by being given an @scheme[output-response] function
- that outputs the content it is called with.
+ that outputs the content it is called with. If the @scheme[output-response] function is called
+ with arguments of zero length (when concatenated), then the output port is flushed with
+ @scheme[flush-output].
  
  Here is a short example:
  @schemeblock[
@@ -210,19 +209,22 @@ Here is an example typical of what you will find in many applications:
     200 #"OK" (current-seconds)
     #"application/octet-stream"
     (list (make-header #"Content-Disposition"
-                       #"attachement; filename=\"file\""))
-    (lambda (send/bytes)
-      (send/bytes #"Some content")
-      (send/bytes)
-      (send/bytes #"Even" #"more" #"content!")
-      (send/bytes #"Now we're done")))
+                       #"attachment; filename=\"file\""))
+    (lambda (output-response)
+      (output-response #"Some content")
+      (output-response)
+      (output-response #"Even" #"more" #"content!")
+      (output-response #"Now we're done")))
  ]
 }
 
 @defthing[response/c contract?]{
- Equivalent to @scheme[(or/c response/basic?
-                             (cons/c bytes? (listof (or/c string? bytes?)))
-                             xexpr/c)].
+ Equivalent to 
+ @schemeblock[
+ (or/c response/basic?
+       (cons/c bytes? (listof (or/c string? bytes?)))
+       xexpr/c)
+ ]
 }
 
 @defproc[(make-xexpr-response [xexpr xexpr/c]
@@ -234,10 +236,10 @@ Here is an example typical of what you will find in many applications:
          response/full?]{
  Equivalent to
  @schemeblock[
-(make-response/full 
-   code message seconds mime-type headers
-   (list (string->bytes/utf-8 (xexpr->string xexpr))))
-]}
+ (make-response/full 
+  code message seconds mime-type headers
+  (list (string->bytes/utf-8 (xexpr->string xexpr))))
+ ]}
                          
 @defproc[(normalize-response [close? boolean?] [response response/c])
          (or/c response/full? response/incremental?)]{

@@ -3,9 +3,12 @@
 (require (for-syntax (rename-in r6rs/private/base-for-syntax
                                 [syntax-rules r6rs:syntax-rules])
                      scheme/base)
+         scheme/promise
          scheme/splicing
          r6rs/private/qq-gen
          r6rs/private/exns
+         r6rs/private/no-set
+         (for-syntax r6rs/private/reconstruct)
          (prefix-in r5rs: r5rs)
          (only-in r6rs/private/readtable rx:number)
          scheme/bool)
@@ -26,7 +29,7 @@
  (rename-out [r5rs:if if])
 
  ;; 11.4.4
- set!
+ (rename-out [r6rs:set! set!])
 
  ;; 11.4.5
  cond else => case
@@ -267,8 +270,8 @@
    (lambda (stx)
      (if (identifier? stx)
          (syntax/loc stx r6rs-/)
-         (syntax-case stx (set!)
-           [(set! . _)
+         (syntax-case stx (r6rs:set!)
+           [(r6rs:set! . _)
             (raise-syntax-error #f
                                 "cannot mutate imported identifier"
                                 stx)]
@@ -346,7 +349,7 @@
          [s (if (regexp-match? #rx"#[dDxXoObB]" s)
                 s
                 (string-append prefix s))])
-    (and (regexp-match? rx:number s)
+    (and (regexp-match? (force rx:number) s)
          (string->number (regexp-replace* #rx"[|][0-9]+" s "")))))
 
 (define r6rs:symbol=?
@@ -554,25 +557,6 @@
                   (syntax/loc stx
                     (define-syntax id (wrap-as-needed expr))))]))
 
-(define-for-syntax (wrap r stx)
-  (cond
-   [(syntax? r) r]
-   [(symbol? r) (error 'macro
-                       "transformer result included a raw symbol: ~e"
-                       r)]
-   [(mpair? r) (datum->syntax
-                stx
-                (cons (wrap (mcar r) stx)
-                      (wrap (mcdr r) stx))
-                stx)]
-   [(vector? r) (datum->syntax
-                 stx
-                 (list->vector
-                  (map (lambda (r) (wrap r stx))
-                       (vector->list r)))
-                 stx)]
-   [else (datum->syntax stx r stx)]))
-
 (define-for-syntax (wrap-as-needed v)
   (cond
    [(and (procedure? v)
@@ -581,7 +565,7 @@
      (case-lambda 
       [(stx) (if (syntax? stx)
                  (let ([r (v stx)])
-                   (wrap r stx))
+                   (wrap r stx stx #t))
                  (v stx))]
       [args (apply v args)])
      (procedure-arity v))]

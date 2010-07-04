@@ -160,8 +160,8 @@ so that
 
 @schemeblock[
 (let ([red 1] [green 2] [blue 3])
-  (rotate red green)      (code:comment #, @t{swaps})
-  (rotate red green blue) (code:comment #, @t{rotates left})
+  (rotate red green)      (code:comment @#,t{swaps})
+  (rotate red green blue) (code:comment @#,t{rotates left})
   (list red green blue))
 ]
 
@@ -304,11 +304,11 @@ Naturally, we can implement @scheme[define-get/put-id] as a macro:
 
 @schemeblock[
 (define-syntax-rule (define-get/put-id id get put!)
-  (define-syntax clock
+  (define-syntax id
     (syntax-id-rules (set!)
-      [(set! clock e) (put-clock! e)]
-      [(clock a (... ...)) ((get-clock) a (... ...))]
-      [clock (get-clock)])))
+      [(set! id e) (put! e)]
+      [(id a (... ...)) ((get) a (... ...))]
+      [id (get)])))
 ]
 
 The @scheme[define-get/put-id] macro is a @deftech{macro-generating
@@ -395,7 +395,7 @@ module, which lets us write @scheme[define-cbr] easily enough:
                  (set! actual v))
                (... ...))]))
     (define-for-cbr do-f (arg ...)
-      () (code:comment #, @t{explained below...})
+      () (code:comment @#,t{explained below...})
       body)))
 ]
 

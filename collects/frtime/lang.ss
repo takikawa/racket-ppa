@@ -1,6 +1,6 @@
-(module lang frtime/mzscheme-utils
+(module lang frtime/lang-utils
   (require frtime/lang-ext)
-  (require (as-is:unchecked frtime/frp-core
+  (require (as-is:unchecked frtime/core/frp
 	    event-set? signal-value))
   
   (define (value-nowable? x)
@@ -12,9 +12,6 @@
       (or (undefined? v)
           (pred v))))
 
-
-  ;(provide-for-syntax (rename frtime/mzscheme-utils syntax->list syntax->list))
-  
   (provide value-nowable? behaviorof
-	   (all-from frtime/mzscheme-utils)
+	   (all-from frtime/lang-utils)
            (all-from-except frtime/lang-ext lift)))

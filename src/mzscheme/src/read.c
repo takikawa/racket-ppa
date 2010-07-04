@@ -4362,6 +4362,52 @@ static Scheme_Object *read_compact_svector(CPort *port, int l)
   return o;
 }
 
+static Scheme_Object *read_compact_escape(CPort *port) 
+{
+#if defined(MZ_PRECISE_GC)
+# define ESC_BLK_BUF_SIZE 32
+  char buffer[ESC_BLK_BUF_SIZE];
+#endif
+  int len;
+  Scheme_Object *ep;
+  char *s;
+  ReadParams params;
+  
+  len = read_compact_number(port);
+  
+  RANGE_CHECK_GETS((unsigned)len);
+  
+#if defined(MZ_PRECISE_GC)
+  s = read_compact_chars(port, buffer, ESC_BLK_BUF_SIZE, len);
+  if (s != buffer)
+    len = -len; /* no alloc in sized_byte_string_input_port */
+#else
+  s = (char *)port->start + port->pos;
+  port->pos += len;
+  len = -len; /* no alloc in sized_byte_string_input_port */
+#endif
+  
+  ep = scheme_make_sized_byte_string_input_port(s, len);
+  
+  params.can_read_compiled = 1;
+  params.can_read_pipe_quote = 1;
+  params.can_read_box = 1;
+  params.can_read_graph = 1;
+  /* Use startup value of case sensitivity so legacy code will work. */
+  params.case_sensitive = scheme_case_sensitive;
+  params.square_brackets_are_parens = 1;
+  params.curly_braces_are_parens = 1;
+  params.read_decimal_inexact = 1;
+  params.can_read_dot = 1;
+  params.can_read_infix_dot = 1;
+  params.can_read_quasi = 1;
+  params.honu_mode = 0;
+  params.skip_zo_vers_check = 0;
+  params.table = NULL;
+
+  return read_inner(ep, NULL, port->ht, scheme_null, &params, 0);
+}
+
 static unsigned char cpt_branch[256];
 
 static Scheme_Object *read_compact(CPort *port, int use_stack);
@@ -4402,46 +4448,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
 
     switch(cpt_branch[ch]) {
     case CPT_ESCAPE:
-      {
-	int len;
-	Scheme_Object *ep;
-	char *s;
-	ReadParams params;
-
-	len = read_compact_number(port);
-
-	RANGE_CHECK_GETS((unsigned)len);
-
-#if defined(MZ_PRECISE_GC)
-	s = read_compact_chars(port, buffer, BLK_BUF_SIZE, len);
-	if (s != buffer)
-	  len = -len; /* no alloc in sized_byte_string_input_port */
-#else
-	s = (char *)port->start + port->pos;
-	port->pos += len;
-	len = -len; /* no alloc in sized_byte_string_input_port */
-#endif
-
-	ep = scheme_make_sized_byte_string_input_port(s, len);
-
-	params.can_read_compiled = 1;
-	params.can_read_pipe_quote = 1;
-	params.can_read_box = 1;
-	params.can_read_graph = 1;
-	/* Use startup value of case sensitivity so legacy code will work. */
-	params.case_sensitive = scheme_case_sensitive;
-	params.square_brackets_are_parens = 1;
-	params.curly_braces_are_parens = 1;
-	params.read_decimal_inexact = 1;
-	params.can_read_dot = 1;
-	params.can_read_infix_dot = 1;
-	params.can_read_quasi = 1;
-	params.honu_mode = 0;
-        params.skip_zo_vers_check = 0;
-	params.table = NULL;
-
-	v = read_inner(ep, NULL, port->ht, scheme_null, &params, 0);
-      }
+      v = read_compact_escape(port);
       break;
     case CPT_SYMBOL:
       l = read_compact_number(port);
@@ -4512,22 +4519,22 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
       break;
     case CPT_CHAR:
       l = read_compact_number(port);
-      v = scheme_make_character(l);
+      return scheme_make_character(l);
       break;
     case CPT_INT:
-      v = scheme_make_integer(read_compact_number(port));
+      return scheme_make_integer(read_compact_number(port));
       break;
     case CPT_NULL:
-      v = scheme_null;
+      return scheme_null;
       break;
     case CPT_TRUE:
-      v = scheme_true;
+      return scheme_true;
       break;
     case CPT_FALSE:
-      v = scheme_false;
+      return scheme_false;
       break;
     case CPT_VOID:
-      v = scheme_void;
+      return scheme_void;
       break;
     case CPT_BOX:
       v = scheme_box(read_compact(port, 0));
@@ -4535,21 +4542,17 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
       break;
     case CPT_PAIR:
       {
-	Scheme_Object *car, *cdr;
-	car = read_compact(port, 0);
-	cdr = read_compact(port, 0);
-	v = scheme_make_pair(car, cdr);
+	v = read_compact(port, 0);
+	return scheme_make_pair(v, read_compact(port, 0));
       }
       break;
     case CPT_LIST:
       l = read_compact_number(port);
       if (l == 1) {
-        Scheme_Object *car, *cdr;
-        car = read_compact(port, 0);
-        cdr = read_compact(port, 0);
-        v = scheme_make_pair(car, cdr);
+        v = read_compact(port, 0);
+        return scheme_make_pair(v, read_compact(port, 0));
       } else
-        v = read_compact_list(l, 0, 0, port);
+        return read_compact_list(l, 0, 0, port);
       break;
     case CPT_VECTOR:
       {
@@ -4560,27 +4563,26 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
 	vec = scheme_make_vector(l, NULL);
 
 	for (i = 0; i < l; i++) {
-	  Scheme_Object *cv;
-	  cv = read_compact(port, 0);
-	  SCHEME_VEC_ELS(vec)[i] = cv;
+	  v = read_compact(port, 0);
+	  SCHEME_VEC_ELS(vec)[i] = v;
 	}
 
         SCHEME_SET_IMMUTABLE(vec);
 
-	v = vec;
+	return vec;
       }
       break;
     case CPT_HASH_TABLE:
       {
 	Scheme_Object *l;
 	int kind, len;
+        Scheme_Object *k;
 
 	kind = read_compact_number(port);
 	len = read_compact_number(port);
 	
 	l = scheme_null;
 	while (len--) {
-	  Scheme_Object *k, *v;
 	  k = read_compact(port, 0);
 	  v = read_compact(port, 0);
 	  /* We can't always hash directly, because a key or value
@@ -4653,7 +4655,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
     case CPT_REFERENCE:
       l = read_compact_number(port);
       RANGE_CHECK(l, < EXPECTED_PRIM_COUNT);
-      v = variable_references[l];
+      return variable_references[l];
       break;
     case CPT_LOCAL:
       {
@@ -4664,7 +4666,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
           flags = read_compact_number(port);
         } else
           flags = 0;
-	v = scheme_make_local(scheme_local_type, p, flags);
+	return scheme_make_local(scheme_local_type, p, flags);
       }
       break;
     case CPT_LOCAL_UNBOX:
@@ -4676,7 +4678,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
           flags = read_compact_number(port);
         } else
           flags = 0;
-	v = scheme_make_local(scheme_local_unbox_type, p, flags);
+	return scheme_make_local(scheme_local_unbox_type, p, flags);
       }
       break;
     case CPT_SVECTOR:
@@ -4700,7 +4702,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
 	}
 
 	scheme_finish_application(a);
-	v = (Scheme_Object *)a;
+	return (Scheme_Object *)a;
       }
       break;
     case CPT_LET_ONE:
@@ -4718,7 +4720,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
 	et = scheme_get_eval_type(lo->value);
 	SCHEME_LET_EVAL_TYPE(lo) = et;
 
-	v = (Scheme_Object *)lo;
+	return (Scheme_Object *)lo;
       }
       break;
     case CPT_BRANCH:
@@ -4727,7 +4729,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
 	test = read_compact(port, 1);
 	tbranch = read_compact(port, 1);
 	fbranch = read_compact(port, 1);
-	v = scheme_make_branch(test, tbranch, fbranch);
+	return scheme_make_branch(test, tbranch, fbranch);
       }
       break;
     case CPT_MODULE_INDEX:
@@ -4737,7 +4739,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
 	  path = read_compact(port, 0);
 	  base = read_compact(port, 0);
 
-	  v = scheme_make_modidx(path, base, scheme_false);
+	  return scheme_make_modidx(path, base, scheme_false);
 	}
 	break;
     case CPT_MODULE_VAR:
@@ -4764,7 +4766,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
         } else
           mv->pos = pos;
 
-	v = (Scheme_Object *)mv;
+	return (Scheme_Object *)mv;
       }
       break;
     case CPT_PATH:
@@ -4799,7 +4801,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
           return NULL;
         }
         cl->code = ((Scheme_Closure *)v)->code;
-        v = (Scheme_Object *)cl;
+        return (Scheme_Object *)cl;
         break;
       }
     case CPT_DELAY_REF:
@@ -4821,6 +4823,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
             port->symtab[l] = v;
           }
         }
+        return v;
         break;
       }
     case CPT_PREFAB:
@@ -4851,7 +4854,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
 	  type = scheme_local_type;
 	  ch -= CPT_SMALL_LOCAL_START;
 	}
-	v = scheme_make_local(type, ch, 0);
+	return scheme_make_local(type, ch, 0);
       }
       break;
     case CPT_SMALL_MARSHALLED_START:
@@ -4874,7 +4877,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
     case CPT_SMALL_NUMBER_START:
       {
 	l = ch - CPT_SMALL_NUMBER_START;
-	v = scheme_make_integer(l);
+	return scheme_make_integer(l);
       }
       break;
     case CPT_SMALL_SVECTOR_START:
@@ -4889,14 +4892,14 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
 	int ppr = CPT_BETWEEN(ch, SMALL_PROPER_LIST);
 	l = ch - (ppr ? CPT_SMALL_PROPER_LIST_START : CPT_SMALL_LIST_START);
       	if (l == 1) {
-          Scheme_Object *car, *cdr;
-          car = read_compact(port, 0);
+          Scheme_Object *cdr;
+          v = read_compact(port, 0);
           cdr = (ppr
                  ? scheme_null
                  : read_compact(port, 0));
-          v = scheme_make_pair(car, cdr);
+          return scheme_make_pair(v, cdr);
         } else
-          v = read_compact_list(l, ppr, /* use_stack */ 0, port);
+          return read_compact_list(l, ppr, /* use_stack */ 0, port);
       }
       break;
     case CPT_SMALL_APPLICATION_START:
@@ -4914,7 +4917,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
 
 	scheme_finish_application(a);
 
-	v = (Scheme_Object *)a;
+	return (Scheme_Object *)a;
       }
       break;
     case CPT_SMALL_APPLICATION2:
@@ -4935,7 +4938,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
 	et += scheme_get_eval_type(app->rator);
 	SCHEME_APPN_FLAGS(app) = et;
 
-	v = (Scheme_Object *)app;
+	return (Scheme_Object *)app;
       }
       break;
     case CPT_SMALL_APPLICATION3:
@@ -4960,13 +4963,15 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
 	et += scheme_get_eval_type(app->rator);
 	SCHEME_APPN_FLAGS(app) = et;
 
-	v = (Scheme_Object *)app;
+	return (Scheme_Object *)app;
       }
       break;
     default:
       v = NULL;
       break;
     }
+
+    /* Some cases where v != NULL return directly */
 
     if (!v)
       scheme_ill_formed_code(port);
@@ -5289,7 +5294,7 @@ static Scheme_Object *read_compiled(Scheme_Object *port,
 			 top->prefix->num_stxes,
 			 top->prefix->num_lifts,
                          0);
-    /* If no exception, the the resulting code is ok. */
+    /* If no exception, the resulting code is ok. */
   } else
     scheme_ill_formed_code(rp);
 
@@ -5322,6 +5327,7 @@ Scheme_Object *scheme_load_delayed_code(int _which, Scheme_Load_Delay *_delay_in
   unsigned char *st;
   Scheme_Object * volatile port;
   Scheme_Object * volatile v;
+  Scheme_Object * volatile v_exn;
   Scheme_Hash_Table ** volatile ht;
   mz_jmp_buf newbuf, * volatile savebuf;
 
@@ -5417,12 +5423,16 @@ Scheme_Object *scheme_load_delayed_code(int _which, Scheme_Load_Delay *_delay_in
   /* Perform the read, catching escapes so we can clean up: */
   savebuf = scheme_current_thread->error_buf;
   scheme_current_thread->error_buf = &newbuf;
+  scheme_current_thread->reading_delayed = scheme_true;
   if (scheme_setjmp(newbuf)) {
     v = NULL;
+    v_exn = scheme_current_thread->reading_delayed;
   } else {
     v = read_compact(rp, 0);
+    v_exn = NULL;
   }
   scheme_current_thread->error_buf = savebuf;
+  scheme_current_thread->reading_delayed = NULL;
 
   /* Clean up: */
 
@@ -5452,6 +5462,8 @@ Scheme_Object *scheme_load_delayed_code(int _which, Scheme_Load_Delay *_delay_in
         
     return v;
   } else {
+    if (v_exn && !scheme_current_thread->cjs.is_kill)
+      scheme_raise(v_exn);
     scheme_longjmp(*scheme_current_thread->error_buf, 1);
     return NULL;
   }
@@ -6169,9 +6181,31 @@ static Scheme_Object *expected_lang(const char *prefix, int ch,
   if (get_lang > 1) {
     return scheme_void;
   } else {
-    scheme_read_err(port, stxsrc, line, col, pos, 1, 0, NULL, 
-                    "read-language: expected `#lang' or `#!', found `%s%c'",
-                    prefix, ch);
+    mzchar chs[2];
+    char *more;
+
+    chs[0] = 0;
+    chs[1] = 0;
+      
+    if (ch == EOF)
+      more = "an end-of-file";
+    else if (ch == SCHEME_SPECIAL)
+      more = "a non-character";
+    else {
+      chs[0] = ch;
+      more = "";
+    }
+
+    scheme_read_err(port, stxsrc, line, col, pos, 1, ch, NULL, 
+                    "read-language: expected (after whitespace and comments)"
+                    " `#lang ' or `#!' followed"
+                    " immediately by a language name, found %s%s%5%s%s%s",
+                    (*prefix || *chs) ? "`" : "", 
+                    prefix, chs, 
+                    (*prefix || *chs) ? "`" : "", 
+                    ((*prefix || *chs) && *more) ? " followed by " : "", 
+                    more);
+    
     return NULL;
   }
 }

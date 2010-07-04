@@ -14,9 +14,7 @@
 
 @title{@bold{Objective-C} FFI}
 
-@declare-exporting[ffi/private/objc-doc-unsafe #:use-sources (ffi/objc)]
-
-@defmodule*/no-declare[(ffi/objc)]{The @schememodname[ffi/objc] library builds on
+@defmodule[ffi/objc]{The @schememodname[ffi/objc] library builds on
 @schememodname[scheme/foreign] to support interaction with
 @link["http://developer.apple.com/documentation/Cocoa/Conceptual/ObjectiveC/"]{Objective-C}.}
 
@@ -161,10 +159,10 @@ space for each @scheme[field-id] within the instance is deallocated.
 #:eval objc-eval
 (eval:alts
  (define-objc-class MyView NSView
-   [bm] (code:comment #, @elem{<- one field})
+   [bm] (code:comment @#,elem{<- one field})
    (- _scheme (swapBitwmap: [_scheme new-bm])
       (begin0 bm (set! bm new-bm)))
-   (- _void (drawRect: [#, @schemeidfont{_NSRect} exposed-rect])
+   (- _void (drawRect: [@#,schemeidfont{_NSRect} exposed-rect])
       (super-tell drawRect: exposed-rect)
       (draw-bitmap-region bm exposed-rect))
    (- _void (dealloc)

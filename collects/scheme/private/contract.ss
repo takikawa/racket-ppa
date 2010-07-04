@@ -87,7 +87,7 @@ improve method arity mismatch contract violation error messages?
                          define-stx)]
     [(_ name contract-expr)
      (raise-syntax-error 'define/contract
-                         "no body after contract"
+                         "expected a contract expression and a definition body, but found only one expression"
                          define-stx)]
     [(_ name+arg-list contract #:freevars args . body)
      (identifier? #'args)
@@ -1075,7 +1075,6 @@ improve method arity mismatch contract violation error messages?
                                                 (list (slc #'exported-selector-ids) ...)
                                                 (list mutator-id-info ...)
                                                 super-id)
-                                          ;#;
                                           (list (slc #'-struct:struct-name)
                                                 (slc #'constructor-new-name)
                                                 (slc #'predicate-new-name)
@@ -1217,6 +1216,12 @@ improve method arity mismatch contract violation error messages?
                             [ctrct (syntax-property ctrct 'inferred-name id)]
                             [external-name (or user-rename-id id)]
                             [where-stx stx])
+                (with-syntax ([extra-test 
+                               (syntax-case #'ctrct (->)
+                                 [(-> dom ... arg)
+                                  #`(and (procedure? id)
+                                         (procedure-arity-includes? id #,(length (syntax->list #'(dom ...)))))]
+                                 [_ #f])])
                 (with-syntax ([code
                                (quasisyntax/loc stx
                                  (begin
@@ -1234,10 +1239,11 @@ improve method arity mismatch contract violation error messages?
                   
                   (syntax-local-lift-module-end-declaration
                    #`(begin 
-                       (-contract contract-id id pos-module-source 'ignored #,(id->contract-src-info #'id))
+                       (unless extra-test
+                         (-contract contract-id id pos-module-source 'ignored #,(id->contract-src-info #'id)))
                        (void)))
                   
-                  (syntax (code id-rename)))))]))
+                  (syntax (code id-rename))))))]))
        
        (with-syntax ([(bodies ...) (code-for-each-clause (syntax->list (syntax (p/c-ele ...))))])
          (signal-dup-syntax-error)
@@ -1359,7 +1365,8 @@ improve method arity mismatch contract violation error messages?
          
          check-between/c
          check-unary-between/c
-         parameter/c)
+         parameter/c
+         hash/c)
 
 (define-syntax (flat-rec-contract stx)
   (syntax-case stx  ()
@@ -2057,7 +2064,7 @@ improve method arity mismatch contract violation error messages?
             (if (flat-contract? ctc)
                 (let ([content-pred? (flat-contract-predicate ctc)])
                   (build-flat-contract
-                   `(listof ,(contract-name ctc))
+                   `(name ,(contract-name ctc))
                    (lambda (x) (and (predicate? x) (testmap content-pred? x)))))
                 (let ([proj (contract-proc ctc)])
                   (make-proj-contract
@@ -2476,3 +2483,106 @@ improve method arity mismatch contract violation error messages?
          (contract-stronger? (parameter/c-ctc that) 
                              (parameter/c-ctc this)))))
 
+(define (hash/c dom rng #:immutable [immutable 'dont-care])
+  (unless (memq immutable '(#t #f dont-care))
+    (error 'hash/c "expected #:immutable argument to be either #t, #f, or 'dont-care, got ~s" immutable))
+  (cond
+    [(eq? immutable #t) 
+     (make-immutable-hash/c (coerce-contract 'hash/c dom) 
+                            (coerce-contract 'hash/c rng))]
+    [else
+     (make-hash/c (coerce-flat-contract 'hash/c dom) 
+                  (coerce-flat-contract 'hash/c rng)
+                  immutable)]))
+
+;; hash-test : hash/c -> any -> bool
+(define (hash-test ctc)
+  (let ([dom-proc ((flat-get (hash/c-dom ctc)) (hash/c-dom ctc))]
+        [rng-proc ((flat-get (hash/c-rng ctc)) (hash/c-rng ctc))]
+        [immutable (hash/c-immutable ctc)])
+    (λ (val)
+      (and (hash? val)
+           (case immutable
+             [(#t) (immutable? val)]
+             [(#f) (not (immutable? val))]
+             [(dont-care) #t])
+           (let/ec k
+             (hash-for-each
+              val
+              (λ (dom rng)
+                (unless (dom-proc dom) (k #f))
+                (unless (rng-proc rng) (k #f))))
+             #t)))))
+
+(define-struct hash/c (dom rng immutable)
+  #:omit-define-syntaxes
+
+  #:property flat-prop hash-test
+  #:property proj-prop
+  (λ (ctc)
+    (let ([dom-proc ((proj-get (hash/c-dom ctc)) (hash/c-dom ctc))]
+          [rng-proc ((proj-get (hash/c-rng ctc)) (hash/c-rng ctc))]
+          [immutable (hash/c-immutable ctc)])
+      (λ (pos-blame neg-blame src-info orig-str)
+        (let ([partial-dom-contract (dom-proc pos-blame neg-blame src-info orig-str)]
+              [partial-rng-contract (rng-proc pos-blame neg-blame src-info orig-str)])
+          (λ (val)
+            (unless (hash? val)
+              (raise-contract-error val src-info pos-blame orig-str 
+                                    "expected a hash"))
+            (case immutable
+              [(#t) (unless (immutable? val)
+                      (raise-contract-error val src-info pos-blame orig-str 
+                                            "expected an immutable hash"))]
+              [(#f) (when (immutable? val)
+                      (raise-contract-error val src-info pos-blame orig-str 
+                                            "expected a mutable hash"))]
+              [(dont-care) (void)])
+              
+            (hash-for-each
+             val
+             (λ (key val)
+               (partial-dom-contract key)
+               (partial-rng-contract val)))
+            
+            val)))))
+  
+  #:property name-prop (λ (ctc) (apply 
+                                 build-compound-type-name
+                                 'hash/c (hash/c-dom ctc) (hash/c-rng ctc)
+                                 (if (eq? 'dont-care (hash/c-immutable ctc))
+                                     '()
+                                     (list '#:immutable (hash/c-immutable ctc)))))
+  #:property stronger-prop
+  (λ (this that)
+    #f))
+
+(define-struct immutable-hash/c (dom rng)
+  #:omit-define-syntaxes
+
+  #:property first-order-prop (λ (ctc) (λ (val) (and (hash? val) (immutable? val))))
+  #:property proj-prop
+  (λ (ctc)
+    (let ([dom-proc ((proj-get (immutable-hash/c-dom ctc)) (immutable-hash/c-dom ctc))]
+          [rng-proc ((proj-get (immutable-hash/c-rng ctc)) (immutable-hash/c-rng ctc))])
+      (λ (pos-blame neg-blame src-info orig-str)
+        (let ([partial-dom-contract (dom-proc pos-blame neg-blame src-info orig-str)]
+              [partial-rng-contract (rng-proc pos-blame neg-blame src-info orig-str)])
+          (λ (val)
+            (unless (and (hash? val)
+                         (immutable? val))
+              (raise-contract-error val src-info pos-blame orig-str 
+                                    "expected an immutable hash"))
+            (make-immutable-hash
+             (hash-map
+              val
+              (λ (k v)
+                (cons (partial-dom-contract k)
+                      (partial-rng-contract v))))))))))
+  
+  #:property name-prop (λ (ctc) (build-compound-type-name
+                                 'hash/c (immutable-hash/c-dom ctc) (immutable-hash/c-rng ctc)
+                                 '#:immutable #t))
+  #:property stronger-prop
+  (λ (this that)
+    #f))

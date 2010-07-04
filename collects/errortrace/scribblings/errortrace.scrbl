@@ -1,10 +1,11 @@
 #lang scribble/doc
 
 @(require scribble/manual
-         (for-label scheme
-                    errortrace
-                    errortrace/errortrace-lib
-                    errortrace/stacktrace))
+          scribble/bnf
+          (for-label scheme
+                     errortrace
+                     errortrace/errortrace-lib
+                     errortrace/stacktrace))
 
 @title[#:tag "top"]{@bold{Errortrace}: Debugging and Profiling}
 
@@ -19,31 +20,43 @@ MzScheme's limited stack-trace reporting.
 
 @section[#:tag "quick-instructions"]{Quick Instructions}
 
-@itemize{@item{Throw away @filepath{.zo} versions of your source.}
+First, throw away @filepath{.zo} versions of your program---at least
+for the modules or files that should be instrumented for error
+reporting or profiling.
+
+Then,
+
+@itemize[
+         @item{If your program has a module file @nonterm{prog}, run it with
               
-         @item{Prefix your program with
+               @commandline{mzscheme -l errortrace -t @nonterm{prog}}}
+
+         @item{If you program is a non-module top-level sequence of
+               definitions and expressions, you can instead add
                @schemeblock[(require errortrace)]
-               or start MzScheme with the @Flag{l} option before the
+               to the beginning of the program or start MzScheme with the @Flag{l} option before the
                arguments to load your program:
-               @commandline{mzscheme -l errortrace ...}
+               @commandline{mzscheme -l errortrace ...}}
 
-               If you want to use MzScheme interactively, include the
-               @Flag{i} flag first:
+         @item{If you have no main program and you want to use
+               MzScheme interactively, include the @Flag{i} flag
+               before @Flag{l}:
                @commandline{mzscheme -i -l errortrace}}
+         ]
 
-         @item{When an exception occurs, the exception handler prints
-               something like a stack trace, most recent contexts first.}
-         }
+After starting @schememodname[errortrace] in one of these ways, when an
+exception occurs, the exception handler something like a stack trace
+with most recent contexts first.
 
-The @schememodname[errortrace] module is strange; don't import it
+The @schememodname[errortrace] module is strange: Don't import it
 into another module. Instead, the @schememodname[errortrace] 
 module is meant to be invoked from the top-level, so that it can install 
 an evaluation handler, exception handler, etc.
 
 To reuse parts of the code of @schememodname[errortrace], import
-@schememodname[errortrace/errortrace-lib]. It contains all of the
-bindings described here, but does not set the compilation handler or
-the error display handler.
+@schememodname[errortrace/errortrace-lib]. That library contains all
+of the bindings described here, but does not set the compilation
+handler or the error display handler.
 
 @; ----------------------------------------------
 
@@ -71,6 +84,20 @@ parameters.
 @section[#:tag "using-errortrace"]{Using Errortrace}
 
 @defmodule[errortrace #:use-sources (errortrace/errortrace-lib)]
+
+See @secref["quick-instructions"] for information on starting with
+@schememodname[errortrace]. This chapter provides information on the
+configuration of @schememodname[errortrace] after it is loaded and
+installed.
+
+Don't import @schememodname[errortrace] into another module and expect
+it to work on that module. Instead, the @schememodname[errortrace]
+module is meant to be invoked from the top-level (as described in
+@secref["quick-instructions"]) so it can install handlers. The
+functions documented in this chapter then can be used at the
+top-level. The functions also can be accessed by importing
+@schememodname[errortrace/errortrace-lib], which does not install any
+handlers.
 
 @; ---------------------------------------------
 
@@ -117,7 +144,7 @@ and sorts by either time or call counts.}
 Returns a list of lists that contain all profiling information accumulated
 so far:
 
-@itemize{
+@itemize[
    @item{the number of times a procedure was called.}
 
    @item{the number of milliseconds consumed by the procedure's body across
@@ -133,19 +160,19 @@ so far:
    @item{optionally, a list of unique call paths (i.e. stack traces) 
          recorded if @scheme[profile-paths-enabled] is set to @scheme[#t].
          Each call path is a pair of 
-         @itemize{
+         @itemize[
            @item{a count (the number of times the path occurred), and}
                 
            @item{a list containing two-element lists. Each two-element list
                  contains 
-                 @itemize{
+                 @itemize[
                    @item{the calling procedure's name or source expression,
                          and}
-                   @item{the calling procedure's source file or @scheme[#f].}}
+                   @item{the calling procedure's source file or @scheme[#f].}]
                 }
-        }
+        ]
         Collecting this information is relatively expensive.}
-}}
+]}
 
 @defboolparam[profile-paths-enabled on?]{
 
@@ -350,11 +377,16 @@ calls to @schemein[test-covered] are inserted into the code (and
 @schemein[initialize-test-coverage-point] is called during compilation).
 If not, no calls to test-covered are inserted.}
 
-@defproc[(test-covered (key any/c)) void?]{
+@defproc[(test-covered (key any/c)) (or/c (-> void?) syntax? #f)]{
+This is called during compilation of the program with a key value once
+ for each point with the key for that program point that was passed to
+@schemein[initialize-test-coverage-point].
 
-During execution of the program, this is called for each point with
-the key for that program point that was passed to
-@schemein[initialize-test-coverage-point].}
+If the result is @scheme[#f], this program point is not
+instrumented. If the result is syntax, it is inserted into the code,
+and if it is a thunk, the thunk is inserted into the code in an
+application. In either case, the syntax or the thunk should register
+that the relevant point was covered.}
 
 @defproc[(initialize-test-coverage-point (key any/c) (stx any/c)) void?]{
 

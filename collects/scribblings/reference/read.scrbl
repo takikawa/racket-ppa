@@ -29,7 +29,7 @@ See @secref["reader"] for information on the default reader in
 @defproc[(read/recursive [in input-port? (current-input-port)]
                          [start (or/c char? #f) #f]
                          [readtable (or/c readtable? #f) (current-readtable)]
-                         [graph? any/c #f])
+                         [graph? any/c #t])
           any]{
 
 Similar to calling @scheme[read], but normally used during the dynamic
@@ -77,7 +77,7 @@ See @secref["readtables"] for an extended example that uses
                                 [in input-port? (current-input-port)]
                                 [start (or/c char? #f) #f]
                                 [readtable (or/c readtable? #f) (current-readtable)]
-                                [graph? any/c #f])
+                                [graph? any/c #t])
           any]{
 
 Analogous to calling @scheme[read/recursive], but the resulting value
@@ -155,7 +155,7 @@ If @scheme[in] does not specify a @tech{reader language}, then
 
 A parameter that controls parsing and printing of symbols. When this
 parameter's value is @scheme[#f], the reader case-folds symbols (e.g.,
-producing @scheme['hi] when the input is any one of \litchar{hi},
+producing @scheme['hi] when the input is any one of @litchar{hi},
 @litchar{Hi}, @litchar{HI}, or @litchar{hI}). The parameter also
 affects the way that @scheme[write] prints symbols containing
 uppercase characters; if the parameter's value is @scheme[#f], then
@@ -279,7 +279,7 @@ port read handler is not used for @scheme[read/recursive] or
 A port read handler is applied to either one argument or two
 arguments:
 
-@itemize{
+@itemize[
 
  @item{A single argument is supplied when the port is used
  with @scheme[read]; the argument is the port being read. The return
@@ -290,7 +290,7 @@ arguments:
  the second argument is a value indicating the source. The return
  value is a syntax object that was read from the port (or end-of-file).}
 
-}
+]
 
 The default port read handler reads standard Scheme expressions with
 Scheme's built-in parser (see @secref["reader"]). It handles a
@@ -317,7 +317,7 @@ Like @scheme[read-syntax], but for Honu mode (see
 @defproc[(read-honu/recursive [in input-port? (current-input-port)]
                               [start (or/c char? #f) #f]
                               [readtable (or/c readtable? #f) (current-readtable)]
-                              [graph? any/c #f])
+                              [graph? any/c #t])
           any]{
 
 Like @scheme[read/recursive], but for Honu mode (see

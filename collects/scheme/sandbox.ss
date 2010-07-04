@@ -236,8 +236,8 @@
 (define (module-specs->non-lib-paths mods)
   (define (lib? x)
     (if (module-path-index? x)
-        (let-values ([(m base) (module-path-index-split x)]) (lib? m))
-        (and (pair? x) (eq? 'lib (car x)))))
+      (let-values ([(m base) (module-path-index-split x)]) (lib? m))
+      (or (symbol? x) (and (pair? x) (eq? 'lib (car x))))))
   ;; turns a module spec to a simple one (except for lib specs)
   (define (simple-modspec mod)
     (cond [(and (pair? mod) (eq? 'lib (car mod))) #f]
@@ -253,25 +253,22 @@
           [(and (eq? 'prefix (car mod)) (pair? (cddr mod)))
            (simple-modspec (caddr mod))]
           [else #f]))
-  (let loop ([todo (filter values (map simple-modspec mods))]
+  (let loop ([todo (filter-map simple-modspec mods)]
              [r '()])
     (cond
-     [(null? todo) r]
-     [(member (car todo) r) (loop (cdr todo) r)]
-     [else
-      (let ([path (car todo)])
-        (loop (filter values
-                      (map (lambda (i)
-                             (simplify-path* (resolve-module-path-index i path)))
-                           (filter (lambda (i)
-                                     (and (module-path-index? i) (not (lib? i))))
-                                   (apply append
-                                          (call-with-values
-                                              (lambda ()
-                                                (module-compiled-imports
-                                                 (get-module-code (car todo))))
-                                            list)))))
-              (cons path r)))])))
+      [(null? todo) r]
+      [(member (car todo) r) (loop (cdr todo) r)]
+      [else
+       (let ([path (car todo)])
+         (loop (append (cdr todo)
+                       (filter-map
+                        (lambda (i)
+                          (simplify-path* (resolve-module-path-index i path)))
+                        (filter (lambda (i)
+                                  (and (module-path-index? i) (not (lib? i))))
+                                (append-map cdr (module-compiled-imports
+                                                 (get-module-code path))))))
+               (cons path r)))])))
 
 ;; Resources ----------------------------------------------------------------
 
@@ -627,6 +624,7 @@
   (define user-thread   #t) ; set later to the thread
   (define user-done-evt #t) ; set in the same place
   (define terminated?   #f) ; set to an exception value when the sandbox dies
+  (define breaks-originally-enabled? (break-enabled))
   (define (limit-thunk thunk)
     (let* ([sec (and limits (car limits))]
            [mb  (and limits (cadr limits))]
@@ -665,42 +663,67 @@
   (define (user-break)
     (when user-thread (break-thread user-thread)))
   (define (user-process)
-    (with-handlers ([void (lambda (exn) (channel-put result-ch exn))])
-      ;; first set up the environment
-      (init-hook)
-      ((sandbox-init-hook))
-      ;; now read and evaluate the input program
-      (evaluate-program
-       (if (procedure? program-maker) (program-maker) program-maker)
-       limit-thunk
-       (and coverage? (lambda (es+get) (set! uncovered es+get))))
-      (channel-put result-ch 'ok))
-    (set! eval-handler (cadr (sandbox-eval-handlers))) ; interactions handler
-    ;; finally wait for interaction expressions
-    (let ([n 0])
-      (let loop ()
-        (let ([expr (channel-get input-ch)])
-          (when (eof-object? expr)
-            (terminated! 'eof) (channel-put result-ch expr) (user-kill))
-          (with-handlers ([void (lambda (exn)
-                                  (channel-put result-ch (cons 'exn exn)))])
-            (define run
-              (if (evaluator-message? expr)
-                (case (evaluator-message-msg expr)
-                  [(thunk) (limit-thunk (car (evaluator-message-args expr)))]
-                  [(thunk*) (car (evaluator-message-args expr))]
-                  [else (error 'sandbox "internal error (bad message)")])
-                (limit-thunk
-                 (lambda ()
-                   (set! n (add1 n))
-                   (eval* (map (lambda (expr) (cons '#%top-interaction expr))
-                               (input->code (list expr) 'eval n)))))))
-            (channel-put result-ch (cons 'vals (call-with-values run list))))
-          (loop)))))
+    (let ([break-paramz (current-break-parameterization)])
+      (parameterize-break
+       #f ;; disable breaks during administrative work
+       (with-handlers ([void (lambda (exn) (channel-put result-ch exn))])
+         (call-with-break-parameterization
+          break-paramz
+          (lambda ()
+            ;; enable breaks, maybe
+            (when breaks-originally-enabled? (break-enabled #t))
+            ;; first set up the environment
+            (init-hook)
+            ((sandbox-init-hook))
+            ;; now read and evaluate the input program
+            (evaluate-program
+             (if (procedure? program-maker) (program-maker) program-maker)
+             limit-thunk
+             (and coverage? (lambda (es+get) (set! uncovered es+get))))))
+         (channel-put result-ch 'ok))
+       (set! eval-handler (cadr (sandbox-eval-handlers))) ; interactions handler
+       ;; finally wait for interaction expressions
+       (let ([n 0])
+         (let loop ()
+           (let ([expr (channel-get input-ch)])
+             (when (eof-object? expr)
+               (terminated! 'eof) (channel-put result-ch expr) (user-kill))
+             (with-handlers ([void (lambda (exn)
+                                     (channel-put result-ch (cons 'exn exn)))])
+               (define run
+                 (if (evaluator-message? expr)
+                     (case (evaluator-message-msg expr)
+                       [(thunk) (limit-thunk (car (evaluator-message-args expr)))]
+                       [(thunk*) (car (evaluator-message-args expr))]
+                       [else (error 'sandbox "internal error (bad message)")])
+                     (limit-thunk
+                      (lambda ()
+                        (set! n (add1 n))
+                        (eval* (map (lambda (expr) (cons '#%top-interaction expr))
+                                    (input->code (list expr) 'eval n)))))))
+               (channel-put result-ch (cons 'vals 
+                                            (call-with-break-parameterization
+                                             break-paramz
+                                             (lambda ()
+                                               (call-with-values run list))))))
+             (loop)))))))
   (define (get-user-result)
-    (with-handlers ([(if (sandbox-propagate-breaks) exn:break? (lambda (_) #f))
-                     (lambda (e) (user-break) (get-user-result))])
-      (sync user-done-evt result-ch)))
+    (if (and (sandbox-propagate-breaks)
+             ;; The following test is weird. We reliably catch breaks if breaks
+             ;; are enabled, except that a break just before or after isn't
+             ;; reliably propagated. A `get-result/enable-breaks' function
+             ;; would make more sense.
+             (break-enabled))
+        ;; The following loop ensures that breaks are disabled while trying
+        ;; to handle a break, which ensures that we don't fail to
+        ;; propagate a break.
+        (parameterize-break
+         #f
+         (let loop ()
+           (with-handlers* ([exn:break? (lambda (e) (user-break) (loop))])
+             (sync/enable-break user-done-evt result-ch))))
+        ;; The simple case doesn't have to deal with breaks:
+        (sync user-done-evt result-ch)))
   (define (user-eval expr)
     ;; the thread will usually be running, but it might be killed outside of
     ;; the sandboxed environment, for example, if you do something like
@@ -763,7 +786,7 @@
           [(thunk thunk*) (user-eval expr)]
           [else (error 'evaluator "internal error, bad message: ~e" msg)]))
       (user-eval expr)))
-  (define (make-output what out set-out! allow-link?)
+  (define (make-output what out set-out!)
     (cond [(not out) (open-output-nowhere)]
           [(and (procedure? out) (procedure-arity-includes? out 0)) (out)]
           [(output-port? out) out]
@@ -804,11 +827,9 @@
          (let-values ([(i o) (make-pipe)]) (set! input o) i)]
         [else (error 'make-evaluator "bad sandbox-input: ~e" inp)]))]
     [current-output-port (make-output 'output (sandbox-output)
-                                      (lambda (o) (set! output o))
-                                      #f)]
+                                      (lambda (o) (set! output o)))]
     [current-error-port (make-output 'error-output (sandbox-error-output)
-                                     (lambda (o) (set! error-output o))
-                                     #t)]
+                                     (lambda (o) (set! error-output o)))]
     ;; paths
     [current-library-collection-paths
      (filter directory-exists?
@@ -856,7 +877,9 @@
     ;; evaluates the program in `run-in-bg') -- so this parameterization
     ;; must be nested in the above (which is what paramaterize* does), or
     ;; it will not use the new namespace.
-    [current-eventspace (make-eventspace)])
+    [current-eventspace (parameterize-break
+                         #f
+                         (make-eventspace))])
    (let ([t (bg-run->thread (run-in-bg user-process))])
      (set! user-done-evt (handle-evt t (lambda (_) (terminate+kill! #t #t))))
      (set! user-thread t))

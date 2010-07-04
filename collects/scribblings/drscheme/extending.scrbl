@@ -39,7 +39,7 @@ Teachpacks are designed to supplement student programs with code that
 cannot be expressed in a teaching language. For
 example, to enable students to play hangman, we supply a teachpack that
 
-@itemize{
+@itemize[
 
  @item{implements the random choosing of a word,}
 
@@ -47,7 +47,7 @@ example, to enable students to play hangman, we supply a teachpack that
 
  @item{manages the GUI.}
 
-}
+]
 
 All these tasks are beyond students in the third week and/or impose
 memorization of currently useless knowledge on students. The essence
@@ -134,6 +134,10 @@ Several environment variables can affect DrScheme's behavior:
        set, DrScheme starts up with errortrace enabled. If the
        variable is set to @litchar{profile}, DrScheme also records
        profiling information about itself.}
+
+ @item{@indexed-envvar{PLTDRPROFILE} : When this environment variable is
+       set, DrScheme uses the @schememodname[profile] library (with
+       a little GUI) to collect profiling information about itself.}
 
  @item{@indexed-envvar{PLTDRBREAK} : When this environment variable is
        set, DrScheme creates a window with a break button, during

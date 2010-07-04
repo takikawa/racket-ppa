@@ -2,9 +2,8 @@
 
 (require (except-in "../utils/utils.ss" extend))
 (require (rep type-rep)
-	 (private type-effect-convenience
-		  type-utils parse-type
-		  union resolve-type)
+         (private parse-type)
+	 (types convenience utils union resolve abbrev)
 	 (env type-env type-environments type-name-env)
 	 (utils tc-utils)
          "def-binding.ss"
@@ -87,6 +86,7 @@
 (define (mk/register-sty nm flds parent parent-field-types types 
                          #:wrapper [wrapper values] 
                          #:type-wrapper [type-wrapper values]
+                         #:pred-wrapper [pred-wrapper values]
                          #:mutable [setters? #f]
                          #:proc-ty [proc-ty #f]
                          #:maker [maker* #f]
@@ -105,6 +105,7 @@
         (register-struct-types nm sty flds external-fld-types external-fld-types/no-parent setters? 
                                #:wrapper wrapper
                                #:type-wrapper type-wrapper
+                               #:pred-wrapper pred-wrapper
                                #:maker (or maker* maker)
                                #:constructor-return cret))))
 
@@ -114,6 +115,7 @@
 (define (register-struct-types nm sty flds external-fld-types external-fld-types/no-parent setters?
                                #:wrapper [wrapper values]
                                #:type-wrapper [type-wrapper values]
+                               #:pred-wrapper [pred-wrapper values]
                                #:maker [maker* #f]
                                #:constructor-return [cret #f])
   ;; create the approriate names that define-struct will bind
@@ -126,8 +128,14 @@
      (list (cons (or maker* maker) 
                  (wrapper (->* external-fld-types (if cret cret name))))
            (cons pred
-                 (make-pred-ty (wrapper name))))
-     (map (lambda (g t) (cons g (wrapper (->* (list name) t)))) getters external-fld-types/no-parent)
+                 (make-pred-ty (pred-wrapper name))))
+     (for/list ([g (in-list getters)] [t (in-list external-fld-types/no-parent)] [i (in-naturals)])
+       (let ([func (if setters? 
+                       (->* (list name) t)
+                       (make-Function 
+                        (list (make-arr* (list name) t 
+                                         #:object (make-LPath (list (make-StructPE name i)) 0)))))])
+         (cons g (wrapper func))))
      (if setters?
          (map (lambda (g t) (cons g (wrapper (->* (list name t) -Void)))) setters external-fld-types/no-parent)
          null)))
@@ -168,6 +176,7 @@
                    ;; wrap everything in the approriate forall
                    #:wrapper (lambda (t) (make-Poly tvars t))
                    #:type-wrapper (lambda (t) (make-App t new-tvars #f))
+                   #:pred-wrapper (lambda (t) (subst-all (for/list ([t tvars]) (list t Univ)) t))
                    #:poly? #t))
 
 

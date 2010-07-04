@@ -952,7 +952,7 @@
 			 (semaphore-post lock))
 			(wrap-evt
 			 (semaphore-peek-evt lock)
-			 (lambda () 0)))))
+			 (lambda (v) 0)))))
 	     void)])
     (test-a-port p (gdelay go) gsync)))
 
@@ -1286,6 +1286,26 @@
 (test #f tcp-port? (current-output-port))
 
 (arity-test tcp-port? 1 1)
+
+;; Check that `tcp-accept-evt' uses the right custodian
+(let ()
+  (define l (tcp-listen 40000 5 #t))
+  (define c (make-custodian))
+  
+  (define-values (i o) (values #f #f))
+  
+  (define t
+    (thread
+     (lambda ()
+       (parameterize ([current-custodian c])
+         (set!-values (i o) (apply values (sync (tcp-accept-evt l))))))))
+  
+  (define-values (ci co) (tcp-connect "localhost" 40000))
+  
+  (sync t)
+  
+  (custodian-shutdown-all c)
+  (port-closed? i))
 
 ;;----------------------------------------------------------------------
 ;; UDP

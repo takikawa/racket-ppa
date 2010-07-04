@@ -35,12 +35,12 @@ parentheses for expressions are brown.
 Many predefined functions operate on lists. Here are a few examples:
 
 @interaction[
-(code:line (length (list "a" "b" "c"))        (code:comment #, @t{count the elements}))
-(code:line (list-ref (list "a" "b" "c") 0)    (code:comment #, @t{extract by position}))
-(list-ref (list "a" "b" "c") 1)
-(code:line (append (list "a" "b") (list "c")) (code:comment #, @t{combine lists}))
-(code:line (reverse (list "a" "b" "c"))       (code:comment #, @t{reverse order}))
-(code:line (member "d" (list "a" "b" "c"))    (code:comment #, @t{check for an element}))
+(code:line (length (list "hop" "skip" "jump"))        (code:comment @#,t{count the elements}))
+(code:line (list-ref (list "hop" "skip" "jump") 0)    (code:comment @#,t{extract by position}))
+(list-ref (list "hop" "skip" "jump") 1)
+(code:line (append (list "hop" "skip") (list "jump")) (code:comment @#,t{combine lists}))
+(code:line (reverse (list "hop" "skip" "jump"))       (code:comment @#,t{reverse order}))
+(code:line (member "fall" (list "hop" "skip" "jump")) (code:comment @#,t{check for an element}))
 ]
 
 @;------------------------------------------------------------------------
@@ -125,13 +125,13 @@ iterations using a handful of list primitives.
 Since a Scheme list is a linked list, the two core operations on a
 non-empty list are
 
-@itemize{
+@itemize[
 
  @item{@scheme[first]: get the first thing in the list; and}
 
  @item{@scheme[rest]: get the rest of the list.}
 
-}
+]
 
 @examples[
 #:eval list-eval
@@ -220,12 +220,12 @@ argument @scheme[len]:
 
 @schemeblock[
 (define (my-length lst)
-  (code:comment #, @t{local function @scheme[iter]:})
+  (code:comment @#,t{local function @scheme[iter]:})
   (define (iter lst len)
     (cond
      [(empty? lst) len]
      [else (iter (rest lst) (+ len 1))]))
-  (code:comment #, @t{body of @scheme[my-length] calls @scheme[iter]:})
+  (code:comment @#,t{body of @scheme[my-length] calls @scheme[iter]:})
   (iter lst 0))
 ]
 
@@ -260,6 +260,9 @@ reasonable, since it has to generate a result of size
 accumulating the result list. The only catch is that the accumulated
 list will be backwards, so you'll have to reverse it at the very end:
 
+@margin-note{Attempting to reduce a constant factor like this is
+usually not worthwhile, as discussed below.}
+
 @schemeblock[
 (define (my-map f lst)
   (define (iter lst backward-result)
@@ -291,7 +294,7 @@ iteration is just a special case of recursion. In many languages, it's
 important to try to fit as many computations as possible into
 iteration form. Otherwise, performance will be bad, and moderately
 large inputs can lead to stack overflow.  Similarly, in Scheme, it is
-often important to make sure that tail recursion is used to avoid
+sometimes important to make sure that tail recursion is used to avoid
 @math{O(n)} space consumption when the computation is easily performed
 in constant space.
 

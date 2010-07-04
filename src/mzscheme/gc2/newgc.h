@@ -5,8 +5,8 @@ typedef struct mpage {
   struct mpage *next;
   struct mpage *prev;
   void *addr;
-  unsigned long previous_size;
-  unsigned long size;
+  unsigned long previous_size; /* for med page, points to place to search for available block */
+  unsigned long size; /* big page size or med page element size */
   unsigned char generation;
 /*
   unsigned char back_pointers :1;
@@ -17,7 +17,7 @@ typedef struct mpage {
   unsigned char mprotected    :1;
 */
   unsigned char back_pointers ;
-  unsigned char big_page      ;
+  unsigned char size_class    ; /* 1 => med; 2 => big; 3 => big marked */
   unsigned char page_type     ; 
   unsigned char marked_on     ;
   unsigned char has_new       ;
@@ -85,12 +85,20 @@ typedef struct Page_Range {
   unsigned long range_alloc_used;
 } Page_Range;
 
+#ifdef MZ_USE_PLACES
+typedef struct NewGCMasterInfo {
+  unsigned short next_GC_id;
+  mzrt_rwlock *cangc;
+} NewGCMasterInfo;
+#endif
 
 #ifdef SIXTY_FOUR_BIT_INTEGERS
 typedef mpage ****PageMap;
 #else
 typedef mpage **PageMap;
 #endif
+
+#define NUM_MED_PAGE_SIZES (((LOG_APAGE_SIZE - 1) - 3) + 1)
 
 typedef struct NewGC {
   Gen0 gen0;
@@ -101,6 +109,8 @@ typedef struct NewGC {
   struct mpage *gen1_pages[PAGE_TYPES];
   Page_Range *protect_range;
 
+  struct mpage *med_pages[NUM_MED_PAGE_SIZES];
+  struct mpage *med_freelist_pages[NUM_MED_PAGE_SIZES];
 
   /* Finalization */
   Fnl *run_queue;
@@ -154,10 +164,14 @@ typedef struct NewGC {
   unsigned long num_major_collects;
   
   /* THREAD_LOCAL variables that need to be saved off */
-  MarkSegment *saved_mark_stack;
-  void *saved_GC_variable_stack;
+  MarkSegment  *saved_mark_stack;
+  void         *saved_GC_variable_stack;
   unsigned long saved_GC_gen0_alloc_page_ptr;
   unsigned long saved_GC_gen0_alloc_page_end;
+  /* Distributed GC over places info */
+#ifdef MZ_USE_PLACES
+  objhead       saved_GC_objhead_template;
+#endif
 
 
   /* Callbacks */

@@ -75,16 +75,6 @@
                               (equal? (lw-e thing-in-hole) 'hole))
                          (list (blank) context (blank))
                          (list (blank) context "" "[" thing-in-hole "]")))))
-       (in-named-hole ,(λ (args)
-                         (let ([name (lw-e (list-ref args 2))]
-                               [context (list-ref args 3)]
-                               [thing-in-hole (list-ref args 4)])
-                           (if (and (lw? thing-in-hole)
-                                    (equal? (lw-e thing-in-hole) 'hole))
-                               (list (blank) context "[]" 
-                                     (basic-text (format "~a" name) (non-terminal-subscript-style)))
-                               (list (blank) context "" "[" thing-in-hole "]" 
-                                     (basic-text (format "~a" name) (non-terminal-subscript-style)))))))
        (hide-hole ,(λ (args)
                      (list (blank)
                            (list-ref args 2)
@@ -198,15 +188,6 @@
     
     (define (ar/e e line line-span col col-span)
       (cond
-        [(and (symbol? e) (assoc e (atomic-rewrite-table)))
-         =>
-         (λ (m)
-           (when (eq? (cadr m) e)
-             (error 'apply-rewrites "rewritten version of ~s is still ~s" e e))
-           (let ([p (cadr m)])
-             (if (procedure? p)
-                 (p)
-                 p)))]
         [(symbol? e) e]
         [(string? e) e]
         [(pict? e) e]
@@ -269,7 +250,9 @@
                [(null? lst) null]
                [(null? (cdr lst))
                 (let ([last (car lst)])
-                  (list (just-before (close-white-square-bracket) last)))]
+                  (list (build-lw "" (lw-line last) 0 (lw-column last) 0)
+                        'spring
+                        (just-after (close-white-square-bracket) last)))]
                [(null? (cddr lst))
                 (cons (car lst) (loop (cdr lst)))]
                [else (list* (car lst) 
@@ -467,7 +450,12 @@
            (set! current-line line)
            (set! current-column col))]
         [else
-         (error 'eject "lines going backwards")])
+         (error 'eject
+                "lines going backwards (current-line ~s line ~s atom ~s tokens ~s)" 
+                current-line
+                line
+                atom
+                tokens)])
       (when (< current-column col)
         (let ([space-span (- col current-column)])
           (set! tokens (cons (make-blank-space-token unquoted?
@@ -707,22 +695,41 @@
                 [second-part (caddr m)]
                 [first-span (- span (string-length first-part))])
            (list 
-            (make-string-token col
-                               first-span
-                               first-part
-                               (non-terminal-style))
+            (non-terminal->token col first-span first-part)
             (make-string-token (+ col first-span) 
                                (- span first-span)
                                second-part
                                (non-terminal-subscript-style)))))]
       [(or (memq atom all-nts)
            (memq atom '(number variable variable-except variable-not-otherwise-mentioned)))
-       (list (make-string-token col span (format "~s" atom) (non-terminal-style)))]
+       (list (non-terminal->token col span (format "~s" atom)))]
       [(symbol? atom)
-       (list (make-string-token col span (symbol->string atom) (literal-style)))]
+       (list (or (rewrite-atomic col span atom literal-style)
+                 (make-string-token col span (symbol->string atom) (literal-style))))]
       [(string? atom)
        (list (make-string-token col span atom (default-style)))]
       [else (error 'atom->tokens "unk ~s" atom)]))
+
+  (define (rewrite-atomic col span e get-style)
+    (cond
+     [(assoc e (atomic-rewrite-table))
+      =>
+      (λ (m)
+         (when (eq? (cadr m) e)
+           (error 'apply-rewrites "rewritten version of ~s is still ~s" e e))
+         (let ([p (cadr m)])
+           (if (procedure? p)
+               (make-pict-token col span (p))
+               (make-string-token col span p (get-style)))))]
+     [else #f]))
+
+  (define (non-terminal->token col span str)
+    (let ([e (string->symbol str)])
+      (or (rewrite-atomic col span e non-terminal-style)
+          (make-string-token col
+                             span
+                             str
+                             (non-terminal-style)))))
   
   (define (pick-font lst fallback)
     (let ([fl (get-face-list 'all)])

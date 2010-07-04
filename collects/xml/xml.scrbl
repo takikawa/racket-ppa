@@ -28,7 +28,7 @@ called an @deftech{X-expression}.
 The @schememodname[xml] library does not provide Document Type
 Declaration (DTD) processing, including preservation of DTDs in read documents, or validation.
 It also does not expand user-defined entities or read user-defined entities in attributes.
-It does interpret namespaces either.
+It does not interpret namespaces either.
 
 @; ----------------------------------------------------------------------
 
@@ -106,7 +106,7 @@ Represents an attribute within an element.}
 }
 
 @defthing[permissive/c contract?]{
- If @scheme[(permissive?)] is @scheme[#t], then equivalent to @scheme[any/c], otherwise equivalent to @scheme[(make-none/c 'permissive)]}
+ If @scheme[(permissive-xexprs)] is @scheme[#t], then equivalent to @scheme[any/c], otherwise equivalent to @scheme[(make-none/c 'permissive)]}
 
 @defstruct[(entity source) ([text (or/c symbol? exact-nonnegative-integer?)])]{
 
@@ -246,7 +246,7 @@ like @scheme[display-xml].}
 
 @section{XML and X-expression Conversions}
 
-@defboolparam[permissive? v]{
+@defboolparam[permissive-xexprs v]{
  If this is set to non-false, then @scheme[xml->xexpr] will allow
  non-XML objects, such as other structs, in the content of the converted XML
  and leave them in place in the resulting ``@tech{X-expression}''.
@@ -255,7 +255,7 @@ like @scheme[display-xml].}
 @defproc[(xml->xexpr [content content/c]) xexpr/c]{
 
 Converts document content into an @tech{X-expression}, using
-@scheme[permissive?] to determine if foreign objects are allowed.}
+@scheme[permissive-xexprs] to determine if foreign objects are allowed.}
 
 @defproc[(xexpr->xml [xexpr xexpr/c]) content/c]{
 
@@ -264,6 +264,10 @@ Converts an @tech{X-expression} into XML content.}
 @defproc[(xexpr->string [xexpr xexpr/c]) string?]{
 
 Converts an @tech{X-expression} into a string containing XML.}
+
+@defproc[(string->xexpr [str string?]) xexpr/c]{
+
+Converts XML represented with a string into an @tech{X-expression}.}
 
 @defproc[((eliminate-whitespace [tags (listof symbol?)]
                                 [choose (boolean? . -> . boolean?)])
@@ -370,7 +374,7 @@ A @deftech{plist dictionary} is a value that could be created by an
 expression matching the following @scheme[_dict-expr] grammar:
 
 @schemegrammar*[
-#:literals (list)
+#:literals (list quote)
 [dict-expr (list 'dict assoc-pair ...)]
 [assoc-pair (list 'assoc-pair string pl-value)]
 [pl-value string

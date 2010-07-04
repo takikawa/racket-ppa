@@ -1649,6 +1649,7 @@ static int thread_val_MARK(void *p) {
   gcMARK(pr->current_mt);
 
   gcMARK(pr->constant_folding);
+  gcMARK(pr->reading_delayed);
   
   gcMARK(pr->overflow_reply);
 
@@ -1676,6 +1677,7 @@ static int thread_val_MARK(void *p) {
   gcMARK(pr->private_kill_next);
   
   gcMARK(pr->user_tls);
+  gcMARK(pr->gmp_tls_data);
   
   gcMARK(pr->mr_hop);
   gcMARK(pr->mref);
@@ -1759,6 +1761,7 @@ static int thread_val_FIXUP(void *p) {
   gcFIXUP(pr->current_mt);
 
   gcFIXUP(pr->constant_folding);
+  gcFIXUP(pr->reading_delayed);
   
   gcFIXUP(pr->overflow_reply);
 
@@ -1786,6 +1789,7 @@ static int thread_val_FIXUP(void *p) {
   gcFIXUP(pr->private_kill_next);
   
   gcFIXUP(pr->user_tls);
+  gcFIXUP(pr->gmp_tls_data);
   
   gcFIXUP(pr->mr_hop);
   gcFIXUP(pr->mref);
@@ -2086,6 +2090,7 @@ static int namespace_val_MARK(void *p) {
 
   gcMARK(e->rename_set);
   gcMARK(e->temp_marked_names);
+  gcMARK(e->post_ex_rename_set);
 
   gcMARK(e->syntax);
   gcMARK(e->exp_env);
@@ -2100,6 +2105,9 @@ static int namespace_val_MARK(void *p) {
   gcMARK(e->tt_require_names);
   gcMARK(e->dt_require_names);
   gcMARK(e->other_require_names);
+  gcMARK(e->did_starts);
+  gcMARK(e->available_next[0]);
+  gcMARK(e->available_next[1]);
 
   gcMARK(e->toplevel);
   gcMARK(e->modchain);
@@ -2121,6 +2129,7 @@ static int namespace_val_FIXUP(void *p) {
 
   gcFIXUP(e->rename_set);
   gcFIXUP(e->temp_marked_names);
+  gcFIXUP(e->post_ex_rename_set);
 
   gcFIXUP(e->syntax);
   gcFIXUP(e->exp_env);
@@ -2135,6 +2144,9 @@ static int namespace_val_FIXUP(void *p) {
   gcFIXUP(e->tt_require_names);
   gcFIXUP(e->dt_require_names);
   gcFIXUP(e->other_require_names);
+  gcFIXUP(e->did_starts);
+  gcFIXUP(e->available_next[0]);
+  gcFIXUP(e->available_next[1]);
 
   gcFIXUP(e->toplevel);
   gcFIXUP(e->modchain);
@@ -2455,6 +2467,7 @@ static int module_phase_exports_val_MARK(void *p) {
   gcMARK(m->provide_src_names);
   gcMARK(m->provide_nominal_srcs);
   gcMARK(m->provide_src_phases);
+  gcMARK(m->provide_insps);
 
   gcMARK(m->kernel_exclusion);
   gcMARK(m->kernel_exclusion2);
@@ -2477,6 +2490,7 @@ static int module_phase_exports_val_FIXUP(void *p) {
   gcFIXUP(m->provide_src_names);
   gcFIXUP(m->provide_nominal_srcs);
   gcFIXUP(m->provide_src_phases);
+  gcFIXUP(m->provide_insps);
 
   gcFIXUP(m->kernel_exclusion);
   gcFIXUP(m->kernel_exclusion2);
@@ -5033,9 +5047,9 @@ static int mark_rename_table_MARK(void *p) {
   gcMARK(rn->nomarshal_ht);
   gcMARK(rn->unmarshal_info);
   gcMARK(rn->shared_pes);
-  gcMARK(rn->plus_kernel_nominal_source);
   gcMARK(rn->set_identity);
   gcMARK(rn->marked_names);
+  gcMARK(rn->free_id_renames);
   return
   gcBYTES_TO_WORDS(sizeof(Module_Renames));
 }
@@ -5047,9 +5061,9 @@ static int mark_rename_table_FIXUP(void *p) {
   gcFIXUP(rn->nomarshal_ht);
   gcFIXUP(rn->unmarshal_info);
   gcFIXUP(rn->shared_pes);
-  gcFIXUP(rn->plus_kernel_nominal_source);
   gcFIXUP(rn->set_identity);
   gcFIXUP(rn->marked_names);
+  gcFIXUP(rn->free_id_renames);
   return
   gcBYTES_TO_WORDS(sizeof(Module_Renames));
 }
@@ -5202,6 +5216,40 @@ static int lex_rib_FIXUP(void *p) {
 
 #define lex_rib_IS_ATOMIC 0
 #define lex_rib_IS_CONST_SIZE 1
+
+
+static int mark_free_id_info_SIZE(void *p) {
+  return
+  gcBYTES_TO_WORDS((sizeof(Scheme_Vector) 
+		    + ((8 - 1) * sizeof(Scheme_Object *))));
+}
+
+static int mark_free_id_info_MARK(void *p) {
+  Scheme_Vector *vec = (Scheme_Vector *)p;
+  int i;
+  for (i = 8; i--; )
+    gcMARK(vec->els[i]);
+
+  return
+  gcBYTES_TO_WORDS((sizeof(Scheme_Vector) 
+		    + ((8 - 1) * sizeof(Scheme_Object *))));
+}
+
+static int mark_free_id_info_FIXUP(void *p) {
+  Scheme_Vector *vec = (Scheme_Vector *)p;
+  int i;
+  for (i = 8; i--; )
+    gcFIXUP(vec->els[i]);
+
+  return
+  gcBYTES_TO_WORDS((sizeof(Scheme_Vector) 
+		    + ((8 - 1) * sizeof(Scheme_Object *))));
+}
+
+#define mark_free_id_info_IS_ATOMIC 0
+#define mark_free_id_info_IS_CONST_SIZE 0
+
+
 
 
 #endif  /* STXOBJ */

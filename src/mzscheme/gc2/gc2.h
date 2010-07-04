@@ -36,6 +36,12 @@ typedef unsigned long (*GC_get_thread_stack_base_Proc)(void);
 
 #endif
 
+#ifdef MZ_USE_PLACES
+# define GC_OBJHEAD_SIZE (2*sizeof(unsigned long))
+#else 
+# define GC_OBJHEAD_SIZE (sizeof(unsigned long))
+#endif
+
 #ifndef GC2_JUST_MACROS
 
 #include <stddef.h>
@@ -396,6 +402,17 @@ GC2_EXTERN void GC_construct_child_gc();
 /*
    Creates a new place specific GC and links to the master GC.
 */
+
+GC2_EXTERN void *GC_switch_to_master_gc();
+/*
+   Switches to the master GC
+*/
+
+GC2_EXTERN void GC_switch_back_from_master(void *gc);
+/*
+   Switches to back to gc from the master GC
+*/
+
 
 # ifdef __cplusplus
 };

@@ -1,6 +1,6 @@
 #lang scheme
-(require (planet schematics/schemeunit:3)
-         (planet schematics/schemeunit:3/text-ui)
+(require schemeunit
+         schemeunit/text-ui
          xml
          xml/plist
          mzlib/etc
@@ -122,6 +122,8 @@ END
      (test-xexpr? (make-cdata #f #f "unquoted <b>"))
      (test-xexpr? (make-comment "Comment!"))
      (test-xexpr? (make-pcdata #f #f "quoted <b>"))
+     
+     (test-not-xexpr? (list 'a (list (list 'href)) "content"))
      
      (test-not-xexpr? +)
      (test-not-xexpr? #f))
@@ -461,7 +463,7 @@ END
    
    (local
      [(define (test-xml->xexpr str xe)
-        (test-equal? str (xml->xexpr (document-element (read-xml (open-input-string str)))) xe))
+        (test-equal? str (string->xexpr str) xe))
       (define (test-xexpr->string xe str)
         (test-equal? (format "~S" xe) (xexpr->string xe) str))]
      (test-suite 
@@ -564,7 +566,7 @@ END
       ; XXX correct-xexpr?
       
       (test-suite
-       "permissive?"
+       "permissive-xexprs"
        (test-exn
         "Non-permissive"
         (lambda (exn)
@@ -575,7 +577,7 @@ END
        
        (test-false
         "Permissive"
-        (parameterize ([permissive? #t])
+        (parameterize ([permissive-xexprs #t])
           (xml->xexpr #f))))))
    
    (local

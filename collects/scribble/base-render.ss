@@ -110,6 +110,22 @@
            (mobile-root? (car p))))
 
     ;; ----------------------------------------
+
+    (define/public (fresh-tag-collect-context? d ci)
+      #f)
+    (define/public (fresh-tag-resolve-context? d ri)
+      #f)
+    (define/public (fresh-tag-render-context? d ri)
+      #f)
+
+    (define/private (extend-prefix d fresh?)
+      (cond
+       [fresh? null]
+       [(part-tag-prefix d)
+        (cons (part-tag-prefix d) (current-tag-prefixes))]
+       [else (current-tag-prefixes)]))
+
+    ;; ----------------------------------------
     ;; marshal info
 
     (define/public (get-serialize-version)
@@ -174,26 +190,28 @@
                    (make-collected-info number
                                         parent
                                         (collect-info-ht p-ci)))
-        (when (part-title-content d)
-          (collect-content (part-title-content d) p-ci))
-        (collect-part-tags d p-ci number)
-        (collect-content (part-to-collect d) p-ci)
-        (collect-flow (part-flow d) p-ci)
-        (let loop ([parts (part-parts d)]
-                   [pos 1])
-          (unless (null? parts)
-            (let ([s (car parts)])
-              (collect-part s d p-ci
-                            (cons (if (or (unnumbered-part? s) 
-                                          (part-style? s 'unnumbered))
-                                      #f 
-                                      pos)
-                                  number))
-              (loop (cdr parts)
-                    (if (or (unnumbered-part? s) 
-                            (part-style? s 'unnumbered))
-                        pos
-                        (add1 pos))))))
+        (parameterize ([current-tag-prefixes
+                        (extend-prefix d (fresh-tag-collect-context? d p-ci))])
+          (when (part-title-content d)
+            (collect-content (part-title-content d) p-ci))
+          (collect-part-tags d p-ci number)
+          (collect-content (part-to-collect d) p-ci)
+          (collect-flow (part-flow d) p-ci)
+          (let loop ([parts (part-parts d)]
+                     [pos 1])
+            (unless (null? parts)
+              (let ([s (car parts)])
+                (collect-part s d p-ci
+                              (cons (if (or (unnumbered-part? s) 
+                                            (part-style? s 'unnumbered))
+                                        #f 
+                                        pos)
+                                    number))
+                (loop (cdr parts)
+                      (if (or (unnumbered-part? s) 
+                              (part-style? s 'unnumbered))
+                          pos
+                          (add1 pos)))))))
         (let ([prefix (part-tag-prefix d)])
           (for ([(k v) (collect-info-ht p-ci)])
             (when (cadr k)
@@ -216,37 +234,45 @@
 
     (define/public (collect-part-tags d ci number)
       (for ([t (part-tags d)])
-        (hash-set! (collect-info-ht ci)
-                   (generate-tag t ci)
-                   (list (or (part-title-content d) '("???")) number))))
+        (let ([t (generate-tag t ci)])
+          (hash-set! (collect-info-ht ci)
+                     t
+                     (list (or (part-title-content d) '("???")) 
+                           number
+                           (add-current-tag-prefix t))))))
 
     (define/public (collect-content c ci)
-      (for ([i c]) (collect-element i ci)))
+      (for ([i (in-list c)]) (collect-element i ci)))
 
     (define/public (collect-paragraph p ci)
       (collect-content (paragraph-content p) ci))
 
     (define/public (collect-flow p ci)
-      (for ([p (flow-paragraphs p)])
+      (for ([p (in-list (flow-paragraphs p))])
         (collect-block p ci)))
 
     (define/public (collect-block p ci)
       (cond [(table? p) (collect-table p ci)]
             [(itemization? p) (collect-itemization p ci)]
             [(blockquote? p) (collect-blockquote p ci)]
+            [(compound-paragraph? p) (collect-compound-paragraph p ci)]
             [(delayed-block? p) (void)]
             [else (collect-paragraph p ci)]))
 
     (define/public (collect-table i ci)
-      (for ([d (apply append (table-flowss i))])
+      (for ([d (in-list (apply append (table-flowss i)))])
         (when (flow? d) (collect-flow d ci))))
 
     (define/public (collect-itemization i ci)
-      (for ([d (itemization-flows i)])
+      (for ([d (in-list (itemization-flows i))])
         (collect-flow d ci)))
 
     (define/public (collect-blockquote i ci)
-      (for ([d (blockquote-paragraphs i)])
+      (for ([d (in-list (blockquote-paragraphs i))])
+        (collect-block d ci)))
+
+    (define/public (collect-compound-paragraph i ci)
+      (for ([d (in-list (compound-paragraph-blocks i))])
         (collect-block d ci)))
 
     (define/public (collect-element i ci)
@@ -263,7 +289,8 @@
                  (for ([e (element-content i)]) (collect-element e ci))))))
 
     (define/public (collect-target-element i ci)
-      (collect-put! ci (generate-tag (target-element-tag i) ci) (list i)))
+      (let ([t (generate-tag (target-element-tag i) ci)])
+        (collect-put! ci t (list i (add-current-tag-prefix t)))))
 
     (define/public (collect-index-element i ci)
       (collect-put! ci
@@ -284,14 +311,16 @@
       (map (lambda (d) (resolve-part d ri)) ds))
 
     (define/public (resolve-part d ri)
-      (when (part-title-content d)
-        (resolve-content (part-title-content d) d ri))
-      (resolve-flow (part-flow d) d ri)
-      (for ([p (part-parts d)])
-        (resolve-part p ri)))
+      (parameterize ([current-tag-prefixes
+                      (extend-prefix d (fresh-tag-resolve-context? d ri))])
+        (when (part-title-content d)
+          (resolve-content (part-title-content d) d ri))
+        (resolve-flow (part-flow d) d ri)
+        (for ([p (part-parts d)])
+          (resolve-part p ri))))
 
     (define/public (resolve-content c d ri)
-      (for ([i c])
+      (for ([i (in-list c)])
         (resolve-element i d ri)))
 
     (define/public (resolve-paragraph p d ri)
@@ -306,6 +335,7 @@
         [(table? p) (resolve-table p d ri)]
         [(itemization? p) (resolve-itemization p d ri)]
         [(blockquote? p) (resolve-blockquote p d ri)]
+        [(compound-paragraph? p) (resolve-compound-paragraph p d ri)]
         [(delayed-block? p) 
          (let ([v ((delayed-block-resolve p) this d ri)])
            (hash-set! (resolve-info-delays ri) p v)
@@ -313,15 +343,19 @@
         [else (resolve-paragraph p d ri)]))
 
     (define/public (resolve-table i d ri)
-      (for ([f (apply append (table-flowss i))])
+      (for ([f (in-list (apply append (table-flowss i)))])
         (when (flow? f) (resolve-flow f d ri))))
 
     (define/public (resolve-itemization i d ri)
-      (for ([f (itemization-flows i)])
+      (for ([f (in-list (itemization-flows i))])
         (resolve-flow f d ri)))
 
     (define/public (resolve-blockquote i d ri)
-      (for ([f (blockquote-paragraphs i)])
+      (for ([f (in-list (blockquote-paragraphs i))])
+        (resolve-block f d ri)))
+
+    (define/public (resolve-compound-paragraph i d ri)
+      (for ([f (in-list (compound-paragraph-blocks i))])
         (resolve-block f d ri)))
 
     (define/public (resolve-element i d ri)
@@ -373,6 +407,11 @@
       (render-part d ri))
 
     (define/public (render-part d ri)
+      (parameterize ([current-tag-prefixes
+                      (extend-prefix d (fresh-tag-render-context? d ri))])
+        (render-part-content d ri)))
+
+    (define/public (render-part-content d ri)
       (list
        (when (part-title-content d)
          (render-content (part-title-content d) d ri))
@@ -386,6 +425,15 @@
     (define/public (render-paragraph p part ri)
       (render-content (paragraph-content p) part ri))
 
+    (define/public (render-compound-paragraph p part ri)
+      (apply append (let loop ([l (compound-paragraph-blocks p)]
+                               [first? #t])
+                      (cond
+                       [(null? l) null]
+                       [else (cons
+                              (render-intrapara-block (car l) part ri first? (null? (cdr l)))
+                              (loop (cdr l) #f))]))))
+
     (define/public (render-flow p part ri start-inline?)
       (if (null? (flow-paragraphs p))
           null
@@ -397,6 +445,9 @@
                          (render-block p part ri #f))
                        (cdr (flow-paragraphs p)))))))
 
+    (define/public (render-intrapara-block p part ri first? last?)
+      (render-block p part ri first?))
+
     (define/public (render-block p part ri inline?)
       (cond
         [(table? p) (if (auxiliary-table? p)
@@ -404,6 +455,7 @@
                       (render-table p part ri inline?))]
         [(itemization? p) (render-itemization p part ri)]
         [(blockquote? p) (render-blockquote p part ri)]
+        [(compound-paragraph? p) (render-compound-paragraph p part ri)]
         [(delayed-block? p) 
          (render-block (delayed-block-blocks p ri) part ri inline?)]
         [else (render-paragraph p part ri)]))

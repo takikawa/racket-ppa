@@ -1,6 +1,7 @@
 #lang scribble/doc
 @(require scribble/manual
           scribble/bnf
+          scribble/struct
           scribble/eval
           (for-syntax scheme/base)
           (for-label scheme/base
@@ -8,7 +9,7 @@
                      scheme/pretty
                      scheme/contract
 		     mrlib/graph
-                     (only-in slideshow/pict pict? text dc-for-text-size)
+                     (only-in slideshow/pict pict? text dc-for-text-size text-style/c)
                      redex))
 
 @(define-syntax (defpattech stx)
@@ -47,6 +48,12 @@
     [(_ args ...)
      #'((tech "term") args ...)]
     [x (identifier? #'x) #'(tech "term")]))
+
+@(define-syntax-rule (arrows a0 a ...)
+   (make-blockquote #f 
+    (list (make-paragraph 
+           (list (schemeidfont (make-element #f (list (symbol->string 'a0))))
+                 (make-element #f (list " " (hspace 1) " " (schemeidfont (symbol->string 'a)))) ...)))))
 
 @(define redex-eval (make-base-eval))
 @(interaction-eval #:eval redex-eval (require redex/reduction-semantics))
@@ -90,6 +97,10 @@ Note that pattern matching is caching (including caching the results
 of side-conditions). This means that once a pattern has matched a
 given term, Redex assumes that it will always match that term. 
 
+This is the grammar for the Redex pattern language. Non-terminal
+references are wrapped with angle brackets; otherwise identifiers
+in the grammar are terminals.
+
 @(schemegrammar* #;#:literals #;(any number string variable variable-except variable-prefix variable-not-otherwise-mentioned hole hide-hole name in-hole side-condition cross) 
    [pattern any 
             number 
@@ -98,24 +109,24 @@ given term, Redex assumes that it will always match that term.
             real
             string 
             variable 
-            (variable-except symbol ...)
-            (variable-prefix symbol)
+            (variable-except <id> ...)
+            (variable-prefix <id>)
             variable-not-otherwise-mentioned
             hole
             symbol
-            (name symbol pattern)
-            (in-hole pattern pattern)
-            (hide-hole pattern)
-            (side-condition pattern guard)
-            (cross symbol)
-            (pattern-sequence ...)
-            scheme-constant]
+            (name <id> <pattern>)
+            (in-hole <pattern> <pattern>)
+            (hide-hole <pattern>)
+            (side-condition <pattern> guard)
+            (cross <id>)
+            (<pattern-sequence> ...)
+            <scheme-constant>]
    [pattern-sequence 
-     pattern 
+     <pattern> 
      (code:line ... (code:comment "literal ellipsis"))
      ..._id])
 
-@itemize{
+@itemize[
 
 @item{The @defpattech[any] @pattern matches any sepxression.
 This @pattern may also be suffixed with an underscore and another
@@ -228,7 +239,7 @@ matches the first @|ttpattern|. This match must include exactly one match
 against the second @|ttpattern|. If there are zero matches or more
 than one match, an exception is raised.
 
-When matching the first argument of in-hole, the `hole' @pattern
+When matching the first argument of in-hole, the @scheme[hole] @pattern
 matches any sexpression. Then, the sexpression that matched the hole
 @pattern is used to match against the second @|pattern|.
 }
@@ -243,7 +254,7 @@ that @|ttpattern|.
 matches what the embedded @ttpattern matches, and then the guard
 expression is evaluated. If it returns @scheme[#f], the @pattern fails
 to match, and if it returns anything else, the @pattern matches. Any
-occurrences of `name' in the @pattern (including those implicitly
+occurrences of @scheme[name] in the @pattern (including those implicitly
 there via @tt{_} pattersn) are bound using @scheme[term-let] in the
 guard. 
 }
@@ -275,7 +286,7 @@ Multiple ellipses are allowed. For example, this @|pattern|:
 
 matches this sexpression:
 
-@schemeblock[(#, @|tttterm| (a a))]
+@schemeblock[(@#,tttterm (a a))]
 
 three different ways. One where the first @tt{a} in the @pattern
 matches nothing, and the second matches both of the
@@ -295,7 +306,7 @@ As an example, this @|pattern|:
 
 only matches this sexpression:
 
-@schemeblock[(#, @|tttterm| (a a))]
+@schemeblock[(@#,tttterm (a a))]
 
 one way, with each named @pattern matching a single a. Unlike
 the above, the two @|pattern|s with mismatched lengths is ruled
@@ -311,7 +322,7 @@ Thus, with the @|pattern|:
 
 and the expression
 
-@schemeblock[(#, @|tttterm| (a a))]
+@schemeblock[(@#,tttterm (a a))]
 
 two matches occur, one where @tt{x} is bound to @scheme['()] and
 @tt{y} is bound to @scheme['(a a)] and one where @tt{x} is bound to
@@ -319,10 +330,10 @@ two matches occur, one where @tt{x} is bound to @scheme['()] and
 bound to @scheme['()].
 
 }
-}
+]
 
-@defform*[[(redex-match lang #, @|ttpattern| any)
-           (redex-match lang #, @|ttpattern|)]]{
+@defform*[[(redex-match lang @#,ttpattern any)
+           (redex-match lang @#,ttpattern)]]{
           
 If @scheme[redex-match] receives three arguments, it
 matches the pattern (in the language) against its third
@@ -410,7 +421,7 @@ stands for repetition unless otherwise indicated):
      ,@scheme-expression
      (code:line ... (code:comment "literal ellipsis"))])
 
-@itemize{
+@itemize[
 
 @item{A term written @scheme[_identifier] is equivalent to the
 corresponding symbol, unless the identifier is bound by
@@ -437,9 +448,9 @@ them.}
 
 @item{A term written as a literal boolean or a string
 produces the boolean or the string.}
-}
+]
 
-@defform[(term #, @|tttterm|)]{
+@defform[(term @#,tttterm)]{
 
 This form is used for construction of a term.
 
@@ -501,7 +512,7 @@ Redex's full pattern matching facilities, see @scheme[term-match] and
 
 }
 
-@defform[(term-match language [#, @|ttpattern| expression] ...)]{
+@defform[(term-match language [@#,ttpattern expression] ...)]{
 
 This produces a procedure that accepts term (or quoted)
 expressions and checks them against each pattern. The
@@ -515,7 +526,7 @@ compiled in an effort to speed up matching. Using the procedural
 result multiple times to avoid compiling the patterns multiple times.
 }
 
-@defform[(term-match/single language [#, @|ttpattern| expression] ...)]{
+@defform[(term-match/single language [@#,ttpattern expression] ...)]{
 
 This produces a procedure that accepts term (or quoted)
 expressions and checks them against each pattern. The
@@ -571,14 +582,14 @@ all non-GUI portions of Redex) and also exported by
 @schememodname[redex] (which includes all of Redex).
 
 @defform/subs[(define-language lang-name 
-                (non-terminal-spec #, @|ttpattern| ...)
+                (non-terminal-spec @#,ttpattern ...)
                 ...)
               ([non-terminal-spec symbol (symbol ...)])]{
 
 This form defines the grammar of a language. It allows the
 definition of recursive @|pattern|s, much like a BNF, but for
 regular-tree grammars. It goes beyond their expressive
-power, however, because repeated `name' @|pattern|s and
+power, however, because repeated @scheme[name] @|pattern|s and
 side-conditions can restrict matches in a context-sensitive
 way.
 
@@ -606,7 +617,7 @@ variables, @scheme[c] for the evaluation contexts and @scheme[v] for values.
 }
 
 @defform[(define-extended-language language language
-           (non-terminal #, @|ttpattern| ...)
+           (non-terminal @#,ttpattern ...)
            ...)]{
 
 This form extends a language with some new, replaced, or
@@ -651,7 +662,7 @@ defined by this language.
 
 @defproc[(compiled-lang? [l any/c]) boolean?]{
 
-Returns #t if its argument was produced by `language', #f
+Returns @scheme[#t] if its argument was produced by @scheme[language], @scheme[#f]
 otherwise.
 }
 
@@ -664,13 +675,13 @@ all non-GUI portions of Redex) and also exported by
 
 @defform/subs[#:literals (--> fresh side-condition where) 
               (reduction-relation language domain main-arrow reduction-case ...)
-              ([domain (code:line) (code:line #:domain #, @|ttpattern|)]
+              ([domain (code:line) (code:line #:domain @#,ttpattern)]
                [main-arrow (code:line) (code:line #:arrow arrow)]
-               [reduction-case (--> #, @|ttpattern| #, @|tttterm| extras ...)]
+               [reduction-case (--> @#,ttpattern @#,tttterm extras ...)]
                [extras name
                        (fresh fresh-clause ...)
-                       (side-condition scheme-expression ...)
-                       (where tl-pat #, @|tttterm|)]
+                       (side-condition scheme-expression)
+                       (where tl-pat @#,tttterm)]
                [fresh-clause var ((var1 ...) (var2 ...))]
                [tl-pat identifier (tl-pat-ele ...)]
                [tl-pat-ele tl-pat (code:line tl-pat ... (code:comment "a literal ellipsis"))])]{
@@ -732,22 +743,22 @@ defines a reduction relation for the lambda-calculus above.
 @defform/none[#:literals (with reduction-relation)
          (reduction-relation 
           language
-          (arrow-var #, @|ttpattern| #, @|tttterm|) ...
+          (arrow-var @#,ttpattern @#,tttterm) ...
           with
-          [(arrow #, @|ttpattern| #, @|tttterm|)
+          [(arrow @#,ttpattern @#,tttterm)
            (arrow-var var var)] ...)]{
 
 Defines a reduction relation with shortcuts. As above, the
 first section defines clauses of the reduction relation, but
-instead of using -->, those clauses can use any identifier
+instead of using @scheme[-->], those clauses can use any identifier
 for an arrow, as long as the identifier is bound after the
-`with' clause. 
+@scheme[with] clause. 
 
-Each of the clauses after the `with' define new relations
-in terms of other definitions after the `with' clause or in
-terms of the main --> relation.
+Each of the clauses after the @scheme[with] define new relations
+in terms of other definitions after the @scheme[with] clause or in
+terms of the main @scheme[-->] relation.
 
-@scheme[fresh] is always fresh with respect to the entire
+A @scheme[fresh] variable is always fresh with respect to the entire
 term, not just with respect to the part that matches the
 right-hand-side of the newly defined arrow.
 
@@ -778,7 +789,7 @@ where the @tt{==>} relation is defined by reducing in the context
 
 This form extends the reduction relation in its first
 argument with the rules specified in @scheme[more]. They should
-have the same shape as the the rules (including the `with'
+have the same shape as the rules (including the @scheme[with]
 clause) in an ordinary @scheme[reduction-relation].
 
 If the original reduction-relation has a rule with the same
@@ -815,7 +826,7 @@ closure of the reduction for the specified non-terminal.
 
 This accepts a reduction, a language, a pattern representing
 a context (ie, that can be used as the first argument to
-`in-hole'; often just a non-terminal) in the language and
+@scheme[in-hole]; often just a non-terminal) in the language and
 returns the closure of the reduction in that context.
 }
 
@@ -857,14 +868,14 @@ terminate (it does terminate if the only infinite reduction paths are cyclic).
   error elsewhere.  }
 
 @defidform[fresh]{ Recognized specially within
-  @scheme[reduction-relation]. A @scheme[-->] form is an
+  @scheme[reduction-relation]. A @scheme[fresh] form is an
   error elsewhere.  }
 
 @defidform[with]{ Recognized specially within
   @scheme[reduction-relation]. A @scheme[with] form is an
   error elsewhere.  }
 
-@section{Metafunctions}
+@section{Metafunctions and Relations}
 
 All of the exports in this section are provided both by
 @schememodname[redex/reduction-semantics] (which includes
@@ -874,12 +885,12 @@ all non-GUI portions of Redex) and also exported by
 @defform/subs[#:literals (: ->)
               (define-metafunction language-exp
                contract
-               [(name #, @|ttpattern| ...) #, @|tttterm| extras ...] 
+               [(name @#,ttpattern ...) @#,tttterm extras ...] 
                ...)
                ([contract (code:line) 
-                          (code:line id : #, @|ttpattern| ... -> #, @|ttpattern|)]
+                          (code:line id : @#,ttpattern ... -> @#,ttpattern)]
                 [extras (side-condition scheme-expression)
-                        (where tl-pat #, @|tttterm|)]
+                        (where tl-pat @#,tttterm)]
                 [tl-pat identifier (tl-pat-ele ...)]
                 [tl-pat-ele tl-pat (code:line tl-pat ... (code:comment "a literal ellipsis"))])]{
 
@@ -887,9 +898,7 @@ The @scheme[define-metafunction] form builds a function on
 sexpressions according to the pattern and right-hand-side
 expressions. The first argument indicates the language used
 to resolve non-terminals in the pattern expressions. Each of
-the rhs-expressions is implicitly wrapped in @|tttterm|. In
-addition, recursive calls in the right-hand side of the
-metafunction clauses should appear inside @|tttterm|. 
+the rhs-expressions is implicitly wrapped in @|tttterm|. 
 
 If specified, the side-conditions are collected with 
 @scheme[and] and used as guards on the case being matched. The
@@ -898,8 +907,9 @@ expression, and the pattern variables in the @|ttpattern| are
 bound in that expression.
 
 Raises an exception recognized by @scheme[exn:fail:redex?] if
-no clauses match, if one of the clauses matches multiple ways, or
-if the contract is violated.
+no clauses match, if one of the clauses matches multiple ways
+(and that leads to different results for the different matches),
+or if the contract is violated.
 
 Note that metafunctions are assumed to always return the same results
 for the same inputs, and their results are cached, unless
@@ -960,7 +970,7 @@ match.
 
 @defform[(define-metafunction/extension extending-name language-exp 
            contract
-           [(name #, @|ttpattern| ...) #, @|tttterm| (side-condition scheme-expression) ...]
+           [(name @#,ttpattern ...) @#,tttterm (side-condition scheme-expression) ...]
            ...)]{
 
 This defines a metafunction as an extension of an existing
@@ -969,10 +979,40 @@ patterns were in this definitions, with the name of the
 function fixed up to be @scheme[extending-name]. 
 }
 
-@defform[(in-domain? (metafunction-name #, @|tttterm| ...))]{
+@defform[(in-domain? (metafunction-name @#,tttterm ...))]{
 Returns @scheme[#t] if the inputs specified to @scheme[metafunction-name] are
 legtimate inputs according to @scheme[metafunction-name]'s contract,
 and @scheme[#f] otherwise.
+}
+
+@defform/subs[#:literals ()
+              (define-relation language-exp
+               [(name @#,ttpattern ...) @#,tttterm ...] ...)
+               ([tl-pat identifier (tl-pat-ele ...)]
+                [tl-pat-ele tl-pat (code:line tl-pat ... (code:comment "a literal ellipsis"))])]{
+
+The @scheme[define-relation] form builds a relation on
+sexpressions according to the pattern and right-hand-side
+expressions. The first argument indicates the language used
+to resolve non-terminals in the pattern expressions. Each of
+the rhs-expressions is implicitly wrapped in @|tttterm|. 
+
+Relations are like metafunctions in that they are called with
+arguments and return results (unlike in, say, prolog, where a relation
+definition would be able to synthesize some of the arguments based on
+the values of others).
+
+Unlike metafunctions, relations check all possible ways to match each
+case, looking for a true result and if none of the clauses match, then
+the result is @scheme[#f]. If there are multiple expressions on
+the right-hand side of a relation, then all of them must be satisfied
+in order for that clause of the relation to be satisfied.
+
+Note that relations are assumed to always return the same results for
+the same inputs, and their results are cached, unless
+@scheme[caching-enable?] is set to @scheme[#f]. Accordingly, if a
+relation is called with the same inputs twice, then its right-hand
+sides are evaluated only once.
 }
 
 @defparam[current-traced-metafunctions traced-metafunctions (or/c 'all (listof symbol?))]{
@@ -1064,7 +1104,7 @@ an association list mapping names to application counts.}
            (apply-reduction-relation* equals (term (+ 1 2 3)))
            (covered-cases coverage)))]
 
-@defform/subs[(generate-term language #, @|ttpattern| size-exp kw-args ...)
+@defform/subs[(generate-term language @#,ttpattern size-exp kw-args ...)
               ([kw-args (code:line #:attempts attempts-expr)
                         (code:line #:retries retries-expr)])
               #:contracts ([size-expr natural-number/c]
@@ -1091,7 +1131,7 @@ argument @scheme[retries-expr] (default @scheme[100]) bounds the number of times
 @scheme[generate-term] is unable to produce a satisfying term after 
 @scheme[retries-expr] attempts, it raises an error}
 
-@defform/subs[(redex-check language #, @|ttpattern| property-expr kw-arg ...)
+@defform/subs[(redex-check language @#,ttpattern property-expr kw-arg ...)
               ([kw-arg (code:line #:attempts attempts-expr)
                        (code:line #:source metafunction)
                        (code:line #:source relation-expr)
@@ -1101,11 +1141,12 @@ argument @scheme[retries-expr] (default @scheme[100]) bounds the number of times
                            [relation-expr reduction-relation?]
                            [retries-expr natural-number/c])]{
 Searches for a counterexample to @scheme[property-expr], interpreted
-as a predicate universally quantified over its free
-@pattech[term]-variables. @scheme[redex-check] chooses substitutions for 
-these free @pattech[term]-variables by generating random terms matching
-@scheme[pattern] and extracting the sub-terms bound by the
-@pattech[names] and non-terminals in @scheme[pattern].
+as a predicate universally quantified over the pattern variables
+bound by @scheme[pattern]. @scheme[redex-check] constructs and tests 
+a candidate counterexample by choosing a random term @math{t} that 
+matches @scheme[pattern] then evaluating @scheme[property-expr]
+using the @scheme[match-bindings] produced by @scheme[match]ing
+@math{t} against @scheme[pattern].
 
 @scheme[redex-check] generates at most @scheme[attempts-expr] (default @scheme[1000])
 random terms in its search. The size and complexity of terms it generates
@@ -1156,22 +1197,22 @@ term that does not match @scheme[pattern].}
           #:attempts 3
           #:source R))]
 
-@defproc[(check-reduction-relation 
-          [relation reduction-relation?]
-          [property (-> any/c any/c)]
-          [#:attempts attempts natural-number/c 1000]
-          [#:retries retries natural-number/c 100])
-         void?]{
+@defform/subs[(check-reduction-relation relation property kw-args ...)
+              ([kw-arg (code:line #:attempts attempts-expr)
+                       (code:line #:retries retries-expr)])
+              #:contracts ([property (-> any/c any/c)]
+                           [attempts-expr natural-number/c]
+                           [retries-expr natural-number/c])]{
 Tests @scheme[relation] as follows: for each case of @scheme[relation],
 @scheme[check-reduction-relation] generates @scheme[attempts] random
 terms that match that case's left-hand side and applies @scheme[property] 
 to each random term.
 
-This function provides a more convenient notation for
+This form provides a more convenient notation for
 @schemeblock[(redex-check L any (property (term any)) 
                           #:attempts (* n attempts)
                           #:source relation)]
-when @scheme[relation] is a relation on @scheme[L] and has @scheme[n] rules.}
+when @scheme[relation] is a relation on @scheme[L] with @scheme[n] rules.}
 
 @defform/subs[(check-metafunction metafunction property kw-args ...)
               ([kw-arg (code:line #:attempts attempts-expr)
@@ -1185,7 +1226,7 @@ Like @scheme[check-reduction-relation] but for metafunctions.}
 
 It is easy to write grammars and reduction rules that are
 subtly wrong and typically such mistakes result in examples
-that just get stuck when viewed in a `traces' window.
+that just get stuck when viewed in a @scheme[traces] window.
 
 The best way to debug such programs is to find an expression
 that looks like it should reduce but doesn't and try to find
@@ -1231,6 +1272,8 @@ exploring reduction sequences.
 
                  [#:scheme-colors? scheme-colors? boolean? #t]
                  [#:filter term-filter (-> any/c (or/c #f string?) any/c) (lambda (x y) #t)]
+                 [#:x-spacing number? 15]
+                 [#:y-spacing number? 15]
                  [#:layout layout (-> (listof term-node?) void) void]
                  [#:edge-labels? edge-label-font boolean? #t]
                  [#:edge-label-font edge-label-font (or/c #f (is-a?/c font%)) #f]
@@ -1297,6 +1340,9 @@ The @scheme[term-filter] function is called each time a new node is
 about to be inserted into the graph. If the filter returns false, the
 node is not inserted into the graph.
 
+The @scheme[x-spacing] and @scheme[y-spacing] control the amount of
+space put between the snips in the default layout.
+
 The @scheme[layout] argument is called (with all of the terms) when
 new terms is inserted into the window. In general, it is called when
 after new terms are inserted in response to the user clicking on the
@@ -1337,6 +1383,8 @@ inserted into the editor by this library have a
                     [#:colors colors (listof (list string string)) '()]
                     [#:filter term-filter (-> any/c (or/c #f string?) any/c) (lambda (x y) #t)]
                     [#:layout layout (-> (listof term-node?) void) void]
+                    [#:x-spacing number? 15]
+                    [#:y-spacing number? 15]
                     [#:edge-labels? edge-label-font boolean? #t]
                     [#:edge-label-font edge-label-font (or/c #f (is-a?/c font%)) #f]
                     [#:graph-pasteboard-mixin graph-pasteboard-mixin (make-mixin-contract graph-pasteboard<%>) values]
@@ -1413,6 +1461,12 @@ to the specified @scheme[color%] object or the color named by the
 string. The @scheme[color-database<%>] is used to convert the string
 to a @scheme[color%] object.
 }
+
+@defproc[(term-node-color [tn term-node?]) (or/c string? (is-a?/c color%) false/c)]{
+
+Returns the current highlighting of the node. See also @scheme[term-node-set-color!].
+}
+
 
 @defproc[(term-node-set-red! [tn term-node?] [red? boolean?]) void?]{
 
@@ -1584,6 +1638,11 @@ relevant dc: a @scheme[bitmap-dc%] or a @scheme[post-script-dc%], depending on
 whether @scheme[file] is a path. See also
 @scheme[reduction-relation->pict].
 
+The following forms of arrows can be typeset: 
+
+@arrows[--> -+> ==> -> => ..> >-> ~~> ~> :-> :--> c->
+        -->> >-- --< >>-- --<<]
+
 }
 
 @defproc[(reduction-relation->pict (r reduction-relation?)
@@ -1603,7 +1662,7 @@ other tools that combine picts together.
 @defform/none[#:literals (render-metafunction)
               (render-metafunction metafunction-name filename)]{}
 @defform[(render-metafunctions metafunction-name ...)]{}
-@defform/none[#:literals (render-metafunction)
+@defform/none[#:literals (render-metafunctions)
               (render-metafunctions metafunction-name ... #:file filename)]{}]]{
 
 If provided with one argument, @scheme[render-metafunction]
@@ -1651,7 +1710,7 @@ This function sets @scheme[dc-for-text-size]. See also
 
 If this is #t, then a language constructed with
 extend-language is shown as if the language had been
-constructed directly with `language'. If it is #f, then only
+constructed directly with @scheme[language]. If it is #f, then only
 the last extension to the language is shown (with
 four-period ellipses, just like in the concrete syntax).
 
@@ -1671,14 +1730,17 @@ multi-line right-hand sides.
 
 This parameter controls the style used by default for the reduction
 relation. It can be @scheme['horizontal], where the left and
-right-hand sides of the reduction rule are beside each other
-or @scheme['vertical], where the left and right-hand sides of the
-reduction rule are above each other. 
-The @scheme['compact-vertical] style moves the reduction arrow
-to the second line and uses less space between lines.
-Finally, in the @scheme['vertical-overlapping-side-conditions] variant, the side-conditions don't contribute to
-the width of the pict, but are just overlaid on the second
-line of each rule.
+right-hand sides of the reduction rule are beside each other or
+@scheme['vertical], where the left and right-hand sides of the
+reduction rule are above each other.  The @scheme['compact-vertical]
+style moves the reduction arrow to the second line and uses less space
+between lines.  The @scheme['vertical-overlapping-side-conditions]
+variant, the side-conditions don't contribute to the width of the
+pict, but are just overlaid on the second line of each rule.  The
+@scheme['horizontal-left-align] style is like the @scheme['horizontal]
+style, but the left-hand sides of the rules are aligned on the left,
+instead of on the right.
+
 }
 
 @defthing[reduction-rule-style/c flat-contract?]{
@@ -1705,13 +1767,43 @@ label on each rule, but only in horizontal mode. Defaults to
 0.
 }
 
-@defparam[metafunction-pict-style style (parameter/c (symbols 'left-right 'up-down 'left-right/vertical-side-conditions 'up-down/vertical-side-conditions))]{
+@defparam[metafunction-pict-style style 
+                                  (or/c 'left-right
+                                        'up-down
+                                        'left-right/vertical-side-conditions
+                                        'up-down/vertical-side-conditions
+                                        'left-right/compact-side-conditions
+                                        'up-down/compact-side-conditions
+                                        'left-right/beside-side-conditions)]{
 
 This parameter controls the style used for typesetting
-metafunctions. The 'left-right style means that the
+metafunctions. The @scheme['left-right] style means that the
 results of calling the metafunction are displayed to the 
-right of the arguments and the 'up-down style means that
+right of the arguments and the @scheme['up-down] style means that
 the results are displayed below the arguments.
+
+The @scheme['left-right/vertical-side-conditions] and
+@scheme['up-down/vertical-side-conditions] variants format side
+conditions each on a separate line, instead of all on the same line.
+
+The @scheme['left-right/compact-side-conditions] and
+@scheme['up-down/compact-side-conditions] variants move side
+conditions to separate lines to avoid making the rendered form wider
+than it would be otherwise.
+
+The @scheme['left-right/beside-side-conditions] variant is like
+@scheme['left-right], except it puts the side-conditions on the 
+same line, instead of on a new line below the case.}
+
+
+@defparam[metafunction-cases 
+          cases
+          (or/c #f (and/c (listof (and/c integer?
+                                         (or/c zero? positive?)))
+                          pair?))]{
+
+This parameter controls which cases in a metafunction are rendered. If it is @scheme[#f] (the default), then all of the
+cases appear. If it is a list of numbers, then only the selected cases appear (counting from @scheme[0]).
 }
 
 @deftogether[[
@@ -1723,10 +1815,10 @@ the results are displayed below the arguments.
 @defparam[default-style style text-style/c]{}]]{
 
 These parameters determine the font used for various text in
-the picts. See `text' in the texpict collection for
-documentation explaining text-style/c. One of the more
-useful things it can be is one of the symbols 'roman,
-'swiss, or 'modern, which are a serif, sans-serif, and
+the picts. See @scheme[text] in the texpict collection for
+documentation explaining @scheme[text-style/c]. One of the more
+useful things it can be is one of the symbols @scheme['roman],
+@scheme['swiss], or @scheme['modern], which are a serif, sans-serif, and
 monospaced font, respectively. (It can also encode style
 information, too.)
 
@@ -1842,8 +1934,8 @@ evaluates expression. If that expression computes any picts,
 the unquote rewriter specified is used to remap them.
 
 The @scheme[proc] should be a function of one argument. It receives
-a lw struct as an argument and should return
-another lw that contains a rewritten version of the
+a @scheme[lw] struct as an argument and should return
+another @scheme[lw] that contains a rewritten version of the
 code.
 }
 
@@ -1866,43 +1958,42 @@ new one that rewrites the value of name-symbol via proc,
 during the evaluation of expression.
 
 @scheme[name-symbol] is expected to evaluate to a symbol. The value
-of proc is called with a (listof lw) -- see below
-for details on the shape of lw, and is expected to
-return a new (listof (union lw string pict)),
+of proc is called with a @scheme[(listof lw)], and is expected to
+return a new @scheme[(listof (or/c lw? string? pict?))],
 rewritten appropriately. 
 
 The list passed to the rewriter corresponds to the
-lw for the sequence that has name-symbol's value at
+@scheme[lw] for the sequence that has name-symbol's value at
 its head.
 
 The result list is constrained to have at most 2 adjacent
-non-lws. That list is then transformed by adding
-lw structs for each of the non-lws in the
-list (see the description of lw below for an
+non-@scheme[lw]s. That list is then transformed by adding
+@scheme[lw] structs for each of the non-@scheme[lw]s in the
+list (see the description of @scheme[lw] below for an
 explanation of logical-space):
 
-@itemize{
+@itemize[
 @item{
-    If there are two adjacent lws, then the logical
+    If there are two adjacent @scheme[lw]s, then the logical
     space between them is filled with whitespace.}
 
 @item{
-    If there is a pair of lws with just a single
-    non-lw between them, a lw will be
-    created (containing the non-lw) that uses all
-    of the available logical space between the lws.
+    If there is a pair of @scheme[lw]s with just a single
+    non-@scheme[lw] between them, a @scheme[lw] will be
+    created (containing the non-@scheme[lw]) that uses all
+    of the available logical space between the @scheme[lw]s.
 }
 
 @item{
-    If there are two adjacent non-lws between two
-    lws, the first non-lw is rendered
-    right after the first lw with a logical space
+    If there are two adjacent non-@scheme[lw]s between two
+    @scheme[lw]s, the first non-@scheme[lw] is rendered
+    right after the first @scheme[lw] with a logical space
     of zero, and the second is rendered right before the
-    last lw also with a logical space of zero, and
-    the logical space between the two lws is
-    absorbed by a new lw that renders using no
+    last @scheme[lw] also with a logical space of zero, and
+    the logical space between the two @scheme[lw]s is
+    absorbed by a new @scheme[lw] that renders using no
     actual space in the typeset version.
-}}
+}]
 }
 
 

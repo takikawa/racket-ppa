@@ -213,13 +213,13 @@
   ;; sorts things out (remove prefix and suffix newlines, adds indentation if
   ;; needed)
   (define (done-items xs)
-    ;; a column marker is either a non-negative integer N (saying the the
-    ;; following code came from at column N), or a negative integer -N (saying
-    ;; that the following code came from column N but no need to add
-    ;; indentation at this point because it is at the openning of a {...});
-    ;; `get-lines*' is careful not to include column markers before a newline
-    ;; or the end of the text, and a -N marker can only come from the beginning
-    ;; of the text (and it's never there if the text began with a newline)
+    ;; a column marker is either a non-negative integer N (saying the following
+    ;; code came from at column N), or a negative integer -N (saying that the
+    ;; following code came from column N but no need to add indentation at this
+    ;; point because it is at the openning of a {...}); `get-lines*' is careful
+    ;; not to include column markers before a newline or the end of the text,
+    ;; and a -N marker can only come from the beginning of the text (and it's
+    ;; never there if the text began with a newline)
     (if (andmap eol-syntax? xs)
       ;; nothing to do
       (reverse xs)
@@ -417,12 +417,16 @@
   (define (get-rprefixes) ; return punctuation prefixes in reverse
     (let loop ([r '()])
       (let-values ([(line col pos) (port-next-location inp)])
-        (cond [(*match1 #rx#"^(?:'|`|,@?)")
+        (cond [(*match1 #rx#"^#?(?:'|`|,@?)")
                => (lambda (m)
-                    (let ([sym (cond [(assoc m '([#"'"  quote]
-                                                 [#"`"  quasiquote]
-                                                 [#","  unquote]
-                                                 [#",@" unquote-splicing]))
+                    (let ([sym (cond [(assoc m '([#"'"   quote]
+                                                 [#"`"   quasiquote]
+                                                 [#","   unquote]
+                                                 [#",@"  unquote-splicing]
+                                                 [#"#'"  syntax]
+                                                 [#"#`"  quasisyntax]
+                                                 [#"#,"  unsyntax]
+                                                 [#"#,@" unsyntax-splicing]))
                                       => cadr]
                                      [else (internal-error 'get-rprefixes)])])
                       (loop (cons (datum->syntax #f sym
@@ -504,19 +508,35 @@
                 (get-datum-readtable) syntax-post-processor)))
 
 ;; ----------------------------------------------------------------------------
-;; readtable
+;; minor utilities for the below
 
-(provide make-at-readtable)
-(define (make-at-readtable
-         #:readtable [readtable (current-readtable)]
-         #:command-char [command-char ch:command]
-         #:start-inside? [start-inside? #f]
-         #:datum-readtable [datum-readtable #t]
-         #:syntax-post-processor [syntax-post-processor values])
+(define default-src (gensym 'scribble-reader))
+(define (src-name src port)
+  (if (eq? src default-src) (object-name port) src))
+
+(define-syntax-rule (named-lambda (name . args) . body)
+  (let ([name (lambda args . body)]) name))
+
+;; ----------------------------------------------------------------------------
+;; readtable and reader
+
+(provide make-at-readtable make-at-reader)
+
+(define ((make-at-readtable-or-inside-reader inside-reader?)
+         readtable command-char datum-readtable syntax-post-processor)
   (define dispatcher
-    (make-dispatcher start-inside? command-char
-                     (lambda () cmd-rt) (lambda () datum-rt)
+    (make-dispatcher #f command-char (lambda () cmd-rt) (lambda () datum-rt)
                      syntax-post-processor))
+  (define (make-inside-reader)
+    (define dispatcher
+      (make-dispatcher #t command-char (lambda () cmd-rt) (lambda () datum-rt)
+                       syntax-post-processor))
+    ;; use a name consistent with `make-at-reader'
+    (named-lambda (at-read-syntax/inside [src default-src]
+                                         [inp (current-input-port)])
+      (define-values [line col pos] (port-next-location inp))
+      (parameterize ([current-readtable at-rt])
+        (dispatcher #f inp (src-name src inp) line col pos))))
   (define at-rt
     (make-readtable readtable command-char 'non-terminating-macro dispatcher))
   (define cmd-rt
@@ -544,7 +564,46 @@
           [(procedure? datum-readtable) (datum-readtable at-rt)]
           [else (error 'make-at-readtable
                        "bad datum-readtable: ~e" datum-readtable)]))
-  at-rt)
+  (if inside-reader? (make-inside-reader) at-rt))
+
+(define (make-at-readtable
+         #:readtable             [readtable (current-readtable)]
+         #:command-char          [command-char ch:command]
+         #:datum-readtable       [datum-readtable #t]
+         #:syntax-post-processor [syntax-post-processor values])
+  ((make-at-readtable-or-inside-reader #f)
+   readtable command-char datum-readtable syntax-post-processor))
+
+(define (make-at-reader
+         #:readtable             [readtable (current-readtable)]
+         #:command-char          [command-char ch:command]
+         #:datum-readtable       [datum-readtable #t]
+         #:syntax-post-processor [syntax-post-processor values]
+         #:syntax?               [syntax-reader? #t]
+         #:inside?               [inside-reader? #f])
+  (let ([r ((make-at-readtable-or-inside-reader inside-reader?)
+            readtable command-char datum-readtable syntax-post-processor)])
+    ;; the result can be a readtable or a syntax reader, depending on inside?,
+    ;; convert it now to the appropriate reader
+    (if inside-reader?
+      ;; if it's a function, then it already is a syntax reader, convert it to
+      ;; a plain reader if needed (note: this only happens when r is a reader)
+      (if syntax-reader?
+        r
+        (named-lambda (at-read/inside [in (current-input-port)])
+          ;; can't be eof, since it returns a list of expressions (as a syntax)
+          (syntax->datum (r (object-name in) in))))
+      ;; if it's a readtable, then just wrap the standard functions
+      (if syntax-reader?
+        (named-lambda (at-read-syntax [src default-src]
+                                      [inp (current-input-port)])
+          (parameterize ([current-readtable r])
+            (read-syntax src inp)))
+        (named-lambda (at-read [inp (current-input-port)])
+          (parameterize ([current-readtable r])
+            (let ([r (read-syntax (object-name inp) inp)])
+              ;; it might be eof
+              (if (syntax? r) (syntax->datum r) r))))))))
 
 (provide use-at-readtable)
 (define use-at-readtable
@@ -556,51 +615,24 @@
 
 ;; utilities for below
 (define make-default-at-readtable
+  (readtable-cached (lambda (rt) (make-at-readtable #:readtable rt))))
+(define make-default-at-reader/inside
   (readtable-cached
-   (lambda (rt) (make-at-readtable #:readtable rt))))
-(define make-default-at-dispatcher/inside
-  (readtable-cached
-   (lambda (rt)
-     (let-values ([(_1 disp _2)
-                   (readtable-mapping
-                    (make-at-readtable #:readtable rt #:start-inside? #t)
-                    ch:command)])
-       disp))))
+   (lambda (rt) (make-at-reader #:inside? #t #:readtable rt))))
 
 ;; ----------------------------------------------------------------------------
 ;; readers
 
-(define default-src (gensym 'scribble-reader))
-(define (src-name src port)
-  (if (eq? src default-src) (object-name port) src))
-
-(define-syntax with-at-reader
-  (syntax-rules ()
-    [(_ body ...)
-     (parameterize ([current-readtable (make-default-at-readtable)])
-       body ...)]))
-
+(provide (rename-out [*read read] [*read-syntax read-syntax]))
 (define (*read [inp (current-input-port)])
-  (with-at-reader (read inp)))
+  (parameterize ([current-readtable (make-default-at-readtable)])
+    (read inp)))
+(define (*read-syntax [src default-src] [inp (current-input-port)])
+  (parameterize ([current-readtable (make-default-at-readtable)])
+    (read-syntax (src-name src inp) inp)))
 
-(define (*read-syntax [src default-src]
-                      [inp (current-input-port)])
-  (with-at-reader (read-syntax (src-name src inp) inp)))
-
+(provide read-inside read-syntax-inside)
 (define (read-inside [inp (current-input-port)])
-  (let*-values ([(line col pos) (port-next-location inp)]
-                [(inside-dispatcher) (make-default-at-dispatcher/inside)])
-    (with-at-reader
-     (syntax->datum
-      (inside-dispatcher #f inp (object-name inp) line col pos)))))
-
-(define (read-syntax-inside [src default-src]
-                            [inp (current-input-port)])
-  (let*-values ([(line col pos) (port-next-location inp)]
-                [(inside-dispatcher) (make-default-at-dispatcher/inside)])
-    (with-at-reader
-     (inside-dispatcher #f inp (src-name src inp) line col pos))))
-
-(provide (rename-out [*read read]
-                     [*read-syntax read-syntax])
-         read-inside read-syntax-inside)
+  (syntax->datum ((make-default-at-reader/inside) default-src inp)))
+(define (read-syntax-inside [src default-src] [inp (current-input-port)])
+  ((make-default-at-reader/inside) src inp))

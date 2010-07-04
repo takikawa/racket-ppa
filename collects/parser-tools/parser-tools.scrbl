@@ -60,7 +60,7 @@ style lexer and parser generators.
 
      An @scheme[re] is matched as follows:
 
-   @itemize{
+   @itemize[
     @item{@scheme[id] --- expands to the named @deftech{lexer abbreviation};
           abbreviations are defined via @scheme[define-lex-abbrev] or supplied by modules
           like @schememodname[parser-tools/lex-sre].}
@@ -78,7 +78,7 @@ style lexer and parser generators.
           The sub-expression must be a set of characters @scheme[re].}
     @item{@scheme[(id datum ...)] --- expands the @deftech{lexer macro} named @scheme[id]; macros
           are defined via @scheme[define-lex-trans].}
-   }
+   ]
 
 Note that both @scheme[(concatenation)] and @scheme[""] match the
 empty string, @scheme[(union)] matches nothing,
@@ -106,7 +106,7 @@ The suggested prefix is @scheme[:], so that @scheme[:*] and
 Since negation is not a common operator on regular expressions, here
 are a few examples, using @scheme[:] prefixed SRE syntax:
 
-@itemize{
+@itemize[
 
 @item{@schemeblock0[(complement "1")]
 
@@ -150,13 +150,13 @@ are a few examples, using @scheme[:] prefixed SRE syntax:
  words, @scheme[(:* (complement "xx"))] = @scheme[any-string].  It is
  usually not correct to place a @scheme[:*] around a
  @scheme[complement].}
-}
+]
 
 
      The following binding have special meaning inside of a lexer
      action:
 
-     @itemize{
+     @itemize[
        @item{@scheme[start-pos] --- a @scheme[position] struct for the first character matched.}
        @item{@scheme[end-pos] --- a @scheme[position] struct for the character after the last character in the match.}
        @item{@scheme[lexeme] --- the matched string.}
@@ -181,7 +181,7 @@ are a few examples, using @scheme[:] prefixed SRE syntax:
 	@scheme[((comment) (return-without-pos (get-token input-port)))] 
 	will cause the value of the recursive call to be returned without
 	wrapping position around it.}
-     }
+     ]
 
      The lexer raises an exception @scheme[(exn:read)] if none of the
      regular expressions match the input.  Hint: If @scheme[(any-char
@@ -197,7 +197,7 @@ are a few examples, using @scheme[:] prefixed SRE syntax:
      special). The non-@scheme[re] @scheme[trigger] forms handle these
      cases:
 
-     @itemize{
+     @itemize[
 
        @item{The @scheme[(eof)] rule is matched when the input port
        returns an @scheme[eof-object] value.  If no @scheme[(eof)]
@@ -214,7 +214,7 @@ are a few examples, using @scheme[:] prefixed SRE syntax:
        port returns a value other than a character,
        @scheme[eof-object], or @scheme[special-comment] structure.  If
        no @scheme[(special)] rule is present, the lexer returns
-       @scheme[(void)].}}
+       @scheme[(void)].}]
 
     End-of-files, specials, special-comments and special-errors can
     never be part of a lexeme with surrounding characters.
@@ -272,7 +272,7 @@ error.}
 
 @defparam[file-path source any/c]{
 
- A parameter that the the lexer uses as the source location if it
+ A parameter that the lexer uses as the source location if it
  raises a @scheme[exn:fail:rad] error.  Setting this parameter allows
  DrScheme, for example, to open the file containing the error.}
 
@@ -458,7 +458,7 @@ the right choice when using @scheme[lexer] in other situations.
 
    Like @scheme[define-tokens], except a each token constructor
    @schemeidfont{token-}@scheme[token-id] takes no arguments and returns
-   @scheme[(#, @scheme[quote] token-id)].}
+   @scheme[(@#,scheme[quote] token-id)].}
 
 
 @defproc[(token-name [t (or/c token? symbol?)]) symbol?]{
@@ -494,7 +494,7 @@ the right choice when using @scheme[lexer] in other situations.
                        (tokens group-id ...)
                        (start non-terminal-id ...)
                        (end token-id ...)
-                       (#, @schemeidfont{error} expr)
+                       (@#,schemeidfont{error} expr)
                        (precs (assoc token-id ...) ...)
                        (src-pos)
                        (suppress)
@@ -508,7 +508,7 @@ the right choice when using @scheme[lexer] in other situations.
     are no duplicates and all non-@italic{OPTIONAL} declarations are
     present:
 
-    @itemize{
+    @itemize[
 
       @item{@schemeblock0[(grammar (non-terminal-id 
                                     ((grammar-id ...) maybe-prec expr)
@@ -526,23 +526,27 @@ the right choice when using @scheme[lexer] in other situations.
 
       Each action is scheme code that has the same scope as its
       parser's definition, except that the variables @scheme[$1], ...,
-      @schemeidfont{$}@math{n} are bound, where @math{n} is the number
+      @schemeidfont{$}@math{i} are bound, where @math{i} is the number
       of @scheme[grammar-id]s in the corresponding production. Each
-      @schemeidfont{$}@math{i} is bound to the result of the action
-      for the @math{i}@superscript{th} grammar symbol on the right of
+      @schemeidfont{$}@math{k} is bound to the result of the action
+      for the @math{k}@superscript{th} grammar symbol on the right of
       the production, if that grammar symbol is a non-terminal, or the
       value stored in the token if the grammar symbol is a terminal.
       If the @scheme[src-pos] option is present in the parser, then
       variables @scheme[$1-start-pos], ...,
-      @schemeidfont{$}@math{n}@schemeidfont{-start-pos} and
+      @schemeidfont{$}@math{i}@schemeidfont{-start-pos} and
       @scheme[$1-end-pos], ...,
-      @schemeidfont{$}@math{n}@schemeidfont{-end-pos} and are also
+      @schemeidfont{$}@math{i}@schemeidfont{-end-pos} and are also
       available, and they refer to the position structures
       corresponding to the start and end of the corresponding
       @scheme[grammar-symbol]. Grammar symbols defined as empty-tokens
-      have no @schemeidfont{$}@math{i} associated, but do have
+      have no @schemeidfont{$}@math{k} associated, but do have
+      @schemeidfont{$}@math{k}@schemeidfont{-start-pos} and
+      @schemeidfont{$}@math{k}@schemeidfont{-end-pos}.
+      Also @schemeidfont{$n-start-pos} and @schemeidfont{$n-end-pos}
+      are bound to the largest start and end positions, (i.e.,
       @schemeidfont{$}@math{i}@schemeidfont{-start-pos} and
-      @schemeidfont{$}@math{i}@schemeidfont{-end-pos}.
+      @schemeidfont{$}@math{i}@schemeidfont{-end-pos}).
 
       All of the productions for a given non-terminal must be grouped
       with it. That is, no @scheme[non-terminal-id] may appear twice
@@ -570,7 +574,7 @@ the right choice when using @scheme[lexer] in other situations.
       that parses entire lines individually.}
 
 
-      @item{@scheme[(#, @schemeidfont{error} expr)]
+      @item{@scheme[(@#,schemeidfont{error} expr)]
 
       The @scheme[expr] should evaluate to a function which will be
       executed for its side-effect whenever the parser encounters an
@@ -638,7 +642,7 @@ the right choice when using @scheme[lexer] in other situations.
       Causes the parser generator not to report shift/reduce or
       reduce/reduce conflicts.}
 
-    }
+    ]
 
     The result of a @scheme[parser] expression with one @scheme[start]
     non-terminal is a function, @scheme[_parse], that takes one

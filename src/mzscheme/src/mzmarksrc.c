@@ -662,6 +662,7 @@ thread_val {
   gcMARK(pr->current_mt);
 
   gcMARK(pr->constant_folding);
+  gcMARK(pr->reading_delayed);
   
   gcMARK(pr->overflow_reply);
 
@@ -689,6 +690,7 @@ thread_val {
   gcMARK(pr->private_kill_next);
   
   gcMARK(pr->user_tls);
+  gcMARK(pr->gmp_tls_data);
   
   gcMARK(pr->mr_hop);
   gcMARK(pr->mref);
@@ -831,6 +833,7 @@ namespace_val {
 
   gcMARK(e->rename_set);
   gcMARK(e->temp_marked_names);
+  gcMARK(e->post_ex_rename_set);
 
   gcMARK(e->syntax);
   gcMARK(e->exp_env);
@@ -845,6 +848,9 @@ namespace_val {
   gcMARK(e->tt_require_names);
   gcMARK(e->dt_require_names);
   gcMARK(e->other_require_names);
+  gcMARK(e->did_starts);
+  gcMARK(e->available_next[0]);
+  gcMARK(e->available_next[1]);
 
   gcMARK(e->toplevel);
   gcMARK(e->modchain);
@@ -985,6 +991,7 @@ module_phase_exports_val {
   gcMARK(m->provide_src_names);
   gcMARK(m->provide_nominal_srcs);
   gcMARK(m->provide_src_phases);
+  gcMARK(m->provide_insps);
 
   gcMARK(m->kernel_exclusion);
   gcMARK(m->kernel_exclusion2);
@@ -2065,9 +2072,9 @@ mark_rename_table {
   gcMARK(rn->nomarshal_ht);
   gcMARK(rn->unmarshal_info);
   gcMARK(rn->shared_pes);
-  gcMARK(rn->plus_kernel_nominal_source);
   gcMARK(rn->set_identity);
   gcMARK(rn->marked_names);
+  gcMARK(rn->free_id_renames);
  size:
   gcBYTES_TO_WORDS(sizeof(Module_Renames));
 }
@@ -2126,6 +2133,20 @@ lex_rib {
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Lexical_Rib));
 }
+
+mark_free_id_info {
+ mark:
+  Scheme_Vector *vec = (Scheme_Vector *)p;
+  int i;
+  for (i = 8; i--; )
+    gcMARK(vec->els[i]);
+
+ size:
+  gcBYTES_TO_WORDS((sizeof(Scheme_Vector) 
+		    + ((8 - 1) * sizeof(Scheme_Object *))));
+}
+
+
 
 END stxobj;
 

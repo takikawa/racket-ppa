@@ -241,7 +241,7 @@ Template forms produce a syntax object as follows:
  A @scheme[template-elem] is a sub-@scheme[template] replicated by any
  number of @scheme[ellipses]es:
 
- @itemize{
+ @itemize[
 
   @item{If the sub-@scheme[template] is replicated by no
    @scheme[ellipses]es, then it generates a single syntax object to
@@ -269,7 +269,7 @@ Template forms produce a syntax object as follows:
    element (with earlier replicating @scheme[ellipses]s) is
    conceptually wrapped with parentheses for generating output, and
    then the wrapping parentheses are removed in the resulting syntax
-   object.}}}
+   object.}]}
 
  @specsubform[(template-elem ... . template)]{
 
@@ -358,6 +358,16 @@ Like @scheme[quasisyntax], but with source-location assignment like
 @scheme[syntax/loc].}
 
 
+@defform[(quote-syntax/prune id)]{
+
+Like @scheme[quote-syntax], but the lexical context of @scheme[id] is
+pruned via @scheme[identifier-prune-lexical-context] to including
+binding only for the symbolic name of @scheme[id] and for
+@scheme['#%top]. Use this form to quote an identifier when its lexical
+information will not be transferred to other syntax objects (except
+maybe to @scheme['#%top] for a top-level binding).}
+
+
 @defform[(syntax-rules (literal-id ...)
            [(id . pattern) template] ...)]{
 
@@ -411,3 +421,16 @@ The @scheme[_] transformer binding prohibits @scheme[_] from being
 used as an expression. This binding useful only in syntax patterns,
 where it indicates a pattern that matches any syntax object. See
 @scheme[syntax-case].}
+
+
+@defproc[(syntax-pattern-variable? [v any/c]) boolean?]{
+
+Return @scheme[#t] if @scheme[v] is a value that, as a
+transformer-binding value, makes the bound variable as pattern
+variable in @scheme[syntax] and other forms. To check whether an
+identifier is a pattern variable, use @scheme[syntax-local-value] to
+get the identifier's transformer value, and then test the value with
+@scheme[syntax-pattern-variable?].
+
+The @scheme[syntax-pattern-variable?] procedure is provided
+@scheme[for-syntax] by @schememodname[scheme/base].}

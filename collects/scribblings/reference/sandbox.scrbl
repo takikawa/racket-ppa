@@ -137,7 +137,7 @@ top-level namespace:
 @interaction[
 #:eval box-eval
 (define base-module-eval 
-  (code:comment #, @t{a module cannot have free variables...})
+  (code:comment @#,t{a module cannot have free variables...})
   (make-evaluator 'scheme/base '(define (f) later)))
 (define base-module-eval 
   (make-evaluator 'scheme/base '(define (f) later)
@@ -145,7 +145,7 @@ top-level namespace:
 (base-module-eval '(f))
 
 (define base-top-eval 
-  (code:comment #, @t{non-module code can have free variables:})
+  (code:comment @#,t{non-module code can have free variables:})
   (make-evaluator '(begin) '(define (f) later)))
 (base-top-eval '(+ 1 2))
 (base-top-eval '(define later 5))
@@ -162,7 +162,7 @@ restriction is enforced).
 
 @schemeblock[
 (define base-module-eval2
-  (code:comment #, @t{equivalent to @scheme[base-module-eval]:})
+  (code:comment @#,t{equivalent to @scheme[base-module-eval]:})
   (make-module-evaluator '(module m scheme/base
                             (define (f) later)
                             (define later 5))))
@@ -411,12 +411,18 @@ collected by sandbox evaluators.  Use
 
 @defboolparam[sandbox-propagate-breaks propagate?]{
 
-When this boolean parameter is true, breaking while an evaluator is
-running evaluator propagates the break signal to the sandboxed
+When both this boolean parameter and @scheme[(break-enabled)] are true, 
+breaking while an evaluator is
+running propagates the break signal to the sandboxed
 context.  This makes the sandboxed evaluator break, typically, but
 beware that sandboxed evaluation can capture and avoid the breaks (so
 if safe execution of code is your goal, make sure you use it with a
-time limit).  The default is @scheme[#t].}
+time limit).  Also, beware that a break may be received after the
+evaluator's result, in which case the evaluation result is lost. Finally,
+beware that a break may be propagated after an evaluator has produced
+a result, so that the break is visible on the next interaction with
+the evaluator (or the break is lost if the evaluator is not used
+further). The default is @scheme[#t].}
 
 
 @defparam[sandbox-namespace-specs spec (cons/c (-> namespace?) 
@@ -560,7 +566,7 @@ is charged back to the sandbox, you should remove references to such
 values when the code is done inspecting it.
 
 This policy has an impact on how the sandbox memory limit interacts
-with the the per-expression limit specified by
+with the per-expression limit specified by
 @scheme[sandbox-eval-limits]: values that are reachable from the
 sandbox, as well as from the interaction will count against the
 sandbox limit.  For example, in the last interaction of this code,
@@ -862,7 +868,7 @@ your own permissions, for example,
     (call-in-sandbox-context
       (lambda ()
         (parameterize ([current-security-guard guard])
-          (code:comment #, @t{can access anything you want here})
+          (code:comment @#,t{can access anything you want here})
           ))))
 ]}
 

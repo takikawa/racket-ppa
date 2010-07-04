@@ -239,16 +239,29 @@ inline static unsigned long custodian_usage(NewGC*gc, void *custodian)
 inline static void BTC_memory_account_mark(NewGC *gc, mpage *page, void *ptr)
 {
   GCDEBUG((DEBUGOUTF, "BTC_memory_account_mark: %p/%p\n", page, ptr));
-  if(page->big_page) {
-    struct objhead *info = (struct objhead *)(NUM(page->addr) + PREFIX_SIZE);
+  if(page->size_class) {
+    if(page->size_class > 1) {
+      /* big page */
+      objhead *info = BIG_PAGE_TO_OBJHEAD(page);
+      
+      if(info->btc_mark == gc->old_btc_mark) {
+        info->btc_mark = gc->new_btc_mark;
+        account_memory(gc, gc->current_mark_owner, gcBYTES_TO_WORDS(page->size));
+        push_ptr(ptr);
+      }
+    } else {
+      /* medium page */
+      objhead *info = MED_OBJHEAD(ptr, page->size);
 
-    if(info->btc_mark == gc->old_btc_mark) {
-      info->btc_mark = gc->new_btc_mark;
-      account_memory(gc, gc->current_mark_owner, gcBYTES_TO_WORDS(page->size));
-      push_ptr(ptr);
+      if(info->btc_mark == gc->old_btc_mark) {
+        info->btc_mark = gc->new_btc_mark;
+        account_memory(gc, gc->current_mark_owner, info->size);
+        ptr = OBJHEAD_TO_OBJPTR(info);
+        push_ptr(ptr);
+      }
     }
   } else {
-    struct objhead *info = (struct objhead *)((char*)ptr - WORD_SIZE);
+    objhead *info = OBJPTR_TO_OBJHEAD(ptr);
 
     if(info->btc_mark == gc->old_btc_mark) {
       info->btc_mark = gc->new_btc_mark;
@@ -289,7 +302,7 @@ int BTC_thread_mark(void *p)
 {
   NewGC *gc = GC_get_GC();
   if (gc->doing_memory_accounting) {
-    return ((struct objhead *)(NUM(p) - WORD_SIZE))->size;
+    return OBJPTR_TO_OBJHEAD(p)->size;
   }
   return gc->mark_table[btc_redirect_thread](p);
 }
@@ -301,7 +314,7 @@ int BTC_custodian_mark(void *p)
     if(custodian_to_owner_set(gc, p) == gc->current_mark_owner)
       return gc->mark_table[btc_redirect_custodian](p);
     else
-      return ((struct objhead *)(NUM(p) - WORD_SIZE))->size;
+      return OBJPTR_TO_OBJHEAD(p)->size;
   }
   return gc->mark_table[btc_redirect_custodian](p);
 }
@@ -310,14 +323,14 @@ int BTC_cust_box_mark(void *p)
 {
   NewGC *gc = GC_get_GC();
   if (gc->doing_memory_accounting) {
-    return ((struct objhead *)(NUM(p) - WORD_SIZE))->size;
+    return OBJPTR_TO_OBJHEAD(p)->size;
   }
   return gc->mark_table[btc_redirect_cust_box](p);
 }
 
-inline static void mark_normal_obj(NewGC *gc, mpage *page, void *ptr)
+inline static void mark_normal_obj(NewGC *gc, int type, void *ptr)
 {
-  switch(page->page_type) {
+  switch(type) {
     case PAGE_TAGGED: {
                         /* we do not want to mark the pointers in a thread or custodian 
                            unless the object's owner is the current owner. In the case
@@ -330,16 +343,18 @@ inline static void mark_normal_obj(NewGC *gc, mpage *page, void *ptr)
                       }
     case PAGE_ATOMIC: break;
     case PAGE_ARRAY: { 
-                       struct objhead *info = (struct objhead *)((char*)ptr - WORD_SIZE);
-                       void **temp = ptr, **end = temp + (info->size - 1);
+                       objhead *info = OBJPTR_TO_OBJHEAD(ptr);
+                       void **temp = ptr;
+                       void **end  = PPTR(info) + info->size;
 
                        while(temp < end) gcMARK(*(temp++));
                        break;
                      };
     case PAGE_TARRAY: {
-                        struct objhead *info = (struct objhead *)((char*)ptr - WORD_SIZE);
+                        objhead *info = OBJPTR_TO_OBJHEAD(ptr);
                         unsigned short tag = *(unsigned short*)ptr;
-                        void **temp = ptr, **end = PPTR(info) + (info->size - INSET_WORDS);
+                        void **temp = ptr;
+                        void **end = PPTR(info) + (info->size - INSET_WORDS);
 
                         while(temp < end) temp += gc->mark_table[tag](temp);
                         break;
@@ -350,7 +365,7 @@ inline static void mark_normal_obj(NewGC *gc, mpage *page, void *ptr)
 
 inline static void mark_acc_big_page(NewGC *gc, mpage *page)
 {
-  void **start = PPTR(NUM(page->addr) + PREFIX_SIZE + WORD_SIZE);
+  void **start = PPTR(BIG_PAGE_TO_OBJECT(page));
   void **end = PPTR(NUM(page->addr) + page->size);
 
   switch(page->page_type) {
@@ -374,7 +389,6 @@ inline static void mark_acc_big_page(NewGC *gc, mpage *page)
   }
 }
 
-
 static void btc_overmem_abort(NewGC *gc)
 {
   gc->kill_propagation_loop = 1;
@@ -391,10 +405,16 @@ static void propagate_accounting_marks(NewGC *gc)
     page = pagemap_find_page(pagemap, p);
     set_backtrace_source(p, page->page_type);
     GCDEBUG((DEBUGOUTF, "btc_account: popped off page %p:%p, ptr %p\n", page, page->addr, p));
-    if(page->big_page)
-      mark_acc_big_page(gc, page);
-    else
-      mark_normal_obj(gc, page, p);
+    if(page->size_class) {
+      if (page->size_class > 1)
+        mark_acc_big_page(gc, page);
+      else {
+        objhead *info = MED_OBJHEAD(p, page->size);
+        p = OBJHEAD_TO_OBJPTR(info);
+        mark_normal_obj(gc, info->type, p);
+      }
+    } else
+      mark_normal_obj(gc, page->page_type, p);
   }
   if(gc->kill_propagation_loop)
     reset_pointer_stack();
@@ -590,7 +610,7 @@ inline static void BTC_run_account_hooks(NewGC *gc)
     if( ((work->type == MZACCT_REQUIRE) && 
           ((gc->used_pages > (gc->max_pages_for_use / 2))
            || ((((gc->max_pages_for_use / 2) - gc->used_pages) * APAGE_SIZE)
-             < (work->amount + custodian_super_require(gc, work->c1)))))
+               < (work->amount + custodian_super_require(gc, work->c1)))))
         ||
         ((work->type == MZACCT_LIMIT) &&
          (GC_get_memory_use(work->c1) > work->amount))) {
@@ -682,7 +702,7 @@ static inline void BTC_clean_up(NewGC *gc) {
   clean_up_account_hooks(gc);
 }
 
-static inline void BTC_set_btc_mark(NewGC *gc, void* x) {
-  ((struct objhead *)(x))->btc_mark = gc->old_btc_mark;
+static inline void BTC_set_btc_mark(NewGC *gc, objhead* info) {
+  info->btc_mark = gc->old_btc_mark;
 }
 #endif

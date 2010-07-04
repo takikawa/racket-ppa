@@ -1,5 +1,5 @@
 #lang scheme/base
-(require (planet schematics/schemeunit:3)
+(require schemeunit
          (planet "sxml.ss" ("lizorkin" "sxml.plt" 2 0))
          mzlib/etc
          mzlib/list
@@ -106,6 +106,16 @@
     "add06.ss - send/suspend/dispatch"
     (build-path example-servlets "add06.ss"))
    
+   (test-add-two-numbers
+    mkd
+    "add-native.ss - native continuation parts"
+    (build-path example-servlets "add-native.ss"))
+   
+   (test-add-two-numbers
+    mkd
+    "add-soft.ss - soft state"
+    (build-path example-servlets "add-soft.ss"))
+   
    ; XXX test something is not d-c
    (test-double-counters
     mkd
@@ -153,3 +163,8 @@
    
    ; XXX test web-extras.ss - redirect/get
    ))
+
+#|
+(require schemeunit/text-ui)
+(run-tests dispatch-lang-tests)
+|#
