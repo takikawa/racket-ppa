@@ -4,7 +4,7 @@
  * Author:      Julian Smart
  * Created:     1993
  * Updated:	August 1994
- * Copyright:   (c) 2004-2006 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2007 PLT Scheme Inc.
  * Copyright:   (c) 1993, AIAI, University of Edinburgh
  */
 
@@ -170,7 +170,7 @@ wxbItem::~wxbItem (void)
   }
 }
 
-void wxbItem::Centre (int direction)
+void wxbItem::Centre (int direction, wxWindow *)
 {
   int x, y, width, height, panel_width, panel_height, new_x, new_y;
   wxPanel *panel;

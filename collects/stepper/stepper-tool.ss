@@ -7,7 +7,7 @@
            (lib "string-constant.ss" "string-constants")
            (lib "async-channel.ss")
            (prefix frame: (lib "framework.ss" "framework"))
-           (lib "unitsig.ss")
+           (lib "unit.ss")
            (lib "class.ss")
            (lib "list.ss")
            (prefix model: "private/model.ss")
@@ -15,7 +15,8 @@
            (prefix x: "private/mred-extensions.ss")
            "private/shared.ss"
            "private/model-settings.ss"
-           "stepper-language-interface.ss")
+           "stepper-language-interface.ss"
+           "xml-sig.ss")
 
   ;; hidden invariant: this list should be a sublist of the language-level
   ;; dialog (i.e., same order):
@@ -29,9 +30,9 @@
 
   (provide stepper-tool@)
 
-  (define stepper-tool@
-    (unit/sig drscheme:tool-exports^
-      (import drscheme:tool^ (xml-snip% scheme-snip%))
+  (define-unit stepper-tool@
+    (import drscheme:tool^ xml^)
+    (export drscheme:tool-exports^)
 
       ;; tool magic here:
       (define (phase1)
@@ -232,7 +233,7 @@
 
         ;; whether the stepper is waiting for a new view to become available
         ;; (initially 'waiting-for-any-step)
-        ;; possible values: #f, 'waiting-for-any-step, 'waiting-for-application
+        ;; possible values: #f, 'waiting-for-any-step, 'waiting-for-application, 'waiting-for-end
         (define stepper-is-waiting? 'waiting-for-any-step)
 
         ;; hand-off-and-block : (-> text%? boolean? void?)
@@ -281,6 +282,8 @@
             [(waiting-for-application)
              (or (eq? step-kind 'user-application)
                  (eq? step-kind 'finished-stepping))]
+            [(waiting-for-end)
+             (or (eq? step-kind 'finished-stepping))]
             [(#f) (error 'right-kind-of-step
                          "this code should be unreachable with stepper-is-waiting? set to #f")]
             [else (error 'right-kind-of-step
@@ -295,55 +298,51 @@
                                      (list (list (car view-triple)
                                                  (caddr view-triple))))))
 
-        ;; find-later-application-step : search through the history, starting
-        ;; at 'n', for an application step.
+        ;; find-later-step : given a predicate on history-entries, search through
+        ;; the history for the first step that satisfies the predicate and whose 
+        ;; number is greater than n
+        (define (find-later-step p n)
+          (let loop ([step 0] 
+                     [remaining view-history])
+            (cond [(null? remaining) #f]
+                  [(and (> step n) (p (car remaining))) step]
+                  [else (loop (+ step 1) (cdr remaining))])))
+        
         (define (find-later-application-step n)
-          (let ([history-length (length view-history)])
-            (let loop ([step (+ n 1)])
-              (cond [(>= step history-length) #f]
-                    [(application-step? (list-ref view-history step)) step]
-                    [else (loop (+ step 1))]))))
-
+          (find-later-step application-step? n))
+        
+        (define (find-later-finished-stepping-step n)
+          (find-later-step finished-stepping-step? n))
+        
+        (define (find-later-any-step n)
+          (find-later-step (lambda (x) #t) n))
+        
         ;; is this an application step?
         (define (application-step? history-entry)
           (case (cadr history-entry)
             [(user-application finished-stepping) #t]
+            [else #f]))
+        
+        ;; is this the finished-stepping step?
+        (define (finished-stepping-step? history-entry)
+          (case (cadr history-entry)
+            [(finished-stepping) #t]
             [else #f]))
 
         ;; build gui object:
 
         ;; home : the action of the 'home' button
         (define (home)
-          (when stepper-is-waiting?
-            (set! stepper-is-waiting? #f))
+          (set! stepper-is-waiting? #f)
           (update-view/existing 0))
 
-        ;; next : the action of the 'next' button
-        (define (next)
-          (let ([new-view (+ view 1)])
-            (if (< new-view (length view-history))
-              (update-view/existing new-view)
-              (begin
-                ;; each step has its own semaphore, so releasing one twice is
-                ;; no problem.
-                (semaphore-post release-for-next-step)
-                (when stepper-is-waiting?
-                  (error 'try-to-get-view "try-to-get-view should not be reachable when already waiting for new step"))
-                (let ([try-get (async-channel-try-get view-channel)])
-                  (if try-get
-                    (begin (add-view-triple try-get)
-                           (update-view/existing new-view))
-                    (begin (set! stepper-is-waiting? 'waiting-for-any-step)
-                           (en/dis-able-buttons))))))))
-
-        ;; next-application : the action of the 'next-application' button
-        ;; NB: while this function looks a lot like (next), the abstractions of
-        ;; the two that I came up with were hard to read. So I left them
-        ;; separate -- JBC
-        (define (next-application)
-          (let ([next-application-step (find-later-application-step view)])
-            (if next-application-step
-              (update-view/existing next-application-step)
+        ;; next-of-specified-kind: if the desired step is already in the list, display
+        ;; it; otherwise, wait for it.
+        (define (next-of-specified-kind find-step right-kind? wait-for-it-flag)
+          (set! stepper-is-waiting? #f)
+          (let ([found-step (find-step view)])
+            (if found-step
+              (update-view/existing found-step)
               (begin
                 ;; each step has its own semaphore, so releasing one twice is
                 ;; no problem.
@@ -352,22 +351,35 @@
                   (error 'try-to-get-view
                          "try-to-get-view should not be reachable when already waiting for new step"))
                 (let ([try-get (async-channel-try-get view-channel)])
-                  (if try-get
-                    (begin
-                      (add-view-triple try-get)
-                      (if (application-step? (list-ref view-history (+ view 1)))
-                        (update-view/existing (+ view 1))
-                        (begin
-                          (set! stepper-is-waiting? 'waiting-for-application)
-                          (en/dis-able-buttons))))
-                    (begin
-                      (set! stepper-is-waiting? 'waiting-for-application)
-                      (en/dis-able-buttons))))))))
+                  (when try-get
+                    (add-view-triple try-get))
+                  (if (and try-get (right-kind? (list-ref view-history (+ view 1))))
+                      (update-view/existing (+ view 1))
+                      (begin
+                          (set! stepper-is-waiting? wait-for-it-flag)
+                          (en/dis-able-buttons))))))))
+        
+        ;; respond to a click on the "next" button
+        (define (next)
+          (next-of-specified-kind find-later-any-step
+                                  (lambda (x) #t)
+                                  'waiting-for-any-step))
+        
+        ;; respond to a click on the "next application" button
+        (define (next-application)
+          (next-of-specified-kind find-later-application-step 
+                                  application-step?
+                                  'waiting-for-application))
+        
+        ;; respond to a click on the "jump to end" button
+        (define (jump-to-end)
+          (next-of-specified-kind find-later-finished-stepping-step
+                                  finished-stepping-step?
+                                  'waiting-for-end))
 
         ;; previous : the action of the 'previous' button
         (define (previous)
-          (when stepper-is-waiting?
-            (set! stepper-is-waiting? #f))
+          (set! stepper-is-waiting? #f)
           (when (= view 0)
             (error 'previous-application
                    "previous-step button should not be enabled in view zero."))
@@ -376,8 +388,7 @@
         ;; previous-application : the action of the 'previous-application'
         ;; button
         (define (previous-application)
-          (when stepper-is-waiting?
-            (set! stepper-is-waiting? #f))
+          (set! stepper-is-waiting? #f)
           (when (= view 0)
             (error 'previous-application
                    "previous-application button should not be enabled in view zero."))
@@ -393,23 +404,16 @@
           (make-object stepper-frame% drscheme-frame))
         (define button-panel
           (make-object horizontal-panel% (send s-frame get-area-container)))
-        (define home-button
-          (make-object button% (string-constant stepper-home) button-panel
-                               (lambda (_1 _2) (home))))
-        (define previous-application-button
-          (make-object button% (string-constant stepper-previous-application)
-                               button-panel
-                               (lambda (dc-1 dc-2) (previous-application))))
-        (define previous-button
-          (make-object button% (string-constant stepper-previous) button-panel
-                               (lambda (_1 _2) (previous))))
-        (define next-button
-          (make-object button% (string-constant stepper-next) button-panel
-                               (lambda (_1 _2) (next))))
-        (define next-application-button
-          (make-object button% (string-constant stepper-next-application)
-                               button-panel
-                               (lambda (dc-1 dc-2) (next-application))))
+        (define (add-button name fun)
+          (make-object button% name button-panel (lambda (_1 _2) (fun))))
+        
+        (define home-button                 (add-button (string-constant stepper-home) home))
+        (define previous-application-button (add-button (string-constant stepper-previous-application) previous-application))
+        (define previous-button             (add-button (string-constant stepper-previous) previous))
+        (define next-button                 (add-button (string-constant stepper-next) next))
+        (define next-application-button     (add-button (string-constant stepper-next-application) next-application))
+        (define jump-to-end-button          (add-button (string-constant stepper-jump-to-end) jump-to-end))
+        
         (define canvas
           (make-object x:stepper-canvas% (send s-frame get-area-container)))
 
@@ -433,10 +437,13 @@
             (send previous-application-button enable can-go-back?)
             (send home-button enable can-go-back?)
             (send next-button
-                  enable (not (and (>= view (- (length view-history) 1))
-                                   stepper-is-waiting?)))
+                  enable (or (find-later-any-step view)
+                             (not stepper-is-waiting?)))
             (send next-application-button
                   enable (or (find-later-application-step view)
+                             (not stepper-is-waiting?)))
+            (send jump-to-end-button
+                  enable (or (find-later-finished-stepping-step view)
                              (not stepper-is-waiting?)))))
 
         (define (print-current-view item evt)
@@ -628,7 +635,9 @@
             (inner (void) on-delete x y))
 
           (define/augment (after-set-next-settings s)
-            (send (get-top-level-window) check-current-language-for-stepper)
+            (let ([tlw (get-top-level-window)])
+              (when tlw
+                (send tlw check-current-language-for-stepper)))
             (inner (void) after-set-next-settings s))
 
           (super-new)))
@@ -683,4 +692,4 @@
       (drscheme:get/extend:extend-definitions-text
        stepper-definitions-text-mixin)
       
-      )))
+      ))

@@ -1,7 +1,7 @@
 
 (module snipclass mzscheme
   (require (lib "class.ss")
-           (lib "unitsig.ss")
+           (lib "unit.ss")
            (lib "mred.ss" "mred")
            (lib "match.ss")
            (lib "string.ss")
@@ -10,15 +10,16 @@
   (provide snipclass@)
   
   (define snipclass@
-    (unit/sig snipclass^
+    (unit
       (import snip^)
+      (export snipclass^)
+
       ;; COPIED AND MODIFIED from mrlib/syntax-browser.ss
       (define syntax-snipclass%
         (class snip-class%
           (define/override (read stream)
-            (let ([str (send stream get-bytes)])
-              (make-object syntax-snip% 
-                (unmarshall-syntax (read-from-string (bytes->string/utf-8 str))))))
+            (make-object syntax-snip%
+              (unmarshall-syntax (read-from-string (send stream get-bytes)))))
           (super-instantiate ())))
       
       (define snip-class (make-object syntax-snipclass%))
@@ -62,7 +63,7 @@
       [else stx]))
   
   (define (unmarshall-object obj)
-    (let ([unknown (λ () (string->symbol (format "unknown: ~s" obj)))])
+    (let ([unknown (lambda () (string->symbol (format "unknown: ~s" obj)))])
       (if (and (pair? obj)
                (symbol? (car obj)))
           (case (car obj)

@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -110,7 +110,7 @@ MZ_EXTERN int scheme_block_until_unless(Scheme_Ready_Fun f, Scheme_Needs_Wakeup_
 					int enable_break);
 
 MZ_EXTERN void scheme_wait_input_allowed(Scheme_Input_Port *port, int nonblock);
-MZ_EXTERN int scheme_unless_ready(Scheme_Object *unless);
+XFORM_NONGCING MZ_EXTERN int scheme_unless_ready(Scheme_Object *unless);
 
 MZ_EXTERN int scheme_in_main_thread(void);
 
@@ -240,6 +240,8 @@ MZ_EXTERN unsigned char scheme_uchar_combining_classes[];
 
 MZ_EXTERN Scheme_Object *scheme_eval(Scheme_Object *obj, Scheme_Env *env);
 MZ_EXTERN Scheme_Object *scheme_eval_multi(Scheme_Object *obj, Scheme_Env *env);
+MZ_EXTERN Scheme_Object *scheme_eval_with_prompt(Scheme_Object *obj, Scheme_Env *env);
+MZ_EXTERN Scheme_Object *scheme_eval_multi_with_prompt(Scheme_Object *obj, Scheme_Env *env);
 
 MZ_EXTERN Scheme_Object *scheme_eval_compiled(Scheme_Object *obj, Scheme_Env *env);
 MZ_EXTERN Scheme_Object *scheme_eval_compiled_multi(Scheme_Object *obj, Scheme_Env *env);
@@ -251,9 +253,16 @@ MZ_EXTERN Scheme_Object *scheme_apply_multi(Scheme_Object *rator, int num_rands,
 MZ_EXTERN Scheme_Object *scheme_apply_no_eb(Scheme_Object *rator, int num_rands, Scheme_Object **rands);
 MZ_EXTERN Scheme_Object *scheme_apply_multi_no_eb(Scheme_Object *rator, int num_rands, Scheme_Object **rands);
 MZ_EXTERN Scheme_Object *scheme_apply_to_list(Scheme_Object *rator, Scheme_Object *argss);
+MZ_EXTERN Scheme_Object *scheme_apply_with_prompt(Scheme_Object *rator, int num_rands, Scheme_Object **rands);
+MZ_EXTERN Scheme_Object *scheme_apply_multi_with_prompt(Scheme_Object *rator, int num_rands, Scheme_Object **rands);
+MZ_EXTERN Scheme_Object *_scheme_apply_with_prompt(Scheme_Object *rator, int num_rands, Scheme_Object **rands);
+MZ_EXTERN Scheme_Object *_scheme_apply_multi_with_prompt(Scheme_Object *rator, int num_rands, Scheme_Object **rands);
 MZ_EXTERN Scheme_Object *scheme_eval_string(const char *str, Scheme_Env *env);
 MZ_EXTERN Scheme_Object *scheme_eval_string_multi(const char *str, Scheme_Env *env);
 MZ_EXTERN Scheme_Object *scheme_eval_string_all(const char *str, Scheme_Env *env, int all);
+MZ_EXTERN Scheme_Object *scheme_eval_string_with_prompt(const char *str, Scheme_Env *env);
+MZ_EXTERN Scheme_Object *scheme_eval_string_multi_with_prompt(const char *str, Scheme_Env *env);
+MZ_EXTERN Scheme_Object *scheme_eval_string_all_with_prompt(const char *str, Scheme_Env *env, int all);
 
 MZ_EXTERN Scheme_Object *_scheme_apply_known_prim_closure(Scheme_Object *rator, int argc,
 							  Scheme_Object **argv);
@@ -263,6 +272,11 @@ MZ_EXTERN Scheme_Object *_scheme_apply_prim_closure(Scheme_Object *rator, int ar
 						    Scheme_Object **argv);
 MZ_EXTERN Scheme_Object *_scheme_apply_prim_closure_multi(Scheme_Object *rator, int argc,
 							  Scheme_Object **argv);
+
+MZ_EXTERN Scheme_Object *scheme_call_with_prompt(Scheme_Closed_Prim f, void *data);
+MZ_EXTERN Scheme_Object *scheme_call_with_prompt_multi(Scheme_Closed_Prim f, void *data);
+MZ_EXTERN Scheme_Object *_scheme_call_with_prompt(Scheme_Closed_Prim f, void *data);
+MZ_EXTERN Scheme_Object *_scheme_call_with_prompt_multi(Scheme_Closed_Prim f, void *data);
 
 MZ_EXTERN Scheme_Object *scheme_values(int c, Scheme_Object **v);
 
@@ -321,6 +335,9 @@ MZ_EXTERN void *GC_malloc_one_tagged(size_t size_in_bytes);
 MZ_EXTERN void *GC_malloc_atomic_uncollectable(size_t size_in_bytes);
 MZ_EXTERN void *scheme_malloc_uncollectable(size_t size_in_bytes);
 MZ_EXTERN void *GC_malloc_array_tagged(size_t size_in_bytes);
+MZ_EXTERN void *GC_malloc_allow_interior(size_t size_in_bytes);
+MZ_EXTERN void *GC_malloc_atomic_allow_interior(size_t size_in_bytes);
+MZ_EXTERN void *GC_malloc_tagged_allow_interior(size_t size_in_bytes);
 #  else
 MZ_EXTERN void *GC_malloc_stubborn(size_t size_in_bytes);
 MZ_EXTERN void *GC_malloc_uncollectable(size_t size_in_bytes);
@@ -384,6 +401,9 @@ MZ_EXTERN Scheme_Hash_Table *scheme_make_hash_table(int type);
 MZ_EXTERN Scheme_Hash_Table *scheme_make_hash_table_equal();
 MZ_EXTERN void scheme_hash_set(Scheme_Hash_Table *table, Scheme_Object *key, Scheme_Object *val);
 MZ_EXTERN Scheme_Object *scheme_hash_get(Scheme_Hash_Table *table, Scheme_Object *key);
+XFORM_NONGCING MZ_EXTERN Scheme_Object *scheme_eq_hash_get(Scheme_Hash_Table *table, Scheme_Object *key);
+MZ_EXTERN void scheme_hash_set_atomic(Scheme_Hash_Table *table, Scheme_Object *key, Scheme_Object *val);
+MZ_EXTERN Scheme_Object *scheme_hash_get_atomic(Scheme_Hash_Table *table, Scheme_Object *key);
 MZ_EXTERN int scheme_hash_table_equal(Scheme_Hash_Table *t1, Scheme_Hash_Table *t2);
 MZ_EXTERN int scheme_is_hash_table_equal(Scheme_Object *o);
 MZ_EXTERN Scheme_Hash_Table *scheme_clone_hash_table(Scheme_Hash_Table *bt);
@@ -493,19 +513,21 @@ MZ_EXTERN Scheme_Object *scheme_make_sema(long v);
 MZ_EXTERN void scheme_post_sema(Scheme_Object *o);
 MZ_EXTERN void scheme_post_sema_all(Scheme_Object *o);
 MZ_EXTERN int scheme_wait_sema(Scheme_Object *o, int just_try);
+XFORM_NONGCING MZ_EXTERN int scheme_try_plain_sema(Scheme_Object *o);
 MZ_EXTERN Scheme_Object **scheme_char_constants;
 
 MZ_EXTERN Scheme_Object *scheme_make_channel();
 MZ_EXTERN Scheme_Object *scheme_make_channel_put_evt(Scheme_Object *ch, Scheme_Object *v);
 
-MZ_EXTERN int scheme_get_int_val(Scheme_Object *o, long *v);
-MZ_EXTERN int scheme_get_unsigned_int_val(Scheme_Object *o, unsigned long *v);
-MZ_EXTERN int scheme_get_long_long_val(Scheme_Object *o, mzlonglong *v);
-MZ_EXTERN int scheme_get_unsigned_long_long_val(Scheme_Object *o, umzlonglong *v);
+XFORM_NONGCING MZ_EXTERN int scheme_get_int_val(Scheme_Object *o, long *v);
+XFORM_NONGCING MZ_EXTERN int scheme_get_unsigned_int_val(Scheme_Object *o, unsigned long *v);
+XFORM_NONGCING MZ_EXTERN int scheme_get_long_long_val(Scheme_Object *o, mzlonglong *v);
+XFORM_NONGCING MZ_EXTERN int scheme_get_unsigned_long_long_val(Scheme_Object *o, umzlonglong *v);
 
-MZ_EXTERN double scheme_real_to_double(Scheme_Object *r);
+XFORM_NONGCING MZ_EXTERN double scheme_real_to_double(Scheme_Object *r);
 
 MZ_EXTERN Scheme_Object *scheme_make_cptr(void *cptr, Scheme_Object *typetag);
+MZ_EXTERN Scheme_Object *scheme_make_offset_cptr(void *cptr, long offset, Scheme_Object *typetag);
 
 MZ_EXTERN const char *scheme_get_proc_name(Scheme_Object *p, int *len, int for_error);
 
@@ -571,17 +593,17 @@ MZ_EXTERN char *scheme_bignum_to_string(const Scheme_Object *n, int radix);
 MZ_EXTERN char *scheme_bignum_to_allocated_string(const Scheme_Object *n, int radix, int alloc);
 MZ_EXTERN Scheme_Object *scheme_read_bignum(const mzchar *str, int offset, int radix);
 MZ_EXTERN Scheme_Object *scheme_read_bignum_bytes(const char *str, int offset, int radix);
-MZ_EXTERN Scheme_Object *scheme_bignum_normalize(const Scheme_Object *n);
+XFORM_NONGCING MZ_EXTERN Scheme_Object *scheme_bignum_normalize(const Scheme_Object *n);
 
 /*========================================================================*/
 /*                              rationals                                 */
 /*========================================================================*/
 
 MZ_EXTERN Scheme_Object *scheme_make_rational(const Scheme_Object *r, const Scheme_Object *d);
-MZ_EXTERN double scheme_rational_to_double(const Scheme_Object *n);
+XFORM_NONGCING MZ_EXTERN double scheme_rational_to_double(const Scheme_Object *n);
 MZ_EXTERN Scheme_Object *scheme_rational_from_double(double d);
 #ifdef MZ_USE_SINGLE_FLOATS
-MZ_EXTERN float scheme_rational_to_float(const Scheme_Object *n);
+XFORM_NONGCING MZ_EXTERN float scheme_rational_to_float(const Scheme_Object *n);
 MZ_EXTERN Scheme_Object *scheme_rational_from_float(float d);
 #else
 # define scheme_rational_to_float scheme_rational_to_double
@@ -601,8 +623,8 @@ MZ_EXTERN Scheme_Object *scheme_complex_real_part(const Scheme_Object *n);
 MZ_EXTERN Scheme_Object *scheme_complex_imaginary_part(const Scheme_Object *n);
 
 /* Exact/inexact: */
-MZ_EXTERN int scheme_is_exact(Scheme_Object *n);
-MZ_EXTERN int scheme_is_inexact(Scheme_Object *n);
+XFORM_NONGCING MZ_EXTERN int scheme_is_exact(const Scheme_Object *n);
+XFORM_NONGCING MZ_EXTERN int scheme_is_inexact(const Scheme_Object *n);
 
 /*========================================================================*/
 /*                 macros, syntax, and compilation                        */
@@ -704,6 +726,12 @@ MZ_EXTERN Scheme_Object *scheme_write_special_nonblock(int argc, Scheme_Object *
 MZ_EXTERN Scheme_Object *scheme_make_write_evt(const char *who, Scheme_Object *port,
 					       Scheme_Object *special, char *str, long start, long size);
 
+MZ_EXTERN Scheme_Port *scheme_port_record(Scheme_Object *port);
+MZ_EXTERN Scheme_Input_Port *scheme_input_port_record(Scheme_Object *port);
+MZ_EXTERN Scheme_Output_Port *scheme_output_port_record(Scheme_Object *port);
+XFORM_NONGCING MZ_EXTERN int scheme_is_input_port(Scheme_Object *port);
+XFORM_NONGCING MZ_EXTERN int scheme_is_output_port(Scheme_Object *port);
+
 MZ_EXTERN Scheme_Object *scheme_make_port_type(const char *name);
 MZ_EXTERN Scheme_Input_Port *scheme_make_input_port(Scheme_Object *subtype, void *data,
 						    Scheme_Object *name,
@@ -755,7 +783,8 @@ MZ_EXTERN Scheme_Object *scheme_make_fd_output_port(int fd, Scheme_Object *name,
 MZ_EXTERN Scheme_Object *scheme_make_byte_string_input_port(const char *str);
 MZ_EXTERN Scheme_Object *scheme_make_sized_byte_string_input_port(const char *str, long len);
 MZ_EXTERN Scheme_Object *scheme_make_byte_string_output_port();
-MZ_EXTERN char *scheme_get_sized_byte_string_output(Scheme_Object *, long *len);
+MZ_EXTERN char *scheme_get_sized_byte_string_output(Scheme_Object *port, long *len);
+MZ_EXTERN char *scheme_get_reset_sized_byte_string_output(Scheme_Object *port, long *len, int reset, long startpos, long endpos);
 
 MZ_EXTERN void scheme_pipe(Scheme_Object **read, Scheme_Object **write);
 MZ_EXTERN void scheme_pipe_with_limit(Scheme_Object **write, Scheme_Object **read, int maxsize);
@@ -774,13 +803,15 @@ MZ_EXTERN char *scheme_os_getcwd(char *buf, int buflen, int *actlen, int noexn);
 MZ_EXTERN int scheme_os_setcwd(char *buf, int noexn);
 MZ_EXTERN char *scheme_getdrive(void);
 
-MZ_EXTERN Scheme_Object *scheme_split_path(const char *path, int len, Scheme_Object **base, int *isdir);
+MZ_EXTERN Scheme_Object *scheme_split_path(const char *path, int len, Scheme_Object **base, int *isdir, int kind);
 MZ_EXTERN Scheme_Object *scheme_build_path(int argc, Scheme_Object **argv);
 MZ_EXTERN Scheme_Object *scheme_path_to_directory_path(Scheme_Object *p);
+MZ_EXTERN Scheme_Object *scheme_path_to_complete_path(Scheme_Object *path, Scheme_Object *relto_path);
 
 MZ_EXTERN Scheme_Object *scheme_make_path(const char *chars);
 MZ_EXTERN Scheme_Object *scheme_make_sized_path(char *chars, long len, int copy);
 MZ_EXTERN Scheme_Object *scheme_make_sized_offset_path(char *chars, long d, long len, int copy);
+MZ_EXTERN Scheme_Object *scheme_make_sized_offset_kind_path(char *chars, long d, long len, int copy, int kind);
 MZ_EXTERN Scheme_Object *scheme_make_path_without_copying(char *chars);
 
 #ifdef MACINTOSH_EVENTS
@@ -812,6 +843,8 @@ MZ_EXTERN void scheme_getnameinfo(void *sa, int salen,
 
 MZ_EXTERN int scheme_get_port_file_descriptor(Scheme_Object *p, long *_fd);
 MZ_EXTERN int scheme_get_port_socket(Scheme_Object *p, long *_s);
+MZ_EXTERN void scheme_socket_to_ports(long s, const char *name, int takeover,
+                                      Scheme_Object **_inp, Scheme_Object **_outp);
 
 MZ_EXTERN void scheme_set_type_printer(Scheme_Type stype, Scheme_Type_Printer printer);
 MZ_EXTERN void scheme_print_bytes(Scheme_Print_Params *pp, const char *str, int offset, int len);
@@ -904,13 +937,13 @@ MZ_EXTERN Scheme_Object *scheme_make_struct_exptime(Scheme_Object **names, int c
 						    Scheme_Object *super_exptime,
 						    int flags);
 
-MZ_EXTERN int scheme_is_struct_instance(Scheme_Object *type, Scheme_Object *v);
+XFORM_NONGCING MZ_EXTERN int scheme_is_struct_instance(Scheme_Object *type, Scheme_Object *v);
 MZ_EXTERN Scheme_Object *scheme_struct_ref(Scheme_Object *s, int pos);
 MZ_EXTERN void scheme_struct_set(Scheme_Object *s, int pos, Scheme_Object *v);
 
 MZ_EXTERN Scheme_Object *scheme_make_struct_type_property(Scheme_Object *name);
 MZ_EXTERN Scheme_Object *scheme_make_struct_type_property_w_guard(Scheme_Object *name, Scheme_Object *guard);
-MZ_EXTERN Scheme_Object *scheme_struct_type_property_ref(Scheme_Object *prop, Scheme_Object *s);
+XFORM_NONGCING MZ_EXTERN Scheme_Object *scheme_struct_type_property_ref(Scheme_Object *prop, Scheme_Object *s);
 
 MZ_EXTERN Scheme_Object *scheme_make_location(Scheme_Object *src,
 					      Scheme_Object *line,
@@ -926,8 +959,8 @@ XFORM_NONGCING MZ_EXTERN int scheme_is_subinspector(Scheme_Object *i, Scheme_Obj
 /*                              utilities                                 */
 /*========================================================================*/
 
-MZ_EXTERN int scheme_eq(Scheme_Object *obj1, Scheme_Object *obj2);
-MZ_EXTERN int scheme_eqv(Scheme_Object *obj1, Scheme_Object *obj2);
+XFORM_NONGCING MZ_EXTERN int scheme_eq(Scheme_Object *obj1, Scheme_Object *obj2);
+XFORM_NONGCING MZ_EXTERN int scheme_eqv(Scheme_Object *obj1, Scheme_Object *obj2);
 MZ_EXTERN int scheme_equal(Scheme_Object *obj1, Scheme_Object *obj2);
 
 #ifdef MZ_PRECISE_GC
@@ -935,6 +968,11 @@ XFORM_NONGCING MZ_EXTERN long scheme_hash_key(Scheme_Object *o);
 #endif
 MZ_EXTERN long scheme_equal_hash_key(Scheme_Object *o);
 MZ_EXTERN long scheme_equal_hash_key2(Scheme_Object *o);
+
+MZ_EXTERN void scheme_set_type_equality(Scheme_Type type, 
+                                        Scheme_Equal_Proc f,
+                                        Scheme_Primary_Hash_Proc hash1,
+                                        Scheme_Secondary_Hash_Proc hash2);
 
 MZ_EXTERN Scheme_Object *scheme_build_list(int argc, Scheme_Object **argv);
 MZ_EXTERN Scheme_Object *scheme_build_list_offset(int argc, Scheme_Object **argv, int delta);

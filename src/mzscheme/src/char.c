@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -15,7 +15,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
   libscheme
   Copyright (c) 1994 Brent Benson
@@ -258,7 +259,8 @@ Scheme_Object *scheme_make_char(mzchar ch)
   if (ch < 256)
     return scheme_char_constants[ch];
   
-  o = scheme_alloc_small_object();
+  o = scheme_malloc_small_atomic_tagged(sizeof(Scheme_Small_Object));
+  CLEAR_KEY_FIELD(o);
   o->type = scheme_char_type;
   SCHEME_CHAR_VAL(o) = ch;
 

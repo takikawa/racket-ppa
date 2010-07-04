@@ -3,7 +3,7 @@
  * Purpose:     MrEd MacOS event loop
  * Author:      Matthew Flatt
  * Created:     1996
- * Copyright:   (c) 2004-2006 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2007 PLT Scheme Inc.
  * Copyright:   (c) 1996, Matthew Flatt
  */
 
@@ -62,6 +62,7 @@ typedef struct EventFinderClosure {
 } EventFinderClosure;
 
 static int queue_size, max_queue_size;
+static int mouse_down_in_flight;
 
 Bool wx_ignore_key; /* used in wxItem */
 
@@ -227,6 +228,11 @@ static void QueueTransferredEvent(EventRecord *e)
   queue_size++;
   if (queue_size > max_queue_size) {
     max_queue_size = queue_size;
+  }
+
+  if ((e->what == mouseDown)
+      || (e->what == mouseMenuDown)) {
+    mouse_down_in_flight = 1;
   }
 
   q->rgn = NULL;
@@ -421,6 +427,39 @@ int WNE(EventRecord *e, double sleep_secs)
 {
   int r;
 
+  if (mouse_down_in_flight) {
+    /* Try hard to handle a mouse-down event before calling
+       WaitNextEvent again. Otherwise, mouse events for tracking
+       (e.g., menu clicks, close-window clicks, window-drag clicks,
+       and button clicks) can get lost. We can't wait forever, though;
+       the target eventspace might be stuck for some reason. If MrEd
+       is idle enough to sleep, take that as a sign that it's ok to
+       get new events. Another sign is if there's a new mouse-down or
+       key-down event. Some other cases, such as a `yield' or waiting
+       on an AppleEvent, are handled by explicitly turning off
+       mouse_down_in_flight before we get here. */
+    EventRef eref;
+    EventTypeSpec poll_evts[2];
+
+    if (!sleep_secs) {
+      poll_evts[0].eventClass = kEventClassMouse;
+      poll_evts[0].eventKind = kEventMouseDown;
+      poll_evts[1].eventClass = kEventClassKeyboard;
+      poll_evts[1].eventKind = kEventRawKeyDown;
+      eref = AcquireFirstMatchingEventInQueue(GetCurrentEventQueue(),
+                                              2,
+                                              poll_evts,
+                                              kEventQueueOptionsNone);
+      if (eref) {
+        ReleaseEvent(eref);
+      } else {
+        /* Looks like we should wait... */
+        return 0;
+      }
+    }
+  }
+
+
   wxResetCanvasBackgrounds();
   
   if (!wne_handlersInstalled) {
@@ -465,7 +504,7 @@ int WNE(EventRecord *e, double sleep_secs)
 
   waiting_for_next_event = 1;
 
-  r = WaitNextEvent(everyEvent, e, sleep_secs * 60, mouseRgn);
+  r = WaitNextEvent(everyEvent, e, (sleep_secs < 0) ? 0x7FFFFFFF : sleep_secs * 60, mouseRgn);
 
   waiting_for_next_event = 0;
 
@@ -486,6 +525,8 @@ void WakeUpMrEd()
    Application queue, sticks them in the MrEd queue, and returns 1,
    unless it was called less than delay_time ago, in which case do
    nothing and return 0. */
+
+static unsigned long lastTime;
  
 static int TransferQueue(int all)
 {
@@ -494,7 +535,6 @@ static int TransferQueue(int all)
   int delay_time = 0;
   
   /* Don't call WaitNextEvent() too often. */
-  static unsigned long lastTime;
   if (TickCount() <= lastTime + delay_time)
     return 0;
   
@@ -607,6 +647,11 @@ void wxTracking()
   cont_mouse_context_window = NULL;
 }
 
+void wxMouseEventHandled(void)
+{
+  mouse_down_in_flight = 0;
+}
+
 #ifdef RECORD_HISTORY
 FILE *history;
 #endif
@@ -712,13 +757,15 @@ static int CheckForMouseOrKey(EventRecord *e, MrQueueRef osq, int check_only,
 	    /* Handle bring-window-to-front click immediately */
 	    if (!osq->half_done) {
 	      if (fc && (!fc->modal_window || (fr == fc->modal_window))) {
-		SelectWindow(window);
+                if ((part == inContent) || !(e->modifiers & cmdKey))
+                  SelectWindow(window);
 		cont_mouse_context = NULL;
 	      } else if (fc && fc->modal_window) {
 		wxFrame *mfr;
 		mfr = (wxFrame *)fc->modal_window;
 		cont_mouse_context = NULL;
-		SelectWindow(mfr->macWindow());
+                if ((part == inContent) || !(e->modifiers & cmdKey))
+                  SelectWindow(mfr->macWindow());
 	      }
 	      osq->half_done = 1;
 	    }
@@ -948,7 +995,7 @@ int MrEdGetNextEvent(int check_only, int current_only,
 
     if (check_only)
       return TRUE;
-        
+    
     MrDequeue(osq);
     
     return TRUE;
@@ -1937,6 +1984,7 @@ static void wait_for_reply(AppleEvent *ae, AppleEvent *reply)
   AEGetAttributePtr(ae, keyReturnIDAttr, typeLongInteger, &rtype, &id, sizeof(long), &sz);
   
   while (1) {
+    wxMouseEventHandled();
     WNE(&e, 1.0);
     if (e.what == kHighLevelEvent)
       AEProcessAppleEvent(&e);

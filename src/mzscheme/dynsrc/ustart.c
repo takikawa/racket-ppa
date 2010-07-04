@@ -78,6 +78,7 @@ static X_flag_entry X_flags[] = {
   { "-title", 1 },
   { "-xnllanguage", 1 },
   { "-xrm", 1 },
+  { "-singleInstance", 0 },
   { NULL, 0 }
 };
 
@@ -140,6 +141,8 @@ static char *copy_string(char *s1)
   int l1;
   char *s;
 
+  if (!s1) return NULL;
+
   l1 = strlen(s1);
 
   s  = (char *)malloc(l1 + 1);
@@ -199,6 +202,9 @@ char *absolutize(char *p, char *d)
 {
   int l1;
 
+  if (!p[0])
+    return p;
+
   if (p[0] == '/')
     return p;
   
@@ -235,7 +241,10 @@ int main(int argc, char **argv)
     /* Absolute path */
   } else if (has_slash(me)) {
     /* Relative path with a directory: */
-    me = path_append(getcwd(NULL, 0), me);
+    char *buf;
+    long buflen = 4096;
+    buf = (char *)malloc(buflen);
+    me = path_append(getcwd(buf, buflen), me);
   } else {
     /* We have to find the executable by searching PATH: */
     char *path = copy_string(getenv("PATH")), *p, *m;

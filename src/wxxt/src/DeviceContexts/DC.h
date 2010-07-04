@@ -4,7 +4,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2006 PLT Scheme Inc.
+ * Copyright: (C) 2004-2007 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -20,7 +20,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301 USA.
  */
 
 #ifndef DC_h
@@ -106,7 +107,8 @@ public:
     virtual void  GetTextExtent(const char *s, double *w, double *h,
 				double *descent = 0, double *ext_leading = 0,
 				wxFont *font=NULL, 
-				Bool combine=FALSE, Bool use16bit=FALSE, int dt=0) = 0;
+				Bool combine=FALSE, Bool use16bit=FALSE, int dt=0,
+                                int len = -1) = 0;
     virtual void  SetBackground(wxColour *c) = 0;
     virtual void  SetBrush(wxBrush *brush) = 0;
     virtual void  SetClippingRect(double x, double y, double w, double h) = 0;

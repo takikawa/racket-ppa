@@ -1,25 +1,21 @@
 
-(module group mzscheme
+(module group (lib "a-unit.ss")
   (require (lib "string-constant.ss" "string-constants")
-           (lib "unitsig.ss")
            (lib "class.ss")
            "sig.ss"
-	   "../gui-utils.ss"
+	   "../preferences.ss"
+           "../gui-utils.ss"
            (lib "mred-sig.ss" "mred")
            (lib "list.ss")
            (lib "file.ss"))
-  
-  (provide group@)
-  
-  (define group@
-    (unit/sig framework:group^
-      (import mred^
-              [application : framework:application^]
-              [frame : framework:frame^]
-              [preferences : framework:preferences^]
-              [text : framework:text^]
-              [canvas : framework:canvas^]
-              [menu : framework:menu^])
+    
+  (import mred^
+          [prefix application: framework:application^]
+          [prefix frame: framework:frame^]
+          [prefix text: framework:text^]
+          [prefix canvas: framework:canvas^]
+          [prefix menu: framework:menu^])
+  (export framework:group^)
       
       (define-struct frame (frame id))
       
@@ -89,6 +85,19 @@
               (for-each
                (λ (menu)
                  (for-each (λ (item) (send item delete)) (send menu get-items))
+                 (when (eq? (system-type) 'macosx)
+                   (new menu:can-restore-menu-item%
+                        [label (string-constant minimize)]
+                        [parent menu]
+                        [callback (λ (x y) (send (send (send menu get-parent) get-frame) iconize #t))]
+                        [shortcut #\m])
+                   (new menu:can-restore-menu-item%
+                        [label (string-constant zoom)]
+                        [parent menu]
+                        [callback (λ (x y) 
+                                    (let ([frame (send (send menu get-parent) get-frame)])
+                                      (send frame maximize (not (send frame is-maximized?)))))])
+                   (make-object separator-menu-item% menu)) 
                  (instantiate menu:can-restore-menu-item% ()
                    (label (string-constant bring-frame-to-front...))
                    (parent menu)
@@ -322,4 +331,4 @@
           (internal-get-the-frame-group)))
       
       (define (get-the-frame-group)
-        (internal-get-the-frame-group)))))
+        (internal-get-the-frame-group)))

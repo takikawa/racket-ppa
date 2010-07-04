@@ -66,12 +66,12 @@
 					    e
 					    (syntax-property
 					     (syntax-case e ()
-					       [((n1 n2) expr)
+					       [((n1 n2) . expr)
 						(quasisyntax/loc e
 						  (#,(syntax-property
 						      #'(n1 n2)
 						      'certify-mode 'transparent)
-						   expr))]
+						   . expr))]
 					       [_else e])
 					     'certify-mode 'transparent)))
 				      (syntax-e #'(elem (... ...)))))
@@ -969,6 +969,7 @@
 							   mk-method-temp
 							   (map car pubments))]
 				      [(public-final-name ...) (map car public-finals)]
+				      [(public-final-name-localized ...) (map lookup-localize (map car public-finals))]
 				      [(public-final-temp ...) (map
 								mk-method-temp
 								(map car public-finals))]
@@ -3132,6 +3133,11 @@
                (values #f #t)
                (loop (vector-ref (class-supers c) (sub1 (class-pos c))) #t))))))
 
+  (define (to-sym s)
+    (if (string? s)
+        (string->symbol s)
+        s))
+
   (define (class-info c)
     (unless (class? c)
       (raise-type-error 'class-info "class" c))
@@ -3140,7 +3146,7 @@
 	  (let loop ([next super][skipped? #f])
 	    (if (or (not next)
 		    (struct? ((class-insp-mk next))))
-		(values (class-name c)
+		(values (to-sym (class-name c))
 			(- (class-field-width c) (class-field-width super))
 			(apply list-immutable (filter interned? (class-field-ids c)))
 			(class-field-ref c)
@@ -3429,17 +3435,13 @@
   ;;--------------------------------------------------------------------
   
   (define undefined (letrec ([x x]) x))
-  
+
   (define-struct (exn:fail:object exn:fail) () insp)
 
   (define (obj-error where . msg)
-    (raise
-     (make-exn:fail:object
-      (string->immutable-string
-       (string-append
-	(format "~a: " where)
-	(apply format msg)))
-      (current-continuation-marks))))
+    (raise (make-exn:fail:object
+            (string-append (format "~a: " where) (apply format msg))
+            (current-continuation-marks))))
 
   (define (for-class name)
     (if name (format " for class: ~a" name) ""))
@@ -3447,7 +3449,7 @@
     (if name (format " for ~a class: ~a" which name) ""))
   (define (for-intf name)
     (if name (format " for interface: ~a" name) ""))
-  
+
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;
   ;; mixin

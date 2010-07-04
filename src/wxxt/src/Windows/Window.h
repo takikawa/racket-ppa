@@ -4,7 +4,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2006 PLT Scheme Inc.
+ * Copyright: (C) 2004-2007 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -20,7 +20,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301 USA.
  */
 
 #ifndef Window_h
@@ -31,7 +32,7 @@
 #endif
 
 #ifdef Have_Xt_Types
-class wxWindow_Xintern {
+class wxWindow_Xintern : public gc {
 public:
     Widget	  frame;			// frame widgets
     Widget	  scroll;			// optional scrollable widget
@@ -133,7 +134,7 @@ public:
     // miscellaneous
     virtual void  AllowDoubleClick(Bool allow) { allow_dclicks = allow; }
     virtual void  CaptureMouse(void);
-    virtual void  DragAcceptFiles(Bool accept) { drag_accept = accept; }
+    virtual void  DragAcceptFiles(Bool accept);
     virtual void  Enable(Bool enable);
     virtual void  EnablePainting(Bool enable) { painting_enabled = enable; }
     virtual void  Fit(void) {}
@@ -176,7 +177,7 @@ public:
     wxFont *GetFont() { return font; }
 
     long GetWindowHandle();
-    
+
 protected:
     // create and destroy associated device context
     void CreateDC(void);
@@ -196,6 +197,7 @@ protected:
     static Status LookupKey(int unshifted, int unalted,
                             Widget w, wxWindow *win, XEvent *xev, KeySym *_keysym, char *s, int *_len);
     void RegisterAll(Widget ww);
+    wxWindow *FindChildByWidget(Widget w);
 #   endif
 protected:
     friend void wxXSetBusyCursor(wxWindow *, wxCursor *);
@@ -223,6 +225,8 @@ protected:
     long  style;
 
     wxWindow **saferef; /* indirection for safety in callbacks */
+
+  wxWindow *dndTarget; /* set between XdndPosition and XdndDrop/XdndLeave */
 
     long misc_flags;
 

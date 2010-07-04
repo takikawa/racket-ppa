@@ -14,7 +14,7 @@
 							 real? number? boolean? 
 							 procedure? symbol?
 							 string? bytes?
-							 vector?
+							 vector? box?
 							 eof-object?))
 				  (let ([s (with-handlers ([exn? exn-message])
 					     (proc 'bad))]
@@ -101,6 +101,8 @@
     (un #f 'symbol? #f)
     (un #t 'vector? (vector 1 2 3))
     (un #f 'vector? #f)
+    (un #t 'box? (box 10))
+    (un #f 'box? #f)
     (un #t 'string? "apple")
     (un #f 'string? #"apple")
     (un #f 'bytes? "apple")
@@ -270,31 +272,14 @@
 
     ))
 
-;; For some comparison, ignore the stack-depth
-;;  part of the compilation result (since it's
-;;  an approximation, anyway).
-(define maybe-different-depths? #f)
-
 (define (comp=? c1 c2)
   (let ([s1 (open-output-bytes)]
 	[s2 (open-output-bytes)])
     (write c1 s1)
     (write c2 s2)
     (let ([t1 (get-output-bytes s1)]
-	  [t2 (get-output-bytes s2)]
-	  [skip-byte (+ 2 ; #~
-			1 ; version length
-			(string-length (version))
-			1 ; symtab count
-			1 ; length
-			1 ; CPT_MARSHALLED for top
-			1)])
+	  [t2 (get-output-bytes s2)])
       (or (bytes=? t1 t2)
-	  (and maybe-different-depths?
-	       (bytes=? (subbytes t1 0 (sub1 skip-byte))
-			(subbytes t2 0 (sub1 skip-byte)))
-	       (bytes=? (subbytes t1 skip-byte)
-			(subbytes t2 skip-byte)))
 	  (begin
 	    (printf "~s\n~s\n" t1 t2)
 	    #f
@@ -370,9 +355,6 @@
 (test-comp (normalize-depth '(let* ([i (cons 0 1)][g i][h (car g)][m h]) m))
 	   (normalize-depth '(let* ([i (cons 0 1)][h (car i)]) h)))
 
-;; The current optimizer reset depths correctly:
-;; (set! maybe-different-depths? #t)
-
 (require #%kernel) ; 
 
 (test-comp (void) '(void))
@@ -428,6 +410,20 @@
               (define (f x) (+ x 1))
               9))
 
+(test-comp '(let ([f (lambda (x) 10)])
+              3)
+           '3)
+
+(test-comp '(let ([x (#%expression
+                      (begin (quote-syntax foo) 3))])
+              x)
+           '3)
+
+(test-comp '(if (lambda () 10)
+                'ok
+                (quote-syntax no!))
+           ''ok)
+
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Check bytecode verification of lifted functions
 
@@ -462,6 +458,16 @@
   (define i 9)
   (set! i 10))
 (err/rt-test (dynamic-require 'bad-order #f))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; Check lifting of a function with only an unused rest arg:
+
+(test 1 'continue
+      (let/ec foo
+        (let ([continue (lambda extras
+                          (foo 1))])
+          (+ 1 (continue)))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; call-with-values optimization

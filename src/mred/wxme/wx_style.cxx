@@ -3,7 +3,7 @@
  * Purpose:     wxStyle and wxStyleList implementation
  * Author:      Matthew Flatt
  * Created:     1995
- * Copyright:   (c) 2004-2006 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2007 PLT Scheme Inc.
  * Copyright:   (c) 1995, Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -18,7 +18,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
  */
 
@@ -1268,9 +1269,9 @@ void *wxStyleList::NotifyOnChange(wxStyleNotifyFunc f, void *data, int weak)
   } else {
     void *weak_data;
     weak_data = (void *)scheme_box((Scheme_Object *)data);
-    GC_finalization_weak_ptr((void **)weak_data, 
-			     ((void **)&SCHEME_BOX_VAL(weak_data)
-			      - (void **)weak_data));
+    GC_finalization_weak_ptr((void **)(void *)weak_data, 
+			     ((void **)(void *)&SCHEME_BOX_VAL(weak_data)
+			      - (void **)(void *)weak_data));
     rec->data = weak_data;
   }
 #else
@@ -1280,7 +1281,7 @@ void *wxStyleList::NotifyOnChange(wxStyleNotifyFunc f, void *data, int weak)
     rec = new WXGC_PTRS NotificationRec;
   rec->data = data;
   if (weak)
-    scheme_weak_reference((void **)&rec->data);
+    scheme_weak_reference((void **)(void *)&rec->data);
   else
     WXGC_IGNORE(rec, rec->data);
 #endif
@@ -1672,6 +1673,11 @@ wxStyleList *wxmbReadStylesFromFile(wxStyleList *styleList,
       wxStyle *js;
 
       f->Get(&shiftIndex);
+
+      if (shiftIndex >= i) {
+        wxmeError("map-index-to-style: bad shift-style index");
+        return FALSE;
+      }
 
       js = styleList->FindOrCreateJoinStyle(ssl->styleMap[baseIndex], 
 					    ssl->styleMap[shiftIndex]);

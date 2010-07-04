@@ -1,7 +1,6 @@
 
-(module launcher-unit mzscheme
-  (require (lib "unitsig.ss")
-	   (lib "file.ss")
+(module launcher-unit (lib "a-unit.ss")
+  (require (lib "file.ss")
 	   (lib "string.ss")
 	   (lib "etc.ss")
 
@@ -9,77 +8,79 @@
 	   (lib "link-sig.ss" "dynext")
 	   (lib "embed.ss" "compiler")
 	   (lib "dirs.ss" "setup")
+           (lib "variant.ss" "setup")
 
 	   "launcher-sig.ss"
 
 	   (lib "winutf16.ss" "compiler" "private"))
 
-  (provide launcher@)
-
-  (define launcher@
-    (unit/sig launcher^
-      (import [c : dynext:compile^]
-	      [l : dynext:link^])
+      (import (prefix c: dynext:compile^)
+	      (prefix l: dynext:link^))
+      (export launcher^)
 
       (define current-launcher-variant
-	(make-parameter 'normal
+	(make-parameter (system-type 'gc)
 			(lambda (v)
-			  (unless (memq v '(normal 3m script script-3m))
+			  (unless (memq v '(3m script-3m cgc script-cgc))
 			    (raise-type-error
 			     'current-launcher-variant
 			     "variant symbol"
 			     v))
 			  v)))
 
+      (define (variant-available? kind cased-kind-name  variant)
+        (cond
+         [(or (eq? 'unix (system-type))
+              (and (eq? 'macosx (system-type))
+                   (eq? kind 'mzscheme)))
+          (let ([bin-dir (find-console-bin-dir)])
+            (and bin-dir
+                 (file-exists? (build-path 
+                                bin-dir 
+                                (format "~a~a" kind (variant-suffix variant #f))))))]
+         [(eq? 'macosx (system-type))
+          ;; kind must be mred, because mzscheme case is caught above
+          (directory-exists? (build-path (find-gui-bin-dir) 
+                                         (format "~a~a.app" 
+                                                 cased-kind-name 
+                                                 (variant-suffix variant #f))))]
+         [(eq? 'windows (system-type))
+          (file-exists? (build-path (if (eq? kind 'mzscheme)
+                                        (find-console-bin-dir)
+                                        (find-gui-bin-dir))
+                                    (format "~a~a.exe" 
+                                            cased-kind-name 
+                                            (variant-suffix variant #t))))]
+         [else (error "unknown system type")]))
+
       (define (available-variants kind)
-	(let* ([3m (cond
-		    [(or (eq? 'unix (system-type))
-			 (and (eq? 'macosx (system-type))
-			      (eq? kind 'mzscheme)))
-		     (if (let ([bin-dir (find-console-bin-dir)])
-			   (and bin-dir
-				(file-exists? (build-path bin-dir (format "~a3m" kind)))))
-			 '(3m)
-			 null)]
-		    [(eq? 'macosx (system-type))
-		     ;; kind must be mred, because mzscheme case caught above
-		     (if (directory-exists? (build-path (find-gui-bin-dir) "MrEd3m.app"))
-			 '(3m)
-			 null)]
-		    [(eq? 'windows (system-type))
-		     (if (file-exists? (build-path (if (eq? kind 'mzscheme)
-						       (find-console-bin-dir)
-						       (find-gui-bin-dir))
-						   (format "~a3m.exe" kind)))
-			 '(3m)
-			 null)]
-		    [else
-		     ;; 3m launchers not yet supported for other platforms:
-		     null])]
-	       [normal (if (eq? kind 'mzscheme)
-			   '(normal) ; MzScheme is always available
-			   (if (let ([gui-dir (find-gui-bin-dir)])
-				 (and gui-dir
-				      (cond
-				       [(eq? 'unix (system-type))
-					(file-exists? (build-path gui-dir (format "~a" kind)))]
-				       [(eq? 'macosx (system-type))
-					(directory-exists? (build-path gui-dir "MrEd.app"))]
-				       [(eq? 'windows (system-type))
-					(file-exists? (build-path gui-dir (format "~a.exe" kind)))]
-				       [else #t])))
-			       '(normal)
-			       null))]
+	(let* ([cased-kind-name (if (eq? kind 'mzscheme)
+                                    "MzScheme"
+                                    "MrEd")]
+               [normal-kind (system-type 'gc)]
+               [alt-kind (if (eq? '3m normal-kind)
+                             'cgc
+                             '3m)]
+               [normal (if (variant-available? kind cased-kind-name normal-kind)
+			   (list normal-kind)
+                           null)]
+	       [alt (if (variant-available? kind cased-kind-name alt-kind)
+                        (list alt-kind)
+                        null)]
 	       [script (if (and (eq? 'macosx (system-type))
 				(eq? kind 'mred)
 				(pair? normal))
-			   '(script)
+			   (if (eq? normal-kind '3m)
+                               '(script-3m)
+                               '(script-cgc))
 			   null)]
-	       [script-3m (if (and (memq '3m 3m)
-				   (memq 'script script))
-			      '(script-3m)
-			      null)])
-	  (append 3m normal script script-3m)))
+	       [script-alt (if (and (memq alt-kind alt)
+                                    (pair? script))
+                               (if (eq? alt-kind '3m)
+                                   '(script-3m)
+                                   '(script-cgc))
+                               null)])
+	  (append normal alt script script-alt)))
 
       (define (available-mred-variants)
 	(available-variants 'mred))
@@ -96,13 +97,15 @@
 	  (delete-directory/files dest))
 	(copy-file src dest))
 
-      (define (variant-suffix variant)
-	(case variant
-	  [(normal script) ""]
-	  [(3m script-3m) "3m"]))
+      (define (script-variant? v)
+        (memq v '(script-3m script-cgc)))
 
-      (define (add-file-suffix path variant)
-	(let ([s (variant-suffix variant)])
+      (define (add-file-suffix path variant mred?)
+	(let ([s (variant-suffix variant (case (system-type)
+                                           [(unix) #f]
+                                           [(windows) #t]
+                                           [(macosx) (and mred?
+                                                          (not (script-variant? variant)))]))])
 	  (if (string=? "" s)
 	      path
 	      (if (and (eq? 'windows (system-type))
@@ -170,7 +173,8 @@
       (define no-arg-x-flags '((xk "-iconic") 
 			       (xl "-rv" "-reverse") 
 			       (xm "+rv") 
-			       (xn "-synchronous")))
+			       (xn "-synchronous")
+                               (xo "-singleInstance")))
 
       (define (skip-x-flags flags)
 	(let ([xfmem (lambda (flag) (lambda (xf) (member flag (cdr xf))))])
@@ -218,7 +222,7 @@
 	     no-arg-x-flags)
 	    (list
 	     (format (string-append
-		      "  *)\n    ~a~a~a  ;;\n"
+		      "  *)\n    ~a~a ~a  ;;\n"
 		      " esac\n"
 		      " shift\n"
 		      " if [ \"$oneargflag\" != '' ] ; then\n"
@@ -323,15 +327,15 @@
       (define (make-unix-launcher kind variant flags dest aux)
 	(install-template dest kind "sh" "sh") ; just for something that's executable
 	(let* ([alt-exe (let ([m (and (eq? kind 'mred)
-				      (memq variant '(script script-3m))
+				      (script-variant? variant)
 				      (assq 'exe-name aux))])
 			  (and m
 			       (format "~a~a.app/Contents/MacOS/~a~a" 
-				       (cdr m) (variant-suffix variant)
-				       (cdr m) (variant-suffix variant))))]
+				       (cdr m) (variant-suffix variant #t)
+				       (cdr m) (variant-suffix variant #t))))]
 	       [x-flags? (and (eq? kind 'mred)
 			      (eq? (system-type) 'unix)
-			      (not (memq variant '(script script-3m))))]
+			      (not (script-variant? variant)))]
 	       [post-flags (cond
 			    [x-flags? (skip-x-flags flags)]
 			    [alt-exe null]
@@ -360,14 +364,14 @@
 	       [exec (format
 		      "exec \"${bindir}/~a~a\" ~a"
 		      (or alt-exe kind)
-		      (if alt-exe "" (variant-suffix variant))
+		      (if alt-exe "" (variant-suffix variant #f))
 		      pre-str)]
 	       [args (format
 		      "~a~a ${1+\"$@\"}\n"
 		      (if alt-exe "" "-N \"$0\" ")
 		      post-str)]
 	       [assemble-exec (if (and (eq? kind 'mred)
-				       (not (memq variant '(script scrip-3m)))
+				       (not (script-variant? variant))
 				       (not (null? post-flags)))
 				  output-x-arg-getter
 				  string-append)])
@@ -409,7 +413,7 @@
 		    [p (open-input-file dest)]
 		    [m (utf-16-regexp #"<Command Line: Replace This")]
 		    [x (utf-16-regexp #"<Executable Directory: Replace This")]
-		    [v (byte-regexp #"<Executable Variant: Replace This")])
+		    [v (utf-16-regexp #"<Executable Variant: Replace This")])
 		(let* ([exedir (bytes->utf-16-bytes
 				(bytes-append
 				 (path->bytes (let ([bin-dir (if (eq? kind 'mred)
@@ -466,8 +470,14 @@
 		  (let ([p (open-output-file dest 'update)])
 		    (write-magic p exedir pos-exedir len-exedir)
 		    (write-magic p (bytes-append bstr #"\0\0") pos-command len-command)
-		    (when (eq? '3m (current-launcher-variant))
-		      (write-magic p #"3" pos-variant 1))
+		    (let* ([suffix (variant-suffix (current-launcher-variant) #t)]
+                           [suffix-bytes (bytes-append
+                                          (list->bytes
+                                           (apply append
+                                                  (map (lambda (c) (list c 0))
+                                                       (bytes->list (string->bytes/latin-1 suffix)))))
+                                          #"\0\0")])
+                      (write-magic p suffix-bytes pos-variant (bytes-length suffix-bytes)))
 		    (close-output-port p)))))))
 
       ;; OS X launcher code:
@@ -475,8 +485,7 @@
       ; make-macosx-launcher : symbol (listof str) pathname ->
       (define (make-macosx-launcher kind variant flags dest aux)
 	(if (or (eq? kind 'mzscheme)
-		(eq? variant 'script)
-		(eq? variant 'script-3m))
+                (script-variant? variant))
 	    ;; MzScheme or script launcher is the same as for Unix
 	    (make-unix-launcher kind variant flags dest aux)
 	    ;; MrEd "launcher" is a stand-alone executable
@@ -609,16 +618,17 @@
       (define (program-launcher-path name mred?)
 	(let* ([variant (current-launcher-variant)]
 	       [mac-script? (and (eq? (system-type) 'macosx) 
-				 (memq variant '(script script-3m)))])
+                                 (script-variant? variant))])
 	  (let ([p (add-file-suffix 
 		    (build-path 
 		     (if (or mac-script? (not mred?))
 			 (find-console-bin-dir)
 			 (find-gui-bin-dir))
 		     ((if mac-script? unix-sfx sfx) name))
-		    variant)])
+		    variant
+                    mred?)])
 	   (if (and (eq? (system-type) 'macosx) 
-		    (not (memq variant '(script script-3m))))
+		    (not (script-variant? variant)))
 	       (path-replace-suffix p #".app")
 	       p))))
 
@@ -629,7 +639,8 @@
 	(case (system-type)
 	  [(macosx) (add-file-suffix 
 		     (build-path (find-console-bin-dir) (unix-sfx name))
-		     (current-launcher-variant))]
+		     (current-launcher-variant)
+                     #f)]
 	  [else (program-launcher-path name #f)]))
       
       (define (mred-launcher-is-directory?)
@@ -639,7 +650,7 @@
 
       (define (mred-launcher-is-actually-directory?)
 	(and (eq? 'macosx (system-type))
-	     (not (memq (current-launcher-variant) '(script script-3m)))))
+	     (not (script-variant? (current-launcher-variant)))))
       (define (mzscheme-launcher-is-actually-directory?)
 	#f)
 
@@ -659,7 +670,7 @@
       (define (mred-launcher-put-file-extension+style+filters)
 	(put-file-extension+style+filters 
 	 (if (and (eq? 'macosx (system-type))
-		  (memq (current-launcher-variant) '(script script-3m)))
+                  (script-variant? (current-launcher-variant)))
 	     'unix
 	     (system-type))))
 
@@ -695,4 +706,4 @@
 	(make-mred-program-launcher file collection (mred-program-launcher-path name)))
       
       (define (install-mzscheme-program-launcher file collection name)
-	(make-mzscheme-program-launcher file collection (mzscheme-program-launcher-path name))))))
+	(make-mzscheme-program-launcher file collection (mzscheme-program-launcher-path name))))

@@ -75,6 +75,32 @@ Various common pieces of code that both the client and server need to access
       [(pkg dir)
        (let* ((at (build-assoc-table pkg dir)))
          (get-best-match at pkg))]))
+
+  ;; lookup-package-by-keys : string string nat nat nat -> (list path string string (listof string) nat nat) | #f
+  ;; looks up and returns a list representation of the package named by the given owner,
+  ;; package name, major and (exact) minor version.
+  ;; this function is intended to be useful for setup-plt and other applications that need to know where planet
+  ;; packages live
+  (define (lookup-package-by-keys owner name maj min-lo min-hi)
+    (let ([result
+           (lookup-package
+            (make-pkg-spec
+             name
+             maj
+             min-lo
+             min-hi
+             (list owner)
+             #f
+             (version)))])
+      (if result
+          (list (pkg-path result)
+                (car (pkg-route result))
+                (pkg-name result)
+                (cdr (pkg-route result))
+                (pkg-maj result)
+                (pkg-min result))
+          #f)))
+     
   
   ; build-assoc-table : FULL-PKG-SPEC path -> assoc-table
   ; returns a version-number -> directory association table for the given package
@@ -135,25 +161,23 @@ Various common pieces of code that both the client and server need to access
        (and (equal? (assoc-table-row->name row) (pkg-spec-name pkg))
             (equal? (assoc-table-row->path row) (pkg-spec-path pkg))))
      (get-hard-link-table)))
-  
+
   ;; verify-well-formed-hard-link-parameter! : -> void
   ;; pitches a fit if the hard link table parameter isn't set right
   (define (verify-well-formed-hard-link-parameter!)
     (unless (and (absolute-path? (HARD-LINK-FILE)) (path-only (HARD-LINK-FILE)))
-      (raise (make-exn:fail:contract 
-              (string->immutable-string
-               (format 
-                "The HARD-LINK-FILE setting must be an absolute path name specifying a file; given ~s" 
-                (HARD-LINK-FILE)))
+      (raise (make-exn:fail:contract
+              (format
+               "The HARD-LINK-FILE setting must be an absolute path name specifying a file; given ~s"
+               (HARD-LINK-FILE))
               (current-continuation-marks)))))
-  
+
   ;; get-hard-link-table : -> assoc-table
   (define (get-hard-link-table)
     (verify-well-formed-hard-link-parameter!)
     (if (file-exists? (HARD-LINK-FILE))
-        (map 
-         (lambda (item) (update-element 4 bytes->path item))
-         (with-input-from-file (HARD-LINK-FILE) read-all))
+        (map (lambda (item) (update-element 4 bytes->path item))
+             (with-input-from-file (HARD-LINK-FILE) read-all))
         '()))
   
   ;; row-for-package? : row string (listof string) num num -> boolean

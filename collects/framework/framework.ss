@@ -1,39 +1,67 @@
 
 (module framework mzscheme
-  (require (lib "unitsig.ss")
-           (lib "mred.ss" "mred")
+  (require (lib "unit.ss")
+           (lib "mred-unit.ss" "mred")
            (lib "mred-sig.ss" "mred")
+           (lib "mred.ss" "mred")
            (lib "class.ss")
            
+           "preferences.ss"
            "test.ss"
            "gui-utils.ss"
            "decorated-editor-snip.ss"
            
            "framework-unit.ss"
-           "framework-sig.ss"
+           "private/sig.ss"
            
            (lib "contract.ss"))
   
-  (provide-signature-elements framework-class^)
+  (provide-signature-elements
+   (prefix application: framework:application-class^)
+   (prefix version: framework:version-class^)
+   (prefix color-model: framework:color-model-class^)
+   (prefix mode: framework:mode-class^)
+   (prefix exit: framework:exit-class^)
+   (prefix menu: framework:menu-class^)
+   (prefix preferences: framework:preferences-class^)
+   (prefix number-snip: framework:number-snip-class^)
+   (prefix autosave: framework:autosave-class^)
+   (prefix path-utils: framework:path-utils-class^)
+   (prefix icon: framework:icon-class^)
+   (prefix keymap: framework:keymap-class^)
+   (prefix editor: framework:editor-class^)
+   (prefix pasteboard: framework:pasteboard-class^)
+   (prefix text: framework:text-class^)
+   (prefix color: framework:color-class^)
+   (prefix color-prefs: framework:color-prefs-class^)
+   (prefix comment-box: framework:comment-box-class^)
+   (prefix finder: framework:finder-class^)
+   (prefix group: framework:group-class^)
+   (prefix canvas: framework:canvas-class^)
+   (prefix panel: framework:panel-class^)
+   (prefix frame: framework:frame-class^)
+   (prefix handler: framework:handler-class^)
+   (prefix scheme: framework:scheme-class^)
+   (prefix main: framework:main-class^))
 
   (provide (all-from "test.ss")
            (all-from "gui-utils.ss")
+           (all-from "preferences.ss")
            (all-from "decorated-editor-snip.ss"))
-
-  (provide exn:struct:unknown-preference
-           exn:struct:exn)
 
   (define-syntax (provide/contract/docs stx)
     (syntax-case stx ()
       [(_ (name contract docs ...) ...)
        (syntax (provide/contract (name contract) ...))]))
-
-  (define-values/invoke-unit/sig 
-   framework^ 
-   framework@ 
-   #f
-   mred^)
+    
+  (define-compound-unit/infer framework+mred@
+    (import)
+    (export framework^)
+    (link standard-mred@ framework@))
+     
   
+  (define-values/invoke-unit/infer framework+mred@)
+    
   (provide/contract/docs
    
    (number-snip:make-repeating-decimal-snip
@@ -77,23 +105,6 @@
     "@flink version:add-spec %"
     ".")
 
-   (exn:make-exn
-    (string? continuation-mark-set? . -> . exn?)
-    (message continuation-marks)
-    "Creates a framework exception.")
-   (exn:exn?
-    (any/c . -> . boolean?)
-    (exn)
-    "Tests if a value is a framework exception.")
-   (exn:make-unknown-preference 
-    (string? continuation-mark-set? . -> . exn:unknown-preference?)
-    (message continuation-marks)
-    "Creates an unknown preference exception.")
-   (exn:unknown-preference? 
-    (any/c . -> . boolean?)
-    (exn)
-    "Determines if a value is an unknown preference exn.")
-
    (application:current-app-name
     (case-> (-> string?)
             (string? . -> . void?))
@@ -107,126 +118,14 @@
     "the second case in the case-lambda sets"
     "the name of the application to \\var{name}.")
 
-   (preferences:get
-    (symbol? . -> . any/c)
-    (symbol)
-    "See also"
-    "@flink preferences:set-default %"
-    "."
-    ""
-    "\\rawscm{preferences:get} returns the value for the preference"
-    "\\var{symbol}. It raises"
-    "\\scmindex{exn:unknown-preference}\\rawscm{exn:unknown-preference}"
-    "if the preference's default has not been set.")
-   (preferences:set
-    (symbol? any/c . -> . void?)
-    (symbol value)
-    "See also"
-    "@flink preferences:set-default %"
-    "."
-    ""
-    "\\rawscm{preferences:set-preference} sets the preference"
-    "\\var{symbol} to \\var{value}. This should be called when the"
-    "users requests a change to a preference."
-    ""
-    "It raises"
-    "\\scmindex{exn:unknown-preference}\\rawscm{exn:unknown-preference}"
-    "if the preference's default has not been set.")
-   (preferences:add-callback
-    (opt-> (symbol? (symbol? any/c . -> . any/c))
-           (boolean?)
-           (-> void?))
-    ((p f)
-     ((weak? #f)))
-    "This function adds a callback which is called with a symbol naming a"
-    "preference and it's value, when the preference changes."
-    "\\rawscm{preferences:add-callback} returns a thunk, which when"
-    "invoked, removes the callback from this preference."
-    ""
-    "If \\var{weak?} is true, the preferences system will only hold on to"
-    "the callback weakly."
-    ""
-    "The callbacks will be called in the order in which they were added."
-    ""
-    "If you are adding a callback for a preference that requires"
-    "marshalling and unmarshalling, you must set the marshalling and"
-    "unmarshalling functions by calling"
-    "\\iscmprocedure{preferences:set-un/marshall} before adding a callback."
-    ""
-    "This function raises"
-    "\\scmindex{exn:unknown-preference}\\rawscm{exn:unknown-preference}"
-    "if the preference has not been set.")
-   (preferences:set-default
-    (symbol? any/c (any/c . -> . any) . -> . void?)
-    (symbol value test)
-    "This function must be called every time your application starts up, before any call to"
-    "@flink preferences:get %"
-    ", "
-    "@flink preferences:set"
-    "(for any given preference)."
-    ""
-    "If you use"
-    "@flink preferences:set-un/marshall %"
-    ", you must call this function before calling it."
-    ""
-    "This sets the default value of the preference \\var{symbol} to"
-    "\\var{value}. If the user has chosen a different setting,"
-    "the user's setting"
-    "will take precedence over the default value."
-    ""
-    "The last argument, \\var{test} is used as a safeguard. That function is"
-    "called to determine if a preference read in from a file is a valid"
-    "preference. If \\var{test} returns \\rawscm{\\#t}, then the preference is"
-    "treated as valid. If \\var{test} returns \\rawscm{\\#f} then the default is"
-    "used.")
-   (preferences:set-un/marshall
-    (symbol? (any/c . -> . printable/c) (printable/c . -> . any/c) . -> . void?)
-    (symbol marshall unmarshall)
-    "\\rawscm{preference:set-un/marshall} is used to specify marshalling and"
-    "unmarshalling functions for the preference"
-    "\\var{symbol}. \\var{marshall} will be called when the users saves their"
-    "preferences to turn the preference value for \\var{symbol} into a"
-    "printable value. \\var{unmarshall} will be called when the user's"
-    "preferences are read from the file to transform the printable value"
-    "into it's internal representation. If \\rawscm{preference:set-un/marshall}"
-    "is never called for a particular preference, the values of that"
-    "preference are assumed to be printable."
-    ""
-    "If the unmarshalling function returns a value that does not meet the"
-    "guard passed to "
-    "@flink preferences:set-default"
-    "for this preference, the default value is used."
-    ""
-    "The \\var{marshall} function might be called with any value returned"
-    "from \\scheme{read} and it must not raise an error (although it"
-    "can return arbitrary results if it gets bad input). This might"
-    "happen when the preferences file becomes corrupted, or is edited"
-    "by hand."
-    ""
-    "\\rawscm{preference:set-un/marshall} must be called before calling"
-    "@flink preferences:get %"
-    ", "
-    "@flink preferences:set %"
-    ".")
-   (preferences:save
-    (-> boolean?)
-    ()
-    "\\rawscm{(preferences:save-user-preferences)} saves the user's preferences to disk,"
-    "potentially marshalling some of the preferences."
-    ""
-    "Returns \\scm{\\#f} if saving the preferences fails and \\scm{\\#t} otherwise.")
-   (preferences:silent-save
-    (-> boolean?)
-    ()
-    "Same as"
-    "@flink preferences:save"
-    "except that it does not put display a message if it fails.")
-   (preferences:restore-defaults
-    (-> void?)
-    ()
-    "\\rawscm{(preferences:restore-defaults)} restores the users's configuration to the"
-    "default preferences.")
-
+   (preferences:put-preferences/gui
+    (-> (listof symbol?)
+        (listof any/c)
+        any)
+    (name-list val-list)
+    "Like \\scheme{put-preferences}, but passes along"
+    "a \\var{locked-proc} that asks the user if they want to"
+    "try again.")
    (preferences:add-panel
     ((or/c string? (cons/c string? (listof string?)))
      ((is-a?/c area-container-window<%>) 
@@ -259,7 +158,7 @@
    "\\var{f} is expected to add a new child panel to it and add"
    "whatever preferences configuration controls it wants to that"
    "panel. Then, \\var{f}'s should return the panel it added.")
-
+   
    (preferences:add-editor-checkbox-panel
     (-> void?)
     ()
@@ -1354,6 +1253,22 @@
      "@flink scheme:short-sym->pref-name"
      "and"
      "@flink scheme:short-sym->style-name %"
+     "."
+     ""
+     "See also"
+     "@flink scheme:get-white-on-black-color-prefs-table %"
+     ".")
+    
+    (scheme:get-white-on-black-color-prefs-table
+     (-> (listof (list/c symbol? (is-a?/c color%))))
+     ()
+     "Returns a table mapping from symbols (naming the categories that"
+     "the online colorer uses for Scheme mode coloring) to their"
+     "colors when the user chooses the white-on-black mode in the"
+     "preferences dialog."
+     ""
+     "See also"
+     "@flink scheme:get-color-prefs-table %"
      ".")
     
     (scheme:short-sym->pref-name
@@ -1473,9 +1388,29 @@
      (xyz)
      "Extracts the z component of \\var{xyz}.")
     
-    (color-prefs:register-color-pref 
-     (symbol? string? (is-a?/c color%) . -> . void?)
-     (pref-name style-name color)
+    (color-prefs:set-default/color-scheme
+     (-> symbol?
+         (or/c (is-a?/c color%) string?) 
+         (or/c (is-a?/c color%) string?)
+         void?)
+     (pref-sym black-on-white-color white-on-black-color)
+     "Registers a preference whose value will be updated"
+     "when the user clicks on one of the color scheme default"
+     "settings in the preferences dialog."
+     ""
+     "Also calls "
+     "@flink preferences:set-default"
+     "and"
+     "@flink preferences:set-un/marshall"
+     "with appropriate arguments to register the preference.")
+    
+    (color-prefs:register-color-preference 
+     (opt->
+      (symbol? string? (or/c (is-a?/c color%) (is-a?/c style-delta%)))
+      ((or/c string? (is-a?/c color%) false/c))
+      void?)
+     ((pref-name style-name color/sd)
+      ((white-on-black-color #f)))
      "This function registers a color preference and initializes the"
      "style list returned from"
      "@flink editor:get-standard-style-list %"
@@ -1484,9 +1419,10 @@
      "and "
      "@flink preferences:set-un/marshall "
      "to install the pref for \\var{pref-name}, using"
-     "\\var{color} as the default color. The preference"
+     "\\var{color/sd} as the default color. The preference"
      "is bound to a \\iscmclass{style-delta}, and initially the \\iscmclass{style-delta}"
-     "changes the foreground color to \\var{color}."
+     "changes the foreground color to \\var{color/sd}, unless \\var{color/sd} is a style"
+     "delta already, in which case it is just used directly."
      "Then, it calls "
      "@flink editor:set-standard-style-list-delta"
      "passing the \\var{style-name} and the current value"
@@ -1495,7 +1431,13 @@
      "Finally, it adds calls"
      "@flink preferences:add-callback "
      "to set a callback for \\var{pref-name} that"
-     "updates the style list when the preference changes.")
+     "updates the style list when the preference changes."
+     ""
+     "If \\var{white-on-black-color} is not \\scheme|#f|, then the color of the"
+     "\\var{color/sd} argument is used in combination with \\var{white-on-black-color}"
+     "to register this preference with"
+     "@flink color-prefs:set-default/color-scheme %"
+     ".")
       
     (color-prefs:add-background-preferences-panel
      (-> void?)
@@ -1527,12 +1469,12 @@
      "and \\var{example-text} is shown in the panel so users can see"
      "the results of their configuration.")
 
-    (color-prefs:marshall-style
+    (color-prefs:marshall-style-delta
      (-> (is-a?/c style-delta%) printable/c)
      (style-delta)
      "Builds a printed representation for a style-delta.")
     
-    (color-prefs:unmarshall-style
+    (color-prefs:unmarshall-style-delta
      (-> printable/c (or/c false/c (is-a?/c style-delta%)))
      (marshalled-style-delta)
      "Builds a style delta from its printed representation."

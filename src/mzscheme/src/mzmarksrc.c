@@ -56,10 +56,18 @@ quotesyntax_obj {
 
 cpointer_obj {
  mark:
-  gcMARK(SCHEME_CPTR_VAL((Scheme_Object *)p));
-  gcMARK(SCHEME_CPTR_TYPE((Scheme_Object *)p));
+  gcMARK(SCHEME_CPTR_VAL(p));
+  gcMARK(SCHEME_CPTR_TYPE(p));
  size:
-  gcBYTES_TO_WORDS(sizeof(Scheme_Simple_Object));
+  gcBYTES_TO_WORDS(sizeof(Scheme_Cptr));
+}
+
+offset_cpointer_obj {
+ mark:
+  gcMARK(SCHEME_CPTR_VAL(p));
+  gcMARK(SCHEME_CPTR_TYPE(p));
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Offset_Cptr));
 }
 
 second_of_cons {
@@ -331,6 +339,7 @@ cont_proc {
   gcMARK(c->dw);
   gcMARK(c->prompt_tag);
   gcMARK(c->meta_continuation);
+  gcMARK(c->common_dw);
   gcMARK(c->save_overflow);
   gcMARK(c->runstack_copied);
   gcMARK(c->runstack_owner);
@@ -345,8 +354,12 @@ cont_proc {
   MARK_jmpup(&c->buf);
   MARK_cjs(&c->cjs);
   MARK_stack_state(&c->ss);
+  gcMARK(c->barrier_prompt);
   gcMARK(c->runstack_start);
   gcMARK(c->runstack_saved);
+
+  gcMARK(c->prompt_id);
+  gcMARK(c->prompt_buf);
 
   /* These shouldn't actually persist across a GC, but
      just in case... */
@@ -354,6 +367,7 @@ cont_proc {
   gcMARK(c->resume_to);
   gcMARK(c->use_next_cont);
   gcMARK(c->extra_marks);
+  gcMARK(c->shortcut_prompt);
   
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Cont));
@@ -417,6 +431,7 @@ escaping_cont_proc {
   gcMARK(c->native_trace);
 #endif
 
+  gcMARK(c->barrier_prompt);
   MARK_stack_state(&c->envss);
 
  size:
@@ -610,7 +625,6 @@ thread_val {
   gcMARK(pr->runstack_swapped);
   pr->spare_runstack = NULL; /* just in case */
 
-  gcMARK(pr->barrier_prompt);
   gcMARK(pr->meta_prompt);
   gcMARK(pr->meta_continuation);
   
@@ -641,6 +655,13 @@ thread_val {
 
   gcMARK(pr->tail_buffer);
   
+  gcMARK(pr->ku.eval.wait_expr);
+
+  gcMARK(pr->ku.apply.tail_rator);
+  gcMARK(pr->ku.apply.tail_rands);
+
+  gcMARK(pr->ku.multiple.array);
+
   gcMARK(pr->ku.k.p1);
   gcMARK(pr->ku.k.p2);
   gcMARK(pr->ku.k.p3);
@@ -648,8 +669,6 @@ thread_val {
   gcMARK(pr->ku.k.p5);
   
   gcMARK(pr->list_stack);
-  
-  gcMARK(pr->rn_memory);
   
   gcMARK(pr->kill_data);
   gcMARK(pr->private_kill_data);
@@ -674,12 +693,43 @@ thread_val {
   gcBYTES_TO_WORDS(sizeof(Scheme_Thread));
 }
 
+runstack_val {
+  long *s = (long *)p;
+ mark:
+  void **a, **b;
+  a = (void **)s + 4 + s[2];
+  b = (void **)s + 4 + s[3];
+  while (a < b) {
+    gcMARK(*a);
+    a++;
+  }
+ more:
+ fixup:
+  /* Zero out the part that we didn't mark, in case it becomes
+     live later. */
+  a = (void **)s + 4;
+  b = (void **)s + 4 + s[2];
+  while (a < b) {
+    *a = NULL;
+    a++;
+  }
+  a = (void **)s + 4 + s[3];
+  b = (void **)s + 4 + (s[1] - 4);
+  while (a < b) {
+    *a = NULL;
+    a++;
+  }
+ size:
+  s[1];
+}
+
 prompt_val {
  mark: 
   Scheme_Prompt *pr = (Scheme_Prompt *)p;
   gcMARK(pr->boundary_overflow_id);
-  gcMARK(pr->boundary_dw_id);
   gcMARK(pr->runstack_boundary_start);
+  gcMARK(pr->tag);
+  gcMARK(pr->id);
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Prompt));
 }
@@ -808,6 +858,7 @@ resolve_prefix_val {
   Resolve_Prefix *rp = (Resolve_Prefix *)p;
   gcMARK(rp->toplevels);
   gcMARK(rp->stxes);
+  gcMARK(rp->delay_info);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Resolve_Prefix));
@@ -877,6 +928,7 @@ module_val {
   gcMARK(m->insp);
 
   gcMARK(m->hints);
+  gcMARK(m->ii_src);
 
   gcMARK(m->comp_prefix);
   gcMARK(m->prefix);
@@ -1000,6 +1052,7 @@ mark_resolve_info {
   Resolve_Info *i = (Resolve_Info *)p;
   
   gcMARK(i->prefix);
+  gcMARK(i->stx_map);
   gcMARK(i->old_pos);
   gcMARK(i->new_pos);
   gcMARK(i->old_stx_pos);
@@ -1140,6 +1193,7 @@ mark_load_handler_data {
   gcMARK(d->p);
   gcMARK(d->stxsrc);
   gcMARK(d->expected_module);
+  gcMARK(d->delay_load_info);
   
  size:
   gcBYTES_TO_WORDS(sizeof(LoadHandlerData));
@@ -1310,6 +1364,26 @@ mark_print_params {
   gcBYTES_TO_WORDS(sizeof(PrintParams));
 }
 
+mark_marshal_tables {
+ mark:
+  Scheme_Marshal_Tables *mt = (Scheme_Marshal_Tables *)p;
+  gcMARK(mt->symtab);
+  gcMARK(mt->rns);
+  gcMARK(mt->rn_refs);
+  gcMARK(mt->st_refs);
+  gcMARK(mt->st_ref_stack);
+  gcMARK(mt->reverse_map);
+  gcMARK(mt->same_map);
+  gcMARK(mt->top_map);
+  gcMARK(mt->key_map);
+  gcMARK(mt->delay_map);
+  gcMARK(mt->rn_saved);
+  gcMARK(mt->shared_offsets);
+  gcMARK(mt->sorted_keys);
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Marshal_Tables));
+}
+
 END print;
 
 /**********************************************************************/
@@ -1424,8 +1498,24 @@ mark_custodian_val {
   gcMARK(m->global_next);
   gcMARK(m->global_prev);
 
+  gcMARK(m->cust_boxes);
+
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Custodian));
+}
+
+mark_custodian_box_val {
+ mark:
+  Scheme_Custodian_Box *b = (Scheme_Custodian_Box *)p;
+  int sd = ((Scheme_Custodian *)GC_resolve(b->cust))->shut_down;
+
+  gcMARK(b->cust);
+  if (!sd) {
+    gcMARK(b->v);
+  }
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Custodian_Box));
 }
 
 mark_thread_hop {
@@ -1709,10 +1799,13 @@ mark_cport {
   gcMARK(cp->start);
   gcMARK(cp->orig_port);
   gcMARK(cp->ht);
+  gcMARK(cp->ut);
   gcMARK(cp->symtab);
   gcMARK(cp->insp);
   gcMARK(cp->magic_sym);
   gcMARK(cp->magic_val);
+  gcMARK(cp->shared_offsets);
+  gcMARK(cp->delay_info);
  size:
   gcBYTES_TO_WORDS(sizeof(CPort));
 }
@@ -1734,8 +1827,31 @@ mark_read_params {
   gcMARK(rp->table);
   gcMARK(rp->magic_sym);
   gcMARK(rp->magic_val);
+  gcMARK(rp->delay_load_info);
  size:
   gcBYTES_TO_WORDS(sizeof(ReadParams));
+}
+
+mark_delay_load {
+ mark:
+  Scheme_Load_Delay *ld = (Scheme_Load_Delay *)p;
+  gcMARK(ld->path);
+  gcMARK(ld->symtab);
+  gcMARK(ld->shared_offsets);
+  gcMARK(ld->insp);
+  gcMARK(ld->rn_memory);
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Load_Delay));
+}
+
+mark_unmarshal_tables {
+ mark:
+  Scheme_Unmarshal_Tables *ut = (Scheme_Unmarshal_Tables *)p;
+  gcMARK(ut->rns);
+  gcMARK(ut->rp);
+  gcMARK(ut->decoded);
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Unmarshal_Tables));
 }
 
 END read;

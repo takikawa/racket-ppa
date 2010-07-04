@@ -64,12 +64,13 @@ GC2_EXTERN void GC_add_roots(void *start, void *end);
    Called by MzScheme to install roots. The memory between
    `start' (inclusive) and `end' (exclusive) contains pointers. */
 
-GC2_EXTERN void GC_init_type_tags(int count, int pair, int weakbox, int ephemeron, int weakarray);
+GC2_EXTERN void GC_init_type_tags(int count, int pair, int weakbox, 
+                                  int ephemeron, int weakarray, int custbox);
 /*
    Called by MzScheme to indicate the number of different type tags it
    uses, starting from 0. `count' is always less than 256. The weakbox
-   argument is the value to be used for tagging weak box, and the
-   ephemeron is the value to tagging an ephemeron. (The GC has some
+   argument is the value to be used for tagging weak box, the
+   ephemeron is the value to tagging an ephemeron, etc. (The GC has some
    freedom in the layout of a weak box or ephemeron, so it performs weak
    box traversals itself, but MzScheme gets to choose the tag.) */
 
@@ -165,6 +166,7 @@ GC2_EXTERN void *GC_malloc_atomic(size_t size_in_bytes);
    Alloc pointerless memory (not necessarily zeroed). */
 
 #define GC_malloc_atomic_tagged GC_malloc_one_tagged
+#define GC_malloc_small_atomic_tagged GC_malloc_one_small_dirty_tagged
 /*
    Alloc pointer-free tagged memory (not necessarily zeroed).
    MzScheme sets the tag before a collection. */
@@ -178,6 +180,14 @@ GC2_EXTERN void *GC_malloc_allow_interior(size_t size_in_bytes);
    Alloc an array of pointers (typically large), and recognize
    pointers into the middle of the array, or just past the end of the
    array. */
+
+GC2_EXTERN void *GC_malloc_atomic_allow_interior(size_t size_in_bytes);
+/*
+   Like GC_malloc_allow_interior(), but for an atomic object. */
+
+GC2_EXTERN void *GC_malloc_tagged_allow_interior(size_t size_in_bytes);
+/*
+   Like GC_malloc_allow_interior(), but for a tagged object. */
 
 GC2_EXTERN void *GC_malloc_weak_array(size_t size_in_bytes, void *replace_val);
 /*
@@ -305,10 +315,12 @@ GC2_EXTERN void GC_fixup(void *p);
 
 GC2_EXTERN void GC_mark_variable_stack(void **var_stack,
 				       long delta,
-				       void *limit);
+				       void *limit,
+                                       void *stack_mem);
 GC2_EXTERN void GC_fixup_variable_stack(void **var_stack,
 					long delta,
-					void *limit);
+					void *limit,
+                                        void *stack_mem);
 /*
    Can be called by a mark or fixup traversal proc to traverse and
    update a chunk of (atomically-allocated) memory containing an image
@@ -322,7 +334,16 @@ GC2_EXTERN void GC_fixup_variable_stack(void **var_stack,
    stack_address is the numerically lower bound for the copied stack
    region, regardless of which direction the stack grows). The `limit'
    argument corresponds to the value that would have been returned by
-   GC_get_thread_stack_base() at the time the stack was copied. */
+   GC_get_thread_stack_base() at the time the stack was copied. 
+
+   The `stack_mem' argument indicates the start of the allocated memory
+   that contains `var_stack'. It is used for backtraces. */
+
+GC2_EXTERN void GC_write_barrier(void *p);
+/* 
+   Explicit write barrier to ensure that a write-barrier signal is not
+   triggered by a memory write.
+*/
 
 # ifdef __cplusplus
 };

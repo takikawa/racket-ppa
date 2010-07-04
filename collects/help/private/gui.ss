@@ -1,12 +1,10 @@
-
-(module gui mzscheme
+(module gui (lib "a-unit.ss")
   (require (lib "framework.ss" "framework")
            (lib "mred.ss" "mred")
            
            (lib "class.ss")
            (lib "contract.ss")
            (lib "etc.ss")
-           (lib "unitsig.ss")
            (lib "list.ss")
            (lib "file.ss")
            
@@ -28,12 +26,8 @@
            
            "internal-hp.ss")
   
-  (provide gui@)
-  
-  (define gui@
-    (unit/sig gui^
-      (import browser^
-              net:url^)
+  (import browser^ url^)
+  (export gui^)
       
       (define help-desk-frame<%>
         (interface (frame:standard-menus<%>)
@@ -52,7 +46,7 @@
             (message-box (string-constant plt:hd:about-help-desk)
                          (format 
                           (string-constant plt:hd:help-desk-about-string)
-                          (version:version) 1995 2006)
+                          (version:version) 1995 2007)
                          this))
           (define/override (help-menu:create-about?) #t)
           (define/override (help-menu:after-about menu)
@@ -167,14 +161,21 @@
 		      url]
                      
                      ;; send the url off to another browser
-                     [(or (and (string? (url-scheme url))
+                     [(and (string? (url-scheme url))
                                (not (member (url-scheme url) '("http"))))
-                          (and (preferences:get 'drscheme:help-desk:ask-about-external-urls)
-                               (ask-user-about-separate-browser))
-                          (preferences:get 'drscheme:help-desk:separate-browser))
                       (send-url (url->string url))
                       #f]
-                     
+                     [(preferences:get 'drscheme:help-desk:ask-about-external-urls)
+                      (case (ask-user-about-separate-browser)
+                        [(separate)
+                         (send-url (url->string url))
+                         #f]
+                        [(internal)
+                         url]
+                        [else #f])]
+                     [(preferences:get 'drscheme:help-desk:separate-browser)
+                      (send-url url)
+                      #f]
                      [else url])]
                   [else url]))
               (super-new)))
@@ -267,6 +268,7 @@
              (not (null? (url-path url)))
              (equal? (path/param-path (car (url-path url))) "doc")))
       
+      ;; ask-user-about-separate-browser : -> (union #f 'separate 'internal)
       (define (ask-user-about-separate-browser)
         (define separate-default? (preferences:get 'drscheme:help-desk:separate-browser))
 
@@ -277,18 +279,25 @@
 		       (string-constant dont-ask-again-always-current)
 		       (string-constant plt:hd:homebrew-browser)
 		       (string-constant plt:hd:separate-browser)
-		       #f
+		       (string-constant cancel)
 		       #f ; no parent
 		       (cons
 			(if separate-default?
 			    'default=2
 			    'default=1)
-			'(no-default disallow-close)))])
-	  (let ([separate? (= result 2)])
-	    (preferences:set 'drscheme:help-desk:separate-browser separate?)
-	    (when checked?
-	      (preferences:set 'drscheme:help-desk:ask-about-external-urls #f))
-	    separate?)))
+			'(no-default)))])
+          (when checked?
+            (preferences:set 'drscheme:help-desk:ask-about-external-urls #f))
+          (case result
+            [(2)
+             (preferences:set 'drscheme:help-desk:separate-browser #t)
+             'separate]
+            [(1)
+             (preferences:set 'drscheme:help-desk:separate-browser #f)
+             'internal]
+            [(#f 3)
+             #f]
+            [else (error 'ack)])))
       
       (define make-help-desk-framework-mixin 
         (mixin (frame:searchable<%> frame:standard-menus<%>) ()
@@ -636,4 +645,4 @@
         (send d center)
         (send t focus)
         (send d show #t)
-        result))))
+        result))

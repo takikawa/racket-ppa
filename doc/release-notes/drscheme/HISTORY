@@ -1,4 +1,87 @@
 ------------------------------
+        Version 370
+------------------------------
+
+  . changed teachpack support so that it is now
+    language-specific and languages no longer support
+    teachpacks by default.
+
+  . interface changes, related to teachpacks:
+
+    . create-executable method in
+      drscheme:language:language<%> no longer takes the
+      teachpack argument
+
+    . the get-init-code in
+      drscheme:language:simple-module-based-language no
+      longer accepts teachpacks as an argument.
+
+    . got rid of all drscheme:teachpack names
+
+    . front-end/complete-program and front-end/interaction
+      no longer accept a teachpack argument
+
+  . changed image.ss teachpack so that it accepts both exact
+    an inexact numbers (not just exact integers) for a
+    number of the primitives (it floors the numbers).
+
+  . changed the save format for color preferences. Due to a
+    bug in earlier versions, this means that color
+    preferences saved in earlier versions of DrScheme will
+    not be copied forward to this version. 
+
+    These functions are renamed:
+
+      color-prefs:marshall-style => color-prefs:marshall-style-delta
+      color-prefs:unmarshall-style => color-prefs:unmarshall-style-delta
+      color-prefs:register-color-pref => color-prefs:register-color-preference
+
+    If you used those functions before, do not use the new
+    ones with the same preference symbol as you used in old
+    versions, or else the old version of your app (or
+    drscheme) will fail to start up.
+
+  . changed the frame:editor-mixin, frame:text-mixin and
+    frame:pasteboard-mixin slightly so that one can supply
+    the editor class as an initialization argument
+    (overriding the get-editor% method still works, but now
+    that method defaults to the initialization argument)
+
+  . added an extra, mandatory argument to calc-button-sizes
+    and draw-button-label in mrlib's name-message.ss. Use
+    small-control-font to get the old behavior.
+
+  . added a new, optional, argument to the initializer of
+    name-message%. 
+
+  . The teaching languages now add a #reader wrapper to
+    saved files. Although the content of the file, when
+    viewed in drscheme, does not change, this does mean that
+    drscheme "remembers" which language was used for each
+    file, even if you change languages when editing other
+    files.
+
+  . added get-reader-module, get-metadata,
+    metadata->settings, and get-metadata-lines methods to
+    the drscheme:language:language<%> interface
+
+  . the framework preferences library now saves prefs each
+    time any one of them is changed, and works better when
+    multiple apps are both using the library. As a
+    consequence of this, preferences:save is no longer in
+    the library. Just remove any calls to it and your code
+    should work fine.
+
+  . split the preferences library out from the framework, so
+    it does not have to depend on mred
+
+  . removed (from the framework): exn:struct:exn,
+    exn:make-exn, and exn:exn?
+
+  . added preferences:restore-prefs-snapshot,
+  preferences:get-prefs-snapshot, and preferences:snaphot?
+
+------------------------------
         Version 353
 ------------------------------
 

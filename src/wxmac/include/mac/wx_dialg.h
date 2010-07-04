@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2006 PLT Scheme Inc.
+// Copyright:  (c) 2004-2007 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -65,7 +65,7 @@ public:
 	Bool OnClose(void);
 
 	virtual void Fit(void);
-	virtual void Centre(int d) { cFrame->Centre(d); }
+	virtual void Centre(int d = wxBOTH, wxWindow *p = NULL) { cFrame->Centre(d, p); }
 
 	void SetIcon(wxBitmap* icon) { cFrame->SetIcon(icon); }
 	void Iconize(Bool iconize) { cFrame->Iconize(iconize); }

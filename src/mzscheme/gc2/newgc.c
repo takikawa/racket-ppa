@@ -41,7 +41,6 @@
 # define inline _inline
 #endif
 
-
 #if defined(sparc) || defined(__sparc) || defined(__sparc__)
 # define ALIGN_DOUBLES
 #endif
@@ -87,7 +86,7 @@
 #define LOG_APAGE_SIZE 14
 
 /* the number of tags to use for tagged objects */
-#define NUMBER_OF_TAGS 260
+#define NUMBER_OF_TAGS 512
 
 /* the size of a page we use for the internal mark stack */
 #define STACK_PART_SIZE (1 * 1024 * 1024)
@@ -127,6 +126,7 @@ static unsigned long pages_in_heap = 0;
 static unsigned long max_heap_size = 0;
 static unsigned long max_used_pages = 0;
 static unsigned long used_pages = 0;
+static unsigned long actual_pages_size = 0;
 static unsigned long in_unsafe_allocation_mode = 0;
 static void (*unsafe_allocation_abort)();
 static void garbage_collect(int);
@@ -162,36 +162,15 @@ inline static void free_used_pages(size_t len)
 
 #define CHECK_USED_AGAINST_MAX(len) check_used_against_max(len)
 #define LOGICALLY_ALLOCATING_PAGES(len) /* empty */
-#define ACTUALLY_ALLOCATING_PAGES(len) /* empty */
+#define ACTUALLY_ALLOCATING_PAGES(len) actual_pages_size += len
 #define LOGICALLY_FREEING_PAGES(len) free_used_pages(len)
-#define ACTUALLY_FREEING_PAGES(len) /* empty */
+#define ACTUALLY_FREEING_PAGES(len) actual_pages_size -= len
 
 #include "page_range.c"
 
-#if _WIN32
-# include "vm_win.c"
-# define MALLOCATOR_DEFINED
-#endif
-
-#if defined(__APPLE__) && defined(__MACH__)
-# define TEST 0
-void designate_modified(void *p);
-# include "vm_osx.c"
-# define MALLOCATOR_DEFINED
-#endif
-
-#if OSKIT
-# include "vm_osk.c"
-# define MALLOCATOR_DEFINED
-#endif
-
-#ifndef MALLOCATOR_DEFINED
-# include "vm_mmap.c"
-#endif
+#include "vm.c"
 
 #include "protect_range.c"
-
-#define malloc_dirty_pages(size,align) malloc_pages(size,align)
 
 /*****************************************************************************/
 /* Memory Tracing, Part 1                                                    */
@@ -386,11 +365,27 @@ static size_t round_to_apage_size(size_t sizeb)
   return sizeb;
 }
 
+static unsigned long custodian_single_time_limit(int set);
+inline static int thread_get_owner(void *p);
+
 /* the core allocation functions */
 static void *allocate_big(size_t sizeb, int type)
 {
   unsigned long sizew;
   struct mpage *bpage;
+
+  if(GC_out_of_memory) {
+    /* We're allowed to fail. Check for allocations that exceed a single-time
+       limit. Otherwise, the limit doesn't work as intended, because
+       a program can allocate a large block that nearly exhausts memory,
+       and then a subsequent allocation can fail. As long as the limit
+       is much smaller than the actual available memory, and as long as
+       GC_out_of_memory protects any user-requested allocation whose size
+       is independent of any existing object, then we can enforce the limit. */
+    if (custodian_single_time_limit(thread_get_owner(scheme_current_thread)) < sizeb) {
+      GC_out_of_memory();
+    }
+  }
 
   /* the actual size of this is the size, ceilinged to the next largest word,
      plus the size of the page header, plus one word for the object header.
@@ -408,7 +403,11 @@ static void *allocate_big(size_t sizeb, int type)
   /* We not only need APAGE_SIZE alignment, we 
      need everything consisently mapped within an APAGE_SIZE
      segment. So round up. */
-  bpage = malloc_pages(round_to_apage_size(sizeb), APAGE_SIZE);
+  if (type == PAGE_ATOMIC) {
+    bpage = malloc_dirty_pages(round_to_apage_size(sizeb), APAGE_SIZE);
+    memset(bpage, 0, sizeof(struct mpage));
+  } else
+    bpage = malloc_pages(round_to_apage_size(sizeb), APAGE_SIZE);
   bpage->size = sizeb;
   bpage->big_page = 1;
   bpage->page_type = type;
@@ -491,6 +490,8 @@ void *GC_malloc_array_tagged(size_t s) { return allocate(s, PAGE_TARRAY); }
 void *GC_malloc_atomic(size_t s) { return allocate(s, PAGE_ATOMIC); }
 void *GC_malloc_atomic_uncollectable(size_t s) { return malloc(s); }
 void *GC_malloc_allow_interior(size_t s) {return allocate_big(s, PAGE_ARRAY);}
+void *GC_malloc_atomic_allow_interior(size_t s) {return allocate_big(s, PAGE_ATOMIC);}
+void *GC_malloc_tagged_allow_interior(size_t s) {return allocate_big(s, PAGE_TAGGED);}
 void GC_free(void *p) {}
 
 void *GC_malloc_one_small_tagged(size_t sizeb)
@@ -888,7 +889,7 @@ unsigned long GC_get_stack_base()
 
 #define GC_X_variable_stack GC_mark_variable_stack
 #define gcX(a) gcMARK(*a)
-#define X_source(p) set_backtrace_source(p, BT_STACK)
+#define X_source(stk, p) set_backtrace_source((stk ? stk : p), BT_STACK)
 #include "var_stack.c"
 #undef GC_X_variable_stack
 #undef gcX
@@ -896,7 +897,7 @@ unsigned long GC_get_stack_base()
 
 #define GC_X_variable_stack GC_fixup_variable_stack
 #define gcX(a) gcFIXUP(*a)
-#define X_source(p) /* */
+#define X_source(stk, p) /* */
 #include "var_stack.c"
 #undef GC_X_variable_stack
 #undef gcX
@@ -1183,8 +1184,10 @@ struct thread {
   struct thread *next;
 };
 
-static Mark_Proc normal_thread_mark = NULL, normal_custodian_mark = NULL;
+static Mark_Proc normal_thread_mark = NULL, normal_custodian_mark = NULL, normal_cust_box_mark = NULL;
 static struct thread *threads = NULL;
+
+static unsigned short cust_box_tag;
 
 inline static void register_new_thread(void *t, void *c)
 {
@@ -1192,6 +1195,7 @@ inline static void register_new_thread(void *t, void *c)
 
   work = (struct thread *)malloc(sizeof(struct thread));
   work->owner = current_owner((Scheme_Custodian *)c);
+  ((Scheme_Thread *)t)->gc_owner_set = work->owner;
   work->thread = t;
   work->next = threads;
   threads = work;
@@ -1203,6 +1207,7 @@ inline static void register_thread(void *t, void *c)
   for(work = threads; work; work = work->next)
     if(work->thread == t) {
       work->owner = current_owner((Scheme_Custodian *)c);
+      ((Scheme_Thread *)t)->gc_owner_set = work->owner;
       return;
     }
   register_new_thread(t, c);
@@ -1213,8 +1218,39 @@ inline static void mark_threads(int owner)
   struct thread *work;
 
   for(work = threads; work; work = work->next)
-    if(work->owner == owner) 
-      normal_thread_mark(work->thread);
+    if(work->owner == owner) {
+      if (((Scheme_Thread *)work->thread)->running) {
+        normal_thread_mark(work->thread);
+        if (work->thread == scheme_current_thread) {
+          GC_mark_variable_stack(GC_variable_stack, 0, gc_stack_base, NULL);
+        }
+      }
+    }
+}
+
+inline static void mark_cust_boxes(Scheme_Custodian *cur)
+{
+  Scheme_Object *pr, *prev = NULL, *next;
+  GC_Weak_Box *wb;
+
+  /* cust boxes is a list of weak boxes to cust boxes */
+
+  pr = cur->cust_boxes;
+  while (pr) {
+    wb = (GC_Weak_Box *)SCHEME_CAR(pr);
+    next = SCHEME_CDR(pr);
+    if (wb->val) {
+      normal_cust_box_mark(wb->val);
+      prev = pr;
+    } else {
+      if (prev)
+        SCHEME_CDR(prev) = next;
+      else
+        cur->cust_boxes = next;
+    }
+    pr = next;
+  }
+  cur->cust_boxes = NULL;
 }
 
 inline static void clean_up_thread_list(void)
@@ -1239,12 +1275,7 @@ inline static void clean_up_thread_list(void)
 
 inline static int thread_get_owner(void *p)
 {
-  struct thread *work; 
-
-  for(work = threads; work; work = work->next)
-    if(work->thread == p)
-      return work->owner;
-  GCERR((GCOUTF, "Bad thread value for thread_get_owner!\n"));
+  return ((Scheme_Thread *)p)->gc_owner_set;
 }
 #endif
 
@@ -1334,14 +1365,19 @@ inline static void clear_stack_pages(void)
   if(int_top) {
     struct stacklet *temp, *base;
     int keep = 2;
-    
+
     /* go to the head of the list */
     for(; int_top->prev; int_top = int_top->prev) {}
     /* then go through and clear them out */
     base = int_top;
     for(; int_top; int_top = temp) {
       temp = int_top->next;
-      if(keep) keep--; else free(int_top);
+      if(keep) { 
+        keep--; 
+        if (!keep)
+          int_top->next = NULL;
+      } else 
+        free(int_top);
     }
     int_top = base;
     int_top->top = PPTR(int_top) + 4;
@@ -1363,12 +1399,14 @@ inline static void reset_pointer_stack(void)
 /*****************************************************************************/
 #ifdef NEWGC_BTC_ACCOUNT
 
-#define OWNER_TABLE_GROW_AMT 10
+#define OWNER_TABLE_INIT_AMT 10
 
 struct ot_entry {
   Scheme_Custodian *originator;
   Scheme_Custodian **members;
   unsigned long memory_use;
+  unsigned long single_time_limit, super_required;
+  char limit_set, required_set;
 };
 
 static struct ot_entry **owner_table = NULL;
@@ -1378,10 +1416,12 @@ static int really_doing_accounting = 0;
 static int current_mark_owner = 0;
 static int old_btc_mark = 0;
 static int new_btc_mark = 1;
+static int reset_limits = 0, reset_required = 0;
 
 inline static int create_blank_owner_set(void)
 {
   int i;
+  unsigned int old_top;
 
   for(i = 1; i < owner_table_top; i++)
     if(!owner_table[i]) {
@@ -1390,11 +1430,15 @@ inline static int create_blank_owner_set(void)
       return i;
     }
 
-  owner_table_top += OWNER_TABLE_GROW_AMT;
+  old_top = owner_table_top;
+  if (!owner_table_top)
+    owner_table_top = OWNER_TABLE_INIT_AMT;
+  else
+    owner_table_top *= 2;
+
   owner_table = realloc(owner_table, owner_table_top*sizeof(struct ot_entry*));
-  bzero((char*)owner_table + (sizeof(struct ot_entry*) * 
-			      (owner_table_top - OWNER_TABLE_GROW_AMT)),
-	OWNER_TABLE_GROW_AMT * sizeof(struct ot_entry*));
+  bzero((char*)owner_table + (sizeof(struct ot_entry*) * old_top),
+	(owner_table_top - old_top) * sizeof(struct ot_entry*));
   
   return create_blank_owner_set();
 }
@@ -1403,11 +1447,17 @@ inline static int custodian_to_owner_set(Scheme_Custodian *cust)
 {
   int i;
 
+  if (cust->gc_owner_set)
+    return cust->gc_owner_set;
+
   for(i = 1; i < owner_table_top; i++)
     if(owner_table[i] && (owner_table[i]->originator == cust))
       return i;
+
   i = create_blank_owner_set();
   owner_table[i]->originator = cust;
+  cust->gc_owner_set = i;
+
   return i;
 }
 
@@ -1427,6 +1477,7 @@ inline static int current_owner(Scheme_Custodian *c)
   if(!has_gotten_root_custodian && c) {
     has_gotten_root_custodian = 1;
     owner_table[1]->originator = c;
+    c->gc_owner_set = 1;
     return 1;
   }
 
@@ -1501,7 +1552,6 @@ inline static unsigned long custodian_usage(void *custodian)
   return gcWORDS_TO_BYTES(retval);
 }
 
-
 inline static void memory_account_mark(struct mpage *page, void *ptr)
 {
   GCDEBUG((DEBUGOUTF, "memory_account_mark: %p/%p\n", page, ptr));
@@ -1537,6 +1587,10 @@ int BTC_custodian_mark(void *p)
     return ((struct objhead *)(NUM(p) - WORD_SIZE))->size;
 }
 
+int BTC_cust_box_mark(void *p)
+{
+  return ((struct objhead *)(NUM(p) - WORD_SIZE))->size;
+}
 
 inline static void mark_normal_obj(struct mpage *page, void *ptr)
 {
@@ -1546,15 +1600,9 @@ inline static void mark_normal_obj(struct mpage *page, void *ptr)
 	 unless the object's owner is the current owner. In the case
 	 of threads, we already used it for roots, so we can just
 	 ignore them outright. In the case of custodians, we do need
-	 to do the check */
+	 to do the check; those differences are handled by replacing
+         the mark procedure in mark_table. */
       mark_table[*(unsigned short*)ptr](ptr);
-/*       unsigned short tag = *(unsigned short*)ptr; */
-/*       if(tag != scheme_thread_type) { */
-/* 	if(tag == scheme_custodian_type) { */
-/* 	  if(custodian_to_owner_set(ptr) == current_mark_owner) */
-/* 	    mark_table[scheme_custodian_type](ptr); */
-/* 	} else mark_table[tag](ptr); */
-/*       } */
       break;
     }
     case PAGE_ATOMIC: break;
@@ -1645,21 +1693,24 @@ static void do_btc_accounting(void)
     if(!normal_thread_mark) {
       normal_thread_mark = mark_table[scheme_thread_type];
       normal_custodian_mark = mark_table[scheme_custodian_type];
+      normal_cust_box_mark = mark_table[cust_box_tag];
     }
     mark_table[scheme_thread_type] = &BTC_thread_mark;
     mark_table[scheme_custodian_type] = &BTC_custodian_mark;
-    
+    mark_table[ephemeron_tag] = btc_mark_ephemeron;
+    mark_table[cust_box_tag] = BTC_cust_box_mark;
+
     /* clear the memory use numbers out */
     for(i = 1; i < owner_table_top; i++)
       if(owner_table[i])
 	owner_table[i]->memory_use = 0;
-    
+
     /* the end of the custodian list is where we want to start */
     while(SCHEME_PTR1_VAL(box)) {
       cur = (Scheme_Custodian*)SCHEME_PTR1_VAL(box);
       box = cur->global_next;
     }
-    
+
     /* walk backwards for the order we want */
     while(cur) {
       int owner = custodian_to_owner_set(cur);
@@ -1669,6 +1720,7 @@ static void do_btc_accounting(void)
 	       owner, cur));
       kill_propagation_loop = 0;
       mark_threads(owner);
+      mark_cust_boxes(cur);
       GCDEBUG((DEBUGOUTF, "Propagating accounting marks\n"));
       propagate_accounting_marks();
       
@@ -1677,12 +1729,14 @@ static void do_btc_accounting(void)
   
     mark_table[scheme_thread_type] = normal_thread_mark;
     mark_table[scheme_custodian_type] = normal_custodian_mark;
+    mark_table[ephemeron_tag] = mark_ephemeron;
+    mark_table[cust_box_tag] = normal_cust_box_mark;
     in_unsafe_allocation_mode = 0;
     doing_memory_accounting = 0;
     old_btc_mark = new_btc_mark;
     new_btc_mark = !new_btc_mark;
-    clear_stack_pages();
   }
+  clear_stack_pages();
 }
 
 struct account_hook {
@@ -1705,13 +1759,20 @@ inline static void add_account_hook(int type,void *c1,void *c2,unsigned long b)
     c1 = park[0]; c2 = park[1];
     park[0] = park[1] = NULL;
   }
+
+  if (type == MZACCT_LIMIT)
+    reset_limits = 1;
+  if (type == MZACCT_REQUIRE)
+    reset_required = 1;
+
   for(work = hooks; work; work = work->next) {
-    if((work->type == type) && (work->c2 == c2)) {
+    if((work->type == type) && (work->c2 == c2) && (work->c1 == c1)) {
       if(type == MZACCT_REQUIRE) {
 	if(b > work->amount) work->amount = b;
       } else { /* (type == MZACCT_LIMIT) */
 	if(b < work->amount) work->amount = b;
       }
+      break;
     } 
   }
 
@@ -1727,7 +1788,7 @@ inline static void clean_up_account_hooks()
   struct account_hook *work = hooks, *prev = NULL;
 
   while(work) {
-    if(marked(work->c1) && marked(work->c2)) {
+    if((!work->c1 || marked(work->c1)) && marked(work->c2)) {
       work->c1 = GC_resolve(work->c1);
       work->c2 = GC_resolve(work->c2);
       prev = work; work = work->next;
@@ -1742,13 +1803,46 @@ inline static void clean_up_account_hooks()
   }
 }
 
+static unsigned long custodian_super_require(void *c)
+{
+  int set = ((Scheme_Custodian *)c)->gc_owner_set;
+
+  if (reset_required) {
+    int i;
+    for(i = 1; i < owner_table_top; i++)
+      if (owner_table[i])
+        owner_table[i]->required_set = 0;
+    reset_required = 0;
+  }
+
+  if (!owner_table[set]->required_set) {
+    unsigned long req = 0, r;
+    struct account_hook *work = hooks;
+
+    while(work) {
+      if ((work->type == MZACCT_REQUIRE) && (c == work->c2)) {
+        r = work->amount + custodian_super_require(work->c1);
+        if (r > req)
+          req = r;
+      }
+      work = work->next;
+    }
+    owner_table[set]->super_required = req;
+    owner_table[set]->required_set = 1;
+  }
+  
+  return owner_table[set]->super_required;
+}
+
 inline static void run_account_hooks()
 {
   struct account_hook *work = hooks, *prev = NULL;
 
   while(work) {
     if( ((work->type == MZACCT_REQUIRE) && 
-	 (((max_used_pages - used_pages) * APAGE_SIZE) < work->amount))
+         ((used_pages > (max_used_pages / 2))
+          || ((((max_used_pages / 2) - used_pages) * APAGE_SIZE)
+              < (work->amount + custodian_super_require(work->c1)))))
 	||
 	((work->type == MZACCT_LIMIT) &&
 	 (GC_get_memory_use(work->c1) > work->amount))) {
@@ -1765,6 +1859,51 @@ inline static void run_account_hooks()
   }
 }
 
+static unsigned long custodian_single_time_limit(int set)
+{
+  if (!set)
+    return (unsigned long)(long)-1;
+
+  if (reset_limits) {
+    int i;
+    for(i = 1; i < owner_table_top; i++)
+      if (owner_table[i])
+        owner_table[i]->limit_set = 0;
+    reset_limits = 0;
+  }
+
+  if (!owner_table[set]->limit_set) {
+    /* Check for limits on this custodian or one of its ancestors: */
+    unsigned long limit = (unsigned long)(long)-1;
+    Scheme_Custodian *orig = owner_table[set]->originator, *c;
+    struct account_hook *work = hooks;
+
+    while(work) {
+      if ((work->type == MZACCT_LIMIT) && (work->c1 == work->c2)) {
+        c = orig;
+        while (1) {
+          if (work->c2 == c) {
+            if (work->amount < limit)
+              limit = work->amount;
+            break;
+          }
+          if (!c->parent)
+            break;
+          c = (Scheme_Custodian*)SCHEME_PTR1_VAL(c->parent);
+          if (!c)
+            break;
+        }
+      }
+      work = work->next;
+    }
+    owner_table[set]->single_time_limit = limit;
+    owner_table[set]->limit_set = 1;
+  }
+
+  return owner_table[set]->single_time_limit;
+}
+
+
 # define set_account_hook(a,b,c,d) { add_account_hook(a,b,c,d); return 1; }
 # define set_btc_mark(x) (((struct objhead *)(x))->btc_mark = old_btc_mark)
 #endif
@@ -1779,6 +1918,10 @@ inline static void run_account_hooks()
 # define run_account_hooks() /* */
 # define custodian_usage(cust) 0
 # define set_btc_mark(x) /* */
+static unsigned long custodian_single_time_limit(int set)
+{
+  return (unsigned long)(long)-1;
+}
 #endif
 
 int GC_set_account_hook(int type, void *c1, unsigned long b, void *c2)
@@ -1792,25 +1935,39 @@ int GC_set_account_hook(int type, void *c1, unsigned long b, void *c2)
 
 static int generations_available = 1;
 
-void designate_modified(void *p)
+int designate_modified(void *p)
 {
   struct mpage *page = find_page(p);
 
   if(page) {
-    protect_pages(page, page->size, 1);
-    page->back_pointers = 1;
-  } else GCERR((GCOUTF, "Seg fault (internal error) at %p\n", p));
+    if (!page->back_pointers) {
+      protect_pages(page, page->size, 1);
+      page->back_pointers = 1;
+      return 1;
+    }
+  } else {
+    GCPRINT(GCOUTF, "Seg fault (internal error) at %p\n", p);
+  }
+  return 0;
+}
+
+void GC_write_barrier(void *p) 
+{
+  (void)designate_modified(p);
 }
 
 #include "sighand.c"
 
-void GC_init_type_tags(int count, int pair, int weakbox, int ephemeron, int weakarray)
+void GC_init_type_tags(int count, int pair, int weakbox, int ephemeron, int weakarray, int custbox)
 {
   static int initialized = 0;
 
   weak_box_tag = weakbox;
   ephemeron_tag = ephemeron;
   weak_array_tag = weakarray;
+# ifdef NEWGC_BTC_ACCOUNT
+  cust_box_tag = custbox;
+# endif
 
   if(!initialized) {
     initialized = 1;
@@ -1910,7 +2067,7 @@ void GC_mark(const void *const_p)
 	     btc_mark is right */
 	  set_btc_mark(NUM(page) + HEADER_SIZEB);
 	}
-	
+
 	page->marked_on = 1;
 	record_backtrace(page, PTR(NUM(page) + HEADER_SIZEB));
 	GCDEBUG((DEBUGOUTF, "Marking %p on big page %p\n", p, page));
@@ -1951,9 +2108,10 @@ void GC_mark(const void *const_p)
 
 	  /* first check to see if this is an atomic object masquerading
 	     as a tagged object; if it is, then convert it */
-	  if(type == PAGE_TAGGED)
-	    if((unsigned long)mark_table[*(unsigned short*)p] < PAGE_TYPES)
+	  if(type == PAGE_TAGGED) {
+            if((unsigned long)mark_table[*(unsigned short*)p] < PAGE_TYPES)
 	      type = ohead->type = (int)(unsigned long)mark_table[*(unsigned short*)p];
+          }
 
 	  /* now set us up for the search for where to put this thing */
 	  work = pages[type];
@@ -1972,6 +2130,7 @@ void GC_mark(const void *const_p)
 	  } else {
 	    /* Allocate and prep the page */
 	    work = (struct mpage *)malloc_dirty_pages(APAGE_SIZE, APAGE_SIZE);
+            memset(work, 0, sizeof(struct mpage));
 	    work->generation = 1;
 	    work->page_type = type;
 	    work->size = work->previous_size = HEADER_SIZEB;
@@ -1998,7 +2157,7 @@ void GC_mark(const void *const_p)
 	  ((struct objhead *)newplace)->mark = 1;
 	  /* if we're doing memory accounting, then we need the btc_mark
 	     to be set properly */
-	  set_btc_mark(ohead);
+	  set_btc_mark(newplace);
 	  /* drop the new location of the object into the forwarding space
 	     and into the mark queue */
 	  newplace = PTR(NUM(newplace) + WORD_SIZE);
@@ -2007,7 +2166,7 @@ void GC_mark(const void *const_p)
 	  /* set forwarding pointer */
 	  GCDEBUG((DEBUGOUTF,"Marking %p (moved to %p on page %p)\n", 
 		   p, newplace, work));
-	  *(void**)p = newplace;
+          *(void**)p = newplace;
 	  push_ptr(newplace);
 	}
       } else GCDEBUG((DEBUGOUTF,"Not marking %p (already marked)\n", p));
@@ -2135,6 +2294,12 @@ static unsigned long num_major_collects = 0;
 #ifdef MZ_GC_BACKTRACE
 # define trace_page_t struct mpage
 # define trace_page_type(page) (page)->page_type
+static void *trace_pointer_start(struct mpage *page, void *p) { 
+  if (page->big_page) 
+    return PTR(NUM(page) + HEADER_SIZEB + WORD_SIZE); 
+  else 
+    return p; 
+}
 # define TRACE_PAGE_TAGGED PAGE_TAGGED
 # define TRACE_PAGE_ARRAY PAGE_ARRAY
 # define TRACE_PAGE_TAGGED_ARRAY PAGE_TARRAY
@@ -2249,6 +2414,9 @@ void GC_dump_with_traces(int flags,
   GCWARN((GCOUTF,"\n"));
   GCWARN((GCOUTF,"Current memory use: %li\n", GC_get_memory_use(NULL)));
   GCWARN((GCOUTF,"Peak memory use after a collection: %li\n",peak_memory_use));
+  GCWARN((GCOUTF,"Allocated (+reserved) page sizes: %li (+%li)\n", 
+          used_pages * APAGE_SIZE, 
+          actual_pages_size - (used_pages * APAGE_SIZE)));
   GCWARN((GCOUTF,"# of major collections: %li\n", num_major_collects));
   GCWARN((GCOUTF,"# of minor collections: %li\n", num_minor_collects));
   GCWARN((GCOUTF,"# of installed finalizers: %i\n", num_fnls));
@@ -2323,11 +2491,6 @@ static void prepare_pages_for_collection(void)
       }
     flush_protect_page_ranges(1);
   }
-
-  /* we do this here because, well, why not? */
-  init_weak_boxes();
-  init_weak_arrays();
-  init_ephemerons();
 }
 
 static void mark_backpointers(void)
@@ -2384,6 +2547,7 @@ struct mpage *allocate_compact_target(struct mpage *work)
   struct mpage *npage;
 
   npage = malloc_dirty_pages(APAGE_SIZE, APAGE_SIZE);
+  memset(npage, 0, sizeof(struct mpage));
   npage->previous_size = npage->size = HEADER_SIZEB;
   npage->generation = 1;
   npage->back_pointers = 0;
@@ -2708,7 +2872,7 @@ static void garbage_collect(int force_full)
 /*   printf("Collection #li (full = %i): %i / %i / %i / %i\n", number, */
 /* 	 gc_full, force_full, !generations_available, */
 /* 	 (since_last_full > 100), (memory_in_use > (2 * last_full_mem_use))); */
-  
+
   number++; 
   INIT_DEBUG_FILE(); DUMP_HEAP();
 
@@ -2726,6 +2890,10 @@ static void garbage_collect(int force_full)
   TIME_STEP("started");
 
   prepare_pages_for_collection();
+  init_weak_boxes();
+  init_weak_arrays();
+  init_ephemerons();
+
   /* at this point, the page map should only include pages that contain
      collectable objects */
 
@@ -2740,7 +2908,7 @@ static void garbage_collect(int force_full)
   mark_roots();
   mark_immobiles();
   TIME_STEP("rooted");
-  GC_mark_variable_stack(GC_variable_stack, 0, gc_stack_base);
+  GC_mark_variable_stack(GC_variable_stack, 0, gc_stack_base, NULL);
 
   TIME_STEP("stacked");
 
@@ -2788,7 +2956,7 @@ static void garbage_collect(int force_full)
   repair_weak_finalizer_structs();
   repair_roots();
   repair_immobiles();
-  GC_fixup_variable_stack(GC_variable_stack, 0, gc_stack_base);
+  GC_fixup_variable_stack(GC_variable_stack, 0, gc_stack_base, NULL);
   TIME_STEP("reparied roots");
   repair_heap();
   TIME_STEP("repaired");
@@ -2808,6 +2976,11 @@ static void garbage_collect(int force_full)
 
   /* new we do want the allocator freaking if we go over half */
   in_unsafe_allocation_mode = 0;
+
+  /* If we have too many idle pages, flush: */
+  if (actual_pages_size > ((used_pages << (LOG_APAGE_SIZE + 1)))) {
+    flush_freed_pages();
+  }
 
   /* update some statistics */
   if(gc_full) num_major_collects++; else num_minor_collects++;
@@ -2859,5 +3032,38 @@ static void garbage_collect(int force_full)
   DUMP_HEAP(); CLOSE_DEBUG_FILE();
 }
 
+#if MZ_GC_BACKTRACE
 
+static GC_get_type_name_proc stack_get_type_name;
+static GC_get_xtagged_name_proc stack_get_xtagged_name;
+static GC_print_tagged_value_proc stack_print_tagged_value;
 
+static void dump_stack_pos(void *a) 
+{
+  GCPRINT(GCOUTF, " @%p: ", a);
+  print_out_pointer("", *(void **)a, stack_get_type_name, stack_get_xtagged_name, stack_print_tagged_value);
+}
+
+# define GC_X_variable_stack GC_do_dump_variable_stack
+# define gcX(a) dump_stack_pos(a)
+# define X_source(stk, p) /* */
+# include "var_stack.c"
+# undef GC_X_variable_stack
+# undef gcX
+# undef X_source
+
+void GC_dump_variable_stack(void **var_stack,
+                            long delta,
+                            void *limit,
+                            void *stack_mem,
+                            GC_get_type_name_proc get_type_name,
+                            GC_get_xtagged_name_proc get_xtagged_name,
+                            GC_print_tagged_value_proc print_tagged_value)
+{
+  stack_get_type_name = get_type_name;
+  stack_get_xtagged_name = get_xtagged_name;
+  stack_print_tagged_value = print_tagged_value;
+  GC_do_dump_variable_stack(var_stack, delta, limit, stack_mem);
+}
+
+#endif

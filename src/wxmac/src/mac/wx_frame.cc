@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2006 PLT Scheme Inc.
+// Copyright:  (c) 2004-2007 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -60,7 +60,7 @@ static ControlUserPaneDrawUPP userPaneDrawFunctionUPP = NewControlUserPaneDrawUP
 //-----------------------------------------------------------------------------
 wxFrame::wxFrame // Constructor (for frame window)
 (
- wxFrame*	parentFrame,		// this is ignored
+ wxFrame*	parentFrame,
  char*		windowTitle,
  int 		x,
  int			y,
@@ -676,6 +676,11 @@ void wxFrame::Maximize(Bool maximize)
     }
 }
 
+Bool wxFrame::IsMaximized()
+{
+  return cMaximized;
+}
+
 void wxFrame::EnforceSize(int minw, int minh, int maxw, int maxh, int incw, int inch)
 {
   RgnHandle screen;
@@ -1075,15 +1080,19 @@ void wxFrame::Show(Bool show)
   
   cUserHidden = !show;
 
-  if (window_parent) {
-    wxChildList *cl;
-    cl = window_parent->GetChildren();
-    cl->Show(this, show);
-  }
-  if (cParentArea) {
-    wxChildList *cl;
-    cl = cParentArea->Windows();
-    cl->Show(this, show);
+  /* Don't try to adjust the screen's window list, because it
+     doesn't keep a list of children. */
+  if (0) {
+    if (window_parent) {
+      wxChildList *cl;
+      cl = window_parent->GetChildren();
+      cl->Show(this, show);
+    }
+    if (cParentArea) {
+      wxChildList *cl;
+      cl = cParentArea->Windows();
+      cl->Show(this, show);
+    }
   }
   tlw = wxTopLevelWindows(ContextWindow());
   tlw->Show(this, show);

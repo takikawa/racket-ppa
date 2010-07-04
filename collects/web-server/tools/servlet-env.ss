@@ -1,6 +1,6 @@
 (module servlet-env mzscheme
   (require (lib "sendurl.ss" "net")
-           (lib "unitsig.ss"))
+           (lib "unit.ss"))
   (require "../configuration.ss"
            "../web-server.ss"
            "../sig.ss"
@@ -16,10 +16,13 @@
   (define-syntax (on-web:syntax stx)
     (syntax-case stx ()
       [(on-web:syntax servlet-expr)
+       (syntax
+        (on-web:syntax 8000 servlet-expr))]
+      [(on-web:syntax port servlet-expr)
        (with-syntax ([initial-request (datum->syntax-object (syntax servlet-expr) 'initial-request)])
          (syntax
           (on-web (lambda (initial-request) servlet-expr)
-                  8000
+                  port
                   "servlets/standalone.ss")))]))
   
   (define (on-web servlet-expr the-port the-path)
@@ -53,7 +56,9 @@
   (define (build-standalone-servlet-configuration the-port the-path the-servlet)
     (let ([basic-configuration@ (load-developer-configuration default-configuration-table-path)]
           [the-scripts (make-cache-table)])
-      (define-values/invoke-unit/sig web-config^ basic-configuration@ i)
+      (define-values/invoke-unit basic-configuration@ 
+        (import) 
+        (export (prefix i: web-config^)))
       (cache-table-lookup! the-scripts
                            (string->symbol
                             (path->string
@@ -69,8 +74,9 @@
                                                     (body (p "Return to the interaction window."))))
                                              30 30)
                                            the-servlet)))
-      (unit/sig web-config^
+      (unit
         (import)
+        (export web-config^)
         (define port the-port)
         (define max-waiting i:max-waiting)
         (define listen-ip i:listen-ip)

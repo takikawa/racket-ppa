@@ -365,7 +365,14 @@
                               [(if test then else) (recon-basic)]
                               [(if test then) (recon-basic)]
                               [(begin . bodies) (recon-basic)]
-                              [(begin0 . bodies) (recon-basic)]
+                              [(begin0 . bodies) 
+                               (if (stepper-syntax-property expr 'stepper-fake-exp)
+                                   (if (null? (syntax->list #`bodies))
+                                       (recon-value (lookup-binding mark-list begin0-temp) render-settings)
+                                       ;; prepend the computed value of the first arg:
+                                       #`(begin0 #,(recon-value (lookup-binding mark-list begin0-temp) render-settings)
+                                                 #,@(map recur (filter-skipped (syntax->list #`bodies)))))
+                                   (recon-basic))]
                               
                               ; let-values, letrec-values
                               [(let-values . rest) (recon-let/rec #f)]
@@ -403,43 +410,46 @@
                               [var-stx
                                (identifier? expr)
                                (let* ([var (syntax var-stx)])
-                                 var
-                                 (cond [(eq? (identifier-binding var) 'lexical)
-                                        ; has this varref's binding not been evaluated yet?
-                                        ; (and this varref isn't in the list of must-lookups?)
-                                        (if (and (ormap (lambda (binding)
-                                                     (bound-identifier=? binding var))
-                                                   dont-lookup)
-                                                 (not (ormap (lambda (binding)
-                                                               (bound-identifier=? binding var))
-                                                             use-lifted-names)))
-                                            var
-
-                                            (case (stepper-syntax-property var 'stepper-binding-type)
-                                              ((lambda-bound) 
-                                               (recon-value (lookup-binding mark-list var) render-settings))
-                                              ((macro-bound)
-                                               ; for the moment, let-bound vars occur only in and/or :
-                                               (recon-value (lookup-binding mark-list var) render-settings))
-                                              ((let-bound)
-                                               (stepper-syntax-property var
-                                                                        'stepper-lifted-name
-                                                                        (binding-lifted-name mark-list var)))
-                                              ((stepper-temp)
-                                               (error 'recon-source-expr "stepper-temp showed up in source?!?"))
-                                              ((non-lexical)
-                                               (error 'recon-source-expr "can't get here: lexical identifier labeled as non-lexical"))
-                                              (else
-                                               (error 'recon-source-expr "unknown 'stepper-binding-type property: ~a" 
-                                                      (stepper-syntax-property var 'stepper-binding-type)))))]
-                                       [else ; top-level-varref
-                                        (fixup-name
-                                         var)]))]
+                                 (if (render-settings-all-bindings-mutable? render-settings)
+                                     var
+                                     (cond [(eq? (identifier-binding var) 'lexical)
+                                            ; has this varref's binding not been evaluated yet?
+                                            ; (and this varref isn't in the list of must-lookups?)
+                                            (if (and (ormap (lambda (binding)
+                                                              (bound-identifier=? binding var))
+                                                            dont-lookup)
+                                                     (not (ormap (lambda (binding)
+                                                                   (bound-identifier=? binding var))
+                                                                 use-lifted-names)))
+                                                var
+                                                
+                                                (case (stepper-syntax-property var 'stepper-binding-type)
+                                                  ((lambda-bound) 
+                                                   (recon-value (lookup-binding mark-list var) render-settings))
+                                                  ((macro-bound)
+                                                   ; for the moment, let-bound vars occur only in and/or :
+                                                   (recon-value (lookup-binding mark-list var) render-settings))
+                                                  ((let-bound)
+                                                   (stepper-syntax-property var
+                                                                            'stepper-lifted-name
+                                                                            (binding-lifted-name mark-list var)))
+                                                  ((stepper-temp)
+                                                   (error 'recon-source-expr "stepper-temp showed up in source?!?"))
+                                                  ((non-lexical)
+                                                   (error 'recon-source-expr "can't get here: lexical identifier labeled as non-lexical"))
+                                                  (else
+                                                   (error 'recon-source-expr "unknown 'stepper-binding-type property: ~a" 
+                                                          (stepper-syntax-property var 'stepper-binding-type)))))]
+                                           [else ; top-level-varref
+                                            (fixup-name
+                                             var)])))]
                               [(#%top . var)
                                (syntax var)]
                               
                               [else
-                               (error 'recon-source "no matching clause for syntax: ~a" expr)])])
+                               (error 'recon-source "no matching clause for syntax: ~a" (if (syntax? expr)
+                                                                                            (syntax-object->datum expr)
+                                                                                            expr))])])
                 (attach-info recon expr)))))))
   
   ;; reconstruct-set!-var
@@ -685,11 +695,17 @@
                          (attach-info #`(label #,recon-bindings #,@rectified-bodies) exp))))])
              (if (stepper-syntax-property exp 'stepper-fake-exp)
                  
-                 (syntax-case exp ()
+                 (kernel:kernel-syntax-case exp #f
                    [(begin . bodies)
                     (if (eq? so-far nothing-so-far)
                         (error 'recon-inner "breakpoint before a begin reduction should have a result value in exp: ~a" (syntax-object->datum exp))
                         #`(begin #,so-far #,@(map recon-source-current-marks (cdr (syntax->list #'bodies)))))]
+                   [(begin0 first-body . rest-bodies)
+                    (if (eq? so-far nothing-so-far)
+                        (error 'recon-inner "breakpoint before a begin0 reduction should have a result value in exp: ~a" (syntax-object->datum exp))
+                        #`(begin0 #,(recon-value (lookup-binding mark-list begin0-temp) render-settings)
+                                  #,so-far
+                                  #,@(map recon-source-current-marks (syntax->list #`rest-bodies))))]
                    [else
                     (error 'recon-inner "unexpected fake-exp expression: ~a" (syntax-object->datum exp))])
                  
@@ -772,44 +788,21 @@
                                             ;; advanced-begin : okay, here comes advanced-begin.
                                             
                                             [(begin . terms)
-                                             ;; copied from app:
-                                             (error 'reconstruct/inner "how did we get here?")
-                                             
-                                             #;(attach-info
-                                                (let* ([sub-exprs (syntax->list (syntax terms))]
-                                                       [arg-temps (build-list (length sub-exprs) get-arg-var)]
-                                                       [arg-vals (map (lambda (arg-temp) 
-                                                                        (lookup-binding mark-list arg-temp))
-                                                                      arg-temps)])
-                                                  (case (mark-label (car mark-list))
-                                                    ((not-yet-called)
-                                                     (let*-2vals ([(evaluated unevaluated) (split-list (lambda (x) (eq? (cadr x) *unevaluated*))
-                                                                                                       (zip sub-exprs arg-vals))]
-                                                                  [rectified-evaluated (map (lx (recon-value _ render-settings)) (map cadr evaluated))])
-                                                                 (if (null? unevaluated)
-                                                                     #`(#%app . #,rectified-evaluated)
-                                                                     #`(#%app 
-                                                                        #,@rectified-evaluated
-                                                                        #,so-far 
-                                                                        #,@(map recon-source-current-marks (cdr (map car unevaluated)))))))
-                                                    ((called)
-                                                     (if (eq? so-far nothing-so-far)
-                                                         (datum->syntax-object #'here `(,#'#%app ...)) ; in unannotated code
-                                                         (datum->syntax-object #'here `(,#'#%app ... ,so-far ...))))
-                                                    (else
-                                                     (error "bad label in application mark in expr: ~a" exp))))
-                                                exp)]
+                                             ;; even in advanced, begin expands into a let-values.
+                                             (error 'reconstruct/inner "begin in non-teaching-languages not implemented in reconstruct")]
                                             
                                             ; begin : in the current expansion of begin, there are only two-element begin's, one-element begins, and 
                                             ;; zero-element begins; these arise as the expansion of ... ?
                                             
-                                            [(begin stx-a stx-b)
+                                            ;; these are all dead code, right?
+                                            
+                                            #;[(begin stx-a stx-b)
                                              (attach-info 
                                               (if (eq? so-far nothing-so-far)
                                                   #`(begin #,(recon-source-current-marks #`stx-a) #,(recon-source-current-marks #`stx-b))
                                                   #`(begin #,so-far #,(recon-source-current-marks #`stx-b))))]
                                             
-                                            [(begin clause)
+                                            #;[(begin clause)
                                              (attach-info
                                               (if (eq? so-far nothing-so-far)
                                                   #`(begin #,(recon-source-current-marks (syntax clause)))
@@ -818,7 +811,7 @@
                                                    "stepper:reconstruct: one-clause begin appeared as context: ~a" (syntax-object->datum exp)))
                                               exp)]
                                             
-                                            [(begin)
+                                            #;[(begin)
                                              (attach-info
                                               (if (eq? so-far nothing-so-far)
                                                   #`(begin)
@@ -826,8 +819,21 @@
                                                    'recon-inner
                                                    "stepper-reconstruct: zero-clause begin appeared as context: ~a" (syntax-object->datum exp))))]
                                             
-                                            ; begin0 : may not occur directly except in advanced
-                                            #;[(begin0  )]
+                                            ; begin0 : 
+                                            ;; one-body begin0: perhaps this will turn out to be a special case of the
+                                            ;; many-body case.
+                                            [(begin0 body)
+                                             (if (eq? so-far nothing-so-far)
+                                                 (recon-source-current-marks exp)
+                                                 (error 'recon-inner "one-body begin0 given as context: ~a" exp))]
+                                            
+                                            ;; the only time begin0 shows up other than in a fake-exp is when the first 
+                                            ;; term is being evaluated
+                                            [(begin0 first-body . rest-bodies)
+                                             (if (eq? so-far nothing-so-far)
+                                                 (error 'foo "not implemented")
+                                                 ;; don't know what goes hereyet
+                                                 #`(begin0 #,so-far #,@(map recon-source-current-marks (syntax->list #`rest-bodies))))]
                                             
                                             ; let-values
                                             

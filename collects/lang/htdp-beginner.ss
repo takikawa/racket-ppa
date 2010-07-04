@@ -7,7 +7,7 @@
   (require (lib "etc.ss")
 	   (lib "list.ss")
 	   (lib "docprovide.ss" "syntax"))
-  
+
   ;; Implements the forms:
   (require "private/teach.ss"
 	   "private/contract-forms.ss")
@@ -25,9 +25,11 @@
 	   (rename beginner-or or)
 	   (rename beginner-quote quote)
 	   (rename beginner-module-begin #%module-begin)
+           (rename beginner-require require)
 	   ; (rename beginner-contract contract)
 	   ; (rename beginner-define-data define-data)
 	   #%datum
+           #%top-interaction
 	   empty true false)
 
   (require-for-syntax "private/firstorder.ss")

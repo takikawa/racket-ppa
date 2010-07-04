@@ -1,8 +1,8 @@
-(require (lib "unitsig.ss")
-         (lib "servlet-sig.ss" "web-server")
-         (lib "date.ss"))
-
-(unit/sig () (import servlet^)
+(module add mzscheme
+  (require (lib "servlet.ss" "web-server"))
+  (provide (all-defined))
+  (define interface-version 'v1)
+  (define timeout +inf.0)
   
   ; request-number : str -> num
   (define (request-number which-number)
@@ -21,9 +21,10 @@
                          (input ([type "text"] [name "number"] [value ""]))
                          (input ([type "submit"] [name "enter"] [value "Enter"])))))))
   
-  (send/suspend
-   (lambda (k-url)
-     `(html (head (title "Sum"))
-            (body ([bgcolor "white"])
-                  (p "The sum is "
-                     ,(number->string (+ (request-number "first") (request-number "second")))))))))
+  (define (start initial-request)
+    (send/suspend
+     (lambda (k-url)
+       `(html (head (title "Sum"))
+              (body ([bgcolor "white"])
+                    (p "The sum is "
+                       ,(number->string (+ (request-number "first") (request-number "second"))))))))))

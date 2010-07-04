@@ -21,6 +21,7 @@
 	   (rename beginner-if if)
 	   (rename beginner-and and)
 	   (rename beginner-or or)
+           (rename beginner-require require)
 	   ;; (rename beginner-contract contract)
 	   ;; (rename beginner-define-data define-data)
 	   (rename intermediate-quote quote)
@@ -29,6 +30,7 @@
 	   (rename intermediate-unquote-splicing unquote-splicing)
 	   (rename beginner-module-begin #%module-begin)
 	   #%datum
+           #%top-interaction
 	   empty true false)
 
   ;; procedures:

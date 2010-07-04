@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	
- * Copyright:	(c) 2004-2006 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2007 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  */
 
@@ -173,6 +173,9 @@ enum {
   wxSMOOTHING_PARTIAL,
   wxSMOOTHING_ON,
   wxSMOOTHING_OFF,
+
+  wxDIM_OVER = 150,
+  wxFADE_OVER,
 };
 
 

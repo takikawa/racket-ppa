@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -15,7 +15,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
   libscheme
   Copyright (c) 1994 Brent Benson
@@ -46,7 +47,9 @@ Scheme_Object *scheme_eval_compiled_sized_string_with_magic(const char *str, int
   if (!env)
     env = scheme_get_env(NULL);
     
-  expr = scheme_internal_read(port, NULL, 1, 1, 0, 0, -1, NULL, magic_sym, magic_val);
+  expr = scheme_internal_read(port, NULL, 1, 1, 0, 0, -1, NULL, 
+                              magic_sym, magic_val,
+                              NULL);
 
   if (multi_ok)
     return _scheme_eval_compiled_multi(expr, env);

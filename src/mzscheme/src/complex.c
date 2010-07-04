@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -15,7 +15,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
   libscheme
   Copyright (c) 1994 Brent Benson
@@ -33,7 +34,8 @@ static Scheme_Object *make_complex(const Scheme_Object *r, const Scheme_Object *
 {
   Scheme_Complex *c;
 
-  c = MALLOC_ONE_TAGGED(Scheme_Complex);
+  c = (Scheme_Complex *)scheme_malloc_small_dirty_tagged(sizeof(Scheme_Complex));
+  CLEAR_KEY_FIELD(&c->so);
   c->so.type = scheme_complex_type;
   c->r = (Scheme_Object *)r;
   c->i = (Scheme_Object *)i;
@@ -250,8 +252,7 @@ Scheme_Object *scheme_complex_divide(const Scheme_Object *_n, const Scheme_Objec
     return scheme_make_complex(r, i);
   }
 
-  aa[0] = d;
-  if (SCHEME_TRUEP(scheme_zero_p(1, aa))) {
+  if (scheme_is_zero(d)) {
     /* This is like dividing by a real number, except that
        the inexact 0 imaginary part can interact with +inf.0 and +nan.0 */
     r = scheme_bin_plus(scheme_bin_div(a, c),
@@ -263,8 +264,7 @@ Scheme_Object *scheme_complex_divide(const Scheme_Object *_n, const Scheme_Objec
     
     return scheme_make_complex(r, i);
   }
-  aa[0] = c;
-  if (SCHEME_TRUEP(scheme_zero_p(1, aa))) {
+  if (scheme_is_zero(c)) {
     r = scheme_bin_plus(scheme_bin_div(b, d),
 			/* Either 0.0 or +nan.0: */
 			scheme_bin_mult(c, a));

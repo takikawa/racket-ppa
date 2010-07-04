@@ -5,7 +5,7 @@
  * Created:	1994
  * Updated:	
  *		11/1/95 - not deleting client data on delete or clear
- * Copyright:	(c) 2004-2006 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2007 PLT Scheme Inc.
  * Copyright:	(c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
  */
 
@@ -80,7 +80,12 @@ static void MyDrawCell(ALData cellData, ALCellPtr cell, const Rect *cellRect, AL
     ::GetFontInfo(&fontInfo);
     MoveTo(cellRect->left, fontInfo.ascent + cellRect->top);
 
-    ForeColor(blackColor);
+    if (!ALIsActive(hAL)) {
+      RGBColor c;
+      c.red = c.green = c.blue = 0x7FFF;
+      RGBForeColor(&c);
+    } else
+      ForeColor(blackColor);
     CopyPascalStringToC(*(StringHandle)cellData, wxBuffer);
     TextMode(srcOr);
     wxDrawUnicodeText(wxBuffer, 0, -1, 0);
@@ -195,7 +200,7 @@ Bool wxListBox::Create(wxPanel *panel, wxFunction func,
 
   if (Title) {
     cListTitle = new WXGC_PTRS wxLabelArea(this, Title, label_font,
-						  labelPosition == wxVERTICAL ? wxTop : wxLeft);
+                                           labelPosition == wxVERTICAL ? wxTop : wxLeft);
   } else
     cListTitle = NULL;
   
@@ -269,8 +274,12 @@ void wxListBox::OnEvent(wxMouseEvent *event)
     SetCurrentDC();
 
     // For scroll bars:
-    startPt0.v = startV;
-    startPt0.h = startH - (cWindowWidth - 16);
+    {
+      int cw, ch;
+      GetClientSize(&cw, &ch);
+      startPt0.v = startV;
+      startPt0.h = startH - (cw - 16);
+    }
     
     startPt.v = startV + SetOriginY; // port c.s.
     startPt.h = startH + SetOriginX;

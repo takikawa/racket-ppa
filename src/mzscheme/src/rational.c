@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
  
     This library is free software; you can redistribute it and/or
@@ -15,7 +15,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
   libscheme
   Copyright (c) 1994 Brent Benson
@@ -33,8 +34,9 @@ static Scheme_Object *make_rational(const Scheme_Object *n, const Scheme_Object 
 {
   Scheme_Rational *r;
 
-  r = MALLOC_ONE_TAGGED(Scheme_Rational);
+  r = (Scheme_Rational *)scheme_malloc_small_dirty_tagged(sizeof(Scheme_Rational));
   r->so.type = scheme_rational_type;
+  CLEAR_KEY_FIELD(&r->so);
   r->num = (Scheme_Object *)n;
   r->denom = (Scheme_Object *)d;
   
@@ -194,7 +196,7 @@ int scheme_rational_eq(const Scheme_Object *a, const Scheme_Object *b)
   return 1;
 }
 
-int scheme_rational_lt(const Scheme_Object *a, const Scheme_Object *b)
+static int rational_lt(const Scheme_Object *a, const Scheme_Object *b, int or_eq)
 {
   Scheme_Rational *ra = (Scheme_Rational *)a;
   Scheme_Rational *rb = (Scheme_Rational *)b;
@@ -204,28 +206,39 @@ int scheme_rational_lt(const Scheme_Object *a, const Scheme_Object *b)
   mb = scheme_bin_mult(rb->num, ra->denom);
 
   if (SCHEME_INTP(ma) && SCHEME_INTP(mb)) {
-    return (SCHEME_INT_VAL(ma) < SCHEME_INT_VAL(mb));
+    if (or_eq)
+      return (SCHEME_INT_VAL(ma) <= SCHEME_INT_VAL(mb));
+    else
+      return (SCHEME_INT_VAL(ma) < SCHEME_INT_VAL(mb));
   } else if (SCHEME_BIGNUMP(ma) && SCHEME_BIGNUMP(mb)) {
-    return scheme_bignum_lt(ma, mb);
+    if (or_eq)
+      return scheme_bignum_le(ma, mb);
+    else
+      return scheme_bignum_lt(ma, mb);
   } else if (SCHEME_BIGNUMP(mb)) {
     return SCHEME_BIGPOS(mb);
   } else
     return !SCHEME_BIGPOS(ma);
 }
 
+int scheme_rational_lt(const Scheme_Object *a, const Scheme_Object *b)
+{
+  return rational_lt(a, b, 0);
+}
+
 int scheme_rational_gt(const Scheme_Object *a, const Scheme_Object *b)
 {
-  return !scheme_rational_lt(a, b) && !scheme_rational_eq(a, b);
+  return !rational_lt(a, b, 1);
 }
 
 int scheme_rational_le(const Scheme_Object *a, const Scheme_Object *b)
 {
-  return !scheme_rational_gt(a, b);
+  return rational_lt(a, b, 1);
 }
 
 int scheme_rational_ge(const Scheme_Object *a, const Scheme_Object *b)
 {
-  return !scheme_rational_lt(a, b);
+  return !rational_lt(a, b, 0);
 }
 
 Scheme_Object *scheme_rational_negate(const Scheme_Object *o)

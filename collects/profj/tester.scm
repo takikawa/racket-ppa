@@ -2,7 +2,7 @@
   
   (require (lib "mred.ss" "mred")
            (lib "tool.ss" "drscheme")
-           (lib "unitsig.ss")
+           (prefix u: (lib "unit.ss"))
            (lib "framework.ss" "framework")
            (lib "string-constant.ss" "string-constants")
            (lib "class.ss")
@@ -77,7 +77,7 @@
         (set-single-test-covered-exprs! 
          current-class 
          (cons src (single-test-covered-exprs current-class)))
-        (when (and (testcase-ext?) src)
+        (when (and (testcase-ext?) src (not (null? current-test-obj)))
           (send current-test-obj testCoverage-boolean-int #f (src-pos src))))
       
       (define/public (provide-test-results)
@@ -506,8 +506,8 @@
     (unless (null? covered)
       (let* ([editor (get-editor (car covered) #f)]
              [style-list (editor:get-standard-style-list)]
-             [uncover-color (send style-list find-named-style "profj:syntax-coloring:scheme:uncovered")]
-             [cover-color (send style-list find-named-style "profj:syntax-coloring:scheme:covered")])
+             [uncover-color (send style-list find-named-style "profj:syntax-colors:scheme:uncovered")]
+             [cover-color (send style-list find-named-style "profj:syntax-colors:scheme:covered")])
         (when editor
           ;(send cover-color set-delta-foreground "darkmagenta")
           ;(send uncover-color set-delta-foreground "black")
@@ -577,9 +577,9 @@
   (define-local-member-name toggle-test-status test-froze-colorer? begin-test-color end-test-color)
   
   (define test-tool@
-    (unit/sig drscheme:tool-exports^
-      (import drscheme:tool^)
-      
+    (u:unit
+      (u:import drscheme:tool^)
+      (u:export drscheme:tool-exports^)
       (define (phase1) (void))
       (define (phase2) (void))
       

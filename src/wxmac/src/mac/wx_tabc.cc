@@ -3,7 +3,7 @@
 // Purpose:	Panel item tab choice implementation (Macintosh version)
 // Author:	Matthew
 // Created:	2002
-// Copyright:  (c) 2004-2006 PLT Scheme Inc.
+// Copyright:  (c) 2004-2007 PLT Scheme Inc.
 // Copyright:  (c) 2002, PLT
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -110,7 +110,7 @@ wxTabChoice::wxTabChoice(wxPanel *panel, wxFunction function, char *label,
   cWindowWidth = TAB_TITLE_SPACE + TAB_BASE_SIDE_SPACE;
   for (i = 0; i < N; i++) {
     double x, y;
-    font->GetTextExtent(wxItemStripLabel(Choices[i]), 0, &x, &y, NULL, NULL, TRUE);
+    font->GetTextExtent(wxItemStripLabel(Choices[i]), 0, -1, &x, &y, NULL, NULL, TRUE);
     cWindowWidth += TAB_TITLE_SPACE + (int)x;
   }
   padTop = TAB_TOP_SPACE;

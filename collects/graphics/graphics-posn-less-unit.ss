@@ -3,7 +3,7 @@
 ; Originally written by Johnathan Franklin
 
 (module graphics-posn-less-unit mzscheme
-  (require (lib "unitsig.ss")
+  (require (lib "unit.ss")
 	   (lib "mred-sig.ss" "mred")
            (lib "mred.ss" "mred")
 	   (lib "class.ss")
@@ -41,11 +41,11 @@
 	    [(viewport) 
 	     (finish ((string-functions 'what) viewport))])))]))
 
-(define graphics-posn-less@
-
-(unit/sig graphics:posn-less^
-  (import (mred : mred^)
+(define-unit graphics-posn-less@
+  (import (prefix mred: mred^)
           graphics:posn^)
+  (export graphics^)
+  (init-depend mred^)
   
   (define send/proc
     (lambda (class method . args)
@@ -1165,7 +1165,7 @@
     (lambda (name show?)
       (unless sixlib-eventspace
 	(set! sixlib-eventspace 
-	      (parameterize ([current-exception-handler
+	      (parameterize ([uncaught-exception-handler
 			      (lambda (x)
 				((error-display-handler)
 				 (format "internal error in graphics library: ~a"
@@ -1301,4 +1301,4 @@
     (lambda (TST)
       (andmap (lambda (p) (p TST)) preds)))
   )
-))
+)

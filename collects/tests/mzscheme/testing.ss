@@ -59,8 +59,11 @@ transcript.
     (display msg err)
     (flush-output err)))
 
+(define Section-prefix
+  (namespace-variable-value 'Section-prefix #f (lambda () "")))
+
 (define (Section . args)
-  (eprintf* "Section~s\n" args)
+  (eprintf* "~aSection~s\n" Section-prefix args)
   (set! cur-section args)
   #t)
 
@@ -113,21 +116,17 @@ transcript.
 (define thunk-error-test
   (case-lambda
    [(th expr) (thunk-error-test th expr exn:application:type?)]
-   [(th expr exn?)
+   [(th expr exn-type?)
     (set! expr (syntax-object->datum expr))
     (set! number-of-error-tests (add1 number-of-error-tests))
     (printf "~s  =e=> " expr)
     (flush-output)
     (call/ec (lambda (escape)
 	       (let* ([old-esc-handler (error-escape-handler)]
-		      [old-handler (current-exception-handler)]
 		      [orig-err-port (current-error-port)]
-		      [test-handler
-		       (lambda ()
-			 (escape #t))]
 		      [test-exn-handler
 		       (lambda (e)
-			 (when (and exn? (not (exn? e)))
+			 (when (and exn-type? (not (exn-type? e)))
 			       (printf " WRONG EXN TYPE: ~s " e)
 			       (record-error (list e 'exn-type expr)))
 			 (when (and (exn:fail:syntax? e)
@@ -148,28 +147,36 @@ transcript.
 					      (record-error (list e (cons 'exn-elem sel) expr)))))))
 			  exn-table)
 
-			 (old-handler e))])
+                         ((error-display-handler)
+                          (if (exn? e)
+                              (exn-message e)
+                              (format "misc. exn: ~s" e))
+                          e)
+
+                         (escape #t))])
 		 (dynamic-wind
 		  (lambda ()
-		    (current-error-port (current-output-port))
-		    (current-exception-handler test-exn-handler)
-		    (error-escape-handler test-handler))
+		    (current-error-port (current-output-port)))
 		  (lambda ()
-		    (let ([v (call-with-values th list)])
-		      (write (cons 'values v))
-		      (display " BUT EXPECTED ERROR")
-		      (record-error (list v 'Error expr))
-		      (newline)
-		      #f))
+                    (call-with-continuation-prompt
+                     (lambda ()
+                       (call-with-exception-handler
+                        test-exn-handler
+                        (lambda ()
+                          (let ([v (call-with-values th list)])
+                            (write (cons 'values v))
+                            (display " BUT EXPECTED ERROR")
+                            (record-error (list v 'Error expr))
+                            (newline)
+                            #f))))))
 		  (lambda ()
 		    (current-error-port orig-err-port)
-		    (current-exception-handler old-handler)
 		    (error-escape-handler old-esc-handler))))))]))
 
 (defvar error-test
   (case-lambda
     [(expr) (error-test expr exn:application:type?)]
-    [(expr exn?) (thunk-error-test (lambda () (eval expr)) expr exn?)]))
+    [(expr exn-type?) (thunk-error-test (lambda () (eval expr)) expr exn-type?)]))
 
 (require (rename mzscheme err:mz:lambda lambda)) ; so err/rt-test works with beginner.ss
 (define-syntax err/rt-test
@@ -227,7 +234,9 @@ transcript.
 		  (let ([v (with-handlers ([void
 					    (lambda (exn)
 					      (if (check? exn)
-						  (printf " ~a\n" (exn-message exn))
+						  (printf " ~a\n" (if (exn? exn)
+                                                                      (exn-message exn)
+                                                                      (format "uncaught ~x" exn)))
 						  (let ([ok-type? (exn:application:arity? exn)])
 						    (printf " WRONG EXN ~a: ~s\n"
 							    (if ok-type?
@@ -269,16 +278,19 @@ transcript.
   (let* ([final? (and (pair? final?) (car final?))]
          [printf (if final? eprintf* printf)]
          [ok?    (null? errs)])
-    (printf "\nPerformed ~a expression tests (~a ~a, ~a ~a)\n"
+    (printf "\n~aPerformed ~a expression tests (~a ~a, ~a ~a)\n"
+            Section-prefix
             (+ number-of-tests number-of-error-tests)
             number-of-tests "good expressions"
             number-of-error-tests "bad expressions")
-    (printf "and ~a exception field tests.\n\n"
+    (printf "~aand ~a exception field tests.\n\n"
+            Section-prefix
             number-of-exn-tests)
     (if ok?
-      (printf "Passed all tests.\n")
-      (begin (printf "Errors were:\n(Section (got expected (call)))\n")
-             (for-each (lambda (l) (printf "~s\n" l)) (reverse errs))
+      (printf "~aPassed all tests.\n" Section-prefix)
+      (begin (printf "~aErrors were:\n~a(Section (got expected (call)))\n"
+                     Section-prefix Section-prefix)
+             (for-each (lambda (l) (printf "~a~s\n" Section-prefix l)) (reverse errs))
              (when final? (exit 1))))
     (when final? (exit (if ok? 0 1)))
     (printf "(Other messages report successful tests of~a.)\n"

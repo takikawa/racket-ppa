@@ -4,7 +4,7 @@
            (lib "string.ss")
            ;(lib "math.ss")
            (lib "class.ss")
-           (lib "unitsig.ss")
+           (lib "unit.ss")
            (lib "contract.ss")
            (lib "mred.ss" "mred")
            (prefix drscheme:arrow: (lib "arrow.ss" "drscheme"))
@@ -28,9 +28,9 @@
   ; how can the three tool classes communicate with each other safely
 
   (define tool@
-    (unit/sig drscheme:tool-exports^
+    (unit 
       (import drscheme:tool^)
-      
+      (export drscheme:tool-exports^) 
       (define phase1 void)
       (define phase2 void)
 
@@ -51,7 +51,7 @@
             #f))
       
       (define (break-at bp p)
-        (hash-table-get bp p))
+        (hash-table-get bp p #f))
       
       (define (truncate str n)
         (if (< (string-length str) n)
@@ -436,7 +436,9 @@
                         (loop start-pos (rest marks)))))))))
 
 	  (define/augment (after-set-next-settings s)
-	    (send (get-top-level-window) check-current-language-for-debugger)
+            (let ([tlw (get-top-level-window)])
+              (when tlw
+                (send tlw check-current-language-for-debugger)))
 	    (inner (void) after-set-next-settings s))))
       
       (define (debug-interactions-text-mixin super%)
@@ -515,7 +517,7 @@
                  (lambda ()
                    ;(print-struct #t)
                    (let ([self (current-thread)]
-                         [oeh (current-exception-handler)]
+                         [oeh (uncaught-exception-handler)]
                          [err-hndlr (error-display-handler)])
                      (error-display-handler
                       (lambda (msg exn)
@@ -529,7 +531,7 @@
                        (current-eval)
                        (lambda (pos)
                          (or (hash-table-get breakpoints -1)
-                             (let ([bp (hash-table-get breakpoints pos)])
+                             (let ([bp (hash-table-get breakpoints pos #f)])
                                (if (procedure? bp)
                                    (bp)
                                    bp))))
@@ -546,7 +548,7 @@
                           (let* ([debug-marks (continuation-mark-set->list ccm debug-key)])
                             (apply values
 				   (send (get-tab) suspend oeh (cons top-mark debug-marks) (cons 'exit-break vals))))])))
-                     (current-exception-handler
+                     (uncaught-exception-handler
                       (lambda (exn)
                         (if (and (exn:break? exn) (send (get-tab) suspend-on-break?))
                             (let ([marks (exn-continuation-marks exn)]

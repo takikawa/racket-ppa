@@ -4,7 +4,7 @@
  * Author:      Julian Smart
  * Created:     1993
  * Updated:	August 1994
- * Copyright:   (c) 2004-2006 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2007 PLT Scheme Inc.
  * Copyright:   (c) 1993, AIAI, University of Edinburgh
  */
 
@@ -71,7 +71,7 @@ extern void wxPostScriptDrawText(Scheme_Object *f, const char *fontname,
 				 const char *text, int dt, Bool combine, int use16, 
 				 double font_size, int symbol_map);
 extern void wxPostScriptGetTextExtent(const char *fontname, 
-				      const char *text, int dt, Bool combine, int use16, 
+				      const char *text, int dt, int len, Bool combine, int use16, 
 				      double font_size,
 				      double *x, double *y, double *descent, double *topSpace,
 				      int symbol_map);
@@ -811,6 +811,8 @@ void wxPostScriptDC::DrawRectangle (double x, double y, double width, double hei
     }
   if (current_pen && current_pen->GetStyle () != wxTRANSPARENT)
     {
+      double pw;
+
       SetPen (current_pen);
 
       pstream->Out("newpath\n");
@@ -821,8 +823,14 @@ void wxPostScriptDC::DrawRectangle (double x, double y, double width, double hei
       pstream->Out("closepath\n");
       pstream->Out("stroke\n");
 
-      CalcBoundingBoxClip(XSCALEBND(x), YSCALEBND(y));
-      CalcBoundingBoxClip(XSCALEBND(x + width),  YSCALEBND(y + height));
+      if (current_pen) {
+        pw = current_pen->GetWidthF();
+        pw /= 2;
+      } else
+        pw = 0;
+
+      CalcBoundingBoxClip(XSCALEBND(x - pw), YSCALEBND(y - pw));
+      CalcBoundingBoxClip(XSCALEBND(x + width + pw),  YSCALEBND(y + height + pw));
     }
 }
 
@@ -908,8 +916,18 @@ void wxPostScriptDC::DrawRoundedRectangle (double x, double y, double width, dou
 
       pstream->Out("stroke\n");
 
-      CalcBoundingBoxClip(XSCALEBND(x), YSCALEBND(y));
-      CalcBoundingBoxClip(XSCALEBND(x + width), YSCALEBND(y + height));
+      {
+        double pw;
+
+        if (current_pen) {
+          pw = current_pen->GetWidthF();
+          pw /= 2;
+        } else
+          pw = 0;
+        
+        CalcBoundingBoxClip(XSCALEBND(x - pw), YSCALEBND(y - pw));
+        CalcBoundingBoxClip(XSCALEBND(x + width + pw),  YSCALEBND(y + height + pw));
+      }
     }
 }
 
@@ -937,9 +955,19 @@ void wxPostScriptDC::DrawEllipse (double x, double y, double width, double heigh
       pstream->Out(XSCALE(x + width / 2)); pstream->Out(" "); pstream->Out(YSCALE(y + height / 2)); pstream->Out(" ");
       pstream->Out(XSCALEREL(width / 2)); pstream->Out(" "); pstream->Out(YSCALEREL(height / 2)); pstream->Out(" 0 360 ellipse\n");
       pstream->Out("stroke\n");
+      
+      {
+        double pw;
 
-      CalcBoundingBoxClip (XSCALEBND(x), YSCALEBND(y));
-      CalcBoundingBoxClip (XSCALEBND(x + width), YSCALEBND(y + height));
+        if (current_pen) {
+          pw = current_pen->GetWidthF();
+          pw /= 2;
+        } else
+          pw = 0;
+        
+        CalcBoundingBoxClip(XSCALEBND(x - pw), YSCALEBND(y - pw));
+        CalcBoundingBoxClip(XSCALEBND(x + width + pw),  YSCALEBND(y + height + pw));
+      }
     }
 }
 
@@ -1659,6 +1687,7 @@ void wxPostScriptDC::StartPage (void)
   pstream->Out("%%EndPageSetup\n");
 
   resetFont = RESET_FONT | RESET_COLOR;
+  current_font_name = NULL;
 
   if (clipping)
     SetClippingRegion(clipping);
@@ -1963,7 +1992,7 @@ double wxPostScriptDC::GetCharWidth (void)
 
 void wxPostScriptDC::GetTextExtent (const char *string, double *x, double *y,
 				    double *descent, double *topSpace, wxFont *theFont,
-				    Bool combine, Bool use16, int dt)
+				    Bool combine, Bool use16, int dt, int slen)
 {
   wxFont *fontToUse = theFont;
   int family;
@@ -1987,7 +2016,7 @@ void wxPostScriptDC::GetTextExtent (const char *string, double *x, double *y,
 
   sym_map = fontToUse->GetFamily() == wxSYMBOL;
 
-  wxPostScriptGetTextExtent(name, string, dt, combine, use16, size,
+  wxPostScriptGetTextExtent(name, string, dt, slen, combine, use16, size,
 			    x, y, descent, topSpace, sym_map);
 }
 
@@ -2324,6 +2353,7 @@ Bool wxPrintSetupData::ShowNative(wxWindow *parent)
   if (!native) {
     native = new WXGC_PTRS wxPrintData();
     native->SetLandscape(printer_orient == PS_LANDSCAPE);
+    native->SetScale(printer_scale_y);
   }
 
   d = new WXGC_PTRS wxPrintDialog(parent, native);
@@ -2333,6 +2363,8 @@ Bool wxPrintSetupData::ShowNative(wxWindow *parent)
   if (ok) {
     ls = native->GetLandscape();
     printer_orient = (ls ? PS_LANDSCAPE : PS_PORTRAIT);
+    printer_scale_y = native->GetScale();
+    printer_scale_x = printer_scale_y;
   }
   return ok;
 #else

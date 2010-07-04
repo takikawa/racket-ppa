@@ -1,46 +1,43 @@
 ;; originally by Dan Grossman
 ;; 6/30/95
 
-(module scheme mzscheme
+(module scheme (lib "a-unit.ss")
   (require "collapsed-snipclass-helpers.ss"
            (lib "string-constant.ss" "string-constants")
-           (lib "unitsig.ss")
 	   (lib "class.ss")
 	   "sig.ss"
 	   (lib "mred-sig.ss" "mred")
-           (lib "mred.ss" "mred")
 	   (lib "list.ss")
-	   (lib "thread.ss")
            (lib "etc.ss")
-           (lib "surrogate.ss")
            (lib "scheme-lexer.ss" "syntax-color")
-           "../gui-utils.ss")
-  
-  (provide scheme@)
-
-  (define (scheme-paren:get-paren-pairs)
-    '(("(" . ")")
-      ("[" . "]")
-      ("{" . "}")))
+           "../gui-utils.ss"
+           "../preferences.ss")
   
   
-  (define scheme@
-    (unit/sig framework:scheme^
-      (import mred^
-              [preferences : framework:preferences^]
-              [icon : framework:icon^]
-              [keymap : framework:keymap^]
-              [text : framework:text^]
-              [editor : framework:editor^]
-              [frame : framework:frame^]
-              [comment-box : framework:comment-box^]
-              [mode : framework:mode^]
-              [color : framework:color^]
-              [color-prefs : framework:color-prefs^])
+  (import mred^
+          [prefix preferences: framework:preferences^]
+          [prefix icon: framework:icon^]
+          [prefix keymap: framework:keymap^]
+          [prefix text: framework:text^]
+          [prefix editor: framework:editor^]
+          [prefix frame: framework:frame^]
+          [prefix comment-box: framework:comment-box^]
+          [prefix mode: framework:mode^]
+          [prefix color: framework:color^]
+          [prefix color-prefs: framework:color-prefs^])
       
-      (rename [-text-mode<%> text-mode<%>]
-              [-text<%> text<%>]
-              [-text% text%])
+  (export (rename framework:scheme^
+                  [-text-mode<%> text-mode<%>]
+                  [-text<%> text<%>]
+                  [-text% text%]))
+  
+  (init-depend mred^ framework:keymap^ framework:color^ framework:mode^
+               framework:text^ framework:editor^)
+      
+        (define (scheme-paren:get-paren-pairs)
+          '(("(" . ")")
+            ("[" . "]")
+            ("{" . "}")))
       
       (define text-balanced? 
         (opt-lambda (text [start 0] [in-end #f])
@@ -270,25 +267,51 @@
   ;;;    ;;;  ;;; ;;;  ;;;  ;; ; ;;  ;;;     ;      ;;;   ;;;  ;;   ;;   ;;; 
                                                                              
  
-      (define color-prefs-table
-        (let ([constant-green (make-object color% 41 128 38)]
-              [symbol-blue (make-object color% 38 38 128)])
-          `((symbol ,symbol-blue ,(string-constant scheme-mode-color-symbol))
-            (keyword ,symbol-blue ,(string-constant scheme-mode-color-keyword))
-            (comment ,(make-object color% 194 116 31) ,(string-constant scheme-mode-color-comment))
-            (string ,constant-green ,(string-constant scheme-mode-color-string))
-            (constant ,constant-green ,(string-constant scheme-mode-color-constant))
-            (parenthesis ,(make-object color% "brown") ,(string-constant scheme-mode-color-parenthesis))
-            (error ,(make-object color% "red") ,(string-constant scheme-mode-color-error))
-            (other ,(make-object color% "black") ,(string-constant scheme-mode-color-other)))))
-      (define (get-color-prefs-table) color-prefs-table)
+  (define color-prefs-table
+    (let ([constant-green (make-object color% 41 128 38)]
+          [symbol-blue (make-object color% 38 38 128)])
+      `((symbol ,symbol-blue ,(string-constant scheme-mode-color-symbol))
+        (keyword ,symbol-blue ,(string-constant scheme-mode-color-keyword))
+        (comment ,(make-object color% 194 116 31) ,(string-constant scheme-mode-color-comment))
+        (string ,constant-green ,(string-constant scheme-mode-color-string))
+        (constant ,constant-green ,(string-constant scheme-mode-color-constant))
+        (parenthesis ,(make-object color% "brown") ,(string-constant scheme-mode-color-parenthesis))
+        (error ,(make-object color% "red") ,(string-constant scheme-mode-color-error))
+        (other ,(make-object color% "black") ,(string-constant scheme-mode-color-other)))))
+  
+  (define white-on-black-color-prefs-table
+    (let* ([sym/kwd (make-object color% 102 102 255)]
+           [new-entries
+            `((symbol ,sym/kwd)
+              (keyword ,sym/kwd)
+              (comment ,(make-object color% 249 148 40))
+              (string ,(make-object color% 51 174 51))
+              (constant ,(make-object color% 60 194 57))
+              (parenthesis ,(make-object color% 151 69 43))
+              (other ,(make-object color% "white")))])
+      (map 
+       (λ (line)
+         (let ([new (assoc (car line) new-entries)])
+           (if new
+               (list* (car line)
+                      (cadr new)
+                      (cddr line))
+               line)))
+       color-prefs-table)))
+
+  (define (get-color-prefs-table) color-prefs-table)
+  (define (get-white-on-black-color-prefs-table) white-on-black-color-prefs-table)
       
       (define (short-sym->pref-name sym) (string->symbol (short-sym->style-name sym)))
+      (define (xlate-sym-style sym) (case sym
+                                      [(sexp-comment) 'comment]
+                                      [else sym]))
       (define sn-hash (make-hash-table))
       (define (short-sym->style-name sym)
 	(hash-table-get sn-hash sym
 			(λ ()
-			  (let ([s (format "framework:syntax-coloring:scheme:~a" sym)])
+			  (let ([s (format "framework:syntax-color:scheme:~a"
+                                           (xlate-sym-style sym))])
 			    (hash-table-put! sn-hash sym s)
 			    s))))
       
@@ -421,7 +444,8 @@
           (define (tabify-on-return?) #t)
           (define tabify    
             (opt-lambda ([pos (get-start-position)])
-              (let* ([last-pos (last-position)]
+              (let* ([tabify-prefs (preferences:get 'framework:tabify)]
+		     [last-pos (last-position)]
                      [para (position-paragraph pos)]
 		     [is-tabbable? (and (> para 0)
 					(not (memq (classify-position (sub1 (paragraph-start-position para)))
@@ -442,7 +466,10 @@
 		     ;; "last" is the start of the S-exp just before "pos"
                      [last 
                       (if contains
-                          (backward-match end limit)
+                          (let ([p (get-backward-sexp end)])
+                            (if (and p (p . >= . limit))
+                                p
+                                (backward-match end limit)))
                           #f)]
                      [last-para (and last
                                      (position-paragraph last))])
@@ -487,7 +514,7 @@
 			(let ([id-end (get-forward-sexp contains)])
 			  (if (and id-end (> id-end contains))
 			      (let* ([text (get-text contains id-end)])
-                                (or (get-keyword-type text)
+                                (or (get-keyword-type text tabify-prefs)
                                     'other)))))]
                      [procedure-indent
                       (λ ()
@@ -520,7 +547,7 @@
 		     ;; Something went wrong matching. Should we get here?
                      (do-indent 0)]
                     [(not last) 
-		     ;; We can't find a match backward from pos,
+                     ;; We can't find a match backward from pos,
 		     ;;  but we seem to be inside an S-exp, so 
 		     ;;  go "up" an S-exp, and move forward past
 		     ;;  the associated paren
@@ -529,28 +556,32 @@
                                       (+ (visual-offset enclosing) 1)
                                       0)))]
                     [(= contains last)
-		     ;; There's only one S-expr in the S-expr
+                     ;; There's only one S-expr in the S-expr
 		     ;;  containing "pos"
                      (do-indent (+ (visual-offset contains)
                                    (procedure-indent)))]
                     [(special-check)
-		     ;; In case of "define", etc., ignore the position of last 
+                     ;; In case of "define", etc., ignore the position of last 
 		     ;;  and just indent under the "define"
                      (do-indent (add1 (visual-offset contains)))]
                     [(= contain-para last-para)
 		     ;; So far, the S-exp containing "pos" was all on
 		     ;;  one line (possibly not counting the opening paren),
 		     ;;  so indent to follow the first S-exp's end
+                     ;;  unless there are just two sexps and the second is an ellipsis.
+                     ;;  in that case, we just ignore the ellipsis
                      (let ([name-length (let ([id-end (get-forward-sexp contains)])
 					  (if id-end
 					      (- id-end contains)
 					      0))])
-                       (do-indent (+ (visual-offset contains)
-                                     name-length
-                                     (indent-first-arg (+ contains 
-                                                          name-length)))))]
+                       (if (second-sexp-is-ellipsis? contains)
+                           (do-indent (visual-offset contains))
+                           (do-indent (+ (visual-offset contains)
+                                         name-length
+                                         (indent-first-arg (+ contains 
+                                                              name-length))))))]
                     [else
-		     ;; No particular special case, so indent to match first 
+                     ;; No particular special case, so indent to match first 
 		     ;; S-expr that start on the previous line
 		     (let loop ([last last][last-para last-para])
 		       (let* ([next-to-last (backward-match last limit)]
@@ -559,6 +590,22 @@
 			 (if (equal? last-para next-to-last-para)
 			     (loop next-to-last next-to-last-para)
 			     (do-indent (visual-offset last)))))])))))
+          
+          ;; returns #t if `contains' is at a position on a line with an sexp, an ellipsis and nothing else.
+          ;; otherwise, returns #f
+          (define/private (second-sexp-is-ellipsis? contains)
+            (let ([fst-end (get-forward-sexp contains)])
+              (and fst-end
+                   (let ([snd-end (get-forward-sexp fst-end)])
+                     (and snd-end
+                          (let ([snd-start (get-backward-sexp snd-end)])
+                            (and snd-start
+                                 (equal? (get-text snd-start snd-end)
+                                         "...")
+                                 (let ([thrd-start (get-forward-sexp snd-end)])
+                                   (and (or (not thrd-start)
+                                            (not (= (position-paragraph thrd-start)
+                                                    (position-paragraph snd-start)))))))))))))
           
           (define/public tabify-selection
             (opt-lambda ([start-pos (get-start-position)]
@@ -742,25 +789,29 @@
               (let ([snip-pos (get-snip-position snip)])
                 (delete snip-pos (+ snip-pos 1)))
               (set-position pos pos)))
-          
-          
+
+          (define/private (stick-to-next-sexp? start-pos)
+            (let ([end-pos (forward-match start-pos (last-position))])
+              (and end-pos
+                   (member (get-text start-pos end-pos)
+                           '("'" "," ",@" "`"
+                             "#'" "#," "#`" "#,@"
+                             "#&" "#;"
+                             "#hash" "#hasheq"
+                             "#ci" "#cs")))))
+
           (define/public (get-forward-sexp start-pos) 
-            (forward-match start-pos (last-position))
-            
-            ;; the below is my first attempt to get forward/backward sexp 
-            ;;  to work properly with qutoe.
-            ;; it broke the tabber, so I took it out for now.
-            #;
-            (let ([one-forward (forward-match start-pos (last-position))])
+            ;; loop to work properly with quote, etc.
+            (let loop ([one-forward (forward-match start-pos (last-position))])
               (cond
                 [(and one-forward (not (= 0 one-forward)))
                  (let ([bw (backward-match one-forward 0)])
                    (cond
                      [(and bw 
-                           (= (- one-forward 1) bw)
-                           (member (get-character bw) '(#\, #\` #\')))
+                           (stick-to-next-sexp? bw))
                       (let ([two-forward (forward-match one-forward (last-position))])
-                        (or two-forward
+                        (if two-forward
+                            (loop two-forward)
                             one-forward))]
                      [else
                       one-forward]))]
@@ -792,7 +843,16 @@
               (if (and end-pos 
                        (or (not min-pos)
                            (end-pos . >= . min-pos)))
-                  end-pos
+                  ;; Can go backward, but check for preceding quote, unquote, etc.
+                  (let loop ([end-pos end-pos])
+                    (let ([next-end-pos (backward-match end-pos limit)])
+                      (if (and next-end-pos
+                               (or (not min-pos)
+                                   (end-pos . >= . min-pos))
+                               (stick-to-next-sexp? next-end-pos))
+                          (loop next-end-pos)
+                          end-pos)))
+                  ;; can't go backward at all:
                   #f)))
           [define flash-backward-sexp
             (λ (start-pos)
@@ -1028,25 +1088,29 @@
             (send text set-styles-fixed #t)
 	    (send text end-edit-sequence))
           
-          (super-new (get-token scheme-lexer-wrapper)
+	  (define tabify-pref (preferences:get 'framework:tabify))
+	  (preferences:add-callback
+	   'framework:tabify
+	   (lambda (k v) (set! tabify-pref v)))
+	  (define/private (scheme-lexer-wrapper in)
+	    (let-values (((lexeme type paren start end) (scheme-lexer in)))
+	      (cond
+		((and (eq? type 'symbol)
+		      (get-keyword-type lexeme tabify-pref))
+		 (values lexeme 'keyword paren start end))
+		(else
+		 (values lexeme type paren start end)))))
+
+          (super-new (get-token (lambda (in) (scheme-lexer-wrapper in)))
                      (token-sym->style short-sym->style-name)
                      (matches '((|(| |)|)
                                 (|[| |]|)
                                 (|{| |}|))))))
       
-      (define (scheme-lexer-wrapper in)
-        (let-values (((lexeme type paren start end) (scheme-lexer in)))
-          (cond
-            ((and (eq? type 'symbol)
-                  (get-keyword-type lexeme))
-             (values lexeme 'keyword paren start end))
-            (else
-             (values lexeme type paren start end)))))
-      
-      ;; get-keyword-type : string -> (union #f 'lambda 'define 'begin)
-      (define (get-keyword-type text)
-        (let* ([pref (preferences:get 'framework:tabify)]
-               [ht (car pref)]
+      ;; get-keyword-type : string (list ht regexp regexp regexp)
+      ;;                 -> (union #f 'lambda 'define 'begin)
+      (define (get-keyword-type text pref)
+        (let* ([ht (car pref)]
                [beg-reg (cadr pref)]
                [def-reg (caddr pref)]
                [lam-reg (cadddr pref)])
@@ -1530,125 +1594,134 @@
         
         main-panel)
       
-      (define (make-indenting-prefs-panel p)
-        (define get-keywords
-          (λ (hash-table)
-            (letrec ([all-keywords (hash-table-map hash-table list)]
-                     [pick-out (λ (wanted in out)
-                                 (cond
-                                   [(null? in) (sort out string<=?)]
-                                   [else (if (eq? wanted (cadr (car in))) 
-                                             (pick-out wanted (cdr in) (cons (symbol->string (car (car in))) out))
-                                             (pick-out wanted (cdr in) out))]))])
-              (values  (pick-out 'begin all-keywords null)
-                       (pick-out 'define all-keywords null)
-                       (pick-out 'lambda all-keywords null)))))
-        (define-values (begin-keywords define-keywords lambda-keywords)
-          (get-keywords (car (preferences:get 'framework:tabify))))
-        (define add-button-callback
-          (λ (keyword-type keyword-symbol list-box)
-            (λ (button command)
-              (let ([new-one
-                     (keymap:call/text-keymap-initializer
-                      (λ ()
-                        (get-text-from-user
-                         (format (string-constant enter-new-keyword) keyword-type)
-                         (format (string-constant x-keyword) keyword-type))))])
-                (when new-one
-                  (let ([parsed (with-handlers ((exn:fail:read? (λ (x) #f)))
-                                  (read (open-input-string new-one)))])
-                    (cond
-                      [(and (symbol? parsed)
-                            (hash-table-get (car (preferences:get 'framework:tabify))
-                                            parsed
-                                            (λ () #f)))
-                       (message-box (string-constant error)
-                                    (format (string-constant already-used-keyword) parsed))]
-                      [(symbol? parsed)
-                       (let ([ht (car (preferences:get 'framework:tabify))])
-                         (hash-table-put! ht parsed keyword-symbol)
-                         (update-list-boxes ht))]
-                      [else (message-box 
-                             (string-constant error)
-                             (format (string-constant expected-a-symbol) new-one))])))))))
-        (define delete-callback
-          (λ (list-box)
-            (λ (button command)
-              (let* ([selections (send list-box get-selections)]
-                     [symbols (map (λ (x) (string->symbol (send list-box get-string x))) selections)])
-                (for-each (λ (x) (send list-box delete x)) (reverse selections))
-                (let ([ht (car (preferences:get 'framework:tabify))])
-                  (for-each (λ (x) (hash-table-remove! ht x)) symbols))))))
-        (define main-panel (make-object horizontal-panel% p))
-        (define make-column
-          (λ (string symbol keywords bang-regexp)
-            (let* ([vert (make-object vertical-panel% main-panel)]
-                   [_ (make-object message% (format (string-constant x-like-keywords) string) vert)]
-                   [box (make-object list-box% #f keywords vert void '(multiple))]
-                   [button-panel (make-object horizontal-panel% vert)]
-                   [text (new text-field% 
-                              (label (string-constant indenting-prefs-extra-regexp))
-                              (callback (λ (tf evt) 
-                                          (let ([str (send tf get-value)])
-                                            (cond
-                                              [(equal? str "") 
-                                               (bang-regexp #f)]
-                                              [else
-                                               (with-handlers ([exn:fail?
-                                                                (λ (x)
-                                                                  (color-yellow (send tf get-editor)))])
-                                                 (bang-regexp (regexp str))
-                                                 (clear-color (send tf get-editor)))]))))
-                              (parent vert))]
-                   [add-button (make-object button% (string-constant add-keyword)
-                                 button-panel (add-button-callback string symbol box))]
-                   [delete-button (make-object button% (string-constant remove-keyword)
-                                    button-panel (delete-callback box))])
-              (send* button-panel 
-                (set-alignment 'center 'center)
-                (stretchable-height #f))
-              (send add-button min-width (send delete-button get-width))
-              (values box text))))
-        (define (color-yellow text)
-          (let ([sd (make-object style-delta%)])
-            (send sd set-delta-background "yellow")
-            (send text change-style sd 0 (send text last-position))))
-        (define (clear-color text)
-          (let ([sd (make-object style-delta%)])
-            (send sd set-delta-background "white")
-            (send text change-style sd 0 (send text last-position))))
-        (define-values (begin-list-box begin-regexp-text) 
-          (make-column "Begin"
-                       'begin
-                       begin-keywords
-                       (λ (x) (set-car! (cdr (preferences:get 'framework:tabify)) x))))
-        (define-values (define-list-box define-regexp-text) 
-          (make-column "Define" 
-                       'define 
-                       define-keywords
-                       (λ (x) (set-car! (cddr (preferences:get 'framework:tabify)) x))))
-        (define-values (lambda-list-box lambda-regexp-text)
-          (make-column "Lambda"
-                       'lambda
-                       lambda-keywords
-                       (λ (x) (set-car! (cdddr (preferences:get 'framework:tabify)) x))))
-        (define update-list-boxes
-          (λ (hash-table)
-            (let-values ([(begin-keywords define-keywords lambda-keywords) (get-keywords hash-table)]
-                         [(reset) (λ (list-box keywords)
-                                    (send list-box clear)
-                                    (for-each (λ (x) (send list-box append x)) keywords))])
-              (reset begin-list-box begin-keywords)
-              (reset define-list-box define-keywords)
-              (reset lambda-list-box lambda-keywords)
-              #t)))
-        (define update-gui
-          (λ (pref)
-            (update-list-boxes (car pref))
-            (send begin-regexp-text set-value (or (object-name (cadr pref)) ""))
-            (send define-regexp-text set-value (or (object-name (caddr pref)) ""))
-            (send lambda-regexp-text set-value (or (object-name (cadddr pref)) ""))))
-        (preferences:add-callback 'framework:tabify (λ (p v) (update-gui v)))
-        main-panel)
+  (define (make-indenting-prefs-panel p)
+    (define get-keywords
+      (λ (hash-table)
+        (letrec ([all-keywords (hash-table-map hash-table list)]
+                 [pick-out (λ (wanted in out)
+                             (cond
+                               [(null? in) (sort out string<=?)]
+                               [else (if (eq? wanted (cadr (car in))) 
+                                         (pick-out wanted (cdr in) (cons (symbol->string (car (car in))) out))
+                                         (pick-out wanted (cdr in) out))]))])
+          (values  (pick-out 'begin all-keywords null)
+                   (pick-out 'define all-keywords null)
+                   (pick-out 'lambda all-keywords null)))))
+    (define-values (begin-keywords define-keywords lambda-keywords)
+      (get-keywords (car (preferences:get 'framework:tabify))))
+    (define add-button-callback
+      (λ (keyword-type keyword-symbol list-box)
+        (λ (button command)
+          (let ([new-one
+                 (keymap:call/text-keymap-initializer
+                  (λ ()
+                    (get-text-from-user
+                     (format (string-constant enter-new-keyword) keyword-type)
+                     (format (string-constant x-keyword) keyword-type))))])
+            (when new-one
+              (let ([parsed (with-handlers ((exn:fail:read? (λ (x) #f)))
+                              (read (open-input-string new-one)))])
+                (cond
+                  [(and (symbol? parsed)
+                        (hash-table-get (car (preferences:get 'framework:tabify))
+                                        parsed
+                                        (λ () #f)))
+                   (message-box (string-constant error)
+                                (format (string-constant already-used-keyword) parsed))]
+                  [(symbol? parsed)
+                   (let* ([pref (preferences:get 'framework:tabify)]
+                          [ht (car pref)])
+                     (hash-table-put! ht parsed keyword-symbol)
+                     (preferences:set 'framework:tabify pref)
+                     (update-list-boxes ht))]
+                  [else (message-box 
+                         (string-constant error)
+                         (format (string-constant expected-a-symbol) new-one))])))))))
+    (define delete-callback
+      (λ (list-box)
+        (λ (button command)
+          (let* ([selections (send list-box get-selections)]
+                 [symbols (map (λ (x) (string->symbol (send list-box get-string x))) selections)])
+            (for-each (λ (x) (send list-box delete x)) (reverse selections))
+            (let* ([pref (preferences:get 'framework:tabify)]
+                   [ht (car pref)])
+              (for-each (λ (x) (hash-table-remove! ht x)) symbols)
+              (preferences:set 'framework:tabify pref))))))
+    (define main-panel (make-object horizontal-panel% p))
+    (define make-column
+      (λ (string symbol keywords bang-regexp)
+        (let* ([vert (make-object vertical-panel% main-panel)]
+               [_ (make-object message% (format (string-constant x-like-keywords) string) vert)]
+               [box (make-object list-box% #f keywords vert void '(multiple))]
+               [button-panel (make-object horizontal-panel% vert)]
+               [text (new text-field% 
+                          (label (string-constant indenting-prefs-extra-regexp))
+                          (callback (λ (tf evt) 
+                                      (let ([str (send tf get-value)])
+                                        (cond
+                                          [(equal? str "") 
+                                           (bang-regexp #f)]
+                                          [else
+                                           (with-handlers ([exn:fail?
+                                                            (λ (x)
+                                                              (color-yellow (send tf get-editor)))])
+                                             (bang-regexp (regexp str))
+                                             (clear-color (send tf get-editor)))]))))
+                          (parent vert))]
+               [add-button (make-object button% (string-constant add-keyword)
+                             button-panel (add-button-callback string symbol box))]
+               [delete-button (make-object button% (string-constant remove-keyword)
+                                button-panel (delete-callback box))])
+          (send* button-panel 
+            (set-alignment 'center 'center)
+            (stretchable-height #f))
+          (send add-button min-width (send delete-button get-width))
+          (values box text))))
+    (define (color-yellow text)
+      (let ([sd (make-object style-delta%)])
+        (send sd set-delta-background "yellow")
+        (send text change-style sd 0 (send text last-position))))
+    (define (clear-color text)
+      (let ([sd (make-object style-delta%)])
+        (send sd set-delta-background "white")
+        (send text change-style sd 0 (send text last-position))))
+    (define (update-pref sel x)
+      (let ([pref (preferences:get 'framework:tabify)])
+        (set-car! (sel pref) x)
+        (preferences:set 'framework:tabify pref)))
+    (define-values (begin-list-box begin-regexp-text) 
+      (make-column "Begin"
+                   'begin
+                   begin-keywords
+                   (λ (x) (update-pref cdr x))))
+    (define-values (define-list-box define-regexp-text) 
+      (make-column "Define" 
+                   'define 
+                   define-keywords
+                   (λ (x) (update-pref cddr x))))
+    (define-values (lambda-list-box lambda-regexp-text)
+      (make-column "Lambda"
+                   'lambda
+                   lambda-keywords
+                   (λ (x) (update-pref cdddr x))))
+    (define update-list-boxes
+      (λ (hash-table)
+        (let-values ([(begin-keywords define-keywords lambda-keywords) (get-keywords hash-table)]
+                     [(reset) (λ (list-box keywords)
+                                (send list-box clear)
+                                (for-each (λ (x) (send list-box append x)) keywords))])
+          (reset begin-list-box begin-keywords)
+          (reset define-list-box define-keywords)
+          (reset lambda-list-box lambda-keywords)
+          #t)))
+    (define update-gui
+      (λ (pref)
+        (update-list-boxes (car pref))
+        (send begin-regexp-text set-value (or (object-name (cadr pref)) ""))
+        (send define-regexp-text set-value (or (object-name (caddr pref)) ""))
+        (send lambda-regexp-text set-value (or (object-name (cadddr pref)) ""))))
+    (preferences:add-callback 'framework:tabify (λ (p v) (update-gui v)))
+    main-panel)
       
-      )))
+      )
+

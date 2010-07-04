@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	
- * Copyright:	(c) 2004-2006 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2007 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -67,6 +67,7 @@ class wxFrame: public wxbFrame
   virtual Bool Iconized(void);
   // Windos 3.x maximize/restore
   virtual void Maximize(Bool maximize);
+  virtual Bool IsMaximized();
 
   void PositionStatusWindow(void);
   HMENU GetWinMenu(void);

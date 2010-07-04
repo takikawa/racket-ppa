@@ -4,10 +4,10 @@
 
 ; "aâàbcçdeéêèëfghiîïjklmnoôpqrstuûùüvwxyz" "AÂÀBCÇDEÉÊÈËFGHIÎÏJKLMNOÔPQRSTUÛÙÜVWXYZ"
 
-; Note: http://www.linux-france.org/prj/jargonf/ peut etre utile... Les dictionnaires online
-; anglais->francais sont tres pauvres en ce qui concerne le jargon technique, et l'academie
-; francaise (http://www-rocq.inria.fr/qui/Philippe.Deschamp/RETIF/) a quelques longueures de
-; retard. http://www-03.ibm.com/ondemand/ca/fr/dictionary/dictionnaire_u.html peut aider aussi...
+; Note: http://www.jargonf.org/ (ex http://www.linux-france.org/prj/jargonf/) peut etre utile...
+; Les dictionnaires online anglais->francais sont tres pauvres en ce qui concerne le jargon technique,
+; et l'academie francaise (http://www-rocq.inria.fr/qui/Philippe.Deschamp/RETIF/) a quelques longueures
+; de retard. http://www-03.ibm.com/ondemand/ca/fr/dictionary/dictionnaire_u.html peut aider aussi...
 ; http://www.dicofr.com/ permet les recherches a partir du mot anglais.
 ; http://www.francophonie.hachette-livre.fr/ est un dico standard de base
 ; http://zeus.inalf.fr/academie9.htm est le dico de l'academie (A-M pour l'instant seulement)
@@ -196,8 +196,10 @@
 
   ;;; info bar at botttom of drscheme frame
   (collect-button-label "Ramassage") ; de miettes
-  (read-only "Lecture seulement")
-  (read/write "Lecture/écriture")
+  (read-only-line1 "Lecture")
+  (read-only-line2 "seulement")
+  (read/write-line1 "Lecture/")
+  (read/write-line2 "écriture")
   (auto-extend-selection "Autosélection") ; "Sélection auto-étendable" ?
   (overwrite "Correction") ; vs Insertion ? surimpression ?
   (running "en cours")
@@ -380,7 +382,11 @@
   ;;; preferences
   (preferences "Préférences")
   (error-saving-preferences "Erreur durant la sauvegarde des préférences : ~a.")
+  (error-saving-preferences-title "Erreur durant la sauvegarde des préférences")
   (error-reading-preferences "Erreur durant la lecture des préférences.")
+  (prefs-file-locked "Le fichier de préférences est verrouillé (car le fichier ~a existe), donc vos préférences n'ont pu être sauvegardées.  Annuler le changement des préférences ?")
+  (try-again "Essayer à nouveau") ;; button label
+  (prefs-file-still-locked "Le fichier de préférences est toujours verrouillé (car le fichier ~a existe), donc vos changements ne vont pas être sauvegardés.")
   (scheme-prefs-panel-label "Scheme")
   (warnings-prefs-panel-label "Avertissements")
   (editor-prefs-panel-label "Edition")
@@ -410,11 +416,16 @@
   (online-coloring-active "Colorier la syntaxe interactivement")
   (open-files-in-tabs "Ouvrir les fichiers dans de nouveaux onglets (pas dans de nouvelles fenêtres)")
   (show-interactions-on-execute "Automatiquement montrer la fenêtre d'interaction lors de l'exécution d'un programme")
+  (switch-to-module-language-automatically "Automatiquement utiliser le langage \"module\" lors de l'ouverture d'un fichier contenant un module")
   (limit-interactions-size "Limiter la taille de la fenêtre d'interaction")
   (background-color "Couleur d'arrière-plan")
   (default-text-color "Couleur du texte") ;; used for configuring colors, but doesn't need the word "color"
   (choose-a-background-color "Sélectionnez une couleur d'avant-plan")
+  (revert-to-defaults "Retour aux valeurs par défaut")
   
+  (black-on-white-color-scheme "Noir sur blanc") ;; these two appear in the color preferences dialog on butttons
+  (white-on-black-color-scheme "Blanc sur noir") ;; clicking the buttons changes teh color schemes to some defaults that've been set up.
+
   ; title of the color choosing dialog
   
   ; should have entire alphabet
@@ -466,6 +477,12 @@
   (already-used-keyword "\"~a\" est déjà un mot clef avec une indentation spéciale.")
   (add-keyword "Ajouter")
   (remove-keyword "Enlever")
+  
+  ; repl color preferences
+  (repl-colors "REPL")
+  (repl-out-color "Sorties")
+  (repl-value-color "Valeurs")
+  (repl-error-color "Erreurs")
   
   ;;; find/replace
   (find-and-replace "Chercher et remplacer")
@@ -554,7 +571,7 @@
   ;;; more information is required from the user before completing
   ;;; the command.
   
-  (file-menu-label "Fichier")
+  (file-menu-label "&Fichier")
 
   (new-info  "Ouvrir un nouveau fichier.")
   (new-menu-item "&Nouvelle fenêtre")
@@ -579,8 +596,11 @@
   (print-info "Envoyer ce fichier à une imprimante.")
   (print-menu-item "&Imprimer...")
   
+  (page-setup-info "Configurer les paramètres d'impression")
+  (page-setup-menu-item "Paramètres d'impression...")
+
   (close-info "Fermer ce fichier.")
-  (close-menu-item "&Fermer")
+  (close-menu-item "Fermer")
   
   (quit-info "Fermer toutes les fenêtres.")
   (quit-menu-item-windows "&Quitter")
@@ -650,6 +670,8 @@
   (wrap-text-item "Replier le texte")
   
   (windows-menu-label "Fe&nêtres")
+  (minimize "Minimiser") ;; minimize and zoom are only used under mac os x
+  (zoom "Agrandir") ; Zoomer?
   (bring-frame-to-front "Amener une fenêtre au premier plan")       ;;; title of dialog
   (bring-frame-to-front... "Amener une fenêtre au premier plan...") ;;; corresponding title of menu item
   (most-recent-window "Fenêtre la plus récente")
@@ -793,6 +815,12 @@
   (break-menu-item-help-string "Stopper l'exécution.")
   (kill-menu-item-label "Tuer")
   (kill-menu-item-help-string "Tuer l'exécution.")
+  (limit-memory-menu-item-label "Limiter la mémoire...")
+  (limit-memory-msg-1 "La limite prendra effet à la prochaine exécution du programme.")
+  (limit-memory-msg-2 "Elle doit être d'au moins 100 megaoctets.")
+  (limit-memory-unlimited "Illimitée")
+  (limit-memory-limited "Limitée")
+  (limit-memory-megabytes "Megaoctets")
   (clear-error-highlight-menu-item-label "Effacer le surlignage d'erreur")
   (clear-error-highlight-item-help-string "Efface le surlignage rose après une erreur")
   (reindent-menu-item-label "&Réindenter")
@@ -883,6 +911,13 @@
   (drscheme-teachpack-message-title "DrScheme teachpack")
   (already-added-teachpack "Le teachpack ~a a déjà été ajouté.")
   
+  ; ~a is filled with the teachpack's name; the message appears in the teachpack selection dialog when a user installs a new teachpack
+  (compiling-teachpack "Compilation du teachpack ~a...")
+  (teachpack-pre-installed "Teachpacks préinstallés")
+  (teachpack-user-installed "Teachpacks installés par l'utilisateur")
+  (install-teachpack... "Installer le teachpack...")
+  (teachpack-already-installed "Un teachpack nommé '~a' a déjà été installé.  Voulez-vous l'écraser ?")
+  
   ;;; Language dialog
   (introduction-to-language-dialog
    "Veuillez sélectionner un langage. Un étudiant dans un cours d'introduction préférera le langage par défaut.")
@@ -898,6 +933,8 @@
   (input-syntax "Syntaxe d'entrée")
   (dynamic-properties "Propriétés dynamiques")
   (output-syntax "Syntaxe de sortie")
+  (teachpacks "Teachpacks") ;; label in the language dialog for the teaching languages
+  (teachpacks-none "<< aucun >>") ;; shows up under the previous string, when there are no teachpacks
   (no-debugging-or-profiling "Pas de débogage ou profilage") ; Profilage. Eurk...
   (debugging "Débogage")
   (debugging-and-profiling "Débogage et profilage")
@@ -911,6 +948,15 @@
   (use-repeating-decimals "Décimales répétitives")
   (decimal-notation-for-rationals "Utiliser la notation décimale pour les nombres rationnels")
 
+  ; used in the bottom left of the drscheme frame as the label
+  ; above the programming language's name
+  (programming-language-label "Langage de programmation :")
+  ; used the popup menu from the just above; greyed out and only
+  ; visible when some languages are in the history
+  (recent-languages "Langages récents :")
+  ; shows up in bottom-left programming language menu popup, when no langs are recorded
+  (no-recently-chosen-languages "pas de langage récent") 
+  
   ;; startup wizard screen language selection section
   (please-select-a-language "Veuillez sélectionner un langage")
   
@@ -950,6 +996,7 @@
   
   ; next two are before and after a language
   (start-with-before "Commencer avec ")
+  (start-with-after "")
 
   (seasoned-plt-schemer? "Programmeur PLT Scheme chevronné ?")
   (looking-for-standard-scheme? "À la recherche d'un langage Scheme standard ?")
@@ -1010,7 +1057,15 @@
   ;;; repl stuff
   (evaluation-terminated "Evaluation terminée.")
   (evaluation-terminated-explanation
-   "Le thread d'évaluation n'est plus en exécution, toute évaluation est donc impossible jusqu'à la prochaine exécution.")
+   "Le tâche d'évaluation n'est plus en exécution, toute évaluation est donc impossible jusqu'à la prochaine exécution.")
+  
+  ; The next three constants show up in the same dialog as the above evaluation-terminated string
+  ; constants.
+  ; The first two show up only when the user calls 'exit' (possibly with a status code).
+  ; The third shows up when the program runs out of memory.
+  (exited-successfully "Evaluation terminée avec succès.")
+  (exited-with-error-code "Evaluation terminée avec le code d'erreur ~a.") ;; ~a is filled in with a number between 1 and 255
+  (program-ran-out-of-memory "Le programme est à cours de mémoire.")
   (last-stack-frame "Montrer le dernier appel de fonction sur la pile.")
   (last-stack-frames "Montrer les derniers ~a appels de fonction sur la pile.")
   (next-stack-frames "Montrer les ~a appels de fonction suivants sur la pile.")
@@ -1124,15 +1179,16 @@
   (stepper-program-has-changed "Avertissement : le programme a été modifié.")
   (stepper-program-window-closed "Avertissement : la fenêtre du programme a disparu.")
   
-  (stepper-home "Début") ; Accueil?
   (stepper-name "Pas à Pas")
   (stepper-language-level-message
    "Le langage actuellement utilisé est \"~a\". Le Pas à Pas ne fonctionne pour l'instant que pour les langages de \"~a\" à \"~a\"")
   (stepper-button-label "Pas")
+  (stepper-home "Début")
   (stepper-previous-application "|< Application")
   (stepper-previous "< Pas")
   (stepper-next "Pas >")
   (stepper-next-application "Application >|")
+  (stepper-jump-to-end "Fin")
   
   (debug-tool-button-name "Déboguer")
   
@@ -1145,7 +1201,7 @@
   
   ;; ml-command-line-arguments is for the command line arguments
   ;; label in the module language details in the language dialog.
-  (ml-command-line-arguments "Arguments de ligne de commande, sous forme d'un vecteur de chaînes de caractères (syntaxe de read)")
+  (ml-command-line-arguments "Arguments de ligne de commande (vecteur de chaînes de caractères, syntaxe de \"read\")")
 
   ;; ml-cp names are all for the module language collection path
   ;; configuration. See the details portion of the language dialog
@@ -1174,6 +1230,17 @@
   (profj-java "Java")
   (profj-java-mode "mode Java")
   
+  (profj-beginner-lang "Débutant")
+  (profj-beginner-lang-one-line-summary "Langage Java restreint pour l'enseignement des etudiants niveau débutant")
+  (profj-full-lang "Complet")
+  (profj-full-lang-one-line-summary "Java 1.0 (et partiellement 1.1)")
+  (profj-advanced-lang "Avancé")
+  (profj-advanced-lang-one-line-summary "Langage Java restreint pour l'enseignement des etudiants niveau avancé")
+  (profj-intermediate-lang "Intermédiaire")
+  (profj-intermediate-lang-one-line-summary "Langage Java restreint pour l'enseignement des etudiants niveau intermédiaire")
+  (profj-dynamic-lang "Java + types dynamiques")
+  (profj-dynamic-lang-one-summary "Java, plus types dynamiques")
+
   (profj-java-mode-color-heading "Édition des couleurs") ; Heading for preference to choose editing colors  
   (profj-java-mode-color-keyword "mots réservés")
   (profj-java-mode-color-string "chaînes de caractères")
@@ -1189,23 +1256,41 @@
   
   (profj-language-config-display-preferences "Préférences pour l'affichage") ; Heading for preferences controlling printing
   (profj-language-config-display-style "Styles d'affichage")
-  (profj-language-config-display-field "classe et champs") ; Class should not be translated (ah oui?)
+  (profj-language-config-display-field "Classe et champs")
+  (profj-language-config-class "Classe")
   (profj-language-config-display-array "Montrer le contenu des tableaux ?")
   (profj-language-config-testing-preferences "Préférences pour les tests") ; Heading for preferences controlling test behavior
   (profj-language-config-testing-enable "Montrer le résultat des tests lors de l'exécution ?") ; Run should be the word found on the Run button
-  (profj-language-config-testing-coverage "Collecte de l'information de couvrage durant les tests ?")
+  (profj-language-config-testing-coverage "Collecter l'information de couvrage durant les tests ?")
+  (profj-language-config-support-test-language "Supporter l'extension de langage \"test\" ?")
   (profj-language-config-testing-check "Permettre les expressions de type \"check\" ?") ; check should not be translated
+  (profj-language-config-classpath "Chemin d'accès aux classes")
+  (profj-language-config-choose-classpath-directory "Choisissez le répertoire à ajouter au chemin d'accès aux classes")
   (profj-language-config-classpath-display "Montrer la valeur actuelle") ; Button label to print the current classpath
 
+  (profj-test-name-close-to-example "Le nom de classe ~a contient un mot qui ressemble au mot \"Example\".")
+  (profj-test-name-example-miscapitalized "Le mot \"example\" dans le nom de classe ~a doit être écrit \"Example\".")
+  
   ;; Close testing window and do not run test cases any more
   (profj-test-results-close-and-disable "Fermer la fenêtre et arrêter l'exécution des tests")
   ;; Hide docked testing window and do not run test cases any more
   (profj-test-results-hide-and-disable "Cacher la fenêtre et arrêter l'exécution des tests")
   (profj-test-results-window-title "Résultats des tests")
 
+  (profj-unsupported "Non-supporté")
+  (profj-executables-unsupported "Désolé - la création d'exécutables n'est pour l'instant pas supportée pour Java")
+
+  (profj-convert-to-text-comment "Convertir en commentaire texte")
+  (profj-convert-to-comment "Convertir en commentaire")
+
+  (profj-executing-main "exécution de \"main\"")
+
   (profj-insert-java-comment-box "Insérer une boite à commentaires Java")
   (profj-insert-java-interactions-box "Insérer une boite à interactions Java")
   
+  (profjWizward-insert-java-class "Insérer une classe Java")
+  (profjWizard-insert-java-union "Insérer un union Java")
+
   ;; The Test Suite Tool
   ;; Errors
   (test-case-empty-error "Test vide")

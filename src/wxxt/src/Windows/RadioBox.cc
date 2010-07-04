@@ -4,7 +4,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2006 PLT Scheme Inc.
+ * Copyright: (C) 2004-2007 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -20,7 +20,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301 USA.
  */
 
 #ifdef __GNUG__
@@ -142,8 +143,8 @@ Bool wxRadioBox::Create(wxPanel *panel, wxFunction func, char *label,
 				  NULL);
     X->handle = wgt;
     // create the toggles
-    toggles = new long[num_toggles];
-    enabled = new Bool[num_toggles];
+    toggles = new WXGC_ATOMIC long[num_toggles];
+    enabled = new WXGC_ATOMIC Bool[num_toggles];
     for (i=0; i < num_toggles; ++i) {
 	char num_name[10]; 
 	char *tlabel;
@@ -271,8 +272,8 @@ Bool wxRadioBox::Create(wxPanel *panel, wxFunction func, char *label,
 				  NULL);
     X->handle = wgt;
     // create the toggles
-    toggles = new long[num_toggles];
-    enabled = new Bool[num_toggles];
+    toggles = new WXGC_ATOMIC long[num_toggles];
+    enabled = new WXGC_ATOMIC Bool[num_toggles];
 #ifdef MZ_PRECISE_GC
     {
       wxBitmap **ba;
@@ -282,8 +283,8 @@ Bool wxRadioBox::Create(wxPanel *panel, wxFunction func, char *label,
       bm_label_masks = ba;
     }
 #else
-    bm_labels = new wxBitmap*[num_toggles];
-    bm_label_masks = new wxBitmap*[num_toggles];
+    bm_labels = new WXGC_PTRS wxBitmap*[num_toggles];
+    bm_label_masks = new WXGC_PTRS wxBitmap*[num_toggles];
 #endif
     for (i=0; i < num_toggles; ++i) {
 	char num_name[10];

@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
  
     This library is free software; you can redistribute it and/or
@@ -15,7 +15,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 */
 
 /* This file implements MzScheme threads.
@@ -23,7 +24,7 @@
    Usually, MzScheme threads are implemented by copying the stack.
    The scheme_thread_block() function is called occassionally by the
    evaluator so that the current thread can be swapped out.
-   scheme_swap_thread() performs the actual swap. Threads can also be
+   do_swap_thread() performs the actual swap. Threads can also be
    implemented by the OS; the bottom part of this file contains
    OS-specific thread code.
 
@@ -174,10 +175,25 @@ MZ_MARK_POS_TYPE scheme_current_cont_mark_pos;
 
 static Scheme_Custodian *main_custodian;
 static Scheme_Custodian *last_custodian;
+static Scheme_Hash_Table *limited_custodians = NULL;
+
+#ifndef MZ_PRECISE_GC
+static int cust_box_count, cust_box_alloc;
+static Scheme_Custodian_Box **cust_boxes;
+# ifndef USE_SENORA_GC
+extern int GC_is_marked(void *);
+# endif
+#endif
+
+/* On swap, put target in a static variable, instead of on the stack,
+   so that the swapped-out thread is less likely to have a pointer
+   to the target thread. */
+static Scheme_Thread *swap_target;
 
 static Scheme_Object *scheduled_kills;
 
 Scheme_Object *scheme_parameterization_key;
+Scheme_Object *scheme_exn_handler_key;
 Scheme_Object *scheme_break_enabled_key;
 
 long scheme_total_gc_time;
@@ -241,6 +257,25 @@ static int recycle_cc_count;
 static mz_jmp_buf main_init_error_buf;
 	
 #ifdef MZ_PRECISE_GC
+/* This is a trick to get the types right. Note that 
+   the layout of the weak box is defined by the
+   GC spec. */
+typedef struct {
+  short type;
+  short hash_key;
+  Scheme_Custodian *val;
+} Scheme_Custodian_Weak_Box;
+
+# define MALLOC_MREF() (Scheme_Custodian_Reference *)scheme_make_weak_box(NULL)
+# define CUSTODIAN_FAM(x) ((Scheme_Custodian_Weak_Box *)x)->val
+# define xCUSTODIAN_FAM(x) SCHEME_BOX_VAL(x)
+#else
+# define MALLOC_MREF() MALLOC_ONE_WEAK(Scheme_Custodian_Reference)
+# define CUSTODIAN_FAM(x) (*(x))
+# define xCUSTODIAN_FAM(x) (*(x))
+#endif
+
+#ifdef MZ_PRECISE_GC
 static void register_traversers(void);
 #endif
 
@@ -248,6 +283,7 @@ static void prepare_this_thread_for_GC(Scheme_Thread *t);
 
 static Scheme_Object *custodian_require_mem(int argc, Scheme_Object *args[]);
 static Scheme_Object *custodian_limit_mem(int argc, Scheme_Object *args[]);
+static Scheme_Object *custodian_can_mem(int argc, Scheme_Object *args[]);
 static Scheme_Object *new_tracking_fun(int argc, Scheme_Object *args[]);
 static Scheme_Object *union_tracking_val(int argc, Scheme_Object *args[]);
 
@@ -283,6 +319,9 @@ static Scheme_Object *custodian_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *custodian_close_all(int argc, Scheme_Object *argv[]);
 static Scheme_Object *custodian_to_list(int argc, Scheme_Object *argv[]);
 static Scheme_Object *current_custodian(int argc, Scheme_Object *argv[]);
+static Scheme_Object *make_custodian_box(int argc, Scheme_Object *argv[]);
+static Scheme_Object *custodian_box_value(int argc, Scheme_Object *argv[]);
+static Scheme_Object *custodian_box_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *call_as_nested_thread(int argc, Scheme_Object *argv[]);
 
 static Scheme_Object *current_namespace(int argc, Scheme_Object *args[]);
@@ -336,6 +375,8 @@ static int resume_suspend_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo);
 static int dead_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo);
 
 static int can_break_param(Scheme_Thread *p);
+
+static int post_system_idle();
 
 static Scheme_Object *current_stats(int argc, Scheme_Object *args[]);
 
@@ -528,6 +569,21 @@ void scheme_init_thread(Scheme_Env *env)
 						       "current-custodian",
 						       MZCONFIG_CUSTODIAN),
 			     env);
+  scheme_add_global_constant("make-custodian-box",
+			     scheme_make_prim_w_arity(make_custodian_box,
+						      "make-custodian-box",
+						      2, 2),
+			     env);
+  scheme_add_global_constant("custodian-box-value",
+			     scheme_make_prim_w_arity(custodian_box_value,
+						      "custodian-box-value",
+						      1, 1),
+			     env);
+  scheme_add_global_constant("custodian-box?",
+			     scheme_make_folding_prim(custodian_box_p,
+                                                      "custodian-box?",
+                                                      1, 1, 1),
+			     env);
   scheme_add_global_constant("call-in-nested-thread",
 			     scheme_make_prim_w_arity(call_as_nested_thread,
 						      "call-in-nested-thread",
@@ -669,12 +725,17 @@ void scheme_init_thread(Scheme_Env *env)
   scheme_add_global_constant("custodian-require-memory",
 			     scheme_make_prim_w_arity(custodian_require_mem,
 						      "custodian-require-memory",
-						      2, 2),
+						      3, 3),
 			     env);
   scheme_add_global_constant("custodian-limit-memory",
 			     scheme_make_prim_w_arity(custodian_limit_mem,
 						      "custodian-limit-memory",
-						      3, 3),
+						      2, 3),
+			     env);
+  scheme_add_global_constant("custodian-memory-accounting-available?",
+                             scheme_make_prim_w_arity(custodian_can_mem,
+                                                      "custodian-memory-accounting-available?",
+						      0, 0),
 			     env);
   
 
@@ -754,8 +815,10 @@ void scheme_init_parameterization(Scheme_Env *env)
   Scheme_Object *v;
   Scheme_Env *newenv;
 
+  REGISTER_SO(scheme_exn_handler_key);
   REGISTER_SO(scheme_parameterization_key);
   REGISTER_SO(scheme_break_enabled_key);
+  scheme_exn_handler_key = scheme_make_symbol("exnh");
   scheme_parameterization_key = scheme_make_symbol("paramz");
   scheme_break_enabled_key = scheme_make_symbol("break-on?");
   
@@ -765,6 +828,9 @@ void scheme_init_parameterization(Scheme_Env *env)
   v = scheme_intern_symbol("#%paramz");
   newenv = scheme_primitive_module(v, env);
   
+  scheme_add_global_constant("exception-handler-key", 
+			     scheme_exn_handler_key,
+			     newenv);
   scheme_add_global_constant("parameterization-key", 
 			     scheme_parameterization_key,
 			     newenv);
@@ -786,6 +852,7 @@ void scheme_init_parameterization(Scheme_Env *env)
 
 
   scheme_finish_primitive_module(newenv);
+  scheme_protect_primitive_provide(newenv, NULL);
 }
 
 static Scheme_Object *collect_garbage(int c, Scheme_Object *p[])
@@ -829,23 +896,45 @@ static Scheme_Object *current_memory_use(int argc, Scheme_Object *args[])
 static Scheme_Object *custodian_require_mem(int argc, Scheme_Object *args[])
 {
   long lim;
+  Scheme_Custodian *c1, *c2, *cx;
 
-  if (SCHEME_INTP(args[0]) && (SCHEME_INT_VAL(args[0]) > 0)) {
-    lim = SCHEME_INT_VAL(args[0]);
-  } else if (SCHEME_BIGNUMP(args[0]) && SCHEME_BIGPOS(args[0])) {
+  if(NOT_SAME_TYPE(SCHEME_TYPE(args[0]), scheme_custodian_type)) {
+    scheme_wrong_type("custodian-require-memory", "custodian", 0, argc, args);
+    return NULL;
+  }
+
+  if (SCHEME_INTP(args[1]) && (SCHEME_INT_VAL(args[1]) > 0)) {
+    lim = SCHEME_INT_VAL(args[1]);
+  } else if (SCHEME_BIGNUMP(args[1]) && SCHEME_BIGPOS(args[1])) {
     lim = 0x3fffffff; /* more memory than we actually have */
   } else {
-    scheme_wrong_type("custodian-require-memory", "positive exact integer", 0, argc, args);
+    scheme_wrong_type("custodian-require-memory", "positive exact integer", 1, argc, args);
     return NULL;
   }
 
-  if(NOT_SAME_TYPE(SCHEME_TYPE(args[1]), scheme_custodian_type)) {
-    scheme_wrong_type("custodian-require-memory", "custodian", 1, argc, args);
+  if(NOT_SAME_TYPE(SCHEME_TYPE(args[2]), scheme_custodian_type)) {
+    scheme_wrong_type("custodian-require-memory", "custodian", 2, argc, args);
     return NULL;
   }
 
-#ifdef MZ_PRECISE_GC
-  if (GC_set_account_hook(MZACCT_REQUIRE, NULL, lim, args[1]))
+  c1 = (Scheme_Custodian *)args[0];
+  c2 = (Scheme_Custodian *)args[2];
+
+  /* Check whether c1 is super to c2: */
+  if (c1 == c2) {
+    cx = NULL;
+  } else {
+    for (cx = c2; cx && NOT_SAME_OBJ(cx, c1); ) {
+      cx = CUSTODIAN_FAM(cx->parent);
+    }
+  }
+  if (!cx) {
+    scheme_raise_exn(MZEXN_FAIL_CONTRACT,
+                     "custodian-require-memory: second custodian is not a sub-custodian of the first custodian");
+  }
+
+#ifdef NEWGC_BTC_ACCOUNT
+  if (GC_set_account_hook(MZACCT_REQUIRE, c1, lim, c2))
     return scheme_void;
 #endif
 
@@ -869,21 +958,42 @@ static Scheme_Object *custodian_limit_mem(int argc, Scheme_Object *args[])
     lim = 0x3fffffff; /* more memory than we actually have */
   } else {
     scheme_wrong_type("custodian-limit-memory", "positive exact integer", 1, argc, args);
-  }
-
-  if(NOT_SAME_TYPE(SCHEME_TYPE(args[2]), scheme_custodian_type)) {
-    scheme_wrong_type("custodian-require-memory", "custodian", 2, argc, args);
     return NULL;
   }
 
-#ifdef MZ_PRECISE_GC
-  if (GC_set_account_hook(MZACCT_LIMIT, args[0], SCHEME_INT_VAL(args[1]), args[2]))
+  if (argc > 2) {
+    if (NOT_SAME_TYPE(SCHEME_TYPE(args[2]), scheme_custodian_type)) {
+      scheme_wrong_type("custodian-require-memory", "custodian", 2, argc, args);
+      return NULL;
+    }
+  }
+
+  if (!limited_custodians)
+    limited_custodians = scheme_make_hash_table(SCHEME_hash_ptr);
+  scheme_hash_set(limited_custodians, args[0], scheme_true);
+  ((Scheme_Custodian *)args[0])->has_limit = 1;
+  if (argc > 2) {
+    scheme_hash_set(limited_custodians, args[2], scheme_true);
+    ((Scheme_Custodian *)args[2])->has_limit = 1;
+  }
+
+#ifdef NEWGC_BTC_ACCOUNT
+  if (GC_set_account_hook(MZACCT_LIMIT, args[0], lim, (argc > 2) ? args[2] : args[0]))
     return scheme_void;
 #endif
 
   scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,
 		   "custodian-limit-memory: not supported");
   return NULL; /* doesn't get here */
+}
+
+static Scheme_Object *custodian_can_mem(int argc, Scheme_Object *args[])
+{
+#ifdef NEWGC_BTC_ACCOUNT
+  return scheme_true;
+#else
+  return scheme_false;
+#endif
 }
 
 static Scheme_Object *new_tracking_fun(int argc, Scheme_Object *args[])
@@ -971,25 +1081,6 @@ static void add_managed_box(Scheme_Custodian *m,
 
   m->count++;
 }
-
-#ifdef MZ_PRECISE_GC
-/* This is a trick to get the types right. Note that 
-   the layout of the weak box is defined by the
-   GC spec. */
-typedef struct {
-  short type;
-  short hash_key;
-  Scheme_Custodian *val;
-} Scheme_Custodian_Weak_Box;
-
-# define MALLOC_MREF() (Scheme_Custodian_Reference *)scheme_make_weak_box(NULL)
-# define CUSTODIAN_FAM(x) ((Scheme_Custodian_Weak_Box *)x)->val
-# define xCUSTODIAN_FAM(x) SCHEME_BOX_VAL(x)
-#else
-# define MALLOC_MREF() MALLOC_ONE_WEAK(Scheme_Custodian_Reference)
-# define CUSTODIAN_FAM(x) (*(x))
-# define xCUSTODIAN_FAM(x) (*(x))
-#endif
 
 static void remove_managed(Scheme_Custodian_Reference *mr, Scheme_Object *o,
 			   Scheme_Close_Custodian_Client **old_f, void **old_data)
@@ -1383,6 +1474,10 @@ Scheme_Thread *scheme_do_close_managed(Scheme_Custodian *m, Scheme_Exit_Closer_F
     /* Remove this custodian from its parent */
     adjust_custodian_family(m, m);
 
+    if (m->has_limit) {
+      scheme_hash_set(limited_custodians, (Scheme_Object *)m, NULL);
+    }
+    
     m = next_m;
   }
 
@@ -1598,6 +1693,110 @@ static Scheme_Object *current_custodian(int argc, Scheme_Object *argv[])
 			     -1, custodian_p, "custodian", 0);
 }
 
+static Scheme_Object *make_custodian_box(int argc, Scheme_Object *argv[])
+{
+  Scheme_Custodian_Box *cb;
+
+  if (!SCHEME_CUSTODIANP(argv[0]))
+    scheme_wrong_type("make-custodian-box", "custodian", 0, argc, argv);
+
+  cb = MALLOC_ONE_TAGGED(Scheme_Custodian_Box);
+  cb->so.type = scheme_cust_box_type;
+  cb->cust = (Scheme_Custodian *)argv[0];
+  cb->v = argv[1];
+
+#ifdef MZ_PRECISE_GC
+  /* 3m  */
+  {
+    Scheme_Object *wb, *pr;
+    wb = GC_malloc_weak_box(cb, NULL, 0);
+    pr = scheme_make_raw_pair(wb, cb->cust->cust_boxes);
+    cb->cust->cust_boxes = pr;
+  }
+#else
+  /* CGC */
+  if (cust_box_count >= cust_box_alloc) {
+    Scheme_Custodian_Box **cbs;
+    if (!cust_box_alloc) {
+      cust_box_alloc = 16;
+      REGISTER_SO(cust_boxes);
+    } else {
+      cust_box_alloc = 2 * cust_box_alloc;
+    }
+    cbs = (Scheme_Custodian_Box **)scheme_malloc_atomic(cust_box_alloc * sizeof(Scheme_Custodian_Box *));
+    memcpy(cbs, cust_boxes, cust_box_count * sizeof(Scheme_Custodian_Box *));
+    cust_boxes = cbs;
+  }
+  cust_boxes[cust_box_count++] = cb;
+#endif
+
+  return (Scheme_Object *)cb;
+}
+
+static Scheme_Object *custodian_box_value(int argc, Scheme_Object *argv[])
+{
+  Scheme_Custodian_Box *cb;
+
+  if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_cust_box_type))
+    scheme_wrong_type("custodian-box-value", "custodian-box", 0, argc, argv);
+
+  cb = (Scheme_Custodian_Box *)argv[0];
+  if (cb->cust->shut_down)
+    return scheme_false;
+
+  return cb->v;
+}
+
+static Scheme_Object *custodian_box_p(int argc, Scheme_Object *argv[])
+{
+  if (SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_cust_box_type))
+    return scheme_true;
+  else
+    return scheme_false;
+}
+
+#ifndef MZ_PRECISE_GC
+void scheme_clean_cust_box_list(void)
+{
+  int src = 0, dest = 0;
+  Scheme_Custodian_Box *cb;
+  void *b;
+
+  while (src < cust_box_count) {
+    cb = cust_boxes[src];
+    b = GC_base(cb);
+    if (b 
+#ifndef USE_SENORA_GC
+        && GC_is_marked(b)
+#endif
+        ) {
+      cust_boxes[dest++] = cb;
+      if (cb->v) {
+        if (cb->cust->shut_down) {
+          cb->v = NULL;
+        }
+      }
+    }
+    src++;
+  }
+  cust_box_count = dest;
+}
+
+static void shrink_cust_box_array(void)
+{
+  /* Call this function periodically to clean up. */
+  if (cust_box_alloc > 128 && (cust_box_count * 4 < cust_box_alloc)) {
+    Scheme_Custodian_Box **cbs;
+    cust_box_alloc = cust_box_count * 2;
+    cbs = (Scheme_Custodian_Box **)scheme_malloc_atomic(cust_box_alloc * sizeof(Scheme_Custodian_Box *));
+    memcpy(cbs, cust_boxes, cust_box_count * sizeof(Scheme_Custodian_Box *));
+    cust_boxes = cbs;
+  }
+}
+#else
+# define shrink_cust_box_array() /* empty */
+# define clean_cust_box_list()   /* empty */
+#endif
 
 static void run_closers(Scheme_Object *o, Scheme_Close_Custodian_Client *f, void *data)
 {
@@ -1872,6 +2071,7 @@ static Scheme_Thread *make_thread(Scheme_Config *config,
     REGISTER_SO(scheme_main_thread);
     REGISTER_SO(scheme_first_thread);
     REGISTER_SO(thread_swap_callbacks);
+    REGISTER_SO(swap_target);
 
     scheme_current_thread = process;
     scheme_first_thread = scheme_main_thread = process;
@@ -2005,7 +2205,7 @@ static Scheme_Thread *make_thread(Scheme_Config *config,
     process->runstack_size = init_stack_size;
     {
       Scheme_Object **sa;
-      sa = scheme_malloc_allow_interior(sizeof(Scheme_Object*) * init_stack_size);
+      sa = scheme_alloc_runstack(init_stack_size);
       process->runstack_start = sa;
     }
     process->runstack = process->runstack_start + init_stack_size;
@@ -2060,7 +2260,7 @@ static Scheme_Thread *make_thread(Scheme_Config *config,
     process->extra_mrefs = scheme_null;
 
 #ifndef MZ_PRECISE_GC
-    scheme_weak_reference((void **)&hop->p);
+    scheme_weak_reference((void **)(void *)&hop->p);
 #endif
   }
 
@@ -2130,6 +2330,48 @@ void *scheme_tls_get(int pos)
     return p->user_tls[pos];
 }
 
+#ifdef MZ_XFORM
+START_XFORM_SKIP;
+#endif
+
+Scheme_Object **scheme_alloc_runstack(long len)
+{
+#ifdef MZ_PRECISE_GC
+  long sz;
+  void **p;
+  sz = sizeof(Scheme_Object*) * (len + 4);
+  p = (void **)GC_malloc_tagged_allow_interior(sz);
+  *(Scheme_Type *)(void *)p = scheme_rt_runstack;
+  ((long *)(void *)p)[1] = gcBYTES_TO_WORDS(sz);
+  ((long *)(void *)p)[2] = 0;
+  ((long *)(void *)p)[3] = len;
+  return (Scheme_Object **)(p + 4);
+#else
+  return (Scheme_Object **)scheme_malloc_allow_interior(sizeof(Scheme_Object*) * len);
+#endif
+}
+
+void scheme_set_runstack_limits(Scheme_Object **rs, long len, long start, long end)
+/* With 3m, we can tell the GC not to scan the unused parts, and we
+   can have the fixup function zero out the unused parts; that avoids
+   writing and scanning pages that could be skipped for a minor
+   GC. For CGC, we have to just clear out the unused part. */
+{
+#ifdef MZ_PRECISE_GC
+  if (((long *)(void *)rs)[-2] != start)
+    ((long *)(void *)rs)[-2] = start;
+  if (((long *)(void *)rs)[-1] != end)
+    ((long *)(void *)rs)[-1] = end;
+#else
+  memset(rs, 0, start * sizeof(Scheme_Object *));
+  memset(rs + end, 0, (len - end) * sizeof(Scheme_Object *));
+#endif
+}
+
+#ifdef MZ_XFORM
+END_XFORM_SKIP;
+#endif
+
 /*========================================================================*/
 /*                     thread creation and swapping                       */
 /*========================================================================*/
@@ -2139,7 +2381,7 @@ int scheme_in_main_thread(void)
   return !scheme_current_thread->next;
 }
 
-void scheme_swap_thread(Scheme_Thread *new_thread)
+static void do_swap_thread()
 {
   scheme_zero_unneeded_rands(scheme_current_thread);
 
@@ -2181,6 +2423,8 @@ void scheme_swap_thread(Scheme_Thread *new_thread)
       scheme_takeover_stacks(scheme_current_thread);
     }
   } else {
+    Scheme_Thread *new_thread = swap_target;
+
     swap_no_setjmp = 0;
 
     /* We're leaving... */
@@ -2211,6 +2455,13 @@ void scheme_swap_thread(Scheme_Thread *new_thread)
 
     LONGJMP(scheme_current_thread);
   }
+}
+
+void scheme_swap_thread(Scheme_Thread *new_thread)
+{
+  swap_target = new_thread;
+  new_thread = NULL;
+  do_swap_thread();
 }
 
 static void select_thread()
@@ -2259,11 +2510,15 @@ static void select_thread()
       }
       if ((new_thread->running & MZTHREAD_USER_SUSPENDED)
 	  && !(new_thread->running & MZTHREAD_NEED_SUSPEND_CLEANUP)) {
-	scheme_console_printf("unbreakable deadlock\n");
-	if (scheme_exit)
-	  scheme_exit(1);
-	/* We really have to exit: */
-	exit(1);
+        if (post_system_idle()) {
+          /* Aha! Someone was waiting for us to do nothing. Try again... */
+        } else {
+          scheme_console_printf("unbreakable deadlock\n");
+          if (scheme_exit)
+            scheme_exit(1);
+          /* We really have to exit: */
+          exit(1);
+        }
       } else {
 	scheme_weak_resume_thread(new_thread);
       }
@@ -2272,7 +2527,11 @@ static void select_thread()
     o = NULL;
   } while (!new_thread);
 
-  scheme_swap_thread(new_thread);
+  swap_target = new_thread;
+  new_thread = NULL;
+  o = NULL;
+  t_set = NULL;
+  do_swap_thread();
 }
 
 static void thread_is_dead(Scheme_Thread *r)
@@ -2339,10 +2598,12 @@ static void remove_thread(Scheme_Thread *r)
   if (r->runstack_owner) {
     /* Drop ownership, if active, and clear the stack */
     if (r == *(r->runstack_owner)) {
-      memset(r->runstack_start, 0, r->runstack_size * sizeof(Scheme_Object*));
-      r->runstack_start = NULL;
+      if (r->runstack_start) {
+        scheme_set_runstack_limits(r->runstack_start, r->runstack_size, 0, 0);
+        r->runstack_start = NULL;
+      }
       for (saved = r->runstack_saved; saved; saved = saved->prev) {
-	memset(saved->runstack_start, 0, saved->runstack_size * sizeof(Scheme_Object*));
+        scheme_set_runstack_limits(saved->runstack_start, saved->runstack_size, 0, 0);
       }
       r->runstack_saved = NULL;
       *(r->runstack_owner) = NULL;
@@ -2378,6 +2639,12 @@ static void remove_thread(Scheme_Thread *r)
   r->cont_mark_stack = 0;
   r->cont_mark_stack_owner = NULL;
   r->cont_mark_stack_swapped = NULL;
+
+  r->ku.apply.tail_rator = NULL;
+  r->ku.apply.tail_rands = NULL;
+  r->tail_buffer = NULL;
+  r->ku.multiple.array = NULL;
+  r->values_buffer = NULL;
 
 #ifndef SENORA_GC_NO_FREE
   if (r->list_stack)
@@ -2526,11 +2793,6 @@ static Scheme_Object *make_subprocess(Scheme_Object *child_thunk,
       maybe_recycle_cell = NULL;
   }
 
-  config = scheme_init_error_escape_proc(config);
-  config = scheme_extend_config(config, MZCONFIG_EXN_HANDLER,
-				scheme_get_thread_param(config, cells,
-							MZCONFIG_INIT_EXN_HANDLER));
-  
   child = make_thread(config, cells, break_cell, mgr);
 
   /* Use child_thunk name, if any, for the thread name: */
@@ -2630,10 +2892,18 @@ static Scheme_Object *thread_dead_p(int argc, Scheme_Object *args[])
   return MZTHREAD_STILL_RUNNING(running) ? scheme_false : scheme_true;
 }
 
-static int thread_wait_done(Scheme_Object *p)
+static int thread_wait_done(Scheme_Object *p, Scheme_Schedule_Info *sinfo)
 {
   int running = ((Scheme_Thread *)p)->running;
-  return !MZTHREAD_STILL_RUNNING(running);
+  if (MZTHREAD_STILL_RUNNING(running)) {
+    /* Replace the direct thread reference with an event, so that
+       the blocking thread can be dequeued: */
+    Scheme_Object *evt;
+    evt = scheme_get_thread_dead((Scheme_Thread *)p);
+    scheme_set_sync_target(sinfo, evt, p, NULL, 0, 0);
+    return 0;
+  } else
+    return 1;
 }
 
 static Scheme_Object *thread_wait(int argc, Scheme_Object *args[])
@@ -2646,7 +2916,7 @@ static Scheme_Object *thread_wait(int argc, Scheme_Object *args[])
   p = (Scheme_Thread *)args[0];
 
   if (MZTHREAD_STILL_RUNNING(p->running)) {
-    scheme_block_until(thread_wait_done, NULL, (Scheme_Object *)p, 0);
+    sch_sync(1, args);
   }
 
   return scheme_void;
@@ -2655,8 +2925,8 @@ static Scheme_Object *thread_wait(int argc, Scheme_Object *args[])
 static void register_thread_sync()
 {
   scheme_add_evt(scheme_thread_type, 
-		  thread_wait_done, 
-		  NULL, NULL, 0);
+                 (Scheme_Ready_Fun)thread_wait_done, 
+                 NULL, NULL, 0);
 }
 
 void scheme_add_swap_callback(Scheme_Closure_Func f, Scheme_Object *data)
@@ -2884,15 +3154,6 @@ Scheme_Object *scheme_call_as_nested_thread(int argc, Scheme_Object *argv[], voi
   {
     Scheme_Config *config;
     config = scheme_current_config();
-    config = scheme_init_error_escape_proc(config);
-    if (!nested_exn_handler) {
-      REGISTER_SO(nested_exn_handler);
-      nested_exn_handler = scheme_make_prim_w_arity(def_nested_exn_handler,
-						    "nested-thread-exception-handler",
-						    1, 1);
-    }
-    config = scheme_extend_config(config, MZCONFIG_EXN_HANDLER, nested_exn_handler);
-
     np->init_config = config;
   }
   {
@@ -2932,7 +3193,7 @@ Scheme_Object *scheme_call_as_nested_thread(int argc, Scheme_Object *argv[], voi
     np->mref = mref;
     np->extra_mrefs = scheme_null;
 #ifndef MZ_PRECISE_GC
-    scheme_weak_reference((void **)&hop->p);
+    scheme_weak_reference((void **)(void *)&hop->p);
 #endif
   }
 
@@ -2945,6 +3206,14 @@ Scheme_Object *scheme_call_as_nested_thread(int argc, Scheme_Object *argv[], voi
 
   if (p != scheme_main_thread)
     scheme_weak_suspend_thread(p);
+
+  if (!nested_exn_handler) {
+    REGISTER_SO(nested_exn_handler);
+    nested_exn_handler = scheme_make_prim_w_arity(def_nested_exn_handler,
+                                                  "nested-thread-exception-handler",
+                                                  1, 1);
+  }
+  scheme_set_cont_mark(scheme_exn_handler_key, nested_exn_handler);
 
   /* Call thunk, catch escape: */
   np->error_buf = &newbuf;
@@ -2971,7 +3240,7 @@ Scheme_Object *scheme_call_as_nested_thread(int argc, Scheme_Object *argv[], voi
 #ifdef MZ_PRECISE_GC
   WEAKIFIED(np->mr_hop->p) = NULL;
 #else
-  scheme_unweak_reference((void **)&np->mr_hop->p);
+  scheme_unweak_reference((void **)(void *)&np->mr_hop->p);
 #endif
   scheme_remove_all_finalization(np->mr_hop);
 
@@ -3052,7 +3321,9 @@ static int check_sleep(int need_activity, int sleep_now)
   if (!do_atomic) {
     p = scheme_first_thread;
     while (p) {
-      if (!p->nestee && (p->ran_some || p->block_descriptor == NOT_BLOCKED))
+      if (!p->nestee
+          && (p->ran_some || p->block_descriptor == NOT_BLOCKED)
+          && (p->next || !(p->running & MZTHREAD_USER_SUSPENDED)))
 	break;
       p = p->next;
     }
@@ -3133,6 +3404,10 @@ static int check_sleep(int need_activity, int sleep_now)
   
     if (needs_sleep_cancelled)
       return 0;
+
+    if (post_system_idle()) {
+      return 0;
+    }
   
     if (sleep_now) {
       float mst = (float)max_sleep_time;
@@ -3150,6 +3425,11 @@ static int check_sleep(int need_activity, int sleep_now)
   }
 
   return 0;
+}
+
+static int post_system_idle()
+{
+  return scheme_try_channel_get(scheme_system_idle_channel);
 }
 
 void scheme_cancel_sleep()
@@ -3201,9 +3481,7 @@ END_XFORM_SKIP;
 
 #endif
 
-#define FALSE_POS_OK_INIT 1
-
-static void init_schedule_info(Scheme_Schedule_Info *sinfo, int false_pos_ok, 
+static void init_schedule_info(Scheme_Schedule_Info *sinfo, Scheme_Thread *false_pos_ok, 
 			       double sleep_end)
 {
   sinfo->false_positive_ok = false_pos_ok;
@@ -3467,6 +3745,8 @@ void scheme_thread_block(float sleep_time)
   /* Check scheduled_kills early and often. */
   check_scheduled_kills();
 
+  shrink_cust_box_array();
+
   if (scheme_active_but_sleeping)
     scheme_wake_up();
 
@@ -3496,6 +3776,8 @@ void scheme_thread_block(float sleep_time)
   check_scheduled_kills();
 
   if (!do_atomic && (sleep_end >= 0.0)) {
+    double msecs = 0.0;
+
     /* Find the next process. Skip processes that are definitely
        blocked. */
     
@@ -3560,13 +3842,16 @@ void scheme_thread_block(float sleep_time)
 	  if (next->block_check) {
 	    Scheme_Ready_Fun_FPC f = (Scheme_Ready_Fun_FPC)next->block_check;
 	    Scheme_Schedule_Info sinfo;
-	    init_schedule_info(&sinfo, FALSE_POS_OK_INIT, next->sleep_end);
+	    init_schedule_info(&sinfo, next, next->sleep_end);
 	    if (f(next->blocker, &sinfo))
 	      break;
 	    next->sleep_end = sinfo.sleep_end;
+            msecs = 0.0; /* that could have taken a while */
 	  }
 	} else if (next->block_descriptor == SLEEP_BLOCKED) {
-	  if (next->sleep_end <= scheme_get_inexact_milliseconds())
+          if (!msecs)
+            msecs = scheme_get_inexact_milliseconds();
+	  if (next->sleep_end <= msecs)
 	    break;
 	} else
 	  break;
@@ -3658,13 +3943,19 @@ void scheme_thread_block(float sleep_time)
 #endif
 
   if (next) {
-    scheme_swap_thread(next);
+    /* Swap in `next', but first clear references to other threads. */
+    next_in_set = NULL;
+    t_set = NULL;
+    swap_target = next;
+    next = NULL;
+    do_swap_thread();
   } else if (do_atomic && scheme_on_atomic_timeout) {
     scheme_on_atomic_timeout();
   } else {
     /* If all processes are blocked, check for total process sleeping: */
-    if (p->block_descriptor != NOT_BLOCKED)
+    if (p->block_descriptor != NOT_BLOCKED) {
       check_sleep(1, 1);
+    }
   }
 
   if (p->block_descriptor == SLEEP_BLOCKED) {
@@ -3707,7 +3998,7 @@ void scheme_thread_block(float sleep_time)
 	if (p->block_check) {
 	  Scheme_Ready_Fun_FPC f = (Scheme_Ready_Fun_FPC)p->block_check;
 	  Scheme_Schedule_Info sinfo;
-	  init_schedule_info(&sinfo, FALSE_POS_OK_INIT, sleep_end);
+	  init_schedule_info(&sinfo, p, sleep_end);
 	  if (f(p->blocker, &sinfo)) {
 	    sleep_end = 0;
 	  } else {
@@ -3774,12 +4065,12 @@ int scheme_block_until(Scheme_Ready_Fun _f, Scheme_Needs_Wakeup_Fun fdf,
 
   /* We make an sinfo to be polite, but we also assume
      that f will not generate any redirections! */
-  init_schedule_info(&sinfo, 0, sleep_end);
+  init_schedule_info(&sinfo, NULL, sleep_end);
 
   while (!(result = f((Scheme_Object *)data, &sinfo))) {
     sleep_end = sinfo.sleep_end;
     if (sinfo.spin) {
-      init_schedule_info(&sinfo, 0, 0.0);
+      init_schedule_info(&sinfo, NULL, 0.0);
       scheme_thread_block(0.0);
       scheme_current_thread->ran_some = 1;
     } else {
@@ -3960,6 +4251,11 @@ void scheme_weak_resume_thread(Scheme_Thread *r)
       scheme_check_tail_buffer_size(r);
     }
   }
+}
+
+void scheme_about_to_move_C_stack(void)
+{
+  wait_until_suspend_ok();
 }
 
 static Scheme_Object *
@@ -5447,7 +5743,7 @@ static Scheme_Thread_Cell_Table *inherit_cells(Scheme_Thread_Cell_Table *cells,
       cell = (Scheme_Object *)HT_EXTRACT_WEAK(bucket->key);
       if (cell && (((Thread_Cell *)cell)->inherited == inherited)) {
 	v = (Scheme_Object *)bucket->val;
-	scheme_add_to_table(t, (const char *)cell, v, 0);
+	scheme_add_to_table(t, (char *)cell, v, 0);
       }
     }
   }
@@ -5526,7 +5822,19 @@ static Scheme_Object *do_param(void *data, int argc, Scheme_Object *argv[]);
 
 Scheme_Config *scheme_current_config()
 {
-  return (Scheme_Config *)scheme_extract_one_cc_mark(NULL, scheme_parameterization_key);
+  Scheme_Object *v;
+
+  v = scheme_extract_one_cc_mark(NULL, scheme_parameterization_key);
+
+  if (!SAME_TYPE(scheme_config_type, SCHEME_TYPE(v))) {
+    /* Someone has grabbed parameterization-key out of #%paramz
+       and misused it.
+       Printing an error message requires consulting parameters,
+       so just escape. */
+    scheme_longjmp(scheme_error_buf, 1);
+  }
+
+  return (Scheme_Config *)v;
 }
 
 static Scheme_Config *do_extend_config(Scheme_Config *c, Scheme_Object *key, Scheme_Object *cell)
@@ -5791,7 +6099,7 @@ static Scheme_Object *do_param(void *data, int argc, Scheme_Object *argv[])
   pos[1] = ((ParamData *)data)->defcell;
   
   return scheme_param_config("parameter-procedure", 
-			     (Scheme_Object *)pos,
+			     (Scheme_Object *)(void *)pos,
 			     argc, argv2,
 			     -2, NULL, NULL, 0);
 }
@@ -5895,9 +6203,11 @@ static void make_initial_config(Scheme_Thread *p)
   init_param(cells, paramz, MZCONFIG_CAN_READ_QUASI, scheme_true);
   init_param(cells, paramz, MZCONFIG_READ_DECIMAL_INEXACT, scheme_true);
   init_param(cells, paramz, MZCONFIG_CAN_READ_READER, scheme_false);
+  init_param(cells, paramz, MZCONFIG_LOAD_DELAY_ENABLED, scheme_false);
+  init_param(cells, paramz, MZCONFIG_DELAY_LOAD_INFO, scheme_false);
 
   init_param(cells, paramz, MZCONFIG_PRINT_GRAPH, scheme_false);
-  init_param(cells, paramz, MZCONFIG_PRINT_STRUCT, scheme_false);
+  init_param(cells, paramz, MZCONFIG_PRINT_STRUCT, scheme_true);
   init_param(cells, paramz, MZCONFIG_PRINT_BOX, scheme_true);
   init_param(cells, paramz, MZCONFIG_PRINT_VEC_SHORTHAND, scheme_true);
   init_param(cells, paramz, MZCONFIG_PRINT_HASH_TABLE, scheme_false);
@@ -5920,12 +6230,13 @@ static void make_initial_config(Scheme_Thread *p)
   init_param(cells, paramz, MZCONFIG_CURLY_BRACES_ARE_PARENS, (scheme_curly_braces_are_parens
 							      ? scheme_true : scheme_false));
 
-  init_param(cells, paramz, MZCONFIG_ERROR_PRINT_WIDTH, scheme_make_integer(100));
+  init_param(cells, paramz, MZCONFIG_ERROR_PRINT_WIDTH, scheme_make_integer(256));
   init_param(cells, paramz, MZCONFIG_ERROR_PRINT_CONTEXT_LENGTH, scheme_make_integer(16));
   init_param(cells, paramz, MZCONFIG_ERROR_PRINT_SRCLOC, scheme_true);
 
   REGISTER_SO(main_custodian);
   REGISTER_SO(last_custodian);
+  REGISTER_SO(limited_custodians);
   main_custodian = scheme_make_custodian(NULL);
   last_custodian = main_custodian;
   init_param(cells, paramz, MZCONFIG_CUSTODIAN, (Scheme_Object *)main_custodian);
@@ -5939,6 +6250,7 @@ static void make_initial_config(Scheme_Thread *p)
   {
     Scheme_Object *s;
     s = scheme_make_path(scheme_os_getcwd(NULL, 0, NULL, 1));
+    s = scheme_path_to_directory_path(s);
     init_param(cells, paramz, MZCONFIG_CURRENT_DIRECTORY, s);
     scheme_set_original_dir(s);
   }
@@ -6543,39 +6855,49 @@ static void prepare_thread_for_GC(Scheme_Object *t)
   /* zero ununsed part of env stack in each thread */
 
   if (!p->nestee) {
-    Scheme_Object **o, **e, **e2;
     Scheme_Saved_Stack *saved;
 # define RUNSTACK_TUNE(x) /* x   - Used for performance tuning */
     RUNSTACK_TUNE( long size; );
 
-    if (!p->runstack_owner
-	|| (p == *p->runstack_owner)) {
-      o = p->runstack_start;
-      e = p->runstack;
-      e2 = p->runstack_tmp_keep;
-
-      while (o < e && (o != e2)) {
-	*(o++) = NULL;
-      }
+    if ((!p->runstack_owner
+         || (p == *p->runstack_owner))
+        && p->runstack_start) {
+      long rs_end;
+      Scheme_Object **rs_start;
 
       /* If there's a meta-prompt, we can also zero out past the unused part */
       if (p->meta_prompt && (p->meta_prompt->runstack_boundary_start == p->runstack_start)) {
-        e = p->runstack_start + p->runstack_size;
-        o = p->runstack_start + p->meta_prompt->runstack_boundary_offset;
-        while (o < e) {
-          *(o++) = NULL;
-        }
+        rs_end = p->meta_prompt->runstack_boundary_offset;
+      } else {
+        rs_end = p->runstack_size;
       }
+
+      if ((p->runstack_tmp_keep >= p->runstack_start)
+          && (p->runstack_tmp_keep < p->runstack))
+        rs_start = p->runstack_tmp_keep;
+      else
+        rs_start = p->runstack;
+
+      scheme_set_runstack_limits(p->runstack_start, 
+                                 p->runstack_size,
+                                 rs_start - p->runstack_start,
+                                 rs_end);
       
       RUNSTACK_TUNE( size = p->runstack_size - (p->runstack - p->runstack_start); );
       
       for (saved = p->runstack_saved; saved; saved = saved->prev) {
-	o = saved->runstack_start;
-	e = o + saved->runstack_offset;
 	RUNSTACK_TUNE( size += saved->runstack_size; );
-	while (o < e) {
-	  *(o++) = NULL;
-	}
+
+        if (p->meta_prompt && (p->meta_prompt->runstack_boundary_start == saved->runstack_start)) {
+          rs_end = p->meta_prompt->runstack_boundary_offset;
+        } else {
+          rs_end = saved->runstack_size;
+        }
+
+        scheme_set_runstack_limits(saved->runstack_start,
+                                   saved->runstack_size,
+                                   saved->runstack_offset,
+                                   rs_end);
       }
     }
 
@@ -6589,8 +6911,9 @@ static void prepare_thread_for_GC(Scheme_Object *t)
     }
   }
       
-  if (!p->cont_mark_stack_owner
-      || (p == *p->cont_mark_stack_owner)) {
+  if ((!p->cont_mark_stack_owner
+       || (p == *p->cont_mark_stack_owner))
+      && p->cont_mark_stack) {
     int segcount, i, segpos;
 
     /* release unused cont mark stack segments */
@@ -6609,11 +6932,18 @@ static void prepare_thread_for_GC(Scheme_Object *t)
     
     if (segpos < p->cont_mark_seg_count) {
       Scheme_Cont_Mark *seg = p->cont_mark_stack_segments[segpos];
-      int stackpos = ((long)p->cont_mark_stack & SCHEME_MARK_SEGMENT_MASK), i;
-      for (i = stackpos; i < SCHEME_MARK_SEGMENT_SIZE; i++) {
-	seg[i].key = NULL;
-	seg[i].val = NULL;
-	seg[i].cache = NULL;
+      int stackpos = ((long)p->cont_mark_stack & SCHEME_MARK_SEGMENT_MASK);
+      if (seg) {
+        for (i = stackpos; i < SCHEME_MARK_SEGMENT_SIZE; i++) {
+          if (seg[i].key) {
+            seg[i].key = NULL;
+            seg[i].val = NULL;
+            seg[i].cache = NULL;
+          } else {
+            /* NULL means we already cleared from here on. */
+            break;
+          }
+        }
       }
     }
 
@@ -6635,8 +6965,13 @@ static void prepare_thread_for_GC(Scheme_Object *t)
     }
   }
 
-  if (p->values_buffer)
-    memset(p->values_buffer, 0, sizeof(Scheme_Object*) * p->values_buffer_size);
+  if (p->values_buffer) {
+    if (p->values_buffer_size > 128)
+      p->values_buffer = NULL;
+    else {
+      memset(p->values_buffer, 0, sizeof(Scheme_Object*) * p->values_buffer_size);
+    }
+  }
 
   p->spare_runstack = NULL;
 
@@ -6667,17 +7002,18 @@ static void get_ready_for_GC()
   scheme_clear_shift_cache();
   scheme_clear_prompt_cache();
   scheme_clear_rx_buffers();
+  scheme_clear_bignum_cache();
 
 #ifdef RUNSTACK_IS_GLOBAL
-  scheme_current_thread->runstack = MZ_RUNSTACK;
-  scheme_current_thread->runstack_start = MZ_RUNSTACK_START;
-  scheme_current_thread->cont_mark_stack = MZ_CONT_MARK_STACK;
-  scheme_current_thread->cont_mark_pos = MZ_CONT_MARK_POS;
+  if (scheme_current_thread->running) {
+    scheme_current_thread->runstack = MZ_RUNSTACK;
+    scheme_current_thread->runstack_start = MZ_RUNSTACK_START;
+    scheme_current_thread->cont_mark_stack = MZ_CONT_MARK_STACK;
+    scheme_current_thread->cont_mark_pos = MZ_CONT_MARK_POS;
+  }
 #endif
 
-  if (scheme_fuel_counter) {
-    for_each_managed(scheme_thread_type, prepare_thread_for_GC);
-  }
+  for_each_managed(scheme_thread_type, prepare_thread_for_GC);
 
 #ifdef MZ_PRECISE_GC
   scheme_flush_stack_copy_cache();
@@ -6704,7 +7040,10 @@ static void done_with_GC()
 {
 #ifdef RUNSTACK_IS_GLOBAL
 # ifdef MZ_PRECISE_GC
-  MZ_RUNSTACK = scheme_current_thread->runstack;
+  if (scheme_current_thread->running) {
+    MZ_RUNSTACK = scheme_current_thread->runstack;
+    MZ_RUNSTACK_START = scheme_current_thread->runstack_start;
+  }
 # endif
 #endif
 #ifdef WINDOWS_PROCESSES
@@ -6899,6 +7238,7 @@ static void register_traversers(void)
 {
   GC_REG_TRAV(scheme_will_executor_type, mark_will_executor_val);
   GC_REG_TRAV(scheme_custodian_type, mark_custodian_val);
+  GC_REG_TRAV(scheme_cust_box_type, mark_custodian_box_val);
   GC_REG_TRAV(scheme_thread_hop_type, mark_thread_hop);
   GC_REG_TRAV(scheme_evt_set_type, mark_evt_set);
   GC_REG_TRAV(scheme_thread_set_type, mark_thread_set);

@@ -4,7 +4,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2006 PLT Scheme Inc.
+ * Copyright: (C) 2004-2007 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -20,7 +20,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301 USA.
  */
 
 #ifdef __GNUG__
@@ -66,7 +67,7 @@ enum {
 #endif
 };
 
-class wxBitmap_Xintern {
+class wxBitmap_Xintern : public gc {
 public:
     int          type;			// what is the type of the bitmap
     unsigned int width, height, depth;	// dimensions of bitmap
@@ -80,7 +81,7 @@ public:
     void         *account;
 };
 
-class wxCursor_Xintern {
+class wxCursor_Xintern : public gc {
 public:
     Cursor x_cursor;
 };
@@ -186,7 +187,6 @@ wxBitmap::wxBitmap(char **data, wxItem *WXUNUSED(anItem)) // anItem used for MOT
     } else {
 	// create failed: free all memory
 	XpmFreeAttributes(Xbitmap->xpm);
-	DELETE_VAL Xbitmap->xpm;
 	DELETE_OBJ Xbitmap;
 	Xbitmap = NULL;
     }
@@ -295,7 +295,6 @@ void wxBitmap::Destroy(void)
 	cm = *((Colormap*)(cmap->GetHandle()));
 	XFreeColors(wxAPP_DISPLAY, cm, Xbitmap->xpm->pixels, Xbitmap->xpm->npixels, 0);
 	XpmFreeAttributes(Xbitmap->xpm);
-	DELETE_VAL Xbitmap->xpm;
       }
       break;
     default:
@@ -392,7 +391,6 @@ else if (flags & wxBITMAP_TYPE_XPM) { // XPM file format
     } else {
       // read failed: free all memory
       XpmFreeAttributes(Xbitmap->xpm);
-      DELETE_VAL Xbitmap->xpm;
       DELETE_OBJ Xbitmap;
       Xbitmap = NULL;
     }
@@ -438,7 +436,7 @@ static int write_pixmap_as_bitmap(Display *display, Pixmap pm, char *fname,
 
   rw = ((width + 1) >> 3);
 
-  data = new char[rw * height];
+  data = new WXGC_ATOMIC char[rw * height];
 
   pos = 0;
   for (j = 0; j < height; j++, pos += rw) {

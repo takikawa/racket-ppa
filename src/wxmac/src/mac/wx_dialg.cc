@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2006 PLT Scheme Inc.
+// Copyright:  (c) 2004-2007 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -180,7 +180,7 @@ static wxFrame *make_dlog_frame(wxWindow *parentFrame, char *windowTitle, int x,
 //-----------------------------------------------------------------------------
 wxDialogBox::wxDialogBox // Constructor (for dialog window)
 (
- wxWindow*	parentFrame,		// this is ignored, used to be wxFrame*
+ wxWindow*	parentFrame,
  char*		windowTitle,
  Bool		modal,
  int 		x,
@@ -258,7 +258,7 @@ extern "C" {
 #endif
 extern "C" {
   extern char *scheme_expand_filename(char* filename, int ilen, const char *errorin, int *ex, int guards);
-  extern int scheme_is_complete_path(const char *s, long len);
+  extern int scheme_is_complete_path(const char *s, long len, int kind);
   extern int scheme_file_exists(const char *s);
   extern char *scheme_find_completion(char *fn);
 }
@@ -406,10 +406,11 @@ static OSStatus tab_evt_handler(EventHandlerCallRef inHandlerCallRef,
     result = extract_string(ccbi);
     len = strlen(result);
 
-    if (scheme_is_complete_path(result, len)) {
+    if (scheme_is_complete_path(result, len, 0)) {
       result = scheme_find_completion(result);
-    } else
+    } else {
       result = NULL;
+    }
 
     if (result) {
       CFStringRef str;
@@ -640,7 +641,6 @@ static char *GetNthPath(NavReplyRecord *reply, int index)
   return wxFSRefToPath(fsref);
 }
 
-static CFStringRef clientName = CFSTR("MrEd");
 static NavEventUPP extProc = NewNavEventUPP((NavEventProcPtr)ExtensionCallback);
 
 char *wxFileSelector(char *message, char *default_path,

@@ -1,5 +1,5 @@
 (module web-status-server mzscheme
-  (require (lib "unitsig.ss")
+  (require (lib "unit.ss")
            (lib "ssl-tcp-unit.ss" "net")
            (lib "tcp-sig.ss" "net")
            (lib "tcp-unit.ss" "net")
@@ -16,7 +16,7 @@
 
     (define web-dir
       (path->string
-       (or (get-config 'web-base-dir)
+       (or (get-conf 'web-base-dir)
            (build-path (this-expression-source-directory) "status-web-root"))))
 
     (define config
@@ -44,39 +44,37 @@
            (paths
             (configuration-root "conf")
             (host-root ,web-dir)
-            (log-file-path ,(cond [(get-config 'web-log-file) => path->string]
+            (log-file-path ,(cond [(get-conf 'web-log-file) => path->string]
                                   [else #f]))
             (file-root "htdocs")
             (servlet-root ,web-dir)
-            (mime-types ,(path->string (build-path (collection-path "web-server")
-                                                   "default-web-root"
-                                                   "mime.types")))
-            (password-authentication ,(path->string (build-path (current-directory) "web-status-passwords"))))))
+            (mime-types ,(path->string
+                          (build-path (collection-path "web-server")
+                                      "default-web-root"
+                                      "mime.types")))
+            (password-authentication "unused"))))
         (virtual-host-table)))
 
-    (define config@
-      (let ([file (make-temporary-file)])
-        (with-output-to-file file (lambda () (write config)) 'truncate)
-        (begin0 (load-configuration file) (delete-file file))))
-    #; ; This is not working yet
-    (define config@
-      (load-configuration-sexpr config
-        #:make-servlet-namespace
-        (make-make-servlet-namespace
-         #:to-be-copied-module-specs
-         '((lib "logger.ss" "handin-server" "private")))))
+    (define configuration
+      (load-configuration-sexpr
+       web-dir config
+       #:make-servlet-namespace
+       (make-make-servlet-namespace
+        #:to-be-copied-module-specs
+        '((lib "md5.ss"    "handin-server" "private")
+          (lib "logger.ss" "handin-server" "private")
+          (lib "config.ss" "handin-server" "private")
+          (lib "hooker.ss" "handin-server" "private")
+          (lib "reloadable.ss" "handin-server" "private")))))
 
-    (define-values/invoke-unit/sig web-server^
-      (compound-unit/sig
-       (import)
-       (link [T : net:tcp^ ((make-ssl-tcp@
-                             "server-cert.pem" "private-key.pem" #f #f
-                             #f #f #f))]
-             [C : web-config^ (config@)]
-             [S : web-server^ (web-server@ T C)])
-       (export (open S)))
-      #f)
-
-    (putenv "HANDIN_SERVER_DIR" (path->string (current-directory)))
+    (define-unit-binding config@ configuration (import) (export web-config^))
+    (define-unit-binding ssl-tcp@
+      (make-ssl-tcp@ "server-cert.pem" "private-key.pem" #f #f #f #f #f)
+      (import) (export tcp^))
+    (define-compound-unit/infer status-server@
+      (import)
+      (link ssl-tcp@ config@ web-server@)
+      (export web-server^))
+    (define-values/invoke-unit/infer status-server@)
 
     (serve)))

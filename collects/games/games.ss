@@ -51,10 +51,10 @@
 		       p)
 		      p
 		      (lambda (b e)
-			(let ([game-unit (dynamic-wind
-                                          begin-busy-cursor
-                                          (lambda () (dynamic-require (build-path dir file) 'game-unit))
-                                          end-busy-cursor)])
+			(let ([game@ (dynamic-wind
+                                         begin-busy-cursor
+                                         (lambda () (dynamic-require (build-path dir file) 'game@))
+                                         end-busy-cursor)])
                           (let ([c (make-custodian)])
                             (parameterize ([current-custodian c])
                               (parameterize ([current-eventspace (make-eventspace)])
@@ -62,7 +62,7 @@
                                  (lambda ()
                                    (exit-handler (lambda (v) 
                                                    (custodian-shutdown-all c)))
-                                   (invoke-unit game-unit))))))))))))
+                                   (invoke-unit game@))))))))))))
    
    (let ([game-mapping (sort game-mapping
                              (lambda (a b)

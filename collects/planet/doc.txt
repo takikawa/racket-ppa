@@ -20,7 +20,7 @@ The structure of user PLaneT invocations is listed below.
 
 PLANET-REQUEST ::= (planet FILE-NAME PKG-SPEC [PATH ...]) 
 FILE-NAME      ::= string
-PKG-SPEC       ::= string | (FILE-PATH ... PKG-NAME) | (FILE-PATH ... PKG-NAME VER-SPEC)
+PKG-SPEC       ::= (FILE-PATH ... PKG-NAME) | (FILE-PATH ... PKG-NAME VER-SPEC)
 VER-SPEC       ::= Nat | (Nat MINOR) 
 MINOR          ::= Nat       ; the specified revision or above
                  | (Nat Nat) ; a revision between the two specified numbers (inclusive)
@@ -80,8 +80,10 @@ cache, which contains compiled files and is specific to each
 particular version of PLT Scheme, the uninstalled package cache is
 shared by all versions of PLT Scheme that use the same package
 repository, and it is searched if a package is not installed in the
-primary cache. This behavior is intended to primarily benefit users
-who upgrade their PLT Scheme installations frequently.
+primary cache and cannot be downloaded from the central PLaneT repository
+(for instance due to a loss of Internet connectivity). This behavior
+is intended to primarily benefit users who upgrade their PLT Scheme
+installations frequently.
 
 > (LINKAGE-FILE) file-string
 > (LINKAGE-FILE file-string) -> void
@@ -234,6 +236,18 @@ a request to the PLaneT server for a new package that would satisfy
 the requirement. The server then finds the newest matching package
 and sends it back to the client, which then installs it and uses
 it to satisfy the original requirement.
+
+4. Cached installation archive
+
+If the remote server cannot be contacted (or fails in any way to
+deliver an acceptable package), the PLaneT client consults the 
+uninstalled-packages cache, a cache of all previously-downloaded
+packages, even those that are not currently installed. PLT Scheme 
+users who frequently upgrade their installations may have many 
+packages downloaded but not installed at any given time; this step 
+is intended to ensure that these users can still run programs even
+if they temporarily lose network connection.
+
 
 _The planet command-line tool_
 ------------------------------
@@ -394,6 +408,13 @@ encoded as x-expressions (see the xml collection for details) that
 PLaneT will use as a short description of your project. This field
 is also used by the Help Desk.
 
+The _'release-notes field_
+
+If present, the release-notes field should contain a list of XHTML
+fragments encoded as x-expressions (see the xml collection for 
+details) that PLaneT will use as a short description of what's new
+in this release of your package.
+
 The _'categories field_
 
 If present, the categories field should be a list of symbols 
@@ -475,7 +496,7 @@ If present, this field should be a list of strings representing
 subdirectories of your package. These directories will be used by
 Help Desk as HTML documentation for your package. See
 _Creating Help Desk Documentation in HTML format_ for more information
-on how to use HTML Help Desk documentation.
+on how to write useful HTML Help Desk documentation.
 
 The _'homepage field_
 
@@ -485,10 +506,17 @@ package on the main PLaneT web page.
 
 The _'primary-file field_
 
-If present, the primary-file field should be a string corresponding to
-the name (without path) of the main Scheme source file of your
-package. PLaneT will direct casual users of your library to require
-this file.
+If present, the primary-file field should be a either a string
+corresponding to the name (without path) of the main Scheme source
+file of your package, or a list of such strings. The PLaneT web page
+corresponding to this package will present all files listed here as
+interface files for your package; it will give direct links to each
+package and a listing of all names provided by the package along with
+their contracts (if present).
+
+If you include only a single string, it will be used as the require
+line printed on your package's page. If you include a list of strings,
+then the first legal file string in the list will be used.
 
 The _'required-core-version field_
 
@@ -504,18 +532,18 @@ clients.
 
 The _'version field_
 
-If present, the version field should describe the version number of
-this code that should be presented to users (e.g., "0.15 alpha").
-This field does not override or in any way interact with your
-package's package version number, which is assigned by PLaneT, but may
-be useful to users.
+If present, the version field should be a string that describes the 
+version number of this code that should be presented to users (e.g., 
+"0.15 alpha"). This field does not override or in any way interact 
+with your package's package version number, which is assigned by 
+PLaneT, but may be useful to users.
 
 
 In addition, PLaneT uses the setup-plt installer to install packages
 on client machines, so most fields it looks for can be included with
-their usual effects. In particular, adding a name field indicates that
+their usual effects. In particular, adding a 'name field indicates that
 the Scheme files in the package should be compiled during
-installation; it is probably a good idea to add it.
+installation; it is a good idea to add it.
 
 An example info.ss file looks like this:
 
@@ -581,17 +609,19 @@ problems.)
 
 4. SUBMIT THE PACKAGE
 
-E-mail the .plt file you built to jacobm+planet@plt-scheme.org If the
-package is an upgrade to a prior package, then tell me so and tell me
-whether or not this package is backwards-compatible with the package
-it's upgrading. Also tell me what PLT Scheme version this package is
-intended for. There's no particular format for this message; the
-system isn't automated yet so I'll just be reading these and
-processing them by hand.
+Go to http://planet.plt-scheme.org/ and click on the link marked
+"contribute a package / log in" in the upper-right-hand corner. If you
+have not yet created an account, then do so on that page by providing
+your name, a user name, an email address, and a password and then
+responding to the confirmation message delivered to the email address
+you provide.
 
-Once I've added your package to the repository, I'll e-mail you
-back and tell you the require-line users will need to type in to get
-it.
+Once you have an account, then if this is a new package then upload it
+using the "Contribute a package" section in your user account page. If
+this is a package update then click "update this package" next to its
+name in the "Manage your packages" section of your user account page,
+then upload the .plt file and indicate on the form whether your update
+is backwards-compatible with the prior version or not.
 
 WARNING: 
 

@@ -1,5 +1,5 @@
 (module client mzscheme
-  (require (lib "mzssl.ss" "openssl"))
+  (require (lib "mzssl.ss" "openssl") "this-collection.ss")
 
   (provide handin-connect
 	   handin-disconnect
@@ -13,6 +13,10 @@
 
   (define-struct handin (r w))
 
+  ;; errors to the user: no need for a "foo: " prefix
+  (define (error* fmt . args)
+    (error (apply format fmt args)))
+
   (define (write+flush port . xs)
     (for-each (lambda (x) (write x port) (newline port)) xs)
     (flush-output port))
@@ -23,25 +27,39 @@
 
   (define (wait-for-ok r who . reader)
     (let ([v (if (pair? reader) ((car reader)) (read r))])
-      (unless (eq? v 'ok) (error 'handin-connect "~a error: ~a" who v))))
+      (unless (eq? v 'ok) (error* "~a error: ~a" who v))))
 
-  (define (handin-connect server port pem)
-    (let ([ctx (ssl-make-client-context)])
-      (ssl-set-verify! ctx #t)
-      (ssl-load-verify-root-certificates! ctx pem)
-      (let-values ([(r w) (ssl-connect server port ctx)])
-	;; Sanity check: server sends "handin", first:
-	(let ([s (read-bytes 6 r)])
-	  (unless (equal? #"handin" s)
-	    (error 'handin-connect "bad handshake from server: ~e" s)))
-	;; Tell server protocol = 'ver1:
-	(write+flush w 'ver1)
-	;; One more sanity check: server recognizes protocol:
-	(let ([s (read r)])
-	  (unless (eq? s 'ver1)
-	    (error 'handin-connect "bad protocol from server: ~e" s)))
-	;; Return connection:
-        (make-handin r w))))
+  ;; ssl connection, makes a readable error message if no connection
+  (define (connect-to server port)
+    (define pem (in-this-collection "server-cert.pem"))
+    (define ctx (ssl-make-client-context))
+    (ssl-set-verify! ctx #t)
+    (ssl-load-verify-root-certificates! ctx pem)
+    (with-handlers
+        ([exn:fail:network?
+          (lambda (e)
+            (let* ([msg
+                    "handin-connect: could not connect to the server (~a:~a)"]
+                   [msg (format msg server port)]
+                   #; ; un-comment to get the full message too
+                   [msg (string-append msg " (" (exn-message e) ")")])
+              (raise (make-exn:fail:network msg (exn-continuation-marks e)))))])
+      (ssl-connect server port ctx)))
+
+  (define (handin-connect server port)
+    (let-values ([(r w) (connect-to server port)])
+      ;; Sanity check: server sends "handin", first:
+      (let ([s (read-bytes 6 r)])
+        (unless (equal? #"handin" s)
+          (error 'handin-connect "bad handshake from server: ~e" s)))
+      ;; Tell server protocol = 'ver1:
+      (write+flush w 'ver1)
+      ;; One more sanity check: server recognizes protocol:
+      (let ([s (read r)])
+        (unless (eq? s 'ver1)
+          (error 'handin-connect "bad protocol from server: ~e" s)))
+      ;; Return connection:
+      (make-handin r w)))
 
   (define (handin-disconnect h)
     (write+flush (handin-w h) 'bye)
@@ -52,8 +70,7 @@
       (write+flush w 'get-user-fields 'bye)
       (let ([v (read r)])
         (unless (and (list? v) (andmap string? v))
-          (error 'handin-connect
-                 "failed to get user-fields list from server"))
+          (error* "failed to get user-fields list from server"))
         (wait-for-ok r "get-user-fields")
         (close-handin-ports h)
         v)))
@@ -63,8 +80,7 @@
       (write+flush w 'get-active-assignments)
       (let ([v (read r)])
         (unless (and (list? v) (andmap string? v))
-          (error 'handin-connect
-                 "failed to get active-assignment list from server"))
+          (error* "failed to get active-assignment list from server"))
         v)))
 
   (define (submit-assignment h username passwd assignment content
@@ -86,8 +102,7 @@
       (wait-for-ok r "login")
       (write+flush w (bytes-length content))
       (let ([v (read r)])
-	(unless (eq? v 'go)
-	  (error 'handin-connect "upload error: ~a" v)))
+        (unless (eq? v 'go) (error* "upload error: ~a" v)))
       (display "$" w)
       (display content w)
       (flush-output w)
@@ -97,8 +112,7 @@
       ;; we expect a string and a style-list to be used with `message-box' and
       ;; the resulting value written back
       (let ([v (read/message)])
-        (unless (eq? 'confirm v)
-          (error (format "submit error: ~a" v))))
+        (unless (eq? 'confirm v) (error* "submit error: ~a" v)))
       (on-commit)
       (write+flush w 'check)
       (wait-for-ok r "commit" read/message)
@@ -113,7 +127,7 @@
         'get-submission)
       (let ([len (read r)])
         (unless (and (number? len) (integer? len) (positive? len))
-          (error 'handin-connect "bad response from server: ~a" len))
+          (error* "bad response from server: ~a" len))
         (let ([buf (begin (regexp-match #rx"[$]" r) (read-bytes len r))])
           (wait-for-ok r "get-submission")
           (close-handin-ports h)
@@ -149,7 +163,7 @@
         'get-user-info 'bye)
       (let ([v (read r)])
         (unless (and (list? v) (andmap string? v))
-          (error 'handin-connect "failed to get user-info list from server"))
+          (error* "failed to get user-info list from server"))
         (wait-for-ok r "get-user-info")
         (close-handin-ports h)
         v)))

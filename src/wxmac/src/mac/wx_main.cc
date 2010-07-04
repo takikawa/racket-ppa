@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2006 PLT Scheme Inc.
+// Copyright:  (c) 2004-2007 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -18,6 +18,7 @@
 #include "PSDC.h"
 
 void wxCleanUp(void);
+extern void wxMouseEventHandled(void);
 
 ///////////////////////////////////////////////////////////////////////////////
 // The procedure CreateApp initializes the whole application.
@@ -91,6 +92,8 @@ void wxCleanUp(void)
 //-----------------------------------------------------------------------------
 Bool wxYield(void)
 { // Yield to incoming messages
+
+  wxMouseEventHandled();
 
   while (wxTheApp->Pending()) {
     wxTheApp->Dispatch();

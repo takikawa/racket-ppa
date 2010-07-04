@@ -1,40 +1,83 @@
 
 (module reductions-engine mzscheme
-  (require "deriv.ss"
+  (require (lib "list.ss")
+           "deriv.ss"
            "stx-util.ss"
            "steps.ss")
-  (provide (all-defined)
-           (all-from "steps.ss"))
-  
-  ;; A Context is (syntax -> syntax)
-  ;; A BigContext is (list-of (cons Syntaxes Syntax))
-  ;;   local expansion contexts: pairs of foci, term
-  
+  (provide (all-from "steps.ss"))
+
+  (provide context
+           big-context
+           current-derivation
+           current-definites
+           learn-definites
+           current-frontier
+           add-frontier
+           blaze-frontier
+           rename-frontier
+           with-context
+           with-derivation
+           with-new-local-context
+           CC
+           R
+           revappend)
+  (provide walk
+           walk/foci
+           stumble
+           stumble/E)
+
   ;; context: parameter of Context
-  (define context (make-parameter (lambda (x) x)))
+  (define context (make-parameter null))
 
   ;; big-context: parameter of BigContext
   (define big-context (make-parameter null))
-  
+
+  ;; current-derivation : parameter of Derivation
+  (define current-derivation (make-parameter #f))
+
+  ;; current-definites : parameter of (list-of identifier)
+  (define current-definites (make-parameter null))
+
+  ;; current-frontier : parameter of (list-of syntax)
+  (define current-frontier (make-parameter null))
+
   (define-syntax with-context
     (syntax-rules ()
       [(with-context f . body)
-       (let ([E (context)])
-         (parameterize ([context (lambda (x) (E (f x)))])
-           . body))]))
+       (let ([c (context)])
+         (parameterize ([context (cons f c)])
+           (let () . body)))]))
+
+  (define-syntax with-derivation
+    (syntax-rules ()
+      [(with-derivation d . body)
+       (parameterize ((current-derivation d)) . body)]))
   
   (define-syntax with-new-local-context
     (syntax-rules ()
       [(with-new-local-context e . body)
-       (parameterize ([big-context (cons (cons (list e) (E e)) (big-context))]
-                      [context (lambda (x) x)])
+       (parameterize ([big-context
+                       (cons (make-bigframe (current-derivation) (context) (list e) e)
+                             (big-context))]
+                      [context null])
          . body)]))
-  
-  ;; E : syntax -> syntax
-  (define (E stx) ((context) stx))
+
+  (define (learn-definites ids)
+    (current-definites (append ids (current-definites))))
+
+  (define (add-frontier stxs)
+    (current-frontier (append stxs (current-frontier)))
+    #;(printf "new frontier: ~s~n" (current-frontier)))
+
+  (define (blaze-frontier stx)
+    #;(unless (memq stx (current-frontier))
+      (fprintf (current-error-port) "frontier does not contain term: ~s~n" stx)
+      (error 'blaze-frontier))
+    (current-frontier (remq stx (current-frontier)))
+    #;(printf "new frontier (blazed): ~s~n" (current-frontier)))
 
   ;; -----------------------------------
-  
+
   ;; CC
   ;; the context constructor
   (define-syntax (CC stx)
@@ -46,9 +89,9 @@
   ;; the threaded reductions engine
   (define-syntax R
     (syntax-rules ()
-      [(R form pattern . clauses)
+      [(R form . clauses)
        (R** #f _ [#:set-syntax form] [#:pattern pattern] . clauses)]))
-  
+
   (define-syntax (R** stx)
     (syntax-case stx (! @ List Block =>)
       [(R** form-var pattern)
@@ -62,7 +105,7 @@
        #'(R** f p2 . more)]
       ;; Bind pattern variables
       [(R** f p [#:bind pattern rhs] . more)
-       #'(with-syntax ([pattern rhs])
+       #'(with-syntax ([pattern (with-syntax ([p f]) rhs)])
            (R** f p . more))]
       ;; Change syntax
       [(R** f p [#:set-syntax form] . more)
@@ -73,22 +116,30 @@
        #'(let-values ([(form2-var foci1-var foci2-var description-var)
                        (with-syntax ([p f])
                          (values form2 foci1 foci2 description))])
-           (cons (walk/foci/E foci1-var foci2-var f form2-var description-var)
+           (cons (walk/foci foci1-var foci2-var f form2-var description-var)
                  (R** form2-var p . more)))]
       [(R** f p [#:rename form2 foci1 foci2 description] . more)
        #'(let-values ([(form2-var foci1-var foci2-var description-var)
                        (with-syntax ([p f])
                          (values form2 foci1 foci2 description))])
-           (cons (walk-rename/foci/E foci1-var foci2-var
-                                     f form2-var
-                                     description-var)
-                 (R** form2-var p . more)))]
+           (rename-frontier f form2-var)
+           (with-context (make-renames foci1-var foci2-var)
+             (cons (walk/foci foci1-var foci2-var
+                              f form2-var
+                              description-var)
+                   (R** form2-var p . more))))]
       [(R** f p [#:walk form2 description] . more)
        #'(let-values ([(form2-var description-var)
                        (with-syntax ([p f])
                          (values form2 description))])
            (cons (walk f form2-var description-var)
                  (R** form2-var p . more)))]
+      [(R** f p [#:learn ids] . more)
+       #'(begin (learn-definites ids)
+                (R** f p . more))]
+      [(R** f p [#:frontier stxs] . more)
+       #'(begin (add-frontier (with-syntax ([p f]) stxs))
+                (R** f p . more))]
 
       ;; Conditional
       [(R** f p [#:if test consequent ...] . more)
@@ -106,7 +157,7 @@
                   ;; If this is the key, then insert the misstep here and stop.
                   ;; This stops processing *within* an error-wrapped prim.
                   (if (or (eq? key #f) (eq? key (cdr info)))
-                      (list (make-misstep f (E f) (car info)))
+                      (list (stumble f (car info)))
                       (continue))]
                  [else
                   (continue)]))]
@@ -115,16 +166,6 @@
        #'(let-values ([(reducer get-e1 get-e2) Generator])
            (R** f p [reducer get-e1 get-e2 hole0 fill0] . more))]
       
-;      ;; Expression case
-;      [(R** f p [hole0 fill0] . more)
-;       #'(R** f p [reductions deriv-e1 deriv-e2 hole0 fill0] . more)]
-;      ;; List case
-;      [(R** f p [List hole0 fill0] . more)
-;       #'(R** f p [list-reductions lderiv-es1 lderiv-es2 hole0 fill0] . more)]
-;      ;; Block case
-;      [(R** f p [Block hole0 fill0] . more)
-;       #'(R** f p [block-reductions bderiv-es1 bderiv-es2 hole0 fill0] . more)]
-
       ;; Implementation for (hole ...) sequences
       [(R** form-var pattern
             [f0 get-e1 get-e2 (hole0 :::) fill0s] . more)
@@ -165,36 +206,84 @@
                           (let ([form-var (ctx0 (get-e2 fill0))])
                             (R** form-var pattern . more))])))]))
   
-  
+
+  ;; Rename mapping
+
+  (define (rename-frontier from to)
+    (current-frontier
+     (apply append (map (make-rename-mapping from to) (current-frontier)))))
+
+  (define (make-rename-mapping from to)
+    (define table (make-hash-table))
+    (let loop ([from from] [to to])
+      (cond [(syntax? from)
+             (hash-table-put! table from (flatten-syntaxes to))
+             (loop (syntax-e from) to)]
+            [(syntax? to)
+             (loop from (syntax-e to))]
+            [(pair? from)
+             (loop (car from) (car to))
+             (loop (cdr from) (cdr to))]
+            [(vector? from)
+             (loop (vector->list from) (vector->list to))]
+            [(box? from)
+             (loop (unbox from) (unbox to))]
+            [else (void)]))
+    (lambda (stx)
+      (let ([replacement (hash-table-get table stx #f)])
+        (if replacement
+            (begin #;(printf "  replacing ~s with ~s~n" stx replacement)
+                   replacement)
+            (begin #;(printf "  not replacing ~s~n" stx)
+                   (list stx))))))
+
+  (define (flatten-syntaxes x)
+    (cond [(syntax? x)
+           (list x)]
+          [(pair? x)
+           (append (flatten-syntaxes (car x))
+                   (flatten-syntaxes (cdr x)))]
+          [(vector? x)
+           (flatten-syntaxes (vector->list x))]
+          [(box? x)
+           (flatten-syntaxes (unbox x))]
+          [else null]))
+
   ;; -----------------------------------
-  
-  ;; walk : syntax(s) syntax(s) [string] -> Reduction
+
+  ;; walk : syntax(es) syntax(es) StepType -> Reduction
   ;; Lifts a local step into a term step.
-  (define walk
-    (case-lambda
-      [(e1 e2) (walk e1 e2 #f)]
-      [(e1 e2 note) (make-rewrite-step e1 e2 (E e1) (E e2) note (big-context))]))
+  (define (walk e1 e2 type)
+    (make-step (current-derivation) (big-context) type (context)
+               (current-definites) (current-frontier)
+               (foci e1) (foci e2) e1 e2))
   
-  ;; walk/foci/E : syntax(s) syntax(s) syntax syntax string -> Reduction
-  (define (walk/foci/E focus1 focus2 e1 e2 note)
-    (walk/foci focus1 focus2 (E e1) (E e2) note))
-
-  ;; walk-rename/foci/E : syntax(s) syntax(s) syntax syntax string -> Reduction
-  (define (walk-rename/foci/E focus1 focus2 e1 e2 note)
-    (make-rename-step focus1 focus2 (E e1) (E e2) note (big-context)))
-
-  ;; walk/foci : syntax(s) syntax(s) syntax syntax string -> Reduction
-  (define (walk/foci focus1 focus2 Ee1 Ee2 note)
-    (make-rewrite-step focus1 focus2 Ee1 Ee2 note (big-context)))
+  ;; walk/foci : syntaxes syntaxes syntax syntax StepType -> Reduction
+  (define (walk/foci foci1 foci2 Ee1 Ee2 type)
+    (make-step (current-derivation) (big-context) type (context)
+               (current-definites) (current-frontier)
+               (foci foci1) (foci foci2) Ee1 Ee2))
 
   ;; stumble : syntax exception -> Reduction
   (define (stumble stx exn)
-    (make-misstep stx (E stx) exn))
+    (make-misstep (current-derivation) (big-context) 'error (context)
+                  (current-definites) (current-frontier)
+                  (foci stx) stx exn))
+  
+  ;; stumble/E : syntax(s) syntax exn -> Reduction
+  (define (stumble/E focus Ee1 exn)
+    (make-misstep (current-derivation) (big-context) 'error (context)
+                  (current-definites) (current-frontier)
+                  (foci focus) Ee1 exn))
+  
   ;; ------------------------------------
   
   (define (revappend a b)
     (cond [(pair? a) (revappend (cdr a) (cons (car a) b))]
           [(null? a) b]))
-  
 
+  (define (foci x)
+    (if (list? x)
+        x
+        (list x)))
   )

@@ -53,6 +53,7 @@
 
 #ifdef wx_msw
 # include "wx_pdf.h"
+extern void wx_release_lazy_regions();
 #endif
 
 #include <stdlib.h>
@@ -250,6 +251,9 @@ START_XFORM_SKIP;
 
 static void collect_start_callback(void)
 {
+#ifdef wx_msw
+  wx_release_lazy_regions();
+#endif
   draw_gc_bm(1);
   orig_collect_start_callback();
 }
@@ -1342,7 +1346,7 @@ void wxPostScriptDrawText(Scheme_Object *f, const char *fontname,
 }
 
 extern void wxPostScriptGetTextExtent(const char *fontname, 
-				      const char *text, int dt, Bool combine, int use16, 
+				      const char *text, int dt, int slen, Bool combine, int use16, 
 				      double font_size,
 				      double *x, double *y, double *descent, double *topSpace,
 				      int sym_map)
@@ -1354,9 +1358,9 @@ extern void wxPostScriptGetTextExtent(const char *fontname,
     a[0] = v;
     a[1] = scheme_make_double(font_size);
     if (use16)
-      v = scheme_make_sized_offset_char_string((mzchar *)text, dt, -1, 1);
+      v = scheme_make_sized_offset_char_string((mzchar *)text, dt, slen, 1);
     else 
-      v = scheme_make_sized_offset_utf8_string((char *)text, dt, -1);
+      v = scheme_make_sized_offset_utf8_string((char *)text, dt, slen);
     a[2] = v;
     a[3] = (combine ? scheme_true : scheme_false);
     a[4] = (sym_map ? scheme_true : scheme_false);
@@ -1545,7 +1549,7 @@ static Scheme_Object *wxPlaySound(int argc, Scheme_Object **argv)
 				    SCHEME_GUARD_FILE_READ);
 
 #ifdef wx_msw  
-  ok = PlaySound(f, NULL, async ? SND_ASYNC : SND_SYNC);
+  ok = PlaySoundW(wxWIDE_STRING(f), NULL, async ? SND_ASYNC : SND_SYNC);
 #endif
 #ifdef wx_mac
   {
@@ -2123,7 +2127,7 @@ void *wxSchemeYield(void *sema)
       return scheme_false;
   } else if (sema) {
     if (!scheme_is_evt((Scheme_Object *)sema))
-      scheme_wrong_type("yield", "evt or 'wait", -1, 0, (Scheme_Object **)&sema);
+      scheme_wrong_type("yield", "evt or 'wait", -1, 0, (Scheme_Object **)(void *)&sema);
 
     if (is_handler)
       return wxDispatchEventsUntilWaitable((wxDispatch_Check_Fun)NULL, NULL, (Scheme_Object *)sema);
@@ -2359,10 +2363,7 @@ static char *win_find_home()
 static char *x_display_str;
 extern void wxsRememberDisplay(char *str)
 {
-  if (str)
-    x_display_str = str;
-  else
-    x_display_str = getenv("DISPLAY");
+  x_display_str = str;
 }
 #endif
 
@@ -2370,7 +2371,7 @@ static Scheme_Object *append_path(Scheme_Object *a, Scheme_Object *b)
 {
   Scheme_Object *s;
   s = scheme_append_byte_string(a, b);
-  s->type = scheme_path_type;
+  s->type = SCHEME_PLATFORM_PATH_KIND;
   return s;
 }
 

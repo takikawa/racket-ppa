@@ -1,9 +1,9 @@
 (module browser-sig mzscheme
-  (require (lib "unitsig.ss")
+  (require (lib "unit.ss")
            "private/sig.ss")
-  
-  (provide browser^)
 
+  (provide browser^)
+  
   (define-signature browser^
     ((open hyper^)
      (open html-export^)

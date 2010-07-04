@@ -20,7 +20,7 @@
   (test p sync p)
   (test s sync s)
   (test #f sync/timeout 0 p)
-  (thread (lambda () (sleep SYNC-SLEEP-DELAY) (semaphore-post s)))
+  (thread (lambda () (sync (system-idle-evt)) (semaphore-post s)))
   (test p sync p)
   (test p sync p)
   (test s sync s)
@@ -34,7 +34,7 @@
   (test 7 channel-get ch)
   (test #f channel-try-get ch)
   (thread (lambda () (channel-put ch 9)))
-  (sleep SYNC-SLEEP-DELAY)
+  (sync (system-idle-evt))
   (test 9 channel-try-get ch)
   (test #f channel-try-get ch))
 
@@ -50,19 +50,19 @@
 (let ([c (make-channel)]
       [v 'nope])
   (test #f sync/timeout 0 c)
-  (thread (lambda () (sleep SYNC-SLEEP-DELAY) (set! v (channel-get c))))
+  (thread (lambda () (sync (system-idle-evt)) (set! v (channel-get c))))
   (test (void) channel-put c 10)
-  (sleep)
+  (sync (system-idle-evt))
   (test 10 'thread-v v)
-  (thread (lambda () (sleep SYNC-SLEEP-DELAY) (channel-put c 11)))
+  (thread (lambda () (sync (system-idle-evt)) (channel-put c 11)))
   (test #f sync/timeout 0 c)
   (test 11 sync c)
   (let ([p (channel-put-evt c 45)])
-    (thread (lambda () (sleep SYNC-SLEEP-DELAY) (set! v (sync c))))
+    (thread (lambda () (sync (system-idle-evt)) (set! v (sync c))))
     (test #f sync/timeout 0 p)
     (test p sync p)
     (test #f sync/timeout 0 p)
-    (sleep)
+    (sync (system-idle-evt))
     (test 45 'thread-v v))
   ;;;;; Make sure break/kill before action => break/kill only
   ;; get:
@@ -70,11 +70,11 @@
 	       (let ([t (thread (lambda ()
 				  (set! v (channel-get c))))])
 		 (test #t thread-running? t)
-		 (sleep)
+		 (sync (system-idle-evt))
 		 (test #t thread-running? t)
 		 (test (void) break-thread t)
 		 (test #f sync/timeout 0 (channel-put-evt c 32))
-		 (sleep)
+                 (sync (system-idle-evt))
 		 (test #f thread-running? t)
 		 (test 45 'old-v v)))])
     (try break-thread)
@@ -83,18 +83,18 @@
   (let ([try (lambda (break-thread)
 	       (let ([t (thread (lambda () (channel-put c 17)))])
 		 (test #t thread-running? t)
-		 (sleep)
+		 (sync (system-idle-evt))
 		 (test #t thread-running? t)
 		 (test (void) break-thread t)
 		 (test #f sync/timeout 0 c)
-		 (sleep)
+		 (sync (system-idle-evt))
 		 (test #f thread-running? t)))])
     (try break-thread)
     (try kill-thread))
   ;; put in main thread:
   (let ([t (current-thread)])
     (thread (lambda () 
-	      (sleep SYNC-SLEEP-DELAY) 
+	      (sync (system-idle-evt))
 	      (break-thread t) 
 	      (set! v (channel-get c)))))
   (test 77
@@ -108,7 +108,7 @@
   ;; get in main thread:
   (let ([t (current-thread)])
     (thread (lambda () 
-	      (sleep SYNC-SLEEP-DELAY) 
+	      (sync (system-idle-evt))
 	      (break-thread t) 
 	      (channel-put c 66))))
   (test 99
@@ -215,8 +215,8 @@
 	  (make-semaphore) (make-semaphore) (make-semaphore) (make-semaphore) 
 	  (let ([sema (make-semaphore 1)])
 	    (wrap-evt sema (lambda (x)
-					  (test sema values x)
-					  77)))))))
+                             (test sema values x)
+                             77)))))))
 
 ;; More alarms:
 (let ([make-delay
@@ -250,14 +250,14 @@
 (test 18 'sync
       (let ([n 17]
 	    [s (make-semaphore)])
-	(thread (lambda () (sleep SYNC-SLEEP-DELAY) (semaphore-post s)))
+	(thread (lambda () (sync (system-idle-evt)) (semaphore-post s)))
 	(sync 
-			      (wrap-evt 
-			       s 
-			       (lambda (sema) (set! n (add1 n)) n))
-			      (wrap-evt 
-			       s 
-			       (lambda (sema) (set! n (add1 n)) n)))))
+         (wrap-evt 
+          s 
+          (lambda (sema) (set! n (add1 n)) n))
+         (wrap-evt 
+          s 
+          (lambda (sema) (set! n (add1 n)) n)))))
 
 (let ([c (make-channel)])
   (thread (lambda () (channel-put c 76)))
@@ -280,6 +280,8 @@
 
 (let ([s (make-semaphore 1)]
       [nack-try-wait? (lambda (n)
+                        (unless (evt? n)
+                          (error "NACK isn't ready for try-wait"))
 			(let ([v (sync/timeout 0 n)])
 			  (when v
 			    (test #t void? v)
@@ -291,56 +293,56 @@
   (let ([v #f])
     (test #f sync/timeout 0
 	  (nack-guard-evt (lambda (nack) 
-				      (set! v nack)
-				      (make-semaphore))))
+                            (set! v nack)
+                            (make-semaphore))))
     (test #t nack-try-wait? v)
     (set! v #f)
     (test #f sync/timeout SYNC-SLEEP-DELAY
 	  (nack-guard-evt (lambda (nack) 
-				      (set! v nack)
-				      (make-semaphore))))
+                            (set! v nack)
+                            (make-semaphore))))
     (test #t nack-try-wait? v)
     (set! v #f)
     (test #f sync/timeout 0
 	  (nack-guard-evt (lambda (nack) 
-				      (set! v nack)
-				      (make-semaphore)))
+                            (set! v nack)
+                            (make-semaphore)))
 	  (nack-guard-evt (lambda (nack) 
-				      (set! v nack)
-				      (make-semaphore))))
+                            (set! v nack)
+                            (make-semaphore))))
     (test #t nack-try-wait? v)
     (set! v #f)
     (test #f sync/timeout SYNC-SLEEP-DELAY
 	  (nack-guard-evt (lambda (nack) 
-				      (set! v nack)
-				      (make-semaphore)))
+                            (set! v nack)
+                            (make-semaphore)))
 	  (nack-guard-evt (lambda (nack) 
-				      (set! v nack)
-				      (make-semaphore))))
+                            (set! v nack)
+                            (make-semaphore))))
     (test #t nack-try-wait? v)
     (set! v #f)
     (test #f sync/timeout SYNC-SLEEP-DELAY
 	  (choice-evt 
 	   (nack-guard-evt (lambda (nack) 
-				       (set! v nack)
-				       (make-semaphore)))
+                             (set! v nack)
+                             (make-semaphore)))
 	   (nack-guard-evt (lambda (nack) 
-				       (set! v nack)
-				       (make-semaphore)))))
+                             (set! v nack)
+                             (make-semaphore)))))
     (test #t nack-try-wait? v)
     (set! v #f)
     (test s sync/timeout 0
 	  (nack-guard-evt (lambda (nack) 
-				      (set! v nack)
-				      s)))
+                            (set! v nack)
+                            s)))
     (test #f nack-try-wait? v) ; ... but not an exception!
     (semaphore-post s)
     (set! v #f)
     (let loop ()
       (test s sync/timeout 0
 	    (nack-guard-evt (lambda (nack) 
-					(set! v nack)
-					(make-semaphore)))
+                              (set! v nack)
+                              (make-semaphore)))
 	    s)
       (if v
 	  (test #t nack-try-wait? v)
@@ -408,6 +410,7 @@
 	 (lambda (nack)
 	   (set! v nack)
 	   (choice-evt (make-semaphore) (make-semaphore)))))
+  (unless (evt? v) (error "the NACK isn't ready!"))
   (test (void) sync/timeout 0 v))
 
 (let ([ch (make-channel)]
@@ -420,7 +423,7 @@
 		  (set! n nack)
 		  never-evt))
 	       (channel-put-evt ch 10))))])
-    (sleep)
+    (sync (system-idle-evt))
     (test 10 channel-get ch)
     (test (void) sync/timeout 0 n)))
 	       
@@ -435,21 +438,21 @@
 
 (let ([s (semaphore-peek-evt (make-semaphore 1))])
   (test s sync/timeout 0 (poll-guard-evt (lambda (poll?)
-							     (test #t values poll?)
-							     s)))
+                                           (test #t values poll?)
+                                           s)))
   (test s sync (poll-guard-evt (lambda (poll?)
-							      (test #f values poll?)
-							      s)))
+                                 (test #f values poll?)
+                                 s)))
   (test s sync/timeout 0 (choice-evt
-				  (poll-guard-evt (lambda (poll?)
-							      (test #t values poll?)
-							      s))
-				  (make-semaphore)))
+                          (poll-guard-evt (lambda (poll?)
+                                            (test #t values poll?)
+                                            s))
+                          (make-semaphore)))
   (test s sync (choice-evt
-				   (poll-guard-evt (lambda (poll?)
-							       (test #f values poll?)
-							       s))
-				   (make-semaphore))))
+                (poll-guard-evt (lambda (poll?)
+                                  (test #f values poll?)
+                                  s))
+                (make-semaphore))))
 
 ;; ----------------------------------------
 ;; Structures as waitables
@@ -487,8 +490,10 @@
 	  [real-took (/ (abs (- (current-milliseconds) real-msecs)) 1000.0)]
 	  [boundary (/ SYNC-BUSY-DELAY 6)])
       ;; Hack.
-      ;; The following test isn't reliable, so only Matthew should see it.
-      (when (regexp-match #rx"(mflatt)|(matthewf)" (path->string (find-system-path 'home-dir)))
+      ;; The following test isn't reliable, so only Matthew should see it,
+      ;; and only in non-parallel mode:
+      (when (and (regexp-match #rx"(mflatt)|(matthewf)" (path->string (find-system-path 'home-dir)))
+                 (equal? "" Section-prefix))
 	(test busy? (lambda (a ax b c d) (> b c)) 'busy-wait? go took boundary real-took)))))
 
 (define (test-good-waitable wrap-sema)
@@ -503,13 +508,11 @@
       (semaphore-post sema)
       (let ()
 	(define (non-busy-wait waitable get-result)
-	  (check-busy-wait
-	   (lambda ()
-	     (thread (lambda ()
-		       (sleep SYNC-BUSY-DELAY)
-		       (semaphore-post sema)))
-	     (test (get-result) sync waitable))
-	   #f)
+          (begin
+            (thread (lambda ()
+                      (sync (system-idle-evt))
+                      (semaphore-post sema)))
+            (test (get-result) sync waitable))
 	  (test #f sync/timeout 0 waitable)
 	  (semaphore-post sema)
 	  (test (get-result) sync waitable)
@@ -586,7 +589,7 @@
        (thread (lambda ()
 		 (sleep SYNC-BUSY-DELAY)
 		 (set! go? #t)))
-       (test bad-stuck-port sync/timeout (* 3 SYNC-BUSY-DELAY) bad-stuck-port))
+       (test bad-stuck-port sync bad-stuck-port))
      #t)))
 
 (test-stuck-port (make-semaphore 1) semaphore-try-wait? semaphore-post)
@@ -666,12 +669,12 @@
     (test t sync/timeout 0 s)
     (test t sync/timeout 0 r)
     (let* ([s (thread-suspend-evt t)])
-      (thread (lambda () (sleep SYNC-SLEEP-DELAY) (thread-suspend t)))
+      (thread (lambda () (sync (system-idle-evt)) (thread-suspend t)))
       (test #f sync/timeout 0 s)
       (test t sync s)
       (let* ([r (thread-resume-evt t)]
 	     [d (thread-dead-evt t)])
-	(thread (lambda () (sleep SYNC-SLEEP-DELAY) (thread-resume t)))
+	(thread (lambda () (sync (system-idle-evt)) (thread-resume t)))
 	(test #f sync/timeout 0 r)
 	(test t sync r)
 
@@ -705,7 +708,11 @@
 	[sl (lambda ()
 	      (let loop ([n 20])
 		(unless (zero? n) (sleep) (loop (sub1 n)))))]
-	[ok-done? (lambda (r) (<= (list-ref r 3) orig-scheduled))])
+	[ok-done? (lambda (r) 
+                    (or (<= (list-ref r 3) orig-scheduled)
+                        ;; If we're running parallel threads, 
+                        ;; just give up on the comparison.
+                        (not (equal? "" Section-prefix))))])
     (test #t
 	  ok-done?
 	  (let loop ([tries 0][n 100])

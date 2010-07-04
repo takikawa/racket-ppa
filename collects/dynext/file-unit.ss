@@ -1,15 +1,16 @@
 
 (module file-unit mzscheme
-  (require (lib "unitsig.ss"))
-  (require (lib "include.ss"))
+  (require (lib "unit.ss")
+           (lib "include.ss")
+           (lib "string.ss"))
 
   (require "file-sig.ss")
 
   (provide dynext:file@)
 
-  (define dynext:file@
-    (unit/sig dynext:file^
+  (define-unit dynext:file@
       (import)
+      (export dynext:file^)
 
       (define (append-zo-suffix s)
 	(path-replace-suffix s #".zo"))
@@ -28,12 +29,7 @@
 	   [(windows) #".obj"])))
 
       (define (append-extension-suffix s)
-	(path-replace-suffix
-	 s
-	 (case (system-type)
-	   [(unix beos) #".so"]
-	   [(macos macosx) #".dylib"]
-	   [(windows) #".dll"])))
+	(path-replace-suffix s (system-type 'so-suffix)))
 
       (define (extract-suffix appender)
 	(subbytes
@@ -47,7 +43,7 @@
 		      extract-base-filename/ext)
 	(let ([mk
 	       (lambda (who pat kind simple)
-		 (let ([rx (byte-regexp 
+		 (let ([rx (byte-pregexp
 			    (string->bytes/latin-1 (format "^(.*)\\.(~a)$" pat)))])
 		   (letrec ([extract-base-filename
 			     (case-lambda
@@ -77,10 +73,7 @@
 	       "compiled object"
 	       (extract-suffix append-object-suffix))
 	   (mk 'extract-base-filename/ext
-	       (case (system-type)
-		 [(unix beos) #"[sS][oO]"]
-		 [(macos macosx) #"[dD][yY][lL][iI][bB]"]
-		 [(windows) #"[dD][lL][lL]"])
+               (regexp-quote (subbytes (system-type 'so-suffix) 1) #f)
 	       "MzScheme extension"
-	       (extract-suffix append-extension-suffix))))))))
+	       (extract-suffix append-extension-suffix)))))))
 

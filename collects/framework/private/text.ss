@@ -5,32 +5,30 @@ WARNING: printf is rebound in the body of the unit to always
 
 |#
 
-(module text mzscheme
+(module text (lib "a-unit.ss")
   (require (lib "string-constant.ss" "string-constants")
-           (lib "unitsig.ss")
 	   (lib "class.ss")
            (lib "match.ss")
 	   "sig.ss"
 	   "../gui-utils.ss"
-	   (lib "mred-sig.ss" "mred")
+	   "../preferences.ss"
+           (lib "mred-sig.ss" "mred")
            (lib "interactive-value-port.ss" "mrlib")
 	   (lib "list.ss")
 	   (lib "etc.ss"))
-  (provide text@)
 
-  (define text@
-    (unit/sig framework:text^
-      (import mred^
-              [icon : framework:icon^]
-              [editor : framework:editor^]
-              [preferences : framework:preferences^]
-              [keymap : framework:keymap^]
-              [color-model : framework:color-model^]
-              [frame : framework:frame^]
-              [scheme : framework:scheme^]
-              [number-snip : framework:number-snip^])
-      
-      (rename [-keymap% keymap%])
+  (import mred^
+          [prefix icon: framework:icon^]
+          [prefix editor: framework:editor^]
+          [prefix keymap: framework:keymap^]
+          [prefix color-model: framework:color-model^]
+          [prefix frame: framework:frame^]
+          [prefix scheme: framework:scheme^]
+          [prefix number-snip: framework:number-snip^]
+          [prefix finder: framework:finder^])
+  (export (rename framework:text^
+                  [-keymap% keymap%]))
+  (init-depend framework:editor^)
       
       (define original-output-port (current-output-port))
       (define (printf . args) 
@@ -46,6 +44,7 @@ WARNING: printf is rebound in the body of the unit to always
       (define basic<%>
         (interface (editor:basic<%> (class->interface text%))
           highlight-range
+          unhighlight-range
           get-highlighted-ranges
           get-styles-fixed
           get-fixed-style
@@ -55,7 +54,7 @@ WARNING: printf is rebound in the body of the unit to always
       
       (define basic-mixin
         (mixin (editor:basic<%> (class->interface text%)) (basic<%>)
-          (inherit get-canvases get-admin split-snip get-snip-position
+          (inherit get-canvas get-canvases get-admin split-snip get-snip-position
                    begin-edit-sequence end-edit-sequence
                    set-autowrap-bitmap
                    delete find-snip invalidate-bitmap-cache
@@ -241,17 +240,28 @@ WARNING: printf is rebound in the body of the unit to always
                 (set! ranges (if (eq? priority 'high) (cons l ranges) (append ranges (list l))))
                 (recompute-range-rectangles)
                 (invalidate-rectangles range-rectangles)
-                (λ ()
-                  (let ([old-rectangles range-rectangles])
-                    (set! ranges
-                          (let loop ([r ranges])
-                            (cond
-                              [(null? r) r]
-                              [else (if (eq? (car r) l)
-                                        (cdr r)
-                                        (cons (car r) (loop (cdr r))))])))
-                    (recompute-range-rectangles)                    
-                    (invalidate-rectangles old-rectangles))))))
+                (λ () (unhighlight-range start end color bitmap caret-space?)))))
+
+          (define/public unhighlight-range
+            (opt-lambda (start end color [bitmap #f] [caret-space? #f])
+              (let ([old-rectangles range-rectangles])
+                (set! ranges
+                      (let loop ([r ranges])
+                        (cond
+                          [(null? r) r]
+                          [else (if (matching-rectangle? (car r) start end color bitmap caret-space?)
+                                    (cdr r)
+                                    (cons (car r) (loop (cdr r))))])))
+                (recompute-range-rectangles)
+                (invalidate-rectangles old-rectangles))))
+          
+          (define/private (matching-rectangle? r start end color bitmap caret-space?)
+            (and (equal? start (range-start r))
+                 (equal? end (range-end r))
+                 (eq? bitmap (range-b/w-bitmap r))
+                 (equal? color (range-color r))
+                 (equal? caret-space? (range-caret-space? r))))
+          
           (define/override (on-paint before dc left-margin top-margin right-margin bottom-margin dx dy draw-caret)
             (super on-paint before dc left-margin top-margin right-margin bottom-margin dx dy draw-caret)
             (recompute-range-rectangles)
@@ -353,7 +363,18 @@ WARNING: printf is rebound in the body of the unit to always
           (public initial-autowrap-bitmap)
           (define (initial-autowrap-bitmap) (icon:get-autowrap-bitmap))
           
-          (super-instantiate ())
+          (define/override (put-file directory default-name)
+            (let* ([canvas (get-canvas)]
+                   [parent (and canvas (send canvas get-top-level-window))])
+              (finder:put-file default-name
+                               directory
+                               #f
+                               (string-constant select-file)
+                               #f
+                               ""
+                               parent)))
+          
+          (super-new)
           (set-autowrap-bitmap (initial-autowrap-bitmap))))
       
       (define foreground-color<%>
@@ -645,6 +666,15 @@ WARNING: printf is rebound in the body of the unit to always
                     (loop (send snip next)))))
               (for-each
                (λ (range)
+                 (send delegate unhighlight-range 
+                       (range-start range)
+                       (range-end range)
+                       (range-color range)
+                       (range-b/w-bitmap range)
+                       (range-caret-space? range)))
+               (send delegate get-highlighted-ranges))
+              (for-each
+               (λ (range)
                  (send delegate highlight-range 
                        (range-start range)
                        (range-end range)
@@ -658,14 +688,16 @@ WARNING: printf is rebound in the body of the unit to always
           
           (define/override highlight-range
             (opt-lambda (start end color [bitmap #f] [caret-space? #f] [priority 'low])
-              (let ([res (super highlight-range start end color bitmap caret-space? priority)])
-                (if delegate
-                    (let ([delegate-res (send delegate highlight-range 
-                                              start end color bitmap caret-space? priority)]) 
-                      (λ ()
-                        (res)
-                        (delegate-res)))
-                    res))))
+              (when delegate
+                (send delegate highlight-range 
+                      start end color bitmap caret-space? priority))
+              (super highlight-range start end color bitmap caret-space? priority)))
+          
+          (define/override unhighlight-range
+            (opt-lambda (start end color [bitmap #f] [caret-space? #f])
+              (when delegate
+                (send delegate unhighlight-range start end color bitmap caret-space?))
+              (super unhighlight-range start end color bitmap caret-space?)))
           
           (inherit get-canvases get-active-canvas has-focus?)
           (define/override (on-paint before? dc left top right bottom dx dy draw-caret?)
@@ -940,6 +972,27 @@ WARNING: printf is rebound in the body of the unit to always
           (inherit set-flags get-flags)
           (set-flags (list* 'handles-events (get-flags)))))
       
+  (define out-style-name "text:ports out")
+  (define error-style-name "text:ports err")
+  (define value-style-name "text:ports value")
+  (let ([create-style-name
+         (λ (name sd)
+           (let* ([sl (editor:get-standard-style-list)])
+             (send sl new-named-style 
+                   name
+                   (send sl find-or-create-style
+                         (send sl find-named-style "Standard")
+                         sd))))])
+    (let ([out-sd (make-object style-delta% 'change-nothing)])
+      (send out-sd set-delta-foreground (make-object color% 150 0 150))
+      (create-style-name out-style-name out-sd))
+    (let ([err-sd (make-object style-delta% 'change-italic)])
+      (send err-sd set-delta-foreground (make-object color% 255 0 0))
+      (create-style-name error-style-name err-sd))
+    (let ([value-sd (make-object style-delta% 'change-nothing)])
+      (send value-sd set-delta-foreground (make-object color% 0 0 175))
+      (create-style-name value-style-name value-sd)))
+  
       (define ports-mixin
         (mixin (wide-snip<%>) (ports<%>)
           (inherit begin-edit-sequence
@@ -1079,18 +1132,9 @@ WARNING: printf is rebound in the body of the unit to always
           
           (define/pubment (submit-to-port? key) (inner #t submit-to-port? key))
           (define/pubment (on-submit) (inner (void) on-submit))
-          (define/public (get-out-style-delta) 
-            (let ([out-sd (make-object style-delta% 'change-nothing)])
-              (send out-sd set-delta-foreground (make-object color% 150 0 150))
-              out-sd))
-          (define/public (get-err-style-delta)
-            (let ([err-sd (make-object style-delta% 'change-italic)])
-              (send err-sd set-delta-foreground (make-object color% 255 0 0))
-              err-sd))
-          (define/public (get-value-style-delta)
-            (let ([value-sd (make-object style-delta% 'change-nothing)])
-              (send value-sd set-delta-foreground (make-object color% 0 0 175))
-              value-sd))
+          (define/public (get-out-style-delta) out-style-name)
+          (define/public (get-err-style-delta) error-style-name)
+          (define/public (get-value-style-delta) value-style-name)
 
           (define/public (get-box-input-editor-snip%) editor-snip%)
           (define/public (get-box-input-text%) input-box%)
@@ -1412,12 +1456,19 @@ WARNING: printf is rebound in the body of the unit to always
             
             (let* ([add-standard
                     (λ (sd)
-                      (let* ([style-list (get-style-list)] 
-                             [std (send style-list find-named-style "Standard")])
-                        (if std
-                            (send style-list find-or-create-style std sd)
-                            (let ([basic (send style-list find-named-style "Basic")])
-                              (send style-list find-or-create-style basic sd)))))]
+                      (cond
+                        [(string? sd)
+                         (let ([style-list (get-style-list)])
+                           (or (send style-list find-named-style sd)
+                               (send style-list find-named-style "Standard")
+                               (send style-list find-named-style "Basic")))]
+                        [sd
+                         (let* ([style-list (get-style-list)] 
+                                [std (send style-list find-named-style "Standard")])
+                           (if std
+                               (send style-list find-or-create-style std sd)
+                               (let ([basic (send style-list find-named-style "Basic")])
+                                 (send style-list find-or-create-style basic sd))))]))]
                    [out-style (add-standard (get-out-style-delta))]
                    [err-style (add-standard (get-err-style-delta))]
                    [value-style (add-standard (get-value-style-delta))])
@@ -2005,4 +2056,4 @@ WARNING: printf is rebound in the body of the unit to always
       (define clever-file-format% (clever-file-format-mixin file%))
       (define backup-autosave% (editor:backup-autosave-mixin clever-file-format%))
       (define searching% (searching-mixin backup-autosave%))
-      (define info% (info-mixin (editor:info-mixin searching%))))))
+      (define info% (info-mixin (editor:info-mixin searching%))))

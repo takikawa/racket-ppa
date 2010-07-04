@@ -31,6 +31,12 @@ PLANNED FEATURES:
     (command-line
      "planet"
      (current-command-line-arguments)
+     (once-each
+      (("--force")
+       ""
+       "Used in conjunction with --create-package; force a package to be"
+       "created even its info.ss file contains errors."
+       (force-package-building? #t)))
      (once-any
       (("-f" "--file")
        plt-file owner maj min
@@ -106,13 +112,16 @@ PLANNED FEATURES:
          "Remove all linkage the given module has, forcing it to upgrade"
          ...)))
 
-    (for-each (lambda (f) (f)) actions))
+    (cond
+      ; make showing the installed packages the default thing to do.
+      [(null? actions) (show-installed-packages)]
+      [else (for-each (lambda (f) (f)) actions)]))
   
   ;; ============================================================
   ;; FEATURE IMPLEMENTATIONS
   
-  (define (fail s . args) 
-    (raise (make-exn:fail (string->immutable-string (apply format s args)) (current-continuation-marks))))
+  (define (fail s . args)
+    (raise (make-exn:fail (apply format s args) (current-continuation-marks))))
   
   (define (download/install owner name majstr minstr)
     (let* ([maj (read-from-string majstr)]

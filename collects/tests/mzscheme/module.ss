@@ -224,5 +224,71 @@
 (test 18 values w_cr)
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Test proper bindings for `#%module-begin'
+
+(test (void) eval
+      '(begin
+	 (module mod_beg2 mzscheme
+		 (provide (all-from-except mzscheme #%module-begin))
+		 (provide (rename mb #%module-begin))
+		 (define-syntax (mb stx)
+		   (syntax-case stx ()
+		     [(_ . forms)
+		      #`(#%plain-module-begin 
+			 #,(datum->syntax-object stx '(require-for-syntax mzscheme))
+			 . forms)])))
+	 (module m mod_beg2
+		 3)))
+
+
+(test (void) eval
+      '(begin
+	 (module mod_beg2 mzscheme
+		 (provide (all-from-except mzscheme #%module-begin))
+		 (provide (rename mb #%module-begin))
+		 (define-syntax (mb stx)
+		   (syntax-case stx ()
+		     [(_ . forms)
+		      #`(#%plain-module-begin 
+			 #,(datum->syntax-object stx '(require-for-syntax mzscheme))
+			 . forms)])))
+	 (module m mod_beg2
+		 3 4)))
+
+(test (void) eval
+      '(begin
+	 (module mod_beg2 mzscheme
+		 (provide (all-from-except mzscheme #%module-begin))
+		 (provide (rename mb #%module-begin))
+		 (define-syntax (mb stx)
+		   (syntax-case stx ()
+		     [(mb . forms)
+		      #`(#%plain-module-begin 
+			 #,(datum->syntax-object #'mb '(require-for-syntax mzscheme))
+			 . forms)])))
+	 (module m mod_beg2
+		 3)))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(let ([f1 "tmp1.ss"]
+      [f2 "tmp2.ss"]
+      [exn:fail-cycle? (lambda (exn)
+                         (and (exn:fail? exn)
+                              (regexp-match? #rx"cycle" (exn-message exn))))])
+  (with-output-to-file f1
+    (lambda ()
+      (write `(module tmp1 mzscheme (require ,f2))))
+    'truncate/replace)
+  (with-output-to-file f2
+    (lambda ()
+      (write `(module tmp2 mzscheme (require ,f1))))
+    'truncate/replace)
+  (err/rt-test (dynamic-require (build-path (current-directory) f1) #f) exn:fail-cycle?)
+  (err/rt-test (dynamic-require (build-path (current-directory) f2) #f) exn:fail-cycle?)
+  (delete-file f1)
+  (delete-file f2))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (report-errs)

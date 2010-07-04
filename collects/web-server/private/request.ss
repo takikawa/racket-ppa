@@ -25,6 +25,13 @@
          (read-request-line ip))
        (define headers 
          (read-headers ip))
+       (define _
+         (match (headers-assq* #"Content-Length" headers)
+              [(struct header (f v))
+               ; Give it one second per byte (with 5 second minimum... a bit arbitrary)               
+               (adjust-connection-timeout! conn (max 5 (string->number (bytes->string/utf-8 v))))]
+              [#f
+               (void)]))
        (define-values (host-ip client-ip)
          (port-addresses ip))
        (define-values (bindings raw-post-data)

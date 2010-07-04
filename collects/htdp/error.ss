@@ -18,7 +18,7 @@
   (define-struct (tp-exn exn) ())
      
   (define (tp-error name fmt . args)
-    (raise (make-tp-exn (string->immutable-string (string-append (format "~a: " name) (apply format fmt args)))
+    (raise (make-tp-exn (string-append (format "~a: " name) (apply format fmt args))
                         (current-continuation-marks))))
 
   (define (number->ord i)
@@ -35,11 +35,14 @@
     (when (string? condition)
       (tp-error pname (string-append condition (format "~nin ~e" given)))))
 
-  ;; Symbol (_ -> Boolean) String X -> X 
-  (define (check-result pname pred? expected given)
+  ;; Symbol (_ -> Boolean) String X  X *-> X 
+  (define (check-result pname pred? expected given . other-given)
     (if (pred? given)
 	given
-	(tp-error pname "result of type <~a> expected, given: ~e" expected given)))
+	(tp-error pname "result of type <~a> expected, given: ~a" expected 
+                  (if (pair? other-given)
+                      (car other-given)
+                      given))))
 
   ;; check-arg : sym bool str str TST -> void
   (define (check-arg pname condition expected arg-posn given)

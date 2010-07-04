@@ -3,7 +3,7 @@
  * Purpose:     MrEd Windows event loop
  * Author:      Matthew Flatt
  * Created:     1996
- * Copyright:   (c) 2004-2006 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2007 PLT Scheme Inc.
  * Copyright:   (c) 1996, Matthew Flatt
  */
 
@@ -566,8 +566,8 @@ int wx_start_win_event(const char *who, HWND hWnd, UINT message, WPARAM wParam, 
     Scheme_Object *v;
     HiEventTramp *het;
 
-    v = scheme_get_param(scheme_current_thread->init_config, mred_het_param);
-    if (SCHEME_FALSEP(v))
+    v = scheme_extract_one_cc_mark(NULL, mred_het_key);
+    if (!v)
       het = NULL;
     else
       het = (HiEventTramp *)SCHEME_CAR(v);
@@ -740,8 +740,8 @@ void wx_end_win_event(const char *who, HWND hWnd, UINT message, int tramp)
     HiEventTramp *het;
     Scheme_Object *v;
 
-    v = scheme_get_param(scheme_current_thread->init_config, mred_het_param);
-    if (SCHEME_FALSEP(v))
+    v = scheme_extract_one_cc_mark(NULL, mred_het_key);
+    if (!v)
       het = NULL;
     else
       het = (HiEventTramp *)SCHEME_CAR(v);
@@ -780,8 +780,8 @@ static void CALLBACK HETRunSome(HWND hwnd, UINT uMsg, UINT idEvent, DWORD dwTime
   HiEventTramp *het;
   Scheme_Object *v;
   
-  v = scheme_get_param(scheme_current_thread->init_config, mred_het_param);
-  if (SCHEME_FALSEP(v))
+  v = scheme_extract_one_cc_mark(NULL, mred_het_key);
+  if (!v)
     het = NULL;
   else
     het = (HiEventTramp *)SCHEME_CAR(v);

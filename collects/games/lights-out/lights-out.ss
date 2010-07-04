@@ -5,12 +5,16 @@
            (lib "class.ss")
            (lib "unit.ss"))
   
-  (provide game-unit)
+  (provide game@
+           lights-out^)
   
-  (define game-unit
+  (define-signature lights-out^
+    (init-board))
+
+  (define game@
     (unit
       (import)
-      (export init-board) ;; : (board -> void) resets the window(s)
+      (export lights-out^) ;; : (board -> void) resets the window(s)
       
       (define frame (make-object frame% "Lights Out"))
       

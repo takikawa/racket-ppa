@@ -16,9 +16,9 @@
   (define (vector-copy v)
     (list->vector (vector->list v)))
 
-  (provide game-unit)
+  (provide game@)
   
-  (define game-unit
+  (define game@
     (unit 
       (import)
       (export)

@@ -143,4 +143,6 @@
               `(send (get-top-level-focus-window) close))))))))
   
   (test-open "frame:searchable open" 'frame:searchable%)
-  (test-open "frame:text open" 'frame:text%))
+  (test-open "frame:text open" 'frame:text%)
+  
+  )

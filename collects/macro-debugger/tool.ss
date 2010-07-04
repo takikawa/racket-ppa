@@ -2,51 +2,58 @@
 (module tool mzscheme
   (require (lib "class.ss")
            (lib "list.ss")
-           (lib "unitsig.ss")
+           (lib "unit.ss")
+           (lib "plt-match.ss")
            (lib "mred.ss" "mred")
            (lib "framework.ss" "framework")
            (lib "tool.ss" "drscheme")
            (lib "bitmap-label.ss" "mrlib")
            (lib "string-constant.ss" "string-constants")
            "model/trace.ss"
+           "model/deriv-c.ss"
+           "model/deriv-util.ss"
            (prefix view: "view/interfaces.ss")
            (prefix view: "view/gui.ss")
            (prefix view: "view/prefs.ss")
            (prefix sb: "syntax-browser/embed.ss"))
 
+  (provide tool@
+           language/macro-stepper<%>)
+
+  (define language/macro-stepper<%>
+    (interface ()
+      enable-macro-stepper?))
+
   (define view-base/tool@
-    (unit/sig view:view-base^
-        (import)
+    (unit
+      (import)
+      (export view:view-base^)
       (define base-frame%
         (frame:standard-menus-mixin frame:basic%))))
 
   (define stepper@
-    (compound-unit/sig
+    (compound-unit
       (import)
-      (link [BASE : view:view-base^ (view-base/tool@)]
-            [STEPPER : view:view^ (view:pre-stepper@ BASE)])
-      (export (open STEPPER))))
+      (link [((BASE : view:view-base^)) view-base/tool@]
+            [((STEPPER : view:view^)) view:pre-stepper@ BASE])
+      (export STEPPER)))
 
-  #;(define stepper@
-      (compound-unit/sig
-        (import)
-        (link (PREFS : view:prefs^ (view:prefs@))
-              (SB   : sb:implementation^ (sb:implementation@))
-              (BASE : view:view-base^ (view-base/tool@))
-              (VIEW : view:view^ (view:view@ PREFS BASE SB)))
-        (export (open VIEW))))
-  
-  (define-values/invoke-unit/sig view:view^ stepper@)
-
-  (provide tool@)
+  (define-values/invoke-unit stepper@ (import) (export view:view^))
 
   (define tool@
-    (unit/sig drscheme:tool-exports^
-      (import drscheme:tool^)
+    (unit (import drscheme:tool^)
+          (export drscheme:tool-exports^)
       
-      (define (phase1) (void))
+      (define (phase1)
+        (drscheme:language:extend-language-interface
+         language/macro-stepper<%>
+         (mixin (drscheme:language:language<%>) (language/macro-stepper<%>)
+           (inherit get-language-position)
+           (define/public (enable-macro-stepper?)
+             (macro-stepper-works-for? (get-language-position)))
+           (super-new))))
       (define (phase2) (void))
-      
+
       (define drscheme-eventspace (current-eventspace))
 
       (define-local-member-name check-language)
@@ -87,15 +94,16 @@
 	    (inner (void) on-tab-change old new))
 
           (define/public (check-language)
-	    (if (debugger-works-for?
-                 (extract-language-level 
-                  (send (get-definitions-text) get-next-settings)))
-		(unless (send macro-debug-button is-shown?)
-		  (send macro-debug-panel
-                        add-child macro-debug-button))
-		(when (send macro-debug-button is-shown?)
-                  (send macro-debug-panel
-                        delete-child macro-debug-button))))
+            (let ([lang
+                   (drscheme:language-configuration:language-settings-language
+                    (send (get-definitions-text) get-next-settings))])
+              (if (send lang enable-macro-stepper?)
+                  (unless (send macro-debug-button is-shown?)
+                          (send macro-debug-panel
+                                add-child macro-debug-button))
+                  (when (send macro-debug-button is-shown?)
+                        (send macro-debug-panel
+                              delete-child macro-debug-button)))))
 
           (send (get-button-panel) change-children
                 (lambda (_)
@@ -108,7 +116,9 @@
         (class %
           (inherit get-top-level-window)
           (define/augment (after-set-next-settings s)
-	    (send (get-top-level-window) check-language)
+            (let ([tlw (get-top-level-window)])
+              (when tlw
+                (send tlw check-language)))
 	    (inner (void) after-set-next-settings s))
           (super-new)))
 
@@ -126,14 +136,21 @@
       (define (macro-debugger-interactions-text-mixin %)
         (class %
           (super-new)
-          (inherit run-in-evaluation-thread)
+          (inherit run-in-evaluation-thread
+                   get-top-level-window)
 
           (define debugging? #f)
+
+          (define current-stepper #f)
+          
           (define/public (enable-macro-debugging ?)
             (set! debugging? ?))
 
           (define/override (reset-console)
             (super reset-console)
+            (when current-stepper
+              (send current-stepper add-obsoleted-warning)
+              (set! current-stepper #f))
             (run-in-evaluation-thread
              (lambda ()
                (let-values ([(e mnr) 
@@ -142,18 +159,22 @@
                  (current-eval e)
                  (current-module-name-resolver mnr)))))
 
+          (define/private (make-stepper filename)
+            (let ([frame (new macro-stepper-frame% (filename filename))])
+              (set! current-stepper frame)
+              (send frame show #t)
+              (send frame get-widget)))
+
           (define/private (make-handlers original-eval-handler original-module-name-resolver)
-            (let ([stepper
-                   (delay 
-                     (let ([frame (new macro-stepper-frame%)])
-                       (send frame show #t)
-                       (send frame get-widget)))]
-                  [debugging? debugging?])
+            (let* ([filename (send (send (get-top-level-window) get-definitions-text)
+                                   get-filename/untitled-name)]
+                   [stepper (delay (make-stepper filename))]
+                   [debugging? debugging?])
               (values
                (lambda (expr)
-                 (if (and debugging? (and (syntax? expr) (syntax-source expr)))
+                 (if (and debugging? (syntax? expr))
                      (let-values ([(e-expr deriv) (trace/result expr)])
-                       (show-deriv deriv stepper)
+                       (show-deriv/orig-parts deriv stepper)
                        (if (syntax? e-expr)
                            (parameterize ((current-eval original-eval-handler))
                              (original-eval-handler e-expr))
@@ -172,6 +193,47 @@
                          (set! debugging? saved-debugging?)
                          (when eo (current-expand-observe eo)))))))))
 
+          ;; show-deriv/orig-parts
+          ;; Strip off mzscheme's #%top-interaction
+          ;; Careful: the #%top-interaction node may be inside of a lift-deriv
+          (define/private (show-deriv/orig-parts deriv stepper-promise)
+            ;; adjust-deriv/lift : Derivation -> (list-of Derivation)
+            (define (adjust-deriv/lift deriv)
+              (match deriv
+                [(IntQ lift-deriv (e1 e2 first lifted-stx second))
+                 (let ([first (adjust-deriv/top first)])
+                   (and first
+                        (let ([e1 (lift/deriv-e1 first)])
+                          (rewrap deriv 
+                                  (make-lift-deriv e1 e2 first lifted-stx second)))))]
+                [else (adjust-deriv/top deriv)]))
+            ;; adjust-deriv/top : Derivation -> Derivation
+            (define (adjust-deriv/top deriv)
+              (if (syntax-source (lift/deriv-e1 deriv))
+                  deriv
+                  ;; It's not original...
+                  ;; Strip out mzscheme's top-interactions
+                  ;; Keep anything that is a non-mzscheme top-interaction
+                  ;; Drop everything else (not original program)
+                  (match deriv
+                    [(IntQ mrule (e1 e2 tx next))
+                     (match tx
+                       [(AnyQ transformation (e1 e2 rs me1 me2 locals seq))
+                        (cond [(ormap (lambda (x)
+                                        (module-identifier=? x #'#%top-interaction))
+                                      rs)
+                               ;; Just mzscheme's top-interaction; strip it out
+                               (adjust-deriv/top next)]
+                              [(equal? (map syntax-e rs) '(#%top-interaction))
+                               ;; A *different* top interaction; keep it
+                               deriv]
+                              [else
+                               ;; Not original and not tagged with top-interaction
+                               #f])])]
+                    [else #f])))
+            (let ([deriv* (adjust-deriv/lift deriv)])
+              (when deriv* (show-deriv deriv* stepper-promise))))
+
           (define/private (show-deriv deriv stepper-promise)
             (parameterize ([current-eventspace drscheme-eventspace])
               (queue-callback
@@ -180,13 +242,7 @@
 
       ;; Borrowed from mztake/debug-tool.ss
 
-      (define (extract-language-level settings)
-	(let* ([language
-                (drscheme:language-configuration:language-settings-language
-                 settings)])
-	  (send language get-language-position)))
-
-      (define (debugger-works-for? lang)
+      (define (macro-stepper-works-for? lang)
         (let ([main-group (car lang)]
               [second (and (pair? (cdr lang)) (cadr lang))]
               [third (and (pair? (cdr lang)) (pair? (cddr lang)) (caddr lang))])

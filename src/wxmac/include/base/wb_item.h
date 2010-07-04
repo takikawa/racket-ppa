@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	
- * Copyright:	(c) 2004-2006 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2007 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  */
 
@@ -48,7 +48,7 @@ class wxbItem: public wxWindow
    virtual void ProcessCommand(wxCommandEvent *event); // Calls the callback and 
 
   // Places item in centre of panel - so can't be used BEFORE panel->Fit()
-  void Centre(int direction = wxHORIZONTAL);
+   void Centre(int direction = wxHORIZONTAL, wxWindow *p = NULL);
 };
 
 #endif // IN_CPROTO

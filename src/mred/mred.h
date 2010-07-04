@@ -68,6 +68,8 @@ typedef struct MrEdContext {
   wxTimer *timer;
   MrEdEvent event;
 
+  wxTimer *timers;
+
   /* Alternate condition for nested event loop pending some condition */
   wxDispatch_Check_Fun alternate;
   void *alt_data;
@@ -134,8 +136,6 @@ typedef int (*HiEventTrampProc)(void *);
 
 class HiEventTramp {
 public:
-  HiEventTrampProc wrap_het_around_f;
-  void *wha_data;
   HiEventTrampProc do_f;
   void *do_data;
   int val;
@@ -156,7 +156,7 @@ public:
 
 int mred_het_run_some(HiEventTrampProc do_f, void *do_data);
 
-extern int mred_het_param;
+extern Scheme_Object *mred_het_key;
 
 int wxHiEventTrampoline(HiEventTrampProc wha_f, void *wha_data);
 
@@ -180,11 +180,15 @@ MRED_EXTERN void mred_set_run_from_cmd_line(MrEd_Run_From_Cmd_Line_Proc);
 # include "../mzscheme/src/schvers.h"
 
 #ifdef MZ_PRECISE_GC
-# define MRED3M "3m"
+# define mrVERSION_SUFFIX " [3m]"
 #else
-# define MRED3M ""
+# ifdef USE_SENORA_GC
+#  define mrVERSION_SUFFIX " [cgc~]"
+# else
+#  define mrVERSION_SUFFIX " [cgc]"
+# endif
 #endif
-#define BANNER "MrEd" MRED3M " version " MZSCHEME_VERSION ", Copyright (c) 2004-2006 PLT Scheme Inc.\n"
+#define BANNER "MrEd v" MZSCHEME_VERSION mrVERSION_SUFFIX ", Copyright (c) 2004-2007 PLT Scheme Inc.\n"
 
 #ifndef WINDOW_STDIO
 /* Removing "|| defined(wx_msw)" below uses the Windows console.
@@ -226,4 +230,5 @@ extern void WakeUpMrEd();
 
 #if defined(wx_xt)
 extern void wxUnhideAllCursors();
+int wxCheckSingleInstance(Scheme_Env *global_env);
 #endif

@@ -60,7 +60,7 @@
 ;;    the binding.
 
 (module driver mzscheme
-  (require (lib "unitsig.ss")
+  (require (lib "unit.ss")
 	   (lib "list.ss")
 	   (lib "file.ss")
 	   (lib "port.ss")
@@ -82,12 +82,11 @@
 
   (provide driver@)
 
-  (define driver@
-    (unit/sig compiler:driver^
-      (import (compiler:option : compiler:option^)
+  (define-unit driver@
+      (import (prefix compiler:option: compiler:option^)
 	      compiler:library^
 	      compiler:cstructs^
-	      (zodiac : zodiac^)
+	      (prefix zodiac: zodiac^)
 	      compiler:zlayer^
 	      compiler:prephase^
 	      compiler:anorm^
@@ -106,7 +105,8 @@
 	      dynext:compile^
 	      dynext:link^
 	      dynext:file^)
-      (rename (compile-extension* compile-extension))
+      (export (rename compiler:driver^
+                      [compile-extension* compile-extension]))
       
       (define debug:file "dump.txt")
       (define debug:port #f)
@@ -179,7 +179,7 @@
 			  input-name 
 			  (build-path c-dir (c-prefix (append-c-suffix base))))
 		      (and 3m?
-			   (build-path c3m-dir (c-prefix (append-c-suffix (path-suffix base #"3m")))))
+			   (build-path c3m-dir (c3m-prefix (append-c-suffix (path-suffix base #"3m")))))
 		      (build-path o-dir (o-prefix (append-constant-pool-suffix base)))
 		      (build-path o-dir (o-prefix (append-object-suffix base)))
 		      (build-path dest-dir (append-extension-suffix base))
@@ -226,10 +226,8 @@
 				   (when (compiler:option:debug)
 				     (debug "~a[~a.~a]_"
 					    n
-					    (zodiac:location-line
-					     (zodiac:zodiac-start sexp))
-					    (zodiac:location-column
-					     (zodiac:zodiac-start sexp))))
+					    (syntax-line sexp)
+					    (syntax-column sexp)))
 				   (cons sexp (loop (+ n 1))))))))])
 	    (unless (null? compiler:messages) (when (compiler:option:verbose) (newline)))
 	    (compiler:report-messages! #t)
@@ -587,8 +585,10 @@
 			(s:process-filenames input-name dest-directory from-c?
 					     (compiler:option:3m)
 					     (and (compiler:option:clean-intermediate-files)
+						  (or (not c-only?)
+						      (compiler:option:3m)))
+					     (and (compiler:option:clean-intermediate-files)
 						  (not c-only?))
-					     (compiler:option:clean-intermediate-files)
 					     (and (compiler:option:clean-intermediate-files)
 						  (not multi-o?)))])
 	    (unless (or (not input-path) (file-exists? input-path))
@@ -1355,7 +1355,7 @@
 		     c3m-output-path
 		     (list (find-include-dir)
 			   (collection-path "compiler")))
-
+	      
 	      (clean-up-src-c))))
 
 	;;--------------------------------------------------------------------
@@ -1363,7 +1363,7 @@
 	;;
 	
 	(if c-only?
-	    (printf " [output to \"~a\"]~n" c-output-path)
+	    (printf " [output to \"~a\"]~n" (or c3m-output-path c-output-path))
 	    
 	    (begin
 	      (unless input-path
@@ -1435,4 +1435,4 @@
 	(when (compiler:option:verbose)
 	  (printf " finished [cpu ~a, real ~a].~n"
 		  total-cpu-time
-		  total-real-time))))))))
+		  total-real-time)))))))

@@ -380,10 +380,10 @@
          ((null? (cdr path)) (make-dir-path (build-path 'same) #t))
          ((not (equal? (cadr path) "lib")) 
           (let ((dir (find-directory (cdr path) fail)))
-            (make-dir-path dir #t)))
+            (make-dir-path (dir-path-path dir) #t)))
          ((and (equal? (cadr path) "lib") (not (null? (cddr path))))
           (make-dir-path (apply collection-path (cddr path)) #t))
-         (else (make-dir-path (list "mzlib") #t))))
+         (else (make-dir-path (build-path "mzlib") #t))))
       (else
        (when (null? (classpath)) (classpath (get-classpath)))
        (let-values (((search)
@@ -1159,7 +1159,7 @@
                                 (apply append (map class-record-methods records))
                                 level)
              (method-error 'inherit-conflict 
-                           (method-record-name (car methods))
+                           (make-id (method-record-name (car methods)) #f)
                            (method-record-atypes (car methods))
                            (method-record-rtype (car methods))
                            (id-string (name-id from))

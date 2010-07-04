@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2006 PLT Scheme Inc.
+// Copyright:  (c) 2004-2007 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -264,7 +264,7 @@ void wxPanel::DoSetSize(int x, int y, int width, int height)
 
 
 //-----------------------------------------------------------------------------
-void wxPanel::Centre(int direction)
+void wxPanel::Centre(int direction, wxWindow *)
 {
   int width, height, panel_width, panel_height, new_x, new_y;
   wxPanel* father;

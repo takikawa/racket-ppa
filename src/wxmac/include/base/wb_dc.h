@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	
- * Copyright:	(c) 2004-2006 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2007 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  */
 
@@ -159,7 +159,7 @@ class wxbDC: public wxObject
   virtual void GetTextExtent(const char* string, double* x, double* y, double* descent = NULL,
   			     double* externalLeading = NULL, wxFont* the_font = NULL, 
 			     Bool combine=FALSE, Bool use16=FALSE,
-                             int d = 0) = 0;
+                             int d = 0, int len = -1) = 0;
   inline virtual Bool Ok(void) {return ok;};
   virtual void SetMapMode(int mode) = 0;
   inline virtual int  GetMapMode(void) {return mapping_mode;};

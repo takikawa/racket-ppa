@@ -106,6 +106,8 @@ scheme_uchar_folds
 scheme_uchar_combining_classes
 scheme_eval
 scheme_eval_multi
+scheme_eval_with_prompt
+scheme_eval_multi_with_prompt
 scheme_eval_compiled
 scheme_eval_compiled_multi
 _scheme_eval_compiled
@@ -115,13 +117,24 @@ scheme_apply_multi
 scheme_apply_no_eb
 scheme_apply_multi_no_eb
 scheme_apply_to_list
+scheme_apply_with_prompt
+scheme_apply_multi_with_prompt
+_scheme_apply_with_prompt
+_scheme_apply_multi_with_prompt
 scheme_eval_string
 scheme_eval_string_multi
 scheme_eval_string_all
+scheme_eval_string_with_prompt
+scheme_eval_string_multi_with_prompt
+scheme_eval_string_all_with_prompt
 _scheme_apply_known_prim_closure
 _scheme_apply_known_prim_closure_multi
 _scheme_apply_prim_closure
 _scheme_apply_prim_closure_multi
+scheme_call_with_prompt
+scheme_call_with_prompt_multi
+_scheme_call_with_prompt
+_scheme_call_with_prompt_multi
 scheme_values
 scheme_check_one_value
 scheme_tail_apply
@@ -151,6 +164,9 @@ GC_malloc_one_tagged
 GC_malloc_atomic_uncollectable
 scheme_malloc_uncollectable
 GC_malloc_array_tagged
+GC_malloc_allow_interior
+GC_malloc_atomic_allow_interior
+GC_malloc_tagged_allow_interior
 scheme_malloc_eternal
 scheme_end_stubborn_change
 scheme_calloc
@@ -186,6 +202,9 @@ scheme_make_hash_table
 scheme_make_hash_table_equal
 scheme_hash_set
 scheme_hash_get
+scheme_eq_hash_get
+scheme_hash_set_atomic
+scheme_hash_get_atomic
 scheme_hash_table_equal
 scheme_is_hash_table_equal
 scheme_clone_hash_table
@@ -246,6 +265,7 @@ scheme_make_sema
 scheme_post_sema
 scheme_post_sema_all
 scheme_wait_sema
+scheme_try_plain_sema
 scheme_char_constants
 scheme_make_channel
 scheme_make_channel_put_evt
@@ -255,6 +275,7 @@ scheme_get_long_long_val
 scheme_get_unsigned_long_long_val
 scheme_real_to_double
 scheme_make_cptr
+scheme_make_offset_cptr
 scheme_get_proc_name
 scheme_utf8_decode
 scheme_utf8_decode_as_prefix
@@ -355,6 +376,11 @@ scheme_close_output_port
 scheme_write_special
 scheme_write_special_nonblock
 scheme_make_write_evt
+scheme_port_record
+scheme_input_port_record
+scheme_output_port_record
+scheme_is_input_port
+scheme_is_output_port
 scheme_make_port_type
 scheme_make_input_port
 scheme_make_output_port
@@ -376,6 +402,7 @@ scheme_make_byte_string_input_port
 scheme_make_sized_byte_string_input_port
 scheme_make_byte_string_output_port
 scheme_get_sized_byte_string_output
+scheme_get_reset_sized_byte_string_output
 scheme_pipe
 scheme_pipe_with_limit
 scheme_make_null_output_port
@@ -391,9 +418,11 @@ scheme_getdrive
 scheme_split_path
 scheme_build_path
 scheme_path_to_directory_path
+scheme_path_to_complete_path
 scheme_make_path
 scheme_make_sized_path
 scheme_make_sized_offset_path
+scheme_make_sized_offset_kind_path
 scheme_make_path_without_copying
 scheme_alloc_fdset_array
 scheme_init_fdset_array
@@ -413,6 +442,7 @@ scheme_host_address_strerror
 scheme_getnameinfo
 scheme_get_port_file_descriptor
 scheme_get_port_socket
+scheme_socket_to_ports
 scheme_set_type_printer
 scheme_print_bytes
 scheme_print_utf8
@@ -470,6 +500,7 @@ scheme_equal
 scheme_hash_key
 scheme_equal_hash_key
 scheme_equal_hash_key2
+scheme_set_type_equality
 scheme_build_list
 scheme_build_list_offset
 scheme_make_list_immutable

@@ -3,7 +3,7 @@
   (require (lib "lex.ss" "parser-tools")
            "deriv.ss")
   (provide (all-defined))
-  
+
   (define-tokens basic-tokens
     (visit                ; syntax
      resolve              ; identifier
@@ -39,7 +39,12 @@
      local-pre            ; syntax
      local-post           ; syntax
      exit-local           ; syntax
+
+     enter-local/expr     ; syntax
+     exit-local/expr      ; (cons syntax expanded-expression)
      
+     variable            ; (cons identifier identifier)
+
      IMPOSSIBLE           ; useful for error-handling clauses that have no NoError counterpart
      ))
   
@@ -50,7 +55,7 @@
      renames-letrec-syntaxes  ; (cons (listof syntax) (cons (listof syntax) syntax))
      renames-block            ; (cons syntax syntax) ... different, contains both pre+post
      ))
-  (define-tokens prim-tokens
+  (define-empty-tokens prim-tokens
     (prim-module prim-#%module-begin
      prim-define-syntaxes prim-define-values
      prim-if prim-wcm prim-begin prim-begin0 prim-#%app prim-lambda
@@ -59,8 +64,7 @@
      prim-quote prim-quote-syntax prim-require prim-require-for-syntax
      prim-require-for-template prim-provide
      prim-set!
-     
-     variable            ; (cons identifier identifier)
+     prim-expression
      ))
   
   ;; ** Signals to tokens
@@ -83,7 +87,6 @@
       (12 . ,token-block->list)
       (13 . ,token-next-group)
       (14 . ,token-block->letrec)
-      #;(15 . renamer)
       (16 . ,token-renames-let)
       (17 . ,token-renames-lambda)
       (18 . ,token-renames-case-lambda)
@@ -132,6 +135,9 @@
       (135 . ,token-module-lift-end-loop)
       (136 . ,token-lift/let-loop)
       (137 . ,token-module-lift-loop)
+      (138 . prim-expression)
+      (139 . ,token-enter-local/expr)
+      (140 . ,token-exit-local/expr)
       ))
   
   (define (tokenize sig-n val pos)
@@ -143,5 +149,8 @@
            pos
            pos)
           (error 'tokenize "bad signal: ~s" sig-n))))
+
+  (define (signal->symbol sig-n)
+    (cdr (assv sig-n signal-mapping)))
   
   )

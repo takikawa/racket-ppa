@@ -1,6 +1,6 @@
 
 (module link-unit mzscheme
-  (require (lib "unitsig.ss")
+  (require (lib "unit.ss")
 	   (lib "include.ss")
 	   (lib "process.ss")
 	   (lib "sendevent.ss")
@@ -12,9 +12,9 @@
 
   (provide dynext:link@)
 
-  (define dynext:link@
-    (unit/sig dynext:link^
+  (define-unit dynext:link@
       (import)
+      (export dynext:link^)
 
       (define (path-string->string s)
 	(if (string? s) s (path->string s)))
@@ -28,8 +28,13 @@
 
       (define (get-unix-linker)
 	(let ([s (case (string->symbol (path->string (system-library-subpath #f)))
-		   [(rs6k-aix ppc-macosx i386-macosx ppc-darwin i386-darwin) "cc"]
-		   [else "ld"])])
+                   [(sparc-solaris i386-solaris 
+                                   sparc-sunos4
+                                   i386-freebsd-2.x
+                                   parisc-hpux
+                                   i386-cygwin)
+                    "ld"]
+		   [else "cc"])])
 	  (find-executable-path s s)))
       
       (define (check-valid-linker-path v)
@@ -85,17 +90,23 @@
       (define link-variant (make-parameter 
 			    'normal
 			    (lambda (s)
-			      (unless (memq s '(normal 3m))
-				(raise-type-error 'link-variant "'normal or '3m" s))
+			      (unless (memq s '(normal cgc 3m))
+				(raise-type-error 'link-variant "'normal, 'cgc, or '3m" s))
 			      s)))
+
+      (define (specific-link-variant)
+        (let ([v (link-variant)])
+          (if (eq? v 'normal)
+              (system-type 'gc)
+              v)))
 
       (define (wrap-3m s)
 	(lambda ()
-	  (list (format s (if (eq? '3m (link-variant)) "3m" "")))))
+	  (list (format s (if (eq? '3m (specific-link-variant)) "3m" "")))))
 
       (define (drop-3m s)
 	(lambda ()
-	  (if (eq? '3m (link-variant))
+	  (if (eq? '3m (specific-link-variant))
 	      null
 	      (list s))))
 
@@ -203,11 +214,14 @@
                                      [win-borland? "bcc"]
                                      [else "msvc"])
 				    f)))]
+	       [dllfile (lambda (f)
+			  (path->string
+			   (build-path std-library-dir f)))]
                [filethunk (lambda (f)
                             (lambda ()
 			      (map file (f))))]
 	       [wrap-xxxxxxx
-                (lambda (f)
+                (lambda (file f)
                   (lambda ()
                     (map (lambda (s)
                            (if (file-exists?
@@ -219,18 +233,21 @@
 	   [win-gcc? (append
 		      (if unix?
 			  null
-			  (list (wrap-xxxxxxx (wrap-3m "libmzsch~a~~a.lib"))
-				(wrap-xxxxxxx (drop-3m "libmzgc~a.lib"))))
+			  (list (wrap-xxxxxxx dllfile (wrap-3m "libmzsch~a~~a.dll"))
+				(wrap-xxxxxxx dllfile (drop-3m "libmzgc~a.dll"))))
 		      (list
-		       (mzdyn-maybe (filethunk (wrap-3m "mzdyn~a.exp")))
-		       (mzdyn-maybe (filethunk (wrap-3m "mzdyn~a.o")))
+		       (mzdyn-maybe (filethunk (wrap-3m "mzdyn~a.exp")))		       
+		       (mzdyn-maybe (filethunk (wrap-3m 
+						;; mzdyn.o is for Unix build, mzdynw.o for Windows
+						(format "mzdyn~a~~a.o"
+							(if unix? "" "w")))))
 		       (file "init.o")
 		       (file "fixup.o")))]
 	   [win-borland? (map file (if (current-use-mzdyn)
                                      (list "mzdynb.obj")
                                      null))]
-	   [else (list (wrap-xxxxxxx (wrap-3m "libmzsch~a~~a.lib"))
-		       (wrap-xxxxxxx (drop-3m "libmzgc~a.lib"))
+	   [else (list (wrap-xxxxxxx file (wrap-3m "libmzsch~a~~a.lib"))
+		       (wrap-xxxxxxx file (drop-3m "libmzgc~a.lib"))
 		       (mzdyn-maybe (filethunk (wrap-3m "mzdyn~a.exp")))
 		       (mzdyn-maybe (filethunk (wrap-3m "mzdyn~a.obj"))))])))
 
@@ -425,4 +442,4 @@
 		  (loop (add1 n))
 		  f)))))
 
-      (include (build-path "private" "macinc.ss")))))
+      (include (build-path "private" "macinc.ss"))))

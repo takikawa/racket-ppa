@@ -4,7 +4,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2006 PLT Scheme Inc.
+ * Copyright: (C) 2004-2007 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -20,7 +20,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301 USA.
  */
 
 #ifdef __GNUG__
@@ -320,7 +321,7 @@ static XPoint *wxEllipseToPolygon(double width, double height, double x, double 
 #ifdef MZ_PRECISE_GC
   p = (XPoint *)GC_malloc_atomic(sizeof(XPoint) * npoints);
 #else
-  p = new XPoint[npoints];
+  p = new WXGC_ATOMIC XPoint[npoints];
 #endif
 
   dx = x + width / 2;

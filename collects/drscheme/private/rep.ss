@@ -18,13 +18,13 @@ TODO
 ;;          user's io ports, to aid any debugging printouts.
 ;;          (esp. useful when debugging the users's io)
 (module rep mzscheme
-  (require (lib "unitsig.ss")
-           (lib "class.ss")
+  (require (lib "class.ss")
            (lib "file.ss")
            (lib "pretty.ss")
            (lib "etc.ss")
            (lib "list.ss")
            (lib "port.ss")
+           (lib "unit.ss")
            "drsig.ss"
            (lib "string-constant.ss" "string-constants")
 	   (lib "mred.ss" "mred")
@@ -60,22 +60,20 @@ TODO
      #f
      (current-break-parameterization)))
   
-  (define rep@
-    (unit/sig drscheme:rep^
-      (import (drscheme:init : drscheme:init^)
-              (drscheme:language-configuration : drscheme:language-configuration/internal^)
-	      (drscheme:language : drscheme:language^)
-              (drscheme:app : drscheme:app^)
-              (drscheme:frame : drscheme:frame^)
-              (drscheme:unit : drscheme:unit^)
-              (drscheme:text : drscheme:text^)
-              (drscheme:help-desk : drscheme:help-desk^)
-              (drscheme:teachpack : drscheme:teachpack^)
-              (drscheme:debug : drscheme:debug^)
-              [drscheme:eval : drscheme:eval^])
-      
-      (rename [-text% text%]
-              [-text<%> text<%>])
+  (define-unit rep@
+    (import (prefix drscheme:init: drscheme:init^)
+            (prefix drscheme:language-configuration: drscheme:language-configuration/internal^)
+            (prefix drscheme:language: drscheme:language^)
+            (prefix drscheme:app: drscheme:app^)
+            (prefix drscheme:frame: drscheme:frame^)
+            (prefix drscheme:unit: drscheme:unit^)
+            (prefix drscheme:text: drscheme:text^)
+            (prefix drscheme:help-desk: drscheme:help-desk^)
+            (prefix drscheme:debug: drscheme:debug^)
+            [prefix drscheme:eval: drscheme:eval^])
+    (export (rename drscheme:rep^
+                    [-text% text%]
+                    [-text<%> text<%>]))
 
       (define -text<%>
         (interface ((class->interface text%)
@@ -92,8 +90,6 @@ TODO
           get-user-eventspace
           get-user-thread
           get-user-namespace
-          get-user-teachpack-cache
-          set-user-teachpack-cache
 
           get-definitions-text
           
@@ -185,12 +181,6 @@ TODO
       ;; a port that accepts values for printing in the repl
       (define current-value-port (make-parameter #f))
 
-      ;; an error escape continuation that the user program can't
-      ;; change; DrScheme sets it, we use a parameter instead of an
-      ;; object field so that there's no non-weak pointer to the
-      ;; continuation from DrScheme.
-      (define current-error-escape-k (make-parameter void))
-            
       ;; drscheme-error-display-handler : (string (union #f exn) -> void
       ;; =User=
       ;; the timing is a little tricky here. 
@@ -261,7 +251,10 @@ TODO
                  ;; give break exn's a free pass on this one.
                  ;; sometimes they get raised in a funny place. 
                  ;; (see call-with-break-parameterization below)
-                 (fprintf (current-error-port) "ACK! didn't find drscheme's stackframe when filtering\n"))
+                 (unless (null? initial-stack)
+                   ;; sometimes, mzscheme just doesn't have any backtrace all. in that case,
+                   ;; don't print anything either.
+                   (fprintf (current-error-port) "ACK! didn't find drscheme's stackframe when filtering\n")))
                initial-stack]
               [else 
                (let ([top (car stack)])
@@ -373,9 +366,8 @@ TODO
                  obj
                  (λ (frame) (send frame prev-tab))))))
       
-      (send drs-bindings-keymap map-function "c:x;o" "toggle-focus-between-definitions-and-interactions")
-      (send drs-bindings-keymap map-function "c:tab" "toggle-focus-between-definitions-and-interactions")
-      (send drs-bindings-keymap map-function "c:shift:tab" "toggle-focus-between-definitions-and-interactions")
+    (send drs-bindings-keymap map-function "c:x;o" "toggle-focus-between-definitions-and-interactions")
+    (send drs-bindings-keymap map-function "c:f6" "toggle-focus-between-definitions-and-interactions")
       (send drs-bindings-keymap map-function "f5" "execute")
       (send drs-bindings-keymap map-function "f1" "search-help-desk")
       (send drs-bindings-keymap map-function "c:tab" "next-tab")
@@ -413,7 +405,9 @@ TODO
                   (send text copy-next-previous-expr)))
           
           (keymap:send-map-function-meta keymap "p" "put-previous-sexp")
-          (keymap:send-map-function-meta keymap "n" "put-next-sexp")))
+          (keymap:send-map-function-meta keymap "n" "put-next-sexp")
+          (send keymap map-function "c:up" "put-previous-sexp")
+          (send keymap map-function "c:down" "put-next-sexp")))
       
       (define scheme-interaction-mode-keymap (make-object keymap:aug-keymap%))
       (setup-scheme-interaction-mode-keymap scheme-interaction-mode-keymap)
@@ -424,7 +418,7 @@ TODO
       (define result-delta (make-object style-delta%)) ; used to be 'change-weight 'bold
       (define error-delta (make-object style-delta%
                             'change-style
-                            'slant))
+                            'italic))
       (send error-delta set-delta-foreground (make-object color% 255 0 0))
       (send result-delta set-delta-foreground (make-object color% 0 0 175))
       (send output-delta set-delta-foreground (make-object color% 150 0 150))
@@ -449,6 +443,8 @@ TODO
       (send* warning-style-delta
         (set-delta-foreground "BLACK")
         (set-delta-background "YELLOW"))
+    (define (get-welcome-delta) welcome-delta)
+    (define (get-dark-green-delta) dark-green-delta)
       
       ;; is-default-settings? : language-settings -> boolean
       ;; determines if the settings in `language-settings'
@@ -485,20 +481,23 @@ TODO
       (let ([marshall 
              (λ (lls)
                (map (λ (ls)
-                      (map (λ (s)
-                             (cond
-                               [(is-a? s string-snip%)
-                                (send s get-text 0 (send s get-count))]
-                               [(string? s) s]
-                               [else "'non-string-snip"]))
-                           ls))
+                      (list
+                       (apply
+                        string-append
+                        (reverse
+                         (map (λ (s)
+                                (cond
+                                  [(is-a? s string-snip%)
+                                   (send s get-text 0 (send s get-count))]
+                                  [(string? s) s]
+                                  [else "'non-string-snip"]))
+                              ls)))))
                     lls))]
             [unmarshall (λ (x) x)])
         (preferences:set-un/marshall
          'drscheme:console-previous-exprs
          marshall unmarshall))
       
-      (define error-color (make-object color% "PINK"))
       (define color? ((get-display-depth) . > . 8))
             
       ;; instances of this interface provide a context for a rep:text%
@@ -530,16 +529,29 @@ TODO
       (define bug-icon 
         (let ([bitmap
                (make-object bitmap%
-                 (build-path (collection-path "icons") "bug09.gif"))])
+                 (build-path (collection-path "icons") "bug09.png"))])
           (if (send bitmap ok?)
               (make-object image-snip% bitmap)
               (make-object string-snip% "[err]"))))
       
-      (define (no-user-evaluation-message frame)
-        (message-box
-         (string-constant evaluation-terminated)
-         (format (string-constant evaluation-terminated-explanation))
-         frame))
+    (define (no-user-evaluation-message frame exit-code memory-killed?)
+      (message-box
+       (string-constant evaluation-terminated)
+       (string-append
+        (string-constant evaluation-terminated-explanation)
+        (if exit-code
+            (string-append
+             "\n\n"
+             (if (zero? exit-code)
+                 (string-constant exited-successfully)
+                 (format (string-constant exited-with-error-code) exit-code)))
+            "")
+        (if memory-killed?
+            (string-append 
+             "\n\n"
+             (string-constant program-ran-out-of-memory))
+            ""))
+       frame))
       
       ;; insert/delta : (instanceof text%) (union snip string) (listof style-delta%) *-> (values number number)
       ;; inserts the string/stnip into the text at the end and changes the
@@ -592,6 +604,7 @@ TODO
                    get-out-port
                    get-snip-position
                    get-start-position
+                   get-styles-fixed
                    get-style-list
                    get-text
                    get-top-level-window
@@ -622,6 +635,7 @@ TODO
                    set-insertion-point
                    set-position
                    set-styles-sticky
+                   set-styles-fixed
                    set-unread-start-point
                    split-snip
                    thaw-colorer)
@@ -757,7 +771,7 @@ TODO
                                      [start (- (srcloc-position loc) 1)]
                                      [span (srcloc-span loc)]
                                      [finish (+ start span)])
-                                (send file highlight-range start finish error-color #f #f 'high)))
+                                (send file highlight-range start finish (drscheme:debug:get-error-color) #f #f 'high)))
                             locs)])
                   
                   (when (and definitions-text error-arrows)
@@ -891,24 +905,29 @@ TODO
                       (thread-running? (get-user-thread)))))
           
           (field (user-language-settings #f)
-                 (user-teachpack-cache (preferences:get 'drscheme:teachpacks))
+                 (user-custodian-parent #f)
+                 (memory-killed-thread #f)
                  (user-custodian #f)
+                 (custodian-limit (and (custodian-memory-accounting-available?)
+                                       (preferences:get 'drscheme:limit-memory)))
                  (user-eventspace-box (make-weak-box #f))
                  (user-namespace-box (make-weak-box #f))
-                 (user-thread-box (make-weak-box #f))
-                 (user-break-parameterization #f))
+                 (user-eventspace-main-thread #f)
+                 (user-break-parameterization #f)
+                 
+                 ;; user-exit-code (union #f (integer-in 0 255))
+                 ;; #f indicates that exit wasn't called. Integer indicates exit code
+                 (user-exit-code #f))
 
           (define/public (get-user-language-settings) user-language-settings)
           (define/public (get-user-custodian) user-custodian)
-          (define/public (get-user-teachpack-cache) user-teachpack-cache)
-          (define/public (set-user-teachpack-cache tpc) (set! user-teachpack-cache tpc))
           (define/public (get-user-eventspace) (weak-box-value user-eventspace-box))
-          (define/public (get-user-thread) (weak-box-value user-thread-box))
+          (define/public (get-user-thread) user-eventspace-main-thread)
           (define/public (get-user-namespace) (weak-box-value user-namespace-box))
           (define/pubment (get-user-break-parameterization) user-break-parameterization) ;; final method
-          
+          (define/pubment (get-custodian-limit) custodian-limit)
+          (define/pubment (set-custodian-limit c) (set! custodian-limit c))
           (field (in-evaluation? #f)
-                 (should-collect-garbage? #f)
                  (ask-about-kill? #f))
           (define/public (get-in-evaluation?) in-evaluation?)
           
@@ -932,7 +951,9 @@ TODO
                 (no-user-evaluation-message
                  (let ([canvas (get-active-canvas)])
                    (and canvas
-                        (send canvas get-top-level-window)))))))
+                        (send canvas get-top-level-window)))
+                 user-exit-code
+                 (not (thread-running? memory-killed-thread))))))
           (field (need-interaction-cleanup? #f))
           
           (define/private (cleanup-interaction) ; =Kernel=, =Handler=
@@ -1020,18 +1041,11 @@ TODO
           (define/public (set-submit-predicate p)
             (set! submit-predicate p))
           
-          ;; record this on an ivar in the class so that
-          ;; continuation jumps into old calls to evaluate-from-port
-          ;; continue to evaluate from the correct port.
-          (define get-sexp/syntax/eof #f)
           (define/public (evaluate-from-port port complete-program? cleanup) ; =Kernel=, =Handler=
             (send context disable-evaluation)
             (send context reset-offer-kill)
             (send context set-breakables (get-user-thread) (get-user-custodian))
             (reset-pretty-print-width)
-            (when should-collect-garbage?
-              (set! should-collect-garbage? #f)
-              (collect-garbage))
             (set! in-evaluation? #t)
             (update-running #t)
             (set! need-interaction-cleanup? #t)
@@ -1041,59 +1055,48 @@ TODO
                (let* ([settings (current-language-settings)]
                       [lang (drscheme:language-configuration:language-settings-language settings)]
                       [settings (drscheme:language-configuration:language-settings-settings settings)]
-                      [dummy-value (box #f)])
-                 (set! get-sexp/syntax/eof 
+                      [dummy-value (box #f)]
+                      [get-sexp/syntax/eof 
                        (if complete-program?
-                           (send lang front-end/complete-program port settings user-teachpack-cache)
-                           (send lang front-end/interaction port settings user-teachpack-cache)))
+                           (send lang front-end/complete-program port settings)
+                           (send lang front-end/interaction port settings))])
                  
                  ; Evaluate the user's expression. We're careful to turn on
                  ;   breaks as we go in and turn them off as we go out.
                  ;   (Actually, we adjust breaks however the user wanted it.)
-                 ; A continuation hop might take us out of this instance of
-                 ;   evaluation and into another one, which is fine.
                  
-                 (let/ec k
-                   (let ([saved-error-escape-k (current-error-escape-k)]
-                         [cleanup? #f])
-                     (dynamic-wind
-                      (λ ()
-                        (set! cleanup? #f)
-                        (current-error-escape-k (λ () 
-                                                  (set! cleanup? #t)
-                                                  (k (void)))))
-                      
-                      (λ () 
-                        (let loop ()
-                          (let ([sexp/syntax/eof (with-stacktrace-name (get-sexp/syntax/eof))])
-                            (unless (eof-object? sexp/syntax/eof)
-                              (call-with-break-parameterization
-                               user-break-parameterization
-                               ;; a break exn may be raised right at this point,
-                               ;; in which case the stack won't be in a trimmable state
-                               ;; so we don't complain (above) when we find an untrimmable 
-                               ;; break exn.
-                               (λ ()
-                                 (call-with-values
-                                  (λ ()
-                                    (with-stacktrace-name (eval-syntax sexp/syntax/eof)))
-                                  (λ x (display-results x)))))
-                              (loop))))
-                        (set! cleanup? #t))
-                      
-                      (λ () 
-                        (current-error-escape-k saved-error-escape-k)
-                        (when cleanup?
-                          (set! in-evaluation? #f)
-                          (update-running #f)
-                          (cleanup)
-                          (flush-output (get-value-port))
-                          (queue-system-callback/sync
-                           (get-user-thread)
-                           (λ () ; =Kernel=, =Handler= 
-                             (after-many-evals)
-                             (cleanup-interaction)
-                             (insert-prompt))))))))))))
+                 (call-with-continuation-prompt
+                  (λ ()
+                    (call-with-break-parameterization
+                     user-break-parameterization
+                     (λ ()
+                       (let loop ()
+                         (let ([sexp/syntax/eof (with-stacktrace-name (get-sexp/syntax/eof))])
+                           (unless (eof-object? sexp/syntax/eof)
+                             (call-with-values
+                              (λ () 
+                                (call-with-continuation-prompt
+                                 (λ () (with-stacktrace-name (eval-syntax sexp/syntax/eof)))
+                                 (default-continuation-prompt-tag)
+                                 (and complete-program?
+                                      (λ args
+                                        (abort-current-continuation 
+                                         (default-continuation-prompt-tag))))))
+                              (λ x (display-results x)))
+                             (loop)))))))
+                  (default-continuation-prompt-tag)
+                  (λ args (void)))
+                                  
+                 (set! in-evaluation? #f)
+                 (update-running #f)
+                 (cleanup)
+                 (flush-output (get-value-port))
+                 (queue-system-callback/sync
+                  (get-user-thread)
+                  (λ () ; =Kernel=, =Handler= 
+                    (after-many-evals)
+                    (cleanup-interaction)
+                    (insert-prompt)))))))
           
           (define/pubment (after-many-evals) (inner (void) after-many-evals))
           
@@ -1107,7 +1110,7 @@ TODO
               (when user-custodian
                 (custodian-shutdown-all user-custodian))
 	      (set! user-custodian #f)
-              (set! user-thread-box (make-weak-box #f))))
+              (set! user-eventspace-main-thread #f)))
           
           (define/public (kill-evaluation) ; =Kernel=, =Handler=
             (when user-custodian
@@ -1137,39 +1140,6 @@ TODO
                               (cleanup-interaction)
                               (cleanup)))))))))
           
-          (define/private protect-user-evaluation ; =User=, =Handler=, =No-Breaks=
-            (λ (thunk cleanup)
-              
-              ;; We only run cleanup if thunk finishes normally or tries to
-              ;; error-escape. Otherwise, it must be a continuation jump
-              ;; into a different call to protect-user-evaluation.
-              
-              ;; `thunk' is responsible for ensuring that breaks are off when
-              ;; it returns or jumps out.
-              
-              (set! in-evaluation? #t)
-              (update-running #t)
-              
-              (let/ec k
-                (let ([saved-error-escape-k (current-error-escape-k)]
-                      [cleanup? #f])
-                  (dynamic-wind
-                   (λ ()
-                     (set! cleanup? #f)
-                     (current-error-escape-k (λ () 
-					       (set! cleanup? #t)
-					       (k (void)))))
-                   (λ () 
-                     (thunk) 
-                     ; Breaks must be off!
-                     (set! cleanup? #t))
-                   (λ () 
-                     (current-error-escape-k saved-error-escape-k)
-                     (when cleanup?
-                       (set! in-evaluation? #f)
-                       (update-running #f)
-                       (cleanup))))))))
-          
           (define/public (run-in-evaluation-thread thunk) ; =Kernel=
             (semaphore-wait eval-thread-state-sema)
             (set! eval-thread-thunks (append eval-thread-thunks (list thunk)))
@@ -1179,105 +1149,125 @@ TODO
           (define/private (init-evaluation-thread) ; =Kernel=
             (set! user-language-settings (send definitions-text get-next-settings))
             
-            (set! user-custodian (make-custodian))
-            ; (custodian-limit-memory user-custodian 10000000 user-custodian)
-            (set! user-eventspace-box (make-weak-box
-                                       (parameterize ([current-custodian user-custodian])
-                                         (make-eventspace))))
-            (set! user-break-parameterization (parameterize-break 
-                                               #t 
-                                               (current-break-parameterization)))
-            (set! eval-thread-thunks null)
-            (set! eval-thread-state-sema (make-semaphore 1))
-            (set! eval-thread-queue-sema (make-semaphore 0))
-            
-            (let* ([init-thread-complete (make-semaphore 0)]
-                   [goahead (make-semaphore)])
+            (set! user-custodian-parent (make-custodian))
+            (set! user-custodian (parameterize ([current-custodian user-custodian-parent])
+                                   (make-custodian)))
+            (set! memory-killed-thread 
+                  (parameterize ([current-custodian user-custodian-parent])
+                    (thread (λ () (semaphore-wait (make-semaphore 0))))))
+            (when custodian-limit
+              (custodian-limit-memory user-custodian-parent 
+                                      custodian-limit
+                                      user-custodian-parent))
+            (let ([user-eventspace (parameterize ([current-custodian user-custodian])
+                                      (make-eventspace))])
+              (set! user-eventspace-box (make-weak-box user-eventspace))
+              (set! user-break-parameterization (parameterize-break 
+                                                 #t 
+                                                 (current-break-parameterization)))
+              (set! eval-thread-thunks null)
+              (set! eval-thread-state-sema (make-semaphore 1))
+              (set! eval-thread-queue-sema (make-semaphore 0))
+              (set! user-exit-code #f)
               
-              ; setup standard parameters
-              (let ([snip-classes
-                     ; the snip-classes in the DrScheme eventspace's snip-class-list
-                     (drscheme:eval:get-snip-classes)])
-                (queue-user/wait
-                 (λ () ; =User=, =No-Breaks=
-                   ; No user code has been evaluated yet, so we're in the clear...
-                   (break-enabled #f)
-                   (set! user-thread-box (make-weak-box (current-thread)))
-                   (initialize-parameters snip-classes))))
-              
-              ;; disable breaks until an evaluation actually occurs
-              (send context set-breakables #f #f)
-              
-              ;; initialize the language
-              (send (drscheme:language-configuration:language-settings-language user-language-settings)
-                    on-execute
-                    (drscheme:language-configuration:language-settings-settings user-language-settings)
-                    (let ([run-on-user-thread (lambda (t) (queue-user/wait t))])
-                      run-on-user-thread))
-              
-              ;; setup the special repl values
-              (let ([raised-exn? #f]
-                    [exn #f])
-                (queue-user/wait
-                 (λ () ; =User=, =No-Breaks=
-                   (with-handlers ((void (λ (x) 
-                                           (set! exn x)
-                                           (set! raised-exn? #t))))
-                     (drscheme:language:setup-setup-values))))
-                (when raised-exn?
-                  (fprintf 
-                   (current-error-port)
-                   "copied exn raised when setting up snip values (thunk passed as third argume to drscheme:language:add-snip-value)\n")
-                  (raise exn)))
-              
-              ;; installs the teachpacks
-              ;; must happen after language is initialized.
-              (queue-user/wait
-               (λ () ; =User=, =No-Breaks=
-                 (drscheme:teachpack:install-teachpacks 
-                  user-teachpack-cache)))
-              
-              (parameterize ([current-eventspace (get-user-eventspace)])
-                (queue-callback
-                 (λ ()
-                   (let ([drscheme-error-escape-handler
-                          (λ ()
-                            ((current-error-escape-k)))])
-                     (error-escape-handler drscheme-error-escape-handler))
-                   
-                   (set! in-evaluation? #f)
-                   (update-running #f)
-                   (send context set-breakables #f #f)
-                   
-                   ;; let init-thread procedure return,
-                   ;; now that parameters are set
-                   (semaphore-post init-thread-complete)
-                   
-                   ; We're about to start running user code.
-                   
-                   ; Pause to let killed-thread get initialized
-                   (semaphore-wait goahead)
-                   
-                   (let loop () ; =User=, =Handler=, =No-Breaks=
-                     ; Wait for something to do
-                     (unless (semaphore-try-wait? eval-thread-queue-sema)
-                       ; User event callbacks run here; we turn on
-                       ;  breaks in the dispatch handler.
-                       (yield eval-thread-queue-sema))
-                     ; About to eval something
-                     (semaphore-wait eval-thread-state-sema)
-                     (let ([thunk (car eval-thread-thunks)])
-                       (set! eval-thread-thunks (cdr eval-thread-thunks))
-                       (semaphore-post eval-thread-state-sema)
-                       ; This thunk evals the user's expressions with appropriate
-                       ;   protections.
-                       (thunk))
-                     (loop)))))
-              (semaphore-wait init-thread-complete)
-              ; Start killed-thread
-              (initialize-killed-thread)
-              ; Let user expressions go...
-              (semaphore-post goahead)))
+              (let* ([init-thread-complete (make-semaphore 0)]
+                     [goahead (make-semaphore)])
+                
+                ; setup standard parameters
+                (let ([snip-classes
+                       ; the snip-classes in the DrScheme eventspace's snip-class-list
+                       (drscheme:eval:get-snip-classes)]
+                      [drs-eventspace (current-eventspace)])
+                  (queue-user/wait
+                   (λ () ; =User=, =No-Breaks=
+                     ; No user code has been evaluated yet, so we're in the clear...
+                     (break-enabled #f)
+                     (set! user-eventspace-main-thread (current-thread))
+                     
+                     (let ([drscheme-exit-handler
+                            (λ (x)
+                              (parameterize-break
+                               #f
+                               (let ([s (make-semaphore)])
+                                 (parameterize ([current-eventspace drs-eventspace])
+                                   (queue-callback
+                                    (λ ()
+                                      (set! user-exit-code 
+                                            (if (and (integer? x)
+                                                     (<= 0 x 255))
+                                                x
+                                                0))
+                                      (semaphore-post s))))
+                                 (semaphore-wait s)
+                                 (custodian-shutdown-all user-custodian))))])
+                       (exit-handler drscheme-exit-handler))
+                     (initialize-parameters snip-classes))))
+                
+                ;; disable breaks until an evaluation actually occurs
+                (send context set-breakables #f #f)
+                
+                ;; initialize the language
+                (send (drscheme:language-configuration:language-settings-language user-language-settings)
+                      on-execute
+                      (drscheme:language-configuration:language-settings-settings user-language-settings)
+                      (let ([run-on-user-thread (lambda (t) (queue-user/wait t))])
+                        run-on-user-thread))
+                
+                ;; setup the special repl values
+                (let ([raised-exn? #f]
+                      [exn #f])
+                  (queue-user/wait
+                   (λ () ; =User=, =No-Breaks=
+                     (with-handlers ((void (λ (x) 
+                                             (set! exn x)
+                                             (set! raised-exn? #t))))
+                       (drscheme:language:setup-setup-values))))
+                  (when raised-exn?
+                    (fprintf 
+                     (current-error-port)
+                     "copied exn raised when setting up snip values (thunk passed as third argume to drscheme:language:add-snip-value)\n")
+                    (raise exn)))
+                
+                (parameterize ([current-eventspace user-eventspace])
+                  (queue-callback
+                   (λ ()
+                     (set! in-evaluation? #f)
+                     (update-running #f)
+                     (send context set-breakables #f #f)
+                     
+                     ;; after this returns, future event dispatches
+                     ;; will use the user's break parameterization
+                     (initialize-dispatch-handler)
+                     
+                     ;; let init-thread procedure return,
+                     ;; now that parameters are set
+                     (semaphore-post init-thread-complete)
+                     
+                     ; We're about to start running user code.
+                     
+                     ; Pause to let killed-thread get initialized
+                     (semaphore-wait goahead)
+                     
+                     (let loop () ; =User=, =Handler=, =No-Breaks=
+                       ; Wait for something to do
+                       (unless (semaphore-try-wait? eval-thread-queue-sema)
+                         ; User event callbacks run here; we turn on
+                         ;  breaks in the dispatch handler.
+                         (yield eval-thread-queue-sema))
+                       ; About to eval something
+                       (semaphore-wait eval-thread-state-sema)
+                       (let ([thunk (car eval-thread-thunks)])
+                         (set! eval-thread-thunks (cdr eval-thread-thunks))
+                         (semaphore-post eval-thread-state-sema)
+                         ; This thunk evals the user's expressions with appropriate
+                         ;   protections.
+                         (thunk))
+                       (loop)))))
+                (semaphore-wait init-thread-complete)
+                ; Start killed-thread
+                (initialize-killed-thread)
+                ; Let user expressions go...
+                (semaphore-post goahead))))
           
           (define/private (queue-user/wait thnk)
             (let ([wait (make-semaphore 0)])
@@ -1351,74 +1341,72 @@ TODO
           ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
           
           ;; initialize-paramters : (listof snip-class%) -> void
-          (define/private initialize-parameters ; =User=
-            (λ (snip-classes)
-              
-              (current-language-settings user-language-settings)
-              (error-value->string-handler drscheme-error-value->string-handler)
-              (error-print-source-location #f)
-              (error-display-handler drscheme-error-display-handler)
-              (current-load-relative-directory #f)
-              (current-custodian user-custodian)
-              (current-load text-editor-load-handler)
-              
-              (drscheme:eval:set-basic-parameters snip-classes)
-              (current-rep this)
-              (let ([dir (or (send context get-directory)
+          (define/private (initialize-parameters snip-classes) ; =User=
+            
+            (current-language-settings user-language-settings)
+            (error-value->string-handler drscheme-error-value->string-handler)
+            (error-print-source-location #f)
+            (error-display-handler drscheme-error-display-handler)
+            (current-load-relative-directory #f)
+            (current-custodian user-custodian)
+            (current-load text-editor-load-handler)
+            
+            (drscheme:eval:set-basic-parameters snip-classes)
+            (current-rep this)
+            (let ([dir (or (send context get-directory)
                            drscheme:init:first-dir)])
-                (current-directory dir)
-                (current-load-relative-directory dir))
-              
-              (set! user-namespace-box (make-weak-box (current-namespace)))
-              
-              (current-output-port (get-out-port))
-              (current-error-port (get-err-port))
-              (current-value-port (get-value-port))
-              (current-input-port (get-in-box-port))
-              (let* ([primitive-dispatch-handler (event-dispatch-handler)])
-                (event-dispatch-handler
-                 (rec drscheme-event-dispatch-handler ; <= a name for #<...> printout
-                   (λ (eventspace) ; =User=, =Handler=
-                     ; Breaking is enabled if the user turned on breaks and
-                     ;  is in a `yield'. If we get a break, that's ok, because
-                     ;  the kernel never queues an event in the user's eventspace.
-                     (cond
-                       [(eq? eventspace (get-user-eventspace))
-                        ; =User=, =Handler=
-                        
-                        ; We must distinguish between "top-level" events and
-                        ;  those within `yield' in the user's program.
-                        (cond
-                          [(not in-evaluation?)
-                           ;; at this point, we must not be in a nested dispatch, so we can
-                           ;; just disable breaks and rely on call-with-break-parameterization
-                           ;; to restore them to the user's setting.
-                           
-                           (call-with-break-parameterization
-                            no-breaks-break-parameterization
-                            (λ ()
-                              ; =No-Breaks=
-                              (send context reset-offer-kill)
-                              (send context set-breakables (get-user-thread) (get-user-custodian))
-                              (protect-user-evaluation
-                               ; Run the dispatch:
-                               (λ () ; =User=, =Handler=, =No-Breaks=
-                                 (call-with-break-parameterization
-                                  user-break-parameterization
-                                  (λ () (primitive-dispatch-handler eventspace))))
-                               ; Cleanup after dispatch
-                               (λ ()
-                                 ;; in principle, the line below might cause
-                                 ;; a "race conditions" in the GUI. That is, there might
-                                 ;; be many little events that the user won't quite
-                                 ;; be able to break.
-                                 (send context set-breakables #f #f)))))]
-                          [else
-                           ; Nested dispatch; don't adjust interface
-                           (primitive-dispatch-handler eventspace)])]
-                       [else 
-                        ; =User=, =Non-Handler=, =No-Breaks=
-                        (primitive-dispatch-handler eventspace)])))))))
+              (current-directory dir)
+              (current-load-relative-directory dir))
+            
+            (set! user-namespace-box (make-weak-box (current-namespace)))
+            
+            (current-output-port (get-out-port))
+            (current-error-port (get-err-port))
+            (current-value-port (get-value-port))
+            (current-input-port (get-in-box-port)))
+          
+          (define/private (initialize-dispatch-handler) ;;; =User=
+            (let* ([primitive-dispatch-handler (event-dispatch-handler)])
+              (event-dispatch-handler
+               (rec drscheme-event-dispatch-handler ; <= a name for #<...> printout
+                 (λ (eventspace) ; =User=, =Handler=
+                   ; Breaking is enabled if the user turned on breaks and
+                   ;  is in a `yield'. If we get a break, that's ok, because
+                   ;  the kernel never queues an event in the user's eventspace.
+                   (cond
+                     [(eq? eventspace (get-user-eventspace))
+                      ; =User=, =Handler=
+                      
+                      ; We must distinguish between "top-level" events and
+                      ;  those within `yield' in the user's program.
+                      (cond
+                        [(not in-evaluation?)
+                         ;; at this point, we must not be in a nested dispatch, so we can
+                         ;; just disable breaks and rely on call-with-break-parameterization
+                         ;; to restore them to the user's setting.
+                         (call-with-break-parameterization
+                          no-breaks-break-parameterization
+                          (λ ()
+                            ; =No-Breaks=
+                            (send context reset-offer-kill)
+                            (send context set-breakables (get-user-thread) (get-user-custodian))
+                            (call-with-continuation-prompt
+                             (λ () ; =User=, =Handler=, =No-Breaks=
+                               (call-with-break-parameterization
+                                user-break-parameterization
+                                (λ () (primitive-dispatch-handler eventspace)))))
+                            
+                            ;; in principle, the line below might cause
+                            ;; "race conditions" in the GUI. That is, there might
+                            ;; be many little events that the user won't quite
+                            ;; be able to break.
+                            (send context set-breakables #f #f)))]
+                        [else
+                         ; Nested dispatch; don't adjust interface
+                         (primitive-dispatch-handler eventspace)])]
+                     [else 
+                      ; =User=, =Non-Handler=, =No-Breaks=
+                      (primitive-dispatch-handler eventspace)]))))))
           
           (define/public (new-empty-console)
             (queue-user/wait
@@ -1436,7 +1424,6 @@ TODO
             (clear-box-input-port)
             (clear-output-ports)
             (set-allow-edits #t)
-            (set! should-collect-garbage? #t)
             
             ;; in case the last evaluation thread was killed, clean up some state.
             (lock #f)
@@ -1471,18 +1458,23 @@ TODO
                                click-delta)))
             (unless (is-default-settings? user-language-settings)
               (insert/delta this (string-append " " (string-constant custom)) dark-green-delta))
+            (when custodian-limit
+              (insert/delta this 
+                            "; memory limit: "
+                            welcome-delta)
+              (insert/delta this
+                            (format "~a megabytes" (floor (/ custodian-limit 1024 1024)))
+                            dark-green-delta))
             (insert/delta this ".\n" welcome-delta)
             
-            (for-each
-             (λ (fn)
-               (insert/delta this
-                             (string-append (string-constant teachpack) ": ")
-                             welcome-delta)
-               (insert/delta this fn dark-green-delta)
-               (insert/delta this ".\n" welcome-delta))
-             (map path->string 
-                  (drscheme:teachpack:teachpack-cache-filenames 
-                   user-teachpack-cache)))
+            (let ([osf (get-styles-fixed)])
+              (set-styles-fixed #f)
+              (send (drscheme:language-configuration:language-settings-language user-language-settings)
+                    extra-repl-information
+                    (drscheme:language-configuration:language-settings-settings user-language-settings)
+                    (open-output-text-editor this 'end))
+              (set-styles-fixed osf))
+            
             (set! setting-up-repl? #f)
             
             (set! already-warned? #f)
@@ -1499,8 +1491,12 @@ TODO
             (set! setting-up-repl? #t)
             (insert/delta this (string-append (string-constant welcome-to) " ") welcome-delta)
             (let-values ([(before after)
-                          (insert/delta this (string-constant drscheme) click-delta drs-font-delta)])
-              (insert/delta this (format (string-append ", " (string-constant version) " ~a.\n") (version:version))
+                          (insert/delta this 
+                                        (string-constant drscheme)
+                                        click-delta
+                                        drs-font-delta)])
+              (insert/delta this (format (string-append ", " (string-constant version) " ~a [~a].\n") 
+                                         (version:version) (system-type 'gc))
                             welcome-delta)
               (set-clickback before after 
                              (λ args (drscheme:app:about-drscheme))
@@ -1514,7 +1510,7 @@ TODO
              (λ () ; =User=, =No-Breaks=
                (send (drscheme:language-configuration:language-settings-language user-language-settings)
                      first-opened)))
-
+            
             (insert-prompt)
             (send context enable-evaluation)
             (end-edit-sequence)
@@ -1555,24 +1551,22 @@ TODO
                 (set-position (last-position))
                 (end-edit-sequence))))
           
-          (define/public copy-next-previous-expr
-            (λ ()
-              (let ([previous-exprs (get-previous-exprs)])
-                (unless (null? previous-exprs)
-                  (set! previous-expr-pos
-                        (if (< (add1 previous-expr-pos) (length previous-exprs))
-                            (add1 previous-expr-pos)
-                            0))
-                  (copy-previous-expr)))))
-          (define/public copy-prev-previous-expr
-            (λ ()
-              (let ([previous-exprs (get-previous-exprs)])
-                (unless (null? previous-exprs)
-                  (set! previous-expr-pos
-                        (if (previous-expr-pos . <= . 0)
-                            (sub1 (length previous-exprs))
-                            (sub1 previous-expr-pos)))
-                  (copy-previous-expr)))))
+          (define/public (copy-next-previous-expr)
+            (let ([previous-exprs (get-previous-exprs)])
+              (unless (null? previous-exprs)
+                (set! previous-expr-pos
+                      (if (< (add1 previous-expr-pos) (length previous-exprs))
+                          (add1 previous-expr-pos)
+                          0))
+                (copy-previous-expr))))
+          (define/public (copy-prev-previous-expr)
+            (let ([previous-exprs (get-previous-exprs)])
+              (unless (null? previous-exprs)
+                (set! previous-expr-pos
+                      (if (previous-expr-pos . <= . 0)
+                          (sub1 (length previous-exprs))
+                          (sub1 previous-expr-pos)))
+                (copy-previous-expr))))
           
           ;; private fields
           (define global-previous-exprs (preferences:get 'drscheme:console-previous-exprs))
@@ -1627,7 +1621,6 @@ TODO
                                            (floor (/ width char-width)))])
                     (send dc set-font old-font)
                     (pretty-print-columns new-columns))))))
-          
           (super-new)
           (auto-wrap #t)
           (set-styles-sticky #f)
@@ -1784,7 +1777,6 @@ TODO
              (text:info-mixin
               (editor:info-mixin
                (text:searching-mixin
-                (text:nbsp->space-mixin
-                 (mode:host-text-mixin
-                  (text:foreground-color-mixin
-                   text:clever-file-format%)))))))))))))))
+                (mode:host-text-mixin
+                 (text:foreground-color-mixin
+                  text:clever-file-format%)))))))))))))

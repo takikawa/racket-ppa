@@ -4,7 +4,7 @@
 	   (lib "file.ss")
 	   (lib "dirs.ss" "setup")
 	   (lib "list.ss")
-	   (prefix config: (lib "config.ss" "config"))
+	   (lib "variant.ss" "setup")
 	   (lib "filename-version.ss" "dynext")
 	   "private/macfw.ss"
 	   "private/windlldir.ss"
@@ -13,21 +13,21 @@
   (provide assemble-distribution)
 
   (define/kw (assemble-distribution dest-dir 
-				    binaries
+				    orig-binaries
 				    #:key
 				    [collects-path #f] ; relative to dest-dir
 				    [copy-collects null])
-    (let* ([types (map get-binary-type binaries)]
+    (let* ([types (map get-binary-type orig-binaries)]
 	   [_ (unless (directory-exists? dest-dir)
 		(make-directory dest-dir))]
 	   [sub-dirs (map (lambda (b type)
 			   (case (system-type)
 			     [(windows) #f]
 			     [(unix) "bin"]
-			     [(macosx) (if (memq type '(mred mred3m))
+			     [(macosx) (if (memq type '(mredcgc mred3m))
 					   #f
 					   "bin")]))
-			  binaries
+			  orig-binaries
 			  types)]
 	   ;; Copy binaries into place:
 	   [binaries
@@ -39,7 +39,7 @@
 		       (make-directory dest-dir))
 		     (let-values ([(base name dir?) (split-path b)])
 		       (let ([dest (build-path dest-dir name)])
-			 (if (and (memq type '(mred mred3m))
+			 (if (and (memq type '(mredcgc mred3m))
 				  (eq? 'macosx (system-type)))
 			     (begin
 			       (copy-app b dest)
@@ -47,14 +47,14 @@
 			     (begin
 			      (copy-file* b dest)
 			      dest))))))
-		 binaries
+		 orig-binaries
 		 sub-dirs
 		 types)]
 	   [single-mac-app? (and (eq? 'macosx (system-type))
 				 (= 1 (length types))
-				 (memq (car types) '(mred mred3m)))])
-      ;; Create directories for libs and collects:
-      (let-values ([(lib-dir collects-dir relative-collects-dir)
+				 (memq (car types) '(mredcgc mred3m)))])
+      ;; Create directories for libs, collects, and extensions:
+      (let-values ([(lib-dir collects-dir relative-collects-dir exts-dir relative-exts-dir)
 		    (if single-mac-app?
 			;; Special case: single Mac OS X MrEd app:
 			(let-values ([(base name dir?)
@@ -69,21 +69,28 @@
 							  "collects")))
 			   (if collects-path
 			       (build-path 'up 'up 'up collects-path)
-			       (build-path 'up "Resources" "collects"))))
+			       (build-path 'up "Resources" "collects"))
+                           (build-path base 'up "Resources" "exts")
+                           (build-path 'up "Resources" "exts")))
 			;; General case:
-			(let ([relative-collects-dir 
-			       (or collects-path
-				   (build-path "lib"
-					       "plt"
-					       (let-values ([(base name dir?) 
-							     (split-path (car binaries))])
-						 (path-replace-suffix name #""))
-					       "collects"))])
+			(let* ([specific-lib-dir
+                                (build-path "lib"
+                                            "plt"
+                                            (let-values ([(base name dir?) 
+                                                          (split-path (car binaries))])
+                                              (path-replace-suffix name #"")))]
+                               [relative-collects-dir 
+                                (or collects-path
+                                    (build-path specific-lib-dir
+                                                "collects"))])
 			  (values (build-path dest-dir "lib")
 				  (build-path dest-dir relative-collects-dir)
-				  relative-collects-dir)))])
+				  relative-collects-dir
+                                  (build-path dest-dir specific-lib-dir "exts")
+                                  (build-path specific-lib-dir "exts"))))])
 	(make-directory* lib-dir)
 	(make-directory* collects-dir)
+	(make-directory* exts-dir)
 	;; Copy libs into place
 	(install-libs lib-dir types)
 	;; Copy collections into place
@@ -96,23 +103,36 @@
 		  copy-collects)
 	;; Patch binaries to find libs
 	(patch-binaries binaries types)
-	;; Patch binaries to find collects
-	(for-each (lambda (b type sub-dir)
-		    (set-collects-path 
-		     b 
-		     (collects-path->bytes 
-		      (cond
-		       [sub-dir
-			(build-path 'up relative-collects-dir)]
-		       [(and (eq? 'macosx (system-type))
-			     (memq type '(mred mredx))
-			     (not single-mac-app?))
-			(build-path 'up 'up 'up relative-collects-dir)]
-		       [else
-			relative-collects-dir]))))
-		  binaries types sub-dirs))
-      ;; Done!
-      (void)))
+        (let ([relative->binary-relative
+               (lambda (sub-dir type relative-dir)
+                 (cond
+                  [sub-dir
+                   (build-path 'up relative-dir)]
+                  [(and (eq? 'macosx (system-type))
+                        (memq type '(mredcgc mred3m))
+                        (not single-mac-app?))
+                   (build-path 'up 'up 'up relative-dir)]
+                  [else
+                   relative-dir]))])
+          ;; Patch binaries to find collects
+          (for-each (lambda (b type sub-dir)
+                      (set-collects-path 
+                       b 
+                       (collects-path->bytes 
+                        (relative->binary-relative sub-dir type relative-collects-dir))))
+                    binaries types sub-dirs)
+          ;; Copy over extensions and adjust embedded paths:
+          (copy-extensions-and-patch-binaries orig-binaries binaries types sub-dirs
+                                              exts-dir 
+                                              relative-exts-dir
+                                              relative->binary-relative)
+          ;; Copy over runtime files and adjust embedded paths:
+          (copy-runtime-files-and-patch-binaries orig-binaries binaries types sub-dirs
+                                                 exts-dir 
+                                                 relative-exts-dir
+                                                 relative->binary-relative)
+          ;; Done!
+          (void)))))
 
   (define (install-libs lib-dir types)
     (case (system-type)
@@ -130,8 +150,8 @@
 	      (list
 	       "iconv.dll"
 	       "UnicoWS.dll"))
-	 (when (or (memq 'mzscheme types)
-		   (memq 'mred types))
+	 (when (or (memq 'mzschemecgc types)
+		   (memq 'mredcgc types))
 	   (map copy-dll
 		(list
 		 (versionize "libmzsch~a.dll")
@@ -141,7 +161,7 @@
 	   (map copy-dll
 		(list
 		 (versionize "libmzsch3m~a.dll"))))
-	 (when (memq 'mred types)
+	 (when (memq 'mredcgc types)
 	   (map copy-dll
 		(list
 		 (versionize "libmred~a.dll"))))
@@ -150,11 +170,11 @@
 		(list
 		 (versionize "libmred3m~a.dll")))))]
       [(macosx)
-       (when (memq 'mzscheme types)
+       (when (memq 'mzschemecgc types)
 	 (copy-framework "MzScheme" #f lib-dir))
        (when (memq 'mzscheme3m types)
 	 (copy-framework "MzScheme" #t lib-dir))
-       (when (memq 'mred types)
+       (when (memq 'mredcgc types)
 	 (copy-framework "MrEd" #f lib-dir))
        (when (memq 'mred3m types)
 	 (copy-framework "MrEd" #t lib-dir))]
@@ -163,29 +183,30 @@
 	 (unless (directory-exists? lib-plt-dir)
 	   (make-directory lib-plt-dir))
 	 (let ([copy-bin
-		(lambda (name)
-		  (copy-file* (build-path (find-console-bin-dir) name)
+		(lambda (name variant)
+		  (copy-file* (build-path (find-console-bin-dir) 
+                                          (format "~a~a" name (variant-suffix variant #f)))
 			      (build-path lib-plt-dir 
-					  (format "~a-~a" name (version)))))])
-	   (when (memq 'mzscheme types)
-	     (copy-bin "mzscheme"))
+					  (format "~a~a-~a" name variant (version)))))])
+	   (when (memq 'mzschemecgc types)
+	     (copy-bin "mzscheme" 'cgc))
 	   (when (memq 'mzscheme3m types)
-	     (copy-bin "mzscheme3m"))
-	   (when (memq 'mred types)
-	     (copy-bin "mred"))
+	     (copy-bin "mzscheme" '3m))
+	   (when (memq 'mredcgc types)
+	     (copy-bin "mred" 'cgc))
 	   (when (memq 'mred3m types)
-	     (copy-bin "mred3m")))
+	     (copy-bin "mred" '3m)))
 	 (when (shared-libraries?)
-	   (when (or (memq 'mzscheme types)
-		     (memq 'mred types))
+	   (when (or (memq 'mzschemecgc types)
+		     (memq 'mredcgc types))
 	     (copy-shared-lib "mzscheme" lib-dir)
 	     (copy-shared-lib "mzgc" lib-dir))
 	   (when (or (memq 'mzscheme3m types)
 		     (memq 'mred3m types))
 	     (copy-shared-lib "mzscheme3m" lib-dir))
-	   (when (memq 'mred types)
+	   (when (memq 'mredcgc types)
 	     (copy-shared-lib "mred" lib-dir))
-	   (when (memq 'mred types)
+	   (when (memq 'mred3m types)
 	     (copy-shared-lib "mred3m" lib-dir))))]))
 
   (define (search-dll dll-dir dll)
@@ -270,18 +291,18 @@
 		 binaries)]
       [(macosx)
        (if (and (= 1 (length types))
-		(memq (car types) '(mred mred3m)))
+		(memq (car types) '(mredcgc mred3m)))
 	   ;; Special case for single MrEd app:
 	   (update-framework-path "@executable_path/../Frameworks/"
 				  (car binaries)
 				  #t)
 	   ;; General case:
 	   (for-each (lambda (b type)
-		       (update-framework-path (if (memq type '(mzscheme mzscheme3m))
+		       (update-framework-path (if (memq type '(mzschemecgc mzscheme3m))
 						  "@executable_path/../lib/" 
 						  "@executable_path/../../../lib/" )
 					      b
-					      (memq type '(mred mred3m))))
+					      (memq type '(mredcgc mred3m))))
 		     binaries types))]
       [(unix)
        (for-each (lambda (b type)
@@ -295,6 +316,7 @@
 		 types)]))
 
   (define (patch-stub-exe-paths b exe shared-lib-dir)
+    ;; Adjust paths to executable and DLL that is embedded in the executable
     (let-values ([(config-pos start end prog-len dll-len rest)
 		  (with-input-from-file b
 		    (lambda ()
@@ -304,13 +326,13 @@
 			  (error 'patch-stub-exe-paths
 				 "cannot find config info"))
 			(read-byte i)
-			(read-one-int i) ; start of prog data
-			(let ([start (read-one-int i)]
-			      [end (read-one-int i)])
+			(read-one-int i) ; start of prog
+			(let ([start (read-one-int i)] ; start of data
+			      [end (read-one-int i)]) ; end of data
 			  (file-position i start)
 			  (let ([prog-len (next-bytes-length i)]
 				[dll-len (next-bytes-length i)])
-			    (values (+ (cdar m) 1)
+			    (values (+ (cdar m) 1) ; position after "cOnFiG:[" tag
 				    start
 				    end
 				    prog-len
@@ -321,13 +343,13 @@
 				  (path->bytes (to-path shared-lib-dir))
 				  #"")])
 	(let ([delta (- (+ prog-len dll-len)
-			(bytes-length exe-bytes)
-			(bytes-length shared-lib-bytes))])
+			(add1 (bytes-length exe-bytes))
+			(add1 (bytes-length shared-lib-bytes)))])
 	  (with-output-to-file b
 	    (lambda ()
 	      (let ([o (current-output-port)])
-		(file-position o (+ config-pos 8))
-		(write-one-int (+ end delta) o)
+		(file-position o (+ config-pos 8)) ; update the end of the program data
+		(write-one-int (- end delta) o)
 		(flush-output o)
 		(file-position o start)
 		(write-bytes exe-bytes o)
@@ -337,6 +359,185 @@
 		(write-bytes rest o)
 		(flush-output o)))
 	    'update)))))
+
+  (define (copy-and-patch-binaries copy? magic
+                                   extract-src construct-dest transform-entry
+                                   init-counter inc-counter
+                                   orig-binaries binaries types sub-dirs 
+                                   exts-dir relative-exts-dir
+                                   relative->binary-relative)
+    (let loop ([orig-binaries orig-binaries]
+               [binaries binaries]
+               [types types]
+               [sub-dirs sub-dirs]
+               [counter init-counter])
+      (unless (null? binaries)
+        (let-values ([(exts start-pos end-pos)
+                      (with-input-from-file (car binaries)
+                        (lambda ()
+                          (let* ([i (current-input-port)]
+                                 [m (regexp-match-positions magic i)])
+                            (if m
+                                ;; Read table:
+                                (begin
+                                  (file-position i (cdar m))
+                                  (let ([l (read i)])
+                                    (values (cadr l) (cdar m) (file-position i))))
+                                ;; No table:
+                                (values null #f #f)))))])
+          (if (null? exts)
+              (loop (cdr orig-binaries) (cdr binaries) (cdr types) (cdr sub-dirs) counter)
+              (let-values ([(new-exts counter)
+                            ;; Copy over the extensions for this binary, generating a separate path
+                            ;; for each executable
+                            (let loop ([exts exts][counter counter])
+                              (if (null? exts)
+                                  (values null counter)
+                                  (let* ([src (extract-src (car exts) (car orig-binaries))]
+                                         [dest (construct-dest src)]
+                                         [sub (format "e~a" counter)])
+                                    (when (and src copy?)
+                                      ; Make dest and copy
+                                      (make-directory* (build-path exts-dir sub (or (path-only dest) 'same)))
+                                      (let ([f (build-path exts-dir sub dest)])
+                                        (when (or (file-exists? f)
+                                                  (directory-exists? f)
+                                                  (link-exists? f))
+                                          (delete-directory/files f))
+                                        (copy-directory/files src f)))
+                                    ;; Generate the new extension entry for the table, and combine with
+                                    ;; recur result for the rest:
+                                    (let-values ([(rest-exts counter)
+                                                  (loop (cdr exts) (inc-counter counter))])
+                                      (values (if src
+                                                  (cons (transform-entry
+                                                         (path->bytes 
+                                                          (relative->binary-relative (car sub-dirs) 
+                                                                                     (car types)
+                                                                                     (build-path relative-exts-dir sub dest)))
+                                                         (car exts))
+                                                        rest-exts)
+                                                  (cons (car exts)
+                                                        rest-exts))
+                                              counter)))))])
+                (when copy?
+                  ;; Update the binary with the new paths
+                  (let* ([str (string->bytes/utf-8 (format "~s" new-exts))]
+                         [extra-space 7] ; = "(quote" plus ")"
+                         [delta (- (- end-pos start-pos) (bytes-length str) extra-space)])
+                    (when (negative? delta)
+                      (error 'copy-and-patch-binaries
+                             "not enough room in executable for revised ~s table"
+                             magic))
+                    (with-output-to-file (car binaries)
+                      (lambda ()
+                        (let ([o (current-output-port)])
+                          (file-position o start-pos)
+                          (write-bytes #"(quote" o)
+                          (write-bytes str o)
+                          ;; Add space before final closing paren. This preserves space in case the
+                          ;; genereated binary is input for a future distribution build.
+                          (write-bytes (make-bytes delta (char->integer #\space)) o)
+                          (write-bytes #")" o)))
+                      'update)))
+                (loop (cdr orig-binaries) (cdr binaries) (cdr types) (cdr sub-dirs) counter)))))))
+
+  (define (copy-extensions-and-patch-binaries orig-binaries binaries types sub-dirs 
+                                              exts-dir relative-exts-dir
+                                              relative->binary-relative)
+    (copy-and-patch-binaries #t #rx#"eXtEnSiOn-modules"
+                             ;; extract-src:
+                             (lambda (ext orig-binary)
+                               (path->complete-path 
+                                (bytes->path (car ext))
+                                (let-values ([(base name dir?)
+                                              (split-path (path->complete-path orig-binary
+                                                                               (current-directory)))])
+                                  base)))
+                             ;; construct-dest:
+                             (lambda (src)
+                               (let-values ([(base name dir?) (split-path src)])
+                                 name))
+                             ;; transform-entry
+                             (lambda (new-path ext)
+                               (list new-path (cadr ext)))
+                             0 add1 ; <- counter
+                             orig-binaries binaries types sub-dirs 
+                             exts-dir relative-exts-dir
+                             relative->binary-relative))
+
+  (define (copy-runtime-files-and-patch-binaries orig-binaries binaries types sub-dirs 
+                                                 exts-dir relative-exts-dir
+                                                 relative->binary-relative)
+    (let ([paths null])
+      ;; Pass 1: collect all the paths
+      (copy-and-patch-binaries #f #rx#"rUnTiMe-paths"
+                               ;; extract-src:
+                               (lambda (rt orig-binary)
+                                 (and (cadr rt)
+                                      (bytes->path (cadr rt))))
+                               ;; construct-dest:
+                               (lambda (src)
+                                 (when src
+                                   (set! paths (cons src paths)))
+                                 "dummy")
+                               ;; transform-entry
+                               (lambda (new-path ext) ext)
+                               "rt" values ; <- counter
+                               orig-binaries binaries types sub-dirs 
+                               exts-dir relative-exts-dir
+                               relative->binary-relative)
+      (unless (null? paths)
+        ;; Determine the shared path prefix:
+        (let* ([root-table (make-hash-table 'equal)]
+               [root->path-element (lambda (root)
+                                     (hash-table-get root-table
+                                                     root
+                                                     (lambda ()
+                                                       (let ([v (format "r~a" (hash-table-count root-table))])
+                                                         (hash-table-put! root-table root v)
+                                                         v))))]
+               [explode (lambda (src)
+                          (reverse
+                           (let loop ([src src])
+                             (let-values ([(base name dir?) (split-path src)])
+                               (if base
+                                   (cons name (loop base))
+                                   (list (root->path-element name)))))))]
+               ;; In reverse order, so we can pick off the paths
+               ;;  in the second pass:
+               [exploded (reverse (map explode paths))]
+               [max-len (apply max 0 (map length exploded))]
+               [common-len (let loop ([cnt 0])
+                             (cond
+                               [((add1 cnt) . = . max-len) cnt]
+                               [(andmap (let ([i (list-ref (car exploded) cnt)])
+                                          (lambda (e)
+                                            (equal? (list-ref e cnt) i)))
+                                        exploded)
+                                (loop (add1 cnt))]
+                               [else cnt]))])
+
+               
+          ;; Pass 2: change all the paths
+          (copy-and-patch-binaries #t #rx#"rUnTiMe-paths"
+                                   ;; extract-src:
+                                   (lambda (rt orig-binary)
+                                     (and (cadr rt)
+                                          (bytes->path (cadr rt))))
+                                   ;; construct-dest:
+                                   (lambda (src)
+                                     (and src
+                                          (begin0
+                                           (apply build-path (list-tail (car exploded) common-len))
+                                           (set! exploded (cdr exploded)))))
+                                   ;; transform-entry
+                                   (lambda (new-path ext)
+                                     (cons (car ext) (list new-path)))
+                                   "rt" values ; <- counter
+                                   orig-binaries binaries types sub-dirs 
+                                   exts-dir relative-exts-dir
+                                   relative->binary-relative)))))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Utilities
@@ -366,10 +567,10 @@
 		  (if (equal? (caddr m) #"r")
 		      (if 3m?
 			  'mred3m
-			  'mred)
+			  'mredcgc)
 		      (if 3m?
 			  'mzscheme3m
-			  'mzscheme))))
+			  'mzschemecgc))))
 	      (error 'assemble-distribution
 		     "file is not a PLT executable: ~e"
 		     b))))))
@@ -410,7 +611,7 @@
 	      (link-exists? dest))
       (delete-directory/files dest))
     (copy-directory/files src dest))
-
+  
   (define (app-to-file b)
     (if (and (eq? 'macosx (system-type))
 	     (regexp-match #rx#"[.][aA][pP][pP]$" 

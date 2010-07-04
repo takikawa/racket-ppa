@@ -3,7 +3,7 @@
  * Purpose:     wxSnip implementations
  * Author:      Matthew Flatt
  * Created:     1995
- * Copyright:   (c) 2004-2006 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2007 PLT Scheme Inc.
  * Copyright:   (c) 1995-2002, Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -18,7 +18,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
  */
 
@@ -78,7 +79,7 @@ static void memmove(char *dest, char *src, long size)
 extern void *wxMallocAtomicIfPossible(size_t s);
 
 #define STRALLOC(n) new WXGC_ATOMIC wxchar[n]
-#define TRY_STRALLOC(n) (wxchar *)wxMallocAtomicIfPossible(n * sizeof(wxchar))
+#define TRY_STRALLOC(n) (wxchar *)wxMallocAtomicIfPossible((n) * sizeof(wxchar))
 #define STRFREE(s) /* empty */
 
 wxchar wx_empty_wxstr[1] = {0};
@@ -592,13 +593,9 @@ void wxTextSnip::SizeCacheInvalid(void)
 
 void wxTextSnip::GetTextExtent(wxDC *dc, int count, double *wo)
 {
-  wxchar save;
   double _w, h;
   wxFont *font;
   int i;
-
-  save = buffer[dtext + count];
-  buffer[dtext + count] = 0;
 
   for (i = count; i--; ) {
     wxchar c = buffer[dtext + i]; 
@@ -612,7 +609,7 @@ void wxTextSnip::GetTextExtent(wxDC *dc, int count, double *wo)
 #endif
 
   if (i < 0) {
-    dc->GetTextExtent((char *)buffer, &_w, &h, NULL, NULL, font, FALSE, TRUE, dtext);
+    dc->GetTextExtent((char *)buffer, &_w, &h, NULL, NULL, font, FALSE, TRUE, dtext, count);
   } else {
     /* text includes null chars */
     double ex_w;
@@ -628,10 +625,7 @@ void wxTextSnip::GetTextExtent(wxDC *dc, int count, double *wo)
       if (!buffer[dtext + i] || (buffer[dtext + i] == NON_BREAKING_SPACE) || (i == count)) {
 	if (i > start) {
 	  double piece_w, h;
-	  wxchar save = buffer[dtext + i];
-	  buffer[dtext + i] = 0;
-	  dc->GetTextExtent((char *)buffer, &piece_w, &h, NULL, NULL, NULL, FALSE, TRUE, dtext + start);
-	  buffer[dtext + i] = save;
+	  dc->GetTextExtent((char *)buffer, &piece_w, &h, NULL, NULL, NULL, FALSE, TRUE, dtext + start, i - start);
 	  _w += piece_w;
 	}
 	if (i < count) {
@@ -641,8 +635,6 @@ void wxTextSnip::GetTextExtent(wxDC *dc, int count, double *wo)
       }
     }
   }
-  
-  buffer[dtext + count] = save;
 
   *wo = _w;
 }
@@ -1713,7 +1705,7 @@ static MediaSnipClass *TheMediaSnipClass;
 MediaSnipClass::MediaSnipClass(void)
 {
   classname = "wxmedia";
-  version = 3;
+  version = 4;
   required = TRUE;
 }
 
@@ -1721,7 +1713,7 @@ wxSnip *MediaSnipClass::Read(wxMediaStreamIn *f)
 {
   wxMediaBuffer *media;
   wxMediaSnip *snip;
-  Bool border, tightFit = 0, alignTopLine = 0;
+  Bool border, tightFit = 0, alignTopLine = 0, useStyleBG = 0;
   int lm, tm, rm, bm, li, ti, ri, bi, type;
   double w, W, h, H;
   wxStandardSnipClassList *scl;
@@ -1746,6 +1738,8 @@ wxSnip *MediaSnipClass::Read(wxMediaStreamIn *f)
     f->Get(&tightFit);
   if (f->ReadingVersion(this) > 2)
     f->Get(&alignTopLine);
+  if (f->ReadingVersion(this) > 3)
+    f->Get(&useStyleBG);
   
   if (!type)
     media = NULL;
@@ -1769,6 +1763,8 @@ wxSnip *MediaSnipClass::Read(wxMediaStreamIn *f)
     snip->SetTightTextFit(1);
   if (alignTopLine)
     snip->SetAlignTopLine(1);
+  if (useStyleBG)
+    snip->UseStyleBG(1);
   
   if (media) {
     wxStyleList *sl;

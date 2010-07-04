@@ -7,7 +7,7 @@ profile todo:
 |#
 
 (module debug mzscheme
-  (require (lib "unitsig.ss")
+  (require (lib "unit.ss")
            (lib "stacktrace.ss" "errortrace")
            (lib "class.ss")
            (lib "list.ss")
@@ -23,14 +23,15 @@ profile todo:
   (define orig (current-output-port))
   
   (provide debug@)
-  (define debug@
-    (unit/sig drscheme:debug^
-      (import [drscheme:rep : drscheme:rep^]
-              [drscheme:frame : drscheme:frame^]
-              [drscheme:unit : drscheme:unit^]
-              [drscheme:language : drscheme:language^]
-              [drscheme:language-configuration : drscheme:language-configuration/internal^]
-              [drscheme:init : drscheme:init^])
+  (define-unit debug@
+    (import [prefix drscheme:rep: drscheme:rep^]
+            [prefix drscheme:frame: drscheme:frame^]
+            [prefix drscheme:unit: drscheme:unit^]
+            [prefix drscheme:language: drscheme:language^]
+            [prefix drscheme:language-configuration: drscheme:language-configuration/internal^]
+            [prefix drscheme:init: drscheme:init^])
+    (export drscheme:debug^)
+
 
       (define (oprintf . args) (apply fprintf orig args))
       
@@ -62,11 +63,17 @@ profile todo:
       (define (get-cm-key) cm-key)
 
       ;; error-delta : (instanceof style-delta%)
-      (define error-delta (make-object style-delta% 'change-style 'slant))
+      (define error-delta (make-object style-delta% 'change-style 'italic))
       (send error-delta set-delta-foreground (make-object color% 255 0 0))
       
-      ;; error-color : (instanceof color%)
-      (define error-color (make-object color% "PINK"))
+      ;; get-error-color : -> (instanceof color%)
+      (define get-error-color
+        (let ([w-o-b (make-object color% 63 0 0)]
+              [b-o-w (make-object color% "PINK")])
+          (λ ()
+            (if (preferences:get 'framework:white-on-black?)
+                w-o-b
+                b-o-w))))
       
       (define clickable-image-snip%
         (class image-snip%
@@ -132,9 +139,10 @@ profile todo:
           (set-flags (cons 'handles-events (get-flags)))))
       
       ;; make-note% : string -> (union class #f)
-      (define (make-note% filename)
+      (define (make-note% filename flag)
         (let ([bitmap (make-object bitmap% 
-                        (build-path (collection-path "icons") filename))])
+                        (build-path (collection-path "icons") filename)
+                        flag)])
           (and (send bitmap ok?)
                (letrec ([note%
                          (class clickable-image-snip%
@@ -147,9 +155,9 @@ profile todo:
                            (super-make-object bitmap))])
                  note%))))
       
-      (define bug-note% (make-note% "bug09.gif"))
-      (define mf-note% (make-note% "mf.gif"))
-      (define file-note% (make-note% "file.gif"))
+      (define bug-note% (make-note% "bug09.png" 'png/mask))
+      (define mf-note% (make-note% "mf.gif" 'gif))
+      (define file-note% (make-note% "file.gif" 'gif))
       
       ;; display-stats : (syntax -> syntax)
       ;; count the number of syntax expressions & number of with-continuation-marks in an 
@@ -189,7 +197,6 @@ profile todo:
                            [(begin expr ...)
                             ;; Found a `begin', so expand/eval each contained 
                             ;; expression one at a time 
-                            
                             (let i-loop ([exprs (syntax->list #'(expr ...))]
                                          [last-one (list (void))])
                               (cond
@@ -197,23 +204,17 @@ profile todo:
                                  (apply values last-one)]
                                 [else 
                                  (i-loop (cdr exprs)
-                                         (call-with-values (λ () (loop (car exprs)))
-                                                           list))]))
-                            
-                            ;; the version below behaves properly wrt continuations
-                            ;; but doesn't match mzscheme. So, we use the one above.
-                            #;
-                            (let ([exprs (syntax->list #'(expr ...))]
-                                  [last-one (list (void))])
-                              (let i-loop ()
-                                (cond
-                                  [(null? exprs) 
-                                   (apply values last-one)]
-                                  [else 
-                                   (let ([exp (car exprs)])
-                                     (set! exprs (cdr exprs))
-                                     (set! last-one (call-with-values (λ () (loop exp)) list))
-                                     (i-loop))])))]
+                                         (call-with-values 
+                                          (λ () 
+                                            (call-with-continuation-prompt
+                                             (λ () (loop (car exprs)))
+                                             (default-continuation-prompt-tag)
+                                             (λ args
+                                               (apply
+                                                abort-current-continuation 
+                                                (default-continuation-prompt-tag)
+                                                args))))
+                                          list))]))]
                            [_else 
                             ;; Not `begin', so proceed with normal expand and eval 
                             (let* ([annotated (annotate-top (expand-syntax top-e) #f)])
@@ -306,7 +307,8 @@ profile todo:
                       (λ () (open-and-highlight-in-file src-to-display)))
                 (write-special note (current-error-port))
                 (display #\space (current-error-port))))
-            (display (path->string (find-relative-path (current-directory) src))
+            (display (path->string (find-relative-path (current-directory)
+                                                       (normalize-path src)))
                      (current-error-port))
             (let ([line (srcloc-line src-to-display)]
                   [col (srcloc-column src-to-display)]
@@ -356,15 +358,24 @@ profile todo:
                      (display msg (current-error-port))))])
           (send error-text-style-delta set-delta-foreground (make-object color% 200 0 0))
           (send-out " in:" void)
-          (for-each (λ (expr)
-                      (display " " (current-error-port))
-                      (send-out (format "~s" (syntax-object->datum expr))
-                                (λ (snp)
-                                  (send snp set-style
-                                        (send the-style-list find-or-create-style
-                                              (send snp get-style)
-                                              error-text-style-delta)))))
-                    (exn:fail:syntax-exprs exn))))
+          (let ([show-one
+                 (λ (expr)
+                   (display " " (current-error-port))
+                   (send-out (format "~s" (syntax-object->datum expr))
+                             (λ (snp)
+                               (send snp set-style
+                                     (send the-style-list find-or-create-style
+                                           (send snp get-style)
+                                           error-text-style-delta)))))]
+                [exprs (exn:fail:syntax-exprs exn)])
+            (cond
+              [(null? exprs) (void)]
+              [(null? (cdr exprs)) (show-one (car exprs))]
+              [else
+               (for-each (λ (expr)
+                           (display "\n " (current-error-port))
+                           (show-one expr))
+                         exprs)]))))
       
       ;; make-debug-error-display-handler : (string (union TST exn) -> void) -> string (union TST exn) -> void
       ;; adds in the bug icon, if there are contexts to display
@@ -474,7 +485,7 @@ profile todo:
                                  (instantiate message% ()
                                    (label (string-constant happy-birthday-matthias))
                                    (parent (send current-backtrace-window get-area-container))))]
-                 [ec (make-object canvas:wide-snip% 
+                 [ec (make-object (canvas:color-mixin canvas:wide-snip%)
                        (send current-backtrace-window get-area-container)
                        text)]
                  [di-vec (list->vector dis)]
@@ -514,7 +525,8 @@ profile todo:
                                                     (string-constant next-stack-frames))
                                                 num-to-show))))
                             (let ([hyper-end (send text last-position)])
-                              (send text change-style (gui-utils:get-clickback-delta)
+                              (send text change-style (gui-utils:get-clickback-delta
+                                                       (preferences:get 'framework:white-on-black?))
                                     hyper-start hyper-end)
                               (send text set-clickback
                                     hyper-start hyper-end
@@ -564,7 +576,10 @@ profile todo:
           (send text insert (format "~a: ~a-~a" fn start (+ start span)))
           (let ([end-pos (send text last-position)])
             (send text insert " ")
-            (send text change-style (gui-utils:get-clickback-delta) start-pos end-pos)
+            (send text change-style 
+                  (gui-utils:get-clickback-delta (preferences:get 'framework:white-on-black?))
+                  start-pos 
+                  end-pos)
             (send text set-clickback
                   start-pos end-pos
                   (λ x
@@ -611,10 +626,17 @@ profile todo:
 	      (send context-text hide-caret #t)
 	      (send text insert "  ")
 	      (let ([snip (make-object editor-snip% context-text)])
+                (send snip use-style-background #t)
 		(send editor-canvas add-wide-snip snip)
-		(send text insert snip))
-	      (send text insert #\newline))
+                (let ([p (send text last-position)])
+                  (send text insert snip p p)
+                  (send text insert #\newline)
+                  (when (preferences:get 'framework:white-on-black?)
+                    (send text change-style white-on-black-style p (+ p 1))))))
 	    (close-text))))
+    
+    (define white-on-black-style (make-object style-delta%))
+    (define stupid-internal-define-syntax1 (send white-on-black-style set-delta-foreground "white"))
 
       ;; copy/highlight-text : text number number -> text
       ;; copies the range from `start' to `finish', including the entire paragraph at
@@ -636,7 +658,7 @@ profile todo:
                        (< (send from-text get-snip-position snip) para-end-pos))
               (send to-text insert (send snip copy))
               (loop (send snip next))))
-          (send to-text highlight-range (- from-start 1) from-end error-color #f #f 'high)
+          (send to-text highlight-range (- from-start 1) from-end (get-error-color) #f #f 'high)
           to-text))
       
       ;; get-filename : debug-source -> string
@@ -1126,28 +1148,33 @@ profile todo:
                                         (prof-info-time info)))))))
         (void))
 
-      ;; get-color-value : number number -> (is-a?/c color%)
-      ;; returns the profiling color
-      ;; for `val' if `max-val' is the largest
-      ;; of any profiling amount.
-      (define (get-color-value val max-val)
-        (let* ([color-min (preferences:get 'drscheme:profile:low-color)]
-               [color-max (preferences:get 'drscheme:profile:high-color)]
-               [adjust
-                (case (preferences:get 'drscheme:profile:scale)
-                  [(sqrt) sqrt]
-                  [(square) (λ (x) (* x x))]
-                  [(linear) (λ (x) x)])]
-               [factor (adjust (if (zero? max-val) 0 (/ val max-val)))]
-               [get-rgb-value
-                (λ (sel)
-                  (let ([small (sel color-min)]
-                        [big (sel color-max)])
-                    (inexact->exact (floor (+ (* factor (- big small)) small)))))])
-          (make-object color% 
-            (get-rgb-value (λ (x) (send x red)))
-            (get-rgb-value (λ (x) (send x green)))
-            (get-rgb-value (λ (x) (send x blue))))))
+    (define (get-color-value/pref val max-val drscheme:profile:low-color drscheme:profile:high-color drscheme:profile:scale)
+      (let* ([adjust
+              (case drscheme:profile:scale
+                [(sqrt) sqrt]
+                [(square) (λ (x) (* x x))]
+                [(linear) (λ (x) x)])]
+             [factor (adjust (if (zero? max-val) 0 (/ val max-val)))]
+             [get-rgb-value
+              (λ (sel)
+                (let ([small (sel drscheme:profile:low-color)]
+                      [big (sel drscheme:profile:high-color)])
+                  (inexact->exact (floor (+ (* factor (- big small)) small)))))])
+        (make-object color% 
+          (get-rgb-value (λ (x) (send x red)))
+          (get-rgb-value (λ (x) (send x green)))
+          (get-rgb-value (λ (x) (send x blue))))))
+    
+    ;; get-color-value : number number -> (is-a?/c color%)
+    ;; returns the profiling color
+    ;; for `val' if `max-val' is the largest
+    ;; of any profiling amount.
+    (define (get-color-value val max-val)
+      (get-color-value/pref val 
+                            max-val
+                            (preferences:get 'drscheme:profile:low-color)
+                            (preferences:get 'drscheme:profile:high-color)
+                            (preferences:get 'drscheme:profile:scale)))
       
       ;; extract-maximum : (listof prof-info) -> number
       ;; gets the maximum value of the currently preferred profiling info.
@@ -1876,11 +1903,15 @@ profile todo:
           (define/override (on-paint)
             (set! in-on-paint? #t)
             (let* ([dc (get-dc)]
-                   [dummy-pen (send dc get-pen)])
+                   [dummy-pen (send dc get-pen)]
+                   [drscheme:profile:low-color (preferences:get 'drscheme:profile:low-color)]
+                   [drscheme:profile:high-color (preferences:get 'drscheme:profile:high-color)]
+                   [drscheme:profile:scale (preferences:get 'drscheme:profile:scale)])
               (let-values ([(w h) (get-client-size)])
                 (let loop ([n 0])
                   (when (n . <= . w)
-                    (send pen set-color (get-color-value n w))
+                    (send pen set-color 
+                          (get-color-value/pref n w drscheme:profile:low-color drscheme:profile:high-color drscheme:profile:scale))
                     (send dc set-pen pen)
                     (send dc draw-line n 0 n h)
                     (send dc set-pen dummy-pen)
@@ -1931,6 +1962,5 @@ profile todo:
  ;   ;   ;      ;     ;   ;   ;      ;   ;  ;     ;   ;  ;   ;  ;   ; 
   ;;;   ;;;;   ;;;;    ;;;   ;;;;     ;;;  ;;;;    ;;; ;  ;;;    ;;;  
                                                                       
-                                                                      
-                                                                      
-      (define-values/invoke-unit/sig stacktrace^ stacktrace@ #f stacktrace-imports^))))
+    
+    (define-values/invoke-unit/infer stacktrace@)))

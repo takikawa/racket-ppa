@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	August 1994
- * Copyright:	(c) 2004-2006 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2007 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -554,6 +554,14 @@ void wxFrame::Maximize(Bool maximize)
 Bool wxFrame::Iconized(void)
 {
   return (Bool)::IsIconic(GetHWND());
+}
+
+Bool wxFrame::IsMaximized()
+{
+  if (IsShown())
+    return (Bool)::IsZoomed(GetHWND());
+  else
+    return hiddenmax;
 }
 
 void wxFrame::SetTitle(char *title)

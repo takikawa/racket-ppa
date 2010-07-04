@@ -13,7 +13,8 @@
 	   "wxwindow.ss"
 	   "wxcontainer.ss")
 
-  (provide (protect active-main-frame)
+  (provide (protect active-main-frame
+                    set-root-menu-wx-frame!)
 	   get-display-size
 	   get-display-left-top-inset
 	   (protect make-top-container%
@@ -23,6 +24,10 @@
 
   ;; Weak boxed:
   (define active-main-frame (make-weak-box #f))
+  
+  (define root-menu-wx-frame #f)
+  (define (set-root-menu-wx-frame! f)
+    (set! root-menu-wx-frame f))
 
   (define get-display-size
     (opt-lambda ([full-screen? #f])
@@ -87,6 +92,8 @@
        [target #f]
 
        [border-buttons null]
+
+       [parent-for-center parent]
 
        [show-ht (make-hash-table)])
       
@@ -333,24 +340,8 @@
 	;;          pass now to superclass's show.
 	[show
 	 (lambda (on?)
-	   (when (and on? pending-redraws?)
-	     (force-redraw))
-	   (when (and on? use-default-position?)
-	     (set! use-default-position? #f)
-	     (if dlg?
-                 (center 'both)
-		 (let*-values ([(w) (get-width)]
-			       [(h) (get-height)]
-			       [(sw sh) (get-display-size)]
-			       [(x x-reset?) (if (< (+ top-x w) sw)
-						 (values top-x #f)
-						 (values (max 0 (- sw w 10)) #t))]
-			       [(y y-reset?) (if (< (+ top-y h) sh)
-						 (values top-y #f)
-						 (values (max 0 (- sh h 20)) #t))])
-		   (move x y)
-		   (set! top-x (if x-reset? init-top-x (+ top-x 10)))
-		   (set! top-y (if y-reset? init-top-y (+ top-y 20))))))
+           (when on?
+             (position-for-initial-show))
 	   (if on?
 	       (hash-table-put! top-level-windows this #t)
 	       (hash-table-remove! top-level-windows this))
@@ -370,7 +361,7 @@
 	[center (lambda (dir)
 		  (when pending-redraws? (force-redraw))
 		  (set! use-default-position? #f)
-		  (super center dir))]
+		  (super center dir parent-for-center))] ; 2nd argument is for Mac OS X
 	
 	;; on-size: ensures that size of frame matches size of content
 	;; input: new-width/new-height: new size of frame
@@ -388,6 +379,26 @@
 	       (wx:queue-callback (lambda () (resized)) #t))))])
 
       (public
+        [position-for-initial-show
+         (lambda ()
+	   (when pending-redraws?
+	     (force-redraw))
+	   (when use-default-position?
+	     (set! use-default-position? #f)
+	     (if dlg?
+                 (center 'both)
+		 (let*-values ([(w) (get-width)]
+			       [(h) (get-height)]
+			       [(sw sh) (get-display-size)]
+			       [(x x-reset?) (if (< (+ top-x w) sw)
+						 (values top-x #f)
+						 (values (max 0 (- sw w 10)) #t))]
+			       [(y y-reset?) (if (< (+ top-y h) sh)
+						 (values top-y #f)
+						 (values (max 0 (- sh h 20)) #t))])
+		   (move x y)
+		   (set! top-x (if x-reset? init-top-x (+ top-x 10)))
+		   (set! top-y (if y-reset? init-top-y (+ top-y 20)))))))]
 	[handle-traverse-key
 	 (lambda (e)
 	   (and panel
@@ -577,7 +588,8 @@
 			(when on?
 			  (set! act-date/seconds (current-seconds))
 			  (set! act-date/milliseconds (current-milliseconds))
-			  (when (wx:main-eventspace? (get-eventspace))
+			  (when (and (wx:main-eventspace? (get-eventspace))
+                                     (not (eq? this root-menu-wx-frame)))
 			    (set! active-main-frame (make-weak-box this))))
 			;; Send refresh to subwindows that need it
 			(set! activate-refresh-wins (filter weak-box-value activate-refresh-wins))

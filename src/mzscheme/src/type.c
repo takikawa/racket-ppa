@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -15,7 +15,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
   libscheme
   Copyright (c) 1994 Brent Benson
@@ -27,6 +28,9 @@
 
 Scheme_Type_Reader *scheme_type_readers;
 Scheme_Type_Writer *scheme_type_writers;
+Scheme_Equal_Proc *scheme_type_equals;
+Scheme_Primary_Hash_Proc *scheme_type_hash1s;
+Scheme_Secondary_Hash_Proc *scheme_type_hash2s;
 
 static char **type_names;
 static Scheme_Type maxtype, allocmax;
@@ -42,6 +46,9 @@ static void init_type_arrays()
   REGISTER_SO(type_names);
   REGISTER_SO(scheme_type_readers);
   REGISTER_SO(scheme_type_writers);
+  REGISTER_SO(scheme_type_equals);
+  REGISTER_SO(scheme_type_hash1s);
+  REGISTER_SO(scheme_type_hash2s);
   
   maxtype = _scheme_last_type_;
   allocmax = maxtype + 10;
@@ -63,6 +70,18 @@ static void init_type_arrays()
 #ifdef MEMORY_COUNTING_ON
   scheme_type_table_count += n;
 #endif  
+
+  scheme_type_equals = MALLOC_N_ATOMIC(Scheme_Equal_Proc, allocmax);
+  n = allocmax * sizeof(Scheme_Equal_Proc);
+  memset((char *)scheme_type_equals, 0, n);
+
+  scheme_type_hash1s = MALLOC_N_ATOMIC(Scheme_Primary_Hash_Proc, allocmax);
+  n = allocmax * sizeof(Scheme_Primary_Hash_Proc);
+  memset((char *)scheme_type_hash1s, 0, n);
+
+  scheme_type_hash2s = MALLOC_N_ATOMIC(Scheme_Secondary_Hash_Proc, allocmax);
+  n = allocmax * sizeof(Scheme_Secondary_Hash_Proc);
+  memset((char *)scheme_type_hash2s, 0, n);
 }
 
 void
@@ -127,7 +146,8 @@ scheme_init_type (Scheme_Env *env)
   set_name(scheme_thread_type, "<thread>");
   set_name(scheme_char_string_type, "<string>");
   set_name(scheme_byte_string_type, "<byte-string>");
-  set_name(scheme_path_type, "<path>");
+  set_name(scheme_unix_path_type, "<unix-path>");
+  set_name(scheme_windows_path_type, "<windows-path>");
   set_name(scheme_struct_property_type, "<struct-property>");
   set_name(scheme_structure_type, "<struct>");
 #ifdef USE_SENORA_GC
@@ -175,6 +195,7 @@ scheme_init_type (Scheme_Env *env)
   set_name(scheme_svector_type, "<short-vector>");
 
   set_name(scheme_custodian_type, "<custodian>");
+  set_name(scheme_cust_box_type, "<custodian-box>");
   set_name(scheme_cont_mark_set_type, "<continuation-mark-set>");
   set_name(scheme_cont_mark_chain_type, "<chain>");
 
@@ -182,6 +203,7 @@ scheme_init_type (Scheme_Env *env)
   
   set_name(scheme_stx_type, "<syntax>");
   set_name(scheme_stx_offset_type, "<internal-syntax-offset>");
+  set_name(scheme_expanded_syntax_type, "<expanded-syntax>");
   set_name(scheme_set_macro_type, "<set!-transformer>");
   set_name(scheme_id_macro_type, "<rename-transformer>");
 
@@ -191,6 +213,7 @@ scheme_init_type (Scheme_Env *env)
   set_name(scheme_subprocess_type, "<subprocess>");
 
   set_name(scheme_cpointer_type, "<cpointer>");
+  set_name(scheme_offset_cpointer_type, "<cpointer>");
 
   set_name(scheme_wrap_chunk_type, "<wrap-chunk>");
 
@@ -241,6 +264,10 @@ scheme_init_type (Scheme_Env *env)
 
   set_name(_scheme_values_types_, "<resurrected>");
   set_name(_scheme_compiled_values_types_, "<internal>");
+
+#ifdef MZ_GC_BACKTRACE
+  set_name(scheme_rt_meta_cont, "<meta-continuation>");
+#endif
 }
 
 Scheme_Type scheme_make_type(const char *name)
@@ -269,10 +296,25 @@ Scheme_Type scheme_make_type(const char *name)
     memcpy(naya, scheme_type_writers, maxtype * sizeof(Scheme_Type_Writer));
     scheme_type_writers = (Scheme_Type_Writer *)naya;
 
+    naya = scheme_malloc_atomic(n = allocmax * sizeof(Scheme_Equal_Proc));
+    memset((char *)naya, 0, n);
+    memcpy(naya, scheme_type_equals, maxtype * sizeof(Scheme_Equal_Proc));
+    scheme_type_equals = (Scheme_Equal_Proc *)naya;
+
+    naya = scheme_malloc_atomic(n = allocmax * sizeof(Scheme_Primary_Hash_Proc));
+    memset((char *)naya, 0, n);
+    memcpy(naya, scheme_type_hash1s, maxtype * sizeof(Scheme_Primary_Hash_Proc));
+    scheme_type_hash1s = (Scheme_Primary_Hash_Proc *)naya;
+
+    naya = scheme_malloc_atomic(n = allocmax * sizeof(Scheme_Secondary_Hash_Proc));
+    memset((char *)naya, 0, n);
+    memcpy(naya, scheme_type_hash2s, maxtype * sizeof(Scheme_Secondary_Hash_Proc));
+    scheme_type_hash2s = (Scheme_Secondary_Hash_Proc *)naya;
+
 #ifdef MEMORY_COUNTING_ON
-  scheme_type_table_count += 20 * (sizeof(Scheme_Type_Reader)
-				   + sizeof(Scheme_Type_Writer));
-  scheme_misc_count += (20 * sizeof(char *));
+    scheme_type_table_count += 20 * (sizeof(Scheme_Type_Reader)
+                                     + sizeof(Scheme_Type_Writer));
+    scheme_misc_count += (20 * sizeof(char *));
 #endif
   }
 
@@ -306,6 +348,20 @@ void scheme_install_type_writer(Scheme_Type t, Scheme_Type_Writer f)
     return;
 
   scheme_type_writers[t] = f;
+}
+
+
+void scheme_set_type_equality(Scheme_Type t, 
+                              Scheme_Equal_Proc f,
+                              Scheme_Primary_Hash_Proc hash1,
+                              Scheme_Secondary_Hash_Proc hash2)
+{
+  if (t < 0 || t >= maxtype)
+    return;
+
+  scheme_type_equals[t] = f;
+  scheme_type_hash1s[t] = hash1;
+  scheme_type_hash2s[t] = hash2;
 }
 
 int scheme_num_types(void)
@@ -354,12 +410,10 @@ static void FIXUP_cjs(Scheme_Continuation_Jump_State *cjs)
 
 static void MARK_stack_state(Scheme_Stack_State *ss)
 {
-  gcMARK(ss->barrier_prompt);
 }
 
 static void FIXUP_stack_state(Scheme_Stack_State *ss)
 {
-  gcFIXUP(ss->barrier_prompt);
 }
 
 static void MARK_jmpup(Scheme_Jumpup_Buf *buf)
@@ -376,7 +430,8 @@ static void MARK_jmpup(Scheme_Jumpup_Buf *buf)
     GC_mark_variable_stack(buf->gc_var_stack,
 			   (long)buf->stack_copy - (long)buf->stack_from,
 			   /* FIXME: stack direction */
-			   (char *)buf->stack_copy + buf->stack_size);
+			   (char *)buf->stack_copy + buf->stack_size,
+                           buf->stack_copy);
 }
 
 static void FIXUP_jmpup(Scheme_Jumpup_Buf *buf)
@@ -392,7 +447,8 @@ static void FIXUP_jmpup(Scheme_Jumpup_Buf *buf)
     GC_fixup_variable_stack(buf->gc_var_stack,
 			    (long)new_stack - (long)buf->stack_from,
 			    /* FIXME: stack direction */
-			    (char *)new_stack + buf->stack_size);
+			    (char *)new_stack + buf->stack_size,
+                            new_stack);
 }
 
 #define MARKS_FOR_TYPE_C
@@ -456,7 +512,8 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_complex_type, complex_obj);
   GC_REG_TRAV(scheme_char_string_type, string_obj);
   GC_REG_TRAV(scheme_byte_string_type, bstring_obj);
-  GC_REG_TRAV(scheme_path_type, bstring_obj);
+  GC_REG_TRAV(scheme_unix_path_type, bstring_obj);
+  GC_REG_TRAV(scheme_windows_path_type, bstring_obj);
   GC_REG_TRAV(scheme_symbol_type, symbol_obj);
   GC_REG_TRAV(scheme_keyword_type, symbol_obj);
   GC_REG_TRAV(scheme_null_type, char_obj); /* small */
@@ -464,6 +521,7 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_raw_pair_type, cons_cell);
   GC_REG_TRAV(scheme_vector_type, vector_obj);
   GC_REG_TRAV(scheme_cpointer_type, cpointer_obj);
+  GC_REG_TRAV(scheme_offset_cpointer_type, offset_cpointer_obj);
 
   GC_REG_TRAV(scheme_bucket_type, bucket_obj);
 
@@ -512,6 +570,7 @@ void scheme_register_traversers(void)
 
   GC_REG_TRAV(scheme_stx_type, stx_val);
   GC_REG_TRAV(scheme_stx_offset_type, stx_off_val);
+  GC_REG_TRAV(scheme_expanded_syntax_type, twoptr_obj);
   GC_REG_TRAV(scheme_module_type, module_val);
   GC_REG_TRAV(scheme_rt_module_exports, module_exports_val);
   GC_REG_TRAV(scheme_module_index_type, modidx_val);
@@ -538,6 +597,10 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_thread_cell_values_type, small_object);
 
   GC_REG_TRAV(scheme_global_ref_type, small_object);
+
+  GC_REG_TRAV(scheme_delay_syntax_type, small_object);
+
+  GC_REG_TRAV(scheme_rt_runstack, runstack_val);
 }
 
 END_XFORM_SKIP;

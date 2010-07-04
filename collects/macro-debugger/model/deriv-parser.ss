@@ -13,8 +13,18 @@
         (error 'derivation-parser "bad token #~a" start)))
   
   ;; PARSER
+
+  (define (parse-derivation x)
+    (parameterize ((current-sequence-number 0))
+      (parse-derivation* x)))
+
+  (define current-sequence-number (make-parameter #f))
+  (define (new-sequence-number)
+    (let ([seq (current-sequence-number)])
+      (current-sequence-number (add1 seq))
+      seq))
   
-  (define parse-derivation
+  (define parse-derivation*
     (parser
      (options (start Expansion)
               (src-pos)
@@ -35,7 +45,7 @@
                            enter-block block->list block->letrec splice
                            enter-list exit-list
                            enter-check exit-check
-                           local-post exit-local
+                           local-post exit-local exit-local/expr
                            phase-up module-body
                            renames-lambda
                            renames-case-lambda
@@ -60,6 +70,8 @@
         $2]
        [(visit (? TaggedPrimStep 'prim) return)
         ($2 $1)]
+       [(visit VariableStep return)
+        ($2 $1 $3)]
        [((? EE/Macro))
         $1])
       (EE/Macro
@@ -127,9 +139,10 @@
       ;; MacroStep Answer = Transformation (I,E)
       (MacroStep 
        [(Resolves enter-macro 
+         (! 'bad-transformer)
          macro-pre-transform (? LocalActions 'locals) (! 'transform) macro-post-transform 
          exit-macro)
-        (make-transformation $2 $7 $1 $3 $6 $4)])
+        (make-transformation $2 $8 $1 $4 $7 $5 (new-sequence-number))])
 
       ;; Local actions taken by macro
       ;; LocalAction Answer = (list-of LocalAction)
@@ -142,9 +155,15 @@
       (LocalAction
        (#:no-wrap)
        [(enter-local local-pre (? EE) local-post exit-local)
-        (make-local-expansion $1 $5 $2 $4 $3)]
+        (make-local-expansion $1 $5 $2 $4 #f $3)]
+       [(enter-local phase-up local-pre (? EE) local-post exit-local)
+        (make-local-expansion $1 $6 $3 $5 #t $4)]
+       [(enter-local/expr local-pre (? EE) local-post exit-local/expr)
+        (make-local-expansion/expr $1 (car $5) $2 $4 #f (cdr $5) $3)]
+       [(enter-local/expr local-pre phase-up (? EE) local-post exit-local/expr)
+        (make-local-expansion/expr $1 (car $6) $3 $5 #t (cdr $6) $4)]
        [(lift)
-        (make-local-lift (car $1) (cdr $1))]
+        (make-local-lift (cdr $1) (car $1))]
        [(lift-statement)
         (make-local-lift-end $1)]
        [(phase-up (? EE/LetLifts))
@@ -163,16 +182,22 @@
       (PrimStep
        (#:no-wrap)
        [(Resolves NoError enter-prim (? Prim) exit-prim)
-        ($4 $3 $5 $1)]
-       [(Resolves variable)
-        (make-p:variable (car $2) (cdr $2) $1)])
+        ($4 $3 $5 $1)])
 
+      (VariableStep
+       (#:no-wrap)
+       (#:args e1 e2)
+       [(Resolves variable)
+        (make-p:variable e1 e2 $1)])
+      
       ;; Tagged Primitive syntax
       ;; TaggedPrimStep Answer = syntax -> PRule
       (TaggedPrimStep
        (#:no-wrap)
        (#:args orig-stx)
        [(Resolves ! IMPOSSIBLE)
+        (make-p:unknown orig-stx #f $1)]
+       [(Resolves NoError enter-prim ! IMPOSSIBLE)
         (make-p:unknown orig-stx #f $1)]
        [(Resolves NoError enter-prim (? TaggedPrim) exit-prim)
         ($4 orig-stx $5 $1 $3)])
@@ -186,6 +211,7 @@
        [((? Prim#%ModuleBegin)) ($1 e1 e2 rs)]
        [((? PrimDefineSyntaxes)) ($1 e1 e2 rs)]
        [((? PrimDefineValues)) ($1 e1 e2 rs)]
+       [((? PrimExpression)) ($1 e1 e2 rs)]
        [((? PrimIf)) ($1 e1 e2 rs)]
        [((? PrimWCM)) ($1 e1 e2 rs)]
        [((? PrimSet)) ($1 e1 e2 rs)]
@@ -234,7 +260,10 @@
 
       (Prim#%ModuleBegin
        (#:args e1 e2 rs)
-       [(prim-#%module-begin ! (? ModulePass1 'pass1) next-group (? ModulePass2 'pass2))
+       [(prim-#%module-begin (! 'malformed)
+                             (? ModulePass1 'pass1) next-group 
+                             (? ModulePass2 'pass2)
+                             (! 'provides))
         (make-p:#%module-begin e1 e2 rs $3 $5)])
 
       (ModulePass1
@@ -304,6 +333,11 @@
         (make-p:define-values e1 e2 rs $3)])
       
       ;; Simple expressions
+      (PrimExpression
+       (#:args e1 e2 rs)
+       [(prim-expression ! (? EE 'inner))
+        (make-p:expression e1 e2 rs $3)])
+
       (PrimIf
        (#:args e1 e2 rs)
        [(prim-if ! (? EE 'test) next (? EE 'then) next (? EE 'else))
@@ -361,7 +395,7 @@
        ;; let*-values with bindings is "macro-like"
        [(prim-let*-values ! (? EE))
         (let ([next-e1 (lift/deriv-e1 $3)])
-          (make-mrule e1 e2 (make-transformation e1 next-e1 rs e1 next-e1 null) $3))]
+          (make-mrule e1 e2 (make-transformation e1 next-e1 rs e1 next-e1 null (new-sequence-number)) $3))]
        ;; No bindings... model as "let"
        [(prim-let*-values NoError renames-let (? NextEEs 'rhss) next-group (? EB 'body))
         (make-p:let-values e1 e2 rs $3 $4 $6)])
@@ -462,7 +496,7 @@
         (make-b:defvals $3 $4)]
        [(next NoError renames-block CheckImmediateMacro
               prim-define-syntaxes (? BindSyntaxes 'bind))
-        (make-b:defstx $3 $4 $5)])
+        (make-b:defstx $3 $4 $6)])
 
       ;; BindSyntaxes Answer = Derivation
       (BindSyntaxes

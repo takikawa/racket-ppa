@@ -152,25 +152,48 @@ static int quotesyntax_obj_FIXUP(void *p) {
 
 static int cpointer_obj_SIZE(void *p) {
   return
-  gcBYTES_TO_WORDS(sizeof(Scheme_Simple_Object));
+  gcBYTES_TO_WORDS(sizeof(Scheme_Cptr));
 }
 
 static int cpointer_obj_MARK(void *p) {
-  gcMARK(SCHEME_CPTR_VAL((Scheme_Object *)p));
-  gcMARK(SCHEME_CPTR_TYPE((Scheme_Object *)p));
+  gcMARK(SCHEME_CPTR_VAL(p));
+  gcMARK(SCHEME_CPTR_TYPE(p));
   return
-  gcBYTES_TO_WORDS(sizeof(Scheme_Simple_Object));
+  gcBYTES_TO_WORDS(sizeof(Scheme_Cptr));
 }
 
 static int cpointer_obj_FIXUP(void *p) {
-  gcFIXUP(SCHEME_CPTR_VAL((Scheme_Object *)p));
-  gcFIXUP(SCHEME_CPTR_TYPE((Scheme_Object *)p));
+  gcFIXUP(SCHEME_CPTR_VAL(p));
+  gcFIXUP(SCHEME_CPTR_TYPE(p));
   return
-  gcBYTES_TO_WORDS(sizeof(Scheme_Simple_Object));
+  gcBYTES_TO_WORDS(sizeof(Scheme_Cptr));
 }
 
 #define cpointer_obj_IS_ATOMIC 0
 #define cpointer_obj_IS_CONST_SIZE 1
+
+
+static int offset_cpointer_obj_SIZE(void *p) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Offset_Cptr));
+}
+
+static int offset_cpointer_obj_MARK(void *p) {
+  gcMARK(SCHEME_CPTR_VAL(p));
+  gcMARK(SCHEME_CPTR_TYPE(p));
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Offset_Cptr));
+}
+
+static int offset_cpointer_obj_FIXUP(void *p) {
+  gcFIXUP(SCHEME_CPTR_VAL(p));
+  gcFIXUP(SCHEME_CPTR_TYPE(p));
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Offset_Cptr));
+}
+
+#define offset_cpointer_obj_IS_ATOMIC 0
+#define offset_cpointer_obj_IS_CONST_SIZE 1
 
 
 static int second_of_cons_SIZE(void *p) {
@@ -884,6 +907,7 @@ static int cont_proc_MARK(void *p) {
   gcMARK(c->dw);
   gcMARK(c->prompt_tag);
   gcMARK(c->meta_continuation);
+  gcMARK(c->common_dw);
   gcMARK(c->save_overflow);
   gcMARK(c->runstack_copied);
   gcMARK(c->runstack_owner);
@@ -898,8 +922,12 @@ static int cont_proc_MARK(void *p) {
   MARK_jmpup(&c->buf);
   MARK_cjs(&c->cjs);
   MARK_stack_state(&c->ss);
+  gcMARK(c->barrier_prompt);
   gcMARK(c->runstack_start);
   gcMARK(c->runstack_saved);
+
+  gcMARK(c->prompt_id);
+  gcMARK(c->prompt_buf);
 
   /* These shouldn't actually persist across a GC, but
      just in case... */
@@ -907,6 +935,7 @@ static int cont_proc_MARK(void *p) {
   gcMARK(c->resume_to);
   gcMARK(c->use_next_cont);
   gcMARK(c->extra_marks);
+  gcMARK(c->shortcut_prompt);
   
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Cont));
@@ -918,6 +947,7 @@ static int cont_proc_FIXUP(void *p) {
   gcFIXUP(c->dw);
   gcFIXUP(c->prompt_tag);
   gcFIXUP(c->meta_continuation);
+  gcFIXUP(c->common_dw);
   gcFIXUP(c->save_overflow);
   gcFIXUP(c->runstack_copied);
   gcFIXUP(c->runstack_owner);
@@ -932,8 +962,12 @@ static int cont_proc_FIXUP(void *p) {
   FIXUP_jmpup(&c->buf);
   FIXUP_cjs(&c->cjs);
   FIXUP_stack_state(&c->ss);
+  gcFIXUP(c->barrier_prompt);
   gcFIXUP(c->runstack_start);
   gcFIXUP(c->runstack_saved);
+
+  gcFIXUP(c->prompt_id);
+  gcFIXUP(c->prompt_buf);
 
   /* These shouldn't actually persist across a GC, but
      just in case... */
@@ -941,6 +975,7 @@ static int cont_proc_FIXUP(void *p) {
   gcFIXUP(c->resume_to);
   gcFIXUP(c->use_next_cont);
   gcFIXUP(c->extra_marks);
+  gcFIXUP(c->shortcut_prompt);
   
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Cont));
@@ -1090,6 +1125,7 @@ static int escaping_cont_proc_MARK(void *p) {
   gcMARK(c->native_trace);
 #endif
 
+  gcMARK(c->barrier_prompt);
   MARK_stack_state(&c->envss);
 
   return
@@ -1103,6 +1139,7 @@ static int escaping_cont_proc_FIXUP(void *p) {
   gcFIXUP(c->native_trace);
 #endif
 
+  gcFIXUP(c->barrier_prompt);
   FIXUP_stack_state(&c->envss);
 
   return
@@ -1574,7 +1611,6 @@ static int thread_val_MARK(void *p) {
   gcMARK(pr->runstack_swapped);
   pr->spare_runstack = NULL; /* just in case */
 
-  gcMARK(pr->barrier_prompt);
   gcMARK(pr->meta_prompt);
   gcMARK(pr->meta_continuation);
   
@@ -1605,6 +1641,13 @@ static int thread_val_MARK(void *p) {
 
   gcMARK(pr->tail_buffer);
   
+  gcMARK(pr->ku.eval.wait_expr);
+
+  gcMARK(pr->ku.apply.tail_rator);
+  gcMARK(pr->ku.apply.tail_rands);
+
+  gcMARK(pr->ku.multiple.array);
+
   gcMARK(pr->ku.k.p1);
   gcMARK(pr->ku.k.p2);
   gcMARK(pr->ku.k.p3);
@@ -1612,8 +1655,6 @@ static int thread_val_MARK(void *p) {
   gcMARK(pr->ku.k.p5);
   
   gcMARK(pr->list_stack);
-  
-  gcMARK(pr->rn_memory);
   
   gcMARK(pr->kill_data);
   gcMARK(pr->private_kill_data);
@@ -1664,7 +1705,6 @@ static int thread_val_FIXUP(void *p) {
   gcFIXUP(pr->runstack_swapped);
   pr->spare_runstack = NULL; /* just in case */
 
-  gcFIXUP(pr->barrier_prompt);
   gcFIXUP(pr->meta_prompt);
   gcFIXUP(pr->meta_continuation);
   
@@ -1695,6 +1735,13 @@ static int thread_val_FIXUP(void *p) {
 
   gcFIXUP(pr->tail_buffer);
   
+  gcFIXUP(pr->ku.eval.wait_expr);
+
+  gcFIXUP(pr->ku.apply.tail_rator);
+  gcFIXUP(pr->ku.apply.tail_rands);
+
+  gcFIXUP(pr->ku.multiple.array);
+
   gcFIXUP(pr->ku.k.p1);
   gcFIXUP(pr->ku.k.p2);
   gcFIXUP(pr->ku.k.p3);
@@ -1702,8 +1749,6 @@ static int thread_val_FIXUP(void *p) {
   gcFIXUP(pr->ku.k.p5);
   
   gcFIXUP(pr->list_stack);
-  
-  gcFIXUP(pr->rn_memory);
   
   gcFIXUP(pr->kill_data);
   gcFIXUP(pr->private_kill_data);
@@ -1732,6 +1777,57 @@ static int thread_val_FIXUP(void *p) {
 #define thread_val_IS_CONST_SIZE 1
 
 
+static int runstack_val_SIZE(void *p) {
+  long *s = (long *)p;
+  return
+  s[1];
+}
+
+static int runstack_val_MARK(void *p) {
+  long *s = (long *)p;
+  void **a, **b;
+  a = (void **)s + 4 + s[2];
+  b = (void **)s + 4 + s[3];
+  while (a < b) {
+    gcMARK(*a);
+    a++;
+  }
+  return
+  s[1];
+}
+
+static int runstack_val_FIXUP(void *p) {
+  long *s = (long *)p;
+  void **a, **b;
+  a = (void **)s + 4 + s[2];
+  b = (void **)s + 4 + s[3];
+  while (a < b) {
+    gcFIXUP(*a);
+    a++;
+  }
+
+  /* Zero out the part that we didn't mark, in case it becomes
+     live later. */
+  a = (void **)s + 4;
+  b = (void **)s + 4 + s[2];
+  while (a < b) {
+    *a = NULL;
+    a++;
+  }
+  a = (void **)s + 4 + s[3];
+  b = (void **)s + 4 + (s[1] - 4);
+  while (a < b) {
+    *a = NULL;
+    a++;
+  }
+  return
+  s[1];
+}
+
+#define runstack_val_IS_ATOMIC 0
+#define runstack_val_IS_CONST_SIZE 0
+
+
 static int prompt_val_SIZE(void *p) {
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Prompt));
@@ -1740,8 +1836,9 @@ static int prompt_val_SIZE(void *p) {
 static int prompt_val_MARK(void *p) {
   Scheme_Prompt *pr = (Scheme_Prompt *)p;
   gcMARK(pr->boundary_overflow_id);
-  gcMARK(pr->boundary_dw_id);
   gcMARK(pr->runstack_boundary_start);
+  gcMARK(pr->tag);
+  gcMARK(pr->id);
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Prompt));
 }
@@ -1749,8 +1846,9 @@ static int prompt_val_MARK(void *p) {
 static int prompt_val_FIXUP(void *p) {
   Scheme_Prompt *pr = (Scheme_Prompt *)p;
   gcFIXUP(pr->boundary_overflow_id);
-  gcFIXUP(pr->boundary_dw_id);
   gcFIXUP(pr->runstack_boundary_start);
+  gcFIXUP(pr->tag);
+  gcFIXUP(pr->id);
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Prompt));
 }
@@ -2069,6 +2167,7 @@ static int resolve_prefix_val_MARK(void *p) {
   Resolve_Prefix *rp = (Resolve_Prefix *)p;
   gcMARK(rp->toplevels);
   gcMARK(rp->stxes);
+  gcMARK(rp->delay_info);
 
   return
   gcBYTES_TO_WORDS(sizeof(Resolve_Prefix));
@@ -2078,6 +2177,7 @@ static int resolve_prefix_val_FIXUP(void *p) {
   Resolve_Prefix *rp = (Resolve_Prefix *)p;
   gcFIXUP(rp->toplevels);
   gcFIXUP(rp->stxes);
+  gcFIXUP(rp->delay_info);
 
   return
   gcBYTES_TO_WORDS(sizeof(Resolve_Prefix));
@@ -2225,6 +2325,7 @@ static int module_val_MARK(void *p) {
   gcMARK(m->insp);
 
   gcMARK(m->hints);
+  gcMARK(m->ii_src);
 
   gcMARK(m->comp_prefix);
   gcMARK(m->prefix);
@@ -2260,6 +2361,7 @@ static int module_val_FIXUP(void *p) {
   gcFIXUP(m->insp);
 
   gcFIXUP(m->hints);
+  gcFIXUP(m->ii_src);
 
   gcFIXUP(m->comp_prefix);
   gcFIXUP(m->prefix);
@@ -2538,6 +2640,7 @@ static int mark_resolve_info_MARK(void *p) {
   Resolve_Info *i = (Resolve_Info *)p;
   
   gcMARK(i->prefix);
+  gcMARK(i->stx_map);
   gcMARK(i->old_pos);
   gcMARK(i->new_pos);
   gcMARK(i->old_stx_pos);
@@ -2554,6 +2657,7 @@ static int mark_resolve_info_FIXUP(void *p) {
   Resolve_Info *i = (Resolve_Info *)p;
   
   gcFIXUP(i->prefix);
+  gcFIXUP(i->stx_map);
   gcFIXUP(i->old_pos);
   gcFIXUP(i->new_pos);
   gcFIXUP(i->old_stx_pos);
@@ -2852,6 +2956,7 @@ static int mark_load_handler_data_MARK(void *p) {
   gcMARK(d->p);
   gcMARK(d->stxsrc);
   gcMARK(d->expected_module);
+  gcMARK(d->delay_load_info);
   
   return
   gcBYTES_TO_WORDS(sizeof(LoadHandlerData));
@@ -2865,6 +2970,7 @@ static int mark_load_handler_data_FIXUP(void *p) {
   gcFIXUP(d->p);
   gcFIXUP(d->stxsrc);
   gcFIXUP(d->expected_module);
+  gcFIXUP(d->delay_load_info);
   
   return
   gcBYTES_TO_WORDS(sizeof(LoadHandlerData));
@@ -3273,6 +3379,53 @@ static int mark_print_params_FIXUP(void *p) {
 #define mark_print_params_IS_CONST_SIZE 1
 
 
+static int mark_marshal_tables_SIZE(void *p) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Marshal_Tables));
+}
+
+static int mark_marshal_tables_MARK(void *p) {
+  Scheme_Marshal_Tables *mt = (Scheme_Marshal_Tables *)p;
+  gcMARK(mt->symtab);
+  gcMARK(mt->rns);
+  gcMARK(mt->rn_refs);
+  gcMARK(mt->st_refs);
+  gcMARK(mt->st_ref_stack);
+  gcMARK(mt->reverse_map);
+  gcMARK(mt->same_map);
+  gcMARK(mt->top_map);
+  gcMARK(mt->key_map);
+  gcMARK(mt->delay_map);
+  gcMARK(mt->rn_saved);
+  gcMARK(mt->shared_offsets);
+  gcMARK(mt->sorted_keys);
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Marshal_Tables));
+}
+
+static int mark_marshal_tables_FIXUP(void *p) {
+  Scheme_Marshal_Tables *mt = (Scheme_Marshal_Tables *)p;
+  gcFIXUP(mt->symtab);
+  gcFIXUP(mt->rns);
+  gcFIXUP(mt->rn_refs);
+  gcFIXUP(mt->st_refs);
+  gcFIXUP(mt->st_ref_stack);
+  gcFIXUP(mt->reverse_map);
+  gcFIXUP(mt->same_map);
+  gcFIXUP(mt->top_map);
+  gcFIXUP(mt->key_map);
+  gcFIXUP(mt->delay_map);
+  gcFIXUP(mt->rn_saved);
+  gcFIXUP(mt->shared_offsets);
+  gcFIXUP(mt->sorted_keys);
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Marshal_Tables));
+}
+
+#define mark_marshal_tables_IS_ATOMIC 0
+#define mark_marshal_tables_IS_CONST_SIZE 1
+
+
 #endif  /* PRINT */
 
 /**********************************************************************/
@@ -3525,6 +3678,8 @@ static int mark_custodian_val_MARK(void *p) {
   gcMARK(m->global_next);
   gcMARK(m->global_prev);
 
+  gcMARK(m->cust_boxes);
+
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Custodian));
 }
@@ -3544,12 +3699,49 @@ static int mark_custodian_val_FIXUP(void *p) {
   gcFIXUP(m->global_next);
   gcFIXUP(m->global_prev);
 
+  gcFIXUP(m->cust_boxes);
+
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Custodian));
 }
 
 #define mark_custodian_val_IS_ATOMIC 0
 #define mark_custodian_val_IS_CONST_SIZE 1
+
+
+static int mark_custodian_box_val_SIZE(void *p) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Custodian_Box));
+}
+
+static int mark_custodian_box_val_MARK(void *p) {
+  Scheme_Custodian_Box *b = (Scheme_Custodian_Box *)p;
+  int sd = ((Scheme_Custodian *)GC_resolve(b->cust))->shut_down;
+
+  gcMARK(b->cust);
+  if (!sd) {
+    gcMARK(b->v);
+  }
+
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Custodian_Box));
+}
+
+static int mark_custodian_box_val_FIXUP(void *p) {
+  Scheme_Custodian_Box *b = (Scheme_Custodian_Box *)p;
+  int sd = ((Scheme_Custodian *)GC_resolve(b->cust))->shut_down;
+
+  gcFIXUP(b->cust);
+  if (!sd) {
+    gcFIXUP(b->v);
+  }
+
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Custodian_Box));
+}
+
+#define mark_custodian_box_val_IS_ATOMIC 0
+#define mark_custodian_box_val_IS_CONST_SIZE 1
 
 
 static int mark_thread_hop_SIZE(void *p) {
@@ -4236,10 +4428,13 @@ static int mark_cport_MARK(void *p) {
   gcMARK(cp->start);
   gcMARK(cp->orig_port);
   gcMARK(cp->ht);
+  gcMARK(cp->ut);
   gcMARK(cp->symtab);
   gcMARK(cp->insp);
   gcMARK(cp->magic_sym);
   gcMARK(cp->magic_val);
+  gcMARK(cp->shared_offsets);
+  gcMARK(cp->delay_info);
   return
   gcBYTES_TO_WORDS(sizeof(CPort));
 }
@@ -4249,10 +4444,13 @@ static int mark_cport_FIXUP(void *p) {
   gcFIXUP(cp->start);
   gcFIXUP(cp->orig_port);
   gcFIXUP(cp->ht);
+  gcFIXUP(cp->ut);
   gcFIXUP(cp->symtab);
   gcFIXUP(cp->insp);
   gcFIXUP(cp->magic_sym);
   gcFIXUP(cp->magic_val);
+  gcFIXUP(cp->shared_offsets);
+  gcFIXUP(cp->delay_info);
   return
   gcBYTES_TO_WORDS(sizeof(CPort));
 }
@@ -4300,6 +4498,7 @@ static int mark_read_params_MARK(void *p) {
   gcMARK(rp->table);
   gcMARK(rp->magic_sym);
   gcMARK(rp->magic_val);
+  gcMARK(rp->delay_load_info);
   return
   gcBYTES_TO_WORDS(sizeof(ReadParams));
 }
@@ -4309,12 +4508,71 @@ static int mark_read_params_FIXUP(void *p) {
   gcFIXUP(rp->table);
   gcFIXUP(rp->magic_sym);
   gcFIXUP(rp->magic_val);
+  gcFIXUP(rp->delay_load_info);
   return
   gcBYTES_TO_WORDS(sizeof(ReadParams));
 }
 
 #define mark_read_params_IS_ATOMIC 0
 #define mark_read_params_IS_CONST_SIZE 1
+
+
+static int mark_delay_load_SIZE(void *p) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Load_Delay));
+}
+
+static int mark_delay_load_MARK(void *p) {
+  Scheme_Load_Delay *ld = (Scheme_Load_Delay *)p;
+  gcMARK(ld->path);
+  gcMARK(ld->symtab);
+  gcMARK(ld->shared_offsets);
+  gcMARK(ld->insp);
+  gcMARK(ld->rn_memory);
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Load_Delay));
+}
+
+static int mark_delay_load_FIXUP(void *p) {
+  Scheme_Load_Delay *ld = (Scheme_Load_Delay *)p;
+  gcFIXUP(ld->path);
+  gcFIXUP(ld->symtab);
+  gcFIXUP(ld->shared_offsets);
+  gcFIXUP(ld->insp);
+  gcFIXUP(ld->rn_memory);
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Load_Delay));
+}
+
+#define mark_delay_load_IS_ATOMIC 0
+#define mark_delay_load_IS_CONST_SIZE 1
+
+
+static int mark_unmarshal_tables_SIZE(void *p) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Unmarshal_Tables));
+}
+
+static int mark_unmarshal_tables_MARK(void *p) {
+  Scheme_Unmarshal_Tables *ut = (Scheme_Unmarshal_Tables *)p;
+  gcMARK(ut->rns);
+  gcMARK(ut->rp);
+  gcMARK(ut->decoded);
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Unmarshal_Tables));
+}
+
+static int mark_unmarshal_tables_FIXUP(void *p) {
+  Scheme_Unmarshal_Tables *ut = (Scheme_Unmarshal_Tables *)p;
+  gcFIXUP(ut->rns);
+  gcFIXUP(ut->rp);
+  gcFIXUP(ut->decoded);
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Unmarshal_Tables));
+}
+
+#define mark_unmarshal_tables_IS_ATOMIC 0
+#define mark_unmarshal_tables_IS_CONST_SIZE 1
 
 
 #endif  /* READ */

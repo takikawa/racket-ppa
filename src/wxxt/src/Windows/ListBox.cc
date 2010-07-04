@@ -4,7 +4,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2006 PLT Scheme Inc.
+ * Copyright: (C) 2004-2007 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -20,7 +20,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301 USA.
  */
 
 #ifdef __GNUG__
@@ -206,8 +207,8 @@ void wxListBox::Append(char *item)
     char **new_choices, **new_client_data;
 
     num_free = LIST_CHUNK_SIZE;
-    new_choices     = new char *[num_choices+LIST_CHUNK_SIZE];
-    new_client_data = new char *[num_choices+LIST_CHUNK_SIZE];
+    new_choices     = new WXGC_PTRS char *[num_choices+LIST_CHUNK_SIZE];
+    new_client_data = new WXGC_PTRS char *[num_choices+LIST_CHUNK_SIZE];
     // copy current choices
     for (i=0; i<num_choices; ++i) {
       new_choices[i] = choices[i];
@@ -279,8 +280,8 @@ void wxListBox::InsertItems(int n_items, char **items, int pos)
 
     pos = pos < num_choices ? pos : num_choices;
 
-    new_choices     = new char *[num_choices+n_items];
-    new_client_data = new char *[num_choices+n_items];
+    new_choices     = new WXGC_PTRS char *[num_choices+n_items];
+    new_client_data = new WXGC_PTRS char *[num_choices+n_items];
 
     for (i = 0; i < pos; ++i) {			// copy choices previous to pos
 	new_choices[i] = choices[i];
@@ -312,9 +313,9 @@ void wxListBox::Set(int n, char *_choices[])
   // copy choices and initialize client_data
   num_choices = n;
   num_free = LIST_CHUNK_SIZE;
-  sa = new char*[n+num_free];
+  sa = new WXGC_PTRS char*[n+num_free];
   choices = sa;
-  sa = new char*[n+num_free];
+  sa = new WXGC_PTRS char*[n+num_free];
   client_data = sa;
   for (i = 0; i < n; i++) {
     char *s;
@@ -453,7 +454,7 @@ int wxListBox::GetSelections(int **list_selections)
 
     rs = XfwfMultiListGetHighlighted(MULTILIST);
 
-    selections = new int[rs->num_selected];
+    selections = new WXGC_ATOMIC int[rs->num_selected];
     for (i = 0; i < rs->num_selected; i++) {
       selections[i] = rs->selected_items[i];
     }

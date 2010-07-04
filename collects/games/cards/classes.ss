@@ -40,6 +40,7 @@
 	[dragging? #f]
 	[bg-click? #f]
 	[click-base #f]
+        [last-click #f]
 	[regions null])
       (private
 	[get-snip-bounds
@@ -236,26 +237,35 @@
       (augment
 	[after-interactive-move
 	 (lambda (e)
-	   (set! dragging? #f)
-	   (inner (void) after-interactive-move e)
-	   (for-each-selected (lambda (snip) (send snip back-to-original-location this)))
-	   (let ([cards (get-reverse-selected-list)])
-	     (only-front-selected) ; in case overlap changed
-	     (for-each
-	      (lambda (region)
-		(when (region-hilite? region)
-		  (mred:queue-callback
-		   ; Call it outside the current edit sequence
-		   (lambda ()
-		     ((region-callback region) cards)
-		     (unhilite-region region)))))
-	      regions)))])
+           (when dragging?
+             (set! dragging? #f)
+             (inner (void) after-interactive-move e)
+             (for-each-selected (lambda (snip) (send snip back-to-original-location this)))
+             (let ([cards (get-reverse-selected-list)])
+               (only-front-selected) ; in case overlap changed
+               (for-each
+                (lambda (region)
+                  (when (region-hilite? region)
+                    (mred:queue-callback
+                                        ; Call it outside the current edit sequence
+                     (lambda ()
+                       ((region-callback region) cards)
+                       (unhilite-region region)))))
+                regions))))])
       (override
 	[on-default-event
 	 (lambda (e)
-	   (let ([click (or (and (send e button-down? 'left) 'left)
-			    (and (send e button-down? 'right) 'right)
-			    (and (send e button-down? 'middle) 'middle))])
+	   (let ([click (let ([c (or (and (send e button-down? 'left) 'left)
+                                     (and (send e button-down? 'right) 'right)
+                                     (and (send e button-down? 'middle) 'middle))])
+                          (cond
+                           [(eq? c last-click) c]
+                           [(not last-click) c]
+                           ;; Move/drag event has different mouse button,
+                           ;; and there was no mouse up. Don't accept the
+                           ;; click, yet.
+                           [else #f]))])
+             (set! last-click click)
 	     (when click
 	       (let* ([actions (cdr (assoc click button-map))]
 		      [one? (list-ref actions 0)]
@@ -308,6 +318,10 @@
 		       (set! bg-click? #f)))
 		 (unless bg-click?
 		   (super on-default-event e))
+                 (when (and bg-click? dragging?)
+                   ;; We didn't call super on-default-event, so we need
+                   ;;  to explicitly end the drag:
+                   (after-interactive-move e))
 		 (when bg-click?
 		   ; Check for clicking on a button region:
 		   (for-each

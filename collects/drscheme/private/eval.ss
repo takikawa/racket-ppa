@@ -1,7 +1,7 @@
 
 (module eval mzscheme
   (require (lib "mred.ss" "mred")
-           (lib "unitsig.ss")
+           (lib "unit.ss")
            (lib "port.ss")
            (lib "class.ss")
 	   (lib "toplevel.ss" "syntax")
@@ -15,18 +15,17 @@
   (define (oprintf . args) (apply fprintf op args))
   
   (provide eval@)
-  (define eval@
-    (unit/sig drscheme:eval^
-      (import [drscheme:language-configuration : drscheme:language-configuration/internal^]
-              [drscheme:rep : drscheme:rep^]
-              [drscheme:init : drscheme:init^]
-              [drscheme:language : drscheme:language^]
-              [drscheme:teachpack : drscheme:teachpack^])
-      
+  (define-unit eval@
+    (import [prefix drscheme:language-configuration: drscheme:language-configuration/internal^]
+            [prefix drscheme:rep: drscheme:rep^]
+            [prefix drscheme:init: drscheme:init^]
+            [prefix drscheme:language: drscheme:language^])
+    (export drscheme:eval^)
+
       (define (traverse-program/multiple language-settings
                                          init
                                          kill-termination)
-        (let-values ([(eventspace custodian teachpack-cache) 
+        (let-values ([(eventspace custodian) 
                       (build-user-eventspace/custodian
                        language-settings
                        init
@@ -59,8 +58,8 @@
                    (λ ()
                      (let ([read-thnk 
                             (if complete-program?
-                                (send language front-end/complete-program port settings teachpack-cache)
-                                (send language front-end/interaction port settings teachpack-cache))])
+                                (send language front-end/complete-program port settings)
+                                (send language front-end/interaction port settings))])
                        (let loop ()
                          (let ([in (read-thnk)])
                            (cond
@@ -102,9 +101,8 @@
          #t))
          
       
-      (define (build-user-eventspace/custodian language-settings init kill-termination)
+    (define (build-user-eventspace/custodian language-settings init kill-termination)
         (let* ([user-custodian (make-custodian)]
-               [user-teachpack-cache (preferences:get 'drscheme:teachpacks)]
 	       [eventspace (parameterize ([current-custodian user-custodian])
 			     (make-eventspace))]
                [language (drscheme:language-configuration:language-settings-language
@@ -138,14 +136,13 @@
           (run-in-eventspace
            (λ ()
              (set! eventspace-main-thread (current-thread))
-             (drscheme:teachpack:install-teachpacks user-teachpack-cache)
              (init)
              (break-enabled #t)))
           (thread
            (λ ()
              (thread-wait eventspace-main-thread)
              (kill-termination)))
-          (values eventspace user-custodian user-teachpack-cache)))
+          (values eventspace user-custodian)))
       
       ;; get-snip-classes : -> (listof snipclass)
       ;; returns a list of the snip classes in the current eventspace
@@ -172,9 +169,6 @@
         (error-print-width 250)
         (current-ps-setup (make-object ps-setup%))
 
-        (let ([user-custodian (current-custodian)])
-          (exit-handler (λ (arg) ; =User=
-                          (custodian-shutdown-all user-custodian))))
         (current-namespace (make-namespace 'empty))
         (for-each (λ (x) (namespace-attach-module drscheme:init:system-namespace x))
                   to-be-copied-module-names))
@@ -226,4 +220,4 @@
                (when (and (equal? #\# (car chars))
                           (equal? #\! (cadr chars)))
                  (read-line port))
-               (values port filename))]))))))
+               (values port filename))])))))

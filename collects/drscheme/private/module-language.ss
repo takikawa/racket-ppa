@@ -1,7 +1,7 @@
 
 (module module-language mzscheme
   (provide module-language@)
-  (require (lib "unitsig.ss")
+  (require (lib "unit.ss")
            (lib "class.ss")
            (lib "mred.ss" "mred")
            (lib "embed.ss" "compiler")
@@ -14,12 +14,12 @@
   (define op (current-output-port))
   (define (oprintf . args) (apply fprintf op args))
   
-  (define module-language@
-    (unit/sig drscheme:module-language^
-      (import [drscheme:language-configuration : drscheme:language-configuration/internal^]
-              [drscheme:language : drscheme:language^]
-              [drscheme:unit : drscheme:unit^]
-              [drscheme:rep : drscheme:rep^])
+  (define-unit module-language@
+    (import [prefix drscheme:language-configuration: drscheme:language-configuration/internal^]
+            [prefix drscheme:language: drscheme:language^]
+            [prefix drscheme:unit: drscheme:unit^]
+            [prefix drscheme:rep: drscheme:rep^])
+    (export drscheme:module-language^)
 
       (define module-language<%> 
         (interface ()
@@ -45,7 +45,7 @@
       ;; module-mixin : (implements drscheme:language:language<%>)
       ;;             -> (implements drscheme:language:language<%>)
       (define (module-mixin %)
-        (class* % (module-language<%>)
+        (class* % (drscheme:language:language<%> module-language<%>)
           (define/override (use-namespace-require/copy?) #t)
           (field [iteration-number 0])
           
@@ -115,8 +115,9 @@
           
           (define/override (get-style-delta) module-language-style-delta)
           
-          (define/override (front-end/complete-program port settings teachpack-cache)
-            (let* ([super-thunk (super front-end/complete-program port settings teachpack-cache)]
+          (inherit get-reader)
+          (define/override (front-end/complete-program port settings)
+            (let* ([super-thunk (λ () ((get-reader) (object-name port) port))]
                    [filename (get-filename port)]
                    [module-name #f]
                    [module-name-prefix (get-module-name-prefix filename)]
@@ -150,16 +151,18 @@
                      (if (eof-object? super-result)
                          #`(begin 
                              (current-module-name-prefix #f)
-                             (eval '(require #,(get-full-module-name)))
-                             (eval '(current-namespace (module->namespace '#,(get-full-module-name)))))
+                             (call-with-continuation-prompt
+                              (λ () (eval '(require #,(get-full-module-name))))))
                          (raise-syntax-error
                           'module-language
                           "there can only be one expression in the definitions window"
                           super-result)))]
+                  [(= 4 iteration-number)
+                   #`(eval '(current-namespace (module->namespace '#,(get-full-module-name))))]
                   [else eof]))))
           
           ;; printer settings are just ignored here.
-          (define/override (create-executable setting parent program-filename teachpacks)
+          (define/override (create-executable setting parent program-filename)
             (let* ([executable-specs (drscheme:language:create-executable-gui
                                       parent 
                                       program-filename
@@ -265,7 +268,7 @@
                       (string-constant ml-cp-choose-a-collection-path)
                       (send parent get-top-level-window))])
             (when dir
-              (send lb append dir #f)
+              (send lb append (path->string dir) #f)
               (update-buttons))))
         
         (define (add-default-callback)
@@ -426,17 +429,18 @@
         (and path
              (let-values ([(base name dir) 
                            (split-path (normal-case-path (simplify-path (expand-path path) #f)))])
-               (string->symbol (format ",~a" (path->string base))))))
+               (string->symbol (format ",~a" (bytes->string/latin-1 (path->bytes base)))))))
         
       ;; build-name : path -> symbol
       (define (build-name pre-path)
         (let ([path (normal-case-path (simplify-path (expand-path pre-path) #f))])
           (let-values ([(base name dir) (split-path path)])
             (string->symbol (format ",~a" 
-                                    (path->string
-                                     (build-path 
-                                      base
-                                      (remove-suffix (path->string name)))))))))
+                                    (bytes->string/latin-1
+                                      (path->bytes
+                                       (build-path 
+                                        base
+                                        (remove-suffix (path->string name))))))))))
       
       ;; get-filename : port -> (union string #f)
       ;; extracts the file the definitions window is being saved in, if any.
@@ -501,13 +505,13 @@
           ;; returns the name after "(module " suffixed with .scm
           ;; in the beginning of the editor
           ;; or #f if the beginning doesn't match "(module "
-          (define (get-module-filename)
+          (define/private (get-module-filename)
             (let ([open-paren (skip-whitespace 0)])
               (or (match-paren open-paren "(")
                   (match-paren open-paren "[")
                   (match-paren open-paren "{"))))
           
-          (define (match-paren open-paren paren)
+          (define/private (match-paren open-paren paren)
             (and (matches open-paren paren)
                  (let ([module (skip-whitespace (+ open-paren 1))])
                    (and (matches module "module")
@@ -519,7 +523,7 @@
                                               ".scm")))))))
           
 
-          (define (matches start string)
+          (define/private (matches start string)
             (let ([last-pos (last-position)])
               (let loop ([i 0])
                 (cond
@@ -531,7 +535,7 @@
                   [(= i (string-length string)) #t]
                   [else #f]))))
           
-          (define (skip-whitespace start)
+          (define/private (skip-whitespace start)
             (let ([last-pos (last-position)])
               (let loop ([pos start])
                 (cond
@@ -543,7 +547,7 @@
                         (loop (+ pos 1))]
                        [else pos]))]))))
 
-          (define (skip-to-whitespace start)
+          (define/private (skip-to-whitespace start)
             (let ([last-pos (last-position)])
               (let loop ([pos start])
                 (cond
@@ -554,4 +558,4 @@
                   [else
                    (loop (+ pos 1))]))))
           
-          (super-instantiate ()))))))
+          (super-new)))))

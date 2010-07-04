@@ -3,7 +3,7 @@
  * Purpose:     MrEd main file, including a hodge-podge of global stuff
  * Author:      Matthew Flatt
  * Created:     1995
- * Copyright:   (c) 2004-2006 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2007 PLT Scheme Inc.
  * Copyright:   (c) 1995-2000, Matthew Flatt
  */
 
@@ -117,6 +117,10 @@ wxFrame *mred_real_main_frame;
 static Scheme_Thread *user_main_thread;
 
 extern void wxMediaIOCheckLSB(void);
+extern void wxMouseEventHandled(void);
+#ifdef wx_xt
+extern int wx_single_instance;
+#endif
 
 #include "mred.h"
 
@@ -240,7 +244,7 @@ static MrEdContext *mred_only_context;
 static int only_context_just_once = 0;
 static MrEdContext *user_main_context;
 static MrEdContextFramesRef mred_frames; /* list of all frames (weak link to invisible ones) */
-static wxTimer *mred_timers;
+static Scheme_Hash_Table *timer_contexts;
 int mred_eventspace_param;
 int mred_event_dispatch_param;
 Scheme_Type mred_eventspace_type;
@@ -249,7 +253,7 @@ static Scheme_Type mred_eventspace_hop_type;
 static Scheme_Object *def_dispatch;
 int mred_ps_setup_param;
 #ifdef NEED_HET_PARAM
-int mred_het_param;
+Scheme_Object *mred_het_key;
 #endif
 
 typedef struct Nested_Wait {
@@ -302,6 +306,7 @@ static int mark_eventspace_val(void *p)
   gcMARK_TYPED(Scheme_Thread_Cell_Table *, c->main_break_cell);
 
   gcMARK_TYPED(wxTimer *, c->timer);
+  gcMARK_TYPED(wxTimer **, c->timers);
 
   gcMARK_TYPED(void *, c->alt_data);
 
@@ -335,6 +340,7 @@ static int fixup_eventspace_val(void *p)
   gcFIXUP_TYPED(Scheme_Thread_Cell_Table *, c->main_break_cell);
 
   gcFIXUP_TYPED(wxTimer *, c->timer);
+  gcFIXUP_TYPED(wxTimer **, c->timers);
 
   gcFIXUP_TYPED(void *, c->alt_data);
 
@@ -671,11 +677,10 @@ static void kill_eventspace(Scheme_Object *ec, void *)
   }
 
   {
-    wxTimer *t, *next;
-    for (t = mred_timers; t; t = next) {
-      next = t->next;
-      if (t->context == (void *)c)
-	t->Stop();
+    wxTimer *t;
+    while (c->timers) {
+      t = c->timers;
+      t->Stop();
     }
   }
 
@@ -777,10 +782,6 @@ static MrEdContext *MakeContext(MrEdContext *c)
 				mred_eventspace_param, 
 				(Scheme_Object *)c);
 
-#ifdef NEED_HET_PARAM
-  config = scheme_extend_config(config, mred_het_param, scheme_false);
-#endif
-
   c->main_config = config;
   cells = scheme_inherit_cells(NULL);
   c->main_cells = cells;
@@ -813,7 +814,7 @@ static MrEdContext *MakeContext(MrEdContext *c)
   }
   c->mr_hop = mr_hop;
 #ifndef MZ_PRECISE_GC
-  scheme_weak_reference((void **)&mr_hop->context);
+  scheme_weak_reference((void **)(void *)&mr_hop->context);
 #endif
 
   {
@@ -863,6 +864,24 @@ static void UnchainContextsList()
     mred_contexts->next = NULL;
     mred_contexts = next;
   }
+}
+
+static wxTimer *GlobalFirstTimer()
+{
+  wxTimer *timer = NULL;
+  int i;
+  for (i = timer_contexts->size; i--; ) {
+    if (timer_contexts->vals[i]) {
+      MrEdContext *c = (MrEdContext *)timer_contexts->keys[i];
+      if (c->ready && c->timers) {
+        if (!timer)
+          timer = c->timers;
+        else if (c->timers->expiration < timer->expiration)
+          timer = c->timers;
+      }
+    }
+  }
+  return timer;
 }
 
 #ifdef wx_xt
@@ -980,7 +999,6 @@ void *MrEdForEachFrame(ForEachFrameProc fp, void *data)
 static int check_eventspace_inactive(void *_c)
 {
   MrEdContext *c = (MrEdContext *)_c;
-  wxTimer *timer = mred_timers;
 
   if (c->nested_avail)
     return 0;
@@ -992,11 +1010,8 @@ static int check_eventspace_inactive(void *_c)
     return 0;
 
   /* Any running timers for the eventspace? */
-  while (timer) {
-    if (((MrEdContext *)timer->context) == c)
-      return 0;
-    timer = timer->next;
-  }
+  if (c->timers)
+    return 0;
 
   /* Any top-level windows visible in this eventspace */
   {
@@ -1036,12 +1051,17 @@ int mred_current_thread_is_handler(void *ctx)
 int mred_in_restricted_context()
 {
 #ifdef NEED_HET_PARAM
-  /* see wxHiEventTrampoline for info on mred_het_param: */
+  /* see wxHiEventTrampoline for info on mred_het_key: */
   Scheme_Object *v;
   if (!scheme_current_thread) 
     return 1;
-  v = scheme_get_param(scheme_current_thread->init_config, mred_het_param);
-  if (SCHEME_TRUEP(v))
+  
+  if (mred_het_key)
+    v = scheme_extract_one_cc_mark(NULL, mred_het_key);
+  else
+    v = NULL;
+
+  if (v && SCHEME_BOX_VAL(v))
     return 1;
 #endif
   return 0;
@@ -1053,16 +1073,12 @@ int mred_in_restricted_context()
 
 static wxTimer *TimerReady(MrEdContext *c)
 {
-  wxTimer *timer = mred_timers;
+  wxTimer *timer;
 
   if (c) {
-    while (timer && (timer->context != (void *)c)) {
-      timer = timer->next;
-    }
+    timer = c->timers;
   } else {
-    while (timer && !((MrEdContext *)timer->context)->ready) {
-      timer = timer->next;
-    }
+    timer = GlobalFirstTimer();
   }
 
   if (timer) {
@@ -1218,13 +1234,9 @@ static Scheme_Object *MrEdDoNextEvent(MrEdContext *c, wxDispatch_Check_Fun alt, 
   int restricted = 0;
 
 #ifdef NEED_HET_PARAM
-  /* see wxHiEventTrampoline for info on mred_het_param: */
-  {
-    Scheme_Object *v;
-    v = scheme_get_param(scheme_current_thread->init_config, mred_het_param);
-    if (SCHEME_TRUEP(v))
-      restricted = 1;
-  }
+  /* see wxHiEventTrampoline for info on mred_het_key: */
+  if (mred_in_restricted_context())
+    restricted = 1;
 #endif
 
   if (alt) {
@@ -1334,13 +1346,9 @@ int MrEdEventReady(MrEdContext *c)
   int restricted = 0;
 
 #ifdef NEED_HET_PARAM
-  /* see wxHiEventTrampoline for info on mred_het_param: */
-  {
-    Scheme_Object *v;
-    v = scheme_get_param(scheme_current_thread->init_config, mred_het_param);
-    if (SCHEME_TRUEP(v))
-      restricted = 1;
-  }
+  /* see wxHiEventTrampoline for info on mred_het_key: */
+  if (mred_in_restricted_context())
+    restricted = 1;
 #endif
 
   return (c->nested_avail
@@ -1529,7 +1537,9 @@ static int try_dispatch(Scheme_Object *do_it)
   if (try_q_callback(do_it, 2))
     return 1;
 
-  if ((timer = TimerReady(NULL))) {
+  timer = TimerReady(NULL);
+
+  if (timer) {
     if (!do_it)
       return 1;
     if (SCHEME_FALSEP(do_it))
@@ -1681,6 +1691,9 @@ Scheme_Object *wxDispatchEventsUntilWaitable(wxDispatch_Check_Fun f, void *data,
   Scheme_Object *result = scheme_void;
 
   c = MrEdGetContext();
+#ifdef wx_mac
+  wxMouseEventHandled();
+#endif
 
   if (c->ready_to_go
       || (c->handler_running != scheme_current_thread)) {
@@ -1735,11 +1748,9 @@ static void MrEdSleep(float secs, void *fds)
 
   now = scheme_get_inexact_milliseconds();
   {
-    wxTimer *timer = mred_timers;
+    wxTimer *timer;
 
-    while (timer && !((MrEdContext *)timer->context)->ready) {
-      timer = timer->next;
-    }
+    timer = GlobalFirstTimer();
 
     if (timer) {
       double done = timer->expiration;
@@ -1814,7 +1825,7 @@ Bool wxTimer::Start(int millisec, Bool _one_shot)
 {
   double now;
 
-  if (prev || next || (mred_timers == this))
+  if (prev || next || (((MrEdContext *)context)->timers == this))
     return FALSE;
 
   if (((MrEdContext *)context)->killed)
@@ -1828,8 +1839,8 @@ Bool wxTimer::Start(int millisec, Bool _one_shot)
   now = scheme_get_inexact_milliseconds();
   expiration = now + interval;
 
-  if (mred_timers) {
-    wxTimer *t = mred_timers;
+  if (((MrEdContext *)context)->timers) {
+    wxTimer *t = ((MrEdContext *)context)->timers;
 
     while (1) {
       int later;
@@ -1843,7 +1854,7 @@ Bool wxTimer::Start(int millisec, Bool _one_shot)
 	if (prev)
 	  prev->next = this;
 	else
-	  mred_timers = this;
+	  ((MrEdContext *)context)->timers = this;
 	return TRUE;
       }
 
@@ -1855,8 +1866,10 @@ Bool wxTimer::Start(int millisec, Bool _one_shot)
       }
       t = t->next;
     }
-  } else
-    mred_timers = this;
+  } else {
+    ((MrEdContext *)context)->timers = this;
+    scheme_hash_set(timer_contexts, (Scheme_Object *)context, scheme_true);
+  }
 
   return TRUE;
 }
@@ -1864,8 +1877,11 @@ Bool wxTimer::Start(int millisec, Bool _one_shot)
 void wxTimer::Dequeue(void)
 {
   if (!prev) {
-    if (mred_timers == this)
-      mred_timers = next;
+    if (((MrEdContext *)context)->timers == this) {
+      ((MrEdContext *)context)->timers = next;
+      if (!next)
+        scheme_hash_set(timer_contexts, (Scheme_Object *)context, NULL);
+    }
   }
 
   if (prev)
@@ -2024,6 +2040,14 @@ static void MrEdQueueWindowCallback(wxWindow *wx_window, Scheme_Closed_Prim *scp
   MrEdContext *c;
   Q_Callback *cb;
   Scheme_Object *p;
+
+  if (!scheme_current_thread) {
+    /* Scheme hasn't started yet, so call directly.
+       We might get here for an update to the stdio
+       window, for example. */
+    scp(data, 0, NULL);
+    return;
+  }
 
 #ifdef wx_mac
   c = MrEdGetContext(wx_window->GetRootFrame());
@@ -2788,11 +2812,6 @@ Scheme_Object *OBJDump(int, Scheme_Object *[])
 	 (long)GC_changing_list_current - (long)GC_changing_list_start);
 # endif
 
-  wxTimer *timer;
-  for (c = 0, timer = mred_timers; timer; timer = timer->next)
-    c++;
-  PRINT_IT("Timers: %d\n", c);
-
   Scheme_Thread *p;
   for (c = 0, p = scheme_first_thread; p; p = p->next)
     c++;
@@ -3229,7 +3248,8 @@ wxFrame *MrEdApp::OnInit(void)
 #endif
 
   wxREGGLOB(mred_frames);
-  wxREGGLOB(mred_timers);
+  wxREGGLOB(timer_contexts);
+  timer_contexts = scheme_make_hash_table(SCHEME_hash_ptr);
 
 #ifdef LIBGPP_REGEX_HACK
   new WXGC_PTRS Regex("a", 0);
@@ -3246,7 +3266,12 @@ wxFrame *MrEdApp::OnInit(void)
 #if !defined(USE_SENORA_GC) && !defined(MZ_PRECISE_GC)
   GC_set_warn_proc(CAST_IGNORE MrEdIgnoreWarnings);
 #endif
+#if 0
+  /* Used to be set for the sake of Mac OS Classic. Now,
+     setting GC_out_of_memory for 3m means that it's ok
+     to fail when a limit is reached. We don't want that. */
   GC_out_of_memory = (OOM_ptr)MrEdOutOfMemory;
+#endif
 
 #ifdef SGC_STD_DEBUGGING
   scheme_external_dump_info = dump_cpp_info;
@@ -3266,9 +3291,6 @@ wxFrame *MrEdApp::OnInit(void)
   mred_eventspace_param = scheme_new_param();
   mred_event_dispatch_param = scheme_new_param();
   mred_ps_setup_param = scheme_new_param();
-#ifdef NEED_HET_PARAM
-  mred_het_param = scheme_new_param();
-#endif
 
   wxInitSnips(); /* and snip classes */
 
@@ -3291,6 +3313,11 @@ wxFrame *MrEdApp::OnInit(void)
 			 mark_eventspace_hop_val,
 			 fixup_eventspace_hop_val,
 			 1, 0);
+#endif
+
+#ifdef NEED_HET_PARAM
+  wxREGGLOB(mred_het_key);
+  mred_het_key = scheme_make_symbol("het"); /* uninterned */
 #endif
 
 #ifdef MZ_PRECISE_GC
@@ -3410,7 +3437,14 @@ void MrEdApp::RealInit(void)
     scheme_exit = CAST_EXIT MrEdExit;
 #endif
 
-  exit_val = mred_finish_cmd_line_run();
+#ifdef wx_xt
+  if (wx_single_instance) {
+    exit_val = wxCheckSingleInstance(global_env);
+  }
+#endif
+
+  if (!exit_val)
+    exit_val = mred_finish_cmd_line_run();
 
   scheme_kill_thread(scheme_current_thread);
 }
@@ -3604,50 +3638,26 @@ extern "C" {
 
 static unsigned long get_deeper_base();
 
-static void pre_het(void *d)
-{
-  HiEventTramp *het = (HiEventTramp *)d;
-
-  het->old_param = scheme_get_param(het->config, mred_het_param);
-  scheme_set_param(het->config, mred_het_param, scheme_make_raw_pair((Scheme_Object *)het, scheme_null));
-}
-
-static Scheme_Object *act_het(void *d)
-{
-  HiEventTramp * het = (HiEventTramp *)d;
-  HiEventTrampProc wha_f = het->wrap_het_around_f;
-
-  het->val = wha_f(het->wha_data);
-
-  return scheme_void;
-}
-
-static void post_het(void *d)
-{
-  HiEventTramp *het = (HiEventTramp *)d;
-
-  scheme_set_param(het->config, mred_het_param, het->old_param);
-}
-
-int wxHiEventTrampoline(int (*wha_f)(void *), void *wha_data)
+int wxHiEventTrampoline(int (*_wha_f)(void *), void *wha_data)
 {
   HiEventTramp *het;
+  HiEventTrampProc wha_f = (HiEventTrampProc)_wha_f;
+  Scheme_Cont_Frame_Data cframe;
+  Scheme_Object *bx;
 
   het = new WXGC_PTRS HiEventTramp;
-  het->wrap_het_around_f = wha_f;
-  het->wha_data = wha_data;
-  het->val = 0;
-  het->config = scheme_current_thread->init_config;
+
+  bx = scheme_make_raw_pair((Scheme_Object *)het, NULL);
+
+  scheme_push_continuation_frame(&cframe);
+  scheme_set_cont_mark(mred_het_key, bx);
 
   het->progress_cont = scheme_new_jmpupbuf_holder();
 
   scheme_init_jmpup_buf(&het->progress_cont->buf);
 
   scheme_start_atomic();
-  scheme_dynamic_wind(CAST_DW_PRE pre_het,
-		      CAST_DW_RUN act_het,
-		      CAST_DW_POST post_het,
-		      NULL, het);
+  het->val = wha_f(wha_data);
 
   if (het->timer_on) {
     het->timer_on = 0;
@@ -3658,10 +3668,11 @@ int wxHiEventTrampoline(int (*wha_f)(void *), void *wha_data)
 
   if (het->in_progress) {
     /* We have leftover work; jump and finish it (non-atomically).
-       But don't swap until we've juped back in, because the jump-in
+       But don't swap until we've jumped back in, because the jump-in
        point might be trying to suspend the thread (and that should
        complete before any swap). */
     scheme_end_atomic_no_swap();
+    SCHEME_CAR(bx) = NULL;
     het->in_progress = 0;
     het->progress_is_resumed = 1;
     if (!scheme_setjmp(het->progress_base)) {
@@ -3674,9 +3685,10 @@ int wxHiEventTrampoline(int (*wha_f)(void *), void *wha_data)
     scheme_end_atomic();
   }
 
+  scheme_pop_continuation_frame(&cframe);
+
   het->old_param = NULL;
   het->progress_cont = NULL;
-  het->wha_data = NULL;
   het->do_data = NULL;
 
   return het->val;
@@ -3688,7 +3700,7 @@ static void suspend_het_progress(void)
 
   {
     Scheme_Object *v;
-    v = scheme_get_param(scheme_current_thread->init_config, mred_het_param);
+    v = scheme_extract_one_cc_mark(NULL, mred_het_key);
     het = (HiEventTramp *)SCHEME_CAR(v);
   }
 
@@ -3766,8 +3778,8 @@ int mred_het_run_some(HiEventTrampProc do_f, void *do_data)
 
   {
     Scheme_Object *v;
-    v = scheme_get_param(scheme_current_thread->init_config, mred_het_param);
-    if (SCHEME_RPAIRP(v))
+    v = scheme_extract_one_cc_mark(NULL, mred_het_key);
+    if (v)
       het = (HiEventTramp *)SCHEME_CAR(v);
     else
       het = NULL;
@@ -3825,10 +3837,9 @@ static unsigned long get_deeper_base()
 #endif
 
 /****************************************************************************/
-/*                              Mac AE support                              */
+/*                              AE-like support                             */
 /****************************************************************************/
 
-#if defined(wx_mac) || defined(wx_msw)
 static void wxDo(Scheme_Object *proc, int argc, Scheme_Object **argv)
 {
   mz_jmp_buf * volatile save, newbuf;
@@ -3868,11 +3879,16 @@ void wxDrop_Runtime(char **argv, int argc)
 
   for (i = 0; i < argc; i++) {
     Scheme_Object *p[1];
+#ifdef wx_xt
+    p[0] = scheme_char_string_to_path(scheme_make_utf8_string(argv[i]));
+#else
     p[0] = scheme_make_path(argv[i]);
+#endif
     wxDo(wxs_app_file_proc, 1, p);
   }
 }
 
+#if defined(wx_mac) || defined(wx_msw)
 void wxDrop_Quit()
 {
 #if WINDOW_STDIO

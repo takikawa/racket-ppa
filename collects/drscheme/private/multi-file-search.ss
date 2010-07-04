@@ -1,8 +1,7 @@
 
-(module multi-file-search mzscheme
+(module multi-file-search (lib "a-unit.ss")
   (require (lib "framework.ss" "framework")
            (lib "class.ss")
-           (lib "unitsig.ss")
            (lib "mred.ss" "mred")
            (lib "file.ss")
            (lib "thread.ss")
@@ -10,13 +9,10 @@
            (lib "string-constant.ss" "string-constants")
            "drsig.ss")
   
-  (provide multi-file-search@)
-  
-  (define multi-file-search@
-    (unit/sig drscheme:multi-file-search^
-      (import [drscheme:frame : drscheme:frame^]
-              [drscheme:unit : drscheme:unit^])
-      
+  (import [prefix drscheme:frame: drscheme:frame^]
+          [prefix drscheme:unit: drscheme:unit^])
+  (export drscheme:multi-file-search^)
+
       ;; multi-file-search : -> void
       ;; opens a dialog to configure the search and initiates the search
       (define (multi-file-search)
@@ -96,10 +92,10 @@
                                (lambda (x) (or (not x) (path? x))))
       (preferences:set-un/marshall 
        'drscheme:multi-file-search:directory
-       (λ (v) (path->string v))
+       (λ (v) (and v (path->string v)))
        (λ (p) (if (path-string? p)
-                       (string->path p)
-                       #f)))
+                  (string->path p)
+                  #f)))
       
       
       ;; open-search-window : search-info -> void
@@ -503,11 +499,12 @@
              (cond
                [(null? methods-check-boxess) null]
                [else
-                (let loop ([methods-check-boxes (car methods-check-boxess)])
-                  (cond
-                    [(null? methods-check-boxes) null]
-                    [else (cons (send (car methods-check-boxes) get-value)
-                                (loop (cdr methods-check-boxes)))]))]))))
+                (cons (let loop ([methods-check-boxes (car methods-check-boxess)])
+                        (cond
+                          [(null? methods-check-boxes) null]
+                          [else (cons (send (car methods-check-boxes) get-value)
+                                      (loop (cdr methods-check-boxes)))]))
+                      (loop (cdr methods-check-boxess)))]))))
         
         (define (dir-field-callback)
           (let ([df (send dir-field get-value)])
@@ -655,7 +652,7 @@
                             (process-dir-contents (cdr contents) k)]))]))])
           (λ () (next-thunk))))
       
-      ;; build-flat-file-list : (union #f regexp) string -> (-> (union string #f))
+      ;; build-flat-file-list : path (union #f regexp) -> (-> (union string #f))
       ;; thread: searching thread
       (define (build-flat-file-list dir filter)
         (let ([contents (map (λ (x) (build-path dir x)) (directory-list dir))])
@@ -664,7 +661,7 @@
               (cond
                 [(null? contents)
                  #f]
-                [(and filter (regexp-match filter (car contents)))
+                [(and filter (regexp-match filter (path->string (car contents))))
                  (begin0
                    (car contents)
                    (set! contents (cdr contents)))]
@@ -715,4 +712,4 @@
                                             (car pos)
                                             (- (cdr pos) (car pos))))))
                            (loop (+ line-number 1))]))))
-                  'text))))))))
+                  'text))))))

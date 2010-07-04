@@ -4,7 +4,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2006 PLT Scheme Inc.
+ * Copyright: (C) 2004-2007 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -20,7 +20,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301 USA.
  */
 
 #include "wx.h"
@@ -37,7 +38,7 @@ char *wxFileNameFromPath(char *path)
 	if (path[tcp] == '/') {
 	  char *naya;
 	  tcp++;
-	  naya = new char[slen + 1 - tcp];
+	  naya = new WXGC_ATOMIC char[slen + 1 - tcp];
 	  memcpy(naya, path + tcp, slen + 1 - tcp);
 	  return naya;
 	}
@@ -53,7 +54,7 @@ char *wxPathOnly(char *path)
     int p, last_slash = 0;
     char *buf;
 
-    buf = new char[strlen(path) + 1];
+    buf = new WXGC_ATOMIC char[strlen(path) + 1];
     
     // copy path and keep the last slash or baskslash in mind
     for (p = 0; path[p]; p++) {

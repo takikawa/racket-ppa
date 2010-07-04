@@ -3,7 +3,7 @@
 // Purpose:	Panel item tab choice implementation (Macintosh version)
 // Author:	Matthew
 // Created:	2002
-// Copyright:  (c) 2004-2006 PLT Scheme Inc.
+// Copyright:  (c) 2004-2007 PLT Scheme Inc.
 // Copyright:  (c) 2002, PLT
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -65,7 +65,7 @@ wxGroupBox::wxGroupBox(wxPanel *panel, char *label, int style, wxFont *_font)
     double x, y;
     wxFont *bold;
     bold = new WXGC_PTRS wxFont(font->GetPointSize(), font->GetFontId(), font->GetStyle(), wxBOLD, 0);
-    bold->GetTextExtent(wxItemStripLabel(label), 0, &x, &y, NULL, NULL, TRUE, FALSE);
+    bold->GetTextExtent(wxItemStripLabel(label), 0, -1, &x, &y, NULL, NULL, TRUE, FALSE);
     cWindowWidth = (int)x + GBOX_EXTRA_H_SPACE;
     cWindowHeight = (int)y + GBOX_EXTRA_SPACE;
   }

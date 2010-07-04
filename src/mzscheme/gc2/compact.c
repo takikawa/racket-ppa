@@ -1,6 +1,6 @@
 /*
   Precise GC for MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 1999 Matthew Flatt
   All rights reserved.
 
@@ -164,9 +164,9 @@ Type_Tag weak_box_tag = 42; /* set by client */
 Type_Tag ephemeron_tag = 42; /* set by client */
 Type_Tag weak_array_tag  = 42; /* set by client */
 
-#define gc_on_free_list_tag 257
+#define gc_on_free_list_tag 511
 
-#define _num_tags_ 260
+#define _num_tags_ 512
 
 Size_Proc size_table[_num_tags_];
 Mark_Proc mark_table[_num_tags_];
@@ -418,43 +418,7 @@ static int just_checking, the_size;
 /******************************************************************************/
 
 #define DONT_NEED_MAX_HEAP_SIZE
-
-/******************************************************************************/
-/* Windows */
-
-#if _WIN32
-# include "vm_win.c"
-# define MALLOCATOR_DEFINED
-#endif
-
-/******************************************************************************/
-/* OSKit */
-
-#if OSKIT
-# include "vm_osk.c"
-# define MALLOCATOR_DEFINED
-#endif
-
-/******************************************************************************/
-/* OS X */
-
-#if defined(OS_X)
-# if GENERATIONS
-static void designate_modified(void *p);
-# endif
-
-# define TEST 0
-# include "vm_osx.c"
-
-# define MALLOCATOR_DEFINED
-#endif
-
-/******************************************************************************/
-/* Default: mmap */
-
-#ifndef MALLOCATOR_DEFINED
-# include "vm_mmap.c"
-#endif
+#include "vm.c"
 
 /******************************************************************************/
 /*                              client setup                                  */
@@ -467,7 +431,7 @@ void GC_set_stack_base(void *base)
   stack_base = (unsigned long)base;
 }
 
-void GC_init_type_tags(int count, int pair, int weakbox, int ephemeron, int weakarray)
+void GC_init_type_tags(int count, int pair, int weakbox, int ephemeron, int weakarray, int custbox)
 {
   pair_tag = pair;
   weak_box_tag = weakbox;
@@ -2655,7 +2619,7 @@ void protect_old_mpages()
 
 #if GENERATIONS
 
-static void designate_modified(void *p)
+static int designate_modified_maybe(void *p, int no_barrier_ok)
 {
   unsigned long g = ((unsigned long)p >> MAPS_SHIFT);
   MPage *map;
@@ -2675,21 +2639,28 @@ static void designate_modified(void *p)
       if (page->flags & MFLAG_CONTINUED) {
 	designate_modified(page->o.bigblock_start);
 	num_seg_faults++;
-	return;
+	return 1;
       } else if (page->age) {
-	page->flags |= MFLAG_MODIFIED;
-	p = (void *)((long)p & MPAGE_START);
-	if (page->flags & MFLAG_BIGBLOCK)
-	  protect_pages(p, page->u.size, 1);
-	else
-	  protect_pages(p, MPAGE_SIZE, 1);
-	num_seg_faults++;
-	return;
+        if (page->flags & MFLAG_MODIFIED) {
+          if (no_barrier_ok)
+            return 0;
+        } else {
+          page->flags |= MFLAG_MODIFIED;
+          p = (void *)((long)p & MPAGE_START);
+          if (page->flags & MFLAG_BIGBLOCK)
+            protect_pages(p, page->u.size, 1);
+          else
+            protect_pages(p, MPAGE_SIZE, 1);
+          num_seg_faults++;
+          return 1;
+        }
+      } else if (no_barrier_ok) {
+        return 0;
       }
 
       GCPRINT(GCOUTF, "Seg fault (internal error) at %lx [%ld]\n", 
 	      (long)p, num_seg_faults);
-      abort();
+      return 0;
     }
   }
 
@@ -2700,7 +2671,17 @@ static void designate_modified(void *p)
 #if defined(_WIN32) && defined(CHECKS)
   DebugBreak();
 #endif
-  abort();
+  return 0;
+}
+
+static int designate_modified(void *p)
+{
+  return designate_modified_maybe(p, 0);
+}
+
+void GC_write_barrier(void *p)
+{
+  designate_modified_maybe(p, 1);
 }
 
 /* The platform-specific signal handlers, and initialization function: */
@@ -2726,9 +2707,9 @@ static int record_stack_source = 0;
 
 #define GC_X_variable_stack GC_mark_variable_stack
 #if RECORD_MARK_SRC
-# define X_source(p) if (record_stack_source) { mark_src = p; mark_type = MTYPE_STACK; }
+# define X_source(stk, p) if (record_stack_source) { mark_src = (stk ? stk : p); mark_type = MTYPE_STACK; }
 #else
-# define X_source(p) /* */
+# define X_source(stk, p) /* */
 #endif
 #define gcX(a) gcMARK(*a)
 #include "var_stack.c"
@@ -2738,7 +2719,7 @@ static int record_stack_source = 0;
 
 #define GC_X_variable_stack GC_fixup_variable_stack
 #define gcX(a) gcFIXUP(*a)
-#define X_source(p) /* */
+#define X_source(stk, p) /* */
 #include "var_stack.c"
 #undef GC_X_variable_stack
 #undef gcX
@@ -2781,16 +2762,16 @@ static void check_ptr(void **a)
 #endif
   }
 }
-# endif
-
 
 #define GC_X_variable_stack GC_do_check_variable_stack
 #define gcX(a) check_ptr(a)
-#define X_source(p) /* */
+#define X_source(stk, p) /* */
 #include "var_stack.c"
 #undef GC_X_variable_stack
 #undef gcX
 #undef X_source
+
+# endif
 
 void GC_check_variable_stack()
 {
@@ -2799,7 +2780,8 @@ void GC_check_variable_stack()
                              0,
                              (void **)(GC_get_thread_stack_base
                                        ? GC_get_thread_stack_base()
-                                       : stack_base));
+                                       : stack_base),
+                             NULL);
 # endif
 }
 #endif
@@ -2899,7 +2881,8 @@ static void do_roots(int fixup)
 			    0,
 			    (void *)(GC_get_thread_stack_base
 				     ? GC_get_thread_stack_base()
-				     : stack_base));
+				     : stack_base),
+                            NULL);
   else {
 #if RECORD_MARK_SRC
     record_stack_source = 1;
@@ -2908,7 +2891,8 @@ static void do_roots(int fixup)
 			   0,
 			   (void *)(GC_get_thread_stack_base
 				    ? GC_get_thread_stack_base()
-				    : stack_base));
+				    : stack_base),
+                           NULL);
 #if RECORD_MARK_SRC
     record_stack_source = 0;
 #endif
@@ -3920,6 +3904,16 @@ void *GC_malloc_allow_interior(size_t size_in_bytes)
   return malloc_bigblock(size_in_bytes, MTYPE_ARRAY, 1);
 }
 
+void *GC_malloc_atomic_allow_interior(size_t size_in_bytes)
+{
+  return malloc_bigblock(size_in_bytes, MTYPE_ATOMIC, 1);
+}
+
+void *GC_malloc_tagged_allow_interior(size_t size_in_bytes)
+{
+  return malloc_bigblock(size_in_bytes, MTYPE_TAGGED, 1);
+}
+
 void *GC_malloc_array_tagged(size_t size_in_bytes)
 {
   return malloc_untagged(size_in_bytes, MTYPE_TAGGED_ARRAY, &tagged_array);
@@ -4249,6 +4243,12 @@ static void *trace_backpointer(MPage *page, void *p)
 
 # define trace_page_t MPage
 # define trace_page_type(page) (page)->type
+static void *trace_pointer_start(struct mpage *page, void *p) { 
+  if (page->flags & MFLAG_BIGBLOCK) 
+    return page->block_start;
+  else 
+    return p;
+}
 # define TRACE_PAGE_TAGGED MTYPE_TAGGED
 # define TRACE_PAGE_ARRAY MTYPE_ARRAY
 # define TRACE_PAGE_TAGGED_ARRAY MTYPE_TAGGED_ARRAY

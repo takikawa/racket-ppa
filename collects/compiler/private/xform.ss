@@ -188,6 +188,10 @@
         (define (character s)
           (count-newlines s)
           (symbol s))
+
+	(define (character? s)
+	  (and (symbol? s)
+	       (regexp-match #rx"'[\\]?.'" (symbol->string s))))
         
         (define (mk-string s)
           (count-newlines s)
@@ -683,15 +687,22 @@
           (printf "#define __xform_nongcing__ /**/~n")
           ;; Another annotation to protect against GC conversion:
           (printf "#define HIDE_FROM_XFORM(x) x~n")
+          (printf "#define XFORM_HIDE_EXPR(x) x~n")
           (printf "#define HIDE_NOTHING_FROM_XFORM() /**/~n")
           ;; In case a conversion is unnecessary where we have this annotation:
           (printf "#define START_XFORM_SKIP /**/~n")
           (printf "#define END_XFORM_SKIP /**/~n")
           (printf "#define START_XFORM_SUSPEND /**/~n")
           (printf "#define END_XFORM_SUSPEND /**/~n")
+          (printf "#define XFORM_START_SKIP /**/~n")
+          (printf "#define XFORM_END_SKIP /**/~n")
+          (printf "#define XFORM_START_SUSPEND /**/~n")
+          (printf "#define XFORM_END_SUSPEND /**/~n")
           ;; For avoiding warnings:
           (printf "#define XFORM_OK_PLUS +~n")
           (printf "#define XFORM_OK_MINUS -~n")
+          (printf "#define XFORM_TRUST_PLUS +~n")
+          (printf "#define XFORM_TRUST_MINUS -~n")
           (printf "~n")
           
           ;; C++ cupport:
@@ -744,6 +755,7 @@
                                       pushed-vars 
                                       num-calls 
                                       num-noreturn-calls
+                                      num-empty-calls
                                       nonempty-calls?))
         
         ;; A function prototype record:
@@ -796,32 +808,38 @@
         
         (define re:_stk_ (regexp "^_stk_"))
         
+        ;; These don't act like functions, but we need to treat them
+        ;;  specially:
+        (define setjmp-functions
+          '(setjmp _setjmp scheme_setjmp scheme_mz_setjmp))
+        
         ;; The non-functions table identifies symbols to ignore when
         ;; finding function calls
         (define non-functions
           '(<= < > >= == != !
-               \| \|\| & && |:| ? % + - * / ^ >> << ~ #csXFORM_OK_PLUS #csXFORM_OK_MINUS 
+               \| \|\| & && |:| ? % + - * / ^ >> << ~ 
+               #csXFORM_OK_PLUS #csXFORM_OK_MINUS #csXFORM_TRUST_PLUS #csXFORM_TRUST_MINUS 
                = >>= <<= ^= += *= /= -= %= \|= &= ++ --
                return sizeof if for while else switch case
                asm __asm __asm__ __volatile __volatile__ volatile __extension__
                __typeof
-               
+
                ;; These don't act like functions:
-               setjmp longjmp _setjmp _longjmp scheme_setjmp scheme_longjmp scheme_mz_setjmp scheme_mz_longjmp
-	       scheme_jit_longjmp scheme_jit_setjmp_prepare
-               
+               setjmp longjmp _longjmp scheme_longjmp_setjmp scheme_mz_longjmp scheme_jit_longjmp
+               scheme_jit_setjmp_prepare
+
                ;; The following are functions, but they don't trigger GC, and
                ;; they either take one argument or no pointer arguments.
                ;; So we can ignore them:
                
                strlen cos sin exp pow log sqrt atan2 
-               isnan isinf fpclass _fpclass _isnan __isfinited
+               isnan isinf fpclass _fpclass _isnan __isfinited __isnanl __isinfl isnanf isinff
                floor ceil round fmod fabs __maskrune _errno __errno
                isalpha isdigit isspace tolower toupper
                fread fwrite socket fcntl setsockopt connect send recv close
                __builtin_next_arg __builtin_saveregs 
                __builtin_constant_p __builtin_memset
-	       __builtin___CFStringMakeConstantString
+               __builtin___CFStringMakeConstantString
                __error __errno_location __toupper __tolower
                __attribute__ __mode__ ; not really functions in gcc
                __iob_func ; VC 8
@@ -829,9 +847,9 @@
                scheme_rational_to_double scheme_bignum_to_double
                scheme_rational_to_float scheme_bignum_to_float
                |GetStdHandle| |__CFStringMakeConstantString|
-		_vswprintf_c
+               _vswprintf_c
                
-		scheme_make_small_bignum scheme_make_small_rational scheme_make_small_complex))
+               scheme_make_small_bignum scheme_make_small_rational scheme_make_small_complex))
         (define non-functions-table
           (let ([ht (make-hash-table)])
             (for-each (lambda (s)
@@ -843,7 +861,7 @@
           ;; The following don't need wrappers, but we need to check for
           ;;  nested function calls because it takes more than one argument:
           (append
-           '(memcpy memmove
+           '(memcpy memmove memcmp
                     strcmp strcoll strcpy _mzstrcpy strcat memset
                     printf sprintf vsprintf vprintf
                     strncmp
@@ -922,6 +940,7 @@
                               (live-var-info-pushed-vars live-vars)
                               (live-var-info-num-calls live-vars)
                               (live-var-info-num-noreturn-calls live-vars)
+                              (live-var-info-num-empty-calls live-vars)
                               (live-var-info-nonempty-calls? live-vars)))
         
         (define gentag-count 0)
@@ -1093,6 +1112,7 @@
                      (print-it (seq->list (seq-in v)) subindent
                                (not (and (parens? v)
                                          prev
+					 (tok? prev)
                                          (memq (tok-n prev) '(for))))
                                (or (braces? v) (callstage-parens? v)))
                      (when (and next-indent (= next-indent subindent))
@@ -1105,6 +1125,7 @@
                       (display/indent v " ")]
                      [(parens? v)
                       (if (and prev 
+			       (tok? prev)
                                (memq (tok-n prev) '(if))
                                (or (null? (cdr e))
                                    (not (braces? (cadr e)))))
@@ -1181,7 +1202,8 @@
                    (newline/indent indent)
                    (display/indent v (tok-n v))
                    (display/indent v " ")]
-                  [(and (eq? '|HIDE_FROM_XFORM| (tok-n v))
+                  [(and (or (eq? '|HIDE_FROM_XFORM| (tok-n v))
+                            (eq? '|XFORM_HIDE_EXPR| (tok-n v)))
                         (pair? (cdr e))
                         (seq? (cadr e))
                         (null? (seq->list (seq-in (cadr e)))))
@@ -1201,7 +1223,8 @@
                    ;; the space it means a long string.
                    (unless (and (eq? '|L| (tok-n v))
                                 (pair? (cdr e))
-                                (string? (tok-n (cadr e)))
+                                (or (string? (tok-n (cadr e)))
+				    (character? (tok-n (cadr e))))
                                 (not (seq? (tok-n (cadr e)))))
                      (display/indent v " "))
                    (when (and (eq? semi (tok-n v))
@@ -1224,6 +1247,7 @@
                                              (callseq-prev? (cdr p)))))))]
                    [callseq-prev? (lambda (prevs)
                                     (and (pair? prevs) (pair? (cdr prevs))
+					 (tok? (car prevs))
                                          (eq? '|,| (tok-n (car prevs)))
                                          (acall? (cadr prevs))))])
             (or
@@ -1231,6 +1255,7 @@
              (let loop ([prevs prevs][semis 0])
                (cond
                  [(and (pair? prevs) 
+		       (tok? (car prevs))
                        (eq? semi (tok-n (car prevs))))
                   (or (positive? semis) ;; means that we already found a proc-ending semi
                       (if (and (pair? (cdr prevs))
@@ -1242,6 +1267,8 @@
                                (acall? (cadr prevs))
                                (loop (cddr prevs) (add1 semis)))))]
                  [(and (pair? prevs) (pair? (cdr prevs)) (pair? (cddr prevs))
+		       (tok? (car prevs))
+		       (tok? (cadr prevs))
                        (eq? '= (tok-n (car prevs)))
                        (symbol? (tok-n (cadr prevs)))
                        (eq? semi (tok-n (caddr prevs))))
@@ -1443,27 +1470,33 @@
         
         (define (start-skip? e)
           (and (pair? e)
-               (eq? START_XFORM_SKIP (tok-n (car e)))))
+               (or (eq? START_XFORM_SKIP (tok-n (car e)))
+                   (eq? 'XFORM_START_SKIP (tok-n (car e))))))
         
         (define (end-skip? e)
           (and (pair? e)
-               (eq? END_XFORM_SKIP (tok-n (car e)))))
+               (or (eq? END_XFORM_SKIP (tok-n (car e)))
+                   (eq? 'XFORM_END_SKIP (tok-n (car e))))))
         
         (define (start-suspend? e)
           (and (pair? e)
-               (eq? START_XFORM_SUSPEND (tok-n (car e)))))
+               (or (eq? START_XFORM_SUSPEND (tok-n (car e)))
+                   (eq? 'XFORM_START_SUSPEND (tok-n (car e))))))
         
         (define (end-suspend? e)
           (and (pair? e)
-               (eq? END_XFORM_SUSPEND (tok-n (car e)))))
+               (or (eq? END_XFORM_SUSPEND (tok-n (car e)))
+                   (eq? 'XFORM_END_SUSPEND (tok-n (car e))))))
         
         (define (start-arith? e)
           (and (pair? e)
-               (eq? START_XFORM_ARITH (tok-n (car e)))))
+               (or (eq? START_XFORM_ARITH (tok-n (car e)))
+                   (eq? 'XFORM_END_TRUST_ARITH (tok-n (car e))))))
         
         (define (end-arith? e)
           (and (pair? e)
-               (eq? END_XFORM_ARITH (tok-n (car e)))))
+               (or (eq? END_XFORM_ARITH (tok-n (car e)))
+                   (eq? 'XFORM_START_TRUST_ARITH (tok-n (car e))))))
         
         (define (access-modifier? e)
           (and (memq (tok-n (car e)) '(public private protected))
@@ -1701,7 +1734,8 @@
         ;; Parses a declaration  of one line (which may have multiple, comma-separated variables).
         ;; Returns a list of pointer declarations and a list of non-pointer declarations.
         (define (get-vars e comment union-ok?)
-          (let* ([e   (if (eq? GC_CAN_IGNORE (tok-n (car e)))
+          (let* ([e   (if (or (eq? GC_CAN_IGNORE (tok-n (car e)))
+                              (eq? 'XFORM_CAN_IGNORE (tok-n (car e))))
                           (list (make-tok semi #f #f)) ; drop everything
                           (filter (lambda (x) (not (memq (tok-n x) '(volatile __volatile__ __volatile const)))) e))]
                  [base (tok-n (car e))]
@@ -1868,7 +1902,7 @@
             pointers))
         
         (define (get-pointer-vars-from-seq body comment comma-sep?)
-          (let ([el (body->lines body comma-sep?)])
+          (let-values ([(pragmas el) (body->lines body comma-sep?)])
             (apply
              append
              (map (lambda (e)
@@ -2163,10 +2197,12 @@
                                                                      (add1 func-pos)
                                                                      (sub1 len)))))]
                         [(arg-vars all-arg-vars) 
-                         (let ([arg-decls (body->lines (append
-                                                        args-e
-                                                        (list (make-tok '|,| #f #f)))
-                                                       #t)])
+                         (let-values ([(arg-pragmas arg-decls) (body->lines (append
+                                                                             args-e
+                                                                             (list (make-tok '|,| #f #f)))
+                                                                            #t)])
+                           (unless (null? arg-pragmas)
+                             (error 'arg-decls "unexpected pragmas"))
                            (let loop ([l arg-decls][arg-vars null][all-arg-vars null])
                              (if (null? l)
                                  (values arg-vars all-arg-vars) 
@@ -2276,7 +2312,7 @@
                                                null)
                                            (lambda () null)
                                            ;; Initially, no live vars, no introduiced vars, etc.:
-                                           (make-live-var-info #f -1 0 null null null 0 0 #f) 
+                                           (make-live-var-info #f -1 0 null null null 0 0 0 #f) 
                                            ;; Add PREPARE_VAR_STACK and ensure result return:
                                            (parse-proto-information
                                             e
@@ -2301,7 +2337,8 @@
 			       (zero? (live-var-info-maxpush live-vars))
 			       (or (<= (live-var-info-num-calls live-vars) 1)
 				   (= (live-var-info-num-calls live-vars)
-				      (live-var-info-num-noreturn-calls live-vars))))))
+				      (+ (live-var-info-num-empty-calls live-vars)
+                                         (live-var-info-num-noreturn-calls live-vars)))))))
                      ;; No conversion necessary. (Lack of `call' records means no GC-setup
                      ;; work when printing out the function.)
                      (list->seq
@@ -2311,8 +2348,8 @@
                      (list->seq body-e))))))))
         
         (define (convert-class-vars body-e arg-vars c++-class new-vars-box)
-          (let ([el (body->lines body-e #f)])
-            (when c++-class
+          (when c++-class
+            (let-values ([(pragmas el) (body->lines body-e #f)])
               (let-values ([(decls body) (split-decls el)])
                 (for-each (lambda (e) 
                             (let-values ([(pointers non-pointers) (get-vars e "CVTLOCAL" #f)])
@@ -2323,224 +2360,226 @@
                                               (tok-line (caar decls)) (tok-file (caar decls))
                                               (car var))))
                                (append! pointers non-pointers))))
-                          decls)))
-            (let loop ([e body-e][can-convert? #t][paren-arrows? #t])
-              (cond
-                [(null? e) null]
-                [(skip-static-line? e)
-                 ;; Jump to semicolon:
-                 (let jloop ([e e])
-                   (if (eq? semi (tok-n (car e)))
-                       (loop e can-convert? paren-arrows?)
-                       (cons (car e) (jloop (cdr e)))))]
-                [(and can-convert?
-                      c++-class
-                      (pair? (cdr e))
-                      (eq? (tok-n (cadr e)) '|::|)
-                      (find-c++-class (tok-n (car e)) #f))
-                 ;; Maybe class-qualified method invocation. See
-                 ;;  what happens if we remove the qualification
-                 (let ([rest (loop (cddr e) #t paren-arrows?)])
-                   (if (eq? sElF (tok-n (car rest)))
-                       (list* (car rest)
-                              (cadr rest)
-                              (car e)
-                              (cadr e)
-                              (cddr rest))
-                       (list* (car e)
-                              (cadr e)
-                              rest)))]
-                [else
-                 (let ([v (car e)])
-                   (cond
-                     [(memq (tok-n v) '(|.| -> |::|))
-                      ;; Don't check next as class member
-                      (cons v (loop (cdr e) #f paren-arrows?))]
-                     [(eq? (tok-n v) 'delete)
-                      ;; Make `delete' expression look like a function call
-                      (let ([arr? (brackets? (cadr e))])
+                          decls))))
+          (let loop ([e body-e][can-convert? #t][paren-arrows? #t])
+            (cond
+             [(null? e) null]
+             [(skip-static-line? e)
+              ;; Jump to semicolon:
+              (let jloop ([e e])
+                (if (eq? semi (tok-n (car e)))
+                    (loop e can-convert? paren-arrows?)
+                    (cons (car e) (jloop (cdr e)))))]
+             [(and can-convert?
+                   c++-class
+                   (pair? (cdr e))
+                   (eq? (tok-n (cadr e)) '|::|)
+                   (find-c++-class (tok-n (car e)) #f))
+              ;; Maybe class-qualified method invocation. See
+              ;;  what happens if we remove the qualification
+              (let ([rest (loop (cddr e) #t paren-arrows?)])
+                (if (eq? sElF (tok-n (car rest)))
+                    (list* (car rest)
+                           (cadr rest)
+                           (car e)
+                           (cadr e)
+                           (cddr rest))
+                    (list* (car e)
+                           (cadr e)
+                           rest)))]
+             [else
+              (let ([v (car e)])
+                (cond
+                 [(pragma? v)
+                  (cons v (loop (cdr e) can-convert? paren-arrows?))]
+                 [(memq (tok-n v) '(|.| -> |::|))
+                  ;; Don't check next as class member
+                  (cons v (loop (cdr e) #f paren-arrows?))]
+                 [(eq? (tok-n v) 'delete)
+                  ;; Make `delete' expression look like a function call
+                  (let ([arr? (brackets? (cadr e))])
+                    (loop (list*
+                           (make-tok (if arr? DELETE_ARRAY DELETE)
+                                     (tok-line v) (tok-file v))
+                           (make-parens
+                            "(" (tok-line v) (tok-file v) ")"
+                            (seqce ((if arr? caddr cadr) e)))
+                           ((if arr? cdddr cddr) e))
+                          #t
+                          paren-arrows?))]
+                 [(eq? (tok-n v) 'delete_wxobject)
+                  ;; replace with call to GC_cpp_delete()
+                  (set! important-conversion? #t)
+                  (when (brackets? (cadr e))
+                    (log-error "[DELOBJ] ~a in ~a: bad use of delete_wxobject"
+                               (tok-line v) (tok-file v)))
+                  (loop (list*
+                         (make-tok GC_cpp_delete (tok-line v) (tok-file v))
+                         (make-parens
+                          "(" (tok-line v) (tok-file v) ")"
+                          (seqce (cadr e)))
+                         (cddr e))
+                        #t
+                        paren-arrows?)]
+                 [(eq? (tok-n v) 'new)
+                  ;; Make `new' expression look like a function call
+                  (set! important-conversion? #t)
+                  (let* ([t (cadr e)]
+                         [obj? (find-c++-class (tok-n t) #f)]
+                         [atom? (lookup-non-pointer-type (tok-n t))])
+                    (unless (or obj? atom?)
+                      (log-error "[NEW] ~a in ~a: New used on non-class"
+                                 (tok-line (car e)) (tok-file (car e))))
+                    
+                    (cond
+                     [(and (pair? (cddr e))
+                           (eq? '* (tok-n (caddr e)))
+                           (pair? (cdddr e))
+                           (brackets? (cadddr e)))
+                      ;; Array of pointers
+                      (loop (list*
+                             (make-tok NEW_PTR_ARRAY
+                                       (tok-line v) (tok-file v))
+                             (make-parens
+                              "(" (tok-line v) (tok-file v) ")"
+                              (seqce (cadr e) 
+                                     (make-tok '|,| #f #f) 
+                                     (cadddr e)))
+                             (cddddr e))
+                            #t
+                            paren-arrows?)]
+                     [(and (pair? (cddr e))
+                           (eq? '* (tok-n (caddr e))))
+                      ;; A pointer
+                      (loop (list*
+                             (make-tok NEW_PTR 
+                                       (tok-line v) (tok-file v))
+                             (make-parens
+                              "(" (tok-line v) (tok-file v) ")"
+                              (seqce (cadr e) (caddr e)))
+                             (cdddr e))
+                            #t
+                            paren-arrows?)]
+                     [(and (pair? (cddr e))
+                           (brackets? (caddr e)))
+                      ;; An array of objects
+                      (unless (or atom? (eq? #cs'wxPoint (tok-n t)))
+                        (log-warning "[ARRAY] ~a in ~a: array of ~a objects, allocating as array of atomic."
+                                     (tok-line t) (tok-file t)
+                                     (tok-n t)))
+                      (loop (list*
+                             (make-tok (if atom? 
+                                           NEW_ATOM_ARRAY 
+                                           NEW_ARRAY)
+                                       #f #f)
+                             (make-parens
+                              "(" (tok-line v) (tok-file v) ")"
+                              (seqce (cadr e) 
+                                     (make-tok '|,| #f #f) 
+                                     (caddr e)))
+                             (cdddr e))
+                            #t
+                            paren-arrows?)]
+                     [(or (and (pair? (cddr e))
+                               (parens? (caddr e)))
+                          (not atom?))
+                      ;; An object with init argument
+                      (when atom?
+                        (log-error "[CONFUSED] ~a in ~a: atomic type with initializers?"
+                                   (tok-line v) (tok-file v)))
+                      (let ([args? (and (pair? (cddr e))
+                                        (parens? (caddr e)))]
+                            [line (tok-line v)]
+                            [file (tok-file v)]
+                            [new-var (string->symbol (format "~a_created" (tok-n (cadr e))))])
+                        (unless (assq (tok-n (cadr e)) (unbox new-vars-box))
+                          (set-box! new-vars-box (cons (cons (tok-n (cadr e)) new-var)
+                                                       (unbox new-vars-box))))
                         (loop (list*
-                               (make-tok (if arr? DELETE_ARRAY DELETE)
-                                         (tok-line v) (tok-file v))
-                               (make-parens
-                                "(" (tok-line v) (tok-file v) ")"
-                                (seqce ((if arr? caddr cadr) e)))
-                               ((if arr? cdddr cddr) e))
+                               (make-creation-parens
+                                "(" line file ")"
+                                (seqce
+                                 (make-tok new-var line file) 
+                                 (make-tok '= line file) 
+                                 (make-tok NEW_OBJ line file)
+                                 (make-parens
+                                  "(" line file ")"
+                                  (seqce (cadr e)))
+                                 (make-tok '|,| line file) 
+                                 (make-tok new-var line file) 
+                                 (make-tok '-> line file) 
+                                 (make-gc-init-tok (tok-n (cadr e)))
+                                 (if args?
+                                     (caddr e)
+                                     (make-parens
+                                      "(" line file ")"
+                                      (seqce)))
+                                 (make-tok '|,| line file) 
+                                 (make-tok new-var line file)))
+                               ((if args? cdddr cddr) e))
                               #t
                               paren-arrows?))]
-                     [(eq? (tok-n v) 'delete_wxobject)
-                      ;; replace with call to GC_cpp_delete()
-                      (set! important-conversion? #t)
-                      (when (brackets? (cadr e))
-                        (log-error "[DELOBJ] ~a in ~a: bad use of delete_wxobject"
-                                   (tok-line v) (tok-file v)))
+                     [else
+                      ;; An atom
                       (loop (list*
-                             (make-tok GC_cpp_delete (tok-line v) (tok-file v))
+                             (make-tok NEW_ATOM (tok-line v) (tok-file v))
                              (make-parens
                               "(" (tok-line v) (tok-file v) ")"
                               (seqce (cadr e)))
                              (cddr e))
                             #t
-                            paren-arrows?)]
-                     [(eq? (tok-n v) 'new)
-                      ;; Make `new' expression look like a function call
-                      (set! important-conversion? #t)
-                      (let* ([t (cadr e)]
-                             [obj? (find-c++-class (tok-n t) #f)]
-                             [atom? (lookup-non-pointer-type (tok-n t))])
-                        (unless (or obj? atom?)
-                          (log-error "[NEW] ~a in ~a: New used on non-class"
-                                     (tok-line (car e)) (tok-file (car e))))
-                        
-                        (cond
-                          [(and (pair? (cddr e))
-                                (eq? '* (tok-n (caddr e)))
-                                (pair? (cdddr e))
-                                (brackets? (cadddr e)))
-                           ;; Array of pointers
-                           (loop (list*
-                                  (make-tok NEW_PTR_ARRAY
-                                            (tok-line v) (tok-file v))
-                                  (make-parens
-                                   "(" (tok-line v) (tok-file v) ")"
-                                   (seqce (cadr e) 
-                                          (make-tok '|,| #f #f) 
-                                          (cadddr e)))
-                                  (cddddr e))
-                                 #t
-                                 paren-arrows?)]
-                          [(and (pair? (cddr e))
-                                (eq? '* (tok-n (caddr e))))
-                           ;; A pointer
-                           (loop (list*
-                                  (make-tok NEW_PTR 
-                                            (tok-line v) (tok-file v))
-                                  (make-parens
-                                   "(" (tok-line v) (tok-file v) ")"
-                                   (seqce (cadr e) (caddr e)))
-                                  (cdddr e))
-                                 #t
-                                 paren-arrows?)]
-                          [(and (pair? (cddr e))
-                                (brackets? (caddr e)))
-                           ;; An array of objects
-                           (unless (or atom? (eq? #cs'wxPoint (tok-n t)))
-                             (log-warning "[ARRAY] ~a in ~a: array of ~a objects, allocating as array of atomic."
-                                          (tok-line t) (tok-file t)
-                                          (tok-n t)))
-                           (loop (list*
-                                  (make-tok (if atom? 
-                                                NEW_ATOM_ARRAY 
-                                                NEW_ARRAY)
-                                            #f #f)
-                                  (make-parens
-                                   "(" (tok-line v) (tok-file v) ")"
-                                   (seqce (cadr e) 
-                                          (make-tok '|,| #f #f) 
-                                          (caddr e)))
-                                  (cdddr e))
-                                 #t
-                                 paren-arrows?)]
-                          [(or (and (pair? (cddr e))
-                                    (parens? (caddr e)))
-                               (not atom?))
-                           ;; An object with init argument
-                           (when atom?
-                             (log-error "[CONFUSED] ~a in ~a: atomic type with initializers?"
-                                        (tok-line v) (tok-file v)))
-                           (let ([args? (and (pair? (cddr e))
-                                             (parens? (caddr e)))]
-                                 [line (tok-line v)]
-                                 [file (tok-file v)]
-                                 [new-var (string->symbol (format "~a_created" (tok-n (cadr e))))])
-                             (unless (assq (tok-n (cadr e)) (unbox new-vars-box))
-                               (set-box! new-vars-box (cons (cons (tok-n (cadr e)) new-var)
-                                                            (unbox new-vars-box))))
-                             (loop (list*
-                                    (make-creation-parens
-                                     "(" line file ")"
-                                     (seqce
-                                      (make-tok new-var line file) 
-                                      (make-tok '= line file) 
-                                      (make-tok NEW_OBJ line file)
-                                      (make-parens
-                                       "(" line file ")"
-                                       (seqce (cadr e)))
-                                      (make-tok '|,| line file) 
-                                      (make-tok new-var line file) 
-                                      (make-tok '-> line file) 
-                                      (make-gc-init-tok (tok-n (cadr e)))
-                                      (if args?
-                                          (caddr e)
-                                          (make-parens
-                                           "(" line file ")"
-                                           (seqce)))
-                                      (make-tok '|,| line file) 
-                                      (make-tok new-var line file)))
-                                    ((if args? cdddr cddr) e))
-                                   #t
-                                   paren-arrows?))]
-                          [else
-                           ;; An atom
-                           (loop (list*
-                                  (make-tok NEW_ATOM (tok-line v) (tok-file v))
-                                  (make-parens
-                                   "(" (tok-line v) (tok-file v) ")"
-                                   (seqce (cadr e)))
-                                  (cddr e))
-                                 #t
-                                 paren-arrows?)]))]
-                     [(and can-convert?
-                           c++-class
-                           (pair? (cdr e))
-                           (parens? (cadr e))
-                           (get-c++-class-method (tok-n v) c++-class))
-                      ;; method call:
-                      (set! used-self? #t)
-                      (list*
-                       (make-tok sElF (tok-line v) (tok-file v))
-                       (make-tok '-> (tok-line v) (tok-file v))
-                       v
-                       (loop (cdr e) #t paren-arrows?))]
-                     [(and paren-arrows?
-                           (>= (length e) 3)
-                           (eq? '-> (tok-n (cadr e)))
-                           (or (null? (cdddr e))
-                               (not (or (parens? (cadddr e))
-                                        (eq? '|::| (tok-n (cadddr e)))))))
-                      (loop (cons (make-parens
-                                   "(" #f #f ")"
-                                   (seqce (car e) (cadr e) (caddr e)))
-                                  (cdddr e))
-                            can-convert?
-                            #t)]
-                     [else
-                      ;; look for conversion
-                      (cons
-                       (cond
-                         [(braces? v)
-                          (make-braces
-                           "{" (tok-line v) (tok-file v) "}"
-                           (list->seq (convert-class-vars (seq->list (seq-in v)) arg-vars c++-class new-vars-box)))]
-                         [(seq? v)
-                          ((get-constructor v)
-                           (tok-n v) (tok-line v) (tok-file v) (seq-close v)
-                           (list->seq (loop (seq->list (seq-in v)) #t #f)))]
-                         [(and can-convert? (eq? (tok-n v) 'this))
-                          (set! used-self? #t)
-                          (make-tok sElF (tok-line v) (tok-file v))]
-                         [(and can-convert?
-                               c++-class
-                               (not (assq (tok-n v) arg-vars))
-                               (get-c++-class-var (tok-n v) c++-class))
-                          (set! used-self? #t)
-                          (make-parens
-                           "(" (tok-line v) (tok-file v) ")"
-                           (seqce (make-tok sElF (tok-line v) (tok-file v))
-                                  (make-tok '-> (tok-line v) (tok-file v))
-                                  v))]
-                         [else v])
-                       (loop (cdr e) #t paren-arrows?))]))]))))
+                            paren-arrows?)]))]
+                 [(and can-convert?
+                       c++-class
+                       (pair? (cdr e))
+                       (parens? (cadr e))
+                       (get-c++-class-method (tok-n v) c++-class))
+                  ;; method call:
+                  (set! used-self? #t)
+                  (list*
+                   (make-tok sElF (tok-line v) (tok-file v))
+                   (make-tok '-> (tok-line v) (tok-file v))
+                   v
+                   (loop (cdr e) #t paren-arrows?))]
+                 [(and paren-arrows?
+                       (>= (length e) 3)
+                       (eq? '-> (tok-n (cadr e)))
+                       (or (null? (cdddr e))
+                           (not (or (parens? (cadddr e))
+                                    (eq? '|::| (tok-n (cadddr e)))))))
+                  (loop (cons (make-parens
+                               "(" #f #f ")"
+                               (seqce (car e) (cadr e) (caddr e)))
+                              (cdddr e))
+                        can-convert?
+                        #t)]
+                 [else
+                  ;; look for conversion
+                  (cons
+                   (cond
+                    [(braces? v)
+                     (make-braces
+                      "{" (tok-line v) (tok-file v) "}"
+                      (list->seq (convert-class-vars (seq->list (seq-in v)) arg-vars c++-class new-vars-box)))]
+                    [(seq? v)
+                     ((get-constructor v)
+                      (tok-n v) (tok-line v) (tok-file v) (seq-close v)
+                      (list->seq (loop (seq->list (seq-in v)) #t #f)))]
+                    [(and can-convert? (eq? (tok-n v) 'this))
+                     (set! used-self? #t)
+                     (make-tok sElF (tok-line v) (tok-file v))]
+                    [(and can-convert?
+                          c++-class
+                          (not (assq (tok-n v) arg-vars))
+                          (get-c++-class-var (tok-n v) c++-class))
+                     (set! used-self? #t)
+                     (make-parens
+                      "(" (tok-line v) (tok-file v) ")"
+                      (seqce (make-tok sElF (tok-line v) (tok-file v))
+                             (make-tok '-> (tok-line v) (tok-file v))
+                             v))]
+                    [else v])
+                   (loop (cdr e) #t paren-arrows?))]))])))
         
         (define re:funcarg (regexp "^__funcarg"))
         (define (is-generated? x)
@@ -2553,8 +2592,8 @@
         ;; The result is two values: converted body, and a new live-vars
         ;; record.
         (define (convert-body body-e extra-vars pushable-vars &-vars c++-class initializers after-vars-thunk live-vars setup-stack-return-type)
-          (let ([&-vars (or &-vars (find-&-vars body-e))]
-                [el (body->lines body-e #f)])
+          (let-values ([(&-vars) (or &-vars (find-&-vars body-e))]
+                       [(pragmas el) (body->lines body-e #f)])
             (let-values ([(decls body) (split-decls el)])
               (let* ([local-vars 
                       (apply
@@ -2609,10 +2648,11 @@
                                                                     (live-var-info-pushed-vars live-vars)
                                                                     (live-var-info-num-calls live-vars)
                                                                     (live-var-info-num-noreturn-calls live-vars)
+                                                                    (live-var-info-num-empty-calls live-vars)
                                                                     (live-var-info-nonempty-calls? live-vars)))]
-                                  [(eq? (tok-n (caar body)) START_XFORM_SKIP)
+                                  [(memq (tok-n (caar body)) '(START_XFORM_SKIP XFORM_START_SKIP))
                                    (let skip-loop ([body (cdr body)])
-                                     (let*-values ([(end?) (eq? (tok-n (caar body)) END_XFORM_SKIP)]
+                                     (let*-values ([(end?) (memq (tok-n (caar body)) '(END_XFORM_SKIP XFORM_START_SKIP))]
                                                    [(rest live-vars) ((if end?
                                                                           loop
                                                                           skip-loop)
@@ -2650,7 +2690,8 @@
                          (let loop ([decls decls][live-vars live-vars])
                            (if (null? decls)
                                live-vars
-                               (let dloop ([el (body->lines (car decls) #t)]
+                               (let dloop ([el (let-values ([(pragmas el) (body->lines (car decls) #t)])
+                                                 el)]
                                            [live-vars live-vars])
                                  (if (null? el)
                                      (loop (cdr decls) live-vars)
@@ -2658,7 +2699,7 @@
                                                    ;; We're not really interested in the conversion.
                                                    ;; We just want to get live vars and
                                                    ;; complain about function calls in the decl area:
-                                                   (convert-function-calls (car el) extra-vars &-vars c++-class live-vars "in decls" #f #t)])
+                                                   (convert-function-calls (car el) extra-vars &-vars c++-class live-vars "decls" #f #t)])
                                        (dloop (cdr el) live-vars))))))])
                     ;; Calculate vars to push in this block. Make sure there are no duplicates.
                     (let ([newly-pushed (let ([ht (make-hash-table)])
@@ -2672,6 +2713,7 @@
                                           (hash-table-map ht (lambda (k v) v)))])
                       (values (apply
                                append
+                               pragmas
                                (append
                                 decls
                                 (list (after-vars-thunk))
@@ -2808,6 +2850,7 @@
                                                     (live-var-info-pushed-vars live-vars)
                                                     (live-var-info-num-calls live-vars)
                                                     (live-var-info-num-noreturn-calls live-vars)
+                                                    (live-var-info-num-empty-calls live-vars)
                                                     (live-var-info-nonempty-calls? live-vars)))))))))))
         
         (define (body-var-decl? e)
@@ -2836,7 +2879,7 @@
                (parens? (car e-))
                ;; Something precedes
                (not (null? (cdr e-)))
-               (eq? (tok-n (cadr e-)) '|HIDE_FROM_XFORM|)))
+               (memq (tok-n (cadr e-)) '(|HIDE_FROM_XFORM| |XFORM_HIDE_EXPR|))))
         
         (define (cast-or-call e- cast-k call-k)
           ;; Looks like a function call, although we don't know the
@@ -2897,7 +2940,9 @@
           (let ([e (seq->list (seq-in args))])
             (if (null? e)
                 (values null args null null live-vars)
-                (let ([el (body->lines e #t)])
+                (let-values ([(pragmas el) (body->lines e #t)])
+                  (unless (null? pragmas)
+                    (error 'lift-out-calls "unexpected pragma"))
                   (let loop ([el el]
                              [new-args null][setups null][new-vars null]
                              [ok-calls null][must-convert? #t][live-vars live-vars])
@@ -2969,6 +3014,7 @@
                                                (live-var-info-pushed-vars live-vars)
                                                (live-var-info-num-calls live-vars)
                                                (live-var-info-num-noreturn-calls live-vars)
+                                               (live-var-info-num-empty-calls live-vars)
                                                (live-var-info-nonempty-calls? live-vars))))
                                       (loop (cdr el) (cons (wrap e) new-args) setups new-vars 
                                             (if must-convert?
@@ -3003,7 +3049,9 @@
                                        [(and (>= (length e) 3)
                                              (let ([n (tok-n (car e))])
                                                (or (number? n) (symbol? n)))
-                                             (memq (tok-n (cadr e)) '(+ - * / #csXFORM_OK_PLUS #csXFORM_OK_MINUS)))
+                                             (memq (tok-n (cadr e)) '(+ - * / 
+                                                                        #csXFORM_OK_PLUS #csXFORM_OK_MINUS
+                                                                        #csXFORM_TRUST_PLUS #csXFORM_TRUST_MINUS)))
                                         (let ([k (lift-in-arithmetic? (cddr e))])
                                           (and k
                                                (lambda (wrap)
@@ -3017,7 +3065,9 @@
                                           (and (>= len 3)
                                                (let ([n (tok-n (list-ref e (sub1 len)))])
                                                  (or (number? n) (symbol? n)))
-                                               (memq (tok-n (list-ref e (- len 2))) '(+ - * / #csXFORM_OK_PLUS #csXFORM_OK_MINUS))))
+                                               (memq (tok-n (list-ref e (- len 2))) '(+ - * / 
+                                                                                        #csXFORM_OK_PLUS #csXFORM_OK_MINUS
+                                                                                        #csXFORM_TRUST_PLUS #csXFORM_TRUST_MINUS))))
                                         (let* ([last? (null? el)]
                                                [len (if last?
                                                         (length e)
@@ -3291,9 +3341,12 @@
                                          (live-var-info-nonempty-calls? live-vars)))])
 			  (let ([non-gcing-call?
 				 (and (null? (cdr func))
-				      (hash-table-get non-gcing-functions (tok-n (car func)) (lambda () #f)))])
+				      (hash-table-get non-gcing-functions (tok-n (car func)) (lambda () #f)))]
+                                [setjmp-call?
+                                 (memq (tok-n (car func)) setjmp-functions)])
 			    (loop rest-
-				  (let ([call (if non-gcing-call?
+				  (let ([call (if (or non-gcing-call?
+                                                      setjmp-call?)
 						  ;; Call without pointer pushes
 						  (make-parens
 						   "(" #f #f ")"
@@ -3335,11 +3388,13 @@
 									     (filter (lambda (x) (not (assq (car x) old-pushed))) 
 										     pushed-vars))])
 							(append new-pushed old-pushed))
-						      (+ (if non-gcing-call? 0 1)
+						      (+ (if (or non-gcing-call? setjmp-call?) 0 1)
 							 (live-var-info-num-calls live-vars))
-						      (+ (if non-returning? 1 0)
+						      (+ (if (or non-gcing-call? setjmp-call?) 0 (if non-returning? 1 0))
 							 (live-var-info-num-noreturn-calls live-vars))
-						      (or (and this-nonempty? (not non-gcing-call?))
+						      (+ (if (or non-gcing-call? non-returning? setjmp-call?) 0 (if this-nonempty? 0 1))
+							 (live-var-info-num-empty-calls live-vars))
+						      (or (and this-nonempty? (not (or non-gcing-call? setjmp-call?)))
 							  (live-var-info-nonempty-calls? live-vars)))
 				  (or converted-sub?
 				      (null? rest-)
@@ -3397,6 +3452,7 @@
                                       (live-var-info-pushed-vars live-vars)
                                       (live-var-info-num-calls live-vars)
                                       (live-var-info-num-noreturn-calls live-vars)
+                                      (live-var-info-num-empty-calls live-vars)
                                       (live-var-info-nonempty-calls? live-vars))
                                      #t))
                              (begin
@@ -3470,6 +3526,7 @@
                                                         new-pushed-vars
                                                         (live-var-info-num-calls live-vars)
                                                         (live-var-info-num-noreturn-calls live-vars)
+                                                        (live-var-info-num-empty-calls live-vars)
                                                         (live-var-info-nonempty-calls? live-vars))))]
                                [(restore-new-vars)
                                 (lambda (live-vars)
@@ -3481,6 +3538,7 @@
                                                       orig-pushed-vars
                                                       (live-var-info-num-calls live-vars)
                                                       (live-var-info-num-noreturn-calls live-vars)
+                                                      (live-var-info-num-empty-calls live-vars)
                                                       (live-var-info-nonempty-calls? live-vars)))]
                                [(e live-vars rest extra)
                                 (cond
@@ -3579,7 +3637,9 @@
         
         (define (convert-seq-interior v comma-sep? vars &-vars c++-class live-vars complain-not-in memcpy?)
           (let ([e (seq->list (seq-in v))])
-            (let ([el (body->lines e comma-sep?)])
+            (let-values ([(pragmas el) (body->lines e comma-sep?)])
+              (unless (null? pragmas)
+                (error 'convert-seq-interior "unexpected pragmas"))
               (let-values ([(el live-vars)
                             (let loop ([el el])
                               (if (null? el)
@@ -3604,6 +3664,8 @@
             (cond
               [(null? e)
                null]
+              [(pragma? (car e))
+               (loop (cdr e))]
               [(eq? '& (tok-n (car e)))
                (if (null? (cdr e))
                    null
@@ -3638,7 +3700,7 @@
             (call-graph/body name (seq->list (seq-in body-v)))))
         
         (define (call-graph/body name body-e)
-          (let ([el (body->lines body-e #f)])
+          (let-values ([(pragmas el) (body->lines body-e #f)])
             (for-each
              (lambda (v)
                (call-graph/stmt name v))
@@ -3663,13 +3725,20 @@
         ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         
         (define (body->lines e comma-sep?)
-          (reverse!
-           (foldl-statement
-            e
-            comma-sep?
-            (lambda (sube l)
-              (cons sube l))
-            null)))
+          (let loop ([e e][pragmas null])
+            (if (or (null? e)
+                    (not (pragma? (car e))))
+                (values
+                 (reverse pragmas)
+                 (reverse!
+                  (foldl-statement
+                   e
+                   comma-sep?
+                   (lambda (sube l)
+                     (cons sube l))
+                   null)))
+                (loop (cdr e)
+                      (cons (car e) pragmas)))))
         
         (define (split-decls el)
           (let loop ([el el][decls null])

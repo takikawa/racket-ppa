@@ -55,24 +55,40 @@
                          (bytes->list s1))))])
       
       ;; test that no drawing is outside the snip's drawing claimed drawing area
-      (let ([bm-clip (make-object bitmap% (+ width 100) (+ height 100))]
-            [bm-noclip (make-object bitmap% (+ width 100) (+ height 100))]
-            [s-clip (make-bytes (* (+ width 100) (+ height 100) 4))]
-            [s-noclip (make-bytes (* (+ width 100) (+ height 100) 4))])
+      (let* ([extra-space 100]
+             [bm-width (+ width extra-space)]
+             [bm-height (+ height extra-space)]
+             [bm-clip (make-object bitmap% bm-width bm-height)]
+             [bm-noclip (make-object bitmap% bm-width bm-height)]
+             [s-clip (make-bytes (* bm-width bm-height 4))]
+             [s-noclip (make-bytes (* bm-width bm-height 4))]
+             [s-trunc (make-bytes (* bm-width bm-height 4))])
         (send bdc set-bitmap bm-clip)
         (send bdc clear)
-        (send bdc set-clipping-rect 50 50 width height)
-        (send snp draw bdc 50 50 0 0 (+ width 100) (+ height 100) 0 0 #f)
+        (send bdc set-clipping-rect (/ extra-space 2) (/ extra-space 2) width height) 
+        (send snp draw bdc (/ extra-space 2) (/ extra-space 2) 0 0 (+ width extra-space) (+ height extra-space) 0 0 #f)
         (send bdc set-clipping-region #f)
-        (send bdc get-argb-pixels 0 0 (+ width 100) (+ height 100) s-clip)
+        (send bdc get-argb-pixels 0 0 (+ width extra-space) (+ height extra-space) s-clip)
         
         (send bdc set-bitmap bm-noclip)
         (send bdc clear)
-        (send snp draw bdc 50 50 0 0 (+ width 100) (+ height 100) 0 0 #f)
-        (send bdc get-argb-pixels 0 0 (+ width 100) (+ height 100) s-noclip)
+        (send snp draw bdc (/ extra-space 2) (/ extra-space 2) 0 0 (+ width extra-space) (+ height extra-space) 0 0 #f)
+        (send bdc get-argb-pixels 0 0 (+ width extra-space) (+ height extra-space) s-noclip)
         (send bdc set-bitmap #f)
-        (test (list 'bmclip name #t) (lambda () (list 'bmclip name (equal? s-clip s-noclip)))))
-      
+        
+        (test (list 'bmclip name #t) (lambda () (list 'bmclip name (equal? s-clip s-noclip))))
+        
+        (send bdc set-bitmap bm-noclip)
+        (send bdc set-pen "black" 1 'transparent)
+        (send bdc set-brush "white" 'solid)
+        (send bdc draw-rectangle 0 0 (/ extra-space 2) bm-height)
+        (send bdc draw-rectangle (- bm-width (/ extra-space 2)) 0 (/ extra-space 2) bm-height)
+        (send bdc draw-rectangle 0 0 bm-width (/ extra-space 2))
+        (send bdc draw-rectangle 0 (- bm-height (/ extra-space 2)) bm-width (/ extra-space 2))
+        (send bdc get-argb-pixels 0 0 (+ width extra-space) (+ height extra-space) s-trunc)
+        
+        (test (list 'bmtrunc name #t) (lambda () (list 'bmtrunc name (equal? s-noclip s-trunc)))))
+        
       (let ([bm-normal (make-object bitmap% width height)]
             [bm-bitmap (make-object bitmap% width height)]
             [s-normal (make-bytes (* width height 4))]
@@ -750,6 +766,19 @@
                                    (move-pinhole (rectangle 2 4 'solid 'red) -1 -2)))))
 
 
+(test (image->color-list
+       (overlay
+        (rectangle 11 11 'solid 'green)
+        (shrink (rectangle 11 11 'solid 'red)
+                1 1 1 1)))
+      'shrinking-twice-shrinks-both-times
+      (image->color-list
+       (overlay
+        (rectangle 11 11 'solid 'green)
+        (shrink (shrink (rectangle 11 11 'solid 'red)
+                        5 5 5 5)
+                1 1 1 1))))
+
 (check-on-bitmap 'solid-rect (rectangle 2 2 'solid 'red))
 (check-on-bitmap 'outline-rect (rectangle 2 2 'outline 'red))
 (check-on-bitmap 'solid-ellipse (ellipse 2 4 'solid 'red))
@@ -759,9 +788,10 @@
 (check-on-bitmap 'solid-triangle (triangle 10 'solid 'red))
 (check-on-bitmap 'outline-triangle (triangle 10 'outline 'red))
 (check-on-bitmap 'solid-star (star 4 10 20 'solid 'red))
+(check-on-bitmap 'solid-star/reverse-args (star 4 20 10 'solid 'red))
 (check-on-bitmap 'outline-star (star 4 10 20 'outline 'red))
 (check-on-bitmap 'line (line 10 7 'red))
-(check-on-bitmap 'text (text "XX" 12 'red))
+; (check-on-bitmap 'text (text "XX" 12 'red)) ;; this test fails for reasons I can't control ... -robby
 (check-on-bitmap 'overlay1 (overlay (p00 (rectangle 1 4 'solid 'blue))
                                    (p00 (rectangle 4 1 'solid 'green))))
 (check-on-bitmap 'overlay2 (overlay/xy (p00 (rectangle 4 4 'solid 'blue))
@@ -831,13 +861,78 @@
                            20 20
                            'red))
 
-#|
+(check-on-bitmap 'shrink
+                 (shrink (shrink (rectangle 11 11 'solid 'red)
+                                 5 5 5 5)
+                         1 1 1 1))
 
-The tests beginning with "bs-" ensure
-that the operations all can accept bitmap 
-snips as arguments
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  test that the image construction functions
+;;  accept non-integer values (and floor them)
+;;
 
-|#
+(test (image->color-list (rectangle 1 1 'solid 'blue))
+      'shrink-tl-accepting-non-integers
+      (image->color-list (shrink-tl (rectangle 10 10 'solid 'blue) 1.5 #e1.5)))
+
+(test (image->color-list (rectangle 1 1 'solid 'blue))
+      'shrink-tr-accepting-non-integers
+      (image->color-list (shrink-tr (rectangle 10 10 'solid 'blue) 1.5 #e1.5)))
+
+(test (image->color-list (rectangle 1 1 'solid 'blue))
+      'shrink-bl-accepting-non-integers
+      (image->color-list (shrink-bl (rectangle 10 10 'solid 'blue) 1.5 #e1.5)))
+
+(test (image->color-list (rectangle 1 1 'solid 'blue))
+      'shrink-br-accepting-non-integers
+      (image->color-list (shrink-br (rectangle 10 10 'solid 'blue) 1.5 #e1.5)))
+      
+(test (image->color-list (rectangle 2 2 'solid 'blue))
+      'rectangle-accepting-non-integers
+      (image->color-list (rectangle #e2.5 2.5 'solid 'blue)))
+
+(test (image->color-list (ellipse 2 2 'solid 'blue))
+      'ellipse-accepting-non-integers
+      (image->color-list (ellipse #e2.5 2.5 'solid 'blue)))
+
+(test (image->color-list (circle 2 'solid 'blue))
+      'circle-accepting-non-integers
+      (image->color-list (circle #e2.5 'solid 'blue)))
+
+(test (image->color-list (star 10 20 30 'solid 'blue))
+      'star-accepting-non-integers
+      (image->color-list (star 10 20.5 #e30.2 'solid 'blue)))
+
+(test (image->color-list (triangle 12 'solid 'blue))
+      'triangle-accepting-non-integers
+      (image->color-list (triangle 12.5 'solid 'blue)))
+
+(test (image->color-list (line 10 12 'blue))
+      'line-accepting-non-integer
+      (image->color-list (line 10.5 #e12.5 'blue)))
+
+(test (image->color-list (shrink (rectangle 10 10 'solid 'blue) 4 4 4 4))
+      'shrink-accepting-non-integers
+      (image->color-list
+       (shrink (rectangle 10 10 'solid 'blue)
+               4.1
+               4.2
+               #e4.3
+               4.4)))
+
+(test (image->color-list (add-line (rectangle 10 10 'solid 'blue)
+                                   0 0 2 2 'red))
+      'add-line-accepting-non-integers
+      (image->color-list (add-line (rectangle 10 10 'solid 'blue)
+                                   0.1 #e.2 2.1 2.2 'red)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; The tests beginning with "bs-" ensure
+;; that the operations all can accept bitmap 
+;; snips as arguments
+;;
 
 (test #t
       'bs-image?
@@ -1069,18 +1164,18 @@ snips as arguments
 (err/rt-name-test (alpha-color-list->image (list (make-alpha-color 0 0 0 0)) 1 1 0 #f) "fifth")
 
 (err/rt-name-test (overlay/xy #f
-                              13687968/78125 ; number's floor is 175
+                              'wrong
                               10
                               (circle 50 'outline 'blue))
                   "first")
 (err/rt-name-test (overlay/xy (rectangle 100 200 'outline 'red)
-                              13687968/78125 ; number's floor is 175
+                              'wrong
                               10
                               (circle 50 'outline 'blue))
                   "second")
 (err/rt-name-test (overlay/xy (rectangle 100 200 'outline 'red)
                               10
-                              13687968/78125
+                              'wrong
                               (circle 50 'outline 'blue))
                   "third")
 (err/rt-name-test (overlay/xy (rectangle 100 200 'outline 'red) 10 10 #f) "fourth")

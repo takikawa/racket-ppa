@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1995
  * Updated:	
- * Copyright:	(c) 2004-2006 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2007 PLT Scheme Inc.
  * Copyright:	(c) 1995, AIAI, University of Edinburgh
  */
 
@@ -102,6 +102,9 @@ class wxPrintData: public wxObject
 
   void SetLandscape(Bool);
   Bool GetLandscape();
+  
+  void SetScale(double s);
+  double GetScale();
 
   wxPrintData *copy();
 };

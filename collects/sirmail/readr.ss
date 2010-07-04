@@ -11,7 +11,7 @@
 ;;
 
 (module readr mzscheme
-  (require (lib "unitsig.ss")
+  (require (lib "unit.ss")
 	   (lib "class.ss")
            (lib "file.ss")
 	   (lib "mred-sig.ss" "mred")
@@ -45,20 +45,20 @@
   (define no-subject-string "<No subject>")
 
   (provide read@)
-  (define read@
-    (unit/sig sirmail:read^
+  (define-unit read@
       (import sirmail:options^
 	      sirmail:environment^
 	      sirmail:utils^
 	      sirmail:send^
 	      mred^
-	      net:imap^
-	      net:smtp^
-	      net:head^
-	      net:base64^
-	      (mime : net:mime^)
-	      net:qp^
+	      imap^
+	      smtp^
+	      head^
+	      base64^
+	      (prefix mime: mime^)
+	      qp^
 	      hierlist^)
+      (export sirmail:read^)
       
       ;; This will be set to the frame object
       (define main-frame #f)
@@ -83,13 +83,10 @@
 				       '(app)))
 	    (show-pref-dialog))))
 
-      (initial-exception-handler
+      (uncaught-exception-handler
        (lambda (x)
 	 (show-error x)
 	 ((error-escape-handler))))
-
-      (current-exception-handler
-       (initial-exception-handler))
 
       ;; Install std bindings global for file dialog, etc.
       (let ([km (make-object keymap%)])
@@ -2468,12 +2465,13 @@
                                 (slurp-stream ent o)
                                 (get-output-bytes o)))]
 		     [generic (lambda (ent)
-				(let ([fn (or (let ([disp (mime:entity-disposition ent)])
-						(and (not (equal? "" (mime:disposition-filename disp)))
-						     (mime:disposition-filename disp)))
-					      (let ([l (mime:entity-params ent)])
-						(let ([a (assoc "name" l)])
-						  (and a (cdr a)))))]
+				(let ([fn (parse-encoded
+                                           (or (let ([disp (mime:entity-disposition ent)])
+                                                 (and (not (equal? "" (mime:disposition-filename disp)))
+                                                      (mime:disposition-filename disp)))
+                                               (let ([l (mime:entity-params ent)])
+                                                 (let ([a (assoc "name" l)])
+                                                   (and a (cdr a))))))]
 				      [sz (mime:disposition-size (mime:entity-disposition ent))]
 				      [content #f])
 				  (let ([to-file
@@ -2515,7 +2513,8 @@
 					      (send t change-style url-delta s e)))
 				    (when (eq? (system-type) 'macosx)
                                       (when fn
-                                        (let ([safer-fn (normalize-path (string-append "~/Desktop/" (regexp-replace #rx"/" fn "-")))])
+                                        (let ([safer-fn (normalize-path (string-append "~/Desktop/" 
+                                                                                       (regexp-replace* #rx"[/\"|:<>\\]" fn "-")))])
 					  (insert " " set-standard-style)
                                           (insert "[save to ~/Desktop/ & open]"
                                                   (lambda (t s e)
@@ -3167,4 +3166,4 @@
                     (loop eou-pos)))))))
         (hilite-urls/prefix "http:")
         (hilite-urls/prefix "https:")
-        (hilite-urls/prefix "ftp:")))))
+        (hilite-urls/prefix "ftp:"))))

@@ -23,6 +23,7 @@
            case->
 	   opt->
            opt->*
+           unconstrained-domain->
            object-contract
            mixin-contract
            make-mixin-contract
@@ -33,8 +34,33 @@
            check-procedure)
   
   
+  (define-syntax (unconstrained-domain-> stx)
+    (syntax-case stx ()
+      [(_ rngs ...)
+       (with-syntax ([(rngs-x ...) (generate-temporaries #'(rngs ...))]
+                     [(proj-x ...) (generate-temporaries #'(rngs ...))]
+                     [(p-app-x ...) (generate-temporaries #'(rngs ...))]
+                     [(res-x ...) (generate-temporaries #'(rngs ...))])
+         #'(let ([rngs-x (coerce-contract 'unconstrained-domain-> rngs)] ...)
+             (let ([proj-x ((proj-get rngs-x) rngs-x)] ...)
+               (make-proj-contract
+                (build-compound-type-name 'unconstrained-domain-> ((name-get rngs-x) rngs-x) ...)
+                (λ (pos-blame neg-blame src-info orig-str)
+                  (let ([p-app-x (proj-x pos-blame neg-blame src-info orig-str)] ...)
+                    (λ (val)
+                      (if (procedure? val)
+                          (λ args
+                            (let-values ([(res-x ...) (apply val args)])
+                              (values (p-app-x res-x) ...)))
+                          (raise-contract-error val
+                                                src-info
+                                                pos-blame
+                                                orig-str
+                                                "expected a procedure")))))
+                procedure?))))]))
+  
   (define-syntax (any stx)
-    (raise-syntax-error 'any "Use any out of an arrow contract" stx))
+    (raise-syntax-error 'any "use of 'any' outside of an arrow contract" stx))
 
   ;; FIXME: need to pass in the name of the contract combinator.
   (define (build--> name doms doms-rest rngs rng-any? func)
@@ -1747,21 +1773,27 @@
   ;;
   ;; arrow opter
   ;;
-  (define/opter (-> opt/i pos neg stx)
+  (define/opter (-> opt/i opt/info stx)
     (define (opt/arrow-ctc doms rngs)
       (let*-values ([(dom-vars rng-vars) (values (generate-temporaries doms)
                                                  (generate-temporaries rngs))]
-                    [(next-doms lifts-doms partials-doms)
+                    [(next-doms lifts-doms superlifts-doms partials-doms stronger-ribs-dom)
                      (let loop ([vars dom-vars]
                                 [doms doms]
                                 [next-doms null]
                                 [lifts-doms null]
-                                [partials-doms null])
+                                [superlifts-doms null]
+                                [partials-doms null]
+                                [stronger-ribs null])
                        (cond
-                         [(null? doms) (values (reverse next-doms) lifts-doms partials-doms)]
+                         [(null? doms) (values (reverse next-doms)
+                                               lifts-doms
+                                               superlifts-doms
+                                               partials-doms
+                                               stronger-ribs)]
                          [else
-                          (let-values ([(next lift partial _ __)
-                                        (opt/i neg pos (car doms))])
+                          (let-values ([(next lift superlift partial _ __ this-stronger-ribs)
+                                        (opt/i (opt/info-swap-blame opt/info) (car doms))])
                             (loop (cdr vars)
                                   (cdr doms)
                                   (cons (with-syntax ((next next)
@@ -1769,18 +1801,26 @@
                                           (syntax (let ((val car-vars)) next)))
                                         next-doms)
                                   (append lifts-doms lift)
-                                  (append partials-doms partial)))]))]
-                    [(next-rngs lifts-rngs partials-rngs)
+                                  (append superlifts-doms superlift)
+                                  (append partials-doms partial)
+                                  (append this-stronger-ribs stronger-ribs)))]))]
+                    [(next-rngs lifts-rngs superlifts-rngs partials-rngs stronger-ribs-rng)
                      (let loop ([vars rng-vars]
                                 [rngs rngs]
                                 [next-rngs null]
                                 [lifts-rngs null]
-                                [partials-rngs null])
+                                [superlifts-rngs null]
+                                [partials-rngs null]
+                                [stronger-ribs null])
                        (cond
-                         [(null? rngs) (values (reverse next-rngs) lifts-rngs partials-rngs)]
+                         [(null? rngs) (values (reverse next-rngs)
+                                               lifts-rngs
+                                               superlifts-rngs
+                                               partials-rngs
+                                               stronger-ribs)]
                          [else
-                          (let-values ([(next lift partial _ __)
-                                        (opt/i pos neg (car rngs))])
+                          (let-values ([(next lift superlift partial _ __ this-stronger-ribs)
+                                        (opt/i opt/info (car rngs))])
                             (loop (cdr vars)
                                   (cdr rngs)
                                   (cons (with-syntax ((next next)
@@ -1788,9 +1828,13 @@
                                           (syntax (let ((val car-vars)) next)))
                                         next-rngs)
                                   (append lifts-rngs lift)
-                                  (append partials-rngs partial)))]))])
+                                  (append superlifts-rngs superlift)
+                                  (append partials-rngs partial)
+                                  (append this-stronger-ribs stronger-ribs)))]))])
         (values
-         (with-syntax ((pos pos)
+         (with-syntax ((pos (opt/info-pos opt/info))
+                       (src-info (opt/info-src-info opt/info))
+                       (orig-str (opt/info-orig-str opt/info))
                        ((dom-arg ...) dom-vars)
                        ((rng-arg ...) rng-vars)
                        ((next-dom ...) next-doms)
@@ -1802,23 +1846,31 @@
                        (let-values ([(rng-arg ...) (val next-dom ...)])
                          (values next-rng ...))))))
          (append lifts-doms lifts-rngs)
+         (append superlifts-doms superlifts-rngs)
          (append partials-doms partials-rngs)
          #f
-         #f)))
+         #f
+         (append stronger-ribs-dom stronger-ribs-rng))))
     
     (define (opt/arrow-any-ctc doms)
       (let*-values ([(dom-vars) (generate-temporaries doms)]
-                    [(next-doms lifts-doms partials-doms)
+                    [(next-doms lifts-doms superlifts-doms partials-doms stronger-ribs-dom)
                      (let loop ([vars dom-vars]
                                 [doms doms]
                                 [next-doms null]
                                 [lifts-doms null]
-                                [partials-doms null])
+                                [superlifts-doms null]
+                                [partials-doms null]
+                                [stronger-ribs null])
                        (cond
-                         [(null? doms) (values (reverse next-doms) lifts-doms partials-doms)]
+                         [(null? doms) (values (reverse next-doms)
+                                               lifts-doms
+                                               superlifts-doms
+                                               partials-doms
+                                               stronger-ribs)]
                          [else
-                          (let-values ([(next lift partial flat _)
-                                        (opt/i pos neg (car doms))])
+                          (let-values ([(next lift superlift partial flat _ this-stronger-ribs)
+                                        (opt/i (opt/info-swap-blame opt/info) (car doms))])
                             (loop (cdr vars)
                                   (cdr doms)
                                   (cons (with-syntax ((next next)
@@ -1826,9 +1878,13 @@
                                           (syntax (let ((val car-vars)) next)))
                                         next-doms)
                                   (append lifts-doms lift)
-                                  (append partials-doms partial)))]))])
+                                  (append superlifts-doms superlift)
+                                  (append partials-doms partial)
+                                  (append this-stronger-ribs stronger-ribs)))]))])
         (values
-         (with-syntax ((pos pos)
+         (with-syntax ((pos (opt/info-pos opt/info))
+                       (src-info (opt/info-src-info opt/info))
+                       (orig-str (opt/info-orig-str opt/info))
                        ((dom-arg ...) dom-vars)
                        ((next-dom ...) next-doms)
                        (dom-len (length dom-vars)))
@@ -1837,11 +1893,13 @@
                      (λ (dom-arg ...)
                        (val next-dom ...)))))
          lifts-doms
+         superlifts-doms
          partials-doms
          #f
-         #f)))
+         #f
+         stronger-ribs-dom)))
     
-    (syntax-case stx (-> values any)
+    (syntax-case* stx (-> values any) module-or-top-identifier=?
       [(-> dom ... (values rng ...))
        (opt/arrow-ctc (syntax->list (syntax (dom ...)))
                       (syntax->list (syntax (rng ...))))]

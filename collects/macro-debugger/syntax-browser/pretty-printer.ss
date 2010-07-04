@@ -21,10 +21,10 @@
       (init-field typesetter)
       (init-field (primary-partition #f))
       (init-field (columns (current-default-columns)))
-      
+
       (unless (syntax? main-stx)
-        (error 'syntax-snip% "got non-syntax object: ~s" main-stx))
-      
+        (error 'syntax-pretty-printer "got non-syntax object: ~s" main-stx))
+
       (define datum #f)
       (define ht:flat=>stx #f)
       (define ht:stx=>flat #f)
@@ -97,7 +97,9 @@
       ;; recompute-tables : -> void
       (define/private (recompute-tables)
         (set!-values (datum ht:flat=>stx ht:stx=>flat)
-                     (syntax->datum/tables main-stx primary-partition 12 #f))
+                     (syntax->datum/tables main-stx primary-partition
+                                           (length (current-colors))
+                                           (current-suffix-option)))
         (set! identifier-list 
               (filter identifier? (hash-table-map ht:stx=>flat (lambda (k v) k)))))
 

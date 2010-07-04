@@ -73,7 +73,7 @@ _kerncase.ss_: matching fully-expanded expressions
 _toplevel.ss_: helper for moduleless compilation and expansion
 ======================================================================
 
-> (expand-top-level-with-compile-time-evals stx) - expands `stx' as
+> (expand-syntax-top-level-with-compile-time-evals stx) - expands `stx' as
   a top-level expression, and evaluates its compile-time portion for
   the benefit of later expansions.
 
@@ -84,25 +84,24 @@ _toplevel.ss_: helper for moduleless compilation and expansion
   expanding a `begin' is the same as expanding separate top-level
   expressions.)
 
-  The `stx' argument should have a context already, possibly
-  introduced with `namespacae-introduce-syntax'.
+  The `stx' should have a context already, possibly introduced with
+  `namespace-introduce-syntax'.
 
-> (expand-top-level-with-compile-time-evals/flatten stx) - 
-  Just like expand-top-level-with-compile-time-evals,
-  except that it returns a list of syntax objects, none of
-  which have a begin. These syntax objects are the
-  flattened out contents of any begins in `stx'.
+> (expand-top-level-with-compile-time-evals stx) - like
+  `expand-syntax-top-level-with-compile-time-evals', but `stx' is
+  first given context by applying `namespace-introduce-syntax' to it.
 
-> (expand-syntax-top-level-with-compile-time-evals stx)
-  Like `expand-top-level-with-compile-time-evals', but `stx' should
-  have a context already, possibly introduced with
-  `namespacae-introduce-syntax'.
+> (expand-top-level-with-compile-time-evals/flatten stx) - like
+  `expand-syntax-top-level-with-compile-time-evals', except that it
+  returns a list of syntax objects, none of which have a
+  `begin'. These syntax objects are the flattened out contents of any
+  `begin's in the expansion of `stx'.
 
 > (eval-compile-time-part-of-top-level stx) - evaluates
   expansion-time code in the fully expanded top-level expression
-  represented by `stx (or a part of it, in the case of `begin'
+  represented by `stx' (or a part of it, in the case of `begin'
   expressions). The expansion-time code might affect the compilation
-  of later top-level expressions. For example, if `stx is a
+  of later top-level expressions. For example, if `stx' is a
   `require' expression, then `namespace-require/expansion-time' is
   used on each require specification in the form. Normally, this
   function is used only by `expand-top-level-with-compile-time-evals'.
@@ -190,7 +189,8 @@ _struct.ss_: generating the same names as `define-struct'
 
 > (generate-struct-declaration orig-stx name-id super-id-or-false
                                field-id-list current-context
-			       make-make-struct-type)
+			       make-make-struct-type
+                               [omit-sel? omit-set?])
 
   This procedure implements the core of a `define-struct' expansion.
 
@@ -199,7 +199,9 @@ _struct.ss_: generating the same names as `define-struct'
   `super-id-or-false', and `field-id-list' arguments provide the main
   parameters. The `current-context' argument is normally the result of
   `syntax-local-context'. The `orig-stx' argument is used for syntax
-  errors.
+  errors. The optional `omit-sel?' and `omit-set?' arguments default
+  to #f; a #t value suppresses definitions of field selectors or
+  mutators, respectively.
 
   The `make-struct-type' procedure is called to generate the
   expression to actually create the struct type. Its arguments are
@@ -241,9 +243,6 @@ _docprovide.ss_: attaching documentation to exports
 
 > (provide-and-document doc-label-id doc-row ...) - a form that
   exports names and records documentation information.  
-
-  !! IMPORTANT: For now, the exporting module must be required with a
-     `lib' or `file' form. Relative paths do no work correctly !!
 
   The `doc-label-id' identifier is used as a key for accessing the
   documentation through `lookup-documentation'.  The actual
@@ -287,10 +286,15 @@ _docprovide.ss_: attaching documentation to exports
 _moddep.ss_: inspecting modules and module dependencies
 ======================================================================
 
-Interpretations of module paths in this library mimic that of the
-default module path resolver in MzScheme (which means that the library
-is limited, but certainly useful as no other module path resolvers
-currently exist).
+Re-exports "modread.ss", "modcode.ss", "modcollapse.ss", and
+"modresolve.ss", in addition to the following:
+
+> (show-import-tree module-path-v) - a debugging aid that prints the
+  import hierarchy starting from a given module path.
+
+======================================================================
+_modread.ss_: reading module source code
+======================================================================
 
 > (with-module-reading-parameterization thunk) - calls `thunk' with
   all reader parameters reset to their default values.
@@ -300,7 +304,9 @@ currently exist).
   named `expected-module-sym' (plus a prefix, if
   `current-module-name-prefix' is set) --- at least if `module' is
   bound in the top-level to MzScheme's `module'. The syntax object
-  `stx' can contain a compiled expression.
+  `stx' can contain a compiled expression. Also, `stx' can be an
+  end-of-file, on the grounds that `read-syntax' can produce an
+  end-of-file.
 
   If `stx' can declare a module in an appropriate top-level, then the
   `check-module-form' procedure returns a syntax object that certainly
@@ -313,7 +319,12 @@ currently exist).
   If stx is eof or eof wrapped as a syntax object, then an error is
   raised or #f is returned.
 
-> (get-module-code path [compiled-subdir compile-proc ext-proc]) -
+======================================================================
+_modcode.ss_: getting module compiled code
+======================================================================
+
+> (get-module-code path [compiled-subdir compile-proc ext-proc]
+                   [#:choose choose-proc]) -
   returns a compiled expression for the declaration of the module
   specified by `module-path-v'. The `module-path-v' argument is a
   quoted module path, as for MzScheme's `dynamic-require' using the
@@ -327,20 +338,52 @@ currently exist).
   available.
 
   The `ext-proc' argument defaults to #f. If it is not #f, it must be
-  a procedure of two arguments that is used when `path' does not exist
-  and no ".zo" version of `path' can be found, but an extension
-  implementing `path' is found. In that case, the arguments to
+  a procedure of two arguments that is called when a native-code
+  version of `path' is should be used. In that case, the arguments to
   `ext-proc' are the path for the extension, and a boolean indicating
   whether the extension is a _loader file (#t) or not (#f).
 
-  If a ".zo" version of `path' is available and newer than var `path'
-  (in one of the directories specified by `compiled-subdir'), then it
-  is used instead of the source. Native-code versions of `path' are
-  ignored --- unless only a native-code version exists (i.e., `path'
-  itself does not exist). If only a native-code version exists, it is
+  The `choose-proc' argument is a procedure that takes three paths: a
+  source path, a .zo file path, and an extension path (for a
+  non-_loader extension). Some of the paths may not exist. The result
+  should be either 'src, 'zo, 'so, or #f, indicating which variant
+  should be used or (in the case of #f) that the default choice should
+  be used.
+
+  The default choice is computed as follows: if a ".zo" version of
+  `path' is available and newer than `path' itself (in one of the
+  directories specified by `compiled-subdir'), then it is used instead
+  of the source. Native-code versions of `path' are ignored, unless
+  only a native-code non_loader version exists (i.e., `path' itself
+  does not exist). A _loader extension is selected a last resort.
+
+  If an extension is prefered or is the only file that exists, it is
   supplied to `ext-proc' when `ext-proc' is #f, or an exception is
   raised (to report that an extension file cannot be used) when
   `ext-proc' is #f.
+
+> moddep-current-open-input-file
+ 
+  A parameter whose value is used like `open-input-file' to read a
+  module source or ".zo" file.
+
+
+> exn:get-module-code
+> exn:get-module-code?
+> exn:get-module-code-path
+> make-exn:get-module-code
+
+  An exception structure type for exceptions raised by
+  `get-module-code'.
+
+======================================================================
+_modresolve.ss_: resolving module paths to file paths
+======================================================================
+
+Interpretations of module paths in this library mimic that of the
+default module path resolver in MzScheme (which means that the library
+is limited, but certainly useful as no other module path resolvers
+currently exist).
 
 > (resolve-module-path module-path-v rel-to-path-string/thunk/#f) -
   resolves a module path to filename path. The module path is resolved
@@ -357,6 +400,15 @@ currently exist).
   index contains the "self" index.  If `module-path-index' depends on
   the "self" module path index, then an exception is raised unless
   `rel-to-path-string/thunk/#f' is a path string.
+
+======================================================================
+_modcollapse.ss_: simplifying module paths
+======================================================================
+
+Interpretations of module paths in this library mimic that of the
+default module path resolver in MzScheme (which means that the library
+is limited, but certainly useful as no other module path resolvers
+currently exist).
 
 > (collapse-module-path module-path-v rel-to-module-path-v) - returns
   a "simplified" module path by combining `module-path-v' with
@@ -376,9 +428,6 @@ currently exist).
   (see the MzScheme manual for details); in this case, the
   `rel-to-module-path-v' base is used where the module path index
   contains the "self" index.
-
-> (show-import-tree module-path-v) - a debugging aid that prints the
-  import hierarchy starting from a given module path.
 
 ======================================================================
 _readerr.ss_: signaling parse errors

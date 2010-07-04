@@ -21,18 +21,18 @@
         (and (syntax? v) 
              ((flat-contract-predicate (cons/c identifier? arglist?)) (syntax-e v)))))
   
-  (provide/contract
-   ;[varref-set-remove-bindings (-> varref-set? varref-set? varref-set?)]
-   ;[binding-set-varref-set-intersect (-> binding-set? varref-set? binding-set?)]
-   ;[binding-set-union (-> (listof binding-set?) binding-set?)]
-   ;[varref-set-union (-> (listof varref-set?) varref-set?)]
-   #;[skipto/auto (syntax? (symbols 'rebuild 'discard) (syntax? . -> . syntax?) . -> . syntax?)]
-   #;[in-closure-table (-> any/c boolean?)]
-   #;[sublist (-> number? number? list? list?)]
-   #;[attach-info (-> syntax? syntax? syntax?)]
-   #;[transfer-info (-> syntax? syntax? syntax?)]
-   #;[arglist->ilist (-> arglist? any)]
-   #;[arglist-flatten (-> arglist? (listof identifier?))])
+  #;(provide/contract
+   [varref-set-remove-bindings (-> varref-set? varref-set? varref-set?)]
+   [binding-set-varref-set-intersect (-> binding-set? varref-set? binding-set?)]
+   [binding-set-union (-> (listof binding-set?) binding-set?)]
+   [varref-set-union (-> (listof varref-set?) varref-set?)]
+   [skipto/auto (syntax? (symbols 'rebuild 'discard) (syntax? . -> . syntax?) . -> . syntax?)]
+   [in-closure-table (-> any/c boolean?)]
+   [sublist (-> number? number? list? list?)]
+   [attach-info (-> syntax? syntax? syntax?)]
+   [transfer-info (-> syntax? syntax? syntax?)]
+   [arglist->ilist (-> arglist? any)]
+   [arglist-flatten (-> arglist? (listof identifier?))])
   
   (provide
    skipto/auto
@@ -66,6 +66,7 @@
    closure-table-lookup
    get-lifted-var
    get-arg-var
+   begin0-temp
    zip
    let-counter
    syntax-pair-map
@@ -90,7 +91,14 @@
    finished-xml-box-table
    language-level->name
    
-   stepper-syntax-property)
+   stepper-syntax-property
+
+   skipto/cdr
+   skipto/cddr
+   skipto/first
+   skipto/second
+   skipto/third
+   skipto/fourth)
   
     
   ;; stepper-syntax-property : like syntax property, but adds properties to an association
@@ -174,6 +182,7 @@
 ;                 (eq? arg2 arg2p)
 ;                 (not (eq? arg1 arg2p)))))
 
+  (define begin0-temp (create-bogus-binding "begin0-temp"))
   
   ; get-lifted-var maintains the mapping between let-bindings and the syntax object
   ; which is used to capture its index at runtime.
@@ -400,20 +409,22 @@
   (define second-arg (lambda (dc y) y))
   
   (define (up-mapping traversal fn)
+    (unless (symbol? fn)
+      (error 'up-mapping "expected symbol for stepper traversal, given: ~v" fn))
     (case traversal
       [(rebuild) (case fn 
                    [(car) (lambda (stx new) (cons new (cdr stx)))]
                    [(cdr) (lambda (stx new) (cons (car stx) new))]
                    [(syntax-e) (swap-args rebuild-stx)]
                    [(both-l both-r) (lambda (stx a b) (cons a b))]
-                   [else (error 'up-mapping "unexpected symbol in up-mapping (1)")])]
+                   [else (error 'up-mapping "unexpected symbol in up-mapping (1): ~v" fn)])]
       [(discard) (case fn
                    [(car) second-arg]
                    [(cdr) second-arg]
                    [(syntax-e) second-arg]
                    [(both-l) (lambda (stx a b) a)]
                    [(both-r) (lambda (stx a b) b)]
-                   [else (error 'up-mapping "unexpected symbol in up-mapping (2)")])]))
+                   [else (error 'up-mapping "unexpected symbol in up-mapping (2): ~v" fn)])]))
   
   (define (down-mapping fn)
     (case fn
@@ -432,6 +443,14 @@
                                  (update (caddr fn-list) (cdr val) fn traversal))]
             [else (let ([down (down-mapping (car fn-list))])
                     (up val (update (cdr fn-list) (down val) fn traversal)))]))))
+  
+  ;; commonly used patterns:
+  (define skipto/cdr `(syntax-e cdr))
+  (define skipto/cddr `(syntax-e cdr cdr))
+  (define skipto/first `(syntax-e car))
+  (define skipto/second `(syntax-e cdr car))
+  (define skipto/third `(syntax-e cdr cdr car))
+  (define skipto/fourth `(syntax-e cdr cdr cdr car))
   
   #;(display (equal? (update '(cdr cdr car both-l (car) (cdr))
                            `(a . (b ((1) c . 2) d))

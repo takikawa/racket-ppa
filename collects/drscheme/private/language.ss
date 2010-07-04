@@ -3,13 +3,12 @@
 ;;          user's io ports, to aid any debugging printouts.
 ;;          (esp. useful when debugging the users's io)
 
-(module language mzscheme
+(module language (lib "a-unit.ss")
   (require "drsig.ss"
            (lib "string-constant.ss" "string-constants")
            (lib "pconvert.ss")
            (lib "pretty.ss")
            (lib "etc.ss")
-	   (lib "unitsig.ss")
 	   (lib "struct.ss")
            (lib "class.ss")
            (lib "file.ss")
@@ -22,15 +21,11 @@
            (lib "distribute.ss" "compiler")
            (lib "bundle-dist.ss" "compiler"))
 
-  (provide language@)
+  (import [prefix drscheme:debug: drscheme:debug^]
+          [prefix drscheme:tools: drscheme:tools^]
+          [prefix drscheme:help-desk: drscheme:help-desk^])
+  (export drscheme:language^)
 
-  (define language@
-    (unit/sig drscheme:language^
-      (import [drscheme:debug : drscheme:debug^]
-              [drscheme:teachpack : drscheme:teachpack^]
-              [drscheme:tools : drscheme:tools^]
-              [drscheme:help-desk : drscheme:help-desk^])
-      
       (define original-output-port (current-output-port))
       (define (printf . args) (apply fprintf original-output-port args)) 
       
@@ -38,34 +33,41 @@
       ;; text/pos = (make-text/pos (instanceof text% number number))
       ;; this represents a portion of a text to be processed.
       
-      (define language<%>
-	(interface ()
-	  marshall-settings
-          unmarshall-settings
-          default-settings
-	  default-settings?
-          
-          order-manuals
-          
-          front-end/complete-program
-          front-end/interaction
-	  config-panel
-	  on-execute
-          first-opened
-          render-value/format
-          render-value
-          
-          capability-value
-          
-          create-executable
-          
-          get-language-position
-          get-language-name
-          get-style-delta
-          get-language-numbers
-          get-one-line-summary
-          get-language-url
-          get-comment-character))
+  (define language<%>
+    (interface ()
+      marshall-settings
+      unmarshall-settings
+      default-settings
+      default-settings?
+      
+      order-manuals
+      
+      front-end/complete-program
+      front-end/interaction
+      config-panel
+      on-execute
+      extra-repl-information
+      
+      first-opened
+      render-value/format
+      render-value
+      
+      capability-value
+      
+      create-executable
+      
+      get-reader-module
+      get-metadata
+      metadata->settings
+      get-metadata-lines
+      
+      get-language-position
+      get-language-name
+      get-style-delta
+      get-language-numbers
+      get-one-line-summary
+      get-language-url
+      get-comment-character))
       
       (define module-based-language<%>
 	(interface ()
@@ -195,8 +197,8 @@
 	  
           (define/public (on-execute setting run-in-user-thread)
 	    (initialize-simple-module-based-language setting run-in-user-thread))
-          (define/public (get-init-code setting teachpacks)
-            (simple-module-based-language-get-init-code setting teachpacks))
+          (define/public (get-init-code setting)
+            (simple-module-based-language-get-init-code setting))
           
           (define/public (render-value/format value settings port width)
             (simple-module-based-language-render-value/format value settings port width))
@@ -442,8 +444,8 @@
            (current-inspector (make-inspector))
            (read-case-sensitive (simple-settings-case-sensitive setting)))))
       
-      ;; simple-module-based-language-get-init-code : setting teachpack-cache -> sexp[module]
-      (define (simple-module-based-language-get-init-code setting teachpack-cache)
+      ;; simple-module-based-language-get-init-code : setting -> sexp[module]
+      (define (simple-module-based-language-get-init-code setting)
         `(module mod-name mzscheme
            (require (lib "pconvert.ss")
                     (lib "pretty.ss"))
@@ -482,7 +484,6 @@
                 `(void))
 
            (define (init-code)
-             ,(drscheme:teachpack:launcher-init-code teachpack-cache)
              (current-inspector (make-inspector))
              (error-value->string-handler executable-error-value->string-handler)
              (read-case-sensitive ,(simple-settings-case-sensitive setting)))))
@@ -511,7 +512,7 @@
 	(mixin (module-based-language<%>) (language<%>)
 	  (inherit get-module get-transformer-module use-namespace-require/copy?
                    get-init-code use-mred-launcher get-reader)
-          
+                    
           (define/pubment (capability-value s) 
             (inner (get-capability-default s) capability-value s))
           
@@ -532,19 +533,25 @@
                                               (get-module)
                                               (get-transformer-module)
                                               run-in-user-thread))
-          (define/public (front-end/complete-program port settings teachpack-cache)
+          (define/public (front-end/complete-program port settings)
             (module-based-language-front-end port (get-reader)))
-          (define/public (front-end/interaction port settings teachpack-cache)
+          (define/public (front-end/interaction port settings)
             (module-based-language-front-end port (get-reader)))
-          (define/public (create-executable setting parent program-filename teachpacks)
+          (define/public (create-executable setting parent program-filename)
             (create-module-based-language-executable parent 
                                                      program-filename
                                                      (get-module)
                                                      (get-transformer-module)
-                                                     (get-init-code setting teachpacks)
+                                                     (get-init-code setting)
                                                      (use-mred-launcher)
                                                      (use-namespace-require/copy?)))
-          (super-instantiate ())))
+          (define/public (extra-repl-information _1 _2) (void))
+          (define/public (get-reader-module) #f)
+          (define/public (get-metadata a b c) #f)
+          (define/public (metadata->settings m) #f)
+          (define/public (get-metadata-lines) #f)
+
+          (super-new)))
 
       ;; create-module-based-language-executable :  
       ;; (is-a?/c area-container<%>) string module-spec module-spec sexp (union boolean? 'ask) boolean?
@@ -575,7 +582,7 @@
                       [(distribution) create-module-based-distribution])])
               (create-executable
                program-filename
-               executable-filename 
+               executable-filename
                module-language-spec
                transformer-module-language-spec
                init-code
@@ -595,15 +602,16 @@
       (define (create-executable-gui parent program-filename show-type show-base)
         (define dlg (make-object dialog% (string-constant create-executable-title) parent))
         (define filename-panel (make-object horizontal-panel% dlg))
-        (define filename-text-field (instantiate text-field% ()
-                                      (label (string-constant filename))
-                                      (parent filename-panel)
-                                      (init-value (path->string (default-executable-filename 
-                                                                  program-filename 
-                                                                  (if (eq? show-type #t) 'launcher show-type)
-                                                                  #f)))
-                                      (min-width 400)
-                                      (callback void)))
+        (define filename-text-field (new text-field% 
+                                         [label (string-constant filename)]
+                                         [parent filename-panel]
+                                         [init-value (path->string 
+                                                      (default-executable-filename 
+                                                        program-filename 
+                                                        (if (eq? show-type #t) 'launcher show-type)
+                                                        #f))]
+                                         [min-width 400]
+                                         [callback void]))
         (define filename-browse-button (instantiate button% ()
                                          (label (string-constant browse...))
                                          (parent filename-panel)
@@ -729,6 +737,7 @@
             
         (define cancelled? #t)
         
+        (reset-filename-suffix)
         (send dlg show #t)
         (cond
           [cancelled? #f]
@@ -825,29 +834,12 @@
       
       ;; default-executable-filename : path symbol boolean -> path
       (define (default-executable-filename program-filename mode mred?)
-        (let-values ([(base name dir) (split-path program-filename)])
-          (let* ([ext (filename-extension name)]
-                 [program-bytename (path-element->bytes name)]
-                 ;; ext-less : bytes
-                 [ext-less (if ext
-                               (subbytes program-bytename
-                                         0
-                                         (- (bytes-length program-bytename)
-                                            (bytes-length ext)
-                                            1 ;; sub1 for the period in the extension
-                                            ))
-                               program-bytename)])
-            (let ([ext (let-values ([(extension style filters)
-                                     (mode->put-file-extension+style+filters mode mred?)])
-                         (and extension
-                              (string->bytes/utf-8 (string-append "." extension))))])
-              (if ext
-                  (if (path? base)
-                      (build-path base (bytes->path-element (bytes-append ext-less ext)))
-                      (bytes->path-element (bytes-append ext-less ext)))
-                  (if (path? base)
-                      (build-path base name)
-                      name))))))
+        (let ([ext (let-values ([(extension style filters)
+                                 (mode->put-file-extension+style+filters mode mred?)])
+                     (if extension
+                         (string->bytes/utf-8 (string-append "." extension))
+                         #""))])
+          (path-replace-suffix program-filename ext)))
       
       (define (mode->put-file-extension+style+filters mode mred?)
         (case mode
@@ -916,28 +908,23 @@
                   (cons `(file ,(path->string init-code-tmp-filename))
                         pre-to-be-embedded-module-specs1)]
                  [pre-to-be-embedded-module-specs3
-                  (append (drscheme:teachpack:launcher-modules-to-embed
-                           (preferences:get 'drscheme:teachpacks))
-                          pre-to-be-embedded-module-specs2)]
-                 [pre-to-be-embedded-module-specs4
                   (filter (λ (x) (not (eq? x 'mzscheme)))
-                          pre-to-be-embedded-module-specs3)]
+                          pre-to-be-embedded-module-specs2)]
                  [to-be-embedded-module-specs
                   (map (λ (x) (list #f x))
-                       pre-to-be-embedded-module-specs4)])
-
-            (make-embedding-executable 
+                       pre-to-be-embedded-module-specs3)])
+            
+            (create-embedding-executable 
              executable-filename
-             gui?
-             #f ;; verbose?
-             to-be-embedded-module-specs
-             (list 
-              bootstrap-tmp-filename
-              program-filename)
-             #f
-             (if gui?
-                 (list "-mvqZ")
-                 (list "-mvq"))))
+             #:mred? gui?
+             #:verbose? #f ;; verbose?
+             #:modules to-be-embedded-module-specs
+             #:literal-files (list 
+                              bootstrap-tmp-filename
+                              program-filename)
+             #:cmdline (if gui?
+                           (list "-mvqZ")
+                           (list "-mvq"))))
           (delete-file init-code-tmp-filename)
           (delete-file bootstrap-tmp-filename)
           (void)))
@@ -1105,7 +1092,9 @@
             (format "~s" (if gui?  
                              (list 'mzscheme '(lib "mred.ss" "mred"))
                              (list 'mzscheme))))
-           (path->string executable-filename))))
+           (if (path? executable-filename)
+               (path->string executable-filename)
+               executable-filename))))
       
       ;; initialize-module-based-language : boolean module-spec module-spec ((-> void) -> void)
       (define (initialize-module-based-language use-copy?
@@ -1125,10 +1114,14 @@
 
       ;; module-based-language-front-end : (port reader -> (-> (union sexp syntax eof)))
       ;; type reader = type-spec-of-read-syntax (see mz manual for details)
-      (define (module-based-language-front-end port reader)
-        (λ () 
-          (reader (object-name port) port)))
-      
+     (define (module-based-language-front-end port reader)
+       (λ () 
+         (let ([s (reader (object-name port) port)])
+           (if (syntax? s)
+               (with-syntax ([s s]
+                             [t (namespace-syntax-introduce (datum->syntax-object #f '#%top-interaction))])
+                 (syntax (t . s)))
+               s))))
       
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;
@@ -1199,5 +1192,5 @@
          'drscheme:language:extend-language-interface
          'phase1)
         (set! default-mixin (compose default-impl default-mixin))
-        (set! language-extensions (cons extension<%> language-extensions))))))
+        (set! language-extensions (cons extension<%> language-extensions))))
 

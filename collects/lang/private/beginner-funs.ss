@@ -10,10 +10,6 @@
 	   "../posn.ss"
 	   "../imageeq.ss")
 
-  ;; Test-suite support (require is really an effect
-  ;;  to make sure that it's loaded)
-  (require (lib "test-case.ss" "test-suite" "private"))
-
   ;; procedures with documentation:
   (provide-and-document
     procedures
@@ -283,7 +279,7 @@
       ((beginner-list* list*) (any ... (listof any) -> (listof any)) 
        "to construct a list by adding multiple items to a list")
 
-      ((beginner-append append) ((listof any) ... -> (listof any))
+      ((beginner-append append) ((listof any) (listof any) (listof any) ... -> (listof any))
        "to create a single list from several, by juxtaposition of the items")
       (length (list -> number)
 	"to compute the number of items on a list")

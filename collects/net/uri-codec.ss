@@ -1,9 +1,6 @@
 (module uri-codec mzscheme
-  (require (lib "unitsig.ss")
-           "uri-codec-sig.ss"
-           "uri-codec-unit.ss")
+  (require (lib "unit.ss") "uri-codec-sig.ss" "uri-codec-unit.ss")
 
-  (provide-signature-elements net:uri-codec^)
+  (provide-signature-elements uri-codec^)
 
-  (define-values/invoke-unit/sig net:uri-codec^
-    uri-codec@))
+  (define-values/invoke-unit/infer uri-codec@))

@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -15,7 +15,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
   libscheme
   Copyright (c) 1994 Brent Benson
@@ -153,6 +154,20 @@ static void init_compile_data(Scheme_Comp_Env *env);
 /*========================================================================*/
 /*                             initialization                             */
 /*========================================================================*/
+
+
+#ifdef DONT_USE_FOREIGN
+static void init_dummy_foreign(Scheme *env)
+{
+  /* Works just well enough that the `mzscheme' module can 
+     import it (so that attaching `mzscheme' to a namespace 
+     also attaches `#%foreign'). */
+  Scheme_Env *menv;
+  menv = scheme_primitive_module(scheme_intern_symbol("#%foreign"), env);
+  scheme_finish_primitive_module(menv);
+  scheme_protect_primitive_provide(menv, NULL);
+}
+#endif
 
 Scheme_Env *scheme_basic_env()
 {
@@ -350,6 +365,8 @@ Scheme_Env *scheme_basic_env()
 
 #ifndef DONT_USE_FOREIGN
   scheme_init_foreign(env);
+#else
+  init_dummy_foreign(env);
 #endif
 
   scheme_add_embedded_builtins(env);
@@ -520,7 +537,7 @@ static void make_init_env(void)
   scheme_add_global_constant("syntax-local-certifier", 
 			     scheme_make_prim_w_arity(local_certify,
 						      "syntax-local-certifier",
-						      0, 0),
+						      0, 1),
 			     env);
 
   scheme_add_global_constant("make-set!-transformer", 
@@ -1372,7 +1389,7 @@ static Scheme_Object *make_toplevel(mzshort depth, int position, int resolved, i
 			     scheme_make_integer(flags))
 	  : scheme_make_integer(position));
     pr = scheme_make_pair(scheme_make_integer(depth), pr);
-    v = scheme_hash_get(toplevels_ht, pr);
+    v = scheme_hash_get_atomic(toplevels_ht, pr);
     if (v)
       return v;
   } else
@@ -1388,7 +1405,7 @@ static Scheme_Object *make_toplevel(mzshort depth, int position, int resolved, i
     if (toplevels_ht->count > TABLE_CACHE_MAX_SIZE) {
       toplevels_ht = scheme_make_hash_table_equal();
     }
-    scheme_hash_set(toplevels_ht, pr, (Scheme_Object *)tl);
+    scheme_hash_set_atomic(toplevels_ht, pr, (Scheme_Object *)tl);
   }
 
   return (Scheme_Object *)tl;
@@ -2207,7 +2224,8 @@ void create_skip_table(Scheme_Comp_Env *start_frame)
 Scheme_Object *
 scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
 		      Scheme_Object *certs, Scheme_Object *in_modidx,
-		      Scheme_Env **_menv, int *_protected)
+		      Scheme_Env **_menv, int *_protected,
+                      Scheme_Object **_lexical_binding_id)
 {
   Scheme_Comp_Env *frame;
   int j = 0, p = 0, modpos, skip_stops = 0, mod_defn_phase, module_self_reference = 0;
@@ -2218,7 +2236,7 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
 
   /* Need to know the phase being compiled */
   phase = env->genv->phase;
-  
+
   /* Walk through the compilation frames */
   for (frame = env; frame->next != NULL; frame = frame->next) {
     int i;
@@ -2261,7 +2279,7 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
 		      && scheme_stx_module_eq(find_id, frame->values[i], phase))
 		  || ((frame->flags & SCHEME_CAPTURE_LIFTED)
 		      && scheme_stx_bound_eq(find_id, frame->values[i], phase)))) {
-	    /* Found a lambda- or let-bound variable: */
+	    /* Found a lambda-, let-, etc. bound variable: */
 	    /* First, check certs (don't bind with fewer certs): */
 	    if (!(flags & SCHEME_NO_CERT_CHECKS) 
 		&& !(frame->flags & (SCHEME_CAPTURE_WITHOUT_RENAME | SCHEME_CAPTURE_LIFTED))) {
@@ -2272,6 +2290,16 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
 	      }
 	    }
 	    /* Looks ok; return a lexical reference */
+            if (_lexical_binding_id) {
+              if (!(frame->flags & SCHEME_CAPTURE_WITHOUT_RENAME))
+                val = scheme_stx_remove_extra_marks(find_id, frame->values[i],
+                                                    ((frame->flags & SCHEME_CAPTURE_LIFTED)
+                                                     ? NULL
+                                                     : uid));
+              else
+                val = find_id;
+              *_lexical_binding_id = val;
+            }
 	    if (flags & SCHEME_DONT_MARK_USE)
 	      return scheme_make_local(scheme_local_type, 0);
 	    else
@@ -2967,10 +2995,46 @@ Resolve_Prefix *scheme_resolve_prefix(int phase, Comp_Prefix *cp, int simplify)
   return rp;
 }
 
+Resolve_Prefix *scheme_remap_prefix(Resolve_Prefix *rp, Resolve_Info *ri)
+{
+  /* Rewrite stxes list based on actual uses at resolve pass.
+     If we have no lifts, we can just srop unused stxes.
+     Otherwise, if any stxes go unused, we just have to replace them
+     with NULL. */
+  int i, cnt;
+  Scheme_Object **new_stxes, *v;
+
+  if (!rp->num_stxes)
+    return rp;
+
+  if (rp->num_lifts)
+    cnt = rp->num_stxes;
+  else
+    cnt = ri->stx_map->count;
+
+  new_stxes = MALLOC_N(Scheme_Object *, cnt);
+
+  for (i = 0; i < rp->num_stxes; i++) {
+    if (ri->stx_map)
+      v = scheme_hash_get(ri->stx_map, scheme_make_integer(i));
+    else
+      v = NULL;
+    if (v) {
+      new_stxes[SCHEME_INT_VAL(v)]  = rp->stxes[i];
+    }
+  }
+
+  rp->stxes = new_stxes;
+  rp->num_stxes = cnt;
+
+  return rp;
+}
+
 Resolve_Info *scheme_resolve_info_create(Resolve_Prefix *rp)
 {
   Resolve_Info *naya;
   Scheme_Object *b;
+  Scheme_Hash_Table *ht;
 
   naya = MALLOC_ONE_RT(Resolve_Info);
 #ifdef MZTAG_REQUIRED
@@ -2980,6 +3044,9 @@ Resolve_Info *scheme_resolve_info_create(Resolve_Prefix *rp)
   naya->count = 0;
   naya->next = NULL;
   naya->toplevel_pos = -1;
+
+  ht = scheme_make_hash_table(SCHEME_hash_ptr);
+  naya->stx_map = ht;
 
   b = scheme_get_param(scheme_current_config(), MZCONFIG_USE_JIT);
   naya->use_jit = SCHEME_TRUEP(b);
@@ -2999,6 +3066,7 @@ Resolve_Info *scheme_resolve_info_extend(Resolve_Info *info, int size, int oldsi
   naya->type = scheme_rt_resolve_info;
 #endif
   naya->prefix = info->prefix;
+  naya->stx_map = info->stx_map;
   naya->next = info;
   naya->use_jit = info->use_jit;
   naya->enforce_const = info->enforce_const;
@@ -3218,6 +3286,22 @@ int scheme_resolve_is_toplevel_available(Resolve_Info *info)
   return 0;
 }
 
+int scheme_resolve_quote_syntax_offset(int i, Resolve_Info *info)
+{
+  Scheme_Hash_Table *ht;
+  Scheme_Object *v;
+
+  ht = info->stx_map;
+
+  v = scheme_hash_get(ht, scheme_make_integer(i));
+  if (!v) {
+    v = scheme_make_integer(ht->count);
+    scheme_hash_set(ht, scheme_make_integer(i), v);
+  }
+
+  return SCHEME_INT_VAL(v);
+}
+
 int scheme_resolve_quote_syntax_pos(Resolve_Info *info)
 {
   return info->prefix->num_toplevels;
@@ -3365,7 +3449,7 @@ namespace_variable_value(int argc, Scheme_Object *argv[])
     init_compile_data((Scheme_Comp_Env *)&inlined_e);
     inlined_e.base.prefix = NULL;
 
-    v = scheme_lookup_binding(id, (Scheme_Comp_Env *)&inlined_e, SCHEME_RESOLVE_MODIDS, NULL, NULL, NULL, NULL);
+    v = scheme_lookup_binding(id, (Scheme_Comp_Env *)&inlined_e, SCHEME_RESOLVE_MODIDS, NULL, NULL, NULL, NULL, NULL);
     if (v) {
       if (!SAME_TYPE(SCHEME_TYPE(v), scheme_variable_type)) {
 	use_map = -1;
@@ -3558,7 +3642,7 @@ local_exp_time_value(int argc, Scheme_Object *argv[])
 			       + SCHEME_OUT_OF_CONTEXT_OK + SCHEME_ELIM_CONST),
 			      scheme_current_thread->current_local_certs, 
 			      scheme_current_thread->current_local_modidx, 
-			      &menv, NULL);
+			      &menv, NULL, NULL);
     
     /* Deref globals */
     if (v && SAME_TYPE(SCHEME_TYPE(v), scheme_variable_type))
@@ -3862,18 +3946,19 @@ certifier(void *_data, int argc, Scheme_Object **argv)
   }
 
   if (cert_data[0] || cert_data[1] || cert_data[2]) {
+    int as_active = SCHEME_TRUEP(cert_data[3]);
     s = scheme_stx_cert(s, mark, 
 			(Scheme_Env *)(cert_data[1] ? cert_data[1] : cert_data[2]),
 			cert_data[0],
 			((argc > 1) && SCHEME_TRUEP(argv[1])) ? argv[1] : NULL,
-			0 /* inactive cert */);
+			as_active);
     if (cert_data[1] && cert_data[2] && !SAME_OBJ(cert_data[1], cert_data[2])) {
       /* Have module we're expanding, in addition to module that bound
 	 the expander. */
       s = scheme_stx_cert(s, mark, (Scheme_Env *)cert_data[2],
 			  NULL,
 			  ((argc > 1) && SCHEME_TRUEP(argv[1])) ? argv[1] : NULL,
-			  0  /* inactive cert */);
+			  as_active);
     }
   }
 
@@ -3885,19 +3970,24 @@ local_certify(int argc, Scheme_Object *argv[])
 {
   Scheme_Object **cert_data;
   Scheme_Env *menv;
+  int active = 0;
 
   if (!scheme_current_thread->current_local_env)
     scheme_raise_exn(MZEXN_FAIL_CONTRACT, 
 		     "syntax-local-certifier: not currently transforming");
   menv = scheme_current_thread->current_local_menv;
 
-  cert_data = MALLOC_N(Scheme_Object*, 3);
+  if (argc)
+    active = SCHEME_TRUEP(argv[0]);
+
+  cert_data = MALLOC_N(Scheme_Object*, 4);
   cert_data[0] = scheme_current_thread->current_local_certs;
   /* Module that bound the macro we're now running: */
   cert_data[1] = (Scheme_Object *)((menv && menv->module) ? menv : NULL);
   /* Module that we're currently expanding: */
   menv = scheme_current_thread->current_local_env->genv;
   cert_data[2] = (Scheme_Object *)((menv && menv->module) ? menv : NULL);
+  cert_data[3] = (active ? scheme_true : scheme_false);
 
   return scheme_make_closed_prim_w_arity(certifier,
 					 cert_data,
@@ -4217,7 +4307,7 @@ static Scheme_Object *read_local_unbox(Scheme_Object *obj)
 static Scheme_Object *write_resolve_prefix(Scheme_Object *obj)
 {
   Resolve_Prefix *rp = (Resolve_Prefix *)obj;
-  Scheme_Object *tv, *sv;
+  Scheme_Object *tv, *sv, *ds;
   int i;
 
   i = rp->num_toplevels;
@@ -4229,7 +4319,13 @@ static Scheme_Object *write_resolve_prefix(Scheme_Object *obj)
   i = rp->num_stxes;
   sv = scheme_make_vector(i, NULL);
   while (i--) {
-    SCHEME_VEC_ELS(sv)[i] = rp->stxes[i];
+    if (rp->stxes[i]) {
+      ds = scheme_alloc_small_object();
+      ds->type = scheme_delay_syntax_type;
+      SCHEME_PTR_VAL(ds) = rp->stxes[i];
+    } else
+      ds = scheme_false;
+    SCHEME_VEC_ELS(sv)[i] = ds;
   }
 
   return scheme_make_pair(scheme_make_integer(rp->num_lifts), scheme_make_pair(tv, sv));
@@ -4238,7 +4334,7 @@ static Scheme_Object *write_resolve_prefix(Scheme_Object *obj)
 static Scheme_Object *read_resolve_prefix(Scheme_Object *obj)
 {
   Resolve_Prefix *rp;
-  Scheme_Object *tv, *sv, **a;
+  Scheme_Object *tv, *sv, **a, *stx;
   int i;
 
   if (!SCHEME_PAIRP(obj)) return NULL;
@@ -4268,7 +4364,17 @@ static Scheme_Object *read_resolve_prefix(Scheme_Object *obj)
   i = rp->num_stxes;
   a = MALLOC_N(Scheme_Object *, i);
   while (i--) {
-    a[i] = SCHEME_VEC_ELS(sv)[i];
+    stx = SCHEME_VEC_ELS(sv)[i];
+    if (SCHEME_FALSEP(stx)) {
+      stx = NULL;
+    } else if (SCHEME_RPAIRP(stx)) {
+      rp->delay_info = (struct Scheme_Load_Delay *)SCHEME_CDR(stx);
+      rp->delay_refcount++;
+      stx = SCHEME_CAR(stx);
+    } else {
+      if (!SCHEME_STXP(stx)) return NULL;
+    }
+    a[i] = stx;
   }
   rp->stxes = a;
 

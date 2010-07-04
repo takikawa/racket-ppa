@@ -5,7 +5,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2006 PLT Scheme Inc.
+ * Copyright: (C) 2004-2007 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -21,7 +21,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301 USA.
  */
 
 #ifndef WindowDC_h
@@ -51,14 +52,14 @@ class wxGLConfig;
 #endif
 
 #ifdef Have_X_Types
-class wxWindowDC_Xinit {
+class wxWindowDC_Xinit : public gc {
 public:
     Display* dpy;		// display of drawable
     Screen* scn;		// screen of drawable
     Drawable drawable;		// init to 0 if drawable is not created
     wxWindow *owner;
 };
-class wxWindowDC_Xintern { // X GDI data
+class wxWindowDC_Xintern : public gc { // X GDI data
 public:
     GC           pen_gc, brush_gc, text_gc, bg_gc;
     Region       user_reg, expose_reg, current_reg;
@@ -147,7 +148,8 @@ public:
   double GetCharWidth(void);
   void  GetTextExtent(const char *s, double *w, double *h, double *descent = 0,
 		      double *ext_leading = 0,	wxFont *font=NULL,
-		      Bool combine=FALSE, Bool use16bit=FALSE, int dt=0);
+		      Bool combine=FALSE, Bool use16bit=FALSE, int dt=0,
+                      int len=-1);
   void  SetBackground(wxColour *c);
   void  SetBrush(wxBrush *brush);
   void  ResetBrush(wxBrush *brush);
@@ -264,7 +266,7 @@ public:
 void wxGetTextExtent(Display *dpy, double scale_x, double scale_y,
 		     const char *orig_s, double *_w, double *_h, double *_descent,
 		     double *_topspace, wxFont *font_to_use,
-		     Bool combine, Bool isUnicode, int dt);
+		     Bool combine, Bool isUnicode, int dt, int len);
 #endif
 
 #endif // WindowDC_hh

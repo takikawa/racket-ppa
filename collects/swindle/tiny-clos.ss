@@ -130,10 +130,9 @@
     (let loop ([fmt-args '()] [args args] [a fmt-num])
       (if (zero? a)
         (raise (exn-maker
-                (string->immutable-string
-                 (if sym
-                   (apply format (concat "~s: " fmt) sym (reverse! fmt-args))
-                   (apply format fmt (reverse! fmt-args))))
+                (if sym
+                  (apply format (concat "~s: " fmt) sym (reverse! fmt-args))
+                  (apply format fmt (reverse! fmt-args)))
                 (current-continuation-marks) . args))
         (loop (cons (car args) fmt-args) (cdr args) (sub1 a))))))
 
@@ -497,17 +496,20 @@
 (define* (struct-type->class stype)
   (hash-table-get
    struct-to-class-table stype
-   (thunk (let-values ([(name init-field-k auto-field-k accessor mutator
-                         immutable-k-list super skipped?)
-                        (struct-type-info stype)])
-            (let* ([super (cond [super (struct-type->class super)]
-                                [skipped? <opaque-struct>]
-                                [else <struct>])]
-                   [this (parameterize ([*default-object-class* #f])
-                           (make <primitive-class>
-                                 :name name :direct-supers (list super)))])
-              (hash-table-put! struct-to-class-table stype this)
-              this)))))
+   (thunk
+     (let-values ([(name init-field-k auto-field-k accessor mutator
+                    immutable-k-list super skipped?)
+                   (struct-type-info stype)])
+       (let* ([supers (list (cond [super (struct-type->class super)]
+                                  [skipped? <opaque-struct>]
+                                  [else <struct>]))]
+              [proc? (procedure-struct-type? stype)]
+              [supers (if proc? (cons <primitive-procedure> supers) supers)]
+              [this (parameterize ([*default-object-class* #f])
+                      (make (if proc? <procedure-class> <primitive-class>)
+                            :name name :direct-supers supers))])
+         (hash-table-put! struct-to-class-table stype this)
+         this)))))
 
 ;;>>...
 ;;> *** Common accessors
@@ -1822,7 +1824,7 @@
                method
                (let* ([psym (object-name (%method-procedure method))]
                       [pstr (and psym (symbol->string psym))])
-                 (if (or (not pstr) (regexp-match #rx":[0-9]*:[0-9]*$" pstr))
+                 (if (or (not pstr) (regexp-match? #rx":[0-9]*:[0-9]*$" pstr))
                    (compute-method-name (%method-specializers method)
                                         (%generic-name generic))
                    psym)))))
@@ -2112,6 +2114,9 @@
         ;; matter?
         ;; ELI: changed the order so it fits better the expected results.
         (cond [(instance?    x) (instance-class x)]
+              [(struct? x)
+               (let-values ([(type _) (struct-info x)])
+                 (if type (struct-type->class type) <opaque-struct>))]
               [(procedure?   x) (cond [(parameter? x) <parameter>]
                                       [(primitive? x) <primitive-procedure>]
                                       [else <procedure>])]
@@ -2146,10 +2151,6 @@
                (if (file-stream-port? x) <input-stream-port> <input-port>)]
               [(output-port? x)
                (if (file-stream-port? x) <output-stream-port> <output-port>)]
-              ;; MzScheme stuff
-              [(struct? x)
-               (let-values ([(type _) (struct-info x)])
-                 (if type (struct-type->class type) <opaque-struct>))]
               [(void?           x) <void>]
               [(box?            x) <box>]
               [(weak-box?       x) <weak-box>]

@@ -4,7 +4,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2006 PLT Scheme Inc.
+ * Copyright: (C) 2004-2007 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -20,7 +20,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301 USA.
  */
 
 #ifdef __GNUG__
@@ -195,7 +196,7 @@ Bool wxMenu::PopupMenu(Widget in_w, int root_x, int root_y, Bool forChoice, int 
 
     {
       void **srs;
-      srs = new void*[2];
+      srs = new WXGC_PTRS void*[2];
       srs[0] = saferef;
       srs[1] = saferefs;
       saferefs = srs;

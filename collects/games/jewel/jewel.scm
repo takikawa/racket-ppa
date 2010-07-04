@@ -17,10 +17,10 @@
 	   "../show-help.ss"
   )
 
-  (provide game-unit)
+  (provide game@)
 
 
-  (define game-unit
+  (define game@
     (unit
       (import)
       (export)
@@ -1796,6 +1796,7 @@
                (min-height 480)
                (stretchable-width #f)
                (stretchable-height #f)
+               (style '(no-resize-border))
           )
   )
 

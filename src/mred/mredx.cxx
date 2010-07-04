@@ -3,7 +3,7 @@
  * Purpose:     MrEd X Windows event loop
  * Author:      Matthew Flatt
  * Created:     1996
- * Copyright:   (c) 2004-2006 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2007 PLT Scheme Inc.
  * Copyright:   (c) 1996, Matthew Flatt
  */
 
@@ -34,6 +34,9 @@ static int grab_stack_pos = 0, grab_stack_size = 0;
 #define WSTACK_INC 3
 
 extern Widget wx_clipWindow, wx_selWindow;
+
+Window wxAddClipboardWindowProperty(Atom prop);
+extern Atom wx_single_instance_tag;
 
 wxWindow *wxLocationToWindow(int x, int y);
 
@@ -765,4 +768,208 @@ int wxUTF8StringToChar(char *str, int slen)
 		     s, 0, 1,
 		     NULL, 0, '?');
   return (int)s[0];
+}
+
+/***********************************************************************/
+
+static int has_property(Display *d, Window w, Atom atag)
+{
+  Atom actual;
+  int format;
+  unsigned long count, remaining;
+  unsigned char *data = 0;
+
+  XGetWindowProperty(d, w, atag,
+		     0, 0x8000000L, FALSE, 
+		     AnyPropertyType, &actual, &format,
+		     &count, &remaining, &data);
+
+  if (data)
+    XFree(data);
+
+  return (actual != None);
+}
+
+static int wxSendOrSetTag(char *tag, char *pre_tag, char *msg)
+{
+  Display *d;
+  Window root, parent, *children;
+  unsigned int n, i;
+  Atom atag, apre_tag;
+  Window target = 0, me;
+  int try_again = 0, add_property_back = 0, found_nothing;
+
+  /* Elect a leader, relying on the fact that the X server serializes
+     its interactions.
+     
+     Each client sets a pre-tag, and then checks all windows. If any
+     window has a (non-pre) tag already, then that's the leader. If no
+     one else has a pre tag, then this client is elected, and it sets
+     the tag on itself.  If someone else has a pre tag, we try again;
+     if the other window id is lower, this client drops it pre tag, so
+     that the other will be elected eventually.  Note that if two
+     clients set a pre tag, then one must see the other (because
+     neither looks until its tag is set). Livelock is a possibility if
+     clients continuously appear with ever higher window ids, but that
+     possibility is exceedingly remote. */
+
+  if (!orig_top_level)
+    d = XtDisplay(save_top_level);
+  else
+    d = XtDisplay(orig_top_level);
+
+  apre_tag = XInternAtom(d, pre_tag, False);
+  atag = XInternAtom(d, tag, False);
+
+  wx_single_instance_tag = atag;
+
+  me = wxAddClipboardWindowProperty(apre_tag);
+
+
+  do {
+    if (add_property_back) {
+      wxAddClipboardWindowProperty(apre_tag);
+      add_property_back = 1;
+    }
+
+    XFlush(d);
+    XSync(d, FALSE);
+    
+    found_nothing = 1;
+
+    if (XQueryTree(d, DefaultRootWindow(d),
+		   &root, &parent, &children, &n)) {
+      for (i = n; i--; ) {
+	if (children[i] != me) {
+	  if (has_property(d, children[i], atag)) {
+	    /* Found the leader: */
+	    target = children[i];
+	    try_again = 0;
+	    found_nothing = 0;
+	    break;
+	  } else if (has_property(d, children[i], apre_tag)) {
+	    /* Found another candidate. If our ID is
+	       higher, then withdrawl candidacy. Loop
+	       to wait for some process to assume leadership. */
+	    if ((long)me >= (long)children[i])
+	      XDeleteProperty(d, me, apre_tag);
+	    try_again = 1;
+	    found_nothing = 0;
+	  }
+	}
+      }
+      
+      if (found_nothing && try_again) {
+	/* This can only happen if some candidate process
+	   (with a lower window ID) has now exited. Try 
+	   again to become the leader. */
+	add_property_back = 1;
+      }
+      
+      if (children)
+	XFree(children);
+    }
+  } while (try_again);
+
+  if (target) {
+    GC_CAN_IGNORE XEvent xevent;
+    long mlen, offset = 0;
+    int sent_last = 0;
+
+    mlen = strlen(msg);
+
+    /* Send the message(s): */
+    while (!sent_last) {
+      memset(&xevent, 0, sizeof (xevent));
+      
+      xevent.xany.type = ClientMessage;
+      xevent.xany.display = d;
+      xevent.xclient.window = target;
+      xevent.xclient.message_type = atag;
+      xevent.xclient.format = 8;
+
+      {
+	int i = sizeof(Window);
+	long w = (long)me;
+
+	while (i--) {
+	  xevent.xclient.data.b[i] = (char)(w & 0xFF);
+	  w = w >> 8;
+	}
+      }
+
+      if (offset < mlen) {
+	long amt;
+	amt = mlen - offset;
+	if (amt > (int)(20 - sizeof(Window)))
+	  amt = 20 - sizeof(Window);
+	memcpy(xevent.xclient.data.b + sizeof(Window), msg + offset, amt);
+	offset += amt;
+	sent_last = (amt < (int)(20 - sizeof(Window)));
+      } else
+	sent_last = 1;
+
+      XSendEvent(d, target, 0, 0, &xevent);
+    }
+
+    XFlush(d);
+    XSync(d, FALSE);
+
+    return 1;
+  } else {
+    /* Set the property on the clipboard window */
+    wxAddClipboardWindowProperty(atag);
+
+    return 0;
+  }
+}
+
+# define SINGLE_INSTANCE_HANDLER_CODE \
+"(lambda (f host)" \
+"  (let ([path (simplify-path" \
+"               (path->complete-path" \
+"                (or (find-executable-path (find-system-path 'run-file) #f)" \
+"                    (find-system-path 'run-file))" \
+"                (current-directory)))])" \
+"    (let ([tag (string->bytes/utf-8" \
+"                (format \"~a:~a_~a\" host path (version)))])" \
+"      (f tag " \
+"         (bytes-append #\"pre\" tag)" \
+"         (apply" \
+"          bytes-append" \
+"          (map (lambda (s)" \
+"                 (let ([s (path->string" \
+"                           (path->complete-path s (current-directory)))])" \
+"                   (string->bytes/utf-8" \
+"                    (format \"~a:~a\"" \
+"                            (string-length s)" \
+"                            s))))" \
+"               (vector->list" \
+"                (current-command-line-arguments))))))))"
+
+static Scheme_Object *prep_single_instance(int argc, Scheme_Object **argv)
+{
+  return (wxSendOrSetTag(SCHEME_BYTE_STR_VAL(argv[0]),
+			 SCHEME_BYTE_STR_VAL(argv[1]),
+			 SCHEME_BYTE_STR_VAL(argv[2]))
+	  ? scheme_true
+	  : scheme_false);
+}
+
+int wxCheckSingleInstance(Scheme_Env *global_env)
+{
+  Scheme_Object *a[2], *v;
+  char buf[256];
+
+  if (!wxGetHostName(buf, 256)) {
+    buf[0] = 0;
+  }
+
+  a[0] = scheme_make_prim(prep_single_instance);
+  a[1] = scheme_make_byte_string(buf);
+  v = scheme_apply(scheme_eval_string(SINGLE_INSTANCE_HANDLER_CODE,
+				      global_env),
+		   2,
+		   a);
+  return SCHEME_TRUEP(v);
 }

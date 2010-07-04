@@ -114,6 +114,8 @@
   scheme_extension_table->scheme_uchar_combining_classes = scheme_uchar_combining_classes;
   scheme_extension_table->scheme_eval = scheme_eval;
   scheme_extension_table->scheme_eval_multi = scheme_eval_multi;
+  scheme_extension_table->scheme_eval_with_prompt = scheme_eval_with_prompt;
+  scheme_extension_table->scheme_eval_multi_with_prompt = scheme_eval_multi_with_prompt;
   scheme_extension_table->scheme_eval_compiled = scheme_eval_compiled;
   scheme_extension_table->scheme_eval_compiled_multi = scheme_eval_compiled_multi;
   scheme_extension_table->_scheme_eval_compiled = _scheme_eval_compiled;
@@ -123,13 +125,24 @@
   scheme_extension_table->scheme_apply_no_eb = scheme_apply_no_eb;
   scheme_extension_table->scheme_apply_multi_no_eb = scheme_apply_multi_no_eb;
   scheme_extension_table->scheme_apply_to_list = scheme_apply_to_list;
+  scheme_extension_table->scheme_apply_with_prompt = scheme_apply_with_prompt;
+  scheme_extension_table->scheme_apply_multi_with_prompt = scheme_apply_multi_with_prompt;
+  scheme_extension_table->_scheme_apply_with_prompt = _scheme_apply_with_prompt;
+  scheme_extension_table->_scheme_apply_multi_with_prompt = _scheme_apply_multi_with_prompt;
   scheme_extension_table->scheme_eval_string = scheme_eval_string;
   scheme_extension_table->scheme_eval_string_multi = scheme_eval_string_multi;
   scheme_extension_table->scheme_eval_string_all = scheme_eval_string_all;
+  scheme_extension_table->scheme_eval_string_with_prompt = scheme_eval_string_with_prompt;
+  scheme_extension_table->scheme_eval_string_multi_with_prompt = scheme_eval_string_multi_with_prompt;
+  scheme_extension_table->scheme_eval_string_all_with_prompt = scheme_eval_string_all_with_prompt;
   scheme_extension_table->_scheme_apply_known_prim_closure = _scheme_apply_known_prim_closure;
   scheme_extension_table->_scheme_apply_known_prim_closure_multi = _scheme_apply_known_prim_closure_multi;
   scheme_extension_table->_scheme_apply_prim_closure = _scheme_apply_prim_closure;
   scheme_extension_table->_scheme_apply_prim_closure_multi = _scheme_apply_prim_closure_multi;
+  scheme_extension_table->scheme_call_with_prompt = scheme_call_with_prompt;
+  scheme_extension_table->scheme_call_with_prompt_multi = scheme_call_with_prompt_multi;
+  scheme_extension_table->_scheme_call_with_prompt = _scheme_call_with_prompt;
+  scheme_extension_table->_scheme_call_with_prompt_multi = _scheme_call_with_prompt_multi;
   scheme_extension_table->scheme_values = scheme_values;
   scheme_extension_table->scheme_check_one_value = scheme_check_one_value;
   scheme_extension_table->scheme_tail_apply = scheme_tail_apply;
@@ -162,6 +175,9 @@
   scheme_extension_table->GC_malloc_atomic_uncollectable = GC_malloc_atomic_uncollectable;
   scheme_extension_table->scheme_malloc_uncollectable = scheme_malloc_uncollectable;
   scheme_extension_table->GC_malloc_array_tagged = GC_malloc_array_tagged;
+  scheme_extension_table->GC_malloc_allow_interior = GC_malloc_allow_interior;
+  scheme_extension_table->GC_malloc_atomic_allow_interior = GC_malloc_atomic_allow_interior;
+  scheme_extension_table->GC_malloc_tagged_allow_interior = GC_malloc_tagged_allow_interior;
 #  else
   scheme_extension_table->GC_malloc_stubborn = GC_malloc_stubborn;
   scheme_extension_table->GC_malloc_uncollectable = GC_malloc_uncollectable;
@@ -207,6 +223,9 @@
   scheme_extension_table->scheme_make_hash_table_equal = scheme_make_hash_table_equal;
   scheme_extension_table->scheme_hash_set = scheme_hash_set;
   scheme_extension_table->scheme_hash_get = scheme_hash_get;
+  scheme_extension_table->scheme_eq_hash_get = scheme_eq_hash_get;
+  scheme_extension_table->scheme_hash_set_atomic = scheme_hash_set_atomic;
+  scheme_extension_table->scheme_hash_get_atomic = scheme_hash_get_atomic;
   scheme_extension_table->scheme_hash_table_equal = scheme_hash_table_equal;
   scheme_extension_table->scheme_is_hash_table_equal = scheme_is_hash_table_equal;
   scheme_extension_table->scheme_clone_hash_table = scheme_clone_hash_table;
@@ -270,6 +289,7 @@
   scheme_extension_table->scheme_post_sema = scheme_post_sema;
   scheme_extension_table->scheme_post_sema_all = scheme_post_sema_all;
   scheme_extension_table->scheme_wait_sema = scheme_wait_sema;
+  scheme_extension_table->scheme_try_plain_sema = scheme_try_plain_sema;
   scheme_extension_table->scheme_char_constants = scheme_char_constants;
   scheme_extension_table->scheme_make_channel = scheme_make_channel;
   scheme_extension_table->scheme_make_channel_put_evt = scheme_make_channel_put_evt;
@@ -279,6 +299,7 @@
   scheme_extension_table->scheme_get_unsigned_long_long_val = scheme_get_unsigned_long_long_val;
   scheme_extension_table->scheme_real_to_double = scheme_real_to_double;
   scheme_extension_table->scheme_make_cptr = scheme_make_cptr;
+  scheme_extension_table->scheme_make_offset_cptr = scheme_make_offset_cptr;
   scheme_extension_table->scheme_get_proc_name = scheme_get_proc_name;
   scheme_extension_table->scheme_utf8_decode = scheme_utf8_decode;
   scheme_extension_table->scheme_utf8_decode_as_prefix = scheme_utf8_decode_as_prefix;
@@ -393,6 +414,11 @@
   scheme_extension_table->scheme_write_special = scheme_write_special;
   scheme_extension_table->scheme_write_special_nonblock = scheme_write_special_nonblock;
   scheme_extension_table->scheme_make_write_evt = scheme_make_write_evt;
+  scheme_extension_table->scheme_port_record = scheme_port_record;
+  scheme_extension_table->scheme_input_port_record = scheme_input_port_record;
+  scheme_extension_table->scheme_output_port_record = scheme_output_port_record;
+  scheme_extension_table->scheme_is_input_port = scheme_is_input_port;
+  scheme_extension_table->scheme_is_output_port = scheme_is_output_port;
   scheme_extension_table->scheme_make_port_type = scheme_make_port_type;
   scheme_extension_table->scheme_make_input_port = scheme_make_input_port;
   scheme_extension_table->scheme_make_output_port = scheme_make_output_port;
@@ -414,6 +440,7 @@
   scheme_extension_table->scheme_make_sized_byte_string_input_port = scheme_make_sized_byte_string_input_port;
   scheme_extension_table->scheme_make_byte_string_output_port = scheme_make_byte_string_output_port;
   scheme_extension_table->scheme_get_sized_byte_string_output = scheme_get_sized_byte_string_output;
+  scheme_extension_table->scheme_get_reset_sized_byte_string_output = scheme_get_reset_sized_byte_string_output;
   scheme_extension_table->scheme_pipe = scheme_pipe;
   scheme_extension_table->scheme_pipe_with_limit = scheme_pipe_with_limit;
   scheme_extension_table->scheme_make_null_output_port = scheme_make_null_output_port;
@@ -429,9 +456,11 @@
   scheme_extension_table->scheme_split_path = scheme_split_path;
   scheme_extension_table->scheme_build_path = scheme_build_path;
   scheme_extension_table->scheme_path_to_directory_path = scheme_path_to_directory_path;
+  scheme_extension_table->scheme_path_to_complete_path = scheme_path_to_complete_path;
   scheme_extension_table->scheme_make_path = scheme_make_path;
   scheme_extension_table->scheme_make_sized_path = scheme_make_sized_path;
   scheme_extension_table->scheme_make_sized_offset_path = scheme_make_sized_offset_path;
+  scheme_extension_table->scheme_make_sized_offset_kind_path = scheme_make_sized_offset_kind_path;
   scheme_extension_table->scheme_make_path_without_copying = scheme_make_path_without_copying;
 #ifdef MACINTOSH_EVENTS
   scheme_extension_table->scheme_mac_spec_to_path = scheme_mac_spec_to_path;
@@ -455,6 +484,7 @@
   scheme_extension_table->scheme_getnameinfo = scheme_getnameinfo;
   scheme_extension_table->scheme_get_port_file_descriptor = scheme_get_port_file_descriptor;
   scheme_extension_table->scheme_get_port_socket = scheme_get_port_socket;
+  scheme_extension_table->scheme_socket_to_ports = scheme_socket_to_ports;
   scheme_extension_table->scheme_set_type_printer = scheme_set_type_printer;
   scheme_extension_table->scheme_print_bytes = scheme_print_bytes;
   scheme_extension_table->scheme_print_utf8 = scheme_print_utf8;
@@ -514,6 +544,7 @@
 #endif
   scheme_extension_table->scheme_equal_hash_key = scheme_equal_hash_key;
   scheme_extension_table->scheme_equal_hash_key2 = scheme_equal_hash_key2;
+  scheme_extension_table->scheme_set_type_equality = scheme_set_type_equality;
   scheme_extension_table->scheme_build_list = scheme_build_list;
   scheme_extension_table->scheme_build_list_offset = scheme_build_list_offset;
   scheme_extension_table->scheme_make_list_immutable = scheme_make_list_immutable;

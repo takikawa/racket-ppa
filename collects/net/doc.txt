@@ -17,8 +17,8 @@ _URL_ posting, _web clients_, _WWW_
 
 To load directly: (require (lib "url.ss" "net"))
 Module files: _url.ss_ - provides the procedures documented below
-              _url-unit.ss_ - provides unit net:url@
-              _url-sig.ss_ - provides signature net:url^
+              _url-unit.ss_ - provides unit url@
+              _url-sig.ss_ - provides signature url^
               _url-struct.ss_ - provides the url and path/param structs
 
 
@@ -31,7 +31,7 @@ TYPES ----------------------------------------------------------------
 
 _url struct_
  (define-struct url (scheme user host port path-absolute? path query fragment))
-> url-scheme : url -> (union false/c string?) 
+> url-scheme : url -> (union false/c string?)
 > url-user : url -> (union false/c string?)
 > url-host : url -> (union false/c string?)
 > url-port : url -> (union false/c number?)
@@ -142,27 +142,49 @@ PROCEDURES -----------------------------------------------------------
   decoded information.
 
 > (get-pure-port url [list-of-strings]) -> input-port
+> (head-pure-port url [list-of-strings]) -> input-port
+> (delete-pure-port url [list-of-strings]) -> input-port
 
-  Takes a URL and returns a pure port corresponding to it.  Writes the
-  optional RFC 822 header-line strings to the server.  For the "file"
-  scheme, uses open-input-file, does not handle exceptions, and
+  Takes a URL, initiates a GET/HEAD/DELETE request and returns a pure
+  port corresponding to the body of the response. The optional list of
+  strings can be used to send header-lines to the server.
+
+  The GET method is used to retrieve whatever information is
+  identified by the url.
+
+  The HEAD method is identical to GET, except the server must not
+  return a message body. The metainformation returned in a response to
+  a HEAD request should be identical to the information in a response
+  to a GET request.
+
+  The DELETE method is used to delete the entity identified by the
+  url.
+
+  The file:// scheme is handled only by get-pure-port,
+  which uses open-input-file, does not handle exceptions, and
   ignores the optional strings.
 
+> (get-impure-port    url [list-of-strings]) -> input-port
+> (head-impure-port   url [list-of-strings]) -> input-port
+> (delete-impure-port url [list-of-strings]) -> input-port
+
+  Like <method>-pure-port above, but the port returned corresponds to
+  both the headers returned as well as the body. The file:// scheme is
+  handled by none of these functions.
+
 > (post-pure-port url post-byte-string [list-of-strings]) -> input-port
-
-  Like `get-pure-port', but issues a POST request (instead of a GET
-  request) to a web server using the given post data byte string.
-
-> (get-impure-port url [list-of-strings]) -> input-port
-
-  Takes a URL and returns an impure port corresponding to it.  Writes
-  the optional RFC 822 header-line strings to the server.  There are
-  no impure ports with scheme "file".
+> (put-pure-port  url put-byte-string  [list-of-strings]) -> input-port
+  
+  Takes a URL, initiates a POST/PUT request and sends the byte-string.
+  A pure port port corresponding to the body of the response is
+  returned.  The optional list of strings can be used to send
+  header-lines to the server.
 
 > (post-impure-port url post-byte-string [list-of-strings]) -> input-port
+> (put-impure-port  url put-byte-string  [list-of-strings]) -> input-port
 
-  Like `get-impure-port', but issues a POST request (instead of a GET
-  request) to a web server using the given post data string.
+  Like post-pure-port and put-pure-port above, but the port returned
+  corresponds to both the headers returned as well as the body.
 
 > (display-pure-port input-port) -> void
 
@@ -182,13 +204,13 @@ PROCEDURES -----------------------------------------------------------
   The "head.ss" library provides procedures, such as `extract-field,
   for manipulating the header.
 
-  Since web server sometimes return mis-formatted replies,
+  Since web servers sometimes return mis-formatted replies,
   `purify-port' is liberal in what it accepts as a header. as a
   result, the result string may be ill formed, but it will either be
   the empty string, or it will be a string matching the following
   regexp:
 
-      #rx"^HTTP/.*?((\r\n\r\n)|(\n\n)|(\r\r))"
+      #rx"^HTTP/.*?(\r\n\r\n|\n\n|\r\r)"
 
 > (call/input-url url url->port-proc port->X-proc [list-of-strings]) -> X
 
@@ -234,10 +256,10 @@ EXAMPLE --------------------------------------------------------------
 
 UNITS ----------------------------------------------------------------
 
-The _url-sig.ss_ module exports the _net:url^_ signature which
+The _url-sig.ss_ module exports the _url^_ signature which
 contains the names documented above. the _url-unit.ss_ module exports
-_url@_, a unit that imports net:tcp^ (see "tcp-sig.ss", below) and
-exports the names in net:url^.
+_url@_, a unit that imports tcp^ (see "tcp-sig.ss", below) and
+exports the names in url^.
 
 ==========================================================================
 _URL viewing_
@@ -287,8 +309,8 @@ _CGI_ backends, _WWW_
 
 To load directly: (require (lib "cgi.ss" "net"))
 Module files: _cgi.ss_ - provides the procedures documented below
-              _cgi-unit.ss_ - provides unit net:cgi@
-              _cgi-sig.ss_ - provides signature net:cgi^
+              _cgi-unit.ss_ - provides unit cgi@
+              _cgi-sig.ss_ - provides signature cgi^
 
 ABSTRACT -------------------------------------------------------------
 
@@ -416,8 +438,8 @@ _sending mail_, _sendmail_
 
 To load directly: (require (lib "sendmail.ss" "net"))
 Module files: _sendmail.ss_ - provides the procedures documented below
-              _sendmail-unit.ss_ - provides unit net:sendmail@
-              _sendmail-sig.ss_ - provides signature net:sendmail^
+              _sendmail-unit.ss_ - provides unit sendmail@
+              _sendmail-sig.ss_ - provides signature sendmail^
 
 
 ABSTRACT -------------------------------------------------------------
@@ -472,8 +494,8 @@ _sending mail_, _SMTP_
 
 To load directly: (require (lib "smtp.ss" "net"))
 Module files: _smtp.ss_ - provides the procedures documented below
-              _smtp-unit.ss_ - provides unit net:smtp@
-              _smtp-sig.ss_ - provides signature net:smtp^
+              _smtp-unit.ss_ - provides unit smtp@
+              _smtp-sig.ss_ - provides signature smtp^
 
 ABSTRACT -------------------------------------------------------------
 
@@ -497,12 +519,13 @@ EXCEPTIONS -----------------------------------------------------------
 PROCEDURES -----------------------------------------------------------
 
 > (smtp-send-message server-string from-string to-list-of-strings header
-                     message-list-of-strings/bytes 
-		     [#:port-no k] 
-		     [#:auth-user user-string-or-#f]
-		     [#:auth-passwd pw-string-or-#f]
-		     [#:tcp-connect proc]
-		     [port-no]) -> void
+                     message-list-of-strings/bytes
+                     [#:port-no k]
+                     [#:auth-user user-string-or-#f]
+                     [#:auth-passwd pw-string-or-#f]
+                     [#:tcp-connect proc]
+                     [#:tls-encode #f]
+                     [port-no]) -> void
 
   The first argument is the IP address of the SMTP server. The
   `from-string' argument specifies the mail address of the sender, and
@@ -530,6 +553,22 @@ PROCEDURES -----------------------------------------------------------
   `ssl-connect' from `(lib "mzssl.ss" "openssl")' to connect to the
   server via SSL.
 
+  If the optional #:tls-encode keyword argument supplies a procedure
+  instead of #f, then the ESMTP STARTTLS protocol is used to initiate
+  SSL communication with the server. The procedure given as the
+  #:tls-encode argument should be like `ports->ssl-ports' from `(lib
+  "mzssl.ss" "openssl")'; it will be called as
+
+    (encode r w #:mode 'connect #:encrypt 'tls #:close-original? #t)
+
+  and it should return two values: an input port and an export port.
+  All further SMTP communication uses the returned ports. 
+
+  For encrypted communication, normally either `ssl-connect' should be
+  supplied for #:tcp-connect, or `ports->ssl-ports' should be supplied
+  for #:tls-encode --- one or the other (depending on what the server
+  expects), rather than both.
+
   See the "head.ss" library for utilities that construct a message
   headers and validate mail address strings.
 
@@ -548,8 +587,8 @@ _NNTP_, _newsgroups_
 
 To load directly: (require (lib "nntp.ss" "net"))
 Module files: _nntp.ss_ - provides the procedures documented below
-              _nntp-unit.ss_ - provides unit net:nntp@
-              _nntp-sig.ss_ - provides signature net:nntp^
+              _nntp-unit.ss_ - provides unit nntp@
+              _nntp-sig.ss_ - provides signature nntp^
 
 ABSTRACT -------------------------------------------------------------
 
@@ -695,8 +734,8 @@ _POP-3_, _reading mail_
 
 To load directly: (require (lib "pop3.ss" "net"))
 Module files: _pop3.ss_ - provides the procedures documented below
-              _pop3-unit.ss_ - provides unit net:pop3@
-              _pop3-sig.ss_ - provides signature net:pop3^
+              _pop3-unit.ss_ - provides unit pop3@
+              _pop3-sig.ss_ - provides signature pop3^
 
 ABSTRACT -------------------------------------------------------------
 
@@ -874,8 +913,8 @@ _IMAP_, _reading mail_
 
 To load directly: (require (lib "imap.ss" "net"))
 Module files: _imap.ss_ - provides the procedures documented below
-              _imap-unit.ss_ - provides unit net:imap@
-              _imap-sig.ss_ - provides signature net:imap^
+              _imap-unit.ss_ - provides unit imap@
+              _imap-sig.ss_ - provides signature imap^
 
 ABSTRACT -------------------------------------------------------------
 
@@ -1249,8 +1288,8 @@ _mime headers_, _mail headers_, _http headers_
 
 To load directly: (require (lib "head.ss" "net"))
 Module files: _head.ss_ - provides the procedures documented below
-              _head-unit.ss_ - provides unit net:head@
-              _head-sig.ss_ - provides signature net:head^
+              _head-unit.ss_ - provides unit head@
+              _head-sig.ss_ - provides signature head^
 
 ABSTRACT -------------------------------------------------------------
 
@@ -1400,8 +1439,8 @@ _DNS_, _domain name service_
 
 To load directly: (require (lib "dns.ss" "net"))
 Module files: _dns.ss_ - provides the procedures documented below
-              _dns-unit.ss_ - provides unit net:dns@
-              _dns-sig.ss_ - provides signature net:dns^
+              _dns-unit.ss_ - provides unit dns@
+              _dns-sig.ss_ - provides signature dns^
 
 ABSTRACT -------------------------------------------------------------
 
@@ -1446,10 +1485,10 @@ _MIME support__
 
 To load directly: (require (lib "mime.ss" "net"))
 Module files: _mime.ss_ - provides the procedures documented below
-              _mime-unit.ss_ - provides unit net:mime@
-                               imports net:base64^ from "base64-sig.ss"
-                               and net:qp^ from "qp-sig.ss"
-              _mime-sig.ss_ - provides signature net:mime^
+              _mime-unit.ss_ - provides unit mime@
+                               imports base64^ from "base64-sig.ss"
+                               and qp^ from "qp-sig.ss"
+              _mime-sig.ss_ - provides signature mime^
 
 ABSTRACT -------------------------------------------------------------
 
@@ -1758,8 +1797,8 @@ _Base 64 Encoding_, _base64_
 
 To load directly: (require (lib "base64.ss" "net"))
 Module files: _base64.ss_ - provides the procedures documented below
-              _base64-unit.ss_ - provides unit net:base64@
-              _base64-sig.ss_ - provides signature net:base64^
+              _base64-unit.ss_ - provides unit base64@
+              _base64-sig.ss_ - provides signature base64^
 
 ABSTRACT -------------------------------------------------------------
 
@@ -1800,8 +1839,8 @@ _Quoted Printable Encoding_, _qp__
 
 To load directly: (require (lib "qp.ss" "net"))
 Module files: _qp.ss_ - provides the procedures documented below
-              _qp-unit.ss_ - provides unit net:qp@
-              _qp-sig.ss_ - provides signature net:qp^
+              _qp-unit.ss_ - provides unit qp@
+              _qp-sig.ss_ - provides signature qp^
 
 ABSTRACT -------------------------------------------------------------
 
@@ -1867,8 +1906,8 @@ _FTP client_
 
 To load directly: (require (lib "ftp.ss" "net"))
 Module files: _ftp.ss_ - provides the procedures documented below
-              _ftp-unit.ss_ - provides unit net:ftp@
-              _ftp-sig.ss_ - provides signature net:ftp^
+              _ftp-unit.ss_ - provides unit ftp@
+              _ftp-sig.ss_ - provides signature ftp^
 
 ABSTRACT -------------------------------------------------------------
 
@@ -1933,12 +1972,12 @@ _TCP redirect_
 ==========================================================================
 
 The "tcp-redirect.ss" library provides an function to generate a unit
-with the signature net:tcp^ that redirects certain port numbers to
-intra-process listeners that do not actually use TCP. The net:tcp^
+with the signature tcp^ that redirects certain port numbers to
+intra-process listeners that do not actually use TCP. The tcp^
 signature is imported, for example, by the url@ unit of "url-unit.ss".
 
 Module file: _tcp-redirect.ss_ - provides the `tcp-redirect-function
-             _tcp-sig.ss_ - defines _net:tcp^_, which contains the
+             _tcp-sig.ss_ - defines _tcp^_, which contains the
                             following:
                                  tcp-abandon-port
                                  tcp-accept
@@ -1950,7 +1989,7 @@ Module file: _tcp-redirect.ss_ - provides the `tcp-redirect-function
                                  tcp-listen
                                  tcp-listener?
              _tcp-unit.ss_ - defines _tcp@_ which implements
-                             net:tcp^ using the MzScheme functions of
+                             tcp^ using the MzScheme functions of
                              the same name
              ssl-tcp-unit.ss - see below
 
@@ -1958,7 +1997,7 @@ PROCEDURES -----------------------------------------------------------
 
 > (tcp-redirect port-number-list)
 
-  Returns a unit that implements net:tcp^ (from "tcp-sig.ss"). For
+  Returns a unit that implements tcp^ (from "tcp-sig.ss"). For
   port numbers not listed in `port-number-list', the unit's
   implementations are the MzScheme implementations.
 
@@ -1972,7 +2011,7 @@ _SSL redirect__
 ==========================================================================
 
 The _ssl-tcp-unit.ss_ library provides `make-ssl-tcp@', which returns
-a unit that implements net:tcp^ from "tcp-sig.ss"
+a unit that implements tcp^ from "tcp-sig.ss"
 
 PROCEDURES -----------------------------------------------------------
 
@@ -1981,7 +2020,7 @@ PROCEDURES -----------------------------------------------------------
    server-suggest-auth-file
    client-cert-file client-key-file client-root-cert-files)
 
-  Returns a unit that implements net:tcp^ using the SSL functions from
+  Returns a unit that implements tcp^ using the SSL functions from
   (lib "mzssl.ss" "openssl"). The arguments to `make-ssl-tcp@' control
   the certificates and keys uses by server and client connections:
 
@@ -2008,8 +2047,8 @@ _cookies_, HTTP _State Management_
 
 To load directly: (require (lib "cookie.ss" "net"))
 Module files: _cookie.ss_ - provides the procedures documented below
-              _cookie-unit.ss_ - provides unit net:cookie@
-              _cookie-sig.ss_ - provides signature net:cookie^
+              _cookie-unit.ss_ - provides unit cookie@
+              _cookie-sig.ss_ - provides signature cookie^
 
 
 ABSTRACT -------------------------------------------------------------
@@ -2147,8 +2186,8 @@ _URL encoding_, _URL decoding_, _application/x-www-form-urlencoded_
 
 To load directly: (require (lib "uri-codec.ss" "net"))
 Module files: _uri-codec.ss_ - provides the procedures documented below
-              _uri-codec-unit.ss_ - provides unit net:uri-codec@
-              _uri-codec-sig.ss_ - provides signature net:uri-codec^
+              _uri-codec-unit.ss_ - provides unit uri-codec@
+              _uri-codec-sig.ss_ - provides signature uri-codec^
 
 
 ABSTRACT -------------------------------------------------------------
@@ -2234,7 +2273,7 @@ PROCEDURES -----------------------------------------------------------
 
   The `separator-mode-sym' argument must be either 'amp or 'semi to
   select the separator. The default is 'semi.
- 
+
 
 > (form-urlencoded->alist string [separator-mode-sym])
   : String -> alist
@@ -2271,3 +2310,194 @@ PROCEDURES -----------------------------------------------------------
    'amp-or-semi       name=shriram&host=nw      name=shriram;host=nw
                                or
                       name=shriram;host=nw
+
+==========================================================================
+_GIF_ writing, _animated GIF_ writing
+==========================================================================
+
+To load directly: (require (lib "gifwrite.ss" "net"))
+
+ABSTRACT -------------------------------------------------------------
+
+The gifwrite package provides functions for writing GIF files to a
+stream, including GIF files with multiple images and controls (such as
+animated GIFs).
+
+TYPES ----------------------------------------------------------------
+
+> gif-stream
+
+A GIF stream is created by `gif-start'.
+
+A stream can be in a number of states:
+
+ * 'init : no images or controls have been added to the stream
+ * 'image-or-control : another image or control can be written now
+ * 'image : another image can be written now (since a control was
+            written)
+ * 'done : nothing more can be added
+
+> dimension
+
+An exact integer between 0 and #xFFFFFFFF, inclusive.
+
+> color
+
+An exact integer between 0 and 255, inclusive, indicating an index in
+a color map.
+
+> colormap
+
+A list of vectors; each vector must contain three color values: one
+for red, one for blue, and one for green. The list length must be 2,
+4, 8, 16, 32, 64, 128, or 256. The colors are indexed (starting from
+0) by their order in the list.
+
+PROCEDURES -----------------------------------------------------------
+
+> (gif-start output-port width-dimension height-dimension bg-color colormap-or-#f)
+
+Writes the start of a GIF file to the given output port, and returns
+a GIF stream that adds to the output port.
+
+The width and height determine a virtual space for the overall GIF
+image. Individual images added to the GIF stream must fit within this
+virtual space. The space is initialized by the given background color.
+
+Finally, the default meaning of color numbers (such as the background
+color) is determined by the given colormap, but individual images
+within the GIF file can have their own colormaps.
+
+A global colormap need not be supplied, in which case a colormap must
+be supplied for each image. Beware that the bg-color is ill-defined if
+a global colormap is not provided.
+
+> (gif-end gif-stream)
+
+Finishes writing a GIF file. The GIF stream's output port is not
+automatically closed.
+
+An exception is raised if an image-control command was just written to
+the stream (so that an image is required next).
+
+> (gif-add-image gif-stream left-dimension
+                            top-dimension
+                            width-dimension
+                            height-dimension
+                            interlaced?
+                            colormap-or-#f
+                            bytes)
+
+Writes an image to the given GIF stream. The left, top, width, and
+height values specify the location and size of the image within the
+overall GIF image's virtual space.
+
+If `interlaced?' is true, then `bytes' should provide bytes in
+interlaced order instead of top-to-bottom order. Interlaced order is:
+  * every 8th row, starting with 0
+  * every 8th row, starting with 4
+  * every 4th row, starting with 2
+  * every 2nd row, starting with 1
+
+If a global color is provided with `gif-start', a #f value can be
+provide instead of a colormap.
+
+The `bytes' argument specifies the pixel content of the image. Each
+byte specifies a color (i.e., an index in the colormap). Each row is
+provided left-to-right, and the rows provided either top-to-bottom or
+in interlaced order (see above). If the image is prefixed with a
+control that specifies an transparent index (see `gif-add-control'),
+then the corresponding "color" doesn't draw into the overall GIF
+image.
+
+An exception is raised if any byte value in `bytes' is larger than the
+colormap's length, if the `bytes' length is not `width' times
+`height', or if the top, left, width, and height dimensions specify a
+region beyond the overall GIF image's virtual space.
+
+> (gif-add-control gif-stream disposal-symbol
+                              wait-for-input?
+                              delay-dimension
+                              transparent-color-or-#f)
+
+Writes an image-control command to a GIF stream. Such a control must
+appear just before an image, and it applies to the following image.
+
+The GIF image model involves processing images one by one, placing
+each image into the specified position within the overall image's
+virtual space. An image-control command can specify a delay before an
+image is added (to create animated GIFs), and it also specifies how
+the image should be kept or removed from the overall image before
+proceeding to the next one (also for GIF animation).
+
+The `disposal-symbol' argument specifies how to proceed:
+
+  - 'any : doesn't matter (perhaps because the next image
+           completely overwrites the current one)
+  - 'keep : leave the image in place
+  - 'restore-bg : replace the image with the background color
+  - 'restore-prev : restore the overall image content to the
+                    content before the image is added
+       
+If `wait-for-input?' is true, then the display program may wait for
+some cue from the user (perhaps a mouse click) before adding the
+image.
+
+The `delay-dimension' argument specifies a delay in 1/100s of a
+second. 
+
+If the `transparent-color-or-#f' argument is a color, then it
+determines an index that is used to reprsent transparent pixels in the
+follow image (as opposed to the color specified by the colormap for
+the index).
+
+An exception is raised if a control is already added to `gif-stream'
+without a corresponding image.
+
+> (gif-add-loop-control gif-stream iteration-dimension)
+
+Writes an control command to a GIF stream for which no images or other
+commands have already been written. The command causes the animating
+sequence of images in the GIF to be repeated `iteration-dimension'
+times, where 0 can be used to mean "infinity".
+
+An exception is raise if some control or image has been added to the
+stream already.
+
+> (gif-add-comment gif-stream bytes)
+
+Adds a generic comment to the GIF stream.
+
+An exception is raised if an image-control command was just written to
+the stream (so that an image is required next).
+
+> (quantize argb-bytes)
+
+Eachimage in a GIF stream is limited to 256 colors, including the
+transparent "color", if any. The `quantize' function helps converts a
+24-bit image (plus alpha channel) into an indexed-color image,reducing
+the number of colors if necessary.
+
+Given a set of pixels expressed in ARGB format (i.e., each four bytes
+is a set of values for one pixel: alpha, red, blue, and green),
+`quantize' produces produces
+
+ - bytes for the image (i.e., a array of colors, expressed as a byte
+   string)
+
+ - a colormap
+
+ - either #f or a color index for the transparent "color"
+
+The conversion treats alpha values less than 128 as transparent
+pixels, and other alpha values as solid.
+
+The quantization process first attempts to use all (non-transparent)
+colors in the image. if that fails, it reduces the image to 12-bit
+color (3 bits per each of red, green, and blue) by rounding up pixel
+values, and tries again. If that fails, it reduces the image to 6-bit
+color (2 bits per each of red, green, and blue).
+
+To convert a collection of images all with the same quantization,
+simply append them for the input of a single call of `quantize', and
+then break apart the result bytes.

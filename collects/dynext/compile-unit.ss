@@ -1,6 +1,6 @@
 
 (module compile-unit mzscheme
-  (require (lib "unitsig.ss")
+  (require (lib "unit.ss")
 	   (lib "include.ss")
 	   (lib "process.ss")
 	   (lib "sendevent.ss")
@@ -11,9 +11,9 @@
 
   (provide dynext:compile@)
 
-  (define dynext:compile@
-    (unit/sig dynext:compile^ 
+  (define-unit dynext:compile@
       (import)
+      (export dynext:compile^)
       
       (define (get-unix-compile)
 	(or (find-executable-path "gcc" #f)
@@ -58,7 +58,7 @@
 
       (define (add-variant-flags l)
 	(append l (list (lambda ()
-			  (if (eq? '3m (compile-variant))
+			  (if (eq? '3m (specific-compile-variant))
 			      '("-DMZ_PRECISE_GC")
 			      null)))))
 
@@ -73,6 +73,7 @@
 					(case (string->symbol (path->string (system-library-subpath #f)))
 					  [(ppc-macosx i386-macosx) '("-fno-common")]
 					  [(ppc-darwin) '("-fno-common")]
+					  [(win32\\i386) '("-DAS_MSVC_EXTENSION")]
 					  [else null])
 					gcc-cpp-flags))
 
@@ -133,16 +134,22 @@
       (define compile-variant (make-parameter 
 			       'normal
 			       (lambda (s)
-				 (unless (memq s '(normal 3m))
-				   (raise-type-error 'compile-variant "'normal or '3m" s))
+				 (unless (memq s '(normal cgc 3m))
+				   (raise-type-error 'compile-variant "'normal, 'cgc, or '3m" s))
 				 s)))
+
+      (define (specific-compile-variant)
+        (let ([v (compile-variant)])
+          (if (eq? v 'normal)
+              (system-type 'gc)
+              v)))
 
       (define (expand-for-compile-variant l)
 	(apply append (map (lambda (s) (if (path-string? s) (list s) (s))) l)))
 
       (define current-make-extra-extension-compiler-flags
 	(make-parameter
-	 (lambda () (case (compile-variant)
+	 (lambda () (case (specific-compile-variant)
 		      [(3m) '("-DMZ_PRECISE_GC")]
 		      [else null]))
 	 (lambda (p)
@@ -289,4 +296,5 @@
       (define compile-extension (make-compile-extension
 				 current-extension-compiler-flags))
       (define preprocess-extension (make-compile-extension
-				    current-extension-compiler-flags)))))
+				    current-extension-compiler-flags))))
+

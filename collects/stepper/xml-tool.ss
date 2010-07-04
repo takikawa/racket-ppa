@@ -1,7 +1,8 @@
 
 (module xml-tool mzscheme
   (require "private/xml-snip-helpers.ss"
-           (lib "unitsig.ss")
+           "xml-sig.ss"
+           (lib "unit.ss")
            (lib "contract.ss")
            (lib "class.ss")
            (lib "mred.ss" "mred")
@@ -13,10 +14,9 @@
   (provide xml-tool@)
   
   (define orig (current-output-port))
-  (define xml-tool@
-    (unit/sig (xml-snip% scheme-snip%)
-      (import drscheme:tool^)
-      
+  (define-unit xml-tool@
+    (import drscheme:tool^)
+    (export xml^)
       (define (phase1) (void))
       (define (phase2) (void))
       
@@ -274,7 +274,7 @@
           (let ([xml-delta (make-object style-delta% 'change-family 'default)])
             (send style-list new-named-style "XML" 
                   (send style-list find-or-create-style 
-                        (send style-list find-named-style "Standard")
+                        (send style-list find-named-style (editor:get-default-color-style-name))
                         xml-delta)))))
 
       (define xml-text-mixin
@@ -424,4 +424,4 @@
       
       (drscheme:language:register-capability 'drscheme:special:xml-menus (flat-contract boolean?) #t)
       
-      (drscheme:get/extend:extend-unit-frame xml-box-frame-extension))))
+      (drscheme:get/extend:extend-unit-frame xml-box-frame-extension)))

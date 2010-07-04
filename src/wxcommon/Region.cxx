@@ -38,6 +38,8 @@ typedef struct {
 typedef int cairo_matrix_p;
 #endif
 
+/**************************************************************************/
+
 wxRegion::wxRegion(wxDC *_dc, wxRegion *r, Bool _no_prgn)
 {
   dc = _dc;
@@ -45,7 +47,7 @@ wxRegion::wxRegion(wxDC *_dc, wxRegion *r, Bool _no_prgn)
   locked = 0;
  
 #ifdef wx_msw
-  rgn = NULL;
+  lazy_rgn = NULL;
 #endif
 #ifdef wx_x
   rgn = NULL;
@@ -66,9 +68,10 @@ wxRegion::~wxRegion()
 void wxRegion::Cleanup()
 {  
 #ifdef wx_msw
-  if (rgn) {
-    DeleteObject(rgn);
-    rgn = NULL;
+  if (lazy_rgn) {
+    if (real_rgn)
+      lazy_rgn->DoneRgn(real_rgn);
+    lazy_rgn = NULL;
   }
 #endif
 #ifdef wx_x
@@ -87,6 +90,35 @@ void wxRegion::Cleanup()
     prgn = NULL;
   }
 }
+
+void wxRegion::Lock(int delta)
+{
+#ifdef wx_msw
+  if (!locked) {
+    if (lazy_rgn) {
+      real_rgn = lazy_rgn->GetRgn();
+    }
+  }
+#endif  
+
+  locked += delta;
+
+#ifdef wx_msw
+  if (!locked) {
+    if (lazy_rgn) {
+      lazy_rgn->DoneRgn(real_rgn);
+      real_rgn = NULL;
+    }
+  }
+#endif
+}
+
+#ifdef wx_msw
+HRGN wxRegion::GetRgn()
+{
+  return real_rgn;
+}
+#endif
 
 void wxRegion::SetRectangle(double x, double y, double width, double height)
 {
@@ -120,7 +152,7 @@ void wxRegion::SetRectangle(double x, double y, double width, double height)
   ih = ((int)floor(y + height)) - iy;
 
 #ifdef wx_msw
-  rgn = CreateRectRgn(ix, iy, ix + iw, iy + ih);
+  lazy_rgn = new RectLazyRgn(ix, iy, iw, ih);
 #endif
 #ifdef wx_x
   {
@@ -217,7 +249,7 @@ void wxRegion::SetRoundedRectangle(double x, double y, double width, double heig
   }
 
 # ifdef wx_msw
-  rgn = CreateRoundRectRgn(ix, iy, ix + iw, iy + ih, xradius, yradius);
+  lazy_rgn = new RoundRectLazyRgn(ix, iy, iw, ih, xradius, yradius);
 # endif
 # ifdef wx_mac
   /* This code uses the current port. We don't know what the current
@@ -290,7 +322,7 @@ void wxRegion::SetEllipse(double x, double y, double width, double height)
 #endif
 
 #ifdef wx_msw
-  rgn = CreateEllipticRgn(ix, iy, ix + iw, iy + ih);
+  lazy_rgn = new EllipticLazyRgn(ix, iy, iw, ih);
 #endif
 #ifdef wx_mac
   /* This code uses the current port. We don't know what the current
@@ -375,7 +407,7 @@ void wxRegion::SetPolygon(int n, wxPoint points[], double xoffset, double yoffse
   }
 
 #ifdef wx_msw
-  rgn = CreatePolygonRgn(cpoints, n, (fillStyle == wxODDEVEN_RULE) ? ALTERNATE : WINDING);
+  lazy_rgn = new PolygonLazyRgn(cpoints, n, (fillStyle == wxODDEVEN_RULE) ? ALTERNATE : WINDING);
 #endif
 #ifdef wx_x
   rgn = XPolygonRegion(cpoints, n, (fillStyle == wxODDEVEN_RULE) ? EvenOddRule : WindingRule);
@@ -648,11 +680,13 @@ void wxRegion::Union(wxRegion *r)
   }
 
 #ifdef wx_msw
-  if (!rgn) {
-    rgn = CreateRectRgn(0, 0, 1, 1);
-    CombineRgn(rgn, r->rgn, rgn, RGN_COPY);
-  } else
-    CombineRgn(rgn, r->rgn, rgn, RGN_OR);
+  if (!lazy_rgn) {
+    lazy_rgn = r->lazy_rgn;
+  } else if (!r->lazy_rgn) {
+    /* no change */
+  } else {
+    lazy_rgn = new UnionLazyRgn(lazy_rgn, r->lazy_rgn, RGN_OR);
+  }
 #endif
 #ifdef wx_x
   if (!rgn) {
@@ -671,21 +705,68 @@ void wxRegion::Union(wxRegion *r)
 void wxRegion::Intersect(wxRegion *r)
 {
   if (r->dc != dc) return;
+  if (ReallyEmpty())
+    return;
   if (r->ReallyEmpty()) {
     Cleanup();
     return;
   }
 
   if (!no_prgn) {
-    wxPathRgn *pr;
-    if (!r->prgn) abort();
-    pr = new WXGC_PTRS wxIntersectPathRgn(prgn, r->prgn);
+    wxPathRgn *rprgn, *pr;
+    rprgn = r->prgn;
+    if (!rprgn) abort();
+    if (prgn->is_rect 
+	&& rprgn->is_rect
+	&& (prgn->ox == rprgn->ox)
+	&& (prgn->oy == rprgn->oy)
+	&& (prgn->sx == rprgn->sx)
+	&& (prgn->sy == rprgn->sy)) {
+      /* Special case: both are rectangles with the same
+	 origin and scale. This is a common case, and it 
+	 can be a lot faster making a rectangle directly. */
+      wxRectanglePathRgn *r1 = (wxRectanglePathRgn *)prgn;
+      wxRectanglePathRgn *r2 = (wxRectanglePathRgn *)rprgn;
+      double px, py, pw, ph;
+
+      if (r1->x < r2->x)
+	px = r2->x;
+      else
+	px = r1->x;
+      if (r1->y < r2->y)
+	py = r2->y;
+      else
+	py = r1->y;
+      if (r1->x + r1->width < r2->x + r2->width)
+	pw = (r1->x + r1->width) - px;
+      else
+	pw = (r2->x + r2->width) - px;
+      if (r1->y + r1->height < r2->y + r2->height)
+	ph = (r1->y + r1->height) - py;
+      else
+	ph = (r2->y + r2->height) - py;
+      
+      if ((pw > 0) && (ph > 0))
+	pr = new WXGC_PTRS wxRectanglePathRgn(dc, px, py, pw, ph);
+      else {
+	/* empty */
+	Cleanup();
+	return;
+      }
+    } else {
+      pr = new WXGC_PTRS wxIntersectPathRgn(prgn, r->prgn);
+    }
     prgn = pr;
   }
 
 #ifdef wx_msw
-  if (!rgn) return;
-  CombineRgn(rgn, r->rgn, rgn, RGN_AND);
+  if (!lazy_rgn) return;
+  if (!r->lazy_rgn) {
+    lazy_rgn = NULL;
+    return;
+  }
+  
+  lazy_rgn = new UnionLazyRgn(lazy_rgn, r->lazy_rgn, RGN_AND);
 #endif
 #ifdef wx_x
   if (!rgn) return;
@@ -716,8 +797,12 @@ void wxRegion::Subtract(wxRegion *r)
   }
 
 #ifdef wx_msw
-  if (!rgn) return;
-  CombineRgn(rgn, rgn, r->rgn, RGN_DIFF);
+  if (!lazy_rgn) return;
+  if (!r->lazy_rgn) {
+    /* No change */
+    return;
+  }
+  lazy_rgn = new UnionLazyRgn(lazy_rgn, r->lazy_rgn, RGN_DIFF);
 #endif
 #ifdef wx_x
   if (!rgn) return;
@@ -750,8 +835,12 @@ void wxRegion::Xor(wxRegion *r)
   }
 
 #ifdef wx_msw
-  if (!rgn) return;
-  CombineRgn(rgn, rgn, r->rgn, RGN_XOR);
+  if (!lazy_rgn) return;
+  if (!r->lazy_rgn) {
+    return;
+  }
+  
+  lazy_rgn = new UnionLazyRgn(lazy_rgn, r->lazy_rgn, RGN_XOR);
 #endif
 #ifdef wx_x
   if (!rgn) return;
@@ -777,8 +866,21 @@ void wxRegion::BoundingBox(double *x, double *y, double *w, double *h)
     double v;
 #ifdef wx_msw
     RECT r;
+    HRGN rgn;
 
-    GetRgnBox(rgn, &r);
+    if (real_rgn)
+      rgn = real_rgn;
+    else
+      rgn = lazy_rgn->GetRgn();
+
+    if (rgn)
+      GetRgnBox(rgn, &r);
+    else {
+      r.left = r.top = r.right = r.bottom = 0;
+    }
+
+    if (!real_rgn)
+      lazy_rgn->DoneRgn(rgn);
   
     *x = r.left;
     *y = r.top;
@@ -826,9 +928,25 @@ Bool wxRegion::Empty()
 {
 #ifdef wx_msw
   RECT r;
-  if (!rgn) return TRUE;
+  HRGN rgn;
+  Bool is_empty;
 
-  return (GetRgnBox(rgn, &r) == NULLREGION);
+  if (!lazy_rgn) return TRUE;
+
+  if (real_rgn)
+    rgn = real_rgn;
+  else
+    rgn = lazy_rgn->GetRgn();
+
+  if (!rgn)
+    is_empty = 1;
+  else
+    is_empty = (GetRgnBox(rgn, &r) == NULLREGION);
+
+  if (!real_rgn)
+    lazy_rgn->DoneRgn(rgn);
+
+  return is_empty;
 #endif
 #ifdef wx_x
   if (!rgn) return TRUE;
@@ -849,7 +967,7 @@ Bool wxRegion::IsInRegion(double x, double y)
 {
   int ix, iy;
 
-  if (!rgn) return FALSE;
+  if (Empty()) return FALSE;
 
   x = dc->FLogicalToUnscrolledDeviceX(x);
   y = dc->FLogicalToUnscrolledDeviceY(y);
@@ -862,7 +980,25 @@ Bool wxRegion::IsInRegion(double x, double y)
   return XPointInRegion(rgn, ix, iy);
 #endif
 #ifdef wx_msw
-  return PtInRegion(rgn, ix, iy);
+  {
+    HRGN rgn;
+    Bool in_rgn;
+
+    if (real_rgn)
+      rgn = real_rgn;
+    else
+      rgn = lazy_rgn->GetRgn();
+    
+    if (rgn)
+      in_rgn = PtInRegion(rgn, ix, iy);
+    else
+      in_rgn = 0;
+
+    if (!real_rgn)
+      lazy_rgn->DoneRgn(rgn);
+
+    return in_rgn;
+  }
 #endif
 #ifdef wx_mac
   {
@@ -1012,6 +1148,7 @@ wxPathRgn::wxPathRgn(wxDC *dc)
     ox = oy = 0.0;
     sx = sy = 1.0;
   }
+  is_rect = 0;
 }
 
 wxPathRgn::~wxPathRgn()
@@ -1129,6 +1266,7 @@ wxRectanglePathRgn::wxRectanglePathRgn(wxDC *dc_for_scale, double _x, double _y,
   y = _y;
   width = _width;
   height = _height;
+  is_rect = 1;
 }
 
 Bool wxRectanglePathRgn::Install(long target, Bool reverse, Bool align)
@@ -1369,7 +1507,9 @@ wxPolygonPathRgn::wxPolygonPathRgn(wxDC *dc_for_scale,
 
 Bool wxPolygonPathRgn::Install(long target, Bool reverse, Bool align)
 {
+#if defined(WX_USE_CAIRO) || defined(wx_msw) || defined(wx_mac)
   double xx, yy;
+#endif
   cairo_matrix_p m;
 
   PrepareScale(target, fillStyle == wxODDEVEN_RULE, align, &m);

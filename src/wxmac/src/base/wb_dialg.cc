@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	August 1994
- * Copyright:	(c) 2004-2006 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2007 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  */
 
@@ -84,8 +84,8 @@ wxbDialogBox::~wxbDialogBox()
   tlw->DeleteObject(this);
 }
 
-void wxbDialogBox::Centre(int direction)
+void wxbDialogBox::Centre(int direction, wxWindow *p)
 {
-  ((wxDialogBox *)this)->cFrame->Centre(direction);
+  ((wxDialogBox *)this)->cFrame->Centre(direction, p);
 }
 

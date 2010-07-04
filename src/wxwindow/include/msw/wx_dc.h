@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	
- * Copyright:	(c) 2004-2006 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2007 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -122,7 +122,7 @@ class wxDC: public wxbDC
   void GetTextExtent(const char *string, double *x, double *y,
                      double *descent = NULL, double *externalLeading = NULL, 
 		     wxFont *theFont = NULL, 
-		     Bool combine = FALSE, Bool use16bit = FALSE, int d = 0);
+		     Bool combine = FALSE, Bool use16bit = FALSE, int d = 0, int len = -1);
   void GetSize(double *width, double *height);
   void GetSizeMM(double *width, double *height);
   Bool StartDoc(char *message);

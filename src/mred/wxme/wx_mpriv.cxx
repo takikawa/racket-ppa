@@ -3,7 +3,7 @@
  * Purpose:     wxMediaEdit private methods implementation
  * Author:      Matthew Flatt
  * Created:     1995
- * Copyright:   (c) 2004-2006 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2007 PLT Scheme Inc.
  * Copyright:   (c) 1995, Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -18,7 +18,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
  */
 
@@ -351,7 +352,7 @@ void wxMediaEdit::_ChangeStyle(long start, long end,
     
     if (!modified) {
       wxUnmodifyRecord *ur;
-      ur = new WXGC_PTRS wxUnmodifyRecord;
+      ur = new WXGC_PTRS wxUnmodifyRecord(delayedStreak);
       AddUndo(ur);
     }
     if (rec)
@@ -2394,8 +2395,8 @@ void wxMediaEdit::Redraw()
     return;
 
   if (admin->DelayRefresh()) {
-    /* Do we know the refresh box already? */
-    if (!delayedscroll && !delayedscrollbox && (refreshAll || refreshUnset)) {
+    /* Does the admin know the refresh box already? */
+    if ((delayedscroll != -1) && !delayedscrollbox && (refreshAll || refreshUnset)) {
       /* Yes ... */
       if (!refreshAll && refreshBoxUnset)
 	return; /* Nothing to do */
@@ -2425,8 +2426,11 @@ void wxMediaEdit::Redraw()
 
   dc = admin->GetDC(&x, &y);
 
-  if (!dc)
+  if (!dc) {
+    delayedscroll = -1;
+    delayedscrollbox = FALSE;
     return;
+  }
 
   origx = x;
   origy = y;
@@ -2644,9 +2648,8 @@ void wxMediaEdit::Refresh(double left, double top, double width, double height,
     wxBrush *brush;
     wxFont *font;
     wxColour *fg, *bg, *col;
-#ifndef NO_GET_CLIPPING_REGION
     wxRegion *rgn;
-#endif
+    int bgmode;
 
     pen = dc->GetPen();
     brush = dc->GetBrush();
@@ -2655,7 +2658,8 @@ void wxMediaEdit::Refresh(double left, double top, double width, double height,
     fg = new WXGC_PTRS wxColour(col);
     col = dc->GetTextBackground();
     bg = new WXGC_PTRS wxColour(col);
-
+    bgmode = dc->GetBackgroundMode();
+ 
     rgn = dc->GetClippingRegion();
     dc->SetClippingRect(left - x, top - y, width, height);
 
@@ -2668,6 +2672,7 @@ void wxMediaEdit::Refresh(double left, double top, double width, double height,
     dc->SetFont(font);
     dc->SetTextForeground(fg);
     dc->SetTextBackground(bg);
+    dc->SetBackgroundMode(bgmode);
   }
 
   EndSequenceLock();
@@ -2691,10 +2696,7 @@ void wxMediaEdit::NeedRefresh(long start, long end)
 
   drawCachedInBitmap = FALSE;
 
-  if (!delayRefresh && !printing && (!admin || !admin->DelayRefresh()))
-    Redraw();
-  else if (admin && !admin->standard)
-    admin->Resized(FALSE);
+  ContinueRefresh();
 }
 
 void wxMediaEdit::RefreshByLineDemand(void)
@@ -2702,10 +2704,30 @@ void wxMediaEdit::RefreshByLineDemand(void)
   if (!graphicMaybeInvalid)
     graphicMaybeInvalid = TRUE;
 
+  ContinueRefresh();
+}
+
+void wxMediaEdit::ContinueRefresh(void)
+{
   if (!delayRefresh && !printing && (!admin || !admin->DelayRefresh()))
     Redraw();
-  else if (admin && !admin->standard)
-    admin->Resized(FALSE);
+  else {
+    int rs = 1;
+    if (!delayRefresh && ((delayedscroll != -1)
+                          || delayedscrollbox)) {
+      if (!printing && admin) {
+        /* Although the administrator says to delay,
+           we can't just drop scroll requests. */
+        Redraw();
+        rs =  0;
+      } else {
+        delayedscroll = -1;
+        delayedscrollbox = 0;
+      }
+    }
+    if (admin && !admin->standard)
+      admin->Resized(FALSE);
+  }
 }
 
 void wxMediaEdit::NeedCaretRefresh(void)

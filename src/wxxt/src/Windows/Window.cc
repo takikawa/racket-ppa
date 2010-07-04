@@ -4,7 +4,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2006 PLT Scheme Inc.
+ * Copyright: (C) 2004-2007 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -20,7 +20,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301 USA.
  */
 
 #ifdef __GNUG__
@@ -38,6 +39,7 @@
 #define  Uses_wxItem
 #define  Uses_wxCanvas
 #define  Uses_wxApp
+#define  Uses_wxClipboard
 #include "wx.h"
 #define  Uses_ScrollWinWidget
 #define  Uses_Scrollbar
@@ -48,6 +50,8 @@
 #define  Uses_MultiListWidget
 #define  Uses_ScrollbarWidget
 #include "widgets.h"
+
+#include "xdnd.h"
 
 #include <X11/Xatom.h>
 #include <X11/keysym.h> // needed for IsFunctionKey, etc.
@@ -60,14 +64,35 @@ static Atom utf8_atom = 0, net_wm_name_atom, net_wm_icon_name_atom;
 extern void wxSetSensitive(Widget, Bool enabled);
 extern int wxLocaleStringToChar(char *str, int slen);
 extern int wxUTF8StringToChar(char *str, int slen);
+extern wxWindow *wxLocationToWindow(int x, int y);
 
 static wxWindow *grabbing_panel;
 static Time grabbing_panel_time;
 static Bool grabbing_panel_regsitered;
 
+#include "xdnd.c"
+
+static int dnd_inited = 0;
+static DndClass dnd;
+
+Atom wx_single_instance_tag = 0;
+
 #ifndef NO_XMB_LOOKUP_STRING
 static XIM the_im;
 #endif
+
+class Accum_Single_Instance_Message {
+public:
+  long src;
+  char *accum;
+  int len, size;
+  Accum_Single_Instance_Message *next;
+};
+static int si_registered;
+static Accum_Single_Instance_Message *si_msgs;
+static void parse_and_drop_runtime(int len, char *s);
+static void decode_percent_escapes(char *s);
+extern void wxDrop_Runtime(char **argv, int argc);
 
 //-----------------------------------------------------------------------------
 // wxWindow constructor
@@ -146,7 +171,9 @@ wxWindow::~wxWindow(void)
     // destroy widgets
     wxSetSensitive(X->frame, TRUE);
 
-    *saferef = NULL; /* MATTHEW */
+    *saferef = NULL;
+
+    dndTarget = NULL; /* just in case */
 
     if (X->frame) XtDestroyWidget(X->frame); X->frame = X->handle = X->scroll = NULL;
     DELETE_OBJ constraints; constraints = NULL;
@@ -1397,6 +1424,173 @@ void wxWindow::FrameEventHandler(Widget w,
       if (win->OnClose())
 	win->Show(FALSE);
     }
+    if (wx_single_instance_tag) {
+      if (xev->xclient.message_type == wx_single_instance_tag) {
+	/* Accumulate msg data */
+	long src = 0;
+	int i;
+	Accum_Single_Instance_Message *msg, *prev = NULL;
+
+	if (!si_registered) {
+	  wxREGGLOB(si_msgs);
+	}
+
+	for (i = sizeof(Window); i--; ) {
+	  src = (src << 8) | ((int)xev->xclient.data.b[i]);
+	}
+
+	for (msg = si_msgs; msg; msg = msg->next) {
+	  if (msg->src == src)
+	    break;
+	}
+	if (!msg) {
+	  char *s;
+	  s = new WXGC_ATOMIC char[128];
+	  msg = new WXGC_PTRS Accum_Single_Instance_Message;
+	  msg->next = si_msgs;
+	  si_msgs = msg;
+	  msg->src = src;
+	  msg->accum = s;
+	  msg->len = 0;
+	  msg->size = 128;
+	}
+	
+	{
+	  int len = sizeof(Window);
+	  while (len < 20 && xev->xclient.data.b[len]) {
+	    len++;
+	  }
+	  len -= sizeof(Window);
+
+	  if (len) {
+	    /* accumulate data */
+	    if (msg->size < msg->len + 1 + len) {
+	      char *naya;
+	      int new_size = msg->size * 2;
+	      naya = new WXGC_ATOMIC char[new_size];
+	      memcpy(naya, msg->accum, msg->len);
+	      msg->accum = naya;
+	      msg->size = new_size;
+	    }
+	    memcpy(msg->accum + msg->len, 
+		   xev->xclient.data.b + sizeof(Window),
+		   len);
+	    msg->len += len;
+	    if (len < (int)(20 - sizeof(Window)))
+	      len = 0; /* inidicate that we're done */
+	  } 
+
+	  if (!len) {
+	    /* done */
+	    if (prev)
+	      prev->next = msg->next;
+	    else
+	      si_msgs = msg->next;
+	    msg->accum[msg->len] = 0;
+
+	    parse_and_drop_runtime(msg->len, msg->accum);
+	  }
+	}
+      }
+    }
+    if (dnd_inited) {
+      if (xev->xclient.message_type == dnd.XdndEnter) {
+	/* Ok... */
+      } else if (xev->xclient.message_type == dnd.XdndPosition) {
+	wxWindow *target = NULL;
+        
+	/* Find immediate target window: */
+        {
+          Display *dpy  = XtDisplay(w);
+          Screen  *scn  = XtScreen(w);
+          Window  root  = RootWindowOfScreen(scn);
+          Window  xwin  = XtWindow(w);
+          Window  child = 0;
+          int cx, cy;
+	  cx = XDND_POSITION_ROOT_X(xev);
+	  cy = XDND_POSITION_ROOT_Y(xev);
+	  while (1) {
+	    if (XTranslateCoordinates(dpy, root, xwin, cx, cy,
+				      &cx, &cy, &child)) {
+	      if (!child)
+		break;
+	      else {
+		root = xwin;
+		xwin = child;
+	      }
+	    } else
+	      break;
+	  }
+	  if (xwin) {
+	    Widget cw;
+	    cw = XtWindowToWidget(dpy, xwin);
+	    if (cw) {
+	      target = win->FindChildByWidget(cw);
+	    }
+          }
+        }
+
+	/* Does this window (if found) accept drops? Or maybe a parent? */
+        while (target && !target->drag_accept) {
+          if (wxSubType(target->__type, wxTYPE_FRAME)
+	      || wxSubType(target->__type, wxTYPE_DIALOG_BOX)) {
+            target = NULL;
+            break;
+          } else {
+            target = target->GetParent();
+          }
+        }
+
+	xdnd_send_status(&dnd, XDND_ENTER_SOURCE_WIN(xev), xev->xclient.window, 
+                         !!target,
+			 0, 0, 0, 10, 10, dnd.XdndActionPrivate);
+        
+	win->dndTarget = target;
+      } else if (xev->xclient.message_type == dnd.XdndDrop) {
+	if (win->dndTarget) {
+	  wxWindow *target = win->dndTarget;
+	  win->dndTarget = NULL;
+	  if (!xdnd_convert_selection(&dnd, XDND_DROP_SOURCE_WIN(xev), xev->xclient.window, dnd.text_uri_list)) {
+	    long len;
+	    char *data;
+	    data = wxTheClipboard->GetClipboardData("text/uri-list", &len, XDND_DROP_TIME(xev), dnd.XdndSelection);
+	    if (data) {
+	      /* Newline-separate elements... */
+	      long offset = 0;
+	      while (offset < len) {
+		long elem_end;
+		for (elem_end = offset; 
+		     (elem_end < len) && (data[elem_end] != '\r');
+		     elem_end++) {
+		}
+		/* If file://... prefix (then drop it) */
+		if ((offset + 7 <= len)
+		    && !strncmp(data XFORM_OK_PLUS offset, "file://", 7)) {
+		  /* Now skip the root: */
+		  long i = offset + 7;
+		  char *data2;
+		  while ((i < elem_end) && (data[i] != '/')) {
+		    i++;
+		  }
+		  if (i < elem_end) {
+		    data2 = new WXGC_ATOMIC char[elem_end - i + 1];
+		    memcpy(data2, data + i, elem_end - i);
+		    data2[elem_end - i] = 0;
+		    decode_percent_escapes(data2);
+		    target->OnDropFile(data2);
+		  }
+		}
+		offset = elem_end + 2; /* assume CRLF */
+	      }
+	    }
+	  }
+	}
+        xdnd_send_finished(&dnd, XDND_DROP_SOURCE_WIN(xev), XtWindow(w), 0);
+      } else if (xev->xclient.message_type == dnd.XdndLeave) {
+	win->dndTarget = NULL;
+        xdnd_send_finished(&dnd, XDND_LEAVE_SOURCE_WIN(xev), XtWindow(w), 0);
+      }
+    }
     break;
   case CreateNotify:
     break;
@@ -2227,7 +2421,7 @@ void wxWindow::GetTextExtent(const char *s, double *w, double *h, double *descen
   
   wxGetTextExtent(wxAPP_DISPLAY, 1.0, 1.0,
 		  s, w, h, descent, ext_leading, theFont,
-		  1, use16bit, 0);
+		  1, use16bit, 0, -1);
 }
 
 
@@ -2255,4 +2449,142 @@ void wxWindow::ForEach(void (*foreach)(wxWindow *w, void *data), void *data)
 long wxWindow::GetWindowHandle()
 {
   return (long)X->handle;
+}
+
+//-----------------------------------------------------------------------------
+// drag & drop
+//-----------------------------------------------------------------------------
+
+void wxWindow::DragAcceptFiles(Bool accept)
+{
+  wxWindow *p;
+
+  if (!drag_accept == !accept)
+    return;
+
+  drag_accept = accept;
+  
+  if (!dnd_inited) {
+    xdnd_init(&dnd, wxAPP_DISPLAY);
+    dnd_inited = 1;
+  }
+
+  /* Declare drag-and-drop possible at this
+     window's top-level frame: */
+
+  p = this;
+  while (p) {
+    if (wxSubType(p->__type, wxTYPE_FRAME)
+	|| wxSubType(p->__type, wxTYPE_DIALOG_BOX))
+      break;
+    p = p->GetParent();
+  }
+  
+  {
+    Atom l[2];
+    l[0] = dnd.text_uri_list;
+    l[1] = 0;
+    xdnd_set_dnd_aware(&dnd, XtWindow(p->X->frame), l);
+  }
+}
+
+wxWindow *wxWindow::FindChildByWidget(Widget w)
+{
+  wxChildNode *node, *next;
+  wxWindow *r;
+
+  if ((w == X->frame)
+      || (w == X->handle))
+    return this;
+
+
+  for (node = children->First(); node; node = next) {
+    wxWindow *child;
+    next = node->Next();
+    child = (wxWindow*)(node->Data());
+    if (child) {
+      r = child->FindChildByWidget(w);
+      if (r)
+        return r;
+    }
+  }
+
+  return NULL;
+}
+
+static void parse_and_drop_runtime(int len, char *s)
+{
+  char **argv, *a;
+  int cnt = 0, pos = 0;
+  int sz;
+
+  while (pos < len) {
+    sz = 0;
+    while ((pos < len) && (s[pos] != ':')) {
+      sz = (sz * 10) + (s[pos] - '0');
+      pos++;
+    }
+    pos++;
+    if (sz > 0)
+      pos += sz;
+    cnt++;
+  }
+  
+  argv = new WXGC_PTRS char*[cnt];
+  
+  pos = cnt = 0;
+  while (pos < len) {
+    sz = 0;
+    while ((pos < len) && (s[pos] != ':')) {
+      sz = (sz * 10) + (s[pos] - '0');
+      pos++;
+    }
+    pos++;
+
+    if (sz > len - pos)
+      sz = len - pos;
+    if (sz < 0)
+      sz = 0;
+    a = new WXGC_ATOMIC char[sz + 1];
+    memcpy(a, s + pos, sz);
+    a[sz] = 0;
+    argv[cnt] = a;
+    
+    if (sz > 0)
+      pos += sz;
+    cnt++;
+  }
+  
+  wxDrop_Runtime(argv, cnt);
+}
+
+static int ishexdig(char s) { 
+  return (((s >= '0') && (s <= '9'))
+	  || ((s >= 'a') && (s <= 'f'))
+	  || ((s >= 'A') && (s <= 'F'))); 
+}
+static int hexval(char s) { 
+  return (((s >= '0') && (s <= '9'))
+	  ? s - '0'
+	  : (((s >= 'a') && (s <= 'f'))
+	     ? s - 'a' + 10
+	     : s - 'A' + 10));
+}
+
+static void decode_percent_escapes(char *s)
+{
+  int src = 0, dest = 0;
+  while (s[src]) {
+    if ((s[src] == '%')
+	&& ishexdig(s[src+1])
+	&& ishexdig(s[src+2])) {
+      int v;
+      v = ((hexval(s[src+1]) << 4) + hexval(s[src+2]));
+      s[dest++] = v;
+      src += 3;
+    } else {
+      s[dest++] = s[src++];
+    }
+  }
+  s[dest] = 0;
 }

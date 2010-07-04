@@ -4,7 +4,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2006 PLT Scheme Inc.
+ * Copyright: (C) 2004-2007 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -20,7 +20,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301 USA.
  */
 
 #ifndef Menu_h
@@ -31,7 +32,7 @@
 #endif
 
 #if defined(Have_Xt_Types)
-class wxMenu_Widgets {
+class wxMenu_Widgets : public gc {
 public:
     Widget shell;
     Widget menu;
@@ -134,7 +135,7 @@ extern char *copystring_xt(const char *s);
 # define BUNDLE_TOP_MENU(menu)   GC_malloc_immobile_box(GC_malloc_weak_box(gcOBJ_TO_PTR(menu), NULL, 0))
 # define FREE_TOP_POINTER(p)     GC_free_immobile_box((void **)p)
 #else
-# define MALLOC_MENU_ITEM()      (new menu_item)
+# define MALLOC_MENU_ITEM()      (new WXGC_PTRS menu_item)
 # define FREE_MENU_ITEM(i)       /* nothing */
 # define MAKE_MENU_STRING(s)     s
 # define FREE_MENU_STRING(s)     /* nothing */

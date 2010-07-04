@@ -25,11 +25,14 @@
 	    pretty-print-show-inexactness
 	    pretty-print-exact-as-decimal
 	    pretty-print-.-symbol-without-bars
-
+            pretty-print-abbreviate-read-macros
+            
 	    pretty-print-style-table?
 	    pretty-print-current-style-table
 	    pretty-print-extend-style-table
-
+            pretty-print-remap-stylable
+            
+            pretty-format
 	    pretty-printing
 	    pretty-print-newline
 	    make-tentative-pretty-print-output-port
@@ -75,6 +78,8 @@
           symbols like-symbols)
          (make-pretty-print-style-table new-ht))))
 
+  (define pretty-print-abbreviate-read-macros (make-parameter #t))
+  
    (define pretty-print-current-style-table 
      (make-parameter 
       (pretty-print-extend-style-table #f null null)
@@ -178,6 +183,23 @@
 
    (define pretty-printing
      (make-parameter #f (lambda (x) (and x #t))))
+  
+  (define pretty-print-remap-stylable
+    (make-parameter (λ (x) #f) 
+                    (λ (f) 
+                      (unless (can-accept-n? 1 f)
+                        (raise-type-error
+                         'pretty-print-remap-stylable
+                         "procedure of 1 argument"
+                         f))
+                      (λ (x)
+                        (let ([res (f x)])
+                          (unless (or (not res) (symbol? res))
+                            (raise-type-error
+                             'pretty-print-remap-stylable
+                             "result of parameter function to be a symbol or #f"
+                             res))
+                          res)))))
 
    (define make-pretty-print
      (lambda (display?)
@@ -197,7 +219,7 @@
 							print-hook
 							(pretty-print-print-line))
 				    (print-graph) (print-struct) (print-hash-table)
-				    (and (not display?) (print-vector-length))
+				    (and (not display?) (print-vector-length)) (print-box)
 				    (pretty-print-depth)
 				    (lambda (o display?)
 				      (size-hook o display? port)))
@@ -369,7 +391,7 @@
 	     (write-string "        " port 0 n))))
 
    (define (generic-write obj display? width pport
-			  print-graph? print-struct? print-hash-table? print-vec-length?
+			  print-graph? print-struct? print-hash-table? print-vec-length? print-box?
 			  depth size-hook)
      
      (define table (make-hash-table)) ; Hash table for looking for loops
@@ -412,7 +434,8 @@
 	   (let loop ([obj obj])
 	     (and (or (vector? obj)
 		      (pair? obj)
-		      (box? obj)
+		      (and (box? obj)
+                           print-box?)
 		      (and (custom-write? obj)
 			   (not (struct-type? obj)))
 		      (and (struct? obj) print-struct?)
@@ -424,15 +447,15 @@
 			       (cond
 				[(vector? obj)
 				 (let ([len (vector-length obj)])
-				   (let loop ([i 0])
+				   (let vloop ([i 0])
 				     (if (= i len)
 					 #f
-					 (or (vector-ref obj i)
-					     (loop (add1 i))))))]
+					 (or (loop (vector-ref obj i))
+					     (vloop (add1 i))))))]
 				[(pair? obj)
 				 (or (loop (car obj))
 				     (loop (cdr obj)))]
-				[(box? obj) (loop (unbox obj))]
+				[(and (box? obj) print-box?) (loop (unbox obj))]
 				[(and (custom-write? obj)
 				      (not (struct-type? obj)))
 				 (loop (extract-sub-objects obj pport))]
@@ -456,7 +479,8 @@
 	 (let loop ([obj obj])
 	   (if (or (vector? obj)
 		   (pair? obj)
-		   (box? obj)
+		   (and (box? obj)
+                        print-box?)
 		   (and (custom-write? obj)
 			(not (struct-type? obj)))
 		   (and (struct? obj) print-struct?)
@@ -477,7 +501,7 @@
 			  [(pair? obj)
 			   (loop (car obj))
 			   (loop (cdr obj))]
-			  [(box? obj) (loop (unbox obj))]
+			  [(and (box? obj) print-box?) (loop (unbox obj))]
 			  [(and (custom-write? obj)
 				(not (struct-type? obj)))
 			   (loop (extract-sub-objects obj pport))]
@@ -639,7 +663,8 @@
 		(when print-vec-length?
 		  (out (number->string (vector-length obj))))
 		(wr-lst (vector->repeatless-list obj) #f depth)))]
-	    [(box? obj)        
+	    [(and (box? obj)
+                  print-box?)
 	     (check-expr-found
 	      obj pport #t
 	      #f #f
@@ -726,8 +751,9 @@
 	 ;; may have to split on multiple lines
 	 (let* ([can-multi (and width
                                 (not (size-hook obj display?))
-				(or (pair? obj) (vector? obj) 
-				    (box? obj) 
+				(or (pair? obj)
+                                    (vector? obj) 
+				    (and (box? obj) print-box?)
 				    (and (custom-write? obj)
 					 (not (struct-type? obj)))
 				    (and (struct? obj) print-struct?)
@@ -781,7 +807,7 @@
                                     "#hash"
                                     "#hasheq"))
 			   (pp-list (hash-table-map obj cons) extra pp-expr #f depth)]
-			  [(box? obj)
+			  [(and (box? obj) print-box?)
 			   (out "#&") 
 			   (pr (unbox obj) extra pp-pair depth)])
 			 (post-print pport obj)))))
@@ -797,12 +823,17 @@
 		   pp-expr
 		   depth))
 	     (let ((head (car expr)))
-	       (if (and (symbol? head)
-			(not (size-hook head display?)))
+	       (if (or (and (symbol? head)
+                            (not (size-hook head display?)))
+                       ((pretty-print-remap-stylable) head))
 		   (let ((proc (style head)))
 		     (if proc
 			 (proc expr extra depth)
-			 (if (> (string-length (symbol->string head))
+			 (if (> (string-length 
+                                 (symbol->string
+                                  (if (symbol? head)
+                                      head
+                                      ((pretty-print-remap-stylable) head))))
 				max-call-head-width)
 			     (pp-general expr extra #f #f #f pp-expr depth)
 			     (pp-list expr extra pp-expr #t depth))))
@@ -961,11 +992,7 @@
        (define max-call-head-width 5)
 
        (define (style head)
-	 (case (or (hash-table-get (pretty-print-style-table-hash
-				    (pretty-print-current-style-table))
-				   head
-				   (lambda () #f))
-		   head)
+	 (case (look-in-style-table head)
 	   ((lambda λ define define-macro define-syntax
 		    syntax-rules
 		    shared
@@ -1011,18 +1038,32 @@
 	   (wr* pport obj depth display?)))
      (let-values ([(l col p) (port-next-location pport)])
        ((printing-port-print-line pport) #f col width)))
+  
+  (define (look-in-style-table raw-head)
+    (let ([head 
+           (cond
+             [((pretty-print-remap-stylable) raw-head)
+              => 
+              values]
+             [else raw-head])])
+      (or (hash-table-get (pretty-print-style-table-hash
+                           (pretty-print-current-style-table))
+                          head
+                          #f)
+          head)))
    
    (define (read-macro? l)
      (define (length1? l) (and (pair? l) (null? (cdr l))))
-     (let ((head (car l)) (tail (cdr l)))
-       (case head
-	 ((quote quasiquote unquote unquote-splicing syntax)
-	  (length1? tail))
-	 (else #f))))
+     (and (pretty-print-abbreviate-read-macros)
+          (let ((head (car l)) (tail (cdr l)))
+            (case head
+              ((quote quasiquote unquote unquote-splicing syntax)
+               (length1? tail))
+              (else #f)))))
    
    (define (read-macro-body l)
      (cadr l))
-   
+  
    (define (read-macro-prefix l)
      (let ((head (car l)))
        (case head
@@ -1033,7 +1074,7 @@
 	 ((syntax)            "#'")
 	 ((unsyntax)          "#,")
 	 ((unsyntax-splicing) "#,@"))))
-
+  
    (define pretty-print-handler
      (lambda (v)
        (unless (void? v)
@@ -1086,5 +1127,20 @@
 				   (substring padded-s (- len 10-power) len)))
 			 ;; d has factor(s) other than 2 and 5.
 			 ;; Print as a fraction.
-			 (number->string x)))))))])))
+			 (number->string x)))))))]))
+  
+  (define pretty-format
+    (case-lambda
+      [(t) (pretty-format t (pretty-print-columns))]
+      [(t w)
+       (parameterize ([pretty-print-columns w])
+         (let ([op (open-output-string)])
+           (pretty-print t op)
+           (let ([s (get-output-string op)])
+             (if (eq? w 'infinity)
+                 s
+                 (substring s 0 (- (string-length s) 1))))))]))
+
+  
+  )
 

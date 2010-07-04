@@ -1,6 +1,7 @@
 (module tool mzscheme
   (require (lib "tool.ss" "drscheme") (lib "contract.ss")
-           (lib "mred.ss" "mred") (lib "framework.ss" "framework") (lib "unitsig.ss") 
+           (lib "mred.ss" "mred") (lib "framework.ss" "framework")
+           (prefix u: (lib "unit.ss")) 
            (lib "file.ss")
            (lib "include-bitmap.ss" "mrlib") (lib "etc.ss")
            (lib "class.ss")
@@ -18,9 +19,9 @@
   (preferences:set-default 'profj:classpath null (lambda (v) (and (list? v) (andmap string? v))))
   
   (define tool@
-    (unit/sig drscheme:tool-exports^
-      (import drscheme:tool^)
-
+    (u:unit
+      (u:import drscheme:tool^)
+      (u:export drscheme:tool-exports^)
       ;Set the Java editing colors
       (define color-prefs-table
         `((keyword ,(make-object color% "black") ,(string-constant profj-java-mode-color-keyword))
@@ -44,8 +45,8 @@
       
       ;; short-sym->style-name : symbol->string
       ;; converts the short name (from the table above) into a name in the editor list
-      ;; (they are added in by `color-prefs:register-color-pref', called below)
-      (define (short-sym->style-name sym) (format "profj:syntax-coloring:scheme:~a" sym))
+      ;; (they are added in by `color-prefs:register-color-preference', called below)
+      (define (short-sym->style-name sym) (format "profj:syntax-colors:scheme:~a" sym))
       
       ;; extend-preferences-panel : vertical-panel -> void
       ;; adds in the configuration for the Java colors to the prefs panel
@@ -149,7 +150,12 @@
       (define (java-lang-mixin level name number one-line dyn?)
         (when dyn? (dynamic? #t))
         (class* object% (drscheme:language:language<%>)
-
+          (define/public (extra-repl-information settings port) (void))
+          (define/public (get-reader-module) #f)
+          (define/public (get-metadata a b) #f)
+          (define/public (metadata->settings m) #f)
+          (define/public (get-metadata-lines) #f)
+          
           (define/public (capability-value s) 
             (cond
               [(eq? s 'drscheme:language-menu-title) (string-constant profj-java)]
@@ -217,7 +223,6 @@
                 #f))
 
           ;Create the ProfessorJ settings selection panel
-          ;Note: Should add strings to string constants
           (define/public (config-panel _parent)
             (letrec ([parent (instantiate vertical-panel% ()
                                (parent _parent)
@@ -235,7 +240,7 @@
                                      (lambda (x y) update-pf)))]
                      [print-style (make-object radio-box%
                                     (string-constant profj-language-config-display-style)
-                                    (list "Class" (string-constant profj-language-config-display-field));"Graphical")
+                                    (list (string-constant profj-language-config-class) (string-constant profj-language-config-display-field));"Graphical")
                                     print-prefs
                                     (lambda (x y) (update-ps)))]
                      [testing-prefs (instantiate group-box-panel% ()
@@ -248,7 +253,7 @@
                                         testing-prefs
                                         (lambda (x y) update-at)))]
                      [allow-test (when (eq? level 'full)
-                                   (make-object check-box% "Support test Language extension?"
+                                   (make-object check-box% (string-constant profj-language-config-support-test-language)
                                      testing-prefs (lambda (x y) update-at2)))]
                      [display-testing 
                       (make-object check-box% (string-constant profj-language-config-testing-enable)
@@ -269,7 +274,7 @@
                      [cp-panel (instantiate group-box-panel% ()
                                             (parent parent)
                                             (alignment '(left center))
-                                            (label "Classpath"))]
+                                            (label (string-constant profj-language-config-classpath)))]
                      [tp-panel (instantiate horizontal-panel% ()
                                  (parent cp-panel)
                                  (alignment '(center center))
@@ -313,7 +318,7 @@
                           (send lower-button enable (and lb-selection enable? (not (= lb-selection (- lb-tot 1)))))))]
                      [add-callback
                       (lambda ()
-                        (let ([dir (get-directory "Choose the directory to add to class path" 
+                        (let ([dir (get-directory (string-constant profj-language-config-choose-classpath-directory) 
                                                   (send parent get-top-level-window))])
                           (when dir
                             (send lb append dir #f)
@@ -441,7 +446,7 @@
           ;;execute-types: type-record 
           (define execute-types (create-type-record))
           
-          (define/public (front-end/complete-program port settings teachpack-cache)
+          (define/public (front-end/complete-program port settings)
             (set! execute-types (create-type-record))
             (mred? #t)
             (let ([name (object-name port)])
@@ -452,7 +457,7 @@
                        eof 
                        (datum->syntax-object #f `(parse-java-full-program ,(parse port name level)
                                                                           ,name) #f)))))))
-          (define/public (front-end/interaction port settings teachpack-cache)
+          (define/public (front-end/interaction port settings)
             (mred? #t)
             (let ([name (object-name port)]
                   [executed? #f])
@@ -544,13 +549,13 @@
                           (regexp-match "Eaxmple" (car names)))
                       (class-loop (cdr names)
                                   ex
-                                  (cons (format "Class ~a's name contains a phrase close to Example."
+                                  (cons (format (string-constant profj-test-name-close-to-example)
                                                 (car names))
                                         ne)))
                      ((regexp-match "example" (car names))
                       (class-loop (cdr names)
                                   ex
-                                  (cons (format "Class ~a's name contains a miscapitalized example."
+                                  (cons (format (string-constant profj-test-name-example-miscapitalized)
                                                 (car names))
                                         ne)))
                      (else
@@ -741,20 +746,20 @@
           
           (define/public (create-executable fn parent . args)
             ;(printf "create-exe called~n")
-	    (message-box "Unsupported"
-			 "Sorry - executables are not supported for Java at this time"
+	    (message-box (string-constant profj-unsupported)
+			 (string-constant profj-executables-unsupported)
 			 parent))
 	  (define/public (get-one-line-summary) one-line)
           
           (super-instantiate ())))
       
       ;Create the ProfessorJ languages
-      (define full-lang% (java-lang-mixin 'full "Full" 4 "Like Java 1.0 (some 1.1)" #f))
-      (define advanced-lang% (java-lang-mixin 'advanced "Advanced" 3 "Java-like Advanced teaching language" #f))
+      (define full-lang% (java-lang-mixin 'full (string-constant profj-full-lang) 4 (string-constant profj-full-lang-one-line-summary) #f))
+      (define advanced-lang% (java-lang-mixin 'advanced (string-constant profj-advanced-lang) 3 (string-constant profj-advanced-lang-one-line-summary) #f))
       (define intermediate-lang% 
-        (java-lang-mixin 'intermediate "Intermediate" 2 "Java-like Intermediate teaching language" #f))
-      (define beginner-lang% (java-lang-mixin 'beginner "Beginner" 1 "Java-like Beginner teaching language" #f))
-      (define dynamic-lang% (java-lang-mixin 'full "Java+dynamic" 5 "Java with dynamic typing capabilities" #t))
+        (java-lang-mixin 'intermediate (string-constant profj-intermediate-lang) 2 (string-constant profj-intermediate-lang-one-line-summary) #f))
+      (define beginner-lang% (java-lang-mixin 'beginner (string-constant profj-beginner-lang) 1 (string-constant profj-beginner-lang-one-line-summary) #f))
+      (define dynamic-lang% (java-lang-mixin 'full (string-constant profj-dynamic-lang) 5 (string-constant profj-dynamic-lang-one-summary) #t))
       
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;
@@ -767,9 +772,9 @@
       (define (register line)
         (let ([sym (car line)]
               [color (cadr line)])
-          (color-prefs:register-color-pref (short-sym->pref-name sym)
-                                           (short-sym->style-name sym)
-                                           color)))
+          (color-prefs:register-color-preference (short-sym->pref-name sym)
+                                                 (short-sym->style-name sym)
+                                                 color)))
       (for-each register color-prefs-table)
       (for-each register coverage-color-prefs)
       
@@ -778,7 +783,7 @@
         (class* decorated-editor-snip% ()
           (inherit get-admin get-editor)
           (define/public (get-comment) "// ")
-          (define/public (get-mesg) "Convert to text comment")
+          (define/public (get-mesg) (string-constant profj-convert-to-text-comment))
 
           (define/override get-text
             (opt-lambda (offset num [flattened? #t])
@@ -886,7 +891,10 @@
                (let ([c-box (new java-comment-box%)]
                      [text (get-edit-target-object)])
                  (send text insert c-box)
-                 (send text set-caret-owner c-box 'global)))))
+                 (send text set-caret-owner c-box 'global))))
+            (demand-callback
+             (lambda (mi)
+               (send mi enable ((get-edit-target-object) . is-a? . text%)))))
           (register-capability-menu-item 'profj:special:java-comment-box (get-special-menu))
           ))
       
@@ -911,7 +919,7 @@
           (define/override (make-editor) (new ((drscheme:unit:get-program-editor-mixin) color:text%)))
           (define/override (make-snip) (make-object java-interactions-box%))
           (define/override (get-corner-bitmap) ji-gif)
-          (define/override (get-mesg) "Convert to comment")
+          (define/override (get-mesg) (string-constant profj-convert-to-comment))
           (define level 'full)
           (define type-recs (create-type-record))
           (define ret-list? #f)
@@ -1027,7 +1035,8 @@
       [(module name lang (#%plain-module-begin bodies ...))
        (let ([execute-body (if (car (main))
                                `(lambda (x) 
-                                  (display "executing main - ")
+				  (display (string-constant profj-executing-main))
+                                  (display " - ")
                                   (display (,(string->symbol (string-append (cadr (main)) "-main_java.lang.String1")) x)))
                                'void)])
          (with-syntax ([main (datum->syntax-object #f execute-body #f)]) 

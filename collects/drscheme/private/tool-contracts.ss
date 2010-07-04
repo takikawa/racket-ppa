@@ -90,7 +90,7 @@
    "The \\var{input} argument specifies the source of the program."
    ""
    "The \\var{eval-compile-time-part?} argument indicates if"
-   "\\Mzhyperref{\rawscm{expand}}{mz:expansion}"
+   "\\Mzhyperref{\\rawscm{expand}}{mz:expansion}"
    "is called or if"
    "\\scheme|expand-top-level-with-compile-time-evals|"
    "is called when the program is expanded."
@@ -561,10 +561,23 @@
 ;               ;      
 ;               ;      
   
+  
+  (drscheme:rep:get-welcome-delta 
+   (-> (is-a?/c style-delta%))
+   ()
+   "Returns a style delta that matches the style and color of the "
+   "phrase ``Welcome to'' in the beginning of the interactions window.")
+  
+  (drscheme:rep:get-dark-green-delta
+   (-> (is-a?/c style-delta%))
+   ()
+   "Returns a style delta that matches the style and color of the "
+   "name of a language in the interactions window.")
+
   (drscheme:rep:get-drs-bindings-keymap
    (-> (is-a?/c keymap%))
    ()
-   "Returns a keymap that bindings various DrScheme-specific"
+   "Returns a keymap that binds various DrScheme-specific"
    "keybindings. This keymap is used in the definitions"
    "and interactions window."
    ""
@@ -1290,9 +1303,7 @@
    (drscheme:language:simple-settings? . -> . vector?)
    (simple-settings)
    
-   "Constructs a vector whose first index is the symbol"
-   "\\rawscm{'struct:simple-settings}"
-   "and the other elements are the fields of \\var{simple-settings}.")
+   "Constructs a vector whose elements are the fields of \\var{simple-settings}.")
   
   
   ;                                                                   
@@ -1347,46 +1358,7 @@
    "they default to \\scmc{\\#t} \\Symbol{keyword+index} and \\Symbol{exact},"
    "and \\Symbol{all} respectively.")
   
-  ;                                                                  
-  ;                                                                  
-  ;                                                                  
-  ;                             ;                             ;      
-  ;                             ;                             ;      
-  ;   ;                         ;                             ;      
-  ;  ;;;;   ;;;   ;;;     ;;;   ; ;;    ; ;;    ;;;     ;;;   ;   ;  
-  ;   ;    ;   ; ;   ;   ;   ;  ;;  ;   ;;  ;  ;   ;   ;   ;  ;  ;   
-  ;   ;   ;    ;     ;  ;       ;   ;   ;    ;     ;  ;       ; ;    
-  ;   ;   ;;;;;;  ;;;;  ;       ;   ;   ;    ;  ;;;;  ;       ;;;    
-  ;   ;   ;      ;   ;  ;       ;   ;   ;    ; ;   ;  ;       ;  ;   
-  ;   ;    ;     ;   ;   ;   ;  ;   ;   ;;  ;  ;   ;   ;   ;  ;   ;  
-  ;    ;;   ;;;;  ;;;;;   ;;;   ;   ;   ; ;;    ;;;;;   ;;;   ;    ; 
-  ;                                     ;                            
-  ;                                     ;                            
-  ;                                     ;                            
-  
-  (drscheme:teachpack:install-teachpacks
-   (drscheme:teachpack:teachpack-cache? . -> . void?)
-   (teachpack-cache)
-   "Installs the teachpack cache in the current namespace."
-   "Passing \\scheme{'drscheme:teachpacks} to"
-   "@flink preferences:get"
-   "returns the user's currently selected TeachPacks.")
-  
-  (drscheme:teachpack:teachpack-cache?
-   (any/c . -> . boolean?)
-   (val)
-   "Determines if \\var{val} is a teachpack"
-   "cache or not.")
-  
-  (drscheme:teachpack:teachpack-cache-filenames
-   (drscheme:teachpack:teachpack-cache? . -> . (listof path?))
-   (teachpack-cache)
-   "Returns the list of filenames for the teachpacks"
-   "in \\var{teachpack-cache}."
-   ""
-   "See also"
-   "@flink drscheme:teachpack:install-teachpacks %"
-   ".")
+
   
   
   ;                                                     
@@ -1416,7 +1388,6 @@
      (create-executable (any/c
                          (or/c (is-a?/c dialog%) (is-a?/c frame%))
                          path?
-                         drscheme:teachpack:teachpack-cache?
                          . -> .
                          void?))
      (default-settings (-> any/c))
@@ -1424,12 +1395,10 @@
      (order-manuals ((listof bytes?) . -> . (values (listof bytes?) boolean?)))
      (front-end/complete-program (input-port?
                                   any/c
-                                  drscheme:teachpack:teachpack-cache?
                                   . -> .
                                   (-> any/c)))
      (front-end/interaction (input-port?
                              any/c
-                             drscheme:teachpack:teachpack-cache?
                              . -> .
                              (-> any/c)))
      (get-language-name (-> string?))

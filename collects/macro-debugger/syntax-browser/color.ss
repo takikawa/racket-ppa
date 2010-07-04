@@ -45,6 +45,9 @@
         (set! color-partition (send controller get-primary-partition))
         (apply-primary-partition-styles))
 
+      (define/public (get-range) range)
+      (define/public (get-identifier-list) identifier-list)
+
       ;; select-syntax : syntax -> void
       (define/public (select-syntax stx)
         (set! selected-syntax stx)
@@ -125,7 +128,7 @@
             (cond [(< n (length colors))
                    (send delta set-delta-foreground (list-ref colors n))]
                   [else
-                   (send delta set-delta-foreground "gray")
+                   (send delta set-delta-foreground "darkgray")
                    #;(begin (send* delta
                               (set-delta-foreground "white")
                               (set-delta-background "black")))]))

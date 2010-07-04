@@ -1,8 +1,8 @@
 ;;;
 ;;; <qp.ss> ---- Quoted Printable Encoding/Decoding
 ;;;
-;;; Copyright (C) 2002 by PLT. 
-;;; Copyright (C) 2001 by Francisco Solsona. 
+;;; Copyright (C) 2002 by PLT.
+;;; Copyright (C) 2001 by Francisco Solsona.
 ;;;
 ;;; This file is part of mime-plt.
 
@@ -18,7 +18,8 @@
 
 ;;; You should have received a copy of the GNU Lesser General Public
 ;;; License along with mime-plt; if not, write to the Free Software
-;;; Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+;;; Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+;;; 02110-1301 USA.
 
 ;;; Author: Francisco Solsona <solsona@acm.org>
 ;;
@@ -26,14 +27,10 @@
 ;; Commentary:
 
 (module qp mzscheme
-  (require (lib "unitsig.ss"))
+  (require (lib "unit.ss") "qp-sig.ss" "qp-unit.ss")
 
-  (require "qp-sig.ss")
-  (require "qp-unit.ss")
+  (define-values/invoke-unit/infer qp@)
 
-  (define-values/invoke-unit/sig net:qp^
-    net:qp@)
-
-  (provide-signature-elements net:qp^))
+  (provide-signature-elements qp^))
 
 ;;; qp.ss ends here

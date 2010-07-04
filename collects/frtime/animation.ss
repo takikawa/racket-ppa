@@ -99,8 +99,8 @@
         ((draw-ellipse pixmap)
          (make-posn (- (posn-x center) radius)
                     (- (posn-y center) radius))
-         (* 2 radius)
-         (* 2 radius)
+         (max 2 (* 2 radius))
+         (max 2 (* 2 radius))
          color)]
        [($ solid-ellipse ul w h color)
         ((draw-solid-ellipse pixmap) ul w h color)]

@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -15,7 +15,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
   libscheme
   Copyright (c) 1994 Brent Benson
@@ -34,6 +35,7 @@ static Scheme_Object *vector_to_list (int argc, Scheme_Object *argv[]);
 static Scheme_Object *list_to_vector (int argc, Scheme_Object *argv[]);
 static Scheme_Object *vector_fill (int argc, Scheme_Object *argv[]);
 static Scheme_Object *vector_to_immutable (int argc, Scheme_Object *argv[]);
+static Scheme_Object *vector_to_values (int argc, Scheme_Object *argv[]);
 
 static Scheme_Object *zero_length_vector;
 
@@ -104,6 +106,12 @@ scheme_init_vector (Scheme_Env *env)
 			     scheme_make_noncm_prim(vector_to_immutable, 
 						    "vector->immutable-vector", 
 						    1, 1), 
+			     env);
+  scheme_add_global_constant("vector->values", 
+			     scheme_make_prim_w_arity2(vector_to_values, 
+                                                       "vector->values", 
+                                                       1, 3,
+                                                       0, -1), 
 			     env);
 }
 
@@ -208,7 +216,7 @@ vector_length (int argc, Scheme_Object *argv[])
 }
 
 static Scheme_Object *
-bad_index(char *name, Scheme_Object *i, Scheme_Object *vec)
+bad_index(char *name, Scheme_Object *i, Scheme_Object *vec, int bottom)
 {
   int n = SCHEME_VEC_SIZE(vec) - 1;
 
@@ -220,7 +228,7 @@ bad_index(char *name, Scheme_Object *i, Scheme_Object *vec)
 		     "%s: index %s out of range [%d, %d] for vector: %t",
 		     name, 
 		     scheme_make_provided_string(i, 2, NULL), 
-		     0, n,
+		     bottom, n,
 		     vstr, vlen);
   } else
     scheme_raise_exn(MZEXN_FAIL_CONTRACT,
@@ -244,7 +252,7 @@ scheme_checked_vector_ref (int argc, Scheme_Object *argv[])
   i = scheme_extract_index("vector-ref", 1, argc, argv, len, 0);
 
   if (i >= len)
-    return bad_index("vector-ref", argv[1], argv[0]);
+    return bad_index("vector-ref", argv[1], argv[0], 0);
 
   return (SCHEME_VEC_ELS(argv[0]))[i];
 }
@@ -262,7 +270,7 @@ scheme_checked_vector_set(int argc, Scheme_Object *argv[])
   i = scheme_extract_index("vector-set!", 1, argc, argv, len, 0);
 
   if (i >= len)
-    return bad_index("vector-set!", argv[1], argv[0]);
+    return bad_index("vector-set!", argv[1], argv[0], 0);
 
   (SCHEME_VEC_ELS(argv[0]))[i] = argv[2];
 
@@ -362,4 +370,56 @@ static Scheme_Object *vector_to_immutable (int argc, Scheme_Object *argv[])
   SCHEME_SET_IMMUTABLE(vec);
 
   return vec;  
+}
+
+static Scheme_Object *vector_to_values (int argc, Scheme_Object *argv[])
+{
+  Scheme_Thread *p;
+  Scheme_Object *vec, **a;
+  long len, start, finish, i;
+
+  vec = argv[0];
+
+  if (!SCHEME_VECTORP(vec))
+    scheme_wrong_type("vector->values", "vector", 0, argc, argv);
+
+  len = SCHEME_VEC_SIZE(vec);
+
+  if (argc > 1)
+    start = scheme_extract_index("vector->values", 1, argc, argv, len + 1, 0);
+  else
+    start = 0;
+  if (argc > 2)
+    finish = scheme_extract_index("vector->values", 2, argc, argv, len + 1, 0);
+  else
+    finish = len;
+
+  if (!(start <= len)) {
+    bad_index("vector->values", argv[1], vec, 0);
+  }
+  if (!(finish >= start && finish <= len)) {
+    bad_index("vector->values", argv[2], vec, start);
+  }
+
+  len = finish - start;
+  if (len == 1)
+    return SCHEME_VEC_ELS(vec)[start];
+
+  p = scheme_current_thread;
+  if (p->values_buffer && (p->values_buffer_size >= len))
+    a = p->values_buffer;
+  else {
+    a = MALLOC_N(Scheme_Object *, len);
+    p->values_buffer = a;
+    p->values_buffer_size = len;
+  }
+
+  p->ku.multiple.array = a;
+  p->ku.multiple.count = len;
+
+  for (i = 0; i < len; i++) {
+    a[i] = SCHEME_VEC_ELS(vec)[start + i];
+  }
+
+  return SCHEME_MULTIPLE_VALUES;
 }

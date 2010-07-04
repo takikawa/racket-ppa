@@ -14,6 +14,7 @@
     ((symbol) #\i)
     ((constant) #\c)
     ((comment) #\;)
+    ((sexp-comment) #\;)
     ((string) #\s)
     ((parenthesis) #\p)
     ((other) #\o)

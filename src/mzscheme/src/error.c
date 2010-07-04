@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -15,7 +15,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
   libscheme
   Copyright (c) 1994 Brent Benson
@@ -63,7 +64,7 @@ static Scheme_Object *emergency_error_display_proc(int, Scheme_Object *[]);
 static Scheme_Object *def_error_value_string_proc(int, Scheme_Object *[]);
 static Scheme_Object *def_exit_handler_proc(int, Scheme_Object *[]);
 
-static Scheme_Object *do_raise(Scheme_Object *arg, int return_ok, int need_debug);
+static Scheme_Object *do_raise(Scheme_Object *arg, int need_debug);
 
 static Scheme_Object *nested_exn_handler(void *old_exn, int argc, Scheme_Object *argv[]);
 
@@ -606,8 +607,6 @@ scheme_inescapeable_error(const char *a, const char *b)
   scheme_console_output(t, al + bl + 1);
 }
 
-#define RAISE_RETURNED "exception handler did not escape"
-
 static void
 call_error(char *buffer, int len, Scheme_Object *exn)
 {
@@ -631,9 +630,8 @@ call_error(char *buffer, int len, Scheme_Object *exn)
 					scheme_make_pair(v, exn),
 					"nested-exception-handler", 
 					1, 1);
-    config = scheme_extend_config(orig_config,
-				  MZCONFIG_EXN_HANDLER,
-				  v);
+
+    config = orig_config;
     if (SAME_OBJ(display_handler, default_display_handler))
       config = scheme_extend_config(config,
 				    MZCONFIG_ERROR_DISPLAY_HANDLER,
@@ -645,6 +643,7 @@ call_error(char *buffer, int len, Scheme_Object *exn)
     
     scheme_push_continuation_frame(&cframe);
     scheme_install_config(config);
+    scheme_set_cont_mark(scheme_exn_handler_key, v);
     scheme_push_break_enable(&cframe2, 0, 0);
 
     p[0] = scheme_make_immutable_sized_utf8_string(buffer, len);
@@ -656,9 +655,7 @@ call_error(char *buffer, int len, Scheme_Object *exn)
 					scheme_make_pair(v, exn),
 					"nested-exception-handler", 
 					1, 1);
-    config = scheme_extend_config(orig_config,
-				  MZCONFIG_EXN_HANDLER,
-				  v);
+    
     config = scheme_extend_config(config,
 				  MZCONFIG_ERROR_DISPLAY_HANDLER,
 				  default_display_handler);
@@ -670,6 +667,7 @@ call_error(char *buffer, int len, Scheme_Object *exn)
     scheme_pop_continuation_frame(&cframe);
 
     scheme_push_continuation_frame(&cframe);
+    scheme_set_cont_mark(scheme_exn_handler_key, v);
     scheme_install_config(config);
     scheme_push_break_enable(&cframe2, 0, 0);
 
@@ -1325,6 +1323,11 @@ void scheme_read_err(Scheme_Object *port,
 
   show_loc = SCHEME_TRUEP(scheme_get_param(scheme_current_config(), MZCONFIG_ERROR_PRINT_SRCLOC));
 
+  /* Via read/recursive, it's possible that the reader will try to
+     complain about a character that precedes the start of a port.
+     In that case, pos can be 0. */
+  if (!pos) line = col = pos = -1;
+
   if (stxsrc) {
     Scheme_Object *xsrc;
 
@@ -1402,13 +1405,14 @@ const char *scheme_set_stx_string = "set!";
 const char *scheme_var_ref_string = "#%variable-reference";
 const char *scheme_begin_stx_string = "begin";
 
-void scheme_wrong_syntax(const char *where,
-			 Scheme_Object *detail_form,
-			 Scheme_Object *form,
-			 const char *detail, ...)
+static void do_wrong_syntax(const char *where,
+                            Scheme_Object *detail_form,
+                            Scheme_Object *form,
+                            char *s, long slen,
+                            Scheme_Object *extra_sources)
 {
-  long len, slen, vlen, dvlen, blen, plen;
-  char *s, *buffer;
+  long len, vlen, dvlen, blen, plen;
+  char *buffer;
   char *v, *dv, *p;
   Scheme_Object *mod, *nomwho, *who;
   int show_src;
@@ -1417,20 +1421,9 @@ void scheme_wrong_syntax(const char *where,
   nomwho = NULL;
   mod = scheme_false;
 
-  if (!detail) {
+  if (!s) {
     s = "bad syntax";
     slen = strlen(s);
-  } else {
-    GC_CAN_IGNORE va_list args;
-
-    /* Precise GC: Don't allocate before getting hidden args off stack */
-    s = prepared_buf;
-
-    HIDE_FROM_XFORM(va_start(args, detail));
-    slen = sch_vsprintf(s, prepared_buf_len, detail, args);
-    HIDE_FROM_XFORM(va_end(args));
-
-    prepared_buf = init_buf(NULL, &prepared_buf_len);
   }
 
   /* Check for special strings that indicate `form' doesn't have a
@@ -1564,13 +1557,68 @@ void scheme_wrong_syntax(const char *where,
   /* We don't actually use nomwho and mod, anymore. */
 
   if (SCHEME_FALSEP(form))
-    form = scheme_null;
+    form = extra_sources;
   else
-    form = scheme_make_immutable_pair(form, scheme_null);
+    form = scheme_make_immutable_pair(form, extra_sources);
 
   scheme_raise_exn(MZEXN_FAIL_SYNTAX, 
 		   form,
 		   "%t", buffer, blen);
+}
+
+void scheme_wrong_syntax(const char *where,
+			 Scheme_Object *detail_form,
+			 Scheme_Object *form,
+			 const char *detail, ...)
+{
+  char *s;
+  long slen;
+
+  if (!detail) {
+    s = NULL;
+    slen = 0;
+  } else {
+    GC_CAN_IGNORE va_list args;
+
+    /* Precise GC: Don't allocate before getting hidden args off stack */
+    s = prepared_buf;
+
+    HIDE_FROM_XFORM(va_start(args, detail));
+    slen = sch_vsprintf(s, prepared_buf_len, detail, args);
+    HIDE_FROM_XFORM(va_end(args));
+
+    prepared_buf = init_buf(NULL, &prepared_buf_len);
+  }
+
+  do_wrong_syntax(where, detail_form, form, s, slen, scheme_null);
+}
+
+void scheme_wrong_syntax_with_more_sources(const char *where,
+                                           Scheme_Object *detail_form,
+                                           Scheme_Object *form,
+                                           Scheme_Object *extra_sources,
+                                           const char *detail, ...)
+{
+  char *s;
+  long slen;
+
+  if (!detail) {
+    s = NULL;
+    slen = 0;
+  } else {
+    GC_CAN_IGNORE va_list args;
+
+    /* Precise GC: Don't allocate before getting hidden args off stack */
+    s = prepared_buf;
+
+    HIDE_FROM_XFORM(va_start(args, detail));
+    slen = sch_vsprintf(s, prepared_buf_len, detail, args);
+    HIDE_FROM_XFORM(va_end(args));
+
+    prepared_buf = init_buf(NULL, &prepared_buf_len);
+  }
+
+  do_wrong_syntax(where, detail_form, form, s, slen, extra_sources);
 }
 
 void scheme_wrong_rator(Scheme_Object *rator, int argc, Scheme_Object **argv)
@@ -1839,7 +1887,7 @@ static Scheme_Object *do_error(int for_user, int argc, Scheme_Object *argv[])
   newargs[1] = TMP_CMARK_VALUE;
   do_raise(scheme_make_struct_instance(exn_table[for_user ? MZEXN_FAIL_USER : MZEXN_FAIL].type,
 				       2, newargs),
-	   0, 1);
+	   1);
 
   return scheme_void;
 #else
@@ -2236,7 +2284,17 @@ def_error_value_string_proc(int argc, Scheme_Object *argv[])
 
 static Scheme_Object *
 def_error_escape_proc(int argc, Scheme_Object *argv[])
-{
+{  
+  Scheme_Object *prompt;
+  Scheme_Thread *p = scheme_current_thread;
+
+  prompt = scheme_extract_one_cc_mark(NULL, SCHEME_PTR_VAL(scheme_default_prompt_tag));
+
+  if (prompt) {
+    p->cjs.jumping_to_continuation = prompt;
+    p->cjs.num_vals = 1;
+    p->cjs.val = scheme_void_proc;
+  }
   scheme_longjmp(scheme_error_buf, 1);
 
   return scheme_void; /* Never get here */
@@ -2378,7 +2436,7 @@ scheme_raise_exn(int id, ...)
 
   do_raise(scheme_make_struct_instance(exn_table[id].type,
 				       c, eargs),
-	   0, 1);
+	   1);
 #else
   call_error(buffer, alen, scheme_false);
 #endif
@@ -2417,18 +2475,9 @@ def_exn_handler(int argc, Scheme_Object *argv[])
 }
 
 static Scheme_Object *
-exn_handler(int argc, Scheme_Object *argv[])
-{
-  return scheme_param_config("current-exception-handler",
-			     scheme_make_integer(MZCONFIG_EXN_HANDLER),
-			     argc, argv,
-			     1, NULL, NULL, 0);
-}
-
-static Scheme_Object *
 init_exn_handler(int argc, Scheme_Object *argv[])
 {
-  return scheme_param_config("initial-exception-handler",
+  return scheme_param_config("uncaught-exception-handler",
 			     scheme_make_integer(MZCONFIG_INIT_EXN_HANDLER),
 			     argc, argv,
 			     1, NULL, NULL, 0);
@@ -2439,22 +2488,30 @@ nested_exn_handler(void *old_exn, int argc, Scheme_Object *argv[])
 {
   Scheme_Object *arg = argv[0], *orig_arg = SCHEME_CDR((Scheme_Object *)old_exn);
   long len, mlen = -1, orig_mlen = -1, blen;
-  char *buffer, *msg, *orig_msg, *raisetype, *orig_raisetype, *who;
+  char *buffer, *msg, *orig_msg, *raisetype, *orig_raisetype, *who, *sep;
   
   buffer = init_buf(&len, &blen);
-  
-  who = SCHEME_BYTE_STR_VAL(SCHEME_CAR((Scheme_Object *)old_exn));
 
-  if (SCHEME_STRUCTP(arg)
-      && scheme_is_struct_instance(exn_table[MZEXN].type, arg)) {
-    Scheme_Object *str = ((Scheme_Structure *)arg)->slots[0];
-    raisetype = "exception raised";
-    str = scheme_char_string_to_byte_string(str);
-    msg = SCHEME_BYTE_STR_VAL(str);
-    mlen = SCHEME_BYTE_STRLEN_VAL(str);
+  if (SCHEME_FALSEP(SCHEME_CAR((Scheme_Object *)old_exn))) {
+    raisetype = "";
+    sep = "";
+    who = "handler for uncaught exceptions";
+    msg = "did not escape";
   } else {
-    msg = error_write_to_string_w_max(arg, len, NULL);
-    raisetype = "raise called (with non-exception value)";
+    who = SCHEME_BYTE_STR_VAL(SCHEME_CAR((Scheme_Object *)old_exn));
+    sep = " by ";
+
+    if (SCHEME_STRUCTP(arg)
+        && scheme_is_struct_instance(exn_table[MZEXN].type, arg)) {
+      Scheme_Object *str = ((Scheme_Structure *)arg)->slots[0];
+      raisetype = "exception raised";
+      str = scheme_char_string_to_byte_string(str);
+      msg = SCHEME_BYTE_STR_VAL(str);
+      mlen = SCHEME_BYTE_STRLEN_VAL(str);
+    } else {
+      msg = error_write_to_string_w_max(arg, len, NULL);
+      raisetype = "raise called (with non-exception value)";
+    }
   }
 
   if (SCHEME_STRUCTP(orig_arg)
@@ -2470,9 +2527,8 @@ nested_exn_handler(void *old_exn, int argc, Scheme_Object *argv[])
   }
 
 
-  blen = scheme_sprintf(buffer, blen, "%s by %s: %t; original %s: %t",
-			raisetype,
-			who,
+  blen = scheme_sprintf(buffer, blen, "%s%s%s: %t; original %s: %t",
+			raisetype, sep, who,
 			msg, mlen,
 			orig_raisetype,
 			orig_msg, orig_mlen);
@@ -2483,49 +2539,82 @@ nested_exn_handler(void *old_exn, int argc, Scheme_Object *argv[])
 }
 
 static Scheme_Object *
-do_raise(Scheme_Object *arg, int return_ok, int need_debug)
+do_raise(Scheme_Object *arg, int need_debug)
 {
- Scheme_Object *v, *p[1], *h;
- Scheme_Config *config;
- Scheme_Cont_Frame_Data cframe, cframe2;
+  Scheme_Object *v, *p[1], *h, *marks;
+  Scheme_Cont_Mark_Chain *chain;
+  Scheme_Cont_Frame_Data cframe, cframe2;
+  int got_chain;
 
  if (scheme_current_thread->skip_error) {
    scheme_longjmp (scheme_error_buf, 1);
  }
 
  if (need_debug) {
-   Scheme_Object *marks;
    marks = scheme_current_continuation_marks(NULL);
    ((Scheme_Structure *)arg)->slots[1] = marks;
  }
 
- config = scheme_current_config();
- h = scheme_get_param(config, MZCONFIG_EXN_HANDLER);
+ h = scheme_extract_one_cc_mark(NULL, scheme_exn_handler_key);
 
- v = scheme_make_byte_string_without_copying("exception handler");
- v = scheme_make_closed_prim_w_arity(nested_exn_handler,
-				     scheme_make_pair(v, arg),
-				     "nested-exception-handler", 
-				     1, 1);
+ chain = NULL;
+ got_chain = 0;
 
- config = scheme_extend_config(config,
-			       MZCONFIG_EXN_HANDLER,
-			       v);
+ while (1) {
+   if (!h) {
+     h = scheme_get_param(scheme_current_config(), MZCONFIG_INIT_EXN_HANDLER);
+     chain = NULL;
+     got_chain = 1;
+   }
 
- scheme_push_continuation_frame(&cframe);
- scheme_install_config(config);
- scheme_push_break_enable(&cframe2, 0, 0);
+   v = scheme_make_byte_string_without_copying("exception handler");
+   v = scheme_make_closed_prim_w_arity(nested_exn_handler,
+                                       scheme_make_pair(v, arg),
+                                       "nested-exception-handler", 
+                                       1, 1);
 
- p[0] = arg;
- v = scheme_apply(h, 1, (Scheme_Object **)p);
+   scheme_push_continuation_frame(&cframe);
+   scheme_set_cont_mark(scheme_exn_handler_key, v);
+   scheme_push_break_enable(&cframe2, 0, 0);
 
- scheme_pop_break_enable(&cframe2, 0);
- scheme_pop_continuation_frame(&cframe);
+   p[0] = arg;
+   v = scheme_apply(h, 1, p);
 
- if (return_ok)
-   return v;
+   scheme_pop_break_enable(&cframe2, 0);
+   scheme_pop_continuation_frame(&cframe);
 
- call_error(RAISE_RETURNED, -1, scheme_false);
+   /* Getting a value back means that we should chain to the
+      next exception handler; we supply the returned value to
+      the next exception handler (if any). */
+   if (!got_chain) {
+     marks = scheme_all_current_continuation_marks();
+     chain = ((Scheme_Cont_Mark_Set *)marks)->chain;
+     marks = NULL;
+     /* Init chain to position of the handler we just
+        called. */
+     while (chain->key != scheme_exn_handler_key) {
+       chain = chain->next;
+     }
+     got_chain = 1;
+   }
+
+   if (chain) {
+     chain = chain->next;
+     while (chain && (chain->key != scheme_exn_handler_key)) {
+       chain = chain->next;
+     }
+
+     if (!chain)
+       h = NULL; /* use uncaught handler */
+     else
+       h = chain->val;
+     arg = v;
+   } else {
+     /* return from uncaught-exception handler */
+     p[0] = scheme_false;
+     return nested_exn_handler(scheme_make_pair(scheme_false, arg), 1, p);
+   }
+ }
 
  return scheme_void;
 }
@@ -2533,24 +2622,36 @@ do_raise(Scheme_Object *arg, int return_ok, int need_debug)
 static Scheme_Object *
 sch_raise(int argc, Scheme_Object *argv[])
 {
-  return do_raise(argv[0], 0, 0);
+  return do_raise(argv[0], 0);
 }
 
 void scheme_raise(Scheme_Object *exn)
 {
-  do_raise(exn, 0, 0);
+  do_raise(exn, 0);
 }
 
 typedef Scheme_Object (*Scheme_Struct_Field_Guard_Proc)(int argc, Scheme_Object *v);
 
 static Scheme_Object *exn_field_check(int argc, Scheme_Object **argv)
 {
-  if (!SCHEME_IMMUTABLE_CHAR_STRINGP(argv[0]))
-    scheme_wrong_field_type(argv[2], "immutable string", argv[0]);
+  Scheme_Object *a[2], *v;
+
+  if (!SCHEME_CHAR_STRINGP(argv[0]))
+    scheme_wrong_field_type(argv[2], "string", argv[0]);
   if (!SAME_OBJ(argv[1], TMP_CMARK_VALUE) && !SCHEME_CONT_MARK_SETP(argv[1]))
     scheme_wrong_field_type(argv[2], "continuation mark set", argv[1]);
 
-  return scheme_values(2, argv);
+  a[0] = argv[0];
+  a[1] = argv[1];
+  
+  if (!SCHEME_IMMUTABLE_CHAR_STRINGP(a[0])) {
+    v = scheme_make_immutable_sized_char_string(SCHEME_CHAR_STR_VAL(a[0]),
+                                                SCHEME_CHAR_STRLEN_VAL(a[0]),
+                                                1);
+    a[0] = v;
+  }
+
+  return scheme_values(2, a);
 }
 
 static Scheme_Object *variable_field_check(int argc, Scheme_Object **argv)
@@ -2702,15 +2803,9 @@ void scheme_init_exn(Scheme_Env *env)
     }
   }
 
-  scheme_add_global_constant("current-exception-handler",
-			     scheme_register_parameter(exn_handler,
-						       "current-exception-handler",
-						       MZCONFIG_EXN_HANDLER),
-			     env);
-
-  scheme_add_global_constant("initial-exception-handler",
+  scheme_add_global_constant("uncaught-exception-handler",
 			     scheme_register_parameter(init_exn_handler,
-						       "initial-exception-handler",
+						       "uncaught-exception-handler",
 						       MZCONFIG_INIT_EXN_HANDLER),
 			     env);
 
@@ -2731,7 +2826,6 @@ void scheme_init_exn_config(void)
 			       "default-exception-handler",
 			       1, 1);
 
-  scheme_set_root_param(MZCONFIG_EXN_HANDLER, h);
   scheme_set_root_param(MZCONFIG_INIT_EXN_HANDLER, h);
 }
 

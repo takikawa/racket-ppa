@@ -5,7 +5,7 @@
            (prefix srfi: (lib "search.ss" "srfi" "1"))
            ;(lib "math.ss")
            (lib "class.ss")
-           (lib "unitsig.ss")
+           (lib "unit.ss")
            ;(lib "contract.ss")
            (lib "mred.ss" "mred")
            (prefix drscheme:arrow: (lib "arrow.ss" "drscheme"))
@@ -20,9 +20,9 @@
   (provide tool@)
   
   (define tool@
-    (unit/sig drscheme:tool-exports^
+    (unit
       (import drscheme:tool^)
-      
+      (export drscheme:tool-exports^)
       (define phase1 void)
       (define phase2 void)
       
@@ -568,7 +568,7 @@
                 (run-in-evaluation-thread
                  (lambda ()
                    (let ([self (current-thread)]
-                         [oeh (current-exception-handler)]
+                         [oeh (uncaught-exception-handler)]
                          [err-hndlr (error-display-handler)])
                      (error-display-handler
                       (lambda (msg exn)
@@ -589,7 +589,7 @@
                        (lambda (ccm kind info)
                          (let* ([debug-marks (continuation-mark-set->list ccm debug-key)])
                            (send parent suspend oeh (cons info debug-marks) kind)))))
-                     (current-exception-handler
+                     (uncaught-exception-handler
                       (lambda (exn)
                         (if (and (exn:break? exn) (send parent suspend-on-break?))
                             (let ([marks (exn-continuation-marks exn)]
@@ -597,8 +597,8 @@
                               (thread (lambda ()
                                         (raise
                                          (make-exn:break
-                                          (string->immutable-string
-                                           (format "~a (suspending)" (exn-message exn)))
+                                          (format "~a (suspending)"
+                                                  (exn-message exn))
                                           marks
                                           cont))))
                               (send parent suspend oeh (continuation-mark-set->list marks debug-key) 'break)

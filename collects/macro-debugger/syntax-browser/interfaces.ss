@@ -1,7 +1,7 @@
 
 (module interfaces mzscheme
   (require (lib "class.ss")
-           (lib "unitsig.ss"))
+           (lib "unit.ss"))
   (provide (all-defined))
 
   ;; Signatures
@@ -55,10 +55,6 @@
     (;; syntax-widget%
      syntax-widget%))
 
-  (define-signature implementation^
-    ([unit widget : widget^]
-     [unit snip : snip^]))
-  
   ;; Class Interfaces
 
   ;; syntax-controller<%>
@@ -118,6 +114,14 @@
     (interface ()
       select-syntax
       apply-styles))
+
+  ;; syntax-sharing-context<%>
+  ;; A syntax-sharing-context<%> 
+  ;; Syntax snips search their enclosing editors for instances of sharing contexts
+  (define syntax-sharing-context<%>
+    (interface ()
+      ;; get-shared-partition
+      get-shared-partition))
 
   ;;----------
   

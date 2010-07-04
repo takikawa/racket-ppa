@@ -1,26 +1,20 @@
 
-(module finder mzscheme
+(module finder (lib "a-unit.ss")
   (require (lib "string-constant.ss" "string-constants")
-           (lib "unitsig.ss")
 	   "sig.ss"
-	   "../gui-utils.ss"
-           (lib "class.ss")
+           "../preferences.ss"
 	   (lib "mred-sig.ss" "mred")
 	   (lib "string.ss")
-	   (lib "list.ss")
 	   (lib "file.ss")
 	   (lib "etc.ss"))
 
-  (provide finder@)
 
-  (define finder@
-    (unit/sig framework:finder^
-      (import mred^
-              [preferences : framework:preferences^]
-	      [keymap : framework:keymap^])
+  (import mred^
+          [prefix keymap: framework:keymap^])
 
-      (rename [-put-file put-file]
-	      [-get-file get-file])
+  (export (rename framework:finder^
+                  [-put-file put-file]
+                  [-get-file get-file]))
 
       (define dialog-parent-parameter (make-parameter #f))
 
@@ -68,24 +62,24 @@
                      #f]
                     [else f]))))))
 
-      (define (*get-file style)
-	(opt-lambda ([directory #f]
-		     [prompt (string-constant select-file)]
-		     [filter #f]
-		     [filter-msg (string-constant file-wrong-form)]
-		     [parent-win (dialog-parent-parameter)])
-	  (let ([f (get-file prompt parent-win directory #f #f style)])
-	    (and f (or (not filter) (filter-match? filter f filter-msg))
-                 (let ([f (normalize-path f)])
-                   (cond [(directory-exists? f)
-                          (message-box (string-constant error)
-                                       (string-constant that-is-dir-name))
-                          #f]
-                         [(not (file-exists? f))
-                          (message-box (string-constant error) 
-                                       (string-constant file-dne))
-                          #f]
-                         [else f]))))))
+  (define (*get-file style)
+    (opt-lambda ([directory #f]
+                 [prompt (string-constant select-file)]
+                 [filter #f]
+                 [filter-msg (string-constant file-wrong-form)]
+                 [parent-win (dialog-parent-parameter)])
+      (let ([f (get-file prompt parent-win directory #f #f style)])
+        (and f (or (not filter) (filter-match? filter f filter-msg))
+             (let ([f (normalize-path f)])
+               (cond [(directory-exists? f)
+                      (message-box (string-constant error)
+                                   (string-constant that-is-dir-name))
+                      #f]
+                     [(not (file-exists? f))
+                      (message-box (string-constant error) 
+                                   (string-constant file-dne))
+                      #f]
+                     [else f]))))))
 
       ;; external interfaces to file functions
 
@@ -97,13 +91,13 @@
 
       (define -put-file
 	(λ args
-	  (apply (case (preferences:get 'framework:file-dialogs)
+          (apply (case (preferences:get 'framework:file-dialogs)
                    [(std) std-put-file]
                    [(common) common-put-file])
                  args)))
       (define -get-file
 	(λ args
-	  (apply (case (preferences:get 'framework:file-dialogs)
+          (apply (case (preferences:get 'framework:file-dialogs)
 		   [(std) std-get-file]
 		   [(common) common-get-file])
-                 args))))))
+                 args))))

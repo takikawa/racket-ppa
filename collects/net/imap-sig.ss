@@ -1,44 +1,37 @@
+(module imap-sig (lib "a-signature.ss")
+  imap-port-number
+  imap-connection?
 
+  imap-connect imap-connect*
+  imap-disconnect
+  imap-force-disconnect
+  imap-reselect
+  imap-examine
+  imap-noop
+  imap-status
+  imap-poll
 
-(module imap-sig mzscheme
-  (require (lib "unitsig.ss"))
+  imap-new?
+  imap-messages
+  imap-recent
+  imap-uidnext
+  imap-uidvalidity
+  imap-unseen
+  imap-reset-new!
 
-  (provide net:imap^)
-  (define-signature net:imap^
-    (imap-port-number
-     imap-connection?
+  imap-get-expunges
+  imap-pending-expunges?
+  imap-get-updates
+  imap-pending-updates?
 
-     imap-connect imap-connect*
-     imap-disconnect
-     imap-force-disconnect
-     imap-reselect
-     imap-examine
-     imap-noop
-     imap-status
-     imap-poll
-     
-     imap-new?
-     imap-messages
-     imap-recent
-     imap-uidnext
-     imap-uidvalidity
-     imap-unseen
-     imap-reset-new!
+  imap-get-messages
+  imap-copy imap-append
+  imap-store imap-flag->symbol symbol->imap-flag
+  imap-expunge
 
-     imap-get-expunges
-     imap-pending-expunges?
-     imap-get-updates
-     imap-pending-updates?
+  imap-mailbox-exists?
+  imap-create-mailbox
 
-     imap-get-messages
-     imap-copy imap-append
-     imap-store imap-flag->symbol symbol->imap-flag
-     imap-expunge
-     
-     imap-mailbox-exists?
-     imap-create-mailbox
-
-     imap-list-child-mailboxes
-     imap-mailbox-flags
-     imap-get-hierarchy-delimiter)))
-
+  imap-list-child-mailboxes
+  imap-mailbox-flags
+  imap-get-hierarchy-delimiter)

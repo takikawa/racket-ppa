@@ -3,7 +3,7 @@
  * Purpose:     wxMediaPasteboard implementation
  * Author:      Matthew Flatt
  * Created:     1995
- * Copyright:   (c) 2004-2006 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2007 PLT Scheme Inc.
  * Copyright:   (c) 1995, Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -18,7 +18,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
  */
 
@@ -950,7 +951,10 @@ Bool wxMediaPasteboard::_Delete(wxSnip *del_snip,
       snip->flags += wxSNIP_CAN_DISOWN;
       SnipSetAdmin(snip, NULL);
       snip->flags -= wxSNIP_CAN_DISOWN;
-
+      if (!del)
+        if (!snip->GetAdmin())
+          snip->flags -= wxSNIP_OWNED;
+      
       if (!modified)
 	SetModified(TRUE);
 
@@ -1550,7 +1554,7 @@ void wxMediaPasteboard::Draw(wxDC *dc, double dx, double dy,
     if (bgColor == wxWHITE)
       wb = whiteBrush;
     else
-      wb = wxTheBrushList->FindOrCreateBrush("WHITE", wxSOLID);
+      wb = wxTheBrushList->FindOrCreateBrush(bgColor, wxSOLID);
     dc->SetBrush(wb);
     dc->SetPen(invisiPen);
     dc->DrawRectangle(dcx, dcy,
@@ -1713,9 +1717,8 @@ void wxMediaPasteboard::Refresh(double localx, double localy, double w, double h
     wxBrush *brush;
     wxFont *font;
     wxColour *fg, *bg;
-#ifndef NO_GET_CLIPPING_REGION
+    int bgmode;
     wxRegion *rgn;
-#endif
 
     pen = dc->GetPen();
     brush = dc->GetBrush();
@@ -1727,23 +1730,21 @@ void wxMediaPasteboard::Refresh(double localx, double localy, double w, double h
       clr = dc->GetTextBackground();
       bg = new WXGC_PTRS wxColour(clr);
     }
+    bgmode = dc->GetBackgroundMode();
     
-#ifndef NO_GET_CLIPPING_REGION
     rgn = dc->GetClippingRegion();
     dc->SetClippingRect(localx - dx, localy - dy, w, h);
-#endif
 
     Draw(dc, -dx, -dy, localx, localy, w, h, show_caret, bgColor);
 
-#ifndef NO_GET_CLIPPING_REGION
     dc->SetClippingRegion(rgn);
-#endif
 
     dc->SetBrush(brush);
     dc->SetPen(pen);
     dc->SetFont(font);
     dc->SetTextForeground(fg);
     dc->SetTextBackground(bg);
+    dc->SetBackgroundMode(bgmode);
   }
 
   EndSequenceLock();
@@ -2566,8 +2567,6 @@ int wxMediaPasteboard::InsertPort(Scheme_Object *f, int WXUNUSED(format), Bool r
 Bool wxMediaPasteboard::InsertFile(const char *who, Scheme_Object *f, const char *filename, 
 				   Bool clearStyles, Bool showErrors)
 {
-  int n;
-  char buffer[MRED_START_STR_LEN + 1];
   Bool fileerr;
 
   if (userLocked || writeLocked)
@@ -2575,9 +2574,7 @@ Bool wxMediaPasteboard::InsertFile(const char *who, Scheme_Object *f, const char
 
   showErrors = TRUE;
 
-  n = scheme_get_byte_string(who, f, buffer, 0, MRED_START_STR_LEN, 0, 0, NULL);
-  buffer[MRED_START_STR_LEN] = 0;
-  if ((n != MRED_START_STR_LEN) || strcmp(buffer, MRED_START_STR)) {
+  if (!wxDetectWXMEFile(who, f, 0)) {
     if (showErrors)
       wxmeError("insert-file in pasteboard%: not a MrEd editor<%> file");
     fileerr = TRUE;

@@ -3,14 +3,14 @@
 ; Calls `exit' when done.
 
 (module setup-unit mzscheme
-  (require (lib "unitsig.ss")
-	   (lib "unit.ss")
+  (require (lib "unit.ss")
 	   (lib "file.ss")
 	   (lib "list.ss")
 	   (lib "cm.ss")
 	   (lib "port.ss")
            (lib "match.ss")
            (lib "planet-archives.ss" "planet")
+           (lib "planet-shared.ss" "planet" "private")
            
 	   "option-sig.ss"
 	   (lib "sig.ss" "compiler")
@@ -23,12 +23,12 @@
   
   (provide setup@)
   
-  (define setup@
-    (unit/sig ()
+  (define-unit setup@
       (import setup-option^
 	      compiler^
-	      (compiler:option : compiler:option^)
+	      (prefix compiler:option: compiler:option^)
 	      launcher^)
+      (export)
       
       (define setup-fprintf
 	(lambda (p s . args)
@@ -38,7 +38,10 @@
 	(lambda (s . args)
 	  (apply setup-fprintf (current-output-port) s args)))
       
-      (setup-printf "Setup version is ~a" (version))
+      (setup-printf "Setup version is ~a [~a]" (version) (system-type 'gc))
+      (setup-printf "Available variants:~a" (apply string-append
+                                                   (map (lambda (s) (format " ~a" s))
+                                                        (available-mzscheme-variants))))
       (setup-printf "Main collection path is ~a" (find-collects-dir))
       (setup-printf "Collection search path is ~a" (if (null? (current-library-collection-paths))
 						       "empty!"
@@ -82,6 +85,10 @@
 			   (current-target-plt-directory-getter)))
 	      (archives))))
       
+      ;; specific-planet-dir ::=
+      ;;    - (list path[directory] string[owner] string[package-name] (listof string[extra package path]) Nat[maj] Nat[min]), or
+      ;;    - (list string[owner] string[package-name] string[maj as string] string[min as string])
+      ;; x-specific-planet-dir ::= (listof specific-planet-dir)
       (define x-specific-planet-dirs (specific-planet-dirs))
       
       (define (done)
@@ -144,9 +151,24 @@
       ;; returns the non-false elements of l in order
       (define (remove-falses l) (filter (lambda (x) x) l))
       
+      ;; planet-spec->planet-list : (list string string nat nat) -> (list path string string (listof string) nat nat) | #f
+      ;; converts a planet package spec into the information needed to create a cc structure
+      (define (planet-spec->planet-list spec)
+        (match spec
+          [(owner pkg-name maj-str min-str)
+           (let ([maj (string->number maj-str)]
+                 [min (string->number min-str)])
+             (unless maj (error 'setup-plt "Bad major version for PLaneT package: ~e" maj-str))
+             (unless min (error 'setup-plt "Bad minor version for PLaneT package: ~e" min-str))
+             (let ([pkg (lookup-package-by-keys owner pkg-name maj min min)])
+               (if pkg
+                   pkg
+                   (error 'setup-plt "Not an installed PLaneT package: (~e ~e ~e ~e)" owner pkg-name maj min))))]
+          [_ spec]))
+      
       (define (planet->cc path owner pkg-file extra-path maj min)
         (unless (path? path)
-            (error 'path->cc "non-path when building package ~a" pkg-file))
+          (error 'planet->cc "non-path when building package ~e" pkg-file))
         (let/ec return
           (let* ([info (with-handlers ([exn:fail? (warning-handler #f)])
                          (get-info/full path))]
@@ -154,11 +176,10 @@
                                   (lambda (x)
                                     (when x
                                       (unless (string? x)
-                                        (error 
-                                         (format 
-                                          "'name' result from directory ~s is not a string:"
-                                          path)
-                                         x)))))])
+                                        (error 'planet->cc
+                                               "'name' result from directory ~e is not a string: ~e"
+                                               path
+                                               x)))))])
             (make-cc
              #f
              path
@@ -192,7 +213,7 @@
          (map (lambda (spec) (apply planet->cc spec))
               (if (and (null? x-specific-collections) (null? x-specific-planet-dirs))
                   (get-all-planet-packages)
-                  x-specific-planet-dirs))))
+                  (remove-falses (map planet-spec->planet-list x-specific-planet-dirs))))))
       
       (define collections-to-compile
 	(sort
@@ -767,9 +788,10 @@
 								 (path-replace-suffix (or mzll mzln) #""))))])
                                     (unless (up-to-date? p aux)
                                       (setup-printf "Installing ~a~a launcher ~a"
-                                                    kind (if (eq? (current-launcher-variant) 'normal)
-                                                             ""
-                                                             (current-launcher-variant))
+                                                    kind (let ([v (current-launcher-variant)])
+                                                           (if (eq? v (system-type 'gc))
+                                                               ""
+                                                               (format " ~a" v)))
                                                     (path->string p))
                                       (make-launcher
                                        (or mzlf
@@ -828,4 +850,4 @@
           (read-line))
         (exit 1))
       
-      (exit 0))))
+      (exit 0)))

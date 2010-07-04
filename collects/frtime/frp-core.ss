@@ -24,11 +24,11 @@
   (define frtime-version "0.3b -- Tue Nov 9 13:39:45 2004")
   
   (define (compose-continuation-mark-sets2 s1 s2)
-    s2)
+    (append s1 s2))
   
   
-  
-  
+  (define (my-ccm)
+    (continuation-mark-set->list (current-continuation-marks) 'drscheme-debug-continuation-mark-key))
   
   ;;;;;;;;;;;;;;;;
   ;; Structures ;;
@@ -65,7 +65,7 @@
                     (lambda (fn . args)
                       (unregister #f fn) ; clear out stale dependencies from previous apps
                       (let* (; revisit error-reporting for switched behaviors
-                             [ccm (current-continuation-marks)]
+                             [ccm (my-ccm)]
                              [app-fun (lambda (cur-fn)
                                         (let ([res (apply cur-fn args)])
                                           (when (signal? res)
@@ -85,41 +85,42 @@
   (define-syntax signal
     (let ([field-name-symbols (list 'value 'dependents 'stale? 'thunk
                                     'depth 'continuation-marks 'parameterization
-                                    'producers)])
+                                    'producers)]
+          [cert (syntax-local-certifier #t)])
       (list-immutable
-       ((syntax-local-certifier) #'struct:signal)
-       ((syntax-local-certifier) #'make-signal)
-       ((syntax-local-certifier) #'signal?)
+       (cert #'struct:signal)
+       (cert #'make-signal)
+       (cert #'signal?)
        (apply list-immutable
               (map
                (lambda (fd)
-                 ((syntax-local-certifier) (datum->syntax-object
-                                            #'here
-                                            (string->symbol (format "signal-~a" fd)))))
+                 (cert (datum->syntax-object
+                        #'here
+                        (string->symbol (format "signal-~a" fd)))))
                (reverse field-name-symbols)))
        (apply list-immutable
               (map
                (lambda (fd)
-                 ((syntax-local-certifier) (datum->syntax-object
-                                            #'here
-                                            (string->symbol (format "set-signal-~a!" fd)))))
+                 (cert (datum->syntax-object
+                        #'here
+                        (string->symbol (format "set-signal-~a!" fd)))))
                (reverse field-name-symbols)))
        #t)))
   
-  (define (signal-custodians sig)
+  (define (signal-custodian sig)
     (call-with-parameterization
      (signal-parameterization sig)
-     current-custs))
+     current-cust))
   
-  (define-struct ft-cust (signal constructed-sigs))
+  (define-struct ft-cust (signal constructed-sigs children))
   ;(define-struct non-scheduled (signal))
   (define make-non-scheduled identity)
   (define (non-scheduled? x) #f)
   (define (non-scheduled-signal x)
     (error 'non-scheduled-signal "should never be called"))
   
-  (define current-custs
-    (make-parameter empty))
+  (define current-cust
+    (make-parameter #f))
   
   (define-struct multiple (values) frtime-inspector)
   
@@ -152,8 +153,8 @@
                                      "extra marks present!" (extra-cont-marks)))))
           (compose-continuation-mark-sets2
            (extra-cont-marks)
-           (current-continuation-marks)))
-        (current-continuation-marks)))
+           (my-ccm)))
+        (my-ccm)))
   
   ;; Simple Structure Combinators
   
@@ -175,55 +176,53 @@
   
   (define (build-signal ctor thunk producers)
     (let ([ccm (effective-continuation-marks)])
+      ;(printf "*")
       (do-in-manager
-       (let* ([custs (current-custs)]
-              [cust-sigs (map ft-cust-signal custs)]
+       (let* ([cust (current-cust)]
+              [cust-sig (and cust (ft-cust-signal cust))]
               [sig (ctor
                     undefined empty #t thunk
-                    (add1 (apply max 0 (append (map safe-signal-depth producers)
-                                               (map safe-signal-depth cust-sigs))))
+                    (add1 (apply max 0 (cons (safe-signal-depth cust-sig) (map safe-signal-depth producers))))
                     ccm
-                    (parameterize ([current-exception-handler
+                    (parameterize ([uncaught-exception-handler
                                     (lambda (exn) (exn-handler exn))]
                                    [extra-cont-marks ccm])
                       (current-parameterization))
-                    (append cust-sigs producers))])
+                    (if cust-sig (append producers (list cust-sig)) producers))])
          ;(printf "~a custodians~n" (length custs))
          (when (cons? producers)
            (register sig producers))
-         (when (cons? cust-sigs)
-           (register (make-non-scheduled sig) cust-sigs))
-         (for-each (lambda (g) (set-ft-cust-constructed-sigs!
-                                g (cons (make-weak-box sig) (ft-cust-constructed-sigs g))))
-                   custs)
+         (when cust-sig
+           (register (make-non-scheduled sig) cust-sig))
+         (when cust
+           (set-ft-cust-constructed-sigs! cust (cons (make-weak-box sig) (ft-cust-constructed-sigs cust))))
          (iq-enqueue sig)
          sig))))
   
   (define (proc->signal:switching thunk current-box trigger . producers)
     (let ([ccm (effective-continuation-marks)])
       (do-in-manager
-       (let* ([custs (current-custs)]
-              [cust-sigs (map ft-cust-signal custs)]
+       (let* ([cust (current-cust)]
+              [cust-sig (and cust (ft-cust-signal cust))]
               [sig (make-signal:switching
                     undefined empty #t thunk
-                    (add1 (apply max 0 (append (map safe-signal-depth producers)
-                                               (map safe-signal-depth cust-sigs))))
+                    (add1 (apply max 0 (cons (safe-signal-depth cust-sig) (map safe-signal-depth producers))))
                     ccm
-                    (parameterize ([current-exception-handler
+                    (parameterize ([uncaught-exception-handler
                                     (lambda (exn) (exn-handler exn))]
                                    [extra-cont-marks ccm])
                       (current-parameterization))
-                    (append cust-sigs producers)
+                    (if cust-sig (cons cust-sig producers) producers)
                     current-box
                     trigger)])
          ;(printf "~a custodians~n" (length custs))
          (when (cons? producers)
            (register sig producers))
-         (when (cons? cust-sigs)
-         (register (make-non-scheduled sig) cust-sigs))
-         (for-each (lambda (g) (set-ft-cust-constructed-sigs!
-                                g (cons (make-weak-box sig) (ft-cust-constructed-sigs g))))
-                   custs)
+         (when cust-sig
+           (register (make-non-scheduled sig) cust-sig))
+         (when cust
+           (set-ft-cust-constructed-sigs!
+            cust (cons (make-weak-box sig) (ft-cust-constructed-sigs cust))))
          (iq-enqueue sig)
          sig))))
     
@@ -237,8 +236,8 @@
   (define (procs->signal:compound ctor mutate! . args)
     (let ([ccm (effective-continuation-marks)])
       (do-in-manager
-       (let* ([custs (current-custs)]
-              [cust-sigs (map ft-cust-signal custs)]
+       (let* ([cust (current-cust)]
+              [cust-sig (and cust (ft-cust-signal cust))]
               [value (apply ctor (map value-now/no-copy args))]
               #;[mutators
                  (foldl
@@ -267,24 +266,22 @@
                                           undefined
                                           val)))
                               val)))
-                      (add1 (apply max 0 (append (map safe-signal-depth args)
-                                                 (map safe-signal-depth cust-sigs))))
+                      (add1 (apply max 0 (cons (safe-signal-depth cust-sig) (map safe-signal-depth args))))
                       ccm
-                      (parameterize ([current-exception-handler
+                      (parameterize ([uncaught-exception-handler
                                       (lambda (exn) (exn-handler exn))]
                                      [extra-cont-marks ccm])
                         (current-parameterization))
-                      (append cust-sigs args)
+                      (if cust-sig (cons cust-sig args) args)
                       (apply ctor args)
                       (lambda () (apply ctor (map value-now args))))])
          ;(printf "mutators = ~a~n" mutators)
          (when (cons? args)
            (register sig args))
-         (when (cons? cust-sigs)
-           (register (make-non-scheduled sig) cust-sigs))
-         (for-each (lambda (g) (set-ft-cust-constructed-sigs!
-                                g (cons (make-weak-box sig) (ft-cust-constructed-sigs g))))
-                   custs)
+         (when cust-sig
+           (register (make-non-scheduled sig) cust-sig))
+         (when cust
+           (set-ft-cust-constructed-sigs! cust (cons (make-weak-box sig) (ft-cust-constructed-sigs cust))))
          (iq-enqueue sig)
          ;(printf "~n*made a compound [~a]*~n~n" (value-now/no-copy sig))
          sig))))
@@ -407,7 +404,7 @@
     (set-signal-value! sig 'dead)
     (set-signal-dependents! sig empty)
     (set-signal-producers! sig empty)
-    (for-each
+    #;(for-each
      (lambda (c)
        (set-ft-cust-constructed-sigs!
         c
@@ -611,21 +608,33 @@
                  dependents))]
        [_ (void)])))
   
+  (define (cust-killall! cust)
+    (let loop ([sigs (ft-cust-constructed-sigs cust)])
+      (when (cons? sigs)
+        (cond
+          [(weak-box-value (first sigs)) => kill-signal]
+          [else (void)])
+        (loop (rest sigs))))
+    (for-each cust-killall! (ft-cust-children cust)))
+  
   (define (super-lift fun bhvr)
     (if (behavior? bhvr)
         (parameterize ([extra-cont-marks
                         (effective-continuation-marks)])
           (do-in-manager
-           (let* ([cust (make-ft-cust (void) empty)]
-                  [custs (cons cust (current-custs))]
+           (let* ([cust (make-ft-cust (void) empty empty)]
+                  [_ (when (current-cust) (set-ft-cust-children! (current-cust) (cons cust (ft-cust-children (current-cust)))))]
                   [pfun (lambda (b)
-                          (parameterize ([current-custs custs])
+                          (parameterize ([current-cust cust])
                             (fun b)))]
                   [current (box undefined)])
              (letrec ([custodian-signal
                        (proc->signal:unchanged
                         (lambda ()
-                          (for-each kill-signal
+                          (cust-killall! cust)
+                          (set-ft-cust-constructed-sigs! cust empty)
+                          (set-ft-cust-children! cust empty)
+                          #;(for-each kill-signal
                                     (filter identity
                                             (map weak-box-value (ft-cust-constructed-sigs cust))))
                           (unregister rtn (unbox current))
@@ -642,7 +651,6 @@
                (set-ft-cust-signal! cust custodian-signal)
                rtn))))
         (fun bhvr)))
-  
   
   (define (propagate b)
     (let ([empty-boxes 0]
@@ -678,7 +686,12 @@
        (let ([new-value (call-with-parameterization
                          params
                          thunk)])
-         (if (or (signal:unchanged? b) (not (eq? value new-value)))
+         (if (or (signal:unchanged? b)
+                 (not (or (boolean? new-value)
+                          (symbol? new-value)
+                          (number? new-value)
+                          (string? new-value)))
+                 (not (eq? value new-value)))
            (begin
              #;(if (signal? new-value)
                  (raise (make-exn:fail
@@ -757,7 +770,7 @@
                                 (undef cur-beh)
                                 #;(kill-signal cur-beh)))
                             (outer))])
-           (set! exn-handler (current-exception-handler))
+           ;; (set! exn-handler (current-exception-handler)) <-- FIXME!
            (let inner ()
              
              ;; process external messages until there is an internal update

@@ -3,7 +3,7 @@
  * Purpose:     MrEd main file, including a hodge-podge of global stuff
  * Author:      Matthew Flatt
  * Created:     1995
- * Copyright:   (c) 2004-2006 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2007 PLT Scheme Inc.
  * Copyright:   (c) 1995-2000, Matthew Flatt
  */
 
@@ -61,15 +61,6 @@ extern "C" { typedef int (*ACTUAL_MAIN_PTR)(int argc, char **argv); }
 /* Hack: overwrite "y" with "n" in binary to disable checking for another
    instance of the same app. */
 char *check_for_another = "yes, please check for another";
-#endif
-
-#if defined(_IBMR2)
-static void dangerdanger(int)
-{
-  char *s = "mred: Danger - paging space low\n";
-  write(2, s, strlen(s));
-  scheme_collect_garbage();
-}
 #endif
 
 static void yield_indefinitely()
@@ -173,23 +164,6 @@ static void interrupt(int)
 #endif
 #endif
 
-#if defined(_IBMR2)
-static int danger_signal_received;
-static void dangerdanger_gui(int)
-{
-  if (danger_signal_received) {
-    fprintf(stderr, "mred: Danger - paging space STILL low - exiting\n");
-    exit(-1);
-  } else {
-    fprintf(stderr, "mred: Danger - paging space low\n");
-    scheme_collect_garbage();
-    danger_signal_received = 1;
-  }
-  
-  signal(SIGDANGER, dangerdanger_gui);
-}
-#endif
-
 static FinishArgs *xfa;
 
 static void do_graph_repl(Scheme_Env *env)
@@ -202,7 +176,7 @@ static void do_graph_repl(Scheme_Env *env)
   p->error_buf = &newbuf;
 
   if (!scheme_setjmp(newbuf)) {
-    if (xfa->alternate_rep)
+    if (xfa->a->alternate_rep)
       scheme_eval_string("(read-eval-print-loop)", env);
     else
       scheme_eval_string("(graphical-read-eval-print-loop)", env);
@@ -226,7 +200,7 @@ static int do_main_loop(FinishArgs *fa)
   xfa = fa;
 
 #ifdef wx_mac
-  if (!fa->no_front) {
+  if (!fa->a->no_front) {
     ProcessSerialNumber psn;
     GetCurrentProcess(&psn);    
     SetFrontProcess(&psn); /* kCurrentProcess doesn't work */
@@ -278,24 +252,16 @@ int main(int argc, char *argv[])
 
   stack_start = (void *)&stack_start;
 
-#if defined(MZ_PRECISE_GC)
-# ifndef wx_msw
-  stack_start = (void *)&__gc_var_stack__;
-  GC_init_type_tags(_scheme_last_type_, scheme_pair_type, scheme_weak_box_type, scheme_ephemeron_type, scheme_rt_weak_array);
-# endif
-  /* For Windows, WinMain inits the type tags. */
-#endif
-
   /* Set stack base and turn off auto-finding of static variables ---
      unless this is Windows, where scheme_set_stack_base
      is called by wxWindows. */
 #ifndef wx_msw
+# if defined(MZ_PRECISE_GC)
+  stack_start = (void *)&__gc_var_stack__;
+# endif
   scheme_set_stack_base(stack_start, 1);
 #endif
 
-#if defined(_IBMR2)
-  signal(SIGDANGER, dangerdanger_gui);
-#endif
 #ifdef wx_x
 # if INTERRUPT_CHECK_ON
   signal(SIGINT, interrupt);

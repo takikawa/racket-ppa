@@ -19,7 +19,7 @@ LIBS = @LIBS@
 
 DEF_COLLECTS_DIR = +D INITIAL_COLLECTS_DIRECTORY='"'"`cd $(srcdir)/../../../collects; pwd`"'"'
 
-XFORM_SETUP = ../mzscheme -rq $(srcdir)/xform.ss --setup
+XFORM_SETUP = ../mzscheme@CGC@ -rq $(srcdir)/xform.ss --setup
 XFORM_NOPRECOMP = $(XFORM_SETUP) --cpp "$(CPP) $(CPPFLAGS)" -o
 XSRCDIR = xsrc
 XFORM = env XFORM_USE_PRECOMP=$(XSRCDIR)/precomp.h $(XFORM_NOPRECOMP)
@@ -121,7 +121,8 @@ XFORMDEP_NOPRECOMP = $(srcdir)/gc2.h $(srcdir)/xform.ss $(srcdir)/xform-mod.ss
 XFORMDEP = $(XFORMDEP_NOPRECOMP) $(XSRCDIR)/precomp.h
 
 $(XSRCDIR)/precomp.h : $(XFORMDEP_NOPRECOMP) $(srcdir)/precomp.c $(srcdir)/../src/schpriv.h $(srcdir)/../include/scheme.h \
-                       $(srcdir)/../sconfig.h $(srcdir)/../uconfig.h $(srcdir)/../src/schvers.h
+                       $(srcdir)/../sconfig.h $(srcdir)/../uconfig.h $(srcdir)/../src/schvers.h $(srcdir)/../src/schemef.h \
+                       $(srcdir)/../src/stypes.h 
 	env XFORM_PRECOMP=yes $(XFORM_NOPRECOMP) $(XSRCDIR)/precomp.h $(srcdir)/precomp.c
 
 $(XSRCDIR)/salloc.c: ../src/salloc.@LTO@ $(XFORMDEP)
@@ -288,9 +289,10 @@ main.@LTO@: $(XSRCDIR)/main.c
 	$(CC) $(CFLAGS) -c $(XSRCDIR)/main.c -o main.@LTO@
 
 gc2.@LTO@: $(srcdir)/gc2.c $(srcdir)/newgc.c $(srcdir)/compact.c $(srcdir)/newgc.c $(srcdir)/gc2.h \
-       $(srcdir)/vm_osx.c $(srcdir)/vm_mmap.c $(srcdir)/vm_osk.c $(srcdir)/alloc_cache.c \
+       $(srcdir)/vm_osx.c $(srcdir)/vm_mmap.c $(srcdir)/vm_osk.c $(srcdir)/vm.c\
+       $(srcdir)/vm_memalign.c $(srcdir)/alloc_cache.c \
        $(srcdir)/page_range.c $(srcdir)/protect_range.c $(srcdir)/var_stack.c $(srcdir)/stack_comp.c \
-       $(srcdir)/../utils/splay.c $(srcdir)/my_qsort.c \
+       $(srcdir)/../utils/splay.c $(srcdir)/my_qsort.c $(srcdir)/backtrace.c \
        $(srcdir)/weak.c $(srcdir)/fnls.c $(srcdir)/../include/scheme.h $(srcdir)/../src/schpriv.h
 	$(CC) $(CFLAGS) -c $(srcdir)/gc2.c -o gc2.@LTO@
 
@@ -305,8 +307,8 @@ EXTRA_OBJS_L = ../src/gmp.@LTO@ @FOREIGN_OBJSLIB_IF_USED@
 	$(AR) $(ARFLAGS) ../libmzscheme3m.@LIBSFX@ $(OBJS) $(EXTRA_OBJS_L)
 	$(RANLIB) ../libmzscheme3m.@LIBSFX@
 
-../mzscheme3m@NOT_OSX@: main.@LTO@ ../libmzscheme3m.@LIBSFX@
-	cd ..; @MZLINKER@ -o mzscheme3m @PROFFLAGS@ gc2/main.@LTO@ libmzscheme3m.@LIBSFX@ @LDFLAGS@ $(LIBS)
+../mzscheme@MMM@@NOT_OSX@: main.@LTO@ ../libmzscheme3m.@LIBSFX@
+	cd ..; @MZLINKER@ -o mzscheme@MMM@ @PROFFLAGS@ gc2/main.@LTO@ libmzscheme3m.@LIBSFX@ @LDFLAGS@ $(LIBS)
 # The above "cd .." prevents a problem with libtool's generated script in --enable-shared mode,
 #  at least for Mac OS X. Beware of changing LIBS or LDFLAGS to inclucde something with a relative
 #  path.
@@ -319,15 +321,15 @@ $(MZFWMMM): ../libmzscheme3m.@LIBSFX@
 	rm -f PLT_MzScheme.framework/PLT_MzScheme
 	ln -s Versions/$(FWVERSION)_3m/PLT_MzScheme PLT_MzScheme.framework/PLT_MzScheme	
 
-../mzscheme3m@OSX@: $(MZFWMMM) main.@LTO@
-	$(CC) -o ../mzscheme3m @PROFFLAGS@ main.@LTO@ -Wl,-headerpad_max_install_names -F. -framework PLT_MzScheme
+../mzscheme@MMM@@OSX@: $(MZFWMMM) main.@LTO@
+	$(CC) -o ../mzscheme@MMM@ @PROFFLAGS@ main.@LTO@ -Wl,-headerpad_max_install_names -F. -framework PLT_MzScheme
 	mkdir -p "../PLT_MzScheme.framework/Versions/$(FWVERSION)_3m"
 	cp "PLT_MzScheme.framework/Versions/$(FWVERSION)_3m/PLT_MzScheme" "../PLT_MzScheme.framework/Versions/$(FWVERSION)_3m/PLT_MzScheme"
-	/usr/bin/install_name_tool -change "PLT_MzScheme.framework/Versions/$(FWVERSION)_3m/PLT_MzScheme" "@executable_path/PLT_MzScheme.framework/Versions/$(FWVERSION)_3m/PLT_MzScheme" "../mzscheme3m"
+	/usr/bin/install_name_tool -change "PLT_MzScheme.framework/Versions/$(FWVERSION)_3m/PLT_MzScheme" "@executable_path/PLT_MzScheme.framework/Versions/$(FWVERSION)_3m/PLT_MzScheme" "../mzscheme@MMM@"
 
 
 clean:
-	/bin/rm -f ../mzscheme3m *.@LTO@ $(XSRCDIR)/*
+	/bin/rm -f ../mzscheme@MMM@ *.@LTO@ $(XSRCDIR)/*
 	/bin/rm -rf PLT_MzScheme.framework
 
 #--------------------------------------------------

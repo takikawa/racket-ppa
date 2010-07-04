@@ -35,7 +35,7 @@ static int page_size; /* OS page size */
 int fd, fd_created;
 #endif
 
-inline static void *find_cached_pages(size_t len, size_t alignment);
+inline static void *find_cached_pages(size_t len, size_t alignment, int dirty_ok);
 static void free_actual_pages(void *p, size_t len, int zeroed);
 
 /* Instead of immediately freeing pages with munmap---only to mmap
@@ -48,7 +48,7 @@ static void free_actual_pages(void *p, size_t len, int zeroed);
    mechanism, but we do a bit of work to collapse adjacent pages in
    the cache. */
 
-static void *malloc_pages(size_t len, size_t alignment)
+static void *do_malloc_pages(size_t len, size_t alignment, int dirty_ok)
 {
   void *r;
   size_t extra = 0;
@@ -70,7 +70,7 @@ static void *malloc_pages(size_t len, size_t alignment)
     len += page_size - (len & (page_size - 1));
 
   /* Something from the cache, perhaps? */
-  r = find_cached_pages(len, alignment);
+  r = find_cached_pages(len, alignment, dirty_ok);
   if (r)
     return r;
 
@@ -116,6 +116,16 @@ static void *malloc_pages(size_t len, size_t alignment)
   return r;
 }
 
+static void *malloc_pages(size_t len, size_t alignment)
+{
+  return do_malloc_pages(len, alignment, 0);
+}
+
+static void *malloc_dirty_pages(size_t len, size_t alignment)
+{
+  return do_malloc_pages(len, alignment, 1);
+}
+
 static void system_free_pages(void *p, size_t len)
 {
   if (munmap(p, len)) {
@@ -136,25 +146,4 @@ static void protect_pages(void *p, size_t len, int writeable)
 
 /*************************************************************/
 
-#ifndef DONT_NEED_MAX_HEAP_SIZE
-
-# include <sys/time.h>
-# include <sys/resource.h>
-# include <unistd.h>
-
-typedef unsigned long size_type;
-
-static size_type determine_max_heap_size(void) 
-{
-  struct rlimit rlim;
-
-# ifdef OS_X
-  getrlimit(RLIMIT_RSS, &rlim);
-# else  
-  getrlimit(RLIMIT_DATA, &rlim);
-# endif
-
-  return (rlim.rlim_cur == RLIM_INFINITY) ? (1024 * 1024 * 1024) : rlim.rlim_cur;
-}
-
-#endif
+# include "rlimit_heapsize.c"

@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	
- * Copyright:	(c) 2004-2006 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2007 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  */
 
@@ -75,7 +75,7 @@ class wxbFrame: public wxWindow
   virtual void SetStatusText(char *text, int number = 0) = 0;
   virtual Bool StatusLineExists(void);
 
-  void Centre(int direction = wxBOTH);
+  void Centre(int direction = wxBOTH, wxWindow *parent = NULL);
 
   // Iconize
   virtual void Iconize(Bool iconize) = 0;

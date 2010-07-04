@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2006 PLT Scheme Inc.
+  Copyright (c) 2007 PLT Scheme Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -14,7 +14,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 */
 
 /*
@@ -107,6 +108,8 @@ static void *call_original_binary_arith_for_branch_code;
 static void *call_original_binary_rev_arith_for_branch_code;
 static void *bad_car_code, *bad_cdr_code;
 static void *bad_caar_code, *bad_cdar_code, *bad_cadr_code, *bad_cddr_code;
+static void *bad_set_car_code, *bad_set_cdr_code;
+static void *bad_unbox_code;
 static void *vector_ref_code, *vector_ref_check_index_code, *vector_set_code, *vector_set_check_index_code;
 static void *string_ref_code, *string_ref_check_index_code, *string_set_code, *string_set_check_index_code;
 static void *bytes_ref_code, *bytes_ref_check_index_code, *bytes_set_code, *bytes_set_check_index_code;
@@ -120,6 +123,7 @@ static void *struct_pred_branch_code;
 static void *struct_get_code;
 static void *bad_app_vals_target;
 static void *app_values_slow_code, *app_values_multi_slow_code, *app_values_tail_slow_code;
+static void *finish_tail_call_code, *finish_tail_call_fixup_code;
 
 typedef struct {
   MZTAG_IF_REQUIRED
@@ -511,30 +515,6 @@ Scheme_Object *scheme_make_native_closure(Scheme_Native_Closure_Data *code)
 Scheme_Object *scheme_make_native_case_closure(Scheme_Native_Closure_Data *code)
 {
   return do_make_native_closure(code, -(code->closure_size + 1));
-}
-
-static void box_multiple_array_element(int pos)
-{
-  Scheme_Thread *p = scheme_current_thread;
-  Scheme_Object **naya, **a;
-  int i;
-
-  a = p->ku.multiple.array;
-  if (SAME_OBJ(a, p->values_buffer))
-    p->values_buffer = NULL;
-
-  naya = MALLOC_N(Scheme_Object *, p->ku.multiple.count);
-  
-  for (i = p->ku.multiple.count; i--; ) {
-    naya[i] = a[i];
-  }
-  {
-    Scheme_Object *eb;
-    eb = scheme_make_envunbox(naya[pos]);
-    naya[pos] = eb;
-  }
-  
-  p->ku.multiple.array = naya;
 }
 
 static void call_set_global_bucket(Scheme_Bucket *b, Scheme_Object *val, int set_undef)
@@ -1280,7 +1260,9 @@ static int generate_direct_prim_tail_call(mz_jit_state *jitter, int num_rands)
 }
 
 static int generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_native, int need_set_rs)
-/* If num_rands < 0, then argc is in LOCAL2 and arguments are already below RUNSTACK_BASE */
+/* If num_rands < 0, then argc is in LOCAL2 and arguments are already below RUNSTACK_BASE.
+   If direct_native == 2, then some arguments are already in place (shallower in the runstack
+   than the arguments to move). */
 {
   int i;
   GC_CAN_IGNORE jit_insn *ref, *ref2, *ref4, *ref5;
@@ -1389,6 +1371,23 @@ static int generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_na
   } else {
     mz_get_local_p(JIT_R0, JIT_LOCAL2);    
   }
+  /* Since we've overwritten JIT_RUNSTACK, if this is not shared
+     code, and if this is 3m, then the runstack no longer
+     has a pointer to the closure for this code. To ensure that
+     an appropriate return point exists, jump to static code
+     for the rest. (This is the slow path, anyway.) */
+   __END_SHORT_JUMPS__(num_rands < 100);
+   if (direct_native > 1) {
+     (void)jit_jmpi(finish_tail_call_fixup_code);
+   } else {
+     (void)jit_jmpi(finish_tail_call_code);
+   }
+
+   return 1;
+}
+
+static int generate_finish_tail_call(mz_jit_state *jitter, int direct_native)
+{
   mz_prepare(3);
   CHECK_LIMIT();
   jit_pusharg_p(JIT_RUNSTACK);
@@ -1399,13 +1398,12 @@ static int generate_tail_call(mz_jit_state *jitter, int num_rands, int direct_na
   } else {
     (void)mz_finish(_scheme_tail_apply_from_native);
   }
+  CHECK_LIMIT();
   /* Pop saved runstack val and return: */
   mz_get_local_p(JIT_NOT_RET, JIT_LOCAL1);
   jit_sti_p(&scheme_current_runstack, JIT_NOT_RET);
   mz_pop_locals();
   jit_ret();
-
-  __END_SHORT_JUMPS__(num_rands < 100);
 
   return 1;
 }
@@ -1901,7 +1899,9 @@ static int generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
     if ((num_rands >= ((Scheme_Primitive_Proc *)rator)->mina)
 	&& ((num_rands <= ((Scheme_Primitive_Proc *)rator)->mu.maxa)
 	    || (((Scheme_Primitive_Proc *)rator)->mina < 0))
-	&& is_noncm(rator, jitter, 0, 0))
+	&& (is_noncm(rator, jitter, 0, 0)
+            /* It's also ok to directly call `values' if multiple values are ok: */
+            || (multi_ok && SAME_OBJ(rator, scheme_values_func))))
       direct_prim = 1;
   } else {
     Scheme_Type t;
@@ -2088,6 +2088,7 @@ static int generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
   END_JIT_DATA(20);
 
   if (num_rands >= MAX_SHARED_CALL_RANDS) {
+    LOG_IT(("<-many args\n"));
     if (is_tail) {
       if (direct_prim) {
         generate_direct_prim_tail_call(jitter, num_rands);
@@ -2115,9 +2116,11 @@ static int generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
       }
       code = shared_tail_code[dp][num_rands];
       if (direct_self) {
+        LOG_IT(("<-self\n"));
 	generate_self_tail_call(rator, jitter, num_rands, code, args_already_in_place);
 	CHECK_LIMIT();
       } else {
+        LOG_IT(("<-tail\n"));
         if (args_already_in_place) {
           jit_movi_l(JIT_R2, args_already_in_place);
           mz_set_local_p(JIT_R2, JIT_LOCAL2);
@@ -2132,6 +2135,7 @@ static int generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
 	code = generate_shared_call(num_rands, jitter, multi_ok, is_tail, direct_prim, direct_native);
 	shared_non_tail_code[dp][num_rands][mo] = code;
       }
+      LOG_IT(("<-non-tail %d %d %d\n", dp, num_rands, mo));
       code = shared_non_tail_code[dp][num_rands][mo];
 
       (void)jit_calli(code);
@@ -2754,6 +2758,9 @@ static int generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
   } else if (IS_NAMED_PRIM(rator, "vector?")) {
     generate_inlined_type_test(jitter, app, scheme_vector_type, scheme_vector_type, for_branch, branch_short);
     return 1;
+  } else if (IS_NAMED_PRIM(rator, "box?")) {
+    generate_inlined_type_test(jitter, app, scheme_box_type, scheme_box_type, for_branch, branch_short);
+    return 1;
   } else if (IS_NAMED_PRIM(rator, "string?")) {
     generate_inlined_type_test(jitter, app, scheme_char_string_type, scheme_char_string_type, for_branch, branch_short);
     return 1;
@@ -2843,6 +2850,34 @@ static int generate_inlined_unary(mz_jit_state *jitter, Scheme_App2_Rec *app, in
       }
       __END_SHORT_JUMPS__(1);
 
+      return 1;
+    } else if (IS_NAMED_PRIM(rator, "unbox")) {
+      GC_CAN_IGNORE jit_insn *reffail, *ref;
+
+      LOG_IT(("inlined unbox\n"));
+
+      mz_runstack_skipped(jitter, 1);
+
+      generate_non_tail(app->rand, jitter, 0, 1);
+      CHECK_LIMIT();
+
+      mz_runstack_unskipped(jitter, 1);
+
+      __START_SHORT_JUMPS__(1);
+      ref = jit_bmci_ul(jit_forward(), JIT_R0, 0x1);
+      __END_SHORT_JUMPS__(1);
+
+      reffail = _jit.x.pc;
+      (void)jit_jmpi(bad_unbox_code);
+
+      __START_SHORT_JUMPS__(1);
+      mz_patch_branch(ref);
+      jit_ldxi_s(JIT_R1, JIT_R0, &((Scheme_Object *)0x0)->type);
+      (void)jit_bnei_i(reffail, JIT_R1, scheme_box_type);
+      __END_SHORT_JUMPS__(1);
+
+      (void)jit_ldxi_p(JIT_R0, JIT_R0, &SCHEME_BOX_VAL(0x0));
+      
       return 1;
     } else if (IS_NAMED_PRIM(rator, "syntax-e")) {
       LOG_IT(("inlined syntax-e\n"));
@@ -3234,6 +3269,43 @@ static int generate_inlined_binary(mz_jit_state *jitter, Scheme_App3_Rec *app, i
 	mz_runstack_unskipped(jitter, 1);
 
       return 1;
+    } else if (IS_NAMED_PRIM(rator, "set-car!")
+               || IS_NAMED_PRIM(rator, "set-cdr!")) {
+      GC_CAN_IGNORE jit_insn *reffail, *ref;
+      int set_car;
+
+      set_car = IS_NAMED_PRIM(rator, "set-car!");
+
+      LOG_IT(("inlined set-car!\n"));
+
+      generate_two_args(app->rand1, app->rand2, jitter, 1);
+      CHECK_LIMIT();
+
+      __START_SHORT_JUMPS__(1);
+      ref = jit_bmci_ul(jit_forward(), JIT_R0, 0x1);
+      reffail = _jit.x.pc;
+      __END_SHORT_JUMPS__(1);
+      if (set_car)
+        (void)jit_jmpi(bad_set_car_code);
+      else
+        (void)jit_jmpi(bad_set_cdr_code);
+      __START_SHORT_JUMPS__(1);
+      mz_patch_branch(ref);
+      jit_ldxi_s(JIT_R2, JIT_R0, &((Scheme_Object *)0x0)->type);
+      (void)jit_bnei_i(reffail, JIT_R2, scheme_pair_type);
+      jit_ldxi_s(JIT_R2, JIT_R0, &(MZ_OPT_HASH_KEY((Scheme_Inclhash_Object *)0x0)));
+      (void)jit_bmsi_ul(reffail, JIT_R2, 0x1);
+      __END_SHORT_JUMPS__(1);
+      CHECK_LIMIT();
+
+      if (set_car)
+        (void)jit_stxi_p(&((Scheme_Simple_Object *)0x0)->u.pair_val.car, JIT_R0, JIT_R1);
+      else
+        (void)jit_stxi_p(&((Scheme_Simple_Object *)0x0)->u.pair_val.cdr, JIT_R0, JIT_R1);
+      
+      (void)jit_movi_p(JIT_R0, scheme_void);
+
+      return 1;
     } else if (IS_NAMED_PRIM(rator, "cons")) {
       LOG_IT(("inlined cons\n"));
 
@@ -3419,7 +3491,8 @@ static void ensure_closure_native(Scheme_Closure_Data *data,
 }
 
 static int generate_closure(Scheme_Closure_Data *data, 
-			    mz_jit_state *jitter)
+			    mz_jit_state *jitter,
+                            int immediately_filled)
 {
   Scheme_Native_Closure_Data *code;
   int retptr;
@@ -3438,7 +3511,11 @@ static int generate_closure(Scheme_Closure_Data *data,
     jit_movi_l(JIT_R0, sz);
     mz_prepare(1);
     jit_pusharg_l(JIT_R0);
-    (void)mz_finish(GC_malloc_one_small_dirty_tagged);
+    if (immediately_filled) {
+      (void)mz_finish(GC_malloc_one_small_dirty_tagged);
+    } else {
+      (void)mz_finish(GC_malloc_one_small_tagged);
+    }
     jit_retval(JIT_R0);
     retptr = mz_retain(code);
     init_word = *(long *)&example_so;
@@ -3566,7 +3643,7 @@ static int generate_case_closure(Scheme_Object *obj, mz_jit_state *jitter)
       o = (Scheme_Object *)((Scheme_Closure *)o)->code;
     data = (Scheme_Closure_Data *)o;
     mz_pushr_p(JIT_R1);
-    generate_closure(data, jitter);
+    generate_closure(data, jitter, 1);
     CHECK_LIMIT();
     generate_closure_fill(data, jitter);
     CHECK_LIMIT();
@@ -3626,6 +3703,9 @@ static int generate_non_tail(Scheme_Object *obj, mz_jit_state *jitter, int multi
       if (mark_pos_ends)
 	generate_non_tail_mark_pos_prefix(jitter);
       jit_ldi_p(JIT_R2, &scheme_current_cont_mark_stack);
+      /* mark stack is an integer... turn it into a pointer */
+      jit_lshi_l(JIT_R2, JIT_R2, 0x1);
+      jit_ori_l(JIT_R2, JIT_R2, 0x1);
       mz_pushr_p(JIT_R2);
       CHECK_LIMIT();
     }
@@ -3647,6 +3727,7 @@ static int generate_non_tail(Scheme_Object *obj, mz_jit_state *jitter, int multi
     }
     if (need_ends) {
       mz_popr_p(JIT_R2);
+      jit_rshi_l(JIT_R2, JIT_R2, 0x1); /* pointer back to integer */
       jit_sti_p(&scheme_current_cont_mark_stack, JIT_R2);
       if (mark_pos_ends)
 	generate_non_tail_mark_pos_suffix(jitter);
@@ -4045,74 +4126,11 @@ static int generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int m
 	  END_JIT_DATA(8);
 	}
 	break;
-      case BOXVAL_EXPD:
-	{
-	  Scheme_Object *p, *v;
-	  int pos, cnt;
-	  START_JIT_DATA();
-
-	  LOG_IT(("boxval\n"));
-
-	  p = (Scheme_Object *)SCHEME_IPTR_VAL(obj);
-	  v = SCHEME_CAR(p);
-	  pos = SCHEME_INT_VAL(v);
-	  p = SCHEME_CDR(p);
-	  v = SCHEME_CAR(p);
-	  cnt = SCHEME_INT_VAL(v);
-	  p = SCHEME_CDR(p);
-
-	  /* cnt is expected number of returns, and it will be
-	     consistent with multi_ok; do something only if the actual
-	     count is the same as cnt */
-
-	  generate_non_tail(p, jitter, cnt != 1, 1);
-	  CHECK_LIMIT();
-
-	  JIT_UPDATE_THREAD_RSPTR_IF_NEEDED();
-
-	  if (cnt != 1) {
-	    jit_insn *ref, *ref2, *ref3;
-
-	    __START_SHORT_JUMPS__(1);
-	    ref = jit_bnei_p(jit_forward(), JIT_R0, SCHEME_MULTIPLE_VALUES);
-	    /* Handle multiple values: */
-	    jit_ldi_p(JIT_R2, &scheme_current_thread);
-	    jit_ldxi_l(JIT_R1, JIT_R2, &((Scheme_Thread *)0x0)->ku.multiple.count);	  
-	    ref3 = jit_bnei_p(jit_forward(), JIT_R1, cnt);
-	    CHECK_LIMIT();
-	    /* Received results match expected results */
-	    (void)jit_movi_i(JIT_R0, pos);
-	    mz_prepare(1);
-	    jit_pusharg_p(JIT_R0);
-	    (void)mz_finish(box_multiple_array_element);
-	    CHECK_LIMIT();
-	    (void)jit_movi_p(JIT_R0, SCHEME_MULTIPLE_VALUES);
-
-	    /* Jump over single-value handling: */
-	    ref2 = jit_jmpi(jit_forward());
-	    CHECK_LIMIT();
-
-	    /* Handle single value: */
-	    mz_patch_branch(ref);
-	    mz_prepare(1);
-	    jit_pusharg_p(JIT_R0);
-	    (void)mz_finish(scheme_make_envunbox);
-	    CHECK_LIMIT();
-	    jit_retval(JIT_R0);
-	    mz_patch_ucbranch(ref2);
-	    mz_patch_branch(ref3);
-	    CHECK_LIMIT();
-	    __END_SHORT_JUMPS__(1);
-	  } else {
-	    mz_prepare(1);
-	    jit_pusharg_p(JIT_R0);
-	    (void)mz_finish(scheme_make_envunbox);
-	    jit_retval(JIT_R0);
-	  }
-
-	  END_JIT_DATA(9);
-	}
-	break;
+      case SPLICE_EXPD:
+        {
+          scheme_signal_error("cannot JIT a top-level splice form");
+        }
+        break;
       default:
 	{
 	  JIT_UPDATE_THREAD_RSPTR_IF_NEEDED();
@@ -4317,7 +4335,7 @@ static int generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int m
       LOG_IT(("lambda\n"));
       
       /* Allocate closure */
-      generate_closure(data, jitter);
+      generate_closure(data, jitter, 1);
       CHECK_LIMIT();
 
       generate_closure_fill(data, jitter);
@@ -4453,7 +4471,7 @@ static int generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int m
       /* Create unfinished closures */
       for (i = 0; i < l->count; i++) {
 	((Scheme_Closure_Data *)l->procs[i])->context = (Scheme_Object *)l;
-	generate_closure((Scheme_Closure_Data *)l->procs[i], jitter);
+	generate_closure((Scheme_Closure_Data *)l->procs[i], jitter, i + 1 == l->count);
 	CHECK_LIMIT();
 	jit_stxi_p(WORDS_TO_BYTES(i), JIT_RUNSTACK, JIT_R0);
       }
@@ -4775,23 +4793,20 @@ static int do_generate_common(mz_jit_state *jitter, void *_data)
   /* Save global array: */
   mz_set_local_p(JIT_V1, JIT_LOCAL3);
 #endif
-  /* Compute i in JIT_V1: */
-  jit_subr_p(JIT_V1, JIT_R1, JIT_R2);
-  jit_subi_p(JIT_V1, JIT_V1, WORDS_TO_BYTES(1));
-  CHECK_LIMIT();
-  /* Load car & cdr of elements at p: */
-  jit_ldxi_p(JIT_R2, JIT_R0, &SCHEME_CAR((Scheme_Object *)0x0));
-  jit_ldxi_p(JIT_R0, JIT_R0, &SCHEME_CDR((Scheme_Object *)0x0));
-  jit_ldxr_p(JIT_R0, JIT_R0, JIT_V1);
   /* Move R1 to V1 to save it: */
   jit_movr_p(JIT_V1, JIT_R1);
-  /* Call scheme_add_rename: */
+  /* Compute i in JIT_R1: */
+  jit_subr_p(JIT_R1, JIT_R1, JIT_R2);
+  jit_subi_p(JIT_R1, JIT_R1, WORDS_TO_BYTES(1));
+  jit_rshi_ul(JIT_R1, JIT_R1, JIT_LOG_WORD_SIZE);
+  CHECK_LIMIT();
+  /* Call scheme_delayed_rename: */
   JIT_UPDATE_THREAD_RSPTR();
   CHECK_LIMIT();
   mz_prepare(2);
-  jit_pusharg_p(JIT_R2);
+  jit_pusharg_l(JIT_R1);
   jit_pusharg_p(JIT_R0);
-  (void)mz_finish(scheme_add_rename);
+  (void)mz_finish(scheme_delayed_rename);
   CHECK_LIMIT();
   jit_retval(JIT_R0);
   /* Restore global array into JIT_R1, and put computed element at i+p+1: */
@@ -4863,6 +4878,45 @@ static int do_generate_common(mz_jit_state *jitter, void *_data)
     }
     CHECK_LIMIT();
   }
+
+  /* *** bad_set_{car,cdr}_code *** */
+  /* Bad argument is in R0, other is in R1 */
+  for (i = 0; i < 2; i++) {
+    switch (i) {
+    case 0:
+      bad_set_car_code = jit_get_ip().ptr;
+      break;
+    case 1:
+      bad_set_cdr_code = jit_get_ip().ptr;
+      break;
+    }
+    jit_subi_p(JIT_RUNSTACK, JIT_RUNSTACK, WORDS_TO_BYTES(2));
+    jit_str_p(JIT_RUNSTACK, JIT_R0);
+    jit_stxi_p(WORDS_TO_BYTES(1), JIT_RUNSTACK, JIT_R1);
+    JIT_UPDATE_THREAD_RSPTR();
+    CHECK_LIMIT();
+    jit_movi_i(JIT_R1, 2);
+    jit_prepare(2);
+    jit_pusharg_p(JIT_RUNSTACK);
+    jit_pusharg_i(JIT_R1);
+    switch (i) {
+    case 0:
+      (void)mz_finish(scheme_checked_set_car);
+      break;
+    case 1:
+      (void)mz_finish(scheme_checked_set_cdr);
+      break;
+    }
+    CHECK_LIMIT();
+  }
+
+  /* *** bad_unbox_code *** */
+  /* R0 is argument */
+  bad_unbox_code = jit_get_ip().ptr;
+  jit_prepare(1);
+  jit_pusharg_i(JIT_R0);
+  (void)mz_finish(scheme_unbox);
+  CHECK_LIMIT();
 
   /* *** call_original_unary_arith_code *** */
   /* R0 is arg, R2 is code pointer, V1 is return address */
@@ -4993,6 +5047,31 @@ static int do_generate_common(mz_jit_state *jitter, void *_data)
   jit_ret();
   CHECK_LIMIT();
 
+  /* *** app_values_tail_slow_code *** */
+  /* RELIES ON jit_prolog(3) FROM ABOVE */
+  /* Rator in V1, arguments are in thread's multiple-values cells. */
+  app_values_tail_slow_code = jit_get_ip().ptr;
+  JIT_UPDATE_THREAD_RSPTR();
+  mz_prepare(1);
+  jit_pusharg_p(JIT_V1);
+  (void)mz_finish(tail_call_with_values_from_multiple_result);
+  jit_retval(JIT_R0);
+  /* Pop saved runstack val and return: */
+  mz_get_local_p(JIT_NOT_RET, JIT_LOCAL1);
+  jit_sti_p(&scheme_current_runstack, JIT_NOT_RET);
+  mz_pop_locals();
+  jit_ret();  
+  CHECK_LIMIT();
+
+  /* *** finish_tail_call_[fixup_]code *** */
+  /* RELIES ON jit_prolog(3) FROM ABOVE */
+  finish_tail_call_code = jit_get_ip().ptr;
+  generate_finish_tail_call(jitter, 0);
+  CHECK_LIMIT();
+  finish_tail_call_fixup_code = jit_get_ip().ptr;
+  generate_finish_tail_call(jitter, 2);
+  CHECK_LIMIT();
+
   /* *** get_stack_pointer_code *** */
   get_stack_pointer_code = jit_get_ip().ptr;
   jit_leaf(0);
@@ -5065,21 +5144,6 @@ static int do_generate_common(mz_jit_state *jitter, void *_data)
     mz_epilog(JIT_R1);
     CHECK_LIMIT();
   }
-
-  /* *** app_values_tail_slow_code *** */
-  /* Rator in V1, arguments are in thread's multiple-values cells. */
-  app_values_tail_slow_code = jit_get_ip().ptr;
-  JIT_UPDATE_THREAD_RSPTR();
-  mz_prepare(1);
-  jit_pusharg_p(JIT_V1);
-  (void)mz_finish(tail_call_with_values_from_multiple_result);
-  jit_retval(JIT_R0);
-  /* Pop saved runstack val and return: */
-  mz_get_local_p(JIT_NOT_RET, JIT_LOCAL1);
-  jit_sti_p(&scheme_current_runstack, JIT_NOT_RET);
-  mz_pop_locals();
-  jit_ret();  
-  CHECK_LIMIT();
 
   /* *** {vector,string,bytes}_{ref,set}_[check_index_]code *** */
   /* R0 is vector/string/bytes, R1 is index (Scheme number in check-index mode), 
@@ -6352,6 +6416,55 @@ Scheme_Object *scheme_native_stack_trace(void)
   return first;
 }
 
+#if 0
+/* Sometimes useful for debugging MzScheme: */
+void scheme_dump_stack_trace(void)
+{
+  void *p, *q;
+  unsigned long stack_end, stack_start;
+  Get_Stack_Proc gs;
+  Scheme_Object *name;
+
+  gs = (Get_Stack_Proc)get_stack_pointer_code;
+  p = gs();
+  stack_start = scheme_approx_sp();
+
+  stack_end = (unsigned long)ADJUST_STACK_START(scheme_current_thread->stack_start);
+
+  while (STK_COMP((unsigned long)p, stack_end)
+	 && STK_COMP(stack_start, (unsigned long)p)) {
+    q = ((void **)p)[RETURN_ADDRESS_OFFSET];
+
+    name = find_symbol((unsigned long)q);
+    if (SCHEME_FALSEP(name)) {
+      /* Code uses special calling convention */
+#ifdef MZ_USE_JIT_PPC
+      /* JIT_LOCAL2 has the next return address */
+      q = ((void **)p)[JIT_LOCAL2 >> JIT_LOG_WORD_SIZE];
+#endif
+#ifdef MZ_USE_JIT_I386
+      /* Push after local stack of return-address proc
+	 has the next return address */
+      q = *(void **)p;
+      q = ((void **)q)[-(3 + LOCAL_FRAME_SIZE + 1)];
+#endif
+      name = find_symbol((unsigned long)q);
+    }
+
+    if (name) {
+      printf(" scheme\n");
+    } else {
+      printf(" %p\n", q);
+    }
+
+    q = *(void **)p;
+    if (STK_COMP((unsigned long)q, (unsigned long)p))
+      break;
+    p = q;
+  }
+}
+#endif
+
 #ifdef MZ_XFORM
 START_XFORM_SKIP;
 #endif
@@ -6400,6 +6513,7 @@ void scheme_clean_native_symtab(void)
 {
 #ifndef MZ_PRECISE_GC
   clear_symbols_for_collected();
+  jit_notify_freed_code();
 #endif
 }
 
@@ -6414,6 +6528,7 @@ static void release_native_code(void *fnlized, void *p)
   add_symbol((unsigned long)p, (unsigned long)p + SCHEME_INT_VAL(len), NULL, 0);
   /* Free memory: */
   free(p);
+  jit_notify_freed_code();
 }
 #endif
 

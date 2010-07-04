@@ -1,7 +1,7 @@
 /*
   SenoraGC, a relatively portable conservative GC for a slightly
     cooperative environment
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 1996-98 Matthew Flatt
   All rights reserved.
 
@@ -17,7 +17,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
   After Boehm et al.
 

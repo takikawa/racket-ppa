@@ -761,7 +761,7 @@
 			    [(fields) (cdddr defined-names)]
 			    [(wrap) (if gen-expr? (lambda (x) (cons 'list-immutable x)) values)]
 			    [(total-wrap) (if gen-expr?
-					      (lambda (x) `(let ([,cert-id (syntax-local-certifier)]) ,x))
+					      (lambda (x) `(let ([,cert-id (syntax-local-certifier #t)]) ,x))
 					      values)])
 		 (total-wrap
 		  (wrap
@@ -1554,9 +1554,13 @@
 			    #f
 			    (lambda (r)
 			      (let ([l (hash-table-get ht (syntax-e r) null)])
-				(unless (and (pair? l)
-					     (ormap (lambda (i) (bound-identifier=? i r)) l))
-				  (hash-table-put! ht (syntax-e r) (cons r l)))))))])
+                                (let ([pr (and (pair? l)
+                                               (ormap (lambda (i) 
+                                                        (and (bound-identifier=? (car i) r) i))
+                                                      l))])
+                                  (if pr
+                                      (set-cdr! pr (cons r (cdr pr)))
+                                      (hash-table-put! ht (syntax-e r) (cons (cons r (list r)) l))))))))])
       (if proto-r
 	  `(lambda (r)
 	     ,(let ([main (let ([build (apply-to-r l)])
@@ -1578,8 +1582,12 @@
 		      ;; This is a trick to minimize the syntax structure we keep:
 		      (quote-syntax ,(datum->syntax-object #f '... p)))
 		    main)))
-	  ;; Get list of unique vars:
-	  (apply append (hash-table-map ht (lambda (k v) v))))))
+          (let ([l (apply append (hash-table-map ht (lambda (k v) v)))])
+            (values
+             ;; Get list of unique vars:
+             (map car l)
+             ;; All ids, including duplicates:
+             (map cdr l))))))
 
   ;; apply-to-r creates an S-expression that applies
   ;; rest to `r', but it also optimizes ((lambda (r) E) r)
@@ -1626,7 +1634,8 @@
 			       (datum->syntax-object stx
 						     v
 						     stx
-						     stx)
+						     stx
+                                                     stx)
 			       v)))
 	  . ,(cddr t))]
        [(and (pair? h)
@@ -1637,7 +1646,8 @@
 						  (datum->syntax-object stx
 									v
 									stx
-									stx)
+									stx
+                                                                        stx)
 						  v)))
 			     ,@(cddr h) ;; <-- WARNING: potential quadratic expansion
 			     . ,(cddr t))]
@@ -1649,7 +1659,8 @@
 			 (datum->syntax-object stx
 					       expr
 					       stx
-					       stx)
+					       stx
+                                               stx)
 			 expr)])
 	  `(pattern-substitute
 	    (quote-syntax ,expr)
@@ -1894,7 +1905,7 @@
   (-define (datum->syntax-object/shape orig datum)
      (if (syntax? datum)
 	 datum
-	 (let ([stx (datum->syntax-object orig datum orig)])
+	 (let ([stx (datum->syntax-object orig datum orig #f orig)])
 	   (let ([shape (syntax-property orig 'paren-shape)])
 	     (if shape
 		 (syntax-property stx 'paren-shape shape)
@@ -1903,20 +1914,17 @@
   (-define (catch-ellipsis-error thunk sexp sloc)
       ((let/ec esc
 	 (with-continuation-mark
-	     parameterization-key
-	     (extend-parameterization
-	      (continuation-mark-set-first #f parameterization-key)
-	      current-exception-handler
-	      (lambda (exn)
-		(esc
-		 (lambda ()
-		   (if (exn:break? exn)
-		       (raise exn)
-		       (raise-syntax-error
-			'syntax
-			"incompatible ellipsis match counts for template"
-			sexp
-			sloc))))))
+	     exception-handler-key
+             (lambda (exn)
+               (esc
+                (lambda ()
+                  (if (exn:break? exn)
+                      (raise exn)
+                      (raise-syntax-error
+                       'syntax
+                       "incompatible ellipsis match counts for template"
+                       sexp
+                       sloc)))))
 	   (let ([v (thunk)])
 	     (lambda () v))))))
 
@@ -2014,9 +2022,7 @@
 	   (let ([new-e (loop (syntax-e stx))])
 	     (if (eq? (syntax-e stx) new-e)
 		 stx
-                 (syntax-recertify
-                  (datum->syntax-object/shape stx new-e)
-                  stx sub-insp #f)))]
+                 (datum->syntax-object/shape stx new-e)))]
 	  [(vector? stx)
 	   (list->vector (map loop (vector->list stx)))]
 	  [(box? stx) (box (loop (unbox stx)))]
@@ -2246,7 +2252,7 @@
       (datum->syntax-object
        here-stx
        (let ([pattern (stx-car (stx-cdr x))])
-	 (let ([unique-vars (make-pexpand pattern #f null #f)])
+	 (let-values ([(unique-vars all-varss) (make-pexpand pattern #f null #f)])
 	   (let ([var-bindings
 		  (map
 		   (lambda (var)
@@ -2285,17 +2291,20 @@
 			  ;; Even if we don't use the builder, we need to check
 			  ;; for a well-formed pattern:
 			  (make-pexpand pattern proto-r non-pattern-vars pattern)]
-			 [r (let loop ([vars unique-vars][bindings var-bindings])
+			 [r (let loop ([vars unique-vars][bindings var-bindings][all-varss all-varss])
 			      (cond
 			       [(null? bindings) null]
-			       [(car bindings) (cons 
-						(datum->syntax-object
-						 (car vars)
-						 (syntax-e 
-						  (syntax-mapping-valvar (car bindings)))
-						 x)
-						(loop (cdr vars) (cdr bindings)))]
-			       [else  (loop (cdr vars) (cdr bindings))]))])
+			       [(car bindings)
+                                (cons
+                                 (syntax-property 
+                                  (datum->syntax-object
+                                   (car vars)
+                                   (syntax-e (syntax-mapping-valvar (car bindings)))
+                                   x)
+                                  'disappeared-use
+                                  (car all-varss))
+                                 (loop (cdr vars) (cdr bindings) (cdr all-varss)))]
+			       [else  (loop (cdr vars) (cdr bindings) (cdr all-varss))]))])
 		     (if (identifier? pattern)
 			 ;; Simple syntax-id lookup:
 			 (car r)
@@ -2311,8 +2320,6 @@
 				  [else
 				   (cons (quote-syntax list*) r)]))))))))))
        x)))
-
-  (-define sub-insp (current-code-inspector))
 
   (provide syntax-case** syntax))
 
@@ -2337,14 +2344,13 @@
 	[(_ stxe kl clause ...)
 	 (syntax (syntax-case** _ #f stxe kl module-identifier=? clause ...))])))
 
-  (-define loc-insp (current-code-inspector))
   (-define (relocate loc stx)
     (if (syntax-source loc)
-	(let-values ([(new-stx) (datum->syntax-object
-                                 stx
-                                 (syntax-e stx)
-                                 loc)])
-	  (syntax-recertify new-stx stx loc-insp #f))
+        (datum->syntax-object stx
+                              (syntax-e stx)
+                              loc
+                              #f
+                              stx)
 	stx))
 
   ;; Like syntax, but also takes a syntax object
@@ -2906,9 +2912,15 @@
 			  letrec-syntaxes+values
 			  fluid-let-syntax
 			  with-continuation-mark
+                          #%expression
+                          #%variable-reference
 			  #%app
 			  #%top
-			  #%datum)))])
+			  #%datum
+                          provide 
+                          require
+                          require-for-syntax
+                          require-for-template)))])
 	     (syntax-case* e (begin define-values define-syntaxes require require-for-template) 
 			   module-transformer-identifier=?
 	       [(begin v ...)
@@ -3057,6 +3069,15 @@
 		 expr1
 		 expr ...))))])))
 
+  (define-syntax parameterize*
+    (syntax-rules ()
+      [(_ () body1 body ...)
+       (let () body1 body ...)]
+      [(_ ([lhs1 rhs1] [lhs rhs] ...) body1 body ...)
+       (parameterize ([lhs1 rhs1])
+         (parameterize* ([lhs rhs] ...)
+                        body1 body ...))]))
+
   (define (current-parameterization)
     (extend-parameterization (continuation-mark-set-first #f parameterization-key)))
   
@@ -3144,6 +3165,8 @@
       (error 'with-handlers
              "exception handler used out of context")))
 
+  (define handler-prompt-key (make-continuation-prompt-tag))
+
   (define-syntaxes (with-handlers with-handlers*)
     (let ([wh 
 	   (lambda (disable-break?)
@@ -3157,8 +3180,7 @@
 									       (syntax->list #'(handler ...))))])
 		    (quasisyntax/loc stx
 		      (let ([pred-name pred] ...
-			    [handler-name handler] ...
-                            [handler-prompt-key (make-continuation-prompt-tag)])
+			    [handler-name handler] ...)
 			;; Capture current break parameterization, so we can use it to
 			;;  evaluate the body
 			(let ([bpz (continuation-mark-set-first #f break-enabled-key)])
@@ -3178,23 +3200,30 @@
 			       (with-continuation-mark 
 				   break-enabled-key
 				   bpz
-				 (parameterize ([current-exception-handler
-						 (lambda (e)
-                                                   (check-with-handlers-in-context handler-prompt-key)
-						   ;; Deliver a thunk to the escape handler:
-						   (abort-current-continuation
-                                                    handler-prompt-key
-						    (lambda ()
-						      (#,(if disable-break?
-							     #'select-handler/no-breaks
-							     #'select-handler/breaks-as-is)
-						       e bpz
-						       (list (cons pred-name handler-name) ...)))))])
-				   expr1 expr ...)))
+                                 (with-continuation-mark 
+                                     exception-handler-key
+                                     (lambda (e)
+                                       ;; Deliver a thunk to the escape handler:
+                                       (abort-current-continuation
+                                        handler-prompt-key
+                                        (lambda ()
+                                          (#,(if disable-break?
+                                                 #'select-handler/no-breaks
+                                                 #'select-handler/breaks-as-is)
+                                           e bpz
+                                           (list (cons pred-name handler-name) ...)))))
+                                   (let ()
+                                     expr1 expr ...))))
                              handler-prompt-key
 			     ;; On escape, apply the handler thunk
 			     (lambda (thunk) (thunk))))))))])))])
       (values (wh #t) (wh #f))))
+
+  (define (call-with-exception-handler exnh thunk)
+    (with-continuation-mark
+        exception-handler-key
+        exnh
+      (thunk)))
 
   (define-syntax set!-values
     (lambda (stx)
@@ -3268,9 +3297,10 @@
 	    (apply values v)))])))
 
   (provide case do delay force promise?
-	   parameterize current-parameterization call-with-parameterization
+	   parameterize parameterize* current-parameterization call-with-parameterization
 	   parameterize-break current-break-parameterization call-with-break-parameterization
-	   with-handlers with-handlers* set!-values
+	   with-handlers with-handlers* call-with-exception-handler
+           set!-values
 	   let/cc let-struct fluid-let time))
 
 ;;----------------------------------------------------------------------
@@ -3288,19 +3318,23 @@
 
   (define -re:suffix #rx#"([.][^.]*|)$")
   (define (path-replace-suffix s sfx)
-    (unless (path-string? s)
-      (raise-type-error 'path-replace-suffix "path or valid-path string" 0 s sfx))
+    (unless (or (path-for-some-system? s)
+                (path-string? s))
+      (raise-type-error 'path-replace-suffix "path (for any system) or valid-path string" 0 s sfx))
     (unless (or (string? sfx) (bytes? sfx))
       (raise-type-error 'path-replace-suffix "string or byte string" 1 s sfx))
     (let-values ([(base name dir?) (split-path s)])
       (when (not base)
 	(raise-mismatch-error 'path-replace-suffix "cannot add a suffix to a root path: " s))
-      (let ([new-name (bytes->path
+      (let ([new-name (bytes->path-element
 		       (regexp-replace -re:suffix 
-				       (path->bytes name)
+				       (path-element->bytes name)
 				       (if (string? sfx)
 					   (string->bytes/locale sfx (char->integer #\?))
-					   sfx)))])
+					   sfx))
+                       (if (path-for-some-system? s)
+                           (path-convention-type s)
+                           (system-path-convention-type)))])
 	(if (path? base)
 	    (build-path base new-name)
 	    new-name))))
@@ -3308,27 +3342,28 @@
   (define bsbs (string #\u5C #\u5C))
 
   (define (normal-case-path s)
-    (unless (path-string? s)
-      (raise-type-error 'normal-path-case "path or valid-path string" s))
+    (unless (or (path-for-some-system? s)
+                (path-string? s))
+      (raise-type-error 'normal-path-case "path (for any system) or valid-path string" s))
     (cond
-     [(eq? (system-type) 'windows)
-      (let ([str (if (string? s) s (path->string s))])
-	(if (regexp-match-positions #rx"^[\u5C][\u5C][?][\u5C]" str)
+     [(if (path-for-some-system? s)
+          (eq? (path-convention-type s) 'windows)
+          (eq? (system-type) 'windows))
+      (let ([str (if (string? s) s (bytes->string/locale (path->bytes s)))])
+	(if (regexp-match? #rx"^[\u5C][\u5C][?][\u5C]" str)
 	    (if (string? s)
 		(string->path s)
 		s)
 	    (let ([s (string-locale-downcase str)])
-	      (string->path 
-	       (regexp-replace* #rx"/" 
-				(if (regexp-match-positions #rx"[/\u5C][. ]+[/\u5C]*$" s)
-				    ;; Just "." or ".." in last path element - don't remove
-				    s
-				    (regexp-replace* #rx"\u5B .\u5D+([/\u5C]*)$" s "\u005C1"))
-				bsbs)))))]
-     [(eq? (system-type) 'macos)
-      (string->path (string-locale-downcase (if (string? s)
-						s
-						(path->string s))))]
+	      (bytes->path 
+               (string->bytes/locale
+                (regexp-replace* #rx"/" 
+                                 (if (regexp-match? #rx"[/\u5C][. ]+[/\u5C]*$" s)
+                                     ;; Just "." or ".." in last path element - don't remove
+                                     s
+                                     (regexp-replace* #rx"\u5B .\u5D+([/\u5C]*)$" s "\u005C1"))
+                                 bsbs))
+               'windows))))]
      [(string? s) (string->path s)]
      [else s]))
 
@@ -3357,30 +3392,29 @@
 	   [else (find-between lo hi)])))))
 
   (define (read-eval-print-loop)
-    (let* ([jump-key (gensym)]
-	   [repl-error-escape-handler
-	    (lambda ()
-	      (let ([jump-k (continuation-mark-set-first #f jump-key)])
-		(if jump-k
-		    (jump-k)
-		    (error 'repl-error-escape-handler "used out of context"))))])
-      ;; This parameterize is outside the loop so that
-      ;;  expressions evaluated in the REPL can set the
-      ;;  error escape handler. That's why we communicate the
-      ;;  actual escape target through a continuation mark.
-      (parameterize ([error-escape-handler repl-error-escape-handler])
-	(let/ec done-k
-	  (let repl-loop ()
-	    (let/ec k
-	      (with-continuation-mark jump-key k
-		(let ([v ((current-prompt-read))])
-		  (when (eof-object? v) (done-k (void)))
-		  (call-with-values
-		      (lambda () ((current-eval) (if (syntax? v)
-						     (namespace-syntax-introduce v)
-						     v)))
-		    (lambda results (for-each (current-print) results))))))
-	    (repl-loop))))))
+    (let repl-loop ()
+      ;; This prompt catches all error escapes, including from read and print.
+      (call-with-continuation-prompt
+       (lambda ()
+         (let ([v ((current-prompt-read))])
+           (unless (eof-object? v)
+             (call-with-values
+                 (lambda () 
+                   ;; This prompt catches escapes during evaluation.
+                   ;; Unlike the outer prompt, the handler prints
+                   ;; the results.
+                   (call-with-continuation-prompt
+                    (lambda ()
+                      (let ([w (cons '#%top-interaction v)])
+                        ((current-eval) (if (syntax? v)
+                                            (namespace-syntax-introduce 
+                                             (datum->syntax-object #f w v))
+                                            w))))))
+               (lambda results (for-each (current-print) results)))
+             ;; Abort to loop. (Calling `repl-loop' directory would not be a tail call.)
+             (abort-current-continuation (default-continuation-prompt-tag)))))
+       (default-continuation-prompt-tag)
+       (lambda args (repl-loop)))))
 
   (define load/cd
     (lambda (n)
@@ -3554,11 +3588,7 @@
 			(cloop (cdr paths))))
 		  (cloop (cdr paths))))))))
 
-  (define dll-suffix
-    (case (system-type)
-      [(windows) #".dll"]
-      [(macosx macos) #".dylib"]
-      [else #".so"]))
+  (define dll-suffix (system-type 'so-suffix))
 
   (define _loader.so
     (path-replace-suffix
@@ -3674,6 +3704,7 @@
   (define -path-cache (make-hash-table 'weak 'equal)) ; weak map from `lib' path + corrent-library-paths to symbols
   
   (define -loading-filename (gensym))
+  (define -loading-prompt-tag (make-continuation-prompt-tag 'module-loading))
   (define -prev-relto #f)
   (define -prev-relto-dir #f)
 
@@ -3711,7 +3742,7 @@
 				    (if (eq? relto -prev-relto)
 					-prev-relto-dir
 					(let ([rts (string->bytes/latin-1 (symbol->string relto))])
-					  (and (regexp-match-positions -re:auto rts)
+					  (and (regexp-match? -re:auto rts)
 					       (let-values ([(base n d?)
 							     (split-path 
 							      (bytes->path
@@ -3728,7 +3759,7 @@
 		     (let* ([dir (get-dir)])
 		       (or (hash-table-get -path-cache (cons s dir) #f)
 			   (let ([s (string->bytes/utf-8 s)])
-			     (if (regexp-match-positions -re:ok-relpath s)
+			     (if (regexp-match? -re:ok-relpath s)
 				 ;; Parse Unix-style relative path string
 				 (let loop ([path dir][s s])
 				   (let ([prefix (regexp-match -re:dir s)])
@@ -3748,7 +3779,7 @@
 		    [(path? s) 
 		     (if (absolute-path? s)
 			 s
-			 (list "(a path must be absolute)"))]
+			 (list " (a path must be absolute)"))]
 		    [(or (not (pair? s))
 			 (not (list? s)))
 		     #f]
@@ -3839,9 +3870,13 @@
 			       filename)))
 			  (unless got
 			    ;; Currently loading?
-			    (let ([l (continuation-mark-set->list
-				      (current-continuation-marks)
-				      -loading-filename)]
+			    (let ([l (let ([tag (if (continuation-prompt-available? -loading-prompt-tag)
+                                                    -loading-prompt-tag
+                                                    (default-continuation-prompt-tag))])
+                                       (continuation-mark-set->list
+                                        (current-continuation-marks tag)
+                                        -loading-filename
+                                        tag))]
 				  [ns (current-namespace)])
 			      (for-each
 			       (lambda (s)
@@ -3854,12 +3889,16 @@
 				    (map cdr (reverse (cons s l))))))
 			       l))
 			    (let ([prefix (string->symbol abase)])
-			      (with-continuation-mark -loading-filename (cons (current-namespace) normal-filename)
-				(parameterize ([current-module-name-prefix prefix])
-				  ((current-load/use-compiled) 
-				   filename 
-				   (string->symbol (bytes->string/latin-1 (path->bytes no-sfx)))))))
-			    (hash-table-put! ht modname suffix))))
+                              ((if (continuation-prompt-available? -loading-prompt-tag)
+                                   (lambda (f) (f))
+                                   (lambda (f) (call-with-continuation-prompt f -loading-prompt-tag)))
+                               (lambda ()
+                                 (with-continuation-mark -loading-filename (cons (current-namespace) normal-filename)
+                                   (parameterize ([current-module-name-prefix prefix])
+                                     ((current-load/use-compiled) 
+                                      filename 
+                                      (string->symbol (bytes->string/latin-1 (path->bytes no-sfx))))))))
+                              (hash-table-put! ht modname suffix)))))
 		      ;; If a `lib' path, cache pathname manipulations
 		      (when (and (not (vector? s-parsed))
 				 (or (string? s)
@@ -4043,7 +4082,18 @@
 	   stx)
 	  (raise-syntax-error #f "bad syntax" stx))))
 
-  (provide mzscheme-in-stx-module-begin))
+  (define-syntax #%top-interaction
+    (lambda (stx)
+      (if (eq? 'top-level (syntax-local-context))
+          'ok
+          (raise-syntax-error
+           #f
+           "not at top level"
+           stx))
+      (datum->syntax-object stx (stx-cdr stx) stx stx)))
+
+  (provide mzscheme-in-stx-module-begin
+           #%top-interaction))
 
 ;;----------------------------------------------------------------------
 ;; mzscheme: provide everything
@@ -4057,6 +4107,7 @@
   (require #%qqstx)
   (require #%define)
   (require #%expobs) ; so it's attached
+  (require (only #%foreign))  ; so it's attached, but doesn't depend on any exports
 
   (provide (all-from #%more-scheme)
 	   (all-from-except #%misc make-standard-module-name-resolver)
@@ -4065,6 +4116,7 @@
 	   (all-from #%qqstx)
 	   (all-from #%define)
 	   (all-from-except #%kernel #%module-begin)
+           #%top-interaction
 	   (rename mzscheme-in-stx-module-begin #%module-begin)
 	   (rename #%module-begin #%plain-module-begin)))
 
@@ -4113,7 +4165,7 @@
 
 	   ;; We have to include the following MzScheme-isms to do anything,
 	   ;; but they're not legal R5RS names, anyway.
-	   #%app #%datum #%top))
+	   #%app #%datum #%top #%top-interaction))
 
 ;;----------------------------------------------------------------------
 ;; init namespace

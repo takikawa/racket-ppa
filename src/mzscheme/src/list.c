@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -15,7 +15,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
   libscheme
   Copyright (c) 1994 Brent Benson
@@ -30,8 +31,6 @@ Scheme_Object scheme_null[1];
 /* locals */
 static Scheme_Object *pair_p_prim (int argc, Scheme_Object *argv[]);
 static Scheme_Object *cons_prim (int argc, Scheme_Object *argv[]);
-static Scheme_Object *set_car_prim (int argc, Scheme_Object *argv[]);
-static Scheme_Object *set_cdr_prim (int argc, Scheme_Object *argv[]);
 static Scheme_Object *cons_immutable (int argc, Scheme_Object *argv[]);
 static Scheme_Object *null_p_prim (int argc, Scheme_Object *argv[]);
 static Scheme_Object *list_p_prim (int argc, Scheme_Object *argv[]);
@@ -138,16 +137,14 @@ scheme_init_list (Scheme_Env *env)
   SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
   scheme_add_global_constant ("cdr", p, env);
 
-  scheme_add_global_constant ("set-car!",
-			      scheme_make_noncm_prim(set_car_prim,
-						     "set-car!",
-						     2, 2),
-			      env);
-  scheme_add_global_constant ("set-cdr!",
-			      scheme_make_noncm_prim(set_cdr_prim,
-						     "set-cdr!",
-						     2, 2),
-			      env);
+  p = scheme_make_noncm_prim(scheme_checked_set_car, "set-car!", 2, 2);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant ("set-car!", p, env);
+
+  p = scheme_make_noncm_prim(scheme_checked_set_cdr, "set-cdr!", 2, 2);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant ("set-cdr!", p, env);
+
   scheme_add_global_constant ("cons-immutable",
 			      scheme_make_noncm_prim(cons_immutable,
 						     "cons-immutable",
@@ -402,16 +399,15 @@ scheme_init_list (Scheme_Env *env)
 						    "box-immutable",
 						    1, 1),
 			     env);
-  scheme_add_global_constant(BOXP,
-			     scheme_make_folding_prim(box_p,
-						      BOXP,
-						      1, 1, 1),
-			     env);
-  scheme_add_global_constant(UNBOX,
-			     scheme_make_noncm_prim(unbox,
-						    UNBOX,
-						    1, 1),
-			     env);
+  
+  p = scheme_make_folding_prim(box_p, BOXP, 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;  
+  scheme_add_global_constant(BOXP, p, env);
+
+  p = scheme_make_noncm_prim(unbox, UNBOX, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;  
+  scheme_add_global_constant(UNBOX, p, env);
+
   scheme_add_global_constant(SETBOX,
 			     scheme_make_noncm_prim(set_box,
 						    SETBOX,
@@ -767,8 +763,8 @@ scheme_checked_cdr (int argc, Scheme_Object *argv[])
   return (SCHEME_CDR (argv[0]));
 }
 
-static Scheme_Object *
-set_car_prim (int argc, Scheme_Object *argv[])
+Scheme_Object *
+scheme_checked_set_car (int argc, Scheme_Object *argv[])
 {
   if (!SCHEME_MUTABLE_PAIRP(argv[0]))
     scheme_wrong_type("set-car!", "mutable-pair", 0, argc, argv);
@@ -777,8 +773,8 @@ set_car_prim (int argc, Scheme_Object *argv[])
   return scheme_void;
 }
 
-static Scheme_Object *
-set_cdr_prim (int argc, Scheme_Object *argv[])
+Scheme_Object *
+scheme_checked_set_cdr (int argc, Scheme_Object *argv[])
 {
   if (!SCHEME_MUTABLE_PAIRP(argv[0]))
     scheme_wrong_type("set-cdr!", "mutable-pair", 0, argc, argv);
@@ -1745,7 +1741,7 @@ Scheme_Object *scheme_make_weak_box(Scheme_Object *v)
   obj->so.type = scheme_weak_box_type;
 
   obj->u.ptr_val = v;
-  scheme_weak_reference((void **)&obj->u.ptr_val);
+  scheme_weak_reference((void **)(void *)&obj->u.ptr_val);
 
   return (Scheme_Object *)obj;
 #endif

@@ -81,6 +81,8 @@ exec mzpp -s "---begin" -o `echo "$0" | sed 's/ssc$/c/'` "$0"
 # define GC_CAN_IGNORE /* empty */
 #endif
 
+#define W_OFFSET(src, delta) ((char *)(src) XFORM_OK_PLUS (delta))
+
 /* same as the macro in file.c */
 #define TO_PATH(x) (SCHEME_PATHP(x) ? (x) : scheme_char_string_to_path(x))
 
@@ -97,8 +99,10 @@ START_XFORM_SKIP;
 #endif
 
 int epm_tried = 0;
-typedef BOOL (WINAPI *EnumProcessModules_t)(HANDLE hProcess, HMODULE* lphModule,
-                                            DWORD cb, LPDWORD lpcbNeeded);
+typedef BOOL (WINAPI *EnumProcessModules_t)(HANDLE hProcess,
+                                            HMODULE* lphModule,
+                                            DWORD cb,
+                                            LPDWORD lpcbNeeded);
 EnumProcessModules_t _EnumProcessModules;
 #include <tlhelp32.h>
 
@@ -423,6 +427,8 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
 ;;     function with the same arguments as above)
 ;;   c->s:  name of value construction macro/function
 ;;    (or a function of the value that generates the expression)
+;;   offset: if specified as "X", use "SCHEME_X_OFFSET" to extract an offset
+;;    value for s->c, otherwise leave 0 as the offset
 
 (define types '())
 
@@ -431,7 +437,7 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
 
 (define *type-counter* 0)
 
-(define (describe-type stype cname ftype ctype pred s->c c->s)
+(define (describe-type stype cname ftype ctype pred s->c c->s offset)
   (set! *type-counter* (add1 *type-counter*))
   (~ "#define FOREIGN_"cname" ("*type-counter*")" \\
      "/* Type Name:   "stype (and (not (equal? cname stype))
@@ -446,6 +452,9 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
                          (if pred "-none- (set by the predicate)" "-none-")]
                         [(procedure? s->c) (s->c "<Scheme>" "aux")]
                         [else (list s->c"(<Scheme>)")]) \\
+     " * S->C offset: "(cond 
+                        [(not offset) "0"]
+                        [else offset]) \\
      " * C->Scheme:   "(cond [(not c->s) "-none-"]
                              [(procedure? c->s) (c->s "<C>")]
                              [else (list c->s"(<C>)")]) \\
@@ -472,10 +481,11 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
          [macro (prop 'macro)]
          [pred  (prop 'pred (and macro (list "SCHEME_"macro"P")))]
          [s->c  (prop 's->c (and macro (list "SCHEME_"macro"_VAL")))]
-         [c->s  (prop 'c->s)])
-    (describe-type stype cname ftype ctype pred s->c c->s)
+         [c->s  (prop 'c->s)]
+         [offset (prop 'offset #f)])
+    (describe-type stype cname ftype ctype pred s->c c->s offset)
     `(,type (stype ,stype) (cname ,cname) (ftype ,ftype) (ctype ,ctype)
-      (macro ,macro) (pred ,pred) (s->c ,s->c) (c->s ,c->s))))
+      (macro ,macro) (pred ,pred) (s->c ,s->c) (c->s ,c->s) (offset ,offset))))
 
 (define (defctype name . args)
   (set! types (append! types (list (make-ctype name args)))))
@@ -492,6 +502,7 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
                      [pred  (id 'pred)]
                      [s->c  (id 's->c)]
                      [c->s  (id 'c->s)]
+                     [offset (id 'offset)]
                      [ptr?  (id 'ptr?)])
          #'(for-each
             (lambda (t)
@@ -505,6 +516,7 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
                      [pred  (get 'pred)]
                      [s->c  (get 's->c)]
                      [c->s  (get 'c->s)]
+                     [offset (get 'offset)]
                      [ptr?  (equal? "pointer" ftype)])
                 body ...))
             types)))]))
@@ -665,6 +677,7 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
 (defctype 'pointer
   'ctype "void*"
   'macro "FFIANYPTR"
+  'offset "FFIANYPTR"
   'c->s  "scheme_make_foreign_cpointer")
 
 ;; This is probably not needed
@@ -856,6 +869,13 @@ void free_libffi_type(void *ignored, void *p)
       (SCHEME_FFIOBJP(x) ? (((ffi_obj_struct*)x)->obj) : \
        SCHEME_BYTE_STRINGP(x) ? SCHEME_BYTE_STR_VAL(x) : \
          NULL)))
+#define SCHEME_FFIANYPTR_OFFSET(x) \
+  (SCHEME_CPTRP(x) ? SCHEME_CPTR_OFFSET(x) : 0)
+#define SCHEME_FFIANYPTR_OFFSETVAL(x) \
+  W_OFFSET(SCHEME_FFIANYPTR_VAL(x), SCHEME_FFIANYPTR_OFFSET(x))
+
+#define SCHEME_CPOINTER_W_OFFSET_P(x) \
+  SAME_TYPE(SCHEME_TYPE(x), scheme_offset_cpointer_type)
 
 #define scheme_make_foreign_cpointer(x) \
   ((x==NULL)?scheme_false:scheme_make_cptr(x,NULL))
@@ -901,14 +921,15 @@ void free_libffi_type(void *ignored, void *p)
 #ifdef SCHEME_BIG_ENDIAN
 #define C2SCHEME(typ,src,delta,argsloc) c_to_scheme(typ,src,delta,argsloc)
 #define REF_CTYPE(ctype) (((sizeof(ctype)<sizeof(int)) && args_loc) \
-  ? ((ctype)(((int*)W_OFFSET(src,delta))[0])) : (((ctype *)W_OFFSET(src,delta))[0]))
+  ? ((ctype)(((int*)W_OFFSET(src,delta))[0])) \
+  : (((ctype *)W_OFFSET(src,delta))[0]))
 #else
 #define C2SCHEME(typ,src,delta,argsloc) c_to_scheme(typ,src,delta)
 #define REF_CTYPE(ctype) (((ctype *)W_OFFSET(src,delta))[0])
 #endif
-#define W_OFFSET(src, delta) ((char *)(src) XFORM_OK_PLUS (delta))
 
-static Scheme_Object *C2SCHEME(Scheme_Object *type, void *src, int delta, int args_loc)
+static Scheme_Object *C2SCHEME(Scheme_Object *type, void *src,
+                               int delta, int args_loc)
 {
   Scheme_Object *res, *base;
   if (!SCHEME_CTYPEP(type))
@@ -930,7 +951,8 @@ static Scheme_Object *C2SCHEME(Scheme_Object *type, void *src, int delta, int ar
              (let ([x (list "REF_CTYPE("ctype")")])
                (if (procedure? c->s) (c->s x) (list c->s"("x")")))
              "scheme_void")";")):}
-    case FOREIGN_struct: return scheme_make_foreign_cpointer(W_OFFSET(src, delta));
+    case FOREIGN_struct:
+           return scheme_make_foreign_cpointer(W_OFFSET(src, delta));
     default: scheme_signal_error("corrupt foreign type: %V", type);
   }
   return NULL; /* shush the compiler */
@@ -944,9 +966,11 @@ static Scheme_Object *C2SCHEME(Scheme_Object *type, void *src, int delta, int ar
  * the function is different: in the relevant cases zero an int and offset the
  * ptr */
 #ifdef SCHEME_BIG_ENDIAN
-#define SCHEME2C(typ,dst,delta,val,basep,retloc) scheme_to_c(typ,dst,delta,val,basep,retloc)
+#define SCHEME2C(typ,dst,delta,val,basep,_offset,retloc) \
+          scheme_to_c(typ,dst,delta,val,basep,_offset,retloc)
 #else
-#define SCHEME2C(typ,dst,delta,val,basep,retloc) scheme_to_c(typ,dst,delta,val,basep)
+#define SCHEME2C(typ,dst,delta,val,basep,_offset,retloc) \
+          scheme_to_c(typ,dst,delta,val,basep,_offset)
 #endif
 
 /* Usually writes the C object to dst and returns NULL.  When basetype_p is not
@@ -954,7 +978,7 @@ static Scheme_Object *C2SCHEME(Scheme_Object *type, void *src, int delta, int ar
  * basetype_p is set to the corrsponding number tag.  If basetype_p is NULL,
  * then a struct value will be *copied* into dst. */
 static void* SCHEME2C(Scheme_Object *type, void *dst, long delta,
-                      Scheme_Object *val, long *basetype_p,
+                      Scheme_Object *val, long *basetype_p, long *_offset,
                       int ret_loc)
 {
   if (!SCHEME_CTYPEP(type))
@@ -993,14 +1017,28 @@ static void* SCHEME2C(Scheme_Object *type, void *dst, long delta,
                    "  }")
                 (display "#endif\n")
                 (~ "  if ("(f pred)") {" \\
-                   "    "ctype" tmp;" \\
+                   "    "ctype" tmp;" (if offset " long toff;" "") \\
                    "    tmp = ("ctype")("(f s->c)");")
-                (if ptr?
-                  (~ "    if (basetype_p == NULL || tmp == NULL) {" \\
-                     "      "x" = tmp; return NULL;" \\
+                (when offset
+                  (~ "    toff = SCHEME_"offset"_OFFSET(val);")
+                  (~ "    if (_offset) *_offset = toff;"))
+                (when ptr?
+                  (~ "    if (basetype_p == NULL ||"
+                     (if offset
+                         "(tmp == NULL && toff == 0)"
+                         "tmp == NULL")
+                     ") {")
+                  (if offset
+                      (~ "      "x" = (_offset ? tmp : ("ctype")W_OFFSET(tmp, toff));")
+                      (~ "      "x" = tmp;"))
+                  (~ "      return NULL;" \\
                      "    } else {" \\
-                     "      *basetype_p = FOREIGN_"cname"; return tmp;" \\
-                     "    }")
+                     "      *basetype_p = FOREIGN_"cname";")
+                  (if offset
+                      (~ "      return _offset ? tmp : ("ctype")W_OFFSET(tmp, toff);")
+                      (~ "      return tmp;"))
+                  (~ "    }"))
+                (when (not ptr?)
                   (~ "    "x" = tmp; return NULL;"))
                 (~ "  } else {" \\
                    "    "(wrong-type "val" stype) \\
@@ -1014,14 +1052,24 @@ static void* SCHEME2C(Scheme_Object *type, void *dst, long delta,
     case FOREIGN_struct:
       if (!SCHEME_FFIANYPTRP(val))
         scheme_wrong_type("Scheme->C", "pointer", 0, 1, &val);
-      if (basetype_p == NULL) {
+      {
         void* p = SCHEME_FFIANYPTR_VAL(val);
-        if (p == NULL) scheme_signal_error("FFI pointer value was NULL.");
-        memcpy(W_OFFSET(dst, delta), p, CTYPE_PRIMTYPE(type)->size);
-        return NULL;
-      } else {
-        *basetype_p = FOREIGN_struct;
-        return SCHEME_FFIANYPTR_VAL(val);
+        long poff = SCHEME_FFIANYPTR_OFFSET(val);
+        if (basetype_p == NULL) {
+          if (p == NULL && poff == 0)
+            scheme_signal_error("FFI pointer value was NULL");
+          memcpy(W_OFFSET(dst, delta), W_OFFSET(p, poff),
+                 CTYPE_PRIMTYPE(type)->size);
+          return NULL;
+        } else {
+          *basetype_p = FOREIGN_struct;
+          if (_offset) {
+            *_offset = poff;
+            return p;
+          } else {
+            return W_OFFSET(p, poff);
+          }
+        }
       }
     default: scheme_signal_error("corrupt foreign type: %V", type);
   }
@@ -1148,7 +1196,8 @@ static void* SCHEME2C(Scheme_Object *type, void *dst, long delta,
 /*****************************************************************************/
 /* Pointer type user functions */
 
-{:(defsymbols nonatomic atomic stubborn uncollectable eternal raw fail-ok):}
+{:(defsymbols nonatomic atomic stubborn uncollectable eternal
+              interior atomic-interior raw fail-ok):}
 
 /* (malloc num type cpointer mode) -> pointer */
 /* The arguments for this function are:
@@ -1168,6 +1217,7 @@ static void* SCHEME2C(Scheme_Object *type, void *dst, long delta,
 {
   int i, size=0, num=0, failok=0;
   void *from = NULL, *res = NULL;
+  long foff = 0;
   Scheme_Object *mode = NULL, *a, *base = NULL;
   void *(*mf)(size_t);
   for (i=0; i<argc; i++) {
@@ -1197,6 +1247,7 @@ static void* SCHEME2C(Scheme_Object *type, void *dst, long delta,
         scheme_signal_error(MYNAME": specifying a second source pointer: %V",
                             a);
       from = SCHEME_FFIANYPTR_VAL(a);
+      foff = SCHEME_FFIANYPTR_OFFSET(a);
     } else {
       scheme_wrong_type(MYNAME, "malloc-argument", i, argc, argv);
     }
@@ -1211,13 +1262,16 @@ static void* SCHEME2C(Scheme_Object *type, void *dst, long delta,
   else if (SAME_OBJ(mode, stubborn_sym))      mf = scheme_malloc_stubborn;
   else if (SAME_OBJ(mode, eternal_sym))       mf = scheme_malloc_eternal;
   else if (SAME_OBJ(mode, uncollectable_sym)) mf = scheme_malloc_uncollectable;
+  else if (SAME_OBJ(mode, interior_sym))      mf = scheme_malloc_atomic_allow_interior;
+  else if (SAME_OBJ(mode, atomic_interior_sym)) mf = scheme_malloc_atomic_allow_interior;
   else if (SAME_OBJ(mode, raw_sym))           mf = malloc;
   else {
     scheme_signal_error(MYNAME": bad allocation mode: %V", mode);
     return NULL; /* shush the compiler */
   }
   if (failok) res = scheme_malloc_fail_ok(mf,size); else res = mf(size);
-  if ((from != NULL) && (res != NULL)) memcpy(res, from, size);
+  if (((from != NULL) || (foff != 0)) && (res != NULL))
+    memcpy(res, W_OFFSET(from, foff), size);
   return scheme_make_foreign_cpointer(res);
 }
 
@@ -1225,12 +1279,14 @@ static void* SCHEME2C(Scheme_Object *type, void *dst, long delta,
 {:(cdefine end-stubborn-change 1):}
 {
   void *ptr;
+  long poff;
   if (!SCHEME_FFIANYPTRP(argv[0]))
     scheme_wrong_type(MYNAME, "cpointer", 0, argc, argv);
   ptr = SCHEME_FFIANYPTR_VAL(argv[0]);
-  if (ptr == NULL)
+  poff = SCHEME_FFIANYPTR_OFFSET(argv[0]);
+  if ((ptr == NULL) && (poff == 0))
     scheme_wrong_type(MYNAME, "non-null-cpointer", 0, argc, argv);
-  scheme_end_stubborn_change(ptr);
+  scheme_end_stubborn_change(W_OFFSET(ptr, poff));
   return scheme_void;
 }
 
@@ -1240,14 +1296,194 @@ static void* SCHEME2C(Scheme_Object *type, void *dst, long delta,
 {:(cdefine free 1):}
 {
   void *ptr;
+  long poff;
   if (!SCHEME_FFIANYPTRP(argv[0]))
     scheme_wrong_type(MYNAME, "cpointer", 0, argc, argv);
   ptr = SCHEME_FFIANYPTR_VAL(argv[0]);
-  if (ptr == NULL)
+  poff = SCHEME_FFIANYPTR_OFFSET(argv[0]);
+  if ((ptr == NULL) && (poff == 0))
     scheme_wrong_type(MYNAME, "non-null-cpointer", 0, argc, argv);
-  free(ptr);
+  free(W_OFFSET(ptr, poff));
   return scheme_void;
 }
+
+#define C_LONG_TYPE_STR "exact integer that fits a C long"
+
+/* (ptr-add cptr offset-k [type])
+ *   Adds an offset to a pointer, returning an offset_cpointer value
+ * (ptr-add! cptr offset-k [type])
+ *   Modifies an existing offset_cpointer value by adjusting its offset field,
+ *   returns void
+ */
+static Scheme_Object *do_ptr_add(const char *who, int is_bang,
+                                 int argc, Scheme_Object **argv)
+{
+  long noff;
+  if (is_bang) {
+    if (!SCHEME_CPOINTER_W_OFFSET_P(argv[0]))
+      scheme_wrong_type(who, "offset-cpointer", 0, argc, argv);
+  } else {
+    if (!SCHEME_FFIANYPTRP(argv[0]))
+      scheme_wrong_type(who, "cpointer", 0, argc, argv);
+  }
+  if (!scheme_get_int_val(argv[1], &noff))
+    scheme_wrong_type(who, C_LONG_TYPE_STR, 1, argc, argv);
+  if (argc > 2) {
+    if (SCHEME_CTYPEP(argv[2])) {
+      long size;
+      size = ctype_sizeof(argv[2]);
+      if (size <= 0) scheme_wrong_type(who, "non-void-C-type", 2, argc, argv);
+      noff = noff * size;
+    } else
+      scheme_wrong_type(who, "C-type", 2, argc, argv);
+  }
+  if (is_bang) {
+    ((Scheme_Offset_Cptr*)(argv[0]))->offset += noff;
+    return scheme_void;
+  } else {
+    return scheme_make_offset_cptr
+             (SCHEME_FFIANYPTR_VAL(argv[0]),
+              SCHEME_FFIANYPTR_OFFSET(argv[0]) + noff,
+              (SCHEME_CPTRP(argv[0])) ? SCHEME_CPTR_TYPE(argv[0]) : NULL);
+  }
+}
+
+/* (ptr-add cptr offset-k [type]) */
+{:(cdefine ptr-add  2 3):} { return do_ptr_add(MYNAME, 0, argc, argv); }
+/* (ptr-add! cptr offset-k [type]) */
+{:(cdefine ptr-add! 2 3):} { return do_ptr_add(MYNAME, 1, argc, argv); }
+
+/* (offset-ptr? x) */
+/* Returns #t if the argument is a cpointer with an offset */
+{:(cdefine offset-ptr? 1 1):}
+{
+  return (SCHEME_CPOINTER_W_OFFSET_P(argv[0])) ? scheme_true : scheme_false;
+}
+
+/* (ptr-offset ptr) */
+/* Returns the offset of a cpointer (0 if it's not an offset pointer) */
+{:(cdefine ptr-offset 1 1):}
+{
+  if (!SCHEME_FFIANYPTRP(argv[0]))
+    scheme_wrong_type(MYNAME, "cpointer", 0, argc, argv);
+  return scheme_make_integer_value(SCHEME_FFIANYPTR_OFFSET(argv[0]));
+}
+
+/* (set-ptr-offset! ptr offset [type]) */
+/* Sets the offset of an offset-cpointer (possibly multiplied by the size of
+ * the given ctype) */
+{:(cdefine set-ptr-offset! 2 3):}
+{
+  long noff;
+  if (!SCHEME_CPOINTER_W_OFFSET_P(argv[0]))
+    scheme_wrong_type(MYNAME, "offset-cpointer", 0, argc, argv);
+  if (!scheme_get_int_val(argv[1], &noff)) {
+    scheme_wrong_type(MYNAME, C_LONG_TYPE_STR, 1, argc, argv);
+  }
+  if (argc > 2) {
+    if (SCHEME_CTYPEP(argv[2])) {
+      long size;
+      if (NULL == get_ctype_base(argv[2]))
+        scheme_wrong_type(MYNAME, "C-type", 2, argc, argv);
+      size = ctype_sizeof(argv[2]);
+      if (size <= 0)
+        scheme_wrong_type(MYNAME, "non-void-C-type", 2, argc, argv);
+      noff = noff * size;
+    } else
+      scheme_wrong_type(MYNAME, "C-type", 2, argc, argv);
+  }
+  ((Scheme_Offset_Cptr*)(argv[0]))->offset = noff;
+  return scheme_void;
+}
+
+/* (mem{move,cpy} dest-ptr [dest-offset] src-ptr [src-offset] count [ctype])
+ *   Copies count * sizeof(ctype) bytes
+ *   from src-ptr + src-offset * sizeof(ctype)
+ *   to dest-ptr + dest-offset * sizeof(ctype).
+ * --or--
+ * (memset dest-ptr [dest-offset] byte count [ctype])
+ *   Sets count * sizeof(ctype) bytes to byte
+ *   at dest-ptr + dest-offset * sizeof(ctype) */
+static Scheme_Object *do_memop(const char *who, int mode,
+                               int argc, Scheme_Object **argv)
+/* mode 0=>memset, 1=>memmove, 2=>memcpy */
+{
+  void *src = NULL, *dest = NULL;
+  long soff = 0, doff = 0, count, v, mult = 0;
+  int i, j, ch = 0, argc1 = argc;
+
+  /* arg parsing: last optional ctype, then count, then fill byte for memset,
+   * then the first and second pointer+offset pair. */
+
+  /* get the optional last ctype multiplier */
+  if (SCHEME_CTYPEP(argv[argc1-1])) {
+    argc1--;
+    mult = ctype_sizeof(argv[argc1]);
+    if (mult <= 0)
+      scheme_wrong_type(who, "non-void-C-type", argc1, argc, argv);
+  }
+
+  /* get the count argument */
+  argc1--;
+  if ((!scheme_get_int_val(argv[argc1], &count)) || (count < 0))
+    scheme_wrong_type(who, "count as " C_LONG_TYPE_STR, argc1, argc, argv);
+  if (mult) count *= mult;
+
+  /* get the fill byte for memset */
+  if (!mode) {
+    argc1--;
+    ch = SCHEME_INTP(argv[argc1]) ? SCHEME_INT_VAL(argv[argc1]) : -1;
+    if ((ch < 0) || (ch > 255))
+      scheme_wrong_type(who, "byte", argc1, argc, argv);
+  }
+
+  /* get the two pointers + offsets */
+  i = 0;
+  for (j=0; j<2; j++) {
+    if (!mode && j==1) break; /* memset needs only a dest argument */
+    if (!(i<argc1))
+      scheme_raise_exn(MZEXN_FAIL_CONTRACT,
+                       "%s: missing a pointer argument for %s",
+                       who, (j == 0 ? "destination" : "source"));
+    if (!SCHEME_FFIANYPTRP(argv[i]))
+      scheme_wrong_type(who, "cpointer", i, argc, argv);
+    switch (j) {
+    case 0: dest = SCHEME_FFIANYPTR_VAL(argv[i]);
+            doff = SCHEME_FFIANYPTR_OFFSET(argv[i]);
+            break;
+    case 1: src  = SCHEME_FFIANYPTR_VAL(argv[i]);
+            soff = SCHEME_FFIANYPTR_OFFSET(argv[i]);
+            break;
+    }
+    i++;
+    if ((i<argc1) && SCHEME_EXACT_INTEGERP(argv[i])) {
+      if (!scheme_get_int_val(argv[i], &v))
+        scheme_wrong_type(who, C_LONG_TYPE_STR, i, argc, argv);
+      if (mult) v *= mult;
+      switch (j) {
+      case 0: doff += v; break;
+      case 1: soff += v; break;
+      }
+      i++;
+    }
+  }
+
+  /* verify that there are no unused leftovers */
+  if (!(i==argc1))
+    scheme_arg_mismatch(who, "unexpected extra argument: ", argv[i]);
+
+  switch (mode) {
+  case 0: memset (W_OFFSET(dest, doff), ch, count); break;
+  case 1: memmove(W_OFFSET(dest, doff), W_OFFSET(src, soff), count); break;
+  case 2: memcpy (W_OFFSET(dest, doff), W_OFFSET(src, soff), count); break;
+  }
+
+  return scheme_void;
+}
+
+{:(cdefine memset  3 5):} { return do_memop(MYNAME, 0, argc, argv); }
+{:(cdefine memmove 3 6):} { return do_memop(MYNAME, 1, argc, argv); }
+{:(cdefine memcpy  3 6):} { return do_memop(MYNAME, 2, argc, argv); }
 
 {:(defsymbols abs):}
 
@@ -1259,12 +1495,13 @@ static void* SCHEME2C(Scheme_Object *type, void *dst, long delta,
 {:(cdefine ptr-ref 2 4):}
 {
   int size=0; void *ptr; Scheme_Object *base;
-  long delta = 0;
+  long delta;
 
   if (!SCHEME_FFIANYPTRP(argv[0]))
     scheme_wrong_type(MYNAME, "cpointer", 0, argc, argv);
   ptr = SCHEME_FFIANYPTR_VAL(argv[0]);
-  if (ptr == NULL)
+  delta = SCHEME_FFIANYPTR_OFFSET(argv[0]);
+  if ((ptr == NULL) && (delta == 0))
     scheme_wrong_type(MYNAME, "non-null-cpointer", 0, argc, argv);
   if (NULL == (base = get_ctype_base(argv[1])))
     scheme_wrong_type(MYNAME, "C-type", 1, argc, argv);
@@ -1285,11 +1522,11 @@ static void* SCHEME2C(Scheme_Object *type, void *dst, long delta,
       scheme_wrong_type(MYNAME, "abs-flag", 2, argc, argv);
     if (!SCHEME_INTP(argv[3]))
       scheme_wrong_type(MYNAME, "integer", 3, argc, argv);
-    delta = SCHEME_INT_VAL(argv[3]);
+    delta += SCHEME_INT_VAL(argv[3]);
   } else if (argc > 2) {
     if (!SCHEME_INTP(argv[2]))
       scheme_wrong_type(MYNAME, "integer", 2, argc, argv);
-    delta = (size * SCHEME_INT_VAL(argv[2]));
+    delta += (size * SCHEME_INT_VAL(argv[2]));
   }
   return C2SCHEME(argv[1], ptr, delta, 0);
 }
@@ -1302,12 +1539,13 @@ static void* SCHEME2C(Scheme_Object *type, void *dst, long delta,
 {:(cdefine ptr-set! 3 5):}
 {
   int size=0; void *ptr;
-  long delta = 0;
+  long delta;
   Scheme_Object *val = argv[argc-1], *base;
   if (!SCHEME_FFIANYPTRP(argv[0]))
     scheme_wrong_type(MYNAME, "cpointer", 0, argc, argv);
   ptr = SCHEME_FFIANYPTR_VAL(argv[0]);
-  if (ptr == NULL)
+  delta = SCHEME_FFIANYPTR_OFFSET(argv[0]);
+  if ((ptr == NULL) && (delta == 0))
     scheme_wrong_type(MYNAME, "non-null-cpointer", 0, argc, argv);
   if (NULL == (base = get_ctype_base(argv[1])))
     scheme_wrong_type(MYNAME, "C-type", 1, argc, argv);
@@ -1334,13 +1572,13 @@ static void* SCHEME2C(Scheme_Object *type, void *dst, long delta,
       scheme_wrong_type(MYNAME, "abs-flag", 2, argc, argv);
     if (!SCHEME_INTP(argv[3]))
       scheme_wrong_type(MYNAME, "integer", 3, argc, argv);
-    delta = SCHEME_INT_VAL(argv[3]);
+    delta += SCHEME_INT_VAL(argv[3]);
   } else if (argc > 3) {
     if (!SCHEME_INTP(argv[2]))
       scheme_wrong_type(MYNAME, "integer", 2, argc, argv);
-    delta = (size * SCHEME_INT_VAL(argv[2]));
+    delta += (size * SCHEME_INT_VAL(argv[2]));
   }
-  SCHEME2C(argv[1], ptr, delta, val, NULL, 0);
+  SCHEME2C(argv[1], ptr, delta, val, NULL, NULL, 0);
   return scheme_void;
 }
 
@@ -1352,14 +1590,17 @@ static void* SCHEME2C(Scheme_Object *type, void *dst, long delta,
   if (!SCHEME_FFIANYPTRP(argv[1]))
     scheme_wrong_type(MYNAME, "cpointer", 1, argc, argv);
   return (SAME_OBJ(argv[0],argv[1]) ||
-          (SCHEME_FFIANYPTR_VAL(argv[0]) == SCHEME_FFIANYPTR_VAL(argv[1])))
+          (SCHEME_FFIANYPTR_OFFSETVAL(argv[0])
+           == SCHEME_FFIANYPTR_OFFSETVAL(argv[1])))
          ? scheme_true : scheme_false;
 }
 
 /* (make-sized-byte-string cpointer len) */
 {:(cdefine make-sized-byte-string 2 2):}
 /* Warning: no copying is done so it is possible to share string contents. */
-/* (Should use real byte-strings with new version.) */
+/* Warning: if source ptr has a offset, resulting string object uses shifted
+ * pointer.
+ * (Should use real byte-strings with new version.) */
 {
   long len;
   if (!SCHEME_FFIANYPTRP(argv[0]))
@@ -1368,7 +1609,8 @@ static void* SCHEME2C(Scheme_Object *type, void *dst, long delta,
     scheme_wrong_type(MYNAME, "integer in a C long range", 1, argc, argv);
   if (SCHEME_FALSEP(argv[0])) return scheme_false;
   else return
-         scheme_make_sized_byte_string(SCHEME_FFIANYPTR_VAL(argv[0]), len, 0);
+         scheme_make_sized_byte_string(SCHEME_FFIANYPTR_OFFSETVAL(argv[0]),
+                                       len, 0);
 }
 
 /* internal: apply Scheme finalizer */
@@ -1442,6 +1684,7 @@ Scheme_Object *ffi_do_call(void *data, int argc, Scheme_Object *argv[])
   Scheme_Object *otype  = SCHEME_VEC_ELS(data)[3];
   Scheme_Object *base;
   ffi_cif       *cif    = (ffi_cif*)(SCHEME_VEC_ELS(data)[4]);
+  long          cfoff   = SCHEME_INT_VAL(SCHEME_VEC_ELS(data)[5]);
   int           nargs   = cif->nargs;
   /* When the foreign function is called, we need an array (ivals) of nargs
    * ForeignAny objects to store the actual C values that are created, and we
@@ -1462,25 +1705,31 @@ Scheme_Object *ffi_do_call(void *data, int argc, Scheme_Object *argv[])
   void **avalues, *p, *newp, *tmp;
   GC_CAN_IGNORE ForeignAny stack_ivals[MAX_QUICK_ARGS];
   void *stack_avalues[MAX_QUICK_ARGS];
+  long stack_offsets[MAX_QUICK_ARGS];
   int i;
-  long basetype;
+  long basetype, offset, *offsets;
   if (nargs <= MAX_QUICK_ARGS) {
     ivals   = stack_ivals;
     avalues = stack_avalues;
+    offsets = stack_offsets;
   } else {
     ivals   = malloc(nargs * sizeof(ForeignAny));
     avalues = scheme_malloc(nargs * sizeof(void*));
+    offsets = scheme_malloc(nargs * sizeof(long));
   }
   /* iterate on input values and types */
   for (i=0; i<nargs; i++, itypes=SCHEME_CDR(itypes)) {
     /* convert argv[i] according to current itype */
-    p = SCHEME2C(SCHEME_CAR(itypes), &(ivals[i]), 0, argv[i], &basetype, 0);
+    offset = 0;
+    p = SCHEME2C(SCHEME_CAR(itypes), &(ivals[i]), 0, argv[i], &basetype,
+                 &offset, 0);
     if (p != NULL) {
       avalues[i] = p;
       ivals[i].x_fixnum = basetype; /* remember the base type */
     } else {
       avalues[i] = NULL;
     }
+    offsets[i] = offset;
   }
   base = get_ctype_base(otype); /* verified below, so cannot be NULL */
   /* If this is a struct return value, then need to malloc in any case, even if
@@ -1494,7 +1743,8 @@ Scheme_Object *ffi_do_call(void *data, int argc, Scheme_Object *argv[])
     p = &oval;
     newp = NULL;
   }
-  /* We finished with all possible mallocs, clear up the avalues mess */
+  /* We finished with all possible mallocs, clear up the avalues and offsets
+   * mess */
   for (i=0; i<nargs; i++) {
     if (avalues[i] == NULL)     /* if this was a non-pointer... */
       avalues[i] = &(ivals[i]); /* ... set the avalues pointer */
@@ -1503,10 +1753,14 @@ Scheme_Object *ffi_do_call(void *data, int argc, Scheme_Object *argv[])
       ivals[i].x_pointer = avalues[i];
       avalues[i] = &(ivals[i]);
     }
-    /* Otherwise it was a struct pointer, and avalues[i] is already fine */
+    /* Otherwise it was a struct pointer, and avalues[i] is already fine. */
+    /* Add offset, if any: */
+    if (offsets[i] != 0) {
+      ivals[i].x_pointer = (char *)ivals[i].x_pointer + offsets[i]; 
+    }
   }
   /* Finally, call the function */
-  ffi_call(cif, c_func, p, avalues);
+  ffi_call(cif, (void *)W_OFFSET(c_func, cfoff), p, avalues);
   if (ivals != stack_ivals) free(ivals);
   ivals = NULL; /* no need now to hold on to this */
   for (i=0; i<nargs; i++) { avalues[i] = NULL; } /* no need for these refs */
@@ -1546,6 +1800,7 @@ void free_fficall_data(void *ignored, void *p)
   Scheme_Object *itypes = argv[1];
   Scheme_Object *otype  = argv[2];
   Scheme_Object *obj, *data, *p, *base;
+  long ooff;
   GC_CAN_IGNORE ffi_type *rtype, **atypes;
   GC_CAN_IGNORE ffi_cif *cif;
   int i, nargs;
@@ -1555,7 +1810,8 @@ void free_fficall_data(void *ignored, void *p)
   if (!SCHEME_FFIANYPTRP(argv[0]))
     scheme_wrong_type(MYNAME, "ffi-obj-or-cpointer", 0, argc, argv);
   obj = SCHEME_FFIANYPTR_VAL(argv[0]);
-  if (obj == NULL)
+  ooff = SCHEME_FFIANYPTR_OFFSET(argv[0]);
+  if ((obj == NULL) && (ooff == 0))
     scheme_wrong_type(MYNAME, "non-null-cpointer", 0, argc, argv);
   nargs = scheme_proper_list_length(itypes);
   if (nargs < 0)
@@ -1574,7 +1830,7 @@ void free_fficall_data(void *ignored, void *p)
   cif = malloc(sizeof(ffi_cif));
   if (ffi_prep_cif(cif, FFI_DEFAULT_ABI, nargs, rtype, atypes) != FFI_OK)
     scheme_signal_error("internal error: ffi_prep_cif did not return FFI_OK");
-  data = scheme_make_vector(5, NULL);
+  data = scheme_make_vector(6, NULL);
   p = scheme_append_byte_string
         (ffi_name_prefix,
          scheme_make_byte_string_without_copying
@@ -1585,6 +1841,7 @@ void free_fficall_data(void *ignored, void *p)
   SCHEME_VEC_ELS(data)[2] = itypes;
   SCHEME_VEC_ELS(data)[3] = otype;
   SCHEME_VEC_ELS(data)[4] = (Scheme_Object*)cif;
+  SCHEME_VEC_ELS(data)[5] = scheme_make_integer(ooff);
   scheme_register_finalizer(data, free_fficall_data, cif, NULL, NULL);
   return scheme_make_closed_prim_w_arity
            (ffi_do_call, (void*)data, SCHEME_BYTE_STR_VAL(p),
@@ -1619,7 +1876,7 @@ void ffi_do_callback(ffi_cif* cif, void* resultp, void** args, void *userdata)
     argv[i] = v;
   }
   p = _scheme_apply(data->proc, argc, argv);
-  SCHEME2C(data->otype, resultp, 0, p, NULL, 1);
+  SCHEME2C(data->otype, resultp, 0, p, NULL, NULL, 1);
 }
 
 /* see ffi-callback below */

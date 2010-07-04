@@ -2,7 +2,7 @@
   (require (lib "url.ss" "net")
            (lib "kw.ss")
            (lib "plt-match.ss")
-           (lib "unitsig.ss")
+           (lib "string.ss")
            (lib "contract.ss"))
   (require "dispatch.ss"
            "../private/web-server-structs.ss"
@@ -10,7 +10,6 @@
            "../private/response.ss"
            "../response-structs.ss"
            "../servlet.ss"
-           "../sig.ss"
            "../private/configuration.ss"
            "../private/util.ss"
            "../managers/manager.ss"
@@ -25,6 +24,34 @@
   (provide ; XXX contract improve
    ; XXX contract kw
    make)
+  
+  (define (url-path->path base p)
+    (path->complete-path
+     (let ([path-elems (regexp-split #rx"/" p)])
+       ;; Servlets can have extra stuff after them
+       (let ([build-path
+              (lambda (b p)
+                (if (string=? p "")
+                    b
+                    (build-path b p)))])
+         (let loop
+           ([p-e (if (string=? (car path-elems) "")
+                     (cddr path-elems)
+                     (cdr path-elems))]
+            [f (build-path base
+                           (if (string=? (car path-elems) "")
+                               (cadr path-elems)
+                               (car path-elems)))])
+           (cond
+             [(null? p-e)
+              f]
+             [(directory-exists? f)
+              (loop (cdr p-e) (build-path f (car p-e)))]
+             [(file-exists? f)
+              f]
+             [else
+              ;; Don't worry about e.g. links for now
+              f]))))))
   
   (define interface-version 'v1)
   (define/kw (make config:instances config:scripts config:make-servlet-namespace
@@ -230,8 +257,8 @@
                      (thread-cell-set! current-execution-context
                                        (make-execution-context
                                         conn req suspend))
-                     (let ([k ((manager-continuation-lookup manager) instance-id k-id salt)])
-                       (k req)))])
+                     (let ([kcb ((manager-continuation-lookup manager) instance-id k-id salt)])
+                       ((custodian-box-value kcb) req)))])
               (output-response conn response))
             (semaphore-post (servlet-instance-data-mutex data)))))
       ((manager-instance-unlock! manager) instance-id)
@@ -268,7 +295,7 @@
               entry)]
         [else
          (raise (make-exn:fail:filesystem:exists:servlet
-                 (string->immutable-string (format "Couldn't find ~a" servlet-filename))
+                 (format "Couldn't find ~a" servlet-filename)
                  (current-continuation-marks) ))]))
     
     ;; load-servlet/path path -> (or/c #f cache-entry)
@@ -279,9 +306,6 @@
     ;;;;;; (XXX: I don't know what 'typed-model-split-store0 was, so it was removed.)
     ;;;; A response
     (define (load-servlet/path a-path)
-      (define (v0.servlet->v1.lambda servlet)
-        (lambda (initial-request)
-          (invoke-unit/sig servlet servlet^)))
       (define (v0.response->v1.lambda response-path response)
         (define go
           (box
@@ -299,16 +323,6 @@
         ; XXX load/use-compiled breaks errortrace
         (define s (load/use-compiled a-path))
         (cond
-          ;; signed-unit servlet
-          ; MF: I'd also like to test that s has the correct import signature.
-          [(unit/sig? s) 
-           (make-servlet (current-custodian)
-                         (current-namespace)
-                         (create-timeout-manager
-                          default-servlet-instance-expiration-handler
-                          timeouts-servlet-connection
-                          timeouts-default-servlet)
-                         (v0.servlet->v1.lambda s))]
           ; FIX - reason about exceptions from dynamic require (catch and report if not already)
           ;; module servlet
           [(void? s)
@@ -323,9 +337,9 @@
                                 (create-timeout-manager
                                  default-servlet-instance-expiration-handler
                                  timeouts-servlet-connection
-                                 timeouts-default-servlet)
+                                 timeout)
                                 (v1.module->v1.lambda timeout start)))]
-               [(v2-transitional) ; XXX: Undocumented
+               [(v2 v2-transitional) ; XXX: Undocumented
                 (let ([start (dynamic-require module-name 'start)]
                       [manager (with-handlers
                                    ([exn:fail:contract?

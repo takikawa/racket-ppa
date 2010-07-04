@@ -1,6 +1,6 @@
 
 (module language-configuration mzscheme
-  (require (lib "unitsig.ss")
+  (require (lib "unit.ss")
            (lib "hierlist.ss" "hierlist")
            (lib "class.ss")
 	   (lib "contract.ss")
@@ -21,17 +21,16 @@
   
   (provide language-configuration@)
   
-  (define language-configuration@
-    (unit/sig drscheme:language-configuration/internal^
-      (import [drscheme:unit : drscheme:unit^]
-              [drscheme:rep : drscheme:rep^]
-              [drscheme:teachpack : drscheme:teachpack^]
-              [drscheme:init : drscheme:init^]
-              [drscheme:language : drscheme:language^]
-              [drscheme:app : drscheme:app^]
-              [drscheme:tools : drscheme:tools^]
-              [drscheme:help-desk : drscheme:help-desk^])
-      
+  (define-unit language-configuration@
+    (import [prefix drscheme:unit: drscheme:unit^]
+            [prefix drscheme:rep: drscheme:rep^]
+            [prefix drscheme:init: drscheme:init^]
+            [prefix drscheme:language: drscheme:language^]
+            [prefix drscheme:app: drscheme:app^]
+            [prefix drscheme:tools: drscheme:tools^]
+            [prefix drscheme:help-desk: drscheme:help-desk^])
+    (export drscheme:language-configuration/internal^)
+
       ;; settings-preferences-symbol : symbol
       ;; this pref used to depend on `version', but no longer does.
       (define settings-preferences-symbol 'drscheme:language-settings)
@@ -1068,72 +1067,8 @@
           (+ 10 ;; upper bound on some platform specific space I don't know how to get.
              (floor (inexact->exact (unbox y-box))))))
 
-      (define teachpack-directory 
-        (let ([lib-dir (collection-path "teachpack")])
-          (if (directory-exists? lib-dir)
-              lib-dir
-              #f)))
 
       
-                                                                      
-                            ;;                          ;;            
-  ;                          ;                           ;            
-  ;                          ;                           ;            
- ;;;;;   ;;;   ;;;;    ;;;   ; ;;  ; ;;;   ;;;;    ;;;   ;  ;;   ;;;  
-  ;     ;   ;      ;  ;   ;  ;;  ;  ;   ;      ;  ;   ;  ; ;    ;   ; 
-  ;     ;;;;;   ;;;;  ;      ;   ;  ;   ;   ;;;;  ;      ;;      ;;;  
-  ;     ;      ;   ;  ;      ;   ;  ;   ;  ;   ;  ;      ; ;        ; 
-  ;   ; ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;  ;   ;   ; 
-   ;;;   ;;;    ;;; ;  ;;;  ;;; ;;; ;;;;    ;;; ;  ;;;  ;;   ;;  ;;;  
-                                    ;                                 
-                                    ;                                 
-                                   ;;;                                
-
-      
-      ;; add-new-teachpack : (instanceof frame%) -> boolean
-      ;; querys the user for the name of a teachpack and adds it to the
-      ;; current teachpacks. Uses the argument as the parent to the dialog
-      ;; the result indicates if the teachpacks changed #t if they did and #f if not
-      (define (add-new-teachpack frame)
-        (let ([lib-file
-               (parameterize ([finder:dialog-parent-parameter frame])
-                 (finder:get-file
-                  teachpack-directory
-                  (string-constant select-a-teachpack)
-                  ".*\\.(ss|scm)$"))])
-          (if lib-file
-              (let* ([interactions-text (send frame get-interactions-text)]
-                     [tp-cache (send interactions-text get-user-teachpack-cache)]
-                     [tp-filenames (drscheme:teachpack:teachpack-cache-filenames tp-cache)]
-                     [new-item (normalize-path lib-file)])
-                (cond
-                  [(member (normal-case-path new-item) (map normal-case-path tp-filenames))
-                   (message-box (string-constant drscheme-teachpack-message-title)
-                                (format (string-constant already-added-teachpack)
-                                        new-item)
-                                frame)]
-                  [else
-                   (let ([new-teachpacks 
-                          (drscheme:teachpack:new-teachpack-cache
-                           (append tp-filenames (list new-item)))])
-                     (send interactions-text set-user-teachpack-cache new-teachpacks)
-                     (preferences:set 'drscheme:teachpacks new-teachpacks))])
-                (set! teachpack-directory (path-only lib-file))
-                #t)
-              #f)))
-      
-      ;; clear-all-teachpacks : -> boolean
-      ;; clears all of the teachpack settings
-      ;; the result indicates if the teachpacks changed #t if they did and #f if not
-      (define (clear-all-teachpacks)
-        (let ([old (preferences:get 'drscheme:teachpacks)])
-          (cond
-            [(null? (drscheme:teachpack:teachpack-cache-filenames old))
-             #f]
-            [else
-             (drscheme:teachpack:set-teachpack-cache-filenames! old null)
-             (preferences:set 'drscheme:teachpacks old)
-             #t])))
 
    ;             ;;;                             
                 ;                                
@@ -1340,10 +1275,10 @@
       ;; overrides front-end to make the language a language that expands its arguments
       (define (add-expand-to-front-end %)
         (class %
-          (define/override (front-end/complete-program input settings teachpack-cache)
-            (wrap-front-end (super front-end/complete-program input settings teachpack-cache)))
-          (define/override (front-end/interaction input settings teachpack-cache)
-            (wrap-front-end (super front-end/interaction input settings teachpack-cache)))
+          (define/override (front-end/complete-program input settings)
+            (wrap-front-end (super front-end/complete-program input settings)))
+          (define/override (front-end/interaction input settings)
+            (wrap-front-end (super front-end/interaction input settings)))
           (define/private (wrap-front-end thnk)
             (λ ()
               (let ([res (thnk)])
@@ -1379,12 +1314,11 @@
         (let* ([extras-mixin
                 (λ (mred-launcher? one-line-summary)
                   (λ (%)
-                    (class %
+                    (class* % (drscheme:language:language<%>)
                       (define/override (get-one-line-summary) one-line-summary)
                       (define/override (use-namespace-require/copy?) #t)
-                      
                       (inherit get-module get-transformer-module get-init-code)
-                      (define/override (create-executable setting parent program-filename teachpacks)
+                      (define/override (create-executable setting parent program-filename)
                         (let ([executable-fn
 			       (drscheme:language:put-executable
 				parent
@@ -1400,10 +1334,10 @@
                              executable-fn
                              (get-module)
                              (get-transformer-module)
-                             (get-init-code setting teachpacks)
+                             (get-init-code setting)
                              mred-launcher?
                              (use-namespace-require/copy?)))))
-                      (super-instantiate ()))))]
+                      (super-new))))]
                [make-simple
                 (λ (module id position numbers mred-launcher? one-line-summary extra-mixin)
                   (let ([%
@@ -1486,10 +1420,10 @@
             (not-a-language-message)
             (fprintf (current-error-port) "\n"))
           
-          (define/override (front-end/interaction input settings teachpack-cache)
+          (define/override (front-end/interaction input settings)
             (not-a-language-message)
             (λ () eof))
-          (define/override (front-end/complete-program input settings teachpack-cache)
+          (define/override (front-end/complete-program input settings)
             (not-a-language-message)
             (λ () eof))
           
@@ -1776,7 +1710,8 @@
                   (label (car (last-pair lang)))
                   (color (send the-color-database find-color "blue"))
                   (callback (λ () (change-current-lang-to lang)))
-                  (font (get-font #:underlined #t))))))
+                  (font (get-font #:underlined #t)))
+             (new canvas-message% (parent panel2) (label (string-constant start-with-after))))))
         
         ;; get-text-pls : path -> (listof (list* string string (listof string))
         ;; gets the questions from an info.ss file.
@@ -1869,4 +1804,4 @@
       (define (find-parent-from-snip snip)
         (let* ([admin (send snip get-admin)]
                [ed (send admin get-editor)])
-          (find-parent-from-editor ed))))))
+          (find-parent-from-editor ed)))))

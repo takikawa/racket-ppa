@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2006 PLT Scheme Inc.
+// Copyright:  (c) 2004-2007 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -167,6 +167,13 @@ void wxCanvas::InitDefaults(wxGLConfig *gl_cfg)
   if (cStyle & wxINVISIBLE)
     Show(FALSE);
   InitInternalGray();
+
+  if (cStyle & wxVSCROLL || cStyle & wxHSCROLL) {
+    /* Somehow fixes initial update. There's another
+       call like this one in the constructor for
+       wxMediaCanvas. */
+    OnClientAreaDSize(1, 1, 1, 1);
+  }
 }
 
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -703,6 +710,13 @@ void wxCanvas::ShowAsActive(Bool flag)
   /* Do nothing. */
 }
 
+void wxCanvas::ChangeToGray(Bool gray)
+{
+  if (cStyle & wxAS_CONTROL)
+    Refresh();
+  wxbCanvas::ChangeToGray(gray);
+}
+
 //-----------------------------------------------------------------------------
 void wxCanvas::ClientToLogical(int* x, int* y) // mac platform only; testing
 { // Transform point from client c.s. to logical c.s. (virtual canvas, scrolling)
@@ -884,9 +898,13 @@ void wxCanvas::OnPaint(void)
 void wxCanvas::ResetGLView()
 {
   if (wx_dc->gl) {
-    wxArea* clientArea, *topClientArea;
+    wxArea* clientArea;
+    wxMacDC *macdc;
     wxFrame *fr;
-    int h, w, th;
+    CGrafPtr graf;
+    WindowRef win;
+    int h, w;
+    Rect cr, sr;
 
     SetCurrentMacDC();
 
@@ -895,11 +913,15 @@ void wxCanvas::ResetGLView()
     h = clientArea->Height();
 
     fr = GetRootFrame();
-    topClientArea = fr->ContentArea();
-    th = topClientArea->Height();
+    macdc = fr->MacDC();
+    graf = macdc->macGrafPort();
+    win = GetWindowFromPort(graf);
 
-    wx_dc->gl->ResetGLView(SetOriginX,
-			   (th - (SetOriginY + h)),
+    GetWindowBounds(win, kWindowContentRgn, &cr);
+    GetWindowBounds(win, kWindowStructureRgn, &sr);
+    
+    wx_dc->gl->ResetGLView(SetOriginX + (cr.left - sr.left),
+			   (cr.bottom - cr.top) - (SetOriginY + h) + (sr.bottom - cr.bottom),
 			   w,
 			   h);
   }

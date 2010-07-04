@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -15,7 +15,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
   libscheme
   Copyright (c) 1994 Brent Benson
@@ -123,6 +124,42 @@ int scheme_eq (Scheme_Object *obj1, Scheme_Object *obj2)
   return SAME_OBJ(obj1, obj2);
 }
 
+XFORM_NONGCING static MZ_INLINE int double_eqv(double a, double b)
+{
+# ifndef NAN_EQUALS_ANYTHING
+  if (a != b) {
+# endif
+    /* Double-check for NANs: */
+    if (MZ_IS_NAN(a)) {
+      if (MZ_IS_NAN(b))
+        return 1;
+# ifdef NAN_EQUALS_ANYTHING
+      return 0;
+# endif
+    }
+# ifdef NAN_EQUALS_ANYTHING
+    if (MZ_IS_NAN(b))
+      return 0;
+    else {
+      if (a == 0.0) {
+        if (b == 0.0) {
+          return scheme_minus_zero_p(a) == scheme_minus_zero_p(b);
+        }
+      }
+      return (a == b);
+    }
+# else
+    return 0;
+  }
+  if (a == 0.0) {
+    if (b == 0.0) {
+      return scheme_minus_zero_p(a) == scheme_minus_zero_p(b);
+    }
+  }
+  return 1;
+# endif
+}
+
 int scheme_eqv (Scheme_Object *obj1, Scheme_Object *obj2)
 {
   Scheme_Type t1, t2;
@@ -135,87 +172,19 @@ int scheme_eqv (Scheme_Object *obj1, Scheme_Object *obj2)
 
   if (NOT_SAME_TYPE(t1, t2)) {
 #ifdef MZ_USE_SINGLE_FLOATS
-    /* If one is a float and the other is a double, corce to double */
+    /* If one is a float and the other is a double, coerce to double */
     if ((t1 == scheme_float_type) && (t2 == scheme_double_type))
-      return scheme_eqv(scheme_make_double(SCHEME_FLT_VAL(obj1)), obj2);
+      return double_eqv(SCHEME_FLT_VAL(obj1), SCHEME_DBL_VAL(obj2));
     else if ((t2 == scheme_float_type) && (t1 == scheme_double_type))
-      return scheme_eqv(scheme_make_double(SCHEME_FLT_VAL(obj2)), obj1);
+      return double_eqv(SCHEME_DBL_VAL(obj1), SCHEME_FLT_VAL(obj2));
 #endif
     return 0;
 #ifdef MZ_USE_SINGLE_FLOATS
   } else if (t1 == scheme_float_type) {
-    float a, b;
-    a = SCHEME_FLT_VAL(obj1);
-    b = SCHEME_FLT_VAL(obj2);
-# ifndef NAN_EQUALS_ANYTHING
-    if (a != b) {
-#  endif
-      /* Double-check for NANs: */
-      if (MZ_IS_NAN(a)) {
-	if (MZ_IS_NAN(b))
-	  return 1;
-# ifdef NAN_EQUALS_ANYTHING
-	return 0;
-# endif
-      }
-# ifdef NAN_EQUALS_ANYTHING
-      if (MZ_IS_NAN(b))
-	return 0;
-      else {
-	if (a == 0.0) {
-	  if (b == 0.0) {
-	    return scheme_minus_zero_p(a) == scheme_minus_zero_p(b);
-	  }
-	}
-	return (a == b);
-      }
-# else
-      return 0;
-    }
-    if (a == 0.0) {
-      if (b == 0.0) {
-	return scheme_minus_zero_p(a) == scheme_minus_zero_p(b);
-      }
-    }
-    return 1;
-# endif
+    return double_eqv(SCHEME_FLT_VAL(obj1), SCHEME_FLT_VAL(obj2));
 #endif
   } else if (t1 == scheme_double_type) {
-    double a, b;
-    a = SCHEME_DBL_VAL(obj1);
-    b = SCHEME_DBL_VAL(obj2);
-# ifndef NAN_EQUALS_ANYTHING
-    if (a != b) {
-# endif
-      /* Double-check for NANs: */
-      if (MZ_IS_NAN(a)) {
-	if (MZ_IS_NAN(b))
-	  return 1;
-# ifdef NAN_EQUALS_ANYTHING
-	return 0;
-# endif
-      }
-# ifdef NAN_EQUALS_ANYTHING
-      if (MZ_IS_NAN(b))
-	return 0;
-      else {
-	if (a == 0.0) {
-	  if (b == 0.0) {
-	    return scheme_minus_zero_p(a) == scheme_minus_zero_p(b);
-	  }
-	}
-	return (a == b);
-      }
-# else
-      return 0;
-    }
-    if (a == 0.0) {
-      if (b == 0.0) {
-	return scheme_minus_zero_p(a) == scheme_minus_zero_p(b);
-      }
-    }
-    return 1;
-# endif
+    return double_eqv(SCHEME_DBL_VAL(obj1), SCHEME_DBL_VAL(obj2));
   } else if (t1 == scheme_bignum_type)
     return scheme_bignum_eq(obj1, obj2);
   else if (t1 == scheme_rational_type)
@@ -266,7 +235,7 @@ int scheme_equal (Scheme_Object *obj1, Scheme_Object *obj2)
 #   include "mzeqchk.inc"
     return vector_equal(obj1, obj2);
   } else if (SCHEME_BYTE_STRINGP(obj1)
-	     || SCHEME_PATHP(obj1)) {
+	     || SCHEME_GENERAL_PATHP(obj1)) {
     int l1, l2;
     l1 = SCHEME_BYTE_STRTAG_VAL(obj1);
     l2 = SCHEME_BYTE_STRTAG_VAL(obj2);
@@ -304,8 +273,13 @@ int scheme_equal (Scheme_Object *obj1, Scheme_Object *obj2)
     return scheme_bucket_table_equal((Scheme_Bucket_Table *)obj1, (Scheme_Bucket_Table *)obj2);
   } else if (SAME_TYPE(SCHEME_TYPE(obj1), scheme_wrap_chunk_type)) {
     return vector_equal(obj1, obj2);
-  } else
-    return 0;
+  } else {
+    Scheme_Equal_Proc eql = scheme_type_equals[SCHEME_TYPE(obj1)];
+    if (eql)
+      return eql(obj1, obj2);
+    else
+      return 0;
+  }
 }
 
 static int vector_equal(Scheme_Object *vec1, Scheme_Object *vec2)

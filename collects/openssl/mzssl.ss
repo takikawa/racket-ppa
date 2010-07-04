@@ -16,7 +16,8 @@
 (module mzssl mzscheme
   (require (lib "foreign.ss")
 	   (lib "port.ss")
-	   (lib "kw.ss"))
+	   (lib "kw.ss")
+           (lib "runtime-path.ss"))
 
   (provide ssl-available?
 	   ssl-load-fail-reason
@@ -48,30 +49,34 @@
 
   (unsafe!)
 
+  ;; We need to declare because they might be distributed with PLT Scheme
+  ;; in which case they should get bundled with stand-alone executables:
+  (define-runtime-path libcrypto-so
+    (case (system-type)
+      [(windows) '(so "libeay32")]
+      [else '(so "libcrypto")]))
+  (define-runtime-path libssl-so
+    (case (system-type)
+      [(windows) '(so "ssleay32")]
+      [else '(so "libssl")]))
+
   (define ssl-load-fail-reason #f)
 
-  (define 3m? (regexp-match #rx#"3m" (path->bytes (system-library-subpath))))
+  (define 3m? (eq? '3m (system-type 'gc)))
 
   (define libcrypto
     (with-handlers ([exn:fail? (lambda (x)
-				 (set! ssl-load-fail-reason (exn-message x))
-				 #f)])
-      (case (system-type)
-	[(windows)
-	 (ffi-lib "libeay32")]
-	[else
-	 (ffi-lib "libcrypto")])))
+                                 (set! ssl-load-fail-reason (exn-message x))
+                                 #f)])
+      (ffi-lib libcrypto-so '("" "0.9.8b" "0.9.8" "0.9.7"))))
 
   (define libssl
     (and libcrypto
-	 (with-handlers ([exn:fail? (lambda (x)
-				      (set! ssl-load-fail-reason (exn-message x))
-				      #f)])
-	   (case (system-type)
-	     [(windows)
-	      (ffi-lib "ssleay32")]
-	     [else
-	      (ffi-lib "libssl")]))))
+	 (with-handlers ([exn:fail?
+                          (lambda (x)
+                            (set! ssl-load-fail-reason (exn-message x))
+                            #f)])
+           (ffi-lib libssl-so '("" "0.9.8b" "0.9.8" "0.9.7")))))
 
   (define libmz (ffi-lib #f))
 
@@ -209,8 +214,7 @@
 
   (define (error/network who fmt . args)
     (raise (make-exn:fail:network
-            (string->immutable-string
-             (format "~a: ~a" who (apply format fmt args)))
+            (format "~a: ~a" who (apply format fmt args))
             (current-continuation-marks))))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

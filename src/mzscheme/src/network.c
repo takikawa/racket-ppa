@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -15,7 +15,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
   libscheme
   Copyright (c) 1994 Brent Benson
@@ -259,8 +260,8 @@ void scheme_init_network(Scheme_Env *env)
   scheme_add_global_constant("tcp-addresses", 
 			     scheme_make_prim_w_arity2(tcp_addresses,
 						       "tcp-addresses", 
-						       1, 1,
-						       2, 2), 
+						       1, 2,
+						       2, 4), 
 			     env);
   scheme_add_global_constant("tcp-abandon-port", 
 			     scheme_make_prim_w_arity(tcp_abandon_port,
@@ -2269,26 +2270,39 @@ void scheme_getnameinfo(void *sa, int salen,
 #endif
 }
 
+static int extract_svc_value(char *svc_buf)
+{
+  int id = 0, j;
+  for (j = 0; svc_buf[j]; j++) {
+    id = (id * 10) + (svc_buf[j] - '0');
+  }
+  return id;
+}
+
 static Scheme_Object *tcp_addresses(int argc, Scheme_Object *argv[])
 {
 #ifdef USE_TCP
   Scheme_Tcp *tcp = NULL;
   int closed = 0;
-  Scheme_Object *result[2];
+  Scheme_Object *result[4];
+  int with_ports = 0;
 
-  if (SCHEME_OUTPORTP(argv[0])) {
+  if (SCHEME_OUTPUT_PORTP(argv[0])) {
     Scheme_Output_Port *op;
-    op = (Scheme_Output_Port *)argv[0];
+    op = scheme_output_port_record(argv[0]);
     if (op->sub_type == scheme_tcp_output_port_type)
       tcp = op->port_data;
     closed = op->closed;
-  } else if (SCHEME_INPORTP(argv[0])) {
+  } else if (SCHEME_INPUT_PORTP(argv[0])) {
     Scheme_Input_Port *ip;
-    ip = (Scheme_Input_Port *)argv[0];
+    ip = scheme_input_port_record(argv[0]);
     if (ip->sub_type == scheme_tcp_input_port_type)
       tcp = ip->port_data;
     closed = ip->closed;
   }
+
+  if (argc > 1)
+    with_ports = SCHEME_TRUEP(argv[1]);
 
   if (!tcp)
     scheme_wrong_type("tcp-addresses", "tcp-port", 0, argc, argv);
@@ -2302,6 +2316,7 @@ static Scheme_Object *tcp_addresses(int argc, Scheme_Object *argv[])
     unsigned int l;
     char here[MZ_SOCK_NAME_MAX_LEN], there[MZ_SOCK_NAME_MAX_LEN];
     char host_buf[MZ_SOCK_HOST_NAME_MAX_LEN];
+    char svc_buf[MZ_SOCK_SVC_NAME_MAX_LEN];
     unsigned int here_len, there_len;
 
     l = sizeof(here);
@@ -2322,22 +2337,38 @@ static Scheme_Object *tcp_addresses(int argc, Scheme_Object *argv[])
 
     scheme_getnameinfo((struct sockaddr *)here, here_len, 
 		       host_buf, sizeof(host_buf),
-		       NULL, 0);
+                       (with_ports ? svc_buf : NULL), 
+                       (with_ports ? sizeof(svc_buf) : 0));
     result[0] = scheme_make_utf8_string(host_buf);
+    if (with_ports) {
+      l = extract_svc_value(svc_buf);
+      result[1] = scheme_make_integer(l);
+    }
 
     scheme_getnameinfo((struct sockaddr *)there, there_len, 
 		       host_buf, sizeof(host_buf),
-		       NULL, 0);
-    result[1] = scheme_make_utf8_string(host_buf);
+                       (with_ports ? svc_buf : NULL), 
+                       (with_ports ? sizeof(svc_buf) : 0));
+    result[with_ports ? 2 : 1] = scheme_make_utf8_string(host_buf);
+    if (with_ports) {
+      l = extract_svc_value(svc_buf);
+      result[3] = scheme_make_integer(l);
+    }
   }
 # else
   result[0] = scheme_make_utf8_string("0.0.0.0");
-  result[1] = result[1];
+  if (with_ports) {
+    result[1] = scheme_make_integer(1);
+    result[2] = result[0];
+    result[3] = result[1];
+  } else {
+    result[1] = result[0];
+  }
 # endif
 
-  return scheme_values(2, result);
+  return scheme_values(with_ports ? 4 : 2, result);
 #else
-  /* First arg can't possible be right! */
+  /* First arg can't possibly be right! */
   scheme_wrong_type("tcp-addresses", "tcp-port", 0, argc, argv);
 #endif
 }
@@ -2345,9 +2376,9 @@ static Scheme_Object *tcp_addresses(int argc, Scheme_Object *argv[])
 static Scheme_Object *tcp_abandon_port(int argc, Scheme_Object *argv[])
 {
 #ifdef USE_TCP
-  if (SCHEME_OUTPORTP(argv[0])) {
+  if (SCHEME_OUTPUT_PORTP(argv[0])) {
     Scheme_Output_Port *op;
-    op = (Scheme_Output_Port *)argv[0];
+    op = scheme_output_port_record(argv[0]);
     if (op->sub_type == scheme_tcp_output_port_type) {
       if (!op->closed) {
 	((Scheme_Tcp *)op->port_data)->flags |= MZ_TCP_ABANDON_OUTPUT;
@@ -2355,11 +2386,11 @@ static Scheme_Object *tcp_abandon_port(int argc, Scheme_Object *argv[])
       }
       return scheme_void;
     }
-  } else if (SCHEME_INPORTP(argv[0])) {
+  } else if (SCHEME_INPUT_PORTP(argv[0])) {
     /* Abandon is not really useful on input ports from the Schemer's
        perspective, but it's here for completeness. */
     Scheme_Input_Port *ip;
-    ip = (Scheme_Input_Port *)argv[0];
+    ip = scheme_input_port_record(argv[0]);
     if (ip->sub_type == scheme_tcp_input_port_type) {
       if (!ip->closed) {
 	((Scheme_Tcp *)ip->port_data)->flags |= MZ_TCP_ABANDON_INPUT;
@@ -2378,12 +2409,16 @@ static Scheme_Object *tcp_abandon_port(int argc, Scheme_Object *argv[])
 static Scheme_Object *tcp_port_p(int argc, Scheme_Object *argv[])
 {
 #ifdef USE_TCP
-  if (SCHEME_OUTPORTP(argv[0])) {
-    if (((Scheme_Output_Port *)argv[0])->sub_type == scheme_tcp_output_port_type) {
+  if (SCHEME_OUTPUT_PORTP(argv[0])) {
+    Scheme_Output_Port *op;
+    op = scheme_output_port_record(argv[0]);
+    if (op->sub_type == scheme_tcp_output_port_type) {
       return scheme_true;
     }
-  } else if (SCHEME_INPORTP(argv[0])) {
-    if (((Scheme_Input_Port *)argv[0])->sub_type == scheme_tcp_input_port_type) {
+  } else if (SCHEME_INPUT_PORTP(argv[0])) {
+    Scheme_Input_Port *ip;
+    ip = scheme_input_port_record(argv[0]);
+    if (ip->sub_type == scheme_tcp_input_port_type) {
       return scheme_true;
     }
   }
@@ -2432,18 +2467,18 @@ int scheme_get_port_socket(Scheme_Object *p, long *_s)
   tcp_t s = 0;
   int s_ok = 0;
 
-  if (SCHEME_OUTPORTP(p)) {
+  if (SCHEME_OUTPUT_PORTP(p)) {
     Scheme_Output_Port *op;
-    op = (Scheme_Output_Port *)p;
+    op = scheme_output_port_record(p);
     if (op->sub_type == scheme_tcp_output_port_type) {
       if (!op->closed) {
 	s = ((Scheme_Tcp *)op->port_data)->tcp;
 	s_ok = 1;
       }
     }
-  } else if (SCHEME_INPORTP(p)) {
+  } else if (SCHEME_INPUT_PORTP(p)) {
     Scheme_Input_Port *ip;
-    ip = (Scheme_Input_Port *)p;
+    ip = scheme_input_port_record(p);
     if (ip->sub_type == scheme_tcp_input_port_type) {
       if (!ip->closed) {
 	s = ((Scheme_Tcp *)ip->port_data)->tcp;
@@ -2458,6 +2493,25 @@ int scheme_get_port_socket(Scheme_Object *p, long *_s)
   } else
     return 0;
 #endif
+}
+
+void scheme_socket_to_ports(long s, const char *name, int takeover,
+                            Scheme_Object **_inp, Scheme_Object **_outp)
+{
+  Scheme_Tcp *tcp;
+  Scheme_Object *v;
+
+  tcp = make_tcp_port_data(s, takeover ? 2 : 3);
+
+  v = make_tcp_input_port(tcp, name);
+  *_inp = v;
+  v = make_tcp_output_port(tcp, name);
+  *_outp = v;
+  
+  if (takeover) {
+    scheme_file_open_count++;
+    REGISTER_SOCKET(s);
+  }
 }
 
 /*========================================================================*/
@@ -3156,10 +3210,7 @@ static int do_udp_recv(const char *name, Scheme_UDP *udp, char *bstr, long start
       udp->previous_from_addr = v[1];
     }
 
-    id = 0;
-    for (j = 0; svc_buf[j]; j++) {
-      id = (id * 10) + (svc_buf[j] - '0');
-    }
+    id = extract_svc_value(svc_buf);
 
     v[2] = scheme_make_integer(id);
 

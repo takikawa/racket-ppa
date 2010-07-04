@@ -217,6 +217,11 @@
 (htdp-top-pop 1)
 (htdp-teachpack-pop)
 
+;; Check require
+(htdp-top (require (lib "unit.ss" "mzlib")))
+(htdp-test #f unit? 12)
+(htdp-top-pop 1)
+
 ;; Error messages
 (htdp-top (define my-x 5))
 (htdp-top (define (my-f x) (+ x 5)))
@@ -228,3 +233,17 @@
 (htdp-syntax-test #'(define (my-x h) 12) #rx"cannot be re-defined")
 (htdp-top-pop 1)
 (htdp-top-pop 1)
+(htdp-syntax-test #'define #rx"does not follow")
+
+(htdp-syntax-test #'(require) #rx"found nothing")
+(htdp-syntax-test #'(require a) #rx"expected a module name as a")
+(htdp-syntax-test #'(require "a" "b") #rx"a single module name")
+(htdp-syntax-test #'(require "") #rx"empty")
+(htdp-syntax-test #'(require "/a") #rx"start with a slash")
+(htdp-syntax-test #'(require "a/") #rx"end with a slash")
+(htdp-syntax-test #'(require "a%&#^%") #rx"string can contain only")
+(htdp-syntax-test #'(require (lib)) #rx"expected at least two strings")
+(htdp-syntax-test #'(require (lib "a")) #rx"expected at least two strings")
+(htdp-syntax-test #'(require (lib "a" "b/")) #rx"end with a slash")
+(htdp-syntax-test #'(require (lib "a" 2)) #rx"string for a lib path")
+(htdp-syntax-test #'(require (planet "a" 2)) #rx"not a valid planet path")

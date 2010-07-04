@@ -98,8 +98,10 @@
 
  ;;; info bar at botttom of drscheme frame
  (collect-button-label "GC")
- (read-only "Schreibgeschützt")
- (read/write "Lesen/Schreiben")
+ (read-only-line1 "Lese-")
+ (read-only-line2 "Modus")
+ (read/write-line1 "Schreib-")
+ (read/write-line2 "Modus")
  (auto-extend-selection "Automatisch erweitern")
  (overwrite "Überschreiben")
  (running "Programm läuft")
@@ -276,7 +278,11 @@
  ;;; preferences
  (preferences "Einstellungen")
  (error-saving-preferences "Fehler beim Speichern der Einstellungen für ~a")
+ (error-saving-preferences-title "Fehler beim Speichern der Einstellungen")
  (error-reading-preferences "Fehler beim Lesen der Einstellungen")
+ (prefs-file-locked "Die Datei mit den Einstellungen ist gesperrt (weil die Datei ~a existiert), weshalb die Änderungen an den Einstellungen nicht gespeichert werden konnten. Änderung an den Einstellungen rückgängig machen?")
+ (try-again "Nochmal versuchen") ;; button label
+ (prefs-file-still-locked "Die Datei mit den Einstellungen ist immer noch gesperrt (weil die Datei ~a existiert), weshalb die Änderungen an den Einstellungen nicht gespeichert werden konnten.")
  (scheme-prefs-panel-label "Scheme")
  (warnings-prefs-panel-label "Warnmeldungen")
  (editor-prefs-panel-label "Editieren")
@@ -306,10 +312,16 @@
  (online-coloring-active "Syntax interaktiv einfärben")
  (open-files-in-tabs "Dateien in separaten Tabs öffnen (nicht separaten Fenstern)")
  (show-interactions-on-execute "Interaktionen beim Programmstart automatisch öffnen")
+ (switch-to-module-language-automatically "Automatisch in die `module'-Sprache wechseln, wenn ein Modul geöffnet wird")
  (limit-interactions-size "Umfang der Interaktionen einschränken")
  (background-color "Hintergrundfarbe")
  (default-text-color "Standard für Text") ;; used for configuring colors, but doesn't need the word "color"
  (choose-a-background-color "Hintergrundfarbe auswählen")
+
+ (revert-to-defaults "Standardeinstellung wiederherstellen")
+
+  (black-on-white-color-scheme "Schwarz auf Weiß") ;; these two appear in the color preferences dialog on butttons
+  (white-on-black-color-scheme "Weiß auf Schwarz") ;; clicking the buttons changes teh color schemes to some defaults that've been set up.
 
  ; title of the color choosing dialog
 
@@ -362,6 +374,12 @@
  (already-used-keyword "\"~a\" ist bereits ein Schlüsselwort mit Spezial-Einrückung")
  (add-keyword "Hinzufügen")
  (remove-keyword "Entfernen")
+
+ ;; repl color preferences
+ (repl-colors "REPL")
+ (repl-out-color "Ausgabe")
+ (repl-value-color "Werte")
+ (repl-error-color "Fehler")
  
  ;;; find/replace
  (find-and-replace "Suchen und Ersetzen")
@@ -469,9 +487,12 @@
  (save-info "Diese Datei auf der Platte speichern")
  (save-menu-item "&Speichern")
 
- (save-as-info "Dateinamen abfragen und dann Datei auf der Platte speichern")
+ (save-as-info "Dateinamen abfragen und dann Datei abspeichern")
  (save-as-menu-item "Speichern &unter...")
 
+ (page-setup-info "Ausdruck-Einstellungen ändern")
+ (page-setup-menu-item "Ausdruck-Einstellungen...")
+ 
  (print-info "Diese Datei zum Drucker schicken")
  (print-menu-item "&Drucken...")
 
@@ -546,6 +567,8 @@
  (wrap-text-item "Text umbrechen")
 
  (windows-menu-label "&Fenster")
+ (minimize "Minimieren") ;; minimize and zoom are only used under mac os x
+ (zoom "Zoomen")
  (bring-frame-to-front "Fenster nach vorn")       ;;; title of dialog
  (bring-frame-to-front... "Fenster nach vorn...") ;;; corresponding title of menu item
  (most-recent-window "Letztes Fenster")
@@ -685,6 +708,13 @@
  (break-menu-item-help-string "Momentane Auswertung unterbrechen")
  (kill-menu-item-label "Abbrechen")
  (kill-menu-item-help-string "Momentante Auswertung abbrechen")
+ (limit-memory-menu-item-label "Speicherverbrauch einschänken...")
+ (limit-memory-msg-1 "Das Limit wird beim nächsten Programmstart aktiv")
+ (limit-memory-msg-2 "und muß mindestens 100 Megabytes betragen.")
+ (limit-memory-unlimited "nicht einschränken")
+ (limit-memory-limited "einschränken")
+ (limit-memory-megabytes "Megabytes")
+
  (clear-error-highlight-menu-item-label "Fehlermarkierung entfernen")
  (clear-error-highlight-item-help-string "Entfernt die rosa Fehlermarkierung")
  (reindent-menu-item-label "&Einrücken")
@@ -772,7 +802,15 @@
  (clear-all-teachpacks-menu-item-label "Alle Teachpacks entfernen")
  (drscheme-teachpack-message-title "DrScheme-Teachpack")
  (already-added-teachpack "Teachpack ~a ist schon dabei")
+
+ ; ~a is filled with the teachpack's name; the message appears in the teachpack selection dialog when a user installs a new teachpack
+ (compiling-teachpack "Teachpack ~a compilieren...")
  
+  (teachpack-pre-installed "Vorinstallierte Teachpacks")
+  (teachpack-user-installed "selbst installierte Teachpacks")
+  (install-teachpack... "Teachpack installieren...")
+  (teachpack-already-installed "Ein Teachpack names '~a' ist schon installiert. Überschreiben?")
+
  ;;; Language dialog
  (introduction-to-language-dialog
   "Bitte eine Sprache auswählen. Für den Anfängerkurs ist wahrscheinlich die voreingestellte Sprache die richtige.")
@@ -788,6 +826,8 @@
  (input-syntax "Eingabesyntax")
  (dynamic-properties "Laufzeit")
  (output-syntax "Ausgabesyntax")
+ (teachpacks "Teachpacks") ;; label in the language dialog for the teaching languages
+ (teachpacks-none "<< keine >>") ;; shows up under the previous string, when there are no teachpacks
  (no-debugging-or-profiling "Kein Debugging oder Profiling")
  (debugging "Debugging")
  (debugging-and-profiling "Debugging und Profiling")
@@ -800,11 +840,18 @@
  (use-mixed-fractions "gemischte Brüche")
  (use-repeating-decimals "Dezimalausgabe mit Perioden")
  (decimal-notation-for-rationals "Dezimalnotation für Brüche")
- (please-select-a-language "Bitte Sprache auswählen")
+
+ ;; used in the bottom left of the drscheme frame as the label
+ ;; above the programming language's name
+ (programming-language-label "Programmiersprache:")
+ ;; used the popup menu from the just above; greyed out and only
+ ;; visible when some languages are in the history
+ (recent-languages "Kürzlich verwendete Sprachen:")
+ ;; shows up in bottom-left programming language menu popup, when no langs are recorded
+ (no-recently-chosen-languages "keine kürzlich verwendete Sprache") 
 
  ;; startup wizard screen language selection section
  (please-select-a-language "Sprache auswählen")
-
  
  ;;; languages
  (beginning-student "Anfänger")
@@ -840,7 +887,9 @@
  (using-a-textbook-after "?")
  
  ;; next two are before and after a language
- (start-with-before "Anfangen mit ")
+ (start-with-before "Mit ")
+
+ (start-with-after "anfangen?")
 
  (seasoned-plt-schemer? "Erfahrener PLT-Schemer?")
  (looking-for-standard-scheme? "Wollen Sie Standard-Scheme?")
@@ -902,6 +951,14 @@
  (evaluation-terminated "Auswertung abgebrochen")
  (evaluation-terminated-explanation
   "Der Auswertungs-Thread läuft nicht mehr; es findet also keine Auswertung bis zum nächsten Programmlauf statt.")
+
+  ; The next three constants show up in the same dialog as the above evaluation-terminated string
+  ; constants.
+  ; The first two show up only when the user calls 'exit' (possibly with a status code).
+  ; The third shows up when the program runs out of memory.
+  (exited-successfully "Erfolgreich beendet.")
+  (exited-with-error-code "Beendet mit Fehlercode ~a.") ;; ~a is filled in with a number between 1 and 255
+  (program-ran-out-of-memory "Dem Programm ist der Speicher ausgegangen.")
  (last-stack-frame "letzten Stack-Frame zeigen")
  (last-stack-frames "die letzten ~a Stack-Frames zeigen")
  (next-stack-frames "die nächsten ~a Stack-Frames zeigen")
@@ -1015,15 +1072,16 @@
  (stepper-program-has-changed "WARNUNG: Das Programm wurde geändert.")
  (stepper-program-window-closed "WARNUNG: Das Programm-Fenster ist nicht mehr da.")
 
- (stepper-home "Anfang")
  (stepper-name "Stepper")
  (stepper-language-level-message
   "Die aktuelle Sprachebene ist \"~a\". Der Stepper funktioniert bisher nur für die Ebenen\"~a\" bis \"~a\".")
  (stepper-button-label "Stepper")
+ (stepper-home "Anfang")
  (stepper-previous-application "|< Applikation")
  (stepper-previous "< Schritt")
  (stepper-next "Schritt >")
  (stepper-next-application "Applikation >|")
+ (stepper-jump-to-end "Ende")
  
  (debug-tool-button-name "Debugger")
 
@@ -1064,6 +1122,18 @@
   ;; Profj
   (profj-java "Java")
   (profj-java-mode "Java-Modus")
+
+  (profj-beginner-lang "Anfänger")
+  (profj-beginner-lang-one-line-summary "Java-ähnliche Lehrsprache für Anfänger")
+  (profj-full-lang "Voller Sprachumfang")
+  (profj-full-lang-one-line-summary "Wie Java 1.0 (einige 1.1-Erweiterungen)")
+  (profj-advanced-lang "Fortgeschritten")
+  (profj-advanced-lang-one-line-summary "Java-ähnliche Lehrsprache für Fortgeschrittene")
+  (profj-intermediate-lang "Zwischenstufe")
+  (profj-intermediate-lang-one-line-summary "Java-ähnliche Lehrsprache, Zwischenstufe")
+  (profj-dynamic-lang "Java+dynamic")
+  (profj-dynamic-lang-one-summary "Java mit dynamischen Typen")
+
   (profj-java-mode-color-heading "Farben ändern") ; Heading for preference to choose editing colors  
   (profj-java-mode-color-keyword "Schlüsselwort")
   (profj-java-mode-color-string "Zeichenkette")
@@ -1079,13 +1149,20 @@
 
   (profj-language-config-display-preferences "Einstellungen Anzeige") ; Heading for preferences controlling printing
   (profj-language-config-display-style "Art der Anzeige")
-  (profj-language-config-display-field "Klassen + Felder") ; Class should not be translated
+  (profj-language-config-display-field "Klasse + Felder")
+  (profj-language-config-class "Klasse")
   (profj-language-config-display-array "Gesamten Inhalt von Arrays ausdrucken?")
   (profj-language-config-testing-preferences "Einstellungen Testen") ; Heading for preferences controlling test behavior
   (profj-language-config-testing-enable "Testresultate bei Start anzeigen?") ; Run should be the word found on the Run button
   (profj-language-config-testing-coverage "Abdeckungsinformationen für Tests sammeln?")
+  (profj-language-config-support-test-language "Spracherweiterung \"test\" unterstützen?")
   (profj-language-config-testing-check "Check-Ausdruck zulassen?") ; check should not be translated
+  (profj-language-config-classpath "Klassenpfad")
+  (profj-language-config-choose-classpath-directory "Verzeichnis für den Klassenpfad auswählren")
   (profj-language-config-classpath-display "Aktuellen Wert anzeigen") ; Button label to print the current classpath
+
+  (profj-test-name-close-to-example "Der Name von Klasse ~a enhält etwas, das so ähnlich wie \"Example\" aussieht.")
+  (profj-test-name-example-miscapitalized "Das \"example\" im Namen der Klasse ~a sollte \"Example\" geschrieben werden.")
 
    ;; Close testing window and do not run test cases any more
   (profj-test-results-close-and-disable "Schließen und Testen deaktivieren")
@@ -1093,8 +1170,19 @@
   (profj-test-results-hide-and-disable "Ausblenden und Testen deaktivieren")
   (profj-test-results-window-title "Testresultate")
 
+  (profj-unsupported "Nicht unterstützt")
+  (profj-executables-unsupported "Programmdateien sind für Java bisher noch nicht unterstützt")
+
+  (profj-convert-to-text-comment "Hier Textkommentar einfügen")
+  (profj-convert-to-comment "Hier Kommentar einfügen")
+
+  (profj-executing-main "main ausführen")
+
   (profj-insert-java-comment-box "Java-Kommentarkasten einfügen")
   (profj-insert-java-interactions-box "Java-Interaktions-Kasten einfügen")
+
+  (profjWizward-insert-java-class "Java-Klasse einfügen")
+  (profjWizard-insert-java-union "Java-Vereinigung einfügen")
 
   ;; The Test Suite Tool
   ;; Errors

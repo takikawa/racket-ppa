@@ -8,6 +8,7 @@
            "shared.ss"
            "my-macros.ss"
            #;"xml-box.ss"
+           #;(file "~/clements/scheme-scraps/eli-debug.ss")
            (prefix beginner-defined: "beginner-defined.ss"))
 
   (define-syntax (where stx)
@@ -270,7 +271,7 @@
   
   
   (define ((annotate/master input-is-top-level?) main-exp break track-inferred-names? language-level)
-    #;(define _ (fprintf (current-error-port) "input to annotate: ~v\n" (syntax-object->datum main-exp)))
+    #;(define _ (>>> (syntax-object->datum main-exp)))
 
     (define binding-indexer
       (let ([binding-index 0])
@@ -445,6 +446,9 @@
                     [make-debug-info-fake-exp (lambda (exp free-bindings)
                                                 (make-debug-info (stepper-syntax-property exp 'stepper-fake-exp #t) 
                                                                  tail-bound free-bindings 'none #t))]
+                    [make-debug-info-fake-exp/tail-bound (lambda (exp tail-bound free-bindings)
+                                                           (make-debug-info (stepper-syntax-property exp 'stepper-fake-exp #t) 
+                                                                            tail-bound free-bindings 'none #t))]
                     
                     [outer-wcm-wrap (if pre-break?
                                         wcm-pre-break-wrap
@@ -452,6 +456,7 @@
                     [wcm-break-wrap (lambda (debug-info exp)
                                       (outer-wcm-wrap debug-info (break-wrap exp)))]
                     
+                    ;; used for things that are values:
                     [normal-bundle
                      (lambda (free-vars annotated)
                        (2vals (outer-wcm-wrap (make-debug-info-normal free-vars)
@@ -573,6 +578,9 @@
                     ;  and confused the heck out of me for some time today.  Bleah.  I'm just going to 
                     ;  do the whole expansion here. Also, I'm going to make this expansion call/cc-clean, 
                     ;  because I think it'll actually be easier to state & read this way.
+                    
+                    ; 2006-11: appears to work now.  I'm about to try to transfer this new idiom to begin0;
+                    ;  wish me luck.
                     
                     
                     [let-abstraction
@@ -702,14 +710,21 @@
                          free-varrefs)))]
                     
                     
-                    ;                                       :@@$ 
-                    ;                                       @:   
-                    ;  @@@ @@@  $@$:  @@-$+  @@-$+  -@@$   @@@@@ 
-                    ;   $   $     -@   @$ :   @$ :  $  -$   @    
-                    ;   +: ++  -$@$@   @      @     @@@@@   @    
-                    ;    $ $   $*  @   @      @     $       @    
-                    ;    $:+   @- *@   @      @     +:      @    
-                    ;    :@    -$$-@@ @@@@@  @@@@@   $@@+  @@@@@ 
+
+                    ;                                            
+                    ;                                            
+                    ;                                        ;;; 
+                    ;                                       ;    
+                    ;                                       ;    
+                    ;   ;   ;   ;;;;  ; ;;;  ; ;;;   ;;;  ;;;;;; 
+                    ;   ;   ;  ;   ;  ;;  ;  ;;  ;  ;   ;   ;    
+                    ;    ; ;   ;   ;  ;      ;      ;;;;;   ;    
+                    ;    ; ;   ;   ;  ;      ;      ;       ;    
+                    ;    ; ;   ;  ;;  ;      ;      ;       ;    
+                    ;     ;     ;; ;  ;      ;       ;;;;   ;    
+                    ;                                            
+                    ;                                            
+                    ;                                            
                     
                     
                     [varref-abstraction
@@ -822,23 +837,60 @@
                     ;                 ;;;;                       
                     ;                                            
                     
-                    [(begin0 . bodies-stx)
-                     (let*-2vals
-                      ([bodies (syntax->list (syntax bodies-stx))]
-                       [(annotated-first free-varrefs-first)
-                        (result-recur (car bodies))]
-                       [(annotated-bodies free-varref-sets)
-                        (2vals-map non-tail-recur (cdr bodies))])
-                      (normal-bundle (varref-set-union (cons free-varrefs-first free-varref-sets))
-                                     (quasisyntax/loc exp (begin0 #,annotated-first #,@annotated-bodies))))]
+                    ;; one-element begin0 is a special case, because in this case only
+                    ;; the body of the begin0 is in tail position.
                     
-                    ;; special case for the expansion of begin.
-                    ;; more efficient, but disabled because of difficulties in threading it through the 
-                    ;; reconstruction.  Easier to undo in the macro-unwind phase.
-                    #;[(let-values () . bodies-stx)
-                     (eq? (stepper-syntax-property exp 'stepper-hint) 'comes-from-begin)
-                     (begin-abstraction (syntax->list #`bodies-stx))]
+                    [(begin0 body)
+                     (let*-2vals ([(annotated-body free-vars-body) 
+                                   (tail-recur #'body)])
+                       (2vals (wcm-break-wrap (make-debug-info-normal free-vars-body)
+                                              (quasisyntax/loc exp (begin0 #,annotated-body)))
+                              free-vars-body))]
                     
+                      
+                    [(begin0 first-body . bodies-stx)
+                     (let*-2vals ([(annotated-first free-vars-first) (result-recur #'first-body)]
+                                  [(annotated-rest free-vars-rest) (2vals-map non-tail-recur (syntax->list #`bodies-stx))]
+                                  [wrapped-rest (map normal-break/values-wrap annotated-rest)]
+                                  [all-free-vars (varref-set-union (cons free-vars-first free-vars-rest))]
+                                  [early-debug-info (make-debug-info-normal all-free-vars)]
+                                  [tagged-temp (stepper-syntax-property begin0-temp 'stepper-binding-type 'stepper-temp)]
+                                  [debug-info-maker
+                                   (lambda (rest-exps)
+                                     (make-debug-info-fake-exp/tail-bound                                               
+                                      #`(begin0 #,@rest-exps)
+                                      (binding-set-union (list (list tagged-temp) tail-bound))
+                                      (varref-set-union (list (list tagged-temp) all-free-vars))))]
+                                  [rolled-into-fakes (let loop ([remaining-wrapped wrapped-rest] 
+                                                                [remaining-src (syntax->list #`bodies-stx)]
+                                                                [first-time? #t])
+                                                       ((if first-time? wcm-wrap wcm-pre-break-wrap)
+                                                        (debug-info-maker remaining-src)   
+                                                        (cond [(null? remaining-src) begin0-temp]
+                                                              [else #`(begin #,(car remaining-wrapped) #,(loop (cdr remaining-wrapped)
+                                                                                                               (cdr remaining-src)
+                                                                                                               #f))])))])
+                                 (2vals (wcm-wrap early-debug-info
+                                                  #`(let ([#,begin0-temp #,annotated-first])
+                                                      #,rolled-into-fakes))
+                                        all-free-vars))]
+                    
+                    
+                    
+                    ;                                                                        
+                    ;                                                                        
+                    ;  ;;;                                       ;;;                         
+                    ;    ;              ;                          ;                         
+                    ;    ;              ;                          ;                         
+                    ;    ;      ;;;   ;;;;;         ;   ;   ;;;;   ;     ;   ;   ;;;    ;;;  
+                    ;    ;     ;   ;    ;           ;   ;  ;   ;   ;     ;   ;  ;   ;  ;   ; 
+                    ;    ;     ;;;;;    ;    ;;;;;   ; ;   ;   ;   ;     ;   ;  ;;;;;   ;;   
+                    ;    ;     ;        ;            ; ;   ;   ;   ;     ;   ;  ;         ;  
+                    ;    ;     ;        ;            ; ;   ;  ;;   ;     ;  ;;  ;      ;   ; 
+                    ;    ;;;    ;;;;     ;;           ;     ;; ;   ;;;    ;; ;   ;;;;   ;;;  
+                    ;                                                                        
+                    ;                                                                        
+                    ;                                                                        
                     [(let-values . _)
                      (let-abstraction exp 
                                           #`let-values

@@ -249,8 +249,9 @@ _option.ss_ module. Options are set by the following parameters:
 > propagate-constants - #t improves the code by
      propagating constants.  Default = #t.
 
-> assume-primitives - #t equates X with #%X when
-     #%X exists.  This is useful only with non-unitized code.
+> assume-primitives - #t adds `(require mzscheme)'
+     to the beginning of the program. This is useful only 
+     with non-`module' code.
      Default = #f.
 
 > stupid - Allow obvious non-syntactic errors; e.g.:
@@ -259,7 +260,7 @@ _option.ss_ module. Options are set by the following parameters:
 > vehicles - Controls how closures are compiled.  The
     possible values are: 'vehicles:automatic - auto-groups
                          'vehicles:functions - groups by procedure
-                         'vehicles:units - groups by unit
+                         'vehicles:units - usupported
                          'vehicles:monolithic - groups randomly
     Default = 'vehicles:automatic.
 
@@ -287,7 +288,7 @@ the `dynext' collection . Those options control the actual C compiler
 and linker that are used. See doc.txt in the `dynext' collection for
 more information about those options.
 
-The _option-unit.ss_ library is a unit/sig matching the signature
+The _option-unit.ss_ library is a unit exporting the signature
 >    compiler:option^
 which contains these options. The _sig.ss_ library defines the
 `compiler:option^' signature.
@@ -297,9 +298,9 @@ which contains these options. The _sig.ss_ library defines the
 The Compiler as a Unit
 ======================
 
-The _compiler-unit.ss_ library provides a unit/sig 
+The _compiler-unit.ss_ library provides a unit
 >      compiler@
-matching the signature
+exporting the signature
 >      compiler^ 
 which provides the compiler.ss functions.  This signature and all
 auxiliary signatures needed by compiler@ are defined by the
@@ -320,7 +321,7 @@ Low-level Extension Compiler and Linker
 The high-level compiler.ss interface relies on low-level
 implementations of the extension compiler and linker.
 
-The _comp-unit.ss_ and _ld-unit.ss_ libraries define unit/sigs for the
+The _comp-unit.ss_ and _ld-unit.ss_ libraries define units for the
 low-level extension compiler and multi-file linker,
 > ld@
 and
@@ -359,7 +360,7 @@ The low-level linker functions from ld@ are:
     compiled object and .kp files into a multi-file extension.
 
 
-Both unit/sigs requires the following imports:
+Both units require the following imports:
 
    dynext:compile^ - From the `dynext' collection
    dynext:link^
@@ -390,7 +391,7 @@ prints the bundle to the current output port, instead; this stream can
 be `load'ed directly by a running program, as long as the
 `read-accept-compiled' parameter is true.
 
-The _embedr-unit.ss_ library provides a signed unit, _compiler:embed@_
+The _embedr-unit.ss_ library provides a unit, _compiler:embed@_
 that imports nothing and exports the functions below. The
 _embedr-sig.ss_ library provides the signature, _compiler:embed^_.
 
@@ -402,10 +403,14 @@ _embedr-sig.ss_ library provides the signature, _compiler:embed^_.
                                [#:mred? mred?]
                                [#:variant variant]
                                [#:aux aux]
-			       [#:collects-path path-or-list]
+                               [#:collects-path path-or-list]
                                [#:on-extension ext-proc]
                                [#:launcher? launcher?]
-                               [#:verbose? verbose?])
+                               [#:verbose? verbose?]
+                               [#:compiler compile-proc]
+                               [#:expand-namespace expand-namespace]
+                               [#:src-filter src-filter-proc]
+                               [#:get-extra-imports extra-imports-proc])
   - Copies the MzScheme (if `mred?' is #f) or MrEd (otherwise) binary,
   embedding code into the copied executable to be loaded on startup.
   (Under Unix, the binary is actually a wrapper executable that execs
@@ -456,7 +461,11 @@ _embedr-sig.ss_ library provides the signature, _compiler:embed^_.
   above might be '(require m).
 
   All modules are compiled before they are embedded into the target
-  executable.
+  executable; see also `compile-proc' below. When a module declares
+  run-time paths via the forms of MzLib's "runtime-path.ss", the
+  generated executable records the path (for use both by immediate
+  execution and for creating a distribution tha contains the
+  executable).
 
   When embedding into a copy of MrEd, a "-Z" flag should usually be
   included in the list of command-line flags, so that the target
@@ -465,11 +474,11 @@ _embedr-sig.ss_ library provides the signature, _compiler:embed^_.
   the class library required into the top-level namespace, literal
   `require's for those libraries should be included at the start.
 
-   The optional `aux' argument is an association list for
-   platform-specific options (i.e., it is a list of pairs where the
-   first element of the pair is a key symbol and the second element is
-   the value for that key). The currently supported keys are as
-   follows:
+  The optional `aux' argument is an association list for
+  platform-specific options (i.e., it is a list of pairs where the
+  first element of the pair is a key symbol and the second element is
+  the value for that key). The currently supported keys are as
+  follows:
 
       _'icns_ (Mac OS X) - an icon file path (suffix ".icns") to
               use for the executable's desktop icon
@@ -558,12 +567,14 @@ _embedr-sig.ss_ library provides the signature, _compiler:embed^_.
 
    If the `on-extension' argument is a procedure, the procedure is
    called when the traversal of module dependencies arrives at an
-   extension (i.e., a DLL or shared object). The default, #f, causes
-   an exception to be raised when an extension is encountered, since
-   extensions cannot be embedded in executables. The procedure is
-   called with two arguments: a path for the extension, and a boolean
-   that is #t if the extension is a _loader variant (instead of a
-   single-module extension).
+   extension (i.e., a DLL or shared object). The default, #f, causes a
+   reference to a single-module extension (in its current location) to
+   be embedded into the executable, since an extension itself cannot
+   be embedded in executables, the default raises an erorr when only a
+   _loader (instead of a single-module extension) variant is
+   available. The procedure is called with two arguments: a path for
+   the extension, and a boolean that is #t if the extension is a
+   _loader variant.
 
    If `launcher?' is #t, then no `modules' should be null,
    `literal-file-list' should be null, `literal-sexp' should be #f,
@@ -574,9 +585,40 @@ _embedr-sig.ss_ library provides the signature, _compiler:embed^_.
    'run-file)' is still the embedding executable).
 
    The `variant' argument indicates which variant of the original
-   binary to use for embedding. The default is 'normal, and typically
-   the only other possibility is '3m. See `current-launcher-variant'
-   in the "launcher" collection for more information.
+   binary to use for embedding. The default is `(system-type 'gc)';
+   see `current-launcher-variant' in the "launcher" collection for
+   more information.
+
+   The `compile-proc' argument is used to compile the source of
+   modules to be included in the executable (when a compiled form is
+   not already available). It should accept a single argument that is
+   a syntax object for a `module' form. The default procedure uses
+   `compile' parameterized to set the current namespace to
+   `expand-namespace'.
+
+   The `expand-namespace' argument selects a namespace for expanding
+   extra modules (and for compiling using the default `compile-proc').
+   Extra-module expansion is needed to detect run-time path
+   declarations in included modules, so that the path resolutions can
+   be directed to the current locations (and, unltimately, redirected
+   to copies in a distribution).
+
+   The `src-filter-proc' takes a path and returns true if the
+   corresponding file source be included in the embedding executable
+   in source form (insteda of compiled form), #f otherwise. The
+   default returns #f for all paths. Beware that the current output
+   port may be redirected to the result executable when the filter
+   procedure is called.
+  
+   The `extra-imports-proc' takes a source pathname and compiled
+   module for each module to be included in the executable. It returns
+   a list of quoted module paths (absolute, as opposed to relative to
+   the module) for extra modules to be included in the executable in
+   addition to the modules that the source module `require's,
+   `require-for-syntax's, and `require-for-template's. For example,
+   these modules might correspond to reader extensions needed to parse
+   a module that will be included as source, as long as the reader is
+   referenced through an absolute module path.
 
 > (make-embedding-executable dest mred? verbose? mod-list literal-file-list literal-sexpr cmdline-list [aux launcher? variant])
 
@@ -658,12 +700,13 @@ it's a ".dmg" disk image; under Unix, it's a ".tgz" archive.
   a file extension is added automatcially (using the first result
   of `bundle-put-file-extension+style+filters').
 
-  By default, the created archive contains a directory with the same
-  name as `dir'. If `for-exe?' is true under Mac OS X, and if `dir'
-  contains a single file, then the created disk image contains just
-  the file.
+  The created archive contains a directory with the same name as `dir'
+  --- except under Mac OS X when `for-exe?' is true and `dir' contains
+  a single a single file or directory, in which case the created disk
+  image contains just the file or directory. The default for
+  `for-exe?' is #f.
 
-  Archive creation files if `dist-file' exists.
+  Archive creation fails if `dist-file' exists.
 
 > (bundle-put-file-extension+style+filters)
 

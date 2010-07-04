@@ -196,8 +196,10 @@ please adhere to these guidelines:
 
  ;;; info bar at botttom of drscheme frame
  (collect-button-label "GC")
- (read-only "Read only")
- (read/write "Read/Write")
+  (read-only-line1 "Read")
+  (read-only-line2 "only")
+  (read/write-line1 "Read/")
+  (read/write-line2 "Write")
  (auto-extend-selection "Auto-extend")
  (overwrite "Overwrite")
  (running "running")
@@ -380,7 +382,11 @@ please adhere to these guidelines:
  ;;; preferences
  (preferences "Preferences")
  (error-saving-preferences "Error saving preferences: ~a")
+ (error-saving-preferences-title "Error saving preferences")
  (error-reading-preferences "Error reading preferences")
+ (prefs-file-locked "The preferences file is locked (because the file ~a exists), so your preference change could not be saved. Cancel preference change?")
+ (try-again "Try again") ;; button label
+ (prefs-file-still-locked "The preferences file is still locked (because the file ~a exists), so your preference change will not be saved.")
  (scheme-prefs-panel-label "Scheme")
  (warnings-prefs-panel-label "Warnings")
  (editor-prefs-panel-label "Editing")
@@ -410,11 +416,16 @@ please adhere to these guidelines:
  (online-coloring-active "Color syntax interactively")
  (open-files-in-tabs "Open files in separate tabs (not separate windows)")
  (show-interactions-on-execute "Automatically open interactions window when running a program")
+  (switch-to-module-language-automatically "Automatically switch to the module language when opening a module")
  (limit-interactions-size "Limit interactions size")
  (background-color "Background Color")
  (default-text-color "Default text") ;; used for configuring colors, but doesn't need the word "color"
  (choose-a-background-color "Please choose a background color")
-
+ (revert-to-defaults "Revert to Defaults")
+  
+  (black-on-white-color-scheme "Black on White") ;; these two appear in the color preferences dialog on butttons
+  (white-on-black-color-scheme "White on Black") ;; clicking the buttons changes teh color schemes to some defaults that've been set up.
+  
  ; title of the color choosing dialog
 
  ; should have entire alphabet
@@ -467,6 +478,12 @@ please adhere to these guidelines:
  (add-keyword "Add")
  (remove-keyword "Remove")
  
+  ; repl color preferences
+  (repl-colors "REPL")
+  (repl-out-color "Output")
+  (repl-value-color "Values")
+  (repl-error-color "Errors")
+  
  ;;; find/replace
  (find-and-replace "Find and Replace")
  (find "Find")
@@ -579,6 +596,9 @@ please adhere to these guidelines:
  (print-info "Send this file to a printer")
  (print-menu-item "&Print...")
 
+ (page-setup-info "Configure printing parameters")
+ (page-setup-menu-item "Page Setup...")
+
  (close-info "Close this file")
  (close-menu-item "&Close")
 
@@ -650,6 +670,8 @@ please adhere to these guidelines:
  (wrap-text-item "Wrap Text")
 
  (windows-menu-label "&Windows")
+ (minimize "Minimize") ;; minimize and zoom are only used under mac os x
+ (zoom "Zoom")
  (bring-frame-to-front "Bring Frame to Front")       ;;; title of dialog
  (bring-frame-to-front... "Bring Frame to Front...") ;;; corresponding title of menu item
  (most-recent-window "Most Recent Window")
@@ -793,6 +815,12 @@ please adhere to these guidelines:
  (break-menu-item-help-string "Break the current evaluation")
  (kill-menu-item-label "Kill")
  (kill-menu-item-help-string "Kill the current evaluation")
+ (limit-memory-menu-item-label "Limit memory...")
+ (limit-memory-msg-1 "The limit will take effect the next time the program")
+ (limit-memory-msg-2 "is Run, and it must be at least 100 megabytes.")
+ (limit-memory-unlimited "Unlimited")
+ (limit-memory-limited "Limited")
+ (limit-memory-megabytes "Megabytes")
  (clear-error-highlight-menu-item-label "Clear Error Highlight")
  (clear-error-highlight-item-help-string "Removes the pink error highlighting")
  (reindent-menu-item-label "&Reindent")
@@ -882,7 +910,14 @@ please adhere to these guidelines:
  (clear-all-teachpacks-menu-item-label "Clear All Teachpacks")
  (drscheme-teachpack-message-title "DrScheme Teachpack")
  (already-added-teachpack "Already added ~a teachpack")
- 
+  
+  ; ~a is filled with the teachpack's name; the message appears in the teachpack selection dialog when a user installs a new teachpack
+  (compiling-teachpack "Compiling ~a teachpack ...")
+  (teachpack-pre-installed "Preinstalled Teachpacks")
+  (teachpack-user-installed "User-installed Teachpacks")
+  (install-teachpack... "Install Teachpack...")
+  (teachpack-already-installed "A teachpack with the name '~a' has already been installed. Overwrite it?")
+  
  ;;; Language dialog
  (introduction-to-language-dialog
   "Please select a language. Students in most introductory courses should use the default language.")
@@ -898,6 +933,8 @@ please adhere to these guidelines:
  (input-syntax "Input Syntax")
  (dynamic-properties "Dynamic Properties")
  (output-syntax "Output Syntax")
+  (teachpacks "Teachpacks") ;; label in the language dialog for the teaching languages
+  (teachpacks-none "<< none >>") ;; shows up under the previous string, when there are no teachpacks
  (no-debugging-or-profiling "No debugging or profiling")
  (debugging "Debugging")
  (debugging-and-profiling "Debugging and profiling")
@@ -911,6 +948,15 @@ please adhere to these guidelines:
  (use-repeating-decimals "Repeating decimals")
  (decimal-notation-for-rationals "Use decimal notation for rationals")
 
+  ; used in the bottom left of the drscheme frame as the label
+  ; above the programming language's name
+  (programming-language-label "Programming language:")
+  ; used the popup menu from the just above; greyed out and only
+  ; visible when some languages are in the history
+  (recent-languages "Recent languages:")
+  ; shows up in bottom-left programming language menu popup, when no langs are recorded
+  (no-recently-chosen-languages "no recently chosen languages") 
+  
  ;; startup wizard screen language selection section
  (please-select-a-language "Please select a language")
   
@@ -950,7 +996,8 @@ please adhere to these guidelines:
   
   ; next two are before and after a language
   (start-with-before "Start with ")
-
+  (start-with-after "")
+  
   (seasoned-plt-schemer? "Seasoned PLT Schemer?")
   (looking-for-standard-scheme? "Looking for standard Scheme?")
 
@@ -1011,6 +1058,14 @@ please adhere to these guidelines:
  (evaluation-terminated "Evaluation Terminated")
  (evaluation-terminated-explanation
   "The evaluation thread is no longer running, so no evaluation can take place until the next execution.")
+  
+  ; The next three constants show up in the same dialog as the above evaluation-terminated string
+  ; constants.
+  ; The first two show up only when the user calls 'exit' (possibly with a status code).
+  ; The third shows up when the program runs out of memory.
+  (exited-successfully "Exited successfully.")
+  (exited-with-error-code "Exited with error code ~a.") ;; ~a is filled in with a number between 1 and 255
+  (program-ran-out-of-memory "The program ran out of memory.")
  (last-stack-frame "show the last stack frame")
  (last-stack-frames "show the last ~a stack frames")
  (next-stack-frames "show the next ~a stack frames")
@@ -1124,15 +1179,16 @@ please adhere to these guidelines:
  (stepper-program-has-changed "WARNING: The program has changed.")
  (stepper-program-window-closed "WARNING: The program window is gone.")
 
- (stepper-home "Home")
  (stepper-name "Stepper")
  (stepper-language-level-message
   "The language level is set to \"~a\". Currently, the stepper works only for the \"~a\" through the \"~a\" language levels.")
  (stepper-button-label "Step")
+ (stepper-home "Home")
  (stepper-previous-application "|< Application")
  (stepper-previous "< Step")
  (stepper-next "Step >")
  (stepper-next-application "Application >|")
+ (stepper-jump-to-end "End")
  
  (debug-tool-button-name "Debug")
 
@@ -1174,6 +1230,17 @@ please adhere to these guidelines:
   (profj-java "Java")
   (profj-java-mode "Java mode")
 
+  (profj-beginner-lang "Beginner")
+  (profj-beginner-lang-one-line-summary "Java-like Beginner teaching language")
+  (profj-full-lang "Full")
+  (profj-full-lang-one-line-summary "Like Java 1.0 (some 1.1)")
+  (profj-advanced-lang "Advanced")
+  (profj-advanced-lang-one-line-summary "Java-like Advanced teaching language")
+  (profj-intermediate-lang "Intermediate")
+  (profj-intermediate-lang-one-line-summary "Java-like Intermediate teaching language")
+  (profj-dynamic-lang "Java+dynamic")
+  (profj-dynamic-lang-one-summary "Java with dynamic typing capabilities")
+
   (profj-java-mode-color-heading "Edit Colors") ; Heading for preference to choose editing colors  
   (profj-java-mode-color-keyword "keyword")
   (profj-java-mode-color-string "string")
@@ -1189,22 +1256,40 @@ please adhere to these guidelines:
   
   (profj-language-config-display-preferences "Display Preferences") ; Heading for preferences controlling printing
   (profj-language-config-display-style "Display style")
-  (profj-language-config-display-field "Class + Fields") ; Class should not be translated
+  (profj-language-config-display-field "Class + Fields")
+  (profj-language-config-class "Class")
   (profj-language-config-display-array "Print entire contents of arrays?")
   (profj-language-config-testing-preferences "Testing Preferences") ; Heading for preferences controlling test behavior
   (profj-language-config-testing-enable "Display testing results on Run?") ; Run should be the word found on the Run button
   (profj-language-config-testing-coverage "Collect coverage information for tests?")
+  (profj-language-config-support-test-language "Support test Language extension?")
   (profj-language-config-testing-check "Allow check expression?") ; check should not be translated
+  (profj-language-config-classpath "Classpath")
+  (profj-language-config-choose-classpath-directory "Choose the directory to add to class path")
   (profj-language-config-classpath-display "Show current") ; Button label to print the current classpath
 
+  (profj-test-name-close-to-example "Class ~a's name contains a phrase close to Example.")
+  (profj-test-name-example-miscapitalized "Class ~a's name contains a miscapitalized example.")
+  
    ;; Close testing window and do not run test cases any more
   (profj-test-results-close-and-disable "Close and Disable Testing")
   ;; Hide docked testing window and do not run test cases any more
   (profj-test-results-hide-and-disable "Hide and Disable Testing")
   (profj-test-results-window-title "Test Results")
+  
+  (profj-unsupported "Unsupported")
+  (profj-executables-unsupported "Sorry - executables are not supported for Java at this time")
+
+  (profj-convert-to-text-comment "Convert to text comment")
+  (profj-convert-to-comment "Convert to comment")
+
+  (profj-executing-main "executing main")
 
   (profj-insert-java-comment-box "Insert Java Comment Box")
   (profj-insert-java-interactions-box "Insert Java Interactions Box")
+
+  (profjWizward-insert-java-class "Insert Java Class")
+  (profjWizard-insert-java-union "Insert Java Union")
 
   ;; The Test Suite Tool
   ;; Errors

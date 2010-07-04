@@ -4,7 +4,7 @@
  * Author:      Julian Smart
  * Created:     1993
  * Updated:	March 1995
- * Copyright:   (c) 2004-2006 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2007 PLT Scheme Inc.
  * Copyright:   (c) 1993, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -153,6 +153,8 @@ wxbMenu::wxbMenu (char *Title, wxFunction WXUNUSED(func))
 // The wxWindow destructor will take care of deleting the submenus.
 wxbMenu::~wxbMenu (void)
 {
+  menu_bar= NULL;
+  top_level_menu = NULL;
 }
 
 wxMenuItem *wxbMenu::FindItemForId (long itemId, wxMenu ** itemMenu, int * pos)
@@ -252,6 +254,7 @@ wxbMenuBar::wxbMenuBar (int N, wxMenu * Menus[], char *Titles[])
 
 wxbMenuBar::~wxbMenuBar (void)
 {
+  menu_bar_frame = NULL;
 }
 
 void wxbMenuBar::Append (wxMenu * menu, char *title)

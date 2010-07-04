@@ -4,7 +4,7 @@
  * Author:      Julian Smart and Matthew Flatt
  * Created:     1993
  * Updated:	August 1994
- * Copyright:   (c) 2004-2006 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2007 PLT Scheme Inc.
  * Copyright:   (c) 1993, AIAI, University of Edinburgh
  */
 
@@ -108,6 +108,14 @@ void wxInitClipboard(void)
   xa_clipboard = ATOM("CLIPBOARD");
 }
 
+Window wxAddClipboardWindowProperty(Atom prop)
+{
+  unsigned char data[1] = { 'm' };
+  XChangeProperty(XtDisplay(wx_clipWindow), XtWindow(wx_clipWindow),
+		  prop, prop, 8, PropModeReplace, data, 1);
+  return XtWindow(wx_clipWindow);
+}
+
 static void AddClipboardFrame(wxClipboard *cb, int on)
 {
   if (!on)
@@ -150,7 +158,7 @@ static Boolean doConvertClipboard(wxClipboard *cb,
     if (cb->clipOwner) {
       count = cb->clipOwner->formats->Number();
       extra = (cb->clipOwner->formats->Member("TEXT")) ? 2 : 0;
-      cb->receivedTargets = new Atom[count + extra];
+      cb->receivedTargets = new WXGC_ATOMIC Atom[count + extra];
       formats = cb->clipOwner->formats->ListToArray(FALSE);
       for (i = 0; i < count; i++) {
 	Atom atm;
@@ -163,7 +171,7 @@ static Boolean doConvertClipboard(wxClipboard *cb,
       }
     } else {
       count = 3;
-      cb->receivedTargets = new Atom[3];
+      cb->receivedTargets = new WXGC_ATOMIC Atom[3];
       ((Atom *)cb->receivedTargets)[0] = xa_utf8;
       ((Atom *)cb->receivedTargets)[1] = XA_STRING;
       ((Atom *)cb->receivedTargets)[2] = xa_text;
@@ -381,7 +389,7 @@ static void wxGetTargets(Widget WXUNUSED(w), XtPointer _cb, Atom *WXUNUSED(sel),
       cb->receivedTargets = (void *)1; /* To break the waiting loop */
       cb->receivedLength = 0;
     } else {
-      cb->receivedTargets = new Atom[*len];
+      cb->receivedTargets = new WXGC_ATOMIC Atom[*len];
       memcpy(cb->receivedTargets, value, *len * sizeof(Atom));
       cb->receivedLength = *len;
     }
@@ -396,7 +404,7 @@ static void wxGetSelection(Widget WXUNUSED(w), XtPointer _cb, Atom *WXUNUSED(sel
   if (cb->in_progress < 0) {
     cb->in_progress = 0;
   } else {
-    cb->receivedString = new char[(*len) + 1];
+    cb->receivedString = new WXGC_ATOMIC char[(*len) + 1];
     memcpy(cb->receivedString, value, *len);
     cb->receivedString[*len] = 0;
     cb->receivedLength = *len;
@@ -455,14 +463,14 @@ static void abandoned_clip(void *_cb)
     cb->in_progress = -1;
 }
 
-char *wxClipboard::GetClipboardData(char *format, long *length, long time)
+char *wxClipboard::GetClipboardData(char *format, long *length, long time, int alt_sel)
 {
-  if (clipOwner)  {
+  if (clipOwner && !alt_sel)  {
     if (clipOwner->formats->Member(format))
       return wxsGetDataInEventspace(clipOwner, format, length);
     else
       return NULL;
-  } else if (cbString) {
+  } else if (cbString && !alt_sel) {
     if (!strcmp(format, "TEXT"))
       return copystring(cbString);
     else
@@ -482,7 +490,7 @@ char *wxClipboard::GetClipboardData(char *format, long *length, long time)
     receivedString = NULL;
     receivedTargets = NULL;
 
-    XtGetSelectionValue(getClipWindow, is_sel ? XA_PRIMARY : xa_clipboard,
+    XtGetSelectionValue(getClipWindow, alt_sel ? alt_sel : (is_sel ? XA_PRIMARY : xa_clipboard),
 			xa_targets, wxGetTargets, (XtPointer)saferef, time);
 
     start_time = scheme_get_inexact_milliseconds();
@@ -517,7 +525,7 @@ char *wxClipboard::GetClipboardData(char *format, long *length, long time)
       return NULL;
     }
 
-    XtGetSelectionValue(getClipWindow, is_sel ? XA_PRIMARY : xa_clipboard,
+    XtGetSelectionValue(getClipWindow, alt_sel ? alt_sel : (is_sel ? XA_PRIMARY : xa_clipboard),
 			xa, wxGetSelection, (XtPointer)saferef, 0);
     
     start_time = scheme_get_inexact_milliseconds();

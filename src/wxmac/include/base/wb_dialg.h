@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	
- * Copyright:	(c) 2004-2006 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2007 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  */
 
@@ -38,7 +38,7 @@ class wxbDialogBox: public wxFrame
   virtual void Iconize(Bool iconize) = 0;
   virtual Bool Iconized(void) = 0;
 
-  void Centre(int direction = wxBOTH);
+  void Centre(int direction = wxBOTH, wxWindow *parent = NULL);
 };
 
 #define wxOPEN 1

@@ -1,37 +1,31 @@
 
 (module syntax-snip mzscheme
   (require (lib "class.ss")
-           (lib "unitsig.ss")
+           (lib "unit.ss")
            (lib "mred.ss" "mred")
            (lib "framework.ss" "framework")
            "interfaces.ss"
            "controller.ss"
            "properties.ss"
-           "typesetter.ss")
+           "typesetter.ss"
+           "partition.ss")
   (provide snip@
-           snip-context-menu-extension@)
-  
+           snip-keymap-extension@)
+
+  ;; Every snip has its own controller and properties-controller
+  ;; (because every snip now displays its own properties)
+
   (define snip@
-    (unit/sig snip^
+    (unit
       (import prefs^
               keymap^
               context-menu^
               snipclass^)
-      
+      (export snip^)
+
       ;; syntax-snip : syntax -> snip
       (define (syntax-snip stx)
         (new syntax-snip% (syntax stx)))
-      
-      (define *syntax-controller* #f)
-      
-      (define (the-syntax-controller)
-        (let ([controller *syntax-controller*])
-          (or controller
-              (let* ([controller (new syntax-controller%)]
-                     [props (new independent-properties-controller% (controller controller))])
-                (send controller set-properties-controller props)
-                (set! *syntax-controller* controller)
-                controller))))
       
       ;; syntax-value-snip%
       (define syntax-value-snip%
@@ -40,7 +34,7 @@
           (init-field controller)
           (inherit set-margin
                    set-inset)
-          
+
           (define -outer (new text:standard-style-list%))
           (super-new (editor -outer) (with-border? #f))
           (set-margin 0 0 0 0)
@@ -48,7 +42,7 @@
           (send -outer change-style (make-object style-delta% 'change-alignment 'top))
           (new syntax-keymap%
                (editor -outer)
-               (context-menu (new context-menu% (snip this))))
+               (snip this))
           (refresh)
           
           (define/public (get-controller) controller)
@@ -86,33 +80,38 @@
           (define/override (copy)
             (new syntax-value-snip% (controller controller) (syntax stx)))
           
+          ;; read-special : any number/#f number/#f number/#f -> syntax
+          ;; Produces 3D syntax to preserve eq-ness of syntax
+          ;; #'#'stx would be lose identity when wrapped
           (define/public (read-special src line col pos)
-            #;(datum->syntax-object #f
-                                    `(,#'quote-syntax ,stx)
-                                    (list src line col pos 1))
-            #`(force '#,(delay stx)))
+            (with-syntax ([p (lambda () stx)])
+              #'(p)))
           ))
-      
+
+
+      ;; syntax-snip%
       (define syntax-snip%
         (class* editor-snip% (readable-snip<%>)
           (init-field ((stx syntax)))
-          (init-field (controller (the-syntax-controller)))
           (inherit set-margin
                    set-inset
                    set-snipclass
                    set-tight-text-fit
-                   show-border)
-          
+                   show-border
+                   get-admin)
+
+          (define controller
+            (new syntax-controller% (primary-partition (find-primary-partition))))
+          (define properties-snip (new properties-snip%))
+          (send controller set-properties-controller this)
+
           (define -outer (new text%))
           (super-new (editor -outer) (with-border? #f))
           (set-margin 0 0 0 0)
           (set-inset 0 0 0 0)
           (set-snipclass snip-class)
           (send -outer select-all)
-          (send -outer change-style (make-object style-delta% 'change-alignment 'top)
-                0
-                (send -outer last-position))
-          
+
           (define the-syntax-snip
             (new syntax-value-snip% (syntax stx) (controller controller)))
           (define the-summary
@@ -122,33 +121,49 @@
                   (format "#<syntax:~s:~s>" line col)
                   "#<syntax>")))
           
-          (define/private (hide-me)
+          (define shown? #f)
+          (define/public (refresh)
+            (if shown?
+                (refresh/shown)
+                (refresh/hidden)))
+
+          (define/private (refresh/hidden)
             (send* -outer
               (begin-edit-sequence)
               (lock #f)
               (erase))
             (set-tight-text-fit #t)
             (show-border #f)
-            (outer:insert (show-icon) style:hyper (lambda _ (show-me)))
+            (outer:insert (show-icon) style:hyper 
+                          (lambda _ (set! shown? #t) (refresh)))
             (outer:insert the-summary)
             (send* -outer 
               (lock #t)
               (end-edit-sequence)))
-          
-          (define/private (show-me)
+
+          (define/private (refresh/shown)
             (send* -outer
               (begin-edit-sequence)
               (lock #f)
               (erase))
             (set-tight-text-fit #f)
             (show-border #t)
-            (outer:insert (hide-icon) style:hyper (lambda _ (hide-me)))
+            (outer:insert (hide-icon) style:hyper
+                          (lambda _ (set! shown? #f) (refresh)))
             (outer:insert " ")
             (outer:insert the-syntax-snip)
+            (outer:insert " ")
+            (if (props-shown?)
+                (begin (outer:insert "<" style:green (lambda _ (show #f)))
+                       (outer:insert properties-snip))
+                (begin (outer:insert ">" style:green (lambda _ (show #t)))))
             (send* -outer
+              (change-style (make-object style-delta% 'change-alignment 'top)
+                            0
+                            (send -outer last-position))
               (lock #t)
               (end-edit-sequence)))
-          
+
           (define/private outer:insert
             (case-lambda
               [(obj)
@@ -165,21 +180,38 @@
           
           ;; Snip methods
           (define/override (copy)
-            (new syntax-snip% (controller controller) (syntax stx)))
+            (new syntax-snip% (syntax stx)))
           (define/override (write stream)
             (send stream put (string->bytes/utf-8 (format "~s" (marshall-syntax stx)))))
           (define/public (read-special src line col pos)
             (send the-syntax-snip read-special src line col pos))
-          
-          (hide-me)
+
+          (define/private (find-primary-partition)
+            #;(define editor (send (get-admin) get-editor))
+            (new-bound-partition))
+
+
+          ;; syntax-properties-controller methods
+          (define properties-shown? #f)
+          (define/public (props-shown?)
+            properties-shown?)
+          (define/public (show ?)
+            (set! properties-shown? ?)
+            (refresh))
+          (define/public (set-syntax stx)
+            (send properties-snip set-syntax stx))
+
+          (refresh)
           (send -outer hide-caret #t)
           (send -outer lock #t)
           ))
       
       ;; independent-properties-controller%
+      #;
       (define independent-properties-controller%
         (class* object% (syntax-properties-controller<%>)
           (init-field controller)
+          (init-field ((stx syntax) #f))
           
           ;; Properties display
           (define parent
@@ -197,25 +229,25 @@
             (send parent show ?))
           (define/public (props-shown?)
             (send parent is-shown?))
+
           (super-new)))
       ))
 
-  (define snip-context-menu-extension@
-    (unit/sig context-menu^
-      (import (pre : context-menu^))
-      
-      (define context-menu%
-        (class pre:context-menu%
-          (init-field snip)
+  (define snip-keymap-extension@
+    (unit
+      (import (prefix pre: keymap^))
+      (export keymap^)
 
-          (define/override (after-selection-items)
-            (super after-selection-items)
-            (new menu-item% (label "Show syntax properties")
-                 (parent this)
-                 (callback (lambda _ (send snip show-props))))
-            (void))
+      (define syntax-keymap%
+        (class pre:syntax-keymap%
+          (init-field snip)
+          (inherit add-function)
+          (super-new (controller (send snip get-controller)))
           
-          (super-new (controller (send snip get-controller)))))))
+          (add-function "show-syntax-properties"
+                        (lambda (i e)
+                          (send snip show-props)))))))
+  
   
   
   (define style:normal (make-object style-delta% 'change-normal))
@@ -223,6 +255,10 @@
     (let ([s (make-object style-delta% 'change-normal)])
       (send s set-delta 'change-toggle-underline)
       (send s set-delta-foreground "blue")
+      s))
+  (define style:green
+    (let ([s (make-object style-delta% 'change-normal)])
+      (send s set-delta-foreground "darkgreen")
       s))
   (define style:bold
     (let ([s (make-object style-delta% 'change-normal)])
@@ -236,6 +272,10 @@
     (make-object image-snip%
       (build-path (collection-path "icons") "turn-down.png")))
   
+  (define (show-properties-icon)
+    (make-object image-snip%
+      (build-path (collection-path "icons") "syncheck.png")))
+
   ;; marshall-syntax : syntax -> printable
   (define (marshall-syntax stx)
     (unless (syntax? stx)

@@ -25,6 +25,7 @@
 	   (rename beginner-if if)
 	   (rename beginner-and and)
 	   (rename beginner-or or)
+           (rename beginner-require require)
 	   (rename intermediate-quote quote)
 	   (rename intermediate-quasiquote quasiquote)
 	   (rename intermediate-unquote unquote)
@@ -42,6 +43,7 @@
 	   ;; (rename advanced-contract contract)
 	   ;; (rename advanced-define-data define-data)
 	   #%datum
+           #%top-interaction
 	   empty true false)
 
   ;; procedures:

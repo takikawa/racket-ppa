@@ -12,7 +12,7 @@
            (lib "list.ss")
            (lib "mred.ss" "mred"))
   
-  (provide game-unit)
+  (provide game@)
   
   (define default-font (send the-font-list find-or-create-font 10 'roman 'normal 'normal #f))
   (preferences:set-default 'paint-by-numbers:font default-font (lambda (f) (is-a? f font%)))
@@ -509,7 +509,7 @@
 	(send (send f get-canvas) set-grid state)
 	(send f show #t))]))
   
-  (define game-unit
+  (define game@
     (unit
       (import)
       (export)

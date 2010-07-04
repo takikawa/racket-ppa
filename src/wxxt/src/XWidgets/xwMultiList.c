@@ -36,7 +36,7 @@
  */ 
 
 /*
- * Copyright 2004-2006 PLT Scheme Inc.
+ * Copyright 2004-2007 PLT Scheme Inc.
  * Copyright 1989 Massachusetts Institute of Technology
  *
  * Permission to use, copy, modify, distribute, and sell this software and its
@@ -869,7 +869,7 @@ int row,column;
 		   strlen(MultiListItemString(item)),
 		   MultiListTabs(mlw), NULL, 
 		   MultiListXftFont(mlw), xmode,
-		   0, NULL);
+		   0, NULL, 0);
   }
 } /* End RedrawRowColumn */
 	

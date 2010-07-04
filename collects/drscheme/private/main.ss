@@ -1,13 +1,11 @@
 
-(module main mzscheme
+(module main (lib "a-unit.ss")
   (require (lib "string-constant.ss" "string-constants")
-           (lib "unitsig.ss")
            (lib "cmdline.ss")
            (lib "contract.ss")
            "drsig.ss"
 	   (lib "mred.ss" "mred")
            (lib "framework.ss" "framework")
-           (lib "unitsig.ss")
            (lib "class.ss")
            (prefix pretty-print: (lib "pretty.ss"))
            (prefix print-convert: (lib "pconvert.ss"))
@@ -17,24 +15,20 @@
            (lib "external.ss" "browser")
            (lib "plt-installer.ss" "setup"))
   
-  (provide main@)
-  
-  (define main@
-    (unit/sig ()
-      (import [drscheme:app : drscheme:app^]
-              [drscheme:unit : drscheme:unit^]
-              [drscheme:get/extend : drscheme:get/extend^]
-              [drscheme:language-configuration : drscheme:language-configuration/internal^]
-	      [drscheme:language : drscheme:language^]
-              [drscheme:teachpack : drscheme:teachpack^]
-              [drscheme:module-language : drscheme:module-language^]
-              [drscheme:tools : drscheme:tools^]
-              [drscheme:debug : drscheme:debug^]
-              [drscheme:frame : drscheme:frame^]
-              [drscheme:font : drscheme:font^]
-              [drscheme:modes : drscheme:modes^]
-              [drscheme:help-desk : drscheme:help-desk^])
-
+  (import [prefix drscheme:app: drscheme:app^]
+          [prefix drscheme:unit: drscheme:unit^]
+          [prefix drscheme:get/extend: drscheme:get/extend^]
+          [prefix drscheme:language-configuration: drscheme:language-configuration/internal^]
+          [prefix drscheme:language: drscheme:language^]
+          [prefix drscheme:module-language: drscheme:module-language^]
+          [prefix drscheme:tools: drscheme:tools^]
+          [prefix drscheme:debug: drscheme:debug^]
+          [prefix drscheme:frame: drscheme:frame^]
+          [prefix drscheme:font: drscheme:font^]
+          [prefix drscheme:modes: drscheme:modes^]
+          [prefix drscheme:help-desk: drscheme:help-desk^])
+  (export)
+    
       (application-file-handler
        (let ([default (application-file-handler)])
          (λ (name)
@@ -62,7 +56,21 @@
                                      '("Scheme (.ss)" "*.ss")
                                      (finder:default-filters)))
       (application:current-app-name (string-constant drscheme))
-      
+
+  (preferences:set-default 'drscheme:limit-memory #f
+                           (λ (x) (or (boolean? x)
+                                      (integer? x)
+                                      (x . >= . (* 1024 1024 100)))))
+  
+  (preferences:set-default 'drscheme:recent-language-names 
+                           null 
+                           (λ (x) 
+                             (and (list? x) 
+                                  (andmap 
+                                   (λ (x)
+                                     (and (pair? x)
+                                          (string? (car x))))
+                                   x))))
       (preferences:set-default 'drscheme:show-interactions-on-execute #t boolean?)
       (preferences:set-default 'drscheme:open-in-tabs #f boolean?)
       (preferences:set-default 'drscheme:toolbar-shown #t boolean?)
@@ -164,15 +172,9 @@
          (or (eq? x #t)
              (not x))))
       
-      (preferences:set-default
-       'drscheme:teachpacks
-       (drscheme:teachpack:new-teachpack-cache) 
-       drscheme:teachpack:teachpack-cache?)
-      (preferences:set-un/marshall
-       'drscheme:teachpacks
-       drscheme:teachpack:marshall-teachpack-cache
-       drscheme:teachpack:unmarshall-teachpack-cache)
-      
+  (preferences:set-default 'drscheme:switch-to-module-language-automatically? #t boolean?)
+
+  
       (drscheme:font:setup-preferences)
       (drscheme:help-desk:add-help-desk-font-prefs #t)
       (color-prefs:add-background-preferences-panel)
@@ -202,6 +204,11 @@
                            (string-constant show-interactions-on-execute)
                            editor-panel)
 
+           (make-check-box 'drscheme:switch-to-module-language-automatically?
+                           (string-constant switch-to-module-language-automatically)
+                           editor-panel)
+
+           
            ;; come back to this one.
            #;
            (letrec ([hp (new horizontal-panel% 
@@ -261,7 +268,11 @@
       (drscheme:language:register-capability 'drscheme:language-menu-title 
                                              (flat-contract string?)
                                              (string-constant scheme-menu-name))
-           
+  
+  (drscheme:language:register-capability 'drscheme:teachpack-menu-items
+                                         (or/c false/c (flat-contract drscheme:unit:teachpack-callbacks?))
+                                         #f)
+  
       (handler:current-create-new-window
        (let ([drscheme-current-create-new-window
 	      (λ (filename)
@@ -360,6 +371,47 @@
          (preferences:set 'framework:exit-when-no-frames #f)]
         [else
          (preferences:set 'framework:exit-when-no-frames #t)])
+  
+
+  (let* ([sl (editor:get-standard-style-list)]
+         [sd (make-object style-delta%)])
+    (send sd set-delta-foreground (make-object color% 255 0 0))
+    (send sl new-named-style 
+          "drscheme:text:ports err"
+          (send sl find-or-create-style
+                (send sl find-named-style "text:ports err")
+                sd)))  
+  (define repl-error-pref 'drscheme:read-eval-print-loop:error-color)
+  (define repl-out-pref 'drscheme:read-eval-print-loop:out-color)
+  (define repl-value-pref 'drscheme:read-eval-print-loop:value-color)
+  (color-prefs:register-color-preference repl-value-pref
+                                         "text:ports value"
+                                         (make-object color% 0 0 175)
+                                         (make-object color% 57 89 216))
+  (color-prefs:register-color-preference repl-error-pref
+                                         "text:ports err"
+                                         (let ([sd (make-object style-delta% 'change-italic)])
+                                           (send sd set-delta-foreground (make-object color% 255 0 0))
+                                           sd))
+  (color-prefs:register-color-preference repl-out-pref
+                                         "text:ports out"
+                                         (make-object color% 150 0 150)
+                                         (make-object color% 192 46 214))
+  (color-prefs:add-to-preferences-panel 
+   (string-constant repl-colors)
+   (λ (parent)
+     (color-prefs:build-color-selection-panel parent
+                                              repl-value-pref
+                                              "text:ports value"
+                                              (string-constant repl-value-color))
+     (color-prefs:build-color-selection-panel parent
+                                              repl-error-pref
+                                              "text:ports err"
+                                              (string-constant repl-error-color))
+     (color-prefs:build-color-selection-panel parent
+                                              repl-out-pref
+                                              "text:ports out"
+                                              (string-constant repl-out-color))))
       
       ;; Check for any files lost last time.
       ;; Ignore the framework's empty frames test, since
@@ -414,4 +466,4 @@
 				(λ () (drscheme:unit:open-drscheme-window f))))
 		   no-dups)])
 	(when (null? (filter (λ (x) x) frames))
-	  (make-basic))))))
+	  (make-basic))))

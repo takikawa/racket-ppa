@@ -1,7 +1,10 @@
 (module pread mzscheme
-  (require (lib "readline.ss" "readline") (lib "file.ss"))
+  (require (lib "readline.ss" "readline") (lib "file.ss")
+           (lib "list.ss") (lib "string.ss"))
 
-  ;; configuration
+  ;; --------------------------------------------------------------------------
+  ;; Configuration
+
   (define current-prompt   (make-parameter #"> "))
   (define show-all-prompts (make-parameter #t))
   (define max-history      (make-parameter 100))
@@ -10,6 +13,40 @@
   (provide current-prompt show-all-prompts
            max-history keep-duplicates keep-blanks)
 
+  ;; --------------------------------------------------------------------------
+  ;; Simple namespace-based completion
+
+  ;; efficiently convert symbols to byte strings
+  (define symbol->bstring
+    (let ([t (make-hash-table 'weak)])
+      (lambda (sym)
+        (or (hash-table-get t sym #f)
+            (let ([bstr (string->bytes/utf-8 (symbol->string sym))])
+              (hash-table-put! t sym bstr)
+              bstr)))))
+
+  ;; get a list of byte strings for current bindings, cache last result
+  (define get-namespace-bstrings
+    (let ([last-syms #f] [last-bstrs #f])
+      (lambda ()
+        (let ([syms (namespace-mapped-symbols)])
+          (unless (equal? syms last-syms)
+            (set! last-syms syms)
+            (set! last-bstrs (sort! (map symbol->bstring syms) bytes<?)))
+          last-bstrs))))
+
+  (define (namespace-completion pat)
+    (let* ([pat (if (string? pat) (string->bytes/utf-8 pat) pat)]
+           [pat (regexp-quote pat)]
+           [pat (regexp-replace* #px#"(\\w)\\b" pat #"\\1\\\\w*")]
+           [pat (byte-pregexp (bytes-append #"^" pat))])
+      (filter (lambda (bstr) (regexp-match pat bstr))
+              (get-namespace-bstrings))))
+
+  (set-completion-function! namespace-completion)
+
+
+  ;; --------------------------------------------------------------------------
   ;; History management
 
   (define local-history
@@ -20,7 +57,13 @@
   (define (save-history)
     (put-preferences '(readline-input-history) (list (reverse local-history))))
 
+  ;; captured now so we don't flush some other output port
+  (define readline-output-port (current-output-port))
+
   (define (readline-bytes/hist p)
+    (when (eq? readline-output-port (current-output-port))
+      (let-values ([(line col pos) (port-next-location readline-output-port)])
+        (when (and col (< 0 col)) (newline))))
     (let ([s (readline-bytes p)])
       (when (and (bytes? s)
                  (or (keep-blanks) (not (zero? (bytes-length s))))
@@ -39,7 +82,8 @@
    (let ([old (exit-handler)])
      (lambda (v) (save-history) (old v))))
 
-  ;; implement an input port that goes through readline
+  ;; --------------------------------------------------------------------------
+  ;; An input port that goes through readline
 
   ;; readline-prompt can be
   ;;   #f: no prompt (normal state),
@@ -66,15 +110,17 @@
     (let ([buffer  #f]
           [skip    #f]
           [blen    #f]
+          [closed? #f]
           [LF      (bytes-ref #"\n" 0)])
-      (define (close!) (set! buffer eof) (save-history))
+      (define (close!) (set! closed? #t) (save-history))
       (define (reader tgt)
         (let loop ()
-          (cond [(eof-object? buffer) eof]
+          (cond [closed? eof]
+                [(eof-object? buffer) (set! buffer #f) eof]
                 [(not buffer)
                  (set! buffer (readline-bytes/hist (get-current-prompt)))
                  (if (eof-object? buffer)
-                   (begin (save-history) buffer)
+                   (begin (save-history) (set! buffer #f) eof)
                    (begin (set! skip 0)
                           (set! blen (bytes-length buffer))
                           (reader tgt)))]
@@ -97,6 +143,9 @@
                           (set! buffer #f)
                           (add1 left)]))])))
       (make-input-port 'readline reader #f close!)))
+
+  ;; --------------------------------------------------------------------------
+  ;; Reading functions
 
   ;; like read-syntax, but waits until valid input is ready
   (define read-complete-syntax
@@ -135,6 +184,7 @@
   (provide read-cmdline-syntax)
   (define (read-cmdline-syntax)
     (define prompt (current-prompt))
+    (flush-output)
     ;; needs to set `readline-prompt' to get a prompt when reading
     (parameterize ([read-accept-reader #t]
                    [readline-prompt prompt])

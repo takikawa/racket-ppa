@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2006 PLT Scheme Inc.
+// Copyright:  (c) 2004-2007 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -170,7 +170,7 @@ void wxGetBestControlRect(ControlRef c, Rect *r, SInt16 *offset,
   if (label && (size < 13)) {
     /* GetBestControlRect makes things too wide */
     double x, y;
-    font->GetTextExtent(label, 0, &x, &y, NULL, NULL);
+    font->GetTextExtent(label, 0, -1, &x, &y, NULL, NULL);
     if (r->right - r->left > x + width_pad)
       r->right = r->left + (short)x + (short)width_pad;
   }

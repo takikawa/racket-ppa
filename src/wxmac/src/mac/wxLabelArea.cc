@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2006 PLT Scheme Inc.
+// Copyright:  (c) 2004-2007 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -43,7 +43,7 @@ wxLabelArea::wxLabelArea
       double fLabelWidth, fLabelHeight, fDescent, fExternalLeading;
 
       labelText = cLabelText->GetLabel();
-      labelFont->GetTextExtent(labelText, 0, &fLabelWidth, &fLabelHeight,
+      labelFont->GetTextExtent(labelText, 0, -1, &fLabelWidth, &fLabelHeight,
 			       &fDescent, &fExternalLeading, TRUE);
       labelWidth = (int)fLabelWidth;
       labelHeight = (int)fLabelHeight;

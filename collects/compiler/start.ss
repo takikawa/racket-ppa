@@ -149,13 +149,19 @@
 	 ,(lambda (f name) (plt-output name) 'plt)
 	 (,(format "Create .plt <archive> containing relative files/dirs")
 	  "archive")]]
+       [once-any
+	[("--3m")
+	 ,(lambda (f) (compiler:option:3m #t))
+	 (,(format "Compile/link for 3m, with -e/-c/-o/--exe/etc.~a"
+                   (if (eq? '3m (system-type 'gc)) " [current default]" "")))]
+	[("--cgc")
+	 ,(lambda (f) (compiler:option:3m #f))
+	 (,(format "Compile/link for CGC, with -e/-c/-o/--exe/etc.~a"
+                   (if (eq? 'cgc (system-type 'gc)) " [current default]" "")))]]
        [once-each
 	[("-m" "--module")
 	 ,(lambda (f) (module-mode #t))
 	 ("Skip eval of top-level syntax, etc. for -e/-c/-o/-z")]
-	[("--3m")
-	 ,(lambda (f) (compiler:option:3m #t))
-	 ("Compile/link for 3m, with -e/-c/-o/etc.")]
 	[("--embedded")
 	 ,(lambda (f) (compiler:option:compile-for-embedded #t))
 	 ("Compile for embedded run-time engine, with -c/-o/-g")]
@@ -373,7 +379,7 @@
 	 ("Set the maximum inlining size" "size")]
 	[("--prim")
 	 ,(lambda (f) (compiler:option:assume-primitives #t))
-	 ("Assume primitive bindings at top-level")]
+	 ("Assume primitive bindings at top level")]
 	[("--stupid")
 	 ,(lambda (f) (compiler:option:stupid #t))
 	 ("Compile despite obvious non-syntactic errors")]
@@ -425,8 +431,9 @@
 		   (void)))))))
      (list "file/directory/collection" "file/directory/sub-collection")))
 
-  (printf "mzc version ~a, Copyright (c) 2004-2006 PLT Scheme Inc.~n"
-	  (version))
+  (printf "mzc v~a [~a], Copyright (c) 2004-2007 PLT Scheme Inc.~n"
+	  (version)
+          (system-type 'gc))
 
   (define-values (mode source-files prefix)
     (parse-options (current-command-line-arguments)))
@@ -439,9 +446,13 @@
     (when (compiler:option:compile-for-embedded)
       (error 'mzc "cannot ~a an extension for an embedded MzScheme" action)))
   
-  (when (compiler:option:3m)
-    (link-variant '3m)
-    (compile-variant '3m))
+  (if (compiler:option:3m)
+      (begin
+        (link-variant '3m)
+        (compile-variant '3m))
+      (begin
+        (link-variant 'cgc)
+        (compile-variant 'cgc)))
   
   (case mode
     [(compile)
@@ -545,7 +556,7 @@
 			 'mzc:create-embedding-executable)
 	dest
 	#:mred? (eq? mode 'gui-exe) 
-	#:variant (if (compiler:option:3m) '3m 'normal)
+	#:variant (if (compiler:option:3m) '3m 'cgc)
 	#:verbose? (compiler:option:verbose)
 	#:modules (cons
 		   `(#%mzc: (file ,(car source-files)))
@@ -563,9 +574,6 @@
 			flags))
 	#:collects-path (exe-embedded-collects-path)
 	#:collects-dest (exe-embedded-collects-dest)
-        #:on-extension (lambda (file _loader?)
-                         (fprintf (current-error-port) 
-                                  " Skipping extension: ~a\n" file))
 	#:aux (exe-aux))
        (printf " [output to \"~a\"]~n" dest))]
     [(exe-dir)

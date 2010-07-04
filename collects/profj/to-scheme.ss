@@ -864,12 +864,12 @@
            (dynamic-callables (refine-method-list wrapped-methods-initial class-name)))
       (list 
        `(define (,(build-identifier (string-append "wrap-convert-assert-" class-name)) obj p n s c)
-          (let ((raise-error 
+          (let ((raise-error
                  (lambda (method-name num-args)
-                   (raise (make-exn:fail 
-                           (string->immutable-string
-                            (format "~a broke the contract with ~a here, expected an object with a method ~a accepting ~a args"
-                                   n p method-name num-args)) c)))))
+                   (raise (make-exn:fail
+                           (format "~a broke the contract with ~a here, expected an object with a method ~a accepting ~a args"
+                                   n p method-name num-args)
+                           c)))))
             (and ,@(map method->check/error
                         (filter (lambda (m) (not (eq? 'ctor (method-record-rtype m)))) wrapped-methods))))
           #;(c:contract ,(methods->contract (filter (lambda (m) (not (eq? 'ctor (method-record-rtype m))))
@@ -940,9 +940,8 @@
                 `(define/public (,(build-identifier define-name) . args)
                    (unless (= (length args) ,(length list-of-args))
                      (raise (make-exn:fail:contract:arity
-                             (string->immutable-string
-                              (format "~a broke the contract with ~a here, method ~a of ~a called with ~a args, instead of ~a"
-                                      neg-blame pos-blame ,(method-record-name method) ,(class-name) (length args) ,(length list-of-args)))
+                             (format "~a broke the contract with ~a here, method ~a of ~a called with ~a args, instead of ~a"
+                                     neg-blame pos-blame ,(method-record-name method) ,(class-name) (length args) ,(length list-of-args))
                              cc-marks)))
                    (let (,@(map (lambda (arg type ref)
                                   `(,arg ,(convert-value (assert-value `(list-ref args ,ref) type #t 'method-arg (method-record-name method)) type #t)))
@@ -1011,21 +1010,21 @@
                 (lambda (ok?)
                   `(let ((v-1 ,value))
                      (if (,ok? v-1) v-1
-                         (raise (make-exn:fail (string->immutable-string
-                                                ,(case kind
-                                                   ((unspecified)                                                
-                                                    `(format "~a broke the contract with ~a here, type-mismatch expected ~a given ~a"
-                                                             neg-blame pos-blame (quote ,type) v-1))
-                                                   ((field)
-                                                    `(format "~a broke the contract with ~a here, type-mismatch for field ~a of class ~a: expected ~a given ~a"
-                                                             neg-blame pos-blame ,name ,(class-name) (quote ,type) v-1))
-                                                   ((method-arg)
-                                                    `(format "~a broke the contract with ~a here, type-mismatch for method argument of ~a in class ~a: expected ~a given ~a"
-                                                             neg-blame pos-blame ,name ,(class-name) (quote ,type) v-1))
-                                                   ((method-ret)
-                                                    `(format "~a broke the contract with ~a here, type-mismatch for method return of ~a in ~a: expected ~a given ~a"
-                                                             neg-blame pos-blame ,name ,(class-name) (quote ,type) v-1)))
-                                                ) cc-marks)))))))
+                         (raise (make-exn:fail
+                                 ,(case kind
+                                    ((unspecified)
+                                     `(format "~a broke the contract with ~a here, type-mismatch expected ~a given ~a"
+                                              neg-blame pos-blame (quote ,type) v-1))
+                                    ((field)
+                                     `(format "~a broke the contract with ~a here, type-mismatch for field ~a of class ~a: expected ~a given ~a"
+                                              neg-blame pos-blame ,name ,(class-name) (quote ,type) v-1))
+                                    ((method-arg)
+                                     `(format "~a broke the contract with ~a here, type-mismatch for method argument of ~a in class ~a: expected ~a given ~a"
+                                              neg-blame pos-blame ,name ,(class-name) (quote ,type) v-1))
+                                    ((method-ret)
+                                     `(format "~a broke the contract with ~a here, type-mismatch for method return of ~a in ~a: expected ~a given ~a"
+                                              neg-blame pos-blame ,name ,(class-name) (quote ,type) v-1)))
+                                 cc-marks)))))))
            (case type
              ((int byte short long) (check 'integer?))
              ((float double) (check 'real?))
@@ -1810,8 +1809,8 @@
   (define translate-throw
     (lambda (expr key src)
       (create-syntax #f `(let* ((obj ,expr)
-                                (exn (make-java:exception 
-                                      (string->immutable-string (send (send obj |getMessage|) get-mzscheme-string))
+                                (exn (make-java:exception
+                                      (send (send obj |getMessage|) get-mzscheme-string)
                                       (current-continuation-marks) obj)))
                            (send obj set-exception! exn)
                            (,(create-syntax #f 'raise (build-src key)) exn))
@@ -2133,9 +2132,9 @@
           `(let ((val ,val))
              (if (string? val)
                  (make-java-string val)
-                 (raise (make-exn:fail (string->immutable-string
-                                        (format "~a broke infered contract here: expected String received ~a"
-                                                ,(class-name) val)) (current-continuation-marks))))))))
+                 (raise (make-exn:fail (format "~a broke infered contract here: expected String received ~a"
+                                               ,(class-name) val)
+                                       (current-continuation-marks))))))))
       ((unknown-ref? type)
        `(let ((val ,val))
           (if (string? val)
@@ -2419,24 +2418,28 @@
               (expr (if obj (translate-expression obj))))
          (cond
            ((var-access-static? access)
-            (let ((static-name (build-static-name field-string (var-access-class access))))
+            (let ((static-name (build-static-name field-string (var-access-class access)))
+                  (obj-wrapper 
+                   (lambda (s) (if obj (make-syntax #f `(begin ,expr ,s) (build-src field-src)) s))))
               (if (dynamic-val? type)
-                  (let ((access-syntax (cond 
-                                         ((unknown-ref? (dynamic-val-type type))
-                                          `(let ((val-1 ,(translate-id static-name field-src)))
-                                             (if (string? val-1)
-                                                 (make-java-string val-1)
-                                                 val-1)))
-                                         (else (translate-id static-name field-src)))))
+                  (let ((access-syntax 
+                         (cond 
+                           ((unknown-ref? (dynamic-val-type type))
+                            `(let ((val-1 ,(translate-id static-name field-src)))
+                               (if (string? val-1)
+                                   (make-java-string val-1)
+                                   val-1)))
+                           (else (translate-id static-name field-src)))))
                     (make-syntax #f
-                                 (convert-assert-value
-                                  (make-syntax #f
-                                               `(c:contract ,(type->contract (dynamic-val-type type) #t)
-                                                            ,access-syntax
-                                                            (quote ,(string->symbol (class-name))) '||)
-                                               (build-src field-src))
-                                  (dynamic-val-type type)) (build-src field-src)))
-                  (translate-id (build-var-name static-name) field-src))))
+                                 (obj-wrapper
+                                  (convert-assert-value
+                                   (make-syntax #f
+                                                `(c:contract ,(type->contract (dynamic-val-type type) #t)
+                                                             ,access-syntax
+                                                             (quote ,(string->symbol (class-name))) '||)
+                                                (build-src field-src))
+                                   (dynamic-val-type type))) (build-src field-src)))
+                  (obj-wrapper (translate-id (build-var-name static-name) field-src)))))
            ((eq? 'array (var-access-class access))
             (if cant-be-null?
                 (make-syntax #f `(send ,expr ,(translate-id field-string field-src)) (build-src src))
@@ -2621,7 +2624,7 @@
                       (cond
                         ((and cant-be-null? (not static?))
                          (create-syntax #f `(send ,expression ,name ,@translated-args) (build-src src)))
-                        (static? (create-syntax #f `(,name ,@translated-args) (build-src src)))
+                        (static? (create-syntax #f `(begin ,expression (,name ,@translated-args)) (build-src src)))
                         (else
                          (create-syntax #f
                                         `(let ((,unique-name ,expression))
@@ -2935,6 +2938,10 @@
       ((check-catch? expr) (translate-check-catch (check-catch-test expr)
                                                   (check-catch-exn expr)
                                                   (expr-src expr)))
+      ((check-by? expr) (translate-check-by (check-by-test expr)
+                                            (check-by-actual expr)
+                                            (check-by-compare expr)
+                                            (expr-src expr)))
       ((check-mutate? expr) (translate-check-mutate (check-mutate-mutate expr)
                                                     (check-mutate-check expr)
                                                     (expr-src expr)))))
@@ -2963,6 +2970,29 @@
                    `(javaRuntime:check-catch ,t ,(symbol->string (syntax-object->datum n)) ,n ,(checked-info test) ,src
                                              (namespace-variable-value 'current~test~object% #f
                                                                        (lambda () #f)))
+                   (build-src src))))
+  
+  ;translate-check-by: expression expression (U '== method-record) src -> syntax
+  (define (translate-check-by test actual comp src)
+    (let ([t (create-syntax #f `(lambda () ,(translate-expression test)) #f)]
+          [a (translate-expression actual)]
+          [info (checked-info test)])
+      (make-syntax #f
+                   `(javaRuntime:check-by ,t ,a 
+                                            ,(if (method-record? comp)
+                                                 (create-syntax #f `(lambda (test-v a)
+                                                                      (send test-v 
+                                                                            ,(build-identifier 
+                                                                              (mangle-method-name 
+                                                                               (method-record-name comp)
+                                                                               (method-record-atypes comp)))
+                                                                            a))
+                                                                (build-src src))
+                                                 'eq?)
+                                            ,info
+                                            ,(if (method-record? comp) (method-record-name comp) "==")
+                                            ,src
+                                            (namespace-variable-value 'current~test~object% #f (lambda () #f)))
                    (build-src src))))
   
   ;translate-check-mutate: expression expression src -> syntax

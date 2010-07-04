@@ -1,7 +1,8 @@
 (module configuration mzscheme
-  (require (lib "unitsig.ss")
+  (require (lib "unit.ss")
            (lib "kw.ss")
            (lib "list.ss")
+           (lib "etc.ss")
            (lib "contract.ss"))
   (require "configuration-structures.ss"
            "configuration-table-structs.ss"
@@ -37,8 +38,9 @@
                                   #:key
                                   [make-servlet-namespace default-make-servlet-namespace])
     (define the-make-servlet-namespace make-servlet-namespace)
-    (unit/sig web-config^
+    (unit
       (import)
+      (export web-config^)
       (define port (configuration-table-port table))
       (define max-waiting (configuration-table-max-waiting table))
       (define listen-ip #f) ; more here - add to configuration table
@@ -79,7 +81,8 @@
              (lambda (spec)
                (if (symbol? spec)
                    spec
-                   ((current-module-name-resolver) spec #f #f)))])
+                   (with-handlers ([exn? (lambda _ #f)])
+                     ((current-module-name-resolver) spec #f #f))))])
         (map get-name 
              (append default-to-be-copied-module-specs
                      to-be-copied-module-specs))))
@@ -90,7 +93,8 @@
       (parameterize ([current-namespace new-namespace])
         (for-each (lambda (name)
                     (with-handlers ([exn? void])
-                      (namespace-attach-module server-namespace name)))
+                      (when name
+                        (namespace-attach-module server-namespace name))))
                   to-be-copied-module-names)
         new-namespace)))
   
@@ -110,12 +114,14 @@
   ; more here - parameterize error based on a configurable file, perhaps?
   ; This is slightly tricky since the (interesting) content comes from the exception.
   (define (servlet-loading-responder url exn)
+    ((error-display-handler)
+       (format "Servlet didn't load:\n~a\n" (exn-message exn))
+       exn)
     (make-response/full 500 "Servlet didn't load"
                         (current-seconds)
                         TEXT/HTML-MIME-TYPE
                         '() ; check
-                        (list "Servlet didn't load.\n"
-                              (exn->string exn))))
+                        (list "Servlet didn't load.\n")))
   
   ; gen-servlet-not-found : str -> url -> response
   (define (gen-servlet-not-found file-not-found-file)
@@ -222,6 +228,7 @@
   
   (provide ; XXX contract
    build-configuration
+   apply-default-functions-to-host-table
    make-make-servlet-namespace)
   (provide/contract
    [complete-configuration (path-string? configuration-table? . -> . configuration?)]

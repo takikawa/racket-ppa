@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	
- * Copyright:	(c) 2004-2006 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2007 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -148,6 +148,7 @@ class wxBitmap: public wxObject
   wxDC *selectedInto; // So bitmap knows whether it's been selected into
                       // a device context (for error checking)
   wxMemoryDC *mask_cache; // the cached mask
+  int cache_xsrc1, cache_ysrc1, cache_iw, cache_ih;
   Bool selectedIntoDC;
   wxGLConfig *gl_cfg;
 

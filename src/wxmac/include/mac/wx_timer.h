@@ -4,7 +4,7 @@
  * Author:	Julian Smart/Cecil Coupe
  * Created:	1993
  * Updated:	
- * Copyright:	(c) 2004-2006 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2007 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  */
 
@@ -28,7 +28,6 @@ class wxTimer: public wxbTimer
  void *context;
  double expiration;
  int one_shot;
- int interval;
  wxTimer *prev, *next;
 #endif
   wxTimer(void *ctx = NULL);

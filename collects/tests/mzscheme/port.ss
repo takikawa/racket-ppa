@@ -64,6 +64,11 @@
   (test-file #f)
   (test-file #t))
 
+(let-values ([(r w) (make-pipe)])
+  (write-byte 200 w)
+  (test #t byte-ready? r)
+  (test #f char-ready? r))
+
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Based on the MzScheme manual...
 
@@ -474,8 +479,11 @@
 
 (let-values ([(in out) (make-pipe 3)])
   (test 3 write-bytes-avail #"12345" out)
+  (test #f sync/timeout 0 out)
   (test #\1 peek-char in)
+  (test out sync/timeout 0 out)
   (test 1 write-bytes-avail #"12345" out)
+  (test #f sync/timeout 0 out)
   (test #\1 peek-char in)
   (test 0 write-bytes-avail* #"12345" out)
   (test #\2 peek-char in 1)

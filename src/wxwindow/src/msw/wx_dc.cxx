@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	August 1994
- * Copyright:	(c) 2004-2006 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2007 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -153,7 +153,7 @@ wxDC::~wxDC(void)
   
   if (current_pen) current_pen->Lock(-1);
   if (current_brush) current_brush->Lock(-1);
-  if (clipping) --clipping->locked;
+  if (clipping) clipping->Lock(-1);
 
   if (filename)
     delete[] filename;
@@ -417,25 +417,27 @@ void wxDC::SetClippingRegion(wxRegion *c)
   if (c && (c->dc != this)) return;
 
   if (clipping)
-    --clipping->locked;
+    clipping->Lock(-1);
 
   clipping = c;
 
   if (clipping)
-    clipping->locked++;
+    clipping->Lock(1);
 
   dc = ThisDC(FALSE);
   if (dc) DoClipping(dc);
   DoneDC(dc);
 }
 
-static HRGN empty_rgn;
+static HRGN empty_rgn, full_rgn;
 
 void wxDC::DoClipping(HDC dc)
 {
   if (clipping) {
-    if (clipping->rgn) {
-      SelectClipRgn(dc, clipping->rgn);
+    HRGN rgn;
+    rgn = clipping->GetRgn();
+    if (rgn) {
+      SelectClipRgn(dc, rgn);
       OffsetClipRgn(dc, canvas_scroll_dx, canvas_scroll_dy);
     } else {
       if (!empty_rgn)
@@ -443,10 +445,9 @@ void wxDC::DoClipping(HDC dc)
       SelectClipRgn(dc, empty_rgn);
     }
   } else {
-    HRGN rgn;
-    rgn = CreateRectRgn(0, 0, 32000, 32000);
-    SelectClipRgn(dc, rgn);
-    DeleteObject(rgn);
+    if (!full_rgn)
+      full_rgn = CreateRectRgn(0, 0, 32000, 32000);
+    SelectClipRgn(dc, full_rgn);
   }
 }
 
@@ -1204,8 +1205,13 @@ void wxDC::DrawPath(wxPath *p, double xoffset, double yoffset,int fillStyle)
 	k += j;
       }
 
-      if (clipping && clipping->rgn)
-	CombineRgn(rgn, clipping->rgn, rgn, RGN_AND);
+      if (clipping) {
+	HRGN crgn;
+	crgn = clipping->GetRgn();
+	if (crgn) {
+	  CombineRgn(rgn, crgn, rgn, RGN_AND);
+	}
+      }
 
       SelectClipRgn(dc, rgn);
       
@@ -1616,10 +1622,13 @@ wchar_t *convert_to_drawable_format(const char *text, int d, int ucs4, long *_ul
   wchar_t *unicode;
   int theStrlen;
 
-  if (ucs4) {
-    theStrlen = ucs4_strlen((const unsigned int *)text XFORM_OK_PLUS d);
-  } else {
-    theStrlen = strlen(text XFORM_OK_PLUS d);
+  theStrlen = *_ulen;
+  if (theStrlen < 0) {
+    if (ucs4) {
+      theStrlen = ucs4_strlen((const unsigned int *)text XFORM_OK_PLUS d);
+    } else {
+      theStrlen = strlen(text XFORM_OK_PLUS d);
+    }
   }
 
   if (ucs4) {
@@ -1817,7 +1826,7 @@ void wxDC::DrawText(const char *text, double x, double y, Bool combine, Bool ucs
   DWORD old_background;
   double w, h, ws, hs, ow, oh;
   wchar_t *ustring;
-  long len, alen;
+  long len = -1, alen;
   double oox, ooy;
   int fam, reset = 0;
   wxFont *theFont;
@@ -2139,12 +2148,12 @@ double wxDC::GetCharWidth(void)
 
 void wxDC::GetTextExtent(const char *string, double *x, double *y,
                          double *descent, double *topSpace, 
-			 wxFont *theFont, Bool combine, Bool ucs4, int d)
+			 wxFont *theFont, Bool combine, Bool ucs4, int d, int slen)
 {
   wxFont *oldFont = NULL;
   HDC dc;
   TEXTMETRIC tm;
-  long len, alen;
+  long len = slen, alen;
   double tx, ty, ow, oh;
   wchar_t *ustring;
   int once = 1, fam, reset = 0;
@@ -2532,6 +2541,10 @@ Bool wxDC::Blit(double xdest, double ydest, double width, double height,
 
     if (mask->mask_cache
 	&& (mask->mask_cache == source->mask_cache)
+	&& (mask->cache_xsrc1 == xsrc1)
+	&& (mask->cache_ysrc1 == ysrc1)
+	&& (mask->cache_iw == iw)
+	&& (mask->cache_ih == ih)
 	&& (mask != selected_bitmap)
 	&& (source != selected_bitmap)
 	&& (source->mask_cache->selected_bitmap)) {
@@ -2645,10 +2658,21 @@ Bool wxDC::Blit(double xdest, double ydest, double width, double height,
 	source->ReleaseCachedMask();
 	orig_mask->mask_cache = invented_memdc;
 	source->mask_cache = invented_memdc;
+
+	orig_mask->cache_xsrc1 = xsrc1;
+	orig_mask->cache_ysrc1 = ysrc1;
+	orig_mask->cache_iw = iw;
+	orig_mask->cache_ih = ih;
+	source->cache_xsrc1 = xsrc1;
+	source->cache_ysrc1 = ysrc1;
+	source->cache_iw = iw;
+	source->cache_ih = ih;
+
 	if (source == orig_mask)
 	  invented_memdc->refcount = 1;
 	else
 	  invented_memdc->refcount = 2;
+
 	invented = NULL; /* indicates that we cached invented */
       }
     }

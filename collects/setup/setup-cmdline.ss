@@ -16,6 +16,8 @@
   ;;  - A list of archives
 
   (define (parse-cmdline argv)
+    
+    (define x-specific-planet-packages '())
     (define x-flags null)
     (define (add-flags l)
       (set! x-flags (append (reverse l) x-flags)))
@@ -24,6 +26,12 @@
       (command-line
        "setup-plt"
        argv
+       (multi
+        [("-P") owner package-name maj min
+         "Setup specified PLaneT packages only"
+         (set! 
+          x-specific-planet-packages
+          (cons (list owner package-name maj min) x-specific-planet-packages))])
        (once-each
 	[("-c" "--clean") "Delete existing compiled files; implies -nxi"
 	 (add-flags '((clean #t)
@@ -54,7 +62,7 @@
 	 (add-flags '((pause-on-errors #t)))]
 	[("--force") "Treat version mismatches for archives as mere warnings"
 	 (add-flags '((force-unpacks #t)))]
-	[("-a" "--all-users") "Install archives into PLTHOME, not user-specific directory"
+	[("-a" "--all-users") "Install archives to main (not user-specific) installation"
 	 (add-flags '((all-users #t)))]
 	[("--mode") mode "Select a compilation mode"
 	 (add-flags `((compile-mode ,mode)))]
@@ -74,4 +82,4 @@
 	  (printf "If no <archive> or -l <collection> is specified, all collections are setup~n")
 	  (exit 0)))))
 
-    (values x-flags x-specific-collections x-archives)))
+    (values x-flags x-specific-collections x-specific-planet-packages x-archives)))

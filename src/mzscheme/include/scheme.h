@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -325,6 +325,10 @@ typedef struct Scheme_Vector {
 typedef struct Scheme_Print_Params Scheme_Print_Params;
 typedef void (*Scheme_Type_Printer)(Scheme_Object *v, int for_display, Scheme_Print_Params *pp);
 
+typedef int (*Scheme_Equal_Proc)(Scheme_Object *obj1, Scheme_Object *obj2);
+typedef long (*Scheme_Primary_Hash_Proc)(Scheme_Object *obj, long base);
+typedef long (*Scheme_Secondary_Hash_Proc)(Scheme_Object *obj);
+
 /* This file defines all the built-in types */
 #ifdef INCLUDE_WITHOUT_PATHS
 # include "stypes.h"
@@ -395,11 +399,15 @@ typedef void (*Scheme_Type_Printer)(Scheme_Object *v, int for_display, Scheme_Pr
 #define SCHEME_MUTABLE_BYTE_STRINGP(obj)  (SCHEME_BYTE_STRINGP(obj) && SCHEME_MUTABLEP(obj))
 #define SCHEME_IMMUTABLE_BYTE_STRINGP(obj)  (SCHEME_BYTE_STRINGP(obj) && SCHEME_IMMUTABLEP(obj))
 
-#define SCHEME_PATHP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_path_type)
+#define SCHEME_PATHP(obj)  SAME_TYPE(SCHEME_TYPE(obj), SCHEME_PLATFORM_PATH_KIND)
+#define SCHEME_GENERAL_PATHP(obj)  ((SCHEME_TYPE(obj) >= scheme_unix_path_type) && (SCHEME_TYPE(obj) <= scheme_windows_path_type))
   /* A path is guranteed to have the same shape as a byte string */
 
 #define SCHEME_PATH_STRINGP(x) (SCHEME_CHAR_STRINGP(x) || SCHEME_PATHP(x))
 #define SCHEME_PATH_STRING_STR "path or string"
+
+#define SCHEME_GENERAL_PATH_STRINGP(x) (SCHEME_CHAR_STRINGP(x) || SCHEME_GENERAL_PATHP(x))
+#define SCHEME_GENERAL_PATH_STRING_STR "path (for any platform) or string"
 
 #define SCHEME_SYMBOLP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_symbol_type)
 #define SCHEME_KEYWORDP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_keyword_type)
@@ -437,6 +445,9 @@ typedef void (*Scheme_Type_Printer)(Scheme_Object *v, int for_display, Scheme_Pr
 #define SCHEME_INPORTP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_input_port_type)
 #define SCHEME_OUTPORTP(obj) SAME_TYPE(SCHEME_TYPE(obj), scheme_output_port_type)
 
+#define SCHEME_INPUT_PORTP(obj)  scheme_is_input_port(obj)
+#define SCHEME_OUTPUT_PORTP(obj) scheme_is_output_port(obj)
+
 #define SCHEME_THREADP(obj)   SAME_TYPE(SCHEME_TYPE(obj), scheme_thread_type)
 #define SCHEME_CUSTODIANP(obj)   SAME_TYPE(SCHEME_TYPE(obj), scheme_custodian_type)
 #define SCHEME_SEMAP(obj)   SAME_TYPE(SCHEME_TYPE(obj), scheme_sema_type)
@@ -452,7 +463,7 @@ typedef void (*Scheme_Type_Printer)(Scheme_Object *v, int for_display, Scheme_Pr
 #define SCHEME_UDPP(obj) SAME_TYPE(SCHEME_TYPE(obj), scheme_udp_type)
 #define SCHEME_UDP_EVTP(obj) SAME_TYPE(SCHEME_TYPE(obj), scheme_udp_evt_type)
 
-#define SCHEME_CPTRP(obj) SAME_TYPE(SCHEME_TYPE(obj), scheme_cpointer_type)
+#define SCHEME_CPTRP(obj) (SAME_TYPE(SCHEME_TYPE(obj), scheme_cpointer_type) || SAME_TYPE(SCHEME_TYPE(obj), scheme_offset_cpointer_type))
 
 #define SCHEME_MUTABLEP(obj) (!(MZ_OPT_HASH_KEY((Scheme_Inclhash_Object *)(obj)) & 0x1))
 #define SCHEME_IMMUTABLEP(obj) (MZ_OPT_HASH_KEY((Scheme_Inclhash_Object *)(obj)) & 0x1)
@@ -470,6 +481,17 @@ typedef void (*Scheme_Type_Printer)(Scheme_Object *v, int for_display, Scheme_Pr
 #define GUARANTEE_CHAR_STRING(fname, argnum) GUARANTEE_TYPE (fname, argnum, SCHEME_CHAR_STRINGP, "string")
 #define GUARANTEE_STRSYM(fname, argnum)      GUARANTEE_TYPE (fname, argnum, SCHEME_STRSYMP, "string or symbol")
 #define GUARANTEE_SYMBOL(fname, argnum)      GUARANTEE_TYPE (fname, argnum, SCHEME_SYMBOLP, "symbol")
+
+#define SCHEME_UNIX_PATH_KIND scheme_unix_path_type
+#define SCHEME_WINDOWS_PATH_KIND scheme_windows_path_type
+
+#ifdef DOS_FILE_SYSTEM
+# define SCHEME_PLATFORM_PATH_KIND SCHEME_WINDOWS_PATH_KIND
+#else
+# define SCHEME_PLATFORM_PATH_KIND SCHEME_UNIX_PATH_KIND
+#endif
+
+#define SCHEME_PATH_KIND(p) SCHEME_TYPE(p)
 
 /*========================================================================*/
 /*                        basic Scheme accessors                          */
@@ -531,8 +553,21 @@ typedef void (*Scheme_Type_Printer)(Scheme_Object *v, int for_display, Scheme_Pr
 #define SCHEME_PINT_VAL(obj) (((Scheme_Simple_Object *)(obj))->u.ptr_int_val.pint)
 #define SCHEME_PLONG_VAL(obj) (((Scheme_Simple_Object *)(obj))->u.ptr_long_val.pint)
 
-#define SCHEME_CPTR_VAL(obj) (((Scheme_Simple_Object *)(obj))->u.cptr_val.val)
-#define SCHEME_CPTR_TYPE(obj) (((Scheme_Simple_Object *)(obj))->u.cptr_val.type)
+typedef struct Scheme_Cptr
+{
+  Scheme_Object so;
+  void *val;
+  Scheme_Object *type;
+} Scheme_Cptr;
+typedef struct Scheme_Offset_Cptr
+{
+  Scheme_Cptr cptr; 
+  long offset;
+} Scheme_Offset_Cptr;
+
+#define SCHEME_CPTR_VAL(obj) (((Scheme_Cptr *)(obj))->val)
+#define SCHEME_CPTR_TYPE(obj) (((Scheme_Cptr *)(obj))->type)
+#define SCHEME_CPTR_OFFSET(obj) (SAME_TYPE(_SCHEME_TYPE(obj), scheme_offset_cpointer_type) ? ((Scheme_Offset_Cptr *)obj)->offset : 0)
 
 #define SCHEME_SET_IMMUTABLE(obj)  ((MZ_OPT_HASH_KEY((Scheme_Inclhash_Object *)(obj)) |= 0x1))
 #define SCHEME_SET_CHAR_STRING_IMMUTABLE(obj) SCHEME_SET_IMMUTABLE(obj)
@@ -921,7 +956,6 @@ typedef struct Scheme_Thread {
   struct Scheme_Thread **cont_mark_stack_owner;
   struct Scheme_Cont_Mark *cont_mark_stack_swapped;
 
-  struct Scheme_Prompt *barrier_prompt; /* a pseudo-prompt */
   struct Scheme_Prompt *meta_prompt; /* a pseudo-prompt */
   
   struct Scheme_Meta_Continuation *meta_continuation;
@@ -942,6 +976,7 @@ typedef struct Scheme_Thread {
   Scheme_Jumpup_Buf jmpup_buf; /* For jumping back to this thread */
 
   struct Scheme_Dynamic_Wind *dw;
+  int next_meta;  /* amount to move forward in the meta-continuaiton chain, starting with dw */
 
   int running;
   Scheme_Object *suspended_box; /* contains pointer to thread when it's suspended */
@@ -984,7 +1019,7 @@ typedef struct Scheme_Thread {
   Scheme_Object **values_buffer;
   int values_buffer_size;
 
-  union {
+  struct { /* used to be a union, but that confuses MZ_PRECISE_GC */
     struct {
       Scheme_Object *wait_expr;
     } eval;
@@ -1009,8 +1044,6 @@ typedef struct Scheme_Thread {
   Scheme_Simple_Object *list_stack;
   int list_stack_pos;
 
-  Scheme_Hash_Table *rn_memory;
-
   /* MzScheme client can use: */
   void (*on_kill)(struct Scheme_Thread *p);
   void *kill_data;
@@ -1032,6 +1065,10 @@ typedef struct Scheme_Thread {
   Scheme_Object *transitive_resumes; /* A hash table of running-boxes */
 
   Scheme_Object *name;
+
+#ifdef MZ_PRECISE_GC
+  int gc_owner_set;
+#endif
 } Scheme_Thread;
 
 #if !SCHEME_DIRECT_EMBEDDED
@@ -1072,7 +1109,6 @@ enum {
 
   MZCONFIG_EXIT_HANDLER,
 
-  MZCONFIG_EXN_HANDLER,
   MZCONFIG_INIT_EXN_HANDLER,
 
   MZCONFIG_EVAL_HANDLER,
@@ -1153,6 +1189,9 @@ enum {
 
   MZCONFIG_THREAD_SET,
   MZCONFIG_THREAD_INIT_STACK_SIZE,
+
+  MZCONFIG_LOAD_DELAY_ENABLED,
+  MZCONFIG_DELAY_LOAD_INFO,
 
   MZCONFIG_EXPAND_OBSERVE,
 
@@ -1482,6 +1521,8 @@ void *scheme_malloc(size_t size);
 # endif
 # define scheme_malloc_tagged GC_malloc_one_tagged
 # define scheme_malloc_small_tagged(s) GC_malloc_one_small_tagged(gcWORDS_TO_BYTES(gcBYTES_TO_WORDS(s)))
+# define scheme_malloc_small_dirty_tagged(s) GC_malloc_one_small_dirty_tagged(gcWORDS_TO_BYTES(gcBYTES_TO_WORDS(s)))
+# define scheme_malloc_small_atomic_tagged(s) GC_malloc_small_atomic_tagged(gcWORDS_TO_BYTES(gcBYTES_TO_WORDS(s)))
 # define scheme_malloc_array_tagged GC_malloc_array_tagged
 # define scheme_malloc_atomic_tagged GC_malloc_atomic_tagged
 # define scheme_malloc_stubborn_tagged GC_malloc_one_tagged
@@ -1491,6 +1532,7 @@ void *scheme_malloc(size_t size);
 # define scheme_malloc_weak GC_malloc_weak
 # define scheme_malloc_weak_tagged GC_malloc_one_weak_tagged
 # define scheme_malloc_allow_interior GC_malloc_allow_interior
+# define scheme_malloc_atomic_allow_interior GC_malloc_allow_interior
 #else
 # ifdef USE_TAGGED_ALLOCATION
 extern void *scheme_malloc_tagged(size_t);
@@ -1511,12 +1553,15 @@ extern void *scheme_malloc_envunbox(size_t);
 #  define scheme_malloc_uncollectable_tagged scheme_malloc_uncollectable
 #  define scheme_malloc_envunbox scheme_malloc
 # endif
+# define scheme_malloc_small_dirty_tagged scheme_malloc_small_tagged
 # define scheme_malloc_allow_interior scheme_malloc
+# define scheme_malloc_atomic_allow_interior scheme_malloc_atomic
+# define scheme_malloc_small_atomic_tagged scheme_malloc_atomic_tagged
 #endif
 
 
 #ifdef MZ_PRECISE_GC
-# define MZ_GC_DECL_REG(size) void *__gc_var_stack__[size+2] = { 0, size };
+# define MZ_GC_DECL_REG(size) void *__gc_var_stack__[size+2] = { (void *)0, (void *)size };
 # define MZ_GC_VAR_IN_REG(x, v) (__gc_var_stack__[x+2] = (void *)&(v))
 # define MZ_GC_ARRAY_VAR_IN_REG(x, v, l) (__gc_var_stack__[x+2] = (void *)0, \
                                           __gc_var_stack__[x+3] = (void *)&(v), \
@@ -1524,7 +1569,7 @@ extern void *scheme_malloc_envunbox(size_t);
 # define MZ_GC_NO_VAR_IN_REG(x) (__gc_var_stack__[x+2] = NULL)
 # define MZ_GC_REG()  (__gc_var_stack__[0] = GC_variable_stack, \
                        GC_variable_stack = __gc_var_stack__)
-# define MZ_GC_UNREG() (GC_variable_stack = __gc_var_stack__[0])
+# define MZ_GC_UNREG() (GC_variable_stack = (void **)__gc_var_stack__[0])
 #else
 # define MZ_GC_DECL_REG(size)            /* empty */
 # define MZ_GC_VAR_IN_REG(x, v)          /* empty */
@@ -1532,6 +1577,16 @@ extern void *scheme_malloc_envunbox(size_t);
 # define MZ_GC_NO_VAR_IN_REG(x)          /* empty */
 # define MZ_GC_REG()                     /* empty */
 # define MZ_GC_UNREG()                   /* empty */
+# define XFORM_HIDE_EXPR(x) x
+# define XFORM_START_SKIP /**/
+# define XFORM_END_SKIP /**/
+# define XFORM_START_SUSPEND /**/
+# define XFORM_END_SUSPEND /**/
+# define XFORM_START_TRUST_ARITH /**/
+# define XFORM_END_TRUST_ARITH /**/
+# define XFORM_CAN_IGNORE /**/
+# define XFORM_TRUST_PLUS +
+# define XFORM_TRUST_MINUS -
 #endif
 
 /*========================================================================*/

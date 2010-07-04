@@ -1,14 +1,9 @@
 (module sig mzscheme
-  (require (lib "unitsig.ss"))
+  (require (lib "unit.ss"))
   (require "private/dispatch-server-sig.ss")
   (provide ; XXX contract signature
-   web-server^ servlet^ web-config^ web-config/pervasive^ web-config/local^)
-
-  (define-signature web-server^
-    ((open dispatch-server^)))
-  
-  (define-signature servlet^
-    (initial-request send/suspend send/finish send/back send/forward adjust-timeout!))
+   (rename dispatch-server^ web-server^) 
+   web-config^ web-config/pervasive^ web-config/local^)  
 
   ; more here - rename
   (define-signature web-config/pervasive^

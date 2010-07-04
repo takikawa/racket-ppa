@@ -4,7 +4,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2006 PLT Scheme Inc.
+ * Copyright: (C) 2004-2007 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -20,7 +20,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301 USA.
  */
 
 #ifndef wxDefines_h
@@ -185,6 +186,8 @@ typedef short int WXTYPE;
 #define wxNUM_HATCH        (wxVERTICAL - wxBDIAGONAL + 1)
 #define wxOPAQUE_STIPPLE   207
 #define wxPANEL_PATTERN    208
+#define wxDIM_OVER         209
+#define wxFADE_OVER        210
 
 #define wxJOIN_BEVEL       0
 #define wxJOIN_MITER       1

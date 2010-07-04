@@ -37,7 +37,7 @@
 #ifndef TEST
 # define TEST 1
 # include "my_qsort.c"
-void designate_modified(void *p);
+int designate_modified(void *p);
 #endif
 
 #ifdef __POWERPC__
@@ -59,7 +59,7 @@ void designate_modified(void *p);
 #endif
 
 /* Forward declarations: */
-inline static void *find_cached_pages(size_t len, size_t alignment);
+inline static void *find_cached_pages(size_t len, size_t alignment, int dirty_ok);
 static void free_actual_pages(void *p, size_t len, int zeroed);
 
 /* the structure of an exception msg and its reply */
@@ -93,7 +93,7 @@ static mach_port_t task_self = 0;
 static mach_port_t exc_port = 0;
 
 /* the VM subsystem as defined by the GC files */
-static void *malloc_pages(size_t len, size_t alignment)
+static void *do_malloc_pages(size_t len, size_t alignment, int dirty_ok)
 {
   kern_return_t retval;
   size_t extra = 0;
@@ -107,7 +107,7 @@ static void *malloc_pages(size_t len, size_t alignment)
   if(len & (page_size - 1))
     len += page_size - (len & (page_size - 1));
 
-  r = find_cached_pages(len, alignment);
+  r = find_cached_pages(len, alignment, dirty_ok);
   if (r)
     return r;
 
@@ -157,6 +157,16 @@ static void *malloc_pages(size_t len, size_t alignment)
   return r;
 }
 
+static void *malloc_pages(size_t len, size_t alignment)
+{
+  return do_malloc_pages(len, alignment, 0);
+}
+
+static void *malloc_dirty_pages(size_t len, size_t alignment)
+{
+  return do_malloc_pages(len, alignment, 1);
+}
+
 static void system_free_pages(void *p, size_t len)
 {
   kern_return_t retval;
@@ -197,7 +207,7 @@ static unsigned long determine_max_heap_size()
 
   getrlimit(RLIMIT_RSS, rlim);
   retval = rlim->rlim_cur; free(rlim);
-  return (retval == RLIM_INFINITY) ? (1024 * 1024 * 1024) : retval;
+  return (retval == RLIM_INFINITY) ? (unsigned long)-1 : retval;
 }
 #endif
 
@@ -236,8 +246,10 @@ kern_return_t catch_exception_raise(mach_port_t port,
   /* kernel return value is in exception_data[0], faulting address in
      exception_data[1] */
   if(exception_data[0] == KERN_PROTECTION_FAILURE) {
-    designate_modified((void*)exception_data[1]);
-    return KERN_SUCCESS;
+    if (designate_modified((void*)exception_data[1]))
+      return KERN_SUCCESS;
+    else
+      return KERN_FAILURE;
   } else 
 #endif
     return KERN_FAILURE;
@@ -355,18 +367,18 @@ static void macosx_init_exception_handler()
 char *normal_page = NULL;
 char *big_page = NULL;
 
-void designate_modified(void *p)
+int designate_modified(void *p)
 {
   if((p >= normal_page) && (p < (normal_page + MPAGE_SIZE))) {
     protect_pages(p, MPAGE_SIZE, 1);
-    return;
+    return 1;
   }
   if((p >= big_page) && (p < (big_page + BPAGE_SIZE))) {
     protect_pages(p, BPAGE_SIZE, 1);
-    return;
+    return 1;
   }
   printf("Unrecognized write: %p\n", p);
-  abort();
+  return 0;
 }
 
 int main(int argc, char **argv)

@@ -3,7 +3,7 @@
  * Purpose:     wxMediaEdit implementation
  * Author:      Matthew Flatt
  * Created:     1995
- * Copyright:   (c) 2004-2006 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2007 PLT Scheme Inc.
  * Copyright:   (c) 1995, Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -18,7 +18,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
  */
 
@@ -429,7 +430,7 @@ void wxMediaEdit::OnEvent(wxMouseEvent *event)
     return;
 
   if (!event->Moving())
-    EndStreaks(wxSTREAK_EXCEPT_KEY_SEQUENCE | wxSTREAK_EXCEPT_CURSOR);
+    EndStreaks(wxSTREAK_EXCEPT_KEY_SEQUENCE | wxSTREAK_EXCEPT_CURSOR | wxSTREAK_EXCEPT_DELAYED);
 
   if (event->ButtonDown() || caretSnip) {
     /* First, find clicked-on snip: */
@@ -466,7 +467,7 @@ void wxMediaEdit::OnEvent(wxMouseEvent *event)
 	snip = NULL;
     } else
       snip = NULL;
-    sequenced = (PTRNE(snip, caretSnip));
+    sequenced = 0 && (PTRNE(snip, caretSnip));
     if (sequenced)
       BeginEditSequence();
     SetCaretOwner(snip);
@@ -979,11 +980,13 @@ Bool wxMediaEdit::ScrollToPosition(long start, Bool ateol, Bool refresh,
     end = start;
 
   if (delayRefresh) {
-    delayedscrollbox = FALSE;
-    delayedscroll = start;
-    delayedscrollend = end;
-    delayedscrollateol = ateol;
-    delayedscrollbias = bias;
+    if (admin) {
+      delayedscrollbox = FALSE;
+      delayedscroll = start;
+      delayedscrollend = end;
+      delayedscrollateol = ateol;
+      delayedscrollbias = bias;
+    }
     return FALSE;
   }
 
@@ -1799,7 +1802,7 @@ void wxMediaEdit::_Insert(wxSnip *isnip, long strlen, wxchar *str, wxList *snips
 
   if (!modified) {
     wxUnmodifyRecord *ur;
-    ur = new WXGC_PTRS wxUnmodifyRecord;
+    ur = new WXGC_PTRS wxUnmodifyRecord(delayedStreak);
     AddUndo(ur);
   }
   if (!noundomode) {
@@ -1929,7 +1932,7 @@ void wxMediaEdit::Insert(wxchar a_char, long start, long end)
   streak = typingStreak;
   ifs = insertForceStreak;
 
-  EndStreaks();
+  EndStreaks(wxSTREAK_EXCEPT_DELAYED);
 
   insertForceStreak = streak;
   Insert(buffer, start, end);
@@ -2021,7 +2024,7 @@ void wxMediaEdit::_Delete(long start, long end, Bool withUndo, Bool scrollOk)
   if (withUndo) {
     if (!modified) {
       wxUnmodifyRecord *ur;
-      ur = new WXGC_PTRS wxUnmodifyRecord;
+      ur = new WXGC_PTRS wxUnmodifyRecord(delayedStreak);
       AddUndo(ur);
     }
     rec = new WXGC_PTRS wxDeleteRecord(start, end, deletionStreak || delayedStreak
@@ -2217,7 +2220,7 @@ void wxMediaEdit::Delete()
   dstreak = deletionStreak;
   dfs = deleteForceStreak;
 
-  EndStreaks();
+  EndStreaks(wxSTREAK_EXCEPT_DELAYED);
   deleteForceStreak = dstreak;
   Delete(startpos, (endpos == startpos) ? -1 : endpos);
 
@@ -3182,17 +3185,15 @@ Bool wxMediaEdit::InsertFile(const char *who, Scheme_Object *f, char *WXUNUSED(f
 {
   long n;
   const int BUF_SIZE = 1000;
-  char sbuffer[MRED_START_STR_LEN+1];
   wxchar buffer[BUF_SIZE];
   Bool fileerr;
 
   if (*format == wxMEDIA_FF_GUESS) {
-    n = scheme_get_byte_string(who, f, sbuffer, 0, MRED_START_STR_LEN, 0, 1, NULL);
-    sbuffer[MRED_START_STR_LEN] = 0;
-    if ((n != MRED_START_STR_LEN) || strcmp(sbuffer, MRED_START_STR))
+    if (!wxDetectWXMEFile(who, f, 1)) {
       *format = wxMEDIA_FF_TEXT;
-    else
+    } else {
       *format = wxMEDIA_FF_STD;
+    }
   }
 
   fileerr = FALSE;
@@ -3200,9 +3201,7 @@ Bool wxMediaEdit::InsertFile(const char *who, Scheme_Object *f, char *WXUNUSED(f
   showErrors = TRUE;
 
   if (*format == wxMEDIA_FF_STD) {
-    n = scheme_get_byte_string(who, f, sbuffer, 0, MRED_START_STR_LEN, 0, 1, NULL);
-    sbuffer[MRED_START_STR_LEN] = 0;
-    if ((n != MRED_START_STR_LEN) || strcmp(sbuffer, MRED_START_STR)){
+    if (!wxDetectWXMEFile(who, f, 1)) {
       if (showErrors) {
 	char ebuf[256];
 	sprintf(ebuf, "%s: not a MrEd editor<%%> file", who);
@@ -3213,7 +3212,7 @@ Bool wxMediaEdit::InsertFile(const char *who, Scheme_Object *f, char *WXUNUSED(f
       wxMediaStreamInFileBase *b;
       wxMediaStreamIn *mf;
 
-      scheme_get_byte_string(who, f, sbuffer, 0, MRED_START_STR_LEN, 0, 0, NULL);
+      wxDetectWXMEFile(who, f, 0);
       
       b = new WXGC_PTRS wxMediaStreamInFileBase(f);
       mf = new WXGC_PTRS wxMediaStreamIn(b);
@@ -3539,19 +3538,23 @@ long wxMediaEdit::_FindPositionInSnip(wxDC *dc, double X, double Y,
   while (1) {
     double dl, dr;
 
-    if ((dl = snip->PartialOffset(dc, X, Y, offset + i)) > x)
+    dl = snip->PartialOffset(dc, X, Y, offset + i);
+    if (dl > x)
       range = i;
-    else if ((dr = snip->PartialOffset(dc, X, Y, offset + i + 1)) <= x) {
-      offset += i;
-      range -= i;
-    } else {
-      if (how_close) {
-	if (dr - x < x - dl)
-	  *how_close = dr - x;
-	else
-	  *how_close = dl - x;
+    else {
+      dr = snip->PartialOffset(dc, X, Y, offset + i + 1);
+      if (dr <= x) {
+        offset += i;
+        range -= i;
+      } else {
+        if (how_close) {
+          if (dr - x < x - dl)
+            *how_close = dr - x;
+          else
+            *how_close = dl - x;
+        }
+        break;
       }
-      break;
     }
     
     i = range / 2;
@@ -4354,14 +4357,16 @@ Bool wxMediaEdit::ScrollTo(wxSnip *snip, double localx, double localy,
     return FALSE;
 
   if (delayRefresh) {
-    delayedscroll = -1;
-    delayedscrollbox = TRUE;
-    delayedscrollsnip = snip;
-    delayedscrollX = localx;
-    delayedscrollY = localy;
-    delayedscrollW = w;
-    delayedscrollH = h;
-    delayedscrollbias = bias;
+    if (admin) {
+      delayedscroll = -1;
+      delayedscrollbox = TRUE;
+      delayedscrollsnip = snip;
+      delayedscrollX = localx;
+      delayedscrollY = localy;
+      delayedscrollW = w;
+      delayedscrollH = h;
+      delayedscrollbias = bias;
+    }
     return FALSE;
   } else {
     if (snip) {

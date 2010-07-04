@@ -537,6 +537,7 @@
     system-menu
     set-modified
     create-status-line
+    is-maximized?
     maximize
     status-line-exists?
     iconized?
@@ -1336,6 +1337,8 @@
     set-inset
     get-margin
     set-margin
+    style-background-used?
+    use-style-background
     border-visible?
     show-border
     set-align-top-line

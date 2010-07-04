@@ -246,27 +246,53 @@ an appropriate subdirectory.
               [compat? (build-compatibility-fn (info 'can-be-loaded-with (lambda () 'none)))])
          (compat? pkg1))]))
   
+  ;; stx->origin-string : stx option -> string
+  ;; returns a description [e.g. file name, line#] of the given syntax
+  (define (stx->origin-string stx)
+    (if stx 
+        (format "~a" (syntax-source stx))
+        "[unknown]"))
   
-  (define (add-pkg-to-diamond-registry! pkg)
+  (define (add-pkg-to-diamond-registry! pkg stx)
     (let ((loaded-packages (hash-table-get (the-version-cache)
                                            (pkg->diamond-key pkg)
                                            (lambda () '()))))
       (begin
-        (for-each
-         (lambda (already-loaded-pkg)
-           (unless (can-be-loaded-together? pkg already-loaded-pkg)
-             (raise (make-exn:fail (string->immutable-string
-                                    (format 
-                                     "Package ~a loaded twice with multiple incompatible versions: 
-attempted to load version ~a.~a while version ~a.~a was already loaded" 
-                                     (pkg-name pkg) 
-                                     (pkg-maj pkg)
-                                     (pkg-min pkg)
-                                     (pkg-maj already-loaded-pkg)
-                                     (pkg-min already-loaded-pkg)))
-                                   (current-continuation-marks)))))
-         loaded-packages)
-        (hash-table-put! (the-version-cache) (pkg->diamond-key pkg) (cons pkg loaded-packages)))))
+        (unless (list? loaded-packages)
+          (error 'PLaneT "Inconsistent state: expected loaded-packages to be a list, received: ~s" loaded-packages))
+        (let* ([all-violations '()]
+               [_
+                (for-each
+                 (lambda (already-loaded-pkg-record)
+                   (let* ([already-loaded-pkg (car already-loaded-pkg-record)]
+                          [stx (cadr already-loaded-pkg-record)]
+                          [stx-origin-string (stx->origin-string stx)])
+                     (unless (can-be-loaded-together? pkg already-loaded-pkg)
+                       (set!
+                        all-violations
+                        (cons
+                         (list
+                          stx
+                          (make-exn:fail 
+                           (format
+                           "Package ~a loaded twice with multiple incompatible versions:
+~a attempted to load version ~a.~a while version ~a.~a was already loaded by ~a"
+                           (pkg-name pkg)
+                           (stx->origin-string stx)
+                           (pkg-maj pkg)
+                           (pkg-min pkg)
+                           (pkg-maj already-loaded-pkg)
+                           (pkg-min already-loaded-pkg)
+                           stx-origin-string)
+                          (current-continuation-marks)))
+                         all-violations)))))
+                 loaded-packages)])
+          (unless (null? all-violations)
+            (let ([worst (or (assq values all-violations) (car all-violations))])
+              (raise (cadr worst)))))
+        (hash-table-put! (the-version-cache)
+                         (pkg->diamond-key pkg) 
+                         (cons (list pkg stx) loaded-packages)))))
   
   ; ==========================================================================================
   ; MAIN LOGIC
@@ -278,7 +304,7 @@ attempted to load version ~a.~a while version ~a.~a was already loaded"
   ; environment
   (define (planet-resolve spec module-path stx load?)
     (let-values ([(path pkg) (get-planet-module-path/pkg spec module-path stx)])
-      (when load? (add-pkg-to-diamond-registry! pkg))
+      (when load? (add-pkg-to-diamond-registry! pkg stx))
       (do-require path (pkg-path pkg) module-path stx load?)))
   
   ;; resolve-planet-path : planet-require-spec -> path
@@ -300,15 +326,15 @@ attempted to load version ~a.~a while version ~a.~a was already loaded"
          (if (ormap number? path)
              (raise-syntax-error #f (format "Module path must consist of strings only, received a number (maybe you intended to specify a package version number?): ~s" path) stx)
              (raise-syntax-error #f (format "Module path must consist of strings only, received: ~s" path) stx)))
-       
-       (match-let*
-           ([pspec (pkg-spec->full-pkg-spec pkg-spec stx)]
-            [result (get-package module-path pspec)])
-         (cond
-           [(string? result)
-            (raise-syntax-error 'require (string->immutable-string result) stx)]
-           [(pkg? result)
-            (values (apply build-path (pkg-path result) (append path (list file-name))) result)]))]
+
+       (match-let* ([pspec (pkg-spec->full-pkg-spec pkg-spec stx)]
+                    [result (get-package module-path pspec)])
+         (cond [(string? result)
+                (raise-syntax-error 'require result stx)]
+               [(pkg? result)
+                (values (apply build-path (pkg-path result)
+                               (append path (list file-name)))
+                        result)]))]
       [_ (raise-syntax-error 'require (format "Illegal PLaneT invocation: ~e" (cdr spec)) stx)]))
 
   ;; PKG-GETTER ::= module-path pspec 
@@ -409,6 +435,12 @@ attempted to load version ~a.~a while version ~a.~a was already loaded"
   (define (get-package-from-cache pkg-spec) 
     (lookup-package pkg-spec))
   
+  ;; get/uninstalled-cache-dummy : pkg-getter
+  ;; always fails, but records the package to the uninstalled package cache
+  ;; upon the success of some other getter later in the chain.
+  (define (get/uninstalled-cache-dummy module-spec pkg-spec success-k failure-k)
+    (failure-k save-to-uninstalled-pkg-cache! void (λ (x) x)))
+  
   ; get/uninstalled-cache : pkg-getter
   ; note: this does not yet work with minimum-required-version specifiers
   ; if you install a package and then use an older mzscheme
@@ -425,14 +457,12 @@ attempted to load version ~a.~a while version ~a.~a was already loaded"
             pkg-spec
             (pkg-maj p)
             (pkg-min p)))
-          (failure-k
-           save-to-uninstalled-pkg-cache!
-           void
-           (λ (x) x)))))
+          (failure-k void void (λ (x) x)))))
   
-  ;; save-to-uninstalled-pkg-cache! : uninstalled-pkg -> void
-  ;; copies the given uninstalled package into the uninstalled-package cache.
-  ;; replaces any old file that might be there
+  ;; save-to-uninstalled-pkg-cache! : uninstalled-pkg -> path[file]
+  ;; copies the given uninstalled package into the uninstalled-package cache,
+  ;; replacing any old file that might be there. Returns the path it copied
+  ;; the file into.
   (define (save-to-uninstalled-pkg-cache! uninst-p)
     (let* ([pspec (uninstalled-pkg-spec uninst-p)]
            [owner (car (pkg-spec-path pspec))]
@@ -446,8 +476,10 @@ attempted to load version ~a.~a while version ~a.~a was already loaded"
                             (number->string min))]
            [full-pkg-path (build-path dir name)])
       (make-directory* dir)
-      (when (file-exists? full-pkg-path) (delete-file full-pkg-path))
-      (copy-file (uninstalled-pkg-path uninst-p) full-pkg-path)))
+      (unless (equal? (normalize-path (uninstalled-pkg-path uninst-p)) (normalize-path full-pkg-path))
+        (when (file-exists? full-pkg-path) (delete-file full-pkg-path))
+        (copy-file (uninstalled-pkg-path uninst-p) full-pkg-path))
+      full-pkg-path))
 
   ; ==========================================================================================
   ; PHASE 3: SERVER RETRIEVAL
@@ -467,10 +499,13 @@ attempted to load version ~a.~a while version ~a.~a was already loaded"
   ; uninstalled-packages cache, then returns a promise for it   
   (define (get-package-from-server pkg)
     (match (download-package pkg)
-      [(#t path maj min) 
-       (let ([upkg (make-uninstalled-pkg path pkg maj min)])
-         (save-to-uninstalled-pkg-cache! upkg)
-         upkg)]
+      [(#t tmpfile-path maj min) 
+       (let* ([upkg (make-uninstalled-pkg tmpfile-path pkg maj min)]
+              [cached-path (save-to-uninstalled-pkg-cache! upkg)]
+              [final (make-uninstalled-pkg cached-path pkg maj min)])
+         (unless (equal? (normalize-path tmpfile-path) (normalize-path cached-path))
+           (delete-file tmpfile-path)) ;; remove the tmp file, we're done with it
+         final)]
       [(#f str) (string-append "PLaneT could not find the requested package: " str)]
       [(? string? s) (string-append "PLaneT could not download the requested package: " s)]))
   
@@ -506,13 +541,12 @@ attempted to load version ~a.~a while version ~a.~a was already loaded"
   ; install the given pkg to the planet cache and return a PKG representing the installed file
   (define (install-pkg pkg path maj min)
     (unless (install?)
-      (raise (make-exn:fail 
-              (string->immutable-string
-               (format
-                "PLaneT error: cannot install package ~s since the install? parameter is set to #f"
-                (list (car (pkg-spec-path pkg)) (pkg-spec-name pkg) maj min)))
+      (raise (make-exn:fail
+              (format
+               "PLaneT error: cannot install package ~s since the install? parameter is set to #f"
+               (list (car (pkg-spec-path pkg)) (pkg-spec-name pkg) maj min))
               (current-continuation-marks))))
-                
+    
     (let* ((owner (car (pkg-spec-path pkg)))
            (extra-path (cdr (pkg-spec-path pkg)))
            (the-dir 
@@ -593,9 +627,8 @@ attempted to load version ~a.~a while version ~a.~a was already loaded"
          (state:abort (format "Unknown error ~a receiving package: ~a" code msg))]
         [bad-response  (state:abort (format "Server returned malformed message: ~e" bad-response))]))
     
-    (define (state:abort msg) 
-      (raise (make-exn:i/o:protocol (string->immutable-string msg)
-                                    (current-continuation-marks))))
+    (define (state:abort msg)
+      (raise (make-exn:i/o:protocol msg (current-continuation-marks))))
     (define (state:failure msg) (list #f msg))
     
     (with-handlers ([void (lambda (e) (close-ports) (raise e))])
@@ -709,8 +742,9 @@ attempted to load version ~a.~a while version ~a.~a was already loaded"
      (list
       get/linkage
       get/installed-cache
-      get/uninstalled-cache
-      get/server)))
+      get/uninstalled-cache-dummy
+      get/server
+      get/uninstalled-cache)))
   
   
   ; ============================================================

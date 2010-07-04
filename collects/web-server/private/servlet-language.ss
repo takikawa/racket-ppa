@@ -3,13 +3,14 @@
            (lib "tool.ss" "drscheme")
            (lib "contract.ss")
            ;(lib "mred.ss" "mred")
-           (lib "unitsig.ss"))
+           (lib "unit.ss"))
   (provide/contract
-   [tool@ unit/sig?])
+   [tool@ unit?])
 
   (define tool@
-    (unit/sig drscheme:tool-exports^
+    (unit 
       (import drscheme:tool^)
+      (export drscheme:tool-exports^)
       (define (phase1) (void))
       (define (phase2)
         (add-servlet-language))
@@ -51,8 +52,8 @@
                  (eval '(define raw-servlet->unit/sig (dynamic-require '(lib "servlet-startup.ss" "web-server") 'raw-servlet->unit/sig)))
                  (eval '(define create-module-servlet (dynamic-require '(lib "servlet-startup.ss" "web-server") 'create-module-servlet)))))))
 
-          (define/override (front-end/complete-program input settings teachpack-cache)
-            (let ([super-thunk (super front-end/complete-program input settings teachpack-cache)])
+          (define/override (front-end/complete-program input settings)
+            (let ([super-thunk (super front-end/complete-program input settings)])
               (unless program-results
                 (let loop ([continue-with-results
                             (lambda (rslts)

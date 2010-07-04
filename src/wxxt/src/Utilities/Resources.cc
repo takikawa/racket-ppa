@@ -4,7 +4,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2006 PLT Scheme Inc.
+ * Copyright: (C) 2004-2007 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -20,7 +20,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301 USA.
  */
 
 #define  Uses_XLib
@@ -97,7 +98,7 @@ static void wxXMergeDatabases(void)
       // Get X defaults file, if any 
       home = wxGetUserHome(NULL);
       if (home) {
-	dest = new char[strlen(home) + 20];
+	dest = new WXGC_ATOMIC char[strlen(home) + 20];
 	
 	strcpy(dest, home);
 	if (dest[strlen(dest) - 1] != '/')
@@ -131,7 +132,7 @@ static void wxXMergeDatabases(void)
     // Get user defaults file, if any 
     home = wxGetUserHome(NULL);
     if (home) {
-      dest = new char[strlen(home) + 20];
+      dest = new WXGC_ATOMIC char[strlen(home) + 20];
       
       strcpy(dest, home);
       if (dest[strlen(dest) - 1] != '/')
@@ -246,7 +247,7 @@ Bool wxGetResource(const char *section, const char *entry, char **value,
     success = XrmGetResource(database, buf, "*", str_type, &xvalue);
     if (success) {
       char *v;
-      v = new char[xvalue.size + 1];
+      v = new WXGC_ATOMIC char[xvalue.size + 1];
       *value = v;
       strncpy(*value, xvalue.addr, (int)xvalue.size);
       return TRUE;

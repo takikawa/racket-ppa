@@ -1,5 +1,5 @@
 (module sig mzscheme
-  (require (lib "unitsig.ss"))
+  (require (lib "unit.ss"))
   
   (provide relative-btree^
            bullet-export^
@@ -12,10 +12,9 @@
      html-eval-ok
      image-map-snip%))
   
-  (define-signature html^
+  (define-signature html^ extends html-export^
     (html-convert
-     html-status-handler
-     (open html-export^)))
+     html-status-handler))
   
   (define-signature bullet-export^
     (bullet-size))

@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2006 PLT Scheme Inc.
+// Copyright:  (c) 2004-2007 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -194,11 +194,13 @@ wxMenu::~wxMenu(void)
   wxNode* node;
   wxMenuItem* item;
 
-  if (menu_bar) // may have to remove menu from the current mac menu bar
-    {
-      menu_bar->Delete(this);
-    } else if (window_parent)
-      ((wxMenu *)window_parent)->Delete(this, 0, -1);
+  if (menu_bar) { // may have to remove menu from the current mac menu bar
+    menu_bar->Delete(this);
+    menu_bar = NULL;
+  } else if (window_parent) {
+    ((wxMenu *)window_parent)->Delete(this, 0, -1);
+    window_parent = NULL;
+  }
 
   ::DisposeMenu(cMacMenu); // does not dispose of submenus
 
@@ -727,7 +729,7 @@ void wxSetUpAppleMenu(wxMenuBar *mbar)
 
    if (!::GetIndMenuItemWithCommandID (NULL, 'pref', 1, &mnu, &idx)) {
      if (wxCan_Do_Pref()) {
-       ::SetMenuItemCommandKey(mnu, idx, FALSE, ';');
+       ::SetMenuItemCommandKey(mnu, idx, FALSE, ',');
        ::EnableMenuItem(mnu, idx);
      } else {
        ::DisableMenuItem(mnu, idx);
@@ -756,12 +758,14 @@ void wxMenuBar::Install(wxWindow *for_frame)
       if (!v) {
 	::DisableMenuItem(mh, 0);
       } else {
-	if (menu_bar_frame)
-	  v = menu_bar_frame->CanAcceptEvent();
-	else
+	if (menu_bar_frame) {
+          /* Don't use CanAcceptEvent(), because that depends on 
+             mouse capture, which is too transient for updating menus. */
+	  v = menu_bar_frame->IsEnable();
+	} else
 	  v = 1;
 	if (!v) {
-	  ::DisableMenuItem(mh, 0);
+          ::DisableMenuItem(mh, 0);
 	} else {
 	  ::EnableMenuItem(mh, 0);
 	}

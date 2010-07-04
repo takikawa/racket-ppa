@@ -118,9 +118,6 @@ The `target' field is a string or a list of strings naming
 the target(s), and the `orig-exn' field is the original
 exception.
 
-The maker.ss library is a signed unit that requires no
-imports and provides `make/proc'.
-
 make.ss also provides the following parameters:
 
 > (make-print-checking [on?]) - If #f, make only prints when
@@ -133,6 +130,12 @@ corresponding make line.  Default: #f.
 
 > (make-print-reasons [on?]) If #t, make prints the reason
 for each dependency that fires. Default: #t.
+
+The make-sig.ss library provides `make^' signature that includes all
+of the above.
+
+The make-unit.ss library provides a `make@' unit with no imports and the
+single export `make^'.
 
 _collection.ss_
 ---------------
@@ -197,11 +200,12 @@ function helps with a few:
      is present.
 
 Many extension installers will have to sort out addition platform
-issues manually, however. For example, the "readline" installer picks
-whether to link to "libcurses" or "libncurses" heuristically by
-inspecting "/usr/lib". More generally, the "last chance" argument to
-`pre-install' allows an installer to patch compiler and linker options
-(see "dynext") before the C code is compiled or linked.
+issues manually, however. For example, an old "readline" installer
+used to pick whether to link to "libcurses" or "libncurses"
+heuristically by inspecting "/usr/lib". More generally, the "last
+chance" argument to `pre-install' allows an installer to patch
+compiler and linker options (see "dynext") before the C code is
+compiled or linked.
 
 
 > (pre-install plthome-dir
@@ -279,6 +283,7 @@ The arguments are as follows:
     "readline" installer adds an AIX-specific compile flag in this
     step when under AIX.
 
-  * 3m-too?--- a boolean. If true, when MzScheme3m is installed, use
-    the equivalent to mzc --xform to transform the source file and
-    then compile and link for 3m.
+  * 3m-too?--- a boolean. If true, when the 3m variant is installed,
+    use the equivalent to mzc --xform to transform the source file and
+    then compile and link for 3m. Otherwise, the extension is built
+    only for CGC when the CGC variant is installed.

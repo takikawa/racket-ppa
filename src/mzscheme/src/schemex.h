@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -193,6 +193,8 @@ unsigned char *scheme_uchar_combining_classes;
 /*========================================================================*/
 Scheme_Object *(*scheme_eval)(Scheme_Object *obj, Scheme_Env *env);
 Scheme_Object *(*scheme_eval_multi)(Scheme_Object *obj, Scheme_Env *env);
+Scheme_Object *(*scheme_eval_with_prompt)(Scheme_Object *obj, Scheme_Env *env);
+Scheme_Object *(*scheme_eval_multi_with_prompt)(Scheme_Object *obj, Scheme_Env *env);
 Scheme_Object *(*scheme_eval_compiled)(Scheme_Object *obj, Scheme_Env *env);
 Scheme_Object *(*scheme_eval_compiled_multi)(Scheme_Object *obj, Scheme_Env *env);
 Scheme_Object *(*_scheme_eval_compiled)(Scheme_Object *obj, Scheme_Env *env);
@@ -202,9 +204,16 @@ Scheme_Object *(*scheme_apply_multi)(Scheme_Object *rator, int num_rands, Scheme
 Scheme_Object *(*scheme_apply_no_eb)(Scheme_Object *rator, int num_rands, Scheme_Object **rands);
 Scheme_Object *(*scheme_apply_multi_no_eb)(Scheme_Object *rator, int num_rands, Scheme_Object **rands);
 Scheme_Object *(*scheme_apply_to_list)(Scheme_Object *rator, Scheme_Object *argss);
+Scheme_Object *(*scheme_apply_with_prompt)(Scheme_Object *rator, int num_rands, Scheme_Object **rands);
+Scheme_Object *(*scheme_apply_multi_with_prompt)(Scheme_Object *rator, int num_rands, Scheme_Object **rands);
+Scheme_Object *(*_scheme_apply_with_prompt)(Scheme_Object *rator, int num_rands, Scheme_Object **rands);
+Scheme_Object *(*_scheme_apply_multi_with_prompt)(Scheme_Object *rator, int num_rands, Scheme_Object **rands);
 Scheme_Object *(*scheme_eval_string)(const char *str, Scheme_Env *env);
 Scheme_Object *(*scheme_eval_string_multi)(const char *str, Scheme_Env *env);
 Scheme_Object *(*scheme_eval_string_all)(const char *str, Scheme_Env *env, int all);
+Scheme_Object *(*scheme_eval_string_with_prompt)(const char *str, Scheme_Env *env);
+Scheme_Object *(*scheme_eval_string_multi_with_prompt)(const char *str, Scheme_Env *env);
+Scheme_Object *(*scheme_eval_string_all_with_prompt)(const char *str, Scheme_Env *env, int all);
 Scheme_Object *(*_scheme_apply_known_prim_closure)(Scheme_Object *rator, int argc,
 							  Scheme_Object **argv);
 Scheme_Object *(*_scheme_apply_known_prim_closure_multi)(Scheme_Object *rator, int argc,
@@ -213,6 +222,10 @@ Scheme_Object *(*_scheme_apply_prim_closure)(Scheme_Object *rator, int argc,
 						    Scheme_Object **argv);
 Scheme_Object *(*_scheme_apply_prim_closure_multi)(Scheme_Object *rator, int argc,
 							  Scheme_Object **argv);
+Scheme_Object *(*scheme_call_with_prompt)(Scheme_Closed_Prim f, void *data);
+Scheme_Object *(*scheme_call_with_prompt_multi)(Scheme_Closed_Prim f, void *data);
+Scheme_Object *(*_scheme_call_with_prompt)(Scheme_Closed_Prim f, void *data);
+Scheme_Object *(*_scheme_call_with_prompt_multi)(Scheme_Closed_Prim f, void *data);
 Scheme_Object *(*scheme_values)(int c, Scheme_Object **v);
 Scheme_Object *(*scheme_check_one_value)(Scheme_Object *v);
 /* Tail calls - only use these when you're writing new functions/syntax */
@@ -258,6 +271,9 @@ void *(*GC_malloc_one_tagged)(size_t size_in_bytes);
 void *(*GC_malloc_atomic_uncollectable)(size_t size_in_bytes);
 void *(*scheme_malloc_uncollectable)(size_t size_in_bytes);
 void *(*GC_malloc_array_tagged)(size_t size_in_bytes);
+void *(*GC_malloc_allow_interior)(size_t size_in_bytes);
+void *(*GC_malloc_atomic_allow_interior)(size_t size_in_bytes);
+void *(*GC_malloc_tagged_allow_interior)(size_t size_in_bytes);
 #  else
 void *(*GC_malloc_stubborn)(size_t size_in_bytes);
 void *(*GC_malloc_uncollectable)(size_t size_in_bytes);
@@ -310,6 +326,9 @@ Scheme_Hash_Table *(*scheme_make_hash_table)(int type);
 Scheme_Hash_Table *(*scheme_make_hash_table_equal)();
 void (*scheme_hash_set)(Scheme_Hash_Table *table, Scheme_Object *key, Scheme_Object *val);
 Scheme_Object *(*scheme_hash_get)(Scheme_Hash_Table *table, Scheme_Object *key);
+Scheme_Object *(*scheme_eq_hash_get)(Scheme_Hash_Table *table, Scheme_Object *key);
+void (*scheme_hash_set_atomic)(Scheme_Hash_Table *table, Scheme_Object *key, Scheme_Object *val);
+Scheme_Object *(*scheme_hash_get_atomic)(Scheme_Hash_Table *table, Scheme_Object *key);
 int (*scheme_hash_table_equal)(Scheme_Hash_Table *t1, Scheme_Hash_Table *t2);
 int (*scheme_is_hash_table_equal)(Scheme_Object *o);
 Scheme_Hash_Table *(*scheme_clone_hash_table)(Scheme_Hash_Table *bt);
@@ -405,6 +424,7 @@ Scheme_Object *(*scheme_make_sema)(long v);
 void (*scheme_post_sema)(Scheme_Object *o);
 void (*scheme_post_sema_all)(Scheme_Object *o);
 int (*scheme_wait_sema)(Scheme_Object *o, int just_try);
+int (*scheme_try_plain_sema)(Scheme_Object *o);
 Scheme_Object **scheme_char_constants;
 Scheme_Object *(*scheme_make_channel)();
 Scheme_Object *(*scheme_make_channel_put_evt)(Scheme_Object *ch, Scheme_Object *v);
@@ -414,6 +434,7 @@ int (*scheme_get_long_long_val)(Scheme_Object *o, mzlonglong *v);
 int (*scheme_get_unsigned_long_long_val)(Scheme_Object *o, umzlonglong *v);
 double (*scheme_real_to_double)(Scheme_Object *r);
 Scheme_Object *(*scheme_make_cptr)(void *cptr, Scheme_Object *typetag);
+Scheme_Object *(*scheme_make_offset_cptr)(void *cptr, long offset, Scheme_Object *typetag);
 const char *(*scheme_get_proc_name)(Scheme_Object *p, int *len, int for_error);
 /*========================================================================*/
 /*                               strings                                  */
@@ -495,8 +516,8 @@ Scheme_Object *(*scheme_complex_normalize)(const Scheme_Object *n);
 Scheme_Object *(*scheme_complex_real_part)(const Scheme_Object *n);
 Scheme_Object *(*scheme_complex_imaginary_part)(const Scheme_Object *n);
 /* Exact/inexact: */
-int (*scheme_is_exact)(Scheme_Object *n);
-int (*scheme_is_inexact)(Scheme_Object *n);
+int (*scheme_is_exact)(const Scheme_Object *n);
+int (*scheme_is_inexact)(const Scheme_Object *n);
 /*========================================================================*/
 /*                 macros, syntax, and compilation                        */
 /*========================================================================*/
@@ -588,6 +609,11 @@ Scheme_Object *(*scheme_write_special)(int argc, Scheme_Object *argv[]);
 Scheme_Object *(*scheme_write_special_nonblock)(int argc, Scheme_Object *argv[]);
 Scheme_Object *(*scheme_make_write_evt)(const char *who, Scheme_Object *port,
 					       Scheme_Object *special, char *str, long start, long size);
+Scheme_Port *(*scheme_port_record)(Scheme_Object *port);
+Scheme_Input_Port *(*scheme_input_port_record)(Scheme_Object *port);
+Scheme_Output_Port *(*scheme_output_port_record)(Scheme_Object *port);
+int (*scheme_is_input_port)(Scheme_Object *port);
+int (*scheme_is_output_port)(Scheme_Object *port);
 Scheme_Object *(*scheme_make_port_type)(const char *name);
 Scheme_Input_Port *(*scheme_make_input_port)(Scheme_Object *subtype, void *data,
 						    Scheme_Object *name,
@@ -633,7 +659,8 @@ Scheme_Object *(*scheme_make_fd_output_port)(int fd, Scheme_Object *name, int re
 Scheme_Object *(*scheme_make_byte_string_input_port)(const char *str);
 Scheme_Object *(*scheme_make_sized_byte_string_input_port)(const char *str, long len);
 Scheme_Object *(*scheme_make_byte_string_output_port)();
-char *(*scheme_get_sized_byte_string_output)(Scheme_Object *, long *len);
+char *(*scheme_get_sized_byte_string_output)(Scheme_Object *port, long *len);
+char *(*scheme_get_reset_sized_byte_string_output)(Scheme_Object *port, long *len, int reset, long startpos, long endpos);
 void (*scheme_pipe)(Scheme_Object **read, Scheme_Object **write);
 void (*scheme_pipe_with_limit)(Scheme_Object **write, Scheme_Object **read, int maxsize);
 Scheme_Object *(*scheme_make_null_output_port)(int can_write_special);
@@ -646,12 +673,14 @@ char *(*scheme_expand_string_filename)(Scheme_Object *f, const char *errorin, in
 char *(*scheme_os_getcwd)(char *buf, int buflen, int *actlen, int noexn);
 int (*scheme_os_setcwd)(char *buf, int noexn);
 char *(*scheme_getdrive)(void);
-Scheme_Object *(*scheme_split_path)(const char *path, int len, Scheme_Object **base, int *isdir);
+Scheme_Object *(*scheme_split_path)(const char *path, int len, Scheme_Object **base, int *isdir, int kind);
 Scheme_Object *(*scheme_build_path)(int argc, Scheme_Object **argv);
 Scheme_Object *(*scheme_path_to_directory_path)(Scheme_Object *p);
+Scheme_Object *(*scheme_path_to_complete_path)(Scheme_Object *path, Scheme_Object *relto_path);
 Scheme_Object *(*scheme_make_path)(const char *chars);
 Scheme_Object *(*scheme_make_sized_path)(char *chars, long len, int copy);
 Scheme_Object *(*scheme_make_sized_offset_path)(char *chars, long d, long len, int copy);
+Scheme_Object *(*scheme_make_sized_offset_kind_path)(char *chars, long d, long len, int copy, int kind);
 Scheme_Object *(*scheme_make_path_without_copying)(char *chars);
 #ifdef MACINTOSH_EVENTS
 char *(*scheme_mac_spec_to_path)(mzFSSpec *spec);
@@ -678,6 +707,8 @@ void (*scheme_getnameinfo)(void *sa, int salen,
 				  char *serv, int servlen);
 int (*scheme_get_port_file_descriptor)(Scheme_Object *p, long *_fd);
 int (*scheme_get_port_socket)(Scheme_Object *p, long *_s);
+void (*scheme_socket_to_ports)(long s, const char *name, int takeover,
+                                      Scheme_Object **_inp, Scheme_Object **_outp);
 void (*scheme_set_type_printer)(Scheme_Type stype, Scheme_Type_Printer printer);
 void (*scheme_print_bytes)(Scheme_Print_Params *pp, const char *str, int offset, int len);
 void (*scheme_print_utf8)(Scheme_Print_Params *pp, const char *str, int offset, int len);
@@ -772,6 +803,10 @@ long (*scheme_hash_key)(Scheme_Object *o);
 #endif
 long (*scheme_equal_hash_key)(Scheme_Object *o);
 long (*scheme_equal_hash_key2)(Scheme_Object *o);
+void (*scheme_set_type_equality)(Scheme_Type type, 
+                                        Scheme_Equal_Proc f,
+                                        Scheme_Primary_Hash_Proc hash1,
+                                        Scheme_Secondary_Hash_Proc hash2);
 Scheme_Object *(*scheme_build_list)(int argc, Scheme_Object **argv);
 Scheme_Object *(*scheme_build_list_offset)(int argc, Scheme_Object **argv, int delta);
 void (*scheme_make_list_immutable)(Scheme_Object *l);

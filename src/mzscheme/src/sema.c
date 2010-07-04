@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
  
     This library is free software; you can redistribute it and/or
@@ -15,7 +15,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 */
 
 #include "schpriv.h"
@@ -23,6 +24,7 @@
 #ifndef NO_SCHEME_THREADS
 
 Scheme_Object *scheme_always_ready_evt;
+Scheme_Object *scheme_system_idle_channel;
 
 static Scheme_Object *make_sema(int n, Scheme_Object **p);
 static Scheme_Object *semap(int n, Scheme_Object **p);
@@ -37,6 +39,7 @@ static Scheme_Object *make_channel_put(int n, Scheme_Object **p);
 static Scheme_Object *channel_p(int n, Scheme_Object **p);
 
 static Scheme_Object *make_alarm(int n, Scheme_Object **p);
+static Scheme_Object *make_sys_idle(int n, Scheme_Object **p);
 
 static int channel_get_ready(Scheme_Object *ch, Scheme_Schedule_Info *sinfo);
 static int channel_put_ready(Scheme_Object *ch, Scheme_Schedule_Info *sinfo);
@@ -48,6 +51,8 @@ static int never_ready(Scheme_Object *w);
 static int pending_break(Scheme_Thread *p);
 
 int scheme_main_was_once_suspended;
+
+static Scheme_Object *system_idle_put_evt;
 
 #ifdef MZ_PRECISE_GC
 static void register_traversers(void);
@@ -137,6 +142,12 @@ void scheme_init_sema(Scheme_Env *env)
 						      1, 1), 
 			     env);
 
+  scheme_add_global_constant("system-idle-evt", 
+			     scheme_make_prim_w_arity(make_sys_idle,
+						      "system-idle-evt",
+						      0, 0), 
+			     env);
+
   REGISTER_SO(scheme_always_ready_evt);
   scheme_always_ready_evt = scheme_alloc_small_object();
   scheme_always_ready_evt->type = scheme_always_evt_type;
@@ -145,6 +156,9 @@ void scheme_init_sema(Scheme_Env *env)
   o = scheme_alloc_small_object();
   o->type = scheme_never_evt_type;
   scheme_add_global_constant("never-evt", o, env);
+
+  REGISTER_SO(scheme_system_idle_channel);
+  scheme_system_idle_channel = scheme_make_channel();
 
   scheme_add_evt(scheme_sema_type, sema_ready, NULL, NULL, 0);
   scheme_add_evt_through_sema(scheme_semaphore_repost_type, sema_for_repost, NULL);
@@ -417,7 +431,10 @@ static void ext_get_into_line(Scheme_Object *ch, Scheme_Schedule_Info *sinfo)
   /* Get into line */
   w = MALLOC_ONE_RT(Scheme_Channel_Syncer);
   w->so.type = scheme_channel_syncer_type;
-  w->p = scheme_current_thread;
+  if (sinfo->false_positive_ok)
+    w->p = sinfo->false_positive_ok;
+  else
+    w->p = scheme_current_thread;
   w->syncing = (Syncing *)sinfo->current_syncing;
   w->obj = ch;
   w->syncing_i = sinfo->w_i;
@@ -446,8 +463,8 @@ static int try_channel(Scheme_Sema *sema, Syncing *syncing, int pos, Scheme_Obje
 	w = w->next;
       } else {
 	Scheme_Channel_Put *chp = (Scheme_Channel_Put *)w->obj;
-	
-	if (!w->syncing->result && !pending_break(w->p)) {
+
+        if (!w->syncing->result && !pending_break(w->p)) {
 	  w->picked = 1;
 	  w->syncing->result = w->syncing_i + 1;
 	  if (w->syncing->disable_break)
@@ -517,6 +534,18 @@ static int try_channel(Scheme_Sema *sema, Syncing *syncing, int pos, Scheme_Obje
   }
 }
 
+int scheme_try_plain_sema(Scheme_Object *o)
+{
+  Scheme_Sema *sema = (Scheme_Sema *)o;
+
+  if (sema->value) {
+    if (sema->value > 0)
+      --sema->value;
+    return 1;
+  } else
+    return 0;
+}
+
 int scheme_wait_semas_chs(int n, Scheme_Object **o, int just_try, Syncing *syncing)
      /* When syncing is supplied, o can contain Scheme_Channel_Syncer
 	and never-evt values, and just_try must be 0. */
@@ -529,12 +558,7 @@ int scheme_wait_semas_chs(int n, Scheme_Object **o, int just_try, Syncing *synci
     Scheme_Sema *sema = semas[0];
     if (just_try > 0) {
       if (sema->so.type == scheme_sema_type) {
-	if (sema->value) {
-	  if (sema->value > 0)
-	    --sema->value;
-	  v = 1;
-	} else
-	  v = 0;
+        v = scheme_try_plain_sema((Scheme_Object *)sema);
       } else {
 	v = try_channel(sema, syncing, 0, NULL);
       }
@@ -943,6 +967,14 @@ static int channel_syncer_ready(Scheme_Object *ch_w, Scheme_Schedule_Info *sinfo
   return 0;
 }
 
+int scheme_try_channel_get(Scheme_Object *ch)
+{
+  if (try_channel((Scheme_Sema *)ch, NULL, -1, NULL)) {
+    return 1;
+  }
+  return 0;
+}
+
 /**********************************************************************/
 /*                             alarms                                 */
 /**********************************************************************/
@@ -989,6 +1021,20 @@ static int never_ready(Scheme_Object *w)
   return 0;
 }
 
+static Scheme_Object *make_sys_idle(int n, Scheme_Object **p)
+{
+  if (!system_idle_put_evt) {
+    Scheme_Object *a[2];
+    REGISTER_SO(system_idle_put_evt);
+    system_idle_put_evt = scheme_make_channel_put_evt(scheme_system_idle_channel,
+                                                      scheme_void);
+    a[0] = system_idle_put_evt;
+    a[1] = scheme_void_proc;
+    system_idle_put_evt = scheme_wrap_evt(2, a);
+  }
+
+  return system_idle_put_evt;
+}
 
 /**********************************************************************/
 /*                           Precise GC                               */

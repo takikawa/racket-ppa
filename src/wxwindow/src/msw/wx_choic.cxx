@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	April 1995
- * Copyright:	(c) 2004-2006 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2007 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -466,6 +466,7 @@ wxCombo::wxCombo(wxWindow *for_canvas,
 
 wxCombo::~wxCombo(void)
 {
+  forCanvas = NULL;
 }
 
 Bool wxCombo::PreOnEvent(wxWindow *win, wxMouseEvent *e)

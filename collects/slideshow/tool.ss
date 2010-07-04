@@ -25,7 +25,7 @@ pict snip :
   (require (lib "tool.ss" "drscheme")
            (lib "mred.ss" "mred")
            (lib "class.ss")
-           (lib "unitsig.ss")
+           (lib "unit.ss")
            (lib "contract.ss")
            (lib "string-constant.ss" "string-constants")
            (lib "framework.ss" "framework")
@@ -52,9 +52,9 @@ pict snip :
 		       #f))]))
 
   (define tool@
-    (unit/sig drscheme:tool-exports^
+    (unit 
       (import drscheme:tool^)
-      
+      (export drscheme:tool-exports^)
       (define original-output-port (current-output-port))
       (define (oprintf . args) (apply fprintf original-output-port args))
       
@@ -699,15 +699,15 @@ pict snip :
       
       (define slideshow-mixin
         (mixin (drscheme:language:language<%>) ()
-          (define/override (front-end/complete-program input settings teachpack-cache)
-            (let ([st (super front-end/complete-program input settings teachpack-cache)])
+          (define/override (front-end/complete-program input settings)
+            (let ([st (super front-end/complete-program input settings)])
               (lambda ()
                 (let ([sv (st)])
                   (cond
                     [(syntax? sv) (rewrite-syntax sv)]
                     [else sv])))))
-          (define/override (front-end/interaction input settings teachpack-cache)
-            (let ([st (super front-end/interaction input settings teachpack-cache)])
+          (define/override (front-end/interaction input settings)
+            (let ([st (super front-end/interaction input settings)])
               (lambda ()
                 (let ([sv (st)])
                   (cond
@@ -831,6 +831,9 @@ pict snip :
            (with-syntax ([(rewritten-expr ...) (map (lambda (x) (add-send-over (rewrite-expr x) x 1)) 
                                                     (syntax->list (syntax (expr ...))))])
              (syntax/cert stx (#%app rewritten-expr ...)))]
+          [(#%expression e)
+           (with-syntax ([e (add-send-over (rewrite-expr #'x) #'x 1)])
+             (syntax/cert stx (#%expression e)))]
           [(#%datum . datum) stx]
           [(#%top . variable) stx]))
       

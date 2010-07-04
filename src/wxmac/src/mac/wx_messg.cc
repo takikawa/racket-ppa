@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2006 PLT Scheme Inc.
+// Copyright:  (c) 2004-2007 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -234,7 +234,7 @@ void wxMessage::CreateWxMessage(char* label, wxFont* theFont) // common construc
   clientWidth = 20;
   clientHeight = 14;
   if (font) {
-    font->GetTextExtent(cMessage, 0, &clientWidth, &clientHeight, NULL, NULL, TRUE);
+    font->GetTextExtent(cMessage, 0, -1, &clientWidth, &clientHeight, NULL, NULL, TRUE);
     if (font->GetStyle() != wxNORMAL)
       clientWidth += 5; //cjc - try hello.cc italic labels are truncated
   }

@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 1995-2002 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -15,7 +15,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
   Thanks to Patrick Barta for the WINDOWS_DYNAMIC_LOAD code.
   Thanks to William Ng for the CODEFRAGMENT_DYNAMIC_LOAD code.
@@ -198,7 +199,7 @@ static Scheme_Object *do_load_extension(const char *filename,
   void *handle;
   int comppath;
 
-  comppath = scheme_is_complete_path(filename, strlen(filename));
+  comppath = scheme_is_complete_path(filename, strlen(filename), SCHEME_PLATFORM_PATH_KIND);
 
   reload_f = NULL;
   modname_f = NULL;

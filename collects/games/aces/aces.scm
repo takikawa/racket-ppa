@@ -15,9 +15,9 @@ possible to remap single click (instead of double click)?
            (lib "string-constant.ss" "string-constants")
            "../show-help.ss")
   
-  (provide game-unit)
+  (provide game@)
   
-  (define game-unit
+  (define game@
     (unit 
       (import)
       (export)

@@ -8,8 +8,6 @@
            "match-error.ss"
            (lib "list.ss"))
   
-  (require (only (lib "1.ss" "srfi") zip unzip2))
-  
   (require-for-template mzscheme)
   
   ;; define a syntax-transformer in terms of a two-argument function  
@@ -77,8 +75,9 @@
     ;; we only filter out a mutator if the accessor is also false.
     ;; this function returns 2 lists of the same length if the inputs were the same length
     (define (handle-acc/mut-lists accs muts)
-      (let*-values ([(filtered-lists) (filter (lambda (x) (car x)) (zip accs muts))]
-                    [(accs muts) (unzip2 filtered-lists)])
+      (let*-values ([(filtered-lists) (filter (lambda (x) (car x)) (map list accs muts))]
+                    [(accs muts) (values (map car filtered-lists)
+                                         (map cadr filtered-lists))])
         (values (reverse accs)
                 (reverse muts))))
     
@@ -128,9 +127,6 @@
              (eq? (car el) 'struct-pred)
              (member (caaddr e) (caddr el))
              (equal? (cadddr e) (cadddr el))))) l)
-     (and (eq? (car e) 'list?)
-          (or (member `(null? ,(cadr e)) l)
-              (member `(pair? ,(cadr e)) l)))
      (and (eq? (car e) 'not)
           (let* ((srch (cadr e))
                  (const-class (equal-test? srch)))

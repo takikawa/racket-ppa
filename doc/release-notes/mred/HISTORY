@@ -1,3 +1,14 @@
+Version 370, May 2007
+
+WXME file format changed to include a #reader() prefix
+Added is-maximized? method to frame% (Windows, Mac OS X)
+Improved the disabled appearance of some controls under Mac OS X
+Added use-style-background and style-background-used? methods
+ to editor-snip%; changes the editor-snip WXME format
+Mac OS X printer-dc% uses scaling specified by the current ps-setup%
+
+----------------------------------------------------------------------
+
 Version 360, November 2006
 
 Added get-other-altgr-key-code and get-other-shift-altgr-key-code
@@ -1219,7 +1230,7 @@ wx:the-snip-class-list was replaced by (wx:get-the-snip-class-list)
 wx:the-buffer-data-class-list was replaced by (wx:get-the-buffer-data-class-list)
 Added transparent text backing for editor text
 Added wx:dc% try-colour method
-wx:window% capture-mode, release-mouse, and make-modal no longer supported
+wx:window% capture-mouse, release-mouse, and make-modal no longer supported
   Modal dialogs can be used instead of make-modal (modal is
   specified through the constructor). There is currently no
   replacement for capture-mouse and release-mouse, but a replacement is

@@ -23,12 +23,12 @@
 
   ;; trace : syntax -> Derivation
   (define (trace stx)
-    (let-values ([(result tracer) (expand+tracer stx)])
+    (let-values ([(result tracer) (expand+tracer stx expand)])
       (parse-derivation tracer)))
 
   ;; trace/result : syntax -> (values syntax/exn Derivation)
   (define (trace/result stx)
-    (let-values ([(result tracer) (expand+tracer stx)])
+    (let-values ([(result tracer) (expand+tracer stx expand)])
       (values result
               (parse-derivation tracer))))
 
@@ -36,45 +36,36 @@
   (define (trace+reductions stx)
     (reductions (trace stx)))
 
-  ;; expand+tracer : syntax/sexpr -> (values syntax/exn (-> event))
-  (define (expand+tracer sexpr)
-    (let* ([s (make-semaphore 1)]
-           [head (cons #f #f)]
-           [tail head]
+  ;; expand+tracer : syntax/sexpr (syntax -> A) -> (values A/exn (-> event))
+  (define (expand+tracer sexpr expander)
+    (let* ([events null]
            [pos 0])
       (define (add! x)
-        (semaphore-wait s)
-        (set-car! tail x) 
-        (set-cdr! tail (cons #f #f))
-        (set! tail (cdr tail))
-        (semaphore-post s))
-      (define get
-        (let ([head head])
-          (lambda ()
-            (semaphore-wait s)
-            (let ([result (car head)])
-              (set! head (cdr head))
-              (semaphore-post s)
-              result))))
+        (set! events (cons x events)))
       (parameterize ((current-expand-observe
-                      (lambda (sig val)
-                        (add! (cons sig val)))))
+                      (let ([c 0])
+                        (lambda (sig val)
+                          (set! c (add1 c))
+                          (add! (cons sig val))))))
         (let ([result
                (with-handlers ([(lambda (exn) #t)
                                 (lambda (exn)
                                   (add! (cons 'error exn))
                                   exn)])
-                 (expand sexpr))])
+                 (expander sexpr))])
           (add! (cons 'EOF pos))
           (values result
-                  (lambda ()
-                    (let* ([sig+val (get)]
-                           [sig (car sig+val)]
-                           [val (cdr sig+val)]
-                           [t (tokenize sig val pos)])
-                      (when (trace-verbose?)
-                            (printf "~s: ~s~n" pos (token-name (position-token-token t))))
-                      (set! pos (add1 pos))
-                      t)))))))
+                  (let ([events (reverse events)])
+                    (lambda ()
+                      (define sig+val (car events))
+                      (set! events (cdr events))
+                      (let* ([sig (car sig+val)]
+                             [val (cdr sig+val)]
+                             [t (tokenize sig val pos)])
+                        (when (trace-verbose?)
+                          (printf "~s: ~s~n" pos
+                                  (token-name (position-token-token t))))
+                        (set! pos (add1 pos))
+                        t))))))))
 
   )

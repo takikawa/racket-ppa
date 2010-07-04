@@ -9,6 +9,7 @@
       init_weak_boxes zero_weak_boxes
       GC_malloc_ephemeron
       size_ephemeron, mark_ephemeron, fixup_ephemeron
+      btc_mark_ephemeron [ifdef NEW_BTC_ACCOUNT]
       init_ephemerons mark_ready_ephemerons zero_remaining_ephemerons
       num_last_seen_ephemerons
    Requires:
@@ -63,9 +64,9 @@ static int mark_weak_array(void *p)
     data = a->data;
     for (i = a->count; i--; ) {
       if (data[i] 
-	  && (*(short *)(data[i]) != 47)
 	  && (*(short *)(data[i]) != 48)
-	  && (*(short *)(data[i]) != 57)) {
+	  && (*(short *)(data[i]) != 49)
+	  && (*(short *)(data[i]) != 58)) {
 	CRASH(1);
       }
     }
@@ -265,6 +266,19 @@ static int mark_ephemeron(void *p)
 
   return gcBYTES_TO_WORDS(sizeof(GC_Ephemeron));
 }
+
+#ifdef NEWGC_BTC_ACCOUNT
+static int btc_mark_ephemeron(void *p)
+{
+  GC_Ephemeron *eph = (GC_Ephemeron *)p;
+  
+  gcMARK(eph->key);
+  gcMARK(eph->val);
+
+  return gcBYTES_TO_WORDS(sizeof(GC_Ephemeron));
+}
+#endif
+
 
 static int fixup_ephemeron(void *p)
 {

@@ -21,7 +21,7 @@
 ;;; ------------------------------------------------------------
 
 (module known mzscheme
-  (require (lib "unitsig.ss")
+  (require (lib "unit.ss")
 	  (lib "list.ss")
 	  (lib "etc.ss"))
 
@@ -31,12 +31,11 @@
   (require "../sig.ss")
 
   (provide known@)
-  (define known@
-    (unit/sig compiler:known^
-      (import (compiler:option : compiler:option^)
+  (define-unit known@
+      (import (prefix compiler:option: compiler:option^)
 	      compiler:library^
 	      compiler:cstructs^
-	      (zodiac : zodiac^)
+	      (prefix zodiac: zodiac^)
 	      compiler:zlayer^
 	      compiler:prephase^
 	      compiler:anorm^
@@ -44,6 +43,7 @@
 	      compiler:closure^
 	      compiler:rep^
 	      compiler:driver^)
+      (export compiler:known^)
       
       ;; helper functions to create a binding annotation
       (define make-known-binding
@@ -82,14 +82,14 @@
 
       ;; Some prims call given procedures directly, some install procedures
       ;;  to be called later, and some call previously installed procedures.
-      ;;  We care abot the installers and callers.
+      ;;  We care about the installers and callers.
       (define prims-that-induce-procedure-calls
 	'(apply map for-each andmap ormap make-promise
 		  dynamic-wind thread call-in-nested-thread
 		  make-object call-with-values time-apply
 		  call-with-output-file call-with-input-file
 		  with-output-to-file with-input-from-file
-		  exit-handler current-eval current-exception-handler
+		  exit-handler current-eval initial-exception-handler
 		  current-prompt-read current-load
 		  call-with-escape-continuation call-with-current-continuation
 		  current-print port-display-handler port-write-handler
@@ -97,7 +97,9 @@
 		  error-display-handler error-escape-handler
 		  port-read-handler error-value->string-handler
 		  call/ec call/cc hash-table-get
-		  hash-table-map hash-table-for-each make-input-port make-output-port))
+		  hash-table-map hash-table-for-each make-input-port make-output-port
+                  call-with-composable-continuation
+                  call-with-continuation-prompt))
 
       ;; The valueable? predicate is used to determine how many variables
       ;;  are reliably set in a mutually-recursive binding context.
@@ -584,4 +586,4 @@
 					ast)))]))])
 	  
 	  (lambda (ast)
-	    (analyze! ast)))))))
+	    (analyze! ast))))))

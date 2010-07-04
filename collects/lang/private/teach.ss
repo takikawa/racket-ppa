@@ -53,23 +53,21 @@
   ;; verify-boolean is inserted to check for boolean results:
   (define (verify-boolean b where)
     (if (or (eq? b #t) (eq? b #f))
-	b
-	(raise
-	 (make-exn:fail:contract
-	  (string->immutable-string
-	   (format "~a: question result is not true or false: ~e" where b))
-	  (current-continuation-marks)))))
+      b
+      (raise
+       (make-exn:fail:contract
+        (format "~a: question result is not true or false: ~e" where b)
+        (current-continuation-marks)))))
 
   ;; Wrapped around uses of local-bound variables:
   (define (check-not-undefined name val)
     (if (eq? val undefined)
-	(raise
-	 (make-exn:fail:contract:variable
-	  (string->immutable-string
-	   (format "local variable used before its definition: ~a" name))
-	  (current-continuation-marks)
-	  name))
-	val))
+      (raise
+       (make-exn:fail:contract:variable
+        (format "local variable used before its definition: ~a" name)
+        (current-continuation-marks)
+        name))
+      val))
   (define undefined (letrec ([x x]) x))
 
   ;; Wrapped around top-level definitions to disallow re-definition:
@@ -139,6 +137,7 @@
 			      beginner-and
 			      beginner-or
 			      beginner-quote
+                              beginner-require
 			      
 			      intermediate-define
 			      intermediate-define-struct
@@ -304,7 +303,7 @@
     (define (ensure-expression stx k)
       (if (memq (syntax-local-context) '(expression))
 	  (k)
-	  (stepper-syntax-property #`(begin0 #,stx) 'stepper-skipto '(syntax-e cdr car))))
+	  (stepper-syntax-property #`(begin0 #,stx) 'stepper-skipto skipto/second)))
 
     ;; Use to generate nicer error messages than direct pattern
     ;; matching. The `where' argument is an English description
@@ -1115,6 +1114,107 @@
 	   (syntax/loc stx (quote expr)))]
 	[_else (bad-use-error 'quote stx)]))
 
+    ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+    ;; require
+    ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+    (define (check-string-form stx s)
+      (unless (regexp-match #rx#"^[-a-zA-Z0-9_. ]+(/+[-a-zA-Z0-9_. ]+)*$" (syntax-e s))
+        (teach-syntax-error
+         'require
+         stx
+         s
+         (cond
+          [(string=? "" (syntax-e s))
+           "a module-naming string cannot be empty"]
+          [(regexp-match #rx"^/" (syntax-e s))
+           "a module-naming string cannot start with a slash"]
+          [(regexp-match #rx"/$" (syntax-e s))
+           "a module-naming string cannot end with a slash"]
+          [else
+           "a module-naming string can contain only a-z, A-Z, 0-9, -, _, ., space, and slash"]))))
+
+    (define (version-number? n)
+      (and (number? n) (exact? n) (integer? n) (n . >= . 0)))
+
+    (define (beginner-require/proc stx)
+      (when (identifier? stx)
+        (bad-use-error 'require stx))
+      (unless (memq (syntax-local-context) '(top-level module module-begin))
+	(teach-syntax-error
+	 'define
+	 stx
+	 #f
+	 "found a module require that is not at the top level"))
+      (syntax-case stx (lib planet)
+        [(_ s)
+         (string? (syntax-e #'s))
+         (begin
+           (check-string-form stx #'s)
+           #'(require s))]
+        [(_ (lib . rest))
+         (let ([s (syntax->list #'rest)])
+           (unless ((length s) . >= . 2)
+             (teach-syntax-error
+              'require
+              stx
+              #f
+              "expected at least two strings with lib, found only ~a parts"
+              (length s)))
+           (for-each (lambda (v)
+                       (unless (string? (syntax-e v))
+                         (teach-syntax-error
+                          'require
+                          stx
+                          v
+                          "expected a string for a lib path, found ~a"
+                          (something-else v)))
+                       (check-string-form stx v))
+                     s)
+           ;; use the original `lib', so that it binds correctly:
+           (syntax-case stx ()
+             [(_ ms) #'(require ms)]))]
+        [(_ (planet . rest))
+         (syntax-case stx (planet)
+           [(_ (planet s1 (s2 s3 n1 n2)))
+            (and (string? (syntax-e #'s1))
+                 (string? (syntax-e #'s2))
+                 (string? (syntax-e #'s3))
+                 (version-number? (syntax-e #'n1))
+                 (version-number? (syntax-e #'n2)))
+            (begin
+              (check-string-form stx #'s1)
+              (check-string-form stx #'s2)
+              (check-string-form stx #'s3)
+              ;; use the original `planet', so that it binds correctly:
+              (syntax-case stx ()
+                [(_ ms) #'(require ms)]))]
+           [_else
+            (teach-syntax-error
+             'require
+             stx
+             #f
+             "not a valid planet path; should be: (require (planet STRING (STRING STRING NUMBER NUMBER)))")])]
+        [(_ thing)
+         (teach-syntax-error
+          'require
+          stx
+          #'thing
+          "expected a module name as a string, a `lib' form, or a `planet' form, found ~a"
+          (something-else #'thing))]
+        [(_)
+         (teach-syntax-error
+          'require
+          stx
+          #f
+          "expected a module name after `require', but found nothing")]
+        [(_ . rest)
+         (teach-syntax-error
+          'require
+          stx
+          #f
+          "expected a single module name after `require', but found ~a parts"
+          (length (syntax->list #'rest)))]))
 
     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
     ;; local
@@ -1333,12 +1433,19 @@
 			  [(rhs-expr ...) (map allow-local-lambda 
 					       (syntax->list (syntax (rhs-expr ...))))])
 	      (quasisyntax/loc stx
-		(let-values ([(tmp-id) rhs-expr] ...)
-		  (let-syntaxes ([(name) (make-undefined-check
-					  (quote-syntax check-not-undefined)
-					  (quote-syntax tmp-id))]
-				 ...)
-				expr))))]
+                (let-values ([(tmp-id) rhs-expr] ...)
+                  #,(stepper-syntax-property
+                     #`(let-syntaxes ([(name) (make-undefined-check
+                                               (quote-syntax check-not-undefined)
+                                               (quote-syntax tmp-id))]
+                                      ...)
+                                     expr)
+                     'stepper-skipto
+                     (append
+                      ;; body of let-values:
+                      skipto/third
+                      ;; body of let-values:
+                      skipto/third)))))]
 	   [_else (bad-let-form 'let stx stx)]))))
 
     (define (intermediate-let*/proc stx)
@@ -1350,7 +1457,7 @@
 	    (stepper-syntax-property
 	     #`(let () expr)
 	     'stepper-skipto
-	     '(syntax-e cdr cdr car))]
+             skipto/third)]
 	   [(_ ([name0 rhs-expr0] [name rhs-expr] ...) expr)
 	    (let ([names (syntax->list (syntax (name0 name ...)))])
 	      (andmap identifier/non-kw? names))
@@ -1695,7 +1802,18 @@
 	    (stepper-syntax-property 
 	     (syntax/loc stx (time . exprs))
 	     'stepper-skipto
-             '(syntax-e cdr car syntax-e car syntax-e cdr car syntax-e cdr syntax-e cdr car syntax-e cdr cdr syntax-e car))]
+             (append 
+              ;; let-values-bindings
+              skipto/second
+              ;; rhs of first binding
+              skipto/first
+              skipto/second
+              ;; 2nd term of application:
+              skipto/cdr
+              skipto/second
+              ;; lambda-body:
+              skipto/cddr
+              skipto/first))]
 	   [_else
 	    (bad-use-error 'time stx)]))))
 
@@ -1873,7 +1991,8 @@
 			     (stepper-syntax-property
 			      (syntax/loc stx (begin (set! id expr ...) set!-result))
 			      'stepper-skipto
-			      '(syntax-e cdr syntax-e car))
+                              (append skipto/cdr
+                                      skipto/first))
 			     (stepper-ignore-checker (syntax/loc stx (#%app values (advanced-set!-continue id expr ...))))))]
 		      [(_ id . __)
 		       (teach-syntax-error

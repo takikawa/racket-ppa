@@ -14,6 +14,8 @@ OUTLINE
   - syntax-browser.ss
 * Using the macro stepper
 * Using the syntax browser
+* Enabling the macro stepper in other languages
+* Notes for DrScheme language implementors
 
 Introduction
 ============
@@ -26,17 +28,70 @@ syntax browser uses colors and a properties panel to show the term's
 syntax properties, such as lexical binding information and source
 location.
 
-_expand.ss_
-===========
+_stepper.ss_
+============
 
-> (require (lib "expand.ss" "macro-debugger"))
+> (require (lib "stepper.ss" "macro-debugger"))
 
 This module provides a single procedure:
 
 > (expand/step syntax-or-sexpr)
 
 Expands the syntax (or S-expression) and opens a macro stepper frame
-for stepping through the expansion.
+for stepping through the expansion. 
+
+_expand.ss_
+===========
+
+> (require (lib "expand.ss" "macro-debugger"))
+
+This module provides the following procedures:
+
+> expand/step
+
+This export will disappear in a future version of the collection.
+Require from stepper.ss instead.
+
+> (expand-only syntax list-of-identifiers)
+
+Expands the given syntax, but only shows the expansion of macros in
+the given identifier list.
+
+Warning: because of limitations in syntax, expansion, and hiding, the
+resulting syntax may not evaluate to the same thing as the original
+syntax.
+
+> (expand/hide syntax list-of-identifier)
+
+Expands the given syntax, but hides the expansion of macros in the
+given identifier list (conceptually, the complement of expand-only).
+
+Warning: because of limitations in syntax, expansion, and hiding, the
+resulting syntax may not evaluate to the same thing as the original
+syntax.
+
+_stepper-text.ss_
+=================
+
+> (require (lib "stepper-text.ss" "macro-debugger"))
+
+This module provides two procedures for stepping through macro
+expansion in text-only environments.
+
+> (expand/step-text syntax [identifier-predicate])
+
+Expands the syntax and prints the macro expansion steps. If the
+identifier predicate is given, it determines which macros are shown
+(if absent, no macros are hidden). A list of identifiers is also
+accepted.
+
+> (stepper-text syntax [identifier-predicate])
+
+Returns a procedure P that:
+ - when called with no arguments (or on the symbol 'next), 
+   prints out individual steps until macro expansion finishes
+ - when called on the symbol 'all,
+   prints out all of the remaining steps
 
 _syntax-browser.ss_
 ===================
@@ -219,3 +274,24 @@ properties.
 
 The syntax browser does not preserve the distinction between
 parentheses and square brackets.
+
+
+Notes for DrScheme language implementors
+========================================
+
+The macro stepper works "out of the box" only with certain languages
+out of all the languages available from the DrScheme languages
+menu. For example, the macro stepper is disabled for the teaching
+languages.
+
+An implementor of a new DrScheme language can designate their language
+"macro-steppable" by overriding the 'enable-macro-stepper?' method of
+their implementation of 'drscheme:language:language<%>'. The default
+implementation in the mixin provided by
+'drscheme:language:get-default-mixin' returns false; override this
+method to return true if the macro stepper button should be shown for
+this language.
+
+Note: There is currently no way to customize the behavior of the macro
+stepper for different languages. When enabled, the macro stepper sees
+exactly those terms that pass through the 'current-eval' handler.

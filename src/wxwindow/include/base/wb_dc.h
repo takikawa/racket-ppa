@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	
- * Copyright:	(c) 2004-2006 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2007 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -149,7 +149,7 @@ class wxbDC: public wxObject
                              double *externalLeading = NULL, 
                              wxFont *theFont = NULL,
                              Bool combine = FALSE, Bool use16bit = FALSE,
-			     int d = 0) = 0;
+			     int d = 0, int len = -1) = 0;
 
   inline virtual Bool Ok(void) {return ok;};
   virtual Bool CanGetTextExtent(void) = 0;

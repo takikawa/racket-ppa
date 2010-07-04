@@ -1,4 +1,3 @@
-#cs
 (module tool mzscheme
   (require "class.scm"
            "union.ss"
@@ -9,7 +8,7 @@
            (only (lib "drsig.ss" "drscheme" "private") drscheme:language-configuration^)
            (lib "framework.ss" "framework")
            (lib "mred.ss" "mred")
-           (lib "unitsig.ss") 
+           (lib "unit.ss") 
            (lib "etc.ss")
            (lib "class.ss")
 	   (lib "string-constant.ss" "string-constants")
@@ -17,14 +16,10 @@
   
   (provide tool@)
   
-  ;; Strings
-  (define INSERT-JAVA-CLASS "Insert Java Class")
-  (define INSERT-JAVA-UNION "Insert Java Union")
-  
   (define tool@
-    (unit/sig drscheme:tool-exports^
+    (unit
       (import drscheme:tool^)
-      
+      (export drscheme:tool-exports^) 
       (define (phase1) (void))
       (define (phase2) (void))
       
@@ -41,9 +36,8 @@
           
           (super-new)
           
-          (define (tee x) x)
-
-          #;(define-syntax tee
+	  #;
+          (define-syntax tee
             (syntax-rules ()
               ((_ x)
                (let* ([a (format "--> ~a\n" 'x)]
@@ -51,7 +45,9 @@
                       [b (format "==> ~a\n" y)])
                  (message-box "error" (format "~a~a" a b))
                  y))))
-          
+
+          (define (tee x) x)
+	  
           ;; String (LANGUAGE-LEVEL -> X) (X ... -> String) (X ... -> String) -> Void
           ;; create a menu item for inserting classes and interfaces 
           (define (make-menu-item% descr get-info make draw)
@@ -67,12 +63,15 @@
               ;; ---------------------------------------------------------------
               
               (define language-level 
-                (let ([simple* (member "ProfessorJ" current-language*)])
+                (let* ([simple* (tee (member "ProfessorJ" current-language*))]
+		       [begin-> (tee (and simple* (cadr simple*)))])
+		  (tee
                   (cond
+		    [begin-> begin->]
                     [(boolean? simple*) PROFESSIONAL]
                     [(eq? (cadr simple*) BEGINNER) BEGINNER]
                     [(eq? (cadr simple*) INTERMEDIATE) INTERMEDIATE]
-                    [else PROFESSIONAL])))
+                    [else PROFESSIONAL]))))
               
               ;; get the editor and insert the desired items ... 
               (define editor (get-edit-target-object))
@@ -84,11 +83,17 @@
                     ;; ... the diagram 
                     (send editor insert (format "/*~n~a~n*/~n~n" (draw (car class-as-info)))))
                   (send editor insert class-as-text))))
-            (new menu-item% (label descr) (parent (get-special-menu)) (callback A)))
+            (define (enable mi)
+              (send mi enable ((get-edit-target-object) . is-a? . text%)))
+            (new menu-item% 
+                 (label descr) 
+                 (parent (get-special-menu))
+                 (callback A)
+                 (demand-callback enable)))
           
-          (make-menu-item% INSERT-JAVA-CLASS get-class-info make-class class-draw)
+          (make-menu-item% (string-constant profjWizward-insert-java-class) get-class-info make-class class-draw)
           (register-capability-menu-item 'profjWizard:special:java-class (get-special-menu))
-          (make-menu-item% INSERT-JAVA-UNION get-union-info make-union dt-draw)
+          (make-menu-item% (string-constant profjWizard-insert-java-union) get-union-info make-union dt-draw)
           (register-capability-menu-item 'profjWizard:special:java-union (get-special-menu))))
       
       (drscheme:get/extend:extend-unit-frame java-class-wizard-mixin)

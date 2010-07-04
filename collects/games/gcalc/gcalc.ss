@@ -6,7 +6,7 @@
 (module gcalc mzscheme
   (require (lib "class.ss") (lib "mred.ss" "mred") (lib "etc.ss")
            "../show-help.ss" (lib "unit.ss"))
-  (provide game-unit)
+  (provide game@)
 
   (define customs '())
   (define (add-custom! name get set type desc)
@@ -19,7 +19,7 @@
        (begin (define var default)
               (add-custom! 'var (lambda () var) (lambda (v) (set! var v))
                            type description))]))
-  (define game-unit
+  (define game@
     (unit (import) (export)
 
 ;;;============================================================================

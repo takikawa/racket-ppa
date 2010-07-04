@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -15,7 +15,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
   libscheme
   Copyright (c) 1994 Brent Benson
@@ -310,7 +311,7 @@ static Scheme_Object *do_hash_set(Scheme_Hash_Table *table, Scheme_Object *key, 
   return val;
 }
 
-static Scheme_Object *do_hash_get(Scheme_Hash_Table *table, Scheme_Object *key)
+XFORM_NONGCING static Scheme_Object *do_hash_get(Scheme_Hash_Table *table, Scheme_Object *key)
 {
   Scheme_Object *tkey, **keys;
   hash_v_t h, h2;
@@ -366,6 +367,36 @@ Scheme_Object *scheme_hash_get(Scheme_Hash_Table *table, Scheme_Object *key)
     return do_hash(table, key, 0, NULL);
   else
     return do_hash_get(table, key);
+}
+
+Scheme_Object *scheme_eq_hash_get(Scheme_Hash_Table *table, Scheme_Object *key)
+/* Specialized to allow XFORM_NONGCING */
+{
+  if (!table->vals)
+    return NULL;
+  else
+    return do_hash_get(table, key);
+}
+
+Scheme_Object *scheme_hash_get_atomic(Scheme_Hash_Table *table, Scheme_Object *key)
+/* Mostly useful for acessing equal-based hash table when you don't want
+   thread switches (such as in stx object manipulations). Simply grabbing the
+   table's lock would be enough to make access to the table single-threaded,
+   but sometimes you don't want any thread switches at all. */
+{
+  Scheme_Object *r;
+  scheme_start_atomic();
+  r = scheme_hash_get(table, key);
+  scheme_end_atomic_no_swap();
+  return r;
+}
+
+void scheme_hash_set_atomic(Scheme_Hash_Table *table, Scheme_Object *key, Scheme_Object *val)
+/* See rationale with scheme_hash_get_atomic. */
+{
+  scheme_start_atomic();
+  scheme_hash_set(table, key, val);
+  scheme_end_atomic_no_swap();
 }
 
 int scheme_hash_table_equal(Scheme_Hash_Table *t1, Scheme_Hash_Table *t2)
@@ -922,8 +953,11 @@ static long equal_hash_key(Scheme_Object *o, long k)
       o = SCHEME_VEC_ELS(o)[len];
       break;
     }
+  case scheme_char_type:
+    return k + SCHEME_CHAR_VAL(o);
   case scheme_byte_string_type:
-  case scheme_path_type:
+  case scheme_unix_path_type:
+  case scheme_windows_path_type:
     {
       int i = SCHEME_BYTE_STRLEN_VAL(o);
       char *s = SCHEME_BYTE_STR_VAL(o);
@@ -1048,8 +1082,14 @@ static long equal_hash_key(Scheme_Object *o, long k)
 	return k + (PTR_TO_LONG(o) >> 4);
     }
 # endif
-  default:
-    return k + (PTR_TO_LONG(o) >> 4);
+  default:    
+    {
+      Scheme_Primary_Hash_Proc h1 = scheme_type_hash1s[t];
+      if (h1)
+        return h1(o, k);
+      else
+        return k + (PTR_TO_LONG(o) >> 4);
+    }
   }
 
   k = (k << 1) + k;
@@ -1145,8 +1185,11 @@ long scheme_equal_hash_key2(Scheme_Object *o)
       
       return k;
     }
+  case scheme_char_type:
+    return t;
   case scheme_byte_string_type:
-  case scheme_path_type:
+  case scheme_unix_path_type:
+  case scheme_windows_path_type:
     {
       int k = 0, i = SCHEME_BYTE_STRLEN_VAL(o);
       char *s = SCHEME_BYTE_STR_VAL(o);
@@ -1242,6 +1285,12 @@ long scheme_equal_hash_key2(Scheme_Object *o)
       return k;
     }
   default:
-    return t;
+    {
+      Scheme_Secondary_Hash_Proc h2 = scheme_type_hash2s[t];
+      if (h2)
+        return h2(o);
+      else
+        return t;
+    }
   }
 }

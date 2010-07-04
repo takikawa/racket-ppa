@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
  
     This library is free software; you can redistribute it and/or
@@ -15,7 +15,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
   libscheme
   Copyright (c) 1994 Brent Benson
@@ -61,6 +62,14 @@ extern MZ_DLLIMPORT unsigned long GC_get_stack_base();
 
 void scheme_set_stack_base(void *base, int no_auto_statics)
 {
+#ifdef MZ_PRECISE_GC
+  GC_init_type_tags(_scheme_last_type_, 
+                    scheme_pair_type, scheme_weak_box_type, 
+                    scheme_ephemeron_type, scheme_rt_weak_array,
+                    scheme_cust_box_type);
+  /* We want to be able to allocate symbols early. */
+  scheme_register_traversers();
+#endif
 #if defined(MZ_PRECISE_GC) || defined(USE_SENORA_GC)
   GC_set_stack_base(base);
   /* no_auto_statics must always be true! */
@@ -225,10 +234,23 @@ Scheme_Object *scheme_make_cptr(void *cptr, Scheme_Object *typetag)
 {
   Scheme_Object *o;
 
-  o = scheme_alloc_object();
+  o = (Scheme_Object *)scheme_malloc_small_tagged(sizeof(Scheme_Cptr));
   o->type = scheme_cpointer_type;
-  SCHEME_PTR1_VAL(o) = cptr;
-  SCHEME_PTR2_VAL(o) = (void *)typetag;
+  SCHEME_CPTR_VAL(o) = cptr;
+  SCHEME_CPTR_TYPE(o) = (void *)typetag;
+
+  return o;
+}
+
+Scheme_Object *scheme_make_offset_cptr(void *cptr, long offset, Scheme_Object *typetag)
+{
+  Scheme_Object *o;
+
+  o = (Scheme_Object *)scheme_malloc_small_tagged(sizeof(Scheme_Offset_Cptr));
+  o->type = scheme_offset_cpointer_type;
+  SCHEME_CPTR_VAL(o) = cptr;
+  SCHEME_CPTR_TYPE(o) = (void *)typetag;
+  ((Scheme_Offset_Cptr *)o)->offset = offset;
 
   return o;
 }
@@ -1016,7 +1038,7 @@ static void print_tagged_value(const char *prefix,
       memcpy(t2 + len, buffer, len2 + 1);
       len += len2;
       type = t2;
-    } else if (!scheme_strncmp(type, "#<continuation", 13)) {
+    } else if (!scheme_strncmp(type, "#<continuation>", 15)) {
       char buffer[256];
       char *t2;
       int len2;
@@ -1110,6 +1132,27 @@ static void print_tagged_value(const char *prefix,
       t3[len + len2 + 3] = 0;
       type = t3;
       len = len3;
+#ifdef MZTAG_REQUIRED
+    } else if (SAME_TYPE(SCHEME_TYPE(v), scheme_rt_meta_cont)) {
+      Scheme_Meta_Continuation *mc = (Scheme_Meta_Continuation *)v;
+      Scheme_Object *pt;
+      long len2, len3;
+      char *t2, *t3;
+
+      pt = mc->prompt_tag;
+      if (pt) {
+        t3 = scheme_write_to_string_w_max(pt, &len3, max_w);
+      } else {
+        t3 = "#f";
+        len3 = 2;
+      }
+
+      len2 = 32 + len3;
+      t2 = (char *)scheme_malloc_atomic(len2);
+      sprintf(t2, "#<meta-continuation>[%d;%s]", mc->pseudo, t3);
+      type = t2;
+      len = strlen(t2);
+#endif
     } else if (!scheme_strncmp(type, "#<syntax", 8)) {
       char *t2, *t3;
       long len2, len3;
@@ -1182,8 +1225,9 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
   if (scheme_external_dump_arg)
     scheme_external_dump_arg(c ? p[0] : NULL);
 
-#ifdef USE_TAGGED_ALLOCATION
   scheme_console_printf("Begin Dump\n");
+
+#ifdef USE_TAGGED_ALLOCATION
   trace_path_type = -1;
   obj_type = -1;
   if (c && SCHEME_SYMBOLP(p[0])) {
@@ -1435,10 +1479,39 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
       scheme_end_atomic();      
       return scheme_make_integer_value((long)p[1]);
     }
-  } else if (SCHEME_INTP(p[0])) {
+  } else if (c && SCHEME_INTP(p[0])) {
     trace_for_tag = SCHEME_INT_VAL(p[0]);
     flags |= GC_DUMP_SHOW_TRACE;
+  } else if (c && SCHEME_THREADP(p[0])) {
+    Scheme_Thread *t = (Scheme_Thread *)p[0];
+    void **var_stack, *limit;
+    long delta;
+
+    scheme_console_printf("Thread: %p\n", t);
+    if (t->running) {
+      if (scheme_current_thread == t) {
+        scheme_console_printf(" swapped in\n");
+        var_stack = GC_variable_stack;
+        delta = 0;
+        limit = (void *)GC_get_thread_stack_base();
+      } else {
+        scheme_console_printf(" swapped out\n");
+        var_stack = (void **)t->jmpup_buf.gc_var_stack;
+        delta = (long)t->jmpup_buf.stack_copy - (long)t->jmpup_buf.stack_from;
+        /* FIXME: stack direction */
+        limit = (void *)t->jmpup_buf.stack_copy + t->jmpup_buf.stack_size;
+      }
+      GC_dump_variable_stack(var_stack, delta, limit, NULL,
+                             scheme_get_type_name,
+                             GC_get_xtagged_name,
+                             print_tagged_value);
+    } else {
+      scheme_console_printf(" done\n");
+    }
+    scheme_end_atomic();
+    return scheme_void;
   }
+
   if ((c > 1) && SCHEME_INTP(p[1]))
     path_length_limit = SCHEME_INT_VAL(p[1]);
   else if ((c > 1) && SCHEME_SYMBOLP(p[1]) && !strcmp("cons", SCHEME_SYM_VAL(p[1]))) {
@@ -1541,6 +1614,7 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
   scheme_console_printf(" (dump-memory-stats 'peek num v) - returns value if num is address of object, v otherwise.\n");
   scheme_console_printf(" (dump-memory-stats 'next v) - next tagged object after v, #f if none; start with #f.\n");
   scheme_console_printf(" (dump-memory-stats 'addr v) - returns the address of v.\n");
+  scheme_console_printf(" (dump-memory-stats thread) - shows information about the thread.\n");
   scheme_console_printf("End Help\n");
 
   result = cons_accum_result;

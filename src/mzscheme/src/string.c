@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2006 PLT Scheme Inc.
+  Copyright (c) 2004-2007 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -15,7 +15,8 @@
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301 USA.
 
   libscheme
   Copyright (c) 1994 Brent Benson
@@ -314,10 +315,7 @@ static char *string_to_from_locale(int to_bytes,
 #define portable_isspace(x) (((x) < 128) && isspace(x))
 
 static Scheme_Object *sys_symbol;
-static Scheme_Object *platform_path;
-#ifdef MZ_PRECISE_GC
-static Scheme_Object *platform_path_no_variant;
-#endif
+static Scheme_Object *platform_3m_path, *platform_cgc_path;
 static Scheme_Object *zero_length_char_string;
 static Scheme_Object *zero_length_byte_string;
 
@@ -350,23 +348,20 @@ scheme_init_string (Scheme_Env *env)
   aborts_symbol = scheme_intern_symbol("aborts");
   error_symbol = scheme_intern_symbol("error");
 
-  REGISTER_SO(platform_path);
-#ifdef MZ_PRECISE_GC
-# ifdef UNIX_FILE_SYSTEM
-#  define MZ3M_SUBDIR "/3m"
-# else
-#  ifdef DOS_FILE_SYSTEM
-#   define MZ3M_SUBDIR "\\3m"
-#  else
-#   define MZ3M_SUBDIR ":3m"
-#  endif
-# endif
-  REGISTER_SO(platform_path_no_variant);
-  platform_path_no_variant = scheme_make_path(SCHEME_PLATFORM_LIBRARY_SUBPATH);
+  REGISTER_SO(platform_3m_path);
+#ifdef UNIX_FILE_SYSTEM
+# define MZ3M_SUBDIR "/3m"
 #else
-# define MZ3M_SUBDIR /* empty */
+# ifdef DOS_FILE_SYSTEM
+#  define MZ3M_SUBDIR "\\3m"
+# else
+#  define MZ3M_SUBDIR ":3m"
+# endif
 #endif
-  platform_path = scheme_make_path(SCHEME_PLATFORM_LIBRARY_SUBPATH MZ3M_SUBDIR);
+  REGISTER_SO(platform_3m_path);
+  REGISTER_SO(platform_cgc_path);
+  platform_cgc_path = scheme_make_path(SCHEME_PLATFORM_LIBRARY_SUBPATH);
+  platform_3m_path = scheme_make_path(SCHEME_PLATFORM_LIBRARY_SUBPATH MZ3M_SUBDIR);
 
   REGISTER_SO(putenv_str_table);
   REGISTER_SO(embedding_banner);
@@ -944,8 +939,8 @@ long scheme_extract_index(const char *name, int pos, int argc, Scheme_Object **a
 }
 
 void scheme_get_substring_indices(const char *name, Scheme_Object *str,
-				  int argc, Scheme_Object **argv,
-				  int spos, int fpos, long *_start, long *_finish)
+                                  int argc, Scheme_Object **argv,
+                                  int spos, int fpos, long *_start, long *_finish)
 {
   long len;
   long start, finish;
@@ -973,6 +968,36 @@ void scheme_get_substring_indices(const char *name, Scheme_Object *str,
 
   *_start = start;
   *_finish = finish;
+}
+
+static void get_substring_indices(const char *name, Scheme_Object *str,
+                                  int argc, Scheme_Object **argv,
+                                  int spos, int fpos, long *_start, long *_finish, long len)
+{
+  if (argc > spos) {
+    if (SCHEME_INTP(argv[spos])) {
+      long start = SCHEME_INT_VAL(argv[spos]);
+      if ((start >= 0) && (start < len)) {
+        *_start = start;
+        if (argc > fpos) {
+          long finish = SCHEME_INT_VAL(argv[fpos]);
+          if ((finish >= start) && (finish <= len)) {
+            *_finish = finish;
+            return;
+          }
+        } else {
+          *_finish = len;
+          return;
+        }
+      }
+    }
+  } else {
+    *_start = 0;
+    *_finish = len;
+    return;
+  }
+
+  scheme_get_substring_indices(name, str, argc, argv, spos, fpos, _start, _finish);
 }
 
 /**********************************************************************/
@@ -1835,7 +1860,7 @@ sch_printf(int argc, Scheme_Object *argv[])
 static Scheme_Object *
 sch_fprintf(int argc, Scheme_Object *argv[])
 {
-  if (!SCHEME_OUTPORTP(argv[0]))
+  if (!SCHEME_OUTPUT_PORTP(argv[0]))
     scheme_wrong_type("fprintf", "output-port", 0, argc, argv);
 
   scheme_do_format("fprintf", argv[0], NULL, 0, 1, 2, argc, argv);
@@ -1875,13 +1900,13 @@ char *scheme_version(void)
   return MZSCHEME_VERSION;
 }
 
-#ifdef USE_SENORA_GC
-# define VERSION_SUFFIX " (sgc)"
+#ifdef MZ_PRECISE_GC
+# define VERSION_SUFFIX " [3m]"
 #else
-# ifdef USE_LOCALE_STRCMP
-#  define VERSION_SUFFIX " (using locale strcmp)"
+# ifdef USE_SENORA_GC
+#  define VERSION_SUFFIX " [cgc~]"
 # else
-#  define VERSION_SUFFIX /* empty */
+#  define VERSION_SUFFIX " [cgc]"
 # endif
 #endif
 
@@ -1891,11 +1916,8 @@ char *scheme_banner(void)
     return embedding_banner;
   else
     return "Welcome to MzScheme"
-#ifdef MZ_PRECISE_GC
-      "3m"
-#endif
-      " version " MZSCHEME_VERSION VERSION_SUFFIX
-      ", Copyright (c) 2004-2006 PLT Scheme Inc.\n";
+      " v" MZSCHEME_VERSION VERSION_SUFFIX
+      ", Copyright (c) 2004-2007 PLT Scheme Inc.\n";
 }
 
 void scheme_set_banner(char *s)
@@ -2120,9 +2142,35 @@ static Scheme_Object *system_type(int argc, Scheme_Object *argv[])
       return scheme_make_utf8_string(buff);
     }
 
+    sym = scheme_intern_symbol("gc");
+    if (SAME_OBJ(argv[0], sym)) {
+#ifdef MZ_PRECISE_GC
+      return scheme_intern_symbol("3m");
+#else
+      return scheme_intern_symbol("cgc");
+#endif
+    }
+
+    sym = scheme_intern_symbol("so-suffix");
+    if (SAME_OBJ(argv[0], sym)) {
+#ifdef DOS_FILE_SYSTEM
+      return scheme_make_byte_string(".dll");
+#else
+# ifdef OS_X
+      return scheme_make_byte_string(".dylib");
+# else
+#  ifdef USE_CYGWIN_SO_SUFFIX
+      return scheme_make_byte_string(".dll");
+#  else
+      return scheme_make_byte_string(".so");
+#  endif
+# endif
+#endif
+    }
+
     sym = scheme_intern_symbol("os");
     if (!SAME_OBJ(argv[0], sym)) {
-      scheme_wrong_type("system-type", "'os, 'link, or 'machine", 0, argc, argv);
+      scheme_wrong_type("system-type", "'os, 'link, 'machine, 'gc, or 'so-suffix", 0, argc, argv);
       return NULL;
     }
   }
@@ -2132,12 +2180,29 @@ static Scheme_Object *system_type(int argc, Scheme_Object *argv[])
 
 static Scheme_Object *system_library_subpath(int argc, Scheme_Object *argv[])
 {
+  if (argc > 0) {
+    Scheme_Object *sym;
+
+    if (SCHEME_FALSEP(argv[0]))
+      return platform_cgc_path;
+    
+    sym = scheme_intern_symbol("cgc");
+    if (SAME_OBJ(sym, argv[0]))
+      return platform_cgc_path;
+
+    sym = scheme_intern_symbol("3m");
+    if (SAME_OBJ(sym, argv[0]))
+      return platform_3m_path;
+
+    scheme_wrong_type("system-library-subpath", "'cgc, '3m, or #f", 0, argc, argv);
+    return NULL;
+  } else {
 #ifdef MZ_PRECISE_GC
-  if ((argc > 0) && SCHEME_FALSEP(argv[0]))
-    return platform_path_no_variant;
-  else
+    return platform_3m_path;
+#else
+    return platform_cgc_path;
 #endif
-    return platform_path;
+  }
 }
 
 const char *scheme_system_library_subpath()
@@ -4834,6 +4899,7 @@ mzchar *scheme_utf8_decode_to_buffer_len(const unsigned char *s, int len,
 					 mzchar *buf, int blen, long *_ulen)
 {
   int ulen;
+
   ulen = utf8_decode_x(s, 0, len, NULL, 0, -1,
 		       NULL, NULL, 0, 0,
 		       NULL, 0, 0);
@@ -5055,6 +5121,22 @@ char *scheme_utf8_encode_to_buffer_len(const mzchar *s, int len,
 				       long *_slen)
 {
   int slen;
+
+  /* ASCII with len < blen is a common case: */
+  if (len < blen) {
+    for (slen = 0; slen < len; slen++) {
+      if (s[slen] > 127)
+        break;
+      else
+        buf[slen] = s[slen];
+    }
+    if (slen == len) {
+      buf[slen] = 0;
+      *_slen = slen;
+      return buf;
+    }
+  }
+
   slen = utf8_encode_x(s, 0, len, NULL, 0, -1, NULL, NULL, 0);
   if (slen + 1 > blen) {
     buf = (char *)scheme_malloc_atomic(slen + 1);

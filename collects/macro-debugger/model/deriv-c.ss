@@ -17,16 +17,18 @@
   ;; - resolves is the list of identifiers resolved by the macro keyword
   ;; - me1 is the marked version of the input syntax
   ;; - me2 is the marked version of the output syntax
-  (define-struct transformation (e1 e2 resolves me1 me2 locals) #f)
+  (define-struct transformation (e1 e2 resolves me1 me2 locals seq) #f)
 
   ;; A LocalAction is one of
-  ;;  - (make-local-expansion Syntax Syntax Syntax Syntax Derivation)
+  ;;  - (make-local-expansion Syntax Syntax Syntax Syntax boolean Derivation)
+  ;;  - (make-local-expansion/expr Syntax Syntax Syntax Syntax boolean Derivation)
   ;;  - (make-local-lift Syntax Identifier)
-  (define-struct local-expansion (e1 e2 me1 me2 deriv) #f)
+  (define-struct local-expansion (e1 e2 me1 me2 for-stx? deriv) #f)
+  (define-struct local-expansion/expr (e1 e2 me1 me2 for-stx? opaque deriv) #f)
   (define-struct local-lift (expr id) #f)
   (define-struct local-lift-end (decl) #f)
   (define-struct local-bind (deriv) #f)
-  
+
   ;; A PRule is one of ...
   (define-struct (prule deriv) (resolves) #f)
 
@@ -38,6 +40,7 @@
   (define-struct (p:define-values prule) (rhs) #f)
   
   ;; Simple expressions
+  (define-struct (p:expression prule) (inner) #f)
   (define-struct (p:if prule) (full? test then else) #f)
   (define-struct (p:wcm prule) (key mark body) #f)
   (define-struct (p:set! prule) (id-resolves rhs) #f)

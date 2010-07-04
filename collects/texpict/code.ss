@@ -3,7 +3,7 @@
 	   (lib "class.ss")
 	   (lib "list.ss")
            (lib "mred.ss" "mred")
-	   (lib "unitsig.ss"))
+	   (lib "unit.ss"))
 
   (provide define-code code^ code-params^ code@)
 
@@ -94,7 +94,7 @@
   (define-signature code^
     (typeset-code code-pict-bottom-line-pict pict->code-pict
      comment-color keyword-color id-color const-color literal-color
-     code-align current-code-tt
+     code-align current-code-tt current-code-font
      current-keyword-list current-const-list current-literal-list 
      code-colorize-enabled code-colorize-quote-enabled 
      code-italic-underscore-enabled code-scripts-enabled
@@ -117,12 +117,14 @@
 	       [(x (... ...)) ,illegal-use-of-once]
 	       [x (get-val)])))]))
   
-  (define code@
-    (unit/sig code^
+  (define-unit code@
       (import code-params^)
+      (export code^)
+
+      (define current-code-font (make-parameter `(bold . modern)))
       
       (define (default-tt s)
-	(text s `(bold . modern) (current-font-size)))
+	(text s (current-code-font) (current-font-size)))
 
       (define current-code-tt (make-parameter default-tt))
 
@@ -286,31 +288,31 @@
 	       (not (char=? #\_ (string-ref str 1))))
 	  (mode-colorize
 	   mode 'id
-	   (text (substring str 1) `(bold italic . modern) (current-font-size)))]
+	   (text (substring str 1) `(italic . ,(current-code-font)) (current-font-size)))]
 	 [(and (code-scripts-enabled)
 	       (regexp-match #rx"^(.+)_([0-9a-z]+)\\^([0-9a-z]+)$" str))
 	  => (lambda (m)
 	       (hbl-append (colorize-id (cadr m) mode)
 			   (cc-superimpose
-			    (text (caddr m) `(subscript bold . modern) (current-font-size))
-			    (text (cadddr m) `(superscript bold . modern) (current-font-size)))))]
+			    (text (caddr m) `(subscript . ,(current-code-font)) (current-font-size))
+			    (text (cadddr m) `(superscript . ,(current-code-font)) (current-font-size)))))]
 	 [(and (code-scripts-enabled)
 	       (regexp-match #rx"^(.+)\\^([0-9a-z]+)_([0-9a-z]+)$" str))
 	  => (lambda (m)
 	       (hbl-append (colorize-id (cadr m) mode)
 			   (cc-superimpose
-			    (text (cadddr m) `(subscript bold . modern) (current-font-size))
-			    (text (caddr m) `(superscript bold . modern) (current-font-size)))))]
+			    (text (cadddr m) `(subscript . ,(current-code-font)) (current-font-size))
+			    (text (caddr m) `(superscript . ,(current-code-font)) (current-font-size)))))]
 	 [(and (code-scripts-enabled)
 	       (regexp-match #rx"^(.+)\\^([0-9a-z]+)$" str))
 	  => (lambda (m)
 	       (hbl-append (colorize-id (cadr m) mode)
-			   (text (caddr m) `(superscript bold . modern) (current-font-size))))]
+			   (text (caddr m) `(superscript . ,(current-code-font)) (current-font-size))))]
 	 [(and (code-scripts-enabled)
 	       (regexp-match #rx"^(.+)_([0-9a-z]+)$" str))
 	  => (lambda (m)
 	       (hbl-append (colorize-id (cadr m) mode)
-			   (text (caddr m) `(subscript bold . modern) (current-font-size))))]
+			   (text (caddr m) `(subscript . ,(current-code-font)) (current-font-size))))]
 	 [else
 	  (mode-colorize
 	   mode 
@@ -528,4 +530,4 @@
 					   (tt (format "~s" (syntax-e stx))) ))
 			closes)])))
       
-      )))
+      ))
