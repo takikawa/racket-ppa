@@ -178,7 +178,9 @@ literal data expressions without the respective explicit form are not
 wrapped with the explicit form. If @scheme[stop-ids] is @scheme[#f]
 instead of a list, then @scheme[stx] is expanded only as long as the
 outermost form of @scheme[stx] is a macro (i.e., expansion does not
-proceed to sub-expressions).
+proceed to sub-expressions). A fully expanded form can include the
+bindings listed in @secref["fully-expanded"] plus the
+@scheme[letrec-syntaxes+values] form.
 
 The optional @scheme[intdef-ctx] argument must be either @scheme[#f],
 the result of @scheme[syntax-local-make-definition-context], or a list
@@ -517,11 +519,11 @@ expanded.
 within a @scheme[module] form, or if it is not a run-time expression,
 then the @exnraise[exn:fail:contract]. }
 
-@defproc[(syntax-local-name) (or/c symbol? #f)]{
+@defproc[(syntax-local-name) any/c]{
 
 Returns an inferred name for the expression position being
-transformed, or @scheme[#f] if no such name is available. See also
-@secref["infernames"].
+transformed, or @scheme[#f] if no such name is available. A name is
+normally a symbol or an identifier. See also @secref["infernames"].
 
 @transform-time[]}
 

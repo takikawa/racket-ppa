@@ -1,15 +1,11 @@
 #lang scheme/base  
-(require "../utils/utils.ss")
-
-(require (rep type-rep filter-rep object-rep)
+(require "../utils/utils.ss"
+         (rep type-rep filter-rep object-rep)
          (utils tc-utils)
          "abbrev.ss"
 	 (types comparison printer union subtype utils)
-         scheme/list
-         scheme/match
-         scheme/promise
-         (for-syntax stxclass)
-         (for-syntax scheme/base)
+         scheme/list scheme/match scheme/promise
+         (for-syntax syntax/parse scheme/base)
          (for-template scheme/base))
 
 (provide (all-defined-out)
@@ -35,6 +31,7 @@
       (match t*
         [(Value: '()) (-lst Univ)]
         [(Mu: var (Union: (list (Value: '()) (Pair: _ (F: var))))) t*]
+        [(Pair: t1 (Value: '())) (-lst t1)]
         [(Pair: t1 t2)
          (let ([t-new (loop t2)])
            (if (type-equal? (-lst t1) t-new)

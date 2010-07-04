@@ -613,11 +613,11 @@ corresponds to the default @tech{module name resolver}.
  @examples[
  (code:comment @#,t{@filepath{main.ss} in package @filepath{farm} by @filepath{mcdonald}:})
  (eval:alts (require (planet mcdonald/farm)) (void))
- (code:comment @#,t{@filepath{main.ss} in version >= 2.0 of package @filepath{farm} by @filepath{mcdonald}:})
+ (code:comment @#,t{@filepath{main.ss} in version >= 2.0 of @filepath{farm} by @filepath{mcdonald}:})
  (eval:alts (require (planet mcdonald/farm:2)) (void))
- (code:comment @#,t{@filepath{main.ss} in version >= 2.5 of package @filepath{farm} by @filepath{mcdonald}:})
+ (code:comment @#,t{@filepath{main.ss} in version >= 2.5 of @filepath{farm} by @filepath{mcdonald}:})
  (eval:alts (require (planet mcdonald/farm:2:5)) (void))
- (code:comment @#,t{@filepath{duck.ss} in version >= 2.5 of package @filepath{farm} by @filepath{mcdonald}:})
+ (code:comment @#,t{@filepath{duck.ss} in version >= 2.5 of @filepath{farm} by @filepath{mcdonald}:})
  (eval:alts (require (planet mcdonald/farm:2:5/duck)) (void))
  ]}
 
@@ -1577,6 +1577,14 @@ Combines @scheme[letrec-syntaxes] with @scheme[letrec-values]: each
 @scheme[trans-id] and @scheme[val-id] is bound in all
 @scheme[trans-expr]s and @scheme[val-expr]s.
 
+The @scheme[letrec-syntaxes+values] form is the core form for local
+compile-time bindings, since forms like @scheme[letrec-syntax] and
+internal @scheme[define-syntax] expand to it. In a fully expanded
+expression (see @secref["fully-expanded"]), the @scheme[trans-id]
+bindings are discarded and the form reduces to @scheme[letrec], but
+@scheme[letrec-syntaxes+values] can appear in the result of
+@scheme[local-expand] with an empty stop list.
+
 See also @scheme[local], which supports local bindings with
 @scheme[define], @scheme[define-syntax], and more.}
 
@@ -1920,17 +1928,24 @@ Evaluation of @scheme[expr] side is @scheme[parameterize]d to set
 @scheme[current-namespace] as in @scheme[let-syntax].}
 
 @defexamples[#:eval (syntax-eval)
-(define-for-syntax foo 2)
-(define-syntax bar
-  (lambda (syntax-object)
-    (printf "foo is ~a\n" foo)
-    #'2))
-(bar)    
-(define-syntax (bar2 syntax-object)
-  (printf "foo is ~a\n" foo)
-  #'3)
-(bar2)  
-]
+(define-for-syntax helper 2)
+(define-syntax (make-two syntax-object)
+ (printf "helper is ~a\n" helper)
+ #'2)
+(make-two)
+(code:comment @#,t{`helper' is not bound in the runtime phase})
+helper
+
+(define-for-syntax (filter-ids ids)
+  (filter identifier? ids))
+(define-syntax (show-variables syntax-object)
+  (syntax-case syntax-object ()
+    [(_ expr ...)
+     (with-syntax ([(only-ids ...)
+                    (filter-ids (syntax->list #'(expr ...)))])
+       #'(list only-ids ...))]))
+(let ([a 1] [b 2] [c 3])
+  (show-variables a 5 2 b c))]
 
 @defform[(define-values-for-syntax (id ...) expr)]{
 

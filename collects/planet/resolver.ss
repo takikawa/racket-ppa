@@ -1,3 +1,5 @@
+#lang mzscheme
+
 #| resolver.ss -- PLaneT client
 
 1. Introduction
@@ -160,14 +162,17 @@ subdirectory.
 
 ||#
 
-#lang mzscheme
 
+;; This `resolver' no longer fits the normal protocol for a 
+;; module name resolver, because it accepts an extra argument in
+;; the second and third cases. The extra argument is a parameterization
+;; to use for installation actions.
 (define resolver
   (case-lambda
     [(name) (void)]
-    [(spec module-path stx) 
-     (resolver spec module-path stx #t)]
-    [(spec module-path stx load?)
+    [(spec module-path stx orig-paramz) 
+     (resolver spec module-path stx #t orig-paramz)]
+    [(spec module-path stx load? orig-paramz)
      ;; ensure these directories exist
      (make-directory* (PLANET-DIR))
      (make-directory* (CACHE-DIR))
@@ -175,7 +180,8 @@ subdirectory.
      (planet-resolve spec
                      (current-module-declare-name) ;; seems more reliable than module-path in v3.99
                      stx
-                     load?)]))
+                     load?
+                     orig-paramz)]))
 
 (require mzlib/match
          mzlib/file
@@ -193,7 +199,8 @@ subdirectory.
          "private/linkage.ss"
          "parsereq.ss"
          
-         "terse-info.ss") 
+         "terse-info.ss"
+         compiler/cm) 
 
 (provide (rename resolver planet-module-name-resolver)
          resolve-planet-path
@@ -321,10 +328,15 @@ subdirectory.
 ;; planet-resolve : PLANET-REQUEST (resolved-module-path | #f) syntax[PLANET-REQUEST] -> symbol
 ;; resolves the given request. Returns a name corresponding to the module in
 ;; the correct environment
-(define (planet-resolve spec rmp stx load?)
-  (let-values ([(path pkg) (get-planet-module-path/pkg spec rmp stx)])
-    (when load? (add-pkg-to-diamond-registry! pkg stx))
-    (do-require path (pkg-path pkg) rmp stx load?)))
+(define (planet-resolve spec rmp stx load? orig-paramz)
+  ;; install various parameters that can affect the compilation of a planet package back to their original state
+  (parameterize ([current-compile (call-with-parameterization orig-paramz current-compile)]
+                 [current-eval (call-with-parameterization orig-paramz current-eval)]
+                 [use-compiled-file-paths (call-with-parameterization orig-paramz use-compiled-file-paths)]
+                 [current-library-collection-paths (call-with-parameterization orig-paramz current-library-collection-paths)])
+    (let-values ([(path pkg) (get-planet-module-path/pkg spec rmp stx)])
+      (when load? (add-pkg-to-diamond-registry! pkg stx))
+      (do-require path (pkg-path pkg) rmp stx load?))))
 
 ;; resolve-planet-path : planet-require-spec -> path
 ;; retrieves the path to the given file in the planet package. downloads and
@@ -554,15 +566,20 @@ subdirectory.
                    (current-time))
            ;; oh man is this a bad hack!
            (parameterize ([current-namespace (make-namespace)])
+             (printf "new namespace\n")
              (let ([ipp (dynamic-require 'setup/plt-single-installer
                                          'install-planet-package)]
                    [rud (dynamic-require 'setup/plt-single-installer
-                                         'reindex-user-documentation)])
-               (ipp path the-dir (list owner (pkg-spec-name pkg)
-                                       extra-path maj min))
-               (unless was-nested?
-                 (printf "------------- Rebuilding documentation index -------------\n")
-                 (rud))))))
+                                         'reindex-user-documentation)]
+                   [msfh (dynamic-require 'compiler/cm 'manager-skip-file-handler)])
+               (printf "starting setup-plt ~s ~s\n" (manager-skip-file-handler) (msfh))
+               (parameterize ([msfh (manager-skip-file-handler)])
+                 (printf "starting setup-plt.2 ~s ~s\n" (manager-skip-file-handler) (msfh))
+                 (ipp path the-dir (list owner (pkg-spec-name pkg)
+                                         extra-path maj min))
+                 (unless was-nested?
+                   (printf "------------- Rebuilding documentation index -------------\n")
+                   (rud)))))))
         (planet-terse-log 'finish (pkg-spec->string pkg))
         (make-pkg (pkg-spec-name pkg) (pkg-spec-path pkg)
                   maj min the-dir 'normal)))))

@@ -6,7 +6,8 @@
 	 define-record-procedures define-record-procedures-parametric
 	 .. ... .... ..... ......
 	 check-expect check-within check-error
-	 : define-contract -> mixed one-of predicate combined property
+	 check-property for-all ==> expect expect-within
+	 contract : define-contract -> mixed one-of predicate combined property
 	 number real rational integer natural boolean true false string empty-list
 	 chocolate-cookie)
 (provide cons)

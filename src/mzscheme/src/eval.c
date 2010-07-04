@@ -163,7 +163,7 @@ static THREAD_LOCAL Scheme_Object *quick_stx;
 /* FIXME needs to be atomically incremented */
 int scheme_overflow_count;
 int get_overflow_count() { return scheme_overflow_count; }
-int scheme_continuation_application_count;
+int THREAD_LOCAL scheme_continuation_application_count;
 
 /* read-only globals */
 Scheme_Object *scheme_eval_waiting;
@@ -5547,8 +5547,12 @@ scheme_compile_expand_expr(Scheme_Object *form, Scheme_Comp_Env *env,
 	
 	if (rec[drec].comp) {
 	  scheme_compile_rec_done_local(rec, drec);
-	  if (SAME_TYPE(SCHEME_TYPE(var), scheme_variable_type)
-	      || SAME_TYPE(SCHEME_TYPE(var), scheme_module_variable_type))
+          if (SAME_TYPE(SCHEME_TYPE(var), scheme_variable_type)
+              && scheme_extract_unsafe(var)) {
+            scheme_register_unsafe_in_prefix(env, rec, drec, menv);
+            return scheme_extract_unsafe(var);
+          } else if (SAME_TYPE(SCHEME_TYPE(var), scheme_variable_type)
+                     || SAME_TYPE(SCHEME_TYPE(var), scheme_module_variable_type))
 	    return scheme_register_toplevel_in_prefix(var, env, rec, drec);
 	  else
 	    return var;
@@ -9972,6 +9976,8 @@ void scheme_init_collection_paths_post(Scheme_Env *global_env, Scheme_Object *ex
       a[0] = _scheme_apply(flcp, 2, a);
       _scheme_apply(clcp, 1, a);
     }
+
+    
   }
   p->error_buf = save;
 }
@@ -10202,6 +10208,10 @@ Scheme_Object **scheme_push_prefix(Scheme_Env *genv, Resolve_Prefix *rp,
   int i, j;
 
   rs_save = rs = MZ_RUNSTACK;
+
+  if (rp->uses_unsafe) {
+    scheme_check_unsafe_accessible(rp->uses_unsafe, genv);
+  }
 
   if (rp->num_toplevels || rp->num_stxes || rp->num_lifts) {
     i = rp->num_toplevels;

@@ -52,7 +52,28 @@ the @scheme[eq?] call would return @scheme[#t].
 
 Moral: do not use @scheme[eq?] on values that have contracts.
 
-@ctc-section{Defining recursive contracts}
+@ctc-section[#:tag "exists-gotcha"]{Exists Contracts and Predicates}
+
+Much like the @scheme[eq?] example above, @scheme[#:∃] contracts
+can change the behavior of a program.
+
+Specifically,
+the @scheme[null?] predicate (and many other predicates) return @scheme[#f]
+for @scheme[#:∃] contracts, and changing one of those contracts to @scheme[any/c]
+means that @scheme[null?] might now return @scheme[#t] instead, resulting in
+arbitrarily different behavior depending on this boolean might flow around
+in the program.
+
+@defmodulelang[scheme/exists]
+
+To work around the above problem, the 
+@schememodname[scheme/exists] library behaves just like the @schememodname[scheme],
+but where predicates signal errors when given @scheme[#:∃] contracts.
+
+Moral: do not use predicates on @scheme[#:∃] contracts, but if you're not sure, use
+@schememodname[scheme/exists] to be safe.
+
+@ctc-section{Defining Recursive Contracts}
 
 When defining a self-referential contract, it is natural to use
 @scheme[define]. For example, one might try to write a contract on

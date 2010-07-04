@@ -3,7 +3,8 @@
 
 (require "../config.ss"
          scribble/manual
-         scribble/struct
+         scribble/core
+         scribble/html-properties
          scribble/decode
          scheme/list
          setup/dirs)
@@ -17,10 +18,18 @@
             [else (error 'main-page "page id not found: ~e" id)]))))
 
 (define (script #:noscript [noscript null] . body)
-  (make-script-element #f noscript "text/javascript" (flatten body)))
+  (make-element (make-style #f (list
+                                (make-script-property
+                                 "text/javascript"
+                                 (flatten body))))
+                noscript))
 
 (define (script-ref #:noscript [noscript null] path)
-  (make-script-element #f noscript "text/javascript" path))
+  (make-element (make-style #f (list
+                                (make-script-property
+                                 "text/javascript"
+                                 path)))
+                noscript))
 
 ;; this is for content that should not be displayed on the web (this
 ;; is done by a class name that is not included in the usual css file,
@@ -31,7 +40,7 @@
 
 ;; the second argument specifies installation/user specific, and if
 ;; it's missing, then it's a page with a single version
-(define (main-page id [installation-specific? '?])
+(define (main-page id [installation-specific? '?] #:force-scheme-css? [force-scheme-css? #f])
   (define info (page-info id))
   (define title-string (car info))
   (define root (cadr info))
@@ -42,7 +51,14 @@
     ;; massage the current path to an up string
     (regexp-replace* #rx"[^/]*/" (regexp-replace #rx"[^/]+$" path "") "../"))
   (define page-title
-    (title #:style '(no-toc) title-string
+    (title #:style (make-style #f (cons 
+                                   'no-toc
+                                   (if (not force-scheme-css?)
+                                       null
+                                       (list
+                                        (make-css-addition (build-path (collection-path "scribble")
+                                                                       "scheme.css"))))))
+           title-string
            #;
            ;; the "(installation)" part shouldn't be visible on the web, but
            ;; there's no way (currently) to not have it in the window title
@@ -88,14 +104,14 @@
                  [else (error "internal error (main-page)")]))
              (define (onclick style)
                (if (eq? root 'user)
-                 (make-with-attributes
-                  style
-                  `([onclick
-                     . ,(format "return GotoPLTRoot(\"~a\", \"~a\");"
-                                (version) path)]))
+                 (make-style style
+                             (list (make-attributes
+                                    `([onclick
+                                       . ,(format "return GotoPLTRoot(\"~a\", \"~a\");"
+                                                  (version) path)]))))
                  style))
              (define (elt style)
                (make-toc-element
-                #f null (list (link dest #:style (onclick style) text))))
+                #f null (list (hyperlink dest #:style (onclick style) text))))
              (list id (elt "tocviewlink") (elt "tocviewselflink")))))
        links))

@@ -1,5 +1,3 @@
-;; (define-record-procedures-2 :pare kons pare? ((kar set-kar!) kdr))
-
 (define-syntax define-record-procedures*
   
   (let ()
@@ -28,18 +26,14 @@
 
     (lambda (x)
       (syntax-case x ()
-	((_ ?type-spec
+	((_ ?type-name
+	    ?contract-constructor-name
 	    ?constructor
 	    ?predicate
 	    (?field-spec ...))
 
 	 (with-syntax
-	     ((?type-name (syntax-case #'?type-spec ()
-			    ((?id ?param ...)
-			     #'?id)
-			    (?id
-			     #'?id)))
-	      ((accessor ...)
+	     (((accessor ...)
 	       (map (lambda (field-spec)
 		      (syntax-case field-spec ()
 			((accessor mutator) (syntax accessor))
@@ -142,29 +136,35 @@
 				    accessor-proc ...
 				    mutator-proc ...))))
 		    (contract
-		     (syntax-case #'?type-spec ()
-		       ((_ ?param ...)
-			(with-syntax (((component-contract ...)
-				       (map (lambda (accessor param)
-					      (with-syntax ((?accessor accessor)
-							    (?param param))
-						#'(at ?param (property ?accessor ?param))))
-					    (syntax->list #'(our-accessor ...))
-					    (syntax->list #'(?param ...)))))
-			  #'(define-contract ?type-spec
-			      (combined (at ?type-name (predicate real-predicate))
-					component-contract ...))))
-		       (_
-			;; we use real-predicate to avoid infinite recursion if a contract
-			;; for ?type-name using ?predicate is inadvertently defined
-			#'(define-contract ?type-name (predicate real-predicate))))))
+		     (with-syntax (((?param ...) (generate-temporaries #'(?field-spec ...))))
+		       (with-syntax (((component-contract ...)
+				      (map (lambda (accessor param)
+					     (with-syntax ((?accessor accessor)
+							   (?param param))
+					       #'(at ?param (property ?accessor ?param))))
+					   (syntax->list #'(our-accessor ...))
+					   (syntax->list #'(?param ...)))))
+			 (with-syntax ((base-contract
+					(stepper-syntax-property
+					 #'(define ?type-name (contract (predicate real-predicate)))
+					 'stepper-skip-completely
+					 #t))
+				       (constructor-contract
+					(stepper-syntax-property
+					 #'(define (?contract-constructor-name ?param ...)
+					     (contract
+					      (combined (at ?type-name (predicate real-predicate))
+							component-contract ...)))
+					 'stepper-skip-completely
+					 #t)))
+			   #'(begin
+			       ;; we use real-predicate to avoid infinite recursion if a contract
+			       ;; for ?type-name using ?predicate is inadvertently defined
+			       base-contract
+			       constructor-contract))))))
 		 (with-syntax ((defs
 				 (stepper-syntax-property
-				  (syntax/loc x defs) 'stepper-skip-completely #t))
-			       (contract
-				(stepper-syntax-property
-				 #'contract
-				 'stepper-skip-completely #t)))
+				  (syntax/loc x defs) 'stepper-skip-completely #t)))
 				 
 		   #'(begin
 		       contract
@@ -172,6 +172,7 @@
 		       defs)))))))
 
       ((_ ?type-name
+	  ?contract-constructor-name
 	  ?constructor
 	  ?predicate
 	  rest)
@@ -179,6 +180,7 @@
 	#f 
 	"Der vierte Operand ist illegal" (syntax rest)))
       ((_ ?type-name
+	  ?contract-constructor-name
 	  ?constructor
 	  ?predicate
 	  rest1 rest2 ... (?field-spec ...))
@@ -186,16 +188,17 @@
 	#f 
 	"Vor den Selektoren/Mutatoren steht eine Form zuviel" #'rest1))
       ((_ ?type-name
+	  ?contract-constructor-name
 	  ?constructor
 	  ?predicate
 	  rest1 rest2 ...)
        (raise-syntax-error 
 	#f 
-	"Zu viele Operanden für define-record-procedures-2" x))
+	"Zu viele Operanden für define-record-procedures*" x))
       ((_ arg1 ...)
        (raise-syntax-error 
 	#f 
-	"Zu wenige Operanden für define-record-procedures-2" x))))))
+	"Zu wenige Operanden für define-record-procedures*" x))))))
 
 (define (access-record-fields rec acc count)
   (let recur ((i 0))
@@ -293,6 +296,7 @@ prints as:
                         (generate-temporaries (syntax (accessor ...)))))
            (syntax
             (define-record-procedures* ?type-name
+	      dummy-contract-constructor-name
               ?constructor
               ?predicate
               ((accessor dummy-mutator) ...))))))
@@ -327,34 +331,26 @@ prints as:
 (define-syntax define-record-procedures-parametric
   (lambda (x)
     (syntax-case x ()
-      ((_ (?type-name ?param ...)
+      ((_ ?type-name
+	  ?contract-constructor-name
           ?constructor
           ?predicate
           (accessor  ...))
 
 
        (begin
-	 (check-for-id-list! (syntax->list #'(?param ...))
-			     "Parameter ist kein Bezeichner")
-	 (when (not (= (length (syntax->list #'(?param ...)))
-		       (length (syntax->list #'(accessor ...)))))
-	   (raise-syntax-error #f
-			       (string-append "Anzahlen der Konstruktor-Parameter "
-					      "und der Felder sollten übereinstimmen")
-			       #'?constructor))
+	 (check-for-id!
+	  (syntax ?type-name)
+	  "Record-Name ist kein Bezeichner")
+
+	 (check-for-id!
+	  (syntax ?contract-constructor-name)
+	  "Vertrags-Konstruktor-Name ist kein Bezeichner")
+
          (check-for-id!
           (syntax ?constructor)
           "Konstruktor ist kein Bezeichner")
 
-	 (check-for-id!
-	  (syntax ?type-name)
-	  "Typ-Name ist kein Bezeichner")
-
-	 (for-each (lambda (param)
-		     (check-for-id! param
-				    "Parameter ist kein Bezeichner"))
-		   (syntax->list #'(?param ...)))
-         
 	 (check-for-id!
 	  (syntax ?predicate)
 	  "Prädikat ist kein Bezeichner")
@@ -366,12 +362,13 @@ prints as:
 	 (with-syntax (((dummy-mutator ...)
 			(generate-temporaries (syntax (accessor ...)))))
 	   (syntax
-	    (define-record-procedures* (?type-name ?param ...)
+	    (define-record-procedures* ?type-name ?contract-constructor-name
 	      ?constructor
 	      ?predicate
 	      ((accessor dummy-mutator) ...))))))
 
       ((_ ?type-name
+	  ?contract-constructor-name
 	  ?constructor
 	  ?predicate
 	  rest)
@@ -379,17 +376,20 @@ prints as:
 	#f 
 	"Der vierte Operand ist keine Liste von Selektoren" (syntax rest)))
       ((_ ?type-name
+	  ?contract-constructor-name
 	  ?constructor
 	  ?predicate
 	  rest1 rest2 ...)
        (raise-syntax-error 
 	#f 
-	"Zu viele Operanden für define-record-procedures-polymorphic" x))
+	"Zu viele Operanden für define-record-procedures-parametric" x))
       ((_ arg1 ...)
        (raise-syntax-error 
 	#f 
-	"Zu wenige Operanden für define-record-procedures-polymorphic" x))
+	"Zu wenige Operanden für define-record-procedures-parametric" x))
       )))
+
+;; (define-record-procedures-2 :pare kons pare? ((kar set-kar!) kdr))
 
 (define-syntax define-record-procedures-2
   (lambda (x)
@@ -402,7 +402,7 @@ prints as:
        (begin
 	 (check-for-id!
 	  (syntax ?type-name)
-	  "Typ-Name ist kein Bezeichner")
+	  "Record-Name ist kein Bezeichner")
          
 	 (check-for-id!
 	  (syntax ?constructor)
@@ -425,6 +425,7 @@ prints as:
 		   (syntax->list (syntax (?field-spec ...))))
 
 	 #'(define-record-procedures* ?type-name
+	     dummy-contract-constructor-name
 	     ?constructor
 	     ?predicate
 	     (?field-spec ...))))
@@ -450,21 +451,21 @@ prints as:
 (define-syntax define-record-procedures-parametric-2
   (lambda (x)
     (syntax-case x ()
-      ((_ (?type-name ?param ...)
+      ((_ ?type-name
+	  ?contract-constructor-name
 	  ?constructor
 	  ?predicate
 	  (?field-spec ...))
 
        (begin
-	 (check-for-id-list! (syntax->list #'(?param ...))
-			     "Parameter ist kein Bezeichner")
-	 (when (not (= (length (syntax->list #'(?param ...)))
-		       (length (syntax->list #'(?field-spec ...)))))
-	   (raise-syntax-error #f
-			       (string-append "Anzahlen der Konstruktor-Parameter "
-					      "und der Felder sollten übereinstimmen")
-			       #'?constructor))
-         
+	 (check-for-id!
+	  (syntax ?type-name)
+	  "Record-Name ist kein Bezeichner")
+
+	 (check-for-id!
+	  (syntax ?contract-constructor-name)
+	  "Vertrags-Konstruktor-Name ist kein Bezeichner")
+
 	 (check-for-id!
 	  (syntax ?constructor)
 	  "Konstruktor ist kein Bezeichner")
@@ -485,11 +486,12 @@ prints as:
 				       "Selektor ist kein Bezeichner"))))
 		   (syntax->list (syntax (?field-spec ...))))
 
-	 #'(define-record-procedures* (?type-name ?param ...)
+	 #'(define-record-procedures* ?type-name ?contract-constructor-name
 	     ?constructor
 	     ?predicate
 	     (?field-spec ...))))
       ((_ ?type-name
+	  ?contract-constructor-name
 	  ?constructor
 	  ?predicate
 	  rest)
@@ -497,15 +499,16 @@ prints as:
 	#f 
 	"Der vierte Operand ist illegal" (syntax rest)))
       ((_ ?type-name
+	  ?contract-constructor-name
 	  ?constructor
 	  ?predicate
 	  rest1 rest2 ...)
        (raise-syntax-error 
 	#f 
-	"Zu viele Operanden für define-record-procedures-2" x))
+	"Zu viele Operanden für define-record-procedures-parametric-2" x))
       ((_ arg1 ...)
        (raise-syntax-error 
 	#f 
-	"Zu wenige Operanden für define-record-procedures-2" x)))))
+	"Zu wenige Operanden für define-record-procedures-parametric-2" x)))))
 
 

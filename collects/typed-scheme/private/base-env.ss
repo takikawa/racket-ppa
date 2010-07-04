@@ -4,6 +4,7 @@
  scheme/list
  scheme/tcp
  scheme
+ scheme/unsafe/ops
  (only-in rnrs/lists-6 fold-left)
  '#%paramz
  (only-in '#%kernel [apply kernel:apply])
@@ -183,6 +184,7 @@
 [- (cl->* (->* (list -Integer) -Integer -Integer) (->* (list N) N N))]
 [max (->* (list N) N N)]
 [min (->* (list N) N N)]
+[vector? (make-pred-ty (-vec Univ))]
 [vector-ref (-poly (a) ((-vec a) N . -> . a))]
 [build-vector (-poly (a) (-Integer (-Integer . -> . a) . -> . (-vec a)))]
 [build-list (-poly (a) (-Integer (-Integer . -> . a) . -> . (-lst a)))]
@@ -278,6 +280,8 @@
 [call-with-current-continuation (-poly (a b) (((a . -> . (Un)) . -> . b) . -> . (Un a b)))]
 [call-with-escape-continuation (-poly (a b) (((a . -> . (Un)) . -> . b) . -> . (Un a b)))]
 
+[struct->vector (Univ . -> . (-vec Univ))]
+
 [quotient (-Integer -Integer . -> . -Integer)]
 [remainder (-Integer -Integer . -> . -Integer)]
 [quotient/remainder 
@@ -297,6 +301,19 @@
 [current-command-line-arguments (-Param (-vec -String) (-vec -String))]
 
 ;; regexp stuff
+[regexp? (make-pred-ty -Regexp)]
+[pregexp? (make-pred-ty -PRegexp)]
+[byte-regexp? (make-pred-ty -Byte-Regexp)]
+[byte-pregexp? (make-pred-ty -Byte-PRegexp)]
+[regexp (-String . -> . -Regexp)]
+[pregexp (-String . -> . -PRegexp)]
+[byte-regexp (-Bytes . -> . -Byte-Regexp)]
+[byte-pregexp (-Bytes . -> . -Byte-PRegexp)]
+[regexp-quote (cl-> [(-String) -String]
+                    [(-String -Boolean) -String]
+                    [(-Bytes) -Bytes]
+                    [(-Bytes -Boolean) -Bytes])]
+ 
 [regexp-match
  (let ([?outp   (-opt -Output-Port)]
        [?N      (-opt N)]
@@ -393,9 +410,9 @@
 [exact->inexact (N . -> . N)]
 [inexact->exact (N . -> . N)]
 
-[real?     (Univ . -> . B)]
-[complex?  (Univ . -> . B)]
-[rational? (Univ . -> . B)]
+[real? (Univ . -> . B : (-LFS (list (-filter N)) (list)))]
+[complex? (Univ . -> . B : (-LFS (list (-filter N)) (list)))]
+[rational? (Univ . -> . B : (-LFS (list (-filter N)) (list)))]
 [floor    (-> N N)]
 [ceiling  (-> N N)]
 [truncate (-> N N)]
@@ -456,6 +473,7 @@
 [round (N . -> . -Integer)]
 [seconds->date (-Integer . -> . (make-Name #'date))]
 [current-seconds (-> -Integer)]
+[current-print (-Param (Univ . -> . Univ) (Univ . -> . Univ))]
 [path->string (-> -Path -String)]
 
 [link-exists? (-> -Pathlike B)]
@@ -475,6 +493,17 @@
                  (cl-> [((-HT a b) a) b]
                        [((-HT a b) a (-> c)) (Un b c)]
                        [((-HT a b) a c) (Un b c)]))]
+[hash-ref! (-poly (a b)
+                  (cl-> [((-HT a b) a (-> b)) b]
+                        [((-HT a b) a b) b]))]
+[hash-iterate-first (-poly (a b)
+                           ((-HT a b) . -> . (Un (-val #f) -Integer)))]
+[hash-iterate-next (-poly (a b)
+                           ((-HT a b) -Integer . -> . (Un (-val #f) -Integer)))]
+[hash-iterate-key (-poly (a b)
+                           ((-HT a b) -Integer . -> . a))]
+[hash-iterate-value (-poly (a b)
+                           ((-HT a b) -Integer . -> . b))]
 #;[hash-table-index (-poly (a b) ((-HT a b) a b . -> . -Void))]
 
 [bytes (->* (list) N -Bytes)]
@@ -482,6 +511,9 @@
 [bytes-append (->* (list -Bytes) -Bytes -Bytes)]
 [subbytes (cl-> [(-Bytes N) -Bytes] [(-Bytes N N) -Bytes])]
 [bytes-length (-> -Bytes N)]
+[read-bytes-line (cl-> [() -Bytes]
+                       [(-Input-Port) -Bytes]
+                       [(-Input-Port Sym) -Bytes])]
 [open-input-file (->key -Pathlike #:mode (Un (-val 'binary) (-val 'text)) #f -Input-Port)]
 [close-input-port (-> -Input-Port -Void)]
 [close-output-port (-> -Output-Port -Void)]
@@ -545,6 +577,8 @@
 
 [module->namespace (-> -Sexp -Namespace)]
 [current-namespace (-Param -Namespace -Namespace)]
+
+[getenv (-> -String (Un -String (-val #f)))]
 
 ;; syntax operations
 
@@ -686,3 +720,21 @@
 [sinh (N . -> . N)]
 [cosh (N . -> . N)]
 [tanh (N . -> . N)]
+
+;; scheme/pretty
+
+[pretty-print
+ (cl->* (Univ . -> . -Void)
+        (Univ -Output-Port . -> . -Void))]
+[pretty-display
+ (cl->* (Univ . -> . -Void)
+        (Univ -Output-Port . -> . -Void))]
+[pretty-format
+ (cl->* (Univ . -> . -Void)
+        (Univ -Integer . -> . -Void))]
+
+;; unsafe
+
+[unsafe-cdr (-poly (a b) 
+              (cl->*
+               (->acc (list (-pair a b)) b (list -cdr))))]

@@ -16,6 +16,7 @@
          type-ascrip-symbol
          type-dotted-symbol
          type-ascription
+         remove-ascription
          check-type
          dotted?)
 
@@ -41,7 +42,7 @@
         (parse-type prop)
         (parse-type/id stx prop)))
   ;(unless let-binding (error 'ohno))
-  ;(printf "let-binding: ~a~n" let-binding)
+  ;(printf "in type-annotation:~a~n" (syntax->datum stx))
   (cond       
     [(syntax-property stx type-label-symbol) => pt]
     [(syntax-property stx type-ascrip-symbol) => pt]
@@ -64,6 +65,9 @@
   (cond
     [(syntax-property stx type-ascrip-symbol) => pt]
     [else #f]))
+
+(define (remove-ascription stx)
+  (syntax-property stx type-ascrip-symbol #f))
 
 (define (log/ann stx ty)
   (printf/log "Required Annotated Variable: ~a ~a~n" (syntax-e stx) ty))

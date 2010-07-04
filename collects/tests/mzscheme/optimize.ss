@@ -63,17 +63,19 @@
 		      (check-error-message op (eval `(lambda (x) (,op x ,arg2))))
 		      (check-error-message op (eval `(lambda (x) (,op ,arg1 x))))
 		      (bin0 v op arg1 arg2))]
+	 [bin-int (lambda (v op arg1 arg2)
+                    (bin-exact v op arg1 arg2)
+                    (let* ([iv (if (number? v)
+                                   (exact->inexact v)
+                                   v)]
+                           [iv0 (if (and (memq op '(* /)) (zero? iv))
+                                    0
+                                    iv)])
+                      (bin0 iv op (exact->inexact arg1) arg2)
+                      (bin0 iv0 op arg1 (exact->inexact arg2))
+                      (bin0 iv op (exact->inexact arg1) (exact->inexact arg2))))]
 	 [bin (lambda (v op arg1 arg2)
-		(bin-exact v op arg1 arg2)
-		(let* ([iv (if (number? v)
-                               (exact->inexact v)
-                               v)]
-                       [iv0 (if (and (memq op '(* /)) (zero? iv))
-                                0
-                                iv)])
-		  (bin0 iv op (exact->inexact arg1) arg2)
-		  (bin0 iv0 op arg1 (exact->inexact arg2))
-		  (bin0 iv op (exact->inexact arg1) (exact->inexact arg2)))
+		(bin-int v op arg1 arg2)
                 (let ([iv (if (number? v)
                               (if (eq? op '*)
                                   (/ v (* 33333 33333))
@@ -234,6 +236,12 @@
     (un (expt 2 30) 'abs (- (expt 2 30)))
     (un (sub1 (expt 2 62)) 'abs (sub1 (expt 2 62)))
     (un (expt 2 62) 'abs (- (expt 2 62)))
+    
+    (un 1.0 'exact->inexact 1)
+    (un 1073741823.0 'exact->inexact (sub1 (expt 2 30)))
+    (un -1073741824.0 'exact->inexact (- (expt 2 30)))
+    (un 4611686018427387903.0 'exact->inexact (sub1 (expt 2 62)))
+    (un -4611686018427387904.0 'exact->inexact (- (expt 2 62)))
 
     (bin 11 '+ 4 7)
     (bin -3 '+ 4 -7)
@@ -265,6 +273,18 @@
     (bin -4 '/ -16 4)
     (bin -4 '/ 16 -4)
     (bin 4 '/ -16 -4)
+
+    (bin-int 3 'quotient 10 3)
+    (bin-int -3 'quotient 10 -3)
+    (bin-int 3 'quotient -10 -3)
+    (bin-int -3 'quotient -10 3)
+    (bin-exact 7 'quotient (* 7 (expt 2 100)) (expt 2 100))
+
+    (bin-int 1 'remainder 10 3)
+    (bin-int 1 'remainder 10 -3)
+    (bin-int -1 'remainder -10 -3)
+    (bin-int -1 'remainder -10 3)
+    (bin-exact 7 'remainder (+ 7 (expt 2 100)) (expt 2 100))
 
     (bin 3 'min 3 300)
     (bin -300 'min 3 -300)

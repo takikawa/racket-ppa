@@ -1,10 +1,9 @@
-#lang mzscheme
-
-(require mzlib/etc 
-         mzlib/list)
+#lang scheme/base
+(require scheme/class)
 
 ;; --------------------------------------------------------------------------
-(provide check-arg check-arity check-proc check-result check-list-list
+(provide check-arg check-arity check-proc check-result 
+         check-list-list check-color
          check-fun-res
          natural?
          find-non tp-exn? number->ord)
@@ -48,6 +47,24 @@
         [(2) (format "~and" i)]
         [(3) (format "~ard" i)])))
 
+;; spell-out : number-or-string -> string
+(define (spell-out arg-posn)
+  (cond
+    [(string? arg-posn) arg-posn]
+    [(number? arg-posn)
+     (case arg-posn
+       [(1) "first"]
+       [(2) "second"]
+       [(3) "third"]
+       [(4) "fourth"]
+       [(5) "fifth"]
+       [(6) "sixth"]
+       [(7) "seventh"]
+       [(8) "eighth"]
+       [(9) "ninth"]
+       [(10) "tenth"]
+       [else (number->ord arg-posn)])]))
+
 ;; Symbol (union true String) String X -> void
 (define (check-list-list pname condition pred given)
   (when (string? condition)
@@ -62,11 +79,38 @@
                     (car other-given)
                     given))))
 
-;; check-arg : sym bool str str TST -> void
+;; check-color : symbol (or/c str non-negative-integer) TST -> void
+(define (check-color pname arg-pos given)
+  (check-arg pname
+             (or (string? given)
+                 (symbol? given))
+             'color
+             arg-pos given)
+  ;; this would be good to check, but it isn't possible, since this
+  ;; file is not allowed to rely on mred. 
+  ;; also nice would be to allow color% objects here, but that's
+  ;; not possible for the same reason (but that is why 
+  ;; the '[else color]' case is below in the cond.
+  #;
+  (let ([color
+         (cond
+           [(symbol? given)
+            (send the-color-database find-color (symbol->string given))]
+           [(string? given)
+            (send the-color-database find-color given)]
+           [else given])])
+    (unless color
+      (tp-error pname 
+                "expected the name ~e to be a color, but did not recognize it"
+                given))))
+
+;; check-arg : sym bool str (or/c str non-negative-integer) TST -> void
 (define (check-arg pname condition expected arg-posn given)
   (unless condition
     (tp-error pname "expected <~a> as ~a argument, given: ~e"
-              expected arg-posn given)))
+              expected 
+              (spell-out arg-posn)
+              given)))
 
 ;; check-arity : sym num (list-of TST) -> void
 (define (check-arity name arg# args)

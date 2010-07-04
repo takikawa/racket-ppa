@@ -1187,6 +1187,7 @@ enum {
   MZCONFIG_PRINT_UNREADABLE,
   MZCONFIG_PRINT_PAIR_CURLY,
   MZCONFIG_PRINT_MPAIR_CURLY,
+  MZCONFIG_PRINT_SYNTAX_WIDTH,
 
   MZCONFIG_CASE_SENS,
   MZCONFIG_SQUARE_BRACKETS_ARE_PARENS,
@@ -1744,6 +1745,8 @@ MZ_EXTERN void scheme_set_original_dir(Scheme_Object *d);
 
 MZ_EXTERN void scheme_init_collection_paths(Scheme_Env *global_env, Scheme_Object *extra_dirs);
 MZ_EXTERN void scheme_init_collection_paths_post(Scheme_Env *global_env, Scheme_Object *extra_dirs, Scheme_Object *extra_post_dirs);
+
+MZ_EXTERN void scheme_seal_parameters();
 
 /* Initialization */
 MZ_EXTERN Scheme_Env *scheme_basic_env(void);

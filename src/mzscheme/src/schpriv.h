@@ -91,8 +91,8 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[]);
 #define REGISTER_SO(x) MZ_REGISTER_STATIC(x)
 
 extern long scheme_total_gc_time;
-extern int scheme_cont_capture_count;
-extern int scheme_continuation_application_count;
+extern THREAD_LOCAL int scheme_cont_capture_count;
+extern THREAD_LOCAL int scheme_continuation_application_count;
 
 int scheme_num_types(void);
 
@@ -171,6 +171,7 @@ void scheme_init_symbol_table(void);
 void scheme_init_symbol_type(Scheme_Env *env);
 void scheme_init_type();
 void scheme_init_list(Scheme_Env *env);
+void scheme_init_unsafe_list(Scheme_Env *env);
 void scheme_init_stx(Scheme_Env *env);
 void scheme_init_module(Scheme_Env *env);
 void scheme_init_module_path_table(void);
@@ -180,10 +181,14 @@ void scheme_init_network(Scheme_Env *env);
 void scheme_init_file(Scheme_Env *env);
 void scheme_init_proc(Scheme_Env *env);
 void scheme_init_vector(Scheme_Env *env);
+void scheme_init_unsafe_vector(Scheme_Env *env);
 void scheme_init_string(Scheme_Env *env);
 void scheme_init_number(Scheme_Env *env);
 void scheme_init_numarith(Scheme_Env *env);
+void scheme_init_unsafe_numarith(Scheme_Env *env);
+void scheme_init_unsafe_number(Scheme_Env *env);
 void scheme_init_numcomp(Scheme_Env *env);
+void scheme_init_unsafe_numcomp(Scheme_Env *env);
 void scheme_init_numstr(Scheme_Env *env);
 void scheme_init_eval(Scheme_Env *env);
 void scheme_init_promise(Scheme_Env *env);
@@ -231,9 +236,10 @@ void scheme_free_dynamic_extensions(void);
 
 /* Type readers & writers for compiled code data */
 typedef Scheme_Object *(*Scheme_Type_Reader)(Scheme_Object *list);
+typedef Scheme_Object *(*Scheme_Type_Reader2)(Scheme_Object *list, Scheme_Object *insp);
 typedef Scheme_Object *(*Scheme_Type_Writer)(Scheme_Object *obj);
 
-extern Scheme_Type_Reader *scheme_type_readers;
+extern Scheme_Type_Reader2 *scheme_type_readers;
 extern Scheme_Type_Writer *scheme_type_writers;
 
 extern Scheme_Equal_Proc *scheme_type_equals;
@@ -414,6 +420,7 @@ void scheme_start_itimer_thread(long usec);
 
 #ifdef UNIX_PROCESSES
 void scheme_block_child_signals(int block);
+void scheme_check_child_done(void);
 #endif
 
 Scheme_Object **scheme_alloc_runstack(long len);
@@ -511,8 +518,8 @@ typedef struct {
 
 struct Scheme_Config {
   Scheme_Object so;
-  Scheme_Object *key;
-  Scheme_Object *cell;
+  Scheme_Object *key; /* NULL => cell is a Scheme_Parameterization* and next is NULL */
+  Scheme_Object *cell; /* value or thread cell (when key != NULL) or Scheme_Parameterization* (otherwise) */
   int depth;
   struct Scheme_Config *next;
 };
@@ -1795,6 +1802,7 @@ extern Scheme_Object *scheme_default_global_print_handler;
 
 /* Type readers & writers for compiled code data */
 void scheme_install_type_reader(Scheme_Type type, Scheme_Type_Reader f);
+void scheme_install_type_reader2(Scheme_Type type, Scheme_Type_Reader2 f);
 void scheme_install_type_writer(Scheme_Type type, Scheme_Type_Writer f);
 
 Scheme_Object *scheme_make_default_readtable(void);
@@ -1827,6 +1835,7 @@ typedef struct Comp_Prefix
   int num_toplevels, num_stxes;
   Scheme_Hash_Table *toplevels; /* buckets for toplevel/module variables */
   Scheme_Hash_Table *stxes;     /* syntax objects */
+  Scheme_Object *uses_unsafe;   /* NULL, inspector, or hashtree of inspectors */
 } Comp_Prefix;
 
 typedef struct Scheme_Comp_Env
@@ -1899,6 +1908,7 @@ typedef struct Resolve_Prefix
   Scheme_Object **toplevels;
   Scheme_Object **stxes; /* simplified */
   Scheme_Object *delay_info_rpair; /* (rcons refcount Scheme_Load_Delay*) */
+  Scheme_Object *uses_unsafe; /* non-NULL => inspector or hashtree of inspectors for accessing #%unsafe bindings */
 } Resolve_Prefix;
 
 typedef struct Resolve_Info
@@ -2085,6 +2095,8 @@ Scheme_Object *scheme_lookup_binding(Scheme_Object *symbol, Scheme_Comp_Env *env
 				     Scheme_Env **_menv, int *_protected,
                                      Scheme_Object **_lexical_binding_id);
 
+Scheme_Object *scheme_extract_unsafe(Scheme_Object *o);
+
 Scheme_Object *scheme_add_env_renames(Scheme_Object *stx, Scheme_Comp_Env *env,
 				      Scheme_Comp_Env *upto);
 
@@ -2136,6 +2148,9 @@ Scheme_Object *scheme_register_toplevel_in_prefix(Scheme_Object *var, Scheme_Com
 						  Scheme_Compile_Info *rec, int drec);
 Scheme_Object *scheme_register_stx_in_prefix(Scheme_Object *var, Scheme_Comp_Env *env,
 					     Scheme_Compile_Info *rec, int drec);
+void scheme_register_unsafe_in_prefix(Scheme_Comp_Env *env,
+                                      Scheme_Compile_Info *rec, int drec,
+                                      Scheme_Env *menv);
 
 void scheme_bind_syntaxes(const char *where, Scheme_Object *names, Scheme_Object *a, 
                           Scheme_Env *exp_env, Scheme_Object *insp, 
@@ -2532,6 +2547,8 @@ typedef struct Scheme_Unmarshal_Tables {
   char *decoded;
 } Scheme_Unmarshal_Tables;
 
+Scheme_Object *scheme_get_cport_inspector(struct CPort *rp);
+
 Scheme_Object *scheme_unmarshal_wrap_get(Scheme_Unmarshal_Tables *ut, 
                                          Scheme_Object *wraps_key, 
                                          int *_decoded);
@@ -2752,6 +2769,7 @@ Scheme_Object *scheme_check_accessible_in_module(Scheme_Env *env, Scheme_Object 
 						 int position, int want_pos,
 						 int *_protected, int *_unexported, 
                                                  Scheme_Env *from_env, int *_would_complain);
+void scheme_check_unsafe_accessible(Scheme_Object *insp, Scheme_Env *from_env);
 Scheme_Object *scheme_module_syntax(Scheme_Object *modname, Scheme_Env *env, Scheme_Object *name);
 
 Scheme_Object *scheme_modidx_shift(Scheme_Object *modidx,
@@ -2768,7 +2786,7 @@ Scheme_Object *scheme_hash_module_variable(Scheme_Env *env, Scheme_Object *modid
 
 Scheme_Env *scheme_get_kernel_env();
 int scheme_is_kernel_env();
-
+Scheme_Env *scheme_get_unsafe_env();
 
 void scheme_install_initial_module_set(Scheme_Env *env);
 Scheme_Bucket_Table *scheme_clone_toplevel(Scheme_Bucket_Table *ht, Scheme_Env *home);
@@ -2780,6 +2798,7 @@ void scheme_clean_dead_env(Scheme_Env *env);
 Scheme_Module *scheme_extract_compiled_module(Scheme_Object *o);
 
 int scheme_is_kernel_modname(Scheme_Object *modname);
+int scheme_is_unsafe_modname(Scheme_Object *modname);
 
 void scheme_clear_modidx_cache(void);
 void scheme_clear_shift_cache(void);
@@ -2967,7 +2986,7 @@ int scheme_is_special_filename(const char *_f, int not_nul);
 char *scheme_get_exec_path(void);
 Scheme_Object *scheme_get_run_cmd(void);
 
-Scheme_Object *scheme_get_fd_identity(Scheme_Object *port, long fd);
+Scheme_Object *scheme_get_fd_identity(Scheme_Object *port, long fd, char *path);
 
 Scheme_Object *scheme_extract_relative_to(Scheme_Object *obj, Scheme_Object *dir);
 
@@ -3183,6 +3202,9 @@ unsigned short * scheme_ucs4_to_utf16(const mzchar *text, int start, int end,
 #define SCHEME_SYM_WEIRDP(o) (MZ_OPT_HASH_KEY(&((Scheme_Symbol *)(o))->iso) & 0x3)
 
 Scheme_Object *scheme_current_library_collection_paths(int argc, Scheme_Object *argv[]);
+
+int scheme_can_inline_fp_op();
+int scheme_can_inline_fp_comp();
 
 /*========================================================================*/
 /*                           places                                       */

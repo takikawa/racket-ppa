@@ -8,11 +8,11 @@
          (types utils convenience union subtype)
          (private-in parse-type type-annotation)
          (rep type-rep)
-         (utils tc-utils stxclass-util)
+         (except-in (utils tc-utils stxclass-util))
          (env lexical-env)
          (only-in (env type-environments) lookup current-tvars extend-env)
          scheme/private/class-internal
-         (except-in stxclass id)
+         (except-in syntax/parse id)
          (only-in srfi/1 split-at))
 
 (require (for-template scheme/base scheme/private/class-internal))
@@ -20,24 +20,23 @@
 (import tc-if^ tc-lambda^ tc-app^ tc-let^ check-subforms^)
 (export tc-expr^)
 
-
 ;; return the type of a literal value
 ;; scheme-value -> type
 (define (tc-literal v-stx [expected #f])
   (define-syntax-class exp
     (pattern i
-             #:when expected
-             #:with datum (syntax-e #'i)
-             #:when (subtype (-val #'datum) expected)))
+             #:fail-unless expected #f
+             #:attr datum (syntax-e #'i)
+             #:fail-unless (subtype (-val (attribute datum)) expected) #f))
   (syntax-parse v-stx 
     [i:exp expected]
-    [i:boolean (-val #'i.datum)]
-    [i:identifier (-val #'i.datum)]
+    [i:boolean (-val (syntax-e #'i))]
+    [i:identifier (-val (syntax-e #'i))]
     [i:exact-integer -Integer]
     [i:number -Number]
     [i:str -String]
     [i:char -Char]
-    [i:keyword (-val #'i.datum)]
+    [i:keyword (-val (syntax-e #'i))]
     [i:bytes -Bytes]
     [i:byte-pregexp -Byte-PRegexp]
     [i:byte-regexp -Byte-Regexp]
@@ -45,7 +44,7 @@
     [(i ...) 
      (-Tuple (map tc-literal (syntax->list #'(i ...))))]
     [i #:declare i (3d vector?)
-       (make-Vector (apply Un (map tc-literal (vector->list #'i.datum))))]
+       (make-Vector (apply Un (map tc-literal (vector->list (syntax-e #'i)))))]
     [_ Univ]))
 
 
@@ -68,7 +67,7 @@
         ([inst (in-improper-stx inst)])
         (cond [(not inst) ty]
               [(not (or (Poly? ty) (PolyDots? ty)))
-               (tc-error/expr #:return (Un) "Cannot instantiate non-polymorphic type ~a" ty)]          
+               (tc-error/expr #:return (Un) "Cannot instantiate non-polymorphic type ~a" ty)]
               [(and (Poly? ty)
                     (not (= (length (syntax->list inst)) (Poly-n ty))))
                (tc-error/expr #:return (Un)
@@ -127,6 +126,11 @@
   (match (tc-expr/check e t)
     [(tc-result1: t) t]))
 
+(define (print-object o)
+  (match o
+    [(Empty:) "no object"]
+    [_ (format "object ~a" o)]))
+
 ;; check-below : (/\ (Results Type -> Result)
 ;;                   (Results Results -> Result)
 ;;                   (Type Results -> Type)
@@ -157,7 +161,7 @@
        [(not (subtype t1 t2))
         (tc-error/expr "Expected ~a, but got ~a" t2 t1)]
        [(not (and (equal? f1 f2) (equal? o1 o2)))
-        (tc-error/expr "Expected result with filter ~a and object ~a, got filter ~a and object ~a" f2 o2 f1 o1)])
+        (tc-error/expr "Expected result with filter ~a and ~a, got filter ~a and ~a" f2 (print-object o2) f1 (print-object o1))])
      expected]
     [((tc-results: t1 f o dty dbound) (tc-results: t2 f o dty dbound))
      (unless (andmap subtype t1 t2)
@@ -179,20 +183,52 @@
      t1]
     [((? Type? t1) (tc-result1: t2 f o))
      (if (subtype t1 t2)
-         (tc-error/expr "Expected result with filter ~a and object ~a, got ~a" f o t1)
+         (tc-error/expr "Expected result with filter ~a and ~a, got ~a" f (print-object o) t1)
          (tc-error/expr "Expected ~a, but got ~a" t2 t1))
      t1]
     [((? Type? t1) (? Type? t2))
      (unless (subtype t1 t2)
        (tc-error/expr "Expected ~a, but got ~a" t2 t1))
-     expected]))
+     expected]
+    [(a b) (int-err "unexpected input for check-below: ~a ~a" a b)]))
 
 (define (tc-expr/check/type form expected)
   #;(syntax? Type/c . -> . tc-results?)
   (tc-expr/check form (ret expected)))
 
-;; tc-expr/check : syntax tc-results -> tc-results
 (define (tc-expr/check form expected)
+  (parameterize ([current-orig-stx form])
+    ;; the argument must be syntax
+    (unless (syntax? form) 
+      (int-err "bad form input to tc-expr: ~a" form))
+    ;; typecheck form
+    (let loop ([form form] [expected expected] [checked? #f])
+      (cond [(type-ascription form) 
+             => 
+             (lambda (ann)
+               (let* ([r (tc-expr/check/internal form ann)]
+                      [r* (check-below r expected)])
+                 ;; around again in case there is an instantiation
+                 ;; remove the ascription so we don't loop infinitely
+                 (loop (remove-ascription form) r* #t)))]
+            [(syntax-property form 'type-inst)
+             ;; check without property first
+             ;; to get the appropriate type to instantiate
+             (match (tc-expr (syntax-property form 'type-inst #f))
+               [(tc-results: ts fs os)
+                ;; do the instantiation on the old type
+                (let* ([ts* (do-inst form ts)]
+                       [ts** (ret ts* fs os)])
+                  ;; make sure the new type is ok
+                  (check-below ts** expected))]
+               ;; no annotations possible on dotted results
+               [ty ty])]
+            ;; nothing to see here
+            [checked? expected]
+            [else (tc-expr/check/internal form expected)]))))
+
+;; tc-expr/check : syntax tc-results -> tc-results
+(define (tc-expr/check/internal form expected)
   (parameterize ([current-orig-stx form])
     ;(printf "form: ~a~n" (syntax-object->datum form))
     ;; the argument must be syntax

@@ -4,6 +4,7 @@
                      scheme/private/sc
                      syntax/stx
                      syntax/id-table
+                     syntax/keyword
                      "rep-data.ss"
                      "rep.ss"
                      "codegen-data.ss"
@@ -111,7 +112,7 @@
               (convert-sides x sides (k iattrs . kargs)))]
        [#s(clause:with pattern expr (def ...))
         (with-syntax ([(p-iattr ...) (pattern-attrs (wash #'pattern))])
-          #`(let ([y (without-fails expr)])
+          #`(let ([y (datum->syntax #f (without-fails expr))])
               def ...
               (parse:S y #,(done-frontier #'x) pattern
                        (convert-sides x sides
@@ -135,20 +136,28 @@
 ;; (parse:clauses id (Clause ...))
 (define-syntax (parse:clauses stx)
   (syntax-case stx ()
-    [(parse:clauses x clauses)
+    [(parse:clauses x clauses ctx)
      (let ()
        (define-values (chunks clauses-stx)
-         (chunk-kw-seq/no-dups #'clauses parse-directive-table))
-       (define-values (decls0 defs) (get-decls+defs chunks))
+         (parse-keyword-options #'clauses parse-directive-table
+                                #:context #'ctx
+                                #:no-duplicates? #t))
+       (define context
+         (options-select-value chunks '#:context #:default #'x))
+       (define-values (decls0 defs)
+         (get-decls+defs chunks #t #:context #'ctx))
        (define (for-clause clause)
          (syntax-case clause ()
            [[p . rest]
-            (let-values ([(rest decls sides)
-                          (parse-pattern-directives #'rest #:decls decls0)])
-              (define-values (decls2 defs2) (decls-create-defs decls))
+            (let-values ([(rest decls2 defs2 sides)
+                          (parse-pattern-directives #'rest
+                                                    #:allow-declare? #t
+                                                    #:decls decls0
+                                                    #:context #'ctx)])
               (with-syntax ([rest rest]
                             [fc (empty-frontier #'x)]
-                            [pattern (parse-whole-pattern #'p decls2)]
+                            [pattern
+                             (parse-whole-pattern #'p decls2 #:context #'ctx)]
                             [(local-def ...) defs2])
                 #`(let ()
                     local-def ...
@@ -156,35 +165,20 @@
                              (convert-sides x #,sides
                                             (clause-success () (let () . rest)))))))]))
        (unless (and (stx-list? clauses-stx) (stx-pair? clauses-stx))
-         (wrong-syntax clauses-stx "expected non-empty sequence of clauses"))
+         (raise-syntax-error #f "expected non-empty sequence of clauses" stx))
        (with-syntax ([(def ...) defs]
                      [(alternative ...)
                       (map for-clause (stx->list clauses-stx))])
-         #`(let ()
+         #`(let ([fail (syntax-patterns-fail #,context)])
              def ...
-             (try alternative ...))))]))
+             (with-enclosing-fail* fail
+               (try alternative ...)))))]))
 
 (define-for-syntax (wash-literal stx)
   (syntax-case stx ()
     [(a b) (list #'a #'b)]))
 (define-for-syntax (wash-literals stx)
   (wash-list wash-literal stx))
-
-#|
-;; (parse:clause id ([id id] ...) Clause) : expr
-(define-syntax (parse:clause stx)
-  (syntax-case stx ()
-    [(parse:clause x literals [p . rest])
-     (let-values ([(rest decls sides)
-                   (parse-pattern-directives
-                    #'rest #:decls (new-declenv (wash-literals #'literals)))])
-       (with-syntax ([rest rest]
-                     [fc (empty-frontier #'x)]
-                     [pattern (parse-whole-pattern #'p decls)])
-         #`(parse:S x fc pattern 
-                    (convert-sides x #,sides
-                                   (clause-success () (let () . rest))))))]))
-|#
 
 ;; (clause-success (IAttr ...) expr) : expr
 (define-syntax (clause-success stx)
@@ -228,13 +222,13 @@
             (if (equal? d (quote datum))
                 k
                 (fail x
-                      #:expect (expectation-of-constant datum)
+                      #:expect (expectation pattern0)
                       #:fce fc)))]
        [#s(pat:literal attrs literal)
         #`(if (and (identifier? x) (free-identifier=? x (quote-syntax literal)))
               k
               (fail x
-                    #:expect (expectation-of-literal literal)
+                    #:expect (expectation pattern0)
                     #:fce fc))]
        [#s(pat:head attrs head tail)
         #`(parse:H x fc head rest index
@@ -269,17 +263,17 @@
                       (let ([part part-expr] ...)
                         (parse:S* (part ...) (part-fc ...) (part-pattern ...) k))
                       (fail x
-                            #:expect (expectation-of-compound kind0 (part-pattern ...))
+                            #:expect (expectation pattern0)
                             #:fce fc))))))]
        [#s(pat:cut attrs pattern)
         #`(with-enclosing-fail enclosing-cut-fail
             (parse:S x fc pattern k))]
-       [#s(pat:describe attrs description pattern)
+       [#s(pat:describe attrs description transparent? pattern)
         #`(let ([previous-fail enclosing-fail]
                 [previous-cut-fail enclosing-cut-fail])
             (define (new-fail failure)
               (fail x
-                    #:expect (expectation-of-thing description #f failure)
+                    #:expect (expectation-of-thing description transparent? failure)
                     #:fce fc))
             (with-enclosing-fail* new-fail
               (parse:S x #,(empty-frontier #'x) pattern
@@ -291,7 +285,7 @@
        [#s(pat:fail _ condition message)
         #`(if condition
               (fail x
-                    #:expect (expectation-of-message message)
+                    #:expect (expectation pattern0)
                     #:fce fc)
               k)])]))
 
@@ -308,6 +302,17 @@
   (syntax-case stx ()
     [(disjunct pattern success (pre ...) (id ...))
      (with-syntax ([(#s(attr sub-id _ _) ...) (pattern-attrs (wash #'pattern))])
+       (with-syntax ([(alt-sub-id ...) (generate-temporaries #'(sub-id ...))])
+         #`(let ([alt-sub-id (attribute sub-id)] ...)
+             (let ([id #f] ...)
+               (let ([sub-id alt-sub-id] ...)
+                 (success pre ... id ...))))))]))
+
+;; (disjunct (clause:attr ...) id (expr ...) (id ...)) : expr
+(define-syntax (disjunct/sides stx)
+  (syntax-case stx ()
+    [(disjunct/sides clauses success (pre ...) (id ...))
+     (with-syntax ([(#s(clause:attr #s(attr sub-id _ _) _) ...) #'clauses])
        (with-syntax ([(alt-sub-id ...) (generate-temporaries #'(sub-id ...))])
          #`(let ([alt-sub-id (attribute sub-id)] ...)
              (let ([id #f] ...)
@@ -340,12 +345,12 @@
   (syntax-case stx ()
     [(parse:H x fc head rest index k)
      (syntax-case #'head ()
-       [#s(hpat:describe _ description pattern)
+       [#s(hpat:describe _ description transparent? pattern)
         #`(let ([previous-fail enclosing-fail]
                 [previous-cut-fail enclosing-cut-fail])
             (define (new-fail failure)
               (fail x
-                    #:expect (expectation-of-thing description #f failure)
+                    #:expect (expectation-of-thing description transparent? failure)
                     #:fce fc))
             (with-enclosing-fail* new-fail
               (parse:H x #,(empty-frontier #'x) pattern
@@ -388,6 +393,22 @@
                           #'pattern
                           #'#s(internal-rest-pattern rest index index0))])
             #'(parse:S x fc pattern k)))]
+       [#s(hpat:optional (a ...) pattern defaults)
+        (with-syntax ([(#s(attr id _ _) ...) #'(a ...)]
+                      [index0 (frontier->index-expr (wash #'fc))])
+          #`(let ([success
+                   (lambda (rest index fail id ...)
+                     (with-enclosing-fail fail
+                       (let-attributes ([a id] ...) k)))])
+              (try (parse:H x fc pattern rest index
+                            (success rest index enclosing-fail (attribute id) ...))
+                   (let ([rest x]
+                         [index index0])
+                     (convert-sides x defaults
+                       (clause-success ()
+                         (disjunct/sides defaults success
+                                         (rest index enclosing-fail)
+                                         (id ...))))))))]
        [_
         (with-syntax ([attrs (pattern-attrs (wash #'head))]
                       [index0 (frontier->index-expr (wash #'fc))])
@@ -442,7 +463,7 @@
                                    #:fce loop-fc)]
                             ...
                             [else
-                             (let-attributes ([a (rep:finalize attr-repc alt-id)] ...)
+                             (let-attributes ([a (rep:finalize a attr-repc alt-id)] ...)
                                (parse:S dx loop-fc tail k))]))))
              (let ([rel-rep 0] ...
                    [alt-id (rep:initial-value attr-repc)] ...)
@@ -478,40 +499,68 @@
                                   #:fce #,(frontier:add-index (wash #'fc)
                                                               #'index))))]))]))
 
-;; (rep:finalize RepConstraint expr) : expr
-(define-syntax (rep:finalize stx)
-  (syntax-case stx ()
-    [(_ #s(rep:once _ _ _) v) #'v]
-    [(_ #s(rep:optional _ _) v) #'v]
-    [(_ _ v) #'(reverse v)]))
-
 ;; (rep:initial-value RepConstraint) : expr
 (define-syntax (rep:initial-value stx)
   (syntax-case stx ()
     [(_ #s(rep:once _ _ _)) #'#f]
-    [(_ #s(rep:optional _ _)) #'#f]
+    [(_ #s(rep:optional _ _ _)) #'#f]
     [(_ _) #'null]))
+
+;; (rep:finalize RepConstraint expr) : expr
+(define-syntax (rep:finalize stx)
+  (syntax-case stx ()
+    [(_ a #s(rep:optional _ _ defaults) v)
+     (with-syntax ([#s(attr name _ _) #'a]
+                   [(#s(clause:attr da de) ...) #'defaults])
+       (let ([default
+              (for/or ([da (syntax->list #'(da ...))]
+                       [de (syntax->list #'(de ...))])
+                (with-syntax ([#s(attr dname _ _) da])
+                  (and (bound-identifier=? #'name #'dname) de)))])
+         (if default
+             #`(or v #,default)
+             #'v)))]
+    [(_ a #s(rep:once _ _ _) v) #'v]
+    [(_ a _ v) #'(reverse v)]))
 
 ;; (rep:min-number RepConstraint) : expr
 (define-syntax (rep:min-number stx)
   (syntax-case stx ()
     [(_ #s(rep:once _ _ _)) #'1]
-    [(_ #s(rep:optional _ _)) #'0]
+    [(_ #s(rep:optional _ _ _)) #'0]
     [(_ #s(rep:bounds min max _ _ _)) #'min]))
 
 ;; (rep:max-number RepConstraint) : expr
 (define-syntax (rep:max-number stx)
   (syntax-case stx ()
     [(_ #s(rep:once _ _ _)) #'1]
-    [(_ #s(rep:optional _ _)) #'1]
+    [(_ #s(rep:optional _ _ _)) #'1]
     [(_ #s(rep:bounds min max _ _ _)) #'max]))
 
 ;; (rep:combine RepConstraint expr expr) : expr
 (define-syntax (rep:combine stx)
   (syntax-case stx ()
     [(_ #s(rep:once _ _ _) a b) #'a]
-    [(_ #s(rep:optional _ _) a b) #'a]
+    [(_ #s(rep:optional _ _ _) a b) #'a]
     [(_ _ a b) #'(cons a b)]))
+
+;; ----
+
+;; (expectation Pattern)
+(define-syntax (expectation stx)
+  (syntax-case stx ()
+    [(_ #s(pat:datum attrs datum))
+     #'(make-expect:atom 'datum)]
+    [(_ #s(pat:literal attrs literal))
+     #'(make-expect:literal (quote-syntax literal))]
+    ;; 2 pat:compound patterns
+    ;;[(_ #s(pat:compound attrs #:pair (head-pattern tail-pattern)))
+    ;; #'(make-expect:pair)]
+    [(_ #s(pat:compound attrs kind0 (part-pattern ...)))
+     #''ineffable]
+    [(_ #s(pat:fail _ condition message))
+     #'(expectation-of-message message)]
+    ))
 
 ;; ----
 
@@ -522,23 +571,11 @@
   (let ([msg message])
     (if msg (make-expect:message msg) 'ineffable)))
 
-(define-syntax-rule (expectation-of-constant constant)
-  (make-expect:atom 'constant))
-
-(define-syntax-rule (expectation-of-literal literal)
-  (make-expect:literal (quote-syntax literal)))
-
-(define-syntax expectation-of-compound
-  (syntax-rules ()
-    [(_ #:pair (head-pattern tail-pattern))
-     (make-expect:pair)]
-    [(_ _ _) 'ineffable]))
-
 (define-syntax expectation-of-reps/too-few
   (syntax-rules ()
     [(_ rep #s(rep:once name too-few-msg too-many-msg))
      (expectation-of-message/too-few too-few-msg name)]
-    [(_ rep #s(rep:optional name too-many-msg))
+    [(_ rep #s(rep:optional name too-many-msg _))
      (error 'impossible)]
     [(_ rep #s(rep:bounds min max name too-few-msg too-many-msg))
      (expectation-of-message/too-few too-few-msg name)]))
@@ -547,7 +584,7 @@
   (syntax-rules ()
     [(_ rep #s(rep:once name too-few-msg too-many-msg))
      (expectation-of-message/too-many too-many-msg name)]
-    [(_ rep #s(rep:optional name too-many-msg))
+    [(_ rep #s(rep:optional name too-many-msg _))
      (expectation-of-message/too-many too-many-msg name)]
     [(_ rep #s(rep:bounds min max name too-few-msg too-many-msg))
      (expectation-of-message/too-many too-many-msg name)]))

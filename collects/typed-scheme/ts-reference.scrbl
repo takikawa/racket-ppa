@@ -188,6 +188,12 @@ types.  In most cases, use of @scheme[:] is preferred to use of @scheme[define:]
 structure is a substructure of @scheme[parent].  When
 @scheme[maybe-type-vars] is present, the structure is polymorphic in the type
  variables @scheme[v].}
+                                 
+@defform/subs[
+(define-struct/exec: name-spec ([f : t] ...) [e : proc-t])
+([name-spec name (name parent)])]{
+ Like @scheme[define-struct:], but defines an procedural structure.  
+ The procdure @scheme[e] is used as the value for @scheme[prop:procedure], and must have type @scheme[proc-t].}
 
 @subsection{Type Aliases}
 @defform*[[(define-type-alias name t)
@@ -252,7 +258,8 @@ Scheme.
 @index["opaque"]{The fourth case} defines a new type @scheme[t].  @scheme[pred], imported from
 module @scheme[m], is a predicate for this type.  The type is defined
 as precisely those values to which @scheme[pred] produces
-@scheme[#t].  @scheme[pred] must have type @scheme[(Any -> Boolean)].
+@scheme[#t].  @scheme[pred] must have type @scheme[(Any -> Boolean)].  
+Opaque types must be required lexically before they are used.
 
 In all cases, the identifiers are protected with @rtech{contracts} which
 enforce the specified types.  If this contract fails, the module

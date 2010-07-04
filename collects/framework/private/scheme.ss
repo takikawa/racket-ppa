@@ -6,7 +6,7 @@
 (require string-constants
          scheme/class
          mred/mred-sig
-         syntax-color/scheme-lexer
+         syntax-color/module-lexer
          "collapsed-snipclass-helpers.ss"
          "sig.ss"
          "../gui-utils.ss"
@@ -43,11 +43,13 @@
     (let* ([end (or in-end (send text last-position))]
            [port (open-input-text-editor text start end)])
       (with-handlers ([exn:fail:read:eof? (λ (x) #f)]
-                      [exn:fail:read? (λ (x) #t)])
-        (let loop ()
-          (let ([s (read port)])
-            (or (eof-object? s)
-                (loop))))))))
+                      [exn:fail:read? (λ (x) #f)])
+        (let ([first (read port)])
+          (and (not (eof-object? first))
+               (let loop ()
+                 (let ([s (read port)])
+                   (or (eof-object? s)
+                       (loop))))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;                                                                  ;;
@@ -1172,14 +1174,14 @@
     (preferences:add-callback
      'framework:tabify
      (lambda (k v) (set! tabify-pref v)))
-    (define/private (scheme-lexer-wrapper in)
-      (let-values (((lexeme type paren start end) (scheme-lexer in)))
+    (define/private (scheme-lexer-wrapper in offset mode)
+      (let-values (((lexeme type paren start end backup-delta mode) (module-lexer in offset mode)))
         (cond
           ((and (eq? type 'symbol)
                 (get-keyword-type lexeme tabify-pref))
-           (values lexeme 'keyword paren start end))
+           (values lexeme 'keyword paren start end backup-delta mode))
           (else
-           (values lexeme type paren start end)))))
+           (values lexeme type paren start end backup-delta mode)))))
     
     (define/override (put-file text sup directory default-name)
       (parameterize ([finder:default-extension "ss"]
@@ -1188,7 +1190,7 @@
         ;; don't call the surrogate's super, since it sets the default extension
         (sup directory default-name)))
     
-    (super-new (get-token (lambda (in) (scheme-lexer-wrapper in)))
+    (super-new (get-token (lambda (in offset mode) (scheme-lexer-wrapper in offset mode)))
                (token-sym->style short-sym->style-name)
                (matches '((|(| |)|)
                           (|[| |]|)

@@ -1,9 +1,10 @@
 #lang scheme/base
 
-(require "../utils/utils.ss" stxclass
+(require "../utils/utils.ss" syntax/parse
          scheme/contract
          (rep type-rep)
-         (private type-annotation))
+         (private type-annotation)
+         (for-template scheme/base))
 
 (p/c [find-annotation (syntax? identifier? . -> . (or/c #f Type/c))])
 
@@ -53,7 +54,7 @@
       [c:lv-clause
        #:with (#%plain-app reverse n:id) #'c.e
        #:with (v) #'(c.v ...) 
-       #:when (free-identifier=? name #'n)
+       #:fail-unless (free-identifier=? name #'n) #f
        (type-annotation #'v)]
       [_ #f]))
   (syntax-parse stx
@@ -63,3 +64,6 @@
 	 (find #'body))]
     [e:core-expr
      (ormap find (syntax->list #'(e.expr ...)))]))
+
+; (require scheme/trace)
+; (trace find-annotation)

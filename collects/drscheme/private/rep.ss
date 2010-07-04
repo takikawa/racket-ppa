@@ -117,6 +117,7 @@ TODO
       
       run-in-evaluation-thread
       after-many-evals
+      on-execute
       
       shutdown
       
@@ -134,18 +135,22 @@ TODO
       
       reset-pretty-print-width
       
+      
+      
       get-prompt
       insert-prompt
       get-context))
+  
   
   (define context<%>
     (interface ()
       ensure-rep-shown   ;; (interactions-text -> void)
       ;; make the rep visible in the frame
       
-      needs-execution   ;; (-> boolean)
-      ;; ask if things have changed that would mean the repl is out
-      ;; of sync with the program being executed in it.
+      repl-submit-happened ;; (-> boolean)
+      ;; notify the context that an evaluation is about to
+      ;; happen in the REPL (so it can show a warning about
+      ;; the language/etc is out of sync if neccessary).
       
       enable-evaluation  ;; (-> void)
       ;; make the context enable all methods of evaluation
@@ -660,7 +665,7 @@ TODO
       ;; highlight-errors :    (listof srcloc)
       ;;                       (union #f (listof srcloc))
       ;;                    -> (void)
-      (define/public (highlight-errors raw-locs raw-error-arrows)
+      (define/public (highlight-errors raw-locs [raw-error-arrows #f])
         (let* ([cleanup-locs
                 (λ (locs)
                   (let ([ht (make-hasheq)])
@@ -857,7 +862,7 @@ TODO
       
       (field (user-language-settings #f)
              (user-custodian-parent #f)
-             (memory-killed-thread #f)
+             (memory-killed-cust-box #f)
              (user-custodian #f)
              (custodian-limit (and (custodian-memory-accounting-available?)
                                    (preferences:get 'drscheme:child-only-memory-limit)))
@@ -895,8 +900,7 @@ TODO
           (end-edit-sequence)
           (when locked? (lock #t))))
       
-      (field (already-warned? #f)
-             (show-no-user-evaluation-message? #t))
+      (field (show-no-user-evaluation-message? #t))
       
       ;; use this to be able to kill the evaluator without the popup dialog
       (define/public (set-show-no-user-evaluation-message? b)
@@ -911,7 +915,7 @@ TODO
             (no-user-evaluation-message
              (get-frame)
              user-exit-code
-             (not (thread-running? memory-killed-thread))))
+             (not (custodian-box-value memory-killed-cust-box))))
           (set! show-no-user-evaluation-message? #t)))
       
       (field (need-interaction-cleanup? #f))
@@ -959,9 +963,12 @@ TODO
         (send context enable-evaluation))
       
       (define/augment (submit-to-port? key)
-        (and prompt-position
-             (only-whitespace-after-insertion-point)
-             (submit-predicate this prompt-position)))
+        (or (eq? (send key get-key-code) 'numpad-enter)
+            (send key get-control-down)
+            (send key get-alt-down)
+            (and prompt-position
+                 (only-whitespace-after-insertion-point)
+                 (submit-predicate this prompt-position))))
       
       (define/private (only-whitespace-after-insertion-point)
         (let ([start (get-start-position)]
@@ -985,13 +992,7 @@ TODO
                  [lst (last old-regions)])
             (reset-regions (append abl (list (list (list-ref lst 0) (last-position))))))
           
-          (let ([needs-execution (send context needs-execution)])
-            (when (if (preferences:get 'drscheme:execute-warning-once)
-                      (and (not already-warned?)
-                           needs-execution)
-                      needs-execution)
-              (set! already-warned? #t)
-              (insert-warning needs-execution)))
+          (send context repl-submit-happened)
           
           ;; lets us know we are done with this one interaction
           ;; (since there may be multiple expressions at the prompt)
@@ -1142,6 +1143,10 @@ TODO
                 (cleanup-interaction)
                 (insert-prompt)))))))
       
+      ;; =User=, =Handler=
+      (define/pubment (on-execute rout) (inner (void) on-execute rout))
+      
+      ;; =Kernel=, =Handler=
       (define/pubment (after-many-evals) (inner (void) after-many-evals))
       
       (define/private shutdown-user-custodian ; =Kernel=, =Handler=
@@ -1201,9 +1206,7 @@ TODO
         (set! user-custodian-parent (make-custodian))
         (set! user-custodian (parameterize ([current-custodian user-custodian-parent])
                                (make-custodian)))
-        (set! memory-killed-thread 
-              (parameterize ([current-custodian user-custodian-parent])
-                (thread (λ () (semaphore-wait (make-semaphore 0))))))
+        (set! memory-killed-cust-box (make-custodian-box user-custodian-parent #t))
         (when custodian-limit
           (custodian-limit-memory user-custodian-parent 
                                   custodian-limit
@@ -1296,7 +1299,11 @@ TODO
             (send (drscheme:language-configuration:language-settings-language user-language-settings)
                   on-execute
                   (drscheme:language-configuration:language-settings-settings user-language-settings)
-                  (let ([run-on-user-thread (lambda (t) (queue-user/wait t))])
+                  (let ([run-on-user-thread (lambda (t) 
+                                              (queue-user/wait 
+                                               (λ ()
+                                                 (with-handlers ((exn? (λ (x) (printf "~s\n" (exn-message x)))))
+                                                   (t)))))])
                     run-on-user-thread))
             
             ;; setup the special repl values
@@ -1313,6 +1320,11 @@ TODO
                  (current-error-port)
                  "copied exn raised when setting up snip values (thunk passed as third argume to drscheme:language:add-snip-value)\n")
                 (raise exn)))
+            
+            ;; allow extensions to this class to do some setup work
+            (on-execute 
+             (let ([run-on-user-thread (lambda (t) (queue-user/wait t))])
+               run-on-user-thread))
             
             (parameterize ([current-eventspace user-eventspace])
               (queue-callback
@@ -1608,7 +1620,6 @@ TODO
         
         (set! setting-up-repl? #f)
         
-        (set! already-warned? #f)
         (reset-regions (list (list (last-position) (last-position))))
         (set-unread-start-point (last-position))
         (set-insertion-point (last-position))
@@ -1924,7 +1935,8 @@ TODO
                          (number? col))
                 (insert-file-name/icon src pos span line col))
               (insert/delta text (format "~a" (exn-message exn)) error-delta)
-              (when (syntax? expr)
+              (when (and (error-print-source-location)
+                         (syntax? expr))
                 (insert/delta text " in: ")
                 (insert/delta text (format "~s" (syntax->datum expr)) error-text-style-delta))
               (insert/delta text "\n")

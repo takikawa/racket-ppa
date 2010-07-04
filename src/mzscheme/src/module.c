@@ -132,6 +132,7 @@ static Scheme_Object *kernel_modname;
 static Scheme_Object *kernel_symbol;
 static Scheme_Object *kernel_modidx;
 static Scheme_Module *kernel;
+static Scheme_Object *unsafe_modname;
 
 /* global read-only symbols */
 static Scheme_Object *module_symbol;
@@ -328,12 +329,14 @@ void scheme_init_module(Scheme_Env *env)
   REGISTER_SO(kernel_symbol);
   REGISTER_SO(kernel_modname);
   REGISTER_SO(kernel_modidx);
+  REGISTER_SO(unsafe_modname);
   kernel_symbol = scheme_intern_symbol("#%kernel");
   kernel_modname = scheme_intern_resolved_module_path(kernel_symbol);
   kernel_modidx = scheme_make_modidx(scheme_make_pair(quote_symbol,
                                                       scheme_make_pair(kernel_symbol, 
                                                                        scheme_null)),
                                      scheme_false, kernel_modname);
+  unsafe_modname = scheme_intern_resolved_module_path(scheme_intern_symbol("#%unsafe"));
 
   REGISTER_SO(module_symbol);
   REGISTER_SO(module_begin_symbol);
@@ -578,6 +581,17 @@ void scheme_finish_kernel(Scheme_Env *env)
 int scheme_is_kernel_modname(Scheme_Object *modname)
 {
   return SAME_OBJ(modname, kernel_modname);
+}
+
+int scheme_is_unsafe_modname(Scheme_Object *modname)
+{
+  return SAME_OBJ(modname, unsafe_modname);
+}
+
+static int is_builtin_modname(Scheme_Object *modname) 
+{
+  return (SAME_OBJ(modname, kernel_modname)
+          || SAME_OBJ(modname, unsafe_modname));
 }
 
 Scheme_Object *scheme_sys_wraps(Scheme_Comp_Env *env)
@@ -830,8 +844,11 @@ static Scheme_Object *_dynamic_require(int argc, Scheme_Object *argv[],
 		: "dynamic-require-for-syntax" )
 	     : "dynamic-require");
 
-  if (SCHEME_TRUEP(name) && !SCHEME_SYMBOLP(name) && !SCHEME_VOIDP(name)) {
-    scheme_wrong_type(errname, "symbol, #f, or void", 1, argc, argv);
+  if (SCHEME_TRUEP(name) 
+      && !SCHEME_SYMBOLP(name) 
+      && !SAME_OBJ(name, scheme_make_integer(0))
+      && !SCHEME_VOIDP(name)) {
+    scheme_wrong_type(errname, "symbol, #f, 0, or void", 1, argc, argv);
     return NULL;
   }
 
@@ -977,10 +994,17 @@ static Scheme_Object *_dynamic_require(int argc, Scheme_Object *argv[],
     }
   }
 
-  if (SCHEME_VOIDP(name))
-    start_module(m, env, 0, modidx, 1, 0, base_phase, scheme_null);
-  else
-    start_module(m, env, 0, modidx, 0, 1, base_phase, scheme_null);
+  start_module(m, env, 0, modidx, 
+               (SCHEME_VOIDP(name)
+                ? 1
+                : (SAME_OBJ(name, scheme_make_integer(0)) 
+                   ? -1
+                   : 0)), 
+               (SCHEME_VOIDP(name)
+                ? 0
+                : 1),
+               base_phase, 
+               scheme_null);
 
   if (SCHEME_SYMBOLP(name)) {
     Scheme_Bucket *b;
@@ -1284,7 +1308,7 @@ static Scheme_Object *namespace_attach_module(int argc, Scheme_Object *argv[])
         scheme_signal_error("internal error: module not in `checked' table");
       }
 
-      if (!SAME_OBJ(name, kernel_modname)) {
+      if (!is_builtin_modname(name)) {
 	LOG_ATTACH(printf("Check %d %s\n", phase, scheme_write_to_string(name, 0)));
 
 	menv = (Scheme_Env *)scheme_hash_get(MODCHAIN_TABLE(from_modchain), name);
@@ -1530,7 +1554,7 @@ static Scheme_Object *namespace_attach_module(int argc, Scheme_Object *argv[])
     name = SCHEME_CAR(nophase_todo);
     nophase_todo = SCHEME_CDR(nophase_todo);      
 
-    if (!SAME_OBJ(name, kernel_modname)) {
+    if (!is_builtin_modname(name)) {
       int i;
 
       menv = (Scheme_Env *)scheme_hash_get(MODCHAIN_TABLE(from_env->label_env->modchain), name);
@@ -1613,7 +1637,7 @@ static Scheme_Object *namespace_attach_module(int argc, Scheme_Object *argv[])
       if (ht->vals[i]) {
         name = ht->keys[i];
         
-        if (!SAME_OBJ(name, kernel_modname)) {
+        if (!is_builtin_modname(name)) {
 
           LOG_ATTACH(printf("Copying no-phase %s\n", scheme_write_to_string(name, NULL)));
           
@@ -1669,7 +1693,7 @@ static Scheme_Object *namespace_attach_module(int argc, Scheme_Object *argv[])
 	name = checked->keys[i];
         just_declare = SCHEME_FALSEP(checked->vals[i]);
 
-	if (!SAME_OBJ(name, kernel_modname)) {
+	if (!is_builtin_modname(name)) {
 	  menv = (Scheme_Env *)scheme_hash_get(MODCHAIN_TABLE(from_modchain), name);
 	  
 	  LOG_ATTACH(printf("Copy %d %s\n", phase, scheme_write_to_string(name, 0)));
@@ -1757,7 +1781,10 @@ static Scheme_Object *namespace_unprotect_module(int argc, Scheme_Object *argv[]
   code_insp = scheme_get_param(scheme_current_config(), MZCONFIG_CODE_INSPECTOR);
 
   if (!SAME_OBJ(name, kernel_modname)) {
-    menv2 = (Scheme_Env *)scheme_hash_get(MODCHAIN_TABLE(to_modchain), name);
+    if (SAME_OBJ(name, unsafe_modname))
+      menv2 = scheme_get_unsafe_env();
+    else
+      menv2 = (Scheme_Env *)scheme_hash_get(MODCHAIN_TABLE(to_modchain), name);
 
     if (!menv2) {
       scheme_arg_mismatch("namespace-unprotect-module",
@@ -2413,6 +2440,8 @@ void scheme_prep_namespace_rename(Scheme_Env *menv)
               
               if (SAME_OBJ(name, kernel_modname))
                 im = kernel;
+              else if (SAME_OBJ(name, unsafe_modname))
+                im = scheme_get_unsafe_env()->module;
               else
                 im = (Scheme_Module *)scheme_hash_get(menv->module_registry, name);
               
@@ -2805,6 +2834,8 @@ static Scheme_Object *module_export_protected_p(int argc, Scheme_Object **argv)
   env = scheme_get_env(NULL);
   if (SAME_OBJ(modname, kernel_modname))
     mv = (Scheme_Object *)kernel;
+  else if (SAME_OBJ(modname, unsafe_modname))
+    mv = (Scheme_Object *)scheme_get_unsafe_env()->module;
   else
     mv = scheme_hash_get(env->module_registry, modname);
   if (!mv) {
@@ -3096,6 +3127,8 @@ static Scheme_Module *module_load(Scheme_Object *name, Scheme_Env *env, const ch
 {
   if (name == kernel_modname)
     return kernel;
+  else if (name == unsafe_modname)
+    return scheme_get_unsafe_env()->module;
   else {
     Scheme_Module *m;
 
@@ -3178,6 +3211,8 @@ Scheme_Env *scheme_module_access(Scheme_Object *name, Scheme_Env *env, int rev_m
 {
   if ((name == kernel_modname) && !rev_mod_phase)
     return scheme_get_kernel_env();
+  else if ((name == unsafe_modname) && !rev_mod_phase)
+    return scheme_get_unsafe_env();
   else {
     Scheme_Object *chain;
     Scheme_Env *menv;
@@ -3480,12 +3515,43 @@ Scheme_Object *scheme_check_accessible_in_module(Scheme_Env *env, Scheme_Object 
   return NULL;
 }
 
+void scheme_check_unsafe_accessible(Scheme_Object *insp, Scheme_Env *from_env)
+{
+  Scheme_Env *unsafe_env;
+
+  unsafe_env = scheme_get_unsafe_env();
+
+  if (SCHEME_HASHTRP(insp)) {
+    Scheme_Hash_Tree *t = (Scheme_Hash_Tree *)insp;
+    int i;
+    Scheme_Object *k, *v;
+
+    for (i = t->count; i--; ) {
+      scheme_hash_tree_index(t, i, &k, &v);
+      insp = k;
+      if (scheme_module_protected_wrt(unsafe_env->insp, insp)) {
+        break;
+      }
+    }
+
+    if (i < 0)
+      return;
+  }
+
+  if (scheme_module_protected_wrt(unsafe_env->insp, insp)) {
+    scheme_wrong_syntax("link", 
+                        NULL, NULL, 
+                        "attempt to access unsafe bindings from an untrusted context");
+  }
+}
+
 int scheme_module_export_position(Scheme_Object *modname, Scheme_Env *env, Scheme_Object *varname)
 {
   Scheme_Module *m;
   Scheme_Object *pos;
 
-  if (modname == kernel_modname)
+  if (SAME_OBJ(modname, kernel_modname)
+      || SAME_OBJ(modname, unsafe_modname))
     return -1;
 
   m = module_load(modname, env, NULL);
@@ -3504,11 +3570,14 @@ int scheme_module_export_position(Scheme_Object *modname, Scheme_Env *env, Schem
 
 Scheme_Object *scheme_module_syntax(Scheme_Object *modname, Scheme_Env *env, Scheme_Object *name)
 {
-  if (modname == kernel_modname) {
+  if (SAME_OBJ(modname, kernel_modname)) {
     Scheme_Env *kenv;
     kenv = scheme_get_kernel_env();
     name = SCHEME_STX_SYM(name);
     return scheme_lookup_in_table(kenv->syntax, (char *)name);
+  } else if (SAME_OBJ(modname, unsafe_modname)) {
+    /* no unsafe syntax */
+    return NULL;
   } else {
     Scheme_Env *menv;
     Scheme_Object *val;
@@ -4007,12 +4076,13 @@ static void should_run_for_compile(Scheme_Env *menv)
 static void start_module(Scheme_Module *m, Scheme_Env *env, int restart, 
 			 Scheme_Object *syntax_idx, int eval_exp, int eval_run, long base_phase,
 			 Scheme_Object *cycle_list)
+/* eval_exp == -1 => make it ready, eval_exp == 1 => run exp-time, eval_exp = 0 => don't even make ready */
 {
   Scheme_Env *menv;
   Scheme_Object *l, *new_cycle_list;
   int prep_namespace = 0;
 
-  if (SAME_OBJ(m, kernel))
+  if (is_builtin_modname(m->modname))
     return;
 
   for (l = cycle_list; !SCHEME_NULLP(l); l = SCHEME_CDR(l)) {
@@ -4404,6 +4474,12 @@ Scheme_Object *scheme_builtin_value(const char *name)
   if (v)
     return v;
 
+  /* Try unsafe next: */
+  a[0] = unsafe_modname;
+  v = _dynamic_require(2, a, scheme_get_env(NULL), 0, 0, 0, 0, 0, -1);
+  if (v)
+    return v;
+
   /* Also try #%utils... */
   a[0] = scheme_make_pair(quote_symbol,
                           scheme_make_pair(scheme_intern_symbol("#%utils"),
@@ -4706,6 +4782,8 @@ module_execute(Scheme_Object *data)
 
   if (SAME_OBJ(m->modname, kernel_modname))
     old_menv = scheme_get_kernel_env();
+  else if (SAME_OBJ(m->modname, unsafe_modname))
+    old_menv = scheme_get_unsafe_env();
   else
     old_menv = (Scheme_Env *)scheme_hash_get(MODCHAIN_TABLE(env->modchain), m->modname);
 
@@ -5296,7 +5374,7 @@ static Scheme_Object *do_module(Scheme_Object *form, Scheme_Comp_Env *env,
   Scheme_Module *m;
   Scheme_Object *mbval, *orig_ii;
   int saw_mb, check_mb = 0;
-  int restore_confusing_name = 0;
+  Scheme_Object *restore_confusing_name = NULL;
   LOG_EXPAND_DECLS;
 
   if (!scheme_is_toplevel(env))
@@ -5324,12 +5402,18 @@ static Scheme_Object *do_module(Scheme_Object *form, Scheme_Comp_Env *env,
 
   LOG_START_EXPAND(m);
 
-  if (SAME_OBJ(m->modname, kernel_modname)) {
+  if (SAME_OBJ(m->modname, kernel_modname)
+      || SAME_OBJ(m->modname, unsafe_modname)) {
     /* Too confusing. Give it a different name while compiling. */
     Scheme_Object *k2;
-    k2 = scheme_intern_resolved_module_path(scheme_make_symbol("#%kernel")); /* uninterned! */
+    const char *kname;
+    if (SAME_OBJ(m->modname, kernel_modname))
+      kname = "#%kernel";
+    else
+      kname = "#%unsafe";
+    k2 = scheme_intern_resolved_module_path(scheme_make_symbol(kname)); /* uninterned! */
+    restore_confusing_name = m->modname;
     m->modname = k2;
-    restore_confusing_name = 1;
   }
 
   {
@@ -5481,7 +5565,7 @@ static Scheme_Object *do_module(Scheme_Object *form, Scheme_Comp_Env *env,
     }
 
     if (restore_confusing_name)
-      m->modname = kernel_modname;
+      m->modname = restore_confusing_name;
 
     m->ii_src = NULL;
 
@@ -8659,6 +8743,8 @@ void scheme_do_module_rename_unmarshal(Scheme_Object *rn, Scheme_Object *info,
 
   if (SAME_OBJ(kernel_modname, name)) {
     me = kernel->me;
+  } else if (SAME_OBJ(unsafe_modname, name)) {
+    me = scheme_get_unsafe_env()->module->me;
   } else {
     if (!export_registry) {
       env = scheme_get_env(scheme_current_config());

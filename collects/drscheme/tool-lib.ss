@@ -1,5 +1,4 @@
-#reader scribble/reader
-#lang scheme/base
+#lang at-exp scheme/base
 
 #|
 
@@ -26,6 +25,8 @@ all of the names in the tools library, for use defining keybindings
 (require (for-syntax scheme/base))
 
 (require/doc drscheme/private/ts scheme/base scribble/manual)
+
+(require/doc (for-label errortrace/errortrace-key))
 
 (shutdown-splash)
 (define-values/invoke-unit/infer drscheme@)
@@ -297,17 +298,26 @@ all of the names in the tools library, for use defining keybindings
   (proc-doc/names
    drscheme:debug:error-display-handler/stacktrace
    (->* (string? any/c)
-        ((or/c false/c (listof srcloc?)))
-        any)
-   ((msg exn) ((stack #f)))
+        ((or/c false/c (listof srcloc?))
+         #:definitions-text (or/c #f (is-a?/c drscheme:unit:definitions-text<%>))
+         #:interactions-text (or/c #f (is-a?/c drscheme:rep:text<%>))
+         )
+        any/c)
+   ((msg exn) ((stack #f)
+               (defs #f)
+               (ints #f)))
    @{Displays the error message represented by the string, adding
      embellishments like those that appears in the DrScheme REPL,
      specifically a clickable icon for the stack trace (if the srcloc location is not empty),
      and a clickable icon for the source of the error (read & syntax errors show their source
      locations and otherwise the first place in the stack trace is shown).
                                       
-     If @scheme[stack] is false, then the stack trace embedded in the @scheme[exn] argument (if any) is used.
-                                                                         
+     If @scheme[stack] is false, then the stack traces embedded in the @scheme[exn] argument (if any) are used.
+     Specifically, this function looks for a stacktrace via
+     @scheme[errortrace-key] in the continuation marks of @scheme[exn] and @scheme[continuation-mark-set->context].
+
+     If @scheme[stack] is not false, that stack is added to the stacks already in the exception.
+     
      This should be called in the same eventspace and on the same thread as the error.})
   
   (proc-doc/names
@@ -320,9 +330,6 @@ all of the names in the tools library, for use defining keybindings
    @{This function implements an error-display-handler in terms
      of another error-display-handler.
      
-     This function is designed to work in conjunction with
-     @scheme[drscheme:debug:make-debug-eval-handler].
-     
      See also MzScheme's
      @scheme[error-display-handler]
      parameter.
@@ -330,49 +337,21 @@ all of the names in the tools library, for use defining keybindings
      If the current-error-port is the definitions window in
      drscheme, this error handler inserts some debugging
      annotations, calls @scheme[oedh], and then highlights the
-     source location of the runtime error.})
-  
-  (proc-doc/names
-   drscheme:debug:make-debug-eval-handler
-   ((any/c . -> . any/c)
-    . -> .
-    (any/c . -> . any/c))
-   
-   (odeh)
-   
-   @{This function implements an eval-handler in terms of another
-     eval-handler.
+     source location of the runtime error.
      
-     This function is designed to work in conjunction with
-     @scheme[drscheme:debug:make-debug-error-display-handler].
+     It looks for both stack trace information in the continuation
+     marks both via the
+     @schememodname[errortrace/errortrace-key] 
+     module and via 
+     @scheme[continuation-mark-set->context].
      
-     See also MzScheme's @scheme[eval-handler]
-     parameter. 
-     
-     The resulting eval-handler expands and annotates the input
-     expression and then passes it to the input eval-handler,
-     unless the input expression is already compiled, in which
-     case it just hands it directly to the input eval-handler.})
+     })
   
   (proc-doc/names
    drscheme:debug:hide-backtrace-window
    (-> void?)
    ()
    @{Hides the backtrace window.})
-  
-  
-  (proc-doc/names
-   drscheme:debug:profiling-enabled
-   (case-> (boolean? . -> . void?)
-           (-> boolean?))
-   ((enabled?) ())
-   @{A parameter that controls if profiling information is recorded.
-     
-     Defaults to @scheme[#f].
-     
-     Only applies if
-     @scheme[drscheme:debug:make-debug-eval-handler]
-     has been added to the eval handler.})
   
   (proc-doc/names
    drscheme:debug:add-prefs-panel
@@ -382,39 +361,103 @@ all of the names in the tools library, for use defining keybindings
   
   (proc-doc/names
    drscheme:debug:open-and-highlight-in-file
-   ((or/c srcloc? (listof srcloc?)) . -> . void?)
-   (debug-info)
+   (->* ((or/c srcloc? (listof srcloc?)))
+        ((or/c #f (cons/c (λ (x) (and (weak-box? x)
+                                      (let ([v (weak-box-value x)])
+                                        (or (not v)
+                                            (is-a?/c v editor<%>)))))
+                          number?)))
+       void?)
+   ((debug-info)
+    ((edition-pair #f)))
    @{This function opens a DrScheme to display
      @scheme[debug-info]. Only the src the position
      and the span fields of the srcloc are considered.
      
-     See also
-     @scheme[drscheme:debug:get-cm-key].})
+     The @scheme[edition-pair] is used to determine if a
+     warning message is shown when before opening the file.
+     If the @scheme[edition-pair] is not @scheme[#f], it is compared
+     with the result of @method[text:basic<%> get-edition-number]
+     of the editor that is loaded to determine if the file has been
+     edited since the source location was recorded. If so, it 
+     puts up a warning dialog message to that effect.})
   
   (proc-doc/names
-   drscheme:debug:show-backtrace-window
-   (string?
-    (or/c exn? (listof srcloc?))
-    . -> .
-    void?)
-   (error-message dis)
+   drscheme:debug:show-backtrace-window/edition-pairs
+   (-> string?
+       (listof srcloc?)
+       (listof (or/c #f (cons/c (λ (x) (and (weak-box? x)
+                                            (let ([v (weak-box-value x)])
+                                              (or (not v)
+                                                  (is-a?/c v editor<%>)))))
+                                number?)))
+       (or/c #f (is-a?/c drscheme:unit:definitions-text<%>))
+       (or/c #f (is-a?/c drscheme:rep:text<%>))
+       void?)
+   (error-message dis editions-pairs defs ints)
    @{Shows the backtrace window you get when clicking on the bug in
      DrScheme's REPL.
      
      The @scheme[error-message] argument is the text of the error,
      @scheme[dis] is the debug information, extracted from the
      continuation mark in the exception record, using
-     @scheme[drscheme:debug:get-cm-key].})
+     @scheme[errortrace-key].
+
+     The @scheme[editions] argument indicates the editions of any editors
+     that are open editing the files corresponding to the source locations
+     
+     The @scheme[defs] argument should be non-@scheme[#f] if there are 
+     possibly stacktrace frames that contain unsaved versions of the 
+     definitions window from drscheme. Similarly, the @scheme[ints] argument
+     should be non-@scheme[#f] if there are possibly stacktrace frames that contain
+     unsaved versions of the interactions window.
+ 
+     Use
+     @scheme[drscheme:rep:current-rep] to get the rep during evaluation of a program.
+     
+     })
   
   (proc-doc/names
-   drscheme:debug:get-cm-key
-   (-> any)
-   ()
-   @{Returns a key used with @scheme[contination-mark-set->list].
-     The contination mark set attached to an exception record
-     for the user's program may use this mark. If it does,
-     each mark on the continuation is a list of the fields
-     of a srcloc object.})
+   drscheme:debug:show-backtrace-window
+   (->* (string?
+         (or/c exn? 
+               (listof srcloc?)
+               (non-empty-listof (cons/c string? (listof srcloc?)))))
+        ((or/c #f (is-a?/c drscheme:rep:text<%>))
+         (or/c #f (is-a?/c drscheme:unit:definitions-text<%>)))
+        void?)
+   ((error-message dis)
+    ((rep #f)
+     (defs #f)))
+   @{Shows the backtrace window you get when clicking on the bug in
+     DrScheme's REPL.
+     
+     This function simply calls @scheme[drscheme:debug:show-backtrace-window/edition-pairs],
+     using @scheme[drscheme:debug:srcloc->edition/pair].
+     })
+  
+  (proc-doc/names
+   drscheme:debug:srcloc->edition/pair
+   (-> srcloc?
+       (or/c #f (is-a?/c drscheme:rep:text<%>))
+       (or/c #f (is-a?/c drscheme:unit:definitions-text<%>))
+       (or/c #f (cons/c (let ([weak-box-containing-an-editor?
+                               (λ (x) (and (weak-box? x)
+                                           (let ([v (weak-box-value x)])
+                                             (or (not v)
+                                                 (is-a?/c v editor<%>)))))])
+                          weak-box-containing-an-editor?)
+                        number?)))
+   (srcloc ints defs)
+   @{Constructs a edition pair from a source location,
+     returning the current edition of the editor editing
+     the source location (if any).
+     
+     The @scheme[ints] and @scheme[defs] arguments are used to map source locations, 
+     in the case that the source location corresponds to the definitions
+     window (when it has not been saved) or the interactions window.
+     })
+ 
   
   ;                           
   ;                           

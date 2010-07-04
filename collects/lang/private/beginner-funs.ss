@@ -1,5 +1,5 @@
 
-(module beginner-funs mzscheme
+(module beginner-funs scheme
   (require mzlib/etc mzlib/list mzlib/math syntax/docprovide)
 
   ;; Implements the procedures:
@@ -277,6 +277,8 @@
 	"to extract the indexed item from the list")
     
       (list (any ... -> (listof any)) "to construct a list of its arguments")
+      
+      (make-list (natural-number any -> (listof any)) "(make-list k x) constructs a list of k copies of x")
 
       ((beginner-list* list*) (any ... (listof any) -> (listof any)) 
        "to construct a list by adding multiple items to a list")
@@ -370,7 +372,7 @@
       
       ((beginner-string-ith string-ith) (string nat -> string)
         "to extract the ith 1-letter substring from the given one")
-      ((beginner-replicate replicate) (string nat -> string)
+      ((beginner-replicate replicate) (nat string -> string)
         "to replicate the given string")
       ((beginner-int->string int->string) (integer -> string)
         "to convert an integer in [0,55295] or [57344 1114111] to a 1-letter string")

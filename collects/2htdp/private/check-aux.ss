@@ -1,8 +1,7 @@
 #lang scheme
 
 (require htdp/image
-         htdp/error
-         (only-in lang/htdp-beginner image?))
+         htdp/error)
 
 (provide (all-defined-out))
 
@@ -124,6 +123,24 @@
           (read-line in) ;; read the newline 
           x))))
 
+(define REGISTER '***register***)
+(define OKAY '***okay***)
+
+;; InPort OutPort (X -> Y) -> (U Y Void)
+;; process a registration from a potential client, invoke k if it is okay
+(define (tcp-process-registration in out k)
+  (define next (tcp-receive in))
+  (when (and (pair? next) (eq? REGISTER (car next))) 
+    (tcp-send out OKAY)
+    (k (cdr next))))
+  
+
+;; InPort OutPort (U #f String) -> Void 
+;; register with the server 
+(define (tcp-register in out name)
+  (tcp-send out `(,REGISTER ,(if name name (symbol->string (gensym 'world)))))
+  (unless (eq? (tcp-receive in) OKAY) (raise tcp-eof)))
+
 ;                                                   
 ;                                                   
 ;                                                   
@@ -166,12 +183,6 @@
 
 (define (image-pins i)
   (format "image with pinhole at (~s,~s)" (pinhole-x i) (pinhole-y i)))
-
-
-;; Symbol Any String -> Void
-(define (check-color tag width rank)
-  (check-arg tag (or (symbol? width) (string? width)) 
-             "color symbol or string" rank width))
 
 ;; Symbol (union Symbol String) Nat -> Void
 (define (check-mode tag s rank)

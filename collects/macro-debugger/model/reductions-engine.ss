@@ -1,6 +1,6 @@
 #lang scheme/base
 (require (for-syntax scheme/base)
-         (for-syntax stxclass)
+         (for-syntax syntax/parse)
          scheme/list
          scheme/contract
          "deriv.ss"
@@ -12,7 +12,10 @@
 (provide (all-from-out "steps.ss")
          (all-from-out "reductions-config.ss")
          DEBUG
-         R)
+         R
+         !)
+
+(define-syntax ! (syntax-rules ()))
 
 (define-syntax-rule (with-syntax1 ([pattern rhs]) . body)
   (syntax-case rhs ()
@@ -21,9 +24,6 @@
                            (format "failed pattern match against ~s"
                                    'pattern)
                            #'x)]))
-
-(begin-for-syntax
- (expr/c-use-contracts? #f))
 
 (define-syntax-rule (DEBUG form ...)
   (when #f
@@ -324,7 +324,7 @@
                          #t))]
 
     [(R** f v p s ws [#:with-visible-form clause ...] . more)
-     #'(let ([k (RP p [#:set-syntax f] . more)])
+     #'(let ([k (RP p #| [#:set-syntax f] |# . more)])
          (if (visibility)
              (R** v v p s ws clause ... => k)
              (k f v s ws)))]

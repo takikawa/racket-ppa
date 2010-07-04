@@ -3,8 +3,13 @@
 (require (rename-in "../utils/utils.ss" [infer r:infer])
          "signatures.ss" "tc-metafunctions.ss"
          "tc-app-helper.ss" "find-annotation.ss"
-         stxclass scheme/match mzlib/trace scheme/list
-         (for-syntax stxclass scheme/base)
+         syntax/parse scheme/match mzlib/trace scheme/list 
+         ;; fixme - don't need to be bound in this phase - only to make syntax/parse happy
+         scheme/bool
+         (only-in scheme/private/class-internal make-object do-make-object)
+         (only-in '#%kernel [apply k:apply])
+         ;; end fixme
+         (for-syntax syntax/parse scheme/base (utils tc-utils))
          (private type-annotation)
          (types utils abbrev union subtype resolve convenience)
          (utils tc-utils)
@@ -14,7 +19,7 @@
          (r:infer infer)
          (for-template 
           (only-in '#%kernel [apply k:apply])
-          "internal-forms.ss" scheme/base 
+          "internal-forms.ss" scheme/base scheme/bool
           (only-in scheme/private/class-internal make-object do-make-object)))
 
 (import tc-expr^ tc-lambda^ tc-dots^ tc-let^)
@@ -138,17 +143,18 @@
 
 (define (let-loop-check form lp actuals args body expected)
   (syntax-parse #`(#,args #,body #,actuals) 
-    #:literals (#%plain-app if null?)
+    #:literals (#%plain-app if null? pair?)
     [((val acc ...)
-      ((if (#%plain-app null? val*) thn els))
+      ((~and inner-body (if (#%plain-app (~or pair? null?) val*) thn els)))
       (actual actuals ...))
+     #:fail-unless
      (and (free-identifier=? #'val #'val*)
-          (ormap (lambda (a) (find-annotation #'(if (#%plain-app null? val*) thn els) a))
-                 (syntax->list #'(acc ...))))
+          (ormap (lambda (a) (find-annotation #'inner-body a))
+                 (syntax->list #'(acc ...)))) #f
      (let* ([ts1 (generalize (tc-expr/t #'actual))]
             [ann-ts (for/list ([a (in-syntax #'(acc ...))]
                                [ac (in-syntax #'(actuals ...))])
-                      (or (find-annotation #'(if (#%plain-app null? val*) thn els) a)
+                      (or (find-annotation #'inner-body a)
                           (generalize (tc-expr/t ac))))]
             [ts (cons ts1 ann-ts)])
        ;; check that the actual arguments are ok here
@@ -159,7 +165,7 @@
        (tc/rec-lambda/check form args body lp ts expected)
        expected)]
     ;; special case when argument needs inference
-    [_
+    [_     
      (let ([ts (for/list ([ac (syntax->list actuals)]
                           [f (syntax->list args)])
                  (or 
@@ -172,7 +178,8 @@
   (define (do-ret t)
     (match t 
       [(Values: (list (Result: ts _ _) ...)) (ret ts)]
-      [(ValuesDots: (list (Result: ts _ _) ...) dty dbound) (ret ts (for/list ([t ts]) (-FS null null)) (for/list ([t ts]) (make-Empty)) dty dbound)]))
+      [(ValuesDots: (list (Result: ts _ _) ...) dty dbound) (ret ts (for/list ([t ts]) (-FS null null)) (for/list ([t ts]) (make-Empty)) dty dbound)]
+      [_ (int-err "do-ret fails: ~a" t)]))
   (define f-ty (single-value f))
   ;; produces the first n-1 elements of the list, and the last element
   (define (split l) (let-values ([(f r) (split-at l (sub1 (length l)))])
@@ -416,11 +423,13 @@
             (ret ts fs os))])]
     ;; special case for keywords
     [(#%plain-app
-      (#%plain-app kpe kws num fn)
+      (#%plain-app cpce s-kp fn kpe kws num)      
       kw-list
       (#%plain-app list . kw-arg-list)
       . pos-args)
-     #:declare kpe (id-from 'keyword-procedure-extract 'scheme/private/kw)
+     #:declare cpce (id-from 'checked-procedure-check-and-extract 'scheme/private/kw)
+     #:declare s-kp (id-from 'struct:keyword-procedure 'scheme/private/kw)
+     #:declare kpe  (id-from 'keyword-procedure-extract 'scheme/private/kw)
      (match (tc-expr #'fn)
        [(tc-result1: (Function: arities)) 
         (tc-keywords form arities (type->list (tc-expr/t #'kws)) #'kw-arg-list #'pos-args expected)]
@@ -428,9 +437,9 @@
                                        "Cannot apply expression of type ~a, since it is not a function type" t)])]
     ;; even more special case for match
     [(#%plain-app (letrec-values ([(lp) (#%plain-lambda args . body)]) lp*) . actuals)
-     #:when expected 
-     #:when (not (andmap type-annotation (syntax->list #'args)))
-     #:when (free-identifier=? #'lp #'lp*)
+     #:fail-unless expected #f 
+     #:fail-unless (not (andmap type-annotation (syntax->list #'args))) #f
+     #:fail-unless (free-identifier=? #'lp #'lp*) #f
      (let-loop-check form #'lp #'actuals #'args #'body expected)]
     ;; special cases for classes
     [(#%plain-app make-object cl . args)     
@@ -439,11 +448,11 @@
      (check-do-make-object #'cl #'pos-args #'(names ...) #'(named-args ...))]
     ;; ormap/andmap of ... argument
     [(#%plain-app or/andmap:id f arg)
-     #:when (or (free-identifier=? #'or/andmap #'ormap)
-                (free-identifier=? #'or/andmap #'andmap))
-     #:when (with-handlers ([exn:fail? (lambda _ #f)])
-              (tc/dots #'arg)
-              #t)
+     #:fail-unless (or (free-identifier=? #'or/andmap #'ormap)
+                       (free-identifier=? #'or/andmap #'andmap)) #f
+     #:fail-unless (with-handlers ([exn:fail? (lambda _ #f)])
+                     (tc/dots #'arg)
+                     #t) #f
      (let-values ([(ty bound) (tc/dots #'arg)])
        (parameterize ([current-tvars (extend-env (list bound)
                                                  (list (make-DottedBoth (make-F bound)))
@@ -461,8 +470,28 @@
      (ret (-Promise (tc-expr/t #'e)))]
     ;; special case for `list'
     [(#%plain-app list . args)
-     (let ([tys (map tc-expr/t (syntax->list #'args))])
-       (ret (apply -lst* tys)))]
+     (begin
+       ;(printf "calling list: ~a ~a~n" (syntax->datum #'args) (Type? expected))
+       (match expected
+         [(tc-result1: (Mu: var (Union: (or 
+                                         (list (Pair: elem-ty (F: var)) (Value: '()))
+                                         (list (Value: '()) (Pair: elem-ty (F: var)))))))
+          ;(printf "special case 1 ~a~n" elem-ty)
+          (for ([i (in-list (syntax->list #'args))])
+               (tc-expr/check i (ret elem-ty)))
+          expected]
+         [(tc-result1: (app untuple (? (lambda (ts) (and ts (= (length (syntax->list #'args))
+                                                               (length ts))))
+                                       ts)))    
+          ;(printf "special case 2 ~a~n" ts)
+          (for ([ac (in-list (syntax->list #'args))]
+                [exp (in-list ts)])
+               (tc-expr/check ac (ret exp)))
+          expected]
+         [_
+          ;(printf "not special case~n")
+          (let ([tys (map tc-expr/t (syntax->list #'args))])
+            (ret (apply -lst* tys)))]))]
     ;; special case for `list*'
     [(#%plain-app list* . args)
      (match-let* ([(list last tys-r ...) (reverse (map tc-expr/t (syntax->list #'args)))]
@@ -470,18 +499,18 @@
        (ret (foldr make-Pair last tys)))]
     ;; inference for ((lambda
     [(#%plain-app (#%plain-lambda (x ...) . body) args ...)
-     #:when (= (length (syntax->list #'(x ...)))
-               (length (syntax->list #'(args ...))))
+     #:fail-unless (= (length (syntax->list #'(x ...)))
+                      (length (syntax->list #'(args ...)))) #f
      (tc/let-values #'((x) ...) #'(args ...) #'body 
                     #'(let-values ([(x) args] ...) . body)
                     expected)]
     ;; inference for ((lambda with dotted rest    
     [(#%plain-app (#%plain-lambda (x ... . rst:id) . body) args ...)
-     #:when (<= (length (syntax->list #'(x ...)))
-                (length (syntax->list #'(args ...))))
+     #:fail-unless (<= (length (syntax->list #'(x ...)))
+                       (length (syntax->list #'(args ...)))) #f
     ;; FIXME - remove this restriction - doesn't work because the annotation 
     ;; on rst is not a normal annotation, may have * or ...
-     #:when (not (type-annotation #'rst))
+     #:fail-unless (not (type-annotation #'rst)) #f
      (let-values ([(fixed-args varargs) (split-at (syntax->list #'(args ...)) (length (syntax->list #'(x ...))))])
        (with-syntax ([(fixed-args ...) fixed-args]
                      [varg #`(#%plain-app list #,@varargs)])
@@ -489,9 +518,24 @@
                         #'(let-values ([(x) fixed-args] ... [(rst) varg]) . body)
                         expected)))]
     [(#%plain-app f . args)
-     (let* ([f-ty (single-value #'f)]
-            [arg-tys (map single-value (syntax->list #'args))])
-       (tc/funapp #'f #'args f-ty arg-tys expected))]))
+     (let* ([f-ty (single-value #'f)])
+       (match f-ty
+         [(tc-result1: 
+           (and t (Function: 
+                   (list (and a (arr: (? (lambda (d) 
+                                           (= (length d) 
+                                              (length (syntax->list #'args))))
+                                         dom)
+                                      (Values: (list (Result: v (LFilterSet: '() '()) (LEmpty:))))
+                                      #f #f '()))))))
+          ;(printf "f dom: ~a ~a~n" (syntax->datum #'f) dom)
+          (let ([arg-tys (map (lambda (a t) (tc-expr/check a (ret t))) 
+                              (syntax->list #'args)
+                              dom)])
+            (tc/funapp #'f #'args f-ty arg-tys expected))]
+         [_
+          (let ([arg-tys (map single-value (syntax->list #'args))])
+            (tc/funapp #'f #'args f-ty arg-tys expected))]))]))
 
 ;(trace tc/app/internal)
 

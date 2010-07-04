@@ -149,14 +149,15 @@ module browser threading seems wrong.
                         [name (and l (send l get-language-name))])
                    (unless (string=? str "")
                      (add-sep)
-                     (make-object menu-item%
-                       (gui-utils:format-literal-label
-                        (string-constant search-help-desk-for) 
-                        (shorten-str 
-                         str 
-                         (- 200 (string-length (string-constant search-help-desk-for)))))
-                       menu
-                       (λ x (help-desk:help-desk str (list ctxt name))))))))
+                     (let ([short-str (shorten-str str 50)])
+                       (make-object menu-item%
+                         (gui-utils:format-literal-label
+                          (string-constant search-help-desk-for) 
+                          (if (equal? short-str str)
+                              str
+                              (string-append short-str "...")))
+                         menu
+                         (λ x (help-desk:help-desk str (list ctxt name)))))))))
            
            (when (is-a? text editor:basic<%>)
              (let-values ([(pos text) (send text get-pos/text event)])
@@ -599,6 +600,15 @@ module browser threading seems wrong.
            [execute-settings (preferences:get drscheme:language-configuration:settings-preferences-symbol)]
            [next-settings execute-settings])
           
+          (define/private (set-needs-execution-state! s) (set! needs-execution-state s))
+          
+          ;; get-needs-execution-message : -> (or/c string #f)
+          ;; returns the current warning message if "Run" should be clicked (ie, if the
+          ;; state of the REPL is out of sync with drscheme).
+          (define/public (get-needs-execution-message)
+            (or (and (not (this-and-next-language-the-same?))
+                     (string-constant needs-execute-language-changed))
+                needs-execution-state))
           
           (define/pubment (get-next-settings) next-settings)
           (define/pubment (set-next-settings _next-settings [update-prefs? #t])
@@ -641,11 +651,6 @@ module browser threading seems wrong.
           (define/pubment (after-set-next-settings s)
             (inner (void) after-set-next-settings s))
           
-          (define/public (needs-execution)
-            (or needs-execution-state
-                (and (not (this-and-next-language-the-same?))
-                     (string-constant needs-execute-language-changed))))
-          
           (define/public (this-and-next-language-the-same?)
             (let ([execute-lang (drscheme:language-configuration:language-settings-language execute-settings)]
                   [next-lang (drscheme:language-configuration:language-settings-language next-settings)])
@@ -657,12 +662,13 @@ module browser threading seems wrong.
                           (drscheme:language-configuration:language-settings-settings next-settings))))))
           
           (define/pubment (set-needs-execution-message msg)
-            (set! needs-execution-state msg))
+            (set-needs-execution-state! msg))
           (define/pubment (teachpack-changed)
-            (set! needs-execution-state (string-constant needs-execute-teachpack-changed)))
+            (set-needs-execution-state! (string-constant needs-execute-teachpack-changed)))
           (define/pubment (just-executed)
             (set! execute-settings next-settings)
-            (set! needs-execution-state #f)
+            (set-needs-execution-state! #f)
+            (send tab clear-execution-state)
             (set! already-warned-state #f))
           (define/pubment (already-warned?)
             already-warned-state)
@@ -675,12 +681,12 @@ module browser threading seems wrong.
           (define/augment (after-insert x y)
             (unless ignore-edits?
               (set! really-modified? #t)
-              (set! needs-execution-state (string-constant needs-execute-defns-edited)))
+              (set-needs-execution-state! (string-constant needs-execute-defns-edited)))
             (inner (void) after-insert x y))
           (define/augment (after-delete x y)
             (unless ignore-edits?
               (set! really-modified? #t)
-              (set! needs-execution-state (string-constant needs-execute-defns-edited)))
+              (set-needs-execution-state! (string-constant needs-execute-defns-edited)))
             (inner (void) after-delete x y))
           
           (define/override (is-special-first-line? l) 
@@ -1228,6 +1234,25 @@ module browser threading seems wrong.
           (send frame enable-evaluation-in-tab this))
         (define/public (get-enabled) enabled?)
         
+        ;; current-execute-warning is a snapshot of the needs-execution-message
+        ;; that is taken each time repl submission happens, and it gets reset
+        ;; when "Run" is clicked.
+        (define current-execute-warning #f)
+        (define/pubment (repl-submit-happened)
+          (set! current-execute-warning (send defs get-needs-execution-message))
+          (update-execute-warning-gui))
+        (define/public (get-current-execute-warning) current-execute-warning)
+        (define/public (clear-execution-state) 
+          (set! current-execute-warning #f)
+          (update-execute-warning-gui))
+        (define/public (update-execute-warning-gui)
+          (when (is-current-tab?)
+            (send frame show/hide-warning-message 
+                  (get-current-execute-warning)
+                  (λ () 
+                    ;; this callback might be run with a different tab ...
+                    (send (send frame get-current-tab) clear-execution-state)))))
+        
         (define/public (get-directory)
           (let ([filename (send defs get-filename)])
             (if (and (path? filename)
@@ -1235,8 +1260,6 @@ module browser threading seems wrong.
                 (let-values ([(base _1 _2) (split-path (normalize-path filename))])
                   base)
                 #f)))
-        (define/public (needs-execution)
-          (send defs needs-execution))
         
         (define/pubment (can-close?)
           (and (send defs can-close?)
@@ -1376,8 +1399,7 @@ module browser threading seems wrong.
         register-toolbar-button
         get-tabs))
     
-    
-    
+
     (define frame-mixin
       (mixin (drscheme:frame:<%> frame:searchable-text<%> frame:delegate<%> frame:open-here<%>)
         (-frame<%>)
@@ -1395,7 +1417,45 @@ module browser threading seems wrong.
                  file-menu:get-save-as-item
                  file-menu:get-revert-item
                  file-menu:get-print-item)
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ;;
+        ;; execute warning
+        ;;
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         
+        (define execute-warning-panel #f)
+        (define execute-warning-parent-panel #f)
+        (define execute-warning-canvas #f)
+        (define/public-final (show/hide-warning-message msg hide-canvas)
+          (when (and execute-warning-parent-panel
+                     execute-warning-panel)
+            (cond
+              [msg
+               (cond
+                 [execute-warning-canvas
+                  (send execute-warning-canvas set-message msg)]
+                 [else
+                  (set! execute-warning-canvas
+                        (new execute-warning-canvas% 
+                             [stretchable-height #t]
+                             [parent execute-warning-panel]
+                             [message msg]))
+                  (new close-icon% 
+                       [parent execute-warning-panel]
+                       [bg-color "yellow"]
+                       [callback (λ () (hide-canvas))])])
+               (send execute-warning-parent-panel
+                     change-children
+                     (λ (l) (append (remq execute-warning-panel l)
+                                    (list execute-warning-panel))))]
+              [else
+               (when execute-warning-canvas
+                 (send execute-warning-parent-panel
+                        change-children
+                        (λ (l) (remq execute-warning-panel l)))
+                 (send execute-warning-canvas set-message #f))])))
+
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ;;
         ;; logging 
@@ -1713,9 +1773,10 @@ module browser threading seems wrong.
                                              (alignment '(left center))
                                              (stretchable-width #f))]
                  [planet-status-outer-panel (new vertical-panel% [parent _module-browser-parent-panel])]
+                 [execute-warning-outer-panel (new vertical-panel% [parent planet-status-outer-panel])]
                  [logger-outer-panel (new (make-two-way-prefs-dragable-panel% panel:vertical-dragable%
                                                                               'drscheme:logging-size-percentage)
-                                          [parent planet-status-outer-panel])]
+                                          [parent execute-warning-outer-panel])]
                  [trans-outer-panel (new vertical-panel% [parent logger-outer-panel])]
                  [root (make-object cls trans-outer-panel)])
             (set! module-browser-parent-panel _module-browser-parent-panel)
@@ -1724,6 +1785,13 @@ module browser threading seems wrong.
             (set! logger-parent-panel logger-outer-panel)
             (set! logger-panel (new vertical-panel% [parent logger-parent-panel]))
             (send logger-parent-panel change-children (lambda (x) (remq logger-panel x)))
+            
+            (set! execute-warning-parent-panel execute-warning-outer-panel)
+            (set! execute-warning-panel (new horizontal-panel% 
+                                             [parent execute-warning-parent-panel]
+                                             [stretchable-height #f]))
+            (send execute-warning-parent-panel change-children (λ (l) (remq execute-warning-panel l)))
+            
             (set! transcript-parent-panel (new horizontal-panel%
                                                (parent trans-outer-panel)
                                                (stretchable-height #f)))
@@ -2736,7 +2804,7 @@ module browser threading seems wrong.
             (on-tab-change old-tab current-tab)
             (send tab update-log)
             (send tab update-planet-status)
-            
+            (send tab update-execute-warning-gui)
             (restore-visible-tab-regions)
             (for-each (λ (defs-canvas) (send defs-canvas refresh))
                       definitions-canvases)
@@ -2869,6 +2937,7 @@ module browser threading seems wrong.
             (set! interactions-shown? is?)
             (set! definitions-shown? ds?)
             (update-shown)
+            (reflow-container) ;; without this one, the percentages in the resizable-panel are not up to date with the children
             (fix-up-canvas-numbers definitions-text vd #f)
             (fix-up-canvas-numbers interactions-text vi #t)
             (reflow-container)
@@ -3156,7 +3225,8 @@ module browser threading seems wrong.
                        (label (string-constant module-browser-name-length))
                        (choices (list (string-constant module-browser-name-short)
                                       (string-constant module-browser-name-medium)
-                                      (string-constant module-browser-name-long)))
+                                      (string-constant module-browser-name-long)
+                                      (string-constant module-browser-name-very-long)))
                        (selection (preferences:get 'drscheme:module-browser:name-length))
                        (callback
                         (λ (x y)
@@ -3188,7 +3258,8 @@ module browser threading seems wrong.
                 (case i
                   [(0) 'short]
                   [(1) 'medium]
-                  [(2) 'long])))
+                  [(2) 'long]
+                  [(3) 'very-long])))
         
         (define/private (mouse-currently-over snips)
           (if (null? snips)
@@ -4002,6 +4073,41 @@ module browser threading seems wrong.
         (set-label-prefix (string-constant drscheme))
         (set! newest-frame this)
         (send definitions-canvas focus)))
+    
+    (define execute-warning-canvas%
+      (class canvas%
+        (inherit stretchable-height get-dc get-client-size min-height)
+        (init-field message)
+        (define/public (set-message _msg) (set! message _msg))
+        
+        (define/override (on-paint)
+          (let ([dc (get-dc)])
+            (let-values ([(w h) (get-client-size)])
+              (send dc set-pen "yellow" 1 'solid)
+              (send dc set-brush "yellow" 'solid)
+              (send dc draw-rectangle 0 0 w h)
+              (when message
+                (let* ([base normal-control-font]
+                       [face (send base get-face)])
+                  (if face
+                      (send dc set-font (send the-font-list find-or-create-font
+                                              (send base get-point-size)
+                                              face
+                                              (send base get-family)
+                                              (send base get-style)
+                                              'bold))
+                      (send dc set-font (send the-font-list find-or-create-font
+                                              (send base get-point-size)
+                                              (send base get-family)
+                                              (send base get-style)
+                                              'bold))))
+                (let-values ([(tw th _1 _2) (send dc get-text-extent message)])
+                  (send dc draw-text message 
+                        (floor (- (/ w 2) (/ tw 2)))
+                        (floor (- (/ h 2) (/ th 2)))))))))
+        (super-new)
+        (let-values ([(w h d a) (send (get-dc) get-text-extent "Xy")])
+          (min-height (+ 4 (floor (inexact->exact h)))))))
     
     
 ;                                                   

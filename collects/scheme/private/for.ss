@@ -4,6 +4,7 @@
              "misc.ss"
              "define.ss"
              "letstx-scheme.ss"
+             '#%unsafe
              (for-syntax '#%kernel
                          "stx.ss"
                          "qqstx.ss"
@@ -43,6 +44,7 @@
              in-parallel
              stop-before
              stop-after
+             (rename *in-producer in-producer)
              (rename *in-indexed in-indexed)
              (rename *in-value in-value)
              
@@ -409,7 +411,7 @@
   (define (:vector-gen v start stop step)
     (values
      ;; pos->element
-     (lambda (i) (vector-ref v i))
+     (lambda (i) (unsafe-vector-ref v i))
      ;; next-pos
      ;; Minor optimisation.  I assume add1 is faster than \x.x+1
      (if (= step 1) add1 (lambda (i) (+ i step)))
@@ -650,7 +652,23 @@
                                              post-cont?s
                                              poses
                                              vals))))))))
-  
+
+  (define (in-producer producer stop . more)
+    (make-do-sequence
+     (lambda ()
+       (values (if (null? more)
+                 (lambda (_) (producer))
+                 (lambda (_) (apply producer more)))
+               void
+               (void)
+               void
+               (if (procedure? stop)
+                 (if (equal? 1 (procedure-arity stop))
+                   (lambda (x) (not (stop x)))
+                   (lambda xs (not (apply stop xs))))
+                 (lambda (x) (not (eq? x stop))))
+               void))))
+
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;  running sequences outside of a loop:
 
@@ -709,10 +727,10 @@
                   [sequence-next (lambda () (next))])
               (values sequence-more?
                       sequence-next)))))))
-      
+
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;  core `for/fold' syntax
-  
+
   (define-syntax values*
     (syntax-rules ()
       [(_ x) x]
@@ -721,11 +739,13 @@
   (define-syntax (for/foldX/derived stx)
     (syntax-case stx ()
       ;; Done case (no more clauses, and no generated clauses to emit):
-      [(_ [orig-stx nested? emit? ()] ([fold-var fold-init] ...) () expr1 expr ...)
+      [(_ [orig-stx nested? emit? ()] ([fold-var fold-init] ...) ()
+          expr1 expr ...)
        #`(let ([fold-var fold-init] ...) (let () expr1 expr ...))]
       ;; Switch-to-emit case (no more clauses to generate):
       [(_ [orig-stx nested? #f binds] ([fold-var fold-init] ...) () . body)
-       #`(for/foldX/derived [orig-stx nested? #t binds] ([fold-var fold-init] ...) () . body)]
+       #`(for/foldX/derived [orig-stx nested? #t binds]
+                            ([fold-var fold-init] ...) () . body)]
       ;; Emit case:
       [(_ [orig-stx nested? #t binds] ([fold-var fold-init] ...) rest expr1 . body)
        (with-syntax ([(([outer-binding ...]
@@ -753,38 +773,37 @@
       ;; Bad body cases:
       [(_ [orig-stx . _] fold-bind ())
        (raise-syntax-error
-        #f
-        "missing body expression after sequence bindings"
-        #'orig-stx)]
+        #f "missing body expression after sequence bindings" #'orig-stx)]
       [(_ [orig-stx . _] fold-bind () . rest)
        (raise-syntax-error
-        #f
-        "bad syntax (illegal use of `.') after sequence bindings"
-        #'orig-stx)]
+        #f "bad syntax (illegal use of `.') after sequence bindings" #'orig-stx)]
       ;; Guard case, no pending emits:
       [(_ [orig-stx nested? #f ()] ([fold-var fold-init] ...) (#:when expr . rest) . body)
        #'(let ([fold-var fold-init] ...)
            (if expr
-               (for/foldX/derived [orig-stx nested? #f ()] ([fold-var fold-var] ...) rest . body)
-               (values* fold-var ...)))]
+             (for/foldX/derived [orig-stx nested? #f ()]
+                                ([fold-var fold-var] ...) rest . body)
+             (values* fold-var ...)))]
       ;; Guard case, pending emits need to be flushed first
-      [(frm [orig-stx nested? #f binds] ([fold-var fold-init] ...) (#:when expr . rest) . body)
-       #'(frm [orig-stx nested? #t binds] ([fold-var fold-init] ...) (#:when expr . rest) . body)]
+      [(frm [orig-stx nested? #f binds] ([fold-var fold-init] ...)
+            (#:when expr . rest) . body)
+       #'(frm [orig-stx nested? #t binds] ([fold-var fold-init] ...)
+              (#:when expr . rest) . body)]
       ;; Convert single-value form to multi-value form:
       [(_ [orig-stx nested? #f binds] fold-bind ([id rhs] . rest) . body)
        (identifier? #'id)
-       #'(for/foldX/derived [orig-stx nested? #f binds] fold-bind ([(id) rhs] . rest) . body)]
+       #'(for/foldX/derived [orig-stx nested? #f binds] fold-bind
+                            ([(id) rhs] . rest) . body)]
       ;; If we get here in single-value mode, then it's a bad clause:
       [(_ [orig-stx #f #f nested? #f binds] fold-bind (clause . rest) . body)
        (raise-syntax-error
-        #f
-        "bad sequence binding clause"
-        #'orig-stx
-        #'clause)]
-      ;; Expand one multi-value clause, and push it into the results to emit: 
-      [(frm [orig-stx nested? #f binds] ([fold-var fold-init] ...) (clause . rest) . body)
+        #f "bad sequence binding clause" #'orig-stx #'clause)]
+      ;; Expand one multi-value clause, and push it into the results to emit:
+      [(frm [orig-stx nested? #f binds] ([fold-var fold-init] ...)
+            (clause . rest) . body)
        (with-syntax ([bind (expand-clause #'orig-stx #'clause)])
-         #`(frm [orig-stx nested? nested? (bind . binds)] ([fold-var fold-init] ...) rest . body))]
+         #`(frm [orig-stx nested? nested? (bind . binds)]
+                ([fold-var fold-init] ...) rest . body))]
       [(_ [orig-stx . _] . _)
        (raise-syntax-error #f "bad syntax" #'orig-stx)]))
 
@@ -935,32 +954,44 @@
     (lambda (stx)
       (let loop ([stx stx])
         (syntax-case stx ()
-          [[(id) (_ a b step)] #`[(id)
-                                  (:do-in
-                                   ;; outer bindings:
-                                   ([(start) a] [(end) b] [(inc) step])
-                                   ;; outer check:
-                                   (unless (and (real? start) (real? end) (real? inc))
-                                     ;; let `in-range' report the error:
-                                     (in-range start end inc))
-                                   ;; loop bindings:
-                                   ([pos start])
-                                   ;; pos check
-                                   #,(cond
-                                       [(not (number? (syntax-e #'step)))
-                                        #`(if (step . >= . 0) (< pos end) (> pos end))]
-                                       [((syntax-e #'step) . >= . 0)
-                                        #'(< pos end)]
-                                       [else
-                                        #'(> pos end)])
-                                   ;; inner bindings
-                                   ([(id) pos])
-                                   ;; pre guard
-                                   #t
-                                   ;; post guard
-                                   #t
-                                   ;; loop args
-                                   ((+ pos inc)))]]
+          [[(id) (_ a b step)] (let ([all-fx?
+                                      (and (fixnum? (syntax-e #'a))
+                                           (fixnum? (syntax-e #'b))
+                                           (memq (syntax-e #'step) '(1 -1)))])
+                                 #`[(id)
+                                    (:do-in
+                                     ;; outer bindings:
+                                     ([(start) a] [(end) b] [(inc) step])
+                                     ;; outer check:
+                                     (unless (and (real? start) (real? end) (real? inc))
+                                       ;; let `in-range' report the error:
+                                       (in-range start end inc))
+                                     ;; loop bindings:
+                                     ([pos start])
+                                     ;; pos check
+                                     #,(if all-fx?
+                                           ;; Special case, can use unsafe ops:
+                                           (cond
+                                            [((syntax-e #'step) . >= . 0)
+                                             #'(unsafe-fx< pos end)]
+                                            [else
+                                             #'(unsafe-fx> pos end)])
+                                           ;; General case:
+                                           (cond
+                                            [(not (number? (syntax-e #'step)))
+                                             #`(if (step . >= . 0) (< pos end) (> pos end))]
+                                            [((syntax-e #'step) . >= . 0)
+                                             #'(< pos end)]
+                                            [else
+                                             #'(> pos end)]))
+                                     ;; inner bindings
+                                     ([(id) pos])
+                                     ;; pre guard
+                                     #t
+                                     ;; post guard
+                                     #t
+                                     ;; loop args
+                                     ((#,(if all-fx? #'unsafe-fx+ #'+) pos inc)))])]
           [[(id) (_ a b)] (loop #'[(id) (_ a b 1)])]
           [[(id) (_ b)] (loop #'[(id) (_ 0 b 1)])]
           [_ #f]))))
@@ -1017,19 +1048,19 @@
              #t
              ;; post guard
              #t
-             ;; loop args
-             ((cdr lst)))]]
+             ;; loop args -- ok to use unsafe-cdr, since car passed
+             ((unsafe-cdr lst)))]]
         [_ #f])))
 
   (define-for-syntax (vector-like-gen vector?-id
-                                      vector-length-id
+                                      unsafe-vector-length-id
                                       in-vector-id
-                                      vector-ref-id)
+                                      unsafe-vector-ref-id)
      (define (in-vector-like stx)
        (with-syntax ([vector? vector?-id]
                      [in-vector in-vector-id]
-                     [vector-length vector-length-id]
-                     [vector-ref vector-ref-id])
+                     [unsafe-vector-length unsafe-vector-length-id]
+                     [unsafe-vector-ref unsafe-vector-ref-id])
          (syntax-case stx ()
            ;; Fast case
            [((id) (_ vec-expr))
@@ -1039,75 +1070,80 @@
                 ([(vec len) (let ([vec vec-expr])
                               (unless (vector? vec)
                                 (in-vector vec))
-                              (values vec (vector-length vec)))])
+                              (values vec (unsafe-vector-length vec)))])
                 ;; outer check
                 #f
                 ;; loop bindings
                 ([pos 0])
                 ;; pos check
-                (pos . < . len)
+                (pos . unsafe-fx< . len)
                 ;; inner bindings
-                ([(id) (vector-ref vec pos)])
+                ([(id) (unsafe-vector-ref vec pos)])
                 ;; pre guard
                 #t
                 ;; post guard
                 #t
                 ;; loop args
-                ((add1 pos)))]]
+                ((unsafe-fx+ 1 pos)))]]
            ;; General case
            [((id) (_ vec-expr start))
             (in-vector-like (syntax ((id) (_ vec-expr start #f 1))))]
            [((id) (_ vec-expr start stop))
             (in-vector-like (syntax ((id) (_ vec-expr start stop 1))))]
            [((id) (_ vec-expr start stop step))
-            #`[(id)
-               (:do-in
-                ;; Outer bindings
-                ;; Prevent multiple evaluation
-                ([(v* stop*) (let ([vec vec-expr]
-                                   [stop* stop])
-                               (if (and (not stop*) (vector? vec))
-                                   (values vec (vector-length vec))
-                                   (values vec stop*)))]
-                 [(start*) start]
-                 [(step*) step])
-                ;; Outer check
-                (when (or (not (vector? v*))
-                          (not (exact-integer? start*))
-                          (not (exact-integer? stop*))
-                          (not (exact-integer? step*))
-                          (zero? step*)
-                          (and (< start* stop*) (< step* 0))
-                          (and (> start* stop*) (> step* 0)))
-                  ;; Let in-vector report the error
-                  (in-vector v* start* stop* step*))
-                ;; Loop bindings
-                ([idx start*])
-                ;; Pos guard
-                #,(cond
-                    [(not (number? (syntax-e #'step)))
+            (let ([all-fx? (memq (syntax-e #'step) '(1 -1))])
+              #`[(id)
+                 (:do-in
+                  ;; Outer bindings
+                  ;; Prevent multiple evaluation
+                  ([(v* stop*) (let ([vec vec-expr]
+                                     [stop* stop])
+                                 (if (and (not stop*) (vector? vec))
+                                     (values vec (unsafe-vector-length vec))
+                                     (values vec stop*)))]
+                   [(start*) start]
+                   [(step*) step])
+                  ;; Outer check
+                  (when (or (not (vector? v*))
+                            (not (exact-integer? start*))
+                            (not (exact-integer? stop*))
+                            (not (exact-integer? step*))
+                            (zero? step*)
+                            (and (< start* stop*) (< step* 0))
+                            (and (> start* stop*) (> step* 0)))
+                    ;; Let in-vector report the error
+                    (in-vector v* start* stop* step*))
+                  ;; Loop bindings
+                  ([idx start*])
+                  ;; Pos guard
+                  #,(cond
+                     [(not (number? (syntax-e #'step)))
                       #`(if (step* . >= . 0) (< idx stop*) (> idx stop*))]
-                    [((syntax-e #'step) . >= . 0)
-                      #'(< idx stop*)]
-                    [else
-                      #'(> idx stop*)])
-                ;; Inner bindings
-                ([(id) (vector-ref v* idx)])
-                ;; Pre guard
-                #t
-                ;; Post guard
-                #t
-                ;; Loop args
-                ((+ idx step)))]]
+                     [((syntax-e #'step) . >= . 0)
+                      (if all-fx?
+                          #'(unsafe-fx< idx stop*)
+                          #'(< idx stop*))]
+                     [else
+                      (if all-fx?
+                          #'(unsafe-fx> idx stop*)
+                          #'(> idx stop*))])
+                  ;; Inner bindings
+                  ([(id) (unsafe-vector-ref v* idx)])
+                  ;; Pre guard
+                  #t
+                  ;; Post guard
+                  #t
+                  ;; Loop args
+                  ((#,(if all-fx? #'unsafe-fx+ #'+) idx step)))])]
            [_ #f])))
           in-vector-like)
   
   (define-sequence-syntax *in-vector
     (lambda () #'in-vector)
     (vector-like-gen #'vector?
-                     #'vector-length
+                     #'unsafe-vector-length
                      #'in-vector
-                     #'vector-ref))
+                     #'unsafe-vector-ref))
   
   (define-sequence-syntax *in-string
     (lambda () #'in-string)
@@ -1137,4 +1173,60 @@
         [((id) (_ expr))
          #'[(id)
             (:do-in ([(id) expr])
-                    #t () #t () #t #f ())]]))))
+                    #t () #t () #t #f ())]])))
+
+  (define-sequence-syntax *in-producer
+    (lambda () #'in-producer)
+    (lambda (stx)
+      (syntax-case stx ()
+        [((id) (_ producer stop more ...))
+         (with-syntax ([(more* ...) (generate-temporaries #'(more ...))])
+           #'[(id)
+              (:do-in
+               ;;outer bindings
+               ([(producer*) producer] [(more*) more] ...
+                [(stop?) (let ([s stop])
+                           (if (procedure? s) s (lambda (x) (eq? x s))))])
+               ;; outer check
+               #t
+               ;; loop bindings
+               ()
+               ;; pos check
+               #t
+               ;; inner bindings
+               ([(id) (producer* more* ...)])
+               ;; pre guard
+               (not (stop? id))
+               ;; post guard
+               #t
+               ;; loop args
+               ())])]
+        ;; multiple-values version
+        [((id ...) (_ producer stop more ...))
+         (with-syntax ([(more* ...) (generate-temporaries #'(more ...))])
+           #'[(id ...)
+              (:do-in
+               ;;outer bindings
+               ([(producer*) producer] [(more*) more] ...
+                [(stop?) (let ([s stop])
+                           (if (procedure? s)
+                             s
+                             (error 'in-producer
+                                    "stop condition for ~a, got: ~e"
+                                    "multiple values must be a predicate" s)))])
+               ;; outer check
+               #t
+               ;; loop bindings
+               ()
+               ;; pos check
+               #t
+               ;; inner bindings
+               ([(id ...) (producer* more* ...)])
+               ;; pre guard
+               (not (stop? id ...))
+               ;; post guard
+               #t
+               ;; loop args
+               ())])])))
+
+  )

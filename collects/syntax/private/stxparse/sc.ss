@@ -49,7 +49,7 @@
                  [rhss rhss])
      (let ([the-rhs
             (parameterize ((current-syntax-context stx))
-              (parse-rhs #'rhss #f splicing? stx))])
+              (parse-rhs #'rhss #f splicing? #:context stx))])
        (with-syntax ([parser (generate-temporary
                               (format-symbol "parse-~a" (syntax-e #'name)))]
                      [attrs (rhs-attrs the-rhs)])
@@ -87,7 +87,7 @@
        (unless (identifier? #'name)
          (raise-syntax-error #f "expected identifier" stx #'name))
        (with-syntax ([([entry (def ...)] ...)
-                      (for/list ([line (check-conventions-rules #'(rule ...))])
+                      (for/list ([line (check-conventions-rules #'(rule ...) stx)])
                         (let ([rx (car line)]
                               [sc (car (cadr line))]
                               [args (cadr (cadr line))])
@@ -111,7 +111,7 @@
      (begin
        (unless (identifier? #'name)
          (raise-syntax-error #f "expected identifier" stx #'name))
-       (let ([lits (check-literals-list #'(lit ...))])
+       (let ([lits (check-literals-list #'(lit ...) stx)])
          (with-syntax ([((internal external) ...) lits])
            #'(define-syntax name
                (make-literalset
@@ -125,7 +125,7 @@
      (with-disappeared-uses
       (let ([rhs
              (parameterize ((current-syntax-context #'ctx))
-               (parse-rhs #'rhss #t (syntax-e #'splicing?) #'ctx))])
+               (parse-rhs #'rhss #t (syntax-e #'splicing?) #:context #'ctx))])
         #`(let ([get-description
                  (lambda args
                    #,(or (rhs-description rhs)
@@ -164,35 +164,29 @@
 (define-syntax (debug-rhs stx)
   (syntax-case stx ()
     [(debug-rhs rhs)
-     (let ([rhs (parse-rhs #'rhs #t stx)])
+     (let ([rhs (parse-rhs #'rhs #t #:context stx)])
        #`(quote #,rhs))]))
 
 (define-syntax (debug-pattern stx)
   (syntax-case stx ()
     [(debug-pattern p)
-     (let ([p (parse-whole-pattern #'p (new-declenv null))])
+     (let ([p (parse-whole-pattern #'p (new-declenv null) #:context stx)])
        #`(quote #,p))]))
 
-(define-syntax-rule (syntax-parse stx-expr . clauses)
-  (let ([x stx-expr])
-    (syntax-parse* syntax-parse x . clauses)))
-
-(define-syntax-rule (syntax-parser . clauses)
-  (lambda (x) (syntax-parse* syntax-parser x . clauses)))
-
-(define-syntax (syntax-parse* stx)
+(define-syntax (syntax-parse stx)
   (syntax-case stx ()
-    [(syntax-parse report-as expr . clauses)
-     (with-disappeared-uses
-      (parameterize ((current-syntax-context
-                      (syntax-property stx
-                                       'report-errors-as
-                                       (syntax-e #'report-as))))
-        #`(let ([x expr])
-            (let ([fail (syntax-patterns-fail x)])
-              (with-enclosing-fail* fail
-                (parameterize ((current-expression (or (current-expression) x)))
-                  (parse:clauses x clauses)))))))]))
+    [(syntax-parse stx-expr . clauses)
+     (quasisyntax/loc stx
+       (let ([x (datum->syntax #f stx-expr)])
+         (parse:clauses x clauses #,stx)))]))
+
+(define-syntax (syntax-parser stx)
+  (syntax-case stx ()
+    [(syntax-parser . clauses)
+     (quasisyntax/loc stx
+       (lambda (x)
+         (let ([x (datum->syntax #f x)])
+           (parse:clauses x clauses #,stx))))]))
 
 (define-syntax with-patterns
   (syntax-rules ()
@@ -200,14 +194,3 @@
      (let () . b)]
     [(with-patterns ([p x] . more) . b)
      (syntax-parse x [p (with-patterns more . b)])]))
-
-;; Failure reporting parameter & default
-
-(define current-failure-handler
-  (make-parameter default-failure-handler))
-
-(define ((syntax-patterns-fail stx0) f)
-  (let ([value ((current-failure-handler) stx0 f)])
-    (error 'current-failure-handler
-           "current-failure-handler: did not escape, produced ~e" value)))
-

@@ -10,12 +10,24 @@
          (for-syntax "rep-data.ss")
          (for-syntax "../util/error.ss")
          "runtime.ss")
-(provide default-failure-handler)
+(provide syntax-patterns-fail
+         current-failure-handler)
+
+;; Failure reporting parameter & default
 
 (define (default-failure-handler stx0 f)
   (match (simplify-failure f)
     [(struct failure (x frontier frontier-stx expected))
      (report-failure stx0 x (last frontier) frontier-stx expected)]))
+
+(define current-failure-handler
+  (make-parameter default-failure-handler))
+
+(define ((syntax-patterns-fail stx0) f)
+  (let ([value ((current-failure-handler) stx0 f)])
+    (error 'current-failure-handler
+           "current-failure-handler: did not escape, produced ~e" value)))
+
 
 ;; report-failure : stx stx number stx Expectation -> (escapes)
 (define (report-failure stx0 x index frontier-stx expected)
@@ -43,7 +55,7 @@
                 stx0
                 frontier-stx))]
         [else
-         (err #f stx0 stx0)]))
+         (err "bad syntax" stx0 stx0)]))
 
 ;; FIXME: try different selection/simplification algorithms/heuristics
 (define (simplify-failure f)
@@ -103,10 +115,11 @@
 ;; prose-for-expectation : Expectation syntax -> string/#f
 (define (prose-for-expectation e index stx)
   (cond [(expect? e)
-         (let ([parts
-                (for/list ([alt (expect->alternatives e)])
-                  (for-alternative alt index stx))])
-           (join-sep parts ";" "or"))]
+         (let ([alts (expect->alternatives e)])
+           (and alts
+                (join-sep (for/list ([alt alts])
+                            (for-alternative alt index stx))
+                          ";" "or")))]
         [(eq? e 'ineffable)
          #f]))
 

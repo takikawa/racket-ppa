@@ -4,7 +4,7 @@
 
 (require (private base-types)
          (for-syntax 
-          (except-in stxclass id)
+          (except-in syntax/parse id)
           scheme/base
           (private type-contract)
           (types utils convenience)
@@ -69,7 +69,7 @@
                           [type-name-references null])]
            [begin (do-time "Initialized Envs")]
            ;; local-expand the module
-           ;; pmb = #%plain-module-begin                            
+           ;; pmb = #%plain-module-begin    
            [with-syntax ([new-mod 
                           (local-expand (syntax/loc stx
                                           (#%plain-module-begin 
@@ -78,7 +78,7 @@
                                         null)])]
            [with-syntax ([(pmb body2 ...) #'new-mod])]
            [begin (do-time "Local Expand Done")]
-           [with-syntax ([after-code (parameterize ([orig-module-stx stx]
+           [with-syntax ([after-code (parameterize ([orig-module-stx (or (orig-module-stx) stx)]
                                                     [expanded-module-stx #'new-mod])
                                        (type-check #'(body2 ...)))]
                          [check-syntax-help (syntax-property #'(void) 'disappeared-use (type-name-references))]

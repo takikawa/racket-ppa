@@ -10,10 +10,14 @@
 	 define-record-procedures-parametric define-record-procedures-parametric-2
          .. ... .... ..... ......
 	 check-expect check-within check-error
-	 : define-contract -> mixed one-of predicate combined property
+	 check-property for-all ==> expect expect-within
+	 contract : define-contract -> mixed one-of predicate combined property
 	 number real rational integer natural boolean true false string empty-list unspecific
 	 chocolate-cookie)
 (provide cons)
 (provide-and-document
  procedures
- (all-from assignments: deinprogramm/DMdA procedures))
+ (all-from-except assignments: deinprogramm/DMdA procedures
+		  quote
+		  symbol?))
+

@@ -195,6 +195,7 @@ please adhere to these guidelines:
  (cs-view-docs-from "~a from ~a")  ;; a completed version of the line above (cs-view-docs) is put into the first ~a and a list of modules (separated by commas) is put into the second ~a. Use check syntax and right-click on a documented variable (eg, 'require') to see this in use
   
  (cs-lexical-variable "lexical variable")
+ (cs-set!d-variable "set!’d variable")
  (cs-imported-variable "imported variable")
 
  ;;; info bar at botttom of drscheme frame
@@ -228,6 +229,9 @@ please adhere to these guidelines:
    "WARNING: The teachpacks have changed. Click Run.")
   (needs-execute-defns-edited
    "WARNING: The definitions window has changed. Click Run.")
+  
+  (editor-changed-since-srcloc-recorded
+   "This editor has been changed since the source location was recorded, so the highlighted region may no longer correspond to the correct source location.")
   
  (file-is-not-saved "The file \"~a\" is not saved.")
  (save "Save")
@@ -1009,7 +1013,12 @@ please adhere to these guidelines:
  (decimal-notation-for-rationals "Use decimal notation for rationals")
  (enforce-primitives-group-box-label "Initial Bindings")
  (enforce-primitives-check-box-label "Disallow redefinition of initial bindings")
-
+ (automatically-compile "Populate compiled/ directories (for faster loading)")
+ (preserve-stacktrace-information "Preserve stacktrace (disable some JIT optimizations)")
+ (expression-level-stacktrace "Expression-level stacktrace")
+ (function-level-stacktrace "Function-level stacktrace")
+  
+  
   ; used in the bottom left of the drscheme frame 
   ; used the popup menu from the just above; greyed out and only
   ; visible when some languages are in the history
@@ -1187,6 +1196,7 @@ please adhere to these guidelines:
  (module-browser-name-short "Short")
  (module-browser-name-medium "Medium")
  (module-browser-name-long "Long")
+ (module-browser-name-very-long "Long, with phases")  ;; like 'Long' but shows the phases where this file is loaded
  (module-browser-open-all "Open all files shown here")
 
  (happy-birthday-matthias "Happy Birthday, Matthias!")
@@ -1243,14 +1253,20 @@ please adhere to these guidelines:
  (stepper-name "Stepper")
  (stepper-language-level-message "The stepper does not work for language \"~a\".")
  (stepper-button-label "Step")
- (stepper-home "Home")
+
  (stepper-previous-application "|< Application")
  (stepper-previous "< Step")
  (stepper-next "Step >")
  (stepper-next-application "Application >|")
- (stepper-jump-to-end "End")
- (stepper-jump "Jump To ...")
- 
+ (stepper-jump "Jump...") ;; this one is changed.  action?
+ (stepper-out-of-steps "Reached the end of evaluation before finding the kind of step you were looking for.")
+ (stepper-no-such-step/title "Step Not Found")
+ (stepper-no-such-step "Couldn't find a step matching that criterion.")
+ (stepper-no-such-step/earlier "Couldn't find an earlier step matching that criterion.")
+ (stepper-jump-to-beginning "to beginning") ;; name changed from stepper-home to stepper-jump-to-beginning
+ (stepper-jump-to-end "to end") ;; content changed
+ (stepper-jump-to-selected "to beginning of selected") ;; new
+  
  (debug-tool-button-name "Debug")
 
  (dialog-back "Back")

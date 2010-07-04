@@ -1,7 +1,7 @@
 #lang scheme/base
 
 (provide :
-	 contract
+	 contract contract/arbitrary
 	 define-contract
 	 define/contract define-values/contract
 	 -> mixed one-of predicate combined property)
@@ -29,9 +29,24 @@
 			      (list ?contract-expr ...)
 			      ?stx)))
     ((one-of ?exp ...)
-     (with-syntax ((?stx (phase-lift stx))
+     (with-syntax ((((?temp ?exp) ...) 
+		    (map list
+			 (generate-temporaries #'(?exp ...)) (syntax->list #'(?exp ...))))
+		   (?stx (phase-lift stx))
 		   (?name name))
-       #'(make-case-contract '?name (list ?exp ...) ?stx)))
+       (with-syntax (((?check ...) 
+		      (map (lambda (lis)
+			     (with-syntax (((?temp ?exp) lis))
+			       (with-syntax ((?raise
+					      (syntax/loc 
+					       #'?exp
+					       (error 'contracts "hier kein Vertrag zulässig, nur normaler Wert"))))
+				 #'(when (contract? ?temp)
+				     ?raise))))
+			   (syntax->list #'((?temp ?exp) ...)))))
+       #'(let ((?temp ?exp) ...)
+	   ?check ...
+	   (make-case-contract '?name (list ?temp ...) ?stx)))))
     ((predicate ?exp)
      (with-syntax ((?stx (phase-lift stx))
 		   (?name name))
@@ -114,7 +129,17 @@
       ((_ ?contr)
        #'(contract #f ?contr))
       ((_ ?name ?contr)
-       (parse-contract (syntax->datum #'?name) #'?contr)))))
+       (stepper-syntax-property
+	(parse-contract (syntax->datum #'?name) #'?contr)
+	'stepper-skip-completely #t)))))
+
+(define-syntax contract/arbitrary
+  (lambda (stx)
+    (syntax-case stx ()
+      ((_ ?arb ?contr . ?rest)
+       #'(let ((contr (contract ?contr . ?rest)))
+	   (set-contract-arbitrary! contr ?arb)
+	   contr)))))
 
 (define-syntax define-contract
   (lambda (stx)

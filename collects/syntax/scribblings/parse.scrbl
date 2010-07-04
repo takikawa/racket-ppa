@@ -12,15 +12,31 @@
 @(define ellipses @scheme[...])
 
 @(begin
+   (define (fixup exn)
+     (let ([src (ormap values (exn:fail:syntax-exprs exn))])
+       (if src
+           (make-exn:fail:syntax
+            (format "~a at: ~a" (exn-message exn) (syntax->datum src))
+            (exn-continuation-marks exn)
+            (exn:fail:syntax-exprs exn))
+           exn)))
    (define the-eval
      (parameterize ((sandbox-output 'string)
-                    (sandbox-error-output 'string))
-       (make-evaluator 'scheme/base #:requires '(syntax/parse))))
+                    (sandbox-error-output 'string)
+                    (sandbox-make-code-inspector current-code-inspector)
+                    (sandbox-eval-handlers
+                     (list #f
+                           (lambda (thunk)
+                             (with-handlers ([exn:fail:syntax?
+                                              (lambda (e) (raise (fixup e)))])
+                               (thunk))))))
+       (make-evaluator 'scheme/base
+                       #:requires '(syntax/parse (for-syntax scheme/base)))))
+   (the-eval '(error-print-source-location #f))
    (define-syntax-rule (myexamples e ...)
-     (parameterize ((error-print-source-location #f))
-       (examples #:eval the-eval e ...))))
+     (examples #:eval the-eval e ...)))
 
-@title[#:tag "stxparse"]{Parsing and classifying syntax}
+@title[#:tag "stxparse" #:style '(toc)]{Parsing and classifying syntax}
 
 The @schememodname[syntax/parse] library provides a framework for
 describing and parsing syntax. Using @schememodname[syntax/parse],
@@ -31,6 +47,226 @@ which offers many improvements over @scheme[syntax-case].
 
 @defmodule[syntax/parse]
 
+@local-table-of-contents[]
+
+@;{----------}
+
+@section{Quick Start}
+
+This section provides a rapid introduction to the
+@schememodname[syntax/parse] library for the macro programmer.
+
+To use @scheme[syntax-parse] to write a macro transformer, import it
+@scheme[for-syntax]:
+
+@schemeblock[(require (for-syntax syntax/parse))]
+
+For example, here is is a module that defines
+@schemekeywordfont{mylet}, a macro that has the same behavior as the
+standard @scheme[let] form (including ``named @scheme[let]''):
+
+@schemeblock[
+(module example scheme/base
+  (require (for-syntax scheme/base syntax/parse))
+  (define-syntax (mylet stx)
+    (syntax-parse stx
+      [(_ loop:id ((x:id e:expr) ...) . body)
+       #'(letrec ([loop (lambda (x ...) . body)])
+           (loop e ...))]
+      [(_ ((x:id e:expr) ...) . body)
+       #'((lambda (x ...) . body) e ...)])))
+]
+
+The macro is defined as a procedure that takes one argument,
+@scheme[stx]. The @scheme[syntax-parse] form is similar to
+@scheme[syntax-case], except that there is no literals list between
+the syntax argument and the sequence of clauses.
+
+@bold{Note: } Remember not to put a literals list between the syntax
+argument and the clauses!
+
+The patterns contain identifiers consisting of two parts separated by
+a colon character, such as @scheme[loop:id] or @scheme[e:expr]. These
+are pattern variables annotated with syntax classes. For example,
+@scheme[loop:id] is a pattern variable named @scheme[loop] with the
+syntax class @scheme[id] (identifier). Note that only the pattern
+variable part is used in the syntax template.
+
+Syntax classes restrict what a pattern variable can match. Above,
+@scheme[loop] only matches an identifier, so the first clause only
+matches the ``named-let'' syntax. Syntax classes replace some uses of
+@scheme[syntax-case]'s ``fenders'' or guard expressions. They also
+enable @scheme[syntax-parse] to automatically give specific error
+messages.
+
+The @schememodname[syntax/parse] library provides several built-in
+syntax classes (see @secref{lib} for a list). Programmers can also
+define their own using @scheme[define-syntax-class]:
+
+@schemeblock[
+(module example-syntax scheme/base
+  (require syntax/parse)
+  (provide binding)
+  (define-syntax-class binding
+    #:attributes (x e)
+    (pattern (x:id e:expr))))
+
+(module example scheme/base
+  (require (for-syntax scheme/base
+                       syntax/parse
+                       'example-syntax))
+  (define-syntax (mylet stx)
+    (syntax-parse stx
+      [(_ loop:id (b:binding ...) . body)
+       #'(letrec ([loop (lambda (b.x ...) . body)])
+           (loop b.e ...))]
+      [(_ (b:binding ...) . body)
+       #'((lambda (b.x ...) . body) b.e ...)])))
+]
+
+@bold{Note:} Syntax classes must be defined in the same phase as the
+@scheme[syntax-parse] expression they're used in. The right-hand side
+of a macro is at phase 1, so syntax classes it uses must be defined in
+a separate module and required @scheme[for-syntax]. Since the
+auxiliary module uses @scheme[define-syntax-class] at phase 0, it has
+@scheme[(require syntax/parse)], with no @scheme[for-syntax].
+
+Alternatively, the syntax class could be made a local definition,
+thus:
+
+@schemeblock[
+(module example scheme/base
+  (require (for-syntax scheme/base
+                       syntax/parse))
+  (define-syntax (mylet stx)
+    (define-syntax-class binding
+      #:attributes (x e)
+      (pattern (x:id e:expr)))
+    (syntax-parse stx
+      [(_ loop:id (b:binding ...) . body)
+       #'(letrec ([loop (lambda (b.x ...) . body)])
+           (loop b.e ...))]
+      [(_ (b:binding ...) . body)
+       #'((lambda (b.x ...) . body) b.e ...)])))
+]
+
+A syntax class is an abstraction of a syntax pattern. The syntax class
+@scheme[binding] gives a name to the repeated pattern fragment
+@scheme[(x:id e:expr)]. The components of the fragment, @scheme[x] and
+@scheme[e], become @tech{attributes} of the syntax class. When
+@scheme[b:binding] matches, @scheme[b] gets bound to the whole binding
+pair, and @scheme[b.x] and @scheme[b.e] get bound to the variable name
+and expression, respectively. Actually, all of them are bound to
+sequences, because of the ellipses.
+
+Syntax classes can have multiple alternative patterns. Suppose we
+wanted to extend @schemekeywordfont{mylet} to allow a simple
+identifier as a binding, in which case it would get the value
+@scheme[#f]:
+
+@schemeblock[
+(mylet ([a 1] b [c 'foo]) ....)
+]
+
+Here's how the syntax class would change:
+
+@SCHEMEBLOCK[
+(module example-syntax scheme/base
+  (require syntax/parse)
+  (require (for-template scheme/base))
+  (provide binding)
+  (define-syntax-class binding
+    #:attributes (x e)
+    (pattern (x:id e:expr))
+    (pattern x:id
+             #:with e #'(quote #f))))
+]
+
+@bold{Note: } The @scheme[(require (for-template scheme/base))] is
+needed for the @scheme[quote] expression.
+
+If the syntax class definition were a local definition in the same
+module, the @scheme[for-template] would be unnecessary.
+
+The second pattern matches unparenthesized identifiers. The @scheme[e]
+attribute is bound using a @scheme[#:with] clause, which matches the
+pattern @scheme[e] against the syntax from evaluating @scheme[#'#f].
+
+Optional keyword arguments are supported via ``head patterns'' (called
+@tech{H-patterns} in the reference documentation). Unlike normal
+patterns, which match one term, head patterns can match a variable
+number of subterms in a list.
+
+Suppose @schemekeywordfont{mylet} accepted an optional
+@scheme[#:check] keyword with one argument, a procedure that would be
+applied to every variable's value. Here's one way to write it
+(dropping the named-let variant for simplicity):
+
+@SCHEMEBLOCK[
+(define-syntax (mylet stx)
+  (syntax-parse stx
+    [(_ (~optional (~seq #:check pred)) (b:binding ...) . body)
+     #`((lambda (b.x ...)
+          #,(if (attribute pred)
+                #'(unless (and (pred b.x) ...) (error 'check))
+                #'(void))
+          . body)
+        b.e ...)]))
+]
+
+An optional subpattern might not match, so attributes within an
+@scheme[~optional] form might not be bound to syntax. Such
+non-syntax-valued attributes may not be used within syntax
+templates. The @scheme[attribute] special form is used to get the
+value of an attribute; if the attribute didn't get matched, the value
+is @scheme[#f].
+
+Here's another way write it, using @scheme[#:defaults] to give the
+@scheme[pred] attribute a default value:
+
+@schemeblock[
+(define-syntax (mylet stx)
+  (syntax-parse stx
+    [(_ (~optional (~seq #:check pred)
+                   #:defaults ([pred #'(lambda (x) #t)]))
+        (b:binding ...) . body)
+     #`((lambda (b.x ...)
+          (unless (and (pred b.x) ...) (error 'check))
+          . body)
+        b.e ...)]))
+]
+
+Programmers can also create abstractions over head patterns, using
+@scheme[define-splicing-syntax-class]. Here it is, rewritten to use
+multiple alternatives instead of @scheme[~optional]:
+
+@schemeblock[
+(define-splicing-syntax-class optional-check
+  #:attributes (pred)
+  (pattern (~seq #:check pred))
+  (pattern (~seq)
+           #:with pred #'(lambda (x) #t)))
+]
+
+@bold{Note: } When defining a splicing syntax class, remember to
+include @scheme[~seq] in the pattern!
+
+Here is the corresponding macro:
+
+@schemeblock[
+(define-syntax (mylet stx)
+  (syntax-parse stx
+    [(_ c:optional-check (b:binding ...) . body)
+     #'((lambda (b.x ...)
+          (unless (and (c.pred b.x) ...) (error 'check))
+          . body)
+        b.e ...)]))
+]
+
+The documentation in the following sections contains additional
+examples of @schememodname[syntax/parse] features.
+
+
 @;{----------}
 
 @section{Parsing syntax}
@@ -39,7 +275,8 @@ This section describes the @scheme[syntax-parse] pattern matching
 form, syntax patterns, and attributes.
 
 @defform/subs[(syntax-parse stx-expr parse-option ... clause ...+)
-              ([parse-option (code:line #:literals (literal ...))
+              ([parse-option (code:line #:context context-expr)
+                             (code:line #:literals (literal ...))
                              (code:line #:literal-sets (literal-set ...))
                              (code:line #:conventions (convention-id ...))]
                [literal literal-id
@@ -56,32 +293,41 @@ subterms of the syntax object and that clause's side conditions and
 
 If the syntax object fails to match any of the patterns (or all
 matches fail the corresponding clauses' side conditions), a syntax
-error is raised.
+error is raised. If the @scheme[#:context] argument is given,
+@scheme[context-expr] is used in reporting the error; otherwise
+@scheme[stx-expr] is used.
+
+@(myexamples
+  (syntax-parse #'(a b 3)
+    [(x:id ...) 'ok])
+  (syntax-parse #'(a b 3)
+    #:context #'(lambda (a b 3) (+ a b))
+    [(x:id ...) 'ok]))
 
 The @scheme[#:literals] option specifies identifiers that should match
-as literals, rather than simply being pattern variables. A literal in
-the literals list has two components: the identifier used within the
-pattern to signify the positions to be matched (@scheme[pattern-id]),
-and the identifier expected to occur in those positions
-(@scheme[literal-id]). If the single-identifier form is used, the same
-identifier is used for both purposes.
+as @tech{literals}, rather than simply being @tech{pattern
+variables}. A literal in the literals list has two components: the
+identifier used within the pattern to signify the positions to be
+matched (@scheme[pattern-id]), and the identifier expected to occur in
+those positions (@scheme[literal-id]). If the single-identifier form
+is used, the same identifier is used for both purposes.
 
 @bold{Note:} Unlike @scheme[syntax-case], @scheme[syntax-parse]
 requires all literals to have a binding. To match identifiers by their
 symbolic names, consider using the @scheme[atom-in-list] syntax class
 instead.
 
-Many literals can be declared at once via one or more @tech{literal sets},
-imported with the @scheme[#:literal-sets] option. The literal-set
-definition determines the literal identifiers to recognize and the
-names used in the patterns to recognize those literals.
+Many literals can be declared at once via one or more @tech{literal
+sets}, imported with the @scheme[#:literal-sets] option. The
+literal-set definition determines the literal identifiers to recognize
+and the names used in the patterns to recognize those literals.
 
 The @scheme[#:conventions] option imports @tech{convention}s that give
 default syntax classes to pattern variables that do not explicitly
 specify a syntax class.
 }
 
-@defform[(syntax-parser maybe-literals clause ...)]{
+@defform[(syntax-parser parse-option ... clause ...+)]{
 
 Like @scheme[syntax-parse], but produces a matching procedure. The
 procedure accepts a single argument, which should be a syntax object.
@@ -119,8 +365,9 @@ following table:
                  (~rest L-pattern)
                  (~! . L-pattern)]
                 [H-pattern
-                 (~or H-pattern ...+)
                  (~seq . L-pattern)
+                 (~or H-pattern ...+)
+                 (~optional H-pattern optional-option ...)
                  (~describe expr H-pattern)
                  S-pattern]
                 [EH-pattern
@@ -152,9 +399,10 @@ Here are the variants of @tech{S-pattern}:
 @specsubform[pvar-id]{
 
 If @scheme[pvar-id] has no syntax class (by @scheme[#:declare] or
-@scheme[#:convention]), the pattern matches anything. The pattern
-variable is bound to the matched subterm, unless the pattern variable
-is the wildcard (@scheme[_]), in which case no binding occurs.
+@scheme[#:convention]), the pattern matches anything. The
+@deftech{pattern variable} is bound to the matched subterm, unless the
+pattern variable is the wildcard (@scheme[_]), in which case no
+binding occurs.
 
 If @scheme[pvar-id] does have an associated syntax class, it behaves
 like the following form.
@@ -163,9 +411,9 @@ like the following form.
 @specsubform[pvar-id:syntax-class-id]{
 
 Matches only subterms specified by the @svar[syntax-class-id]. The
-syntax class's attributes are computed for the subterm and bound to
-the pattern variables formed by prefixing @svar[pvar-id.] to the
-name of the attribute. @svar[pvar-id] is bound to the matched
+syntax class's @tech{attributes} are computed for the subterm and
+bound to the pattern variables formed by prefixing @svar[pvar-id.] to
+the name of the attribute. @svar[pvar-id] is bound to the matched
 subterm.
 
 If @svar[pvar-id] is @scheme[_], no attributes are bound.
@@ -175,19 +423,27 @@ If @svar[pvar-id] is empty (that is, if the pattern is of the form
 bound, but their names are not prefixed first.
 
 @myexamples[
-(syntax-parse #'x
+(syntax-parse #'a
   [var:id (syntax-e #'var)])
 (syntax-parse #'12
   [var:id (syntax-e #'var)])
-(syntax-parse #'(x y z)
-  [var:id (syntax-e #'var)])]
+(define-syntax-class two
+  #:attributes (x y)
+  (pattern (x y)))
+(syntax-parse #'(a b)
+  [t:two (syntax->datum #'(t t.x t.y))])
+(syntax-parse #'(a b)
+  [t
+   #:declare t two
+   (syntax->datum #'(t t.x t.y))])]
+
 }
 
 @specsubform[literal-id]{
 
 An identifier that appears in the literals list is not a pattern
-variable; instead, it is a literal that matches any identifier
-@scheme[free-identifier=?] to it.
+variable; instead, it is a @deftech{literal} that matches any
+identifier @scheme[free-identifier=?] to it.
 
 Specifically, if @scheme[literal-id] is the ``pattern'' name of an
 entry in the literals list, then it represents a pattern that matches
@@ -261,7 +517,7 @@ See @tech{EH-patterns} for more information.
 
 @specsubform[#:literals (~and) (~and S-pattern ...)]{
 
-Matches any syntax that matches all of the included patterns.
+Matches any term that matches all of the subpatterns.
 
 Attributes bound in subpatterns are available to subsequent
 subpatterns. The whole pattern binds all of the subpatterns'
@@ -272,10 +528,12 @@ term (including its lexical context, source location, etc) while also
 examining its structure. Syntax classes are useful for the same
 purpose, but @scheme[~and] can be lighter weight.
 
-@(interaction-eval #:eval the-eval
-  (begin (define (check-imports . _) #f)))
-
 @myexamples[
+(define-syntax (import stx)
+  (raise-syntax-error #f "illegal use of import" stx))
+(eval:alts
+  (define (check-imports stx) ....)
+  (define (check-imports . _) #f))
 (syntax-parse #'(m (import one two))
   #:literals (import)
   [(_ (~and import-clause (import i ...)))
@@ -291,7 +549,8 @@ purpose, but @scheme[~and] can be lighter weight.
 
 @specsubform[#:literals (~or) (~or S-pattern ...)]{
 
-Matches any term that matches one of the included patterns.
+Matches any term that matches one of the included patterns. The
+alternatives are tried in order.
 
 The whole pattern binds @emph{all} of the subpatterns' attributes. An
 attribute that is not bound by the ``chosen'' subpattern has a value
@@ -461,6 +720,10 @@ Matches a head whose elements, if put in a list, would match the given
 (syntax-parse #'(1 2 3 4)
   [((~seq 1 2 3) 4) 'ok])
 ]
+
+See also the section on @tech{EH-patterns} for more interesting
+examples of @scheme[~seq].
+
 }
 
 @specsubform[#:literals (~or) (~or H-pattern ...)]{
@@ -469,10 +732,32 @@ Like the S-pattern version of @scheme[~or], but matches a term head
 instead.
 
 @myexamples[
-(syntax-parse #'(#:foo 2 a b c)
-  [((~or (~seq #:foo x) (~seq)) y:id ...)
+(syntax-parse #'(m #:foo 2 a b c)
+  [(_ (~or (~seq #:foo x) (~seq)) y:id ...)
+   (attribute x)])
+(syntax-parse #'(m a b c)
+  [(_ (~or (~seq #:foo x) (~seq)) y:id ...)
    (attribute x)])
 ]
+}
+
+@specsubform/subs[#:literals (~optional) (~optional H-pattern optional-option ...)
+                  ([optional-option (code:line #:defaults ([attr-id expr] ...))])]{
+
+Matches either the given head subpattern or an empty head. If the
+@scheme[#:defaults] option is given, the following attribute bindings
+are used if the subpattern does not match. The default attributes must
+be a subset of the subpattern's attributes.
+
+@myexamples[
+(syntax-parse #'(m #:foo 2 a b c)
+  [(_ (~optional (~seq #:foo x) #:defaults ([x #'#f])) y:id ...)
+   (attribute x)])
+(syntax-parse #'(m a b c)
+  [(_ (~optional (~seq #:foo x) #:defaults ([x #'#f])) y:id ...)
+   (attribute x)])
+]
+
 }
 
 @specsubform[#:literals (~describe) (~describe expr H-pattern)]{
@@ -535,7 +820,8 @@ of @scheme[name-expr]"}.
 
 @specsubform/subs[#:literals (~optional) (~optional H-pattern optional-option ...)
                   ([optional-option (code:line #:name name-expr)
-                                    (code:line #:too-many too-many-message-expr)])]{
+                                    (code:line #:too-many too-many-message-expr)
+                                    (code:line #:defaults ([attr-id expr] ...))])]{
 
 Matches if the inner H-pattern matches. This pattern may be used at
 most once in the match of the entire repetition.
@@ -544,6 +830,11 @@ If the pattern is chosen more than once in the repetition sequence,
 then an error is raised with a message, either
 @scheme[too-many-message-expr] or @schemevalfont{"too many occurrences
 of @scheme[name-expr]"}.
+
+If the @scheme[#:defaults] option is given, the following attribute
+bindings are used if the subpattern does not match at all in the
+sequence. The default attributes must be a subset of the subpattern's
+attributes.
 }
 
 
@@ -557,8 +848,10 @@ conditions. The grammar for pattern directives follows:
                (code:line #:declare pattern-id syntax-class-id)
                (code:line #:declare pattern-id (syntax-class-id expr ...))
                (code:line #:with syntax-pattern expr)
+               (code:line #:attr attr-id expr)
                (code:line #:fail-when condition-expr message-expr)
-               (code:line #:fail-unless condition-expr message-expr)]
+               (code:line #:fail-unless condition-expr message-expr)
+               (code:line #:when condition-expr)]
 
 @specsubform[(code:line #:declare pvar-id syntax-class-id)]
 @specsubform[(code:line #:declare pvar-id (syntax-class-id expr ...))]{
@@ -576,15 +869,22 @@ pattern that the @scheme[#:declare] directive applies to.
 
 }
 
-@specsubform[(code:line #:with syntax-pattern expr)]{
+@specsubform[(code:line #:with syntax-pattern stx-expr)]{
+
+Evaluates the @scheme[stx-expr] in the context of all previous
+attribute bindings and matches it against the pattern. If the match
+succeeds, the pattern's attributes are added to environment for the
+evaluation of subsequent side conditions. If the @scheme[#:with] match
+fails, the matching process backtracks. Since a syntax object may
+match a pattern in several ways, backtracking may cause the same
+clause to be tried multiple times before the next clause is reached.
+}
+
+@specsubform[(code:line #:attr attr-id expr)]{
 
 Evaluates the @scheme[expr] in the context of all previous attribute
-bindings and matches it against the pattern. If the match succeeds,
-the pattern's attributes are added to environment for the evaluation
-of subsequent side conditions. If the @scheme[#:with] match fails, the
-matching process backtracks. Since a syntax object may match a pattern
-in several ways, backtracking may cause the same clause to be tried
-multiple times before the next clause is reached.
+bindings and binds it to the attribute named by @scheme[attr-id]. The
+value of @scheme[expr] need not be syntax.
 }
 
 @specsubform[(code:line #:fail-when condition-expr message-expr)]
@@ -598,6 +898,15 @@ given message); otherwise, it continues.
 
 }
 
+@specsubform[(code:line #:when condition-expr)]{
+
+Evaluates the @scheme[condition-expr] in the context of all previous
+attribute bindings. If the value is @scheme[#f], the matching process
+backtracks. In other words, @scheme[#:when] is like
+@scheme[#:fail-unless] without the message argument.
+
+}
+
 @deftogether[[
 @defidform[~or]
 @defidform[~and]
@@ -605,7 +914,6 @@ given message); otherwise, it continues.
 @defidform[~once]
 @defidform[~optional]
 @defidform[~rest]
-@;{@defidform[~struct]}
 @defidform[~describe]
 @defidform[~!]
 @defidform[~bind]
@@ -615,6 +923,21 @@ Syntax pattern keywords, recognized by @scheme[syntax-parse].
 
 }
 
+@;{----------}
+
+@section{Pattern Variables and Attributes}
+
+An @deftech{attribute} is a name bound by a syntax pattern. An
+attribute can be a @tech{pattern variable} itself, or it can be a
+@deftech{nested attribute} coming from the syntax class of some
+pattern variable. The name of a nested attribute is computed by
+concatenating the pattern variable name with the syntax class's
+exported attribute's name, separated by a dot (see the example below).
+
+Attribute names cannot be used directly as expressions (that is,
+attributes are not variables). Instead, an attribute's value can be
+gotten using the @scheme[attribute] special form.
+
 @defform[(attribute attr-id)]{
 
 Returns the value associated with the attribute named
@@ -623,13 +946,76 @@ error is raised. If @scheme[attr-id] is an attribute with a nonzero
 ellipsis depth, then the result has the corresponding level of list
 nesting.
 
-The values returned by @scheme[attribute] never undergo additional
-wrapping as syntax objects, unlike values produced by some uses of
-@scheme[syntax], @scheme[quasisyntax], etc. Consequently, the
-@scheme[attribute] form is preferred when the attribute value is used
-as data, not placed in a syntax object.
-
 }
+
+The value of an attribute need not be syntax. Non-syntax-valued
+attributes can be used to return a parsed representation of a subterm
+or the results of an analysis on the subterm. A non-syntax-valued
+attribute should be bound using the @scheme[#:attr] directive or a
+@scheme[~bind] pattern.
+
+@myexamples[
+(define-syntax-class table
+  (pattern ((key value) ...)
+           #:attr hash
+                  (for/hash ([k (syntax->datum #'(key ...))]
+                             [v (syntax->datum #'(value ...))])
+                    (values k v))))
+(syntax-parse #'((a 1) (b 2) (c 3))
+  [t:table
+   (attribute t.hash)])
+]
+
+A syntax-valued attribute is an attribute whose value is a syntax
+object or a syntax list of the appropriate @tech{ellipsis
+depth}. Syntax-valued attributes can be used within @scheme[syntax],
+@scheme[quasisyntax], etc as part of a syntax template. If a
+non-syntax-valued attribute is used in a syntax template, a runtime
+error is signalled.
+
+@myexamples[
+(syntax-parse #'((a 1) (b 2) (c 3))
+  [t:table
+   #'(t.key ...)])
+(syntax-parse #'((a 1) (b 2) (c 3))
+  [t:table
+   #'t.hash])
+]
+
+Every attribute has an associated @deftech{ellipsis depth} that
+determines how it can be used in a syntax template (see the discussion
+of ellipses in @scheme[syntax]). For a pattern variable, the ellipsis
+depth is the number of ellipses the pattern variable ``occurs under''
+in the pattern. For a nested attribute the depth is the sum of the
+pattern variable's depth and the depth of the attribute in the syntax
+class. Consider the following code:
+
+@schemeblock[
+(define-syntax-class quark
+  (pattern (a b ...)))
+(syntax-parse some-term
+  [(x (y:quark ...) ... z:quark)
+   some-code])
+]
+
+The syntax class @scheme[quark] exports two attributes: @scheme[a] at
+depth 0 and @scheme[b] at depth 1. The @scheme[syntax-parse] pattern
+has three pattern variables: @scheme[x] at depth 0, @scheme[y] at
+depth 2, and @scheme[z] at depth 0. Since @scheme[x] and @scheme[y]
+are annotated with the @scheme[quark] syntax class, the pattern also
+binds the following nested attributes: @scheme[y.a] at depth 2,
+@scheme[y.b] at depth 3, @scheme[z.a] at depth 0, and @scheme[z.b] at
+depth 1.
+
+An attribute's ellipsis nesting depth is @emph{not} a guarantee that
+its value has that level of list nesting. In particular, @scheme[~or]
+and @scheme[~optional] patterns may result in attributes with fewer
+than expected levels of list nesting.
+
+@(myexamples
+  (syntax-parse #'(1 2 3)
+    [(~or (x:id ...) _)
+     (attribute x)]))
 
 @;{----------}
 
@@ -637,7 +1023,7 @@ as data, not placed in a syntax object.
 
 Syntax classes provide an abstraction mechanism for the specification
 of syntax. Built-in syntax classes are supplied that recognize basic
-classes such as @scheme[identifier]s and @scheme[keyword]s.
+classes such as @scheme[identifier] and @scheme[keyword].
 Programmers can compose basic syntax classes to build specifications
 of more complex syntax, such as lists of distinct identifiers and
 formal arguments with keywords. Macros that manipulate the same
@@ -683,8 +1069,8 @@ depth (zero if not explicitly specified).
 If the attributes are not explicitly listed, they are inferred as the
 set of all pattern variables occurring in every variant of the syntax
 class. Pattern variables that occur at different ellipsis depths are
-not included, nor are nested attributes.
-
+not included. Only nested attributes from previously declared syntax
+classes are included.
 }
 
 @specsubform[(code:line #:description description)]{
@@ -754,10 +1140,9 @@ Keyword recognized by @scheme[define-syntax-class]. It may not be
 used as an expression.
 }
 
-
 @subsection{Attributes}
 
-A syntax class has a set of @deftech{attribute}s. Each attribute has a
+A syntax class has a set of @tech{attributes}. Each attribute has a
 name, an ellipsis depth, and a set of nested attributes. When an
 instance of the syntax class is parsed and bound to a pattern
 variable, additional pattern variables are bound for each of the
@@ -806,7 +1191,7 @@ places. The most common example is the literals for fully expanded
 programs, which are used in many analysis and transformation
 tools. Specifying literals individually is burdensome and error-prone.
 As a remedy, @schememodname[syntax/parse] offers @deftech{literal
-set}s. A literal set is defined via @scheme[define-literal-set] and
+sets}. A literal set is defined via @scheme[define-literal-set] and
 used via the @scheme[#:literal-set] option of @scheme[syntax-parse].
 
 @defform/subs[(define-literal-set name-id (literal ...))
@@ -854,14 +1239,15 @@ class.
   [#rx"^n" nat])
 (syntax-parse #'(a b c 1 2 3)
   #:conventions (xn-prefixes)
-  [(x0 x ... n0 n ...) (syntax->datum #'(x0 (x ...) n0 (n ...)))])
+  [(x0 x ... n0 n ...)
+   (syntax->datum #'(x0 (x ...) n0 (n ...)))])
 ]
 
 }
 
 @;{----------}
 
-@section{Library syntax classes and literal sets}
+@section[#:tag "lib"]{Library syntax classes and literal sets}
 
 @subsection{Syntax classes}
 
@@ -927,13 +1313,12 @@ identifier based on their symbolic names rather than their bindings.
 
 @defidform[kernel-literals]{
 
-Literal set containing the identifiers for fully-expanded code. The
-set contains all of the forms listed by
+Literal set containing the identifiers for fully-expanded code
+(@secref[#:doc '(lib "scribblings/reference/reference.scrbl")
+"fully-expanded"]). The set contains all of the forms listed by
 @scheme[kernel-form-identifier-list], plus @scheme[module],
 @scheme[#%plain-module-begin], @scheme[#%require], and
 @scheme[#%provide].
-
-@;{See @secref[#:doc '(lib "scribblings/reference/reference.scrbl") 'fully-expanded].}
 
 Note that the literal-set uses the names @scheme[#%plain-lambda] and
 @scheme[#%plain-app], not @scheme[lambda] and @scheme[#%app].

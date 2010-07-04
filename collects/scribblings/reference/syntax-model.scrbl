@@ -252,6 +252,10 @@ in which case the relevant @tech{phase level} is 1 (for which
 comparisons are made using @scheme[free-transformer-identifier=?]
 instead of @scheme[free-identifier=?]).
 
+In addition to the grammar above, @scheme[letrec-syntaxes+values] can
+appear in a fully local-expanded expression, such as the result from
+@scheme[local-expand] when the stop list is empty.
+
 @;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 @subsection[#:tag "expand-steps"]{Expansion Steps}
 
@@ -849,7 +853,8 @@ the procedure bound to @scheme[my-f] will have the inferred name
 When an @indexed-scheme['inferred-name] property is attached to a
 syntax object for an expression (see @secref["stxprops"]), the
 property value is used for naming the expression, and it overrides any
-name that was inferred from the expression's context.
+name that was inferred from the expression's context. Normally, the
+property value should be a symbol or an identifier.
 
 When an inferred name is not available, but a source location is
 available, a name is constructed using the source location

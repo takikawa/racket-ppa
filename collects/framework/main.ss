@@ -54,6 +54,37 @@
   (link standard-mred@ framework@))
 
 (provide/doc
+ 
+ (proc-doc/names 
+  text:range? (-> any/c boolean?) (arg)
+  @{Determines if @scheme[arg] is an instance of the @tt{range} struct.})
+ 
+ (proc-doc/names
+  text:range-start
+  (-> text:range? exact-nonnegative-integer?)
+  (range)
+  @{Returns the start position of the range.})
+ (proc-doc/names
+  text:range-end
+  (-> text:range? exact-nonnegative-integer?)
+  (range)
+  @{Returns the end position of the range.})
+ (proc-doc/names
+  text:range-caret-space?
+  (-> text:range? boolean?)
+  (range)
+  @{Returns a boolean indicating where the caret-space in the range goes. See also @method[text:basic<%> highlight-range].})
+ (proc-doc/names
+  text:range-style
+  (-> text:range? exact-nonnegative-integer?)
+  (range)
+  @{Returns the style of the range. See also @method[text:basic<%> highlight-range].})
+ (proc-doc/names
+  text:range-color
+  (-> text:range? (or/c string? (is-a?/c color%)))
+  (range)
+  @{Returns the color of the highlighted range.})
+    
  (parameter-doc
   text:autocomplete-append-after
   (parameter/c string?)
@@ -854,7 +885,7 @@
   ()
   @{This returns the reset unlocked @scheme[bitmap].
          
-         The bitmap may not respond @scheme[#t] to the @link bitmap ok?
+         The bitmap may not respond @scheme[#t] to the @method[bitmap% ok?]
          method.})
  
  (proc-doc/names
@@ -870,10 +901,10 @@
   icon:get-left/right-cursor
   (-> (is-a?/c cursor%))
   ()
-  @{This function returns a @link cursor object that indicates
+  @{This function returns a @scheme[cursor%] object that indicates
          left/right sizing is possible, for use with columns inside a window.
          
-         The cursor may not respond @scheme[#t] to the @link cursor ok?
+         The cursor may not respond @scheme[#t] to the @method[cursor% ok?]
          method.})
  
  (proc-doc/names
@@ -893,7 +924,7 @@
   @{This returns a bitmap to be displayed in an @scheme[frame:info<%>]
          frame when garbage collection is taking place.
          
-         The bitmap may not respond @scheme[#t] to the @link bitmap ok?
+         The bitmap may not respond @scheme[#t] to the @method[bitmap% ok?]
          method.})
  
  (proc-doc/names
@@ -1233,7 +1264,7 @@
   keymap:setup-search
   ((is-a?/c keymap%) . -> . void?)
   (keymap)
-  @{This extends a @link keymap with the bindings for searching.})
+  @{This extends a @scheme[keymap%] with the bindings for searching.})
  
  (proc-doc/names
   keymap:set-chained-keymaps
@@ -1271,7 +1302,8 @@
   ((text)
    ((start 0) (end #f)))
   @{Determines if the range in the editor from @scheme[start] to
-               @scheme[end] in @scheme[text] is a matched set of parenthesis.  If
+               @scheme[end] in @scheme[text] has at least one complete s-expression and
+               there are no incomplete s-expressions.  If
                @scheme[end] is @scheme[#f], it defaults to the last position of the
                @scheme[text].
                
@@ -1344,7 +1376,7 @@
   scheme:get-wordbreak-map
   (-> (is-a?/c editor-wordbreak-map%))
   ()
-  @{This method returns a @link editor-wordbreak-map that is suitable
+  @{This method returns a @scheme[editor-wordbreak-map%] that is suitable
          for Scheme.})
  
  (proc-doc/names

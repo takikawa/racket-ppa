@@ -10,6 +10,7 @@
          scheme/match
          scheme/system
          scheme/list
+         scheme/string
          compiler/cm
          planet/planet-archives
          planet/private/planet-shared
@@ -233,11 +234,12 @@
   (define (planet->cc path owner pkg-file extra-path maj min)
     (unless (path? path)
       (error 'planet->cc "non-path when building package ~e" pkg-file))
-    (make-cc* #f
-              path
-              #f ; don't need root-dir; absolute paths in cache.ss will be ok
-              (get-planet-cache-path)
-              (list `(planet ,owner ,pkg-file ,@extra-path) maj min)))
+    (and (directory-exists? path)
+         (make-cc* #f
+                   path
+                   #f ; don't need root-dir; absolute paths in cache.ss will be ok
+                   (get-planet-cache-path)
+                   (list `(planet ,owner ,pkg-file ,@extra-path) maj min))))
 
   ;; planet-cc->sub-cc : cc (listof bytes [encoded path]) -> cc
   ;; builds a compilation job for the given subdirectory of the given cc this
@@ -344,7 +346,8 @@
     ;; file we assume that we generated it rather than another setup-plt
     ;; process
     (define all-ccs (plt-collection-closure all-collections))
-    (define (cc->name cc) (apply build-path (cc-collection cc)))
+    (define (cc->name cc)
+      (string-join (map path->string (cc-collection cc)) "/"))
     (define all-names   (map cc->name all-ccs))
     (define given-names (map cc->name given-ccs))
     (define (cc-mark cc) (build-path (cc-path cc) ".setup-plt-marker"))
@@ -694,7 +697,7 @@
                               (setup-fprintf (current-error-port) #f " deleting ~a" (build-path c p))
                               (delete-file (build-path c p))))))))
                   ;; Make .zos
-                  (compile-directory-zos dir info #:skip-path compile-skip-directory))
+                  (compile-directory-zos dir info #:skip-path compile-skip-directory #:skip-doc-sources? (not (make-docs))))
                 make-base-empty-namespace))))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

@@ -4,7 +4,7 @@
 
 (require (except-in "../utils/utils.ss" extend))
 (require
- (rep type-rep)
+ (rep type-rep filter-rep object-rep)
  (typecheck internal-forms)
  (utils tc-utils require-contract)
  (env type-name-env)
@@ -48,7 +48,7 @@
   (= (length l) (length (remove-duplicates l))))
 
 
-(define (type->contract ty fail)
+(define (type->contract ty fail #:out [out? #f])
   (define vars (make-parameter '()))
   (let/ec exit
     (let loop ([ty ty] [pos? #t])
@@ -64,19 +64,26 @@
         [(Base: sym cnt) cnt]
         [(Refinement: par p? cert)
          #`(and/c #,(t->c par) (flat-contract #,(cert p?)))]
-        [(Union: elems) 
-         (with-syntax 
-             ([cnts (map t->c elems)])
-           #;(printf "~a~n" (syntax-object->datum #'cnts))
-           #'(or/c . cnts))]
+        [(Union: elems)         
+         (let-values ([(vars notvars)
+                       (partition F? elems)])
+           (unless (>= 1 (length vars)) (exit (fail)))
+           (with-syntax 
+               ([cnts (append (map t->c vars) (map t->c notvars))])
+             #'(or/c . cnts)))]
         [(Function: arrs)
          (let ()           
            (define (f a)
              (define-values (dom* rngs* rst)
                (match a
-                 [(arr: dom (Values: (list (Result: rngs _ _) ...)) rst #f '())
+                 [(arr: dom (Values: (list (Result: rngs (LFilterSet: '() '()) (LEmpty:)) ...)) rst #f '())
                   (values (map t->c/neg dom) (map t->c rngs) (and rst (t->c/neg rst)))]
+                 [(arr: dom (Values: (list (Result: rngs _ _) ...)) rst #f '())
+                  (if (and out? pos?)
+                      (values (map t->c/neg dom) (map t->c rngs) (and rst (t->c/neg rst)))
+                      (exit (fail)))]
                  [_ (exit (fail))]))
+             (trace f)
              (with-syntax 
                  ([(dom* ...) dom*]
                   [rng* (match rngs*
@@ -93,9 +100,9 @@
 	     [(list e) e]
 	     [l #`(case-> #,@l)]))]
         [(Vector: t)
-         #`(vector-immutableof #,(t->c t))]
+         #`(vectorof #,(t->c t))]
         [(Box: t)
-         #`(box-immutable/c #,(t->c t))]
+         #`(box/c #,(t->c t))]
         [(Pair: t1 t2)
          #`(cons/c #,(t->c t1) #,(t->c t2))]
         [(Opaque: p? cert)
@@ -127,7 +134,7 @@
         [(Syntax: t) #`(syntax/c #,(t->c t))]
         [(Value: v) #`(flat-named-contract #,(format "~a" v) (lambda (x) (equal? x '#,v)))]
         [(Param: in out) #`(parameter/c #,(t->c out))]
-	[(Hashtable: k v) #`hash?]
+	[(Hashtable: k v) #`(hash/c #,(t->c k) #,(t->c v) #:immutable 'dont-care)]
         [else          
          (exit (fail))]))))
 

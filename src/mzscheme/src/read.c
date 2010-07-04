@@ -115,6 +115,7 @@ static Scheme_Object *print_unreadable(int, Scheme_Object *[]);
 static Scheme_Object *print_pair_curly(int, Scheme_Object *[]);
 static Scheme_Object *print_mpair_curly(int, Scheme_Object *[]);
 static Scheme_Object *print_honu(int, Scheme_Object *[]);
+static Scheme_Object *print_syntax_width(int, Scheme_Object *[]);
 
 #define NOT_EOF_OR_SPECIAL(x) ((x) >= 0)
 
@@ -475,6 +476,7 @@ void scheme_init_read(Scheme_Env *env)
   GLOBAL_PARAMETER("print-pair-curly-braces",       print_pair_curly,       MZCONFIG_PRINT_PAIR_CURLY,            env);
   GLOBAL_PARAMETER("print-mpair-curly-braces",      print_mpair_curly,      MZCONFIG_PRINT_MPAIR_CURLY,           env);
   GLOBAL_PARAMETER("print-honu",                    print_honu,             MZCONFIG_HONU_MODE,                   env);
+  GLOBAL_PARAMETER("print-syntax-width",            print_syntax_width,     MZCONFIG_PRINT_SYNTAX_WIDTH,          env);
 
   GLOBAL_PRIM_W_ARITY("make-readtable",     make_readtable,     1, -1,      env);
   GLOBAL_FOLDING_PRIM("readtable?",         readtable_p,        1, 1, 1,    env);
@@ -683,6 +685,31 @@ static Scheme_Object *
 print_honu(int argc, Scheme_Object *argv[])
 {
   DO_CHAR_PARAM("print-honu", MZCONFIG_HONU_MODE);
+}
+
+static Scheme_Object *good_syntax_width(int c, Scheme_Object **argv)
+{
+  int ok;
+
+  ok = (SCHEME_INTP(argv[0]) 
+	? ((SCHEME_INT_VAL(argv[0]) > 3)
+           || !SCHEME_INT_VAL(argv[0]))
+	: (SCHEME_BIGNUMP(argv[0])
+	   ? SCHEME_BIGPOS(argv[0])
+	   : (SCHEME_FLTP(argv[0])
+              ? MZ_IS_POS_INFINITY(SCHEME_FLT_VAL(argv[0]))
+              : 0)));
+
+  return ok ? scheme_true : scheme_false;
+}
+
+static Scheme_Object *
+print_syntax_width(int argc, Scheme_Object *argv[])
+{
+  return scheme_param_config("print-syntax-width",
+			     scheme_make_integer(MZCONFIG_PRINT_SYNTAX_WIDTH),
+			     argc, argv,
+			     -1, good_syntax_width, "+inf.0, 0, or exact integer greater than three", 0);
 }
 
 #ifdef LOAD_ON_DEMAND
@@ -4654,7 +4681,7 @@ static Scheme_Object *read_compact(CPort *port, int use_stack)
       break;
     case CPT_REFERENCE:
       l = read_compact_number(port);
-      RANGE_CHECK(l, < EXPECTED_PRIM_COUNT);
+      RANGE_CHECK(l, < (EXPECTED_PRIM_COUNT + EXPECTED_UNSAFE_COUNT));
       return variable_references[l];
       break;
     case CPT_LOCAL:
@@ -5035,7 +5062,7 @@ static Scheme_Object *read_compact_quote(CPort *port, int embedded)
 static Scheme_Object *read_marshalled(int type, CPort *port)
 {
   Scheme_Object *l;
-  Scheme_Type_Reader reader;
+  Scheme_Type_Reader2 reader;
 
   l = read_compact(port, 1);
 
@@ -5049,7 +5076,7 @@ static Scheme_Object *read_marshalled(int type, CPort *port)
     scheme_ill_formed_code(port);
   }
 
-  l = reader(l);
+  l = reader(l, port->insp);
 
   if (!l)
     scheme_ill_formed_code(port);
@@ -5506,6 +5533,11 @@ void scheme_unmarshal_wrap_set(Scheme_Unmarshal_Tables *ut,
 
   ut->rp->symtab[l] = v;
   ut->decoded[l] = 1;
+}
+
+Scheme_Object *scheme_get_cport_inspector(struct CPort *rp)
+{
+  return rp->insp;
 }
 
 /*========================================================================*/

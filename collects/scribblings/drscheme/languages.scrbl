@@ -1,5 +1,8 @@
 #lang scribble/doc
-@(require "common.ss")
+@(require "common.ss"
+          (for-label errortrace/errortrace-lib
+                     compiler/cm
+                     planet/config))
 
 @title[#:tag "languages" #:style 'toc]{Languages}
 
@@ -22,6 +25,51 @@ window} must contain a module in some form. Besides @hash-lang[], a
 Scheme module can be written as @scheme[(module ...)]. In any case,
 aside from comments, the @tech{definitions window} must contain
 exactly one module.
+
+In the details pane of the module langauge, some of the
+configuration options for the Module language that correspond
+to using various libraries and thus can be used without DrScheme. 
+Here's how, for the ones that are straightforward (the ones
+not mentioned here require more sophisticated configuration
+of various libraries).
+
+@itemize[
+ @item{@bold{Dynamic Properties}: 
+        The radio buttons corresond to various uses of the @schememodname[errortrace/errortrace-lib] library.
+        
+        The @italic{No Debugging or profiling} option means not to use the library at all.
+        
+        The @italic{Debugging} option means @scheme[(current-compile (make-errortrace-compile-handler))] as well as
+        adding @scheme[(build-path "compiled" "errortrace")] to @scheme[use-compiled-file-paths].
+        
+        The @italic{Debugging and profiling} option means to use @schememodname[errortrace/errortrace-lib] library's 
+        @scheme[profiling-enabled] in conjunction with @scheme[current-eval].
+        
+        The @italic{Syntactic test suite coverage} option means to use @scheme[test-coverage-enabled]
+        in conjunction with @scheme[current-eval].
+
+        The other two checkboxes save compiled @tt{.zo} files and adjust the JIT compiler. 
+        
+        The @italic{populate compiled/ directories} option corresponds to 
+        @schemeblock[(current-load/use-compiled 
+                      (make-compilation-manager-load/use-compiled-handler))
+                     (manager-skip-file-handler
+                      (λ (p) 
+                        (file-date-in-paths 
+                         p
+                         (cons (CACHE-DIR) (current-library-collection-paths)))))]
+        plus adding either @scheme[(build-path "compiled" "drscheme")] or 
+        @scheme[(build-path "compiled" "drscheme" "errortrace")]
+        to the front of @scheme[use-compiled-file-paths], depending if the
+        @italic{Debugging} option is set or not.
+        
+        The @italic{Preserve stacktrace} option corresponds to 
+        @schemeblock[(compile-context-preservation-enabled #t)]
+        }
+ @item{@bold{Output Syntax}: The output syntax options correspond to settings in the @scheme[scheme/pretty] library and the @scheme[scheme/pconvert] library.}
+ @item{@bold{Collection Paths}: This corresponds to setting the @scheme[current-library-collection-paths] parameter.}
+ @item{@bold{Command-line arguments}: This corresponds to setting the @scheme[current-command-line-arguments] parameter.}
+]
 
 @; ----------------------------------------
 
@@ -292,72 +340,6 @@ A program in the teaching languages should be tested using the check forms ---
  for details on configuring the report behavior. 
  
  Tests can be disabled if necessary, see @secref["menu:scheme"] for details.
-
-@; ----------------------------------------
-
-@section[#:tag "profj"]{ProfessorJ}
-
-The ProfessorJ languages are Java based languages designed for teaching and
- experimentation. There are four teaching based languages:
-
-@itemize[
-
- @item{The @as-index{@drlang{ProfessorJ Beginner} language} is a small
-       subset of Java, designed for novice computer science students. 
-       Each class must contain a constructor that initializes the class's
-       fields; each method must return a value.}
-       
- @item{The @as-index{@drlang{ProfessorJ Intermediate} language} is an extension to 
-       ProfessorJ Beginner that adds full class-based inheritance and mutation.
-       Classes do not require constructors and null values may arise.}
-
- @item{The @as-index{@drlang{ProfessorJ Intermediate + access} language} adds
-       access controls, such as public or private, to member definitions and 
-       supports overloading constructor definitions.}
-
- @item{The @as-index{@drlang{ProfessorJ Advanced} language} adds arrays, loop
-       constructs, and package specifications.}
-
-]
-
-The remaining two languages support language extensions and experimentations:
-
-@itemize[
- @item{The @as-index{@drlang{ProfessorJ Full} language} supports most of Java 1.1
-       features, as well as a set of constructs designed for the development of 
-       unit tests}
- @item{The @as-index{@drlang{ProfessorJ Java + dynamic} language} extends the
-       ProfessorJ Full language with a dynamic type and the ability to import Scheme
-       libraries directly, for developing programs that use both languages.}
- ]
-
-Value printing can be either @defterm{Class} or @defterm{Class + Field}, selectable
- in the show details section of the language selection window. The Class printing style
- only displays the class name for any object value. The Class + Field style displays
- the class combined with the names and values for all of the class's fields; when displaying
- a recursively defined object, any repeated object reverts to the Class style display for
- the second appearance. Languages with arrays may opt to always display an entire array or
- truncate the middle section of longer arrays.
-
-All of the ProfessorJ languages support testing extensions, and tests are required
- within the teaching languages. The experimental languages, Full and Java + dynamic, 
- allow the removal of these forms within the language selection window. 
- 
-Programs in the teaching languages must be tested, using a class containing the word
- 'Example' in the name and the 'check ... expect ...' comparison forms. On run,
- all Example classes are instanstiated and all methods prefixed with the word 'test' 
- are run. When there are no tests, a warning appears in the interactions window; 
- when all tests succeed, an acknowledgement appears in the interactions window;
- otherwise, a testing window appears to report the results. See @secref["menu:view"] 
- for details on configuring the report behavior. Tests can be disabled if necessary,
- see @secref["menu:scheme"] for details.
- 
-Unless disabled in the language configuration window, expression-level coverage 
- information is collected during testing. Selecting the buttons within the report
- modifies the color of the program in the definitions window, to distinguish 
- expressions that were used in the test from those that were not. Typing into the
- definitions window restores the original coloring.
-      
 
 @; ----------------------------------------
 

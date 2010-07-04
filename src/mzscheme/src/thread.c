@@ -336,6 +336,7 @@ static Scheme_Object *make_parameter(int argc, Scheme_Object *args[]);
 static Scheme_Object *make_derived_parameter(int argc, Scheme_Object *args[]);
 static Scheme_Object *extend_parameterization(int argc, Scheme_Object *args[]);
 static Scheme_Object *parameterization_p(int argc, Scheme_Object *args[]);
+static Scheme_Object *reparameterize(int argc, Scheme_Object **argv);
 
 static Scheme_Object *make_thread_cell(int argc, Scheme_Object *args[]);
 static Scheme_Object *thread_cell_p(int argc, Scheme_Object *args[]);
@@ -857,6 +858,12 @@ void scheme_init_parameterization(Scheme_Env *env)
 			     scheme_make_prim_w_arity(check_break_now,
 						      "check-for-break", 
 						      0, 0), 
+			     newenv);
+
+  scheme_add_global_constant("reparameterize",
+                             scheme_make_prim_w_arity(reparameterize,
+						      "reparameterize", 
+						      1, 1), 
 			     newenv);
 
 
@@ -4088,6 +4095,11 @@ void scheme_thread_block(float sleep_time)
   /* Check scheduled_kills early and often. */
   check_scheduled_kills();
 
+#ifdef UNIX_PROCESSES
+  /* Reap zombie processes: */
+  scheme_check_child_done();
+#endif
+
   shrink_cust_box_array();
 
   if (scheme_active_but_sleeping)
@@ -6211,6 +6223,12 @@ void scheme_set_param(Scheme_Config *c, int pos, Scheme_Object *o)
 			 scheme_current_thread->cell_values, o);
 }
 
+static Scheme_Parameterization *malloc_paramz()
+{
+  return (Scheme_Parameterization *)scheme_malloc_tagged(sizeof(Scheme_Parameterization) + 
+                                                         (max_configs - 1) * sizeof(Scheme_Object*));
+}
+
 void scheme_flatten_config(Scheme_Config *orig_c)
 {
   int pos, i;
@@ -6220,8 +6238,7 @@ void scheme_flatten_config(Scheme_Config *orig_c)
   Scheme_Config *c;
 
   if (orig_c->next) {
-    paramz = (Scheme_Parameterization *)scheme_malloc_tagged(sizeof(Scheme_Parameterization) + 
-							     (max_configs - 1) * sizeof(Scheme_Object*));
+    paramz = malloc_paramz();
 #ifdef MZTAG_REQUIRED
     paramz->type = scheme_rt_parameterization;
 #endif
@@ -6346,6 +6363,42 @@ static Scheme_Object *extend_parameterization(int argc, Scheme_Object *argv[])
   }
 
   return (Scheme_Object *)c;
+}
+
+static Scheme_Object *reparameterize(int argc, Scheme_Object **argv)
+{
+  /* Clones values of all built-in parameters in a new parameterization.
+     This could be implemented in Scheme by enumerating all built-in parameters,
+     but it's easier and faster here. We need this for the Planet resolver. */
+  Scheme_Config *c, *naya;
+  Scheme_Parameterization *pz, *npz;
+  Scheme_Object *v;
+  int i;
+
+  if (!SCHEME_CONFIGP(argv[0]))
+    scheme_wrong_type("reparameterize", "parameterization", 0, argc, argv);
+  
+  c = (Scheme_Config *)argv[0];
+  scheme_flatten_config(c);
+
+  pz = (Scheme_Parameterization *)c->cell;
+  npz = malloc_paramz();
+  memcpy(npz, pz, sizeof(Scheme_Parameterization));
+
+  naya = MALLOC_ONE_TAGGED(Scheme_Config);
+  naya->so.type = scheme_config_type;
+  naya->depth = 0;
+  naya->key = NULL;
+  naya->cell = (Scheme_Object *)npz;
+  naya->next = NULL;
+
+  for (i = 0; i < max_configs; i++) {
+    v = scheme_thread_cell_get(pz->prims[i], scheme_current_thread->cell_values);
+    v = scheme_make_thread_cell(v, 1);
+    npz->prims[i] = v;
+  }
+
+  return (Scheme_Object *)naya;
 }
 
 static Scheme_Object *parameter_p(int argc, Scheme_Object **argv)
@@ -6545,6 +6598,7 @@ static void make_initial_config(Scheme_Thread *p)
   init_param(cells, paramz, MZCONFIG_PRINT_UNREADABLE, scheme_true);
   init_param(cells, paramz, MZCONFIG_PRINT_PAIR_CURLY, scheme_false);
   init_param(cells, paramz, MZCONFIG_PRINT_MPAIR_CURLY, scheme_true);
+  init_param(cells, paramz, MZCONFIG_PRINT_SYNTAX_WIDTH, scheme_make_integer(32));
 
   init_param(cells, paramz, MZCONFIG_HONU_MODE, scheme_false);
 

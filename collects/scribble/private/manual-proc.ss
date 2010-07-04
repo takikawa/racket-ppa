@@ -3,7 +3,6 @@
          "../struct.ss"
          "../scheme.ss"
          "../search.ss"
-         "../config.ss"
          "../basic.ss"
          "../manual-struct.ss"
          "qsloc.ss"
@@ -22,14 +21,15 @@
 
 (provide defproc defproc* defstruct
          defparam defparam* defboolparam
-         defthing defthing* defthing/proc
+         defthing defthing* 
+         defthing/proc ; XXX unknown contract
          ;; private:
-         *defthing)
+         *defthing) ; XXX unknown contract
 
 (define dots0
-  (make-element "schememeta" (list "...")))
+  (make-element meta-color (list "...")))
 (define dots1
-  (make-element "schememeta" (list "...+")))
+  (make-element meta-color (list "...+")))
 
 (define (make-openers n)
   (schemeparenfont
@@ -772,7 +772,7 @@
                (list content)
                tag
                (list name)
-               (list (schemeidfont (make-element "schemevaluelink"
+               (list (schemeidfont (make-element value-link-color
                                                  (list name))))
                (with-exporting-libraries
                 (lambda (libs)

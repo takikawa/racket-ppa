@@ -54,6 +54,9 @@
   (define user-installed-teachpacks-collection "installed-teachpacks")
   (define teachpack-installation-dir (build-path (find-user-collects-dir) user-installed-teachpacks-collection))
 
+  (define generic-proc
+    (procedure-rename void '?))
+
   ;; adapted from collects/drscheme/private/main.ss
   (preferences:set-default 'drscheme:deinprogramm:last-set-teachpacks
                            '() 
@@ -205,7 +208,11 @@
 				 obj contract message blame))))))
                  (scheme-test-data (list (drscheme:rep:current-rep) drs-eventspace contract-test-display%))
                  (test-execute (get-preference 'tests:enable? (lambda () #t)))
-                 (test-format (make-formatter (lambda (v o) (render-value/format v settings o 40))))
+                 (test-format (make-formatter (lambda (v o)
+						(render-value/format (if (procedure? v)
+									 generic-proc
+									 v)
+								     settings o 40))))
 		 )))
             (super on-execute settings run-in-user-thread)
 
@@ -1086,6 +1093,8 @@
             (class* % (stepper-language<%>)
               (init-field stepper:supported)
               (define/override (stepper:supported?) stepper:supported)
+              (define/override (stepper:show-inexactness?) #f)
+              (define/override (stepper:show-consumed-and/or-clauses?) #f)
               (define/override (stepper:render-to-sexp val settings language-level)
                 (parameterize ([pc:current-print-convert-hook (make-print-convert-hook settings)])
                   (set-print-settings

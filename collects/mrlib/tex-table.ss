@@ -135,6 +135,7 @@
     ("succ" "≻")
     ("sim" "∼")
     ("perp" "⊥")
+    ("top" "⊤")
     ("preceq" "≼")
     ("succeq" "≽")
     ("simeq" "≃")
@@ -162,6 +163,8 @@
     ("propto" "∝")
     ("vdash" "⊢")
     ("dashv" "⊣")
+    
+    ("sqrt" "√")
     
     ("skull" "☠") 
     ("smiley" "☺")

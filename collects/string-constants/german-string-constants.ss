@@ -98,6 +98,7 @@
  (cs-view-docs-from "~a aus ~a")  ;; a completed version of the line above (cs-view-docs) is put into the first ~a and a list of modules (separated by commas) is put into the second ~a. Use check syntax and right-click on a documented variable (eg, 'require') to see this in use
   
  (cs-lexical-variable "lexikalische Variable")
+ (cs-set!d-variable "geset!zte Variable")
  (cs-imported-variable "importierte Variable")
 
  ;;; info bar at botttom of drscheme frame
@@ -130,6 +131,9 @@
   "WARNUNG: Die Teachpacks haben sich geändert. \"Start\" drücken.")
  (needs-execute-defns-edited
   "WARNUNG: Die Definitionen haben sich geändert. \"Start\" drücken.")
+
+ (editor-changed-since-srcloc-recorded
+  "Dieser Editor wurde geändert seit die Quelltext-Stellen zugeordnet wurden: die markierte Region entspricht möglicherweise nicht mehr der korrekten Stelle im Quelltext.")
 
  (file-is-not-saved "Die Datei \"~a\" ist nicht gespeichert.")
  (save "Speichern")
@@ -909,7 +913,10 @@
  (enforce-primitives-group-box-label "Initiale Bindungen")
  (enforce-primitives-check-box-label "Änderungen von initialen Bindungen verbieten")
 
- (automatically-compile? "Quelldateien automatisch compilieren?")
+ (automatically-compile "compiled/-Verzeichnisse bestücken (für schnelleres laden)")
+ (preserve-stacktrace-information "Stack-Trace aufbewahren (einige JIT-Optimierungen werden abgeschaltet)")
+ (expression-level-stacktrace "Stack-Trace mit Ausdrücken")
+ (function-level-stacktrace "Stack-Trace mit Funktionen")
 
  ;; used in the bottom left of the drscheme frame as the label
  ;; above the programming language's name
@@ -1090,6 +1097,7 @@
  (module-browser-name-short "Kurz")
  (module-browser-name-medium "Mittel")
  (module-browser-name-long "Lang")
+ (module-browser-name-very-long "Lang mit Phasen")  ;; like 'Long' but shows the phases where this file is loaded
  (module-browser-open-all "Alle hier angezeigten Datein öffnen")
 
  (happy-birthday-matthias "Happy Birthday, Matthias!")
@@ -1147,13 +1155,19 @@
  (stepper-language-level-message
   "Der Stepper unterstützt die Sprachebene \"~a\" nicht.")
  (stepper-button-label "Stepper")
- (stepper-home "Anfang")
+
  (stepper-previous-application "|< Applikation")
  (stepper-previous "< Schritt")
  (stepper-next "Schritt >")
  (stepper-next-application "Applikation >|")
- (stepper-jump-to-end "Ende")
- (stepper-jump "Springen zu ...")
+ (stepper-jump "Springen ...")
+ (stepper-out-of-steps "Ende der Auswertung erreicht, bevor ein angemessener Schritt gefunden werden konnte.")
+ (stepper-no-such-step/title "Kein Schritt gefunden.")
+ (stepper-no-such-step "Kein Schritt gefunden, der das Kriterium erfüllt.")
+ (stepper-no-such-step/earlier "Kein früherer Schritt gefunden, der das Kriterium erfüllt.")
+ (stepper-jump-to-beginning "an den Anfang") ;; name changed from stepper-home to stepper-jump-to-beginning
+ (stepper-jump-to-end "ans Ende") ;; content changed
+ (stepper-jump-to-selected "an den Anfang des markierten Ausdrucks") ;; new
  
  (debug-tool-button-name "Debugger")
 

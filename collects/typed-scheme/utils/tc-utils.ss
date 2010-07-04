@@ -6,7 +6,7 @@ don't depend on any other portion of the system
 |#
 
 (provide (all-defined-out))
-(require "syntax-traversal.ss" stxclass (for-syntax scheme/base stxclass) scheme/match)
+(require "syntax-traversal.ss" syntax/parse (for-syntax scheme/base syntax/parse) scheme/match)
 
 ;; a parameter representing the original location of the syntax being currently checked
 (define current-orig-stx (make-parameter #'here))
@@ -54,7 +54,7 @@ don't depend on any other portion of the system
   ;(printf "exp: ~a~n" (syntax-object->datum emodule))
   ;(printf "stx (locate): ~a~n" (syntax-object->datum stx))
   (if (and (not (print-syntax?)) omodule emodule stx)
-      (look-for-in-orig omodule emodule stx)
+      (or (look-for-in-orig omodule emodule stx) stx)
       stx))
 
 (define (raise-typecheck-error msg stxs)
@@ -181,4 +181,4 @@ don't depend on any other portion of the system
 
 (define-syntax-class (id-from sym mod)
   (pattern i:id
-           #:when (id-from? #'i sym mod)))
+           #:fail-unless (id-from? #'i sym mod) #f))

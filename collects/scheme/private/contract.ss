@@ -15,7 +15,9 @@ improve method arity mismatch contract violation error messages?
          define-struct/contract
          define/contract
          with-contract
-         current-contract-region)
+         current-contract-region
+         new-∃/c
+         ∃?)
 
 (require (for-syntax scheme/base)
          (for-syntax "contract-opt-guts.ss")
@@ -129,42 +131,49 @@ improve method arity mismatch contract violation error messages?
 (define-syntax (define-struct/contract stx)
   (define-struct field-info (stx ctc [mutable? #:mutable] auto?))
   (define-struct s-info (auto-value-stx transparent? def-stxs? def-vals?))
+
+  (define syntax-error
+    (lambda v
+      (apply raise-syntax-error 'define-struct/contract v)))
   
   (define (build-struct-names name field-infos)
-    (let ([name-str (symbol->string (syntax-e name))])
-      (list* name
-             (datum->syntax 
-              name
-              (string->symbol
-               (string-append "struct:" name-str)))
-             (datum->syntax 
-              name
-              (string->symbol
-               (string-append "make-" name-str)))
-             (datum->syntax 
-              name
-              (string->symbol
-               (string-append name-str "?")))           
-             (apply append
-                    (for/list ([finfo field-infos])
-                      (let ([field-str (symbol->string (syntax-e (field-info-stx finfo)))])
-                        (cons (datum->syntax 
-                               name
-                               (string->symbol
-                                (string-append name-str "-" field-str)))
-                              (if (field-info-mutable? finfo)
-                                  (list (datum->syntax 
-                                         name
-                                         (string->symbol
-                                          (string-append "set-" name-str "-" field-str "!"))))
-                                  null))))))))
+    (let ([name-str (symbol->string (syntax-case name ()
+                                      [id (identifier? #'id)
+                                          (syntax-e #'id)]
+                                      [(sub super) 
+                                       (syntax-e #'sub)]))])
+      (list* 
+       (syntax-case name ()
+         [id (identifier? #'id) #'id]
+         [(sub super) #'sub])
+       (datum->syntax 
+        name
+        (string->symbol
+         (string-append "struct:" name-str)))
+       (datum->syntax 
+        name
+        (string->symbol
+         (string-append "make-" name-str)))
+       (datum->syntax 
+        name
+        (string->symbol
+         (string-append name-str "?")))           
+       (apply append
+              (for/list ([finfo field-infos])
+                (let ([field-str (symbol->string (syntax-e (field-info-stx finfo)))])
+                  (cons (datum->syntax 
+                         name
+                         (string->symbol
+                          (string-append name-str "-" field-str)))
+                        (if (field-info-mutable? finfo)
+                            (list (datum->syntax 
+                                   name
+                                   (string->symbol
+                                    (string-append "set-" name-str "-" field-str "!"))))
+                            null))))))))
   
   (define (build-contracts stx pred field-infos)
-    (list* (quasisyntax/loc stx
-             (-> #,@(map field-info-ctc
-                        (filter (λ (f)
-                                  (not (field-info-auto? f)))
-                                field-infos)) any/c))
+    (list* (syntax/loc stx any/c)
            (syntax/loc stx any/c)
            (apply append
                   (for/list ([finfo field-infos])
@@ -176,19 +185,15 @@ improve method arity mismatch contract violation error messages?
                                  (quasisyntax/loc stx
                                    (-> #,pred #,field-ctc void?)))
                                 null)))))))
-
+  
   (define (check-field f ctc)
     (let ([p-list (syntax->list f)])
       (if p-list
           (begin 
             (when (null? p-list)
-              (raise-syntax-error 'define-struct/contract
-                                  "expected struct field"
-                                  f))
+              (syntax-error "expected struct field" f))
             (unless (identifier? (car p-list))
-              (raise-syntax-error 'define-struct/contract
-                                  "expected identifier"
-                                  f))
+              (syntax-error "expected identifier" f))
             (let loop ([rest (cdr p-list)]
                        [mutable? #f]
                        [auto? #f])
@@ -199,27 +204,21 @@ improve method arity mismatch contract violation error messages?
                         (cond
                           [(eq? elem '#:mutable)
                            (begin (when mutable?
-                                    (raise-syntax-error 'define-struct/contract
-                                            "redundant #:mutable"
-                                            (car rest)))
+                                    (syntax-error "redundant #:mutable"
+                                                  (car rest)))
                                   (loop (cdr rest) #t auto?))]
                           [(eq? elem '#:auto)
                            (begin (when auto?
-                                    (raise-syntax-error 'define-struct/contract
-                                            "redundant #:mutable"
-                                            (car rest)))
+                                    (syntax-error "redundant #:mutable"
+                                                  (car rest)))
                                   (loop (cdr rest) mutable? #t))]
-                          [else (raise-syntax-error 'define-struct/contract
-                                                    "expected #:mutable or #:auto"
-                                                    (car rest))])
-                        (raise-syntax-error 'define-struct/contract
-                                            "expected #:mutable or #:auto"
-                                            (car rest)))))))
+                          [else (syntax-error "expected #:mutable or #:auto"
+                                              (car rest))])
+                        (syntax-error "expected #:mutable or #:auto"
+                                      (car rest)))))))
           (if (identifier? f)
               (make-field-info f ctc #f #f)
-              (raise-syntax-error 'define-struct/contract
-                                  "expected struct field"
-                                  f)))))
+              (syntax-error "expected struct field" f)))))
   (define (check-kwds kwd-list field-infos)
     (let loop ([kwds kwd-list]
                [auto-value-stx #f]
@@ -231,62 +230,76 @@ improve method arity mismatch contract violation error messages?
           (make-s-info auto-value-stx transparent? def-stxs? def-vals?)
           (let ([kwd (syntax-e (car kwds))])
             (when (not (keyword? kwd))
-              (raise-syntax-error 'define-struct/contract
-                                  "expected a keyword"
-                                  (car kwds)))
+              (syntax-error "expected a keyword"
+                            (car kwds)))
             (cond
               [(eq? kwd '#:auto-value)
-               (when (null? (cdr kwd-list))
-                 (raise-syntax-error 'define-struct/contract
-                                     "expected a following expression"
-                                     (car kwds)))
-               (loop (cddr kwd-list) (cadr kwd-list)
+               (when (null? (cdr kwds))
+                 (syntax-error "expected a following expression"
+                               (car kwds)))
+               (loop (cddr kwds) (cadr kwds)
                      transparent? mutable? def-stxs? def-vals?)]
+              ;; let arbitrary properties through
+              [(eq? kwd '#:property)
+               (when (null? (cdr kwds))
+                 (syntax-error "expected a property"
+                               (car kwds)))
+               (when (null? (cddr kwds))
+                 (syntax-error "expected a value for the property"
+                               (car kwds)))
+               (loop (cdddr kwds) auto-value-stx
+                     mutable? transparent? def-stxs? def-vals?)]
               [(eq? kwd '#:mutable)
                (when mutable?
-                 (raise-syntax-error 'define-struct/contract
-                                     "redundant #:mutable"
-                                     (car kwds)))
+                 (syntax-error "redundant #:mutable"
+                               (car kwds)))
                (for ([finfo field-infos])
-                    (set-field-info-mutable?! finfo #t))
-               (loop (cdr kwd-list) auto-value-stx
-                     transparent? #t def-stxs? def-vals?)]
+                 (set-field-info-mutable?! finfo #t))
+               (loop (cdr kwds) auto-value-stx
+                     #t transparent? def-stxs? def-vals?)]
               [(eq? kwd '#:transparent)
                (when transparent?
-                 (raise-syntax-error 'define-struct/contract
-                                     "redundant #:transparent"
-                                     (car kwds)))
-               (loop (cdr kwd-list) auto-value-stx
-                     #t mutable? def-stxs? def-vals?)]
+                 (syntax-error "redundant #:transparent"
+                               (car kwds)))
+               (loop (cdr kwds) auto-value-stx
+                     mutable? #t def-stxs? def-vals?)]
               [(eq? kwd '#:omit-define-syntaxes)
                (when (not def-stxs?)
-                 (raise-syntax-error 'define-struct/contract
-                                     "redundant #:omit-define-syntaxes"
-                                     (car kwds)))
-               (loop (cdr kwd-list) auto-value-stx
+                 (syntax-error "redundant #:omit-define-syntaxes"
+                               (car kwds)))
+               (loop (cdr kwds) auto-value-stx
                      transparent? mutable? #f def-vals?)]
               [(eq? kwd '#:omit-define-values)
                (when (not def-vals?)
-                 (raise-syntax-error 'define-struct/contract
-                                     "redundant #:omit-define-values"
-                                     (car kwds)))
-               (loop (cdr kwd-list) auto-value-stx
+                 (syntax-error "redundant #:omit-define-values"
+                               (car kwds)))
+               (loop (cdr kwds) auto-value-stx
                      transparent? mutable? def-stxs? #f)]
-              [else (raise-syntax-error 'define-struct/contract
-                                        "unexpected keyword"
-                                        (car kwds))])))))
+              [else (syntax-error "unexpected keyword"
+                                  (car kwds))])))))
   (syntax-case stx ()
     [(_ name ([field ctc] ...) kwds ...)
      (let ([fields (syntax->list #'(field ...))])
-       (unless (identifier? #'name)
-         (raise-syntax-error 'define-struct/contract
-                             "expected identifier for struct name"
-                             #'name))
+       (unless (or (identifier? #'name)
+                   (syntax-case #'name ()
+                     [(x y) (and (identifier? #'x)
+                                 (identifier? #'y))]
+                     [_ #f]))
+         (syntax-error "expected identifier for struct name or a sub-type relationship (subtype supertype)"
+                       #'name))
        (let* ([field-infos (map check-field fields (syntax->list #'(ctc ...)))]
               [sinfo (check-kwds (syntax->list #'(kwds ...)) field-infos)]
               [names (build-struct-names #'name field-infos)]
               [pred (cadddr names)]
-              [ctcs (build-contracts stx pred field-infos)])
+              [ctcs (build-contracts stx pred field-infos)]
+              [super-fields (syntax-case #'name ()
+                              [(child parent)
+                               (let ([v (syntax-local-value #'parent (lambda () #f))])
+                                 (unless (struct-info? v)
+                                   (raise-syntax-error #f "identifier is not bound to a structure type" stx #'parent))
+                                 (let ([v (extract-struct-info v)])
+                                   (cadddr v)))]
+                              [else '()])])
          (let-values ([(non-auto-fields auto-fields)
                        (let loop ([fields field-infos]
                                   [nautos null]
@@ -302,24 +315,32 @@ improve method arity mismatch contract violation error messages?
                                      (loop (cdr fields)
                                            (cons (car fields) nautos)
                                            autos)
-                                     (raise-syntax-error 'define-struct/contract
-                                                         "non-auto field after auto fields"
-                                                         (field-info-stx (car fields)))))))])
+                                     (syntax-error "non-auto field after auto fields"
+                                                   (field-info-stx (car fields)))))))])
            (with-syntax ([ctc-bindings
                           (let ([val-bindings (if (s-info-def-vals? sinfo)
-                                                  (cons (cadr names) (map list (cddr names) ctcs))
+                                                  (cons (cadr names)
+                                                        (map list (cddr names)
+                                                             ctcs))
                                                   null)])
                             (if (s-info-def-stxs? sinfo)
                                 (cons (car names) val-bindings)
                                 val-bindings))]
                          [orig stx]
+                         [struct-name (syntax-case #'name ()
+                                        [id (identifier? #'id) #'id]
+                                        [(id1 super) #'id1])]
                          [(auto-check ...)
                           (let* ([av-stx (if (s-info-auto-value-stx sinfo)
                                              (s-info-auto-value-stx sinfo)
                                              #'#f)]
                                  [av-id (datum->syntax av-stx
                                                        (string->symbol
-                                                        (string-append (symbol->string (syntax-e #'name))
+                                                        (string-append (syntax-case #'name ()
+                                                                         [id (identifier? #'id)
+                                                                             (symbol->string (syntax-e #'id))]
+                                                                         [(id1 super)
+                                                                          (symbol->string (syntax-e #'id1))])
                                                                        ":auto-value"))
                                                        av-stx)])
                             (for/list ([finfo auto-fields])
@@ -329,29 +350,45 @@ improve method arity mismatch contract violation error messages?
                                              '(struct name)
                                              'cant-happen
                                              #,(id->contract-src-info av-id)))))]
+                         ;; a list of variables, one for each super field
+                         [(super-fields ...) (generate-temporaries super-fields)]
+                         ;; the contract for a super field is any/c becuase the
+                         ;; super constructor will have its own contract
+                         [(super-contracts ...) (for/list ([i (in-list super-fields)])
+                                                  (datum->syntax stx 'any/c))]
+                         [(non-auto-contracts ...)
+                          (map field-info-ctc
+                               (filter (lambda (f)
+                                         (not (field-info-auto? f)))
+                                       field-infos))]
+                         ;; the make-foo function. this is used to make the contract
+                         ;; print the right name in the blame
+                         [maker (caddr names)]
                          [(non-auto-name ...)
                           (map field-info-stx non-auto-fields)])
              (syntax/loc stx
                (begin
                  (define-values () (begin auto-check ... (values)))
-                 (with-contract #:type struct name
-                   ctc-bindings
-                   (define-struct/derived orig name (field ...)
-                     kwds ...
-                     #:guard (λ (non-auto-name ... struct-name)
-                               (unless (eq? 'name struct-name)
-                                 (error (format "Cannot create subtype ~a of contracted struct ~a" 
-                                                struct-name 'name)))
-                               (values non-auto-name ...))))))))))]
+                 (define (guard super-fields ... non-auto-name ... struct-name)
+                   (values super-fields ... non-auto-name ...))
+                 (define blame-id
+                   (current-contract-region))
+                 (with-contract #:type struct struct-name
+                                ctc-bindings
+                                (define-struct/derived orig name (field ...)
+                                  kwds ...
+                                  #:guard (-contract (-> super-contracts ... non-auto-contracts ... symbol? any)
+                                                     guard
+                                                     
+                                                     (current-contract-region) blame-id
+                                                     #'maker)))))))))]
     [(_ name . bad-fields)
      (identifier? #'name)
-     (raise-syntax-error 'define-struct/contract
-                         "expected a list of field name/contract pairs"
-                         #'bad-fields)]
+     (syntax-error "expected a list of field name/contract pairs"
+                   #'bad-fields)]
     [(_ . body)
-     (raise-syntax-error 'define-struct/contract
-                         "expected a structure name"
-                         #'body)]))
+     (syntax-error "expected a structure name"
+                   #'body)]))
 
 ;                                                                                         
 ;                                                                                         
@@ -373,49 +410,46 @@ improve method arity mismatch contract violation error messages?
 
 (define-syntax-parameter current-contract-region (λ (stx) #'(#%variable-reference)))
 
-(define-for-syntax (make-with-contract-transformer contract-stx id pos-blame-id)
+(define-for-syntax (make-contracted-id-transformer id contract-stx pos-blame-id neg-blame-id)
   (make-set!-transformer
    (lambda (stx)
-     (with-syntax ([neg-blame-id #'(current-contract-region)]
-                   [pos-blame-id pos-blame-id]
-                   [contract-stx contract-stx])
-       (syntax-case stx (set!)
-         [(set! id arg)
-          (raise-syntax-error 'with-contract
-                              "cannot set! a with-contract variable"
-                              stx
-                              (syntax id))]
-         [(f arg ...)
-          (quasisyntax/loc stx
-            ((-contract contract-stx
-                        #,id
-                        pos-blame-id
-                        neg-blame-id
-                        #,(id->contract-src-info id))
-             arg ...))]
-         [ident
-          (identifier? (syntax ident))
-          (quasisyntax/loc stx
-            (-contract contract-stx
-                       #,id
-                       pos-blame-id
-                       neg-blame-id
-                       #,(id->contract-src-info id)))])))))
+     (syntax-case stx (set!)
+       [(set! id arg)
+        (raise-syntax-error 'with-contract
+                            "cannot set! a contracted variable"
+                            stx
+                            (syntax id))]
+       [(f arg ...)
+        (quasisyntax/loc stx
+          ((-contract #,contract-stx
+                      #,id
+                      #,pos-blame-id
+                      #,neg-blame-id
+                      #,(id->contract-src-info id))
+           arg ...))]
+       [ident
+        (identifier? (syntax ident))
+        (quasisyntax/loc stx
+          (-contract #,contract-stx
+                     #,id
+                     #,pos-blame-id
+                     #,neg-blame-id
+                     #,(id->contract-src-info id)))]))))
 
 
 (define-syntax (with-contract-helper stx)
   (syntax-case stx ()
-    [(_ blame-stx () ())
+    [(_ () ())
      (begin #'(define-values () (values)))]
-    [(_ blame-stx (p0 p ...) (u ...))
+    [(_ (p0 p ...) (u ...))
      (raise-syntax-error 'with-contract
                          "no definition found for identifier"
                          #'p0)]
-    [(_ blame-stx () (u0 u ...))
+    [(_ () (u0 u ...))
      (raise-syntax-error 'with-contract
                          "no definition found for identifier"
                          #'u0)]
-    [(_ blame-stx (p ...) (u ...) body0 body ...)
+    [(_ (p ...) (u ...) body0 body ...)
      (let ([expanded-body0 (local-expand #'body0
                                          (syntax-local-context)
                                          (kernel-form-identifier-list))])
@@ -428,7 +462,7 @@ improve method arity mismatch contract violation error messages?
        (syntax-case expanded-body0 (begin define-values define-syntaxes)
          [(begin sub ...)
           (syntax/loc stx
-            (with-contract-helper blame-stx (p ...) (u ...) sub ... body ...))]
+            (with-contract-helper (p ...) (u ...) sub ... body ...))]
          [(define-syntaxes (id ...) expr)
           (let ([ids (syntax->list #'(id ...))])
             (for ([i1 (syntax->list #'(p ...))])
@@ -442,18 +476,18 @@ improve method arity mismatch contract violation error messages?
                           [unused-us (filter-ids (syntax->list #'(u ...)) ids)])
               (with-syntax ()
                 (syntax/loc stx
-                  (begin def (with-contract-helper blame-stx (p ...) unused-us body ...))))))]
+                  (begin def (with-contract-helper (p ...) unused-us body ...))))))]
          [(define-values (id ...) expr)
           (let ([ids (syntax->list #'(id ...))])
             (with-syntax ([def expanded-body0]
                           [unused-ps (filter-ids (syntax->list #'(p ...)) ids)]
                           [unused-us (filter-ids (syntax->list #'(u ...)) ids)])
               (syntax/loc stx
-                (begin def (with-contract-helper blame-stx unused-ps unused-us body ...)))))]
+                (begin def (with-contract-helper unused-ps unused-us body ...)))))]
          [else
           (quasisyntax/loc stx
             (begin #,expanded-body0
-                   (with-contract-helper blame-stx (p ...) (u ...) body ...)))]))]))
+                   (with-contract-helper (p ...) (u ...) body ...)))]))]))
 
 (define-for-syntax (check-and-split-with-contracts single-allowed? args)
   (let loop ([args args]
@@ -488,32 +522,6 @@ improve method arity mismatch contract violation error messages?
                            (format "expected ~a(identifier contract)"
                                    (if single-allowed? "an identifier or " ""))
                            (car args))])))
-
-(define-for-syntax (make-free-var-transformer fv ctc pos-blame neg-blame)
-  (make-set!-transformer
-   (lambda (stx)
-     (syntax-case stx (set!)
-       [(set! id arg)
-        (raise-syntax-error 'with-contract
-                            "cannot set! a contracted variable"
-                            stx
-                            (syntax id))]
-       [(f arg ...)
-        (quasisyntax/loc stx
-          ((-contract #,ctc
-                      #,fv
-                      #,pos-blame
-                      #,neg-blame
-                      #,(id->contract-src-info fv))
-           arg ...))]
-       [ident
-        (identifier? (syntax ident))
-        (quasisyntax/loc stx
-          (-contract #,ctc
-                     #,fv
-                     #,pos-blame
-                     #,neg-blame
-                     #,(id->contract-src-info fv)))]))))
 
 (define-syntax (with-contract stx)
   (when (eq? (syntax-local-context) 'expression)
@@ -589,13 +597,13 @@ improve method arity mismatch contract violation error messages?
                         ...
                         (values)))
                (define-syntaxes (free-var-id ...)
-                 (values (make-free-var-transformer
+                 (values (make-contracted-id-transformer
                           (quote-syntax free-var)
                           (quote-syntax free-ctc-id)
                           (quote-syntax blame-id)
                           (quote-syntax blame-stx)) ...))
                (splicing-syntax-parameterize ([current-contract-region (λ (stx) #'blame-stx)])
-                 (with-contract-helper blame-stx (marked-p ...) (marked-u ...) . #,(marker #'body)))
+                 (with-contract-helper (marked-p ...) (marked-u ...) . #,(marker #'body)))
                (define-values (ctc-id ...)
                  (values (verify-contract 'with-contract ctc) ...))
                (define-values ()
@@ -608,10 +616,11 @@ improve method arity mismatch contract violation error messages?
                         (values)))
                (define-syntaxes (u ... p ...)
                  (values (make-rename-transformer #'marked-u) ...
-                         (make-with-contract-transformer
-                          (quote-syntax ctc-id)
+                         (make-contracted-id-transformer
                           (quote-syntax marked-p)
-                          (quote-syntax blame-stx)) ...)))))))]
+                          (quote-syntax ctc-id)
+                          (quote-syntax blame-stx)
+                          (quote-syntax blame-id)) ...)))))))]
     [(_ #:type type blame (arg ...) #:freevar x c . body)
      (syntax/loc stx
        (with-contract #:type type blame (arg ...) #:freevars ([x c]) . body))]
@@ -674,7 +683,15 @@ improve method arity mismatch contract violation error messages?
                         ;; No: lift the contract creation:
                         (with-syntax ([contract-id contract-id]
                                       [id id]
-                                      [pos-module-source pos-module-source])
+                                      [pos-module-source pos-module-source]
+                                      [id-ref (syntax-case stx (set!)
+                                                [(set! whatever e)
+                                                 id] ;; just avoid an error here, signal the error later
+                                                [(id . x)
+                                                 #'id]
+                                                [id
+                                                 (identifier? #'id)
+                                                 #'id])])
                           (syntax-local-introduce
                            (syntax-local-lift-expression
                             #`(-contract contract-id
@@ -703,9 +720,6 @@ improve method arity mismatch contract violation error messages?
            (quasisyntax/loc stx (#%expression #,stx)))))))
 
 
-;; (provide/contract p/c-ele ...)
-;; p/c-ele = (id expr) | (rename id id expr) | (struct id (id expr) ...)
-;; provides each `id' with the contract `expr'.
 (define-syntax (provide/contract provide-stx)
   (syntax-case provide-stx (struct)
     [(_ p/c-ele ...)
@@ -745,19 +759,62 @@ improve method arity mismatch contract violation error messages?
        ;; code-for-each-clause : (listof syntax) -> (listof syntax)
        ;; constructs code for each clause of a provide/contract
        (define (code-for-each-clause clauses)
-         (cond
+         (let loop ([clauses clauses]
+                    [exists-binders '()])
+           (cond
            [(null? clauses) null]
            [else
             (let ([clause (car clauses)])
               ;; compare raw identifiers for `struct' and `rename' just like provide does
               (syntax-case* clause (struct rename) (λ (x y) (eq? (syntax-e x) (syntax-e y))) 
+                [exists
+		 (or (eq? '#:exists (syntax-e #'exists)) (eq? '#:∃ (syntax-e #'exists)))
+                 (cond
+                   [(null? (cdr clauses))
+                    (raise-syntax-error 'provide/conract
+                                        (format "expected either a single variable or a sequence of variables to follow ~a, but found nothing"
+						(syntax-e #'exists))
+                                        provide-stx
+                                        clause)]
+                   [else
+                    (syntax-case (cadr clauses) ()
+		      [x
+		       (identifier? #'x)
+                       (with-syntax ([(x-gen) (generate-temporaries #'(x))])
+                         (cons (code-for-one-exists-id #'x #'x-gen)
+                               (loop (cddr clauses) 
+                                     (add-a-binder #'x #'x-gen exists-binders))))]
+                      [(x ...)
+                       (andmap identifier? (syntax->list #'(x ...)))
+                       (with-syntax ([(x-gen ...) (generate-temporaries #'(x ...))])
+                         (append (map code-for-one-exists-id 
+                                      (syntax->list #'(x ...))
+                                      (syntax->list #'(x-gen ...)))
+                                 (loop (cddr clauses)
+                                       (let loop ([binders exists-binders]
+                                                  [xs (syntax->list #'(x ...))]
+                                                  [x-gens (syntax->list #'(x-gen ...))])
+                                         (cond
+                                           [(null? xs) binders]
+                                           [else (loop (add-a-binder (car xs) (car x-gens) binders)
+                                                       (cdr xs)
+                                                       (cdr x-gens))])))))]
+                      [else
+                       (raise-syntax-error 'provide/contract
+					   (format "expected either a single variable or a sequence of variables to follow ~a"
+						   (syntax-e #'exists))
+                                           provide-stx
+                                           (cadr clauses))])])]
                 [(rename this-name new-name contract)
                  (and (identifier? (syntax this-name))
                       (identifier? (syntax new-name)))
                  (begin
                    (add-to-dups-table #'new-name)
-                   (cons (code-for-one-id provide-stx (syntax this-name) (syntax contract) (syntax new-name))
-                         (code-for-each-clause (cdr clauses))))]
+                   (cons (code-for-one-id provide-stx 
+                                          (syntax this-name) 
+                                          (add-exists-binders (syntax contract) exists-binders)
+                                          (syntax new-name))
+                         (loop (cdr clauses) exists-binders)))]
                 [(rename this-name new-name contract)
                  (identifier? (syntax this-name))
                  (raise-syntax-error 'provide/contract 
@@ -778,9 +835,10 @@ improve method arity mismatch contract violation error messages?
                  (let ([sc (build-struct-code provide-stx
                                               (syntax struct-name)
                                               (syntax->list (syntax (field-name ...)))
-                                              (syntax->list (syntax (contract ...))))])
+                                              (map (λ (x) (add-exists-binders x exists-binders))
+                                                   (syntax->list (syntax (contract ...)))))])
                    (add-to-dups-table #'struct-name)
-                   (cons sc (code-for-each-clause (cdr clauses))))]
+                   (cons sc (loop (cdr clauses) exists-binders)))]
                 [(struct name)
                  (identifier? (syntax name))
                  (raise-syntax-error 'provide/contract
@@ -821,8 +879,12 @@ improve method arity mismatch contract violation error messages?
                  (identifier? (syntax name))
                  (begin
                    (add-to-dups-table #'name)
-                   (cons (code-for-one-id provide-stx (syntax name) (syntax contract) #f)
-                         (code-for-each-clause (cdr clauses))))]
+                   (cons (code-for-one-id provide-stx 
+                                          (syntax name) 
+                                          (add-exists-binders (syntax contract)
+                                                              exists-binders)
+                                          #f)
+                         (loop (cdr clauses) exists-binders)))]
                 [(name contract)
                  (raise-syntax-error 'provide/contract
                                      "expected identifier"
@@ -832,7 +894,7 @@ improve method arity mismatch contract violation error messages?
                  (raise-syntax-error 'provide/contract
                                      "malformed clause"
                                      provide-stx
-                                     (syntax unk))]))]))
+                                     (syntax unk))]))])))
        
        ;; well-formed-struct-name? : syntax -> bool
        (define (well-formed-struct-name? stx)
@@ -1179,6 +1241,16 @@ improve method arity mismatch contract violation error messages?
                        field-contract-id
                        void?))))
        
+       ;; code-for-one-exists-id : syntax -> syntax
+       (define (code-for-one-exists-id x x-gen)
+         #`(define #,x-gen (new-∃/c '#,x)))
+
+       (define (add-exists-binders stx exists-binders)
+         #`(let #,exists-binders #,stx))
+       
+       (define (add-a-binder id id-gen binders)
+         (cons #`[#,id #,id-gen] binders))
+       
        ;; code-for-one-id : syntax syntax syntax (union syntax #f) -> syntax
        ;; given the syntax for an identifier and a contract,
        ;; builds a begin expression for the entire contract and provide
@@ -1229,7 +1301,9 @@ improve method arity mismatch contract violation error messages?
                                    
                                    #,@(if no-need-to-check-ctrct?
                                           (list)
-                                          (list #'(define contract-id (verify-contract 'provide/contract ctrct))))
+                                          (list #'(define contract-id 
+                                                    (let ([id ctrct]) ;; let is here to give the right name.
+                                                      (verify-contract 'provide/contract id)))))
                                    (define-syntax id-rename
                                      (make-provide/contract-transformer (quote-syntax contract-id)
                                                                         (quote-syntax id)
@@ -1310,7 +1384,7 @@ improve method arity mismatch contract violation error messages?
              (unpack-blame pos-blame)
              a-contract-raw
              name))
-    (((contract-proc a-contract) pos-blame neg-blame src-info (contract-name a-contract))
+    (((contract-proc a-contract) pos-blame neg-blame src-info (contract-name a-contract) #t)
      name)))
 
 (define-syntax (recursive-contract stx)
@@ -1318,11 +1392,11 @@ improve method arity mismatch contract violation error messages?
     [(_ arg)
      (syntax (make-proj-contract 
               '(recursive-contract arg) 
-              (λ (pos-blame neg-blame src str)
+              (λ (pos-blame neg-blame src str positive-position?)
                 (let ([ctc (coerce-contract 'recursive-contract arg)])
                   (let ([proc (contract-proc ctc)])
                     (λ (val)
-                      ((proc pos-blame neg-blame src str) val)))))
+                      ((proc pos-blame neg-blame src str positive-position?) val)))))
               #f))]))
 
 ;                                                                                                   
@@ -1356,7 +1430,7 @@ improve method arity mismatch contract violation error messages?
          false/c
          printable/c
          symbols one-of/c
-         listof cons/c list/c
+         listof non-empty-listof cons/c list/c
          vectorof vector-immutableof vector/c vector-immutable/c 
          box-immutable/c box/c
          promise/c
@@ -1466,8 +1540,8 @@ improve method arity mismatch contract violation error messages?
   (λ (ctc)
     (let ([c-proc ((proj-get (or/c-ho-ctc ctc)) (or/c-ho-ctc ctc))]
           [pred (or/c-pred ctc)])
-      (λ (pos-blame neg-blame src-info orig-str)
-        (let ([partial-contract (c-proc pos-blame neg-blame src-info orig-str)])
+      (λ (pos-blame neg-blame src-info orig-str positive-position?)
+        (let ([partial-contract (c-proc pos-blame neg-blame src-info orig-str positive-position?)])
           (λ (val)
             (cond
               [(pred val) val]
@@ -1505,8 +1579,8 @@ improve method arity mismatch contract violation error messages?
          [c-procs (map (λ (x) ((proj-get x) x)) ho-contracts)]
          [first-order-checks (map (λ (x) ((first-order-get x) x)) ho-contracts)]
          [predicates (map flat-contract-predicate (multi-or/c-flat-ctcs ctc))])
-    (λ (pos-blame neg-blame src-info orig-str)
-      (let ([partial-contracts (map (λ (c-proc) (c-proc pos-blame neg-blame src-info orig-str)) c-procs)])
+    (λ (pos-blame neg-blame src-info orig-str positive-position?)
+      (let ([partial-contracts (map (λ (c-proc) (c-proc pos-blame neg-blame src-info orig-str positive-position?)) c-procs)])
         (λ (val)
           (cond
             [(ormap (λ (pred) (pred val)) predicates)
@@ -1622,8 +1696,9 @@ improve method arity mismatch contract violation error messages?
                             (pos (opt/info-pos opt/info))
                             (neg (opt/info-neg opt/info))
                             (src-info (opt/info-src-info opt/info))
-                            (orig-str (opt/info-orig-str opt/info)))
-                (syntax (((proj-get lift-var) lift-var) pos neg src-info orig-str)))))
+                            (orig-str (opt/info-orig-str opt/info))
+                            (positive-position? (opt/info-orig-str opt/info)))
+                (syntax (((proj-get lift-var) lift-var) pos neg src-info orig-str positive-position?)))))
        #f
        lift-var
        (list #f)
@@ -2069,8 +2144,8 @@ improve method arity mismatch contract violation error messages?
                 (let ([proj (contract-proc ctc)])
                   (make-proj-contract
                    (build-compound-type-name 'name ctc)
-                   (λ (pos-blame neg-blame src-info orig-str)
-                     (let ([p-app (proj pos-blame neg-blame src-info orig-str)])
+                   (λ (pos-blame neg-blame src-info orig-str positive-position?)
+                     (let ([p-app (proj pos-blame neg-blame src-info orig-str positive-position?)])
                        (λ (val)
                          (unless (predicate? val)
                            (raise-contract-error
@@ -2086,6 +2161,10 @@ improve method arity mismatch contract violation error messages?
 
 (define listof
   (*-immutableof list? map andmap list listof))
+
+(define (non-empty-list? x) (and (pair? x) (list? (cdr x))))
+(define non-empty-listof
+  (*-immutableof non-empty-list? map andmap non-empty-list non-empty-listof))
 
 (define (immutable-vector? val) (and (immutable? val) (vector? val)))
 
@@ -2228,8 +2307,8 @@ improve method arity mismatch contract violation error messages?
                      (let ([procs (contract-proc ctc-x)] ...)
                        (make-proj-contract
                         (build-compound-type-name 'name ctc-x ...)
-                        (λ (pos-blame neg-blame src-info orig-str)
-                          (let ([p-apps (procs pos-blame neg-blame src-info orig-str)] ...)
+                        (λ (pos-blame neg-blame src-info orig-str positive-position?)
+                          (let ([p-apps (procs pos-blame neg-blame src-info orig-str positive-position?)] ...)
                             (λ (v)
                               (if #,(if test-immutable?
                                         #'(and (predicate?-name v)
@@ -2258,8 +2337,8 @@ improve method arity mismatch contract violation error messages?
             (let ([procs (map contract-proc ctcs)])
               (make-proj-contract
                (apply build-compound-type-name 'name ctcs)
-               (λ (pos-blame neg-blame src-info orig-str)
-                 (let ([p-apps (map (λ (proc) (proc pos-blame neg-blame src-info orig-str)) procs)]
+               (λ (pos-blame neg-blame src-info orig-str positive-position?)
+                 (let ([p-apps (map (λ (proc) (proc pos-blame neg-blame src-info orig-str positive-position?)) procs)]
                        [count (length params)])
                    (λ (v)
                      (if (and (immutable? v)
@@ -2360,8 +2439,8 @@ improve method arity mismatch contract violation error messages?
            [ctc-proc (contract-proc ctc)])
       (make-proj-contract
        (build-compound-type-name 'promise/c ctc)
-       (λ (pos-blame neg-blame src-info orig-str)
-         (let ([p-app (ctc-proc pos-blame neg-blame src-info orig-str)])
+       (λ (pos-blame neg-blame src-info orig-str positive-position?)
+         (let ([p-app (ctc-proc pos-blame neg-blame src-info orig-str positive-position?)])
            (λ (val)
              (unless (promise? val)
                (raise-contract-error
@@ -2451,9 +2530,9 @@ improve method arity mismatch contract violation error messages?
   #:property proj-prop
   (λ (ctc)
     (let ([c-proc ((proj-get (parameter/c-ctc ctc)) (parameter/c-ctc ctc))])
-      (λ (pos-blame neg-blame src-info orig-str)
-        (let ([partial-neg-contract (c-proc neg-blame pos-blame src-info orig-str)]
-              [partial-pos-contract (c-proc pos-blame neg-blame src-info orig-str)])
+      (λ (pos-blame neg-blame src-info orig-str positive-position?)
+        (let ([partial-neg-contract (c-proc neg-blame pos-blame src-info orig-str (not positive-position?))]
+              [partial-pos-contract (c-proc pos-blame neg-blame src-info orig-str positive-position?)])
           (λ (val)
             (cond
               [(parameter? val)
@@ -2523,9 +2602,9 @@ improve method arity mismatch contract violation error messages?
     (let ([dom-proc ((proj-get (hash/c-dom ctc)) (hash/c-dom ctc))]
           [rng-proc ((proj-get (hash/c-rng ctc)) (hash/c-rng ctc))]
           [immutable (hash/c-immutable ctc)])
-      (λ (pos-blame neg-blame src-info orig-str)
-        (let ([partial-dom-contract (dom-proc pos-blame neg-blame src-info orig-str)]
-              [partial-rng-contract (rng-proc pos-blame neg-blame src-info orig-str)])
+      (λ (pos-blame neg-blame src-info orig-str positive-position?)
+        (let ([partial-dom-contract (dom-proc pos-blame neg-blame src-info orig-str positive-position?)]
+              [partial-rng-contract (rng-proc pos-blame neg-blame src-info orig-str positive-position?)])
           (λ (val)
             (unless (hash? val)
               (raise-contract-error val src-info pos-blame orig-str 
@@ -2565,9 +2644,9 @@ improve method arity mismatch contract violation error messages?
   (λ (ctc)
     (let ([dom-proc ((proj-get (immutable-hash/c-dom ctc)) (immutable-hash/c-dom ctc))]
           [rng-proc ((proj-get (immutable-hash/c-rng ctc)) (immutable-hash/c-rng ctc))])
-      (λ (pos-blame neg-blame src-info orig-str)
-        (let ([partial-dom-contract (dom-proc pos-blame neg-blame src-info orig-str)]
-              [partial-rng-contract (rng-proc pos-blame neg-blame src-info orig-str)])
+      (λ (pos-blame neg-blame src-info orig-str positive-position?)
+        (let ([partial-dom-contract (dom-proc pos-blame neg-blame src-info orig-str positive-position?)]
+              [partial-rng-contract (rng-proc pos-blame neg-blame src-info orig-str positive-position?)])
           (λ (val)
             (unless (and (hash? val)
                          (immutable? val))
@@ -2586,3 +2665,35 @@ improve method arity mismatch contract violation error messages?
   #:property stronger-prop
   (λ (this that)
     #f))
+
+(define (∃-proj ctc)
+  (let ([in (∃/c-in ctc)]
+        [out (∃/c-out ctc)]
+        [pred? (∃/c-pred? ctc)])
+  (λ (pos-blame neg-blame src-info orig-str positive-position?)
+    (if positive-position?
+	in
+        (λ (val)
+          (if (pred? val)
+              (out val)
+              (raise-contract-error val src-info pos-blame orig-str 
+                                    "non-polymorphic value: ~e"
+                                    val)))))))
+
+(define-struct ∃/c (in out pred? name)
+  #:omit-define-syntaxes
+  #:property proj-prop ∃-proj
+  #:property name-prop (λ (ctc) (∃/c-name ctc))
+  #:property first-order-prop
+  (λ (ctc) (λ (x) #t)) ;; ???
+      
+  #:property stronger-prop
+  (λ (this that) #f))
+
+(define-struct ∃ ())
+
+(define (new-∃/c raw-name)
+  (define name (string->symbol (format "~a/∃" raw-name)))
+  (define-values (struct-type constructor predicate accessor mutator)
+    (make-struct-type name struct:∃ 1 0))
+  (make-∃/c constructor (λ (x) (accessor x 0)) predicate raw-name))

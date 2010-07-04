@@ -1,3 +1,10 @@
+Version 4.2.2, September 2009
+Added scheme/unsafe/ops
+Added print-syntax-width
+Added file-or-directory-identity
+Inside: embedding applications should call scheme_seal_parameters
+ after initializing parameter values (currently used by Planet)
+
 Version 4.2.1, July 2009
 Added string->unreadable-symbol and symbol-interned?
 Added syntax-local-lift-provide

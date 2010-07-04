@@ -20,12 +20,14 @@ This file defines two sorts of primitives. All of them are provided into any mod
 
 
 (provide (all-defined-out)
-	 (rename-out [define-typed-struct define-struct:]))
+         :
+	 (rename-out [define-typed-struct define-struct:]
+                     [define-typed-struct/exec define-struct/exec:]))
 
 (require (except-in "../utils/utils.ss" extend))
 (require (for-syntax 
-          stxclass
-	  stxclass/util
+          syntax/parse
+	  syntax/private/util
           scheme/base
           (rep type-rep)
           mzlib/match
@@ -33,26 +35,21 @@ This file defines two sorts of primitives. All of them are provided into any mod
           syntax/struct
           syntax/stx
           scheme/struct-info
+          (private internal)
 	  (except-in (utils utils tc-utils))
           (env type-name-env)
           "type-contract.ss"))
 
 (require (utils require-contract)
+         "colon.ss"
          (typecheck internal-forms)
          (except-in mzlib/contract ->)
          (only-in mzlib/contract [-> c->])
          mzlib/struct
-         "base-types.ss")
+         "base-types.ss"
+         "base-types-extra.ss")
 
 (define-for-syntax (ignore stx) (syntax-property stx 'typechecker:ignore #t))
-
-(define-for-syntax (internal stx)
-  (quasisyntax/loc stx
-    (define-values ()
-      (begin
-        (quote-syntax #,stx)
-        (#%plain-app values)))))
-
 
 
 (define-syntax (require/typed stx)
@@ -67,27 +64,31 @@ This file defines two sorts of primitives. All of them are provided into any mod
     #:attributes (nm ty)
     (pattern [nm:opt-rename ty]))
   (define-syntax-class struct-clause
-    #:literals (struct)
+    ;#:literals (struct)
     #:attributes (nm (body 1))
-    (pattern [struct nm:opt-rename (body ...)]))
+    (pattern [struct nm:opt-rename (body ...)]
+             #:fail-unless (eq? 'struct (syntax-e #'struct)) #f))
   (define-syntax-class opaque-clause
-    #:literals (opaque)
+    ;#:literals (opaque)
     #:attributes (ty pred opt)
     (pattern [opaque ty:id pred:id]
+             #:fail-unless (eq? 'opaque (syntax-e #'opaque)) #f
              #:with opt #'())
     (pattern [opaque ty:id pred:id #:name-exists]
+             #:fail-unless (eq? 'opaque (syntax-e #'opaque)) #f
              #:with opt #'(#:name-exists)))
   (syntax-parse stx
-    [(_ lib (~or [sc:simple-clause] [strc:struct-clause] [oc:opaque-clause]) ...)
-     #'(begin (require/typed sc.nm sc.ty lib) ... 
-              (require-typed-struct strc.nm (strc.body ...) lib) ...
-              (require/opaque-type oc.ty oc.pred lib . oc.opt) ...)]
-    [(_ nm:opt-rename ty lib (~or [#:struct-maker parent] #:opt) ...)
+    [(_ lib (~or sc:simple-clause strc:struct-clause oc:opaque-clause) ...)
+     #'(begin 
+	 (require/opaque-type oc.ty oc.pred lib . oc.opt) ...
+	 (require/typed sc.nm sc.ty lib) ... 
+	 (require-typed-struct strc.nm (strc.body ...) lib) ...)]
+    [(_ nm:opt-rename ty lib (~optional [~seq #:struct-maker parent]) ...)
      (with-syntax ([cnt* (generate-temporary #'nm.nm)]
-		   [sm (if #'parent
+		   [sm (if (attribute parent)
                            #'(#:struct-maker parent)
                            #'())])
-       (let ([prop-name (if #'parent
+       (let ([prop-name (if (attribute parent)
                             'typechecker:contract-def/maker
                             'typechecker:contract-def)])
          (quasisyntax/loc stx 
@@ -103,14 +104,14 @@ This file defines two sorts of primitives. All of them are provided into any mod
   (define-syntax-class name-exists-kw
     (pattern #:name-exists))
   (syntax-parse stx
-    [(_ ty:id pred:id lib (~or [ne:name-exists-kw] #:opt) ...)
+    [(_ ty:id pred:id lib (~optional ne:name-exists-kw) ...)
      (register-type-name #'ty (make-Opaque #'pred (syntax-local-certifier)))
      (quasisyntax/loc stx
        (begin 
          #,(syntax-property #'(define pred-cnt (any/c . c-> . boolean?))
                             'typechecker:ignore #t)
          #,(internal #'(require/typed-internal pred (Any -> Boolean : (Opaque pred))))
-         #,(if #'ne
+         #,(if (attribute ne)
                (internal (syntax/loc stx (define-type-alias-internal ty (Opaque pred))))
                (syntax/loc stx (define-type-alias ty (Opaque pred))))
          #,(syntax-property #'(require/contract pred pred-cnt lib)
@@ -167,9 +168,9 @@ This file defines two sorts of primitives. All of them are provided into any mod
     [(pdefine: tvars (nm . formals) : ret-ty . body)
      (with-syntax* ([(tys ...) (types-of-formals #'formals stx)]
                     [type (syntax/loc #'ret-ty (All tvars (tys ... -> ret-ty)))])
-                   (syntax/loc stx
-                     (define: nm : type
-                       (plambda: tvars formals . body))))]))
+       (syntax/loc stx
+         (define: nm : type
+           (plambda: tvars formals . body))))]))
 
 (define-syntax (ann stx)
   (syntax-case stx (:)
@@ -177,30 +178,6 @@ This file defines two sorts of primitives. All of them are provided into any mod
      (syntax-property #'arg 'type-ascription #'ty)]
     [(_ arg ty)
      (syntax-property #'arg 'type-ascription #'ty)]))
-
-(define-syntax (: stx)
-  (define stx*
-    ;; make it possible to add another colon after the id for clarity
-    ;; and in that case, a `->' on the RHS does not need to be
-    ;; explicitly parenthesized
-    (syntax-case stx (:)
-      [(: id : x ...)
-       (ormap (lambda (x) (eq? '-> (syntax-e x))) (syntax->list #'(x ...)))
-       (syntax/loc stx (: id (x ...)))]
-      [(: id : . more) (syntax/loc stx (: id . more))]
-      [_ stx]))
-  (define (err str . sub)
-    (apply raise-syntax-error '|type declaration| str stx sub))
-  (syntax-case stx* ()
-    [(_ id ty)
-     (identifier? #'id)
-     (syntax-property (internal (syntax/loc stx (:-internal id ty)))
-                      'disappeared-use #'id)]
-    [(_ id x ...)
-     (case (length (syntax->list #'(x ...)))
-       [(1)  (err "can only annotate identifiers with types" #'id)]
-       [(0)  (err "missing type")]
-       [else (err "bad syntax (multiple types after identifier)")])]))
 
 (define-syntax (inst stx)
   (syntax-case stx (:)

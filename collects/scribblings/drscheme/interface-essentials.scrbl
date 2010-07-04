@@ -3,13 +3,14 @@
           scribble/decode
           scribble/eval
           scribble/struct
+          scribble/scheme
           (for-label htdp/convert
                      scheme/gui/base))
 
 @(define (ioinputfont . s)
    (apply tt s))
 @(define (iooutputfont . s)
-   (make-element "schemestdout" (decode-content s)))
+   (make-element output-color (decode-content s)))
 
 @title[#:tag "interface-essentials" #:style 'toc]{Interface Essentials}
 
@@ -167,21 +168,21 @@ non-Scheme languages. You specify a language in one of two ways:
 
 @itemize[
 
- @item{Select the @menuitem["Language" "Choose Language..."] menu
+ @item{Select the @drlang{Module} language (via the
+       @menuitem["Language" "Choose Language..."] menu item), and then
+       specify a specific language as part of the program usually by
+       starting the definitions-window content with @hash-lang[].}
+
+  @item{Select the @menuitem["Language" "Choose Language..."] menu
        item, and choose a language other than @drlang{Module}. After
        changing the language, click @onscreen{Run} to reset the
        language in the interactions window. The bottom-left corner of
        DrScheme's main window also has a shortcut menu item for
        selecting previously selected languages.}
 
- @item{Select the @drlang{Module} language (via the
-       @menuitem["Language" "Choose Language..."] menu item), and then
-       specify a specific language as part of the program usually by
-       starting the definitions-window content with @hash-lang[].}
-
 ]
 
-The latter method, @drlang{Module} with @hash-lang[], is the recommend
+The former method, @drlang{Module} with @hash-lang[], is the recommend
 mode, and it is described further in @secref["module"].
 
 The @menuitem["Language" "Choose Language..."] dialog contains a
@@ -704,6 +705,32 @@ already being debugged, a message box will pop up explaining that the
 file cannot be included in another debugging session.
 
 @; ----------------------------------------------------------------------
+
+@section[#:tag "module-browser"]{The Module Browser}
+
+The module browser shows you the structure of all of the files in your program.
+It can be opened via the @onscreen{Show} menu, or via the @onscreen{Module Browser ...} 
+menu item in the @onscreen{Scheme} menu.
+
+A module browser window contains a square for each
+  module. The squares are colored based on the number of
+  lines of code in the module. If a module has more lines of
+  code, it gets a darker color.
+  
+  In addition, for each normal import, a blue line drawn is
+  from the module to the importing module. Similarly, purple
+  lines are drawn for each for-syntax, for-template or for-meta import. In the initial
+  module layout, modules to the left import modules to the
+  right, but since modules can be moved around
+  interactively, that property might not be preserved.
+
+  To open the file corresponding to the module, right-click or
+  control-click (Mac OS X) on the box for that module.
+  
+  The module browser will also show you the phases that each
+  module is loaded in; choose the ``Long, with phases'' menu item
+  in the ``Names'' popup menu. The integers indicate the phases and
+  if @scheme[#f] is present, it means the module is loaded @scheme[for-label].
 
 @section[#:tag "create-exe"]{Creating Executables}
 

@@ -1,7 +1,8 @@
 #lang scribble/doc
 @(require "mz.ss"
           (for-syntax scheme/base)
-          scribble/scheme)
+          scribble/scheme
+	  (for-label scheme/generator))
 
 @(define-syntax speed
    (syntax-rules ()
@@ -9,6 +10,12 @@
       @t{An @scheme[id] application can provide better performance for
          @elem[what]
          iteration when it appears directly in a @scheme[for] clause.}]))
+
+@(define generator-eval
+   (lambda ()
+     (let ([the-eval (make-base-eval)])
+       (the-eval '(require scheme/generator))
+       the-eval)))
 
 @title[#:tag "sequences"]{Sequences}
 
@@ -166,6 +173,16 @@ its value from @scheme[hash] (as opposed to using @scheme[hash] directly
 as a sequence to get the key and value as separate values for each
 element).}
 
+@defproc[(in-producer [producer procedure?] [stop any/c] [args any/c] ...)
+         sequence]{
+Returns a sequence that contains values from sequential calls to
+@scheme[producer].  @scheme[stop] identifies the value that marks the
+end of the sequence --- this value is not included in the sequence.
+@scheme[stop] can be a predicate or a value that is tested against the
+results with @scheme[eq?].  Note that you must use a predicate function
+if the stop value is itself a function, or if the @scheme[producer]
+returns multiple values.}
+
 @defproc[(in-value [v any/c]) sequence]{
 Returns a sequence that produces a single value: @scheme[v]. This form
 is mostly useful for @scheme[let]-like bindings in forms such as
@@ -285,4 +302,61 @@ returns @scheme[#t] if more values are available for the sequence. The
 second returns the next element (which may be multiple values) from the
 sequence; if no more elements are available, the
 @exnraise[exn:fail:contract].}
+
+@section{Iterator Generators}
+@defmodule[scheme/generator]
+@defform[(generator body ...)]{ Creates a function that returns a
+value, usually through @scheme[yield], each time it is invoked. When
+the generator runs out of values to yield the last value it computed
+will be returned for future invocations of the generator. Generators
+can be safely nested.
+
+@examples[#:eval (generator-eval)
+(define g (generator
+	    (let loop ([x '(a b c)])
+	      (if (null? x)
+		0
+		(begin
+		  (yield (car x))
+		  (loop (cdr x)))))))
+(g)
+(g)
+(g)
+(g)
+(g)
+]
+
+To use an existing generator as a sequence, you should use @scheme[in-producer]
+with a stop-value known to the generator.
+
+@examples[#:eval (generator-eval)
+(define my-stop-value (gensym))
+(define my-generator (generator
+		       (let loop ([x '(a b c)])
+			 (if (null? x)
+			   my-stop-value
+			   (begin
+			     (yield (car x))
+			     (loop (cdr x)))))))
+
+(for/list ([i (in-producer my-generator my-stop-value)])
+  i)
+]}
+
+@defproc[(in-generator [expr any?] ...) sequence?]{ Returns a generator
+that can be used as a sequence. The @scheme[in-generator] procedure takes care of the
+case when @scheme[expr] stops producing values, so when the @scheme[expr]
+completes, the generator will end.
+
+@examples[#:eval (generator-eval)
+(for/list ([i (in-generator 
+		(let loop ([x '(a b c)])
+		  (when (not (null? x))
+		    (yield (car x))
+		    (loop (cdr x)))))])
+  i)
+]}
+
+@defform[(yield expr)]{ Saves the point of execution inside a generator
+and returns a value.}
 

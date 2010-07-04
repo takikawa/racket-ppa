@@ -16,6 +16,10 @@
  check-error  ;; syntax : (check-error <expression> <expression>)
  )
 
+; for other modules implementing check-expect-like forms
+(provide
+ (for-syntax check-expect-maker))
+
 (define INEXACT-NUMBERS-FMT
   "check-expect cannot compare inexact numbers. Try (check-within test ~a range).")
 (define FUNCTION-FMT
@@ -54,39 +58,69 @@
                        (syntax-column stx)
                        (syntax-position stx)
                        (syntax-span stx)))))
-  #`(define #,bogus-name
-      #,(stepper-syntax-property
-         #`(let ([test-info (namespace-variable-value
-                             'test~object #f builder (current-namespace))])
-             (when test-info
-               (insert-test test-info
-                            (lambda ()
-                              #,(with-stepper-syntax-properties
-                                 (['stepper-hint hint-tag]
-                                  ['stepper-hide-reduction #t]
-                                  ['stepper-use-val-as-final #t])
-                                 (quasisyntax/loc stx
-                                   (#,checker-proc-stx
-                                    #,(with-stepper-syntax-properties
-                                          (['stepper-hide-reduction #t])
+  (if (eq? 'module (syntax-local-context))
+      #`(define #,bogus-name
+          #,(stepper-syntax-property
+             #`(let ([test-info (namespace-variable-value
+                                 'test~object #f builder (current-namespace))])
+                 (when test-info
+                   (insert-test test-info
+                                (lambda ()
+                                  #,(with-stepper-syntax-properties
+                                     (['stepper-hint hint-tag]
+                                      ['stepper-hide-reduction #t]
+                                      ['stepper-use-val-as-final #t])
+                                     (quasisyntax/loc stx
+                                       (#,checker-proc-stx
+                                        #,(with-stepper-syntax-properties
+                                           (['stepper-hide-reduction #t])
+                                           #`(car 
+                                              #,(with-stepper-syntax-properties
+                                                 (['stepper-hide-reduction #t])
+                                                 #`(list
+                                                    (lambda () #,test-expr)
+                                                    #,(syntax/loc stx (void))))))
+                                        #,@embedded-stxes
+                                        #,src-info
+                                        #,(with-stepper-syntax-properties
+                                           (['stepper-no-lifting-info #t]
+                                            ['stepper-hide-reduction #t])
+                                           #'test-info))))))))
+             'stepper-skipto
+             (append skipto/third ;; let
+                     skipto/third skipto/second ;; unless (it expands into a begin)
+                     skipto/cdr skipto/third ;; application of insert-test
+                     '(syntax-e cdr cdr syntax-e car) ;; lambda
+                     )))
+      #`(begin
+          (let ([test-info (namespace-variable-value
+                            'test~object #f builder (current-namespace))])
+            (when test-info
+              (begin
+                (send test-info reset-info)
+                (insert-test test-info
+                             (lambda ()
+                               #,(with-stepper-syntax-properties
+                                  (['stepper-hint hint-tag]
+                                   ['stepper-hide-reduction #t]
+                                   ['stepper-use-val-as-final #t])
+                                  (quasisyntax/loc stx
+                                    (#,checker-proc-stx
+                                     #,(with-stepper-syntax-properties
+                                        (['stepper-hide-reduction #t])
                                         #`(car 
                                            #,(with-stepper-syntax-properties
-                                                 (['stepper-hide-reduction #t])
-                                               #`(list
-                                                  (lambda () #,test-expr)
-                                                  #,(syntax/loc stx (void))))))
-                                    #,@embedded-stxes
-                                    #,src-info
-                                    #,(with-stepper-syntax-properties
-                                       (['stepper-no-lifting-info #t]
-                                        ['stepper-hide-reduction #t])
-                                       #'test-info))))))))
-         'stepper-skipto
-         (append skipto/third ;; let
-                 skipto/third skipto/second ;; unless (it expands into a begin)
-                 skipto/cdr skipto/third ;; application of insert-test
-                 '(syntax-e cdr cdr syntax-e car) ;; lambda
-                 ))))
+                                              (['stepper-hide-reduction #t])
+                                              #`(list
+                                                 (lambda () #,test-expr)
+                                                 #,(syntax/loc stx (void))))))
+                                     #,@embedded-stxes
+                                     #,src-info
+                                     #,(with-stepper-syntax-properties
+                                        (['stepper-no-lifting-info #t]
+                                         ['stepper-hide-reduction #t])
+                                        #'test-info)))))))))
+          (test))))
 
 (define-for-syntax (check-context?)
   (let ([c (syntax-local-context)])
@@ -174,22 +208,24 @@
 ;;                (src format scheme-val scheme-val scheme-val -> check-fail)
 ;;                ( -> scheme-val) scheme-val scheme-val object symbol? -> void
 (define (run-and-check check maker test expect range src test-info kind)
-  (match-let ([(list result result-val exn?)
-               (with-handlers ([exn? (lambda (e) (raise e)
-                                       (let ([display (error-display-handler)])
-                                         #;((error-display-handler) (exn-message e) e)
-                                         (list (make-unexpected-error src (test-format) expect
-                                                                      (exn-message e) 
-                                                                      e) 'error (lambda () 
-                                                                                  (printf "~a~n" e)
-                                                                                  (display (exn-message e) e)))))])
+  (match-let ([(list result result-val exn)
+               (with-handlers ([exn:fail?
+                                (lambda (e)
+                                  (let ([display (error-display-handler)])
+                                    (list (make-unexpected-error src (test-format) expect
+                                                                 (exn-message e) 
+                                                                 e)
+                                          'error
+                                          e)))])
                  (let ([test-val (test)])
                    (cond [(check expect test-val range) (list #t test-val #f)]
                          [else 
                           (list (maker src (test-format) test-val expect range) test-val #f)])))])
     (cond [(check-fail? result)
-           (send (send test-info get-info) check-failed result (check-fail-src result) exn?)
-           #f]
+           (send (send test-info get-info) check-failed result (check-fail-src result) exn)
+           (if exn
+	       (raise exn)
+	       #f)]
           [else
            #t])))
 
@@ -198,7 +234,15 @@
     (namespace-set-variable-value! 'test~object te (current-namespace))
     te))
 
-(define (test) (run-tests) (display-results))
+(define-syntax (test stx) 
+  (syntax-case stx ()
+    [(_)
+     (syntax-property
+      #'(dynamic-wind
+	    values
+	    (lambda () (run-tests))
+	    (lambda () (display-results)))
+      'test-call #t)]))
 
 (define-syntax (run-tests stx)
   (syntax-case stx ()
@@ -247,6 +291,9 @@
     (define/public (get-info)
       (unless test-info (send this setup-info 'check-require))
       test-info)
+    (define/public (reset-info)
+      (set! tests null)
+      #;(send this setup-info 'check-require))
 
     (define/augment (run)
       (inner (void) run)
