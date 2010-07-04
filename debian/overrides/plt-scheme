@@ -1,0 +1,3 @@
+plt-scheme: extra-license-file /usr/share/plt/doc/doc-license.txt
+plt-scheme: extra-license-file /usr/share/plt/doc/release-notes/COPYING.LIB
+plt-scheme: shared-lib-without-dependency-information /usr/lib/plt/collects

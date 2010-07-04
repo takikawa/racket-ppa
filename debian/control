@@ -1,0 +1,39 @@
+Source: plt-scheme
+Section: interpreters
+Priority: optional
+Maintainer: Ari Pollak <ari@debian.org>
+Standards-Version: 3.8.0
+Build-Depends: cdbs, quilt, debhelper (>= 7.0.0), patchutils,
+ libfreetype6-dev, libjpeg62-dev, libpng12-dev, libssl-dev, libxaw7-dev,
+ xbitmaps, libxft-dev, perl5-base, libgl1-mesa-dev | libgl-dev,
+ libglu1-mesa-dev | libglu-dev, libx11-dev, libxrender-dev, libcairo2-dev
+XS-Vcs-Svn: svn://svn.debian.org/svn/pkt-plt-scheme/drscheme/
+XS-Vcs-Browser: http://svn.debian.org/wsvn/pkg-plt-scheme/drscheme/
+Homepage: http://www.plt-scheme.org/
+
+Package: plt-scheme
+Architecture: any
+Depends: ${shlibs:Depends}
+Recommends: plt-scheme-doc
+Conflicts: mzscheme (<< 2:4.0.1+fake.1), drscheme (<< 2:4.0.1+fake.1)
+Replaces: mzscheme (<< 2:4.0.1+fake.1), drscheme (<< 2:4.0.1+fake.1)
+Description: PLT Scheme Programming Environment
+ This is a Scheme Programming Environment, designed for use within
+ an educational setting. It includes its own IDE (DrScheme) as well as a
+ standalone interpreter (MzScheme).
+ DrScheme has an integrated help system and can run one of four
+ modes (beginning, intermediate, advanced, complete).  Each
+ level exposes successively more features and options to the
+ user.  The goal of this configuration is to protect novice users
+ from the more arcane behavior of Scheme under certain cases.
+
+Package: plt-scheme-doc
+Section: doc
+Architecture: all
+Depends: ${shlibs:Depends}
+Recommends: plt-scheme
+Conflicts: mzscheme (<< 2:4.0.1+fake.1), drscheme (<< 2:4.0.1+fake.1)
+Replaces: mzscheme (<< 2:4.0.1+fake.1), drscheme (<< 2:4.0.1+fake.1)
+Enhances: plt-scheme-doc
+Description: PLT Scheme Documentation
+ This package includes all of the documentation for PLT Scheme.

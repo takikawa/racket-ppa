@@ -1,0 +1,7 @@
+# Example watch control file for uscan
+# Rename this file to "watch" and then you can run the "uscan" command
+# to check for upstream updates and more.
+# Site		Directory		Pattern			Version	Script
+version=3
+opts=filenamemangle=s/.*-([0-9.]+)-.*/plt-scheme-$1.tar.gz/ \
+http://download.plt-scheme.org/bundles/([0-9]\.[0-9.]+)/plt/plt-([0-9]\.[0-9.]+)-src-unix.tgz

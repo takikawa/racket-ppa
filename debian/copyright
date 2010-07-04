@@ -1,0 +1,82 @@
+This package was debianized by Brent A. Fulgham bfulgham@debian.org on
+Fri, 4 Feb 2000 22:10:09 -0700.
+
+It was downloaded from http://download.plt-scheme.org/drscheme/
+
+Upstream Authors/Copyright: PLT Scheme Inc.
+
+Copyright: 
+Everything in this package is licensed under the GNU Lesser General Public
+License (LGPL), except for the the R5RS and SRFI docs, of which the copyrights
+follow below. The text of the LGPL is not included in this file, because
+there is a verbatim copy in /usr/share/common-licenses/LGPL on Debian systems.
+
+-------------------------------
+
+readline collection notes:
+GNU's readline library is covered by the GPL (found at
+/usr/share/common-licenses/GPL on Debian systems), and that applies to
+code that links with it.  PLT Scheme is LGPL, so this code is not used by
+default; you should explicitly enable it if you want to.  Also, be aware that
+if you write code that uses this library, it will make your code link to the
+readline library when invoked, with the usual GPL implications.
+
+-------------------------------
+
+SRFI license:
+
+	Permission is hereby granted, free of charge, to any person obtaining a
+	copy of this software and associated documentation files (the "Software"),
+	to deal in the Software without restriction, including without limitation
+	the rights to use, copy, modify, merge, publish, distribute, sublicense,
+	and/or sell copies of the Software, and to permit persons to whom the
+	Software is furnished to do so, subject to the following conditions:
+
+	The above copyright notice and this permission notice shall be included in
+	all copies or substantial portions of the Software.
+
+	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+	IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+	FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+	AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+	LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+	FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+	DEALINGS IN THE SOFTWARE.
+
+-------------------------------
+
+R5RS license:
+
+    We intend this report to belong to the entire Scheme community,
+    and so we grant permission to copy it in whole or in part without
+    fee.  In particular, we encourage implementors of Scheme to use
+    this report as a starting point for manuals and other
+    documentation, modifying it as necessary. 
+
+Note from Ari Pollak <ari@debian.org>: because the R5RS license wasn't clear
+enough according to the Debian Free Software Guidelines, I asked the authors to
+clarify what they meant. Here are their responses:
+
+On Jun 28, William D Clinger wrote:
+> > Can R5RS be modified and distributed by anyone, with or without fee?
+> 
+> Yes.
+> 
+> William D Clinger
+> Co-editor, R5RS
+
+On Jun 29, Richard Kelsey wrote:
+> > Can R5RS be modified and distributed by anyone, with or without fee?
+> 
+> Yes.
+> 
+> Richard A Kelsey
+> Co-editor, R5RS
+
+On Jul  6, Jonathan A Rees wrote:
+> In answer to "Can R5RS be modified and distributed by anyone, with or  
+> without fee?", the answer is
+> yes.
+> 
+> Jonathan
+
