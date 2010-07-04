@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -166,16 +166,6 @@ typedef struct FSSpec mzFSSpec;
 
 #define MZ_EXTERN extern MZ_DLLSPEC
 
-#ifdef MZ_USE_PLACES
-# if _MSC_VER
-#  define THREAD_LOCAL __declspec(thread)
-# else
-#  define THREAD_LOCAL __thread
-# endif
-#else
-# define THREAD_LOCAL /* empty */
-#endif
-
 #ifndef MZ_DONT_USE_JIT
 # if defined(MZ_USE_JIT_PPC) || defined(MZ_USE_JIT_I386) || defined(MZ_USE_JIT_X86_64)
 #  define MZ_USE_JIT
@@ -328,6 +318,12 @@ typedef struct Scheme_Vector {
   Scheme_Object *els[1];
 } Scheme_Vector;
 
+typedef struct Scheme_Double_Vector {
+  Scheme_Object so;
+  long size;
+  double els[1];
+} Scheme_Double_Vector;
+
 typedef struct Scheme_Print_Params Scheme_Print_Params;
 typedef void (*Scheme_Type_Printer)(Scheme_Object *v, int for_display, Scheme_Print_Params *pp);
 
@@ -445,6 +441,8 @@ typedef long (*Scheme_Secondary_Hash_Proc)(Scheme_Object *obj, void *cycle_data)
 #define SCHEME_MUTABLE_VECTORP(obj)  (SCHEME_VECTORP(obj) && SCHEME_MUTABLEP(obj))
 #define SCHEME_IMMUTABLE_VECTORP(obj)  (SCHEME_VECTORP(obj) && SCHEME_IMMUTABLEP(obj))
 
+#define SCHEME_FLVECTORP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_flvector_type)
+
 #define SCHEME_STRUCTP(obj) (SAME_TYPE(SCHEME_TYPE(obj), scheme_structure_type) || SAME_TYPE(SCHEME_TYPE(obj), scheme_proc_struct_type))
 #define SCHEME_STRUCT_TYPEP(obj) SAME_TYPE(SCHEME_TYPE(obj), scheme_struct_type_type)
 
@@ -549,6 +547,9 @@ typedef long (*Scheme_Secondary_Hash_Proc)(Scheme_Object *obj, void *cycle_data)
 #define SCHEME_VEC_ELS(obj)  (((Scheme_Vector *)(obj))->els)
 #define SCHEME_VEC_BASE(obj) SCHEME_VEC_ELS(obj)
 
+#define SCHEME_FLVEC_SIZE(obj) (((Scheme_Double_Vector *)(obj))->size)
+#define SCHEME_FLVEC_ELS(obj)  (((Scheme_Double_Vector *)(obj))->els)
+
 #define SCHEME_ENVBOX_VAL(obj)  (*((Scheme_Object **)(obj)))
 #define SCHEME_WEAK_BOX_VAL(obj) SCHEME_BOX_VAL(obj)
 
@@ -638,7 +639,7 @@ typedef struct Scheme_Offset_Cptr
 #define SCHEME_PRIM_STRUCT_OTHER_TYPE_MASK (128 | 256)
 #define SCHEME_PRIM_IS_MULTI_RESULT 512
 #define SCHEME_PRIM_IS_BINARY_INLINED 1024
-#define SCHEME_PRIM_IS_USER_PARAMETER 2048
+#define SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL 2048
 #define SCHEME_PRIM_IS_METHOD 4096
 #define SCHEME_PRIM_IS_CLOSURE 8192
 #define SCHEME_PRIM_IS_UNARY_INLINED 16384
@@ -908,6 +909,14 @@ typedef struct Scheme_Cont_Frame_Data {
 /*                              threads                                   */
 /*========================================================================*/
 
+#ifdef MZ_PRECISE_GC
+# ifdef INCLUDE_WITHOUT_PATHS
+#  include "schgc2obj.h"
+# else
+#  include "../gc2/gc2_obj.h"
+# endif
+#endif
+
 typedef void (Scheme_Close_Custodian_Client)(Scheme_Object *o, void *data);
 typedef void (*Scheme_Exit_Closer_Func)(Scheme_Object *, Scheme_Close_Custodian_Client *, void *);
 typedef Scheme_Object *(*Scheme_Custodian_Extractor)(Scheme_Object *o);
@@ -1098,10 +1107,14 @@ typedef struct Scheme_Thread {
   Scheme_Object *mbox_last;
   Scheme_Object *mbox_sema;
 
+  long saved_errno;
+
 #ifdef MZ_PRECISE_GC
   struct GC_Thread_Info *gc_info; /* managed by the GC */
 #endif
 } Scheme_Thread;
+
+#include "schthread.h"
 
 #if !SCHEME_DIRECT_EMBEDDED
 # ifdef LINK_EXTENSIONS_BY_TABLE
@@ -1492,7 +1505,7 @@ typedef void (*Scheme_Invoke_Proc)(Scheme_Env *env, long phase_shift,
 #  define scheme_fuel_counter (*scheme_fuel_counter_ptr)
 # endif
 #else
-MZ_EXTERN THREAD_LOCAL volatile int scheme_fuel_counter;
+THREAD_LOCAL_DECL(MZ_EXTERN volatile int scheme_fuel_counter);
 #endif
 
 #ifdef FUEL_AUTODECEREMENTS
@@ -1659,6 +1672,7 @@ extern void *scheme_malloc_envunbox(size_t);
 # define XFORM_END_SKIP /**/
 # define XFORM_START_SUSPEND /**/
 # define XFORM_END_SUSPEND /**/
+# define XFORM_SKIP_PROC /**/
 # define XFORM_START_TRUST_ARITH /**/
 # define XFORM_END_TRUST_ARITH /**/
 # define XFORM_CAN_IGNORE /**/
@@ -1701,8 +1715,8 @@ MZ_EXTERN void scheme_set_logging(int syslog_level, int stderr_level);
 MZ_EXTERN int scheme_get_allow_set_undefined();
 
 #ifndef MZ_USE_PLACES
-MZ_EXTERN THREAD_LOCAL Scheme_Thread *scheme_current_thread;
-MZ_EXTERN THREAD_LOCAL Scheme_Thread *scheme_first_thread;
+THREAD_LOCAL_DECL(MZ_EXTERN Scheme_Thread *scheme_current_thread);
+THREAD_LOCAL_DECL(MZ_EXTERN Scheme_Thread *scheme_first_thread);
 #endif
 MZ_EXTERN Scheme_Thread *scheme_get_current_thread();
 MZ_EXTERN long scheme_get_multiple_count();
@@ -1745,6 +1759,7 @@ MZ_EXTERN Scheme_Object *scheme_set_exec_cmd(char *s);
 MZ_EXTERN Scheme_Object *scheme_set_run_cmd(char *s);
 MZ_EXTERN void scheme_set_collects_path(Scheme_Object *p);
 MZ_EXTERN void scheme_set_original_dir(Scheme_Object *d);
+MZ_EXTERN void scheme_set_addon_dir(Scheme_Object *p);
 
 MZ_EXTERN void scheme_init_collection_paths(Scheme_Env *global_env, Scheme_Object *extra_dirs);
 MZ_EXTERN void scheme_init_collection_paths_post(Scheme_Env *global_env, Scheme_Object *extra_dirs, Scheme_Object *extra_post_dirs);

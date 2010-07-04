@@ -35,6 +35,7 @@
              (rename *in-input-port-chars in-input-port-chars)
              (rename *in-port in-port)
              (rename *in-lines in-lines)
+             (rename *in-bytes-lines in-bytes-lines)
              in-hash
              in-hash-keys
              in-hash-values
@@ -469,8 +470,8 @@
 
   (define in-port
     (case-lambda
-      [()  (in-port (current-input-port) read)]
-      [(r) (in-port (current-input-port) r)]
+      [()  (in-port read (current-input-port))]
+      [(r) (in-port r (current-input-port))]
       [(r p)
        (unless (and (procedure? r) (procedure-arity-includes? r 1))
          (raise-type-error 'in-port "procedure (arity 1)" r))
@@ -489,6 +490,19 @@
           "'linefeed, 'return, 'return-linefeed, 'any, or 'any-one"
           mode))
        (in-producer (lambda () (read-line p mode)) eof)]))
+  
+  (define in-bytes-lines
+    (case-lambda
+      [()  (in-bytes-lines (current-input-port) 'any)]
+      [(p) (in-bytes-lines p 'any)]
+      [(p mode)
+       (unless (input-port? p) (raise-type-error 'in-bytes-lines "input-port" p))
+       (unless (memq mode '(linefeed return return-linefeed any any-one))
+         (raise-type-error
+          'in-bytes-lines
+          "'linefeed, 'return, 'return-linefeed, 'any, or 'any-one"
+          mode))
+       (in-producer (lambda () (read-bytes-line p mode)) eof)]))
 
   (define (in-hash ht)
     (unless (hash? ht) (raise-type-error 'in-hash "hash" ht))
@@ -990,16 +1004,15 @@
     (lambda (stx)
       (let loop ([stx stx])
         (syntax-case stx ()
-          [[(id) (_ start)]
-           (and (integer? (syntax-e #'start))
-                (exact? (syntax-e #'start))
-                ((syntax-e #'start) . >= . 0))
+          [[(id) (_ start-expr)]
            #`[(id)
               (:do-in
                ;; outer bindings:
-               ()
+               ([(start) start-expr])
                ;; outer check:
-               (void)
+               (unless (exact-nonnegative-integer? start)
+                 ;; let `in-naturals' report the error:
+                 (in-naturals start))
                ;; loop bindings:
                ([pos start])
                ;; pos check
@@ -1254,6 +1267,26 @@
                        "'linefeed, 'return, 'return-linefeed, 'any, or 'any-one"
                        mode*))
                     (lambda () (read-line p* mode*)))
+                  eof)]])))
+  
+  (define-sequence-syntax *in-bytes-lines
+    (lambda () #'in-bytes-lines)
+    (lambda (stx)
+      (syntax-case stx ()
+        [[(id) (_)]   #'[(id) (*in-bytes-lines (current-input-port) 'any)]]
+        [[(id) (_ p)] #'[(id) (*in-bytes-lines p 'any)]]
+        [[(id) (_ p mode)]
+         #'[(id) (*in-producer
+                  (let ([p* p] [mode* mode])
+                    (unless (input-port? p*)
+                      (raise-type-error 'in-bytes-lines "input-port" p*))
+                    (unless (memq mode* '(linefeed return return-linefeed any
+                                          any-one))
+                      (raise-type-error
+                       'in-bytes-lines
+                       "'linefeed, 'return, 'return-linefeed, 'any, or 'any-one"
+                       mode*))
+                    (lambda () (read-bytes-line p* mode*)))
                   eof)]])))
 
   (define-sequence-syntax *in-input-port-bytes

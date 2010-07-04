@@ -1,7 +1,7 @@
 #lang scheme/base
 
 ;; Foreign Scheme interface
-(require '#%foreign setup/dirs
+(require '#%foreign setup/dirs scheme/unsafe/ops
          (for-syntax scheme/base scheme/list syntax/stx))
 
 ;; This module is full of unsafe bindings that are not provided to requiring
@@ -64,6 +64,7 @@
           (unsafe malloc) (unsafe free) (unsafe end-stubborn-change)
           cpointer? ptr-equal? ptr-add (unsafe ptr-ref) (unsafe ptr-set!) (unsafe cast)
           ptr-offset ptr-add! offset-ptr? set-ptr-offset!
+          vector->cpointer flvector->cpointer saved-errno lookup-errno
           ctype? make-ctype make-cstruct-type (unsafe make-sized-byte-string) ctype->layout
           _void _int8 _uint8 _int16 _uint16 _int32 _uint32 _int64 _uint64
           _fixint _ufixint _fixnum _ufixnum
@@ -398,7 +399,9 @@
          [else (set! keys (cons (cons key val) keys))]))
      (let loop ([t orig])
        (define (next rest . args) (apply setkey! args) (loop rest))
-       (syntax-case* t (type: expr: bind: 1st-arg: prev-arg: pre: post:) id=?
+       (syntax-case* t
+           (type: expr: bind: 1st-arg: prev-arg: pre: post: keywords:)
+           id=?
          [(type: t x ...)      (next #'(x ...) 'type #'t)]
          [(expr:     e  x ...) (next #'(x ...) 'expr #'e)]
          [(bind:     id x ...) (next #'(x ...) 'bind (cert-id #'id) #t)]
@@ -407,6 +410,12 @@
          ;; in the following two cases pass along orig for recertifying
          [(pre:      p  x ...) (next #'(x ...) 'pre  (with-arg #'p))]
          [(post:     p  x ...) (next #'(x ...) 'post (with-arg #'p))]
+         [(keywords: x ...)
+          (let kloop ([ks '()] [xs #'(x ...)])
+            (syntax-case xs ()
+              [(k v x ...) (syntax-e #'k)
+               (kloop (cons (cons (syntax-e #'k) #'v) ks) #'(x ...))]
+              [_ (next xs 'keywords (reverse ks))]))]
          [() (and (pair? keys) keys)]
          [_else #f]))))
 
@@ -427,7 +436,7 @@
         (let ([type (getkey 'type)] [pre (getkey 'pre)] [post (getkey 'post)])
           (unless type
             (err "this type must be used in a _fun expression (#f type)"))
-          (for-each notkey '(expr bind 1st prev))
+          (for-each notkey '(expr bind 1st prev keywords))
           (if (or pre post)
             ;; a type with pre/post blocks
             (let ([make-> (lambda (x what)
@@ -478,15 +487,16 @@
 ;; optionally applying a wrapper function to modify the result primitive
 ;; (callouts) or the input procedure (callbacks).
 (define* (_cprocedure itypes otype
-                      #:abi [abi #f] 
-                      #:wrapper [wrapper #f] 
-                      #:keep [keep #f]
-                      #:atomic? [atomic? #f])
-  (_cprocedure* itypes otype abi wrapper keep atomic?))
+                      #:abi        [abi     #f]
+                      #:wrapper    [wrapper #f]
+                      #:keep       [keep    #f]
+                      #:atomic?    [atomic? #f]
+                      #:save-errno [errno   #f])
+  (_cprocedure* itypes otype abi wrapper keep atomic? errno))
 
 ;; for internal use
 (define held-callbacks (make-weak-hasheq))
-(define (_cprocedure* itypes otype abi wrapper keep atomic?)
+(define (_cprocedure* itypes otype abi wrapper keep atomic? errno)
   (define-syntax-rule (make-it wrap)
     (make-ctype _fpointer
       (lambda (x)
@@ -499,7 +509,7 @@
                                   (if (or (null? x) (pair? x)) (cons cb x) cb)))]
                      [(procedure? keep) (keep cb)])
                cb)))
-      (lambda (x) (and x (wrap (ffi-call x itypes otype abi))))))
+      (lambda (x) (and x (wrap (ffi-call x itypes otype abi errno))))))
   (if wrapper (make-it wrapper) (make-it begin)))
 
 ;; Syntax for the special _fun type:
@@ -522,12 +532,11 @@
     [_ (raise-syntax-error '-> "should be used only in a _fun context")]))
 
 (provide _fun)
+(define-for-syntax _fun-keywords
+  `([#:abi ,#'#f] [#:keep ,#'#t] [#:atomic? ,#'#f] [#:save-errno ,#'#f]))
 (define-syntax (_fun stx)
   (define (err msg . sub) (apply raise-syntax-error '_fun msg stx sub))
   (define xs     #f)
-  (define abi    #f)
-  (define keep   #f)
-  (define atomic? #f)
   (define inputs #f)
   (define output #f)
   (define bind   '())
@@ -541,6 +550,22 @@
   (define (bind! x) (set! bind (append bind (list x))))
   (define (pre!  x) (set! pre  (append pre  (list x))))
   (define (post! x) (set! post (append post (list x))))
+  (define-values (kwd-ref kwd-set!)
+    (let ([ks '()])
+      (values
+       (lambda (k)
+         (cond [(assq k ks) => cdr]
+               [(assq k _fun-keywords) => cadr]
+               [else (error '_fun "internal error: unknown keyword: ~e" k)]))
+       (lambda (k-stx v [sub k-stx])
+         (let ([k (if (syntax? k-stx) (syntax-e k-stx) k-stx)])
+           (cond [(assq k ks)
+                  (err (if (keyword? k-stx)
+                         (format "indirectly duplicate ~s keyword" k-stx)
+                         "duplicate keyword")
+                       sub)]
+                 [(assq k _fun-keywords) (set! ks (cons (cons k v) ks))]
+                 [else (err "unknown keyword" sub)]))))))
   (define ((t-n-e clause) type name expr)
     (let ([keys (custom-type->keys type err)])
       (define (getkey key) (cond [(assq key keys) => cdr] [else #f]))
@@ -573,8 +598,12 @@
         (set! type (getkey 'type))
         (cond [(and (not expr) (getkey 'expr)) => (lambda (x) (set! expr x))])
         (cond [(getkey 'bind) => (lambda (x) (bind! #`[#,x #,name]))])
-        (cond [(getkey 'pre) => (lambda (x) (pre!  #`[#,name #,(arg x #t)]))])
-        (cond [(getkey 'post) => (lambda (x) (post! #`[#,name #,(arg x)]))]))
+        (cond [(getkey 'pre ) => (lambda (x) (pre!  #`[#,name #,(arg x #t)]))])
+        (cond [(getkey 'post) => (lambda (x) (post! #`[#,name #,(arg x)]))])
+        (cond [(getkey 'keywords)
+               => (lambda (ks)
+                    (for ([k+v (in-list ks)])
+                      (kwd-set! (car k+v) (cdr k+v) clause)))]))
       ;; turn a #f syntax to #f
       (set! type (and type (syntax-case type () [#f #f] [_ type])))
       (when type ; remember these for later usages
@@ -584,18 +613,11 @@
   (define (do-fun)
     ;; parse keywords
     (let loop ()
-      (let ([k (and (pair? xs) (pair? (cdr xs)) (syntax-e (car xs)))])
-        (define-syntax-rule (kwds [key var] ...)
-          (case k
-            [(key) (if var
-                     (err (format "got a second ~s keyword") 'key (car xs))
-                     (begin (set! var (cadr xs)) (set! xs (cddr xs)) (loop)))]
-            ...
-            [else (err "unknown keyword" (car xs))]))
-        (when (keyword? k) (kwds [#:abi abi] [#:keep keep] [#:atomic? atomic?]))))
-    (unless abi  (set! abi  #'#f))
-    (unless keep (set! keep #'#t))
-    (unless atomic? (set! atomic? #'#f))
+      (let ([k (and (pair? xs) (pair? (cdr xs)) (car xs))])
+        (when (keyword? (syntax-e k))
+          (kwd-set! k (cadr xs))
+          (set! xs (cddr xs))
+          (loop))))
     ;; parse known punctuation
     (set! xs (map (lambda (x)
                     (syntax-case* x (-> ::) id=? [:: '::] [-> '->] [_  x]))
@@ -651,44 +673,53 @@
                                (err "extraneous output expression" #'expr)
                                (t-n-e #'type #'name #'expr))]
               [type          (t-n-e #'type temp output-expr)])))
-    (if (or (caddr output) input-names (ormap caddr inputs)
-            (ormap (lambda (x) (not (car x))) inputs)
-            (pair? bind) (pair? pre) (pair? post))
-      (let* ([input-names (or input-names
-                              (filter-map (lambda (i)
-                                            (and (not (caddr i)) (cadr i)))
-                                          inputs))]
-             [output-expr (let ([o (caddr output)])
-                            (or (and (not (void? o)) o)
-                                (cadr output)))]
-             [args (filter-map (lambda (i)
-                                 (and (caddr i)
-                                      (not (void? (caddr i)))
-                                      #`[#,(cadr i) #,(caddr i)]))
-                               inputs)]
-             [ffi-args (filter-map (lambda (x) (and (car x) (cadr x))) inputs)]
-             ;; the actual wrapper body
-             [body (quasisyntax/loc stx
-                     (lambda #,input-names
-                       (let* (#,@args
-                              #,@bind
-                              #,@pre
-                              [#,(cadr output) (ffi #,@ffi-args)]
-                              #,@post)
-                         #,output-expr)))]
-             ;; if there is a string 'ffi-name property, use it as a name
-             [body (let ([n (cond [(syntax-property stx 'ffi-name)
-                                   => syntax->datum]
-                                  [else #f])])
-                     (if (string? n)
-                       (syntax-property
-                        body 'inferred-name
-                        (string->symbol (string-append "ffi-wrapper:" n)))
-                       body))])
-        #`(_cprocedure* (list #,@(filter-map car inputs)) #,(car output)
-                        #,abi (lambda (ffi) #,body) #,keep #,atomic?))
-      #`(_cprocedure* (list #,@(filter-map car inputs)) #,(car output)
-                      #,abi #f #,keep #,atomic?)))
+    (let ([make-cprocedure
+           (lambda (wrapper)
+             #`(_cprocedure* (list #,@(filter-map car inputs))
+                             #,(car output)
+                             #,(kwd-ref '#:abi)
+                             #,wrapper
+                             #,(kwd-ref '#:keep)
+                             #,(kwd-ref '#:atomic?)
+                             #,(kwd-ref '#:save-errno)))])
+      (if (or (caddr output) input-names (ormap caddr inputs)
+              (ormap (lambda (x) (not (car x))) inputs)
+              (pair? bind) (pair? pre) (pair? post))
+        (let* ([input-names
+                (or input-names
+                    (filter-map (lambda (i) (and (not (caddr i)) (cadr i)))
+                                inputs))]
+               [output-expr
+                (let ([o (caddr output)])
+                  (or (and (not (void? o)) o) (cadr output)))]
+               [args
+                (filter-map (lambda (i)
+                              (and (caddr i)
+                                   (not (void? (caddr i)))
+                                   #`[#,(cadr i) #,(caddr i)]))
+                            inputs)]
+               [ffi-args
+                (filter-map (lambda (x) (and (car x) (cadr x))) inputs)]
+               ;; the actual wrapper body
+               [body (quasisyntax/loc stx
+                       (lambda #,input-names
+                         (let* (#,@args
+                                #,@bind
+                                #,@pre
+                                [#,(cadr output) (ffi #,@ffi-args)]
+                                #,@post)
+                           #,output-expr)))]
+               ;; if there is a string 'ffi-name property, use it as a name
+               [body (let ([n (cond [(syntax-property stx 'ffi-name)
+                                     => syntax->datum]
+                                    [else #f])])
+                       (if (string? n)
+                         (syntax-property
+                          body 'inferred-name
+                          (string->symbol (string-append "ffi-wrapper:" n)))
+                         body))])
+          (make-cprocedure #`(lambda (ffi) #,body)))
+        (make-cprocedure #'#f))))
   (syntax-case stx ()
     [(_ x ...) (begin (set! xs (syntax->list #'(x ...))) (do-fun))]))
 
@@ -894,7 +925,9 @@
 ;;               eg, for method calls),
 ;; * `prev-arg:' similar to 1st-arg: but for the previous argument,
 ;; * `pre:'      for a binding that will be inserted before the ffi call,
-;; * `post:'     for a binding after the ffi call.
+;; * `post:'     for a binding after the ffi call,
+;; * `keywords:' specifying keywords to be used in the surrounding _fun
+;;               (the keywords and values follow).
 ;; The pre: and post: bindings can be of the form (id => expr) to use the
 ;; existing value.  Note that if the pre: expression is not (id => expr), then
 ;; it means that there is no input for this argument.  Also note that if a
@@ -1079,9 +1112,11 @@
                      [TAG->list    (id "" "->list")]
                      [TAG-ref      (id "" "-ref")]
                      [TAG-set!     (id "" "-set!")]
+                     [TAG->cpointer (id "" "->cpointer")]
                      [_TAG         (id "_" "")]
                      [_TAG*        (id "_" "*")]
-                     [TAGname      name])
+                     [TAGname      name]
+                     [f64?         (if (eq? (syntax-e #'TAG) 'f64) #'#t #'#f)])
          #'(begin
              (define-struct TAG (ptr length))
              (provide TAG? TAG-length (rename-out [TAG s:TAG]))
@@ -1102,14 +1137,19 @@
              (define* (TAG-ref v i)
                (if (TAG? v)
                    (if (and (exact-nonnegative-integer? i) (< i (TAG-length v)))
-                       (ptr-ref (TAG-ptr v) type i)
+                       (if f64? ;; use JIT-inlined operation
+                           (unsafe-f64vector-ref v i)
+                           (ptr-ref (TAG-ptr v) type i))
                        (error 'TAG-ref "bad index ~e for ~a bounds of 0..~e"
                               i 'TAG (sub1 (TAG-length v))))
                    (raise-type-error 'TAG-ref TAGname v)))
              (define* (TAG-set! v i x)
                (if (TAG? v)
                    (if (and (exact-nonnegative-integer? i) (< i (TAG-length v)))
-                       (ptr-set! (TAG-ptr v) type i x)
+                       (if (and f64? ;; use JIT-inlined operation
+                                (inexact-real? x))
+                           (unsafe-f64vector-set! v i x)
+                           (ptr-set! (TAG-ptr v) type i x))
                        (error 'TAG-set! "bad index ~e for ~a bounds of 0..~e"
                               i 'TAG (sub1 (TAG-length v))))
                    (raise-type-error 'TAG-set! TAGname v)))
@@ -1119,6 +1159,10 @@
                    (raise-type-error 'TAG->list TAGname v)))
              (define* (list->TAG l)
                (make-TAG (list->cblock l type) (length l)))
+             (define* (TAG->cpointer v)
+               (if (TAG? v)
+                   (TAG-ptr v)
+                   (raise-type-error 'TAG->cpointer TAGname v)))
              ;; same as the _cvector implementation
              (provide _TAG)
              (define _TAG*
@@ -1264,9 +1308,10 @@
     (raise-type-error 'cast "ctype" to-type))
   (unless (= (ctype-sizeof to-type)
              (ctype-sizeof from-type))
-    (raise-mismatch-error (format "representation sizes of types differ: ~e to "
-                                  from-type)
-                          to-type))
+    (raise-mismatch-error 'cast
+                          (format "representation sizes of from and to types differ: ~e and "
+                                  (ctype-sizeof from-type))
+                          (ctype-sizeof to-type)))
   (let ([p2 (malloc from-type)])
     (ptr-set! p2 from-type p)
     (ptr-ref p2 to-type)))

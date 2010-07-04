@@ -65,11 +65,11 @@ fo@o  -@->  fo@o
 ---
 @foo[bar]{}  -@->  (foo bar)
 ---
-@foo[bar][baz]  -@->  (foo bar) (baz)
+@foo[bar][baz]  -@->  (foo bar) [baz]
 ---
 @foo[bar]{baz}  -@->  (foo bar "baz")
 ---
-@foo[bar]{baz}[blah]  -@->  (foo bar "baz") (blah)
+@foo[bar]{baz}[blah]  -@->  (foo bar "baz") [blah]
 ---
 @foo[bar]{baz}@foo[blah]  -@->  (foo bar "baz") (foo blah)
 ---
@@ -91,7 +91,7 @@ fo@o  -@->  fo@o
 ---
 @[foo]  -@->  (foo)
 ---
-@|{blah}|  -@->  ("blah")
+@|{blah}|  -@->  {"blah"}
 ---
 ;; -------------------- newlines and spaces in text
 ---

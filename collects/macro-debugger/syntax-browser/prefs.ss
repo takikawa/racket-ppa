@@ -1,4 +1,3 @@
-
 #lang scheme/base
 (require scheme/class
          framework/framework
@@ -15,57 +14,60 @@
 (preferences:set-default 'SyntaxBrowser:PropertiesPanelPercentage 1/3 number?)
 (preferences:set-default 'SyntaxBrowser:PropertiesPanelShown #t boolean?)
 
-(pref:get/set pref:width SyntaxBrowser:Width)
-(pref:get/set pref:height SyntaxBrowser:Height)
-(pref:get/set pref:props-percentage SyntaxBrowser:PropertiesPanelPercentage)
-(pref:get/set pref:props-shown? SyntaxBrowser:PropertiesPanelShown)
+(define pref:width (pref:get/set 'SyntaxBrowser:Width))
+(define pref:height (pref:get/set 'SyntaxBrowser:Height))
+(define pref:props-percentage (pref:get/set 'SyntaxBrowser:PropertiesPanelPercentage))
+(define pref:props-shown? (pref:get/set 'SyntaxBrowser:PropertiesPanelShown))
 
 (define prefs-base%
   (class object%
     ;; suffix-option : SuffixOption
-    (field/notify suffix-option (new notify-box% (value 'over-limit)))
+    (define-notify suffix-option (new notify-box% (value 'over-limit)))
 
     ;; syntax-font-size : number/#f
     ;; When non-false, overrides the default font size
-    (field/notify syntax-font-size (new notify-box% (value #f)))
+    (define-notify syntax-font-size (new notify-box% (value #f)))
 
     ;; colors : (listof string)
-    (field/notify colors 
-      (new notify-box%
-           (value '("black" "red" "blue"
-                    "mediumforestgreen" "darkgreen" 
-                    "darkred"
-                    "cornflowerblue" "royalblue" "steelblue" "darkslategray" "darkblue"
-                    "indigo" "purple" 
-                    "orange" "salmon" "darkgoldenrod" "olive"))))
+    (define-notify colors
+      (new notify-box% (value the-colors)))
 
     (super-new)))
 
+(define alt-colors
+  '("black"
+    "red"       "blue"           "forestgreen" "purple"       "brown"
+    "firebrick" "darkblue"       "seagreen"    "violetred"    "chocolate"
+    "darkred"   "cornflowerblue" "darkgreen"   "indigo"       "sandybrown"
+    "orange"    "cadetblue"      "olive"       "mediumpurple" "goldenrod"))
+
+(define the-colors
+  '("black" "red" "blue"
+    "mediumforestgreen" "darkgreen" 
+    "darkred"
+    "cornflowerblue" "royalblue" "steelblue" "darkslategray" "darkblue"
+    "indigo" "purple" 
+    "orange" "salmon" "darkgoldenrod" "olive"))
+
 (define syntax-prefs-base%
   (class* prefs-base% (config<%>)
-    ;; width, height : number
-    (notify-methods width)
-    (notify-methods height)
+    (init readonly?)
 
-    ;; props-percentage : ...
-    (notify-methods props-percentage)
+    (define-syntax-rule (define-pref-notify* (name pref) ...)
+      (begin (define-notify name (notify-box/pref pref #:readonly? readonly?)) ...))
 
-    ;; props-shown? : boolean
-    (notify-methods props-shown?)
+    (define-pref-notify*
+      (width pref:width)
+      (height pref:height)
+      (props-percentage pref:props-percentage)
+      (props-shown? pref:props-shown?))
+
     (super-new)))
 
 (define syntax-prefs%
   (class syntax-prefs-base%
-    (connect-to-pref width pref:width)
-    (connect-to-pref height pref:height)
-    (connect-to-pref props-percentage pref:props-percentage)
-    (connect-to-pref props-shown? pref:props-shown?)
-    (super-new)))
+    (super-new (readonly? #f))))
 
 (define syntax-prefs/readonly%
   (class syntax-prefs-base%
-    (connect-to-pref/readonly width pref:width)
-    (connect-to-pref/readonly height pref:height)
-    (connect-to-pref/readonly props-percentage pref:props-percentage)
-    (connect-to-pref/readonly props-shown? pref:props-shown?)
-    (super-new)))
+    (super-new (readonly? #t))))

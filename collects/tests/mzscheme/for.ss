@@ -135,6 +135,9 @@
 (test-generator [((123) 4)] (in-port read (open-input-string "(123) 4")))
 (test-generator [(65 66 67)] (in-port read-byte (open-input-string "ABC")))
 
+(test-generator [("abc" "def")] (in-lines (open-input-string "abc\ndef")))
+(test-generator [(#"abc" #"def")] (in-bytes-lines (open-input-string "abc\ndef")))
+
 (test-generator [(0 1 2 3 4 5)] (in-sequences (in-range 6)))
 (test-generator [(0 1 2 3 4 5)] (in-sequences (in-range 4) '(4 5)))
 (test-generator [(0 1 2 3 4 5)] (in-sequences (in-range 6) '()))
@@ -243,5 +246,31 @@
              (yield 'even))])
   (test '(#t #f #f #t #t #f odd even) 'yield-helper
         (list (g1) (g2) (g1) (g2) (g1) (g2) (g1) (g2))))
+
+(test '(1 2 3)
+      'sequence->generator-1
+      (let ([maker (sequence->generator '(1 2 3))])
+        (list (maker) (maker) (maker))))
+
+(test '(1 2 3)
+      'sequence->generator-2
+      (let ([maker (sequence->generator (in-list '(1 2 3)))])
+        (list (maker) (maker) (maker))))
+
+(test '(0 1 2 3 4)
+      'sequence->generator-3
+      (let ([maker (sequence->generator (in-range 0 5))])
+        (list (maker) (maker) (maker) (maker) (maker))))
+
+(test '(0 1 2 3 4)
+      'sequence->generator-4
+      (let ([maker (sequence->generator (in-naturals))])
+        (list (maker) (maker) (maker) (maker) (maker))))
+
+(test '(1 2 3 1 2 3)
+      'sequence->repeated-generator
+      (let ([maker (sequence->repeated-generator '(1 2 3))])
+        (list (maker) (maker) (maker)
+              (maker) (maker) (maker))))
 
 (report-errs)

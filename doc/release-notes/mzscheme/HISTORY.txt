@@ -1,3 +1,12 @@
+Version 4.2.4, January 2010
+Added scheme/flonum and scheme/fixnum
+Extended scheme/unsafe/ops
+Changed JIT to support unboxed local binding of known-flonum
+ arguments to unsafe-fl functions
+Changed JIT to inline numeric ops with more than 2 arguments
+Added #:save-errno option for foreign-function types
+Added module->imports and module->exports
+
 Version 4.2.3, November 2009
 Changed _pointer (in scheme/foreign) to mean a pointer that does not
  refer to GCable memory; added _gcpointer

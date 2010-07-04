@@ -342,6 +342,7 @@ the later case, the result is the @scheme[ctype]).}
                       [output-type ctype?]
                       [#:abi abi (or/c symbol/c #f) #f]
                       [#:atomic? atomic? any/c #f]
+                      [#:save-errno save-errno (or/c #f 'posix 'windows) #f]
                       [#:wrapper wrapper (or/c #f (procedure? . -> . procedure?))
                                          #f]
                       [#:keep keep (or/c boolean? box? (any/c . -> . any/c))
@@ -385,6 +386,20 @@ continuation jumps, and its non-tail recursion must be minimal to
 avoid C-level stack overflow; otherwise, the process may crash or
 misbehave.
 
+If @scheme[save-errno] is @scheme['posix], then the value of
+@as-index{@tt{errno}} is saved (specific to the current thread)
+immediately after a foreign function returns. The saved value is
+accessible through @scheme[saved-errno]. If @scheme[save-errno] is
+@scheme['windows], then the value of
+@as-index{@tt{GetLastError}}@tt{()} is saved for later use via
+@scheme[saved-errno]; the @scheme['windows] option is available only
+under Windows (on other platforms @scheme[saved-errno] will return
+0). If @scheme[save-errno] is @scheme[#f], no error value is saved
+automatically. The error-recording support provided by
+@scheme[save-errno] is needed because the PLT Scheme runtime system
+may otherwise preempt the current Scheme thread and itself call
+functions that set error values.
+
 The optional @scheme[wrapper], if provided, is expected to be a
 function that can change a callout procedure: when a callout is
 generated, the wrapper is applied on the newly created primitive
@@ -398,7 +413,7 @@ the foreign code before they reach the Scheme procedure, and possibly
 changes the result values too.
 
 Sending Scheme functions as callbacks to foreign code is achieved by
-translating them to a foreign ``closure'', which foreign code can call
+translating them to a foreign ``closure,'' which foreign code can call
 as plain C functions.  Additional care must be taken in case the
 foreign code might hold on to the callback function.  In these cases
 you must arrange for the callback value to not be garbage-collected,
@@ -450,7 +465,8 @@ values: @itemize[
 @defform/subs[#:literals (-> :: :)
               (_fun fun-option ... maybe-args type-spec ... -> type-spec
                     maybe-wrapper)
-              ([fun-option (code:line #:abi  abi-expr)
+              ([fun-option (code:line #:abi abi-expr)
+                           (code:line #:save-errno save-errno-expr)
                            (code:line #:keep keep-expr)
                            (code:line #:atomic? atomic?-expr)]
                [maybe-args code:blank
@@ -469,6 +485,15 @@ syntax for the @scheme[_cprocedure] type constructor. In its simplest
 form, only the input @scheme[type-expr]s and the output @scheme[type-expr] are
 specified, and each types is a simple expression, which creates a
 straightforward function type.
+
+For instance,
+
+@schemeblock[
+(_fun _int _string -> _int)
+]
+
+specifies a function that receives an integer and a
+string, and returns an integer.
 
 In its full form, the @scheme[_fun] syntax provides an IDL-like
 language that can be used to create a wrapper function around the
@@ -552,6 +577,10 @@ treated:
    argument's value.}
 
  @item{@scheme[post:] a similar post-foreign code chunk.}
+
+ @item{@scheme[keywords:] specifies keyword/value expressions that will
+   be used with the surrounding @scheme[_fun] form.  (Note: the
+   keyword/value sequence follows @scheme[keywords:], not parenthesized.)}
 ]
 
 The @scheme[pre:] and @scheme[post:] bindings can be of the form
@@ -911,15 +940,16 @@ expects arguments for both the super fields ands the new ones:
 
 @section{Enumerations and Masks}
 
-Although the constructors below are describes as procedures,they are
+Although the constructors below are describes as procedures, they are
 implemented as syntax, so that error messages can report a type name
 where the syntactic context implies one.
 
-@defproc[(_enum [symbols list?][basetype ctype? _ufixint]) ctype?]{
+@defproc[(_enum [symbols list?] [basetype ctype? _ufixint])
+         ctype?]{
 
 Takes a list of symbols and generates an enumeration type.  The
-enumeration maps between the given @scheme[symbols] and integers,
-counting from @scheme[0].
+enumeration maps between a symbol in the given @scheme[symbols] list and
+corresponding integers, counting from @scheme[0].
 
 The list @scheme[symbols] can also set the values of symbols by
 putting @scheme['=] and an exact integer after the symbol.  For
@@ -929,7 +959,8 @@ example, the list @scheme['(x y = 10 z)] maps @scheme['x] to
 
 The @scheme[basetype] argument specifies the base type to use.}
 
-@defproc[(_bitmask [symbols (or symbol? list?)][basetype ctype? _uint]) ctype?]{
+@defproc[(_bitmask [symbols (or symbol? list?)] [basetype ctype? _uint])
+         ctype?]{
 
 Similar to @scheme[_enum], but the resulting mapping translates a list
 of symbols to a number and back, using @scheme[bitwise-ior].  A single

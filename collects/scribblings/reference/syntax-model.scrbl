@@ -489,16 +489,16 @@ be @tech{expand}ed (i.e. parsed) before it can be evaluated, and it is
 expanded at @tech{phase level} 1 (i.e., in the @tech{transformer
 environment}) instead of @tech{phase level} 0.
 
-The if resulting @scheme[value] is a procedure of one argument or as
-the result of @scheme[make-set!-transformer] on a procedure, then is
-it used as a @deftech{syntax transformer} (a.k.a. @deftech{macro}).
+If the resulting @scheme[value] is a procedure of one argument or
+the result of @scheme[make-set!-transformer] on a procedure, then it
+is used as a @deftech{syntax transformer} (a.k.a. @deftech{macro}).
 The procedure is expected to accept a syntax object and return a
 syntax object. A use of the binding (at @tech{phase level} 0) triggers
 a call of the @tech{syntax transformer} by the expander; see
 @secref["expand-steps"].
 
 Before the expander passes a @tech{syntax object} to a transformer,
-the @tech{syntax object} is extend with a @deftech{syntax mark} (that
+the @tech{syntax object} is extended with a @deftech{syntax mark} (that
 applies to all sub-@tech{syntax objects}). The result of the
 transformer is similarly extended with the same @tech{syntax
 mark}. When a @tech{syntax object}'s @tech{lexical information}
@@ -771,7 +771,7 @@ bucket-2
 (defs-and-uses)
 ]
 
-Macro-generated \scheme{require} and \scheme{provide}
+Macro-generated @scheme{require} and @scheme{provide}
  clauses also introduce and reference generation-specific bindings:
 
 @itemize[

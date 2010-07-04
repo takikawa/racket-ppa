@@ -712,12 +712,6 @@ before the pattern compiler is invoked.
          [(has-underscore? pattern)
           (let*-values ([(binder before-underscore)
                          (let ([before (split-underscore pattern)])
-                           (unless (or (hash-maps? clang-ht before)
-                                       (memq before underscore-allowed))
-                             (error 'compile-pattern "before underscore must be either a non-terminal ~a or a built-in pattern, found ~a in ~s" 
-                                    before
-                                    (format "~s" (list* 'one 'of: (hash-map clang-ht (λ (x y) x))))
-                                    pattern))
                            (values pattern before))]
                         [(match-raw-name has-hole?)
                          (compile-id-pattern before-underscore)])
@@ -1484,9 +1478,8 @@ before the pattern compiler is invoked.
              [else (let ([r-exp (car r-exps)])
                      (cond
                        [(repeat? r-exp)
-                        (i-loop
-                         (cdr r-exps)
-                         (append (repeat-empty-bindings r-exp) ribs))]
+                        (append (repeat-empty-bindings r-exp)
+                                (i-loop (cdr r-exps) ribs))]
                        [else
                         (loop (car r-exps) (i-loop (cdr r-exps) ribs))]))])))]
       [else ribs])))
@@ -1598,6 +1591,7 @@ before the pattern compiler is invoked.
                       compiled-pattern?))
  
  (set-cache-size! (-> (and/c integer? positive?) void?))
+ (cache-size (and/c integer? positive?))
  
  (make-bindings ((listof bind?) . -> . bindings?))
  (bindings-table (bindings? . -> . (listof bind?)))

@@ -3,11 +3,16 @@
 
 (Section 'optimization)
 
+(require scheme/flonum
+         scheme/fixnum)
+
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; Check JIT inlining of primitives:
 (parameterize ([current-namespace (make-base-namespace)]
 	       [eval-jit-enabled #t])
+  (namespace-require 'scheme/flonum)
+  (namespace-require 'scheme/fixnum)
   (let* ([check-error-message (lambda (name proc)
 				(unless (memq name '(eq? not null? pair?
 							 real? number? boolean? 
@@ -89,17 +94,41 @@
                   (bin0 iv op +nan.0 (exact->inexact arg2))
                   (unless (eq? op 'eq?)
                     (bin0 iv op +nan.0 +nan.0))))]
-	 [tri0 (lambda (v op get-arg1 arg2 arg3 check-effect)
+	 [tri0 (lambda (v op get-arg1 arg2 arg3 check-effect #:wrap [wrap values])
 		 ;; (printf "Trying ~a ~a ~a\n" op (get-arg1) arg2 arg3);
-		 (let ([name `(,op ,get-arg1 ,arg2, arg3)])
-		   (test v name ((eval `(lambda (x) (,op x ,arg2 ,arg3))) (get-arg1)))
+		 (let ([name `(,op ,get-arg1 ,arg2, arg3)]
+                       [get-arg2 (lambda () arg2)]
+                       [get-arg3 (lambda () arg3)])
+		   (test v name ((eval `(lambda (x) ,(wrap `(,op x ,arg2 ,arg3)))) (get-arg1)))
 		   (check-effect)
-		   (test v name ((eval `(lambda (x) (,op (,get-arg1) x ,arg3))) arg2))
+		   (test v name ((eval `(lambda (x) ,(wrap `(,op (,get-arg1) x ,arg3)))) arg2))
 		   (check-effect)
-		   (test v name ((eval `(lambda (x) (,op (,get-arg1) ,arg2 x))) arg3))
+		   (test v name ((eval `(lambda (x) ,(wrap `(,op x (,get-arg2) ,arg3)))) (get-arg1)))
 		   (check-effect)
-		   (test v name ((eval `(lambda (x y z) (,op x y z))) (get-arg1) arg2 arg3))
+		   (test v name ((eval `(lambda (x) ,(wrap `(,op (,get-arg1) (,get-arg2) x)))) arg3))
+		   (check-effect)
+		   (test v name ((eval `(lambda () ,(wrap `(,op (,get-arg1) (,get-arg2) (,get-arg3)))))))
+		   (check-effect)
+		   (test v name ((eval `(lambda (x) ,(wrap `(,op (,get-arg1) ,arg2 x)))) arg3))
+		   (check-effect)
+		   (test v name ((eval `(lambda (x y) ,(wrap `(,op (,get-arg1) x y)))) arg2 arg3))
+		   (check-effect)
+		   (eval `(define _arg2 ,arg2))
+		   (test v name ((eval `(lambda (y) ,(wrap `(,op (,get-arg1) _arg2 y)))) arg3))
+                   (check-effect)
+		   (test v name ((eval `(lambda (x y z) ,(wrap `(,op x y z)))) (get-arg1) arg2 arg3))
 		   (check-effect)))]
+         [tri (lambda (v op get-arg1 arg2 arg3 check-effect #:wrap [wrap values])
+                (define (e->i n) (if (number? n) (exact->inexact n) n))
+                (tri0 v op get-arg1 arg2 arg3 check-effect #:wrap wrap)
+                (tri0 (e->i v) op (lambda () (exact->inexact (get-arg1))) (exact->inexact arg2) (exact->inexact arg3) check-effect
+                       #:wrap wrap)
+                (tri0 (e->i v) op get-arg1 (exact->inexact arg2) arg3 check-effect
+                       #:wrap wrap))]
+         [tri-if (lambda (v op get-arg1 arg2 arg3 check-effect)
+                   (tri v op get-arg1 arg2 arg3 check-effect)
+                   (tri (if v 'true 'false) op get-arg1 arg2 arg3 check-effect
+                        #:wrap (lambda (e) `(if ,e 'true 'false))))]
 	 [tri-exact (lambda (v op get-arg1 arg2 arg3 check-effect 3rd-all-ok?)
                       (check-error-message op (eval `(lambda (x) (,op x ,arg2 ,arg3))))
                       (check-error-message op (eval `(lambda (x) (,op (,get-arg1) x ,arg3))))
@@ -188,12 +217,30 @@
     (bin #t '< -200 100)
     (bin #f '< 100 -200)
     (bin #t '< 1 (expt 2 30))
+    (tri-if #t '< (lambda () 1) 2 3 void)
+    (tri-if #f '< (lambda () 1) 3 3 void)
+    (tri-if #f '< (lambda () 1) -1 3 void)
+    (bin-exact #t 'fx< 100 200)
+    (bin-exact #f 'fx< 200 100)
+    (bin-exact #f 'fx< 200 200)
+    (bin-exact #t 'fl< 100.0 200.0)
+    (bin-exact #f 'fl< 200.0 100.0)
+    (bin-exact #f 'fl< 200.0 200.0)
 
     (bin #t '<= 100 200)
     (bin #f '<= 200 100)
     (bin #t '<= 100 100)
     (bin #t '<= -200 100)
     (bin #f '<= 100 -200)
+    (tri-if #t '<= (lambda () 1) 2 3 void)
+    (tri-if #t '<= (lambda () 1) 3 3 void)
+    (tri-if #f '<= (lambda () 1) -1 3 void)
+    (bin-exact #t 'fx<= 100 200)
+    (bin-exact #f 'fx<= 200 100)
+    (bin-exact #t 'fx<= 200 200)
+    (bin-exact #t 'fl<= 100.0 200.0)
+    (bin-exact #f 'fl<= 200.0 100.0)
+    (bin-exact #t 'fl<= 200.0 200.0)
 
     (bin #f '> 100 200)
     (bin #t '> 200 100)
@@ -201,18 +248,44 @@
     (bin #f '> -200 100)
     (bin #t '> 100 -200)
     (bin #f '> 1 (expt 2 30))
+    (tri-if #t '> (lambda () 3) 2 1 void)
+    (tri-if #f '> (lambda () 3) 3 1 void)
+    (tri-if #f '> (lambda () 3) -1 1 void)
+    (bin-exact #f 'fx> 100 200)
+    (bin-exact #t 'fx> 200 100)
+    (bin-exact #f 'fx> 200 200)
+    (bin-exact #f 'fl> 100.0 200.0)
+    (bin-exact #t 'fl> 200.0 100.0)
+    (bin-exact #f 'fl> 200.0 200.0)
 
     (bin #f '>= 100 200)
     (bin #t '>= 200 100)
     (bin #t '>= 100 100)
     (bin #f '>= -200 100)
     (bin #t '>= 100 -200)
+    (tri-if #t '>= (lambda () 3) 2 1 void)
+    (tri-if #t '>= (lambda () 3) 3 1 void)
+    (tri-if #f '>= (lambda () 3) -1 1 void)
+    (bin-exact #f 'fx>= 100 200)
+    (bin-exact #t 'fx>= 200 100)
+    (bin-exact #t 'fx>= 200 200)
+    (bin-exact #f 'fl>= 100.0 200.0)
+    (bin-exact #t 'fl>= 200.0 100.0)
+    (bin-exact #t 'fl>= 200.0 200.0)
 
     (bin #f '= 100 200)
     (bin #f '= 200 100)
     (bin #t '= 100 100)
     (bin #f '= -200 100)
     (bin #f '= +nan.0 +nan.0)
+    (tri-if #t '= (lambda () 3) 3 3 void)
+    (tri-if #f '= (lambda () 3) 3 1 void)
+    (tri-if #f '= (lambda () 3) 1 3 void)
+    (tri-if #f '= (lambda () 1) 3 3 void)
+    (bin-exact #f 'fx= 100 200)
+    (bin-exact #t 'fx= 200 200)
+    (bin-exact #f 'fl= 100.0 200.0)
+    (bin-exact #t 'fl= 200.0 200.0)
 
     (un 3 'add1 2)
     (un -3 'add1 -4)
@@ -236,6 +309,23 @@
     (un (expt 2 30) 'abs (- (expt 2 30)))
     (un (sub1 (expt 2 62)) 'abs (sub1 (expt 2 62)))
     (un (expt 2 62) 'abs (- (expt 2 62)))
+    (un-exact 3.0 'flabs -3.0)
+
+    (un-exact 3.0 'flsqrt 9.0)
+    (un-exact +nan.0 'flsqrt -9.0)
+
+    (let ([test-trig
+           (lambda (trig fltrig)
+             (un (trig 1.0) fltrig 1.0)
+             (un +nan.0 fltrig +nan.0))])
+      (test-trig sin 'flsin)
+      (test-trig cos 'flcos)
+      (test-trig tan 'fltan)
+      (test-trig asin 'flasin)
+      (test-trig acos 'flacos)
+      (test-trig atan 'flatan)
+      (test-trig log 'fllog)
+      (test-trig exp 'flexp))
     
     (un 1.0 'exact->inexact 1)
     (un 1073741823.0 'exact->inexact (sub1 (expt 2 30)))
@@ -243,10 +333,17 @@
     (un 4611686018427387903.0 'exact->inexact (sub1 (expt 2 62)))
     (un -4611686018427387904.0 'exact->inexact (- (expt 2 62)))
 
+    (un-exact 10.0 '->fl 10)
+    (un-exact 10.0 'fx->fl 10)
+
     (bin 11 '+ 4 7)
     (bin -3 '+ 4 -7)
     (bin (expt 2 30) '+ (expt 2 29) (expt 2 29))
     (bin (- (expt 2 31) 2) '+ (sub1 (expt 2 30)) (sub1 (expt 2 30)))
+    (tri 6 '+ (lambda () 1) 2 3 void)
+    (tri 13/2 '+ (lambda () 1) 5/2 3 void)
+    (bin-exact 25 'fx+ 10 15)
+    (bin-exact 3.4 'fl+ 1.1 2.3)
 
     (bin 3 '- 7 4)
     (bin 11 '- 7 -4)
@@ -254,6 +351,10 @@
     (bin (expt 2 30) '- (expt 2 29) (- (expt 2 29)))
     (bin (- (expt 2 30)) '- (- (expt 2 29)) (expt 2 29))
     (bin (- 2 (expt 2 31)) '- (- 1 (expt 2 30)) (sub1 (expt 2 30)))
+    (tri 6 '- (lambda () 10) 3 1 void)
+    (tri 13/2 '- (lambda () 10) 3 1/2 void)
+    (bin-exact 13 'fx- 5 -8)
+    (bin-exact -0.75 'fl- 1.5 2.25)
 
     (bin 4 '* 1 4)
     (bin 0 '* 0 4)
@@ -265,6 +366,10 @@
     (bin (expt 2 30) '* 2 (expt 2 29))
     (bin (expt 2 31) '* 2 (expt 2 30))
     (bin (- (expt 2 30)) '* 2 (- (expt 2 29)))
+    (tri 30 '* (lambda () 2) 3 5 void)
+    (tri 5 '* (lambda () 2) 3 5/6 void)
+    (bin-exact 253 'fx* 11 23)
+    (bin-exact 2.53 'fl* 1.1 2.3)
 
     (bin 0 '/ 0 4)
     (bin 1/4 '/ 1 4)
@@ -273,26 +378,60 @@
     (bin -4 '/ -16 4)
     (bin -4 '/ 16 -4)
     (bin 4 '/ -16 -4)
+    (tri 3 '/ (lambda () 30) 5 2 void)
+    (tri 12 '/ (lambda () 30) 5 1/2 void)
+    (bin-exact (/ 1.1 2.3) 'fl/ 1.1 2.3)
 
     (bin-int 3 'quotient 10 3)
     (bin-int -3 'quotient 10 -3)
     (bin-int 3 'quotient -10 -3)
     (bin-int -3 'quotient -10 3)
     (bin-exact 7 'quotient (* 7 (expt 2 100)) (expt 2 100))
+    (bin-exact 3 'fxquotient 10 3)
+    (bin-exact -3 'fxquotient 10 -3)
+    (bin-exact (expt 2 30) 'quotient (- (expt 2 30)) -1)
 
     (bin-int 1 'remainder 10 3)
     (bin-int 1 'remainder 10 -3)
     (bin-int -1 'remainder -10 -3)
     (bin-int -1 'remainder -10 3)
     (bin-exact 7 'remainder (+ 7 (expt 2 100)) (expt 2 100))
+    (bin-exact 1 'fxremainder 10 3)
+    (bin-exact 1 'fxremainder 10 -3)
+    (bin-exact -1 'fxremainder -10 3)
+    (bin-exact -1 'fxremainder -10 -3)
+
+    (bin-int 1 'modulo 10 3)
+    (bin-int -2 'modulo 10 -3)
+    (bin-int -1 'modulo -10 -3)
+    (bin-int 2 'modulo -10 3)
+    (bin-exact 7 'modulo (+ 7 (expt 2 100)) (expt 2 100))
+    (bin-exact 1 'fxmodulo 10 3)
+    (bin-exact -2 'fxmodulo 10 -3)
+    (bin-exact -1 'fxmodulo -10 -3)
+    (bin-exact 2 'fxmodulo -10 3)
 
     (bin 3 'min 3 300)
     (bin -300 'min 3 -300)
     (bin -400 'min -400 -300)
+    (tri 5 'min (lambda () 10) 5 20 void)
+    (tri 5 'min (lambda () 5) 10 20 void)
+    (tri 5 'min (lambda () 20) 10 5 void)
+    (bin-exact 3.0 'flmin 3.0 4.5)
+    (bin-exact 2.5 'flmin 3.0 2.5)
+    (bin-exact 30 'fxmin 30 45)
+    (bin-exact 25 'fxmin 30 25)
 
     (bin 300 'max 3 300)
     (bin 3 'max 3 -300)
     (bin -3 'max -3 -300)
+    (tri 50 'max (lambda () 10) 50 20 void)
+    (tri 50 'max (lambda () 50) 10 20 void)
+    (tri 50 'max (lambda () 20) 10 50 void)
+    (bin-exact 4.5 'flmax 3.0 4.5)
+    (bin-exact 3.0 'flmax 3.0 2.5)
+    (bin-exact 45 'fxmax 30 45)
+    (bin-exact 30 'fxmax 30 25)
 
     (bin-exact 11 'bitwise-and 11 43)
     (bin-exact 0 'bitwise-and 11 32)
@@ -301,18 +440,24 @@
     (bin-exact 11 'bitwise-and 11 -1)
     (bin-exact -11 'bitwise-and -11 -1)
     (bin-exact (expt 2 50) 'bitwise-and (expt 2 50) (expt 2 50))
+    (tri-exact #x10101 'bitwise-and (lambda () #x11111) #x10111 #x110101 void #f)
+    (bin-exact 11 'fxand 11 43)
 
     (bin-exact 11 'bitwise-ior 8 3)
     (bin-exact 11 'bitwise-ior 11 3)
     (bin-exact -1 'bitwise-ior 11 -1)
     (bin-exact (sub1 (expt 2 51)) 'bitwise-ior (sub1 (expt 2 50)) (expt 2 50))
     (bin-exact (add1 (expt 2 50)) 'bitwise-ior 1 (expt 2 50))
+    (tri-exact #x10101 'bitwise-ior (lambda () #x1) #x100 #x10000 void #f)
+    (bin-exact 11 'fxior 8 3)
 
     (bin-exact 11 'bitwise-xor 8 3)
     (bin-exact 8 'bitwise-xor 11 3)
     (bin-exact -2 'bitwise-xor 1 -1)
     (bin-exact (sub1 (expt 2 51)) 'bitwise-xor (sub1 (expt 2 50)) (expt 2 50))
     (bin-exact (add1 (expt 2 50)) 'bitwise-xor 1 (expt 2 50))
+    (tri-exact #x10101 'bitwise-xor (lambda () #x1) #x110 #x10010 void #f)
+    (bin-exact 11 'fxxor 8 3)
 
     (bin-exact 4 'arithmetic-shift 2 1)
     (bin-exact 1 'arithmetic-shift 2 -1)
@@ -324,12 +469,16 @@
     (bin-exact -1 'arithmetic-shift -1 -1)
     (bin-exact 2 'arithmetic-shift (expt 2 33) -32)
     (bin-exact 8 'arithmetic-shift (expt 2 33) -30)
+    (bin-exact 4 'fxlshift 2 1)
+    (bin-exact 1 'fxrshift 2 1)
 
     (un-exact -1 'bitwise-not 0)
     (un-exact 0 'bitwise-not -1)
     (un-exact (- -1 (expt 2 30)) 'bitwise-not (expt 2 30))
     (un-exact (- (expt 2 30)) 'bitwise-not (sub1 (expt 2 30)))
     (un-exact (- -1 (expt 2 32)) 'bitwise-not (expt 2 32))
+    (un-exact -1 'fxnot 0)
+    (un-exact 0 'fxnot -1)
 
     (bin-exact #t 'bitwise-bit-set? 1 0)
     (bin-exact #f 'bitwise-bit-set? 1 1)
@@ -355,6 +504,10 @@
 
     (un-exact 'a 'unbox (box 'a))
     (un-exact 3 'vector-length (vector 'a 'b 'c))
+
+    (bin-exact 1.1 'flvector-ref (flvector 1.1 2.2 3.3) 0)
+    (bin-exact 3.3 'flvector-ref (flvector 1.1 2.2 3.3) 2)
+    (un-exact 3 'flvector-length (flvector 1.1 2.2 3.3))
 
     (bin-exact #\a 'string-ref "abc\u2001" 0)
     (bin-exact #\b 'string-ref "abc\u2001" 1)
@@ -397,7 +550,8 @@
 			 '(0 1 2))))])
       (test-setter make-vector #f 7 'vector-set! vector-set! vector-ref)
       (test-setter make-bytes 0 7 'bytes-set! bytes-set! bytes-ref)
-      (test-setter make-string #\a #\7 'string-set! string-set! string-ref))
+      (test-setter make-string #\a #\7 'string-set! string-set! string-ref)
+      (test-setter make-flvector 1.0 7.0 'flvector-set! flvector-set! flvector-ref))
 
     ))
 
@@ -558,6 +712,14 @@
 (test-comp '(lambda (x) (if (cons 1 x) 78 78))
            '(lambda (x) 78))
 
+(test-comp '(lambda (x) (if (let ([r (something)])
+                              (if r r (something-else)))
+                            (a1)
+                            (a2)))
+           '(lambda (x)  (if (if (something) #t (something-else))
+                             (a1)
+                             (a2))))
+
 (test-comp '(values 10)
            10)
 (test-comp '(let ([x (values 10)])
@@ -567,6 +729,14 @@
               (values x))
            '(let ([x (random)])
               x))
+(test-comp '(let ([x (+ (cons 1 2) 0)])
+              (values x))
+           '(let ([x (+ (cons 1 2) 0)])
+              x))
+
+(test-comp '(let ([x (+ (cons 1 2) 0)])
+              (- x 8))
+           '(- (+ (cons 1 2) 0) 8))
 
 (test-comp '(let-values ([(x y) (values 1 2)])
               (+ x y))
@@ -653,13 +823,16 @@
               15)
            15)
 
-(test-comp '(letrec ((even
-                      (let ([unused 6])
-                        (let ([even (lambda (x) (if (zero? x) #t (even (sub1 x))))])
-                          (values even)))))
-              (even 10000))
-           '(letrec ((even (lambda (x) (if (zero? x) #t (even (sub1 x))))))
-              (even 10000)))
+(parameterize ([compile-context-preservation-enabled 
+                ;; Avoid different amounts of unrolling
+                #t])
+  (test-comp '(letrec ((even
+                        (let ([unused 6])
+                          (let ([even (lambda (x) (if (zero? x) #t (even (sub1 x))))])
+                            (values even)))))
+                (even 10000))
+             '(letrec ((even (lambda (x) (if (zero? x) #t (even (sub1 x))))))
+                (even 10000))))
 
 (test-comp '(procedure? add1)
            #t)
@@ -919,6 +1092,6 @@
 (err/rt-test (cwv-2-5-f (lambda () 1) (lambda (y z) (+ y 2))) exn:fail:contract:arity?)
 (err/rt-test (cwv-2-5-f (lambda () (values 1 2 3)) (lambda (y z) (+ y 2))) exn:fail:contract:arity?)
 
-;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (report-errs)

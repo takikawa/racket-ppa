@@ -42,11 +42,10 @@
          (append-pats pat rpat)
          (raise-syntax-error 'match "non-list pattern inside unquote-splicing"
                              stx #'p)))]
-    [(p dd)
+    [(p dd . rest)
      (ddk? #'dd)
-     (let* ([count (ddk? #'..)]
-            [min (if (number? count) count #f)]
-            [max (if (number? count) count #f)])
+     (let* ([count (ddk? #'dd)]
+            [min (and (number? count) count)])
        (make-GSeq
         (parameterize ([match-...-nesting (add1 (match-...-nesting))])
           (list (list (pq #'p))))
@@ -55,9 +54,19 @@
         (list #f)
         ;; patterns in p get bound to lists
         (list #f)
-        (make-Null (make-Dummy #f))
+        (pq #'rest)
         #f))]
     [(a . b) (make-Pair (pq #'a) (pq #'b))]
+    ;; prefab structs
+    [struct
+     (prefab-struct-key (syntax-e #'struct))
+     (let ([key (prefab-struct-key (syntax-e #'struct))]
+           [pats (cdr (vector->list (struct->vector (syntax-e #'struct))))])
+       (make-And (list (make-Pred #`(struct-type-make-predicate (prefab-key->struct-type '#,key #,(length pats))))
+                       (make-App #'struct->vector
+                                 (make-Vector (cons (make-Dummy #f) (map pq pats))))))
+       #;
+       (make-PrefabStruct key (map pq pats)))]
     ;; the hard cases
     [#(p ...)
      (ormap (lambda (p)
@@ -73,7 +82,7 @@
      (make-Vector (map pq (syntax->list #'(p ...))))]
     [bx
      (box? (syntax-e #'bx))
-     (make-Box (pq (unbox (syntax-e #'bx))))]
+     (make-Box (pq (unbox (syntax-e #'bx))))]    
     [()
      (make-Null (make-Dummy #f))]
     [v

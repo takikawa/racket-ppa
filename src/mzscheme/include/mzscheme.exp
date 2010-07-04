@@ -202,6 +202,11 @@ scheme_remove_all_finalization
 scheme_dont_gc_ptr
 scheme_gc_ptr_ok
 scheme_collect_garbage
+GC_register_traversers
+GC_resolve
+GC_mark
+GC_fixup
+GC_fixup_self
 scheme_malloc_immobile_box
 scheme_free_immobile_box
 scheme_make_bucket_table
@@ -575,4 +580,6 @@ scheme_make_provided_string
 scheme_make_args_string
 scheme_system_library_subpath
 scheme_signal_received
+scheme_signal_received_at
+scheme_get_signal_handle
 scheme_char_strlen

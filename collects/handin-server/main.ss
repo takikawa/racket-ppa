@@ -1,4 +1,5 @@
 #lang scheme/base
+
 (require mzlib/thread
          scheme/port
          openssl
@@ -170,9 +171,10 @@
   (set! len (read r-safe))
   (unless (and (number? len) (integer? len) (positive? len))
     (error* "bad length: ~s" len))
-  (unless (len . < . (get-conf 'max-upload))
-    (error* "max handin file size is ~s bytes, file to handin is too big (~s bytes)"
-            (get-conf 'max-upload) len))
+  (let ([max (get-conf 'max-upload)])
+    (unless (len . < . max)
+      (error* "max handin file size is ~s bytes, ~a (~s bytes)"
+              max "file to handin is too big" len)))
   (parameterize ([current-directory (assignment<->dir assignment)])
     (wait-for-lock dirname
       (let ([dir (build-path (current-directory) dirname)])
@@ -623,66 +625,94 @@
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(log-line "server started ------------------------------")
-(hook 'server-start `([port ,(get-conf 'port-number)]))
+(define web-controller (web:run))
 
-(define stop-status (web:run))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (define session-count 0)
+
+(define (handle-handin-request r w)
+  (set! connection-num (add1 connection-num))
+  (when ((current-memory-use) . > . (get-conf 'session-memory-limit))
+    (collect-garbage))
+  (parameterize ([current-session
+                  (begin (set! session-count (add1 session-count))
+                         session-count)])
+    (let-values ([(here there) (ssl-addresses r)])
+      (log-line "connect from ~a" there)
+      (hook 'server-connect `([from ,there])))
+    (with-watcher
+     w
+     (lambda (kill-watcher)
+       (let ([r-safe (make-limited-input-port r (* 4 1024))])
+         (with-handlers ([exn:fail?
+                          (lambda (exn)
+                            (let ([msg (if (exn? exn)
+                                         (exn-message exn)
+                                         (format "~e" exn))])
+                              (kill-watcher)
+                              (log-line "ERROR: ~a" msg)
+                              (write+flush w msg)
+                              ;; see note on close-output-port below
+                              (close-output-port w)))])
+           ;; Initiate handin protocol (the 'handin token was already peeked)
+           (unless (eq? 'handin (read r-safe))
+             (error 'handin "internal error, didn't get peeked string"))
+           (write+flush w 'handin)
+           ;; Check version:
+           (let ([ver (read r-safe)])
+             (if (eq? 'ver1 ver)
+               (write+flush w 'ver1)
+               (error 'handin "unknown handin version: ~e" ver)))
+           (handle-connection r r-safe w)
+           (log-line "normal exit")
+           (kill-watcher)))))))
+
+(define (handle-http-request r w)
+  (let ([s (make-semaphore 0)])
+    (web-controller 'connect r w s)
+    (semaphore-wait s)))
+
+(define (handle-*-request r w)
+  (let* ([proto (regexp-match-peek #rx#"^[^\r\n]*(?=\r?\n)" r 0 (* 4 1024))]
+         [proto (and proto (car proto))])
+    ((cond [(not proto) (error 'handin "no protocol line" proto)]
+           [(equal? #"handin" proto) handle-handin-request]
+           [(regexp-match? #rx#"(?i:http/[0-9.]+)$" proto) handle-http-request]
+           [else (error 'handin "unknown protocol: ~e" proto)])
+     r w)))
 
 (define default-context-length (error-print-context-length))
 (parameterize ([error-display-handler (lambda (msg exn) (log-line msg))]
                [error-print-context-length 0]
                [current-directory server-dir])
+  (define port (get-conf 'port-number))
+  (define (start-notify)
+    (log-line "*** handin server started on port ~a" port)
+    (hook 'server-start `([port ,port])))
   (run-server
-   (get-conf 'port-number)
+   port
    (lambda (r w)
      (error-print-context-length default-context-length)
-     (set! connection-num (add1 connection-num))
-     (when ((current-memory-use) . > . (get-conf 'session-memory-limit))
-       (collect-garbage))
-     (parameterize ([current-session
-                     (begin (set! session-count (add1 session-count))
-                            session-count)])
-       (let-values ([(here there) (ssl-addresses r)])
-         (log-line "connect from ~a" there)
-         (hook 'server-connect `([from ,there])))
-       (with-watcher
-        w
-        (lambda (kill-watcher)
-          (let ([r-safe (make-limited-input-port r 2048)])
-            (write+flush w 'handin)
-            ;; Check protocol:
-            (with-handlers ([exn:fail?
-                             (lambda (exn)
-                               (let ([msg (if (exn? exn)
-                                            (exn-message exn)
-                                            (format "~e" exn))])
-                                 (kill-watcher)
-                                 (log-line "ERROR: ~a" msg)
-                                 (write+flush w msg)
-                                 ;; see note on close-output-port below
-                                 (close-output-port w)))])
-              (let ([protocol (read r-safe)])
-                (if (eq? protocol 'ver1)
-                  (write+flush w 'ver1)
-                  (error 'handin "unknown protocol: ~s" protocol)))
-              (handle-connection r r-safe w)
-              (log-line "normal exit")
-              (kill-watcher)
-              ;; This close-output-port should not be necessary, and it's
-              ;; here due to a deficiency in the SSL binding.  The problem is
-              ;; that a custodian shutdown of w is harsher for SSL output
-              ;; than a normal close. A normal close flushes an internal
-              ;; buffer that's not supposed to exist, while the shutdown
-              ;; gives up immediately.
-              (close-output-port w)))))))
+     (handle-*-request r w)
+     ;; This close-output-port should not be necessary, and it's here
+     ;; due to a deficiency in the SSL binding.  The problem is that a
+     ;; custodian shutdown of w is harsher for SSL output than a normal
+     ;; close. A normal close flushes an internal buffer that's not
+     ;; supposed to exist, while the shutdown gives up immediately.
+     (close-output-port w))
    #f ; `with-watcher' handles our timeouts
    (lambda (exn)
-     (printf "~a\n" (if (exn? exn) (exn-message exn) exn)))
+     (log-line "ERROR: ~a" (if (exn? exn) (exn-message exn) exn)))
    (lambda (port-k cnt reuse?)
      (let ([l (ssl-listen port-k cnt #t)])
        (ssl-load-certificate-chain! l "server-cert.pem")
        (ssl-load-private-key! l "private-key.pem")
+       (start-notify)
        l))
-   ssl-close ssl-accept ssl-accept/enable-break))
+   (lambda (l)
+     (log-line "shutting down")
+     (web-controller 'shutdown)
+     (ssl-close l))
+   ssl-accept ssl-accept/enable-break))

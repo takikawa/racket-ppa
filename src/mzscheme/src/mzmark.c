@@ -1449,6 +1449,34 @@ static int vector_obj_FIXUP(void *p) {
 #define vector_obj_IS_CONST_SIZE 0
 
 
+static int flvector_obj_SIZE(void *p) {
+  Scheme_Double_Vector *vec = (Scheme_Double_Vector *)p;
+
+  return
+  gcBYTES_TO_WORDS((sizeof(Scheme_Double_Vector) 
+		    + ((vec->size - 1) * sizeof(double))));
+}
+
+static int flvector_obj_MARK(void *p) {
+  Scheme_Double_Vector *vec = (Scheme_Double_Vector *)p;
+
+  return
+  gcBYTES_TO_WORDS((sizeof(Scheme_Double_Vector) 
+		    + ((vec->size - 1) * sizeof(double))));
+}
+
+static int flvector_obj_FIXUP(void *p) {
+  Scheme_Double_Vector *vec = (Scheme_Double_Vector *)p;
+
+  return
+  gcBYTES_TO_WORDS((sizeof(Scheme_Double_Vector) 
+		    + ((vec->size - 1) * sizeof(double))));
+}
+
+#define flvector_obj_IS_ATOMIC 1
+#define flvector_obj_IS_CONST_SIZE 0
+
+
 static int input_port_SIZE(void *p) {
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Input_Port));
@@ -2945,6 +2973,33 @@ static int mark_sfs_info_FIXUP(void *p) {
 #define mark_sfs_info_IS_CONST_SIZE 1
 
 
+static int mark_once_used_SIZE(void *p) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Once_Used));
+}
+
+static int mark_once_used_MARK(void *p) {
+  Scheme_Once_Used *o = (Scheme_Once_Used *)p;
+  gcMARK(o->expr);
+  gcMARK(o->info);
+  gcMARK(o->next);
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Once_Used));
+}
+
+static int mark_once_used_FIXUP(void *p) {
+  Scheme_Once_Used *o = (Scheme_Once_Used *)p;
+  gcFIXUP(o->expr);
+  gcFIXUP(o->info);
+  gcFIXUP(o->next);
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Once_Used));
+}
+
+#define mark_once_used_IS_ATOMIC 0
+#define mark_once_used_IS_CONST_SIZE 1
+
+
 #endif  /* ENV */
 
 /**********************************************************************/
@@ -3089,6 +3144,7 @@ static int mark_closure_info_MARK(void *p) {
   
   gcMARK(i->local_flags);
   gcMARK(i->base_closure_map);
+  gcMARK(i->flonum_map);
 
   return
   gcBYTES_TO_WORDS(sizeof(Closure_Info));
@@ -3099,6 +3155,7 @@ static int mark_closure_info_FIXUP(void *p) {
   
   gcFIXUP(i->local_flags);
   gcFIXUP(i->base_closure_map);
+  gcFIXUP(i->flonum_map);
 
   return
   gcBYTES_TO_WORDS(sizeof(Closure_Info));
@@ -3290,18 +3347,51 @@ static int place_val_SIZE(void *p) {
 
 static int place_val_MARK(void *p) {
   Scheme_Place *pr = (Scheme_Place *)p;
+  gcMARK(pr->channel);
+
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Place));
 }
 
 static int place_val_FIXUP(void *p) {
   Scheme_Place *pr = (Scheme_Place *)p;
+  gcFIXUP(pr->channel);
+
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Place));
 }
 
 #define place_val_IS_ATOMIC 0
 #define place_val_IS_CONST_SIZE 1
+
+
+static int place_async_channel_val_SIZE(void *p) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Place_Async_Channel));
+}
+
+static int place_async_channel_val_MARK(void *p) {
+  Scheme_Place_Async_Channel *pac = (Scheme_Place_Async_Channel *)p;
+  int i;
+  for (i = pac->size; i--; )
+    gcMARK(pac->msgs[i]);
+
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Place_Async_Channel));
+}
+
+static int place_async_channel_val_FIXUP(void *p) {
+  Scheme_Place_Async_Channel *pac = (Scheme_Place_Async_Channel *)p;
+  int i;
+  for (i = pac->size; i--; )
+    gcFIXUP(pac->msgs[i]);
+
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Place_Async_Channel));
+}
+
+#define place_async_channel_val_IS_ATOMIC 0
+#define place_async_channel_val_IS_CONST_SIZE 1
 
 
 #endif  /* PLACES */
@@ -3582,7 +3672,7 @@ static int mark_input_fd_FIXUP(void *p) {
 
 #endif
 
-#if defined(UNIX_PROCESSES)
+#if defined(UNIX_PROCESSES) && !(defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC))
 static int mark_system_child_SIZE(void *p) {
   return
   gcBYTES_TO_WORDS(sizeof(System_Child));
@@ -5408,6 +5498,102 @@ static int native_unclosed_proc_plus_case_FIXUP(void *p) {
 
 
 #endif  /* JIT */
+
+/**********************************************************************/
+
+#ifdef MARKS_FOR_FUTURE_C
+
+#ifdef FUTURES_ENABLED
+
+static int future_SIZE(void *p) {
+  return
+  gcBYTES_TO_WORDS(sizeof(future_t));
+}
+
+static int future_MARK(void *p) {
+  future_t *f = (future_t *)p;
+  gcMARK(f->orig_lambda);
+  gcMARK(f->arg_s0);
+  gcMARK(f->arg_S0);
+  gcMARK(f->arg_b0);
+  gcMARK(f->arg_n0);
+  gcMARK(f->arg_s1);
+  gcMARK(f->arg_S1);
+  gcMARK(f->arg_s2);
+  gcMARK(f->arg_S2);
+  gcMARK(f->retval_s);
+  gcMARK(f->retval);
+  gcMARK(f->multiple_array);
+  gcMARK(f->tail_rator);
+  gcMARK(f->tail_rands);
+  gcMARK(f->prev);
+  gcMARK(f->next);
+  gcMARK(f->next_waiting_atomic);
+  return
+  gcBYTES_TO_WORDS(sizeof(future_t));
+}
+
+static int future_FIXUP(void *p) {
+  future_t *f = (future_t *)p;
+  gcFIXUP(f->orig_lambda);
+  gcFIXUP(f->arg_s0);
+  gcFIXUP(f->arg_S0);
+  gcFIXUP(f->arg_b0);
+  gcFIXUP(f->arg_n0);
+  gcFIXUP(f->arg_s1);
+  gcFIXUP(f->arg_S1);
+  gcFIXUP(f->arg_s2);
+  gcFIXUP(f->arg_S2);
+  gcFIXUP(f->retval_s);
+  gcFIXUP(f->retval);
+  gcFIXUP(f->multiple_array);
+  gcFIXUP(f->tail_rator);
+  gcFIXUP(f->tail_rands);
+  gcFIXUP(f->prev);
+  gcFIXUP(f->next);
+  gcFIXUP(f->next_waiting_atomic);
+  return
+  gcBYTES_TO_WORDS(sizeof(future_t));
+}
+
+#define future_IS_ATOMIC 0
+#define future_IS_CONST_SIZE 1
+
+
+#else
+
+static int sequential_future_SIZE(void *p) {
+  return
+  gcBYTES_TO_WORDS(sizeof(future_t));
+}
+
+static int sequential_future_MARK(void *p) {
+  future_t *f = (future_t *)p;
+  gcMARK(f->orig_lambda);
+  gcMARK(f->running_sema);
+  gcMARK(f->retval);
+  gcMARK(f->multiple_array);
+  return
+  gcBYTES_TO_WORDS(sizeof(future_t));
+}
+
+static int sequential_future_FIXUP(void *p) {
+  future_t *f = (future_t *)p;
+  gcFIXUP(f->orig_lambda);
+  gcFIXUP(f->running_sema);
+  gcFIXUP(f->retval);
+  gcFIXUP(f->multiple_array);
+  return
+  gcBYTES_TO_WORDS(sizeof(future_t));
+}
+
+#define sequential_future_IS_ATOMIC 0
+#define sequential_future_IS_CONST_SIZE 1
+
+
+#endif
+
+#endif  /* FUTURE */
 
 /**********************************************************************/
 

@@ -3,7 +3,7 @@
 
 (require (rename-in "../utils/utils.ss" [infer r:infer]))
 (require syntax/kerncase
-	 unstable/list
+	 unstable/list unstable/syntax
          mzlib/etc
          scheme/match
          "signatures.ss"
@@ -103,7 +103,7 @@
            ;; if all the variables have types, we stick them into the environment
            [(andmap (lambda (s) (syntax-property s 'type-label)) vars)        
             (let ([ts (map get-type vars)])
-              (for-each register-type vars ts)
+              (for-each register-type-if-undefined vars ts)
               (map make-def-binding vars ts))]
            ;; if this already had an annotation, we just construct the binding reps
            [(andmap (lambda (s) (lookup-type s (lambda () #f))) vars)
@@ -253,9 +253,11 @@
     ;; report delayed errors
     (report-all-errors)
     ;; compute the new provides
-    (with-syntax
-        ([((new-provs ...) ...) (map (generate-prov stx-defs val-defs) provs)])
+    (with-syntax*
+        ([the-variable-reference (generate-temporary #'blame)]
+         [((new-provs ...) ...) (map (generate-prov stx-defs val-defs #'the-variable-reference) provs)])
       #`(begin
+          (define the-variable-reference (#%variable-reference))
            #,(env-init-code)
            #,(tname-env-init-code)
            #,(talias-env-init-code)

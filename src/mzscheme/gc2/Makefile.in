@@ -138,7 +138,7 @@ xobjects: $(OBJS) main.@LTO@
 XFORMDEP = $(srcdir)/gc2.h $(srcdir)/gc2_obj.h $(srcdir)/xform.ss $(srcdir)/xform-mod.ss \
            $(srcdir)/precomp.c $(srcdir)/../src/schpriv.h $(srcdir)/../include/scheme.h \
            $(srcdir)/../sconfig.h $(srcdir)/../uconfig.h $(srcdir)/../src/schemef.h \
-           $(srcdir)/../src/stypes.h 
+           $(srcdir)/../src/stypes.h $(srcdir)/../include/schthread.h $(srcdir)/../src/mzrt.h 
 
 LIGHTNINGDEP = $(srcdir)/../src/lightning/i386/core.h $(srcdir)/../src/lightning/i386/core-common.h \
                $(srcdir)/../src/lightning/i386/asm.h $(srcdir)/../src/lightning/i386/asm-common.h \
@@ -332,6 +332,7 @@ gc2.@LTO@: \
 		$(srcdir)/gc2_obj.h \
 		$(srcdir)/immobile_boxes.c \
 		$(srcdir)/../include/scheme.h \
+		$(srcdir)/../include/schthread.h \
 		$(srcdir)/../include/../sconfig.h \
 		$(srcdir)/../include/../uconfig.h \
 		$(srcdir)/../include/../src/stypes.h \
@@ -371,8 +372,10 @@ FOREIGN_USED_OBJSLIB = $(FOREIGN_OBJSLIB)
 FOREIGN_NOT_USED_LIB = 
 FOREIGN_NOT_USED_OBJSLIB = 
 
-EXTRA_OBJS_T = ../src/gmp.@LTO@ ../src/unwind.@LTO@ $(@FOREIGN_IF_USED@_LIB)
-EXTRA_OBJS_L = ../src/gmp.@LTO@ ../src/unwind.@LTO@ $(@FOREIGN_IF_USED@_OBJSLIB)
+EXTRA_GMP := $(if @EXTRA_GMP_OBJ@,../src/@EXTRA_GMP_OBJ@,)
+
+EXTRA_OBJS_T = ../src/gmp.@LTO@ $(EXTRA_GMP) ../src/unwind.@LTO@ $(@FOREIGN_IF_USED@_LIB)
+EXTRA_OBJS_L = ../src/gmp.@LTO@ $(EXTRA_GMP) ../src/unwind.@LTO@ $(@FOREIGN_IF_USED@_OBJSLIB)
 
 ../libmzscheme3m.@LIBSFX@: $(OBJS) $(EXTRA_OBJS_T) gc2.@LTO@
 	$(AR) $(ARFLAGS) ../libmzscheme3m.@LIBSFX@ $(OBJS) $(EXTRA_OBJS_L) gc2.@LTO@

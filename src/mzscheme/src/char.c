@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -28,7 +28,8 @@
 
 /* globals */
 #include "schuchar.inc"
-Scheme_Object **scheme_char_constants;
+READ_ONLY Scheme_Object **scheme_char_constants;
+READ_ONLY static Scheme_Object *general_category_symbols[NUM_GENERAL_CATEGORIES];
 
 /* locals */
 static Scheme_Object *char_p (int argc, Scheme_Object *argv[]);
@@ -63,7 +64,6 @@ static Scheme_Object *char_general_category (int argc, Scheme_Object *argv[]);
 static Scheme_Object *char_utf8_length (int argc, Scheme_Object *argv[]);
 static Scheme_Object *char_map_list (int argc, Scheme_Object *argv[]);
 
-static Scheme_Object *general_category_symbols[NUM_GENERAL_CATEGORIES];
 
 void scheme_init_portable_case(void)
 {
@@ -89,6 +89,12 @@ void scheme_init_char (Scheme_Env *env)
     
     scheme_char_constants[i] = sc;
   }
+  
+  for (i = 0; i < NUM_GENERAL_CATEGORIES; i++) {
+    Scheme_Object *s;
+    s = scheme_intern_symbol(general_category_names[i]);
+    general_category_symbols[i] = s;
+  }
 
   p = scheme_make_folding_prim(char_p, "char?", 1, 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
@@ -98,158 +104,36 @@ void scheme_init_char (Scheme_Env *env)
   SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
   scheme_add_global_constant("char=?", p, env);
 
-  scheme_add_global_constant("char<?", 
-			     scheme_make_folding_prim(char_lt, 
-						      "char<?", 
-						      2, -1, 1), 
-			     env);
-  scheme_add_global_constant("char>?", 
-			     scheme_make_folding_prim(char_gt, 
-						      "char>?", 
-						      2, -1, 1), 
-			     env);
-  scheme_add_global_constant("char<=?", 
-			     scheme_make_folding_prim(char_lt_eq, 
-						      "char<=?", 
-						      2, -1, 1), 
-			     env);
-  scheme_add_global_constant("char>=?", 
-			     scheme_make_folding_prim(char_gt_eq, 
-						      "char>=?", 
-						      2, -1, 1), 
-			     env);
-  scheme_add_global_constant("char-ci=?", 
-			     scheme_make_folding_prim(char_eq_ci, 
-						      "char-ci=?", 
-						      2, -1, 1), 
-			     env);
-  scheme_add_global_constant("char-ci<?", 
-			     scheme_make_folding_prim(char_lt_ci, 
-						      "char-ci<?", 
-						      2, -1, 1), 
-			     env);
-  scheme_add_global_constant("char-ci>?", 
-			     scheme_make_folding_prim(char_gt_ci, 
-						      "char-ci>?", 
-						      2, -1, 1), 
-			     env);
-  scheme_add_global_constant("char-ci<=?", 
-			     scheme_make_folding_prim(char_lt_eq_ci, 
-						      "char-ci<=?", 
-						      2, -1, 1), 
-			     env);
-  scheme_add_global_constant("char-ci>=?", 
-			     scheme_make_folding_prim(char_gt_eq_ci, 
-						      "char-ci>=?", 
-						      2, -1, 1), 
-			     env);
-  scheme_add_global_constant("char-alphabetic?", 
-			     scheme_make_folding_prim(char_alphabetic, 
-						      "char-alphabetic?", 
-						      1, 1, 1), 
-			     env);
-  scheme_add_global_constant("char-numeric?", 
-			     scheme_make_folding_prim(char_numeric, 
-						      "char-numeric?", 
-						      1, 1, 1), 
-			     env);
-  scheme_add_global_constant("char-symbolic?", 
-			     scheme_make_folding_prim(char_symbolic, 
-						      "char-symbolic?", 
-						      1, 1, 1), 
-			     env);
-  scheme_add_global_constant("char-graphic?", 
-			     scheme_make_folding_prim(char_graphic, 
-						      "char-graphic?", 
-						      1, 1, 1), 
-			     env);
-  scheme_add_global_constant("char-whitespace?", 
-			     scheme_make_folding_prim(char_whitespace, 
-						      "char-whitespace?", 
-						      1, 1, 1), 
-			     env);
-  scheme_add_global_constant("char-blank?", 
-			     scheme_make_folding_prim(char_blank, 
-						      "char-blank?", 
-						      1, 1, 1), 
-			     env);
-  scheme_add_global_constant("char-iso-control?", 
-			     scheme_make_folding_prim(char_control, 
-						      "char-iso-control?", 
-						      1, 1, 1), 
-			     env);
-  scheme_add_global_constant("char-punctuation?", 
-			     scheme_make_folding_prim(char_punctuation, 
-						      "char-punctuation?", 
-						      1, 1, 1), 
-			     env);
-  scheme_add_global_constant("char-upper-case?", 
-			     scheme_make_folding_prim(char_upper_case, 
-						      "char-upper-case?", 
-						      1, 1, 1),
-			     env);
-  scheme_add_global_constant("char-title-case?", 
-			     scheme_make_folding_prim(char_title_case, 
-						      "char-title-case?", 
-						      1, 1, 1),
-			     env);
-  scheme_add_global_constant("char-lower-case?", 
-			     scheme_make_folding_prim(char_lower_case, 
-						      "char-lower-case?", 
-						      1, 1, 1), 
-			     env);
-  scheme_add_global_constant("char-title-case?", 
-			     scheme_make_folding_prim(char_title_case, 
-						      "char-title-case?", 
-						      1, 1, 1), 
-			     env);
-  scheme_add_global_constant("char->integer", 
-			     scheme_make_folding_prim(char_to_integer, 
-						      "char->integer", 
-						      1, 1, 1),
-			     env);
-  scheme_add_global_constant("integer->char",
-			     scheme_make_folding_prim(integer_to_char, 
-						      "integer->char",
-						      1, 1, 1), 
-			     env);
-  scheme_add_global_constant("char-upcase", 
-			     scheme_make_folding_prim(char_upcase, 
-						      "char-upcase", 
-						      1, 1, 1), 
-			     env);
-  scheme_add_global_constant("char-downcase", 
-			     scheme_make_folding_prim(char_downcase, 
-						      "char-downcase", 
-						      1, 1, 1),
-			     env);
-  scheme_add_global_constant("char-titlecase", 
-			     scheme_make_folding_prim(char_titlecase, 
-						      "char-titlecase", 
-						      1, 1, 1),
-			     env);
-  scheme_add_global_constant("char-foldcase", 
-			     scheme_make_folding_prim(char_foldcase, 
-						      "char-foldcase", 
-						      1, 1, 1),
-			     env);
-  scheme_add_global_constant("char-general-category", 
-			     scheme_make_folding_prim(char_general_category, 
-						      "char-general-category", 
-						      1, 1, 1),
-			     env);
-
-  scheme_add_global_constant("char-utf-8-length", 
-			     scheme_make_folding_prim(char_utf8_length, 
-						      "char-utf-8-length", 
-						      1, 1, 1),
-			     env);
-
-  scheme_add_global_constant("make-known-char-range-list", 
-			     scheme_make_immed_prim(char_map_list, 
-						    "make-known-char-range-list", 
-						    0, 0),
-			     env);
+  GLOBAL_FOLDING_PRIM("char<?",                char_lt,               2, -1, 1, env);
+  GLOBAL_FOLDING_PRIM("char>?",                char_gt,               2, -1, 1, env);
+  GLOBAL_FOLDING_PRIM("char<=?",               char_lt_eq,            2, -1, 1, env);
+  GLOBAL_FOLDING_PRIM("char>=?",               char_gt_eq,            2, -1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-ci=?",             char_eq_ci,            2, -1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-ci<?",             char_lt_ci,            2, -1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-ci>?",             char_gt_ci,            2, -1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-ci<=?",            char_lt_eq_ci,         2, -1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-ci>=?",            char_gt_eq_ci,         2, -1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-alphabetic?",      char_alphabetic,       1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-numeric?",         char_numeric,          1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-symbolic?",        char_symbolic,         1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-graphic?",         char_graphic,          1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-whitespace?",      char_whitespace,       1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-blank?",           char_blank,            1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-iso-control?",     char_control,          1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-punctuation?",     char_punctuation,      1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-upper-case?",      char_upper_case,       1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-title-case?",      char_title_case,       1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-lower-case?",      char_lower_case,       1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-title-case?",      char_title_case,       1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("char->integer",         char_to_integer,       1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("integer->char",         integer_to_char,       1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-upcase",           char_upcase,           1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-downcase",         char_downcase,         1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-titlecase",        char_titlecase,        1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-foldcase",         char_foldcase,         1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-general-category", char_general_category, 1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("char-utf-8-length",     char_utf8_length,      1, 1, 1, env);
+  GLOBAL_IMMED_PRIM("make-known-char-range-list", char_map_list, 0, 0, env);
 }
 
 Scheme_Object *scheme_make_char(mzchar ch)
@@ -405,11 +289,6 @@ static Scheme_Object *char_general_category (int argc, Scheme_Object *argv[])
 
   c = SCHEME_CHAR_VAL(argv[0]);
   cat = scheme_general_category(c);
-  if (!general_category_symbols[cat]) {
-    Scheme_Object *s;
-    s = scheme_intern_symbol(general_category_names[cat]);
-    general_category_symbols[cat] = s;
-  }
 
   return general_category_symbols[cat];
 }

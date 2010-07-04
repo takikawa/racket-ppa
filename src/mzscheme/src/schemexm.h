@@ -18,14 +18,14 @@
 #define scheme_get_env (scheme_extension_table->scheme_get_env)
 #define scheme_inherit_cells (scheme_extension_table->scheme_inherit_cells)
 #define scheme_current_break_cell (scheme_extension_table->scheme_current_break_cell)
-#ifndef LINK_EXTENSIONS_BY_TABLE
-# ifndef MZ_USE_PLACES
+#ifndef USE_THREAD_LOCAL
+# ifndef LINK_EXTENSIONS_BY_TABLE
 #define scheme_current_thread (scheme_extension_table->scheme_current_thread)
-# endif
 #define scheme_fuel_counter (scheme_extension_table->scheme_fuel_counter)
-#else
+# else
 #define scheme_current_thread_ptr (scheme_extension_table->scheme_current_thread_ptr)
 #define scheme_fuel_counter_ptr (scheme_extension_table->scheme_fuel_counter_ptr)
+# endif
 #endif
 #define scheme_get_current_thread (scheme_extension_table->scheme_get_current_thread)
 #define scheme_start_atomic (scheme_extension_table->scheme_start_atomic)
@@ -229,7 +229,9 @@
 #define scheme_gc_ptr_ok (scheme_extension_table->scheme_gc_ptr_ok)
 #define scheme_collect_garbage (scheme_extension_table->scheme_collect_garbage)
 #ifdef MZ_PRECISE_GC
+# ifndef USE_THREAD_LOCAL
 #define GC_variable_stack (scheme_extension_table->GC_variable_stack)
+# endif
 #define GC_register_traversers (scheme_extension_table->GC_register_traversers)
 #define GC_resolve (scheme_extension_table->GC_resolve)
 #define GC_mark (scheme_extension_table->GC_mark)
@@ -633,6 +635,8 @@
 #define scheme_make_args_string (scheme_extension_table->scheme_make_args_string)
 #define scheme_system_library_subpath (scheme_extension_table->scheme_system_library_subpath)
 #define scheme_signal_received (scheme_extension_table->scheme_signal_received)
+#define scheme_signal_received_at (scheme_extension_table->scheme_signal_received_at)
+#define scheme_get_signal_handle (scheme_extension_table->scheme_get_signal_handle)
 #define scheme_char_strlen (scheme_extension_table->scheme_char_strlen)
 #ifdef MZ_PRECISE_GC
 #pragma GC_VARIABLE_STACK_THOUGH_TABLE

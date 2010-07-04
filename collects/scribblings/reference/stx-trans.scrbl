@@ -63,7 +63,7 @@ is identified by the @scheme[prop:set!-transformer] property of
 
 @defthing[prop:set!-transformer struct-type-property?]{
 
-A @tech{structure type property} to indentify structure types that act
+A @tech{structure type property} to identify structure types that act
 as @tech{assignment transformers} like the ones created by
 @scheme[make-set!-transformer].
 
@@ -133,7 +133,7 @@ create @scheme[transformer] or as indicated by a
 
 @defthing[prop:rename-transformer struct-type-property?]{
 
-A @tech{structure type property} to indentify structure types that act
+A @tech{structure type property} to identify structure types that act
 as @tech{rename transformers} like the ones created by
 @scheme[make-rename-transformer].
 
@@ -171,7 +171,14 @@ value and @scheme[cons] it onto the current result of
 @scheme[syntax-local-context] if it is a list.
 
 When an identifier in @scheme[stop-ids] is encountered by the expander
-in a subexpression, expansions stops for the subexpression.  If
+in a subexpression, expansions stops for the subexpression. If
+@scheme[stop-ids] is a non-empty list, then
+@scheme[begin], @scheme[quote], @scheme[set!], @scheme[lambda],
+@scheme[case-lambda], @scheme[let-values], @scheme[letrec-values],
+@scheme[if], @scheme[begin0], @scheme[with-continuation-mark],
+@scheme[letrec-syntaxes+values], @scheme[#%app],
+@scheme[#%expression], @scheme[#%top], and
+@scheme[#%variable-reference] are added to @scheme[stop-ids].  If
 @scheme[#%app], @scheme[#%top], or @scheme[#%datum] appears in
 @scheme[stop-ids], then application, top-level variable reference, and
 literal data expressions without the respective explicit form are not
@@ -576,8 +583,9 @@ exports of the module.
 
 Returns @scheme[id-stx] if no binding in the current expansion context
 shadows @scheme[id-stx] (ignoring unsealed @tech{internal-definition
-contexts}), if @scheme[id-stx] has no module bindings in its lexical
-information, and if the current expansion context is not a
+contexts} and identifiers that had the @indexed-scheme['unshadowable]
+@tech{syntax property}), if @scheme[id-stx] has no module bindings in
+its lexical information, and if the current expansion context is not a
 @tech{module context}.
 
 If a binding of @scheme[inner-identifier] shadows @scheme[id-stx], the

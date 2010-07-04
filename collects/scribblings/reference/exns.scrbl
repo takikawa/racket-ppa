@@ -1,6 +1,7 @@
 #lang scribble/doc
 @(require scribble/bnf
-          "mz.ss")
+          "mz.ss"
+          (for-label scheme/fixnum))
 
 @title[#:tag "exns"]{Exceptions}
 
@@ -40,12 +41,24 @@ multiple returns/escapes are impossible. All exceptions raised by
 Breaks are disabled from the time the exception is raised until the
 exception handler obtains control, and the handler itself is
 @scheme[parameterize-break]ed to disable breaks initially; see
-@secref["breakhandler"] for more information on breaks.}
+@secref["breakhandler"] for more information on breaks.
 
+@examples[
+(with-handlers ([number? (lambda (n)
+                           (+ n 5))])
+  (raise 18 #t))
+(define-struct (my-exception exn:fail:user) ())
+(with-handlers ([my-exception? (lambda (e)
+                                 #f)])
+  (+ 5 (raise (make-my-exception
+                "failed"
+                (current-continuation-marks)))))
+(raise 'failed #t)
+]}
 
 @defproc*[([(error [sym symbol?]) any]
            [(error [msg string?][v any/c] ...) any]
-           [(error [src symbol?][format string?][v any/c] ...) any])]{
+           [(error [src symbol?][frmat string?][v any/c] ...) any])]{
 
 Raises the exception @scheme[exn:fail], which contains an error
 string. The different forms produce the error string in different
@@ -62,17 +75,23 @@ ways:
  @scheme[error-value->string-handler]). A space is inserted before
  each @scheme[v].}
 
- @item{@scheme[(error src format v ...)] creates a
+ @item{@scheme[(error src frmat v ...)] creates a
  message string equivalent to the string created by
 
   @schemeblock[
-  (format (string-append "~s: " format) src v ...)
+  (format (string-append "~s: " frmat) src v ...)
   ]}
 
 ]
 
 In all cases, the constructed message string is passed to
-@scheme[make-exn:fail], and the resulting exception is raised.}
+@scheme[make-exn:fail], and the resulting exception is raised.
+
+@examples[
+(error 'failed)
+(error "failed" 23 'pizza (list 1 2 3))
+(error 'failed "~a failed because ~a" 'method-a "no argument supplied")
+]}
 
 @defproc*[([(raise-user-error [sym symbol?]) any]
            [(raise-user-error [msg string?][v any/c] ...) any]
@@ -83,7 +102,13 @@ Like @scheme[error], but constructs an exception with
 default @tech{error display handler} does not show a ``stack trace'' for
 @scheme[exn:fail:user] exceptions (see @secref["contmarks"]), so
 @scheme[raise-user-error] should be used for errors that are intended
-for end users.}
+for end users.
+
+@examples[
+(raise-user-error 'failed)
+(raise-user-error "failed" 23 'pizza (list 1 2 3))
+(raise-user-error 'failed "~a failed because ~a" 'method-a "no argument supplied")
+]}
 
 
 @defproc*[([(raise-type-error [name symbol?][expected string?][v any/c]) any]
@@ -102,7 +127,20 @@ In the second form, the bad argument is indicated by an index
 arguments @scheme[v] are provided (in order). The resulting error
 message names the bad argument and also lists the other arguments. If
 @scheme[bad-pos] is not less than the number of @scheme[v]s, the
-@exnraise[exn:fail:contract].}
+@exnraise[exn:fail:contract].
+
+@examples[
+(define (feed-cow animal)
+  (if (not (eq? animal 'cow))
+    (raise-type-error 'feed-cow "cow" animal)
+    "fed the cow"))
+(feed-cow 'turkey)
+(define (feed-animals cow sheep goose cat)
+  (if (not (eq? goose 'goose))
+    (raise-type-error 'feed-animals "goose" 2 cow sheep goose cat)
+    "fed the animals"))
+(feed-animals 'cow 'sheep 'dog 'cat)
+]}
 
 @defproc[(raise-mismatch-error [name symbol?][message string?][v any/c]) any]{
 
@@ -125,11 +163,17 @@ the procedure. The printed form of @scheme[v] is appended to
 
 Creates an @scheme[exn:fail:contract:arity] value and @scheme[raise]s
 it as an exception.  The @scheme[name] is used for the source
-procedure's name in the error message. The @scheme[arity-v] value must
-be a possible result from @scheme[procedure-arity], and it is used for
-the procedure's arity in the error message; if
-@scheme[name-symbol-or-procedure] is a procedure, its actual arity is
-ignored.  The @scheme[arg-v] arguments are the actual supplied
+procedure's name in the error message. 
+
+The @scheme[arity-v] value must
+be a possible result from @scheme[procedure-arity], except
+that it does not have to be normalized (see @scheme[procedure-arity?] for
+the details of normalized arities); @scheme[raise-arity-error] 
+will normalize the arity and used the normalized form in the error message.
+If @scheme[name-symbol-or-procedure] is a procedure, its actual arity is
+ignored.  
+
+The @scheme[arg-v] arguments are the actual supplied
 arguments, which are shown in the error message (using the error value
 conversion handler; see @scheme[error-value->string-handler]); also,
 the number of supplied @scheme[arg-v]s is explicitly mentioned in the
@@ -420,6 +464,11 @@ Raised when a procedure is applied to the wrong number of arguments.}
            #:inspector #f]{
 
 Raised for division by exact zero.}
+
+@defstruct[(exn:fail:contract:non-fixnum-result exn:fail:contract) ()
+           #:inspector #f]{
+
+Raised by functions like @scheme[fx+] when the result would not be a fixnum.}
 
 @defstruct[(exn:fail:contract:continuation exn:fail:contract) ()
            #:inspector #f]{

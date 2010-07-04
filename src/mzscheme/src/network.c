@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -316,7 +316,7 @@ typedef struct SOCKADDR_IN mz_unspec_address;
 # ifdef PROTOENT_IS_INT
 #  define PROTO_P_PROTO PROTOENT_IS_INT
 # else
-static struct protoent *proto;
+SHARED_OK static struct protoent *proto;
 #  define PROTO_P_PROTO (proto ? proto->p_proto : 0)
 # endif
 
@@ -338,11 +338,9 @@ static struct protoent *proto;
 # define mz_gai_strerror gai_strerror
 #else
 # define mzAI_PASSIVE 0
-# ifdef MZ_XFORM
-START_XFORM_SKIP;
-# endif
 static int mz_getaddrinfo(const char *nodename, const char *servname,
 			  const struct mz_addrinfo *hints, struct mz_addrinfo **res)
+  XFORM_SKIP_PROC
 {
   struct hostent *h;
 
@@ -386,17 +384,16 @@ static int mz_getaddrinfo(const char *nodename, const char *servname,
   return h_errno;
 }
 void mz_freeaddrinfo(struct mz_addrinfo *ai)
+  XFORM_SKIP_PROC
 {
   free(ai->ai_addr);
   free(ai);
 }
 const char *mz_gai_strerror(int ecode)
+  XFORM_SKIP_PROC
 {
   return hstrerror(ecode);
 }
-# ifdef MZ_XFORM
-END_XFORM_SKIP;
-# endif
 #endif
 
 #if defined(USE_WINSOCK_TCP) || defined(PTHREADS_OK_FOR_GHBN)
@@ -441,11 +438,8 @@ HANDLE ready_sema;
 int ready_fd;
 # endif
 
-#ifdef MZ_XFORM
-START_XFORM_SKIP;
-#endif
-
 static long getaddrinfo_in_thread(void *data)
+  XFORM_SKIP_PROC
 {
   int ok;
   struct mz_addrinfo *res, hints;
@@ -486,10 +480,6 @@ static long getaddrinfo_in_thread(void *data)
 
   return 1;
 }
-
-#ifdef MZ_XFORM
-END_XFORM_SKIP;
-#endif
 
 static void release_ghbn_lock(GHBN_Rec *rec)
 {
@@ -1226,7 +1216,6 @@ static void tcp_close_input(Scheme_Input_Port *port)
   closesocket(data->tcp);
 #endif
 
-  --scheme_file_open_count;
 }
 
 static int
@@ -1425,7 +1414,6 @@ static void tcp_close_output(Scheme_Output_Port *port)
   closesocket(data->tcp);
 #endif
 
-  --scheme_file_open_count;
 }
 
 static int
@@ -1514,7 +1502,6 @@ static void closesocket_w_decrement(Close_Socket_Data *csd)
   if (csd->src_addr)
     mz_freeaddrinfo(csd->src_addr);
   mz_freeaddrinfo(csd->dest_addr);  
-  --scheme_file_open_count;
 }
 #endif
 
@@ -1631,7 +1618,6 @@ static Scheme_Object *tcp_connect(int argc, Scheme_Object *argv[])
 	    errno = status;
 #endif
 
-	    scheme_file_open_count++;
 	  
 	    if (inprogress) {
 	      tcp_t *sptr;
@@ -1691,7 +1677,6 @@ static Scheme_Object *tcp_connect(int argc, Scheme_Object *argv[])
 	    } else {
 	      errid = errno;
 	      closesocket(s);
-	      --scheme_file_open_count;
 	      errpart = 6;
 	    }
 	  } else {
@@ -1738,15 +1723,24 @@ tcp_connect_break(int argc, Scheme_Object *argv[])
 }
 
 
-static short get_no_portno(tcp_t socket)
+static unsigned short get_no_portno(tcp_t socket, int *_errid)
 {
-  GC_CAN_IGNORE struct sockaddr_in addr;
-  unsigned int l = sizeof(struct sockaddr);
+  char here[MZ_SOCK_NAME_MAX_LEN];
+  unsigned int l = sizeof(here);
+  unsigned short no_port;
 
-  if (getsockname(socket, (struct sockaddr *) &addr, &l)) {
-    scheme_raise_exn(MZEXN_FAIL_NETWORK, "tcp-addresses: could not get local address (%e)", SOCK_ERRNO());
+  if (getsockname(socket, (struct sockaddr *)here, &l)) {
+    int errid;
+    errid = SOCK_ERRNO();
+    *_errid = errid;
+    return 0;
   }
-  return addr.sin_port; 
+
+  /* don't use ntohs, since the result is put back into another sin_port: */
+  no_port = ((struct sockaddr_in *)here)->sin_port;
+  if (!no_port)
+    *_errid = 0;
+  return no_port;
 }
 
 static Scheme_Object *
@@ -1835,7 +1829,7 @@ tcp_listen(int argc, Scheme_Object *argv[])
 #endif
       int first_time = 1;
       int first_was_zero = 0;
-      short no_port = 0;
+      unsigned short no_port = 0;
 
       errid = 0;
       for (addr = tcp_listen_addr; addr; ) {
@@ -1910,8 +1904,12 @@ tcp_listen(int argc, Scheme_Object *argv[])
 	  if (!bind(s, addr->ai_addr, addr->ai_addrlen)) {
             if (first_time) {
               if (((struct sockaddr_in *)addr->ai_addr)->sin_port == 0) {
-                no_port = get_no_portno(s);
+                no_port = get_no_portno(s, &errid);
                 first_was_zero = 1;
+		if (no_port == 0) {
+		  closesocket(s);
+		  break;
+		}
               }
               first_time = 0;
             }
@@ -1933,7 +1931,6 @@ tcp_listen(int argc, Scheme_Object *argv[])
 	      }
 	      l->s[pos++] = s;
 	    
-	      scheme_file_open_count++;
 	      REGISTER_SOCKET(s);
 
 	      if (pos == count) {
@@ -1971,7 +1968,6 @@ tcp_listen(int argc, Scheme_Object *argv[])
 	s = l->s[i];
 	UNREGISTER_SOCKET(s);
 	closesocket(s);
-	--scheme_file_open_count;
       }
       
       mz_freeaddrinfo(tcp_listen_addr);
@@ -2014,7 +2010,6 @@ static int stop_listener(Scheme_Object *o)
 	UNREGISTER_SOCKET(s);
 	closesocket(s);
 	listener->s[i] = INVALID_SOCKET;
-	--scheme_file_open_count;
       }
       scheme_remove_managed(((listener_t *)o)->mref, o);
     }
@@ -2152,7 +2147,6 @@ do_tcp_accept(int argc, Scheme_Object *argv[], Scheme_Object *cust, char **_fail
     v[0] = make_tcp_input_port(tcp, "tcp-accepted", cust);
     v[1] = make_tcp_output_port(tcp, "tcp-accepted", cust);
 
-    scheme_file_open_count++;
     REGISTER_SOCKET(s);
     
     return scheme_values(2, v);
@@ -2508,7 +2502,6 @@ void scheme_socket_to_ports(long s, const char *name, int takeover,
   *_outp = v;
   
   if (takeover) {
-    scheme_file_open_count++;
     REGISTER_SOCKET(s);
   }
 }

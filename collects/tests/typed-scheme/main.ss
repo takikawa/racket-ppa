@@ -39,14 +39,16 @@
       [(list-rest 'exn-pred e)
        (eval `(exn-matches . ,e) (namespace-anchor->namespace a))]
       [_ 
-       (exn-matches ".*typecheck.*" exn:fail:syntax?)])))
+       (exn-matches ".*Type Checker.*" exn:fail:syntax?)])))
 
 (define (mk-tests dir loader test)
   (lambda ()
     (define path (build-path (this-expression-source-directory) dir))  
     (define tests
       (for/list ([p (directory-list path)]
-                 #:when (scheme-file? p))
+                 #:when (scheme-file? p)
+		 ;; skip backup files
+		 #:when (not (regexp-match #rx".*~" (path->string p))))
         (test-case
          (path->string p)
          (test

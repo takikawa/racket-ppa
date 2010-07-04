@@ -1,15 +1,12 @@
-
 #ifndef __mzscheme_gc_2__
 #define __mzscheme_gc_2__
 
-#ifdef MZ_USE_PLACES
-# if _MSC_VER
-#  define THREAD_LOCAL __declspec(thread)
+#ifndef GC2_JUST_MACROS
+# ifdef INCLUDE_WITHOUT_PATHS
+#  include "schthread.h"
 # else
-#  define THREAD_LOCAL __thread
+#  include "../include/schthread.h"
 # endif
-#else
-# define THREAD_LOCAL /* empty */
 #endif
 
 /***************************************************************************/
@@ -34,12 +31,6 @@ typedef unsigned long (*GC_get_thread_stack_base_Proc)(void);
 #  define GC2_JUST_MACROS
 # endif
 
-#endif
-
-#ifdef MZ_USE_PLACES
-# define GC_OBJHEAD_SIZE (2*sizeof(unsigned long))
-#else 
-# define GC_OBJHEAD_SIZE (sizeof(unsigned long))
 #endif
 
 #ifndef GC2_JUST_MACROS
@@ -288,7 +279,7 @@ GC2_EXTERN void GC_finalization_weak_ptr(void **p, int offset);
 /* Cooperative GC                                                          */
 /***************************************************************************/
 
-GC2_EXTERN THREAD_LOCAL void **GC_variable_stack;
+THREAD_LOCAL_DECL(GC2_EXTERN void **GC_variable_stack);
 /*
    See the general overview in README. */
 
@@ -413,6 +404,31 @@ GC2_EXTERN void GC_switch_back_from_master(void *gc);
    Switches to back to gc from the master GC
 */
 
+GC2_EXTERN long GC_alloc_alignment();
+/*
+   Guaranteeed alignment for nusery pages. Returns a constant, and
+   can be called from any thread.
+*/
+
+GC2_EXTERN unsigned long GC_make_jit_nursery_page(int count);
+/*
+   Obtains nursery pages from the GC for thread local allocation;
+   resulting space is count times the allocation alignment.
+   The result is an unsigned long because it's not a valid
+   pointer to a GCable object. The result becomes invalid (i.e. it's collected)
+   with the next GC.
+*/
+
+GC2_EXTERN void GC_check_master_gc_request();
+/*
+   Checks to see if the master has requested a places major GC run 
+   and executes a GC if requested
+*/
+
+GC2_EXTERN void GC_set_put_external_event_fd(void *fd);
+/*
+   Sets the fd that can be passed to scheme_signal_received_at to wake up the place for GC
+*/
 
 # ifdef __cplusplus
 };

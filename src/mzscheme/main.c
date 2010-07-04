@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 1995-2000 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -76,6 +76,10 @@ START_XFORM_SUSPEND;
 # ifndef OS_X
 #  include "simpledrop.h"
 # endif
+#endif
+
+#ifdef INSTRUMENT_PRIMITIVES 
+extern int g_print_prims;
 #endif
 
 #ifdef MZ_XFORM
@@ -244,6 +248,10 @@ typedef struct {
   MAIN_char **argv;
 } Main_Args;
 
+# ifdef MZ_PRECISE_GC
+START_XFORM_SKIP;
+# endif
+
 static int main_after_dlls(int argc, MAIN_char **argv)
 {
   Main_Args ma;
@@ -251,6 +259,10 @@ static int main_after_dlls(int argc, MAIN_char **argv)
   ma.argv = argv;
   return scheme_main_stack_setup(1, main_after_stack, &ma);
 }
+
+# ifdef MZ_PRECISE_GC
+END_XFORM_SKIP;
+# endif
 
 /************************     main_after_stack    *************************/
 /*               Setup, parse command-line, and go to cont_run            */

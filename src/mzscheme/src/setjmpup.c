@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -35,8 +35,8 @@
 #endif
 
 #ifdef MZ_PRECISE_GC
-void *(*scheme_get_external_stack_val)(void);
-void (*scheme_set_external_stack_val)(void *);
+HOOK_SHARED_OK void *(*scheme_get_external_stack_val)(void);
+HOOK_SHARED_OK void (*scheme_set_external_stack_val)(void *);
 #endif
 
 #ifndef MZ_PRECISE_GC
@@ -216,15 +216,13 @@ static void set_copy(void *s_c, void *c)
 # define get_copy(s_c) (s_c)
 # define set_copy(s_c, c) s_c = c
 
-#define STACK_COPY_CACHE_SIZE 10
-static THREAD_LOCAL void *stack_copy_cache[STACK_COPY_CACHE_SIZE];
-static THREAD_LOCAL long stack_copy_size_cache[STACK_COPY_CACHE_SIZE];
-static THREAD_LOCAL int scc_pos;
+THREAD_LOCAL_DECL(static void *stack_copy_cache[STACK_COPY_CACHE_SIZE]);
+THREAD_LOCAL_DECL(static long stack_copy_size_cache[STACK_COPY_CACHE_SIZE]);
+THREAD_LOCAL_DECL(static int scc_pos);
 #define SCC_OK_EXTRA_AMT 100
 
-START_XFORM_SKIP;
-
 void scheme_flush_stack_copy_cache(void)
+  XFORM_SKIP_PROC
 {
   int i;
   for (i = 0; i < STACK_COPY_CACHE_SIZE; i++) {
@@ -232,8 +230,6 @@ void scheme_flush_stack_copy_cache(void)
     stack_copy_size_cache[i] = 0;
   }
 }
-
-END_XFORM_SKIP;
 
 #endif
 

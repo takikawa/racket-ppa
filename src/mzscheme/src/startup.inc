@@ -392,10 +392,12 @@
 "(#%require '#%expobs"
 "(only '#%foreign) "
 "(only '#%unsafe) "
+"(only '#%flfxnum) "
 " '#%paramz"
 " '#%network"
 " '#%utils"
-"(only '#%place)))"
+"(only '#%place)"
+"(only '#%futures)))"
 );
   EVAL_ONE_STR(
 "(module #%boot '#%kernel"

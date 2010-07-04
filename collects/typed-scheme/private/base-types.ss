@@ -1,7 +1,15 @@
 #lang s-exp "type-env-lang.ss"
 
-[Number -Number]
+[Number -Real]
+[Real -Real]
+[Complex -Number]
 [Integer -Integer]
+[Exact-Rational -ExactRational]
+[Flonum -Flonum]
+[Exact-Positive-Integer -ExactPositiveInteger]
+[Exact-Nonnegative-Integer -ExactNonnegativeInteger]
+[Natural -ExactNonnegativeInteger]
+
 [Void -Void]
 [Boolean -Boolean]
 [Symbol -Symbol]
@@ -35,3 +43,6 @@
 [Pair (-poly (a b) (-pair a b))]
 [Boxof (-poly (a) (make-Box a))]
 [Continuation-Mark-Set -Cont-Mark-Set]
+[False (-val #f)]
+[True (-val #t)]
+[Null (-val null)]

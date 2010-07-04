@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -26,17 +26,19 @@
 #include "schpriv.h"
 #include <string.h>
 
-Scheme_Type_Reader2 *scheme_type_readers;
-Scheme_Type_Writer *scheme_type_writers;
-Scheme_Equal_Proc *scheme_type_equals;
-Scheme_Primary_Hash_Proc *scheme_type_hash1s;
-Scheme_Secondary_Hash_Proc *scheme_type_hash2s;
+/* types should all be registered before invoking places */
 
-static char **type_names;
-static Scheme_Type maxtype, allocmax;
+SHARED_OK Scheme_Type_Reader2 *scheme_type_readers;
+SHARED_OK Scheme_Type_Writer *scheme_type_writers;
+SHARED_OK Scheme_Equal_Proc *scheme_type_equals;
+SHARED_OK Scheme_Primary_Hash_Proc *scheme_type_hash1s;
+SHARED_OK Scheme_Secondary_Hash_Proc *scheme_type_hash2s;
+
+SHARED_OK static char **type_names;
+SHARED_OK static Scheme_Type maxtype, allocmax;
 
 #ifdef MEMORY_COUNTING_ON
-long scheme_type_table_count;
+SHARED_OK long scheme_type_table_count;
 #endif
 
 static void init_type_arrays()
@@ -161,6 +163,7 @@ scheme_init_type ()
   set_name(scheme_syntax_compiler_type, "<syntax-compiler>");
   set_name(scheme_macro_type, "<macro>");
   set_name(scheme_vector_type, "<vector>");
+  set_name(scheme_flvector_type, "<flvector>");
   set_name(scheme_bignum_type, "<bignum-integer>");
   set_name(scheme_escaping_cont_type, "<escape-continuation>");
   set_name(scheme_sema_type, "<semaphore>");
@@ -268,6 +271,8 @@ scheme_init_type ()
   set_name(scheme_logger_type, "<logger>");
   set_name(scheme_log_reader_type, "<log-receiver>");
 
+  set_name(scheme_future_type, "<future>");
+
   set_name(_scheme_values_types_, "<resurrected>");
   set_name(_scheme_compiled_values_types_, "<internal>");
 
@@ -275,6 +280,7 @@ scheme_init_type ()
   set_name(scheme_rt_meta_cont, "<meta-continuation>");
 #endif
   set_name(scheme_place_type, "<place>");
+  set_name(scheme_place_async_channel_type, "<place_async_channel>");
   set_name(scheme_engine_type, "<engine>");
 }
 
@@ -538,6 +544,7 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_mutable_pair_type, cons_cell);
   GC_REG_TRAV(scheme_raw_pair_type, cons_cell);
   GC_REG_TRAV(scheme_vector_type, vector_obj);
+  GC_REG_TRAV(scheme_flvector_type, flvector_obj);
   GC_REG_TRAV(scheme_cpointer_type, cpointer_obj);
   GC_REG_TRAV(scheme_offset_cpointer_type, offset_cpointer_obj);
 

@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -128,7 +128,7 @@ long scheme_creator_id = 'MzSc';
 #define IS_A_SEP(kind, x) ((kind == SCHEME_UNIX_PATH_KIND) ? IS_A_UNIX_SEP(x) : IS_A_DOS_SEP(x))
 #define IS_A_PRIM_SEP(kind, x) ((kind == SCHEME_UNIX_PATH_KIND) ? IS_A_UNIX_PRIM_SEP(x) : IS_A_DOS_PRIM_SEP(x))
 
-MZ_DLLSPEC int scheme_ignore_user_paths;
+SHARED_OK int scheme_ignore_user_paths;
 void scheme_set_ignore_user_paths(int v) { scheme_ignore_user_paths = v; }
 
 #define CURRENT_WD() scheme_get_param(scheme_current_config(), MZCONFIG_CURRENT_DIRECTORY)
@@ -216,20 +216,42 @@ static char *do_normal_path_seps(char *si, int *_len, int delta, int strip_trail
 static char *remove_redundant_slashes(char *filename, int *l, int delta, int *expanded, int kind);
 static Scheme_Object *do_path_to_directory_path(char *s, long offset, long len, Scheme_Object *p, int just_check, int kind);
 
-static Scheme_Object *up_symbol, *relative_symbol;
-static Scheme_Object *same_symbol;
+READ_ONLY static Scheme_Object *up_symbol;
+READ_ONLY static Scheme_Object *relative_symbol;
+READ_ONLY static Scheme_Object *same_symbol;
 #ifndef NO_FILE_SYSTEM_UTILS
-static Scheme_Object *read_symbol, *write_symbol, *execute_symbol;
+READ_ONLY static Scheme_Object *read_symbol, *write_symbol, *execute_symbol;
 
-static Scheme_Object *temp_dir_symbol, *home_dir_symbol, *pref_dir_symbol;
-static Scheme_Object *doc_dir_symbol, *desk_dir_symbol;
-static Scheme_Object *init_dir_symbol, *init_file_symbol, *sys_dir_symbol;
-static Scheme_Object *exec_file_symbol, *run_file_symbol, *collects_dir_symbol;
-static Scheme_Object *pref_file_symbol, *orig_dir_symbol, *addon_dir_symbol;
+READ_ONLY static Scheme_Object *temp_dir_symbol, *home_dir_symbol, *pref_dir_symbol;
+READ_ONLY static Scheme_Object *doc_dir_symbol, *desk_dir_symbol;
+READ_ONLY static Scheme_Object *init_dir_symbol, *init_file_symbol, *sys_dir_symbol;
+READ_ONLY static Scheme_Object *exec_file_symbol, *run_file_symbol, *collects_dir_symbol;
+READ_ONLY static Scheme_Object *pref_file_symbol, *orig_dir_symbol, *addon_dir_symbol;
 
-static Scheme_Object *exec_cmd, *run_cmd, *collects_path, *original_pwd;
+SHARED_OK static Scheme_Object *exec_cmd;
+SHARED_OK static Scheme_Object *run_cmd;
+SHARED_OK static Scheme_Object *collects_path;
+THREAD_LOCAL_DECL(static Scheme_Object *original_pwd);
+SHARED_OK static Scheme_Object *addon_dir;
+
 #endif
-static Scheme_Object *windows_symbol, *unix_symbol;
+READ_ONLY static Scheme_Object *windows_symbol, *unix_symbol;
+
+#if defined(UNIX_FILE_SYSTEM) && !defined(NO_UNIX_USERS)
+typedef struct {
+  gid_t gid;
+  char set, in;
+} Group_Mem_Cache;
+
+# define GROUP_CACHE_SIZE 10
+FIXME_LATER static Group_Mem_Cache group_mem_cache[GROUP_CACHE_SIZE];
+
+SHARED_OK static int have_user_ids = 0;
+SHARED_OK static uid_t uid;
+SHARED_OK static uid_t euid;
+SHARED_OK static gid_t gid;
+SHARED_OK static gid_t egid;
+#endif
 
 void scheme_init_file(Scheme_Env *env)
 {
@@ -525,6 +547,13 @@ void scheme_init_file(Scheme_Env *env)
 						       "use-user-specific-search-paths",
 						       MZCONFIG_USE_USER_PATHS),
 			     env);
+}
+
+void scheme_init_file_places()
+{
+#ifndef NO_FILE_SYSTEM_UTILS
+  REGISTER_SO(original_pwd);
+#endif
 }
 
 /**********************************************************************/
@@ -1622,7 +1651,7 @@ char *strip_trailing_spaces(const char *s, int *_len, int delta, int in_place)
 }
 
 /* Watch out for special device names. Could we do better than hardwiring this list? */
-static char *special_filenames[] = { "NUL", "CON", "PRN", "AUX", /* NT only: "CLOCK$", */
+READ_ONLY static const char *special_filenames[] = { "NUL", "CON", "PRN", "AUX", /* NT only: "CLOCK$", */
                                      "COM1", "COM2", "COM3", "COM4", "COM5", 
                                      "COM6", "COM7", "COM8", "COM9",
                                      "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", 
@@ -5279,12 +5308,6 @@ static Scheme_Object *file_modify_seconds(int argc, Scheme_Object **argv)
 }
 
 #if defined(UNIX_FILE_SYSTEM) && !defined(NO_UNIX_USERS)
-# define GROUP_CACHE_SIZE 10
-typedef struct {
-  gid_t gid;
-  char set, in;
-} Group_Mem_Cache;
-static Group_Mem_Cache group_mem_cache[GROUP_CACHE_SIZE];
 static int user_in_group(uid_t uid, gid_t gid)
 {
   struct group *g;
@@ -5321,10 +5344,6 @@ static int user_in_group(uid_t uid, gid_t gid)
 
   return in;
 }
-
-static int have_user_ids = 0;
-static uid_t uid, euid;
-static gid_t gid, egid;
 #endif
 
 static Scheme_Object *file_or_dir_permissions(int argc, Scheme_Object *argv[])
@@ -5688,8 +5707,7 @@ enum {
 Scheme_Object *scheme_get_run_cmd(void)
 {
   if (!run_cmd) {
-    REGISTER_SO(run_cmd);
-    run_cmd = scheme_make_path("mzscheme");
+    return scheme_make_path("mzscheme");
   }
   return run_cmd;
 }
@@ -5719,21 +5737,20 @@ find_system_path(int argc, Scheme_Object **argv)
     which = id_sys_dir;
   else if (argv[0] == exec_file_symbol) {
     if (!exec_cmd) {
-      REGISTER_SO(exec_cmd);
-      exec_cmd = scheme_make_path("mzscheme");
+       return scheme_make_path("mzscheme");
     }
     return exec_cmd;
   } else if (argv[0] == run_file_symbol) {
     return scheme_get_run_cmd();
   } else if (argv[0] == collects_dir_symbol) {
     if (!collects_path) {
-      REGISTER_SO(collects_path);
-      collects_path = scheme_make_path("collects");
+      return scheme_make_path("collects");
     }
     return collects_path;
   } else if (argv[0] == orig_dir_symbol) {
     return original_pwd;
   } else if (argv[0] == addon_dir_symbol) {
+    if (addon_dir) return addon_dir;
     which = id_addon_dir;
   } else {
     scheme_wrong_type("find-system-path", "system-path-symbol",
@@ -5977,6 +5994,7 @@ find_system_path(int argc, Scheme_Object **argv)
 
 #endif
 
+/* should only called from main */
 Scheme_Object *scheme_set_exec_cmd(char *s)
 {
 #ifndef NO_FILE_SYSTEM_UTILS
@@ -5989,6 +6007,7 @@ Scheme_Object *scheme_set_exec_cmd(char *s)
 #endif
 }
 
+/* should only called from main */
 Scheme_Object *scheme_set_run_cmd(char *s)
 {
 #ifndef NO_FILE_SYSTEM_UTILS
@@ -6009,18 +6028,28 @@ char *scheme_get_exec_path(void)
     return NULL;
 }
 
+/* should only called from main */
 void scheme_set_collects_path(Scheme_Object *p)
 {
-  REGISTER_SO(collects_path);
+  if (!collects_path) {
+    REGISTER_SO(collects_path);
+  }
   collects_path = p;
 }
 
+
 void scheme_set_original_dir(Scheme_Object *d)
 {
-  if (!original_pwd) {
-    REGISTER_SO(original_pwd);
-  }
   original_pwd = d;
+}
+
+/* should only called from main */
+void scheme_set_addon_dir(Scheme_Object *p)
+{
+  if (!addon_dir) {
+    REGISTER_SO(addon_dir);
+  }
+  addon_dir = p;
 }
 
 /********************************************************************************/

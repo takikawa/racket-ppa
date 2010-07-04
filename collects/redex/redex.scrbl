@@ -128,7 +128,7 @@ in the grammar are terminals.
 
 @itemize[
 
-@item{The @defpattech[any] @pattern matches any sepxression.
+@item{The @defpattech[any] @pattern matches any sexpression.
 This @pattern may also be suffixed with an underscore and another
 identifier, in which case they bind the full name (as if it
 were an implicit @pattech[name] @pattern) and match the portion
@@ -192,9 +192,9 @@ symbol except those that are used as literals elsewhere in
 the language.
 }
 
-@item{The @defpattech[hole] @pattern matches anything when inside a matching
+@item{The @defpattech[hole] @pattern matches anything when inside
 the first argument to an @pattech[in-hole] @|pattern|. Otherwise, 
-it matches only the hole.
+it matches only a hole.
 }
 
 @item{The @defpattech[symbol] @pattern stands for a literal symbol that must
@@ -202,7 +202,10 @@ match exactly, unless it is the name of a non-terminal in a
 relevant language or contains an underscore. 
 
 If it is a non-terminal, it matches any of the right-hand
-sides of that non-terminal.
+sides of that non-terminal. If the non-terminal appears
+twice in a single pattern, then the match is constrained
+to expressions that are the same, unless the pattern is part
+of a grammar, in which case there is no constraint.
 
 If the symbol is a non-terminal followed by an underscore,
 for example @tt{e_1}, it is implicitly the same as a name @pattern
@@ -369,28 +372,19 @@ clause is followed by an ellipsis.  Nested ellipses produce
 nested lists.
 }
 
-@defproc[(set-cache-size! [size positive-integer?]) void?]{
-
-Changes the cache size; the default size is @scheme[350].
-
-The cache is per-pattern (ie, each pattern has a cache of size at most
-350 (by default)) and is a simple table that maps expressions to how
-they matched the pattern (ie, the bindings for the pattern
-variables). When the cache gets full, it is thrown away and a new
-cache is started.
+@defparam[caching-enabled? on? boolean?]{
+  When this parameter is @scheme[#t] (the default), Redex caches the results of 
+  pattern matching and metafunction evaluation. There is a separate cache for
+  each pattern and metafunction; when one fills (see @scheme[set-cache-size!]),
+  Redex evicts all of the entries in that cache.
+                                         
+  Caching should be disabled when matching a pattern that depends on values
+  other than the in-scope pattern variables or evaluating a metafunction
+  that reads or writes mutable external state.
 }
 
-@defparam[caching-enabled? on? boolean?]{
-  This is a parameter that controls whether or not a cache
-  is consulted (and updated) while matching and while evaluating
-  metafunctions.
-
-  If it is @scheme[#t], then side-conditions and the right-hand sides
-  of metafunctions are assumed to only depend on the values of the
-  pattern variables in scope (and thus not on any other external
-  state).
-
-  Defaults to @scheme[#t].
+@defproc[(set-cache-size! [size positive-integer?]) void?]{                                                           
+Changes the size of the per-pattern and per-metafunction caches. The default size is @scheme[350].
 }
 
 @section{Terms}
@@ -634,18 +628,17 @@ extended non-terminals. For example, this language:
 @schemeblock[
   (define-extended-language lc-num-lang
     lc-lang
-    (e ....     (code:comment "extend the previous `e' non-terminal")
+    (v ....     (code:comment "extend the previous `v' non-terminal")
        +
-       number)
-    (v ....
-       + 
        number)
     (x (variable-except lambda +)))
 ]
 
-extends lc-lang with two new alternatives for both the @scheme[e]
-and @scheme[v] nonterminal, replaces the @scheme[x] non-terminal with a
-new one, and carries the @scheme[c] non-terminal forward. 
+extends lc-lang with two new alternatives for the @scheme[v]
+non-terminal, carries forward the @scheme[e] and @scheme[c]
+non-terminals, and replaces the @scheme[x] non-terminal with a
+new one (which happens to be equivalent to the one that would 
+have been inherited).
 
 The four-period ellipses indicates that the new language's
 non-terminal has all of the alternatives from the original
@@ -709,18 +702,19 @@ The fresh variables clause generates variables that do not
 occur in the term being matched. If the @scheme[fresh-clause] is a
 variable, that variable is used both as a binding in the
 rhs-exp and as the prefix for the freshly generated
-variable. 
+variable. (The variable does not have to be
+a non-terminal in the language of the reduction relation.)
 
 The second case of a @scheme[fresh-clause] is used when you want to
 generate a sequence of variables. In that case, the ellipses
 are literal ellipses; that is, you must actually write
-ellipses in your rule. The variable var1 is like the
+ellipses in your rule. The variable @scheme[var1] is like the
 variable in first case of a @scheme[fresh-clause], namely it is
 used to determine the prefix of the generated variables and
 it is bound in the right-hand side of the reduction rule,
 but unlike the single-variable fresh clause, it is bound to
-a sequence of variables. The variable var2 is used to
-determine the number of variables generated and var2 must be
+a sequence of variables. The variable @scheme[var2] is used to
+determine the number of variables generated and @scheme[var2] must be
 bound by the left-hand side of the rule.
 
 The side-conditions are expected to all hold, and have the
@@ -891,16 +885,16 @@ all non-GUI portions of Redex) and also exported by
 @schememodname[redex] (which includes all of Redex).
 
 @defform/subs[#:literals (: ->)
-              (define-metafunction language-exp
+             (define-metafunction language
                contract
                [(name @#,ttpattern ...) @#,tttterm extras ...] 
                ...)
-               ([contract (code:line) 
-                          (code:line id : @#,ttpattern ... -> @#,ttpattern)]
-                [extras (side-condition scheme-expression)
-                        (where tl-pat @#,tttterm)]
-                [tl-pat identifier (tl-pat-ele ...)]
-                [tl-pat-ele tl-pat (code:line tl-pat ... (code:comment "a literal ellipsis"))])]{
+             ([contract (code:line) 
+                        (code:line id : @#,ttpattern ... -> @#,ttpattern)]
+              [extras (side-condition scheme-expression)
+                      (where tl-pat @#,tttterm)]
+              [tl-pat identifier (tl-pat-ele ...)]
+              [tl-pat-ele tl-pat (code:line tl-pat ... (code:comment "a literal ellipsis"))])]{
 
 The @scheme[define-metafunction] form builds a function on
 sexpressions according to the pattern and right-hand-side
@@ -921,7 +915,7 @@ or if the contract is violated.
 
 Note that metafunctions are assumed to always return the same results
 for the same inputs, and their results are cached, unless
-@scheme[caching-enable?] is set to @scheme[#f]. Accordingly, if a
+@scheme[caching-enabled?] is set to @scheme[#f]. Accordingly, if a
 metafunction is called with the same inputs twice, then its body is
 only evaluated a single time.
 
@@ -940,9 +934,7 @@ an expression in the lc-lang above:
 
 The first argument to define-metafunction is the grammar
 (defined above). Following that are three cases, one for
-each variation of expressions (e in lc-lang). The right-hand
-side of each clause begins with a comma, since they are
-implicitly wrapped in @|tttterm|. The free variables of an
+each variation of expressions (e in lc-lang). The free variables of an
 application are the free variables of each of the subterms;
 the free variables of a variable is just the variable
 itself, and the free variables of a lambda expression are
@@ -976,17 +968,32 @@ match.
 
 }
 
-@defform[(define-metafunction/extension extending-name language-exp 
+@defform[(define-metafunction/extension f language 
            contract
-           [(name @#,ttpattern ...) @#,tttterm (side-condition scheme-expression) ...]
+           [(g @#,ttpattern ...) @#,tttterm extras ...] 
            ...)]{
 
-This defines a metafunction as an extension of an existing
-one. The extended metafunction behaves as if the original
-patterns were in this definitions, with the name of the
-function fixed up to be @scheme[extending-name]. 
+Defines a metafunction @scheme[g] as an extension of an existing
+metafunction @scheme[f]. The metafunction @scheme[g] behaves as 
+if @scheme[f]'s clauses were appended to its definition (with 
+occurrences of @scheme[f] changed to @scheme[g] in the inherited
+clauses).
 }
 
+For example, @scheme[define-metafunction/extension] may be used to extend
+the free-vars function above to the forms introduced by the language
+lc-num-lang.
+                
+@schemeblock[
+(define-metafunction/extension free-vars lc-num-lang
+  free-vars-num : e -> (x ...)
+  [(free-vars-num number) 
+   ()]
+  [(free-vars-num (+ e_1 e_2))
+   (∪ (free-vars-num e_1)
+      (free-vars-num e_2))])
+]
+                
 @defform[(in-domain? (metafunction-name @#,tttterm ...))]{
 Returns @scheme[#t] if the inputs specified to @scheme[metafunction-name] are
 legtimate inputs according to @scheme[metafunction-name]'s contract,
@@ -994,7 +1001,7 @@ and @scheme[#f] otherwise.
 }
 
 @defform/subs[#:literals ()
-              (define-relation language-exp
+              (define-relation language
                [(name @#,ttpattern ...) @#,tttterm ...] ...)
                ([tl-pat identifier (tl-pat-ele ...)]
                 [tl-pat-ele tl-pat (code:line tl-pat ... (code:comment "a literal ellipsis"))])]{

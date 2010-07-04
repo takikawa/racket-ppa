@@ -1,20 +1,19 @@
-
 #lang scheme/base
 (require scheme/list
          scheme/class
          scheme/gui
          drscheme/arrow
          framework/framework
-         unstable/gui/notify)
+         unstable/interval-map
+         unstable/gui/notify
+         "interfaces.ss")
 
 (provide text:hover<%>
-         text:hover-identifier<%>
-         text:mouse-drawings<%>
+         text:hover-drawings<%>
          text:arrows<%>
 
          text:hover-mixin
-         text:hover-identifier-mixin
-         text:mouse-drawings-mixin
+         text:hover-drawings-mixin
          text:tacking-mixin
          text:arrows-mixin)
 
@@ -28,8 +27,8 @@
 
 (define white (send the-color-database find-color "white"))
 
-;; A Drawing is (make-drawing number number (??? -> void) boolean boolean)
-(define-struct drawing (start end draw visible? tacked?) #:mutable)
+;; A Drawing is (make-drawing number number (??? -> void) (box boolean))
+(define-struct drawing (start end draw tacked?))
 
 (define-struct idloc (start end id))
 
@@ -68,20 +67,14 @@
   (interface (text:basic<%>)
     update-hover-position))
 
-(define text:hover-identifier<%>
-  (interface ()
-    get-hovered-identifier
-    set-hovered-identifier
-    listen-hovered-identifier))
-
-(define text:mouse-drawings<%>
+(define text:hover-drawings<%>
   (interface (text:basic<%>)
-    add-mouse-drawing
-    for-each-drawing
+    add-hover-drawing
+    get-position-drawings
     delete-all-drawings))
 
 (define text:arrows<%>
-  (interface (text:mouse-drawings<%>)
+  (interface (text:hover-drawings<%>)
     add-arrow
     add-question-arrow
     add-billboard))
@@ -106,89 +99,64 @@
 
     (super-new)))
 
-(define text:hover-identifier-mixin
-  (mixin (text:hover<%>) (text:hover-identifier<%>)
-    (field/notify hovered-identifier (new notify-box% (value #f)))
-
-    (define idlocs null)
-
-    (define/public (add-identifier-location start end id)
-      (set! idlocs (cons (make-idloc start end id) idlocs)))
-
-    (define/public (delete-all-identifier-locations)
-      (set! idlocs null)
-      (set-hovered-identifier #f))
-
-    (define/override (update-hover-position pos)
-      (super update-hover-position pos)
-      (let search ([idlocs idlocs])
-        (cond [(null? idlocs) (set-hovered-identifier #f)]
-              [(and (<= (idloc-start (car idlocs)) pos)
-                    (< pos (idloc-end (car idlocs))))
-               (set-hovered-identifier (idloc-id (car idlocs)))]
-              [else (search (cdr idlocs))])))
-    (super-new)))
-
-(define text:mouse-drawings-mixin
-  (mixin (text:hover<%>) (text:mouse-drawings<%>)
+(define text:hover-drawings-mixin
+  (mixin (text:hover<%>) (text:hover-drawings<%>)
     (inherit dc-location-to-editor-location
              find-position
              invalidate-bitmap-cache)
 
-    ;; list of Drawings
-    (field [drawings-list null])
+    ;; interval-map of Drawings
+    (define drawings-list (make-numeric-interval-map))
 
-    (define/public add-mouse-drawing
-      (case-lambda
-        [(start end draw)
-         (add-mouse-drawing start end draw (box #f))]
-        [(start end draw tack-box)
-         (set! drawings-list 
-               (cons (make-drawing start end draw #f tack-box)
-                     drawings-list))]))
+    (field [hover-position #f])
+
+    (define/override (update-hover-position pos)
+      (define old-pos hover-position)
+      (super update-hover-position pos)
+      (set! hover-position pos)
+      (unless (same-drawings? old-pos pos)
+        (invalidate-bitmap-cache 0.0 0.0 +inf.0 +inf.0)))
+
+    (define/public (add-hover-drawing start end draw [tack-box (box #f)])
+      (let ([drawing (make-drawing start end draw tack-box)])
+        (interval-map-cons*! drawings-list
+                             start (add1 end)
+                             drawing
+                             null)))
 
     (define/public (delete-all-drawings)
-      (set! drawings-list null))
-
-    (define/public-final (for-each-drawing f)
-      (for-each f drawings-list))
+      (interval-map-remove! drawings-list -inf.0 +inf.0))
 
     (define/override (on-paint before? dc left top right bottom dx dy draw-caret)
       (super on-paint before? dc left top right bottom dx dy draw-caret)
       (unless before?
-        (for-each-drawing
-         (lambda (d)
-           (when (or (drawing-visible? d) (unbox (drawing-tacked? d)))
-             ((drawing-draw d) this dc left top right bottom dx dy))))))
+        (for ([d (get-position-drawings hover-position)])
+          ((drawing-draw d) this dc left top right bottom dx dy))))
 
-    (define/override (update-hover-position pos)
-      (super update-hover-position pos)
-      (let ([changed? (update-visible-drawings pos)])
-        (when changed? (invalidate-bitmap-cache 0.0 0.0 +inf.0 +inf.0))))
+    (define/public (get-position-drawings pos)
+      (if pos (interval-map-ref drawings-list pos null) null))
 
-    (define/private (update-visible-drawings pos)
-      (let ([changed? #f])
-        (for-each-drawing
-         (lambda (d)
-           (let ([vis? (<= (drawing-start d) pos (drawing-end d))])
-             (unless (eqv? vis? (drawing-visible? d))
-               (set-drawing-visible?! d vis?)
-               (set! changed? #t)))))
-        changed?))
+    (define/private (same-drawings? old-pos pos)
+      ;; relies on order drawings added & list-of-eq?-struct equality
+      (equal? (get-position-drawings old-pos)
+              (get-position-drawings pos)))
 
     (super-new)))
 
 (define text:tacking-mixin
-  (mixin (text:basic<%> text:mouse-drawings<%>) ()
+  (mixin (text:basic<%> text:hover-drawings<%>) ()
     (inherit get-canvas
-             for-each-drawing)
-    (inherit-field drawings-list)
+             get-keymap
+             get-position-drawings)
+    (inherit-field hover-position)
     (super-new)
+
+    (define tacked-table (make-hasheq))
 
     (define/override (on-event ev)
       (case (send ev get-event-type)
         ((right-down)
-         (if (ormap (lambda (d) (drawing-visible? d)) drawings-list)
+         (if (pair? (get-position-drawings hover-position))
              (send (get-canvas) popup-menu
                    (make-tack/untack-menu)
                    (send ev get-x)
@@ -197,33 +165,39 @@
         (else
          (super on-event ev))))
 
+    (define/override (on-paint before? dc left top right bottom dx dy draw-caret)
+      (super on-paint before? dc left top right bottom dx dy draw-caret)
+      (unless before?
+        (for ([draw (in-hash-keys tacked-table)])
+          (draw this dc left top right bottom dx dy))))
+
     (define/private (make-tack/untack-menu)
       (define menu (new popup-menu%))
+      (define keymap (get-keymap))
       (new menu-item% (label "Tack")
            (parent menu)
-           (callback
-            (lambda _ (tack))))
+           (callback (lambda _ (tack))))
       (new menu-item% (label "Untack")
            (parent menu)
-           (callback
-            (lambda _ (untack))))
+           (callback (lambda _ (untack))))
+      (when (is-a? keymap keymap/popup<%>)
+        (new separator-menu-item% (parent menu))
+        (send keymap add-context-menu-items menu))
       menu)
 
     (define/private (tack)
-      (for-each-drawing
-       (lambda (d)
-         (when (drawing-visible? d)
-           (set-box! (drawing-tacked? d) #t)))))
+      (for ([d (get-position-drawings hover-position)])
+        (hash-set! tacked-table (drawing-draw d) #t)
+        (set-box! (drawing-tacked? d) #t)))
     (define/private (untack)
-      (for-each-drawing
-       (lambda (d)
-         (when (drawing-visible? d)
-           (set-box! (drawing-tacked? d) #f)))))))
+      (for ([d (get-position-drawings hover-position)])
+        (hash-remove! tacked-table (drawing-draw d))
+        (set-box! (drawing-tacked? d) #f)))))
 
 (define text:arrows-mixin
-  (mixin (text:mouse-drawings<%>) (text:arrows<%>)
+  (mixin (text:hover-drawings<%>) (text:arrows<%>)
     (inherit position-location
-             add-mouse-drawing
+             add-hover-drawing
              find-wordbreak)
 
     (define/public (add-arrow from1 from2 to1 to2 color)
@@ -256,7 +230,7 @@
                           (+ w mini mini)
                           (+ h mini mini))
                          (draw-text str (+ x dx mini) (+ y dy mini adj-y))))))))])
-        (add-mouse-drawing pos1 pos2 draw)))
+        (add-hover-drawing pos1 pos2 draw)))
 
     (define/private (internal-add-arrow from1 from2 to1 to2 color-name question?)
       (define color (send the-color-database find-color color-name))
@@ -285,9 +259,9 @@
                          (send dc set-text-foreground color)
                          (send dc draw-text "?" 
                                (+ endx dx fw)
-                               (- endy dy fh)))))))])
-          (add-mouse-drawing from1 from2 draw tack-box)
-          (add-mouse-drawing to1 to2 draw tack-box))))
+                               (- (+ endy dy) fh)))))))])
+          (add-hover-drawing from1 from2 draw tack-box)
+          (add-hover-drawing to1 to2 draw tack-box))))
 
     (define/private (position->location p)
       (define xbox (box 0.0))
@@ -312,12 +286,44 @@
 
     (super-new)))
 
-(define text:mouse-drawings%
-  (text:mouse-drawings-mixin
+(define text:hover-drawings%
+  (text:hover-drawings-mixin
    (text:hover-mixin
     text:standard-style-list%)))
 
 (define text:arrows%
   (text:arrows-mixin
    (text:tacking-mixin
-    text:mouse-drawings%)))
+    text:hover-drawings%)))
+
+
+#|
+(define text:hover-identifier<%>
+  (interface ()
+    get-hovered-identifier
+    set-hovered-identifier
+    listen-hovered-identifier))
+
+(define text:hover-identifier-mixin
+  (mixin (text:hover<%>) (text:hover-identifier<%>)
+    (define-notify hovered-identifier (new notify-box% (value #f)))
+
+    (define idlocs null)
+
+    (define/public (add-identifier-location start end id)
+      (set! idlocs (cons (make-idloc start end id) idlocs)))
+
+    (define/public (delete-all-identifier-locations)
+      (set! idlocs null)
+      (set-hovered-identifier #f))
+
+    (define/override (update-hover-position pos)
+      (super update-hover-position pos)
+      (let search ([idlocs idlocs])
+        (cond [(null? idlocs) (set-hovered-identifier #f)]
+              [(and (<= (idloc-start (car idlocs)) pos)
+                    (< pos (idloc-end (car idlocs))))
+               (set-hovered-identifier (idloc-id (car idlocs)))]
+              [else (search (cdr idlocs))])))
+    (super-new)))
+|#

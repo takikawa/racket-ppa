@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -53,14 +53,14 @@ Scheme_Object *(*scheme_current_break_cell)();
 /*========================================================================*/
 /*                                threads                                 */
 /*========================================================================*/
-#ifndef LINK_EXTENSIONS_BY_TABLE
-# ifndef MZ_USE_PLACES
+#ifndef USE_THREAD_LOCAL
+# ifndef LINK_EXTENSIONS_BY_TABLE
 Scheme_Thread *scheme_current_thread;
-# endif
 volatile int scheme_fuel_counter;
-#else
+# else
 Scheme_Thread **scheme_current_thread_ptr;
 volatile int *scheme_fuel_counter_ptr;
+# endif
 #endif
 Scheme_Thread *(*scheme_get_current_thread)();
 void (*scheme_start_atomic)(void);
@@ -329,7 +329,9 @@ void (*scheme_dont_gc_ptr)(void *p);
 void (*scheme_gc_ptr_ok)(void *p);
 void (*scheme_collect_garbage)(void);
 #ifdef MZ_PRECISE_GC
+# ifndef USE_THREAD_LOCAL
 void **GC_variable_stack;
+# endif
 void (*GC_register_traversers)(short tag, Size_Proc size, Mark_Proc mark, Fixup_Proc fixup,
 				      int is_constant_size, int is_atomic);
 void *(*GC_resolve)(void *p);
@@ -899,6 +901,8 @@ char *(*scheme_make_provided_string)(Scheme_Object *o, int count, int *len);
 char *(*scheme_make_args_string)(char *s, int which, int argc, Scheme_Object **argv, long *len);
 const char *(*scheme_system_library_subpath)();
 void (*scheme_signal_received)(void);
+void (*scheme_signal_received_at)(void *);
+void *(*scheme_get_signal_handle)();
 int (*scheme_char_strlen)(const mzchar *s);
 #ifndef SCHEME_EX_INLINE
 } Scheme_Extension_Table;

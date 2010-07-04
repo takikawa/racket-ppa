@@ -886,7 +886,7 @@ please adhere to these guidelines:
  (reindent-menu-item-label "&Reindent")
  (reindent-all-menu-item-label "Reindent &All")
  (semicolon-comment-out-menu-item-label "&Comment Out with Semicolons")
- (box-comment-out-menu-item-label "&Comment Out with a Box")
+ (box-comment-out-menu-item-label "Comment Out with a &Box")
  (uncomment-menu-item-label "&Uncomment")
 
  (convert-to-semicolon-comment "Convert to Semicolon Comment")
@@ -1055,7 +1055,7 @@ please adhere to these guidelines:
   (initial-language-category "Initial language")
   (no-language-chosen "No language chosen")
  
- (module-language-one-line-summary "Run creates a REPL in the context of the module, including the module's declared language")
+ (module-language-one-line-summary "Reads the #lang line to specify the actual language")
   (module-language-auto-text "Automatic #lang line") ;; shows up in the details section of the module language
    
   ;;; from the `not a language language' used initially in drscheme.

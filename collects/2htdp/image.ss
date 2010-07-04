@@ -46,12 +46,17 @@ and they all have good sample contracts. (It is amazing what we can do with kids
 |#
 
 
-(require mrlib/image-core
-         "private/image-more.ss")
+(require "../mrlib/image-core.ss"
+         "private/image-more.ss"
+         "private/img-err.ss"
+         htdp/error)
 
 (provide overlay
          overlay/align
          overlay/xy
+         underlay
+         underlay/align
+         underlay/xy
          
          beside
          beside/align
@@ -59,9 +64,12 @@ and they all have good sample contracts. (It is amazing what we can do with kids
          above
          above/align
          
+	 crop
          rotate
          frame
-   
+         place-image
+         place-image/align
+         
          scale
          scale/xy
          
@@ -79,6 +87,9 @@ and they all have good sample contracts. (It is amazing what we can do with kids
          right-triangle
          line
          add-line
+         add-curve
+         scene+line
+         scene+curve
          text
          text/font
          bitmap
@@ -89,8 +100,16 @@ and they all have good sample contracts. (It is amazing what we can do with kids
          mode?
          angle?
          side-count?
-         color?
+         image-color?
+         pen-style? 
+         pen-cap?
+         pen-join?
+         (rename-out [build-color make-color])
+         color-red color-blue color-green color? color
          
+         (rename-out [build-pen make-pen])
+         pen-color pen-width pen-style pen-cap pen-join pen
+
          image-width
          image-height
          image-baseline)

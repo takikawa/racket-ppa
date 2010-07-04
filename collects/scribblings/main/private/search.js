@@ -226,17 +226,8 @@ function InitializeSearch() {
   result_links.push(n);
   AdjustResultsNum();
   // get search string
-  if (location.search.length > 0) {
-    var paramstrs = location.search.substring(1).split(/[;&]/);
-    for (var i=0; i<paramstrs.length; i++) {
-      var param = paramstrs[i].split(/=/);
-      // ignores an empty "q=" (param.length will be 1)
-      if (param.length == 2 && param[0] == "q") {
-        query.value = unescape(param[1]);
-        break;
-      }
-    }
-  }
+  var init_q = GetPageArg("q",false);
+  if (init_q && init_q != "") query.value = init_q;
   ContextFilter();
   DoSearch();
   query.focus();
@@ -608,6 +599,7 @@ function UpdateResults() {
   if (first_search_result < 0 ||
       first_search_result >= search_results.length)
     first_search_result = 0;
+  var link_args = (page_query_string && ("?"+page_query_string));
   for (var i=0; i<result_links.length; i++) {
     var n = i + first_search_result;
     if (n < search_results.length) {
@@ -646,9 +638,16 @@ function UpdateResults() {
       }
       if (note)
         note = '&nbsp;&nbsp;<span class="smaller">' + note + '</span>';
+      var href = UncompactUrl(res[1]);
+      if (link_args) {
+        var hash = href.indexOf("#");
+        if (hash >= 0)
+          href = href.substring(0,hash) + link_args + href.substring(hash);
+        else
+          href = href + link_args;
+      }
       result_links[i].innerHTML =
-        '<a href="' + UncompactUrl(res[1]) + '"'
-         +' class="indexlink" tabIndex="2">'
+        '<a href="' + href + '" class="indexlink" tabIndex="2">'
         + UncompactHtml(res[2]) + '</a>' + (note || "");
       result_links[i].style.backgroundColor =
         (n < exact_results_num) ? highlight_color : background_color;
@@ -891,6 +890,6 @@ function SetHighlightColor(inp) {
 }
 set_highlight_color = SetHighlightColor;
 
-window.onload = InitializeSearch;
+AddOnLoad(InitializeSearch);
 
 })();

@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -30,15 +30,21 @@
 #include <math.h>
 #include "../gc2/gc2_obj.h"
 
-long scheme_hash_request_count;
-long scheme_hash_iteration_count;
+THREAD_LOCAL_DECL(long scheme_hash_request_count);
+THREAD_LOCAL_DECL(long scheme_hash_iteration_count);
+
+READ_ONLY static Scheme_Object GONE[1];
 
 #ifdef MZ_PRECISE_GC
 static void register_traversers(void);
 #endif
 
 #ifdef MZ_PRECISE_GC
-static long keygen;
+/* keygen race conditions below are ok, because keygen is randomness used
+to create a hashkey.  Setting a hashkey on a Scheme_Object however, may 
+lead to race conditions */
+
+FIXME_LATER static long keygen;
 XFORM_NONGCING static MZ_INLINE
 long PTR_TO_LONG(Scheme_Object *o)
 {
@@ -51,7 +57,8 @@ long PTR_TO_LONG(Scheme_Object *o)
   v = o->keyex;
 
   if (!(v & 0xFFFC)) {
-    v |= (short)keygen;
+    long local_keygen = keygen;
+    v |= (short)local_keygen;
 #ifdef OBJHEAD_HAS_HASH_BITS
     /* In 3m mode, we only have 14 bits of hash code in the
        Scheme_Object header. But the GC-level object header has some
@@ -60,7 +67,7 @@ long PTR_TO_LONG(Scheme_Object *o)
        objects, so we use 1 of our 14 bits to indicate whether the
        other bit are present. */
     if (GC_is_allocated(o)) {
-      OBJHEAD_HASH_BITS(o) = (keygen >> 16);
+      OBJHEAD_HASH_BITS(o) = (local_keygen >> 16);
       v |= 0x4000;
     } else
       v &= ~0x4000;
@@ -140,7 +147,6 @@ static int not_stx_bound_eq(char *a, char *b)
 /*                         normal hash table                              */
 /*========================================================================*/
 
-static Scheme_Object GONE[1];
 
 Scheme_Hash_Table *scheme_make_hash_table(int type)
 {
@@ -919,10 +925,6 @@ static Scheme_Object *hash_k(void)
   return scheme_make_integer_value(nv);
 }
 
-/* Number of lists/vectors/structs/boxes to hash before
-   paying for a stack check. */
-#define HASH_COUNT_START 20
-
 static long overflow_equal_hash_key(Scheme_Object *o, long k, Hash_Info *hi)
 {
   Scheme_Object *nv;
@@ -945,6 +947,47 @@ static long overflow_equal_hash_key(Scheme_Object *o, long k, Hash_Info *hi)
   return val;
 }
 
+XFORM_NONGCING static long dbl_hash_val(double d) 
+  XFORM_SKIP_PROC
+{
+  int e;
+  
+  if (MZ_IS_NAN(d)) {
+    d = 0.0;
+    e = 1000;
+  } else if (MZ_IS_POS_INFINITY(d)) {
+    d = 0.5;
+    e = 1000;
+  } else if (MZ_IS_NEG_INFINITY(d)) {
+    d = -0.5;
+    e = 1000;
+  } else if (!d && scheme_minus_zero_p(d)) {
+    d = 0;
+    e = 1000;
+  } else {
+    /* frexp should not be used on inf or nan: */
+    d = frexp(d, &e);
+  }
+
+  return ((long)(d * (1 << 30))) + e;
+}
+
+XFORM_NONGCING static long dbl_hash2_val(double d)  
+  XFORM_SKIP_PROC
+{
+  int e;
+  
+  if (MZ_IS_NAN(d)
+      || MZ_IS_POS_INFINITY(d)
+      || MZ_IS_NEG_INFINITY(d)) {
+    e = 1;
+  } else {
+    /* frexp should not be used on inf or nan: */
+    d = frexp(d, &e);
+  }
+  return e;
+}
+
 #define OVERFLOW_HASH() overflow_equal_hash_key(o, k - t, hi)
 
 /* Based on Bob Jenkins's one-at-a-time hash function at
@@ -954,7 +997,6 @@ static long overflow_equal_hash_key(Scheme_Object *o, long k, Hash_Info *hi)
 static long equal_hash_key(Scheme_Object *o, long k, Hash_Info *hi)
 {
   Scheme_Type t;
-  static int hash_counter = HASH_COUNT_START;
 
  top:
   t = SCHEME_TYPE(o);
@@ -971,26 +1013,7 @@ static long equal_hash_key(Scheme_Object *o, long k, Hash_Info *hi)
 #endif
   case scheme_double_type:
     {
-      double d;
-      int e;
-      d = SCHEME_DBL_VAL(o);
-      if (MZ_IS_NAN(d)) {
-	d = 0.0;
-	e = 1000;
-      } else if (MZ_IS_POS_INFINITY(d)) {
-	d = 0.5;
-	e = 1000;
-      } else if (MZ_IS_NEG_INFINITY(d)) {
-	d = -0.5;
-	e = 1000;
-      } else if (!d && scheme_minus_zero_p(d)) {
-	d = 0;
-	e = 1000;
-      } else {
-	/* frexp should not be used on inf or nan: */
-	d = frexp(d, &e);
-      }
-      return k + ((long)(d * (1 << 30))) + e;
+      return k + dbl_hash_val(SCHEME_DBL_VAL(o));
     }
   case scheme_bignum_type:
     {
@@ -1058,6 +1081,22 @@ static long equal_hash_key(Scheme_Object *o, long k, Hash_Info *hi)
       
       o = SCHEME_VEC_ELS(o)[len];
       break;
+    }
+  case scheme_flvector_type:
+    {
+      long len = SCHEME_FLVEC_SIZE(o), i;
+      double d;
+
+      if (!len)
+	return k + 1;
+      
+      for (i = 0; i < len; i++) {
+	SCHEME_USE_FUEL(1);
+	d = SCHEME_FLVEC_ELS(o)[i];
+        k = (k << 5) + k + dbl_hash_val(d);
+      }
+      
+      return k;
     }
   case scheme_char_type:
     return k + SCHEME_CHAR_VAL(o);
@@ -1380,7 +1419,6 @@ static long overflow_equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
 static long equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
 {
   Scheme_Type t;
-  static int hash_counter = HASH_COUNT_START;
 
  top:
   t = SCHEME_TYPE(o);
@@ -1396,18 +1434,7 @@ static long equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
 #endif
   case scheme_double_type:
     {
-      double d;
-      int e;
-      d = SCHEME_FLOAT_VAL(o);
-      if (MZ_IS_NAN(d)
-	  || MZ_IS_POS_INFINITY(d)
-	  || MZ_IS_NEG_INFINITY(d)) {
-	e = 1;
-      } else {
-	/* frexp should not be used on inf or nan: */
-	d = frexp(d, &e);
-      }
-      return e;
+      return dbl_hash2_val(SCHEME_FLOAT_VAL(o));
     }
   case scheme_bignum_type:
     return SCHEME_BIGDIG(o)[0];
@@ -1452,6 +1479,23 @@ static long equal_hash_key2(Scheme_Object *o, Hash_Info *hi)
       for (i = 0; i < len; i++) {
 	SCHEME_USE_FUEL(1);
 	k += equal_hash_key2(SCHEME_VEC_ELS(o)[i], hi);
+      }
+      
+      return k;
+    }
+  case scheme_flvector_type:
+    {
+      long len = SCHEME_FLVEC_SIZE(o), i;
+      double d;
+      long k = 0;
+
+      if (!len)
+	return k + 1;
+      
+      for (i = 0; i < len; i++) {
+	SCHEME_USE_FUEL(1);
+	d = SCHEME_FLVEC_ELS(o)[i];
+        k = (k << 5) + k + dbl_hash2_val(d);
       }
       
       return k;

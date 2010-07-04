@@ -1,7 +1,12 @@
 #lang scribble/doc
 @(require "mz.ss"
           scheme/math
-          (for-label scheme/math))
+          scribble/extract
+          (for-label scheme/math
+                     scheme/flonum
+                     scheme/fixnum
+                     scheme/unsafe/ops
+                     scheme/require))
 
 @(define math-eval (make-base-eval))
 @(interaction-eval #:eval math-eval (require scheme/math))
@@ -64,7 +69,10 @@ infinity, or @scheme[+nan.0] if no such limit exists.
 
 A @deftech{fixnum} is an exact integer whose two's complement
 representation fit into 31 bits on a 32-bit platform or 63 bits on a
-64-bit platform. Two fixnums that are @scheme[=] are also the same
+64-bit platform; furthermore, no allocation is required when computing
+with fixnums. See also the @schememodname[scheme/fixnum] module, below.
+
+Two fixnums that are @scheme[=] are also the same
 according to @scheme[eq?]. Otherwise, the result of @scheme[eq?]
 applied to two numbers is undefined.
 
@@ -232,13 +240,13 @@ otherwise.}
 
 
 @defproc[(remainder [n integer?] [m integer?]) integer?]{ Returns
- @scheme[q] with the same sign as @scheme[n] such that
+ @scheme[_q] with the same sign as @scheme[n] such that
 
 @itemize[
 
- @item{@scheme[(abs q)] is between @scheme[0] (inclusive) and @scheme[(abs m)] (exclusive), and}
+ @item{@scheme[(abs _q)] is between @scheme[0] (inclusive) and @scheme[(abs m)] (exclusive), and}
 
- @item{@scheme[(+ q (* m (quotient n m)))] equals @scheme[n].}
+ @item{@scheme[(+ _q (* m (quotient n m)))] equals @scheme[n].}
 
 ]
 
@@ -255,13 +263,13 @@ otherwise.}
 
 
 @defproc[(modulo [n integer?] [m integer?]) number?]{  Returns
- @scheme[q] with the same sign as @scheme[m] where
+ @scheme[_q] with the same sign as @scheme[m] where
 
 @itemize[
 
- @item{@scheme[(abs q)] is between @scheme[0] (inclusive) and @scheme[(abs m)] (exclusive), and}
+ @item{@scheme[(abs _q)] is between @scheme[0] (inclusive) and @scheme[(abs m)] (exclusive), and}
 
- @item{the difference between @scheme[q] and @scheme[(- n (* m (quotient n m)))] is a multiple of @scheme[m].}
+ @item{the difference between @scheme[_q] and @scheme[(- n (* m (quotient n m)))] is a multiple of @scheme[m].}
 
 ]
 
@@ -444,7 +452,8 @@ used.
 
 @defproc[(log [z number?]) number?]{ Returns the natural logarithm of
  @scheme[z].  The result is normally inexact, but it is
- @scheme[0] when @scheme[z] is an exact @scheme[1].
+ @scheme[0] when @scheme[z] is an exact @scheme[1]. When @scheme[z]
+ is exact @scheme[0], @exnraise[exn:fail:contract:divide-by-zero].}
 
 @mz-examples[(log (exp 1)) (log 2+3i) (log 1)]}
 
@@ -850,6 +859,209 @@ for the machine running Scheme, @scheme[#f] if the native encoding
 is little-endian.}
 
 @; ------------------------------------------------------------------------
+@section{Inexact-Real (Flonum) Operations}
+
+@defmodule[scheme/flonum]
+
+The @schememodname[scheme/flonum] library provides operations like
+@scheme[fl+] that consume and produce only real @tech{inexact
+numbers}, which are also known as @deftech{flonums}. Flonum-specific
+operations provide can better performance when used consistently, and
+they are as safe as generic operations like @scheme[+].
+
+@margin-note{See @guidesecref["fixnums+flonums"].}
+
+@subsection{Flonum Arithmetic}
+
+@deftogether[(
+@defproc[(fl+ [a inexact-real?][b inexact-real?]) inexact-real?]
+@defproc[(fl- [a inexact-real?][b inexact-real?]) inexact-real?]
+@defproc[(fl* [a inexact-real?][b inexact-real?]) inexact-real?]
+@defproc[(fl/ [a inexact-real?][b inexact-real?]) inexact-real?]
+@defproc[(flabs [a inexact-real?]) inexact-real?]
+)]{
+
+Like @scheme[+], @scheme[-], @scheme[*], @scheme[/], and @scheme[abs],
+but constrained to consume @tech{flonums}. The result is always a
+@tech{flonum}.}
+
+@deftogether[(
+@defproc[(fl= [a inexact-real?][b inexact-real?]) boolean?]
+@defproc[(fl< [a inexact-real?][b inexact-real?]) boolean?]
+@defproc[(fl> [a inexact-real?][b inexact-real?]) boolean?]
+@defproc[(fl<= [a inexact-real?][b inexact-real?]) boolean?]
+@defproc[(fl>= [a inexact-real?][b inexact-real?]) boolean?]
+@defproc[(flmin [a inexact-real?]) inexact-real?]
+@defproc[(flmax [a inexact-real?]) inexact-real?]
+)]{
+
+Like @scheme[=], @scheme[<], @scheme[>], @scheme[<=], @scheme[>=],
+@scheme[min], and @scheme[max], but constrained to consume
+@tech{flonums}.}
+
+@deftogether[(
+@defproc[(flround [a inexact-real?]) inexact-real?]
+@defproc[(flfloor [a inexact-real?]) inexact-real?]
+@defproc[(flceiling [a inexact-real?]) inexact-real?]
+@defproc[(fltruncate [a inexact-real?]) inexact-real?]
+)]{
+
+Like @scheme[round], @scheme[floor], @scheme[ceiling], and
+@scheme[truncate], but constrained to consume @tech{flonums}.}
+
+@deftogether[(
+@defproc[(flsin [a inexact-real?]) inexact-real?]
+@defproc[(flcos [a inexact-real?]) inexact-real?]
+@defproc[(fltan [a inexact-real?]) inexact-real?]
+@defproc[(flasin [a inexact-real?]) inexact-real?]
+@defproc[(flacos [a inexact-real?]) inexact-real?]
+@defproc[(flatan [a inexact-real?]) inexact-real?]
+@defproc[(fllog [a inexact-real?]) inexact-real?]
+@defproc[(flexp [a inexact-real?]) inexact-real?]
+@defproc[(flsqrt [a inexact-real?]) inexact-real?]
+)]{
+
+Like @scheme[sin], @scheme[cos], @scheme[tan], @scheme[asin],
+@scheme[acos], @scheme[atan], @scheme[log], @scheme[exp], and
+@scheme[flsqrt], but constrained to consume and produce
+@tech{flonums}. The result is @scheme[+nan.0] when a number outside
+the range @scheme[-1.0] to @scheme[1.0] is given to @scheme[flasin] or
+@scheme[flacos], or when a negative number is given to @scheme[fllog]
+or @scheme[flsqrt].}
+
+@defproc[(->fl [a exact-integer?]) inexact-real?]{
+Like @scheme[exact->inexact], but constrained to consume exact integers,
+so the result is always a @tech{flonum}.
+}
+
+@subsection{Flonum Vectors}
+
+A @deftech{flvector} is like a @tech{vector}, but it holds only
+inexact real numbers. This representation can be more compact, and
+unsafe operations on @tech{flvector}s (see
+@schememodname[scheme/unsafe/ops]) can execute more efficiently than
+unsafe operations on @tech{vectors} of inexact reals.
+
+An f64vector as provided by @schememodname[scheme/foreign] stores the
+same kinds of values as an @tech{flvector}, but with extra
+indirections that make f64vectors more convenient for working with
+foreign libraries. The lack of indirections make unsafe
+@tech{flvector} access more efficient.
+
+Two @tech{flvectors} are @scheme[equal?] if they have the same length,
+and if the values in corresponding slots of the @tech{flvectors} are
+@scheme[equal?].
+
+@defproc[(flvector? [v any/c]) boolean?]{
+
+Returns @scheme[#t] if @scheme[v] is a @tech{flvector}, @scheme[#f] otherwise.}
+
+@defproc[(flvector [x inexact-real?] ...) flvector?]{
+
+Creates a @tech{flvector} containing the given inexact real numbers.}
+
+@defproc[(make-flvector [size exact-nonnegative-integer?]
+                        [x inexact-real? 0.0]) 
+         flvector?]{
+
+Creates a @tech{flvector} with @scheme[size] elements, where every
+slot in the @tech{flvector} is filled with @scheme[x].}
+
+@defproc[(flvector-length [vec flvector?]) exact-nonnegative-integer?]{
+
+Returns the length of @scheme[vec] (i.e., the number of slots in the
+@tech{flvector}).}
+
+
+@defproc[(flvector-ref [vec flvector?] [pos exact-nonnegative-integer?])
+         inexact-real?]{
+
+Returns the inexact real number in slot @scheme[pos] of
+@scheme[vec]. The first slot is position @scheme[0], and the last slot
+is one less than @scheme[(flvector-length vec)].}
+
+@defproc[(flvector-set! [vec flvector?] [pos exact-nonnegative-integer?]
+                        [x inexact-real?])
+         inexact-real?]{
+
+Sets the inexact real number in slot @scheme[pos] of @scheme[vec]. The
+first slot is position @scheme[0], and the last slot is one less than
+@scheme[(flvector-length vec)].}
+
+                       
+@section{Fixnum Operations}
+
+@defmodule[scheme/fixnum]
+
+The @schememodname[scheme/fixnum] library provides operations like
+@scheme[fx+] that consume and produce only fixnums. The operations in
+this library are meant to be safe versions of unsafe operations like
+@scheme[unsafe-fx+]. These safe operations are generally no faster
+than using generic primitives like @scheme[+].
+
+The expected use of the @schememodname[scheme/fixnum] library is for
+code where the @scheme[require] of @schememodname[scheme/fixnum] is
+replaced with
+
+@schemeblock[(require (filtered-in
+                       (λ (name) (regexp-replace #rx"unsafe-" name ""))
+                       scheme/unsafe/ops))]
+
+to drop in unsafe versions of the library. Alternately, when
+encountering crashes with code that uses unsafe fixnum operations, use
+the @schememodname[scheme/fixnum] library to help debug the problems.
+
+@deftogether[(
+@defproc[(fx+ [a fixnum?][b fixnum?]) fixnum?]
+@defproc[(fx- [a fixnum?][b fixnum?]) fixnum?]
+@defproc[(fx* [a fixnum?][b fixnum?]) fixnum?]
+@defproc[(fxquotient [a fixnum?][b fixnum?]) fixnum?]
+@defproc[(fxremainder [a fixnum?][b fixnum?]) fixnum?]
+@defproc[(fxmodulo [a fixnum?][b fixnum?]) fixnum?]
+@defproc[(fxabs [a fixnum?]) fixnum?]
+)]{
+
+Safe versions of @scheme[unsafe-fx+], @scheme[unsafe-fx-],
+@scheme[unsafe-fx*], @scheme[unsafe-fxquotient],
+@scheme[unsafe-fxremainder], @scheme[unsafe-fxmodulo], and
+@scheme[unsafe-fxabs]. The
+@exnraise[exn:fail:contract:non-fixnum-result] if the arithmetic
+result would not be a fixnum.}
+
+
+@deftogether[(
+@defproc[(fxand [a fixnum?][b fixnum?]) fixnum?]
+@defproc[(fxior [a fixnum?][b fixnum?]) fixnum?]
+@defproc[(fxxor [a fixnum?][b fixnum?]) fixnum?]
+@defproc[(fxnot [a fixnum?]) fixnum?]
+@defproc[(fxlshift [a fixnum?][b fixnum?]) fixnum?]
+@defproc[(fxrshift [a fixnum?][b fixnum?]) fixnum?]
+)]{
+
+Safe versions of @scheme[unsafe-fxand], @scheme[unsafe-fxior],
+@scheme[unsafe-fxxor], @scheme[unsafe-fxnot],
+@scheme[unsafe-fxlshift], and @scheme[unsafe-fxrshift].  The
+@exnraise[exn:fail:contract:non-fixnum-result] if the arithmetic
+result would not be a fixnum.}
+
+
+@deftogether[(
+@defproc[(fx= [a fixnum?][b fixnum?]) boolean?]
+@defproc[(fx< [a fixnum?][b fixnum?]) boolean?]
+@defproc[(fx> [a fixnum?][b fixnum?]) boolean?]
+@defproc[(fx<= [a fixnum?][b fixnum?]) boolean?]
+@defproc[(fx>= [a fixnum?][b fixnum?]) boolean?]
+@defproc[(fxmin [a fixnum?][b fixnum?]) fixnum?]
+@defproc[(fxmax [a fixnum?][b fixnum?]) fixnum?]
+)]{
+
+Safe versions of @scheme[unsafe-fx=], @scheme[unsafe-fx<],
+ @scheme[unsafe-fx>], @scheme[unsafe-fx<=], @scheme[unsafe-fx>=],
+ @scheme[unsafe-fxmin], and @scheme[unsafe-fxmax].}
+
+
+
+@; ------------------------------------------------------------------------
 @section{Extra Constants and Functions}
 
 @note-lib[scheme/math]
@@ -901,13 +1113,15 @@ Returns the hyperbolic tangent of @scheme[z].}
 Computes the greatest exact integer @scheme[m] such that:
 @schemeblock[(<= (expt 10 m)
                  (inexact->exact r))]
-Hence also
+Hence also:
 @schemeblock[(< (inexact->exact r)
-                (expt 10 (add1 m)))].
+                (expt 10 (add1 m)))]
 
 @mz-examples[#:eval math-eval 
                     (order-of-magnitude 999)
-                    (order-of-magnitude 1000)]
+                    (order-of-magnitude 1000)
+                    (order-of-magnitude 1/100)
+                    (order-of-magnitude 1/101)]
 }
 
 @; ----------------------------------------------------------------------

@@ -546,6 +546,15 @@ vector_obj {
 		    + ((vec->size - 1) * sizeof(Scheme_Object *))));
 }
 
+flvector_obj {
+  Scheme_Double_Vector *vec = (Scheme_Double_Vector *)p;
+
+ mark:
+ size:
+  gcBYTES_TO_WORDS((sizeof(Scheme_Double_Vector) 
+		    + ((vec->size - 1) * sizeof(double))));
+}
+
 input_port {
  mark:
   Scheme_Input_Port *ip = (Scheme_Input_Port *)p;
@@ -1185,6 +1194,16 @@ mark_sfs_info {
   gcBYTES_TO_WORDS(sizeof(SFS_Info));
 }
 
+mark_once_used {
+ mark:
+  Scheme_Once_Used *o = (Scheme_Once_Used *)p;
+  gcMARK(o->expr);
+  gcMARK(o->info);
+  gcMARK(o->next);
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Once_Used));
+}
+
 END env;
 
 /**********************************************************************/
@@ -1253,6 +1272,7 @@ mark_closure_info {
   
   gcMARK(i->local_flags);
   gcMARK(i->base_closure_map);
+  gcMARK(i->flonum_map);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Closure_Info));
@@ -1337,8 +1357,21 @@ START places;
 place_val {
  mark:
   Scheme_Place *pr = (Scheme_Place *)p;
+  gcMARK(pr->channel);
+
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Place));
+}
+
+place_async_channel_val {
+ mark:
+  Scheme_Place_Async_Channel *pac = (Scheme_Place_Async_Channel *)p;
+  int i;
+  for (i = pac->size; i--; )
+    gcMARK(pac->msgs[i]);
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Place_Async_Channel));
 }
 
 END places;
@@ -1460,7 +1493,7 @@ mark_input_fd {
 }
 #endif
 
-#if defined(UNIX_PROCESSES)
+#if defined(UNIX_PROCESSES) && !(defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC))
 mark_system_child {
  mark:
   System_Child *sc = (System_Child *)p;
@@ -2215,6 +2248,53 @@ native_unclosed_proc_plus_case {
 }
 
 END jit;
+
+/**********************************************************************/
+
+START future;
+
+#ifdef FUTURES_ENABLED
+
+future {
+ mark:
+  future_t *f = (future_t *)p;
+  gcMARK(f->orig_lambda);
+  gcMARK(f->arg_s0);
+  gcMARK(f->arg_S0);
+  gcMARK(f->arg_b0);
+  gcMARK(f->arg_n0);
+  gcMARK(f->arg_s1);
+  gcMARK(f->arg_S1);
+  gcMARK(f->arg_s2);
+  gcMARK(f->arg_S2);
+  gcMARK(f->retval_s);
+  gcMARK(f->retval);
+  gcMARK(f->multiple_array);
+  gcMARK(f->tail_rator);
+  gcMARK(f->tail_rands);
+  gcMARK(f->prev);
+  gcMARK(f->next);
+  gcMARK(f->next_waiting_atomic);
+ size:
+  gcBYTES_TO_WORDS(sizeof(future_t));
+}
+
+#else
+
+sequential_future {
+ mark:
+  future_t *f = (future_t *)p;
+  gcMARK(f->orig_lambda);
+  gcMARK(f->running_sema);
+  gcMARK(f->retval);
+  gcMARK(f->multiple_array);
+ size:
+  gcBYTES_TO_WORDS(sizeof(future_t));
+}
+
+#endif
+
+END future;
 
 /**********************************************************************/
 

@@ -61,7 +61,7 @@
            public-final override-final augment-final
            field init init-field init-rest
            rename-super rename-inner inherit inherit/super inherit/inner inherit-field
-           this super inner
+           this this% super inner
            super-make-object super-instantiate super-new
            inspect))
 
@@ -170,6 +170,7 @@
 
 (define/provide-context-keyword
   [this this-param]
+  [this% this%-param]
   [super super-param]
   [inner inner-param]
   [super-make-object super-make-object-param]
@@ -229,6 +230,7 @@
                 (quote-syntax super)
                 (quote-syntax inner)
                 (quote-syntax this)
+                (quote-syntax this%)
                 (quote-syntax super-instantiate)
                 (quote-syntax super-make-object)
                 (quote-syntax super-new)
@@ -335,7 +337,7 @@
         (local-expand
          expr
          'expression
-         (append locals expand-stop-names)
+         (append locals (list #'lambda #'λ) expand-stop-names)
          def-ctx))
       ;; Checks whether the vars sequence is well-formed
       (define (vars-ok? vars)
@@ -377,17 +379,19 @@
          #f))
       ;; -- tranform loop starts here --
       (let loop ([stx orig-stx][can-expand? #t][name name][locals null])
-        (syntax-case stx (#%plain-lambda lambda case-lambda letrec-values let-values)
+        (syntax-case stx (#%plain-lambda lambda λ case-lambda letrec-values let-values)
           [(lam vars body1 body ...)
            (or (and (free-identifier=? #'lam #'#%plain-lambda)
                     (vars-ok? (syntax vars)))
-               (and (free-identifier=? #'lam #'lambda)
+               (and (or (free-identifier=? #'lam #'lambda)
+                        (free-identifier=? #'lam #'λ))
                     (kw-vars-ok? (syntax vars))))
            (if xform?
                (with-syntax ([the-obj the-obj]
                              [the-finder the-finder]
                              [name (mk-name name)])
-                 (with-syntax ([vars (if (free-identifier=? #'lam #'lambda)
+                 (with-syntax ([vars (if (or (free-identifier=? #'lam #'lambda)
+                                             (free-identifier=? #'lam #'λ))
                                          (let loop ([vars #'vars])
                                            (cond
                                              [(identifier? vars) vars]
@@ -422,6 +426,8 @@
           [(#%plain-lambda . _)
            (bad "ill-formed lambda expression for method" stx)]
           [(lambda . _)
+           (bad "ill-formed lambda expression for method" stx)]
+          [(λ . _)
            (bad "ill-formed lambda expression for method" stx)]
           [(case-lambda [vars body1 body ...] ...)
            (andmap vars-ok? (syntax->list (syntax (vars ...))))
@@ -1334,7 +1340,9 @@
                                          (syntax-parameterize
                                           ([this-param (make-this-map (quote-syntax this-id)
                                                                       (quote-syntax the-finder)
-                                                                      (quote the-obj))])
+                                                                      (quote the-obj))]
+                                           [this%-param (make-this%-map (quote-syntax (object-ref this))
+                                                                        (quote-syntax the-finder))])
                                           (let-syntaxes
                                            mappings
                                            (syntax-parameterize 

@@ -103,6 +103,13 @@
 (test-syntax-error "identifier not first part of pair after contracted in signature"
   (define-signature x ((contracted [(-> number? number?) x]))))
 
+(test-syntax-error "identifier h? not bound anywhere"
+  (module h?-test scheme
+    (define-signature s^
+      ((define-values (f?) (values number?))
+       (define-syntaxes (g?) (make-rename-transformer #'number?))
+       (contracted [f (-> f? (and/c g? h?))])))))
+
 (test-syntax-error "f not defined in unit exporting sig3"
   (unit (import) (export sig3 sig4)
         (define a #t)
@@ -862,3 +869,28 @@
     (make-student 4 3))
   (test-contract-error top-level "student-id" "not a student"
     (student-id 'a)))
+
+;; Test that prefixing doesn't cause issues.
+(let ()
+  (define-signature t^
+    ((contracted (t? (any/c . -> . boolean?))
+                 (make-t (-> t?)))))
+  
+  (define-unit t@
+    (import)
+    (export t^)
+    (define-struct t ()))
+  
+  (define-signature s^ (new-make-t))
+  
+  (define-unit s@
+    (import (prefix pre: t^))
+    (export s^)
+    (define new-make-t pre:make-t))
+  
+  (define c@ (compound-unit (import)
+                            (export S)
+                            (link [((T : t^)) t@]
+                                  [((S : s^)) s@ T])))
+  (define-values/invoke-unit c@ (import) (export s^))
+  (new-make-t))

@@ -77,6 +77,7 @@ Keep documentation and tests up to date.
 @include-section["list.scrbl"]
 @include-section["net.scrbl"]
 @include-section["path.scrbl"]
+@include-section["srcloc.scrbl"]
 @include-section["string.scrbl"]
 @include-section["struct.scrbl"]
 @include-section["syntax.scrbl"]
@@ -87,6 +88,8 @@ Keep documentation and tests up to date.
 @include-section["sequence.scrbl"]
 @include-section["hash.scrbl"]
 @include-section["match.scrbl"]
+@include-section["skip-list.scrbl"]
+@include-section["interval-map.scrbl"]
 
 @;{--------}
 

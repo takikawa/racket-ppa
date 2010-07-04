@@ -43,9 +43,13 @@
                                (fp "LTop")
                                (for ([i els]) (fp " ~a" i)))
                            (fp")")]
+    [(LNotTypeFilter: type path 0) (fp "(! ~a @ ~a)" type path)]
+    [(LTypeFilter: type path 0) (fp "(~a @ ~a)" type path)]
     [(LNotTypeFilter: type path idx) (fp "(! ~a @ ~a ~a)" type path idx)]
     [(LTypeFilter: type path idx) (fp "(~a @ ~a ~a)" type path idx)]
-    [(LBot:) (fp "LBot")]))
+    [(LBot:) (fp "LBot")]
+    [(LImpFilter: a c) (fp "(LImpFilter ~a ~a)" a c)]
+    [else (fp "(Unknown Latent Filter: ~a)" (struct->vector c))]))
 
 (define (print-filter c port write?)
   (define (fp . args) (apply fprintf port args))
@@ -57,14 +61,17 @@
     [(NoFilter:) (fp "-")]
     [(NotTypeFilter: type path id) (fp "(! ~a @ ~a ~a)" type path (syntax-e id))]
     [(TypeFilter: type path id) (fp "(~a @ ~a ~a)" type path (syntax-e id))]
-    [(Bot:) (fp "Bot")]))
+    [(Bot:) (fp "Bot")]
+    [(ImpFilter: a c) (fp "(ImpFilter ~a ~a)" a c)]
+    [else (fp "(Unknown Filter: ~a)" (struct->vector c))]))
 
 (define (print-pathelem c port write?)
   (define (fp . args) (apply fprintf port args))
   (match c
     [(CarPE:) (fp "car")]
     [(CdrPE:) (fp "cdr")]
-    [(StructPE: t i) (fp "(~a ~a)" t i)]))
+    [(StructPE: t i) (fp "(~a ~a)" t i)]
+    [else (fp "(Unknown Path Element: ~a)" (struct->vector c))]))
 
 (define (print-latentobject c port write?)
   (define (fp . args) (apply fprintf port args))
@@ -77,7 +84,8 @@
   (match c
     [(NoObject:) (fp "-")]
     [(Empty:) (fp "")]
-    [(Path: pes i) (fp "~a" (append pes (list (syntax-e i))))]))
+    [(Path: pes i) (fp "~a" (append pes (list (syntax-e i))))]    
+    [else (fp "(Unknown Object: ~a)" (struct->vector c))]))
 
 ;; print out a type
 ;; print-type : Type Port Boolean -> Void
@@ -109,17 +117,21 @@
          [(Values: (list (Result: t (LFilterSet: (list) (list)) (LEmpty:))))
           (fp "-> ~a" t)]
          [(Values: (list (Result: t
-				  (LFilterSet: (list (LTypeFilter: ft '() 0))
-					       (list (LNotTypeFilter: ft '() 0)))
+				  (LFilterSet: (list (LTypeFilter: ft pth 0))
+					       (list (LNotTypeFilter: ft pth 0)))
 				  (LEmpty:)))) 
-          (fp "-> ~a : ~a" t ft)]
+          (if (null? pth)
+              (fp "-> ~a : ~a" t ft)
+              (begin (fp "-> ~a : ~a @" t ft)
+                     (for ([pe pth]) (fp " ~a" pe))))]
          [(Values: (list (Result: t fs (LEmpty:)))) 
           (fp/filter "-> ~a : ~a" t fs)]
          [(Values: (list (Result: t lf lo)))
           (fp/filter "-> ~a : ~a ~a" t lf lo)]
          [_
           (fp "-> ~a" rng)])
-       (fp ")")]))
+       (fp ")")]      
+      [else (fp "(Unknown Function Type: ~a)" (struct->vector a))]))
   (define (tuple? t)
     (match t
       [(Pair: a (? tuple?)) #t]
@@ -131,6 +143,8 @@
       [(Value: '()) null]))
   (match c 
     [(Univ:) (fp "Any")]
+    ;; special case number until something better happens
+    [(Base: 'Number _) (fp "Number")]
     [(? has-name?) (fp "~a" (has-name? c))]
     ;; names are just the printed as the original syntax
     [(Name: stx) (fp "~a" (syntax-e stx))]

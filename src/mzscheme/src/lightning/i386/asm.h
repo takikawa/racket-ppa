@@ -122,7 +122,7 @@ typedef _uc		jit_insn;
 /*** ASSEMBLER ***/
 
 #define _OFF4(D)        (_jit_UL(D) - _jit_UL(_jit.x.pc))
-#define _CKD8(D)        _ck_d(8, ((_uc) _OFF4(D)) )
+#define _CKD8(D)        _ck_d(8, ((_sc) _OFF4(D)) )
 
 #define _D8(D)          (_jit_B(0), ((*(_PUC(_jit.x.pc)-1))= _CKD8(D)))
 #define _D32(D)         (_jit_I(0), ((*(_PUI(_jit.x.pc)-1))= _OFF4(D)))
@@ -205,10 +205,14 @@ typedef _uc		jit_insn;
 #define	 _d16()					   (		  _jit_B(0x66	)				  )
 #define	  _O(	     OP				)  (		  _jit_B(  OP	)				  )
 #ifdef JIT_X86_64
-# define  _REX(R,X,B)                              ( _jit_B(0x48|((R&0x8)>>1)|((X&0x8)>>2)|((B&0x8)>>3)) )
+# define  _REX_(P,R,X,B)                          ( _jit_B(P|((R&0x8)>>1)|((X&0x8)>>2)|((B&0x8)>>3)) )
+# define  _REX(R,X,B)                              _REX_(0x48,R,X,B)
+# define  _REXd(R,X,B)                             _REX_(0x40,R,X,B)
 # define  _qO(	     OP, R,X,B			)  ( _REX(R,X,B), _jit_B(  OP	) )
+# define  _qOd(	     OP, R,X,B			)  ( _REXd(R,X,B), _jit_B(  OP	) )
 #else
 # define  _qO(	     OP, R,X,B  		)  _O(OP)
+# define  _qOd(	     OP, R,X,B  		)  _O(OP)
 #endif
 #define	  _Or(	     OP,R			)  (		  _jit_B( (OP)|_r(R))				  )
 #ifdef JIT_X86_64
@@ -259,6 +263,7 @@ typedef _uc		jit_insn;
 #define	  _O_r_X(    OP	    ,R	,MD,MB,MI,MS	)  (	    _O	    (  OP  ),_r_X(   R	,MD,MB,MI,MS)		  )
 #define	 _qO_r_X(    OP	    ,R	,MD,MB,MI,MS	)  (	   _qO	    (  OP,R,0,MS),_qr_X(R,MD,MB,MI,MS)		  )
 #define	 _qO_r_XB(   OP	    ,R	,MD,MB,MI,MS	)  (	   _qO	    (  OP,R,0,MB),_qr_X(R,MD,MB,MI,MS)		  )
+#define	 _qO_r_Xd(   OP	    ,R	,MD,MB,MI,MS	)  (	   _qOd	    (  OP,R,0,MB),_qr_X(R,MD,MB,MI,MS)		  )
 #define	 _OO_r_X(    OP	    ,R	,MD,MB,MI,MS	)  (	   _OO	    (  OP  ),_r_X(   R	,MD,MB,MI,MS)		  )
 #define	  _O_r_X_B(  OP	    ,R	,MD,MB,MI,MS,B	)  (	    _O	    (  OP  ),_r_X(   R	,MD,MB,MI,MS) ,_jit_B(B)	  )
 #define	  _O_r_X_W(  OP	    ,R	,MD,MB,MI,MS,W	)  (	    _O	    (  OP  ),_r_X(   R	,MD,MB,MI,MS) ,_jit_W(W)	  )
@@ -557,15 +562,25 @@ typedef _uc		jit_insn;
 #define JNLESm(D,B,I,S)			JCCSim(0xf,D,B,I,S)
 #define JGSm(D,B,I,S)			JCCSim(0xf,D,B,I,S)
 
-#ifdef JIT_X86_64
-# define JCCim(CC,nCC,D,B,I,S) (!_jitl.long_jumps \
-                                ? _OO_D32(0x0f80|(CC), (long)(D) ) \
-                                : (_O_D8(0x70|(nCC), _jit_UL(_jit.x.pc) + 13), JMPm((long)D, 0, 0, 0)))
-#else
-# define JCCim(CC,nCC,D,B,I,S)		((_r0P(B) && _r0P(I)) ? (_jitl.tiny_jumps \
+#ifndef JIT_X86_64
+# define SUPPORT_TINY_JUMPS
+#endif
+
+#ifdef SUPPORT_TINY_JUMPS
+# define JCCim_base(CC,nCC,D,B,I,S) ((_r0P(B) && _r0P(I)) ? (_jitl.tiny_jumps \
                                                                  ? _O_D8(0x70|(CC), D) \
                                                                  : _OO_D32	(0x0f80|(CC)		,(long)(D)		)) : \
 								JITFAIL("illegal mode in conditional jump"))
+#else
+# define JCCim_base(CC,nCC,D,B,I,S) (_OO_D32	(0x0f80|(CC)		,(long)(D)		))
+#endif
+
+#ifdef JIT_X86_64
+# define JCCim(CC,nCC,D,B,I,S) (!_jitl.long_jumps \
+                                ? JCCim_base(CC,nCC,D,B,I,S)            \
+                                : (_O_D8(0x70|(nCC), _jit_UL(_jit.x.pc) + 13), JMPm((long)D, 0, 0, 0)))
+#else
+# define JCCim(CC,nCC,D,B,I,S)	JCCim_base(CC,nCC,D,B,I,S)
 #endif
 
 #define JOm(D,B,I,S)			JCCim(0x0,0x1,D,B,I,S)
@@ -603,15 +618,21 @@ typedef _uc		jit_insn;
 #define JMPSm(D,B,I,S)			((_r0P(B) && _r0P(I)) ? _O_D8	(0xeb			,(long)(D)		) : \
 								JITFAIL("illegal mode in short jump"))
 
-#ifdef JIT_X86_64
-# define JMPm(D,B,I,S) (!_jitl.long_jumps \
-                        ? _O_D32(0xe9, (long)(D)) \
-                        : (MOVQir((D), JIT_REXTMP), _qO_Mrm(0xff,_b11,_b100,_r8(JIT_REXTMP))))
-#else
-# define JMPm(D,B,I,S)			((_r0P(B) && _r0P(I)) ? (_jitl.tiny_jumps \
+#ifdef SUPPORT_TINY_JUMPS
+# define JMPm_base(D,B,I,S)             ((_r0P(B) && _r0P(I)) ? (_jitl.tiny_jumps \
                                                                  ? _O_D8(0xeB, D) \
                                                                  : _O_D32	(0xe9			,(long)(D)		)) : \
 								JITFAIL("illegal mode in direct jump"))
+#else
+# define JMPm_base(D,B,I,S)  (_O_D32(0xe9			,(long)(D)		))
+#endif
+
+#ifdef JIT_X86_64
+# define JMPm(D,B,I,S) (!_jitl.long_jumps \
+                        ? JMPm_base(D,B,I,S)  \
+                        : (MOVQir((D), JIT_REXTMP), _qO_Mrm(0xff,_b11,_b100,_r8(JIT_REXTMP))))
+#else
+# define JMPm(D,B,I,S)	JMPm_base(D,B,I,S)
 #endif
 
 #define JMPsr(R)			_O_Mrm	(0xff	,_b11,_b100,_r4(R)			)
@@ -622,6 +643,7 @@ typedef _uc		jit_insn;
 #define LAHF_()				_O		(0x9f								)
 #define LEALmr(MD, MB, MI, MS, RD)	_O_r_X		(0x8d		     ,_r4(RD)		,MD,MB,MI,MS		)
 #define LEAQmr(MD, MB, MI, MS, RD)	_qO_r_X		(0x8d		     ,_r8(RD)		,MD,MB,MI,MS		)
+#define LEAQmQr(MD, MB, MI, MS, RD)	_qO_r_XB	(0x8d		     ,_r8(RD)		,MD,MB,MI,MS		)
 #define LEAVE_()			_O		(0xc9								)
 
 
@@ -664,8 +686,8 @@ typedef _uc		jit_insn;
 
 #define MOVQmr(MD, MB, MI, MS, RD)	_qO_r_X		(0x8b		     ,_r8(RD)		,MD,MB,MI,MS		)
 #define MOVQmQr(MD, MB, MI, MS, RD)	_qO_r_XB	(0x8b		     ,_r8(RD)		,MD,MB,MI,MS		)
-#define MOVQrm(RS, MD, MB, MI, MS)	_qO_r_X		(0x89		     ,_r8(RS)		,MD,MB,MI,MS		)
-#define MOVQrQm(RS, MD, MB, MI, MS)	_qO_r_XB      	(0x89		     ,_r8(RS)		,MD,MB,MI,MS		)
+#define MOVQrm(RS, MD, MB, MI, MS)	_qO_r_Xd	(0x89		     ,_r8(RS)		,MD,MB,MI,MS		)
+#define MOVQrQm(RS, MD, MB, MI, MS)	_qO_r_XB     	(0x89		     ,_r8(RS)		,MD,MB,MI,MS		)
 #define MOVQir(IM,  R)			_qOr_Q	        (0xb8,_r8(R)			,IM	)
 
 #define MOVQrr(RS, RD)			_qO_Mrm		(0x89		,_b11,_r8(RS),_r8(RD)				)

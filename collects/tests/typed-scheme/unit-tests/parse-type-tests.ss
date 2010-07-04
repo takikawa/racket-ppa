@@ -5,8 +5,8 @@
 	 (rep type-rep)
 	 (rename-in (types comparison subtype union utils convenience)
                     [Un t:Un] [-> t:->])
-         (private base-types base-types-extra colon)
-         (for-template (private base-types base-types-extra base-env colon))
+         (private base-types-new base-types-extra colon)
+         (for-template (private base-types-new base-types-extra base-env colon))
          (private parse-type)
          (schemeunit))
 
@@ -96,6 +96,7 @@
    [#t (-val #t)]
    [#f (-val #f)]
    ["foo" (-val "foo")]
+   ['(1 2 3) (-Tuple (map -val '(1 2 3)))]
    
    [(Listof Number) (make-Listof  N)]
    

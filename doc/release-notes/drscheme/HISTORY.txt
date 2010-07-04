@@ -1,8 +1,23 @@
 ------------------------------
+        Version 4.2.4
+------------------------------
+
+  . the 2htdp/image library changed:
+    - changed how equality works (it is now based on how the 
+      images draw, instead of on an underlying algebra
+      of images)
+    - added cropping and curves
+    - overlay, beside, and above now line things up on
+      centers, rather than upper lefts
+    - added scene-related funtions (place-image, scene+line, etc)
+    - added support for drawing with various kinds of pens
+
+------------------------------
         Version 4.2.3
 ------------------------------
 
   . minor bug fixes
+  . added first draft of the 2htdp/image library
 
 ------------------------------
         Version 4.2.2

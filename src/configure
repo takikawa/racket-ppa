@@ -7100,7 +7100,7 @@ fi
 LFS_CFLAGS=`getconf LFS_CFLAGS 2> /dev/null`
 if test "${LFS_CFLAGS}" != "" ; then
   echo "Large-file support: ${LFS_CFLAGS}"
-  PREFLAGS="${PREFLAGS} ${LFS_CFLAGS}"
+  MZOPTIONS="${MZOPTIONS} ${LFS_CFLAGS}"
 fi
 
 ###### Get data sizes, stack direction, and endianness #######
@@ -10712,11 +10712,7 @@ fi
 
 if test "${enable_places}" = "yes" ; then
   PREFLAGS="$PREFLAGS -DMZ_USE_PLACES"
-  if test "${CGC_X86_64}" = "1" ; then
-    PLACE_CGC_FLAGS="$GC_THREADS_FLAG -DTHREAD_LOCAL_ALLOC"
-  else
-    PLACE_CGC_FLAGS="$GC_THREADS_FLAG -DPARALLEL_MARK -DTHREAD_LOCAL_ALLOC"
-  fi
+  PLACE_CGC_FLAGS="$GC_THREADS_FLAG -DTHREAD_LOCAL_ALLOC"
   LDFLAGS="$LDFLAGS -pthread"
   LIBATOM="LIBATOM_USE"
 fi
@@ -10724,7 +10720,7 @@ fi
 ############### futures ###################
 
 if test "${enable_futures}" = "yes" ; then
-  PREFLAGS="$PREFLAGS -DFUTURES_ENABLED"
+  PREFLAGS="$PREFLAGS -DFUTURES_ENABLED -DUSE_PTHREAD_INSTEAD_OF_ITIMER"
   LDFLAGS="$LDFLAGS -pthread"
 fi
 

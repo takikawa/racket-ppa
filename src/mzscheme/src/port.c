@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -169,7 +169,7 @@ int scheme_stupid_windows_machine;
 
 /******************** Unix Subprocesses ********************/
 
-#if defined(UNIX_PROCESSES)
+#if defined(UNIX_PROCESSES) && !(defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC))
 /* For process & system: */
 typedef struct System_Child {
   MZTAG_IF_REQUIRED
@@ -186,6 +186,10 @@ typedef struct Scheme_Subprocess {
   Scheme_Object so;
   void *handle;
   int pid;
+#if defined(UNIX_PROCESSES) && defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
+  short done;
+  int status;
+#endif
 } Scheme_Subprocess;
 
 #ifdef USE_FD_PORTS
@@ -206,11 +210,8 @@ static int *malloc_refcount()
   return (int *)malloc(sizeof(int));
 }
 
-#ifdef MZ_XFORM
-START_XFORM_SKIP;
-#endif
-
 static int dec_refcount(int *refcount)
+  XFORM_SKIP_PROC
 {
   int rc;
 
@@ -226,10 +227,6 @@ static int dec_refcount(int *refcount)
 
   return rc;
 }
-
-#ifdef MZ_XFORM
-END_XFORM_SKIP;
-#endif
 
 #else
 
@@ -302,59 +299,61 @@ typedef struct Scheme_FD {
 /******************** Globals and Prototypes ********************/
 
 /* globals */
-Scheme_Object scheme_eof[1];
-THREAD_LOCAL Scheme_Object *scheme_orig_stdout_port;
-THREAD_LOCAL Scheme_Object *scheme_orig_stderr_port;
-THREAD_LOCAL Scheme_Object *scheme_orig_stdin_port;
+READ_ONLY Scheme_Object scheme_eof[1];
+THREAD_LOCAL_DECL(Scheme_Object *scheme_orig_stdout_port);
+THREAD_LOCAL_DECL(Scheme_Object *scheme_orig_stderr_port);
+THREAD_LOCAL_DECL(Scheme_Object *scheme_orig_stdin_port);
 
-THREAD_LOCAL fd_set *scheme_fd_set;
+THREAD_LOCAL_DECL(fd_set *scheme_fd_set);
 
-Scheme_Object *(*scheme_make_stdin)(void) = NULL;
-Scheme_Object *(*scheme_make_stdout)(void) = NULL;
-Scheme_Object *(*scheme_make_stderr)(void) = NULL;
+HOOK_SHARED_OK Scheme_Object *(*scheme_make_stdin)(void) = NULL;
+HOOK_SHARED_OK Scheme_Object *(*scheme_make_stdout)(void) = NULL;
+HOOK_SHARED_OK Scheme_Object *(*scheme_make_stderr)(void) = NULL;
 
-int scheme_file_open_count;
-
-MZ_DLLSPEC int scheme_binary_mode_stdio;
+SHARED_OK MZ_DLLSPEC int scheme_binary_mode_stdio = 0;
 void scheme_set_binary_mode_stdio(int v) { scheme_binary_mode_stdio =  v; }
 
-static int special_is_ok;
+THREAD_LOCAL_DECL(static int special_is_ok);
 
 /* locals */
+#ifdef USE_FD_PORTS
+THREAD_LOCAL_DECL(static int fd_reserved);
+THREAD_LOCAL_DECL(static int the_fd);
+#endif
 #ifdef MZ_FDS
-static Scheme_Object *fd_input_port_type;
+READ_ONLY static Scheme_Object *fd_input_port_type;
 #endif
 #ifdef USE_OSKIT_CONSOLE
-static Scheme_Object *oskit_console_input_port_type;
+READ_ONLY static Scheme_Object *oskit_console_input_port_type;
 #endif
-static Scheme_Object *file_input_port_type;
-Scheme_Object *scheme_string_input_port_type;
+READ_ONLY static Scheme_Object *file_input_port_type;
+READ_ONLY Scheme_Object *scheme_string_input_port_type;
 #ifdef USE_TCP
-Scheme_Object *scheme_tcp_input_port_type;
-Scheme_Object *scheme_tcp_output_port_type;
+READ_ONLY Scheme_Object *scheme_tcp_input_port_type;
+READ_ONLY Scheme_Object *scheme_tcp_output_port_type;
 #endif
 #ifdef MZ_FDS
-static Scheme_Object *fd_output_port_type;
+READ_ONLY static Scheme_Object *fd_output_port_type;
 #endif
-static Scheme_Object *file_output_port_type;
-Scheme_Object *scheme_string_output_port_type;
-Scheme_Object *scheme_user_input_port_type;
-Scheme_Object *scheme_user_output_port_type;
-Scheme_Object *scheme_pipe_read_port_type;
-Scheme_Object *scheme_pipe_write_port_type;
-Scheme_Object *scheme_null_output_port_type;
-Scheme_Object *scheme_redirect_output_port_type;
+READ_ONLY static Scheme_Object *file_output_port_type;
+READ_ONLY Scheme_Object *scheme_string_output_port_type;
+READ_ONLY Scheme_Object *scheme_user_input_port_type;
+READ_ONLY Scheme_Object *scheme_user_output_port_type;
+READ_ONLY Scheme_Object *scheme_pipe_read_port_type;
+READ_ONLY Scheme_Object *scheme_pipe_write_port_type;
+READ_ONLY Scheme_Object *scheme_null_output_port_type;
+READ_ONLY Scheme_Object *scheme_redirect_output_port_type;
 
-int scheme_force_port_closed;
+THREAD_LOCAL_DECL(int scheme_force_port_closed);
 
-static int flush_out;
-static int flush_err;
+SHARED_OK static int flush_out;
+SHARED_OK static int flush_err;
 
-static THREAD_LOCAL Scheme_Custodian *new_port_cust; /* back-door argument */
+THREAD_LOCAL_DECL(static Scheme_Custodian *new_port_cust); /* back-door argument */
 
 #if defined(FILES_HAVE_FDS)
-static THREAD_LOCAL int external_event_fd;
-static THREAD_LOCAL int put_external_event_fd;
+THREAD_LOCAL_DECL(static int external_event_fd);
+THREAD_LOCAL_DECL(static int put_external_event_fd);
 #endif
 
 static void register_port_wait();
@@ -410,17 +409,17 @@ static Scheme_Object *make_oskit_console_input_port();
 static void force_close_output_port(Scheme_Object *port);
 static void force_close_input_port(Scheme_Object *port);
 
-static Scheme_Object *text_symbol, *binary_symbol;
-static Scheme_Object *append_symbol, *error_symbol, *update_symbol, *can_update_symbol;
-static Scheme_Object *replace_symbol, *truncate_symbol, *truncate_replace_symbol;
-static Scheme_Object *must_truncate_symbol;
+ROSYM static Scheme_Object *text_symbol, *binary_symbol;
+ROSYM static Scheme_Object *append_symbol, *error_symbol, *update_symbol, *can_update_symbol;
+ROSYM static Scheme_Object *replace_symbol, *truncate_symbol, *truncate_replace_symbol;
+ROSYM static Scheme_Object *must_truncate_symbol;
 
-Scheme_Object *scheme_none_symbol, *scheme_line_symbol, *scheme_block_symbol;
+ROSYM Scheme_Object *scheme_none_symbol, *scheme_line_symbol, *scheme_block_symbol;
 
-static Scheme_Object *exact_symbol;
+ROSYM static Scheme_Object *exact_symbol;
 
 #define READ_STRING_BYTE_BUFFER_SIZE 1024
-static THREAD_LOCAL char *read_string_byte_buffer;
+THREAD_LOCAL_DECL(static char *read_string_byte_buffer);
 
 #define fail_err_symbol scheme_false
 
@@ -493,7 +492,7 @@ scheme_init_port (Scheme_Env *env)
   REGISTER_SO(scheme_null_output_port_type);
   REGISTER_SO(scheme_redirect_output_port_type);
 
-#if defined(UNIX_PROCESSES)
+#if defined(UNIX_PROCESSES) && !(defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC))
   REGISTER_SO(scheme_system_children);
 #endif
 
@@ -550,11 +549,6 @@ scheme_init_port (Scheme_Env *env)
       scheme_stupid_windows_machine = 1;
   }
 #endif
-
-  scheme_init_port_places();
-
-  flush_out = SCHEME_TRUEP(scheme_terminal_port_p(1, &scheme_orig_stdout_port));
-  flush_err = SCHEME_TRUEP(scheme_terminal_port_p(1, &scheme_orig_stderr_port));
 
 #ifdef MZ_FDS
   scheme_add_atexit_closer(flush_if_output_fds);
@@ -654,6 +648,9 @@ void scheme_init_port_places(void)
   }
 # endif
 #endif
+  
+  flush_out = SCHEME_TRUEP(scheme_terminal_port_p(1, &scheme_orig_stdout_port));
+  flush_err = SCHEME_TRUEP(scheme_terminal_port_p(1, &scheme_orig_stderr_port));
 }
 
 void scheme_init_port_config(void)
@@ -688,27 +685,25 @@ void scheme_alloc_global_fdset() {
 }
 
 #ifdef USE_DYNAMIC_FDSET_SIZE
-static int dynamic_fd_size;
+/* initialized early via scheme_alloc_global_fdset */
+SHARED_OK static int dynamic_fd_size;
 
 # define STORED_ACTUAL_FDSET_LIMIT
 # define FDSET_LIMIT(fd) (*(int *)((char *)fd XFORM_OK_PLUS dynamic_fd_size))
 
-#ifdef MZ_XFORM
-START_XFORM_SKIP;
-#endif
-
 void *scheme_alloc_fdset_array(int count, int permanent)
+  XFORM_SKIP_PROC
 {
   /* Note: alloc only at the end, because this function
      isn't annotated. We skip annotation so that it's
      ok with OS X use from default_sleep() */
 
   if (!dynamic_fd_size) {
-#ifdef USE_ULIMIT
+# ifdef USE_ULIMIT
     dynamic_fd_size = ulimit(4, 0);
-#else
+# else
     dynamic_fd_size = getdtablesize();
-#endif
+# endif
     /* divide by bits-per-byte: */
     dynamic_fd_size = (dynamic_fd_size + 7) >> 3;
     /* word-align: */
@@ -721,10 +716,6 @@ void *scheme_alloc_fdset_array(int count, int permanent)
   else
     return scheme_malloc_atomic(count * (dynamic_fd_size + sizeof(long)));
 }
-
-#ifdef MZ_XFORM
-END_XFORM_SKIP;
-#endif
 
 void *scheme_init_fdset_array(void *fdarray, int count)
 {
@@ -743,17 +734,17 @@ void scheme_fdzero(void *fd)
 
 #else
 
-#if defined(WIN32_FD_HANDLES)
-# define fdset_type win_extended_fd_set
-#else
-# define fdset_type fd_set
-#endif
+# if defined(WIN32_FD_HANDLES)
+#  define fdset_type win_extended_fd_set
+# else
+#  define fdset_type fd_set
+# endif
 
 void *scheme_alloc_fdset_array(int count, int permanent)
 {
-#if defined(FILES_HAVE_FDS) || defined(USE_SOCKETS_TCP) || defined(WIN32_FD_HANDLES)
+# if defined(FILES_HAVE_FDS) || defined(USE_SOCKETS_TCP) || defined(WIN32_FD_HANDLES)
   void *fdarray;
-# if defined(WIN32_FD_HANDLES)
+#  if defined(WIN32_FD_HANDLES)
   if (count) {
     fdarray = scheme_malloc_allow_interior(count * sizeof(fdset_type));
     if (permanent)
@@ -762,19 +753,19 @@ void *scheme_alloc_fdset_array(int count, int permanent)
     scheme_init_fdset_array(fdarray, count);
   } else
     fdarray = NULL;
-# else
+#  else
   if (permanent)
     fdarray = scheme_malloc_eternal(count * sizeof(fdset_type));
   else
     fdarray = scheme_malloc_atomic(count * sizeof(fdset_type));
-# endif
+#  endif
   return fdarray;
-#else
+# else
   return NULL;
-#endif
+# endif
 }
 
-#if defined(WIN32_FD_HANDLES)
+# if defined(WIN32_FD_HANDLES)
 static void reset_wait_array(win_extended_fd_set *efd)
 {
   /* Allocate an array that may be big enough to hold all events
@@ -785,11 +776,11 @@ static void reset_wait_array(win_extended_fd_set *efd)
   wa = MALLOC_N_ATOMIC(HANDLE, sz);
   efd->wait_array = wa;
 }
-#endif
+# endif
 
 void *scheme_init_fdset_array(void *fdarray, int count)
 {
-#if defined(WIN32_FD_HANDLES)
+# if defined(WIN32_FD_HANDLES)
   if (count) {
     int i;
     win_extended_fd_set *fd;
@@ -806,28 +797,28 @@ void *scheme_init_fdset_array(void *fdarray, int count)
       reset_wait_array(fdarray);
     }
   }
-#endif
+# endif
   return fdarray;
 }
 
 void *scheme_get_fdset(void *fdarray, int pos)
 {
-#if defined(FILES_HAVE_FDS) || defined(USE_SOCKETS_TCP) || defined(WIN32_FD_HANDLES)
+# if defined(FILES_HAVE_FDS) || defined(USE_SOCKETS_TCP) || defined(WIN32_FD_HANDLES)
   return ((fdset_type *)fdarray) + pos;
-#else
+# else
   return NULL;
-#endif
+# endif
 }
 
 void scheme_fdzero(void *fd)
 {
-#if defined(WIN32_FD_HANDLES)
+# if defined(WIN32_FD_HANDLES)
   scheme_init_fdset_array(fd, 1);
-#else
-# if defined(FILES_HAVE_FDS) || defined(USE_SOCKETS_TCP)
+# else
+#  if defined(FILES_HAVE_FDS) || defined(USE_SOCKETS_TCP)
   FD_ZERO((fd_set *)fd);
+#  endif
 # endif
-#endif
 }
 
 #endif
@@ -1184,11 +1175,8 @@ void scheme_remember_subthread(struct Scheme_Thread_Memory *tm, void *t)
   tm->subhandle = t;
 }
 
-#ifdef MZ_XFORM
-START_XFORM_SKIP;
-#endif
-
 void scheme_forget_thread(struct Scheme_Thread_Memory *tm)
+  XFORM_SKIP_PROC
 {
   if (tm->prev)
     tm->prev->next = tm->next;
@@ -1207,11 +1195,13 @@ void scheme_forget_thread(struct Scheme_Thread_Memory *tm)
 }
 
 void scheme_forget_subthread(struct Scheme_Thread_Memory *tm)
+  XFORM_SKIP_PROC
 {
   tm->subhandle = NULL;
 }
 
 void scheme_suspend_remembered_threads(void)
+  XFORM_SKIP_PROC
 {
   Scheme_Thread_Memory *tm, *next, *prev = NULL;
   int keep;
@@ -1249,6 +1239,7 @@ void scheme_suspend_remembered_threads(void)
 }
 
 void scheme_resume_remembered_threads(void)
+  XFORM_SKIP_PROC
 {
   Scheme_Thread_Memory *tm;
 
@@ -1258,10 +1249,6 @@ void scheme_resume_remembered_threads(void)
     ResumeThread((HANDLE)tm->handle);
   }
 }
-
-#ifdef MZ_XFORM
-END_XFORM_SKIP;
-#endif
 
 #endif
 
@@ -3901,7 +3888,6 @@ scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[
       return NULL;
     } else {
       regfile = S_ISREG(buf.st_mode);
-      scheme_file_open_count++;
       result = make_fd_input_port(fd, scheme_make_path(filename), regfile, 0, NULL, internal);
     }
   }
@@ -3941,7 +3927,6 @@ scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[
     filename_exn(name, "cannot open input file", filename, errno);
     return NULL;
   }
-  scheme_file_open_count++;
 
   result = scheme_make_named_file_input_port(fp, scheme_make_path(filename));
 # endif
@@ -4132,7 +4117,6 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
   } while ((ok == -1) && (errno == EINTR));
 
   regfile = S_ISREG(buf.st_mode);
-  scheme_file_open_count++;
   return make_fd_output_port(fd, scheme_make_path(filename), regfile, 0, and_read, -1);
 #else
 # ifdef WINDOWS_FILE_HANDLES
@@ -4218,7 +4202,6 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
       SetEndOfFile(fd);
   }
 
-  scheme_file_open_count++;
   return make_fd_output_port((int)fd, scheme_make_path(filename), regfile, mode[1] == 't', and_read, -1);
 # else
   if (scheme_directory_exists(filename)) {
@@ -4278,7 +4261,6 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
     if (!fp)
       filename_exn(name, "cannot open output file", filename, errno);
   }
-  scheme_file_open_count++;
 
   return scheme_make_file_output_port(fp);
 # endif
@@ -4740,7 +4722,6 @@ file_close_input(Scheme_Input_Port *port)
   fip = (Scheme_Input_File *)port->port_data;
 
   fclose(fip->f);
-  --scheme_file_open_count;
 }
 
 static void
@@ -5271,7 +5252,6 @@ fd_close_input(Scheme_Input_Port *port)
     rc = dec_refcount(fip->refcount);
     if (!rc) {
       CloseHandle((HANDLE)fip->fd);
-      --scheme_file_open_count;
     }
   }
 #else
@@ -5283,7 +5263,6 @@ fd_close_input(Scheme_Input_Port *port)
      do {
        cr = close(fip->fd);
      } while ((cr == -1) && (errno == EINTR));
-     --scheme_file_open_count;
    }
  }
 #endif
@@ -5442,11 +5421,8 @@ make_fd_input_port(int fd, Scheme_Object *name, int regfile, int win_textmode, i
 
 # ifdef WINDOWS_FILE_HANDLES
 
-#ifdef MZ_XFORM
-START_XFORM_SKIP;
-#endif
-
 static long WindowsFDReader(Win_FD_Input_Thread *th)
+  XFORM_SKIP_PROC
 {
   DWORD toget, got;
   int perma_eof = 0;
@@ -5502,6 +5478,7 @@ static long WindowsFDReader(Win_FD_Input_Thread *th)
 }
 
 static void WindowsFDICleanup(Win_FD_Input_Thread *th)
+  XFORM_SKIP_PROC
 {
   int rc;
 
@@ -5515,10 +5492,6 @@ static void WindowsFDICleanup(Win_FD_Input_Thread *th)
   free(th->buffer);
   free(th);
 }
-
-#ifdef MZ_XFORM
-END_XFORM_SKIP;
-#endif
 
 # endif
 
@@ -5796,7 +5769,6 @@ file_close_output(Scheme_Output_Port *port)
   FILE *fp = fop->f;
 
   fclose(fp);
-  --scheme_file_open_count;
 }
 
 Scheme_Object *
@@ -6533,7 +6505,6 @@ fd_close_output(Scheme_Output_Port *port)
     rc = dec_refcount(fop->refcount);
     if (!rc) {
       CloseHandle((HANDLE)fop->fd);
-      --scheme_file_open_count;
     }
   }
 #else
@@ -6546,7 +6517,6 @@ fd_close_output(Scheme_Output_Port *port)
      do {
        cr = close(fop->fd);
      } while ((cr == -1) && (errno == EINTR));
-     --scheme_file_open_count;
    }
  }
 #endif
@@ -6649,11 +6619,8 @@ static void flush_if_output_fds(Scheme_Object *o, Scheme_Close_Custodian_Client 
 
 #ifdef WINDOWS_FILE_HANDLES
 
-#ifdef MZ_XFORM
-START_XFORM_SKIP;
-#endif
-
 static long WindowsFDWriter(Win_FD_Output_Thread *oth)
+  XFORM_SKIP_PROC
 {
   DWORD towrite, wrote, start;
   int ok, more_work = 0, err_no;
@@ -6717,6 +6684,7 @@ static long WindowsFDWriter(Win_FD_Output_Thread *oth)
 }
 
 static void WindowsFDOCleanup(Win_FD_Output_Thread *oth)
+  XFORM_SKIP_PROC
 {
   int rc;
 
@@ -6731,10 +6699,6 @@ static void WindowsFDOCleanup(Win_FD_Output_Thread *oth)
     free(oth->buffer);
   free(oth);
 }
-
-#ifdef MZ_XFORM
-END_XFORM_SKIP;
-#endif
 
 #endif
 
@@ -6817,7 +6781,7 @@ static int MyPipe(int *ph, int near_index) {
 
 /**************** Unix: signal stuff ******************/
 
-#if defined(UNIX_PROCESSES)
+#if defined(UNIX_PROCESSES) && !(defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC))
 
 # define WAITANY(s) waitpid((pid_t)-1, s, WNOHANG)
 
@@ -6827,12 +6791,10 @@ static int MyPipe(int *ph, int near_index) {
 
 static int need_to_check_children;
 
-#ifdef MZ_XFORM
-START_XFORM_SKIP;
-#endif
-
 void scheme_block_child_signals(int block)
+  XFORM_SKIP_PROC
 {
+#if !(defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC))
   sigset_t sigs;
 
   sigemptyset(&sigs);
@@ -6841,9 +6803,11 @@ void scheme_block_child_signals(int block)
   sigaddset(&sigs, SIGPROF);
 #endif
   sigprocmask(block ? SIG_BLOCK : SIG_UNBLOCK, &sigs, NULL);
+#endif
 }
 
 static void child_done(int ingored)
+  XFORM_SKIP_PROC
 {
   need_to_check_children = 1;
   scheme_signal_received();
@@ -6853,14 +6817,11 @@ static void child_done(int ingored)
 # endif
 }
 
-#ifdef MZ_XFORM
-END_XFORM_SKIP;
-#endif
-
 static int sigchld_installed = 0;
 
 static void init_sigchld(void)
 {
+#if !(defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC))
   if (!sigchld_installed) {
     /* Catch child-done signals */
     START_XFORM_SKIP;
@@ -6869,6 +6830,7 @@ static void init_sigchld(void)
 
     sigchld_installed = 1;
   }
+#endif
 }
 
 static void check_child_done()
@@ -7109,24 +7071,47 @@ scheme_make_redirect_output_port(Scheme_Object *port)
 
 #if defined(UNIX_PROCESSES) || defined(WINDOWS_PROCESSES)
 
-static int subp_done(Scheme_Object *sp)
+static int subp_done(Scheme_Object *so)
 {
-  void *sci = ((Scheme_Subprocess *)sp)->handle;
+  Scheme_Subprocess *sp;
+  sp = (Scheme_Subprocess*) so;
 
 #if defined(UNIX_PROCESSES)
-  System_Child *sc = (System_Child *)sci;
-  check_child_done();
-  return sc->done;
-#endif
-#ifdef WINDOWS_PROCESSES
-  DWORD w;
-  if (sci) {
-    if (GetExitCodeProcess((HANDLE)sci, &w))
-      return w != STILL_ACTIVE;
+# if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
+  {
+    int status;
+    if(! sp->done) {
+      if(scheme_get_child_status(((Scheme_Subprocess *)sp)->pid, &status)) {
+        sp->done = 1;
+        sp->status = status;
+        return 1;
+      }
+      return 0;
+    }
     else
       return 1;
-  } else
-    return 1;
+  }
+# else
+  {
+    System_Child *sc;
+    sc = ((System_Child *) ((Scheme_Subprocess *)sp)->handle);
+    check_child_done();
+    return sc->done;
+  }
+# endif
+#endif
+#ifdef WINDOWS_PROCESSES
+  {
+    HANDLE sci = (HANDLE) ((Scheme_Subprocess *)sp)->handle;
+    DWORD w;
+    if (sci) {
+      if (GetExitCodeProcess(sci, &w))
+        return w != STILL_ACTIVE;
+      else
+        return 1;
+    } else
+      return 1;
+  }
 #endif
 }
 
@@ -7152,14 +7137,23 @@ static Scheme_Object *subprocess_status(int argc, Scheme_Object **argv)
     int going = 0, status = MZ_FAILURE_STATUS;
 
 #if defined(UNIX_PROCESSES)
-    System_Child *sc = (System_Child *)sp->handle;
-
-    check_child_done();
-
-    if (sc->done)
-      status = sc->status;
-    else
+# if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
+  if (sp->done)
+    status = sp->status;
+  else {
+    if(!scheme_get_child_status(((Scheme_Subprocess *)sp)->pid, &status)) {
       going = 1;
+    }
+  }
+# else
+  System_Child *sc = (System_Child *)sp->handle;
+  check_child_done();
+
+  if (sc->done)
+    status = sc->status;
+  else
+   going = 1;
+# endif
 #else
 # ifdef WINDOWS_PROCESSES
     DWORD w;
@@ -7225,23 +7219,34 @@ static Scheme_Object *subprocess_kill(int argc, Scheme_Object **argv)
     Scheme_Subprocess *sp = (Scheme_Subprocess *)argv[0];
 
 #if defined(UNIX_PROCESSES)
-    {
-      System_Child *sc = (System_Child *)sp->handle;
-
-      check_child_done();
-
-      while (1) {
-	if (sc->done)
-	  return scheme_void;
-
-	if (!kill(sp->pid, SCHEME_TRUEP(argv[1]) ? SIGKILL : SIGINT))
-	  return scheme_void;
-
-	if (errno != EINTR)
-	  break;
-	/* Otherwise we were interrupted. Try `kill' again. */
-      }
+# if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
+  {
+    int status;
+    if (sp->done)
+      return scheme_void;
+    if(scheme_get_child_status(sp->pid, &status)) {
+	   return scheme_void;
     }
+  }
+# else
+  {
+    System_Child *sc = (System_Child *)sp->handle;
+
+    check_child_done();
+    if (sc->done)
+      return scheme_void;
+  }
+# endif
+
+  while (1) {
+
+    if (!kill(sp->pid, SCHEME_TRUEP(argv[1]) ? SIGKILL : SIGINT))
+      return scheme_void;
+
+    if (errno != EINTR)
+      break;
+    /* Otherwise we were interrupted. Try `kill' again. */
+  }
 #else
     if (SCHEME_TRUEP(argv[1])) {
       DWORD w;
@@ -7405,6 +7410,16 @@ static long mz_spawnv(char *command, const char * const *argv,
 static void close_subprocess_handle(void *sp, void *ignored)
 {
   Scheme_Subprocess *subproc = (Scheme_Subprocess *)sp;
+  #if defined(MZ_USE_PLACES) && defined (MZ_PRECISE_GC)
+  {
+    int status;
+    int pid = ((Scheme_Subprocess *)sp)->pid;
+    scheme_get_child_status(pid, &status)
+    /* printf("close_subprocess_handle pid %i status %i\n", pid status); */
+
+  }
+  #endif
+
   CloseHandle(subproc->handle);
 }
 
@@ -7423,7 +7438,9 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
   char **argv;
   Scheme_Object *in, *out, *err;
 #if defined(UNIX_PROCESSES)
+# if !(defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC))
   System_Child *sc;
+# endif
   int fork_errno = 0;
 #else
   void *sc = 0;
@@ -7645,6 +7662,7 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
   /*--------------------------------------*/
 
   {
+#if !(defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC))
     init_sigchld();
 
     sc = MALLOC_ONE_RT(System_Child);
@@ -7655,13 +7673,25 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
     sc->done = 0;
 
     scheme_block_child_signals(1);
+#endif
 
     pid = fork();
 
     if (pid > 0) {
+#if defined(MZ_USE_PLACES) && defined (MZ_PRECISE_GC)
+      {
+        int *signal_fd;
+        int status;
+        signal_fd = scheme_get_signal_handle();
+        scheme_places_register_child(pid, signal_fd, &status);
+
+        /* printf("SUBPROCESS  %i\n", pid); */
+      }
+#else
       sc->next = scheme_system_children;
       scheme_system_children = sc;
       sc->id = pid;
+#endif
     } else if (!pid) {
 #ifdef USE_ITIMER
       /* Turn off the timer. */
@@ -7695,7 +7725,9 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
       fork_errno = errno;
     }
 
+#if !(defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC))
     scheme_block_child_signals(0);
+#endif
   }
 
   switch (pid)
@@ -7813,19 +7845,16 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
   if (!inport) {
     mzCLOSE_PIPE_END(to_subprocess[0]);
     out = NULL;
-    scheme_file_open_count += 1;
   } else
     out = scheme_false;
   if (!outport) {
     mzCLOSE_PIPE_END(from_subprocess[1]);
     in = NULL;
-    scheme_file_open_count += 1;
   } else
     in = scheme_false;
   if (!errport) {
     mzCLOSE_PIPE_END(err_subprocess[1]);
     err = NULL;
-    scheme_file_open_count += 1;
   } else
     err = scheme_false;
 
@@ -7843,7 +7872,9 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
 
   subproc = MALLOC_ONE_TAGGED(Scheme_Subprocess);
   subproc->so.type = scheme_subprocess_type;
+#if !(defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC))
   subproc->handle = (void *)sc;
+#endif
   subproc->pid = pid;
 # if defined(WINDOWS_PROCESSES)
   scheme_add_finalizer(subproc, close_subprocess_handle, NULL);
@@ -8045,10 +8076,6 @@ static Scheme_Object *sch_shell_execute(int c, Scheme_Object *argv[])
 /* We don't want on-demand loading of code to fail because we run out of
    file descriptors. So, keep one in reserve. */
 
-#ifdef USE_FD_PORTS
-static int fd_reserved, the_fd;
-#endif
-
 void scheme_reserve_file_descriptor(void)
 {
 #ifdef USE_FD_PORTS
@@ -8115,16 +8142,12 @@ void scheme_notify_sleep_progress()
 /******************** Main sleep function  *****************/
 /* The simple select() stuff is buried in Windows complexity. */
 
+static void default_sleep(float v, void *fds)
+#ifdef OS_X
+  XFORM_SKIP_PROC
+#endif
 /* This sleep function is not allowed to allocate in OS X, because it
    is called in a non-main thread. */
-
-#ifdef OS_X
-# ifdef MZ_XFORM
-START_XFORM_SKIP;
-# endif
-#endif
-
-static void default_sleep(float v, void *fds)
 {
   /* REMEMBER: don't allocate in this function (at least not GCable
      memory) for OS X. Not that FD setups are ok, because they use
@@ -8359,35 +8382,43 @@ static void default_sleep(float v, void *fds)
 #endif
 }
 
-#ifdef OS_X
-# ifdef MZ_XFORM
-END_XFORM_SKIP;
-# endif
-#endif
-
-#ifdef MZ_XFORM
-START_XFORM_SKIP;
-#endif
-
-void scheme_signal_received(void)
+void scheme_signal_received_at(void *h)
+  XFORM_SKIP_PROC
 /* Ensure that MzScheme wakes up if asleep. */
 {
 #if defined(FILES_HAVE_FDS)
-  if (put_external_event_fd) {
+  int put_ext_event_fd = *(int *)h;
+  if (put_ext_event_fd) {
     int v;
     do {
-      v = write(put_external_event_fd, "!", 1);
+      v = write(put_ext_event_fd, "!", 1);
     } while ((v == -1) && (errno == EINTR));
   }
 #endif
 #if defined(WINDOWS_PROCESSES) || defined(WINDOWS_FILE_HANDLES)
-  ReleaseSemaphore(scheme_break_semaphore, 1, NULL);
+  ReleaseSemaphore(*(OS_SEMAPHORE_TYPE *)h, 1, NULL);
 #endif
 }
 
-#ifdef MZ_XFORM
-END_XFORM_SKIP;
+void *scheme_get_signal_handle()
+  XFORM_SKIP_PROC
+{
+#if defined(FILES_HAVE_FDS)
+  return &put_external_event_fd;
+#else
+# if defined(WINDOWS_PROCESSES) || defined(WINDOWS_FILE_HANDLES)
+  return &scheme_break_semaphore;
+# else
+  return NULL;
+# endif
 #endif
+}
+
+void scheme_signal_received(void)
+  XFORM_SKIP_PROC
+{
+  scheme_signal_received_at(scheme_get_signal_handle());
+}
 
 int scheme_get_external_event_fd(void)
 {
@@ -8404,11 +8435,8 @@ static HANDLE itimer;
 static OS_SEMAPHORE_TYPE itimer_semaphore;
 static long itimer_delay;
 
-#ifdef MZ_XFORM
-START_XFORM_SKIP;
-#endif
-
 static long ITimer(void)
+  XFORM_SKIP_PROC
 {
   WaitForSingleObject(itimer_semaphore, INFINITE);
 
@@ -8420,10 +8448,6 @@ static long ITimer(void)
     }
   }
 }
-
-#ifdef MZ_XFORM
-END_XFORM_SKIP;
-#endif
 
 static void scheme_start_itimer_thread(long usec)
 {
@@ -8456,16 +8480,15 @@ typedef struct ITimer_Data {
   volatile unsigned long * jit_stack_boundary_ptr;
 } ITimer_Data;
 
-static THREAD_LOCAL ITimer_Data itimerdata;
-
-#ifdef MZ_XFORM
-START_XFORM_SKIP;
-#endif
+THREAD_LOCAL_DECL(static ITimer_Data *itimerdata);
 
 static void *green_thread_timer(void *data)
+  XFORM_SKIP_PROC
 {
   ITimer_Data *itimer_data;
   itimer_data = (ITimer_Data *)data;
+
+  scheme_init_os_thread();
   
   while (1) {
     if (itimer_data->die) {
@@ -8489,58 +8512,63 @@ static void *green_thread_timer(void *data)
   return NULL;
 }
 
-#ifdef MZ_XFORM
-END_XFORM_SKIP;
-#endif
-
-static void start_green_thread_timer(long usec) {
-  itimerdata.die = 0;
-  itimerdata.delay = usec;
-  itimerdata.fuel_counter_ptr = &scheme_fuel_counter;
-  itimerdata.jit_stack_boundary_ptr = &scheme_jit_stack_boundary;
-  pthread_mutex_init(&itimerdata.mutex, NULL);
-  pthread_cond_init(&itimerdata.cond, NULL);
-  pthread_create(&itimerdata.thread, NULL, green_thread_timer, &itimerdata);
-  itimerdata.itimer = 1;
+static void start_green_thread_timer(long usec) 
+{
+  itimerdata->die = 0;
+  itimerdata->delay = usec;
+  itimerdata->fuel_counter_ptr = &scheme_fuel_counter;
+  itimerdata->jit_stack_boundary_ptr = &scheme_jit_stack_boundary;
+  pthread_mutex_init(&itimerdata->mutex, NULL);
+  pthread_cond_init(&itimerdata->cond, NULL);
+  pthread_create(&itimerdata->thread, NULL, green_thread_timer, itimerdata);
+  itimerdata->itimer = 1;
 }
 
-void kill_green_thread_timer() {
-    void *rc;
-    pthread_mutex_lock(&itimerdata.mutex);
-    itimerdata.die = 1;
-    if (!itimerdata.state) {
-      /* itimer thread is currently running working */
-    } else if (itimerdata.state < 0) {
-      /* itimer thread is waiting on cond */
-      pthread_cond_signal(&itimerdata.cond);
-    } else {
-      /* itimer thread is working, and we've already
-         asked it to continue */
-    }
-    pthread_mutex_unlock(&itimerdata.mutex);
-    pthread_join(itimerdata.thread, &rc);
+static void kill_green_thread_timer() 
+{
+  void *rc;
+  pthread_mutex_lock(&itimerdata->mutex);
+  itimerdata->die = 1;
+  if (!itimerdata->state) {
+    /* itimer thread is currently running working */
+  } else if (itimerdata->state < 0) {
+    /* itimer thread is waiting on cond */
+    pthread_cond_signal(&itimerdata->cond);
+  } else {
+    /* itimer thread is working, and we've already
+       asked it to continue */
+  }
+  pthread_mutex_unlock(&itimerdata->mutex);
+  pthread_join(itimerdata->thread, &rc);
+  itimerdata = NULL;
 }
 
-static void kickoff_green_thread_timer(long usec) {
-    pthread_mutex_lock(&itimerdata.mutex);
-    itimerdata.delay = usec;
-    if (!itimerdata.state) {
-      /* itimer thread is currently running working */
-      itimerdata.state = 1;
-    } else if (itimerdata.state < 0) {
-      /* itimer thread is waiting on cond */
-      itimerdata.state = 0;
-      pthread_cond_signal(&itimerdata.cond);
-    } else {
-      /* itimer thread is working, and we've already
-         asked it to continue */
-    }
-    pthread_mutex_unlock(&itimerdata.mutex);
+static void kickoff_green_thread_timer(long usec) 
+{
+  pthread_mutex_lock(&itimerdata->mutex);
+  itimerdata->delay = usec;
+  if (!itimerdata->state) {
+    /* itimer thread is currently running working */
+    itimerdata->state = 1;
+  } else if (itimerdata->state < 0) {
+    /* itimer thread is waiting on cond */
+    itimerdata->state = 0;
+    pthread_cond_signal(&itimerdata->cond);
+  } else {
+    /* itimer thread is working, and we've already
+       asked it to continue */
+  }
+  pthread_mutex_unlock(&itimerdata->mutex);
 }
 
 static void scheme_start_itimer_thread(long usec)
 {
-  if (!itimerdata.itimer) {
+  if (!itimerdata) {
+    itimerdata = (ITimer_Data *)malloc(sizeof(ITimer_Data));
+    memset(itimerdata, 0, sizeof(ITimer_Data));
+  }
+
+  if (!itimerdata->itimer) {
     start_green_thread_timer(usec);
   } else {
     kickoff_green_thread_timer(usec);
@@ -8551,11 +8579,8 @@ static void scheme_start_itimer_thread(long usec)
 
 #ifdef USE_ITIMER
 
-#ifdef MZ_XFORM
-START_XFORM_SKIP;
-#endif
-
 static void itimer_expired(int ignored)
+  XFORM_SKIP_PROC
 {
   scheme_fuel_counter = 0;
   scheme_jit_stack_boundary = (unsigned long)-1;
@@ -8564,7 +8589,9 @@ static void itimer_expired(int ignored)
 #  endif
 }
 
-static void kickoff_itimer(long usec) {
+static void kickoff_itimer(long usec) 
+  XFORM_SKIP_PROC
+{
   struct itimerval t;
   struct itimerval old;
   static int itimer_handler_installed = 0;
@@ -8582,10 +8609,6 @@ static void kickoff_itimer(long usec) {
   setitimer(ITIMER_PROF, &t, &old);
 }
 
-#ifdef MZ_XFORM
-END_XFORM_SKIP;
-#endif
-
 #endif
 
 void scheme_kickoff_green_thread_time_slice_timer(long usec) {
@@ -8595,6 +8618,13 @@ void scheme_kickoff_green_thread_time_slice_timer(long usec) {
   scheme_start_itimer_thread(usec);
 #elif defined(USE_PTHREAD_THREAD_TIMER)
   scheme_start_itimer_thread(usec);
+#endif
+}
+
+void scheme_kill_green_thread_timer()
+{
+#if defined(USE_PTHREAD_THREAD_TIMER)
+  kill_green_thread_timer();
 #endif
 }
 
@@ -8650,6 +8680,7 @@ static void (*sleep_sleep)(float seconds, void *fds);
 
 static void *do_watch()
 {
+  scheme_init_os_thread();
   while (1) {
     pt_sema_wait(&sleeping_sema);
 
@@ -8813,7 +8844,7 @@ static void register_traversers(void)
   GC_REG_TRAV(scheme_rt_input_fd, mark_input_fd);
 #endif
 
-#if defined(UNIX_PROCESSES)
+#if defined(UNIX_PROCESSES) && !(defined(MZ_USE_PLACES) && defined (MZ_PRECISE_GC))
   GC_REG_TRAV(scheme_rt_system_child, mark_system_child);
 #endif
 

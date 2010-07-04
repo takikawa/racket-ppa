@@ -78,6 +78,9 @@
 	(hash-table-put! used-symbols (string->symbol "GC_get_variable_stack") 1)
 	(hash-table-put! used-symbols (string->symbol "GC_set_variable_stack") 1)
         (hash-table-put! used-symbols (string->symbol "memset") 1)
+	(hash-table-put! used-symbols (string->symbol "scheme_thread_local_key") 1)
+	(hash-table-put! used-symbols (string->symbol "scheme_thread_locals") 1)
+	(hash-table-put! used-symbols (string->symbol "pthread_getspecific") 1)
         
         ;; For dependency tracking:
         (define depends-files (make-hash-table 'equal))
@@ -582,10 +585,22 @@
         ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         
         (define per-block-push? #t)
-        (define gc-var-stack-through-table?
+        (define gc-var-stack-mode
           (ormap (lambda (e)
-                   (and (pragma? e)
-                        (regexp-match #rx"GC_VARIABLE_STACK_THOUGH_TABLE" (pragma-s e))))
+                   (cond
+                    [(and (pragma? e)
+                          (regexp-match #rx"GC_VARIABLE_STACK_THOUGH_TABLE" (pragma-s e)))
+                     'table]
+                    [(and (tok? e)
+                          (eq? (tok-n e) 'XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL))
+                     'thread-local]
+                    [(and (tok? e)
+                          (eq? (tok-n e) 'XFORM_GC_VARIABLE_STACK_THROUGH_GETSPECIFIC))
+                     'getspecific]
+                    [(and (tok? e)
+                          (eq? (tok-n e) 'XFORM_GC_VARIABLE_STACK_THROUGH_FUNCTION))
+                     'function]
+                    [else #f]))
                  e-raw))
         
         ;; The code produced by xform uses a number of macros. These macros
@@ -595,9 +610,16 @@
         
         (when (and pgc? (not precompiled-header))
           ;; Setup GC_variable_stack macro
-          (printf (if gc-var-stack-through-table?
-                      "#define GC_VARIABLE_STACK (scheme_extension_table->GC_variable_stack)~n"
-                      "#define GC_VARIABLE_STACK GC_variable_stack~n"))
+          (printf (case gc-var-stack-mode
+                   [(table)
+                    "#define GC_VARIABLE_STACK (scheme_extension_table->GC_variable_stack)~n"]
+                   [(getspecific)
+                    "#define GC_VARIABLE_STACK (((Thread_Local_Variables *)pthread_getspecific(scheme_thread_local_key))->GC_variable_stack_)~n"]
+                   [(function)
+                    "#define GC_VARIABLE_STACK ((scheme_get_thread_local_variables())->GC_variable_stack_)~n"]
+                   [(thread-local)
+                    "#define GC_VARIABLE_STACK ((&scheme_thread_locals)->GC_variable_stack_)~n"]
+                   [else "#define GC_VARIABLE_STACK GC_variable_stack~n"]))
 
           (if gc-variable-stack-through-funcs?
 	      (begin
@@ -708,13 +730,15 @@
           (printf "#define XFORM_END_SKIP /**/~n")
           (printf "#define XFORM_START_SUSPEND /**/~n")
           (printf "#define XFORM_END_SUSPEND /**/~n")
+          (printf "#define XFORM_SKIP_PROC /**/~n")
           ;; For avoiding warnings:
           (printf "#define XFORM_OK_PLUS +~n")
           (printf "#define XFORM_OK_MINUS -~n")
           (printf "#define XFORM_TRUST_PLUS +~n")
           (printf "#define XFORM_TRUST_MINUS -~n")
+          (printf "#define XFORM_OK_ASSIGN /**/~n")
           (printf "~n")
-          
+
           ;; C++ cupport:
           (printf "#define NEW_OBJ(t) new (UseGC) t~n")
           (printf "#define NEW_ARRAY(t, array) (new (UseGC) t array)~n")
@@ -830,13 +854,14 @@
                \| \|\| & && |:| ? % + - * / ^ >> << ~ 
                #csXFORM_OK_PLUS #csXFORM_OK_MINUS #csXFORM_TRUST_PLUS #csXFORM_TRUST_MINUS 
                = >>= <<= ^= += *= /= -= %= \|= &= ++ --
-               return if for while else switch case
+               return if for while else switch case XFORM_OK_ASSIGN
                asm __asm __asm__ __volatile __volatile__ volatile __extension__
                __typeof sizeof __builtin_object_size
 
                ;; These don't act like functions:
                setjmp longjmp _longjmp scheme_longjmp_setjmp scheme_mz_longjmp scheme_jit_longjmp
                scheme_jit_setjmp_prepare
+               scheme_get_thread_local_variables pthread_getspecific
 
                ;; The following are functions, but they don't trigger GC, and
                ;; they either take one argument or no pointer arguments.
@@ -845,7 +870,7 @@
                strlen cos sin exp pow log sqrt atan2 
                isnan isinf fpclass _fpclass _isnan __isfinited __isnanl __isnan
                __isinff __isinfl isnanf isinff __isinfd __isnanf __isnand __isinf
-               floor ceil round fmod fabs __maskrune _errno __errno
+               floor ceil round fmod modf fabs __maskrune _errno __errno
                isalpha isdigit isspace tolower toupper
                fread fwrite socket fcntl setsockopt connect send recv close
                __builtin_next_arg __builtin_saveregs 
@@ -1053,7 +1078,9 @@
                 (set! non-pointer-types (list-ref l 5))
                 (set! struct-defs (list-ref l 6))
                 
-                (set! non-gcing-functions (hash-table-copy (list-ref l 7)))))))
+                (set! non-gcing-functions (hash-table-copy (list-ref l 7)))
+
+                (set! gc-var-stack-mode (list-ref l 8))))))
         
         ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ;; Pretty-printing output
@@ -1160,6 +1187,7 @@
                      (unless (regexp-match re:boring s)
                        (printf "\n~a\n\n" s)
                        (set! line (+ line 3))))]
+                  [(threadlocal-decl? v) (void)]
                   [(seq? v)
                    (display/indent v (tok-n v))
                    (let ([subindent (if (braces? v)
@@ -1406,6 +1434,9 @@
             [(start-arith? e)
              (set! check-arith? #t)
              null]
+
+            [(threadlocal-decl? e)
+             null]
             
             [(access-modifier? e)
              ;; public, private, etc.
@@ -1493,42 +1524,45 @@
                          e))))]
             [(function? e)
              (let ([name (register-proto-information e)])
-	       (when (eq? (tok-n (car e)) '__xform_nongcing__)
-		 (hash-table-put! non-gcing-functions name #t))
-               (when show-info? (printf "/* FUNCTION ~a */~n" name))
-               (if (or (positive? suspend-xform)
-                       (not pgc?)
-                       (and where 
-                            (regexp-match re:h where)
-                            (let loop ([e e][prev #f])
-                              (cond
-                                [(null? e) #t]
-                                [(and (eq? '|::| (tok-n (car e)))
-                                      prev
-                                      (eq? (tok-n prev) (tok-n (cadr e))))
-                                 ;; inline constructor: need to convert
-                                 #f]
-                                [else (loop (cdr e) (car e))]))))
-                   ;; Not pgc, xform suspended,
-                   ;; or still in headers and probably a simple inlined function
-                   (let ([palm-static? (and palm? (eq? 'static (tok-n (car e))))])
-                     (when palm?
-                       (fprintf map-port "(~aimpl ~s)~n" 
-                                (if palm-static? "s" "")
-                                name)
-                       (call-graph name e))
-                     (append
-                      (if palm-static?
-                          ;; Need to make sure prototype is there for section
-                          (add-segment-label
-                           name
-                           (let loop ([e e])
-                             (if (braces? (car e))
-                                 (list (make-tok semi #f #f))
-                                 (cons (car e) (loop (cdr e))))))
-                          null)
-                      e))
-                   (convert-function e name)))]
+               (when (eq? (tok-n (car e)) '__xform_nongcing__)
+                 (hash-table-put! non-gcing-functions name #t))
+               (if (skip-function? e)
+                   e
+                   (begin
+                     (when show-info? (printf "/* FUNCTION ~a */~n" name))
+                     (if (or (positive? suspend-xform)
+                             (not pgc?)
+                             (and where 
+                                  (regexp-match re:h where)
+                                  (let loop ([e e][prev #f])
+                                    (cond
+                                     [(null? e) #t]
+                                     [(and (eq? '|::| (tok-n (car e)))
+                                           prev
+                                           (eq? (tok-n prev) (tok-n (cadr e))))
+                                      ;; inline constructor: need to convert
+                                      #f]
+                                     [else (loop (cdr e) (car e))]))))
+                         ;; Not pgc, xform suspended,
+                         ;; or still in headers and probably a simple inlined function
+                         (let ([palm-static? (and palm? (eq? 'static (tok-n (car e))))])
+                           (when palm?
+                             (fprintf map-port "(~aimpl ~s)~n" 
+                                      (if palm-static? "s" "")
+                                      name)
+                             (call-graph name e))
+                           (append
+                            (if palm-static?
+                                ;; Need to make sure prototype is there for section
+                                (add-segment-label
+                                 name
+                                 (let loop ([e e])
+                                   (if (braces? (car e))
+                                       (list (make-tok semi #f #f))
+                                       (cons (car e) (loop (cdr e))))))
+                                null)
+                            e))
+                         (convert-function e name)))))]
             [(var-decl? e)
              (when show-info? (printf "/* VAR */~n"))
              (if (and can-drop-vars?
@@ -1580,6 +1614,12 @@
           (and (pair? e)
                (or (eq? END_XFORM_ARITH (tok-n (car e)))
                    (eq? 'XFORM_START_TRUST_ARITH (tok-n (car e))))))
+
+        (define (threadlocal-decl? e)
+          (and (pair? e)
+               (or (eq? 'XFORM_GC_VARIABLE_STACK_THROUGH_GETSPECIFIC (tok-n (car e)))
+                   (eq? 'XFORM_GC_VARIABLE_STACK_THROUGH_FUNCTION (tok-n (car e)))
+                   (eq? 'XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL (tok-n (car e))))))
         
         (define (access-modifier? e)
           (and (memq (tok-n (car e)) '(public private protected))
@@ -1673,12 +1713,16 @@
                      (and (braces? v)
                           (let ([v (list-ref e (sub1 ll))])
                             (or (parens? v)
+                                (eq? (tok-n v) 'XFORM_SKIP_PROC)
                                 ;; `const' can appear between the arg parens
                                 ;;  and the function body; this happens in the
                                 ;;  OS X headers
                                 (and (eq? 'const (tok-n v))
                                      (positive? (sub1 ll))
                                      (parens? (list-ref e (- ll 2))))))))))))
+
+        (define (skip-function? e)
+          (ormap (lambda (v) (eq? (tok-n v) 'XFORM_SKIP_PROC)) e))
         
         ;; Recognize a top-level variable declaration:
         (define (var-decl? e)
@@ -1907,6 +1951,7 @@
                                                          (and struct-array?
                                                               (struct-array-type-count (cdr base-is-ptr?))))])
                                     (when (and struct-array?
+                                               (not union-ok?)
                                                (> array-size 16))
                                       (log-error "[SIZE] ~a in ~a: Large array of structures at ~a."
                                                  (tok-line v) (tok-file v) name))
@@ -3553,7 +3598,10 @@
                                                               (and m
                                                                    (not (or (array-type? (cdr m))
                                                                             (struct-array-type? (cdr m)))))))))
-                                                  (not (symbol? (tok-n (car assignee)))))
+                                                  (and (not (symbol? (tok-n (car assignee))))
+                                                       ;; as below, ok if preceded by XFORM_OK_ASSIGN
+                                                       (or (not (pair? (cdr assignee)))
+                                                           (not (eq? (tok-n (cadr assignee)) 'XFORM_OK_ASSIGN)))))
                                               (and (symbol? (tok-n (car assignee)))
                                                    (not (null? (cdr assignee)))
                                                    ;; ok if name starts with "_stk_"
@@ -3565,6 +3613,8 @@
                                                              (pair? (cddr assignee))
                                                              (symbol? (tok-n (caddr assignee)))
                                                              (null? (cdddr assignee))))
+                                                   ;; ok if preceded by XFORM_OK_ASSIGN
+                                                   (not (eq? (tok-n (cadr assignee)) 'XFORM_OK_ASSIGN))
                                                    ;; ok if preceeding is `if', `until', etc.
                                                    (not (and (parens? (cadr assignee))
                                                              (pair? (cddr assignee))
@@ -3964,7 +4014,8 @@
                     (marshall pointer-types)
                     (marshall non-pointer-types)
                     (marshall struct-defs)
-		    non-gcing-functions)])
+		    non-gcing-functions
+                    (list 'quote gc-var-stack-mode))])
               (with-output-to-file (change-suffix file-out #".zo")
                 (lambda ()
                   (let ([orig (current-namespace)])

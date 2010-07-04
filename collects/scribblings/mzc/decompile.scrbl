@@ -72,17 +72,30 @@ Many forms in the decompiled code, such as @scheme[module],
  it may even contain cyclic references to itself or other constant
  closures.}
 
+ @item{A form @scheme[(#%apply-values _proc _expr)] is equivalent to
+ @scheme[(call-with-values (lambda () _expr) _proc)], but the run-time
+ system avoids allocating a closure for @scheme[_expr].}
+
  @item{Some applications of core primitives are annotated with
  @schemeidfont{#%in}, which indicates that the JIT compiler will
  inline the operation. (Inlining information is not part of the
  bytecode, but is instead based on an enumeration of primitives that
  the JIT is known to handle specially.) Operations from
- @schememodname[scheme/unsafe/ops] are always inlined, so
- @schemeidfont{#%in} is not shown for them.}
+ @schememodname[scheme/flonum] and @schememodname[scheme/unsafe/ops]
+ are always inlined, so @schemeidfont{#%in} is not shown for them.}
 
- @item{A form @scheme[(#%apply-values _proc _expr)] is equivalent to
- @scheme[(call-with-values (lambda () _expr) _proc)], but the run-time
- system avoids allocating a closure for @scheme[_expr].}
+ @item{Some applications of flonum operations from @schememodname[scheme/flonum] 
+ and @schememodname[scheme/unsafe/ops] are annotated with
+ @schemeidfont{#%flonum}, indicating a place where the JIT compiler
+ might avoid allocation for intermediate flonum results. A single
+ @schemeidfont{#%flonum} by itself is not useful, but a
+ @schemeidfont{#%flonum} operation that consumes a
+ @schemeidfont{#%flonum} or @schemeidfont{#%from-flonum} argument
+ indicates a potential performance improvement. A
+ @schemeidfont{#%from-flonum} wraps an identifier that is bound by
+ @scheme[let] with a @schemeidfont{#%as-flonum} around its value,
+ which indicates a local binding that can avoid boxing (when used as
+ an argument to an operation that can work with unboxed values).}
 
  @item{A @schemeidfont{#%decode-syntax} form corresponds to a syntax
  object. Future improvements to the decompiler will convert such

@@ -466,10 +466,12 @@
   (#%require '#%expobs
              (only '#%foreign)  ; so it's attached, but doesn't depend on any exports
              (only '#%unsafe)   ; ditto
+             (only '#%flfxnum)  ; ditto
              '#%paramz
              '#%network
              '#%utils
-             (only '#%place)))
+             (only '#%place)
+             (only '#%futures)))
 
 ;; ----------------------------------------
 ;; Handlers to install on startup

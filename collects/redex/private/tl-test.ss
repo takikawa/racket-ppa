@@ -261,7 +261,16 @@
       (term (f 1)))
     (test rhs-eval-count 2))
   
+  (define-namespace-anchor here)
+  (define ns (namespace-anchor->namespace here))
   
+  (let ([src 'bad-underscore])
+    (test 
+     (parameterize ([current-namespace ns])
+       (syntax-error-sources
+        '(define-language L (n m_1))
+        src))
+     (list src)))
   
 ;                                                                                             
 ;                                                                                             
@@ -1202,6 +1211,25 @@
                (fresh ((x ...) (variable_1 ...) (variable_1 ...)))))
          '(x y z))
         (list '(x1 y1 z1 x y z)))
+
+  (test (apply-reduction-relation 
+         (reduction-relation 
+          empty-language
+          (--> any (any_y x)
+               (where any_y x)
+               (fresh x)))
+         (term junk))
+        (list '(x x1)))
+  
+  (test (apply-reduction-relation 
+         (reduction-relation 
+          empty-language
+          (--> (variable ...) (variable_0 ... variable_1 ...)
+               (fresh ((variable_0 ...) (variable ...)))
+               (fresh ((variable_1 ...) (variable ...)))))
+         (term (x y)))
+        (list '(variable_0 variable_1 variable_2 variable_3)))
+
   
   ;; test that redex match can be used in a side-condition 
   ;; with the same language that is used to define the 

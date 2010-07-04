@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -43,12 +43,32 @@ static Scheme_Object *fx_lt (int argc, Scheme_Object *argv[]);
 static Scheme_Object *fx_gt (int argc, Scheme_Object *argv[]);
 static Scheme_Object *fx_lt_eq (int argc, Scheme_Object *argv[]);
 static Scheme_Object *fx_gt_eq (int argc, Scheme_Object *argv[]);
+static Scheme_Object *fx_min (int argc, Scheme_Object *argv[]);
+static Scheme_Object *fx_max (int argc, Scheme_Object *argv[]);
+
+static Scheme_Object *unsafe_fx_eq (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_fx_lt (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_fx_gt (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_fx_lt_eq (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_fx_gt_eq (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_fx_min (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_fx_max (int argc, Scheme_Object *argv[]);
 
 static Scheme_Object *fl_eq (int argc, Scheme_Object *argv[]);
 static Scheme_Object *fl_lt (int argc, Scheme_Object *argv[]);
 static Scheme_Object *fl_gt (int argc, Scheme_Object *argv[]);
 static Scheme_Object *fl_lt_eq (int argc, Scheme_Object *argv[]);
 static Scheme_Object *fl_gt_eq (int argc, Scheme_Object *argv[]);
+static Scheme_Object *fl_min (int argc, Scheme_Object *argv[]);
+static Scheme_Object *fl_max (int argc, Scheme_Object *argv[]);
+
+static Scheme_Object *unsafe_fl_eq (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_fl_lt (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_fl_gt (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_fl_lt_eq (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_fl_gt_eq (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_fl_min (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_fl_max (int argc, Scheme_Object *argv[]);
 
 #define zeroi scheme_exact_zero
 
@@ -57,23 +77,28 @@ void scheme_init_numcomp(Scheme_Env *env)
   Scheme_Object *p;
 
   p = scheme_make_folding_prim(eq, "=", 2, -1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_NARY_INLINED);
   scheme_add_global_constant("=", p, env);
 
   p = scheme_make_folding_prim(lt, "<", 2, -1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_BINARY_INLINED);
   scheme_add_global_constant("<", p, env);
 
   p = scheme_make_folding_prim(gt, ">", 2, -1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_NARY_INLINED);
   scheme_add_global_constant(">", p, env);
 
   p = scheme_make_folding_prim(lt_eq, "<=", 2, -1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_NARY_INLINED);
   scheme_add_global_constant("<=", p, env);
 
   p = scheme_make_folding_prim(gt_eq, ">=", 2, -1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_NARY_INLINED);
   scheme_add_global_constant(">=", p, env);
 
   p = scheme_make_folding_prim(zero_p, "zero?", 1, 1, 1);
@@ -89,72 +114,174 @@ void scheme_init_numcomp(Scheme_Env *env)
   scheme_add_global_constant("negative?", p, env);
 
   p = scheme_make_folding_prim(sch_max, "max", 1, -1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_NARY_INLINED);
   scheme_add_global_constant("max", p, env);
 
   p = scheme_make_folding_prim(sch_min, "min", 1, -1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_NARY_INLINED);
   scheme_add_global_constant("min", p, env);
+}
+
+void scheme_init_flfxnum_numcomp(Scheme_Env *env)
+{
+  Scheme_Object *p;
+
+  p = scheme_make_folding_prim(fx_eq, "fx=", 2, 2, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("fx=", p, env);
+
+  p = scheme_make_folding_prim(fx_lt, "fx<", 2, 2, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("fx<", p, env);
+
+  p = scheme_make_folding_prim(fx_gt, "fx>", 2, 2, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("fx>", p, env);
+
+  p = scheme_make_folding_prim(fx_lt_eq, "fx<=", 2, 2, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("fx<=", p, env);
+
+  p = scheme_make_folding_prim(fx_gt_eq, "fx>=", 2, 2, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("fx>=", p, env);
+
+  p = scheme_make_folding_prim(fx_min, "fxmin", 2, 2, 1);
+  if (scheme_can_inline_fp_comp())
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("fxmin", p, env);
+  
+  p = scheme_make_folding_prim(fx_max, "fxmax", 2, 2, 1);
+  if (scheme_can_inline_fp_comp())
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("fxmax", p, env);
+
+
+  p = scheme_make_folding_prim(fl_eq, "fl=", 2, 2, 1);
+  if (scheme_can_inline_fp_comp())
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("fl=", p, env);
+
+  p = scheme_make_folding_prim(fl_lt, "fl<", 2, 2, 1);
+  if (scheme_can_inline_fp_comp())
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("fl<", p, env);
+
+  p = scheme_make_folding_prim(fl_gt, "fl>", 2, 2, 1);
+  if (scheme_can_inline_fp_comp())
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("fl>", p, env);
+
+  p = scheme_make_folding_prim(fl_lt_eq, "fl<=", 2, 2, 1);
+  if (scheme_can_inline_fp_comp())
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("fl<=", p, env);
+
+  p = scheme_make_folding_prim(fl_gt_eq, "fl>=", 2, 2, 1);
+  if (scheme_can_inline_fp_comp())
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("fl>=", p, env);
+
+  p = scheme_make_folding_prim(fl_min, "flmin", 2, 2, 1);
+  if (scheme_can_inline_fp_op())
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("flmin", p, env);
+  
+  p = scheme_make_folding_prim(fl_max, "flmax", 2, 2, 1);
+  if (scheme_can_inline_fp_op())
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("flmax", p, env);
 }
 
 void scheme_init_unsafe_numcomp(Scheme_Env *env)
 {
   Scheme_Object *p;
 
-  p = scheme_make_folding_prim(fx_eq, "unsafe-fx=", 2, 2, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  p = scheme_make_folding_prim(unsafe_fx_eq, "unsafe-fx=", 2, 2, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
   scheme_add_global_constant("unsafe-fx=", p, env);
 
-  p = scheme_make_folding_prim(fx_lt, "unsafe-fx<", 2, 2, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  p = scheme_make_folding_prim(unsafe_fx_lt, "unsafe-fx<", 2, 2, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
   scheme_add_global_constant("unsafe-fx<", p, env);
 
-  p = scheme_make_folding_prim(fx_gt, "unsafe-fx>", 2, 2, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  p = scheme_make_folding_prim(unsafe_fx_gt, "unsafe-fx>", 2, 2, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
   scheme_add_global_constant("unsafe-fx>", p, env);
 
-  p = scheme_make_folding_prim(fx_lt_eq, "unsafe-fx<=", 2, 2, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  p = scheme_make_folding_prim(unsafe_fx_lt_eq, "unsafe-fx<=", 2, 2, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
   scheme_add_global_constant("unsafe-fx<=", p, env);
 
-  p = scheme_make_folding_prim(fx_gt_eq, "unsafe-fx>=", 2, 2, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  p = scheme_make_folding_prim(unsafe_fx_gt_eq, "unsafe-fx>=", 2, 2, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
   scheme_add_global_constant("unsafe-fx>=", p, env);
 
-  p = scheme_make_folding_prim(fl_eq, "unsafe-fl=", 2, 2, 1);
+  p = scheme_make_folding_prim(unsafe_fx_min, "unsafe-fxmin", 2, 2, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
+  scheme_add_global_constant("unsafe-fxmin", p, env);
+
+  p = scheme_make_folding_prim(unsafe_fx_max, "unsafe-fxmax", 2, 2, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
+  scheme_add_global_constant("unsafe-fxmax", p, env);
+
+  p = scheme_make_folding_prim(unsafe_fl_eq, "unsafe-fl=", 2, 2, 1);
   if (scheme_can_inline_fp_comp())
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL;
   scheme_add_global_constant("unsafe-fl=", p, env);
 
-  p = scheme_make_folding_prim(fl_lt, "unsafe-fl<", 2, 2, 1);
+  p = scheme_make_folding_prim(unsafe_fl_lt, "unsafe-fl<", 2, 2, 1);
   if (scheme_can_inline_fp_comp())
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL;
   scheme_add_global_constant("unsafe-fl<", p, env);
 
-  p = scheme_make_folding_prim(fl_gt, "unsafe-fl>", 2, 2, 1);
+  p = scheme_make_folding_prim(unsafe_fl_gt, "unsafe-fl>", 2, 2, 1);
   if (scheme_can_inline_fp_comp())
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL;
   scheme_add_global_constant("unsafe-fl>", p, env);
 
-  p = scheme_make_folding_prim(fl_lt_eq, "unsafe-fl<=", 2, 2, 1);
+  p = scheme_make_folding_prim(unsafe_fl_lt_eq, "unsafe-fl<=", 2, 2, 1);
   if (scheme_can_inline_fp_comp())
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL;
   scheme_add_global_constant("unsafe-fl<=", p, env);
 
-  p = scheme_make_folding_prim(fl_gt_eq, "unsafe-fl>=", 2, 2, 1);
+  p = scheme_make_folding_prim(unsafe_fl_gt_eq, "unsafe-fl>=", 2, 2, 1);
   if (scheme_can_inline_fp_comp())
     SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL;
   scheme_add_global_constant("unsafe-fl>=", p, env);
+
+  p = scheme_make_folding_prim(unsafe_fl_min, "unsafe-flmin", 2, 2, 1);
+  if (scheme_can_inline_fp_op())
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL;
+  scheme_add_global_constant("unsafe-flmin", p, env);
+  
+  p = scheme_make_folding_prim(unsafe_fl_max, "unsafe-flmax", 2, 2, 1);
+  if (scheme_can_inline_fp_op())
+    SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL;
+  scheme_add_global_constant("unsafe-flmax", p, env);
 }
 
 /* Prototype needed for 3m conversion: */
 static MZ_INLINE Scheme_Object *force_rat(Scheme_Object *n, Small_Rational *sr);
 
-#ifdef MZ_XFORM
-START_XFORM_SKIP;
-#endif
-
 static MZ_INLINE Scheme_Object *force_rat(Scheme_Object *n, Small_Rational *sr)
+  XFORM_SKIP_PROC
 {
   Scheme_Type t = SCHEME_TYPE(n);
   if (t == scheme_rational_type)
@@ -162,10 +289,6 @@ static MZ_INLINE Scheme_Object *force_rat(Scheme_Object *n, Small_Rational *sr)
   else
     return scheme_make_small_bn_rational(n, sr);
 }
-
-#ifdef MZ_XFORM
-END_XFORM_SKIP;
-#endif
 
 GEN_NARY_COMP(eq, "=", scheme_bin_eq, SCHEME_NUMBERP, "number")
 GEN_NARY_COMP(lt, "<", scheme_bin_lt, SCHEME_REALP, REAL_NUMBER_STR)
@@ -358,37 +481,93 @@ GEN_TWOARY_OP(static, sch_max, "max", bin_max, SCHEME_REALP, REAL_NUMBER_STR)
 GEN_TWOARY_OP(static, sch_min, "min", bin_min, SCHEME_REALP, REAL_NUMBER_STR)
 
 /************************************************************************/
-/*                               Unsafe                                 */
+/*                                Flfx                                  */
 /************************************************************************/
 
-#define UNSAFE_FX(name, op, fold)                            \
+#define SAFE_FX_X(name, s_name, op, T, F)                    \
+ static Scheme_Object *name(int argc, Scheme_Object *argv[]) \
+ {                                                           \
+   if (!SCHEME_INTP(argv[0])) scheme_wrong_type(s_name, "fixnum", 0, argc, argv); \
+   if (!SCHEME_INTP(argv[1])) scheme_wrong_type(s_name, "fixnum", 1, argc, argv); \
+   if (SCHEME_INT_VAL(argv[0]) op SCHEME_INT_VAL(argv[1]))   \
+     return T;                                               \
+   else                                                      \
+     return F;                                               \
+ }
+
+#define SAFE_FX(name, s_name, op) SAFE_FX_X(name, s_name, op, scheme_true, scheme_false)
+
+SAFE_FX(fx_eq, "fx=", ==)
+SAFE_FX(fx_lt, "fx<", <)
+SAFE_FX(fx_gt, "fx>", >)
+SAFE_FX(fx_lt_eq, "fx<=", <=)
+SAFE_FX(fx_gt_eq, "fx>=", >=)
+SAFE_FX_X(fx_min, "fxmin", <, argv[0], argv[1])
+SAFE_FX_X(fx_max, "fxmax", >, argv[0], argv[1])
+
+#define UNSAFE_FX_X(name, op, fold, T, F)                    \
  static Scheme_Object *name(int argc, Scheme_Object *argv[]) \
  {                                                           \
    if (scheme_current_thread->constant_folding) return (fold(argv[0], argv[1]) ? scheme_true : scheme_false); \
    if (SCHEME_INT_VAL(argv[0]) op SCHEME_INT_VAL(argv[1]))   \
-     return scheme_true;                                     \
+     return T;                                               \
    else                                                      \
-     return scheme_false;                                    \
+     return F;                                               \
  }
 
-UNSAFE_FX(fx_eq, ==, scheme_bin_eq)
-UNSAFE_FX(fx_lt, <, scheme_bin_lt)
-UNSAFE_FX(fx_gt, >, scheme_bin_gt)
-UNSAFE_FX(fx_lt_eq, <=, scheme_bin_lt_eq)
-UNSAFE_FX(fx_gt_eq, >=, scheme_bin_gt_eq)
+#define UNSAFE_FX(name, op, fold) UNSAFE_FX_X(name, op, fold, scheme_true, scheme_false)
 
-#define UNSAFE_FL(name, op, fold)                            \
+UNSAFE_FX(unsafe_fx_eq, ==, scheme_bin_eq)
+UNSAFE_FX(unsafe_fx_lt, <, scheme_bin_lt)
+UNSAFE_FX(unsafe_fx_gt, >, scheme_bin_gt)
+UNSAFE_FX(unsafe_fx_lt_eq, <=, scheme_bin_lt_eq)
+UNSAFE_FX(unsafe_fx_gt_eq, >=, scheme_bin_gt_eq)
+
+UNSAFE_FX_X(unsafe_fx_min, <, bin_min, argv[0], argv[1])
+UNSAFE_FX_X(unsafe_fx_max, >, bin_max, argv[0], argv[1])
+
+#define SAFE_FL_X(name, sname, op, T, F)                       \
+ static Scheme_Object *name(int argc, Scheme_Object *argv[]) \
+ {                                                           \
+   if (!SCHEME_FLOATP(argv[0])) scheme_wrong_type(sname, "inexact-real", 0, argc, argv); \
+   if (!SCHEME_FLOATP(argv[1])) scheme_wrong_type(sname, "inexact-real", 1, argc, argv); \
+   if (SCHEME_DBL_VAL(argv[0]) op SCHEME_DBL_VAL(argv[1]))   \
+     return T;                                               \
+   else                                                      \
+     return F;                                               \
+ }
+
+#define SAFE_FL(name, sname, op) SAFE_FL_X(name, sname, op, scheme_true, scheme_false)
+
+SAFE_FL(fl_eq, "fl=", ==)
+SAFE_FL(fl_lt, "fl<", <)
+SAFE_FL(fl_gt, "fl>", >)
+SAFE_FL(fl_lt_eq, "fl<=", <=)
+SAFE_FL(fl_gt_eq, "fl>=", >=)
+
+SAFE_FL_X(fl_min, "flmin", <, argv[0], argv[1])
+SAFE_FL_X(fl_max, "flmax", >, argv[0], argv[1])
+
+#define UNSAFE_FL_X(name, op, fold, T, F, PRE_CHECK)         \
  static Scheme_Object *name(int argc, Scheme_Object *argv[]) \
  {                                                           \
    if (scheme_current_thread->constant_folding) return (fold(argv[0], argv[1]) ? scheme_true : scheme_false); \
+   PRE_CHECK                                                 \
    if (SCHEME_DBL_VAL(argv[0]) op SCHEME_DBL_VAL(argv[1]))   \
-     return scheme_true;                                     \
+     return T;                                               \
    else                                                      \
-     return scheme_false;                                    \
+     return F;                                               \
  }
 
-UNSAFE_FL(fl_eq, ==, scheme_bin_eq)
-UNSAFE_FL(fl_lt, <, scheme_bin_lt)
-UNSAFE_FL(fl_gt, >, scheme_bin_gt)
-UNSAFE_FL(fl_lt_eq, <=, scheme_bin_lt_eq)
-UNSAFE_FL(fl_gt_eq, >=, scheme_bin_gt_eq)
+#define UNSAFE_FL(name, op, fold) UNSAFE_FL_X(name, op, fold, scheme_true, scheme_false, )
+
+UNSAFE_FL(unsafe_fl_eq, ==, scheme_bin_eq)
+UNSAFE_FL(unsafe_fl_lt, <, scheme_bin_lt)
+UNSAFE_FL(unsafe_fl_gt, >, scheme_bin_gt)
+UNSAFE_FL(unsafe_fl_lt_eq, <=, scheme_bin_lt_eq)
+UNSAFE_FL(unsafe_fl_gt_eq, >=, scheme_bin_gt_eq)
+
+#define CHECK_ARGV0_NAN if (MZ_IS_NAN(SCHEME_DBL_VAL(argv[0]))) return argv[0];
+
+UNSAFE_FL_X(unsafe_fl_min, <, bin_min, argv[0], argv[1], CHECK_ARGV0_NAN)
+UNSAFE_FL_X(unsafe_fl_max, >, bin_max, argv[0], argv[1], CHECK_ARGV0_NAN)

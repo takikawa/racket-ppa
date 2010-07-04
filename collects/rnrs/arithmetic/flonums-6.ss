@@ -5,49 +5,49 @@
                   div0-and-mod0 div0 mod0
                   [integer? r6rs:integer?]
                   finite? infinite? nan?)
+         (prefix-in core: scheme/flonum)
+         scheme/fixnum
          (only-in rnrs/arithmetic/fixnums-6
                   fixnum?)
          rnrs/conditions-6
-         r6rs/private/num-inline
-         (for-syntax r6rs/private/inline-rules))
+         r6rs/private/num-inline)
 
 (provide (rename-out [inexact-real? flonum?])
          real->flonum
          flnumerator
          fldenominator
-         fllog flsqrt flexpt
+         fllog (rename-out [core:flsqrt flsqrt]) flexpt
          &no-infinities make-no-infinities-violation no-infinities-violation?
-         &no-nans make-no-nans-violation no-nans-violation?
-         fixnum->flonum)
+         &no-nans make-no-nans-violation no-nans-violation?)
 ;; More provided via macros
 
 (define-inliner define-fl inexact-real? "flonum")
 
-(define-fl = fl=? (a b c ...) nocheck)
-(define-fl > fl>? (a b c ...) nocheck)
-(define-fl < fl<? (a b c ...) nocheck)
-(define-fl <= fl<=? (a b c ...) nocheck)
-(define-fl >= fl>=? (a b c ...) nocheck)
+(define-fl = fl=? core:fl= (a b c ...) nocheck)
+(define-fl > fl>? core:fl> (a b c ...) nocheck)
+(define-fl < fl<? core:fl< (a b c ...) nocheck)
+(define-fl <= fl<=? core:fl<= (a b c ...) nocheck)
+(define-fl >= fl>=? core:fl>= (a b c ...) nocheck)
 
-(define-fl integer? flinteger? (a) nocheck)
-(define-fl zero? flzero? (a) nocheck)
-(define-fl positive? flpositive? (a) nocheck)
-(define-fl negative? flnegative? (a) nocheck)
-(define-fl odd? flodd? (a) nocheck)
-(define-fl even? fleven? (a) nocheck)
-(define-fl finite? flfinite? (a) nocheck)
-(define-fl infinite? flinfinite? (a) nocheck)
-(define-fl nan? flnan? (a) nocheck)
+(define-fl integer? flinteger? #f (a) nocheck)
+(define-fl zero? flzero? #f (a) nocheck)
+(define-fl positive? flpositive? #f (a) nocheck)
+(define-fl negative? flnegative? #f (a) nocheck)
+(define-fl odd? flodd? #f (a) nocheck)
+(define-fl even? fleven? #f (a) nocheck)
+(define-fl finite? flfinite? #f (a) nocheck)
+(define-fl infinite? flinfinite? #f (a) nocheck)
+(define-fl nan? flnan? #f (a) nocheck)
 
-(define-fl max flmax (a b ...) nocheck)
-(define-fl min flmin (a b ...) nocheck)
+(define-fl max flmax core:flmax (a b ...) nocheck)
+(define-fl min flmin core:flmin (a b ...) nocheck)
 
-(define-fl + fl+ (a b ...) nocheck)
-(define-fl * fl* (a b ...) nocheck)
-(define-fl - fl- [(a) (a b ...)] nocheck)
-(define-fl / fl/ [(a) (a b ...)] nocheck)
+(define-fl + fl+ core:fl+ (a b ...) nocheck)
+(define-fl * fl* core:fl* (a b ...) nocheck)
+(define-fl - fl- core:fl- [(a) (a b ...)] nocheck)
+(define-fl / fl/ core:fl/ [(a) (a b ...)] nocheck)
 
-(define-fl abs flabs (a) nocheck)
+(define-fl abs flabs core:flabs (a) nocheck)
 
 (provide fldiv-and-mod
          fldiv0-and-mod0)
@@ -57,16 +57,16 @@
   (unless (inexact-real? b)
     (raise-type-error 'fldiv-and-mod "flonum" b))
   (div-and-mod a b))
-(define-fl div fldiv (a b) nocheck)
-(define-fl mod flmod (a b) nocheck)
+(define-fl div fldiv #f (a b) nocheck)
+(define-fl mod flmod #f (a b) nocheck)
 (define (fldiv0-and-mod0 a b)
   (unless (inexact-real? a)
     (raise-type-error 'fldiv0-and-mod0 "flonum" a))
   (unless (inexact-real? b)
     (raise-type-error 'fldiv0-and-mod0 "flonum" b))
   (div0-and-mod0 a b))
-(define-fl div0 fldiv0 (a b) nocheck)
-(define-fl mod0 flmod0 (a b) nocheck)
+(define-fl div0 fldiv0 #f (a b) nocheck)
+(define-fl mod0 flmod0 #f (a b) nocheck)
 
 (define (flnumerator c)
   (if (inexact-real? c)
@@ -83,39 +83,25 @@
           1.0)
       (raise-type-error 'fldenominator "flonum" c)))
 
-(define-fl floor flfloor (a) nocheck)
-(define-fl ceiling flceiling (a) nocheck)
-(define-fl truncate fltruncate (a) nocheck)
-(define-fl round flround (a) nocheck)
-
-(define-fl exp flexp (a) nocheck)
+(provide (rename-out [core:flfloor flfloor]
+                     [core:flceiling flceiling]
+                     [core:flround flround]
+                     [core:fltruncate fltruncate]
+                     [core:flexp flexp]))
 
 (define fllog
   (case-lambda
-   [(v) 
-    (unless (inexact-real? v)
-      (raise-type-error 'fllog "flonum" v))
-    (let ([v (log v)])
-      (if (inexact-real? v)
-          v
-          +nan.0))]
+   [(v) (core:fllog v)]
    [(v1 v2)
     (/ (fllog v1) (fllog v2))]))
 
-(define-fl sin flsin (a) nocheck)
-(define-fl cos flcos (a) nocheck)
-(define-fl tan fltan (a) nocheck)
-(define-fl asin flasin (a) nocheck)
-(define-fl acos flacos (a) nocheck)
-(define-fl atan flatan [(a) (a b)] nocheck)
+(provide (rename-out [core:flsin flsin]
+                     [core:flcos flcos]
+                     [core:fltan fltan]
+                     [core:flasin flasin]
+                     [core:flacos flacos]))
 
-(define (flsqrt v)
-  (unless (inexact-real? v)
-    (raise-type-error 'flsqrt "flonum" v))
-  (let ([v (sqrt v)])
-    (if (inexact-real? v)
-        v
-        +nan.0)))
+(define-fl atan flatan #f [(a) (a b)] nocheck)
 
 (define (flexpt a b)
   (unless (inexact-real? a)
@@ -141,7 +127,4 @@
     (raise-type-error 'real->flonum "real" r))
   (exact->inexact r))
 
-(define (fixnum->flonum fx)
-  (if (fixnum? fx)
-      (exact->inexact fx)
-      (raise-type-error 'fixnum->flonum "fixnum" fx)))
+(provide (rename-out [fx->fl fixnum->flonum]))

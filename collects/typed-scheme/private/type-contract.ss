@@ -57,7 +57,7 @@
         [(Mu: var (Union: (list (Value: '()) (Pair: elem-ty (F: var)))))
          #`(listof #,(t->c elem-ty))]
         [(? (lambda (e) (eq? t:Any-Syntax e))) #'syntax?]
-        [(Base: sym cnt) cnt]
+        [(Base: sym cnt) #`(flat-named-contract '#,sym (flat-contract-predicate #,cnt))]
         [(Refinement: par p? cert)
          #`(and/c #,(t->c par) (flat-contract #,(cert p?)))]
         [(Union: elems)         
@@ -70,25 +70,34 @@
         [(Function: arrs)
          (let ()           
            (define (f a)
-             (define-values (dom* rngs* rst)
+             (define-values (dom* opt-dom* rngs* rst)
                (match a
-                 [(arr: dom (Values: (list (Result: rngs (LFilterSet: '() '()) (LEmpty:)) ...)) rst #f '())
-                  (values (map t->c/neg dom) (map t->c rngs) (and rst (t->c/neg rst)))]
+                 [(arr: dom (Values: (list (Result: rngs (LFilterSet: '() '()) (LEmpty:)) ...)) rst #f kws)
+                  (let-values ([(mand-kws opt-kws) (partition (match-lambda [(Keyword: _ _ mand?) mand?]) kws)]
+                               [(conv) (match-lambda [(Keyword: kw kty _) (list kw (t->c/neg kty))])])
+                    (values (append (map t->c/neg dom) (append-map conv mand-kws))
+                            (append-map conv opt-kws)
+                            (map t->c rngs) 
+                            (and rst (t->c/neg rst))))]
                  [(arr: dom (Values: (list (Result: rngs _ _) ...)) rst #f '())
                   (if (and out? pos?)
-                      (values (map t->c/neg dom) (map t->c rngs) (and rst (t->c/neg rst)))
+                      (values (map t->c/neg dom)
+                              null
+                              (map t->c rngs)
+                              (and rst (t->c/neg rst)))
                       (exit (fail)))]
                  [_ (exit (fail))]))
              (trace f)
              (with-syntax 
                  ([(dom* ...) dom*]
+                  [(opt-dom* ...) opt-dom*]
                   [rng* (match rngs*
                           [(list r) r]
                           [_ #`(values #,@rngs*)])]
                   [rst* rst])
-               (if rst
-                   #'((dom* ...) () #:rest (listof rst*) . ->* . rng*)
-                   #'(dom* ...  . -> . rng*))))
+               (if (or rst (pair? (syntax-e #'(opt-dom* ...))))
+                   #'((dom* ...) (opt-dom* ...) #:rest (listof rst*) . ->* . rng*)
+                   #'(dom* ... . -> . rng*))))
            (unless (no-duplicates (for/list ([t arrs])
                                     (match t [(arr: dom _ _ _ _) (length dom)])))
              (exit (fail)))

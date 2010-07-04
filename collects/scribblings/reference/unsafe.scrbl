@@ -1,6 +1,11 @@
 #lang scribble/doc
 @(require "mz.ss"
-          (for-label scheme/unsafe/ops))
+          (for-label scheme/unsafe/ops
+                     scheme/flonum
+                     (only-in scheme/foreign
+                              f64vector?
+                              f64vector-ref
+                              f64vector-set!)))
 
 @title[#:tag "unsafe"]{Unsafe Operations}
 
@@ -34,15 +39,17 @@ can be prevented by adjusting the code inspector (see
 @defproc[(unsafe-fx* [a fixnum?][b fixnum?]) fixnum?]
 @defproc[(unsafe-fxquotient [a fixnum?][b fixnum?]) fixnum?]
 @defproc[(unsafe-fxremainder [a fixnum?][b fixnum?]) fixnum?]
+@defproc[(unsafe-fxmodulo [a fixnum?][b fixnum?]) fixnum?]
 @defproc[(unsafe-fxabs [a fixnum?]) fixnum?]
 )]{
 
 For @tech{fixnums}: Like @scheme[+], @scheme[-], @scheme[*],
-@scheme[quotient], @scheme[remainder], and @scheme[abs], but constrained to consume
-@tech{fixnums} and produce a @tech{fixnum} result. The mathematical
-operation on @scheme[a] and @scheme[b] must be representable as a
-@tech{fixnum}. In the case of @scheme[unsafe-fxquotient] and
-@scheme[unsafe-fxremainder], @scheme[b] must not be @scheme[0].}
+@scheme[quotient], @scheme[remainder], @scheme[modulo], and
+@scheme[abs], but constrained to consume @tech{fixnums} and produce a
+@tech{fixnum} result. The mathematical operation on @scheme[a] and
+@scheme[b] must be representable as a @tech{fixnum}. In the case of
+@scheme[unsafe-fxquotient], @scheme[unsafe-fxremainder], and
+@scheme[unsafe-fxmodulo], @scheme[b] must not be @scheme[0].}
 
 
 @deftogether[(
@@ -73,15 +80,17 @@ represent a @tech{fixnum}, and the result is effectively
 @defproc[(unsafe-fx> [a fixnum?][b fixnum?]) boolean?]
 @defproc[(unsafe-fx<= [a fixnum?][b fixnum?]) boolean?]
 @defproc[(unsafe-fx>= [a fixnum?][b fixnum?]) boolean?]
+@defproc[(unsafe-fxmin [a fixnum?][b fixnum?]) fixnum?]
+@defproc[(unsafe-fxmax [a fixnum?][b fixnum?]) fixnum?]
 )]{
 
 For @tech{fixnums}: Like @scheme[=], @scheme[<], @scheme[>],
-@scheme[<=], and @scheme[>=], but constrained to consume
-@tech{fixnums}.}
+@scheme[<=], @scheme[>=], @scheme[min], and @scheme[max], but
+constrained to consume @tech{fixnums}.}
 
 
 @defproc[(unsafe-fx->fl [a fixnum?]) inexact-real?]{
-Like @scheme[exact->inexact], but constrained to consume @tech{fixnums}.
+Unchecked version of @scheme[->fl].
 }
 
 
@@ -93,10 +102,8 @@ Like @scheme[exact->inexact], but constrained to consume @tech{fixnums}.
 @defproc[(unsafe-flabs [a inexact-real?]) inexact-real?]
 )]{
 
-For real @tech{inexact numbers}: Like @scheme[+], @scheme[-],
-@scheme[*], @scheme[/], and @scheme[abs], but constrained to consume
-real @tech{inexact numbers}. The result is always a real @tech{inexact
-number}.}
+For @tech{flonums}: Unchecked versions of @scheme[fl+], @scheme[fl-],
+@scheme[fl*], @scheme[fl/], and @scheme[flabs].}
 
 
 @deftogether[(
@@ -105,11 +112,45 @@ number}.}
 @defproc[(unsafe-fl> [a inexact-real?][b inexact-real?]) boolean?]
 @defproc[(unsafe-fl<= [a inexact-real?][b inexact-real?]) boolean?]
 @defproc[(unsafe-fl>= [a inexact-real?][b inexact-real?]) boolean?]
+@defproc[(unsafe-flmin [a inexact-real?]) inexact-real?]
+@defproc[(unsafe-flmax [a inexact-real?]) inexact-real?]
 )]{
 
-For real @tech{inexact numbers}: Like @scheme[=], @scheme[<],
-@scheme[>], @scheme[<=], and @scheme[>=], but constrained to consume
-real @tech{inexact numbers}.}
+For @tech{flonums}: Unchecked versions of @scheme[fl=], @scheme[fl<],
+@scheme[fl>], @scheme[fl<=], @scheme[fl>=], @scheme[flmin], and
+@scheme[flmax].}
+
+
+@deftogether[(
+@defproc[(unsafe-flround [a inexact-real?]) inexact-real?]
+@defproc[(unsafe-flfloor [a inexact-real?]) inexact-real?]
+@defproc[(unsafe-flceiling [a inexact-real?]) inexact-real?]
+@defproc[(unsafe-fltruncate [a inexact-real?]) inexact-real?]
+)]{
+
+For @tech{flonums}: Unchecked (potentially) versions of
+@scheme[flround], @scheme[flfloor], @scheme[flceiling], and
+@scheme[fltruncate]. Currently, these bindings are simply aliases for
+the corresponding safe bindings.}
+
+
+@deftogether[(
+@defproc[(unsafe-flsin [a inexact-real?]) inexact-real?]
+@defproc[(unsafe-flcos [a inexact-real?]) inexact-real?]
+@defproc[(unsafe-fltan [a inexact-real?]) inexact-real?]
+@defproc[(unsafe-flasin [a inexact-real?]) inexact-real?]
+@defproc[(unsafe-flacos [a inexact-real?]) inexact-real?]
+@defproc[(unsafe-flatan [a inexact-real?]) inexact-real?]
+@defproc[(unsafe-fllog [a inexact-real?]) inexact-real?]
+@defproc[(unsafe-flexp [a inexact-real?]) inexact-real?]
+@defproc[(unsafe-flsqrt [a inexact-real?]) inexact-real?]
+)]{
+
+For @tech{flonums}: Unchecked (potentially) versions of
+@scheme[flsin], @scheme[flcos], @scheme[fltan], @scheme[flasin],
+@scheme[flacos], @scheme[flatan], @scheme[fllog], @scheme[flexp], and
+@scheme[flsqrt]. Currently, some of these bindings are simply aliases
+for the corresponding safe bindings.}
 
 
 @section{Unsafe Data Extraction}
@@ -163,6 +204,27 @@ Unsafe versions of @scheme[bytes-length], @scheme[bytes-ref], and
 @scheme[bytes-set!]. A bytes's size can never be larger than a
 @tech{fixnum} (so even @scheme[bytes-length] always returns a
 fixnum).}
+
+
+@deftogether[(
+@defproc[(unsafe-flvector-length [v flvector?]) fixnum?]
+@defproc[(unsafe-flvector-ref [v flvector?][k fixnum?]) any/c]
+@defproc[(unsafe-flvector-set! [v flvector?][k fixnum?][x inexact-real?]) void?]
+)]{
+
+Unsafe versions of @scheme[flvector-length], @scheme[flvector-ref], and
+@scheme[flvector-set!]. A @tech{flvector}'s size can never be larger than a
+@tech{fixnum} (so even @scheme[flvector-length] always returns a
+fixnum).}
+
+
+@deftogether[(
+@defproc[(unsafe-f64vector-ref [vec f64vector?][k fixnum?]) inexact-real?]
+@defproc[(unsafe-f64vector-set! [vec f64vector?][k fixnum?][n inexact-real?]) void?]
+)]{
+
+Unsafe versions of @scheme[f64vector-ref] and
+@scheme[f64vector-set!].}
 
 
 @deftogether[(

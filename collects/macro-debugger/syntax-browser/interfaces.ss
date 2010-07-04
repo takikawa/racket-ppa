@@ -84,6 +84,11 @@
    ;; add-keymap : text snip
    add-keymap))
 
+;; keymap/popup<%>
+(define-interface keymap/popup<%> ()
+  (;; add-context-menu-items : popup-menu -> void
+   add-context-menu-items))
+
 ;; display<%>
 (define-interface display<%> ()
   (;; refresh : -> void
@@ -124,6 +129,7 @@
 (define-struct range (obj start end))
 
 ;; A TreeRange is (make-treerange syntax nat nat (listof TreeRange))
+;; where subs are disjoint, in order, and all contained within [start, end]
 (define-struct treerange (obj start end subs))
 
 ;; syntax-prefs<%>

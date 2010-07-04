@@ -64,11 +64,12 @@
         [#:when (or (not (identifier? e1))
                     (not (bound-identifier=? e1 e2)))
                 [#:walk e2 'resolve-variable]])]
-    [(Wrap p:module (e1 e2 rs ?1 ?2 tag rename check tag2 ?3 body shift))
+    [(Wrap p:module (e1 e2 rs ?1 locals tag rename check tag2 ?3 body shift))
      (R [#:hide-check rs]
         [! ?1]
+        [#:pattern ?form]
+        [LocalActions ?form locals]
         [#:pattern (?module ?name ?language . ?body-parts)]
-        [! ?2]
         [#:when tag
                 [#:in-hole ?body-parts
                            [#:walk (list tag) 'tag-module-begin]]]
@@ -96,12 +97,12 @@
         [#:do (DEBUG (printf "** module begin pass 2\n"))]
         [ModulePass ?forms pass2]
         [! ?1])]
-    [(Wrap p:define-syntaxes (e1 e2 rs ?1 rhs ?2))
+    [(Wrap p:define-syntaxes (e1 e2 rs ?1 rhs locals))
      (R [! ?1]
         [#:pattern (?define-syntaxes ?vars ?rhs)]
         [#:binders #'?vars]
         [Expr/PhaseUp ?rhs rhs]
-        [! ?2])]
+        [LocalActions ?rhs locals])]
     [(Wrap p:define-values (e1 e2 rs ?1 rhs))
      (R [! ?1]
         [#:pattern (?define-values ?vars ?rhs)]
@@ -224,6 +225,11 @@
           [#:step 'provide]
           [#:set-syntax e2]))]
 
+    [(Wrap p:require (e1 e2 rs ?1 locals))
+     (R [! ?1]
+        [#:pattern ?form]
+        [LocalActions ?form locals])]
+
     [(Wrap p:stop (e1 e2 rs ?1))
      (R [! ?1])]
 
@@ -235,10 +241,11 @@
      (R [! ?1]
         [#:pattern ?form]
         [Expr ?form deriv])]
-    [(Wrap p:set! (e1 e2 rs ?1 id-rs rhs))
+    [(Wrap p:set! (e1 e2 rs ?1 id-rs ?2 rhs))
      (R [! ?1]
         [#:pattern (?set! ?var ?rhs)]
         [#:learn id-rs]
+        [! ?2]
         [Expr ?rhs rhs])]
 
     ;; Macros
@@ -353,19 +360,20 @@
      (R)]
     [(cons local rest)
      (R [#:pattern ?form]
-        [#:if (visibility)
-              ;; If macro with local-expand is transparent,
-              ;; then all local-expansions must be transparent.
-              ([#:parameterize ((macro-policy (lambda _ #t)))
-                 [#:new-local-context
-                  [LocalAction ?form local]]])
-              ([#:pass1]
-               [LocalAction ?form local]
-               [#:pass2])]
+        [#:parameterize ((macro-policy
+                          ;; If macro with local-expand is transparent,
+                          ;; then all local-expansions must be transparent.
+                          (if (visibility) (lambda _ #t) (macro-policy))))
+          [#:new-local-context
+           [#:pattern ?form]
+           [LocalAction ?form local]]]
         [LocalActions ?form rest])]))
 
 (define (LocalAction local)
   (match/count local
+    [(struct local-exn (exn))
+     (R [! exn])]
+
     [(struct local-expansion (e1 e2 for-stx? me1 inner #f me2 opaque))
      (R [#:parameterize ((phase (if for-stx? (add1 (phase)) (phase))))
          [#:set-syntax e1]
@@ -543,11 +551,11 @@
 ;; BindSyntaxes : BindSyntaxes -> RST
 (define (BindSyntaxes bindrhs)
   (match bindrhs
-    [(Wrap bind-syntaxes (rhs ?1))
+    [(Wrap bind-syntaxes (rhs locals))
      (R [#:set-syntax (node-z1 rhs)] ;; set syntax; could be in local-bind
         [#:pattern ?form]
         [Expr/PhaseUp ?form rhs]
-        [! ?1])]))
+        [LocalActions ?form locals])]))
 
 ;; ModulePass : (list-of MBRule) -> RST
 (define (ModulePass mbrules)
@@ -573,8 +581,8 @@
         [! ?1]
         [#:let begin-form #'?firstB]
         [#:let rest-forms #'?rest]
-        [#:pattern ?forms]
         [#:left-foot (list #'?firstB)]
+        [#:pattern ?forms]
         [#:set-syntax (append (stx->list (stx-cdr begin-form)) rest-forms)]
         [#:step 'splice-module (stx->list (stx-cdr begin-form))]
         [#:rename ?forms tail]

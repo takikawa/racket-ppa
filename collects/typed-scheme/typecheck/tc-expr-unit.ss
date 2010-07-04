@@ -4,10 +4,11 @@
 (require (rename-in "../utils/utils.ss" [private private-in]))
 (require syntax/kerncase mzlib/trace
          scheme/match (prefix-in - scheme/contract)
-         "signatures.ss"
-         (types utils convenience union subtype)
+         "signatures.ss" "tc-envops.ss" "tc-metafunctions.ss"
+         (types utils convenience union subtype remove-intersect)
          (private-in parse-type type-annotation)
          (rep type-rep)
+         (only-in (infer infer) restrict)
          (except-in (utils tc-utils stxclass-util))
          (env lexical-env)
          (only-in (env type-environments) lookup current-tvars extend-env)
@@ -32,8 +33,14 @@
     [i:exp expected]
     [i:boolean (-val (syntax-e #'i))]
     [i:identifier (-val (syntax-e #'i))]
-    [i:exact-integer -Integer]
-    [(~var i (3d real?)) -Number]
+    [0 -Zero]
+    [(~var i (3d exact-positive-integer?)) -ExactPositiveInteger]
+    [(~var i (3d exact-nonnegative-integer?)) -ExactNonnegativeInteger]
+    [(~var i (3d exact-integer?)) -Integer]
+    [(~var i (3d (lambda (e) (and (number? e) (exact? e) (rational? e))))) -ExactRational]
+    [(~var i (3d inexact-real?)) -Flonum]
+    [(~var i (3d real?)) -Real]
+    [(~var i (3d number?)) -Number]
     [i:str -String]
     [i:char -Char]
     [i:keyword (-val (syntax-e #'i))]
@@ -41,10 +48,26 @@
     [i:byte-pregexp -Byte-PRegexp]
     [i:byte-regexp -Byte-Regexp]
     [i:regexp -Regexp]
-    [(i ...) 
-     (-Tuple (map tc-literal (syntax->list #'(i ...))))]
-    [i #:declare i (3d vector?)
-       (make-Vector (apply Un (map tc-literal (vector->list (syntax-e #'i)))))]
+    [(i ...)
+     (match expected
+       [(Mu: var (Union: (list (Value: '()) (Pair: elem-ty (F: var)))))
+        (-Tuple
+         (for/list ([l (in-list (syntax->list #'(i ...)))])
+           (tc-literal l elem-ty)))]
+       ;; errors are handled elsewhere
+       [_ (-Tuple
+           (for/list ([l (in-list (syntax->list #'(i ...)))])
+             (tc-literal l #f)))])]
+    [(~var i (3d vector?))
+     (match expected
+       [(Vector: t)
+        (make-Vector (apply Un 
+                            (for/list ([l (syntax-e #'i)])
+                              (tc-literal l t))))]
+       ;; errors are handled elsewhere
+       [_ (make-Vector (apply Un 
+                              (for/list ([l (syntax-e #'i)])
+                                (tc-literal l #f))))])]
     [_ Univ]))
 
 
@@ -227,6 +250,22 @@
             [checked? expected]
             [else (tc-expr/check/internal form expected)]))))
 
+(define (tc-or e1 e2 or-part [expected #f])
+  (match (single-value e1)
+    [(tc-result1: t1 (and f1 (FilterSet: fs+ fs-)) o1)
+     (let*-values ([(flag+ flag-) (values (box #t) (box #t))])
+       (match-let* ([(tc-result1: t2 f2 o2) (with-lexical-env 
+                                             (env+ (lexical-env) fs+ flag+) 
+                                             (with-lexical-env/extend 
+                                              (list or-part) (list (restrict t1 (-val #f))) (single-value e2 expected)))]
+                    [t1* (remove t1 (-val #f))]
+                    [f1* (-FS fs+ (list (make-Bot)))])
+         ;; if we have the same number of values in both cases
+         (let ([r (combine-filter f1 f1* f2 t1* t2 o1 o2)])
+           (if expected 
+               (check-below r expected)
+               r))))]))
+
 ;; tc-expr/check : syntax tc-results -> tc-results
 (define (tc-expr/check/internal form expected)
   (parameterize ([current-orig-stx form])
@@ -303,6 +342,13 @@
            (let-values (((_ _) (#%plain-app find-method/who _ rcvr _)))
              (#%plain-app _ _ args ...)))
          (tc/send #'rcvr #'meth #'(args ...) expected)]
+        ;; or
+        [(let-values ([(or-part) e1]) (if op1 op2 e2))
+         (and 
+          (identifier? #'op1) (identifier? #'op2)
+          (free-identifier=? #'or-part #'op1)
+          (free-identifier=? #'or-part #'op2))
+         (tc-or #'e1 #'e2 #'or-part expected)]
         ;; let
         [(let-values ([(name ...) expr] ...) . body)
          (tc/let-values #'((name ...) ...) #'(expr ...) #'body form expected)]
@@ -365,6 +411,12 @@
          (let-values (((_ _) (#%plain-app find-method/who _ rcvr _)))
            (#%plain-app _ _ args ...)))
        (tc/send #'rcvr #'meth #'(args ...))]
+      ;; or
+      [(let-values ([(or-part) e1]) (if op1 op2 e2))
+       (and (identifier? #'op1) (identifier? #'op2)
+            (free-identifier=? #'or-part #'op1)
+            (free-identifier=? #'or-part #'op2))
+       (tc-or #'e1 #'e2 #'or-part)]
       ;; let
       [(let-values ([(name ...) expr] ...) . body)
        (tc/let-values #'((name ...) ...) #'(expr ...) #'body form)]

@@ -24,6 +24,7 @@ exec mzscheme -qu "$0" ${1+"$@"}
     (when (file-exists? (symbol->string bm))
       (delete-file (symbol->string bm)))
     (parameterize ([current-command-line-arguments (vector (symbol->string bm))])
+      (namespace-require 'scheme)
       (load script)))
 
   (define (clean-up-bin bm)
@@ -271,7 +272,7 @@ exec mzscheme -qu "$0" ${1+"$@"}
                 run-larceny
                 extract-larceny-times
                 clean-up-fasl
-                '(maze maze2))
+                '())
      (make-impl 'ikarus
                 mk-ikarus
                 run-ikarus
@@ -317,6 +318,10 @@ exec mzscheme -qu "$0" ${1+"$@"}
       takr2
       triangle))
 
+  (define extra-benchmarks
+    '(kanren
+      psyntax))
+
   (define (run-benchmark impl bm)
     (let ([i (ormap (lambda (i)
                       (and (eq? impl (impl-name i))
@@ -349,6 +354,7 @@ exec mzscheme -qu "$0" ${1+"$@"}
                   actual-implementations-to-run 
                   num-iterations)
     (process-command-line benchmarks
+                          extra-benchmarks
                           (map impl-name impls) obsolte-impls
                           3))
 

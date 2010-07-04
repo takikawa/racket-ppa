@@ -1,15 +1,16 @@
-#lang scheme
+#lang scheme/base
+
 (require scheme/list
+         scheme/path
          scheme/file
          scheme/date
          net/uri-codec
          web-server/servlet
-         web-server/servlet-env
-         web-server/managers/lru
          handin-server/private/md5
          handin-server/private/logger
          handin-server/private/config
-         handin-server/private/hooker)
+         handin-server/private/hooker
+         "run-servlet.ss")
 
 (define (aget alist key)
   (cond [(assq key alist) => cdr] [else #f]))
@@ -229,6 +230,8 @@
          [user      (aget bindings 'user)]
          [passwd    (aget bindings 'passwd)]
          [user      (and user (clean-str user))]
+         [user      (and user (if (get-conf 'username-case-sensitive)
+                                user (string-foldcase user)))]
          [user-data (get-user-data user)])
     (cond [(and user-data
                 (string? passwd)
@@ -246,42 +249,36 @@
         (lambda () (set! count (add1 count)) (format "w~a" count))
         (lambda () (semaphore-post sema))))))
 
-(define ((send-error msg) req)
-  `(html (head (meta [(http-equiv "refresh") (content "3;URL=/")])
-               (title ,msg))
-         (body ,msg "; " (a ([href "/"]) "restarting") " in 3 seconds.")))
-
 (define default-context-length (error-print-context-length))
-(define ((run-servlet port))
-  (serve/servlet
-   (lambda (request)
-     (error-print-context-length default-context-length)
-     (parameterize ([current-session (web-counter)])
-       (login-page (aget (request-bindings request) 'handin) #f)))
-   #:port port #:listen-ip #f #:ssl? #t #:command-line? #t
-   #:servlet-path "/" #:servlet-regexp #rx""
-   #:server-root-path server-dir #:servlets-root server-dir
-   #:file-not-found-responder (send-error "File not found")
-   #:servlet-namespace '(handin-server/private/md5
-                         handin-server/private/logger
-                         handin-server/private/config
-                         handin-server/private/hooker
-                         handin-server/private/reloadable)
-   #:manager (make-threshold-LRU-manager
-              (send-error "Your session has expired") (* 12 1024 1024))
-   #:log-file (get-conf 'web-log-file)))
+
+(define (dispatcher request)
+  (error-print-context-length default-context-length)
+  (parameterize ([current-session (web-counter)])
+    (login-page (aget (request-bindings request) 'handin) #f)))
 
 (provide run)
 (define (run)
-  (cond [(get-conf 'https-port-number)
-         => (lambda (p)
-              (define t
-                (parameterize ([error-print-context-length 0])
-                  (thread
-                   (lambda ()
-                     (dynamic-wind
-                       (lambda () (log-line "*** starting web server"))
-                       (run-servlet p)
-                       (lambda () (log-line "*** web server died!")))))))
-              (lambda () (break-thread t)))]
-        [else void]))
+  (if (get-conf 'use-https)
+    (begin0 (parameterize ([error-print-context-length 0])
+              (run-servlet
+               dispatcher
+               #:namespace '(handin-server/private/md5
+                             handin-server/private/logger
+                             handin-server/private/config
+                             handin-server/private/hooker
+                             handin-server/private/reloadable)
+               #:log-file (get-conf 'web-log-file)))
+      (log-line "*** embedded web server started"))
+    ;; simple "server" so it's known that there is no server
+    (lambda (msg . args)
+      (when (eq? 'connect msg)
+        (for-each (lambda (x) (display x (cadr args)))
+                  '(#"HTTP/1.0 200 OK\r\n"
+                    #"Content-Type: text/html\r\n"
+                    #"\r\n"
+                    #"<html><body><h1>"
+                    #"Please use the handin plugin"
+                    #"</h1></body></html>"))
+        (close-input-port (car args))
+        (close-output-port (cadr args))
+        (semaphore-post (caddr args))))))

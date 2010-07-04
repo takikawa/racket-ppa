@@ -1,8 +1,11 @@
 #lang scheme/gui
 
-(require 2htdp/private/image-more
+;; Run this file is generate the images in the img/ directory, 
+;; picked up by image-examples from image.scrbl
+
+(require 2htdp/image
          lang/posn
-         mrlib/image-core)
+         (only-in 2htdp/private/image-more save-image))
 
 (define-namespace-anchor anchor)
 (define ns (namespace-anchor->namespace anchor))
@@ -28,7 +31,13 @@
 
 (define (handle-image exp)
   (printf ".") (flush-output)
-  (let ([result (parameterize ([current-namespace image-ns]) (eval exp))])
+  (let ([result 
+         (with-handlers ([exn:fail?
+                          (λ (x)
+                            (printf "\nerror evaluating:\n")
+                            (pretty-print exp)
+                            (raise x))])
+           (parameterize ([current-namespace image-ns]) (eval exp)))])
     (cond
       [(image? result)
        (let ([fn (exp->filename exp)])

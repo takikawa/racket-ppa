@@ -40,7 +40,7 @@
  |#
  [create-aux-def
   (-> list? ;; DeclEntry
-      (values identifier? identifier? (listof sattr?) (listof syntax?)))]
+      (values identifier? identifier? (listof sattr?) (listof syntax?) boolean?))]
  [check-literals-list
   (-> syntax? syntax?
       (listof (list/c identifier? identifier?)))]
@@ -202,7 +202,7 @@
       (values (declenv-put-parser decls k parser description attrs splicing?)
               (append new-defs defs)))))
 
-;; create-aux-def : DeclEntry -> (values id id (listof SAttr) (listof stx))
+;; create-aux-def : DeclEntry -> (values id id (listof SAttr) (listof stx) boolean)
 (define (create-aux-def entry)
   (let ([sc-name (caddr entry)]
         [args (cadddr entry)])
@@ -693,13 +693,13 @@
 
 (define (check-list-pattern pattern stx)
   (match pattern
-    [#s(pat:datum _base '())
+    [(make pat:datum _base '())
      #t]
-    [#s(pat:head _base _head tail)
+    [(make pat:head _base _head tail)
      (check-list-pattern tail stx)]
-    [#s(pat:dots _base _head tail)
+    [(make pat:dots _base _head tail)
      (check-list-pattern tail stx)]
-    [#s(pat:compound _base '#:pair (list _head tail))
+    [(make pat:compound _base '#:pair (list _head tail))
      (check-list-pattern tail stx)]
     [_
      (wrong-syntax stx "expected proper list pattern")]))
@@ -974,7 +974,7 @@
   (define (check-sc-expr x)
     (syntax-case x ()
       [sc (identifier? #'sc) (list #'sc null)]
-      [(sc arg ...) (identifier? #'sc) (list #'sc #'(arg ...))]
+      [(sc arg ...) (identifier? #'sc) (list #'sc (syntax->list #'(arg ...)))]
       [_ (raise-syntax-error #f "expected syntax class use" ctx x)]))
   (syntax-case stx ()
     [(rx sc)

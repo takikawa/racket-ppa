@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -32,22 +32,22 @@
 # include <malloc.h>
 #endif
 
-int (*scheme_check_print_is_obj)(Scheme_Object *o);
+HOOK_SHARED_OK int (*scheme_check_print_is_obj)(Scheme_Object *o);
 
 #define QUICK_ENCODE_BUFFER_SIZE 256
-static THREAD_LOCAL char *quick_buffer = NULL;
-static THREAD_LOCAL char *quick_encode_buffer = NULL;
+THREAD_LOCAL_DECL(static char *quick_buffer = NULL);
+THREAD_LOCAL_DECL(static char *quick_encode_buffer = NULL);
 
 /* FIXME places possible race condition on growing printer size */
-static Scheme_Type_Printer *printers;
-static int printers_count;
+SHARED_OK static Scheme_Type_Printer *printers;
+SHARED_OK static int printers_count;
 
-static THREAD_LOCAL Scheme_Hash_Table *cache_ht;
+THREAD_LOCAL_DECL(static Scheme_Hash_Table *cache_ht);
 
 /* read-only globals */
-static char compacts[_CPT_COUNT_];
-static Scheme_Hash_Table *global_constants_ht;
-static Scheme_Object *quote_link_symbol = NULL;
+SHARED_OK static char compacts[_CPT_COUNT_];
+SHARED_OK static Scheme_Hash_Table *global_constants_ht;
+SHARED_OK static Scheme_Object *quote_link_symbol = NULL;
 
 /* Flag for debugging compiled code in printed form: */
 #define NO_COMPACT 0
@@ -132,10 +132,10 @@ static Scheme_Object *writable_struct_subs(Scheme_Object *s, int for_write, Prin
 	   && SCHEME_STRUCTP(obj) \
 	   && PRINTABLE_STRUCT(obj, pp), 0)) \
     || (qk(SCHEME_STRUCTP(obj) && scheme_is_writable_struct(obj), 0)) \
+    || (qk(pp->print_struct, 1) && SCHEME_STRUCTP(obj) && SCHEME_PREFABP(obj)) \
     || (qk(pp->print_hash_table, 1) && (SCHEME_HASHTPx(obj) || SCHEME_HASHTRP(obj))))
 #define ssQUICK(x, isbox) x
 #define ssQUICKp(x, isbox) (pp ? x : isbox)
-#define ssALL(x, isbox) 1
 #define ssALLp(x, isbox) isbox
 
 void scheme_init_print(Scheme_Env *env)
@@ -534,16 +534,14 @@ static int check_cycles(Scheme_Object *obj, int for_write, Scheme_Hash_Table *ht
   return 0;
 }
 
-#ifdef MZ_XFORM
-START_XFORM_SKIP;
-#endif
-
 /* The fast cycle-checker plays a dangerous game: it changes type
    tags. No GCs can occur here, and no thread switches. If the fast
    version takes to long, we back out to the general case. (We don't
    even check for stack overflow, so keep the max limit low.) */
 
+#if !defined(MZ_USE_PLACES)
 static int check_cycles_fast(Scheme_Object *obj, PrintParams *pp, int *fast_checker_counter)
+  XFORM_SKIP_PROC
 {
   Scheme_Type t;
   int cycle = 0;
@@ -617,9 +615,6 @@ static int check_cycles_fast(Scheme_Object *obj, PrintParams *pp, int *fast_chec
 
   return cycle;
 }
-
-#ifdef MZ_XFORM
-END_XFORM_SKIP;
 #endif
 
 #ifdef DO_STACK_CHECK
@@ -1529,13 +1524,6 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
 #endif
 
 #ifdef DO_STACK_CHECK
-#define PRINT_COUNT_START 20
-  {
-    static int check_counter = PRINT_COUNT_START;
-
-    if (!--check_counter) {
-      check_counter = PRINT_COUNT_START;
-      {
 #include "mzstkchk.h"
 	{
 	  Scheme_Thread *p = scheme_current_thread;
@@ -1560,9 +1548,6 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
 
 	  return closed;
 	}
-      }
-    }
-  }
 #endif
 
   if (scheme_check_print_is_obj && !scheme_check_print_is_obj(obj)) {
@@ -2442,7 +2427,7 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
       int unbox = SAME_TYPE(SCHEME_TYPE(obj), scheme_local_unbox_type);
       Scheme_Local *loc = (Scheme_Local *)obj;
       if ((loc->position < CPT_RANGE(SMALL_LOCAL))
-          && !(SCHEME_LOCAL_FLAGS(loc) & SCHEME_LOCAL_CLEARING_MASK)) {
+          && !SCHEME_GET_LOCAL_FLAGS(loc)) {
 	unsigned char s[1];
 	s[0] = loc->position + (unbox 
 				? CPT_SMALL_LOCAL_UNBOX_START 
@@ -2451,7 +2436,7 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
       } else {
         int flags;
 	print_compact(pp, unbox ? CPT_LOCAL_UNBOX : CPT_LOCAL);
-        flags = SCHEME_LOCAL_FLAGS(loc) & SCHEME_LOCAL_CLEARING_MASK;
+        flags = SCHEME_GET_LOCAL_FLAGS(loc);
         if (flags) {
           print_compact_number(pp, -(loc->position + 1));
           print_compact_number(pp, flags);
@@ -2512,7 +2497,10 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
 
       lo = (Scheme_Let_One *)obj;
 
-      print_compact(pp, CPT_LET_ONE);
+      if (SCHEME_LET_EVAL_TYPE(lo) & LET_ONE_FLONUM)
+        print_compact(pp, CPT_LET_ONE_FLONUM);
+      else
+        print_compact(pp, CPT_LET_ONE);
       print(scheme_protect_quote(lo->value), notdisplay, 1, NULL, mt, pp);
       closed = print(scheme_protect_quote(lo->body), notdisplay, 1, NULL, mt, pp);
     }

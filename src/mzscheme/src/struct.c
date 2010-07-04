@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -25,17 +25,32 @@
 #define PROP_USE_HT_COUNT 5
 
 /* globals */
-Scheme_Object *scheme_arity_at_least, *scheme_date;
-Scheme_Object *scheme_make_arity_at_least;
-Scheme_Object *scheme_source_property;
-Scheme_Object *scheme_input_port_property, *scheme_output_port_property;
-Scheme_Object *scheme_equal_property;
-Scheme_Object *scheme_make_struct_type_proc;
-Scheme_Object *scheme_current_inspector_proc;
+READ_ONLY Scheme_Object *scheme_arity_at_least;
+READ_ONLY Scheme_Object *scheme_date;
+READ_ONLY Scheme_Object *scheme_make_arity_at_least;
+READ_ONLY Scheme_Object *scheme_source_property;
+READ_ONLY Scheme_Object *scheme_input_port_property;
+READ_ONLY Scheme_Object *scheme_output_port_property;
+READ_ONLY Scheme_Object *scheme_equal_property;
+READ_ONLY Scheme_Object *scheme_make_struct_type_proc;
+READ_ONLY Scheme_Object *scheme_current_inspector_proc;
+READ_ONLY Scheme_Object *scheme_recur_symbol;
+READ_ONLY Scheme_Object *scheme_display_symbol;
+READ_ONLY Scheme_Object *scheme_write_special_symbol;
+
+READ_ONLY static Scheme_Object *location_struct;
+READ_ONLY static Scheme_Object *write_property;
+READ_ONLY static Scheme_Object *evt_property;
+READ_ONLY static Scheme_Object *proc_property;
+READ_ONLY static Scheme_Object *rename_transformer_property;
+READ_ONLY static Scheme_Object *set_transformer_property;
+READ_ONLY static Scheme_Object *not_free_id_symbol;
+READ_ONLY static Scheme_Object *scheme_checked_proc_property;
+ROSYM static Scheme_Object *ellipses_symbol;
+ROSYM static Scheme_Object *prefab_symbol;
 
 /* locals */
 
-Scheme_Object *location_struct;
 
 typedef enum {
   SCHEME_CONSTR = 1, 
@@ -64,6 +79,8 @@ static Scheme_Object *current_inspector(int argc, Scheme_Object *argv[]);
 static Scheme_Object *current_code_inspector(int argc, Scheme_Object *argv[]);
 
 static Scheme_Object *make_struct_type_property(int argc, Scheme_Object *argv[]);
+static Scheme_Object *make_struct_type_property_from_c(int argc, Scheme_Object *argv[],
+  Scheme_Object **predout, Scheme_Object **accessout );
 static Scheme_Object *struct_type_property_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *check_evt_property_value_ok(int argc, Scheme_Object *argv[]);
 static Scheme_Object *check_equal_property_value_ok(int argc, Scheme_Object *argv[]);
@@ -109,14 +126,9 @@ static Scheme_Object *make_name(const char *pre, const char *tn, int tnl, const 
 
 static void get_struct_type_info(int argc, Scheme_Object *argv[], Scheme_Object **a, int always);
 
-static Scheme_Object *write_property;
-Scheme_Object *scheme_recur_symbol, *scheme_display_symbol, *scheme_write_special_symbol;
 
-static Scheme_Object *evt_property;
 static int evt_struct_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo);
 static int is_evt_struct(Scheme_Object *);
-
-static Scheme_Object *proc_property;
 
 static int wrapped_evt_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo);
 static int nack_guard_evt_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo);
@@ -137,16 +149,11 @@ static Scheme_Object *exn_source_get(int argc, Scheme_Object **argv);
 
 static Scheme_Object *procedure_extract_target(int argc, Scheme_Object **argv);
 
-static Scheme_Object *rename_transformer_property;
-static Scheme_Object *set_transformer_property;
-static Scheme_Object *not_free_id_symbol;
-static Scheme_Object *scheme_checked_proc_property;
-
 #ifdef MZ_PRECISE_GC
 static void register_traversers(void);
 #endif
 
-static THREAD_LOCAL Scheme_Bucket_Table *prefab_table;
+THREAD_LOCAL_DECL(static Scheme_Bucket_Table *prefab_table);
 static Scheme_Object *make_prefab_key(Scheme_Struct_Type *type);
 
 #define cons scheme_make_pair
@@ -155,8 +162,6 @@ static Scheme_Object *make_prefab_key(Scheme_Struct_Type *type);
 
 #define BUILTIN_STRUCT_FLAGS SCHEME_STRUCT_EXPTIME | SCHEME_STRUCT_NO_SET
 #define LOC_STRUCT_FLAGS BUILTIN_STRUCT_FLAGS | SCHEME_STRUCT_NO_SET
-
-static Scheme_Object *ellipses_symbol, *prefab_symbol;
 
 #define TYPE_NAME(base, blen) make_name("struct:", base, blen, "", NULL, 0, "", 1)
 #define CSTR_NAME(base, blen) make_name("make-", base, blen, "", NULL, 0, "", 1)
@@ -188,13 +193,13 @@ scheme_init_struct (Scheme_Env *env)
   int i;
   Scheme_Object *guard;
 
-  static const char *arity_fields[1] = { "value" };
+  READ_ONLY static const char *arity_fields[1] = { "value" };
 #ifdef TIME_SYNTAX
-  static const char *date_fields[10] = { "second", "minute", "hour",
+  READ_ONLY static const char *date_fields[10] = { "second", "minute", "hour",
 					 "day", "month", "year",
 					 "week-day", "year-day", "dst?", "time-zone-offset" };
 #endif
-  static const char *location_fields[10] = { "source", "line", "column", "position", "span" };
+  READ_ONLY static const char *location_fields[10] = { "source", "line", "column", "position", "span" };
   
 #ifdef MZ_PRECISE_GC
   register_traversers();
@@ -261,10 +266,7 @@ scheme_init_struct (Scheme_Env *env)
 
     a[0] = scheme_intern_symbol("custom-write");
     a[1] = guard;
-    make_struct_type_property(2, a);
-    write_property = scheme_current_thread->ku.multiple.array[0];
-    pred = scheme_current_thread->ku.multiple.array[1];
-    access = scheme_current_thread->ku.multiple.array[2];
+    write_property = make_struct_type_property_from_c(2, a, &pred, &access);
     scheme_add_global_constant("prop:custom-write", write_property, env);
     scheme_add_global_constant("custom-write?", pred, env);
     scheme_add_global_constant("custom-write-accessor", access, env);
@@ -280,6 +282,10 @@ scheme_init_struct (Scheme_Env *env)
     scheme_add_global_constant("prop:evt", evt_property, env);
 
     scheme_add_evt(scheme_structure_type,
+		   (Scheme_Ready_Fun)evt_struct_is_ready,
+		   NULL,
+		   is_evt_struct, 1);
+    scheme_add_evt(scheme_proc_struct_type,
 		   (Scheme_Ready_Fun)evt_struct_is_ready,
 		   NULL,
 		   is_evt_struct, 1);
@@ -793,10 +799,11 @@ static Scheme_Object *prop_accessor(int argc, Scheme_Object **args, Scheme_Objec
   return v;
 }
 
-static Scheme_Object *make_struct_type_property(int argc, Scheme_Object *argv[])
-{
+static Scheme_Object *make_struct_type_property_from_c(int argc, Scheme_Object *argv[],
+  Scheme_Object **predout, Scheme_Object **accessout ) {
+
   Scheme_Struct_Property *p;
-  Scheme_Object *a[3], *v, *supers = scheme_null;
+  Scheme_Object *a[1], *v, *supers = scheme_null;
   char *name;
   int len;
 
@@ -850,35 +857,35 @@ static Scheme_Object *make_struct_type_property(int argc, Scheme_Object *argv[])
   name[len] = '?';
   name[len+1] = 0;
 
-  v = scheme_make_folding_prim_closure(prop_pred,
-				       1, a,
-				       name,
-				       1, 1, 0);
-  a[1] = v;
+  v = scheme_make_folding_prim_closure(prop_pred, 1, a, name, 1, 1, 0);
+  *predout = v;
 
   name = MALLOC_N_ATOMIC(char, len + 10);
   memcpy(name, SCHEME_SYM_VAL(argv[0]), len);
   memcpy(name + len, "-accessor", 10);
 
-  v = scheme_make_folding_prim_closure(prop_accessor,
-				       1, a,
-				       name,
-				       1, 1, 0);
-  a[2] = v;
+  v = scheme_make_folding_prim_closure(prop_accessor, 1, a, name, 1, 1, 0);
+  *accessout = v;
 
+  return a[0];
+}
+
+static Scheme_Object *make_struct_type_property(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *a[3];
+  a[0] = make_struct_type_property_from_c(argc, argv, &a[1], &a[2]);
   return scheme_values(3, a);
 }
 
 Scheme_Object *scheme_make_struct_type_property_w_guard(Scheme_Object *name, Scheme_Object *guard)
 {
-  Scheme_Thread *p = scheme_current_thread;
   Scheme_Object *a[2];
+  Scheme_Object *pred = NULL;
+  Scheme_Object *access = NULL;
 
   a[0] = name;
   a[1] = guard;
-
-  (void)make_struct_type_property(2, a);
-  return p->ku.multiple.array[0];
+  return make_struct_type_property_from_c(2, a, &pred, &access);
 }
 
 Scheme_Object *scheme_make_struct_type_property(Scheme_Object *name)
@@ -960,17 +967,21 @@ static Scheme_Object *guard_property(Scheme_Object *prop, Scheme_Object *v, Sche
   } else {
     /* Normal guard handling: */
     if (p->guard) {
-      Scheme_Object *a[2], *info[mzNUM_ST_INFO], *l;
+      if(!scheme_defining_primitives) {
+        Scheme_Object *a[2], *info[mzNUM_ST_INFO], *l;
 
-      a[0] = (Scheme_Object *)t;
-      get_struct_type_info(1, a, info, 1);
+        a[0] = (Scheme_Object *)t;
+        get_struct_type_info(1, a, info, 1);
 
-      l = scheme_build_list(mzNUM_ST_INFO, info);
+        l = scheme_build_list(mzNUM_ST_INFO, info);
 
-      a[0] = v;
-      a[1] = l;
-    
-      return _scheme_apply(p->guard, 2, a);
+        a[0] = v;
+        a[1] = l;
+
+        return _scheme_apply(p->guard, 2, a);
+      }
+      else 
+        return v;
     } else
       return v;
   }
@@ -1048,6 +1059,11 @@ static Scheme_Object *check_evt_property_value_ok(int argc, Scheme_Object *argv[
   return v;
 }
 
+static Scheme_Object *return_wrapped(void *data, int argc, Scheme_Object *argv[])
+{
+  return (Scheme_Object *)data;
+}
+
 static int evt_struct_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo)
 {
   Scheme_Object *v;
@@ -1092,7 +1108,12 @@ static int evt_struct_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo)
 	return 0;
       }
 
-      /* non-evt => ready and result is self */
+      /* non-evt => ready and result is self; if self is a procedure,
+         we need to wrap it, so that self is not treated as a `wrap-evt'
+         procedure. */
+      if (SCHEME_PROCP(o)) {
+        o = scheme_make_closed_prim_w_arity(return_wrapped, (void *)o, "wrapper", 1, 1);
+      }
       scheme_set_sync_target(sinfo, o, o, NULL, 0, 0, NULL);
 
       return 1;
@@ -1863,7 +1884,7 @@ static Scheme_Object *check_type_and_inspector(const char *who, int always, int 
 
   stype = (Scheme_Struct_Type *)argv[0];
 
-  insp = scheme_get_param(scheme_current_config(), MZCONFIG_INSPECTOR);
+  insp = scheme_get_current_inspector();
 
   if (!always && !scheme_is_subinspector(stype->inspector, insp)) {
     scheme_arg_mismatch(who, 
@@ -2777,6 +2798,29 @@ make_struct_proc(Scheme_Struct_Type *struct_type,
   ((Scheme_Closed_Primitive_Proc *)p)->pp.flags |= flags;
 
   return p;
+}
+
+Scheme_Object *scheme_rename_struct_proc(Scheme_Object *p, Scheme_Object *sym)
+{
+  if (SCHEME_PRIMP(p)) {
+    int is_getter = (((Scheme_Primitive_Proc *)p)->pp.flags & SCHEME_PRIM_IS_STRUCT_INDEXED_GETTER);
+    int is_setter = (((Scheme_Primitive_Proc *)p)->pp.flags & SCHEME_PRIM_IS_STRUCT_INDEXED_GETTER);
+    
+    if (is_getter || is_setter) {
+      const char *func_name;
+      Struct_Proc_Info *i;
+
+      func_name = scheme_symbol_name(sym);
+      
+      i = (Struct_Proc_Info *)SCHEME_PRIM_CLOSURE_ELS(p)[0];
+      
+      return make_struct_proc(i->struct_type, (char *)func_name, 
+                              is_getter ? SCHEME_GETTER : SCHEME_SETTER,
+                              i->field);
+    }
+  }
+
+  return NULL;
 }
 
 static Scheme_Object *make_name(const char *pre, const char *tn, int ltn,
