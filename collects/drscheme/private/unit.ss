@@ -17,22 +17,21 @@ module browser threading seems wrong.
            scheme/path
            scheme/port
            scheme/list
-           (only-in mzlib/etc compose)
            string-constants
            framework
            mrlib/name-message
            mrlib/bitmap-label
            mrlib/include-bitmap
-           "drsig.ss"
-           "auto-language.ss"
-           "insert-large-letters.ss"
            mrlib/switchable-button
            mrlib/cache-image-snip
            mrlib/include-bitmap
-           
+           mrlib/close-icon
            net/sendurl
            net/url
            
+           "drsig.ss"
+           "auto-language.ss"
+           "insert-large-letters.ss"
            (prefix-in drscheme:arrow: "../arrow.ss")
            
            mred
@@ -89,7 +88,8 @@ module browser threading seems wrong.
         is-current-tab?
         get-enabled
         on-close
-        can-close?))
+        can-close?
+        toggle-log))
     
     (define definitions-text<%> 
       (interface ()
@@ -379,10 +379,10 @@ module browser threading seems wrong.
              [add-to-program-editor-mixin
               (λ (mixin)
                 (drscheme:tools:only-in-phase 'drscheme:unit:add-to-program-editor-mixin 'phase1)
-                (set! program-editor-mixin (compose mixin program-editor-mixin)))])
+                (let ([old program-editor-mixin])
+                  (set! program-editor-mixin (λ (x) (mixin (old x))))))])
         (values get-program-editor-mixin
                 add-to-program-editor-mixin)))
-    
     
     ;; this sends a message to it's frame when it gets the focus
     (define make-searchable-canvas%
@@ -1314,13 +1314,39 @@ module browser threading seems wrong.
         
         (define/public-final (is-current-tab?) (eq? this (send frame get-current-tab)))
         
+        (define log-visible? #f)
+        (define/public-final (toggle-log)
+          (set! log-visible? (not log-visible?))
+          (send frame show/hide-log log-visible?))
+        (define/public-final (update-log)
+          (send frame show/hide-log log-visible?))
+        (define/public-final (update-logger-window command)
+          (when (is-current-tab?)
+            (send frame update-logger-window command)))
+        
+        (define current-planet-status #f)
+        (define/public-final (new-planet-status a b)
+          (set! current-planet-status (cons a b))
+          (update-planet-status))
+        (define/public-final (clear-planet-status) 
+          (set! current-planet-status #f)
+          (update-planet-status))
+        (define/public-final (update-planet-status)
+          (send frame show-planet-status 
+                (and current-planet-status 
+                     (car current-planet-status))
+                (and current-planet-status 
+                     (cdr current-planet-status))))
+        
         (super-new)))
     
-    ;; should only be called by the tab% object
+    ;; should only be called by the tab% object (and the class itself)
     (define-local-member-name 
       disable-evaluation-in-tab
       enable-evaluation-in-tab
-      update-toolbar-visibility)
+      update-toolbar-visibility
+      show/hide-log
+      show-planet-status)
     
     (define -frame<%>
       (interface (drscheme:frame:<%> frame:searchable-text<%> frame:delegate<%> frame:open-here<%>)
@@ -1370,27 +1396,236 @@ module browser threading seems wrong.
                  file-menu:get-revert-item
                  file-menu:get-print-item)
         
-        ;; logging : (union #f string[directory-name])
-        (field [logging #f]
-               [definitions-log-counter 0]  ;; number
-               [interactions-log-counter 0] ;; number
-               [logging-parent-panel #f]    ;; panel (unitialized short time only)
-               [logging-panel #f]           ;; panel (unitialized short time only)
-               [logging-menu-item #f])      ;; menu-item (unitialized short time only)
-        ;; log-definitions : -> void
-        (define/private (log-definitions)
-          (when logging
-            (set! definitions-log-counter (+ definitions-log-counter 1))
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ;;
+        ;; logging 
+        ;;
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        
+        (define logger-panel #f)
+        (define logger-parent-panel #f)
+        
+        ;; logger-gui-tab-panel: (or/c #f (is-a?/c tab-panel%))
+        ;; this is #f when the GUI has not been built yet. After
+        ;; it becomes a tab-panel, it is always a tab-panel (altho the tab panel might not always be shown)
+        (define logger-gui-tab-panel #f)
+        (define logger-gui-canvas #f)
+        
+        ;; logger-gui-text: (or/c #f (is-a?/c tab-panel%))
+        ;; this is #f when the GUI has not been built or when the logging panel is hidden
+        ;; in that case, the logging messages aren't begin saved in an editor anywhere
+        (define logger-gui-text #f)
+        
+        (define logger-menu-item #f)
+
+        (define/public-final (show/hide-log show?)
+          (let ([p (preferences:get 'drscheme:logging-size-percentage)])
+            (begin-container-sequence)
+            (cond
+              [logger-gui-tab-panel
+               (send logger-parent-panel change-children
+                     (λ (l)
+                       (cond
+                         [(or (and show? (member logger-panel l))
+                              (and (not show?)
+                                   (not (member logger-panel l))))
+                          ;; if things are already up to date, only update the logger text
+                          (when show?
+                            (update-logger-window #f))
+                          l]
+                         [show? 
+                          (new-logger-text)
+                          (send logger-gui-canvas set-editor logger-gui-text)
+                          (update-logger-window #f)
+                          (send logger-menu-item set-label (string-constant hide-log))
+                          (append (remq logger-panel l) (list logger-panel))]
+                         [else
+                          (send logger-menu-item set-label (string-constant show-log))
+                          (set! logger-gui-text #f)
+                          (send logger-gui-canvas set-editor #f)
+                          (remq logger-panel l)])))]
+              [else
+               (when show? ;; if we want to hide and it isn't built yet, do nothing
+                 (set! logger-gui-tab-panel
+                       (new tab-panel% 
+                            [choices (list (string-constant logging-all)
+                                           "fatal" "error" "warning" "info" "debug")]
+                            [parent logger-panel]
+                            [callback
+                             (λ (tp evt)
+                               (update-logger-window #f))]))
+                 (new-logger-text)
+                 (set! logger-gui-canvas 
+                       (new editor-canvas% [parent logger-gui-tab-panel] [editor logger-gui-text]))
+                 (send logger-menu-item set-label (string-constant hide-log))
+                 (update-logger-window #f)
+                 (send logger-parent-panel change-children (lambda (l) (append l (list logger-panel)))))])
+            (with-handlers ([exn:fail? void])
+              (send logger-parent-panel set-percentages (list p (- 1 p))))
+            (update-logger-button-label)
+            (end-container-sequence)))
+        
+        (define/private (log-shown?)
+          (and logger-gui-tab-panel
+               (member logger-panel (send logger-parent-panel get-children))))
+        
+        (define/private (new-logger-text)
+          (set! logger-gui-text (new (text:hide-caret/selection-mixin text:basic%)))
+          (send logger-gui-text lock #t))
+        
+        (define/public (update-logger-window command)
+          (when logger-gui-text 
+            (let ([admin (send logger-gui-text get-admin)]
+                  [canvas (send logger-gui-text get-canvas)])
+              (when (and canvas admin)
+                (let ([logger-messages (send interactions-text get-logger-messages)]
+                      [level (case (send logger-gui-tab-panel get-selection)
+                               [(0) #f]
+                               [(1) 'fatal]
+                               [(2) 'error]
+                               [(3) 'warning]
+                               [(4) 'info]
+                               [(5) 'debug])])
+                  (cond
+                    [(and (pair? command)
+                          (pair? logger-messages)
+                          ;; just flush and redraw everything if there is one (or zero) logger messages
+                          (pair? (cdr logger-messages)))
+                     (let ([msg (cdr command)])
+                       (when (or (not level) 
+                                 (eq? (vector-ref msg 0) level))
+                         (send logger-gui-text begin-edit-sequence)
+                         (send logger-gui-text lock #f)
+                         (case (car command)
+                           [(add-line) (void)]
+                           [(clear-last-and-add-line)
+                            (send logger-gui-text delete
+                                  0
+                                  (send logger-gui-text paragraph-start-position 1))]) 
+                         (send logger-gui-text insert
+                               "\n"
+                               (send logger-gui-text last-position)
+                               (send logger-gui-text last-position))
+                         (send logger-gui-text insert 
+                               (vector-ref msg 1) 
+                               (send logger-gui-text last-position)
+                               (send logger-gui-text last-position))
+                         (send logger-gui-text end-edit-sequence)
+                         (send logger-gui-text lock #t)))]
+                    [else
+                     (send logger-gui-text begin-edit-sequence)
+                     (send logger-gui-text lock #f)
+                     (send logger-gui-text erase)
+                     
+                     (let ([insert-one
+                            (λ (x newline?)
+                              (when (or (not level)
+                                        (eq? level (vector-ref x 0)))
+                                (when newline? (send logger-gui-text insert "\n" 0 0))
+                                (send logger-gui-text insert (vector-ref x 1) 0 0)))]) 
+                       
+                       (unless (null? logger-messages)
+                         ;; skip the last newline in the buffer
+                         (insert-one (car logger-messages) #f)
+                         (for-each
+                          (λ (x) (insert-one x #t))
+                          (cdr (send interactions-text get-logger-messages)))))
+                       
+                     (send logger-gui-text lock #t)
+                     (send logger-gui-text end-edit-sequence)]))))))
+        
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ;;
+        ;; planet status 
+        ;;
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+      
+        (define planet-status-parent-panel #f)
+        (define planet-status-panel #f)
+        (define planet-message #f)
+        (define planet-logger-button #f)
+        ;; local-member-name
+        (define/public (show-planet-status tag package)
+          (cond
+            [(and (not tag)
+                  (not package)
+                  (or (not planet-status-parent-panel)
+                      (not (member planet-status-panel (send planet-status-parent-panel get-children)))))
+             ;; if there is no information and there is no GUI there, don't do anything
+             (void)]
+            [else
+             (when planet-status-panel
+               (unless planet-message
+                 (new message% 
+                      [parent planet-status-panel]
+                      [label drscheme:debug:small-planet-bitmap])
+                 (set! planet-message (new message% [parent planet-status-panel] [label ""] [stretchable-width #t]))
+                 (set! planet-logger-button
+                       (new button%
+                            [font small-control-font]
+                            [parent planet-status-panel]
+                            [label (string-constant show-log)]
+                            [callback (λ (a b) (send current-tab toggle-log))]))
+                 (update-logger-button-label)
+                 (new close-icon%
+                      [parent planet-status-panel]
+                      [callback (λ () 
+                                  (send planet-status-parent-panel change-children
+                                        (λ (l)
+                                          (remq planet-status-panel l)))
+                                  (send current-tab clear-planet-status))]))
+               (send planet-message set-label 
+                     (case tag
+                       [(download)
+                        (format (string-constant planet-downloading) package)]
+                       [(install)
+                        (format (string-constant planet-installing) package)]
+                       [(finish)
+                        (format (string-constant planet-finished) package)]
+                       [else
+                        (string-constant planet-no-status)]))
+               (send planet-status-parent-panel change-children
+                     (λ (l)
+                       (if (memq planet-status-panel l)
+                           l
+                           (append (remq planet-status-panel l) (list planet-status-panel))))))]))
+            
+        (define/private (update-logger-button-label)
+          (when planet-logger-button
+            (send planet-logger-button set-label
+                  (if (and logger-gui-text
+                           (member logger-panel (send logger-parent-panel get-children)))
+                      (string-constant hide-log)
+                      (string-constant show-log)))))
+        
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ;;
+        ;; transcript
+        ;;
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+      
+        
+        ;; transcript : (union #f string[directory-name])
+        (field [transcript #f]
+               [definitions-transcript-counter 0]  ;; number
+               [interactions-transcript-counter 0] ;; number
+               [transcript-parent-panel #f]    ;; panel (unitialized short time only)
+               [transcript-panel #f]           ;; panel (unitialized short time only)
+               [transcript-menu-item #f])      ;; menu-item (unitialized short time only)
+        ;; record-definitions : -> void
+        (define/private (record-definitions)
+          (when transcript
+            (set! definitions-transcript-counter (+ definitions-transcript-counter 1))
             (send definitions-text save-file 
-                  (build-path logging (format "~a-definitions" (pad-two definitions-log-counter)))
+                  (build-path transcript (format "~a-definitions" (pad-two definitions-transcript-counter)))
                   'copy)))
         
-        ;; log-ineractions : -> void
-        (define/private (log-interactions)
-          (when logging
-            (set! interactions-log-counter (+ interactions-log-counter 1))
+        ;; record-ineractions : -> void
+        (define/private (record-interactions)
+          (when transcript
+            (set! interactions-transcript-counter (+ interactions-transcript-counter 1))
             (send interactions-text save-file 
-                  (build-path logging (format "~a-interactions" (pad-two interactions-log-counter)))
+                  (build-path transcript (format "~a-interactions" (pad-two interactions-transcript-counter)))
                   'copy)))
         
         ;; pad-two : number -> string
@@ -1400,50 +1635,51 @@ module browser threading seems wrong.
             [(<= 0 n 9) (format "0~a" n)]
             [else (format "~a" n)]))
         
-        ;; start-logging : -> void
-        ;; turns on the logging and shows the logging gui
-        (define/private (start-logging)
-          (let ([log-directory (mred:get-directory
-                                (string-constant please-choose-a-log-directory)
-                                this)])
-            (when (and log-directory
-                       (ensure-empty log-directory))
-              (send logging-menu-item set-label (string-constant stop-logging))
-              (set! logging log-directory)
-              (set! definitions-log-counter 0)
-              (set! interactions-log-counter 0)
-              (build-logging-panel)
-              (log-definitions))))
+        ;; start-transcript : -> void
+        ;; turns on the transcript and shows the transcript gui
+        (define/private (start-transcript)
+          (let ([transcript-directory (mred:get-directory
+                                       (string-constant please-choose-a-log-directory)
+                                       this)])
+            (when (and transcript-directory
+                       (ensure-empty transcript-directory))
+              (send transcript-menu-item set-label (string-constant stop-logging))
+              (set! transcript transcript-directory)
+              (set! definitions-transcript-counter 0)
+              (set! interactions-transcript-counter 0)
+              (build-transcript-panel)
+              (record-definitions))))
         
-        ;; stop-logging : -> void
-        ;; turns off the logging procedure
-        (define/private (stop-logging)
-          (log-interactions)
-          (send logging-menu-item set-label (string-constant log-definitions-and-interactions))
-          (set! logging #f)
-          (send logging-panel change-children (λ (l) null)))
+        ;; stop-transcript : -> void
+        ;; turns off the transcript procedure
+        (define/private (stop-transcript)
+          (record-interactions)
+          (send transcript-menu-item set-label (string-constant log-definitions-and-interactions))
+          (set! transcript #f)
+          (send transcript-panel change-children (λ (l) null)))
         
-        ;; build-logging-panel : -> void
-        ;; builds the contents of the logging panel
-        (define/private (build-logging-panel)
-          (define hp (make-object horizontal-panel% logging-panel '(border)))
+        ;; build-transcript-panel : -> void
+        ;; builds the contents of the transcript panel
+        (define/private (build-transcript-panel)
+          (define hp (make-object horizontal-panel% transcript-panel '(border)))
           (make-object message% (string-constant logging-to) hp)
-          (send (make-object message% (path->string logging) hp) stretchable-width #t)
-          (make-object button% (string-constant stop-logging) hp (λ (x y) (stop-logging))))
+          (send (make-object message% (path->string transcript) hp) stretchable-width #t)
+          (make-object button% (string-constant stop-logging) hp (λ (x y) (stop-transcript))))
         
         ;; ensure-empty : string[directory] -> boolean
-        ;; if the log-directory is empty, just return #t
+        ;; if the transcript-directory is empty, just return #t
         ;; if not, ask the user about emptying it. 
         ;;   if they say yes, try to empty it.
         ;;     if that fails, report the error and return #f.
         ;;     if it succeeds, return #t.
         ;;   if they say no, return #f.
-        (define/private (ensure-empty log-directory)
-          (let ([dir-list (directory-list log-directory)])
+        (define/private (ensure-empty transcript-directory)
+          (let ([dir-list (directory-list transcript-directory)])
             (or (null? dir-list)
                 (let ([query (message-box 
                               (string-constant drscheme)
-                              (gui-utils:format-literal-label (string-constant erase-log-directory-contents) log-directory)
+                              (gui-utils:format-literal-label (string-constant erase-log-directory-contents)
+                                                              transcript-directory)
                               this
                               '(yes-no))])
                   (cond
@@ -1460,29 +1696,49 @@ module browser threading seems wrong.
                                                      (format "~s" exn)))
                                          this)
                                         #f)])
-                       (for-each (λ (file) (delete-file (build-path log-directory file)))
+                       (for-each (λ (file) (delete-file (build-path transcript-directory file)))
                                  dir-list)
                        #t)])))))
         
         (define/override (make-root-area-container cls parent)
-          (let* ([outer-panel (super make-root-area-container module-browser-dragable-panel% parent)]
-                 [saved-p (preferences:get 'drscheme:module-browser-size-percentage)]
+          (let* ([saved-p (preferences:get 'drscheme:module-browser-size-percentage)]
+                 [saved-p2 (preferences:get 'drscheme:logging-size-percentage)]
+                 [_module-browser-parent-panel
+                  (super make-root-area-container 
+                         (make-two-way-prefs-dragable-panel% panel:horizontal-dragable%
+                                                             'drscheme:module-browser-size-percentage)
+                         parent)]
                  [_module-browser-panel (new vertical-panel%
-                                             (parent outer-panel)
+                                             (parent _module-browser-parent-panel)
                                              (alignment '(left center))
                                              (stretchable-width #f))]
-                 [louter-panel (make-object vertical-panel% outer-panel)]
-                 [root (make-object cls louter-panel)])
+                 [planet-status-outer-panel (new vertical-panel% [parent _module-browser-parent-panel])]
+                 [logger-outer-panel (new (make-two-way-prefs-dragable-panel% panel:vertical-dragable%
+                                                                              'drscheme:logging-size-percentage)
+                                          [parent planet-status-outer-panel])]
+                 [trans-outer-panel (new vertical-panel% [parent logger-outer-panel])]
+                 [root (make-object cls trans-outer-panel)])
+            (set! module-browser-parent-panel _module-browser-parent-panel)
             (set! module-browser-panel _module-browser-panel)
-            (set! module-browser-parent-panel outer-panel)
-            (send outer-panel change-children (λ (l) (remq module-browser-panel l)))
-            (preferences:set 'drscheme:module-browser-size-percentage saved-p)
-            (set! logging-parent-panel (new horizontal-panel%
-                                            (parent louter-panel)
-                                            (stretchable-height #f)))
-            (set! logging-panel (make-object horizontal-panel% logging-parent-panel))
+            (send module-browser-parent-panel change-children (λ (l) (remq module-browser-panel l)))
+            (set! logger-parent-panel logger-outer-panel)
+            (set! logger-panel (new vertical-panel% [parent logger-parent-panel]))
+            (send logger-parent-panel change-children (lambda (x) (remq logger-panel x)))
+            (set! transcript-parent-panel (new horizontal-panel%
+                                               (parent trans-outer-panel)
+                                               (stretchable-height #f)))
+            (set! transcript-panel (make-object horizontal-panel% transcript-parent-panel))
+            (set! planet-status-parent-panel (new vertical-panel% 
+                                                  [parent planet-status-outer-panel]
+                                                  [stretchable-height #f]))
+            (set! planet-status-panel (new horizontal-panel% 
+                                           [parent planet-status-parent-panel]))
+            (send planet-status-parent-panel change-children (λ (l) (remq planet-status-panel l)))
             (unless (toolbar-shown?)
-              (send logging-parent-panel change-children (λ (l) '())))
+              (send transcript-parent-panel change-children (λ (l) '())))
+            (preferences:set 'drscheme:module-browser-size-percentage saved-p)
+            (preferences:set 'drscheme:logging-size-percentage saved-p2)
+            
             root))
         
         (inherit show-info hide-info is-info-hidden?)
@@ -1522,7 +1778,7 @@ module browser threading seems wrong.
               [hidden?
                (hide-info)
                (send top-outer-panel change-children (λ (l) '()))
-               (send logging-parent-panel change-children (λ (l) '()))]
+               (send transcript-parent-panel change-children (λ (l) '()))]
               [top? (orient/show #t)]
               [left? (orient/show #t)]
               [right? (orient/show #f)]))
@@ -1567,7 +1823,7 @@ module browser threading seems wrong.
                         (cons top-outer-panel (remq top-outer-panel l))
                         (append (remq top-outer-panel l) (list top-outer-panel)))))
             (send top-outer-panel change-children (λ (l) (list top-panel)))
-            (send logging-parent-panel change-children (λ (l) (list logging-panel)))
+            (send transcript-parent-panel change-children (λ (l) (list transcript-panel)))
             (if vertical? 
                 (send top-panel change-children (λ (x) (remq name-panel x)))
                 (send top-panel change-children (λ (x) (cons name-panel (remq name-panel x)))))
@@ -2261,7 +2517,7 @@ module browser threading seems wrong.
                  (λ () (file-menu:get-save-as-item))
                  ;(λ () (file-menu:save-as-text-item)) ; Save As Text...
                  (λ () (file-menu:get-print-item))))
-          (send file-menu:print-transcript-item enable interactions-shown?))
+          (send file-menu:print-interactions-item enable interactions-shown?))
         
         (define/augment (can-close?)
           (and (andmap (lambda (tab)
@@ -2280,8 +2536,8 @@ module browser threading seems wrong.
                     tabs)
           (when (eq? this newest-frame)
             (set! newest-frame #f))
-          (when logging
-            (stop-logging))
+          (when transcript
+            (stop-transcript))
           (remove-show-status-line-callback)
           (remove-bug-icon-callback)
           (send interactions-text on-close))
@@ -2309,9 +2565,9 @@ module browser threading seems wrong.
             (check-if-save-file-up-to-date)
             (when (preferences:get 'drscheme:show-interactions-on-execute)
               (ensure-rep-shown interactions-text))
-            (when logging
-              (log-definitions)
-              (log-interactions))
+            (when transcript
+              (record-definitions)
+              (record-interactions))
             (send definitions-text just-executed)
             (send language-message set-yellow #f)
             (send interactions-canvas focus)
@@ -2477,6 +2733,8 @@ module browser threading seems wrong.
             (send definitions-text set-delegate old-delegate)
             (update-running (send current-tab is-running?))
             (on-tab-change old-tab current-tab)
+            (send tab update-log)
+            (send tab update-planet-status)
             
             (restore-visible-tab-regions)
             (for-each (λ (defs-canvas) (send defs-canvas refresh))
@@ -2498,7 +2756,7 @@ module browser threading seems wrong.
             (let ([delegate (send from-defs get-delegate)])
               (send from-defs set-delegate #f)
               (send to-defs set-delegate delegate)))
-          
+                    
           (inner (void) on-tab-change from-tab to-tab))
         
         (define/public (next-tab) (change-to-delta-tab +1))
@@ -2790,7 +3048,15 @@ module browser threading seems wrong.
                      [label (string-constant toolbar-hidden)]
                      [parent toolbar-menu]
                      [callback (λ (x y) (set-toolbar-hidden))]
-                     [checked #f])))
+                     [checked #f]))
+          
+          (set! logger-menu-item
+                (new menu-item%
+                     [label (string-constant show-log)]
+                     [parent show-menu]
+                     [callback
+                      (λ (x y) (send current-tab toggle-log))]))
+          )
         
         
         ;                                                                                                       
@@ -2995,7 +3261,7 @@ module browser threading seems wrong.
         ;                                            
         
         (define execute-menu-item #f)
-        (define file-menu:print-transcript-item #f)
+        (define file-menu:print-interactions-item #f)
         (define file-menu:create-new-tab-item #f)
         
         (define/override (file-menu:between-new-and-open file-menu)
@@ -3056,20 +3322,20 @@ module browser threading seems wrong.
                   (when filename
                     (send interactions-text save-file/gui-error filename 'text)))))
             (make-object separator-menu-item% file-menu)
-            (set! logging-menu-item
+            (set! transcript-menu-item
                   (make-object menu:can-restore-menu-item%
                     (string-constant log-definitions-and-interactions)
                     file-menu
                     (λ (x y)
-                      (if logging
-                          (stop-logging)
-                          (start-logging)))))
+                      (if transcript
+                          (stop-transcript)
+                          (start-transcript)))))
             (make-object separator-menu-item% file-menu)
             (super file-menu:between-save-as-and-print file-menu)))
         
         [define/override file-menu:print-string (λ () (string-constant print-definitions))]
         (define/override (file-menu:between-print-and-close file-menu)
-          (set! file-menu:print-transcript-item
+          (set! file-menu:print-interactions-item
                 (make-object menu:can-restore-menu-item%
                   (string-constant print-interactions)
                   file-menu
@@ -4177,16 +4443,15 @@ module browser threading seems wrong.
     
     (define -frame% (frame-mixin super-frame%))
     
-    (define module-browser-dragable-panel%
-      (class panel:horizontal-dragable%
+    (define (make-two-way-prefs-dragable-panel% % pref-key)
+      (class %
         (inherit get-percentages)
         (define/augment (after-percentage-change)
           (let ([percentages (get-percentages)])
             (when (and (pair? percentages)
                        (pair? (cdr percentages))
                        (null? (cddr percentages)))
-              (preferences:set 'drscheme:module-browser-size-percentage
-                               (car percentages))))
+              (preferences:set pref-key (car percentages))))
           (inner (void) after-percentage-change))
         (super-new)))
     

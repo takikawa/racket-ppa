@@ -18,12 +18,12 @@
          call)
 
 (define (call d u bs)
-  (htxml (collect d (make-request 'get (string->url u) empty bs #"" "127.0.0.1" 80 "127.0.0.1"))))
+  (htxml (collect d (make-request #"GET" (string->url u) empty bs #"" "127.0.0.1" 80 "127.0.0.1"))))
 (define (htxml bs)
   (match (regexp-match #"^.+\r\n\r\n(.+)$" bs)
     [(list _ s)
      (define sx (ssax:xml->sxml (open-input-bytes s) empty))
-     (pretty-print sx)
+     #;(pretty-print sx)
      sx]
     [_
      (error 'html "Given ~S~n" bs)]))
@@ -100,13 +100,15 @@
      #'(let ([ns (make-base-empty-namespace)])
          (parameterize ([current-namespace ns])
            (namespace-require 'scheme/base)
+           (namespace-require 'web-server/http)
            (namespace-require 'web-server/lang/abort-resume)
            (namespace-require 'mzlib/serialize)
            (eval '(module m-id . rest))
            (eval '(require 'm-id)))
          
          (lambda (s-expr)
-           (parameterize ([current-namespace ns])
+           (parameterize ([current-namespace ns]
+                          [current-output-port (open-output-nowhere)])
              (eval s-expr))))]
     [else
      (raise-syntax-error #f "make-module-evel: dropped through" m-expr)]))
@@ -115,9 +117,11 @@
   (let ([ns (make-base-empty-namespace)])
     (parameterize ([current-namespace ns])
       (namespace-require 'scheme/base)
+      (namespace-require 'web-server/http)
       (namespace-require 'web-server/lang/abort-resume)
       (namespace-require 'mzlib/serialize)
       (namespace-require pth))
     (lambda (expr)
-      (parameterize ([current-namespace ns])
+      (parameterize ([current-namespace ns]
+                     [current-output-port (open-output-nowhere)])
         (eval expr)))))

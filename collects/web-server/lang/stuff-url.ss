@@ -1,62 +1,61 @@
 #lang scheme
 (require net/url
          scheme/serialize
-         web-server/private/md5-store
-         web-server/private/gzip
-         "../private/util.ss"
-         "../private/url-param.ss"
-         "../private/mod-map.ss")
+         web-server/private/servlet
+         web-server/stuffers/stuffer
+         web-server/stuffers/serialize
+         web-server/stuffers/gzip
+         web-server/stuffers/base64
+         web-server/stuffers/hash
+         web-server/http
+         web-server/private/url-param)
 
-(provide/contract
- [max-url-length (parameter/c number?)]
- [url-too-big? (url? . -> . boolean?)]
- [stuff-url (serializable? url? . -> . url?)]
- [stuffed-url? (url? . -> . boolean?)]
- [unstuff-url (url? . -> . serializable?)])
+(define (is-url-too-big? v)
+  (define uri
+    (request-uri 
+     (execution-context-request
+      (current-execution-context))))
+  (> (string-length
+      (url->string
+       (insert-in-uri uri v)))
+     ; http://www.boutell.com/newfaq/misc/urllength.html
+     2048))
 
-; http://www.boutell.com/newfaq/misc/urllength.html
-(define max-url-length
-  (make-parameter 2048))
+(define (make-default-stuffer home)
+  (stuffer-chain
+   serialize-stuffer
+   is-url-too-big?
+   (stuffer-chain
+    gzip-stuffer 
+    base64-stuffer)
+   is-url-too-big?
+   (md5-stuffer home)))
 
-(define (url-too-big? uri)
-  ((string-length (url->string uri)) . > . (max-url-length)))
+(define default-stuffer
+  (make-default-stuffer
+   (build-path (find-system-path 'home-dir) ".urls")))
 
-;; stuff-url: serial url -> url
-;; encode in the url
-(require net/base64)
-(define (stuff-url c uri)
-  (let* ([cb (c->bytes c)]
-         [cb-uri (insert-param uri "c" (bytes->string/utf-8 cb))])
-    (if (url-too-big? cb-uri)
-        (let* ([cc (gzip/bytes cb)]
-               [cc-uri (insert-param uri "cc" (bytes->string/utf-8 (base64-encode cc)))])
-          (if (url-too-big? cc-uri)
-              (let* ([hc (md5-store cc)]
-                     [hc-uri (insert-param uri "hc" (bytes->string/utf-8 hc))])
-                (if (url-too-big? hc-uri)
-                    (error 'stuff-url "Continuation too big: ~a" c)
-                    hc-uri))
-              cc-uri))
-        cb-uri)))
+(define URL-KEY "c")
+
+(define (insert-in-uri uri c)
+  (insert-param uri URL-KEY (bytes->string/utf-8 c)))
+
+(define (stuff-url stuffer uri c)
+  (insert-in-uri
+   uri ((stuffer-in stuffer) c)))
 
 (define (stuffed-url? uri)
-  (and (or (extract-param uri "c")
-           (extract-param uri "cc")
-           (extract-param uri "hc"))
-       #t))
+  (string? (extract-param uri URL-KEY)))
 
-(define (c->bytes c)
-  (write/bytes (compress-serial (serialize c))))
-(define (bytes->c b)
-  (deserialize (decompress-serial (read/bytes b))))
+(define (unstuff-url stuffer uri)
+  ((stuffer-out stuffer)
+   (string->bytes/utf-8
+    (extract-param uri URL-KEY))))
 
-;; unstuff-url: url -> serial
-;; decode from the url and reconstruct the serial
-(define (unstuff-url uri)
-  (cond
-    [(extract-param uri "c") 
-     => (compose bytes->c string->bytes/utf-8)]
-    [(extract-param uri "cc")
-     => (compose bytes->c gunzip/bytes base64-decode string->bytes/utf-8)]
-    [(extract-param uri "hc")
-     => (compose bytes->c gunzip/bytes md5-lookup string->bytes/utf-8)]))
+(provide/contract
+ [default-stuffer (stuffer/c serializable? bytes?)]
+ [make-default-stuffer (path-string? . -> . (stuffer/c serializable? bytes?))]
+ [is-url-too-big? (bytes? . -> . boolean?)]
+ [stuff-url ((stuffer/c serializable? bytes?) url? serializable? . -> . url?)]
+ [stuffed-url? (url? . -> . boolean?)]
+ [unstuff-url ((stuffer/c serializable? bytes?) url? . -> . serializable?)])

@@ -9,7 +9,11 @@ Although the @exec{scribble} command-line utility generates output
 from a Scribble document (run @exec{scribble -h} for more
 information), documentation of PLT Scheme libraries is normally built
 by @exec{setup-plt}. This chapter emphasizes the @exec{setup-plt}
-approach, which more automatically supports links across documents.
+approach, which more automatically supports links across
+documents.
+
+@margin-note{See @secref["config"] for information on using the
+             @exec{scribble} command-line utility.}
 
 @;----------------------------------------
 @section[#:tag "getting-started"]{Getting Started}
@@ -303,7 +307,7 @@ and they declare hyperlink targets for @scheme[scheme]-based
 hyperlinks.
 
 To document a @scheme[my-helper] procedure that is exported by
-@filepath{helper.ss} in the @scheme{my-lib} collection that contains
+@filepath{helper.ss} in the @filepath{my-lib} collection that contains
 @filepath{manual.scrbl}:
 
 @itemize[
@@ -433,7 +437,7 @@ via @scheme[require-for-label] and @scheme[require]:
 
 In general, a @filepath{.scrbl} file produces a @techlink{part}. A part
 produced by a document's main source (as specified in the
-@scheme{info.ss} file) represents the whole document. The
+@filepath{info.ss} file) represents the whole document. The
 @scheme[include-section] procedure can be used to incorporate a part
 as a sub-part of the enclosing part.
 

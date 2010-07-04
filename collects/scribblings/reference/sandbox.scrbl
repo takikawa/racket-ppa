@@ -168,6 +168,11 @@ restriction is enforced).
                             (define later 5))))
 ]
 
+@scheme[make-module-evaluator] can be very convenient for testing
+module files: all you need to do is pass in a path value for the file
+name, and you get back an evaluator in the module's context which you
+can use with your favorite test facility.
+
 In all cases, the evaluator operates in an isolated and limited
 environment:
 @itemize[
@@ -189,6 +194,18 @@ environment too --- so, for example, if the memory that is required to
 create the sandbox is higher than the limit, then
 @scheme[make-evaluator] will fail with a memory limit exception.
 
+The sandboxed evironment is well isolated, and the evaluator function
+essentially sends it an expression and waits for a result.  This form
+of communication makes it impossible to have nested (or concurrent)
+calls to a single evaluator.  Usually this is not a problem, but in
+some cases you can get the evaluator function available inside the
+sandboxed code, for example:
+@schemeblock[
+(let ([e (make-evaluator 'scheme/base)])
+  (e (,e 1)))
+]
+An error will be signalled in such cases.
+
 Evaluation can also be instrumented to track coverage information when
 @scheme[sandbox-coverage-enabled] is set. Exceptions (both syntax and
 run-time) are propagated as usual to the caller of the evaluation
@@ -198,13 +215,12 @@ exceptions happen in the same way, so you don't need special code to
 catch syntax errors.
 
 Finally, the fact that a sandboxed evaluator accept syntax objects
-makes it usable as the value for @scheme{current-eval}, which means
+makes it usable as the value for @scheme[current-eval], which means
 that you can easily start a sandboxed read-eval-print-loop.  For
 example, here is a quick implementation of a networked REPL:
 
 @schemeblock[
-(define e
-  (make-module-evaluator '(module m scheme/base)))
+(define e (make-evaluator 'scheme/base))
 (let-values ([(i o) (tcp-accept (tcp-listen 9999))])
   (parameterize ([current-input-port  i]
                  [current-output-port o]
@@ -410,7 +426,7 @@ A parameter that holds a list of values that specify how to create a
 namespace for evaluation in @scheme[make-evaluator] or
 @scheme[make-module-evaluator].  The first item in the list is a thunk
 that creates the namespace, and the rest are module paths for modules
-that to be attached to the created namespace using
+to be attached to the created namespace using
 @scheme[namespace-attach-module].
 
 The default is @scheme[(list make-base-namespace)] if @scheme[gui?] is
@@ -462,7 +478,8 @@ specifications in @scheme[sandbox-path-permissions], and it uses
 
 
 @defparam[sandbox-path-permissions perms
-          (listof (list/c (or/c 'execute 'write 'delete 'read-bytecode 'read 'exists)
+          (listof (list/c (or/c 'execute 'write 'delete 
+                                'read-bytecode 'read 'exists)
                           (or/c byte-regexp? bytes? string? path?)))]{
 
 A parameter that configures the behavior of the default sandbox

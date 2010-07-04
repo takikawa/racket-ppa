@@ -1,7 +1,7 @@
 #lang scribble/doc
 @(require "mz.ss")
 
-@(define ellipses (scheme ...))
+@(define lit-ellipses (scheme ...))
 
 @title[#:tag "stx-patterns"]{Pattern-Based Syntax Matching}
 
@@ -26,7 +26,7 @@
                              (stat-pattern ...+ . stat-pattern)
                              (code:line #,(tt "#")(stat-pattern ...))
                              const]
-               [ellipses #,ellipses])]{
+               [ellipses #,lit-ellipses])]{
 
 Finds the first @scheme[pattern] that matches the syntax object
 produced by @scheme[stx-expr], and for which the corresponding
@@ -205,7 +205,7 @@ the individual @scheme[stx-expr].}
                               (code:line #,(tt "#")(stat-template ...))
                               (code:line #,(tt "#s")(key-datum stat-template ...))
                               const]
-               [ellipses #,ellipses])]{
+               [ellipses #,lit-ellipses])]{
 
 Constructs a syntax object based on a @scheme[template],which can
 inlude @tech{pattern variables} bound by @scheme[syntax-case] or
@@ -348,7 +348,8 @@ for use only with a @scheme[quasisyntax] template.}
 Like @scheme[syntax], except that the immediate resulting syntax
 object takes its source-location information from the result of
 @scheme[stx-expr] (which must produce a syntax object), unless the
-@scheme[template] is just a pattern variable.}
+@scheme[template] is just a pattern variable or both the source and
+position of @scheme[stx-expr] are @scheme[#f].}
 
 
 @defform[(quasisyntax/loc stx-expr template)]{

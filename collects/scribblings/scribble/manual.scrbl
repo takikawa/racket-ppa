@@ -4,8 +4,8 @@
           (for-syntax scheme/base)
           (for-label scribble/manual-struct))
 
-@(define ellipses (scheme ...))
-@(define ellipses+ (scheme ...+))
+@(define lit-ellipses (scheme ...))
+@(define lit-ellipses+ (scheme ...+))
 
 @title[#:tag "manual" #:style 'toc]{Manual Forms}
 
@@ -106,6 +106,7 @@ A few other escapes are recognized symbolically:
 
 }
 
+See also @schememodname[scribble/comment-reader].
 }
 
 @defform[(SCHEMEBLOCK datum ...)]{Like @scheme[schemeblock], but with
@@ -140,8 +141,10 @@ as a REPL value (i.e., a single color with no hyperlinks).}
 @defform[(schemeid datum ...)]{Like @scheme[scheme], but typeset
 as an unbound identifier (i.e., no coloring or hyperlinks).}
 
-@defform[(schememodname datum)]{Like @scheme[scheme], but typeset as a
-module path. If @scheme[datum] is an identifier, then it is
+@defform*[((schememodname datum)
+           (schememodname ((unsyntax (scheme unsyntax)) expr)))]{
+Like @scheme[scheme], but typeset as a module path. If @scheme[datum]
+is an identifier or @scheme[expr] produces a symbol, then it is
 hyperlinked to the module path's definition as created by
 @scheme[defmodule].}
 
@@ -202,10 +205,53 @@ procedure, but use @scheme[var] if that cannot work for some reason.}
 in a form definition.}
 
 @; ------------------------------------------------------------------------
+
+@subsection{Typesetting Comments}
+
+@defmodulereader[scribble/comment-reader]
+
+As a reader module, @schememodname[scribble/comment-reader] reads a
+single S-expression that contains @litchar{;}-based comment lines, and
+it wraps the comments with @scheme[code:comment] for use with forms
+like @scheme[schemeblock]. More precisely,
+@schememodname[scribble/comment-reader] extends the current reader to
+adjust the parsing of @litchar{;}.
+
+For example, within a Scribble document that imports
+@schememodname[scribble/manual],
+
+@verbatim[#:indent 2]|{
+  @#reader scribble/comment-reader
+   (schemeblock
+    ;; This is not a pipe
+    (make-pipe)
+   )
+}|
+
+generates
+
+@#reader scribble/comment-reader
+ (schemeblock
+  ;; This is not a pipe
+  (make-pipe)
+ )
+
+The initial @litchar["@"] is needed above to shift into S-expression
+mode, so that @schememetafont{#reader} is recognized as a reader
+declaration instead of literal text. Also, the example uses
+@scheme[(schemeblock ....)]  instead of
+@schememetafont["@"]@scheme[schemeblock]@schememetafont["["]@scheme[....]@schememetafont["]"]
+because the @"@"-reader would drop comments within the
+@scheme[schemeblock] before giving
+@schememodname[scribble/comment-reader] a chance to convert them.
+
+@; ------------------------------------------------------------------------
 @section[#:tag "doc-modules"]{Documenting Modules}
 
-@defform/subs[(defmodule id maybe-sources pre-flow ...)
-              ([maybe-sources code:blank
+@defform/subs[(defmodule maybe-req id maybe-sources pre-flow ...)
+              ([maybe-req code:blank
+                          (code:line #:require-form expr)]
+               [maybe-sources code:blank
                               (code:line #:use-sources (mod-path ...))])]{
 
 Produces a sequence of flow elements (encaptured in a @scheme[splice])
@@ -220,6 +266,11 @@ Besides generating text, this form expands to a use of
 used at most once in a section, though it can be shadowed with
 @scheme[defmodule]s in sub-sections.
 
+If a @scheme[#:require-form] clause is provided, the given expression
+produces an element to use instead of @scheme[(scheme require)] for
+the declaration of the module. This is useful to suggest a different
+way of accessing the module instead of through @scheme[require].
+
 Hyperlinks created by @scheme[schememodname] are associated with the
 enclosing section, rather than the local @scheme[id] text.}
 
@@ -230,32 +281,32 @@ Like @scheme[defmodule], but documents @scheme[id] as a module path
 suitable for use by either @scheme[require] or @schememodfont{#lang}.}
 
 
-@defform[(defmodule* (id ...+) maybe-sources pre-flow ...)]{
+@defform[(defmodulereader id maybe-sources pre-flow ...)]{
 
-Like @scheme[defmodule], but introduces multiple module paths instead
+Like @scheme[defmodule], but documents @scheme[id] as a module path
+suitable for use with @schememetafont{#reader}.}
+
+
+@deftogether[(
+@defform[(defmodule* maybe-req  (id ...+) maybe-sources pre-flow ...)]
+@defform[(defmodulelang* (id ...+) maybe-sources pre-flow ...)]
+@defform[(defmodulereader* (id ...+) maybe-sources pre-flow ...)]
+)]{
+
+Like @scheme[defmodule], etc., but introduces multiple module paths instead
 of just one.}
 
+@deftogether[(
+@defform[(defmodule*/no-declare maybe-req (id ...) pre-flow ...)]
+@defform[(defmodulelang*/no-declare (id ...) pre-flow ...)]
+@defform[(defmodulereader*/no-declare (id ...) pre-flow ...)]
+)]{
 
-@defform[(defmodulelang* (id ...+) maybe-sources pre-flow ...)]{
-
-Like @scheme[defmodulelang], but introduces multiple module paths
-instead of just one.}
-
-
-@defform[(defmodule*/no-declare (id ...) pre-flow ...)]{
-
-Like @scheme[defmodule*], but without expanding to
+Like @scheme[defmodule*], etc., but without expanding to
 @scheme[declare-exporting]. Use this form when you want to provide a
 more specific list of modules (e.g., to name both a specific module
 and one that combines several modules) via your own
 @scheme[declare-exporting] declaration.}
-
-
-@defform[(defmodulelang*/no-declare (id ...) pre-flow ...)]{
-
-Like @scheme[defmodulelang*], but without expanding to
-@scheme[declare-exporting].}
-
 
 @defform/subs[(declare-exporting mod-path ... maybe-sources)
               ([maybe-sources code:blank
@@ -315,8 +366,8 @@ sub-sections.}
                          (keyword arg-id contract-expr-datum default-expr)
                          ellipses
                          ellipses+]
-               [ellipses #, @ellipses]
-               [ellipses+ #, @ellipses+])]{
+               [ellipses #, @lit-ellipses]
+               [ellipses+ #, @lit-ellipses+])]{
 
 Produces a sequence of flow elements (encapsulated in a
 @scheme[splice]) to document a procedure named @scheme[id]. Nesting
@@ -351,14 +402,14 @@ Each @scheme[arg-spec] must have one of the following forms:
        Like the previous case, but with a default
        value.}
 
-@specsubform[#, @ellipses]{Any number of the preceding argument.  This
+@specsubform[#, @lit-ellipses]{Any number of the preceding argument.  This
        form is normally used at the end, but keyword-based arguments
        can sensibly appear afterward. See also the documentation for
-       @scheme[append] for a use of @ellipses before the last
+       @scheme[append] for a use of @lit-ellipses before the last
        argument.}
 
-@specsubform[#, @ellipses+]{One or more of the preceding argument
-       (normally at the end, like @ellipses).}
+@specsubform[#, @lit-ellipses+]{One or more of the preceding argument
+       (normally at the end, like @lit-ellipses).}
 
 The @scheme[result-contract-expr-datum] is typeset via
 @scheme[schemeblock0], and it represents a contract on the procedure's
@@ -570,6 +621,29 @@ typeset as with @scheme[scheme].}
 
 Like @scheme[schemegrammar], but for typesetting multiple productions
 at once, aligned around the @litchar{=} and @litchar{|}.}
+
+@defproc[(defidentifier [id identifier?]
+                        [#:form? form? any/c #f]
+                        [#:index? index? any/c #t]
+                        [#:show-libs? show-libs? any/c #t])
+         element?]{
+
+Typesets @scheme[id] as a Scheme identifier, and also establishes the
+identifier as the definition of a binding in the same way as
+@scheme[defproc], @scheme[defform], etc. As always, the library that
+provides the identifier must be declared via @scheme[defmodule] or
+@scheme[declare-exporting] for an enclosing section.
+
+If @scheme[form?] is a true value, then the identifier is documented
+as a syntactic form, so that uses of the identifier (normally
+including @scheme[id] itself) are typeset as a syntactic form.
+
+If @scheme[index?] is a true value, then the identifier is registered
+in the index.
+
+If @scheme[show-libs?] is a true value, then the identifier's defining
+module may be exposed in the typeset form (e.g., when viewing HTML and
+the mouse hovers over the identifier).}
 
 @; ------------------------------------------------------------------------
 @section[#:tag "doc-classes"]{Documenting Classes and Interfaces}
@@ -802,7 +876,7 @@ and @litchar{^} for subscripts and superscripts.}
          element?]{
 
 Inserts the hyperlinked title of the section tagged @scheme[tag], but
-@scheme{aux-element} items in the title content are omitted in the
+@schemeidfont{aux-element} items in the title content are omitted in the
 hyperlink label.
 
 If @scheme[module-path] is provided, the @scheme[tag] refers to a tag
@@ -857,13 +931,15 @@ The tag @scheme[t] refers to the content form of
 @scheme[pre-content].}
 
 
-@defproc[(elemref [t tag?] [pre-content any/c] ...) element?]{
+@defproc[(elemref [t tag?] [pre-content any/c] ... 
+                  [#:underline? underline? any/c #t]) element?]{
 
 The @tech{decode}d @scheme[pre-content] is hyperlinked to @scheme[t],
 which is normally defined using @scheme[elemtag].}
 
 
-@defproc[(deftech [pre-content any/c] ...) element?]{
+@defproc[(deftech [pre-content any/c] ...
+                  [#:style? style? any/c #t]) element?]{
 
 Produces an element for the @tech{decode}d @scheme[pre-content], and
 also defines a term that can be referenced elsewhere using
@@ -886,7 +962,10 @@ as follows:
 
 These normalization steps help support natural-language references
 that differ slightly from a defined form. For example, a definition of
-``bananas'' can be referenced with a use of ``banana''.}
+``bananas'' can be referenced with a use of ``banana''.
+
+If @scheme[style?] is true, then @scheme[defterm] is used on
+@scheme[pre-content].}
 
 @defproc[(tech [pre-content any/c] ...
                [#:doc module-path (or/c module-path? false/c) #f])

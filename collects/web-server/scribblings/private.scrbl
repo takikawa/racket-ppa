@@ -147,21 +147,19 @@ The @scheme[dispatch-server^] signature is an alias for
 
 @defsignature[dispatch-server-config^ ()]{
 
- @defthing[port port?]{Specifies the port to serve on.}
- @defthing[listen-ip string?]{Passed to @scheme[tcp-accept].}
+ @defthing[port port-number?]{Specifies the port to serve on.}
+ @defthing[listen-ip (or/c string? false/c)]{Passed to @scheme[tcp-listen].}
  @defthing[max-waiting integer?]{Passed to @scheme[tcp-accept].}
  @defthing[initial-connection-timeout integer?]{Specifies the initial timeout given to a connection.}
  @defproc[(read-request [c connection?]
-                        [p port?]
-                        [port-addresses (-> port? boolean?
-                                            (or/c (values string? string?)
-                                                  (values string? (integer-in 1 65535)
-                                                          string? (integer-in 1 65535))))])
-          any/c]{
+                        [p port-number?]
+                        [port-addresses 
+                         (input-port? . -> . (values string? string?))])
+          (values any/c boolean?)]{
   Defines the way the server reads requests off connections to be passed
   to @scheme[dispatch].
  }
- @defthing[dispatch dispatcher/c]{How to handle requests.}
+ @defthing[dispatch (-> connection? any/c void)]{How to handle requests.}
 }
 
 }
@@ -173,8 +171,8 @@ The @scheme[dispatch-server^] signature is an alias for
 The @schememodname[web-server/private/dispatch-server-unit] module
 provides the unit that actually implements a dispatching server.
 
-@defthing[dispatch-server@ (unit/c (tcp^ dispatch-server-config^) 
-                                   (dispatch-server^))]{
+@defthing[dispatch-server@ (unit/c (import tcp^ dispatch-server-config^) 
+                                   (export dispatch-server^))]{
  Runs the dispatching server config in a very basic way, except that it uses
  @secref["connection-manager.ss"] to manage connections.
 }
@@ -368,6 +366,28 @@ with this process.
 }
 
 @; ------------------------------------------------------------
+@section[#:tag "gzip.ss"]{GZip}
+@(require (for-label web-server/private/gzip
+                     file/gzip
+                     file/gunzip))
+
+@defmodule[web-server/private/gzip]{
+
+The @web-server provides a thin wrapper around @schememodname[file/gzip] and @schememodname[file/gunzip].
+
+@defproc[(gzip/bytes [ib bytes?])
+         bytes?]{
+ GZips @scheme[ib] and returns the result.
+}
+                
+@defproc[(gunzip/bytes [ib bytes?])
+         bytes?]{
+ GUnzips @scheme[ib] and returns the result.
+}
+
+}
+
+@; ------------------------------------------------------------
 @section[#:tag "util.ss"]{Miscellaneous Utilities}
 @(require (for-label web-server/private/util))
 
@@ -377,6 +397,7 @@ There are a number of other miscellaneous utilities the @web-server
 needs. They are provided by @filepath{private/util.ss}.
 
 @subsection{Contracts}
+@defthing[non-empty-string/c contract?]{Contract for non-empty strings.}
 @defthing[port-number? contract?]{Equivalent to @scheme[(between/c 1 65535)].}
 @defthing[path-element? contract?]{Equivalent to @scheme[(or/c path-string? (symbols 'up 'same))].}
 
@@ -433,13 +454,6 @@ needs. They are provided by @filepath{private/util.ss}.
 
 @subsection{Exceptions}
 
-@defproc[(pretty-print-invalid-xexpr [exn exn:invalid-xexpr?]
-                                     [v any/c])
-         void]{
- Prints @scheme[v] as if it were almost an X-expression highlighting the error
- according to @scheme[exn].
-}
-
 @defproc[(network-error [s symbol?]
                         [fmt string?]
                         [v any/c] ...)
@@ -471,6 +485,10 @@ needs. They are provided by @filepath{private/util.ss}.
 
 @subsection{Bytes}
 
+@defproc[(bytes-ci=? [b1 bytes?] [b2 bytes?]) boolean?]{
+ Compares two bytes case insensitively.
+}
+                                                        
 @defproc[(read/bytes [b bytes?])
          serializable?]{
  @scheme[read]s a value from @scheme[b] and returns it.

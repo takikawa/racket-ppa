@@ -1,6 +1,5 @@
 #lang scheme/base
-(require (planet "test.ss" ("schematics" "schemeunit.plt" 2))
-         (planet "util.ss" ("schematics" "schemeunit.plt" 2))
+(require (planet schematics/schemeunit:3)
          (only-in mzlib/file
                   make-temporary-file)
          net/url
@@ -42,7 +41,7 @@
                                  #:authentication-responder 
                                  (lambda (u h) (esc h))))
     (define-values (c i o) (make-mock-connection #""))
-    (d c (make-request 'get 
+    (d c (make-request #"GET"
                        (if applies? 
                            (string->url "http://host/secret/something")
                            (string->url "http://host/not-secret"))
@@ -74,7 +73,7 @@
     (test-equal? "not authorized"
                  (let ([v (runt #t #f)])
                    (list (header-field v) (header-value v)))
-                 (list #"WWW-Authenticate" #" Basic realm=\"secret stuff\""))
+                 (list #"WWW-Authenticate" #"Basic realm=\"secret stuff\""))
     (test-exn "does not apply"
               exn:dispatcher?
               (lambda ()

@@ -525,7 +525,7 @@ static void make_kernel_env(void)
   GLOBAL_PRIM_W_ARITY("syntax-local-name", local_exp_time_name, 0, 0, env);
   GLOBAL_PRIM_W_ARITY("syntax-local-context", local_context, 0, 0, env);
   GLOBAL_PRIM_W_ARITY("syntax-local-phase-level", local_phase_level, 0, 0, env);
-  GLOBAL_PRIM_W_ARITY("syntax-local-make-definition-context", local_make_intdef_context, 0, 0, env);
+  GLOBAL_PRIM_W_ARITY("syntax-local-make-definition-context", local_make_intdef_context, 0, 1, env);
   GLOBAL_PRIM_W_ARITY("internal-definition-context-seal", intdef_context_seal, 1, 1, env);
   GLOBAL_PRIM_W_ARITY("internal-definition-context?", intdef_context_p, 1, 1, env);
   GLOBAL_PRIM_W_ARITY("identifier-remove-from-definition-context", id_intdef_remove, 2, 2, env);
@@ -2638,7 +2638,7 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
 
   /* Used out of context? */
   if (SAME_OBJ(modidx, scheme_undefined)) {
-    if (!env->genv->module && SCHEME_STXP(find_id)) {
+    if (SCHEME_STXP(find_id)) {
       /* Looks like lexically bound, but double-check that it's not bound via a tl_id: */
       find_global_id = scheme_tl_id_sym(env->genv, find_id, NULL, 0, NULL, NULL);
       if (!SAME_OBJ(find_global_id, SCHEME_STX_VAL(find_id)))
@@ -3990,6 +3990,10 @@ namespace_undefine_variable(int argc, Scheme_Object *argv[])
 
   if (scheme_lookup_global(argv[0], env)) {
     bucket = scheme_global_bucket(argv[0], env);
+    scheme_set_global_bucket("namespace-undefine-variable!", 
+                             bucket,
+                             NULL,
+                             0);
     bucket->val = NULL;
   } else {
     scheme_raise_exn(MZEXN_FAIL_CONTRACT_VARIABLE, argv[0],
@@ -4301,13 +4305,24 @@ local_phase_level(int argc, Scheme_Object *argv[])
 static Scheme_Object *
 local_make_intdef_context(int argc, Scheme_Object *argv[])
 {
-  Scheme_Comp_Env *env;
+  Scheme_Comp_Env *env, *senv;
   Scheme_Object *c, *rib;
 
   env = scheme_current_thread->current_local_env;
   if (!env)
     scheme_raise_exn(MZEXN_FAIL_CONTRACT, "syntax-local-make-definition-context: not currently transforming");
   
+  if (argc && SCHEME_TRUEP(argv[0])) {
+    if (!SAME_TYPE(scheme_intdef_context_type, SCHEME_TYPE(argv[0])))
+      scheme_wrong_type("syntax-local-bind-syntaxes", "internal-definition context or #f", 0, argc, argv);
+    senv = (Scheme_Comp_Env *)SCHEME_PTR1_VAL(argv[0]);
+    if (!scheme_is_sub_env(senv, env)) {
+      scheme_raise_exn(MZEXN_FAIL_CONTRACT, "syntax-local-make-definition-context: transforming context does "
+                       "not match given internal-definition context");
+    }
+    env = senv;
+  }
+
   rib = scheme_make_rename_rib();
 
   c = scheme_alloc_object();
@@ -4339,15 +4354,46 @@ static Scheme_Object *intdef_context_seal(int argc, Scheme_Object *argv[])
 static Scheme_Object *
 id_intdef_remove(int argc, Scheme_Object *argv[])
 {
+  Scheme_Object *l, *res, *skips;
+
   if (!SCHEME_STXP(argv[0]) || !SCHEME_SYMBOLP(SCHEME_STX_VAL(argv[0])))
     scheme_wrong_type("identifier-from-from-definition-context", 
                       "syntax identifier", 0, argc, argv);
-
-  if (!SAME_TYPE(SCHEME_TYPE(argv[1]), scheme_intdef_context_type))
-    scheme_wrong_type("identifier-remove-from-definition-context", 
-                      "internal-definition context", 1, argc, argv);
   
-  return scheme_stx_id_remove_rib(argv[0], SCHEME_PTR2_VAL(argv[1]));
+  l = argv[1];
+  if (!SAME_TYPE(SCHEME_TYPE(l), scheme_intdef_context_type)) {
+    while (SCHEME_PAIRP(l)) {
+      if (!SAME_TYPE(SCHEME_TYPE(SCHEME_CAR(l)), scheme_intdef_context_type))
+        break;
+      l = SCHEME_CDR(l);
+    }
+    if (!SCHEME_NULLP(l))
+      scheme_wrong_type("identifier-remove-from-definition-context", 
+                        "internal-definition context or list of internal-definition contexts", 
+                        1, argc, argv);
+  }
+
+  l = argv[1];
+  if (SAME_TYPE(SCHEME_TYPE(l), scheme_intdef_context_type))
+    l = scheme_make_pair(l, scheme_null);
+
+  res = argv[0];
+  skips = scheme_null;
+
+  while (SCHEME_PAIRP(l)) {
+    res = scheme_stx_id_remove_rib(res, SCHEME_PTR2_VAL(SCHEME_CAR(l)));
+    skips = scheme_make_pair(SCHEME_PTR2_VAL(SCHEME_CAR(l)), skips);
+    l = SCHEME_CDR(l);
+  }
+
+  if (scheme_stx_ribs_matter(res, skips)) {
+    /* Removing ribs leaves the binding for this identifier in limbo, because
+       the rib that binds it depends on the removed ribs. Invent in inaccessible
+       identifier. */
+    res = scheme_add_remove_mark(res, scheme_new_mark());
+  }
+  
+  return res;
 }
 
 static Scheme_Object *
@@ -4557,6 +4603,7 @@ local_make_delta_introduce(int argc, Scheme_Object *argv[])
   Scheme_Object *introducers = scheme_null, *mappers = scheme_null;
   int renamed = 0;
   Scheme_Comp_Env *env;
+  Scheme_Object *certs;
 
   env = scheme_current_thread->current_local_env;
   if (!env)
@@ -4570,6 +4617,8 @@ local_make_delta_introduce(int argc, Scheme_Object *argv[])
 
   sym = scheme_stx_activate_certs(sym);
 
+  certs = scheme_current_thread->current_local_certs;
+
   while (1) {
     binder = NULL;
 
@@ -4578,7 +4627,7 @@ local_make_delta_introduce(int argc, Scheme_Object *argv[])
 			       + SCHEME_RESOLVE_MODIDS
 			       + SCHEME_APP_POS + SCHEME_ENV_CONSTANTS_OK
 			       + SCHEME_OUT_OF_CONTEXT_OK + SCHEME_ELIM_CONST),
-			      scheme_current_thread->current_local_certs, 
+			      certs, 
 			      scheme_current_thread->current_local_modidx, 
 			      NULL, NULL, &binder);
     
@@ -4607,7 +4656,10 @@ local_make_delta_introduce(int argc, Scheme_Object *argv[])
     
     v = SCHEME_PTR_VAL(v);
     if (SAME_TYPE(SCHEME_TYPE(v), scheme_id_macro_type)) {
+      certs = scheme_stx_extract_certs(sym, certs);
+
       sym = SCHEME_PTR1_VAL(v);
+      sym = scheme_stx_activate_certs(sym);
 
       v = SCHEME_PTR2_VAL(v);
       if (!SCHEME_FALSEP(v))
@@ -5188,6 +5240,9 @@ static Scheme_Object *read_resolve_prefix(Scheme_Object *obj)
 
   tv = SCHEME_CAR(obj);
   sv = SCHEME_CDR(obj);
+
+  if (!SCHEME_VECTORP(tv)) return NULL;
+  if (!SCHEME_VECTORP(sv)) return NULL;
 
   rp = MALLOC_ONE_TAGGED(Resolve_Prefix);
   rp->so.type = scheme_resolve_prefix_type;

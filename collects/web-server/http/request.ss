@@ -1,6 +1,5 @@
-#lang scheme/base
-(require mzlib/contract
-         mzlib/plt-match
+#lang scheme
+(require mzlib/plt-match
          net/url
          mzlib/list
          net/uri-codec
@@ -10,7 +9,11 @@
 
 (provide/contract
  [rename ext:read-request read-request
-         ((connection? number? ((input-port?) . ->* . (string? string?))) . ->* . (request? boolean?))])
+         (connection? 
+          port-number?
+          (input-port? . -> . (values string? string?))
+          . -> .
+          (values request? boolean?))])
 
 (define (ext:read-request conn host-port port-addresses)
   (with-handlers ([exn? (lambda (exn)
@@ -87,7 +90,7 @@
   (let ([rx (byte-regexp #"^([^ ]+) (.+) HTTP/([0-9]+)\\.([0-9]+)$")])
     (lambda (a) (regexp-match rx a))))
 
-; read-request-line : iport -> symbol url number number
+; read-request-line : iport -> bytes url number number
 ; to read in the first line of an http request, AKA the "request line"
 ; effect: in case of errors, complain [MF: where] and close the ports
 (define (read-request-line ip)
@@ -98,7 +101,7 @@
         [(match-method line)
          => (match-lambda
               [(list _ method url major minor)
-               (values (lowercase-symbol! (bytes->string/utf-8 method))
+               (values method
                        (string->url (bytes->string/utf-8 url))
                        (string->number (bytes->string/utf-8 major))
                        (string->number (bytes->string/utf-8 minor)))])]
@@ -110,7 +113,7 @@
   (let ([rx (byte-regexp (bytes-append #"^([^:]*):[ " (bytes 9) #"]*(.*)"))])
     (lambda (a) (regexp-match rx a))))
 
-; read-headers : iport -> (listof (cons symbol bytes))
+; read-headers : iport -> (listof header?)
 (define (read-headers in)
   (let read-header ()
     (define l (read-bytes-line in 'any))
@@ -147,48 +150,52 @@
 
 ;; read-bindings&post-data/raw: connection symbol url (listof header?) -> (values (or/c (listof binding?) string?) (or/c bytes? false/c?))
 (define (read-bindings&post-data/raw conn meth uri headers)
-  (match meth
-    ['get
-     (values (map (match-lambda
-                    [(list-rest k v)
-                     (make-binding:form (string->bytes/utf-8 (symbol->string k))
-                                        (string->bytes/utf-8 v))])
-                  (url-query uri))
+  (cond
+    [(bytes-ci=? #"GET" meth)
+     (values (filter (lambda (x) x)
+                     (map (match-lambda
+                            [(list-rest k v)
+                             (if (and (symbol? k) (string? v))
+                                 (make-binding:form (string->bytes/utf-8 (symbol->string k))
+                                                    (string->bytes/utf-8 v))
+                                 #f)])
+                          (url-query uri)))
              #f)]
-    ['post
-     (define content-type (headers-assq* #"Content-Type" headers))
-     (define in (connection-i-port conn))
-     (cond
-       [(and content-type (regexp-match FILE-FORM-REGEXP (header-value content-type)))
-        => (match-lambda
-             [(list _ content-boundary)
-              (values
-               (map (match-lambda
-                      [(struct mime-part (headers contents))
-                       (define rhs (header-value (headers-assq* #"Content-Disposition" headers)))
-                       (match (list (regexp-match #"filename=(\"([^\"]*)\"|([^ ;]*))" rhs)
-                                    (regexp-match #"[^e]name=(\"([^\"]*)\"|([^ ;]*))" rhs))
-                         [(list #f #f)
-                          (network-error 'reading-bindings "Couldn't extract form field name for file upload")]
-                         [(list #f (list _ _ f0 f1))
-                          (make-binding:form (or f0 f1) (apply bytes-append contents))]
-                         [(list (list _ _ f00 f01) (list _ _ f10 f11))
-                          (make-binding:file (or f10 f11) (or f00 f01) headers (apply bytes-append contents))])])
-                    (read-mime-multipart content-boundary in))
-               #f)])]
-       [else        
-        (match (headers-assq* #"Content-Length" headers)
-          [(struct header (_ value))
-           (cond
-             [(string->number (bytes->string/utf-8 value))
-              => (lambda (len) 
-                   (let ([raw-bytes (read-bytes len in)])
-                     (values (parse-bindings raw-bytes) raw-bytes)))]
-             [else 
-              (network-error 'read-bindings "Post request contained a non-numeric content-length")])]
-          [#f
-           (let ([raw-bytes (apply bytes-append (read-to-eof in))])
-             (values (parse-bindings raw-bytes) raw-bytes))])])]
+    [(bytes-ci=? #"POST" meth)
+     (local
+       [(define content-type (headers-assq* #"Content-Type" headers))
+        (define in (connection-i-port conn))]
+       (cond
+         [(and content-type (regexp-match FILE-FORM-REGEXP (header-value content-type)))
+          => (match-lambda
+               [(list _ content-boundary)
+                (values
+                 (map (match-lambda
+                        [(struct mime-part (headers contents))
+                         (define rhs (header-value (headers-assq* #"Content-Disposition" headers)))
+                         (match (list (regexp-match #"filename=(\"([^\"]*)\"|([^ ;]*))" rhs)
+                                      (regexp-match #"[^e]name=(\"([^\"]*)\"|([^ ;]*))" rhs))
+                           [(list #f #f)
+                            (network-error 'reading-bindings "Couldn't extract form field name for file upload")]
+                           [(list #f (list _ _ f0 f1))
+                            (make-binding:form (or f0 f1) (apply bytes-append contents))]
+                           [(list (list _ _ f00 f01) (list _ _ f10 f11))
+                            (make-binding:file (or f10 f11) (or f00 f01) headers (apply bytes-append contents))])])
+                      (read-mime-multipart content-boundary in))
+                 #f)])]
+         [else        
+          (match (headers-assq* #"Content-Length" headers)
+            [(struct header (_ value))
+             (cond
+               [(string->number (bytes->string/utf-8 value))
+                => (lambda (len) 
+                     (let ([raw-bytes (read-bytes len in)])
+                       (values (parse-bindings raw-bytes) raw-bytes)))]
+               [else 
+                (network-error 'read-bindings "Post request contained a non-numeric content-length")])]
+            [#f
+             (let ([raw-bytes (apply bytes-append (read-to-eof in))])
+               (values (parse-bindings raw-bytes) raw-bytes))])]))]
     [meth
      (values empty #f)]))
 

@@ -7,9 +7,12 @@
                      web-server/http
                      web-server/managers/lru
                      web-server/private/util
+                     web-server/dispatchers/dispatch
                      web-server/configuration/configuration-table
                      web-server/configuration/responders
                      web-server/dispatchers/dispatch-log
+                     scheme/serialize
+                     web-server/stuffers
                      scheme/list))
 
 @defmodule[web-server/servlet-env]{
@@ -80,7 +83,7 @@ If you want to use @scheme[serve/servlet] in a start up script for a Web server,
                #:command-line? #t)
 ]
 
-@defproc[(serve/servlet [start (request? . -> . response?)]
+@defproc[(serve/servlet [start (request? . -> . response/c)]
                         [#:command-line? command-line? boolean? #f]
                         [#:launch-browser? launch-browser? boolean? (not command-line?)]
                         [#:quit? quit? boolean? (not command-line?)]
@@ -96,6 +99,7 @@ If you want to use @scheme[serve/servlet] in a start up script for a Web server,
                                             "^~a$"
                                             (regexp-quote servlet-path)))]
                         [#:stateless? stateless? boolean? #f]
+                        [#:stuffer stuffer (stuffer/c serializable? bytes?) default-stuffer]
                         [#:manager manager manager? (make-threshold-LRU-manager #f (* 1024 1024 64))]
                         [#:servlet-namespace servlet-namespace (listof module-path?) empty]
                         [#:server-root-path server-root-path path-string? default-server-root-path]
@@ -103,7 +107,7 @@ If you want to use @scheme[serve/servlet] in a start up script for a Web server,
                         [#:servlets-root servlets-root path-string? (build-path server-root-path "htdocs")]
                         [#:servlet-current-directory servlet-current-directory path-string? servlets-root]
                         [#:file-not-found-responder file-not-found-responder
-                                                    (request? . -> . response?)
+                                                    (request? . -> . response/c)
                                                     (gen-file-not-found-responder 
                                                      (build-path
                                                       server-root-path
@@ -112,7 +116,7 @@ If you want to use @scheme[serve/servlet] in a start up script for a Web server,
                         [#:mime-types-path mime-types-path path-string?
                                            ....]
                         [#:log-file log-file (or/c false/c path-string?) #f]
-                        [#:log-format log-format symbol? 'apache-default])
+                        [#:log-format log-format log-format/c 'apache-default])
                        void]{
  This sets up and starts a fairly default server instance.
       
@@ -123,14 +127,15 @@ If you want to use @scheme[serve/servlet] in a start up script for a Web server,
  
  If @scheme[quit?] is true, then the URL @filepath["/quit"] ends the server.
   
- If @scheme[stateless?] is true, then the servlet is run as a stateless @schememodname[web-server] module.
+ If @scheme[stateless?] is true, then the servlet is run as a stateless @schememod[web-server] module and @scheme[stuffer] is used
+ as the @tech{stuffer}.
  
  Advanced users may need the following options:
  
  The server listens on @scheme[listen-ip] and port @scheme[port].
  
  If @scheme[ssl?] is true, then the server runs in HTTPS mode with @filepath{<server-root-path>/server-cert.pem}
- and @filepath{<server-root-path>/private-key.pem} as the certificates and private keys 
+ and @filepath{<server-root-path>/private-key.pem} as the certificates and private keys.
  
  The servlet is loaded with @scheme[manager]
  as its continuation manager. (The default manager limits the amount of memory to 64 MB and
@@ -157,4 +162,53 @@ If you want to use @scheme[serve/servlet] in a start up script for a Web server,
  are those allowed by @scheme[log-format->format].
 }
 
+@defproc[(dispatch/servlet 
+          [start (request? . -> . response/c)]
+          [#:regexp regexp regexp? #rx""]
+          [#:stateless? stateless? boolean? #f]
+          [#:stuffer stuffer (stuffer/c serializable? bytes?) default-stuffer]
+          [#:manager manager manager? (make-threshold-LRU-manager #f (* 1024 1024 64))]
+          [#:namespace namespace (listof module-path?) empty]
+          [#:current-directory servlet-current-directory path-string? (current-directory)])
+         dispatcher/c]{
+ @scheme[serve/servlet] starts a server and uses a particular dispatching sequence. For some applications, this
+ nails down too much, but users are conflicted, because the interface is so convenient. For those users, @scheme[dispatch/servlet]
+ does the hardest part of @scheme[serve/servlet] and constructs a dispatcher just for the @scheme[start] servlet.
+ 
+ The dispatcher responds to requests that match @scheme[regexp]. The current directory
+ of servlet execution is @scheme[servlet-current-directory]. 
+ 
+ If @scheme[stateless?] is true, then the servlet is run as a stateless @schememod[web-server] module and @scheme[stuffer] is used
+ as the @tech{stuffer}.
+
+ The servlet is loaded with @scheme[manager] as its continuation manager. (The default manager limits the amount of memory to 64 MB and
+ deals with memory pressure as discussed in the @scheme[make-threshold-LRU-manager] documentation.)
+ 
+ The modules specified by @scheme[servlet-namespace] are shared with other servlets.
+}
+                      
+@defproc[(serve/launch/wait
+          [make-dispatcher (semaphore? . -> . dispatcher/c)]
+          [#:launch-path launch-path (or/c false/c string?) #f]
+          [#:banner? banner? boolean? #f]
+          [#:listen-ip listen-ip (or/c false/c string?) "127.0.0.1"]
+          [#:port port number? 8000]
+          [#:ssl-keys ssl-keys (or/c false/c (cons/c path-string? path-string?)) #f])
+         void]{
+ The other interesting part of @scheme[serve/servlet] is its ability to start up a server and immediately
+ launch a browser at it. This is provided by @scheme[serve/launch/wait].
+ 
+ It starts a server using the result of @scheme[make-dispatcher] as the dispatcher. @scheme[make-dispatcher] is supplied
+ a semaphore that if posted, will cause the server to quit.
+ 
+ If @scheme[launch-path] is not false, then a browser is launched with that path appended to the URL to the server itself.
+ 
+ If @scheme[banner?] is true, then a banner is printed informing the user of the server's URL.
+ 
+ The server listens on @scheme[listen-ip] and port @scheme[port].
+ 
+ If @scheme[ssl-keys] is not false, then the server runs in HTTPS mode with @scheme[(car ssl-keys)]
+ and @scheme[(cdr ssl-keys)] as paths to the certificate and private key.    
+}
+              
 }

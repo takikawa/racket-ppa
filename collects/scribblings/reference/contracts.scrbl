@@ -53,12 +53,17 @@ Constructs a @tech{flat contract} from @scheme[predicate]. A value
 satisfies the contract if the predicate returns a true value.}
 
 
-@defproc[(flat-named-contract [type-name string?][predicate (any/c . -> . any)])
+@defproc[(flat-named-contract [type-name any/c][predicate (any/c . -> . any)])
          flat-contract?]{
 
-Like @scheme[flat-contract], but the first argument must be a string
-used for error reporting. The string describes the type that the
-predicate checks for.}
+Like @scheme[flat-contract], but the first argument must be the
+(quoted) name of a contract used for error reporting. 
+For example, 
+@schemeblock[(flat-named-contract
+              'odd-integer 
+              (lambda (x) (and (integer? x) (odd? x))))]
+turns the predicate into a contract with the name @tt{odd-integer}.
+}
 
 @defthing[any/c flat-contract?]{
 
@@ -362,7 +367,7 @@ The @scheme[case->] contract is a specialized contract,
 designed to match @scheme[case-lambda] and
 @scheme[unconstrained-domain->] allows range checking
 without requiring that the domain have any particular shape
-(see below for an exmaple use).
+(see below for an example use).
 
 @defform*/subs[#:literals (any values)
                [(-> dom ... range)]
@@ -673,23 +678,63 @@ contract on the fields that the sub-struct shares with its parent are
 only used in the contract for the sub-struct's maker, and the selector
 or mutators for the super-struct are not provided.}
 
-@defform[(define/contract id contract-expr init-value-expr)]{
+@defform/subs[
+ (with-contract blame-id (wc-export ...) free-var-list body ...+)
+ ([wc-export
+   id
+   (id contract-expr)]
+  [free-var-list
+   code:blank
+   (code:line #:freevars ([id contract-expr] ...))
+   (code:line #:freevar id contract-expr)])]{
+Generates a local contract boundary.  The @scheme[contract-expr]
+form cannot appear in expression position.  The @scheme[body] of the
+form allows definition/expression interleaving like a @scheme[module]
+body.  Names bound within the @scheme[body] must be exported to be
+accessible from outside the @scheme[with-contract] form.  Such
+@scheme[id]s can either be paired with a @scheme[contract-expr] or
+exported without a contract.
 
-Attaches the contract @scheme[contract-expr] to
-@scheme[init-value-expr] and binds that to @scheme[id].
+The @scheme[blame-id] is used for the positive positions of
+contracts paired with exported @scheme[id]s.  Contracts broken
+within the @scheme[with-contract] @scheme[body] will use the
+@scheme[blame-id] for their negative position.
 
-The @scheme[define/contract] form treats individual definitions as
-units of blame. The definition itself is responsible for positive
-(co-variant) positions of the contract and each reference to
-@scheme[id] (including those in the initial value expression) must
-meet the negative positions of the contract.
+If a free-var-list is given, then any uses of the free variables
+inside the @scheme[body] will be protected with contracts that
+blame the context of the @scheme[with-contract] form for the positive
+positions and the @scheme[with-contract] form for the negative ones.}
 
-Error messages with @scheme[define/contract] are not as clear as those
-provided by @scheme[provide/contract], because
-@scheme[define/contract] cannot detect the name of the definition
-where the reference to the defined variable occurs. Instead, it uses
-the source location of the reference to the variable as the name of
-that definition.}
+@defform*[[(define/contract id contract-expr free-var-list init-value-expr)
+ (define/contract (head args) contract-expr free-var-list body ...+)]]{
+Works like @scheme[define], except that the contract
+@scheme[contract-expr] is attached to the bound value.  For the
+definition of @scheme[head] and @scheme[args], see @scheme[define].
+For the definition of @scheme[free-var-list], see @scheme[with-contract].
+
+The @scheme[define/contract] form treats the individual definition as
+a contract region. The definition itself is responsible for positive
+(co-variant) positions of the contract and references to
+@scheme[id] outside of the definition must meet the negative
+positions of the contract. Since the contract boundary is
+between the definition and the surrounding context, references to
+@scheme[id] inside the @scheme[define/contract] form are not checked.
+
+If a free-var-list is given, then any uses of the free variables
+inside the @scheme[body] will be protected with contracts that
+blame the context of the @scheme[define/contract] form for the positive
+positions and the @scheme[define/contract] form for the negative ones.}
+
+@defform*[[(define-struct/contract struct-id ([field contract-expr] ...)
+                                   struct-option ...)]]{
+Works like @scheme[define-struct], except that the arguments to the constructor,
+accessors, and mutators are protected by contracts.  For the definitions of
+@scheme[field] and @scheme[struct-option], see @scheme[define-struct].
+
+The @scheme[define-struct/contract] form only allows a subset of the
+@scheme[struct-option] keywords: @scheme[#:mutable], @scheme[#:transparent],
+@scheme[#:auto-value], @scheme[#:omit-define-syntaxes], and
+@scheme[#:omit-define-values].}
 
 @defform*[[(contract contract-expr to-protect-expr
                      positive-blame-expr negative-blame-expr)

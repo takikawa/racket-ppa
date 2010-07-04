@@ -12,7 +12,9 @@ The @web-server implements many HTTP RFCs that are provided by this module.
 
 @; ------------------------------------------------------------
 @section[#:tag "request-structs.ss"]{Requests}
-@(require (for-label web-server/http/request-structs))
+@(require (for-label web-server/http/request-structs
+                     xml
+                     scheme/match))
 
 @defmodule[web-server/http/request-structs]{
 
@@ -54,7 +56,7 @@ The @web-server implements many HTTP RFCs that are provided by this module.
  Returns the binding with an id equal to @scheme[id] from @scheme[binds] or @scheme[#f].
 }
 
-@defstruct[request ([method symbol?]
+@defstruct[request ([method bytes?]
                     [uri url?]
                     [headers/raw (listof header?)]
                     [bindings/raw (listof binding?)]
@@ -157,7 +159,7 @@ Here is an example typical of what you will find in many applications:
 
 @defstruct[response/basic
            ([code number?]
-            [message string?]
+            [message bytes?]
             [seconds number?]
             [mime bytes?]
             [headers (listof header?)])]{
@@ -169,7 +171,7 @@ Here is an example typical of what you will find in many applications:
  Example:
  @schemeblock[
   (make-response/basic
-   301 "Moved Permanently"
+   301 #"Moved Permanently"
    (current-seconds) TEXT/HTML-MIME-TYPE
    (list (make-header #"Location"
                       #"http://www.plt-scheme.org/downloads")))
@@ -177,14 +179,14 @@ Here is an example typical of what you will find in many applications:
 }
 
 @defstruct[(response/full response/basic)
-           ([body (listof (or/c string? bytes?))])]{
+           ([body (listof bytes?)])]{
  As with @scheme[response/basic], except with @scheme[body] as the response
  body.
 
  Example:
  @schemeblock[
   (make-response/full
-   301 "Moved Permanently"
+   301 #"Moved Permanently"
    (current-seconds) TEXT/HTML-MIME-TYPE
    (list (make-header #"Location"
                       #"http://www.plt-scheme.org/downloads"))
@@ -197,7 +199,7 @@ Here is an example typical of what you will find in many applications:
 }
 
 @defstruct[(response/incremental response/basic)
-           ([generator ((() (listof (or/c bytes? string?)) . ->* . any) . -> . any)])]{
+           ([generator ((() () #:rest (listof bytes?) . ->* . any) . -> . any)])]{
  As with @scheme[response/basic], except with @scheme[generator] as a function that is
  called to generate the response body, by being given an @scheme[output-response] function
  that outputs the content it is called with.
@@ -205,7 +207,7 @@ Here is an example typical of what you will find in many applications:
  Here is a short example:
  @schemeblock[
   (make-response/incremental
-    200 "OK" (current-seconds)
+    200 #"OK" (current-seconds)
     #"application/octet-stream"
     (list (make-header #"Content-Disposition"
                        #"attachement; filename=\"file\""))
@@ -213,18 +215,33 @@ Here is an example typical of what you will find in many applications:
       (send/bytes #"Some content")
       (send/bytes)
       (send/bytes #"Even" #"more" #"content!")
-      (send/bytes "Now we're done")))
+      (send/bytes #"Now we're done")))
  ]
 }
 
-@defproc[(response? [v any/c])
-         boolean?]{
- Checks if @scheme[v] is a valid response. A response is either:
- @itemize[
-  @item{A @scheme[response/basic] structure.}
-  @item{A value matching the contract @scheme[(cons/c (or/c bytes? string?) (listof (or/c bytes? string?)))].}
-  @item{A value matching @scheme[xexpr?].}
- ]
+@defthing[response/c contract?]{
+ Equivalent to @scheme[(or/c response/basic?
+                             (cons/c bytes? (listof (or/c string? bytes?)))
+                             xexpr/c)].
+}
+
+@defproc[(make-xexpr-response [xexpr xexpr/c]
+                              [#:code code number? 200]
+                              [#:message message bytes? #"Okay"]
+                              [#:seconds seconds number? (current-seconds)]
+                              [#:mime-type mime-type bytes? TEXT/HTML-MIME-TYPE]
+                              [#:headers headers (listof header?) empty])
+         response/full?]{
+ Equivalent to
+ @schemeblock[
+(make-response/full 
+   code message seconds mime-type headers
+   (list (string->bytes/utf-8 (xexpr->string xexpr))))
+]}
+                         
+@defproc[(normalize-response [close? boolean?] [response response/c])
+         (or/c response/full? response/incremental?)]{
+ Coerces @scheme[response] into a full response, filling in additional details where appropriate.
 }
 
 @defthing[TEXT/HTML-MIME-TYPE bytes?]{Equivalent to @scheme[#"text/html; charset=utf-8"].}
@@ -235,15 +252,123 @@ transmission that the server @bold{will not catch}.}
 }
 
 @; ------------------------------------------------------------
+@section[#:tag "cookie"]{Placing Cookies}
+
+@(require (for-label net/cookie
+                     web-server/servlet
+                     web-server/http/redirect
+                     web-server/http/request-structs
+                     web-server/http/response-structs
+                     web-server/http/cookie))
+
+@defmodule[web-server/http/cookie]{
+ This module provides functions to create cookies and responses that set them.
+      
+ @defproc[(make-cookie [name string?] [value string?]
+                       [#:comment comment (or/c false/c string?) #f]
+                       [#:domain domain (or/c false/c valid-domain?) #f]
+                       [#:max-age max-age (or/c false/c exact-nonnegative-integer?) #f]
+                       [#:path path (or/c false/c string?) #f]
+                       [#:secure? secure? (or/c false/c boolean?) #f])
+          cookie?]{
+  Constructs a cookie with the appropriate fields.
+ }
+ 
+ @defproc[(cookie->header [c cookie?]) header?]{
+  Constructs a header that sets the cookie.
+ }             
+                  
+ @defproc[(xexpr-response/cookies [cookies (listof cookie?)]
+                                  [xexpr xexpr/c])
+          response/full?]{
+  Constructs a response using @scheme[xexpr] that sets all the cookies in @scheme[cookies].
+ }
+                         
+ Examples:
+ @schemeblock[
+  (define time-cookie 
+    (make-cookie "time" (number->string (current-seconds))))
+  (define id-cookie
+    (make-cookie "id" "joseph" #:secure? #t))
+  
+  (redirect-to 
+   "http://localhost/logged-in"
+   see-other
+   #:headers 
+   (map cookie->header
+        (list time-cookie id-cookie)))
+  
+  (send/suspend
+    (lambda (k-url)
+      (xexpr-response/cookies
+       (list time-cookie id-cookie)
+       `(html (head (title "Cookie Example"))
+              (body (h1 "You're cookie'd!"))))))
+ ]
+ 
+ @warning{When using cookies, make sure you follow the advice of the @link["http://cookies.lcs.mit.edu/"]{MIT Cookie Eaters},
+          or you will be susceptible to dangerous attacks.} 
+}                                  
+
+@; ------------------------------------------------------------
+@section[#:tag "cookie-parse"]{Extracting Cookies}
+
+@(require (for-label web-server/http/cookie-parse
+                     net/cookie
+                     net/url
+                     scheme/list))
+@defmodule[web-server/http/cookie-parse]{
+ @defstruct[client-cookie 
+            ([name string?]
+             [value string?]
+             [domain (or/c false/c valid-domain?)]
+             [path (or/c false/c string?)])]{
+                              
+  While server cookies are represented with @scheme[cookie?]s, cookies that come from the client are represented
+  with a @scheme[client-cookie] structure.                              
+ }
+ 
+ @defproc[(request-cookies [req request?])
+          (listof client-cookie?)]{
+  Extracts the cookies from @scheme[req]'s headers.
+ }
+
+ Examples:
+ @schemeblock[
+  (define (start req)
+    (define cookies (request-cookies req))
+    (define id-cookie 
+      (findf (lambda (c)
+               (string=? "id" (client-cookie-name c)))
+             cookies))
+    (if id-cookie
+        (hello (client-cookie-value id-cookie))
+        (redirect-to 
+         (url->string (request-uri req))
+         see-other
+         #:headers 
+         (list
+          (cookie->header (make-cookie "id" "joseph"))))))
+        
+   (define (hello who)
+     `(html (head (title "Hello!"))
+            (body 
+             (h1 "Hello " 
+                 ,who))))
+ ]
+}
+
+@; ------------------------------------------------------------
 @section[#:tag "redirect.ss"]{Redirect}
-@(require (for-label web-server/http/redirect))
+@(require (for-label web-server/http/redirect
+                     web-server/private/util))
 
 @defmodule[web-server/http/redirect]{
 
-@defproc[(redirect-to [uri string?]
+@defproc[(redirect-to [uri non-empty-string/c]
                       [perm/temp redirection-status? temporarily]
                       [#:headers headers (listof header?) (list)])
-         response?]{
+         response/c]{
  Generates an HTTP response that redirects the browser to @scheme[uri],
  while including the @scheme[headers] in the response.
  
@@ -271,14 +396,109 @@ transmission that the server @bold{will not catch}.}
 @defmodule[web-server/http/basic-auth]{
 
 An implementation of HTTP Basic Authentication.
-
-@defproc[(extract-user-pass [heads (listof header?)])
+   
+@defproc[(make-basic-auth-header [realm string?])
+         header?]{
+ Returns a header that instructs the Web browser to request a username and password from the client using
+ Basic authentication with @scheme[realm] as the realm.
+}
+                 
+@defproc[(request->basic-credentials [req request?])
          (or/c false/c (cons/c bytes? bytes?))]{
  Returns a pair of the username and password from the authentication
- header in @scheme[heads] if they are present, or @scheme[#f].
+ header in @scheme[req] if they are present, or @scheme[#f]. 
+}
+                                               
+Example:
+@schememod[
+web-server/insta
  
- Example:
- @scheme[(extract-user-pass (request-headers/raw req))] might return @scheme[(cons #"aladin" #"open sesame")].
+(define (start req)
+  (match (request->basic-credentials req)
+    [(cons user pass)
+     `(html (head (title "Basic Auth Test"))
+            (body (h1 "User: " ,(bytes->string/utf-8 user))
+                  (h1 "Pass: " ,(bytes->string/utf-8 pass))))]
+    [else
+     (make-response/basic
+      401 #"Unauthorized" (current-seconds) TEXT/HTML-MIME-TYPE
+      (list 
+       (make-basic-auth-header 
+        (format "Basic Auth Test: ~a" (gensym)))))])) 
+]
 }
 
+@; ------------------------------------------------------------
+@section[#:tag "digest-auth.ss"]{Digest Authentication}
+@(require (for-label web-server/http/digest-auth
+                     scheme/pretty))
+
+@defmodule[web-server/http/digest-auth]{
+
+An implementation of HTTP Digest Authentication.
+   
+@defproc[(make-digest-auth-header [realm string?] [private-key string?] [opaque string?])
+         header?]{
+ Returns a header that instructs the Web browser to request a username and password from the client
+ using Digest authentication with @scheme[realm] as the realm, @scheme[private-key] as the server's
+ contribution to the nonce, and @scheme[opaque] as the opaque data passed through the client.
+}
+                 
+@defproc[(request->digest-credentials [req request?])
+         (or/c false/c (listof (cons/c symbol? string?)))]{
+ Returns the Digest credentials from @scheme[req] (if they appear) as an association list.
+}         
+                                                          
+@defthing[username*realm->password/c contract?]{
+ Used to look up the password for a user is a realm.                                                
+                                                
+ Equivalent to @scheme[(string? string? . -> . string?)].                                                
+}
+
+@defthing[username*realm->digest-HA1/c contract?]{
+ Used to compute the user's secret hash.
+      
+ Equivalent to @scheme[(string? string? . -> . bytes?)].
+} 
+       
+@defproc[(password->digest-HA1 [lookup-password username*realm->password/c])
+         username*realm->digest-HA1/c]{
+ Uses @scheme[lookup-password] to find the password, then computes the secret hash of it.
+}      
+                                       
+@defproc[(make-check-digest-credentials [lookup-HA1 username*realm->digest-HA1/c])
+         (string? (listof (cons/c symbol? string?)) . -> . boolean?)]{
+ Constructs a function that checks whether particular Digest credentials (the second argument of the returned function)
+ are correct given the HTTP method provided as the first argument and the secret hash computed by @scheme[lookup-HA1].
+ 
+ This is will result in an exception if the Digest credentials are missing portions.
+} 
+                                                                     
+Example:
+@schememod[
+web-server/insta
+(require scheme/pretty)
+
+(define private-key "private-key")
+(define opaque "opaque")
+
+(define (start req)
+  (match (request->digest-credentials req)
+    [#f
+     (make-response/basic
+      401 #"Unauthorized" (current-seconds) TEXT/HTML-MIME-TYPE
+      (list (make-digest-auth-header
+             (format "Digest Auth Test: ~a" (gensym))
+             private-key opaque)))]
+    [alist
+     (define check
+       (make-check-digest-credentials
+        (password->digest-HA1 (lambda (username realm) "pass"))))
+     (define pass?
+       (check "GET" alist))
+     `(html (head (title "Digest Auth Test"))
+            (body 
+             (h1 ,(if pass? "Pass!" "No Pass!"))
+             (pre ,(pretty-format alist))))])) 
+]
 }

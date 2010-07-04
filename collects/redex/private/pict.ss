@@ -20,7 +20,9 @@
          render-reduction-relation-rules
          
          metafunction->pict
+         metafunctions->pict
          render-metafunction
+         render-metafunctions
          
          basic-text
          
@@ -342,6 +344,8 @@
 (define short-curvy-arrow-pict (mk-arrow-pict "m" 'curvy))
 (define double-arrow-pict (mk-arrow-pict "xxx" 'straight-double))
 (define short-double-arrow-pict (mk-arrow-pict "m" 'straight-double))
+(define map-arrow-pict (mk-arrow-pict "m" 'map))
+(define long-map-arrow-pict (mk-arrow-pict "xxx" 'map))
 
 (define user-arrow-table (make-hasheq))
 (define (set-arrow-pict! arr thunk)
@@ -360,7 +364,14 @@
           [(>->) (basic-text "\u21a3" (default-style))]
           [(~~>) (curvy-arrow-pict)]
           [(~>) (short-curvy-arrow-pict)]
-          [(:->) (basic-text "\u21a6" (default-style))]
+          [(:->) 
+           (if STIX?
+               (basic-text "\u21a6" (default-style))
+               (map-arrow-pict))]
+          [(:-->) 
+           (if STIX?
+               (basic-text "\u27fc" (default-style))
+               (long-map-arrow-pict))]
           [(c->) (basic-text "\u21aa" (default-style))]
           [(-->>) (basic-text "\u21a0" (default-style))]
           [(>--) (basic-text "\u291a" (default-style))]
@@ -395,7 +406,7 @@
 
 (define (render-language lang [filename #f] #:nts [nts (render-language-nts)])
   (if filename
-      (save-as-ps (λ () (do-language->pict 'render-language lang)) filename nts)
+      (save-as-ps (λ () (do-language->pict 'render-language lang nts)) filename)
       (parameterize ([dc-for-text-size (make-object bitmap-dc% (make-object bitmap% 1 1))])
         (do-language->pict 'render-language lang nts))))
 
@@ -634,106 +645,136 @@
   (syntax-case stx ()
     [(_ name)
      (identifier? #'name)
-     #'(metafunction->pict/proc (metafunction name))]))
+     #'(metafunctions->pict name)]))
+
+(define-syntax (metafunctions->pict stx)
+  (syntax-case stx ()
+    [(_ name1 name2 ...)
+     (and (identifier? #'name1)
+          (andmap identifier? (syntax->list #'(name2 ...))))
+     #'(metafunctions->pict/proc (list (metafunction name1) (metafunction name2) ...) 'metafunctions->pict)]))
+
+(define-syntax (render-metafunctions stx)
+  (syntax-case stx ()
+    [(_ name1 name2 ...)
+     (and (identifier? #'name)
+          (andmap identifier? (syntax->list #'(name2 ...))))
+     #'(render-metafunction/proc (list (metafunction name1) (metafunction name2) ...) #f 'render-metafunctions)]
+    [(_ name1 name2 ... #:file filename)
+     (and (identifier? #'name1)
+          (andmap identifier? (syntax->list #'(name2 ...))))
+     #'(render-metafunction/proc (list (metafunction name1) (metafunction name2) ...) filename 'render-metafunctions)]))
 
 (define-syntax (render-metafunction stx)
   (syntax-case stx ()
     [(_ name)
      (identifier? #'name)
-     #'(render-metafunction/proc (metafunction name))]
+     #'(render-metafunction/proc (list (metafunction name)) #f 'render-metafunction)]
     [(_ name file)
      (identifier? #'name)
-     #'(render-metafunction/proc (metafunction name) file)]))
+     #'(render-metafunction/proc (list (metafunction name)) file 'render-metafunction)]))
 
 (define linebreaks (make-parameter #f))
 
 (define metafunction-pict-style (make-parameter 'left-right))
 
-(define metafunction->pict/proc
-  (lambda (mf)
-    (let ([current-linebreaks (linebreaks)]
-          [all-nts (language-nts (metafunc-proc-lang (metafunction-proc mf)))]
-          [sep 2])
-      (let* ([wrapper->pict (lambda (lw) (lw->pict all-nts lw))]
-             [eqns (metafunc-proc-pict-info (metafunction-proc mf))]
-             [lhss (map (lambda (eqn) 
-                          (wrapper->pict
-                           (metafunction-call (metafunc-proc-name (metafunction-proc mf))
-                                              (car eqn)
-                                              (metafunc-proc-multi-arg? (metafunction-proc mf)))))
-                        eqns)]
-             [scs (map (lambda (eqn)
-                         (if (and (null? (cadr eqn))
-                                  (null? (caddr eqn)))
-                             #f
-                             (side-condition-pict null 
-                                                  (map wrapper->pict (cadr eqn)) 
-                                                  (map (lambda (p)
-                                                         (cons (wrapper->pict (car p)) (wrapper->pict (cdr p))))
-                                                       (caddr eqn))
-                                                  +inf.0)))
-                       eqns)]
-             [rhss (map (lambda (eqn) (wrapper->pict (cadddr eqn))) eqns)]
-             [linebreak-list (or current-linebreaks
-                                 (map (lambda (x) #f) eqns))]
-             [=-pict (make-=)]
-             [max-lhs-w (apply max (map pict-width lhss))]
-             [max-line-w (apply
-                          max
-                          (map (lambda (lhs sc rhs linebreak?)
-                                 (max
-                                  (if sc (pict-width sc) 0)
-                                  (if linebreak?
-                                      (max (pict-width lhs)
-                                           (+ (pict-width rhs) (pict-width =-pict)))
-                                      (+ (pict-width lhs) (pict-width rhs) (pict-width =-pict)
-                                         (* 2 sep)))))
-                               lhss scs rhss linebreak-list))])
-        (case (metafunction-pict-style)
-          [(left-right)
-           (table 3
-                  (apply append
-                         (map (lambda (lhs sc rhs linebreak?)
-                                (append
-                                 (if linebreak?
-                                     (list lhs (blank) (blank))
-                                     (list lhs =-pict rhs))
-                                 (if linebreak?
-                                     (let ([p rhs])
-                                       (list (hbl-append sep
-                                                         =-pict
-                                                         (inset p 0 0 (- 5 (pict-width p)) 0))
-                                             (blank)
-                                             ;; n case this line sets the max width, add suitable space in the right:
-                                             (blank (max 0 (- (pict-width p) max-lhs-w sep))
-                                                    0)))
-                                     null)
-                                 (if (not sc)
-                                     null
-                                     (list (inset sc 0 0 (- 5 (pict-width sc)) 0)
-                                           (blank)
-                                           ;; In case sc set the max width...
-                                           (blank (max 0 (- (pict-width sc) max-lhs-w (pict-width =-pict) (* 2 sep)))
-                                                  0)))))
-                              lhss
-                              scs
-                              rhss
-                              linebreak-list))
-                  ltl-superimpose ltl-superimpose
-                  sep sep)]
-          [(up-down)
-           (apply vl-append
-                  sep
-                  (apply append
-                         (map (lambda (lhs sc rhs)
-                                (cons
-                                 (vl-append (hbl-append lhs =-pict) rhs)
-                                 (if (not sc)
-                                     null
-                                     (list (inset sc 0 0 (- 5 (pict-width sc)) 0)))))
-                              lhss
-                              scs
-                              rhss)))])))))
+(define (metafunctions->pict/proc mfs name)
+  (unless (andmap (λ (mf) (eq? (metafunc-proc-lang (metafunction-proc (car mfs)))
+                               (metafunc-proc-lang (metafunction-proc mf))))
+                  mfs)
+    (error name "expected metafunctions that are all drawn from the same language"))
+  (let* ([current-linebreaks (linebreaks)]
+         [all-nts (language-nts (metafunc-proc-lang (metafunction-proc (car mfs))))]
+         [sep 2]
+         [style (metafunction-pict-style)]
+         [wrapper->pict (lambda (lw) (lw->pict all-nts lw))]
+         [eqns (apply append (map (λ (mf) (metafunc-proc-pict-info (metafunction-proc mf))) mfs))]
+         [lhss 
+          (apply append
+                 (map (λ (mf)
+                        (map (lambda (eqn) 
+                               (wrapper->pict
+                                (metafunction-call (metafunc-proc-name (metafunction-proc mf))
+                                                   (list-ref eqn 0)
+                                                   (metafunc-proc-multi-arg? (metafunction-proc mf)))))
+                             (metafunc-proc-pict-info (metafunction-proc mf))))
+                      mfs))]
+         [scs (map (lambda (eqn)
+                     (if (and (null? (list-ref eqn 1))
+                              (null? (list-ref eqn 2)))
+                         #f
+                         (side-condition-pict null 
+                                              (map wrapper->pict (list-ref eqn 1)) 
+                                              (map (lambda (p)
+                                                     (cons (wrapper->pict (car p))
+                                                           (wrapper->pict (cdr p))))
+                                                   (list-ref eqn 2))
+                                              (if (memq style '(up-down/vertical-side-conditions
+                                                                left-right/vertical-side-conditions))
+                                                  0
+                                                  +inf.0))))
+                   eqns)]
+         [rhss (map (lambda (eqn) (wrapper->pict (list-ref eqn 3))) eqns)]
+         [linebreak-list (or current-linebreaks
+                             (map (lambda (x) #f) eqns))]
+         [=-pict (make-=)]
+         [max-lhs-w (apply max (map pict-width lhss))]
+         [max-line-w (apply
+                      max
+                      (map (lambda (lhs sc rhs linebreak?)
+                             (max
+                              (if sc (pict-width sc) 0)
+                              (if linebreak?
+                                  (max (pict-width lhs)
+                                       (+ (pict-width rhs) (pict-width =-pict)))
+                                  (+ (pict-width lhs) (pict-width rhs) (pict-width =-pict)
+                                     (* 2 sep)))))
+                           lhss scs rhss linebreak-list))])
+    (case style
+      [(left-right left-right/vertical-side-conditions)
+       (table 3
+              (apply append
+                     (map (lambda (lhs sc rhs linebreak?)
+                            (append
+                             (if linebreak?
+                                 (list lhs (blank) (blank))
+                                 (list lhs =-pict rhs))
+                             (if linebreak?
+                                 (let ([p rhs])
+                                   (list (hbl-append sep
+                                                     =-pict
+                                                     (inset p 0 0 (- 5 (pict-width p)) 0))
+                                         (blank)
+                                         ;; n case this line sets the max width, add suitable space in the right:
+                                         (blank (max 0 (- (pict-width p) max-lhs-w sep))
+                                                0)))
+                                 null)
+                             (if (not sc)
+                                 null
+                                 (list (inset sc 0 0 (- 5 (pict-width sc)) 0)
+                                       (blank)
+                                       ;; In case sc set the max width...
+                                       (blank (max 0 (- (pict-width sc) max-lhs-w (pict-width =-pict) (* 2 sep)))
+                                              0)))))
+                          lhss
+                          scs
+                          rhss
+                          linebreak-list))
+              ltl-superimpose ltl-superimpose
+              sep sep)]
+      [(up-down up-down/vertical-side-conditions)
+       (apply vl-append
+              sep
+              (apply append
+                     (map (lambda (lhs sc rhs)
+                            (cons
+                             (vl-append (hbl-append lhs =-pict) rhs)
+                             (if (not sc)
+                                 null
+                                 (list (inset sc 0 0 (- 5 (pict-width sc)) 0)))))
+                          lhss
+                          scs
+                          rhss)))])))
 
 (define (metafunction-call name an-lw flattened?)
   (if flattened?
@@ -743,7 +784,7 @@
                      ;; the first loc wrapper is just there to make the
                      ;; shape of this line be one that the apply-rewrites
                      ;; function (in core-layout.ss) recognizes as a metafunction
-                     (make-lw ""
+                     (make-lw "("
                               (lw-line an-lw)
                               0
                               (lw-column an-lw)
@@ -843,12 +884,12 @@
                                (basic-text "]" (default-style)))])]
     [else x]))
 
-(define render-metafunction/proc
-  (case-lambda 
-    [(mf filename)
-     (save-as-ps (λ () (metafunction->pict/proc mf))
+(define (render-metafunction/proc mfs filename name)
+  (cond
+    [filename
+     (save-as-ps (λ () (metafunctions->pict/proc mfs name))
                  filename)]
-    [(mf)
+    [else
      (parameterize ([dc-for-text-size (make-object bitmap-dc% (make-object bitmap% 1 1))])
-       (metafunction->pict/proc mf))]))
+       (metafunctions->pict/proc mfs name))]))
      

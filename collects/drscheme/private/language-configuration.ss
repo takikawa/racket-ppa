@@ -511,17 +511,19 @@
                                
                                (let-values ([(vis-lang vis-settings)
                                              (cond
-                                               [(or (not selected-language)
-                                                    (eq? selected-language language-to-show))
+                                               [(and (not selected-language)
+                                                     (eq? language-to-show language))
                                                 (values language-to-show settings-to-show)]
-                                               [(and language-to-show settings-to-show)
-                                                (values selected-language
-                                                        (send selected-language default-settings))]
+                                               [(eq? selected-language language)
+                                                (values language 
+                                                        (if (eq? language language-to-show)
+                                                            settings-to-show
+                                                            (send language default-settings)))]
                                                [else (values #f #f)])])
                                  (cond
-                                   [(not vis-lang) (void)]
-                                   [(equal? (send vis-lang get-language-position)
-                                            (send language get-language-position))
+                                   [(and vis-lang
+                                         (equal? (send vis-lang get-language-position)
+                                                 (send language get-language-position)))
                                     (get/set-settings vis-settings)
                                     (send details-panel active-child language-details-panel)]
                                    [else
@@ -759,8 +761,6 @@
         (send revert-to-defaults-outer-panel stretchable-height #f)
         (send outermost-panel set-alignment 'center 'center)
         
-        (update-show/hide-details)
-        
         (for-each add-language-to-dialog languages)
         (send languages-hier-list sort 
               (λ (x y)
@@ -818,6 +818,7 @@
           (get/set-selected-language-settings settings-to-show))
         (when details-shown?
           (do-construct-details))
+        (update-show/hide-details)
         (send languages-hier-list focus)
         (values
          (λ () selected-language)

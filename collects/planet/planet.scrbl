@@ -82,11 +82,11 @@ written using a new shorter syntax:
 @schemeblock[(require (planet schematics/spgsql:2:3/spgsql))]
 
 The two forms behave identically. In the abbreviated syntax, however,
-it is illegal to write the trailing @scheme{.ss} suffix on the file
-name to be required or the trailing @scheme{.plt} on the package file
+it is illegal to write the trailing @filepath{.ss} suffix on the file
+name to be required or the trailing @filepath{.plt} on the package file
 name. (They are mandatory for the long-form syntax.) It is also legal
 in the abbreviated syntax to omit a filename to be required entirely;
-in that case, PLaneT requires the file @scheme{main.ss} in the given
+in that case, PLaneT requires the file @filepath{main.ss} in the given
 package.
 
 @subsection{Fine-Grained Control Over Package Imports}
@@ -189,6 +189,16 @@ match only the exact package version 2.1 of the @filepath{zip.plt} package.
 
 @;@subsection{The Diamond Property}
 
+@subsection{Monitoring PLaneT's progress}
+
+PLaneT logs information about what it is doing to the @tt{info}
+log (via @scheme[log-info]). 
+In DrScheme, you can view the logs from the @onscreen{Show Log}
+menu item in the @onscreen{View} menu, and MzScheme's logging output
+can be controlled via command-line options and via environment
+variables. See 
+@secref["logging" #:doc '(lib "scribblings/reference/reference.scrbl")] 
+for more details.
 
 @section[#:tag "search-order"]{The PLaneT Search Order}
 
@@ -591,6 +601,34 @@ package minor version, or @scheme[#f] if the expression appears outside the
 context of a package. The others are convenience macros that
 select out the relevant field, or return @scheme[#f] if the expression
 appears outside the context of a PLaneT package.}
+
+@subsection{Terse Status Updates}
+
+@defmodule[planet/terse-info]
+
+This module provides access to some PLaneT status information. This
+module is first loaded by PLaneT in the initial namespace (when
+PLaneT's resolver is loaded), but PLaneT uses @scheme[dynamic-require] to load
+this module each time it wants to announce information. Similarly, the
+state of which procedures are registered (via @scheme[planet-terse-register]) 
+is saved in the namespace, making the listening and information producing
+namespace-specific.
+
+@defproc[(planet-terse-register
+          [proc (-> (or/c 'download 'install 'finish) string? any/c)]
+          [namespace namespace? (current-namespace)]) void?]{
+Registers @scheme[proc] as a function to be called when
+@scheme[planet-terse-log] is called with a matching namespace argument.
+ Note that @scheme[proc] is called 
+asynchronously (ie, on some thread other than the one calling @scheme[planet-terse-register]).
+}
+
+@defproc[(planet-terse-log [id (or/c 'download 'install 'finish)]
+                           [msg string?]
+                           [namespace namespace? (current-namespace)]) void?]{
+  This function is called by PLaneT to announce when things are happening.
+The namespace passed along is used to identify the procs to notify.
+}
 
 @section{Developing Packages for PLaneT}
 

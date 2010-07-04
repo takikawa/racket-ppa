@@ -13,7 +13,11 @@
          define*
          define*-values
          define*-syntax
-         define*-syntaxes)
+         define*-syntaxes
+
+         (for-syntax package?
+                     package-exported-identifiers
+                     package-original-identifiers))
 
 (define-for-syntax (do-define-* stx define-values-id)
   (syntax-case stx ()
@@ -30,10 +34,24 @@
        (with-syntax ([define-values define-values-id])
          (syntax/loc stx
            (define-values (id ...) rhs))))]))
-(define-syntax (define*-values stx)
+(define-syntax (-define*-values stx)
   (do-define-* stx #'define-values))
-(define-syntax (define*-syntaxes stx)
+(define-syntax (-define*-syntaxes stx)
   (do-define-* stx #'define-syntaxes))
+(define-syntax (define*-values stx)
+  (syntax-case stx ()
+    [(_ (id ...) rhs)
+     (syntax-property
+      (syntax/loc stx (-define*-values (id ...) rhs))
+      'certify-mode
+      'transparent-binding)]))
+(define-syntax (define*-syntaxes stx)
+  (syntax-case stx ()
+    [(_ (id ...) rhs)
+     (syntax-property
+      (syntax/loc stx (-define*-syntaxes (id ...) rhs))
+      'certify-mode
+      'transparent-binding)]))
 
 (define-syntax (define* stx)
   (let-values ([(id rhs) (normalize-definition stx #'lambda)])
@@ -117,14 +135,12 @@
                                  orig-ctx
                                  null)))]
                 [pre-package-id (lambda (id def-ctxes)
-                                  (for/fold ([id id])
-                                      ([def-ctx (in-list def-ctxes)])
-                                    (identifier-remove-from-definition-context 
-                                     id 
-                                     def-ctx)))]
+                                  (identifier-remove-from-definition-context 
+                                   id 
+                                   def-ctxes))]
                 [kernel-forms (list*
-                               #'define*-values
-                               #'define*-syntaxes
+                               #'-define*-values
+                               #'-define*-syntaxes
                                (kernel-form-identifier-list))]
                 [init-exprs (syntax->list #'(form ...))]
                 [new-bindings (make-bound-identifier-mapping)]
@@ -154,7 +170,8 @@
                                                                     ;; Need to preserve the original
                                                                     (pre-package-id id def-ctxes)
                                                                     ;; It's not accessible, so just hide the name
-                                                                    ;;  to avoid re-binding errors.
+                                                                    ;;  to avoid re-binding errors. (Is this necessary,
+                                                                    ;;  or would `pre-package-id' take care of it?)
                                                                     (car (generate-temporaries (list id)))))
                                                               (syntax->list #'(export ...)))])
                                             (syntax/loc stx
@@ -279,16 +296,16 @@
                             def-ctxes)]
                      [(def (id ...) rhs)
                       (and (or (free-identifier=? #'def #'define-syntaxes)
-                               (free-identifier=? #'def #'define*-syntaxes))
+                               (free-identifier=? #'def #'-define*-syntaxes))
                            (andmap identifier? (syntax->list #'(id ...))))
                       (with-syntax ([rhs (local-transformer-expand
                                           #'rhs
                                           'expression
                                           null)])
-                        (let ([star? (free-identifier=? #'def #'define*-syntaxes)]
+                        (let ([star? (free-identifier=? #'def #'-define*-syntaxes)]
                               [ids (syntax->list #'(id ...))])
                           (let* ([def-ctx (if star?
-                                              (syntax-local-make-definition-context)
+                                              (syntax-local-make-definition-context (car def-ctxes))
                                               (car def-ctxes))]
                                  [ids (if star? 
                                           (map (add-package-context (list def-ctx)) ids)
@@ -302,9 +319,9 @@
                                   (if star? (cons def-ctx def-ctxes) def-ctxes)))))]
                      [(def (id ...) rhs)
                       (and (or (free-identifier=? #'def #'define-values)
-                               (free-identifier=? #'def #'define*-values))
+                               (free-identifier=? #'def #'-define*-values))
                            (andmap identifier? (syntax->list #'(id ...))))
-                      (let ([star? (free-identifier=? #'def #'define*-values)]
+                      (let ([star? (free-identifier=? #'def #'-define*-values)]
                             [ids (syntax->list #'(id ...))])
                         (let* ([def-ctx (if star?
                                             (syntax-local-make-definition-context)
@@ -392,3 +409,23 @@
   (do-open stx #'define-syntaxes))
 (define-syntax (open*-package stx)
   (do-open stx #'define*-syntaxes))
+
+(define-for-syntax (package-exported-identifiers id)
+  (let ([v (and (identifier? id)
+                (syntax-local-value id (lambda () #f)))])
+    (unless (package? v)
+      (raise-type-error 'package-exported-identifiers "identifier bound to a package" id))
+    (let ([introduce (syntax-local-make-delta-introducer 
+                      (syntax-local-introduce id))])
+      (map (lambda (i)
+             (syntax-local-introduce
+              (syntax-local-get-shadower
+               (introduce (car i)))))
+           ((package-exports v))))))
+
+(define-for-syntax (package-original-identifiers id)
+  (let ([v (and (identifier? id)
+                (syntax-local-value id (lambda () #f)))])
+    (unless (package? v)
+      (raise-type-error 'package-exported-identifiers "identifier bound to a package" id))
+    (map cdr ((package-exports v)))))

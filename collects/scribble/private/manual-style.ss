@@ -26,7 +26,7 @@
          void-const undefined-const
          math)
 
-(define PLaneT "PLaneT")
+(define PLaneT (make-element "planetName" '("PLaneT")))
 
 (define etc "etc.") ; so we can fix the latex space, one day
 
@@ -172,8 +172,8 @@
 
 (define (elemtag t . body)
   (make-target-element #f (decode-content body) `(elem ,t)))
-(define (elemref t . body)
-  (make-link-element #f (decode-content body) `(elem ,t)))
+(define (elemref #:underline? [u? #t] t . body)
+  (make-link-element (if u? #f "plainlink") (decode-content body) `(elem ,t)))
 
 (define (doc-prefix doc s)
   (if doc (list (module-path-prefix->string doc) s) s))
