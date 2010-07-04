@@ -60,7 +60,8 @@
     ;; Primitives
     [(Wrap p:variable (e1 e2 rs ?1))
      (R [#:learn (list e2)]
-        [#:when (not (bound-identifier=? e1 e2))
+        [#:when (or (not (identifier? e1))
+                    (not (bound-identifier=? e1 e2)))
                 [#:walk e2 'resolve-variable]])]
     [(Wrap p:module (e1 e2 rs ?1 ?2 tag rename check tag2 ?3 body shift))
      (R [#:hide-check rs]
@@ -612,7 +613,7 @@
 ;; lift-error
 (define (lift-error sym . args)
   (apply fprintf (current-error-port) args)
-  (when #t
+  (when #f
     (apply error sym args)))
 
 ;; opaque-table

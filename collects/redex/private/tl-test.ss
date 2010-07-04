@@ -303,7 +303,7 @@
   ;; match one clause two ways => error
   (let ()
     (define-metafunction empty-language
-      [(ll (number_1 ... number_2 ...)) 4])
+      [(ll (number_1 ... number_2 ...)) (number_1 ...)])
     (test (with-handlers ((exn? (λ (x) 'exn-raised))) 
             (term (ll ()))
             'no-exn)
@@ -477,8 +477,8 @@
   (let ()
     (define-metafunction empty-language
       [(f variable) 
-       (x x)
-       (where x (variable variable))])
+       (any_x any_x)
+       (where any_x (variable variable))])
     (test (term (f z)) 
           (term ((z z) (z z)))))
   
@@ -504,8 +504,8 @@
   
   (let ()
     (define-metafunction empty-language
-      [(err number_1 ... number_2 ...) 1])
-    (test (term (err)) 1)
+      [(err number_1 ... number_2 ...) (number_1 ...)])
+    (test (term (err)) (term ()))
     (test (with-handlers ((exn:fail:redex? (λ (x) 'right-exn))
                           ((λ (x) #t) (λ (x) 'wrong-exn)))
             (term (err 1 2))
@@ -571,6 +571,22 @@
     (test (term (foo y))
           (term docare)))
   
+  (let ()
+    (define f-called? #f)
+    (define-metafunction empty-language
+      f : (side-condition any_1 (begin (set! f-called? #t) #t)) -> any
+      [(f any_1) any_1])
+    (test (term (f 1)) 1)
+    (test f-called? #t))
+    
+  (let ()
+    (define g-called? #f)
+    (define-metafunction empty-language
+      g : any -> (side-condition any_1 (begin (set! g-called? #t) #t))
+      [(g any_1) any_1])
+    (test (term (g 1)) 1)
+    (test g-called? #t))
+  
   ;; test that tracing works properly
   ;; note that caching comes into play here (which is why we don't see the recursive calls)
   (let ()
@@ -595,9 +611,117 @@
         (term (f 1)))
       (test (get-output-string sp) "|(f 1)\n|0\n")))
   
+  (let ()
+    (define-language var-lang [(x y z w) variable])
+    
+    ;; this should produce the second case, 
+    ;; since the where clause (should) fail to match 
+    ;; in the first case.
+    (define-metafunction var-lang
+      [(f x)
+       first-case
+       (where (AnotherAtom y) (Atom x))]
+      [(f x)
+       second-case])
+    
+    (test (term (f a)) (term second-case)))
+  
+  (let ()
+    
+    ;; this is an ambiguous function 
+    ;; and should signal an error if it is ever called
+    ;; with multiple different arguments, but if the
+    ;; arguments are all the same, it will return
+    ;; the same result for any parse, and thus should be allowed.
+    (define-metafunction empty-language
+      [(f any_x ... any_y any_z ...)
+       any_y])
+    
+    (test (term (f 1 1 1 1 1)) (term 1)))
+  
+  (let ()
+    (define-metafunction empty-language
+      [(ex variable_x) 
+       variable_x
+       (where quote variable_x)])
+    
+    (test (term (ex quote)) (term quote)))
+  
+  (let ()
+    (define-metafunction empty-language
+      [(f any ...)
+       (any ...)
+       (where variable_1 x)
+       (side-condition #f)
+       (where (number ...) y)]
+      [(f any ...)
+       12345])
+    
+    (test (term (f 8)) 12345))
+  
+  
+;                                                                                                 
+;                                                                                                 
+;                                                                                                 
+;                                                                                                 
+;                                                                                                 
+;                                                                                                 
+;       ;;           ;;; ;;                                   ;;           ;;  ;;                 
+;       ;;          ;;;  ;;                                   ;;          ;;;  ;;                 
+;    ;;;;;   ;;;;  ;;;;; ;;  ;; ;;;   ;;;;       ;;;;  ;;;;   ;;   ;;;;  ;;;;; ;;   ;;;;   ;; ;;; 
+;   ;;;;;;  ;;  ;; ;;;;  ;;  ;;;;;;  ;;  ;;      ;;;; ;;  ;;  ;;  ;;  ;;  ;;;; ;;  ;;;;;;  ;;;;;; 
+;  ;;;  ;; ;;;;;;;; ;;   ;;  ;;  ;; ;;;;;;;;;;;; ;;  ;;;;;;;; ;;    ;;;;  ;;;  ;; ;;;  ;;; ;;  ;; 
+;  ;;;  ;; ;;;      ;;   ;;  ;;  ;; ;;;     ;;;; ;;  ;;;      ;;  ;;; ;;  ;;;  ;; ;;;  ;;; ;;  ;; 
+;   ;;;;;;  ;;; ;;  ;;   ;;  ;;  ;;  ;;; ;;      ;;   ;;; ;;  ;; ;;;  ;;  ;;;; ;;  ;;;;;;  ;;  ;; 
+;    ;;;;;   ;;;;   ;;   ;;  ;;  ;;   ;;;;       ;;    ;;;;   ;;  ;;;;;;   ;;; ;;   ;;;;   ;;  ;; 
+;                                                                                                 
+;                                                                                                 
+;                                                                                                 
 
-;                                                                                                                                
-;                                                                                                                                
+  
+  (let ()
+    (define-relation empty-language
+      [(<: any any) #t])
+    
+    (test (term (<: 1 1)) #t)
+    (test (term (<: 1 2)) #f))
+  
+  (let ()
+    (define-relation empty-language
+      [(<: number_1 number_2) ,(< (term number_1) (term number_2))]
+      [(<: number_1 number_1) #t])
+    
+    (test (term (<: 1 2)) #t)
+    (test (term (<: 1 1)) #t)
+    (test (term (<: 2 1)) #f))
+  
+  (let ()
+    (define-relation empty-language
+      [(<: number_1 ... number_2 number_3 ... number_2 number_4 ...) #t])
+    
+    (test (term (<: 1 2 3 4)) #f)
+    (test (term (<: 1 1 2 3 4)) #t)
+    (test (term (<: 1 2 1 3 4)) #t)
+    (test (term (<: 1 2 3 1 4)) #t)
+    (test (term (<: 1 2 3 4 1)) #t))
+  
+  (let ()
+    (define-relation empty-language
+      [(<: number_1 number_1)])
+    (test (term (<: 1 1)) #t)
+    (test (term (<: 1 2)) #f))
+  
+  (let ()
+    (define-relation empty-language
+      [(<: number_1 number_2 number_3)
+       ,(= (term number_1) (term number_2))
+       ,(= (term number_2) (term number_3))])
+    (test (term (<: 1 2 3)) #f)
+    (test (term (<: 1 1 2)) #f)
+    (test (term (<: 1 2 2)) #f)
+    (test (term (<: 1 1 1)) #t))
+  
+ 
 ;                    ;;                         ;                                        ;;                    ;                 
 ;                     ;                 ;                                                 ;            ;                         
 ;   ;; ;;   ;;;    ;; ; ;;  ;;   ;;;;  ;;;;;  ;;;     ;;;  ;; ;;          ;; ;;   ;;;     ;     ;;;   ;;;;;  ;;;     ;;;  ;; ;;  
@@ -811,7 +935,7 @@
           (with-handlers ((exn? exn-message))
             (apply-reduction-relation red 1)
             'no-exception-raised))
-        "reduction-relation: relation reduced to x, which is outside its domain")
+        "reduction-relation: relation reduced to x via rule #0 (counting from 0), which is outside its domain")
 
   (let* ([red1
           (reduction-relation 
@@ -1328,6 +1452,14 @@
          '(1 1))
         1)
   
+  (test (call-with-values
+         (λ () 
+           ((term-match/single empty-language
+                               [() (values 1 2)])
+            '()))
+         list)
+        '(1 2))
+  
   (test (let ([x 0])
           (cons ((term-match empty-language
                              [(any_a ... number_1 any_b ...)
@@ -1357,8 +1489,8 @@
   (test (apply-reduction-relation
          (reduction-relation empty-language
                              (--> number_1 
-                                  y
-                                  (where y ,(+ 1 (term number_1)))))
+                                  any_y
+                                  (where any_y ,(+ 1 (term number_1)))))
          3)
         '(4))
   
@@ -1367,24 +1499,35 @@
           (apply-reduction-relation
            (reduction-relation empty-language
                                (--> any 
-                                    z
-                                    (where y ,x)
-                                    (where x 2)
-                                    (where z ,(+ (term y) (term x)))))
+                                    any_z
+                                    (where any_y ,x)
+                                    (where any_x 2)
+                                    (where any_z ,(+ (term any_y) (term any_x)))))
            'whatever))
         '(7))
+  
+  ;; tests `where' clauses bind in side-conditions
+  (test (let ([x 'unk])
+          (apply-reduction-relation
+           (reduction-relation empty-language
+                               (--> any 
+                                    the-result
+                                    (where any_y any)
+                                    (side-condition (eq? (term any_y) 'whatever))))
+           'whatever))
+        '(the-result))
   
   ;; test that where clauses bind in side-conditions that follow
   (let ([save1 #f]
         [save2 #f])
-    (term-let ([y (term outer-y)])
+    (term-let ([any_y (term outer-y)])
               (test (begin (apply-reduction-relation
                             (reduction-relation empty-language
                                                 (--> number_1 
-                                                     y
-                                                     (side-condition (set! save1 (term y)))
-                                                     (where y inner-y)
-                                                     (side-condition (set! save2 (term y)))))
+                                                     any_y
+                                                     (side-condition (set! save1 (term any_y)))
+                                                     (where any_y inner-y)
+                                                     (side-condition (set! save2 (term any_y)))))
                             3)
                            (list save1 save2))
                     (list 'outer-y 'inner-y))))
@@ -1392,11 +1535,26 @@
   (test (apply-reduction-relation
          (reduction-relation empty-language
                              (--> any 
-                                  y
+                                  any_y
                                   (fresh x)
-                                  (where y x)))
+                                  (where any_y x)))
          'x)
         '(x1))
+
+  (let ()
+    ;; tests where's ability to have redex patterns, not just syntax-case patterns
+    (define-language var-lang [(x y z w) variable])
+    
+    (define red
+      (reduction-relation
+       var-lang
+       (--> (x ...)
+            (y ... z ...)
+            (where (y ... w z ...) (x ...)))))
+    
+    (test (apply-reduction-relation red (term (a b c)))
+          (list (term (a b)) (term (a c)) (term (b c)))))
+  
   
   (let ([r (reduction-relation
             grammar
@@ -1420,7 +1578,7 @@
              (->4 a b)])])
     
     ; test that names are properly bound for side-conditions in shortcuts
-    (let* ([lhs (rewrite-proc-lhs (first (reduction-relation-make-procs r)))]
+    (let* ([lhs ((rewrite-proc-lhs (first (reduction-relation-make-procs r))) grammar)]
            [proc (third lhs)]
            [name (cadadr lhs)]
            [bind (λ (n) (make-bindings (list (make-bind name n))))])
@@ -1439,7 +1597,7 @@
         [else #f]))
     
     ; test shortcut in terms of shortcut
-    (test (match (rewrite-proc-lhs (third (reduction-relation-make-procs r)))
+    (test (match ((rewrite-proc-lhs (third (reduction-relation-make-procs r))) grammar)
             [`(((side-condition 5 ,(? procedure?)) 2) 1) #t]
             [else #f])
           #t))

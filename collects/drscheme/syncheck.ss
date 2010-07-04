@@ -241,6 +241,8 @@ If the namespace does not, they are colored the unbound color.
             ;;                           string))))))
             (define arrow-vectors #f)
             
+            ;; cleanup-texts : (or/c #f (listof text))
+            (define cleanup-texts #f)
             
             ;; bindings-table : hash-table[(list text number number) -o> (listof (list text number number))]
             ;; this is a private field
@@ -385,6 +387,7 @@ If the namespace does not, they are colored the unbound color.
               (set! tacked-hash-table (make-hasheq))
               (set! arrow-vectors (make-hasheq))
               (set! bindings-table (make-hash))
+              (set! cleanup-texts '())
               (let ([f (get-top-level-window)])
                 (when f
                   (send f open-status-line 'drscheme:check-syntax:mouse-over))))
@@ -405,48 +408,69 @@ If the namespace does not, they are colored the unbound color.
                   (set! cursor-location #f)
                   (set! cursor-text #f)
                   (set! cursor-eles #f)
+                  (when cleanup-texts
+                    (for-each (λ (text) (send text thaw-colorer))
+                              cleanup-texts))
+                  (set! cleanup-texts #f)
                   (when any-tacked?
                     (invalidate-bitmap-cache))
                   (update-docs-background #f)
                   (let ([f (get-top-level-window)])
                     (when f
                       (send f close-status-line 'drscheme:check-syntax:mouse-over))))))
+            
+            ;; syncheck:add-to-cleanup-texts : (is-a?/c text%) -> void
+            (define/public (syncheck:add-to-cleanup-texts txt)
+              (cond
+                [cleanup-texts
+                 (unless (memq txt cleanup-texts)
+                   (send txt freeze-colorer)
+                   (set! cleanup-texts (cons txt cleanup-texts)))
+                 #t]
+                [else #f]))
+            
             (define/public (syncheck:add-menu text start-pos end-pos key make-menu)
-              (when (and (<= 0 start-pos end-pos (last-position)))
-                (add-to-range/key text start-pos end-pos make-menu key #t)))
+              (when arrow-vectors
+                (when (and (<= 0 start-pos end-pos (last-position)))
+                  (add-to-range/key text start-pos end-pos make-menu key #t))))
             
             (define/public (syncheck:add-background-color text color start fin key)
-              (when (is-a? text text:basic<%>)
-                (add-to-range/key text start fin (make-colored-region color text start fin) key #f)))
+              (when arrow-vectors
+                (when (is-a? text text:basic<%>)
+                  (add-to-range/key text start fin (make-colored-region color text start fin) key #f))))
             
             ;; syncheck:add-arrow : symbol text number number text number number boolean -> void
             ;; pre: start-editor, end-editor are embedded in `this' (or are `this')
             (define/public (syncheck:add-arrow start-text start-pos-left start-pos-right
                                                end-text end-pos-left end-pos-right
                                                actual? level)
-              (let* ([arrow (make-var-arrow #f #f #f #f
-                                            start-text start-pos-left start-pos-right
-                                            end-text end-pos-left end-pos-right
-                                            actual? level)])
-                (when (add-to-bindings-table
-                       start-text start-pos-left start-pos-right
-                       end-text end-pos-left end-pos-right)
-                  (add-to-range/key start-text start-pos-left start-pos-right arrow #f #f)
-                  (add-to-range/key end-text end-pos-left end-pos-right arrow #f #f))))
+              (when arrow-vectors
+                (let* ([arrow (make-var-arrow #f #f #f #f
+                                              start-text start-pos-left start-pos-right
+                                              end-text end-pos-left end-pos-right
+                                              actual? level)])
+                  (when (add-to-bindings-table
+                         start-text start-pos-left start-pos-right
+                         end-text end-pos-left end-pos-right)
+                    (add-to-range/key start-text start-pos-left start-pos-right arrow #f #f)
+                    (add-to-range/key end-text end-pos-left end-pos-right arrow #f #f)))))
             
             ;; syncheck:add-tail-arrow : text number text number -> void
             (define/public (syncheck:add-tail-arrow from-text from-pos to-text to-pos)
-              (let ([tail-arrow (make-tail-arrow #f #f #f #f to-text to-pos from-text from-pos)])
-                (add-to-range/key from-text from-pos (+ from-pos 1) tail-arrow #f #f)
-                (add-to-range/key to-text to-pos (+ to-pos 1) tail-arrow #f #f)))
+              (when arrow-vectors
+                (let ([tail-arrow (make-tail-arrow #f #f #f #f to-text to-pos from-text from-pos)])
+                  (add-to-range/key from-text from-pos (+ from-pos 1) tail-arrow #f #f)
+                  (add-to-range/key to-text to-pos (+ to-pos 1) tail-arrow #f #f))))
             
             ;; syncheck:add-jump-to-definition : text start end id filename -> void
             (define/public (syncheck:add-jump-to-definition text start end id filename)
-              (add-to-range/key text start end (make-def-link id filename) #f #f))
+              (when arrow-vectors
+                (add-to-range/key text start end (make-def-link id filename) #f #f)))
             
             ;; syncheck:add-mouse-over-status : text pos-left pos-right string -> void
             (define/public (syncheck:add-mouse-over-status text pos-left pos-right str)
-              (add-to-range/key text pos-left pos-right str #f #f))
+              (when arrow-vectors
+                (add-to-range/key text pos-left pos-right str #f #f)))
             
             ;; add-to-range/key : text number number any any boolean -> void
             ;; adds `key' to the range `start' - `end' in the editor
@@ -981,17 +1005,12 @@ If the namespace does not, they are colored the unbound color.
           (when (is-current-tab?)
             (send (get-frame) hide-error-report)))
         
-        (define cleanup-texts '())
         (define/public (syncheck:clear-highlighting)
           (let* ([definitions (get-defs)]
                  [locked? (send definitions is-locked?)])
             (send definitions begin-edit-sequence #f)
             (send definitions lock #f)
             (send definitions syncheck:clear-arrows)
-            (for-each (λ (text) 
-                        (send text thaw-colorer))
-                      cleanup-texts)
-            (set! cleanup-texts '())
             (send definitions lock locked?)
             (send definitions end-edit-sequence)))
         
@@ -1003,12 +1022,6 @@ If the namespace does not, they are colored the unbound color.
           (send report-error-text on-close)
           (send (get-defs) syncheck:clear-arrows)
           (inner (void) on-close))
-        
-        ;; syncheck:add-to-cleanup-texts : (is-a?/c text%) -> void
-        (define/public (syncheck:add-to-cleanup-texts txt)
-          (unless (memq txt cleanup-texts)
-            (send txt freeze-colorer)
-            (set! cleanup-texts (cons txt cleanup-texts))))
         
         (super-new)))
     
@@ -2011,10 +2024,15 @@ If the namespace does not, they are colored the unbound color.
         
         (when (and unused/phases requires/phases)
           (let ([req-path/pr (get-module-req-path (identifier-binding var phase-level)
-                                                  phase-level)])
-            (when req-path/pr
+                                                  phase-level)]
+                [source-req-path/pr (get-module-req-path (identifier-binding var phase-level)
+                                                          phase-level
+                                                          #:nominal? #f)])
+            (when (and req-path/pr source-req-path/pr)
               (let* ([req-path (list-ref req-path/pr 0)]
                      [id (list-ref req-path/pr 1)]
+                     [source-req-path (list-ref source-req-path/pr 3)]
+                     [source-id (list-ref source-req-path/pr 1)]
                      [req-phase-level (list-ref req-path/pr 2)]
                      [unused (hash-ref unused/phases req-phase-level)]
                      [requires (hash-ref requires/phases req-phase-level)]
@@ -2028,8 +2046,8 @@ If the namespace does not, they are colored the unbound color.
                                 (when id
                                   (add-jump-to-definition
                                    var
-                                   id
-                                   (get-require-filename req-path user-namespace user-directory)))
+                                   source-id
+                                   (get-require-filename source-req-path user-namespace user-directory)))
                                 (add-mouse-over var
                                                 (fw:gui-utils:format-literal-label 
                                                  (string-constant cs-mouse-over-import)
@@ -2059,25 +2077,28 @@ If the namespace does not, they are colored the unbound color.
         [else (eq? var id)]))
     
     
-    ;; get-module-req-path : binding -> (union #f (cons require-sexp sym))
+    ;; get-module-req-path : binding number [#:nominal? boolean] -> (union #f (list require-sexp sym ?? module-path))
     ;; argument is the result of identifier-binding or identifier-transformer-binding
-    (define (get-module-req-path binding phase-level)
+    (define (get-module-req-path binding phase-level #:nominal? [nominal-source-path? #t])
       (and (pair? binding)
            (or (not (number? phase-level))
                (= phase-level
                   (+ (list-ref binding 5)
                      (list-ref binding 6))))
-           (let ([mod-path (list-ref binding 2)])
+           (let ([mod-path (if nominal-source-path? (list-ref binding 2) (list-ref binding 0))])
              (cond
                [(module-path-index? mod-path)
                 (let-values ([(base offset) (module-path-index-split mod-path)])
                   (list base
-                        (list-ref binding 3)
-                        (list-ref binding 5)))]
+                        (if nominal-source-path? (list-ref binding 3) (list-ref binding 1))
+                        (list-ref binding 5)
+                        mod-path))]
                [(symbol? mod-path)
                 (list mod-path 
-                      (list-ref binding 3)
-                      (list-ref binding 5))]))))
+                      (if nominal-source-path? (list-ref binding 3) (list-ref binding 1))
+                      (list-ref binding 5)
+                      mod-path)]
+               [else #f]))))
     
     ;; color/connect-top : namespace directory id-set syntax -> void
     (define (color/connect-top rename-ht user-namespace user-directory binders var)
@@ -2229,17 +2250,21 @@ If the namespace does not, they are colored the unbound color.
                             #f
                             (make-require-open-menu file)))))))))))
     
-    ;; get-require-filename : sexp namespace string[directory] -> filename
+    ;; get-require-filename : sexp-or-module-path-index namespace string[directory] -> filename
     ;; finds the filename corresponding to the require in stx
     (define (get-require-filename datum user-namespace user-directory)
-      (let ([mp
-             (parameterize ([current-namespace user-namespace]
-                            [current-directory user-directory]
-                            [current-load-relative-directory user-directory])
-               (with-handlers ([exn:fail? (λ (x) #f)])
-                 ((current-module-name-resolver) datum #f #f)))])
-        (and (resolved-module-path? mp)
-             (resolved-module-path-name mp))))
+      (parameterize ([current-namespace user-namespace]
+                     [current-directory user-directory]
+                     [current-load-relative-directory user-directory])
+        (with-handlers ([exn:fail? (λ (x) 
+                                     (printf "fail ~s\n" (exn-message x))
+                                     #f)])
+          (cond
+            [(module-path-index? datum)
+             (resolved-module-path-name 
+              (module-path-index-resolve datum))]
+            [else
+             ((current-module-name-resolver) datum #f #f)]))))
     
     ;; make-require-open-menu : path -> menu -> void
     (define (make-require-open-menu file)
@@ -2416,8 +2441,8 @@ If the namespace does not, they are colored the unbound color.
       (let ([style (send (send source get-style-list)
                          find-named-style
                          style-name)])
-        (add-to-cleanup-texts source)
-        (send source change-style style start finish #f)))
+        (when (add-to-cleanup-texts source)
+          (send source change-style style start finish #f))))
     
     ;; hash-table[syntax -o> (listof syntax)] -> void
     (define (add-tail-ht-links tail-ht)
@@ -2488,10 +2513,9 @@ If the namespace does not, they are colored the unbound color.
     
     ;; add-to-cleanup-texts : (is-a?/c editor<%>) -> void
     (define (add-to-cleanup-texts ed)
-      (let ([ed (find-outermost-editor ed)])
-        (when (is-a? ed drscheme:unit:definitions-text<%>)
-          (let ([tab (send ed get-tab)])
-            (send tab syncheck:add-to-cleanup-texts ed)))))
+      (let ([outermost (find-outermost-editor ed)])
+        (and (is-a? outermost drscheme:unit:definitions-text<%>)
+             (send outermost syncheck:add-to-cleanup-texts ed))))
     
     (define (find-outermost-editor ed)
       (let loop ([ed ed])

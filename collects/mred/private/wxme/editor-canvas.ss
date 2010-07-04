@@ -1,5 +1,6 @@
 #lang scheme/base
 (require scheme/class
+         scheme/file
          "../syntax.ss"
          "editor.ss"
          "editor-admin.ss"
@@ -128,7 +129,11 @@
 
 ;; ----------------------------------------
 
-(define default-wheel-amt 3)
+(define default-wheel-amt
+  (let ([v (get-preference 'MrEd:wheelStep)])
+    (if (exact-integer? v)
+        (max 3 (min 1000 v))
+        3)))
 
 (define (INIT-SB style)
   (append
@@ -439,9 +444,10 @@
                        [y 0])
                (get-scroll x y)
              (let ([y (max (+ y
-                              (if (eq? code 'wheel-up)
-                                  -1
-                                  1))
+                              (* wheel-amt
+                                 (if (eq? code 'wheel-up)
+                                     -1
+                                     1)))
                            0)])
                (do-scroll x y #t))))]
         [else
@@ -676,11 +682,11 @@
                                     [(or (and (eq? bias 'start) (fw . > . iw))
                                          (and (fw . < . iw) (localx . < . x))
                                          (and (fw . > . iw) (not (eq? bias 'end)) (localx . < . x)))
-                                     (quotient localx hpixels-per-scroll)]
+                                     (->long (/ localx hpixels-per-scroll))]
                                     [(or (and (eq? bias 'end) (fw . > . iw))
                                          (and (fw . < . iw) ((+ x iw) . < . (+ localx fw)))
                                          (and (fw . > . iw) (not (eq? bias 'start)) ((+ localx fw) . > . (+ x iw))))
-                                     (+ (quotient (+ localx (- fw iw)) hpixels-per-scroll) 1)]
+                                     (+ (->long (/ (+ localx (- fw iw)) hpixels-per-scroll)) 1)]
                                     [else cx])
                                    0)
                                cx)])
@@ -726,7 +732,7 @@
                                                   [total-height 0.0])
                                           (send med get-extent total-width total-height)
 
-                                        (let-values ([(vnum-scrolls scroll-offset)
+                                        (let-values ([(vnum-scrolls -scroll-offset)
                                                       (if (or (zero? h)
                                                               (and (not scroll-to-last?)
                                                                    (h . >= . total-height)))
@@ -738,7 +744,7 @@
                                                                     (values vnum-scrolls 1)
                                                                     (let ([start (- (send med find-scroll-line (+ h 1)) 1)])
                                                                       (values (- vnum-scrolls start)
-                                                                              (+ scroll-offset start)))))
+                                                                              (+ 1 start)))))
                                                               (let ([top (max 0
                                                                               (- (->long (- total-height
                                                                                             (if scroll-to-last?
@@ -751,6 +757,8 @@
                                                                               (- nsl 1)
                                                                               vnum-scrolls)
                                                                           0)))))])
+
+                                          (set! scroll-offset -scroll-offset)
 
                                           (let-values ([(num-scrolls vspp)
                                                         (if (positive? vnum-scrolls)
@@ -773,7 +781,7 @@
                                                                        (if (modulo tw hpixels-per-scroll)
                                                                            (+ tw (- hpixels-per-scroll (modulo tw hpixels-per-scroll)))
                                                                            tw)])
-                                                                  (values (quotient tw hpixels-per-scroll)
+                                                                  (values (->long (/ tw hpixels-per-scroll))
                                                                           given-h-scrolls-per-page)))
                                                               (values 0 1))])
 

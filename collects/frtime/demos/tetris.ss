@@ -1,9 +1,10 @@
+#lang frtime
 (require (lifted texpict/mrpict colorize vl-append vr-append text
                  cc-superimpose hb-append ht-append pin-over blank
                  dc-for-text-size)
          (lifted texpict/utils filled-rectangle rectangle)
          frtime/gui/fred mred
-         (only frtime/frp-core do-in-manager do-in-manager-after))
+         (only frtime/core/frp do-in-manager do-in-manager-after))
 
 ;; TODO: layered drawing, pause, game over
 

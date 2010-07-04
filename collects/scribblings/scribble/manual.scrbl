@@ -10,9 +10,15 @@
 @title[#:tag "manual" #:style 'toc]{Manual Forms}
 
 @defmodule[scribble/manual]{The @schememodname[scribble/manual]
-library provides all of @schememodname[scribble/basic], plus
-additional functions that are relatively specific to writing PLT
-Scheme documentation.}
+library provides all of @schememodname[scribble/basic] plus additional
+functions, including many that are relatively specific to writing PLT
+Scheme documentation.
+
+The @schememodname[scribble/manual] name can also be used as a
+language with @hash-lang[]. It acts like the
+@schememodname[scribble/doc] language, except that the
+@schememodname[scribble/manual] library is also required into
+the module.}
 
 @local-table-of-contents[]
 
@@ -92,8 +98,12 @@ A few other escapes are recognized symbolically:
        produces a paragraph using @scheme[t]: 
 
        @verbatim[#:indent 2]|{
-         (code:comment #, @t{this is a comment})
-       }|}
+         (code:comment @#,t{this is a comment})
+       }|
+
+       (Note that @litchar|{@#,foo{...}}| reads as
+       @SCHEME[(unsyntax (foo "..."))].)
+       }
 
  @item{@schemeidfont{code:blank} typesets as a blank space.}
 
@@ -366,8 +376,8 @@ sub-sections.}
                          (keyword arg-id contract-expr-datum default-expr)
                          ellipses
                          ellipses+]
-               [ellipses #, @lit-ellipses]
-               [ellipses+ #, @lit-ellipses+])]{
+               [ellipses @#,lit-ellipses]
+               [ellipses+ @#,lit-ellipses+])]{
 
 Produces a sequence of flow elements (encapsulated in a
 @scheme[splice]) to document a procedure named @scheme[id]. Nesting
@@ -402,13 +412,13 @@ Each @scheme[arg-spec] must have one of the following forms:
        Like the previous case, but with a default
        value.}
 
-@specsubform[#, @lit-ellipses]{Any number of the preceding argument.  This
+@specsubform[@#,lit-ellipses]{Any number of the preceding argument.  This
        form is normally used at the end, but keyword-based arguments
        can sensibly appear afterward. See also the documentation for
        @scheme[append] for a use of @lit-ellipses before the last
        argument.}
 
-@specsubform[#, @lit-ellipses+]{One or more of the preceding argument
+@specsubform[@#,lit-ellipses+]{One or more of the preceding argument
        (normally at the end, like @lit-ellipses).}
 
 The @scheme[result-contract-expr-datum] is typeset via
@@ -1070,6 +1080,8 @@ combination of @scheme[envvar] and @scheme[as-index].}
 
 @; ------------------------------------------------------------------------
 @section{Bibliography}
+
+@margin-note{See also @schememodname[scriblib/autobib].}
 
 @defproc[(cite [key string?]) element?]{
 

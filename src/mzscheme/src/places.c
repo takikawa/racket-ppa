@@ -18,6 +18,7 @@ static Scheme_Object *scheme_place_sleep(int argc, Scheme_Object *args[]);
 static Scheme_Object *scheme_place_p(int argc, Scheme_Object *args[]);
 static void load_namespace(char *namespace_name);
 static void load_namespace_utf8(Scheme_Object *namespace_name);
+static Scheme_Object *scheme_places_deep_copy_in_master(Scheme_Object *so);
 
 # ifdef MZ_PRECISE_GC
 static void register_traversers(void);
@@ -121,6 +122,7 @@ Scheme_Object *scheme_place(int argc, Scheme_Object *args[]) {
     scheme_wrong_count_m("place", 1, 2, argc, args, 0);
   }
   collection_paths = scheme_current_library_collection_paths(0, NULL);
+  collection_paths = scheme_places_deep_copy_in_master(collection_paths);
   place_data->current_library_collection_paths = collection_paths;
 
   /* create new place */
@@ -188,6 +190,20 @@ Scheme_Object *scheme_places_deep_copy(Scheme_Object *so)
         new_so = scheme_intern_exact_symbol(sym->s, sym->len);
       }
       break;
+    case scheme_pair_type:
+      {
+        Scheme_Object *car;
+        Scheme_Object *cdr;
+        Scheme_Object *pair;
+        car = scheme_places_deep_copy(SCHEME_CAR(so));
+        cdr = scheme_places_deep_copy(SCHEME_CDR(so));
+        pair = scheme_make_pair(car, cdr);
+        return pair;
+      }
+      break;
+    case scheme_null_type:
+      new_so = so;
+      break;
     case scheme_resolved_module_path_type:
       abort();
       break;
@@ -243,8 +259,17 @@ static void *place_start_proc(void *data_arg) {
   return scheme_true;
 }
 
-#ifdef MZ_PRECISE_GC
+Scheme_Object *scheme_places_deep_copy_in_master(Scheme_Object *so) {
+#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
+  void *return_payload;
+  return_payload = scheme_master_fast_path(5, so);
+  return (Scheme_Object*) return_payload;
+#endif
+  return so;
+}
 
+#ifdef MZ_PRECISE_GC
+static void* scheme_master_place_handlemsg(int msg_type, void *msg_payload);
 static void *master_scheme_place(void *data) {
   mz_proc_thread *myself;
   myself = proc_thread_self;
@@ -255,34 +280,65 @@ static void *master_scheme_place(void *data) {
     void *recv_payload;
     pt_mbox *origin;
     Scheme_Object *o;
-    Scheme_Object *copied_o;
 
     pt_mbox_recv(myself->mbox, &recv_type, &recv_payload, &origin);
-    switch(recv_type) {
-      case 1:
-        copied_o = scheme_places_deep_copy((Scheme_Object *)recv_payload);
-        o = scheme_intern_resolved_module_path_worker(copied_o);
-        pt_mbox_send(origin, 2, (void *) o, NULL);
-        break;
-      case 3:
-        {
-          Scheme_Symbol_Parts *parts;
-          parts = (Scheme_Symbol_Parts *) recv_payload;
-          o = (Scheme_Object *)scheme_intern_exact_symbol_in_table_worker(parts->table, parts->kind, parts->name, parts->len);
-          pt_mbox_send(origin, 4, (void *) o, NULL);
-        }
-        break;
-      case 5:
-        break;
-    }
+    o = scheme_master_place_handlemsg(recv_type, recv_payload);
+    pt_mbox_send(origin, 2, (void *) o, NULL);
   }
   return NULL;
 }
 
+static void* scheme_master_place_handlemsg(int msg_type, void *msg_payload)
+{
+  switch(msg_type) {
+    case 1:
+      {
+        Scheme_Object *o;
+        Scheme_Object *copied_o;
+        copied_o = scheme_places_deep_copy((Scheme_Object *)msg_payload);
+        o = scheme_intern_resolved_module_path_worker(copied_o);
+        return o;
+      }
+      break;
+    case 3:
+      {
+        Scheme_Object *o;
+        Scheme_Symbol_Parts *parts;
+        parts = (Scheme_Symbol_Parts *) msg_payload;
+        o = (Scheme_Object *)scheme_intern_exact_symbol_in_table_worker(parts->table, parts->kind, parts->name, parts->len);
+        return o;
+      }
+      break;
+    case 5:
+      { 
+        Scheme_Object *copied_o;
+        copied_o = scheme_places_deep_copy((Scheme_Object *)msg_payload);
+        return copied_o;
+      }
+      break;
+  }
+  return NULL;
+}
+
+void* scheme_master_fast_path(int msg_type, void *msg_payload) {
+  Scheme_Object *o;
+  void *original_gc;
+
+  original_gc = GC_switch_to_master_gc();
+  o = scheme_master_place_handlemsg(msg_type, msg_payload);
+  GC_switch_back_from_master(original_gc);
+
+  return o;
+}
+
+
 void spawn_master_scheme_place() {
   mzrt_proc_first_thread_init();
+  
 
-  scheme_master_proc_thread = mz_proc_thread_create(master_scheme_place, NULL);
+  //scheme_master_proc_thread = mz_proc_thread_create(master_scheme_place, NULL);
+  scheme_master_proc_thread = ~0;
+
 }
 #endif
 

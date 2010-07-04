@@ -68,7 +68,7 @@
   ;; possible values: #f, or a predicate on steps.
   (define stepper-is-waiting? (lambda (x) #t))
   
-  ;; hand-off-and-block : (-> text%? boolean? void?)
+  ;; hand-off-and-block : (-> text%? any (listof (or/c posn-info? false?)) void?)
   ;; hand-off-and-block generates a new semaphore, hands off a thunk to
   ;; drscheme's eventspace, and blocks on the new semaphore.  The thunk
   ;; adds the text% to the waiting queue, and checks to see if the
@@ -98,7 +98,7 @@
                             (update-view/existing (- (length view-history) 1)))]
                     [else 
                      ;; nope, keep running:
-                     (begin (if (eq? (step-kind new-step) 'finished-stepping)
+                     (begin (if (finished-stepping-step? new-step)
                                 (begin (message-box "Ran out of steps"
                                                     "Reached the end of evaluation before finding the kind of step you were looking for.")
                                        (update-view/existing (- (length view-history) 1)))
@@ -158,13 +158,13 @@
   ;; is this an application step?
   (define (application-step? history-entry)
     (match history-entry
-      [(struct step (text (or 'user-application 'finished-stepping) posns)) #t]
+      [(struct step (text (or 'user-application 'finished-or-error) posns)) #t]
       [else #f]))
   
   ;; is this the finished-stepping step?
   (define (finished-stepping-step? history-entry)
     (match (step-kind history-entry)
-      ['finished-stepping #t]
+      ['finished-or-error #t]
       [else #f]))
   
   ;; is this step on the selected expression?
@@ -194,7 +194,8 @@
        (begin
             ;; each step has its own semaphore, so releasing one twice is
             ;; no problem.
-            (semaphore-post release-for-next-step)
+            (when release-for-next-step
+              (semaphore-post release-for-next-step))
             (when stepper-is-waiting?
               (error 'try-to-get-view
                      "try-to-get-view should not be reachable when already waiting for new step"))
@@ -327,7 +328,9 @@
   ;; en/dis-able-buttons : set enable & disable the stepper buttons,
   ;; based on view-controller state
   (define (en/dis-able-buttons)
-    (let* ([can-go-back? (and view (> view 0))])
+     ;; let's just leave all the buttons enabled...
+     (void)
+     #;(let* ([can-go-back? (and view (> view 0))])
       (send previous-button enable can-go-back?)
       (send previous-application-button enable can-go-back?)
       (send next-button
@@ -350,11 +353,11 @@
             [(struct before-after-result (pre-exps post-exps kind pre-src post-src))
              (list (new x:stepper-text% [left-side pre-exps] [right-side post-exps]) kind (list pre-src post-src))]
             [(struct before-error-result (pre-exps err-msg pre-src))
-             (list (new x:stepper-text% [left-side pre-exps] [right-side err-msg]) #f (list pre-src))]
+             (list (new x:stepper-text% [left-side pre-exps] [right-side err-msg]) 'finished-or-error (list pre-src))]
             [(struct error-result (err-msg))
-             (list (new x:stepper-text% [left-side null] [right-side err-msg]) #f (list))]
+             (list (new x:stepper-text% [left-side null] [right-side err-msg]) 'finished-or-error (list))]
             [(struct finished-stepping ())
-             (list x:finished-text 'finished-stepping (list))])])
+             (list x:finished-text 'finished-or-error (list))])])
       (hand-off-and-block step-text step-kind posns)))
   
   ;; program-expander-prime : wrap the program-expander for a couple of reasons:

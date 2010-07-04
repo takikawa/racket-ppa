@@ -1,3 +1,4 @@
+#lang frtime
 ;; GrowingPoints
 ;; Written by Robb Cutler
 ;; July, 2004
@@ -9,8 +10,7 @@
 ;; Require the animation library, the gui library, and the library
 ;; containing the build-list function.
 (require frtime/animation
-         frtime/gui
-         frtime/etc)
+         frtime/gui)
 
 ;; distance : number number number number -> number
 ;; Returns the distance between (x1, y1) and (x2, y2).

@@ -236,8 +236,8 @@
 (define (module-specs->non-lib-paths mods)
   (define (lib? x)
     (if (module-path-index? x)
-        (let-values ([(m base) (module-path-index-split x)]) (lib? m))
-        (and (pair? x) (eq? 'lib (car x)))))
+      (let-values ([(m base) (module-path-index-split x)]) (lib? m))
+      (or (symbol? x) (and (pair? x) (eq? 'lib (car x))))))
   ;; turns a module spec to a simple one (except for lib specs)
   (define (simple-modspec mod)
     (cond [(and (pair? mod) (eq? 'lib (car mod))) #f]
@@ -253,25 +253,22 @@
           [(and (eq? 'prefix (car mod)) (pair? (cddr mod)))
            (simple-modspec (caddr mod))]
           [else #f]))
-  (let loop ([todo (filter values (map simple-modspec mods))]
+  (let loop ([todo (filter-map simple-modspec mods)]
              [r '()])
     (cond
-     [(null? todo) r]
-     [(member (car todo) r) (loop (cdr todo) r)]
-     [else
-      (let ([path (car todo)])
-        (loop (filter values
-                      (map (lambda (i)
-                             (simplify-path* (resolve-module-path-index i path)))
-                           (filter (lambda (i)
-                                     (and (module-path-index? i) (not (lib? i))))
-                                   (apply append
-                                          (call-with-values
-                                              (lambda ()
-                                                (module-compiled-imports
-                                                 (get-module-code (car todo))))
-                                            list)))))
-              (cons path r)))])))
+      [(null? todo) r]
+      [(member (car todo) r) (loop (cdr todo) r)]
+      [else
+       (let ([path (car todo)])
+         (loop (append (cdr todo)
+                       (filter-map
+                        (lambda (i)
+                          (simplify-path* (resolve-module-path-index i path)))
+                        (filter (lambda (i)
+                                  (and (module-path-index? i) (not (lib? i))))
+                                (append-map cdr (module-compiled-imports
+                                                 (get-module-code path))))))
+               (cons path r)))])))
 
 ;; Resources ----------------------------------------------------------------
 
@@ -789,7 +786,7 @@
           [(thunk thunk*) (user-eval expr)]
           [else (error 'evaluator "internal error, bad message: ~e" msg)]))
       (user-eval expr)))
-  (define (make-output what out set-out! allow-link?)
+  (define (make-output what out set-out!)
     (cond [(not out) (open-output-nowhere)]
           [(and (procedure? out) (procedure-arity-includes? out 0)) (out)]
           [(output-port? out) out]
@@ -830,11 +827,9 @@
          (let-values ([(i o) (make-pipe)]) (set! input o) i)]
         [else (error 'make-evaluator "bad sandbox-input: ~e" inp)]))]
     [current-output-port (make-output 'output (sandbox-output)
-                                      (lambda (o) (set! output o))
-                                      #f)]
+                                      (lambda (o) (set! output o)))]
     [current-error-port (make-output 'error-output (sandbox-error-output)
-                                     (lambda (o) (set! error-output o))
-                                     #t)]
+                                     (lambda (o) (set! error-output o)))]
     ;; paths
     [current-library-collection-paths
      (filter directory-exists?

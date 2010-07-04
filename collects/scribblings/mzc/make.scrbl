@@ -241,6 +241,15 @@ A parameter for a procedure of one argument that is called to report
  compilation-manager actions, such as checking a file. The argument to
  the procedure is a string.}
 
+@defparam[manager-skip-file-handler proc (-> path? (or/c number? #f))]{
+
+A parameter whose value is called for each file that is loaded and
+ needs recompilation. If the procedure returns a number, then the file
+ is skipped (i.e., not compiled), and the number is used as the
+ timestamp for the file's bytecode. If the procedure returns
+ @scheme[#f], then the file is compiled as usual. The default is
+ @scheme[(lambda (x) #f)].}
+
 @; ----------------------------------------------------------------------
 
 @section{Compilation Manager Hook for Syntax Transformers}

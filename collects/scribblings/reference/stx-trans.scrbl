@@ -42,9 +42,9 @@ expression is provided to the transformer.
   (let-syntax ([x (make-set!-transformer
                     (lambda (stx)
                       (syntax-case stx (set!)
-                        (code:comment #, @t{Redirect mutation of x to y})
+                        (code:comment @#,t{Redirect mutation of x to y})
                         [(set! id v) (syntax (set! y v))]
-                        (code:comment #, @t{Normal use of @scheme[x] really gets @scheme[x]})
+                        (code:comment @#,t{Normal use of @scheme[x] really gets @scheme[x]})
                         [id (identifier? (syntax id)) (syntax x)])))])
     (begin
       (set! x 3)
@@ -198,7 +198,32 @@ was triggered by a use of a module-defined identifier with a
 expanded for the body of a module, then the expansion of @scheme[stx]
 can use any identifier defined by the module.
 
-@transform-time[]}
+@transform-time[]
+
+@examples[#:eval stx-eval
+(define-syntax do-print
+  (syntax-rules ()
+    [(_ x ...) (printf x ...)]))
+
+(define-syntax hello
+  (syntax-rules ()
+    [(_ x) (do-print "hello ~a" x)]))
+
+(define-syntax (show stx)
+  (syntax-case stx ()
+    [(_ x)
+     (with-syntax ([partly-expanded (local-expand #'(hello x)
+						  'expression
+						  (list #'do-print))]
+		   [expanded (local-expand #'(hello x)
+					   'expression
+					   #f)])
+       (printf "partly expanded syntax is ~a\n" (syntax->datum #'partly-expanded))
+       (printf "expanded syntax is ~a\n" (syntax->datum #'expanded))
+       #'expanded)]))
+
+(show 1)
+]}
 
 
 @defproc[(syntax-local-expand-expression [stx syntax?])
@@ -425,6 +450,15 @@ Other syntactic forms can capture lifts by using
 
 @transform-time[]}
 
+@defproc[(syntax-local-lift-values-expression [n exact-nonnegative-integer?] [stx syntax?])
+         (listof identifier?)]{
+
+Like @scheme[syntax-local-lift-expression], but binds the result to
+@scheme[n] identifiers, and returns a list of the @scheme[n]
+identifiers.
+
+@transform-time[]}
+
 
 @defproc[(syntax-local-lift-context)
          any/c]{
@@ -444,13 +478,13 @@ for caching lift information to avoid redundant lifts.
 
 Cooperates with the @scheme[module] form to insert @scheme[stx] as
 a top-level declaration at the end of the module currently being
-expanded. If the current expression being transformed is not within a
-@scheme[module] form, or if it is not a run-time expression, then the
-@exnraise[exn:fail:contract]. If the current expression being
+expanded. If the current expression being
 transformed is not in the module top-level, then @scheme[stx] is
 eventually expanded in an expression context.
 
-@transform-time[]}
+@transform-time[] If the current expression being transformed is not
+within a @scheme[module] form, or if it is not a run-time expression,
+then the @exnraise[exn:fail:contract].}
 
 
 @defproc[(syntax-local-lift-require [raw-require-spec any/c][stx syntax?])
@@ -471,6 +505,17 @@ resulting syntax object (assuming that the lexical information of
 @scheme[#%require] is lifted).
 
 @transform-time[]}
+
+@defproc[(syntax-local-lift-provide [raw-provide-spec-stx syntax?])
+         void?]{
+
+Lifts a @scheme[#%provide] form corresponding to
+@scheme[raw-provide-spec-stx] to the top of the module currently being
+expanded.
+
+@transform-time[] If the current expression being transformed is not
+within a @scheme[module] form, or if it is not a run-time expression,
+then the @exnraise[exn:fail:contract]. }
 
 @defproc[(syntax-local-name) (or/c symbol? #f)]{
 

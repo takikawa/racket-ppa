@@ -50,7 +50,8 @@ These functions optimize the construction of dispatchers and launching of server
           [#:banner? banner? boolean? #f]
           [#:listen-ip listen-ip (or/c false/c string?) "127.0.0.1"]
           [#:port port number? 8000]
-          [#:ssl-keys ssl-keys (or/c false/c (cons/c path-string? path-string?)) #f])
+          [#:ssl-cert ssl-cert (or/c false/c path-string?) #f]
+          [#:ssl-key ssl-key (or/c false/c path-string?) #f])
          void]{
  The other interesting part of @scheme[serve/servlet] is its ability to start up a server and immediately
  launch a browser at it. This is provided by @scheme[serve/launch/wait].
@@ -62,10 +63,13 @@ These functions optimize the construction of dispatchers and launching of server
  
  If @scheme[banner?] is true, then a banner is printed informing the user of the server's URL.
  
- The server listens on @scheme[listen-ip] and port @scheme[port].
+ The server listens on @scheme[listen-ip] and port @scheme[port]. If @scheme[listen-ip] is @scheme[#f], then the server accepts 
+ connections to all of the listening machine's addresses. Otherwise, the server accepts connections only at the interface(s) associated with the given string.
+ For example, providing @scheme["127.0.0.1"] (the default) as @scheme[listen-ip] creates a server that accepts only connections to @scheme["127.0.0.1"] (the loopback interface) from the local machine.
  
- If @scheme[ssl-keys] is not false, then the server runs in HTTPS mode with @scheme[(car ssl-keys)]
- and @scheme[(cdr ssl-keys)] as paths to the certificate and private key.    
+ 
+ If @scheme[ssl-key] and @scheme[ssl-cert] are not false, then the server runs in HTTPS mode with @scheme[ssl-cert]
+ and @scheme[ssl-key] as paths to the certificate and private key.    
 }
               
 }

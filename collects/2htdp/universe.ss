@@ -11,11 +11,19 @@
          "private/image.ss"
          "private/world.ss"
          "private/universe.ss"
+	 "private/launch-many-worlds.ss"
          htdp/error
          (rename-in lang/prim (first-order->higher-order f2h))
          (only-in mzlib/etc evcase))
 
 (provide (all-from-out "private/image.ss"))
+
+(provide
+  launch-many-worlds
+  ;; (launch-many-worlds e1 ... e2)
+  ;; run expressions e1 through e2 in parallel,
+  ;; produce all values
+)
 
 (provide
  sexp?  ;; Any -> Boolean 
@@ -25,6 +33,8 @@
 ;; Spec = (on-tick Expr) 
 ;;      | (on-tick Expr Expr) 
 ;; -- on-tick must specify a tick handler; it may specify a clock-tick rate
+;;      = (check-with Expr)
+;; -- check-with must specify a predicate 
 
 (define-keywords AllSpec
   [on-tick (function-with-arity
@@ -32,7 +42,8 @@
             except
             [(x rate) 
              #'(list (proc> 'on-tick (f2h x) 1) 
-                     (num> 'on-tick rate positive? "pos. number" "rate"))])])
+                     (num> 'on-tick rate positive? "pos. number" "rate"))])]
+  [check-with (function-with-arity 1)])
 
 ;                                     
 ;                                     
@@ -93,9 +104,9 @@
 ;;      | (stop-when Expr)
 ;; -- stop-when must specify a boolean-valued function 
 ;;      | (register Expr)
-;;      | (register Expr Expr)
 ;; -- register must specify the internet address of a host (including LOCALHOST)
-;; -- it may specify a world's name 
+;;      | (name Expr)
+;; -- the name 
 ;;      | (record? Expr)
 ;; -- should the session be recorded and turned into PNGs and an animated GIF
 ;;      | (on-receive Expr) 
@@ -121,7 +132,7 @@
   [name (lambda (tag)
           (lambda (p)
             (syntax-case p ()
-              [(n) #`(symbol> #,tag n)]
+              [(n) #`(string> #,tag n)]
               [_ (err tag p "expected a string for the current world")])))]
   [record? (lambda (tag)
              (lambda (p)
@@ -159,7 +170,9 @@
                                        kwds Spec)))
                          (list (syntax-e (car co)) ((cadr co) (cdr x))))
                        spec)])
-       #`(send (new (if #,rec? aworld% world%) [world0 w]  #,@args) last))]))
+       #`(parameterize ([current-eventspace (make-eventspace)])
+           (let ([o (new (if #,rec? aworld% world%) [world0 w]  #,@args)])
+             (send o last))))]))
 
 
 ;                                                                 
@@ -246,7 +259,6 @@
  make-mail   ;; World S-expression -> Mail 
  mail?       ;; is this a real mail? 
  universe    ;; <syntax> : see below 
- universe2   ;; (World World -> U) (U World Message) -> U
  )
 
 ;; Expr = (universe Expr UniSpec)
@@ -262,10 +274,10 @@
 ;;    in the console 
 
 (define-keywords UniSpec
-  [on-new (function-with-arity 3)]
-  [on-msg (function-with-arity 4)]
-  [on-disconnect (function-with-arity 3)]
-  [to-string (function-with-arity 2)])
+  [on-new (function-with-arity 2)]
+  [on-msg (function-with-arity 3)]
+  [on-disconnect (function-with-arity 2)]
+  [to-string (function-with-arity 1)])
 
 (define-syntax (universe stx)
   (syntax-case stx ()
@@ -309,20 +321,6 @@
          [(not (memq 'on-msg domain))
           (raise-syntax-error #f "missing on-msg clause" stx)]
          [else ; (and (memq #'on-new domain) (memq #'on-msg domain))
-          #`(send (new universe% [universe0 u] #,@args) last)]))]))
+          #`(parameterize ([current-eventspace (make-eventspace)])
+              (send (new universe% [universe0 u] #,@args) last))]))]))
 
-;; (World World -> U) (U World Msg) -> U
-(define (universe2 create process)
-  ;; UniState = '() | (list World) | Universe
-  ;; [Listof World] UniState World -> (cons UniState [Listof (list World S-expression)])
-  (define (nu s x p)
-    (cond
-      [(null? s) (make-bundle (list p) '* '())]
-      [(not (pair? s)) (make-bundle s '* '())]
-      [(null? (rest s)) (create (first s) p)]
-      [else (error 'create "a third world is signing up!")]))
-  (universe '() 
-            (on-new nu)
-            (on-msg process)
-            #;
-            (on-tick (lambda (u x) (printf "hello!\n") (list u)) 1)))

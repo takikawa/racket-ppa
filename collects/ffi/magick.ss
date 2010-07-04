@@ -2,7 +2,19 @@
 
 (require mzlib/foreign) (unsafe!)
 
-(define libwand (ffi-lib "libWand" "6.0.1"))
+(define (ffi-try-libs . libs)
+  (let loop ([libs* libs]
+             [exceptions '()])
+    (if (null? libs*)
+      (error 'ffi-try-libs "Could not load any of the libraries in ~a\n~a\n" libs exceptions)
+      (let ([lib (caar libs*)]
+            [version (cdar libs*)])
+        (with-handlers ([exn:fail:filesystem? (lambda (e)
+                                                (loop (cdr libs*) (cons e exceptions)))])
+          (ffi-lib lib version))))))
+     
+(define libwand (ffi-try-libs '("libWand" "6.0.1" "6")
+                              '("libMagickWand" "1")))
 
 ;; ===== Main Objects =========================================================
 
@@ -1315,7 +1327,7 @@
 ;; profiles from the image.
 (defmagick* MagickProfileImage :
   _MagickWand (profile-name : _string)
-  (profile : _bytes) (_ulong = (string-length profile))
+  (profile : _bytes) (_ulong = (bytes-length profile))
   -> _status)
 
 ;; MagickQuantizeImage analyzes the colors within a reference image and chooses
@@ -1384,7 +1396,7 @@
 
 ;; MagickReadImageBlob reads an image or image sequence from a blob.
 (defmagick* MagickReadImageBlob :
-  _MagickWand (blob : _bytes) (_ulong = (string-length blob)) -> _status)
+  _MagickWand (blob : _bytes) (_ulong = (bytes-length blob)) -> _status)
 
 ;; MagickReadImageFile reads an image or image sequence from an open file
 ;; descriptor.
@@ -1595,7 +1607,7 @@
 ;; profiles.
 (defmagick* MagickSetImageProfile :
   _MagickWand (profile-name : _string)
-  (profile : _bytes) (_ulong = (string-length profile))
+  (profile : _bytes) (_ulong = (bytes-length profile))
   -> _status)
 
 ;; MagickSetImageRedPrimary sets the image chromaticity red primary point.

@@ -16,7 +16,7 @@
 The DrScheme window has three parts: a row of buttons at the top, two
 editing panels in the middle, and a status line at the bottom.
 
-@image["example.png"]
+@centerline{@image[#:scale 0.7 "example.png"]}
 
 The top editing panel, called the @deftech{definitions window}, is for
 defining programs. The above figure shows a program that defines the
@@ -399,12 +399,12 @@ but within special boxes that separate explicit I/O from normal
 expressions and results. For example, evaluating
 
 @schemeblock[
-#, @tt{>} (read)
+@#,tt{>} (read)
 ]
 
 in the interactions window produces a special box for entering input:
 
-@image["io.png"]
+@centerline{@image[#:scale 0.6 "io.png"]}
 
 Type a number into the box and hit Enter, and that number becomes the
 result of the @scheme[(read)] expression. Once text is submitted for
@@ -414,10 +414,10 @@ shows a new prompt, it hides the interaction box. Thus, if you type
 as follows:
 
 @schemeblock[
-#, @tt{>} (read)
-#, @ioinputfont{5}
-#, @schemeresult[5]
-#, @tt{>} #, @tt{_}
+@#,tt{>} (read)
+@#,ioinputfont{5}
+@#,schemeresult[5]
+@#,tt{>} @#,tt{_}
 ]
 
 In this case, the first @ioinputfont{5} is the input, and the second
@@ -440,10 +440,10 @@ and provide the input S-expression @scheme[(1 2)], the interactions
 window ultimately appears as follows:
 
 @schemeblock[
-#, @ioinputfont{(1 2)}
-#, @iooutputfont{(1 2)}
-#, @schemeresult[(1 2)]
-#, @tt{>} #, @tt{_}
+@#,ioinputfont{(1 2)}
+@#,iooutputfont{(1 2)}
+@#,schemeresult[(1 2)]
+@#,tt{>} @#,tt{_}
 ]
 
 In this example, @scheme[display] produces output immediately beneath
@@ -456,13 +456,13 @@ Entering the same program line-by-line in the interactions window
 produces a different-looking result:
 
 @schemeblock[
-#, @tt{>} (define v (read))
-#, @ioinputfont{(1 2)}
-#, @tt{>} (display v)
-#, @iooutputfont{(1 2)}
-#, @tt{>} v
-#, @schemeresult[(1 2)]
-#, @tt{>} #, @tt{_}
+@#,tt{>} (define v (read))
+@#,ioinputfont{(1 2)}
+@#,tt{>} (display v)
+@#,iooutputfont{(1 2)}
+@#,tt{>} v
+@#,schemeresult[(1 2)]
+@#,tt{>} @#,tt{_}
 ]
 
 Depending on the input operation, you may enter more text into an
@@ -473,31 +473,31 @@ interaction, two values are provided in response to the first
 second @scheme[(read)]:
 
 @schemeblock[
-#, @tt{>} (read)
-#, @ioinputfont{5 6}
-#, @schemeresult[5]
-#, @tt{>} (read)
-#, @schemeresult[6]
-#, @tt{>} #, @tt{_}
+@#,tt{>} (read)
+@#,ioinputfont{5 6}
+@#,schemeresult[5]
+@#,tt{>} (read)
+@#,schemeresult[6]
+@#,tt{>} @#,tt{_}
 ]
 
 The following example illustrates that submitting input with Return
 inserts a newline character into the input stream:
 
 @schemeblock[
-#, @tt{>} (read)
-#, @ioinputfont{5}
+@#,tt{>} (read)
+@#,ioinputfont{5}
 
-#, @schemeresult[5]
-#, @tt{>} (read-char)
-#, @schemeresult[#\newline]
-#, @tt{>} #, @tt{_}
+@#,schemeresult[5]
+@#,tt{>} (read-char)
+@#,schemeresult[#\newline]
+@#,tt{>} @#,tt{_}
 ]
 
-Within a @scheme[#, @hash-lang[] #, @schememodname[scheme]] module,
+Within a @scheme[@#,hash-lang[] @#,schememodname[scheme]] module,
 the results of top-level expression print the same as the results of
 an expression entered in the @tech{interactions window}. The reason is
-that @scheme[#, @hash-lang[] #, @schememodname[scheme]] explicitly
+that @scheme[@#,hash-lang[] @#,schememodname[scheme]] explicitly
 prints the results of top-level expressions using
 @scheme[(current-print)], and DrScheme sets @scheme[(current-print)]
 to print values in the same way as for interactions.
@@ -686,7 +686,7 @@ execution is currently paused.  The expression's return value is
 displayed at the left of the button bar, and the value of @scheme[n]
 is displayed in the stack view pane.
 
-@image["debugger1.png"]
+@centerline{@image[#:scale 0.5 "debugger1.png"]}
 
 @subsection{Debugging Multiple Files}
 

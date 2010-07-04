@@ -37,7 +37,8 @@
                       #:banner? boolean?
                       #:listen-ip (or/c false/c string?)
                       #:port number?
-                      #:ssl-keys (or/c false/c (cons/c path-string? path-string?)))
+                      #:ssl-cert (or/c false/c path-string?)
+                      #:ssl-key (or/c false/c path-string?))
                      . ->* .
                      void)])
 
@@ -75,7 +76,7 @@
                                   #:additional-specs
                                   default-module-specs)])
                    (if stateless?
-                       (make-stateless.servlet servlet-current-directory stuffer start)
+                       (make-stateless.servlet servlet-current-directory stuffer manager start)
                        (make-v2.servlet servlet-current-directory manager start)))])
             (set-box! servlet-box servlet)
             servlet))))))
@@ -92,9 +93,11 @@
          [listen-ip "127.0.0.1"]
          #:port
          [port 8000]
-         #:ssl-keys
-         [ssl-keys #f])
-  (define ssl? (pair? ssl-keys))
+         #:ssl-cert
+         [ssl-cert #f]
+         #:ssl-key
+         [ssl-key #f])
+  (define ssl? (and ssl-cert ssl-key))
   (define server-url
     (string-append (if ssl? "https" "http")
                    "://localhost"
@@ -109,7 +112,7 @@
                     (let ()
                       (define-unit-binding ssl-tcp@
                         (make-ssl-tcp@
-                         (car ssl-keys) (cdr ssl-keys)
+                         ssl-cert ssl-key
                          #f #f #f #f #f)
                         (import) (export tcp^))
                       ssl-tcp@)

@@ -97,7 +97,7 @@ dependency.
 If an identifier has a @tech{local binding}, then it is the same for
 all phase levels, though the reference is allowed only at a particular
 phase level. Attempting to reference a @tech{local binding} in a
-different @tech{phase level} than the binding's context produces a
+different @tech{phase level} from the binding's context produces a
 syntax error. If an identifier has a @tech{top-level binding} or
 @tech{module binding}, then it can have different such bindings in
 different phase levels.
@@ -214,7 +214,7 @@ the binding (according to @scheme[free-identifier=?]) matters.}
       (letrec-values (((id ...) expr) ...)
         expr ...+)
       (set! id expr)
-      (#, @scheme[quote] datum)
+      (@#,scheme[quote] datum)
       (quote-syntax datum)
       (with-continuation-mark expr expr expr)
       (#%plain-app expr ...+)
@@ -777,15 +777,15 @@ and to start evaluating expanded/compiled code.
 
 @examples[
 (code:line
- (define x 'orig) (code:comment #, @t{define in the original namespace}))
-(code:comment #, @t{The following @scheme[let] expression is compiled in the original})
-(code:comment #, @t{namespace, so direct references to @scheme[x] see @scheme['orig].})
+ (define x 'orig) (code:comment @#,t{define in the original namespace}))
+(code:comment @#,t{The following @scheme[let] expression is compiled in the original})
+(code:comment @#,t{namespace, so direct references to @scheme[x] see @scheme['orig].})
 (code:line
- (let ([n (make-base-namespace)]) (code:comment #, @t{make new namespace})
+ (let ([n (make-base-namespace)]) (code:comment @#,t{make new namespace})
    (parameterize ([current-namespace n]) 
-     (eval '(define x 'new)) (code:comment #, @t{evals in the new namespace})
-     (display x) (code:comment #, @t{displays @scheme['orig]})
-     (display (eval 'x)))) (code:comment #, @t{displays @scheme['new]}))
+     (eval '(define x 'new)) (code:comment @#,t{evals in the new namespace})
+     (display x) (code:comment @#,t{displays @scheme['orig]})
+     (display (eval 'x)))) (code:comment @#,t{displays @scheme['new]}))
 ]
 
 A @tech{namespace} is purely a top-level entity, not to be confused

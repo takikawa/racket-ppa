@@ -169,7 +169,7 @@ Scheme_Thread *scheme_make_thread(void*);
 void scheme_init_true_false(void);
 void scheme_init_symbol_table(void);
 void scheme_init_symbol_type(Scheme_Env *env);
-void scheme_init_type(Scheme_Env *env);
+void scheme_init_type();
 void scheme_init_list(Scheme_Env *env);
 void scheme_init_stx(Scheme_Env *env);
 void scheme_init_module(Scheme_Env *env);
@@ -188,6 +188,7 @@ void scheme_init_numstr(Scheme_Env *env);
 void scheme_init_eval(Scheme_Env *env);
 void scheme_init_promise(Scheme_Env *env);
 void scheme_init_struct(Scheme_Env *env);
+void scheme_init_reduced_proc_struct(Scheme_Env *env);
 void scheme_init_fun(Scheme_Env *env);
 void scheme_init_symbol(Scheme_Env *env);
 void scheme_init_char(Scheme_Env *env);
@@ -214,6 +215,7 @@ void scheme_init_parameterization(Scheme_Env *env);
 void scheme_init_getenv(void);
 
 #ifndef DONT_USE_FOREIGN
+void scheme_init_foreign_globals();
 void scheme_init_foreign(Scheme_Env *env);
 #endif
 void scheme_init_place(Scheme_Env *env);
@@ -221,6 +223,9 @@ void scheme_init_place(Scheme_Env *env);
 void scheme_init_print_buffers_places(void);
 void scheme_init_eval_places(void);
 void scheme_init_port_places(void);
+void scheme_init_regexp_places(void);
+void scheme_init_stx_places(void);
+
 
 void scheme_free_dynamic_extensions(void);
 
@@ -609,6 +614,7 @@ typedef struct Scheme_Struct_Type {
 } Scheme_Struct_Type;
 
 #define STRUCT_TYPE_ALL_IMMUTABLE 0x1
+#define STRUCT_TYPE_CHECKED_PROC  0x2
 
 typedef struct Scheme_Structure
 {
@@ -663,6 +669,8 @@ Scheme_Struct_Type *scheme_lookup_prefab_type(Scheme_Object *key, int field_coun
 Scheme_Object *scheme_make_prefab_struct_instance(Scheme_Struct_Type *stype,
                                                          Scheme_Object *vec);
 Scheme_Object *scheme_clone_prefab_struct_instance(Scheme_Structure *s);
+
+Scheme_Object *scheme_extract_checked_procedure(int argc, Scheme_Object **argv);
 
 /*========================================================================*/
 /*                         syntax objects                                 */
@@ -2084,11 +2092,13 @@ Scheme_Object *scheme_env_frame_uid(Scheme_Comp_Env *env);
 
 typedef Scheme_Object *(*Scheme_Lift_Capture_Proc)(Scheme_Object *, Scheme_Object **, Scheme_Object *, Scheme_Comp_Env *);
 void scheme_frame_captures_lifts(Scheme_Comp_Env *env, Scheme_Lift_Capture_Proc cp, Scheme_Object *data, 
-                                 Scheme_Object *end_stmts, Scheme_Object *context_key, Scheme_Object *require_lifts);
+                                 Scheme_Object *end_stmts, Scheme_Object *context_key, 
+                                 Scheme_Object *require_lifts, Scheme_Object *provide_lifts);
 void scheme_propagate_require_lift_capture(Scheme_Comp_Env *orig_env, Scheme_Comp_Env *env);
 Scheme_Object *scheme_frame_get_lifts(Scheme_Comp_Env *env);
 Scheme_Object *scheme_frame_get_end_statement_lifts(Scheme_Comp_Env *env);
 Scheme_Object *scheme_frame_get_require_lifts(Scheme_Comp_Env *env);
+Scheme_Object *scheme_frame_get_provide_lifts(Scheme_Comp_Env *env);
 Scheme_Object *scheme_generate_lifts_key(void);
 
 Scheme_Object *scheme_toplevel_require_for_expand(Scheme_Object *module_path, 
@@ -2111,6 +2121,8 @@ Scheme_Closure *scheme_malloc_empty_closure(void);
 
 Scheme_Object *scheme_make_native_closure(Scheme_Native_Closure_Data *code);
 Scheme_Object *scheme_make_native_case_closure(Scheme_Native_Closure_Data *code);
+
+void scheme_reset_app2_eval_type(Scheme_App2_Rec *app);
 
 Scheme_Native_Closure_Data *scheme_generate_case_lambda(Scheme_Case_Lambda *cl);
 
@@ -3176,13 +3188,19 @@ Scheme_Object *scheme_current_library_collection_paths(int argc, Scheme_Object *
 /*                           places                                       */
 /*========================================================================*/
 
-#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
+#if defined(MZ_USE_PLACES)
+# if defined(MZ_PRECISE_GC)
 typedef struct Scheme_Symbol_Parts {
   Scheme_Hash_Table *table;
   int kind;
   unsigned int len;
   const char *name;
 } Scheme_Symbol_Parts;
+
+void spawn_master_scheme_place();
+void *scheme_master_fast_path(int msg_type, void *msg_payload);
+# endif
+Scheme_Object *scheme_places_deep_copy(Scheme_Object *so);
 #endif
 
 typedef struct Scheme_Place {
@@ -3191,8 +3209,6 @@ typedef struct Scheme_Place {
 } Scheme_Place;
 
 Scheme_Env *scheme_place_instance_init();
-void spawn_master_scheme_place();
-Scheme_Object *scheme_places_deep_copy(Scheme_Object *so);
 
 /*========================================================================*/
 /*                           engine                                       */

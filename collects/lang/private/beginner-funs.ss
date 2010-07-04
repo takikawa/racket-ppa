@@ -291,8 +291,11 @@
       (memv (any (listof any) -> (union false list))
 	"to determine whether some value is on the list"
 	" (comparing values with eqv?)")
-      ((beginner-member member) (any (listof any)-> boolean)
+      ((beginner-member member) (any (listof any) -> boolean)
 	"to determine whether some value is on the list"
+	" (comparing values with equal?)")
+      ((beginner-remove remove) (any (listof any) -> (listof any))
+	"to construct a list like the given one with the first occurrence of the given item removed"
 	" (comparing values with equal?)")
       (reverse ((listof any) -> list)
 	"to create a reversed version of a list")
@@ -365,14 +368,14 @@
       (string-length (string -> nat)
 	"to determine the length of a string")
       
-      ((beginner-string-ith string-ith) (string -> string)
+      ((beginner-string-ith string-ith) (string nat -> string)
         "to extract the ith 1-letter substring from the given one")
       ((beginner-replicate replicate) (string nat -> string)
         "to replicate the given string")
       ((beginner-int->string int->string) (integer -> string)
         "to convert an integer in [0,55295] or [57344 1114111] to a 1-letter string")
       ((beginner-string->int string->int) (string -> integer)
-        "to convert a 1-letter string to an integer in [0,55295] or [57344 1114111]")
+        "to convert a 1-letter string to an integer in [0,55295] or [57344, 1114111]")
       ((beginner-explode explode) (string -> (listof string))
         "to translate a string into a list of 1-letter strings")
       ((beginner-implode implode) ((listof string) -> string)

@@ -6,14 +6,11 @@
 (require
  (rep type-rep)
  (typecheck internal-forms)
- (utils tc-utils)
+ (utils tc-utils require-contract)
  (env type-name-env)
- "parse-type.ss"
- "require-contract.ss"
- "resolve-type.ss"
- "type-utils.ss"   
- (only-in "type-effect-convenience.ss" Any-Syntax)
- (prefix-in t: "type-effect-convenience.ss")
+ (types resolve utils)
+ (prefix-in t: (types convenience))
+ (private parse-type)
  scheme/match
  syntax/struct
  syntax/stx
@@ -53,7 +50,7 @@
 
 (define (type->contract ty fail)
   (define vars (make-parameter '()))
-  (let/cc exit
+  (let/ec exit
     (let loop ([ty ty] [pos? #t])
       (define (t->c t) (loop t pos?))
       (define (t->c/neg t) (loop t (not pos?)))
@@ -63,7 +60,7 @@
         ;; we special-case lists:
         [(Mu: var (Union: (list (Value: '()) (Pair: elem-ty (F: var)))))
          #`(listof #,(t->c elem-ty))]
-        [(? (lambda (e) (eq? Any-Syntax e))) #'syntax?]
+        [(? (lambda (e) (eq? t:Any-Syntax e))) #'syntax?]
         [(Base: sym cnt) cnt]
         [(Refinement: par p? cert)
          #`(and/c #,(t->c par) (flat-contract #,(cert p?)))]
@@ -73,18 +70,13 @@
            #;(printf "~a~n" (syntax-object->datum #'cnts))
            #'(or/c . cnts))]
         [(Function: arrs)
-         (let ()
+         (let ()           
            (define (f a)
              (define-values (dom* rngs* rst)
                (match a
-                 [(arr: dom (Values: rngs) #f #f '() _ _)
-                  (values (map t->c/neg dom) (map t->c rngs) #f)]
-                 [(arr: dom rng #f #f '() _ _)
-                  (values (map t->c/neg dom) (list (t->c rng)) #f)]
-                 [(arr: dom (Values: rngs) rst #f '() _ _)
-                  (values (map t->c/neg dom) (map t->c rngs) (t->c/neg rst))]
-                 [(arr: dom rng rst #f '() _ _)
-                  (values (map t->c/neg dom) (list (t->c rng)) (t->c/neg rst))]))
+                 [(arr: dom (Values: (list (Result: rngs _ _) ...)) rst #f '())
+                  (values (map t->c/neg dom) (map t->c rngs) (and rst (t->c/neg rst)))]
+                 [_ (exit (fail))]))
              (with-syntax 
                  ([(dom* ...) dom*]
                   [rng* (match rngs*
@@ -95,13 +87,15 @@
                    #'((dom* ...) () #:rest (listof rst*) . ->* . rng*)
                    #'(dom* ...  . -> . rng*))))
            (unless (no-duplicates (for/list ([t arrs])
-                                    (match t [(arr: dom _ _ _ _ _ _) (length dom)])))
+                                    (match t [(arr: dom _ _ _ _) (length dom)])))
              (exit (fail)))
 	   (match (map f arrs)
 	     [(list e) e]
 	     [l #`(case-> #,@l)]))]
         [(Vector: t)
-         #`(vectorof #,(t->c t))]
+         #`(vector-immutableof #,(t->c t))]
+        [(Box: t)
+         #`(box-immutable/c #,(t->c t))]
         [(Pair: t1 t2)
          #`(cons/c #,(t->c t1) #,(t->c t2))]
         [(Opaque: p? cert)

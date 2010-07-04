@@ -75,20 +75,22 @@
 (define-syntax fail-check
   (syntax-rules ()
     ((_)
-     (raise
-      (make-exn:test:check
-       "Check failure"
-       (current-continuation-marks)
-       (check-info-stack))))))
+     (let ([marks (current-continuation-marks)])
+       (raise
+        (make-exn:test:check
+         "Check failure"
+         marks
+         (check-info-stack marks)))))))
 
 (define-syntax fail-internal
   (syntax-rules ()
     ((_)
-     (raise
-      (make-exn:test:check:internal
-       "Internal failure"
-       (current-continuation-marks)
-       (check-info-stack))))))
+     (let ([marks (current-continuation-marks)])
+       (raise
+        (make-exn:test:check:internal
+         "Internal failure"
+         marks
+         (check-info-stack marks)))))))
 
 ;; refail-check : exn:test:check -> (exception raised)
 ;;
@@ -105,13 +107,9 @@
   (syntax-case stx ()
     ((define-check (name formal ...) expr ...)
      (with-syntax ([reported-name
-                    (symbol->string
-                     (syntax->datum (syntax name)))]
+                    (symbol->string (syntax->datum (syntax name)))]
                    [(actual ...)
-                    (datum->syntax
-                     stx
-                     (map gensym
-                          (syntax->datum (syntax (formal ...)))))]
+                    (generate-temporaries (syntax (formal ...)))]
                    [check-fn
                     (syntax
                      (lambda (formal ...

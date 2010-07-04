@@ -79,10 +79,10 @@ better memory performance, but it also allows multiple results.}
 A @tech{flat contract} that accepts no values.}
 
 
-@defproc[(or/c [contract (or/c contract? (any/c . -> . any/c))] ...)
+@defproc[(or/c [contract contract?] ...)
          contract?]{
 
-Takes any number of predicates and higher-order contracts and returns
+Takes any number of contracts and returns
 a contract that accepts any value that any one of the contracts
 accepts, individually.
 
@@ -301,6 +301,23 @@ type named by @scheme[struct-id], and whose field values match the
 Produces a contract on parameters whose values must match
 @scheme[contract].}
 
+@defproc[(hash/c [key contract?]
+                 [val contract?] 
+                 [#:immutable immutable (or/c #t #f 'dont-care) 'dont-care])
+         contract?]{
+Produces a contract that recognizes @scheme[hash] tables with keys and values
+as specified by the @scheme[key] and @scheme[val] arguments.
+
+If the @scheme[immutable] argument is @scheme[#f] or
+@scheme['dont-care], then the resulting contract is a flat contract,
+and the @scheme[key] and @scheme[val] arguments must also be flat
+contracts. 
+
+If @scheme[immtable] is @scheme[#t], then the other arguments do not
+have to be flat contracts, the result is not a flat contract, and
+checking this contract involves making a copy of the hash-table.
+}
+
 
 @defform[(flat-rec-contract id flat-contract-expr ...)]
 
@@ -414,7 +431,7 @@ invocations of the function).
 
 If @scheme[(values range-expr ...)] is used as the last sub-form of
 @scheme[->], the function must produce a result for each contract, and
-each values must match its respective contract.}
+each value must match its respective contract.}
 
 
 @defform*/subs[#:literals (any values)
@@ -426,7 +443,7 @@ each values must match its respective contract.}
 
 The @scheme[->*] contract combinator produces contracts for
 functions that accept optional arguments (either keyword or
-positional) and or arbitrarily many arguments. The first
+positional) and/or arbitrarily many arguments. The first
 clause of a @scheme[->*] contract describes the mandatory
 arguments, and is similar to the argument description of a
 @scheme[->] contract. The second clause describes the

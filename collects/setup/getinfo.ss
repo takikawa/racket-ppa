@@ -13,6 +13,16 @@
                         (map (lambda (x) (if (path? x) (path->string x) x))
                              coll-path))))
 
+;; HACK:
+;; This require is not used.  It just requires the file, since
+;; otherwise the reader guard below will be invoked on it too, and
+;; that will make it throw up.  One possible solution for this would
+;; be for the security guard to be provided with the file in question.
+;; Another would be to force all info files to use `#lang' which means
+;; that we'll be able to query their module-language via the
+;; `get-info' protocol.
+(require (prefix-in !!!HACK!!! setup/infotab/lang/reader))
+
 ;; get-info/full : path -> info/#f
 (define (get-info/full dir)
   (define file (build-path dir "info.ss"))
@@ -25,8 +35,7 @@
                     (lambda (x)
                       (if (eq? x 'setup/infotab/lang/reader)
                         x
-                        (err "has illegal #lang or #reader"))
-                      x)])
+                        (err "has illegal #lang or #reader")))])
       (with-input-from-file file
         (lambda ()
           (begin0 
@@ -45,8 +54,20 @@
           ;; that is required).
           ;; We are, however, trusting that the bytecode form of the
           ;; file (if any) matches the source.
-          (dynamic-require file '#%info-lookup)]
+          (parameterize ([current-namespace (info-namespace)])
+            (dynamic-require file '#%info-lookup))]
          [else (err "does not contain a module of the right shape")])))
+
+(define info-namespace
+  ;; To avoid loading modules into the current namespace
+  ;; when get-info is called, load info modules in a separate
+  ;; namespace.
+  (let ([ns-box (make-weak-box #f)])
+    (lambda ()
+      (or (weak-box-value ns-box)
+          (let ([ns (make-base-empty-namespace)])
+            (set! ns-box (make-weak-box ns))
+            ns)))))
 
 ;; directory-record = (make-directory-record nat nat key path (listof symbol))
 ;; eg: (make-directory-record 1 0 '(lib "mzlib") #"mzlib" '(name))

@@ -3,6 +3,7 @@
          (lib "utils.ss" "texpict")
          scheme/gui/base
          scheme/class
+         (only-in scheme/list drop-right last)
          "reduction-semantics.ss"
          "struct.ss"
          "loc-wrapper.ss"
@@ -45,6 +46,7 @@
          arrow-space
          label-space
          metafunction-pict-style
+         metafunction-cases
          compact-vertical-min-width
          extend-language-show-union
          set-arrow-pict!)
@@ -118,11 +120,12 @@
                     (tp (rule-pict-lhs rp))
                     (tp (rule-pict-rhs rp))
                     (rule-pict-label rp)
-                    (map tp (rule-pict-side-conditions rp))
-                    (map tp (rule-pict-fresh-vars rp))
-                    (map (lambda (v)
-                           (cons (tp (car v)) (tp (cdr v))))
-                         (rule-pict-pattern-binds rp)))))
+                    (map (lambda (v) 
+                           (if (pair? v)
+                               (cons (tp (car v)) (tp (cdr v)))
+                               (tp v)))
+                         (rule-pict-side-conditions/pattern-binds rp))
+                    (map tp (rule-pict-fresh-vars rp)))))
 
 (define current-label-extra-space (make-parameter 0))
 (define reduction-relation-rule-separation (make-parameter 4))
@@ -218,39 +221,67 @@
   (make-vertical-style rbl-superimpose))
 
 (define (rule-picts->pict/compact-vertical rps)
-  (let ([max-w (apply max
-                      (compact-vertical-min-width)
-                      (map pict-width
-                           (append
-                            (map rule-pict-lhs rps)
-                            (map rule-pict-rhs rps))))])
-    (table 3
-           (apply
-            append
-            (map (lambda (rp)
-                   (let ([arrow (hbl-append (arrow->pict (rule-pict-arrow rp)) (blank (arrow-space) 0))]
-                         [lhs (rule-pict-lhs rp)]
-                         [rhs (rule-pict-rhs rp)]
-                         [spc (basic-text " " (default-style))]
-                         [label (hbl-append (blank (label-space) 0) (rp->pict-label rp))]
-                         [sep (blank (compact-vertical-min-width)
-                                     (reduction-relation-rule-separation))])
-                     (if ((apply + (map pict-width (list lhs spc arrow spc rhs)))
-                          . < .
-                          max-w)
-                         (list 
-                          (blank) (hbl-append lhs spc arrow spc rhs) label
-                          (blank) (rp->side-condition-pict rp max-w) (blank)
-                          (blank) sep (blank))
-                         (list (blank) lhs label
-                               arrow rhs (blank)
-                               (blank) (rp->side-condition-pict rp max-w) (blank)
-                               (blank) sep (blank)))))
-                 rps))
-           ltl-superimpose ltl-superimpose
-           (list* 2 (+ 2 (current-label-extra-space))) 2)))
+  (let* ([max-w (apply max
+                       (compact-vertical-min-width)
+                       (map pict-width
+                            (append
+                             (map rule-pict-lhs rps)
+                             (map rule-pict-rhs rps))))]
+         [scs (map (lambda (rp)
+                     (rp->side-condition-pict rp max-w))
+                   rps)]
+         [labels (map (lambda (rp)
+                        (hbl-append (blank (label-space) 0) (rp->pict-label rp)))
+                      rps)]
+         [total-w (apply max
+                         max-w
+                         (append (map pict-width scs)
+                                 (map (lambda (lbl)
+                                        (+ max-w 2 (label-space) (pict-width lbl)))
+                                      labels)))]
+         [one-line
+          (lambda (sep?)
+            (lambda (rp sc label)
+              (let ([arrow (hbl-append (arrow->pict (rule-pict-arrow rp)) (blank (arrow-space) 0))]
+                    [lhs (rule-pict-lhs rp)]
+                    [rhs (rule-pict-rhs rp)]
+                    [spc (basic-text " " (default-style))]
+                    [sep (blank (compact-vertical-min-width)
+                                (reduction-relation-rule-separation))]
+                    [add-label (lambda (p label)
+                                 (htl-append 
+                                  p
+                                  (inset label (- total-w (pict-width p) (pict-width label))
+                                         0 0 0)))])
+                (append
+                 (if ((apply + (map pict-width (list lhs spc arrow spc rhs)))
+                      . < .
+                      max-w)
+                     (list 
+                      (blank) (add-label (hbl-append lhs spc arrow spc rhs) label)
+                      (blank) sc)
+                     (list (blank) (add-label lhs label)
+                           arrow rhs
+                           (blank) sc))
+                 (if sep? (list (blank) sep) null)))))])
+    (if (null? rps)
+        (blank)
+        (table 2
+               (append
+                (apply
+                 append
+                 (map (one-line #t)
+                      (drop-right rps 1) 
+                      (drop-right scs 1)
+                      (drop-right labels 1)))
+                ((one-line #f) (last rps) (last scs) (last labels)))
+               ltl-superimpose ltl-superimpose
+               2 2))))
 
-(define (side-condition-pict fresh-vars side-conditions pattern-binds max-w)
+;; side-condition-pict : (listof pict) (listof (or/c (cons/c pict pict) pict)) number -> pict
+;; the elements of pattern-binds/sc that are pairs are bindings (ie "x = <something>")
+;;     and the elements of pattern-binds/sc that are just picts are just plain side-conditions
+(define (side-condition-pict fresh-vars pattern-binds/sc max-w)
   (let* ([frsh 
           (if (null? fresh-vars)
               null
@@ -263,16 +294,17 @@
                   fresh-vars))
                 (basic-text " fresh" (default-style)))))]
          [binds (map (lambda (b)
-                       (htl-append
-                        (car b)
-                        (make-=)
-                        (cdr b)))
-                     pattern-binds)]
+                       (if (pair? b)
+                           (htl-append
+                            (car b)
+                            (make-=)
+                            (cdr b))
+                           b))
+                     pattern-binds/sc)]
          [lst (add-between
                'comma
                (append
                 binds
-                side-conditions
                 frsh))])
     (if (null? lst)
         (blank)
@@ -292,8 +324,7 @@
 
 (define (rp->side-condition-pict rp max-w)
   (side-condition-pict (rule-pict-fresh-vars rp)
-                       (rule-pict-side-conditions rp)
-                       (rule-pict-pattern-binds rp)
+                       (rule-pict-side-conditions/pattern-binds rp)
                        max-w))
 
 (define (rp->pict-label rp)
@@ -443,7 +474,7 @@
                      (map (λ (x) (format " ~a" x)) (cdr langs-nts)))))))
      nts)))
 
-;; lang-pict-builder : (-> pict) string -> void
+;; save-as-ps : (-> pict) string -> void
 (define (save-as-ps mk-pict filename) 
   (let ([ps-dc (make-ps-dc filename)])
     (parameterize ([dc-for-text-size ps-dc])
@@ -480,14 +511,17 @@
                 info))))
 
 (define (sequence-of-non-terminals nts)
-  (let loop ([nts (cdr nts)]
-             [pict (non-terminal (format "~a" (car nts)))])
-    (cond
-      [(null? nts) pict]
-      [else 
-       (loop (cdr nts)
-             (hbl-append pict 
-                         (non-terminal (format ", ~a" (car nts)))))])))
+  (let ([draw-nt (lambda (nt)
+                   (lw->pict nts (build-lw nt 0 0 0 0)))])
+    (let loop ([nts (cdr nts)]
+               [pict (draw-nt (car nts))])
+      (cond
+       [(null? nts) pict]
+       [else 
+        (loop (cdr nts)
+              (hbl-append pict 
+                          (non-terminal ", ")
+                          (draw-nt (car nts))))]))))
 
 
 (define extend-language-show-union (make-parameter #f))
@@ -580,9 +614,10 @@
                              [column (+ (lw-column fst)
                                         (lw-column-span fst))]
                              [column-span
-                              (- (lw-column snd)
-                                 (+ (lw-column fst)
-                                    (lw-column-span fst)))])
+                              (max (- (lw-column snd)
+                                      (+ (lw-column fst)
+                                         (lw-column-span fst)))
+                                   0)])
                         (build-lw (make-bar) line line-span column column-span))]
                      [else
                       (build-lw
@@ -681,6 +716,35 @@
 (define linebreaks (make-parameter #f))
 
 (define metafunction-pict-style (make-parameter 'left-right))
+(define metafunction-cases (make-parameter #f))
+(define (select-cases eqns)
+  (let ([cases (metafunction-cases)])
+    (if cases
+        (let loop ([eqns eqns]
+                   [cases (remove-dups (sort cases <))]
+                   [i 0])
+          (cond
+            [(null? eqns) null]
+            [(null? cases) null]
+            [else 
+             (cond
+               [(= i (car cases))
+                (cons (car eqns)
+                      (loop (cdr eqns) (cdr cases) (+ i 1)))]
+               [else
+                (loop (cdr eqns) cases (+ i 1))])]))
+        eqns)))
+
+;; remove-dups : (listof number)[sorted] -> (listof number)[sorted]
+;; removes duplicate numbers from 'l'
+(define (remove-dups l)
+  (let loop ([l l])
+    (cond
+      [(null? (cdr l)) l]
+      [(= (car l) (cadr l))
+       (loop (cdr l))]
+      [else
+       (cons (car l) (loop (cdr l)))])))
 
 (define (metafunctions->pict/proc mfs name)
   (unless (andmap (λ (mf) (eq? (metafunc-proc-lang (metafunction-proc (car mfs)))
@@ -692,8 +756,8 @@
          [sep 2]
          [style (metafunction-pict-style)]
          [wrapper->pict (lambda (lw) (lw->pict all-nts lw))]
-         [eqns (apply append (map (λ (mf) (metafunc-proc-pict-info (metafunction-proc mf))) mfs))]
-         [lhss 
+         [all-eqns (apply append (map (λ (mf) (metafunc-proc-pict-info (metafunction-proc mf))) mfs))]
+         [all-lhss 
           (apply append
                  (map (λ (mf)
                         (map (lambda (eqn) 
@@ -703,46 +767,55 @@
                                                    (metafunc-proc-multi-arg? (metafunction-proc mf)))))
                              (metafunc-proc-pict-info (metafunction-proc mf))))
                       mfs))]
-         [scs (map (lambda (eqn)
-                     (if (and (null? (list-ref eqn 1))
-                              (null? (list-ref eqn 2)))
-                         #f
-                         (side-condition-pict null 
-                                              (map wrapper->pict (list-ref eqn 1)) 
-                                              (map (lambda (p)
-                                                     (cons (wrapper->pict (car p))
-                                                           (wrapper->pict (cdr p))))
-                                                   (list-ref eqn 2))
-                                              (if (memq style '(up-down/vertical-side-conditions
-                                                                left-right/vertical-side-conditions))
-                                                  0
-                                                  +inf.0))))
-                   eqns)]
-         [rhss (map (lambda (eqn) (wrapper->pict (list-ref eqn 3))) eqns)]
+         [eqns (select-cases all-eqns)]
+         [lhss (select-cases all-lhss)]
+         [rhss (map (lambda (eqn) (wrapper->pict (list-ref eqn 2))) eqns)]
          [linebreak-list (or current-linebreaks
                              (map (lambda (x) #f) eqns))]
          [=-pict (make-=)]
          [max-lhs-w (apply max (map pict-width lhss))]
-         [max-line-w (apply
-                      max
-                      (map (lambda (lhs sc rhs linebreak?)
-                             (max
-                              (if sc (pict-width sc) 0)
-                              (if linebreak?
-                                  (max (pict-width lhs)
-                                       (+ (pict-width rhs) (pict-width =-pict)))
-                                  (+ (pict-width lhs) (pict-width rhs) (pict-width =-pict)
-                                     (* 2 sep)))))
-                           lhss scs rhss linebreak-list))])
+         [max-line-w/pre-sc (apply
+                             max
+                             (map (lambda (lhs rhs linebreak?)
+                                    (max
+                                     (if (or linebreak?
+                                             (memq style '(up-down
+                                                           up-down/vertical-side-conditions
+                                                           up-down/compact-side-conditions)))
+                                         (max (pict-width lhs)
+                                              (+ (pict-width rhs) (pict-width =-pict)))
+                                         (+ (pict-width lhs) (pict-width rhs) (pict-width =-pict)
+                                            (* 2 sep)))))
+                                  lhss rhss linebreak-list))]
+         [scs (map (lambda (eqn)
+                     (if (null? (list-ref eqn 1))
+                         #f
+                         (side-condition-pict null 
+                                              (map (lambda (p)
+                                                     (if (pair? p)
+                                                         (cons (wrapper->pict (car p))
+                                                               (wrapper->pict (cdr p)))
+                                                         (wrapper->pict p)))
+                                                   (list-ref eqn 1))
+                                              (if (memq style '(up-down/vertical-side-conditions
+                                                                left-right/vertical-side-conditions))
+                                                  0
+                                                  (if (memq style '(up-down/compact-side-conditions
+                                                                    left-right/compact-side-conditions))
+                                                      max-line-w/pre-sc
+                                                      +inf.0)))))
+                   eqns)])
     (case style
-      [(left-right left-right/vertical-side-conditions)
+      [(left-right left-right/vertical-side-conditions left-right/compact-side-conditions left-right/beside-side-conditions)
        (table 3
               (apply append
                      (map (lambda (lhs sc rhs linebreak?)
                             (append
                              (if linebreak?
                                  (list lhs (blank) (blank))
-                                 (list lhs =-pict rhs))
+                                 (if (and sc (eq? style 'left-right/beside-side-conditions))
+                                     (list lhs =-pict (hbl-append 10 rhs sc))
+                                     (list lhs =-pict rhs)))
                              (if linebreak?
                                  (let ([p rhs])
                                    (list (hbl-append sep
@@ -753,7 +826,9 @@
                                          (blank (max 0 (- (pict-width p) max-lhs-w sep))
                                                 0)))
                                  null)
-                             (if (not sc)
+                             (if (or (not sc)
+                                     (and (not linebreak?)
+                                          (eq? style 'left-right/beside-side-conditions)))
                                  null
                                  (list (inset sc 0 0 (- 5 (pict-width sc)) 0)
                                        (blank)
@@ -766,19 +841,21 @@
                           linebreak-list))
               ltl-superimpose ltl-superimpose
               sep sep)]
-      [(up-down up-down/vertical-side-conditions)
-       (apply vl-append
-              sep
-              (apply append
-                     (map (lambda (lhs sc rhs)
-                            (cons
-                             (vl-append (hbl-append lhs =-pict) rhs)
-                             (if (not sc)
-                                 null
-                                 (list (inset sc 0 0 (- 5 (pict-width sc)) 0)))))
-                          lhss
-                          scs
-                          rhss)))])))
+      [(up-down up-down/vertical-side-conditions up-down/compact-side-conditions)
+       (panorama
+        ;; the side-conditions may hang outside the pict, so bring them back w/ panorama
+        (apply vl-append
+               sep
+               (apply append
+                      (map (lambda (lhs sc rhs)
+                             (cons
+                              (vl-append (hbl-append lhs =-pict) rhs)
+                              (if (not sc)
+                                  null
+                                  (list (inset sc 0 0 (- 5 (pict-width sc)) 0)))))
+                           lhss
+                           scs
+                           rhss))))])))
 
 (define (metafunction-call name an-lw flattened?)
   (if flattened?

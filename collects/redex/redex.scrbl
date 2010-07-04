@@ -97,6 +97,10 @@ Note that pattern matching is caching (including caching the results
 of side-conditions). This means that once a pattern has matched a
 given term, Redex assumes that it will always match that term. 
 
+This is the grammar for the Redex pattern language. Non-terminal
+references are wrapped with angle brackets; otherwise identifiers
+in the grammar are terminals.
+
 @(schemegrammar* #;#:literals #;(any number string variable variable-except variable-prefix variable-not-otherwise-mentioned hole hide-hole name in-hole side-condition cross) 
    [pattern any 
             number 
@@ -105,20 +109,20 @@ given term, Redex assumes that it will always match that term.
             real
             string 
             variable 
-            (variable-except symbol ...)
-            (variable-prefix symbol)
+            (variable-except <id> ...)
+            (variable-prefix <id>)
             variable-not-otherwise-mentioned
             hole
             symbol
-            (name symbol pattern)
-            (in-hole pattern pattern)
-            (hide-hole pattern)
-            (side-condition pattern guard)
-            (cross symbol)
-            (pattern-sequence ...)
-            scheme-constant]
+            (name <id> <pattern>)
+            (in-hole <pattern> <pattern>)
+            (hide-hole <pattern>)
+            (side-condition <pattern> guard)
+            (cross <id>)
+            (<pattern-sequence> ...)
+            <scheme-constant>]
    [pattern-sequence 
-     pattern 
+     <pattern> 
      (code:line ... (code:comment "literal ellipsis"))
      ..._id])
 
@@ -282,7 +286,7 @@ Multiple ellipses are allowed. For example, this @|pattern|:
 
 matches this sexpression:
 
-@schemeblock[(#, @|tttterm| (a a))]
+@schemeblock[(@#,tttterm (a a))]
 
 three different ways. One where the first @tt{a} in the @pattern
 matches nothing, and the second matches both of the
@@ -302,7 +306,7 @@ As an example, this @|pattern|:
 
 only matches this sexpression:
 
-@schemeblock[(#, @|tttterm| (a a))]
+@schemeblock[(@#,tttterm (a a))]
 
 one way, with each named @pattern matching a single a. Unlike
 the above, the two @|pattern|s with mismatched lengths is ruled
@@ -318,7 +322,7 @@ Thus, with the @|pattern|:
 
 and the expression
 
-@schemeblock[(#, @|tttterm| (a a))]
+@schemeblock[(@#,tttterm (a a))]
 
 two matches occur, one where @tt{x} is bound to @scheme['()] and
 @tt{y} is bound to @scheme['(a a)] and one where @tt{x} is bound to
@@ -328,8 +332,8 @@ bound to @scheme['()].
 }
 ]
 
-@defform*[[(redex-match lang #, @|ttpattern| any)
-           (redex-match lang #, @|ttpattern|)]]{
+@defform*[[(redex-match lang @#,ttpattern any)
+           (redex-match lang @#,ttpattern)]]{
           
 If @scheme[redex-match] receives three arguments, it
 matches the pattern (in the language) against its third
@@ -446,7 +450,7 @@ them.}
 produces the boolean or the string.}
 ]
 
-@defform[(term #, @|tttterm|)]{
+@defform[(term @#,tttterm)]{
 
 This form is used for construction of a term.
 
@@ -508,7 +512,7 @@ Redex's full pattern matching facilities, see @scheme[term-match] and
 
 }
 
-@defform[(term-match language [#, @|ttpattern| expression] ...)]{
+@defform[(term-match language [@#,ttpattern expression] ...)]{
 
 This produces a procedure that accepts term (or quoted)
 expressions and checks them against each pattern. The
@@ -522,7 +526,7 @@ compiled in an effort to speed up matching. Using the procedural
 result multiple times to avoid compiling the patterns multiple times.
 }
 
-@defform[(term-match/single language [#, @|ttpattern| expression] ...)]{
+@defform[(term-match/single language [@#,ttpattern expression] ...)]{
 
 This produces a procedure that accepts term (or quoted)
 expressions and checks them against each pattern. The
@@ -578,7 +582,7 @@ all non-GUI portions of Redex) and also exported by
 @schememodname[redex] (which includes all of Redex).
 
 @defform/subs[(define-language lang-name 
-                (non-terminal-spec #, @|ttpattern| ...)
+                (non-terminal-spec @#,ttpattern ...)
                 ...)
               ([non-terminal-spec symbol (symbol ...)])]{
 
@@ -613,7 +617,7 @@ variables, @scheme[c] for the evaluation contexts and @scheme[v] for values.
 }
 
 @defform[(define-extended-language language language
-           (non-terminal #, @|ttpattern| ...)
+           (non-terminal @#,ttpattern ...)
            ...)]{
 
 This form extends a language with some new, replaced, or
@@ -671,13 +675,13 @@ all non-GUI portions of Redex) and also exported by
 
 @defform/subs[#:literals (--> fresh side-condition where) 
               (reduction-relation language domain main-arrow reduction-case ...)
-              ([domain (code:line) (code:line #:domain #, @|ttpattern|)]
+              ([domain (code:line) (code:line #:domain @#,ttpattern)]
                [main-arrow (code:line) (code:line #:arrow arrow)]
-               [reduction-case (--> #, @|ttpattern| #, @|tttterm| extras ...)]
+               [reduction-case (--> @#,ttpattern @#,tttterm extras ...)]
                [extras name
                        (fresh fresh-clause ...)
-                       (side-condition scheme-expression ...)
-                       (where tl-pat #, @|tttterm|)]
+                       (side-condition scheme-expression)
+                       (where tl-pat @#,tttterm)]
                [fresh-clause var ((var1 ...) (var2 ...))]
                [tl-pat identifier (tl-pat-ele ...)]
                [tl-pat-ele tl-pat (code:line tl-pat ... (code:comment "a literal ellipsis"))])]{
@@ -739,9 +743,9 @@ defines a reduction relation for the lambda-calculus above.
 @defform/none[#:literals (with reduction-relation)
          (reduction-relation 
           language
-          (arrow-var #, @|ttpattern| #, @|tttterm|) ...
+          (arrow-var @#,ttpattern @#,tttterm) ...
           with
-          [(arrow #, @|ttpattern| #, @|tttterm|)
+          [(arrow @#,ttpattern @#,tttterm)
            (arrow-var var var)] ...)]{
 
 Defines a reduction relation with shortcuts. As above, the
@@ -871,7 +875,7 @@ terminate (it does terminate if the only infinite reduction paths are cyclic).
   @scheme[reduction-relation]. A @scheme[with] form is an
   error elsewhere.  }
 
-@section{Metafunctions}
+@section{Metafunctions and Relations}
 
 All of the exports in this section are provided both by
 @schememodname[redex/reduction-semantics] (which includes
@@ -881,12 +885,12 @@ all non-GUI portions of Redex) and also exported by
 @defform/subs[#:literals (: ->)
               (define-metafunction language-exp
                contract
-               [(name #, @|ttpattern| ...) #, @|tttterm| extras ...] 
+               [(name @#,ttpattern ...) @#,tttterm extras ...] 
                ...)
                ([contract (code:line) 
-                          (code:line id : #, @|ttpattern| ... -> #, @|ttpattern|)]
+                          (code:line id : @#,ttpattern ... -> @#,ttpattern)]
                 [extras (side-condition scheme-expression)
-                        (where tl-pat #, @|tttterm|)]
+                        (where tl-pat @#,tttterm)]
                 [tl-pat identifier (tl-pat-ele ...)]
                 [tl-pat-ele tl-pat (code:line tl-pat ... (code:comment "a literal ellipsis"))])]{
 
@@ -903,8 +907,9 @@ expression, and the pattern variables in the @|ttpattern| are
 bound in that expression.
 
 Raises an exception recognized by @scheme[exn:fail:redex?] if
-no clauses match, if one of the clauses matches multiple ways, or
-if the contract is violated.
+no clauses match, if one of the clauses matches multiple ways
+(and that leads to different results for the different matches),
+or if the contract is violated.
 
 Note that metafunctions are assumed to always return the same results
 for the same inputs, and their results are cached, unless
@@ -965,7 +970,7 @@ match.
 
 @defform[(define-metafunction/extension extending-name language-exp 
            contract
-           [(name #, @|ttpattern| ...) #, @|tttterm| (side-condition scheme-expression) ...]
+           [(name @#,ttpattern ...) @#,tttterm (side-condition scheme-expression) ...]
            ...)]{
 
 This defines a metafunction as an extension of an existing
@@ -974,10 +979,40 @@ patterns were in this definitions, with the name of the
 function fixed up to be @scheme[extending-name]. 
 }
 
-@defform[(in-domain? (metafunction-name #, @|tttterm| ...))]{
+@defform[(in-domain? (metafunction-name @#,tttterm ...))]{
 Returns @scheme[#t] if the inputs specified to @scheme[metafunction-name] are
 legtimate inputs according to @scheme[metafunction-name]'s contract,
 and @scheme[#f] otherwise.
+}
+
+@defform/subs[#:literals ()
+              (define-relation language-exp
+               [(name @#,ttpattern ...) @#,tttterm ...] ...)
+               ([tl-pat identifier (tl-pat-ele ...)]
+                [tl-pat-ele tl-pat (code:line tl-pat ... (code:comment "a literal ellipsis"))])]{
+
+The @scheme[define-relation] form builds a relation on
+sexpressions according to the pattern and right-hand-side
+expressions. The first argument indicates the language used
+to resolve non-terminals in the pattern expressions. Each of
+the rhs-expressions is implicitly wrapped in @|tttterm|. 
+
+Relations are like metafunctions in that they are called with
+arguments and return results (unlike in, say, prolog, where a relation
+definition would be able to synthesize some of the arguments based on
+the values of others).
+
+Unlike metafunctions, relations check all possible ways to match each
+case, looking for a true result and if none of the clauses match, then
+the result is @scheme[#f]. If there are multiple expressions on
+the right-hand side of a relation, then all of them must be satisfied
+in order for that clause of the relation to be satisfied.
+
+Note that relations are assumed to always return the same results for
+the same inputs, and their results are cached, unless
+@scheme[caching-enable?] is set to @scheme[#f]. Accordingly, if a
+relation is called with the same inputs twice, then its right-hand
+sides are evaluated only once.
 }
 
 @defparam[current-traced-metafunctions traced-metafunctions (or/c 'all (listof symbol?))]{
@@ -1069,7 +1104,7 @@ an association list mapping names to application counts.}
            (apply-reduction-relation* equals (term (+ 1 2 3)))
            (covered-cases coverage)))]
 
-@defform/subs[(generate-term language #, @|ttpattern| size-exp kw-args ...)
+@defform/subs[(generate-term language @#,ttpattern size-exp kw-args ...)
               ([kw-args (code:line #:attempts attempts-expr)
                         (code:line #:retries retries-expr)])
               #:contracts ([size-expr natural-number/c]
@@ -1096,7 +1131,7 @@ argument @scheme[retries-expr] (default @scheme[100]) bounds the number of times
 @scheme[generate-term] is unable to produce a satisfying term after 
 @scheme[retries-expr] attempts, it raises an error}
 
-@defform/subs[(redex-check language #, @|ttpattern| property-expr kw-arg ...)
+@defform/subs[(redex-check language @#,ttpattern property-expr kw-arg ...)
               ([kw-arg (code:line #:attempts attempts-expr)
                        (code:line #:source metafunction)
                        (code:line #:source relation-expr)
@@ -1237,6 +1272,8 @@ exploring reduction sequences.
 
                  [#:scheme-colors? scheme-colors? boolean? #t]
                  [#:filter term-filter (-> any/c (or/c #f string?) any/c) (lambda (x y) #t)]
+                 [#:x-spacing number? 15]
+                 [#:y-spacing number? 15]
                  [#:layout layout (-> (listof term-node?) void) void]
                  [#:edge-labels? edge-label-font boolean? #t]
                  [#:edge-label-font edge-label-font (or/c #f (is-a?/c font%)) #f]
@@ -1303,6 +1340,9 @@ The @scheme[term-filter] function is called each time a new node is
 about to be inserted into the graph. If the filter returns false, the
 node is not inserted into the graph.
 
+The @scheme[x-spacing] and @scheme[y-spacing] control the amount of
+space put between the snips in the default layout.
+
 The @scheme[layout] argument is called (with all of the terms) when
 new terms is inserted into the window. In general, it is called when
 after new terms are inserted in response to the user clicking on the
@@ -1343,6 +1383,8 @@ inserted into the editor by this library have a
                     [#:colors colors (listof (list string string)) '()]
                     [#:filter term-filter (-> any/c (or/c #f string?) any/c) (lambda (x y) #t)]
                     [#:layout layout (-> (listof term-node?) void) void]
+                    [#:x-spacing number? 15]
+                    [#:y-spacing number? 15]
                     [#:edge-labels? edge-label-font boolean? #t]
                     [#:edge-label-font edge-label-font (or/c #f (is-a?/c font%)) #f]
                     [#:graph-pasteboard-mixin graph-pasteboard-mixin (make-mixin-contract graph-pasteboard<%>) values]
@@ -1419,6 +1461,12 @@ to the specified @scheme[color%] object or the color named by the
 string. The @scheme[color-database<%>] is used to convert the string
 to a @scheme[color%] object.
 }
+
+@defproc[(term-node-color [tn term-node?]) (or/c string? (is-a?/c color%) false/c)]{
+
+Returns the current highlighting of the node. See also @scheme[term-node-set-color!].
+}
+
 
 @defproc[(term-node-set-red! [tn term-node?] [red? boolean?]) void?]{
 
@@ -1614,7 +1662,7 @@ other tools that combine picts together.
 @defform/none[#:literals (render-metafunction)
               (render-metafunction metafunction-name filename)]{}
 @defform[(render-metafunctions metafunction-name ...)]{}
-@defform/none[#:literals (render-metafunction)
+@defform/none[#:literals (render-metafunctions)
               (render-metafunctions metafunction-name ... #:file filename)]{}]]{
 
 If provided with one argument, @scheme[render-metafunction]
@@ -1719,13 +1767,43 @@ label on each rule, but only in horizontal mode. Defaults to
 0.
 }
 
-@defparam[metafunction-pict-style style (parameter/c (symbols 'left-right 'up-down 'left-right/vertical-side-conditions 'up-down/vertical-side-conditions))]{
+@defparam[metafunction-pict-style style 
+                                  (or/c 'left-right
+                                        'up-down
+                                        'left-right/vertical-side-conditions
+                                        'up-down/vertical-side-conditions
+                                        'left-right/compact-side-conditions
+                                        'up-down/compact-side-conditions
+                                        'left-right/beside-side-conditions)]{
 
 This parameter controls the style used for typesetting
-metafunctions. The 'left-right style means that the
+metafunctions. The @scheme['left-right] style means that the
 results of calling the metafunction are displayed to the 
-right of the arguments and the 'up-down style means that
+right of the arguments and the @scheme['up-down] style means that
 the results are displayed below the arguments.
+
+The @scheme['left-right/vertical-side-conditions] and
+@scheme['up-down/vertical-side-conditions] variants format side
+conditions each on a separate line, instead of all on the same line.
+
+The @scheme['left-right/compact-side-conditions] and
+@scheme['up-down/compact-side-conditions] variants move side
+conditions to separate lines to avoid making the rendered form wider
+than it would be otherwise.
+
+The @scheme['left-right/beside-side-conditions] variant is like
+@scheme['left-right], except it puts the side-conditions on the 
+same line, instead of on a new line below the case.}
+
+
+@defparam[metafunction-cases 
+          cases
+          (or/c #f (and/c (listof (and/c integer?
+                                         (or/c zero? positive?)))
+                          pair?))]{
+
+This parameter controls which cases in a metafunction are rendered. If it is @scheme[#f] (the default), then all of the
+cases appear. If it is a list of numbers, then only the selected cases appear (counting from @scheme[0]).
 }
 
 @deftogether[[

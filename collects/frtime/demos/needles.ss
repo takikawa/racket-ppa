@@ -1,3 +1,4 @@
+#lang frtime
 ;; Needles
 ;; Written by Robb Cutler
 ;; July, 2004
@@ -9,7 +10,6 @@
 ;; Require the animation library and the library
 ;; containing the build-list function.
 (require frtime/animation
-         frtime/etc
          frtime/gui)
 
 ;; How many needles on one side of the grid of needles

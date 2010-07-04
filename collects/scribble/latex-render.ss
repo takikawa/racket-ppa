@@ -79,7 +79,7 @@
           (let ([no-number? (and (pair? number) 
                                  (or (not (car number))
                                      ((length number) . > . 3)))])
-            (printf "\\~a~a~a"
+            (printf "\n\n\\~a~a~a"
                     (case (length number)
                       [(0 1) "sectionNewpage\n\n\\section"]
                       [(2) "subsection"]
@@ -130,6 +130,12 @@
           (when (string? style) (printf "}"))))
       null)
 
+    (define/override (render-intrapara-block p part ri first? last?)
+      (unless first?
+        (printf "\n\n\\noindent "))
+      (begin0
+       (super render-intrapara-block p part ri first? last?)))
+
     (define/override (render-element e part ri)
       (when (render-element? e)
         ((render-element-render e) this part ri))
@@ -173,6 +179,7 @@
                  [(italic) (wrap e "textit" #f)]
                  [(bold) (wrap e "textbf" #f)]
                  [(tt) (wrap e "Scribtexttt" #t)]
+                 [(url) (wrap e "nolinkurl" 'exact)]
                  [(no-break) (super render-element e part ri)]
                  [(sf) (wrap e "textsf" #f)]
                  [(subscript) (wrap e "textsub" #f)]
@@ -187,6 +194,8 @@
                  [(newline) (printf "\\\\")]
                  [else (error 'latex-render
                               "unrecognzied style symbol: ~s" style)])]
+              [(target-url? style)
+               (wrap e (format "href{~a}" (target-url-addr style)) #f)]
               [(string? style)
                (wrap e style (regexp-match? #px"^scheme(?!error)" style))]
               [(and (pair? style) (memq (car style) '(bg-color color)))
@@ -249,10 +258,9 @@
              [index? (eq? 'index (table-style t))]
              [tableform
               (cond [index? "list"]
-                    [(and (not (current-table-mode)) (not inline-table?))
-                     "bigtabular"]
+                    [(not (current-table-mode)) "bigtabular"]
                     [else "tabular"])]
-             [opt (cond [(equal? tableform "bigtabular") "[l]"]
+             [opt (cond [(equal? tableform "bigtabular") ""]
                         [(equal? tableform "tabular") "[t]"]
                         [else ""])]
              [flowss (if index? (cddr (table-flowss t)) (table-flowss t))]
@@ -272,79 +280,96 @@
              [boxline "{\\setlength{\\unitlength}{\\linewidth}\\begin{picture}(1,0)\\put(0,0){\\line(1,0){1}}\\end{picture}}"]
              [twidth (if (null? (table-flowss t))
                          1
-                         (length (car (table-flowss t))))])
-        (unless (or (null? flowss) (null? (car flowss)))
-          (parameterize ([current-table-mode
-                          (if inline? (current-table-mode) (list tableform t))]
-                         [show-link-page-numbers
-                          (or index? (show-link-page-numbers))])
-            (cond
-              [index? (printf "\\begin{list}{}{\\parsep=0pt \\itemsep=1pt \\leftmargin=2ex \\itemindent=-2ex}\n")]
-              [inline? (void)]
-              [else
-               (printf "~a\\begin{~a}~a{@{}~a}\n~a"
-                       (if (string? (table-style t))
-                           (format "\\begin{~a}" (table-style t))
-                           "")
-                       tableform
-                       opt
-                       (string-append*
-                        (map (lambda (i align)
-                               (format "~a@{}"
-                                       (case align
-                                         [(center) "c"]
-                                         [(right) "r"]
-                                         [else "l"])))
-                             (car flowss)
-                             (cdr (or (and (list? (table-style t))
-                                           (assoc 'alignment
-                                                  (or (table-style t) null)))
-                                      (cons #f (map (lambda (x) #f)
-                                                    (car flowss)))))))
-                       (if boxed? 
-                           (if (equal? tableform "bigtabular")
-                               (format "~a \\endfirsthead\n" boxline)
-                               (format "\\multicolumn{~a}{@{}l@{}}{~a} \\\\\n" 
-                                       (length (car flowss))
-                                       boxline))
-                           ""))])
-            (let loop ([flowss flowss]
-                       [row-styles row-styles])
-              (let ([flows (car flowss)]
-                    [row-style (car row-styles)])
-                (let loop ([flows flows]
-                           [col-v-styles (or (and (list? row-style)
-                                                  (let ([p (assoc 'valignment row-style)])
-                                                    (and p (cdr p))))
-                                             (let ([p (and (list? (table-style t))
-                                                           (assoc 'valignment (table-style t)))])
-                                               (and p (cdr p))))])
-                  (unless (null? flows)
-                    (when index? (printf "\n\\item "))
-                    (unless (eq? 'cont (car flows))
-                      (let ([cnt (let loop ([flows (cdr flows)][n 1])
-                                   (cond [(null? flows) n]
-                                         [(eq? (car flows) 'cont)
-                                          (loop (cdr flows) (add1 n))]
-                                         [else n]))])
-                        (unless (= cnt 1) (printf "\\multicolumn{~a}{l}{" cnt))
-                        (render-table-flow (car flows) part ri twidth (and col-v-styles
-                                                                           (car col-v-styles)))
-                        (unless (= cnt 1) (printf "}"))
-                        (unless (null? (list-tail flows cnt)) (printf " &\n"))))
-                    (unless (null? (cdr flows)) (loop (cdr flows)
-                                                      (and col-v-styles (cdr col-v-styles))))))
-                (unless (or index? (null? (cdr flowss)))
-                  (printf " \\\\\n")
-                  (when (equal? row-style "inferencetop") (printf "\\hline\n")))
-                (unless (null? (cdr flowss))
-                  (loop (cdr flowss) (cdr row-styles)))))
-            (unless inline?
-              (printf "\\end{~a}~a"
-                      tableform
-                      (if (string? (table-style t))
-                           (format "\\end{~a}" (table-style t))
-                           ""))))))
+                         (length (car (table-flowss t))))]
+             [single-column? (and (= 1 twidth)
+                                  (not (table-style t))
+                                  (not (current-table-mode)))])
+        (if single-column?
+            (do-render-blockquote 
+             (make-blockquote "SingleColumn"
+                              (apply append (map flow-paragraphs (map car (table-flowss t)))))
+             part 
+             ri
+             #t)
+            (unless (or (null? flowss) (null? (car flowss)))
+              (parameterize ([current-table-mode
+                              (if inline? (current-table-mode) (list tableform t))]
+                             [show-link-page-numbers
+                              (or index? (show-link-page-numbers))])
+                (cond
+                 [index? (printf "\\begin{list}{}{\\parsep=0pt \\itemsep=1pt \\leftmargin=2ex \\itemindent=-2ex}\n")]
+                 [inline? (void)]
+                 [single-column? (printf "\\begin{tabbing}\n")]
+                 [else
+                  (printf "~a~a\\begin{~a}~a{@{~a}~a}\n~a"
+                          (if (and inline-table? (equal? tableform "bigtabular"))
+                              "\\bigtableinlinecorrect"
+                              "")
+                          (if (string? (table-style t))
+                              (format "\\begin{~a}" (table-style t))
+                              "")
+                          tableform
+                          opt
+                          (if (equal? tableform "bigtabular")
+                              "\\bigtableleftpad"
+                              "")
+                          (string-append*
+                           (map (lambda (i align)
+                                  (format "~a@{}"
+                                          (case align
+                                            [(center) "c"]
+                                            [(right) "r"]
+                                            [else "l"])))
+                                (car flowss)
+                                (cdr (or (and (list? (table-style t))
+                                              (assoc 'alignment
+                                                     (or (table-style t) null)))
+                                         (cons #f (map (lambda (x) #f)
+                                                       (car flowss)))))))
+                          (if boxed? 
+                              (if (equal? tableform "bigtabular")
+                                  (format "~a \\SEndFirstHead\n" boxline)
+                                  (format "\\multicolumn{~a}{@{}l@{}}{~a} \\\\\n" 
+                                          (length (car flowss))
+                                          boxline))
+                              ""))])
+                (let loop ([flowss flowss]
+                           [row-styles row-styles])
+                  (let ([flows (car flowss)]
+                        [row-style (car row-styles)])
+                    (let loop ([flows flows]
+                               [col-v-styles (or (and (list? row-style)
+                                                      (let ([p (assoc 'valignment row-style)])
+                                                        (and p (cdr p))))
+                                                 (let ([p (and (list? (table-style t))
+                                                               (assoc 'valignment (table-style t)))])
+                                                   (and p (cdr p))))])
+                      (unless (null? flows)
+                        (when index? (printf "\n\\item "))
+                        (unless (eq? 'cont (car flows))
+                          (let ([cnt (let loop ([flows (cdr flows)][n 1])
+                                       (cond [(null? flows) n]
+                                             [(eq? (car flows) 'cont)
+                                              (loop (cdr flows) (add1 n))]
+                                             [else n]))])
+                            (unless (= cnt 1) (printf "\\multicolumn{~a}{l}{" cnt))
+                            (render-table-flow (car flows) part ri twidth (and col-v-styles
+                                                                               (car col-v-styles)))
+                            (unless (= cnt 1) (printf "}"))
+                            (unless (null? (list-tail flows cnt)) (printf " &\n"))))
+                        (unless (null? (cdr flows)) (loop (cdr flows)
+                                                          (and col-v-styles (cdr col-v-styles))))))
+                    (unless (or index? (null? (cdr flowss)))
+                      (printf " \\\\\n")
+                      (when (equal? row-style "inferencetop") (printf "\\hline\n")))
+                    (unless (null? (cdr flowss))
+                      (loop (cdr flowss) (cdr row-styles)))))
+                (unless inline?
+                  (printf "\\end{~a}~a"
+                          tableform
+                          (if (string? (table-style t))
+                              (format "\\end{~a}" (table-style t))
+                              "")))))))
       null)
 
     (define/private (render-table-flow p part ri twidth vstyle)
@@ -394,7 +419,7 @@
                                 (eq? (styled-itemization-style t) 'ordered))
                            "enumerate"
                            "itemize"))])
-        (printf "\\begin{~a}" mode)
+        (printf "\\begin{~a}\\atItemizeStart" mode)
         (for ([flow (itemization-flows t)])
           (printf "\n\n\\~a" (if style-str
                                   (format "~aItem{" style-str)
@@ -405,16 +430,35 @@
         (printf "\\end{~a}" mode)
         null))
 
-    (define/override (render-blockquote t part ri)
+    (define/private (do-render-blockquote t part ri single-column?)
       (let ([kind (or (blockquote-style t) "quote")])
         (if (regexp-match #rx"^[\\]" kind)
             (printf "~a{" kind)
             (printf "\\begin{~a}" kind))
-        (parameterize ([current-table-mode (list "blockquote" t)])
+        (parameterize ([current-table-mode (if single-column?
+                                               (current-table-mode)
+                                               (list "blockquote" t))])
           (render-flow (make-flow (blockquote-paragraphs t)) part ri #f))
         (if (regexp-match #rx"^[\\]" kind)
             (printf "}")
             (printf "\\end{~a}" kind))
+        null))
+
+    (define/override (render-blockquote t part ri)
+      (do-render-blockquote t part ri #f))
+
+    (define/override (render-compound-paragraph t part ri)
+      (let ([kind (compound-paragraph-style t)])
+        (when kind
+          (if (regexp-match #rx"^[\\]" kind)
+              (printf "~a{" kind)
+              (printf "\\begin{~a}" kind)))
+        (parameterize ([current-table-mode (list "blockquote" t)])
+          (super render-compound-paragraph t part ri))
+        (when kind
+          (if (regexp-match #rx"^[\\]" kind)
+              (printf "}")
+              (printf "\\end{~a}" kind)))
         null))
 
     (define/override (render-other i part ri)
@@ -439,50 +483,186 @@
       null)
 
     (define/private (display-protected s)
-      (let ([len (string-length s)])
-        (let loop ([i 0])
-          (unless (= i len)
-            (let ([c (string-ref s i)])
-              (display
-               (case c
-                 [(#\\) (if (rendering-tt)
-                            "{\\char`\\\\}"
-                            "$\\backslash$")]
-                 [(#\_) (if (rendering-tt)
-                            "{\\char`\\_}"
-                            "$\\_$")]
-                 [(#\^) "{\\char'136}"]
-                 [(#\>) (if (rendering-tt) "{\\texttt >}" "$>$")]
-                 [(#\<) (if (rendering-tt) "{\\texttt <}" "$<$")]
-                 [(#\|) (if (rendering-tt) "{\\texttt |}" "$|$")]
-                 [(#\? #\! #\. #\:)
-                  (if (rendering-tt) (format "{\\hbox{\\texttt{~a}}}" c) c)]
-                 [(#\~) "$\\sim$"]
-                 [(#\{ #\}) (if (rendering-tt)
-                                (format "{\\char`\\~a}" c)
-                                (format "\\~a" c))]
-                 [(#\# #\% #\& #\$) (format "\\~a" c)]
-                 [(#\uA0) "~"]
-                 [(#\uDF) "{\\ss}"]
-                 [(#\u039A) "K"] ; kappa
-                 [(#\u0391) "A"] ; alpha
-                 [(#\u039F) "O"] ; omicron
-                 [(#\u03A3) "$\\Sigma$"]
-                 [(#\u03BA) "$\\kappa$"]
-                 [(#\u03B1) "$\\alpha$"]
-                 [(#\u03B2) "$\\beta$"]
-                 [(#\u03B3) "$\\gamma$"]
-                 [(#\u03BF) "o"] ; omicron
-                 [(#\u03C3) "$\\sigma$"]
-                 [(#\u03C2) "$\\varsigma$"]
-                 [(#\u03BB) "$\\lambda$"]
-                 [(#\u039B) "$\\Lambda$"]
-                 [(#\u03BC) "$\\mu$"]
-                 [(#\u03C0) "$\\pi$"]
-                 [(#\∞) "$\\infty$"]
-                 [(#\à) "\\`{a}"]
-                 [else c])))
-            (loop (add1 i))))))
+      (if (eq? (rendering-tt) 'exact)
+          (display s)
+          (let ([len (string-length s)])
+            (let loop ([i 0])
+              (unless (= i len)
+                (let ([c (string-ref s i)])
+                  (display
+                   (case c
+                     [(#\\) (if (rendering-tt)
+                                "{\\char`\\\\}"
+                                "$\\backslash$")]
+                     [(#\_) (if (rendering-tt)
+                                "{\\char`\\_}"
+                                "$\\_$")]
+                     [(#\^) "{\\char'136}"]
+                     [(#\>) (if (rendering-tt) "{\\texttt >}" "$>$")]
+                     [(#\<) (if (rendering-tt) "{\\texttt <}" "$<$")]
+                     [(#\|) (if (rendering-tt) "{\\texttt |}" "$|$")]
+                     [(#\? #\! #\. #\:)
+                      (if (rendering-tt) (format "{\\hbox{\\texttt{~a}}}" c) c)]
+                     [(#\~) "$\\sim$"]
+                     [(#\{ #\}) (if (rendering-tt)
+                                    (format "{\\char`\\~a}" c)
+                                    (format "\\~a" c))]
+                     [(#\# #\% #\& #\$) (format "\\~a" c)]
+                     [(#\uA0) "~"]
+                     [(#\uDF) "{\\ss}"]
+                     [else
+                      (if ((char->integer c) . > . 127)
+                          (case c
+                            [(#\u039A) "K"] ; kappa
+                            [(#\u0391) "A"] ; alpha
+                            [(#\u039F) "O"] ; omicron
+                            [(#\u03A3) "$\\Sigma$"]
+                            [(#\u03BA) "$\\kappa$"]
+                            [(#\u03B1) "$\\alpha$"]
+                            [(#\u03B2) "$\\beta$"]
+                            [(#\u03B3) "$\\gamma$"]
+                            [(#\u03BF) "o"] ; omicron
+                            [(#\u03C3) "$\\sigma$"]
+                            [(#\u03C2) "$\\varsigma$"]
+                            [(#\u03BB) "$\\lambda$"]
+                            [(#\u039B) "$\\Lambda$"]
+                            [(#\u03BC) "$\\mu$"]
+                            [(#\u03C0) "$\\pi$"]
+                            [(#\∞) "$\\infty$"]
+                            [(#\⇓) "$\\Downarrow$"]
+                            [(#\↖) "$\\nwarrow$"]
+                            [(#\↓) "$\\downarrow$"]
+                            [(#\⇒) "$\\Rightarrow$"]
+                            [(#\→) "$\\rightarrow$"]
+                            [(#\↘) "$\\searrow$"]
+                            [(#\↙) "$\\swarrow$"]
+                            [(#\←) "$\\leftarrow$"]
+                            [(#\↑) "$\\uparrow$"]
+                            [(#\⇐) "$\\Leftarrow$"]
+                            [(#\−) "$\\longrightarrow$"]
+                            [(#\⇑) "$\\Uparrow$"]
+                            [(#\⇔) "$\\Leftrightarrow$"]
+                            [(#\↕) "$\\updownarrow$"]
+                            [(#\↔) "$\\leftrightarrow$"]
+                            [(#\↗) "$\\nearrow$"]
+                            [(#\⇕) "$\\Updownarrow$"]
+                            [(#\א) "$\\aleph$"]
+                            [(#\′) "$\\prime$"]
+                            [(#\∅) "$\\emptyset$"]
+                            [(#\∇) "$\\nabla$"]
+                            [(#\♦) "$\\diamondsuit$"]
+                            [(#\♠) "$\\spadesuit$"]
+                            [(#\♣) "$\\clubsuit$"]
+                            [(#\♥) "$\\heartsuit$"]
+                            [(#\♯) "$\\sharp$"]
+                            [(#\♭) "$\\flat$"]
+                            [(#\♮) "$\\natural$"]
+                            [(#\√) "$\\surd$"]
+                            [(#\¬) "$\\neg$"]
+                            [(#\△) "$\\triangle$"]
+                            [(#\∀) "$\\forall$"]
+                            [(#\∃) "$\\exists$"]
+                            [(#\∘) "$\\circ$"]
+                            [(#\θ) "$\\theta$"]
+                            [(#\τ) "$\\tau$"]
+                            [(#\υ) "$\\upsilon$"]
+                            [(#\φ) "$\\phi$"]
+                            [(#\δ) "$\\delta$"]
+                            [(#\ρ) "$\\rho$"]
+                            [(#\ε) "$\\epsilon$"]
+                            [(#\χ) "$\\chi$"]
+                            [(#\ψ) "$\\psi$"]
+                            [(#\ζ) "$\\zeta$"]
+                            [(#\ν) "$\\nu$"]
+                            [(#\ω) "$\\omega$"]
+                            [(#\η) "$\\eta$"]
+                            [(#\ξ) "$\\xi$"]
+                            [(#\Γ) "$\\Gamma$"]
+                            [(#\Ψ) "$\\Psi$"]
+                            [(#\∆) "$\\Delta$"]
+                            [(#\Ξ) "$\\Xi$"]
+                            [(#\Υ) "$\\Upsilon$"]
+                            [(#\Ω) "$\\Omega$"]
+                            [(#\Θ) "$\\Theta$"]
+                            [(#\Π) "$\\Pi$"]
+                            [(#\Φ) "$\\Phi$"]
+                            [(#\±) "$\\pm$"]
+                            [(#\∩) "$\\cap$"]
+                            [(#\◇) "$\\diamond$"]
+                            [(#\⊕) "$\\oplus$"]
+                            [(#\∓) "$\\mp$"]
+                            [(#\∪) "$\\cup$"]
+                            [(#\△) "$\\bigtriangleup$"]
+                            [(#\⊖) "$\\ominus$"]
+                            [(#\×) "$\\times$"]
+                            [(#\⊎) "$\\uplus$"]
+                            [(#\▽) "$\\bigtriangledown$"]
+                            [(#\⊗) "$\\otimes$"]
+                            [(#\÷) "$\\div$"]
+                            [(#\⊓) "$\\sqcap$"]
+                            [(#\▹) "$\\triangleleft$"]
+                            [(#\⊘) "$\\oslash$"]
+                            [(#\∗) "$\\ast$"]
+                            [(#\⊔) "$\\sqcup$"]
+                            [(#\∨) "$\\vee$"]
+                            [(#\∧) "$\\wedge$"]
+                            [(#\◃) "$\\triangleright$"]
+                            [(#\⊙) "$\\odot$"]
+                            [(#\★) "$\\star$"]
+                            [(#\†) "$\\dagger$"]
+                            [(#\•) "$\\bullet$"]
+                            [(#\‡) "$\\ddagger$"]
+                            [(#\≀) "$\\wr$"]
+                            [(#\⨿) "$\\amalg$"]
+                            [(#\≤) "$\\leq$"]
+                            [(#\≥) "$\\geq$"]
+                            [(#\≡) "$\\equiv$"]
+                            [(#\⊨) "$\\models$"]
+                            [(#\≺) "$\\prec$"]
+                            [(#\≻) "$\\succ$"]
+                            [(#\∼) "$\\sim$"]
+                            [(#\⊥) "$\\perp$"]
+                            [(#\≼) "$\\preceq$"]
+                            [(#\≽) "$\\succeq$"]
+                            [(#\≃) "$\\simeq$"]
+                            [(#\≪) "$\\ll$"]
+                            [(#\≫) "$\\gg$"]
+                            [(#\≍) "$\\asymp$"]
+                            [(#\∥) "$\\parallel$"]
+                            [(#\⊂) "$\\subset$"]
+                            [(#\⊃) "$\\supset$"]
+                            [(#\≈) "$\\approx$"]
+                            [(#\⋈) "$\\bowtie$"]
+                            [(#\⊆) "$\\subseteq$"]
+                            [(#\⊇) "$\\supseteq$"]
+                            [(#\≌) "$\\cong$"]
+                            [(#\⊏) "$\\sqsubset$"]
+                            [(#\⊐) "$\\sqsupset$"]
+                            [(#\≠) "$\\neq$"]
+                            [(#\⌣) "$\\smile$"]
+                            [(#\⊑) "$\\sqsubseteq$"]
+                            [(#\⊒) "$\\sqsupseteq$"]
+                            [(#\≐) "$\\doteq$"]
+                            [(#\⌢) "$\\frown$"]
+                            [(#\∈) "$\\in$"]
+                            [(#\∋) "$\\ni$"]
+                            [(#\∝) "$\\propto$"]
+                            [(#\⊢) "$\\vdash$"]
+                            [(#\⊣) "$\\dashv$"]    
+                            [(#\☠) "$\\skull$"] 
+                            [(#\☺) "$\\smiley$"]
+                            [(#\☻) "$\\blacksmiley$"]
+                            [(#\☹) "$\\frownie$"]
+                            [(#\à) "\\`{a}"]
+                            [(#\è) "\\`{e}"]
+                            [(#\é) "\\'{e}"]
+                            [(#\ä) "\\\"a"]
+                            [(#\ü) "\\\"u"]
+                            [(#\ö) "\\\"o"]
+                            [(#\uA7) "\\S"]
+                            [else c])
+                          c)])))
+                (loop (add1 i)))))))
 
     ;; ----------------------------------------
 

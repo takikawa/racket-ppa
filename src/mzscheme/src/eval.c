@@ -1304,6 +1304,11 @@ static void set_app2_eval_type(Scheme_App2_Rec *app)
   SCHEME_APPN_FLAGS(app) = et;
 }
 
+void scheme_reset_app2_eval_type(Scheme_App2_Rec *app)
+{
+  set_app2_eval_type(app);
+}
+
 static Scheme_Object *resolve_application2(Scheme_Object *o, Resolve_Info *orig_info, int already_resolved_arg_count)
 {
   Resolve_Info *info;
@@ -4142,14 +4147,15 @@ static Scheme_Object *sfs_let_one(Scheme_Object *o, SFS_Info *info)
     info->max_nontail = save_mnt;
 
     if (info->max_used[pos] <= ip) {
-      /* No one is using it, so either don't push the real value, or clear it.
+      /* No one is using it, so either don't push the real value, or 
+         clear it if there's a later non-tail call.
          The optimizer normally would have converted away the binding, but
          it might not because (1) it was introduced late by inlining,
          or (2) the rhs expression doesn't always produce a single
          value. */
       if (scheme_omittable_expr(rhs, 1, -1, 1, NULL)) {
         rhs = scheme_false;
-      } else {
+      } else if (ip < info->max_calls[pos]) {
         Scheme_Object *clr;
         Scheme_Sequence *s;
         s = malloc_sequence(2);
@@ -5081,7 +5087,7 @@ static void *compile_k(void)
 	 before the rest. */
       while (1) {
 	scheme_frame_captures_lifts(cenv, scheme_make_lifted_defn, scheme_sys_wraps(cenv), 
-                                    scheme_false, scheme_false, scheme_null);
+                                    scheme_false, scheme_false, scheme_null, scheme_false);
 	form = scheme_check_immediate_macro(form, 
 					    cenv, &rec, 0,
 					    0, &gval, NULL, NULL);
@@ -5122,7 +5128,7 @@ static void *compile_k(void)
 
       while (1) {
 	scheme_frame_captures_lifts(cenv, scheme_make_lifted_defn, scheme_sys_wraps(cenv), 
-                                    scheme_false, scheme_false, scheme_null);
+                                    scheme_false, scheme_false, scheme_null, scheme_false);
 
 	scheme_init_compile_recs(&rec, 0, &rec2, 1);
 
@@ -6254,28 +6260,49 @@ Scheme_Object *scheme_expand_expr(Scheme_Object *form, Scheme_Comp_Env *env,
   return scheme_compile_expand_expr(form, env, erec, drec, 0);
 }
 
-static Scheme_Object *pair_lifted(Scheme_Object *_ip, Scheme_Object **_id, Scheme_Object *expr, Scheme_Comp_Env *env)
+static Scheme_Object *pair_lifted(Scheme_Object *_ip, Scheme_Object **_ids, Scheme_Object *expr, Scheme_Comp_Env *env)
 {
   Scheme_Comp_Env **ip = (Scheme_Comp_Env **)_ip, *naya;
+  Scheme_Object *ids, *id;
+  int pos;
 
-  naya = scheme_new_compilation_frame(1, SCHEME_CAPTURE_LIFTED, (*ip)->next, NULL);
+  pos = scheme_list_length(*_ids);
+  naya = scheme_new_compilation_frame(pos, SCHEME_CAPTURE_LIFTED, (*ip)->next, NULL);
   (*ip)->next = naya;
   *ip = naya;
 
-  scheme_add_compilation_binding(0, *_id, naya);
+  for (ids = *_ids; !SCHEME_NULLP(ids); ids = SCHEME_CDR(ids)) {
+    id = SCHEME_CAR(ids);
+    scheme_add_compilation_binding(--pos, id, naya);
+  }
 
-  return icons(icons(*_id, scheme_null), icons(expr, scheme_null));
+  return icons(*_ids, icons(expr, scheme_null));
 }
 
 static Scheme_Object *add_lifts_as_let(Scheme_Object *obj, Scheme_Object *l, Scheme_Comp_Env *env,
-                                       Scheme_Object *orig_form)
+                                       Scheme_Object *orig_form, int comp_rev)
 {
-  Scheme_Object *revl = scheme_null, *a;
+  Scheme_Object *revl, *a;
 
   if (SCHEME_NULLP(l)) return obj;
 
-  for (; SCHEME_PAIRP(l); l = SCHEME_CDR(l)) {
-    revl = icons(SCHEME_CAR(l), revl);
+  revl = scheme_reverse(l);
+
+  if (comp_rev) {
+    /* We've already compiled the body of this let
+       with the bindings in reverse order. So insert a series of `lets'
+       to match that order: */
+    if (!SCHEME_NULLP(SCHEME_CDR(l))) {
+      for (; SCHEME_PAIRP(l); l = SCHEME_CDR(l)) {
+        a = scheme_reverse(SCHEME_CAR(SCHEME_CAR(l)));
+        for (; !SCHEME_NULLP(a); a = SCHEME_CDR(a)) {
+          obj = icons(scheme_datum_to_syntax(let_values_symbol, scheme_false, scheme_sys_wraps(env), 0, 0),
+                      icons(icons(icons(icons(SCHEME_CAR(a), scheme_null), icons(SCHEME_CAR(a), scheme_null)),
+                                  scheme_null),
+                            icons(obj, scheme_null)));
+        }
+      }
+    }
   }
 
   for (; SCHEME_PAIRP(revl); revl = SCHEME_CDR(revl)) {
@@ -6285,7 +6312,9 @@ static Scheme_Object *add_lifts_as_let(Scheme_Object *obj, Scheme_Object *l, Sch
                       icons(obj, scheme_null)));
   }
 
-  return scheme_datum_to_syntax(obj, orig_form, scheme_false, 0, 0);
+  obj = scheme_datum_to_syntax(obj, orig_form, scheme_false, 0, 0);
+  
+  return obj;
 }
  
 static Scheme_Object *compile_expand_expr_lift_to_let_k(void);
@@ -6351,7 +6380,8 @@ compile_expand_expr_lift_to_let(Scheme_Object *form, Scheme_Comp_Env *env,
 
   context_key = scheme_generate_lifts_key();
   
-  scheme_frame_captures_lifts(inserted, pair_lifted, (Scheme_Object *)ip, scheme_false, context_key, NULL);
+  scheme_frame_captures_lifts(inserted, pair_lifted, (Scheme_Object *)ip, scheme_false, 
+                              context_key, NULL, scheme_false);
 
   if (rec[drec].comp) {
     scheme_init_compile_recs(rec, drec, recs, 2);
@@ -6377,7 +6407,7 @@ compile_expand_expr_lift_to_let(Scheme_Object *form, Scheme_Comp_Env *env,
       SCHEME_IPTR_VAL(o) = form;
     } else
       o = form;
-    form = add_lifts_as_let(o, l, env, orig_form);
+    form = add_lifts_as_let(o, l, env, orig_form, rec[drec].comp);
     SCHEME_EXPAND_OBSERVE_LETLIFT_LOOP(rec[drec].observer, form);
     form = compile_expand_expr_lift_to_let(form, env, recs, 1);
     if (rec[drec].comp)
@@ -7656,6 +7686,7 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 {
   Scheme_Type type;
   Scheme_Object *v;
+  GC_CAN_IGNORE Scheme_Object *tmpv; /* safe-for-space relies on GC_CAN_IGNORE */
   GC_MAYBE_IGNORE_INTERIOR Scheme_Object **old_runstack;
   GC_MAYBE_IGNORE_INTERIOR MZ_MARK_STACK_TYPE old_cont_mark_stack;
 #if USE_LOCAL_RUNSTACK
@@ -7706,6 +7737,19 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 # define UPDATE_THREAD_RSPTR() /**/
 # define RUNSTACK_CHANGED() /**/
 # define RESET_LOCAL_RUNSTACK() /**/
+#endif
+
+#if 1
+# define EVAL_SFS_CLEAR(runstack, obj)                                \
+          if (SCHEME_LOCAL_FLAGS(obj) & SCHEME_LOCAL_CLEAR_ON_READ) { \
+            runstack[SCHEME_LOCAL_POS(obj)] = NULL;                   \
+          }
+# define SFS_CLEAR_RUNSTACK_ONE(runstack, pos) runstack[pos] = NULL
+# define SFS_CLEAR_RUNSTACK(runstack, i, n)  for (i = n; i--; ) { SFS_CLEAR_RUNSTACK_ONE(runstack, i); }
+#else
+# define EVAL_SFS_CLEAR(rs, obj) /* empty */
+# define SFS_CLEAR_RUNSTACK_ONE(runstack, pos) /* empty */
+# define SFS_CLEAR_RUNSTACK(runstack, i, n)  /* empty */
 #endif
 
 #define RUNSTACK_START MZ_RUNSTACK_START
@@ -7897,16 +7941,16 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 	    return NULL; /* Doesn't get here */
 	  }
 	
-	  stack = RUNSTACK = old_runstack - num_params;
-	  CHECK_RUNSTACK(p, RUNSTACK);
-	  RUNSTACK_CHANGED();
-
-	  if (rands != stack) {
-	    int n = num_params; 
-	    while (n--) {
-	      stack[n] = rands[n];
-	    }
-	  }
+          stack = RUNSTACK = old_runstack - num_params;
+          CHECK_RUNSTACK(p, RUNSTACK);
+          RUNSTACK_CHANGED();
+          
+          if (rands != stack) {
+            int n = num_params; 
+            while (n--) {
+              stack[n] = rands[n];
+            }
+          }
 	}
       } else {
 	if (num_rands) {
@@ -8042,7 +8086,9 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 	goto returnv;
       }
 
-      v = data->code(obj, num_rands, rands);
+      tmpv = obj;
+      obj = NULL; /* save for space, since tmpv is ignored by the GC */
+      v = data->code(tmpv, num_rands, rands);
 
       if (v == SCHEME_TAIL_CALL_WAITING) {
         /* [TC-SFS]; see schnapp.inc */
@@ -8179,11 +8225,13 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
       case scheme_local_type:
 	{
 	  v = RUNSTACK[SCHEME_LOCAL_POS(obj)];
+          EVAL_SFS_CLEAR(RUNSTACK, obj);
           goto returnv_never_multi;
 	}
       case scheme_local_unbox_type:
 	{
 	  v = SCHEME_ENVBOX_VAL(RUNSTACK[SCHEME_LOCAL_POS(obj)]);
+          EVAL_SFS_CLEAR(RUNSTACK, obj);
           goto returnv_never_multi;
 	}
       case scheme_syntax_type:
@@ -8198,7 +8246,6 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
       case scheme_application_type:
 	{
 	  Scheme_App_Rec *app;
-	  GC_CAN_IGNORE Scheme_Object *tmpv;
 	  GC_MAYBE_IGNORE_INTERIOR Scheme_Object **randsp;
 	  Scheme_Object **stack;
 	  int k;
@@ -8224,6 +8271,7 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 	  stack = PUSH_RUNSTACK(p, RUNSTACK, num_rands);
 	  RUNSTACK_CHANGED();
 	  UPDATE_THREAD_RSPTR();
+          SFS_CLEAR_RUNSTACK(RUNSTACK, k, num_rands);
 
 	  /* Inline local & global variable lookups for speed */
 	  switch (GET_FIRST_EVAL) {
@@ -8233,10 +8281,18 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 	    global_lookup(obj =, obj, tmpv);
 	    break;
 	  case SCHEME_EVAL_LOCAL:
-	    obj = stack[SCHEME_LOCAL_POS(obj)];
+            {
+              tmpv = stack[SCHEME_LOCAL_POS(obj)];
+              EVAL_SFS_CLEAR(stack, obj);
+              obj = tmpv;
+            }
 	    break;
 	  case SCHEME_EVAL_LOCAL_UNBOX:
-	    obj = SCHEME_ENVBOX_VAL(stack[SCHEME_LOCAL_POS(obj)]);
+            {
+              tmpv = SCHEME_ENVBOX_VAL(stack[SCHEME_LOCAL_POS(obj)]);
+              EVAL_SFS_CLEAR(stack, obj);
+              obj = tmpv;
+            }
 	    break;
 	  default:
 	    obj = _scheme_eval_linked_expr_wp(obj, p);
@@ -8272,9 +8328,11 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 		break;
 	      case SCHEME_EVAL_LOCAL:
 		*(randsp++) = stack[SCHEME_LOCAL_POS(v)];
+                EVAL_SFS_CLEAR(stack, v);
 		break;
 	      case SCHEME_EVAL_LOCAL_UNBOX:
 		*(randsp++) = SCHEME_ENVBOX_VAL(stack[SCHEME_LOCAL_POS(v)]);
+                EVAL_SFS_CLEAR(stack, v);
 		break;
 	      default:
 		{
@@ -8307,6 +8365,7 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 	  rands = PUSH_RUNSTACK(p, RUNSTACK, 1);
 	  RUNSTACK_CHANGED();
 	  UPDATE_THREAD_RSPTR();
+          SFS_CLEAR_RUNSTACK_ONE(RUNSTACK, 0);
 	  
 	  /* Inline local & global variable lookups for speed */
 	  switch (flags & 0x7) {
@@ -8314,15 +8373,22 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 	    break;
 	  case SCHEME_EVAL_GLOBAL:
             {
-              GC_CAN_IGNORE Scheme_Object *tmpv;
               global_lookup(obj =, obj, tmpv);
             }
 	    break;
 	  case SCHEME_EVAL_LOCAL:
-	    obj = rands[SCHEME_LOCAL_POS(obj)];
+            {
+              tmpv = rands[SCHEME_LOCAL_POS(obj)];
+              EVAL_SFS_CLEAR(rands, obj);
+              obj = tmpv;
+            }
 	    break;
 	  case SCHEME_EVAL_LOCAL_UNBOX:
-	    obj = SCHEME_ENVBOX_VAL(rands[SCHEME_LOCAL_POS(obj)]);
+            {
+              tmpv = SCHEME_ENVBOX_VAL(rands[SCHEME_LOCAL_POS(obj)]);
+              EVAL_SFS_CLEAR(rands, obj);
+              obj = tmpv;
+            }
 	    break;
 	  default:
 	    obj = _scheme_eval_linked_expr_wp(obj, p);
@@ -8336,15 +8402,22 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 	    break;
 	  case SCHEME_EVAL_GLOBAL:
             {
-              GC_CAN_IGNORE Scheme_Object *tmpv;
               global_lookup(arg =, arg, tmpv);
             }
 	    break;
 	  case SCHEME_EVAL_LOCAL:
-	    arg = rands[SCHEME_LOCAL_POS(arg)];
+            {
+              tmpv = rands[SCHEME_LOCAL_POS(arg)];
+              EVAL_SFS_CLEAR(rands, arg);
+              arg = tmpv;
+            }
 	    break;
 	  case SCHEME_EVAL_LOCAL_UNBOX:
-	    arg = SCHEME_ENVBOX_VAL(rands[SCHEME_LOCAL_POS(arg)]);
+            {
+              tmpv = SCHEME_ENVBOX_VAL(rands[SCHEME_LOCAL_POS(arg)]);
+              EVAL_SFS_CLEAR(rands, arg);
+              arg = tmpv;
+            }
 	    break;
 	  default:
 	    arg = _scheme_eval_linked_expr_wp(arg, p);
@@ -8362,7 +8435,6 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 	  Scheme_App3_Rec *app;
 	  GC_CAN_IGNORE Scheme_Object *arg;
 	  short flags;
-	  GC_CAN_IGNORE Scheme_Object *tmpv;
 
 	  app = (Scheme_App3_Rec *)obj;
 	  
@@ -8372,7 +8444,9 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 	  rands = PUSH_RUNSTACK(p, RUNSTACK, 2);
 	  RUNSTACK_CHANGED();
 	  UPDATE_THREAD_RSPTR();
-	  
+          SFS_CLEAR_RUNSTACK_ONE(RUNSTACK, 0);
+          SFS_CLEAR_RUNSTACK_ONE(RUNSTACK, 1);
+
 	  /* Inline local & global variable lookups for speed */
 	  switch (flags & 0x7) {
 	  case SCHEME_EVAL_CONSTANT:
@@ -8381,10 +8455,14 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 	    global_lookup(obj =, obj, tmpv);
 	    break;
 	  case SCHEME_EVAL_LOCAL:
-	    obj = rands[SCHEME_LOCAL_POS(obj)];
+	    tmpv = rands[SCHEME_LOCAL_POS(obj)];
+            EVAL_SFS_CLEAR(rands, obj);
+            obj = tmpv;
 	    break;
 	  case SCHEME_EVAL_LOCAL_UNBOX:
-	    obj = SCHEME_ENVBOX_VAL(rands[SCHEME_LOCAL_POS(obj)]);
+	    tmpv = SCHEME_ENVBOX_VAL(rands[SCHEME_LOCAL_POS(obj)]);
+            EVAL_SFS_CLEAR(rands, obj);
+            obj = tmpv;
 	    break;
 	  default:
 	    obj = _scheme_eval_linked_expr_wp(obj, p);
@@ -8400,10 +8478,14 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 	    global_lookup(arg =, arg, tmpv);
 	    break;
 	  case SCHEME_EVAL_LOCAL:
-	    arg = rands[SCHEME_LOCAL_POS(arg)];
+	    tmpv = rands[SCHEME_LOCAL_POS(arg)];
+            EVAL_SFS_CLEAR(rands, arg);
+            arg = tmpv;
 	    break;
 	  case SCHEME_EVAL_LOCAL_UNBOX:
-	    arg = SCHEME_ENVBOX_VAL(rands[SCHEME_LOCAL_POS(arg)]);
+	    tmpv = SCHEME_ENVBOX_VAL(rands[SCHEME_LOCAL_POS(arg)]);
+            EVAL_SFS_CLEAR(rands, arg);
+            arg = tmpv;
 	    break;
 	  default:
 	    arg = _scheme_eval_linked_expr_wp(arg, p);
@@ -8421,10 +8503,14 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 	    global_lookup(arg =, arg, tmpv);
 	    break;
 	  case SCHEME_EVAL_LOCAL:
-	    arg = rands[SCHEME_LOCAL_POS(arg)];
+	    tmpv = rands[SCHEME_LOCAL_POS(arg)];
+            EVAL_SFS_CLEAR(rands, arg);
+            arg = tmpv;
 	    break;
 	  case SCHEME_EVAL_LOCAL_UNBOX:
-	    arg = SCHEME_ENVBOX_VAL(rands[SCHEME_LOCAL_POS(arg)]);
+	    tmpv = SCHEME_ENVBOX_VAL(rands[SCHEME_LOCAL_POS(arg)]);
+            EVAL_SFS_CLEAR(rands, arg);
+            arg = tmpv;
 	    break;
 	  default:
 	    arg = _scheme_eval_linked_expr_wp(arg, p);
@@ -8626,20 +8712,22 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
 	    break;
 	  case SCHEME_EVAL_GLOBAL:
 	    {
-	      GC_CAN_IGNORE Scheme_Object *tmpv;
 	      global_lookup(RUNSTACK[0] =, lo->value, tmpv);
 	    }
 	    break;
 	  case SCHEME_EVAL_LOCAL:
 	    RUNSTACK[0] = RUNSTACK[SCHEME_LOCAL_POS(lo->value)];
+            EVAL_SFS_CLEAR(RUNSTACK, lo->value);
 	    break;
 	  case SCHEME_EVAL_LOCAL_UNBOX:
 	    RUNSTACK[0] = SCHEME_ENVBOX_VAL(RUNSTACK[SCHEME_LOCAL_POS(lo->value)]);
+            EVAL_SFS_CLEAR(RUNSTACK, lo->value);
 	    break;
 	  default:
 	    UPDATE_THREAD_RSPTR();
 	    {
 	      GC_CAN_IGNORE Scheme_Object *val;
+              SFS_CLEAR_RUNSTACK_ONE(RUNSTACK, 0);
 	      val = _scheme_eval_linked_expr_wp(lo->value, p);
 	      RUNSTACK[0] = val;
 	    }
@@ -9059,7 +9147,8 @@ static void *expand_k(void)
       scheme_frame_captures_lifts(env, 
                                   (as_local < 0) ? pair_lifted : scheme_make_lifted_defn, data, 
                                   scheme_false, catch_lifts_key, 
-                                  (!as_local && catch_lifts_key) ? scheme_null : NULL);
+                                  (!as_local && catch_lifts_key) ? scheme_null : NULL,
+                                  scheme_false);
     }
 
     if (just_to_top) {
@@ -9076,7 +9165,7 @@ static void *expand_k(void)
           || SCHEME_PAIRP(rl)) {
         l = scheme_append(rl, l);
         if (as_local < 0)
-          obj = add_lifts_as_let(obj, l, env, scheme_false);
+          obj = add_lifts_as_let(obj, l, env, scheme_false, 0);
         else
           obj = add_lifts_as_begin(obj, l, env);
         SCHEME_EXPAND_OBSERVE_LIFT_LOOP(erec1.observer,obj);
@@ -9346,15 +9435,18 @@ Scheme_Object *scheme_generate_lifts_key(void)
 }
 
 Scheme_Object *
-scheme_make_lifted_defn(Scheme_Object *sys_wraps, Scheme_Object **_id, Scheme_Object *expr, Scheme_Comp_Env *env)
+scheme_make_lifted_defn(Scheme_Object *sys_wraps, Scheme_Object **_ids, Scheme_Object *expr, Scheme_Comp_Env *env)
 {
-  Scheme_Object *l;
+  Scheme_Object *l, *ids, *id;
 
-  /* Registers marked id: */
-  scheme_tl_id_sym(env->genv, *_id, scheme_false, 2, NULL, NULL);
+  /* Registers marked ids: */
+  for (ids = *_ids; !SCHEME_NULLP(ids); ids = SCHEME_CDR(ids)) {
+    id = SCHEME_CAR(ids);
+    scheme_tl_id_sym(env->genv, id, scheme_false, 2, NULL, NULL);
+  }
 
   l = icons(scheme_datum_to_syntax(define_values_symbol, scheme_false, sys_wraps, 0, 0), 
-	    icons(scheme_make_pair(*_id, scheme_null),
+	    icons(*_ids,
 		  icons(expr,
 			scheme_null)));
 
@@ -9366,12 +9458,16 @@ static Scheme_Object *add_intdef_renamings(Scheme_Object *l, Scheme_Object *rena
   Scheme_Object *rl = renaming;
 
   if (SCHEME_PAIRP(renaming)) {
-    l = scheme_add_rib_delimiter(l, scheme_null);
+    int need_delim;
+    need_delim = !SCHEME_NULLP(SCHEME_CDR(rl));
+    if (need_delim)
+      l = scheme_add_rib_delimiter(l, scheme_null);
     while (!SCHEME_NULLP(rl)) {
       l = scheme_add_rename(l, SCHEME_CAR(rl));
       rl = SCHEME_CDR(rl);
     }
-    l = scheme_add_rib_delimiter(l, renaming);
+    if (need_delim)
+      l = scheme_add_rib_delimiter(l, renaming);
   } else {
     l = scheme_add_rename(l, renaming);
   }
@@ -9594,7 +9690,8 @@ do_local_expand(const char *name, int for_stx, int catch_lifts, int for_expr, in
       scheme_frame_captures_lifts(env, 
                                   (catch_lifts < 0) ? pair_lifted : scheme_make_lifted_defn, data,
                                   scheme_false, 
-                                  catch_lifts_key, NULL);
+                                  catch_lifts_key, NULL,
+                                  scheme_false);
     }
 
     memset(drec, 0, sizeof(drec));
@@ -9618,7 +9715,7 @@ do_local_expand(const char *name, int for_stx, int catch_lifts, int for_expr, in
 
     if (catch_lifts_key) {
       if (catch_lifts < 0)
-        xl = add_lifts_as_let(xl, scheme_frame_get_lifts(env), env, orig_l);
+        xl = add_lifts_as_let(xl, scheme_frame_get_lifts(env), env, orig_l, 0);
       else
         xl = add_lifts_as_begin(xl, scheme_frame_get_lifts(env), env);
       SCHEME_EXPAND_OBSERVE_LIFT_LOOP(observer,xl);
@@ -10185,11 +10282,12 @@ void scheme_pop_prefix(Scheme_Object **rs)
    CLOS_PRESERVES_MARKS. (Maybe check them in the JIT pass?) */
 
 #define VALID_NOT 0
-#define VALID_VAL 1
-#define VALID_BOX 2
-#define VALID_TOPLEVELS 3
-#define VALID_VAL_NOCLEAR 4
-#define VALID_BOX_NOCLEAR 5
+#define VALID_UNINIT 1
+#define VALID_VAL 2
+#define VALID_BOX 3
+#define VALID_TOPLEVELS 4
+#define VALID_VAL_NOCLEAR 5
+#define VALID_BOX_NOCLEAR 6
 
 typedef struct Validate_Clearing {
   MZTAG_IF_REQUIRED
@@ -10510,7 +10608,7 @@ static void validate_unclosed_procedure(Mz_CPort *port, Scheme_Object *expr,
     if (q == self_pos)
       self_pos_in_closure = i;
     p = q + delta;
-    if ((q < 0) || (p >= depth) || (stack[p] == VALID_NOT))
+    if ((q < 0) || (p >= depth) || (stack[p] <= VALID_UNINIT))
       scheme_ill_formed_code(port);
     vld = stack[p];
     if (vld == VALID_VAL_NOCLEAR)
@@ -10553,11 +10651,18 @@ static void check_self_call_valid(Scheme_Object *rator, Mz_CPort *port, struct V
     int i, pos;
     for (i = vc->self_count; i--; ) {
       pos = i + vc->self_start;
-      if (stack[pos] == VALID_NOT)
+      if (stack[pos] <= VALID_UNINIT)
         scheme_ill_formed_code(port);
     }
   }
 }
+
+#define CAN_RESET_STACK_SLOT 0
+#if !CAN_RESET_STACK_SLOT
+# define WHEN_CAN_RESET_STACK_SLOT(x) 0
+#else
+# define WHEN_CAN_RESET_STACK_SLOT(x) (x)
+#endif
 
 void scheme_validate_expr(Mz_CPort *port, Scheme_Object *expr, 
                           char *stack, Validate_TLS tls,
@@ -10917,9 +11022,9 @@ void scheme_validate_expr(Mz_CPort *port, Scheme_Object *expr,
 					   || ((stack[p] != VALID_BOX)
                                                && (stack[p] != VALID_BOX_NOCLEAR))))
 	    || (!SCHEME_LET_AUTOBOX(lv) && ((p >= letlimit)
-					    || ((stack[p] != VALID_VAL) 
-                                                && (stack[p] != VALID_VAL_NOCLEAR) 
-                                                && (stack[p] != VALID_NOT)))))
+					    || (WHEN_CAN_RESET_STACK_SLOT(stack[p] != VALID_VAL) 
+                                                && WHEN_CAN_RESET_STACK_SLOT(stack[p] != VALID_VAL_NOCLEAR) 
+                                                && (stack[p] != VALID_UNINIT)))))
 	  scheme_ill_formed_code(port);
 
 	if (!SCHEME_LET_AUTOBOX(lv)) {
@@ -10948,7 +11053,7 @@ void scheme_validate_expr(Mz_CPort *port, Scheme_Object *expr,
 	}
       } else {
 	delta -= c;
-	memset(stack + delta, VALID_NOT, c);
+	memset(stack + delta, VALID_UNINIT, c);
       }
 
 
@@ -10972,6 +11077,10 @@ void scheme_validate_expr(Mz_CPort *port, Scheme_Object *expr,
       }
 
       for (i = 0; i < c; i++) {
+#if !CAN_RESET_STACK_SLOT
+        if (stack[delta + i] != VALID_UNINIT)
+          scheme_ill_formed_code(port);
+#endif
 	stack[delta + i] = VALID_VAL;
       }
 
@@ -10992,10 +11101,16 @@ void scheme_validate_expr(Mz_CPort *port, Scheme_Object *expr,
       --delta;
       if (delta < 0)
 	scheme_ill_formed_code(port);
-      stack[delta] = VALID_NOT;
+      stack[delta] = VALID_UNINIT;
 
       scheme_validate_expr(port, lo->value, stack, tls, depth, letlimit, delta, num_toplevels, num_stxes, num_lifts,
                            NULL, 0, 0, vc, 0);
+
+#if !CAN_RESET_STACK_SLOT
+      if (stack[delta] != VALID_UNINIT)
+        scheme_ill_formed_code(port);
+#endif
+      
       stack[delta] = VALID_VAL;
 
       expr = lo->body;

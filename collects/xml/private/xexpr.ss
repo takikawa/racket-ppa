@@ -1,6 +1,7 @@
 #lang scheme
 (require scheme/pretty
          "structures.ss"
+         "reader.ss"
          "writer.ss")
 
 ;; Xexpr ::= String
@@ -26,11 +27,11 @@
         comment? p-i? cdata? pcdata?))
 
 #;(define xexpr/c
-  (flat-rec-contract xexpr
-    xexpr-datum/c
-    (cons/c symbol?
-            (or/c (cons/c (listof (list/c symbol? string?)) (listof xexpr))
-                  (listof xexpr)))))
+    (flat-rec-contract xexpr
+                       xexpr-datum/c
+                       (cons/c symbol?
+                               (or/c (cons/c (listof (list/c symbol? string?)) (listof xexpr))
+                                     (listof xexpr)))))
 
 (define xexpr/c 
   (make-proj-contract
@@ -90,7 +91,7 @@
                       (car x))
                      (current-continuation-marks)
                      x)))))
-    [(permissive?) (true)]
+    [(permissive-xexprs) (true)]
     (else (false
            (make-exn:invalid-xexpr
             (format (string-append
@@ -129,13 +130,18 @@
 ;; True if the list is a list of String,Symbol pairs.
 (define (attribute-symbol-string? attr true false)
   (if (symbol? (car attr))
-      (if (or (string? (cadr attr))
-              (permissive?))
-          (true)
+      (if (pair? (cdr attr))
+          (if (or (string? (cadr attr))
+                  (permissive-xexprs))
+              (true)
+              (false (make-exn:invalid-xexpr
+                      (format "Expected a string, given ~a" (cadr attr))
+                      (current-continuation-marks)
+                      (cadr attr))))
           (false (make-exn:invalid-xexpr
-                  (format "Expected a string, given ~a" (cadr attr))
+                  (format "Expected an attribute value string for attribute ~a" attr)
                   (current-continuation-marks)
-                  (cadr attr))))
+                  attr)))
       (false (make-exn:invalid-xexpr
               (format "Expected a symbol, given ~a" (car attr))
               (current-continuation-marks)
@@ -183,7 +189,7 @@
         [(entity? x) (entity-text x)]
         [(or (comment? x) (p-i? x) (cdata? x)) x]
         [(document? x) (error 'xml->xexpr "Expected content, given ~e\nUse document-element to extract the content." x)]
-        [(permissive?) x]
+        [(permissive-xexprs) x]
         [else (error 'xml->xexpr "Expected content, given ~e" x)]))))
 
 ;; attribute->srep : Attribute -> Attribute-srep
@@ -227,6 +233,9 @@
     (write-xml/content (xexpr->xml xexpr) port)
     (get-output-string port)))
 
+(define (string->xexpr str)
+  (xml->xexpr (read-xml/element (open-input-string str))))
+
 ;; bcompose : (a a -> c) (b -> a) -> (b b -> c)
 (define (bcompose f g)
   (lambda (x y) (f (g x) (g y))))
@@ -236,6 +245,7 @@
  [exn:invalid-xexpr-code (exn:invalid-xexpr? . -> . any/c)]
  [xexpr/c contract?]
  [xexpr? (any/c . -> . boolean?)]
+ [string->xexpr (string? . -> . xexpr/c)]
  [xexpr->string (xexpr/c . -> . string?)]
  [xml->xexpr (content/c . -> . xexpr/c)]
  [xexpr->xml (xexpr/c . -> . content/c)]

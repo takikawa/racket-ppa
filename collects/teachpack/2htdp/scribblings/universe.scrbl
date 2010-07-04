@@ -161,8 +161,7 @@ The design of a world program demands that you come up with a data
 
 @defform/subs[#:id big-bang
               #:literals 
-	      (on-tick on-draw on-key on-mouse on-receive 
-	        stop-when register record? name)
+	      (on-tick on-draw on-key on-mouse on-receive stop-when check-with register record? name)
               (big-bang state-expr clause ...)
               ([clause
 		 (on-tick tick-expr)
@@ -172,6 +171,7 @@ The design of a world program demands that you come up with a data
 		 (on-draw draw-expr)
 		 (on-draw draw-expr width-expr height-expr)
 		 (stop-when stop-expr)	   
+		 (check-with world?-expr)	   
 		 (record? boolean-expr)
 		 (on-receive rec-expr)
 		 (register IP-expr)
@@ -417,6 +417,16 @@ All @tech{MouseEvent}s are represented via strings:
 
 @item{
 
+@defform[(check-with world-expr?)
+         #:contracts
+         ([world-expr? (-> Any boolean?)])]{
+ tell DrScheme to call the @scheme[world-expr?] function on the result of
+ every world handler call. If this call produces @scheme[true], the result
+ is considered a world; otherwise the world program signals an error. 
+}}
+
+@item{
+
 @defform[(record? boolean-expr)
          #:contracts
          ([boolean-expr boolean?])]{
@@ -455,9 +465,9 @@ For the creation of scenes from the world, use the functions from
 @secref["image"].  The teachpack adds the following two functions, which
 are highly useful for creating scenes. 
 
-@defproc[(nw:rectangle [width natural-number/c] [height natural-number/c] [solid-or-filled Mode] [c Color]) image?]{
+@defproc[(nw:rectangle [width natural-number/c] [height natural-number/c] [solid-or-outline Mode] [c Color]) image?]{
    creates a @scheme[width] by @scheme[height] rectangle, solid or outlined as specified by
-   @scheme[solid-or-filled] and colored according to @scheme[c], with a pinhole at the upper left
+   @scheme[solid-or-outline] and colored according to @scheme[c], with a pinhole at the upper left
    corner.}
    
 @defproc[(scene+line [s scene?][x0 number?][y0 number?][x1 number?][y1 number?][c Color]) scene?]{
@@ -562,198 +572,9 @@ A typical program does not use all three of these functions. Furthermore,
  goal. It often demands the design of many auxiliary functions. The
  collection of all these functions is your @tech{world} program. 
 
-@; -----------------------------------------------------------------------------
-@subsection{Simulating a Door: Data}
+@centerline{An extended example is available in 
+ @link["http://www.ccs.neu.edu/home/matthias/HtDP2e/"]{How to Design Worlds/2e}.}
 
-Our first and immediate goal is to represent the world as data. In this
- specific example, the world consists of our door and what changes about
- the door is whether it is locked, unlocked but closed, or open. We use
- three symbols to represent the three states:
-
-@(begin
-#reader scribble/comment-reader
-(schemeblock
-;; WorldState is one of: 
-;; -- @scheme['locked]
-;; -- @scheme['closed]
-;; -- @scheme['open]
-;; interpretation: state of door 
-))
-
-Symbols are particularly well-suited here because they directly express
- the state of the door. 
-
-Now that we have a data definition, we must also decide which computer
- interactions should model the various actions on the door.  Our pictorial
- representation of the door's states and transitions, specifically the
- arrow from @tt{open} to @tt{closed} suggests the use of a function that
- simulates time. For the other three arrows, we could use either keyboard
- events or mouse clicks or both. Our solution uses three keystrokes:
- @scheme[#\u] for unlocking the door, @scheme[#\l] for locking it, and
- @scheme[#\space] for pushing it open.  We can express these choices
- graphically by translating the above state-machine diagram from the world
- of information into the world of data.
-
-@table*[ @list[ @t{@image["door-sim.png"]} @t{@image["door-real.png"]}] ]
-
-For completeness, we have repeated the original diagram on the right so
-that you can see which computer interaction corresponds to which domain
-action. 
-
-@; -----------------------------------------------------------------------------
-@subsection{Simulating a Door: Functions}
-
-Our analysis and data definition leaves us with three functions to design: 
-
-@itemize[
-
-@item{@emph{automatic-closer}, which closes the time during one tick;}
-
-@item{@emph{door-actions}, which manipulates the time in response to
-pressing a key; and}
-
-@item{@emph{render}, which translates the current state of the door into
-a visible scene.}
-
-]
-
-Let's start with @emph{automatic-closer}. Since @emph{automatic-closer}
-acts as the @scheme[on-tick] handler, we get its contract, 
-and it is easy to refine the purpose statement, too:
-
-@(begin
-#reader scribble/comment-reader
-(schemeblock
-;; automatic-closer : WorldState -> WorldState
-;; closes an open door over the period of one tick 
-(define (automatic-closer state-of-door) ...)
-))
-
- Making up examples is trivial when the world can only be in one of three
- states: 
-
-@table*[
-	@list[@t{ given state } @t{ desired state }]
-        @list[@t{ @scheme['locked] } @t{ @scheme['locked] }]
-        @list[@t{ @scheme['closed] } @t{ @scheme['closed] }]
-        @list[@t{ @scheme['open]   } @t{ @scheme['closed] }]
-]
-
-@(begin
-#reader scribble/comment-reader
-(schemeblock
-;; automatic-closer : WorldState -> WorldState
-;; closes an open door over the period of one tick 
-
-(check-expect (automatic-closer 'locked) 'locked)
-(check-expect (automatic-closer 'closed) 'closed)
-(check-expect (automatic-closer 'open) 'closed)
-
-(define (automatic-closer state-of-door) ...)
-))
-
- The template step demands a conditional with three clauses: 
-
-@(begin
-#reader scribble/comment-reader
-(schemeblock
-(define (automatic-closer state-of-door)
-  (cond
-    [(symbol=? 'locked state-of-door) ...]
-    [(symbol=? 'closed state-of-door) ...]
-    [(symbol=? 'open state-of-door) ...]))
-))
-
- The examples basically dictate what the outcomes of the three cases must
- be:
-
-@(begin
-#reader scribble/comment-reader
-(schemeblock
-(define (automatic-closer state-of-door)
-  (cond
-    [(symbol=? 'locked state-of-door) 'locked]
-    [(symbol=? 'closed state-of-door) 'closed]
-    [(symbol=? 'open state-of-door) 'closed]))
-))
-
- Don't forget to run the example-tests. 
-
-For the remaining three arrows of the diagram, we design a function that
- reacts to the three chosen keyboard events. As mentioned, functions that
- deal with keyboard events consume both a world and a keyevent:
-
-@(begin
-#reader scribble/comment-reader
-(schemeblock
-;; door-actions : WorldState @tech{KeyEvent} -> WorldState
-;; key events simulate actions on the door 
-(define (door-actions s k) ...)
-))
-
-@table*[
-	@list[@t{ given state } @t{ given keyevent } @t{ desired state }]
- 
-@list[ @t{ @scheme['locked] } @t{ @scheme[#\u]}     @t{@scheme['closed]}]
-@list[ @t{ @scheme['closed] } @t{ @scheme[#\l]}     @t{@scheme['locked]}]
-@list[ @t{ @scheme['closed] } @t{ @scheme[#\space]} @t{@scheme['open]  }]
-@list[ @t{ @scheme['open] }   @t{  --- }             @t{@scheme['open]  }]]
-
- The examples combine what the above picture shows and the choices we made
- about mapping actions to keyboard events. 
-
-From here, it is straightforward to turn this into a complete design:
- 
-@schemeblock[
-(define (door-actions s k)
-  (cond
-    [(and (symbol=? 'locked s) (key=? #\u k)) 'closed]
-    [(and (symbol=? 'closed s) (key=? #\l k)) 'locked]
-    [(and (symbol=? 'closed s) (key=? #\space k)) 'open]
-    [else s]))
-
-(check-expect (door-actions 'locked #\u) 'closed)
-(check-expect (door-actions 'closed #\l) 'locked)
-(check-expect (door-actions 'closed #\space) 'open)
-(check-expect (door-actions 'open 'any) 'open)
-(check-expect (door-actions 'closed 'any) 'closed)
-]
-
-Last but not least we need a function that renders the current state of the
-world as a scene. For simplicity, let's just use a large text for this
-purpose:
-
-@(begin
-#reader scribble/comment-reader
-(schemeblock
-;; render : WorldState -> @tech{scene}
-;; translate the current state of the door into a large text 
-(define (render s)
-  (text (symbol->string s) 40 'red))
-
-(check-expect (render 'closed) (text "closed" 40 'red))
-))
- The function @scheme[symbol->string] translates a symbol into a string,
- which is needed because @scheme[text] can deal only with the latter, not
- the former. A look into the language documentation revealed that this
- conversion function exists, and so we use it. 
-
-Once everything is properly designed, it is time to @emph{run} the
-program. In the case of the universe teachpack, this means we must specify
-which function takes care of tick events, key events, and drawing: 
-
-@schemeblock[
-(big-bang 'locked
-          (on-tick automatic-closer)
-	  (on-key door-actions)
-	  (on-draw render))
-]
- 
-Now it's time for you to collect the pieces and run them in DrScheme to see
-whether it all works. 
-
-Exercise: Design a data representation that closes the door over two (or
-three or more) clock ticks instead of one. 
 
 @; -----------------------------------------------------------------------------
 @section[#:tag "world2"]{The World is not Enough} 
@@ -997,7 +818,7 @@ Understanding the server's event handling functions demands several data
 @defproc[(iworld=? [u iworld?][v iworld?]) boolean?]{
  compares two @emph{iworld}s for equality.}
 
-@defproc[(iworld-name [w iworld?]) symbol?]{
+@defproc[(iworld-name [w iworld?]) string?]{
  extracts the name from a @emph{iworld} structure.}
 
 @defthing[iworld1 iworld?]{an @emph{iworld} for testing your programs}
@@ -1014,19 +835,18 @@ for universe programs. For example:
 }
 
 @item{Each event handler produces a @emph{bundle}, which is a structure
- that contains the list of @emph{iworld}s that the universe must track; the
- @tech{server}'s remaining state; and a list of mails to other
- worlds: 
+ that contains the @tech{server}'s state, a list of mails to other worlds, 
+ and the list of @emph{iworld}s that are to be disconnected. 
 
 @defproc[(bundle? [x any/c]) boolean?]{
  determines whether @scheme[x] is a @emph{bundle}.}
 
-@defproc[(make-bundle [low (listof iworld?)] [state any/c] [mails (listof mail?)]) bundle?]{
- creates a @emph{bundle} from a list of iworlds, a piece of data that
- represents a server state, and a list of mails.}
+@defproc[(make-bundle [state any/c] [mails (listof mail?)] [low (listof iworld?)]) bundle?]{
+ creates a @emph{bundle} from a piece of data that
+ represents a server state, a list of mails, and a list of iworlds.}
 
-If an event handler returns a bundle with an empty list of worlds, the
-universe server is restarted in the initial state. 
+If disconnecting from these worlds results in an empty list of
+participants, the universe server is restarted in the initial state.
 
 A @emph{mail} represents a message from an event handler to a world. The
 teachpack provides only a predicate and a constructor for these structures:
@@ -1061,7 +881,7 @@ The @tech{server} itself is created with a description that includes the
 
 @defform/subs[#:id universe
               #:literals 
-	      (on-new on-msg on-tick on-disconnect to-string)
+	      (on-new on-msg on-tick on-disconnect to-string check-with)
               (universe state-expr clause ...)
               ([clause
 		 (on-new new-expr)
@@ -1070,6 +890,7 @@ The @tech{server} itself is created with a description that includes the
 		 (on-tick tick-expr rate-expr)
 		 (on-disconnect dis-expr)
 		 (to-string render-expr)
+		 (check-with universe?-expr)
 		 ])]{
 
 creates a server with a given state, @scheme[state-expr]. The
@@ -1095,31 +916,28 @@ The mandatory clauses of a @scheme[universe] server description are
 @item{
  @defform[(on-new new-expr)
           #:contracts
-          ([new-expr (-> [listof iworld?] (unsyntax @tech{UniverseState}) iworld? bundle?)])]{
+          ([new-expr (-> (unsyntax @tech{UniverseState}) iworld? bundle?)])]{
  tell DrScheme to call the function @scheme[new-expr] every time another world joins the
- universe. The event handler is called on the current list of iworlds and the
+ universe. The event handler is called with the current state and the
  joining iworld, which isn't on the list yet. In particular, the handler may
  reject a @tech{world} program from participating in a @tech{universe},
- simply by not including it in the resulting @scheme[bundle] structure. The
- handler may still send one message to the world that attempts to join. }
+ by simply including it in the resulting @scheme[bundle] structure (third field).}
 }
 
 @item{
  @defform[(on-msg msg-expr)
           #:contracts
-          ([msg-expr (-> [listof iworld?] (unsyntax @tech{UniverseState}) iworld? sexp? bundle?)])]{
-
- tell DrScheme to apply @scheme[msg-expr] to the list of currently
- participating worlds @scheme[low], the current state of the universe, the world
+          ([msg-expr (-> (unsyntax @tech{UniverseState}) iworld? sexp? bundle?)])]{
+ tell DrScheme to apply @scheme[msg-expr] to the current state of the universe, the world
  @scheme[w] that sent the message, and the message itself. Note that
  @scheme[w] is guaranteed to be on the list @scheme[low]. 
  }
 }]
- All proper event handlers produce a @emph{bundle}. The list of worlds in
- this @emph{bundle} becomes the server's list of worlds, meaning that only
- the server listens only to messages from "approved" worlds.  The state in
- the bundle is safe-guarded by the server until the next event, and the
- mails are broadcast as specified.
+ All proper event handlers produce a @emph{bundle}.  The state in the
+ bundle is safe-guarded by the server until the next event, and the mails
+ are broadcast as specified.  The list of iworlds in the third field of the
+ bundle is removed from the list of participants from which to expect
+ messages. 
 
 The following picture provides a graphical overview of the server's workings. 
 
@@ -1137,7 +955,7 @@ optional handlers:
 @item{
 @defform/none[(on-tick tick-expr)
               #:contracts
-              ([tick-expr (-> [listof iworld?] (unsyntax @tech{UniverseState}) bundle?)])]{
+              ([tick-expr (-> (unsyntax @tech{UniverseState}) bundle?)])]{
  tell DrScheme to apply @scheme[tick-expr] to the current list of
  participating worlds and the current state of the
  universe. 
@@ -1145,7 +963,7 @@ optional handlers:
 
 @defform/none[(on-tick tick-expr rate-expr)
               #:contracts
-              ([tick-expr (-> [listof iworld?] (unsyntax @tech{UniverseState}) bundle?)]
+              ([tick-expr (-> (unsyntax @tech{UniverseState}) bundle?)]
                [rate-expr natural-number/c])]{ 
  tell DrScheme to apply @scheme[tick-expr] as above but use the specified
  clock tick rate instead of the default.
@@ -1156,7 +974,7 @@ optional handlers:
 @item{
  @defform[(on-disconnect dis-expr)
           #:contracts
-          ([dis-expr (-> [listof iworld?] (unsyntax @tech{UniverseState}) iworld? bundle?)])]{
+          ([dis-expr (-> (unsyntax @tech{UniverseState}) iworld? bundle?)])]{
  tell DrScheme to invoke @scheme[dis-expr] every time a participating
  @tech{world} drops its connection to the server. The first two arguments
  are the current list of participating worlds and the state of the
@@ -1167,13 +985,58 @@ optional handlers:
 @item{
  @defform[(to-string render-expr)
           #:contracts
-          ([render-expr (-> [listof iworld?] (unsyntax @tech{UniverseState}) string?)])]{
+          ([render-expr (-> (unsyntax @tech{UniverseState}) string?)])]{
  tell DrScheme to render the state of the universe after each event and to
  display this string in the universe console. 
  }
 }
 
+@item{
+ @defform/none[(check-with universe?-expr)
+          #:contracts
+          ([universe?-expr (-> Any boolean?)])]{
+ ensure that what the event handlers produce is really an element of
+ @tech{UniverseState}.}
+}
+
 ]
+
+@subsection{Exploring a Universe}
+
+In order to explore the workings of a universe, it is necessary to launch a
+ server and several world programs on one and the same computer. We
+ recommend launching one server out of one DrScheme tab and as many worlds
+ as necessary out of second lab. For the latter, the teachpack provides a
+ special form. 
+
+@defform[(launch-many-worlds expression ...)]{
+ evaluates all sub-expressions in parallel. Typically each sub-expression
+ is an application of a function that evaluates a @scheme[big-bang]
+ expression. When all worlds have stopped, the expression returns all final
+ worlds in order.}
+
+Once you have designed a world program, add a function definition
+ concerning @scheme[big-bang] to the end of the tab: 
+@(begin
+#reader scribble/comment-reader
+(schemeblock
+;; String -> World 
+(define (main n)
+  (big-bang ... (name n) ...))
+))
+ Then in DrScheme's Interactions area, use @scheme[launch-with-many-worlds]
+ to create several distinctively named worlds: 
+@(begin
+#reader scribble/comment-reader
+(schemeblock
+> (launch-with-many-worlds (main "matthew") (main "kathi") (main "h3") )
+10
+25
+33
+))
+ The three worlds can then interact via a server. When all of them have
+ stopped, they produce the final states, here @scheme[10], @scheme[25], and
+ @scheme[33]. 
 
 @; -----------------------------------------------------------------------------
 @section[#:tag "universe-sample"]{A First Sample Universe} 
@@ -1294,17 +1157,17 @@ translates into the design of two functions with the following headers,
 #reader scribble/comment-reader
 (schemeblock
 ;; Bundle is
-;;   (make-bundle [Listof iworld?] UniverseState [Listof mail?])
+;;   (make-bundle UniverseState [Listof mail?] [Listof iworld?])
 
-;; [Listof iworld?] UniverseState iworld? -> Bundle 
-;; compute next list of worlds and new @tech{UniverseState} 
-;; when world w is joining the universe, which is in state s; 
-(define (add-world s w) ...)
+;; UniverseState iworld? -> Bundle 
+;; next list of worlds when world @scheme[iw] is joining 
+;; the universe in state @scheme[s]
+(define (add-world s iw) ...)
 
-;; [Listof iworld?] UniverseState iworld? W2U -> Bundle 
-;; compute next list of worlds and new @tech{UniverseState} 
-;; when world w is sending message m to universe in state s
-(define (process s p m) ...)
+;; UniverseState iworld? W2U -> Bundle 
+;; next list of worlds when world @scheme[iw] is sending message @scheme[m] to 
+;; the universe in state @scheme[s]
+(define (process s iw m) ...)
 ))
 
 Finally, we must also decide how the messages affect the states of the
@@ -1419,15 +1282,15 @@ The preceding subsection dictates that our server program starts like this:
 #reader scribble/comment-reader
 [schemeblock
 ;; Result is 
-;;   (make-bundle [Listof world?] '* (list (make-mail world? GoMessage)))
+;;   (make-bundle [Listof iworld?] (list (make-mail iworld? GoMessage)) '())
 
-;; [Listof world?] UniverseState world? -> Result 
-;; add world w to the universe, when server is in state u
-(define (add-world u w) ...)
+;; [Listof iworld?] iworld? -> Result 
+;; add world @scheme[iw] to the universe, when server is in state @scheme[u]
+(define (add-world u @scheme[iw]) ...)
 
-;; [Listof world?] UniverseState world? StopMessage -> Result
-;; world w sent message m when server is in state u 
-(define (switch u w m) ...)
+;; [Listof iworld?] iworld? StopMessage -> Result
+;; world @scheme[iw] sent message @scheme[m] when server is in state @scheme[u] 
+(define (switch u iw m) ...)
 ])
 
 Although we could have re-used the generic contracts from this
@@ -1443,17 +1306,17 @@ The second step of the design recipe calls for functional examples:
 [schemeblock
 ;; an obvious example for adding a world: 
 (check-expect
-  (add-world '() '* world1) 
+  (add-world '() world1) 
   (make-bundle (list world1)
-               '*
-               (list (make-mail world1 'it-is-your-turn))))
+               (list (make-mail world1 'it-is-your-turn))
+	       '()))
 
 ;; an example for receiving a message from the active world:
 (check-expect
- (switch (list world1 world2) '* world1 'done)
+ (switch (list world1 world2) world1 'done)
  (make-bundle (list world2 world1)
-              '*
-              (list (make-mail world2 'it-is-your-turn))))
+              (list (make-mail world2 'it-is-your-turn))
+	      '()))
 ])
 
  Note that our protocol analysis dictates this behavior for the two
@@ -1475,8 +1338,8 @@ The protocol tells us that @emph{add-world} just adds the given
 (define (add-world univ state wrld)
   (local ((define univ* (append univ (list wrld))))
     (make-bundle univ*
-                 '*
-                 (list (make-mail (first univ*) 'it-is-your-turn)))))
+                 (list (make-mail (first univ*) 'it-is-your-turn))
+		 '())))
 ])
 
 Because @emph{univ*} contains at least @emph{wrld}, it is acceptable to
@@ -1492,11 +1355,11 @@ Similarly, the protocol says that when @emph{switch} is invoked because a
 @(begin
 #reader scribble/comment-reader
 [schemeblock
-(define (switch univ state wrld m)
+(define (switch univ wrld m)
   (local ((define univ* (append (rest univ) (list (first univ)))))
     (make-bundle univ*
-                 '*
-                 (list (make-mail (first univ*) 'it-is-your-turn)))))
+                 (list (make-mail (first univ*) 'it-is-your-turn))
+		 '())))
 ])
 
  As before, appending the first world to the end of the list guarantees
@@ -1505,7 +1368,7 @@ Similarly, the protocol says that when @emph{switch} is invoked because a
 
 Start the server now. 
 
- @schemeblock[(universe '* (on-new add-world) (on-msg switch))]
+ @schemeblock[(universe '() (on-new add-world) (on-msg switch))]
           
 Exercise: The function definition simply assumes that @emph{wrld} is
  @scheme[world=?] to @scheme[(first univ)] and that the received message

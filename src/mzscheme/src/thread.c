@@ -220,7 +220,7 @@ static int missed_context_switch = 0;
 static int have_activity = 0;
 int scheme_active_but_sleeping = 0;
 static int thread_ended_with_activity;
-int scheme_no_stack_overflow;
+THREAD_LOCAL int scheme_no_stack_overflow;
 
 static int needs_sleep_cancelled;
 
@@ -1331,15 +1331,21 @@ static void managed_object_gone(void *o, void *mr)
     remove_managed(mr, o, NULL, NULL);
 }
 
+int scheme_custodian_is_available(Scheme_Custodian *m)
+{
+  if (m->shut_down)
+    return 0;
+  return 1;
+}
+
 void scheme_custodian_check_available(Scheme_Custodian *m, const char *who, const char *what)
 {
   if (!m)
     m = (Scheme_Custodian *)scheme_get_param(scheme_current_config(), MZCONFIG_CUSTODIAN);
   
-  if (m->shut_down) {
+  if (!scheme_custodian_is_available(m))
     scheme_arg_mismatch(who, "the custodian has been shut down: ",
-			(Scheme_Object *)m);
-  }
+                        (Scheme_Object *)m);
 }
 
 Scheme_Custodian_Reference *scheme_add_managed(Scheme_Custodian *m, Scheme_Object *o, 
@@ -5180,8 +5186,8 @@ typedef struct Evt {
   int can_redirect;
 } Evt;
 
-static int evts_array_size;
-static Evt **evts;
+static THREAD_LOCAL int evts_array_size;
+static THREAD_LOCAL Evt **evts;
 
 void scheme_add_evt(Scheme_Type type,
 		    Scheme_Ready_Fun ready, 
@@ -7400,13 +7406,26 @@ static void done_with_GC()
 #ifdef MZ_PRECISE_GC
 static void inform_GC(int major_gc, long pre_used, long post_used)
 {
-  if (scheme_main_logger)
-    scheme_log(scheme_main_logger,
-               SCHEME_LOG_DEBUG, 0,
-               "GC [%s] at %ld bytes; %ld collected in %ld msec",
-               (major_gc ? "major" : "minor"),
-               pre_used, pre_used - post_used,
-               end_this_gc_time - start_this_gc_time);
+  if (scheme_main_logger) {
+    /* Don't use scheme_log(), because it wants to allocate a buffer
+       based on the max value-print width, and we may not be at a
+       point where parameters are available. */
+    char buf[128];
+    long buflen;
+
+    sprintf(buf,
+            "GC [%s] at %ld bytes; %ld collected in %ld msec",
+            (major_gc ? "major" : "minor"),
+            pre_used, pre_used - post_used,
+            end_this_gc_time - start_this_gc_time);
+    buflen = strlen(buf);
+
+    scheme_log_message(scheme_main_logger,
+                       SCHEME_LOG_DEBUG,
+                       buf, buflen,
+                       NULL);
+  }
+
 }
 #endif
 

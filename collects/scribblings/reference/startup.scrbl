@@ -133,12 +133,11 @@ flags:
         @nonterm{file} : @scheme[require]s @nonterm{file}.}
 
   @item{@FlagFirst{l} @nonterm{path} or @DFlagFirst{lib}
-       @nonterm{path} : @scheme[require]s @scheme[(lib #,
-       @nontermstr{path})].}
+       @nonterm{path} : @scheme[require]s @scheme[(lib
+       @#,nontermstr{path})].}
 
-  @item{@FlagFirst{p} @nonterm{file} @nonterm{u} @nonterm{path} :
-       @scheme[require]s @scheme[(planet #, @nontermstr{file}
-       #, @nontermstr{user} #, @nontermstr{pkg})].
+  @item{@FlagFirst{p} @nonterm{package} :
+       @scheme[require]s @scheme[(planet @#,nontermstr{package})].
 
        @margin-note{Despite its name, @DFlag{script} is not usually
        used for Unix scripts. See @guidesecref["scripts"] for more
@@ -227,8 +226,8 @@ flags:
         @scheme[textual-read-eval-print-loop] instead of
         @scheme[graphical-read-eval-print-loop].}
 
-  @item{@FlagFirst{I} @nonterm{path} : Sets @scheme[(lib #,
-        @nontermstr{path})] as the path to @scheme[require] to initialize
+  @item{@FlagFirst{I} @nonterm{path} : Sets @scheme[(lib
+        @#,nontermstr{path})] as the path to @scheme[require] to initialize
         the namespace, unless namespace initialization is disabled.}
 
   @item{@FlagFirst{X} @nonterm{dir} or @DFlagFirst{collects}

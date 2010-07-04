@@ -19,8 +19,8 @@ the least-used characters in Scheme code.
 You can use the reader via Scheme's @schemefont{#reader} form:
 
 @schemeblock[
- #, @schemefont|{
-      #reader scribble/reader @foo{This is free-form text!}
+ @#,schemefont|{
+     #reader scribble/reader @foo{This is free-form text!}
 }|]
 
 or use the @scheme[at-exp] meta-language as described in
@@ -60,10 +60,10 @@ function to switch the current readtable to a readtable that parses
 Informally, the concrete syntax of @"@"-forms is
 
 @schemeblock[
- #, @BNF-seq[@litchar["@"]
-             @nonterm{cmd}
-             @litchar{[} @kleenestar{@nonterm{datum}} @litchar{]}
-             @litchar["{"] @kleenestar{@nonterm{text-body}} @litchar["}"]]
+ @#,BNF-seq[@litchar["@"]
+            @nonterm{cmd}
+            @litchar{[} @kleenestar{@nonterm{datum}} @litchar{]}
+            @litchar["{"] @kleenestar{@nonterm{text-body}} @litchar["}"]]
 ]
 
 where all three parts after @litchar["@"] are optional, but at least
@@ -71,7 +71,7 @@ one should be present.  (Note that spaces are not allowed between the
 three parts.)  Roughly, a form matching the above grammar is read as
 
 @schemeblock[
-  (#, @nonterm{cmd} #, @kleenestar{@nonterm{datum}} #, @kleenestar{@nonterm{parsed-body}})
+  (@#,nonterm{cmd} @#,kleenestar{@nonterm{datum}} @#,kleenestar{@nonterm{parsed-body}})
 ]
 
 where @nonterm{parsed-body} is the translation of each
@@ -255,6 +255,7 @@ wrapping the @italic{whole} expression.
 
 @scribble-examples|==={
   @`',@foo{blah}
+  @#`#'#,@foo{blah}
 }===|
 
 When writing Scheme code, this means that @litchar|{@`',@foo{blah}}|
@@ -288,9 +289,9 @@ comment.  There are two comment forms, one for arbitrary-text and
 possibly nested comments, and another one for line comments:
 
 @schemeblock[
-#, @BNF-seq[@litchar["@;{"] @kleenestar{@nonterm{any}} @litchar["}"]]
+@#,BNF-seq[@litchar["@;{"] @kleenestar{@nonterm{any}} @litchar["}"]]
 
-#, @BNF-seq[@litchar["@;"] @kleenestar{@nonterm{anything-else-without-newline}}]
+@#,BNF-seq[@litchar["@;"] @kleenestar{@nonterm{anything-else-without-newline}}]
 ]
 
 In the first form, the commented body must still parse correctly; see
@@ -619,12 +620,12 @@ can be used to identify newlines in the original @nonterm{text-body}.
 @; FIXME: unfortunate code duplication (again):
 @interaction[
 (eval:alts
-  (let ([nl (car #, @tt["@'{"]
-                 #, @tt["  }"])])
+  (let ([nl (car @#,tt["@'{"]
+                 @#,tt["  }"])])
     (for-each (lambda (x) (display (if (eq? x nl) "\n... " x)))
-              #, @tt["@`{foo"]
-              #, @elem[@tt["   @"] @scheme[,@(list "bar" "\n" "baz")]]
-              #, @tt["   blah}}"])
+              @#,tt["@`{foo"]
+              @#,elem[@tt["   @"] @scheme[,@(list "bar" "\n" "baz")]]
+              @#,tt["   blah}}"])
     (newline))
   (let ([nl (car @'{
                    })])
@@ -784,7 +785,7 @@ example, implicitly quoted keywords:
                    (cddr xs))))])))
   (eval:alts
    (code:line
-    #, @tt["@foo[x 1 y (* 2 3)]{blah}"])
+    @#,tt["@foo[x 1 y (* 2 3)]{blah}"])
     ;; Unfortunately, expressions are preserved by `def+int'
     ;; using `quote', not `quote-syntax' (which would create all sorts
     ;; or binding trouble), so we manually re-attach the property:
@@ -826,10 +827,10 @@ is an example of this.
                                      rst)])))))]))
   (eval:alts
    (code:line
-    #, @tt["@verb[string-append]{"]
-    #, @tt["  foo"]
-    #, @tt["    bar"]
-    #, @tt["}"])
+    @#,tt["@verb[string-append]{"]
+    @#,tt["  foo"]
+    @#,tt["    bar"]
+    @#,tt["}"])
    @verb[string-append]{
      foo
        bar
@@ -844,13 +845,13 @@ is an example of this.
 another language that is specified immediate after
 @schememodname[at-exp].}
 
-For example, @scheme[#, @hash-lang[] at-exp scheme/base] adds @"@"-reader
+For example, @scheme[@#,hash-lang[] at-exp scheme/base] adds @"@"-reader
 support to @scheme[scheme/base], so that
 
 @schememod[
 at-exp scheme/base
 
-(define (greet who) #, @elem{@tt["@"]@scheme[string-append]@schemeparenfont["{"]@schemevalfont{Hello, }@tt["@|"]@scheme[who]@tt["|"]@schemevalfont{.}@schemeparenfont["}"]})
+(define (greet who) @#,elem{@tt["@"]@scheme[string-append]@schemeparenfont["{"]@schemevalfont{Hello, }@tt["@|"]@scheme[who]@tt["|"]@schemevalfont{.}@schemeparenfont["}"]})
 (greet "friend")]
 
 reports @scheme["Hello, friend."].
@@ -878,7 +879,7 @@ provides direct Scribble reader functionality for advanced needs.}
          (or/c syntax? eof-object?)]{
 These procedures implement the Scribble reader.  They do so by
 constructing a reader table based on the current one, and using that
-in reading.
+for reading.
 }
 
 @defproc[(read-inside [in input-port? (current-input-port)]) any]{}
@@ -891,14 +892,16 @@ Useful for implementing languages that are textual by default (see
 @filepath{docreader.ss} for example).
 }
 
-@defproc[(make-at-readtable [#:readtable readtable readtable? (current-readtable)]
-                            [#:command-char command-char character? #\@]
-                            [#:start-inside? start-inside? any/c #f]
-                            [#:datum-readtable datum-readtable 
-                                               (or/c readtable? boolean? 
-                                                     (readtable? . -> . readtable?)) 
-                                               #t]
-                            [#:syntax-post-processor syntax-post-proc (syntax? . -> . syntax?) values])
+@defproc[(make-at-readtable
+          [#:readtable readtable readtable? (current-readtable)]
+          [#:command-char command-char character? #\@]
+          [#:datum-readtable datum-readtable
+                             (or/c readtable? boolean?
+                                              (readtable? . -> . readtable?))
+                             #t]
+          [#:syntax-post-processor syntax-post-proc
+                                   (syntax? . -> . syntax?)
+                                   values])
           readtable?]{
 
 Constructs an @"@"-readtable.  The keyword arguments can customize the
@@ -934,16 +937,38 @@ resulting reader in several ways:
           [_else (error "@ forms must have a body")])))
   ]}
 
-@item{@scheme[start-inside?] --- if true, creates a readtable for
-use starting in text mode, instead of S-expression mode.}
-
 ]}
+
+@defproc[(make-at-reader [#:syntax? syntax? #t] [#:inside? inside? #f] ...)
+          procedure?]{
+Constructs a variant of a @"@"-readtable.  The arguments are the same
+as in @scheme[make-at-readtable], with two more that determine the
+kind of reader function that will be created: @scheme[syntax?] chooses
+between a @scheme[read]- or @scheme[read-syntax]-like function, and
+@scheme[inside?] chooses a plain reader or an @schemeid[-inside]
+variant.
+
+The resulting function has a different contract and action based on
+these inputs.  The expected inputs are as in @scheme[read] or
+@scheme[read-syntax] depending on @scheme[syntax?]; the function will
+read a single expression or, if @scheme[inside?] is true, the whole
+input; it will return a syntactic list of expressions rather than a
+single one in this case.
+
+Note that @scheme[syntax?] defaults to @scheme[#t], as this is the
+more expected common case when you're dealing with concrete-syntax
+reading.
+
+Note that if @scheme[syntax?] is true, the @scheme[read]-like function
+is constructed by simply converting a syntax result back into a datum.}
 
 @defproc[(use-at-readtable ...) void?]{
 
 Passes all arguments to @scheme[make-at-readtable], and installs the
 resulting readtable using @scheme[current-readtable]. It also enables
-line counting for the current input-port via @scheme[port-count-lines!].}
+line counting for the current input-port via @scheme[port-count-lines!].
+
+This is mostly useful for playing with the Scribble syntax on the REPL.}
 
 @; *** End reader-import section ***
 ))]))

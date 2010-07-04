@@ -195,8 +195,9 @@ static Scheme_Bucket_Table *initial_toplevel;
 static Scheme_Object *empty_self_modidx;
 static Scheme_Object *empty_self_modname;
 
-static Scheme_Bucket_Table *starts_table;
+static THREAD_LOCAL Scheme_Bucket_Table *starts_table;
 
+/* caches */
 static THREAD_LOCAL Scheme_Modidx *modidx_caching_chain;
 static THREAD_LOCAL Scheme_Object *global_shift_cache;
 #define GLOBAL_SHIFT_CACHE_SIZE 40
@@ -369,15 +370,15 @@ void scheme_init_module(Scheme_Env *env)
   GLOBAL_PRIM_W_ARITY("module->namespace",                module_to_namespace,        1, 1, env);
   GLOBAL_PRIM_W_ARITY("module->language-info",            module_to_lang_info,        1, 1, env);
   GLOBAL_PRIM_W_ARITY("module-path?",                     is_module_path,             1, 1, env);
-
-  REGISTER_SO(starts_table);
-  starts_table = scheme_make_weak_equal_table();
 }
 
 void scheme_init_module_resolver(void)
 {
   Scheme_Object *o;
   Scheme_Config *config;
+
+  REGISTER_SO(starts_table);
+  starts_table = scheme_make_weak_equal_table();
 
   config = scheme_current_config();
 
@@ -2359,7 +2360,7 @@ void scheme_prep_namespace_rename(Scheme_Env *menv)
 	/* Local, provided: */
 	for (i = 0; i < m->me->rt->num_provides; i++) {
 	  if (SCHEME_FALSEP(m->me->rt->provide_srcs[i])) {
-	    name = m->me->rt->provides[i];
+	    name = m->me->rt->provide_src_names[i];
 	    scheme_extend_module_rename(one_rn, m->self_modidx, name, name, m->self_modidx, name, 0, 
                                         scheme_make_integer(0), NULL, NULL, 0);
 	  }
@@ -2734,7 +2735,9 @@ Scheme_Object *scheme_intern_resolved_module_path_worker(Scheme_Object *o)
   rmp->type = scheme_resolved_module_path_type;
   SCHEME_PTR_VAL(rmp) = o;
 
+  scheme_start_atomic();
   b = scheme_bucket_from_table(modpath_table, (const char *)rmp);
+  scheme_end_atomic_no_swap();
   if (!b->val)
     b->val = scheme_true;
 
@@ -2748,14 +2751,9 @@ Scheme_Object *scheme_intern_resolved_module_path_worker(Scheme_Object *o)
 Scheme_Object *scheme_intern_resolved_module_path(Scheme_Object *o)
 {
 #if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
-  mz_proc_thread *self;
-  self = proc_thread_self;
-  if ( scheme_master_proc_thread && scheme_master_proc_thread != proc_thread_self ) {
-    int return_msg_type;
-    void *return_payload;
-    pt_mbox_send_recv(scheme_master_proc_thread->mbox, 1, o, self->mbox, &return_msg_type, &return_payload);
-    return (Scheme_Object*) return_payload;
-  }
+  void *return_payload;
+  return_payload = scheme_master_fast_path(1, o);
+  return (Scheme_Object*) return_payload;
 #endif
   return scheme_intern_resolved_module_path_worker(o);
 }
@@ -5761,27 +5759,34 @@ static Scheme_Object *add_req(Scheme_Object *imods, Scheme_Object *requires)
   return requires;
 }
 
-static Scheme_Object *add_lifted_defn(Scheme_Object *data, Scheme_Object **_id, Scheme_Object *expr, Scheme_Comp_Env *_env)
+static Scheme_Object *add_lifted_defn(Scheme_Object *data, Scheme_Object **_ids, Scheme_Object *expr, Scheme_Comp_Env *_env)
 {
   Scheme_Comp_Env *env;
-  Scheme_Object *self_modidx, *rn, *name, *id;
+  Scheme_Object *self_modidx, *rn, *name, *ids, *id, *new_ids = scheme_null;
 
   env = (Scheme_Comp_Env *)SCHEME_VEC_ELS(data)[0];
   self_modidx = SCHEME_VEC_ELS(data)[1];
   rn = SCHEME_VEC_ELS(data)[2];
+
+  for (ids = *_ids; !SCHEME_NULLP(ids); ids = SCHEME_CDR(ids)) {
+    id = SCHEME_CAR(ids);
   
-  name = scheme_tl_id_sym(env->genv, *_id, scheme_false, 2, NULL, NULL);
+    name = scheme_tl_id_sym(env->genv, id, scheme_false, 2, NULL, NULL);
 
-  /* Create the bucket, indicating that the name will be defined: */
-  scheme_add_global_symbol(name, scheme_undefined, env->genv);
+    /* Create the bucket, indicating that the name will be defined: */
+    scheme_add_global_symbol(name, scheme_undefined, env->genv);
   
-  /* Add a renaming: */
-  scheme_extend_module_rename(rn, self_modidx, name, name, self_modidx, name, 0, NULL, NULL, NULL, 0);
+    /* Add a renaming: */
+    scheme_extend_module_rename(rn, self_modidx, name, name, self_modidx, name, 0, NULL, NULL, NULL, 0);
 
-  id = scheme_add_rename(*_id, rn);
-  *_id = id;
+    id = scheme_add_rename(id, rn);
+    new_ids = cons(id, new_ids);
+  }
 
-  return scheme_make_lifted_defn(scheme_sys_wraps(env), _id, expr, _env);
+  new_ids = scheme_reverse(new_ids);
+  *_ids = new_ids;
+
+  return scheme_make_lifted_defn(scheme_sys_wraps(env), _ids, expr, _env);
 }
 
 static Scheme_Object *make_require_form(Scheme_Object *module_path, long phase, Scheme_Object *mark)
@@ -6065,8 +6070,11 @@ static Scheme_Object *do_module_begin(Scheme_Object *form, Scheme_Comp_Env *env,
       p = (maybe_has_lifts 
            ? scheme_frame_get_end_statement_lifts(xenv) 
            : scheme_null);
+      prev_p = (maybe_has_lifts 
+                ? scheme_frame_get_provide_lifts(xenv) 
+                : scheme_null);
       scheme_frame_captures_lifts(xenv, scheme_make_lifted_defn, scheme_sys_wraps(xenv), 
-                                  p, lift_ctx, req_data);
+                                  p, lift_ctx, req_data, prev_p);
       maybe_has_lifts = 1;
 
       {
@@ -6111,8 +6119,12 @@ static Scheme_Object *do_module_begin(Scheme_Object *form, Scheme_Comp_Env *env,
 	  fm = scheme_flatten_begin(e, fm);
 	  SCHEME_EXPAND_OBSERVE_SPLICE(observer, fm);
 	  if (SCHEME_STX_NULLP(fm)) {
+            e = scheme_frame_get_provide_lifts(xenv);
+            e = scheme_reverse(e);
             fm = scheme_frame_get_end_statement_lifts(xenv);
             fm = scheme_reverse(fm);
+            if (!SCHEME_NULLP(e))
+              fm = scheme_append(fm, e);
             SCHEME_EXPAND_OBSERVE_MODULE_LIFT_END_LOOP(observer, fm);
             maybe_has_lifts = 0;
             if (SCHEME_NULLP(fm)) {
@@ -6223,7 +6235,8 @@ static Scheme_Object *do_module_begin(Scheme_Object *form, Scheme_Comp_Env *env,
 	  scheme_prepare_exp_env(env->genv);
 	  scheme_prepare_compile_env(env->genv->exp_env);
 	  eenv = scheme_new_comp_env(env->genv->exp_env, env->insp, 0);
-          scheme_frame_captures_lifts(eenv, NULL, NULL, scheme_false, scheme_false, req_data);
+          scheme_frame_captures_lifts(eenv, NULL, NULL, scheme_false, scheme_false, 
+                                      req_data, scheme_false);
 
 	  oenv = (for_stx ? eenv : env);
 	  
@@ -6402,8 +6415,12 @@ static Scheme_Object *do_module_begin(Scheme_Object *form, Scheme_Comp_Env *env,
 
     /* If we're out of declarations, check for lifted-to-end: */
     if (SCHEME_STX_NULLP(fm) && maybe_has_lifts) {
+      e = scheme_frame_get_provide_lifts(xenv);
+      e = scheme_reverse(e);
       fm = scheme_frame_get_end_statement_lifts(xenv);
       fm = scheme_reverse(fm);
+      if (!SCHEME_NULLP(e))
+        fm = scheme_append(fm, e);
       SCHEME_EXPAND_OBSERVE_MODULE_LIFT_END_LOOP(observer, fm);
       maybe_has_lifts = 0;
     }
@@ -6488,7 +6505,10 @@ static Scheme_Object *do_module_begin(Scheme_Object *form, Scheme_Comp_Env *env,
       l = (maybe_has_lifts 
            ? scheme_frame_get_end_statement_lifts(cenv) 
            : scheme_null);
-      scheme_frame_captures_lifts(cenv, add_lifted_defn, lift_data, l, lift_ctx, req_data);
+      ll = (maybe_has_lifts 
+            ? scheme_frame_get_provide_lifts(cenv) 
+            : scheme_null);
+      scheme_frame_captures_lifts(cenv, add_lifted_defn, lift_data, l, lift_ctx, req_data, ll);
       maybe_has_lifts = 1;
 
       if (kind == 2)
@@ -6541,12 +6561,19 @@ static Scheme_Object *do_module_begin(Scheme_Object *form, Scheme_Comp_Env *env,
 
     /* If we're out of declarations, check for lifted-to-end: */
     if (SCHEME_NULLP(p) && maybe_has_lifts) {
+      int expr_cnt;
+      e = scheme_frame_get_provide_lifts(cenv);
+      e = scheme_reverse(e);
       p = scheme_frame_get_end_statement_lifts(cenv);
-      SCHEME_EXPAND_OBSERVE_MODULE_LIFT_END_LOOP(observer, scheme_reverse(p));
       p = scheme_reverse(p);
+      expr_cnt = scheme_list_length(p);
+      if (!SCHEME_NULLP(e))
+        p = scheme_append(p, e);
+      SCHEME_EXPAND_OBSERVE_MODULE_LIFT_END_LOOP(observer, p);
       for (ll = p; SCHEME_PAIRP(ll); ll = SCHEME_CDR(ll)) {
-        e = scheme_make_pair(SCHEME_CAR(ll), scheme_make_integer(1));
+        e = scheme_make_pair(SCHEME_CAR(ll), (expr_cnt > 0) ? scheme_make_integer(1) : scheme_make_integer(3));
         SCHEME_CAR(ll) = e;
+        expr_cnt--;
       }
       maybe_has_lifts = 0;
       if (prev_p) {
@@ -9151,6 +9178,7 @@ top_level_require_execute(Scheme_Object *data)
 {
   do_require_execute(scheme_environment_from_dummy(SCHEME_CAR(data)),
                      SCHEME_CDR(data));
+  return scheme_void;
 }
 
 static Scheme_Object *
