@@ -52,15 +52,15 @@
                   #:ssl? boolean?
                   #:manager manager?
                   #:servlet-namespace (listof module-path?)
-                  #:server-root-path path?
+                  #:server-root-path path-string?
                   #:stateless? boolean?
-                  #:extra-files-paths (listof path?)
-                  #:servlets-root path?
+                  #:extra-files-paths (listof path-string?)
+                  #:servlets-root path-string?
                   #:file-not-found-responder (request? . -> . response?)
-                  #:mime-types-path path?
+                  #:mime-types-path path-string?
                   #:servlet-path string?
                   #:servlet-regexp regexp?
-                  #:log-file (or/c false/c path?))
+                  #:log-file (or/c false/c path-string?))
                  . ->* .
                  void)])
 
@@ -128,7 +128,9 @@
                                "mime.types")))]
 
          #:log-file
-         [log-file #f])
+         [log-file #f]
+         #:log-format
+         [log-format 'apache-default])
   (define standalone-url
     (string-append (if ssl? "https" "http")
                    "://localhost"
@@ -141,10 +143,7 @@
   (define servlet-box (box #f))
   (define dispatcher
     (dispatcher-sequence
-     (and log-file (log:make #:format (log:log-format->format
-                                       ;; 'parenthesized-default
-                                       ;; 'extended
-                                       'apache-default)
+     (and log-file (log:make #:format (log:log-format->format log-format)
                              #:log-path log-file))
      (and quit? (filter:make #rx"^/quit$" (quit-server sema)))
      (filter:make

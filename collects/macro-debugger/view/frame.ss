@@ -1,6 +1,7 @@
 
 #lang scheme/base
 (require scheme/class
+         macro-debugger/util/class-iop
          scheme/unit
          scheme/list
          scheme/file
@@ -14,7 +15,7 @@
          "warning.ss"
          "hiding-panel.ss"
          (prefix-in sb: "../syntax-browser/embed.ss")
-         (prefix-in sb: "../syntax-browser/params.ss")
+	 (prefix-in sb: "../syntax-browser/interfaces.ss")
          "../model/deriv.ss"
          "../model/deriv-util.ss"
          "../model/trace.ss"
@@ -24,7 +25,7 @@
 (provide macro-stepper-frame-mixin)
 
 (define (macro-stepper-frame-mixin base-frame%)
-  (class base-frame%
+  (class* base-frame% (stepper-frame<%>)
     (init-field config)
     (init-field director)
     (init-field (filename #f))
@@ -41,8 +42,8 @@
              get-help-menu)
 
     (super-new (label (make-label))
-               (width (send config get-width))
-               (height (send config get-height)))
+               (width (send: config config<%> get-width))
+               (height (send: config config<%> get-height)))
 
     (define/private (make-label)
       (if filename
@@ -53,9 +54,9 @@
           "Macro stepper"))
 
     (define/override (on-size w h)
-      (send config set-width w)
-      (send config set-height h)
-      (send widget update/preserve-view))
+      (send: config config<%> set-width w)
+      (send: config config<%> set-height h)
+      (send: widget widget<%> update/preserve-view))
 
     (define warning-panel
       (new horizontal-panel%
@@ -66,12 +67,13 @@
     (define/public (get-macro-stepper-widget%)
       macro-stepper-widget%)
 
-    (define widget
+    (define: widget widget<%>
       (new (get-macro-stepper-widget%)
            (parent (get-area-container))
            (director director)
            (config config)))
-    (define controller (send widget get-controller))
+    (define: controller sb:controller<%>
+      (send: widget widget<%> get-controller))
 
     (define/public (get-widget) widget)
     (define/public (get-controller) controller)
@@ -113,15 +115,15 @@
       (new (get-menu-item%)
            (label "Duplicate stepper")
            (parent file-menu)
-           (callback (lambda _ (send widget duplicate-stepper))))
+           (callback (lambda _ (send: widget widget<%> duplicate-stepper))))
       (new (get-menu-item%)
            (label "Duplicate stepper (current term only)")
            (parent file-menu)
-           (callback (lambda _ (send widget show-in-new-frame)))))
+           (callback (lambda _ (send: widget widget<%> show-in-new-frame)))))
 
     (menu-option/notify-box stepper-menu
-                            "Show syntax properties"
-                            (get-field show-syntax-properties? config))
+                            "View syntax properties"
+                            (get-field props-shown? config))
 
     (let ([id-menu
            (new (get-menu%)
@@ -134,23 +136,24 @@
                               (parent id-menu)
                               (callback
                                (lambda _ 
-                                 (send controller set-identifier=? p))))])
-                    (send controller listen-identifier=?
-                          (lambda (name+func)
-                            (send this-choice check
-                                  (eq? (car name+func) (car p)))))))
+                                 (send: controller sb:controller<%> set-identifier=? p))))])
+                    (send: controller sb:controller<%> listen-identifier=?
+                           (lambda (name+func)
+                             (send this-choice check
+                                   (eq? (car name+func) (car p)))))))
                 (sb:identifier=-choices)))
 
-    (let ([identifier=? (send config get-identifier=?)])
+    (let ([identifier=? (send: config config<%> get-identifier=?)])
       (when identifier=?
         (let ([p (assoc identifier=? (sb:identifier=-choices))])
-          (send controller set-identifier=? p))))
+          (send: controller sb:controller<%> set-identifier=? p))))
 
     (new (get-menu-item%)
          (label "Clear selection")
          (parent stepper-menu)
          (callback
-          (lambda _ (send controller set-selected-syntax #f))))
+          (lambda _ (send: controller sb:controller<%> 
+			   set-selected-syntax #f))))
 
     (new separator-menu-item% (parent stepper-menu))
 
@@ -161,11 +164,11 @@
     (new (get-menu-item%)
          (label "Remove selected term")
          (parent stepper-menu)
-         (callback (lambda _ (send widget remove-current-term))))
+         (callback (lambda _ (send: widget widget<%> remove-current-term))))
     (new (get-menu-item%)
          (label "Reset mark numbering")
          (parent stepper-menu)
-         (callback (lambda _ (send widget reset-primary-partition))))
+         (callback (lambda _ (send: widget widget<%> reset-primary-partition))))
     (let ([extras-menu
            (new (get-menu%)
                 (label "Extra options")
@@ -175,11 +178,14 @@
            (parent extras-menu)
            (callback
             (lambda (i e)
-              (sb:current-suffix-option
-               (if (send i is-checked?)
-                   'always
-                   'over-limit))
-              (send widget update/preserve-view))))
+              (send: config config<%> set-suffix-option
+                     (if (send i is-checked?)
+                         'always
+                         'over-limit))
+              (send: widget widget<%> update/preserve-view))))
+      (menu-option/notify-box extras-menu
+                              "Factor out common context?"
+                              (get-field split-context? config))
       (menu-option/notify-box extras-menu
                               "Highlight redex/contractum"
                               (get-field highlight-foci? config))

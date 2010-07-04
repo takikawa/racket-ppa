@@ -3,6 +3,7 @@
 (require (for-syntax scheme/base)
          scheme/list
          scheme/class
+         macro-debugger/util/class-iop
          scheme/gui)
 (provide define/listen
          field/notify
@@ -151,10 +152,13 @@
     (new checkable-menu-item%
          (label label)
          (parent parent)
-         (checked (send nb get))
+         (demand-callback
+          (lambda (i)
+            (send i check (send nb get))))
          (callback
-          (lambda _ (send nb set (send menu-item is-checked?))))))
-  (send nb listen (lambda (value) (send menu-item check value)))
+          (lambda _ 
+            #;(send nb set (send menu-item is-checked?))
+            (send nb set (not (send nb get)))))))
   menu-item)
 
 (define (check-box/notify-box parent label nb)

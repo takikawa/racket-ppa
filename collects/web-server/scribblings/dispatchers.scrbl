@@ -99,7 +99,7 @@ URLs to paths on the filesystem.
  The returned @scheme[path?] is the path on disk. The list is the list of
  path elements that correspond to the path of the URL.}
 
-@defproc[(make-url->path (base path?))
+@defproc[(make-url->path (base path-string?))
          url->path/c]{
  The @scheme[url-path/c] returned by this procedure considers the root
  URL to be @scheme[base]. It ensures that @scheme[".."]s in the URL
@@ -368,7 +368,7 @@ a URL that refreshes the password file, servlet cache, etc.}
          dispatcher/c]{
  This dispatcher runs Scheme servlets, using @scheme[url->servlet] to resolve URLs to the underlying servlets.
  If servlets have errors loading, then @scheme[responders-servlet-loading] is used. Other errors are handled with
- @scheme[responders-servlet].
+ @scheme[responders-servlet]. If a servlet raises calls @scheme[next-dispatcher], then the signal is propagated by this dispatcher.
 }
                       
 }
@@ -388,3 +388,70 @@ a URL that refreshes the password file, servlet cache, etc.}
          dispatcher/c]{
  Returns a dispatcher that prints memory usage on every request.
 }}
+
+@; ------------------------------------------------------------
+@section[#:tag "limit.ss"]{Limiting Requests}
+@a-dispatcher[web-server/dispatchers/limit
+              @elem{provides a wrapper dispatcher that limits how many requests are serviced at once.}]{
+
+@defproc[(make [limit number?]
+               [inner dispatcher/c]
+               [#:over-limit over-limit (symbols 'block 'kill-new 'kill-old) 'block])
+         dispatcher/c]{
+ Returns a dispatcher that defers to @scheme[inner] for work, but will forward a maximum of @scheme[limit] requests concurrently.
+         
+ If there are no additional spaces inside the limit and a new request is received, the @scheme[over-limit] option determines what is done.
+ The default (@scheme['block]) causes the new request to block until an old request is finished being handled.
+ If @scheme[over-limit] is @scheme['kill-new], then the new request handler is killed---a form of load-shedding.
+ If @scheme[over-limit] is @scheme['kill-old], then the oldest request handler is killed---prioritizing new connections over old.
+ (This setting is a little dangerous because requests might never finish if there is constant load.)
+}}
+                      
+@(require (for-label
+           web-server/web-server
+           web-server/http
+           (prefix-in limit: web-server/dispatchers/limit)
+           (prefix-in filter: web-server/dispatchers/dispatch-filter)
+           (prefix-in sequencer: web-server/dispatchers/dispatch-sequencer)))
+                                                                                                       
+Consider this example:
+@schememod[
+ scheme
+ 
+(require web-server/web-server
+         web-server/http
+         web-server/http/response
+         (prefix-in limit: web-server/dispatchers/limit)
+         (prefix-in filter: web-server/dispatchers/dispatch-filter)
+         (prefix-in sequencer: web-server/dispatchers/dispatch-sequencer))
+
+(serve #:dispatch
+       (sequencer:make
+        (filter:make
+         #rx"/limited"
+         (limit:make
+          5
+          (lambda (conn req)
+            (output-response/method
+             conn
+             (make-response/full
+              200 "Okay"
+              (current-seconds) TEXT/HTML-MIME-TYPE
+              empty
+              (list (format "hello world ~a"
+                            (sort (build-list 100000 (λ x (random 1000)))
+                                  <))))
+             (request-method req)))
+          #:over-limit 'block))
+        (lambda (conn req)          
+          (output-response/method
+           conn
+           (make-response/full 200 "Okay"
+                               (current-seconds) TEXT/HTML-MIME-TYPE
+                               empty
+                               (list "<html><body>Unlimited</body></html>"))
+           (request-method req))))
+       #:port 8080)
+
+(do-not-return)
+]

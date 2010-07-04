@@ -39,8 +39,9 @@ These values can also be used as C pointer objects.}
            [(ctype-c->scheme [type ctype?]) procedure?])]{
 
 Accessors for the components of a C type object, made by
-@scheme[make-ctype].  The @scheme[ctype-basetype] selector returns
-@scheme[#f] for primitive types (including cstruct types).}
+@scheme[make-ctype].  The @scheme[ctype-basetype] selector returns a
+symbol for primitive types that names the type, a list of ctypes for
+cstructs, and another ctype for user-defined ctypes.}
 
 
 @defproc[(ffi-call [ptr any/c] [in-types (listof ctype?)] [out-type ctype?]
@@ -61,7 +62,8 @@ especially important on Windows, where most system functions are
 
 
 @defproc[(ffi-callback [proc any/c] [in-types any/c] [out-type any/c]
-                       [abi (or/c symbol/c #f) #f])
+                       [abi (or/c symbol/c #f) #f]
+                       [atomic? any/c #f])
          ffi-callback?]{
 
 The symmetric counterpart of @scheme[ffi-call].  It receives a Scheme

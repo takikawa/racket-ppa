@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2008 PLT Scheme Inc.
+  Copyright (c) 2004-2009 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
  
     This library is free software; you can redistribute it and/or
@@ -221,6 +221,7 @@ static Scheme_Object *top_introduce_stx(int argc, Scheme_Object **argv);
 static Scheme_Object *allow_set_undefined(int argc, Scheme_Object **argv);
 static Scheme_Object *compile_module_constants(int argc, Scheme_Object **argv);
 static Scheme_Object *use_jit(int argc, Scheme_Object **argv);
+static Scheme_Object *disallow_inline(int argc, Scheme_Object **argv);
 
 static Scheme_Object *app_syntax(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec, int drec);
 static Scheme_Object *app_expand(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Expand_Info *erec, int drec);
@@ -378,6 +379,7 @@ scheme_init_eval (Scheme_Env *env)
   GLOBAL_PARAMETER("compile-allow-set!-undefined",      allow_set_undefined,      MZCONFIG_ALLOW_SET_UNDEFINED,   env);
   GLOBAL_PARAMETER("compile-enforce-module-constants",  compile_module_constants, MZCONFIG_COMPILE_MODULE_CONSTS, env);
   GLOBAL_PARAMETER("eval-jit-enabled",                  use_jit,                  MZCONFIG_USE_JIT,               env);
+  GLOBAL_PARAMETER("compile-context-preservation-enabled", disallow_inline,       MZCONFIG_DISALLOW_INLINE,       env);
   
   REGISTER_SO(app_symbol);
   REGISTER_SO(datum_symbol);
@@ -776,6 +778,17 @@ int scheme_omittable_expr(Scheme_Object *o, int vals, int fuel, int resolved,
     }
   }
 
+  if (vtype == scheme_compiled_toplevel_type) {
+    note_match(1, vals, warn_info);
+    if ((vals == 1) || (vals < 0)) {
+      if (SCHEME_TOPLEVEL_FLAGS(o) 
+          & (SCHEME_TOPLEVEL_CONST | SCHEME_TOPLEVEL_READY))
+        return 1;
+      else
+        return 0;
+    }
+  }
+
   if ((vtype == scheme_syntax_type)
       && (SCHEME_PINT_VAL(o) == CASE_LAMBDA_EXPD)) {
     note_match(1, vals, warn_info);
@@ -889,8 +902,12 @@ int scheme_omittable_expr(Scheme_Object *o, int vals, int fuel, int resolved,
 	return 1;
       }
     }
-    /* (void <omittable> ...) */
-    if (SAME_OBJ(scheme_void_proc, app->args[0])) {
+    /* ({void,list,list*,vector,vector-immutable} <omittable> ...) */
+    if (SAME_OBJ(scheme_void_proc, app->args[0])
+        || SAME_OBJ(scheme_list_proc, app->args[0])
+        || SAME_OBJ(scheme_list_star_proc, app->args[0])
+        || SAME_OBJ(scheme_vector_proc, app->args[0])
+        || SAME_OBJ(scheme_vector_immutable_proc, app->args[0])) {
       note_match(1, vals, warn_info);
       if ((vals == 1) || (vals < 0)) {
         int i;
@@ -905,10 +922,15 @@ int scheme_omittable_expr(Scheme_Object *o, int vals, int fuel, int resolved,
   }
 
   if ((vtype == scheme_application2_type)) {
-    /* (values <omittable>) or (void <omittable>) */
+    /* ({values,void,list,list*,vector,vector-immutable,box} <omittable>) */
     Scheme_App2_Rec *app = (Scheme_App2_Rec *)o;
     if (SAME_OBJ(scheme_values_func, app->rator)
-        || SAME_OBJ(scheme_void_proc, app->rator)) {
+        || SAME_OBJ(scheme_void_proc, app->rator)
+        || SAME_OBJ(scheme_list_proc, app->rator)
+        || SAME_OBJ(scheme_list_star_proc, app->rator)
+        || SAME_OBJ(scheme_vector_proc, app->rator)
+        || SAME_OBJ(scheme_vector_immutable_proc, app->rator)
+        || SAME_OBJ(scheme_box_proc, app->rator)) {
       note_match(1, vals, warn_info);
       if ((vals == 1) || (vals < 0)) {
 	if (scheme_omittable_expr(app->rand, 1, fuel - 1, resolved, warn_info))
@@ -928,8 +950,14 @@ int scheme_omittable_expr(Scheme_Object *o, int vals, int fuel, int resolved,
 	  return 1;
       }
     }
-    /* (void <omittable> <omittable>) */
-    if (SAME_OBJ(scheme_void_proc, app->rator)) {
+    /* ({void,cons,list,list*,vector,vector-immutable) <omittable> <omittable>) */
+    if (SAME_OBJ(scheme_void_proc, app->rator)
+        || SAME_OBJ(scheme_cons_proc, app->rator)
+        || SAME_OBJ(scheme_mcons_proc, app->rator)
+        || SAME_OBJ(scheme_list_proc, app->rator)
+        || SAME_OBJ(scheme_list_star_proc, app->rator)
+        || SAME_OBJ(scheme_vector_proc, app->rator)
+        || SAME_OBJ(scheme_vector_immutable_proc, app->rator)) {
       note_match(1, vals, warn_info);
       if ((vals == 1) || (vals < 0)) {
 	if (scheme_omittable_expr(app->rand1, 1, fuel - 1, resolved, warn_info)
@@ -1060,7 +1088,7 @@ static Scheme_Object *make_application(Scheme_Object *v)
     app->rator = SCHEME_CAR(v);
     v = SCHEME_CDR(v);
     app->rand = SCHEME_CAR(v);
-
+    
     return (Scheme_Object *)app;
   } else if (n == 3) {
     Scheme_App3_Rec *app;
@@ -1334,7 +1362,7 @@ static Scheme_Object *resolve_application2(Scheme_Object *o, Resolve_Info *orig_
     orig_info->max_let_depth = info->max_let_depth;
 
   set_app2_eval_type(app);
-
+        
   return (Scheme_Object *)app;
 }
 
@@ -1704,20 +1732,23 @@ Scheme_Object *scheme_make_syntax_compiled(int idx, Scheme_Object *data)
 
 static Scheme_Object *link_module_variable(Scheme_Object *modidx,
 					   Scheme_Object *varname,
-					   Scheme_Object *insp,
+					   int check_access, Scheme_Object *insp,
 					   int pos, int mod_phase,
-					   Scheme_Env *env)
+					   Scheme_Env *env, 
+                                           Scheme_Object **exprs, int which)
 {
   Scheme_Object *modname;
   Scheme_Env *menv;
+  int self = 0;
 
   /* If it's a name id, resolve the name. */
   modname = scheme_module_resolve(modidx, 1);
 
   if (env->module && SAME_OBJ(env->module->modname, modname)
-      && (env->mod_phase == mod_phase))
+      && (env->mod_phase == mod_phase)) {
+    self = 1;
     menv = env;
-  else {
+  } else {
     menv = scheme_module_access(modname, env, mod_phase);
     
     if (!menv && env->phase) {
@@ -1740,22 +1771,57 @@ static Scheme_Object *link_module_variable(Scheme_Object *modidx,
       return NULL;
     }
 
-    if (!SAME_OBJ(menv, env)) {
+    if (check_access && !SAME_OBJ(menv, env)) {
       varname = scheme_check_accessible_in_module(menv, insp, NULL, varname, NULL, NULL, 
                                                   insp, pos, 0, NULL, env);
+    }
+  }
+
+  if (exprs) {
+    if (self) {
+      exprs[which] = varname;
+    } else {
+      if (mod_phase != 0)
+        modname = scheme_make_pair(modname, scheme_make_integer(mod_phase));
+      modname = scheme_make_pair(varname, modname);
+      exprs[which] = modname;
     }
   }
 
   return (Scheme_Object *)scheme_global_bucket(varname, menv);
 }
 
-static Scheme_Object *link_toplevel(Scheme_Object *expr, Scheme_Env *env,
+static Scheme_Object *link_toplevel(Scheme_Object **exprs, int which, Scheme_Env *env,
                                     Scheme_Object *src_modidx, 
                                     Scheme_Object *dest_modidx)
 {
-  if (SCHEME_SYMBOLP(expr)) {
+  Scheme_Object *expr = exprs[which];
+
+  if (SCHEME_FALSEP(expr)) {
     /* See scheme_make_environment_dummy */
     return (Scheme_Object *)scheme_global_bucket(begin_symbol, env);
+  } else if (SCHEME_PAIRP(expr) || SCHEME_SYMBOLP(expr)) {
+    /* Simplified module reference */
+    Scheme_Object *modname, *varname;
+    int mod_phase = 0;
+    if (SCHEME_SYMBOLP(expr)) {
+      varname = expr;
+      modname = env->module->modname;
+      mod_phase = env->mod_phase;
+    } else {
+      varname = SCHEME_CAR(expr);
+      modname = SCHEME_CDR(expr);
+      if (SCHEME_PAIRP(modname)) {
+        mod_phase = SCHEME_INT_VAL(SCHEME_CDR(modname));
+        modname = SCHEME_CAR(modname);
+      }
+    }
+    return link_module_variable(modname,
+                                varname,
+                                0, NULL,
+                                -1, mod_phase,
+                                env, 
+                                NULL, 0);
   } else if (SAME_TYPE(SCHEME_TYPE(expr), scheme_variable_type)) {
     Scheme_Bucket_With_Home *b = (Scheme_Bucket_With_Home *)expr;
     
@@ -1764,18 +1830,20 @@ static Scheme_Object *link_toplevel(Scheme_Object *expr, Scheme_Env *env,
     else
       return link_module_variable(b->home->module->modname,
 				  (Scheme_Object *)b->bucket.bucket.key,
-				  b->home->module->insp,
+				  1, b->home->module->insp,
 				  -1, b->home->mod_phase,
-				  env);
+				  env, 
+                                  exprs, which);
   } else {
     Module_Variable *mv = (Module_Variable *)expr;
     
     return link_module_variable(scheme_modidx_shift(mv->modidx,
-						    src_modidx,
-						    dest_modidx),
-				mv->sym, mv->insp,
+                                                    src_modidx,
+                                                    dest_modidx),
+				mv->sym, 1, mv->insp,
 				mv->pos, mv->mod_phase,
-				env);
+				env,
+                                exprs, which);
   }
 }
 
@@ -1849,7 +1917,7 @@ Scheme_Object *scheme_resolve_expr(Scheme_Object *expr, Resolve_Info *info)
   case scheme_compiled_let_void_type:
     return scheme_resolve_lets(expr, info);
   case scheme_compiled_toplevel_type:
-    return scheme_resolve_toplevel(info, expr);
+    return scheme_resolve_toplevel(info, expr, 1);
   case scheme_compiled_quote_syntax_type:
     {
       Scheme_Quote_Syntax *qs;
@@ -2200,6 +2268,14 @@ Scheme_Object *optimize_for_inline(Optimize_Info *info, Scheme_Object *le, int a
   int offset = 0, single_use = 0;
   Scheme_Object *bad_app = NULL;
 
+  if (info->inline_fuel < 0)
+    return NULL;
+  
+  if (SAME_TYPE(SCHEME_TYPE(le), scheme_compiled_unclosed_procedure_type)) {
+    /* Found a `((lambda' */
+    single_use = 1;
+  }
+
   if (SAME_TYPE(SCHEME_TYPE(le), scheme_local_type)) {
     /* Check for inlining: */
     le = scheme_optimize_info_lookup(info, SCHEME_LOCAL_POS(le), &offset, &single_use);
@@ -2438,6 +2514,16 @@ static Scheme_Object *optimize_application(Scheme_Object *o, Optimize_Info *info
     le = scheme_optimize_expr(app->args[i], info);
     app->args[i] = le;
 
+    if (!i) {
+      if (SAME_TYPE(SCHEME_TYPE(app->args[0]),scheme_compiled_unclosed_procedure_type)) {
+        /* Found "((lambda" after optimizing; try again */
+        le = optimize_for_inline(info, app->args[i], n - 1, app, NULL, NULL, &rator_flags);
+        if (le)
+          return le;
+      }
+    }
+
+
     if (i && (SCHEME_TYPE(le) < _scheme_compiled_values_types_))
       all_vals = 0;
   }
@@ -2481,6 +2567,13 @@ static Scheme_Object *optimize_application2(Scheme_Object *o, Optimize_Info *inf
   le = scheme_optimize_expr(app->rator, info);
   app->rator = le;
 
+  if (SAME_TYPE(SCHEME_TYPE(app->rator),scheme_compiled_unclosed_procedure_type)) {
+    /* Found "((lambda" after optimizing; try again */
+    le = optimize_for_inline(info, app->rator, 1, NULL, app, NULL, &rator_flags);
+    if (le)
+      return le;
+  }
+
   le = scheme_optimize_expr(app->rand, info);
   app->rand = le;
   if (SCHEME_TYPE(le) > _scheme_compiled_values_types_) {
@@ -2507,7 +2600,8 @@ static Scheme_Object *optimize_application2(Scheme_Object *o, Optimize_Info *inf
     }
   }
 
-  if (SAME_OBJ(scheme_values_func, app->rator)
+  if ((SAME_OBJ(scheme_values_func, app->rator)
+       || SAME_OBJ(scheme_list_star_proc, app->rator))
       && scheme_omittable_expr(app->rand, 1, -1, 0, info)) {
     info->preserves_marks = 1;
     info->single_result = 1;
@@ -2542,6 +2636,13 @@ static Scheme_Object *optimize_application3(Scheme_Object *o, Optimize_Info *inf
 
   le = scheme_optimize_expr(app->rator, info);
   app->rator = le;
+
+  if (SAME_TYPE(SCHEME_TYPE(app->rator),scheme_compiled_unclosed_procedure_type)) {
+    /* Found "((lambda" after optimizing; try again */
+    le = optimize_for_inline(info, app->rator, 2, NULL, NULL, app, &rator_flags);
+    if (le)
+      return le;
+  }
 
   /* 1st arg */
 
@@ -4542,11 +4643,14 @@ void scheme_init_compile_recs(Scheme_Compile_Info *src, int drec,
     dest[i].comp = 1;
     dest[i].dont_mark_local_use = src[drec].dont_mark_local_use;
     dest[i].resolve_module_ids = src[drec].resolve_module_ids;
+    dest[i].no_module_cert = src[drec].no_module_cert;
     dest[i].value_name = scheme_false;
     dest[i].certs = src[drec].certs;
     /* should be always NULL */
     dest[i].observer = src[drec].observer;
     dest[i].pre_unwrapped = 0;
+    dest[i].env_already = 0;
+    dest[i].comp_flags = src[drec].comp_flags;
   }
 }
 
@@ -4565,6 +4669,9 @@ void scheme_init_expand_recs(Scheme_Expand_Info *src, int drec,
     dest[i].certs = src[drec].certs;
     dest[i].observer = src[drec].observer;
     dest[i].pre_unwrapped = 0;
+    dest[i].no_module_cert = src[drec].no_module_cert;
+    dest[i].env_already = 0;
+    dest[i].comp_flags = src[drec].comp_flags;
   }
 }
 
@@ -4583,10 +4690,13 @@ void scheme_init_lambda_rec(Scheme_Compile_Info *src, int drec,
   lam[dlrec].comp = 1;
   lam[dlrec].dont_mark_local_use = src[drec].dont_mark_local_use;
   lam[dlrec].resolve_module_ids = src[drec].resolve_module_ids;
+  lam[dlrec].no_module_cert = src[drec].no_module_cert;
   lam[dlrec].value_name = scheme_false;
   lam[dlrec].certs = src[drec].certs;
   lam[dlrec].observer = src[drec].observer;
   lam[dlrec].pre_unwrapped = 0;
+  lam[dlrec].env_already = 0;
+  lam[dlrec].comp_flags = src[drec].comp_flags;
 }
 
 void scheme_merge_lambda_rec(Scheme_Compile_Info *src, int drec,
@@ -4742,6 +4852,23 @@ static Scheme_Object *add_renames_unless_module(Scheme_Object *form, Scheme_Env 
   return form;
 }
 
+static int get_comp_flags(Scheme_Config *config)
+{
+  int comp_flags = 0;
+
+  if (!config)
+    config = scheme_current_config();
+
+  if (SCHEME_TRUEP(scheme_get_param(scheme_current_config(), 
+                                    MZCONFIG_ALLOW_SET_UNDEFINED)))
+    comp_flags |= COMP_ALLOW_SET_UNDEFINED;
+  if (SCHEME_FALSEP(scheme_get_param(scheme_current_config(), 
+                                     MZCONFIG_DISALLOW_INLINE)))
+    comp_flags |= COMP_CAN_INLINE;
+
+  return comp_flags;
+}
+
 void scheme_enable_expression_resolve_lifts(Resolve_Info *ri)
 {
   Scheme_Object *lift_vec;
@@ -4781,10 +4908,10 @@ static void *compile_k(void)
 {
   Scheme_Thread *p = scheme_current_thread;
   Scheme_Object *form;
-  int writeable, for_eval, rename, enforce_consts;
+  int writeable, for_eval, rename, enforce_consts, comp_flags;
   Scheme_Env *genv;
   Scheme_Compile_Info rec, rec2;
-  Scheme_Object *o, *tl_queue;
+  Scheme_Object *o, *rl, *tl_queue;
   Scheme_Compilation_Top *top;
   Resolve_Prefix *rp;
   Resolve_Info *ri;
@@ -4824,16 +4951,20 @@ static void *compile_k(void)
     config = scheme_current_config();
     insp = scheme_get_param(config, MZCONFIG_CODE_INSPECTOR);
     enforce_consts = SCHEME_TRUEP(scheme_get_param(config, MZCONFIG_COMPILE_MODULE_CONSTS));
+    comp_flags = get_comp_flags(config);
   }
 
   while (1) {
     rec.comp = 1;
     rec.dont_mark_local_use = 0;
     rec.resolve_module_ids = !writeable && !genv->module;
+    rec.no_module_cert = 0;
     rec.value_name = scheme_false;
     rec.certs = NULL;
     rec.observer = NULL;
     rec.pre_unwrapped = 0;
+    rec.env_already = 0;
+    rec.comp_flags = comp_flags;
 
     cenv = scheme_new_comp_env(genv, insp, SCHEME_TOPLEVEL_FRAME);
 
@@ -4842,7 +4973,8 @@ static void *compile_k(void)
 	 find one, break it up to eval first expression
 	 before the rest. */
       while (1) {
-	scheme_frame_captures_lifts(cenv, scheme_make_lifted_defn, scheme_sys_wraps(cenv), scheme_false, scheme_false);
+	scheme_frame_captures_lifts(cenv, scheme_make_lifted_defn, scheme_sys_wraps(cenv), 
+                                    scheme_false, scheme_false, scheme_null);
 	form = scheme_check_immediate_macro(form, 
 					    cenv, &rec, 0,
 					    0, &gval, NULL, NULL);
@@ -4858,10 +4990,13 @@ static void *compile_k(void)
 	  } else
 	    break;
 	} else {
+	  rl = scheme_frame_get_require_lifts(cenv);
 	  o = scheme_frame_get_lifts(cenv);
-	  if (!SCHEME_NULLP(o)) {
+	  if (!SCHEME_NULLP(o)
+              || !SCHEME_NULLP(rl)) {
 	    tl_queue = scheme_make_pair(form, tl_queue);
 	    tl_queue = scheme_append(o, tl_queue);
+	    tl_queue = scheme_append(rl, tl_queue);
 	    form = SCHEME_CAR(tl_queue);
 	    tl_queue = SCHEME_CDR(tl_queue);
 	  }
@@ -4879,7 +5014,8 @@ static void *compile_k(void)
       Scheme_Object *l, *prev_o = NULL;
 
       while (1) {
-	scheme_frame_captures_lifts(cenv, scheme_make_lifted_defn, scheme_sys_wraps(cenv), scheme_false, scheme_false);
+	scheme_frame_captures_lifts(cenv, scheme_make_lifted_defn, scheme_sys_wraps(cenv), 
+                                    scheme_false, scheme_false, scheme_null);
 
 	scheme_init_compile_recs(&rec, 0, &rec2, 1);
 
@@ -4900,10 +5036,13 @@ static void *compile_k(void)
 	/* If any definitions were lifted in the process of compiling o,
 	   we need to fold them in. */
 	l = scheme_frame_get_lifts(cenv);
-	if (!SCHEME_NULLP(l)) {
-	  l = icons(scheme_datum_to_syntax(begin_symbol, scheme_false, scheme_sys_wraps(cenv), 0, 0),
-		    l);
-	  form = scheme_datum_to_syntax(l, scheme_false, scheme_false, 0, 0);
+	rl = scheme_frame_get_require_lifts(cenv);
+	if (!SCHEME_NULLP(l)
+            || !SCHEME_NULLP(rl)) {
+          rl = scheme_append(rl, l);
+          rl = icons(scheme_datum_to_syntax(begin_symbol, scheme_false, scheme_sys_wraps(cenv), 0, 0),
+                     rl);
+          form = scheme_datum_to_syntax(rl, scheme_false, scheme_false, 0, 0);
 	  prev_o = o;
 	} else 
 	  break;
@@ -4911,6 +5050,8 @@ static void *compile_k(void)
 
       oi = scheme_optimize_info_create();
       oi->enforce_const = enforce_consts;
+      if (!(comp_flags & COMP_CAN_INLINE))
+        oi->inline_fuel = -1;
       o = scheme_optimize_expr(o, oi);
 
       rp = scheme_resolve_prefix(0, cenv->prefix, 1);
@@ -5032,6 +5173,9 @@ Scheme_Object *scheme_check_immediate_macro(Scheme_Object *first,
                                   SCHEME_NULL_FOR_UNBOUND
                                   + SCHEME_APP_POS + SCHEME_ENV_CONSTANTS_OK
                                   + SCHEME_DONT_MARK_USE
+                                  + ((!rec[drec].comp && (rec[drec].depth == -2))
+                                     ? SCHEME_OUT_OF_CONTEXT_OK
+                                     : 0)
                                   + ((rec[drec].comp && rec[drec].resolve_module_ids)
                                      ? SCHEME_RESOLVE_MODIDS
                                      : 0),
@@ -5233,7 +5377,10 @@ scheme_compile_expand_expr(Scheme_Object *form, Scheme_Comp_Env *env,
 				       : 0)
 				    + ((rec[drec].comp && rec[drec].resolve_module_ids)
 				       ? SCHEME_RESOLVE_MODIDS
-				       : 0),
+				       : 0)
+                                    + ((!rec[drec].comp && (rec[drec].depth == -2))
+                                       ? (SCHEME_OUT_OF_CONTEXT_OK | SCHEME_OUT_OF_CONTEXT_LOCAL)
+                                       : 0),
 				    rec[drec].certs, env->in_modidx, 
 				    &menv, &protected, &lexical_binding_id);
 
@@ -5337,7 +5484,10 @@ scheme_compile_expand_expr(Scheme_Object *form, Scheme_Comp_Env *env,
 				    + SCHEME_DONT_MARK_USE
 				    + ((rec[drec].comp && rec[drec].resolve_module_ids)
 				       ? SCHEME_RESOLVE_MODIDS
-				       : 0),
+				       : 0)
+                                    + ((!rec[drec].comp && (rec[drec].depth == -2))
+                                       ? (SCHEME_OUT_OF_CONTEXT_OK | SCHEME_OUT_OF_CONTEXT_LOCAL)
+                                       : 0),
 				    erec1.certs, env->in_modidx, 
 				    &menv, NULL, NULL);
 
@@ -5420,7 +5570,10 @@ scheme_compile_expand_expr(Scheme_Object *form, Scheme_Comp_Env *env,
       var = scheme_lookup_binding(find_name, env,
 				  SCHEME_NULL_FOR_UNBOUND
 				  + SCHEME_APP_POS + SCHEME_ENV_CONSTANTS_OK
-				  + SCHEME_DONT_MARK_USE,
+				  + SCHEME_DONT_MARK_USE
+                                  + ((!rec[drec].comp && (rec[drec].depth == -2))
+                                     ? (SCHEME_OUT_OF_CONTEXT_OK | SCHEME_OUT_OF_CONTEXT_LOCAL)
+                                     : 0),
 				  rec[drec].certs, env->in_modidx, 
 				  &menv, NULL, NULL);
 
@@ -5460,7 +5613,10 @@ scheme_compile_expand_expr(Scheme_Object *form, Scheme_Comp_Env *env,
       var = scheme_lookup_binding(stx, env,
 				  SCHEME_NULL_FOR_UNBOUND
 				  + SCHEME_APP_POS + SCHEME_ENV_CONSTANTS_OK
-				  + SCHEME_DONT_MARK_USE,
+				  + SCHEME_DONT_MARK_USE
+                                  + ((!rec[drec].comp && (rec[drec].depth == -2))
+                                     ? (SCHEME_OUT_OF_CONTEXT_OK | SCHEME_OUT_OF_CONTEXT_LOCAL)
+                                     : 0),
 				  rec[drec].certs, env->in_modidx, 
 				  &menv, NULL, NULL);
     }
@@ -6065,7 +6221,7 @@ compile_expand_expr_lift_to_let(Scheme_Object *form, Scheme_Comp_Env *env,
 
   context_key = scheme_generate_lifts_key();
   
-  scheme_frame_captures_lifts(inserted, pair_lifted, (Scheme_Object *)ip, scheme_false, context_key);
+  scheme_frame_captures_lifts(inserted, pair_lifted, (Scheme_Object *)ip, scheme_false, context_key, NULL);
 
   if (rec[drec].comp) {
     scheme_init_compile_recs(rec, drec, recs, 2);
@@ -6273,7 +6429,7 @@ scheme_compile_expand_block(Scheme_Object *forms, Scheme_Comp_Env *env,
 	  if (!SCHEME_STX_SYMBOLP(var))
 	    scheme_wrong_syntax(NULL, var, first, 
 				"name must be an identifier");
-	  scheme_dup_symbol_check(&r, "internal definition", var, "binding", first);
+	  // scheme_dup_symbol_check(&r, "internal definition", var, "binding", first);
 	  vars = SCHEME_STX_CDR(vars);
 	  cnt++;
 	}
@@ -6343,6 +6499,16 @@ scheme_compile_expand_block(Scheme_Object *forms, Scheme_Comp_Env *env,
 	    scheme_set_local_syntax(cnt++, a, scheme_false, new_env);
 	  }
 
+	  /* Extend shared rib with renamings */
+	  scheme_add_env_renames(rib, new_env, env);
+
+          /* Check for duplicates after extending the rib with renamings,
+             since the renamings properly track marks. */
+          for (l = names; SCHEME_STX_PAIRP(l); l = SCHEME_STX_CDR(l)) {
+	    a = SCHEME_STX_CAR(l);
+            scheme_dup_symbol_check(&r, "internal definition", a, "binding", first);
+          }
+
 	  if (!is_val) {
 	    /* Evaluate and bind syntaxes */
 	    scheme_prepare_exp_env(new_env->genv);
@@ -6355,9 +6521,6 @@ scheme_compile_expand_block(Scheme_Object *forms, Scheme_Comp_Env *env,
 				 &pos);
 	  }
 
-	  /* Extend shared rib with renamings */
-	  scheme_add_env_renames(rib, new_env, env);
-	  
 	  /* Remember extended environment */
 	  SCHEME_PTR1_VAL(ctx) = new_env;
 	  env = new_env;
@@ -6425,6 +6588,10 @@ scheme_compile_expand_block(Scheme_Object *forms, Scheme_Comp_Env *env,
     }
 
     if (!more) {
+      /* We've converted to a letrec or letrec-values+syntaxes */
+      scheme_stx_seal_rib(rib);
+      rec[drec].env_already = 1;
+
       if (rec[drec].comp) {
 	result = scheme_compile_expr(result, env, rec, drec);
         return scheme_make_pair(result, scheme_null);
@@ -6442,6 +6609,8 @@ scheme_compile_expand_block(Scheme_Object *forms, Scheme_Comp_Env *env,
       }
     }
   }
+
+  scheme_stx_seal_rib(rib);
 
   if (rec[drec].comp) {
     Scheme_Object *vname, *rest;
@@ -8325,15 +8494,16 @@ scheme_do_eval(Scheme_Object *obj, int num_rands, Scheme_Object **rands,
       case scheme_with_cont_mark_type:
 	{
 	  Scheme_With_Continuation_Mark *wcm = (Scheme_With_Continuation_Mark *)obj;
-	  GC_CAN_IGNORE Scheme_Object *key, *val;
+	  Scheme_Object *key;
+	  GC_CAN_IGNORE Scheme_Object *val;
 	  
 	  UPDATE_THREAD_RSPTR();
 	  key = wcm->key;
 	  if (SCHEME_TYPE(key) < _scheme_values_types_)
-	    key = _scheme_eval_linked_expr_wp(wcm->key, p);
+	    key = _scheme_eval_linked_expr_wp(key, p);
 	  val = wcm->val;
 	  if (SCHEME_TYPE(val) < _scheme_values_types_)
-	    val = _scheme_eval_linked_expr_wp(wcm->val, p);
+	    val = _scheme_eval_linked_expr_wp(val, p);
 
 	  scheme_set_cont_mark(key, val);
 
@@ -8482,6 +8652,7 @@ static void *eval_k(void)
       v = _scheme_eval_linked_expr_wp(v, p);
   } else if (SAME_TYPE(SCHEME_TYPE(v), scheme_compilation_top_type)) {
     Scheme_Compilation_Top *top = (Scheme_Compilation_Top *)v;
+    Resolve_Prefix *rp;
     int depth;
 
     depth = top->max_let_depth + scheme_prefix_depth(top->prefix);
@@ -8497,6 +8668,9 @@ static void *eval_k(void)
 
     if (use_jit)
       v = scheme_jit_expr(v);
+    else
+      v = scheme_eval_clone(v);
+    rp = scheme_prefix_eval_clone(top->prefix);
 
     save_runstack = scheme_push_prefix(env, top->prefix, NULL, NULL, 0, env->phase);
 
@@ -8669,7 +8843,7 @@ static void *expand_k(void)
   Scheme_Object *obj, *certs, *observer, *catch_lifts_key;
   Scheme_Comp_Env *env;
   Scheme_Expand_Info erec1;
-  int depth, rename, just_to_top, as_local;
+  int depth, rename, just_to_top, as_local, comp_flags;
 
   obj = (Scheme_Object *)p->ku.k.p1;
   env = (Scheme_Comp_Env *)p->ku.k.p2;
@@ -8696,6 +8870,8 @@ static void *expand_k(void)
   observer = scheme_get_expand_observe();
   SCHEME_EXPAND_OBSERVE_START_EXPAND(observer);
 
+  comp_flags = get_comp_flags(NULL);
+
   /* Loop for lifted expressions: */
   while (1) {
     erec1.comp = 0;
@@ -8704,9 +8880,14 @@ static void *expand_k(void)
     erec1.certs = certs;
     erec1.observer = observer;
     erec1.pre_unwrapped = 0;
+    erec1.no_module_cert = 0;
+    erec1.env_already = 0;
+    erec1.comp_flags = comp_flags;
 
     if (catch_lifts_key)
-      scheme_frame_captures_lifts(env, scheme_make_lifted_defn, scheme_sys_wraps(env), scheme_false, catch_lifts_key);
+      scheme_frame_captures_lifts(env, scheme_make_lifted_defn, scheme_sys_wraps(env), 
+                                  scheme_false, catch_lifts_key, 
+                                  (!as_local && catch_lifts_key) ? scheme_null : NULL);
   
     if (just_to_top) {
       Scheme_Object *gval;
@@ -8715,9 +8896,12 @@ static void *expand_k(void)
       obj = scheme_expand_expr(obj, env, &erec1, 0);
 
     if (catch_lifts_key) {
-      Scheme_Object *l;
+      Scheme_Object *l, *rl;
       l = scheme_frame_get_lifts(env);
-      if (SCHEME_PAIRP(l)) {
+      rl = scheme_frame_get_require_lifts(env);
+      if (SCHEME_PAIRP(l)
+          || SCHEME_PAIRP(rl)) {
+        l = scheme_append(rl, l);
         obj = add_lifts_as_begin(obj, l, env);
         SCHEME_EXPAND_OBSERVE_LIFT_LOOP(erec1.observer,obj);
 	if ((depth >= 0) || as_local)
@@ -9018,6 +9202,7 @@ do_local_expand(const char *name, int for_stx, int catch_lifts, int for_expr, in
   if (for_stx) {
     scheme_prepare_exp_env(env->genv);
     env = scheme_new_comp_env(env->genv->exp_env, env->insp, 0);
+    scheme_propagate_require_lift_capture(orig_env, env);
   }
 
   if (for_expr)
@@ -9151,13 +9336,18 @@ do_local_expand(const char *name, int for_stx, int catch_lifts, int for_expr, in
 
     if (catch_lifts_key)
       scheme_frame_captures_lifts(env, scheme_make_lifted_defn, scheme_sys_wraps(env), scheme_false, 
-                                  catch_lifts_key);
+                                  catch_lifts_key, NULL);
 
     memset(drec, 0, sizeof(drec));
     drec[0].value_name = scheme_false; /* or scheme_current_thread->current_local_name ? */
     drec[0].certs = scheme_current_thread->current_local_certs;
     drec[0].depth = -2;
     drec[0].observer = observer;
+    {
+      int comp_flags;
+      comp_flags = get_comp_flags(NULL);
+      drec[0].comp_flags = comp_flags;
+    }
 
     xl = scheme_check_immediate_macro(l, env, drec, 0, 0, &gval, NULL, NULL);
 
@@ -9185,7 +9375,7 @@ do_local_expand(const char *name, int for_stx, int catch_lifts, int for_expr, in
     l = scheme_add_rename(l, renaming);
 
   if (for_expr) {
-    /* Package up expanded expr with the enviornment. */
+    /* Package up expanded expr with the environment. */
     while (1) {
       if (orig_env->flags & SCHEME_FOR_STOPS)
         orig_env = orig_env->next;
@@ -9455,6 +9645,14 @@ static Scheme_Object *use_jit(int argc, Scheme_Object **argv)
 			     -1, NULL, NULL, 1);
 }
 
+static Scheme_Object *disallow_inline(int argc, Scheme_Object **argv)
+{
+  return scheme_param_config("compile-context-preservation-enabled", 
+			     scheme_make_integer(MZCONFIG_DISALLOW_INLINE),
+			     argc, argv,
+			     -1, NULL, NULL, 1);
+}
+
 static Scheme_Object *
 enable_break(int argc, Scheme_Object *argv[])
 {
@@ -9504,6 +9702,11 @@ local_eval(int argc, Scheme_Object **argv)
 
   stx_env = (Scheme_Comp_Env *)SCHEME_PTR1_VAL(argv[2]);
   rib = SCHEME_PTR2_VAL(argv[2]);
+
+  if (*scheme_stx_get_rib_sealed(rib)) {
+    scheme_raise_exn(MZEXN_FAIL_CONTRACT, "syntax-local-bind-syntaxes: given "
+		     "internal-definition context has been sealed");
+  }
   
   if (!scheme_is_sub_env(stx_env, env)) {
     scheme_raise_exn(MZEXN_FAIL_CONTRACT, "syntax-local-bind-syntaxes: transforming context does "
@@ -9536,6 +9739,9 @@ local_eval(int argc, Scheme_Object **argv)
     rec.certs = certs;
     rec.observer = observer;
     rec.pre_unwrapped = 0;
+    rec.no_module_cert = 0;
+    rec.env_already = 0;
+    rec.comp_flags = get_comp_flags(NULL);
     
     /* Evaluate and bind syntaxes */
     expr = scheme_add_remove_mark(expr, scheme_current_thread->current_local_mark);
@@ -9556,6 +9762,60 @@ local_eval(int argc, Scheme_Object **argv)
   SCHEME_PTR1_VAL(argv[2]) = stx_env;
 
   return scheme_void;
+}
+
+/*========================================================================*/
+/*                       cloning prefix information                       */
+/*========================================================================*/
+
+Scheme_Object *scheme_eval_clone(Scheme_Object *expr)
+{
+  /* Clone as much as necessary of `expr' so that prefixes are
+     cloned. Cloned prefixes, in turn, can be updated by linking to
+     reduce the overhead of cross-module references. */
+  if (SAME_TYPE(SCHEME_TYPE(expr), scheme_syntax_type)) {
+    int kind;
+    Scheme_Object *orig, *naya;
+    
+    kind = SCHEME_PINT_VAL(expr);
+    orig = SCHEME_IPTR_VAL(expr);
+    switch (kind) {
+    case MODULE_EXPD:
+      naya = scheme_module_eval_clone(orig);
+      break;
+    case DEFINE_SYNTAX_EXPD:
+    case DEFINE_FOR_SYNTAX_EXPD:
+      naya = scheme_syntaxes_eval_clone(orig);
+      break;
+    default:
+      naya = orig;
+      break;
+    }
+
+    if (SAME_OBJ(orig, naya))
+      return expr;
+    
+    return scheme_make_syntax_resolved(kind, naya);
+  } else
+    return expr;
+}
+
+Resolve_Prefix *scheme_prefix_eval_clone(Resolve_Prefix *rp)
+{
+  Resolve_Prefix *naya;
+  Scheme_Object **tls;
+
+  if (!rp->num_toplevels)
+    return rp;
+
+  naya = MALLOC_ONE_TAGGED(Resolve_Prefix);
+  memcpy(naya, rp, sizeof(Resolve_Prefix));
+  
+  tls = MALLOC_N(Scheme_Object*, rp->num_toplevels);
+  memcpy(tls, rp->toplevels, sizeof(Scheme_Object *) * rp->num_toplevels);
+  naya->toplevels = tls;
+
+  return naya;
 }
 
 /*========================================================================*/
@@ -9594,7 +9854,7 @@ Scheme_Object **scheme_push_prefix(Scheme_Env *genv, Resolve_Prefix *rp,
     for (i = 0; i < rp->num_toplevels; i++) {
       v = rp->toplevels[i];
       if (genv)
-	v = link_toplevel(rp->toplevels[i], genv, src_modidx, now_modidx);
+	v = link_toplevel(rp->toplevels, i, genv, src_modidx, now_modidx);
       a[i] = v;
     }
 
@@ -9602,7 +9862,7 @@ Scheme_Object **scheme_push_prefix(Scheme_Env *genv, Resolve_Prefix *rp,
       i = rp->num_toplevels;
       v = scheme_stx_phase_shift_as_rename(now_phase - src_phase, src_modidx, now_modidx, 
 					   genv ? genv->export_registry : NULL);
-      if (v || rp->delay_info) {
+      if (v || (rp->delay_info_rpair && SCHEME_CDR(rp->delay_info_rpair))) {
 	/* Put lazy-shift info in a[i]: */
         Scheme_Object **ls;
         ls = MALLOC_N(Scheme_Object *, 2);
@@ -9795,15 +10055,17 @@ int scheme_validate_rator_wants_box(Scheme_Object *app_rator, int pos,
                                     int num_toplevels, int num_stxes, int num_lifts)
 {
   Scheme_Closure_Data *data = NULL;
+  Scheme_Type ty;
 
   while (1) {
-    if (SAME_TYPE(SCHEME_TYPE(app_rator), scheme_closure_type)) {
+    ty = SCHEME_TYPE(app_rator);
+    if (SAME_TYPE(ty, scheme_closure_type)) {
       data = SCHEME_COMPILED_CLOS_CODE(app_rator);
       break;
-    } else if (SAME_TYPE(SCHEME_TYPE(app_rator), scheme_unclosed_procedure_type)) {
+    } else if (SAME_TYPE(ty, scheme_unclosed_procedure_type)) {
       data = (Scheme_Closure_Data *)app_rator;
       break;
-    } else if (SAME_TYPE(SCHEME_TYPE(app_rator), scheme_toplevel_type)) {
+    } else if (SAME_TYPE(ty, scheme_toplevel_type)) {
       int p;
       p = SCHEME_TOPLEVEL_POS(app_rator);
       while (1) {

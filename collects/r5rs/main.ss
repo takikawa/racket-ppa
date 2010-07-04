@@ -151,6 +151,14 @@
 
   ;; --------------------------------------------------
 
+  (define (to-mutable v)
+    (cond
+     [(pair? v) (mcons (to-mutable (car v))
+                       (to-mutable (cdr v)))]
+     [(vector? v) (list->vector
+                   (map to-mutable (vector->list v)))]
+     [else v]))
+
   (define-syntax (r5rs:quote stx)
     (syntax-case stx ()
       [(_ form)
@@ -162,13 +170,7 @@
                 (ormap loop (syntax->list #'(a ...)))]
                [_ #f]))
            ;; quote has to create mpairs:
-           (syntax-local-lift-expression (let loop ([form #'form])
-                                           (syntax-case form ()
-                                             [(a . b)
-                                              #`(mcons #,(loop #'a) #,(loop #'b))]
-                                             [#(a ...)
-                                              #`(vector . #,(map loop (syntax->list #'(a ...))))]
-                                             [other #'(quote other)])))
+           (syntax-local-lift-expression #'(to-mutable 'form))
            ;; no pairs to worry about:
            #'(quote form))]))
 
@@ -410,6 +412,7 @@
                                                     (cdr exprs)))
                                          (reverse idss) (reverse rhss)
                                          (reverse stx-idss) (reverse stx-rhss))]))))])
+           (internal-definition-context-seal def-ctx)
            (if (and (null? (syntax-e #'(stx-rhs ...)))
                     (andmap (lambda (ids)
                               (= 1 (length (syntax->list ids))))

@@ -22,6 +22,7 @@ typedef struct mpage {
   unsigned char marked_on     ;
   unsigned char has_new       ;
   unsigned char mprotected    ;
+  unsigned char added         ;
   unsigned short live_size;
   void **backtrace;
 } mpage;
@@ -33,6 +34,12 @@ typedef struct Gen0 {
  unsigned long current_size;
  unsigned long max_size;
 } Gen0;
+
+typedef struct MarkSegment {
+  struct MarkSegment *prev;
+  struct MarkSegment *next;
+  void **top;
+} MarkSegment;
 
 typedef struct Weak_Finalizer {
   void *p;
@@ -109,10 +116,7 @@ typedef struct NewGC {
   void (*unsafe_allocation_abort)(struct NewGC *);
   unsigned long memory_in_use; /* the amount of memory in use */
 
-  /* blame the child saved off Mark_Proc pointers */
-  Mark_Proc normal_thread_mark;
-  Mark_Proc normal_custodian_mark;
-  Mark_Proc normal_cust_box_mark;
+  /* blame the child thread infos */
   GC_Thread_Info *thread_infos;
 
   mpage *release_pages;
@@ -140,8 +144,6 @@ typedef struct NewGC {
   AccountHook *hooks;
 
 
-
-
   unsigned long number_of_gc_runs;
   unsigned int since_last_full;
   unsigned long last_full_mem_use;
@@ -150,6 +152,19 @@ typedef struct NewGC {
   unsigned long peak_memory_use;
   unsigned long num_minor_collects;
   unsigned long num_major_collects;
+  
+  /* THREAD_LOCAL variables that need to be saved off */
+  MarkSegment *saved_mark_stack;
+  void *saved_GC_variable_stack;
+  unsigned long saved_GC_gen0_alloc_page_ptr;
+  unsigned long saved_GC_gen0_alloc_page_end;
+
+
+  /* Callbacks */
+  void (*GC_collect_start_callback)(void);
+  void (*GC_collect_end_callback)(void);
+  void (*GC_collect_inform_callback)(int major_gc, long pre_used, long post_used);
+  unsigned long (*GC_get_thread_stack_base)(void);
 
   GC_Immobile_Box *immobile_boxes;
 

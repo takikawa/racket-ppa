@@ -676,6 +676,9 @@ please adhere to these guidelines:
   (complete-word "Complete Word") ; the complete word menu item in the edit menu
   (no-completions "... no completions available") ; shows up in the completions menu when there are no completions (in italics)
   
+  (overwrite-mode "Overwrite Mode")
+  (enable-overwrite-mode-keybindings "Enable overwrite mode keybindings")
+  
  (preferences-info "Configure your preferences")
  (preferences-menu-item "Preferences...")
 
@@ -845,7 +848,7 @@ please adhere to these guidelines:
  (close-tab "Close Tab") ;; must not have any &s in it.
  (close-tab-amp "&Close Tab") ;; like close-tab, but with an ampersand on the same letter as the one in close-menu-item
   
- ;;; edit-menu
+ ;;; edit menu
  (split-menu-item-label "&Split")
  (collapse-menu-item-label "C&ollapse")
  
@@ -862,7 +865,7 @@ please adhere to these guidelines:
  (force-quit-menu-item-help-string "Uses custodian-shutdown-all to abort the current evaluation")
  (limit-memory-menu-item-label "Limit Memory...")
  (limit-memory-msg-1 "The limit will take effect the next time the program")
- (limit-memory-msg-2 "is Run, and it must be at least 100 megabytes.")
+ (limit-memory-msg-2 "is Run, and it must be at least one megabyte.")
  (limit-memory-unlimited "Unlimited")
  (limit-memory-limited "Limited")
  (limit-memory-megabytes "Megabytes")

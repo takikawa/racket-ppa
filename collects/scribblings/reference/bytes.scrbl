@@ -335,7 +335,7 @@ string.
 @defproc[(bytes-open-converter [from-name string?][to-name string?])
          bytes-converter?]{
 
-Produces a string converter to go from the encoding named by
+Produces a @deftech{byte converter} to go from the encoding named by
 @scheme[from-name] to the encoding named by @scheme[to-name]. If the
 requested conversion pair is not available, @scheme[#f] is returned
 instead of a converter.
@@ -405,14 +405,15 @@ Windows and Mac OS X.
 @filepath{iconv.dll} is included with @filepath{libmzsch@italic{VERS}.dll}.}
 
 The set of available encodings and combinations varies by platform,
-depending on the @exec{iconv} library that is installed. Under
-Windows, @filepath{iconv.dll} or @filepath{libiconv.dll} must be in the same
-directory as @filepath{libmzsch@italic{VERS}.dll} (where @italic{VERS} is
-a version number), in the user's path, in the system directory, or in
-the current executable's directory at run time, and the DLL must
-either supply @tt{_errno} or link to @filepath{msvcrt.dll} for
-@tt{_errno}; otherwise, only the guaranteed combinations are
-available.}
+depending on the @exec{iconv} library that is installed; the
+@scheme[from-name] and @scheme[to-name] arguments are passed on to
+@tt{iconv_open}. Under Windows, @filepath{iconv.dll} or
+@filepath{libiconv.dll} must be in the same directory as
+@filepath{libmzsch@italic{VERS}.dll} (where @italic{VERS} is a version
+number), in the user's path, in the system directory, or in the
+current executable's directory at run time, and the DLL must either
+supply @tt{_errno} or link to @filepath{msvcrt.dll} for @tt{_errno};
+otherwise, only the guaranteed combinations are available.}
 
 
 @defproc[(bytes-close-converter [converter bytes-converter?]) void]{
@@ -534,8 +535,8 @@ The result of @scheme[bytes-convert-end] is two values:
 
 @defproc[(bytes-converter? [v any/c]) boolean?]{
 
-Returns @scheme[#t] if @scheme[v] is a byte converter produced by
-@scheme[bytes-open-converter], @scheme[#f] otherwise.}
+Returns @scheme[#t] if @scheme[v] is a @tech{byte converter} produced
+by @scheme[bytes-open-converter], @scheme[#f] otherwise.}
 
 
 @defproc[(locale-string-encoding) any]{

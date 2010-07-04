@@ -1,7 +1,19 @@
 #lang scribble/doc
 @(require "web-server.ss")
+@(require (for-label web-server/dispatchers/dispatch-servlets))
 
-@title{Troubleshooting}
+@title{Troubleshooting and Tips}
+
+@section{Why are my servlets not updating on the server when I change the code on disk?}
+
+By default, the server uses @scheme[make-cached-url->servlet] to load servlets
+from the disk. As it loads them, they are cached and the disk is not referred to for future
+requests. This ensures that there is a single namespace for each servlet, so that different instances
+can share resources, such as database connections, and communicate through the store. The default
+configuration of the server (meaning the dispatcher sequence used when you load a configuration file)
+provides a special URL to localhost that will reset the cache: @filepath{/conf/refresh-servlets}. If
+you want the server to reload your changed servlet code, then GET this URL and the server will reload the
+servlet on the next request.
 
 @section{What special considerations are there for security with the Web Server?}
 
@@ -89,3 +101,7 @@ We can now start the server with:
 
 The Web Server will start on port 443 (which can be overridden with the @exec{-p} option) using the
 @filepath{private-key.pem} and @filepath{server-cert.pem} we've created.
+
+@section{How do I limit the number of requests serviced at once by the Web Server?}
+
+Refer to @secref["limit.ss"].

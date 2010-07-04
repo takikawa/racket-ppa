@@ -1,6 +1,9 @@
 (module tl-test mzscheme
   (require "../reduction-semantics.ss"
-           "test-util.ss")
+           "test-util.ss"
+           (only "matcher.ss" make-bindings make-bind)
+           scheme/match
+           "struct.ss")
   
   (reset-count)
   
@@ -187,6 +190,45 @@
           #t)
     (test (pair? (redex-match iswim-cont W (term QQ)))
           #t))
+  
+  
+  ;; test caching
+  (let ()
+    (define match? #t)
+    
+    (define-language lang
+      (x (side-condition any match?)))
+    
+    (test (pair? (redex-match lang x 1)) #t)
+    (set! match? #f)
+    (test (pair? (redex-match lang x 1)) #t)
+    (parameterize ([caching-enabled? #f])
+      (test (pair? (redex-match lang x 1)) #f)))
+  
+  
+  (let ()
+    (define sc-eval-count 0)
+    (define-language lang
+      (x (side-condition any (begin (set! sc-eval-count (+ sc-eval-count 1))
+                                    #t))))
+    
+    (redex-match lang x 1)
+    (redex-match lang x 1)
+    (parameterize ([caching-enabled? #f])
+      (redex-match lang x 1))
+    (test sc-eval-count 2))
+  
+  (let ()
+    (define rhs-eval-count 0)
+    (define-metafunction empty-language
+      [(f any) ,(begin (set! rhs-eval-count (+ rhs-eval-count 1))
+                       1)])
+    
+    (term (f 1))
+    (term (f 1))
+    (parameterize ([caching-enabled? #f])
+      (term (f 1)))
+    (test rhs-eval-count 2))
   
   
 ;                                                                                             
@@ -462,6 +504,29 @@
             'no-exn)
           'no-exn))
     
+  ;; test that tracing works properly
+  ;; note that caching comes into play here (which is why we don't see the recursive calls)
+  (let ()
+    (define-metafunction empty-language
+      [(f 0) 0]
+      [(f number) (f ,(- (term number) 1))])
+    
+    (let ([sp (open-output-string)])
+      (parameterize ([current-output-port sp])
+        (term (f 1)))
+      (test (get-output-string sp) ""))
+    
+    (let ([sp (open-output-string)])
+      (parameterize ([current-output-port sp]
+                     [current-traced-metafunctions 'all])
+        (term (f 1)))
+      (test (get-output-string sp) "|(f 1)\n|0\n"))
+    
+    (let ([sp (open-output-string)])
+      (parameterize ([current-output-port sp]
+                     [current-traced-metafunctions '(f)])
+        (term (f 1)))
+      (test (get-output-string sp) "|(f 1)\n|0\n")))
   
 
 ;                                                                                                                                
@@ -536,6 +601,19 @@
          '((2 3) (4 5)))
         (list '((2 3) 20)
               '(6 (4 5))))
+  
+  ; shortcuts like this fail if compilation fails to preserve
+  ; lexical context for side-conditions expressions.
+  (test (let ([x #t])
+          (apply-reduction-relation
+           (reduction-relation
+            grammar
+            (==> variable variable)
+            with
+            [(--> (a (side-condition number x)) b)
+             (==> a b)])
+           '(x 4)))
+        '(x))
   
   (test (apply-reduction-relation/tag-with-names
          (reduction-relation 
@@ -1098,5 +1176,77 @@
                                   (where y x)))
          'x)
         '(x1))
+  
+  (let ([r (reduction-relation
+            grammar
+            (->1 1 2)
+            (->2 3 4)
+            (->4 5 6)
+            with
+            [(--> (side-condition (a number) (even? (term number))) b)
+             (->1 a b)]
+            [(--> (X 
+                   (number number)
+                   (X_1 X_1)
+                   (M_!_1 M_!_1)
+                   (1 ..._1 1 ..._1)
+                   (1 ..._!_1 1 ..._!_1))
+                  b)
+             (->2 X b)]
+            [(--> (a 1) b)
+             (->3 a b)]
+            [(->3 (a 2) b)
+             (->4 a b)])])
+    
+    ; test that names are properly bound for side-conditions in shortcuts
+    (let* ([lhs (rewrite-proc-lhs (first (reduction-relation-make-procs r)))]
+           [proc (third lhs)]
+           [name (cadadr lhs)]
+           [bind (λ (n) (make-bindings (list (make-bind name n))))])
+      (test (and (proc (bind 4)) (not (proc (bind 3)))) #t))
+    
+    ; test binder renaming
+    (let ([sym-mtch? (λ (rx) (λ (s) (and (symbol? s) (regexp-match? rx (symbol->string s)))))])
+      (match (rewrite-proc-lhs (second (reduction-relation-make-procs r)))
+        [`(3
+           (,(and n1 (? (sym-mtch? #px"^number_\\d+$"))) ,n1)
+           (,(and n2 (? (sym-mtch? #px"^X_1\\d+$"))) ,n2)
+           (,(and m1 (? (sym-mtch? #px"^M_!_1\\d+$"))) ,m1)
+           (1 ,(and ...1 (? (sym-mtch? #px"^\\.\\.\\._1\\d+$"))) 1 ,...1)
+           (1 ,(and ...!1 (? (sym-mtch? #px"^\\.\\.\\._!_1\\d+$"))) 1 ,...!1))
+         #t]
+        [else #f]))
+    
+    ; test shortcut in terms of shortcut
+    (test (match (rewrite-proc-lhs (third (reduction-relation-make-procs r)))
+            [`(((side-condition 5 ,(? procedure?)) 2) 1) #t]
+            [else #f])
+          #t))
+  
+  (let* ([R (reduction-relation
+             empty-language
+             (--> number (q ,(add1 (term number)))
+                  (side-condition (odd? (term number)))
+                  side-condition)
+             (--> 1 4)
+             (==> 2 t
+                  shortcut)
+             with
+             [(--> (q a) b)
+              (==> a b)])]
+         [c (make-coverage R)]
+         [< (λ (c d) (string<? (car c) (car d)))])
+    (parameterize ([relation-coverage c])
+      (apply-reduction-relation R 4)
+      (test (sort (covered-cases c) <)
+            '(("shortcut" . 0) ("side-condition" . 0) ("unnamed" . 0)))
+      
+      (apply-reduction-relation R 3)
+      (test (sort (covered-cases c) <)
+            '(("shortcut" . 0) ("side-condition" . 1) ("unnamed" . 0)))
+      
+      (apply-reduction-relation* R 1)
+      (test (sort (covered-cases c) <)
+            '(("shortcut" . 1) ("side-condition" . 2) ("unnamed" . 1)))))
   
   (print-tests-passed 'tl-test.ss))

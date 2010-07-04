@@ -103,30 +103,33 @@
 
 ;; http://getpost-impure-port : bool x url x union (str, #f) x list (str) -> in-port
 (define (http://getpost-impure-port get? url post-data strings)
-  (let*-values
-      ([(proxy) (assoc (url-scheme url) (current-proxy-servers))]
-       [(server->client client->server) (make-ports url proxy)]
-       [(access-string) (url->string
-                         (if proxy
-                           url
-                           (make-url #f #f #f #f
-                                     (url-path-absolute? url)
-                                     (url-path url)
-                                     (url-query url)
-                                     (url-fragment url))))])
-    (define (println . xs)
-      (for-each (lambda (x) (display x client->server)) xs)
-      (display "\r\n" client->server))
-    (println (if get? "GET " "POST ") access-string " HTTP/1.0")
-    (println "Host: " (url-host url)
-             (let ([p (url-port url)]) (if p (format ":~a" p) "")))
-    (when post-data (println "Content-Length: " (bytes-length post-data)))
-    (for-each println strings)
-    (println)
-    (when post-data (display post-data client->server))
-    (flush-output client->server)
-    (tcp-abandon-port client->server)
-    server->client))
+  (define proxy (assoc (url-scheme url) (current-proxy-servers)))
+  (define-values (server->client client->server) (make-ports url proxy))
+  (define access-string
+    (url->string
+     (if proxy
+       url
+       ;; RFCs 1945 and 2616 say:
+       ;;   Note that the absolute path cannot be empty; if none is present in
+       ;;   the original URI, it must be given as "/" (the server root).
+       (let-values ([(abs? path)
+                     (if (null? (url-path url))
+                       (values #t (list (make-path/param "" '())))
+                       (values (url-path-absolute? url) (url-path url)))])
+         (make-url #f #f #f #f abs? path (url-query url) (url-fragment url))))))
+  (define (println . xs)
+    (for-each (lambda (x) (display x client->server)) xs)
+    (display "\r\n" client->server))
+  (println (if get? "GET " "POST ") access-string " HTTP/1.0")
+  (println "Host: " (url-host url)
+           (let ([p (url-port url)]) (if p (format ":~a" p) "")))
+  (when post-data (println "Content-Length: " (bytes-length post-data)))
+  (for-each println strings)
+  (println)
+  (when post-data (display post-data client->server))
+  (flush-output client->server)
+  (tcp-abandon-port client->server)
+  server->client)
 
 (define (file://->path url [kind (system-path-convention-type)])
   (let ([strs (map path/param-path (url-path url))]
@@ -375,13 +378,9 @@
                            (eq? 'windows (file-url-path-convention-type))
                            (not (equal? host "")))])
        (when win-file?
-         (if (equal? "" port)
-           (set! path (string-append host ":" path))
-           (set! path (if path
-                        (if host
-                          (string-append host "/" path)
-                          path)
-                        host)))
+         (set! path (cond [(equal? "" port) (string-append host ":" path)]
+                          [(and path host) (string-append host "/" path)]
+                          [else (or path host)]))
          (set! port #f)
          (set! host ""))
        (let* ([scheme   (and scheme (string-downcase scheme))]

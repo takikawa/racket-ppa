@@ -7,8 +7,6 @@
          "private/rg.ss"
          "private/error.ss")
 
-#;(provide (all-from-out "private/rg.ss"))
-
 (provide exn:fail:redex?) ;; from error.ss
 
 (provide reduction-relation 
@@ -29,7 +27,8 @@
          define-metafunction
          define-metafunction/extension
          metafunction
-         in-domain?)
+         in-domain?
+         caching-enabled?)
 
 (provide (rename-out [test-match redex-match])
          term-match
@@ -42,7 +41,13 @@
          test-predicate
          test-results)
 
+(provide redex-check
+         generate-term
+         check-metafunction
+         check-metafunction-contract)
+
 (provide/contract
+ [current-traced-metafunctions (parameter/c (or/c 'all (listof symbol?)))]
  [reduction-relation->rule-names (-> reduction-relation? (listof symbol?))]
  [language-nts (-> compiled-lang? (listof symbol?))]
  [set-cache-size! (-> number? void?)]
@@ -59,4 +64,10 @@
                   (-> bindings? symbol? any)
                   (-> bindings? symbol? (-> any) any))]
  [variable-not-in (any/c symbol? . -> . symbol?)]
- [variables-not-in (any/c (listof symbol?) . -> . (listof symbol?))])
+ [variables-not-in (any/c (listof symbol?) . -> . (listof symbol?))]
+ [check-reduction-relation (->* (reduction-relation? (-> any/c any/c))
+                                (#:attempts natural-number/c)
+                                (one-of/c #t (void)))]
+ [relation-coverage (parameter/c (or/c false/c coverage?))]
+ [make-coverage (-> reduction-relation? coverage?)]
+ [covered-cases (-> coverage? (listof (cons/c string? natural-number/c)))])

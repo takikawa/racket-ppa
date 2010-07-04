@@ -1,9 +1,11 @@
 
 #lang scheme/base
 (require scheme/class
+         macro-debugger/util/class-iop
          scheme/gui
          scheme/list
          syntax/boundmap
+         "interfaces.ss"
          "../model/hiding-policies.ss"
          "../util/mpi.ss"
          "../util/notify.ss")
@@ -16,9 +18,9 @@
 
 ;; macro-hiding-prefs-widget%
 (define macro-hiding-prefs-widget%
-  (class object%
+  (class* object% (hiding-prefs<%>)
     (init parent)
-    (init-field stepper)
+    (init-field: (stepper widget<%>))
     (init-field config)
 
     (define/public (get-policy)
@@ -77,7 +79,7 @@
            (style '(deleted))))
 
     (define/private (get-mode)
-      (send config get-macro-hiding-mode))
+      (send: config config<%> get-macro-hiding-mode))
 
     (define/private (macro-hiding-enabled?)
       (let ([mode (get-mode)])
@@ -87,7 +89,7 @@
 
     (define/private (ensure-custom-mode)
       (unless (equal? (get-mode) mode:custom)
-        (send config set-macro-hiding-mode mode:custom)))
+        (send: config config<%> set-macro-hiding-mode mode:custom)))
 
     (define/private (update-visibility)
       (let ([customizing (equal? (get-mode) mode:custom)])
@@ -102,10 +104,10 @@
                             (list customize-panel)
                             null))))))
 
-    (send config listen-macro-hiding-mode
-          (lambda (value)
-            (update-visibility)
-            (force-refresh)))
+    (send: config config<%> listen-macro-hiding-mode
+           (lambda (value)
+             (update-visibility)
+             (force-refresh)))
 
     (define box:hiding
       (new check-box%
@@ -173,11 +175,11 @@
     ;; refresh : -> void
     (define/public (refresh)
       (when (macro-hiding-enabled?)
-        (send stepper refresh/resynth)))
+        (send: stepper widget<%> refresh/resynth)))
 
     ;; force-refresh : -> void
     (define/private (force-refresh)
-      (send stepper refresh/resynth))
+      (send: stepper widget<%> refresh/resynth))
 
     ;; set-syntax : syntax/#f -> void
     (define/public (set-syntax lstx)

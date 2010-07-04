@@ -2,6 +2,8 @@
 
 (require
  scheme/list
+ scheme/tcp
+ scheme
  (only-in rnrs/lists-6 fold-left)
  '#%paramz
  (only-in '#%kernel [apply kernel:apply])
@@ -88,7 +90,7 @@
 [symbol? (make-pred-ty Sym)]
 [list? (make-pred-ty (-lst Univ))]
 [list (-poly (a) (->* '() a (-lst a)))]
-[procedure? (make-pred-ty (make-Function (list (make-top-arr))))]
+[procedure? (make-pred-ty top-func)]
 [map (-polydots (c a b) ((list ((list a) (b b) . ->... . c) (-lst a))
                          ((-lst b) b) . ->... .(-lst c)))]
 [for-each (-polydots (c a b) ((list ((list a) (b b) . ->... . Univ) (-lst a))
@@ -243,8 +245,10 @@
 
 [apply        (-poly (a b) (((list) a . ->* . b) (-lst a) . -> . b))]
 [kernel:apply (-poly (a b) (((list) a . ->* . b) (-lst a) . -> . b))]
-[time-apply (-poly (a b) (((list) a . ->* . b) (-lst a)
-                          . -> . (-values (list b N N N))))]
+[time-apply (-polydots (b a) (((list) (a a) . ->... . b)
+                              (-lst a)
+                              . -> . 
+                              (-values (list (-pair b (-val '())) N N N))))]
 
 [call/cc (-poly (a b) (((a . -> . (Un)) . -> . b) . -> . (*Un a b)))]
 [call/ec (-poly (a b) (((a . -> . (Un)) . -> . b) . -> . (*Un a b)))]
@@ -286,6 +290,57 @@
          [(-Pattern -InpBts N         ) (optlist -Bytes)]
          [(-Pattern -InpBts N ?N      ) (optlist -Bytes)]
          [(-Pattern -InpBts N ?N ?outp) (optlist -Bytes)]))]
+
+[regexp-match*
+ (let ([?N      (-opt N)]
+       [-StrRx  (*Un -String -Regexp -PRegexp)]
+       [-BtsRx  (*Un -Bytes  -Byte-Regexp -Byte-PRegexp)]
+       [-InpBts (*Un -Input-Port -Bytes)])
+   (cl->*
+    (-StrRx   -String [N ?N] . ->opt . (-lst -String))
+    (-BtsRx   -String [N ?N] . ->opt . (-lst -Bytes))
+    (-Pattern -InpBts [N ?N] . ->opt . (-lst -Bytes))))]
+[regexp-try-match
+ (let ([?outp   (-opt -Output-Port)]
+       [?N      (-opt N)]
+       [optlist (lambda (t) (-opt (-lst (-opt t))))])
+   (->opt -Pattern -Input-Port [N ?N ?outp] (optlist -Bytes)))]
+
+[regexp-match-exact?
+ (-Pattern (Un -String -Bytes -Input-Port) . -> . B)]
+
+
+[regexp-match-positions
+ (let ([?outp   (-opt -Output-Port)]
+       [?N      (-opt N)]
+       [optlist (lambda (t) (-opt (-lst (-opt t))))]
+       [-StrRx  (*Un -String -Regexp -PRegexp)]
+       [-BtsRx  (*Un -Bytes  -Byte-Regexp -Byte-PRegexp)]
+       [-InpBts (*Un -Input-Port -Bytes)])
+   (->opt -Pattern (Un -String -InpBts) [N ?N ?outp] (optlist (-pair -Nat -Nat))))]
+[regexp-match-positions*
+ (let ([?outp   (-opt -Output-Port)]
+       [?N      (-opt N)]
+       [optlist (lambda (t) (-opt (-lst (-opt t))))]
+       [-StrRx  (*Un -String -Regexp -PRegexp)]
+       [-BtsRx  (*Un -Bytes  -Byte-Regexp -Byte-PRegexp)]
+       [-InpBts (*Un -Input-Port -Bytes)])
+   (->opt -Pattern (Un -String -InpBts) [N ?N ?outp] (-lst (-pair -Nat -Nat))))]
+#;
+[regexp-match-peek-positions*]
+#;
+[regexp-split]
+
+[regexp-quote (cl->*
+               (->opt -String [Univ] -String)
+               (->opt -Bytes [Univ] -Bytes))]
+[regexp-replace-quote
+ (cl->*
+  [-> -String -String]
+  [-> -Bytes -Bytes])]
+
+
+
 
 [number->string (N . -> . -String)]
 
@@ -481,3 +536,29 @@
 [read-accept-reader (-Param B B)]
 
 [maybe-print-message (-String . -> . -Void)]
+
+;; scheme/tcp
+[tcp-listener? (make-pred-ty -TCP-Listener)]
+[tcp-abandon-port (-Port . -> . -Void)]
+[tcp-accept (-TCP-Listener . -> . (-values (list -Input-Port -Output-Port)) )]
+[tcp-accept/enable-break (-TCP-Listener . -> . (-values (list -Input-Port -Output-Port)) )]
+[tcp-accept-ready? (-TCP-Listener . -> . B )]
+[tcp-addresses (-Port . -> . (-values (list N N)))]
+[tcp-close (-TCP-Listener . -> . -Void )]
+[tcp-connect (-String -Integer . -> . (-values (list -Input-Port -Output-Port)))]
+[tcp-connect/enable-break (-String -Integer . -> . (-values (list -Input-Port -Output-Port)))]
+[tcp-listen (N . -> . -TCP-Listener)]
+
+;; scheme/bool
+[boolean=? (B B . -> . B)]
+[symbol=? (Sym Sym . -> . B)]
+[false? (make-pred-ty (-val #f))]
+
+;; with-stx.ss
+[generate-temporaries ((Un (-Syntax Univ) (-lst Univ)) . -> . (-lst (-Syntax Sym)))]
+[check-duplicate-identifier ((-lst (-Syntax Sym)) . -> . (-opt (-Syntax Sym)))]
+
+;; string.ss
+[real->decimal-string (N [-Nat] . ->opt .  -String)]
+
+[current-continuation-marks (-> -Cont-Mark-Set)]

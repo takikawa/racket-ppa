@@ -1,27 +1,27 @@
 
-#lang mzscheme
+#lang scheme/base
 (require scheme/class
          mred
          framework/framework
          scheme/list
          scheme/match
-         mzlib/kw
          syntax/boundmap
+         macro-debugger/util/class-iop
          "interfaces.ss"
-         "params.ss"
          "controller.ss"
          "display.ss"
          "keymap.ss"
          "hrule-snip.ss"
          "properties.ss"
          "text.ss"
-         "util.ss")
+         "util.ss"
+         "../util/mpi.ss")
 (provide widget%)
 
 ;; widget%
 ;; A syntax widget creates its own syntax-controller.
 (define widget%
-  (class* object% (widget-hooks<%>)
+  (class* object% (syntax-browser<%> widget-hooks<%>)
     (init parent)
     (init-field config)
 
@@ -43,23 +43,19 @@
     (define/public (setup-keymap)
       (new syntax-keymap% 
            (editor -text)
+           (controller controller)
            (config config)))
 
     (send -text set-styles-sticky #f)
     (send -text lock #t)
 
-    ;; syntax-properties-controller<%> methods
-
-    (define/public (props-shown?)
-      (send -props-panel is-shown?))
-
-    (define/public (toggle-props)
-      (show-props (not (send -props-panel is-shown?))))
-
     (define/public (show-props show?)
+      (internal-show-props show?))
+
+    (define/private (internal-show-props show?)
       (if show?
           (unless (send -props-panel is-shown?)
-            (let ([p (send config get-props-percentage)])
+            (let ([p (send: config config<%> get-props-percentage)])
               (send -split-panel add-child -props-panel)
               (update-props-percentage p))
             (send -props-panel show #t))
@@ -67,29 +63,27 @@
             (send -split-panel delete-child -props-panel)
             (send -props-panel show #f))))
 
-    (send config listen-props-percentage
-          (lambda (p)
-            (update-props-percentage p)))
-    (send config listen-props-shown?
-          (lambda (show?)
-            (show-props show?)))
-
     (define/private (update-props-percentage p)
       (send -split-panel set-percentages
             (list (- 1 p) p)))
 
+    (define/private (props-panel-shown?)
+      (send -props-panel is-shown?))
+
     ;;
 
-    (define/public (get-controller) controller)
+    (define/public (get-controller)
+      controller)
 
     ;;
 
-    (define/public (get-main-panel) -main-panel)
+    (define/public (get-main-panel)
+      -main-panel)
 
     (define/public (shutdown)
-      (when (props-shown?)
-        (send config set-props-percentage
-              (cadr (send -split-panel get-percentages)))))
+      (when (props-panel-shown?)
+        (send: config config<%> set-props-percentage
+               (cadr (send -split-panel get-percentages)))))
 
     ;; syntax-browser<%> Methods
 
@@ -112,63 +106,85 @@
             (send -text set-clickback a b handler)
             (send -text change-style clickback-style a b)))))
 
-    (define/public add-syntax
-      (lambda/kw (stx #:key [hi-stxs null] hi-color alpha-table [definites null]
-                      hi2-color [hi2-stxs null])
-        (define (get-binder id)
+    (define/public (add-syntax stx
+                               #:binder-table [alpha-table #f]
+                               #:shift-table [shift-table #f]
+                               #:definites [definites null]
+                               #:hi-colors [hi-colors null]
+                               #:hi-stxss [hi-stxss null]
+                               #:substitutions [substitutions null])
+      (define (get-binders id)
+        (define binder
           (module-identifier-mapping-get alpha-table id (lambda () #f)))
-        (when (and (pair? hi-stxs) (not hi-color))
-          (error 'syntax-widget%::add-syntax "no highlight color specified"))
-        (let ([display (internal-add-syntax stx)]
-              [definite-table (make-hash-table)])
-          (when (and hi2-color (pair? hi2-stxs))
-            (send display highlight-syntaxes hi2-stxs hi2-color))
-          (when (and hi-color (pair? hi-stxs))
-            (send display highlight-syntaxes hi-stxs hi-color))
-          (for-each (lambda (x) (hash-table-put! definite-table x #t)) definites)
-          (when alpha-table
-            (let ([range (send display get-range)]
-                  [start (send display get-start-position)])
-              (define (adjust n) (+ start n))
-              (for-each
-               (lambda (id)
-                 #; ;; DISABLED
-                 (match (identifier-binding id)
-                   [(list src-mod src-name nom-mod nom-name _)
-                    (for-each (lambda (id-r)
-                                (send -text add-billboard
-                                      (adjust (car id-r))
-                                      (adjust (cdr id-r))
-                                      (string-append "from "
-                                                     (mpi->string src-mod))
-                                      (if (hash-table-get definite-table id #f)
-                                          "blue"
-                                          "purple")))
-                              (send range get-ranges id))]
-                   [_ (void)])
+        (if shift-table
+            (cons binder (hash-ref shift-table binder null))
+            (list binder)))
+      (let ([display (internal-add-syntax stx)]
+            [definite-table (make-hasheq)])
+        (let ([range (send: display display<%> get-range)]
+              [offset (send: display display<%> get-start-position)])
+          (for ([subst substitutions])
+            (for ([r (send: range range<%> get-ranges (car subst))])
+              (with-unlock -text
+                (send -text insert (cdr subst)
+                      (+ offset (car r))
+                      (+ offset (cdr r))
+                      #f)
+                (send -text change-style
+                      (code-style -text (send: config config<%> get-syntax-font-size))
+                      (+ offset (car r))
+                      (+ offset (cdr r)))))))
+        (for ([hi-stxs hi-stxss] [hi-color hi-colors])
+          (send: display display<%> highlight-syntaxes hi-stxs hi-color))
+        (for ([definite definites])
+          (hash-set! definite-table definite #t)
+          (when shift-table
+            (for ([shifted-definite (hash-ref shift-table definite null)])
+              (hash-set! definite-table shifted-definite #t))))
+        (when alpha-table
+          (let ([range (send: display display<%> get-range)]
+                [start (send: display display<%> get-start-position)])
+            (let* ([binders0
+                    (module-identifier-mapping-map alpha-table (lambda (k v) k))]
+                   [binders
+                    (apply append (map get-binders binders0))])
+              (send: display display<%> underline-syntaxes binders))
+            (for ([id (send: range range<%> get-identifier-list)])
+              (define definite? (hash-ref definite-table id #f))
+              (when #f ;; DISABLED
+                (add-binding-billboard start range id definite?))
+              (for ([binder (get-binders id)])
+                (for ([binder-r (send: range range<%> get-ranges binder)])
+                  (for ([id-r (send: range range<%> get-ranges id)])
+                    (add-binding-arrow start binder-r id-r definite?)))))))
+        (void)))
 
-                 (let ([binder (get-binder id)])
-                   (when binder
-                     (for-each
-                      (lambda (binder-r)
-                        (for-each (lambda (id-r)
-                                    (if (hash-table-get definite-table id #f)
-                                        (send -text add-arrow
-                                              (adjust (car binder-r))
-                                              (adjust (cdr binder-r))
-                                              (adjust (car id-r))
-                                              (adjust (cdr id-r))
-                                              "blue")
-                                        (send -text add-question-arrow
-                                              (adjust (car binder-r))
-                                              (adjust (cdr binder-r))
-                                              (adjust (car id-r))
-                                              (adjust (cdr id-r))
-                                              "purple")))
-                                  (send range get-ranges id)))
-                      (send range get-ranges binder)))))
-               (send range get-identifier-list))))
-          display)))
+    (define/private (add-binding-arrow start binder-r id-r definite?)
+      (if definite?
+          (send -text add-arrow
+                (+ start (car binder-r))
+                (+ start (cdr binder-r))
+                (+ start (car id-r))
+                (+ start (cdr id-r))
+                "blue")
+          (send -text add-question-arrow
+                (+ start (car binder-r))
+                (+ start (cdr binder-r))
+                (+ start (car id-r))
+                (+ start (cdr id-r))
+                "purple")))
+
+    (define/private (add-binding-billboard start range id definite?)
+      (match (identifier-binding id)
+        [(list-rest src-mod src-name nom-mod nom-name _)
+         (for-each (lambda (id-r)
+                     (send -text add-billboard
+                           (+ start (car id-r))
+                           (+ start (cdr id-r))
+                           (string-append "from " (mpi->string src-mod))
+                           (if definite? "blue" "purple")))
+                   (send: range range<%> get-ranges id))]
+        [_ (void)]))
 
     (define/public (add-separator)
       (with-unlock -text
@@ -180,30 +196,41 @@
       (with-unlock -text
         (send -text erase)
         (send -text delete-all-drawings))
-      (send controller remove-all-syntax-displays))
+      (send: controller displays-manager<%> remove-all-syntax-displays))
 
     (define/public (get-text) -text)
 
     ;; internal-add-syntax : syntax -> display
     (define/private (internal-add-syntax stx)
       (with-unlock -text
-        (parameterize ((current-default-columns (calculate-columns)))
-          (let ([display (print-syntax-to-editor stx -text controller)])
-            (send* -text
-              (insert "\n")
-              ;(scroll-to-position current-position)
-              )
-            display))))
+        (let ([display
+               (print-syntax-to-editor stx -text controller config
+                                       (calculate-columns)
+                                       (send -text last-position))])
+          (send* -text
+            (insert "\n")
+            ;;(scroll-to-position current-position)
+            )
+          display)))
 
     (define/private (calculate-columns)
-      (define style (code-style -text))
+      (define style (code-style -text (send: config config<%> get-syntax-font-size)))
       (define char-width (send style get-text-width (send -ecanvas get-dc)))
       (define-values (canvas-w canvas-h) (send -ecanvas get-client-size))
       (sub1 (inexact->exact (floor (/ canvas-w char-width)))))
 
     ;; Initialize
     (super-new)
-    (setup-keymap)))
+    (setup-keymap)
+
+    (send: config config<%> listen-props-shown?
+           (lambda (show?)
+             (show-props show?)))
+    (send: config config<%> listen-props-percentage
+           (lambda (p)
+             (update-props-percentage p)))
+    (internal-show-props (send: config config<%> get-props-shown?))))
+
 
 (define clickback-style
   (let ([sd (new style-delta%)])

@@ -14,13 +14,17 @@
        (identifier? #'id)
        #'(find-help (quote-syntax id))]
       [(help id #:from lib)
-       (if (identifier? #'id)
-         (if (module-path? (syntax->datum #'lib))
-           #'(find-help/lib (quote id) (quote lib))
-           (raise-syntax-error
-            #f "expected a module path after #:from" stx #'lib))
-         (raise-syntax-error
-          #f "expected an identifier before #:from" stx #'id))]
+       (cond [(not (identifier? #'id))
+              (raise-syntax-error
+               #f "expected an identifier before #:from" stx #'id)]
+             [(not (module-path? (syntax->datum #'lib)))
+              (raise-syntax-error
+               #f "expected a module path after #:from" stx #'lib)]
+             [else #'(find-help/lib (quote id) (quote lib))])]
+      [(help str0 str ...)
+       (andmap (lambda (s) (string? (syntax-e s)))
+               (syntax->list #'(str0 str ...)))
+       #'(search-for (list str0 str ...))]
       [(help #:search str ...)
        (with-syntax ([(str ...)
                       (map (lambda (e)
@@ -32,32 +36,37 @@
       [_
        (raise-syntax-error
         #f
-        (string-append "expects a single identifer, a #:from clause, or a"
-                       " #:search clause; try just `help' for more information")
+        (string-append "expects any number of literal strings, a single"
+                       " identifier, an identifier followed by a #:from clause,"
+                       " or a #:search clause;"
+                       " try `(help help)' for more information")
         stx)])))
 
 (define (open-help-start)
-  (find-help #'help))
+  (go-to-main-page))
 
 ;; Autoload utilities from help/help-utils; if it does not exists,
 ;; suggest using docs.plt-scheme.org.
 
 (define-namespace-anchor anchor)
 (define get-binding
-  (let ([ns #f] [utils #f])
+  (let ([ns #f])
     (lambda (sym)
       (unless ns
-        (set! ns (namespace-anchor->empty-namespace anchor))
-        (set! utils (resolved-module-path-name
-                     (module-path-index-resolve
-                      (module-path-index-join 'help/help-utils #f)))))
-      (parameterize ([current-namespace ns])
-        (if (file-exists? utils)
-          (dynamic-require utils sym)
-          (lambda _
-            (error 'help "documentation system unavailable; ~a\n~a"
-                   "try http://docs.plt-scheme.org/"
-                   (format "  (missing file: ~a)" utils))))))))
+        (set! ns (namespace-anchor->empty-namespace anchor)))
+      (with-handlers ([exn:fail?
+                       (lambda (exn)
+                         ((error-display-handler) 
+                          (if (exn? exn)
+                              (exn-message exn)
+                              (format "~s" exn))
+                          exn)
+                         (raise-user-error
+                          'help
+                          (string-append
+                           "documentation system unavailable; "
+                           "try http://docs.plt-scheme.org/")))])
+        (dynamic-require 'help/help-utils sym)))))
 
 (define-syntax-rule (define-help-autoload id)
   (define id
@@ -67,3 +76,4 @@
 (define-help-autoload find-help)
 (define-help-autoload find-help/lib)
 (define-help-autoload search-for)
+(define-help-autoload go-to-main-page)
