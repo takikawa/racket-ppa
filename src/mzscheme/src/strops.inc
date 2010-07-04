@@ -103,17 +103,17 @@ X_(make, string) (int argc, Scheme_Object *argv[])
 
   len = scheme_extract_index("make-" XSTRINGSTR, 0, argc, argv, -1, 0);
 
-  if (len == -1) {
-    scheme_raise_out_of_memory("make-" XSTRINGSTR, "making " XSTR "string of length %s",
-			       scheme_make_provided_string(argv[0], 0, NULL));
-  }
-
   if (argc == 2) {
     if (!CHARP(argv[1]))
       scheme_wrong_type("make-" XSTRINGSTR, CHAR_STR, 1, argc, argv);
     fill = (Xchar)CHAR_VAL(argv[1]);
   } else
     fill = 0;
+
+  if (len == -1) {
+    scheme_raise_out_of_memory("make-" XSTRINGSTR, "making " XSTR "string of length %s",
+			       scheme_make_provided_string(argv[0], 0, NULL));
+  }
 
   str = X(scheme_alloc, _string)(len, fill);
   return str;
@@ -145,8 +145,8 @@ X__(string_length) (int argc, Scheme_Object *argv[])
   return scheme_make_integer(SCHEME_X_STRTAG_VAL(argv[0]));
 }
 
-static Scheme_Object *
-X__(string_ref) (int argc, Scheme_Object *argv[])
+Scheme_Object *
+X_(scheme_checked, string_ref) (int argc, Scheme_Object *argv[])
 {
   long i, len;
   int c;
@@ -169,8 +169,8 @@ X__(string_ref) (int argc, Scheme_Object *argv[])
   return MAKE_CHAR(c);
 }
 
-static Scheme_Object *
-X__(string_set) (int argc, Scheme_Object *argv[])
+Scheme_Object *
+X_(scheme_checked, string_set) (int argc, Scheme_Object *argv[])
 {
   long i, len;
   Xchar *str;
@@ -280,7 +280,7 @@ X__(string_to_list) (int argc, Scheme_Object *argv[])
   if (!SCHEME_X_STRINGP(argv[0]))
     scheme_wrong_type(XSTRINGSTR "->list", XSTR "string", 0, argc, argv);
 
-  chars = SCHEME_X_STR_VAL(argv[0]);
+  chars = (uXchar *)SCHEME_X_STR_VAL(argv[0]);
   len = SCHEME_X_STRTAG_VAL(argv[0]);
 
   if (len < 0xFFF) {

@@ -653,10 +653,11 @@
                              (string-constant goto-line)
                              (string-constant goto-line))))])
 		    (when (string? num-str)
-		      (let ([line-num (inexact->exact (string->number num-str))])
+		      (let* ([possible-num (string->number num-str)]
+                             [line-num (and possible-num (inexact->exact possible-num))])
 			(cond
                           [(and (number? line-num)
-                                (= line-num (floor line-num))
+                                (integer? line-num)
                                 (<= 1 line-num (+ (send edit last-paragraph) 1)))
                            (let ([pos (send edit paragraph-start-position 
                                             (sub1 line-num))])
@@ -990,11 +991,6 @@
 	      (map "c:x;c:g" "ring-bell")
 	      (map "c:c;c:g" "ring-bell")
 
-              ;; This mapping is here to avoid having ctl-z insert "z"
-              ;;  when the "Undo" menu item is disabled, because inserting
-              ;;  "z" empties the redo stack
-              (map "c:z" "ring-bell")
-	      
 	      (map-meta "(" "insert-()-pair")
 	      (map-meta "[" "insert-[]-pair")
 	      (map-meta "{" "insert-{}-pair")

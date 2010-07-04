@@ -25,6 +25,7 @@
   scheme_extension_table->scheme_current_thread_ptr = scheme_current_thread_ptr;
   scheme_extension_table->scheme_fuel_counter_ptr = scheme_fuel_counter_ptr;
 #endif
+  scheme_extension_table->scheme_get_current_thread = scheme_get_current_thread;
   scheme_extension_table->scheme_start_atomic = scheme_start_atomic;
   scheme_extension_table->scheme_end_atomic = scheme_end_atomic;
   scheme_extension_table->scheme_end_atomic_no_swap = scheme_end_atomic_no_swap;
@@ -105,10 +106,12 @@
   scheme_extension_table->scheme_multiple_values = scheme_multiple_values;
   scheme_extension_table->scheme_uchar_table = scheme_uchar_table;
   scheme_extension_table->scheme_uchar_cases_table = scheme_uchar_cases_table;
+  scheme_extension_table->scheme_uchar_cats_table = scheme_uchar_cats_table;
   scheme_extension_table->scheme_uchar_ups = scheme_uchar_ups;
   scheme_extension_table->scheme_uchar_downs = scheme_uchar_downs;
   scheme_extension_table->scheme_uchar_titles = scheme_uchar_titles;
   scheme_extension_table->scheme_uchar_folds = scheme_uchar_folds;
+  scheme_extension_table->scheme_uchar_combining_classes = scheme_uchar_combining_classes;
   scheme_extension_table->scheme_eval = scheme_eval;
   scheme_extension_table->scheme_eval_multi = scheme_eval_multi;
   scheme_extension_table->scheme_eval_compiled = scheme_eval_compiled;
@@ -123,10 +126,10 @@
   scheme_extension_table->scheme_eval_string = scheme_eval_string;
   scheme_extension_table->scheme_eval_string_multi = scheme_eval_string_multi;
   scheme_extension_table->scheme_eval_string_all = scheme_eval_string_all;
-  scheme_extension_table->_scheme_apply_known_closed_prim = _scheme_apply_known_closed_prim;
-  scheme_extension_table->_scheme_apply_known_closed_prim_multi = _scheme_apply_known_closed_prim_multi;
-  scheme_extension_table->_scheme_apply_closed_prim = _scheme_apply_closed_prim;
-  scheme_extension_table->_scheme_apply_closed_prim_multi = _scheme_apply_closed_prim_multi;
+  scheme_extension_table->_scheme_apply_known_prim_closure = _scheme_apply_known_prim_closure;
+  scheme_extension_table->_scheme_apply_known_prim_closure_multi = _scheme_apply_known_prim_closure_multi;
+  scheme_extension_table->_scheme_apply_prim_closure = _scheme_apply_prim_closure;
+  scheme_extension_table->_scheme_apply_prim_closure_multi = _scheme_apply_prim_closure_multi;
   scheme_extension_table->scheme_values = scheme_values;
   scheme_extension_table->scheme_check_one_value = scheme_check_one_value;
   scheme_extension_table->scheme_tail_apply = scheme_tail_apply;
@@ -135,6 +138,7 @@
   scheme_extension_table->scheme_tail_eval_expr = scheme_tail_eval_expr;
   scheme_extension_table->scheme_set_tail_buffer_size = scheme_set_tail_buffer_size;
   scheme_extension_table->scheme_force_value = scheme_force_value;
+  scheme_extension_table->scheme_force_one_value = scheme_force_one_value;
   scheme_extension_table->scheme_set_cont_mark = scheme_set_cont_mark;
   scheme_extension_table->scheme_push_continuation_frame = scheme_push_continuation_frame;
   scheme_extension_table->scheme_pop_continuation_frame = scheme_pop_continuation_frame;
@@ -207,17 +211,21 @@
   scheme_extension_table->scheme_clone_hash_table = scheme_clone_hash_table;
   scheme_extension_table->scheme_make_prim = scheme_make_prim;
   scheme_extension_table->scheme_make_noneternal_prim = scheme_make_noneternal_prim;
-  scheme_extension_table->scheme_make_closed_prim = scheme_make_closed_prim;
   scheme_extension_table->scheme_make_prim_w_arity = scheme_make_prim_w_arity;
   scheme_extension_table->scheme_make_folding_prim = scheme_make_folding_prim;
+  scheme_extension_table->scheme_make_noncm_prim = scheme_make_noncm_prim;
   scheme_extension_table->scheme_make_noneternal_prim_w_arity = scheme_make_noneternal_prim_w_arity;
+  scheme_extension_table->scheme_make_prim_w_everything = scheme_make_prim_w_everything;
+  scheme_extension_table->scheme_make_prim_closure_w_arity = scheme_make_prim_closure_w_arity;
+  scheme_extension_table->scheme_make_folding_prim_closure = scheme_make_folding_prim_closure;
+  scheme_extension_table->scheme_make_closed_prim = scheme_make_closed_prim;
   scheme_extension_table->scheme_make_closed_prim_w_arity = scheme_make_closed_prim_w_arity;
   scheme_extension_table->scheme_make_folding_closed_prim = scheme_make_folding_closed_prim;
-  scheme_extension_table->scheme_make_prim_w_everything = scheme_make_prim_w_everything;
   scheme_extension_table->scheme_make_closed_prim_w_everything = scheme_make_closed_prim_w_everything;
   scheme_extension_table->scheme_prim_is_method = scheme_prim_is_method;
   scheme_extension_table->scheme_make_pair = scheme_make_pair;
   scheme_extension_table->scheme_make_immutable_pair = scheme_make_immutable_pair;
+  scheme_extension_table->scheme_make_raw_pair = scheme_make_raw_pair;
   scheme_extension_table->scheme_make_byte_string = scheme_make_byte_string;
   scheme_extension_table->scheme_make_sized_byte_string = scheme_make_sized_byte_string;
   scheme_extension_table->scheme_make_sized_offset_byte_string = scheme_make_sized_offset_byte_string;
@@ -441,6 +449,7 @@
   scheme_extension_table->scheme_get_host_address = scheme_get_host_address;
   scheme_extension_table->scheme_free_host_address = scheme_free_host_address;
   scheme_extension_table->scheme_host_address_strerror = scheme_host_address_strerror;
+  scheme_extension_table->scheme_getnameinfo = scheme_getnameinfo;
   scheme_extension_table->scheme_get_port_file_descriptor = scheme_get_port_file_descriptor;
   scheme_extension_table->scheme_get_port_socket = scheme_get_port_socket;
   scheme_extension_table->scheme_set_type_printer = scheme_set_type_printer;
@@ -458,10 +467,6 @@
   scheme_extension_table->scheme_global_bucket = scheme_global_bucket;
   scheme_extension_table->scheme_global_keyword_bucket = scheme_global_keyword_bucket;
   scheme_extension_table->scheme_module_bucket = scheme_module_bucket;
-  scheme_extension_table->scheme_exptime_global_bucket = scheme_exptime_global_bucket;
-  scheme_extension_table->scheme_exptime_expdef_global_bucket = scheme_exptime_expdef_global_bucket;
-  scheme_extension_table->scheme_exptime_module_bucket = scheme_exptime_module_bucket;
-  scheme_extension_table->scheme_exptime_expdef_module_bucket = scheme_exptime_expdef_module_bucket;
   scheme_extension_table->scheme_builtin_value = scheme_builtin_value;
   scheme_extension_table->scheme_set_global_bucket = scheme_set_global_bucket;
   scheme_extension_table->scheme_install_macro = scheme_install_macro;

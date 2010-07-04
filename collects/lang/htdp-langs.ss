@@ -301,13 +301,13 @@ tracing todo:
           (inherit get-module get-transformer-module get-init-code
                    use-namespace-require/copy?)
           (define/override (create-executable setting parent program-filename teachpack-cache)
-            (let ([executable-filename
+            (let ([dist-filename
 		   (drscheme:language:put-executable
 		    parent program-filename
-		    #f 
-		    #t
-		    (string-constant save-a-mred-stand-alone-executable))])
-              (when executable-filename
+		    'distribution
+		    #t 
+		    (string-constant save-a-mred-distribution))])
+              (when dist-filename
                 (let ([wrapper-filename (make-temporary-file "drs-htdp-lang-executable~a.ss")]
                       [teachpack-specs
                        (map (lambda (x) `(file ,(path->string x)))
@@ -333,9 +333,9 @@ tracing todo:
                       (write `(require #%htdp-lang-executable) outp)
                       (newline outp))
                     'truncate)
-                  (drscheme:language:create-module-based-stand-alone-executable
+                  (drscheme:language:create-module-based-distribution
                    wrapper-filename
-                   executable-filename
+                   dist-filename
                    (get-module)
                    (get-transformer-module)
                    (get-init-code setting teachpack-cache)
@@ -655,13 +655,15 @@ tracing todo:
                         (send s set-delta-foreground "firebrick")
                         s)
                       #f)))))
-        (hash-table-put! (thread-cell-ref current-test-coverage-info)
-                         key
-                         (list #f expr)))
+        (let ([ht (thread-cell-ref current-test-coverage-info)])
+          (when ht
+            (hash-table-put! ht key (list #f expr)))))
       
       (define (test-covered key)
-        (let ([v (hash-table-get (thread-cell-ref current-test-coverage-info) key)])
-          (set-car! v #t)))
+        (let ([ht (thread-cell-ref current-test-coverage-info)])
+          (when ht
+            (let ([v (hash-table-get ht key)])
+              (set-car! v #t)))))
       
       (define-values/invoke-unit/sig et:stacktrace^ et:stacktrace@ et et:stacktrace-imports^)
 
@@ -711,7 +713,7 @@ tracing todo:
 				 (send tab tracing:add-line (get-output-string sp))
 				 (semaphore-post sema))
 			       #f)))
-			  ;; Wait for th eline to get written, so that the
+			  ;; Wait for the line to get written, so that the
 			  ;;  trace output doesn't get too far behind (which
 			  ;;  matters, again, for infinite loops)
 			  (semaphore-wait sema)))))))))))

@@ -32,7 +32,7 @@
 	   (lib "link.ss" "dynext")
 	   (lib "pack.ss" "setup")
 	   (lib "getinfo.ss" "setup")
-	   (lib "plthome.ss" "setup"))
+	   (lib "dirs.ss" "setup"))
 
   (define dest-dir (make-parameter #f))
   (define auto-dest-dir (make-parameter #f))
@@ -40,9 +40,14 @@
   (define ld-output (make-parameter #f))
 
   (define exe-output (make-parameter #f))
-  (define exe-embedded-flags (make-parameter '("-mvq-")))
+  (define exe-embedded-flags (make-parameter '("-m" "-v" "-U" "-q" "--")))
   (define exe-embedded-libraries (make-parameter null))
   (define exe-aux (make-parameter null))
+  (define exe-embedded-collects-path (make-parameter #f))
+  (define exe-embedded-collects-dest (make-parameter #f))
+  (define exe-dir-add-collects-dirs (make-parameter null))
+
+  (define exe-dir-output (make-parameter #f))
 
   (define module-mode (make-parameter #f))
 
@@ -53,8 +58,11 @@
   (define plt-files-replace (make-parameter #f))
   (define plt-files-plt-relative? (make-parameter #f))
   (define plt-files-plt-home-relative? (make-parameter #f))
+  (define plt-force-install-dir? (make-parameter #f))
   (define plt-setup-collections (make-parameter null))
   (define plt-include-compiled (make-parameter #f))
+
+  (define stop-at-source (make-parameter #f))
 
   (define (extract-suffix appender)
     (bytes->string/latin-1
@@ -129,6 +137,10 @@
 	 ,(lambda (f name) (exe-output name) 'gui-exe)
 	 (,(format "Embed module in MrEd to create <exe>")
 	  "exe")]
+	[("--exe-dir")
+	 ,(lambda (f name) (exe-dir-output name) 'exe-dir)
+	 (,(format "Combine executables with support files in <dir>")
+	  "dir")]
 	[("--collection-plt")
 	 ,(lambda (f name) (plt-output name) 'plt-collect)
 	 (,(format "Create .plt <archive> containing collections")
@@ -147,6 +159,11 @@
 	[("--embedded")
 	 ,(lambda (f) (compiler:option:compile-for-embedded #t))
 	 ("Compile for embedded run-time engine, with -c/-o/-g")]
+	[("--source")
+	 ,(lambda (f) (stop-at-source #t))
+	 (,(format "Stop at ~a instead of ~a for -o/-g"
+		   (extract-suffix append-c-suffix)
+		   (extract-suffix append-object-suffix)))]
 	[("-p" "--prefix") 
 	 ,(lambda (f v) v)
 	 ("Add elaboration-time prefix file for -e/-c/-o/-z" "file")]
@@ -256,6 +273,14 @@
        [help-labels
 	"--------------------- executable configuration flags ------------------------"]
        [once-each
+	[("--collects-path")
+	 ,(lambda (f i)
+	    (exe-embedded-collects-path i))
+	 ("Set <path> main collects in --[gui-]exe/--exe-dir" "path")]
+	[("--collects-dest")
+	 ,(lambda (f i)
+	    (exe-embedded-collects-dest i))
+	 ("Add --[gui-]exe collection code to <dir>" "dir")]
 	[("--ico")
 	 ,(lambda (f i) (exe-aux
 			 (cons (cons 'ico i)
@@ -265,13 +290,23 @@
 	 ,(lambda (f i) (exe-aux
 			 (cons (cons 'icns i)
 			       (exe-aux))))
-	 ("Mac OS X icon for --[gui-]exe executable" ".icns-file")]]
+	 ("Mac OS X icon for --[gui-]exe executable" ".icns-file")]
+	[("--orig-exe")
+	 ,(lambda (f) (exe-aux 
+		       (cons (cons 'original-exe? #t)
+			     (exe-aux))))
+	 ("Use original executable for --[gui-]exe instead of stub")]]
        [multi
 	[("++lib")
 	 ,(lambda (f l c) (exe-embedded-libraries
 			   (append (exe-embedded-libraries)
 				   (list (list l c)))))
 	 ("Embed <lib> from <collect> in --[gui-]exe executable" "lib" "collect")]
+	[("++collects-copy")
+	 ,(lambda (f d) (exe-dir-add-collects-dirs
+			 (append (exe-dir-add-collects-dirs)
+				 (list d))))
+	 ("Add collects in <dir> to --exe-dir" "dir")]
 	[("++exf") 
 	 ,(lambda (f v) (exe-embedded-flags
 			 (append (exe-embedded-flags)
@@ -299,10 +334,17 @@
 	 ("Files in archive replace existing files when unpacked")]
 	[("--at-plt")
 	 ,(lambda (f) (plt-files-plt-relative? #t))
-	 ("Files/dirs in archive are relative to PLT add-ons directory")]
+	 ("Files/dirs in archive are relative to user's add-ons directory")]]
+       [once-any
 	[("--all-users")
 	 ,(lambda (f) (plt-files-plt-home-relative? #t))
-	 ("Files/dirs in archive are relative to PLT installation directory")]
+	 ("Files/dirs in archive go to PLT installation if writable")]
+	[("--force-all-users")
+	 ,(lambda (f) 
+	    (plt-files-plt-home-relative? #t)
+	    (plt-force-install-dir? #t))
+	 ("Files/dirs forced to PLT installation")]]
+       [once-each
 	[("--include-compiled")
 	 ,(lambda (f) (plt-include-compiled #t))
 	 ("Include \"compiled\" subdirectories in the archive")]]
@@ -383,7 +425,7 @@
 		   (void)))))))
      (list "file/directory/collection" "file/directory/sub-collection")))
 
-  (printf "mzc version ~a, Copyright (c) 2004-2005 PLT Scheme Inc.~n"
+  (printf "mzc version ~a, Copyright (c) 2004-2006 PLT Scheme Inc.~n"
 	  (version))
 
   (define-values (mode source-files prefix)
@@ -410,12 +452,14 @@
     [(compile-c)
      ((compile-extensions-to-c prefix) source-files (dest-dir))]
     [(compile-o)
-     ((compile-extension-parts prefix) source-files (dest-dir))]
+     (((if (stop-at-source) compile-extension-parts-to-c compile-extension-parts) prefix)
+      source-files (dest-dir))]
     [(link)
      (never-embedded "link")
      (link-extension-parts source-files (or (dest-dir) (current-directory)))]
     [(link-glue)
-     (glue-extension-parts source-files (or (dest-dir) (current-directory)))]
+     ((if (stop-at-source) glue-extension-parts-to-c glue-extension-parts)
+      source-files (or (dest-dir) (current-directory)))]
     [(zo)
      ((compile-zos prefix) source-files (if (auto-dest-dir)
 					    'auto
@@ -484,7 +528,7 @@
 		    (not (compiler:option:verbose))
 		    file
 		    out-file
-		    (list (build-path plthome "include")))
+		    (list (find-include-dir)))
 		   (printf " [output to \"~a\"]~n" out-file)))
 	       source-files)]
     [(exe gui-exe)
@@ -496,27 +540,37 @@
 		  (exe-output)
 		  (eq? mode 'gui-exe))])
        ((dynamic-require '(lib "embed.ss" "compiler" "private") 
-			 'mzc:make-embedding-executable)
+			 'mzc:create-embedding-executable)
 	dest
-	(eq? mode 'gui-exe) 
-	(compiler:option:verbose)
-	(cons
-	 `(#%mzc: (file ,(car source-files)))
-	 (map (lambda (l)
-		`(#t (lib ,@l)))
-	      (exe-embedded-libraries)))
-	null
-	`(require ,(string->symbol
-		    (format
-		     "#%mzc:~a"
-		     (let-values ([(base name dir?) (split-path (car source-files))])
-		       (path->bytes (path-replace-suffix name #""))))))
-	(let ([flags (exe-embedded-flags)])
-	  (if (eq? mode 'gui-exe) 
-	      (cons "-Z" flags)
-	      flags))
-	(exe-aux))
+	#:mred? (eq? mode 'gui-exe) 
+	#:variant (if (compiler:option:3m) '3m 'normal)
+	#:verbose? (compiler:option:verbose)
+	#:modules (cons
+		   `(#%mzc: (file ,(car source-files)))
+		   (map (lambda (l)
+			  `(#t (lib ,@l)))
+			(exe-embedded-libraries)))
+	#:literal-expression `(require ,(string->symbol
+					 (format
+					  "#%mzc:~a"
+					  (let-values ([(base name dir?) (split-path (car source-files))])
+					    (path->bytes (path-replace-suffix name #""))))))
+	#:cmdline (let ([flags (exe-embedded-flags)])
+		    (if (eq? mode 'gui-exe) 
+			(cons "-Z" flags)
+			flags))
+	#:collects-path (exe-embedded-collects-path)
+	#:collects-dest (exe-embedded-collects-dest)
+	#:aux (exe-aux))
        (printf " [output to \"~a\"]~n" dest))]
+    [(exe-dir)
+     ((dynamic-require '(lib "distribute.ss" "compiler") 
+		       'assemble-distribution)
+      (exe-dir-output)
+      source-files
+      #:collects-path (exe-embedded-collects-path)
+      #:copy-collects (exe-dir-add-collects-dirs))
+     (printf " [output to \"~a\"]~n" (exe-dir-output))]
     [(plt)
      (for-each (lambda (fd)
 		 (unless (relative-path? fd)
@@ -525,25 +579,27 @@
 		    "file/directory is not relative to the current directory: \"~a\""
 		    fd)))
 	       source-files)
-     (pack (plt-output) (plt-name)
-	   source-files
-	   (map list (plt-setup-collections))
-	   std-filter #t 
-	   (if (plt-files-replace)
-	       'file-replace
-	       'file)
-	   #f
-	   (or (plt-files-plt-relative?)
-	       (plt-files-plt-home-relative?))
-	   ;; Get current version of mzscheme for require:
-	   (let ([i (get-info '("mzscheme"))])
-	     (let ([v (and i (i 'version (lambda () #f)))])
-	       (list (list '("mzscheme") v))))
-	   null
-	   (plt-files-plt-home-relative?))
+     (pack-plt (plt-output) (plt-name)
+	       source-files
+	       #:collections (map list (plt-setup-collections))
+	       #:file-mode (if (plt-files-replace)
+			       'file-replace
+			       'file)
+	       #:plt-relative? (or (plt-files-plt-relative?)
+				   (plt-files-plt-home-relative?))
+	       #:at-plt-home? (plt-files-plt-home-relative?)
+	       #:test-plt-dirs (if (or (plt-force-install-dir?)
+				       (not (plt-files-plt-home-relative?)))
+				   #f
+				   (list "collects" "doc" "include" "lib"))
+	       #:requires
+	       ;; Get current version of mzscheme for require:
+	       (let ([i (get-info '("mzscheme"))])
+		 (let ([v (and i (i 'version (lambda () #f)))])
+		   (list (list '("mzscheme") v)))))
      (printf " [output to \"~a\"]~n" (plt-output))]
     [(plt-collect)
-     (pack-collections
+     (pack-collections-plt
       (plt-output)
       (if (eq? default-plt-name (plt-name))
 	  #f
@@ -555,13 +611,14 @@
 		     (cons (cadr m) (loop (caddr m)))
 		     (list sf)))))
 	   source-files)
-      (plt-files-replace)
-      (map list (plt-setup-collections))
-      (if (plt-include-compiled)
-	  (lambda (path)
-	    (or (regexp-match #rx"compiled$" path)
-		(std-filter path)))
-	  std-filter)
-      (plt-files-plt-home-relative?))
+      #:replace? (plt-files-replace)
+      #:extra-setup-collections (map list (plt-setup-collections))
+      #:file-filter (if (plt-include-compiled)
+			(lambda (path)
+			  (or (regexp-match #rx"compiled$" path)
+			      (std-filter path)))
+			std-filter)
+      #:at-plt-home? (plt-files-plt-home-relative?)
+      #:test-plt-collects? (not (plt-force-install-dir?)))
      (printf " [output to \"~a\"]~n" (plt-output))]
     [else (printf "bad mode: ~a~n" mode)]))

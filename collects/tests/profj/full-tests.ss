@@ -3,11 +3,63 @@
            (lib "parameters.ss" "profj"))
   
   (prepare-for-tests "Full")
+
+  (execute-test 
+   "class hasCharArray {  
+     char[] b = new char[]{'a'};
+   }" 'full #f "Test of array alloc init")
+  
+  (execute-test
+   "class Aextendee {
+     int f (Aextendee x) { return 4; }
+    }
+    class Bextendor extends Aextendee {
+     int f( Bextendor x) { return 5; }
+    }"
+   'full #f 
+   "Overloading introduced on extends")
+  
+  (execute-test
+   "class Xforward {
+     int x = y;
+     int y;
+   }" 'full #t "Forward reference error")
+  
+  (interact-test 
+   "class Xnoundef {
+     int x = this.y;
+     int y = 2;
+    }"
+   'full
+   '("new Xnoundef().x" "new Xnoundef().y")
+   '(0 2)
+   "Testing no undefined fields")
   
   (parameterize ((dynamic? #t))
-    (interact-test "class A { }"
+    (interact-test
+     "class Xeq { }"
+    'full
+    '("Xeq x = new Xeq();" "Xeq y = (dynamic) x;" "x.equals(y)" "y.equals(x)" "y==x" "x==y")
+    '((void) (void) #t #t #t #t)
+    "Equality test of a wrapped and unwrapped object"))
+  
+  (parameterize ((dynamic? #t))
+    (interact-test
+    "class Xacc { int y; Xacc(int y) { this.y = y; } }"
+    'full 
+    '("Xacc x = new Xacc(3);" "Xacc y = (dynamic) x;"  "x.y = 4"  "y.y" "y.y=5" "x.y")
+    '((void) (void) 4 4 5 5)
+    "Accessing fields of a dynamic value"))
+  
+  (execute-test
+   "package a; class a { int x; 
+                     Object get() { class b { int y() { return a.this.x; } }  return new b(); }}"
+   'full #f "Statement inner class accessing package field")
+  
+  (parameterize ((dynamic? #t))
+    (interact-test "class Acast { }"
                    'full
-                   '("dynamic x = new A();" "A a = x;" "(A) a")
+                   '("dynamic x = new Acast();" "Acast a = x;" "(Acast) a")
                    '((void) (void) a~f)
                    "Casting a guarded/asserted value back to the original type"))
   
@@ -25,20 +77,20 @@
   
   (parameterize ((dynamic? #t))
     (interact-test
-     "class X{ int x( int i) { return i; }}"
+     "class Xcastd{ int x( int i) { return i; }}"
      'full 
-     '("((dynamic) new X()).x(1)" "((dynamic) new X()).x()")
+     '("((dynamic) new Xcastd()).x(1)" "((dynamic) new Xcastd()).x()")
      '(1 error)
      "Test of casting known values to dynamic"))
      
   (execute-test
-   "interface A {}
-    interface B {}
-    class C implements A, B {
+   "interface Aa {}
+    interface Ba {}
+    class Ca implements Aa, Ba {
     static void go() {
-	C c = new C();
-	A a = c;
-	B b = c;
+	Ca c = new Ca();
+	Aa a = c;
+	Ba b = c;
 	
 	if (a == b) {
 	    b=b;
@@ -53,43 +105,43 @@
   }" 'full #f "test of ==, using castable")
   
   (execute-test
-   "class A { }
-    class B extends A { }
-    class C extends A { }
-    class X {
-      A a = new B();
-      C b = new C();
+   "class Ab { }
+    class Bb extends Ab { }
+    class Cb extends Ab { }
+    class Xb {
+      Ab a = new Bb();
+      Cb b = new Cb();
       boolean e() {
         return a == b;
       }
     }" 'full #f "Test of ==")
   
   (execute-test
-   "class A { }
-    class B extends A { }
-    class C extends A { }
-    class X { 
-      B a = new B();
-      C b = new C();
+   "class Ac { }
+    class Bc extends Ac { }
+    class Cc extends Ac { }
+    class Xc { 
+      Bc a = new Bc();
+      Cc b = new Cc();
       boolean e() {
         return a == b;
       }
     }" 'full #t "Incompatible type test ==")
   
   (execute-test
-   "class A {
+   "class Ad {
       boolean b() {
         return \"hi\" == new Object();
       }
     }" 'full #f "Comparing String and Object")
   
   (execute-test
-   "final class A {
+   "final class Ae {
     }
-    interface B { }
-    class X {
-      Object o( A a ) {
-        return (B) a;
+    interface Be { }
+    class Xe {
+      Object o( Ae a ) {
+        return (Be) a;
       }
     }" 'full #t "Cast from final class to unimpl interface")
   
@@ -100,35 +152,35 @@
   
   (parameterize ((dynamic? #t))
     (execute-test
-     "class X { int m(dynamic x) { return x(1); } }"
+     "class Xf { int m(dynamic x) { return x(1); } }"
      'full #f "Using a dynamic parameter as a method"))
   
   (parameterize ((dynamic? #t))
     (execute-test
-     "class X { dynamic x; }"
+     "class Xg { dynamic x; }"
      'full #f "Dynamic variable (unused) in class")
     (execute-test
-     "class X { dynamic x; int foo() { return x; } }"
+     "class Xh { dynamic x; int foo() { return x; } }"
      'full #f "Dynamic variable used, but not executed in class")
     (execute-test
-     "class X { dynamic f() { return 3; } }"
+     "class Xi { dynamic f() { return 3; } }"
      'full #f "Method returning dynamic with actual an int")
     (execute-test
-     "class X { int f(dynamic x) { return 3; }}"
+     "class Xj { int f(dynamic x) { return 3; }}"
      'full #f "Method with dynamic parm, not used")
     (execute-test
-     "class X {float f(dynamic x, dynamic y) { return x + y; }}"
+     "class Xk {float f(dynamic x, dynamic y) { return x + y; }}"
      'full #f "Method adding two dynamics, returning a float")
     (interact-test
-     "class X { float f( dynamic x, dynamic y) { return x + y; }}"
-     'full (list "new X().f(1,1);")
+     "class Xl { float f( dynamic x, dynamic y) { return x + y; }}"
+     'full (list "new Xl().f(1,1);")
      (list 2) 
      "Method adding two dynamics (returning a float), called"))
     
   
   
   (execute-test
-   "class C {
+   "class Crv {
      void x() { return 1; }
     }"
    'full #t "Trying to return value from void method")
@@ -140,7 +192,7 @@
    "Make sure returns are type-checked in interactions")
   
   (execute-test
-   "class A {
+   "class Abames {
      void n() { }
      void s() { }
      void src() { }
@@ -149,15 +201,15 @@
    'full #f "Names that used to get clobbered")
   
   (interact-test 
-   "class A {
+   "class Ainner {
      class B {
        B() { }
-       A m = A.this;
+       Ainner m = Ainner.this;
      }
-     B b = new B();
+     //B b = new B();
     }"
    'full
-   (list "A a = new A();" "A.B b = a.new B();" "a.new B().m")
+   (list "Ainner a = new Ainner();" "Ainner.B b = a.new B();" "a.new B().m")
    (list '(void) '(void) 'a~f)
    "Inner class creation")
   
@@ -186,15 +238,15 @@
    }" 'full #f "Instanceof test")
 
   
-  (execute-test "interface F { 
+  (execute-test "interface Faa { 
                    int foo(int x);
                  }
-                 interface G extends F {
+                 interface Gaa extends Faa {
                    int foo(int x);
                  }
 
-                 class A implements G {
-                   A() { }
+                 class Aia implements Gaa {
+                   Aia() { }
                    int foo(int x) { return 3; }
                  }" 'full #f "Extending an interface while overriding a method")
   
@@ -206,19 +258,19 @@
    'full #f "Static access and order")
 
   (interact-test
-   "public class hasStatic {
+   "public class hasStatic1 {
    private int myId;
 
-   public hasStatic( int id ) {
+   public hasStatic1( int id ) {
      super();
      this.myId = id;
    }
 
-   public static int returnId( hasStatic s ) {
+   public static int returnId( hasStatic1 s ) {
       return s.myId;
    }
   }"
-   'full (list "hasStatic.returnId(new hasStatic(4))") (list 4) "Static use of private field")
+   'full (list "hasStatic1.returnId(new hasStatic1(4))") (list 4) "Static use of private field")
   
   (interact-test 'full
                  (list "int x = 4;" "x")
@@ -246,17 +298,17 @@
    'full #t "Misplaced super call")
   
   (interact-test
-   "class A {
+   "class Az {
     static int x= 0;
     static {
      for(int i = 0; i< 10; i++)
       x += i;
      }
     }"
-   'full (list "A.x") (list 45)  "for loop in static section")
+   'full (list "Az.x") (list 45)  "for loop in static section")
   
   (execute-test
-   "class A { A() { super.toString(); } }"
+   "class Azz { Azz() { super.toString(); } }"
    'full #f "Calling a super method")
   
   (report-test-results))

@@ -3,7 +3,7 @@
  * Purpose:     MrEd main file, including a hodge-podge of global stuff
  * Author:      Matthew Flatt
  * Created:     1995
- * Copyright:   (c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:   (c) 2004-2006 PLT Scheme Inc.
  * Copyright:   (c) 1995-2000, Matthew Flatt
  */
 
@@ -78,15 +78,17 @@ static void yield_indefinitely()
   void *dummy;
 #endif
   mz_jmp_buf * volatile save, newbuf;
+  Scheme_Thread * volatile p;
 
-  save = scheme_current_thread->error_buf;
-  scheme_current_thread->error_buf = &newbuf;
+  p = scheme_get_current_thread();
+  save = p->error_buf;
+  p->error_buf = &newbuf;
 
   if (!scheme_setjmp(newbuf)) {
     mred_wait_eventspace();
   }
 
-  scheme_current_thread->error_buf = save;
+  p->error_buf = save;
 
 #ifdef MZ_PRECISE_GC
   dummy = NULL; /* makes xform think that dummy is live, so we get a __gc_var_stack__ */
@@ -126,12 +128,15 @@ extern "C" Scheme_Object *scheme_initialize(Scheme_Env *env);
 #endif
 #define GET_INIT_FILENAME get_init_filename
 #if REDIRECT_STDIO || WINDOW_STDIO || WCONSOLE_STDIO
-# define PRINTF scheme_console_printf
+# define PRINTF mred_console_printf
+static void (*mred_console_printf)(char *str, ...);
+# define NEED_MRED_CONSOLE_PRINTF
 #else
 # define PRINTF printf
 #endif
 #define PROGRAM "MrEd"
 #define PROGRAM_LC "mred"
+#define INITIAL_BIN_TYPE "ri"
 
 #ifdef wx_mac
 # ifndef OS_X
@@ -190,9 +195,11 @@ static FinishArgs *xfa;
 static void do_graph_repl(Scheme_Env *env)
 {
   mz_jmp_buf * volatile save, newbuf;
+  Scheme_Thread * volatile p;
 
-  save = scheme_current_thread->error_buf;
-  scheme_current_thread->error_buf = &newbuf;
+  p = scheme_get_current_thread();
+  save = p->error_buf;
+  p->error_buf = &newbuf;
 
   if (!scheme_setjmp(newbuf)) {
     if (xfa->alternate_rep)
@@ -201,7 +208,7 @@ static void do_graph_repl(Scheme_Env *env)
       scheme_eval_string("(graphical-read-eval-print-loop)", env);
   }
 
-  scheme_current_thread->error_buf = save;
+  p->error_buf = save;
 
 #ifdef MZ_PRECISE_GC
   env = NULL; /* makes xform think that env is live, so we get a __gc_var_stack__ */
@@ -228,11 +235,14 @@ static int do_main_loop(FinishArgs *fa)
 
  {
    mz_jmp_buf * volatile save, newbuf;
-   save = scheme_current_thread->error_buf;
-   scheme_current_thread->error_buf = &newbuf;
+   Scheme_Thread * volatile p;
+
+   p = scheme_get_current_thread();
+   save = p->error_buf;
+   p->error_buf = &newbuf;
    if (!scheme_setjmp(newbuf))
      wxDoMainLoop();
-   scheme_current_thread->error_buf = save;
+   p->error_buf = save;
  }
 
   return 0;
@@ -240,6 +250,9 @@ static int do_main_loop(FinishArgs *fa)
 
 static void run_from_cmd_line(int argc, char **argv, Scheme_Env *(*mk_basic_env)(void))
 {
+#ifdef NEED_MRED_CONSOLE_PRINTF
+  mred_console_printf = scheme_get_console_printf();
+#endif
   run_from_cmd_line(argc, argv, mk_basic_env, do_main_loop);
 }
 
@@ -262,7 +275,6 @@ int main(int argc, char *argv[])
 {
   int rval;
   void *stack_start;
-
 
   stack_start = (void *)&stack_start;
 
@@ -296,103 +308,21 @@ int main(int argc, char *argv[])
 
 #ifdef wx_mac
   wxMacDisableMods = controlKey;
-
 # ifndef OS_X
   scheme_creator_id = 'mReD';
   wxMediaCreatorId = 'mReD';
-# endif
-
-# if !defined(__powerc) && !defined(__ppc__)
-  long calcLimit, size;
-  THz zone;
-	
-  zone = GetZone();
-  size = ((long)LMGetCurStackBase()-(*(long *)zone)-sizeof(Zone));
-  calcLimit = size - 1048576; /* 1 MB stack */
-  if (calcLimit % 2)
-    calcLimit++;
-  SetApplLimit((Ptr)((*(long *)zone)+sizeof(Zone)+calcLimit));
 # endif
 #endif
 
 #ifdef wx_mac
   /* initialize Mac stuff */
-# ifdef WX_CARBON
-  ::MoreMasterPointers(4);
-# else
-  ::MaxApplZone();
-  ::InitWindows();
-  ::InitGraf(&qd.thePort);		
-  ::InitFonts();
-  ::InitDialogs(NULL);
-  ::TEInit();
-  ::InitMenus();
-  for (int i=0; i<4; i++) {
-    ::MoreMasters();
-  }
-# endif
-
-# ifdef OS_X
   wx_original_argv_zero = argv[0];
-# endif
-
   wxDrop_GetArgs(&argc, &argv, &wx_in_terminal);
-
-# ifndef OS_X
-  wx_original_argv_zero = argv[0];
-# endif
-
-# ifndef OS_X
-  { 
-    KeyMap keys;
-    GetKeys(keys);
-    if (keys[1] & 32768L) { /* Cmd key down */
-      DialogPtr dial;
-      short hit, type;
-      Rect box;
-      Handle hand;
-      Str255 str;
-      char temp[256];
-      int argc2;
-      char **argv2;
-  
-      dial = GetNewDialog(128, NULL, (WindowRef)-1);
-      do {
-        ModalDialog(NULL, &hit);
-      } while (hit > 2);
-      if (hit == 1) {
-        GetDialogItem(dial, 3, &type, &hand, &box);
-        GetDialogItemText(hand, str);
-        CopyPascalStringToC(str,temp);
-        ParseLine(temp, &argc2, &argv2);
-      } else {
-        argc2 = 0;
-        argv2 = NULL;
-      }
-      DisposeDialog(dial);
-      
-      if (argc2) {
-        int i, j;
-        char **both;
-	both = (char **)malloc(sizeof(char *) * (argc + argc2 - 1));
-        for (i = 0; i < argc; i++) {
-          both[i] = argv[i];
-	}
-        for (j = 1; j < argc2; j++, i++) {
-          both[i] = argv2[j];
-	}
-        
-        argv = both;
-        argc += argc2 - 1;
-      }
-    }
-  }
-# endif
 #endif
 
-  scheme_actual_main = CAST_ACTUAL_MAIN actual_main;
-  mred_run_from_cmd_line = run_from_cmd_line;
-  mred_finish_cmd_line_run = finish_cmd_line_run;
+  scheme_set_actual_main(actual_main);
+  mred_set_run_from_cmd_line(run_from_cmd_line);
+  mred_set_finish_cmd_line_run(finish_cmd_line_run);
 
   rval = scheme_image_main(argc, argv);
 
@@ -603,7 +533,7 @@ static char *CreateUniqueName()
   return together;
 }
 
-int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR ignored, int nCmdShow)
+int APIENTRY WinMain_dlls_ready(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR ignored, int nCmdShow)
 {
   LPWSTR m_lpCmdLine;
   long argc, j, l;
@@ -694,5 +624,30 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR ignored
 
   return wxWinMain(wm_is_mred, hInstance, hPrevInstance, argc, argv, nCmdShow, main);
 }
+
+# ifdef MZ_PRECISE_GC
+START_XFORM_SKIP;
+# endif
+
+int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR ignored, int nCmdShow)
+{
+  /* Order matters: load dependencies first */
+# ifndef MZ_PRECISE_GC
+  load_delayed_dll(NULL, "libmzgcxxxxxxx.dll");
+# endif
+  load_delayed_dll(NULL, "libmzsch" DLL_3M_SUFFIX "xxxxxxx.dll");
+  load_delayed_dll(NULL, "libmred" DLL_3M_SUFFIX "xxxxxxx.dll");
+  record_dll_path();
+
+  return WinMain_dlls_ready(hInstance, hPrevInstance, ignored, nCmdShow);
+}
+
+# ifdef MZ_PRECISE_GC
+END_XFORM_SKIP;
+# endif
+
+#if _MSC_VER >= 1400
+#pragma comment(linker,"/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
+#endif
 
 #endif

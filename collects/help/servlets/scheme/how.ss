@@ -4,6 +4,7 @@
            "../../private/manuals.ss"
            "../private/headelts.ss"
            "../../private/installed-components.ss"
+           (lib "uri-codec.ss" "net")
            (lib "servlet.ss" "web-server"))
   
   (provide interface-version timeout start)
@@ -65,12 +66,13 @@
          ,(color-highlight `(H2  "mzc"))
          (A ((NAME "mzc2") (VALUE "mzc compiler")))
          (A ((NAME "mzc3") (VALUE "Compiling")))
-         "The " (B  "mzc") " executable compiles MzScheme and "
-         "MrEd programs to native code using a C compiler "
-         "(which your system must provide).  The resulting native "
-         "code can be loaded into MrEd or MzScheme.  The mzc "
-         "compiler also provides limited support for building "
-         "stand-alone executables from Scheme code." 
+         "The " (B  "mzc") " command-line tool creates stand-alone "
+	 "executables, compiles MzScheme and MrEd programs to byte-code files, compiles "
+         "programs to native code using a C compiler "
+	 ,(if (memq (system-type) '(macosx windows)) 
+	      "(not useful on this machine, since MzScheme's just-in-time compiler works), "
+	      "(useful on on machines where MzScheme's just-in-time compiler is unavailable), ")
+	 "bundles distribution archives, and performs many other tasks."
          (P)
          "On this machine, the mzc program is at " 
          (TT  ,(path->string (mzscheme-program-launcher-path "mzc"))) "."
@@ -95,7 +97,7 @@
          (A ((NAME "setup") (VALUE "Setup PLT program")))
          (A ((NAME "setup2") (VALUE "setup-plt program")))
          (A ((HREF ,(format "/servlets/doc-anchor.ss?file=~a&name=~a&caption=~a"
-                            (hexify-string
+                            (uri-encode
                              (path->string
                               (simplify-path
                                (build-path (collection-path "mzlib") 'up "setup" "doc.txt"))))

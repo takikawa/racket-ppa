@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt, Scott Owens
 
     This library is free software; you can redistribute it and/or
@@ -1165,8 +1165,8 @@ char *scheme_bignum_to_allocated_string(const Scheme_Object *b, int radix, int a
 
 #ifdef MZ_PRECISE_GC
   {
-    char *save = str;
-    str = (char*)scheme_malloc_atomic(slen);
+    unsigned char *save = str;
+    str = (unsigned char*)scheme_malloc_atomic(slen);
     memcpy(str, save, slen);
     RELEASE(save);
   }

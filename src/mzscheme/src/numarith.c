@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -38,26 +38,24 @@ static Scheme_Object *quotient_remainder (int argc, Scheme_Object *argv[]);
 
 void scheme_init_numarith(Scheme_Env *env)
 {
-  scheme_add_global_constant("add1", 
-			     scheme_make_folding_prim(scheme_add1,
-						      "add1",
-						      1, 1, 1),
-			     env);
-  scheme_add_global_constant("sub1", 
-			     scheme_make_folding_prim(scheme_sub1,
-						      "sub1",
-						      1, 1, 1),
-			     env);
-  scheme_add_global_constant("+", 
-			     scheme_make_folding_prim(plus,
-						      "+", 
-						      0, -1, 1),
-			     env);
-  scheme_add_global_constant("-", 
-			     scheme_make_folding_prim(minus,
-						      "-",
-						      1, -1, 1),
-			     env);
+  Scheme_Object *p;
+
+  p = scheme_make_folding_prim(scheme_add1, "add1", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant("add1", p, env);
+
+  p = scheme_make_folding_prim(scheme_sub1, "sub1", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant("sub1", p, env);
+
+  p = scheme_make_folding_prim(plus, "+", 0, -1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("+", p, env);
+
+  p = scheme_make_folding_prim(minus, "-", 1, -1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("-", p, env);
+
   scheme_add_global_constant("*", 
 			     scheme_make_folding_prim(mult,
 						      "*", 
@@ -242,8 +240,8 @@ GEN_BIN_OP(scheme_bin_minus, "-", SUBTRACT, F_SUBTRACT, FS_SUBTRACT, scheme_bign
 GEN_BIN_OP(scheme_bin_mult, "*", MULTIPLY, F_MULTIPLY, FS_MULTIPLY, scheme_bignum_multiply, scheme_rational_multiply, scheme_complex_multiply, GEN_RETURN_0, GEN_RETURN_0, NO_NAN_CHECK, NO_NAN_CHECK)
 GEN_BIN_DIV_OP(scheme_bin_div, "/", DIVIDE, F_DIVIDE, FS_DIVIDE, scheme_make_rational, scheme_rational_divide, scheme_complex_divide)
 
-GEN_NARY_OP(plus, "+", scheme_bin_plus, 0, SCHEME_NUMBERP, "number")
-GEN_NARY_OP(mult, "*", scheme_bin_mult, 1, SCHEME_NUMBERP, "number")
+GEN_NARY_OP(static, plus, "+", scheme_bin_plus, 0, SCHEME_NUMBERP, "number")
+GEN_NARY_OP(static, mult, "*", scheme_bin_mult, 1, SCHEME_NUMBERP, "number")
 
 static Scheme_Object *
 minus (int argc, Scheme_Object *argv[])

@@ -22,7 +22,7 @@
     (parser
      (start CompilationUnit AdvancedInteractions VariableInitializer Type)
      ;;(debug "parser.output")
-     (tokens java-vals special-toks Keywords Separators EmptyLiterals Operators)
+     (tokens java-vals special-toks Keywords Separators EmptyLiterals Operators ExtraKeywords)
      ;(terminals val-tokens special-tokens keyword-tokens separator-tokens literal-tokens operator-tokens)
      (error (lambda (tok-ok name val start-pos end-pos)
               (if ((determine-error))
@@ -55,7 +55,8 @@
                                              (- (position-offset (cadr $1)) (position-offset $1-start-pos))
                                              (file-path))
                                    (car $1))]
-       [(NULL_LIT) (make-literal 'null (build-src 1) #f)])
+       [(NULL_LIT) (make-literal 'null (build-src 1) #f)]
+       [(IMAGE_SPECIAL) (make-literal 'image (build-src 1) $1)])
       
       ;; 19.4
       (Type
@@ -675,7 +676,13 @@
         (if (access? $2)
             (make-cast #f (build-src 4) 
                            (make-type-spec (access->name $2) 0 (build-src 2 2)) $4)
-            (error 'bad-cast))]
+            (raise-read-error "An operator is needed to combine these expressions."
+                              (file-path)
+                              (position-line $1-start-pos)
+                              (position-col $1-start-pos)
+                              (+ (position-offset $1-start-pos) (interactions-offset))
+                              (- (position-offset $4-end-pos)
+                                 (position-offset $1-start-pos))))]
        ;; GJ - Not sure if this is in spec or not.
        ;;[(O_PAREN Name < ReferenceTypeList1 C_PAREN UnaryExpressionNotPlusMinus) #t]
        [(O_PAREN Name Dims C_PAREN UnaryExpressionNotPlusMinus)
@@ -763,8 +770,15 @@
        [(ConditionalOrExpression ? Expression : ConditionalExpression)
 	(make-cond-expression #f (build-src 5) $1 $3 $5 (build-src 2 2))])
       
+      (CheckExpression
+       [(ConditionalExpression) $1]
+       [(check ConditionalExpression expect ConditionalExpression) 
+        (make-check #f (build-src 4) $2 $4 #f (build-src 2 4))]
+       [(check ConditionalExpression expect ConditionalExpression within ConditionalExpression) 
+        (make-check #f (build-src 6) $2 $4 $6 (build-src 2 4))])
+      
       (AssignmentExpression
-       [(ConditionalExpression) $1])
+       [#;(ConditionalExpression)(CheckExpression) $1])
       
       (Assignment
        [(LeftHandSide AssignmentOperator AssignmentExpression)

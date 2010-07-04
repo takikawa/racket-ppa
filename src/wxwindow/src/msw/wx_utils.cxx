@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	August 1994
- * Copyright:	(c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:	(c) 2004-2006 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -460,6 +460,13 @@ wchar_t *wx_convert_to_wchar(char *s, int do_copy)
 		     NULL, 1/*UTF-16*/, 1);
   ws[len] = 0;
   return ws;
+}
+
+extern "C" {
+  wchar_t *_wx_convert_to_wchar(char *s, int do_copy)
+  {
+    return wx_convert_to_wchar(s, do_copy);
+  }
 }
 
 char *wx_convert_from_wchar(wchar_t *ws)

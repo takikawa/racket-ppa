@@ -4,7 +4,7 @@
  * Author:		Julian Smart
  * Created:	1993
  * Updated:	August 1994
- * Copyright:	(c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:	(c) 2004-2006 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  */
 
@@ -38,7 +38,7 @@ wxHashTable::wxHashTable (int, int size)
   current_position = -1;
   current_node = NULL;
 
-  ll = new wxList *[size];
+  ll = new WXGC_PTRS wxList *[size];
   hash_table = ll;
   for (i = 0; i < size; i++) {
     hash_table[i] = NULL;
@@ -65,7 +65,7 @@ wxList *wxHashTable::GetList(int position, KeyType ktype, Bool makeit)
 
   if (!l) {
     if (makeit) {
-      l = new wxList(ktype, FALSE);
+      l = new WXGC_PTRS wxList(ktype, FALSE);
       hash_table[position] = l;
     }
   }

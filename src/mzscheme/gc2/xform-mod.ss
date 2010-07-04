@@ -7,6 +7,7 @@
 
   (define show-info? #f)
   (define output-depends-info? #f)
+  (define gc-variable-stack-through-funcs? #f)
 
   (define palm? #f)
   (define pgc? #t)
@@ -40,7 +41,12 @@
     [("--cpp") cmdline "set CPP command line"
      (set! cpp cmdline)]
     [("-o") dest-file "name destination file"
-     (set! file-out dest-file)]]
+     (set! file-out dest-file)]
+    [("--indirect") "access GC_variable_stack through functions"
+     (set! gc-variable-stack-through-funcs? #t)]
+    [("+D") def "add CPP -D flag"
+     (set! cpp (string-append cpp " -D" 
+			      (regexp-replace* "[ \"]" def "'\\0'")))]]
    [args (file)
 	 (set! file-in file)])
 
@@ -49,7 +55,8 @@
 	 file-out
 	 palm? pgc? pgc-really?
 	 precompiling-header? precompiled-header
-	 show-info? output-depends-info?))
+	 show-info? output-depends-info?
+	 gc-variable-stack-through-funcs?))
 
 
 

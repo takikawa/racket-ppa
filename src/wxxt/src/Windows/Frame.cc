@@ -4,7 +4,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2005 PLT Scheme, Inc.
+ * Copyright: (C) 2004-2006 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -642,7 +642,7 @@ void wxFrame::SetIcon(wxBitmap *icon, wxBitmap *mask, int kind)
       pm = mask ? GETPIXMAP(mask) : (Pixmap)NULL;
       XtVaSetValues(X->frame, XtNiconMask, pm, NULL);
       pm = GETPIXMAP(bm);
-      XtVaSetValues(X->frame, XtNiconPixmap, pm, (Pixmap)NULL);
+      XtVaSetValues(X->frame, XtNiconPixmap, pm, (Pixmap)NULL, NULL);
       
       frame_icon = bm;
       frame_mask = mask;

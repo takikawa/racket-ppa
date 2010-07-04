@@ -2,12 +2,11 @@
   (require (lib "contract.ss")
            (lib "string.ss")
            (lib "list.ss")
-           (lib "url.ss" "net")
-           (lib "xml.ss" "xml")
            (lib "plt-match.ss")
-           (lib "errortrace-lib.ss" "errortrace"))
-  (require "response-structs.ss"
-           "request-structs.ss")
+           (lib "url.ss" "net")
+           (lib "errortrace-lib.ss" "errortrace")
+           (lib "uri-codec.ss" "net"))
+  (require "request-structs.ss")
   
   (provide provide-define-struct
            extract-flag
@@ -16,17 +15,21 @@
            url-path->string)
   
   (provide/contract
+   [valid-port? (any/c . -> . boolean?)]
    [decompose-request ((request?) . ->* . (url? symbol? string?))]
    [network-error ((symbol? string?) (listof any/c) . ->* . (void))]
-   [path->list  (path? . -> . (cons/c (union path? (symbols 'up 'same))
-                                      (listof (union path? (symbols 'up 'same)))))]
-   [url-path->path ((union (symbols 'up 'same) path?) string? . -> . path?)]
+   [path->list  (path? . -> . (cons/c (or/c path? (symbols 'up 'same))
+                                      (listof (or/c path? (symbols 'up 'same)))))]
+   [url-path->path ((or/c (symbols 'up 'same) path?) string? . -> . path?)]
    [directory-part (path? . -> . path?)]
-   [lowercase-symbol! ((union string? bytes?) . -> . symbol?)]
-   [exn->string ((union exn? any/c) . -> . string?)]
-   [get-mime-type (path? . -> . bytes?)]
-   [build-path-unless-absolute (path? (union string? path?) . -> . path?)])
-    
+   [lowercase-symbol! ((or/c string? bytes?) . -> . symbol?)]
+   [exn->string ((or/c exn? any/c) . -> . string?)]
+   [build-path-unless-absolute (path? (or/c string? path?) . -> . path?)])
+  
+  ;; valid-port? : any/c -> boolean?
+  (define (valid-port? p)
+    (and (number? p) (integer? p) (exact? p) (<= 1 p 65535)))
+  
   ;; ripped this off from url-unit.ss
   (define (url-path->string strs)
     (apply
@@ -59,25 +62,21 @@
              (apply format (format "~a: ~a" src fmt) args))
             (current-continuation-marks))))
   
-  ;; build-path-unless-absolute : path (union string? path?) -> path?
+  ;; build-path-unless-absolute : path (or/c string? path?) -> path?
   (define (build-path-unless-absolute base path)
     (if (absolute-path? path)
         (build-path path)
         (build-path base path)))
   
-  ;; exn->string : (union exn any) -> string
-  ;; builds an error message, including errortrace annotations (if present)
-  ;; TODO: do we really need this? Ask Robby about better ways to print exceptions.
+  ;; exn->string : (or/c exn any) -> string
   (define (exn->string exn)
     (if (exn? exn)
-        (let ([op (open-output-string)])
-          (display (exn-message exn) op)
-          (newline op)
-          (print-error-trace op exn)
-          (get-output-string op))
+        (parameterize ([current-error-port (open-output-string)])
+          ((error-display-handler) (exn-message exn) exn)
+          (get-output-string (current-error-port)))
         (format "~s\n" exn)))
   
-  ; lowercase-symbol! : (union string bytes) -> symbol
+  ; lowercase-symbol! : (or/c string bytes) -> symbol
   (define (lowercase-symbol! s)
     (let ([s (if (bytes? s)
                  (bytes->string/utf-8 s)
@@ -104,73 +103,7 @@
           (let ([next (string-append (substring prefix 0 (sub1 len))
                                      (string (integer->char (add1 ascii))))])
             (lambda (x)
-              (and (string<=? prefix x) (string<? x next)))))))
-  
-  
-  ;; get-mime-type: path -> bytes
-  ;; determine the mime type based on the filename's suffix
-  ;;
-  ;; Notes (GregP):
-  ;; 1. Can we determine the mime type based on file contents?
-  ;; 2. Assuming that 7-bit ASCII is correct for mime-type
-  (define get-mime-type
-    (let ([file-suffix-regexp (byte-regexp #".*\\.([^\\.]*$)")])
-      (lambda (path)
-        (match (regexp-match file-suffix-regexp (path->bytes path))
-          [(list path-bytes sffx)
-           (hash-table-get MIME-TYPE-TABLE
-                           (lowercase-symbol! sffx)
-                           (lambda () DEFAULT-MIME-TYPE))]
-          [_ DEFAULT-MIME-TYPE]))))
-  
-  
-  (define DEFAULT-MIME-TYPE #"text/plain")
-  
-  (define MIME-TYPE-TABLE
-    (let ([table (make-hash-table)])
-      (for-each (lambda (x) (hash-table-put! table (car x) (cdr x)))
-                '((htm  . #"text/html")
-                  (html . #"text/html")
-                  (css  . #"text/css")
-                  (txt  . #"text/plain")
-                  (hqx  . #"application/mac-binhex40")
-                  (doc  . #"application/msword")
-                  (plt  . #"application/octet-stream")
-                  (w02  . #"application/octet-stream")
-                  (w03  . #"application/octet-stream")
-                  (exe  . #"application/octet-stream")
-                  (bin  . #"application/octet-stream")
-                  (pdf  . #"application/pdf")
-                  (ps   . #"application/postscript")
-                  (rtf  . #"application/rtf")
-                  (dvi  . #"application/x-dvi")
-                  (tar  . #"application/x-tar")
-                  (tex  . #"application/x-tex")
-                  (zip  . #"application/zip")
-                  (xls  . #"application/msexcel")
-                  (ppt  . #"application/powerpoint")
-                  (pot  . #"application/powerpoint")
-                  (ppf  . #"application/persuasion")
-                  (fm   . #"application/filemaker")
-                  (pm6  . #"application/pagemaker")
-                  (psd  . #"application/x-photoshop")
-                  (pdd  . #"application/x-photoshop")
-                  (ram  . #"audio/x-pn-realaudio")
-                  (ra   . #"audio/x-realaudio")
-                  (swf  . #"application/x-shockwave-flash")
-                  (aif  . #"audio/aiff")
-                  (au   . #"audio/basic")
-                  (voc  . #"audio/voice")
-                  (wav  . #"audio/wave")
-                  (mov  . #"video/quicktime")
-                  (mpg  . #"video/mpeg")
-                  (png  . #"image/png")
-                  (bmp  . #"image/bmp")
-                  (gif  . #"image/gif")
-                  (jpg  . #"image/jpeg")
-                  (tif  . #"image/tiff")
-                  (pic  . #"image/x-pict")))
-      table))
+              (and (string<=? prefix x) (string<? x next)))))))      
   
   (define (directory-part path)
     (let-values ([(base name must-be-dir) (split-path path)])
@@ -178,38 +111,48 @@
         [(eq? 'relative base) (current-directory)]
         [(not base) (error 'directory-part "~a is a top-level directory" path)]
         [(path? base) base])))
-
+  
   ; more here - ".." should probably raise an error instead of disappearing.
+  ; XXX: This is terrible. should re-write.
   (define (url-path->path base p)
-    (let ((path-elems (chop-string #\/ p)))
+    (let ([path-elems (regexp-split #rx"/" p)])
       ;;; Hardcoded, bad, and wrong
       (if (or (string=? (car path-elems) "servlets")
               (and (string=? (car path-elems) "")
                    (string=? (cadr path-elems) "servlets")))
           ;; Servlets can have extra stuff after them
-          (let loop ((p-e (if (string=? (car path-elems) "")
-                              (cddr path-elems)
-                              (cdr path-elems)))
-                     (f (build-path base 
-                                    (if (string=? (car path-elems) "")
-                                        (cadr path-elems)
-                                        (car path-elems)))))
-            (cond
-              ((null? p-e) f)
-              ((directory-exists? f) (loop (cdr p-e) (build-path f (car p-e))))
-              ((file-exists? f) f)
-              (else f))) ;; Don't worry about e.g. links for now
-          ; spidey can't check build-path's use of only certain symbols
+          (let ([build-path
+                 (lambda (b p)
+                   (if (string=? p "")
+                       b
+                       (build-path b p)))])
+            (let loop ([p-e (if (string=? (car path-elems) "")
+                                (cddr path-elems)
+                                (cdr path-elems))]
+                       [f (build-path base 
+                                      (if (string=? (car path-elems) "")
+                                          (cadr path-elems)
+                                          (car path-elems)))])
+              (cond
+                [(null? p-e)
+                 f]
+                [(directory-exists? f)
+                 (loop (cdr p-e) (build-path f (car p-e)))]
+                [(file-exists? f)
+                 f]
+                [else
+                 f]))) ;; Don't worry about e.g. links for now
           (apply build-path base
-                 (foldr (lambda (x acc)
-                          (cond
-                            [(string=? x "") acc]
-                            [(string=? x ".") acc]
-                            [(string=? x "..") acc] ; ignore ".." (cons 'up acc)]
-                            [else (cons x acc)]))
-                        null
-                        (chop-string #\/ p))))))
-  
+                 (reverse!
+                  (foldl (lambda (x acc)
+                           (cond
+                             [(string=? x "") acc]
+                             [(string=? x ".") acc]
+                             [(string=? x "..") (if (pair? acc) (cdr acc) acc)]
+                             [else (cons x acc)]))
+                         null
+                         (regexp-split #rx"/" p)))))))
+
   ; update-params : Url (U #f String) -> String
   ; to create a new url just like the old one, but with a different parameter part
   ;; GREGP: this is broken! replace with the version from new-kernel
@@ -234,23 +177,6 @@
             [(string? base) (loop base new-acc)]
             [else ; conflate 'relative and #f
              new-acc])))))
-  
-  ; chop-string : Char String -> (listof String)
-  (define (chop-string separator s)
-    (let ([p (open-input-string s)])
-      (let extract-parts ()
-        (cons (list->string
-               (let part ()
-                 (let ([char (peek-char p)])
-                   (cond
-                     [(eof-object? char) null]
-                     [else (cond
-                             [(eq? separator char) null]
-                             [else (read-char p) (cons char (part))])]))))
-              (cond
-                [(eof-object? (read-char p)) null]
-                [else (extract-parts)])))))
-  
   
   ; this should go somewhere that other collections can use it too
   (define-syntax provide-define-struct
@@ -282,31 +208,16 @@
   (define-struct servlet-error ())
   (define-struct (invalid-%-suffix servlet-error) (chars))
   (define-struct (incomplete-%-suffix invalid-%-suffix) ())
-  (define (translate-escapes raw)
+  (define (translate-escapes init)
+    (define raw (uri-decode init))
     (list->string
-     (let loop ((chars (string->list raw)))
-       (if (null? chars) null
-           (let ((first (car chars))
-                 (rest (cdr chars)))
-             (let-values (((this rest)
-                           (cond
-                             ((char=? first #\+)
-                              (values #\space rest))
-                             ((char=? first #\%)
-                              ; MF: I rewrote this code so that Spidey could eliminate all checks.
-                              ; I am more confident this way that this hairy expression doesn't barf.
-                              (if (pair? rest)
-                                  (let ([rest-rest (cdr rest)])
-                                    (if (pair? rest-rest)
-                                        (values (integer->char
-                                                 (or (string->number (string (car rest) (car rest-rest)) 16)
-                                                     (raise (make-invalid-%-suffix
-                                                             (if (string->number (string (car rest)) 16)
-                                                                 (car rest-rest)
-                                                                 (car rest))))))
-                                                (cdr rest-rest))
-                                        (raise (make-incomplete-%-suffix rest))))
-                                  (raise (make-incomplete-%-suffix rest))))
-                             (else (values first rest)))))
-               (cons this (loop rest))))))))
-  )
+     (let loop ([chars (string->list raw)])
+       (match chars
+         [(list)
+          (list)]
+         [(list-rest ic cs)
+          (define c
+            (cond
+              [(char=? ic #\+) #\space]
+              [else ic]))
+          (list* c (loop cs))])))))

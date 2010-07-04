@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
  
     This library is free software; you can redistribute it and/or
@@ -106,7 +106,8 @@ extern HANDLE scheme_break_semaphore;
 
 #include "schfd.h"
 
-#define INIT_SCHEME_STACK_SIZE 1000
+#define DEFAULT_INIT_STACK_SIZE 1000
+#define MAX_INIT_STACK_SIZE 100000
 
 #ifdef SGC_STD_DEBUGGING
 # define SENORA_GC_NO_FREE
@@ -146,6 +147,8 @@ static int buffer_init_size = INIT_TB_SIZE;
 Scheme_Thread *scheme_current_thread = NULL;
 Scheme_Thread *scheme_main_thread = NULL;
 Scheme_Thread *scheme_first_thread = NULL;
+
+Scheme_Thread *scheme_get_current_thread() { return scheme_current_thread; }
 
 typedef struct Scheme_Thread_Set {
   Scheme_Object so;
@@ -218,7 +221,7 @@ extern MZ_DLLIMPORT long GC_get_memory_use();
 
 typedef struct Thread_Cell {
   Scheme_Object so;
-  char inherited;
+  char inherited, assigned;
   Scheme_Object *def_val;
   /* A thread's thread_cell table maps cells to keys weakly.
      This table maps keys to values weakly. The two weak
@@ -312,6 +315,8 @@ static Scheme_Object *current_security_guard(int argc, Scheme_Object *argv[]);
 static Scheme_Object *make_thread_set(int argc, Scheme_Object *argv[]);
 static Scheme_Object *thread_set_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *current_thread_set(int argc, Scheme_Object *argv[]);
+
+static Scheme_Object *current_thread_initial_stack_size(int argc, Scheme_Object *argv[]);
 
 static void adjust_custodian_family(void *pr, void *ignored);
 
@@ -687,30 +692,41 @@ void scheme_init_thread(Scheme_Env *env)
 						      1, 1, 1), 
 			     env);
   scheme_add_global_constant("sync", 
-			     scheme_make_prim_w_arity(sch_sync,
-						      "sync", 
-						      1, -1), 
+			     scheme_make_prim_w_arity2(sch_sync,
+						       "sync", 
+						       1, -1,
+						       0, -1), 
 			     env);
   scheme_add_global_constant("sync/timeout", 
-			     scheme_make_prim_w_arity(sch_sync_timeout,
-						      "sync/timeout", 
-						      2, -1), 
+			     scheme_make_prim_w_arity2(sch_sync_timeout,
+						       "sync/timeout", 
+						       2, -1,
+						       0, -1), 
 			     env);
   scheme_add_global_constant("sync/enable-break", 
-			     scheme_make_prim_w_arity(sch_sync_enable_break,
-						      "sync/enable-break", 
-						      1, -1),
+			     scheme_make_prim_w_arity2(sch_sync_enable_break,
+						       "sync/enable-break", 
+						       1, -1,
+						       0, -1),
 			     env);
   scheme_add_global_constant("sync/timeout/enable-break", 
-			     scheme_make_prim_w_arity(sch_sync_timeout_enable_break,
-						      "sync/timeout/enable-break", 
-						      2, -1),
+			     scheme_make_prim_w_arity2(sch_sync_timeout_enable_break,
+						       "sync/timeout/enable-break", 
+						       2, -1,
+						       0, -1),
 			     env);
   scheme_add_global_constant("choice-evt", 
 			     scheme_make_prim_w_arity(evts_to_evt,
 						      "choice-evt", 
 						      0, -1), 
 			     env);
+				 
+  scheme_add_global_constant("current-thread-initial-stack-size", 
+			     scheme_register_parameter(current_thread_initial_stack_size,
+						       "current-thread-initial-stack-size",
+						       MZCONFIG_THREAD_INIT_STACK_SIZE),
+			     env);
+
 
   REGISTER_SO(namespace_options);
 
@@ -1595,7 +1611,7 @@ static void run_closers(Scheme_Object *o, Scheme_Close_Custodian_Client *f, void
 {
   Scheme_Object *l;
 
-  for (l = closers; SCHEME_PAIRP(l); l = SCHEME_CDR(l)) {
+  for (l = closers; SCHEME_RPAIRP(l); l = SCHEME_CDR(l)) {
     Scheme_Exit_Closer_Func cf;
     cf = (Scheme_Exit_Closer_Func)SCHEME_CAR(l);
     cf(o, f, data);
@@ -1633,7 +1649,7 @@ void scheme_add_atexit_closer(Scheme_Exit_Closer_Func f)
     closers = scheme_null;
   }
 
-  closers = scheme_make_pair((Scheme_Object *)f, closers);
+  closers = scheme_make_raw_pair((Scheme_Object *)f, closers);
 }
 
 void scheme_schedule_custodian_close(Scheme_Custodian *c)
@@ -1927,7 +1943,7 @@ static Scheme_Thread *make_thread(Scheme_Config *config,
     mgr = (Scheme_Custodian *)scheme_get_param(config, MZCONFIG_CUSTODIAN);
 
 #ifdef MZ_PRECISE_GC
-  GC_register_thread(process, mgr);
+  GC_register_new_thread(process, mgr);
 #endif
 
   {
@@ -1979,14 +1995,36 @@ static Scheme_Thread *make_thread(Scheme_Config *config,
     process->tail_buffer = tb;
   }
   process->tail_buffer_size = buffer_init_size;
-
-  process->runstack_size = INIT_SCHEME_STACK_SIZE;
+ 
   {
-    Scheme_Object **sa;
-    sa = scheme_malloc_allow_interior(sizeof(Scheme_Object*) * INIT_SCHEME_STACK_SIZE);
-    process->runstack_start = sa;
+    int init_stack_size;
+    Scheme_Object *iss;
+
+    iss = scheme_get_thread_param(config, cells, MZCONFIG_THREAD_INIT_STACK_SIZE);
+    if (SCHEME_INTP(iss))
+      init_stack_size = SCHEME_INT_VAL(iss);
+    else if (SCHEME_BIGNUMP(iss))
+      init_stack_size = 0x7FFFFFFF;
+    else
+      init_stack_size = DEFAULT_INIT_STACK_SIZE;
+    
+    /* A too-large stack size won't help performance.
+       A too-small stack size is unsafe for certain kinds of
+       tail calls. */
+    if (init_stack_size > MAX_INIT_STACK_SIZE)
+      init_stack_size = MAX_INIT_STACK_SIZE;
+    if (init_stack_size < SCHEME_TAIL_COPY_THRESHOLD)
+      init_stack_size = SCHEME_TAIL_COPY_THRESHOLD;
+
+    process->runstack_size = init_stack_size;
+    {
+      Scheme_Object **sa;
+      sa = scheme_malloc_allow_interior(sizeof(Scheme_Object*) * init_stack_size);
+      process->runstack_start = sa;
+    }
+    process->runstack = process->runstack_start + init_stack_size;
   }
-  process->runstack = process->runstack_start + INIT_SCHEME_STACK_SIZE;
+  
   process->runstack_saved = NULL;
 
 #ifdef RUNSTACK_IS_GLOBAL
@@ -2124,6 +2162,7 @@ void scheme_swap_thread(Scheme_Thread *new_thread)
     printf("death\n");
   swapping = 1;
 #endif
+
   if (!swap_no_setjmp && SETJMP(scheme_current_thread)) {
     /* We're back! */
     /* See also initial swap in in start_child() */
@@ -2142,7 +2181,7 @@ void scheme_swap_thread(Scheme_Thread *new_thread)
     {
       Scheme_Object *l, *o;
       Scheme_Closure_Func f;
-      for (l = thread_swap_callbacks; SCHEME_PAIRP(l); l = SCHEME_CDR(l)) {
+      for (l = thread_swap_callbacks; SCHEME_RPAIRP(l); l = SCHEME_CDR(l)) {
 	o = SCHEME_CAR(l);
 	f = SCHEME_CLOS_FUNC(o);
 	o = SCHEME_CLOS_DATA(o);
@@ -2161,6 +2200,7 @@ void scheme_swap_thread(Scheme_Thread *new_thread)
     swap_no_setjmp = 0;
 
     /* We're leaving... */
+
     if (scheme_current_thread->init_break_cell) {
       int cb;
       cb = can_break_param(scheme_current_thread);
@@ -2284,6 +2324,8 @@ static void thread_is_dead(Scheme_Thread *r)
   
   r->error_buf = NULL;
   r->overflow_buf = NULL;
+
+  r->spare_runstack = NULL;
 }
 
 static void remove_thread(Scheme_Thread *r)
@@ -2382,7 +2424,6 @@ static void remove_thread(Scheme_Thread *r)
 }
 
 static void start_child(Scheme_Thread * volatile child,
-			Scheme_Thread * volatile return_to_thread,
 			Scheme_Object * volatile child_eval)
 {
   if (SETJMP(child)) {
@@ -2398,7 +2439,7 @@ static void start_child(Scheme_Thread * volatile child,
     {
       Scheme_Object *l, *o;
       Scheme_Closure_Func f;
-      for (l = thread_swap_callbacks; SCHEME_PAIRP(l); l = SCHEME_CDR(l)) {
+      for (l = thread_swap_callbacks; SCHEME_RPAIRP(l); l = SCHEME_CDR(l)) {
 	o = SCHEME_CAR(l);
 	f = SCHEME_CLOS_FUNC(o);
 	o = SCHEME_CLOS_DATA(o);
@@ -2411,9 +2452,6 @@ static void start_child(Scheme_Thread * volatile child,
 #if WATCH_FOR_NESTED_SWAPS
     swapping = 0;
 #endif
-
-    if (return_to_thread)
-      scheme_swap_thread(return_to_thread);
 
     if (scheme_current_thread->running & MZTHREAD_KILLED) {
       /* This thread is dead! Give up now. */
@@ -2460,7 +2498,7 @@ static Scheme_Object *make_subprocess(Scheme_Object *child_thunk,
 				      Scheme_Custodian *mgr,
 				      int normal_kill)
 {
-  Scheme_Thread *child, *return_to_thread;
+  Scheme_Thread *child;
   int turn_on_multi;
  
   turn_on_multi = !scheme_first_thread->next;
@@ -2510,13 +2548,9 @@ static Scheme_Object *make_subprocess(Scheme_Object *child_thunk,
     child->suspend_to_kill = 1;
 
   child->stack_start = child_start;
-  
-  if (do_atomic)
-    return_to_thread = scheme_current_thread;
-  else
-    return_to_thread = NULL;
 
-  start_child(child, return_to_thread, child_thunk);
+  /* Sets the child's jmpbuf for swapping in later: */
+  start_child(child, child_thunk);
 
   if (scheme_notify_multithread && turn_on_multi) {
     scheme_notify_multithread(1);
@@ -2618,7 +2652,7 @@ void scheme_add_swap_callback(Scheme_Closure_Func f, Scheme_Object *data)
 {
   Scheme_Object *p;
 
-  p = scheme_make_pair((Scheme_Object *)f, data);
+  p = scheme_make_raw_pair((Scheme_Object *)f, data);
   thread_swap_callbacks = scheme_make_pair(p, thread_swap_callbacks);
 }
 
@@ -2646,7 +2680,10 @@ static int is_stack_too_shallow2(void)
   return s[THREAD_STACK_SPACE];
 }
 
-static int is_stack_too_shallow(void)
+int scheme_is_stack_too_shallow(void)
+/* Make sure this function insn't inlined, mainly because
+   is_stack_too_shallow2() can get inlined, and it adds a lot
+   to the stack. */
 {
 #  include "mzstkchk.h"
   {
@@ -2709,7 +2746,7 @@ Scheme_Object *scheme_thread_w_details(Scheme_Object *thunk,
 #ifdef DO_STACK_CHECK
   /* Make sure the thread starts out with a reasonable stack size, so
      it doesn't thrash right away: */
-  if (is_stack_too_shallow()) {
+  if (scheme_is_stack_too_shallow()) {
     Scheme_Thread *p = scheme_current_thread;
 
     /* Don't mangle the stack if we're in atomic mode, because that
@@ -2786,7 +2823,7 @@ static Scheme_Object *call_as_nested_thread(int argc, Scheme_Object *argv[])
   np = MALLOC_ONE_TAGGED(Scheme_Thread);
   np->so.type = scheme_thread_type;
 #ifdef MZ_PRECISE_GC
-  GC_register_thread(np, mgr);
+  GC_register_new_thread(np, mgr);
 #endif
   np->running = MZTHREAD_RUNNING;
   np->ran_some = 1;
@@ -3313,6 +3350,7 @@ static void raise_break(Scheme_Thread *p)
   Scheme_Ready_Fun block_check;
   Scheme_Needs_Wakeup_Fun block_needs_wakeup;
   Scheme_Object *a[1];
+  Scheme_Cont_Frame_Data cframe;
 
   p->external_break = 0;
 
@@ -3329,7 +3367,14 @@ static void raise_break(Scheme_Thread *p)
   
   a[0] = scheme_make_prim((Scheme_Prim *)raise_user_break);
 
+  /* Continuation frame ensures that this doesn't
+     look like it's in tail position with respect to
+     an existing escape continuation */
+  scheme_push_continuation_frame(&cframe);
+
   scheme_call_ec(1, a);
+
+  scheme_pop_continuation_frame(&cframe);
 
   /* Continue from break... */
   p->block_descriptor = block_descriptor;
@@ -4398,7 +4443,7 @@ static void promote_thread(Scheme_Thread *p, Scheme_Custodian *to_c)
       /* Otherwise, this is custodian is unrelated to the existing ones.
 	 Add it as an extra custodian. */
       mref = scheme_add_managed(to_c, (Scheme_Object *)p->mr_hop, NULL, NULL, 0);
-      l = scheme_make_pair((Scheme_Object *)mref, p->extra_mrefs);
+      l = scheme_make_raw_pair((Scheme_Object *)mref, p->extra_mrefs);
       p->extra_mrefs = l;
 
       transitive_promote(p, to_c);
@@ -5373,15 +5418,19 @@ Scheme_Object *scheme_thread_cell_get(Scheme_Object *cell, Scheme_Thread_Cell_Ta
 {
   Scheme_Object *v;
 
-  v = scheme_lookup_in_table(cells, (const char *)cell);
-  if (v)
-    return scheme_ephemeron_value(v);
-  else
-    return ((Thread_Cell *)cell)->def_val;
+  if (((Thread_Cell *)cell)->assigned) {
+    v = scheme_lookup_in_table(cells, (const char *)cell);
+    if (v)
+      return scheme_ephemeron_value(v);
+  }
+
+  return ((Thread_Cell *)cell)->def_val;
 }
 
 void scheme_thread_cell_set(Scheme_Object *cell, Scheme_Thread_Cell_Table *cells, Scheme_Object *v)
 {
+  if (!((Thread_Cell *)cell)->assigned)
+    ((Thread_Cell *)cell)->assigned = 1;
   v = scheme_make_ephemeron(cell, v);
   scheme_add_to_table(cells, (const char *)cell, (void *)v, 0);
 }
@@ -5696,7 +5745,7 @@ static Scheme_Object *extend_parameterization(int argc, Scheme_Object *argv[])
       a[1] = scheme_false;
       if (SCHEME_PRIMP(argv[i])) {
 	Scheme_Prim *proc;
-	proc = ((Scheme_Primitive_Proc *)argv[i])->prim_val;
+	proc = (Scheme_Prim *)((Scheme_Primitive_Proc *)argv[i])->prim_val;
 	key = proc(2, a); /* leads to scheme_param_config to set a[1] */
       } else {
 	/* sets a[1] */
@@ -5865,6 +5914,9 @@ static void make_initial_config(Scheme_Thread *p)
 
   init_param(cells, paramz, MZCONFIG_HONU_MODE, scheme_false);
 
+  init_param(cells, paramz, MZCONFIG_COMPILE_MODULE_CONSTS, scheme_true);
+  init_param(cells, paramz, MZCONFIG_USE_JIT, scheme_startup_use_jit ? scheme_true : scheme_false);
+
   {
     Scheme_Object *s;
     s = scheme_make_immutable_sized_utf8_string("", 0);
@@ -5878,6 +5930,7 @@ static void make_initial_config(Scheme_Thread *p)
 							      ? scheme_true : scheme_false));
 
   init_param(cells, paramz, MZCONFIG_ERROR_PRINT_WIDTH, scheme_make_integer(100));
+  init_param(cells, paramz, MZCONFIG_ERROR_PRINT_CONTEXT_LENGTH, scheme_make_integer(16));
   init_param(cells, paramz, MZCONFIG_ERROR_PRINT_SRCLOC, scheme_true);
 
   REGISTER_SO(main_custodian);
@@ -5896,6 +5949,7 @@ static void make_initial_config(Scheme_Thread *p)
     Scheme_Object *s;
     s = scheme_make_path(scheme_os_getcwd(NULL, 0, NULL, 1));
     init_param(cells, paramz, MZCONFIG_CURRENT_DIRECTORY, s);
+    scheme_set_original_dir(s);
   }
 
   {
@@ -5973,6 +6027,8 @@ static void make_initial_config(Scheme_Thread *p)
     t_set = create_thread_set(NULL);
     init_param(cells, paramz, MZCONFIG_THREAD_SET, (Scheme_Object *)t_set);
   }
+  
+  init_param(cells, paramz, MZCONFIG_THREAD_INIT_STACK_SIZE, scheme_make_integer(DEFAULT_INIT_STACK_SIZE));
 
   {
     int i;
@@ -6092,6 +6148,26 @@ Scheme_Object *scheme_param_config(char *name, Scheme_Object *pos,
   
     return scheme_void;
   }
+}
+
+static Scheme_Object *
+exact_positive_integer_p (int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *n = argv[0];
+  if (SCHEME_INTP(n) && (SCHEME_INT_VAL(n) > 0))
+    return scheme_true;
+  if (SCHEME_BIGNUMP(n) && SCHEME_BIGPOS(n))
+    return scheme_true;
+
+  return scheme_false;
+}
+
+static Scheme_Object *current_thread_initial_stack_size(int argc, Scheme_Object *argv[])
+{
+  return scheme_param_config("current-thread-initial-stack-size", 
+			     scheme_make_integer(MZCONFIG_THREAD_INIT_STACK_SIZE),
+			     argc, argv,
+			     -1, exact_positive_integer_p, "exact positive integer", 0);
 }
 
 /*========================================================================*/
@@ -6512,6 +6588,8 @@ static void prepare_thread_for_GC(Scheme_Object *t)
 
   if (p->values_buffer)
     memset(p->values_buffer, 0, sizeof(Scheme_Object*) * p->values_buffer_size);
+
+  p->spare_runstack = NULL;
 
   /* zero ununsed part of list stack */
   scheme_clean_list_stack(p);

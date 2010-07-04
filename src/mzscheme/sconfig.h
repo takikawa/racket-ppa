@@ -14,20 +14,6 @@
 
 #ifndef FLAGS_ALREADY_SET
 
-/*************** (BEGIN PLATFORM-INDEPENDENT OPTIONS) *************/
-
-  /*******************************/
- /* Evaluator Tuning Parameters */
-/*******************************/
-
-#define SCHEME_STACK_SIZE 5000
-
- /* SCHEME_STACK_SIZE <X> sets the size of stack segments for Scheme
-    variables. */
-
-/**************** (END PLATFORM-INDEPENDENT OPTIONS) **************/
-
-
 
 /******** (BEGIN KNOWN ARCHITECTURE/SYSTEM CONFIGURATIONS) ********/
 
@@ -134,6 +120,11 @@
 #  define FLUSH_SPARC_REGISTER_WINDOWS
 # endif
 
+#ifdef i386
+# define MZ_USE_JIT_I386
+# define MZ_JIT_USE_MPROTECT
+#endif
+
 # define FLAGS_ALREADY_SET
 
 #endif
@@ -238,6 +229,18 @@
 
 # define FLAGS_ALREADY_SET
 
+#if defined(i386)
+# define MZ_USE_JIT_I386
+# define MZ_JIT_USE_MPROTECT
+#endif
+#if defined(__x86_64__)
+# define MZ_USE_JIT_X86_64
+# define MZ_JIT_USE_MPROTECT
+#endif
+#if defined(powerpc)
+# define MZ_USE_JIT_PPC
+#endif
+
 #endif
 
   /********************* NetBSD ***********************/
@@ -253,7 +256,9 @@
 
 # define STACK_GROWS_DOWN
 
+#ifndef __ELF__
 # define UNDERSCORE_DYNLOAD_SYMBOL_PREFIX
+#endif
 
 # define USE_IEEE_FP_PREDS
 # define POW_HANDLES_INF_CORRECTLY
@@ -265,6 +270,14 @@
 #if defined(__alpha__)
 # define SIXTY_FOUR_BIT_INTEGERS
 # define USE_DIVIDE_MAKE_INFINITY
+#endif
+
+#if defined(i386)
+# define MZ_USE_JIT_I386
+# define MZ_JIT_USE_MPROTECT
+#endif
+#if defined(powerpc)
+# define MZ_USE_JIT_PPC
 #endif
 
 # define FLAGS_ALREADY_SET
@@ -285,7 +298,9 @@
 
 # define STACK_GROWS_DOWN
 
+#ifndef __ELF__
 # define UNDERSCORE_DYNLOAD_SYMBOL_PREFIX
+#endif
 
 # define USE_IEEE_FP_PREDS
 # define POW_HANDLES_INF_CORRECTLY
@@ -297,6 +312,9 @@
 # define REGISTER_POOR_MACHINE
 
 # define USE_TM_GMTOFF_FIELD
+
+# define MZ_USE_JIT_I386
+# define MZ_JIT_USE_MPROTECT
 
 # define FLAGS_ALREADY_SET
 
@@ -332,6 +350,9 @@
 # define USE_TM_GMTOFF_FIELD
 
 # define REGISTER_POOR_MACHINE
+
+# define MZ_USE_JIT_I386
+# define MZ_JIT_USE_MPROTECT
 
 # define FLAGS_ALREADY_SET
 
@@ -566,6 +587,9 @@
 # define USE_ICONV_DLL
 # define NO_MBTOWC_FUNCTIONS
 
+# define MZ_USE_JIT_I386
+# define MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC
+
 # define FLAGS_ALREADY_SET
 
 #endif
@@ -597,6 +621,7 @@
 # define USE_CREATE_PIPE
 
 # define USE_MZ_CYGWIN_SETJMP
+# define USE_MZ_SETJMP
 
 # define USE_PLAIN_TIME
 # define USE_TOD_FOR_TIMEZONE
@@ -611,18 +636,28 @@
 
 # define LINK_EXTENSIONS_BY_TABLE
 
+# define MZ_USE_JIT_I386
+
 # define FLAGS_ALREADY_SET
 
 #endif
 
   /************** Mac OS X  ****************/
 
-# if (defined(__APPLE__) && defined(__ppc__) && defined(__MACH__)) || defined(OS_X)
+# if defined(OS_X) || defined(XONX)
 
 #ifdef XONX 
-# define SCHEME_PLATFORM_LIBRARY_SUBPATH "ppc-darwin"
+# ifdef __POWERPC__
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "ppc-darwin"
+# else
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-darwin"
+# endif
 #else
-# define SCHEME_PLATFORM_LIBRARY_SUBPATH "ppc-macosx"
+# ifdef __POWERPC__
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "ppc-macosx"
+# else
+#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-macosx"
+# endif
 #endif
 
 # include "uconfig.h"
@@ -636,7 +671,9 @@
 #endif
 
 # define STACK_GROWS_DOWN
+#ifdef __POWERPC__
 # define SCHEME_BIG_ENDIAN
+#endif
 # define USE_MAP_ANON
 
 # define USE_CARBON_FP_PREDS
@@ -654,9 +691,15 @@
 # define MACOS_UNICODE_SUPPORT
 #endif
 
-# ifndef OS_X
+#ifndef OS_X
 #  define OS_X 1
-# endif
+#endif
+
+#ifdef __POWERPC__
+# define MZ_USE_JIT_PPC
+#else
+# define MZ_USE_JIT_I386
+#endif
 
 # define FLAGS_ALREADY_SET
 
@@ -664,7 +707,7 @@
 
   /************** Darwin x86  ****************/
 
-# if defined(__APPLE__) && defined(__MACH__) && defined(__i386__)
+# if defined(__APPLE__) && defined(__MACH__) && defined(__i386__) && !defined(OS_X)
 
 # define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-darwin"
 
@@ -678,6 +721,10 @@
 # define SIGSET_IS_SIGNAL
 
 # define USE_TM_GMTOFF_FIELD
+
+# define USE_UNDERSCORE_SETJMP
+
+# define MZ_USE_JIT_I386
 
 # define FLAGS_ALREADY_SET
 
@@ -1270,6 +1317,22 @@
  /* MZSCHEME_IS_CODEFRAGMENT exploits improved CFM linking when
     MzScheme is itself a shared library instead of embedded in
     an application */
+
+  /***********************/
+ /*         JIT         */
+/***********************/
+
+ /* MZ_USE_JIT_I386 enables the JIT for x86 */
+
+ /* MZ_USE_JIT_X86_65 enables the JIT for x86_64 */
+
+ /* MZ_USE_JIT_PPC enables the JIT for PowerPC */
+
+ /* MZ_JIT_USE_MPROTECT uses mprotect on x86 platforms to make code
+    pages executable */
+
+ /* MZ_JIT_USE_WINDOWS_VIRTUAL_ALLOC uses VirtualAlloc to make
+    code pages executable. */
 
   /***********************/
  /*     Heap Images     */

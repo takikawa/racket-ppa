@@ -1,10 +1,12 @@
 (module mztake mzscheme
   (require (lib "contract.ss")
+           (lib "match.ss")
            (prefix frp: (lib "lang-ext.ss" "frtime"))
            (rename (lib "frtime.ss" "frtime") frp:list list)
            (rename (lib "frtime.ss" "frtime") frp:value-nowable? value-nowable?)
            (rename (lib "frtime.ss" "frtime") frp:behaviorof behaviorof)
            "mztake-structs.ss"
+           (lib "base-gm.ss" "frtime")
            (lib "etc.ss")
            (lib "list.ss")
            "marks.ss"
@@ -13,37 +15,47 @@
   ;; Turn struct printing on for MzTake users.
   (print-struct true)
 
-  (provide loc$
+  (provide (rename loc loc$)
+           debug-process-running-e 
+           loc/r
            trace
            bind
            define/bind
            define/bind-e
+           [rename loc/opt-col loc]
            [rename mztake-top #%top])
   
-  (provide/contract [loc-reqspec (loc? . -> . require-spec?)]
-                    [loc-line (loc? . -> . number?)]
-                    [loc-col (loc? . -> . number?)]
-                    [rename loc/opt-col loc
-                            ((any/c number?) (number?) . opt-> . loc?)]
-                    [exceptions (() (debug-process?) . opt-> . frp:event?)]
+  (provide/contract [exceptions (() (debug-process?) . opt-> . frp:event?)]
                     [exited? (() (debug-process?) . opt-> . frp:behavior?)]
                     [kill (() (debug-process?) . opt-> . void?)]
                     [kill-all (-> void?)]
                     [set-running-e! ((frp:event?) (debug-process?) . opt-> . any)]
                     [set-running! ((frp:value-nowable?) (debug-process?) . opt-> . any)]
                     [where (() (debug-process?) . opt-> . frp:event?)]
+                    
                     [current-policy (case-> (-> any)
                                             (any/c . -> . void?))]
                     [current-process (case-> (-> debug-process?)
                                              (debug-process? . -> . void?))]
+                    [current-reqspec (case-> (-> string?)
+                                          (string? . -> . void?))]  
                     [create-debug-process (-> debug-process?)]
                     [set-main! ((require-spec?) (debug-process?) . opt-> . void?)]
                     [trace* (debug-process? loc? (-> any) . -> . frp:event?)]
                     [bind* (debug-process? symbol? . -> . any)])
   
-  (define loc/opt-col
-    (opt-lambda (reqspec line [col #f])
-      (loc reqspec line col)))
+  (define (loc* after?)
+    (define (set-r r) (current-reqspec r))
+    (match-lambda*
+      [(arg) ((loc* after?) (current-reqspec) arg)]
+      [((and (not (? require-spec?)) arg) args ...) (apply (loc* after?) (current-reqspec) arg args)]
+      [((? require-spec? r) (? number? line)) (set-r r) (make-loc/lc r after? line false)]
+      [((? require-spec? r) (? number? line) (? number? col)) (set-r r) (make-loc/lc r after? line col)]
+      [((? require-spec? r) pattern) (set-r r) (make-loc/p r after? pattern)]))
+  
+  (define loc/r (loc* true))
+  
+  (define loc/opt-col (loc* false))
   
   (define exceptions
     (opt-lambda ([p (current-process)])
@@ -80,29 +92,50 @@
       (debug-process-where p)))
   
   (define current-process (make-parameter (create-debug-process)))
+  (define current-reqspec (make-parameter false))
   
   (define set-main!
     (opt-lambda (reqspec [p (current-process)])
+      (current-reqspec  reqspec )
       (process:set-main! p reqspec)))
   
   (define-syntax trace
-    (syntax-rules ()
+    (syntax-rules (=>)
       [(_ loc)
-       (trace* (current-process) loc (lambda () true))]
+       (let ([loc* loc])
+         (if (loc-after? loc*)
+             (trace* (current-process) loc* identity)
+             (trace* (current-process) loc* (lambda () true))))]
+      [(_ loc => proc)
+       (trace* (current-process) loc proc)]
       [(_ loc body ...)
        (trace* (current-process) loc (lambda () body ...))]))
+  
+  (define (mztake-top* name thunk)
+    (if (debug-process-marks (current-process))
+        (with-handlers
+            ([exn:fail?
+              (lambda (exn)
+                (with-handlers
+                    ([exn:fail? (lambda (exn2) (raise exn2))])
+                  (bind* (current-process) name)))])
+          (thunk))
+        (thunk)))
   
   (define-syntax (mztake-top stx)
     (syntax-case stx () 
       [(_ . name) 
-       (begin 
-         #'(with-handlers
-               ([exn:fail?
-                 (lambda (exn)
-                   (with-handlers
-                       ([exn:fail? (lambda (exn2) (raise exn))])
-                     (bind* (current-process) 'name)))])
-             (#%top . name)))]))
+       #'(mztake-top* 'name (lambda () (#%top . name)))]))
+  
+  (define (lookup-in-top-level p name)
+    (let/ec success
+      (define (try m)
+        (let/ec fail
+          (define (fail*) (fail false))
+          (success (hash-get (hash-get (debug-process-top-level p) m fail*) name fail*))))
+      (for-each try (map mark-module-name (debug-process-marks p)))
+      (hash-for-each (debug-process-top-level p) (lambda (m ns) (try m)))
+      (error 'bind "variable `~a' not found in target at the current location" name)))
   
   (define (bind* p name)
     (unless (debug-process-marks p)
@@ -111,10 +144,9 @@
     (let ([bs (lookup-all-bindings
                (lambda (id) (eq? (syntax-e id) name))
                (debug-process-marks p))])
-      (when (empty? bs)
-        (error 'bind "variable `~a' not found in target at the current location" name))
-      
-      (mark-binding-value (first bs))))
+      (if (empty? bs)
+          (lookup-in-top-level p name)
+          (mark-binding-value (first bs)))))
   
   (define-syntax bind
     (syntax-rules ()

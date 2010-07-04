@@ -29,6 +29,8 @@
     (apply append (map (lambda (ks) (list (cadr ks) (caddr ks)))
                        processed-keyword-specs))))
 
+(define true (list 'true)) ; used for flag values
+
 (provide lambda/kw)
 (define-syntax (lambda/kw stx)
   ;; --------------------------------------------------------------------------
@@ -53,14 +55,6 @@
                    )
            (append formals (list #'#:rest #'rest))))]
       [(formal ...) (syntax->list formals)]))
-  ;; is an expression simple? (=> evaluating cannot have side effects)
-  (define (simple-expr? expr)
-    (let ([expr (local-expand expr 'expression null)]) ; expand id macros
-      (syntax-case expr (#%datum #%top quote)
-        [(#%datum . _) #t]
-        [(#%top . _) #t]
-        [(quote . _) #t]
-        [_ (identifier? expr)])))
   ;; split a list of syntax objects based on syntax keywords:
   ;;   (x ... #:k1 ... #:k2 ... ...) --> ((x ...) (#:k1 ...) (#:k2 ...) ...)
   (define (split-by-keywords xs)
@@ -91,8 +85,22 @@
        (list #'var #'key #'default)]
       [(var default) (identifier? #'var) (list #'var (key #'var) #'default)]
       [(var) (identifier? #'var) (list #'var (key #'var) #'#f)]
-      [var (identifier? #'var) (list #'var (key #'var) #'#f)]
+      [var   (identifier? #'var) (list #'var (key #'var) #'#f)]
       [var (serror #'var "not a valid ~a spec" #:key)]))
+  ;; --------------------------------------------------------------------------
+  ;; process a flag argument spec, returns (<id> <key-stx> <default-expr>)
+  ;; so it can be used like keys
+  (define (process-flag k)
+    (define (key var)
+      (datum->syntax-object
+       k (string->keyword (symbol->string (syntax-e var))) k k))
+    (syntax-case k ()
+      [(var key)
+       (and (identifier? #'var) (keyword? (syntax-e #'key)))
+       (list #'var #'key #'#f)]
+      [(var) (identifier? #'var) (list #'var (key #'var) #'#f)]
+      [var   (identifier? #'var) (list #'var (key #'var) #'#f)]
+      [var (serror #'var "not a valid ~a spec" #:flag)]))
   ;; --------------------------------------------------------------------------
   ;; helpers for process-vars
   (define ((process-mode modes rests) processed-spec)
@@ -118,36 +126,53 @@
        [(or forbid forbid-any) #f]
        [else (ormap (lambda (k) (and (assq k rests) #t)) ; suggested?
                     (car (cddddr processed-spec)))])))
+  (define (make-keyword-get-expr key rest default known-vars)
+    ;; expand (for id macros) and check if its a simple expression, because if
+    ;; it is, evaluation cannot have side-effects and we can use keyword-get*
+    (define default*
+      (local-expand default 'expression (cons #'#%app known-vars)))
+    (define simple?
+      (syntax-case default* (#%datum #%top quote)
+        [(#%datum . _) #t] [(#%top . _) #t] [(quote . _) #t]
+        [_ (identifier? default*)]))
+    (with-syntax ([getter  (if simple? #'keyword-get* #'keyword-get)]
+                  [default (if simple? default* #`(lambda () #,default*))]
+                  [rest rest] [key key])
+      #'(getter rest key default)))
   ;; --------------------------------------------------------------------------
   ;; test variables
-  (define (process-vars vars opts keys0 rests modes . only-vars?)
+  (define (process-vars vars opts keys0 flags rests modes . only-vars?)
     (define (gensym x)
       (car (generate-temporaries (list x))))
     (let*-values
         ([(only-vars?) (and (pair? only-vars?) (car only-vars?))]
-         [(opts keys0) (values (map process-opt opts) (map process-key keys0))]
+         [(opts)  (map process-opt opts)]
+         [(keys0) (map process-key keys0)]
+         [(flags) (map process-flag flags)]
          [(rest body all-keys other-keys other-keys+body)
           (apply values (map (lambda (k)
                                (cond [(assq k rests) => cdr] [else #f]))
                              rest-like-kwds))]
-         [(rest* body* other-keys*)
-          (values (or rest (gensym #'rest))
-                  (if (and body (identifier? body)) body (gensym #'body))
-                  (or other-keys (gensym #'other-keys)))]
+         [(rest*)       (or rest (gensym #'rest))]
+         [(body*)       (if (and body (identifier? body)) body (gensym #'body))]
+         [(other-keys*) (or other-keys (gensym #'other-keys))]
          [(other-keys-mode duplicate-keys-mode body-mode anything-mode)
           (apply values (map (process-mode modes rests)
                              processed-keyword-specs))]
-         ;; turn (<id> <key> <default>) keys to (<id> <default>)
+         ;; turn (<id> <key> <default>) keys to (<id> <getter>)
          [(keys)
-          (with-syntax ([r rest*])
-            (map (lambda (k)
-                   (list
-                    (car k)
-                    (if (simple-expr? (caddr k))
-                      ;; simple case => no closure
-                      #`(keyword-get* r #,(cadr k) #,(caddr k))
-                      #`(keyword-get  r #,(cadr k) (lambda () #,(caddr k))))))
-                 keys0))]
+          (with-syntax ([rst rest*])
+            (let loop ([ks (append keys0 flags)]  [r '()]
+                       [known-vars (append vars (map car opts))])
+              (if (null? ks)
+                (reverse! r)
+                (let ([k (car ks)])
+                  (loop (cdr ks)
+                        (cons (list (car k)
+                                    (make-keyword-get-expr
+                                     (cadr k) rest* (caddr k) known-vars))
+                              r)
+                        (cons (car k) known-vars))))))]
          [(all-ids)
           `(,@vars ,@(map car opts) ,@(map car keys) ,rest* ,body*
             ;; make up names if not specified, to make checking easy
@@ -161,10 +186,11 @@
              => (lambda (d) (serror d "not an identifier"))]
             [(check-duplicate-identifier all-ids)
              => (lambda (d) (serror d "duplicate argument name"))]
-            [else (values vars opts keys rest rest* body body* all-keys
-                          other-keys other-keys* other-keys+body
-                          other-keys-mode duplicate-keys-mode body-mode
-                          anything-mode (map cadr keys0))])))
+            [else (values
+                   vars opts keys (map cadr flags) rest rest* body body*
+                   all-keys other-keys other-keys* other-keys+body
+                   other-keys-mode duplicate-keys-mode body-mode anything-mode
+                   (append (map cadr keys0) (map cadr flags)))])))
   ;; --------------------------------------------------------------------------
   ;; parses formals, returns list of normal vars, optional var specs, key var
   ;; specs, an alist of rest-like kw+vars, and a mode for allowing other keys
@@ -173,28 +199,40 @@
     (let* ([formals (split-by-keywords formals)]
            [vars (car formals)]
            [formals (cdr formals)]
-           [pop-formals
-            (lambda (key)
-              (if (and (pair? formals) (eq? key (syntax-e* (caar formals))))
-                (begin0 (cdar formals) (set! formals (cdr formals)))
-                '()))]
-           [opts (pop-formals #:optional)]
-           [keys (pop-formals #:key)])
-      ;; now get all rest-like vars
+           [opts  '()]
+           [keys  '()]
+           [flags '()])
+      (when (and (pair? formals) (eq? #:optional (syntax-e* (caar formals))))
+        (set! opts (cdar formals)) (set! formals (cdr formals)))
+      (let loop ([last #f])
+        (let* ([k-stx (and (pair? formals) (caar formals))]
+               [k     (and k-stx (syntax-e* k-stx))])
+          (when (and k (eq? k last)) (serror k-stx "two ~s sections" k))
+          (case k
+            [(#:key) (set! keys (append! keys (cdar formals)))
+             (set! formals (cdr formals)) (loop k)]
+            [(#:flag) (set! flags (append! flags (cdar formals)))
+             (set! formals (cdr formals)) (loop k)]
+            #| else continue below |#)))
+      ;; now get all rest-like vars and modes
       (let loop ([formals formals] [rests '()] [modes '()])
         (if (null? formals)
-          (apply process-vars vars opts keys rests modes only-vars?)
+          (apply process-vars vars opts keys flags rests modes only-vars?)
           (let* ([k-stx (caar formals)]
-                 [k (syntax-e* k-stx)])
-            (cond [(memq k '(#:optional #:key))
+                 [k     (syntax-e* k-stx)])
+            (cond [(memq k '(#:optional #:key #:flag))
                    (serror k-stx "misplaced ~a" k)]
                   [(memq k mode-keywords)
-                   (cond [(null? keys)
-                          (serror k-stx "cannot use without #:key arguments")]
-                         [(pair? (cdar formals))
-                          (serror (cadar formals)
-                                  "identifier following mode keyword ~a" k)]
-                         [else (loop (cdr formals) rests (cons k modes))])]
+                   (cond
+                    #; ;(*)
+                    ;; don't throw an error here, it still fine if used with
+                    ;; #:allow-other-keys (explicit or implicit), also below
+                    [(and (null? keys) (null? flags))
+                     (serror k-stx "cannot use without #:key/#:flag arguments")]
+                    [(pair? (cdar formals))
+                     (serror (cadar formals)
+                             "identifier following mode keyword ~a" k)]
+                    [else (loop (cdr formals) rests (cons k modes))])]
                   [(not (memq k rest-like-kwds))
                    (serror k-stx "unknown meta keyword")]
                   [(assq k rests)
@@ -203,8 +241,11 @@
                    (serror k-stx "missing variable name")]
                   [(not (null? (cddar formals)))
                    (serror k-stx "too many variable names")]
+                  #; ;(*)
+                  ;; same as above: don't throw an error here, still fine if
+                  ;; used with #:allow-other-keys (explicit or implicit)
                   [(and (null? keys) (not (eq? #:rest k)))
-                   (serror k-stx "cannot use without #:key arguments")]
+                   (serror k-stx "cannot use without #:key/#:flag arguments")]
                   [else (loop (cdr formals)
                               (cons (cons k (cadar formals)) rests)
                               modes)]))))))
@@ -217,6 +258,7 @@
     (define-values (vars        ; plain variables
                     opts        ; optionals, each is (id default)
                     keys        ; keywords, each is (id key default)
+                    flags       ; flag keyword syntaxes (args are part of keys)
                     rest        ; rest variable (no optionals)
                     rest*       ;   always an id
                     body        ; rest after all keyword-vals (id or formals)
@@ -326,14 +368,15 @@
                     expr)
                 #'expr)])
           (if (and allow-anything? (not body)
-                   (not other-keys+body) (not all-keys) (not other-keys))
+                   (not other-keys+body) (not all-keys) (not other-keys)
+                   (null? flags))
             ;; allowing anything and don't need special rests, so no loop
             #'expr
             ;; normal code
             #`(let loop loop-vars
                 (if (and (pair? body*) (keyword? (car body*))
                          #,@(if allow-anything? #'((pair? (cdr body*))) '()))
-                  #,(if allow-anything? ; already checker pair? above
+                  #,(if allow-anything? ; already checked pair? above
                       #'next-loop
                       #'(if (pair? (cdr body*))
                           next-loop
@@ -354,19 +397,47 @@
                           (error* 'name "expecting a ~s keyword got: ~e"
                                   'keywords (car body*))))))))))
     ;; ------------------------------------------------------------------------
+    ;; generates the loop that turns flags to #t's
+    (define (make-flags-body) ; called only when there are flags
+      (with-syntax ([flags flags] [rest* rest*])
+        #'(let loop ([xs rest*])
+            (when (and (pair? xs) (keyword? (car xs)))
+              (if (memq (car xs) 'flags)
+                (if (null? (cdr xs))
+                  (set-cdr! xs (list true))
+                  (begin (unless (eq? true (cadr xs))
+                           (set-cdr! xs (cons true (cdr xs))))
+                         (loop (cddr xs))))
+                (when (pair? (cdr xs)) (loop (cddr xs))))))))
+    ;; ------------------------------------------------------------------------
     ;; generates the part of the body that deals with rest-related stuff
     (define (make-keys-body expr)
-      (with-syntax ([body (make-rest-body expr)] [keys keys])
-        #'(let* keys body)))
+      (let ([kb (with-syntax ([body (make-rest-body expr)] [keys keys])
+                  #'(let* keys body))])
+        (if (null? flags)
+          kb
+          (with-syntax ([keys-body kb] [flag-tweaks (make-flags-body)])
+            #'(begin flag-tweaks keys-body)))))
+    ;; ------------------------------------------------------------------------
+    ;; more sanity tests (see commented code above -- search for "(*)")
+    (let ([r (or all-keys other-keys other-keys+body body rest)])
+      (when (and (not allow-other-keys?) (null? keys))
+        (when r
+          (serror r "cannot use without #:key, #:flag, or #:allow-other-keys"))
+        (when allow-duplicate-keys?
+          (serror #f (string-append "cannot allow duplicate keys without"
+                                    " #:key, #:flag, or #:allow-other-keys"))))
+      (when (and allow-other-keys? (null? keys) (not r))
+        (serror #f "cannout allow other keys without using them in some way")))
     ;; ------------------------------------------------------------------------
     ;; body generation starts here
     (cond
-     ;; no optionals or keys => plain lambda
-     [(and (null? opts) (null? keys))
+     ;; no optionals or keys (or other-keys) => plain lambda
+     [(and (null? opts) (null? keys) (not allow-other-keys?))
       (with-syntax ([vars (append! vars (or rest '()))] [expr expr])
         (syntax/loc stx (lambda vars expr)))]
      ;; no keys => make a case-lambda for optionals
-     [(null? keys)
+     [(and (null? keys) (not allow-other-keys?))
       (let ([clauses (make-opt-clauses expr (or rest '()))])
         (with-syntax ([name name] [clauses clauses])
           (syntax/loc stx (letrec ([name (case-lambda . clauses)]) name))))]
@@ -376,13 +447,43 @@
                     [body (make-keys-body expr)])
         (syntax/loc stx (lambda vars body)))]
      ;; both opts and keys => combine the above two
+     ;; (the problem with this is that things that follow the required
+     ;; arguments are always taken as optionals, even if they're keywords, so
+     ;; the following piece of code is used.)
+     #;
      [else
       (let ([clauses (make-opt-clauses (make-keys-body expr) rest*)])
         (with-syntax ([name name] [clauses clauses])
-          (syntax/loc stx (letrec ([name (case-lambda . clauses)]) name))))]))
+          (syntax/loc stx (letrec ([name (case-lambda . clauses)]) name))))]
+     ;; both opts and keys => pop optionals as long as they're not keywords
+     [else
+      (with-syntax
+          ([rest rest*]
+           [vars (append! vars rest*)]
+           [body (make-keys-body expr)]
+           [((optvar optexpr) ...)
+            (apply append
+                   (map (lambda (opt)
+                          (with-syntax ([(ovar odef) opt] [rest rest*])
+                            (list #'[otmp (if (null? rest)
+                                            #t (keyword? (car rest)))]
+                                  #'[ovar (if otmp odef (car rest))]
+                                  #'[rest (if otmp rest (cdr rest))])))
+                        opts))])
+        (syntax/loc stx (lambda vars (let* ([optvar optexpr] ...) body))))]))
   (syntax-case stx ()
     [(_ formals expr0 expr ...)
-     (generate-body #'formals #'(let () expr0 expr ...))]))
+     ;; check if there are only identifiers, and save the whole mess if so
+     (if (let loop ([xs #'formals])
+           (cond [(syntax? xs) (loop (syntax-e xs))]
+                 [(symbol? xs) #t]
+                 [(null? xs)   #t]
+                 [(not (pair? xs)) #f]
+                 [(symbol? (if (syntax? (car xs)) (syntax-e (car xs)) (car xs)))
+                  (loop (cdr xs))]
+                 [else #f]))
+       #'(lambda formals expr0 expr ...)
+       (generate-body #'formals #'(let () expr0 expr ...)))]))
 
 (provide define/kw)
 (define-syntax (define/kw stx)
@@ -400,18 +501,23 @@
 
 ;; keyword searching utility (note: no errors for odd length)
 (provide keyword-get)
-(define (keyword-get args keyword . not-found)
-  (let loop ([args args])
-    (cond [(or (null? args) (null? (cdr args)) (not (keyword? (car args))))
-           (and (pair? not-found) ((car not-found)))]
-          [(eq? (car args) keyword) (cadr args)]
-          [else (loop (cddr args))])))
+(define keyword-get
+  (case-lambda
+   [(args keyword not-found)
+    (let loop ([args args])
+      (cond [(or (null? args) (null? (cdr args)) (not (keyword? (car args))))
+             (not-found)]
+            [(eq? (car args) keyword) (cadr args)]
+            [else (loop (cddr args))]))]
+   ;; the following makes another function call, but the code that is generated
+   ;; by this module never gets here
+   [(args keyword) (keyword-get* args keyword #f)]))
 
 ;; a private version of keyword-get that is used with simple values
-(define (keyword-get* args keyword . not-found)
+(define (keyword-get* args keyword not-found)
   (let loop ([args args])
     (cond [(or (null? args) (null? (cdr args)) (not (keyword? (car args))))
-           (and (pair? not-found) (car not-found))]
+           not-found]
           [(eq? (car args) keyword) (cadr args)]
           [else (loop (cddr args))])))
 

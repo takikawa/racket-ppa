@@ -4,7 +4,32 @@
   (prepare-for-tests "Intermediate")
   
   ;;Execute tests without errors
+  
+  (execute-test
+   "interface A { int a(); }
+    abstract class B implements A { }
+   "
+   'intermediate
+   #f "abstract class not fully implementing an interface")
+  
+  (execute-test
+   "interface A1 { int a(); }
+    abstract class B1 implements A1 { }
+    class C1 extends B1 {
+     int a() { return 3; }
+    }"
+   'intermediate
+   #f "class implementing abstract class's unimplmenented interface")
 
+  (execute-test
+   "interface ToImplement { int a(); }
+    abstract class ToExtend implements ToImplement { int a() { return 2; } }
+    class ToBe extends ToExtend implements ToImplement {
+    }"
+   'intermediate
+   #f "Repetition of fully satisfied interface in class hierarchy")
+
+  
   (execute-test
    "abstract class Foo {
       abstract int f();
@@ -13,21 +38,21 @@
    #f "Simple abstract class with abstract method")
   
   (execute-test
-   "abstract class Foo {
+   "abstract class Foo1 {
      abstract int f();
     }
-    class FooP extends Foo {
+    class FooP extends Foo1 {
      int f() { return 3; }
     }"
     'intermediate
     #f "Simple abstract class with extending sub class")
   
   (execute-test
-   "abstract class Foo {
+   "abstract class Foo2 {
      abstract int f();
      int fp() { return 3; }
     }
-    class FooP extends Foo {
+    class FooP2 extends Foo2 {
      int f() { return this.fp(); }
     }"
    'intermediate
@@ -54,8 +79,8 @@
    'intermediate #f "Class extension")
   
   (execute-test
-   "class first { int x() { return 3; } }
-    class second extends first { int x() { return 6; }}"
+   "class first1 { int x() { return 3; } }
+    class second1 extends first1 { int x() { return 6; }}"
    'intermediate #f "Overriding")
   
   (execute-test
@@ -243,9 +268,9 @@
     'intermediate #f "Abstract method implemented, class subclassed")
 
   (execute-test
-   "class X {
+   "class XIof {
      boolean equals( Object o ) {
-      return o instanceof X;
+      return o instanceof XIof;
     }
   }"
    'intermediate #f "Correct instanceof usage")
@@ -301,7 +326,56 @@
      }" 'intermediate #f "Casts of class to implementing iface, and reverse")
   
   ;;Execute tests with errors
+  
+  (execute-test
+   "class CheckError {
+     void foo() { }
+   }
+   class Examples {
+     boolean t1 = check new CheckError().foo() expect false;
+   }
+   " 'intermediate #t "Check with void method call in test")
+  
+  (execute-test
+   "class CheckError {
+    void foo() { }
+    }
+    class Examples { 
+      boolean t1 = check 3 expect new CheckError().foo();
+    }" 'intermediate #t "Check with void method call in expect")
+  
+  (execute-test
+   "class A { 
+     a b c;
+    }"
+   'intermediate
+   #t "Parse error with three identifiers in a row")
+  
+  (execute-test
+   "interface A { int a(); }
+    abstract class B implements A { }
+    class C extends B { int a() { return super.a() + 3; } }"
+   'intermediate
+   #t "Extending class calls super.a() of an abstract method")
 
+
+  (execute-test
+   "interface A { int a(); }
+    abstract class B implements A { }
+    class C extends B { }"
+   'intermediate
+   #t
+   "Extending class fails to implement abstract parent's unimplemented interfaces")
+  
+  (execute-test
+   "class Foo {
+  Foo() {}
+  boolean compare(int x, int y, int z) {
+    return (x == y) (y == z);
+  }
+}"
+   'intermediate #t "Parse error, two expressions (one parened) without an operator")
+  
   (execute-test
    "abstract class F{ abstract int f(); }
     class G extends F { }"
@@ -381,14 +455,14 @@
    }" 'intermediate #t "Incompatible return type from inherited interface")
 
   (execute-test
-   "class X {
+   "class X2 {
       int c (Object o) {
         return (int) o;
       }
     }" 'intermediate #t "Cast of object to primitive")
   
   (execute-test
-   "class X {
+   "class X3 {
      int c () {
        return (int) false;
      }
@@ -397,7 +471,7 @@
   (execute-test
    "interface A { int x();}
     interface B { boolean x(); }
-    class X {
+    class X4 {
       Object o(A a) {
         return (B) a;
       }
@@ -440,6 +514,95 @@
    (list 5)
    "Calling a super method")
 
+  (interact-test
+   'intermediate
+   '("(double) 1" "(double) 1.0" "double x;" "x" "x = 1;" "(int) x")
+   '(1.0 1.0 (void) 0.0 1.0 1)
+   "Double-int conversions")
+  
+    (interact-test
+   "import draw.*;
+class BlockWorld extends World {
+ int WIDTH = 100;
+ int HEIGHT = 100;
+ Color BACKGROUND = new Red();
+ DrpBlock block;
+ BlockWorld(DrpBlock block) {  
+  this. block = block;
+ }
+ World onTick() { 
+  return new BlockWorld(this. block.drop());
+ }
 
+ World onKeyEvent(String ke) { 
+  return this;
+ }
+ boolean erase() {
+  return this. drawBackground();
+ }
+ boolean draw() {
+  return this. block.draw(this); 
+ }
+ boolean drawBackground() {
+  return true;//this. theCanvas.drawRect(new Posn(0,0),this. WIDTH,this. HEIGHT,this. BACKGROUND);
+ }
+}
+
+class Examples extends BlockWorld { 
+ Examples() {
+  super(new DrpBlock(10,0));
+ }
+}
+class DrpBlock {
+ int down;
+ int right;
+ int HEIGHT = 10; 
+ int WIDTH = 10; 
+ int deltaY = 5;
+ int deltaX = 3;
+
+ DrpBlock(int down, int right) {
+  this. down = down;
+  this. right = right;
+ }
+ DrpBlock drop() {
+  return new DrpBlock(this. down + this. deltaY,this. right);
+ }
+ boolean draw(World w) {
+  return w.theCanvas.drawRect(new Posn(this.right,this.down),this.HEIGHT,this.WIDTH,new Red());
+ }
+ boolean erase(BlockWorld w) {
+  return w.theCanvas.drawRect(new Posn(this.right,this.down),this.HEIGHT,this.WIDTH,w.BACKGROUND);
+ }
+ boolean hasLanded(BlockWorld w) {
+  if (this. down + this. HEIGHT >= w.HEIGHT)
+   return true;
+  else 
+   return false;
+ }
+ DrpBlock steer(String ke) {
+  if (ke.equals(\"left\"))
+   return new DrpBlock(this. down,this. right - this. deltaX);
+  else if (ke.equals(\"right\"))
+   return new DrpBlock(this. down,this. right + this. deltaX);
+  else 
+   return this; 
+ }
+ boolean toStop(BlockWorld w, int down) {
+  if (this. down + this. HEIGHT >= down)
+   return true;
+  else 
+   return false;
+ }
+}"
+   'intermediate
+   '("Examples a = new Examples();") '((void)) 
+   "Cycle: used to cause multiple declarations of a class")
+  
+  (interact-test
+   'intermediate
+   '("int a = 3;" "a = 45;" "a")
+   '((void) 45 45)
+   "Test of assignment")
   
   (report-test-results))

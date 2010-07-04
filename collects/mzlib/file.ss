@@ -20,7 +20,8 @@
 	   call-with-output-file*
 
 	   fold-files
-	   find-files)
+	   find-files
+	   pathlist-closure)
 
   (require "list.ss"
 	   "etc.ss")
@@ -171,36 +172,29 @@
 			       file))]))
 	    filename))))
 
-  (define file-name-from-path
-    (lambda (name)
-      (unless (path-string? name)
-	(raise-type-error 'file-name-from-path "path or string" name))
-      (let-values ([(base file dir?) (split-path name)])
-	(if (and (not dir?) (path? file))
-	    file
-	    #f))))
+  (define (file-name who name)
+    (unless (path-string? name)
+      (raise-type-error who "path or string" name))
+    (let-values ([(base file dir?) (split-path name)])
+      (and (not dir?) (path? file) file)))
 
-  (define path-only
-    (lambda (name)
-      (unless (path-string? name)
-	(raise-type-error 'path-only "path or string" name))
-      (let-values ([(base file dir?) (split-path name)])
-	(cond
-	 [dir? name]
-	 [(path? base) base]
-	 [else #f]))))
+  (define (file-name-from-path name)
+    (file-name 'file-name-from-path name))
+
+  (define (path-only name)
+    (unless (path-string? name)
+      (raise-type-error 'path-only "path or string" name))
+    (let-values ([(base file dir?) (split-path name)])
+      (cond [dir? name]
+            [(path? base) base]
+            [else #f])))
 
   ;; name can be any string; we just look for a dot
-  (define filename-extension
-    (lambda (name)
-      (unless (path-string? name)
-	(raise-type-error 'filename-extension "path or string" name))
-      (let ([name (if (path? name)
-		      (path->bytes name)
-		      name)])
-	(let ([m (regexp-match #rx#"[.]([^.]+)$" name)])
-	  (and m
-	       (cadr m))))))
+  (define (filename-extension name)
+    (let* ([name (file-name 'filename-extension name)]
+           [name (and name (path->bytes name))])
+      (cond [(and name (regexp-match #rx#"[.]([^.]+)$" name)) => cadr]
+            [else #f])))
 
   (define (delete-directory/files path)
     (unless (path-string? path)
@@ -246,8 +240,8 @@
 					   "format string for 1 argument"
 					   template))])
 	(format template void))
-      (unless (or (not copy-from) (path-string? copy-from))
-	(raise-type-error 'make-temporary-file "path, valid-path string, or #f" copy-from))
+      (unless (or (not copy-from) (path-string? copy-from) (eq? copy-from 'directory))
+	(raise-type-error 'make-temporary-file "path, valid-path string, 'directory, or #f" copy-from))
       (unless (or (not base-dir) (path-string? base-dir))
 	(raise-type-error 'make-temporary-file "path, valid-path, string, or #f" base-dir))
       (let ([tmpdir (find-system-path 'temp-dir)])
@@ -262,7 +256,9 @@
 							   (loop (- s (random 10))
 								 (+ ms (random 10))))])
 	      (if copy-from
-		  (copy-file copy-from name)
+		  (if (eq? copy-from 'directory)
+		      (make-directory name)
+		      (copy-file copy-from name))
 		  (close-output-port (open-output-file name)))
 	      name))))]
      [(template copy-from) (make-temporary-file template copy-from #f)]
@@ -480,38 +476,49 @@
   (define fold-files
     (opt-lambda (f init [path #f] [follow-links? #t])
 
-      ;; traverse-dir : string[directory] (listof string[file/directory]) -> (listof string[file/directory])
       (define (traverse-dir dir base acc)
-	(let loop ([subs (directory-list dir)]
-		   [acc acc])
-	  (cond
-	   [(null? subs) acc]
-	   [else (loop (cdr subs)
-		       (let ([path (if base
-				       (build-path base (car subs))
-				       (car subs))])
-			 (traverse-file/dir path path acc)))])))
+	(let loop ([subs (directory-list dir)] [acc acc])
+	  (cond [(null? subs) acc]
+                [else (loop (cdr subs)
+                            (let ([path (if base
+                                          (build-path base (car subs))
+                                          (car subs))])
+                              (traverse-file/dir path path acc)))])))
 
-      ;; traverse-file/dir : string[file/directory] (listof string[file/directory]) -> (listof string[file/directory])
       (define (traverse-file/dir file/dir base acc)
-	(cond
-	 [(and (not follow-links?) (link-exists? file/dir))
-	  (f file/dir 'link acc)]
-	 [(directory-exists? file/dir)
-	  (traverse-dir file/dir base (if base
-					  (f file/dir 'dir acc)
-					  acc))]
-	 [else (f file/dir 'file acc)]))
-      
-      (traverse-file/dir (or path (current-directory)) 
-			 path
-			 init)))
+	(cond [(and (not follow-links?) (link-exists? file/dir))
+               (f file/dir 'link acc)]
+              [(directory-exists? file/dir)
+               (traverse-dir file/dir base (if base (f file/dir 'dir acc) acc))]
+              [else (f file/dir 'file acc)]))
 
-  (define find-files 
+      (traverse-file/dir (or path (current-directory)) path init)))
+
+  (define find-files
     (opt-lambda (f [path #f])
-      (fold-files (lambda (path kind acc)
-		    (if (f path)
-			(cons path acc)
-			acc))
-		  null
-		  path))))
+      (reverse! (fold-files (lambda (path kind acc)
+                              (if (f path) (cons path acc) acc))
+                            null
+                            path))))
+
+  (define (pathlist-closure paths)
+    (let loop ([paths (map (lambda (p) (simplify-path (resolve-path p) #f))
+                           paths)]
+               [r '()])
+      (if (null? paths)
+        (reverse! r)
+        (let loop2 ([path (car paths)]
+                    [new (cond [(file-exists? (car paths))
+                                (list (car paths))]
+                               [(directory-exists? (car paths))
+                                (find-files void (car paths))]
+                               [else (error 'pathlist-closure
+                                            "file/directory not found: ~a"
+                                            (car paths))])])
+          (let-values ([(base name dir?) (split-path path)])
+            (if (path? base)
+              (loop2 base (if (or (member base r) (member base paths))
+                            new (cons base new)))
+              (loop (cdr paths) (append! (reverse! new) r))))))))
+
+  )

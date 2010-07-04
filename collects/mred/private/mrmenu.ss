@@ -135,6 +135,7 @@
 				(send wx-parent append (send wx id) label help-string checkable?))
 			    (send wx-parent append-item this wx))
 			  (send wx-parent append-item this wx-submenu (strip-tab label)))
+		      (send wx set-enabled #t) ; re-added item is initially enabled at wx level
 		      (set! shown? #t)
 		      (do-enable enabled?))))]
 	[delete (entry-point
@@ -222,8 +223,9 @@
 					     (send keymap add-function "menu-item" 
 						   ;; keymap function callback already in exit mode:
 						   (lambda (edit event)
-						     (when (is-enabled?)
-						       (callback this (make-object wx:control-event% 'menu)))))
+						     (if (is-enabled?)
+							 (callback this (make-object wx:control-event% 'menu))
+							 (wx:bell))))
 					     (send keymap map-function key-binding "menu-item")
 					     keymap))])
 			 (values new-label keymap)))])
@@ -234,8 +236,7 @@
 			 (let-values ([(new-label keymap) (calc-labels l)])
 			   (set! label (string->immutable-string l))
 			   (super-set-label new-label)
-			   (if (or (super-is-deleted?)
-				   (not (super-is-enabled?)))
+			   (if (super-is-deleted?)
 			       (send wx set-keymap keymap)
 			       (send wx swap-keymap menu keymap)))))])
       (override

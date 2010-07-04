@@ -1,6 +1,8 @@
 (module license mzscheme
-  (require "../private/util.ss")
-  (require "../private/headelts.ss")
+  (require "../private/util.ss"
+           "../private/headelts.ss"
+           (lib "uri-codec.ss" "net")
+	   (lib "dirs.ss" "setup"))
   
   (require (lib "servlet.ss" "web-server"))
   (provide interface-version timeout start)
@@ -14,7 +16,7 @@
                 `(DIV ,s (BR)))
               ss))))
   
-  (define copyright-year 2005)
+  (define copyright-year 2006)
   
   (define (start initial-request)
     (report-errors-to-browser send/finish)
@@ -26,7 +28,7 @@
       (BODY
        (A ((NAME "lic") (VALUE "License")))
        (B "PLT Software") (BR)
-       (B ,(format "Copyright (c) ~a PLT Scheme, Inc." copyright-year))
+       (B ,(format "Copyright (c) ~a PLT Scheme Inc." copyright-year))
        (P)
        "PLT software is distributed under the GNU Library General Public "
        " License (LGPL).  This means you can link PLT software (such as "
@@ -36,10 +38,10 @@
        "under the terms of the LGPL, which in particular means that you must "
        "release the source code for the modified software. See "
        (A ((HREF ,(format "/servlets/doc-anchor.ss?name=COPYING.LIB&caption=Copying PLT software&file=~a"
-                          (hexify-string
+                          (uri-encode
                            (path->string
                             (simplify-path 
-                             (build-path (collection-path "mzlib") 'up 'up "notes" "COPYING.LIB")))))))
+                             (build-path (find-doc-dir) "release-notes" "COPYING.LIB")))))))
           "COPYING.LIB")
        " for more information."
        (P)
@@ -48,15 +50,15 @@
        ,@(map make-item 
               `(("DrScheme"
                  "Copyright (c) 1995-2003 PLT"
-                 ,(format "Copyright (c) ~a PLT Scheme, Inc." copyright-year)
+                 ,(format "Copyright (c) 2004-~a PLT Scheme Inc." copyright-year)
                  "All rights reserved.")
                 ("MrEd"
                  "Copyright (c) 1995-2003 PLT"
-		 ,(format "Copyright (c) ~a PLT Scheme, Inc." copyright-year)
+		 ,(format "Copyright (c) 2004-~a PLT Scheme Inc." copyright-year)
                  "All rights reserved.")
                 ("MzScheme" 
                  "Copyright (c) 1995-2003 PLT"
-		 ,(format "Copyright (c) ~a PLT Scheme, Inc." copyright-year)
+		 ,(format "Copyright (c) 2004-~a PLT Scheme Inc." copyright-year)
                  "All rights reserved.")
                 ("libscheme" 
                  "Copyright (c) 1994 Brent Benson"
@@ -89,5 +91,9 @@
 		("zlib"
 		 "Copyright (c) 1995-2002 Jean-loup Gailly and Mark Adler"
 		 "All rights reserved.")
+		("GNU MP Library"
+		 "Copyright (c) 1992, 1993, 1994, 1996 by Free Software Foundation, Inc.")
+		("GNU lightning"
+		 "Copyright (c) 1994, 1995, 1996, 1999, 2000, 2001, 2002 Free Software Foundation, Inc.")
 		("GNU Classpath"
 		 "Gnu Public Licence with special exception")))))))

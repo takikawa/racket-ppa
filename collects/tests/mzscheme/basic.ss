@@ -1,6 +1,16 @@
 
 (load-relative "loadtest.ss")
 
+(test "bbb" regexp-replace* "a" "aaa" "b")
+
+(define (test-weird-offset regexp-match regexp-match-positions)
+  (test #f regexp-match "e" (open-input-string ""))
+  (test #f regexp-match "e" (open-input-string "") (expt 2 100))
+  (test #f regexp-match "e" (open-input-string "") (expt 2 100) (expt 2 101))
+  (test '((3 . 4)) regexp-match-positions "e" (open-input-string "eaae") 2 (expt 2 101)))
+(test-weird-offset regexp-match regexp-match-positions)
+
+
 (test '() 'null null)
 (test '() 'null ())
 
@@ -955,8 +965,9 @@
 (err/rt-test (make-bytes 5.0 98))
 (err/rt-test (make-bytes 5.2 97))
 (err/rt-test (make-bytes -5 98))
-(err/rt-test (make-bytes 500000000000000 #\f) exn:fail:out-of-memory?) ;; bignum on 32-bit machines
-(err/rt-test (make-bytes 50000000000000000000 #\f) exn:fail:out-of-memory?)  ;; bignum on 64-bit machines
+(err/rt-test (make-bytes 50000000000000000000 #\f))
+(err/rt-test (make-bytes 500000000000000 45) exn:fail:out-of-memory?) ;; bignum on 32-bit machines
+(err/rt-test (make-bytes 50000000000000000000 45) exn:fail:out-of-memory?)  ;; bignum on 64-bit machines
 
 
 (define f (make-bytes 3 (char->integer #\*)))
@@ -1149,6 +1160,21 @@
   (test "hihihi" regexp-replace* (string #\nul) (string #\nul #\nul #\nul) "hi"))
 (test (string #\- #\nul #\+ #\- #\nul #\+ #\- #\nul #\+)
       regexp-replace* "a" "aaa" (string #\- #\nul #\+))
+
+(test "xpple" regexp-replace #rx"a" "apple" "x")
+(test #"xpple" regexp-replace #rx#"a" "apple" "x")
+(test #"xpple" regexp-replace #rx"a" #"apple" "x")
+(test #"xpple" regexp-replace #rx#"a" #"apple" "x")
+(err/rt-test (regexp-replace #rx"a" "apple" #"x"))
+
+(test "pAPple" regexp-replace #rx"a(.)" "apple" (lambda (a b) (string-append b (string-upcase a))))
+(test #"p.ap.ple" regexp-replace #rx#"a(.)" "apple" (lambda (a b) (bytes-append b #"." a #".")))
+(test #"p.ap.ple" regexp-replace #rx"a(.)" #"apple" (lambda (a b) (bytes-append b #"." a #".")))
+(test #"p.ap.ple" regexp-replace #rx#"a(.)" #"apple" (lambda (a b) (bytes-append b #"." a #".")))
+(err/rt-test (regexp-replace #rx#"a(.)" #"apple" (lambda (a b) "string")))
+(err/rt-test (regexp-replace #rx#"a(.)" "apple" (lambda (a b) "string")))
+(err/rt-test (regexp-replace #rx"a(.)" #"apple" (lambda (a b) "string")))
+(err/rt-test (regexp-replace #rx"a(.)" "apple" (lambda (a b) #"bytes")))
 
 ;; Check extremely many subexpressions:
 (for-each
@@ -1726,8 +1752,8 @@
       procedure-arity (case-lambda [(x) 0] [(x y z) 1] [(x y z w u . rest) 2]))
 (test (make-arity-at-least 0) procedure-arity (lambda x 1))
 (test (list 0 (make-arity-at-least 0)) procedure-arity (case-lambda 
-					       [() 10]
-					       [x 1]))
+							[() 10]
+							[x 1]))
 (test (make-arity-at-least 0) procedure-arity (lambda x x))
 (arity-test procedure-arity 1 1)
 
@@ -1981,14 +2007,15 @@
 (arity-test hash-table-for-each 2 2)
 (arity-test hash-table? 1 3)
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Misc
 
 (test #t string? (version))
 (test #t string? (banner))
 (test #t symbol? (system-type))
-(test (system-type) system-type #f)
-(test #t string? (system-type #t))
+(test (system-type) system-type 'os)
+(test #t string? (system-type 'machine))
+(test #t symbol? (system-type 'link))
 (test #t relative-path? (system-library-subpath))
 
 (test #t 'cmdline (let ([v (current-command-line-arguments)])
@@ -2002,6 +2029,30 @@
 (arity-test system-type 0 1)
 (arity-test system-library-subpath 0 1)
 (arity-test current-command-line-arguments 0 1)
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; procedure-closure-contents-eq?
+
+(for-each
+ (lambda (jit?)
+   (parameterize ([eval-jit-enabled jit?])
+     (let ([f #f])
+       (set! f (eval '(lambda (x) (lambda () x))))
+       ((f 'c)) ; forced JIT compilation
+       (test #t procedure-closure-contents-eq? (f 'a) (f 'a))
+       (test #f procedure-closure-contents-eq? (f 'a) (f 'b))
+       (set! f (eval '(case-lambda
+		       [(x) (lambda () 12)]
+		       [(x y) (lambda () (list x y))])))
+       ((f 'c)) ; forces JIT compilation
+       ((f 'c 'd)) ; forces JIT compilation
+       (test #t procedure-closure-contents-eq? (f 'a) (f 'a))
+       (test #t procedure-closure-contents-eq? (f 'a 'b) (f 'a 'b))
+       (test #f procedure-closure-contents-eq? (f 'a 'b) (f 'c 'b)))))
+ '(#t #f))
+(test #t procedure-closure-contents-eq? add1 add1)
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (report-errs)
 

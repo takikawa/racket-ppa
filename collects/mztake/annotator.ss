@@ -5,10 +5,16 @@
            (lib "list.ss")
            (lib "marks.ss" "mztake")
            (lib "mred.ss" "mred")
+           (lib "pretty.ss")
+           (lib "base-gm.ss" "frtime")
            (lib "load-sandbox.ss" "mztake")
            (prefix srfi: (lib "search.ss" "srfi" "1"))
            )
   (provide annotate-stx annotate-for-single-stepping)
+
+  (module-identifier=? #'eval/annotations
+		       (datum->syntax-object #f 'eval/annotations))
+
 
   (define (arglist-bindings arglist-stx)
     (syntax-case arglist-stx ()
@@ -49,11 +55,14 @@
   ;; (use the key DEBUG-KEY).  If BREAK-BEFORE returns some value, the
   ;; evaluation skips the expression entirely and just returns that value.
   ;; Otherwise, evaluation proceeds normally.  After the expression is
-  ;; evaluated BREAK-AFTER is called.  If BREAK-AFTER returns some value, the
+  ;; evaluated, BREAK? is called with the position of the end of the expression.
+  ;; If it returns true, BREAK-AFTER is called; otherwise, the expression returns
+  ;; normally.  If BREAK-AFTER returns some value, the
   ;; return value of the expression is replaced by that value.
   ;;
-  ;; RECORD-BOUND-ID is simply passed to ANNOTATE-STX.  
-  (define (annotate-for-single-stepping stx break? break-before break-after record-bound-id)
+  ;; RECORD-BOUND-ID and RECORD-TOP-LEVEL-ID are simply passed to ANNOTATE-STX.  
+  
+  (define (annotate-for-single-stepping stx break? break-before break-after record-bound-id record-top-level-id )
     (annotate-stx
      stx
      (lambda (debug-info annotated raw is-tail?)
@@ -92,7 +101,8 @@
                                 #,debug-info
                                 (current-continuation-marks) value-list)
                          (apply values value-list)))))))
-     record-bound-id))
+     record-bound-id
+      record-top-level-id ))
 
 
   ; annotate-stx : (syntax? 
@@ -132,7 +142,7 @@
   ;;
   ;; Naturally, when USE-CASE is 'bind, BOUND-STX and BINDING-STX are equal.  
   ;;
-  (define (annotate-stx stx break-wrap record-bound-id)
+  (define (annotate-stx stx break-wrap record-bound-id record-top-level-id)
 
     (define breakpoints (make-hash-table))
 
@@ -147,37 +157,45 @@
        [(module identifier name (#%plain-module-begin . module-level-exprs))
         (quasisyntax/loc stx (module identifier name
                                (#%plain-module-begin 
-                                #,@(map module-level-expr-iterator
+                                #,@(map (lambda (e) (module-level-expr-iterator
+                                                     e (list (syntax-e #'identifier)
+                                                             (syntax-source #'identifier))))
                                         (syntax->list #'module-level-exprs)))))]
        [else-stx
-        (general-top-level-expr-iterator stx)]))
+        (general-top-level-expr-iterator stx  #f  )]))
     
-    (define (module-level-expr-iterator stx)
+    (define (module-level-expr-iterator stx module-name )
       (kernel:kernel-syntax-case
        stx #f
        [(provide . provide-specs)
         stx]
        [else-stx
-        (general-top-level-expr-iterator stx)]))
+        (general-top-level-expr-iterator stx module-name )]))
     
-    (define (general-top-level-expr-iterator stx)
+    (define (general-top-level-expr-iterator stx module-name )
       (kernel:kernel-syntax-case
        stx #f
        [(define-values (var ...) expr)
-        #`(define-values (var ...)
-            #,(annotate #`expr null #;(syntax->list #`(var ...)) #t))]
+        
+        (begin (for-each (lambda (v) (record-bound-id 'bind v v))
+                         (syntax->list #'(var ...)))
+               (quasisyntax/loc stx
+                 (begin (define-values (var ...) #,(annotate #`expr empty #t module-name))
+                        #,(if (syntax-source #'stx)
+                              #`(begin (#,record-top-level-id '#,module-name 'var var) ...)
+                              #'(void))
+                        (void)))
+               )
+        ]
        [(define-syntaxes (var ...) expr)
         stx]
        [(define-values-for-syntax (var ...) expr)
-	stx
-	;; define-values-for-syntax's RHS is compile time, so treat it
-	;;  like define-syntaxes
-	#;
-        #`(define-values-for-syntax (var ...) 
-            #,(annotate #`expr #`(syntax->list #'(var ...)) #t))]      
+        ;; define-values-for-syntax's RHS is compile time, so treat it
+        ;; like define-syntaxes
+        stx]
        [(begin . top-level-exprs)
         (quasisyntax/loc stx (begin #,@(map (lambda (expr)
-                                              (module-level-expr-iterator expr))
+                                              (module-level-expr-iterator expr module-name ))
                                             (syntax->list #'top-level-exprs))))]
        [(require . require-specs)
         stx]
@@ -185,9 +203,9 @@
         stx]
        [(require-for-template dot require-specs) stx]
        [else
-        (annotate stx '() #f)]))
+        (annotate stx '() #f module-name )]))
     
-    (define (annotate expr bound-vars is-tail?)
+    (define (annotate expr bound-vars is-tail? module-name )
       
       (define annotate-break?
         (let ([pos (syntax-position expr)]
@@ -225,17 +243,17 @@
                  [new-rhs (map (lambda (expr)
 				 (annotate expr 
 					   (if letrec? all-bindings bound-vars)
-					   #f))
+					   #f module-name ))
 			       (syntax->list #'(rhs ...)))]
                  [last-body (car (reverse (syntax->list #'bodies)))]
                  [all-but-last-body (reverse (cdr (reverse (syntax->list #'bodies))))]
                  [bodies (append (map (lambda (expr)
-                                        (annotate expr all-bindings #f))
+                                        (annotate expr all-bindings #f module-name ))
                                       all-but-last-body)
                                  (list (annotate
                                         last-body
 					all-bindings 
-					is-tail?)))]
+					is-tail? module-name )))]
 		 [local-debug-info (assemble-debug-info new-bindings new-bindings 'normal #f)]
 		 [previous-bindings (previous-bindings bound-vars)])
             (for-each (lambda (id) (record-bound-id 'bind id id)) new-bindings)
@@ -266,8 +284,8 @@
                  [all-bound-vars (append new-bound-vars bound-vars)]
                  [new-bodies (let loop ([bodies (syntax->list #'bodies)])
                                (if (equal? '() (cdr bodies))
-                                   (list (annotate (car bodies) all-bound-vars #t))
-                                   (cons (annotate (car bodies) all-bound-vars #f)
+                                   (list (annotate (car bodies) all-bound-vars #t module-name ))
+                                   (cons (annotate (car bodies) all-bound-vars #f module-name )
                                          (loop (cdr bodies)))))])
             (for-each (lambda (id) (record-bound-id 'bind id id)) new-bound-vars)
             (quasisyntax/loc clause
@@ -300,26 +318,26 @@
                             (case-lambda #,@(map lambda-clause-annotator (syntax->list #'clauses))))]
           
           [(if test then)
-           (quasisyntax/loc expr (if #,(annotate #'test bound-vars #f)
-                                     #,(annotate #'then bound-vars is-tail?)))]
+           (quasisyntax/loc expr (if #,(annotate #'test bound-vars #f module-name )
+                                     #,(annotate #'then bound-vars is-tail? module-name )))]
           
           [(if test then else)
-           (quasisyntax/loc expr (if #,(annotate #'test bound-vars #f)
-                                     #,(annotate #'then bound-vars is-tail?)
-                                     #,(annotate #'else bound-vars is-tail?)))]
+           (quasisyntax/loc expr (if #,(annotate #'test bound-vars #f module-name )
+                                     #,(annotate #'then bound-vars is-tail? module-name )
+                                     #,(annotate #'else bound-vars is-tail? module-name )))]
           
           [(begin . bodies)
            (letrec ([traverse
                      (lambda (lst)
                        (if (and (pair? lst) (equal? '() (cdr lst)))
-                           `(,(annotate (car lst) bound-vars is-tail?))
-                           (cons (annotate (car lst) bound-vars #f)
+                           `(,(annotate (car lst) bound-vars is-tail? module-name ))
+                           (cons (annotate (car lst) bound-vars #f module-name )
                                  (traverse (cdr lst)))))])
              (quasisyntax/loc expr (begin #,@(traverse (syntax->list #'bodies)))))]
           
           [(begin0 . bodies)
            (quasisyntax/loc expr (begin0 #,@(map (lambda (expr)
-                                                   (annotate expr bound-vars #f))
+                                                   (annotate expr bound-vars #f module-name ))
                                                  (syntax->list #'bodies))))]
           
           [(let-values . clause)
@@ -334,7 +352,7 @@
              (when binder
                (let ([f (first binder)])
                  (record-bound-id 'set expr f)))
-             (quasisyntax/loc expr (set! var #,(annotate #`val bound-vars #f))))]
+             (quasisyntax/loc expr (set! var #,(annotate #`val bound-vars #f module-name ))))]
           
           [(quote _) expr]
           
@@ -342,16 +360,16 @@
           
           [(with-continuation-mark key mark body)
            (quasisyntax/loc expr (with-continuation-mark key
-                                                         #,(annotate #'mark bound-vars #f)
-                                                         #,(annotate #'body bound-vars is-tail?)))]
+                                                         #,(annotate #'mark bound-vars #f module-name )
+                                                         #,(annotate #'body bound-vars is-tail? module-name )))]
           
           [(#%app . exprs)
            (let ([subexprs (map (lambda (expr) 
-                                  (annotate expr bound-vars #f))
+                                  (annotate expr bound-vars #f module-name ))
                                 (syntax->list #'exprs))])
              (if is-tail?
                  (quasisyntax/loc expr #,subexprs)
-                 (wcm-wrap (make-debug-info expr bound-vars bound-vars 'normal #f (previous-bindings bound-vars))
+                 (wcm-wrap (make-debug-info module-name expr bound-vars bound-vars 'normal #f (previous-bindings bound-vars))
                            (quasisyntax/loc expr #,subexprs))))]
           
           [(#%datum . _) expr]
@@ -366,7 +384,7 @@
       
       (if annotate-break?
           (break-wrap
-           (make-debug-info expr bound-vars bound-vars 'at-break #f (previous-bindings bound-vars))
+           (make-debug-info module-name expr bound-vars bound-vars 'at-break #f (previous-bindings bound-vars))
            annotated
            expr
            is-tail?)

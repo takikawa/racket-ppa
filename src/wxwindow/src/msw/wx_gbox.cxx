@@ -3,7 +3,7 @@
  * Purpose:	Group box item implementation
  * Author:	Matthew Flatt
  * Created:	2003
- * Copyright:	(c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:	(c) 2004-2006 PLT Scheme Inc.
  * Copyright:	(c) 2003, PLT
  */
 
@@ -58,7 +58,7 @@ wxGroupBox::wxGroupBox(wxPanel *panel, char *Title, long _style, wxFont *_font):
     double label_height = 0;
     int char_width, ignored;
 
-    GetTextExtent(wxStripMenuCodes(the_label), &label_width, &label_height, NULL, NULL, font);
+    GetLabelExtent(wxStripMenuCodes(the_label), &label_width, &label_height);
     wxGetCharSize((HWND)ms_handle, &char_width, &ignored, font);
     label_width += 3 * char_width; /* space before & after label */
     width = label_width;

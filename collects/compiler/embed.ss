@@ -16,7 +16,7 @@
                      (opt-> (path-string?
                              any/c
                              any/c
-                             (listof (list/c (union boolean? symbol?) any/c))
+                             (listof (list/c (or/c boolean? symbol?) any/c))
                              (listof path-string?)
                              any/c
                              (listof string?))
@@ -25,6 +25,7 @@
                              symbol?)
                             void?)])
   (provide write-module-bundle
+	   create-embedding-executable
            embedding-executable-is-directory?
            embedding-executable-put-file-extension+style+filters
 	   embedding-executable-add-suffix))

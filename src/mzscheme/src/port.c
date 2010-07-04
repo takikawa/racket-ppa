@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -255,6 +255,7 @@ Scheme_Object *(*scheme_make_stderr)(void) = NULL;
 int scheme_file_open_count;
 
 MZ_DLLSPEC int scheme_binary_mode_stdio;
+void scheme_set_binary_mode_stdio(int v) { scheme_binary_mode_stdio =  v; }
 
 static int special_is_ok;
 
@@ -1256,7 +1257,7 @@ static void do_count_lines(Scheme_Port *ip, const char *buffer, long offset, lon
     int state = ip->utf8state;
     int n;
     degot += state_len(state);
-    n = scheme_utf8_decode_count(buffer, offset, offset + i + 1, &state, 0, '?');
+    n = scheme_utf8_decode_count((const unsigned char *)buffer, offset, offset + i + 1, &state, 0, '?');
     degot += (i + 1 - n);
     ip->utf8state = 0; /* assert: state == 0, because we ended with a newline */
   }
@@ -1299,7 +1300,7 @@ static void do_count_lines(Scheme_Port *ip, const char *buffer, long offset, lon
     col -= n;
     for (i = prev_i; i < got; i++) {
       if (buffer[offset + i] == '\t') {
-	n = scheme_utf8_decode_count(buffer, offset + prev_i, offset + i, &state, 0, '?');
+	n = scheme_utf8_decode_count((const unsigned char *)buffer, offset + prev_i, offset + i, &state, 0, '?');
 	degot += ((i - prev_i) - n);
 	col += n;
 	col = col - (col & 0x7) + 8;
@@ -1307,7 +1308,7 @@ static void do_count_lines(Scheme_Port *ip, const char *buffer, long offset, lon
       }
     }
     if (prev_i < i) {
-      n = scheme_utf8_decode_count(buffer, offset + prev_i, offset + i, &state, 1, '?');
+      n = scheme_utf8_decode_count((const unsigned char *)buffer, offset + prev_i, offset + i, &state, 1, '?');
       n += state_len(state);
       col += n;
       degot += ((i - prev_i) - n);
@@ -1335,6 +1336,9 @@ long scheme_get_byte_string_unless(const char *who,
   int special_ok = special_is_ok, check_special;
   Scheme_Get_String_Fun gs;
   Scheme_Peek_String_Fun ps;
+
+  /* See also get_one_byte, below. Any change to this function
+     may require a change to 1-byte specialization of get_one_byte. */
 
   /* back-door argument: */
   special_is_ok = 0;
@@ -1433,8 +1437,11 @@ long scheme_get_byte_string_unless(const char *who,
 
     if (check_special && ip->ungotten_special) {
       if (!special_ok) {
-	if (!peek && ip->progress_evt)
-	  post_progress(ip);
+	if (!peek) {
+	  if (ip->progress_evt)
+	    post_progress(ip);
+	  ip->ungotten_special = NULL;
+	}
 	scheme_bad_time_for_special(who, port);
       }
       if (!peek) {
@@ -1553,7 +1560,7 @@ long scheme_get_byte_string_unless(const char *who,
 	    ip->unless_cache = scheme_false;
 	    ip->unless = unless;
 	  } else {
-	    unless = scheme_make_pair(NULL, NULL);
+	    unless = scheme_make_raw_pair(NULL, NULL);
 	    ip->unless = unless;
 	  }
 	  if (unless_evt)
@@ -1868,10 +1875,10 @@ int scheme_peeked_read_via_get(Scheme_Input_Port *ip,
   Scheme_Object * volatile v, *sema, *a[3], ** volatile aa, * volatile l;
   volatile long size = _size;
   volatile int n, current_leader = 0;
-  Scheme_Type t;
+  volatile Scheme_Type t;
   Scheme_Object * volatile target_evt = _target_evt;
 
-  /* Check whether t's even t value is known to be always itself: */
+  /* Check whether t's event value is known to be always itself: */
   t = SCHEME_TYPE(target_evt);
   if (!SAME_TYPE(t, scheme_sema_type)
       && !SAME_TYPE(t, scheme_channel_put_type)
@@ -1903,7 +1910,7 @@ int scheme_peeked_read_via_get(Scheme_Input_Port *ip,
       /* Some other thread is already trying to commit.
 	 Ask it to sync on our target, too */
       v = scheme_make_pair(scheme_make_integer(_size), target_evt);
-      l = scheme_make_pair(v, ip->input_extras);
+      l = scheme_make_raw_pair(v, ip->input_extras);
       ip->input_extras = l;
 
       scheme_post_sema_all(ip->input_giveup);
@@ -1927,6 +1934,11 @@ int scheme_peeked_read_via_get(Scheme_Input_Port *ip,
       /* No other thread is trying to commit. This one is hereby
 	 elected "main" if multiple threads try to commit. */
 
+      if (SAME_TYPE(t, scheme_always_evt_type)) {
+	/* Fast path: always-evt is ready */
+	return complete_peeked_read_via_get(ip, size);
+      }
+
       /* This sema makes other threads wait before reading: */
       sema = scheme_make_sema(0);
       ip->input_lock = sema;
@@ -1940,12 +1952,12 @@ int scheme_peeked_read_via_get(Scheme_Input_Port *ip,
 	/* There are other threads trying to commit, and
 	   as main thread, we'll help them out. */
 	n = 3;
-	for (l = ip->input_extras; l ; l = SCHEME_CDR(l)) {
+	for (l = ip->input_extras; l; l = SCHEME_CDR(l)) {
 	  n++;
 	}
 	aa = MALLOC_N(Scheme_Object *, n);
 	n = 3;
-	for (l = ip->input_extras; l ; l = SCHEME_CDR(l)) {
+	for (l = ip->input_extras; l; l = SCHEME_CDR(l)) {
 	  aa[n++] = SCHEME_CDR(SCHEME_CAR(l));
 	}
       } else {
@@ -2124,12 +2136,12 @@ long scheme_get_char_string(const char *who,
 	special_is_ok = 1;
 	got = scheme_get_byte_string_unless(who, port,
 					    s, leftover, 1,
-					    0, 1, 
+					    0, 1 /* => peek */, 
 					    quick_plus(peek_skip, ahead_skip),
 					    NULL);
 	if (got > 0) {
 	  long ulen, glen;
-	  glen = scheme_utf8_decode_as_prefix(s, 0, got + leftover,
+	  glen = scheme_utf8_decode_as_prefix((const unsigned char *)s, 0, got + leftover,
 					      buffer, offset, offset + size,
 					      &ulen, 0, '?');
 	  if (glen && (ulen < got + leftover)) {
@@ -2171,11 +2183,13 @@ long scheme_get_char_string(const char *who,
 	  }
 	} else {
 	  /* Either EOF or SPECIAL -- either one ends the leftover
-	     sequence in an error. */
-	  while (leftover) {
+	     sequence in an error. We may have more leftover chars
+	     than we need, but they haven't been read, yet. */
+	  while (leftover && size) {
 	    buffer[offset++] = '?';
 	    total_got++;
 	    --leftover;
+	    --size;
 	  }
 	  return total_got;
 	}
@@ -2197,7 +2211,7 @@ long scheme_get_char_string(const char *who,
     if (got >= 0) {
       long ulen, glen;
 
-      glen = scheme_utf8_decode_as_prefix(s, 0, got + leftover,
+      glen = scheme_utf8_decode_as_prefix((const unsigned char *)s, 0, got + leftover,
 					  buffer, offset, offset + size,
 					  &ulen, 0, '?');
       
@@ -2232,6 +2246,103 @@ long scheme_get_char_string(const char *who,
   }
 }
 
+static 
+#ifndef NO_INLINE_KEYWORD
+MSC_IZE(inline)
+#endif
+long get_one_byte(const char *who,
+		  Scheme_Object *port,
+		  char *buffer, long offset,
+		  int only_avail)
+{
+  Scheme_Input_Port *ip;
+  long gc;
+  int special_ok = special_is_ok;
+  Scheme_Get_String_Fun gs;
+
+  special_is_ok = 0;
+
+  ip = (Scheme_Input_Port *)port;
+
+  CHECK_PORT_CLOSED(who, "input", port, ip->closed);
+
+  if (ip->input_lock)
+    scheme_wait_input_allowed(ip, only_avail);
+
+  if (ip->ungotten_count) {
+    buffer[offset] = ip->ungotten[--ip->ungotten_count];
+    gc = 1;
+  } else if (ip->peeked_read && pipe_char_count(ip->peeked_read)) {
+    int ch;
+    ch = scheme_get_byte(ip->peeked_read);
+    buffer[offset] = ch;
+    gc = 1;
+  } else if (ip->ungotten_special) {
+    if (ip->progress_evt)
+      post_progress(ip);
+    if (!special_ok) {
+      ip->ungotten_special = NULL;
+      scheme_bad_time_for_special(who, port);
+      return 0;
+    }
+    ip->special = ip->ungotten_special;
+    ip->ungotten_special = NULL;
+    if (ip->p.position >= 0)
+      ip->p.position++;
+    if (ip->p.count_lines)
+      inc_pos((Scheme_Port *)ip, 1);
+    return SCHEME_SPECIAL;
+  } else {
+    if (ip->pending_eof > 1) {
+      ip->pending_eof = 1;
+      return EOF;
+    } else {
+      /* Call port's get function. */
+      gs = ip->get_string_fun;
+
+      gc = gs(ip, buffer, offset, 1, 0, NULL);
+	
+      if (ip->progress_evt && (gc > 0))
+	post_progress(ip);
+
+      if (gc < 1) {
+	if (gc == SCHEME_SPECIAL) {
+	  if (special_ok) {
+	    if (ip->p.position >= 0)
+	      ip->p.position++;
+	    if (ip->p.count_lines)
+	      inc_pos((Scheme_Port *)ip, 1);
+	    return SCHEME_SPECIAL;
+	  } else {
+	    scheme_bad_time_for_special(who, port);
+	    return 0;
+	  }
+	} else if (gc == EOF) {
+	  ip->p.utf8state = 0;
+	  return EOF;
+	} else {
+	  /* didn't get anything the first try, so use slow path: */
+	  special_is_ok = special_ok;
+	  return scheme_get_byte_string_unless(who, port,
+					       buffer, offset, 1,
+					       0, 0, NULL, NULL);
+	}
+      }
+    }
+  }
+
+  /****************************************************/
+  /* Adjust position information for chars got so far */
+  /****************************************************/
+  
+  if (ip->p.position >= 0)
+    ip->p.position++;
+  if (ip->p.count_lines)
+    do_count_lines((Scheme_Port *)ip, buffer, offset, 1);
+  
+  return gc;
+}
+
 int
 scheme_getc(Scheme_Object *port)
 {
@@ -2240,11 +2351,18 @@ scheme_getc(Scheme_Object *port)
   int v, delta = 0;
 
   while(1) {
-    v = scheme_get_byte_string_unless("read-char", port,
-				      s, delta, 1,
-				      0,
-				      delta > 0, scheme_make_integer(delta-1),
-				      NULL);
+    if (delta) {
+      v = scheme_get_byte_string_unless("read-char", port,
+					s, delta, 1,
+					0,
+					delta > 0, scheme_make_integer(delta-1),
+					NULL);
+    } else {
+      v = get_one_byte("read-char", port,
+		       s, 0, 
+		       0);
+    }
+
     if ((v == EOF) || (v == SCHEME_SPECIAL)) {
       if (!delta)
 	return v;
@@ -2254,7 +2372,7 @@ scheme_getc(Scheme_Object *port)
 	return '?';
       }
     } else {
-      v = scheme_utf8_decode_prefix(s, delta + 1, r, 0);
+      v = scheme_utf8_decode_prefix((const unsigned char *)s, delta + 1, r, 0);
       if (v > 0) {
 	if (delta) {
 	  /* Need to read the peeked bytes (will ignore) */
@@ -2282,11 +2400,9 @@ scheme_get_byte(Scheme_Object *port)
   char s[1];
   int v;
 
-  v = scheme_get_byte_string_unless("read-byte", port,
-				    s, 0, 1,
-				    0,
-				    0, 0,
-				    NULL);
+  v = get_one_byte("read-byte", port,
+		   s, 0,
+		   0);
 
   if ((v == EOF) || (v == SCHEME_SPECIAL))
     return v;
@@ -2399,7 +2515,7 @@ static int do_peekc_skip(Scheme_Object *port, Scheme_Object *skip,
 	return '?';
       }
     } else {
-      v = scheme_utf8_decode_prefix(s, delta + 1, r, 0);
+      v = scheme_utf8_decode_prefix((const unsigned char *)s, delta + 1, r, 0);
       if (v > 0)
 	return r[0];
       else if (v == -2) {
@@ -3073,7 +3189,7 @@ scheme_put_char_string(const char *who, Scheme_Object *port,
     bstr = buf;
   else
     bstr = (char *)scheme_malloc_atomic(blen);
-  scheme_utf8_encode(str, d, d + len, bstr, 0, 0);
+  scheme_utf8_encode(str, d, d + len, (unsigned char *)bstr, 0, 0);
 
   return scheme_put_byte_string(who, port, bstr, 0, blen, 0);
 }
@@ -3888,18 +4004,20 @@ scheme_file_position(int argc, Scheme_Object *argv[])
   if (!SCHEME_OUTPORTP(argv[0]) && !SCHEME_INPORTP(argv[0]))
     scheme_wrong_type("file-position", "port", 0, argc, argv);
   if (argc == 2) {
-    int ok = 0;
+    if (!SCHEME_EOFP(argv[1])) {
+      int ok = 0;
 
-    if (SCHEME_INTP(argv[1])) {
-      ok = (SCHEME_INT_VAL(argv[1]) >= 0);
+      if (SCHEME_INTP(argv[1])) {
+	ok = (SCHEME_INT_VAL(argv[1]) >= 0);
+      }
+      
+      if (SCHEME_BIGNUMP(argv[1])) {
+	ok = SCHEME_BIGPOS(argv[1]);
+      }
+      
+      if (!ok)
+	scheme_wrong_type("file-position", "non-negative exact integer or eof", 1, argc, argv);
     }
-
-    if (SCHEME_BIGNUMP(argv[1])) {
-      ok = SCHEME_BIGPOS(argv[1]);
-    }
-
-    if (!ok)
-      scheme_wrong_type("file-position", "non-negative exact integer", 1, argc, argv);
   }
 
   f = NULL;
@@ -3969,34 +4087,45 @@ scheme_file_position(int argc, Scheme_Object *argv[])
 		     scheme_make_provided_string(argv[0], 2, NULL));
 
   if (argc > 1) {
-    long n = SCHEME_INT_VAL(argv[1]);
+    long n;
+    int whence;
+
+    if (SCHEME_INTP(argv[1])) {
+      n = SCHEME_INT_VAL(argv[1]);
+      whence = SEEK_SET;
+    } else {
+      n = 0;
+      whence = SEEK_END;
+    }
+      
     if (f) {
-      if (fseek(f, n, 0)) {
+      if (fseek(f, n, whence)) {
 	scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
 			 "file-position: position change failed on file (%e)",
 			 errno);
       }
 #ifdef MZ_FDS
     } else if (had_fd) {
-      long n = SCHEME_INT_VAL(argv[1]), lv;
-
+      long lv;
+      
       if (SCHEME_OUTPORTP(argv[0])) {
 	flush_fd((Scheme_Output_Port *)argv[0], NULL, 0, 0, 0, 0);
       }
-
+      
 # ifdef WINDOWS_FILE_HANDLES
-      lv = SetFilePointer((HANDLE)fd, n, NULL, FILE_BEGIN);
+      lv = SetFilePointer((HANDLE)fd, n, NULL, 
+			  ((whence == SEEK_SET) ? FILE_BEGIN : FILE_END));
 # else
 #  ifdef MAC_FILE_HANDLES
-      {
-	errno = SetFPos(fd, fsFromStart, n);
+			  {
+	errno = SetFPos(fd, ((whence == SEEK_SET) ? fsFromStart : fsFromLEOF), n);
 	if (errno == noErr)
 	  lv = 0;
 	else
 	  lv = -1;
       }
 #  else
-      lv = lseek(fd, n, 0);
+      lv = lseek(fd, n, whence);
 #  endif
 # endif
 
@@ -4022,6 +4151,9 @@ scheme_file_position(int argc, Scheme_Object *argv[])
       }
 #endif
     } else {
+      if (whence == SEEK_END) {
+	n = is->size;
+      }
       if (wis) {
 	if (is->index > is->u.hot)
 	  is->u.hot = is->index;
@@ -4463,21 +4595,27 @@ static long fd_get_string(Scheme_Input_Port *port,
   Scheme_FD *fip;
   long bc;
 
-  if (scheme_unless_ready(unless))
+  if (unless && scheme_unless_ready(unless))
     return SCHEME_UNLESS_READY;
 
   fip = (Scheme_FD *)port->port_data;
 
   if (fip->bufcount) {
-    bc = ((size <= fip->bufcount)
-	  ? size
-	  : fip->bufcount);
+    if (size == 1) {
+      buffer[offset] = fip->buffer[fip->buffpos++];
+      --fip->bufcount;
+      return 1;
+    } else {
+      bc = ((size <= fip->bufcount)
+	    ? size
+	    : fip->bufcount);
 
-    memcpy(buffer + offset, fip->buffer + fip->buffpos, bc);
-    fip->buffpos += bc;
-    fip->bufcount -= bc;
+      memcpy(buffer + offset, fip->buffer + fip->buffpos, bc);
+      fip->buffpos += bc;
+      fip->bufcount -= bc;
 
-    return bc;
+      return bc;
+    }
   } else {
     if ((nonblock == 2) && (fip->flush == MZ_FLUSH_ALWAYS))
       return 0;

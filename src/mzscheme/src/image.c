@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -48,6 +48,11 @@ extern void *GC_get_stack_base();
 #endif
 
 MZ_DLLSPEC int (*scheme_actual_main)(int argc, char **argv);
+
+void scheme_set_actual_main(int (*m)(int argc, char **argv))
+{
+  scheme_actual_main = m;
+}
 
 #ifdef UNIX_IMAGE_DUMPS
 static Scheme_Object *(*scheme_dump_heap)(char *filename) = NULL;

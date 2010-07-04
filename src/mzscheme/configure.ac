@@ -35,6 +35,7 @@ AC_ARG_ENABLE(libjpeg, [  --enable-libjpeg        use libjpeg instead of buildin
 
 AC_ARG_ENABLE(shared, [  --enable-shared         create shared libraries])
 AC_ARG_ENABLE(dynlib, [  --enable-dynlib         same as --enable-shared])
+AC_ARG_ENABLE(shared, [  --enable-origtree       install with original directory structure])
 
 AC_ARG_ENABLE(foreign, [  --enable-foreign        compile foreign support (enabled by default)], , enable_foreign=yes)
 AC_ARG_ENABLE(llvm,    [  --enable-llvm           compile llvm support (disabled by default)], , enable_llvm=no)
@@ -63,6 +64,7 @@ AC_ARG_ENABLE(noopt, [  --enable-noopt          drop -O C flags])
 
 AC_ARG_ENABLE(xonx, [  --enable-xonx           compile X11 (not Quartz) MrEd for Mac OS X])
 AC_ARG_ENABLE(libfw, [  --enable-libfw          install Mac OS X frameworks to /Library/Frameworks])
+AC_ARG_ENABLE(libfw, [  --enable-userfw         install Mac OS X frameworks to ~/Library/Frameworks])
 
 ###### Get OS Type #######
 
@@ -101,22 +103,13 @@ if test "${enable_dynlib}" = "no" ; then
   enable_shared=no
 fi
 
-if test "${enable_mred}" = "no" ; then
-  enable_wbuild=no
-  enable_xrender=no
-  enable_cairo=no
-  enable_libpng=no
-  enable_libjpeg=no
-  enable_gl=no
-  enable_pthread=no
-fi
-
 enable_quartz=no
 if test "${enable_xonx}" = "yes" ; then
   enable_quartz=no
 else
   if test "$OS" = "Darwin" ; then
     enable_quartz=yes
+    enable_origtree=yes
   fi
 fi
 
@@ -130,31 +123,64 @@ if test "${enable_perl}" = "" ; then
   fi
 fi
 
-if test "${prefix}" = "NONE" ; then
-  prefix=`cd "${srcdir}/.." && pwd`
-  MAKE_FINISH=inplace-finish
-else
-  # Check whether ${prefix} is redundant, because
-  # $prefix/src is $srcdir.
-  here_inode=`(ls -i -l -d ${srcdir}/. | cut -d d -f 1) 2> /dev/null`
-  there_inode=`(ls -i -l -d ${prefix}/src | cut -d d -f 1) 2> /dev/null`
-  if test "${here_inode}" = "${there_inode}" ; then
-    echo "in-place install, --prefix  specification is redundant"
-  else 
-    echo "----> Installation will go to ${prefix}:"
-    echo "---->   ${prefix}/collects/..."
-    echo "---->   ${prefix}/bin/..."
-    echo "---->   ${prefix}/lib/..."
-    echo "---->   ${prefix}/include/..."
-    echo "---->   ${prefix}/man/..."
-    echo "---->   ${prefix}/notes/..."
-    MAKE_COPYTREE=copytree
-    MAKE_FINISH=copy-finish
-  fi
-fi
-
 if test "${enable_iconv}" = "" ; then
   enable_iconv=yes
+fi
+
+############## Install targets ################
+
+unixstyle=no
+if test "${prefix}" != "NONE" ; then
+  if test "${enable_origtree}" != "yes" ; then
+    unixstyle=yes
+  fi
+fi
+if test "${exec_prefix}" != "NONE" ; then
+ unixstyle=yes
+fi
+if test "${bindir}" != '${exec_prefix}/bin' ; then
+ unixstyle=yes
+fi
+if test "${datadir}" != '${prefix}/share' ; then
+ unixstyle=yes
+fi
+if test "${libdir}" != '${exec_prefix}/lib' ; then
+ unixstyle=yes
+fi
+if test "${includedir}" != '${prefix}/include' ; then
+ unixstyle=yes
+fi
+if test "${mandir}" != '${prefix}/man' ; then
+ unixstyle=yes
+fi
+
+if test "${unixstyle}" = "no" ; then
+  if test "${prefix}" = "NONE" ; then
+    inplacebuild=yes
+    prefix=`cd "${srcdir}/.." && pwd`
+  else
+    MAKE_COPYTREE=copytree
+  fi
+  bindir='${prefix}/bin'
+  libpltdir='${prefix}/lib'
+  collectsdir='${prefix}/collects'
+  includepltdir='${prefix}/include'
+  docdir='${prefix}/doc'
+  mandir='${prefix}/man'
+  COLLECTS_PATH="../collects"
+  INSTALL_ORIG_TREE=yes
+else
+  if test "${prefix}" = "NONE" ; then
+    # Set prefix explicitly so we can use it during configure
+    prefix="${ac_default_prefix}"
+  fi
+  libpltdir="${libdir}/plt"
+  collectsdir="${libdir}/plt/collects"
+  includepltdir="${includedir}/plt"
+  docdir="${datadir}/plt/doc"
+  MAKE_COPYTREE=copytree
+  COLLECTS_PATH='${collectsdir}'
+  INSTALL_ORIG_TREE=no
 fi
 
 ###### Make sure MrEd is really there ######
@@ -163,6 +189,16 @@ if test "${enable_mred}" = "yes" ; then
   if test ! -d $srcdir/mred ; then
     enable_mred=no
   fi
+fi
+
+if test "${enable_mred}" = "no" ; then
+  enable_wbuild=no
+  enable_xrender=no
+  enable_cairo=no
+  enable_libpng=no
+  enable_libjpeg=no
+  enable_gl=no
+  enable_pthread=no
 fi
 
 ###### Some defaults #######
@@ -203,6 +239,8 @@ LIBMZSCHEME_DEP=""
 
 XFT_EXTRA_FLAGS=
 XFT_EXTRA_LIBS=
+
+EXE_SUFFIX=
 
 ###### OSKit stuff #######
 
@@ -380,6 +418,9 @@ case $OS in
   OpenBSD)
     LIBS="$LIBS -rdynamic"
     ;;
+  NetBSD)
+    LIBS="$LIBS -rdynamic"
+    ;;
   IRIX)
     STATICLINK="/usr/lib/libC.a /usr/lib/libmalloc.a"
     if test "$X_PRE_LIBS" = " -lSM -lICE" ; then
@@ -426,18 +467,13 @@ case $OS in
     X_LIBS="-L/usr/contrib/X11R6/lib/ $X_LIBS"
     ;;
   CYGWIN*)
-    # Old cygwin approach, to make it Windows-like instead of Unix-like:
-    #  MZBINTARGET=cygwin-bin
-    #  MZINSTALLTARGET=cygwin-install
-    #  EXTRALIBS="$LIBS gmzwin.exp"
-    #  MZOPTIONS="$MZOPTIONS -DGC_DLL"
-    #  CGCOPTIONS="$CGCOPTIONS -DGC_DLL -DGC_BUILD -DUSE_MSVC_MD_LIBRARY -DMD_LIB_MAIN"
     MZINSTALLTARGET=unix-cygwin-install
     if test "${enable_shared}" = "yes" ; then
       ar_libtool_no_undefined=" -no-undefined"
       LIBMZSCHEME_DEP="libmzgc.la -liconv"
       LIBMRED_DEP="../mzscheme/libmzgc.la ../mzscheme/libmred.la"
     fi
+    EXE_SUFFIX=".exe"
     ;;
   BeOS)
     if test "${enable_sgcdebug}" = "yes" ; then
@@ -494,8 +530,13 @@ case $OS in
       enable_pthread=no
       if test "${enable_libfw}" = "yes" ; then
         FRAMEWORK_INSTALL_DIR=/Library/Frameworks
-      else
+        FRAMEWORK_REL_INSTALL=no
+      elif test "${enable_userfw}" = "yes" ; then
         FRAMEWORK_INSTALL_DIR=~/Library/Frameworks
+        FRAMEWORK_REL_INSTALL=no
+      else
+        FRAMEWORK_INSTALL_DIR='${libdir}'
+        FRAMEWORK_REL_INSTALL=yes
       fi
     else
       PREFLAGS="$PREFLAGS -DXONX "
@@ -558,6 +599,16 @@ AC_TRY_LINK([#include <langinfo.h>],
    have_codeset=yes,
    have_codeset=no)
 AC_MSG_RESULT($have_codeset)
+
+AC_MSG_CHECKING([for getaddrinfo])
+AC_TRY_LINK([#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>],
+	[getaddrinfo(NULL, NULL, NULL, NULL);],
+   AC_DEFINE(HAVE_GETADDRINFO,1,[Have getaddrinfo])
+   have_getaddrinfo=yes,
+   have_getaddrinfo=no)
+AC_MSG_RESULT($have_getaddrinfo)
 
 iconv_lib_flag=""
 if test "${enable_iconv}" = "yes" ; then
@@ -687,6 +738,8 @@ if test "${enable_mred}" = "yes" ; then
   fi
   AC_MSG_RESULT($different) 
 
+  if test "$enable_quartz" = "no" ; then
+
   # If we're using gcc and including X11/Intrinsic doesn't work
   #  then try adding -fpermissive
   if test "$CC" = "gcc" ; then
@@ -698,7 +751,26 @@ if test "${enable_mred}" = "yes" ; then
     AC_MSG_RESULT($addperm) 
   fi
 
-  if test "$enable_quartz" = "no" ; then
+  # X11 headers present?
+  xmissing=""
+  AC_CHECK_HEADER(X11/Xlib.h, :, xmissing="$xmissing X11/Xlib.h")
+  AC_CHECK_HEADER(X11/Intrinsic.h, :, xmissing="$xmissing X11/XIntrinsic.h")
+  AC_CHECK_LIB(X11, XFlush, :, xmissing="$xmissing libX11", $X_LIBS)
+  AC_CHECK_LIB(Xext, XSyncQueryExtension, :, xmissing="$xmissing libXext", $X_LIBS -lX11)
+  AC_CHECK_LIB(Xt, XtDestroyWidget, :, xmissing="$xmissing libXt", $X_LIBS -lX11 -lXext)
+  AC_CHECK_LIB(Xmu, XmuInternAtom, :, xmissing="$xmissing libXmu", $X_LIBS -lXt -lX11 -lXext)
+  AC_CHECK_LIB(Xaw, vendorShellClassRec, :, xmissing="$xmissing libXaw", $X_LIBS -lXmu -lXt -lX11 -lXext)
+  if test "$xmissing" = "" ; then
+     :
+  else
+     echo "******************************************************"
+     echo "configure: cannot find X11 development files that are"
+     echo "           needed to compile MrEd:"
+     echo "$xmissing"
+     echo "******************************************************"
+     echo configure aborted
+     exit 1
+  fi
 
   # Can we make auto-repeat detectable?
 [ msg="whether X11/XKBlib.h is available"   ]
@@ -981,6 +1053,7 @@ if test "${enable_shared}" = "yes" ; then
   LTA="la"
   FOREIGN_CONVENIENCE="_convenience"
   FOREIGN_OBJSLIB="\$(FOREIGN_LIB)"
+  MZOPTIONS="$MZOPTIONS -DMZ_USES_SHARED_LIB"
 else
   LIBSFX=a
   MREDLINKER="$CXX"
@@ -1044,6 +1117,9 @@ AC_SUBST(EXTRA_GMP_OBJ)
 AC_SUBST(OSX)
 AC_SUBST(NOT_OSX)
 AC_SUBST(FRAMEWORK_INSTALL_DIR)
+AC_SUBST(FRAMEWORK_REL_INSTALL)
+AC_SUBST(INSTALL_ORIG_TREE)
+AC_SUBST(EXE_SUFFIX)
 
 AC_SUBST(MREDLINKER)
 AC_SUBST(LIBSFX)
@@ -1088,6 +1164,12 @@ AC_SUBST(LLVMTARGET)
 
 AC_SUBST(LTO)
 AC_SUBST(LTA)
+
+AC_SUBST(collectsdir)
+AC_SUBST(libpltdir)
+AC_SUBST(includepltdir)
+AC_SUBST(docdir)
+AC_SUBST(COLLECTS_PATH)
 
 mk_needed_dir()
 {
@@ -1181,3 +1263,30 @@ fi
 
 AC_OUTPUT($makefiles)
 
+if test "${inplacebuild}" = "yes" ; then
+  echo ">>> Installation is in-place:"
+  echo "      ${srcdir}/.."
+  echo "    Configure with --prefix if you wanted to install somewhere else."
+  if test "${enable_quartz}" != "yes" ; then
+    echo "    The --prefix option also makes the installed files better conform"
+    echo "    to Unix installation conventions. (The configure script will show"
+    echo "    you specific installation paths when --prefix is used.)"
+  fi
+  if test "${enable_shared}" != "yes" ; then
+    echo "    Alternately, you can simply "'`'"mv' the in-place installation after"
+    echo "    running "'`'"make install'."
+  fi
+else
+  echo ">>> Installation targets:"
+  echo " executables  : ${bindir}/..."
+  echo " Scheme code  : ${collectsdir}/..."
+  echo " core docs    : ${docdir}/..."
+  echo " C libraries  : ${libdir}/..."
+  echo " C headers    : ${includepltdir}/..."
+  echo " extra C objs : ${libpltdir}/..."
+  echo " man pages    : ${mandir}/..."
+  echo "  where prefix = ${prefix}"
+  if test "${unixstyle}" = "yes" ; then
+    echo "    and exec_prefix = ${exec_prefix}"
+  fi
+fi

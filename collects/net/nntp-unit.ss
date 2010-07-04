@@ -44,7 +44,7 @@
 	(lambda (constructor format-string . args)
 	  (lambda exn-args
 	    (raise (apply constructor
-			  (apply format format-string args)
+			  (string->immutable-string (apply format format-string args))
 			  (current-continuation-marks)
 			  exn-args)))))
 
@@ -61,6 +61,7 @@
 	  [(receiver sender) (connect-to-server* receiver sender "unspecified"
 			                         "unspecified")]
 	  [(receiver sender server-name port-number)
+           (file-stream-buffer-mode sender 'line)
 	   (let ((communicator (make-communicator sender receiver server-name
 				                  port-number)))
 	     (let-values (((code response)
@@ -146,9 +147,11 @@
 
       (define send-to-server
 	(lambda (communicator message-template . rest)
-	  (apply fprintf (communicator-sender communicator)
-		 (string-append message-template "\r\n")
-		 rest)))
+	  (let ([sender (communicator-sender communicator)])
+            (apply fprintf sender
+                   (string-append message-template "\r\n")
+                   rest)
+            (flush-output sender))))
 
       ;; parse-status-line :
       ;; string -> number x string

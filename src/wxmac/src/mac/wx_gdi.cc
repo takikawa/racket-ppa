@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2005 PLT Scheme, Inc.
+// Copyright:  (c) 2004-2006 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -56,7 +56,7 @@ void *XpmMalloc(size_t size)
 #ifdef PLAIN_MALLOC_FOR_XPM
   return RECORD("m", malloc(size));
 #else
-  return new char[size];
+  return new WXGC_ATOMIC char[size];
 #endif
 }
 
@@ -425,7 +425,7 @@ wxPen::wxPen(void)
 {
   wxColour *c;
   
-  c = new wxColour(wxBLACK);
+  c = new WXGC_PTRS wxColour(wxBLACK);
   c->Lock(1);
   colour = c;
   
@@ -449,7 +449,7 @@ wxbPen(col, Width, Style)
 {
   wxColour *c;
   
-  c = new wxColour(col);
+  c = new WXGC_PTRS wxColour(col);
   c->Lock(1);
   colour = c;
   
@@ -468,7 +468,7 @@ wxbPen(col, Width, Style)
 {
   wxColour *c;
   
-  c = new wxColour(col);
+  c = new WXGC_PTRS wxColour(col);
   c->Lock(1);
   colour = c;
   
@@ -488,7 +488,7 @@ wxBrush::wxBrush(void)
 {
   wxColour *c;
   
-  c = new wxColour(wxBLACK);
+  c = new WXGC_PTRS wxColour(wxBLACK);
   c->Lock(1);
   
   colour = c;
@@ -506,7 +506,7 @@ wxBrush::wxBrush(wxColour *col, int Style)
 {
   wxColour *c;
   
-  c = new wxColour(col);
+  c = new WXGC_PTRS wxColour(col);
   c->Lock(1);
   colour = c;
   
@@ -519,7 +519,7 @@ wxBrush::wxBrush(char *col, int Style)
 {
   wxColour *c;
   
-  c = new wxColour(col);
+  c = new WXGC_PTRS wxColour(col);
   c->Lock(1);
   colour = c;
   
@@ -577,8 +577,8 @@ wxCursor::wxCursor(wxBitmap *mask, wxBitmap *bm, int hotSpotX, int hotSpotY)
   if (!temp_mdc) {
     wxREGGLOB(temp_mdc);
     wxREGGLOB(temp_mask_mdc);
-    temp_mdc = new wxMemoryDC(1);
-    temp_mask_mdc = new wxMemoryDC(1);
+    temp_mdc = new WXGC_PTRS wxMemoryDC(1);
+    temp_mask_mdc = new WXGC_PTRS wxMemoryDC(1);
   }
   
   bitmap_dc = temp_mdc;
@@ -600,9 +600,9 @@ wxCursor::wxCursor(wxBitmap *mask, wxBitmap *bm, int hotSpotX, int hotSpotY)
     }
   }
 
-  c = new wxColour(); /* to recieve bit values */
+  c = new WXGC_PTRS wxColour(); /* to recieve bit values */
 
-  cMacCustomCursor = new Cursor;
+  cMacCustomCursor = new WXGC_ATOMIC Cursor;
 
   /* Init arrays */
   for (i = 0; i < h; i++) {
@@ -783,9 +783,7 @@ wxCursor::wxCursor(int cursor_type)
 //-----------------------------------------------------------------------------
 wxCursor::~wxCursor(void)
 {
-  if (cMacCustomCursor) {
-    delete cMacCustomCursor;
-  }
+  cMacCustomCursor = NULL;
 }
 
 //-----------------------------------------------------------------------------
@@ -876,21 +874,27 @@ void wxDisplaySize(int *width, int *height, int flags)
   BitMap screenBits;
   int mbh;
 
-  GetQDGlobalsScreenBits(&screenBits);
-  *width = screenBits.bounds.right - screenBits.bounds.left;
-  if (flags)
-    mbh = 0;
-  else
-    mbh = wxMenuBarHeight;
-  *height = screenBits.bounds.bottom - screenBits.bounds.top - mbh;
+  if (!flags) {
+    Rect r;
+    GetAvailableWindowPositioningBounds(NULL, &r);
+    *width = (r.right - r.left);
+    *height = (r.bottom - wxMenuBarHeight);
+  } else {
+    GetQDGlobalsScreenBits(&screenBits);
+    *width = screenBits.bounds.right - screenBits.bounds.left;
+    *height = screenBits.bounds.bottom - screenBits.bounds.top;
+  }
 }
 
-void wxDisplayOrigin(int *x, int *y)
+void wxDisplayOrigin(int *x, int *y, int flags)
 {
-  int mbh;
-  *x = 0;
-  mbh = wxMenuBarHeight;
-  *y = mbh;
+  if (flags) {
+    Rect r;
+    GetAvailableWindowPositioningBounds(NULL, &r);
+    *x = r.left;
+  } else
+    *x = 0;
+  *y = wxMenuBarHeight;
 }
 
 static void FreeGWorld(GWorldPtr x_pixmap)

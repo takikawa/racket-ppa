@@ -303,7 +303,7 @@ static Scheme_Object *foreign_ffi_obj_name(int argc, Scheme_Object *argv[])
 #define scheme_get_realint_val(x,y) \
   scheme_get_int_val(x,(long*)(y))
 #define scheme_get_unsigned_realint_val(x,y) \
-  scheme_get_unsigned_int_val(x,(long*)(y))
+  scheme_get_unsigned_int_val(x,(unsigned long*)(y))
 #define scheme_make_realinteger_value \
   scheme_make_integer_value
 #define scheme_make_realinteger_value_from_unsigned \
@@ -710,7 +710,7 @@ END_XFORM_SKIP;
 #define CTYPE_PRIMP(x)     (NULL == (CTYPE_BASETYPE(x)))
 #define CTYPE_USERP(x)     (!(CTYPE_PRIMP(x)))
 #define CTYPE_PRIMTYPE(x)  ((ffi_type*)(((ctype_struct*)(x))->scheme_to_c))
-#define CTYPE_PRIMLABEL(x) ((int)(((ctype_struct*)(x))->c_to_scheme))
+#define CTYPE_PRIMLABEL(x) ((long)(((ctype_struct*)(x))->c_to_scheme))
 #define CTYPE_USER_S2C(x)  (((ctype_struct*)(x))->scheme_to_c)
 #define CTYPE_USER_C2S(x)  (((ctype_struct*)(x))->c_to_scheme)
 

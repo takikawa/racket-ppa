@@ -193,9 +193,9 @@
     (let* ([test-teachpack
             (lambda (dir)
               (lambda (teachpack)
-                (when (or (equal? "ss" (filename-extension teachpack))
-                          (equal? "scm" (filename-extension teachpack)))
-                  (unless (equal? "graphing.ss" teachpack)
+                (when (or (equal? #"ss" (filename-extension teachpack))
+                          (equal? #"scm" (filename-extension teachpack)))
+                  (unless (equal? "graphing.ss" (path->string teachpack))
                     (printf "  testing ~a~n" (build-path dir teachpack))
                     (let ([filename (normal-case-path (build-path dir teachpack))])
                       (fw:test:menu-select "Language" "Clear All Teachpacks")
@@ -212,8 +212,9 @@
                           (printf "       got: ~s~n  expected: ~s~n" got expected))))))))]
            [test-teachpacks
             (lambda (dir)
-              (for-each (test-teachpack dir) (directory-list dir)))]
-           [teachpack-dir (normalize-path (build-path (collection-path "mzlib") 'up 'up "teachpack"))])
+              (for-each (test-teachpack dir) 
+                        (directory-list dir)))]
+           [teachpack-dir (normalize-path (collection-path "teachpack"))])
       (set-language-level! '("How to Design Programs" "Advanced Student"))
       (test-teachpacks teachpack-dir)
       (test-teachpacks (build-path teachpack-dir "htdp"))))

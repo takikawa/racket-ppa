@@ -1,8 +1,8 @@
 _XML_ Library
 =============
 
-Files: xml.ss xmlr.ss xmls.ss
-Signature: xml^
+Files: _xml.ss_
+Signature: _xml^_
 
 Basic XML Data Types
 ====================
@@ -46,7 +46,7 @@ Functions
 
        Any non-characters other than eof read from the input-port will
        appear in the document content.  Such special values may only appear
-       where XML content may.  See make-custom-input-port for information
+       where XML content may.  See make-input-port for information
        about creating ports that return non-character values.
        
 > read-xml/element : [Input-port] -> Element
@@ -236,10 +236,10 @@ Note: Xexpr is the only important one to understand.  Even then,
         "<![CDATA[~a]]>" with proper quoting. If this is an incorrect 
         assumption, this library will generate invalid XML.
 
-> Entity = (make-entity (U Nat Symbol))
-  (define-struct entity (text))
+> Entity = (make-entity Location Location (U Nat Symbol))
+  (define-struct (entity struct:source) (text))
 
-> Processing-instruction = (make-pi Location Location String (list String))
+> Processing-instruction = (make-pi Location Location String String)
   (define-struct (pi struct:source) (target-name instruction))
 
 > Comment = (make-comment String)
@@ -258,7 +258,7 @@ Note: Xexpr is the only important one to understand.  Even then,
 The PList Library
 =================
 
-Files: plist.ss
+Files: _plist.ss_
 
 The PList library provides the ability to read and write xml documents which 
 conform to the "plist" DTD, used to store 'dictionaries' of string - value

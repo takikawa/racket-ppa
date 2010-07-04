@@ -122,7 +122,7 @@ next section.
       file. If `dest-dir' is 'auto, each .zo file is placed in a
       "compiled" subdirectory relative to the source file. (The
       directory is created if necessary.)
- 
+
  Collection compilation
  ----------------------
 
@@ -144,10 +144,9 @@ next section.
 
 >      compile-omit-files - a list of filenames (without paths); all
          Scheme files in the collection are compiled except for the
-         files in this list.  If a file contains elaboration time
-         expressions (e.g., macros, signatures) that are not intended
-         to be local to the file, then the file should be included in
-         this list.
+         files in this list.  Note: files that are required by other
+         files that are compiled will get compiled in the process even
+         when listed here.
 
 >      compile-extension-omit-files - a list of filenames to extend
          the list returned for `compile-omit-files'. Unlike the list
@@ -375,7 +374,9 @@ Embedding Scheme Code to Create a Stand-alone Executable
 
 The _embed.ss_ library provides a function to embed Scheme code into a
 copy of MzScheme or MrEd, thus creating a _stand-alone_ Scheme
-executable.
+executable. To package the executable into a distribution that is
+indpendent of your PLT installation, use `assemble-distribution'
+from "distribute.ss"
 
 Embedding walks the module dependency graph to find all modules needed
 by some initial set of top-level modules, compiling them if needed,
@@ -394,10 +395,21 @@ The _embedr-unit.ss_ library provides a signed unit, _compiler:embed@_
 that imports nothing and exports the functions below. The
 _embedr-sig.ss_ library provides the signature, _compiler:embed^_.
 
-> (make-embedding-executable dest mred? verbose? mod-list literal-file-list literal-sexpr cmdline-list [aux launcher? variant])
+> (create-embedding-executable dest 
+                               [#:modules mod-list] 
+                               [#:literal-files literal-file-list] 
+                               [#:literal-expression literal-sexp]
+                               [#:cmdline cmdline-list] 
+                               [#:mred? mred?]
+                               [#:variant variant]
+                               [#:aux aux]
+			       [#:collects-path path-or-list]
+                               [#:launcher? launcher?]
+                               [#:verbose? verbose?])
   - Copies the MzScheme (if `mred?' is #f) or MrEd (otherwise) binary,
   embedding code into the copied executable to be loaded on startup.
-  The source executable is located relative to the "mzlib" collection.
+  (Under Unix, the binary is actually a wrapper executable that execs
+  the original; see also 'original-exe? below.)
 
   See the mzc documentation for a simpler interface that is
   well-suited to programs defined with `module'.
@@ -488,7 +500,20 @@ _embedr-sig.ss_ library provides the signature, _compiler:embed^_.
               prefix start "@executable_path/" works for a
               MzScheme-based application, the corresponding prefix
               start for a MrEd-based application is
-              "@executable_path/../../../"
+              "@executable_path/../../../"; if #f is supplied, the
+              executable's framework path is left as-is, otherwise
+              the original executable's path to a framework is
+              converted to an absolute path if it was relative
+
+      _'dll-dir_ (Windows) - a string/path to a directory that
+              contains PLT DLLs needed by the executable, such as
+              "pltmzsch<version>.dll", or a boolean; a path can be
+              relative to the executable; if #f is supplied, the path
+              is left as-is; if #t is supplied, the path is dropped
+              (so that the DLLs must be in the system directory or the
+              user's PATH); if no value is supplied the original
+              executable's path to DLLs is converted to an absolute
+              path if it was relative
 
       _'subsystem_ (Windows) - a symbol, either 'console for a console
               application or 'windows for a consoleless application;
@@ -508,21 +533,45 @@ _embedr-sig.ss_ library provides the signature, _compiler:embed^_.
               found relative to the launcher instead of the original
               executable
 
+      _'original-exe?_ (Unix) - a boolean; #t means that the embedding
+              uses the original MzScheme or MrEd executable, instead
+              of a wrapper binary that execs the original; the default is
+              #f
+
    See also `build-aux-from-path' in the "launcher" collection. The
    default `aux' is `null'.
+
+   If the #:collects-path argument is #f, then the created executable
+   maintains its built-in (relative) path to the main "collects"
+   directory --- which will be the result of `(find-system-path
+   'collects-dir)' when the executable is run --- plus a potential
+   list of other directories for finding library collections --- which
+   are used to initialize the `current-library-collection-paths' list
+   in combination with "PLTCOLLECTS" environment variable.  Otherwise,
+   the argument specifies a replacement; it must be either a path,
+   string, or non-empty list of paths and strings. In the last case,
+   the first path or string specifies the main collection directory,
+   and the rest are additional directories for the collection search
+   path (placed, in order, after the user-specific "collects"
+   directory, but before the main "collects" directory; then the
+   search list is combined with "PLTCOLLECTS", if it is defined).
 
    If `launcher?' is #t, then no `modules' should be null,
    `literal-file-list' should be null, `literal-sexp' should be #f,
    and the platform should be Windows or Mac OS X. The embedding
    executable is created in such a way that `(find-system-path
    'exec-file)' produces the source MzScheme or MrEd path instead of
-   the embedding executable.
+   the embedding executable (but the result of `(find-system-path
+   'run-file)' is still the embedding executable).
 
    The `variant' argument indicates which variant of the original
    binary to use for embedding. The default is 'normal, and typically
    the only other possibility is '3m. See `current-launcher-variant'
    in the "launcher" collection for more information.
 
+> (make-embedding-executable dest mred? verbose? mod-list literal-file-list literal-sexpr cmdline-list [aux launcher? variant])
+
+   Old (keywordless) interface to `create-embedding-executable'.
 
 > (write-module-bundle verbose? mod-list literal-file-list literal-sexpr)
   - Like `make-embedding-executable', but the module bundle is written
@@ -555,3 +604,60 @@ _embedr-sig.ss_ library provides the signature, _compiler:embed^_.
 
 > (embedding-executable-add-suffix path mred?) - Returns a path with a
   suitable executable suffix added, if it's not present already.
+
+Assembling Stand-alone Executables with Shared Libraries
+========================================================
+
+The _distribute.ss_ library provides a function to combine a
+stand-alone executable created with "embed.ss" with any DLLs,
+frameworks, or shared libraries that it needs to run on other machines
+(with the same OS).
+
+> (assemble-distribution dest-dir
+                         list-of-exec-files
+                         [#:collects-path path]
+                         [#:copy-collects list-of-dirs])
+
+  Copies the executables in `list-of-exec-files' to the directory
+  `dest-dir', along with DLLs, frameworks, and/or shared libraries
+  that the executables need to run a different machine.
+
+  The arrangement of the executables and support files in `dest-dir'
+  depends on the platform. In general `assemble-distribution' tries to
+  do the Right Thing.
+
+  If a #:collects-path argument is given, it overrides the default
+  location of the main "collects" directory for the packaged
+  executables. It should be relative to the `dest-dir' directory
+  (typically inside it).
+
+  The content of each directory in the #:copy-collects argument is
+  copied into the main "collects" directory for the packaged
+  executables.
+
+Packing Stand-alone Executables into a Distribution
+===================================================
+
+The _bundle-dist.ss_ library provides a function to pack a directory
+(usually assembled by `assemble-distribution') into a distribution
+file.  Under Windows, the result is a ".zip" archive; under Mac OS X,
+it's a ".dmg" disk image; under Unix, it's a ".tgz" archive.
+
+> (bundle-directory dist-file dir [for-exe?])
+
+  Packages `dir' into `dist-file'. If `dist-file' has no extension,
+  a file extension is added automatcially (using the first result
+  of `bundle-put-file-extension+style+filters').
+
+  By default, the created archive contains a directory with the same
+  name as `dir'. If `for-exe?' is true under Mac OS X, and if `dir'
+  contains a single file, then the created disk image contains just
+  the file.
+
+  Archive creation files if `dist-file' exists.
+
+> (bundle-put-file-extension+style+filters)
+
+  Returns three values suitable for use as the `extension', `style',
+  and `filters' arguments to `put-file', respectively to select
+  a distribution-file name.

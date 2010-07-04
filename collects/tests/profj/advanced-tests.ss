@@ -1,15 +1,56 @@
 (module advanced-tests mzscheme
   (require (lib "profj-testing.ss" "profj"))
+  (require (lib "String.ss" "profj" "libs" "java" "lang"))
   
   (prepare-for-tests "Advanced")
   
   ;;Execution tests without errors
-
-  (interact-test
-   'advanced
-   '("null.m()")
-   '(error)
-   "Calling a method on null")
+  
+  (execute-test
+   "class OneC { }
+    class TwoC extends OneC { }
+    class ThreeC extends TwoC { }
+    class Overload {
+      int num(OneC o) { return 1; }
+      int num(TwoC o) { return 2; }
+      int t() { return num(new ThreeC()); }
+    }
+   " 'advanced #f "Overloading resolution")
+  
+  (execute-test
+   "class Checkclass { }
+    class ExampleCheck {
+      boolean t1 = check new Checkclass[10] expect new Checkclass[10];
+      boolean t2 = check (new int[3])[1] expect 0;
+    }"
+   'advanced #f "check expressions")
+    
+  (execute-test
+   "class Blah {
+	Blah () {}
+	int addUp (int top) {
+		int answer = 0;
+		int counter = 1;
+		while (counter <= top) {
+			answer += counter;
+			++counter;
+			}
+		return answer;
+		}
+	}"
+   'advanced #f "while loop with statements after")
+  
+  (execute-test
+   "interface Abs { int a( int x); }
+    abstract class Babs implements Abs { }
+   "
+   'advanced #f "abs. class with interface not all impl., with args")
+  
+  (execute-test
+   "public class Xprivate {
+     private int x() { return 3; }
+    }"
+   'advanced #f "Class with private method")
   
   (execute-test
    "public class Something {
@@ -61,16 +102,26 @@
    'advanced #f "Class containing inits")
   
   (execute-test
-   "class X {
+   "class Xfinal {
      final int x() { return 4; }
    }"
    'advanced #f "Class with final method")
   
   (execute-test
-   "class X {
+   "class Xoverload {
      int x() { return 3; }
      int x( int y ) { return y; }
    }" 'advanced #f "Class with overloaded methods")
+  
+  (execute-test
+   "class Ret {
+     boolean rets() {
+      if (true)
+        return true;
+      return false;
+      }
+     }"
+   'advanced #f "If with no else, reachable return")
   
   ;;Execution tests with errors
 
@@ -102,8 +153,8 @@
     }" 'advanced #t "Attempt to set before named, init")
    
   (execute-test
-   "class X {  X() { this(1); }
-               X(int i) { this(); }}"
+   "class Xth {  Xth() { this(1); }
+                 Xth(int i) { this(); }}"
    'advanced #t "Cyclic calls to this")
   
   (execute-test
@@ -226,7 +277,94 @@ class WeeklyPlanner{
 }
  " 'advanced #t "Parsing test from student program. Should mention {")
   
+  (execute-test
+   "class NoRet {
+     boolean noRet() {
+       if (true) 
+         return true;
+     }
+    }"
+   'advanced #t "If with no else, and return in if")
+  
+  (execute-test
+   "class Blah {
+	boolean same (int[] these, int[] those) {
+		int which = 0;
+		while ((which < these.length) && (which < those.length)) {
+			if (these[which] == those[which]) {
+				which = which + 1;
+				return true;
+				}
+			return false;
+			}
+		}
+	}"
+   'advanced #t "No reachable return -- while loop has returns")
+  
+
+  
   ;;Interaction tests, mix of right and error
+  
+  (interact-test
+   'advanced
+   '("int a = 'a';" "a" "int b;" "b = 'a';")
+   '((void) 97 (void) 97) "Conversion of char to int")
+  
+  (interact-test 'advanced '("int a = 1;" "++a") '((void) 2) "Test of ++")
+  
+  (interact-test
+   'advanced
+   '("check (new int[12])[3] expect 0" 
+     "check new int[2] expect new int[4]"
+     "check new int[3] expect new int[3]"
+     "String[] t = new String[3];"
+     "t[2] = \"\";"
+     "check new Object[3] expect t"
+     "check new String[3] expect new Object[3]"
+     "check new int[3][3] expect new int[3]")
+   `(#t #f #t (void) ,(make-java-string "") #f #t #f)
+   "Check of arrays")
+  
+  (interact-test
+   "class Afirst {
+     private int x = 10;
+     public int y = x * 2;
+    }
+    class Bsecond {
+     public int x = 10;
+     private int y = x * 2;
+     public int report() { return y; }
+   }
+   class Cthird {
+     public int x = 10;
+     public int y = 2 * x;
+   }
+   class Dfourth {
+     int x = 10;
+     public int y = 2 * x;
+   }"
+   'advanced
+   '("Afirst a = new Afirst();" 
+     "Bsecond b = new Bsecond();" 
+     "Cthird c = new Cthird();" 
+     "Dfourth d = new Dfourth();" 
+     "a.y" "b.report()" "c.y" "d.y")
+   '((void) (void) (void) (void) 20 20 20 20)
+   "Private, etc shouldn't effect order of evaluation")
+  
+  (interact-test
+   "public class Xp {
+     private int x() { return 3; }
+    }"
+   'advanced '("Xp y = new Xp();" "y.x()")
+   '((void) error) "Creating class with private method, and trying to access the method")
+
+  
+  (interact-test
+   'advanced
+   '("null.m()")
+   '(error)
+   "Calling a method on null")
   
   (interact-test 'advanced
                  (list "new int[3] instanceof int[] && true"
@@ -247,13 +385,14 @@ class WeeklyPlanner{
 
   (interact-test
    'advanced
-   (list "(new int[2][])[0]" #;"(new int[2][])[1]=new int[2];")
-   (list null #;0)
+   (list "(new int[2][])[0]")
+   (list null)
    "multi-dimension array - not all intialized")
   
   (interact-test
    'advanced
-   (list "int[] x = new int[10];" "for( int i = 0; i< x.length; i++) x[i]=i;" "x.length" "x[5]")
+   (list "int[] x = new int[10];" 
+         "for( int i = 0; i< x.length; i++) x[i]=i;" "x.length" "x[5]")
    (list '(void) '(void) 10 5)
    "Array & for loop")
   
@@ -275,6 +414,35 @@ class WeeklyPlanner{
          "Object[] o = new Object[2];" "x[0]" "y[0]" "z[0]" "o[0]")
    (list '(void) '(void) '(void) '(void) 0 #f #\null null)
    "Array initialization checks")
+  
+  (interact-test
+   'advanced
+   (list "Object o = \"\";" "(String) o")
+   (list '(void) 'o~f)
+   "Casting to a String")
+  
+  (interact-test
+   'advanced
+   (list "\"hello\".substring(2,5)")
+   (list (make-java-string "llo"))
+   "Test of substring")
+         
+  (interact-test
+   "class A2 {
+      private int a;
+      A2(int a) { this.a = a; }
+      int g(A2 b) { return b.a; }
+   }"
+   'advanced
+   (list "new A2(1).g(new A2(2))")
+   (list 2)
+   "Test of private field access")
+  
+  (interact-test
+   'advanced
+   (list "String[] a = {new String(\"hi\"),new String(\"i\")};")
+   (list '(void))
+   "Test of array init")
   
   (report-test-results)
   

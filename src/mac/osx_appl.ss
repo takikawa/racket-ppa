@@ -5,30 +5,16 @@
 # OS X pre-make script
 # builds resource files, makes template Starter.app and MrEd.app
 #
-# the script must be run from the mrd build directory,
+# the script must be run from the mred build directory,
 # and srcdir must be provided as the first argument
 
-PLTHOMEBASE="$1/.."
-export PLTHOMEBASE
-PLTHOME=
-export PLTHOME
-PLTCOLLECTS=
-export PLTCOLLECTS
-DYLD_FRAMEWORK_PATH=${BUILDBASE}/mzscheme:${DYLD_FRAMEWORK_PATH}
-export DYLD_FRAMEWORK_PATH
-shift 1
-exec ${BUILDBASE}/mzscheme/mzscheme -xqr "$0"
+exec ${BUILDBASE}/mzscheme/mzscheme -qr "$0" "$1"
 echo "Couldn't start MzScheme!"
 exit 1
 
 |#
 
 (use-compiled-file-paths null)
-
-(let ([p (getenv "PLTHOMEBASE")])
-  (let ([plthome (path->complete-path p)])
-    (putenv "PLTHOME" (path->string plthome))
-    (current-library-collection-paths (list (build-path plthome "collects")))))
 
 (module osx_appl mzscheme
 
@@ -39,11 +25,9 @@ exit 1
   (define rez-path (or (getenv "REZ")
 		       "/Developer/Tools/Rez"))
 
-  ; set plthome:
-  (define plthome (getenv "PLTHOME"))
-  (printf "plthome is ~s~n" plthome)
-
   (define for-3m? (getenv "BUILDING_3M"))
+
+  (define plthome (build-path (vector-ref (current-command-line-arguments) 0) 'up))
 
   ; Rez where needed:
   (let* ([cw-path (build-path plthome "src" "mac" "cw")]
@@ -63,10 +47,10 @@ exit 1
     (let* ([head-path (build-path path (car template-tree))])
       (when (file-exists? head-path)
 	    (error 'realize-template 
-		   "Can't create directory ~s because there's a file with that name" 
+		   "Can't create directory \"~a\" because there's a file with that name" 
 		   head-path))
       (unless (directory-exists? head-path)
-	      (printf "Creating directory: ~s~n" head-path)
+	      (printf "Creating directory: ~a\n" head-path)
 	      (make-directory head-path))
       (for-each (lambda (template-tree) (realize-template head-path template-tree))
 	        (cdr template-tree))))
@@ -79,7 +63,7 @@ exit 1
 
   (define (write-info contents-path info-plist)
     (let* ([info-plist-path (build-path contents-path "Info.plist")])
-      (printf "writing file ~s~n" info-plist-path)
+      (printf "writing file ~a\n" info-plist-path)
       (call-with-output-file info-plist-path
 	(lambda (port)
 	  (write-plist info-plist port))
@@ -91,7 +75,7 @@ exit 1
       (make-directory* app-path)
       (realize-template app-path app-template-tree)
       (let* ([pkg-info-path (build-path app-path "Contents" "PkgInfo")])
-	(printf "writing file ~s~n" pkg-info-path)
+	(printf "writing file ~a\n" pkg-info-path)
 	(call-with-output-file pkg-info-path
 	  (lambda (port)
 	    (fprintf port pkg-info-string))

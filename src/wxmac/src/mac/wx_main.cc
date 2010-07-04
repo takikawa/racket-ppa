@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2005 PLT Scheme, Inc.
+// Copyright:  (c) 2004-2006 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -31,7 +31,7 @@ void wxCleanUp(void);
 //	void CreateApp(void);	// This procedure initializes the whole application
 //	void CreateApp(void)
 //	{
-//		new MyApp;
+//		new WXGC_PTRS MyApp;
 //	}
 //
 ///////////////////////////////////////////////////////////////////////////////

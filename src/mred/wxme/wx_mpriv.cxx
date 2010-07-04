@@ -3,7 +3,7 @@
  * Purpose:     wxMediaEdit private methods implementation
  * Author:      Matthew Flatt
  * Created:     1995
- * Copyright:   (c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:   (c) 2004-2006 PLT Scheme Inc.
  * Copyright:   (c) 1995, Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -254,7 +254,7 @@ void wxMediaEdit::_ChangeStyle(long start, long end,
     return;
 
   if (!newStyle && !delta) {
-    newStyle = styleList->FindNamedStyle(STD_STYLE);
+    newStyle = GetDefaultStyle();
     if (!newStyle)
       newStyle = styleList->BasicStyle();
   }
@@ -289,13 +289,14 @@ void wxMediaEdit::_ChangeStyle(long start, long end,
   if (!len) {
     startSnip = snips;
     endSnip = NULL;
+    initialStyleNeeded = 0;
   } else {
     startSnip = FindSnip(start, +1);
     endSnip = FindSnip(end, +2);
   }
 
   if (!noundomode)
-    rec = new wxStyleChangeRecord(start, end, delayedStreak || !modified, startpos, endpos, restoreSel);
+    rec = new WXGC_PTRS wxStyleChangeRecord(start, end, delayedStreak || !modified, startpos, endpos, restoreSel);
   else
     rec = NULL;
 
@@ -346,7 +347,7 @@ void wxMediaEdit::_ChangeStyle(long start, long end,
     
     if (!modified) {
       wxUnmodifyRecord *ur;
-      ur = new wxUnmodifyRecord;
+      ur = new WXGC_PTRS wxUnmodifyRecord;
       AddUndo(ur);
     }
     if (rec)
@@ -648,14 +649,11 @@ long wxMediaEdit::_FindStringAll(wxchar *str, int direction,
     return -1;
 
   if (!caseSens) {
-    /* FIXME: use locale... */
     oldStr = str;
-    str = new wxchar[slen + 1];
+    str = new WXGC_ATOMIC wxchar[slen + 1];
     for (i = 0; i < slen; i++) {
-      if (str[i] < 128)
-	str[i] = tolower(oldStr[i]);
-      else
-	str[i] = oldStr[i];
+      c = oldStr[i];
+      str[i] = scheme_tofold(c);
     }
     str[i] = 0;
   }
@@ -678,7 +676,7 @@ long wxMediaEdit::_FindStringAll(wxchar *str, int direction,
     sgoal = -1;
   }
 
-  smap = new long[slen];
+  smap = new WXGC_ATOMIC long[slen];
 
   smap[sbase] = beyond;
   s = beyond;
@@ -696,7 +694,7 @@ long wxMediaEdit::_FindStringAll(wxchar *str, int direction,
   if (!justOne) {
     long *naya;
     allocFound = 10;
-    naya = new long[allocFound];
+    naya = new WXGC_ATOMIC long[allocFound];
     *positions = naya;
     foundCount = 0;
   } else
@@ -740,8 +738,7 @@ long wxMediaEdit::_FindStringAll(wxchar *str, int direction,
       while(n--) {
 	c = text[i];
 	if (!caseSens)
-	  if (c >= 'A' && c <= 'Z')
-	    c += ('a' - 'A');
+	  c = scheme_tofold(c);
 	while ((s != beyond) && (str[s + direction] != c)) {
 	  s = smap[s];
 	}
@@ -763,7 +760,7 @@ long wxMediaEdit::_FindStringAll(wxchar *str, int direction,
 		long *old = *positions, *naya, oldCount = allocFound;
 
 		allocFound *= 2;
-		naya = new long[allocFound];
+		naya = new WXGC_ATOMIC long[allocFound];
 		*positions = naya;
 		
 		memcpy(*positions, old, oldCount * sizeof(long));
@@ -801,21 +798,21 @@ void wxMediaEdit::MakeOnlySnip(void)
 {
   wxMediaLine *line;
 
-  snips = new wxTextSnip();
-  snips->style = styleList->FindNamedStyle(STD_STYLE);
+  snips = new WXGC_PTRS wxTextSnip();
+  snips->style = GetDefaultStyle();
   if (!snips->style) {
     snips->style = styleList->BasicStyle();
   }
 #if CHECK_CONSISTENCY
   if (!snips->style)
-    fprintf(stderr, "NULL style for STD_STYLE!\n");
+    fprintf(stderr, "NULL style for basic style!\n");
 #endif
   snips->count = 0;
   snips->SetAdmin(snipAdmin);
   snips->prev = NULL;
   snips->next = NULL;
 
-  line = new wxMediaLine;
+  line = new WXGC_PTRS wxMediaLine;
   snips->line = lineRoot = firstLine = lastLine = line;
   lineRoot->SetStartsParagraph(TRUE);
 
@@ -901,7 +898,7 @@ wxSnip *wxMediaEdit::SnipSetAdmin(wxSnip *snip, wxSnipAdmin *a)
     } else if (a) {
       /* Snip didn't accept membership into this buffer. Give up on it. */
       wxSnip *naya;
-      naya = new wxSnip();
+      naya = new WXGC_PTRS wxSnip();
 
       naya->count = orig_count;
       SpliceSnip(naya, snip->prev, snip->next);
@@ -954,17 +951,17 @@ void wxMediaEdit::SnipSplit(wxSnip *snip, long pos, wxSnip **a_ptr, wxSnip **b_p
   b = *b_ptr;
 
   if (!a)
-    a = new wxSnip();
+    a = new WXGC_PTRS wxSnip();
   if (!b)
-    b = new wxSnip();
+    b = new WXGC_PTRS wxSnip();
 
   if (a->IsOwned()) {
     /* uh-oh: make up a dummy */
-     a = new wxSnip();
+     a = new WXGC_PTRS wxSnip();
   }
   if (b->IsOwned()) {
     /* uh-oh: make up a dummy */
-     b = new wxSnip();
+     b = new WXGC_PTRS wxSnip();
   }
 
   *a_ptr = a;
@@ -1149,11 +1146,11 @@ wxTextSnip *wxMediaEdit::InsertTextSnip(long start, wxStyle *style)
   snip = OnNewTextSnip();
   if (snip->IsOwned() || snip->count) {
     /* Uh-oh. Resort to wxTextSnip() */
-    snip = new wxTextSnip();
+    snip = new WXGC_PTRS wxTextSnip();
   }
   {
     wxStyle *styl;
-    styl = (style ? style : styleList->FindNamedStyle(STD_STYLE));
+    styl = (style ? style : GetDefaultStyle());
     snip->style = styl;
   }
   if (!snip->style) {
@@ -1163,8 +1160,8 @@ wxTextSnip *wxMediaEdit::InsertTextSnip(long start, wxStyle *style)
   if (rsnip != snip) {
     /* Uh-oh. Resort to wxTextSnip() */
     wxStyle *styl;
-    snip = new wxTextSnip();
-    styl = (style ? style : styleList->FindNamedStyle(STD_STYLE));
+    snip = new WXGC_PTRS wxTextSnip();
+    styl = (style ? style : GetDefaultStyle());
     snip->style = styl;
     if (!snip->style) {
       snip->style = styleList->BasicStyle();
@@ -1303,7 +1300,7 @@ void wxMediaEdit::CheckMergeSnips(long start)
 	    snip2->flags -= wxSNIP_OWNED;
 	    if (naya->IsOwned()) {
 	      /* Uh-oh. Make dummy */
-	      naya = new wxSnip();
+	      naya = new WXGC_PTRS wxSnip();
 	    }
 	    if (naya->flags & wxSNIP_CAN_SPLIT)
 	      naya->flags -= wxSNIP_CAN_SPLIT;
@@ -1345,12 +1342,12 @@ void wxMediaEdit::CheckMergeSnips(long start)
 
 wxTextSnip *wxMediaEdit::OnNewTextSnip()
 {
-  return new wxTextSnip();
+  return new WXGC_PTRS wxTextSnip();
 }
 
 wxTabSnip *wxMediaEdit::OnNewTabSnip()
 {
-  return new wxTabSnip();
+  return new WXGC_PTRS wxTabSnip();
 }
 
 /****************************************************************/
@@ -1519,7 +1516,7 @@ void wxMediaEdit::SetClickbackHilited(wxClickback *click, Bool on)
   if (on != click->hilited) {
     if (on) {
       interceptmode = TRUE;
-      intercepted = new wxList();
+      intercepted = new WXGC_PTRS wxList();
       
       BeginEditSequence();
       FlashOn(click->start, click->end, FALSE, FALSE, -1);
@@ -2073,11 +2070,11 @@ void wxMediaEdit::Redraw(wxDC *dc, double starty, double endy,
     outlineBrush = wxTheBrushList->FindOrCreateBrush("BLACK", wxCOLOR);
     outlineInactivePen = wxThePenList->FindOrCreatePen("BLACK", 1, wxCOLOR);
 #if ALLOW_X_STYLE_SELECTION
-    outlineNonownerBrush = new wxBrush();
+    outlineNonownerBrush = new WXGC_PTRS wxBrush();
     outlineNonownerBrush->SetColour("BLACK");
     {
       wxBitmap *bm;
-      bm = new wxBitmap(xpattern, 16, 16);
+      bm = new WXGC_PTRS wxBitmap(xpattern, 16, 16);
       outlineNonownerBrush->SetStipple(bm);
     }
     outlineNonownerBrush->SetStyle(wxXOR);
@@ -2648,9 +2645,9 @@ void wxMediaEdit::Refresh(double left, double top, double width, double height,
     brush = dc->GetBrush();
     font = dc->GetFont();
     col = dc->GetTextForeground();
-    fg = new wxColour(col);
+    fg = new WXGC_PTRS wxColour(col);
     col = dc->GetTextBackground();
-    bg = new wxColour(col);
+    bg = new WXGC_PTRS wxColour(col);
 
     rgn = dc->GetClippingRegion();
     dc->SetClippingRect(left - x, top - y, width, height);
@@ -2765,7 +2762,7 @@ void *wxMediaEdit::BeginPrint(wxDC *dc, Bool fit)
     double w, h;
     long hm, vm;
 
-    savedInfo = new SaveSizeInfo;
+    savedInfo = new WXGC_PTRS SaveSizeInfo;
     
     savedInfo->maxw = GetMaxWidth();
     savedInfo->bm = SetAutowrapBitmap(NULL);

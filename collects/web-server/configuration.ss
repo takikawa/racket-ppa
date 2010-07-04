@@ -5,12 +5,13 @@
            "sig.ss"
            "util.ss"
            "parse-table.ss"
-           "cache-table.ss"
+           "private/cache-table.ss"
            "response.ss")
   (require (lib "unitsig.ss")
            (lib "contract.ss"))
   
   (provide complete-configuration
+           get-configuration
            build-developer-configuration
            build-developer-configuration/vhosts ;; added 2/3/05 by Jacob
            default-configuration-table-path
@@ -19,6 +20,17 @@
   (provide/contract
    [load-configuration (path? . -> . unit/sig?)]
    [load-developer-configuration (path? . -> . unit/sig?)])
+  
+  (provide error-response
+           servlet-loading-responder
+           gen-servlet-not-found
+           gen-servlet-responder
+           gen-servlets-refreshed
+           gen-passwords-refreshed
+           gen-authentication-responder
+           gen-protocol-responder
+           gen-file-not-found-responder
+           gen-collect-garbage-responder)
   
   (define default-configuration-table-path
     (build-path (collection-path "web-server") "configuration-table"))
@@ -106,7 +118,8 @@
       ;; allow people (SamTH) to use MrEd primitives from servlets.
       ;; GregP: putting mred.ss here is a bad idea because it will cause
       ;; web-server-text to have a dependency on mred
-      ;(lib "mred.ss" "mred")
+      ;; JM: We get around it by only doing it if the module is already attached.
+      (lib "mred.ss" "mred")
       (lib "servlet.ss" "web-server")))
   
   
@@ -133,7 +146,9 @@
     (let ([server-namespace (current-namespace)]
           [new-namespace (make-namespace)])
       (parameterize ([current-namespace new-namespace])
-        (for-each (lambda (name) (namespace-attach-module server-namespace name))
+        (for-each (lambda (name)
+                    (with-handlers ([exn? void])
+                      (namespace-attach-module server-namespace name)))
                   to-be-copied-module-names)
         new-namespace)))
   
@@ -270,6 +285,7 @@
                     (build-path-unless-absolute host-base (paths-log paths))
                     (build-path-unless-absolute host-base (paths-htdocs paths))
                     (build-path-unless-absolute host-base (paths-servlet paths))
+                    (build-path-unless-absolute host-base (paths-mime-types paths))                    
                     (build-path-unless-absolute host-base (paths-passwords paths))))))
   
   ; gen-virtual-hosts : (listof (list regexp host)) host ->

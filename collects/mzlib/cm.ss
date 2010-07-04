@@ -1,6 +1,6 @@
 (module cm mzscheme
   (require (lib "moddep.ss" "syntax")
-	   (lib "plthome.ss" "setup")
+	   (lib "main-collects.ss" "setup")
 	   (lib "file.ss"))
 
   (provide make-compilation-manager-load/use-compiled-handler
@@ -15,7 +15,8 @@
   (define indent (make-parameter ""))
   (define trust-existing-zos (make-parameter #f))
 
-  (define (trace-printf fmt . args) ((trace) (string-append (indent) (apply format fmt args))))
+  (define (trace-printf fmt . args) 
+    ((trace) (string-append (indent) (apply format fmt args))))
   
   (define my-max
     (case-lambda
@@ -53,6 +54,13 @@
         ((eq? 'relative base) mode)
         (else (build-path base mode)))))
 
+  (define (try-delete-file path)
+    ;; Attempt to delete, but give up if it
+    ;;  doesn't work:
+    (with-handlers ([exn:fail:filesystem? void])
+      (trace-printf "deleting: ~a" path)
+      (delete-file path)))
+
   ;; with-compile-output : path (output-port -> alpha) -> alpha
   ;;  Open path for writing, and arranges to delete path if there's
   ;;  an exception. Breaks are managed so that the port is reliably
@@ -60,11 +68,7 @@
   (define (with-compile-output path proc)
     (let ([bp (current-break-parameterization)])
       (with-handlers ([void (lambda (exn)
-			      ;; Attempt to delete, but give up if it
-			      ;;  doesn't work:
-			      (with-handlers ([exn:fail:filesystem? void])
-				(trace-printf "deleting: ~a" path)
-				(delete-file path))
+			      (try-delete-file path)
 			      (raise exn))])
 	(let ([out (open-output-file path 'truncate/replace)])
 	  (dynamic-wind
@@ -85,8 +89,8 @@
        dep-path
        (lambda (op)
 	 (write (cons (version)
-		      (append (map plthome-ify deps)
-			      (map (lambda (x) (plthome-ify (cons 'ext x)))
+		      (append (map path->main-collects-relative deps)
+			      (map (lambda (x) (path->main-collects-relative (cons 'ext x)))
 				   external-deps)))
 		op)
 	 (newline op)))))
@@ -137,8 +141,16 @@
 	       zo-name
 	       (lambda (out)
 		 (with-handlers ((exn:fail?
-				  (lambda (ex) (compilation-failure mode path zo-name #f (exn-message ex)))))
-		   (write code out))
+				  (lambda (ex)
+				    (close-output-port out)
+				    (try-delete-file zo-name)
+				    (compilation-failure mode path zo-name #f (exn-message ex)))))
+		   (parameterize ([current-write-relative-directory
+				   (let-values ([(base name dir?) (split-path path)])
+				     (if (eq? base 'relative)
+					 (current-directory)
+					 (path->complete-path base (current-directory))))])
+		     (write code out)))
 		 ;; redundant, but close as early as possible:
 		 (close-output-port out)
 		 ;; Note that we check time and write .deps before returning from with-compile-output...
@@ -233,15 +245,20 @@
 				 (let ([t (cond
 					   [(bytes? d) (compile-root mode (bytes->path d) up-to-date)]
 					   [(path? d) (compile-root mode d up-to-date)]
-					   [(and (pair? d) (eq? (car d) 'ext))
+					   [(and (pair? d) 
+						 (eq? (car d) 'ext)
+						 (or (bytes? (cdr d))
+						     (path? (cdr d))))
 					    (with-handlers ((exn:fail:filesystem?
 							     (lambda (ex) +inf.0)))
-					      (file-or-directory-modify-seconds (cdr d)))]
-					   [else -inf.0])])
+					      (file-or-directory-modify-seconds (if (bytes? (cdr d))
+										    (bytes->path (cdr d))
+										    (cdr d))))]
+					   [else +inf.0])])
 				   (when (> t path-zo-time)
 				     (trace-printf "newer: ~a (~a > ~a)..." d t path-zo-time))
 				   (> t path-zo-time)))
-			       (map un-plthome-ify (cdr deps)))
+			       (map main-collects-relative->path (cdr deps)))
                         (compile-zo mode path))))))
                 (let ((stamp (get-compiled-time mode path #t)))
                   (hash-table-put! up-to-date path stamp)

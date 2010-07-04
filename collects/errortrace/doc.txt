@@ -5,8 +5,8 @@
 
 _Errortrace_ is a stack-trace-on-exceptions/profiler/coverage tool for
 MzScheme.  Errortrace is not a complete debugger, and a real debugger
-in DrScheme is expected soon; meanwhile, using errortrace might be
-better than nothing.
+in DrScheme is expected eventually; meanwhile, using errortrace might
+be better than MzScheme's limited stack-trace reporting.
 
 Quick instructions
 ------------------
@@ -21,7 +21,7 @@ Quick instructions
   2) When an exception occurs, the exception handler prints something
      like a stack trace, most recent contexts first
 
-The errortrace module is odd; don't import it into another module.
+The errortrace module is strange; don't import it into another module.
 Instead, the errortrace module is meant to be invoked from the
 top-level, so that it can install an evaluation handler, exception
 handler, etc.
@@ -60,12 +60,6 @@ is reported.
 
 The instrumentation for storing exception information slows most
 programs by a factor of 2 or 3.
-
-Do not load errortrace before writing .zo files.  Errortrace
-instruments S-expressions with unprintable values; this works fine if
-the instrumented S-expression is passed to the default eval handler,
-but neither the S-expression nor its byte-code form can be marshalled
-to a string.
 
 The `print-error-trace' procedure takes a port and exception and
 prints the errortrace-collected debugging information contained in the
@@ -115,12 +109,12 @@ Profiling records:
  * the procedure's source in the form of a syntax object (which might,
    in turn, provide a source location file and position).
 
- * optionally, information about the procedure call path (something
-   like the stack trace) for every call to the procedure.  Path
-   information is collected when the `profile-paths-enabled' boolean
-   parameter is #t; the default is #f, but setting the parameter to #t
-   immediately affects all procedure instrumented for profiling
-   information:
+ * optionally, information about the procedure call path (i.e., a
+   stack trace) for every call to the procedure; collecting this
+   information is relatively expensive. Path information is collected
+   when the `profile-paths-enabled' boolean parameter is #t; the
+   default is #f, but setting the parameter to #t immediately affects
+   all procedure instrumented for profiling information:
 
 >   (profile-paths-enabled) - returns #t if profiling collects path
     information, #f otherwise
@@ -145,8 +139,9 @@ To retrieve all profiling information accumulated so far, call
 
   * the syntax source of the procedure; and
 
-  * a list of call paths, recorded while `profile-paths-enabled' is
-    set to #t.  Each call path is a list containing two-element lists;
+  * a list of unique call paths recorded while `profile-paths-enabled'
+    is set to #t.  Each call path is a pair of a count (the number of
+    times the path occurred) and a list containing two-element lists;
     each two-element list contains the calling procedure's name or
     source expression and the calling procedure's source file or #f.
 

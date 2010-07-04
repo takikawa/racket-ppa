@@ -423,6 +423,18 @@
 	(void? v)
 	(date? v)
 	(arity-at-least? v)))
+
+  ;; If a module is dynamic-required through a path,
+  ;;  then it can cause simplified module paths to be paths;
+  ;;  keep the literal path, but marshal it to bytes.
+  (define (protect-path p)
+    (if (path? p)
+	(path->bytes p)
+	p))
+  (define (unprotect-path p)
+    (if (bytes? p)
+	(bytes->path p)
+	p))
   
   (define (mod-to-id info mod-map cache)
     (let ([deserialize-id (serialize-info-deserialize-id info)])
@@ -438,10 +450,11 @@
 			    (and (list? b)
 				 (if (symbol? (caddr b))
 				     (caddr b)
-				     (collapse-module-path-index 
-				      (caddr b)
-				      `(file ,(build-path (serialize-info-dir info)
-							  "here.ss")))))
+				     (protect-path
+				      (collapse-module-path-index 
+				       (caddr b)
+				       (build-path (serialize-info-dir info)
+						   "here.ss")))))
 			    (syntax-e deserialize-id)))]
 			[(symbol? deserialize-id)
 			 (cons #f deserialize-id)]
@@ -449,10 +462,11 @@
 			 (cons
 			  (if (symbol? (cdr deserialize-id))
 			      (cdr deserialize-id)
-			      (collapse-module-path-index 
-			       (cdr deserialize-id)
-			       `(file ,(build-path (serialize-info-dir info)
-						   "here.ss"))))
+			      (protect-path
+			       (collapse-module-path-index 
+				(cdr deserialize-id)
+				(build-path (serialize-info-dir info)
+					    "here.ss"))))
 			  (car deserialize-id))])])
 		  (hash-table-get 
 		   mod-map path+name
@@ -661,10 +675,8 @@
       (hash-table-for-each cycle
 			   (lambda (k v)
 			     (hash-table-put! share k v)))
-      (let ([ordered (map car
-			  (mergesort (hash-table-map share cons)
-				     (lambda (a b)
-				       (< (cdr a) (cdr b)))))])
+      (let ([ordered (map car (sort (hash-table-map share cons)
+                                    (lambda (a b) (< (cdr a) (cdr b)))))])
 	(let ([serializeds (map (lambda (v)
 				  (if (hash-table-get cycle v (lambda () #f))
 				      ;; Box indicates cycle record allocation
@@ -679,9 +691,8 @@
 			 (cons n
 			       (serialize-one v share #f mod-map mod-map-cache))))]
 	      [main-serialized (serialize-one v share #t mod-map mod-map-cache)]
-	      [mod-map-l (map car
-			      (mergesort (hash-table-map mod-map cons)
-					 (lambda (a b) (< (cdr a) (cdr b)))))])
+	      [mod-map-l (map car (sort (hash-table-map mod-map cons)
+                                        (lambda (a b) (< (cdr a) (cdr b)))))])
 	  (list (hash-table-count mod-map)
 		mod-map-l
 		(length serializeds)
@@ -818,7 +829,8 @@
 	(unless (null? l)
 	  (let* ([path+name (car l)]
 		 [des (if (car path+name)
-			  (dynamic-require (car path+name) (cdr path+name))
+			  (dynamic-require (unprotect-path (car path+name))
+					   (cdr path+name))
 			  (namespace-variable-value (cdr path+name)))])
 	    ;; Register maker and struct type:
 	    (vector-set! mod-map n des))

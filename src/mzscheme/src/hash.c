@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -715,7 +715,8 @@ static long hash_general(Scheme_Object *o)
     keygen += 4;
   }
 
-  return *(long *) mzALIAS o;
+  /* Relies on int = two shorts: */
+  return *(int *) mzALIAS o;
 }
 
 static long hash_symbol(Scheme_Object *o)
@@ -736,7 +737,8 @@ static long hash_symbol(Scheme_Object *o)
       return hash_general(o);
   }
 
-  return *(long *) mzALIAS o;
+  /* Relies on int = two shorts: */
+  return *(int *) mzALIAS o;
 }
 
 static long hash_prim(Scheme_Object *o)
@@ -773,6 +775,7 @@ void scheme_init_hash_key_procs(void)
   PROC(scheme_prim_type, hash_prim);
   PROC(scheme_closed_prim_type, hash_prim);
   PROC(scheme_closure_type, hash_general);
+  PROC(scheme_native_closure_type, hash_general);
   PROC(scheme_case_closure_type, hash_case);
   PROC(scheme_cont_type, hash_general);
   PROC(scheme_escaping_cont_type, hash_general);
@@ -893,24 +896,31 @@ END_XFORM_SKIP;
 /*                           equal? hashing                               */
 /*========================================================================*/
 
+static long equal_hash_key(Scheme_Object *o, long k);
+
 static Scheme_Object *hash_k(void)
 {
   Scheme_Thread *p = scheme_current_thread;
   Scheme_Object *v = (Scheme_Object *)p->ku.k.p1;
+  long nv;
 
   p->ku.k.p1 = NULL;
   
-  return (Scheme_Object *)scheme_equal_hash_key(v);
+  nv = equal_hash_key(v, p->ku.k.i1);
+
+  return scheme_make_integer_value(nv);
 }
 
 /* Number of lists/vectors/structs/boxes to hash before
    paying for a stack check. */
 #define HASH_COUNT_START 20
 
-long scheme_equal_hash_key(Scheme_Object *o)
+#define MZ_HASH_K hash_k
+#define MZ_HASH_I1 (k - t)
+
+static long equal_hash_key(Scheme_Object *o, long k)
 {
   Scheme_Type t;
-  long k = 0;
   static int hash_counter = HASH_COUNT_START;
 
  top:
@@ -922,18 +932,28 @@ long scheme_equal_hash_key(Scheme_Object *o)
     return k + SCHEME_INT_VAL(o);
 #ifdef MZ_USE_SINGLE_FLOATS
   case scheme_float_type:
-    {
-      double d;
-      int e;
-      d = frexp(SCHEME_DBL_VAL(o), &e);
-      return k + ((long)(d * (1 << 30))) + e;
-    }
 #endif
   case scheme_double_type:
     {
       double d;
       int e;
-      d = frexp(SCHEME_DBL_VAL(o), &e);
+      d = SCHEME_DBL_VAL(o);
+      if (MZ_IS_NAN(d)) {
+	d = 0.0;
+	e = 1000;
+      } else if (MZ_IS_POS_INFINITY(d)) {
+	d = 0.5;
+	e = 1000;
+      } else if (MZ_IS_NEG_INFINITY(d)) {
+	d = -0.5;
+	e = 1000;
+      } else if (!d && scheme_minus_zero_p(d)) {
+	d = 0;
+	e = 1000;
+      } else {
+	/* frexp should not be used on inf or nan: */
+	d = frexp(d, &e);
+      }
       return k + ((long)(d * (1 << 30))) + e;
     }
   case scheme_bignum_type:
@@ -951,7 +971,7 @@ long scheme_equal_hash_key(Scheme_Object *o)
     break;
   case scheme_rational_type:
     {
-      k += scheme_equal_hash_key(scheme_rational_numerator(o));
+      k += equal_hash_key(scheme_rational_numerator(o), 0);
       o = scheme_rational_denominator(o);
       break;
     }
@@ -959,14 +979,14 @@ long scheme_equal_hash_key(Scheme_Object *o)
   case scheme_complex_izi_type:
     {
       Scheme_Complex *c = (Scheme_Complex *)o;
-      k += scheme_equal_hash_key(c->r);
+      k += equal_hash_key(c->r, 0);
       o = c->i;
       break;
     }
   case scheme_pair_type:
     {
 #     include "mzhashchk.inc"
-      k += scheme_equal_hash_key(SCHEME_CAR(o));
+      k += equal_hash_key(SCHEME_CAR(o), 0);
       o = SCHEME_CDR(o);
       break;
     }
@@ -982,7 +1002,7 @@ long scheme_equal_hash_key(Scheme_Object *o)
       --len;
       for (i = 0; i < len; i++) {
 	SCHEME_USE_FUEL(1);
-	val = scheme_equal_hash_key(SCHEME_VEC_ELS(o)[i]);
+	val = equal_hash_key(SCHEME_VEC_ELS(o)[i], 0);
 	k = (k << 5) + k + val;
       }
       
@@ -1024,7 +1044,7 @@ long scheme_equal_hash_key(Scheme_Object *o)
 #       include "mzhashchk.inc"
 	
 	for (i = SCHEME_STRUCT_NUM_SLOTS(s1); i--; ) {
-	  k += scheme_equal_hash_key(s1->slots[i]);
+	  k += equal_hash_key(s1->slots[i], 0);
 	  k = (k << 5) + k;
 	}
 	
@@ -1042,7 +1062,7 @@ long scheme_equal_hash_key(Scheme_Object *o)
     }
   case scheme_hash_table_type:
     {
-      Scheme_Hash_Table *t = (Scheme_Hash_Table *)o;
+      Scheme_Hash_Table *ht = (Scheme_Hash_Table *)o;
       Scheme_Object **vals, **keys;
       int i;
 
@@ -1050,12 +1070,12 @@ long scheme_equal_hash_key(Scheme_Object *o)
 
       k = (k << 1) + 3;
       
-      keys = t->keys;
-      vals = t->vals;
-      for (i = t->size; i--; ) {
+      keys = ht->keys;
+      vals = ht->vals;
+      for (i = ht->size; i--; ) {
 	if (vals[i]) {
-	  k += scheme_equal_hash_key(keys[i]);
-	  k += (scheme_equal_hash_key(vals[i]) << 1);
+	  k += equal_hash_key(keys[i], 0);
+	  k += (equal_hash_key(vals[i], 0) << 1);
 	}
       }
       
@@ -1063,19 +1083,19 @@ long scheme_equal_hash_key(Scheme_Object *o)
     }
   case scheme_bucket_table_type:
     {
-      Scheme_Bucket_Table *t = (Scheme_Bucket_Table *)o;
+      Scheme_Bucket_Table *ht = (Scheme_Bucket_Table *)o;
       Scheme_Bucket **buckets, *bucket;
       const char *key;
       int i, weak;
   
 #    include "mzhashchk.inc"
 
-      buckets = t->buckets;
-      weak = t->weak;
+      buckets = ht->buckets;
+      weak = ht->weak;
       
       k = (k << 1) + 7;
       
-      for (i = t->size; i--; ) {
+      for (i = ht->size; i--; ) {
 	bucket = buckets[i];
 	if (bucket) {
 	  if (weak) {
@@ -1084,8 +1104,8 @@ long scheme_equal_hash_key(Scheme_Object *o)
 	    key = bucket->key;
 	  }
 	  if (key) {
-	    k += (scheme_equal_hash_key((Scheme_Object *)bucket->val) << 1);
-	    k += scheme_equal_hash_key((Scheme_Object *)key);
+	    k += (equal_hash_key((Scheme_Object *)bucket->val, 0) << 1);
+	    k += equal_hash_key((Scheme_Object *)key, 0);
 	  }
 	}
       }
@@ -1123,6 +1143,29 @@ long scheme_equal_hash_key(Scheme_Object *o)
   goto top;
 }
 
+long scheme_equal_hash_key(Scheme_Object *o)
+{
+  return equal_hash_key(o, 0);
+}
+
+static Scheme_Object *hash2_k(void)
+{
+  Scheme_Thread *p = scheme_current_thread;
+  Scheme_Object *v = (Scheme_Object *)p->ku.k.p1;
+  long nv;
+
+  p->ku.k.p1 = NULL;
+  
+  nv = scheme_equal_hash_key2(v);
+
+  return scheme_make_integer(nv);
+}
+
+#undef MZ_HASH_K
+#undef MZ_HASH_I1
+#define MZ_HASH_K hash2_k
+#define MZ_HASH_I1 0
+
 long scheme_equal_hash_key2(Scheme_Object *o)
 {
   Scheme_Type t;
@@ -1142,7 +1185,15 @@ long scheme_equal_hash_key2(Scheme_Object *o)
     {
       double d;
       int e;
-      d = frexp(SCHEME_DBL_VAL(o), &e);
+      d = SCHEME_DBL_VAL(o);
+      if (MZ_IS_NAN(d)
+	  || MZ_IS_POS_INFINITY(d)
+	  || MZ_IS_NEG_INFINITY(d)) {
+	e = 1;
+      } else {
+	/* frexp should not be used on inf or nan: */
+	d = frexp(d, &e);
+      }
       return e;
     }
   case scheme_bignum_type:
@@ -1229,16 +1280,16 @@ long scheme_equal_hash_key2(Scheme_Object *o)
     goto top;
   case scheme_hash_table_type:
     {
-      Scheme_Hash_Table *t = (Scheme_Hash_Table *)o;
+      Scheme_Hash_Table *ht = (Scheme_Hash_Table *)o;
       Scheme_Object **vals, **keys;
       int i;
       long k = 0;
       
 #     include "mzhashchk.inc"
 
-      keys = t->keys;
-      vals = t->vals;
-      for (i = t->size; i--; ) {
+      keys = ht->keys;
+      vals = ht->vals;
+      for (i = ht->size; i--; ) {
 	if (vals[i]) {
 	  k += scheme_equal_hash_key2(keys[i]);
 	  k += scheme_equal_hash_key2(vals[i]);
@@ -1249,7 +1300,7 @@ long scheme_equal_hash_key2(Scheme_Object *o)
     }
   case scheme_bucket_table_type:
     {
-      Scheme_Bucket_Table *t = (Scheme_Bucket_Table *)o;
+      Scheme_Bucket_Table *ht = (Scheme_Bucket_Table *)o;
       Scheme_Bucket **buckets, *bucket;
       const char *key;
       int i, weak;
@@ -1257,10 +1308,10 @@ long scheme_equal_hash_key2(Scheme_Object *o)
 
 #     include "mzhashchk.inc"
   
-      buckets = t->buckets;
-      weak = t->weak;
+      buckets = ht->buckets;
+      weak = ht->weak;
       
-      for (i = t->size; i--; ) {
+      for (i = ht->size; i--; ) {
 	bucket = buckets[i];
 	if (bucket) {
 	  if (weak) {

@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -93,6 +93,7 @@ scheme_init_type (Scheme_Env *env)
   set_name(scheme_case_lambda_sequence_type, "<case-lambda-code>");
   set_name(scheme_begin0_sequence_type, "<begin0-code>");
   set_name(scheme_with_cont_mark_type, "<with-continuation-mark-code>");
+  set_name(scheme_quote_syntax_type, "<quote-syntax-code>");
 
   set_name(scheme_let_value_type, "<let-value-code>");
   set_name(scheme_let_void_type, "<let-void-code>");
@@ -109,10 +110,12 @@ scheme_init_type (Scheme_Env *env)
   set_name(scheme_prim_type, "<primitive>");
   set_name(scheme_closed_prim_type, "<primitive-closure>");
   set_name(scheme_closure_type, "<procedure>");
+  set_name(scheme_native_closure_type, "<procedure>");
   set_name(scheme_cont_type, "<continuation>");
   set_name(scheme_tail_call_waiting_type, "<tail-call-waiting>");
   set_name(scheme_null_type, "<empty-list>");
   set_name(scheme_pair_type, "<pair>");
+  set_name(scheme_raw_pair_type, "<raw-pair>");
   set_name(scheme_box_type, "<box>");
   set_name(scheme_integer_type, "<fixnum-integer>");
   set_name(scheme_double_type, "<inexact-number>");
@@ -173,6 +176,7 @@ scheme_init_type (Scheme_Env *env)
 
   set_name(scheme_custodian_type, "<custodian>");
   set_name(scheme_cont_mark_set_type, "<continuation-mark-set>");
+  set_name(scheme_cont_mark_chain_type, "<chain>");
 
   set_name(scheme_inspector_type, "<inspector>");
   
@@ -354,6 +358,7 @@ static void MARK_stack_state(Scheme_Stack_State *ss)
   gcMARK(ss->runstack_start);
   ss->runstack = ss->runstack_start + (ss->runstack - old);
   gcMARK(ss->runstack_saved);
+  gcMARK(ss->current_escape_cont_key);
 }
 
 static void FIXUP_stack_state(Scheme_Stack_State *ss)
@@ -364,6 +369,7 @@ static void FIXUP_stack_state(Scheme_Stack_State *ss)
   gcFIXUP(ss->runstack_saved);
   gcFIXUP_TYPED_NOW(Scheme_Object **, ss->runstack_start);
   ss->runstack = ss->runstack_start + (ss->runstack - old);
+  gcFIXUP(ss->current_escape_cont_key);
 }
 
 static void MARK_jmpup(Scheme_Jumpup_Buf *buf)
@@ -420,6 +426,7 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_letrec_type, letrec);
   GC_REG_TRAV(scheme_let_one_type, let_one);
   GC_REG_TRAV(scheme_with_cont_mark_type, with_cont_mark);
+  GC_REG_TRAV(scheme_quote_syntax_type, quotesyntax_obj);
   GC_REG_TRAV(scheme_module_variable_type, module_var);
 
   GC_REG_TRAV(_scheme_values_types_, bad_trav);
@@ -462,6 +469,7 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_keyword_type, symbol_obj);
   GC_REG_TRAV(scheme_null_type, char_obj); /* small */
   GC_REG_TRAV(scheme_pair_type, cons_cell);
+  GC_REG_TRAV(scheme_raw_pair_type, cons_cell);
   GC_REG_TRAV(scheme_vector_type, vector_obj);
   GC_REG_TRAV(scheme_cpointer_type, cpointer_obj);
 

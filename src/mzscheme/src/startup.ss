@@ -160,15 +160,17 @@
 	  (cons i l)
 	  #f)))
 
-  ;; used in pattern-matching where the second
+  ;; used in pattern-matching where either
   ;;  list can be a failure; if it's null, the first
   ;;  part might be an improper list
   (define-values (append/#f)
     (lambda (l1 l2)
-      (if l2
-	  (if (null? l2)
-	      l1
-	      (append l1 l2))
+      (if l1
+	  (if l2
+	      (if (null? l2)
+		  l1
+		  (append l1 l2))
+	      #f)
 	  #f)))
 
   ;; The rotate procedures are used to
@@ -247,10 +249,12 @@
 		(if (stx-null? d)
 		    (list (quote-syntax list) a)
 		    (if (if (pair? d)
-			    (module-identifier=? (quote-syntax list) (car d))
+			    (if (module-identifier=? (quote-syntax list) (car d))
+				#t
+				(module-identifier=? (quote-syntax list*) (car d)))
 			    #f)
-			(list* (quote-syntax list) a (cdr d))
-			(list (quote-syntax cons) a d))))))
+			(list* (car d) a (cdr d))
+			(list (quote-syntax list*) a d))))))
 	  (datum->syntax-object
 	   here
 	   (normal
@@ -1096,8 +1100,9 @@
 			  (if (stx-vector? e ,len)
 			      ,body
 			      #f))
-		       did-var?)
-		      (let-values ([(match-elem elem-did-var? <false>>) 
+		       did-var?
+		       #f)
+		      (let-values ([(match-elem elem-did-var? <false>) 
 				    (let ([e (vector-ref (syntax-e p) (sub1 pos))])
 				      (m&e e e use-ellipses? (not did-var?) #f))])
 			(loop (sub1 pos)
@@ -1206,10 +1211,7 @@
 	     (pair? (cdr e1))
 	     (null? (cddr e1)))
 	`(cons/#f ,(cadr e1) ,e2)
-	`(let ([v ,e1])
-	   (if v
-	       (append/#f v ,e2)
-	       #f))))
+	`(append/#f ,e1 ,e2)))
 
   ;; ----------------------------------------------------------------------
   ;; Output generator
@@ -1464,22 +1466,22 @@
 		(eq? (cadr t) (stx-cdr p)))))
       `(quote-syntax ,p)]
      [(syntax? stx)
-      ;; Keep location information
+      ;; Keep context and location information
       (let ([ctx (datum->syntax-object stx 'ctx stx)])
 	`(datum->syntax-object (quote-syntax ,ctx)
 			       ,(apply-cons #f h t p) 
 			       (quote-syntax ,ctx)))]
      ;; (cons X null) => (list X)
      [(eq? t 'null)
-      `(list ,h)]
+      `(list-immutable ,h)]
      ;; (cons X (list[*] Y ...)) => (list[*] X Y ...)
      [(and (pair? t)
-	   (memq (car t) '(list list*)))
+	   (memq (car t) '(list-immutable list*-immutable)))
       `(,(car t) ,h ,@(cdr t))]
      ;; (cons X (cons Y Z)) => (list* X Y Z)
      [(and (pair? t)
-	   (eq? (car t) 'cons))
-      `(list* ,h ,@(cdr t))]
+	   (eq? (car t) 'cons-immutable))
+      `(list*-immutable ,h ,@(cdr t))]
      ;; (cons (car X) (cdr X)) => X
      [(and (pair? h) (pair? t)
 	   (eq? (car h) 'car)
@@ -1488,7 +1490,7 @@
 	   (eq? (cadr h) (cadr t)))
       (cadr h)]
      [else
-      `(cons ,h ,t)]))
+      `(cons-immutable ,h ,t)]))
 
   ;; Generates a list-ref expression; if use-tail-pos
   ;;  is not #f, then the argument list is really a list*
@@ -1518,9 +1520,15 @@
       (let sub ([p p][use-ellipses? #t])
 	(cond 
 	 [(and use-ellipses? (ellipsis? p))
-	  (let ([subs (sub (stx-car p) #t)])
-	    (append (map list subs)
-		    (sub (stx-cdr (stx-cdr p)) #t)))]
+	  (let-values ([(rest nest)
+			(let loop ([p (stx-cdr (stx-cdr p))][nest list])
+			  (if (and (stx-pair? p)
+				   (...? (stx-car p)))
+			      (loop (stx-cdr p) (lambda (x) (list (nest x))))
+			      (values p nest)))])
+	    (let ([subs (sub (stx-car p) #t)])
+	      (append (map nest subs)
+		      (sub rest #t))))]
 	 [(stx-pair? p) 
 	  (let ([hd (stx-car p)])
 	    (if (and use-ellipses?
@@ -1638,14 +1646,13 @@
        [else (loop (cdr proto-r))])))
 
   (-define (no-ellipses? stx)
-    (let loop ([stx stx])
-      (cond
-       [(stx-pair? stx)
-	(and (no-ellipses? (stx-car stx))
-	     (no-ellipses? (stx-cdr stx)))]
-       [(identifier? stx)
-	(not (...? stx))]
-       [else #t])))
+    (cond
+     [(stx-pair? stx)
+      (and (no-ellipses? (stx-car stx))
+	   (no-ellipses? (stx-cdr stx)))]
+     [(identifier? stx)
+      (not (...? stx))]
+     [else #t]))
 
   ;; Structure for communicating first-order pattern variable information:
   (define-struct syntax-mapping (depth valvar))
@@ -1986,11 +1993,13 @@
 
   (-define loc-insp (current-code-inspector))
   (-define (relocate loc stx)
-    (let ([new-stx (datum->syntax-object
-		    stx
-		    (syntax-e stx)
-		    loc)])
-      (syntax-recertify new-stx stx loc-insp #f)))
+    (if (syntax-source loc)
+	(let ([new-stx (datum->syntax-object
+			stx
+			(syntax-e stx)
+			loc)])
+	  (syntax-recertify new-stx stx loc-insp #f))
+	stx))
 
   ;; Like syntax, but also takes a syntax object
   ;; that supplies a source location for the
@@ -2577,6 +2586,16 @@
   (require #%small-scheme #%define #%paramz)
   (require-for-syntax #%kernel #%stx #%stxcase-scheme #%qqstx)
 
+  (define-syntax case-test
+    (lambda (x)
+      (syntax-case x ()
+	[(_ x (k))
+	 (if (symbol? (syntax-e #'k))
+	     (syntax (eq? x 'k))
+	     (syntax (eqv? x 'k)))]
+	[(_ x (k ...))
+	 (syntax (memv x '(k ...)))])))
+
   ;; From Dybvig:
   (define-syntax case
     (lambda (x)
@@ -2586,10 +2605,10 @@
 	((_ v (else e1 e2 ...))
 	 (syntax/loc x (begin v e1 e2 ...)))
 	((_ v ((k ...) e1 e2 ...))
-	 (syntax/loc x (if (memv v '(k ...)) (begin e1 e2 ...))))
+	 (syntax/loc x (if (case-test v (k ...)) (begin e1 e2 ...))))
 	((_ v ((k ...) e1 e2 ...) c1 c2 ...)
 	 (syntax/loc x (let ((x v))
-			 (if (memv x '(k ...))
+			 (if (case-test x (k ...))
 			     (begin e1 e2 ...)
 			     (case x c1 c2 ...)))))
 	((_ v (bad e1 e2 ...) . rest)
@@ -2962,7 +2981,7 @@
 		  (break-enabled #f))
 	  (lambda ()
 	    (let/ec done
-	      (let loop ()
+	      (let repl-loop ()
 		(let/ec k
 		  (dynamic-wind
 		      (lambda ()
@@ -2980,7 +2999,7 @@
 			(set! be? (break-enabled))
 			(break-enabled #f)
 			(set! jump #f))))
-		(loop))))
+		(repl-loop))))
 	  (lambda () (error-escape-handler eeh)
 		  (break-enabled be?)
 		  (set! jump #f)
@@ -2997,7 +3016,7 @@
 	      (string->immutable-string
 	       (format "load/cd: cannot open a directory: ~s" n))
 	      (current-continuation-marks)))
-	    (if (not (bytes? base))
+	    (if (not (path? base))
 		(load n)
 		(begin
 		  (if (not (directory-exists? base))
@@ -3050,7 +3069,8 @@
 		(cons-path default s null)))))))
 
   (define find-executable-path
-    (lambda (program libpath)
+    (case-lambda 
+     [(program libpath reverse?)
       (unless (path-string? program) 
 	(raise-type-error 'find-executable-path "path or string (sans nul)" program))
       (unless (or (not libpath) (and (path-string? libpath) 
@@ -3060,18 +3080,22 @@
 		(lambda (exec-name)
                   (if libpath
 		      (let-values ([(base name isdir?) (split-path exec-name)])
-			(if (path? base)
-			    (let ([lib (build-path base libpath)])
-			      (if (or (directory-exists? lib) 
-				      (file-exists? lib))
-				  lib
-				  (let ([resolved (resolve-path exec-name)])
-				    (cond
-				     [(equal? resolved exec-name) #f]
-				     [(relative-path? resolved)
-				      (found-exec (build-path base resolved))]
-			             [else (found-exec resolved)]))))
-			    #f))
+			(let ([next
+			       (lambda ()
+				 (let ([resolved (resolve-path exec-name)])
+				   (cond
+				    [(equal? resolved exec-name) #f]
+				    [(relative-path? resolved)
+				     (found-exec (build-path base resolved))]
+				    [else (found-exec resolved)])))])
+			  (or (and reverse? (next))
+			      (if (path? base)
+				  (let ([lib (build-path base libpath)])
+				    (and (or (directory-exists? lib) 
+					     (file-exists? lib))
+					 lib))
+				  #f)
+			      (and (not reverse?) (next)))))
 		      exec-name))])
 	(if (and (relative-path? program)
 		 (let-values ([(base name dir?) (split-path program)])
@@ -3091,7 +3115,9 @@
 			  (found-exec name)
 			  (loop (cdr paths)))))))
 	    (let ([p (path->complete-path program)])
-	      (and (file-exists? p) (found-exec p)))))))
+	      (and (file-exists? p) (found-exec p)))))]
+     [(program libpath) (find-executable-path program libpath #f)]
+     [(program) (find-executable-path program #f #f)]))
 
   ;; ------------------------------ Memtrace ------------------------------
   
@@ -3477,26 +3503,39 @@
 	    (hash-table-put! ht relto 'attach))])))
     standard-module-name-resolver)
     
-  (define (find-library-collection-paths)
-    (path-list-string->path-list
-     (or (getenv "PLTCOLLECTS") "")
-     (cons
-      (build-path (find-system-path 'addon-dir)
-		  (version)
-		  "collects")
-      (or (ormap
-	   (lambda (f) (let ([p (f)]) (and p (directory-exists? p) (list (simplify-path p)))))
-	   (list
-	    (lambda () (let ((v (getenv "PLTHOME")))
-			 (and v (build-path v "collects"))))
-	    (lambda () (find-executable-path (find-system-path 'exec-file) "collects"))
-	    ;; When binary is in bin/ subdir:
-	    (lambda () (find-executable-path (find-system-path 'exec-file) (build-path 'up "collects")))
-	    ;; When binary is in .bin/<platform> subdir:
-	    (lambda () (find-executable-path (find-system-path 'exec-file) (build-path 'up 'up "collects")))
-	    ;; When binary is in bin/<appname>.app/Contents/Macos subdir:
-	    (lambda () (find-executable-path (find-system-path 'exec-file) (build-path 'up 'up 'up "collects")))))
-	  null))))
+  (define find-library-collection-paths
+    (case-lambda
+     [() (find-library-collection-paths null)]
+     [(extra-collects-dirs)
+      (let ([user-too? (use-user-specific-search-paths)]
+	    [cons-if (lambda (f r) (if f (cons f r) r))])
+	(path-list-string->path-list
+	 (if user-too?
+	     (or (getenv "PLTCOLLECTS") "")
+	     "")
+	 (cons-if
+	  (and user-too?
+	       (build-path (find-system-path 'addon-dir)
+			   (version)
+			   "collects"))
+	  (let loop ([l (append
+			 extra-collects-dirs
+			 (list (find-system-path 'collects-dir)))])
+	    (if (null? l)
+		null
+		(let* ([collects-path (car l)]
+		       [v
+			(cond
+			 [(complete-path? collects-path) collects-path]
+			 [(absolute-path? collects-path)
+			  (path->complete-path collects-path
+					       (find-executable-path (find-system-path 'exec-file) #f #t))]
+			 [else
+			  (find-executable-path (find-system-path 'exec-file) collects-path #t)])])
+		  (if v
+		      (cons (simplify-path (path->complete-path v (current-directory)))
+			    (loop (cdr l)))
+		      (loop (cdr l)))))))))]))
 
   ;; -------------------------------------------------------------------------
 

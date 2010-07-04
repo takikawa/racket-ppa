@@ -12,7 +12,7 @@ PLANNED FEATURES:
   (require (lib "cmdline.ss")
            (lib "string.ss")
            (lib "file.ss")
-           (prefix list: (lib "list.ss"))
+           (only (lib "list.ss") sort)
            (lib "match.ss")
            
            "config.ss"
@@ -72,6 +72,20 @@ PLANNED FEATURES:
        ""
        "List the current linkage table"
        (set! actions (cons show-linkage actions)))
+      
+      (("-a" "--associate")
+       owner pkg maj min path
+       ""
+       "Create a development link between the specified package specifier "
+       "and the specified directory name"
+       (set! actions (cons (lambda () (add-hard-link-cmd owner pkg maj min path)) actions)))
+      
+      (("-u" "--unassociate")
+       owner pkg maj min
+       ""
+       "Remove any development link associated with the specified package"
+       (set! actions (cons (lambda () (remove-hard-link-cmd owner pkg maj min)) actions)))
+           
       ;; unimplemented so far:
       #;(("-u" "--unlink")
          module
@@ -152,28 +166,34 @@ PLANNED FEATURES:
        (for-each 
         (lambda (link) (apply printf "    ~a\t~a\t~a ~a\n" link))
         (cdr module)))
-     (list:quicksort 
-      (current-linkage)
-      (lambda (a b) (string<? (symbol->string a) (symbol->string b))))))
+     (sort (current-linkage)
+           (lambda (a b) (string<? (symbol->string (car a)) (symbol->string (car b)))))))
   
+  (define (add-hard-link-cmd ownerstr pkgstr majstr minstr pathstr)
+    (let* ([maj (read-from-string majstr)]
+           [min (read-from-string minstr)]
+           [path (string->path pathstr)])
+      (add-hard-link ownerstr pkgstr maj min path)))
   
-  
+  (define (remove-hard-link-cmd ownerstr pkgstr majstr minstr)
+    (let* ([maj (read-from-string majstr)]
+           [min (read-from-string minstr)])
+      (remove-hard-link ownerstr pkgstr maj min)))
+      
   
   ;; ------------------------------------------------------------
   ;; Utility
     
   (define (sort-by-criteria l . criteria)
-    (list:quicksort
-     l
-     (lambda (a b)
-       (let loop ((a a) (b b) (c criteria))
-         (cond
-           [(null? a) #f]
-           [((caar c) (car a) (car b)) #t]
-           [(not ((cadar c) (car a) (car b))) #f]
-           [else (loop (cdr a) (cdr b) (cdr c))])))))
+    (sort l
+          (lambda (a b)
+            (let loop ((a a) (b b) (c criteria))
+              (cond
+               [(null? a) #f]
+               [((caar c) (car a) (car b)) #t]
+               [(not ((cadar c) (car a) (car b))) #f]
+               [else (loop (cdr a) (cdr b) (cdr c))])))))
 
-  
 
   ;; ============================================================
   ;; start the program

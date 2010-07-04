@@ -5,6 +5,7 @@
            (lib "class.ss")
 	   (lib "contract.ss")
            (lib "kw.ss")
+           (lib "string.ss")
            "drsig.ss"
            (lib "string-constant.ss" "string-constants")
 	   (lib "mred.ss" "mred")
@@ -1023,9 +1024,7 @@
              (floor (inexact->exact (unbox y-box))))))
 
       (define teachpack-directory 
-        (let ([lib-dir (build-path 
-                        (collection-path "mzlib")
-                        'up 'up "teachpack")])
+        (let ([lib-dir (collection-path "teachpack")])
           (if (directory-exists? lib-dir)
               lib-dir
               #f)))
@@ -1052,12 +1051,11 @@
       ;; the result indicates if the teachpacks changed #t if they did and #f if not
       (define (add-new-teachpack frame)
         (let ([lib-file
-               (begin
-                 (parameterize ([finder:dialog-parent-parameter frame])
-                   (finder:get-file 
-                    teachpack-directory
-                    (string-constant select-a-teachpack)
-                    ".*\\.(ss|scm)$")))])
+               (parameterize ([finder:dialog-parent-parameter frame])
+                 (finder:get-file
+                  teachpack-directory
+                  (string-constant select-a-teachpack)
+                  ".*\\.(ss|scm)$"))])
           (if lib-file
               (let* ([interactions-text (send frame get-interactions-text)]
                      [tp-cache (send interactions-text get-user-teachpack-cache)]
@@ -1121,7 +1119,8 @@
 
       
       (define (add-info-specified-languages)
-        (for-each add-info-specified-language (find-relevant-directories '(drscheme-language-positions))))
+        (for-each add-info-specified-language
+                  (find-relevant-directories '(drscheme-language-positions))))
       
       (define (add-info-specified-language directory)
         (let ([info-proc (get-info/full directory)])
@@ -1160,8 +1159,9 @@
                               numberss)
                       (list? lang-modules)
                       (andmap (λ (x)
-                                (and (list? x)
-                                     (andmap string? x)))
+                                (or (string? x)
+                                    (and (list? x)
+                                         (andmap string? x))))
                               lang-modules)
                       (list? summaries)
                       (andmap string? summaries)
@@ -1174,7 +1174,7 @@
 				;; approximation (no good test, really)
 				;; since it depends on the value of a mz
 				;; parameter to interpret the module spec
-                                (or (eq? x #f) (symbol? x) (pair? x)))
+                                (or (string? x) (eq? x #f) (symbol? x) (pair? x)))
                               reader-specs)
                       
                       (= (length lang-positions)
@@ -1199,17 +1199,26 @@
                                                                    (format "uncaught exception: ~s" x)))
                                                   read-syntax/namespace-introduce)])
                                  (contract
-                                  (opt-> (any/c)
-                                         (port? (list/c (and/c number? integer? exact? (>=/c 0))
-                                                        (and/c number? integer? exact? (>=/c 0))
-                                                        (and/c number? integer? exact? (>=/c 0))))
-                                         (union syntax? eof-object?))
-                                  (dynamic-require reader-spec 'read-syntax)
+                                  (opt-> ()
+                                         (any/c port?)
+                                         (or/c syntax? eof-object?))
+                                  (dynamic-require
+                                   (cond
+                                     [(string? reader-spec)
+                                      (build-path
+                                       directory 
+                                       (platform-independent-string->path reader-spec))]
+                                     [else reader-spec])
+                                   'read-syntax)
                                   (string->symbol (format "~s" lang-position))
                                   'drscheme))
                                read-syntax/namespace-introduce)])
                       (add-language (instantiate % ()
-                                      (module `(lib ,@lang-module))
+                                      (module (if (string? lang-module)
+                                                  (build-path
+                                                   directory 
+                                                   (platform-independent-string->path lang-module))
+                                                  `(lib ,@lang-module)))
                                       (language-position lang-position)
                                       (language-numbers lang-numbers)
                                       (one-line-summary one-line-summary)
@@ -1232,6 +1241,16 @@
 		  summaries
                   urls
 		  reader-specs))])))))
+      
+      (define (platform-independent-string->path str)
+        (apply
+         build-path
+         (map (λ (x) 
+                (cond
+                  [(string=? ".." x) 'up]
+                  [(string=? "." x) 'same]
+                  [else x]))
+              (regexp-split #rx"/" str))))
 
       (define read-syntax/namespace-introduce
         (opt-lambda (source-name-v [input-port (current-input-port)])
@@ -1581,7 +1600,7 @@
         (define (insert-text-pls)
           (for-each
            display-text-pl
-           (quicksort
+           (sort
             (apply append (map get-text-pls (find-relevant-directories '(textbook-pls))))
             (λ (x y)
               (cond

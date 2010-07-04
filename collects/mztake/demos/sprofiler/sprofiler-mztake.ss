@@ -1,6 +1,6 @@
 (require (lib "mztake.ss" "mztake" )
          (lib "match.ss")
-         (lib "more-useful-code.ss" "mztake"))
+         (lib "base-gm.ss" "frtime"))
 
 (set-main! "picture.ss")
 
@@ -10,10 +10,10 @@
 
 (define pings (make-hash 'equal))
 
-(for-each-e (where)
-            (match-lambda [(line function context rest ...) 
-                           (hash-table-increment! pings (list function context))]
-                          [_ (void)]))
+(for-each-e! (where)
+             (match-lambda [(line function context rest ...) 
+                            (hash-table-increment! pings (list function context))]
+                           [_ (void)]))
 
 (define clicks (changes (quotient milliseconds 50)))
 
@@ -21,4 +21,4 @@
                          (clicks . -=> . true)))
 
 (define (show-profile)
-  (quicksort (hash-pairs pings) (lambda (a b) (> (second a) (second b)))))
+  (sort (hash-pairs pings) (lambda (a b) (> (second a) (second b)))))

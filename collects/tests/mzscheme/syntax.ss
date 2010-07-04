@@ -16,9 +16,10 @@
 		      (positive? (lambda (x) 'positive)))
 		     (raise 1)))
 (test 5 'with-handlers
-        (with-handlers ([void (lambda (x) 5)])
-	     (with-handlers ((zero? (lambda (x) 'zero)))
-		  (/ 0))))
+      (with-handlers ([void (lambda (x) 5)])
+	(with-handlers ((zero? (lambda (x) 'zero)))
+	  (/ 0))))
+
 (error-test #'(with-handlers ()
 	         (/ 0))
 	    exn:fail:contract:divide-by-zero?)
@@ -29,6 +30,7 @@
 			     (boolean? (lambda (x) 'boolean)))
 		 (/ 0))
 	    exn:application:type?)
+
 (syntax-test #'with-handlers)
 (syntax-test #'(with-handlers))
 (syntax-test #'(with-handlers . 1))
@@ -59,7 +61,7 @@
 	    arity?)
 
 (test-values '(1 2) (lambda () (with-handlers ([void void])
-					      (values 1 2))))
+				 (values 1 2))))
 
 (SECTION 4 1 2)
 (test '(quote a) 'quote (quote 'a))
@@ -1043,4 +1045,56 @@
 (define x 5)
 (test 5 '#%top (#%top . x))
 
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Tests related to bytecode optimizer.
+;; The (if (let ([x M]) (if x x N)) ...)
+;;   => (if (if M #t N) ...)
+;; converter drops the variable `x', which means
+;; that other mappings must adjust
+
+(let ([val 0])
+  (let ([g (lambda ()
+	     (letrec ([f (lambda (z x)
+			   (if (let ([w (even? 81)])
+				 (if w
+				     w
+				     (let ([y x])
+				       (set! x 7)
+				       (set! val (+ y 5)))))
+			       'yes
+			       'no))])
+	       (f 0 11)))])
+    (g))
+  (test 16 values val))
+
+(let ([val 0])
+  (let ([g (lambda ()
+	     (letrec ([f (lambda (z x)
+			   (if (let ([w (even? 81)])
+				 (if w
+				     w
+				     (let ([y x])
+				       (set! val (+ y 5)))))
+			       'yes
+			       'no))])
+	       (f 0 11)))])
+    (g))
+  (test 16 values val))
+
+;; Function-inline test where (h (g v 10)) involves two inlines:
+(letrec ([f (lambda (x) (h (g v 10)))]
+	 [h (lambda (x) (list x x))]
+	 [g (lambda (a b) a)]
+	 [v (list 'hello)]
+	 [w (list 'no!)]) 
+  (test '((hello) (hello)) f 10))
+
+;; Inlining introduces a let binding that is immediately dropped:
+(test '(1 . 2)
+      (let ([x (cons 1 2)]) (let ([f (lambda (x) x)]) (f (lambda (y) x))))
+      10)
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (report-errs)
+

@@ -29,18 +29,27 @@
         (values (cadr m) (string->number (caddr m))))
       (values #f #f)))
 
-  (define handin-name (#%info-lookup 'name))
+  (define handin-name     (#%info-lookup 'name))
   (define this-collection (#%info-lookup 'collection))
-  (define web-menu-name (#%info-lookup 'web-menu-name (lambda () #f)))
-  (define web-address (#%info-lookup 'web-address (lambda () #f)))
+  (define web-menu-name   (#%info-lookup 'web-menu-name (lambda () #f)))
+  (define web-address     (#%info-lookup 'web-address (lambda () #f)))
+  (define in-this-collection
+    (let ([path (collection-path this-collection)])
+      (lambda (file) (build-path path file))))
 
   (define handin-dialog-name (string-append handin-name " Handin"))
   (define button-label/h     (string-append handin-name " Handin"))
   (define button-label/r     (string-append handin-name " Retrieve"))
   (define manage-dialog-name (string-append handin-name " Handin Account"))
 
+  (define updater?
+    (#%info-lookup 'enable-auto-update (lambda () #f)))
+  (define multifile?
+    (#%info-lookup 'enable-multifile-handin (lambda () #f)))
+
   (define preference-key
-    (string->symbol (format "submit:username:~a" this-collection)))
+    (string->symbol
+     (format "~a:submit:username" (string-downcase this-collection))))
 
   (preferences:set-default preference-key "" string?)
   (define (remembered-user)
@@ -49,16 +58,20 @@
     (preferences:set preference-key user))
 
   (define (connect)
-    (handin-connect
-     server port-no
-     (build-path (collection-path this-collection) "server-cert.pem")))
+    (handin-connect server port-no (in-this-collection "server-cert.pem")))
 
+  (provide handin-frame%)
   (define handin-frame%
     (class dialog%
       (inherit show is-shown? center)
       (super-new [label handin-dialog-name])
 
-      (init-field content open-drscheme-window)
+      (init-field content on-retrieve)
+      (define mode
+        (cond [(and content on-retrieve) #f]
+              [content     'submit]
+              [on-retrieve 'retrieve]
+              [else (error 'handin-frame "bad initial values")]))
 
       (define status (new message%
 			  [label (format "Making secure connection to ~a..." server)]
@@ -95,7 +108,9 @@
              [callback (lambda _
                          (define r? (send retrieve? get-value))
                          (send ok set-label
-                               (if r? button-label/r button-label/h)))]))
+                               (if r? button-label/r button-label/h)))]
+             [value (eq? 'retrieve mode)]
+             [style (if mode '(deleted) '())]))
 
       (define (submit-file)
         (define final-message "Handin successful.")
@@ -131,12 +146,14 @@
            (lambda ()
              (done-interface)
              (do-cancel-button)
-             (string->editor! buf (send (open-drscheme-window) get-editor))))))
+             (on-retrieve buf)))))
 
       (define ok
         (new button%
-          [label ; can change to button-label/r, so use extra spaces
-           (string-append " " button-label/h " ")]
+          [label (case mode
+                   [(submit)   button-label/h]
+                   [(retrieve) button-label/r]
+                   [else (string-append " " button-label/h " ")])] ; can change
           [parent button-panel]
           [style '(border)]
           [callback
@@ -267,33 +284,37 @@
       (center)
       (show #t)))
 
-  (define (manage-handin-account)
+  (provide manage-handin-account)
+  (define (manage-handin-account parent)
     (new
      (class dialog%
        (inherit show is-shown? center)
        (super-new [label manage-dialog-name]
-		  [alignment '(left center)])
+                  [alignment '(left center)]
+                  [parent parent])
 
-       (define EXTRA-FIELDS
+       (define USER-FIELDS
          (let ([ef #f])
            (lambda ()
-             (unless ef (set! ef (retrieve-extra-fields (connect))))
+             (unless ef (set! ef (retrieve-user-fields (connect))))
              ef)))
 
        (define status
          (new message%
-              [label (format "Manage ~a handin account at ~a." handin-name server)]
+              [label (format "Manage ~a handin account at ~a."
+                             handin-name server)]
               [parent this]
               [stretchable-width #t]))
 
        (define tabs
          (new tab-panel%
               [parent this]
-              [choices '("New User" "Change Info" "Uninstall")]
+              [choices `("New User" "Change Info"
+                         ,(if multifile? "Un/Install" "Uninstall"))]
               [callback
                (lambda (tp e)
                  (send single active-child
-                       (list-ref (list new-user-box old-user-box uninstall-box)
+                       (list-ref (list new-user-box old-user-box un/install-box)
                                  (send tabs get-selection))))]))
 
        (define single (new panel:single% [parent tabs]))
@@ -320,7 +341,7 @@
          (string=? (send t1 get-value) (send t2 get-value)))
 
        (define (activate-change)
-         (define an-extra-non-empty? (ormap non-empty? change-extra-fields))
+         (define an-extra-non-empty? (ormap non-empty? change-user-fields))
 	 (send retrieve-old-info-button enable
                (non-empty? old-username old-passwd))
 	 (send change-button enable
@@ -338,10 +359,10 @@
 
        (define old-passwd
          (mk-passwd "Old Password:" old-user-box activate-change))
-       (define change-extra-fields
+       (define change-user-fields
          (map (lambda (f)
-                (mk-txt (format "~a:" (car f)) old-user-box activate-change))
-              (EXTRA-FIELDS)))
+                (mk-txt (string-append f ":") old-user-box activate-change))
+              (USER-FIELDS)))
        (define new-passwd
          (mk-passwd "New Password:" old-user-box activate-change))
        (define new-passwd2
@@ -365,20 +386,17 @@
        (define (activate-new)
 	 (send new-button enable
 	       (and (apply non-empty? new-username add-passwd add-passwd2
-                           add-extra-fields)
+                           add-user-fields)
                     (same-value add-passwd add-passwd2))))
        (define new-user-box (new vertical-panel%
 				 [parent single]
 				 [alignment '(center center)]))
        (define new-username (mk-txt "Username:" new-user-box activate-new))
        (send new-username set-value (remembered-user))
-       (define add-extra-fields
+       (define add-user-fields
          (map (lambda (f)
-                (mk-txt (format "~a:" (car f)) new-user-box activate-new))
-              (EXTRA-FIELDS)))
-       ;; (define full-name  (mk-txt "Full Name:" new-user-box activate-new))
-       ;; (define student-id (mk-txt "ID:" new-user-box activate-new))
-       ;; (define email      (mk-txt "Email:" new-user-box activate-new))
+                (mk-txt (string-append f ":") new-user-box activate-new))
+              (USER-FIELDS)))
        (define add-passwd  (mk-passwd "Password:" new-user-box activate-new))
        (define add-passwd2 (mk-passwd "Password again:" new-user-box activate-new))
        (define new-button (new button%
@@ -388,30 +406,67 @@
                                            (do-change/add #t new-username))]
 			       [style '(border)]))
 
-       (define uninstall-box (new vertical-panel%
-				 [parent single]
-				 [alignment '(center center)]))
-       (define uninstall-button (new button%
-				     [label (format "Uninstall ~a Handin" handin-name)]
-				     [parent uninstall-box]
-				     [callback
-				      (lambda (b e)
-					(let ([dir (collection-path this-collection)])
-					  (with-handlers ([void (lambda (exn)
-								  (report-error
-								   "Uninstall failed."
-								   exn))])
-					    (delete-directory/files dir)
-					    (set! uninstalled? #t)
-					    (send uninstall-button enable #f)
-					    (message-box
-					     "Uninstall"
-					     (format
-					      "The ~a tool has been uninstalled. ~a~a"
-					      handin-name
-					      "The Handin button and associated menu items"
-					      " will not appear after you restart DrScheme.")))))]))
+       (define un/install-box
+         (new vertical-panel% [parent single] [alignment '(center center)]))
+       (define uninstall-button
+         (new button%
+           [label (format "Uninstall ~a Handin" handin-name)]
+           [parent un/install-box]
+           [callback
+            (lambda (b e)
+              (let ([dir (collection-path this-collection)])
+                (with-handlers ([void
+                                 (lambda (exn)
+                                   (report-error "Uninstall failed." exn))])
+                  (delete-directory/files dir)
+                  (set! uninstalled? #t)
+                  (send uninstall-button enable #f)
+                  (message-box "Uninstall"
+                    (format "The ~a tool has been uninstalled. ~a~a"
+                            handin-name
+                            "The Handin button and associated menu items will"
+                            " not appear after you restart DrScheme.")
+                    this)
+                  (send this show #f))))]))
        (send uninstall-button enable (not uninstalled?))
+
+       (define install-standalone-button
+         (and multifile?
+              (new button%
+                [label (format "Install Standalone ~a Handin" handin-name)]
+                [parent un/install-box]
+                [callback
+                 (lambda (b e)
+                   (define (launcher sym)
+                     (dynamic-require `(lib "launcher.ss" "launcher") sym))
+                   (let* ([exe (let-values
+                                   ([(dir name dir?)
+                                     (split-path
+                                      ((launcher 'mred-program-launcher-path)
+                                       (format "~a Handin" handin-name)))])
+                                 (path->string name))]
+                          [dir (get-directory
+                                (format "Choose a directory to create the ~s~a"
+                                        exe " executable in")
+                                #f)])
+                     (when (and dir (directory-exists? dir))
+                       (parameterize ([current-directory dir])
+                         (when (or (not (file-exists? exe))
+                                   (eq? 'ok
+                                        (message-box
+                                         "File Exists"
+                                         (format
+                                          "The ~s executable already exists, ~a"
+                                          exe "it will be overwritten")
+                                         this '(ok-cancel caution))))
+                           ((launcher 'make-mred-launcher)
+                            (list "-mvLe-" "handin-multi.ss" this-collection
+                                  "(multifile-handin)")
+                            (build-path dir exe))
+                           (message-box "Standalone Executable"
+                                        (format "~s created" exe)
+                                        this)
+                           (send this show #f))))))])))
 
        (define (report-error tag exn)
 	 (queue-callback
@@ -469,9 +524,9 @@
                  (format "The \"~a\" and \"~a\" passwords are not the same."
                          l1 l2))
                (k (void))))
-           (for-each (lambda (t f) (check-length t 100 (car f) k))
-                     (if new? add-extra-fields change-extra-fields)
-                     (EXTRA-FIELDS))
+           (for-each (lambda (t f) (check-length t 100 f k))
+                     (if new? add-user-fields change-user-fields)
+                     (USER-FIELDS))
 	   (send tabs enable #f)
 	   (parameterize ([current-custodian comm-cust])
 	     (thread
@@ -493,9 +548,9 @@
                           (if new? "Creating user..." "Updating server..."))
 		    (if new?
 			(run submit-addition username add-passwd
-                             add-extra-fields)
+                             add-user-fields)
 			(run submit-info-change username old-passwd new-passwd
-                             change-extra-fields)))
+                             change-user-fields)))
 		  (send status set-label "Success.")
 		  (send cancel set-label "Close")))))))
 
@@ -521,14 +576,15 @@
                             "Success, you can now edit fields.")
                       (send tabs enable #t)
                       (for-each (lambda (f val) (send f set-value val))
-                                change-extra-fields vals)
+                                change-user-fields vals)
                       (activate-change)))))))))
 
        (send new-user-box show #f)
        (send old-user-box show #f)
-       (send uninstall-box show #f)
+       (send un/install-box show #f)
        (let ([new? (equal? "" (remembered-user))])
-         (send (if new? new-user-box old-user-box) show #t)
+         (send single active-child (if new? old-user-box new-user-box))
+         (send single active-child (if new? new-user-box old-user-box))
          (send tabs set-selection (if new? 0 1)))
        (activate-new)
        (activate-change)
@@ -556,9 +612,7 @@
 	(send bm2 set-loaded-mask mbm2))
       bm2))
 
-  (define handin-icon
-    (scale-by-half
-     (build-path (collection-path this-collection) "icon.png")))
+  (define handin-icon (scale-by-half (in-this-collection "icon.png")))
 
   (define (editors->string editors)
     (let* ([base (make-object editor-stream-out-bytes-base%)]
@@ -591,7 +645,10 @@
       (import drscheme:tool^)
 
       (define phase1 void)
-      (define phase2 void)
+      (define phase2
+        (if updater?
+          (dynamic-require `(lib "updater.ss" ,this-collection) 'bg-update)
+          void))
 
       (define tool-button-label (bitmap-label-maker button-label/h handin-icon))
 
@@ -603,11 +660,30 @@
 	  (super-instantiate ())
 
           (define/override (file-menu:between-open-and-revert file-menu)
+            ;; super adds a separator, add this and another sep after that
+            (super file-menu:between-open-and-revert file-menu)
             (new menu-item%
-		 (label (format "Manage ~a Handin Account..." handin-name))
-		 (parent file-menu)
-		 (callback (lambda (m e) (manage-handin-account))))
-            (super file-menu:between-open-and-revert file-menu))
+              [label (format "Manage ~a Handin Account..." handin-name)]
+              [parent file-menu]
+              [callback (lambda (m e) (manage-handin-account this))])
+            (when multifile?
+              (new menu-item%
+                [label (format "Submit multiple ~a Files..." handin-name)]
+                [parent file-menu]
+                [callback (lambda (m e)
+                            ((dynamic-require
+                              `(lib "handin-multi.ss" ,this-collection)
+                              'multifile-handin)))]))
+            (when updater?
+              (new menu-item%
+                [label (format "Update ~a plugin..." handin-name)]
+                [parent file-menu]
+                [callback
+                 (lambda (m e)
+                   ((dynamic-require `(lib "updater.ss" ,this-collection)
+                                     'update)
+                    #f #t))])) ; no parent
+            (new separator-menu-item% [parent file-menu]))
 
           (define/override (help-menu:after-about menu)
 	    (when web-menu-name
@@ -619,19 +695,24 @@
             (super help-menu:after-about menu))
 
 	  (define button
-	    (new button%
-		 [label (tool-button-label this)]
-		 [parent (get-button-panel)]
-		 [callback (lambda (button evt)
-			     (let ([content (editors->string
-					     (list (get-definitions-text)
-						   (get-interactions-text)))])
-			       (new handin-frame%
-                                    [parent this]
-                                    [content content]
-                                    [open-drscheme-window
-                                     drscheme:unit:open-drscheme-window])))]
-		 [style '(deleted)]))
+            (new button%
+              [label (tool-button-label this)]
+              [parent (get-button-panel)]
+              [style '(deleted)]
+              [callback
+               (lambda (button evt)
+                 (let ([content (editors->string
+                                 (list (get-definitions-text)
+                                       (get-interactions-text)))])
+                   (new handin-frame%
+                     [parent this]
+                     [content content]
+                     [on-retrieve
+                      (lambda (buf)
+                        (string->editor!
+                         buf
+                         (send (drscheme:unit:open-drscheme-window)
+                               get-editor)))])))]))
 
 	  (send (get-button-panel) change-children
 		(lambda (l) (cons button l)))))

@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2005 PLT Scheme, Inc.
+// Copyright:  (c) 2004-2006 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -148,8 +148,8 @@ void wxScrollBar::InitDefaults(wxFunction function)
   Callback(function);
 
   cStyle = (cStyle & wxHSCROLL ? wxHSCROLL : wxVSCROLL); // kludge
-  scrollData = new wxScrollData;
-  cScroll = new wxScroll(this, scrollData);
+  scrollData = new WXGC_PTRS wxScrollData;
+  cScroll = new WXGC_PTRS wxScroll(this, scrollData);
 }
 
 //-----------------------------------------------------------------------------
@@ -298,7 +298,7 @@ void wxScrollBar::OnEvent(wxMouseEvent *event) // mac platform only
 	  wxScrollEvent *e;
 
 	  newPosition = GetValue();
-	   e = new wxScrollEvent();
+	   e = new WXGC_PTRS wxScrollEvent();
 	  e->direction = (horizontal ? wxHORIZONTAL : wxVERTICAL);
 	  e->pos = GetValue();
 	  e->moveType = wxEVENT_TYPE_SCROLL_THUMBTRACK;
@@ -353,7 +353,7 @@ void wxScrollBar::TrackAction(short part) // mac platform only
 			  ? wxWhatScrollData::wxPositionH 
 			  : wxWhatScrollData::wxPositionV);
     SetValue(newPosition);
-    e = new wxScrollEvent();
+    e = new WXGC_PTRS wxScrollEvent();
     e->direction = (horizontal ? wxHORIZONTAL : wxVERTICAL);
     e->pos = GetValue();
     e->moveType = mtype;

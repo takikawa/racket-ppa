@@ -363,7 +363,11 @@ WARNING: printf is rebound in the body of the unit to always
       (define foreground-color-mixin
         (mixin (basic<%> editor:standard-style-list<%>) (foreground-color<%>)
           (inherit begin-edit-sequence end-edit-sequence change-style get-style-list)
-	  (define/override (get-fixed-style)
+          
+          (define/override (default-style-name)
+            (editor:get-default-color-style-name))
+	  
+          (define/override (get-fixed-style)
             (send (editor:get-standard-style-list)
 		  find-named-style
 		  (editor:get-default-color-style-name)))
@@ -1434,7 +1438,9 @@ WARNING: printf is rebound in the body of the unit to always
                                                  (make-write-special-proc value-style)))
               (let ([install-handlers
                      (λ (port)
-                       (set-interactive-print-handler port)
+                       ;; don't want to set the port-print-handler here; 
+                       ;; instead drscheme sets the global-port-print-handler
+                       ;; to catch fractions and the like
                        (set-interactive-write-handler port)
                        (set-interactive-display-handler port))])
                 (install-handlers out-port)

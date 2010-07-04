@@ -9,7 +9,7 @@
   ; CONTRACTS
   
   (define varref-set? (listof identifier?))
-  (define binding-set? (union varref-set? (symbols 'all)))
+  (define binding-set? (or/c varref-set? (symbols 'all)))
   (define (arglist? v)
     (or (null? v)
         (identifier? v)
@@ -71,9 +71,6 @@
    binding-set? ; predicate
    ; get-binding-name
    ; bogus-binding?
-   if-temp
-   begin-temp
-   set!-temp
    ; get-lifted-gensym
    ; expr-read
    ; set-expr-read!
@@ -82,7 +79,16 @@
    reset-profiling-table ; profiling info
    get-set-pair-union-stats ; profiling info
    re-intern-identifier
-   finished-xml-box-table)
+   finished-xml-box-table
+   >>>)
+  
+  ;; eli's debug operator:
+  ;; (I'm sure his version is more elegant.)
+  (define (>>> x . extra)
+    (begin (fprintf (current-error-port) "~a >>> ~v\n" 
+                    (if extra (apply string-append extra) "")
+                    x)
+           x))
   
   ; A step-result is either:
   ; (make-before-after-result finished-exps exp redex reduct)
@@ -95,7 +101,7 @@
   (define-struct error-result (err-msg) (make-inspector))
   (define-struct finished-stepping () (make-inspector))
   
-  (define step-result? (union before-after-result? before-error-result? error-result? finished-stepping?))
+  (define step-result? (or/c before-after-result? before-error-result? error-result? finished-stepping?))
   
   ; the closure record is placed in the closure table
 
@@ -216,10 +222,6 @@
                   (weak-assoc-add assoc-table stx new-binding)
                   new-binding)))))))
   
-  (define if-temp (syntax-property (datum->syntax-object #`here `if-temp) 'stepper-binding-type 'stepper-temp))
-  (define begin-temp (syntax-property (datum->syntax-object #`here `begin-temp) 'stepper-binding-type 'stepper-temp))
-  (define set!-temp (syntax-property (datum->syntax-object #`here `set!-temp) 'stepper-binding-type 'stepper-temp))
-
   ; gensyms needed by many modules:
 
   ; no-sexp is used to indicate no sexpression for display.
@@ -282,7 +284,7 @@
  
   
   ;; arglist : for our puposes, an ilist is defined like this:
-  ;; arglist : (union identifier? null? (cons identifier? arglist?) (syntax (cons identifier? arglist?))
+  ;; arglist : (or/c identifier? null? (cons identifier? arglist?) (syntax (cons identifier? arglist?))
   ;; ... where an ilist val can be anything _except_ a pair or null
 
   ;; arglist->ilist : turns an (possibly improper) arglist into a (possibly improper) list of syntax objects
@@ -356,7 +358,8 @@
                       #f))
   
   (define break-kind?
-    (symbols 'normal-break 'result-exp-break 'result-value-break 'double-break 'late-let-break 'expr-finished-break 'define-struct-break))
+    (symbols 'normal-break 'normal-break/values 'result-exp-break 'result-value-break 
+             'double-break 'late-let-break 'expr-finished-break 'define-struct-break))
 
   ; functional update package
 
@@ -488,6 +491,7 @@
       (user-stepper-define-type stepper-define-type)
       (user-stepper-proc-define-name stepper-proc-define-name)
       (user-stepper-and/or-clauses-consumed stepper-and/or-clauses-consumed)
+      (user-stepper-offset-index stepper-offset-index)
       (stepper-xml-hint stepper-xml-hint)))  ; I find it mildly worrisome that this breaks the pattern
                                              ;  by failing to preface the identifier with 'user-'.  JBC, 2005-08
   
@@ -495,6 +499,7 @@
   ;  (from native property names to 'user-' style property names)
   
   (define (attach-info to-exp from-exp)
+    (if (syntax-property from-exp 'stepper-offset-index) (>>> (syntax-property from-exp 'stepper-offset-index)))
     (let* ([attached (foldl (lambda (labels stx)
                               (match labels
                                 [`(,new-label ,old-label)

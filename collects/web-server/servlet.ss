@@ -1,18 +1,18 @@
-;; Default choice for writing module servlets
 (module servlet mzscheme
   (require (lib "contract.ss")
            (lib "etc.ss")
            (lib "xml.ss" "xml"))
-  (require "servlet-tables.ss"
-           "response.ss"
+  (require "response.ss"
+           "managers/manager.ss"
+           "private/servlet.ss"
+           "private/url.ss"
            "servlet-helpers.ss"
            "timer.ss"
            "web-cells.ss")
   
-  ;; ************************************************************
-  ;; HELPERS
+  ;; CONTRACT HELPERS
+  (define servlet-response? any/c)
   
-  ;; Is it a Xexpr, or an Xexpr with procedures?
   (define (xexpr/callback? x)
     (correct-xexpr? x 
                     (lambda () #t)
@@ -22,6 +22,24 @@
                           (begin ((error-display-handler) (exn-message exn) exn)
                                  #f)))))
   
+  (define response-generator?
+    (string? . -> . servlet-response?))
+  
+  (define url-transform?
+    (string? . -> . string?))
+  
+  (define expiration-handler?
+    (request? . -> . void?))
+  
+  (define (parameter/c c)
+    parameter?)
+  
+  (define embed/url?
+    (((request? . -> . any/c)) (expiration-handler?) . opt-> . string?))
+  
+  ;; ************************************************************
+  ;; HELPERS
+  
   ;; replace-procedures : (proc -> url) xexpr/callbacks? -> xexpr?
   ;; Change procedures to the send/suspend of a k-url
   (define (xexpr/callback->xexpr p->a p-exp)
@@ -29,39 +47,38 @@
       [(list? p-exp) (map (lambda (p-e) (xexpr/callback->xexpr p->a p-e))
                           p-exp)]
       [(procedure? p-exp) (p->a p-exp)]
-      [else p-exp]))
-  
-  ;; get-current-servlet-instance : -> servlet
-  (define (get-current-servlet-instance)
-    (let ([inst (thread-cell-ref current-servlet-instance)])
-      (unless inst
-        (raise (make-exn:servlet:no-current-instance "" (current-continuation-marks))))
-      inst))
+      [else p-exp])) 
   
   ;; Weak contracts: the input is checked in output-response, and a message is
   ;; sent directly to the client (Web browser) instead of the terminal/log.
   (provide/contract
+   [xexpr/callback? (any/c . -> . boolean?)]
+   [xexpr/callback->xexpr (embed/url? xexpr/callback? . -> . xexpr?)]
+   [current-url-transform (parameter/c url-transform?)]
+   [current-servlet-continuation-expiration-handler (parameter/c expiration-handler?)]
    [redirect/get (-> request?)]
    [redirect/get/forget (-> request?)]
-   [adjust-timeout! (number? . -> . any)]
-   [send/back (any/c . -> . any)]
-   [send/finish (any/c . -> . any)]
-   [send/suspend (((string? . -> . any/c)) ((request? . -> . any/c)) . opt-> . request?)]
-   [send/forward (((string? . -> . any/c)) ((request? . -> . any/c)) . opt-> . request?)]
-   ;;; validate-xexpr/callback is not checked anywhere:
-   [send/suspend/callback (xexpr/callback? . -> . any)])
+   [adjust-timeout! (number? . -> . void?)]
+   [clear-continuation-table! (-> void?)]
+   [send/back (any/c . -> . void?)]
+   [send/finish (any/c . -> . void?)]
+   [send/suspend ((response-generator?) (expiration-handler?) . opt-> . request?)]
+   [send/forward ((response-generator?) (expiration-handler?) . opt-> . request?)]
+   [send/suspend/dispatch ((embed/url? . -> . servlet-response?) . -> . any/c)]
+   [send/suspend/callback (xexpr/callback? . -> . any/c)])
   
+  (require "url.ss")
   (provide
-   clear-continuation-table!
-   send/suspend/dispatch
-   current-servlet-continuation-expiration-handler
-   xexpr/callback?
-   xexpr/callback->xexpr
    (all-from "web-cells.ss")
-   (all-from "servlet-helpers.ss"))    
+   (all-from "servlet-helpers.ss")
+   (all-from "url.ss"))
   
   ;; ************************************************************
   ;; EXPORTS
+  
+  ;; current-url-transform : string? -> string?
+  (define current-url-transform
+    (make-parameter identity))
   
   ;; current-servlet-continuation-expiration-handler : request -> response
   (define current-servlet-continuation-expiration-handler
@@ -70,19 +87,18 @@
   ;; adjust-timeout! : sec -> void
   ;; adjust the timeout on the servlet
   (define (adjust-timeout! secs)
-    (reset-timer (servlet-instance-timer (get-current-servlet-instance))
-                 secs))
+    ((manager-adjust-timeout! (current-servlet-manager)) (get-current-servlet-instance-id) secs))
   
   ;; ext:clear-continuations! -> void
   (define (clear-continuation-table!)
-    (clear-continuations! (get-current-servlet-instance)))
+    ((manager-clear-continuations! (current-servlet-manager)) (get-current-servlet-instance-id)))
   
   ;; send/back: response -> void
   ;; send a response and don't clear the continuation table
   (define (send/back resp)
-    (let ([ctxt (servlet-instance-context (get-current-servlet-instance))])
-      (output-response (execution-context-connection ctxt) resp)
-      ((execution-context-suspend ctxt))))
+    (define ctxt (servlet-instance-data-context (current-servlet-instance-data)))
+    (output-response (execution-context-connection ctxt) resp)
+    ((execution-context-suspend ctxt)))
   
   ;; send/finish: response -> void
   ;; send a response and clear the continuation table
@@ -101,15 +117,16 @@
     (opt-lambda (response-generator [expiration-handler (current-servlet-continuation-expiration-handler)])
       (with-frame-after
        (let/cc k
-         (let* ([inst (get-current-servlet-instance)]
-                [ctxt (servlet-instance-context inst)]
-                [k-url (store-continuation!
-                        k expiration-handler
-                        (request-uri (execution-context-request ctxt))
-                        inst)]
-                [response (response-generator k-url)])
-           (output-response (execution-context-connection ctxt) response)
-           ((execution-context-suspend ctxt)))))))
+         (define instance-id (get-current-servlet-instance-id))
+         (define ctxt (servlet-instance-data-context (current-servlet-instance-data)))
+         (define k-embedding ((manager-continuation-store! (current-servlet-manager)) instance-id k expiration-handler))
+         (define k-url ((current-url-transform)
+                        (embed-ids 
+                         (list* instance-id k-embedding)
+                         (request-uri (execution-context-request ctxt)))))
+         (define response (response-generator k-url))
+         (output-response (execution-context-connection ctxt) response)
+         ((execution-context-suspend ctxt))))))
   
   ;; send/forward: (url -> response) [(request -> response)] -> request
   ;; clear the continuation table, then behave like send/suspend
@@ -126,7 +143,7 @@
     ; Note: Herman's syntactic strategy would fail without the new-request capture.
     ;       (Moving this to the tail-position is not possible anyway, by the way.)
     (let ([thunk 
-           (let/ec k0
+           (let/cc k0
              (send/back
               (response-generator
                (opt-lambda (proc [expiration-handler (current-servlet-continuation-expiration-handler)])

@@ -166,7 +166,9 @@
   (define null-input (open-input-string ""))
   (define (safe-eval expr . more)
     (parameterize ([current-security-guard tight-security]
-                   [current-input-port null-input])
+                   [current-input-port null-input]
+                   ;; breaks: [current-code-inspector (make-inspector)]
+                   )
       (apply eval expr more)))
 
   ;; Execution ----------------------------------------

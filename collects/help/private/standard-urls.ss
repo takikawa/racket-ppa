@@ -2,6 +2,9 @@
 
   (require "../servlets/private/util.ss"
            "internal-hp.ss"
+           "get-help-url.ss"
+           (lib "uri-codec.ss" "net")
+           (lib "dirs.ss" "setup")
            (lib "contract.ss"))
   
   (provide home-page-url)
@@ -20,12 +23,12 @@
                                any/c 
                                (listof path?)
                                any/c
-                               (union false/c string?) . -> . string?))
+                               (or/c false/c string?) . -> . string?))
    (make-results-url (string?
                       search-type? search-how? any/c 
                       (listof path?) 
                       any/c
-                      (union false/c string?)
+                      (or/c false/c string?)
                       . -> .
                       string?))
    (flush-manuals-url string?)
@@ -66,8 +69,8 @@
             internal-host
             internal-port
             coll
-            (hexify-string name)
-            (hexify-string link)))
+            (uri-encode name)
+            (uri-encode link)))
   
   (define (make-relative-results-url search-string search-type match-type lucky? manuals doc.txt? lang-name)
     (string-append
@@ -88,26 +91,25 @@
                            "lucky=~a&"
                            "manuals=~a&"
                            "doctxt=~a")
-            (hexify-string search-string)
+            (uri-encode search-string)
             search-type
             match-type
             (if lucky? "true" "false")
-            (hexify-string (format "~s" (map path->bytes manuals)))
+            (uri-encode (format "~s" (map path->bytes manuals)))
             (if doc.txt? "true" "false"))])
       (if language-name
-          (string-append start (format "&langname=~a" (hexify-string language-name)))
+          (string-append start (format "&langname=~a" (uri-encode language-name)))
           start)))
   
   ; sym, string assoc list
   (define hd-locations
-    '((hd-tour "/doc/tour/")
-      (release-notes "/servlets/release/notes.ss")
-      (plt-license "/servlets/release/license.ss")
-      (front-page "/servlets/home.ss")))
+    `((hd-tour ,(get-help-url (build-path (find-doc-dir) "tour")))
+      (release-notes ,(prefix-with-server "/servlets/release/notes.ss"))
+      (plt-license ,(prefix-with-server "/servlets/release/license.ss"))
+      (front-page ,(prefix-with-server "/servlets/home.ss"))))
   
   (define hd-location-syms (map car hd-locations))
 
   (define (get-hd-location sym)
     ; the assq is guarded by the contract
-    (let ([entry (assq sym hd-locations)])
-      (prefix-with-server (cadr entry)))))
+    (cadr (assq sym hd-locations))))

@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -32,9 +32,12 @@
 #define TMP_CMARK_VALUE scheme_parameterization_key
 
 /* globals */
-void (*scheme_console_printf)(char *str, ...);
+scheme_console_printf_t scheme_console_printf;
+scheme_console_printf_t scheme_get_console_printf() { return scheme_console_printf; }
+
 void (*scheme_console_output)(char *str, long len);
-void (*scheme_exit)(int v);
+Scheme_Exit_Proc scheme_exit;
+void scheme_set_exit(Scheme_Exit_Proc p) { scheme_exit = p; }
 
 #ifdef MEMORY_COUNTING_ON
 long scheme_misc_count;
@@ -42,6 +45,7 @@ long scheme_misc_count;
 
 /* locals */
 static Scheme_Object *error(int argc, Scheme_Object *argv[]);
+static Scheme_Object *raise_user_error(int argc, Scheme_Object *argv[]);
 static Scheme_Object *raise_syntax_error(int argc, Scheme_Object *argv[]);
 static Scheme_Object *raise_type_error(int argc, Scheme_Object *argv[]);
 static Scheme_Object *raise_mismatch_error(int argc, Scheme_Object *argv[]);
@@ -50,6 +54,7 @@ static Scheme_Object *error_display_handler(int, Scheme_Object *[]);
 static Scheme_Object *error_value_string_handler(int, Scheme_Object *[]);
 static Scheme_Object *exit_handler(int, Scheme_Object *[]);
 static Scheme_Object *error_print_width(int, Scheme_Object *[]);
+static Scheme_Object *error_print_context_length(int, Scheme_Object *[]);
 static Scheme_Object *error_print_srcloc(int, Scheme_Object *[]);
 static Scheme_Object *def_error_escape_proc(int, Scheme_Object *[]);
 static Scheme_Object *def_error_display_proc(int, Scheme_Object *[]);
@@ -241,7 +246,9 @@ static long sch_vsprintf(char *s, long maxlen, const char *msg, va_list args)
 	      buf[0] = c;
 	      tlen = 1;
 	    } else {
-	      tlen = scheme_utf8_encode_all(&c, 1, (unsigned char *)buf);
+	      mzchar mc;
+	      tlen = scheme_utf8_encode_all(&mc, 1, (unsigned char *)buf);
+	      c = (int)mc;
 	    }
 	    t = buf;
 	  }
@@ -471,6 +478,11 @@ void scheme_init_error(Scheme_Env *env)
 						      "error",
 						      1, -1),
 			     env);
+  scheme_add_global_constant("raise-user-error",
+			     scheme_make_prim_w_arity(raise_user_error,
+						      "raise-user-error",
+						      1, -1),
+			     env);
   scheme_add_global_constant("raise-syntax-error",
 			     scheme_make_prim_w_arity(raise_syntax_error,
 						      "raise-syntax-error",
@@ -510,6 +522,11 @@ void scheme_init_error(Scheme_Env *env)
 			     scheme_register_parameter(error_print_width,
 						       "error-print-width",
 						       MZCONFIG_ERROR_PRINT_WIDTH),
+			     env);
+  scheme_add_global_constant("error-print-context-length",
+			     scheme_register_parameter(error_print_context_length,
+						       "error-print-context-length",
+						       MZCONFIG_ERROR_PRINT_CONTEXT_LENGTH),
 			     env);
   scheme_add_global_constant("error-print-source-location",
 			     scheme_register_parameter(error_print_srcloc,
@@ -665,6 +682,8 @@ static long get_print_width(void)
   w = scheme_get_param(scheme_current_config(), MZCONFIG_ERROR_PRINT_WIDTH);
   if (SCHEME_INTP(w))
     print_width = SCHEME_INT_VAL(w);
+  else if (SCHEME_BIGNUMP(w))
+    print_width = 0x7FFFFFFF;
   else
     print_width = 10000;
 
@@ -909,7 +928,7 @@ static char *make_arity_expect_string(const char *name, int namelen,
 
 void scheme_wrong_count_m(const char *name, int minc, int maxc,
 			  int argc, Scheme_Object **argv, int is_method)
-     /* minc == -1 => name is really a case-lambda or proc-struct */
+     /* minc == -1 => name is really a case-lambda, native closure, or proc-struct */
 {
   char *s;
   long len;
@@ -923,7 +942,7 @@ void scheme_wrong_count_m(const char *name, int minc, int maxc,
     p->tail_buffer = tb;
   }
 
-  /* minc = 1 -> name is really a case-lambda proc */
+  /* minc = 1 -> name is really a case-lambda or native proc */
 
   if (minc == -1) {
     /* Check for is_method in case-lambda */
@@ -938,12 +957,42 @@ void scheme_wrong_count_m(const char *name, int minc, int maxc,
 	/* See note in schpriv.h about the IS_METHOD hack */
 	is_method = 1;
       }
+#ifdef MZ_USE_JIT
+    } else if (SAME_TYPE(SCHEME_TYPE((Scheme_Object *)name), scheme_native_closure_type)) {
+      Scheme_Object *pa;
+      pa = scheme_get_native_arity((Scheme_Object *)name);
+      if (SCHEME_BOXP(pa)) {
+	pa = SCHEME_BOX_VAL(pa);
+	is_method = 1;
+      }
+      if (SCHEME_INTP(pa)) {
+	minc = SCHEME_INT_VAL(pa);
+	if (minc < 0) {
+	  minc = (-minc) - 1;
+	  maxc = -1;
+	} else
+	  maxc = minc;
+	name = scheme_get_proc_name((Scheme_Object *)name, NULL, 1);
+      } else if (SCHEME_STRUCTP(pa)) {
+	/* This happens when a non-case-lambda is not yet JITted.
+	 It's an arity-at-least record. */
+	pa = ((Scheme_Structure *)pa)->slots[0];
+	minc = SCHEME_INT_VAL(pa);
+	maxc = -1;
+	name = scheme_get_proc_name((Scheme_Object *)name, NULL, 1);
+      } else {
+	/* complex; use "no matching case" msg */
+      }
+#endif
     }
   }
 
   /* Watch out for impossible is_method claims: */
   if (!argc || !minc)
     is_method = 0;
+
+  if (maxc > SCHEME_MAX_ARGS)
+    maxc = -1;
 
   s = make_arity_expect_string(name, -1, minc, maxc, argc, argv, &len, is_method);
 
@@ -985,7 +1034,15 @@ char *scheme_make_arity_expect_string(Scheme_Object *proc,
   if (SCHEME_PRIMP(proc)) {
     name = ((Scheme_Primitive_Proc *)proc)->name;
     mina = ((Scheme_Primitive_Proc *)proc)->mina;
-    maxa = ((Scheme_Primitive_Proc *)proc)->maxa;
+    if (mina < 0) {
+      /* set min1 to -2 to indicates cases */
+      mina = -2;
+      maxa = 0;
+    } else {
+      maxa = ((Scheme_Primitive_Proc *)proc)->mu.maxa;
+      if (maxa > SCHEME_MAX_ARGS)
+	maxa = -1;
+    }
   } else if (SCHEME_CLSD_PRIMP(proc)) {
     name = ((Scheme_Closed_Primitive_Proc *)proc)->name;
     mina = ((Scheme_Closed_Primitive_Proc *)proc)->mina;
@@ -994,6 +1051,33 @@ char *scheme_make_arity_expect_string(Scheme_Object *proc,
     name = scheme_get_proc_name(proc, &namelen, 1);
     mina = -2;
     maxa = 0;
+#ifdef MZ_USE_JIT
+  } else if (SAME_TYPE(SCHEME_TYPE((Scheme_Object *)proc), scheme_native_closure_type)) {
+    Scheme_Object *pa;
+    pa = scheme_get_native_arity((Scheme_Object *)proc);
+    if (SCHEME_BOXP(pa)) {
+      pa = SCHEME_BOX_VAL(pa);
+    }
+    if (SCHEME_INTP(pa)) {
+      mina = SCHEME_INT_VAL(pa);
+      if (mina < 0) {
+	mina = (-mina) - 1;
+	maxa = -1;
+      } else
+	maxa = mina;
+    } else if (SCHEME_STRUCTP(pa)) {
+      /* This happens when a non-case-lambda is not yet JITted.
+	 It's an arity-at-least record. */
+      pa = ((Scheme_Structure *)pa)->slots[0];
+      mina = SCHEME_INT_VAL(pa);
+      maxa = -1;
+    } else {
+      /* complex; use "no matching case" msg */
+      mina = -2;
+      maxa = 0;
+    }
+    name = scheme_get_proc_name((Scheme_Object *)proc, &namelen, 1);
+#endif
   } else {
     Scheme_Closure_Data *data;
 
@@ -1133,7 +1217,12 @@ void scheme_arg_mismatch(const char *name, const char *msg, Scheme_Object *o)
   char *s;
   int slen;
 
-  s = scheme_make_provided_string(o, 1, &slen);
+  if (o)
+    s = scheme_make_provided_string(o, 1, &slen);
+  else {
+    s = "";
+    slen = 0;
+  }
 
   scheme_raise_exn(MZEXN_FAIL_CONTRACT,
 		   "%s: %s%t",
@@ -1669,7 +1758,7 @@ char *scheme_make_provided_string(Scheme_Object *o, int count, int *lenout)
   return error_write_to_string_w_max(o, len, lenout);
 }
 
-static Scheme_Object *error(int argc, Scheme_Object *argv[])
+static Scheme_Object *do_error(int for_user, int argc, Scheme_Object *argv[])
 {
   Scheme_Object *newargs[2];
 
@@ -1732,7 +1821,7 @@ static Scheme_Object *error(int argc, Scheme_Object *argv[])
 
 #ifndef NO_SCHEME_EXNS
   newargs[1] = TMP_CMARK_VALUE;
-  do_raise(scheme_make_struct_instance(exn_table[MZEXN_FAIL].type,
+  do_raise(scheme_make_struct_instance(exn_table[for_user ? MZEXN_FAIL_USER : MZEXN_FAIL].type,
 				       2, newargs),
 	   0, 1);
 
@@ -1743,6 +1832,16 @@ static Scheme_Object *error(int argc, Scheme_Object *argv[])
   return _scheme_tail_apply(scheme_get_param(scheme_current_config(), MZCONFIG_ERROR_ESCAPE_HANDLER),
 			    0, NULL);
 #endif
+}
+
+static Scheme_Object *error(int argc, Scheme_Object *argv[])
+{
+  return do_error(0, argc, argv);
+}
+
+static Scheme_Object *raise_user_error(int argc, Scheme_Object *argv[])
+{
+    return do_error(1, argc, argv);
 }
 
 static Scheme_Object *raise_syntax_error(int argc, Scheme_Object *argv[])
@@ -1841,9 +1940,15 @@ static Scheme_Object *raise_mismatch_error(int argc, Scheme_Object *argv[])
 
 static Scheme_Object *good_print_width(int c, Scheme_Object **argv)
 {
-  return ((SCHEME_INTP(argv[0]) || (SCHEME_BIGNUMP(argv[0])))
-	  ? scheme_true
-	  : scheme_false);
+  int ok;
+
+  ok = (SCHEME_INTP(argv[0]) 
+	? (SCHEME_INT_VAL(argv[0]) > 3)
+	: (SCHEME_BIGNUMP(argv[0])
+	   ? SCHEME_BIGPOS(argv[0])
+	   : 0));
+
+  return ok ? scheme_true : scheme_false;
 }
 
 static Scheme_Object *error_print_width(int argc, Scheme_Object *argv[])
@@ -1852,6 +1957,27 @@ static Scheme_Object *error_print_width(int argc, Scheme_Object *argv[])
 			     scheme_make_integer(MZCONFIG_ERROR_PRINT_WIDTH),
 			     argc, argv,
 			     -1, good_print_width, "integer greater than three", 0);
+}
+
+static Scheme_Object *good_print_context_length(int c, Scheme_Object **argv)
+{
+  int ok;
+
+  ok = (SCHEME_INTP(argv[0]) 
+	? (SCHEME_INT_VAL(argv[0]) >= 0)
+	: (SCHEME_BIGNUMP(argv[0])
+	   ? SCHEME_BIGPOS(argv[0])
+	   : 0));
+
+  return ok ? scheme_true : scheme_false;
+}
+
+static Scheme_Object *error_print_context_length(int argc, Scheme_Object *argv[])
+{
+  return scheme_param_config("error-print-context-length",
+			     scheme_make_integer(MZCONFIG_ERROR_PRINT_CONTEXT_LENGTH),
+			     argc, argv,
+			     -1, good_print_context_length, "non-negative integer", 0);
 }
 
 static Scheme_Object *error_print_srcloc(int argc, Scheme_Object *argv[])
@@ -1881,6 +2007,79 @@ def_error_display_proc(int argc, Scheme_Object *argv[])
 			   SCHEME_BYTE_STRTAG_VAL(s),
 			   port);
   scheme_write_byte_string("\n", 1, port);
+
+  /* Print context, if available */
+  if (SCHEME_STRUCTP(argv[1])
+      && scheme_is_struct_instance(exn_table[MZEXN].type, argv[1])
+      && !scheme_is_struct_instance(exn_table[MZEXN_FAIL_USER].type, argv[1])) {
+    Scheme_Object *l, *w;
+    int print_width = 1024, max_cnt = 16;
+
+    w = scheme_get_param(config, MZCONFIG_ERROR_PRINT_CONTEXT_LENGTH);
+    if (SCHEME_INTP(w))
+      max_cnt = SCHEME_INT_VAL(w);
+    else
+      max_cnt = 0x7FFFFFFF;
+
+    if (max_cnt) {
+      int orig_max_cnt = max_cnt;
+      w = scheme_get_param(config, MZCONFIG_ERROR_PRINT_WIDTH);
+      if (SCHEME_INTP(w))
+	print_width = SCHEME_INT_VAL(w);
+      else
+	print_width = 0x7FFFFFFF;
+      l = scheme_get_stack_trace(((Scheme_Structure *)argv[1])->slots[1]);
+      while (!SCHEME_NULLP(l)) {
+	if (!max_cnt) {
+	  scheme_write_byte_string("...\n", 4, port);
+	  break;
+	} else {
+	  Scheme_Object *name, *loc;
+	  
+	  if (max_cnt == orig_max_cnt) {
+	    /* Starting label: */
+	    scheme_write_byte_string("\n === context ===\n", 18, port);
+	  }
+
+	  name = SCHEME_CAR(l);
+	  loc = SCHEME_CDR(name);
+	  name = SCHEME_CAR(name);
+
+	  if (SCHEME_TRUEP(loc)) {
+	    Scheme_Structure *sloc = (Scheme_Structure *)loc;
+	    scheme_display_w_max(sloc->slots[0], port, print_width);
+	    if (SCHEME_TRUEP(sloc->slots[1])) {
+	      /* Line + column */
+	      scheme_write_byte_string(":", 1, port);
+	      scheme_display_w_max(sloc->slots[1], port, print_width);
+	      scheme_write_byte_string(":", 1, port);
+	      scheme_display_w_max(sloc->slots[2], port, print_width);
+	    } else {
+	      /* Position */
+	      scheme_write_byte_string("::", 2, port);
+	      scheme_display_w_max(sloc->slots[3], port, print_width);
+	    }
+
+	    if (SCHEME_TRUEP(name)) {
+	      scheme_write_byte_string(": ", 2, port);
+	    }
+	  }
+
+	  if (SCHEME_TRUEP(name)) {
+	    scheme_display_w_max(name, port, print_width);
+	  }
+	  scheme_write_byte_string("\n", 1, port);
+	  l = SCHEME_CDR(l);
+	  --max_cnt;
+	}
+      }
+
+      if (max_cnt != orig_max_cnt) {
+	/* Extra ending newline */
+	scheme_write_byte_string("\n", 1, port);
+      }
+    }
+  }
 
   return scheme_void;
 }

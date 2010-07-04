@@ -5,7 +5,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2005 PLT Scheme, Inc.
+ * Copyright: (C) 2004-2006 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -157,6 +157,8 @@ wxWindowDC::wxWindowDC(void) : wxDC()
     current_pen = wxBLACK_PEN;
     current_pen->Lock(1);
     current_font = wxNORMAL_FONT;
+
+    need_x_set_font = 1;
 }
 
 wxWindowDC::~wxWindowDC(void)
@@ -2428,6 +2430,10 @@ void wxWindowDC::DrawText(char *orig_text, double x, double y,
 #endif
     {
       if ((angle == 0.0) && (current_text_bgmode == wxSOLID)) {
+	if (need_x_set_font) {
+	  XSetFont(DPY, TEXT_GC, fontinfo->fid);
+	  need_x_set_font = 0;
+	}
 	XDrawImageString16(DPY, DRAWABLE, TEXT_GC, dev_x, dev_y+ascent, (XChar2b *)text + dt, textlen);
       } else {
 	if (angle != 0.0) {
@@ -2471,6 +2477,10 @@ void wxWindowDC::DrawText(char *orig_text, double x, double y,
 
 	  XSetFont(DPY, TEXT_GC, zfontinfo->fid);
 	} else {
+	  if (need_x_set_font) {
+	    XSetFont(DPY, TEXT_GC, fontinfo->fid);
+	    need_x_set_font = 0;
+	  }
 	  XDrawString16(DPY, DRAWABLE, TEXT_GC, dev_x, dev_y+ascent, ((XChar2b *)text) + dt, textlen);
 	}
       }
@@ -2668,16 +2678,13 @@ Bool wxWindowDC::GlyphAvailable(int c, wxFont *font)
 
 void wxWindowDC::SetFont(wxFont *font)
 {
-    XFontStruct *xfs;
+  if (!DRAWABLE)
+    return;
 
-    if (!DRAWABLE)
-	return;
+  if (!(current_font = font)) // nothing to do without a font
+    return;
 
-    if (!(current_font = font)) // nothing to do without a font
-	return;
-
-    xfs  =(XFontStruct*)font->GetInternalFont(scale_x, scale_y);
-    XSetFont(DPY, TEXT_GC, xfs->fid);
+  need_x_set_font = 1;
 }
 
 void wxWindowDC::SetTextForeground(wxColour *col)

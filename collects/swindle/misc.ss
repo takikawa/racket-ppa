@@ -16,30 +16,41 @@
 ;;>>... Convenient syntax definitions
 
 ;;>> (define* ...)
-;;>   Just like `define', except that the defined identifier is
-;;>   automatically `provide'd.  Doesn't work for defining values.
+;;>   Like `define', except that the defined identifier is automatically
+;;>   `provide'd.  Doesn't provide the identifier if outside of a module
+;;>   context.
 (provide define*)
 (define-syntax (define* stx)
   (syntax-case stx ()
     [(_ x . xs)
+     (memq (syntax-local-context) '(module module-begin))
      (let ([name (let loop ([x #'x])
                    (syntax-case x () [(x . xs) (loop #'x)] [_ x]))])
-       #`(begin (provide #,name) (define x . xs)))]))
+       (if name
+         #`(begin (provide #,name) (define x . xs))
+         #`(define x . xs)))]
+    [(_ x . xs) #`(define x . xs)]))
 ;;>> (make-provide-syntax orig-def-syntax provide-def-syntax)
 ;;>   Creates `provide-def-syntax' as a syntax that is the same as
 ;;>   `orig-def-syntax' together with an automatic `provide' form for the
 ;;>   defined symbol, which should be either the first argument or the first
 ;;>   identifier in a list (it does not work for recursive nesting).  The
-;;>   convention when this is used is to use a "*" suffix for the second
-;;>   identifier.
+;;>   `provide' form is added only if the form appears at a module
+;;>   top-level.  The convention when this is used is to use a "*" suffix
+;;>   for the second identifier.
 (provide make-provide-syntax)
 (define-syntax make-provide-syntax
   (syntax-rules ()
     [(_ form form*)
-     (define-syntax form*
-       (syntax-rules ()
-         [(_ (id . as) . r) (begin (provide id) (form (id . as) . r))]
-         [(_ id . r) (begin (provide id) (form id . r))]))]))
+     (define-syntax (form* stx)
+       (syntax-case stx ()
+         [(_ (id . as) . r)
+          (memq (syntax-local-context) '(module module-begin))
+          #'(begin (provide id) (form (id . as) . r))]
+         [(_ id . r)
+          (memq (syntax-local-context) '(module module-begin))
+          #'(begin (provide id) (form id . r))]
+         [(_ . r) #'(form . r)]))]))
 ;;>> (define-syntax* ...)
 ;;>   Defined as the auto-provide form of `define-syntax'.
 (provide define-syntax*)
@@ -1853,7 +1864,7 @@
 ;;>   Try to match the given `string' against several regexps.  Each clause
 ;;>   has one of the following forms:
 ;;>   * (re => function): if `string' matches `re', apply `function' on the
-;;>     result list.
+;;>     resulting list.
 ;;>   * ((re args ...) body ...): if `string' matches `re', bind the tail of
 ;;>     results (i.e, excluding the whole match result) to the given
 ;;>     arguments and evaluate the body.  The whole match result (the first
@@ -1874,136 +1885,9 @@
                      body ...)
                    r)))]
       [(re body ...) #'((regexp-match re s) body ...)]))
-  (define (do-clauses c)
-    (cond [(null? c) c]
-          [(pair? c) (cons (do-clause (car c)) (do-clauses (cdr c)))]
-          [(syntax? c) (do-clauses (syntax-e c))]))
   (syntax-case stx ()
     [(_ str clause ...)
-     #`(let ([s str]) (cond #,@(do-clauses #'(clause ...))))]))
-
-;; ----------------------------------------------------------------------------
-;; Taken from slib (faster than then quicksort and mergesort in list.ss).
-;; "sort.scm" Defines: sorted?, merge, merge!, sort, sort!
-;; Author : Richard A. O'Keefe (based on Prolog code by D.H.D.Warren)
-
-;;>>... Sorting
-;;> The following section defines functions for sorting.  They are taken
-;;> directly from slib since they are more convenient and faster than the
-;;> functions in mzlib/list.  See the source for more details.
-
-;;>> (sorted? sequence less?)
-;;>   True when `sequence' is a list (x0 x1 ... xm) or a vector #(x0 ... xm)
-;;>   such that its elements are sorted according to `less?':
-;;>     (not (less? (list-ref list i) (list-ref list (- i 1)))).
-(define* (sorted? seq less?)
-  (cond [(null? seq) #t]
-        [(vector? seq)
-         (let ([n (vector-length seq)])
-           (if (<= n 1)
-             #t
-             (do ([i 1 (+ i 1)])
-                 [(or (= i n)
-                      (less? (vector-ref seq i) (vector-ref seq (- i 1))))
-                  (= i n)])))]
-        [else
-         (let loop ([last (car seq)] [next (cdr seq)])
-           (or (null? next)
-               (and (not (less? (car next) last))
-                    (loop (car next) (cdr next)))))]))
-
-;;>> (merge a b less?)
-;;>   Takes two lists `a' and `b' such that both (sorted? a less?) and
-;;>   (sorted? b less?) are true, and returns a new list in which the
-;;>   elements of `a' and `b' have been stably interleaved so that (sorted?
-;;>   (merge a b less?) less?) is true.  Note: this does not accept vectors.
-(define* (merge a b less?)
-  (cond [(null? a) b]
-        [(null? b) a]
-        [else (let loop ([x (car a)] [a (cdr a)] [y (car b)] [b (cdr b)])
-                ;; The loop handles the merging of non-empty lists.  It has
-                ;; been written this way to save testing and car/cdring.
-                (if (less? y x)
-                  (if (null? b)
-                    (cons y (cons x a))
-                    (cons y (loop x a (car b) (cdr b))))
-                  ;; x <= y
-                  (if (null? a)
-                    (cons x (cons y b))
-                    (cons x (loop (car a) (cdr a) y b)))))]))
-
-;;>> (merge! a b less?)
-;;>   Takes two sorted lists `a' and `b' and smashes their cdr fields to
-;;>   form a single sorted list including the elements of both.  Note: this
-;;>   does not accept vectors.
-(define* (merge! a b less?)
-  (define (loop r a b)
-    (if (less? (car b) (car a))
-      (begin (set-cdr! r b)
-             (if (null? (cdr b))
-               (set-cdr! b a)
-               (loop b a (cdr b))))
-      ;; (car a) <= (car b)
-      (begin (set-cdr! r a)
-             (if (null? (cdr a))
-               (set-cdr! a b)
-               (loop a (cdr a) b)))))
-  (cond [(null? a) b]
-        [(null? b) a]
-        [(less? (car b) (car a))
-         (if (null? (cdr b))
-           (set-cdr! b a)
-           (loop b a (cdr b)))
-         b]
-        [else ; (car a) <= (car b)
-         (if (null? (cdr a))
-           (set-cdr! a b)
-           (loop a (cdr a) b))
-         a]))
-
-;;>> (sort! sequence less?)
-;;>   Sorts the list or vector `sequence' destructively.
-;; It uses a version of merge-sort invented, to the best of my knowledge, by
-;; David H. D. Warren, and first used in the DEC-10 Prolog system.
-;; R. A. O'Keefe adapted it to work destructively in Scheme.
-(define* (sort! seq less?)
-  (define (step n)
-    (cond [(> n 2) (let* ([j (quotient n 2)]
-                          [a (step j)]
-                          [k (- n j)]
-                          [b (step k)])
-                     (merge! a b less?))]
-          [(= n 2) (let ([x (car seq)]
-                         [y (cadr seq)]
-                         [p seq])
-                     (set! seq (cddr seq))
-                     (when (less? y x)
-                       (set-car! p y) (set-car! (cdr p) x))
-                     (set-cdr! (cdr p) '())
-                     p)]
-          [(= n 1) (let ([p seq])
-                     (set! seq (cdr seq))
-                     (set-cdr! p '())
-                     p)]
-          [else '()]))
-  (if (vector? seq)
-    (let ([n (vector-length seq)] [vec seq])
-      (set! seq (vector->list seq))
-      (do ([p (step n) (cdr p)] [i 0 (+ i 1)])
-          [(null? p) vec]
-        (vector-set! vec i (car p))))
-    ;; otherwise, assume it is a list
-    (step (length seq))))
-
-;;>> (sort sequence less?)
-;;>   Sorts a vector or list non-destructively.  It does this by sorting a
-;;>   copy of the sequence.
-;; My understanding is that the Standard says that the result of append is
-;; always "newly allocated" except for sharing structure with "the last
-;; argument", so (append x '()) ought to be a standard way of copying a list x.
-(define* (sort seq less?)
-  (if (vector? seq)
-    (list->vector (sort! (vector->list seq) less?))
-    (sort! (append seq '()) less?)))
+     #`(let ([s str])
+         (cond #,@(map do-clause (syntax->list #'(clause ...)))))]))
 
 )

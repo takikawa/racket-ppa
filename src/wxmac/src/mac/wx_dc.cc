@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2005 PLT Scheme, Inc.
+// Copyright:  (c) 2004-2006 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -20,9 +20,9 @@ wxDC::wxDC(void)
 {
   cMacDC = NULL;
   cMacCurrentTool = kNoTool;
-  current_background_color = new wxColour(wxWHITE);
-  current_text_foreground = new wxColour(wxBLACK);
-  current_text_background = new wxColour(wxWHITE);
+  current_background_color = new WXGC_PTRS wxColour(wxWHITE);
+  current_text_foreground = new WXGC_PTRS wxColour(wxBLACK);
+  current_text_background = new WXGC_PTRS wxColour(wxWHITE);
 }
 
 //-----------------------------------------------------------------------------

@@ -3,7 +3,7 @@
  * Purpose:     wxMediaBuffer implementation
  * Author:      Matthew Flatt
  * Created:     1995
- * Copyright:   (c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:   (c) 2004-2006 PLT Scheme Inc.
  * Copyright:   (c) 1995-98, Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -49,8 +49,6 @@
 #include <string.h>
 #include "scheme.h"
 
-#define NUM_MAX_UNDOS 256
-
 #define DELETE_CLIP_LIST_CONTENT 0
 
 #if ALLOW_X_STYLE_SELECTION
@@ -85,7 +83,7 @@ class wxMediaXClipboardClient : public wxClipboardClient
 static wxMediaXClipboardClient *TheMediaXClipboardClient;
 #endif
 
-# define MALLOC_CRP(n) new wxChangeRecord*[n]
+# define MALLOC_CRP(n) new WXGC_PTRS wxChangeRecord*[n]
 
 // xformer doesn't handle static member variable declarations
 #ifdef MZ_PRECISE_GC
@@ -107,6 +105,9 @@ extern Scheme_Object *objscheme_bundle_wxMediaBuffer(wxMediaBuffer*);
 
 /******************************************************************/
 
+static int emacs_style_undo = -1;
+extern int wxGetBoolPreference(const char *name, int *res);
+
 #ifndef EACH_BUFFER_OWN_OFFSCREEN
 static int bcounter = 0;
 #endif
@@ -114,12 +115,10 @@ static int bcounter = 0;
 wxMediaBuffer::wxMediaBuffer()
  : wxObject(WXGC_NO_CLEANUP)
 {
-  wxChangeRecord **crpa;
-
-  map = new wxKeymap();
+  map = new WXGC_PTRS wxKeymap();
   // AddBufferFunctions(map);
 
-  styleList = new wxStyleList;
+  styleList = new WXGC_PTRS wxStyleList;
   styleList->NewNamedStyle(STD_STYLE, NULL);
   notifyId = styleList->NotifyOnChange((wxStyleNotifyFunc)MediaStyleNotify, 
 				       this, 1);
@@ -127,13 +126,13 @@ wxMediaBuffer::wxMediaBuffer()
   filename = NULL;
 
   undomode = redomode = interceptmode = FALSE;
-  maxUndos = NUM_MAX_UNDOS;
-  crpa = MALLOC_CRP(maxUndos);
-  changes = crpa;
-  changes_start = changes_end = 0;
-  crpa =  MALLOC_CRP(maxUndos);
-  redochanges = crpa;
-  redochanges_start = redochanges_end = 0;
+  maxUndos = 0;
+
+  if (emacs_style_undo == -1) {
+    if (!wxGetBoolPreference("emacsUndo", &emacs_style_undo)) {
+      emacs_style_undo = 0;
+    }
+  }
 
   customCursor = NULL;
 
@@ -159,7 +158,7 @@ wxMediaBuffer::wxMediaBuffer()
     wxREGGLOB(bitmap);
     wxREGGLOB(lastUsedOffscreen);
     bitmap = NULL;
-    offscreen = new wxMemoryDC();
+    offscreen = new WXGC_PTRS wxMemoryDC();
     bmHeight = bmWidth = 0;
 #ifndef wx_mac
     offscreen->SetOptimization(TRUE);
@@ -473,7 +472,7 @@ Bool wxMediaBuffer::ReadyOffscreen(double width, double height)
     if (width > bmWidth)
       bmWidth = ROUND(width) + 1;
 
-    bitmap = new wxBitmap(bmWidth, bmHeight);
+    bitmap = new WXGC_PTRS wxBitmap(bmWidth, bmHeight);
 
     offscreen->SelectObject(NULL);
     if (oldbm)
@@ -512,14 +511,24 @@ void wxMediaBuffer::SetStyleList(wxStyleList *newList)
 				     this, 1);
   styleList = newList;
 
-  if (!styleList->FindNamedStyle(STD_STYLE))
-    styleList->NewNamedStyle(STD_STYLE, NULL);
+  /* Create STD_STYLE if it's not there: */
+  styleList->NewNamedStyle(STD_STYLE, NULL);
 }
 
 static void MediaStyleNotify(wxStyle *which, wxMediaBuffer *media)
 {
   if (media)
     media->StyleHasChanged(which);
+}
+
+char *wxMediaBuffer::GetDefaultStyleName()
+{
+  return STD_STYLE;
+}
+
+wxStyle *wxMediaBuffer::GetDefaultStyle()
+{
+  return styleList->FindNamedStyle(GetDefaultStyleName());
 }
 
 /******************************************************************/
@@ -612,13 +621,16 @@ void wxMediaBuffer::DoFont(int, Bool)
 void wxMediaBuffer::InsertBox(int type)
 {
   wxSnip *snip;
+  char *sname;
 
   snip = OnNewBox(type);
   if (!snip)
     return;
 
+  sname = GetDefaultStyleName();
+
   BeginEditSequence();
-  snip->style = styleList->FindNamedStyle(STD_STYLE);
+  snip->style = styleList->FindNamedStyle(sname);
   if (!snip->style) {
     wxStyle *bs;
     bs = styleList->BasicStyle();
@@ -635,10 +647,10 @@ wxSnip *wxMediaBuffer::OnNewBox(int type)
   wxMediaBuffer *media;
 
   if (type == wxEDIT_BUFFER)
-    media = new wxMediaEdit();
+    media = new WXGC_PTRS wxMediaEdit();
   else
-    media = new wxMediaPasteboard();
-  snip = new wxMediaSnip(media);
+    media = new WXGC_PTRS wxMediaPasteboard();
+  snip = new WXGC_PTRS wxMediaSnip(media);
 
   media->SetKeymap(map);  
   media->SetStyleList(styleList);
@@ -664,7 +676,7 @@ void wxMediaBuffer::InsertImage(char *filename, long type, Bool relative, Bool i
 wxImageSnip *wxMediaBuffer::OnNewImageSnip(char *filename, long type, 
 					   Bool relative, Bool inlineImg)
 {
-  return new wxImageSnip(filename, type, relative, inlineImg);
+  return new WXGC_PTRS wxImageSnip(filename, type, relative, inlineImg);
 }
 
 /**********************************************************************/
@@ -1050,8 +1062,8 @@ Bool wxMediaBuffer::ReadSnipsFromFile(wxMediaStreamIn *f, Bool overwritestylenam
   f->Get(&numSnips);
 
   if (bufferType == wxEDIT_BUFFER) {  
-    snipsToInsert = new wxList(wxKEY_NONE, FALSE);
-    dataToInsert = new wxList(wxKEY_NONE, FALSE);
+    snipsToInsert = new WXGC_PTRS wxList(wxKEY_NONE, FALSE);
+    dataToInsert = new WXGC_PTRS wxList(wxKEY_NONE, FALSE);
   } else {
     snipsToInsert = NULL;
     dataToInsert = NULL;
@@ -1421,7 +1433,7 @@ void wxMediaBuffer::Print(Bool interactive, Bool fitToPage, int WXUNUSED_X(outpu
     wxDC *dc;
     void *data;
     
-    dc = new wxPostScriptDC(interactive, parent, forcePageBBox, asEPS);
+    dc = new WXGC_PTRS wxPostScriptDC(interactive, parent, forcePageBBox, asEPS);
 
     if (dc->Ok()) { 
       dc->StartDoc("Printing buffer");
@@ -1449,8 +1461,8 @@ void wxMediaBuffer::Print(Bool interactive, Bool fitToPage, int WXUNUSED_X(outpu
     wxPrinter *p;
     wxPrintout *o;
   
-    p = new wxPrinter();
-    o = new wxMediaPrintout(this, fitToPage);
+    p = new WXGC_PTRS wxPrinter();
+    o = new WXGC_PTRS wxMediaPrintout(this, fitToPage);
 
     p->Print(parent, o, interactive);
     
@@ -1467,7 +1479,7 @@ void wxMediaBuffer::Undo(void)
   if (!undomode && !redomode) {
     undomode = TRUE;
     
-    PerformUndos(changes, FALSE);
+    PerformUndos(FALSE);
     
     undomode = FALSE;
   }
@@ -1478,7 +1490,7 @@ void wxMediaBuffer::Redo(void)
   if (!undomode && !redomode) {
     redomode = TRUE;
     
-    PerformUndos(redochanges, TRUE);
+    PerformUndos(TRUE);
     
     redomode = FALSE;
   }
@@ -1486,12 +1498,11 @@ void wxMediaBuffer::Redo(void)
 
 #define delete_cgrec(x)  DELETE_OBJ (x)
 
-static void wxmeClearUndos(wxChangeRecord **changes, int start, int end,
-			   int maxUndos)
+static void wxmeClearUndos(wxChangeRecord **changes, int start, int end, int size)
 {
   int i;
 
-  for (i = start; i != end; i = (i + 1) % maxUndos) {
+  for (i = start; i != end; i = (i + 1) % size) {
     delete_cgrec(changes[i]);
     changes[i] = NULL;
   }
@@ -1502,14 +1513,32 @@ void wxMediaBuffer::AddUndo(wxChangeRecord *rec)
   if (interceptmode)
     intercepted->Append((wxObject *)rec);
   else if (undomode)
-    AppendUndo(rec, redochanges, TRUE);
+    AppendUndo(rec, TRUE);
   else if (!noundomode) {
     if (!redomode) {
-      wxmeClearUndos(redochanges, redochanges_start,
-		     redochanges_end, maxUndos);
-      redochanges_start = redochanges_end = 0;
+      if (emacs_style_undo) {
+	if (redochanges_start != redochanges_end) {
+	  int e = redochanges_end;
+	  wxChangeRecord *cr;
+	  while (redochanges_start != e) {
+	    e = (e - 1 + redochanges_size) % redochanges_size;
+	    cr = redochanges[e];
+	    AppendUndo(cr->Inverse(), FALSE);
+	  }
+	  while (redochanges_start != redochanges_end) {
+	    AppendUndo(redochanges[redochanges_start], FALSE);
+	    redochanges[redochanges_start] = NULL;
+	    redochanges_start = (redochanges_start + 1) % redochanges_size;
+	  }
+	  redochanges_start = 0;
+	  redochanges_end = 0;
+	}
+      } else {
+	wxmeClearUndos(redochanges, redochanges_start, redochanges_end, redochanges_size);
+	redochanges_start = redochanges_end = 0;
+      }
     }
-    AppendUndo(rec, changes, FALSE);
+    AppendUndo(rec, FALSE);
   } else
     delete_cgrec(rec);
 }
@@ -1517,63 +1546,106 @@ void wxMediaBuffer::AddUndo(wxChangeRecord *rec)
 void wxMediaBuffer::AddSchemeUndo(void *proc)
 {
   wxSchemeModifyRecord *modrec;
-  modrec = new wxSchemeModifyRecord(proc);
+  modrec = new WXGC_PTRS wxSchemeModifyRecord(proc);
   AddUndo(modrec);
 }
 
-void wxMediaBuffer::AppendUndo(wxChangeRecord *rec, wxChangeRecord **changes, 
-			       Bool redos)
+void wxMediaBuffer::AppendUndo(wxChangeRecord *rec, Bool redos)
 {
   if (maxUndos) {
-    int start, end;
+    wxChangeRecord **c;
+    int start, end, size;
 
     if (redos) {
       start = redochanges_start;
       end = redochanges_end;
+      size = redochanges_size;
+      c = redochanges;
     } else {
       start = changes_start;
       end = changes_end;
+      size = changes_size;
+      c = changes;
     }
 
-    changes[end] = rec;
-    end = (end + 1) % maxUndos;
+    if (!size) {
+      size = 128; /* Initial undo size */
+      if (size > maxUndos)
+	size = maxUndos;
+      c = MALLOC_CRP(size);
+    }
+
+    c[end] = rec;
+    end = (end + 1) % size;
     if (end == start) {
-      delete_cgrec(changes[start]);
-      changes[start] = NULL;
-      start = (start + 1) % maxUndos;
+      if ((size < maxUndos) || emacs_style_undo) {
+	/* Make more room */
+	int s, i, j;
+	wxChangeRecord **naya;
+	s = (size * 2);
+	if (s > maxUndos)
+	  s = maxUndos;
+
+	naya = MALLOC_CRP(s);
+	for (j = 0, i = start; 
+	     (j < size); 
+	     j++, i = (i + 1) % size) {
+	  naya[j] = c[i];
+	}
+	size = s;
+	c = naya;
+	start = 0;
+	end = j;
+      } else {
+	/* No room to grow, so drop an undo record */
+	delete_cgrec(c[start]);
+	c[start] = NULL;
+	start = (start + 1) % size;
+      }
     }
     
     if (redos) {
       redochanges_start = start;
       redochanges_end = end;
+      redochanges_size = size;
+      redochanges = c;
     } else {
       changes_start = start;
       changes_end = end;
+      changes_size = size;
+      changes = c;
     }
   } else
     delete_cgrec(rec);
 }
 
-void wxMediaBuffer::PerformUndos(wxChangeRecord **changes, Bool redos)
+void wxMediaBuffer::PerformUndos(Bool redos)
 {
+  wxChangeRecord **c;
   wxChangeRecord *rec;
+  wxChangeRecordId *id = NULL;
+  int parity = 0;
   Bool cont;
-  int start, end;
+  int start, end, size;
   
   BeginEditSequence();
 
   if (redos) {
     start = redochanges_start;
     end = redochanges_end;
+    size = redochanges_size;
+    c = redochanges;
   } else {
     start = changes_start;
     end = changes_end;
+    size = changes_size;
+    c = changes;
   }
 
   while (start != end) {
-    end = (end - 1 + maxUndos) % maxUndos;
-    rec = changes[end];
-    changes[end] = NULL;
+    end = (end - 1 + size) % size;
+    rec = c[end];
+    c[end] = NULL;
 
     if (redos) {
       redochanges_start = start;
@@ -1583,13 +1655,55 @@ void wxMediaBuffer::PerformUndos(wxChangeRecord **changes, Bool redos)
       changes_end = end;
     }
     
+    if (emacs_style_undo) {
+      id = rec->GetId();
+      parity = rec->GetParity();
+    }
+
     cont = rec->Undo(this);
-    delete_cgrec(rec);
+
     if (!cont)
       break;
   }
 
   EndEditSequence();
+
+  if (emacs_style_undo && !redos) {
+    /* Combine all new steps into one undo record, and
+       set/generate id */
+    start = redochanges_start;
+    end = redochanges_end;
+    size = redochanges_size;
+    c = redochanges;
+
+    if (start != end) {
+      wxChangeRecord *cr;
+      int e, cnt = 0;
+      for (e = end; start != e; ) {
+	e = (e - 1 + size) % size;
+	cr = c[e];
+	if (cr->IsComposite())
+	  break;
+	else
+	  cnt++;
+      }
+
+      if (cnt > 0) {
+	wxCompositeRecord *cu;
+	int i;
+	cu = new WXGC_PTRS wxCompositeRecord(cnt, id, !parity);
+	for (i = 0; i < cnt; i++) {
+	  e = (end - cnt + i + size) % size;
+	  cu->AddUndo(i, c[e]);
+	  c[e] = NULL;
+	}
+	e = (end - cnt + size) % size;
+	c[e] = cu;
+	end = (e + 1) % size;
+	redochanges_end = end;
+      }
+    }
+  }
 }
 
 void wxMediaBuffer::PerformUndoList(wxList *changes)
@@ -1612,46 +1726,31 @@ void wxMediaBuffer::PerformUndoList(wxList *changes)
 }
 
 void wxMediaBuffer::ClearUndos()
-{
-  wxmeClearUndos(changes, changes_start, changes_end, maxUndos);
+{  
+  wxmeClearUndos(changes, changes_start, changes_end, changes_size);
   changes_start = changes_end = 0;
-  wxmeClearUndos(redochanges, redochanges_start, redochanges_end, maxUndos);
+  wxmeClearUndos(redochanges, redochanges_start, redochanges_end, redochanges_size);
   redochanges_start = redochanges_end = 0;
 }
 
 void wxMediaBuffer::SetMaxUndoHistory(int v)
 {
-  wxChangeRecord **naya;
-  int i, j;
+  if (v < 0)
+    v = 0xfffFFFF;
 
   if (undomode || redomode || (v == maxUndos))
     return;
 
-  naya = MALLOC_CRP(v);
-  for (j = 0, i = changes_start; 
-       (i != changes_end) && (j < v); 
-       j++, i = (i + 1) % maxUndos) {
-    naya[j] = changes[i];
+  if (!v) {
+    ClearUndos();
+    changes = NULL;
+    redochanges = NULL;
+    changes_size = 0;
+    redochanges_size = 0;
   }
-  for (; i != changes_end; i = (i + 1) % maxUndos) {
-    delete_cgrec(changes[i]);
-  }
-  changes = naya;
-  changes_start = 0;
-  changes_end = v ? (j % v) : 0;
 
-  naya = MALLOC_CRP(v);
-  for (j = 0, i = redochanges_start; 
-       (i != redochanges_end) && (j < v); 
-       j++, i = (i + 1) % maxUndos) {
-    naya[j] = redochanges[i];
-  }
-  for (; i != redochanges_end; i = (i + 1) % maxUndos) {
-    delete_cgrec(redochanges[i]);
-  }
-  redochanges = naya;
-  redochanges_start = 0;
-  redochanges_end = v ? (j % v) : v;
+  /* Should we bother downsizing if maxUndos gets smaller but stays
+     non-0? */
 
   maxUndos = v;
 }
@@ -1699,18 +1798,18 @@ static void InitCutNPaste()
     wxREGGLOB(copyRingStyle);
     wxREGGLOB(copyRingData);
 
-    copyRingBuffer1 = new wxList*[copyRingSize];
-    copyRingBuffer2 = new wxList*[copyRingSize];
-    copyRingStyle = new wxStyleList*[copyRingSize];
-    copyRingData = new wxBufferData*[copyRingSize];
+    copyRingBuffer1 = new WXGC_PTRS wxList*[copyRingSize];
+    copyRingBuffer2 = new WXGC_PTRS wxList*[copyRingSize];
+    copyRingStyle = new WXGC_PTRS wxStyleList*[copyRingSize];
+    copyRingData = new WXGC_PTRS wxBufferData*[copyRingSize];
 
     copyRingMax = 1;
     copyRingDest = 1;
 
     wxREGGLOB(wxmb_commonCopyBuffer);
     wxREGGLOB(wxmb_commonCopyBuffer2);
-    wxmb_commonCopyBuffer = new wxList(wxKEY_NONE, FALSE);
-    wxmb_commonCopyBuffer2 = new wxList(wxKEY_NONE, FALSE);
+    wxmb_commonCopyBuffer = new WXGC_PTRS wxList(wxKEY_NONE, FALSE);
+    wxmb_commonCopyBuffer2 = new WXGC_PTRS wxList(wxKEY_NONE, FALSE);
 
     wxREGGLOB(wxmb_copyStyleList);
     wxREGGLOB(wxmb_commonCopyRegionData);
@@ -1723,12 +1822,12 @@ static void InitCutNPaste()
 
   if (!TheMediaClipboardClient) {
     wxREGGLOB(TheMediaClipboardClient);
-    TheMediaClipboardClient = new wxMediaClipboardClient;
+    TheMediaClipboardClient = new WXGC_PTRS wxMediaClipboardClient;
 #if ALLOW_X_STYLE_SELECTION
     wxREGGLOB(TheMediaXClipboardClient);
     wxREGGLOB(wxMediaXSelectionOwner);
     wxREGGLOB(wxMediaXSelectionAllowed);
-    TheMediaXClipboardClient = new wxMediaXClipboardClient;
+    TheMediaXClipboardClient = new WXGC_PTRS wxMediaXClipboardClient;
 #endif
   }
 }
@@ -1777,8 +1876,8 @@ void wxMediaBuffer::FreeOldCopies(void)
       DELETE_OBJ wxmb_commonCopyRegionData;
 #endif
 
-    wxmb_commonCopyBuffer = new wxList(wxKEY_NONE, FALSE);
-    wxmb_commonCopyBuffer2 = new wxList(wxKEY_NONE, FALSE);
+    wxmb_commonCopyBuffer = new WXGC_PTRS wxList(wxKEY_NONE, FALSE);
+    wxmb_commonCopyBuffer2 = new WXGC_PTRS wxList(wxKEY_NONE, FALSE);
 
     wxmb_commonCopyRegionData = NULL;
 
@@ -1813,8 +1912,8 @@ void wxMediaBuffer::FreeOldCopies(void)
     copyRingPos = copyRingDest;
   }
 
-  wxmb_commonCopyBuffer = new wxList(wxKEY_NONE, FALSE);
-  wxmb_commonCopyBuffer2 = new wxList(wxKEY_NONE, FALSE);
+  wxmb_commonCopyBuffer = new WXGC_PTRS wxList(wxKEY_NONE, FALSE);
+  wxmb_commonCopyBuffer2 = new WXGC_PTRS wxList(wxKEY_NONE, FALSE);
   wxmb_commonCopyRegionData = NULL;
   wxmb_copyStyleList = NULL;
 
@@ -1873,8 +1972,8 @@ void wxMediaBuffer::DoBufferPaste(wxClipboard *cb, long time, Bool local)
       wxMediaStreamInStringBase *b;
       wxMediaStreamIn *mf;
 
-      b = new wxMediaStreamInStringBase(str, len);
-      mf = new wxMediaStreamIn(b);
+      b = new WXGC_PTRS wxMediaStreamInStringBase(str, len);
+      mf = new WXGC_PTRS wxMediaStreamIn(b);
 
       if (wxReadMediaVersion(mf, b, TRUE, FALSE)) {
 	if (wxReadMediaGlobalHeader(mf)) {
@@ -1899,7 +1998,7 @@ void wxMediaBuffer::DoBufferPaste(wxClipboard *cb, long time, Bool local)
       if (!pasteTextOnly)
 	bm = cb->GetClipboardBitmap(time);
       if (bm) { 
-	snip = new wxImageSnip(bm);
+	snip = new WXGC_PTRS wxImageSnip(bm);
 	InsertPasteSnip(snip, NULL);
       } else {
 	str = cb->GetClipboardString(time);
@@ -1945,9 +2044,9 @@ void wxMediaBuffer::CopySelfTo(wxMediaBuffer *m)
 
   m->BeginEditSequence();
 
-  copySnips = new wxList(wxKEY_NONE, FALSE);
+  copySnips = new WXGC_PTRS wxList(wxKEY_NONE, FALSE);
   wxmb_commonCopyBuffer = copySnips;
-  copySnips2 = new wxList(wxKEY_NONE, FALSE);
+  copySnips2 = new WXGC_PTRS wxList(wxKEY_NONE, FALSE);
   wxmb_commonCopyBuffer2 = copySnips2;
   wxmb_copyStyleList = NULL;
   wxmb_commonCopyRegionData = NULL;
@@ -1962,7 +2061,7 @@ void wxMediaBuffer::CopySelfTo(wxMediaBuffer *m)
     wxSnip *s;
     wxNode *n;
     wxList *unselect;
-    unselect = new wxList(wxKEY_NONE, FALSE);
+    unselect = new WXGC_PTRS wxList(wxKEY_NONE, FALSE);
     
     BeginEditSequence();
     for (s = pb->FindFirstSnip(); s; s = s->Next()) {
@@ -2084,7 +2183,7 @@ static char *GenericGetData(char *format, long *size,
     }
     
     if (!total)
-      total = new char[1];
+      total = new WXGC_ATOMIC char[1];
     
     total[length] = 0;
 
@@ -2135,8 +2234,8 @@ static char *GenericGetData(char *format, long *size,
     wxMediaStreamOut *mf;
     char *result;
 
-    b = new wxMediaStreamOutStringBase();
-    mf = new wxMediaStreamOut(b);
+    b = new WXGC_PTRS wxMediaStreamOutStringBase();
+    mf = new WXGC_PTRS wxMediaStreamOut(b);
 
     wxWriteMediaVersion(mf, b);
 
@@ -2197,9 +2296,9 @@ static void CopyIntoSelection()
   saveData = wxmb_commonCopyRegionData;
  
   /* Set up new selection buffers, and redirect: */
-  copySnips = new wxList(wxKEY_NONE, FALSE);
+  copySnips = new WXGC_PTRS wxList(wxKEY_NONE, FALSE);
   wxmb_commonCopyBuffer = copySnips;
-  copySnips2 = new wxList(wxKEY_NONE, FALSE);
+  copySnips2 = new WXGC_PTRS wxList(wxKEY_NONE, FALSE);
   wxmb_commonCopyBuffer2 = copySnips2;
   wxmb_copyStyleList = NULL;
   wxmb_commonCopyRegionData = NULL;
@@ -2369,13 +2468,13 @@ void wxMediaBuffer::SetModified(Bool mod)
     num_parts_modified = 0;
     for (i = changes_end; i != changes_start; ) {
       wxChangeRecord *cr;
-      i = (i - 1 + maxUndos) % maxUndos;
+      i = (i - 1 + changes_size) % changes_size;
       cr = changes[i];
       cr->DropSetUnmodified();
     }
     for (i = redochanges_end; i != redochanges_start; ) {
       wxChangeRecord *cr;
-      i = (i - 1 + maxUndos) % maxUndos;
+      i = (i - 1 + redochanges_size) % redochanges_size;
       cr = redochanges[i];
       cr->DropSetUnmodified();
     }

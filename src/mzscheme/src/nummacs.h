@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 1995 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -456,8 +456,8 @@ name (const Scheme_Object *n1, const Scheme_Object *n2) \
   return scheme_void; \
 }
 
-#define GEN_NARY_OP(name, scheme_name, bin_name, ident, TYPEP, type) \
-static Scheme_Object * \
+#define GEN_NARY_OP(stat, name, scheme_name, bin_name, ident, TYPEP, type) \
+stat Scheme_Object * \
 name (int argc, Scheme_Object *argv[]) \
 { \
   Scheme_Object *ret; \

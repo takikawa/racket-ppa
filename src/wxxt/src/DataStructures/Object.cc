@@ -4,7 +4,7 @@
  *
  * Authors: Markus Holzem, Julian Smart and Arthur Seaton
  *
- * Copyright: (C) 2004-2005 PLT Scheme, Inc.
+ * Copyright: (C) 2004-2006 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian, Arthur)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -30,6 +30,7 @@
 #define Uses_wxDebugStreamBuf
 #define Uses_wxObject
 #define Uses_wxHashTable
+#define Uses_wxTypeTree
 #include "wx.h"
 
 #include <stdarg.h>
@@ -70,5 +71,12 @@ wxObject::~wxObject(void)
 long wxObject::MemoryUse(void)
 {
   return 0;
+}
+#endif
+
+#ifdef COMPACT_BACKTRACE_GC
+char *wxObject::gcGetName()
+{
+  return wxGetTypeName(__type);
 }
 #endif

@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	
- * Copyright:	(c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:	(c) 2004-2006 PLT Scheme Inc.
  * Copyright:	(c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
  */
 
@@ -62,15 +62,15 @@ static void InitFormats()
   ClipboardFormat *cf;
 
   wxREGGLOB(ClipboardFormats);
-  ClipboardFormats = new wxList;
+  ClipboardFormats = new WXGC_PTRS wxList;
 
-  cf = new ClipboardFormat;
+  cf = new WXGC_PTRS ClipboardFormat;
   cf->name = "TEXT";
   cf->format = wxCF_TEXT;
 
   ClipboardFormats->Append(cf);
 
-  cf = new ClipboardFormat;
+  cf = new WXGC_PTRS ClipboardFormat;
   cf->name = "PICT";
   cf->format = wxCF_BITMAP;
 
@@ -89,7 +89,8 @@ Bool wxCloseClipboard(void)
 
 Bool wxEmptyClipboard(void)
 {
-  ClearCurrentScrap();
+  OSStatus err;
+  err = ClearCurrentScrap();
   return true;
 }
 
@@ -156,9 +157,8 @@ Bool wxSetClipboardData(int dataFormat, wxObject *obj, int width, int height)
   }
   
   err = GetCurrentScrap(&scrap);
-  if (err != noErr) {
+  if (err != noErr)
     return FALSE;
-  }
   err = PutScrapFlavor(scrap, format, kScrapFlavorMaskNone, length, (const void *)obj);
   return (err == noErr);
 }
@@ -281,7 +281,7 @@ wxObject *wxGetClipboardData(int dataFormat, long *size)
   return (wxObject *)result;
 }
 
-int  wxEnumClipboardFormats(int dataFormat)
+int wxEnumClipboardFormats(int dataFormat)
 {
   long format;
   wxNode *node;
@@ -304,9 +304,19 @@ int  wxEnumClipboardFormats(int dataFormat)
 
   for (; node; node = node->Next()) {
     cf = (ClipboardFormat *)node->Data();
+#ifdef __POWERPC__
     memcpy(&format, cf->name, 4);
+#else
     {
-#ifdef WX_CARBON
+      char tmp[4];
+      tmp[3] = cf->name[0];
+      tmp[2] = cf->name[1];
+      tmp[1] = cf->name[2];
+      tmp[0] = cf->name[3];
+      memcpy(&format, tmp, 4);
+    }
+#endif
+    {
       ScrapRef scrap;
       OSErr err;
       ScrapFlavorFlags dontcare;
@@ -314,18 +324,13 @@ int  wxEnumClipboardFormats(int dataFormat)
       err = GetCurrentScrap(&scrap);
       if ((err != noErr)||(GetScrapFlavorFlags(scrap,format,&dontcare) != noErr))
 	return cf->format;
-#else
-      long offset;      
-      if (GetScrap(NULL, format, &offset) > 0)
-	return cf->format;
-#endif
     }
   }
 
   return 0;
 }
 
-int  wxRegisterClipboardFormat(char *formatName)
+int wxRegisterClipboardFormat(char *formatName)
 {
   wxNode *node;
   ClipboardFormat *cf;
@@ -339,11 +344,11 @@ int  wxRegisterClipboardFormat(char *formatName)
       return cf->format;
   }
 
-  cf = new ClipboardFormat;
+  cf = new WXGC_PTRS ClipboardFormat;
 
   cf->format = ClipboardFormats->Number();
   cf->format += CUSTOM_ID_START;
-  cf->name = new char[strlen(formatName) + 1];
+  cf->name = new WXGC_ATOMIC char[strlen(formatName) + 1];
   strcpy(cf->name, formatName);
 
   ClipboardFormats->Append(cf);
@@ -365,10 +370,17 @@ Bool wxGetClipboardFormatName(int dataFormat, char *formatName, int maxCount)
   for (node = ClipboardFormats->First(); node; node = node->Next()) {
     cf = (ClipboardFormat *)node->Data();
     if (cf->format == dataFormat) {
+#ifdef __POWERPC__
       formatName[0] = cf->name[0];
       formatName[1] = cf->name[1];
       formatName[2] = cf->name[2];
       formatName[3] = cf->name[3];
+#else
+      formatName[3] = cf->name[0];
+      formatName[2] = cf->name[1];
+      formatName[1] = cf->name[2];
+      formatName[0] = cf->name[3];
+#endif
       return TRUE;
     }
   }
@@ -386,12 +398,12 @@ void wxInitClipboard(void)
 {
   if (!wxTheClipboard)
     wxREGGLOB(wxTheClipboard);
-  wxTheClipboard = new wxClipboard;
+  wxTheClipboard = new WXGC_PTRS wxClipboard;
 }
 
 wxClipboardClient::wxClipboardClient()
 {
-  formats = new wxStringList;
+  formats = new WXGC_PTRS wxStringList;
 }
 
 wxClipboard::wxClipboard()
@@ -494,7 +506,7 @@ char *wxClipboard::GetClipboardString(long time)
 
   str = GetClipboardData("TEXT", &length, time);
   if (!str) {
-    str = new char[1];
+    str = new WXGC_ATOMIC char[1];
     *str = 0;
   }
 
@@ -534,8 +546,8 @@ wxBitmap *wxClipboard::GetClipboardBitmap(long time)
     bbox.right = w;
     bbox.bottom = h;
       
-    bm = new wxBitmap(w, h, 0);
-    mdc = new wxMemoryDC();
+    bm = new WXGC_PTRS wxBitmap(w, h, 0);
+    mdc = new WXGC_PTRS wxMemoryDC();
     mdc->SelectObject(bm);
     if (mdc->Ok()) {
       Handle h;

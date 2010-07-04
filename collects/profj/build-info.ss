@@ -9,6 +9,8 @@
   ;-------------------------------------------------------------------------------
   ;General helper functions for building information
   
+  (define class-name (make-parameter #f))
+  
   ;; name->list: name -> (list string)
   (define (name->list n)
     (cons (id-string (name-id n)) (map id-string (name-path n))))
@@ -50,10 +52,6 @@
                           (if (or (not local?) profj-lib? htdch-lib? scheme-lib? (to-file))
                               (string-append n ".ss")
                               (string->symbol n))))))
-      #;(when (or htdch-lib? (equal? name "Image"))
-        (printf "build-require : class ~a path ~a ~a~n" name path (access (make-name))))
-      #;(printf "build-req of ~a profj-lib? ~a htdch-lib? ~a scheme-lib? ~a ~n"
-              (make-name) profj-lib? htdch-lib? scheme-lib?)
       (if scheme?
           (list (syn `(prefix ,(string->symbol
                                 (apply string-append
@@ -93,7 +91,7 @@
                           ((not (null? (package-imports prog))) 
                            (import-file (car (package-imports prog)))))))
       (set-package-defs! prog defs)
-      
+
       ;Add lang to local environment
       (for-each (lambda (class) (send type-recs add-to-env class lang-pack current-loc)) lang)
       (for-each (lambda (class) (send type-recs add-class-req (cons class lang-pack) #f current-loc)) lang)
@@ -177,11 +175,15 @@
   ;build-inner-info: def (U void string) (list string) symbol type-records loc bool -> class-record
   (define (build-inner-info def unique-name pname level type-recs current-loc look-in-table?)
     ;(add-def-info def pname type-recs current-loc look-in-table? level)
+    (class-name unique-name)
     (let ((record (process-class/iface def pname type-recs #f #f level)))
-      (when (string? unique-name) (set-class-record-name! record (list unique-name)))
+      (when (string? unique-name) (set-class-record-name! record (cons unique-name pname)))
       (send type-recs add-to-records 
-            (if (eq? (def-kind def) 'statement) (list unique-name) (id-string (def-name def)))
+            (cons (if (eq? (def-kind def) 'statement) unique-name (id-string (def-name def))) pname)
             record)
+      ;(printf "~a~n" unique-name)
+      (send type-recs add-to-env unique-name pname current-loc)
+      (class-name #f)
       record))
   
   ;add-to-queue: (list definition) -> void
@@ -227,7 +229,8 @@
            (file-path (build-path dir (string-append class suffix))))
       (cond
         ((is-import-restricted? class path level) (used-restricted-import class path caller-src))
-        ((send type-recs get-class-record class-name #f (lambda () #f)) void)
+        ((send type-recs get-class-record class-name #f (lambda () #f)) 
+         void )
         ((and (file-exists? type-path)
               (or (core? class-name) (older-than? file-path type-path)) (read-record type-path))
          =>
@@ -382,16 +385,19 @@
                                 (equal? (filename-extension f) #".scm")))
                 (directory-list (dir-path-path dir)))
         (filter (lambda (c-name) (not (equal? c-name "")))
-                (map (lambda (fn) 
+                (map (lambda (fn)
                        (let ((str (path->string fn)))
                          (substring str 0 (- (string-length str) 
                                              (add1 (bytes-length (filename-extension fn)))))))
-                     (filter (lambda (f) 
-                                    (let ((ext (filename-extension f)))
+                     (filter (lambda (f)
+                               (let ((first (substring (path->string f) 0 1))
+                                     (ext (filename-extension f)))
+                                 (and (not (equal? "#" first))
+                                      (not (equal? "." first))
                                       (or (equal? ext #"java")
                                           (equal? ext #"djava")
-                                          (equal? ext #"ajava"))))
-                                  (directory-list (dir-path-path dir)))))))
+                                          (equal? ext #"ajava")))))
+                             (directory-list (dir-path-path dir)))))))
   
   ;load-lang: type-records -> void (adds lang to type-recs)
   (define (load-lang type-recs)
@@ -402,6 +408,7 @@
                                  (filter (lambda (f) (equal? (filename-extension f) #"jinfo"))
                                          (directory-list (build-path (dir-path-path dir) "compiled"))))))
            (array (datum->syntax-object #f `(lib "array.ss" "profj" "libs" "java" "lang") #f)))
+      ;(printf "class-list ~a~n" class-list)
       (send type-recs add-package-contents lang class-list)
       (for-each (lambda (c) (import-class c lang dir #f type-recs 'full #f #f)) class-list)
       (send type-recs add-require-syntax (list 'array) (list array array))
@@ -497,12 +504,13 @@
                                        (make-req (car name-list) 
                                                  (send type-recs lookup-path (car name-list) (lambda () null)))
                                        (make-req (car name-list) (cdr name-list))))
-                                 (cons super-name (map name->list (header-implements info))))))
+                                 (cons super-name (map name->list (header-implements info)))))
+                      (old-loc (send type-recs get-location)))
                  
                  (set! reqs
                        (remove-dup-reqs
                         (append (get-method-reqs (class-record-methods super-record))
-                                reqs)))                                                
+                                reqs)))
                  (send type-recs set-location! (def-file class))
                  (set-def-uses! class reqs)
                  
@@ -550,7 +558,7 @@
                                                     iface-records (header-implements info)
                                                     m type-recs level)
                           (no-abstract-methods m members level type-recs)))
-                   
+                                      
                    (valid-inherited-methods? (cons super-record iface-records)
                                              (cons (if (null? super)
                                                        (make-name (make-id "Object" #f) null #f)
@@ -563,7 +571,16 @@
                                           members
                                           level
                                           type-recs)
-                                      
+                   
+                   (when (and (memq 'abstract test-mods)
+                              (or (not (null? iface-records))
+                                  (not (null? (header-implements info)))))
+                     (let ((unimp-stubs (make-unimplmented-stubs iface-records (header-implements info)
+                                                                 m type-recs)))
+                       (set-def-members! class
+                                         (append unimp-stubs (def-members class)))
+                       (set! m (append m (map method-rec unimp-stubs)))))
+                   
                    (let ((record
                           (make-class-record 
                            cname
@@ -590,9 +607,10 @@
                      (when put-in-table? (send type-recs add-class-record record))
                      
                      (for-each (lambda (member)
-			     (when (def? member)
-			       (process-class/iface member package-name type-recs #f put-in-table? level)))
-			   members)
+                                 (when (def? member)
+                                   (process-class/iface member package-name type-recs #f put-in-table? level)))
+                               members)
+                     (send type-recs set-location! old-loc)
                      
                      record))))))
         (cond
@@ -628,7 +646,8 @@
               (not (null? (method-record-throws super-ctor))))
          (default-ctor-error 'throws name (method-record-class super-ctor) (id-src name) level))
         (else
-         (let* ((rec (make-method-record (id-string name) `(public) 'ctor null null #f (list (id-string name))))
+         (let* ((rec (make-method-record (id-string name) `(public) 'ctor null null #f 
+                                         (if (class-name) (list (class-name)) (list (id-string name)))))
                 (method (make-method (list (make-modifier 'public #f))
                                      (make-type-spec 'ctor 0 #f)
                                      null
@@ -707,7 +726,8 @@
                       (object-methods (class-record-methods (send type-recs get-class-record object-type)))
                       (members (def-members iface))
                       (reqs (map (lambda (name-list) (make-req (car name-list) (cdr name-list)))
-                                 super-names)))
+                                 super-names))
+                      (old-loc (send type-recs get-location)))
                  (send type-recs set-location! (def-file iface))
                  (set-def-uses! iface reqs)                 
                  
@@ -731,6 +751,12 @@
                    (valid-inherited-methods? super-records (header-extends info) level type-recs)
                    (check-current-methods super-records m members level type-recs)
                    
+                   (for-each (lambda (fi)
+                               (unless (memq 'static (field-record-modifiers fi))
+                                 (set-field-record-modifiers! fi 
+                                                              (cons 'static (field-record-modifiers fi)))))
+                             f)
+                   
                    (let ((record
                           (make-class-record 
                            iname
@@ -744,6 +770,7 @@
                                                (map class-record-parents super-records)))
                            null)))
                      (send type-recs add-class-record record)
+                     (send type-recs set-location! old-loc)
                      record))))))
         (if look-in-table?
             (get-record (send type-recs get-class-record iname #f build-record) type-recs)
@@ -1026,7 +1053,7 @@
                                  #f))))
         (check-for-conflicts (cdr methods) record members level type-recs)))
   
-  ;class-fully-implemented? class-record id (list class-record) (list id) (list method) symbol -> bool
+  ;class-fully-implemented? class-record id (list class-record) (list id) (list method) type-records symbol -> bool
   (define (class-fully-implemented? super super-name ifaces ifaces-name methods type-recs level)
     (when (memq 'abstract (class-record-modifiers super))
       (let ((unimplemented-iface-methods (get-unimplemented-methods (class-record-methods super)
@@ -1039,9 +1066,67 @@
         (implements-all? (get-methods-need-implementing (class-record-methods super))
                          methods super-name level)))
     (andmap (lambda (iface iface-name)
-              (implements-all? (class-record-methods iface) methods iface-name level))
+              (or (super-implements? iface (class-record-ifaces super))
+                  (implements-all? (class-record-methods iface) methods iface-name level)))
             ifaces
             ifaces-name))
+  
+  ;super-implements?: class-record (list (list string))
+  (define (super-implements? iface ifaces)
+    (member (class-record-name iface) ifaces))
+  
+  ;make-unimplmented-stubs: (list class-record) (list name) (list method-record) type-records -> (list method)
+  (define (make-unimplmented-stubs ifaces ifaces-name methods type-recs)
+    (letrec ((type->type-spec
+              (lambda (t)
+                (cond
+                  ((symbol? t) (make-type-spec t 0 #f))
+                  ((ref-type? t) (make-type-spec (make-name (make-id (ref-type-class/iface t) #f)
+                                                            (map (lambda (t) (make-id t #f))
+                                                                 (ref-type-path t)) #f)
+                                                 0 #f))
+                  ((array-type? t) (make-type-spec (type-spec-name (type->type-spec (array-type-type t)))
+                                                   (array-type-dim t))))))
+             (copy-method-record
+              (lambda (m)
+                (make-method-record (method-record-name m)
+                                    (cons 'abstract (method-record-modifiers m))
+                                    (method-record-rtype m)
+                                    (method-record-atypes m)
+                                    (method-record-throws m)
+                                    #f
+                                    (method-record-class m))))
+             (remove-dups
+              (lambda (l)
+                (cond
+                  ((null? l) l)
+                  ((member (car l) (cdr l)) (remove-dups (cdr l)))
+                  (else (cons (car l) (remove-dups (cdr l)))))))
+             (unimplemented-iface-methods 
+              (car (get-unimplemented-methods methods 
+                                              (remove-dups (append (map (lambda (iface)
+                                                                          (cond 
+                                                                            ((id? iface) (list (id-string iface)))
+                                                                            ((name? iface) (cons (id-string (name-id iface))
+                                                                                                 (map id-string (name-path iface))))))
+                                                                        ifaces-name)
+                                                                   (map class-record-name ifaces))) type-recs))))
+      (apply append
+             (map (lambda (m-lists)
+                    (map (lambda (m)
+                           (make-method (cons (make-modifier 'abstract #f) 
+                                              (map (lambda (a) (make-modifier a #f)) (method-record-modifiers m)))
+                                        (type->type-spec (method-record-rtype m))
+                                        null
+                                        (make-id (method-record-name m) #f)
+                                        (map (lambda (a)
+                                               (make-var-decl (make-id (gensym) #f) null
+                                                              (type->type-spec a) #f #f))
+                                             (method-record-atypes m))
+                                        null #f #f 
+                                        (copy-method-record m) #f))
+                         m-lists))
+                  unimplemented-iface-methods))))
   
   ;get-unimplemented-methods: (list method-record) (list (list string)) type-recs -> (list (list (list method-record)) (list string(
   (define (get-unimplemented-methods methods ifaces type-recs)
@@ -1141,7 +1226,7 @@
     (make-field-record (id-string (field-name field)) 
                        (check-field-modifiers level (field-modifiers field))
                        (var-init? field)
-                       cname 
+                       (if (class-name) (cons (class-name) (cdr cname)) cname)
                        (field-type field)))
                   
   ;; process-method: method (list method-record) (list string) type-records symbol -> method-record  
@@ -1168,15 +1253,16 @@
       (when (and (memq level '(beginner intermediate))
                  (member name (map method-record-name inherited-methods))
                  (not over?))
-        (inherited-overload-error name parms (method-record-atypes 
-                                              (car (filter (lambda (m) (equal? (method-record-name m) name))
-                                                           inherited-methods)))
+        (inherited-overload-error (car cname) name parms 
+                                  (method-record-atypes 
+                                   (car (filter (lambda (m) (equal? (method-record-name m) name))
+                                                inherited-methods)))
                                   (id-src (method-name method))))
             
       (when (eq? ret 'ctor)
         (if (regexp-match "\\." (car cname))
             (begin
-              (unless (equal? name (filename-extension (car cname)))
+              (unless (equal? name (bytes->string/locale (filename-extension (car cname))))
                 (not-ctor-error name (car cname) (id-src (method-name method))))
               (set! name (car cname))
               (set-id-string! (method-name method) (car cname)))
@@ -1213,13 +1299,14 @@
                                         parms
                                         throws
                                         over?
-                                        cname)))
+                                        (if (class-name) (cons (class-name) (cdr cname)) cname))))
         (set-method-rec! method record)
         record)))
   
   ;process-inner def (list name) type-records symbol -> inner-record
   (define (process-inner def cname type-recs level)
     (make-inner-record (filename-extension (id-string (def-name def)))
+                       (id-string (def-name def))
                        (map modifier-kind (header-modifiers (def-header def)))
                        (class-def? def)))
 
@@ -1440,22 +1527,22 @@
                      ((dups) 
                       (format "Modifier ~a may only appear once in a declaration, it occurs multiple times here." m))
                      ((access)
-                      "Declaration may only be one of public, private, or protected, more than one occurs here")
+                      "Declaration may only be one of public, private, or protected, more than one occurs here.")
                      ((invalid-iface)
-                      (format "Modifier ~a is not valid for interfaces" m))
+                      (format "Modifier ~a is not valid for interfaces." m))
                      ((invalid-class)
-                      (format "Modifier ~a is not valid for classes" m))
+                      (format "Modifier ~a is not valid for classes." m))
                      ((invalid-field)
-                      (format "Modifier ~a is not valid for fields" m))
+                      (format "Modifier ~a is not valid for fields." m))
                      ((invalid-method)
-                      (format "Modifier ~a is not valid for methods" m))
+                      (format "Modifier ~a is not valid for methods." m))
                      ((invalid-ctor)
-                      (format "Modifier ~a is not valid for constructors" m))
+                      (format "Modifier ~a is not valid for constructors." m))
                      ((invalid-abstract)
-                      (format "Modifier ~a is not valid for an abstract method" m))
-                     ((final-abstract) "Class declared final and abstract which is not allowed")
-                     ((final-volatile) "Field declared final and volatile which is not allowed")
-                     ((native-strictfp) "Method declared native and strictfp which is not allowed"))
+                      (format "Modifier ~a is not valid for an abstract method." m))
+                     ((final-abstract) "Class declared final and abstract which is not allowed.")
+                     ((final-volatile) "Field declared final and volatile which is not allowed.")
+                     ((native-strictfp) "Method declared native and strictfp which is not allowed."))
                    m src)))
 
   ;dependence-error: symbol id src -> void
@@ -1463,9 +1550,9 @@
     (let ((n (id->ext-name name)))
       (raise-error n
                    (case kind
-                     ((immediate) (format "~a may not extend itself, which it does here" n))
+                     ((immediate) (format "~a may not extend itself, which it does here." n))
                      ((cycle) 
-                      (format "~a is illegally dependent on itself, potentially through other definitions" n)))
+                      (format "~a is illegally dependent on itself, potentially through other definitions." n)))
                    n src)))
 
   ;extension-error: symbol id name src -> void
@@ -1476,63 +1563,73 @@
        s
        (case kind
          ((final) 
-          (format "Final classes may never be extended, therefore final class ~a may not be extended by ~a" s n))
+          (format "Final classes may never be extended, therefore final class ~a may not be extended by ~a." s n))
          ((implement) 
           (format 
-           "A class may only declare an implemented interface once, this class declares it is implementing ~a more than once"
+           "A class may only declare an implemented interface once, this class declares it is implementing ~a more than once."
            s))
          ((ifaces) 
-          (format "An interface may only declare each extended interface once, ~a declares this interface more than once" s))
+          (format "An interface may only declare each extended interface once, ~a declares this interface more than once." s))
          ((iface-class) 
-          (format "Interfaces may never extend classes, interface ~a has attemped to extend ~a, which is a class" n s))
+          (format "Interfaces may never extend classes, interface ~a has attemped to extend ~a, which is a class." n s))
          ((class-iface) 
-          (format "Classes may never extend interfaces, class ~a has attempted to extend ~a, which is an interface" n s))
+          (format "Classes may never extend interfaces, class ~a has attempted to extend ~a, which is an interface." n s))
          ((implement-class) 
-          (format "Only interfaces may be implemented, class ~a has attempted to implement class ~a" n s)))
+          (format "Only interfaces may be implemented, class ~a has attempted to implement class ~a." n s)))
        s src)))
 
   ;method-error: symbol id (list type) type string src bool -> void
   (define (method-error kind name parms ret class src ctor?)
     (if (eq? kind 'inherited-conflict-field)
         (let ((n (id->ext-name name)))
-          (raise-error n (format "Field ~a conflicts with a method of the same name from ~a" n class) n src))
-        (let ((m-name (method-name->ext-name (id-string name) parms))
+          (raise-error n (format "Field ~a conflicts with a method of the same name from ~a." n class) n src))
+        (let ((m-name (method-name->ext-name (id-string name) null))
+              (m-full-name (method-name->ext-name (id-string name) parms))
               (r-name (type->ext-name ret)))
           (raise-error 
            m-name
            (case kind
              ((illegal-abstract)
               (format 
-               "Abstract method ~a is not allowed in non-abstract class ~a, abstract methods must be in abstract classes" 
-               m-name class))
+               "Abstract method ~a is not allowed in non-abstract class ~a, abstract methods must be in abstract classes." 
+               m-full-name class))
              ((repeated)
-              (format "~a ~a has already been written in this class, ~a, and cannot be written again" 
-                      (if ctor? "Constructor" "Method") m-name class))
+              (format "~a ~a has already been written in this class, ~a, and cannot be written again." 
+                      (if ctor? "Constructor" "Method") m-full-name class))
              ((inherit-conflict)
-              (format "Inherited method ~a from ~a conflicts with another method of the same name" m-name class))
+              (format "Inherited method ~a from ~a conflicts with another method of the same name." m-full-name class))
              ((conflict)
-              (format "Method ~a conflicts with a method inherited from ~a" m-name class))
-             ((not-implement) (format "Method ~a returning ~a from ~a should be implemented and was not" m-name r-name class))
+              (format "Method ~a conflicts with a method inherited from ~a" m-full-name class))
+             ((not-implement) (format "Method ~a returning ~a from ~a should be implemented and was not." m-full-name r-name class))
              ((ctor-ret-value)
-              (format "Constructor ~a for class ~a has a return type, which is not allowed" m-name class))
+              (format "Constructor ~a for class ~a has a return type, which is not allowed." m-full-name class))
              ((class-name)
-              (format "Method ~a from ~a has the same name as a class, which is not allowed" m-name class))
+              (format "Method ~a from ~a has the same name as a class, which is not allowed." m-full-name class))
              ((bad-ret)
               (format "Methods with the same name must have the same return type. Found definitions of method ~a in ~a with return types ~a and ~a."
-                      m-name class r-name (type->ext-name ctor?))))
+                      m-full-name class r-name (type->ext-name ctor?))))
            m-name src))))
 
-  ;inherited-overload-error: string (list type) (list type) src -> void
-  (define (inherited-overload-error name new-type inherit-type src)
-    (let ((n (string->symbol name))
-          (nt (map type->ext-name new-type))
-          (gt (map type->ext-name inherit-type)))
-      (raise-error n
-                   (string-append 
-                    (format "Attempted to override method ~a, but it should have ~a arguments with types ~a.~n"
-                            n (length inherit-type) gt)                                      
-                    (format "Given ~a arguments with types ~a" (length new-type) nt))
-                   n src)))                               
+  ;inherited-overload-error: string string (list type) (list type) src -> void
+  (define (inherited-overload-error curr-class name new-type inherit-type src)
+    (let* ((n (string->symbol name))
+           (nt (map type->ext-name new-type))
+           (nt-l (length nt))
+           (gt (map type->ext-name inherit-type))
+           (gt-l (length gt)))
+      (raise-error 
+       (string->symbol curr-class)
+       (string-append
+        (format "Attempted to override method ~a, but it should have " n)
+        (cond
+          ((= gt-l 0) "no arguments.~n")
+          ((= gt-l 1) (format "1 argument with type ~a.~n" (car gt)))
+          (else (format "~a arguments with types ~a." gt-l gt)))
+        (cond
+          ((= nt-l 0) "Given a method with no arguments.")
+          ((= nt-l 1) (format "Given a method with one argument with type ~a." (car nt)))
+          (else (format "Given a method with ~a arguments with types ~a." nt-l nt))))
+       (string->symbol curr-class) src)))
   
   ;not-ctor-error: string string src -> void
   (define (not-ctor-error meth class src)
@@ -1540,17 +1637,17 @@
       (raise-error 
        n
        (format "~a~n~a"
-               (format "Method ~a has no return type and does not have the same name as the class, ~a"
+               (format "Method ~a has no return type and does not have the same name as the class, ~a."
                        n class)
-               "Only constructors may have no return type, but must have the name of the class")
+               "Only constructors may have no return type, but must have the name of the class.")
        n src)))
 
   ;beginner-ctor-error: symbol id src -> void
   (define (beginner-ctor-error kind class src) 
     (let ((n (id->ext-name class)))
       (raise-error n (case kind
-                       ((none) (format "Class ~a must have a constructor" n))
-                       ((abstract) (format "Abstract class ~a may not have a constructor" n))) n src)))
+                       ((none) (format "Class ~a must have a constructor." n))
+                       ((abstract) (format "Abstract class ~a may not have a constructor." n))) n src)))
 
   ;default-ctor-error symbol id string src symbol -> void
   (define (default-ctor-error kind name parent src level)
@@ -1559,14 +1656,14 @@
                    (case kind
                      ((private)
                       (if (memq level '(beginner intermediate))
-                          (format "Class ~a cannot extend ~a" n parent)
-                          (format "Class ~a cannot access the default constructor of ~a, which is private" n parent)))
+                          (format "Class ~a cannot extend ~a." n parent)
+                          (format "Class ~a cannot access the default constructor of ~a, which is private." n parent)))
                      ((non-accessible)
                       (if (memq level '(beginner intermediate))
-                          (format "Class ~a must have a constructor due to its extension of class ~a" n parent)
-                          (format "Class ~a cannot access a default constructor for ~a" n parent)))
+                          (format "Class ~a must have a constructor due to its extension of class ~a." n parent)
+                          (format "Class ~a cannot access a default constructor for ~a." n parent)))
                      ((throws)
-                      (format "Class ~a cannot use the default constructor for ~a, as ~a's default contains a throws clause"
+                      (format "Class ~a cannot use the default constructor for ~a, as ~a's default contains a throws clause."
                               n parent parent)))
                    n src)))
   
@@ -1577,14 +1674,14 @@
      (case kind
        ((num) 
         (format 
-         "Method ~a in ~a overrides a method from ~a: Method in ~a should throw no types if original doesn't"
+         "Method ~a in ~a overrides a method from ~a: Method in ~a should throw no types if original doesn't."
          (method-name->ext-name m-name parms) (car class) parent (car class)))
        ((subclass)
-        (let ((line1 (format "Method ~a in ~a overrides from a method from ~a"
+        (let ((line1 (format "Method ~a in ~a overrides from a method from ~a."
                              (method-name->ext-name m-name parms) (car class) parent))
               (line2 
                (format 
-                "All types thrown by overriding method in ~a must be subtypes of original throws: ~a is not"
+                "All types thrown by overriding method in ~a must be subtypes of original throws: ~a is not."
                 (car class) (type->ext-name throw))))
           (format "~a~n~a" line1 line2))))
      'throws src))
@@ -1592,14 +1689,15 @@
   ;return-error string (list type) (list string) type type src -> void
   (define (override-return-error name parms class ret old-ret src)
     (let ((name (string->symbol name))
+          (m-name-short (method-name->ext-name name null))
           (m-name (method-name->ext-name name parms)))
       (raise-error 
        name
        (format 
         "~a~n~a"
-        (format "Method ~a of class ~a overrides an inherited method, in overriding the return type must remain the same"
+        (format "Method ~a of class ~a overrides an inherited method, in overriding the return type must remain the same."
                 m-name (car class))
-        (format "~a's return has changed from ~a to ~a" m-name (type->ext-name old-ret) (type->ext-name ret)))
+        (format "~a's return has changed from ~a to ~a." m-name-short (type->ext-name old-ret) (type->ext-name ret)))
        name src)))
   
   ;override-access-error symbol symbol string (list type) (list string) string src -> void
@@ -1612,14 +1710,14 @@
                       (if (eq? level 'full)
                           (format 
                            "Method ~a in ~a attempts to override final method from ~a, final methods may not be overridden"
-                           m-name (car class) parent)
-                          (format "Method ~a from ~a cannot be overridden in ~a" m-name parent (car class))))
+                           m-name (car class) (if (list? parent) (car parent) parent))
+                          (format "Method ~a from ~a cannot be overridden in ~a" name parent (car class))))
                      ((static)
                       (format "Method ~a in ~a attempts to override static method from ~a, which is not allowed"
                               m-name (car class) parent))
                      ((public) 
                       (format "Method ~a in ~a must be public to override public method from ~a, ~a is not public" 
-                              m-name (car class) parent m-name))
+                              m-name (car class) parent name))
                      ((protected) 
                       (format 
                        "Method ~a in ~a must be public or protected to override protected method from ~a, it is neither"
@@ -1634,7 +1732,7 @@
     (let ((name (id->ext-name (field-name parm))))
       (raise-error name
                    (format 
-                    "Method parameters may not share names, ~a in ~a cannot have multiple parameters with the name ~a"
+                    "Method parameters may not share names, ~a in ~a cannot have multiple parameters with the name ~a."
                     meth (car class) name)
                    name (id-src (field-name parm)))))
 
@@ -1645,21 +1743,21 @@
                    (case kind
                      ((field) 
                       (format 
-                       "Each field in a class must have a unique name. Multiple fields have been declared with the name ~a" 
+                       "Each field in a class must have a unique name. Multiple fields have been declared with the name ~a." 
                        n))
                      ((method) 
-                      (format "~a has been declared as a field and a method, which is not allowed" n))
+                      (format "~a has been declared as a field and a method, which is not allowed." n))
                      ((class) 
-                      (format "~a has been declared as a field and a ~a, which is not allowed" n
+                      (format "~a has been declared as a field and a ~a, which is not allowed." n
                               (if (eq? level 'intermediate) "class or interface" "class")))
                      ((inherited-conflict-method)
-                      (format "Method ~a conflicts with an inherited field of the same name" n)))
+                      (format "Method ~a conflicts with an inherited field of the same name." n)))
                    n src)))
   
   ;import-error: name src -> void
   (define (import-error imp src)
     (raise-error 'import
-                 (format "Import ~a not found" (path->ext (name->path imp)))
+                 (format "Import ~a not found." (path->ext (name->path imp)))
                  'import src))
 
   ;file-error: symbol (list string) src symbol -> void
@@ -1670,26 +1768,26 @@
                        (case kind
                          ((file) (format "Required file ~a, for class or interface ~a, not found" 
                                          (string-append (path->ext path) ".java") (path->ext path)))
-                         ((dir) (format "Required directory ~a not found" (path->ext path))))
+                         ((dir) (format "Required directory, for package ~a not found" (path->ext path))))
                        k src))
         (raise-error (string->symbol (car path))
                      (case kind
-                       ((file) (format "Class or interface ~a is not known" (path->ext path)))
-                       ((dir) (format "Directory to search, ~a, is not known" (path->ext path))))
+                       ((file) (format "Class or interface ~a is not known." (path->ext path)))
+                       ((dir) (format "Package ~a is not known." (path->ext path))))
                      (string->symbol (car path))
                      src)))
 
   ;used-restricted-import: string (list string) src -> void
   (define (used-restricted-import class path src)
     (raise-error 'import
-                 (format "Imported class, ~a, cannot be imported or used" (path->ext (cons class path)))
+                 (format "Imported class, ~a, cannot be imported or used." (path->ext (cons class path)))
                  'import src))
 
   
   ;throws-error id src -> void
   (define (throws-error t src)
     (raise-error 'throws
-                 (format "Thrown class must be a subtype of Throwable: Given ~a" (id->ext-name t))
+                 (format "Thrown class must be a subtype of Throwable: Given ~a." (id->ext-name t))
                  'throws src))
         
   (define build-info-location (make-parameter #f))

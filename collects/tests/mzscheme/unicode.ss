@@ -551,19 +551,19 @@
     (#(#f #f #f #f #f #f) error
      (#o374 #o200 #o200 #o200 #o200 #o200))
     ;; illedgal surrogates
-    (#(#f #f #f) error
+    (#(#f #f #f) surrogate1
      (#o355 #o240 #o200))
-    (#(#f #f #f) error
+    (#(#f #f #f) surrogate1
      (#o355 #o255 #o277))
-    (#(#f #f #f) error
+    (#(#f #f #f) surrogate1
      (#o355 #o256 #o200))
-    (#(#f #f #f) error
+    (#(#f #f #f) surrogate1
      (#o355 #o257 #o277))
-    (#(#f #f #f) error
+    (#(#f #f #f) surrogate2
      (#o355 #o260 #o200))
-    (#(#f #f #f) error
+    (#(#f #f #f) surrogate2
      (#o355 #o276 #o200))
-    (#(#f #f #f) error
+    (#(#f #f #f) surrogate2
      (#o355 #o277 #o277))
     (#(#f #f #f #f #f #f) error
      (#o355 #o240 #o200 #o355 #o260 #o200))
@@ -666,7 +666,7 @@
 		      (test 0 bytes-utf-8-index s 0)
 		      (let-values ([(s2 n status) (bytes-convert utf-8-iconv s)])
 			(test (case parse-status 
-				[(error/aborts) 'error]
+				[(error/aborts surrogate1 surrogate2) 'error]
 				[else parse-status ])
 			      'status status))
 		      (let ([convert
@@ -700,7 +700,7 @@
 					     (bytes-convert utf-8-iconv-p (bytes-append prefix s))]
 					    [(pl) (bytes-length prefix)])
 				 (case parse-status
-				   [(error)
+				   [(error surrogate1 surrogate2)
 				    (test 'complete 'status status)
 				    (test (+ (bytes-length s) pl) 'n n)
 				    (test (+ (vector-length code-points) pl) bytes-length s2)
@@ -857,8 +857,150 @@
 					     (loop 0 a))
 					 (loop (- n (min d n)) (cons s a)))))))])
 		      (go (lambda (n p) (read-n n p 1)))
-		      (go (lambda (n p) (read-n n p 2))))))))
+		      (go (lambda (n p) (read-n n p 2))))))
+		;; Test UTF-16
+		(let ([c (bytes-open-converter "platform-UTF-8" "platform-UTF-16")])
+		  (let-values ([(s2 n status) (bytes-convert c s)])
+		    (case parse-status
+		      [(surrogate1 surrogate2)
+		       (if (eq? (system-type) 'windows)
+			   (begin
+			     (if (eq? parse-status 'surrogate1)
+				 (test 'aborts 'status status)
+				 (test 'complete 'status status))
+			     ;; Double the surrogate, and then the "unpaired"
+			     ;; surrogates are still allowed, and they're doubled
+			     (let-values ([(s2 n status) (bytes-convert c (bytes-append s s))])
+			       (if (eq? parse-status 'surrogate1)
+				   (begin
+				     (test 3 'ds-count n)
+				     (test 'aborts `(status ,s) status))
+				   (test 'complete `(status ,s) status)))
+			     (let ([try-xtra
+				    (lambda (xtra all? d-size)
+				      (when all?
+					;; Add non-surrogate to the end, and it should always work:
+				        (let-values ([(s2 n status) (bytes-convert c (bytes-append s xtra))])
+					  (test 'complete 'status status)
+					  (test (+ 3 (bytes-length xtra)) 'cnt n)
+					  (test (* 2 (+ 1 d-size)) bytes-length s2)))
+				      ;; Same, even if we only accept 2 output bytes:
+				      (let-values ([(n0 n status) (bytes-convert c (bytes-append s xtra)
+										 0 (+ 3 (bytes-length xtra))
+										 (make-bytes 2))])
+					 (test 'continues 'status status)
+					 (test 3 'cnt n)
+					 (test 2 'got n0)))])
+			       (try-xtra #"a" #t 1)
+			       (try-xtra #"\360\220\200\200" #t 2)
+			       (try-xtra #"\355\240\200" #f 1)))
+			   (test 'error 'status status))]
+		      [(error error/aborts)
+		       (test 'error 'status status)]
+		      [(aborts)
+		       (test 'aborts 'status status)]
+		      [else
+		       (test parse-status 'status status)])
+		    (when (eq? status 'complete)
+		      ;; complete => used all bytes
+		      (test n 'count (bytes-length s))
+		      ;; complete => unconverting to return to original
+		      (unless (memq parse-status '(surrogate1 surrogate2))
+		        (let ([c2 (bytes-open-converter "platform-UTF-16" "platform-UTF-8")])
+			  (let-values ([(s3 n2 status2) (bytes-convert c2 s2)])
+			    (test s `(UTF-16-round-trip ,s2) s3)
+			    (test n2 'count (bytes-length s2)))
+			  ;; Try partial unconvert
+			  (let-values ([(s4 n4 status4) (bytes-convert c2 s2 0 (sub1 (bytes-length s2)))])
+			    (test 'aborts `(status ,s2) status4))
+			  ;; Try unconvert into to-small buffer:
+			  (let-values ([(s4 n4 status4) (bytes-convert c2 s2 0 (bytes-length s2) 
+								       (make-bytes (sub1 (bytes-length s))))])
+			    (test 'continues 'status status4))))
+		      ;; complete => can add bytes onto the end
+		      (let-values ([(s2 n status) (bytes-convert c (bytes-append s #"x"))])
+			(test 'complete 'status status)
+			(test n 'count (add1 (bytes-length s))))
+		      ;; complete => need enough room for result
+		      (when (positive? (bytes-length s2))
+			(let ([dest (make-bytes (bytes-length s2))])
+			  (let-values ([(s3 n2 status) (bytes-convert c s 0 n dest 0 (sub1 (bytes-length s2)))])
+			    (test 'continues 'status status)
+			    (when (positive? n2)
+			      (let-values ([(s4 n3 status) (bytes-convert c s n2 n dest s3)])
+				(test 'complete 'status status)
+				(test s2 'bytes-append dest)
+				(test n + n2 n3)
+				(test (bytes-length s2) + s3 s4)))))))
+		    (when (and (eq? status 'error)
+			       (not (eq? parse-status 'error/aborts)))
+		      ;; permissive decoder should work:
+		      (let ([c2 (bytes-open-converter "platform-UTF-8-permissive" "platform-UTF-16")])
+			(let-values ([(s2 n status) (bytes-convert c2 s)])
+			  (test 'complete 'status status)
+			  ;; Should be the same as decoding corrected UTF-8:
+			  (let-values ([(s3 n status) (bytes-convert c (string->bytes/utf-8
+									(bytes->string/utf-8 s #\?)))])
+			    (test s3 `(permissive ,s) s2)))))))))
 	    basic-utf-8-tests))
+
+;; Further UTF-16 tests
+(let ([c (bytes-open-converter "platform-UTF-16" "platform-UTF-8")])
+  (let-values ([(s n status) (bytes-convert c (bytes-append
+					       (integer->integer-bytes #xD800 2 #f)
+					       (integer->integer-bytes #xDC00 2 #f)))])
+    (test-values (list #"" 0 'aborts)
+		 (lambda () (bytes-convert c (integer->integer-bytes #xD800 2 #f) )))
+    ;; Windows: unpaired surrogates allowed:
+    (when (eq? 'windows (system-type))
+      (test-values (list #"" 0 'aborts)
+		   (lambda () (bytes-convert c (integer->integer-bytes #xD8FF 2 #f))))
+      (test-values (list #"\355\277\277" 2 'complete)
+		   (lambda () (bytes-convert c (integer->integer-bytes #xDFFF 2 #f)))))
+    ;; Non-windows: after #xD800 bits, surrogate pair is assumed
+    (unless (eq? 'windows (system-type))
+      (test-values (list #"" 0 'aborts)
+		   (lambda () (bytes-convert c (integer->integer-bytes #xD800 2 #f))))
+      (test-values (list #"" 0 'aborts)
+		   (lambda () (bytes-convert c (integer->integer-bytes #xDFFF 2 #f) )))
+      (test-values (list s 4 'complete)
+		   (lambda ()
+		     (bytes-convert c
+				    (bytes-append (integer->integer-bytes #xD800 2 #f) 
+						  (integer->integer-bytes #xD800 2 #f)))))
+      (test-values (list s 4 'complete)
+		   (lambda ()
+		     (bytes-convert c
+				    (bytes-append (integer->integer-bytes #xD800 2 #f) 
+						  (integer->integer-bytes #x0000 2 #f)))))
+      (test-values (list s 4 'complete)
+		   (lambda ()
+		     (bytes-convert c
+				    (bytes-append (integer->integer-bytes #xDC00 2 #f) 
+						  (integer->integer-bytes #x1000 2 #f))))))))
+(when (eq? (system-type) 'windows)
+  (let ([c (bytes-open-converter "platform-UTF-8-permissive" "platform-UTF-16")])
+    ;; Check that we use all 6 bytes of #"\355\240\200\355\260\200" or none
+    (test-values (list 12 6 'complete)
+		 (lambda ()
+		   (bytes-convert c #"\355\240\200\355\260\200" 0 6 (make-bytes 12))))
+    ;; If we can't look all the way to the end, reliably abort without writing:
+    (let ([s (make-bytes 12 (char->integer #\x))])
+      (let loop ([n 1])
+	(unless (= n 6)
+	  (test-values (list 0 0 'aborts)
+		       (lambda ()
+		         (bytes-convert c #"\355\240\200\355\260\200" 0 n s)))
+	  (test #"xxxxxxxxxxxx" values s) ; no writes to bytes string
+	  (loop (add1 n)))))
+    (let ([s (make-bytes 12 (char->integer #\x))])
+      (let loop ([n 0])
+	(unless (= n 12)
+	  (test-values (list 0 0 'continues)
+		       (lambda ()
+			 (bytes-convert c #"\355\240\200\355\260\200" 0 6 (make-bytes n))))
+	  (test #"xxxxxxxxxxxx" values s) ; no writes to bytes string
+	  (loop (add1 n)))))))
 
 ;; Seems like this sort of thing should be covered above, and maybe it
 ;;  it after some other corrections. But just in case:

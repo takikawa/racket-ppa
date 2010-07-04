@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2005 PLT Scheme, Inc.
+// Copyright:  (c) 2004-2006 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -53,8 +53,8 @@ wxScreen::wxScreen // Constructor (for screen window)
 	if (width < 0) cWindowWidth = wPortRect.right - wPortRect.left;
 	if (height < 0) cWindowHeight = wPortRect.bottom - wPortRect.top;
 
-  	cMenuArea = new wxArea(this);
-  	cScreenArea = new wxArea(this);
+  	cMenuArea = new WXGC_PTRS wxArea(this);
+  	cScreenArea = new WXGC_PTRS wxArea(this);
 }
 
 //=============================================================================

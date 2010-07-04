@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -1367,6 +1367,34 @@ number_to_string (int argc, Scheme_Object *argv[])
   } else
     radix = 10;
 
+  if (SCHEME_INTP(o) && ((radix == 10) || (radix == 16))) {
+    /* Fast path for common case. */
+    mzchar num[32];
+    int pos = 32;
+    long v = SCHEME_INT_VAL(o);
+    if (v) {
+      int neg, digit;
+      if (v < 0) {
+	neg = 1;
+	v = -v;
+      } else
+	neg = 0;
+      while (v) {
+	digit = (v % radix);
+	if (digit < 10)
+	  num[--pos] = digit + '0';
+	else
+	  num[--pos] = (digit - 10) + 'a';
+	v = v / radix;
+      }
+      if (neg)
+	num[--pos] = '-';
+    } else {
+      num[--pos] = '0';
+    }
+    return scheme_make_sized_offset_char_string(num, pos, 32 - pos, 1);
+  }
+
   return scheme_make_utf8_string/*_without_copying*/(number_to_allocated_string(radix, o, 1));
 }
 
@@ -1476,7 +1504,7 @@ static char *double_to_string (double d, int alloc)
   return s;
 }
 
-char *number_to_allocated_string(int radix, Scheme_Object *obj, int alloc)
+static char *number_to_allocated_string(int radix, Scheme_Object *obj, int alloc)
 {
   char *s;
 
@@ -1917,7 +1945,7 @@ static Scheme_Object *real_to_bytes (int argc, Scheme_Object *argv[])
     size = SCHEME_INT_VAL(argv[1]);
   else
     size = 0;
-  if ((size != 2) && (size != 4) &&(size != 8))
+  if ((size != 4) && (size != 8))
     scheme_wrong_type("real->floating-point-bytes", "exact 4 or 8", 1, argc, argv);
 
   if (argc > 2)

@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2005 PLT Scheme, Inc.
+// Copyright:  (c) 2004-2006 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -97,7 +97,7 @@ wxApp::wxApp():wxbApp()
   wxREGGLOB(wxScreen::gScreenWindow);
   {
     wxScreen *sc;
-    sc = new wxScreen;
+    sc = new WXGC_PTRS wxScreen;
     wxScreen::gScreenWindow = sc;
   }
   menuArea = (wxScreen::gScreenWindow)->MenuArea();
@@ -419,7 +419,7 @@ void wxApp::doMacMouseUp(void)
 
       mouseWindow->ScreenToClient(&hitX, &hitY); // mouseWindow client c.s.
       
-      theMouseEvent = new wxMouseEvent(type);
+      theMouseEvent = new WXGC_PTRS wxMouseEvent(type);
       theMouseEvent->leftDown = FALSE;
       theMouseEvent->middleDown = FALSE;
       theMouseEvent->rightDown = FALSE;
@@ -460,7 +460,7 @@ void wxApp::doMacMouseUp(void)
 	  rightButton = cCurrentEvent.modifiers & controlKey;
 	  type = rightButton ? wxEVENT_TYPE_RIGHT_UP : wxEVENT_TYPE_LEFT_UP;
 	  
-	  theMouseEvent = new wxMouseEvent(type);
+	  theMouseEvent = new WXGC_PTRS wxMouseEvent(type);
 	  
 	  theMouseEvent->leftDown = FALSE;
 	  theMouseEvent->middleDown = FALSE;
@@ -489,7 +489,7 @@ void wxApp::doMacMouseMotion(void)
   Bool isMouseDown = (cCurrentEvent.modifiers & btnState);
   wxMouseEvent *theMouseEvent;
 
-  theMouseEvent = new wxMouseEvent(wxEVENT_TYPE_MOTION);
+  theMouseEvent = new WXGC_PTRS wxMouseEvent(wxEVENT_TYPE_MOTION);
   theMouseEvent->leftDown = isMouseDown && !isRightButton;
   theMouseEvent->middleDown = FALSE;
   theMouseEvent->rightDown = isMouseDown && isRightButton;
@@ -552,7 +552,7 @@ void wxApp::doMacMouseLeave(void)
   wxWindow* win;
   void *rc;
 
-  theMouseEvent = new wxMouseEvent(wxEVENT_TYPE_LEAVE_WINDOW);
+  theMouseEvent = new WXGC_PTRS wxMouseEvent(wxEVENT_TYPE_LEAVE_WINDOW);
   theMouseEvent->leftDown = isMouseDown && !isRightButton;
   theMouseEvent->middleDown = FALSE;
   theMouseEvent->rightDown = isMouseDown && isRightButton;
@@ -629,7 +629,7 @@ void wxApp::doMacKeyUpDown(Bool down)
   if (!theMacWxFrame || !theMacWxFrame->IsEnable())
     return;	
 
-  theKeyEvent = new wxKeyEvent(wxEVENT_TYPE_CHAR);
+  theKeyEvent = new WXGC_PTRS wxKeyEvent(wxEVENT_TYPE_CHAR);
   theKeyEvent->x = cCurrentEvent.where.h;
   theKeyEvent->y = cCurrentEvent.where.v;
   theKeyEvent->controlDown = Bool(cCurrentEvent.modifiers & controlKey);
@@ -827,9 +827,11 @@ void wxApp::doMacKeyUpDown(Bool down)
 						GetScriptManagerVariable(smKeyScript),
 						kCFAllocatorNull);
 	  if (str) {
-	    if (CFStringGetLength(str) > 0)
-	      CFStringGetCharacters(str, CFRangeMake(0, 1), keys);
-	    else
+	    if (CFStringGetLength(str) > 0) {
+	      GC_CAN_IGNORE CFRange rng;
+	      rng = CFRangeMake(0, 1);
+	      CFStringGetCharacters(str, rng, keys);
+	    } else
 	      keys[0] = '?';
 	    CFRelease(str);
 	  } else
@@ -1142,7 +1144,7 @@ void wxApp::doMacContentClick(wxFrame* frame)
   int hitX, hitY;
   int metal_drag_ok = 1;
 
-  theMouseEvent = new wxMouseEvent(mouseEventType);
+  theMouseEvent = new WXGC_PTRS wxMouseEvent(mouseEventType);
   theMouseEvent->leftDown = !rightButton;
   theMouseEvent->middleDown = FALSE;
   theMouseEvent->rightDown = rightButton;

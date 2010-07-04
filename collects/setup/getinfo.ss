@@ -7,14 +7,14 @@
            
            (lib "contract.ss")
            
-           (lib "planet-archives.ss" "planet"))
+           (lib "cachepath.ss" "planet"))
 
   (define info? (opt-> (symbol?) ((-> any/c)) any/c))
   (define path-or-string? (lambda (x) (or (path? x) (string? x))))
   
   (provide/contract
-   (get-info ((listof path-or-string?) . -> . (union info? boolean?)))
-   (get-info/full (path? . -> . (union info? boolean?)))
+   (get-info ((listof path-or-string?) . -> . (or/c info? boolean?)))
+   (get-info/full (path? . -> . (or/c info? boolean?)))
    (find-relevant-directories (opt-> ((listof symbol?))
                                      ((lambda (x) (or (eq? x 'preferred)
                                                       (eq? x 'all-available))))
@@ -81,35 +81,43 @@
     ;; Use the colls ht because a collection might be in multiple
     ;;  collection paths, and we only want one
     (let ([colls (make-hash-table 'equal)])
-      (for-each (lambda (f)
-                  (when (file-exists? f)
-                    (for-each 
-                     (lambda (i)
-                       (match i
-                         [((? bytes? pathbytes) 
-                           ((? symbol? fields) ...)
-                           key ;; anything is okay here
-                           (? integer? maj)
-                           (? integer? min))
-                          (let ((old-items (hash-table-get 
-                                            colls
-                                            key
-                                            (lambda () '())))
-                                (new-item (list (bytes->path pathbytes) fields maj min)))
-                            (hash-table-put! colls 
-                                             key
-                                             ((table-insert t) new-item old-items)))]
-                         [_
-                          (error 'find-relevant-directories
-                                 "bad info-domain cache entry: ~e in: ~a" 
-                                 i
-                                 f)]))
-                     (let ([l (with-input-from-file f read)])
-                       (unless (list? l)
-                         (error 'find-relevant-directories
-                                "bad info-domain cache file: ~a" 
-                                f))
-                       l))))
+      (for-each (lambda (f+root-dir)
+		  (let ([f (car f+root-dir)]
+			[root-dir (cdr f+root-dir)])
+		    (when (file-exists? f)
+		      (for-each 
+		       (lambda (i)
+			 (match i
+			   [((? bytes? pathbytes) 
+			     ((? symbol? fields) ...)
+			     key ;; anything is okay here
+			     (? integer? maj)
+			     (? integer? min))
+			    (let ((old-items (hash-table-get 
+					      colls
+					      key
+					      (lambda () '())))
+				  (new-item (list (let ([p (bytes->path pathbytes)])
+						    (if (and (relative-path? p) root-dir)
+							(build-path root-dir p)
+							p))
+						  fields 
+						  maj 
+						  min)))
+			      (hash-table-put! colls 
+					       key
+					       ((table-insert t) new-item old-items)))]
+			   [_
+			    (error 'find-relevant-directories
+				   "bad info-domain cache entry: ~e in: ~a" 
+				   i
+				   f)]))
+		       (let ([l (with-input-from-file f read)])
+			 (unless (list? l)
+			   (error 'find-relevant-directories
+				  "bad info-domain cache file: ~a" 
+				  f))
+			 l)))))
 		(reverse (table-paths t)))
       ;; For each coll, invert the mapping, adding the col name to the list for each sym: 
       (hash-table-for-each colls
@@ -134,10 +142,13 @@
                   [(eq? key 'preferred) preferred-table]
                   [(eq? key 'all-available) all-available-table]
                   [else (error 'find-relevant-directories "Invalid key: ~s" key)]))
- 
+
+      ;; A list of (cons cache.ss-path root-dir-path)
+      ;;  If root-dir-path is not #f, then paths in the cache.ss
+      ;;  file are relative to it. #f is used for the planet cache.ss file.
       (define search-path 
-        (cons user-infotable 
-              (map (lambda (coll) (build-path coll "info-domain" "compiled" "cache.ss"))
+        (cons (cons user-infotable #f)
+              (map (lambda (coll) (cons (build-path coll "info-domain" "compiled" "cache.ss") coll))
                    (current-library-collection-paths))))
       
       (unless (equal? (table-paths t) search-path)
@@ -157,7 +168,7 @@
                                       syms)
                             ;; Extract the relevant collections:
                             (hash-table-map result (lambda (k v) k))))])
-        (quicksort unsorted compare-directories))))
+        (sort unsorted compare-directories))))
   
   (define (compare-directories a b)
     (let-values ([(base1 name1 dir?1) (split-path a)]

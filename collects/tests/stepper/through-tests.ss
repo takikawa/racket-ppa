@@ -34,7 +34,7 @@
                           (fprintf (current-error-port) "test-sequence: steps do not match.\ngiven: ~v\nexpected: ~v\n" result (car all-steps)))
 
                         ; uncomment for testing:
-                        #; (when (compare-steps result (car all-steps))
+                         #;(when (compare-steps result (car all-steps))
                            (printf "test-sequence: steps match for expected result: ~v\n"(car all-steps)))
 
                         (set! all-steps (cdr all-steps)))))]
@@ -205,8 +205,6 @@
   
 
   
-  
-  ;; OLD TEST CASES
   (t mz-app2
      (test-mz-sequence "((lambda (x) (+ x 3)) 4)"
 		       `((before-after ((hilite ((lambda (x) (+ x 3)) 4)))
@@ -1371,6 +1369,22 @@
   ;;
   ;;;;;;;;;;;
   
+  (t simple-begin
+     (test-advanced-sequence "(+ 3 (begin 4 5))"
+       `((before-after ((+ 3 (hilite (begin 4 5)))) 
+                       ((+ 3 (hilite 5))))
+         (before-after ((hilite (+ 3 5)))
+                       ((hilite 8)))
+         (finished-stepping))))
+  
+  (t begin-onlyvalues
+     (test-advanced-sequence "(+ 3 (begin 4 5 6))"
+       `((before-after ((+ 3 (hilite (begin 4 5 6))))
+                       ((+ 3 (hilite (begin 5 6)))))
+         (before-after ((+ 3 (hilite (begin 5 6))))
+                       ((+ 3 (hilite 6))))
+         (before-after ((hilite (+ 3 6))
+                        (hilite 9))))))
   
   (t begin
      (test-advanced-sequence "(begin (+ 3 4) (+ 4 5) (+ 9 8))"
@@ -1398,6 +1412,6 @@
      (test-teachpack-sequence " (define (f2c x) x) (convert-gui f2c)" `() ; placeholder
                                ))
   
-  #;(run-tests '(begin))
+  #;(run-tests '(begin-onlyvalues))
   (run-all-tests)
   )

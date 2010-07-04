@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -30,8 +30,6 @@ static Scheme_Object *make_vector (int argc, Scheme_Object *argv[]);
 static Scheme_Object *vector (int argc, Scheme_Object *argv[]);
 static Scheme_Object *vector_immutable (int argc, Scheme_Object *argv[]);
 static Scheme_Object *vector_length (int argc, Scheme_Object *argv[]);
-static Scheme_Object *vector_ref (int argc, Scheme_Object *argv[]);
-static Scheme_Object *vector_set (int argc, Scheme_Object *argv[]);
 static Scheme_Object *vector_to_list (int argc, Scheme_Object *argv[]);
 static Scheme_Object *list_to_vector (int argc, Scheme_Object *argv[]);
 static Scheme_Object *vector_fill (int argc, Scheme_Object *argv[]);
@@ -42,66 +40,70 @@ static Scheme_Object *zero_length_vector;
 void
 scheme_init_vector (Scheme_Env *env)
 {
+  Scheme_Object *p;
+
   REGISTER_SO(zero_length_vector);
   zero_length_vector = (Scheme_Object *)scheme_malloc_tagged(sizeof(Scheme_Vector)
 							     - sizeof(Scheme_Object *));
   zero_length_vector->type = scheme_vector_type;
   SCHEME_VEC_SIZE(zero_length_vector) = 0;
 
-  scheme_add_global_constant("vector?", 
-			     scheme_make_folding_prim(vector_p, 
-						      "vector?", 
-						      1, 1, 1), 
-			     env);
+  p = scheme_make_folding_prim(vector_p, "vector?", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant("vector?", p, env);
+
   scheme_add_global_constant("make-vector", 
-			     scheme_make_prim_w_arity(make_vector, 
-						      "make-vector", 
-						      1, 2), 
+			     scheme_make_noncm_prim(make_vector, 
+						    "make-vector", 
+						    1, 2), 
 			     env);
   scheme_add_global_constant("vector", 
-			     scheme_make_prim_w_arity(vector, 
-						      "vector", 
-						      0, -1), 
+			     scheme_make_noncm_prim(vector, 
+						    "vector", 
+						    0, -1), 
 			     env);
   scheme_add_global_constant("vector-immutable", 
-			     scheme_make_prim_w_arity(vector_immutable, 
-						      "vector-immutable", 
-						      0, -1), 
+			     scheme_make_noncm_prim(vector_immutable, 
+						    "vector-immutable", 
+						    0, -1), 
 			     env);
   scheme_add_global_constant("vector-length", 
 			     scheme_make_folding_prim(vector_length, 
 						      "vector-length", 
 						      1, 1, 1), 
 			     env);
-  scheme_add_global_constant("vector-ref", 
-			     scheme_make_prim_w_arity(vector_ref, 
-						      "vector-ref", 
-						      2, 2), 
-			     env);
-  scheme_add_global_constant("vector-set!", 
-			     scheme_make_prim_w_arity(vector_set, 
-						      "vector-set!", 
-						      3, 3), 
-			     env);
+
+  p = scheme_make_noncm_prim(scheme_checked_vector_ref, 
+			     "vector-ref", 
+			     2, 2);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("vector-ref", p, env);
+
+  p = scheme_make_noncm_prim(scheme_checked_vector_set,
+			     "vector-set!", 
+			     3, 3);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_MIN_NARY_INLINED;
+  scheme_add_global_constant("vector-set!", p, env);
+
   scheme_add_global_constant("vector->list", 
-			     scheme_make_prim_w_arity(vector_to_list, 
-						      "vector->list", 
-						      1, 1), 
+			     scheme_make_noncm_prim(vector_to_list, 
+						    "vector->list", 
+						    1, 1), 
 			     env);
   scheme_add_global_constant("list->vector", 
-			     scheme_make_prim_w_arity(list_to_vector, 
-						      "list->vector", 
-						      1, 1), 
+			     scheme_make_noncm_prim(list_to_vector, 
+						    "list->vector", 
+						    1, 1), 
 			     env);
   scheme_add_global_constant("vector-fill!", 
-			     scheme_make_prim_w_arity(vector_fill, 
-						      "vector-fill!", 
-						      2, 2), 
+			     scheme_make_noncm_prim(vector_fill, 
+						    "vector-fill!", 
+						    2, 2), 
 			     env);
   scheme_add_global_constant("vector->immutable-vector", 
-			     scheme_make_prim_w_arity(vector_to_immutable, 
-						      "vector->immutable-vector", 
-						      1, 1), 
+			     scheme_make_noncm_prim(vector_to_immutable, 
+						    "vector->immutable-vector", 
+						    1, 1), 
 			     env);
 }
 
@@ -229,8 +231,8 @@ bad_index(char *name, Scheme_Object *i, Scheme_Object *vec)
   return NULL;
 }
 
-static Scheme_Object *
-vector_ref (int argc, Scheme_Object *argv[])
+Scheme_Object *
+scheme_checked_vector_ref (int argc, Scheme_Object *argv[])
 {
   long i, len;
 
@@ -247,8 +249,8 @@ vector_ref (int argc, Scheme_Object *argv[])
   return (SCHEME_VEC_ELS(argv[0]))[i];
 }
 
-static Scheme_Object *
-vector_set(int argc, Scheme_Object *argv[])
+Scheme_Object *
+scheme_checked_vector_set(int argc, Scheme_Object *argv[])
 {
   long i, len;
 

@@ -46,6 +46,7 @@
      make-debug-error-display-handler/text
      make-debug-eval-handler
      hide-backtrace-window
+     print-bug-to-stderr
      
      profile-definitions-text-mixin
      profile-tab-mixin
@@ -196,7 +197,8 @@
      goto-plt-license
      help-desk
      get-docs
-     open-url))
+     open-url
+     add-help-desk-font-prefs))
   
   (define-signature drscheme:language^
     (get-default-mixin
@@ -205,6 +207,9 @@
      
      create-module-based-launcher
      create-module-based-stand-alone-executable
+     create-module-based-distribution
+
+     create-distribution-for-executable
 
      create-executable-gui
      put-executable
@@ -224,6 +229,11 @@
      simple-module-based-language-config-panel
      
      add-snip-value
+
+     register-capability
+     capability-registered?
+     get-capability-default
+     get-capability-contract
      
      language<%>
      module-based-language<%>

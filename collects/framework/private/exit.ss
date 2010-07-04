@@ -57,9 +57,16 @@
 	     (if (eq? (system-type) 'windows)
 		 (string-constant exit)
 		 (string-constant quit))
-	     (string-constant cancel)
+	     (if (eq? (system-type) 'windows)
+		 (string-constant dont-exit)
+		 (string-constant dont-quit))
 	     (string-constant warning)
-	     #f)
+	     #f
+             #f
+             'app
+             (case-lambda
+              [() (not (preferences:get 'framework:verify-exit))]
+              [(new) (preferences:set 'framework:verify-exit (not new))]))
 	    #t))
 
       (define (-exit)

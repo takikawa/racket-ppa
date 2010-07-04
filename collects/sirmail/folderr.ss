@@ -15,7 +15,7 @@
   
   (require (lib "hierlist-sig.ss" "hierlist"))
 
-  (require (lib "openssl.ss" "openssl"))
+  (require (lib "mzssl.ss" "openssl"))
   
   (provide folder@)
   (define folder@
@@ -45,7 +45,7 @@
                                                 frame
                                                 ""
                                                 '(password))])
-                     (unless p (error 'connect "connection cancelled"))
+                     (unless p (raise-user-error 'connect "connection cancelled"))
                      p))])
           (let-values ([(server port-no)
                         (parse-server-name (IMAP-SERVER) (if (get-pref 'sirmail:use-ssl?) 993 143))])
@@ -213,7 +213,7 @@
                                 short-name
                                 selectable?
                                 (loop child-mailbox-name)))))
-                       (quicksort
+                       (sort
                         child-mailboxes
                         (lambda (x y)
                           (string<=? (bytes->string/utf-8 (get-child-mailbox-name x))

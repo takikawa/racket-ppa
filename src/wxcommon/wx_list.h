@@ -4,7 +4,7 @@
  * Author:		Julian Smart
  * Created:	1993
  * Updated:	
- * Copyright:	(c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:	(c) 2004-2006 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  */
 
@@ -35,6 +35,9 @@ class wxList;
 enum KeyType {wxKEY_NONE = 0, wxKEY_INTEGER, wxKEY_STRING};
 
 class wxNode
+#ifndef MZ_PRECISE_GC
+: public gc
+#endif
 {
  private:
  
@@ -159,6 +162,9 @@ class wxStringList: public wxList
 class wxChildList;
 
 class wxChildNode
+#ifndef MZ_PRECISE_GC
+: public gc
+#endif
 {
 public:
   wxChildList *owner;
@@ -177,6 +183,9 @@ public:
 };
 
 class wxChildList
+#ifndef MZ_PRECISE_GC
+: public gc
+#endif
 {
  public:
   int n;

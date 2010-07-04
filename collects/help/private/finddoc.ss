@@ -1,10 +1,12 @@
 (module finddoc mzscheme
-  (require "path.ss")
+  (require "path.ss"
+	   "get-help-url.ss"
+           (lib "dirs.ss" "setup"))
 
   (provide finddoc
-	   findreldoc
-           finddoc-page
-	   finddoc-page-anchor)
+	   finddoc-page
+	   finddoc-page-anchor
+	   find-doc-directory)
   
   ;; Creates a "file:" link into the indicated manual.
   ;; The link doesn't go to a particular anchor,
@@ -17,31 +19,18 @@
                   (build-path (car m) (caddr m))
                     label))))
 
-  ;; Given a Unix-style relative path to reach the "doc"
-  ;; collection, creates a link that can go to a
-  ;; particular anchor.
-  (define (findreldoc todocs manual index-key label)
-    (let ([m (lookup manual index-key label)])
-      (if (string? m)
-          m
-          (format "<A href=\"~a/~a/~a#~a\">~a</A>"
-                  todocs
-                  manual
-                  (caddr m)
-                  (cadddr m)
-                  label))))
-
   (define (finddoc-page-help manual index-key anchor?)
     (let ([m (lookup manual index-key "dummy")])
       (if (string? m)
           (error (format "Error finding index \"~a\" in manual \"~a\""
                          index-key manual))
-          (let ([path (if anchor?
-                          (string-append (caddr m) "#" (cadddr m))
-                          (caddr m))])
-            (if (servlet-path? path)
-                path
-                (format "/doc/~a/~a" manual path))))))
+          (if (servlet-path? (string->path (caddr m)))
+              (if anchor?
+                  (string-append (caddr m) "#" (cadddr m))
+                  (caddr m))
+              (get-help-url (build-path (list-ref m 0)
+                                        (list-ref m 2))
+                            (list-ref m 3))))))
   
   ; finddoc-page : string string -> string
   ; returns path for use by PLT Web server
@@ -63,7 +52,7 @@
   ;; (list docdir index-key filename anchor title)
   (define (lookup manual index-key label)
     (let ([key (string->symbol manual)]
-	  [docdir (build-path (collection-path "doc") manual)])
+	  [docdir (find-doc-directory manual)])
       (let ([l (hash-table-get
 		ht
 		key
@@ -77,6 +66,13 @@
 	(let ([m (assoc index-key l)])
 	  (if m 
 	      (cons docdir m)
-	      (error 'finddoc "index key ~s not found in manual ~s" index-key manual)))))))
-
-
+	      (error 'finddoc "index key ~s not found in manual ~s" index-key manual))))))
+  
+  ;; finds the full path of the doc directory, if one exists
+  ;; input is just the short name of the directory (as a path)
+  (define (find-doc-directory doc)
+    (ormap (lambda (d)
+	     (let ([p (build-path d doc)])
+	       (and (directory-exists? p)
+		    p)))
+	   (get-doc-search-dirs))))

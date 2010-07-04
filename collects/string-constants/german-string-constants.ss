@@ -14,7 +14,10 @@
  (plt "PLT")
  (drscheme "DrScheme")
  (ok "OK")
- (cancel "Absagen")
+ ;; We can't use "Abbrechen" here because that's much closer in
+ ;; meaning to "abort", and it appears in dialogs saying "Quit?" "OK"
+ ;; "Cancel."
+ (cancel "Abbrechen")
  (abort "Abbrechen")
  (untitled "Namenlos")
  (untitled-n "Namenlos ~a")
@@ -27,7 +30,8 @@
  (ignore "Ignorieren")
  (revert "Änderungen rückgängig machen")
 
- (dont-ask-again "Nicht wieder nachfragen (immer so wie jetzt)")
+ (dont-ask-again-always-current "Nicht wieder nachfragen (immer so wie jetzt)")
+ (dont-ask-again                "Nicht wieder nachfragen")
 
  (web-materials "Verwandte Web-Seiten")
  (tool-web-sites "Web-Seiten mit Tools")
@@ -46,15 +50,11 @@
  (bug-report-field-summary "Zusammenfassung")
  (bug-report-field-severity "Wie schlimm?")
  (bug-report-field-class "Art")
- (bug-report-field-priority "Priorität")
  (bug-report-field-description "Beschreibung")
  (bug-report-field-reproduce1 "Schritte, um das Problem zu")
  (bug-report-field-reproduce2 "reproduzieren")
  (bug-report-field-environment "Umgebung")
- (bug-report-field-tools "Tools")
  (bug-report-field-docs-installed "Installierte Dokumentation")
- (bug-report-field-language "Sprachebene")
- (bug-report-field-teachpacks "Teachpacks")
  (bug-report-field-collections "Kollektionen")
  (bug-report-field-human-language "Interaktionssprache")	;
  (bug-report-field-version "Version")
@@ -62,11 +62,8 @@
  (bug-report-show-synthesized-info "Generierte Informationen anzeigen")	; (an)zeigen
  (bug-report-submit "Abschicken")	
  (bug-report-submit-menu-item "Bug-Report abschicken") ;; in Help Menu (drs & help desk)
- (sending-bug-report "Bug-Report abschicken")
  (error-sending-bug-report "Versendung des Bug-Reports fehlgeschlagen")
  (error-sending-bug-report-expln "Ein Fehler ist beim Versenden des Bug-Reports aufgetreten. Falls Ihre Internet-Verbindung eigentlich funktioniert, besuchen Sie bitte:\n\n    http://bugs.plt-scheme.org/ \n\nund teilen Sie uns den Bug mit unserem Online-Formular mit. Wir bitten um Ihr Verständnis.\n\nDie Fehlermeldung lautet:\n~a")
- (bug-report-sent "Bug-Report erfolgreich verschickt")
- (bug-report-sent-detail "Wir danken für Ihren Bug-Report. Sie sollten innerhalb der nächsten 30 Minuten eine Bestätigung per Email bekommen. Falls nicht, schicken Sie eine Email an folgende Adresse: scheme@plt-scheme.org.")
  (illegal-bug-report "Ungültiger Bug-Report")
  (pls-fill-in-field "Bitte auch das \"~a\" Feld ausfüllen")
  (malformed-email-address "Ungültige Email-Adresse")
@@ -96,9 +93,7 @@
  (cs-mouse-over-import "Bindung ~s importiert aus ~s")
 
  (cs-lexical-variable "lexikalische Variable")
- (cs-lexical-syntax "lexikalische Syntax")
  (cs-imported-variable "importierte Variable")
- (cs-imported-syntax "importierte Syntax")
 
  ;;; info bar at botttom of drscheme frame
  (collect-button-label "GC")
@@ -117,7 +112,6 @@
 
  ; these appear on subsequent lines in the `Help|Welcome to DrScheme' dialog.
  (welcome-to-drscheme "Willkommen bei DrScheme")
- (version/language "Version ~a, ~a")
 
  (goto-line "Zu Zeile springen")
  (goto-line-invalid-number
@@ -135,13 +129,12 @@
 
  (file-is-not-saved "Die Datei \"~a\" ist nicht gespeichert.")
  (save "Speichern")
- (please-choose-either "Bitte entweder \"~a\" oder \"~a\" wählen")
  (close-anyway "Trotzdem schließen")
  (clear-anyway "Trotzdem löschen")
 
  (log-definitions-and-interactions "Definitionen and Interaktionen protokollieren...")
  (stop-logging "Protokoll stoppen")
- (please-choose-a-log-directory "Bitte wählen Sie ein Verzeichnis f?r das Protokoll")
+ (please-choose-a-log-directory "Bitte wählen Sie ein Verzeichnis für das Protokoll")
  (logging-to "Protokoll: ")
  (erase-log-directory-contents "Inhalt von Protokoll-Verzeichnisses ~a löschen?")
  (error-erasing-log-directory "Fehler beim Löschen des Protokoll-Verzeichnisses.\n\n~a\n")
@@ -162,7 +155,6 @@
  (syntax-coloring-choose-color "Wählen Sie eine Farbe für ~a")
  (preferences-colors "Farben")
 
- (url "URL")
  (url: "URL:")
  (open-url... "URL öffnen...")
  (open-url "URL öffnen")
@@ -173,18 +165,9 @@
  ;; Help Desk
  (help "Hilfe")
  (help-desk "Hilfezentrum")
- (plt:hd:search-results "Suchergebnisse")
  (plt:hd:search "Suchen")
- (plt:hd:search-for "Suchen nach")
- (plt:hd:lucky "Glück gehabt!")
  (plt:hd:feeling-lucky "Auf gut Glück")
- (plt:hd:stop "Stop")   
- (plt:hd:options "Optionen") 
- (plt:hd:configure "Konfiguration")
  (plt:hd:home "Hilfezentrum-Homepage") 
- (plt:hd:show-manuals "Handbücher anzeigen") 
- (plt:hd:send-bug-report "Bug-Report")
- (plt:hd:query-bug-reports "Bug-Reports abfragen")
  ; next 3 are popup menu choices in help desk search frame
  (plt:hd:search-for-keyword "Stichworteintrag")
  (plt:hd:search-for-keyword-or-index "Stichwort- oder Index-Eintrag")
@@ -193,42 +176,15 @@
  (plt:hd:containing-match "Teilwort")
  (plt:hd:regexp-match "über regulären Ausdruck")
  (plt:hd:find-docs-for "Finde Dokumentation zu:")
- (plt:hd:nothing-found-for-search-key "Nichts zu \"~a\" gefunden.")
- (plt:hd:searching "Suche...")
- (plt:hd:search-stopped "[Suche gestopt.]")
  (plt:hd:search-stopped-too-many-matches "[Suche abgebrochen: zu viele Treffer]")
  (plt:hd:nothing-found-for "Nichts zu ~a gefunden")
- (plt:hd:error-finding-docs "Konnte die Dokumentation nicht finden.\n\n~a")
  (plt:hd:and "und")
  (plt:hd:refresh "aktualisieren")
  (plt:hd:refresh-all-manuals "alle Handbücher aktualisieren")
  (plt:hd:manual-installed-date "(installiert ~a)")
  ; Help Desk configuration
- (plt:hd:configuration "Konfiguration PLT-Hilfezentrum")
- (plt:hd:no-frames "Ohne Frames")
- (plt:hd:use-frames "Mit Frames")
- (plt:hd:use-html-frames "Mit HTML-frames")
- (plt:hd:search-pane-options "Optionen Such-Panel")
- (plt:hd:height "Höhe")
- (plt:hd:bg-color "Hintergrundfarbe")
- (plt:hd:pixels "Pixel")
- (plt:hd:text-color "Farbe Text")
- (plt:hd:link-color "Farbe Links")
- (plt:hd:text-sample "Text im Such-Panel erscheint in dieser Farbe")
- (plt:hd:link-sample "Links im Such-Panel erscheinen in dieser Farbe")
- (plt:hd:save-changes "Änderungen sichern")
- (plt:hd:reset "Zurücksetzen")
- (plt:hd:defaults "Werkseinstellungen")
- (plt:hd:javascript-note
-    "Ihre Selektionen werden hier erscheinen, falls Sie Javascript eingeschaltet haben und einen aktuellen standardkompatiblen Browser benutzen.")
  ;; refreshing manuals
- (plt:hd:refresh-downloading "~a herunterladen")
- (plt:hd:refresh-installing "~a installieren")
- (plt:hd:refresh-progress "Fortschritt beim Herunterladen von PLT-Handbuch")
- (plt:hd:refresh-done "Aktualisierung der Handbücher abgeschlossen")
 ;; should not mention `SVN' (plt:hd:refresh-done "Aktualisierung der Handbücher aus SVN abgeschlossen")
- (plt:hd:refresh-installation-log "Installations-Protokoll")
- (plt:hd:refresh-stopped "PLT-Handbuch-Aktualisierung gestoppt")
  (plt:hd:refreshing-manuals "Handbücher aktualisieren")
  (plt:hd:refresh-downloading... "~a herunterladen...")
  (plt:hd:refresh-deleting... "Alte Version von ~a löschen...")
@@ -248,13 +204,14 @@
   (plt:hd:external-link-in-help "Externe URLs im Hilfe-Browser")
   (plt:hd:use-homebrew-browser "Den Hilfe-Browser für externe URLs benutzen")
   (plt:hd:new-help-desk "Neues Hilfezentrum")
-  (plt:hd:teaching-manuals "Handbücher für Lehrende und Lernende")
-  (plt:hd:professional-manuals "Handbücher für Anwender")
-  (plt:hd:all-manuals "Alle Handbücher")
 
   ;; in the Help Desk language dialog, title on the right.
   (plt:hd:manual-search-ordering "Suchreihenfolge Handbuch")
 
+  (use-drscheme-font-size "DrScheme-Schriftgröße verwenden")
+
+  (help-desk-this-is-just-example-text
+   "Dies ist nur ein Beispieltext für das Setzen der Schriftgröße.  Öffnen sie das Hilfezentrum (im \"Hilfe\"-Menü), um diesen Links zu folgen.")
 
  ;; Help desk htty proxy
  (http-proxy "HTTP-Proxy")
@@ -273,11 +230,8 @@
  (browser-command-line-label "Kommandzeile:")
  (choose-browser "Browser auswählen")
  (no-browser "Später")
- (use-internal-browser-for-help "Hilfe mit internem PLT-Browser lesen")
- (use-external-browser-for-help "Hilfe mit externam Browser lesen")
  (browser-cmdline-expl-line-1 "(Kommandozeile konstruiert durch Aneinanderhängen von Vor-Text, URL,")
  (browser-cmdline-expl-line-2 " und Nach-Text, ohne zusätzliche Leerzeichen dazwischen.")
- (cannot-display-url "Kann URL ~s nicht anzeigen: ~a")
  (install? "Installieren?")  ;; if a .plt file is found (title of dialog)
  (you-have-selected-an-installable-package "Sie haben eine installierbares Paket angewählt.")
  (do-you-want-to-install-it? "Wollen Sie es installieren?")
@@ -290,7 +244,6 @@
  (downloading-file... "Datei herunterladen...")
  (package-was-installed "Das Paket wurde erfolgreich installiert.")
  (download-was-saved "Die Datei wurde erfolgreich gespeichert.")
- (getting-page "Seite laden") ;; dialog title
 
  (install-plt-file-menu-item... ".plt-Datei installieren...")
  (install-plt-file-dialog-title ".plt-Datei installieren")
@@ -311,9 +264,6 @@
  (about-drscheme-frame-title "Über DrScheme")
  (take-a-tour "Nehmen Sie die Führung!")
  (release-notes "Release-Notes")
- (parenthetical-last-version "(vorige Version ~a)")
- (parenthetical-last-language "(vorige Sprache ~a)")
- (parenthetical-last-version/language "(vorige Version ~a, Sprache ~a)")
  
  
  ;;; save file in particular format prompting.
@@ -324,17 +274,15 @@
  
  ;;; preferences
  (preferences "Einstellungen")
- (saving-preferences "Einstellungen werden gesichert")
- (error-unmarshalling "Fehler beim Lesen der Einstellung für ~a")
  (error-saving-preferences "Fehler beim Speichern der Einstellungen für ~a")
  (error-reading-preferences "Fehler beim Lesen der Einstellungen")
- (expected-list-of-length2 "Eine Liste mit zwei Elementen erwartet")
  (scheme-prefs-panel-label "Scheme")
  (warnings-prefs-panel-label "Warnmeldungen")
  (editor-prefs-panel-label "Editieren")
  (general-prefs-panel-label "Allgemein")
  (highlight-parens "Geklammerten Text hervorheben")
- (fixup-parens "Klammern korrigieren")
+ (fixup-open-parens "Öffnende Klammern automatisch justieren")
+ (fixup-close-parens "Schließende Klammern automatisch justieren")
  (flash-paren-match "Passende Klammer anblinken")
  (auto-save-files "Dateien automatisch abspeichern")
  (backup-files "Backup-Dateien")
@@ -348,12 +296,10 @@
  (enable-keybindings-in-menus "Tastenbelegung für Menüs")
  (automatically-to-ps "Automatisch in PostScript-Datei drucken")
  (option-as-meta "Option-Taste als Mera behandeln") ;; macos/macos x only
- (use-mdi "MDI-Fenster verwenden") ;;; ms windows only -- use that window in a window thingy
  (separate-dialog-for-searching "Für Textsuche separaten Dialog verwenden")
  (reuse-existing-frames "Existierende Fenster für neu geöffnete Dateien wiederverwenden")
  (default-fonts "Standard-Fonts")
  (paren-match-color "Farbe für Klammern-Hervorhebung") ; in prefs dialog
- (choose-color "Farbe auswählen") ; in prefs dialog
  (online-coloring-active "Syntax interaktiv einfärben")
  (open-files-in-tabs "Dateien in separaten Tabs öffnen (nicht separaten Fenstern)")
  (show-interactions-on-execute "Interaktionen beim Programmstart automatisch öffnen")
@@ -363,7 +309,6 @@
  (choose-a-background-color "Hintergrundfarbe auswählen")
 
  ; title of the color choosing dialog
- (choose-paren-highlight-color "Farbe für Klammerhervorhebung wählen")
 
  ; should have entire alphabet
  (font-example-string "Zwölf Boxkämpfer jagen Victor quer über den großen Sylter Deich.") 
@@ -416,12 +361,12 @@
  (replace "Ersetzen")
  (dock "Andocken")
  (undock "Ablegen")
- (use-separate-dialog-for-searching "Separaten Dialog für Suchen verwenden")
  (replace&find-again "Nochmals Suchen && Ersetzen") ;;; need double & to get a single &
  (replace-to-end "Ersetzen bis zum Ende")
  (forward "Vorwärts")
  (backward "Rückwärts")
  (hide "Ausblenden")
+ (find-case-sensitive "Groß-/Kleinschreibung beachten")
  
  ;;; multi-file-search
  (mfs-multi-file-search-menu-item "In Dateien suchen...")
@@ -444,8 +389,6 @@
  (mfs-search-interrupted "Suche abgebrochen.")
  
  ;;; reverting a file
- (error-reverting "DrScheme - Fehler beim Wiederherstellen")
- (could-not-read "Konnte \"~a\" nicht lesen")
  (are-you-sure-revert
   "Sind Sie sicher, dass Sie diese Datei wiederherstellen wollen? Diese Operation kann nicht rückgängig gemacht werden.")
  (are-you-sure-revert-title
@@ -549,7 +492,6 @@
  (paste-menu-item "&Einfügen")
 
  (clear-info "Lösche die Selektion, ohne das Clipboard dabei zu ändern oder etwas einzufügen")
- (clear-menu-item-others "Löschen")
  (clear-menu-item-windows "&Löschen")
 
  (select-all-info "Selektiere das gesamte Dokument")
@@ -582,19 +524,15 @@
 
  ;; menu items in the "special" menu
  (insert-text-box-item "Text-Kasten einfügen")
- (insert-pb-box-item "Pinwand-Kasten einfügen")
  (insert-image-item "Bild einfügen...")
  (insert-comment-box-menu-item-label "Kommentarkasten einfügen")
  (insert-lambda "&Lambda einfügen")
- (insert-delta "&Delta (define) einfügen")
 
  (wrap-text-item "Text umbrechen")
 
  (windows-menu-label "&Fenster")
  (bring-frame-to-front "Fenster nach vorn")       ;;; title of dialog
  (bring-frame-to-front... "Fenster nach vorn...") ;;; corresponding title of menu item
- (next-window "Nächstes Fenster")
- (previous-window "Voriges Fenster")
  (most-recent-window "Letztes Fenster")
 
  (view-menu-label "&Anzeigen")
@@ -606,7 +544,6 @@
  (help-menu-label "&Hilfe")
  (about-info "Mehr über dieses Programm und seine Entstehung")
  (about-menu-item "Über...")
- (help-menu-check-for-updates "Nach Updates schauen...")
  
  ;; open here's new menu item
  (create-new-window-or-clear-current
@@ -621,6 +558,8 @@
  (quit "Beenden")
  (are-you-sure-exit "Sind Sie sicher, dass Sie das Programm beenden wollen?")
  (are-you-sure-quit "Sind Sie sicher, dass Sie das Programm beenden wollen?")
+ (dont-exit "Widerrufen")
+ (dont-quit "Widerrufen")
  
  ;;; autosaving
  (error-autosaving "Fehler beim automatischen Speichern von \"~a\".") ;; ~a will be a filename
@@ -669,7 +608,6 @@
  
  ;;; tools
  (invalid-tool-spec "Die Tool-Spezifikation in der Datei info.ss der Kollektion ~a enthält Fehler. Da sollte eine Zeichenkette oder eine Liste von Zeichenketten stehen, tatsächlich steht dort aber: ~e")
- (error-loading-tool-title "DrScheme - Fehler beim Laden von ~s; ~s")
  (error-invoking-tool-title "Fehler beim Starten von Tool ~s;~s")
  (tool-tool-names-same-length
   "`tool-names' und `tools' in info.ss für ~s müssen Listen der gleichen Länge sein, tatsächlich stehen dort ~e und ~e")
@@ -746,33 +684,37 @@
  (create-executable-menu-item-label "Programmdatei generieren...")
  (create-executable-title "Programmdatei generieren")
  (must-save-before-executable "Sie müssen vor der Generierung einer Programmdatei speichern.")
- (save-an-executable "Programmdatei speichern")
  (save-a-mred-launcher "MrEd-Launcher speichern")
  (save-a-mzscheme-launcher "MzScheme-Launcher speichern")
  (save-a-mred-stand-alone-executable "MrEd-Stand-Alone-Programmdatei speichern")
  (save-a-mzscheme-stand-alone-executable "MzScheme-Stand-Alone-Programmdatei speichern")
+ (save-a-mred-distribution "MrEd-Distribution speichern")
+ (save-a-mzscheme-distribution "MzScheme-Distribution speichern")
 
  (definitions-not-saved "Die Definitionen sind nicht gespeichert. Die Programmdatei wird von der letzten gespeicherten Version gezogen. Weitermachen?")
- (inline-saved-program-in-executable?
-  "Scheme-Code in das Programm einbinden? Dann könnten Sie die Programmdatei zu einem anderen ~a-Computer transferieren, aber die Programmdatei wird dann ziemlich groß. Falls nicht, können Sie die Programmdatei nicht transferieren, aber sie wird deutlich kleiner. Außerdem wird die Programmdatei dann die jeweils neueste Version des Scheme-Codes benutzen.")
- (use-mred-binary?
-  "MrEd für diese Programmdatei verwenden?\n\nFalls ja, kann das Programm die Bibliothek (lib \"mred.ss\" \"mred\") verwenden. Falls nein, wird DrScheme MzScheme verwenden - dann kann das Programm die Bibliothek nicht verwenden.n\nFalls Sie nicht sicher sind, wählen Sie \"ja\".")
- (inline-saved-program-in-executable/windows/path
-   "WARNUNG! Die generierte Programmdatei benötigt drei DLLs: libmred.dll, libmzsch.gll und libgc.dll, die sich in folgendem Verzeichnis befinden:\n\n~a\n\nDie Programmdatei findet DLLs entweder im selben Verzeichnis wie die Programmdatei selbst oder durch die Umgebungsvariable PATH.\n\nAls Sie DrScheme installierten, hat der Installer PATH derart verwändert, dass das DLL-Verzeichnis dabei ist. Diese Einstellung könnte seitdem geändert worden sein.\n\nFalls Sie die Programmdatei auf eine andere Maschine tranferieren, müssen Sie die DLLs ebenfalls transferieren - entweder in das gleiche Verzeichnis wie die Programmdatei oder in ein Verzeichnis im PATH der anderen Maschine.")
  (launcher "Launcher")
+ (launcher-explanatory-label "Launcher (nur für diese Maschine, läuft vom Quelltext)")
  (stand-alone "Stand-alone")
+ (stand-alone-explanatory-label "Stand-alone (nur für diese Maschine, startet compilierte Kopie)")
+ (distribution "Distribution")
+ (distribution-explanatory-label "Distribution (für die Installation auf anderen Maschinen)")
  (executable-type "Typ")
  (executable-base "Hauptteil")
  (filename "Dateiname: ")
  (create "Erzeugen")
- (please-choose-an-executable-filename "Bitte Dateinamen für Programm auswählen")
- (windows-executables-must-end-with-exe
-  "Der Dateiname\n\n  ~a\n\nist unzulässig. Unter Windows müssen Programmdateien mit .exe enden.")
+ (please-specify-a-filename "Bitte einen Dateinamen angeben.")
+ (~a-must-end-with-~a
+  "Der Dateiname auf \".~a\"\n\n  ~a\n\nist nicht zulässig. Der Dateiname muß auf \".~a\" enden.")
  (macosx-executables-must-end-with-app
-  "Der Dateiname\n\n  ~a\n\nist unzulässig. Unter Mac OS X müssen Namen für Programme mit .app enden.")
+  "Der Dateiname auf \".~a\"\n\n  ~a\n\nist nicht zulässig. Unter Mac OS X muß der Dateiname auf \".app\" enden.")
  (warning-directory-will-be-replaced
-  "WARNUNG: das Verzeichnis:\n\n  ~a\n\nwird überschrieben werden. Weitermachen?")
+  "WARNUNG: Das Verzeichnis:\n\n  ~a\n\nsoll überschrieben werden. Weitermachen?")
  
+ (distribution-progress-window-title "Fortschritt bei der Erstellung der Distribution")
+ (creating-executable-progress-status "Ausführbares Programm für Distribution erstellen...")
+ (assembling-distribution-files-progress-status "Dateien für Distribution zusammenstellen...")
+ (packing-distribution-progress-status "Distribution einpacken...")
+
  (create-servlet "Servlet erzeugen...")
 
  ; the ~a is a language such as "module" or "algol60"
@@ -802,20 +744,17 @@
 
  ;; number snip popup menu
  (show-decimal-expansion "Als Dezimalexpansion anzeigen")
- (show-fraction-view "Als Bruch anzeigen")
  (show-mixed-fraction-view "Als gemischten Bruch anzeigen")
  (show-improper-fraction-view "Als ungemischten Bruch anzeigenn")
  (show-more-decimal-places "Mehr Dezimalziffern anzeigen")
  
  ;;; Teachpack messages
  (select-a-teachpack "Teachpack auswählen")
- (clear-teachpack "Teachpack ~a herauswerfen")
+ (clear-teachpack "Teachpack ~a entfernen")
  (teachpack-error-label "DrScheme - Teachpack-Fehler")
- (teachpack-dne/cant-read "Die Teachpack-Datei ~a existiert nicht oder ist nicht lesbar.")
  (teachpack-didnt-load "Die Teachpack-Datei ~a konnte nicht korrekt geladen werden.")
- (teachpack-error-invoke "Die Teachpack-Datei ~a hat beim Start ein Problem signalisiert.")
  (add-teachpack-menu-item-label "Teachpack hinzufügen...")
- (clear-all-teachpacks-menu-item-label "Alle Teachpacks herauswerfen")
+ (clear-all-teachpacks-menu-item-label "Alle Teachpacks entfernen")
  (drscheme-teachpack-message-title "DrScheme-Teachpack")
  (already-added-teachpack "Teachpack ~a ist schon dabei")
  
@@ -838,13 +777,10 @@
  (debugging "Debugging")
  (debugging-and-profiling "Debugging und Profiling")
  (test-coverage "Syntaktische Test-Suiten-Abdeckung")
- (whole/fractional-exact-numbers-label "Zahlen als Brüche ausdrucken")
- (booleans-as-true/false-label "Booleans als \"true\" und \"false\" ausdrucken")
  (show-details-button-label "Details einblenden")
  (hide-details-button-label "Details ausblenden")
  (choose-language-menu-item-label "Sprache auswählen...")
  (revert-to-language-defaults "Standard-Spracheinstellungen wiederherstellen")
- (language-docs-button-label "Dokumentation für Sprache")
  (fraction-style "Bruch-Ausgabe")
  (use-mixed-fractions "gemischte Brüche")
  (use-repeating-decimals "Dezimalausgabe mit Perioden")
@@ -853,15 +789,6 @@
 
  ;; startup wizard screen language selection section
  (please-select-a-language "Sprache auswählen")
- (show-all-languages "Alle sprachen anzeigen")
- (show-drscheme-usage-questions "Fragen zur Benutzung von DrScheme anzeigen")
- (are-you...-kind-of-drscheme-user "Sind Sie ...")
- (use-with-htdp "... ein DrScheme-Benutzer, der mit \"How to Design Programs\" arbeitet?")
- (use-seasoned "... ein erfahrener PLT-Schemer?")
- (use-other "... ein DrScheme-Benutzer aus anderen Gründen?")
- (use-eopl "... ein DrScheme-Benutzer, der mit \"Essentials of Programming Languages\" arbeitet?")
- (pl-lang-choice-format "Sprache am Anfang: ~a")
- (choose-new-language-before-running "Bitte wählen Sie eine andere Sprache vor dem Start aus.")
 
  
  ;;; languages
@@ -875,9 +802,7 @@
  (intermediate/lambda-one-line-summary "Zwischenstufe plus Prozeduren höherer Ordnung")
  (advanced-student "Fortgeschritten")
  (advanced-one-line-summary "Zwischenstufe plus lambda und Mutation")
- (full-language "Alles") ;; also in the HtDP languages section
  (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
- (r5rs-like-languages "R5RS-verwandet")
  (pretty-big-scheme "Kombo (enthält MrEd and Fortgeschritten)")
  (pretty-big-scheme-one-line-summary "Macht Syntax and Prozeduren der HtDP-Sprachen verfügbar")
  (r5rs-lang-name "Standard (R5RS)")
@@ -901,7 +826,6 @@
  
  ;; next two are before and after a language
  (start-with-before "Anfangen mit ")
- (start-with-after ".")
 
  (seasoned-plt-schemer? "Erfahrener PLT-Schemer?")
  (looking-for-standard-scheme? "Wollen Sie Standard-Scheme?")
@@ -940,7 +864,6 @@
  (profiling-update "Profile atkualisieren")
  (profiling-col-percent-time "% Zeit")
  (profiling-col-function "Prozedur")
- (profiling-col-name "Name")
  (profiling-col-time-in-msec "ms")
  (profiling-col-calls "Aufrufe")
  (profiling-show-profile "Profile einblenden")
@@ -982,30 +905,17 @@
  (kill? "Abbrechen?")
 
  ;;; version checker
- ;; the next two are used in the initial wizard dialog.
- ;; Note that vc-wizard-check-prompt can (should) have newlines so
- ;; it will not make the dialog too wide.
- (vc-wizard-check-note "Die Version, die Sie gerade installieren wollen, könnte veraltet\n sein. Wenn Sie wollen, kann DrScheme nachsehen.")
- (vc-wizard-check-button "Nach Updates schauen")
- (vc-update-check "Update-Prüfung")
- (vc-please-wait "Bitte warten")
- (vc-connecting-version-server "Mit PLT-Versions-Server verbinden")
- (vc-network-timeout "Netzwerk-Timeout") 
- (vc-cannot-connect  "Verbindungsversuch zum PLT-Versions-Server fehlgeschlagen")
- (vc-network-failure "Netzwerkproblem")
- (vc-old-binaries "Die installierten Programmdateien für DrScheme (oder MzScheme) sind veraltet")
- (vc-binary-information-format "Version installierte Programmdatei: ~a (Iteration ~a)")
- (vc-details-format "~a~nDetails:~n~a")
- (vc-details-text "Details:~n")
- (vc-error-format "Fehler: ~a") 
- (vc-current-format "~a v.~a (Iteration ~a) ist auf dem aktuellen Stand")
- (vc-update-format "~a v.~a (Iteration ~a) sollte aktualisiert werden auf v.~a (Iteration ~a)")
- (vc-binary-name "Programmdatei")
- (vc-updates-available "Updates sind verfügbar auf")
- (vc-latest-binary-information-format "Neuestes Release ist Version ~a (Iteration ~a)")
- (vc-update-dialog-title "PLT-Update-Status")
- (vc-need-update-string "Ein oder mehrere installierte PLT-Software-Pakete sind veraltet")
- (vc-no-update-string "Alle installierten PLT-Software-Pakte sind auf dem neuesten Stand")
+ (version:update-menu-item "Nach Updates schauen...")
+ (version:update-check "Update-Prüfung")
+ (version:connecting-server  "Mit PLT-Versions-Server verbinden")
+ (version:results-title      "PLT-Versions-Check")
+ (version:do-periodic-checks "Regelmäßig nach neueren PLT-Scheme-Versionen schauen")
+ (version:take-me-there      "Dorthin gehen") ; ...to the download website
+ ;; the next one can appear alone, or followed by a comma and the one after that
+ (version:plt-up-to-date     "Die PLT-Version ist aktuell")
+ (version:but-newer-alpha    "aber es gibt eine neuere Alpha-Version")
+ ;; This is used in this context: "PLT Scheme vNNN <<<*>>> http://download..."
+ (version:now-available-at   "ist jetzt verfügbar bei")
 
  ;; special menu
  (special-menu "S&pezial")
@@ -1029,6 +939,7 @@
  (module-browser-progress "Modul-Browser: ~a") ;; prefix in the status line
  (module-browser-compiling-defns "Modul-Browser: Definition compilieren")
  (module-browser-show-lib-paths/short "\"lib\"-requires folgen") ;; check box label in show module browser pane in drscheme window.
+ (module-browser-show-planet-paths/short "\"planet\"-requires folgen") ;; check box label in show module browser pane in drscheme window.
  (module-browser-refresh "Aktualisieren") ;; button label in show module browser pane in drscheme window.
  (module-browser-only-in-plt-and-module-langs
   "Der Modul-Browser ist nur für Programme in den PLT-Sprachen und in der Modul-Sprache verfügbar (und nur für Programme mit Modulen).")
@@ -1047,8 +958,6 @@
  (mrflow-button-title "Analyse")
  ;(mrflow-unknown-style-delta-error-title "Unknown Box Style Delta")
  ;(mrflow-unknown-style-delta-error "Unknown box style delta: ~a")
- (mrflow-coloring-error-title "Farbe für \"unbekannt\"")
- (mrflow-coloring-error "Kein Style für Farbe ~a verwendet")
  (mrflow-popup-menu-show-type "Typ einblenden")
  (mrflow-popup-menu-hide-type "Typ ausblenden")
  (mrflow-popup-menu-show-errors "Fehler einblenden")
@@ -1070,7 +979,6 @@
  ;(snips-and-arrows-changing-terms-warning "Changing terms in an editor containing snips cannot be undone.  You can either cancel this action, remove the snips, and try the change again, or you can continue with the change, in which case the change will not be undoable (all others changes made before and afterward will still be undoable though).")
  (snips-and-arrows-hide-all-snips-in-editor "Alle Snips im Editor ausblenden")
 
- (xml-tool-menu "XML")
  (xml-tool-insert-xml-box "XML-Kasten einfügen")
  (xml-tool-insert-scheme-box "Scheme-Kasten einfügen")
  (xml-tool-insert-scheme-splice-box "Scheme-Spleiß-Kasten einfügen")
@@ -1102,9 +1010,9 @@
  (stepper-next "Schritt >")
  (stepper-next-application "Applikation >|")
  
- (wizard-next "Weiter")
- (wizard-back "Zurück")
- (wizard-finish "Fertigstellen")
+ (debug-tool-button-name "Debugger")
+
+ (dialog-back "Zurück")
 
  ;; warnings about closing a drscheme frame when the program
  ;; might still be doing something interesting
@@ -1141,14 +1049,35 @@
   ;; Profj
   (profj-java "Java")
   (profj-java-mode "Java-Modus")
+  (profj-java-mode-color-heading "Farben ändern") ; Heading for preference to choose editing colors  
   (profj-java-mode-color-keyword "Schlüsselwort")
   (profj-java-mode-color-string "Zeichenkette")
   (profj-java-mode-color-literal "Literal")
   (profj-java-mode-color-comment "Kommentar")
   (profj-java-mode-color-error "Fehler")
   (profj-java-mode-color-identifier "Bezeichner")
+  (profj-java-mode-color-prim-type "primitiver Typ") ; Example text for built-in Java types
   (profj-java-mode-color-default "sonstiges")
   
+  (profj-coverage-color-heading "Farben für Abdeckung") ; Heading for preference to choose coverage colors
+  (profj-coverage-color-covered "abgedeckte Ausdrücke") 
+
+  (profj-language-config-display-preferences "Einstellungen Anzeige") ; Heading for preferences controlling printing
+  (profj-language-config-display-style "Art der Anzeige")
+  (profj-language-config-display-field "Klassen + Felder") ; Class should not be translated
+  (profj-language-config-display-array "Gesamten Inhalt von Arrays ausdrucken?")
+  (profj-language-config-testing-preferences "Einstellungen Testen") ; Heading for preferences controlling test behavior
+  (profj-language-config-testing-enable "Testresultate bei Start anzeigen?") ; Run should be the word found on the Run button
+  (profj-language-config-testing-coverage "Abdeckungsinformationen für Tests sammeln?")
+  (profj-language-config-testing-check "Check-Ausdruck zulassen?") ; check should not be translated
+  (profj-language-config-classpath-display "Aktuellen Wert anzeigen") ; Button label to print the current classpath
+
+   ;; Close testing window and do not run test cases any more
+  (profj-test-results-close-and-disable "Schließen und Testen deaktivieren")
+  ;; Hide docked testing window and do not run test cases any more
+  (profj-test-results-hide-and-disable "Ausblenden und Testen deaktivieren")
+  (profj-test-results-window-title "Testresultate")
+
   (profj-insert-java-comment-box "Java-Kommentarkasten einfügen")
   (profj-insert-java-interactions-box "Java-Interaktions-Kasten einfügen")
 
@@ -1156,7 +1085,6 @@
   ;; Errors
   (test-case-empty-error "Leerer Testfall")
   (test-case-too-many-expressions-error "Zu viele Ausdrücke in einem Testfall")
-  (test-case-not-at-top-level "Testfall-Kasten nicht ganz am Top-Level")
   ;; Dr. Scheme window menu items
   (test-case-insert "Testfall einfügen")
   (test-case-disable-all "Alle Testfälle deaktivieren")

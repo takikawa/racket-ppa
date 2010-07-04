@@ -45,12 +45,11 @@
 
   (define server-dir (current-directory))
   (define config-file (build-path server-dir "config.ss"))
-  (unless (file-exists? config-file)
-    (error 'handin-server
-           "must be started from a properly configured directory"))
 
   (define (get-config which default)
-    (get-preference which (lambda () default) #f config-file))
+    (if (file-exists? config-file)
+      (get-preference which (lambda () default) #f config-file)
+      default))
 
   (define PORT-NUMBER        (get-config 'port-number 7979))
   (define HTTPS-PORT-NUMBER  (get-config 'https-port-number (add1 PORT-NUMBER)))
@@ -71,6 +70,9 @@
                   ("ID#" #f #f)
                   ("Email" #rx"^[^@<>\"`',]+@[a-zA-Z0-9_.-]+[.][a-zA-Z]+$"
                    "a valid email address"))))
+  ;; separate user-controlled fields, and hidden fields
+  (define USER-FIELDS
+    (filter (lambda (f) (not (eq? '- (cadr f)))) EXTRA-FIELDS))
 
   (define orig-custodian (current-custodian))
 
@@ -109,11 +111,10 @@
     ;; means that there was a failed submission and the next one will
     ;; re-create ATTEMPT.
     (let* ([dirlist (map path->string (directory-list))]
-	   [dir (quicksort
-		 (filter (lambda (d)
-			   (and (directory-exists? d)
-				(regexp-match SUCCESS-RE d)))
-			 dirlist)
+	   [dir (sort (filter (lambda (d)
+                                (and (directory-exists? d)
+                                     (regexp-match SUCCESS-RE d)))
+                              dirlist)
 		 string<?)]
 	   [dir (and (pair? dir) (car dir))])
       (when dir
@@ -300,7 +301,9 @@
                   (begin
                     (LOG "saving ~a for ~a" assignment users)
                     (parameterize ([current-directory ATTEMPT-DIR])
-                      (rename-file-or-directory "handin" part))
+                      (cond [part (unless (equal? part "handin")
+                                    (rename-file-or-directory "handin" part))]
+                            [(file-exists? "handin") (delete-file "handin")]))
                     ;; Shift successful-attempt directories so that there's
                     ;;  no SUCCESS-0:
                     (make-success-dir-available 0)
@@ -325,6 +328,8 @@
       (error 'handin "no ~a submission directory for ~a" assignment users))
     (LOG "retrieving assignment for ~a: ~a" users assignment)
     (parameterize ([current-directory (build-path "active" assignment dirname)])
+      (define magics '(#"WXME" #"<<<MULTI-SUBMISSION-FILE>>>"))
+      (define mlen (apply max (map bytes-length magics)))
       (define file
         ;; find the newest wxme file
         (let loop ([files (directory-list)] [file #f] [time #f])
@@ -332,8 +337,12 @@
             file
             (let ([f (car files)])
               (if (and (file-exists? f)
-                       (equal? #"WXME" (with-input-from-file f
-                                         (lambda () (read-bytes 4))))
+                       (let ([m (with-input-from-file f
+                                  (lambda () (read-bytes mlen)))])
+                         (ormap (lambda (magic)
+                                  (equal? magic
+                                          (subbytes m 0 (bytes-length magic))))
+                                magics))
                        (or (not file)
                            (> (file-or-directory-modify-seconds f) time)))
                 (loop (cdr files) f (file-or-directory-modify-seconds f))
@@ -369,15 +378,26 @@
                    (regexp-match field-re value)]
                   [(list? field-re) (member value field-re)]
                   [(not field-re) #t]
+                  [(eq? field-re '-) #t] ; -> hidden field, no check
                   [else (error 'handin "bad spec: field-regexp is ~e"
                                field-re)])
       (error 'handin "bad ~a: \"~a\"~a" field-name value
              (if field-desc (format "; need ~a" field-desc) ""))))
 
+  ;; Utility for the next two functions: reconstruct a full list of
+  ;; extra-fields from user-fields, using "" for hidden fields
+  (define (add-hidden-to-user-fields user-fields)
+    (let ([user-field-name->user-field (map cons USER-FIELDS user-fields)])
+      (map (lambda (f)
+             (cond [(assq f user-field-name->user-field) => cdr]
+                   [else ""]))
+           EXTRA-FIELDS)))
+
   (define (add-new-user data)
     (define username     (a-ref data 'username/s))
     (define passwd       (a-ref data 'password))
-    (define extra-fields (a-ref data 'extra-fields))
+    (define user-fields  (a-ref data 'user-fields))
+    (define extra-fields (add-hidden-to-user-fields user-fields))
     (unless ALLOW-NEW-USERS?
       (error 'handin "new users not allowed: ~a" username))
     (check-field username USER-REGEXP "username" USER-DESC)
@@ -404,14 +424,16 @@
     (put-user-data username (cons passwd extra-fields)))
 
   (define (change-user-info data)
-    (define usernames  (a-ref data 'usernames))
-    (define user-datas (a-ref data 'user-datas))
-    (define passwd     (a-ref data 'new-password))
-    (define extra-fields (a-ref data 'extra-fields))
+    (define usernames    (a-ref data 'usernames))
+    (define user-datas   (a-ref data 'user-datas))
+    (define passwd       (a-ref data 'new-password))
+    (define user-fields  (a-ref data 'user-fields))
+    (define extra-fields (add-hidden-to-user-fields user-fields))
     (unless (= 1 (length usernames))
       (error 'handin "cannot change a password for multiple users: ~a"
              usernames))
-    ;; the new data is the same as the old one for every empty string
+    ;; the new data is the same as the old one for every empty string (includes
+    ;; hidden fields)
     (let ([new-data (map (lambda (old new) (if (equal? "" new) old new))
                          (car user-datas) (cons passwd extra-fields))])
       (unless (or ALLOW-CHANGE-INFO? (equal? (cdr new-data) (cdar user-datas)))
@@ -421,14 +443,18 @@
       (for-each
        (lambda (str info) (check-field str (cadr info) (car info) (caddr info)))
        (cdr new-data) EXTRA-FIELDS)
-      (LOG "change info for ~a ~s -> ~s" (car usernames) new-data (car user-datas))
+      (LOG "change info for ~a ~s -> ~s"
+           (car usernames) (car user-datas) new-data)
       (put-user-data (car usernames) new-data)))
 
   (define (get-user-info data)
     (define usernames  (a-ref data 'usernames))
     (unless (= 1 (length usernames))
       (error 'handin "cannot get user-info for multiple users: ~a" usernames))
-    (cdar (a-ref data 'user-datas)))
+    ;; filter out hidden fields
+    (let ([all-data (cdar (a-ref data 'user-datas))])
+      (filter values (map (lambda (d f) (and (memq f USER-FIELDS) d))
+                          all-data EXTRA-FIELDS))))
 
   (define crypt
     (let ([c #f] [sema (make-semaphore 1)])
@@ -440,16 +466,21 @@
           (lambda () (bytes->string/utf-8 (c passwd salt)))))))
   (define (has-password? raw md5 passwords)
     (define (good? passwd)
+      (define (bad-password msg)
+        (LOG "ERROR: ~a -- ~s" msg passwd)
+        (error 'handin "bad password in user database"))
       (cond [(string? passwd) (equal? md5 passwd)]
             [(and (list? passwd) (= 2 (length passwd))
-                  (eq? 'unix (car passwd)) (string? (cadr passwd))
-                  ;; find the salt part
-                  (regexp-match #rx"^([$][^$]+[$][^$]+[$]|..)" (cadr passwd)))
-             => (lambda (m)
-                  (equal? (crypt raw (car m)) (cadr passwd)))]
-            [else (LOG "ERROR: bad password in user database: ~s" passwd)
-                  ;; do not show the bad password...
-                  (error 'handin "bad password in user database")]))
+                  (symbol? (car passwd)) (string? (cadr passwd)))
+             (case (car passwd)
+               [(plaintext) (equal? raw (cadr passwd))]
+               [(unix)
+                (let ([salt (regexp-match #rx"^([$][^$]+[$][^$]+[$]|..)"
+                                          (cadr passwd))])
+                  (unless salt (bad-password "badly formatted unix password"))
+                  (equal? (crypt raw (car salt)) (cadr passwd)))]
+               [else (bad-password "bad password type in user database")])]
+            [else (bad-password "bad password value in user database")]))
     (or (member md5 passwords) ; very cheap search first
         (ormap good? passwords)))
 
@@ -469,9 +500,9 @@
         [(set)
          (let* ([key (read r-safe)] [val (read r-safe)])
            (unless (symbol? key) (perror "bad key value: ~e" key))
-           (unless (if (eq? 'extra-fields key)
+           (unless (if (eq? 'user-fields key)
                      (and (list? val)
-                          (- (length val) (length EXTRA-FIELDS))
+                          (- (length val) (length USER-FIELDS))
                           (andmap string? val))
                      (string? val))
              (perror "bad value for set: ~e" val))
@@ -483,7 +514,7 @@
               (let ([usernames
                      ;; Username lists must always be sorted, and never empty
                      ;; (regexp-split will not return an empty list)
-                     (quicksort (regexp-split #rx" *[+] *" val) string<?)])
+                     (sort (regexp-split #rx" *[+] *" val) string<?)])
                 (a-set! data 'usernames usernames)
                 (a-set! data 'user-datas (map get-user-data usernames)))]
              [(password new-password)
@@ -501,8 +532,8 @@
         [(get-active-assignments)
          (write+flush w active-assignments)
          (loop)]
-        [(get-extra-fields)
-         (write+flush w EXTRA-FIELDS)
+        [(get-user-fields)
+         (write+flush w (map car USER-FIELDS))
          (loop)]
         ;; ----------------------------------------
         ;; action handlers
@@ -535,7 +566,7 @@
     (write+flush w 'ok)) ; final confirmation for *all* actions
 
   (define (assignment-list)
-    (quicksort (map path->string (directory-list "active")) string<?))
+    (sort (map path->string (directory-list "active")) string<?))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -156,6 +156,10 @@ typedef struct FSSpec mzFSSpec;
 
 #define MZ_EXTERN extern MZ_DLLSPEC
 
+#if defined(MZ_USE_JIT_PPC) || defined(MZ_USE_JIT_I386) || defined(MZ_USE_JIT_X86_64)
+# define MZ_USE_JIT
+#endif
+
 /* Define _W64 for MSC if needed. */
 #if defined(_MSC_VER) && !defined(_W64)
 # if !defined(__midl) && (defined(_X86_) || defined(_M_IX86)) && _MSC_VER >= 1300
@@ -189,10 +193,6 @@ extern "C"
 
 typedef short Scheme_Type;
 
-/* Used to use `short' for app arg counts, etc., but adding limit
-   checks is difficult, and seems arbitrary. We can switch back
-   to short if the expense turns out to be noticable; in that case
-   also define MZSHORT_IS_SHORT. */
 typedef int mzshort;
 
 typedef unsigned int mzchar;
@@ -402,6 +402,8 @@ typedef void (*Scheme_Type_Printer)(Scheme_Object *v, int for_display, Scheme_Pr
 #define SCHEME_IMMUTABLE_PAIRP(obj)    (SCHEME_PAIRP(obj) && SCHEME_IMMUTABLEP(obj))
 #define SCHEME_LISTP(obj)    (SCHEME_NULLP(obj) || SCHEME_PAIRP(obj))
 
+#define SCHEME_RPAIRP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_raw_pair_type)
+
 #define SCHEME_BOXP(obj)     SAME_TYPE(SCHEME_TYPE(obj), scheme_box_type)
 #define SCHEME_MUTABLE_BOXP(obj)  (SCHEME_BOXP(obj) && SCHEME_MUTABLEP(obj))
 #define SCHEME_IMMUTABLE_BOXP(obj)  (SCHEME_BOXP(obj) && SCHEME_IMMUTABLEP(obj))
@@ -538,7 +540,7 @@ typedef void (*Scheme_Type_Printer)(Scheme_Object *v, int for_display, Scheme_Pr
 #define scheme_ispunc(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x4)
 #define scheme_iscontrol(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x8)
 #define scheme_isspace(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x10)
-#define scheme_isxdigit(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x20)
+/* #define scheme_isSOMETHING(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x20) - not yet used */
 #define scheme_isdigit(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x40)
 #define scheme_isalpha(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x80)
 #define scheme_istitle(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x100)
@@ -547,6 +549,8 @@ typedef void (*Scheme_Type_Printer)(Scheme_Object *v, int for_display, Scheme_Pr
 #define scheme_isgraphic(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x800)
 #define scheme_iscaseignorable(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x1000)
 #define scheme_isspecialcasing(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x2000)
+#define scheme_needs_decompose(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x4000)
+#define scheme_needs_maybe_compose(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x8000)
 
 #define scheme_iscased(x) ((scheme_uchar_find(scheme_uchar_table, x)) & 0x700)
 
@@ -554,6 +558,10 @@ typedef void (*Scheme_Type_Printer)(Scheme_Object *v, int for_display, Scheme_Pr
 #define scheme_tolower(x) (x + scheme_uchar_downs[scheme_uchar_find(scheme_uchar_cases_table, x)])
 #define scheme_totitle(x) (x + scheme_uchar_titles[scheme_uchar_find(scheme_uchar_cases_table, x)])
 #define scheme_tofold(x) (x + scheme_uchar_folds[scheme_uchar_find(scheme_uchar_cases_table, x)])
+#define scheme_combining_class(x) (scheme_uchar_combining_classes[scheme_uchar_find(scheme_uchar_cases_table, x)])
+
+#define scheme_general_category(x) ((scheme_uchar_find(scheme_uchar_cats_table, x)) & 0x1F)
+/* Note: 3 bits available in the cats table */
 
 /*========================================================================*/
 /*                          procedure values                              */
@@ -563,23 +571,34 @@ typedef void (*Scheme_Type_Printer)(Scheme_Object *v, int for_display, Scheme_Pr
    Do not use them directly. */
 #define SCHEME_PRIM_IS_FOLDING 1
 #define SCHEME_PRIM_IS_PRIMITIVE 2
-#define SCHEME_PRIM_IS_STRUCT_PROC 4
-#define SCHEME_PRIM_IS_STRUCT_SETTER 8
+#define SCHEME_PRIM_IS_STRUCT_INDEXED_GETTER 4
+#define SCHEME_PRIM_IS_STRUCT_PRED 8
 #define SCHEME_PRIM_IS_PARAMETER 16
-#define SCHEME_PRIM_IS_STRUCT_GETTER 32
-#define SCHEME_PRIM_IS_STRUCT_PRED 64
-#define SCHEME_PRIM_IS_STRUCT_CONSTR 128
+#define SCHEME_PRIM_IS_STRUCT_OTHER 32
+#define SCHEME_PRIM_STRUCT_OTHER_TYPE_MASK (64 | 128)
 #define SCHEME_PRIM_IS_MULTI_RESULT 256
-#define SCHEME_PRIM_IS_GENERIC 512
+#define SCHEME_PRIM_IS_BINARY_INLINED 512
 #define SCHEME_PRIM_IS_USER_PARAMETER 1024
 #define SCHEME_PRIM_IS_METHOD 2048
-#define SCHEME_PRIM_IS_POST_DATA 4096
+#define SCHEME_PRIM_IS_CLOSURE 4096
+#define SCHEME_PRIM_IS_NONCM 8192
+#define SCHEME_PRIM_IS_UNARY_INLINED 16384
+#define SCHEME_PRIM_IS_MIN_NARY_INLINED 32768
 
-typedef struct Scheme_Object *
-(Scheme_Prim)(int argc, struct Scheme_Object *argv[]);
+#define SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_GETTER 0
+#define SCHEME_PRIM_STRUCT_TYPE_CONSTR 64
+#define SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_SETTER 128
+#define SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER (64 | 128)
 
-typedef struct Scheme_Object *
-(Scheme_Closed_Prim)(void *d, int argc, struct Scheme_Object *argv[]);
+#define SCHEME_PRIM_IS_STRUCT_PROC (SCHEME_PRIM_IS_STRUCT_INDEXED_GETTER | SCHEME_PRIM_IS_STRUCT_PRED | SCHEME_PRIM_IS_STRUCT_OTHER)
+
+#define SCHEME_PRIM_PROC_FLAGS(x) (((Scheme_Prim_Proc_Header *)x)->flags)
+
+typedef struct Scheme_Object *(Scheme_Prim)(int argc, Scheme_Object *argv[]);
+
+typedef struct Scheme_Object *(Scheme_Primitive_Closure_Proc)(int argc, struct Scheme_Object *argv[], Scheme_Object *p);
+
+#define SCHEME_MAX_ARGS 0x3FFFFFFE
 
 typedef struct {
   Scheme_Object so;
@@ -588,15 +607,39 @@ typedef struct {
 
 typedef struct {
   Scheme_Prim_Proc_Header pp;
-  Scheme_Prim *prim_val;
+  Scheme_Primitive_Closure_Proc *prim_val;
   const char *name;
-  mzshort mina, maxa;
+  mzshort mina;
+  /* If mina < 0; mina is negated case count minus one for a case-lambda
+     generated by mzc, where the primitive checks argument arity
+     itself, and mu.cases is available instead of mu.maxa. */
+  union {
+    mzshort *cases;
+    mzshort maxa;   /* > SCHEME_MAX_ARGS => any number of arguments */
+  } mu;
 } Scheme_Primitive_Proc;
 
 typedef struct {
   Scheme_Primitive_Proc pp;
   mzshort minr, maxr;
+  /* Never combined with a closure */
 } Scheme_Prim_W_Result_Arity;
+
+typedef struct Scheme_Primitive_Closure {
+  Scheme_Primitive_Proc p;
+  /* The rest is here only if SCHEME_PRIM_IS_CLOSURE
+     is set in p.pp.flags. */
+#ifdef MZ_PRECISE_GC
+  mzshort count;
+#endif
+  Scheme_Object *val[1];
+} Scheme_Primitive_Closure;
+
+#define SCHEME_PRIM_CLOSURE_ELS(p) ((Scheme_Primitive_Closure *)p)->val
+
+/* ------ Old-style primitive closures ------- */
+
+typedef struct Scheme_Object *(Scheme_Closed_Prim)(void *d, int argc, struct Scheme_Object *argv[]);
 
 typedef struct {
   Scheme_Prim_Proc_Header pp;
@@ -619,93 +662,50 @@ typedef struct {
 
 /* ------------------------------------------------- */
 /*                 mzc closure glue
-    The following structures are used by mzc to implement closures
-    where the closure data is allocated as part of the
-    Scheme_Closed_Primitive_Proc record.  In 3m mode, a length must be
-    included, and all of the closur-data elements are assumed to be
-    pointers. Furthermore, in 3m mode, a cases and non-cases closure
-    must have closure data starting at the same point, since two
-    kinds can flow to the same MZC_PARAM_TO_SWITCH().
+    The following are used by mzc to implement closures.
 */
 
-typedef struct {
-  union {
-    Scheme_Closed_Primitive_Proc p;
-#ifdef MZ_PRECISE_GC
-    Scheme_Closed_Case_Primitive_Proc other;
-#endif
-  } u;
-#ifdef MZ_PRECISE_GC
-  mzshort len;
-#endif
-} Scheme_Closed_Primitive_Post_Proc;
-
-typedef struct {
-  Scheme_Closed_Primitive_Post_Proc p;
-  void *a[1];
-} Scheme_Closed_Primitive_Post_Ext_Proc;
-
-typedef struct {
-  union {
-    Scheme_Closed_Case_Primitive_Proc p;
-#ifdef MZ_PRECISE_GC
-    Scheme_Closed_Primitive_Proc other;
-#endif
-  } u;
-#ifdef MZ_PRECISE_GC
-  mzshort len;
-#endif
-} Scheme_Closed_Case_Primitive_Post_Proc;
-
-typedef struct {
-  Scheme_Closed_Case_Primitive_Post_Proc p;
-  void *a[1];
-} Scheme_Closed_Case_Primitive_Post_Ext_Proc;
-
-#define _scheme_fill_prim_closure(rec, cfunc, dt, nm, amin, amax, flgs) \
-  ((rec)->pp.so.type = scheme_closed_prim_type, \
+#define _scheme_fill_prim_closure(rec, cfunc, nm, amin, amax, flgs) \
+  ((rec)->pp.so.type = scheme_prim_type, \
    (rec)->prim_val = cfunc, \
-   (rec)->data = (void *)(dt), \
    (rec)->name = nm, \
-   (rec)->mina = amin, \
-   (rec)->maxa = amax, \
+   (rec)->mina = amin,	  \
+   (rec)->mu.maxa = (amax == -1 ? SCHEME_MAX_ARGS + 1 : amax), \
    (rec)->pp.flags = flgs, \
    rec)
 
 #ifdef MZ_PRECISE_GC
-# define _scheme_fill_prim_closure_post(rec, cfunc, dt, nm, amin, amax, flgs, ln) \
-  ((rec)->len = ln,							\
-   _scheme_fill_prim_closure(&(rec)->u.p, cfunc, dt, nm, amin, amax,	\
-			     flgs | SCHEME_PRIM_IS_POST_DATA))
+# define _scheme_fill_prim_closure_post(rec, cfunc, nm, amin, amax, flgs, ln) \
+  ((rec)->count = ln,							\
+   _scheme_fill_prim_closure(&(rec)->p, cfunc, nm, amin, amax,	\
+			     flgs | SCHEME_PRIM_IS_CLOSURE))
 #else
-# define _scheme_fill_prim_closure_post(rec, cfunc, dt, nm, amin, amax, flgs, ln) \
-  _scheme_fill_prim_closure(&(rec)->u.p, cfunc, dt, nm, amin, amax, flgs)
+# define _scheme_fill_prim_closure_post(rec, cfunc, nm, amin, amax, flgs, ln) \
+  _scheme_fill_prim_closure(&(rec)->p, cfunc, nm, amin, amax, flgs)
 #endif
 
-#define _scheme_fill_prim_case_closure(rec, cfunc, dt, nm, ccount, cses, flgs) \
-  ((rec)->p.pp.so.type = scheme_closed_prim_type, \
-   (rec)->p.prim_val = cfunc, \
-   (rec)->p.data = (void *)(dt), \
-   (rec)->p.name = nm, \
-   (rec)->p.mina = -2, \
-   (rec)->p.maxa = -(ccount), \
-   (rec)->p.pp.flags = flgs, \
-   (rec)->cases = cses, \
+#define _scheme_fill_prim_case_closure(rec, cfunc, nm, ccount, cses, flgs) \
+  ((rec)->pp.so.type = scheme_prim_type, \
+   (rec)->prim_val = cfunc, \
+   (rec)->name = nm, \
+   (rec)->mina = -(ccount+1), \
+   (rec)->pp.flags = flgs, \
+   (rec)->mu.cases = cses, \
    rec)
 
 #ifdef MZ_PRECISE_GC
-# define _scheme_fill_prim_case_closure_post(rec, cfunc, dt, nm, ccount, cses, flgs, ln) \
-  ((rec)->len = ln,							\
-   _scheme_fill_prim_case_closure(&(rec)->u.p, cfunc, dt, nm, ccount, cses, \
-				  flgs | SCHEME_PRIM_IS_POST_DATA))
+# define _scheme_fill_prim_case_closure_post(rec, cfunc, nm, ccount, cses, flgs, ln) \
+  ((rec)->count = ln,							\
+   _scheme_fill_prim_case_closure(&((rec)->p), cfunc, nm, ccount, cses,	\
+				  flgs | SCHEME_PRIM_IS_CLOSURE))
 #else
-# define _scheme_fill_prim_case_closure_post(rec, cfunc, dt, nm, ccount, cses, flgs, ln) \
-  _scheme_fill_prim_case_closure(&(rec)->u.p, cfunc, dt, nm, ccount, cses, flgs)
+# define _scheme_fill_prim_case_closure_post(rec, cfunc, nm, ccount, cses, flgs, ln) \
+  _scheme_fill_prim_case_closure(&((rec)->p), cfunc, nm, ccount, cses, flgs)
 #endif
 
 /* ------------------------------------------------- */
 
-#define SCHEME_PROCP(obj)  (!SCHEME_INTP(obj) && ((_SCHEME_TYPE(obj) >= scheme_prim_type) && (_SCHEME_TYPE(obj) <= scheme_proc_struct_type)))
+#define SCHEME_PROCP(obj)  (!SCHEME_INTP(obj) && ((_SCHEME_TYPE(obj) >= scheme_prim_type) && (_SCHEME_TYPE(obj) <= scheme_native_closure_type)))
 #define SCHEME_SYNTAXP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_syntax_compiler_type)
 #define SCHEME_PRIMP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_prim_type)
 #define SCHEME_CLSD_PRIMP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_closed_prim_type)
@@ -713,8 +713,7 @@ typedef struct {
 #define SCHEME_ECONTP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_escaping_cont_type)
 #define SCHEME_CONT_MARK_SETP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_cont_mark_set_type)
 #define SCHEME_PROC_STRUCTP(obj) SAME_TYPE(SCHEME_TYPE(obj), scheme_proc_struct_type)
-#define SCHEME_STRUCT_PROCP(obj) (SCHEME_CLSD_PRIMP(obj) && (((Scheme_Closed_Primitive_Proc *)(obj))->pp.flags & SCHEME_PRIM_IS_STRUCT_PROC))
-#define SCHEME_GENERICP(obj) (SCHEME_CLSD_PRIMP(obj) && (((Scheme_Closed_Primitive_Proc *)(obj))->pp.flags & SCHEME_PRIM_IS_GENERIC))
+#define SCHEME_STRUCT_PROCP(obj) (SCHEME_PRIMP(obj) && (((Scheme_Primitive_Proc *)(obj))->pp.flags & SCHEME_PRIM_IS_STRUCT_PROC))
 #define SCHEME_CLOSUREP(obj) (SAME_TYPE(SCHEME_TYPE(obj), scheme_closure_type) || SAME_TYPE(SCHEME_TYPE(obj), scheme_case_closure_type))
 
 #define SCHEME_PRIM(obj)     (((Scheme_Primitive_Proc *)(obj))->prim_val)
@@ -736,7 +735,7 @@ typedef struct Scheme_Hash_Table
   void (*make_hash_indices)(void *v, long *h1, long *h2);
   int (*compare)(void *v1, void *v2);
   Scheme_Object *mutex;
-  int mcount; /* number of non-null keys, <= count */
+  int mcount; /* number of non-NULL keys, >= count (which is non-NULL vals) */
 } Scheme_Hash_Table;
 
 
@@ -780,14 +779,24 @@ typedef long mz_pre_jmp_buf[8];
 # define mz_pre_jmp_buf jmp_buf
 #endif
 
+#ifdef MZ_USE_JIT
+typedef struct { 
+  mz_pre_jmp_buf jb; 
+  unsigned long stack_frame; /* declared as `long' to hide pointer from 3m xform */
+} mz_one_jit_jmp_buf;
+typedef mz_one_jit_jmp_buf mz_jit_jmp_buf[1];
+#else
+# define mz_jit_jmp_buf mz_pre_jmp_buf
+#endif
+
 #ifdef MZ_PRECISE_GC
 typedef struct {
-  mz_pre_jmp_buf jb;
-  long gcvs; /* declared as `long' so it isn't pushed when on the stack! */
+  mz_jit_jmp_buf jb;
+  long gcvs; /* declared as `long' to hide pointer from 3m xform */
   long gcvs_cnt;
 } mz_jmp_buf;
 #else
-# define mz_jmp_buf mz_pre_jmp_buf
+# define mz_jmp_buf mz_jit_jmp_buf
 #endif
 
 /* Like setjmp & longjmp, but you can jmp to a deeper stack position */
@@ -795,7 +804,7 @@ typedef struct {
 typedef struct Scheme_Jumpup_Buf {
   void *stack_from, *stack_copy;
   long stack_size, stack_max_size;
-  struct Scheme_Jumpup_Buf *cont;
+  struct Scheme_Cont *cont; /* for sharing continuation tails */
   mz_jmp_buf buf;
 #ifdef MZ_PRECISE_GC
   void *gc_var_stack;
@@ -818,8 +827,11 @@ typedef struct Scheme_Continuation_Jump_State {
   short is_kill;
 } Scheme_Continuation_Jump_State;
 
-#define MZ_MARK_POS_TYPE int
-#define MZ_MARK_STACK_TYPE int
+/* A mark position is in odd number, so that it can be
+   viewed as a pointer (i.e., a fixnum): */
+#define MZ_MARK_POS_TYPE long
+/* A mark "pointer" is an offset into the stack: */
+#define MZ_MARK_STACK_TYPE long
 
 typedef struct Scheme_Cont_Frame_Data {
   MZ_MARK_POS_TYPE cont_mark_pos;
@@ -864,6 +876,7 @@ typedef struct Scheme_Thread {
 
   mz_jmp_buf *error_buf;
   Scheme_Continuation_Jump_State cjs;
+  Scheme_Object *current_escape_cont_key;
 
   Scheme_Thread_Cell_Table *cell_values;
   Scheme_Config *init_config;
@@ -876,6 +889,11 @@ typedef struct Scheme_Thread {
   long runstack_size;
   struct Scheme_Saved_Stack *runstack_saved;
   Scheme_Object **runstack_tmp_keep;
+
+  /* in case of bouncing, we keep a recently
+     released runstack; it's dropped on GC, though */
+  Scheme_Object **spare_runstack;
+  long spare_runstack_size;
 
   struct Scheme_Thread **runstack_owner;
   struct Scheme_Saved_Stack *runstack_swapped;
@@ -930,6 +948,8 @@ typedef struct Scheme_Thread {
   Scheme_Object *(*overflow_k)(void);
   Scheme_Object *overflow_reply;
 
+   /* content of tail_buffer is zeroed on GC, unless
+      runstack_tmp_keep is set to tail_buffer */
   Scheme_Object **tail_buffer;
   int tail_buffer_size;
 
@@ -1062,18 +1082,23 @@ enum {
   MZCONFIG_HONU_MODE,
 
   MZCONFIG_ERROR_PRINT_WIDTH,
+  MZCONFIG_ERROR_PRINT_CONTEXT_LENGTH,
 
   MZCONFIG_ERROR_ESCAPE_HANDLER,
 
   MZCONFIG_ALLOW_SET_UNDEFINED,
+  MZCONFIG_COMPILE_MODULE_CONSTS,
+  MZCONFIG_USE_JIT,
 
   MZCONFIG_CUSTODIAN,
   MZCONFIG_INSPECTOR,
   MZCONFIG_CODE_INSPECTOR,
 
   MZCONFIG_USE_COMPILED_KIND,
+  MZCONFIG_USE_USER_PATHS,
 
   MZCONFIG_LOAD_DIRECTORY,
+  MZCONFIG_WRITE_DIRECTORY,
 
   MZCONFIG_COLLECTION_PATHS,
 
@@ -1101,6 +1126,7 @@ enum {
   MZCONFIG_SCHEDULER_RANDOM_STATE,
 
   MZCONFIG_THREAD_SET,
+  MZCONFIG_THREAD_INIT_STACK_SIZE,
 
   __MZCONFIG_BUILTIN_COUNT__
 };
@@ -1294,9 +1320,13 @@ typedef void (*Scheme_Invoke_Proc)(Scheme_Env *env, long phase_shift,
 #define _scheme_tail_eval_wp scheme_tail_eval_wp
 
 #define _scheme_direct_apply_primitive_multi(prim, argc, argv) \
-    (((Scheme_Primitive_Proc *)prim)->prim_val(argc, argv))
+  (((Scheme_Primitive_Proc *)prim)->prim_val(argc, argv, prim))
 #define _scheme_direct_apply_primitive(prim, argc, argv) \
-    scheme_check_one_value(_scheme_direct_apply_primitive_multi(prim, argc, argv))
+  scheme_check_one_value(_scheme_direct_apply_primitive_multi(prim, argc, argv))
+#define _scheme_direct_apply_primitive_closure_multi(prim, argc, argv) \
+  _scheme_direct_apply_primitive_multi(prim, argc, argv)
+#define _scheme_direct_apply_primitive_closure(prim, argc, argv) \
+  _scheme_direct_apply_primitive(prim, argc, argv)
 #define _scheme_direct_apply_closed_primitive_multi(prim, argc, argv) \
     (((Scheme_Closed_Primitive_Proc *)prim)->prim_val(((Scheme_Closed_Primitive_Proc *)prim)->data, argc, argv))
 #define _scheme_direct_apply_closed_primitive(prim, argc, argv) \
@@ -1348,18 +1378,27 @@ MZ_EXTERN Scheme_Object *scheme_eval_waiting;
 # endif
 #endif
 
+#ifdef MZ_USE_JIT
+MZ_EXTERN void scheme_jit_longjmp(mz_jit_jmp_buf b, int v);
+MZ_EXTERN void scheme_jit_setjmp_prepare(mz_jit_jmp_buf b);
+# define scheme_jit_setjmp(b) (scheme_jit_setjmp_prepare(b), scheme_mz_setjmp((b)->jb))
+#else
+# define scheme_jit_longjmp(b, v) scheme_mz_longjmp(b, v) 
+# define scheme_jit_setjmp(b) scheme_mz_setjmp(b) 
+#endif
+
 #ifdef MZ_PRECISE_GC
 /* Need to make sure that a __gc_var_stack__ is always available where
    setjmp & longjmp are used. */
 # define scheme_longjmp(b, v) (((long *)(void*)((b).gcvs))[1] = (b).gcvs_cnt, \
                                GC_variable_stack = (void **)(void*)(b).gcvs, \
-                               scheme_mz_longjmp((b).jb, v))
+                               scheme_jit_longjmp((b).jb, v))
 # define scheme_setjmp(b)     ((b).gcvs = (long)__gc_var_stack__, \
                                (b).gcvs_cnt = (long)(__gc_var_stack__[1]), \
-                               scheme_mz_setjmp((b).jb))
+                               scheme_jit_setjmp((b).jb))
 #else
-# define scheme_longjmp(b, v) scheme_mz_longjmp(b, v)
-# define scheme_setjmp(b) scheme_mz_setjmp(b)
+# define scheme_longjmp(b, v) scheme_jit_longjmp(b, v)
+# define scheme_setjmp(b) scheme_jit_setjmp(b)
 #endif
 
 /*========================================================================*/
@@ -1406,12 +1445,10 @@ void *scheme_malloc(size_t size);
 #  define GC2_EXTERN MZ_EXTERN
 # endif
 # ifdef INCLUDE_WITHOUT_PATHS
-#  if SCHEME_DIRECT_EMBEDDED
-#   include "gc2.h"
-#  else
+#  if !SCHEME_DIRECT_EMBEDDED
 #   define GC2_JUST_MACROS_AND_TYPEDEFS
-#   include "schemegc2.h"
 #  endif
+#  include "schemegc2.h"
 # else
 #  include "../gc2/gc2.h"
 # endif
@@ -1486,14 +1523,28 @@ MZ_EXTERN int scheme_square_brackets_are_parens; /* Defaults to 1 */
 MZ_EXTERN int scheme_curly_braces_are_parens; /* Defaults to 1 */
 MZ_EXTERN int scheme_hash_percent_syntax_only; /* Defaults to 0 */
 MZ_EXTERN int scheme_hash_percent_globals_only; /* Defaults to 0 */
-MZ_EXTERN int scheme_binary_mode_stdio; /* Windows-MacOS-specific. Defaults to 0 */
+MZ_EXTERN int scheme_binary_mode_stdio; /* Windows-specific; Defaults to 0 */
+MZ_EXTERN int scheme_startup_use_jit; /* Defaults to 1 */
+MZ_EXTERN int scheme_ignore_user_paths; /* Defaults to 0 */
+
+MZ_EXTERN void scheme_set_case_sensitive(int);
+MZ_EXTERN void scheme_set_allow_set_undefined(int);
+MZ_EXTERN void scheme_set_binary_mode_stdio(int);
+MZ_EXTERN void scheme_set_startup_use_jit(int);
+MZ_EXTERN void scheme_set_ignore_user_paths(int);
+
+MZ_EXTERN int scheme_get_allow_set_undefined();
 
 MZ_EXTERN Scheme_Thread *scheme_current_thread;
 MZ_EXTERN Scheme_Thread *scheme_first_thread;
 
 /* Set these global hooks (optionally): */
-MZ_EXTERN void (*scheme_exit)(int v);
-MZ_EXTERN void (*scheme_console_printf)(char *str, ...);
+typedef void (*Scheme_Exit_Proc)(int v);
+MZ_EXTERN Scheme_Exit_Proc scheme_exit;
+MZ_EXTERN void scheme_set_exit(Scheme_Exit_Proc p);
+typedef void (*scheme_console_printf_t)(char *str, ...);
+MZ_EXTERN scheme_console_printf_t scheme_console_printf;
+MZ_EXTERN scheme_console_printf_t scheme_get_console_printf();
 MZ_EXTERN void (*scheme_console_output)(char *str, long len);
 MZ_EXTERN void (*scheme_sleep)(float seconds, void *fds);
 MZ_EXTERN void (*scheme_notify_multithread)(int on);
@@ -1519,6 +1570,9 @@ MZ_EXTERN Scheme_Object *(*scheme_make_stderr)(void);
 
 MZ_EXTERN void scheme_set_banner(char *s);
 MZ_EXTERN Scheme_Object *scheme_set_exec_cmd(char *s);
+MZ_EXTERN Scheme_Object *scheme_set_run_cmd(char *s);
+MZ_EXTERN void scheme_set_collects_path(Scheme_Object *p);
+MZ_EXTERN void scheme_set_original_dir(Scheme_Object *d);
 
 /* Initialization */
 MZ_EXTERN Scheme_Env *scheme_basic_env(void);
@@ -1534,6 +1588,7 @@ MZ_EXTERN int scheme_get_external_event_fd(void);
 /* image dump enabling startup: */
 MZ_EXTERN int scheme_image_main(int argc, char **argv);
 MZ_EXTERN int (*scheme_actual_main)(int argc, char **argv);
+MZ_EXTERN void scheme_set_actual_main(int (*m)(int argc, char **argv));
 
 /* GC registration: */
 #ifdef GC_MIGHT_USE_REGISTERED_STATICS
@@ -1560,6 +1615,24 @@ MZ_EXTERN Scheme_Object *scheme_param_config(char *name, Scheme_Object *pos,
 MZ_EXTERN Scheme_Object *scheme_register_parameter(Scheme_Prim *function, char *name, int which);
 
 #endif /* SCHEME_DIRECT_EMBEDDED */
+
+/*========================================================================*/
+/*                              addrinfo                                  */
+/*========================================================================*/
+
+#ifdef HAVE_GETADDRINFO
+# define mz_addrinfo addrinfo
+#else
+struct mz_addrinfo {
+  int ai_flags;
+  int ai_family;
+  int ai_socktype;
+  int ai_protocol;
+  size_t  ai_addrlen;
+  struct sockaddr *ai_addr;
+  struct mz_addrinfo *ai_next;
+};
+#endif
 
 /*========================================================================*/
 /*                              FFI functions                             */
@@ -1661,6 +1734,8 @@ extern Scheme_Extension_Table *scheme_extension_table;
 # define MZ_FD_CLR(n, p) FD_CLR(n, p)
 # define MZ_FD_ISSET(n, p) FD_ISSET(n, p)
 #endif
+
+/*========================================================================*/
 
 #ifdef __cplusplus
 }

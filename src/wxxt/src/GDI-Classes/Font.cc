@@ -4,7 +4,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2005 PLT Scheme, Inc.
+ * Copyright: (C) 2004-2006 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -737,7 +737,11 @@ static wxFontStruct *wxLoadQueryNearestAAFont(const char *name,
 	     : XFT_SLANT_ROMAN));
 
     ex_tags[0] = NULL;
+    ex_types[0] = 0;
+    ex_vals[0] = 0;
     ex_tags[1] = NULL;
+    ex_types[1] = 0;
+    ex_vals[1] = 0;
 
     switch (smoothing) {
     case wxSMOOTHING_OFF:

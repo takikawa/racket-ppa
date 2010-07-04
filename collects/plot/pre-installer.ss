@@ -9,7 +9,7 @@
   (define tmp-dir (build-path src-dir "tmp"))
   (define dir->libname '(["all" "libplplot"] ["fit" "libfit"]))
   (define native-dir
-    (build-path top-dir "compiled" "native" (system-library-subpath)))
+    (build-path top-dir "compiled" "native" (system-library-subpath #f)))
 
   (define (build-library lib)
     (when (and (directory-exists? lib)
@@ -20,7 +20,7 @@
                                     "Found an unknown source directory: ~s\n"
                                     lib)])]
              [so-name (build-path top-dir "compiled" "native"
-                                  (system-library-subpath)
+                                  (system-library-subpath #f)
                                   (append-extension-suffix libname))])
         (parameterize ([current-directory lib]
                        [current-extension-compiler-flags
@@ -56,7 +56,7 @@
             (delete-directory/files tmp-dir))))))
 
   (provide pre-installer)
-  (define (pre-installer plthome)
+  (define (pre-installer main-collects-parent-dir)
     (unless (directory-exists? src-dir)
       (error 'plot-preinstall "Could not find the source directory at ~a"
              src-dir))

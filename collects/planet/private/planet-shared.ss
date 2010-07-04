@@ -1,38 +1,28 @@
 #| planet-shared.ss -- shared client/server utility functions
 
 Various common pieces of code that both the client and server need to access
-
 ==========================================================================================
-
 |#
 
 (module planet-shared mzscheme
   
   (require (lib "list.ss")
            (lib "etc.ss")
-           (lib "port.ss"))
+           (lib "port.ss")
+           (lib "file.ss")
+           (lib "getinfo.ss" "setup")
+           "../config.ss")
   
   (provide (all-defined))
   
-  (define-syntax (define-parameters stx)
-    (syntax-case stx ()
-      [(_ (name val) ...)
-       (andmap identifier? (syntax-e #'(name ...)))
-       #'(begin
-           (provide name ...)
-           (define name (make-parameter val)) ...)]))
-  
-  
   ; exn:i/o:protocol: exception indicating that a protocol error occured
   (define-struct (exn:i/o:protocol exn:fail:network) ())
-
-  (define BUILD "build")
   
   ; ==========================================================================================
   ; CACHE LOGIC
   ; Handles checking the cache for an appropriate module
   ; ==========================================================================================
-
+  
   ; language-version->repository : string -> string | #f
   ; finds the appropriate language version for the given repository
   (define (language-version->repository ver)
@@ -50,61 +40,246 @@ Various common pieces of code that both the client and server need to access
   (define (legal-language? l)
     (and (language-version->repository l) #t))
   
-  ; lookup-package : FULL-PKG-SPEC string[dirname] -> PKG | #f
-  ; returns the directory pointing to the appropriate package in the cache, or #f if the given package
-  ; isn't in the cache
-  (define (lookup-package pkg cache-dir)
-    (let ((pkg-dir (build-path (apply build-path cache-dir (pkg-spec-path pkg)) (pkg-spec-name pkg))))
-      (if (directory-exists? pkg-dir)
-          (get-best-match pkg pkg-dir)
-          #f)))
+  ; lookup-package : FULL-PKG-SPEC -> PKG | #f
+  ; returns the directory pointing to the appropriate package in the cache, the user's hardlink table,
+  ; or #f if the given package isn't in the cache or the hardlink table
+  (define (lookup-package pkg)
+    (let* ((at (build-assoc-table pkg)))
+      (get-best-match at pkg)))
   
-  ; get-best-match :FULL-PKG-SPEC (listof string[directory-name]) -> PKG | #f
-  ; gets the best version in the given subdirectory in the specified low and high version range
-  ; or #f if there is no appropriate version
-  (define (get-best-match pkg-spec path)
-    (let ((major-version (if (pkg-spec-maj pkg-spec)
-                             (let ((specified-number (number->string (pkg-spec-maj pkg-spec))))
-                               (if (directory-exists? (build-path path specified-number))
-                                   specified-number
-                                   #f))
-                             (get-highest-numbered-subdir path #f #f))))
-      (if major-version
-          (let ((minor-version (get-highest-numbered-subdir 
-                                (build-path path major-version)
-                                (pkg-spec-minor-lo pkg-spec)
-                                (pkg-spec-minor-hi pkg-spec))))
-            (if minor-version
-                (make-pkg
-                 (pkg-spec-name pkg-spec)
-                 (pkg-spec-path pkg-spec)
-                 (string->number major-version) 
-                 (string->number minor-version)
-                 (build-path path major-version minor-version))
+  ; build-assoc-table : FULL-PKG-SPEC -> assoc-table
+  ; returns a version-number -> directory association table for the given package
+  (define (build-assoc-table pkg)
+    (add-to-table 
+     (dir->assoc-table pkg)
+     (hard-links pkg)))
+  
+  ;; assoc-table ::= (listof (list n n path))
+  (define empty-table '())
+  
+  ;; get-min-core-version : path -> string | #f
+  (define (get-min-core-version p)
+    (let ((info (with-handlers ([exn:fail? (lambda (e) #f)])
+                  (get-info/full p))))
+      (if info
+          (let ((core (info 'required-core-version (lambda () #f))))
+            (if (and core (string? core))
+                core
                 #f))
           #f)))
   
-  ; get-highest-numbered-subdir : string (Nat | #f) (Nat | #f) -> string[subdir] | #f
-  ; given a path, returns the subdirectory of that path with the highest numeric name or #f if
-  ; none exists. Does not return the full path.
-  (define (get-highest-numbered-subdir path lo hi)
-    (define (valid-dir? d) 
-      (and 
-       (directory-exists? (build-path path d)) 
-       (let ((n (string->number (path->string d))))
-         (and n
-              (or (not lo) (>= n lo))
-              (or (not hi) (<= n hi))))))
+  ; dir->assoc-table : FULL-PKG-SPEC -> assoc-table
+  ; returns the on-disk packages for the given planet dir
+  (define (dir->assoc-table pkg)
+    (define path (build-path (apply build-path (CACHE-DIR) (pkg-spec-path pkg)) (pkg-spec-name pkg)))
     
-    (unless (directory-exists? path) 
-      (raise (make-exn:fail:filesystem 
-              "Internal PLaneT error: inconsistent cache, directory does not exist" 
-              (current-continuation-marks))))
-    (max-string (map path->string (filter valid-dir? (directory-list path)))))
+    (define (tree-stuff->row-or-false p majs mins)
+      (let ((maj (string->number majs))
+            (min (string->number mins)))
+        (if (and (path? p) maj min)
+            (let* ((the-path         (build-path path majs mins))
+                   (min-core-version (get-min-core-version the-path)))
+              (make-assoc-table-row 
+               (pkg-spec-name pkg) 
+               (pkg-spec-path pkg)
+               maj min
+               the-path
+               min-core-version))
+            #f)))
+    
+    (if (directory-exists? path)
+        (filter
+         (λ (x) x)
+         (tree-apply
+          tree-stuff->row-or-false
+          (directory->tree path (λ (x) #t) 2 (λ (x) x))))
+        empty-table))
   
-  ; FULL-PKG-SPEC : (make-pkg-spec string (Nat | #f) (Nat | #f) (Nat | #f) (listof string) (syntax | #f))
-  (define-struct pkg-spec (name maj minor-lo minor-hi path stx) (make-inspector))
-  ; PKG : string Nat Nat path
+  ; the link table format:
+  ; (listof (list string[name] (listof string[path]) num num bytes[directory])
+  
+  ; hard-links : FULL-PKG-SPEC -> (listof assoc-table-row)
+  (define (hard-links pkg)
+    (filter
+     (λ (row)
+       (and (equal? (assoc-table-row->name row) (pkg-spec-name pkg))
+            (equal? (assoc-table-row->path row) (pkg-spec-path pkg))))
+     (get-hard-link-table)))
+  
+  ;; verify-well-formed-hard-link-parameter! : -> void
+  ;; pitches a fit if the hard link table parameter isn't set right
+  (define (verify-well-formed-hard-link-parameter!)
+    (unless (and (absolute-path? (HARD-LINK-FILE)) (path-only (HARD-LINK-FILE)))
+      (raise (make-exn:fail:contract 
+              (string->immutable-string
+               (format 
+                "The HARD-LINK-FILE setting must be an absolute path name specifying a file; given ~s" 
+                (HARD-LINK-FILE)))
+              (current-continuation-marks)))))
+  
+  ;; get-hard-link-table : -> assoc-table
+  (define (get-hard-link-table)
+    (verify-well-formed-hard-link-parameter!)
+    (if (file-exists? (HARD-LINK-FILE))
+        (map 
+         (lambda (item) (update-element 4 bytes->path item))
+         (with-input-from-file (HARD-LINK-FILE) read-all))
+        '()))
+  
+  ;; row-for-package? : row string (listof string) num num -> boolean
+  ;; determines if the row associates the given package with a dir
+  (define (points-to? row name path maj min)
+    (and (equal? name (assoc-table-row->name row))
+         (equal? path (assoc-table-row->path row))
+         (equal? maj  (assoc-table-row->maj row))
+         (equal? min  (assoc-table-row->min row))))
+  
+  ;; save-hard-link-table : assoc-table -> void
+  ;; saves the given table, overwriting any file that might be there
+  (define (save-hard-link-table table)
+    (verify-well-formed-hard-link-parameter!)
+    (with-output-to-file (HARD-LINK-FILE)
+      (lambda ()
+        (display "")
+        (for-each 
+         (lambda (row)
+           (write (update-element 4 path->bytes row))
+           (newline))
+         table))
+      'truncate))
+  
+  ;; add-hard-link! string (listof string) num num path -> void
+  ;; adds the given hard link, clearing any previous ones already in place
+  ;; for the same package
+  (define (add-hard-link! name path maj min dir)
+    (let* ([original-table (get-hard-link-table)]
+           [new-table (cons
+                       (make-assoc-table-row name path maj min dir #f)
+                       (filter
+                        (lambda (row) (not (points-to? row name path maj min)))
+                        original-table))])
+      (save-hard-link-table new-table)))
+  
+  ;; filter-link-table! : (row -> boolean) -> void
+  ;; removes all rows from the link table that don't match the given predicate
+  (define (filter-link-table! f)
+    (save-hard-link-table (filter f (get-hard-link-table))))
+  
+  ;; update-element : number (x -> y) (listof any [x in position number]) -> (listof any [y in position number])
+  (define (update-element n f l)
+    (cond
+      [(null? l) (error 'update-element "Index too large")]
+      [(zero? n) (cons (f (car l)) (cdr l))]
+      [else (cons (car l) (update-element (sub1 n) f (cdr l)))]))
+  
+  ; add-to-table assoc-table (listof assoc-table-row) -> assoc-table
+  (define add-to-table append) 
+  
+  ;; first-n-list-selectors : number -> (values (listof x -> x) ...)
+  ;; returns n list selectors for the first n elements of a list
+  ;; (useful for defining meaningful names to list-structured data)
+  (define (first-n-list-selectors n)
+    (apply values (build-list n (lambda (m) (lambda (row) (list-ref row m))))))
+  
+  ;; assoc-table-row->{name,path,maj,min,dir,required-version} 
+  ;; : assoc-table-row ->
+  ;; {string,(listof string),num,num,path,string|#f}
+  ;; retrieve the {package name, "package path", major version, minor version, directory, required core version}
+  ;; of the given row
+  (define-values (assoc-table-row->name
+                  assoc-table-row->path
+                  assoc-table-row->maj
+                  assoc-table-row->min
+                  assoc-table-row->dir
+                  assoc-table-row->required-version)
+    (first-n-list-selectors 6))
+  
+  (define (make-assoc-table-row name path maj min dir required-version)
+    (list name path maj min dir required-version))
+  
+  (define-struct mz-version (major minor))
+  
+  ;; string->mz-version : string -> mz-version | #f
+  (define (string->mz-version str)
+    (let ((ver (regexp-match #rx"^([0-9]+)(\\.([0-9]+))?$" str)))
+      (if ver
+          (make-mz-version 
+           (string->number (list-ref ver 1))
+           (if (list-ref ver 3)
+               (string->number (list-ref ver 3))
+               0))
+          #f)))
+  
+  ;; version<= : mz-version mz-version -> boolean
+  ;; determines if a is the version string of an earlier mzscheme release than b
+  ;;   [n.b. this relies on a guarantee from Matthew that mzscheme version
+  ;;    x1.y1 is older than version x2.y2 iff x1<x2 or x1=x2 and y1<y2]
+  (define (version<= a b)
+    (or (<= (mz-version-major a) (mz-version-major b))
+        (and (= (mz-version-major a) (mz-version-major b))
+             (<= (mz-version-minor a) (mz-version-minor b)))))
+  
+  ;; pkg< : pkg pkg -> boolean
+  ;; determines if a is an earlier version than b
+  ;; [only sensical if a and b are versions of the same package]
+  (define (pkg< a b)
+    (or (< (pkg-maj a) (pkg-maj b))
+        (and (= (pkg-maj a) (pkg-maj b))
+             (< (pkg-min a) (pkg-min b)))))
+  
+  (define (pkg> a b) 
+    (pkg< b a))
+  (define (pkg= a b) 
+    (not (or (pkg< a b) (pkg> a b))))
+  
+  ;; compatible-version? : assoc-table-row FULL-PKG-SPEC -> boolean
+  ;; determines if the given package constrint verstr can support the given package
+  (define (compatible-version? row spec)
+    (let ((required-version (assoc-table-row->required-version row)))
+      (or (not required-version)
+          (let ((required (string->mz-version required-version))
+                (provided (string->mz-version (pkg-spec-core-version spec))))
+            (or (not required) 
+                (not provided)
+                (version<= required provided))))))
+  
+  ; get-best-match : assoc-table FULL-PKG-SPEC -> PKG | #f
+  ; return the best on-disk match for the given package spec
+  (define (get-best-match table spec)
+    (if (null? table)
+        #f
+        (let* ((target-maj 
+                (or (pkg-spec-maj spec)
+                    (apply max (map assoc-table-row->maj table))))
+               (lo (pkg-spec-minor-lo spec))
+               (hi (pkg-spec-minor-hi spec))
+               (matches
+                (filter 
+                 (λ (x) 
+                   (let ((n (assoc-table-row->min x)))
+                     (and
+                      (equal? target-maj (assoc-table-row->maj x))
+                      (or (not lo) (>= n lo))
+                      (or (not hi) (<= n hi))
+                      (compatible-version? x spec))))
+                 table)))
+          (if (null? matches)
+              #f
+              (let ((best-row
+                     (car 
+                      (sort
+                       matches
+                       (λ (a b) (> (assoc-table-row->min a) (assoc-table-row->min b)))))))
+                (make-pkg
+                 (pkg-spec-name spec)
+                 (pkg-spec-path spec)
+                 (assoc-table-row->maj best-row)
+                 (assoc-table-row->min best-row)
+                 (assoc-table-row->dir best-row)))))))
+  
+  ; FULL-PKG-SPEC : (make-pkg-spec string (Nat | #f) (Nat | #f) (Nat | #f) (listof string) (syntax | #f)) string
+  (define-struct pkg-spec (name maj minor-lo minor-hi path stx core-version) (make-inspector))
+  ; PKG : string (listof string) Nat Nat path
   (define-struct pkg (name route maj min path))
   
   ; ==========================================================================================
@@ -135,26 +310,8 @@ Various common pieces of code that both the client and server need to access
                     (begin
                       (set! to-read (- to-read bytes-read))
                       bytes-read)))]))
-       #f
-       void))))
-  
-  ; max-string : listof string[digits] -> string | #f
-  ; this odd little guy takes a list of strings that represent a number and returns the string
-  ; that represents the maximum number among them, or #f if there were no numbers at all 
-  (define (max-string strs)
-    (if (null? strs)
-        #f
-        (let loop ((biggest (car strs))
-                   (big-n (string->number (car strs)))
-                   (rest (cdr strs)))
-          (cond
-            [(null? rest) biggest]
-            [else
-             (let* ([candidate (car rest)]
-                    [test-n    (string->number candidate)])
-               (if (> test-n big-n)
-                   (loop candidate test-n (cdr rest))
-                   (loop biggest big-n (cdr rest))))]))))
+         #f
+         void))))
   
   ; write-line : X output-port -> void
   ; writes the given value followed by a newline to the given port
@@ -223,8 +380,6 @@ Various common pieces of code that both the client and server need to access
        l)
       (hash-table-map ht cons)))
   
-  
-  
   (define (drop-last l) (reverse (cdr (reverse l))))
   
   ;; note: this can be done faster by reading a copy-port'ed port with
@@ -249,6 +404,15 @@ Various common pieces of code that both the client and server need to access
                 null-out)))
       (parameterize ([current-output-port outport])
         (f))))
+  
+  
+  ;; pkg->info : PKG -> (symbol (-> TST) -> TST)
+  ;; get an info.ss thunk for the given package
+  (define (pkg->info p)
+    (or
+     (with-handlers ([exn:fail? (lambda (e) #f)])
+       (get-info/full (pkg-path p)))
+     (lambda (s thunk) (thunk))))
   
   ;; ============================================================
   ;; TREE STUFF
@@ -278,7 +442,7 @@ Various common pieces of code that both the client and server need to access
                '()
                (let ((next-depth (if max-depth (sub1 max-depth) #f)))
                  (map (lambda (d) (directory->tree d valid-dir? next-depth)) files))))))))
-
+  
   ;; filter-pattern : (listof pattern-term)
   ;; pattern-term   : (x -> y) | (make-star (tst -> bool) (x -> y))
   (define-struct star (pred fun))

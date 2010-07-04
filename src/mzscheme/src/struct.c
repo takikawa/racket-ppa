@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -39,13 +39,6 @@ typedef enum {
   SCHEME_GEN_SETTER
 } Scheme_ProcT;
 
-typedef struct Struct_Proc_Info {
-  MZTAG_IF_REQUIRED
-  Scheme_Struct_Type *struct_type;
-  char *func_name;
-  mzshort field;
-} Struct_Proc_Info;
-
 typedef struct {
   Scheme_Object so;
   Scheme_Object *evt;
@@ -81,6 +74,8 @@ static Scheme_Object *struct_type_p(int argc, Scheme_Object *argv[]);
 
 static Scheme_Object *struct_info(int argc, Scheme_Object *argv[]);
 static Scheme_Object *struct_type_info(int argc, Scheme_Object *argv[]);
+static Scheme_Object *struct_type_pred(int argc, Scheme_Object *argv[]);
+static Scheme_Object *struct_type_constr(int argc, Scheme_Object *argv[]);
 static Scheme_Object *struct_to_vector(int argc, Scheme_Object *argv[]);
 
 static Scheme_Object *struct_setter_p(int argc, Scheme_Object *argv[]);
@@ -367,6 +362,16 @@ scheme_init_struct (Scheme_Env *env)
 						       1, 1,
 						       mzNUM_ST_INFO, mzNUM_ST_INFO),
 			     env);
+  scheme_add_global_constant("struct-type-make-predicate",
+			     scheme_make_prim_w_arity(struct_type_pred,
+						      "struct-type-make-predicate",
+						      1, 1),
+			     env);
+  scheme_add_global_constant("struct-type-make-constructor",
+			     scheme_make_prim_w_arity(struct_type_constr,
+						      "struct-type-make-constructor",
+						      1, 1),
+			     env);
   scheme_add_global_constant("struct->vector",
 			     scheme_make_prim_w_arity(struct_to_vector,
 						      "struct->vector",
@@ -553,9 +558,10 @@ static Scheme_Object *current_code_inspector(int argc, Scheme_Object *argv[])
 /*                             properties                                 */
 /*========================================================================*/
 
-static Scheme_Object *prop_pred(Scheme_Object *prop, int argc, Scheme_Object **args)
+static Scheme_Object *prop_pred(int argc, Scheme_Object **args, Scheme_Object *prim)
 {
   Scheme_Struct_Type *stype;
+  Scheme_Object *prop = SCHEME_PRIM_CLOSURE_ELS(prim)[0];
 
   if (SCHEME_STRUCTP(args[0]))
     stype = ((Scheme_Structure *)args[0])->stype;
@@ -578,14 +584,14 @@ static Scheme_Object *prop_pred(Scheme_Object *prop, int argc, Scheme_Object **a
   return scheme_false;
 }
 
-static Scheme_Object *prop_accessor(Scheme_Object *prop, int argc, Scheme_Object **args)
+static Scheme_Object *do_prop_accessor(Scheme_Object *prop, Scheme_Object *arg, int error_ok, const char *name)
 {
   Scheme_Struct_Type *stype;
 
-  if (SCHEME_STRUCTP(args[0]))
-    stype = ((Scheme_Structure *)args[0])->stype;
-  else if (SAME_TYPE(SCHEME_TYPE(args[0]), scheme_struct_type_type))
-    stype = (Scheme_Struct_Type *)args[0];
+  if (SCHEME_STRUCTP(arg))
+    stype = ((Scheme_Structure *)arg)->stype;
+  else if (SAME_TYPE(SCHEME_TYPE(arg), scheme_struct_type_type))
+    stype = (Scheme_Struct_Type *)arg;
   else
     stype = NULL;
 
@@ -604,11 +610,17 @@ static Scheme_Object *prop_accessor(Scheme_Object *prop, int argc, Scheme_Object
     }
   }
   
-  if (argc < 2) /* hack; see scheme_struct_type_property_ref */
-    scheme_wrong_type("property accessor", 
+  if (error_ok) /* hack; see scheme_struct_type_property_ref */
+    scheme_wrong_type(name ? name : "property accessor", 
 		      "struct or struct-type with property", 
-		      0, argc, args);
+		      0, 1, (Scheme_Object **)&arg);
   return NULL;
+}
+
+static Scheme_Object *prop_accessor(int argc, Scheme_Object **args, Scheme_Object *prim)
+{
+  return do_prop_accessor(SCHEME_PRIM_CLOSURE_ELS(prim)[0], args[0], 1, 
+			  ((Scheme_Primitive_Proc *)prim)->name);
 }
 
 static Scheme_Object *make_struct_type_property(int argc, Scheme_Object *argv[])
@@ -640,20 +652,20 @@ static Scheme_Object *make_struct_type_property(int argc, Scheme_Object *argv[])
   name[len] = '?';
   name[len+1] = 0;
 
-  v = scheme_make_folding_closed_prim((Scheme_Closed_Prim *)prop_pred,
-				      (void *)p,
-				      name,
-				      1, 1, 0);
+  v = scheme_make_folding_prim_closure(prop_pred,
+				       1, a,
+				       name,
+				       1, 1, 0);
   a[1] = v;
 
   name = MALLOC_N_ATOMIC(char, len + 10);
   memcpy(name, SCHEME_SYM_VAL(argv[0]), len);
   memcpy(name + len, "-accessor", 10);
 
-  v = scheme_make_folding_closed_prim((Scheme_Closed_Prim *)prop_accessor,
-				      (void *)p,
-				      name,
-				      1, 1, 0);
+  v = scheme_make_folding_prim_closure(prop_accessor,
+				       1, a,
+				       name,
+				       1, 1, 0);
   a[2] = v;
 
   return scheme_values(3, a);
@@ -678,7 +690,7 @@ Scheme_Object *scheme_make_struct_type_property(Scheme_Object *name)
 
 Scheme_Object *scheme_struct_type_property_ref(Scheme_Object *prop, Scheme_Object *s)
 {
-  return prop_accessor(prop, 2, &s); /* 2 is a hack! */
+  return do_prop_accessor(prop, s, 0, NULL);
 }
 
 static Scheme_Object *struct_type_property_p(int argc, Scheme_Object *argv[])
@@ -792,6 +804,8 @@ static int evt_struct_is_ready(Scheme_Object *o, Scheme_Schedule_Info *sinfo)
       result = scheme_apply(f, 1, a);
 
       if (scheme_is_evt(result)) {
+	SCHEME_USE_FUEL(1); /* Needed beause an apply of a mzc-generated function
+			       might not check for breaks. */
 	scheme_set_sync_target(sinfo, result, NULL, NULL, 0, 1);
 	return 0;
       }
@@ -966,13 +980,60 @@ scheme_make_struct_instance(Scheme_Object *_stype, int argc, Scheme_Object **arg
   return (Scheme_Object *)inst;
 }
 
-static Scheme_Object *struct_pred(Scheme_Struct_Type *stype, int argc, Scheme_Object **args)
+static Scheme_Object *
+make_struct_instance(int argc, Scheme_Object **args, Scheme_Object *prim)
 {
-  if (SCHEME_STRUCTP(args[0])
-      && STRUCT_TYPEP(stype, ((Scheme_Structure *)args[0])))
-    return scheme_true;
-  else
-    return scheme_false;
+  return scheme_make_struct_instance(SCHEME_PRIM_CLOSURE_ELS(prim)[0], argc, args);
+}
+
+static Scheme_Object *
+make_simple_struct_instance(int argc, Scheme_Object **args, Scheme_Object *prim)
+/* No guards, uninitialized slots, or proc type */
+{
+  Scheme_Structure *inst;
+  Scheme_Struct_Type *stype = (Scheme_Struct_Type *)SCHEME_PRIM_CLOSURE_ELS(prim)[0];
+  int i, c;
+
+  c = stype->num_slots;
+  inst = (Scheme_Structure *)
+    scheme_malloc_tagged(sizeof(Scheme_Structure) 
+			 + ((c - 1) * sizeof(Scheme_Object *)));
+  
+  inst->so.type = scheme_structure_type;
+  inst->stype = stype;
+
+  for (i = 0; i < argc; i++) {
+    inst->slots[i] = args[i];
+  }
+  
+  return (Scheme_Object *)inst;
+}
+
+static int is_simple_struct_type(Scheme_Struct_Type *stype)
+{
+  int p;
+
+  if (stype->proc_attr)
+    return 0;
+
+  for (p = stype->name_pos; p >= 0; p--) {
+    if (stype->parent_types[p]->guard)
+      return 0;
+    if (stype->parent_types[p]->num_slots != stype->parent_types[p]->num_islots)
+      return 0;
+  }
+
+  return 1;
+}
+
+static Scheme_Object *struct_pred(int argc, Scheme_Object **args, Scheme_Object *prim)
+{
+  if (SCHEME_STRUCTP(args[0])) {
+    Scheme_Struct_Type *stype = (Scheme_Struct_Type *)SCHEME_PRIM_CLOSURE_ELS(prim)[0];
+    if (STRUCT_TYPEP(stype, ((Scheme_Structure *)args[0])))
+      return scheme_true;
+  }
+  return scheme_false;
 }
 
 static int parse_pos(const char *who, Struct_Proc_Info *i, Scheme_Object **args, int argc)
@@ -1029,10 +1090,11 @@ static int parse_pos(const char *who, Struct_Proc_Info *i, Scheme_Object **args,
   return pos;
 }
 
-static Scheme_Object *struct_getter(Struct_Proc_Info *i, int argc, Scheme_Object **args)
+static Scheme_Object *struct_getter(int argc, Scheme_Object **args, Scheme_Object *prim)
 {
   Scheme_Structure *inst;
   int pos;
+  Struct_Proc_Info *i = (Struct_Proc_Info *)SCHEME_PRIM_CLOSURE_ELS(prim)[0];
 
   inst = (Scheme_Structure *)args[0];
 
@@ -1057,11 +1119,12 @@ static Scheme_Object *struct_getter(Struct_Proc_Info *i, int argc, Scheme_Object
   return inst->slots[pos];
 }
 
-static Scheme_Object *struct_setter(Struct_Proc_Info *i, int argc, Scheme_Object **args)
+static Scheme_Object *struct_setter(int argc, Scheme_Object **args, Scheme_Object *prim)
 {
   Scheme_Structure *inst;
   int pos;
   Scheme_Object *v;
+  Struct_Proc_Info *i = (Struct_Proc_Info *)SCHEME_PRIM_CLOSURE_ELS(prim)[0];
 
   if (!SCHEME_STRUCTP(args[0])) {
     scheme_wrong_type(i->func_name, 
@@ -1160,25 +1223,36 @@ static Scheme_Object *struct_info(int argc, Scheme_Object *argv[])
   return scheme_values(2, a);
 }
 
-static void get_struct_type_info(int argc, Scheme_Object *argv[], Scheme_Object **a, int always)
+static Scheme_Object *check_type_and_inspector(const char *who, int always, int argc, Scheme_Object *argv[])
 {
-  Scheme_Struct_Type *stype, *parent;
-  Scheme_Object *insp, *ims;
-  int p;
+  Scheme_Object *insp;
+  Scheme_Struct_Type *stype;
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_struct_type_type))
-    scheme_wrong_type("struct-type-info", "struct-type", 0, argc, argv);
+    scheme_wrong_type(who, "struct-type", 0, argc, argv);
 
   stype = (Scheme_Struct_Type *)argv[0];
 
   insp = scheme_get_param(scheme_current_config(), MZCONFIG_INSPECTOR);
 
   if (!always && !scheme_is_subinspector(stype->inspector, insp)) {
-    scheme_arg_mismatch("struct-type-info", 
+    scheme_arg_mismatch(who, 
 			"current inspector cannot extract info for struct-type: ",
 			argv[0]);
-    return;
+    return NULL;
   }
+
+  return insp;
+}
+
+static void get_struct_type_info(int argc, Scheme_Object *argv[], Scheme_Object **a, int always)
+{
+  Scheme_Struct_Type *stype, *parent;
+  Scheme_Object *insp, *ims;
+  int p;
+
+  insp = check_type_and_inspector("struct-type-info", always, argc, argv);
+  stype = (Scheme_Struct_Type *)argv[0];
 
   /* Make sure generic accessor and mutator are created: */
   if (!stype->accessor) {
@@ -1232,6 +1306,34 @@ static Scheme_Object *struct_type_info(int argc, Scheme_Object *argv[])
   get_struct_type_info(argc, argv, a, 0);
 
   return scheme_values(mzNUM_ST_INFO, a);
+}
+
+static Scheme_Object *struct_type_pred(int argc, Scheme_Object *argv[])
+{
+  Scheme_Struct_Type *stype;
+
+  check_type_and_inspector("struct-type-make-predicate", 0, argc, argv);
+  stype = (Scheme_Struct_Type *)argv[0];
+
+  return make_struct_proc(stype, 
+			  scheme_symbol_val(PRED_NAME(scheme_symbol_val(stype->name),
+						      SCHEME_SYM_LEN(stype->name))),
+			  SCHEME_PRED,
+			  stype->num_slots);
+}
+
+static Scheme_Object *struct_type_constr(int argc, Scheme_Object *argv[])
+{
+  Scheme_Struct_Type *stype;
+
+  check_type_and_inspector("struct-type-make-constructor", 0, argc, argv);
+  stype = (Scheme_Struct_Type *)argv[0];
+
+  return make_struct_proc(stype, 
+			  scheme_symbol_val(CSTR_NAME(scheme_symbol_val(stype->name),
+						      SCHEME_SYM_LEN(stype->name))),
+			  SCHEME_CONSTR,
+			  stype->num_slots);
 }
 
 Scheme_Object *scheme_struct_to_vector(Scheme_Object *_s, Scheme_Object *unknown_val, Scheme_Object *insp)
@@ -1374,20 +1476,30 @@ int scheme_inspector_sees_part(Scheme_Object *s, Scheme_Object *insp, int pos)
 }
 
 
-#define STRUCT_PROCP(o, t) \
-    (SCHEME_STRUCT_PROCP(o) && (((Scheme_Closed_Primitive_Proc *)o)->pp.flags & t))
+#define STRUCT_mPROCP(o, t, v)						\
+  (SCHEME_PRIMP(o) && ((((Scheme_Primitive_Proc *)o)->pp.flags & (t)) == (v)))
+
+#define STRUCT_PROCP(o, t) STRUCT_mPROCP(o, t, t)
 
 static Scheme_Object *
 struct_setter_p(int argc, Scheme_Object *argv[])
 {
-  return (STRUCT_PROCP(argv[0], SCHEME_PRIM_IS_STRUCT_SETTER)
+  return ((STRUCT_mPROCP(argv[0], 
+			 SCHEME_PRIM_IS_STRUCT_OTHER | SCHEME_PRIM_STRUCT_OTHER_TYPE_MASK,
+			 SCHEME_PRIM_IS_STRUCT_OTHER | SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER)
+	   || STRUCT_mPROCP(argv[0], 
+			    SCHEME_PRIM_IS_STRUCT_OTHER | SCHEME_PRIM_STRUCT_OTHER_TYPE_MASK,
+			    SCHEME_PRIM_IS_STRUCT_OTHER | SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_SETTER))
 	  ? scheme_true : scheme_false);
 }
 
 static Scheme_Object *
 struct_getter_p(int argc, Scheme_Object *argv[])
 {
-  return (STRUCT_PROCP(argv[0], SCHEME_PRIM_IS_STRUCT_GETTER)
+  return ((STRUCT_PROCP(argv[0], SCHEME_PRIM_IS_STRUCT_INDEXED_GETTER)
+	   || STRUCT_mPROCP(argv[0], 
+			    SCHEME_PRIM_IS_STRUCT_OTHER | SCHEME_PRIM_STRUCT_OTHER_TYPE_MASK,
+			    SCHEME_PRIM_IS_STRUCT_OTHER | SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_GETTER))
 	  ? scheme_true : scheme_false);
 }
 
@@ -1401,7 +1513,9 @@ struct_pred_p(int argc, Scheme_Object *argv[])
 static Scheme_Object *
 struct_constr_p(int argc, Scheme_Object *argv[])
 {
-  return (STRUCT_PROCP(argv[0], SCHEME_PRIM_IS_STRUCT_CONSTR)
+  return (STRUCT_mPROCP(argv[0], 
+			SCHEME_PRIM_IS_STRUCT_OTHER | SCHEME_PRIM_STRUCT_OTHER_TYPE_MASK,
+			SCHEME_PRIM_IS_STRUCT_OTHER | SCHEME_PRIM_STRUCT_TYPE_CONSTR)
 	  ? scheme_true : scheme_false);
 }
 
@@ -1415,10 +1529,11 @@ static Scheme_Object *make_struct_field_xxor(const char *who, int getter,
   char digitbuf[20];
   int fieldstrlen;
 
-  if (!STRUCT_PROCP(argv[0], (getter
-			      ? SCHEME_PRIM_IS_STRUCT_GETTER
-			      : SCHEME_PRIM_IS_STRUCT_SETTER))
-      || (((Scheme_Closed_Primitive_Proc *)argv[0])->mina == (getter ? 1 : 2))) {
+  if (!STRUCT_mPROCP(argv[0], 
+		     SCHEME_PRIM_IS_STRUCT_OTHER | SCHEME_PRIM_STRUCT_OTHER_TYPE_MASK,
+		     SCHEME_PRIM_IS_STRUCT_OTHER | (getter 
+						    ? SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_GETTER
+						    : SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_SETTER))) {
     scheme_wrong_type(who, (getter 
 			    ? "accessor procedure that requires a field index"
 			    : "mutator procedure that requires a field index"),
@@ -1426,7 +1541,7 @@ static Scheme_Object *make_struct_field_xxor(const char *who, int getter,
     return NULL;
   }
 
-  i = (Struct_Proc_Info *)((Scheme_Closed_Primitive_Proc *)argv[0])->data;
+  i = (Struct_Proc_Info *)SCHEME_PRIM_CLOSURE_ELS(argv[0])[0];
 
   pos = parse_pos(who, i, argv, argc);
   
@@ -1879,22 +1994,28 @@ make_struct_proc(Scheme_Struct_Type *struct_type,
 		 char *func_name, 
 		 Scheme_ProcT proc_type, int field_num)
 {
-  Scheme_Object *p;
-  short flags = SCHEME_PRIM_IS_STRUCT_PROC;
+  Scheme_Object *p, *a[1];
+  short flags = 0;
 
   if (proc_type == SCHEME_CONSTR) {
-    p = scheme_make_folding_closed_prim((Scheme_Closed_Prim *)scheme_make_struct_instance,
-					(void *)struct_type,
-					func_name,
-					struct_type->num_islots,
-					struct_type->num_islots,
-					0);
-    flags |= SCHEME_PRIM_IS_STRUCT_CONSTR;
+    int simple;
+    simple = is_simple_struct_type(struct_type);
+    a[0] = (Scheme_Object *)struct_type;
+    p = scheme_make_folding_prim_closure((simple 
+					  ? make_simple_struct_instance
+					  : make_struct_instance),
+					 1, a,
+					 func_name,
+					 struct_type->num_islots,
+					 struct_type->num_islots,
+					 0);
+    flags |= SCHEME_PRIM_STRUCT_TYPE_CONSTR | SCHEME_PRIM_IS_STRUCT_OTHER;
   } else if (proc_type == SCHEME_PRED) {
-    p = scheme_make_folding_closed_prim((Scheme_Closed_Prim *)struct_pred,
-					(void *)struct_type,
-					func_name,
-					1, 1, 1);
+    a[0] = (Scheme_Object *)struct_type;
+    p = scheme_make_folding_prim_closure(struct_pred,
+					 1, a,
+					 func_name,
+					 1, 1, 1);
     flags |= SCHEME_PRIM_IS_STRUCT_PRED;
   } else {
     Struct_Proc_Info *i;
@@ -1914,21 +2035,29 @@ make_struct_proc(Scheme_Struct_Type *struct_type,
     else
       need_pos = 0;
 
+    a[0] = (Scheme_Object *)i;
+
     if ((proc_type == SCHEME_GETTER) || (proc_type == SCHEME_GEN_GETTER)) {
-      p = scheme_make_folding_closed_prim((Scheme_Closed_Prim *)struct_getter,
-					  (void *)i,
-					  func_name,
-					  1 + need_pos, 1 + need_pos, 1);
-      flags |= SCHEME_PRIM_IS_STRUCT_GETTER;
+      p = scheme_make_folding_prim_closure(struct_getter,
+					   1, a,
+					   func_name,
+					   1 + need_pos, 1 + need_pos, 1);
+      if (need_pos)
+	flags |= SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_GETTER | SCHEME_PRIM_IS_STRUCT_OTHER;
+      else
+	flags |= SCHEME_PRIM_IS_STRUCT_INDEXED_GETTER;
       /* Cache the accessor only if `struct_info' is used.
 	 This avoids keep lots of useless accessors.
 	 if (need_pos) struct_type->accessor = p; */
     } else {
-      p = scheme_make_folding_closed_prim((Scheme_Closed_Prim *)struct_setter,
-					  (void *)i,
-					  func_name,
-					  2 + need_pos, 2 + need_pos, 0);
-      flags |= SCHEME_PRIM_IS_STRUCT_SETTER;
+      p = scheme_make_folding_prim_closure(struct_setter,
+					   1, a,
+					   func_name,
+					   2 + need_pos, 2 + need_pos, 0);
+      if (need_pos)
+	flags |= SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_SETTER | SCHEME_PRIM_IS_STRUCT_OTHER;
+      else
+	flags |= SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER | SCHEME_PRIM_IS_STRUCT_OTHER;
       /* See note above:
 	 if (need_pos) struct_type->mutator = p; */
     }

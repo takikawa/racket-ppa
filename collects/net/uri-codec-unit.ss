@@ -1,3 +1,7 @@
+;; 1/2/2006: Added a mapping for uri path segments 
+;; that allows more characters to remain decoded 
+;; -robby
+
 ;;;
 ;;; <uri-codec-unit.ss> ---- En/Decode URLs and form-urlencoded data
 ;;; Time-stamp: <03/04/25 10:31:31 noel>
@@ -74,75 +78,53 @@
   (require (lib "unitsig.ss")
            (lib "match.ss")
            (lib "string.ss")
-	   (lib "etc.ss")
+           (lib "list.ss")
+           (lib "etc.ss")
            "uri-codec-sig.ss")
 
   (provide uri-codec@)
-
-  ;; Macro to loop over integers from n (inclusive) to m (exclusive)
-  ;; Extracted from iteration.ss in macro package at Schematics
-  (define-syntax for
-        (syntax-rules ()
-          ((for (i n m) forms ...)
-           (let ((fixed-m m))
-                 (let loop ((i n))
-                   (if (< i fixed-m)
-                           (begin
-                                 forms ...
-                                 (loop (+ i 1)))))))))
 
   (define uri-codec@
     (unit/sig net:uri-codec^
       (import)
 
+      (define (self-map-char ch) (cons ch ch))
+      (define (self-map-chars str) (map self-map-char (string->list str)))
+
       ;; The characters that always map to themselves
       (define alphanumeric-mapping
-        (map (lambda (char)
-               (cons char char))
-             '(#\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7 #\8 #\9
-               #\A #\B #\C #\D #\E #\F #\G #\H #\I #\J
-               #\K #\L #\M #\N #\O #\P #\Q #\R #\S #\T
-               #\U #\V #\W #\X #\Y #\Z #\a #\b #\c #\d
-               #\e #\f #\g #\h #\i #\j #\k #\l #\m #\n
-               #\o #\p #\q #\r #\s #\t #\u #\v #\w #\x
-               #\y #\z)))
+        (self-map-chars
+         "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"))
 
       ;; Characters that sometimes map to themselves
-      (define safe-mapping
-        (map (lambda (char)
-               (cons char char))
-             '(#\- #\_ #\. #\! #\~ #\* #\' #\( #\))))
+      (define safe-mapping (self-map-chars "-_.!~*'()"))
 
       ;; The strict URI mapping
-      (define uri-mapping
-        (append alphanumeric-mapping safe-mapping))
+      (define uri-mapping (append alphanumeric-mapping safe-mapping))
+
+      ;; The uri path segment mapping from RFC 3986
+      (define uri-path-segment-mapping
+        (append alphanumeric-mapping
+                safe-mapping
+                (map (λ (c) (cons c c)) (string->list "@+,=$&:"))))
 
       ;; The form-urlencoded mapping
       (define form-urlencoded-mapping
-        (append '((#\. . #\.)
-                  (#\- . #\-)
-                  (#\* . #\*)
-                  (#\_ . #\_)
-                  (#\space . #\+))
-                alphanumeric-mapping))
+        `(,@(self-map-chars ".-*_") (#\space . #\+) ,@alphanumeric-mapping))
 
       (define (number->hex-string number)
-        (let ((hex (number->string number 16)))
-          (string-append "%"
-                         (if (= (string-length hex) 1)
-                             (string-append "0" hex)
-                             hex))))
+        (define (hex n) (string-ref "0123456789ABCDEF" n))
+        (string #\% (hex (quotient number 16)) (hex (modulo number 16))))
 
       (define (hex-string->number hex-string)
         (string->number (substring hex-string 1 3) 16))
 
+      (define ascii-size 128)
+
       ;; (listof (cons char char)) -> (values (vectorof string) (vectorof string))
       (define (make-codec-tables alist)
-        (let ((encoding-table (make-vector 256 ""))
-              (decoding-table (make-vector 256 0)))
-          (for (i 0 256)
-               (vector-set! encoding-table i (number->hex-string i))
-               (vector-set! decoding-table i i))
+        (let ([encoding-table (build-vector ascii-size number->hex-string)]
+              [decoding-table (build-vector ascii-size values)])
           (for-each (match-lambda
                      [(orig . enc)
                       (vector-set! encoding-table
@@ -157,6 +139,10 @@
       (define-values (uri-encoding-vector uri-decoding-vector)
         (make-codec-tables uri-mapping))
 
+      (define-values (uri-path-segment-encoding-vector
+                      uri-path-segment-decoding-vector)
+        (make-codec-tables uri-path-segment-mapping))
+
       (define-values (form-urlencoded-encoding-vector
                       form-urlencoded-decoding-vector)
         (make-codec-tables form-urlencoded-mapping))
@@ -164,8 +150,11 @@
       ;; vector string -> string
       (define (encode table str)
         (apply string-append
-               (map (lambda (byte)
-                      (vector-ref table byte))
+               (map (lambda (byte) 
+                      (cond
+                        [(< byte ascii-size)
+                         (vector-ref table byte)]
+                        [else (number->hex-string byte)]))
                     (bytes->list (string->bytes/utf-8 str)))))
 
       ;; vector string -> string
@@ -175,17 +164,23 @@
            [() (list)]
            [(#\% (? hex-digit? char1) (? hex-digit? char2) . rest)
             ;; This used to consult the table again, but I think that's
-            ;;  wrong. For exmaple %2b should produce +, not a space.
+            ;;  wrong. For example %2b should produce +, not a space.
             (cons (string->number (string char1 char2) 16)
                   (internal-decode rest))]
-           [(char . rest)
+           [((? ascii-char? char) . rest)
             (cons
-             (vector-ref table
-                         (char->integer char))
+             (vector-ref table (char->integer char))
+             (internal-decode rest))]
+           [(char . rest)
+            (append
+             (bytes->list (string->bytes/utf-8 (string char)))
              (internal-decode rest))]))
 	(bytes->string/utf-8
 	 (apply bytes (internal-decode (string->list str)))))
-
+      
+      (define (ascii-char? c)
+        (< (char->integer c) ascii-size))
+      
       (define (hex-digit? c)
         (or (char<=? #\0 c #\9)
             (char<=? #\a c #\f)
@@ -198,6 +193,14 @@
       ;; string -> string
       (define (uri-decode str)
         (decode uri-decoding-vector str))
+      
+      ;; string -> string
+      (define (uri-path-segment-encode str)
+        (encode uri-path-segment-encoding-vector str))
+      
+      ;; string -> string
+      (define (uri-path-segment-decode str)
+        (decode uri-path-segment-decoding-vector str))
 
       ;; string -> string
       (define (form-urlencoded-encode str)
@@ -210,83 +213,74 @@
       ;; listof (cons string string) -> string
       ;; http://www.w3.org/TR/html401/appendix/notes.html#ampersands-in-uris
       ;; listof (cons symbol string) -> string
-      (define alist->form-urlencoded
-        (opt-lambda (args)
-          (let* ([mode (current-alist-separator-mode)]
-		 [format-one
-                  (lambda (arg)
-                    (let* ([name (car arg)]
-                           [value (cdr arg)])
-                      (string-append 
-                       (form-urlencoded-encode (symbol->string name))
-                       "="
-                       (form-urlencoded-encode value))))]
-                 [strs (let loop ([args args])
-                         (cond
-                           [(null? args) null]
-                           [(null? (cdr args)) (list (format-one (car args)))]
-                           [else (list* (format-one (car args))
-                                        (if (eq? mode 'amp)
-					    "&"
-					    ";")
-                                        (loop (cdr args)))]))])
-            (apply string-append strs))))
+      (define (alist->form-urlencoded args)
+        (let* ([mode (current-alist-separator-mode)]
+               [format-one
+                (lambda (arg)
+                  (let* ([name (car arg)]
+                         [value (cdr arg)])
+                    (string-append (form-urlencoded-encode (symbol->string name))
+                                   "="
+                                   (form-urlencoded-encode value))))]
+               [strs (let loop ([args args])
+                       (cond
+                        [(null? args) null]
+                        [(null? (cdr args)) (list (format-one (car args)))]
+                        [else (list* (format-one (car args))
+                                     (if (eq? mode 'amp) "&" ";")
+                                     (loop (cdr args)))]))])
+          (apply string-append strs)))
 
-      ;; string -> listof (cons string string)  
+      ;; string -> listof (cons string string)
       ;; http://www.w3.org/TR/html401/appendix/notes.html#ampersands-in-uris
-      (define form-urlencoded->alist
-	(opt-lambda (str)
-	  (define key-regexp (regexp "[^=]*"))
-	  (define value-regexp (case (current-alist-separator-mode)
-				 [(semi) (regexp "[^;]*")]
-				 [(amp) (regexp "[^&]*")]
-				 [else (regexp "[^&;]*")]))
-	  (define (next-key str start)
-	    (if (>= start (string-length str))
-		#f
-		(match (regexp-match-positions key-regexp str start)
-		  [((start . end))
-		   (vector (let ([s (form-urlencoded-decode (substring str start end))])
-			     (string->symbol s))
-			   (add1 end))]
-		  [#f #f])))
-	  (define (next-value str start)
-	    (if (>= start (string-length str))
-		#f
-		(match (regexp-match-positions value-regexp str start)
-		  [((start . end))
-		   (vector (form-urlencoded-decode (substring str start end))
-			   (add1 end))]
-		  [#f #f])))
-	  (define (next-pair str start)
-	    (match (next-key str start)
-	      [#(key start)
-	       (match (next-value str start)
-		 [#(value start)
-		  (vector (cons key value) start)]
-		 [#f
-		  (vector (cons key "") (string-length str))])]
-	      [#f #f]))
-	  (let loop ([start 0]
-		     [end (string-length str)]
-		     [make-alist (lambda (x) x)])
-	    (cond
-	     [(>= start end) (make-alist '())]
-	     [else
-	      (match (next-pair str start)
-		[#(pair next-start)
-		 (loop next-start end (lambda (x) (make-alist (cons pair x))))]
-		[#f (make-alist '())])]))))
+      (define (form-urlencoded->alist str)
+	(define key-regexp #rx"[^=]*")
+        (define value-regexp (case (current-alist-separator-mode)
+                               [(semi) #rx"[^;]*"]
+                               [(amp) #rx"[^&]*"]
+                               [else #rx"[^&;]*"]))
+        (define (next-key str start)
+          (and (< start (string-length str))
+               (match (regexp-match-positions key-regexp str start)
+                 [((start . end))
+                  (vector (let ([s (form-urlencoded-decode
+                                    (substring str start end))])
+                            (string->symbol s))
+                          (add1 end))]
+                 [#f #f])))
+        (define (next-value str start)
+          (and (< start (string-length str))
+               (match (regexp-match-positions value-regexp str start)
+                 [((start . end))
+                  (vector (form-urlencoded-decode (substring str start end))
+                          (add1 end))]
+                 [#f #f])))
+        (define (next-pair str start)
+          (match (next-key str start)
+            [#(key start)
+             (match (next-value str start)
+               [#(value start)
+                (vector (cons key value) start)]
+               [#f
+                (vector (cons key "") (string-length str))])]
+            [#f #f]))
+        (let loop ([start 0]
+                   [end (string-length str)]
+                   [make-alist (lambda (x) x)])
+          (if (>= start end)
+            (make-alist '())
+            (match (next-pair str start)
+              [#(pair next-start)
+               (loop next-start end (lambda (x) (make-alist (cons pair x))))]
+              [#f (make-alist '())]))))
 
       (define current-alist-separator-mode
-	(make-parameter 'amp-or-semi (lambda (s)
-				       (unless (memq s '(amp semi amp-or-semi))
-					 (raise-type-error 'current-alist-separator-mode
-							   "'amp, 'semi, or 'amp-or-semi"
-							   s))
-				       s)))
-
-      ))
-  )
+	(make-parameter 'amp-or-semi
+                        (lambda (s)
+                          (unless (memq s '(amp semi amp-or-semi))
+                            (raise-type-error 'current-alist-separator-mode
+                                              "'amp, 'semi, or 'amp-or-semi"
+                                              s))
+                          s))))))
 
 ;;; uri-codec-unit.ss ends here

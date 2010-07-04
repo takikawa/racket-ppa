@@ -3124,7 +3124,7 @@ Scheme_Object *variantToSchemeObject (VARIANTARG *pVariantArg)
     return scheme_void;
 
   case VT_I1 :
-    return scheme_make_character (pVariantArg->cVal);
+    return scheme_make_char (pVariantArg->cVal);
 
   case VT_I2 :
     return scheme_make_integer_value (pVariantArg->iVal);
@@ -3136,7 +3136,7 @@ Scheme_Object *variantToSchemeObject (VARIANTARG *pVariantArg)
     return scheme_make_integer_value_from_long_long (pVariantArg->llVal);
 
   case VT_UI1 :
-    return scheme_make_character ((char) (pVariantArg->bVal));
+    return scheme_make_char ((char) (pVariantArg->bVal));
 
   case VT_UI2 :
     return scheme_make_integer (pVariantArg->uiVal);
@@ -3203,7 +3203,7 @@ Scheme_Object *retvalVariantToSchemeObject (VARIANTARG *pVariantArg)
   case VT_VOID :
     return scheme_void;
   case VT_BYREF|VT_UI1 :
-    return scheme_make_character (*pVariantArg->pcVal);
+    return scheme_make_char (*pVariantArg->pcVal);
   case VT_BYREF|VT_I2 :
     return scheme_make_integer (*pVariantArg->piVal);
   case VT_BYREF|VT_I4 :
@@ -3240,7 +3240,7 @@ Scheme_Object *retvalVariantToSchemeObject (VARIANTARG *pVariantArg)
   case VT_BYREF|VT_VARIANT :
     return variantToSchemeObject (pVariantArg->pvarVal);
   case VT_BYREF|VT_I1 :
-    return scheme_make_character (*pVariantArg->pcVal);
+    return scheme_make_char (*pVariantArg->pcVal);
   case VT_BYREF|VT_UI2 :
     return scheme_make_integer_value_from_unsigned (*pVariantArg->puiVal);
   case VT_BYREF|VT_UI4 :
@@ -3266,12 +3266,12 @@ void unmarshalVariant (Scheme_Object *val, VARIANTARG *pVariantArg)
   switch (pVariantArg->vt) {
 
   case VT_I1 | VT_BYREF :
-    SCHEME_BOX_VAL (val) = scheme_make_character (*pVariantArg->pcVal);
+    SCHEME_BOX_VAL (val) = scheme_make_char (*pVariantArg->pcVal);
     scheme_gc_ptr_ok (pVariantArg->pcVal);
     break;
 
   case VT_UI1 | VT_BYREF :
-    SCHEME_BOX_VAL (val) = scheme_make_character ((char) (*pVariantArg->pbVal));
+    SCHEME_BOX_VAL (val) = scheme_make_char ((char) (*pVariantArg->pbVal));
     scheme_gc_ptr_ok (pVariantArg->pbVal);
     break;
 
@@ -4951,15 +4951,24 @@ void browserHwndMsgLoop (LPVOID p)
       ? 1L
       : 0L;
 
-  hwnd = CreateWindow ("AtlAxWin7", "myspage.DHTMLPage.1",
-		      WS_VISIBLE | hasScrollBars |
-		      (pBrowserWindowInit->browserWindow.style & ~ (WS_HSCROLL|WS_VSCROLL)),
-		      pBrowserWindowInit->browserWindow.x, pBrowserWindowInit->browserWindow.y,
-		      pBrowserWindowInit->browserWindow.width, pBrowserWindowInit->browserWindow.height,
-		      NULL, NULL, hInstance, NULL);
+# if _MSC_VER < 1400
+#   define ATLWINDOWTITLE "AtlAxWin71"
+# else
+#   define ATLWINDOWTITLE "AtlAxWin80"
+# endif
+  hwnd = CreateWindow (ATLWINDOWTITLE,
+                       "myspage.DHTMLPage.1",
+                       WS_VISIBLE | hasScrollBars |
+                       (pBrowserWindowInit->browserWindow.style & ~ (WS_HSCROLL|WS_VSCROLL)),
+                       pBrowserWindowInit->browserWindow.x, pBrowserWindowInit->browserWindow.y,
+                       pBrowserWindowInit->browserWindow.width, pBrowserWindowInit->browserWindow.height,
+                       NULL, NULL, hInstance, NULL);
+# undef ATLWINDOWTITLE
 
-  if (hwnd == NULL)
-    scheme_signal_error ("make-browser: Can't create browser window");
+  if (hwnd == NULL) {
+    ReleaseSemaphore (createHwndSem, 1, NULL);
+    return;
+  }
 
   ShowWindow (hwnd, SW_SHOW);
   SetForegroundWindow (hwnd);
@@ -5012,10 +5021,16 @@ void browserHwndMsgLoop (LPVOID p)
   }
 }
 
+#define DLL_RELATIVE_PATH L"../../../../../../../lib"
+#include "../mzscheme/delayed.inc"
+
 BOOL APIENTRY DllMain (HANDLE hModule, DWORD reason, LPVOID lpReserved)
 {
 
   if (reason == DLL_PROCESS_ATTACH) {
+
+    load_delayed_dll((HINSTANCE)hModule, "libmzgcxxxxxxx.dll");
+    load_delayed_dll((HINSTANCE)hModule, "libmzschxxxxxxx.dll");
 
     hInstance = (HINSTANCE)hModule;
 

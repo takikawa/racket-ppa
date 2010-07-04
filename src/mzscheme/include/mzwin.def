@@ -19,6 +19,7 @@ EXPORTS
  scheme_current_break_cell
  scheme_current_thread DATA
  scheme_fuel_counter DATA
+ scheme_get_current_thread
  scheme_start_atomic
  scheme_end_atomic
  scheme_end_atomic_no_swap
@@ -99,10 +100,12 @@ EXPORTS
  scheme_multiple_values
  scheme_uchar_table
  scheme_uchar_cases_table
+ scheme_uchar_cats_table
  scheme_uchar_ups
  scheme_uchar_downs
  scheme_uchar_titles
  scheme_uchar_folds
+ scheme_uchar_combining_classes
  scheme_eval
  scheme_eval_multi
  scheme_eval_compiled
@@ -123,6 +126,7 @@ EXPORTS
  scheme_tail_eval_expr
  scheme_set_tail_buffer_size
  scheme_force_value
+ scheme_force_one_value
  scheme_set_cont_mark
  scheme_push_continuation_frame
  scheme_pop_continuation_frame
@@ -171,17 +175,21 @@ EXPORTS
  scheme_clone_hash_table
  scheme_make_prim
  scheme_make_noneternal_prim
- scheme_make_closed_prim
  scheme_make_prim_w_arity
  scheme_make_folding_prim
+ scheme_make_noncm_prim
  scheme_make_noneternal_prim_w_arity
+ scheme_make_prim_w_everything
+ scheme_make_prim_closure_w_arity
+ scheme_make_folding_prim_closure
+ scheme_make_closed_prim
  scheme_make_closed_prim_w_arity
  scheme_make_folding_closed_prim
- scheme_make_prim_w_everything
  scheme_make_closed_prim_w_everything
  scheme_prim_is_method
  scheme_make_pair
  scheme_make_immutable_pair
+ scheme_make_raw_pair
  scheme_make_byte_string
  scheme_make_sized_byte_string
  scheme_make_sized_offset_byte_string
@@ -384,6 +392,7 @@ EXPORTS
  scheme_get_host_address
  scheme_free_host_address
  scheme_host_address_strerror
+ scheme_getnameinfo
  scheme_get_port_file_descriptor
  scheme_get_port_socket
  scheme_set_type_printer
@@ -401,10 +410,6 @@ EXPORTS
  scheme_global_bucket
  scheme_global_keyword_bucket
  scheme_module_bucket
- scheme_exptime_global_bucket
- scheme_exptime_expdef_global_bucket
- scheme_exptime_module_bucket
- scheme_exptime_expdef_module_bucket
  scheme_builtin_value
  scheme_set_global_bucket
  scheme_install_macro

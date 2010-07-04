@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -46,13 +46,16 @@
 /* globals */
 int scheme_allow_set_undefined;
 
+void scheme_set_allow_set_undefined(int v) { scheme_allow_set_undefined =  v; }
+int scheme_get_allow_set_undefined() { return scheme_allow_set_undefined; }
+
 int scheme_starting_up;
 
 Scheme_Object *scheme_local[MAX_CONST_LOCAL_POS][2];
 
 #define MAX_CONST_TOPLEVEL_DEPTH 16
 #define MAX_CONST_TOPLEVEL_POS 16
-Scheme_Object *toplevels[MAX_CONST_TOPLEVEL_DEPTH][MAX_CONST_TOPLEVEL_POS];
+Scheme_Object *toplevels[MAX_CONST_TOPLEVEL_DEPTH][MAX_CONST_TOPLEVEL_POS][SCHEME_TOPLEVEL_FLAGS_MASK + 1];
 
 #define TABLE_CACHE_MAX_SIZE 2048
 Scheme_Hash_Table *toplevels_ht;
@@ -119,11 +122,9 @@ static int env_uid_counter;
 #define ARBITRARY_USE 1
 #define CONSTRAINED_USE 2
 #define WAS_SET_BANGED 4
+/* See also SCHEME_USE_COUNT_MASK */
 
 typedef struct Compile_Data {
-  char **stat_dists; /* (pos, depth) => used? */
-  int *sd_depths;
-  int used_toplevel;
   int num_const;
   Scheme_Object **const_names;
   Scheme_Object **const_vals;
@@ -140,6 +141,9 @@ static void init_compile_data(Scheme_Comp_Env *env);
 
 /* Precise GC WARNING: this macro produces unaligned pointers: */
 #define COMPILE_DATA(e) (&((Scheme_Full_Comp_Env *)e)->data)
+
+#define SCHEME_NON_SIMPLE_FRAME (SCHEME_NO_RENAME | SCHEME_CAPTURE_WITHOUT_RENAME \
+                                 | SCHEME_FOR_STOPS | SCHEME_FOR_INTDEF | SCHEME_CAPTURE_LIFTED)
 
 /*========================================================================*/
 /*                             initialization                             */
@@ -250,33 +254,40 @@ Scheme_Env *scheme_basic_env()
   }
 
   {
-    int i, k;
+    int i, k, cnst;
 
 #ifndef USE_TAGGED_ALLOCATION
     GC_CAN_IGNORE Scheme_Toplevel *all;
 
     all = (Scheme_Toplevel *)scheme_malloc_eternal(sizeof(Scheme_Toplevel) 
 						   * MAX_CONST_TOPLEVEL_DEPTH 
-						   * MAX_CONST_TOPLEVEL_POS);
+						   * MAX_CONST_TOPLEVEL_POS
+						   * (SCHEME_TOPLEVEL_FLAGS_MASK + 1));
 # ifdef MEMORY_COUNTING_ON
-    scheme_misc_count += (sizeof(Scheme_Toplevel) * MAX_CONST_TOPLEVEL_DEPTH * MAX_CONST_TOPLEVEL_POS);
+    scheme_misc_count += (sizeof(Scheme_Toplevel) 
+			  * MAX_CONST_TOPLEVEL_DEPTH 
+			  * MAX_CONST_TOPLEVEL_POS
+			  * (SCHEME_TOPLEVEL_FLAGS_MASK + 1));
 # endif
 #endif
 
     for (i = 0; i < MAX_CONST_TOPLEVEL_DEPTH; i++) {
       for (k = 0; k < MAX_CONST_TOPLEVEL_POS; k++) {
-	Scheme_Toplevel *v;
+	for (cnst = 0; cnst <= SCHEME_TOPLEVEL_FLAGS_MASK; cnst++) {
+	  Scheme_Toplevel *v;
 	
 #ifndef USE_TAGGED_ALLOCATION
-	v = (all++);
+	  v = (all++);
 #else
-	v = (Scheme_Toplevel *)scheme_malloc_eternal_tagged(sizeof(Scheme_Toplevel));
+	  v = (Scheme_Toplevel *)scheme_malloc_eternal_tagged(sizeof(Scheme_Toplevel));
 #endif
-	v->so.type = scheme_toplevel_type;
-	v->depth = i;
-	v->position = k;
+	  v->iso.so.type = scheme_toplevel_type;
+	  v->depth = i;
+	  v->position = k;
+	  SCHEME_TOPLEVEL_FLAGS(v) = cnst;
 	
-	toplevels[i][k] = (Scheme_Object *)v;
+	  toplevels[i][k][cnst] = (Scheme_Object *)v;
+	}
       }
     }
   }
@@ -311,6 +322,8 @@ Scheme_Env *scheme_basic_env()
   scheme_init_thread_memory();
 #endif
     
+  scheme_init_getenv(); /* checks PLTNOJIT */
+
   scheme_make_thread();
 
 #ifdef TIME_STARTUP_PROCESS
@@ -339,7 +352,6 @@ Scheme_Env *scheme_basic_env()
 
   scheme_starting_up = 0;
 
-  scheme_init_getenv();
 #ifdef TIME_STARTUP_PROCESS
   printf("done @ %ld\n#endif\n", scheme_get_process_milliseconds());
 #endif
@@ -603,9 +615,30 @@ static void skip_certain_things(Scheme_Object *o, Scheme_Close_Custodian_Client 
 /*                        namespace constructors                          */
 /*========================================================================*/
 
+static void create_env_marked_names(Scheme_Env *e)
+{
+  Scheme_Hash_Table *mn;
+  Scheme_Object *rn;
+
+  /* Set up a rename table, in case an identifier with a let-binding
+     renaming ends up in a definition position: */
+
+  mn = scheme_make_hash_table(SCHEME_hash_ptr);
+  scheme_hash_set(mn, scheme_false, scheme_null);
+  e->marked_names = mn;
+
+  rn = scheme_make_module_rename(e->phase, mzMOD_RENAME_TOPLEVEL, mn);
+  e->rename = rn;
+}
+
 Scheme_Env *scheme_make_empty_env(void)
 {
-  return make_env(NULL, 0, 7);
+  Scheme_Env *e; 
+
+  e = make_env(NULL, 0, 7);
+  create_env_marked_names(e);
+
+  return e;
 }
 
 static Scheme_Env *make_env(Scheme_Env *base, int semi, int toplevel_size)
@@ -708,6 +741,9 @@ void scheme_prepare_exp_env(Scheme_Env *env)
 
     env->exp_env = eenv;
     eenv->template_env = env;
+
+    if (!env->module && !env->phase)
+      create_env_marked_names(eenv);
   }
 }
 
@@ -890,21 +926,6 @@ scheme_global_keyword_bucket(Scheme_Object *symbol, Scheme_Env *env)
   return b;
 }
 
-Scheme_Bucket *
-scheme_exptime_global_bucket(Scheme_Object *symbol, Scheme_Env *env)
-{
-  /* This is for mzc, but it can't be right. */
-  scheme_prepare_exp_env(env);
-  return scheme_global_bucket(symbol, env->exp_env);
-}
-
-Scheme_Bucket *
-scheme_exptime_expdef_global_bucket(Scheme_Object *symbol, Scheme_Env *env)
-{
-  scheme_prepare_exp_env(env);
-  return scheme_global_bucket(symbol, env->exp_env);
-}
-
 /********** Set **********/
 
 void
@@ -975,7 +996,8 @@ void scheme_shadow(Scheme_Env *env, Scheme_Object *n, int stxtoo)
 				  n, n,
 				  env->module->self_modidx,
 				  n,
-				  env->mod_phase);
+				  env->mod_phase,
+				  0);
     }
   }
 
@@ -1060,8 +1082,6 @@ static void init_compile_data(Scheme_Comp_Env *env)
 
   data = COMPILE_DATA(env);
 
-  data->stat_dists = NULL;
-  data->sd_depths = NULL;
   data->use = use;
   for (i = 0; i < c; i++) {
     use[i] = 0;
@@ -1096,6 +1116,13 @@ Scheme_Comp_Env *scheme_new_compilation_frame(int num_bindings, int flags,
   frame->prefix = base->prefix;
   frame->in_modidx = base->in_modidx;
 
+  if (flags & SCHEME_NON_SIMPLE_FRAME)
+    frame->skip_depth = 0;
+  else if (base->next)
+    frame->skip_depth = base->skip_depth + 1;
+  else
+    frame->skip_depth = 0;
+
   init_compile_data(frame);
 
   return frame;
@@ -1105,7 +1132,6 @@ Scheme_Comp_Env *scheme_new_comp_env(Scheme_Env *genv, Scheme_Object *insp, int 
 {
   Scheme_Comp_Env *e;
   Comp_Prefix *cp;
-
 
   if (!insp)
     insp = scheme_get_param(scheme_current_config(), MZCONFIG_CODE_INSPECTOR);
@@ -1184,6 +1210,7 @@ scheme_add_compilation_binding(int index, Scheme_Object *val, Scheme_Comp_Env *f
 			"index out of range: %d", index);
   
   frame->values[index] = val;
+  frame->skip_table = NULL;
 }
 
 void scheme_frame_captures_lifts(Scheme_Comp_Env *env, Scheme_Lift_Capture_Proc cp, Scheme_Object *data)
@@ -1228,6 +1255,7 @@ void scheme_set_local_syntax(int pos,
 {
   COMPILE_DATA(env)->const_names[pos] = name;
   COMPILE_DATA(env)->const_vals[pos] = val;
+  env->skip_table = NULL;
 }
 
 Scheme_Comp_Env *
@@ -1261,7 +1289,8 @@ Scheme_Comp_Env *scheme_no_defines(Scheme_Comp_Env *env)
 {
   if (scheme_is_toplevel(env)
       || scheme_is_module_env(env)
-      || scheme_is_module_begin_env(env))
+      || scheme_is_module_begin_env(env)
+      || (env->flags & SCHEME_INTDEF_FRAME))
     return scheme_new_compilation_frame(0, 0, env, NULL);
   else
     return env;
@@ -1300,17 +1329,26 @@ Scheme_Comp_Env *scheme_extend_as_toplevel(Scheme_Comp_Env *env)
     return scheme_new_compilation_frame(0, SCHEME_TOPLEVEL_FRAME, env, NULL);
 }
 
-static Scheme_Object *make_toplevel(mzshort depth, int position, int resolved)
+static Scheme_Object *make_toplevel(mzshort depth, int position, int resolved, int flags)
 {
   Scheme_Toplevel *tl;
   Scheme_Object *v, *pr;
 
+  /* Important: non-resolved can't be cached, because the ISCONST
+     field is modified to track mutated module-level variables. But
+     the value for a specific toplevel is cached in the environment
+     layer. */
+
   if (resolved) {
     if ((depth < MAX_CONST_TOPLEVEL_DEPTH)
 	&& (position < MAX_CONST_TOPLEVEL_POS))
-      return toplevels[depth][position];
+      return toplevels[depth][position][flags];
 
-    pr = scheme_make_pair(scheme_make_integer(depth), scheme_make_integer(position));
+    pr = (flags
+	  ? scheme_make_pair(scheme_make_integer(position),
+			     scheme_make_integer(flags))
+	  : scheme_make_integer(position));
+    pr = scheme_make_pair(scheme_make_integer(depth), pr);
     v = scheme_hash_get(toplevels_ht, pr);
     if (v)
       return v;
@@ -1318,9 +1356,10 @@ static Scheme_Object *make_toplevel(mzshort depth, int position, int resolved)
     pr = NULL;
 
   tl = (Scheme_Toplevel *)scheme_malloc_atomic_tagged(sizeof(Scheme_Toplevel));
-  tl->so.type = (resolved ? scheme_toplevel_type : scheme_compiled_toplevel_type);
+  tl->iso.so.type = (resolved ? scheme_toplevel_type : scheme_compiled_toplevel_type);
   tl->depth = depth;
   tl->position = position;
+  SCHEME_TOPLEVEL_FLAGS(tl) = flags;
 
   if (resolved) {
     if (toplevels_ht->count > TABLE_CACHE_MAX_SIZE) {
@@ -1335,24 +1374,13 @@ static Scheme_Object *make_toplevel(mzshort depth, int position, int resolved)
 Scheme_Object *scheme_register_toplevel_in_prefix(Scheme_Object *var, Scheme_Comp_Env *env,
 						  Scheme_Compile_Info *rec, int drec)
 {
-  Scheme_Comp_Env *frame;
   Comp_Prefix *cp = env->prefix;
   Scheme_Hash_Table *ht;
   Scheme_Object *o;
 
   if (rec && rec[drec].dont_mark_local_use) {
     /* Make up anything; it's going to be ignored. */
-    return make_toplevel(0, 0, 0);
-  }
-
-  /* Register use at lambda, if any: */
-  frame = env;
-  while (frame) {
-    if (frame->flags & SCHEME_LAMBDA_FRAME) {
-      COMPILE_DATA(frame)->used_toplevel = 1;
-      break;
-    }
-    frame = frame->next;
+    return make_toplevel(0, 0, 0, 0);
   }
 
   ht = cp->toplevels;
@@ -1365,12 +1393,18 @@ Scheme_Object *scheme_register_toplevel_in_prefix(Scheme_Object *var, Scheme_Com
   if (o)
     return o;
 
-  o = make_toplevel(0, cp->num_toplevels, 0);
+  o = make_toplevel(0, cp->num_toplevels, 0, 0);
 
   cp->num_toplevels++;
   scheme_hash_set(ht, var, o);
 
   return o;
+}
+
+Scheme_Object *scheme_toplevel_to_flagged_toplevel(Scheme_Object *_tl, int flags)
+{
+  Scheme_Toplevel *tl = (Scheme_Toplevel *)_tl;
+  return make_toplevel(tl->depth, tl->position, 0, flags);
 }
 
 Scheme_Object *scheme_register_stx_in_prefix(Scheme_Object *var, Scheme_Comp_Env *env, 
@@ -1406,15 +1440,6 @@ Scheme_Object *scheme_register_stx_in_prefix(Scheme_Object *var, Scheme_Comp_Env
   o = (Scheme_Object *)l;
   
   scheme_hash_set(cp->stxes, var, o);
-
-  /* Register use at lambda, if any: */
-  while (env) {
-    if (env->flags & SCHEME_LAMBDA_FRAME) {
-      COMPILE_DATA(env)->used_toplevel = 1;
-      break;
-    }
-    env = env->next;
-  }
 
   return o;
 }
@@ -1473,43 +1498,24 @@ static Scheme_Local *get_frame_loc(Scheme_Comp_Env *frame,
 /* Generates a Scheme_Local record for a static distance coodinate, and also
    marks the variable as used for closures. */
 {
-  COMPILE_DATA(frame)->use[i] |= (((flags & (SCHEME_APP_POS | SCHEME_SETTING | SCHEME_REFERENCING))
-				   ? CONSTRAINED_USE
-				   : ARBITRARY_USE)
-				  | ((flags & (SCHEME_SETTING | SCHEME_REFERENCING | SCHEME_LINKING_REF))
-				     ? WAS_SET_BANGED
-				     : 0));
-  
-  if (!COMPILE_DATA(frame)->stat_dists) {
-    int k, *ia;
-    char **ca;
-    ca = MALLOC_N(char*, frame->num_bindings);
-    COMPILE_DATA(frame)->stat_dists = ca;
-    ia = MALLOC_N_ATOMIC(int, frame->num_bindings);
-    COMPILE_DATA(frame)->sd_depths = ia;
-    for (k = frame->num_bindings; k--; ) {
-      COMPILE_DATA(frame)->sd_depths[k] = 0;
-    }
-  }
-  
-  if (COMPILE_DATA(frame)->sd_depths[i] <= j) {
-    char *naya, *a;
-    int k;
-    
-    naya = MALLOC_N_ATOMIC(char, (j + 1));
-    for (k = j + 1; k--; ) {
-      naya[k] = 0;
-    }
-    a = COMPILE_DATA(frame)->stat_dists[i];
-    for (k = COMPILE_DATA(frame)->sd_depths[i]; k--; ) {
-      naya[k] = a[k];
-    }
-    
-    COMPILE_DATA(frame)->stat_dists[i] = naya;
-    COMPILE_DATA(frame)->sd_depths[i] = j + 1;
-  }
+  int cnt, u;
 
-  COMPILE_DATA(frame)->stat_dists[i][j] = 1;
+  u = COMPILE_DATA(frame)->use[i];
+  
+  u |= (((flags & (SCHEME_APP_POS | SCHEME_SETTING | SCHEME_REFERENCING))
+	 ? CONSTRAINED_USE
+	 : ARBITRARY_USE)
+	| ((flags & (SCHEME_SETTING | SCHEME_REFERENCING | SCHEME_LINKING_REF))
+	   ? WAS_SET_BANGED
+	   : 0));
+
+  cnt = ((u & SCHEME_USE_COUNT_MASK) >> SCHEME_USE_COUNT_SHIFT);
+  if (cnt < SCHEME_USE_COUNT_INF)
+    cnt++;
+  u -= (u & SCHEME_USE_COUNT_MASK);
+  u |= (cnt << SCHEME_USE_COUNT_SHIFT);
+  
+  COMPILE_DATA(frame)->use[i] = u;
 
   return (Scheme_Local *)scheme_make_local(scheme_local_type, p + i);
 }
@@ -1581,11 +1587,11 @@ Scheme_Object *scheme_hash_module_variable(Scheme_Env *env, Scheme_Object *modid
   return val;
 }
 
-Scheme_Object *scheme_tl_id_sym(Scheme_Env *env, Scheme_Object *id, int is_def)
+Scheme_Object *scheme_tl_id_sym(Scheme_Env *env, Scheme_Object *id, Scheme_Object *bdg, int is_def)
 /* The `env' argument can actually be a hash table. */
 {
-  Scheme_Object *marks = NULL, *sym, *map, *l, *a, *amarks, *m, *best_match;
-  int best_match_skipped, ms;
+  Scheme_Object *marks = NULL, *sym, *map, *l, *a, *amarks, *m, *best_match, *cm, *abdg;
+  int best_match_skipped, ms, one_mark;
   Scheme_Hash_Table *marked_names;
 
   sym = SCHEME_STX_SYM(id);
@@ -1603,8 +1609,10 @@ Scheme_Object *scheme_tl_id_sym(Scheme_Env *env, Scheme_Object *id, int is_def)
     /* If we're defining, see if we need to create a table.  Getting
        marks is relatively expensive, but we only do this once per
        definition. */
+    if (!bdg)
+      bdg = scheme_stx_moduleless_env(id, 0 /* renames currently don't depend on phase */);
     marks = scheme_stx_extract_marks(id);
-    if (SCHEME_NULLP(marks))
+    if (SCHEME_NULLP(marks) && SCHEME_FALSEP(bdg))
       return sym;
   }
 
@@ -1612,7 +1620,7 @@ Scheme_Object *scheme_tl_id_sym(Scheme_Env *env, Scheme_Object *id, int is_def)
     marked_names = scheme_make_hash_table(SCHEME_hash_ptr);
     env->marked_names = marked_names;
   }
-
+  
   map = scheme_hash_get(marked_names, sym);
 
   if (!map) {
@@ -1623,35 +1631,76 @@ Scheme_Object *scheme_tl_id_sym(Scheme_Env *env, Scheme_Object *id, int is_def)
       map = scheme_null;
   }
 
+  if (!bdg) {
+    /* We need lexical binding, if any, too: */
+    bdg = scheme_stx_moduleless_env(id, 0 /* renames currently don't depend on phase */);
+  }
+
   if (!marks) {
     /* We really do need the marks. Get them. */
     marks = scheme_stx_extract_marks(id);
-    if (SCHEME_NULLP(marks))
+    if (SCHEME_NULLP(marks) && SCHEME_FALSEP(bdg))
       return sym;
   }
 
   best_match = NULL;
   best_match_skipped = scheme_list_length(marks);
+  if (best_match_skipped == 1) {
+    /* A mark list of length 1 is the common case.
+       Since the list is otherwise marshaled into .zo, etc.,
+       simplify by extracting just the mark: */
+    marks = SCHEME_CAR(marks);
+    one_mark = 1;
+  } else
+    one_mark = 0;
+
+  if (!SCHEME_TRUEP(bdg))
+    bdg = NULL;
 
   /* Find a mapping that matches the longest tail of marks */
   for (l = map; SCHEME_PAIRP(l); l = SCHEME_CDR(l)) {
     a = SCHEME_CAR(l);
     amarks = SCHEME_CAR(a);
-    if (is_def) {
-      if (scheme_equal(amarks, marks)) {
-	best_match = SCHEME_CDR(a);
-	break;
-      }
-    } else {
-      for (m = marks, ms = 0; 
-	   SCHEME_PAIRP(m) && (ms < best_match_skipped);
-	   m = SCHEME_CDR(m), ms++) {
-  
-	if (scheme_equal(amarks, m)) {
-	  if (ms < best_match_skipped) {
+
+    if (SCHEME_VECTORP(amarks)) {
+      abdg = SCHEME_VEC_ELS(amarks)[1];
+      amarks = SCHEME_VEC_ELS(amarks)[0];
+    } else
+      abdg = NULL;
+
+    if (SAME_OBJ(abdg, bdg)) {
+      if (is_def) {
+	if (scheme_equal(amarks, marks)) {
+	  best_match = SCHEME_CDR(a);
+	  break;
+	}
+      } else {
+	if (!SCHEME_PAIRP(marks)) {
+	  /* To be better than nothing, could only match exactly: */
+	  if (scheme_equal(amarks, marks)) {
 	    best_match = SCHEME_CDR(a);
-	    best_match_skipped = ms;
-	    break;
+	    best_match_skipped = 0;
+	  }
+	} else {
+	  /* amarks can match a tail of marks: */
+	  for (m = marks, ms = 0; 
+	       SCHEME_PAIRP(m) && (ms < best_match_skipped);
+	       m = SCHEME_CDR(m), ms++) {
+
+	    cm = m;
+	    if (!SCHEME_PAIRP(amarks)) {
+	      /* If we're down to the last element
+		 of marks, then extract it to try to
+		 match the symbol amarks. */
+	      if (SCHEME_NULLP(SCHEME_CDR(m)))
+		cm = SCHEME_CAR(m);
+	    }
+  
+	    if (scheme_equal(amarks, cm)) {
+	      best_match = SCHEME_CDR(a);
+	      best_match_skipped = ms;
+	      break;
+	    }
 	  }
 	}
       }
@@ -1723,6 +1772,12 @@ Scheme_Object *scheme_tl_id_sym(Scheme_Env *env, Scheme_Object *id, int is_def)
 
 	/* Otherwise, increment counter and try again... */
       }
+    }
+    if (bdg) {
+      a = scheme_make_vector(2, NULL);
+      SCHEME_VEC_ELS(a)[0] = marks;
+      SCHEME_VEC_ELS(a)[1] = bdg;
+      marks = a;
     }
     a = scheme_make_pair(marks, best_match);
     map = scheme_make_pair(a, map);
@@ -2060,6 +2115,49 @@ void scheme_seal_env_renames(Scheme_Comp_Env *env)
 }
 
 /*********************************************************************/
+
+void create_skip_table(Scheme_Comp_Env *start_frame)
+{
+  Scheme_Comp_Env *end_frame, *frame;
+  int depth, dj = 0, dp = 0, i;
+  Scheme_Hash_Table *table;
+  int stride = 0;
+
+  depth = start_frame->skip_depth;
+
+  /* Find frames to be covered by the skip table.
+     The theory here is the same as the `mapped' table
+     in Scheme_Cert (see stxobj.c) */
+  for (end_frame = start_frame->next;
+       end_frame && ((depth & end_frame->skip_depth) != end_frame->skip_depth);
+       end_frame = end_frame->next) {
+    stride++;
+  }
+
+  table = scheme_make_hash_table(SCHEME_hash_ptr);
+  
+  for (frame = start_frame; frame != end_frame; frame = frame->next) {
+    if (frame->flags & SCHEME_LAMBDA_FRAME)
+      dj++;
+    dp += frame->num_bindings;
+    for (i = frame->num_bindings; i--; ) {
+      if (frame->values[i]) {
+	scheme_hash_set(table, SCHEME_STX_VAL(frame->values[i]), scheme_true);
+      }
+    }
+    for (i = COMPILE_DATA(frame)->num_const; i--; ) {
+      scheme_hash_set(table, SCHEME_STX_VAL(COMPILE_DATA(frame)->const_names[i]), scheme_true);
+    }
+  }
+
+  scheme_hash_set(table, scheme_make_integer(0), (Scheme_Object *)end_frame);
+  scheme_hash_set(table, scheme_make_integer(1), scheme_make_integer(dj));
+  scheme_hash_set(table, scheme_make_integer(2), scheme_make_integer(dp));
+
+  start_frame->skip_table = table;
+}
+
+/*********************************************************************/
 /* 
 
    scheme_lookup_binding() is the main resolver of lexical, module,
@@ -2077,7 +2175,7 @@ void scheme_seal_env_renames(Scheme_Comp_Env *env)
      scheme_variable_type (id is a global or module-bound variable),
      or
 
-     scheme_module_variable_type (id is a module-boundvariable).
+     scheme_module_variable_type (id is a module-bound variable).
 
 */
 
@@ -2097,14 +2195,31 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
   phase = env->genv->phase;
   
   /* Walk through the compilation frames */
-  frame = env;
   for (frame = env; frame->next != NULL; frame = frame->next) {
     int i;
     Scheme_Object *uid;
 
-    if (frame->flags & SCHEME_LAMBDA_FRAME)
-      j++;      
+    while (1) {
+      if (frame->skip_table) {
+	if (!scheme_hash_get(frame->skip_table, SCHEME_STX_VAL(find_id))) {
+	  /* Skip ahead. 0 maps to frame, 1 maps to j delta, and 2 maps to p delta */
+	  val = scheme_hash_get(frame->skip_table, scheme_make_integer(1));
+	  j += SCHEME_INT_VAL(val);
+	  val = scheme_hash_get(frame->skip_table, scheme_make_integer(2));
+	  p += SCHEME_INT_VAL(val);
+	  frame = (Scheme_Comp_Env *)scheme_hash_get(frame->skip_table, scheme_make_integer(0));
+	} else
+	  break;
+      } else if (frame->skip_depth && !(frame->skip_depth & 0x1F)) {
+	/* We're some multiple of 32 frames deep. Build a skip table and try again. */
+	create_skip_table(frame);
+      } else
+	break;
+    }
     
+    if (frame->flags & SCHEME_LAMBDA_FRAME)
+      j++;
+
     if (!skip_stops || !(frame->flags & SCHEME_FOR_STOPS)) {
       if (frame->flags & SCHEME_FOR_STOPS)
 	skip_stops = 1;
@@ -2258,7 +2373,7 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
     *_menv = genv;
   
   if (!modname && SCHEME_STXP(find_id))
-    find_global_id = scheme_tl_id_sym(env->genv, find_id, 0);
+    find_global_id = scheme_tl_id_sym(env->genv, find_id, NULL, 0);
   else
     find_global_id = find_id;
 
@@ -2361,87 +2476,6 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
   return (Scheme_Object *)b;
 }
 
-void scheme_env_make_closure_map(Scheme_Comp_Env *env, mzshort *_size, mzshort **_map)
-{
-  /* A closure map lists the captured variables for a closure; the
-     indices are resolved two new indicies in the second phase of
-     compilation. */
-  Compile_Data *data;
-  Scheme_Comp_Env *frame;
-  int i, j, pos = 0, lpos = 0;
-  mzshort *map, size;
-
-  /* Count vars used by this closure (skip args): */
-  j = 1;
-  for (frame = env->next; frame; frame = frame->next) {
-    data = COMPILE_DATA(frame);
-
-    if (frame->flags & SCHEME_LAMBDA_FRAME)
-      j++;
-
-    if (data->stat_dists) {
-      for (i = 0; i < frame->num_bindings; i++) {
-	if (data->sd_depths[i] > j) {
-	  if (data->stat_dists[i][j]) {
-	    pos++;
-	  }
-	}
-      }
-    }
-  }
-
-  data = NULL; /* Clear unaligned pointer */
-
-  size = pos;
-  *_size = size;
-  map = MALLOC_N_ATOMIC(mzshort, size);
-  *_map = map;
-
-  /* Build map, unmarking locals and marking deeper in parent prame */
-  j = 1; pos = 0;
-  for (frame = env->next; frame; frame = frame->next) {
-    data = COMPILE_DATA(frame);
-
-    if (frame->flags & SCHEME_LAMBDA_FRAME)
-      j++;
-
-    if (data->stat_dists) {
-      for (i = 0; i < frame->num_bindings; i++) {
-	if (data->sd_depths[i] > j) {
-	  if (data->stat_dists[i][j]) {
-	    map[pos++] = lpos;
-	    data->stat_dists[i][j] = 0; /* This closure's done with these vars... */
-	    data->stat_dists[i][j - 1] = 1; /* ... but ensure previous keeps */
-	  }
-	}
-	lpos++;
-      }
-    } else
-      lpos += frame->num_bindings;
-  }
-}
-
-int scheme_env_uses_toplevel(Scheme_Comp_Env *frame)
-{
-  int used;
-
-  used = COMPILE_DATA(frame)->used_toplevel;
-  
-  if (used) {
-    /* Propagate use to an enclosing lambda, if any: */
-    frame = frame->next;
-    while (frame) {
-      if (frame->flags & SCHEME_LAMBDA_FRAME) {
-	COMPILE_DATA(frame)->used_toplevel = 1;
-	break;
-      }
-      frame = frame->next;
-    }
-  }
-
-  return used;
-}
-
 int *scheme_env_get_flags(Scheme_Comp_Env *frame, int start, int count)
 {
   int *v, i;
@@ -2457,6 +2491,7 @@ int *scheme_env_get_flags(Scheme_Comp_Env *frame, int start, int count)
       v[i] |= SCHEME_WAS_USED;
     if (old & WAS_SET_BANGED)
       v[i] |= SCHEME_WAS_SET_BANGED;
+    v[i] |= (old & SCHEME_USE_COUNT_MASK);
   }
 
   return v;
@@ -2533,12 +2568,315 @@ int scheme_check_context(Scheme_Env *env, Scheme_Object *name, Scheme_Object *ok
     if (SAME_OBJ(mod, scheme_undefined))
       return 1;
   }
-
+  
   return 0;
 }
 
 /*========================================================================*/
-/*             compile-time env for phase 2 ("resolve")                   */
+/*                 compile-time env for optimization                      */
+/*========================================================================*/
+
+Optimize_Info *scheme_optimize_info_create()
+{
+  Optimize_Info *info;
+
+  info = MALLOC_ONE_RT(Optimize_Info);
+#ifdef MZTAG_REQUIRED
+  info->type = scheme_rt_optimize_info;
+#endif
+  info->inline_fuel = 16;
+  
+  return info;
+}
+
+static void register_stat_dist(Optimize_Info *info, int i, int j)
+{
+  if (!info->stat_dists) {
+    int k, *ia;
+    char **ca;
+    ca = MALLOC_N(char*, info->new_frame);
+    info->stat_dists = ca;
+    ia = MALLOC_N_ATOMIC(int, info->new_frame);
+    info->sd_depths = ia;
+    for (k = info->new_frame; k--; ) {
+      info->sd_depths[k] = 0;
+    }
+  }
+  
+  if (info->sd_depths[i] <= j) {
+    char *naya, *a;
+    int k;
+    
+    naya = MALLOC_N_ATOMIC(char, (j + 1));
+    for (k = j + 1; k--; ) {
+      naya[k] = 0;
+    }
+    a = info->stat_dists[i];
+    for (k = info->sd_depths[i]; k--; ) {
+      naya[k] = a[k];
+    }
+    
+    info->stat_dists[i] = naya;
+    info->sd_depths[i] = j + 1;
+  }
+
+  info->stat_dists[i][j] = 1;
+}
+
+void scheme_env_make_closure_map(Optimize_Info *info, mzshort *_size, mzshort **_map)
+{
+  /* A closure map lists the captured variables for a closure; the
+     indices are resolved two new indicies in the second phase of
+     compilation. */
+  Optimize_Info *frame;
+  int i, j, pos = 0, lpos = 0;
+  mzshort *map, size;
+
+  /* Count vars used by this closure (skip args): */
+  j = 1;
+  for (frame = info->next; frame; frame = frame->next) {
+    if (frame->flags & SCHEME_LAMBDA_FRAME)
+      j++;
+
+    if (frame->stat_dists) {
+      for (i = 0; i < frame->new_frame; i++) {
+	if (frame->sd_depths[i] > j) {
+	  if (frame->stat_dists[i][j]) {
+	    pos++;
+	  }
+	}
+      }
+    }
+  }
+
+  size = pos;
+  *_size = size;
+  map = MALLOC_N_ATOMIC(mzshort, size);
+  *_map = map;
+
+  /* Build map, unmarking locals and marking deeper in parent frame */
+  j = 1; pos = 0;
+  for (frame = info->next; frame; frame = frame->next) {
+    if (frame->flags & SCHEME_LAMBDA_FRAME)
+      j++;
+
+    if (frame->stat_dists) {
+      for (i = 0; i < frame->new_frame; i++) {
+	if (frame->sd_depths[i] > j) {
+	  if (frame->stat_dists[i][j]) {
+	    map[pos++] = lpos;
+	    frame->stat_dists[i][j] = 0; /* This closure's done with these vars... */
+	    frame->stat_dists[i][j - 1] = 1; /* ... but ensure previous keeps */
+	  }
+	}
+	lpos++;
+      }
+    } else
+      lpos += frame->new_frame;
+  }
+}
+
+int scheme_env_uses_toplevel(Optimize_Info *frame)
+{
+  int used;
+
+  used = frame->used_toplevel;
+  
+  if (used) {
+    /* Propagate use to an enclosing lambda, if any: */
+    frame = frame->next;
+    while (frame) {
+      if (frame->flags & SCHEME_LAMBDA_FRAME) {
+	frame->used_toplevel = 1;
+	break;
+      }
+      frame = frame->next;
+    }
+  }
+
+  return used;
+}
+
+void scheme_optimize_info_used_top(Optimize_Info *info)
+{
+  while (info) {
+    if (info->flags & SCHEME_LAMBDA_FRAME) {
+      info->used_toplevel = 1;
+      break;
+    }
+    info = info->next;
+  }
+}
+
+void scheme_optimize_propagate(Optimize_Info *info, int pos, Scheme_Object *value)
+{
+  Scheme_Object *p;
+  
+  p = scheme_make_vector(3, NULL);
+  SCHEME_VEC_ELS(p)[0] = info->consts;
+  SCHEME_VEC_ELS(p)[1] = scheme_make_integer(pos);
+  SCHEME_VEC_ELS(p)[2] = value;
+
+  info->consts = p;
+}
+
+void scheme_optimize_mutated(Optimize_Info *info, int pos)
+/* pos must be in immediate frame */
+{
+  if (!info->use) {
+    char *use;
+    use = (char *)scheme_malloc_atomic(info->new_frame);
+    memset(use, 0, info->new_frame);
+    info->use = use;
+  }
+  info->use[pos] = 1;
+}
+
+Scheme_Object *scheme_optimize_reverse(Optimize_Info *info, int pos, int unless_mutated)
+/* pos is in new-frame counts, and we want to produce an old-frame reference if
+   it's not mutated */
+{
+  int delta = 0;
+
+  while (1) {
+    if (pos < info->new_frame)
+      break;
+    pos -= info->new_frame;
+    delta += info->original_frame;
+    info = info->next;
+  }
+
+  if (unless_mutated)
+    if (info->use && info->use[pos])
+      return NULL;
+
+  return scheme_make_local(scheme_local_type, pos + delta);
+}
+
+int scheme_optimize_is_used(Optimize_Info *info, int pos)
+/* pos must be in immediate frame */
+{
+  int i;
+
+  if (info->stat_dists) {
+    for (i = info->sd_depths[pos]; i--; ) {
+      if (info->stat_dists[pos][i])
+	return 1;
+    }
+  }
+
+  return 0;
+}
+
+static Scheme_Object *do_optimize_info_lookup(Optimize_Info *info, int pos, int j, int *closure_offset)
+{
+  Scheme_Object *p, *n;
+  int delta = 0;
+
+  while (info) {
+    if (info->flags & SCHEME_LAMBDA_FRAME)
+      j++;
+    if (pos < info->original_frame)
+      break;
+    pos -= info->original_frame;
+    delta += info->new_frame;
+    info = info->next;
+  }
+
+  p = info->consts;
+  while (p) {
+    n = SCHEME_VEC_ELS(p)[1];
+    if (SCHEME_INT_VAL(n) == pos) {
+      n = SCHEME_VEC_ELS(p)[2];
+      if (SAME_TYPE(SCHEME_TYPE(n), scheme_compiled_unclosed_procedure_type)) {
+	if (!closure_offset)
+	  break;
+	else {
+	  *closure_offset = delta;
+	}
+      } else if (closure_offset) {
+	return NULL;
+      } else if (SAME_TYPE(SCHEME_TYPE(n), scheme_local_type)) {
+	int pos;
+
+	pos = SCHEME_LOCAL_POS(n);
+	if (info->flags & SCHEME_LAMBDA_FRAME)
+	  j--; /* because it will get re-added on recur */
+
+	/* Marks local as used; we don't expect to get back
+	   a value, because chaining would normally happen on the 
+	   propagate-call side. Chaining there also means that we 
+	   avoid stack overflow here. */
+	n = do_optimize_info_lookup(info, pos, j, NULL);
+
+	if (!n) {
+	  /* Return shifted reference to other local: */
+	  delta += scheme_optimize_info_get_shift(info, pos);
+	  n = scheme_make_local(scheme_local_type, pos + delta);
+	}
+      }
+      return n;
+    }
+    p = SCHEME_VEC_ELS(p)[0];
+  }
+
+  if (!closure_offset)
+    register_stat_dist(info, pos, j);
+  
+  return NULL;
+}
+
+Scheme_Object *scheme_optimize_info_lookup(Optimize_Info *info, int pos, int *closure_offset)
+{
+  return do_optimize_info_lookup(info, pos, 0, closure_offset);
+}
+
+Optimize_Info *scheme_optimize_info_add_frame(Optimize_Info *info, int orig, int current, int flags)
+{
+  Optimize_Info *naya;
+
+  naya = scheme_optimize_info_create();
+  naya->flags = (short)flags;
+  naya->next = info;
+  naya->original_frame = orig;
+  naya->new_frame = current;
+  naya->inline_fuel = info->inline_fuel;
+  naya->letrec_not_twice = info->letrec_not_twice;
+  naya->enforce_const = info->enforce_const;
+  naya->top_level_consts = info->top_level_consts;
+
+  return naya;
+}
+
+int scheme_optimize_info_get_shift(Optimize_Info *info, int pos)
+{
+  int delta = 0;
+
+  while (info) {
+    if (pos < info->original_frame)
+      break;
+    pos -= info->original_frame;
+    delta += (info->new_frame - info->original_frame);
+    info = info->next;
+  }
+
+  if (!info)
+    *(long *)0x0 = 1;
+
+  return delta;
+}
+
+void scheme_optimize_info_done(Optimize_Info *info)
+{
+  info->next->max_let_depth += info->max_let_depth;
+  info->next->size += info->size;
+}
+
+
+  
+
+/*========================================================================*/
+/*                    compile-time env for resolve                        */
 /*========================================================================*/
 
 /* See eval.c for information about the compilation phases. */
@@ -2597,6 +2935,7 @@ Resolve_Prefix *scheme_resolve_prefix(int phase, Comp_Prefix *cp, int simplify)
 Resolve_Info *scheme_resolve_info_create(Resolve_Prefix *rp)
 {
   Resolve_Info *naya;
+  Scheme_Object *b;
 
   naya = MALLOC_ONE_RT(Resolve_Info);
 #ifdef MZTAG_REQUIRED
@@ -2606,6 +2945,9 @@ Resolve_Info *scheme_resolve_info_create(Resolve_Prefix *rp)
   naya->count = 0;
   naya->next = NULL;
   naya->toplevel_pos = -1;
+
+  b = scheme_get_param(scheme_current_config(), MZCONFIG_USE_JIT);
+  naya->use_jit = SCHEME_TRUEP(b);
 
   return naya;
 }
@@ -2623,6 +2965,8 @@ Resolve_Info *scheme_resolve_info_extend(Resolve_Info *info, int size, int oldsi
 #endif
   naya->prefix = info->prefix;
   naya->next = info;
+  naya->use_jit = info->use_jit;
+  naya->enforce_const = info->enforce_const;
   naya->size = size;
   naya->oldsize = oldsize;
   naya->count = mapc;
@@ -2737,7 +3081,8 @@ Scheme_Object *scheme_resolve_toplevel(Resolve_Info *info, Scheme_Object *expr)
 
   return make_toplevel(skip + SCHEME_TOPLEVEL_DEPTH(expr), /* depth is 0 (normal) or 1 (exp-time) */
 		       SCHEME_TOPLEVEL_POS(expr),
-		       1);
+		       1,
+		       SCHEME_TOPLEVEL_FLAGS(expr) & SCHEME_TOPLEVEL_FLAGS_MASK);
 }
 
 /*========================================================================*/
@@ -3236,9 +3581,9 @@ local_get_shadower(int argc, Scheme_Object *argv[])
 	  env_marks = scheme_stx_extract_marks(esym);
 	  if (scheme_equal(env_marks, sym_marks)) {
 	    sym = esym;
-	    if (COMPILE_DATA(frame)->const_uids)
+	    if (COMPILE_DATA(frame)->const_uids) {
 	      uid = COMPILE_DATA(frame)->const_uids[i];
-	    else
+	    } else
 	      uid = frame->uid;
 	    break;
 	  }
@@ -3487,17 +3832,39 @@ rename_transformer_p(int argc, Scheme_Object *argv[])
 
 static Scheme_Object *write_toplevel(Scheme_Object *obj)
 {
+  int pos, flags;
+  Scheme_Object *pr;
+
+  pos = SCHEME_TOPLEVEL_POS(obj);
+  flags = (SCHEME_TOPLEVEL_FLAGS(obj) & SCHEME_TOPLEVEL_FLAGS_MASK);
+
+  pr = (flags
+	? scheme_make_pair(scheme_make_integer(pos),
+			   scheme_make_integer(flags))
+	: scheme_make_integer(pos));
+
   return scheme_make_pair(scheme_make_integer(SCHEME_TOPLEVEL_DEPTH(obj)),
-			  scheme_make_integer(SCHEME_TOPLEVEL_POS(obj)));
+			  pr);
 }
 
 static Scheme_Object *read_toplevel(Scheme_Object *obj)
 {
+  int pos, depth, flags;
+
   if (!SCHEME_PAIRP(obj)) return NULL;
 
-  return make_toplevel(SCHEME_INT_VAL(SCHEME_CAR(obj)),
-		       SCHEME_INT_VAL(SCHEME_CDR(obj)),
-		       1);
+  depth = SCHEME_INT_VAL(SCHEME_CAR(obj));
+  obj = SCHEME_CDR(obj);
+
+  if (SCHEME_PAIRP(obj)) {
+    pos = SCHEME_INT_VAL(SCHEME_CAR(obj));
+    flags = SCHEME_INT_VAL(SCHEME_CDR(obj)) & SCHEME_TOPLEVEL_FLAGS_MASK;
+  } else {
+    pos = SCHEME_INT_VAL(obj);
+    flags = 0;
+  }
+
+  return make_toplevel(depth, pos, 1, flags);
 }
 
 static Scheme_Object *write_variable(Scheme_Object *obj)
@@ -3673,6 +4040,7 @@ static void register_traversers(void)
 {
   GC_REG_TRAV(scheme_rt_comp_env, mark_comp_env);
   GC_REG_TRAV(scheme_rt_resolve_info, mark_resolve_info);
+  GC_REG_TRAV(scheme_rt_optimize_info, mark_optimize_info);
 }
 
 END_XFORM_SKIP;

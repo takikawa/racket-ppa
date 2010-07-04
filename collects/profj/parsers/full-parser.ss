@@ -852,7 +852,13 @@
         (if (access? $2)
             (make-cast #f (build-src 4) 
                            (make-type-spec (access->name $2) 0 (build-src 2 2)) $4)
-            (error 'bad-cast))]
+            (raise-read-error "An operator is needed to combine these expressions."
+                              (file-path)
+                              (position-line $1-start-pos)
+                              (position-col $1-start-pos)
+                              (+ (position-offset $1-start-pos) (interactions-offset))
+                              (- (position-offset $4-end-pos)
+                                 (position-offset $1-start-pos))))]
        [(O_PAREN Name Dims C_PAREN UnaryExpressionNotPlusMinus)
 	(make-cast #f (build-src 4)
 		       (make-type-spec $2 $3 (build-src 2 3))
@@ -938,13 +944,20 @@
        [(ConditionalOrExpression ? Expression : ConditionalExpression)
 	(make-cond-expression #f (build-src 5) $1 $3 $5 (build-src 2 2))])
       
-      (AssignmentExpression
+      (CheckExpression
        [(ConditionalExpression) $1]
+       [(check ConditionalExpression expect ConditionalExpression) 
+        (make-check #f (build-src 4) $2 $4 #f (build-src 2 4))]
+       [(check ConditionalExpression expect ConditionalExpression within ConditionalExpression) 
+        (make-check #f (build-src 6) $2 $4 $6 (build-src 2 4))])
+      
+      (AssignmentExpression
+       [#;(ConditionalExpression) (CheckExpression) $1]
        [(Assignment) $1])
       
       (Assignment
        [(LeftHandSide AssignmentOperator AssignmentExpression)
-	(make-assignment #f (build-src 3) $1 $2 $3 (build-src 2 2))])
+	(make-assignment #f (build-src 3) $1 $2 $3 (build-src 2 2))])      
       
       (LeftHandSide
        [(Name) (name->access $1)]

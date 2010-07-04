@@ -239,7 +239,7 @@ If the namespace does not, they are colored the unbound color.
                 (hash-table-for-each
                  bindings-table
                  (λ (k v)
-                   (hash-table-put! bindings-table k (quicksort v compare-bindings)))))
+                   (hash-table-put! bindings-table k (sort v compare-bindings)))))
               
               (define tacked-hash-table (make-hash-table))
               (define cursor-location #f)
@@ -833,6 +833,7 @@ If the namespace does not, they are colored the unbound color.
           
           (define/augment (on-close)
 	    (send report-error-text on-close)
+            (send (get-defs) syncheck:clear-arrows)
 	    (inner (void) on-close))
           
           ;; syncheck:add-to-cleanup-texts : (is-a?/c text%) -> void
@@ -924,7 +925,7 @@ If the namespace does not, they are colored the unbound color.
               (set! rest-panel r-root)
               r-root))
 
-          (inherit open-status-line close-status-line update-status-line)
+          (inherit open-status-line close-status-line update-status-line ensure-rep-hidden)
           ;; syncheck:button-callback : (case-> (-> void) ((union #f syntax) -> void)
           ;; this is the only function that has any code running on the user's thread
           (define/public syncheck:button-callback
@@ -934,6 +935,7 @@ If the namespace does not, they are colored the unbound color.
                (when (send check-syntax-button is-enabled?)
                  (open-status-line 'drscheme:check-syntax)
                  (update-status-line 'drscheme:check-syntax status-init)
+                 (ensure-rep-hidden)
                  (let-values ([(expanded-expression expansion-completed) (make-traversal)])
                    (let* ([definitions-text (get-definitions-text)]
                           [drs-eventspace (current-eventspace)]
@@ -2104,7 +2106,7 @@ If the namespace does not, they are colored the unbound color.
             (let ([new-sym (format "~s" (string->symbol new-str))])
               (let* ([to-be-renamed 
                       (remove-duplicates
-                       (quicksort 
+                       (sort 
                         (apply 
                          append
                          (map (λ (id-set) 

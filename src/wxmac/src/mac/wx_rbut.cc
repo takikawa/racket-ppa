@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2005 PLT Scheme, Inc.
+// Copyright:  (c) 2004-2006 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -332,7 +332,7 @@ void wxRadioButton::OnEvent(wxMouseEvent *event) // mac platform only
 
       if (trackResult) {
 	wxCommandEvent *commandEvent;
-	commandEvent = new wxCommandEvent(wxEVENT_TYPE_RADIOBOX_COMMAND);
+	commandEvent = new WXGC_PTRS wxCommandEvent(wxEVENT_TYPE_RADIOBOX_COMMAND);
 	ProcessCommand(commandEvent);
       }
     }

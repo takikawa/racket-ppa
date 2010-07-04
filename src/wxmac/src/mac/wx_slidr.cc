@@ -4,7 +4,7 @@
  * Author:	Cecil Coupe
  * Created:	1995
  * Updated:	
- * Copyright:	(c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:	(c) 2004-2006 PLT Scheme Inc.
  * Copyright:	(c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
  */
 
@@ -173,8 +173,7 @@ Bool wxSlider::Create(wxPanel *panel, wxFunction func, char *label, int value,
   {
     void *rc;
     rc = WRAP_SAFEREF(this);
-    refcon = rc;
-    SetControlReference(cMacControl, (long)refcon);
+    SetControlReference(cMacControl, (long)rc);
   }
 
   if (label) {
@@ -189,8 +188,8 @@ Bool wxSlider::Create(wxPanel *panel, wxFunction func, char *label, int value,
 
   if (label)
     {
-      cTitle = new wxLabelArea(this, label, font,
-			       labelPosition == wxVERTICAL ? wxTop : wxLeft);
+      cTitle = new WXGC_PTRS wxLabelArea(this, label, font,
+					 labelPosition == wxVERTICAL ? wxTop : wxLeft);
     }
   else
     cTitle = NULL;
@@ -219,10 +218,10 @@ wxSlider::~wxSlider(void)
 {
   void *rc;
 
-  ::DisposeControl(cMacControl);
-
   rc = (void *)GetControlReference(cMacControl);
   FREE_SAFEREF(rc);
+
+  ::DisposeControl(cMacControl);
 }
 
 
@@ -431,7 +430,7 @@ void wxSlider::TrackPart(int part)
       HIViewSetNeedsDisplay(cPaintControl, TRUE);
   }
  
-  commandEvent = new wxCommandEvent(wxEVENT_TYPE_SLIDER_COMMAND);
+  commandEvent = new WXGC_PTRS wxCommandEvent(wxEVENT_TYPE_SLIDER_COMMAND);
 
   /* Must queue callbacks only: */
   ProcessCommand(commandEvent);

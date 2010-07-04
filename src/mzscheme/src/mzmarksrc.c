@@ -48,6 +48,12 @@ toplevel_obj {
   gcBYTES_TO_WORDS(sizeof(Scheme_Toplevel));
 }
 
+quotesyntax_obj {
+ mark:
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Quote_Syntax));
+}
+
 cpointer_obj {
  mark:
   gcMARK(SCHEME_CPTR_VAL((Scheme_Object *)p));
@@ -153,6 +159,10 @@ unclosed_proc {
   gcMARK(d->name);
   gcMARK(d->code);
   gcMARK(d->closure_map);
+#ifdef MZ_USE_JIT
+  gcMARK(d->native_code);
+  gcMARK(d->context);
+#endif
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Closure_Data));
@@ -240,11 +250,24 @@ prim_proc {
 
  mark:
   gcMARK(prim->name);
-
+  if (prim->mina < 0) {
+    gcMARK(prim->mu.cases);
+  }
+  if (prim->pp.flags & SCHEME_PRIM_IS_CLOSURE) {
+    Scheme_Primitive_Closure *cc = (Scheme_Primitive_Closure *)prim;
+    int i;
+    for (i = cc->count; i--; ) {
+      gcMARK(cc->val[i]);
+    }
+  }  
+  
  size:
-  ((prim->pp.flags & SCHEME_PRIM_IS_MULTI_RESULT)
-   ? gcBYTES_TO_WORDS(sizeof(Scheme_Prim_W_Result_Arity))
-   : gcBYTES_TO_WORDS(sizeof(Scheme_Primitive_Proc)));
+  ((prim->pp.flags & SCHEME_PRIM_IS_CLOSURE)
+   ? (gcBYTES_TO_WORDS(sizeof(Scheme_Primitive_Closure))
+      + ((Scheme_Primitive_Closure *)prim)->count - 1)
+   : ((prim->pp.flags & SCHEME_PRIM_IS_MULTI_RESULT)
+      ? gcBYTES_TO_WORDS(sizeof(Scheme_Prim_W_Result_Arity))
+      : gcBYTES_TO_WORDS(sizeof(Scheme_Primitive_Proc))));
 }
 
 closed_prim_proc {
@@ -253,23 +276,6 @@ closed_prim_proc {
  mark:
   gcMARK(c->name);
   gcMARK(SCHEME_CLSD_PRIM_DATA(c));
-  if (c->pp.flags & SCHEME_PRIM_IS_POST_DATA) {
-    if (c->mina == -2) {
-      Scheme_Closed_Case_Primitive_Post_Ext_Proc *cc;
-      int i;
-      cc = (Scheme_Closed_Case_Primitive_Post_Ext_Proc *)c;
-      for (i = cc->p.len; i--; ) {
-	gcMARK(cc->a[i]);
-      }
-    } else {
-      Scheme_Closed_Primitive_Post_Ext_Proc *cc;
-      int i;
-      cc = (Scheme_Closed_Primitive_Post_Ext_Proc *)c;
-      for (i = cc->p.len; i--; ) {
-	gcMARK(cc->a[i]);
-      }
-    }
-  }
   if (c->mina == -2) {
     gcMARK(((Scheme_Closed_Case_Primitive_Proc *)c)->cases);
   }
@@ -278,28 +284,24 @@ closed_prim_proc {
   ((c->pp.flags & SCHEME_PRIM_IS_MULTI_RESULT)
    ? gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Prim_W_Result_Arity))
    : ((c->mina == -2)
-      ? ((c->pp.flags & SCHEME_PRIM_IS_POST_DATA)
-	 ? (gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Case_Primitive_Post_Ext_Proc))
-	    + ((Scheme_Closed_Case_Primitive_Post_Proc *)c)->len - 1)
-	 : gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Case_Primitive_Proc)))
-      : ((c->pp.flags & SCHEME_PRIM_IS_POST_DATA)
-	 ? (gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Primitive_Post_Ext_Proc))
-	    + ((Scheme_Closed_Primitive_Post_Proc *)c)->len - 1)
-	 : gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Primitive_Proc)))));
+      ? gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Case_Primitive_Proc))
+      : gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Primitive_Proc))));
 }
 
 scm_closure {
   Scheme_Closure *c = (Scheme_Closure *)p;
+  int closure_size = ((Scheme_Closure_Data *)GC_resolve(c->code))->closure_size;
 
  mark:
-  int i = c->closure_size;
+
+  int i = closure_size;
   while (i--)
     gcMARK(c->vals[i]);
   gcMARK(c->code);
   
  size:
   gcBYTES_TO_WORDS((sizeof(Scheme_Closure)
-		    + (c->closure_size - 1) * sizeof(Scheme_Object *)));
+		    + (closure_size - 1) * sizeof(Scheme_Object *)));
 }
 
 case_closure {
@@ -311,6 +313,9 @@ case_closure {
   for (i = c->count; i--; )
     gcMARK(c->array[i]);
   gcMARK(c->name);
+#ifdef MZ_USE_JIT
+  gcMARK(c->native_code);
+#endif
 
  size:
   gcBYTES_TO_WORDS((sizeof(Scheme_Case_Lambda)
@@ -329,9 +334,13 @@ cont_proc {
   gcMARK(c->runstack_owner);
   gcMARK(c->cont_mark_stack_copied);
   gcMARK(c->cont_mark_stack_owner);
+  gcMARK(c->orig_mark_segments);
   gcMARK(c->init_config);
   gcMARK(c->init_break_cell);
-  
+#ifdef MZ_USE_JIT
+  gcMARK(c->native_trace);
+#endif
+
   MARK_jmpup(&c->buf);
   MARK_cjs(&c->cjs);
   MARK_stack_state(&c->ss);
@@ -370,6 +379,10 @@ escaping_cont_proc {
   Scheme_Escaping_Cont *c = (Scheme_Escaping_Cont *)p;
 
   gcMARK(c->mark_key);
+  gcMARK(c->marks_prefix);
+#ifdef MZ_USE_JIT
+  gcMARK(c->native_trace);
+#endif
 
   MARK_cjs(&c->cjs);
   MARK_stack_state(&c->envss);
@@ -551,6 +564,8 @@ thread_val {
 
   MARK_cjs(&pr->cjs);
 
+  gcMARK(pr->current_escape_cont_key);
+
   gcMARK(pr->cell_values);
   gcMARK(pr->init_config);
   gcMARK(pr->init_break_cell);
@@ -563,6 +578,7 @@ thread_val {
   gcMARK(pr->runstack_saved);
   gcMARK(pr->runstack_owner);
   gcMARK(pr->runstack_swapped);
+  pr->spare_runstack = NULL; /* just in case */
   
   gcMARK(pr->cont_mark_stack_segments);
   gcMARK(pr->cont_mark_stack_owner);
@@ -629,6 +645,7 @@ cont_mark_set_val {
  mark:
   Scheme_Cont_Mark_Set *s = (Scheme_Cont_Mark_Set *)p;
   gcMARK(s->chain);
+  gcMARK(s->native_stack_trace);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Cont_Mark_Set));
@@ -911,9 +928,8 @@ mark_comp_env {
   gcMARK(e->base.dup_check);
   gcMARK(e->base.intdef_name);
   gcMARK(e->base.in_modidx);
+  gcMARK(e->base.skip_table);
   
-  gcMARK(e->data.stat_dists);
-  gcMARK(e->data.sd_depths);
   gcMARK(e->data.const_names);
   gcMARK(e->data.const_vals);
   gcMARK(e->data.const_uids);
@@ -937,6 +953,21 @@ mark_resolve_info {
 
  size:
   gcBYTES_TO_WORDS(sizeof(Resolve_Info));
+}
+
+mark_optimize_info {
+ mark:
+  Optimize_Info *i = (Optimize_Info *)p;
+  
+  gcMARK(i->stat_dists);
+  gcMARK(i->sd_depths);
+  gcMARK(i->next);
+  gcMARK(i->use);
+  gcMARK(i->consts);
+  gcMARK(i->top_level_consts);
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(Optimize_Info));
 }
 
 
@@ -1635,6 +1666,7 @@ mark_readtable {
   Readtable *t = (Readtable *)p;
   gcMARK(t->mapping);
   gcMARK(t->fast_mapping);
+  gcMARK(t->symbol_parser);
  size:
   gcBYTES_TO_WORDS(sizeof(Readtable));
 }
@@ -1701,6 +1733,8 @@ mark_rename_table {
  mark:
   Module_Renames *rn = (Module_Renames *)p;
   gcMARK(rn->ht);
+  gcMARK(rn->nomarshal_ht);
+  gcMARK(rn->unmarshal_info);
   gcMARK(rn->plus_kernel_nominal_source);
   gcMARK(rn->marked_names);
  size:
@@ -1749,6 +1783,70 @@ lex_rib {
 }
 
 END stxobj;
+
+/**********************************************************************/
+
+START jit;
+
+native_closure {
+  Scheme_Native_Closure *c = (Scheme_Native_Closure *)p;
+  int closure_size = ((Scheme_Native_Closure_Data *)GC_resolve(c->code))->closure_size;
+
+  if (closure_size < 0) {
+    closure_size = -(closure_size + 1);
+  }
+
+ mark:
+
+  {
+    int i = closure_size;
+    while (i--)
+      gcMARK(c->vals[i]);
+  }
+  gcMARK(c->code);
+  
+ size:
+  gcBYTES_TO_WORDS((sizeof(Scheme_Native_Closure)
+		    + (closure_size - 1) * sizeof(Scheme_Object *)));
+}
+
+mark_jit_state {
+ mark:
+  mz_jit_state *j = (mz_jit_state *)p;
+  gcMARK(j->mappings);
+ size:
+  gcBYTES_TO_WORDS(sizeof(mz_jit_state));
+}
+
+native_unclosed_proc {
+ mark:
+  Scheme_Native_Closure_Data *d = (Scheme_Native_Closure_Data *)p;
+  int i;
+
+  gcMARK(d->u2.name);
+  for (i = d->retain_count; i--; ) {
+    gcMARK(d->retained[i]);
+  }
+  if (d->closure_size < 0) {
+    gcMARK(d->u.arities);
+  }
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Native_Closure_Data));
+}
+
+native_unclosed_proc_plus_case {
+ mark:
+  Scheme_Native_Closure_Data_Plus_Case *d = (Scheme_Native_Closure_Data_Plus_Case *)p;
+
+  native_unclosed_proc_MARK(p);
+  gcMARK(d->case_lam);
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Native_Closure_Data_Plus_Case));
+}
+
+END jit;
 
 /**********************************************************************/
 

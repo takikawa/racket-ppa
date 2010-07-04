@@ -1,16 +1,17 @@
 (module url-structs mzscheme
   (require (lib "contract.ss"))
-  
-  (define-struct url (scheme user host port path query fragment))
+
+  (define-struct url (scheme user host port path-absolute? path query fragment))
   (define-struct path/param (path param))
 
   (provide/contract
-   (struct url ([scheme (union false/c string?)]
-                [user (union false/c string?)]
-                [host (union false/c string?)]
-                [port (union false/c number?)]
-                [path (listof (union string? path/param?))]
+   (struct url ([scheme (or/c false/c string?)]
+                [user (or/c false/c string?)]
+                [host (or/c false/c string?)]
+                [port (or/c false/c number?)]
+                [path-absolute? boolean?]
+                [path (listof path/param?)]
                 [query (listof (cons/c symbol? string?))]
-                [fragment (union false/c string?)]))
-   (struct path/param ([path string?]
-                       [param string?]))))
+                [fragment (or/c false/c string?)]))
+   (struct path/param ([path (or/c string? (symbols 'up 'same))]
+                       [param (listof string?)]))))

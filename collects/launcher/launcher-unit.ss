@@ -8,9 +8,11 @@
 	   (lib "compile-sig.ss" "dynext")
 	   (lib "link-sig.ss" "dynext")
 	   (lib "embed.ss" "compiler")
-	   (lib "plthome.ss" "setup")
+	   (lib "dirs.ss" "setup")
 
-	   "launcher-sig.ss")
+	   "launcher-sig.ss"
+
+	   (lib "winutf16.ss" "compiler" "private"))
 
   (provide launcher@)
 
@@ -34,17 +36,21 @@
 		    [(or (eq? 'unix (system-type))
 			 (and (eq? 'macosx (system-type))
 			      (eq? kind 'mzscheme)))
-		     (if (and plthome
-			      (file-exists? (build-path plthome "bin" (format "~a3m" kind))))
+		     (if (let ([bin-dir (find-console-bin-dir)])
+			   (and bin-dir
+				(file-exists? (build-path bin-dir (format "~a3m" kind)))))
 			 '(3m)
 			 null)]
 		    [(eq? 'macosx (system-type))
 		     ;; kind must be mred, because mzscheme case caught above
-		     (if (directory-exists? (build-path plthome "MrEd3m.app"))
+		     (if (directory-exists? (build-path (find-gui-bin-dir) "MrEd3m.app"))
 			 '(3m)
 			 null)]
 		    [(eq? 'windows (system-type))
-		     (if (file-exists? (build-path plthome (format "~a3m.exe" kind)))
+		     (if (file-exists? (build-path (if (eq? kind 'mzscheme)
+						       (find-console-bin-dir)
+						       (find-gui-bin-dir))
+						   (format "~a3m.exe" kind)))
 			 '(3m)
 			 null)]
 		    [else
@@ -52,15 +58,16 @@
 		     null])]
 	       [normal (if (eq? kind 'mzscheme)
 			   '(normal) ; MzScheme is always available
-			   (if (and plthome
-				    (cond
-				     [(eq? 'unix (system-type))
-				      (file-exists? (build-path plthome "bin" (format "~a" kind)))]
-				     [(eq? 'macosx (system-type))
-				      (directory-exists? (build-path plthome "MrEd.app"))]
-				     [(eq? 'windows (system-type))
-				      (file-exists? (build-path plthome (format "~a.exe" kind)))]
-				     [else #t]))
+			   (if (let ([gui-dir (find-gui-bin-dir)])
+				 (and gui-dir
+				      (cond
+				       [(eq? 'unix (system-type))
+					(file-exists? (build-path gui-dir (format "~a" kind)))]
+				       [(eq? 'macosx (system-type))
+					(directory-exists? (build-path gui-dir "MrEd.app"))]
+				       [(eq? 'windows (system-type))
+					(file-exists? (build-path gui-dir (format "~a.exe" kind)))]
+				       [else #t])))
 			       '(normal)
 			       null))]
 	       [script (if (and (eq? 'macosx (system-type))
@@ -179,31 +186,29 @@
 			f))))))
 
       (define (output-x-arg-getter exec args)
-	(let* ([newline (string #\newline)]
-	       [or-flags
-		(lambda (l)
-		  (if (null? (cdr l))
-		      (car l)
-		      (string-append
-		       (car l)
-		       (apply
-			string-append
-			(map (lambda (s) (string-append " | " s)) (cdr l))))))])
+	(let ([or-flags
+               (lambda (l)
+                 (if (null? (cdr l))
+                   (car l)
+                   (string-append
+                    (car l)
+                    (apply
+                     string-append
+                     (map (lambda (s) (string-append " | " s)) (cdr l))))))])
 	  (apply
 	   string-append
 	   (append
-	    (list "# Find X flags and shift them to the front" newline
-		  "findxend()" newline
-		  "{" newline
-		  " oneargflag=''" newline
-		  " case \"$1\" in" newline)
+	    (list "# Find X flags and shift them to the front\n"
+		  "findxend() {\n"
+		  " oneargflag=''\n"
+		  " case \"$1\" in\n")
 	    (map
 	     (lambda (f)
 	       (format (string-append
-			"  ~a)" newline
-			"     oneargflag=\"$1\"" newline
-			"     ~a=\"$2\"" newline
-			"   ;;" newline)
+			"  ~a)\n"
+			"     oneargflag=\"$1\"\n"
+			"     ~a=\"$2\"\n"
+			"   ;;\n")
 		       (or-flags (cdr f))
 		       (car f)))
 	     one-arg-x-flags)
@@ -234,23 +239,99 @@
 			no-arg-x-flags)))
 		     args))))))
 
+      (define (protect-shell-string s)
+	(regexp-replace*
+         #rx"[\"`'$\\]" (if (path? s) (path->string s) s) "\\\\&"))
+
+      (define (normalize+explode-path p)
+	(explode-path (normal-case-path (normalize-path p))))
+
+      (define (relativize bindir-explode dest-explode)
+	(let loop ([b bindir-explode] [d dest-explode])
+	  (if (and (pair? b) (equal? (car b) (car d)))
+	      (loop (cdr b) (cdr d))
+	      (let ([p (append (map (lambda (x) 'up) (cdr d)) b)])
+		(if (null? p) 
+		    #f
+		    (apply build-path p))))))
+
+      (define (make-relative-path-header dest bindir)
+        ;; rely only on binaries in /usr/bin:/bin
+        (define (has-exe? exe)
+          (or (file-exists? (build-path "/usr/bin" exe))
+              (file-exists? (build-path "/bin" exe))))
+        (let* ([has-readlink?  (and (not (eq? 'macosx (system-type)))
+                                    (has-exe? "readlink"))]
+               [dest-explode   (normalize+explode-path dest)]
+               [bindir-explode (normalize+explode-path bindir)])
+          (if (and (has-exe? "dirname") (has-exe? "basename")
+                   (or has-readlink? (and (has-exe? "ls") (has-exe? "sed")))
+                   (equal? (car dest-explode) (car bindir-explode)))
+            (string-append
+             "# Make this PATH-independent\n"
+             "saveP=\"$PATH\"\n"
+             "PATH=/usr/bin:/bin\n"
+             "\n"
+             (if has-readlink? ""
+                 (string-append
+                  "# imitate possibly-missing readlink\n"
+                  "readlink() {\n"
+                  "  ls -l -- \"$1\" | sed -e \"s/^.* -> //\"\n"
+                  "}\n"
+                  "\n"))
+             "# Remember current directory\n"
+             "saveD=`pwd`\n"
+             "\n"
+             "# Find absolute path to this script,\n"
+             "# resolving symbolic references to the end\n"
+             "# (changes the current directory):\n"
+             "D=`dirname \"$0\"`\n"
+             "F=`basename \"$0\"`\n"
+             "cd \"$D\"\n"
+             "while [ -L \"$F\" ]; do\n"
+             "  P=`readlink \"$F\"`\n"
+             "  D=`dirname \"$P\"`\n"
+             "  F=`basename \"$P\"`\n"
+             "  cd \"$D\"\n"
+             "done\n"
+             "D=`pwd`\n"
+             "\n"
+             "# Restore current directory\n"
+             "cd \"$saveD\"\n"
+             "\n"
+             "bindir=\"$D"
+	     (let ([s (relativize bindir-explode dest-explode)])
+	       (if s
+		   (string-append "/" 
+				  (protect-shell-string s))
+		   ""))
+             "\"\n"
+             "PATH=\"$saveP\"\n"
+             "\n")
+            ;; fallback to absolute path header
+            (make-absolute-path-header bindir))))
+
+      (define (make-absolute-path-header bindir)
+	(string-append "bindir=\""(protect-shell-string bindir)"\"\n\n"))
+
       (define (make-unix-launcher kind variant flags dest aux)
 	(install-template dest kind "sh" "sh") ; just for something that's executable
-	(let* ([newline (string #\newline)]
-	       [alt-exe (let ([m (and (eq? kind 'mred)
+	(let* ([alt-exe (let ([m (and (eq? kind 'mred)
 				      (memq variant '(script script-3m))
 				      (assq 'exe-name aux))])
 			  (and m
 			       (format "~a~a.app/Contents/MacOS/~a~a" 
 				       (cdr m) (variant-suffix variant)
 				       (cdr m) (variant-suffix variant))))]
-	       [post-flags (if (and (eq? kind 'mred)
-				    (not (memq variant '(script script-3m))))
-			       (skip-x-flags flags)
-			       null)]
+	       [x-flags? (and (eq? kind 'mred)
+			      (eq? (system-type) 'unix)
+			      (not (memq variant '(script script-3m))))]
+	       [post-flags (cond
+			    [x-flags? (skip-x-flags flags)]
+			    [alt-exe null]
+			    [else flags])]
 	       [pre-flags (cond
-			   [alt-exe null]
-			   [(null? post-flags) flags]
+			   [(not x-flags?) null]
 			   [else
 			    (let loop ([f flags])
 			      (if (eq? f post-flags)
@@ -258,40 +339,46 @@
 				  (cons (car f) (loop (cdr f)))))])]
 	       [pre-str (str-list->sh-str pre-flags)]
 	       [post-str (str-list->sh-str post-flags)]
-	       [header (format
-			(string-append
-			 "#!/bin/sh" newline
-			 "# This script was created by make-~a-launcher" newline
-			 newline
-			 "if [ \"$PLTHOME\" = '' ] ; then" newline
-			 "  PLTHOME=\"~a\"" newline
-			 "  export PLTHOME" newline
-			 "fi" newline
-			 newline)
-			kind (regexp-replace* "\"" 
-					      (path->string plthome)
-					      "\\\\\""))]
+	       [header (string-append
+                        "#!/bin/sh\n"
+                        "# This script was created by make-"(symbol->string kind)"-launcher\n"
+                        "\n")]
+	       [dir-finder
+		(let ([bindir (if alt-exe
+				  (find-gui-bin-dir)
+				  (find-console-bin-dir))])
+		  (if (let ([a (assq 'relative? aux)])
+			(and a (cdr a)))
+		      (make-relative-path-header dest bindir)
+		      (make-absolute-path-header bindir)))]
 	       [exec (format
-		      "exec \"${PLTHOME}/~a~a~a\" ~a"
-		      (if alt-exe "" "bin/")
+		      "exec \"${bindir}/~a~a\" ~a"
 		      (or alt-exe kind)
-		      (if alt-exe "" (variant-suffix variant)) pre-str)]
+		      (if alt-exe "" (variant-suffix variant))
+		      pre-str)]
 	       [args (format
-		      " ~a ${1+\"$@\"}~n"
+		      "~a ~a ${1+\"$@\"}~n"
+		      (if alt-exe "" " -N \"$0\"")
 		      post-str)]
 	       [assemble-exec (if (and (eq? kind 'mred)
 				       (not (memq variant '(script scrip-3m)))
 				       (not (null? post-flags)))
 				  output-x-arg-getter
 				  string-append)])
-	  (unless plthome
-	    (error 'make-unix-launcher "unable to locate PLTHOME"))
+	  (unless (find-console-bin-dir)
+	    (error 'make-unix-launcher "unable to locate bin directory"))
 	  (let ([p (open-output-file dest 'truncate)])
-	    (fprintf p "~a~a"
+	    (fprintf p "~a~a~a"
 		     header
+		     dir-finder
 		     (assemble-exec exec args))
 	    (close-output-port p))))
-      
+
+      (define (utf-16-regexp b)
+	(byte-regexp (bytes-append (bytes->utf-16-bytes b)
+				   #"[^>]*"
+				   (bytes->utf-16-bytes #">"))))
+
       (define (make-windows-launcher kind variant flags dest aux)
 	(if (not (and (let ([m (assq 'independent? aux)])
 			(and m (cdr m)))))
@@ -305,15 +392,25 @@
 	    ;; Independent launcher (needed for Setup PLT):
 	    (begin
 	      (install-template dest kind "mzstart.exe" "mrstart.exe")
-	      (let ([bstr (string->bytes/utf-8 (str-list->dos-str flags))]
+	      (let ([bstr (bytes->utf-16-bytes
+			   (string->bytes/utf-8 (str-list->dos-str flags)))]
 		    [p (open-input-file dest)]
-		    [m #rx#"<Command Line: Replace This[^>]*>"]
-		    [x #rx#"<Executable Directory: Replace This[^>]*>"]
-		    [v #rx#"<Executable Variant: Replace This>"])
-		(let* ([exedir (bytes-append
-				(path->bytes plthome)
-				;; null character marks end of executable directory
-				#"\0")]
+		    [m (utf-16-regexp #"<Command Line: Replace This")]
+		    [x (utf-16-regexp #"<Executable Directory: Replace This")]
+		    [v (byte-regexp #"<Executable Variant: Replace This")])
+		(let* ([exedir (bytes->utf-16-bytes
+				(bytes-append
+				 (path->bytes (let ([bin-dir (if (eq? kind 'mred)
+								 (find-gui-bin-dir)
+								 (find-console-bin-dir))])
+					       (if (let ([m (assq 'relative? aux)])
+						    (and m (cdr m)))
+						  (or (relativize (normalize+explode-path bin-dir)
+								  (normalize+explode-path dest))
+						      (build-path 'same))
+						  bin-dir)))
+				 ;; null wchar marks end of executable directory
+				 #"\0\0"))]
 		       [find-it ; Find the magic start
 			(lambda (magic s)
 			  (file-position p 0)
@@ -355,18 +452,18 @@
 		  (check-len len-exedir exedir "executable home directory")
 		  (check-len len-command bstr "collection/file name")
 		  (let ([p (open-output-file dest 'update)])
-		    (write-magic p exedir pos-exedir len-exedir)   
-		    (write-magic p bstr pos-command len-command)   
+		    (write-magic p exedir pos-exedir len-exedir)
+		    (write-magic p (bytes-append bstr #"\0\0") pos-command len-command)
 		    (when (eq? '3m (current-launcher-variant))
 		      (write-magic p #"3" pos-variant 1))
 		    (close-output-port p)))))))
-      
+
       ;; OS X launcher code:
-     
-      ; make-macosx-launcher : symbol (listof str) pathname ->  
+
+      ; make-macosx-launcher : symbol (listof str) pathname ->
       (define (make-macosx-launcher kind variant flags dest aux)
-	(if (or (eq? kind 'mzscheme) 
-		(eq? variant 'script) 
+	(if (or (eq? kind 'mzscheme)
+		(eq? variant 'script)
 		(eq? variant 'script-3m))
 	    ;; MzScheme or script launcher is the same as for Unix
 	    (make-unix-launcher kind variant flags dest aux)
@@ -377,12 +474,11 @@
 				       aux
 				       #t
 				       variant)))
-        
-      
+
       (define (make-macos-launcher kind variant flags dest aux)
 	(install-template dest kind "GoMr" "GoMr")
 	(let ([p (open-input-file dest)])
-	  (let ([m (regexp-match-positions "<Insert offset here>" p)])
+	  (let ([m (regexp-match-positions #rx#"<Insert offset here>" p)])
 	    ;; fast-forward to the end:
 	    (let ([s (make-bytes 4096)])
 	      (let loop ()
@@ -403,24 +499,24 @@
 		(file-position p data-fork-size)
 		(display str p)
 		(close-output-port p))))))
-      
+
       (define (get-maker)
 	(case (system-type)
-	  [(unix) make-unix-launcher]
+	  [(unix)    make-unix-launcher]
 	  [(windows) make-windows-launcher]
-	  [(macos) make-macos-launcher]
-	  [(macosx) make-macosx-launcher]))
-      
+	  [(macos)   make-macos-launcher]
+	  [(macosx)  make-macosx-launcher]))
+
       (define make-mred-launcher
 	(opt-lambda (flags dest [aux null])
 	  (let ([variant (current-launcher-variant)])
 	    ((get-maker) 'mred variant flags dest aux))))
-      
+
       (define make-mzscheme-launcher
 	(opt-lambda (flags dest [aux null])
 	  (let ([variant (current-launcher-variant)])
 	    ((get-maker) 'mzscheme variant flags dest aux))))
-      
+
       (define (strip-suffix s)
 	(path-replace-suffix s #""))
 
@@ -483,12 +579,6 @@
 				(build-aux-from-path
 				 (build-path (collection-path collection)
 					     (strip-suffix file)))))
-      
-      (define l-home (if (memq (system-type) '(unix))
-			 (build-path plthome "bin")
-			 plthome))
-
-      (define l-home-macosx-mzscheme (build-path plthome "bin"))
 
       (define (unix-sfx file)
 	(list->string
@@ -504,28 +594,31 @@
 			   [(windows) (string-append file ".exe")]
 			   [else file]))
 
-      (define (mred-program-launcher-path name)
+      (define (program-launcher-path name mred?)
 	(let* ([variant (current-launcher-variant)]
 	       [mac-script? (and (eq? (system-type) 'macosx) 
 				 (memq variant '(script script-3m)))])
 	  (let ([p (add-file-suffix 
 		    (build-path 
-		     (if mac-script?
-			 l-home-macosx-mzscheme
-			 l-home)
+		     (if (or mac-script? (not mred?))
+			 (find-console-bin-dir)
+			 (find-gui-bin-dir))
 		     ((if mac-script? unix-sfx sfx) name))
 		    variant)])
 	   (if (and (eq? (system-type) 'macosx) 
 		    (not (memq variant '(script script-3m))))
 	       (path-replace-suffix p #".app")
 	       p))))
+
+      (define (mred-program-launcher-path name)
+	(program-launcher-path name #t))
       
       (define (mzscheme-program-launcher-path name)
 	(case (system-type)
 	  [(macosx) (add-file-suffix 
-		     (build-path l-home-macosx-mzscheme (unix-sfx name))
+		     (build-path (find-console-bin-dir) (unix-sfx name))
 		     (current-launcher-variant))]
-	  [else (mred-program-launcher-path name)]))
+	  [else (program-launcher-path name #f)]))
       
       (define (mred-launcher-is-directory?)
 	#f)

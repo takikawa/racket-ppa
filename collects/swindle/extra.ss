@@ -139,7 +139,7 @@
 ;;>   symbol-macro that accesses the corresponding slot value of `obj'.
 ;;>   Each `slot' is either an identifier `id' which makes it stand for
 ;;>   `(slot-ref obj 'id)', or `(id slot)' which makes `id' stand for
-;;>   `(slot-ref obj 'slot)'.
+;;>   `(slot-ref obj slot)'.
 (defsubst* (with-slots obj (slot ...) body0 body ...)
   (process-with-slots obj (slot ...) () body0 body ...))
 
@@ -894,7 +894,7 @@
 ;;>   `(amb)' fails immediately.
 (defsubst* (amb expr ...)
   (let ([prev-amb-fail (amb-fail)])
-    (let/cc sk
+    (let/ec sk
       (let/cc fk
         (amb-fail (thunk (amb-fail prev-amb-fail) (fk 'fail)))
         (sk expr)) ...

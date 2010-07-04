@@ -11,6 +11,42 @@
   ;;Execution tests that should pass
   
   (execute-test
+   "class MyClass {
+      Object field;
+
+      MyClass( Object f ) { this.field = f; }      
+
+      MyClass method() { return this; }
+    }
+
+    class CorrectChecks {
+     
+     boolean t;
+     boolean t2 = check 1 expect 3;
+     boolean t3 = (check 1 expect 3) || (check 2 expect 3);
+     boolean t4 = (check 1 expect 1) && (check 3 expect 3);
+     boolean t5 = check \"Hi\" expect \"\";
+     boolean t6 = check 1.5 expect 2 within .4;
+     boolean t7 = check true expect false;
+     boolean t8 = check new MyClass(\"\") expect new MyClass(\"\");
+     boolean t9 = check new MyClass(\"\").field expect \"\";
+     boolean t10 = check new MyClass(\"\").method() expect new MyClass(\"\");
+
+     CorrectChecks() { this.t= check 1 expect 4; }
+
+   }" language #f "Class with many different style of checks within it")
+  
+  (execute-test 
+   "interface A {
+      boolean s( B b);
+    }
+    class B implements A {
+      B() { }
+      boolean s( B b ) { return true; }
+    }"
+   language #f "Interface and class with cyclic reference")               
+  
+  (execute-test
    "class Simple {
      Simple() { }
     }
@@ -107,6 +143,33 @@
   
   ;;Execution tests that should produce errors
 
+  (execute-test
+   "class CorrectChecks {
+     
+     boolean t;
+     boolean t2 = check 1 expect 3;
+     boolean t3 = (check 1 expect 3) || (check 2 expect 3);
+     boolean t4 = (check 1 expect 1) && (check 3 expect 3);
+     boolean t5 = check \"Hi\" expect \"\";
+     boolean t6 = check 1.5 expect 2 within .4;
+     boolean t7 = check true expect false;
+     boolean t8 = check new MyClass(\"\") expect new MyClass(\"\");
+     boolean t9 = check new MyClass(\"\").field expect \"\";
+     boolean t10 = check new MyClass(\"\").method() expect new MyClass(\"\");
+
+     ()
+     
+     CorrectChecks() { this.t= check 1 expect 4; }
+
+   }" language #t "Correct checks, followed by a parse error: should mention (")
+  
+  (execute-test
+   "class X {
+     int x = this.y;
+     int y = 3;
+     X() { }
+   }" language #t "Should be forward field error")
+  
   (execute-test
    "interface Z { 
      int x(); 
@@ -276,9 +339,9 @@
    "Tests instantiating a class")
   
   (interact-test
-   "class Book {
+   "class Book2 {
      int numPages;
-     Book( int numPages ) {
+     Book2( int numPages ) {
        this.numPages = numPages;
      }
      String level() {
@@ -292,7 +355,7 @@
    }
    "
    language
-   (list "new Book(9).level()" "new Book(10).level()" "new Book(100).level()" "new Book(99).level")
+   (list "new Book2(9).level()" "new Book2(10).level()" "new Book2(100).level()" "new Book2(99).level")
    (list (make-java-string "Apprentice") (make-java-string "Journeyman") (make-java-string "Master") 'error)
    "Tests of an if in a method")
   
@@ -450,6 +513,26 @@
    (list "new A()")
    (list 'error)
    "Trying to create an instance of an interface")
+  
+  (interact-test
+   "class X { X() { } double f() { return 2; } }"
+   language
+   (list "double x = 1;" "x" "new X().f()")
+   (list '(void) 1.0 2.0)
+   "Converting ints into doubles appropriately")
+  
+  (interact-test
+   language
+   (list "check true expect true"
+         "check true expect 1"
+         "check true expect true within 1"
+         "check new Object() expect \"hi\""
+         "check \"hi\" expect new Object()"
+         "check 1.4 expect 1"
+         "check 1.4 expect 1 within .5"
+         "check 1.4 expect 1 within true")
+   (list #t 'error #t #f 'error 'error #t 'error)
+   "Calling check in many ways")
   
   (report-test-results))
    

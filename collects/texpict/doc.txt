@@ -341,6 +341,15 @@ Basic Constructors:
    Creates a fish, swimming either 'left or 'right.
       [MrEd only, in utils.ss]
 
+> (explode-star small-rad large-rad points line-size line-color)
+
+  Creates a star-shaped explosion thingy. The points are
+  aligned on two radii, one for the beginning of the points
+  and one for the end, large-rad and small-rad. points is
+  the number of spikes sitcking out, and line-size and
+  line-color are the thickness of the lines and the lines
+  color.
+
 
 Combiners:
 ----------
@@ -1018,19 +1027,33 @@ implements an interactive browser for face configurations.
     'unhappiest - (face* 'normal 'huge #t default-face-color 0 -3)
     'mad - (face* 'angry 'grimace #t default-face-color 0)
     'mean - (face* 'angry 'narrow #f default-face-color 0)
+    'surprised - (face* 'worried 'oh #t default-face-color -4 -3 2)
 
 > (face* eyebrow-kind mouth-kind frown? [color eye-inset eyebrow-dy pupil-dx pupil-dy])
   - returns a pict for a configured face:
 
       - eyebrow-kind is one of 'none, 'normal, 'worried, or 'angry
       - mouth-kind is one of 'plain, 'narrow, 'medium, 'large, 'huge, 
-                             'grimace, or 'tongue
+                             'grimace, 'oh, or 'tongue
       - frown? determines whether the mouth is up or down
       - color is either a color string or a color% object
       - eye-inset adjusts the eye size; recommend values: between 0 and 10
       - eyebrow-dy adjusts the eyebrows; recommend values: between -5 and 5
       - pupil-dx adjusts the pupil; recommend values: between -10 and 10
       - pupil-dy adjusts the pupil; recommend values: between -15 and 15
+
+In addition to the above, the function also accepts these keywords,
+each of which is a boolean. With the exception of the last one, they
+control if there is a shading on a particular feature in the face
+(shading tends to look worse than just anti-aliasing when the face is
+small). The last one controls the visibility of the teeth.
+
+ #:eyebrow-shading?
+ #:mouth-shading?
+ #:eye-shading?
+ #:tongue-shading?
+ #:face-background-shading?
+ #:teeth?
 
 ------------------------------------------------------------
 _flash.ss_

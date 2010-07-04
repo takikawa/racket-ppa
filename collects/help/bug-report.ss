@@ -2,45 +2,43 @@
 (module bug-report mzscheme
   (require (lib "string-constant.ss" "string-constants")
            (lib "head.ss" "net")
-           (lib "smtp.ss" "net")
            (lib "mred.ss" "mred")
            (lib "framework.ss" "framework")
            (lib "class.ss")
            (lib "etc.ss")
+           (lib "list.ss")
            (lib "url.ss" "net")
            (lib "uri-codec.ss" "net")
            (lib "htmltext.ss" "browser")
+           (lib "dirs.ss" "setup")
            "private/buginfo.ss"
            "private/manuals.ss")
-  
+
   (provide help-desk:report-bug)
-  
-  (define bug-report-recipient "bugs")
-  (define bug-email-server "bugs.plt-scheme.org")
-  (define bug-email-server-port 1025)
+
   (define bug-www-server "bugs.plt-scheme.org")
   (define bug-www-server-port 80)
-  (define bug-report-email-address 
-    (string-append bug-report-recipient "@plt-scheme.org"))
-  
+
   ;; this one should be defined by help desk.
   (define frame-mixin
     (namespace-variable-value 'help-desk:frame-mixin #f (lambda () (lambda (x) x))))
-  
+
   (preferences:set-default 'drscheme:email "" string?)
   (preferences:set-default 'drscheme:full-name "" string?)
 
-  (define (remove-extra-blanks %)
-    (class %
-      (define/override (edit-menu:between-find-and-preferences menu) (void))
-      (super-instantiate ())))
-
   (define bug-frame%
-    (class (frame-mixin (remove-extra-blanks (frame:standard-menus-mixin frame:basic%)))
+    (class (frame-mixin (frame:standard-menus-mixin frame:basic%))
       (init title)
 
+      ;; a bunch of stuff we don't want
       (define/override (file-menu:between-print-and-close menu) (void))
-      
+      (define/override (edit-menu:between-find-and-preferences menu) (void))
+      (define/override (file-menu:create-open?)        #f)
+      (define/override (file-menu:create-open-recent?) #f)
+      (define/override (file-menu:create-new?)         #f)
+      (define/override (file-menu:create-save?)        #f)
+      (define/override (file-menu:create-revert?)      #f)
+
       (field (ok-to-close? #f))
       (public set-ok-to-close)
       (define (set-ok-to-close ok?) (set! ok-to-close? #t))
@@ -49,15 +47,15 @@
             (ask-yes-or-no (string-constant cancel-bug-report?)
                            (string-constant are-you-sure-cancel-bug-report?)
                            this)))
-      
+
       (super-make-object title)))
-  
-  
+
+
   (define (help-desk:report-bug)
     (define bug-frame (instantiate bug-frame% () (title (string-constant bug-report-form))))
     (define single (new panel:single% (parent (send bug-frame get-area-container))))
     (define outermost-panel (make-object vertical-panel% single))
-    
+
     (define response-panel (new vertical-panel% (parent single)))
     (define response-text (new (html-text-mixin text%) (auto-wrap #t)))
     (define response-ec (new editor-canvas% (parent response-panel) (editor response-text)))
@@ -69,7 +67,7 @@
     (define response-reset (new button%
                                 (parent response-button-panel)
                                 (enabled #f)
-                                (label (string-constant wizard-back))
+                                (label (string-constant dialog-back))
                                 (callback
                                  (lambda (x y)
                                    (switch-to-compose-view)))))
@@ -90,12 +88,23 @@
       (new grow-box-spacer-pane% (parent response-button-panel)))
     
     (define top-panel (make-object vertical-panel% outermost-panel))
-    
-    (define (switch-to-respose-view) (send single active-child response-panel))
-    (define (switch-to-compose-view) 
+
+    (define (switch-to-response-view)
+      (send response-text lock #f)
       (send response-text erase)
-      (send single active-child outermost-panel))
-    
+      (render-html-to-text ; hack to get nice text in
+       (open-input-string
+        "&nbsp;<br><br><br><br><br><div align=\"center\"><h2><b>Submitting bug report...</b></h2></div>")
+       response-text #t #f)
+      (send response-text lock #t)
+      (send single active-child response-panel))
+    (define (switch-to-compose-view)
+      (send single active-child outermost-panel)
+      (send (if (string=? "" (preferences:get 'drscheme:full-name))
+              name
+              summary)
+          focus))
+
     (define lps null)
     
     ; build/label : ((union string (list-of string))
@@ -207,8 +216,12 @@
                 (let* ([text (new (editor:standard-style-list-mixin
 				   (editor:keymap-mixin
 				    text:basic%)))]
-                       [canvas (make-object canvas:basic% panel text)])
+                       [canvas (new canvas:basic% 
+                                    (style '(hide-hscroll))
+                                    (parent panel) 
+                                    (editor text))])
                   (send text set-paste-text-only #t)
+                  (send text auto-wrap #t)
                   (send text set-styles-fixed #t)
                   canvas))
               #t
@@ -226,7 +239,9 @@
     
     (define synthesized-dialog (make-object dialog% (string-constant bug-report-synthesized-information)))
     (define synthesized-panel (make-object vertical-panel% synthesized-dialog))
-    (define synthesized-button-panel (make-object horizontal-panel% synthesized-dialog))
+    (define synthesized-button-panel
+      (new horizontal-panel% [parent synthesized-dialog]
+           [alignment '(right center)] [stretchable-height #f]))
     (define synthesized-ok-button (make-object button% (string-constant ok) synthesized-button-panel
 					       (lambda (x y)
 						 (send synthesized-dialog show #f))))
@@ -260,7 +275,7 @@
     (define human-language
       (build/label 
        (string-constant bug-report-field-human-language)
-       (lambda (panel)            
+       (lambda (panel)
          (keymap:call/text-keymap-initializer
           (lambda ()
             (make-object text-field% #f panel void ""))))
@@ -275,7 +290,7 @@
        synthesized-panel))
 
     (define collections
-      (make-big-text 
+      (make-big-text
        (string-constant bug-report-field-collections)
        #t
        synthesized-panel))
@@ -288,7 +303,7 @@
                 (build/label
                  label
                  (lambda (panel)
-                   (let ([field 
+                   (let ([field
                           (keymap:call/text-keymap-initializer
                            (lambda ()
                              (make-object text-field% #f panel void "")))])
@@ -299,14 +314,18 @@
                  synthesized-panel))))
            (get-bug-report-infos)))
 
-    (define button-panel (make-object horizontal-panel% outermost-panel))
+    (define button-panel
+      (new horizontal-panel% [parent outermost-panel]
+           [alignment '(right center)] [stretchable-height #f]))
     (define synthesized-button (make-object button%
                                  (string-constant bug-report-show-synthesized-info)
                                  button-panel (lambda x (show-synthesized-info))))
-    (define ok-button (make-object button% (string-constant bug-report-submit) button-panel (lambda x (ok))))
+    (define _spacer (new horizontal-pane% (parent button-panel)))
     (define cancel-button (make-object button% (string-constant cancel) button-panel (lambda x (cancel))))
-    (define grow-box-spacer-pane (make-object grow-box-spacer-pane% button-panel))
-    
+    (define ok-button (make-object button% (string-constant bug-report-submit) button-panel (lambda x (ok))))
+    (define _grow-box
+      (new grow-box-spacer-pane% [parent button-panel]))
+
     (define (get-query)
       (list (cons 'help-desk "true")
             (cons 'replyto (preferences:get 'drscheme:email))
@@ -338,71 +357,15 @@
                                      (car extra)
                                      (send (cdr extra) get-value)))
                            extras))))
-        
-    ;; smtp-send-bug-report : -> void
-    (define (smtp-send-bug-report)
-      (smtp-send-message
-       bug-email-server
-       (preferences:get 'drscheme:email)
-       (list bug-report-recipient)
-       (insert-field
-        "X-Mailer"
-        (format "Help Desk ~a (bug report form)" (version:version))
-        (insert-field     
-         "Subject" 
-         (send summary get-value)
-         (insert-field
-          "To"
-          bug-report-email-address
-          (insert-field
-           "From"
-           (format "~a <~a>" 
-                   (preferences:get 'drscheme:full-name)
-                   (preferences:get 'drscheme:email))
-           empty-header))))
-       `(">Category:       all"
-         ,(format ">Synopsis:       ~a" (send summary get-value))
-         ">Confidential:   no"
-         ,(format ">Severity:       ~a" (send severity get-string-selection))
-         ,(format ">Priority:       medium")
-         ,(format ">Class:          ~a" (translate-class (send bug-class get-string-selection)))
-         ">Submitter-Id:   unknown"
-         ,(format ">Originator:     ~a" (preferences:get 'drscheme:full-name))
-         ">Organization:"
-         "titan"
-         ,(format ">Release:        ~a" (send version get-value))
-         ">Environment:"
-         ,(format "~a" (send environment get-value))
-         "Docs Installed:" 
-         ,(format "~a" (send (send docs-installed get-editor) get-text))
-         "Collections: "
-         ,(format "~a" (send (send collections get-editor) get-text))
-         " "
-         ,(format "Human Language: ~a" (send human-language get-value))
-         " "
-         ,@(map (lambda (extra)
-                  (format "~a: ~a"
-                          (car extra)
-                          (send (cdr extra) get-value)))
-                extras)
-         ">Fix: "
-         ">Description:"
-         ,@(get-strings description)
-         ">How-To-Repeat:"
-         ,@(get-strings reproduce))
-       bug-email-server-port))
-    
+
     ; send-bug-report : (-> void)
     ;; initiates sending the bug report and switches the GUI's mode
     (define (send-bug-report)
       (letrec ([query (get-query)]
-               [url (make-url "http"
-                              #f
-                              bug-www-server
-                              bug-www-server-port
-                              (list "cgi-bin" "bug-report")
-                              '() ;query
-                              #f)]
+               [url
+                (string->url (format "http://~a:~a/cgi-bin/bug-report"
+                                     bug-www-server
+                                     bug-www-server-port))]
                [post-data 
                 (parameterize ([current-alist-separator-mode 'amp])
                   (string->bytes/utf-8 (alist->form-urlencoded query)))]
@@ -429,17 +392,22 @@
                           (case-lambda
                             [(x) (post-pure-port x post-data)]
                             [(x y) (post-pure-port x post-data y)])
-                          (lambda (port) (render-html-to-text port response-text #t #f))))
+                          (lambda (port)
+                            (send response-text lock #f)
+                            (send response-text erase)
+                            (render-html-to-text port response-text #t #f)
+                            (send response-text lock #t))))
                        (queue-callback
                         (lambda ()
                           (send response-abort enable #f)
                           (send response-reset enable #t)
                           (send response-close enable #t)
                           (set! cancel-kill-thread #f)
-                          (send bug-frame set-ok-to-close #t)))))))])
+                          (send bug-frame set-ok-to-close #t)
+                          (send response-close focus)))))))])
         (set! cancel-kill-thread http-thread)
         (send response-abort enable #t)
-        (switch-to-respose-view)))
+        (switch-to-response-view)))
     
     (define (get-strings canvas)
       (let ([t (send canvas get-editor)])
@@ -475,63 +443,82 @@
                           (string-constant pls-fill-in-either-description-or-reproduce))
              (done-checking #f))
           
-          (unless (member #\@ (string->list (or (preferences:get 'drscheme:email) "")))
+          (unless (regexp-match #rx"@" (or (preferences:get 'drscheme:email) ""))
             (message-box (string-constant illegal-bug-report)
                          (string-constant malformed-email-address))
             (done-checking #f))
           (done-checking #t))))
-    
+
     (define (ok)
       (when (sanity-checking)
         (send-bug-report)))
-    
+
     (define (cancel)
       (cleanup-frame))
-    
+
     (define (cleanup-frame)
       (send bug-frame close))
-        
-    (send severity set-selection 1)
-    (send version set-value   
-          (format "~a"
-                  (version:version)))
 
-    (send environment set-value   
+    (define (directories-contents dirs)
+      (map (lambda (d)
+             (cons (path->string d)
+                   (if (directory-exists? d)
+                     (map path->string (directory-list d))
+                     '(non-existent-path))))
+           dirs))
+
+    (define (split-by-directories dirs split-by)
+      (let ([res (append! (map list (map path->string split-by)) '((*)))]
+            [dirs (map path->string dirs)])
+        (for-each
+         (lambda (d)
+           (let* ([l (string-length d)]
+                  [x (assf
+                      (lambda (d2)
+                        (or (eq? d2 '*)
+                            (let ([l2 (string-length d2)])
+                              (and (< l2 l) (equal? d2 (substring d 0 l2))
+                                   (member (string-ref d l2) '(#\/ #\\))))))
+                           res)])
+             (append! x (list (if (string? (car x))
+                                (substring d (add1 (string-length (car x))))
+                                d)))))
+         dirs)
+        (filter (lambda (x) (pair? (cdr x))) res)))
+
+    (send response-ec allow-tab-exit #t)
+
+    (send severity set-selection 1)
+    (send version set-value (format "~a" (version:version)))
+
+    (send environment set-value
           (format "~a ~s (~a) (get-display-depth) = ~a"
                   (system-type)
-                  (system-type #t)
+                  (system-type 'machine)
                   (system-library-subpath)
                   (get-display-depth)))
-    
+
     (send (send collections get-editor)
-          insert       
-          (format "~s"
-                  (map (lambda (x)
-                         (list x 
-                               (if (directory-exists? x)
-                                   (directory-list x)
-                                   "non-existent path")))
-                       (current-library-collection-paths))))
-    
+          insert
+          (format "~s" (directories-contents (get-collects-search-dirs))))
+
     (send human-language set-value (format "~a" (this-language)))
-    
+
     (send (send collections get-editor) auto-wrap #t)
     (send (send docs-installed get-editor) auto-wrap #t)
-    (send synthesized-button-panel set-alignment 'right 'center)
-    
+
+    ;; Currently, the help-menu is left empty
+    (frame:remove-empty-menus bug-frame)
+
     (align-labels)
-    (send button-panel set-alignment 'right 'center)
-    (send button-panel stretchable-height #f)
-    (send (if (string=? "" (preferences:get 'drscheme:full-name))
-              name
-              summary)
-          focus)
-    
+    (switch-to-compose-view)
+
     (send (send docs-installed get-editor) insert
-          (format "~s" (find-doc-directories)))
-    
+          (format "~s" (split-by-directories (find-doc-directories)
+                                             (get-doc-search-dirs))))
+
     (send bug-frame show #t))
-  
+
   (define (ask-yes-or-no title msg parent)
     (gui-utils:get-choice msg 
                           (string-constant yes)

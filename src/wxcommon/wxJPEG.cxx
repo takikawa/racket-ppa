@@ -49,6 +49,17 @@ static wxColor *the_color;
 extern void wxmeError(const char *e);
 extern int wxGetPreference(const char *name, char *res, long len);
 
+#ifdef wx_msw
+# include "wx_utils.h"
+# define wxFOpen(fn, m) _wfopen(wxWIDE_STRING(fn), m)
+# define wx_RB_mode L"rb"
+# define wx_WB_mode L"wb"
+#else
+# define wxFOpen(fn, m) fopen(fn, m)
+# define wx_RB_mode "rb"
+# define wx_WB_mode "wb"
+#endif
+
 #ifndef DRAW_SCANLINE_DEFINED
 
 static void draw_scanline(JSAMPROW row, int cols, int rownum, int step, JSAMPARRAY colormap, wxMemoryDC *dc,
@@ -90,7 +101,7 @@ static void get_scanline(JSAMPROW row, int cols, int rownum, wxMemoryDC *dc)
 
   if (!the_color) {
     wxREGGLOB(the_color);
-    the_color = new wxColour(0, 0, 0);
+    the_color = new WXGC_PTRS wxColour(0, 0, 0);
   }
 
   for (colnum = 0; colnum < cols; colnum++, d += 3) {
@@ -108,7 +119,7 @@ wxMemoryDC *create_dc(int width, int height, wxBitmap *bm, int mono)
 {
   wxMemoryDC *dc;
 
-  dc = new wxMemoryDC();
+  dc = new WXGC_PTRS wxMemoryDC();
   if (width >= 0)
     bm->Create(width, height, mono ? 1 : -1);
   dc->SelectObject(bm);
@@ -125,7 +136,7 @@ wxMemoryDC *create_reader_dc(wxBitmap *bm, volatile int *desel)
 {
   wxMemoryDC *dc;
 
-  dc = new wxMemoryDC(1); /* 1 => read-only */
+  dc = new WXGC_PTRS wxMemoryDC(1); /* 1 => read-only */
   dc->SelectObject(bm);
   if (!dc->GetObject()) {
 # ifdef wx_msw
@@ -201,7 +212,7 @@ int read_JPEG_file(char * filename, wxBitmap *bm)
    * requires it in order to read binary files.
    */
 
-  if ((infile = fopen(filename, "rb")) == NULL) {
+  if ((infile = wxFOpen(filename, wx_RB_mode)) == NULL) {
     sprintf(jpeg_err_buffer, "can't open %.255s\n", filename);
     wxmeError(jpeg_err_buffer);
     return 0;
@@ -353,9 +364,9 @@ int write_JPEG_file(char *filename, wxBitmap *bm, int quality)
   dc = create_reader_dc(bm, (int *)&desel);
 
   wid = bm->GetWidth();
-  row_pointer = new JSAMPLE[3 * wid];
+  row_pointer = new WXGC_ATOMIC JSAMPLE[3 * wid];
 
-  if ((outfile = fopen(filename, "wb")) == NULL) {
+  if ((outfile = wxFOpen(filename, wx_WB_mode)) == NULL) {
     if (desel)
       dc->SelectObject(NULL);
     sprintf(jpeg_err_buffer, "can't open %.255s\n", filename);
@@ -570,7 +581,7 @@ static void png_get_line(png_bytep row, int cols, int rownum, wxMemoryDC *dc, wx
 
   if (!the_color) {
     wxREGGLOB(the_color);
-    the_color = new wxColour(0, 0, 0);
+    the_color = new WXGC_PTRS wxColour(0, 0, 0);
   }
 
   for (colnum = 0, delta = 0; colnum < cols; colnum++, delta += step) {
@@ -595,7 +606,7 @@ static void png_get_line1(png_bytep row, int cols, int rownum, wxMemoryDC *dc)
 
   if (!the_color) {
     wxREGGLOB(the_color);
-    the_color = new wxColour(0, 0, 0);
+    the_color = new WXGC_PTRS wxColour(0, 0, 0);
   }
 
   for (colnum = 0, delta = 0; colnum < cols; delta++) {
@@ -629,7 +640,7 @@ int wx_read_png(char *file_name, wxBitmap *bm, int w_mask, wxColour *bg)
    wxMemoryDC *mdc = NULL;
    wxBitmap *mbm = NULL;
 
-   if ((fp = fopen(file_name, "rb")) == NULL)
+   if ((fp = wxFOpen(file_name, wx_RB_mode)) == NULL)
      return 0;
 
    /* Create and initialize the png_struct with the desired error handler
@@ -818,7 +829,7 @@ int wx_read_png(char *file_name, wxBitmap *bm, int w_mask, wxColour *bg)
 #ifdef MZ_PRECISE_GC
    rows = (png_bytep *)GC_malloc(sizeof(png_bytep) * height);
 #else
-   rows = new png_bytep[height];
+   rows = new WXGC_PTRS png_bytep[height];
 #endif
 
    row_width = png_get_rowbytes(png_ptr, info_ptr);
@@ -866,7 +877,7 @@ int wx_read_png(char *file_name, wxBitmap *bm, int w_mask, wxColour *bg)
 
        mono_mask = ((y < height) ? 0 : 1);
 
-       mbm = new wxBitmap(width, height, mono_mask);
+       mbm = new WXGC_PTRS wxBitmap(width, height, mono_mask);
        if (mbm->Ok())
 	 mdc = create_dc(-1, -1, mbm, mono_mask);
        else
@@ -918,7 +929,7 @@ int wx_write_png(char *file_name, wxBitmap *bm)
    volatile int desel = 1;
    volatile int mdesel = 1;
 
-   if ((fp = fopen(file_name, "wb")) == NULL)
+   if ((fp = wxFOpen(file_name, wx_WB_mode)) == NULL)
      return 0;
 
    /* Create and initialize the png_struct with the desired error handler
@@ -1009,7 +1020,7 @@ int wx_write_png(char *file_name, wxBitmap *bm)
 #ifdef MZ_PRECISE_GC
    rows = (png_bytep *)GC_malloc(sizeof(png_bytep) * height);
 #else
-   rows = new png_bytep[height];
+   rows = new WXGC_PTRS png_bytep[height];
 #endif
    row_width = png_get_rowbytes(png_ptr, info_ptr);
    for (y = 0; y < height; y++) {

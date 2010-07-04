@@ -4,7 +4,7 @@
  * Author:	Cecil Coupe
  * Created:	1995
  * Updated:	
- * Copyright:	(c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:	(c) 2004-2006 PLT Scheme Inc.
  * Copyright:	(c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
  */
 
@@ -106,8 +106,8 @@ wxGauge::wxGauge(wxPanel *panel, char *label, int _range, int x, int y,
 
   if (label)
     {
-      cTitle = new wxLabelArea(this, label, font,
-			       labelPosition == wxVERTICAL ? wxTop : wxLeft);
+      cTitle = new WXGC_PTRS wxLabelArea(this, label, font,
+					 labelPosition == wxVERTICAL ? wxTop : wxLeft);
     } else
       cTitle = NULL;
   

@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2005 PLT Scheme, Inc.
+// Copyright:  (c) 2004-2006 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -96,7 +96,7 @@ void wxMemoryDC::SelectObject(wxBitmap *bitmap)
     if (bitmap->x_pixmap) {
       int dpth;
 
-      cMacDC = new wxMacDC((CGrafPtr)bitmap->x_pixmap);
+      cMacDC = new WXGC_PTRS wxMacDC((CGrafPtr)bitmap->x_pixmap);
       // bitmap->DrawMac(0, 0);
       ok = TRUE;
       
@@ -123,7 +123,7 @@ wxBitmap* wxMemoryDC::GetObject()
 wxGL *wxMemoryDC::GetGL()
 {
   if (!gl) {
-    gl = new wxGL();
+    gl = new WXGC_PTRS wxGL();
     if (Colour && cMacDC) {
       CGrafPtr cp;
       cp = cMacDC->macGrafPort();

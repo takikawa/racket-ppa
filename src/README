@@ -42,17 +42,13 @@ First, install the Mac OS X Developer Tools from Apple. Then, follow
 the Unix instructions below, but note the following:
 
  * The MzScheme build creates a framework, PLT_MzScheme.framework,
-   which is installed into ~/Library/Frameworks. This framework is
-   used by the executable `mzscheme' that goes into plt/bin.
+   which is installed into plt/lib. This framework is used by the
+   executable `mzscheme' that goes into plt/bin.
 
  * The MrEd build creates a framework, PLT_MrEd.framework, which is
-   installed into ~/Library/Frameworks. This framework is used by the
-   executable bundle MrEd.app that goes into the `plt' directory.
-   Installation creates a script, plt/bin/mred, that runs the bundle.
-
- * If you build frequently from the Subversion-based sources, beware
-   that you may accumlate many old, unused versions of the framework
-   in ~/Library/Frameworks.
+   installed into plt/lib. This framework is used by the executable
+   bundle MrEd.app that goes into the `plt' directory.  Installation
+   creates a script, plt/bin/mred, that runs the bundle.
 
  * The --enable-shared flag for `configure' is redundant (i.e., builds
    create and use frameworks by default), and --disable-shared is not
@@ -98,16 +94,18 @@ the Unix instructions below, but note the following:
     your shell and PATH setting).
 
     If the --prefix flag is omitted, the binaries are built for an
-    in-place installation (i.e., the plt directory containing this
-    README will be used directly). Unless --enable-shared is used, the
-    plt directory can be moved later, but most system administrators
-    would recommend that you use --enable-shared.
+    in-place installation (i.e., the parent of the directory
+    containing this README will be used directly). Unless
+    --enable-shared is used, the plt directory can be moved later;
+    most system administrators would recommend that you use
+    --enable-shared, but the PLT Scheme developers distribute binaries
+    built without --enable-shared.
 
     The `configure' script generates the makefiles for building
     MzScheme and/or MrEd. The current directory at the time
     `configure' is run will be used as working space for building the
     executables (independent of --prefix). This build directory does
-    not have to be in the plt/ tree, even for an "in-place"
+    not have to be in the source tree, even for an "in-place"
     build. It's ok to run `configure' from its own directory (as in
     the example above), but it's often better to pick a separate build
     directory that is otherwise empty.
@@ -146,13 +144,19 @@ the Unix instructions below, but note the following:
 
  3. Run `make install'.
 
-    This step copies binaries and libraries into place within the plt
-    tree. For example, the `mzscheme' binary is copied for Unix into
-    the directory plt/bin/mzscheme. For a --prefix, build, the rest of
-    the plt tree is also copied to the target directory.
+    This step copies binaries and libraries into place within the
+    target installation. For example, the `mzscheme' binary is copied
+    into the "bin" directory for an in-place build, or into the
+    executable directory for a --prefix build.
 
-    In addition, this step runs the plt/install script, which updates
-    script paths and builds .zo files.
+    For a --prefix build, this step also creates a "config.ss" module
+    in a "config" collection for a --prefix build, so that various PLT
+    tools and libraries can find the installation directories.
+
+    Finally, this step compiles ".zo" bytecode files for installed
+    Scheme source, and generates launcher programs like
+    "DrScheme". Use `make plain-install' to install without compiling
+    ".zo" files or creating launchers.
 
     If the installation fails because the target directory cannot be
     created, or because the target directory is not the one you
@@ -161,22 +165,31 @@ the Unix instructions below, but note the following:
     it is sometimes not necessary to repeat steps 1 or 2. (Try it and
     find out...)
 
-    If you build frequently from the Subversion-based sources with
-    --enabled-shared, beware that you may accumlate many old, unused
-    versions of the dynamic libraries in plt/lib.
+    If you build frequently from the Subversion-based sources, beware
+    that you may accumulate user- and version-specific information in
+    your "add-ons" directory, which you can most easily find by
+    evaluating
+      (find-system-path 'addon-dir)
+    in MzScheme. In addition, if you configure with --enabled-shared,
+    you may accumlate many unused versions of the dynamic libraries in
+    your installation target.
 
- 4. ONLY Subversion users with in-place builds: the `make install'
-    step does not run plt/install for an in-place build, because old
-    .zo files typically need to be deleted, first. After an initial
-    in-place build, manually run ./install in the plt directory. For
-    later builds, manually run plt/bin/setup-plt.
+ 4. [Optional] Run `help-desk' to install missing documentation.
+
+    The source distribution (or Subversion-based source) includes only
+    the release notes, and not the rest of the core documentation.
+    Run the newly installed `help-desk' and follow the "Manuals" link
+    to install the rest of the documentation. For a Subversion-based
+    build, the "Manuals" page includes a link to update previously
+    installed documentation.
 
 After an "in-place" install without Subversion, the plt/src directory
 is no longer needed, and it can be safely deleted. Build information
-is recorded in plt/lib/buildinfo.
+is recorded in a "buildinfo" file in the installation.
 
-If you move the plt tree (for a build without dynamic libraries), run
-the script ./install in the relocated plt directory.
+For a build without --prefix (or with --enable-origtree) and without
+--enable-shared, you can safely move the install tree, because all
+file references within the installation are relative.
 
 OpenGL, Unix, and pthreads
 --------------------------
@@ -199,7 +212,43 @@ pthreads. On these platforms, GL support will be included in MrEd,
 but it will not work properly unless --enable-pthread is specified.
 
 ========================================================================
- Compiling the OSKit-based kernel
+ Embedded Paths in the Executables
+========================================================================
+
+On all platforms, the MzScheme and MrEd binaries embed a path to the
+main "collects" directory of library collections. This path can be
+relative to the executable. Multiple paths can be provided, in which
+case the first path is the main "collects" path, and additional paths
+are placed before the main path (but after a user-specific "collects"
+path) in the default collection path list.
+
+The paths are embedded in the binary immediately after a "coLLECTs
+dIRECTORy:" tag. Each path must be NUL terminated, the entire list of
+paths must end with an additional NUL terminator, and the overall list
+must be less than 1024 bytes long.
+
+As an alternative to editing an exeuctable directly, the
+`create-embedding-executable' procedure from `(lib "embed.ss"
+"compiler")' can be used to change the embedded path. For example, the
+following program clones the MzScheme executable to "/tmp/mz" and
+changes the embedded path in the clone to "/tmp/collects":
+
+ (require (lib "embed.ss" "compiler"))
+ (create-embedding-executable "/tmp/mz" #:collects-path "/tmp/collects")
+
+Similarly, `mzc' in `--exe' or `--gui-exe' mode accepts a `--collects'
+flag to set the collection path in the generated executable.
+
+Under Windows, executables also embed a path to DLLs. For more
+information, see worksp\README.
+
+Paths to all other installation directories are found through the
+"config.ss" library of the "config" collection. See "doc.txt" in the
+"config" collection (for search for "config.ss" in Help Desk) for more
+information.
+
+========================================================================
+ Compiling the OSKit-based Kernel
 ========================================================================
 
 To build the OSKit-based MzScheme kernel, run the configure script
@@ -266,6 +315,7 @@ configurations for the following platforms:
               HP/UX
               FreeBSD
               OpenBSD
+              NetBSD
               OSF1 (Alpha)
               SCO Unix (x86)
 
@@ -311,12 +361,13 @@ for "moving memory manager".
   path. Then, in a shell, change directories to plt\src\worksp\gc2 and
   run
 
-   ../../../mzscheme.exe -r make.ss
+   ..\..\..\mzscheme.exe -r make.ss
 
   The resulting MzScheme3m.exe and MrEd3m.exe will appear in the "plt"
   directory, along with DLLs libmzsch3mxxxxxxx.dll and
-  libmred3mxxxxxxx.dll. (There is no correspingd libmzgc3mxxxxxxx.dll.
-  Instead, it is merged with libmzsch3mxxxxxxx.dll.)
+  libmred3mxxxxxxx.dll in plt/lib. (There is no correspingd
+  libmzgc3mxxxxxxx.dll.  Instead, it is merged with
+  libmzsch3mxxxxxxx.dll.)
 
 Configuration Options
 ---------------------

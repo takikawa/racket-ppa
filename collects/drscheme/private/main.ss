@@ -2,6 +2,8 @@
 (module main mzscheme
   (require (lib "string-constant.ss" "string-constants")
            (lib "unitsig.ss")
+           (lib "cmdline.ss")
+           (lib "contract.ss")
            "drsig.ss"
 	   (lib "mred.ss" "mred")
            (lib "framework.ss" "framework")
@@ -16,7 +18,6 @@
            (lib "plt-installer.ss" "setup"))
   
   (provide main@)
-  (define argv (current-command-line-arguments))
   
   (define main@
     (unit/sig ()
@@ -31,7 +32,8 @@
               [drscheme:debug : drscheme:debug^]
               [drscheme:frame : drscheme:frame^]
               [drscheme:font : drscheme:font^]
-              [drscheme:modes : drscheme:modes^])
+              [drscheme:modes : drscheme:modes^]
+              [drscheme:help-desk : drscheme:help-desk^])
 
       (application-file-handler
        (let ([default (application-file-handler)])
@@ -167,6 +169,7 @@
        drscheme:teachpack:unmarshall-teachpack-cache)
       
       (drscheme:font:setup-preferences)
+      (drscheme:help-desk:add-help-desk-font-prefs #t)
       (color-prefs:add-background-preferences-panel)
       (scheme:add-preferences-panel)
       (scheme:add-coloring-preferences-panel)
@@ -240,7 +243,20 @@
                            warnings-panel))))
       (drscheme:debug:add-prefs-panel)
       (install-help-browser-preference-panel)
-
+      
+      (drscheme:language:register-capability 'drscheme:define-popup
+                                             (or/c (cons/c string? string?) false/c)
+                                             (cons "(define" "(define ...)"))
+      
+      (drscheme:language:register-capability 'drscheme:special:insert-fraction (flat-contract boolean?) #t)
+      (drscheme:language:register-capability 'drscheme:special:insert-large-letters (flat-contract boolean?) #t)
+      (drscheme:language:register-capability 'drscheme:special:insert-lambda (flat-contract boolean?) #t)
+      (drscheme:language:register-capability 'drscheme:special:insert-image (flat-contract boolean?) #t)
+      (drscheme:language:register-capability 'drscheme:special:insert-comment-box (flat-contract boolean?) #t)
+      (drscheme:language:register-capability 'drscheme:language-menu-title 
+                                             (flat-contract string?)
+                                             (string-constant scheme-menu-name))
+           
       (handler:current-create-new-window
        (let ([drscheme-current-create-new-window
 	      (λ (filename)
@@ -344,7 +360,12 @@
       (autosave:restore-autosave-files/gui)
      
       ;; install user's keybindings
-      (for-each keymap:add-user-keybindings-file (preferences:get 'drscheme:user-defined-keybindings))
+      (with-handlers ([exn? 
+                       (λ (exn)
+                         (message-box (string-constant drscheme)
+                                      (exn-message exn)))])
+        (for-each keymap:add-user-keybindings-file 
+                  (preferences:get 'drscheme:user-defined-keybindings)))
       
       ;; the initial window doesn't set the 
       ;; unit object's state correctly, yet.
@@ -366,7 +387,9 @@
                       (loop (cdr files))
                       (cons (car files) (loop (cdr files))))])))
       
-      (let* ([files-to-open (reverse (vector->list argv))]
+      ;; NOTE: drscheme-normal.ss sets current-command-line-arguments to
+      ;; the list of files to open, after parsing out flags like -h
+      (let* ([files-to-open (reverse (vector->list (current-command-line-arguments)))]
              [normalized/filtered
               (let loop ([files files-to-open])
                 (cond

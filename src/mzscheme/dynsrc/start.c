@@ -1,7 +1,7 @@
 /* Launcher program for Windows. */
 /* Builds a MzScheme starter if MZSTART is defined. */
 /* Builds a MrEd starter if MRSTART is defined. */
-/* If neither is defined, MZSTART is auto-defined */
+/* If neither is defined, MZSTART is auto-defined. */
 
 #include <windows.h>
 #include <stdlib.h>
@@ -18,16 +18,18 @@
 #endif
 
 #ifdef MRSTART
-# define GOSUBDIR "\\"
-# define GOEXE "mred.exe"
-# define GOEXE3M "mred3m.exe"
+# define GOSUBDIR L"\\"
+# define GOEXE L"mred.exe"
+# define sGOEXE "mred.exe"
+# define GOEXE3M L"mred3m.exe"
 # define WAITTILLDONE 0
 #endif
 
 #ifdef MZSTART
-# define GOSUBDIR "\\"
-# define GOEXE "mzscheme.exe"
-# define GOEXE3M "mzscheme3m.exe"
+# define GOSUBDIR L"\\"
+# define GOEXE L"mzscheme.exe"
+# define sGOEXE "mzscheme.exe"
+# define GOEXE3M L"mzscheme3m.exe"
 # define WAITTILDONE 1
 #endif
 
@@ -44,57 +46,81 @@
 /* Win command lines limited to 1024 chars, so 1024 chars for
    command tail is ample */
 
-static char *input = 
-  "<Command Line: Replace This ************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "****************************************************************"
-  "***************************************************************>";
+static wchar_t *input = 
+  L"<Command Line: Replace This ************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"****************************************************************"
+  L"***************************************************************>";
 
 /* Win long filenames limited to 255 chars, so 254 chars for
    directory is ample */
 
-static char *exedir = "<Executable Directory: Replace This ********"
-                      "********************************************"
-                      "********************************************"
-                      "********************************************"
-                      "********************************************"
-                      "********************************************>";
+static wchar_t *exedir = L"<Executable Directory: Replace This ********"
+                      L"********************************************"
+                      L"********************************************"
+                      L"********************************************"
+                      L"********************************************"
+                      L"********************************************>";
 
 static char *variant = "<Executable Variant: Replace This>";
 
-static char *protect(char *s)
+static int wc_strlen(const wchar_t *ws)
 {
-  char *naya;
+  int l;
+  for (l = 0; ws[l]; l++) { }
+  return l;
+}
+
+static void wc_strcpy(wchar_t *dest, const wchar_t *src)
+{
+  while (*src) {
+    *dest = *src;
+    dest++;
+    src++;
+  }
+  *dest = 0;
+}
+
+static void wc_strcat(wchar_t *dest, const wchar_t *src)
+{
+  while (*dest)
+    dest++;
+  wc_strcpy(dest, src);
+}
+
+static wchar_t *protect(wchar_t *s)
+{
+  wchar_t *naya;
   int has_space = 0, has_quote = 0, was_slash = 0;
 
   for (naya = s; *naya; naya++) {
-    if (isspace(*naya) || (*naya == '\'')) {
+    if (((*naya < 128) && isspace(*naya)) || (*naya == '\'')) {
       has_space = 1;
       was_slash = 0;
     } else if (*naya == '"') {
@@ -107,10 +133,10 @@ static char *protect(char *s)
   }
 
   if (has_space || has_quote) {
-    char *p;
+    wchar_t *p;
     int wrote_slash = 0;
 
-    naya = malloc(strlen(s) + 3 + 3*has_quote);
+    naya = (wchar_t *)malloc((wc_strlen(s) + 3 + 3*has_quote) * sizeof(wchar_t));
     naya[0] = '"';
     for (p = naya + 1; *s; s++) {
       if (*s == '"') {
@@ -138,21 +164,21 @@ static char *protect(char *s)
   return s;
 }
 
-static int parse_command_line(int count, char **command, 
-			      char *buf, int maxargs)
+static int parse_command_line(int count, wchar_t **command, 
+			      wchar_t *buf, int maxargs)
 
 {
-  char *parse, *created, *write;
+  wchar_t *parse, *created, *write;
   int findquote = 0;
     
   parse = created = write = buf;
   while (*parse) {
-    while (*parse && isspace(*parse)) parse++;
-    while (*parse && (!isspace(*parse) || findquote))	{
+    while (*parse && (*parse < 128) && isspace(*parse)) parse++;
+    while (*parse && ((*parse > 128) || !isspace(*parse) || findquote))	{
       if (*parse== '"') {
 	findquote = !findquote;
       } else if (*parse== '\\') {
-	char *next;
+	wchar_t *next;
 	for (next = parse; *next == '\\'; next++);
 	if (*next == '"') {
 	  /* Special handling: */
@@ -174,7 +200,7 @@ static int parse_command_line(int count, char **command,
       parse++;
     *(write++) = 0;
 	  
-    if (*created)	{
+    if (*created) {
       command[count++] = created;
       if (count == maxargs)
 	return count;
@@ -185,22 +211,23 @@ static int parse_command_line(int count, char **command,
   return count;
 }
 
-static char *make_command_line(int argc, char **argv)
+static wchar_t *make_command_line(int argc, wchar_t **argv)
 {
   int i, len = 0;
-  char *r;
+  wchar_t *r;
 
   for (i = 0; i < argc; i++) {
-    len += strlen(argv[i]) + 1;
+    len += wc_strlen(argv[i]) + 1;
   }
-  r = malloc(len);
+  r = (wchar_t *)malloc(len * sizeof(wchar_t));
   len = 0;
   for (i = 0; i < argc; i++) {
-    int l = strlen(argv[i]);
+    int l = wc_strlen(argv[i]);
     if (len) r[len++] = ' ';
-    memcpy(r + len, argv[i], l);
+    memcpy(r + len, argv[i], l * sizeof(wchar_t));
     len += l;
   }
+
   r[len] = 0;
   return r;
 }
@@ -213,29 +240,28 @@ void WriteStr(HANDLE h, const char *s) {
 #endif
 
 #ifdef DUPLICATE_INPUT
-static char *copy_string(char *s)
+static wchar_t *copy_string(wchar_t *s)
 {
-  int l = strlen(s);
-  char *d = malloc(l + 1);
-  memcpy(d, s, l + 1);
+  int l = wc_strlen(s);
+  wchar_t *d = (wchar_t *)malloc((l + 1) * sizeof(wchar_t));
+  memcpy(d, s, (l + 1) * sizeof(wchar_t));
   return d;
 }
 #endif
 
 #ifdef MRSTART
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, 
-		     LPSTR m_lpCmdLine, int nCmdShow)
+		     LPWSTR m_lpCmdLine, int nCmdShow)
 #else
-int main(int argc_in, char **argv_in)
+int wmain(int argc_in, wchar_t **argv_in)
 #endif
 {
-  char *p;
-  char go[MAXCOMMANDLEN * 2];
-  char *args[MAX_ARGS + 1];
-  char *command_line; 
-  int count, i;
+  wchar_t go[MAXCOMMANDLEN * 2];
+  wchar_t *args[MAX_ARGS + 1];
+  wchar_t *command_line; 
+  int count, i, cl_len;
   struct MSC_IZE(stat) st;
-  STARTUPINFO si;
+  STARTUPINFOW si;
   PROCESS_INFORMATION pi;
 #ifdef MZSTART
   HANDLE out;
@@ -252,18 +278,45 @@ int main(int argc_in, char **argv_in)
   count = 1;
   count = parse_command_line(count, args, input, MAX_ARGS);
   
-  /* exedir should be PLTHOME path */
-  strcpy(go, exedir);
-  strcat(go, GOSUBDIR);
-  strcat(go, (variant[0] != '<') ? GOEXE3M : GOEXE);
+  /* exedir can be relative to the current executable */
+  if ((exedir[0] == '\\')
+      || ((((exedir[0] >= 'a') && (exedir[0] <= 'z'))
+	   || 	((exedir[0] >= 'A') && (exedir[0] <= 'Z')))
+	  && (exedir[1] == ':'))) {
+    /* Absolute path */
+  } else {
+    /* Make it absolute, relative to this executable */
+    int plen;
+    int mlen;
+    wchar_t *s2, *path;
 
-  if (_stat(go, &st)) {
-    char errbuff[MAXCOMMANDLEN * 2];
+    path = (wchar_t *)malloc(1024 * sizeof(wchar_t));
+    GetModuleFileNameW(NULL, path, 1024);
+
+    plen = wc_strlen(exedir);
+    mlen = wc_strlen(path);
+
+    while (mlen && (path[mlen - 1] != '\\')) {
+      mlen--;
+    }
+    s2 = (wchar_t *)malloc((mlen + plen + 1) * sizeof(wchar_t));
+    memcpy(s2, path, mlen * sizeof(wchar_t));
+    memcpy(s2 + mlen, exedir, (plen + 1) * sizeof(wchar_t));
+    exedir = s2;
+  }
+
+  wc_strcpy(go, exedir);
+  wc_strcat(go, GOSUBDIR);
+  wc_strcat(go, (variant[0] != '<') ? GOEXE3M : GOEXE);
+
+  if (_wstat(go, &st)) {
 #ifdef MRSTART
-    sprintf(errbuff,"Can't find %s",go);
-    MessageBox(NULL,errbuff,"Error",MB_OK);
+    wchar_t errbuff[MAXCOMMANDLEN * 2];
+    swprintf(errbuff,L"Can't find %s",go);
+    MessageBoxW(NULL,errbuff,L"Error",MB_OK);
 #else
-    sprintf(errbuff,"Can't find %s\n",go);
+    char errbuff[MAXCOMMANDLEN * 2];
+    sprintf(errbuff,"Can't find %S\n",go);
     WriteStr(out,errbuff);
 #endif
     exit(-1);
@@ -273,10 +326,12 @@ int main(int argc_in, char **argv_in)
 
 #ifdef MRSTART
   {
-    char *buf;
+    wchar_t *buf;
     
-    buf = malloc(strlen(m_lpCmdLine) + 1);
-    memcpy(buf, m_lpCmdLine, strlen(m_lpCmdLine) + 1);
+    m_lpCmdLine = GetCommandLineW();
+
+    buf = (wchar_t *)malloc((wc_strlen(m_lpCmdLine) + 1) * sizeof(wchar_t));
+    memcpy(buf, m_lpCmdLine, (wc_strlen(m_lpCmdLine) + 1) * sizeof(wchar_t));
     count = parse_command_line(count, args, buf, MAX_ARGS);
   }
 #else
@@ -294,42 +349,36 @@ int main(int argc_in, char **argv_in)
     /* MessageBox(NULL, args[i], "Argument", MB_OK); */
   }
   
-  /* make the exedir PLTHOME if it's not currently */
-
-  p = getenv("PLTHOME");
-  if (p == NULL || strcmp(p,exedir)) {
-    SetEnvironmentVariable("PLTHOME", exedir);
-  }
-  
-  for (i = 0; i < sizeof(si); i++)
-    ((char *)&si)[i] = 0;
+  memset(&si, 0, sizeof(si));
   si.cb = sizeof(si);
   
   command_line = make_command_line(count, args);
 
-  if (strlen(command_line) > MAXCOMMANDLEN) {
-    char errbuff[MAXCOMMANDLEN * 2];
+  cl_len = wc_strlen(command_line);
+  if (cl_len > MAXCOMMANDLEN) {
 #ifdef MRSTART
-    sprintf(errbuff,"Command line exceeds %d characters: %s",
-	    MAXCOMMANDLEN,go);
-    MessageBox(NULL,errbuff,"Error",MB_OK);
+    wchar_t errbuff[MAXCOMMANDLEN * 2];
+    swprintf(errbuff,L"Command line of %d characters exceeds %d characters: %.1024s",
+	     cl_len, MAXCOMMANDLEN,command_line);
+    MessageBoxW(NULL,errbuff,L"Error",MB_OK);
 #else
-    sprintf(errbuff,"Command line exceeds %d characters: %s\n",
-	    MAXCOMMANDLEN,go);
+    char errbuff[MAXCOMMANDLEN * 2];
+    sprintf(errbuff,"Command line of %d characters exceeds %d characters: %.1024S\n",
+	    cl_len, MAXCOMMANDLEN,command_line);
     WriteStr(out,errbuff);
 #endif
     exit(-1);
   } 
 
-  if (!CreateProcess(go,
-		     command_line,
-		     NULL, NULL, TRUE,
-		     0, NULL, NULL, &si, &pi)) {
+  if (!CreateProcessW(go,
+		      command_line,
+		      NULL, NULL, TRUE,
+		      0, NULL, NULL, &si, &pi)) {
     
 #ifdef MRSTART
-    MessageBox(NULL, "Can't start " GOEXE, "Error", MB_OK);
+    MessageBoxW(NULL, L"Can't start " GOEXE, L"Error", MB_OK);
 #else
-    WriteStr(out, "Can't start " GOEXE "\n");
+    WriteStr(out, "Can't start " sGOEXE "\n");
 #endif
     return -1;
   } else {

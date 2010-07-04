@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -122,12 +122,6 @@ static Scheme_Hash_Table *global_constants_ht;
 #define ssQUICKp(x, isbox) (pp ? x : isbox)
 #define ssALL(x, isbox) 1
 #define ssALLp(x, isbox) isbox
-
-#ifdef MZ_PRECISE_GC
-# define ZERO_SIZED(closure) !(closure->closure_size)
-#else
-# define ZERO_SIZED(closure) closure->zero_sized
-#endif
 
 static Scheme_Hash_Table *cache_ht;
 
@@ -990,7 +984,7 @@ static void do_print_string(int compact, int notdisplay,
     reset = 0;
   }
   el = scheme_utf8_encode(s, offset, offset + l, 
-			  buf, 0, 0);
+			  (unsigned char *)buf, 0, 0);
   if (compact) {
     print_compact(pp, CPT_CHAR_STRING);
     print_compact_number(pp, el);
@@ -1397,7 +1391,7 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
 	mzchar us[1];
 	int l;
 	us[0] = SCHEME_CHAR_VAL(obj);
-	l = scheme_utf8_encode(us, 0, 1, s, 0, 0);
+	l = scheme_utf8_encode(us, 0, 1, (unsigned char *)s, 0, 0);
 	print_char_string(s, l, us, 0, 1, notdisplay, 1, pp);
       } else
 	print_char(obj, notdisplay, pp);
@@ -1588,7 +1582,39 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
     }
   else if (SCHEME_PATHP(obj))
     {
-      if (compact || !pp->print_unreadable) {
+      if (compact) {
+	/* Needed for srclocs in procedure names */
+	Scheme_Object *idx;
+	int l;
+	
+	idx = scheme_hash_get(symtab, obj);
+	if (idx) {
+	  print_compact(pp, CPT_SYMREF);
+	  l = SCHEME_INT_VAL(idx);
+	  print_compact_number(pp, l);
+	} else {
+	  Scheme_Object *dir;
+
+	  /* Hash before making relative */
+	  idx = scheme_make_integer(symtab->count);
+	  scheme_hash_set(symtab, obj, idx);
+	  
+	  dir = scheme_get_param(scheme_current_config(),
+				 MZCONFIG_WRITE_DIRECTORY);
+	  if (SCHEME_PATHP(dir)) {
+	    obj = scheme_extract_relative_to(obj, dir);
+	  }
+
+	  print_compact(pp, CPT_PATH);
+
+	  l = SCHEME_PATH_LEN(obj);
+	  print_compact_number(pp, l);
+	  print_this_string(pp, SCHEME_PATH_VAL(obj), 0, l);
+
+	  l = SCHEME_INT_VAL(idx);
+	  print_compact_number(pp, l);
+	}
+      } else if (!pp->print_unreadable) {
 	cannot_print(pp, notdisplay, obj, ht, compact);
       } else {
 	if (notdisplay)
@@ -1627,8 +1653,7 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
 		      -1, pp);
 	} else {
 	  print_utf8_string(pp, "#<", 0, 2);
-	  print_string_in_angle(pp, ((Scheme_Closed_Primitive_Proc *)obj)->name, 
-				SCHEME_GENERICP(obj) ? "" : "primitive:", -1);
+	  print_string_in_angle(pp, ((Scheme_Closed_Primitive_Proc *)obj)->name, "primitive:", -1);
 	  PRINTADDRESS(pp, obj);
 	  print_utf8_string(pp, ">", 0, 1);
 	}
@@ -1636,14 +1661,29 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
 
       closed = 1;
     }
-  else if (SCHEME_CLOSUREP(obj)) 
+  else if (SCHEME_CLOSUREP(obj)
+	   || SAME_TYPE(SCHEME_TYPE(obj), scheme_native_closure_type))
     {
       if (compact || !pp->print_unreadable) {
-	Scheme_Closure *closure = (Scheme_Closure *)obj;
-	if (compact && ZERO_SIZED(closure)) {
-	  /* Print original code: */
-	  compact = print((Scheme_Object *)SCHEME_COMPILED_CLOS_CODE(closure), notdisplay, compact, ht, symtab, rnht, pp);
-	} else
+	int done = 0;
+	if (compact) {
+	  if (SCHEME_TYPE(obj) == scheme_closure_type) {
+	    Scheme_Closure *closure = (Scheme_Closure *)obj;
+	    if (ZERO_SIZED_CLOSUREP(closure)) {
+	      /* Print original `lambda' code: */
+	      compact = print((Scheme_Object *)SCHEME_COMPILED_CLOS_CODE(closure), notdisplay, compact, ht, symtab, rnht, pp);
+	      done = 1;
+	    }
+	  } else if (SCHEME_TYPE(obj) == scheme_case_closure_type) {
+	    obj = scheme_unclose_case_lambda(obj, 0);
+	    if (!SCHEME_PROCP(obj)) {
+	      /* Print original `case-lambda' code: */
+	      compact = print(obj, notdisplay, compact, ht, symtab, rnht, pp);
+	      done = 1;
+	    }
+	  }
+	}
+	if (!done)
 	  cannot_print(pp, notdisplay, obj, ht, compact);
       } else {
 	int len;
@@ -2113,7 +2153,15 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
 #ifdef SGC_STD_DEBUGGING
 	len = strlen(s) - 1;
 #endif
-	print_utf8_string(pp, s, 0, len);
+	if (!s) {
+	  char s[8];
+	  print_utf8_string(pp, "<???:", 0, 5);
+	  sprintf(s, "%d", SCHEME_TYPE(obj));
+	  print_utf8_string(pp, s, 0, -1);
+	  print_utf8_string(pp, ">", 0, 1);
+	} else {
+	  print_utf8_string(pp, s, 0, len);
+	}
 #ifdef SGC_STD_DEBUGGING
 	PRINTADDRESS(pp, obj);
 	print_utf8_string(pp, ">", 0, 1);
@@ -2320,7 +2368,8 @@ print_pair(Scheme_Object *pair, int notdisplay, int compact,
 	  /* This needs a tag */
 	  break;
 	}
-      }cdr = SCHEME_CDR(cdr);
+      }
+      cdr = SCHEME_CDR(cdr);
     }
     if (SCHEME_NULLP(cdr)) {
       /* Proper list without sharing. */

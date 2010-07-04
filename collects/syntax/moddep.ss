@@ -2,6 +2,8 @@
 (module moddep mzscheme
   (require (lib "etc.ss")
 	   (lib "port.ss")
+	   (lib "list.ss")
+	   (lib "contract.ss")
            (lib "resolver.ss" "planet"))
   
 
@@ -212,7 +214,7 @@
 	  relto)]
      [(pair? relto) relto]
      [(not dir?)
-      (error 'resolve-module-path-index "can't resolve \"self\" with just a relative directory ~e" relto)]
+      (error 'resolve-module-path-index "can't resolve \"self\" with non-path relative-to: ~e" relto)]
      [(procedure? relto) (relto)]
      [else
       (current-directory)]))
@@ -294,90 +296,144 @@
 
   (define collapse-module-path
     ;; relto-mp should be a relative path, '(lib relative-path collection), or '(file path)
-    ;;          of a thunk that produces one of those
+    ;;          or a thunk that produces one of those
     (lambda (s relto-mp)
-      (let ([combine-relative-elements
-	     (lambda (elements)
-	       (when (procedure? relto-mp)
-		 (set! relto-mp (relto-mp)))
-	       (cond
-		[(path-string? relto-mp)
-		 (bytes->string/locale
-		  (apply
-		   bytes-append
-		   (let ([m (regexp-match re:path-only (if (path? relto-mp)
-							   (path->bytes relto-mp)
-							   (string->bytes/locale relto-mp)))])
-		     (if m
-			 (cadr m)
-			 #"."))
-		   (map (lambda (e)
-			  (cond
-			   [(eq? e 'same) #"/."]
-			   [(eq? e 'up) #"/.."]
-			   [else (bytes-append #"/" (if (path? e)
-							(path->bytes e)
-							e))]))
-			elements)))]
-		[else (let ([path (path->string
-				   (apply build-path
-					  (let-values ([(base n d?) (split-path (cadr relto-mp))])
-					    (if (eq? base 'relative)
-						'same
-						base))
-					  (map (lambda (i)
-						 (cond
-						  [(bytes? i) (bytes->path i)]
-						  [else i]))
-					       elements)))])
-			(if (eq? (car relto-mp) 'lib)
-			    `(lib ,path ,(caddr relto-mp))
-			    `(file ,path)))]))])
+      ;; Used for 'lib paths, so it's always Unix-style
+      (define (attach-to-relative-path-string elements relto)
+	(let ([elem-str (substring
+			 (apply string-append
+				(map (lambda (i)
+				       (string-append
+					"/"
+					(cond
+					 [(bytes? i) (bytes->string/locale i)]
+					 [(path? i) (path->string i)]
+					 [(eq? i 'up) ".."]
+					 [else i])))
+				     (filter (lambda (x)
+					       (not (eq? x 'same)))
+					     elements)))
+			 1)])
+	  (if (or (regexp-match #rx"^[.]/+[^/]*" relto)
+		  (not (regexp-match #rx"/" relto)))
+	      elem-str
+	      (let ([m (regexp-match #rx"^(.*/)/*[^/]*$" relto)])
+		(string-append (cadr m) elem-str)))))
+      
+      (define (combine-relative-elements elements)
+	
+	;; Used for 'file paths, so it's platform specific:
+	(define (attach-to-relative-path relto)
+	  (apply build-path
+		 (let-values ([(base n d?) (split-path relto)])
+		   (if (eq? base 'relative)
+		       'same
+		       base))
+		 (map (lambda (i)
+			(cond
+			 [(bytes? i) (bytes->path i)]
+			 [else i]))
+		      elements)))
+	
+	(when (procedure? relto-mp)
+	  (set! relto-mp (relto-mp)))
 	(cond
-	 [(string? s)
-	  ;; Parse Unix-style relative path string
-	  (let loop ([elements null][s (string->bytes/utf-8 s)])
-	    (let ([prefix (regexp-match re:dir s)])
-	      (if prefix
-		  (loop (cons (let ([p (cadr prefix)])
-				(cond
-				 [(bytes=? p #".") 'same]
-				 [(bytes=? p #"..") 'up]
-				 [else (bytes->path p)]))
-			      elements)
-			(caddr prefix))
-		  (combine-relative-elements 
-		   (reverse (cons s elements))))))]
-	 [(and (or (not (pair? s))
-		   (not (list? s)))
-	       (not (path? s)))
-	  #f]
-	 [(or (path? s)
-	      (eq? (car s) 'file))
-	  (let ([p (if (path? s)
-		       s
-		       (cadr s))])
-	    (if (absolute-path? p)
-		s
-		(let loop ([p p][elements null])
-		  (let-values ([(base name dir?) (split-path p)])
-		    (cond
-		     [(eq? base 'relative)
-		      (combine-relative-elements 
-		       (cons name elements))]
-		     [else (loop base (cons name elements))])))))]
-	 [(eq? (car s) 'lib)
-	  (let ([cols (let ([len (length s)])
-			(if (= len 2)
-			    (list "mzlib")
-			    (cddr s)))])
-	    `(lib ,(path->string
-		    (build-path (if (null? (cdr cols))
-				    'same
-				    (apply build-path 'same (cdr cols)))
-				(cadr s)))
-		  ,(car cols)))]
-	 [else #f]))))
+	 [(or (path? relto-mp)
+	      (and (string? relto-mp)
+		   (ormap path? elements)))
+	  (apply build-path
+		 (let-values ([(base name dir?) (split-path relto-mp)])
+		   (if (eq? base 'relative)
+		       'same
+		       base))
+		 (map (lambda (x) (if (bytes? x) (bytes->path x) x))
+		      elements))]
+	 [(string? relto-mp)
+	  (bytes->string/locale
+	   (apply
+	    bytes-append
+	    (let ([m (regexp-match re:path-only (string->bytes/locale relto-mp))])
+	      (if m
+		  (cadr m)
+		  #"."))
+	    (map (lambda (e)
+		   (cond
+		    [(eq? e 'same) #"/."]
+		    [(eq? e 'up) #"/.."]
+		    [else (bytes-append #"/" (if (path? e)
+						 (path->bytes e)
+						 e))]))
+		 elements)))]
+	 [(eq? (car relto-mp) 'file)
+	  (let ([path ((if (ormap path? elements)
+			   values
+			   path->string)
+		       (attach-to-relative-path (cadr relto-mp)))])
+	    (if (path? path)
+		path
+		`(file ,path)))]
+	 [(eq? (car relto-mp) 'lib)
+	  (let ([path (attach-to-relative-path-string elements
+						      (cadr relto-mp))])
+	    `(lib ,path ,(caddr relto-mp)))]
+	 [(eq? (car relto-mp) 'planet)
+	  (let ([pathstr (attach-to-relative-path-string elements
+							 (cadr relto-mp))])
+	    `(planet ,pathstr ,(caddr relto-mp)))]
+	 [else (error 'combine-relative-elements "don't know how to deal with: ~s" relto-mp)]))
+
+      (cond
+       [(string? s)
+	;; Parse Unix-style relative path string
+	(let loop ([elements null][s (string->bytes/utf-8 s)])
+	  (let ([prefix (regexp-match re:dir s)])
+	    (if prefix
+		(loop (cons (let ([p (cadr prefix)])
+			      (cond
+			       [(bytes=? p #".") 'same]
+			       [(bytes=? p #"..") 'up]
+			       [else (bytes->path p)]))
+			    elements)
+		      (caddr prefix))
+		(combine-relative-elements 
+		 (reverse (cons s elements))))))]
+       [(and (or (not (pair? s))
+		 (not (list? s)))
+	     (not (path? s)))
+	#f]
+       [(or (path? s)
+	    (eq? (car s) 'file))
+	(let ([p (if (path? s)
+		     s
+		     (cadr s))])
+	  (if (absolute-path? p)
+	      s
+	      (let loop ([p p][elements null])
+		(let-values ([(base name dir?) (split-path p)])
+		  (cond
+		   [(eq? base 'relative)
+		    (combine-relative-elements 
+		     (cons name elements))]
+		   [else (loop base (cons name elements))])))))]
+       [(eq? (car s) 'lib)
+	(let ([cols (let ([len (length s)])
+		      (if (= len 2)
+			  (list "mzlib")
+			  (cddr s)))])
+	  `(lib ,(attach-to-relative-path-string 
+		  (append (cdr cols)
+			  (list (cadr s)))
+		  ".")
+		,(car cols)))]
+       [(eq? (car s) 'planet)
+	(let ((cols (cdddr s)))
+	  `(planet 
+	    ,(attach-to-relative-path-string 
+	      (append cols
+		      (list (cadr s)))
+	      ".")
+	    ,(caddr s)))]
+       [else #f])))
 
   (define (collapse-module-path-index mpi relto-mp)
     (let-values ([(path base) (module-path-index-split mpi)])
@@ -410,18 +466,81 @@
 	  (for-each (mk-loop " [for-syntax]") fs-imports)
 	  (for-each (mk-loop " [for-template]") ft-imports)))))
 
-  (provide check-module-form
+  (define (module-path-v-string? v)
+    (and (regexp-match #rx"^[-a-zA-Z0-9./]+$" v)
+	 (not (regexp-match #rx"^/" v))
+	 (not (regexp-match #rx"/$" v))))
 
-	   get-module-code
-           exn:get-module-code
-           exn:get-module-code?
-           exn:get-module-code-path
-           make-exn:get-module-code
+  (define (module-path-v? v)
+    (cond
+     [(path? v) #t]
+     [(string? v)
+      (module-path-v-string? v)]
+     [(pair? v)
+      (case (car v)
+	[(file) (and (pair? (cdr v))
+		     (path-string? (cadr v))
+		     (null? (cddr v)))]
+	[(lib) (and (pair? (cdr v))
+		    (list? (cdr v))
+		    (map module-path-v-string? (cdr v)))]
+	[(planet) #t]
+	[else #f])]
+     [else #f]))
+
+  (define rel-to-path-string/thunk/#f
+    (or/c path-string?
+	  (-> path-string?)
+	  false/c))
+
+  (define simple-rel-to-module-path-v/c
+    (or/c
+     (list/c (symbols 'lib) module-path-v-string? module-path-v-string?)
+     (list/c (symbols 'file) (and/c string? path-string?))
+     ;; not quite specific enough of a contract -- it should also spell out what's
+     ;; allowed in the package spec 
+     (cons/c (symbols 'planet) (cons/c string? (cons/c (listof any/c) (listof string?))))
+     path-string?))
+
+  (define rel-to-module-path-v/c
+    (or/c simple-rel-to-module-path-v/c
+	  (-> simple-rel-to-module-path-v/c)))
+
+  (provide/contract
+   [check-module-form (syntax? symbol? (or/c string? path? false/c) 
+			       . -> . any)]
+
+   [get-module-code ([path-string?]
+		     [(and/c path-string?
+			     relative-path?)
+		      (any/c . -> . any)
+		      (or/c false/c
+			    (path? boolean? . -> . any))]
+		     . opt-> .
+		     any)])
+
+  (provide
+   exn:get-module-code
+   exn:get-module-code?
+   exn:get-module-code-path
+   make-exn:get-module-code)
            
-	   resolve-module-path
-	   resolve-module-path-index
+  (provide/contract
+   [resolve-module-path (module-path-v?
+			 rel-to-path-string/thunk/#f
+			 . -> . path?)]
+   [resolve-module-path-index ((or/c symbol?
+				     module-path-index?)
+			       rel-to-path-string/thunk/#f
+			       . -> . path?)]
 
-	   collapse-module-path
-	   collapse-module-path-index
-
-	   show-import-tree))
+   [collapse-module-path (module-path-v?
+			  rel-to-module-path-v/c
+			  . -> . 
+			  simple-rel-to-module-path-v/c)]
+   [collapse-module-path-index ((or/c symbol?
+				      module-path-index?)
+				rel-to-module-path-v/c
+				. -> . simple-rel-to-module-path-v/c)])
+  
+  (provide show-import-tree))

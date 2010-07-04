@@ -8,7 +8,7 @@
    (lib "class.ss")
    "ast.ss")
   
-  (provide (all-defined-except sort number-assign-conversions remove-dups meth-member?
+  (provide (all-defined-except number-assign-conversions remove-dups meth-member?
                                generate-require-spec))
       
   ;; symbol-type = 'null | 'string | 'boolean | 'char | 'byte | 'short | 'int
@@ -115,6 +115,8 @@
   ;; widening-prim-conversion: symbol-type symbol-type -> boolean
   (define (widening-prim-conversion to from)
     (cond
+      ((symbol=? to from) #t)
+      ((symbol=? to 'char) #f)
       ((symbol=? 'short to)
        (symbol=? 'byte from))
       ((symbol=? 'int to)
@@ -204,7 +206,8 @@
             (else
              (or (type=? (array-type-type to) (array-type-type from))
                  (castable? (array-type-type from)
-                            (array-type-type to))))))))
+                            (array-type-type to)
+                            type-recs)))))))
   
   ;Do the two lists of method signatures have conflicting methods
   ;signature-conflicts? (list method-record) (list method-record) -> bool
@@ -308,8 +311,8 @@
   ;; (make-method-record string (list symbol) type (list type) (list type) (U bool method-record) string)
   (define-struct method-record (name modifiers rtype atypes throws override class) (make-inspector))
 
-  ;;(make-inner-record string (list symbol) bool)
-  (define-struct inner-record (name modifiers class?) (make-inspector))
+  ;;(make-inner-record string string (list symbol) bool)
+  (define-struct inner-record (name full-name modifiers class?) (make-inspector))
 
   ;;(make-scheme-record string (list string) path (list dynamic-val))
   (define-struct scheme-record (name path dir provides))
@@ -380,11 +383,13 @@
                         ((inner-path) (if (null? key-path) (lookup-path key-inner (lambda () null)) key-path))
                         ((new-search)
                          (lambda ()
-                           (if (null? path) 
-                               (fail)
-                               (let ((back-path (reverse path)))
-                                 (search-for-record key (car back-path) 
-                                                    (reverse (cdr back-path)) (lambda () #f) fail))))))
+                           (cond
+                             ((null? path) (fail))
+                             (else
+                              (let ((back-path (reverse path)))
+                                (search-for-record key (car back-path)
+                                                   (reverse (cdr back-path)) (lambda () #f) fail)))))))
+            ;(printf "key ~a key-path ~a path ~a location ~a ~n" key key-path path location)
             ;(printf "get-class-record: ~a~n" ctype)
             ;(hash-table-for-each records (lambda (k v) (printf "~a -> ~a~n" k v)))
             (cond
@@ -455,9 +460,10 @@
       
       ;lookup-path: string ( -> 'a) -> (U (list string) #f)
       (define/public (lookup-path class fail)
+        ;(printf "class ~a location ~a~n" class location)
         ;(printf "lookup ~a~n" class)
-        ;(hash-table-for-each (hash-table-get class-environment location)
-        ;                    (lambda (k v) (printf "~a -> ~a~n" k v)))
+        #;(hash-table-for-each (hash-table-get class-environment location)
+                            (lambda (k v) (printf "~a -> ~a~n" k v)))
         (if location
             (hash-table-get (hash-table-get class-environment 
                                             location 
@@ -612,17 +618,71 @@
                             (method-record-atypes (car methods)))
              (meth-member? meth (cdr methods)))))
 
-  ;sort: (list number) -> (list number)
-  (define (sort l)
-    (quicksort l (lambda (i1 i2) (< (car i1) (car i2)))))
+  ;depth: 'a (listof 'a) -> (U int #f)
+  ;The position in elt-list that elt is at, starting with 1
+  (define (depth elt elt-list)
+    (letrec ((d 
+              (lambda (elt-list cnt)
+                #;(printf "d: elt ~a elt-list ~a~n" elt elt-list)
+                (cond
+                  ((null? (cdr elt-list)) +inf.0)
+                  ((equal? (car elt-list) elt) cnt)
+                  (else (d (cdr elt-list) (add1 cnt)))))))
+      (d elt-list 1)))                   
+  
+  ;iface-depth: (list string) (list (list string)) type-records -> int
+  (define (iface-depth elt ifaces type-recs)
+    (if (= 1 (length ifaces))
+        1
+        (let ([iface-tree (map (lambda (iface)
+                                 (cons iface
+                                       (class-record-parents 
+                                        (get-record (send type-recs get-class-record iface)
+                                                    type-recs))))
+			       ifaces)])
+          (apply min (map (lambda (i-list) (depth elt i-list)) iface-tree)))))
+  
+  ;conversion-steps: type type -> int
+  (define (conversion-steps from to type-recs)
+    #;(printf "conversion-steps ~a ~a~n" from to)
+    (cond
+      ((ref-type? from)
+       (let* ((to-name (cons (ref-type-class/iface to) (ref-type-path to)))
+              (from-class (send type-recs get-class-record from))
+              (from-class-parents (class-record-parents from-class))
+              (from-class-ifaces (class-record-ifaces from-class)))
+         (cond
+           ((eq? to 'dynamic) (length from-class-parents))
+           ((null? from-class-parents) 
+            (iface-depth to-name from-class-ifaces type-recs))
+           ((null? from-class-ifaces)
+            (depth to-name from-class-parents))
+           (else (min (depth to-name from-class-parents)
+                      (iface-depth to-name from-class-ifaces type-recs))))))
+      ((array-type? from)
+       (cond
+         ((array-type? to)
+          (conversion-steps (array-type-type from) (array-type-type to) type-recs))
+         (else
+          (add1 (conversion-steps (array-type-type from) to type-recs)))))
+      (else 
+       (case from
+         ((byte) (depth to '(short int long float double)))
+         ((char) (depth to '(byte short int long float double)))
+         ((short) (depth to '(int long float double)))
+         ((int) (depth to '(long float double)))
+         ((long) (depth to '(float double)))
+         (else 1))
+       )))
   
   ;number-assign-conversion: (list type) (list type) type-records -> int
   (define (number-assign-conversions site-args method-args type-recs)
     (cond
       ((null? site-args) 0)
-      ((and (assignment-conversion (car site-args) (car method-args) type-recs)
+      ((and (assignment-conversion (car method-args) (car site-args) type-recs)
             (not (type=? (car site-args) (car method-args))))
-       (add1 (number-assign-conversions (cdr site-args) (cdr method-args) type-recs)))
+       (+ (conversion-steps (car site-args) (car method-args) type-recs)
+          (number-assign-conversions (cdr site-args) (cdr method-args) type-recs)))
       (else (number-assign-conversions (cdr site-args) (cdr method-args) type-recs))))
   
   ;; resolve-overloading: (list method-record) (list type) (-> 'a) (-> 'a) (-> 'a) type-records-> method-record
@@ -637,11 +697,13 @@
            (assignable (filter (lambda (mr)
                                  (andmap a-convert? (m-atypes mr) arg-types))
                                methods))
-           (assignable-count (sort 
+           (sort (lambda (l p) (quicksort l p)))
+           (assignable-count (sort
                               (map (lambda (mr)
                                      (list (number-assign-conversions arg-types (m-atypes mr) type-recs)
                                            mr))
-                                   assignable))))
+                                   assignable)
+                              (lambda (i1 i2) (< (car i1) (car i2))))))
       (cond
         ((null? methods) (arg-count-fail))
         ((= 1 (length methods-same)) (car methods-same))
@@ -665,18 +727,7 @@
                                                   #f)))
             (with-handlers ((exn? (lambda (e) (fail))))
               (expand mod-syntax))
-            (set-scheme-record-provides! mod-ref (cons var (scheme-record-provides mod-ref))))
-                                    
-          #;(let ((old-namespace (current-namespace)))
-           (current-namespace (make-namespace))
-           (namespace-require (generate-require-spec (java-name->scheme (scheme-record-name mod-ref))
-                                                     (scheme-record-path mod-ref)))
-           (begin
-             (namespace-variable-value var #t  (lambda () 
-                                                 (current-namespace old-namespace)
-                                                 (fail)))
-             (set-scheme-record-provides! mod-ref (cons var (scheme-record-provides mod-ref)))
-             (current-namespace old-namespace))))))
+            (set-scheme-record-provides! mod-ref (cons var (scheme-record-provides mod-ref)))))))
           
   ;generate-require-spec: string (list string) -> (U string (list symbol string+))
   (define (generate-require-spec name path)
@@ -696,7 +747,7 @@
       ((regexp-match "[a-zA-Z0-9]+Set$" name)
        (java-name->scheme (regexp-replace "Set$" name "!")))
       ((regexp-match "[a-zA-Z0-9]+Obj$" name)
-       (java-name->scheme (regexp-replace "Obj%" name "%")))
+       (java-name->scheme (regexp-replace "Obj$" name "%")))
       ((regexp-match "[a-z0-9]+->[A-Z]" name) =>
        (lambda (substring)
          (let ((char (car (regexp-match "[A-Z]" (car substring)))))
@@ -710,7 +761,8 @@
                                               (string-append remainder "-" (string (char-downcase char))))))))
       (else name)))
 
-  
+  (define (inner-rec-member name inners)
+    (member name (map inner-record-name inners)))
                   
 ;                                          
 ;             ;                ;;          
@@ -727,8 +779,8 @@
 ;                                          
 
   
-  (define type-version "version3")
-  (define type-length 10)
+  (define type-version "version4")
+  (define type-length 11)
   
   ;; read-record: path -> (U class-record #f)
   (define (read-record filename)
@@ -736,6 +788,8 @@
               (lambda (input)
                 (and (= (length input) type-length)
                      (equal? type-version (list-ref input 9))
+                     (or (equal? (version) (list-ref input 10))
+                         (equal? "ignore" (list-ref input 10)))
                      (make-class-record (list-ref input 1)
                                         (list-ref input 2)
                                         (symbol=? 'class (car input))
@@ -765,7 +819,8 @@
               (lambda (input)
                 (make-inner-record (car input)
                                    (cadr input)
-                                   (symbol=? 'class (caddr input)))))
+                                   (caddr input)
+                                   (symbol=? 'class (cadddr input)))))
              (parse-type
               (lambda (input)
                 (cond
@@ -774,7 +829,7 @@
                    (make-array-type (parse-type (cadr input)) (car input)))
                   (else
                    (make-ref-type (car input) (cdr input)))))))
-      (parse-class/iface (call-with-input-file filename read))))
+        (parse-class/iface (call-with-input-file filename read))))
   
   ;; write-record: class-record port->
   (define (write-record rec port)
@@ -788,11 +843,23 @@
                  (class-record-modifiers r)
                  (class-record-object? r)
                  (map field->list (class-record-fields r))
-                 (map method->list (filter (compose not method-record-override) (class-record-methods r)))
+                 (map method->list 
+                      (let* ((kept-overrides null)
+                            (methods
+                             (filter 
+                              (compose not
+                                       (lambda (meth-rec) 
+                                         (and (method-record-override meth-rec)
+                                              (or (equal? (method-record-modifiers meth-rec)
+                                                          (method-record-modifiers (method-record-override meth-rec)))
+                                                  (not (set! kept-overrides (cons (method-record-override meth-rec) kept-overrides)))))))
+                              (class-record-methods r))))
+                        (filter (compose not (lambda (m) (memq m kept-overrides))) methods)))
                  (map inner->list (class-record-inners r))
                  (class-record-parents r)
                  (class-record-ifaces r)
-                 type-version)))
+                 type-version
+                 (version))))
              (field->list
               (lambda (f)
                 (list
@@ -812,6 +879,7 @@
              (inner->list
               (lambda (i)
                 (list (inner-record-name i)
+                      (inner-record-full-name i)
                       (inner-record-modifiers i)
                       (if (inner-record-class? i) 'class 'interface))))
              (type->list

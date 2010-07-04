@@ -7,7 +7,6 @@
 
 (SECTION 'OBJECT)
 
-
 ;; ------------------------------------------------------------
 ;; Test syntax errors
 
@@ -500,6 +499,23 @@
 (test '(14 (12 (8 (10 (2 23))))) 'bjt (send (new bjjbjfoo-jbjjbgoo%) foo 23))
 (test '(9 (13 (15 (6 (3 24))))) 'bjt (send (new bjjbjfoo-jbjjbgoo%) goo 24))
 (test '(14 (12 (8 (10 (20 (7 25)))))) 'bjt (send (new bjjbjfoo-jbjjbgoo%) hoo 25))
+
+;; ----------------------------------------
+;; Make sure inner default isn't called when augment is available:
+
+(let ([x 0])
+  (define c% (class object%
+	       (define/pubment (m v)
+		 (inner (set! x (+ x v)) m v))
+	       (super-new)))
+  (define d% (class c%
+	       (define/augment (m v)
+		 (list v))
+	       (super-new)))
+  (test (void) 'no-inner (send (new c%) m 5))
+  (test 5 values x)
+  (test '(6) 'inner (send (new d%) m 6))
+  (test 5 values x))
 
 ;; ----------------------------------------
 
@@ -1103,5 +1119,45 @@
       (let ()
         (define-local-member-name f)
         (new (class object% (field [f 1] [g 1]) (super-new)))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check that a macro expansion to init, etc,
+;; is certified correctly:
+
+(define (check-class-cert form rename?)
+  (define class-cert-%%-init (gensym 'class-cert-%%-init))
+  (define class-cert-%%-client (gensym 'class-cert-%%-client))
+  (teval
+   `(module ,class-cert-%%-init mzscheme
+      (require (lib "class.ss"))
+      (define-syntax (init-private stx)
+	(syntax-case stx ()
+	  [(_ name value)
+	   (with-syntax ([(internal-name)
+			  (generate-temporaries #'(internal-name))])
+	     #'(begin
+		 (,form (,(if rename? '(internal-name name) 'internal-name)
+			 value))
+		 (define name internal-name)))]))
+      (provide (all-defined))))
+  ;; Shouldn't fail with a cert erorr:
+  (teval
+   `(module ,class-cert-%%-client mzscheme
+      (require (lib "class.ss")
+	       ,class-cert-%%-init)
+      (define cert-error%
+	(class object%
+	  (init-private thing "value")
+	  (define/public (to-string)
+	    thing)
+	  (super-new))))))
+
+(map (lambda (rename?)
+       (check-class-cert 'init rename?)
+       (check-class-cert 'field rename?) 
+       (check-class-cert 'init-field rename?))
+     '(#t #f))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (report-errs)

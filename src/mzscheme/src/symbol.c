@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -54,6 +54,8 @@ unsigned long scheme_max_found_symbol_name;
 
 /* globals */
 int scheme_case_sensitive = 1;
+
+void scheme_set_case_sensitive(int v) { scheme_case_sensitive =  v; }
 
 /* locals */
 static Scheme_Object *symbol_p_prim (int argc, Scheme_Object *argv[]);
@@ -223,6 +225,9 @@ static void clean_symbol_table(void)
   clean_one_symbol_table(scheme_keyword_table);
   clean_one_symbol_table(scheme_parallel_symbol_table);
   scheme_clear_ephemerons();
+# ifdef MZ_USE_JIT
+  scheme_clean_native_symtab();
+# endif
 }
 #endif
 
@@ -275,24 +280,25 @@ scheme_init_symbol_type (Scheme_Env *env)
 void
 scheme_init_symbol (Scheme_Env *env)
 {
-  scheme_add_global_constant("symbol?",
-			     scheme_make_folding_prim(symbol_p_prim,
-						      "symbol?",
-						      1, 1, 1),
-			     env);
+  Scheme_Object *p;
+
+  p = scheme_make_folding_prim(symbol_p_prim, "symbol?", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant("symbol?", p, env);
+
   scheme_add_global_constant("string->symbol",
-			     scheme_make_prim_w_arity(string_to_symbol_prim,
-						      "string->symbol",
-						      1, 1), env);
+			     scheme_make_noncm_prim(string_to_symbol_prim,
+						    "string->symbol",
+						    1, 1), env);
   scheme_add_global_constant("string->uninterned-symbol",
-			     scheme_make_prim_w_arity(string_to_uninterned_symbol_prim,
-						      "string->uninterned-symbol",
-						      1, 1),
+			     scheme_make_noncm_prim(string_to_uninterned_symbol_prim,
+						    "string->uninterned-symbol",
+						    1, 1),
 			     env);
   scheme_add_global_constant("symbol->string",
-			     scheme_make_prim_w_arity(symbol_to_string_prim,
-						      "symbol->string",
-						      1, 1),
+			     scheme_make_noncm_prim(symbol_to_string_prim,
+						    "symbol->string",
+						    1, 1),
 			     env);
 
   scheme_add_global_constant("keyword?",
@@ -301,19 +307,19 @@ scheme_init_symbol (Scheme_Env *env)
 						      1, 1, 1),
 			     env);
   scheme_add_global_constant("string->keyword",
-			     scheme_make_prim_w_arity(string_to_keyword_prim,
-						      "string->keyword",
-						      1, 1), env);
+			     scheme_make_noncm_prim(string_to_keyword_prim,
+						    "string->keyword",
+						    1, 1), env);
   scheme_add_global_constant("keyword->string",
-			     scheme_make_prim_w_arity(keyword_to_string_prim,
-						      "keyword->string",
-						      1, 1),
+			     scheme_make_noncm_prim(keyword_to_string_prim,
+						    "keyword->string",
+						    1, 1),
 			     env);
 
   scheme_add_global_constant("gensym",
-			     scheme_make_prim_w_arity(gensym,
-						      "gensym",
-						      0, 1),
+			     scheme_make_noncm_prim(gensym,
+						    "gensym",
+						    0, 1),
 			     env);
 }
 
@@ -519,7 +525,7 @@ const char *scheme_symbol_name_and_size(Scheme_Object *sym, unsigned int *length
 	mzchar buf[2];
 	int ul = 2;
 	while (1) {
-	  if (scheme_utf8_decode(s, i, i + ul,
+	  if (scheme_utf8_decode((unsigned char *)s, i, i + ul,
 				 buf, 0, 1,
 				 NULL, 0, 0) > 0)
 	    break;
@@ -548,7 +554,7 @@ const char *scheme_symbol_name_and_size(Scheme_Object *sym, unsigned int *length
     mzchar cbuf[100], *cs;
     long clen;
     dz = 0;
-    cs = scheme_utf8_decode_to_buffer_len(s, len, cbuf, 100, &clen);
+    cs = scheme_utf8_decode_to_buffer_len((unsigned char *)s, len, cbuf, 100, &clen);
     if (cs
 	&& digit_start
 	&& !(flags & SCHEME_SNF_FOR_TS)

@@ -1,12 +1,12 @@
 (module search mzscheme
   (require (lib "string-constant.ss" "string-constants")
-           "docpos.ss"
            "colldocs.ss"
            "path.ss"
            "manuals.ss"
            (lib "list.ss")
            (lib "plt-match.ss")
-           (lib "contract.ss"))
+           (lib "contract.ss")
+	   (lib "dirs.ss" "setup"))
   
   (provide doc-collections-changed)
   (provide/contract
@@ -21,22 +21,20 @@
      (-> any)
      (string? any/c . -> . void?)
      (string? any/c . -> . void?)
-     (string? string? string? path? (union string? number? false/c) any/c . -> . void?)
+     (string? string? string? path? (or/c string? number? false/c) any/c . -> . void?)
      . -> .
-     (union string? false/c))]
+     (or/c string? false/c))]
    
    (build-string-finds/finds (string? 
                               boolean?
                               boolean?
                               . -> . 
                               (values (listof string?) 
-                                      (listof (union regexp? string?)))))
+                                      (listof (or/c regexp? string?)))))
    
    (non-regexp (string? . -> . string?)))
 
-  (define (html-doc-position x)
-    (or (user-defined-doc-position x)
-	(standard-html-doc-position x)))
+  (define doc-dirs (get-doc-search-dirs))
   
   ; These are set by reset-doc-lists:
   ; docs, doc-names and doc-kinds are parallel lists. doc-kinds
@@ -48,23 +46,19 @@
   ; doc-kinds : (list-of symbol)
   (define doc-kinds null)
   ; doc-collection-date : (union #f number 'none)
-  (define doc-collection-date #f)
-      
+  (define doc-collection-dates (map (lambda (x) #f) doc-dirs))
+  
+  (define (dir-date/none dir)
+    (with-handlers ([exn:fail:filesystem? (lambda (x) 'none)])
+      (file-or-directory-modify-seconds dir)))
+
   (define (reset-doc-lists)
   ; Locate standard HTML documentation
     (define-values (std-docs std-doc-names)
       (let* ([docs (find-doc-directories)]
              [doc-names (map get-doc-name docs)])
-        ; Order the standard docs:
-        (let ([ordered (quicksort
-                        (map list docs doc-names)
-                        (lambda (a b) ; html-doc-position expects collection name
-                          (let-values ([(_1 a-short _2) (split-path (car a))]
-                                       [(_3 b-short _4) (split-path (car b))])
-                            (< (html-doc-position a-short)
-                               (html-doc-position b-short)))))])
-          (values (map car ordered) (map cadr ordered))))) ; here we want the std title
-    
+        (values docs doc-names)))
+  
     ; Check collections for doc.txt files:
     (define-values (txt-docs txt-doc-names) (colldocs))
     
@@ -76,10 +70,7 @@
 			  txt-doc-names)))
     (set! doc-kinds (append (map (lambda (x) 'html) std-docs) (map (lambda (x) 'text) txt-docs)))
     
-    (with-handlers ([exn:fail:filesystem? (lambda (x) (set! doc-collection-date 'none))])
-		   (set! doc-collection-date 
-			 (file-or-directory-modify-seconds
-			  (collection-path "doc")))))
+    (set! doc-collection-dates (map dir-date/none doc-dirs)))
   
   (define MAX-HIT-COUNT 300)
   
@@ -296,12 +287,11 @@
        (string->list s)))))
       
   (define (doc-collections-changed)
-    (set! doc-collection-date #f)
+    (set! doc-collection-dates (map (lambda (x) #f) doc-dirs))
     (set! html-keywords (make-hash-table 'equal))
     (set! html-indices (make-hash-table 'equal))
     (set! text-keywords (make-hash-table 'equal))
-    (set! text-indices (make-hash-table 'equal))
-    (reset-doc-positions!))
+    (set! text-indices (make-hash-table 'equal)))
 
   (define max-reached #f)
 
@@ -338,11 +328,18 @@
                      add-doc-section add-kind-section add-choice)
     ; When new docs are installed, the directory's modification date changes:
     (set! max-reached #f)
-    (unless (eq? doc-collection-date 'none)
-      (when (or (not doc-collection-date)
-                (> (file-or-directory-modify-seconds (collection-path "doc"))
-                   doc-collection-date))
-        (reset-doc-lists)))
+
+    (when (ormap (lambda (date new-date)
+		   (cond
+		    [(not date) #t]
+		    [(equal? date new-date) #f]
+		    [(eq? date 'none) #t]
+		    [(eq? new-date 'none) #t]
+		    [else (new-date . > . date)]))
+		 doc-collection-dates
+		 (map dir-date/none doc-dirs))
+      (reset-doc-lists))
+
     (let ([hit-count 0])
       (let-values ([(string-finds finds) (build-string-finds/finds given-find regexp? exact?)]
                    [(filtered-docs filtered-doc-names filtered-doc-kinds)

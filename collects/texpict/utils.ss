@@ -3,7 +3,8 @@
   (require (lib "class.ss")
 	   (lib "math.ss")
 	   (lib "etc.ss")
-	   (lib "mred.ss" "mred"))
+	   (lib "contract.ss")
+           (lib "mred.ss" "mred"))
 
   (require "mrpict.ss")
 
@@ -39,7 +40,7 @@
 	   angel-wing
 	   desktop-machine
 	   standard-fish
-
+           
 	   pin-line
 	   pin-arrow-line
            pin-arrows-line
@@ -230,7 +231,12 @@
   (define (filled-rectangle w h)
     (dc
      (lambda (dc x y)
-       (send dc draw-rectangle x y w h))
+       (let ([b (send dc get-brush)])
+         (send dc set-brush (send the-brush-list find-or-create-brush
+				  (send (send dc get-pen) get-color)
+                                  'solid))
+	 (send dc draw-rectangle x y w h)
+	 (send dc set-brush b)))
      w
      h))
   
@@ -249,7 +255,12 @@
     (opt-lambda (w h [corner -0.25])
       (dc
        (lambda (dc x y)
-	 (send dc draw-rounded-rectangle x y w h corner))
+	 (let ([b (send dc get-brush)])
+	   (send dc set-brush (send the-brush-list find-or-create-brush
+				    (send (send dc get-pen) get-color)
+				    'solid))
+	   (send dc draw-rounded-rectangle x y w h corner)
+	   (send dc set-brush b)))
        w
        h)))
   
@@ -280,7 +291,12 @@
   
   (define (filled-ellipse width height)
     (dc (lambda (dc x y)
-	  (send dc draw-ellipse x y width height))
+	  (let ([b (send dc get-brush)])
+	    (send dc set-brush (send the-brush-list find-or-create-brush
+				     (send (send dc get-pen) get-color)
+				     'solid))
+	    (send dc draw-ellipse x y width height)
+	    (send dc set-brush b)))
 	width height))
 
   (define cloud
@@ -833,7 +849,9 @@
 	    [eb (send end-c blue)]
 	    [c (make-object color%)]
 	    [s (lambda (start end i)
-		 (floor (+ start (* (- end start) (/ i steps)))))])
+                 (if (= steps 0)
+                     end
+                     (floor (+ start (* (- end start) (/ i steps))))))])
 	(let loop ([i 0])
 	  (send c set (s sr er i) (s sg eg i) (s sb eb i))
 	  (when brush?
@@ -934,4 +952,56 @@
 	       0 0 0 2)
 	      "blue"))
   
+  
+  (provide/contract [explode-star
+                     (-> number? number?  number? number? (union (is-a?/c color%) string?) pict?)])
+  ;; abstract-explosion number number number number color -> pict
+  (define (explode-star small-rad large-rad points line-size line-color)
+    (define (find-xy radius theta)
+      (values (* radius (cos theta))
+              (* radius (sin theta))))
+    (let ([roff (floor (/ large-rad 2))]
+          [fx #f]
+          [fy #f])
+      (dc
+       (lambda (dc dx dy)
+         (let ([old-pen (send dc get-pen)])
+           (send dc set-pen (send the-pen-list find-or-create-pen line-color line-size 'solid))
+           (let loop ([i points]
+                      [lx #f]
+                      [ly #f])
+             (cond
+               [(zero? i) (when (and lx ly)
+                            (send dc draw-line
+                                  (+ dx large-rad lx)
+                                  (+ dy large-rad ly)
+                                  (+ dx large-rad fx)
+                                  (+ dy large-rad fy)))]
+               [else (let* ([this-p (- i 1)]
+                            [theta1 (* 2 pi (/ this-p points))]
+                            [theta2 (* 2 pi (/ (- this-p 1/2) points))])
+                       (let-values ([(x1 y1) (find-xy small-rad theta1)]
+                                    [(x2 y2) (find-xy large-rad theta2)])
+                         (unless (and fx fy)
+                           (set! fx x1)
+                           (set! fy y1))
+                         (when (and lx ly)
+                           (send dc draw-line
+                                 (+ dx large-rad lx)
+                                 (+ dy large-rad ly)
+                                 (+ dx large-rad x1)
+                                 (+ dy large-rad y1)))
+                         (send dc draw-line
+                               (+ dx large-rad x1)
+                               (+ dy large-rad y1)
+                               (+ dx large-rad x2)
+                               (+ dy large-rad y2))
+                         (loop (- i 1)
+                               x2
+                               y2)))]))
+           (send dc set-pen old-pen)))
+       (* large-rad 2)
+       (* large-rad 2)
+       0
+       0)))
   )

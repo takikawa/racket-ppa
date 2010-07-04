@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	April 1995
- * Copyright:	(c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:	(c) 2004-2006 PLT Scheme Inc.
  * Copyright:	(c) 1995, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -275,6 +275,11 @@ void wxSlider::SetValue(int value)
   {
     sprintf(wxBuffer, "%d", value);
     SetWindowText(edit_value, wxBuffer);
+  }
+
+  if (!winEnabled) {
+    /* Windows bug? Setting the value loses disabled state. */
+    ::EnableWindow((HWND)ms_handle, (BOOL)FALSE); 
   }
 }
 

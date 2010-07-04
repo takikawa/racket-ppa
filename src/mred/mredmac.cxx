@@ -3,7 +3,7 @@
  * Purpose:     MrEd MacOS event loop
  * Author:      Matthew Flatt
  * Created:     1996
- * Copyright:   (c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:   (c) 2004-2006 PLT Scheme Inc.
  * Copyright:   (c) 1996, Matthew Flatt
  */
 
@@ -19,6 +19,13 @@
 
 #include <unistd.h>
 #include <fcntl.h>
+
+#ifdef __i386__ 
+# include <CoreServices/CoreServices.h>
+# define wxNATIVE_LONG(x) EndianS32_BtoN((x).bigEndianValue)
+#else
+# define wxNATIVE_LONG(x) x
+#endif
 
 static int dispatched = 1;
 
@@ -202,7 +209,7 @@ static void QueueTransferredEvent(EventRecord *e)
   if ((e->what == osEvt) && !(((e->message >> 24) & 0x0ff) == suspendResumeMessage))
     return;
 
-  q = new MrQueueElem;
+  q = new WXGC_PTRS MrQueueElem;
   memcpy(&q->event, e, sizeof(EventRecord));
   q->next = NULL;
   q->prev = last;
@@ -290,20 +297,30 @@ int WNE(EventRecord *e, double sleep_secs)
     ok = ConvertEventRefToEventRecord(ref, e);
 
     if (!ok) {
+      EventRef compat = NULL;
+
       if ((GetEventClass(ref) == kEventClassMouse)
-		 && (GetEventKind(ref) == kEventMouseWheelMoved)) {
+	  && (GetEventKind(ref) == 11 /* kEventMouseScroll */)) {
+	GetEventParameter(ref, kEventParamEventRef, typeEventRef,
+			  NULL, sizeof(compat), NULL, &compat);
+      }
+      if (!compat)
+	compat = ref;
+
+      if ((GetEventClass(compat) == kEventClassMouse)
+	  && (GetEventKind(compat) == kEventMouseWheelMoved)) {
 	UInt32 modifiers;
 	EventMouseWheelAxis axis;
 	SInt32 delta;
 	Point pos;
 	
-	GetEventParameter(ref, kEventParamKeyModifiers, typeUInt32, 
+	GetEventParameter(compat, kEventParamKeyModifiers, typeUInt32, 
 			  NULL, sizeof(modifiers), NULL, &modifiers);
-	GetEventParameter(ref, kEventParamMouseWheelAxis, 
+	GetEventParameter(compat, kEventParamMouseWheelAxis, 
 			  typeMouseWheelAxis, NULL, sizeof(axis), NULL, &axis);
-	GetEventParameter(ref, kEventParamMouseWheelDelta, 
+	GetEventParameter(compat, kEventParamMouseWheelDelta, 
 			  typeLongInteger, NULL, sizeof(delta), NULL, &delta);
-	GetEventParameter(ref, kEventParamMouseLocation,
+	GetEventParameter(compat, kEventParamMouseLocation,
 			  typeQDPoint, NULL, sizeof(Point), NULL, &pos);
 
 	if (axis == kEventMouseWheelAxisY) {
@@ -479,13 +496,13 @@ static int GetMods(void)
   int mods = 0;
 	  
   GetKeys(km);
-  if (km[1] & 32768)
+  if (wxNATIVE_LONG(km[1]) & 32768)
     mods |= cmdKey;
-  if (km[1] & 1)
+  if (wxNATIVE_LONG(km[1]) & 1)
     mods |= shiftKey;
-  if (km[1] & 4)
+  if (wxNATIVE_LONG(km[1]) & 4)
     mods |= optionKey;
-  if (km[1] & 8)
+  if (wxNATIVE_LONG(km[1]) & 8)
     mods |= controlKey;
   
   return mods;
@@ -1329,7 +1346,21 @@ static long check_four(char *name, int which, int argc, Scheme_Object **argv)
   if (!SCHEME_BYTE_STRINGP(o) || (SCHEME_BYTE_STRTAG_VAL(o) != 4))
     scheme_wrong_type(name, "MacOS type/creator 4-character byte string", which, argc, argv);
   
-  return *(long *)SCHEME_BYTE_STR_VAL(o);
+#ifdef __POWERPC__
+  return *(int *)SCHEME_BYTE_STR_VAL(o);
+#else
+  {
+    int v;
+    char tmp[4], *bs;
+    bs = SCHEME_BYTE_STR_VAL(o);
+    tmp[3] = bs[0];
+    tmp[2] = bs[1];
+    tmp[1] = bs[2];
+    tmp[0] = bs[3];
+    memcpy(&v, tmp, 4);
+    return v;
+  }
+#endif
 }
 
 static int has_null(const char *s, long l)
@@ -1473,7 +1504,7 @@ static int ae_marshall(AEDescList *ae, AEDescList *list_in, AEKeyword kw, Scheme
 	        break;
 	      } else if (_err) {
 		*stage = "converting file to alias: ";
-		return NULL;
+		return 0;
 	      }
 	      type = typeAlias;
 	      HLock(alias);
@@ -1814,7 +1845,7 @@ static pascal OSErr HandleAnswer(const AppleEvent *evt, AppleEvent *rae, long k)
   long sz;
   AppleEvent *ae;
   
-  r = new ReplyItem;
+  r = new WXGC_PTRS ReplyItem;
   ae = (AppleEvent *)scheme_malloc_atomic(sizeof(AppleEvent));
   r->ae = ae;
   
@@ -2047,7 +2078,7 @@ ControlPartCode wxHETTrackControl(ControlRef theControl, Point startPoint, Contr
   wxTC_Closure *c;
   int v;
 
-  c = new wxTC_Closure;
+  c = new WXGC_PTRS wxTC_Closure;
   c->ctl = theControl;
   c->start = startPoint;
   c->proc = actionProc;
@@ -2084,7 +2115,7 @@ extern void wxHETShowWindow(WindowPtr w)
 extern void wxHETShowSheetWindow(WindowPtr w, WindowPtr pw)
 {
   wxSW_Closure *c;
-  c = new wxSW_Closure;
+  c = new WXGC_PTRS wxSW_Closure;
   c->w = w;
   c->pw = pw;
 

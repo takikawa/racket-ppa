@@ -81,7 +81,7 @@
                                 default-name)
                             label)))]
                    [sorted/visible-frames
-                    (quicksort
+                    (sort
                      (filter (λ (x) (send (frame-frame x) is-shown?)) frames)
                      (λ (f1 f2)
                        (string-ci<=? (get-name (frame-frame f1))
@@ -254,7 +254,7 @@
       
       (define (choose-a-frame parent)
         (letrec-values ([(sorted-frames)
-                         (quicksort
+                         (sort
                           (send (get-the-frame-group) get-frames)
                           (λ (x y) (string-ci<=? (send x get-label) (send y get-label))))]
                         [(d) (make-object dialog% (string-constant bring-frame-to-front) parent 400 600)]
@@ -288,7 +288,7 @@
                                 (send t begin-edit-sequence)
                                 (send t erase)
                                 (when full-name
-                                  (send t insert full-name))
+                                  (send t insert (path->string full-name)))
                                 (send t end-edit-sequence))]
                              [(list-box-dclick)
                               (set! cancelled? #f)
@@ -307,7 +307,7 @@
           (let ([fr (car sorted-frames)])
             (when (and (is-a? fr frame:basic<%>)
                        (send fr get-filename))
-              (send t insert (send (car sorted-frames) get-filename)))
+              (send t insert (path->string (send (car sorted-frames) get-filename))))
             (send lb set-selection 0))
           (send d show #t)
           (unless cancelled?

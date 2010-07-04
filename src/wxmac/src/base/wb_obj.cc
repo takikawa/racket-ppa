@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	August 1994
- * Copyright:	(c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:	(c) 2004-2006 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  */
 
@@ -49,6 +49,6 @@ wxObject::~wxObject(void)
 # ifdef COMPACT_BACKTRACE_GC
 char *wxObject::gcGetName()
 {
-  wxGetTypeName(__type);
+  return wxGetTypeName(__type);
 }
 # endif

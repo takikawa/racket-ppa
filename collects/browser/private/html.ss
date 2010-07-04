@@ -234,8 +234,7 @@
                                              (copy-port ip op)))))
                                       'truncate)
               (pop-status)
-              (let* ([upath (url-path url)]
-                     [bitmap (make-object bitmap% tmp-filename)])
+              (let ([bitmap (make-object bitmap% tmp-filename)])
                 (with-handlers ([exn:fail?
                                  (lambda (x)
                                    (message-box "Warning"
@@ -549,9 +548,19 @@
               (letrec ([image-map-snips null]
                        [image-maps null]
                        
+                       [html-basic-style
+                        (let ([sl (send a-text get-style-list)])
+                          (or (send sl find-named-style "Html Standard")
+                              (send sl find-named-style "Standard")
+                              (send sl find-named-style "Basic")))]
+                       
+                       ;; inserts 
                        [insert 
-                        (lambda (what)
-                          (a-text-insert what (current-pos)))]
+                        (λ (what)
+                          (let ([pos-before (current-pos)])
+                            (a-text-insert what pos-before)
+                            (let ([pos-after (current-pos)])
+                              (change-style html-basic-style pos-before pos-after))))]
                        
                        [insert-newlines
                         (lambda (num forced-lines para-base)
@@ -812,13 +821,11 @@
                                   (not (= e #xFFFE))
                                   (not (<= #xD800 e #xDFFF))
                                   (send default-font screen-glyph-exists? (integer->char e)))
-                             ;; The call to `string' here should be removed. It
-                             ;; was here to avoid a v299.6 bug.
-                             (insert (string (integer->char e)))
+                             (insert (integer->char e))
                              void]
                             [(<= 913 e 969)
                              (let ([lp (current-pos)])
-                               (insert (string (integer->char (+ (- e 913) (char->integer #\A)))))
+                               (insert (integer->char (+ (- e 913) (char->integer #\A))))
                                (lambda ()
                                  (change-style delta:symbol lp (+ lp 1))))]
                             

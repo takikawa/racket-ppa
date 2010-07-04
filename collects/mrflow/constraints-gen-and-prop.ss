@@ -13,6 +13,7 @@
            "labels.ss"
            "types.ss"
            "set-hash.ss"
+           "assoc-set-hash.ss"
            (prefix util: "util.ss")
            (prefix hc: "hashcons.ss")
            (prefix cst: "constants.ss")
@@ -200,7 +201,7 @@
              env))
      env args args-labels))
   
-  ; syntax-object (listof (cons symbol label)) -> (union label #f)
+  ; syntax-object (listof (cons symbol label)) -> (or/c label #f)
   (define (lookup-env var env)
     (let ([name-label-pair (assq (syntax-e var) env)])
       (if name-label-pair
@@ -223,7 +224,7 @@
   (define (add-top-level-name sba-state term label)
     (hash-table-put! (sba-state-top-level-name->label sba-state) (syntax-object->datum term) label))
   
-  ; sba-state symbol -> (union label #f)
+  ; sba-state symbol -> (or/c label #f)
   ; finds the label for a top level var.
   (define (lookup-top-level-name sba-state name)
     (hash-table-get (sba-state-top-level-name->label sba-state) name cst:thunk-false))
@@ -2283,52 +2284,155 @@
       bound-label))
   
   
-  ; sba-state syntax-object (listof (cons symbol label)) label (listof label) -> label
-  (define (create-label-from-quote sba-state quoted-term gamma enclosing-lambda-label)
-    (let ([sexp-e (syntax-e quoted-term)])
-      (cond
-        [(list? sexp-e)
-         (let loop ([sexp-e sexp-e])
-           (if (null? sexp-e)
-               (let ([null-label
-                      (make-label-cst
-                       #f #f #f #f #t
-                       quoted-term
-                       (make-hash-table)
-                       (make-hash-table)
-                       '())])
-                 (initialize-label-set-for-value-source null-label)
-                 null-label)
+  ; (label -> void) syntax-object (assoc-setof location-info label) -> label
+  ; We must take sharing into account.  We can't count on using syntax-e and eq?
+  ; because they don't preserve sharing (see the MzScheme manual) and using
+  ; syntax-object->datum and eq? might mistakenly result in too much sharing, since
+  ; some values like intergers, symbols, and '() are always eq?.  So we have to rely
+  ; on source locations and so on.  And the reason we must take sharing into account
+  ; is because otherwise things like '#0=(1 . #0#) will make this code fail to
+  ; terminate.  Try the foolowing code in DrScheme to see why syntax-e and
+  ; syntax-object->datum are not what we want:
+  ;  (define-syntax lst
+  ;    (syntax-rules ()
+  ;      [(_ a b) #'(a a b)]))
+  ;  (lst 1 1)
+  ;  (define w1 #`#,(lst 1 1))
+  ;  w1
+  ;  (define w2 (syntax-e w1))
+  ;  w2
+  ;  (define w3 w2)
+  ;  w3
+  ;  (eq? (car w3) (cadr w3))
+  ;  (eq? (car w3) (caddr w3))
+  ;  (define w4 (syntax-object->datum w1))
+  ;  w4
+  ;  (eq? (car w4) (cadr w4))
+  ;  (eq? (car w4) (caddr w4))
+  ;
+  ;  '(1 1 1)
+  ;  (define x1 #''(1 1 1))
+  ;  x1
+  ;  (define x2 (syntax-e x1))
+  ;  x2
+  ;  (define x3 (syntax-e (cadr x2)))
+  ;  x3
+  ;  (eq? (car x3) (cadr x3))
+  ;  (eq? (car x3) (caddr x3))
+  ;  (define x4 (syntax-object->datum (cadr x2)))
+  ;  x4
+  ;  (eq? (car x4) (cadr x4))
+  ;  (eq? (car x4) (caddr x4))
+  ;  
+  ;  '(#0=1 #0# 1)
+  ;  (define y1 #''(#0=1 #0# 1))
+  ;  y1
+  ;  (define y2 (syntax-e y1))
+  ;  y2
+  ;  (define y3 (syntax-e (cadr y2)))
+  ;  y3
+  ;  (eq? (car y3) (cadr y3))
+  ;  (eq? (car y3) (caddr y3))
+  ;  (define y4 (syntax-object->datum (cadr y2)))
+  ;  y4
+  ;  (eq? (car y4) (cadr y4))
+  ;  (eq? (car y4) (caddr y4))
+  ;
+  ;  '(#0=(1) #0# (1))
+  ;  (define z1 #''(#0=(1) #0# (1)))
+  ;  z1
+  ;  (define z2 (syntax-e z1))
+  ;  z2
+  ;  (define z3 (syntax-e (cadr z2)))
+  ;  z3
+  ;  (eq? (car z3) (cadr z3))
+  ;  (eq? (car z3) (caddr z3))
+  ;  (define z4 (syntax-object->datum (cadr z2)))
+  ;  z4
+  ;  (eq? (car z4) (cadr z4))
+  ;  (eq? (car z4) (caddr z4))
+  ;
+  (define (create-label-from-quote register-label-with-gui term-stx assoc-set)
+    (let ([term-loc-info (list (syntax-source term-stx)
+                               (syntax-position term-stx)
+                               (syntax-span term-stx))])
+      ;(printf "Q: ~a ~a ~a ~a~n" (syntax-object->datum term-stx) (syntax-e term-stx) term-stx (assoc-set-in? assoc-set term-loc-info))
+      ;(printf "L: ~a~n" term-loc-info)
+      (if (assoc-set-in? assoc-set term-loc-info)
+          (assoc-set-get assoc-set term-loc-info)
+          (let ([sexp-e (syntax-e term-stx)])
+            (cond
+              [(list? sexp-e)
+               (let loop ([sexp-e sexp-e]
+                          [top-label? #t])
+                 (if (null? sexp-e)
+                     (let ([null-label
+                            (make-label-cst
+                             #f #f #f #f #t
+                             term-stx
+                             (make-hash-table)
+                             (make-hash-table)
+                             sexp-e)])
+                       (initialize-label-set-for-value-source null-label)
+                       null-label)
+                     (let ([cons-label
+                            (make-label-cons
+                             #f #f #f #f (not top-label?)
+                             term-stx
+                             (make-hash-table)
+                             (make-hash-table)
+                             #f
+                             #f)])
+                       ; the top-most cons-label in the list is the only one in
+                       ; the list that might be associated with a #n name and
+                       ; therefore the only one that might have a #n# sharing
+                       ; reference somewhere else, so we need to remember it so
+                       ; sharing is dealt with correctly.  We need to memoize it
+                       ; before any recursive call so that we close the loop
+                       ; correctly.
+                       (when top-label?
+                         (assoc-set-set assoc-set term-loc-info cons-label)
+                         (register-label-with-gui cons-label))
+                       (set-label-cons-car!
+                        cons-label
+                        (create-label-from-quote register-label-with-gui
+                                                 (car sexp-e) assoc-set))
+                       (set-label-cons-cdr!
+                        cons-label
+                        (loop (cdr sexp-e) #f))
+                       (initialize-label-set-for-value-source cons-label)
+                       cons-label)))]
+              [(pair? sexp-e)
                (let ([cons-label
                       (make-label-cons
-                       #f #f #f #f #t
-                       quoted-term
+                       #f #f #f #f #f
+                       term-stx
                        (make-hash-table)
                        (make-hash-table)
-                       (create-label-from-quote sba-state (car sexp-e) gamma enclosing-lambda-label)
-                       (loop (cdr sexp-e)))])
+                       #f
+                       #f)])
+                 (assoc-set-set assoc-set term-loc-info cons-label)
+                 (register-label-with-gui cons-label)
+                 (set-label-cons-car!
+                  cons-label
+                  (create-label-from-quote register-label-with-gui
+                                           (car sexp-e) assoc-set))
+                 (set-label-cons-cdr!
+                  cons-label
+                  (create-label-from-quote register-label-with-gui
+                                           (cdr sexp-e) assoc-set))
                  (initialize-label-set-for-value-source cons-label)
-                 cons-label)))]
-        [(pair? sexp-e)
-         (let ([cons-label
-                (make-label-cons
-                 #f #f #f #f #t
-                 quoted-term
-                 (make-hash-table)
-                 (make-hash-table)
-                 (create-label-from-quote sba-state (car sexp-e) gamma enclosing-lambda-label)
-                 (create-label-from-quote sba-state (cdr sexp-e) gamma enclosing-lambda-label))])
-           (initialize-label-set-for-value-source cons-label)
-           cons-label)]
-        [else (let ([label (make-label-cst
-                            #f #f #f #f #f
-                            quoted-term
-                            (make-hash-table)
-                            (make-hash-table)
-                            sexp-e)])
-                (initialize-label-set-for-value-source label)
-                ((sba-state-register-label-with-gui sba-state) label)
-                label)])))
+                 cons-label)]
+              [else (let ([label (make-label-cst
+                                  #f #f #f #f #f
+                                  term-stx
+                                  (make-hash-table)
+                                  (make-hash-table)
+                                  sexp-e)])
+                      (assoc-set-set assoc-set term-loc-info label)
+                      (initialize-label-set-for-value-source label)
+                      (register-label-with-gui label)
+                      label)])))))
   
   ; Builds a list of labels of length n, with all labels being the same.
   ; This function should be seldom called, so it's not being made tail recursive...
@@ -2513,7 +2617,8 @@
         ((sba-state-register-label-with-gui sba-state) label)
         label)]
      [(quote sexp)
-      (create-label-from-quote sba-state (syntax sexp) gamma enclosing-lambda-label)]
+      (create-label-from-quote (sba-state-register-label-with-gui sba-state)
+                               (syntax sexp) (assoc-set-make 'equal))]
      [(define-values vars exp)
       (let* (; scheme list of syntax objects
              [vars (syntax-e (syntax vars))]
@@ -3117,7 +3222,7 @@
   
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; PRIMITIVE TYPE PARSER AND LOOKUP
   
-  ; sba-state symbol -> (union prim-data #f)
+  ; sba-state symbol -> (or/c prim-data #f)
   (define (lookup-primitive-data sba-state name)
     (hash-table-get (sba-state-primitive-types-table sba-state) name cst:thunk-false))
   
@@ -4345,14 +4450,14 @@
   
   ; called when t2 is a (flow var free) type instead of a handle
   (define/contract subtype-type
-    (sba-state? handle? hc:hashcons-type? any/c boolean? (union false/c label?) . -> . boolean?)
+    (sba-state? handle? hc:hashcons-type? any/c boolean? (or/c false/c label?) . -> . boolean?)
     (lambda (sba-state t1-handle t2 delta-flow error? label)
       (subtype sba-state t1-handle
                (hc:hashcons-type (sba-state-hashcons-tbl sba-state) t2)
                delta-flow error? label)))
   
   (define/contract subtype
-    (sba-state? handle? handle? any/c boolean? (union false/c label?) . -> . boolean?)
+    (sba-state? handle? handle? any/c boolean? (or/c false/c label?) . -> . boolean?)
     (lambda (sba-state t1-handle t2-handle delta-flow error? label)
       (if (subt sba-state (sba-state-hashcons-tbl sba-state) t1-handle t2-handle delta-flow (set-make 'equal))
           #t
@@ -4388,11 +4493,11 @@
                 (eq? term-type '#%top)
                 (eq? term-type 'quote))))))
   
-  ; label -> (union number #f)
+  ; label -> (or/c number #f)
   (define (get-span-from-label label)
     (syntax-span (label-term label)))
   
-  ; sba-state label (union 'red 'green 'orange) string -> void
+  ; sba-state label (or/c 'red 'green 'orange) string -> void
   (define (set-error-for-label sba-state label gravity message)
     (err:error-table-set (sba-state-errors sba-state)
                          (list label)
@@ -4468,7 +4573,7 @@
             (set-type-var-reach! (label-type-var label) set)
             set))))
   
-  ; label -> (union type-var handle)
+  ; label -> (or/c type-var handle)
   ; the label better have a type-var...
   (define (get-handle-or-type-var label)
     (let* ([type-var (label-type-var label)]
@@ -4541,7 +4646,7 @@
           (set-type-var-handle! (label-type-var label) handle)
           handle)))
   
-  ; type (union (hash-table-of type-flow-var (cons label type)) symbol) -> string
+  ; type (or/c (hash-table-of type-flow-var (cons label type)) symbol) -> string
   ; type pretty printer
   ; delta-flow is the flow variable environment, or a symbol if no flow environment
   ; was available at the time of the call.
@@ -4878,9 +4983,7 @@
   ;                                              (substring file 0 9))
   ;                                    (string=? "test-realbig"
   ;                                              (substring file 0 12))))
-  ;                             (list:quicksort 
-  ;                              (directory-list path)
-  ;                              string<=?)
+  ;                             (list:sort (directory-list path) string<=?)
   ;                             )]
   ;         )
   ;    (initialize-primitive-type-schemes XXX)

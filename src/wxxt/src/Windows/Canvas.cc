@@ -4,7 +4,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2005 PLT Scheme, Inc.
+ * Copyright: (C) 2004-2006 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -362,7 +362,7 @@ void wxCanvas::SetScrollbars(int h_pixels, int v_pixels, int x_len, int y_len,
 	XtVaSetValues(X->scroll,
 		      XtNhScrollAmount, h_units,
 		      XtNvScrollAmount, v_units,
-		      0);
+		      NULL);
       }
     } else {
       Arg a[8];

@@ -73,10 +73,13 @@ GC2_EXTERN void GC_init_type_tags(int count, int weakbox, int ephemeron);
    freedom in the layout of a weak box or ephemeron, so it performs weak
    box traversals itself, but MzScheme gets to choose the tag.) */
 
-GC2_EXTERN void GC_register_thread(void *, void *);
+GC2_EXTERN void GC_register_new_thread(void *, void *);
 /*
    Indicates that a just-allocated point is for a thread record
    owned by a particular custodian. */
+GC2_EXTERN void GC_register_thread(void *, void *);
+/*
+   Indicates that a a thread record is owned by a particular custodian. */
 
 GC2_EXTERN void (*GC_collect_start_callback)(void);
 GC2_EXTERN void (*GC_collect_end_callback)(void);
@@ -188,6 +191,11 @@ GC2_EXTERN void GC_free_immobile_box(void **b);
    Allocate (or free) a non-GCed box containing a pointer to a GCed
    value.  The pointer is stored as the first longword of the box. */
 
+GC2_EXTERN long GC_malloc_atomic_stays_put_threshold();
+/*
+   Returns a minimum size for which atomic allocations generate
+   objects that never move. */
+
 /***************************************************************************/
 /* Memory tracing                                                          */
 /***************************************************************************/
@@ -219,6 +227,9 @@ GC2_EXTERN void GC_finalization_weak_ptr(void **p, int offset);
 GC2_EXTERN void **GC_variable_stack;
 /*
    See the general overview in README. */
+
+GC2_EXTERN void **GC_get_variable_stack();
+GC2_EXTERN void GC_set_variable_stack(void **p);
 
 GC2_EXTERN void GC_register_traversers(short tag, Size_Proc size, Mark_Proc mark, Fixup_Proc fixup,
 				       int is_constant_size, int is_atomic);
@@ -304,14 +315,19 @@ GC2_EXTERN void GC_fixup_variable_stack(void **var_stack,
 #endif
 
 /* Macros (implementation-specific): */
+#ifdef __x86_64__
+# define gcLOG_WORD_SIZE 3
+#else
+# define gcLOG_WORD_SIZE 2
+#endif
 #define gcMARK(x) GC_mark(x)
 #define gcMARK_TYPED(t, x) gcMARK(x)
 #define gcMARK_TYPED_NOW(t, x) gcMARK(x)
 #define gcFIXUP_TYPED_NOW(t, x) GC_fixup(&(x))
 #define gcFIXUP_TYPED(t, x) gcFIXUP_TYPED_NOW(void*, x)
 #define gcFIXUP(x) gcFIXUP_TYPED(void*, x)
-#define gcBYTES_TO_WORDS(x) ((x + 3) >> 2)
-#define gcWORDS_TO_BYTES(x) (x << 2)
+#define gcBYTES_TO_WORDS(x) ((x + (1 << gcLOG_WORD_SIZE) - 1) >> gcLOG_WORD_SIZE)
+#define gcWORDS_TO_BYTES(x) (x << gcLOG_WORD_SIZE)
 
 #define GC_INTERIORABLES_NEVER_MOVE 1
 

@@ -13,11 +13,18 @@
   (require (lib "file.ss")
            (lib "unitsig.ss")
            (lib "port.ss")
-	   "url-structs.ss"
+           (lib "string.ss")
+           (lib "list.ss")
+           "url-structs.ss"
            "uri-codec.ss"
            "url-sig.ss"
            "tcp-sig.ss")
   (provide url@)
+
+  ;; undocumented hook to allow testing
+  (provide set-url:os-type!)
+  (define url:os-type (system-type))
+  (define (set-url:os-type! new) (set! url:os-type new))
 
   (define url@
     (unit/sig net:url^
@@ -50,7 +57,7 @@
                                                        (string->immutable-string (cadr v))
                                                        (caddr v)))
                                      v)))))
-
+      
       (define url-error
         (lambda (fmt . args)
           (let ((s (string->immutable-string
@@ -60,12 +67,7 @@
                                                  arg))
                                            args)))))
             (raise (make-url-exception s (current-continuation-marks))))))
-
-      (define (url->file-path url)
-	(path->string
-	 (apply build-path (or (url-host url) 'same)
-		(map (lambda (x) (if (equal? x "") 'same x)) (url-path url)))))
-
+      
       (define url->string
         (lambda (url)
           (let ((scheme (url-scheme url))
@@ -75,24 +77,22 @@
                 (path (url-path url))
                 (query (url-query url))
                 (fragment (url-fragment url)))
-            (cond
-             ((and scheme (string=? scheme "file"))
-              (string-append "file:" 
-			     (url->file-path url)
-                             (or (and (not fragment) "")
-                                 (string-append "#" fragment))))
-             (else
-              (let ((sa string-append))
-                (sa (if scheme (sa scheme "://") "")
-                    (if user (sa (uri-encode user) "@") "")
-                    (if host host "")
-                    (if port (sa ":" (number->string port)) "")
-                                        ; There used to be a "/" here, but that causes an
-                                        ; extra leading slash -- wonder why it ever worked!
-                    (combine-path-strings path)
-                    ;(if query (sa "?" (uri-encode query)) "")
-                    (if (null? query) "" (sa "?"  (alist->form-urlencoded query)))
-                    (if fragment (sa "#" (uri-encode fragment)) ""))))))))
+            (let ((sa string-append))
+              (sa (if scheme (sa scheme ":") "")
+                  (if (or user host port)
+                      (sa
+                       "//"
+                       (if user (sa (uri-encode user) "@") "")
+                       (if host host "")
+                       (if port (sa ":" (number->string port)) "")
+                       ; There used to be a "/" here, but that causes an
+                       ; extra leading slash -- wonder why it ever worked!
+                       )
+                      "")
+                  (combine-path-strings (url-path-absolute? url) path)
+                  ;(if query (sa "?" (uri-encode query)) "")
+                  (if (null? query) "" (sa "?"  (alist->form-urlencoded query)))
+                  (if fragment (sa "#" (uri-encode fragment)) ""))))))
 
       ;; url->default-port : url -> num
       (define url->default-port
@@ -126,7 +126,8 @@
                    (url->string
                     (if proxy
                         url
-                        (make-url #f #f #f #f
+                        (make-url #f #f #f #f 
+                                  (url-path-absolute? url)
                                   (url-path url)
                                   (url-query url)
                                   (url-fragment url))))))
@@ -145,10 +146,29 @@
 	    (tcp-abandon-port client->server) ; flushes
             server->client)))
 
+      (define (file://->path url)
+        ;; remove all ""s
+        (let ([elts (remove* '("") (map path/param-path (url-path url)))]
+              [abs? (url-path-absolute? url)])
+          ;; See the discussion in PR8060 for an explanation
+          (if (eq? 'windows url:os-type)
+            (let ([host (or (url-host url) "")])
+              (unless (equal? "" host) (set! elts (cons host elts)))
+              (if (null? elts)
+                (build-path) ; make it throw the error
+                (let* ([fst (car elts)] [len (string-length fst)])
+                  (if (or (not abs?) (eq? #\: (string-ref fst (sub1 len))))
+                    (apply build-path elts)
+                    (if (null? (cdr elts))
+                      (build-path (string-append "\\\\" (car elts)))
+                      (apply build-path
+                             (string-append "\\\\" (car elts) "\\" (cadr elts))
+                             (cddr elts)))))))
+            (apply build-path (if abs? (cons "/" elts) elts)))))
+
       ;; file://get-pure-port : url -> in-port
-      (define file://get-pure-port
-        (lambda (url)
-          (open-input-file (url->file-path url))))
+      (define (file://get-pure-port url)
+        (open-input-file (file://->path url)))
 
       (define (schemeless-url url)
         (url-error "Missing protocol (usually \"http:\") at the beginning of URL: ~a" url))
@@ -223,62 +243,95 @@
                (not (url-fragment url))
                (null? (url-path url)))))
 
-      (define (combine-url/relative base string)
-        (let ([relative (string->url string)])
+     
+      ;; transliteration of code in rfc 3986, section 5.2.2
+      (define (combine-url/relative Base string)
+        (let ([R (string->url string)]
+              [T (make-url #f #f #f #f #f '() '() #f)])
+          (if (url-scheme R)
+              (begin 
+                (set-url-scheme! T (url-scheme R))
+                (set-url-user! T (url-user R))  ;; authority
+                (set-url-host! T (url-host R))  ;; authority
+                (set-url-port! T (url-port R))  ;; authority
+                (set-url-path-absolute?! T (url-path-absolute? R))
+                (set-url-path! T (remove-dot-segments (url-path R)))
+                (set-url-query! T (url-query R)))
+              (begin
+                (if (url-host R)  ;; => authority is defined
+                    (begin 
+                      (set-url-user! T (url-user R))  ;; authority
+                      (set-url-host! T (url-host R))  ;; authority
+                      (set-url-port! T (url-port R))  ;; authority
+                      (set-url-path-absolute?! T (url-path-absolute? R))
+                      (set-url-path! T (remove-dot-segments (url-path R)))
+                      (set-url-query! T (url-query R)))
+                    (begin
+                      (if (null? (url-path R)) ;; => R has empty path
+                          (begin
+                            (set-url-path-absolute?! T (url-path-absolute? Base))
+                            (set-url-path! T (url-path Base))
+                            (if (not (null? (url-query R)))
+                                (set-url-query! T (url-query R))
+                                (set-url-query! T (url-query Base))))
+                          (begin
+                            (cond
+                              [(url-path-absolute? R)
+                               (set-url-path-absolute?! T #t)
+                               (set-url-path! T (remove-dot-segments (url-path R)))]
+                              [(and (null? (url-path Base))
+                                    (url-host Base))
+                               (set-url-path-absolute?! T #t)
+                               (set-url-path! T (remove-dot-segments (url-path R)))]
+                              [else
+                               (set-url-path-absolute?! T (url-path-absolute? Base))
+                               (set-url-path! T (remove-dot-segments 
+                                                 (append (all-but-last (url-path Base))
+                                                         (url-path R))))])
+                            (set-url-query! T (url-query R))))
+                      (set-url-user! T (url-user Base))   ;; authority
+                      (set-url-host! T (url-host Base))   ;; authority
+                      (set-url-port! T (url-port Base)))) ;; authority
+                (set-url-scheme! T (url-scheme Base))))
+          (set-url-fragment! T (url-fragment R))
+          T))
+      
+      (define (all-but-last lst)
+        (cond
+          [(null? lst) null]
+          [(null? (cdr lst)) null]
+          [else (cons (car lst) (all-but-last (cdr lst)))]))
+      
+      ;; cribbed from 5.2.4 in rfc 3986
+      ;; the strange cases 2 and 4 implicitly change urls
+      ;; with paths segments "." and ".." at the end
+      ;; into "./" and "../" respectively
+      (define (remove-dot-segments path)
+        (let loop ([path path]
+                   [result '()])
           (cond
-            [(empty-url? base)                ; Step 1
-             relative]
-            [(empty-url? relative)            ; Step 2a
-             base]
-            [(url-scheme relative)            ; Step 2b
-             relative]
-            [else                             ; Step 2c
-             (set-url-scheme! relative (url-scheme base))
-             (cond
-               [(url-host relative)     ; Step 3
-                relative]
-               [else
-                (set-url-host! relative (url-host base))
-                (set-url-port! relative (url-port base)) ; Unspecified!
-                (let ([rel-path (url-path relative)])
-                  (cond
-                    [(and (not (equal? string "")) ; Step 4
-                          (char=? #\/ (string-ref string 0)))
-                     relative]
-                    [(or (not rel-path) ; Step 5
-                         (null? rel-path))
-                     (set-url-path! relative (url-path base))
-                     (when (url-query relative)
-                       (set-url-query! relative (url-query base)))
-                     relative]
-                    [else               ; Step 6
-                     (merge-and-normalize
-                      (url-path base) relative)]))])])))
-
-      (define (merge-and-normalize base-path relative-url)
-        (let* ([joined
-                (let loop ([base-path base-path])
-                  (cond
-                    [(null? base-path) (url-path relative-url)]
-                    [(null? (cdr base-path)) (url-path relative-url)]
-                    [else (cons (car base-path) (loop (cdr base-path)))]))]
-               [reversed/simplified
-                (if (null? joined)
-                    null
-                    (let loop ([segs (reverse joined)])
-                      (cond
-                        [(null? segs) null]
-                        [else (let ([fst (car segs)])
-                                (cond
-                                  [(string=? fst ".")
-                                   (loop (cdr segs))]
-                                  [(string=? fst "..")
-                                   (if (null? (cdr segs))
-                                       segs
-                                       (loop (cddr segs)))]
-                                  [else (cons (car segs) (loop (cdr segs)))]))])))])
-          (set-url-path! relative-url (reverse reversed/simplified))
-          relative-url))
+            [(null? path) (reverse result)]
+            [(and (eq? (path/param-path (car path)) 'same)
+                  (null? (cdr path)))
+             (loop (cdr path)
+                   (cons (make-path/param "" '()) result))]
+            [(eq? (path/param-path (car path)) 'same)
+             (loop (cdr path)
+                   result)]
+            [(and (eq? (path/param-path (car path)) 'up)
+                  (null? (cdr path))
+                  (not (null? result)))
+             (loop (cdr path) 
+                   (cons (make-path/param "" '()) (cdr result)))]
+            [(and (eq? (path/param-path (car path)) 'up)
+                  (not (null? result)))
+             (loop (cdr path) (cdr result))]
+            [(and (eq? (path/param-path (car path)) 'up)
+                  (null? result))
+             ;; when we go up too far, just drop the "up"s.
+             (loop (cdr path) result)]
+            [else
+             (loop (cdr path) (cons (car path) result))])))
 
       ;; call/input-url : url x (url -> in-port) x (in-port -> T)
       ;;                  [x list (str)] -> T
@@ -320,90 +373,50 @@
 
       ;; string->url : str -> url
       ;; New implementation, mostly provided by Neil Van Dyke
-      (define string->url
-        (let ((rx (regexp (string-append
-                           "^"
-                           "[ \t\f\r\n]*"
-                           "("                ; <1  front-opt
-                           "([a-zA-Z]*:)?"    ; =2  scheme-colon-opt
-                           "("                ; <3  slashslash-opt
-                           "//"
-                           "([^:/@;?#]*@)?"   ; =4  user-at-opt
-                           "([^:/@;?#]+)?"    ; =5  host-opt
-                           "(:[0-9]*)?"       ; =6  colon-port-opt
-                           ")?"               ; >3  slashslash-opt
-                           ")?"               ; >1  front-opt
-                           "([^?#]*)"         ; =7  path
-                           "(\\?[^#]*)?"      ; =8  question-query-opt
-                           "(#.*)?"           ; =9 hash-fragment-opt
-                           "[ \t\f\r\n]*"
-                           "$"))))
-          (lambda (str)
-            (let ([m (regexp-match #rx"^[ \t\f\r\n]*file:(.*)$" str)])
-              ;; File scheme:
-              (if m
-                  (let ([path+fragment (regexp-match #rx"^([^#]*)(#(.*))?$" (cadr m))])
-                    (let ([path (cadr path+fragment)]
-                          [fragment (caddr path+fragment)])
-                      (if (or (relative-path? path)
-                              (absolute-path? path))
-			  (let-values ([(root elems kind)
-					(let loop ([path (simplify-path path)][accum null][kind #f])
-					  (let-values ([(base name dir?) (split-path path)])
-					    (let ([kind (or kind
-							    (if dir? 'dir 'file))])
-					      (cond
-					       [(path? base)
-						(loop base (cons name accum) kind)]
-					       [(eq? base 'relative)
-						(values #f (cons name accum) kind)]
-					       [else
-						(values path accum kind)]))))])
-			    (make-url "file"
-				      #f  ; user
-				      (and root (path->string root))  ; host
-				      #f  ; port
-				      (append (map path->string elems)
-					      (if (eq? kind 'dir)
-						  '("")
-						  null))
-				      '()  ; query
-				      fragment))
-                          (url-error "scheme 'file' path ~s neither relative nor absolute" path))))
-                  ;; Other scheme:
-                  (let ((match (regexp-match-positions rx str)))
-                    (if match
-                        (let* ((get-str (lambda (pos skip-left skip-right)
-                                          (let ((pair (list-ref match pos)))
-                                            (if pair
-                                                (substring str
-                                                           (+ (car pair) skip-left)
-                                                           (- (cdr pair) skip-right))
-                                                #f))))
-                               (get-num (lambda (pos skip-left skip-right)
-                                          (let ((s (get-str pos skip-left skip-right)))
-                                            (if s (string->number s) #f))))
-                               (host (get-str 5  0 0)))
-                          (make-url (get-str 2  0 1) ; scheme
-                                    (uri-decode/maybe (get-str 4  0 1)) ; user
-                                    host
-                                    (get-num 6  1 0) ; port
-                                    (separate-path-strings
-                                     (let ([path (get-str 7  0 0)])
-                                       ;; If path is "" and the input is an absolute URL
-                                       ;; with a hostname, then the intended path is "/",
-                                       ;; but the URL is missing a "/" at the end.
-                                       (if (and (string=? path "")
-                                                host)
-                                           "/"
-                                           path)))
-                                    ;(uri-decode/maybe (get-str 8  1 0)) ;
-                                    ;query
-                                    (let ([q (get-str 8 1 0)])
-                                      (if q (form-urlencoded->alist q) '()))
-                                    (uri-decode/maybe (get-str 9  1 0)) ; fragment
-                                    ))
-                        (url-error "Invalid URL string: ~e" str))))))))
+      (define url-rx
+        (regexp (string-append
+                 "^"
+                 "[ \t\f\r\n]*"
+                 "(?:"                ; <A  front-opt
+                 "(?:([a-zA-Z]*):)?"  ; =1  scheme-colon-opt
+                 "(?:"                ; <B  slashslash-opt
+                 "//"
+                 "(?:([^:/@;?#]*)@)?" ; =2  user-at-opt
+                 "([^:/@;?#]*)?"      ; =3  host-opt
+                 "(?::([0-9]*))?"     ; =4  colon-port-opt
+                 ")?"                 ; >B  slashslash-opt
+                 ")?"                 ; >A  front-opt
+                 "([^?#]*)"           ; =5  path
+                 "(?:\\?([^#]*))?"    ; =6  question-query-opt
+                 "(?:#(.*))?"         ; =7  hash-fragment-opt
+                 "[ \t\f\r\n]*"
+                 "$")))
+      (define (string->url str)
+        (apply
+         (lambda (scheme user host port path query fragment)
+           ;; Windows => "file://xxx:/...." specifies a "xxx:/..." path
+           (when (and (equal? "" port) (equal? "file" scheme)
+                      (eq? 'windows url:os-type))
+             (set! path (string-append host ":" path))
+             (set! host #f))
+           (let* ([user   (uri-decode/maybe user)]
+                  [port   (and port (string->number port))]
+                  [abs?   (and (not (= 0 (string-length path)))
+                               (char=? #\/ (string-ref path 0)))]
+                  [path   (separate-path-strings
+                           ;; If path is "" and the input is an absolute URL
+                           ;; with a hostname, then the intended path is "/",
+                           ;; but the URL is missing a "/" at the end.
+                           path
+                           #;
+                           (if (and (string=? path "") host) "/" path))]
+                  [query   (if query (form-urlencoded->alist query) '())]
+                  [fragment (uri-decode/maybe fragment)])
+             (when (string? scheme) (string-lowercase! scheme))
+             (when (string? host) (string-lowercase! host))
+             (make-url scheme user host port abs? path query fragment)))
+         (cdr (or (regexp-match url-rx str)
+                  (url-error "Invalid URL string: ~e" str)))))
 
       (define (uri-decode/maybe f)
         ;; If #f, and leave unmolested any % that is followed by hex digit
@@ -411,43 +424,52 @@
         ;; in an attempt to be "friendly"
         (and f (uri-decode (regexp-replace* "%([^0-9a-fA-F])" f "%25\\1"))))
 
-      ;; separate-path-strings : string[starting with /] -> (listof (union string path/param))
+      ;; separate-path-strings : string[starting with /] -> (listof path/param)
       (define (separate-path-strings str)
+        (let ([strs (regexp-split #rx"/" str)])
+          (map separate-params (if (string=? "" (car strs)) (cdr strs) strs))))
+
+      (define (separate-params s)
+        (let ([lst (map path-segment-decode (regexp-split #rx";" s))])
+          (make-path/param (car lst) (cdr lst))))
+
+      (define (path-segment-decode p)
+        (cond [(string=? p "..") 'up]
+              [(string=? p ".") 'same]
+              [else (uri-path-segment-decode p)]))
+
+      (define (path-segment-encode p)
         (cond
-          [(string=? str "") '()]
+          [(eq? p 'up) ".."]
+          [(eq? p 'same) "."]
+          [(equal? p "..") "%2e%2e"]
+          [(equal? p ".") "%2e"]
+          [else (uri-path-segment-encode p)]))
+      
+      (define (combine-path-strings absolute? path/params)
+        (cond
+          [(null? path/params) ""]
+          [else 
+           (apply string-append
+                  (if absolute? "/" "")
+                  (add-between "/" (map join-params path/params)))]))
+
+      (define (join-params s)
+        (apply string-append
+               (add-between ";" (map path-segment-encode
+                                     (cons (path/param-path s)
+                                           (path/param-param s))))))
+      
+      (define (add-between bet lst)
+        (cond
+          [(null? lst) null]
+          [(null? (cdr lst)) lst]
           [else
-           (let loop ([str (if (char=? #\/ (string-ref str 0))
-                               (substring str 1 (string-length str))
-                               str)])
+           (let loop ([fst (car lst)]
+                      [lst (cdr lst)])
              (cond
-               [(regexp-match #rx"([^/]*)/(.*)$" str)
-                =>
-                (lambda (m)
-                  (cons (maybe-separate-params (cadr m)) (loop (caddr m))))]
-               [else (list (maybe-separate-params str))]))]))
-
-      (define (maybe-separate-params s)
-        (cond
-          [(regexp-match #rx"^([^;]*);(.*)$" s)
-           =>
-           (lambda (m)
-             (make-path/param (cadr m) (caddr m)))]
-          [else s]))
-
-      (define (combine-path-strings strs)
-        (apply
-         string-append
-         (let loop ([strs strs])
-           (cond
-             [(null? strs) '()]
-             [else (list* "/"
-                          (maybe-join-params (car strs))
-                          (loop (cdr strs)))]))))
-
-      ;; needs to unquote things!
-      (define (maybe-join-params s)
-        (cond
-          [(string? s) s]
-          [else (string-append (path/param-path s)
-                               ";"
-                               (path/param-param s))])))))
+               [(null? lst) (list fst)]
+               [else (list* fst 
+                            bet
+                            (loop (car lst)
+                                  (cdr lst)))]))])))))

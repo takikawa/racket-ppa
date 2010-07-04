@@ -227,14 +227,34 @@
 
   ;; optionals and keys
   (let ([f (lambda/kw (#:optional a b #:key c d) (list a b c d))])
+    ;; the parts that are commented out are relying on the old (CL-like)
+    ;; behavior of always treating the first arguments as optionals.  Now a
+    ;; keyword marks the end of the optionals.
     (t '(#f #f #f #f)    <= (f)
        '(1 #f #f #f)     <= (f 1)
        '(1 2 #f #f)      <= (f 1 2)
-       '(#:c #:d #f #f)  <= (f #:c #:d)
-       '(#:c 1 #f #f)    <= (f #:c 1)
+       ;; '(#:c #:d #f #f)  <= (f #:c #:d)
+       ;; '(#:c 1 #f #f)    <= (f #:c 1)
        '(1 2 #:d #f)     <= (f 1 2 #:c #:d)
-       '(#:c #:d #:d #f) <= (f #:c #:d #:c #:d)
-       '(#:c 1 #:d #f)   <= (f #:c 1 #:c #:d)))
+       ;; '(#:c #:d #:d #f) <= (f #:c #:d #:c #:d)
+       ;; '(#:c 1 #:d #f)   <= (f #:c 1 #:c #:d)
+       ;; Test new behavior on the commented expressions that are valid
+       '(#f #f #:d #f)   <= (f #:c #:d)
+       '(#f #f 1 #f)     <= (f #:c 1)
+       ;; Now test the new behavior
+       '(#f #f #f 2)     <= (f #:d 2)
+       '(1 #f #f 2)      <= (f 1 #:d 2)
+       '(1 2 #f 2)       <= (f 1 2 #:d 2)
+       '(1 #f #f 2)      <= (f 1 #f #:d 2)))
+  (let ([f (lambda/kw (x #:optional a b #:key c d) (list x a b c d))])
+    ;; also test that the required argument is still working fine
+    (t '(0 #f #f #f 2)   <= (f 0 #:d 2)
+       '(0 1 #f #f 2)    <= (f 0 1 #:d 2)
+       '(0 1 2 #f 2)     <= (f 0 1 2 #:d 2)
+       '(0 1 #f #f 2)    <= (f 0 1 #f #:d 2)
+       '(#:x 1 #f #f 2)  <= (f #:x 1 #f #:d 2)
+       ;; and test errors
+       :rt-err:          <= (f 0 #:c 2 #:c 3)))
 
   ;; multi-level arg lists with #:body specs
   (let ([f (lambda/kw (#:key x y #:body (z)) (list x y z))])
@@ -355,9 +375,11 @@
      :st-err: <= (lambda/kw (x #:body x #:allow-other-keys) 1)
      :st-err: <= (lambda/kw (x #:optional ()) 1)
      :st-err: <= (lambda/kw (x #:optional (x y z)) 1)
-     :st-err: <= (lambda/kw (x #:other-keys z) 1)
-     :st-err: <= (lambda/kw (x #:other-keys+body z) 1)
-     :st-err: <= (lambda/kw (x #:all-keys z) 1)
+     ;; :st-err: <= (lambda/kw (x #:other-keys z) 1)      <-- these are all
+     ;; :st-err: <= (lambda/kw (x #:other-keys+body z) 1) <-- fine!
+     ;; :st-err: <= (lambda/kw (x #:all-keys z) 1)        <-- (see below)
+     :st-err: <= (lambda/kw (x #:other-keys z #:forbid-other-keys) 1)
+     :st-err: <= (lambda/kw (x #:all-keys   z #:forbid-other-keys) 1)
      :st-err: <= (lambda/kw (x #:key y #:allow-other-keys z) 1)
      :st-err: <= (lambda/kw (x #:key y #:forbid-body z) 1)
      :st-err: <= (lambda/kw (x #:key y #:allow-body #:rest r #:forbid-body) 1)
@@ -366,5 +388,13 @@
      :st-err: <= (lambda/kw (x #:key y z #:body (x)) x)
      :st-err: <= (lambda/kw (#:key a #:body r #:forbid-body) r)
      :st-err: <= (lambda/kw (#:key a #:other-keys r #:forbid-other-keys) r))
+
+  ;; it is ok to have no keys, and still specify all-keys etc
+  (let ([f (lambda/kw (x #:all-keys ak) (list x ak))])
+    (t (f 1)             => '(1 ())
+       (f 1 #:a 2)       => '(1 (#:a 2))
+       (f 1 #:a 2 #:b 3) => '(1 (#:a 2 #:b 3))
+       (f 1 #:a 2 #:a 3) => '(1 (#:a 2 #:a 3))
+       (f 1 #:a 2 #:a 3) => '(1 (#:a 2 #:a 3))))
 
   )

@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -118,6 +118,8 @@ double scheme_floating_point_nzero = 0.0; /* negated below; many compilers treat
 void
 scheme_init_number (Scheme_Env *env)
 {
+  Scheme_Object *p;
+
   REGISTER_SO(scheme_pi);
   REGISTER_SO(scheme_half_pi);
   REGISTER_SO(scheme_zerod);
@@ -217,21 +219,20 @@ scheme_init_number (Scheme_Env *env)
   scheme_single_nan_object = scheme_make_float((float)not_a_number_val);
 #endif
 
-  scheme_add_global_constant("number?", 
-			     scheme_make_folding_prim(number_p,
-						      "number?",
-						      1, 1, 1),
-			     env);
+  p = scheme_make_folding_prim(number_p, "number?", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant("number?", p, env);
+
   scheme_add_global_constant("complex?", 
 			     scheme_make_folding_prim(complex_p,
 						      "complex?",
 						      1, 1, 1),
 			     env);
-  scheme_add_global_constant("real?", 
-			     scheme_make_folding_prim(real_p,
-						      "real?",
-						      1, 1, 1),
-			     env);
+
+  p = scheme_make_folding_prim(real_p, "real?", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant("real?", p, env);
+
   scheme_add_global_constant("rational?", 
 			     scheme_make_folding_prim(rational_p,
 						      "rational?",
@@ -262,31 +263,27 @@ scheme_init_number (Scheme_Env *env)
 						      "even?",
 						      1, 1, 1),
 			     env);
-  scheme_add_global_constant("bitwise-and", 
-			     scheme_make_folding_prim(scheme_bitwise_and,
-						      "bitwise-and",
-						      1, -1, 1),
-			     env);
-  scheme_add_global_constant("bitwise-ior", 
-			     scheme_make_folding_prim(bitwise_or,
-						      "bitwise-ior",
-						      1, -1, 1),
-			     env);
-  scheme_add_global_constant("bitwise-xor", 
-			     scheme_make_folding_prim(bitwise_xor,
-						      "bitwise-xor",
-						      1, -1, 1),
-			     env);
-  scheme_add_global_constant("bitwise-not", 
-			     scheme_make_folding_prim(bitwise_not,
-						      "bitwise-not",
-						      1, 1, 1),
-			     env);
-  scheme_add_global_constant("arithmetic-shift", 
-			     scheme_make_folding_prim(scheme_bitwise_shift,
-						      "arithmetic-shift",
-						      2, 2, 1),
-			     env);
+
+  p = scheme_make_folding_prim(scheme_bitwise_and, "bitwise-and", 0, -1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("bitwise-and", p, env);
+
+  p = scheme_make_folding_prim(bitwise_or, "bitwise-ior", 0, -1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("bitwise-ior", p, env);
+
+  p = scheme_make_folding_prim(bitwise_xor, "bitwise-xor", 0, -1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("bitwise-xor", p, env);
+
+  p = scheme_make_folding_prim(bitwise_not, "bitwise-not", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant("bitwise-not", p, env);
+
+  p = scheme_make_folding_prim(scheme_bitwise_shift, "arithmetic-shift", 2, 2, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("arithmetic-shift", p, env);
+
   scheme_add_global_constant("gcd", 
 			     scheme_make_folding_prim(gcd,
 						      "gcd", 
@@ -616,21 +613,12 @@ double scheme_real_to_double(Scheme_Object *r)
 }
 
 static
-/*   Inlining seems to trip over a bug in gcc 3.4.x, 
-     and it's not worth the trouble.
-   #ifndef NO_INLINE_KEYWORD
-   # ifndef DONT_INLINE_NZERO_TEST
-   MSC_IZE(inline)
-   # endif
-   #endif */
+#ifndef NO_INLINE_KEYWORD
+MSC_IZE(inline)
+#endif
 int minus_zero_p(double d)
 {
-  /* Relies on 4-byte "int": */
-  if (((int *) mzALIAS &d)[0] == ((int *) mzALIAS &scheme_floating_point_nzero)[0]
-      && ((int *) mzALIAS &d)[1] == ((int *) mzALIAS &scheme_floating_point_nzero)[1])
-    return 1;
-
-  return 0;
+  return (1 / d) < 0;
 }
 
 int scheme_minus_zero_p(double d)
@@ -881,8 +869,8 @@ even_p (int argc, Scheme_Object *argv[])
 
 static Scheme_Object *bin_lcm (Scheme_Object *n1, Scheme_Object *n2);
 
-GEN_NARY_OP(gcd, "gcd", scheme_bin_gcd, 0, scheme_is_integer, "integer")
-GEN_NARY_OP(lcm, "lcm", bin_lcm, 1, scheme_is_integer, "integer")
+GEN_NARY_OP(static, gcd, "gcd", scheme_bin_gcd, 0, scheme_is_integer, "integer")
+GEN_NARY_OP(static, lcm, "lcm", bin_lcm, 1, scheme_is_integer, "integer")
 
 Scheme_Object *
 scheme_bin_gcd (const Scheme_Object *n1, const Scheme_Object *n2)
@@ -1860,16 +1848,30 @@ static double sch_pow(double x, double y)
   } else if (MZ_IS_POS_INFINITY(x)) {
     if (y == 0.0)
       return 1.0;
+    else if (y < 0)
+      return 0.0;
     else
       return scheme_infinity_val;
   } else if (MZ_IS_NEG_INFINITY(x)) {
     if (y == 0.0)
       return 1.0;
     else {
-      if (fmod(y, 2.0) == 1.0)
-	return scheme_minus_infinity_val;
-      else
-	return scheme_infinity_val;
+      int neg = 0;
+      if (y < 0) {
+	neg = 1;
+	y = -y;
+      }
+      if (fmod(y, 2.0) == 1.0) {
+	if (neg)
+	  return scheme_floating_point_nzero;
+	else
+	  return scheme_minus_infinity_val;
+      } else {
+	if (neg)
+	  return 0.0;
+	else
+	  return scheme_infinity_val;
+      }
     }
   } else
     return pow(x, y);
@@ -2274,7 +2276,7 @@ scheme_inexact_to_exact (int argc, Scheme_Object *argv[])
     double d = SCHEME_FLOAT_VAL(o);
 
     /* Try simple case: */
-    Scheme_Object *i = scheme_make_integer((int)d);
+    Scheme_Object *i = scheme_make_integer((long)d);
     if ((double)SCHEME_INT_VAL(i) == d) {
 # ifdef NAN_EQUALS_ANYTHING
       if (!MZ_IS_NAN(d))
@@ -2322,9 +2324,9 @@ GEN_BIN_INT_OP(bin_bitwise_xor, "bitwise-xor", ^, scheme_bignum_xor)
 
 #define MZ_PUBLIC /**/
 
-GEN_TWOARY_OP(MZ_PUBLIC, scheme_bitwise_and, "bitwise-and", bin_bitwise_and, SCHEME_EXACT_INTEGERP, "exact integer")
-GEN_TWOARY_OP(static, bitwise_or, "bitwise-ior", bin_bitwise_or, SCHEME_EXACT_INTEGERP, "exact integer")
-GEN_TWOARY_OP(static, bitwise_xor, "bitwise-xor", bin_bitwise_xor, SCHEME_EXACT_INTEGERP, "exact integer")
+GEN_NARY_OP(MZ_PUBLIC, scheme_bitwise_and, "bitwise-and", bin_bitwise_and, -1, SCHEME_EXACT_INTEGERP, "exact integer")
+GEN_NARY_OP(static, bitwise_or, "bitwise-ior", bin_bitwise_or, 0, SCHEME_EXACT_INTEGERP, "exact integer")
+GEN_NARY_OP(static, bitwise_xor, "bitwise-xor", bin_bitwise_xor, 0, SCHEME_EXACT_INTEGERP, "exact integer")
 
 static Scheme_Object *
 bitwise_not(int argc, Scheme_Object *argv[])

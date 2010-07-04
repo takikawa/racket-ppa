@@ -172,9 +172,27 @@ TODO
       ;; the highlight must be set after the error message, because inserting into the text resets
       ;;     the highlighting.
       (define (drscheme-error-display-handler msg exn)
-        (let ([src-locs (if (exn:srclocs? exn)
-                            ((exn:srclocs-accessor exn) exn)
-                            '())])
+        (let* ([srclocs-stack 
+                (if (exn? exn)
+                    (filter values (map cdr (continuation-mark-set->context (exn-continuation-marks exn))))
+                    '())]
+               [stack 
+                (filter
+                 values
+                 (map (λ (srcloc)
+                        (let ([source (srcloc-source srcloc)]
+                              [pos (srcloc-position srcloc)]
+                              [span (srcloc-span srcloc)])
+                          (and source pos span
+                               (cons source (cons pos span)))))
+                      srclocs-stack))]
+               [src-locs (if (exn:srclocs? exn)
+                             ((exn:srclocs-accessor exn) exn)
+                             (if (null? stack)
+                                 '()
+                                 (list (car srclocs-stack))))])
+          (unless (null? stack)
+            (drscheme:debug:print-bug-to-stderr msg stack))
           (for-each drscheme:debug:display-srcloc-in-error src-locs)
           (display msg (current-error-port))
           (when (exn:fail:syntax? exn)
@@ -187,7 +205,9 @@ TODO
               (parameterize ([current-eventspace drscheme:init:system-eventspace])
                 (queue-callback
                  (λ ()
-                   (send rep highlight-errors/exn exn))))))))
+                   (send rep highlight-errors
+                         src-locs 
+                         (filter (λ (x) (is-a? (car x) text%)) stack)))))))))
       
       ;; drscheme-error-value->string-handler : TST number -> string
       (define (drscheme-error-value->string-handler x n)
@@ -709,7 +729,7 @@ TODO
                   (hash-table-put! ht (car arrs) n)
                   (loop (cdr arrs) (+ n 1))))
               (let* ([unsorted (hash-table-map ht list)]
-                     [sorted (quicksort unsorted (λ (x y) (<= (cadr x) (cadr y))))]
+                     [sorted (sort unsorted (λ (x y) (<= (cadr x) (cadr y))))]
                      [arrs (map car sorted)])
                 arrs)))
                     
@@ -847,8 +867,6 @@ TODO
             (send context set-breakables #f #f)
             (send context enable-evaluation))
           
-          (inherit backward-containing-sexp)
-          
           (define/augment (submit-to-port? key) 
             (and prompt-position
                  (only-whitespace-after-insertion-point)
@@ -927,17 +945,17 @@ TODO
           ;; continue to evaluate from the correct port.
           (define get-sexp/syntax/eof #f)
           (define/public (evaluate-from-port port complete-program? cleanup) ; =Kernel=, =Handler=
-              (send context disable-evaluation)
-              (send context reset-offer-kill)
-              (send context set-breakables (get-user-thread) (get-user-custodian))
-              (reset-pretty-print-width)
-              (when should-collect-garbage?
-                (set! should-collect-garbage? #f)
-                (collect-garbage))
-              (set! in-evaluation? #t)
-              (update-running #t)
-              (set! need-interaction-cleanup? #t)
-              
+            (send context disable-evaluation)
+            (send context reset-offer-kill)
+            (send context set-breakables (get-user-thread) (get-user-custodian))
+            (reset-pretty-print-width)
+            (when should-collect-garbage?
+              (set! should-collect-garbage? #f)
+              (collect-garbage))
+            (set! in-evaluation? #t)
+            (update-running #t)
+            (set! need-interaction-cleanup? #t)
+            
             (run-in-evaluation-thread
              (λ () ; =User=, =Handler=, =No-Breaks=
                (let* ([settings (current-language-settings)]
@@ -1370,7 +1388,7 @@ TODO
                                click-delta)))
             (unless (is-default-settings? user-language-settings)
               (insert/delta this (string-append " " (string-constant custom)) dark-green-delta))
-            (insert/delta this (format ".~n") welcome-delta)
+            (insert/delta this ".\n" welcome-delta)
             
             (for-each
              (λ (fn)
@@ -1378,7 +1396,7 @@ TODO
                              (string-append (string-constant teachpack) ": ")
                              welcome-delta)
                (insert/delta this fn dark-green-delta)
-               (insert/delta this (format ".~n") welcome-delta))
+               (insert/delta this ".\n" welcome-delta))
              (map path->string 
                   (drscheme:teachpack:teachpack-cache-filenames 
                    user-teachpack-cache)))
@@ -1399,7 +1417,7 @@ TODO
             (insert/delta this (string-append (string-constant welcome-to) " ") welcome-delta)
             (let-values ([(before after)
                           (insert/delta this (string-constant drscheme) click-delta drs-font-delta)])
-              (insert/delta this (format (string-append ", " (string-constant version) " ~a.~n") (version:version))
+              (insert/delta this (format (string-append ", " (string-constant version) " ~a.\n") (version:version))
                             welcome-delta)
               (set-clickback before after 
                              (λ args (drscheme:app:about-drscheme))
@@ -1529,7 +1547,10 @@ TODO
           
           (super-new)
           (auto-wrap #t)
-          (set-styles-sticky #f)))
+          (set-styles-sticky #f)
+
+	  (inherit set-max-undo-history)
+	  (set-max-undo-history 'forever)))
       
       (define input-delta (make-object style-delta%))
       (send input-delta set-delta-foreground (make-object color% 0 150 0))

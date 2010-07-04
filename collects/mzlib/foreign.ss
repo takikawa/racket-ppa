@@ -2,7 +2,8 @@
 
 (module foreign mzscheme
 
-(require #%foreign)
+(require #%foreign
+	 (lib "dirs.ss" "setup"))
 (require-for-syntax (lib "stx.ss" "syntax"))
 
 ;; This module is full of unsafe bindings that are not provided to requiring
@@ -162,11 +163,19 @@
       ;; unreliable).
       (let* ([version (if (pair? version) (string-append "." (car version)) "")]
              [fullpath (lambda (p) (path->complete-path (expand-path p)))]
+             [absolute? (absolute-path? name)]
              [name0 (path->string (expand-path name))]     ; orig name
              [name  (if (regexp-match lib-suffix-re name0) ; name + suffix
                       (string-append name0 version)
                       (string-append name0 "." lib-suffix version))])
-        (or (ffi-lib name #t)         ; try good name first
+        (or (and (not absolute?)
+                 (ormap (lambda (dir)
+                          ;; try good name first, then original
+                          (or (ffi-lib (build-path dir name) #t)
+                              (ffi-lib (build-path dir name0) #t)))
+                        (get-lib-search-dirs)))
+	    ;; Try without DLL path:
+	    (ffi-lib name #t)         ; try good name first
             (ffi-lib name0 #t)        ; try original
             (and (file-exists? name)  ; try a relative path
                  (ffi-lib (fullpath name) #t))
@@ -770,7 +779,7 @@
           (cond [(null? xs) n]
                 [(assq (car xs) symbols->integers) =>
                  (lambda (x) (loop (cdr xs) (bitwise-ior (cadr x) n)))]
-                [else (raise-type-error s->c (format "~a" (or name "bitmaks"))
+                [else (raise-type-error s->c (format "~a" (or name "bitmask"))
                                         symbols)]))))
     (lambda (n)
       (if (zero? n) ; probably common
@@ -1463,8 +1472,8 @@
     (if (zero? len)
       #f ; #() => NULL
       (let ([cblock (malloc len type)])
-        (let loop ([i (sub1 len)])
-          (unless (< i 0)
+        (let loop ([i 0])
+          (when (< i len)
             (ptr-set! cblock type i (vector-ref v i))
             (loop (add1 i))))
         cblock))))
@@ -1500,8 +1509,10 @@
 ;; which is not a good idea.
 (define killer-executor (make-will-executor))
 (define killer-thread
-  (thread (lambda () (let loop () (will-execute killer-executor) (loop)))))
+  (delay
+    (thread (lambda () (let loop () (will-execute killer-executor) (loop))))))
 (define* (register-finalizer obj finalizer)
+  (force killer-thread)
   (will-register killer-executor obj finalizer))
 
 (define-unsafer unsafe!)

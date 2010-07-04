@@ -44,9 +44,15 @@
                  [v (cdr v)])
              (set-car! v (add1 (car v)))
              (when (profile-paths-enabled)
-               (let ([v (cdddr v)])
-                 (set-car! v (cons (current-continuation-marks profile-key)
-                                   (car v)))))
+               (let ([v (cddddr v)])
+		 (let ([cms
+			(continuation-mark-set->list
+			 (current-continuation-marks)
+			 profile-key)])
+		   (unless (hash-table? (car v))
+		     (set-car! v (make-hash-table 'equal)))
+		   (hash-table-put! (car v) cms 
+				    (add1 (hash-table-get (car v) cms (lambda () 0)))))))
              (if (unbox b)
                  #f
                  (begin
@@ -72,12 +78,14 @@
               [expr (cadddr (cdr val))]
               [cmss (cadddr (cddr val))])
           (list count time name expr
-                (map (lambda (cms)
-                       (map (lambda (k)
-                              (let ([v (cdr (hash-table-get profile-info k))])
-                                (list (caddr v) (cadddr v))))
-                            cms))
-                     cmss))))))
+		(if (hash-table? cmss)
+		    (hash-table-map cmss (lambda (ks v)
+					   (cons v 
+						 (map (lambda (k)
+							(let ([v (cdr (hash-table-get profile-info k))])
+							  (list (caddr v) (cadddr v))))
+						      ks))))
+		    null))))))
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Stacktrace instrumenter
@@ -136,7 +144,7 @@
                                  (syntax-position (car s))))
                           (get-execute-counts))])
         (let ([sorted
-               (quicksort
+               (sort
                 here
                 (lambda (a b)
                   (let ([ap (syntax-position (car a))]
@@ -231,9 +239,9 @@
     (error-print-width 50)
     (printf "Sorting profile data...~n")
     (let* ([sel (if sort-time? cadr car)]
-           [counts (quicksort (filter (lambda (c) (positive? (car c)))
-                                      (get-profile-results))
-                              (lambda (a b) (< (sel a) (sel b))))]
+           [counts (sort (filter (lambda (c) (positive? (car c)))
+                                 (get-profile-results))
+                         (lambda (a b) (< (sel a) (sel b))))]
            [total 0])
       (for-each
        (lambda (c)
@@ -245,14 +253,14 @@
          (when paths?
            (for-each
             (lambda (cms)
-              (unless (null? cms)
-                (printf "  VIA ~e" (caar cms))
+              (unless (null? (cdr cms))
+                (printf "  ~e VIA ~e" (car cms) (caadr cms))
                 (for-each
                  (lambda (cm)
                    (printf " <- ~e" (car cm)))
-                 (cdr cms))
+                 (cddr cms))
                 (printf "~n")))
-            (cadddr (cdr c)))))
+	    (sort (cadddr (cdr c)) (lambda (a b) (> (car a) (car b)))))))
        counts)
       (printf "Total samples: ~a~n" total)))
 
@@ -297,7 +305,7 @@
                             e
                             (namespace-syntax-introduce
                              (datum->syntax-object #f e))))])
-               e2)
+	       e2)
              e)
          immediate-eval?))))
 

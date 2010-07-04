@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2005 PLT Scheme, Inc.
+// Copyright:  (c) 2004-2006 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -12,6 +12,9 @@
 #define wxMacDCh
 
 class wxMacDC
+#ifndef MZ_PRECISE_GC
+: public gc
+#endif
 {
   protected:
 	CGrafPtr	cMacGrafPort;

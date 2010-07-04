@@ -94,6 +94,16 @@
       (syntax-object->datum 
        (syntax-case '((1) (2 3)) () [((a ...) ...) #'(#(a ...) ...)])))
 
+(test '(1 2 3 6 8 9 0 1 2 3)
+      syntax-object->datum 
+      (syntax-case '(((1) (2 3)) ((6)) ((8 9 0) (1 2 3))) () [(((a ...) ...) ...) #'(a ... ... ...)]))
+(test '((1 2 3) (6) (8 9 0 1 2 3))
+      syntax-object->datum 
+      (syntax-case '(((1) (2 3)) ((6)) ((8 9 0) (1 2 3))) () [(((a ...) ...) ...) #'((a ... ...) ...)]))
+(test '((1) (2 3) (6) (8 9 0) (1 2 3))
+      syntax-object->datum 
+      (syntax-case '(((1) (2 3)) ((6)) ((8 9 0) (1 2 3))) () [(((a ...) ...) ...) #'((a ...) ... ...)]))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Test basic expansion and property propagation
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -621,6 +631,29 @@
 (test #t has-stx-property? (expand #'(let () (define-struct a (x)) (define-struct (b a) (z)) 10))
       #f 'a 'disappeared-use)
 
+;; Check that origin is bound by disappeared binding:
+(test #t has-stx-property? (expand #'(let () (define-syntax (x stx) #'(quote y)) x)) 'quote 'x 'origin)
+(let ([check-expr
+       (lambda (expr)
+	 (let ([e (expand expr)])
+	   (syntax-case e ()
+	     [(lv () beg)
+	      (let ([db (syntax-property #'beg 'disappeared-binding)])
+		(syntax-case #'beg ()
+		  [(bg e)
+		   (let ([o (syntax-property #'e 'origin)])
+		     (test #t (lambda (db o)
+				(and (list? db)
+				     (list? o)
+				     (= 1 (length db))
+				     (= 1 (length o))
+				     (identifier? (car db))
+				     (identifier? (car o))
+				     (bound-identifier=? (car db) (car o))))
+			   db o))]))])))])
+  (check-expr #'(let () (letrec-syntaxes+values ([(x) (lambda (stx) #'(quote y))]) () x)))
+  (check-expr #'(let () (define-syntax (x stx) #'(quote y)) x)))
+
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; protected identifiers
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -742,7 +775,8 @@
 
 (module ++m mzscheme 
   (define ++x 10) 
-  (provide (protect ++x)))
+  (define-syntax (++xm stx) #'100)
+  (provide (protect ++x ++xm)))
 (module ++n mzscheme 
   (require ++m) 
   (define ++y ++x)
@@ -762,6 +796,7 @@
 (require ++m)
 
 (test 10 values ++x)
+(test 100 values ++xm)
 (test 10 values ++y-macro2)
 
 (let ()
@@ -783,9 +818,11 @@
 
     (err/rt-test (teval '++y-macro2) exn:fail:contract:variable?)
     (err/rt-test (teval '++x) exn:fail:contract:variable?)
+    (err/rt-test (teval '++xm) exn:fail:contract:variable?)
 
     (teval '(require ++m))
     (err/rt-test (teval '++x) exn:fail:syntax?)
+    (err/rt-test (teval '++xm) exn:fail:syntax?)
     (err/rt-test (teval '++y-macro2) exn:fail:syntax?)
     
     (teval '(module zrt mzscheme 
@@ -1003,5 +1040,35 @@
   (go-once (lambda (e) (eval (expand e)))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; layers of lexical binding
+
+(test '(1 2) 'macro-nested-lexical
+      (let ()
+	(define-syntax (m stx)
+	  (with-syntax ([x1 (let ([x 0]) #'x)]
+			[x2 (let ([x 0]) #'x)])
+	    #'(begin
+		(define x1 1)	
+		(define x2 2)
+		(list x1 x2))))
+	(m)))
+
+(module @!$m mzscheme
+  (define-syntax (d stx)
+    (syntax-case stx ()
+      [(_ id)
+       (with-syntax ([x1 (let ([x 0]) #'x)]
+		     [x2 (let ([x 0]) #'x)])
+	 #'(begin
+	     (define x1 10)
+	     (define x2 20)
+	     (define id (list x1 x2
+			      (list? (identifier-binding (quote-syntax x1)))))))]))
+  (d @!$get)
+  (provide @!$get))
+(require @!$m)
+(test '(10 20 #t) '@!$get @!$get)
+
+
 
 (report-errs)

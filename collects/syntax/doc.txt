@@ -290,7 +290,7 @@ currently exist).
 > (with-module-reading-parameterization thunk) - calls `thunk' with
   all reader parameters reset to their default values.
 
-> (check-module-form stx expected-module-sym filename-string-or-#f) -
+> (check-module-form stx expected-module-sym source-or-#f) -
   inspects `stx' to check whether evaluating it will declare a module
   named `expected-module-sym' (plus a prefix, if
   `current-module-name-prefix' is set) --- at least if `module' is
@@ -301,8 +301,9 @@ currently exist).
   `check-module-form' procedure returns a syntax object that certainly
   will declare a module (adding explicit context to the leading
   `module' if necessary) in any top-level. Otherwise, if
-  `filename-string-or-#f' is a string, a suitable exception is raised,
-  and if `filename-string-or-#f' is #f, #f is returned.
+  `source-string-or-#f' is not #f, a suitable exception is raised
+  using the `write' form of the source in the message; if
+  `source-or-#f' is #f, #f is returned.
 
   If stx is eof or eof wrapped as a syntax object, then an error is
   raised or #f is returned.
@@ -337,24 +338,33 @@ currently exist).
   `ext-proc' is #f.
 
 > (resolve-module-path module-path-v rel-to-path-string/thunk/#f) -
-  resolves a module path to filename path. The module path is
-  resolved relative to `rel-to-path-string/thunk/#f' if it is a string
-  (a filename path), to the directory result of calling the thunk if
-  it is a thunk, or to the current directory otherwise.
+  resolves a module path to filename path. The module path is resolved
+  relative to `rel-to-path-string/thunk/#f' if it is a path string
+  (assumed to be for a file), to the directory result of calling the
+  thunk if it is a thunk, or to the current directory otherwise. The
+  `module-path-v' argument is a quoted module path, as for MzScheme's
+  `dynamic-require' using the default module path resolver.
 
 > (resolve-module-path-index module-path-index rel-to-path-string/thunk/#f)
   - like `resolve-module-path' but the input is a module path index
   (see the MzScheme manual for details); in this case, the
-  `rel-to-path-string/thunk/#f' base is used where the module path index
-  contains the "self" index.  If `module-path-v' represents the
-  "self" module path index, then an exception is raised unless
+  `rel-to-path-string/thunk/#f' base is used where the module path
+  index contains the "self" index.  If `module-path-index' depends on
+  the "self" module path index, then an exception is raised unless
   `rel-to-path-string/thunk/#f' is a path string.
 
 > (collapse-module-path module-path-v rel-to-module-path-v) - returns
   a "simplified" module path by combining `module-path-v' with
   `rel-to-module-path', where the latter must have the form '(lib
-  <relative-path> <collection>), '(file <path>), a relative path, or a
-  thunk to generate one of those.
+  <relative-path> <collection>), '(file <string>), a path, or a thunk
+  to generate one of those. The `module-path-v' argument is a quoted
+  module path, as for MzScheme's `dynamic-require' using the default
+  module path resolver.
+
+  The result can be a path if `module-path-v' contains a path element
+  that is needed for the result, or if `rel-to-module-path-v' is a
+  non-string path that is needed for the result; otherwise, the result
+  is a printable "quoted" module path.
 
 > (collapse-module-path-index module-path-index rel-to-module-path-v)
   - like `collapse-module-path', but the input is a module path index

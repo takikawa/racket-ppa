@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -59,9 +59,6 @@
 #  include <Carbon.h>
 # endif
 #endif
-#ifdef USE_MAC_FILE_TOOLBOX
-# include <Files.h>
-#endif
 #ifdef UNIX_FILE_SYSTEM
 # include <fcntl.h>
 # include <grp.h>
@@ -99,7 +96,7 @@
 # define S_ISREG(m) ((m) & _S_IFREG)
 #endif
 
-#if defined(MAC_FILE_SYSTEM) || defined(CARBON_FILE_SYSTEM)
+#if defined(CARBON_FILE_SYSTEM)
 long scheme_creator_id = 'MzSc';
 #endif
 
@@ -111,14 +108,13 @@ long scheme_creator_id = 'MzSc';
 # define FN_SEP '\\'
 # define IS_A_SEP(x) (((x) == '/') || ((x) == '\\'))
 #endif
-#ifdef MAC_FILE_SYSTEM
-# define FN_SEP ':'
-# define IS_A_SEP(x) ((x) == ':')
-#endif
 #ifdef PALMOS_STUFF
 # define FN_SEP 0
 # define IS_A_SEP(x) (!(x))
 #endif
+
+MZ_DLLSPEC int scheme_ignore_user_paths;
+void scheme_set_ignore_user_paths(int v) { scheme_ignore_user_paths = v; }
 
 #define CURRENT_WD() scheme_get_param(scheme_current_config(), MZCONFIG_CURRENT_DIRECTORY)
 
@@ -168,6 +164,7 @@ static Scheme_Object *file_or_dir_permissions(int argc, Scheme_Object *argv[]);
 static Scheme_Object *file_size(int argc, Scheme_Object *argv[]);
 static Scheme_Object *current_library_collection_paths(int argc, Scheme_Object *argv[]);
 static Scheme_Object *use_compiled_kind(int, Scheme_Object *[]);
+static Scheme_Object *use_user_paths(int, Scheme_Object *[]);
 static Scheme_Object *find_system_path(int argc, Scheme_Object **argv);
 #endif
 
@@ -191,9 +188,10 @@ static Scheme_Object *read_symbol, *write_symbol, *execute_symbol;
 static Scheme_Object *temp_dir_symbol, *home_dir_symbol, *pref_dir_symbol;
 static Scheme_Object *doc_dir_symbol, *desk_dir_symbol;
 static Scheme_Object *init_dir_symbol, *init_file_symbol, *sys_dir_symbol;
-static Scheme_Object *exec_file_symbol, *pref_file_symbol, *addon_dir_symbol;
+static Scheme_Object *exec_file_symbol, *run_file_symbol, *collects_dir_symbol;
+static Scheme_Object *pref_file_symbol, *orig_dir_symbol, *addon_dir_symbol;
 
-static Scheme_Object *exec_cmd;
+static Scheme_Object *exec_cmd, *run_cmd, *collects_path, *original_pwd;
 #endif
 
 void scheme_init_file(Scheme_Env *env)
@@ -216,6 +214,9 @@ void scheme_init_file(Scheme_Env *env)
   REGISTER_SO(sys_dir_symbol);
   REGISTER_SO(pref_file_symbol);
   REGISTER_SO(exec_file_symbol);
+  REGISTER_SO(run_file_symbol);
+  REGISTER_SO(collects_dir_symbol);
+  REGISTER_SO(orig_dir_symbol);
   REGISTER_SO(addon_dir_symbol);
 #endif
 
@@ -238,6 +239,9 @@ void scheme_init_file(Scheme_Env *env)
   sys_dir_symbol = scheme_intern_symbol("sys-dir");
   pref_file_symbol = scheme_intern_symbol("pref-file");
   exec_file_symbol = scheme_intern_symbol("exec-file");
+  run_file_symbol = scheme_intern_symbol("run-file");
+  collects_dir_symbol = scheme_intern_symbol("collects-dir");
+  orig_dir_symbol = scheme_intern_symbol("orig-dir");
   addon_dir_symbol = scheme_intern_symbol("addon-dir");
 #endif
 
@@ -418,6 +422,11 @@ void scheme_init_file(Scheme_Env *env)
 			     scheme_register_parameter(use_compiled_kind,
 						       "use-compiled-file-paths",
 						       MZCONFIG_USE_COMPILED_KIND),
+			     env);
+  scheme_add_global_constant("use-user-specific-search-paths",
+			     scheme_register_parameter(use_user_paths,
+						       "use-user-specific-search-paths",
+						       MZCONFIG_USE_USER_PATHS),
 			     env);
 }
 
@@ -701,123 +710,74 @@ static char *mz_getcwd(char *s, int l)
 
 char *scheme_os_getcwd(char *buf, int buflen, int *actlen, int noexn)
 {
-#ifdef USE_MAC_FILE_TOOLBOX
-    char *dir;
-    char nbuf[64];
-    WDPBRec rec;
-    FSSpec spec;
-    OSErr err;
-    
-    rec.ioNamePtr = (StringPtr)nbuf;
-    PBHGetVol(&rec, 0);
-    
-    err = FSMakeFSSpec(rec.ioVRefNum,rec.ioWDDirID,NULL,&spec);
-    
-    if (err != noErr) {
-      return NULL;
+# define GETCWD_BUFSIZE 1024
+  char buffer[GETCWD_BUFSIZE], *r, *gbuf;
+  int obuflen = buflen;
+
+  if (buflen < GETCWD_BUFSIZE) {
+    gbuf = buffer;
+    buflen = GETCWD_BUFSIZE;
+  } else
+    gbuf = buf;
+
+  r = mz_getcwd(gbuf, buflen - 1);
+  if (!r) {
+    char *r2;
+
+    r = mz_getcwd(NULL, 0);
+    if (!r) {
+      /* Something bad happened! */
+      if (noexn) {
+	if (actlen)
+	  *actlen = 0;
+
+	if (buf) {
+	  buf[0] = 0;
+	  return buf;
+	} else {
+	  return ".";
+	}
+      }
+	
+      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM, 
+		       "current-directory: unknown failure (%e)", errno);
     }
-    
-    dir = scheme_mac_spec_to_path(&spec);
+
+    buflen = strlen(r) + 1;
+    r2 = (char *)scheme_malloc_atomic(buflen);
+    memcpy(r2, r, buflen);
+    r2[buflen] = 0;
+    free(r);
+    r = r2;
 
     if (actlen)
-      *actlen = strlen(dir) + 1;
+      *actlen = buflen;
+  } else {
+    int slen = strlen(r) + 1;
 
-    return dir;
-#else
-# define GETCWD_BUFSIZE 1024
-    char buffer[GETCWD_BUFSIZE], *r, *gbuf;
-    int obuflen = buflen;
+    if (actlen)
+      *actlen = slen;
 
-    if (buflen < GETCWD_BUFSIZE) {
-      gbuf = buffer;
-      buflen = GETCWD_BUFSIZE;
-    } else
-      gbuf = buf;
-
-    r = mz_getcwd(gbuf, buflen - 1);
-    if (!r) {
-      char *r2;
-
-      r = mz_getcwd(NULL, 0);
-      if (!r) {
-	/* Something bad happened! */
-	if (noexn) {
-	  if (actlen)
-	    *actlen = 0;
-
-	  if (buf) {
-	    buf[0] = 0;
-	    return buf;
-	  } else {
-	    return ".";
-	  }
-	}
-	
-	scheme_raise_exn(MZEXN_FAIL_FILESYSTEM, 
-			 "current-directory: unknown failure (%e)", errno);
-      }
-
-      buflen = strlen(r) + 1;
-      r2 = (char *)scheme_malloc_atomic(buflen);
-      memcpy(r2, r, buflen);
-      r2[buflen] = 0;
-      free(r);
-      r = r2;
-
-      if (actlen)
-	*actlen = buflen;
-    } else {
-      int slen = strlen(r) + 1;
-
-      if (actlen)
-	*actlen = slen;
-
-      if (obuflen < slen)
-      	r = scheme_strdup(r);
-      else if (r != buf) {
-	memcpy(buf, r, slen);
-	r = buf;
-      }
+    if (obuflen < slen)
+      r = scheme_strdup(r);
+    else if (r != buf) {
+      memcpy(buf, r, slen);
+      r = buf;
     }
+  }
      
-    return r;
-#endif
+  return r;
 }
-
-#ifdef USE_MAC_FILE_TOOLBOX
-static int find_mac_file(const char *filename, int use_real_cwd,
-			 FSSpec *spec, int finddir, int findfile,
-			 int *dealiased, int *wasdir, int *exists,
-			 long *filedate, int *flags, 
-			 long *type, unsigned long *size,
-			 FInfo *finfo, int set_time); 
-#endif
 
 int scheme_os_setcwd(char *expanded, int noexn)
 {
-#ifdef USE_MAC_FILE_TOOLBOX
-  FSSpec spec;
-#endif
   int err;
 
-#ifdef USE_MAC_FILE_TOOLBOX
-  if (find_mac_file(expanded, 1, &spec, 1, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0)) {
-    WDPBRec rec;
-    
-    rec.ioNamePtr = NULL;
-    rec.ioVRefNum = spec.vRefNum;
-    rec.ioWDDirID = spec.parID;
-    
-    err = PBHSetVol(&rec, 0);
-  } else
-    err = 1;
-#else
   while (1) {
     err = MSC_W_IZE(chdir)(MSC_WIDE_PATH(expanded));
     if (!err || (errno != EINTR))
       break;
   }
-#endif
 
   if (err && !noexn)
       scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
@@ -912,382 +872,6 @@ Scheme_Object *scheme_remove_current_directory_prefix(Scheme_Object *fn)
 
   return fn;
 }
-
-#ifdef USE_MAC_FILE_TOOLBOX
-static int find_mac_file(const char *filename, int use_real_cwd,
-			 FSSpec *spec, int finddir, int findfile,
-			 int *dealiased, int *wasdir, int *exists,
-			 long *filedate, int *flags, 
-			 long *type, unsigned long *size,
-			 FInfo *finfo, int set_time) 
-/* finddir:   0 => don't care if dir is found (but set *wasdir)
-              1 => must find a dir
-   findfile:  0 => don't care if file is found (but unset *wasdir)
-              1 => must find a file
-             -1 => must find a link
-             -2 => must find a file or link
-             -3 => don't care if file or link is found (but unset *wasdir)
-   wasdir and exists are always filled in, unless they're null; *exists
-    is set to 2 if a link is found
-   filedate, flags, type, size, and finfo are only filled in
-   when findfile >= 0 (and when they're non-null)
- */
-{
-  WDPBRec  wdrec;
-  CInfoPBRec pbrec;
-  char buf[256];
-  short find_vref;
-  long find_dir_id;
-  int need_filedate = 0;
-
-  if (dealiased)
-    *dealiased = 0;
-  if (wasdir)
-    *wasdir = 1;
-  if (exists)
-    *exists = 0;
-  if (flags)
-    *flags = 0;
-  if (type)
-    *type = 0;
-  if (size)
-    *size = 0;
-  if (filedate)
-    *filedate = 0;
-
-  if (use_real_cwd) {
-    wdrec.ioNamePtr = (StringPtr)buf;
-    if (PBHGetVol(&wdrec, 0))
-      return 0;
-    
-    find_vref = wdrec.ioWDVRefNum;
-    find_dir_id = wdrec.ioWDDirID;
-  } else {
-    int len = filename ? strlen(filename) : 0;
-    find_vref = -1;
-    find_dir_id = 0;
-    if (!filename || !scheme_is_complete_path(filename, len))
-      filename = do_path_to_complete_path((char *)filename, len, NULL, 0);
-  }
-  
-  /* filename is empty => Local directory */
-  if (!*filename) {
-    if (findfile && (findfile != -3))
-      return 0;
-    if (exists)
-      *exists = 1;
-    need_filedate = 1;
-  } else {
-    const char *p;
-    int has_colon;
-    
-    for (p = filename; *p && (*p != ':'); p++) {}
-    has_colon = (*p == ':');
-    
-    p = filename;    
-    if (*p == ':') {
-      p++;
-    } else if (has_colon) {
-      char vbuf[256];
-      int len = 0;
-      HParamBlockRec hrec;
-      /* It's an absolute path: get the Volume Name and vRefNum */
-      while (*p && *p != ':') {
-	vbuf[len++] = *(p++);
-	if (len > 32)
-	  return 0;
-      }
-      vbuf[len] = 0;
-      if (*p)
-	p++;
-      
-      strcat(vbuf, ":");
-      {
-	/* C to Pascal string: */
-	int clen = strlen(vbuf);
-	memmove(vbuf + 1, vbuf, clen);
-	vbuf[0] = clen;
-      }
-      hrec.volumeParam.ioNamePtr = (unsigned char *)vbuf;
-      hrec.volumeParam.ioVRefNum = 0;
-      hrec.volumeParam.ioVolIndex = -1;
-      if (PBHGetVInfo(&hrec, 0))
-	return 0;
-      find_vref = hrec.volumeParam.ioVRefNum;
-      find_dir_id = 0;
-    }
-    
-    if (!*p) {
-      if (findfile && (findfile != -3))
-        return 0;
-      if (exists)
-        *exists = 1;
-      need_filedate = 1;
-    }
-
-    while (p && *p) {
-      const char *next = p;
-      int len = 0;
-      Boolean isFolder, wasAlias;
-      
-      while (*next && *next != ':') {
-	buf[len++] = *(next++);
-	if (len > 32)
-	  return 0;
-      }
-      buf[len] = 0;
-      
-      if (*next)
-	next++;
-      if (!*next)
-	next = NULL;
-      
-      if (len > 32)
-	return 0;
-      
-      if (!len) {
-	/* Parent directory */
-	pbrec.hFileInfo.ioNamePtr = spec->name;
-	pbrec.hFileInfo.ioVRefNum = find_vref;
-	pbrec.hFileInfo.ioDirID = find_dir_id;
-	pbrec.hFileInfo.ioFDirIndex = -1;
-	if (PBGetCatInfo(&pbrec, 0))
-	  return 0;	
-	find_dir_id = pbrec.dirInfo.ioDrParID;
-	if (!next) {
-	  if (findfile && (findfile != -3))
-	    return 0;
-	  if (wasdir)
-	    *wasdir = 1;
-	  if (exists)
-	    *exists = 1;
-	  need_filedate = 1;
-	}
-      } else {
-	spec->vRefNum = find_vref;
-	spec->parID = find_dir_id;
-	memcpy((void *)spec->name, buf, len);
-	spec->name[len] = 0;
-	{
-	  /* C to Pascal string: */
-	  int clen = strlen((char *)spec->name);
-	  memmove(spec->name + 1, spec->name, clen);
-	  spec->name[0] = clen;
-	}
-	
-	pbrec.hFileInfo.ioNamePtr = spec->name;
-	pbrec.hFileInfo.ioVRefNum = spec->vRefNum;
-	pbrec.hFileInfo.ioDirID = spec->parID;
-	pbrec.hFileInfo.ioFDirIndex = 0;
-	if (PBGetCatInfo(&pbrec, 0)) {
-	  if (finddir || (findfile && (findfile != -3)) || next)
-	    return 0;
-	  if (wasdir)
-	    *wasdir = 0;
-	  break;
-	} else {
-	  /* If it's a file, it could be an alias: */
-	  if (!(pbrec.hFileInfo.ioFlAttrib & 0x10)) {
-	    Str32 origname;
-	    memcpy(origname, spec->name, 32);
-	    ResolveAliasFile(spec, 1, &isFolder, &wasAlias);
-	    if (!next && (findfile < 0)) {
-	      if (wasAlias) {
-	        spec->vRefNum = find_vref;
-	        spec->parID = find_dir_id;
-	        memcpy((void *)spec->name, origname, 32);
-	      }
-		  if (findfile <= -2) {
-	        if (wasdir)
-	         *wasdir = 0;
-			if (exists)
-			 *exists = wasAlias ? 2 : 1;
-	        return 1;
-	      }
-	      if (wasdir)
-	        *wasdir = isFolder;
-	      if (wasAlias && exists)
-	        *exists = 2;
-	      return wasAlias ? 1 : 0;
-	    }
-	    if (wasAlias && dealiased)
-	      *dealiased = 1;
-	    
-	    if (wasAlias) {
-	      /* Look it up again: */
-	      find_vref = spec->vRefNum;
-	      find_dir_id = spec->parID;
-	      pbrec.hFileInfo.ioNamePtr = spec->name;
-	      pbrec.hFileInfo.ioVRefNum = spec->vRefNum;
-	      pbrec.hFileInfo.ioDirID = spec->parID;
-	      pbrec.hFileInfo.ioFDirIndex = 0;
-	      if (PBGetCatInfo(&pbrec, 0)) {
-	        if (finddir || (findfile && (findfile != -3)) || next)
-	          return 0;
-	        if (wasdir)
-	          *wasdir = 0;
-	        if (exists)
-	          *exists = 0;
-	        break;
-	      }
-	    }
-	  }
-	 
-	  if (!(pbrec.hFileInfo.ioFlAttrib & 0x10)) {
-	    if (finddir || next)
-	      return 0; /* Not a directory */
-	    if (wasdir)
-	      *wasdir = 0;
-	    if (exists)
-	      *exists = 1;
-	    if (filedate)
-	      *filedate = pbrec.hFileInfo.ioFlMdDat;
-	    if (type)
-	      *type = pbrec.hFileInfo.ioFlFndrInfo.fdType;
-	    if (flags)
-	      *flags = pbrec.hFileInfo.ioFlAttrib;
-	    if (size)
-	      *size = pbrec.hFileInfo.ioFlLgLen;
-	    if (finfo)
-	      memcpy(finfo, &pbrec.hFileInfo.ioFlFndrInfo, sizeof(FInfo));
-	  } else {
-	    if (findfile && (findfile != -3) && !next)
-	      return 0;
-	    find_vref = spec->vRefNum;
-	    find_dir_id = pbrec.hFileInfo.ioDirID;
-	    if (!next) {
-	      if (flags)
-	        *flags = pbrec.hFileInfo.ioFlAttrib;
-	      if (filedate)
-	        *filedate = pbrec.dirInfo.ioDrMdDat;
-	      if (exists)
-	        *exists = 1;
-	     }
-	  }
-        }  
-      }
-      
-      p = next;
-    }
-  }
-  
-  if (need_filedate && filedate) {
-    Str255 buffer;
-    pbrec.hFileInfo.ioNamePtr = buffer;
-    pbrec.hFileInfo.ioVRefNum = find_vref;
-    pbrec.hFileInfo.ioDirID = find_dir_id;
-    pbrec.hFileInfo.ioFDirIndex = -1;
-    if (!PBGetCatInfo(&pbrec, 0))
-      *filedate = pbrec.dirInfo.ioDrMdDat;
-  }
-  
-  spec->vRefNum = find_vref;
-  spec->parID = find_dir_id;
-  
-  return 1;
-}
-
-char *scheme_mac_spec_to_path(FSSpec *spec)
-{
-#define QUICK_BUF_SIZE 256
-
-  CInfoPBRec pbrec;
-  char buf[256], qbuf[QUICK_BUF_SIZE], *s;
-  int i, j, size = 0, alloced = QUICK_BUF_SIZE - 1;
-  int vref = spec->vRefNum;
-  long dirID = spec->parID;
-
-  s = qbuf;
-  for (i = spec->name[0]; i; i--) {
-    s[size++] = spec->name[i];
-  }
-
-  while (1)  {
-    pbrec.hFileInfo.ioNamePtr = (unsigned char *)buf;
-    pbrec.hFileInfo.ioVRefNum = vref;
-    pbrec.hFileInfo.ioDirID = dirID;
-    pbrec.hFileInfo.ioFDirIndex = -1;
-	if (PBGetCatInfo(&pbrec, 0))
-	  return NULL;
-	
-	if (size + buf[0] + 1 > alloced) {
-	   char *old;
-	   
-	   alloced *= 2;
-	   old = (char *)scheme_malloc_atomic(alloced + 1);
-	   memcpy(old, s, size);
-	}
-
-    s[size++] = ':';
-    for (i = buf[0]; i; i--) {
-      s[size++] = buf[i];
-    }
-	  
-    dirID = pbrec.dirInfo.ioDrParID;
-    if (dirID == 1)
-      break;
-  }
-  
-  if (alloced < QUICK_BUF_SIZE) {
-    s = (char *)scheme_malloc_atomic(size + 1);
-    for (j = 0, i = size; i--; j++) {
-      s[j] = qbuf[i];
-    }
-  } else {
-    int save;
-    
-    for (i = 0, j = size - 1; i < j; i++, j--) {
-      save = s[i];
-      s[i] = s[j];
-      s[j] = save;
-    }
-  }
-  
-  s[size] = 0;
-  return s;
-}
-
-void scheme_file_create_hook(char *filename)
-{
-  FSSpec spec;
-    
-  if (find_mac_file(filename, 1, &spec, 0, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0)) {
-    FInfo info;
-
-    FSpGetFInfo(&spec, &info);
-    info.fdCreator = scheme_creator_id;
-    info.fdType = 'TEXT';
-    FSpSetFInfo(&spec, &info);
-  }
-}
-
-int scheme_mac_path_to_spec(const char *filename, FSSpec *spec)
-{
-  int wasdir;
-  
-  if (find_mac_file(filename, 1, spec, 0, 0, NULL, &wasdir, NULL, NULL, NULL, NULL, NULL, NULL, 0)) {
-    if (wasdir) {
-      CInfoPBRec pb;
-      
-      pb.hFileInfo.ioNamePtr = spec->name;
-      pb.hFileInfo.ioVRefNum = spec->vRefNum;
-      pb.hFileInfo.ioFDirIndex = -1;
-      pb.hFileInfo.ioDirID = spec->parID;
-      if (PBGetCatInfo(&pb, 0)) {
-	/* Should never happen; the record should exist, because it
-	   was used to create the spec. But maybe one day the
-	   directory could disappear, in a truly multithreaded
-	   MacOS. */
-	return 0;
-      }           
-      spec->parID = pb.dirInfo.ioDrParID;
-    }
-
-    return 1;
-  } else
-    return 0;
-}
-#endif
 
 static int has_null(const char *s, long l)
 {
@@ -1959,28 +1543,6 @@ static char *do_expand_filename(Scheme_Object *o, char* filename, int ilen, cons
     }
   }
 #endif
-#ifdef USE_MAC_FILE_TOOLBOX
-  {
-    FSSpec spec;
-    int dealiased, wasdir;
-    
-    if (find_mac_file(filename, 0, &spec, 0, 0, &dealiased, &wasdir, NULL, NULL, NULL, NULL, NULL, NULL, 0)) {
-      if (wasdir) {
-      	// clean up broken FSSpec:
-      	FSMakeFSSpec(spec.vRefNum,spec.parID,NULL,&spec);
-      }
-      if (dealiased) {
-        char *s;
-        s = scheme_mac_spec_to_path(&spec);
-	if (s) {
-	  if (expanded)
-	    *expanded = 1;
-	  return s;
-        }
-      }
-    }
-  }
-#endif
 
   if (fullpath) {
     if (!scheme_is_complete_path(filename, ilen)) {
@@ -2111,11 +1673,12 @@ static time_t convert_date(const FILETIME *ft)
 # define MZ_UNC_WRITE 0x2
 # define MZ_UNC_EXEC 0x4
 
-static int UNC_stat(char *dirname, int len, int *flags, int *isdir, Scheme_Object **date)
+static int UNC_stat(char *dirname, int len, int *flags, int *isdir, Scheme_Object **date,
+		    mzlonglong *filesize)
   /* dirname must be absolute */
 {
   int strip_end, strip_char;
-  struct MSC_IZE(stat) buf;
+  struct MSC_IZE(_stat64) buf;
   int v;
 
   if (isdir)
@@ -2166,6 +1729,9 @@ static int UNC_stat(char *dirname, int len, int *flags, int *isdir, Scheme_Objec
       if (isdir) {
 	*isdir = (GET_FF_ATTRIBS(fd) & FF_A_DIR);
       }
+      if (filesize) {
+	*filesize = ((mzlonglong)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
+      }
       return 1;
     }
   } else if ((len > 1) && (dirname[len - 1] == '\\' || dirname[len - 1] == '/')
@@ -2179,7 +1745,7 @@ static int UNC_stat(char *dirname, int len, int *flags, int *isdir, Scheme_Objec
     strip_end = strip_char = 0;
 
   while (1) {
-    v = !MSC_W_IZE(stat)(MSC_WIDE_PATH(dirname), &buf);
+    v = !MSC_W_IZE(stat64)(MSC_WIDE_PATH(dirname), &buf);
     if (v || (errno != EINTR))
       break;
   }
@@ -2198,6 +1764,8 @@ static int UNC_stat(char *dirname, int len, int *flags, int *isdir, Scheme_Objec
       if (buf.st_mode & MSC_IZE(S_IWRITE))
 	*flags |= MZ_UNC_WRITE;
     }
+    if (filesize)
+      *filesize = buf.st_size;
   }
 
   if (strip_end)
@@ -2209,14 +1777,6 @@ static int UNC_stat(char *dirname, int len, int *flags, int *isdir, Scheme_Objec
 
 int scheme_file_exists(char *filename)
 {
-#ifdef USE_MAC_FILE_TOOLBOX
-  FSSpec spec;
-  
-  if (!find_mac_file(filename, 1, &spec, 0, 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0))
-    return 0;
-  return 1;
-
-#else
 # ifdef NO_STAT_PROC
   FILE *fp;
 
@@ -2234,7 +1794,7 @@ int scheme_file_exists(char *filename)
 
   {
     int isdir;
-    return (UNC_stat(filename, strlen(filename), NULL, &isdir, NULL)
+    return (UNC_stat(filename, strlen(filename), NULL, &isdir, NULL, NULL)
 	    && !isdir);
   }
 #  else
@@ -2248,26 +1808,17 @@ int scheme_file_exists(char *filename)
   return !ok && !S_ISDIR(buf.st_mode);
 #  endif
 # endif
-#endif
 }
 
 int scheme_directory_exists(char *dirname)
 {
-#ifdef USE_MAC_FILE_TOOLBOX
-  FSSpec spec;
-  
-  if (!find_mac_file(dirname, 1, &spec, 1, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0))
-    return 0;
-
-  return 1;
-#else
 # ifdef NO_STAT_PROC
   return 0;
 # else
 #  ifdef DOS_FILE_SYSTEM
   int isdir;
 
-  return (UNC_stat(dirname, strlen(dirname), NULL, &isdir, NULL)
+  return (UNC_stat(dirname, strlen(dirname), NULL, &isdir, NULL, NULL)
 	  && isdir);
 #  else
   struct MSC_IZE(stat) buf;
@@ -2282,14 +1833,10 @@ int scheme_directory_exists(char *dirname)
   return S_ISDIR(buf.st_mode);
 #  endif
 # endif
-#endif
 }
 
 int scheme_is_regular_file(char *filename)
 {
-#ifdef USE_MAC_FILE_TOOLBOX
-  return 1;
-#else
 # ifdef NO_STAT_PROC
   return 0;
 # else
@@ -2309,7 +1856,6 @@ int scheme_is_regular_file(char *filename)
 
   return S_ISREG(buf.st_mode);
 # endif  
-#endif
 }
 
 static Scheme_Object *file_exists(int argc, Scheme_Object **argv)
@@ -2373,18 +1919,6 @@ static Scheme_Object *link_exists(int argc, Scheme_Object **argv)
   scheme_security_check_file("link-exists?", filename, SCHEME_GUARD_FILE_EXISTS);
 
   return scheme_false;
-#endif
-#ifdef USE_MAC_FILE_TOOLBOX
-  {
-    FSSpec spec;
-  
-    scheme_security_check_file("link-exists?", filename, SCHEME_GUARD_FILE_EXISTS);
-
-    if (!find_mac_file(filename, 0, &spec, 0, -1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0))
-      return scheme_false;
-
-    return scheme_true;
-  }
 #endif
 #ifdef UNIX_FILE_SYSTEM
   {
@@ -2452,22 +1986,6 @@ Scheme_Object *scheme_get_fd_identity(Scheme_Object *port, long fd)
     inoi2 = info.nFileIndexHigh;
     shift = sizeof(DWORD);
     shift2 = 2 * sizeof(DWORD);
-  }
-#endif
-#ifdef MAC_FILE_SYSTEM
-  FCBPBRec rec;
-  OSErr err;
-
-  rec.ioNamePtr = NULL;
-  rec.ioFCBIndx = 0;
-  rec.ioRefNum = fd;
-
-  err = PBGetFCBInfo(&rec, FALSE);
-
-  if (err == noErr) {
-    devi = (unsigned short)rec.ioFCBVRefNum;
-    inoi = (unsigned short)rec.ioFCBVRefNum;
-    shift = sizeof(short);
   }
 #endif
 
@@ -2542,9 +2060,6 @@ static Scheme_Object *do_build_path(int argc, Scheme_Object **argv, int no_final
   int alloc = PN_BUF_LEN;
   char buffer[PN_BUF_LEN], *str, *next;
   int rel, next_off;
-#ifdef MAC_FILE_SYSTEM
-  int prev_no_sep;
-#endif
 #ifdef DOS_FILE_SYSTEM
   int first_was_drive = 0;
   int first_len = 0;
@@ -2573,10 +2088,6 @@ static Scheme_Object *do_build_path(int argc, Scheme_Object **argv, int no_final
 	next = "..";
 	len = 2;
 #endif
-#ifdef MAC_FILE_SYSTEM
-	next = "";
-	len = 0;
-#endif
       } else if (SAME_OBJ(argv[i], same_symbol)) {
 #ifdef UNIX_FILE_SYSTEM
 	next = ".";
@@ -2586,20 +2097,11 @@ static Scheme_Object *do_build_path(int argc, Scheme_Object **argv, int no_final
 	next = ".";
 	len = 1;
 #endif
-#ifdef MAC_FILE_SYSTEM
-	next = "";
-	len = 0;
-#endif
       } else {
 	Scheme_Object *bs;
 	bs = TO_PATH(argv[i]);
 	next = SCHEME_PATH_VAL(bs);
 	len = SCHEME_PATH_LEN(bs);
-#ifdef MAC_FILE_SYSTEM
-	/* ":" is not a legal particle */
-	if ((len == 1) && (next[0] == ':'))
-	  len = 0;
-#endif	
 	if (!len) {
 	  char *astr;
 	  long alen;
@@ -2858,62 +2360,11 @@ static Scheme_Object *do_build_path(int argc, Scheme_Object **argv, int no_final
 	  first_was_drive = is_drive;
       }
 #endif
-#ifdef MAC_FILE_SYSTEM
-      /* If we're appending a relative path, strip leading sep; otherwise,
-         check for embedded colons */
-      if (next[next_off] == FN_SEP) {
-	rel = 1;
-	if (i) {
-	  next_off++;
-	  --len;
-	}
-      } else {
-	/* Except for first, ignore a colon at the end. */
-	int last = i ? len - 1 : len, j;
-	rel = 1;
-	for (j = 0; j < last; j++) {
-	  if (next[j + next_off] == ':') {
-	    if (i) {
-	      char *nstr;
-#ifdef MZ_PRECISE_GC
-	      /* Can't pass unaligned pointer to scheme_raise_exn: */
-	      if (next_off & 0x1) {
-		nstr = MALLOC_N_ATOMIC(char, len+1);
-		memcpy(nstr, next + next_off, len);
-		nstr[len] = 0;
-	      } else
-#endif
-		nstr = next + next_off;
-
-	      scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-			       "build-path: absolute path \"%q\" cannot be"
-			       " added to a path",
-			       nstr);
-	      return scheme_false;
-	    } else {
-	      rel = 0;
-	      break;
-	    }
-	  }
-	}
-      }
-#endif
 
       if (!i) {
-#ifdef MAC_FILE_SYSTEM
-	no_sep = !rel || (next[next_off] == ':');
-#else
 	no_sep = 1;
-#endif
       }
       
-#ifdef MAC_FILE_SYSTEM
-      if (SAME_OBJ(argv[i], same_symbol)) {
-	prev_no_sep = no_sep;
-	no_sep = 1;
-      }
-#endif
-
 #ifdef DOS_FILE_SYSTEM
       if (i)
 	pre_unc = check_dos_slashslash_drive(str, 0, pos, NULL, 0, 0);
@@ -2949,30 +2400,14 @@ static Scheme_Object *do_build_path(int argc, Scheme_Object **argv, int no_final
       /* If last path elem ends in a separator, don't add one: */
       if (len) {
 	no_sep = IS_A_SEP(next[next_off + len - 1]);
-#ifdef MAC_FILE_SYSTEM
-	if (!len)
-	  no_sep = 0;
-#endif
       } else {
-#ifdef MAC_FILE_SYSTEM
-	if (SAME_OBJ(argv[i], same_symbol))
-	  no_sep = prev_no_sep;
-	else
-	  no_sep = 0;
-#else
 	no_sep = 0;
-#endif
       }
     } else {
       scheme_wrong_type("build-path", "path, string, 'up, 'same", i, argc, argv);
       return scheme_false;
     }
   }
-
-#ifdef MAC_FILE_SYSTEM
-  if (argc && SAME_OBJ(argv[argc - 1], up_symbol))
-    str[pos++] = ':';
-#endif
 
   str[pos] = 0;
 
@@ -3084,7 +2519,6 @@ Scheme_Object *scheme_split_path(const char *path, int len, Scheme_Object **base
 
 #endif
 
-#ifndef MAC_FILE_SYSTEM
 #ifdef DOS_FILE_SYSTEM
 # define ALLOW_DOUBLE_BEFORE allow_double_before
 #else
@@ -3115,7 +2549,6 @@ Scheme_Object *scheme_split_path(const char *path, int len, Scheme_Object **base
       }
     }
   }
-#endif
 
 #ifdef DOS_FILE_SYSTEM
   if (len <= drive_end)
@@ -3155,72 +2588,44 @@ Scheme_Object *scheme_split_path(const char *path, int len, Scheme_Object **base
       return MAKE_SPLIT(scheme_false, scheme_make_sized_path(s, len, 1), 1);
 #endif
 
-#ifdef MAC_FILE_SYSTEM
-    dir = last_was_sep ? scheme_false : relative_symbol;
-#else
     dir = relative_symbol;
-#endif
 
-  /* Check for 'up: */
-#ifndef MAC_FILE_SYSTEM
-  if (!no_up && (s[0] == '.') && (s[1] == '.')
-      && (2 >= len || IS_A_SEP(s[2])))
-    {
+    /* Check for 'up: */
+    if (!no_up && (s[0] == '.') && (s[1] == '.')
+	&& (2 >= len || IS_A_SEP(s[2]))) {
       file = up_symbol;
       is_dir = 1;
-    } 
-  else if (!no_up && (s[0] == '.') && (1 >= len || IS_A_SEP(s[1])))
-    {
+    } else if (!no_up && (s[0] == '.') && (1 >= len || IS_A_SEP(s[1]))) {
       file = same_symbol;
       is_dir = 1;
-    } 
-  else
-#endif
-    {
+    } else {
       int delta;
       is_dir = last_was_sep;
-#ifdef MAC_FILE_SYSTEM
-      /* We need to keep the trailing separator for a root: */
-      delta = last_was_sep;
-#else
       delta = 0;
-#endif
       file = make_protected_sized_offset_path(no_up || is_dir, 
 					      s, 0, len - last_was_sep + delta, 1);
     }
-
+    
     return MAKE_SPLIT(dir, file, is_dir);
   }
 		 
   /* Check for 'up and 'same: */
-#if defined(UNIX_FILE_SYSTEM) || defined(DOS_FILE_SYSTEM) || defined(PALMOS_STUFF)
   if (!no_up && (s[p + 1] == '.') && (s[p + 2] == '.')
-      && (p + 3 >= len || IS_A_SEP(s[p + 3])))
-#endif
-#ifdef MAC_FILE_SYSTEM
-  if ((p == len - 2) && s[p + 1] == ':')
-#endif  
-    {
-      file = up_symbol;
-      is_dir = 1;
-    } 
-#ifndef MAC_FILE_SYSTEM
-  else if (!no_up && (s[p + 1] == '.') && (p + 2 >= len || IS_A_SEP(s[p + 2])))
-    {
-      file = same_symbol;
-      is_dir = 1;
-    }
-#endif
-  else 
-    {
-      file = make_protected_sized_offset_path(no_up || last_was_sep,
-					      s,
-					      p + 1, 
-					      len - p - last_was_sep - 1, 
-					      1);
-      is_dir = last_was_sep;
-    }
-
+      && (p + 3 >= len || IS_A_SEP(s[p + 3]))) {
+    file = up_symbol;
+    is_dir = 1;
+  } else if (!no_up && (s[p + 1] == '.') && (p + 2 >= len || IS_A_SEP(s[p + 2]))) {
+    file = same_symbol;
+    is_dir = 1;
+  } else {
+    file = make_protected_sized_offset_path(no_up || last_was_sep,
+					    s,
+					    p + 1, 
+					    len - p - last_was_sep - 1, 
+					    1);
+    is_dir = last_was_sep;
+  }
+  
   /* Check directory */
   if (p > 0) {
     Scheme_Object *ss;
@@ -3230,17 +2635,12 @@ Scheme_Object *scheme_split_path(const char *path, int len, Scheme_Object **base
 		      is_dir);
   }
 	
-  /* p = 0; for Unix & Dos, this means root dir. For Mac, this means
-     it was relative. */
-#ifdef MAC_FILE_SYSTEM
-  return MAKE_SPLIT(relative_symbol, file, is_dir);
-#else
+  /* p = 0; this means root dir. */
   {
     Scheme_Object *ss;
     ss = scheme_make_sized_path(s, 1, 1);
     return MAKE_SPLIT(ss, file, is_dir);
   }
-#endif  
 }
 
 #ifndef NO_FILE_SYSTEM_UTILS
@@ -3278,10 +2678,6 @@ static Scheme_Object *split_path(int argc, Scheme_Object **argv)
 
 int scheme_is_relative_path(const char *s, long len)
 {
-#ifdef MAC_FILE_SYSTEM
-  int i;
-#endif
-
   if (!len)
     return 0;
 
@@ -3302,15 +2698,6 @@ int scheme_is_relative_path(const char *s, long len)
     return 0;
   else
     return 1;
-#endif
-#ifdef MAC_FILE_SYSTEM
-  if (s[0] != ':')
-    for (i = 1; i < len; i++) {
-      if (s[i] == ':')
-	return 0;
-    }
-
-  return 1;
 #endif
 }
 
@@ -3392,12 +2779,6 @@ static char *do_path_to_complete_path(char *filename, long ilen, const char *wrt
       wlen = w;
     }
 #endif
-#ifdef MAC_FILE_SYSTEM
-    if (IS_A_SEP(filename[0])) {
-      filename++;
-      ilen--;
-    }
-#endif
     memcpy(naya + wlen, filename, ilen);
     naya[wlen + ilen] = 0;
     
@@ -3477,29 +2858,6 @@ static Scheme_Object *delete_file(int argc, Scheme_Object **argv)
   if (!SCHEME_PATH_STRINGP(argv[0]))
     scheme_wrong_type("delete-file", SCHEME_PATH_STRING_STR, 0, argc, argv);
 
-#ifdef USE_MAC_FILE_TOOLBOX
-  {
-    FSSpec spec;
-    char *file;
-    int glen;
-    Scheme_Object *bs;
-
-    bs = TO_PATH(argv[0]);
-    
-    file = SCHEME_PATH_VAL(bs);
-    flen = SCHEME_PATH_LEN(bs);
-    if (has_null(file, flen))
-      raise_null_error("delete-file", argv[0], "");
-    
-    scheme_security_check_file("delete-file", file, SCHEME_GUARD_FILE_DELETE);
- 
-    if (find_mac_file(file, 0, &spec, 0, -2, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0)) {
-      errid = FSpDelete(&spec);
-      if (!errid)
-        return scheme_void;
-    }
-  }
-#else
   while (1) {
     if (!MSC_W_IZE(unlink)(MSC_WIDE_PATH(scheme_expand_string_filename(argv[0],
 								       "delete-file",
@@ -3510,7 +2868,6 @@ static Scheme_Object *delete_file(int argc, Scheme_Object **argv)
       break;
   }
   errid = errno;
-#endif
   
   scheme_raise_exn(MZEXN_FAIL_FILESYSTEM, 
 		   "delete-file: cannot delete file: \"%q\" (%e)",
@@ -3524,10 +2881,6 @@ static Scheme_Object *rename_file(int argc, Scheme_Object **argv)
 {
   int exists_ok = 0;
   char *src, *dest;
-#ifdef USE_MAC_FILE_TOOLBOX
-  FSSpec srcspec, destspec;
-  int swas_dir, sexists, dexists;
-#endif
   Scheme_Object *bss, *bsd;
 
   if (!SCHEME_PATH_STRINGP(argv[0]))
@@ -3540,23 +2893,6 @@ static Scheme_Object *rename_file(int argc, Scheme_Object **argv)
   bss = argv[0];
   bsd = argv[1];
 
-#ifdef USE_MAC_FILE_TOOLBOX
-  {
-    int srcl, destl;
-    bss = TO_PATH(bss);
-    bsd = TO_PATH(bsd);
-    src = SCHEME_PATH_VAL(bss);
-    srcl = SCHEME_PATH_LEN(bss);
-    if (has_null(src, srcl))
-      raise_null_error("rename-file-or-directory", argv[0], "");
-    dest = SCHEME_PATH_VAL(bsd);
-    destl = SCHEME_PATH_LEN(bsd);
-    if (has_null(dest, destl))
-      raise_null_error("rename-file-or-directory", argv[1], "");
-  }
-  scheme_security_check_file("rename-file-or-directory", src, SCHEME_GUARD_FILE_READ);
-  scheme_security_check_file("rename-file-or-directory", dest, SCHEME_GUARD_FILE_WRITE);
-#else
   src = scheme_expand_string_filename(bss,
 				      "rename-file-or-directory",
 				      NULL,
@@ -3565,66 +2901,7 @@ static Scheme_Object *rename_file(int argc, Scheme_Object **argv)
 				       "rename-file-or-directory",
 				       NULL,
 				       SCHEME_GUARD_FILE_WRITE);
-#endif
 
-#ifdef USE_MAC_FILE_TOOLBOX
-  if (find_mac_file(src, 0, &srcspec, 0, -3, NULL, &swas_dir, &sexists, NULL, NULL, NULL, NULL, NULL, 0)
-      && sexists) {
-    if (find_mac_file(dest, 0, &destspec, 0, 0, NULL, NULL, &dexists, NULL, NULL, NULL, NULL, NULL, 0)) {
-      /* Already exists or different volumes => failure */
-      if ((exists_ok || !dexists) && (srcspec.vRefNum == destspec.vRefNum)) {
-        int rename;
-        
-        if (swas_dir) {
-          /* Get parent of directory to be moved: */
-          CInfoPBRec pb;
-          
-          pb.hFileInfo.ioNamePtr = srcspec.name;
-          pb.hFileInfo.ioVRefNum = srcspec.vRefNum;
-          pb.hFileInfo.ioFDirIndex = -1;
-          pb.hFileInfo.ioDirID = srcspec.parID;
-          if ((errno = PBGetCatInfo(&pb, 0))) {
-            goto failed;
-	  }
-            
-          srcspec.parID = pb.dirInfo.ioDrParID;
-        }
-        
-        rename = ((destspec.name[0] != srcspec.name[0])
-                  || memcmp(destspec.name, srcspec.name, destspec.name[0] + 1));
-        
-	if (dexists && exists_ok) {
-	  if ((errno = FSpDelete(&destspec)))
-	    goto failed;
-	}
-
-        if (srcspec.parID != destspec.parID) {
-          CMovePBRec mv;
-          mv.ioNamePtr = srcspec.name;
-          mv.ioVRefNum = srcspec.vRefNum;
-          mv.ioDirID = srcspec.parID;
-          mv.ioNewName = NULL;
-          mv.ioNewDirID = destspec.parID;
-          if ((errno = PBCatMove(&mv, 0))) {
-            goto failed;
-	  }
-        }
-        
-        if (rename) {
-          srcspec.parID = destspec.parID;
-          if ((errno = FSpRename(&srcspec, destspec.name))) {
-	    goto failed;
-	  }
-      	}
-      	
-        return scheme_void;
-      } else if (!exists_ok && dexists)
-	exists_ok = -1;
-    }
-  }
-  errno = -1;
-# define MOVE_ERRNO_FORMAT "%e"
-#else
 # ifdef DOS_FILE_SYSTEM
   if (MoveFileExW(WIDE_PATH_COPY(src), WIDE_PATH(dest), (exists_ok ? MOVEFILE_REPLACE_EXISTING : 0)))
     return scheme_void;
@@ -3664,9 +2941,8 @@ static Scheme_Object *rename_file(int argc, Scheme_Object **argv)
   }
 # define MOVE_ERRNO_FORMAT "%e"
 # endif
-#endif
 
-#if defined (USE_MAC_FILE_TOOLBOX) || ! defined (DOS_FILE_SYSTEM)
+#ifndef DOS_FILE_SYSTEM
 failed:
 #endif
   scheme_raise_exn((exists_ok < 0) ? MZEXN_FAIL_FILESYSTEM_EXISTS : MZEXN_FAIL_FILESYSTEM, 
@@ -3677,23 +2953,6 @@ failed:
   
   return NULL;
 }
-
-#ifdef MAC_FILE_SYSTEM
-static int xCopyFile(short dest, short src) {
-  long i, j;
-  char buffer[256]; 
-  
-  do {
-    i = 256;
-    FSRead(src, &i, buffer);
-    j = i;
-    FSWrite(dest, &i, buffer);
-    if (j != i) return 0;
-  } while (i);
-  
-  return 1;
-}
-#endif
 
 static Scheme_Object *copy_file(int argc, Scheme_Object **argv)
 {
@@ -3709,18 +2968,6 @@ static Scheme_Object *copy_file(int argc, Scheme_Object **argv)
   bss = argv[0];
   bsd = argv[1];
 
-#ifdef MAC_FILE_SYSTEM
-  bss = TO_PATH(bss);
-  bsd = TO_PATH(bsd);
-  src = SCHEME_PATH_VAL(bass);
-  if (has_null(src, SCHEME_PATH_LEN(bass)))
-    raise_null_error("copy-file", bass, "");
-  dest = SCHEME_PATH_VAL(bsd);
-  if (has_null(dest, SCHEME_PATH_LEN(bsd)))
-    raise_null_error("copy-file", bsd, "");
-  scheme_security_check_file("copy-file", src, SCHEME_GUARD_FILE_READ);
-  scheme_security_check_file("copy-file", dest, SCHEME_GUARD_FILE_WRITE | SCHEME_GUARD_FILE_DELETE);
-#else
   src = scheme_expand_string_filename(bss,
 				      "copy-file",
 				      NULL,
@@ -3729,7 +2976,6 @@ static Scheme_Object *copy_file(int argc, Scheme_Object **argv)
 				       "copy-file",
 				       NULL, 
 				       SCHEME_GUARD_FILE_WRITE | SCHEME_GUARD_FILE_DELETE);
-#endif
 
 #ifdef UNIX_FILE_SYSTEM
   {
@@ -3806,74 +3052,6 @@ static Scheme_Object *copy_file(int argc, Scheme_Object **argv)
   reason = "copy failed";
   if (GetLastError() == ERROR_ALREADY_EXISTS)
     pre_exists = 1;
-#endif
-#ifdef MAC_FILE_SYSTEM
-  { 
-    FInfo finfo;
-    FSSpec srcspec, destspec;
-    int exists = 0;
-    static OSErr en;
-   
-    if (find_mac_file(src, 0, &srcspec, 0, 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &finfo, 0)) {
-      if (find_mac_file(dest, 0, &destspec, 0, 0, NULL, NULL, &exists, NULL, NULL, NULL, NULL, NULL, 0)
-      	  && !exists) {
-        CopyParam rec;
-        
-        /* Try CopyFile first: */
-        rec.ioVRefNum = srcspec.vRefNum;
-        rec.ioDstVRefNum = destspec.vRefNum;
-        rec.ioDirID = srcspec.parID;
-        rec.ioNewDirID = destspec.parID;
-        rec.ioNamePtr = srcspec.name;
-        rec.ioNewName = destspec.name;
-        rec.ioCopyName = NULL;
-        if (!(en = PBHCopyFileSync((HParmBlkPtr)&rec)))
-          return scheme_void;
-        else {
-          /* Try the old-fashioned way: */
-          short sdf, srf, ddf, drf;
-          if (!FSpOpenDF(&srcspec, fsRdPerm, &sdf)) {
-            if (!FSpOpenRF(&srcspec, fsRdPerm, &srf)) {
-              if (!FSpCreate(&destspec, finfo.fdCreator, finfo.fdType, smSystemScript)) {
-                if (!FSpOpenDF(&destspec, fsWrPerm, &ddf)) {
-                  if (!FSpOpenRF(&destspec, fsWrPerm, &drf)) {
-                    if (xCopyFile(ddf, sdf)) {
-                      if (xCopyFile(drf, srf)) {
-	                    FSClose(drf);
-	                    FSClose(ddf);
-	                    FSClose(srf);
-	                    FSClose(sdf);
-	                    return scheme_void;
-	                  } else
-			    reason = "read or write error on resource fork";
-	                } else
-			  reason = "read or write error on data fork";
-	                FSClose(drf);
-                  }  else
-		    reason = "cannot open destination file resource fork";
-                  FSClose(ddf);
-                } else
-		  reason = "cannot open destination file data fork";
-                FSpDelete(&destspec);
-              } else
-		reason = "cannot create destination file";
-              FSClose(srf);
-            } else
-	      reason = "cannot open source file resource fork";
-            FSClose(sdf);
-          } else
-	    reason = "cannot open source file data fork";
-        }
-      } else {
-	if (exists) {
-	  reason = "destination already exists";
-	  pre_exists = 1;
-	} else
-	  reason = "bad destination path";
-      }
-    } else
-      reason = "source file does not exist";
-  }
 #endif
 
   scheme_raise_exn(pre_exists ? MZEXN_FAIL_FILESYSTEM_EXISTS : MZEXN_FAIL_FILESYSTEM, 
@@ -4272,7 +3450,7 @@ static Scheme_Object *simplify_path(int argc, Scheme_Object *argv[])
 {
   char *s;
   int len, use_fs;
-  Scheme_Object *bs;
+  Scheme_Object *bs, *r;
 
   if (!SCHEME_PATH_STRINGP(argv[0]))
     scheme_wrong_type("simplify-path", SCHEME_PATH_STRING_STR, 0, argc, argv);
@@ -4287,7 +3465,14 @@ static Scheme_Object *simplify_path(int argc, Scheme_Object *argv[])
 
   use_fs = ((argc <= 1) || SCHEME_TRUEP(argv[1]));
 
-  return do_simplify_path(bs, scheme_null, 0, use_fs, 0);
+  r = do_simplify_path(bs, scheme_null, 0, use_fs, 0);
+
+  if (SCHEME_FALSEP(r)) {
+    /* Input was just 'same: */
+    return scheme_make_path(".");
+  }
+
+  return r;
 }
 
 static Scheme_Object *current_drive(int argc, Scheme_Object *argv[])
@@ -4328,7 +3513,7 @@ static Scheme_Object *expand_path(int argc, Scheme_Object *argv[])
 
 static Scheme_Object *do_directory_list(int break_ok, int argc, Scheme_Object *argv[])
 {
-#if !defined(NO_READDIR) || defined(USE_MAC_FILE_TOOLBOX) || defined(USE_FINDFIRST)
+#if !defined(NO_READDIR) || defined(USE_FINDFIRST)
   char *filename;
   Scheme_Object * volatile first = scheme_null, * volatile last = NULL, *n, *elem;
 #endif
@@ -4343,23 +3528,15 @@ static Scheme_Object *do_directory_list(int break_ok, int argc, Scheme_Object *a
   FF_HANDLE_TYPE hfile;
   FF_TYPE info;
 #endif
-#ifdef USE_MAC_FILE_TOOLBOX
-  CInfoPBRec pbrec;
-  char buf[256];
-  FSSpec dir;
-  short find_position = 0;
-#else
   volatile int counter = 0;
-#endif
 
   if (argc && !SCHEME_PATH_STRINGP(argv[0]))
     scheme_wrong_type("directory-list", SCHEME_PATH_STRING_STR, 0, argc, argv);
 
-#if defined(NO_READDIR) && !defined(USE_MAC_FILE_TOOLBOX) && !defined(USE_FINDFIRST)
+#if defined(NO_READDIR) && !defined(USE_FINDFIRST)
   return scheme_null;
 #else
 
-#ifndef USE_MAC_FILE_TOOLBOX
   if (argc) {
     Scheme_Object *path = argv[0];
 # ifdef USE_FINDFIRST
@@ -4371,7 +3548,7 @@ static Scheme_Object *do_directory_list(int break_ok, int argc, Scheme_Object *a
 				    break_ok ? SCHEME_GUARD_FILE_READ : 0);
       if (!filename)
 	return NULL;
-#ifdef USE_FINDFIRST
+# ifdef USE_FINDFIRST
       /* Eliminate "." and "..": */
       if (SAME_OBJ(path, argv[0])) {
 	Scheme_Object *old;
@@ -4382,7 +3559,7 @@ static Scheme_Object *do_directory_list(int break_ok, int argc, Scheme_Object *a
       } else
 	break;
     }
-#endif
+# endif
   } else {
     filename = SCHEME_PATH_VAL(CURRENT_WD());
     if (break_ok) {
@@ -4398,60 +3575,8 @@ static Scheme_Object *do_directory_list(int break_ok, int argc, Scheme_Object *a
 		       filename);
     return NULL;
   }
-#endif
 
-#ifdef USE_MAC_FILE_TOOLBOX
-  if (argc) {
-    Scheme_Object *bs;
-    bs = TO_PATH(argv[0]);
-    bs = BYTE_PATH(bs);
-    filename = SCHEME_PATH_VAL(bs);
-    if (has_null(filename, SCHEME_PATH_LEN(bs)))
-      raise_null_error("directory-list", argv[0], "");
-  } else {
-    filename = SCHEME_PATH_VAL(CURRENT_WD());
-    if (break_ok)
-      scheme_security_check_file("directory-list", NULL, SCHEME_GUARD_FILE_EXISTS);
-  }
-  if (break_ok)
-    scheme_security_check_file("directory-list", filename, SCHEME_GUARD_FILE_READ);
-
-  if (!find_mac_file(filename, 0, &dir, 1, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0)) {
-    if (argc) {
-      scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
-		       "directory-list: could not open \"%q\"",
-		       filename);
-    }
-    return scheme_null;
-  }
-  
-  while (1) {
-    pbrec.hFileInfo.ioVRefNum = dir.vRefNum;
-    pbrec.hFileInfo.ioDirID = dir.parID;
-    pbrec.hFileInfo.ioFDirIndex = find_position + 1;
-    pbrec.hFileInfo.ioNamePtr = (unsigned char *)buf;
-    if (PBGetCatInfo(&pbrec, 0) || !*buf)
-      break;
-    
-    find_position++;
-
-    if (break_ok && !(find_position & 0x15)) {
-      scheme_thread_block(0);
-      scheme_current_thread->ran_some = 1;
-    }
-    
-    n = scheme_make_sized_offset_path(buf, 1, buf[0], 1);
-    elem = scheme_make_pair(n, scheme_null);
-    if (last)
-      SCHEME_CDR(last) = elem;
-    else
-      first = elem;
-    last = elem;
-  }
-  
-  return first;
-#else
-#ifdef USE_FINDFIRST
+# ifdef USE_FINDFIRST
 
   if (!filename)
     pattern = "*.*";
@@ -4522,24 +3647,24 @@ static Scheme_Object *do_directory_list(int break_ok, int argc, Scheme_Object *a
   FIND_CLOSE(hfile);
 
   return first;
-#else
+# else
   
   dir = opendir(filename ? filename : ".");
   if (!dir)
     return scheme_null;
   
   while ((e = readdir(dir))) {
-#ifdef DIRENT_NO_NAMLEN
+#  ifdef DIRENT_NO_NAMLEN
     nlen = strlen(e->d_name);
-#else
+#  else
     nlen = e->d_namlen;
-#endif
-#if defined(UNIX_FILE_SYSTEM) || defined(DOS_FILE_SYSTEM)
+#  endif
+#  if defined(UNIX_FILE_SYSTEM) || defined(DOS_FILE_SYSTEM)
     if (nlen == 1 && e->d_name[0] == '.')
       continue;
     if (nlen == 2 && e->d_name[0] == '.' && e->d_name[1] == '.')
       continue;
-#endif
+#  endif
     n = scheme_make_sized_path(e->d_name, nlen, 1);
     elem = scheme_make_pair(n, scheme_null);
     if (last)
@@ -4560,8 +3685,7 @@ static Scheme_Object *do_directory_list(int break_ok, int argc, Scheme_Object *a
   closedir(dir);
 
   return first;
-#endif
-#endif
+# endif
 #endif
 }
 
@@ -4663,15 +3787,65 @@ char *scheme_find_completion(char *fn)
   return SCHEME_PATH_VAL(f);
 }
 
+static Scheme_Object *explode_path(Scheme_Object *p)
+{
+  Scheme_Object *l = scheme_null, *base, *name;
+  int isdir;
+
+  while (1) {
+    name = scheme_split_path(SCHEME_PATH_VAL(p), SCHEME_PATH_LEN(p), &base, &isdir);
+    l = scheme_make_pair(name, l);
+
+    if (!SCHEME_PATHP(base)) {
+      l = scheme_make_pair(base, l);
+      return l;
+    }
+    p = base;
+  }
+}
+
+Scheme_Object *scheme_extract_relative_to(Scheme_Object *obj, Scheme_Object *dir)
+{
+  Scheme_Object *de, *oe;
+
+  de = explode_path(dir);
+  oe = explode_path(obj);
+
+  while (SCHEME_PAIRP(de)
+	 && SCHEME_PAIRP(oe)) {
+    if (!scheme_equal(SCHEME_CAR(de), SCHEME_CAR(oe)))
+      return obj;
+    de = SCHEME_CDR(de);
+    oe = SCHEME_CDR(oe);
+  }
+
+  if (SCHEME_NULLP(de)) {
+    Scheme_Object *a[2];
+   
+    if (SCHEME_NULLP(oe)) {
+      a[0] = same_symbol;
+      obj = scheme_build_path(1, a);
+    } else {
+      obj = SCHEME_CAR(oe);
+      oe = SCHEME_CDR(oe);
+    }
+
+    while (SCHEME_PAIRP(oe)) {
+      a[0] = obj;
+      a[1] = SCHEME_CAR(oe);
+      obj = scheme_build_path(2, a);
+      oe = SCHEME_CDR(oe);
+    }
+  }
+
+  return obj;
+}
+
 static Scheme_Object *filesystem_root_list(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *first = scheme_null;
-#if defined(DOS_FILE_SYSTEM) || defined(USE_MAC_FILE_TOOLBOX)
+#if defined(DOS_FILE_SYSTEM)
   Scheme_Object *last = NULL, *v;
-#endif
-#ifdef USE_MAC_FILE_TOOLBOX
-  HParamBlockRec rec;
-  int i;
 #endif
 
   scheme_security_check_file("filesystem-root-list", NULL, SCHEME_GUARD_FILE_EXISTS);
@@ -4712,30 +3886,6 @@ static Scheme_Object *filesystem_root_list(int argc, Scheme_Object *argv[])
     SetErrorMode(oldmode);
   }
 #endif
-#ifdef USE_MAC_FILE_TOOLBOX
-  i = 1;
-  while (1) {
-    Str255 name;
-    Scheme_Object *v;
-    
-    rec.volumeParam.ioVolIndex = i;
-    rec.volumeParam.ioNamePtr = name;
-    
-    if (PBHGetVInfo(&rec, 0))
-      break;
-    
-    name[name[0] + 1] = ':';
-    v = scheme_make_pair(scheme_make_sized_offset_path((char *)name, 1, 
-						       name[0] + 1, 1), 
-    	                 scheme_null);
-    if (last)
-      SCHEME_CDR(last) = v;
-    else
-      first = v;
-    last = v;
-    i++;
-  }
-#endif
 
   return first;
 }
@@ -4747,33 +3897,6 @@ static Scheme_Object *make_directory(int argc, Scheme_Object *argv[])
 #else
   char *filename;
   int exists_already = 0;
-
-# ifdef USE_MAC_FILE_TOOLBOX	  
-  FSSpec spec;
-  Scheme_Object *bs;
-
-  if (!SCHEME_PATH_STRINGP(argv[0]))
-    scheme_wrong_type("make-directory", SCHEME_PATH_STRING_STR, 0, argc, argv);
-
-  bs = TO_PATH(argv[0]);
-
-  filename = SCHEME_PATH_VAL(argv[0]);
-  if (has_null(filename, SCHEME_PATH_LEN(argv[0])))
-    raise_null_error("make-directory", argv[0], "");
-
-  scheme_security_check_file("make-directory", filename, SCHEME_GUARD_FILE_WRITE);
-
-  if (find_mac_file(filename, 0, &spec, 0, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0)) {
-    SInt32 created;
-    errno = FSpDirCreate(&spec, smSystemScript, &created);
-    if (!created)
-      errno = dupFNErr;
-    if (!errno)
-      return scheme_void;
-    exists_already = (errno == dupFNErr);
-  }
-# define MKDIR_EXN_TYPE "%E"
-# else
   int len, copied;
 
   if (!SCHEME_PATH_STRINGP(argv[0]))
@@ -4807,7 +3930,6 @@ static Scheme_Object *make_directory(int argc, Scheme_Object *argv[])
 
   exists_already = (errno == EEXIST);
 # define MKDIR_EXN_TYPE "%e"
-# endif
 
   scheme_raise_exn(exists_already ? MZEXN_FAIL_FILESYSTEM_EXISTS : MZEXN_FAIL_FILESYSTEM,
 		   "make-directory: cannot make directory: %q (" MKDIR_EXN_TYPE ")",
@@ -4827,27 +3949,6 @@ static Scheme_Object *delete_directory(int argc, Scheme_Object *argv[])
 # endif
   char *filename;
 
-# ifdef USE_MAC_FILE_TOOLBOX	  
-  FSSpec spec;
-  Scheme_Object *bs;
-
-  if (!SCHEME_PATH_STRINGP(argv[0]))
-    scheme_wrong_type("delete-directory", SCHEME_PATH_STRING_STR, 0, argc, argv);
-
-  bs = TO_PATH(argv[0]);
-
-  filename = SCHEME_PATH_VAL(bs);
-  if (has_null(filename, SCHEME_PATH_LEN(bs)))
-    raise_null_error("delete-directory", argv[0], "");
-  
-  scheme_security_check_file("delete-directory", filename, SCHEME_GUARD_FILE_DELETE);
-
-  if (find_mac_file(filename, 0, &spec, 1, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0)) {
-    errno = FSpDelete(&spec);
-    if (!errno)
-      return scheme_void;
-  }  
-# else
   if (!SCHEME_PATH_STRINGP(argv[0]))
     scheme_wrong_type("delete-directory", SCHEME_PATH_STRING_STR, 0, argc, argv);
 
@@ -4859,7 +3960,7 @@ static Scheme_Object *delete_directory(int argc, Scheme_Object *argv[])
   while (1) {
     if (!MSC_W_IZE(rmdir)(MSC_WIDE_PATH(filename)))
       return scheme_void;
-#  ifdef DOS_FILE_SYSTEM
+# ifdef DOS_FILE_SYSTEM
     else if ((errno == EACCES) && !tried_cwd) {
       /* Maybe we're using the target directory. Try a real setcwd. */
       Scheme_Object *tcd;
@@ -4867,11 +3968,10 @@ static Scheme_Object *delete_directory(int argc, Scheme_Object *argv[])
       scheme_os_setcwd(SCHEME_PATH_VAL(tcd), 0);
       tried_cwd = 1;
     }
-#  endif
+# endif
     else if (errno != EINTR)
       break;
   }
-# endif
 
   scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
 		   "delete-directory: cannot delete directory: %q (%e)",
@@ -4900,7 +4000,7 @@ static Scheme_Object *make_link(int argc, Scheme_Object *argv[])
 				      &copied,
 				      SCHEME_GUARD_FILE_WRITE);
 
-#if defined(USE_MAC_FILE_TOOLBOX) || defined(DOS_FILE_SYSTEM)
+#if defined(DOS_FILE_SYSTEM)
   scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,
 		   "make-file-or-directory-link: link creation not supported on this platform; "
 		   "cannot create link: %Q",
@@ -4926,34 +4026,20 @@ static Scheme_Object *file_modify_seconds(int argc, Scheme_Object **argv)
 {
   char *file;
   int set_time = 0;
-#ifdef USE_MAC_FILE_TOOLBOX
-  FSSpec spec;
-  long mtime;
-  int exists;
-  Scheme_Object *bs;
-#else
   UNBUNDLE_TIME_TYPE mtime;
   struct MSC_IZE(stat) buf;
-#endif
 
   if (!SCHEME_PATH_STRINGP(argv[0]))
     scheme_wrong_type("file-or-directory-modify-seconds", SCHEME_PATH_STRING_STR, 0, argc, argv);
 
   set_time = ((argc > 1) && SCHEME_TRUEP(argv[1]));
 
-#ifdef USE_MAC_FILE_TOOLBOX	  
-  bs = TO_PATH(argv[0]);
-  file = SCHEME_PATH_VAL(bs);
-  if (has_null(file, SCHEME_PATH_LEN(bs)))
-    raise_null_error("file-or-directory-modify-seconds", argv[0], "");
-#else
   file = scheme_expand_string_filename(argv[0],
 				       "file-or-directory-modify-seconds",
 				       NULL,
 				       (set_time
 					? SCHEME_GUARD_FILE_WRITE
 					: SCHEME_GUARD_FILE_READ));
-#endif
   
   if (set_time) {
     if (!SCHEME_INTP(argv[1]) && !SCHEME_BIGNUMP(argv[1])) {
@@ -4973,26 +4059,12 @@ static Scheme_Object *file_modify_seconds(int argc, Scheme_Object **argv)
     scheme_check_proc_arity("file-or-directory-modify-seconds", 0, 2, argc, argv);
   }
 
-#ifdef USE_MAC_FILE_TOOLBOX	  
-  scheme_security_check_file("file-or-directory-modify-seconds", file, 
-			     (set_time
-			      ? SCHEME_GUARD_FILE_READ
-			      : SCHEME_GUARD_FILE_WRITE));
-
-  if (!find_mac_file(file, 0, &spec, 0, 0, NULL, NULL, &exists, &mtime, NULL, NULL, NULL, NULL, set_time)
-      || !exists) {
-    /* Failed */
-  } else if (set_time)
-    return scheme_void;
-  else
-    return scheme_make_integer_value_from_time(mtime);
-#else
 # ifdef DOS_FILE_SYSTEM
   if (!set_time) {
     int len = strlen(file);
     Scheme_Object *secs;
 
-    if (UNC_stat(file, len, NULL, NULL, &secs))
+    if (UNC_stat(file, len, NULL, NULL, &secs, NULL))
       return secs;
   } else 
 # endif
@@ -5012,7 +4084,6 @@ static Scheme_Object *file_modify_seconds(int argc, Scheme_Object **argv)
 	  break;
       }
     }
-#endif
 
   if (argc > 2) {
     return _scheme_tail_apply(argv[2], 0, NULL);
@@ -5033,7 +4104,7 @@ typedef struct {
   char set, in;
 } Group_Mem_Cache;
 static Group_Mem_Cache group_mem_cache[GROUP_CACHE_SIZE];
-static int user_in_group(gid_t gid)
+static int user_in_group(uid_t uid, gid_t gid)
 {
   struct group *g;
   struct passwd *pw;
@@ -5044,7 +4115,7 @@ static int user_in_group(gid_t gid)
       return group_mem_cache[i].in;
   }
 
-  pw = getpwuid(getuid());
+  pw = getpwuid(uid);
   if (!pw)
     return 0;
 
@@ -5069,96 +4140,128 @@ static int user_in_group(gid_t gid)
 
   return in;
 }
+
+static int have_user_ids = 0;
+static uid_t uid, euid;
+static gid_t gid, egid;
 #endif
 
 static Scheme_Object *file_or_dir_permissions(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *l = scheme_null;
   char *filename;
-#ifdef USE_MAC_FILE_TOOLBOX
-  FSSpec spec;
-  int flags, isdir, exists;
-  long type;
-  Scheme_Object *bs;
-#endif
 
   if (!SCHEME_PATH_STRINGP(argv[0]))
     scheme_wrong_type("file-or-directory-permissions", SCHEME_PATH_STRING_STR, 0, argc, argv);
 
-#ifdef USE_MAC_FILE_TOOLBOX	  
-  bs = TO_PATH(argv[0]);
-  filename = SCHEME_PATH_VAL(bs);
-  if (has_null(filename, SCHEME_PATH_LEN(bs)))
-    raise_null_error("file-or-directory-permissions", argv[0], "");
-#else
   filename = scheme_expand_string_filename(argv[0],
 					   "file-or-directory-permissions",
 					   NULL,
 					   SCHEME_GUARD_FILE_READ);
-#endif
 
-#ifdef USE_MAC_FILE_TOOLBOX
-  scheme_security_check_file("file-or-directory-permissions", filename, SCHEME_GUARD_FILE_READ);
-
-  if (!find_mac_file(filename, 0, &spec, 0, 0, NULL, &isdir, &exists, NULL, &flags, &type, NULL, NULL, 0)
-      || !exists)
-    return l = NULL;
-  else {
-    l = scheme_make_pair(read_symbol, l);
-    
-    if (type == 'APPL')
-      l = scheme_make_pair(execute_symbol, l);
-    
-    if (!(flags & 0x1))
-      l = scheme_make_pair(write_symbol, l);
-  }
-#else
 # ifdef NO_STAT_PROC
   return scheme_null;
 # else
 #  ifdef UNIX_FILE_SYSTEM
-  {
-    struct stat buf;
-    int read, write, execute;
+  /* General strategy for permissions (to deal with setuid)
+     taken from euidaccess() in coreutils... */
+#   ifndef NO_UNIX_USERS
+  if (have_user_ids == 0) {
+    have_user_ids = 1;
+    uid = getuid();
+    gid = getgid();
+    euid = geteuid();
+    egid = getegid();
+  }
 
-    if (stat(filename, &buf))
+  if ((uid == euid) && (gid == egid)) {
+    /* Not setuid; use access() */
+    int read, write, execute, ok;
+    
+    do {
+      ok = access(filename, R_OK);
+    } while ((ok == -1) && (errno == EINTR));
+    read = !ok;
+    
+    if (ok && (errno != EACCES))
       l = NULL;
     else {
-#ifndef NO_UNIX_USERS
-      if (buf.st_uid == getuid()) {
-	read = !!(buf.st_mode & S_IRUSR);
-	write = !!(buf.st_mode & S_IWUSR);
-	execute = !!(buf.st_mode & S_IXUSR);
-      } else if (user_in_group(buf.st_gid)) {
-	read = !!(buf.st_mode & S_IRGRP);
-	write = !!(buf.st_mode & S_IWGRP);
-	execute = !!(buf.st_mode & S_IXGRP);
-      } else {
-	read = !!(buf.st_mode & S_IROTH);
-	write = !!(buf.st_mode & S_IWOTH);
-	execute = !!(buf.st_mode & S_IXOTH);
-      }
-#else
-      read = !!(buf.st_mode & (S_IRUSR | S_IRGRP | S_IROTH));
-      write = !!(buf.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH));
-      execute = !!(buf.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH));
-#endif
+      do {
+	ok = access(filename, W_OK);
+      } while ((ok == -1) && (errno == EINTR));
+      write = !ok;
       
-      if (read)
-	l = scheme_make_pair(read_symbol, l);
-      if (write)
-	l = scheme_make_pair(write_symbol, l);
-      if (execute)
-	l = scheme_make_pair(execute_symbol, l);
+      if (ok && (errno != EACCES))
+	l = NULL;
+      else {
+	do {
+	  ok = access(filename, X_OK);
+	} while ((ok == -1) && (errno == EINTR));
+	execute = !ok;
+      
+	if (ok && (errno != EACCES))
+	  l = NULL;
+	else {
+	  if (read)
+	    l = scheme_make_pair(read_symbol, l);
+	  if (write)
+	    l = scheme_make_pair(write_symbol, l);
+	  if (execute)
+	    l = scheme_make_pair(execute_symbol, l);
+	}
+      }
     }
-  }
+  } else 
+#  endif
+    {
+      /* Use stat, because setuid, or because or no user info available */
+      struct stat buf;
+      int read, write, execute;
+
+      if (stat(filename, &buf))
+	l = NULL;
+      else {
+#   ifndef NO_UNIX_USERS
+	if (euid == 0) {
+	  /* Super-user can read/write anything, and can
+	     execute anything that someone can execute */
+	  read = 1;
+	  write = 1;
+	  execute = !!(buf.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH));
+	} else if (buf.st_uid == euid) {
+	  read = !!(buf.st_mode & S_IRUSR);
+	  write = !!(buf.st_mode & S_IWUSR);
+	  execute = !!(buf.st_mode & S_IXUSR);
+	} else if ((egid == buf.st_gid) || user_in_group(euid, buf.st_gid)) {
+	  read = !!(buf.st_mode & S_IRGRP);
+	  write = !!(buf.st_mode & S_IWGRP);
+	  execute = !!(buf.st_mode & S_IXGRP);
+	} else {
+	  read = !!(buf.st_mode & S_IROTH);
+	  write = !!(buf.st_mode & S_IWOTH);
+	  execute = !!(buf.st_mode & S_IXOTH);
+	}
+#   else
+	read = !!(buf.st_mode & (S_IRUSR | S_IRGRP | S_IROTH));
+	write = !!(buf.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH));
+	execute = !!(buf.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH));
+#   endif
+	
+	if (read)
+	  l = scheme_make_pair(read_symbol, l);
+	if (write)
+	  l = scheme_make_pair(write_symbol, l);
+	if (execute)
+	  l = scheme_make_pair(execute_symbol, l);
+      }
+    }
 #  endif  
 #  ifdef DOS_FILE_SYSTEM
   {
     int len = strlen(filename);
     int flags;
     
-    if (UNC_stat(filename, len, &flags, NULL, NULL)) {
+    if (UNC_stat(filename, len, &flags, NULL, NULL, NULL)) {
       if (flags & MZ_UNC_READ)
 	l = scheme_make_pair(read_symbol, l);
       if (flags & MZ_UNC_WRITE)
@@ -5170,7 +4273,6 @@ static Scheme_Object *file_or_dir_permissions(int argc, Scheme_Object *argv[])
   }
 #  endif
 # endif
-#endif
   
   if (!l) {
     scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
@@ -5184,34 +4286,24 @@ static Scheme_Object *file_or_dir_permissions(int argc, Scheme_Object *argv[])
 static Scheme_Object *file_size(int argc, Scheme_Object *argv[])
 {
   char *filename;
-#ifdef USE_MAC_FILE_TOOLBOX
-  FSSpec spec;
-  Scheme_Object *bs;
-#endif
   unsigned long len = 0;
 
   if (!SCHEME_PATH_STRINGP(argv[0]))
     scheme_wrong_type("file-size", SCHEME_PATH_STRING_STR, 0, argc, argv);
 
-#ifdef USE_MAC_FILE_TOOLBOX	  
-  bs = TO_PATH(argv[0]);
-  filename = SCHEME_PATH_VAL(bs);
-  if (has_null(filename, SCHEME_PATH_LEN(bs)))
-    raise_null_error("file-size", argv[0], "");
-#else
   filename = scheme_expand_string_filename(argv[0],
 					   "file-size",
 					   NULL,
 					   SCHEME_GUARD_FILE_READ);
-#endif
 
-#ifdef USE_MAC_FILE_TOOLBOX
-  scheme_security_check_file("file-size", filename, SCHEME_GUARD_FILE_READ);
-
-  if (!find_mac_file(filename, 0, &spec, 0, 1, NULL, NULL, NULL, NULL, NULL, NULL, &len, NULL, 0))
-    goto failed;
-#endif
-#if defined(UNIX_FILE_SYSTEM) || defined(DOS_FILE_SYSTEM)
+#ifdef DOS_FILE_SYSTEM
+ {
+   mzlonglong filesize;
+   if (UNC_stat(filename, strlen(filename), NULL, NULL, NULL, &filesize)) {
+     return scheme_make_integer_value_from_long_long(filesize);
+   }
+ }
+#else
   {
     struct MSC_IZE(stat) buf;
 
@@ -5227,11 +4319,12 @@ static Scheme_Object *file_size(int argc, Scheme_Object *argv[])
 
     len = buf.st_size;
   }
-#endif
 
   return scheme_make_integer_value_from_unsigned(len);
 
-failed:
+ failed:
+#endif
+
   scheme_raise_exn(MZEXN_FAIL_FILESYSTEM,
 		   "file-size: file not found: \"%q\"",
 		   filename_for_error(argv[0]));
@@ -5356,6 +4449,14 @@ static Scheme_Object *use_compiled_kind(int argc, Scheme_Object *argv[])
 			     -1, compiled_kind_p, "list of relative paths and strings", 1);
 }
 
+static Scheme_Object *use_user_paths(int argc, Scheme_Object *argv[])
+{
+  return scheme_param_config("use-user-specific-search-paths", 
+			     scheme_make_integer(MZCONFIG_USE_USER_PATHS),
+			     argc, argv,
+			     -1, NULL, NULL, 1);
+}
+
 /********************************************************************************/
 
 #ifndef NO_FILE_SYSTEM_UTILS
@@ -5402,6 +4503,20 @@ find_system_path(int argc, Scheme_Object **argv)
       exec_cmd = scheme_make_path("mzscheme");
     }
     return exec_cmd;
+  } else if (argv[0] == run_file_symbol) {
+    if (!run_cmd) {
+      REGISTER_SO(run_cmd);
+      run_cmd = scheme_make_path("mzscheme");
+    }
+    return run_cmd;
+  } else if (argv[0] == collects_dir_symbol) {
+    if (!collects_path) {
+      REGISTER_SO(collects_path);
+      collects_path = scheme_make_path("collects");
+    }
+    return collects_path;
+  } else if (argv[0] == orig_dir_symbol) {
+    return original_pwd;
   } else if (argv[0] == addon_dir_symbol) {
     which = id_addon_dir;
   } else {
@@ -5621,82 +4736,6 @@ find_system_path(int argc, Scheme_Object **argv)
   }
 #endif
 
-#ifdef MAC_FILE_SYSTEM
-  {
-    OSType	t;
-    FSSpec	spec;
-    Scheme_Object *home;
-    int		ends_in_colon;
-    SInt16	vRefNum;
-    SInt32	dirID;
-    OSErr	err;
-
-    switch (which) {
-    case id_doc_dir:
-    case id_desk_dir:
-      t = 'desk';
-      break;
-    case id_home_dir:
-    case id_pref_dir:
-    case id_pref_file:
-    case id_init_dir:
-    case id_init_file:
-    case id_addon_dir:
-      t = 'pref';
-      break;
-    case id_sys_dir:
-      t = 'macs';
-      break;
-    case id_temp_dir:
-    default:
-      t = 'temp';
-      break;
-    }
-
-    err = FindFolder(kOnSystemDisk, t, kCreateFolder, &vRefNum, &dirID);
-    
-    if (err == noErr) {
-      FSMakeFSSpec(vRefNum,dirID,NULL,&spec);
-      home = scheme_make_path(scheme_mac_spec_to_path(&spec));
-    }
-    else {
-      if (which == id_temp_dir)
-	home = CURRENT_WD();
-      else {
-	/* Everything else uses system current directory if there's no prefs folder */
-	home = scheme_make_path(scheme_os_getcwd(NULL, 0, NULL, 1));
-	if (!home)
-	  /* disaster strikes; use Scheme CWD */
-	  home = CURRENT_WD();
-      }
-    }
-  
-    if ((which == id_home_dir) 
-	|| (which == id_doc_dir) 
-	|| (which == id_desk_dir) 
-	|| (which == id_temp_dir) 
-	|| (which == id_init_dir) 
-	|| (which == id_sys_dir))
-      return home;
-    
-    ends_in_colon = (SCHEME_PATH_VAL(home))[SCHEME_PATH_LEN(home) - 1] == ':';
-
-    if ((which == id_addon_dir)
-	|| (which == id_pref_dir)
-	|| (which == id_pref_file))
-      home = append_path(home, scheme_make_path(":PLT Scheme AddOns" + ends_in_colon));
-      ends_in_colon = 0;
-    }
-
-    if (which == id_init_file)
-      return append_path(home, scheme_make_path(":mzschemerc.ss" + ends_in_colon));
-    if (which == id_pref_file)
-      return append_path(home, scheme_make_path(":org.plt-scheme.prefs.ss" + ends_in_colon));
-
-    return home;
-  }
-#endif
-
   /* Something went wrong if we get here. */
   return scheme_void;
 }
@@ -5715,6 +4754,18 @@ Scheme_Object *scheme_set_exec_cmd(char *s)
 #endif
 }
 
+Scheme_Object *scheme_set_run_cmd(char *s)
+{
+#ifndef NO_FILE_SYSTEM_UTILS
+  if (!run_cmd) {
+    REGISTER_SO(run_cmd);
+    run_cmd = scheme_make_path(s);
+  }
+
+  return run_cmd;
+#endif
+}
+
 char *scheme_get_exec_path(void)
 {
   if (exec_cmd)
@@ -5723,128 +4774,50 @@ char *scheme_get_exec_path(void)
     return NULL;
 }
 
+void scheme_set_collects_path(Scheme_Object *p)
+{
+  REGISTER_SO(collects_path);
+  collects_path = p;
+}
+
+void scheme_set_original_dir(Scheme_Object *d)
+{
+  if (!original_pwd) {
+    REGISTER_SO(original_pwd);
+  }
+  original_pwd = d;
+}
+
 /********************************************************************************/
 
-#ifdef MAC_CLASSIC_PROCESS_CONTROL
+#ifdef DOS_FILE_SYSTEM
 
-static long check_four(char *name, int which, int argc, Scheme_Object **argv)
+static wchar_t *dlldir;
+
+__declspec(dllexport) wchar_t *scheme_get_dll_path(wchar_t *s);
+__declspec(dllexport) void scheme_set_dll_path(wchar_t *p);
+
+wchar_t *scheme_get_dll_path(wchar_t *s)
 {
-  Scheme_Object *o = argv[which];
-  
-  if (!SCHEME_BYTE_STRINGP(o))
-    scheme_wrong_type(name, "MacOS type/creator 4-character byte string", which, argc, argv);
-
-  if (SCHEME_BYTE_STRTAG_VAL(o) != 4) {
-    scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-		     "%s: string is not a 4-character type or creator signature: %V",
-		     name,
-		     o);
-  }
-  
-  return *(long *)SCHEME_BYTE_STR_VAL(o);
+  if (dlldir) {
+    int len1, len2;
+    wchar_t *p;
+    len1 = wc_strlen(dlldir);
+    len2 = wc_strlen(s);
+    p = (wchar_t *)scheme_malloc_atomic((len1 + len2 + 2) * sizeof(wchar_t));
+    memcpy(p, dlldir, len1);
+    if (p[len1 - 1] != '\\') {
+      p[len1++] = '\\';
+    }
+    memcpy(p + len1, s, (len2 + 1) * sizeof(wchar_t));
+    return p;
+  } else
+    return s;
 }
 
-static int appl_name_to_spec(char *name, int find_path, Scheme_Object *o, FSSpec *spec)
+void scheme_set_dll_path(wchar_t *p)
 {
-  if (find_path) {
-    HVolumeParam volPB;
-    HIOParam paramPB;
-    GetVolParmsInfoBuffer volinfo;
-    DTPBRec rec;
-    Str255 nm;
-    short vrefnum;
-    long junk;
-    long creator = check_four(name, 0, 1, &o);
-
-    /* try current volume: */
-    scheme_os_setcwd(SCHEME_PATH_VAL(scheme_get_param(scheme_current_config(), 
-						      MZCONFIG_CURRENT_DIRECTORY)),
-		     0);
-    if (HGetVol(nm, &vrefnum, &junk) == noErr) {
-      rec.ioNamePtr = NULL;
-      rec.ioVRefNum = vrefnum;
-      
-      if (PBDTGetPath(&rec)) {
-	rec.ioIndex = 0;
-	rec.ioNamePtr = nm;
-	rec.ioFileCreator = creator;
-
-	if (PBDTGetAPPL(&rec, 0)) {
-	  memcpy(spec->name, nm, 32);
-	  spec->vRefNum = vrefnum;
-	  spec->parID = rec.ioAPPLParID;
-	  
-	  return 1;
-	}
-      }
-    }
-
-    volPB.ioNamePtr = NULL;
-    paramPB.ioNamePtr = NULL;
-    paramPB.ioBuffer = (Ptr)&volinfo;
-    paramPB.ioReqCount = sizeof(volinfo);
-
-    /* Loop over all volumes: */
-    for (volPB.ioVolIndex = 1; PBHGetVInfoSync ((HParmBlkPtr)&volPB) == noErr; volPB.ioVolIndex++) {
-      /* Call PBHGetVolParms call to ensure the volume is a local volume. */
-      paramPB.ioVRefNum = volPB.ioVRefNum;
-
-      if (PBHGetVolParmsSync ((HParmBlkPtr)&paramPB) == noErr && volinfo.vMServerAdr == 0) {
-	rec.ioNamePtr = NULL;
-	rec.ioVRefNum = volPB.ioVRefNum;
-	
-	if (PBDTGetPath(&rec))
-	  break;
-
-	rec.ioIndex = 0;
-	rec.ioNamePtr = nm;
-	rec.ioFileCreator = creator;
-
-	if (PBDTGetAPPL(&rec, 0))
-	  break;
-      
-	memcpy(spec->name, nm, 32);
-	spec->vRefNum = vrefnum;
-	spec->parID = rec.ioAPPLParID;
-
-	return 1;
-      }
-    }
-    return 0;
-  } else {
-    char *s;
-    
-    if (!SCHEME_PATH_STRINGP(o))
-      scheme_wrong_type(name, SCHEME_PATH_STRING_STR, 0, 1, &o);
-  
-    s = scheme_expand_string_filename(o,
-				      name,
-				      NULL,
-				      0);
-
-    if (!find_mac_file(s, 0, spec, 0, 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0))
-      return 0;
-  }
-  
-  return 1;
-}
-
-int scheme_mac_start_app(char *name, int find_path, Scheme_Object *o)
-{
-  FSSpec spec;
-  LaunchParamBlockRec rec;
-
-  if (!appl_name_to_spec(name, find_path, o, &spec))
-    return 0;
-
-  rec.launchBlockID = extendedBlock;
-  rec.launchEPBLength = extendedBlockLen;
-  rec.launchFileFlags = 0;
-  rec.launchControlFlags = launchContinue | launchNoFileFlags;
-  rec.launchAppSpec = &spec;
-  rec.launchAppParameters = NULL;
-
-  return !LaunchApplication(&rec);
+  dlldir = p;
 }
 
 #endif

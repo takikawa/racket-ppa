@@ -314,7 +314,7 @@ ac_subdirs_all="$ac_subdirs_all foreign/gcc/libffi"
 ac_subdirs_all="$ac_subdirs_all llvm/llvm"
 ac_subdirs_all="$ac_subdirs_all wxcommon/jpeg"
 ac_subdirs_all="$ac_subdirs_all wxxt/src/x/wbuild"
-ac_subst_vars='SHELL PATH_SEPARATOR PACKAGE_NAME PACKAGE_TARNAME PACKAGE_VERSION PACKAGE_STRING PACKAGE_BUGREPORT exec_prefix prefix program_transform_name bindir sbindir libexecdir datadir sysconfdir sharedstatedir localstatedir libdir includedir oldincludedir infodir mandir build_alias host_alias target_alias DEFS ECHO_C ECHO_N ECHO_T LIBS CC CFLAGS LDFLAGS CPPFLAGS ac_ct_CC EXEEXT OBJEXT CPP EGREP CXX CXXFLAGS ac_ct_CXX CXXCPP RANLIB ac_ct_RANLIB PERL X_CFLAGS X_PRE_LIBS X_LIBS X_EXTRA_LIBS PREFLAGS COMPFLAGS PROFFLAGS SED AS AR STATIC_AR ARFLAGS WBUILD CC_FOR_BUILD REZ MZLINKER PLAIN_CC DYN_CFLAGS x_includes x_libraries OPTIONS MZOPTIONS CGCOPTIONS GC2OPTIONS MROPTIONS GCDIR MZBINTARGET MZINSTALLTARGET EXTRA_GMP_OBJ OSX NOT_OSX FRAMEWORK_INSTALL_DIR MREDLINKER LIBSFX WXLIBS WXVARIANT ICP MRLIBINSTALL LIBFINISH MAKE_MRED MAKE_MRED3M MAKE_MREDINSTALL MAKE_MREDINSTALL3M MAKE_WBUILD MAKE_COPYTREE MAKE_FINISH WXPRECOMP USE_WXPRECOMP INCLUDEDEP WX_MMD_FLAG JPEG_A JPEG_INC ZLIB_A ZLIB_INC PNG_A OSKHOME EXTRA_OSK_LIBS FOREIGN_OBJSLIB_IF_USED FOREIGN_LIB_IF_USED FOREIGN_OBJSLIB FOREIGN_CONVENIENCE FOREIGNTARGET LIBMZSCHEME_DEP LIBMRED_DEP LLVMTARGET LTO LTA subdirs LIBOBJS LTLIBOBJS'
+ac_subst_vars='SHELL PATH_SEPARATOR PACKAGE_NAME PACKAGE_TARNAME PACKAGE_VERSION PACKAGE_STRING PACKAGE_BUGREPORT exec_prefix prefix program_transform_name bindir sbindir libexecdir datadir sysconfdir sharedstatedir localstatedir libdir includedir oldincludedir infodir mandir build_alias host_alias target_alias DEFS ECHO_C ECHO_N ECHO_T LIBS CC CFLAGS LDFLAGS CPPFLAGS ac_ct_CC EXEEXT OBJEXT CPP EGREP CXX CXXFLAGS ac_ct_CXX CXXCPP RANLIB ac_ct_RANLIB PERL X_CFLAGS X_PRE_LIBS X_LIBS X_EXTRA_LIBS PREFLAGS COMPFLAGS PROFFLAGS SED AS AR STATIC_AR ARFLAGS WBUILD CC_FOR_BUILD REZ MZLINKER PLAIN_CC DYN_CFLAGS x_includes x_libraries OPTIONS MZOPTIONS CGCOPTIONS GC2OPTIONS MROPTIONS GCDIR MZBINTARGET MZINSTALLTARGET EXTRA_GMP_OBJ OSX NOT_OSX FRAMEWORK_INSTALL_DIR FRAMEWORK_REL_INSTALL INSTALL_ORIG_TREE EXE_SUFFIX MREDLINKER LIBSFX WXLIBS WXVARIANT ICP MRLIBINSTALL LIBFINISH MAKE_MRED MAKE_MRED3M MAKE_MREDINSTALL MAKE_MREDINSTALL3M MAKE_WBUILD MAKE_COPYTREE MAKE_FINISH WXPRECOMP USE_WXPRECOMP INCLUDEDEP WX_MMD_FLAG JPEG_A JPEG_INC ZLIB_A ZLIB_INC PNG_A OSKHOME EXTRA_OSK_LIBS FOREIGN_OBJSLIB_IF_USED FOREIGN_LIB_IF_USED FOREIGN_OBJSLIB FOREIGN_CONVENIENCE FOREIGNTARGET LIBMZSCHEME_DEP LIBMRED_DEP LLVMTARGET LTO LTA collectsdir libpltdir includepltdir docdir COLLECTS_PATH subdirs LIBOBJS LTLIBOBJS'
 ac_subst_files=''
 
 # Initialize some variables set by options.
@@ -819,33 +819,25 @@ _ACEOF
 
   cat <<_ACEOF
 Installation directories:
-  --prefix=TARGETDIR      install to TARGETDIR (usually ..../plt)
+  --prefix=PREFIX         install architecture-independent files in PREFIX
+			  [$ac_default_prefix]
+  --exec-prefix=EPREFIX   install architecture-dependent files in EPREFIX
+			  [PREFIX]
+
+By default, \`make install' will install all the files in
+\`$ac_default_prefix/bin', \`$ac_default_prefix/lib' etc.  You can specify
+an installation prefix other than \`$ac_default_prefix' using \`--prefix',
+for instance \`--prefix=\$HOME'.
+
+For better control, use the options below.
+
+Fine tuning of the installation directories:
+  --bindir=DIR           user executables [EPREFIX/bin]
+  --datadir=DIR          read-only architecture-independent data [PREFIX/share]
+  --libdir=DIR           object code libraries [EPREFIX/lib]
+  --includedir=DIR       C header files [PREFIX/include]
+  --mandir=DIR           man documentation [PREFIX/man]
 _ACEOF
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
   cat <<\_ACEOF
 
@@ -871,6 +863,7 @@ Optional Features:
   --enable-libjpeg        use libjpeg instead of building (enabled by default)
   --enable-shared         create shared libraries
   --enable-dynlib         same as --enable-shared
+  --enable-origtree       install with original directory structure
   --enable-foreign        compile foreign support (enabled by default)
   --enable-llvm           compile llvm support (disabled by default)
   --enable-sgc            use Senora GC instead of the Boehm GC
@@ -890,6 +883,7 @@ Optional Features:
   --enable-noopt          drop -O C flags
   --enable-xonx           compile X11 (not Quartz) MrEd for Mac OS X
   --enable-libfw          install Mac OS X frameworks to /Library/Frameworks
+  --enable-userfw         install Mac OS X frameworks to ~/Library/Frameworks
 
 Optional Packages:
   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
@@ -1399,6 +1393,11 @@ if test "${enable_dynlib+set}" = set; then
   enableval="$enable_dynlib"
 
 fi;
+# Check whether --enable-shared or --disable-shared was given.
+if test "${enable_shared+set}" = set; then
+  enableval="$enable_shared"
+
+fi;
 
 # Check whether --enable-foreign or --disable-foreign was given.
 if test "${enable_foreign+set}" = set; then
@@ -1502,6 +1501,11 @@ fi;
 # Check whether --enable-xonx or --disable-xonx was given.
 if test "${enable_xonx+set}" = set; then
   enableval="$enable_xonx"
+
+fi;
+# Check whether --enable-libfw or --disable-libfw was given.
+if test "${enable_libfw+set}" = set; then
+  enableval="$enable_libfw"
 
 fi;
 # Check whether --enable-libfw or --disable-libfw was given.
@@ -5031,22 +5035,13 @@ if test "${enable_dynlib}" = "no" ; then
   enable_shared=no
 fi
 
-if test "${enable_mred}" = "no" ; then
-  enable_wbuild=no
-  enable_xrender=no
-  enable_cairo=no
-  enable_libpng=no
-  enable_libjpeg=no
-  enable_gl=no
-  enable_pthread=no
-fi
-
 enable_quartz=no
 if test "${enable_xonx}" = "yes" ; then
   enable_quartz=no
 else
   if test "$OS" = "Darwin" ; then
     enable_quartz=yes
+    enable_origtree=yes
   fi
 fi
 
@@ -5060,31 +5055,64 @@ if test "${enable_perl}" = "" ; then
   fi
 fi
 
-if test "${prefix}" = "NONE" ; then
-  prefix=`cd "${srcdir}/.." && pwd`
-  MAKE_FINISH=inplace-finish
-else
-  # Check whether ${prefix} is redundant, because
-  # $prefix/src is $srcdir.
-  here_inode=`(ls -i -l -d ${srcdir}/. | cut -d d -f 1) 2> /dev/null`
-  there_inode=`(ls -i -l -d ${prefix}/src | cut -d d -f 1) 2> /dev/null`
-  if test "${here_inode}" = "${there_inode}" ; then
-    echo "in-place install, --prefix  specification is redundant"
-  else
-    echo "----> Installation will go to ${prefix}:"
-    echo "---->   ${prefix}/collects/..."
-    echo "---->   ${prefix}/bin/..."
-    echo "---->   ${prefix}/lib/..."
-    echo "---->   ${prefix}/include/..."
-    echo "---->   ${prefix}/man/..."
-    echo "---->   ${prefix}/notes/..."
-    MAKE_COPYTREE=copytree
-    MAKE_FINISH=copy-finish
-  fi
-fi
-
 if test "${enable_iconv}" = "" ; then
   enable_iconv=yes
+fi
+
+############## Install targets ################
+
+unixstyle=no
+if test "${prefix}" != "NONE" ; then
+  if test "${enable_origtree}" != "yes" ; then
+    unixstyle=yes
+  fi
+fi
+if test "${exec_prefix}" != "NONE" ; then
+ unixstyle=yes
+fi
+if test "${bindir}" != '${exec_prefix}/bin' ; then
+ unixstyle=yes
+fi
+if test "${datadir}" != '${prefix}/share' ; then
+ unixstyle=yes
+fi
+if test "${libdir}" != '${exec_prefix}/lib' ; then
+ unixstyle=yes
+fi
+if test "${includedir}" != '${prefix}/include' ; then
+ unixstyle=yes
+fi
+if test "${mandir}" != '${prefix}/man' ; then
+ unixstyle=yes
+fi
+
+if test "${unixstyle}" = "no" ; then
+  if test "${prefix}" = "NONE" ; then
+    inplacebuild=yes
+    prefix=`cd "${srcdir}/.." && pwd`
+  else
+    MAKE_COPYTREE=copytree
+  fi
+  bindir='${prefix}/bin'
+  libpltdir='${prefix}/lib'
+  collectsdir='${prefix}/collects'
+  includepltdir='${prefix}/include'
+  docdir='${prefix}/doc'
+  mandir='${prefix}/man'
+  COLLECTS_PATH="../collects"
+  INSTALL_ORIG_TREE=yes
+else
+  if test "${prefix}" = "NONE" ; then
+    # Set prefix explicitly so we can use it during configure
+    prefix="${ac_default_prefix}"
+  fi
+  libpltdir="${libdir}/plt"
+  collectsdir="${libdir}/plt/collects"
+  includepltdir="${includedir}/plt"
+  docdir="${datadir}/plt/doc"
+  MAKE_COPYTREE=copytree
+  COLLECTS_PATH='${collectsdir}'
+  INSTALL_ORIG_TREE=no
 fi
 
 ###### Make sure MrEd is really there ######
@@ -5093,6 +5121,16 @@ if test "${enable_mred}" = "yes" ; then
   if test ! -d $srcdir/mred ; then
     enable_mred=no
   fi
+fi
+
+if test "${enable_mred}" = "no" ; then
+  enable_wbuild=no
+  enable_xrender=no
+  enable_cairo=no
+  enable_libpng=no
+  enable_libjpeg=no
+  enable_gl=no
+  enable_pthread=no
 fi
 
 ###### Some defaults #######
@@ -5133,6 +5171,8 @@ LIBMZSCHEME_DEP=""
 
 XFT_EXTRA_FLAGS=
 XFT_EXTRA_LIBS=
+
+EXE_SUFFIX=
 
 ###### OSKit stuff #######
 
@@ -8508,6 +8548,9 @@ case $OS in
   OpenBSD)
     LIBS="$LIBS -rdynamic"
     ;;
+  NetBSD)
+    LIBS="$LIBS -rdynamic"
+    ;;
   IRIX)
     STATICLINK="/usr/lib/libC.a /usr/lib/libmalloc.a"
     if test "$X_PRE_LIBS" = " -lSM -lICE" ; then
@@ -8554,18 +8597,13 @@ case $OS in
     X_LIBS="-L/usr/contrib/X11R6/lib/ $X_LIBS"
     ;;
   CYGWIN*)
-    # Old cygwin approach, to make it Windows-like instead of Unix-like:
-    #  MZBINTARGET=cygwin-bin
-    #  MZINSTALLTARGET=cygwin-install
-    #  EXTRALIBS="$LIBS gmzwin.exp"
-    #  MZOPTIONS="$MZOPTIONS -DGC_DLL"
-    #  CGCOPTIONS="$CGCOPTIONS -DGC_DLL -DGC_BUILD -DUSE_MSVC_MD_LIBRARY -DMD_LIB_MAIN"
     MZINSTALLTARGET=unix-cygwin-install
     if test "${enable_shared}" = "yes" ; then
       ar_libtool_no_undefined=" -no-undefined"
       LIBMZSCHEME_DEP="libmzgc.la -liconv"
       LIBMRED_DEP="../mzscheme/libmzgc.la ../mzscheme/libmred.la"
     fi
+    EXE_SUFFIX=".exe"
     ;;
   BeOS)
     if test "${enable_sgcdebug}" = "yes" ; then
@@ -8622,8 +8660,13 @@ case $OS in
       enable_pthread=no
       if test "${enable_libfw}" = "yes" ; then
         FRAMEWORK_INSTALL_DIR=/Library/Frameworks
-      else
+        FRAMEWORK_REL_INSTALL=no
+      elif test "${enable_userfw}" = "yes" ; then
         FRAMEWORK_INSTALL_DIR=~/Library/Frameworks
+        FRAMEWORK_REL_INSTALL=no
+      else
+        FRAMEWORK_INSTALL_DIR='${libdir}'
+        FRAMEWORK_REL_INSTALL=yes
       fi
     else
       PREFLAGS="$PREFLAGS -DXONX "
@@ -8772,6 +8815,64 @@ rm -f conftest.err conftest.$ac_objext \
       conftest$ac_exeext conftest.$ac_ext
 echo "$as_me:$LINENO: result: $have_codeset" >&5
 echo "${ECHO_T}$have_codeset" >&6
+
+echo "$as_me:$LINENO: checking for getaddrinfo" >&5
+echo $ECHO_N "checking for getaddrinfo... $ECHO_C" >&6
+cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+int
+main ()
+{
+getaddrinfo(NULL, NULL, NULL, NULL);
+  ;
+  return 0;
+}
+_ACEOF
+rm -f conftest.$ac_objext conftest$ac_exeext
+if { (eval echo "$as_me:$LINENO: \"$ac_link\"") >&5
+  (eval $ac_link) 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } &&
+	 { ac_try='test -z "$ac_c_werror_flag"
+			 || test ! -s conftest.err'
+  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; } &&
+	 { ac_try='test -s conftest$ac_exeext'
+  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; }; then
+
+cat >>confdefs.h <<\_ACEOF
+#define HAVE_GETADDRINFO 1
+_ACEOF
+
+   have_getaddrinfo=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+have_getaddrinfo=no
+fi
+rm -f conftest.err conftest.$ac_objext \
+      conftest$ac_exeext conftest.$ac_ext
+echo "$as_me:$LINENO: result: $have_getaddrinfo" >&5
+echo "${ECHO_T}$have_getaddrinfo" >&6
 
 iconv_lib_flag=""
 if test "${enable_iconv}" = "yes" ; then
@@ -9247,6 +9348,8 @@ fi
   echo "$as_me:$LINENO: result: $different" >&5
 echo "${ECHO_T}$different" >&6
 
+  if test "$enable_quartz" = "no" ; then
+
   # If we're using gcc and including X11/Intrinsic doesn't work
   #  then try adding -fpermissive
   if test "$CC" = "gcc" ; then
@@ -9304,7 +9407,658 @@ rm -f conftest.err conftest.$ac_objext conftest.$ac_ext
 echo "${ECHO_T}$addperm" >&6
   fi
 
-  if test "$enable_quartz" = "no" ; then
+  # X11 headers present?
+  xmissing=""
+
+if test "${ac_cv_header_X11_Xlib_h+set}" = set; then
+  echo "$as_me:$LINENO: checking for X11/Xlib.h" >&5
+echo $ECHO_N "checking for X11/Xlib.h... $ECHO_C" >&6
+if test "${ac_cv_header_X11_Xlib_h+set}" = set; then
+  echo $ECHO_N "(cached) $ECHO_C" >&6
+fi
+echo "$as_me:$LINENO: result: $ac_cv_header_X11_Xlib_h" >&5
+echo "${ECHO_T}$ac_cv_header_X11_Xlib_h" >&6
+else
+  # Is the header compilable?
+echo "$as_me:$LINENO: checking X11/Xlib.h usability" >&5
+echo $ECHO_N "checking X11/Xlib.h usability... $ECHO_C" >&6
+cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+$ac_includes_default
+#include <X11/Xlib.h>
+_ACEOF
+rm -f conftest.$ac_objext
+if { (eval echo "$as_me:$LINENO: \"$ac_compile\"") >&5
+  (eval $ac_compile) 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } &&
+	 { ac_try='test -z "$ac_cxx_werror_flag"
+			 || test ! -s conftest.err'
+  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; } &&
+	 { ac_try='test -s conftest.$ac_objext'
+  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; }; then
+  ac_header_compiler=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+ac_header_compiler=no
+fi
+rm -f conftest.err conftest.$ac_objext conftest.$ac_ext
+echo "$as_me:$LINENO: result: $ac_header_compiler" >&5
+echo "${ECHO_T}$ac_header_compiler" >&6
+
+# Is the header present?
+echo "$as_me:$LINENO: checking X11/Xlib.h presence" >&5
+echo $ECHO_N "checking X11/Xlib.h presence... $ECHO_C" >&6
+cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+#include <X11/Xlib.h>
+_ACEOF
+if { (eval echo "$as_me:$LINENO: \"$ac_cpp conftest.$ac_ext\"") >&5
+  (eval $ac_cpp conftest.$ac_ext) 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } >/dev/null; then
+  if test -s conftest.err; then
+    ac_cpp_err=$ac_cxx_preproc_warn_flag
+    ac_cpp_err=$ac_cpp_err$ac_cxx_werror_flag
+  else
+    ac_cpp_err=
+  fi
+else
+  ac_cpp_err=yes
+fi
+if test -z "$ac_cpp_err"; then
+  ac_header_preproc=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+  ac_header_preproc=no
+fi
+rm -f conftest.err conftest.$ac_ext
+echo "$as_me:$LINENO: result: $ac_header_preproc" >&5
+echo "${ECHO_T}$ac_header_preproc" >&6
+
+# So?  What about this header?
+case $ac_header_compiler:$ac_header_preproc:$ac_cxx_preproc_warn_flag in
+  yes:no: )
+    { echo "$as_me:$LINENO: WARNING: X11/Xlib.h: accepted by the compiler, rejected by the preprocessor!" >&5
+echo "$as_me: WARNING: X11/Xlib.h: accepted by the compiler, rejected by the preprocessor!" >&2;}
+    { echo "$as_me:$LINENO: WARNING: X11/Xlib.h: proceeding with the compiler's result" >&5
+echo "$as_me: WARNING: X11/Xlib.h: proceeding with the compiler's result" >&2;}
+    ac_header_preproc=yes
+    ;;
+  no:yes:* )
+    { echo "$as_me:$LINENO: WARNING: X11/Xlib.h: present but cannot be compiled" >&5
+echo "$as_me: WARNING: X11/Xlib.h: present but cannot be compiled" >&2;}
+    { echo "$as_me:$LINENO: WARNING: X11/Xlib.h:     check for missing prerequisite headers?" >&5
+echo "$as_me: WARNING: X11/Xlib.h:     check for missing prerequisite headers?" >&2;}
+    { echo "$as_me:$LINENO: WARNING: X11/Xlib.h: see the Autoconf documentation" >&5
+echo "$as_me: WARNING: X11/Xlib.h: see the Autoconf documentation" >&2;}
+    { echo "$as_me:$LINENO: WARNING: X11/Xlib.h:     section \"Present But Cannot Be Compiled\"" >&5
+echo "$as_me: WARNING: X11/Xlib.h:     section \"Present But Cannot Be Compiled\"" >&2;}
+    { echo "$as_me:$LINENO: WARNING: X11/Xlib.h: proceeding with the preprocessor's result" >&5
+echo "$as_me: WARNING: X11/Xlib.h: proceeding with the preprocessor's result" >&2;}
+    { echo "$as_me:$LINENO: WARNING: X11/Xlib.h: in the future, the compiler will take precedence" >&5
+echo "$as_me: WARNING: X11/Xlib.h: in the future, the compiler will take precedence" >&2;}
+    (
+      cat <<\_ASBOX
+## ------------------------------------------ ##
+## Report this to the AC_PACKAGE_NAME lists.  ##
+## ------------------------------------------ ##
+_ASBOX
+    ) |
+      sed "s/^/$as_me: WARNING:     /" >&2
+    ;;
+esac
+echo "$as_me:$LINENO: checking for X11/Xlib.h" >&5
+echo $ECHO_N "checking for X11/Xlib.h... $ECHO_C" >&6
+if test "${ac_cv_header_X11_Xlib_h+set}" = set; then
+  echo $ECHO_N "(cached) $ECHO_C" >&6
+else
+  ac_cv_header_X11_Xlib_h=$ac_header_preproc
+fi
+echo "$as_me:$LINENO: result: $ac_cv_header_X11_Xlib_h" >&5
+echo "${ECHO_T}$ac_cv_header_X11_Xlib_h" >&6
+
+fi
+if test $ac_cv_header_X11_Xlib_h = yes; then
+  :
+else
+  xmissing="$xmissing X11/Xlib.h"
+fi
+
+
+  if test "${ac_cv_header_X11_Intrinsic_h+set}" = set; then
+  echo "$as_me:$LINENO: checking for X11/Intrinsic.h" >&5
+echo $ECHO_N "checking for X11/Intrinsic.h... $ECHO_C" >&6
+if test "${ac_cv_header_X11_Intrinsic_h+set}" = set; then
+  echo $ECHO_N "(cached) $ECHO_C" >&6
+fi
+echo "$as_me:$LINENO: result: $ac_cv_header_X11_Intrinsic_h" >&5
+echo "${ECHO_T}$ac_cv_header_X11_Intrinsic_h" >&6
+else
+  # Is the header compilable?
+echo "$as_me:$LINENO: checking X11/Intrinsic.h usability" >&5
+echo $ECHO_N "checking X11/Intrinsic.h usability... $ECHO_C" >&6
+cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+$ac_includes_default
+#include <X11/Intrinsic.h>
+_ACEOF
+rm -f conftest.$ac_objext
+if { (eval echo "$as_me:$LINENO: \"$ac_compile\"") >&5
+  (eval $ac_compile) 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } &&
+	 { ac_try='test -z "$ac_cxx_werror_flag"
+			 || test ! -s conftest.err'
+  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; } &&
+	 { ac_try='test -s conftest.$ac_objext'
+  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; }; then
+  ac_header_compiler=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+ac_header_compiler=no
+fi
+rm -f conftest.err conftest.$ac_objext conftest.$ac_ext
+echo "$as_me:$LINENO: result: $ac_header_compiler" >&5
+echo "${ECHO_T}$ac_header_compiler" >&6
+
+# Is the header present?
+echo "$as_me:$LINENO: checking X11/Intrinsic.h presence" >&5
+echo $ECHO_N "checking X11/Intrinsic.h presence... $ECHO_C" >&6
+cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+#include <X11/Intrinsic.h>
+_ACEOF
+if { (eval echo "$as_me:$LINENO: \"$ac_cpp conftest.$ac_ext\"") >&5
+  (eval $ac_cpp conftest.$ac_ext) 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } >/dev/null; then
+  if test -s conftest.err; then
+    ac_cpp_err=$ac_cxx_preproc_warn_flag
+    ac_cpp_err=$ac_cpp_err$ac_cxx_werror_flag
+  else
+    ac_cpp_err=
+  fi
+else
+  ac_cpp_err=yes
+fi
+if test -z "$ac_cpp_err"; then
+  ac_header_preproc=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+  ac_header_preproc=no
+fi
+rm -f conftest.err conftest.$ac_ext
+echo "$as_me:$LINENO: result: $ac_header_preproc" >&5
+echo "${ECHO_T}$ac_header_preproc" >&6
+
+# So?  What about this header?
+case $ac_header_compiler:$ac_header_preproc:$ac_cxx_preproc_warn_flag in
+  yes:no: )
+    { echo "$as_me:$LINENO: WARNING: X11/Intrinsic.h: accepted by the compiler, rejected by the preprocessor!" >&5
+echo "$as_me: WARNING: X11/Intrinsic.h: accepted by the compiler, rejected by the preprocessor!" >&2;}
+    { echo "$as_me:$LINENO: WARNING: X11/Intrinsic.h: proceeding with the compiler's result" >&5
+echo "$as_me: WARNING: X11/Intrinsic.h: proceeding with the compiler's result" >&2;}
+    ac_header_preproc=yes
+    ;;
+  no:yes:* )
+    { echo "$as_me:$LINENO: WARNING: X11/Intrinsic.h: present but cannot be compiled" >&5
+echo "$as_me: WARNING: X11/Intrinsic.h: present but cannot be compiled" >&2;}
+    { echo "$as_me:$LINENO: WARNING: X11/Intrinsic.h:     check for missing prerequisite headers?" >&5
+echo "$as_me: WARNING: X11/Intrinsic.h:     check for missing prerequisite headers?" >&2;}
+    { echo "$as_me:$LINENO: WARNING: X11/Intrinsic.h: see the Autoconf documentation" >&5
+echo "$as_me: WARNING: X11/Intrinsic.h: see the Autoconf documentation" >&2;}
+    { echo "$as_me:$LINENO: WARNING: X11/Intrinsic.h:     section \"Present But Cannot Be Compiled\"" >&5
+echo "$as_me: WARNING: X11/Intrinsic.h:     section \"Present But Cannot Be Compiled\"" >&2;}
+    { echo "$as_me:$LINENO: WARNING: X11/Intrinsic.h: proceeding with the preprocessor's result" >&5
+echo "$as_me: WARNING: X11/Intrinsic.h: proceeding with the preprocessor's result" >&2;}
+    { echo "$as_me:$LINENO: WARNING: X11/Intrinsic.h: in the future, the compiler will take precedence" >&5
+echo "$as_me: WARNING: X11/Intrinsic.h: in the future, the compiler will take precedence" >&2;}
+    (
+      cat <<\_ASBOX
+## ------------------------------------------ ##
+## Report this to the AC_PACKAGE_NAME lists.  ##
+## ------------------------------------------ ##
+_ASBOX
+    ) |
+      sed "s/^/$as_me: WARNING:     /" >&2
+    ;;
+esac
+echo "$as_me:$LINENO: checking for X11/Intrinsic.h" >&5
+echo $ECHO_N "checking for X11/Intrinsic.h... $ECHO_C" >&6
+if test "${ac_cv_header_X11_Intrinsic_h+set}" = set; then
+  echo $ECHO_N "(cached) $ECHO_C" >&6
+else
+  ac_cv_header_X11_Intrinsic_h=$ac_header_preproc
+fi
+echo "$as_me:$LINENO: result: $ac_cv_header_X11_Intrinsic_h" >&5
+echo "${ECHO_T}$ac_cv_header_X11_Intrinsic_h" >&6
+
+fi
+if test $ac_cv_header_X11_Intrinsic_h = yes; then
+  :
+else
+  xmissing="$xmissing X11/XIntrinsic.h"
+fi
+
+
+  echo "$as_me:$LINENO: checking for XFlush in -lX11" >&5
+echo $ECHO_N "checking for XFlush in -lX11... $ECHO_C" >&6
+if test "${ac_cv_lib_X11_XFlush+set}" = set; then
+  echo $ECHO_N "(cached) $ECHO_C" >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lX11 $X_LIBS $LIBS"
+cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+
+/* Override any gcc2 internal prototype to avoid an error.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+/* We use char because int might match the return type of a gcc2
+   builtin and then its argument prototype would still apply.  */
+char XFlush ();
+int
+main ()
+{
+XFlush ();
+  ;
+  return 0;
+}
+_ACEOF
+rm -f conftest.$ac_objext conftest$ac_exeext
+if { (eval echo "$as_me:$LINENO: \"$ac_link\"") >&5
+  (eval $ac_link) 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } &&
+	 { ac_try='test -z "$ac_cxx_werror_flag"
+			 || test ! -s conftest.err'
+  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; } &&
+	 { ac_try='test -s conftest$ac_exeext'
+  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; }; then
+  ac_cv_lib_X11_XFlush=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+ac_cv_lib_X11_XFlush=no
+fi
+rm -f conftest.err conftest.$ac_objext \
+      conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+echo "$as_me:$LINENO: result: $ac_cv_lib_X11_XFlush" >&5
+echo "${ECHO_T}$ac_cv_lib_X11_XFlush" >&6
+if test $ac_cv_lib_X11_XFlush = yes; then
+  :
+else
+  xmissing="$xmissing libX11"
+fi
+
+  echo "$as_me:$LINENO: checking for XSyncQueryExtension in -lXext" >&5
+echo $ECHO_N "checking for XSyncQueryExtension in -lXext... $ECHO_C" >&6
+if test "${ac_cv_lib_Xext_XSyncQueryExtension+set}" = set; then
+  echo $ECHO_N "(cached) $ECHO_C" >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lXext $X_LIBS -lX11 $LIBS"
+cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+
+/* Override any gcc2 internal prototype to avoid an error.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+/* We use char because int might match the return type of a gcc2
+   builtin and then its argument prototype would still apply.  */
+char XSyncQueryExtension ();
+int
+main ()
+{
+XSyncQueryExtension ();
+  ;
+  return 0;
+}
+_ACEOF
+rm -f conftest.$ac_objext conftest$ac_exeext
+if { (eval echo "$as_me:$LINENO: \"$ac_link\"") >&5
+  (eval $ac_link) 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } &&
+	 { ac_try='test -z "$ac_cxx_werror_flag"
+			 || test ! -s conftest.err'
+  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; } &&
+	 { ac_try='test -s conftest$ac_exeext'
+  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; }; then
+  ac_cv_lib_Xext_XSyncQueryExtension=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+ac_cv_lib_Xext_XSyncQueryExtension=no
+fi
+rm -f conftest.err conftest.$ac_objext \
+      conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+echo "$as_me:$LINENO: result: $ac_cv_lib_Xext_XSyncQueryExtension" >&5
+echo "${ECHO_T}$ac_cv_lib_Xext_XSyncQueryExtension" >&6
+if test $ac_cv_lib_Xext_XSyncQueryExtension = yes; then
+  :
+else
+  xmissing="$xmissing libXext"
+fi
+
+  echo "$as_me:$LINENO: checking for XtDestroyWidget in -lXt" >&5
+echo $ECHO_N "checking for XtDestroyWidget in -lXt... $ECHO_C" >&6
+if test "${ac_cv_lib_Xt_XtDestroyWidget+set}" = set; then
+  echo $ECHO_N "(cached) $ECHO_C" >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lXt $X_LIBS -lX11 -lXext $LIBS"
+cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+
+/* Override any gcc2 internal prototype to avoid an error.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+/* We use char because int might match the return type of a gcc2
+   builtin and then its argument prototype would still apply.  */
+char XtDestroyWidget ();
+int
+main ()
+{
+XtDestroyWidget ();
+  ;
+  return 0;
+}
+_ACEOF
+rm -f conftest.$ac_objext conftest$ac_exeext
+if { (eval echo "$as_me:$LINENO: \"$ac_link\"") >&5
+  (eval $ac_link) 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } &&
+	 { ac_try='test -z "$ac_cxx_werror_flag"
+			 || test ! -s conftest.err'
+  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; } &&
+	 { ac_try='test -s conftest$ac_exeext'
+  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; }; then
+  ac_cv_lib_Xt_XtDestroyWidget=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+ac_cv_lib_Xt_XtDestroyWidget=no
+fi
+rm -f conftest.err conftest.$ac_objext \
+      conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+echo "$as_me:$LINENO: result: $ac_cv_lib_Xt_XtDestroyWidget" >&5
+echo "${ECHO_T}$ac_cv_lib_Xt_XtDestroyWidget" >&6
+if test $ac_cv_lib_Xt_XtDestroyWidget = yes; then
+  :
+else
+  xmissing="$xmissing libXt"
+fi
+
+  echo "$as_me:$LINENO: checking for XmuInternAtom in -lXmu" >&5
+echo $ECHO_N "checking for XmuInternAtom in -lXmu... $ECHO_C" >&6
+if test "${ac_cv_lib_Xmu_XmuInternAtom+set}" = set; then
+  echo $ECHO_N "(cached) $ECHO_C" >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lXmu $X_LIBS -lXt -lX11 -lXext $LIBS"
+cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+
+/* Override any gcc2 internal prototype to avoid an error.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+/* We use char because int might match the return type of a gcc2
+   builtin and then its argument prototype would still apply.  */
+char XmuInternAtom ();
+int
+main ()
+{
+XmuInternAtom ();
+  ;
+  return 0;
+}
+_ACEOF
+rm -f conftest.$ac_objext conftest$ac_exeext
+if { (eval echo "$as_me:$LINENO: \"$ac_link\"") >&5
+  (eval $ac_link) 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } &&
+	 { ac_try='test -z "$ac_cxx_werror_flag"
+			 || test ! -s conftest.err'
+  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; } &&
+	 { ac_try='test -s conftest$ac_exeext'
+  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; }; then
+  ac_cv_lib_Xmu_XmuInternAtom=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+ac_cv_lib_Xmu_XmuInternAtom=no
+fi
+rm -f conftest.err conftest.$ac_objext \
+      conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+echo "$as_me:$LINENO: result: $ac_cv_lib_Xmu_XmuInternAtom" >&5
+echo "${ECHO_T}$ac_cv_lib_Xmu_XmuInternAtom" >&6
+if test $ac_cv_lib_Xmu_XmuInternAtom = yes; then
+  :
+else
+  xmissing="$xmissing libXmu"
+fi
+
+  echo "$as_me:$LINENO: checking for vendorShellClassRec in -lXaw" >&5
+echo $ECHO_N "checking for vendorShellClassRec in -lXaw... $ECHO_C" >&6
+if test "${ac_cv_lib_Xaw_vendorShellClassRec+set}" = set; then
+  echo $ECHO_N "(cached) $ECHO_C" >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lXaw $X_LIBS -lXmu -lXt -lX11 -lXext $LIBS"
+cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+
+/* Override any gcc2 internal prototype to avoid an error.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+/* We use char because int might match the return type of a gcc2
+   builtin and then its argument prototype would still apply.  */
+char vendorShellClassRec ();
+int
+main ()
+{
+vendorShellClassRec ();
+  ;
+  return 0;
+}
+_ACEOF
+rm -f conftest.$ac_objext conftest$ac_exeext
+if { (eval echo "$as_me:$LINENO: \"$ac_link\"") >&5
+  (eval $ac_link) 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } &&
+	 { ac_try='test -z "$ac_cxx_werror_flag"
+			 || test ! -s conftest.err'
+  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; } &&
+	 { ac_try='test -s conftest$ac_exeext'
+  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; }; then
+  ac_cv_lib_Xaw_vendorShellClassRec=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+ac_cv_lib_Xaw_vendorShellClassRec=no
+fi
+rm -f conftest.err conftest.$ac_objext \
+      conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+echo "$as_me:$LINENO: result: $ac_cv_lib_Xaw_vendorShellClassRec" >&5
+echo "${ECHO_T}$ac_cv_lib_Xaw_vendorShellClassRec" >&6
+if test $ac_cv_lib_Xaw_vendorShellClassRec = yes; then
+  :
+else
+  xmissing="$xmissing libXaw"
+fi
+
+  if test "$xmissing" = "" ; then
+     :
+  else
+     echo "******************************************************"
+     echo "configure: cannot find X11 development files that are"
+     echo "           needed to compile MrEd:"
+     echo "$xmissing"
+     echo "******************************************************"
+     echo configure aborted
+     exit 1
+  fi
 
   # Can we make auto-repeat detectable?
  msg="whether X11/XKBlib.h is available"
@@ -9377,8 +10131,7 @@ fi
 
 if test "${enable_gl}" = "yes" ; then
   # Check for header
-
-if test "${ac_cv_header_GL_glx_h+set}" = set; then
+  if test "${ac_cv_header_GL_glx_h+set}" = set; then
   echo "$as_me:$LINENO: checking for GL/glx.h" >&5
 echo $ECHO_N "checking for GL/glx.h... $ECHO_C" >&6
 if test "${ac_cv_header_GL_glx_h+set}" = set; then
@@ -10962,6 +11715,7 @@ if test "${enable_shared}" = "yes" ; then
   LTA="la"
   FOREIGN_CONVENIENCE="_convenience"
   FOREIGN_OBJSLIB="\$(FOREIGN_LIB)"
+  MZOPTIONS="$MZOPTIONS -DMZ_USES_SHARED_LIB"
 else
   LIBSFX=a
   MREDLINKER="$CXX"
@@ -10981,6 +11735,15 @@ fi
 ############## final output ################
 
 LIBS="$LIBS $EXTRALIBS"
+
+
+
+
+
+
+
+
+
 
 
 
@@ -11903,6 +12666,9 @@ s,@EXTRA_GMP_OBJ@,$EXTRA_GMP_OBJ,;t t
 s,@OSX@,$OSX,;t t
 s,@NOT_OSX@,$NOT_OSX,;t t
 s,@FRAMEWORK_INSTALL_DIR@,$FRAMEWORK_INSTALL_DIR,;t t
+s,@FRAMEWORK_REL_INSTALL@,$FRAMEWORK_REL_INSTALL,;t t
+s,@INSTALL_ORIG_TREE@,$INSTALL_ORIG_TREE,;t t
+s,@EXE_SUFFIX@,$EXE_SUFFIX,;t t
 s,@MREDLINKER@,$MREDLINKER,;t t
 s,@LIBSFX@,$LIBSFX,;t t
 s,@WXLIBS@,$WXLIBS,;t t
@@ -11938,6 +12704,11 @@ s,@LIBMRED_DEP@,$LIBMRED_DEP,;t t
 s,@LLVMTARGET@,$LLVMTARGET,;t t
 s,@LTO@,$LTO,;t t
 s,@LTA@,$LTA,;t t
+s,@collectsdir@,$collectsdir,;t t
+s,@libpltdir@,$libpltdir,;t t
+s,@includepltdir@,$includepltdir,;t t
+s,@docdir@,$docdir,;t t
+s,@COLLECTS_PATH@,$COLLECTS_PATH,;t t
 s,@subdirs@,$subdirs,;t t
 s,@LIBOBJS@,$LIBOBJS,;t t
 s,@LTLIBOBJS@,$LTLIBOBJS,;t t
@@ -12605,3 +13376,30 @@ echo "$as_me: error: $ac_sub_configure failed for $ac_dir" >&2;}
 fi
 
 
+if test "${inplacebuild}" = "yes" ; then
+  echo ">>> Installation is in-place:"
+  echo "      ${srcdir}/.."
+  echo "    Configure with --prefix if you wanted to install somewhere else."
+  if test "${enable_quartz}" != "yes" ; then
+    echo "    The --prefix option also makes the installed files better conform"
+    echo "    to Unix installation conventions. (The configure script will show"
+    echo "    you specific installation paths when --prefix is used.)"
+  fi
+  if test "${enable_shared}" != "yes" ; then
+    echo "    Alternately, you can simply "'`'"mv' the in-place installation after"
+    echo "    running "'`'"make install'."
+  fi
+else
+  echo ">>> Installation targets:"
+  echo " executables  : ${bindir}/..."
+  echo " Scheme code  : ${collectsdir}/..."
+  echo " core docs    : ${docdir}/..."
+  echo " C libraries  : ${libdir}/..."
+  echo " C headers    : ${includepltdir}/..."
+  echo " extra C objs : ${libpltdir}/..."
+  echo " man pages    : ${mandir}/..."
+  echo "  where prefix = ${prefix}"
+  if test "${unixstyle}" = "yes" ; then
+    echo "    and exec_prefix = ${exec_prefix}"
+  fi
+fi

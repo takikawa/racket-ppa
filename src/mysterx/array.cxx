@@ -38,7 +38,7 @@ Scheme_Object *safeArrayElementToSchemeObject(SAFEARRAY *theArray,
   case VT_UI1 :
     char cArg;
     SafeArrayGetElement(theArray,allIndices,&cArg);
-    return scheme_make_character(cArg);
+    return scheme_make_char(cArg);
 
   case VT_UI2 :
     unsigned short usArg;
@@ -93,7 +93,7 @@ Scheme_Object *safeArrayElementToSchemeObject(SAFEARRAY *theArray,
   case VT_BSTR :
     BSTR bArg;
     SafeArrayGetElement(theArray,allIndices,&bArg);
-    return unmarshalBSTR((unsigned short *)bArg);
+    return unmarshalBSTR(bArg);
 
   case VT_ERROR :
     SCODE scodeArg;

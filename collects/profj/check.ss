@@ -7,7 +7,7 @@
            "restrictions.ss"
            "profj-pref.ss"
            "build-info.ss"
-           (lib "class.ss") (lib "list.ss") 
+           (lib "class.ss") (lib "list.ss") (lib "file.ss")
            (prefix srfi: (lib "1.ss" "srfi")) (lib "string.ss"))
   (provide check-defs check-interactions-types)
   
@@ -32,8 +32,8 @@
   ;; var-type => (make-var-type string type properties)
   (define-struct var-type (var type properties) (make-inspector))
   
-  ;;inner-rec ==> (make-inner-rec string (U symbol void) class-rec)
-  (define-struct inner-rec (name unique-name record))
+  ;;inner-rec ==> (make-inner-rec string (U symbol void) (list string) class-rec)
+  (define-struct inner-rec (name unique-name package record))
   
   ;;Environment variable properties
   ;;(make-properties bool bool bool bool bool bool)
@@ -211,12 +211,12 @@
     (member label (environment-labels env)))
 
   ;;add-local-inner-to-env: string symbol class-rec env -> env
-  (define (add-local-inner-to-env name unique-name rec env)
+  (define (add-local-inner-to-env name unique-name package rec env)
     (make-environment (environment-types env)
                       (environment-set-vars env)
                       (environment-exns env)
                       (environment-labels env)
-                      (cons (make-inner-rec name unique-name rec) (environment-local-inners env))))
+                      (cons (make-inner-rec name unique-name package rec) (environment-local-inners env))))
   
   ;;lookup-local-inner: string env -> (U inner-rec #f)
   (define (lookup-local-inner name env)
@@ -305,11 +305,17 @@
   
   ;check-class: class-def (list string) symbol type-records env -> void
   (define (check-class class package-name level type-recs class-env)
-    (let ((old-reqs (send type-recs get-class-reqs))
+    (let* ((old-reqs (send type-recs get-class-reqs))
           (old-update (update-class-with-inner))
-          (name (id-string (def-name class))))
+          (name (id-string (def-name class)))
+          (rec (send type-recs get-class-record (cons name package-name))))
       (update-class-with-inner (lambda (inner)
-                                 (set-def-members! class (cons inner (def-members class)))))
+                                 (let ((name (id-string (def-name inner))))
+                                   (set-def-members! class (cons inner (def-members class)))
+                                   (set-class-record-inners! rec 
+                                                             (cons (make-inner-record (filename-extension name) name 
+                                                                                      (map modifier-kind (header-modifiers (def-header inner)))
+                                                                                      (class-def? inner)) (class-record-inners rec))))))
       (send type-recs set-class-reqs (def-uses class))
       
       (send type-recs add-req (make-req "String" '("java" "lang")))
@@ -334,8 +340,17 @@
   ;check-interface: interface-def (list string) symbol type-recs -> void
   (define (check-interface iface p-name level type-recs)
     (let ((old-reqs (send type-recs get-class-reqs))
-          (old-update (update-class-with-inner)))
+          (old-update (update-class-with-inner))
+          (rec (send type-recs get-class-record (cons (id-string (def-name iface)) p-name))))
       (update-class-with-inner (lambda (inner)
+                                 (let ((name (id-string (def-name inner))))
+                                   (set-def-members! iface (cons inner (def-members iface)))
+                                   (set-class-record-inners! rec 
+                                                             (cons (make-inner-record (filename-extension name) name 
+                                                                                      (map modifier-kind (header-modifiers (def-header inner)))
+                                                                                      (class-def? inner)) (class-record-inners rec))))))
+
+      #;(update-class-with-inner (lambda (inner)
                                  (set-def-members! iface (cons inner (def-members iface)))))
       (send type-recs set-class-reqs (def-uses iface))
       
@@ -352,17 +367,19 @@
   (define (check-inner-def def level type-recs c-class env)
     (let* ((statement-inner? (eq? (def-kind def) 'statement))
            (local-inner? (or (eq? (def-kind def) 'anon) statement-inner?))
-           (p-name (if local-inner? null (cdr c-class)))
+           (p-name (cdr c-class))
            (inner-env (update-env-for-inner env))
            (this-type (var-type-type (lookup-var-in-env "this" env)))
            (unique-name 
             (when statement-inner? (symbol->string (gensym (string-append (id-string (def-name def)) "-")))))
            (inner-rec
             (when local-inner?
-              (build-inner-info def unique-name p-name level type-recs (def-file def) #t))))
-      (when local-inner? (add-init-args def env))
-      (when statement-inner?
-        (set-id-string! (header-id (def-header def)) unique-name))
+              (add-init-args def env)
+              (begin0
+                (build-inner-info def unique-name p-name level type-recs (def-file def) #t)
+                (when statement-inner?
+                  (set-id-string! (header-id (def-header def)) unique-name))
+                ((update-class-with-inner) def)))))
       (if (interface-def? def)
           (check-interface def p-name level type-recs)
           (check-class def p-name level type-recs (add-var-to-env "encl-this-1" this-type final-parm inner-env)))
@@ -370,7 +387,7 @@
       (for-each (lambda (use)
                   (add-required c-class (req-class use) (req-path use) type-recs))
                 (def-uses def))
-      (list unique-name inner-rec)))
+      (list unique-name p-name inner-rec)))
     
   ;add-init-args: def env -> void
   ;Updates the inner class with the names of the final variables visible within the class
@@ -392,7 +409,7 @@
            (fields (class-record-fields class-record))
            (field-env (create-field-env fields env (car c-class)))
            (base-fields (create-field-env (filter (lambda (field)
-                                                    (not (equal? (field-record-class field) (car c-class))))
+                                                    (not (equal? (field-record-class field) c-class)))
                                                   fields) env (car c-class)))
            (ctor-throw-env (if iface? field-env
                                (consolidate-throws 
@@ -429,9 +446,9 @@
                    (add-required c-class (ref-type-class/iface type) (ref-type-path type) type-recs))
                  (if (var-init? member)
                      (check-var-init (var-init-init member)
-                                     (lambda (e env) 
+                                     (lambda (e env)
                                        (check-expr e env
-                                                   level type-recs c-class #f 
+                                                   level type-recs c-class #f
                                                    static? #f #f))
                                      (if static? statics fields)
                                      type
@@ -705,8 +722,15 @@
   
   (define (inherited-field-not-set-error name src)
     (raise-error (string->symbol name)
-                 (format "Inherited field ~a must be set in the constructor for the current class" name)
+                 (format "Inherited field ~a must be set in the constructor for the current class." name)
                  (string->symbol name) src))
+  
+  ;raise-forward-reference: id src -> void
+  (define (raise-forward-reference field src)
+    (let ((name (id->ext-name (id-string field))))
+      (raise-error name 
+                   (format "Field ~a cannot be referenced before its declaration." name)
+                   name src)))
   
   ;check-method: method env type-records (list string) boolean boolean-> void
   (define (check-method method env level type-recs c-class static? iface?)
@@ -775,12 +799,13 @@
       ((ifS? body) 
        (if (ifS-else body)
            (and (reachable-return? (ifS-then body))
-                (reachable-return? (ifS-else body)))))
+                (reachable-return? (ifS-else body)))
+           #f))
       ((throw? body) #t)
       ((return? body) #t)
-      ((while? body) (reachable-return? (while-loop body)))
-      ((doS? body) (reachable-return? (doS-loop body)))
-      ((for? body) (reachable-return? (for-loop body)))
+      ((while? body) #f #;(reachable-return? (while-loop body)))
+      ((doS? body)  #f #;(reachable-return? (doS-loop body)))
+      ((for? body)  #f #;(reachable-return? (for-loop body)))
       ((try? body) 
        (and (reachable-return? (try-body body))
             (or (and (try-finally body)
@@ -830,7 +855,7 @@
             (let ((new-type/env (check-e (car exps) env)))
               (unless (assignment-conversion dec-type (type/env-t new-type/env) type-recs)
                 (array-init-error dec-type (type/env-t new-type/env) (expr-src (car exps))))
-              (loop (cdr exps) (type/env-t new-type/env)))))))))
+              (loop (cdr exps) (type/env-e new-type/env)))))))))
   
   ;check-array-init-sub-inits: (list array-init) (exp env -> type/env) env type type-records -> type/env
   (define (check-array-init-sub-inits inits check-e env type type-recs)
@@ -848,15 +873,15 @@
   (define (method-error kind method src)
     (raise-error method
                  (case kind
-                   ((no-reachable) (format "method ~a does not have a reachable return" method))
+                   ((no-reachable) (format "Method ~a does not have a reachable return." method))
                    ((abstract)
                     (let ((line1 
-                           (format "abstract method ~a has an implementation, abstract methods may not have implementations"
+                           (format "Abstract method ~a has an implementation, abstract methods may not have implementations."
                                    method))
-                          (line2 "Either a ';'should come after the header, or the method should not be abstract"))
+                          (line2 "Either a ';'should come after the header, or the method should not be abstract."))
                       (format "~a~n~a" line1 line2)))
-                   ((native) (format "native method ~a has an implementation which is not allowed" method))
-                   ((no-body) (format "method ~a has no implementation and is not abstract" method)))
+                   ((native) (format "Native method ~a has an implementation which is not allowed." method))
+                   ((no-body) (format "Method ~a has no implementation and is not abstract." method)))
                  method src))
   
   ;var-init-error: symbol symbol type type src -> void
@@ -864,10 +889,10 @@
     (raise-error name
                  (case kind
                    ((array)
-                    (format "Expected ~a to be of declared type ~a, given an array" 
+                    (format "Expected ~a to be of declared type ~a, given an array." 
                             name (type->ext-name dec-type)))
                    ((other)
-                    (format "Expected ~a to be assignable to declared type ~a, given ~a which is unrelated"
+                    (format "Expected ~a to be assignable to declared type ~a, given ~a which is unrelated."
                             name (type->ext-name dec-type) (type->ext-name given))))
                  name src))
 
@@ -876,7 +901,7 @@
     (let ((d (type->ext-name dec-type))
           (g (type->ext-name given)))
       (raise-error g
-                   (format "Error initializing declared array of ~a, given element with incompatible type ~a"
+                   (format "Error initializing declared array of ~a, given element with incompatible type ~a."
                            d g)
                    d src)))
 
@@ -884,7 +909,7 @@
   (define (field-not-set-error name class kind src)
     (let ((n (id->ext-name name)))
       (raise-error n
-                   (format "Field ~a from ~a must be set in the ~a and is not"
+                   (format "Field ~a from ~a must be set in the ~a and is not."
                            n
                            class
                            (case kind
@@ -897,7 +922,7 @@
   (define (beginner-ctor-error class kind src)
     (let ((exp (statement->ext-name kind)))
       (raise-error exp
-                   (format "Constructor for ~a may only assign the fields of ~a. Found illegal statement ~a"
+                   (format "Constructor for ~a may only assign the fields of ~a. Found illegal statement ~a."
                            class class exp)
                    exp src)))
   
@@ -907,10 +932,10 @@
      '=
      (case kind
        ((not-left-this)
-        "Constructor must assign the class's fields. This expression is not a field of this class and maynot be assigned")
+        "Constructor must assign the class's fields. This expression is not a field of this class and maynot be assigned.")
        ((right-this)
-        "The constructor maynot assign fields with other of its fields. Other values must be used"))
-     '= src))          
+        "The constructor maynot assign fields with other of its fields. Other values must be used."))
+     '= src))
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;Statement checking functions
@@ -1084,7 +1109,7 @@
   (define (check-while cond/env src check-s loop-body)
     ((check-cond 'while) (type/env-t cond/env) src)
     (check-s loop-body (type/env-e cond/env) #t #f)
-    (make-type/env 'void (type/env-t cond/env)))
+    (make-type/env 'void (type/env-e cond/env)))
         
   ;check-do: (exp env -> type/env) exp src type/env -> type/env
   (define (check-do check-e exp src loop/env)
@@ -1198,12 +1223,12 @@
       
   ;check-local-inner: def env symbol (list string) type-records -> type/env
   (define (check-local-inner def env level c-class type-recs)
-    ((update-class-with-inner) def)
+    ;((update-class-with-inner) def)
     (let ((original-name (id-string (def-name def)))
           (rec/new-name (check-inner-def def level type-recs c-class env)))
       (make-type/env 
        (make-ref-type original-name null) 
-       (add-local-inner-to-env original-name (car rec/new-name) (cadr rec/new-name) env))))
+       (add-local-inner-to-env original-name (car rec/new-name) (cadr rec/new-name) (caddr rec/new-name) env))))
   
   ;check-break: (U id #f) src bool bool symbol env-> type/env
   (define (check-break label src in-loop? in-switch? level env)
@@ -1239,7 +1264,7 @@
   ;make-condition-error: symbol type src -> void
   (define (kind-condition-error kind cond src)
     (raise-error kind
-                 (format "~a condition must be a boolean: Given ~a" 
+                 (format "~a condition must be a boolean: Given ~a." 
                          kind (type->ext-name cond))
                  kind src))
     
@@ -1249,9 +1274,9 @@
       (raise-error 'throw
                    (case kind
                      ((not-throwable)
-                      (format "Expression for throw must be a subtype of Throwable: given ~a" t))
+                      (format "Expression for throw must be a subtype of Throwable: given ~a." t))
                      ((not-declared)
-                      (format "Thrown type ~a must be declared as thrown or caught" t)))
+                      (format "Thrown type ~a must be declared as thrown or caught." t)))
                    'throw src)))
   
   ;return-error: symbol type type src -> void
@@ -1265,11 +1290,11 @@
           (let ((line1 
                  (format "The return expression's type must be equal to or a subclass of the method's return ~a." e))
                 (line2
-                 (format "The given expression has type ~a which is not equivalent to the declared return" g)))
+                 (format "The given expression has type ~a which is not equivalent to the declared return." g)))
             (format "~a~n~a" line1 line2)))
-         ((void) "No value should be returned from void method, found a returned value")
+         ((void) "No value should be returned from void method, found a returned value.")
          ((val)
-          (format "Expected a return value assignable to ~a. No value was given" e)))
+          (format "Expected a return value assignable to ~a. No value was given." e)))
        'return src)))
 
   ;illegal-redefinition: id src -> void
@@ -1292,7 +1317,7 @@
   ;catch-error: type src -> void
   (define (catch-error given src)
     (raise-error 'catch
-                 (format "catch clause must catch an argument of subclass Throwable: Given ~a"
+                 (format "Catch clause must catch an argument of subclass Throwable: Given ~a"
                          (type->ext-name given))
                  'catch src))
   
@@ -1312,23 +1337,23 @@
   ;illegal-label: symbol string src -> void
   (define (illegal-label kind label src)
     (raise-error kind
-                 (format "~a references label ~a, no enclosing statement has this label"
+                 (format "~a references label ~a, no enclosing statement has this label."
                          kind label)
                  kind src))
                  
   ;break-error: src -> void
   (define (break-error src level)
     (raise-error 'break (if (eq? level 'full) 
-                            "break must be in either a loop or a switch"
-                            "break must be in a loop")
+                            "'break' must be in either a loop or a switch."
+                            "'break' must be in a loop.")
                  'break src))
   (define (continue-error src)
-    (raise-error 'continue "continue must be in a loop" 'continue src))
+    (raise-error 'continue "'continue' must be in a loop." 'continue src))
 
   ;synch-error: type src -> void
   (define (synch-error given src)
     (raise-error 'synchronize
-                 (format "synchronization expression must be a subtype of Object: Given ~a"
+                 (format "Synchronization expression must be a subtype of Object: Given ~a"
                          (type->ext-name given))
                  'synchronize src))                                        
   
@@ -1349,11 +1374,11 @@
              (add-required c-class "String" `("java" "lang") type-recs)
              (set-expr-type exp string-type))
             ((eq? (expr-types exp) 'image)
-             (get-record (send type-recs get-class-record '("Image" "draw2") #f
-                               ((get-importer type-recs) '("Image" "draw2")
+             (get-record (send type-recs get-class-record '("Image" "graphics") #f
+                               ((get-importer type-recs) '("Image" "graphics")
                                                          type-recs level (expr-src exp))) type-recs)
-             (add-required c-class "Image" `("draw2") type-recs)
-             (set-expr-type exp (make-ref-type "Image" '("draw2"))))
+             (add-required c-class "Image" `("graphics") type-recs)
+             (set-expr-type exp (make-ref-type "Image" '("graphics"))))
             (else (expr-types exp))) env))
         ((bin-op? exp)
          (set-expr-type exp 
@@ -1484,7 +1509,19 @@
                                           c-class
                                           level
                                           type-recs
-                                          env))))))
+                                          env)))
+        ((check? exp)
+         (set-expr-type exp
+                        (check-test-expr (check-test exp)
+                                         (check-actual exp)
+                                         (check-range exp)
+                                         check-sub-expr
+                                         env
+                                         level
+                                         (check-ta-src exp)
+                                         (expr-src exp)
+                                         type-recs)))
+         )))
 
   ;;check-bin-op: symbol exp exp (exp env -> type/env) env src-loc symbol type-records -> type/env
   ;;Fully checks bin-ops, including checking the subexpressions
@@ -1587,6 +1624,13 @@
       ((or (eq? 'long t1) (eq? 'long t2)) 'long)
       (else 'int)))
 
+  (define (get-inners class type-recs)
+    (let ((rec (get-record (send type-recs get-class-record class) type-recs)))
+      (class-record-inners rec)))
+  
+  (define (inner-member class inners)
+    (member (car class) (map inner-record-full-name inners)))
+  
   ;;check-access: expression (expr env -> type/env) env symbol type-records (list string) bool bool bool -> type/env
   (define (check-access exp check-e env level type-recs c-class interact? static? assign-left?)
     (let ((acc (access-name exp)))
@@ -1651,7 +1695,8 @@
                       (and (null? (cdr field-class))
                            (lookup-local-inner (car field-class) env))))
                 
-                (when (and (special-name? obj)
+                (when (and (memq level '(beginner intermediate))
+                           (special-name? obj)
                            (not (lookup-var-in-env fname env)))
                   (access-before-define (string->symbol fname) src))
                 
@@ -1663,10 +1708,12 @@
                 (when (and (eq? level 'beginner)
                            (eq? (car c-class) (car field-class))
                            (or (not obj) (and (special-name? obj) (not (expr-src obj)))))
-                  (beginner-field-access-error (string->symbol fname) src))
-           
-                (when (and private? (not (equal? c-class field-class)))
-                  (illegal-field-access 'private (string->symbol fname) level (car field-class) src))
+                  (beginner-field-access-error (string->symbol fname) src))                    
+                
+                (when private?
+                  (unless (or (equal? c-class field-class)
+                              (inner-member c-class (get-inners field-class type-recs)))
+                  (illegal-field-access 'private (string->symbol fname) level (car field-class) src)))
                 
                 (when (and protected? 
                            (not (or (equal? c-class field-class)
@@ -1674,7 +1721,7 @@
                                     (package-members? c-class field-class type-recs))))
                   (illegal-field-access 'protected (string->symbol fname) level (car field-class) src))
                           
-                (when (and (not private?) (not protected?) 
+                (when (and (not private?) (not protected?)
                            (not public?) (not (package-members? c-class field-class type-recs)))
                   (illegal-field-access 'package (string->symbol fname) level (car field-class) src))
            
@@ -1796,6 +1843,12 @@
                          (variable-not-found-error (if class? 'class-name 'method-name) (car acc) (id-src (car acc))))
                         ((close-to-keyword? (id-string (car acc)))
                          (close-to-keyword-error 'field (car acc) (id-src (car acc))))
+                        ((and (not static?) (not interact?)
+                              (get-field-record (id-string (car acc)) 
+                                                (send type-recs get-class-record 
+                                                      (var-type-type (lookup-var-in-env "this" env))) (lambda () #f)))
+                         (access-before-define (string->symbol (id-string (car acc)))
+                                               (id-src (car acc))))
                         (else
                          (variable-not-found-error 'not-found (car acc) (id-src (car acc))))))))))
            (set-access-name! exp new-acc)
@@ -2112,11 +2165,25 @@
            (when (and static? (not (memq 'static mods)) (not expr))
              (non-static-called-error name c-class src level))
            
-           (when (and (memq 'protected mods) (reference-type? exp-type) 
-                      (or (not (is-eq-subclass? this exp-type type-recs))
-                          (not (package-members? c-class (cons (ref-type-class/iface exp-type) (ref-type-path exp-type))
-                                                 type-recs))))
-             (call-access-error 'pro level name exp-type src))
+           (when (and (memq 'abstract mods)
+                      (special-name? expr)
+                      (equal? "super" (special-name-name expr)))
+             (call-abstract-error level name exp-type src))
+           
+           (when (and (memq 'protected mods)
+                      (reference-type? exp-type))
+             (unless (or (is-eq-subclass? this exp-type type-recs)
+                         (let* ((e-class (ref-type-class/iface exp-type))
+                                (e-path (ref-type-path exp-type))
+                                (true-path (if (null? e-path)
+                                               (send type-recs lookup-path e-class (lambda () null))
+                                               e-path)))
+                           #;(printf "~a ~a ~a~n" c-class (cons e-class true-path)
+                                   (send type-recs get-interactions-package))
+                           (package-members? c-class 
+                                             (cons e-class true-path)
+                                             type-recs)))
+               (call-access-error 'pro level name exp-type src)))
            (when (and (memq 'private mods)
                       (reference-type? exp-type)
                       (if static?
@@ -2173,6 +2240,12 @@
                        (method-arg-error 'type (list arg) (cons atype atypes) name exp-type src)))
                    args atypes)))))
   
+  ;find-class: string rec-type env type-records -> (values boolean type record)
+  #;(define (find-class name this env type-recs)
+    (let ((local-inner? (lookup-local-inner name env))
+          ...)))
+    
+  
   ;; 15.9
   ;;check-class-alloc: expr (U name identifier) (list exp) (exp env -> type/env) src type-records 
   ;                   (list string) env symbol bool-> type/env
@@ -2185,14 +2258,15 @@
                     (make-name (def-name name/def) null (id-src (def-name name/def))))
                    ((id? name/def) (make-name name/def null (id-src name/def)))
                    (else name/def)))
-           (inner-lookup? (lookup-local-inner (id-string (name-id name)) env))      
+           (inner-lookup? (lookup-local-inner (id-string (name-id name)) env))
            (type (if inner-lookup?
-                     (make-ref-type (inner-rec-unique-name inner-lookup?) null)
+                     (make-ref-type (inner-rec-unique-name inner-lookup?) (inner-rec-package inner-lookup?))
                      (name->type name c-class (name-src name) level type-recs)))
            (class-record 
             (if inner-lookup?
                 (inner-rec-record inner-lookup?)
                 (get-record (send type-recs get-class-record type c-class) type-recs)))
+           ;(p (when (null? class-record) (print-struct #t) (printf "~a~n" type)))
            (methods (get-method-records (id-string (name-id name)) class-record type-recs)))
       (unless (or (equal? (car (class-record-name class-record)) (ref-type-class/iface type)))
         (set-id-string! (name-id name) (car (class-record-name class-record)))
@@ -2307,9 +2381,9 @@
             (if inner-lookup?
                 (if (> (type-spec-dim elt-type) 0)
                     (make-array-type
-                     (make-ref-type (inner-rec-unique-name inner-lookup?) null)
+                     (make-ref-type (inner-rec-unique-name inner-lookup?) (inner-rec-package inner-lookup?))
                      (type-spec-dim elt-type))
-                    (make-ref-type (inner-rec-unique-name inner-lookup?) null))
+                    (make-ref-type (inner-rec-unique-name inner-lookup?) (inner-rec-package inner-lookup?)))
                 (type-spec-to-type elt-type c-class level type-recs))))
       (when (and (ref-type? type) (not inner-lookup?))
         (add-required c-class (ref-type-class/iface type) (ref-type-path type) type-recs))
@@ -2339,9 +2413,9 @@
             (if inner-lookup?
                 (if (> (type-spec-dim elt-type) 0)
                     (make-array-type
-                     (make-ref-type (inner-rec-unique-name inner-lookup?) null)
+                     (make-ref-type (inner-rec-unique-name inner-lookup?) (inner-rec-package inner-lookup?))
                      (type-spec-dim elt-type))
-                    (make-ref-type (inner-rec-unique-name inner-lookup?) null))
+                    (make-ref-type (inner-rec-unique-name inner-lookup?) (inner-rec-package inner-lookup?)))
                 (type-spec-to-type elt-type c-class level type-recs)))
            (a-type/env (check-array-init (array-init-vals init) check-sub-exp env type type-recs))
            (a-type (type/env-t a-type/env)))
@@ -2455,9 +2529,9 @@
             (if inner-lookup?
                 (if (> (type-spec-dim cast-type) 0)
                     (make-array-type
-                     (make-ref-type (inner-rec-unique-name inner-lookup?) null)
+                     (make-ref-type (inner-rec-unique-name inner-lookup?) (inner-rec-package inner-lookup?))
                      (type-spec-dim cast-type))
-                    (make-ref-type (inner-rec-unique-name inner-lookup?) null))
+                    (make-ref-type (inner-rec-unique-name inner-lookup?) (inner-rec-package inner-lookup?)))
                 (type-spec-to-type cast-type current-class level type-recs))))
       (when (and (reference-type? type) (not inner-lookup?))
         (unless (equal? (car current-class) (ref-type-class/iface type))
@@ -2475,7 +2549,7 @@
           (unless (or (and (prim-numeric-type? exp-type)
                            (prim-numeric-type? type)
                            (or (widening-prim-conversion exp-type type)
-                               (widening-prim-conversion type exp-type))) 
+                               (widening-prim-conversion type exp-type)))
                       (and (eq? 'boolean type)
                            (eq? 'boolean exp-type)))
             (cast-error 'incompatible-prim exp-type type src))
@@ -2496,9 +2570,9 @@
             (if inner-lookup?
                 (if (> (type-spec-dim inst-type) 0)
                     (make-array-type
-                     (make-ref-type (inner-rec-unique-name inner-lookup?) null)
+                     (make-ref-type (inner-rec-unique-name inner-lookup?) (inner-rec-package inner-lookup?))
                      (type-spec-dim inst-type))
-                    (make-ref-type (inner-rec-unique-name inner-lookup?) null))
+                    (make-ref-type (inner-rec-unique-name inner-lookup?) (inner-rec-package inner-lookup?)))
                 (type-spec-to-type inst-type current-class level type-recs))))
       (when (and (ref-type? type) (not inner-lookup?))
         (unless (equal? (car current-class) (ref-type-class/iface type))
@@ -2539,6 +2613,11 @@
            (rtype (type/env-t rtype/env)))
       (when (access? l-exp)
         (check-final l-exp c-tor? static-init? c-class env))
+      (when (and (eq? level 'beginner) c-tor?
+                 (access? l-exp) (field-access? (access-name l-exp))
+                 (var-access-init? (field-access-access (access-name l-exp))))
+        (ctor-illegal-assignment (field-access-field (access-name l-exp))
+                                 (expr-src l-exp)))
       (make-type/env
        (case op
          ((=)
@@ -2552,8 +2631,8 @@
                 (local-access? (access-name l-exp)))
            (add-set-to-env (id-string (local-access-name (access-name l-exp)))
                            (type/env-e rtype/env))
-           (type/env-e rtype/env)))))
-
+           (type/env-e rtype/env)))))      
+  
   ;check-final: expression bool bool string -> void
   (define (check-final expr ctor? static-init? c-class env)
     (let ((access (access-name expr))
@@ -2597,7 +2676,59 @@
     (and (special-name? expr)
          (equal? "this" (special-name-name expr))))
   
-      
+  ;check-test-expr: exp exp (U #f exp) (exp env -> type/env) env symbol src src type-records-> type/env
+  (define (check-test-expr test actual range check-e env level ta-src src type-recs)
+    (let* ((test-te (check-e test env))
+           (test-t (type/env-t test-te))
+           (actual-te (check-e actual (type/env-e test-te)))
+           (actual-t (type/env-t actual-te))
+           (range-te (if range (check-e range (type/env-e actual-te)) actual-te))
+           (range-t (when range (type/env-t range-te)))
+           (res (make-type/env 'boolean (type/env-e range-te))))
+      (when (eq? test-t 'void)
+        (check-type-error 'void level test-t actual-t (expr-src test)))
+      (when (eq? actual-t 'void)
+        (check-type-error 'void level test-t actual-t (expr-src actual)))
+      (when (and range (not (prim-numeric-type? range-t)))
+        (check-range-error (expr-src range) range-t)) 
+      (cond
+        ((and (eq? 'boolean test-t)
+              (eq? 'boolean actual-t)) res)
+        ((and (prim-numeric-type? test-t)
+              (prim-numeric-type? actual-t))
+         (if (or (and (prim-integral-type? test-t)
+                      (prim-integral-type? actual-t))
+                 range)
+             res
+             (check-double-error test-t actual-t 
+                                 (expr-src test) (expr-src actual))))
+        ((and (memq level '(advanced full))
+              (reference-type? test-t) (reference-type? actual-t))
+         (cond
+           ((castable? actual-t test-t type-recs) res)
+           (else (check-type-error 'cast level test-t actual-t ta-src))))
+        ((and (memq level '(advanced full))
+              (or (array-type? test-t) (array-type? actual-t)))
+         (cond
+           ((castable? actual-t test-t type-recs) res)
+           (else
+            (check-type-error 'cast level test-t actual-t ta-src))))
+        ((and (eq? level 'beginner) (reference-type? test-t) (reference-type? actual-t))
+         (if (or (is-eq-subclass? actual-t test-t type-recs)
+                 (implements? actual-t test-t type-recs))
+             res
+             (check-type-error 'iface level test-t actual-t ta-src)))
+        ((and (reference-type? test-t) (reference-type? actual-t)) 
+         (if (or (is-eq-subclass? actual-t test-t type-recs)
+                 (implements? actual-t test-t type-recs))
+             res
+             (check-type-error 'subtype level test-t actual-t ta-src)))
+        (else
+         (check-type-error (if (memq level '(advanced full)) 'cast 'subtype)
+                           level
+                           test-t actual-t ta-src)))))
+  
+  
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;Expression Errors
 
@@ -2611,9 +2742,9 @@
       (raise-error
        op
        (case side
-         ((right) (format "Right hand side of ~a should be of type ~a, but given ~a" op ext-out rt))
-         ((left) (format "Left hand side of ~a should be of type ~a, but given ~a" op ext-out lt))
-         (else (format "~a expects arguments of type ~a, but given ~a and ~a" op ext-out lt rt)))
+         ((right) (format "Right hand side of ~a should be of type ~a, but given ~a." op ext-out rt))
+         ((left) (format "Left hand side of ~a should be of type ~a, but given ~a." op ext-out lt))
+         (else (format "~a expects arguments of type ~a, but given ~a and ~a." op ext-out lt rt)))
        op src)))
   
   ;bin-op-beginner-error symbol type type src -> void
@@ -2673,11 +2804,11 @@
       (raise-error 
        name
        (case kind
-         ((not-found) (format "reference to undefined identifier ~a" name))
-         ((class-name) (format "class named ~a cannot be used as a variable, which is how it is used here" name))
+         ((not-found) (format "Reference to undefined identifier ~a." name))
+         ((class-name) (format "Class named ~a cannot be used as a variable, which is how it is used here." name))
          ((method-name) 
           (let ((line1
-                 (format "method named ~a cannot be used as a variable, which is how it is used here." name))
+                 (format "Method named ~a cannot be used as a variable, which is how it is used here." name))
                 (line2 "A call to a method should be followed by () and any arguments to the method"))
             (format "~a~n~a" line1 line2))))
        name src)))
@@ -2688,37 +2819,37 @@
       (raise-error
        field
        (case kind
-         ((not-found) (format "field ~a not found for object with type ~a" field t))
+         ((not-found) (format "Field ~a not found for object with type ~a." field t))
          ((class-name)
           (format "Class named ~a is being erroneously accessed as a field" field))
          ((method-name)
           (let ((line1
                  (format "Method ~a is being erroneously accessed as a field for class ~a." field t))
-                (line2 "A call to a method chould be followed by () and any arguments to the method"))
+                (line2 "A call to a method should be followed by () and any arguments to the method"))
             (format "~a~n~a" line1 line2)))
          ((array)
           (format "~a only has a length field, attempted to access ~a" t field))
          ((primitive)
-          (format "attempted to access field ~a on ~a, this value does not have fields" field t)))
+          (format "Attempted to access field ~a on ~a; this value does not have fields." field t)))
        field src)))
 
   ;unusable-var-error: symbol src -> void
   (define (unusable-var-error name src)
     (raise-error 
      name
-     (format "field ~a cannot be used in this class, as two or more parents contain a field with this name" name)
+     (format "Field ~a cannot be used in this class, as two or more parents contain a field with this name." name)
      name src))
 
   ;unset-var-error: symbol src -> void
   (define (unset-var-error name src)
     (raise-error name
-                 (format "local variable ~a was not set along all paths reaching this point, and cannot be used"
+                 (format "Local variable ~a was not set along all paths reaching this point, and cannot be used."
                          name)
                  name src))     
   ;access-before-defined: symbol src -> void
   (define (access-before-define name src)
     (raise-error name
-                 (format "field ~a cannot be accessed before its definition" name)
+                 (format "Field ~a cannot be accessed before its declaration." name)
                  name src))
   
   ;not-static-field-access-error symbol symbol src -> void
@@ -2727,17 +2858,17 @@
      name
      (case level
        ((beginner intermediate) 
-        (format "Field ~a cannot be retrieved from a class, ~a can only be accessed from an instance of the class"
+        (format "Field ~a cannot be retrieved from a class, ~a can only be accessed from an instance of the class."
                 name name))
        ((advanced full)
-        (format "Field ~a accessed as though static; this field is not a static field" name)))
+        (format "Field ~a accessed as though static; ~a is not a static field" name name)))
      name src))
   
   ;beginner-field-access-error: symbol src -> void
   (define (beginner-field-access-error name src)
     (raise-error
      name
-     (format "field ~a from the current class accessed as a variable. fields should be accessed with 'this'" name)
+     (format "Field ~a from the current class accessed as a variable. Fields should be accessed with 'this'." name)
      name src))
   
   ;illegal-field-access: symbol symbol symbol string src -> void
@@ -2991,6 +3122,16 @@
                                types)))))
       (substring out 0 (- (string-length out) 5))))                                                         
   
+  ;call-abstract-error: symbol id type src -> void
+  (define (call-abstract-error level name exp src)
+    (let ((n (id->ext-name name))
+          (t (get-call-type exp)))
+      (raise-error n
+                   (if (memq level '(beginner))
+                       (format "You maynot call method ~a from ~a" n t)
+                       (format "super.~a(...) may not be called as ~a is abstract in ~a." n n t))
+                   n src)))
+  
   ;call-access-error: symbol symbol id type src -> void
   (define (call-access-error kind level name exp src)
     (let ((n (id->ext-name name))
@@ -3230,6 +3371,13 @@
   (define (illegal-assignment src)
     (raise-error '= "Assignment is only allowed in the constructor" '= src))
 
+  ;ctor-illegal-assignment: id src -> void
+  (define (ctor-illegal-assignment name src)
+    (raise-error '= 
+                 (format "Field ~a has already been initialized and cannot be reassigned."
+                         (id->ext-name name))
+                 '= src))
+  
   (define (assignment-error op ltype rtype src)
     (raise-error op
                  (format "~a requires that the right hand type be equivalent to or a subtype of ~a: given ~a"
@@ -3272,6 +3420,57 @@
                  (format "Implicit import of class ~a failed as this class does not exist at the specified location"
                          class)
                  (string->symbol class) src))
+  
+    (define (check-range-error src type)
+    (raise-error
+     'check
+     (format "Within clause of 'check' must specify a range with a number, found ~a."
+             (type->ext-name type))
+     'within
+     src))
+  
+  (define (check-double-error test-type actual-type test-src actual-src)
+    (let ((check-fault? (prim-integral-type? actual-type)))
+      (raise-error
+       (if check-fault? 'check 'expect)
+       (format "When ~a of a 'check' expression is a ~a, the expression must specify a range with 'within'."
+               (if check-fault?
+                   "the expression to check"
+                   "the expected expression")
+               (type->ext-name
+                (if check-fault? test-type actual-type)))
+       'check (if check-fault? test-src actual-src)
+       )))
+  
+  (define (check-type-error kind level test-type actual-type ta-src)
+    (raise-error
+     'check
+     (cond
+       ((and (eq? kind 'void) (eq? test-type 'void))
+        "The test of a 'check' expression must produce a value. Current expression does not.")
+       ((and (eq? kind 'void) (eq? actual-type 'void))
+        "The expected result of a 'check' expression must be a value. Current expression is not a value.")
+       (else
+        (string-append (format "A 'check' expression compares the test and expected expressions.~n")
+                       (format "Found ~a which is not comparable to ~a.~a"
+                               (type->ext-name actual-type)
+                               (type->ext-name test-type)
+                               (if (not (eq? level 'full))
+                                   ""
+                                   " The expected expression must be castable to the test type.")))        
+        #;(string-append
+           (format "In a 'check' expression, the type of the expected expression must be ~a the tested expression.~n"
+                   (if (eq? kind 'cast) "castable to" "a subtype of"))
+           (format "Found ~a, which is not ~a ~a, the type of the tested expression."
+                   (type->ext-name actual-type)
+                   (case kind
+                     ((cast)  "castable to")
+                     ((iface subtype) "a subtype of"))
+                   (type->ext-name test-type)
+                   ))))
+     'check ta-src
+     ))
+
   
   (define check-location (make-parameter #f))
   

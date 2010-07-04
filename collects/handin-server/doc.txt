@@ -238,11 +238,11 @@ sub-directories:
          add this configuration entry with the name of your new copy
          (relative to the handin server directory)
 
-      'extra-fields : a list that describes extra fields of (string)
-         information for students; each element in this list is a list
-         of three values -- the name of the field, the regexp (or #f,
-         or a list of permitted string values), and a plain-words
-         description of acceptable strings.  The default is
+      'extra-fields : a list that describes extra string fields of
+         information for student records; each element in this list is
+         a list of three values -- the name of the field, the regexp
+         (or #f, or a list of permitted string values), and a string
+         describing of acceptable strings.  The default is
 
            '(("Full Name" #f #f)
              ("ID#" #f #f)
@@ -264,6 +264,17 @@ sub-directories:
 
          The order of these fields will be used both on the client GUI
          side and in the "users.ss" file (see below).
+
+         The second item in a field description can also be the symbol
+         '-, which marks this field as one that is hidden from the
+         user interface: students will not see it and will not be able
+         to provide or modify it; when a new student creates an
+         account, such fields will be left empty.  This is useful for
+         adding information that you have on students from another
+         source, for example, adding information from a course roster.
+         You should manually edit the "users.ss" file and fill in such
+         information.  (The third element for such descriptors is
+         ignored.)
 
   * "users.ss" (created if not present if a user is added) --- keeps
     the list of user accounts, along with the associated password
@@ -302,12 +313,12 @@ sub-directories:
     matches your 'extra-fields specification.  For example, given this
     system file:
 
-      foo:wRzN1u5q2SqRD:1203:1203:Foo Moo:/home/foo:/bin/tcsh
+      foo:wRzN1u5q2SqRD:1203:1203:L.E. Foo:/home/foo:/bin/tcsh
       bar:$1$dKlU0OkJ$t63NU/eTzKz:1205:1205:Bar Z. Lie:/home/bar:/bin/bash
 
-    you can create a "users.ss" file as
+    you can create this "users.ss" file:
 
-      ((foo ((unix "wRzN1u5q2SqRD") "Foo Moo" "?"))
+      ((foo ((unix "wRzN1u5q2SqRD") "L.E. Foo" "?"))
        (bar ((unix "$1$dKlU0OkJ$t63NU/eTzKz") "Bar Z. Lie" "?")))
 
     which can be combined with this setting for 'extra-fields in your
@@ -321,6 +332,10 @@ sub-directories:
     and you can tell your students to use their department username
     and password, and use the "Manage ..." dialog to properly set
     their TA name.
+
+    Finally, a password value can be a list that begins with a
+    'plaintext symbol, which will be used without encryption.  This
+    may be useful for manually resetting a forgotten passwords.
 
   * "active/" --- sub-directory for active assignments. A list of
     active assignments is sent to a client tool when a student clicks
@@ -402,7 +417,9 @@ sub-directories:
     from the status interface.
 
     The checker should return a string, such as "handin.scm", to use
-    in naming the submission file.
+    in naming the submission file, or #f to indicate that he file
+    should be deleted (eg, when the checker alrady created the
+    submission file(s) in a different place).
 
     Alternatively, the module can bind `checker' to a list of three
     procedures: a pre-checker, a checker, and a post-checker.  All
@@ -702,9 +719,16 @@ Keywords for configuring `check:':
   null -- no teachpacks.
 
 * :create-text? -- if true, then a textual version of the submission
-  is saved as `text.scm' in a `grading' subdirectory.  This is
-  intended for printouts and grading, and is in a subdirectory so
-  students will not see it on the status web server.  Defaults to #t.
+  is saved as "text.scm" in a "grading" subdirectory (or any suffix
+  that is specified by :output below, for example "hw.java" is
+  converted into a textual "grading/text.java").  This is intended for
+  printouts and grading, and is in a subdirectory so students will not
+  see it on the status web server.  Defaults to #t.
+
+* :untabify? -- if true, then tabs are converted to spaces, assuming a
+  standard tab width of 8 places.  This is needed for a correct
+  computation of line lengths, but note that DrScheme does not insert
+  tabs in Scheme mode.  Defaults to #t.
 
 * :textualize? -- if true, then all submissions are converted to text,
   trying to convert objects like comment boxes and test cases to some
@@ -716,7 +740,26 @@ Keywords for configuring `check:':
   to 79.  This feature can be disabled if set to #f.
 
 * :output -- the name of the original handin file (unrelated to the
-  text-converted files).  Defaults to "hw.scm".
+  text-converted files).  Defaults to "hw.scm".  (The suffix changes
+  the defaults of the following two entries.)  Can be #f for removing
+  the original file after processing.
+
+* :multi-file -- by default, this is set to #f, which means that only
+  DrScheme is used to send submissions as usual.  See "Multiple-file
+  submissions" below for setting up multi-file submissions.
+
+* :names-checker -- used for multi-file submissions; see
+  "Multiple-file submissions" below for details.
+
+* :markup-prefix -- used as the prefix for :student-lines and
+  :extra-lines below.  The default is ";;> " or "//> ", depending on
+  the suffix of :output above.  (Note: if you change this, make sure
+  to change :prefix-re too.)
+
+* :prefix-re -- used to identify lines with markup (";>" or "//>"
+  etc), so students cannot fool the system by writing marked-up code.
+  The default is ";>" or "//>", depending on the suffix of :output
+  above.
 
 * :student-line -- when a submission is converted to text, it begins
   with lines describing the students that have submitted it; this is
@@ -724,11 +767,13 @@ Keywords for configuring `check:':
   holes that that `user-substs' (see below) fills out.  The default is
   "Student: {username} ({Full Name} <{Email}>)", which requires a
   "Full Name" and "Email" entries in the server's extra-fields
-  configuration.  These lines are always prefixed with ";;> ".
+  configuration.  These lines are prefixed with ";;> " or the prefix
+  specified by :makup-prefix above.
 
 * :extra-lines -- a list of lines to add after the student lines, all
-  with a ";;> " prefix too.  Defaults to a single line: "Maximum
-  points for this assignment: <+100>".
+  with a ";;> " or :markup-prefix too.  Defaults to a single line:
+  "Maximum points for this assignment: <+100>".  (Can use
+  "{submission}" for the submission directory.)
 
 * :user-error-message -- a string that is used to report an error that
   occurred during evaluation of the submitted code (not during
@@ -825,7 +870,7 @@ value from the submission code.
   information (see above) and then substitute field names in {braces}
   by the corresponding value.  An error will be signaled if a field
   name is missing.  Also, "{username}" will always be replaced by the
-  username.
+  username and "{submission}" by the current submission directory.
 
   This is used to process the `:student-line' value in the checker,
   but it is provided for additional uses.  See the above sample code
@@ -885,7 +930,8 @@ value from the submission code.
   non-#f value in the submission context, throwing an error
   otherwise.  The second form compares the result of evaluation,
   requiring it to be equal to `result' (optionally specifying an
-  equality procedure).
+  equality procedure).  Note that the `result' and `equal?' forms are
+  *not* evaluated in the submission context.
 
 > (!all-covered)
   When coverage information is enabled (see `:coverage?' above), this
@@ -893,3 +939,85 @@ value from the submission code.
   error with source information if some code is left uncovered.  The
   collected information includes only execution coverage by submission
   code, excluding additional checker tests.
+
+*** Multiple-file submissions
+
+By default, the system is set up for submissions of single a single
+file, straight fom DrScheme using the handin-client.  There is some
+support for multi-file submissions in "extra-utils.ss" and in the
+handin-client -- it is possible to submit multiple files, and have the
+system generate a single file that is the concatenation of all
+submission files (used only with text files).  To set up multi-file
+submissions, do the following:
+
+* Add a `:multi-file' keyword in `check:', and as a value, use the
+  suffix that should be used for the single concatenated output file.
+
+* You can also add a `:names-checker' keyword -- the value can be a
+  regexp that all submitted files must follow (eg, ".*[.]scm$"), or a
+  list of expected file names.  Alternatively, it can be a 1-argument
+  procedure that will receive the (sorted) list of submitted files and
+  can throw an error if some files are missing or some files are
+  forbidden.
+
+* In the "info.ss" file of the handin-client you need to set
+  `enable-multifile-handin' to #t, and adjust `selection-default' to
+  patterns that are common to your course.  (It can be a single
+  pattern, or a list of them.)
+
+On the server side, each submission is saved in a file called "raw",
+which contains all submitted files.  In the "grading" directory, you
+will get a "text.<sfx>" file ("<sfx>" is the suffix that is used as a
+value for `:multi-file') that contains all submitted files with clear
+separators.  A possible confusion is that every submission is a
+complete set of files that overwrites any existing submission -- but
+students may think that the server accumulates incoming files.  To
+avoid such confusion, when a submission arrives an there is already an
+existing previous submission, the contents is compared, and if there
+are files that existed in the old submission but not in the new ones,
+the student will see a warning pop-up that allows aborting the
+submission.
+
+On the client side, students will have an additional file-menu entry
+for submitting multiple files, which pops up a dialog that can be used
+to submit multiple files.  In this dialog, students choose their
+working directory, and the `selection-default' entry from the
+"handin-client/info.ss" file specifies a few patterns that can be used
+to automatically select files.  The dialog provides all handin-related
+functionality that is available in DrScheme.  For further convenience,
+it can be used as a standalone application: in the account management
+dialog, the "Un/Install" tab has a button that will ask for a
+directory where it will create an executable for the multi-file
+submission utility -- the resulting executable can be used outside of
+DrScheme (but PLT Scheme is still required, so it cannot be
+uninstalled).
+
+*** Auto-updater
+
+The handin-client has code that can be used for automatic updating of
+clients.  This can be useful for courses where you distribute some
+additional functionality (collections, teachpacks, language-levels
+etc), and this functionality can change (or expected to change, for
+example, distributing per-homework teachpacks).
+
+To enable this, uncomment the relevant part of the "info.ss" file in
+the client code, it has the following three keys: `enable-auto-update'
+that turns this facility on, `version-filename' and `package-filename'
+which are the expected file names of the version file and the .plt
+file relative to the course web address (the value of the
+`web-address' key).  Also, include in your client collection a
+"version" file that contains a single number that is its version -- a
+big integer that holds the time of this collection in a YYYYMMDDHHMM
+format.
+
+When students install the client, every time DrScheme starts, it will
+automatically check the version from the web page (as specified by the
+`web-address' and `version-filename' keys), and if that contains a
+bigger number, it will offer the students to download and install the
+new version.  So, every time you want to distribute a new version, you
+build a new .plt file that contains a new version file, then copy
+these version and .plt files to your web page, and students will be
+notified automatically.  Note: to get this to work, you need to create
+your .plt file using mzc's `--replace' flag, so it will be possible to
+overwrite existing files.  (Also note that there is no way to delete
+files when a new .plt is installed.)

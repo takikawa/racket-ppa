@@ -137,7 +137,9 @@
 	  (check-dimension cwho height)
 	  (check-init-pos-integer cwho x)
 	  (check-init-pos-integer cwho y)
-	  (check-style cwho #f '(no-resize-border no-caption no-system-menu mdi-parent mdi-child toolbar-button hide-menu-bar float metal) 
+	  (check-style cwho #f '(no-resize-border no-caption no-system-menu 
+						  mdi-parent mdi-child 
+						  toolbar-button hide-menu-bar float metal) 
 		       style)
 	  (when (memq 'mdi-child style)
 	    (when (memq 'mdi-parent style)
@@ -206,13 +208,13 @@
     (class100*/kw basic-top-level-window% ()
 		  [(label [parent #f] [width #f] [height #f] [x #f] [y #f] [style null])
 		   top-level-window%-keywords]
-      (inherit on-traverse-char on-system-menu-char)
+      (inherit on-traverse-char on-system-menu-char center)
       (sequence
 	(let ([cwho '(constructor dialog)])
 	  (check-label-string cwho label)
 	  (check-top-level-parent/false cwho parent)
 	  (for-each (lambda (x) (check-dimension cwho x)) (list width height x y))
-	  (check-style cwho #f '(no-caption resize-border) style)))
+	  (check-style cwho #f '(no-caption resize-border no-sheet) style)))
       (rename [super-on-subwindow-char on-subwindow-char])
       (private-field [wx #f])
       (override
@@ -226,7 +228,7 @@
 	   (super-init (lambda (finish) 
 			 (set! wx (finish (make-object wx-dialog% this this
 						       (and parent (mred->wx parent)) label #t
-						       (or x -1) (or y -1) (or width 0) (or height 0)
+						       (or x -11111) (or y -11111) (or width 0) (or height 0)
 						       style)
 					  #f))
 			 wx)

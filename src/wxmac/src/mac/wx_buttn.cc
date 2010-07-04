@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2005 PLT Scheme, Inc.
+// Copyright:  (c) 2004-2006 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -153,8 +153,8 @@ wxButton::wxButton // Constructor (given parentPanel, bitmap)
 
   Callback(function);
 
-  cBorderArea = new wxArea(this);
-  new wxButtonBorder(cBorderArea);
+  cBorderArea = new WXGC_PTRS wxArea(this);
+  new WXGC_PTRS wxButtonBorder(cBorderArea);
 
   SetCurrentMacDC();
   theMacGrafPort = cMacDC->macGrafPort();
@@ -391,7 +391,7 @@ void wxButton::OnEvent(wxMouseEvent *event) // mac platform only
     
     if (trackResult) {
       wxCommandEvent *commandEvent;
-      commandEvent = new wxCommandEvent(wxEVENT_TYPE_BUTTON_COMMAND);
+      commandEvent = new WXGC_PTRS wxCommandEvent(wxEVENT_TYPE_BUTTON_COMMAND);
       ProcessCommand(commandEvent);
     }
   }

@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2005 PLT Scheme, Inc.
+// Copyright:  (c) 2004-2006 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -33,7 +33,7 @@ wxLabelArea::wxLabelArea
   wxFont* labelFont;
 
   __type = wxTYPE_LABEL_AREA;
-  cLabelText = new wxMessage(this, label, theFont, xoffset, yoffset);
+  cLabelText = new WXGC_PTRS wxMessage(this, label, theFont, xoffset, yoffset);
   cDirection = direction;
 
   labelFont = cLabelText->font;

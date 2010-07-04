@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	August 1994
- * Copyright:	(c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:	(c) 2004-2006 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -1615,10 +1615,7 @@ void wxDisplaySize(int *width, int *height, int flags)
 {
   RECT r;
 
-  if (!flags && SystemParametersInfo(SPI_GETWORKAREA, 0, &r, 0)) {
-    *width = (r.right - r.left);
-    *height = (r.bottom - r.top);
-  } else {
+  {
     HDC dc;
     int dw, dh;
     dc = ::GetDC(NULL);
@@ -1630,11 +1627,11 @@ void wxDisplaySize(int *width, int *height, int flags)
   }
 }
 
-void wxDisplayOrigin(int *x, int *y)
+void wxDisplayOrigin(int *x, int *y, int flags)
 {
   RECT r;
 
-  if (SystemParametersInfo(SPI_GETWORKAREA, 0, &r, 0)) {
+  if (flags && SystemParametersInfo(SPI_GETWORKAREA, 0, &r, 0)) {
     *x = r.left;
     *y = r.top;
   } else {
@@ -1948,7 +1945,9 @@ Bool wxBitmap::LoadFile(char *bitmap_file, long flags, wxColour *bg)
 
   if (flags & wxBITMAP_TYPE_BMP_RESOURCE)
   {
-    ms_bitmap = LoadBitmap(wxhInstance, bitmap_file);
+    wchar_t *ws;
+    ws = wxWIDE_STRING(bitmap_file);
+    ms_bitmap = LoadBitmapW(wxhInstance, ws);
     if (ms_bitmap) {
       BITMAP bm;
       RegisterGDIObject(ms_bitmap);

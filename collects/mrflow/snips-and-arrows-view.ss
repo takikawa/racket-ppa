@@ -4,7 +4,7 @@
    (lib "class.ss")
    (lib "mred.ss" "mred")
    (prefix arrow: (lib "arrow.ss" "drscheme"))
-   (prefix lst: (lib "list.ss"))
+   (only (lib "list.ss") sort)
    (prefix strcst: (lib "string-constant.ss" "string-constants"))
    
    (prefix cst: "constants.ss")
@@ -64,7 +64,7 @@
    
    (add-arrow (gui-view-state? (list/c label? label? string?) boolean? . -> . void?))
    (get-tacked-arrows-from-label (gui-view-state? label? . -> . non-negative-exact-integer?))
-   (remove-arrows (gui-view-state? label? (union symbol? boolean?) boolean? . -> . void?))
+   (remove-arrows (gui-view-state? label? (or/c symbol? boolean?) boolean? . -> . void?))
    (redraw-arrows (gui-view-state? (is-a?/c dc<%>) real? real? . -> . void?))
    
    (invalidate-bitmap-cache (gui-view-state? . -> . void?))
@@ -167,7 +167,7 @@
   (define (add-arrow gui-view-state arrow-info tacked?)
     (saam:add-arrow (gui-view-state-gui-model-state gui-view-state) arrow-info tacked?))
   
-  ; gui-view-state label (union symbol boolean) boolean -> void
+  ; gui-view-state label (or/c symbol boolean) boolean -> void
   (define (remove-arrows gui-view-state start-label tacked? exn?)
     (saam:remove-arrows (gui-view-state-gui-model-state gui-view-state) start-label tacked? exn?))
   
@@ -431,9 +431,9 @@
                               (send editor change-style
                                     (get-style-delta-from-label (car labels))
                                     position new-ending-pos #f))))
-                        (lst:quicksort (assoc-set-map new-terms-by-positions cons)
-                                       (lambda (pos&term-pair1 pos&term-pair2)
-                                         (> (car pos&term-pair1) (car pos&term-pair2)))))
+                        (sort (assoc-set-map new-terms-by-positions cons)
+                              (lambda (pos&term-pair1 pos&term-pair2)
+                                (> (car pos&term-pair1) (car pos&term-pair2)))))
                        (send editor lock locked?)
                        (send editor end-edit-sequence)))))))
           (set-gui-view-state-analysis-currently-modifying?! gui-view-state #f))))

@@ -34,7 +34,8 @@
 				Name="VCCustomBuildTool"/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalOptions="/MACHINE:I386"
+				AdditionalOptions="/MACHINE:I386 /DELAYLOAD:libmzschxxxxxxx.dll /DELAYLOAD:libmzgcxxxxxxx.dll"
+				AdditionalDependencies="unicows.lib delayimp.lib"
 				OutputFile="..\..\..\$(ProjectName).exe"
 				SuppressStartupBanner="TRUE"
 				GenerateDebugInformation="TRUE"
@@ -49,7 +50,7 @@ if exist &quot;$(TargetPath)&quot; goto :MzOK
 echo Error: did not find $(TargetPath)
 exit 1
 :MzOK
-&quot;$(TargetPath)&quot; -qr ..\..\mzscheme\mkincludes.ss &quot;$(TargetDir)/&quot; ..
+&quot;$(TargetPath)&quot; -qr ..\..\mzscheme\mkincludes.ss &quot;$(TargetDir)/include/&quot; ..\..\mzscheme ..
 if errorlevel 1 exit 1
 cd ..\..\mzscheme\dynsrc
 mkmzdynd.bat
@@ -102,7 +103,8 @@ cd ..\..\worksp\mzscheme
 				Name="VCCustomBuildTool"/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalOptions="/MACHINE:I386"
+				AdditionalOptions="/MACHINE:I386 /DELAYLOAD:libmzschxxxxxxx.dll /DELAYLOAD:libmzgcxxxxxxx.dll"
+				AdditionalDependencies="unicows.lib delayimp.lib"
 				OutputFile="..\..\..\$(ProjectName).exe"
 				LinkIncremental="1"
 				SuppressStartupBanner="TRUE"
@@ -118,7 +120,7 @@ if exist &quot;$(TargetPath)&quot; goto :MzOK
 echo Error: did not find $(TargetPath)
 exit 1
 :MzOK
-&quot;$(TargetPath)&quot; -qr ..\..\mzscheme\mkincludes.ss &quot;$(TargetDir)/&quot; ..
+&quot;$(TargetPath)&quot; -qr ..\..\mzscheme\mkincludes.ss &quot;$(TargetDir)/include/&quot; ..\..\mzscheme ..
 if errorlevel 1 exit 1
 cd ..\..\mzscheme\dynsrc
 mkmzdyn.bat

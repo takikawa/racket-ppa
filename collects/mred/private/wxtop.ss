@@ -31,14 +31,21 @@
 	(wx:display-size xb yb (if full-screen? 1 0))
 	(values (unbox xb) (unbox yb)))))
 
-  (define (get-display-left-top-inset)
-    (let ([xb (box 0)]
-	  [yb (box 0)])
-      (wx:display-origin xb yb)
-      (values (unbox xb) (unbox yb))))
+  (define get-display-left-top-inset
+    (opt-lambda ([advisory? #f])
+      (let ([xb (box 0)]
+	    [yb (box 0)])
+	(wx:display-origin xb yb advisory?)
+	(values (unbox xb) (unbox yb)))))
   
-  (define top-x 1)
-  (define top-y 1)
+  (define-values (init-top-x init-top-y)
+    (let-values ([(x y) (get-display-left-top-inset #f)]
+		 [(x2 y2) (get-display-left-top-inset #t)])
+      (values (+ 1 (- x2 x))
+	      (+ 1 (- y2 y)))))
+
+  (define top-x init-top-x)
+  (define top-y init-top-y)
   (define top-level-windows (make-hash-table 'weak))
   
   ;; make-top-container%: adds the necessary functionality to wx:frame% and 
@@ -330,18 +337,20 @@
 	     (force-redraw))
 	   (when (and on? use-default-position?)
 	     (set! use-default-position? #f)
-	     (let*-values ([(w) (get-width)]
-			   [(h) (get-height)]
-			   [(sw sh) (get-display-size)]
-			   [(x x-reset?) (if (< (+ top-x w) sw)
-					     (values top-x #f)
-					     (values (max 0 (- sw w 10)) #t))]
-			   [(y y-reset?) (if (< (+ top-y h) sh)
-					     (values top-y #f)
-					     (values (max 0 (- sh h 20)) #t))])
-	       (move x y)
-	       (set! top-x (if x-reset? 0 (+ top-x 10)))
-	       (set! top-y (if y-reset? 0 (+ top-y 20)))))
+	     (if dlg?
+                 (center 'both)
+		 (let*-values ([(w) (get-width)]
+			       [(h) (get-height)]
+			       [(sw sh) (get-display-size)]
+			       [(x x-reset?) (if (< (+ top-x w) sw)
+						 (values top-x #f)
+						 (values (max 0 (- sw w 10)) #t))]
+			       [(y y-reset?) (if (< (+ top-y h) sh)
+						 (values top-y #f)
+						 (values (max 0 (- sh h 20)) #t))])
+		   (move x y)
+		   (set! top-x (if x-reset? init-top-x (+ top-x 10)))
+		   (set! top-y (if y-reset? init-top-y (+ top-y 20))))))
 	   (if on?
 	       (hash-table-put! top-level-windows this #t)
 	       (hash-table-remove! top-level-windows this))
@@ -522,7 +531,7 @@
 					       (let loop ([i 0])
 						 (if (= i n)
 						     #f
-						     (let ([l (send o get-string i)])
+						     (let ([l (send win get-item-label i)])
 						       (if (and (string? l)
 								(regexp-match re l))
 							   (begin

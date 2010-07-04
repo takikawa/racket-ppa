@@ -2,9 +2,10 @@
 (require (lib "list.ss")
 	 (lib "head.ss" "net"))
 
-(define msgs (quicksort
-	      (filter (lambda (x) (regexp-match "^[0-9]*$" x)) (directory-list))
-	      (lambda (a b) (< (string->number a) (string->number b)))))
+(define msgs
+  (sort (filter (lambda (x) (regexp-match #rx"^[0-9]*$" (path->string x))) (directory-list))
+        (lambda (a b) (< (string->number (path->string a))
+			 (string->number (path->string b))))))
 
 (define mailbox
   (let loop ([msgs msgs][p 1])
@@ -15,7 +16,7 @@
 	  (let ([header (with-input-from-file msg
 		     (lambda () (read-string (file-size msg))))])
 	    (cons (list
-		   (string->number msg)
+		   (string->number (path->string msg))
 		   p
 		   (file-exists? (format "~abody" msg))
 		   (extract-field "From" header)

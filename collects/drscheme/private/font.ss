@@ -20,7 +20,8 @@
       
       (define (setup-preferences)
         (preferences:add-panel
-         (list (string-constant font-prefs-panel-title))
+         (list (string-constant font-prefs-panel-title)
+               (string-constant drscheme))
          (λ (panel)
            (let* ([main (make-object vertical-panel% panel)]
 		  [min-size 1]
@@ -139,7 +140,9 @@
                                        [(2) 'smoothed]
                                        [(3) 'default])))))]
                   
-                  [text (make-object (editor:standard-style-list-mixin text%))]
+                  [text (make-object (text:foreground-color-mixin
+                                      (editor:standard-style-list-mixin 
+                                       text:basic%)))]
                   [ex-panel (make-object horizontal-panel% main)]
                   [msg (make-object message% (string-constant example-text) ex-panel)]
                   [canvas (make-object canvas:color% main text)]
@@ -168,7 +171,6 @@
                      (send text set-position 0 0)
                      (send text lock #t)
                      (send text end-edit-sequence))])
-             
              (preferences:add-callback
               'framework:standard-style-list:font-size
               (λ (p v) (send size-slider set-value v)))

@@ -486,6 +486,16 @@
       (image=? (line 0 4 'red)
                (color-list->image (list red red red red red) 1 5 0 0)))
 
+(test #t
+      'line 
+      (image=? (line 0 -4 'red)
+               (color-list->image (list red red red red red) 1 5 0 4)))
+
+(test #t
+      'line 
+      (image=? (line -4 0 'red)
+               (color-list->image (list red red red red red) 5 1 4 0)))
+
 ;; note: next two tests may be platform-specific... I'm not sure.
 ;; I developed them under macos x. -robby
 (test #t
@@ -1036,5 +1046,24 @@ snips as arguments
 (err/rt-name-test (alpha-color-list->image (list (make-alpha-color 0 0 0 0)) 1 #f #f #f) "third")
 (err/rt-name-test (alpha-color-list->image (list (make-alpha-color 0 0 0 0)) 1 1 #f #f) "fourth")
 (err/rt-name-test (alpha-color-list->image (list (make-alpha-color 0 0 0 0)) 1 1 0 #f) "fifth")
+
+(err/rt-name-test (overlay/xy #f
+                              13687968/78125 ; number's floor is 175
+                              10
+                              (circle 50 'outline 'blue))
+                  "first")
+(err/rt-name-test (overlay/xy (rectangle 100 200 'outline 'red)
+                              13687968/78125 ; number's floor is 175
+                              10
+                              (circle 50 'outline 'blue))
+                  "second")
+(err/rt-name-test (overlay/xy (rectangle 100 200 'outline 'red)
+                              10
+                              13687968/78125
+                              (circle 50 'outline 'blue))
+                  "third")
+(err/rt-name-test (overlay/xy (rectangle 100 200 'outline 'red) 10 10 #f) "fourth")
+(err/rt-name-test (overlay/xy (rectangle 100 200 'outline 'red) 10 +inf.0 #f) "third")
+(err/rt-name-test (overlay/xy (rectangle 100 200 'outline 'red) -inf.0 +inf.0 #f) "second")
 
 (report-errs)

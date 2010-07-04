@@ -42,6 +42,15 @@ VER-SPEC is provided, the most recent version is assumed. If no
 owner-name/path ... clause is provided, the default package is
 assumed.
 
+For example, 
+
+  (require (planet "test-connection.ss" ("planet" "test-connection.plt" 1 0)))
+
+requires the file "test-connection.ss" from the package owned by
+"planet" called "test-connection.plt", and says that any package with
+major version 1 and any minor version greater than or equal to 0 will
+do.
+
 _config.ss_: client configuration
 
 This file provides several parameters useful for configuring how
@@ -147,6 +156,25 @@ numbers and major-version must be greater than zero.
 Removes the entire linkage table from the system, which will force all
 modules to relink themselves to PLaneT modules the next time they run.
 
+> (add-hard-link owner name major-version minor-version directory) -> void
+
+Adds a development link between the specified package and the given
+directory; once a link is established, PLaneT will treat the cache as
+having a package with the given owner, name, and version whose files
+are located in the given path. This is intended for package
+development; users only interested in using PLaneT packages
+available online should not need to create any development links. 
+
+owner and name must be strings, major-version and minor-version must
+be natural numbers, and directory must be a path (not a string)
+indicating a directory.
+
+If the specified package already has a development link, this function
+first removes the old link and then adds the new one.
+
+> (remove-hard-link owner name major-version minor-version) -> void
+
+Removes any hard link that may be associated with the given package.
 
 _The PLaneT search order_
 -------------------------
@@ -166,9 +194,11 @@ and are stored in a user-specific table called the linkage table.
 
 2. Acceptable local package
 
-If the PLaneT client doesn't have any previous linkage information,
-it checks its list of already-installed PLaneT packages for one that
-meets the requirement, and uses it if available.
+If the PLaneT client doesn't have any previous linkage information, it
+checks its list of already-installed PLaneT packages for one that
+meets the requirement, and uses it if available. Both PLaneT-installed
+packages and packages established through a development link are
+checked simultaneously at this stage.
 
 3. Acceptable remote package
 
@@ -225,6 +255,42 @@ List the current linkage table
 -U, --unlink-all
 
 Clear the linkage table, unlinking all packages and allowing upgrades.
+
+-a, --associate <owner> <pkg> <maj> <min> <dir>
+
+Create a development link from the given package specifier
+to the given directory, clearing any previous development
+links that may have been in place. (See below for an explanation
+of what development links are.)
+
+-u, --unassociate <owner> <pkg> <maj> <min>
+
+Remove any development links from the given package specifier.
+
+
+_Development links_
+-------------------
+
+To aid development, PLaneT allows users to establish direct
+associations between a particular planet package (e.g. myname
+myfirstpackage.plt 1 0) with an arbitrary directory on the filesystem
+(e.g., /home/myname/svn/mypackages/devel/). These associations are
+intended to allow developers to use their own directory structures,
+version control systems, etc. while developing PLaneT packages while
+still being able to use the packages they create as though they were
+distributed directly by PLaneT. Development links are local to a
+particular user and repository (but not to a particular MzScheme minor
+revision).
+
+To establish a development link, use the planet command-line tool:
+
+$ planet --associate myname mypackage.plt 1 0 ~/svn/mypackages/devel
+
+Once you are finished developing a package, you should remove any
+development links you have established for it, again using the planet
+command-line tool:
+
+$ planet --unassociate myname mypackage.plt 1 0
 
 _Distributing Packages with PLaneT_
 -----------------------------------
@@ -297,6 +363,46 @@ ignored. If you put no legal symbols in the categories field or do not
 include this field in your info.ss file, your package will be
 categorized as "Miscellaneous."
 
+The _'can-be-loaded-with field_
+
+If present, the can-be-loaded-with field should be a quoted datum of
+one of the following forms:
+   
+can-be-loaded-with = 'all
+                   | 'none
+                   | (list 'all-except VER-SPEC ...)
+                   | (list 'only VER-SPEC ...)
+
+where VER-SPEC is a quoted instance of the VER-SPEC form defined at the
+beginning of this document. 
+
+Depending on your package's behavior, it may or may not be okay for
+multiple versions of the same package to be loaded at one time on the
+entire system --- for instance, if your package relies on writing to a
+particular file and assumes that nothing else writes to that same
+file, then multiple versions of the same package being loaded
+simultaneously may be a problem. This field allows you to specify
+whether your package can be loaded simultaneously with older versions
+of itself. If its value is 'all, then the package may be loaded with
+any older version. If it is 'none, then it may not be loaded with
+older versions at all. If it is (list 'all-except VER-SPEC ...) then
+any package except those that match one of the given VER-SPEC forms
+may be loaded with this package; if it is (list 'only VER-SPEC ...)
+then only packages that match one of the given VER-SPEC forms may be
+loaded with this package.
+
+When checking to see if a package may be loaded, PLaneT compares it to
+all other currently-loaded instances of the same package with any
+version: for each comparison, it checks to see if the newer package's
+can-be-loaded-with field allows the older package to be loaded. If all
+such comparisons succeed then the new package may be loaded; otherwise
+PLaneT signals an error.
+
+The default for this field is 'none as a conservative protection
+measure. For many packages it is safe to set this field to
+'any.
+
+
 The _'doc.txt field_
 
 If present, the doc.txt field should be a string corresponding to the
@@ -327,13 +433,25 @@ the name (without path) of the main Scheme source file of your
 package. PLaneT will direct casual users of your library to require
 this file.
 
+The _'required-core-version field_
+
+If present, the required-core-version field should be a string with
+the same syntax as the output of mzscheme's built-in (version)
+function. Defining this field indicates that PLaneT should only allow
+users of a version of mzscheme equal to or more recent than the
+version specified by this field. This allows you finer-grained control
+of your package's core-language requirements than its inclusion in a
+particular repository; for instance, setting this field to "300.2"
+would cause the PLaneT server not to serve it to MzScheme v300
+clients.
+
 The _'version field_
 
-If present, the version field should describe the version number
-of this code that should be presented to users (e.g., "0.15 alpha").
-This field does not override or in any way interact with your package's
-package version number, which is assigned by PLaneT, but may be useful
-to users.
+If present, the version field should describe the version number of
+this code that should be presented to users (e.g., "0.15 alpha").
+This field does not override or in any way interact with your
+package's package version number, which is assigned by PLaneT, but may
+be useful to users.
 
 
 In addition, PLaneT uses the setup-plt installer to install packages

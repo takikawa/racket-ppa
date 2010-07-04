@@ -1,6 +1,8 @@
 
 (module smtp-unit mzscheme
-  (require (lib "unitsig.ss"))
+  (require (lib "unitsig.ss")
+	   (lib "kw.ss")
+	   "base64.ss")
 
   (require "smtp-sig.ss")
 
@@ -9,7 +11,7 @@
     (unit/sig net:smtp^
       (import)
 
-      (define ID "localhost")
+      (define smtp-sending-server (make-parameter "localhost"))
 
       (define debug-via-stdio? #f)
 
@@ -60,16 +62,26 @@
 			    (raise-type-error 'smtp-sending-end-of-message "thunk" f))
 			  f)))
       
-      (define (smtp-send-message* r w sender recipients header message-lines)
+      (define (smtp-send-message* r w sender recipients header message-lines
+				  auth-user auth-passwd)
 	    (with-handlers ([void (lambda (x)
 				    (close-input-port r)
 				    (close-output-port w)
 				    (raise x))])
 	      (check-reply r 220 w)
 	      (log "hello~n")
-	      (fprintf w "EHLO ~a~a" ID crlf)
+	      (fprintf w "EHLO ~a~a" (smtp-sending-server) crlf)
 	      (check-reply r 250 w)
 	      
+	      (when auth-user
+		(log "auth~n")
+		(fprintf w "AUTH PLAIN ~a"
+			 ;; Encoding adds CRLF
+			 (base64-encode
+			  (string->bytes/latin-1
+			   (format "~a\0~a\0~a" auth-user auth-user auth-passwd))))
+		(check-reply r 235 w))
+
 	      (log "from~n")
 	      (fprintf w "MAIL FROM:<~a>~a" sender crlf)
 	      (check-reply r 250 w)
@@ -107,13 +119,18 @@
 	      (close-input-port r)))
       
       (define smtp-send-message
-	(case-lambda
-	 [(server sender recipients header message-lines)
-	  (smtp-send-message server sender recipients header message-lines 25)]
-	 [(server sender recipients header message-lines pos)
+	(lambda/kw (server sender recipients header message-lines 
+			   #:key 
+			   [port-no 25]
+			   [auth-user #f]
+			   [auth-passwd #f]
+			   [tcp-connect tcp-connect]
+			   #:body
+			   (#:optional [opt-port-no port-no]))
 	  (when (null? recipients)
 	    (error 'send-smtp-message "no receivers"))
 	  (let-values ([(r w) (if debug-via-stdio?
 				  (values (current-input-port) (current-output-port))
-				  (tcp-connect server pos))])
-	    (smtp-send-message* r w sender recipients header message-lines))])))))
+				  (tcp-connect server opt-port-no))])
+	    (smtp-send-message* r w sender recipients header message-lines
+				auth-user auth-passwd)))))))

@@ -93,7 +93,7 @@
 		       [(memq 'stop style) 'stop]
 		       [(memq 'caution style) 'caution]
 		       [else 'app])])
-	(let-values ([(msg-pnl btn-pnl extra-width btn-h-align msg-h-align msg-v-align)
+	(let-values ([(msg-pnl btn-pnl cb-pnl extra-width btn-h-align msg-h-align msg-v-align)
 		      (case (system-type)
 			[(macosx) (let ([p (make-object horizontal-pane% f)])
 				    (send f min-width 300)
@@ -108,12 +108,20 @@
 				      (when single?
 					(send msg-pnl horiz-margin 8))
 				      (send btn-pnl vert-margin 8)
-				      (send msg-pnl min-height 64)
+				      (send msg-pnl min-height 40)
+				      (send msg-pnl min-width 300)
 				      (send btn-pnl stretchable-height #f)
-				      (values msg-pnl btn-pnl 96 'right 'left 'top)))]
-			[else (let ([p (instantiate horizontal-pane% (f) [alignment '(center top)])])
-				(make-object message% icon-id p)
-				(values (make-object vertical-pane% p) f 0 'center 'center 'center))])])
+				      (values msg-pnl btn-pnl btn-pnl 96 'right 'left 'top)))]
+			[else (let ([p (new horizontal-pane% [parent f] [alignment '(center top)])])
+				(let ([icon-msg (make-object message% icon-id p)]
+				      [msg-pnl (new vertical-pane% [parent p])])
+				  (values (if single?
+					      (new horizontal-pane% 
+						   [parent msg-pnl]
+						   [alignment '(center top)]
+						   [min-height (send icon-msg min-height)])
+					      msg-pnl)
+					  f msg-pnl 0 'center 'center 'center)))])])
 	  (if single?
 	      (begin
 		(send msg-pnl set-alignment (if (= (length strings) 1) msg-h-align 'left) msg-v-align)
@@ -147,9 +155,13 @@
 			(send msg-pnl delete-child c)
 			(loop #t)))))))
 	  (let ([check (and check?
-			    (let ([p (new horizontal-pane% [parent btn-pnl]
+			    (let ([p (new vertical-pane% [parent cb-pnl]
 					  [stretchable-height #f]
 					  [alignment '(left center)])])
+			      (when (and single?
+					 (eq? 'macosx (system-type)))
+				;; Match text-panel margin:
+				(send p horiz-margin 8))
 			      (new check-box% 
 				   [label check-message]
 				   [parent p]

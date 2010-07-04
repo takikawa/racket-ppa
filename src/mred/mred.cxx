@@ -3,7 +3,7 @@
  * Purpose:     MrEd main file, including a hodge-podge of global stuff
  * Author:      Matthew Flatt
  * Created:     1995
- * Copyright:   (c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:   (c) 2004-2006 PLT Scheme Inc.
  * Copyright:   (c) 1995-2000, Matthew Flatt
  */
 
@@ -184,7 +184,9 @@ extern "C" {
 /* Set by mrmain.cxx: */
 /* (The indirection is needed to avoid mutual .dll dependencies.) */
 MrEd_Finish_Cmd_Line_Run_Proc mred_finish_cmd_line_run;
+void mred_set_finish_cmd_line_run(MrEd_Finish_Cmd_Line_Run_Proc p) { mred_finish_cmd_line_run = p; }
 MrEd_Run_From_Cmd_Line_Proc mred_run_from_cmd_line;
+void mred_set_run_from_cmd_line(MrEd_Run_From_Cmd_Line_Proc p) { mred_run_from_cmd_line = p; }
 
 #if 0
 /* Force initialization of the garbage collector (currently needed
@@ -481,7 +483,7 @@ void wxPushModalWindow(wxObject *w, wxWindow *win)
 
   if (c->modal_window) {
     MrEd_Saved_Modal *save;
-    save = new MrEd_Saved_Modal;
+    save = new WXGC_PTRS MrEd_Saved_Modal;
 
     save->next = c->modal_stack;
     save->win = c->modal_window;
@@ -739,13 +741,13 @@ static MrEdContext *MakeContext(MrEdContext *c)
     c = (MrEdContext *)scheme_malloc_tagged(sizeof(MrEdContext));
     c->so.type = mred_eventspace_type;
 
-    tlwl = new wxChildList();
+    tlwl = new WXGC_PTRS wxChildList();
     c->topLevelWindowList = tlwl;
     scl = wxMakeTheSnipClassList();
     c->snipClassList = scl;
     bdcl = wxMakeTheBufferDataClassList();
     c->bufferDataClassList = bdcl;
-    fc = new MrEdFinalizedContext;
+    fc = new WXGC_PTRS MrEdFinalizedContext;
     c->finalized = fc;
   }
 
@@ -756,7 +758,7 @@ static MrEdContext *MakeContext(MrEdContext *c)
   c->busyState = 0;
   c->killed = 0;
 
-  frames = new MrEdContextFrames;
+  frames = new WXGC_PTRS MrEdContextFrames;
   c->finalized->frames = frames;
   frames->next = mred_frames;
   frames->prev = NULL;
@@ -2237,9 +2239,9 @@ IOFrame::IOFrame()
   wxMenuBar *mb;
   wxMenu *m;
 
-  display = new wxMediaCanvas(this);
+  display = new WXGC_PTRS wxMediaCanvas(this);
 
-  media = new IOMediaEdit();
+  media = new WXGC_PTRS IOMediaEdit();
   display->SetMedia(media);
   endpos = 0;
   hidden = FALSE;
@@ -2265,7 +2267,7 @@ IOFrame::IOFrame()
   /* Fixed-width font: */
   sl = media->GetStyleList();
   style = sl->FindNamedStyle("Standard");
-  sd = new wxStyleDelta(wxCHANGE_FAMILY, wxMODERN);
+  sd = new WXGC_PTRS wxStyleDelta(wxCHANGE_FAMILY, wxMODERN);
   style->SetDelta(sd);
 
 #ifdef wx_mac
@@ -2278,11 +2280,11 @@ IOFrame::IOFrame()
 # define CLOSE_MENU_ITEM "Close"
 #endif
 
-  mb = new wxMenuBar();
+  mb = new WXGC_PTRS wxMenuBar();
   SetMenuBar(mb);
-  fileMenu = new wxMenu();
+  fileMenu = new WXGC_PTRS wxMenu();
   fileMenu->Append(77, CLOSE_MENU_ITEM);
-  m = new wxMenu();
+  m = new WXGC_PTRS wxMenu();
   m->Append(79, "&Copy\tCmd+C");
   m->Append(81, "&Paste\tCmd+V");
   m->AppendSeparator();
@@ -2446,12 +2448,12 @@ static void MrEdSchemeMessages(char *msg, ...)
     if (!ioFrame) {
       wxREGGLOB(ioFrame);
       if (mred_only_context)
-	ioFrame = new IOFrame;
+	ioFrame = new WXGC_PTRS IOFrame;
       else {
 	/* Set eventspace ... */
 	mred_only_context = mred_main_context;
 	only_context_just_once = 1;
-	ioFrame = new IOFrame;
+	ioFrame = new WXGC_PTRS IOFrame;
 	mred_only_context = NULL;
       }
     }
@@ -2854,14 +2856,17 @@ void wxTraceDone(void)
 
 void wxObjectFinalize(void *o)
 {
-  if (((wxObject *)o)->__type != -1) {
 #if 0
+  /* Not every gc instance is a wxObject instance, now: */
+  if (((wxObject *)o)->__type != -1) {
+# if 0
     /* New non-cleanup flag makes this incorrect: */
     fprintf(stderr, "ERROR: free wxObject had non-deleted type value!");
-#else
+# else
     ((wxObject *)o)->__type = -1;
-#endif
+# endif
   }
+#endif
 }
 
 static void set_trace_arg(Scheme_Object *a)
@@ -2902,7 +2907,7 @@ static char *object_type_name(void *v)
 	    char *r;
 	    l1 = strlen(c);
 	    l2 = strlen(lbl);
-	    r = new char[l1+l2+2];
+	    r = new WXGC_ATOMIC char[l1+l2+2];
 	    memcpy(r, c, l1);
 	    r[l1] = '=';
 	    memcpy(r + l1 + 1, lbl, l2 + 1);
@@ -3020,13 +3025,13 @@ void DangerThreadTimer::Notify(void)
   if (danger_signal_received) {
     if (!dangerFrame) {
       wxREGGLOB(dangerFrame);
-      dangerFrame = new wxDialogBox((wxWindow *)NULL, "Danger", FALSE, 0, 0, 300, 200);
+      dangerFrame = new WXGC_PTRS wxDialogBox((wxWindow *)NULL, "Danger", FALSE, 0, 0, 300, 200);
 
-      (void) new wxMessage(dangerFrame, "Warning: Paging space is low.");
+      (void) new WXGC_PTRS wxMessage(dangerFrame, "Warning: Paging space is low.");
 
       dangerFrame->NewLine();
 
-      wxButton *b = new wxButton(dangerFrame, (wxFunction)DismissDanger, "Ok");
+      wxButton *b = new WXGC_PTRS wxButton(dangerFrame, (wxFunction)DismissDanger, "Ok");
 
       dangerFrame->Fit();
       b->Centre(wxHORIZONTAL);
@@ -3142,7 +3147,7 @@ static Scheme_Env *setup_basic_env()
 
 #ifdef DANGER_ALARM
   {
-    DangerThreadTimer *t = new DangerThreadTimer();
+    DangerThreadTimer *t = new WXGC_PTRS DangerThreadTimer();
     t->Start(10000);
   }
 #endif
@@ -3202,7 +3207,7 @@ wxFrame *MrEdApp::OnInit(void)
   wxREGGLOB(mred_timers);
 
 #ifdef LIBGPP_REGEX_HACK
-  new Regex("a", 0);
+  new WXGC_PTRS Regex("a", 0);
 #endif
 
 #if REDIRECT_STDIO || WINDOW_STDIO || WCONSOLE_STDIO
@@ -3266,14 +3271,14 @@ wxFrame *MrEdApp::OnInit(void)
 #ifdef MZ_PRECISE_GC
   mmc = (MrEdContext *)GC_malloc_one_tagged(sizeof(MrEdContext));
 #else
-  mmc = new MrEdContext;
+  mmc = new WXGC_PTRS MrEdContext;
 #endif
   mmc->so.type = mred_eventspace_type;
   wxREGGLOB(mred_main_context);
   mred_main_context = mmc;
   {
     wxChildList *cl;
-    cl = new wxChildList();
+    cl = new WXGC_PTRS wxChildList();
     mmc->topLevelWindowList = cl;
   }
   {
@@ -3288,7 +3293,7 @@ wxFrame *MrEdApp::OnInit(void)
   }
   {
     MrEdFinalizedContext *fc;
-    fc = new MrEdFinalizedContext;
+    fc = new WXGC_PTRS MrEdFinalizedContext;
     mmc->finalized = fc;
   }
 
@@ -3300,7 +3305,7 @@ wxFrame *MrEdApp::OnInit(void)
   /* Just in case wxWindows needs an initial frame: */
   /* (Windows needs it for the clipboard.) */
   wxREGGLOB(mred_real_main_frame);
-  mred_real_main_frame = new wxFrame(NULL, "MrEd");
+  mred_real_main_frame = new WXGC_PTRS wxFrame(NULL, "MrEd");
 #ifdef wx_msw
   TheMrEdApp->wx_frame = mred_real_main_frame;
 #endif
@@ -3504,7 +3509,7 @@ void wxCreateApp(void)
     wxREGGLOB(q_callbacks);
 
     wxREGGLOB(TheMrEdApp);
-    TheMrEdApp = new MrEdApp;
+    TheMrEdApp = new WXGC_PTRS MrEdApp;
   }
 }
 
@@ -3579,7 +3584,7 @@ static void pre_het(void *d)
   HiEventTramp *het = (HiEventTramp *)d;
 
   het->old_param = scheme_get_param(het->config, mred_het_param);
-  scheme_set_param(het->config, mred_het_param, scheme_make_pair((Scheme_Object *)het, scheme_null));
+  scheme_set_param(het->config, mred_het_param, scheme_make_raw_pair((Scheme_Object *)het, scheme_null));
 }
 
 static Scheme_Object *act_het(void *d)
@@ -3603,7 +3608,7 @@ int wxHiEventTrampoline(int (*wha_f)(void *), void *wha_data)
 {
   HiEventTramp *het;
 
-  het = new HiEventTramp;
+  het = new WXGC_PTRS HiEventTramp;
   het->wrap_het_around_f = wha_f;
   het->wha_data = wha_data;
   het->val = 0;
@@ -3737,7 +3742,7 @@ int mred_het_run_some(HiEventTrampProc do_f, void *do_data)
   {
     Scheme_Object *v;
     v = scheme_get_param(scheme_current_thread->init_config, mred_het_param);
-    if (SCHEME_PAIRP(v))
+    if (SCHEME_RPAIRP(v))
       het = (HiEventTramp *)SCHEME_CAR(v);
     else
       het = NULL;

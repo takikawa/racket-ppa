@@ -21,6 +21,9 @@
       
       (application-preferences-handler (λ () (preferences:show-dialog)))
       
+      (preferences:set-default 'framework:case-sensitive-search?
+                               #f
+                               boolean?)
       (preferences:set-default 'framework:basic-canvas-background
                                (send the-color-database find-color "white")
                                (λ (x) (is-a? x color%)))
@@ -145,6 +148,7 @@
       
       (preferences:set-default 'framework:highlight-parens #t boolean?)
       (preferences:set-default 'framework:fixup-parens #t boolean?)
+      (preferences:set-default 'framework:fixup-open-parens #t boolean?)
       (preferences:set-default 'framework:paren-match #t boolean?)
       (let ([hash-table (make-hash-table)])
 	(for-each (λ (x) 
@@ -168,6 +172,7 @@
                      
                      
                      λ lambda let let* letrec recur
+                     lambda/kw
                      letrec-values
                      with-syntax
 		     with-continuation-mark
@@ -229,12 +234,8 @@
       (preferences:set-default 'framework:verify-exit #t boolean?)
       (preferences:set-default 'framework:delete-forward? #t boolean?)
       (preferences:set-default 'framework:show-periods-in-dirlist #f boolean?)
-      (preferences:set-default
-       'framework:file-dialogs
-       'std
-       (λ (x)
-	 (or (eq? x 'common)
-	     (eq? x 'std))))
+      (preferences:set-default 'framework:file-dialogs 'std
+                               (λ (x) (and (memq x '(common std)) #t)))
       
       ;; scheme prefs
       

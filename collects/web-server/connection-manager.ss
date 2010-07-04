@@ -1,4 +1,4 @@
-;; this is an trivial implementation of the connection-manger interface that
+;; this is a trivial implementation of the connection-manger interface that
 ;; uses timeouts instead of a queued-model.
 
 ;; the queued-model is also fully implemented but won't be used at this time.
@@ -32,15 +32,16 @@
   
   ;; kill-connection!: connection -> void
   ;; kill this connection
-  (define (kill-connection! conn-demned)    
+  (define (kill-connection! conn-demned)
     (cancel-timer! (connection-timer conn-demned))
-    (close-output-port (connection-o-port conn-demned))
-    (close-input-port (connection-i-port conn-demned))
+    (with-handlers ([exn:fail:network? void])
+      (close-output-port (connection-o-port conn-demned)))
+    (with-handlers ([exn:fail:network? void])
+      (close-input-port (connection-i-port conn-demned)))
     (set-connection-close?! conn-demned #t)
     (custodian-shutdown-all (connection-custodian conn-demned)))
   
   ;; adjust-connection-timeout!: connection number -> void
   ;; change the expiration time for this connection
   (define (adjust-connection-timeout! conn time)
-    (reset-timer (connection-timer conn) time))
-  )
+    (reset-timer! (connection-timer conn) time)))

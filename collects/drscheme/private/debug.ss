@@ -227,20 +227,24 @@ profile todo:
                (orig-error-display-handler msg exn)])))
         debug-error-display-handler)
       
+      (define (print-bug-to-stderr msg cms)
+        (let ([note% (if (mf-bday?) mf-note% bug-note%)])
+          (when note%
+            (let ([note (new note%)])
+              (send note set-callback (λ () (show-backtrace-window msg cms)))
+              (write-special note (current-error-port))
+              (display #\space (current-error-port))))))
+      
       (define (show-error-and-highlight msg exn highlight-errors)
-        (let* ([cms (and (exn? exn) 
-                         (continuation-mark-set? (exn-continuation-marks exn))
-                         (continuation-mark-set->list 
-                          (exn-continuation-marks exn)
-                          cm-key))])
+        (let ([cms
+               (and (exn? exn) 
+                    (continuation-mark-set? (exn-continuation-marks exn))
+                    (continuation-mark-set->list 
+                     (exn-continuation-marks exn)
+                     cm-key))])
           (when (and cms
                      (pair? cms))
-            (let ([note% (if (mf-bday?) mf-note% bug-note%)])
-              (when note%
-                (let ([note (new note%)])
-                  (send note set-callback (λ () (show-backtrace-window msg cms)))
-                  (write-special note (current-error-port))
-                  (display #\space (current-error-port))))))
+            (print-bug-to-stderr msg cms))
           
           (let ([srcs-to-display (find-src-to-display exn cms)])
             (for-each display-srcloc-in-error srcs-to-display)
@@ -269,13 +273,20 @@ profile todo:
       ;; prints out the src location information for src-to-display
       ;; as it would appear in an error message
       (define (display-srcloc-in-error src-to-display)
-        (let ([src (srcloc-source src-to-display)])
+        (let* ([raw-src (srcloc-source src-to-display)]
+               [src (if (and (is-a? raw-src editor<%>)
+                             (not (is-a? raw-src drscheme:unit:definitions-text<%>)))
+                        (let* ([b (box #f)]
+                               [fn (send raw-src get-filename b)])
+                          (and (not (unbox b))
+                               fn))
+                        raw-src)])
           (when (and (path? src) file-note%)
             (let ([note (new file-note%)])
               (send note set-callback 
                     (λ () (open-and-highlight-in-file src-to-display)))
               (write-special note (current-error-port))
-              (display #\space (current-error-port))
+              (display #\space (current-error-port)) 
               (display (path->string (find-relative-path (current-directory) src))
                        (current-error-port))
               (let ([line (srcloc-line src-to-display)]
@@ -292,19 +303,27 @@ profile todo:
       ;;                    -> (listof srclocs)
       ;; finds the source location to display, choosing between
       ;; the stack trace and the exception record.
-      ;; returns #f if the source isn't a string.
       (define (find-src-to-display exn cms)
-        (cond
-          [(exn:srclocs? exn)
-           ((exn:srclocs-accessor exn) exn)]
-          [(pair? cms)
-           (let ([fst (car cms)])
-             (list (make-srcloc (car fst)
-                                #f
-                                #f
-                                (cadr fst)
-                                (cddr fst))))]
-          [else '()]))
+        (let ([has-info?
+               (λ (srcloc)
+                 (ormap (λ (f) (f srcloc))
+                        (list srcloc-column
+                              srcloc-line
+                              srcloc-position
+                              srcloc-source
+                              #;srcloc-span)))])  ;; don't consider span alone to count as `info'
+          (cond
+            [(and (exn:srclocs? exn)
+                  (ormap has-info? ((exn:srclocs-accessor exn) exn)))
+             ((exn:srclocs-accessor exn) exn)]
+            [(pair? cms)
+             (let ([fst (car cms)])
+               (list (make-srcloc (car fst)
+                                  #f
+                                  #f
+                                  (cadr fst)
+                                  (cddr fst))))]
+            [else '()])))
   
       
       (define (show-syntax-error-context port exn)
@@ -674,20 +693,23 @@ profile todo:
       (define current-test-coverage-info (make-thread-cell #f))
 
       (define (initialize-test-coverage-point key expr)
-        (unless (thread-cell-ref current-test-coverage-info)
+        (unless (hash-table? (thread-cell-ref current-test-coverage-info))
           (let ([rep (drscheme:rep:current-rep)])
             (when rep
-              (let ([ht (make-hash-table)])
-                (thread-cell-set! current-test-coverage-info ht)
-                (send rep set-test-coverage-info ht)))))
+              (let ([ut (eventspace-handler-thread (send rep get-user-eventspace))])
+                (when (eq? ut (current-thread))
+                  (let ([ht (make-hash-table)])
+                    (thread-cell-set! current-test-coverage-info ht)
+                    (send rep set-test-coverage-info ht)))))))
         (let ([ht (thread-cell-ref current-test-coverage-info)])
-          (when ht ;; if rep isn't around, we don't do test coverage...
-                   ;; this can happen when check syntax expands, for example
+          (when (hash-table? ht)
+            ;; if rep isn't around, we don't do test coverage...
+            ;; this can happen when check syntax expands, for example
             (hash-table-put! ht key (list #f expr)))))
   
       (define (test-covered key)
         (let ([ht (thread-cell-ref current-test-coverage-info)])
-          (when ht ;; as in the `when' test in `initialize-test-coverage-point'
+          (when (hash-table? ht) ;; as in the `when' test in `initialize-test-coverage-point'
             (let ([v (hash-table-get ht key)])
               (set-car! v #t)))))
       
@@ -696,7 +718,7 @@ profile todo:
           set-test-coverage-info
           get-test-coverage-info))
       
-      (define test-coverage-frame<%>
+      (define test-coverage-tab<%>
         (interface ()
           show-test-coverage-annotations ;; hash-table (union #f style) (union #f style) boolean -> void
           get-test-coverage-info-visible?
@@ -715,12 +737,13 @@ profile todo:
               (set! test-coverage-on-style on-style)
               (set! test-coverage-off-style off-style)
               (set! ask-about-reset? ask?)))
-          (define/public (get-test-coverage-info) test-coverage-info)
+          (define/public (get-test-coverage-info) 
+            test-coverage-info)
           
           (inherit get-top-level-window)
           (define/augment (after-many-evals)
             (when test-coverage-info
-              (send (get-context) show-test-coverage-annotations 
+              (send (get-context) show-test-coverage-annotations
                     test-coverage-info
                     test-coverage-on-style
                     test-coverage-off-style
@@ -753,7 +776,7 @@ profile todo:
                      #t]))
                 #t))
           
-          (define/private (clear-test-coverage)
+          (define/public (clear-test-coverage)
             (let ([tab (get-tab)])
               (when (send tab get-test-coverage-info-visible?)
                 (send tab clear-test-coverage-display)
@@ -794,7 +817,7 @@ profile todo:
       (define erase-test-coverage-style-delta (make-object style-delta% 'change-normal-color))
       
       (define test-coverage-tab-mixin
-        (mixin (drscheme:rep:context<%>) (test-coverage-frame<%>)
+        (mixin (drscheme:rep:context<%> drscheme:unit:tab<%>) (test-coverage-tab<%>)
           
           (field [internal-clear-test-coverage-display #f])
           
@@ -865,7 +888,7 @@ profile todo:
                       ;;    unless x and y are the same source location.
                       ;;    in that case, color red first and then green
                       [sorted
-                       (quicksort
+                       (sort
                         filtered
                         (λ (x y)
                           (let* ([x-stx (cadr x)]
@@ -965,9 +988,10 @@ profile todo:
                                (when locked? (send txt lock #t)))
                              (send txt end-edit-sequence)))))))))
 
+          (inherit get-defs)
           (define/augment (clear-annotations)
             (inner (void) clear-annotations)
-            (clear-test-coverage-display))
+            (send (get-defs) clear-test-coverage))
           
           (super-new)))
  
@@ -1033,37 +1057,44 @@ profile todo:
 	(unless (thread-cell-ref current-profile-info)
           (let ([rep (drscheme:rep:current-rep)])
             (when rep
-              (let ([ht (make-hash-table)])
-                (thread-cell-set! current-profile-info ht)
-                (send (send rep get-context) add-profile-info ht)))))
+              (let ([ut (eventspace-handler-thread (send rep get-user-eventspace))])
+                (when (eq? ut (current-thread))
+                  (let ([ht (make-hash-table)])
+                    (thread-cell-set! current-profile-info ht)
+                    (send (send rep get-context) add-profile-info ht)))))))
         (let ([profile-info (thread-cell-ref current-profile-info)])
-          (hash-table-put! profile-info
-                           key 
-                           (make-prof-info #f 0 0 (and (syntax? name) (syntax-e name)) expr)))
+          (when profile-info
+            (hash-table-put! profile-info
+                             key 
+                             (make-prof-info #f 0 0 (and (syntax? name) (syntax-e name)) expr))))
         (void))
   
       ;; register-profile-start : sym -> (union #f number)
       ;; =user=
       ;; imported into errortrace
       (define (register-profile-start key)
-	(let ([info (hash-table-get (thread-cell-ref current-profile-info) key)])
-          (set-prof-info-num! info (+ (prof-info-num info) 1))
-          (if (prof-info-nest info)
-              #f
-              (begin
-                (set-prof-info-nest! info #t)
-                (current-process-milliseconds)))))
+	(let ([ht (thread-cell-ref current-profile-info)])
+          (when ht
+            (let ([info (hash-table-get ht key)])
+              (set-prof-info-num! info (+ (prof-info-num info) 1))
+              (if (prof-info-nest info)
+                  #f
+                  (begin
+                    (set-prof-info-nest! info #t)
+                    (current-process-milliseconds)))))))
       
       ;; register-profile-done : sym (union #f number) -> void
       ;; =user=
       ;; imported into errortrace
       (define (register-profile-done key start)
         (when start
-	  (let ([info (hash-table-get (thread-cell-ref current-profile-info) key)])
-	    (set-prof-info-nest! info #f)
-	    (set-prof-info-time! info
-                                 (+ (- (current-process-milliseconds) start)
-                                    (prof-info-time info)))))
+          (let ([ht (thread-cell-ref current-profile-info)])
+            (when ht
+              (let ([info (hash-table-get ht key)])
+                (set-prof-info-nest! info #f)
+                (set-prof-info-time! info
+                                     (+ (- (current-process-milliseconds) start)
+                                        (prof-info-time info)))))))
         (void))
 
       ;; get-color-value : number number -> (is-a?/c color%)
@@ -1577,7 +1608,7 @@ profile todo:
                       (send ed hide-caret #t)
                       (send ed lock #t))]
                    
-                   [top-infos (top 100 (quicksort infos bigger-value?))])
+                   [top-infos (top 100 (sort infos bigger-value?))])
               (for-each show-highlight top-infos)
               (initialize-editors)
               (let loop ([infos top-infos]

@@ -33,82 +33,85 @@
               [scheme : framework:scheme^]
               [exit : framework:exit^]
               [comment-box : framework:comment-box^])
-      
+
       (rename [-editor<%> editor<%>]
               [-pasteboard% pasteboard%]
               [-text% text%])
 
       (define (reorder-menus frame)
-        (let* ([items (send (send frame get-menu-bar) get-items)]
-               [move-to-back
-                (λ (name items)
-                  (let loop ([items items]
-                             [back null])
-                    (cond
-                      [(null? items) back]
-                      [else (let ([item (car items)])
-                              (if (string=? (send item get-plain-label) name)
-                                  (loop (cdr items)
-                                        (cons item back))
-                                  (cons item (loop (cdr items) back))))])))]
-               [move-to-front
-                (λ (name items)
-                  (reverse (move-to-back name (reverse items))))]
-               [re-ordered
-                (move-to-front
-                 (string-constant file-menu)
-                 (move-to-front
-                  (string-constant edit-menu)
-                  (move-to-back
-                   (string-constant help-menu)
-                   (move-to-back
-                    (string-constant windows-menu)
-                    items))))])
+        (define items (send (send frame get-menu-bar) get-items))
+        (define (find-menu name)
+          (ormap (λ (i) (and (string=? (send i get-plain-label) name) i))
+                 items))
+        (let* ([file-menu (find-menu (string-constant file-menu))]
+               [edit-menu (find-menu (string-constant edit-menu))]
+               [windows-menu (find-menu (string-constant windows-menu))]
+               [help-menu (find-menu (string-constant help-menu))]
+               [other-items
+                (remq* (list file-menu edit-menu windows-menu help-menu) items)]
+               [re-ordered (filter values `(,file-menu ,edit-menu
+                                            ,@other-items
+                                            ,windows-menu ,help-menu))])
           (for-each (λ (item) (send item delete)) items)
           (for-each (λ (item) (send item restore)) re-ordered)))
-      
-      (define (add-snip-menu-items edit-menu c%)
-        (let* ([get-edit-target-object
-                (λ ()
-                  (let ([menu-bar
-                         (let loop ([p (send edit-menu get-parent)])
-                           (cond
-                             [(is-a? p menu-bar%)
-                              p]
-                             [(is-a? p menu%)
-                              (loop (send p get-parent))]
-                             [else #f]))])
-                    (and menu-bar
-                         (let ([frame (send menu-bar get-frame)])
-                           (send frame get-edit-target-object)))))]
-               [edit-menu:do 
-                (λ (const)
-                  (λ (menu evt)
+
+      (define (remove-empty-menus frame)
+        (define menus (send (send frame get-menu-bar) get-items))
+        (for-each (λ (menu) (send menu delete)) menus)
+        (for-each (λ (menu)
+                    (when (pair? (send menu get-items)) (send menu restore)))
+                  menus))
+
+      (define add-snip-menu-items
+        (opt-lambda (edit-menu c% [func void])
+          (let* ([get-edit-target-object
+                  (λ ()
+                    (let ([menu-bar
+                           (let loop ([p (send edit-menu get-parent)])
+                             (cond
+                               [(is-a? p menu-bar%)
+                                p]
+                               [(is-a? p menu%)
+                                (loop (send p get-parent))]
+                               [else #f]))])
+                      (and menu-bar
+                           (let ([frame (send menu-bar get-frame)])
+                             (send frame get-edit-target-object)))))]
+                 [edit-menu:do 
+                  (λ (const)
+                    (λ (menu evt)
+                      (let ([edit (get-edit-target-object)])
+                        (when (and edit
+                                   (is-a? edit editor<%>))
+                          (send edit do-edit-operation const)))
+                      #t))]
+                 [on-demand
+                  (λ (menu-item)
                     (let ([edit (get-edit-target-object)])
-                      (when (and edit
-                                 (is-a? edit editor<%>))
-                        (send edit do-edit-operation const)))
-                    #t))]
-               [on-demand
-                (λ (menu-item)
-                  (let ([edit (get-edit-target-object)])
-                    (send menu-item enable (and edit (is-a? edit editor<%>)))))]
-               [insert-comment-box
-                 (λ ()
-                   (let ([text (get-edit-target-object)])
-                     (when text
-                       (let ([snip (make-object comment-box:snip%)])
-                         (send text insert snip)
-                         (send text set-caret-owner snip 'global)))))])
-          
-          (make-object c% (string-constant insert-comment-box-menu-item-label)
-            edit-menu 
-            (λ (x y) (insert-comment-box))
-            #f #f
-            on-demand)
-          (make-object c% (string-constant insert-image-item)
-            edit-menu (edit-menu:do 'insert-image) #f #f on-demand)
-          (void)))
+                      (send menu-item enable (and edit (is-a? edit editor<%>)))))]
+                 [insert-comment-box
+                  (λ ()
+                    (let ([text (get-edit-target-object)])
+                      (when text
+                        (let ([snip (make-object comment-box:snip%)])
+                          (send text insert snip)
+                          (send text set-caret-owner snip 'global)))))])
+            
+            (let ([item
+                   (new c%
+                        [label (string-constant insert-comment-box-menu-item-label)]
+                        [parent edit-menu]
+                        [callback (λ (x y) (insert-comment-box))]
+                        [demand-callback on-demand])])
+              (func item))
+            (let ([item 
+                   (new c% 
+                        [label (string-constant insert-image-item)]
+                        [parent edit-menu]
+                        [callback (edit-menu:do 'insert-image)]
+                        [demand-callback on-demand])])
+              (func item))
+            (void))))
       
       (define frame-width 600)
       (define frame-height 650)
@@ -1220,7 +1223,10 @@
           (define/private (cancel-due-to-unsaved-changes editor)
             (and (send editor is-modified?)
                  (let ([save (gui-utils:unsaved-warning
-                              (or (send editor get-filename) (get-label))
+                              (let ([fn (send editor get-filename)])
+                                (if fn 
+                                    (path->string fn)
+                                    (get-label)))
                               (string-constant clear-anyway)
                               #t
                               this)])
@@ -1283,8 +1289,11 @@
           (define/private (user-okays-switch? ed)
             (or (not (send ed is-modified?))
                 (let ([answer
-                       (gui-utils:unsaved-warning 
-                        (or (send ed get-filename) (get-label))
+                       (gui-utils:unsaved-warning
+                        (let ([fn (send ed get-filename)])
+                          (if fn
+                              (path->string fn)
+                              (get-label)))
                         (string-constant switch-anyway)
                         #t)])
                   (case answer
@@ -1569,11 +1578,12 @@
                   
                   [allow-replace? (not (send to-be-searched-text is-locked?))]
                   
-                  [dialog (make-object dialog% 
-                            (if allow-replace?
-                                (string-constant find-and-replace)
-                                (string-constant find))
-                            frame)]
+                  [dialog (new dialog% 
+                               (label (if allow-replace?
+                                          (string-constant find-and-replace)
+                                          (string-constant find)))
+                               (parent frame)
+                               (style '(no-sheet)))]
                   
                   [copy-text
                    (λ (from to)
@@ -1610,6 +1620,13 @@
                   
                   [button-panel (make-object horizontal-panel% dialog)]
                   
+                  [prefs-panel  (make-object horizontal-panel% dialog)]
+                  [sensitive-check-box-callback (λ () (send find-edit toggle-case-sensitive))]
+                  [sensitive-check-box (make-object check-box% 
+                                         (string-constant find-case-sensitive)
+                                         prefs-panel (λ (x y) (sensitive-check-box-callback)))]
+                  [dummy (begin (send sensitive-check-box set-value (send find-edit get-case-sensitive?))
+                                (send prefs-panel set-alignment 'center 'center))]
                   [update-texts
                    (λ ()
                      (send find-edit stop-searching)
@@ -1874,26 +1891,32 @@
                                        string
                                        searching-direction
                                        search-anchor
-                                       'eof #t #t #t)])
+                                       'eof #t case-sensitive? #t)])
                           (cond
                             [(not first-pos)
                              (if wrap?
-                                 (let-values ([(found-edit pos)
-                                               (find-string-embedded
-                                                top-searching-edit
-                                                string 
-                                                searching-direction
-                                                (if (eq? 'forward searching-direction)
-                                                    0
-                                                    (send searching-edit last-position)))])
-                                   (if (not pos)
-                                       (not-found found-edit #f)
-                                       (found found-edit pos)))
+                                 (begin
+                                   (let-values ([(found-edit pos)
+                                                 (find-string-embedded
+                                                  top-searching-edit
+                                                  string 
+                                                  searching-direction
+                                                  (if (eq? 'forward searching-direction)
+                                                      0
+                                                      (send searching-edit last-position))
+                                                  'eof #t case-sensitive? #f)])
+                                     (if (not pos)
+                                         (not-found found-edit #f)
+                                         (found found-edit pos))))
                                  (not-found found-edit #f))]
                             [else
                              (found found-edit first-pos)]))))))))
-          (field
-           [dont-search #f])
+          (field [dont-search #f]
+                 [case-sensitive? (preferences:get 'framework:case-sensitive-search?)])
+          (define/public (toggle-case-sensitive)
+            (set! case-sensitive? (not case-sensitive?))
+            (preferences:set 'framework:case-sensitive-search? case-sensitive?))
+          (define/public (get-case-sensitive?) case-sensitive?)
           (define/public (stop-searching)
             (set! dont-search #t))
           (define/public (start-searching)
@@ -2161,6 +2184,7 @@
               (set-search-direction direction)
               (send find-edit search #t beep?)))
           
+          (define sensitive-check-box #f)
 	  (define search-panel #f)
 	  (define search-gui-built? #f)
           (define dir-radio #f)
@@ -2236,6 +2260,15 @@
 							 'backward)])
 					(set-search-direction forward)
 					(reset-search-anchor (get-text-to-search)))))))
+                
+                (define _10
+                  (begin
+                    (set! sensitive-check-box (make-object check-box% 
+                                                (string-constant find-case-sensitive)
+                                                middle-right-panel 
+                                                (λ (x y) (send find-edit toggle-case-sensitive))))
+                    (send sensitive-check-box set-value (get-field case-sensitive? find-edit))))
+
 
 		(define hide/undock-pane (make-object horizontal-panel% middle-right-panel))
 		(define hide-button (make-object button% (string-constant hide)

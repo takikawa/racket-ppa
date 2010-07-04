@@ -97,9 +97,10 @@ class wxMediaBuffer : public wxObject
   int maxUndos;
 
   wxChangeRecord **changes;
-  int changes_start, changes_end;
+  int changes_start, changes_end, changes_size;
   wxChangeRecord **redochanges;
-  int redochanges_start, redochanges_end;
+  int redochanges_start, redochanges_end, redochanges_size;
+  wxChangeRecord **savedchanges; /* for Emacs-style undo */
   wxList *intercepted;
 
   wxCursor *customCursor;
@@ -124,9 +125,9 @@ class wxMediaBuffer : public wxObject
   virtual void InsertPasteSnip(wxSnip *snip, wxBufferData *) = 0;
   virtual void InsertPasteString(wxchar *str) = 0;
 
-  void PerformUndos(wxChangeRecord **, Bool redos);
+  void PerformUndos(Bool redos);
   void PerformUndoList(wxList *);
-  void AppendUndo(wxChangeRecord *, wxChangeRecord **, Bool redo);
+  void AppendUndo(wxChangeRecord *, Bool redo);
 
   Bool DoOwnCaret(Bool ownit);
   Bool DoSetCaretOwner(wxSnip *, int);
@@ -135,6 +136,8 @@ class wxMediaBuffer : public wxObject
 
   virtual void SettingAdmin(wxMediaAdmin *);
   virtual void InitNewAdmin(void); 
+
+  wxStyle *GetDefaultStyle();
 
  public:
   wxMediaBuffer();
@@ -332,6 +335,8 @@ class wxMediaBuffer : public wxObject
 
   void SetLoadOverwritesStyles(Bool);
   Bool GetLoadOverwritesStyles();
+
+  virtual char *GetDefaultStyleName();
 
   void AddBufferFunctions(wxKeymap *tab);
 

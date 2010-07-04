@@ -1,17 +1,15 @@
 (module servlet-env mzscheme
+  (require (lib "sendurl.ss" "net")
+           (lib "unitsig.ss"))
   (require "configuration.ss"
            "web-server.ss"
            "sig.ss"
-           "servlet.ss"
-           "connection-manager.ss"
-           "servlet-tables.ss"
            "util.ss"
            "response.ss"
-           "cache-table.ss")
-  (require (lib "url.ss" "net")
-           (lib "sendurl.ss" "net")
-           (lib "unitsig.ss")
-           (lib "tcp-sig.ss" "net"))
+           "managers/timeouts.ss"
+           "private/servlet.ss"
+           "private/cache-table.ss")
+  (require "servlet.ss")
   (provide (rename on-web:syntax on-web)
            (all-from "servlet.ss"))
   
@@ -64,13 +62,14 @@
                                          "default-web-root" "."
                                          the-path)))
                            (lambda ()
-                             (make-servlet the-servlet
-                                           (make-custodian)
+                             (make-servlet (make-custodian)
                                            (i:make-servlet-namespace)
-                                           30
-                                           (lambda (request)
+                                           (create-timeout-manager
+                                             (lambda (request)
                                              `(html (head "Return to the interaction window.")
-                                                    (body (p "Return to the interaction window.")))))))
+                                                    (body (p "Return to the interaction window."))))
+                                             30 30)
+                                           the-servlet)))
       (unit/sig web-config^
         (import)
         (define port the-port)

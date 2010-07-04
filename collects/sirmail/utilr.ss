@@ -96,6 +96,25 @@
 
       ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+      (define (show-error-message-box x main-frame)
+	(let ([sp (open-output-string)])
+	  ;; use error display handler in case
+	  ;; errortrace (or something else) is
+	  ;; installed
+	  (parameterize ([current-output-port sp]
+			 [current-error-port sp])
+	    ((error-display-handler)
+	     (if (exn? x)
+		 (exn-message x)
+		 (format "uncaught exn: ~s" x))
+	     x))
+	  (message-box "Error" 
+		       (get-output-string sp)
+		       main-frame
+		       '(ok stop))))
+
+      ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
       (define (break-really-hard? set-d!)
 	(let* ([d (make-object dialog% "Danger")]
 	       [p (make-object vertical-pane% d)]
@@ -229,6 +248,15 @@
 		    2))
 	      'yes
 	      'no)))
+
+      ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+      (define (get-pw-from-user username parent)
+	(get-text-from-user "Password" 
+			    (format "Password for ~a:" username)
+			    parent
+			    ""
+			    '(password)))
 
       ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;  Decoding `from' names                                  ;;

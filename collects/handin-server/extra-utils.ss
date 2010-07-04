@@ -29,8 +29,21 @@
   (error (apply format fmt args)))
 
 (define fields
-  (map car (get-preference 'extra-fields (lambda () #f) #f
-                           (build-path server-dir "config.ss"))))
+  (map car (or (get-preference 'extra-fields (lambda () #f) #f
+                               (build-path server-dir "config.ss"))
+               (error* "bad configuration file: missing extra-fields entry"))))
+
+(provide submission-dir)
+(define submission-dir-re
+  (regexp (string-append "[/\\]active[/\\]([^/\\]+)[/\\](?:[^/\\]+)"
+                         "[/\\](?:SUCCESS-[0-9]+|ATTEMPT)[/\\]?$")))
+(define (submission-dir)
+  (let ([m (regexp-match submission-dir-re
+                         (path->string (current-directory)))])
+    (if m
+      (cadr m)
+      (error* "internal error: unexpected directory name: ~a"
+              (current-directory)))))
 
 (provide user-data)
 (define (user-data user)
@@ -40,7 +53,8 @@
 
 (provide user-substs)
 (define (user-substs user str)
-  (subst str `(("username" . ,user) ,@(map cons fields (user-data user)))))
+  (subst str `(("username" . ,user) ("submission" . ,submission-dir)
+               ,@(map cons fields (user-data user)))))
 
 (define (subst str substs)
   (if (list? str)
@@ -48,11 +62,14 @@
     (let* ([m (regexp-match-positions #rx"{([^{}]+)}" str)]
            [s (and m (substring str (caadr m) (cdadr m)))])
       (if m
-        (subst (string-append (substring str 0 (caar m))
-                              (cond [(assoc s substs) => cdr]
-                                    [else (error 'subst
-                                                 "unknown substitution: ~s" s)])
-                              (substring str (cdar m)))
+        (subst (string-append
+                (substring str 0 (caar m))
+                (cond [(assoc s substs)
+                       => (lambda (x)
+                            (let ([s (cdr x)])
+                              (if (procedure? s) (s) s)))]
+                      [else (error 'subst "unknown substitution: ~s" s)])
+                (substring str (cdar m)))
                substs)
         str))))
 
@@ -67,9 +84,10 @@
     (let ([line (bytes->string/utf-8 line)])
       (unless (or (< (string-length line) len)
                   (< (string-width line) len))
-        (error* "~a \"~a\" is longer than ~a characters"
+        (error* "~a \"~a\" in ~a is longer than ~a characters"
                 (if n (format "Line #~a" n) "The line")
                 (regexp-replace #rx"^[ \t]*(.*?)[ \t]*$" line "\\1")
+                (currently-processed-file-name)
                 len)))))
 
 ;; ============================================================================
@@ -124,28 +142,60 @@
                    (send x get-text 0 (send x get-count)))]
           [else x])))
 
-(define (submission->string submission maxwidth textualize?)
+(define (untabify str)
+  (let loop ([idx 0] [pos 0] [strs '()])
+    (let ([tab (regexp-match-positions #rx"\t" str idx)])
+      (if tab
+        (let* ([pos (+ pos (- (caar tab) idx))]
+               [newpos (* (add1 (quotient pos 8)) 8)])
+          (loop (cdar tab) newpos
+                (list* (make-bytes (- newpos pos) 32)
+                       (subbytes str idx (caar tab))
+                       strs)))
+        (apply bytes-append (reverse! (cons (subbytes str idx) strs)))))))
+
+(define current-processed-file ; set when processing multi-file submissions
+  (make-parameter #f))
+(define (currently-processed-file-name)
+  (or (current-processed-file) "your code"))
+
+(define (input->process->output maxwidth textualize? untabify? bad-re)
+  (let loop ([n 1])
+    (let ([line (if textualize?
+                  (read-bytes-line (current-input-port) 'any)
+                  (with-handlers ([void
+                                   (lambda (e)
+                                     (error* "The submission must not ~a"
+                                             "have non-textual items"))])
+                    (read-bytes-line (current-input-port) 'any)))])
+      (unless (eof-object? line)
+        (let* ([line (regexp-replace #rx#"[ \t]+$" line #"")]
+               [line (if (and untabify?
+                              (regexp-match-positions #rx"\t" line))
+                       (untabify line) line)])
+          (when (and bad-re (regexp-match bad-re line))
+            (error* "You cannot use \"~a\" in ~a!~a"
+                    (if (regexp? bad-re) (object-name bad-re) bad-re)
+                    (currently-processed-file-name)
+                    (if textualize? "" (format " (line ~a)" n))))
+          (when maxwidth
+            (verify-line-length line (and (not textualize?) n) maxwidth))
+          (display line) (newline) (loop (add1 n)))))))
+
+(define (submission->bytes submission maxwidth textualize? untabify?
+                           markup-prefix bad-re)
+  (define magic #"WXME")
+  (unless (equal? magic (subbytes submission 0 (bytes-length magic)))
+    (error* "bad submission format, expecting a single  DrScheme submission"))
   (let-values ([(defs inters) (unpack-submission submission)])
-    (parameterize ([current-output-port (open-output-string)]
-                   [current-input-port
+    (parameterize ([current-input-port
                     (if textualize?
-                      (input-port->text-input-port
-                       (open-input-text-editor defs 0 'end snip->text))
-                      (open-input-text-editor defs))])
-      (let loop ([n 1])
-        (let ([line (if textualize?
-                      (read-bytes-line)
-                      (with-handlers ([void
-                                       (lambda (e)
-                                         (error* "The submission must not ~a"
-                                                 "have non-textual items"))])
-                        (read-bytes-line)))])
-          (unless (eof-object? line)
-            (let ([line (regexp-replace #rx#"[ \t]+$" line #"")])
-              (when maxwidth
-                (verify-line-length line (and (not textualize?) n) maxwidth))
-              (display line) (newline) (loop (add1 n))))))
-      (get-output-string (current-output-port)))))
+                      (input-port->text-input-port (open-input-text-editor
+                                                    defs 0 'end snip->text))
+                      (open-input-text-editor defs))]
+                   [current-output-port (open-output-string)])
+      (input->process->output maxwidth textualize? untabify? bad-re)
+      (get-output-bytes (current-output-port)))))
 
 ;; ---------------------------------------------------------
 ;; This code will hack textualization of test and text boxes
@@ -209,6 +259,101 @@
 (send (get-the-snip-class-list) add text-box-sc)
 
 ;; ============================================================================
+;; Dealing with multi-file submissions
+
+(define (read-multifile . port)
+  (define magic #"<<<MULTI-SUBMISSION-FILE>>>")
+  (define (assert-format b)
+    (unless b
+      (error* "bad submission format, expecting a multi-file submission -- ~a"
+              "use the multi-file submission tool")))
+  (define (read-it)
+    (assert-format (equal? magic (read-bytes (bytes-length magic))))
+    (let loop ([files '()])
+      (let ([f (with-handlers ([void void]) (read))])
+        (if (eof-object? f)
+          (sort files (lambda (x y) (string<? (car x) (car y))))
+          (loop (cons f files))))))
+  (let ([files (if (pair? port)
+                 (parameterize ([current-input-port (car port)]) (read-it))
+                 (read-it))])
+    (assert-format (and (list? files)
+                        (andmap (lambda (x)
+                                  (and (list? x) (= 2 (length x))
+                                       (string? (car x)) (bytes? (cadr x))))
+                                files)))
+    files))
+
+(define ((unpack-multifile-submission names-checker raw-file-name)
+         submission maxwidth textualize? untabify?
+         markup-prefix prefix-re)
+  (let* ([files (read-multifile (open-input-bytes submission))]
+         [names (map car files)])
+    (cond [(ormap (lambda (f)
+                    (and (regexp-match #rx"^[.]|[/\\ ]" (car f)) (car f)))
+                  files)
+           => (lambda (file) (error* "bad filename: ~e" file))])
+    (cond [(procedure? names-checker) (names-checker names)]
+          [(or (regexp? names-checker)
+               (string? names-checker) (bytes? names-checker))
+           (cond [(ormap (lambda (n)
+                           (and (not (regexp-match names-checker n)) n))
+                         names)
+                  => (lambda (file) (error* "bad filename: ~e" file))])]
+          [(and (list? names-checker) (andmap string? names-checker))
+           (let ([missing (remove* names names-checker)])
+             (when (pair? missing) (error* "missing files: ~e" missing)))
+           (let ([extra (remove* names-checker names)])
+             (when (pair? extra) (error* "unexpected files: ~e" extra)))]
+          [names-checker (error* "bad names-checker specification: ~e"
+                                 names-checker)])
+    ;; problem: students might think that submitting files one-by-one will keep
+    ;; them all; solution: if there is already a submission, then warn against
+    ;; files that disappear.
+    (let* ([raw (build-path 'up raw-file-name)]
+           [old (and (file-exists? raw)
+                     (with-handlers ([void (lambda _ #f)])
+                       (with-input-from-file raw read-multifile)))]
+           [removed (and old (remove* names (map car old)))])
+      (when (and (pair? removed)
+                 (not (eq? 'ok (message
+                                (apply string-append
+                                       "The following file"
+                                       (if (pair? (cdr removed)) "s" "")
+                                       " will be lost:"
+                                       (map (lambda (n) (string-append " " n))
+                                            removed))
+                                '(ok-cancel caution)))))
+        (error* "Aborting...")))
+    ;; This will create copies of the original files
+    ;; (for-each (lambda (file)
+    ;;             (with-output-to-file (car file)
+    ;;               (lambda () (display (cadr file)) (flush-output))))
+    ;;           files)
+    (let* ([pfx-len  (string-length markup-prefix)]
+           [line-len (- maxwidth pfx-len)]
+           [=s       (lambda (n) (if (<= 0 n) (make-string n #\=) ""))]
+           [===      (format "~a~a\n" markup-prefix (=s line-len))])
+      (define (sep name)
+        (newline)
+        (display ===)
+        (let ([n (/ (- line-len 4 (string-length name)) 2)])
+          (printf "~a~a< ~a >~a\n"
+                  markup-prefix (=s (floor n)) name (=s (ceiling n))))
+        (display ===)
+        (newline))
+      (parameterize ([current-output-port (open-output-bytes)])
+        (for-each (lambda (file)
+                    (sep (car file))
+                    (parameterize ([current-input-port
+                                    (open-input-bytes (cadr file))]
+                                   [current-processed-file (car file)])
+                      (input->process->output
+                       maxwidth textualize? untabify? prefix-re)))
+                  files)
+        (get-output-bytes (current-output-port))))))
+
+;; ============================================================================
 ;; Checker function
 
 (provide submission-eval)
@@ -240,13 +385,16 @@
        (loop #'(x ...) (cons (list (syntax-e #'key) #'key #'val) keyvals))]
       [(body ...)
        (with-syntax
-           ([users*         (get ':users #'#f)]
-            [eval?*         (get ':eval? #'#t)]
-            [language*      (get ':language #'#f)]
-            [teachpacks*    (get ':teachpacks #''())]
-            [create-text?*  (get ':create-text? #'#t)]
-            [textualize?*   (get ':textualize? #'#f)]
-            [maxwidth*      (get ':maxwidth #'79)]
+           ([users*         (get ':users         #'#f)]
+            [eval?*         (get ':eval?         #'#t)]
+            [language*      (get ':language      #'#f)]
+            [teachpacks*    (get ':teachpacks    #''())]
+            [create-text?*  (get ':create-text?  #'#t)]
+            [untabify?*     (get ':untabify?     #'#t)]
+            [textualize?*   (get ':textualize?   #'#f)]
+            [maxwidth*      (get ':maxwidth      #'79)]
+            [markup-prefix* (get ':markup-prefix #'#f)]
+            [prefix-re*     (get ':prefix-re     #'#f)]
             [student-line*
              (get ':student-line
                   #'"Student: {username} ({Full Name} <{Email}>)")]
@@ -254,8 +402,10 @@
              (get ':extra-lines
                   #''("Maximum points for this assignment: <+100>"))]
             [value-printer* (get ':value-printer #'#f)]
-            [coverage?*     (get ':coverage? #'#f)]
-            [output*        (get ':output #'"hw.scm")]
+            [coverage?*     (get ':coverage?     #'#f)]
+            [output*        (get ':output        #'"hw.scm")]
+            [multi-file*    (get ':multi-file    #'#f)]
+            [names-checker* (get ':names-checker #'#f)]
             [user-error-message*
              (get ':user-error-message #'"Error in your code --\n~a")]
             [checker        (id 'checker)]
@@ -277,7 +427,7 @@
                               (if (list? us)
                                 (map (lambda (x)
                                        (if (list? x)
-                                         (quicksort x string<?)
+                                         (sort x string<?)
                                          (list x)))
                                      us)
                                 us))]
@@ -285,15 +435,38 @@
                    [language       language*]
                    [teachpacks     teachpacks*]
                    [create-text?   create-text?*]
+                   [untabify?      untabify?*]
                    [textualize?    textualize?*]
                    [maxwidth       maxwidth*]
+                   [markup-prefix  markup-prefix*]
+                   [prefix-re      prefix-re*]
                    [student-line   student-line*]
                    [extra-lines    extra-lines*]
                    [value-printer  value-printer*]
                    [coverage?      coverage?*]
                    [output-file    output*]
+                   [multi-file     multi-file*]
+                   [names-checker  names-checker*]
                    [user-error-message user-error-message*]
                    [execute-counts #f])
+               ;; ========================================
+               ;; set defaults that depend on file name
+               (define suffix
+                 (let ([sfx (string->symbol
+                             (string-downcase
+                              (if multi-file
+                                (format "~a" multi-file)
+                                (and output-file
+                                     (regexp-replace
+                                      #rx"^.*[.]" output-file "")))))])
+                   (case sfx
+                     [(java c cc c++)
+                      (unless markup-prefix (set! markup-prefix "//> "))
+                      (unless prefix-re     (set! prefix-re     #rx"//>"))]
+                     [else
+                      (unless markup-prefix (set! markup-prefix ";;> "))
+                      (unless prefix-re     (set! prefix-re     #rx";>"))])
+                   sfx))
                ;; ========================================
                ;; verify submitting users
                (define (pre users submission)
@@ -316,31 +489,40 @@
                ;; ========================================
                ;; convert to text, evaluate, check
                (define (check users submission)
-                 (define text-file "grading/text.scm")
+                 (define text-file (format "grading/text.~a" suffix))
+                 (define (prefix-line str)
+                   (printf "~a~a\n" markup-prefix str))
+                 (define generic-substs `(("submission" . ,submission-dir)))
+                 (define (prefix-line/substs str)
+                   (prefix-line (subst str generic-substs)))
                  (define (write-text)
+                   (current-run-status "creating text file")
                    (with-output-to-file text-file
                      (lambda ()
-                       (define added (or (thread-cell-ref added-lines) '()))
-                       (for-each
-                        (lambda (user)
-                          (printf ";;> ~a\n" (user-substs user student-line)))
-                        users)
-                       (for-each (lambda (l) (printf ";;> ~a\n" l)) extra-lines)
-                       (for-each (lambda (l) (printf ";;> ~a\n" l)) added)
+                       (for-each (lambda (user)
+                                   (prefix-line
+                                    (user-substs user student-line)))
+                                 users)
+                       (for-each prefix-line/substs extra-lines)
+                       (for-each prefix-line/substs
+                                 (or (thread-cell-ref added-lines) '()))
                        (display submission-text))
                      'truncate))
                  (define submission-text
                    (and create-text?
-                        (submission->string submission maxwidth textualize?)))
-                 (when create-text?
-                   (make-directory "grading")
-                   (when (regexp-match #rx";>" submission-text)
-                     (error* "You cannot use \";>\" in your code!"))
-                   (write-text))
+                        (begin (current-run-status "reading submission")
+                               ((if multi-file
+                                  (unpack-multifile-submission
+                                   names-checker output-file)
+                                  submission->bytes)
+                                submission maxwidth textualize? untabify?
+                                markup-prefix prefix-re))))
+                 (when create-text? (make-directory "grading") (write-text))
                  (when value-printer (current-value-printer value-printer))
                  (when coverage? (coverage-enabled #t))
                  (current-run-status "checking submission")
                  (cond
+                  [(not eval?) (let () body ...)]
                   [language
                    (let ([eval
                           (with-handlers
@@ -373,7 +555,6 @@
                                           body*1 body* (... ...))])])
                          (let () body ...))
                        (when (thread-cell-ref added-lines) (write-text))))]
-                  [(not eval?) (let () body ...)]
                   [else (error* "no language configured for submissions")])
                  output-file)
                ;; ========================================
@@ -386,13 +567,15 @@
                                  "`eval?' without `language'"]
                                 [(and (not create-text?) textualize?)
                                  "`textualize?' without `create-text?'"]
+                                [(and maxwidth (not untabify?))
+                                 "`untabify?' without `maxwidth'"]
                                 [(and (not eval?) coverage?)
                                  "`coverage?' without `eval?'"]
                                 [(and textualize? coverage?)
                                  "`textualize?' and `coverage?'"]
                                 [else #f])])
                  (when bad
-                   (error* "bad checker specifications: cannot use ~a" bad)))
+                   (error* "bad checker specifications: ~a" bad)))
                ;; ========================================
                (list pre check post))))])))
 
@@ -444,8 +627,7 @@
                  "You have chosen to submit your work individually;"
                  " if you continue, it will be impossible for you to"
                  " later submit with a partner.  Are you sure you want"
-                 " to continue?"
-                 (path->string (current-directory)))
+                 " to continue?")
                 '(yes-no)))
         (make-directory "wants-single-submission")
         (error* "Aborting single submission!")))))
@@ -473,7 +655,7 @@
                     (let ([x (read)])
                       (cond [(eof-object? x) (reverse! r)]
                             [(null? x) (loop r)]
-                            [(list? x) (loop (cons (quicksort x string<?) r))]
+                            [(list? x) (loop (cons (sort x string<?) r))]
                             [else      (loop (cons (list x) r))])))))))))
   (lambda (users)
     (read-teams!)

@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	August 1994
- * Copyright:	(c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:	(c) 2004-2006 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -539,13 +539,15 @@ int wxGetControlFontSize()
   return 8;
 }
 
-void wxItem::GetLabelExtent(const char *string, double *x, double *y)
+void wxItem::GetLabelExtent(const char *string, double *x, double *y, wxFont *fnt)
 {
-  GetTextExtent(string, x, y, NULL, NULL, font);
+  if (!fnt)
+    fnt = font;
+  GetTextExtent(string, x, y, NULL, NULL, fnt);
   if (y && ms_handle) {
     /* Keep min height consistent, even with substitutions */
     int cx, cy;
-    wxGetCharSize((HWND)ms_handle, &cx, &cy, font);
+    wxGetCharSize((HWND)ms_handle, &cx, &cy, fnt);
     if (*y < cy)
       *y = cy;
   }

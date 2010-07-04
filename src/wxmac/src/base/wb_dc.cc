@@ -4,7 +4,7 @@
  * Author:      Julian Smart
  * Created:     1993
  * Updated:	August 1994
- * Copyright:   (c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:   (c) 2004-2006 PLT Scheme Inc.
  * Copyright:   (c) 1993, AIAI, University of Edinburgh
  */
 
@@ -124,10 +124,10 @@ void wxbDC::DrawSpline(double x1, double y1, double x2, double y2, double x3, do
   wxPoint *point2;
   wxPoint *point3;
 
-  point_list = new wxList;
-  point1 = new wxPoint;
-  point2 = new wxPoint;
-  point3 = new wxPoint;
+  point_list = new WXGC_PTRS wxList;
+  point1 = new WXGC_ATOMIC wxPoint;
+  point2 = new WXGC_ATOMIC wxPoint;
+  point3 = new WXGC_ATOMIC wxPoint;
 
   point1->x = x1; point1->y = y1;
   point_list->Append((wxObject*)point1);
@@ -144,7 +144,7 @@ void wxbDC::DrawSpline(double x1, double y1, double x2, double y2, double x3, do
 
 wxColor *wxbDC::GetBackground(void)
 { 
-  return new wxColour(current_background_color);
+  return new WXGC_PTRS wxColour(current_background_color);
 }
 
 void wxbDC::SetLogicalOrigin(double x, double y)

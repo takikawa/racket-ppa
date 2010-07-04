@@ -1,7 +1,7 @@
 /*
   SenoraGC, a relatively portable conservative GC for a slightly
     cooperative environment
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 1996-98 Matthew Flatt
   All rights reserved.
 
@@ -606,40 +606,40 @@ static Tree *next(Tree *node)
 static void remove_freepage(SectorFreepage *fp)
 {
   /* Remove fp from freelists: */
-  sector_freepage_by_start = delete(fp->start, sector_freepage_by_start);
-  sector_freepage_by_end = delete(fp->end, sector_freepage_by_end);
+  sector_freepage_by_start = splay_delete(fp->start, sector_freepage_by_start);
+  sector_freepage_by_end = splay_delete(fp->end, sector_freepage_by_end);
   sector_freepage_by_size = splay(fp->size, sector_freepage_by_size);
   if (TREE_FP(sector_freepage_by_size) == fp) {
     /* This was the representative for its size; remove it. */
-    sector_freepage_by_size = delete(fp->size, sector_freepage_by_size);
+    sector_freepage_by_size = splay_delete(fp->size, sector_freepage_by_size);
     if (fp->same_size) {
       SectorFreepage *same;
       same = TREE_FP(fp->same_size);
-      same->same_size = delete(same->start, fp->same_size);
-      sector_freepage_by_size = insert(same->size, &same->by_size, sector_freepage_by_size);
+      same->same_size = splay_delete(same->start, fp->same_size);
+      sector_freepage_by_size = splay_insert(same->size, &same->by_size, sector_freepage_by_size);
     }
   } else {
     /* Not the top-level representative; remove it from the representative's
        same_size tree */
     SectorFreepage *same;
     same = TREE_FP(sector_freepage_by_size);
-    same->same_size = delete(fp->start, same->same_size);
+    same->same_size = splay_delete(fp->start, same->same_size);
   }
 }
 
 static void add_freepage(SectorFreepage *naya)
 {
   naya->by_start.data = (void *)naya;
-  sector_freepage_by_start = insert(naya->start, &naya->by_start, sector_freepage_by_start);
+  sector_freepage_by_start = splay_insert(naya->start, &naya->by_start, sector_freepage_by_start);
   naya->by_end.data = (void *)naya;
-  sector_freepage_by_end = insert(naya->end, &naya->by_end, sector_freepage_by_end);
+  sector_freepage_by_end = splay_insert(naya->end, &naya->by_end, sector_freepage_by_end);
   naya->by_size.data = (void *)naya;
-  sector_freepage_by_size = insert(naya->size, &naya->by_size, sector_freepage_by_size);
+  sector_freepage_by_size = splay_insert(naya->size, &naya->by_size, sector_freepage_by_size);
   if (TREE_FP(sector_freepage_by_size) != naya) {
     /* This size was already in the tree; add it to the next_size list, instead */
     SectorFreepage *already = TREE_FP(sector_freepage_by_size);
     naya->by_start_per_size.data = (void *)naya;
-    already->same_size = insert(naya->start, &naya->by_start_per_size, already->same_size);
+    already->same_size = splay_insert(naya->start, &naya->by_start_per_size, already->same_size);
   } else
     naya->same_size = NULL;
 }
@@ -3027,16 +3027,16 @@ static int trace_path_buffer_pos;
 #endif
 
 #if PAD_BOUNDARY_BYTES
-static void bad_pad(char *where, void *s, long sz, long diff, long offset, 
+static void bad_pad(char *where, void *s, int type, long sz, long diff, long offset, 
 		    long pd, long expect)
 {
   FPRINTF(STDERR,
-	  "pad %s violation at %lx, len %ld (diff %ld+%ld): %lx != %lx\n", 
-	  where, (unsigned long)s, sz, diff, offset, pd, expect);
+	  "pad %s violation at %lx <%d>, len %ld (diff %ld+%ld): %lx != %lx\n", 
+	  where, (unsigned long)s, type, sz, diff, offset, pd, expect);
 }
 #endif
 
-static void collect_init_chunk(MemoryChunk *c, int uncollectable)
+static void collect_init_chunk(MemoryChunk *c, int uncollectable, int ty)
 {
   for (; c; c = c->next) {
     if (uncollectable && TRACE_COLLECT_SWITCH)
@@ -3053,20 +3053,20 @@ static void collect_init_chunk(MemoryChunk *c, int uncollectable)
       diff = ((long *)s)[1];
       pd = *(long *)s;
       if (pd != PAD_PATTERN)
-	bad_pad("start", s, sz, diff, 0, pd, PAD_PATTERN);
+	bad_pad("start", s, ty, sz, diff, 0, pd, PAD_PATTERN);
       pd = *(long *)INT_TO_PTR(c->end - PAD_END_SIZE);
       if (pd != PAD_PATTERN)
-	bad_pad("end1", s, sz, diff, 0, pd, PAD_PATTERN);
+	bad_pad("end1", s, ty, sz, diff, 0, pd, PAD_PATTERN);
       pd = *(long *)INT_TO_PTR(c->end - PAD_END_SIZE + sizeof(long));
       if (pd != PAD_PATTERN)
-	bad_pad("end2", s, sz, diff, 0, pd, PAD_PATTERN);
+	bad_pad("end2", s, ty, sz, diff, 0, pd, PAD_PATTERN);
       if (diff) {
 	/* Given was bigger than requested; check extra bytes: */
 	unsigned char *ps = ((unsigned char *)s) + sz - PAD_END_SIZE - diff;
 	long d = 0;
 	while (d < diff) {
 	  if (*ps != PAD_FILL_PATTERN) {
-	    bad_pad("extra", s, sz, diff, d, *ps, PAD_FILL_PATTERN);
+	    bad_pad("extra", s, ty, sz, diff, d, *ps, PAD_FILL_PATTERN);
 	  }
 	  ps++;
 	  d++;
@@ -3132,7 +3132,7 @@ static void collect_finish_chunk(MemoryChunk **c, GC_Set *set)
   high_plausible = local_high_plausible;
 }
 
-static void collect_init_common(BlockOfMemory **blocks, int uncollectable)
+static void collect_init_common(BlockOfMemory **blocks, int uncollectable, int ty)
 {
   int i, j;
   int boundary, boundary_val = 0;
@@ -3164,20 +3164,20 @@ static void collect_init_common(BlockOfMemory **blocks, int uncollectable)
 	  pd = *(long *)s;
 	  diff = ((long *)s)[1];
 	  if (pd != PAD_PATTERN)
-	    bad_pad("start", s, size, diff, 0, pd, PAD_PATTERN);
+	    bad_pad("start", s, ty, size, diff, 0, pd, PAD_PATTERN);
 	  pd = *(long *)INT_TO_PTR(p + size - PAD_END_SIZE);
 	  if (pd != PAD_PATTERN)
-	    bad_pad("end1", s, size, diff, 0, pd, PAD_PATTERN);
+	    bad_pad("end1", s, ty, size, diff, 0, pd, PAD_PATTERN);
 	  pd = *(long *)INT_TO_PTR(p + size - PAD_END_SIZE + sizeof(long));
 	  if (pd != PAD_PATTERN)
-	    bad_pad("end2", s, size, diff, 0, pd, PAD_PATTERN);
+	    bad_pad("end2", s, ty, size, diff, 0, pd, PAD_PATTERN);
 	  if (diff) {
 	    /* Given was bigger than requested; check extra bytes: */
 	    unsigned char *ps = ((unsigned char *)s) + size - PAD_END_SIZE - diff;
 	    long d = 0;
 	    while (d < diff) {
 	      if (*ps != PAD_FILL_PATTERN) {
-		bad_pad("extra", s, size, diff, d, *ps, PAD_FILL_PATTERN);
+		bad_pad("extra", s, ty, size, diff, d, *ps, PAD_FILL_PATTERN);
 	      }
 	      ps++;
 	      d++;
@@ -4312,9 +4312,11 @@ static void do_GC_gcollect(void *stack_now)
     if (!common_sets[j]->locked) {
 # endif
       collect_init_chunk(*(common_sets[j]->othersptr),
-			 common_sets[j]->uncollectable);
+			 common_sets[j]->uncollectable,
+			 j);
       collect_init_common(common_sets[j]->blocks,
-			  common_sets[j]->uncollectable);
+			  common_sets[j]->uncollectable,
+			  j);
 # if ALLOW_SET_LOCKING
     }
 # endif

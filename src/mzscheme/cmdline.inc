@@ -7,8 +7,69 @@
 
 char *cmdline_exe_hack = "[Replace me for EXE hack                                       ]";
 
+#ifdef MZ_PRECISE_GC
+# define GC_PRECISION_TYPE "3"
+#else
+# define GC_PRECISION_TYPE "c"
+#endif
+char *binary_type_hack = "bINARy tYPe:" INITIAL_BIN_TYPE GC_PRECISION_TYPE;
+
+#ifndef INITIAL_COLLECTS_DIRECTORY
+# ifdef DOS_FILE_SYSTEM
+#  define INITIAL_COLLECTS_DIRECTORY "collects"
+# else
+#  define INITIAL_COLLECTS_DIRECTORY "../collects"
+# endif
+#endif
+
+static char *_coldir = "coLLECTs dIRECTORy:" /* <- this tag stays, so we can find it again */
+                       INITIAL_COLLECTS_DIRECTORY 
+                       "\0\0" /* <- 1st nul terminates path, 2nd terminates path list */
+                       /* Pad with at least 1024 bytes: */
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************"
+                       "****************************************************************";
+static int _coldir_offset = 19; /* Skip permanent tag */
+
+#ifndef MZ_PRECISE_GC
+# define XFORM_OK_PLUS +
+#endif
+
 #ifdef DOS_FILE_SYSTEM
 # include <Windows.h>
+
+#define DLL_RELATIVE_PATH L"lib"
+#include "delayed.inc"
+
+extern 
+# ifdef __cplusplus
+"C"
+# endif
+__declspec(dllexport) void scheme_set_dll_path(wchar_t *s);
+
+static void record_dll_path(void)
+{
+  if (_dlldir[_dlldir_offset] != '<') {
+    scheme_set_dll_path(_dlldir + _dlldir_offset);
+  }
+}
+
+# ifdef MZ_PRECISE_GC
+END_XFORM_SKIP;
+# endif
 #endif
 
 #ifndef DONT_PARSE_COMMAND_LINE
@@ -246,19 +307,23 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
 	  break;
 	}
       } else if (fa->eval_kind[i] == mzcmd_EVAL) {
-	save = scheme_current_thread->error_buf;
-	scheme_current_thread->error_buf = &newbuf;
+	Scheme_Thread * volatile p;
+	p = scheme_get_current_thread();
+	save = p->error_buf;
+	p->error_buf = &newbuf;
 	if (!scheme_setjmp(newbuf))
 	  scheme_eval_string_all(fa->evals_and_loads[i], fa->global_env, 0);
 	else {
 	  exit_val = 1;
-	  scheme_current_thread->error_buf = save;
+	  p->error_buf = save;
 	  break;
 	}
-	scheme_current_thread->error_buf = save;
+	p->error_buf = save;
       } else if (fa->eval_kind[i] == mzcmd_MAIN) {
-	save = scheme_current_thread->error_buf;
-	scheme_current_thread->error_buf = &newbuf;
+	Scheme_Thread * volatile p;
+	p = scheme_get_current_thread();
+	save = p->error_buf;
+	p->error_buf = &newbuf;
 	if (!scheme_setjmp(newbuf)) {
 	  Scheme_Object *a[1], *m, *fn;
 	  
@@ -269,10 +334,10 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
 	  (void)scheme_apply(m, 1, a);
 	} else {
 	  exit_val = 1;
-	  scheme_current_thread->error_buf = save;
+	  p->error_buf = save;
 	  break;
 	}
-	scheme_current_thread->error_buf = save;
+	p->error_buf = save;
       }
     }
   }
@@ -282,11 +347,13 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
   {
     Scheme_Object *f, *a[1];
     mz_jmp_buf * volatile save, newbuf;
-    save = scheme_current_thread->error_buf;
-    scheme_current_thread->error_buf = &newbuf;
+    Scheme_Thread * volatile p;
+    p = scheme_get_current_thread();
+    save = p->error_buf;
+    p->error_buf = &newbuf;
     if (!scheme_setjmp(newbuf)) {
       f = scheme_initialize(fa->global_env);
-      a[0] = scheme_true;
+      a[0] = scheme_make_true();
       f = _scheme_apply_multi(f, 1, a);
       if (SAME_OBJ(f, SCHEME_MULTIPLE_VALUES)
 	  && (scheme_multiple_count == 2)) {
@@ -296,7 +363,7 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
     } else {
       exit_val = 1;
     }
-    scheme_current_thread->error_buf = save;
+    p->error_buf = save;
   }
 #endif
 
@@ -304,8 +371,10 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
   if (!fa->no_rep && !fa->script_mode) {
     /* enter read-eval-print loop */
     mz_jmp_buf * volatile save, newbuf;
-    save = scheme_current_thread->error_buf;
-    scheme_current_thread->error_buf = &newbuf;
+    Scheme_Thread * volatile p;
+    p = scheme_get_current_thread();
+    save = p->error_buf;
+    p->error_buf = &newbuf;
     if (!scheme_setjmp(newbuf)) {
       repl(fa->global_env);
       exit_val = 0;
@@ -315,19 +384,21 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
       fa->add_yield = 0;
 #endif
     }
-    scheme_current_thread->error_buf = save;
+    p->error_buf = save;
   }
 #endif /* DONT_RUN_REP */
 
 #ifdef VERSION_YIELD_FLAG
   if (fa->add_yield) {
     mz_jmp_buf * volatile save, newbuf;
-    save = scheme_current_thread->error_buf;
-    scheme_current_thread->error_buf = &newbuf;
+    Scheme_Thread * volatile p;
+    p = scheme_get_current_thread();
+    save = p->error_buf;
+    p->error_buf = &newbuf;
     if (!scheme_setjmp(newbuf)) {
       yield_indefinitely();
     }
-    scheme_current_thread->error_buf = save;
+    p->error_buf = save;
   }
 #endif
 
@@ -335,11 +406,13 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
 }
 
 #ifndef NO_FILE_SYSTEM_UTILS
-static void init_collection_paths(Scheme_Env *global_env)
+static void init_collection_paths(Scheme_Env *global_env, Scheme_Object *extra_dirs)
 {		
   mz_jmp_buf * volatile save, newbuf;
-  save = scheme_current_thread->error_buf;
-  scheme_current_thread->error_buf = &newbuf;
+  Scheme_Thread * volatile p;
+  p = scheme_get_current_thread();
+  save = p->error_buf;
+  p->error_buf = &newbuf;
   if (!scheme_setjmp(newbuf)) {
     Scheme_Object *clcp, *flcp, *a[1];
 
@@ -347,11 +420,12 @@ static void init_collection_paths(Scheme_Env *global_env)
     flcp = scheme_builtin_value("find-library-collection-paths");
 
     if (clcp && flcp) {
-      a[0] = _scheme_apply(flcp, 0, NULL);
+      a[0] = extra_dirs;
+      a[0] = _scheme_apply(flcp, 1, a);
       _scheme_apply(clcp, 1, a);
     }
   }
-  scheme_current_thread->error_buf = save;
+  p->error_buf = save;
 }
 #endif
 
@@ -359,8 +433,10 @@ static void init_collection_paths(Scheme_Env *global_env)
 static void init_mred(Scheme_Env *global_env)
 {
   mz_jmp_buf * volatile save, newbuf;
-  save = scheme_current_thread->error_buf;
-  scheme_current_thread->error_buf = &newbuf;
+  Scheme_Thread * volatile p;
+  p = scheme_get_current_thread();
+  save = p->error_buf;
+  p->error_buf = &newbuf;
   if (!scheme_setjmp(newbuf)) {
     scheme_eval_string("(require (lib \"class.ss\"))", 
 		       global_env);
@@ -369,7 +445,7 @@ static void init_mred(Scheme_Env *global_env)
     scheme_eval_string("(current-load text-editor-load-handler)", 
 		       global_env);
   }
-  scheme_current_thread->error_buf = save;
+  p->error_buf = save;
 }
 #endif
 
@@ -394,8 +470,8 @@ static int run_from_cmd_line(int argc, char *_argv[],
 {
   GC_CAN_IGNORE char **argv = _argv;
   Scheme_Env *global_env;
-  char *prog;
-  Scheme_Object *sch_argv;
+  char *prog, *sprog = NULL;
+  Scheme_Object *sch_argv, *collects_path = NULL, *collects_extra = NULL;
   int i;
 #ifndef DONT_PARSE_COMMAND_LINE
   char **evals_and_loads, *real_switch = NULL, *runner;
@@ -477,18 +553,19 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	 The cmdline is appended to the end of the binary.
 	 The long integer at cmdline_exe_hack[4] says
 	 where the old end was, and cmdline_exe_hack[8]
-	 says how long the cmdoine string is. */
-      char *path;
+	 says how long the cmdline string is. It might
+	 be relative to the executable. */
+      wchar_t *path;
       HANDLE fd;
 
-      path = (char *)malloc(1024);
-      GetModuleFileName(NULL, path, 1024);
-      fd = CreateFile(path, GENERIC_READ,
-		      FILE_SHARE_READ | FILE_SHARE_WRITE,
-		      NULL,
-		      OPEN_EXISTING,
-		      0,
-		      NULL);
+      path = (wchar_t *)malloc(1024 * sizeof(wchar_t));
+      GetModuleFileNameW(NULL, path, 1024);
+      fd = CreateFileW(path, GENERIC_READ,
+		       FILE_SHARE_READ | FILE_SHARE_WRITE,
+		       NULL,
+		       OPEN_EXISTING,
+		       0,
+		       NULL);
       if (fd == INVALID_HANDLE_VALUE)
 	p = (unsigned char *)"\0\0\0";
       else {
@@ -504,7 +581,39 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  p = (unsigned char *)"\0\0\0";
 	else if (cmdline_exe_hack[0] == '*') {
 	  /* "*" means that the first item is argv[0] replacement: */
+	  sprog = prog;
 	  prog = (char *)p + 4;
+
+	  if ((prog[0] == '\\')
+	      || ((((prog[0] >= 'a') && (prog[0] <= 'z'))
+		   || 	((prog[0] >= 'A') && (prog[0] <= 'Z')))
+		  && (prog[1] == ':'))) {
+	    /* Absolute path */
+	  } else {
+	    /* Make it absolute, relative to this executable */
+	    int plen = strlen(prog);
+	    int mlen, len;
+	    char *s2, *p2;
+
+	    /* UTF-8 encode path: */
+	    for (len = 0; path[len]; len++) { }
+	    mlen = scheme_utf8_encode((unsigned int *)path, 0, len,
+				      NULL, 0,
+				      1 /* UTF-16 */);
+	    p2 = (char *)malloc(mlen + 1);
+	    mlen = scheme_utf8_encode((unsigned int *)path, 0, len,
+				      (unsigned char *)p2, 0,
+				      1 /* UTF-16 */);
+
+	    while (mlen && (p2[mlen - 1] != '\\')) {
+	      mlen--;
+	    }
+	    s2 = (char *)malloc(mlen + plen + 1);
+	    memcpy(s2, p2, mlen);
+	    memcpy(s2 + mlen, prog, plen + 1);
+	    prog = s2;
+	  }
+
 	  p += (p[0]
 		+ (((long)p[1]) << 8)
 		+ (((long)p[2]) << 16)
@@ -619,12 +728,16 @@ static int run_from_cmd_line(int argc, char *_argv[],
       argv[0] = "-u";
     else if (!strcmp("--main", argv[0]))
       argv[0] = "-I";
+    else if (!strcmp("--name", argv[0]))
+      argv[0] = "-N";
     else if (!strcmp("--no-lib-path", argv[0]))
       argv[0] = "-x";
     else if (!strcmp("--version", argv[0]))
       argv[0] = "-v";
     else if (!strcmp("--no-init-file", argv[0]))
       argv[0] = "-q";
+    else if (!strcmp("--no-jit", argv[0]))
+      argv[0] = "-j";
     else if (!strcmp("--no-argv", argv[0]))
       argv[0] = "-A";
     else if (!strcmp("--mute-banner", argv[0]))
@@ -633,6 +746,10 @@ static int run_from_cmd_line(int argc, char *_argv[],
       argv[0] = "-w";
     else if (!strcmp("--binary", argv[0]))
       argv[0] = "-b";
+    else if (!strcmp("--collects", argv[0]))
+      argv[0] = "-X";
+    else if (!strcmp("--search", argv[0]))
+      argv[0] = "-S";
 # ifndef MZSCHEME_CMD_LINE
     else if (!strcmp("--nogui", argv[0]))
       argv[0] = "-Z";
@@ -667,13 +784,13 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  goto show_help;
 	  break;
 	case 'g':
-	  scheme_case_sensitive = 1;
+	  scheme_set_case_sensitive(1);
 	  break;
 	case 'G':
-	  scheme_case_sensitive = 0;
+	  scheme_set_case_sensitive(0);
 	  break;
 	case 's':
-	  scheme_allow_set_undefined = 1;
+	  scheme_set_allow_set_undefined(1);
 	  break;
 	case 'e':
 	  if (argc < 2) {
@@ -685,6 +802,32 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  --argc;
 	  evals_and_loads[num_enl] = argv[0];
 	  eval_kind[num_enl++] = mzcmd_EVAL;
+	  break;
+	case 'X':
+	  if (argc < 2) {
+	    PRINTF("%s: missing path after %s switch\n", 
+		   prog, real_switch);
+	    goto show_need_help;
+	  }
+	  argv++;
+	  --argc;
+	  collects_path = scheme_make_path(argv[0]);
+	  break;
+	case 'U':
+	  scheme_set_ignore_user_paths(1);
+	  break;
+	case 'S':
+	  if (argc < 2) {
+	    PRINTF("%s: missing path after %s switch\n", 
+		   prog, real_switch);
+	    goto show_need_help;
+	  }
+	  argv++;
+	  --argc;
+	  if (!collects_extra)
+	    collects_extra = scheme_make_null();
+	  collects_extra = scheme_make_pair(scheme_make_path(argv[0]),
+					    collects_extra);
 	  break;
 	case 'x':
 	  no_lib_path = 1;
@@ -826,6 +969,17 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  --argc;
 	  eval_kind[num_enl++] = mzcmd_EVAL;
 	  break;
+	case 'N':
+	  if (argc < 2) {
+	    PRINTF("%s: missing name after %s switch\n", 
+		   prog, 
+		   real_switch);
+	    goto show_need_help;
+	  }
+	  argv++;
+	  --argc;
+	  sprog = argv[0];
+	  break;
 	case 'A':
 	  no_argv = 1;
 	  break;
@@ -847,8 +1001,11 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	case '-':
 	  no_more_switches = 1;
 	  break;
+	case 'j':
+	  scheme_set_startup_use_jit(0);
+	  break;
 	case 'b':
-	  scheme_binary_mode_stdio = 1;
+	  scheme_set_binary_mode_stdio(1);
 	  break;
 #ifndef MZSCHEME_CMD_LINE
 	case 'Z':
@@ -897,7 +1054,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
 #endif
       PRINTF(BANNER);
 #ifdef MZSCHEME_CMD_LINE  
-    if (scheme_allow_set_undefined)
+    if (scheme_get_allow_set_undefined())
       PRINTF(SDESC);
 # ifdef DOS_FILE_SYSTEM
 #  if !defined(FILES_HAVE_FDS)
@@ -913,10 +1070,10 @@ static int run_from_cmd_line(int argc, char *_argv[],
 #endif
   }
 #endif /* DONT_PARSE_COMMAND_LINE */
-  
+
   global_env = mk_basic_env();
 
-  sch_argv = scheme_make_vector(argc, scheme_null);
+  sch_argv = scheme_make_vector(argc, NULL);
   for (i = 0; i < argc; i++) {
     Scheme_Object *so;
     so = scheme_make_locale_string(argv[i]);
@@ -933,7 +1090,10 @@ static int run_from_cmd_line(int argc, char *_argv[],
     scheme_add_global("argv", sch_argv, global_env);
   {	
     Scheme_Object *ps;
-    ps = scheme_set_exec_cmd(prog);
+    scheme_set_exec_cmd(prog);
+    if (!sprog)
+      sprog = prog;
+    ps = scheme_set_run_cmd(sprog);
 #ifndef DONT_PARSE_COMMAND_LINE
     if (!no_argv)
 #endif
@@ -942,8 +1102,38 @@ static int run_from_cmd_line(int argc, char *_argv[],
 
 #ifndef NO_FILE_SYSTEM_UTILS
   /* Setup path for "collects" collection directory: */
-  if (!no_lib_path)
-    init_collection_paths(global_env);
+  if (!no_lib_path) {
+    Scheme_Object *l, *r;
+    int len, offset;
+
+    if (!collects_path)
+      collects_path = scheme_make_path(_coldir XFORM_OK_PLUS _coldir_offset);
+    scheme_set_collects_path(collects_path);
+
+    /* Make list of additional collection paths: */
+    if (collects_extra) {
+      l = collects_extra;
+    } else {
+      l = scheme_make_null();
+      offset = _coldir_offset;
+      while (1) {
+	len = strlen(_coldir XFORM_OK_PLUS offset);
+	offset += len + 1;
+	if (!_coldir[offset])
+	  break;
+	l = scheme_make_pair(scheme_make_path(_coldir XFORM_OK_PLUS offset),
+			     l);
+      }
+    }
+    /* Reverse list */
+    r = scheme_make_null();
+    while (SCHEME_PAIRP(l)) {
+      r = scheme_make_pair(SCHEME_CAR(l), r);
+      l = SCHEME_CDR(l);
+    }
+    
+    init_collection_paths(global_env, r);
+  }
 #endif /* NO_FILE_SYSTEM_UTILS */
 
 #ifndef MZSCHEME_CMD_LINE
@@ -1001,7 +1191,6 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	 "  -l <file>, --mzlib <file> : Same as -e '(require (lib \"<file>\"))'.\n"
 	 "  -L <file> <coll> : Same as -e '(require (lib \"<file>\" \"<coll>\"))'.\n"
 	 "  -M <coll> : Same as -e '(require (lib \"<coll>.ss\" \"<coll>\"))'.\n"
-	 "  -M errortrace : Report locations in uncompiled source for run-time errors.\n"
 	 "  -r, --script : Script mode: use as last switch for scripts. Same as -fmv-.\n" 
 	 "  -i, --script-cd : Like -r, but also sets the directory. Same as -dmv-.\n"
 	 "  -u, --require-script : Like -r, but requires a module. Same as -tmv-.\n" 
@@ -1016,9 +1205,18 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	 "  -k <n> <m> : Load executable-embedded code from file offset <n> to <m>.\n"
 	 "  -C, --main : Like -r, then call `main' w/argument list; car is file name.\n"
 	 " Initialization switches:\n"
+	 "  -X <dir>, --collects <dir> : Main collects at <dir> relative to " PROGRAM ".\n"
+	 "  -S <dir>, --search <dir> : More collects at <dir> relative to " PROGRAM ".\n"
+	 "  -U, --no-user-path : Ignores user-specific collects, etc.\n"
          "  -x, --no-lib-path : Skips trying to set current-library-collection-paths.\n"
 	 "  -q, --no-init-file : Skips trying to load " INIT_FILENAME ".\n"
+	 "  -N <file>, --name <file> : Sets `program' to <file>.\n"
 	 "  -A : Skips defining `argv' and `program'.\n"
+# ifdef MZ_USE_JIT
+	 "  -j, --no-jit : Disables just-in-time compiler.\n"
+# else
+	 "  -j, --no-jit : No effect, since the just-in-time compiler is unavailable.\n"
+# endif
 	 " Language setting switches:\n"
 	 "  -g, --case-sens : Identifiers/symbols are initially case-sensitive.\n"
 	 "  -G, --case-insens : Identifiers/symbols are initially case-insensitive.\n"

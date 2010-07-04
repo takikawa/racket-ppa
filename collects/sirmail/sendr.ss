@@ -11,7 +11,8 @@
   (require (lib "list.ss")
 	   (lib "file.ss")
 	   (lib "string.ss")
-	   (lib "process.ss"))
+	   (lib "process.ss")
+	   (lib "mzssl.ss" "openssl"))
 
   (require "sirmails.ss"
 	   "pref.ss"
@@ -25,6 +26,8 @@
 
   (require (lib "hierlist-sig.ss" "hierlist"))
 
+  (define smtp-passwords (make-hash-table 'equal))
+
   (provide send@)
   (define send@
     (unit/sig sirmail:send^
@@ -32,6 +35,7 @@
 	      sirmail:utils^
 	      sirmail:options^
 	      sirmail:read^
+	      (env : sirmail:environment^)
 	      mred^
 	      net:imap^
 	      net:smtp^
@@ -45,12 +49,7 @@
       ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
       (define (show-error x main-frame)
-	(message-box "Error" 
-		     (if (exn? x)
-			 (exn-message x)
-			 (format "Strange exception: ~s" x))
-		     main-frame
-		     '(ok stop)))
+	(show-error-message-box x main-frame))
         
       (define FRAME-WIDTH 560)
       (define FRAME-HEIGHT 600)
@@ -345,13 +344,14 @@
                                           '(ok)))])
                        (delete-file t)))))))
         
-        (define c (new editor-canvas% 
+        (define c (new canvas:color% 
                        [parent (send mailer-frame get-area-container)]
                        [style '(auto-hscroll)]))
         (define message-editor-super%
           (color:text-mixin 
            (editor:backup-autosave-mixin
-            text:standard-style-list%)))
+            (text:foreground-color-mixin
+             text:standard-style-list%))))
         (define message-editor (make-object (class message-editor-super%
                                               (inherit reset-region)
                                               
@@ -408,12 +408,20 @@
             w))
         
         (define (send-msg)
-          (define-values (smtp-server-to-use smtp-port-to-use)
-            (parse-server-name (SMTP-SERVER) 25))
+          (define-values (smtp-ssl? smtp-auth-user smtp-server-to-use smtp-port-to-use)
+            (parse-server-name+user+type (SMTP-SERVER) 25))
+	  (define smtp-auth-passwd (and smtp-auth-user
+					(or (hash-table-get smtp-passwords (cons smtp-auth-user smtp-server-to-use)
+							    (lambda () #f))
+					    (let ([p (get-pw-from-user smtp-auth-user mailer-frame)])
+					      (unless p (raise-user-error 'send "send canceled"))
+					      p))))
           (send-message
            (send message-editor get-text)
+	   smtp-ssl?
            smtp-server-to-use
            smtp-port-to-use
+	   smtp-auth-user smtp-auth-passwd
            (map (lambda (i) (send i user-data)) 
                 (send enclosure-list get-items))
            enable
@@ -431,7 +439,10 @@
                    (if f
                        (send message-editor save-file f 'text)
                        (loop))))))
-           message-count))
+           message-count)
+	  (when smtp-auth-passwd
+	    (hash-table-put! smtp-passwords (cons smtp-auth-user smtp-server-to-use) 
+			     smtp-auth-passwd)))
         
         ;; enq-msg : -> void
         ;; enqueues a message for a later send
@@ -581,7 +592,19 @@
                 [demand-callback (lambda (m)
                                    (send m enable (send enclosure-list get-selected)))])
               enable #f)
-        
+	(instantiate menu-item% ("Clone Message" edit-menu)
+		     [callback (lambda (i e)
+				 (let ([p (open-input-text-editor message-editor)]
+				       [s (make-semaphore)])
+				   (env:start-new-window
+				    (lambda ()
+				      (new-mailer p "" "" "" "" "" 
+						  (map (lambda (i) (send i user-data)) 
+						       (send enclosure-list get-items))
+						  message-count)
+				      (semaphore-post s)))
+				   (semaphore-wait s)))]
+		     [shortcut #\=])
         
         (add-preferences-menu-items edit-menu)
         
@@ -605,16 +628,26 @@
         
         (make-fixed-width c message-editor #t return-bitmap)
         (send message-editor set-paste-text-only #t)
-        (send message-editor set-max-undo-history 5000) ;; Many undos!
+        (send message-editor set-max-undo-history 'forever)
         (send c set-editor message-editor)
         
         (activate-spelling message-editor)
         
         (send message-editor begin-edit-sequence)
         (if file
-            ;; Resume a composition...
-            (send message-editor load-file file)
-            ;; Build message skeleton
+            ;; Resume/clone a composition...
+	    (begin
+	      (if (port? file)
+		  (send message-editor insert-port file)
+		  (send message-editor load-file file))
+	      (let ([pos (send message-editor
+			       find-string (string-append "\n" SEPARATOR "\n")
+			       'forward 0)])
+		(when pos
+		  (send message-editor set-no-change-region 
+			pos
+			(+ pos 2 (string-length SEPARATOR))))))
+	    ;; Build message skeleton
             (begin
               (send message-editor insert "To: ")
               (send message-editor insert (string-crlf->lf to))
@@ -649,8 +682,14 @@
                 (if (string=? to "")
                     (send message-editor set-position (send message-editor paragraph-end-position 0))
                     (send message-editor set-position message-start)))
-              (send message-editor clear-undos)))
-        
+              (send message-editor change-style
+                    (send (send message-editor get-style-list)
+                          find-named-style
+                          (editor:get-default-color-style-name))
+                    0 
+                    (send message-editor last-position))))
+
+	(send message-editor clear-undos)
         (send message-editor set-modified #f)
         (send message-editor scroll-to-position 0)
         (send message-editor end-edit-sequence)
@@ -681,8 +720,9 @@
       ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
       (define (send-message message-str
+			    ssl?
                             smtp-server
-                            smtp-port
+                            smtp-port auth-user auth-pw
                             enclosures
                             enable 
                             status-message-starting
@@ -763,7 +803,10 @@
                                               tos
                                               new-header
                                               body-lines
-                                              smtp-port))))
+                                              #:port-no smtp-port
+					      #:tcp-connect (if ssl? ssl-connect tcp-connect)
+					      #:auth-user auth-user
+					      #:auth-passwd auth-pw))))
                        save-before-killing))
                   (status-done))
                 (message-box

@@ -4,7 +4,7 @@
  * Author:      Julian Smart
  * Created:     1993
  * Updated:	August 1994
- * Copyright:   (c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:   (c) 2004-2006 PLT Scheme Inc.
  * Copyright:   (c) 1993, AIAI, University of Edinburgh
  */
 
@@ -243,9 +243,9 @@ Bool wxPostScriptDC::Create(Bool interactive, wxWindow *parent, Bool usePaperBBo
 
   current_pen = NULL;
   current_brush = NULL;
-  current_background_color = new wxColour(wxWHITE);
+  current_background_color = new WXGC_PTRS wxColour(wxWHITE);
 
-  current_text_foreground = new wxColour(wxBLACK);
+  current_text_foreground = new WXGC_PTRS wxColour(wxBLACK);
 
   mapping_mode = MM_TEXT;
 #else
@@ -415,7 +415,7 @@ void wxPostScriptDC::SetClippingRect(double cx, double cy, double cw, double ch)
   if (!pstream)
     return;
 
-  r = new wxRegion(this);
+  r = new WXGC_PTRS wxRegion(this);
   r->SetRectangle(cx, cy, cw, ch);
 
   SetClippingRegion(r);
@@ -1479,7 +1479,7 @@ Bool wxPostScriptDC::StartDoc (char *message)
 
   if (device == wxDEVICE_EPS) {
     wxPSStream *pss;
-    pss = new wxPSStream(filename);
+    pss = new WXGC_PTRS wxPSStream(filename);
     pstream = pss;
 
     if (!pstream || !pstream->good()) {
@@ -1725,7 +1725,7 @@ Blit (double xdest, double ydest, double fwidth, double fheight,
   x = (long)floor(xsrc);
   y = (long)floor(ysrc);
 
-  c = new wxColour;
+  c = new WXGC_PTRS wxColour;
 
   /* Since we want a definition, may need to start a dictionary: */
   if (rop >= 0) {
@@ -1908,7 +1908,7 @@ Bool wxPostScriptDC::Blit (double xdest, double ydest, double fwidth, double fhe
   if (!main_dc) {
     if (!temp_mdc) {
       wxREGGLOB(temp_mdc);
-      temp_mdc = new wxMemoryDC(1);
+      temp_mdc = new WXGC_PTRS wxMemoryDC(1);
     }
     temp_mdc->SelectObject(bm);
     /* Might fail, so we double-check: */
@@ -1923,7 +1923,7 @@ Bool wxPostScriptDC::Blit (double xdest, double ydest, double fwidth, double fhe
    if (!mask_dc) {
      if (!temp_mask_mdc) {
        wxREGGLOB(temp_mask_mdc);
-       temp_mask_mdc = new wxMemoryDC(1);
+       temp_mask_mdc = new WXGC_PTRS wxMemoryDC(1);
      } 
      temp_mask_mdc->SelectObject(mask);
      if (temp_mask_mdc->GetObject()) {
@@ -2016,6 +2016,11 @@ double wxPostScriptDC::DeviceToLogicalXRel(int x)
   return x / user_scale_x;
 }
 
+double wxPostScriptDC::UnscrolledDeviceToLogicalX(int x)
+{
+  return DeviceToLogicalX(x);
+}
+
 double wxPostScriptDC::DeviceToLogicalY(int y)
 {
   double y2 = -(y - paper_h);
@@ -2025,6 +2030,11 @@ double wxPostScriptDC::DeviceToLogicalY(int y)
 double wxPostScriptDC::DeviceToLogicalYRel(int y)
 {
   return y / user_scale_y;
+}
+
+double wxPostScriptDC::UnscrolledDeviceToLogicalY(int y)
+{
+  return DeviceToLogicalY(y);
 }
 
 int wxPostScriptDC::LogicalToDeviceX(double x)
@@ -2037,6 +2047,11 @@ int wxPostScriptDC::LogicalToDeviceXRel(double x)
   return (int)floor(XSCALEREL(x));
 }
 
+int wxPostScriptDC::LogicalToUnscrolledDeviceX(double x)
+{
+  return LogicalToDeviceX(x);
+}
+
 int wxPostScriptDC::LogicalToDeviceY(double y)
 {
   return (int)floor(YSCALE(y));
@@ -2045,6 +2060,11 @@ int wxPostScriptDC::LogicalToDeviceY(double y)
 int wxPostScriptDC::LogicalToDeviceYRel(double y)
 {
   return (int)floor(YSCALEREL(y));
+}
+
+int wxPostScriptDC::LogicalToUnscrolledDeviceY(double y)
+{
+  return LogicalToDeviceY(y);
 }
 
 double wxPostScriptDC::FLogicalToDeviceX(double x)
@@ -2057,6 +2077,11 @@ double wxPostScriptDC::FLogicalToDeviceXRel(double x)
   return XSCALEREL(x);
 }
 
+double wxPostScriptDC::FLogicalToUnscrolledDeviceX(double x)
+{
+  return FLogicalToDeviceX(x);
+}
+
 double wxPostScriptDC::FLogicalToDeviceY(double y)
 {
   return YSCALE(y);
@@ -2065,6 +2090,11 @@ double wxPostScriptDC::FLogicalToDeviceY(double y)
 double wxPostScriptDC::FLogicalToDeviceYRel(double y)
 {
   return YSCALEREL(y);
+}
+
+double wxPostScriptDC::FLogicalToUnscrolledDeviceY(double y)
+{
+  return FLogicalToDeviceY(y);
 }
 
 double wxPostScriptDC::FsLogicalToDeviceX(double x, double device_origin_x, double user_scale_x)
@@ -2292,11 +2322,11 @@ Bool wxPrintSetupData::ShowNative(wxWindow *parent)
   Bool ok;
 
   if (!native) {
-    native = new wxPrintData();
+    native = new WXGC_PTRS wxPrintData();
     native->SetLandscape(printer_orient == PS_LANDSCAPE);
   }
 
-  d = new wxPrintDialog(parent, native);
+  d = new WXGC_PTRS wxPrintDialog(parent, native);
   ok = d->UseIt();
   DELETE_OBJ d;
 
@@ -2319,11 +2349,11 @@ void wxInitializePrintSetupData(Bool /* init */)
   wxPrintSetupData *wxThePrintSetupData;
   
 #ifdef wx_mac
-  wxThePrintPaperDatabase = new wxPrintPaperDatabase;
+  wxThePrintPaperDatabase = new WXGC_PTRS wxPrintPaperDatabase;
   wxThePrintPaperDatabase->CreateDatabase();
 #endif
   
-  wxThePrintSetupData = new wxPrintSetupData;
+  wxThePrintSetupData = new WXGC_PTRS wxPrintSetupData;
   
   wxThePrintSetupData->SetPrintPreviewCommand(PS_PREVIEW_COMMAND);
   wxThePrintSetupData->SetPrinterOrientation(PS_PORTRAIT);
@@ -2398,7 +2428,7 @@ void wxPrintPaperDatabase::AddPaperType(char *name, int wmm, int hmm,
 					int wp, int hp)
 {
   wxPrintPaperType *ppt;
-  ppt = new wxPrintPaperType(name, wmm, hmm, wp, hp);
+  ppt = new WXGC_PTRS wxPrintPaperType(name, wmm, hmm, wp, hp);
   Append(name, ppt);
 }
 

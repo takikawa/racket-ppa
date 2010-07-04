@@ -17,6 +17,8 @@ CPPFLAGS = @PREFLAGS@ @OPTIONS@ @GC2OPTIONS@ @MZOPTIONS@ -I$(builddir)/.. -I$(sr
 CFLAGS = @CFLAGS@ $(CPPFLAGS) @COMPFLAGS@ @PROFFLAGS@
 LIBS = @LIBS@
 
+DEF_COLLECTS_DIR = +D INITIAL_COLLECTS_DIRECTORY='"'"`cd $(srcdir)/../../../collects; pwd`"'"'
+
 PRE_MZ@OSX@ = env DYLD_FRAMEWORK_PATH="`pwd`/.."
 PRE_MZ@NOT_OSX@ = 
 XFORM_SETUP = $(PRE_MZ) ../mzscheme -rq $(srcdir)/xform.ss --setup
@@ -38,6 +40,7 @@ OBJS =  salloc.@LTO@ \
 	fun.@LTO@ \
 	hash.@LTO@ \
 	image.@LTO@ \
+	jit.@LTO@ \
 	list.@LTO@ \
 	module.@LTO@ \
 	network.@LTO@ \
@@ -78,6 +81,7 @@ XSRCS = $(XSRCDIR)/salloc.c \
 	$(XSRCDIR)/fun.c \
 	$(XSRCDIR)/hash.c \
 	$(XSRCDIR)/image.c \
+	$(XSRCDIR)/jit.c \
 	$(XSRCDIR)/list.c \
 	$(XSRCDIR)/module.c \
 	$(XSRCDIR)/network.c \
@@ -144,6 +148,8 @@ $(XSRCDIR)/hash.c: ../src/hash.@LTO@ $(XFORMDEP)
 	$(XFORM) $(XSRCDIR)/hash.c $(SRCDIR)/hash.c
 $(XSRCDIR)/image.c: ../src/image.@LTO@ $(XFORMDEP)
 	$(XFORM) $(XSRCDIR)/image.c $(SRCDIR)/image.c
+$(XSRCDIR)/jit.c: ../src/jit.@LTO@ $(XFORMDEP)
+	$(XFORM) $(XSRCDIR)/jit.c $(SRCDIR)/jit.c
 $(XSRCDIR)/module.c: ../src/module.@LTO@ $(XFORMDEP)
 	$(XFORM) $(XSRCDIR)/module.c $(SRCDIR)/module.c
 $(XSRCDIR)/list.c: ../src/list.@LTO@ $(XFORMDEP)
@@ -175,7 +181,7 @@ $(XSRCDIR)/sema.c: ../src/sema.@LTO@ $(XFORMDEP)
 $(XSRCDIR)/setjmpup.c: ../src/setjmpup.@LTO@ $(XFORMDEP)
 	$(XFORM) $(XSRCDIR)/setjmpup.c $(SRCDIR)/setjmpup.c
 $(XSRCDIR)/string.c: ../src/string.@LTO@ $(XFORMDEP)
-	$(XFORM_SETUP) --cpp "$(CPP) -I$(OBJDIR) $(CPPFLAGS)" -o $(XSRCDIR)/string.c $(SRCDIR)/string.c
+	$(XFORM_SETUP) --cpp "$(CPP) -I../src $(CPPFLAGS)" -o $(XSRCDIR)/string.c $(SRCDIR)/string.c
 $(XSRCDIR)/struct.c: ../src/struct.@LTO@ $(XFORMDEP)
 	$(XFORM) $(XSRCDIR)/struct.c $(SRCDIR)/struct.c
 $(XSRCDIR)/stxobj.c: ../src/stxobj.@LTO@ $(XFORMDEP)
@@ -193,7 +199,7 @@ $(XSRCDIR)/vector.c: ../src/vector.@LTO@ $(XFORMDEP)
 $(XSRCDIR)/foreign.c: ../../foreign/foreign.@LTO@ $(XFORMDEP)
 	$(XFORM_SETUP) --cpp "$(CPP) $(CPPFLAGS) -I../../foreign/gcc/libffi/include -I${SRCDIR}/../../mzscheme/src" -o $(XSRCDIR)/foreign.c $(SRCDIR)/../../foreign/foreign.c
 $(XSRCDIR)/main.c: ../main.@LTO@ $(XFORMDEP)
-	$(XFORM) $(XSRCDIR)/main.c $(srcdir)/../main.c
+	$(XFORM) $(XSRCDIR)/main.c $(DEF_COLLECTS_DIR) $(srcdir)/../main.c
 
 
 salloc.@LTO@: $(XSRCDIR)/salloc.c
@@ -224,6 +230,8 @@ hash.@LTO@: $(XSRCDIR)/hash.c
 	$(CC) $(CFLAGS) -c $(XSRCDIR)/hash.c -o hash.@LTO@
 image.@LTO@: $(XSRCDIR)/image.c
 	$(CC) $(CFLAGS) -c $(XSRCDIR)/image.c -o image.@LTO@
+jit.@LTO@: $(XSRCDIR)/jit.c
+	$(CC) $(CFLAGS) -c $(XSRCDIR)/jit.c -o jit.@LTO@
 list.@LTO@: $(XSRCDIR)/list.c
 	$(CC) $(CFLAGS) -c $(XSRCDIR)/list.c -o list.@LTO@
 module.@LTO@: $(XSRCDIR)/module.c
@@ -277,37 +285,42 @@ main.@LTO@: $(XSRCDIR)/main.c
 
 gc2.@LTO@: $(srcdir)/gc2.c $(srcdir)/newgc.c $(srcdir)/compact.c $(srcdir)/newgc.c $(srcdir)/gc2.h \
        $(srcdir)/vm_osx.c $(srcdir)/vm_mmap.c $(srcdir)/vm_osk.c $(srcdir)/alloc_cache.c $(srcdir)/my_qsort.c \
-       $(srcdir)/weak.c $(srcdir)/../include/scheme.h $(srcdir)/../src/schpriv.h
+       $(srcdir)/weak.c $(srcdir)/fnls.c $(srcdir)/../include/scheme.h $(srcdir)/../src/schpriv.h
 	$(CC) $(CFLAGS) -c $(srcdir)/gc2.c -o gc2.@LTO@
 
 FOREIGN_OBJS = ../../foreign/gcc/libffi/src/*.@LTO@ ../../foreign/gcc/libffi/src/*/*.@LTO@
 FOREIGN_LIB = ../../foreign/gcc/libffi/libffi@FOREIGN_CONVENIENCE@.la
 FOREIGN_OBJSLIB = @FOREIGN_OBJSLIB@
 
-EXTRA_OBJS_T = ../src/gmp.@LTO@ $(FOREIGN_LIB)
-EXTRA_OBJS_L = ../src/gmp.@LTO@ $(FOREIGN_OBJSLIB)
+EXTRA_OBJS_T = ../src/gmp.@LTO@ @FOREIGN_LIB_IF_USED@
+EXTRA_OBJS_L = ../src/gmp.@LTO@ @FOREIGN_OBJSLIB_IF_USED@
 
 ../libmzscheme3m.@LIBSFX@: $(OBJS) $(EXTRA_OBJS_T)
 	$(AR) $(ARFLAGS) ../libmzscheme3m.@LIBSFX@ $(OBJS) $(EXTRA_OBJS_L)
 	$(RANLIB) ../libmzscheme3m.@LIBSFX@
 
 ../mzscheme3m@NOT_OSX@: main.@LTO@ ../libmzscheme3m.@LIBSFX@
-	@MZLINKER@ -o ../mzscheme3m main.@LTO@ ../libmzscheme3m.@LIBSFX@ $(LIBS)
+	cd ..; @MZLINKER@ -o mzscheme3m @PROFFLAGS@ gc2/main.@LTO@ libmzscheme3m.@LIBSFX@ @LDFLAGS@ $(LIBS)
+# The above "cd .." prevents a problem with libtool's generated script in --enable-shared mode,
+#  at least for Mac OS X. Beware of changing LIBS or LDFLAGS to inclucde something with a relative
+#  path.
 
 MZFWMMM = PLT_MzScheme.framework/Versions/$(FWVERSION)_3m/PLT_MzScheme
 
-$(MZFWMMM): $(OBJS) $(EXTRA_OBJS_T)
+$(MZFWMMM): ../libmzscheme3m.@LIBSFX@
 	if [ ! -d PLT_MzScheme.framework ] ; then mkdir PLT_MzScheme.framework ; fi
 	if [ ! -d PLT_MzScheme.framework/Versions ] ; then mkdir PLT_MzScheme.framework/Versions ; fi
 	if [ ! -d PLT_MzScheme.framework/Versions/$(FWVERSION)_3m ] ; then mkdir PLT_MzScheme.framework/Versions/$(FWVERSION)_3m ; fi
-	$(CC) -o $(MZFWMMM) -framework CoreFoundation -dynamiclib -all_load $(OBJS) $(EXTRA_OBJS_L) $(LIBS)
+	$(CC) -o $(MZFWMMM) -framework CoreFoundation -dynamiclib -all_load ../libmzscheme3m.@LIBSFX@ @LDFLAGS@ $(LIBS)
 	rm -f PLT_MzScheme.framework/PLT_MzScheme
 	ln -s Versions/$(FWVERSION)_3m/PLT_MzScheme PLT_MzScheme.framework/PLT_MzScheme	
 
 ../mzscheme3m@OSX@: $(MZFWMMM) main.@LTO@
-	$(CC) -o ../mzscheme3m main.@LTO@ -F. -framework PLT_MzScheme
+	$(CC) -o ../mzscheme3m @PROFFLAGS@ main.@LTO@ -Wl,-headerpad_max_install_names -F. -framework PLT_MzScheme
 	if [ ! -d ../PLT_MzScheme.framework/Versions/$(FWVERSION)_3m ] ; then mkdir ../PLT_MzScheme.framework/Versions/$(FWVERSION)_3m ; fi
 	cp PLT_MzScheme.framework/Versions/$(FWVERSION)_3m/PLT_MzScheme ../PLT_MzScheme.framework/Versions/$(FWVERSION)_3m/PLT_MzScheme
+	/usr/bin/install_name_tool -change "PLT_MzScheme.framework/Versions/$(FWVERSION)_3m/PLT_MzScheme" "@executable_path/PLT_MzScheme.framework/Versions/$(FWVERSION)_3m/PLT_MzScheme" ../mzscheme3m
+
 
 clean:
 	/bin/rm -f ../mzscheme3m *.@LTO@ $(XSRCDIR)/*

@@ -1,6 +1,8 @@
 (module config mzscheme
   (require (lib "file.ss")
            (lib "configuration.ss" "web-server")
+	   (lib "dirs.ss" "setup")
+           (lib "config.ss" "planet")
            "internal-hp.ss")
   
   (provide config)
@@ -11,7 +13,6 @@
               (normalize-path
                (apply build-path args)))]
            [help-path (build-normal-path (collection-path "help"))]
-           [doc-path (build-normal-path help-path 'up "doc")]
            [host-root (build-normal-path help-path "web-root")]
            [servlet-root help-path]
            [make-host-config
@@ -39,14 +40,18 @@
                  (log-file-path #f)
                  (file-root ,file-root)
                  (servlet-root ,servlet-root)
+                 (mime-types "../../web-server/default-web-root/mime.types")
                  (password-authentication "passwords"))))])
       (build-developer-configuration/vhosts
        `((port ,internal-port)
          (max-waiting 40)
          (initial-connection-timeout 30)
          (default-host-table
-           ,(make-host-config (build-normal-path doc-path 'up)))
-         (virtual-host-table
-          (,addon-host 
-           ,(make-host-config
-             (build-path (find-system-path 'addon-dir))))))))))
+           ,(make-host-config (find-collects-dir)))
+	 (virtual-host-table
+	  ,@(map
+	     (lambda (virtual-host dir)
+	       `(,virtual-host 
+		 ,(make-host-config dir)))
+	     (cons planet-host (append doc-hosts collects-hosts))
+	     (cons (PLANET-DIR) (append doc-dirs collects-dirs)))))))))

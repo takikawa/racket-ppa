@@ -1,0 +1,45 @@
+{ (define LIBNAME "An Imperative Drawing Library (HtDC)")
+  (include "head.tinc") }
+
+
+This <code>idraw</code> package provides stateful classes and imperative methods
+for a visual world. Here is its class diagram of public fields and methods:
+
+<pre>
+<code>
+import draw.Color; 
+import draw.Posn; 
+
+  +---------------------------------+     
+  | abstract World                  |
+  +---------------------------------+       +------------------------------------+
+  | Canvas theCanvas                |------>| Canvas                             |
+  +---------------------------------+       +------------------------------------+
+  | void bigBang(int,int,double)    |       +------------------------------------+
+  | World endOfTime()               |       | void show()                        |
+  | World endOfWorld()              |       | void close()                       |
+  | abstract void onTick()          |       | void drawCircle(Posn,int,Color)    |
+  | abstract void onKeyEvent(String)|       | void drawDisk(Posn,int,Color)      |
+  | abstract void draw()            |       | void drawRect(Posn,int,int,Color)  |
+  | abstract void erase()           |       | void drawLine(Posn,Posn,Color)     |
+  +---------------------------------+       | void drawString(Posn,String)       |
+                                            | void clearCircle(Posn,int,Color)   |
+                                            | void clearDisk(Posn,int,Color)     |
+                                            | void clearRect(Posn,int,int,Color) |
+                                            | void clearLine(Posn,Posn,Color)    |
+                                            +------------------------------------+
+</code>
+</pre>
+
+<p>The abstract <code>World</code> class in <code>idraw</code> provides the same
+methods as the <code>World</code> class in <a href="./draw.html#world">the
+<code>draw</code> library</a>. Their return values are usually <code>void</code>,
+however, except for <code>endOfTime</code> and <code>endOfWorld</code>, which
+continue to return the last world.</p>
+
+<p>In an analogous manner, the methods in the <code>Canvas</code> class export
+the same methods as the <code>Canvas</code> class in <a
+href="./draw.html#canvas">the <code>draw</code> package</a>. Their return values,
+however, are <code>void</code>.  </p>
+
+{(include "foot.tinc")}

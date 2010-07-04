@@ -346,6 +346,7 @@
           
           (define/public (is-stopped?) stopped?)
           (define/public (is-frozen?) frozen?)
+          (define/public (is-stopped?) stopped?)
           
           ;; See docs
           (define/public (freeze-colorer)

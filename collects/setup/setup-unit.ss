@@ -18,7 +18,8 @@
            
 	   "unpack.ss"
 	   "getinfo.ss"
-	   "plthome.ss")
+	   "dirs.ss"
+	   "main-collects.ss")
   
   (provide setup@)
   
@@ -38,10 +39,10 @@
 	  (apply setup-fprintf (current-output-port) s args)))
       
       (setup-printf "Setup version is ~a" (version))
-      (setup-printf "PLT home directory is ~a" (path->string plthome))
-      (setup-printf "Collection paths are ~a" (if (null? (current-library-collection-paths))
-						  "empty!"
-						  ""))
+      (setup-printf "Main collection path is ~a" (find-collects-dir))
+      (setup-printf "Collection search path is ~a" (if (null? (current-library-collection-paths))
+						       "empty!"
+						       ""))
       (for-each (lambda (p)
 		  (setup-printf "  ~a" (path->string p)))
 		(current-library-collection-paths))
@@ -74,7 +75,7 @@
 	 (specific-collections)
 	 (map (lambda (x) (unpack 
 			   x 
-			   plthome 
+			   (build-path (find-collects-dir) 'up)
 			   (lambda (s) (setup-printf "~a" s)) 
 			   (current-target-directory-getter)
 			   (force-unpacks)
@@ -95,7 +96,7 @@
       ;;              Find Collections                 ;;
       ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       
-      (define-struct cc (collection path name info info-path shadowing-policy) (make-inspector))
+      (define-struct cc (collection path name info root-dir info-path shadowing-policy) (make-inspector))
       
       (define (warning-handler v)
 	(lambda (exn) 
@@ -133,6 +134,7 @@
               (apply collection-path collection-p)
               name
               info
+	      root-dir
               (build-path root-dir "info-domain" "compiled" "cache.ss")
               ;; by convention, all collections have "version" 1 0. This forces them
               ;; to conflict with each other.
@@ -162,6 +164,7 @@
              path
              name
              info
+	     #f ; don't need root-dir; absolute paths in cache.ss will be ok
              (get-planet-cache-path)
              (list `(planet ,owner ,pkg-file ,@extra-path) maj min)))))
       
@@ -192,7 +195,7 @@
                   x-specific-planet-dirs))))
       
       (define collections-to-compile
-	(quicksort
+	(sort
 	 (if (and (null? x-specific-collections) (null? x-specific-planet-dirs))
 	     (let ([ht (make-hash-table 'equal)])
 	       (let loop ([collection-paths (current-library-collection-paths)])
@@ -375,7 +378,7 @@
               (for-each (lambda (s)
 			  (when (path-string? s)
 			    (hash-table-put! dependencies s #t)))
-			(map un-plthome-ify (cdr deps))))))
+			(map main-collects-relative->path (cdr deps))))))
 	(delete-file path))
       
       (define (delete-files-in-directory path printout dependencies)
@@ -533,9 +536,10 @@
                       (setup-printf "~aInstalling ~a"
                                     (case part [(pre) "Pre-"] [(post) "Post-"] [else ""])
                                     (cc-name cc))
-		      (if (procedure-arity-includes? installer 2)
-			  (installer plthome (cc-path cc))
-			  (installer plthome))))))))
+		      (let ([dir (build-path (find-collects-dir) 'up)])
+			(if (procedure-arity-includes? installer 2)
+			    (installer dir (cc-path cc))
+			    (installer dir)))))))))
            ccs-to-compile)))
       
       (do-install-part 'pre)
@@ -653,9 +657,18 @@
                                                             (match i
                                                               [((? (lambda (a) 
                                                                        (and (bytes? a)
-                                                                            (file-exists? (build-path 
-                                                                                           (bytes->path a)
-                                                                                           "info.ss"))))
+									    (let ([p (bytes->path a)])
+									      ;; If we have a root directory, then the path
+									      ;;  must be relative to it, otherwise it must
+									      ;;  be absolute:
+									      (and (if (cc-root-dir cc)
+										       (relative-path? p)
+										       (complete-path? p))
+										   (file-exists? (build-path
+												  (if (cc-root-dir cc)
+												      (build-path (cc-root-dir cc) p)
+												      p)
+												  "info.ss"))))))
                                                                    a)
                                                                 ((? symbol? b) ...) 
                                                                 c
@@ -677,7 +690,11 @@
                           ;; Add this collection's info to the table, replacing
                           ;; any information already there.
                           (hash-table-put! t 
-                                           (path->bytes (cc-path cc))
+                                           (path->bytes (if (cc-root-dir cc)
+							    ;; Use relative path:
+							    (apply build-path (cc-collection cc))
+							    ;; Use absolute path:
+							    (cc-path cc)))
                                            (cons (domain) (cc-shadowing-policy cc))))))
                     ccs-to-compile)
           ;; Write out each collection-root-specific table to a "cache.ss" file:
@@ -741,10 +758,13 @@
                                (for-each
                                 (lambda (mzln mzll mzlf)
                                   (let ([p (program-launcher-path mzln)]
-                                        [aux (cons `(exe-name . ,mzln)
-                                                   (build-aux-from-path
-                                                    (build-path (cc-path cc)
-                                                                (path-replace-suffix (or mzll mzln) #""))))])
+                                        [aux (list* `(exe-name . ,mzln)
+						    '(framework-root . #f)
+						    '(dll-dir . #f)
+						    `(relative? . ,(not absolute-installation?))
+						    (build-aux-from-path
+						     (build-path (cc-path cc)
+								 (path-replace-suffix (or mzll mzln) #""))))])
                                     (unless (up-to-date? p aux)
                                       (setup-printf "Installing ~a~a launcher ~a"
                                                     kind (if (eq? (current-launcher-variant) 'normal)
@@ -753,12 +773,9 @@
                                                     (path->string p))
                                       (make-launcher
                                        (or mzlf
-                                           (if (and (cc-collection cc)
-                                                    (= 1 (length (cc-collection cc))))
-                                               ;; Common case (simpler parsing for Windows to
-                                               ;; avoid cygwin bug):
-                                               (list "-qmvL-" mzll (path->string (car (cc-collection cc))))
-                                               (list "-qmvt-" (format "~a" (path->string (build-path (cc-path cc) mzll))))))
+                                           (if (cc-collection cc)
+                                             (list "-qmvL-" mzll (path->string (apply build-path (cc-collection cc))))
+                                             (list "-qmvt-" (format "~a" (path->string (build-path (cc-path cc) mzll))))))
                                        p
                                        aux))))
                                 mzlns

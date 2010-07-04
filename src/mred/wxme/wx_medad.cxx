@@ -3,7 +3,7 @@
  * Purpose:     wxMediaCanvas & wxDrawableMediaAdmin implementation
  * Author:      Matthew Flatt
  * Created:     1995
- * Copyright:   (c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:   (c) 2004-2006 PLT Scheme Inc.
  * Copyright:   (c) 1995, Matthew Flatt
  */
 
@@ -121,7 +121,7 @@ class wxAutoDragTimer : public wxTimer
 wxAutoDragTimer::wxAutoDragTimer(wxMediaCanvas *c, wxMouseEvent *e) {
   canvas = c;
   SetContext(MrEdGetWindowContext(c));
-  event = new wxMouseEvent(0);
+  event = new WXGC_PTRS wxMouseEvent(0);
   memcpy(event, e, sizeof(wxMouseEvent));
   Start(AUTO_DRAG_DELAY, TRUE);
 }
@@ -217,13 +217,13 @@ wxMediaCanvas::wxMediaCanvas(wxWindow *parent,
 			  1, 1, 0, 0, FALSE);
   if (fakeXScroll) {
     SimpleScroll *ss;
-    ss = new SimpleScroll(this, wxHORIZONTAL, 0, 1, 0) ;
+    ss = new WXGC_PTRS SimpleScroll(this, wxHORIZONTAL, 0, 1, 0) ;
     hscroll = ss;
   } else
     hscroll = (SimpleScroll *)NULL;
   if (fakeYScroll) {
     SimpleScroll *ss;
-    ss = new SimpleScroll(this, wxVERTICAL, 0, 1, 0);
+    ss = new WXGC_PTRS SimpleScroll(this, wxVERTICAL, 0, 1, 0);
     vscroll = ss;
   } else
     vscroll = (SimpleScroll *)NULL;
@@ -237,7 +237,7 @@ wxMediaCanvas::wxMediaCanvas(wxWindow *parent,
 
   {
     wxCanvasMediaAdmin *cma;
-    cma = new wxCanvasMediaAdmin(this);
+    cma = new WXGC_PTRS wxCanvasMediaAdmin(this);
     admin = cma;
   }
   admin->standard = 1;
@@ -407,7 +407,7 @@ void wxMediaCanvas::OnFocus(Bool focus)
   if (focuson) {
     if (!blinkTimer) {
       wxBlinkTimer *bt;
-      bt = new wxBlinkTimer(this);
+      bt = new WXGC_PTRS wxBlinkTimer(this);
       blinkTimer = bt;
     }
     blinkTimer->Start(BLINK_DELAY, 1);
@@ -582,7 +582,7 @@ void wxMediaCanvas::OnEvent(wxMouseEvent *event)
 	    w = w->GetParent();
 	}
 	if (!w) {
-	  autoDragger = new wxAutoDragTimer(this, event);
+	  autoDragger = new WXGC_PTRS wxAutoDragTimer(this, event);
 	}
       }
     }
@@ -597,7 +597,7 @@ void wxMediaCanvas::UpdateCursorNow(void)
   if (!media)
     return;
 
-  event = new wxMouseEvent(wxEVENT_TYPE_MOTION);
+  event = new WXGC_PTRS wxMouseEvent(wxEVENT_TYPE_MOTION);
   
   event->x = last_x;
   event->y = last_y;
@@ -724,7 +724,7 @@ void wxMediaCanvas::NoCustomCursor(void)
   
   if (!arrow) {
     wxREGGLOB(arrow);
-    arrow = new wxCursor(wxCURSOR_ARROW);
+    arrow = new WXGC_PTRS wxCursor(wxCURSOR_ARROW);
   }
 
   if (customCursorOn) {
@@ -879,10 +879,16 @@ Bool wxMediaCanvas::ScrollTo(double localx, double localy, double fw, double fh,
     else if (// doesn't fit, bias is set:
 	     (bias == 1 && fh > ih) 
 	     // fits, need to shift up into view:
-	     || (fh <= ih && y + ih < localy + fh)) 
-      sy = media->FindScrollLine(find_dy + localy + fh - ih) + 1 - scrollOffset;
-    else if (// doesn't fit, no conflicting bias, maybe shift down to see more:
-	     (fh > ih && bias != -1 && localy + fh > y + ih)) {
+	     || (fh <= ih && y + ih < localy + fh))  {
+      double l = find_dy + localy + fh - ih;
+      // Find scroll pos for top of region to show:
+      sy = media->FindScrollLine(l);
+      // Unless l is exactly the top of a line, move down to the next whole line:
+      if (media->ScrollLineLocation(sy) != l)
+	sy++;
+      sy -= scrollOffset;
+    } else if (// doesn't fit, no conflicting bias, maybe shift down to see more:
+	       (fh > ih && bias != -1 && localy + fh > y + ih)) {
       // Shift to one more than the first scroll position that shows last line
       long my;
       my = media->FindScrollLine(find_dy + localy + fh - ih) + 1 - scrollOffset;
@@ -1326,7 +1332,7 @@ wxDC *wxCanvasMediaAdmin::GetDC(double *fx, double *fy)
   if (!canvas) {
     if (!wx_canvasless_offscreen) {
       wxREGGLOB(wx_canvasless_offscreen);
-      wx_canvasless_offscreen = new wxMemoryDC();
+      wx_canvasless_offscreen = new WXGC_PTRS wxMemoryDC();
     }
     if (fx)
       *fx = 0;
@@ -1511,7 +1517,7 @@ void wxCanvasMediaAdmin::Resized(Bool update)
 void wxCanvasMediaAdmin::UpdateCursor()
 {
   if (!updateCursorTimer && canvas) {
-    updateCursorTimer = new wxUpdateCursorTimer(this);
+    updateCursorTimer = new WXGC_PTRS wxUpdateCursorTimer(this);
 
     if (nextadmin)
       nextadmin->UpdateCursor();

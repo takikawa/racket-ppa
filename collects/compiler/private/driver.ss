@@ -73,7 +73,7 @@
 	   (lib "compile-sig.ss" "dynext")
 	   (lib "link-sig.ss" "dynext")
 	   (lib "file-sig.ss" "dynext")
-	   (lib "plthome.ss" "setup"))
+	   (lib "dirs.ss" "setup"))
 
   (require "../sig.ss"
 	   "sig.ss"
@@ -211,7 +211,7 @@
 	(lambda (exn)
 	  (set! compiler:messages (reverse! compiler:messages))
 	  (compiler:report-messages! #t)
-	  (exit 1)))
+	  (raise-user-error "compile failed")))
   
       (define s:expand-top-level-expressions!
 	(lambda (input-directory reader verbose?)
@@ -503,7 +503,7 @@
 	    (when (and stop-on-errors?
 		       (or (positive? error-count)
 			   (positive? fatal-error-count)))
-	      (error "Errors encountered.  Compilation aborted.")))))
+	      (raise-user-error "Errors encountered.  Compilation aborted.")))))
 
       (define total-cpu-time 0)
       (define total-real-time 0)
@@ -698,7 +698,8 @@
 		  (let ([core-thunk
 			 (lambda ()
 			   (parameterize ([current-namespace elaborate-namespace]
-					  [current-load-relative-directory input-directory])
+					  [current-load-relative-directory input-directory]
+					  [compile-enforce-module-constants #f])
 			     (let ([sources+bytecodes+magics
 				    (map (lambda (src)
 					   (let-values ([(src bytecode magic-sym)
@@ -1244,10 +1245,10 @@
 				       ;; sort the functions by index to get an optimal case statement
 				       ;; even for stupid compilers
 				       (set! lambda-list
-					     (quicksort lambda-list
-							(lambda (l1 l2)
-							  (< (closure-code-label (get-annotation l1))
-							     (closure-code-label (get-annotation l2))))))
+					     (sort lambda-list
+                                                   (lambda (l1 l2)
+                                                     (< (closure-code-label (get-annotation l1))
+                                                        (closure-code-label (get-annotation l2))))))
 				       (for-each (lambda (L)
 						   (let ([code (get-annotation L)]
 							 [start (zodiac:zodiac-start L)])
@@ -1352,7 +1353,7 @@
 	      (xform (not (compiler:option:verbose)) 
 		     (path->string c-output-path)
 		     c3m-output-path
-		     (list (build-path plthome "include")
+		     (list (find-include-dir)
 			   (collection-path "compiler")))
 
 	      (clean-up-src-c))))
@@ -1376,7 +1377,6 @@
 		     (lambda ()
 		       (with-handlers
 			   ([void (lambda (exn)
-				    (exit)
 				    (compiler:fatal-error
 				     #f
 				     (string-append

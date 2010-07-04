@@ -20,7 +20,9 @@
    make-planet-archive
    get-installed-planet-archives
    remove-pkg
-   unlink-all)
+   unlink-all
+   add-hard-link
+   remove-hard-link)
 
   ;; current-cache-contents : -> ((string ((string ((nat (nat ...)) ...)) ...)) ...)
   ;; returns the packages installed in the local PLaneT cache
@@ -28,9 +30,9 @@
     (cdr (tree->list (repository-tree))))
   
   ;; get-installed-package : string string nat nat -> PKG | #f
-  ;; gets the package associated with this package, if any
+  ;; gets the package associated with this package specification, if any
   (define (get-installed-package owner name maj min)
-    (lookup-package (make-pkg-spec name maj min min (list owner) #f) (CACHE-DIR)))
+    (lookup-package (make-pkg-spec name maj min min (list owner) #f (version))))
   
   ;; just so it will be provided
   (define unlink-all remove-all-linkage!)
@@ -118,7 +120,10 @@
   ;; gives the current "linkage table"; a table that links modules to particular versions
   ;; of planet requires that satisfy those linkages
   (define (current-linkage)
-    (let* ((links (with-input-from-file (LINKAGE-FILE) read-all))
+    (let* ((links 
+            (if (file-exists? (LINKAGE-FILE))
+                (with-input-from-file (LINKAGE-FILE) read-all)
+                '()))
            (buckets (categorize caar links)))
       (map
        (lambda (x) (cons (car x) (map (lambda (y) (drop-last (cadr y))) (cdr x))))
@@ -148,4 +153,22 @@
                'file
                #f
                #f))
-       (normalize-path archive-name)])))
+       (normalize-path archive-name)]))
+  
+  ;; add-hard-link : string string num num path -> void
+  ;; adds an entry in the hard-links table associating the given
+  ;; require spec to the given path
+  (define (add-hard-link owner pkg-name maj min path)
+    (unless (directory-exists? path)
+      (if (file-exists? path)
+          (error 'add-hard-link "Hard links must point to directories, not files")
+          (fprintf (current-error-port) 
+                   "Warning: directory ~a does not exist\n"
+                   (path->string path))))
+    (add-hard-link! pkg-name (list owner) maj min path))
+   
+  ;; remove-hard-link : string string num num -> void
+  ;; removes any development association from the given package spec
+  (define (remove-hard-link owner pkg-name maj min)
+    (filter-link-table!
+     (lambda (row) (not (points-to? row pkg-name (list owner) maj min))))))

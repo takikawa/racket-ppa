@@ -3,7 +3,7 @@
  * Purpose:	Declaration of the Platform Independent GIF Image Class
  * Author:	Alejandro Aguilar Sierra
  * Created:	1995
- * Copyright:	(c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:	(c) 2004-2006 PLT Scheme Inc.
  * Copyright:	(c) 1995, Alejandro Aguilar Sierra <asierra@servidor.unam.mx>
  */
 #if !defined(__wximgfil_h)
@@ -59,7 +59,11 @@ typedef int BOOL;
 struct rgb { byte  r,g,b; };
 struct rgbq { byte  r,g,b,rv; };
 
-class wxGIF {
+class wxGIF
+#ifndef MZ_PRECISE_GC
+: public gc
+#endif
+{
 private:
   void InitInterlaceRow(int);
 public:

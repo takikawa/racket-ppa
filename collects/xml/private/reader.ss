@@ -72,9 +72,14 @@
         (let read-more ()
           (let ([x (lex in pos)])
             (cond
-              [(or (pi? x) (comment? x))
+              [(pi? x)
                (let-values ([(lst next) (read-more)])
                  (values (cons x lst) next))]
+              [(comment? x)
+               (let-values ([(lst next) (read-more)])
+                 (if (read-comments)
+                     (values (cons x lst) next)
+                     (values lst next)))]
               [(and (pcdata? x) (andmap char-whitespace? (string->list (pcdata-string x))))
                (read-more)]
               [else (values null x)]))))
@@ -241,19 +246,18 @@
       
       ;; lex-attributes : Input-port (-> Location) -> (listof Attribute)
       (define (lex-attributes in pos)
-        (quicksort (let loop ()
-                     (skip-space in)
-                     (cond
-                       [(name-start? (peek-char-or-special in))
-                        (cons (lex-attribute in pos) (loop))]
-                       [else null]))
-                   (lambda (a b)
-                     (let ([na (attribute-name a)]
-                           [nb (attribute-name b)])
-                       (cond
-                         [(eq? na nb) (lex-error in pos "duplicated attribute name ~a" na)]
-                         [else (string<? (symbol->string na) (symbol->string nb))])))))
-      
+        (sort (let loop ()
+                (skip-space in)
+                (cond [(name-start? (peek-char-or-special in))
+                       (cons (lex-attribute in pos) (loop))]
+                      [else null]))
+              (lambda (a b)
+                (let ([na (attribute-name a)]
+                      [nb (attribute-name b)])
+                  (cond
+                   [(eq? na nb) (lex-error in pos "duplicated attribute name ~a" na)]
+                   [else (string<? (symbol->string na) (symbol->string nb))])))))
+
       ;; lex-attribute : Input-port (-> Location) -> Attribute
       (define (lex-attribute in pos)
         (let ([start (pos)]

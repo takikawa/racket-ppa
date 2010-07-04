@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -30,8 +30,6 @@ Scheme_Object scheme_null[1];
 /* locals */
 static Scheme_Object *pair_p_prim (int argc, Scheme_Object *argv[]);
 static Scheme_Object *cons_prim (int argc, Scheme_Object *argv[]);
-static Scheme_Object *car_prim (int argc, Scheme_Object *argv[]);
-static Scheme_Object *cdr_prim (int argc, Scheme_Object *argv[]);
 static Scheme_Object *set_car_prim (int argc, Scheme_Object *argv[]);
 static Scheme_Object *set_cdr_prim (int argc, Scheme_Object *argv[]);
 static Scheme_Object *cons_immutable (int argc, Scheme_Object *argv[]);
@@ -122,74 +120,74 @@ static Scheme_Object *weak_symbol, *equal_symbol;
 void
 scheme_init_list (Scheme_Env *env)
 {
+  Scheme_Object *p;
+  
   scheme_null->type = scheme_null_type;
 
   scheme_add_global_constant ("null", scheme_null, env);
 
-  scheme_add_global_constant ("pair?",
-			      scheme_make_folding_prim(pair_p_prim,
-						       "pair?",
-						       1, 1, 1),
-			      env);
+  p = scheme_make_folding_prim(pair_p_prim, "pair?", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant ("pair?", p, env);
+
   scheme_add_global_constant ("cons",
 			      scheme_make_prim_w_arity(cons_prim,
 						       "cons",
 						       2, 2),
 			      env);
-  scheme_add_global_constant ("car",
-			      scheme_make_prim_w_arity(car_prim,
-						       "car",
-						       1, 1),
-			      env);
-  scheme_add_global_constant ("cdr",
-			      scheme_make_prim_w_arity(cdr_prim,
-						       "cdr",
-						       1, 1),
-			      env);
+
+  p = scheme_make_noncm_prim(scheme_checked_car, "car", 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant ("car", p, env);
+
+  p = scheme_make_noncm_prim(scheme_checked_cdr, "cdr", 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant ("cdr", p, env);
+
   scheme_add_global_constant ("set-car!",
-			      scheme_make_prim_w_arity(set_car_prim,
-						       "set-car!",
-						       2, 2),
+			      scheme_make_noncm_prim(set_car_prim,
+						     "set-car!",
+						     2, 2),
 			      env);
   scheme_add_global_constant ("set-cdr!",
-			      scheme_make_prim_w_arity(set_cdr_prim,
-						       "set-cdr!",
-						       2, 2),
+			      scheme_make_noncm_prim(set_cdr_prim,
+						     "set-cdr!",
+						     2, 2),
 			      env);
   scheme_add_global_constant ("cons-immutable",
-			      scheme_make_prim_w_arity(cons_immutable,
-						       "cons-immutable",
-						       2, 2),
+			      scheme_make_noncm_prim(cons_immutable,
+						     "cons-immutable",
+						     2, 2),
 			      env);
-  scheme_add_global_constant ("null?",
-			      scheme_make_folding_prim(null_p_prim,
-						       "null?",
-						       1, 1, 1),
-			      env);
+
+  p = scheme_make_folding_prim(null_p_prim, "null?", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant ("null?", p, env);
+
   scheme_add_global_constant ("list?",
-			      scheme_make_prim_w_arity(list_p_prim,
-						       "list?",
-						       1, 1),
+			      scheme_make_noncm_prim(list_p_prim,
+						     "list?",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("list",
-			      scheme_make_prim_w_arity(list_prim,
-						       "list",
-						       0, -1),
+			      scheme_make_noncm_prim(list_prim,
+						     "list",
+						     0, -1),
 			      env);
   scheme_add_global_constant ("list-immutable",
-			      scheme_make_prim_w_arity(list_immutable_prim,
-						       "list-immutable",
-						       0, -1),
+			      scheme_make_noncm_prim(list_immutable_prim,
+						     "list-immutable",
+						     0, -1),
 			      env);
   scheme_add_global_constant ("list*",
-			      scheme_make_prim_w_arity(list_star_prim,
-						       "list*",
-						       1, -1),
+			      scheme_make_noncm_prim(list_star_prim,
+						     "list*",
+						     1, -1),
 			      env);
   scheme_add_global_constant ("list*-immutable",
-			      scheme_make_prim_w_arity(list_star_immutable_prim,
-						       "list*-immutable",
-						       1, -1),
+			      scheme_make_noncm_prim(list_star_immutable_prim,
+						     "list*-immutable",
+						     1, -1),
 			      env);
   scheme_add_global_constant("immutable?",
 			     scheme_make_folding_prim(immutablep,
@@ -197,221 +195,221 @@ scheme_init_list (Scheme_Env *env)
 						      1, 1, 1),
 			     env);
   scheme_add_global_constant ("length",
-			      scheme_make_prim_w_arity(length_prim,
-						       "length",
-						       1, 1),
+			      scheme_make_noncm_prim(length_prim,
+						     "length",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("append",
-			      scheme_make_prim_w_arity(append_prim,
-						       "append",
-						       0, -1),
+			      scheme_make_noncm_prim(append_prim,
+						     "append",
+						     0, -1),
 			      env);
   scheme_add_global_constant ("append!",
-			      scheme_make_prim_w_arity(append_bang_prim,
-						       "append!",
-						       0, -1),
+			      scheme_make_noncm_prim(append_bang_prim,
+						     "append!",
+						     0, -1),
 			      env);
   scheme_add_global_constant ("reverse",
-			      scheme_make_prim_w_arity(reverse_prim,
-						       "reverse",
-						       1, 1),
+			      scheme_make_noncm_prim(reverse_prim,
+						     "reverse",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("reverse!",
-			      scheme_make_prim_w_arity(reverse_bang_prim,
-						       "reverse!",
-						       1, 1),
+			      scheme_make_noncm_prim(reverse_bang_prim,
+						     "reverse!",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("list-tail",
-			      scheme_make_prim_w_arity(list_tail_prim,
-						       "list-tail",
-						       2, 2),
+			      scheme_make_noncm_prim(list_tail_prim,
+						     "list-tail",
+						     2, 2),
 			      env);
   scheme_add_global_constant ("list-ref",
-			      scheme_make_prim_w_arity(list_ref_prim,
-						       "list-ref",
-						       2, 2),
+			      scheme_make_noncm_prim(list_ref_prim,
+						     "list-ref",
+						     2, 2),
 			      env);
   scheme_add_global_constant ("memq",
-			      scheme_make_prim_w_arity(memq,
-						       "memq",
-						       2, 2),
+			      scheme_make_noncm_prim(memq,
+						     "memq",
+						     2, 2),
 			      env);
   scheme_add_global_constant ("memv",
-			      scheme_make_prim_w_arity(memv,
-						       "memv",
-						       2, 2),
+			      scheme_make_noncm_prim(memv,
+						     "memv",
+						     2, 2),
 			      env);
   scheme_add_global_constant ("member",
-			      scheme_make_prim_w_arity(member,
-						       "member",
-						       2, 2),
+			      scheme_make_noncm_prim(member,
+						     "member",
+						     2, 2),
 			      env);
   scheme_add_global_constant ("assq",
-			      scheme_make_prim_w_arity(assq,
-						       "assq",
-						       2, 2),
+			      scheme_make_noncm_prim(assq,
+						     "assq",
+						     2, 2),
 			      env);
   scheme_add_global_constant ("assv",
-			      scheme_make_prim_w_arity(assv,
-						       "assv",
-						       2, 2),
+			      scheme_make_noncm_prim(assv,
+						     "assv",
+						     2, 2),
 			      env);
   scheme_add_global_constant ("assoc",
-			      scheme_make_prim_w_arity(assoc,
-						       "assoc",
-						       2, 2),
+			      scheme_make_noncm_prim(assoc,
+						     "assoc",
+						     2, 2),
 			      env);
   scheme_add_global_constant ("caar",
-			      scheme_make_prim_w_arity(caar_prim,
-						       "caar",
-						       1, 1),
+			      scheme_make_noncm_prim(caar_prim,
+						     "caar",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("cadr",
-			      scheme_make_prim_w_arity(cadr_prim,
-						       "cadr",
-						       1, 1),
+			      scheme_make_noncm_prim(cadr_prim,
+						     "cadr",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("cdar",
-			      scheme_make_prim_w_arity(cdar_prim,
-						       "cdar",
-						       1, 1),
+			      scheme_make_noncm_prim(cdar_prim,
+						     "cdar",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("cddr",
-			      scheme_make_prim_w_arity(cddr_prim,
-						       "cddr",
-						       1, 1),
+			      scheme_make_noncm_prim(cddr_prim,
+						     "cddr",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("caaar",
-			      scheme_make_prim_w_arity(caaar_prim,
-						       "caaar",
-						       1, 1),
+			      scheme_make_noncm_prim(caaar_prim,
+						     "caaar",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("caadr",
-			      scheme_make_prim_w_arity(caadr_prim,
-						       "caadr",
-						       1, 1),
+			      scheme_make_noncm_prim(caadr_prim,
+						     "caadr",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("cadar",
-			      scheme_make_prim_w_arity(cadar_prim,
-						       "cadar",
-						       1, 1),
+			      scheme_make_noncm_prim(cadar_prim,
+						     "cadar",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("cdaar",
-			      scheme_make_prim_w_arity(cdaar_prim,
-						       "cdaar",
-						       1, 1),
+			      scheme_make_noncm_prim(cdaar_prim,
+						     "cdaar",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("cdadr",
-			      scheme_make_prim_w_arity(cdadr_prim,
-						       "cdadr",
-						       1, 1),
+			      scheme_make_noncm_prim(cdadr_prim,
+						     "cdadr",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("cddar",
-			      scheme_make_prim_w_arity(cddar_prim,
-						       "cddar",
-						       1, 1),
+			      scheme_make_noncm_prim(cddar_prim,
+						     "cddar",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("caddr",
-			      scheme_make_prim_w_arity(caddr_prim,
-						       "caddr",
-						       1, 1),
+			      scheme_make_noncm_prim(caddr_prim,
+						     "caddr",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("cdddr",
-			      scheme_make_prim_w_arity(cdddr_prim,
-						       "cdddr",
-						       1, 1),
+			      scheme_make_noncm_prim(cdddr_prim,
+						     "cdddr",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("cddddr",
-			      scheme_make_prim_w_arity(cddddr_prim,
-						       "cddddr",
-						       1, 1),
+			      scheme_make_noncm_prim(cddddr_prim,
+						     "cddddr",
+						     1, 1),
 			      env);
 
   scheme_add_global_constant ("cadddr",
-			      scheme_make_prim_w_arity(cadddr_prim,
-						       "cadddr",
-						       1, 1),
+			      scheme_make_noncm_prim(cadddr_prim,
+						     "cadddr",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("cdaddr",
-			      scheme_make_prim_w_arity(cdaddr_prim,
-						       "cdaddr",
-						       1, 1),
+			      scheme_make_noncm_prim(cdaddr_prim,
+						     "cdaddr",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("cddadr",
-			      scheme_make_prim_w_arity(cddadr_prim,
-						       "cddadr",
-						       1, 1),
+			      scheme_make_noncm_prim(cddadr_prim,
+						     "cddadr",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("cdddar",
-			      scheme_make_prim_w_arity(cdddar_prim,
-						       "cdddar",
-						       1, 1),
+			      scheme_make_noncm_prim(cdddar_prim,
+						     "cdddar",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("caaddr",
-			      scheme_make_prim_w_arity(caaddr_prim,
-						       "caaddr",
-						       1, 1),
+			      scheme_make_noncm_prim(caaddr_prim,
+						     "caaddr",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("cadadr",
-			      scheme_make_prim_w_arity(cadadr_prim,
-						       "cadadr",
-						       1, 1),
+			      scheme_make_noncm_prim(cadadr_prim,
+						     "cadadr",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("caddar",
-			      scheme_make_prim_w_arity(caddar_prim,
-						       "caddar",
-						       1, 1),
+			      scheme_make_noncm_prim(caddar_prim,
+						     "caddar",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("cdaadr",
-			      scheme_make_prim_w_arity(cdaadr_prim,
-						       "cdaadr",
-						       1, 1),
+			      scheme_make_noncm_prim(cdaadr_prim,
+						     "cdaadr",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("cdadar",
-			      scheme_make_prim_w_arity(cdadar_prim,
-						       "cdadar",
-						       1, 1),
+			      scheme_make_noncm_prim(cdadar_prim,
+						     "cdadar",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("cddaar",
-			      scheme_make_prim_w_arity(cddaar_prim,
-						       "cddaar",
-						       1, 1),
+			      scheme_make_noncm_prim(cddaar_prim,
+						     "cddaar",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("cdaaar",
-			      scheme_make_prim_w_arity(cdaaar_prim,
-						       "cdaaar",
-						       1, 1),
+			      scheme_make_noncm_prim(cdaaar_prim,
+						     "cdaaar",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("cadaar",
-			      scheme_make_prim_w_arity(cadaar_prim,
-						       "cadaar",
-						       1, 1),
+			      scheme_make_noncm_prim(cadaar_prim,
+						     "cadaar",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("caadar",
-			      scheme_make_prim_w_arity(caadar_prim,
-						       "caadar",
-						       1, 1),
+			      scheme_make_noncm_prim(caadar_prim,
+						     "caadar",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("caaadr",
-			      scheme_make_prim_w_arity(caaadr_prim,
-						       "caaadr",
-						       1, 1),
+			      scheme_make_noncm_prim(caaadr_prim,
+						     "caaadr",
+						     1, 1),
 			      env);
   scheme_add_global_constant ("caaaar",
-			      scheme_make_prim_w_arity(caaaar_prim,
-						       "caaaar",
-						       1, 1),
+			      scheme_make_noncm_prim(caaaar_prim,
+						     "caaaar",
+						     1, 1),
 			      env);
 
   scheme_add_global_constant(BOX,
-			     scheme_make_prim_w_arity(box,
-						      BOX,
-						      1, 1),
+			     scheme_make_noncm_prim(box,
+						    BOX,
+						    1, 1),
 			     env);
   scheme_add_global_constant("box-immutable",
-			     scheme_make_prim_w_arity(immutable_box,
-						      "box-immutable",
-						      1, 1),
+			     scheme_make_noncm_prim(immutable_box,
+						    "box-immutable",
+						    1, 1),
 			     env);
   scheme_add_global_constant(BOXP,
 			     scheme_make_folding_prim(box_p,
@@ -419,25 +417,25 @@ scheme_init_list (Scheme_Env *env)
 						      1, 1, 1),
 			     env);
   scheme_add_global_constant(UNBOX,
-			     scheme_make_prim_w_arity(unbox,
-						      UNBOX,
-						      1, 1),
+			     scheme_make_noncm_prim(unbox,
+						    UNBOX,
+						    1, 1),
 			     env);
   scheme_add_global_constant(SETBOX,
-			     scheme_make_prim_w_arity(set_box,
-						      SETBOX,
-						      2, 2),
+			     scheme_make_noncm_prim(set_box,
+						    SETBOX,
+						    2, 2),
 			     env);
 
   scheme_add_global_constant("make-hash-table",
-			     scheme_make_prim_w_arity(make_hash_table,
-						      "make-hash-table",
-						      0, 2),
+			     scheme_make_noncm_prim(make_hash_table,
+						    "make-hash-table",
+						    0, 2),
 			     env);
   scheme_add_global_constant("make-immutable-hash-table",
-			     scheme_make_prim_w_arity(make_immutable_hash_table,
-						      "make-immutable-hash-table",
-						      1, 2),
+			     scheme_make_noncm_prim(make_immutable_hash_table,
+						    "make-immutable-hash-table",
+						    1, 2),
 			     env);
   scheme_add_global_constant("hash-table?",
 			     scheme_make_folding_prim(hash_table_p,
@@ -445,19 +443,19 @@ scheme_init_list (Scheme_Env *env)
 						      1, 3, 1),
 			     env);
   scheme_add_global_constant("hash-table-count",
-			     scheme_make_prim_w_arity(hash_table_count,
-						      "hash-table-count",
-						      1, 1),
+			     scheme_make_noncm_prim(hash_table_count,
+						    "hash-table-count",
+						    1, 1),
 			     env);
   scheme_add_global_constant("hash-table-copy",
-			     scheme_make_prim_w_arity(hash_table_copy,
-						      "hash-table-copy",
-						      1, 1),
+			     scheme_make_noncm_prim(hash_table_copy,
+						    "hash-table-copy",
+						    1, 1),
 			     env);
   scheme_add_global_constant("hash-table-put!",
-			     scheme_make_prim_w_arity(hash_table_put,
-						      "hash-table-put!",
-						      3, 3),
+			     scheme_make_noncm_prim(hash_table_put,
+						    "hash-table-put!",
+						    3, 3),
 			     env);
   scheme_add_global_constant("hash-table-get",
 			     scheme_make_prim_w_arity(hash_table_get,
@@ -465,41 +463,41 @@ scheme_init_list (Scheme_Env *env)
 						      2, 3),
 			     env);
   scheme_add_global_constant("hash-table-remove!",
-			     scheme_make_prim_w_arity(hash_table_remove,
-						      "hash-table-remove!",
-						      2, 2),
+			     scheme_make_noncm_prim(hash_table_remove,
+						    "hash-table-remove!",
+						    2, 2),
 			     env);
   scheme_add_global_constant("hash-table-map",
-			     scheme_make_prim_w_arity(hash_table_map,
-						      "hash-table-map",
-						      2, 2),
+			     scheme_make_noncm_prim(hash_table_map,
+						    "hash-table-map",
+						    2, 2),
 			     env);
   scheme_add_global_constant("hash-table-for-each",
-			     scheme_make_prim_w_arity(hash_table_for_each,
-						      "hash-table-for-each",
-						      2, 2),
+			     scheme_make_noncm_prim(hash_table_for_each,
+						    "hash-table-for-each",
+						    2, 2),
 			     env);
 
   scheme_add_global_constant("eq-hash-code",
-			     scheme_make_prim_w_arity(eq_hash_code,
-						      "eq-hash-code",
-						      1, 1),
+			     scheme_make_noncm_prim(eq_hash_code,
+						    "eq-hash-code",
+						    1, 1),
 			     env);
   scheme_add_global_constant("equal-hash-code",
-			     scheme_make_prim_w_arity(equal_hash_code,
-						      "equal-hash-code",
-						      1, 1),
+			     scheme_make_noncm_prim(equal_hash_code,
+						    "equal-hash-code",
+						    1, 1),
 			     env);
 
   scheme_add_global_constant("make-weak-box",
-			     scheme_make_prim_w_arity(make_weak_box,
-						      "make-weak-box",
-						      1, 1),
+			     scheme_make_noncm_prim(make_weak_box,
+						    "make-weak-box",
+						    1, 1),
 			     env);
   scheme_add_global_constant("weak-box-value",
-			     scheme_make_prim_w_arity(weak_box_value,
-						      "weak-box-value",
-						      1, 1),
+			     scheme_make_noncm_prim(weak_box_value,
+						    "weak-box-value",
+						    1, 1),
 			     env);
   scheme_add_global_constant("weak-box?",
 			     scheme_make_folding_prim(weak_boxp,
@@ -508,14 +506,14 @@ scheme_init_list (Scheme_Env *env)
 			     env);
 
   scheme_add_global_constant("make-ephemeron",
-			     scheme_make_prim_w_arity(make_ephemeron,
-						      "make-ephemeron",
-						      2, 2),
+			     scheme_make_noncm_prim(make_ephemeron,
+						    "make-ephemeron",
+						    2, 2),
 			     env);
   scheme_add_global_constant("ephemeron-value",
-			     scheme_make_prim_w_arity(ephemeron_value,
-						      "ephemeron-value",
-						      1, 1),
+			     scheme_make_noncm_prim(ephemeron_value,
+						    "ephemeron-value",
+						    1, 1),
 			     env);
   scheme_add_global_constant("ephemeron?",
 			     scheme_make_folding_prim(ephemeronp,
@@ -534,8 +532,32 @@ Scheme_Object *scheme_make_pair(Scheme_Object *car, Scheme_Object *cdr)
 {
   Scheme_Object *cons;
 
+#if 0
+  if (!car || !cdr
+      || (SCHEME_TYPE(car) < 0)
+      || (SCHEME_TYPE(cdr) < 0)
+      || (SCHEME_TYPE(car) >= (_scheme_last_type_ + 10)) /* +10 leaves room of external types */
+      || (SCHEME_TYPE(cdr) >= (_scheme_last_type_ + 10)))
+    *(long *)0x0 = 1;
+#endif
+
   cons = scheme_alloc_object();
   cons->type = scheme_pair_type;
+  SCHEME_CAR(cons) = car;
+  SCHEME_CDR(cons) = cdr;
+  return cons;
+}
+
+Scheme_Object *scheme_make_raw_pair(Scheme_Object *car, Scheme_Object *cdr)
+{
+  Scheme_Object *cons;
+
+  /* A raw pair is like a pair, but some of our low-level debugging
+     tools expect pairs to always contain tagged values. A raw pair
+     contains arbitrary pointers. */
+
+  cons = scheme_alloc_object();
+  cons->type = scheme_raw_pair_type;
   SCHEME_CAR(cons) = car;
   SCHEME_CDR(cons) = cdr;
   return cons;
@@ -731,16 +753,16 @@ cons_immutable (int argc, Scheme_Object *argv[])
   return (cons);
 }
 
-static Scheme_Object *
-car_prim (int argc, Scheme_Object *argv[])
+Scheme_Object *
+scheme_checked_car (int argc, Scheme_Object *argv[])
 {
   if (!SCHEME_PAIRP(argv[0]))
     scheme_wrong_type("car", "pair", 0, argc, argv);
   return (SCHEME_CAR (argv[0]));
 }
 
-static Scheme_Object *
-cdr_prim (int argc, Scheme_Object *argv[])
+Scheme_Object *
+scheme_checked_cdr (int argc, Scheme_Object *argv[])
 {
   if (!SCHEME_PAIRP(argv[0]))
     scheme_wrong_type("cdr", "pair", 0, argc, argv);
@@ -1118,15 +1140,25 @@ list_ref_prim(int argc, Scheme_Object *argv[])
 static Scheme_Object * \
 name (int argc, Scheme_Object *argv[]) \
 { \
-  Scheme_Object *list; \
-  list = argv[1]; \
+  Scheme_Object *list, *turtle; \
+  list = turtle = argv[1]; \
   while (SCHEME_PAIRP(list)) \
     { \
       if (comp (argv[0], SCHEME_CAR (list))) \
 	{ \
-          return (list); \
+          return list; \
 	} \
       list = SCHEME_CDR (list); \
+      if (SCHEME_PAIRP(list)) { \
+        if (comp (argv[0], SCHEME_CAR (list))) \
+	  { \
+            return list; \
+	  } \
+        if (SAME_OBJ(list, turtle)) break; \
+        list = SCHEME_CDR (list); \
+        turtle = SCHEME_CDR (turtle); \
+        SCHEME_USE_FUEL(1); \
+      } \
     } \
   if (!SCHEME_NULLP(list)) { \
     scheme_raise_exn(MZEXN_FAIL_CONTRACT, \
@@ -1144,8 +1176,8 @@ GEN_MEM(member, member, scheme_equal)
 static Scheme_Object * \
 name (int argc, Scheme_Object *argv[]) \
 { \
-  Scheme_Object *pair, *list; \
-  list = argv[1]; \
+  Scheme_Object *pair, *list, *turtle;			\
+  list = turtle = argv[1]; \
   while (SCHEME_PAIRP (list)) \
     { \
       pair = SCHEME_CAR (list); \
@@ -1165,6 +1197,17 @@ name (int argc, Scheme_Object *argv[]) \
           return (pair); \
 	} \
       list = SCHEME_CDR (list); \
+      if (SCHEME_PAIRP(list)) { \
+        pair = SCHEME_CAR (list); \
+        if (SCHEME_PAIRP(pair)) { \
+          if (comp (argv[0], SCHEME_CAR (pair))) \
+	    return pair; \
+          list = SCHEME_CDR (list); \
+          if (SAME_OBJ(list, turtle)) break; \
+          turtle = SCHEME_CDR (turtle); \
+          SCHEME_USE_FUEL(1); \
+        } \
+      } \
     } \
   if (!SCHEME_NULLP(list)) {\
     scheme_raise_exn(MZEXN_FAIL_CONTRACT, \
@@ -1749,6 +1792,7 @@ static Scheme_Ephemeron *ephemerons, *done_ephemerons; /* not registered as a ro
 # define GC_is_marked(p) GC_base(p)
 # define GC_did_mark_stack_overflow() 0
 #else
+extern MZ_DLLIMPORT void *GC_base(void *);
 extern MZ_DLLIMPORT int GC_is_marked(void *);
 extern MZ_DLLIMPORT int GC_did_mark_stack_overflow(void);
 #endif
@@ -1918,7 +1962,7 @@ void scheme_clear_ephemerons()
   done_ephemerons = NULL;
 }
 
-extern MZ_DLLIMPORT void (*GC_custom_finalize)(void);
+extern MZ_DLLIMPORT void (*GC_custom_finalize)();
 
 void scheme_init_ephemerons(void)
 {

@@ -198,13 +198,13 @@
           (size-down (preferences:get 'framework:recently-opened-files/pos)
                      n)))       
       
-      ;; set-recent-position : string number number -> void
+      ;; set-recent-position : path number number -> void
       ;; updates the recent menu preferences 
       ;; with the positions `start' and `end'
       (define (set-recent-position filename start end)
         (let ([recent-items
                (filter (λ (x) (string=? (path->string (car x))
-                                             (path->string filename)))
+                                        (path->string filename)))
                        (preferences:get 'framework:recently-opened-files/pos))])
           (unless (null? recent-items)
             (let ([recent-item (car recent-items)])
@@ -303,9 +303,9 @@
               (for-each (λ (item) (send hl delete-item item)) (send hl get-items))
               (for-each (λ (item) (add-recent-item item))
                         (if (eq? (preferences:get 'framework:recently-opened-sort-by) 'name)
-                            (quicksort recent-list-items
-                                       (λ (x y) (string<=? (path->string (car x))
-                                                                (path->string (car y)))))
+                            (sort recent-list-items
+                                  (λ (x y) (string<=? (path->string (car x))
+                                                      (path->string (car y)))))
                             recent-list-items))
               (send ed end-edit-sequence)))
           
@@ -380,7 +380,8 @@
 
       (define open-file
 	(λ ()
-	  (let* ([parent (and (preferences:get 'framework:open-here?)
+	  (let* ([parent (and (or (not (eq? 'macosx (system-type)))
+                                  (preferences:get 'framework:open-here?))
                               (get-top-level-focus-window))]
                  [file 
                   (parameterize ([finder:dialog-parent-parameter parent])

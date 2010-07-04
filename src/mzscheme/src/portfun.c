@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -99,6 +99,7 @@ static Scheme_Object *write_byte (int, Scheme_Object *[]);
 static Scheme_Object *load (int, Scheme_Object *[]);
 static Scheme_Object *current_load (int, Scheme_Object *[]);
 static Scheme_Object *current_load_directory(int argc, Scheme_Object *argv[]);
+static Scheme_Object *current_write_directory(int argc, Scheme_Object *argv[]);
 static Scheme_Object *default_load (int, Scheme_Object *[]);
 static Scheme_Object *transcript_on(int, Scheme_Object *[]);
 static Scheme_Object *transcript_off(int, Scheme_Object *[]);
@@ -152,6 +153,8 @@ Scheme_Object *scheme_write_proc, *scheme_display_proc, *scheme_print_proc;
 void
 scheme_init_port_fun(Scheme_Env *env)
 {
+  Scheme_Object *p;
+
 #ifdef MZ_PRECISE_GC
   register_traversers();
 #endif
@@ -181,15 +184,15 @@ scheme_init_port_fun(Scheme_Env *env)
 
   module_symbol = scheme_intern_symbol("module");
 
-  scheme_write_proc = scheme_make_prim_w_arity(sch_write,
-					       "write",
+  scheme_write_proc = scheme_make_noncm_prim(sch_write,
+					     "write",
+					     1, 2);
+  scheme_display_proc = scheme_make_noncm_prim(display,
+					       "display",
 					       1, 2);
-  scheme_display_proc = scheme_make_prim_w_arity(display,
-						 "display",
-						 1, 2);
-  scheme_print_proc = scheme_make_prim_w_arity(sch_print,
-					       "print",
-					       1, 2);
+  scheme_print_proc = scheme_make_noncm_prim(sch_print,
+					     "print",
+					     1, 2);
 
   /* Made as a closed prim so we can get the arity right: */
   default_read_handler = scheme_make_closed_prim_w_arity(sch_default_read_handler,
@@ -341,292 +344,292 @@ scheme_init_port_fun(Scheme_Env *env)
 			     env);
 
   scheme_add_global_constant("read",
-			     scheme_make_prim_w_arity(read_f,
-						      "read",
-						      0, 1),
+			     scheme_make_noncm_prim(read_f,
+						    "read",
+						    0, 1),
 			     env);
   scheme_add_global_constant("read/recursive",
-			     scheme_make_prim_w_arity(read_recur_f,
-						      "read/recursive",
-						      0, 3),
+			     scheme_make_noncm_prim(read_recur_f,
+						    "read/recursive",
+						    0, 3),
 			     env);
   scheme_add_global_constant("read-syntax",
-			     scheme_make_prim_w_arity(read_syntax_f,
-						      "read-syntax",
-						      0, 2),
+			     scheme_make_noncm_prim(read_syntax_f,
+						    "read-syntax",
+						    0, 2),
 			     env);
   scheme_add_global_constant("read-syntax/recursive",
-			     scheme_make_prim_w_arity(read_syntax_recur_f,
-						      "read-syntax/recursive",
-						      0, 4),
+			     scheme_make_noncm_prim(read_syntax_recur_f,
+						    "read-syntax/recursive",
+						    0, 4),
 			     env);
   scheme_add_global_constant("read-honu",
-			     scheme_make_prim_w_arity(read_honu_f,
-						      "read-honu",
-						      0, 1),
+			     scheme_make_noncm_prim(read_honu_f,
+						    "read-honu",
+						    0, 1),
 			     env);
   scheme_add_global_constant("read-honu/recursive",
-			     scheme_make_prim_w_arity(read_honu_recur_f,
-						      "read-honu/recursive",
-						      0, 1),
+			     scheme_make_noncm_prim(read_honu_recur_f,
+						    "read-honu/recursive",
+						    0, 1),
 			     env);
   scheme_add_global_constant("read-honu-syntax",
-			     scheme_make_prim_w_arity(read_honu_syntax_f,
-						      "read-honu-syntax",
-						      0, 2),
+			     scheme_make_noncm_prim(read_honu_syntax_f,
+						    "read-honu-syntax",
+						    0, 2),
 			     env);
   scheme_add_global_constant("read-honu-syntax/recursive",
-			     scheme_make_prim_w_arity(read_honu_syntax_recur_f,
-						      "read-honu-syntax/recursive",
-						      0, 2),
+			     scheme_make_noncm_prim(read_honu_syntax_recur_f,
+						    "read-honu-syntax/recursive",
+						    0, 2),
 			     env);
   scheme_add_global_constant("read-char",
-			     scheme_make_prim_w_arity(read_char,
-						      "read-char",
-						      0, 1),
+			     scheme_make_noncm_prim(read_char,
+						    "read-char",
+						    0, 1),
 			     env);
   scheme_add_global_constant("read-char-or-special",
-			     scheme_make_prim_w_arity(read_char_spec,
-						      "read-char-or-special",
-						      0, 1),
+			     scheme_make_noncm_prim(read_char_spec,
+						    "read-char-or-special",
+						    0, 1),
 			     env);
   scheme_add_global_constant("read-byte",
-			     scheme_make_prim_w_arity(read_byte,
-						      "read-byte",
-						      0, 1),
+			     scheme_make_noncm_prim(read_byte,
+						    "read-byte",
+						    0, 1),
 			     env);
   scheme_add_global_constant("read-byte-or-special",
-			     scheme_make_prim_w_arity(read_byte_spec,
-						      "read-byte-or-special",
-						      0, 1),
+			     scheme_make_noncm_prim(read_byte_spec,
+						    "read-byte-or-special",
+						    0, 1),
 			     env);
   scheme_add_global_constant("read-bytes-line",
-			     scheme_make_prim_w_arity(read_byte_line,
-						      "read-bytes-line",
-						      0, 2),
+			     scheme_make_noncm_prim(read_byte_line,
+						    "read-bytes-line",
+						    0, 2),
 			     env);
   scheme_add_global_constant("read-line",
-			     scheme_make_prim_w_arity(read_line,
-						      "read-line",
-						      0, 2),
+			     scheme_make_noncm_prim(read_line,
+						    "read-line",
+						    0, 2),
 			     env);
   scheme_add_global_constant("read-string",
-			     scheme_make_prim_w_arity(sch_read_string,
-						      "read-string",
-						      1, 2),
+			     scheme_make_noncm_prim(sch_read_string,
+						    "read-string",
+						    1, 2),
 			     env);
   scheme_add_global_constant("read-string!",
-			     scheme_make_prim_w_arity(sch_read_string_bang,
-						      "read-string!",
-						      1, 4),
+			     scheme_make_noncm_prim(sch_read_string_bang,
+						    "read-string!",
+						    1, 4),
 			     env);
   scheme_add_global_constant("peek-string",
-			     scheme_make_prim_w_arity(sch_peek_string,
-						      "peek-string",
-						      2, 3),
+			     scheme_make_noncm_prim(sch_peek_string,
+						    "peek-string",
+						    2, 3),
 			     env);
   scheme_add_global_constant("peek-string!",
-			     scheme_make_prim_w_arity(sch_peek_string_bang,
-						      "peek-string!",
-						      2, 5),
+			     scheme_make_noncm_prim(sch_peek_string_bang,
+						    "peek-string!",
+						    2, 5),
 			     env);
   scheme_add_global_constant("read-bytes",
-			     scheme_make_prim_w_arity(sch_read_bytes,
-						      "read-bytes",
-						      1, 2),
+			     scheme_make_noncm_prim(sch_read_bytes,
+						    "read-bytes",
+						    1, 2),
 			     env);
   scheme_add_global_constant("read-bytes!",
-			     scheme_make_prim_w_arity(sch_read_bytes_bang,
-						      "read-bytes!",
-						      1, 4),
+			     scheme_make_noncm_prim(sch_read_bytes_bang,
+						    "read-bytes!",
+						    1, 4),
 			     env);
   scheme_add_global_constant("peek-bytes",
-			     scheme_make_prim_w_arity(sch_peek_bytes,
-						      "peek-bytes",
-						      2, 3),
+			     scheme_make_noncm_prim(sch_peek_bytes,
+						    "peek-bytes",
+						    2, 3),
 			     env);
   scheme_add_global_constant("peek-bytes!",
-			     scheme_make_prim_w_arity(sch_peek_bytes_bang,
-						      "peek-bytes!",
-						      2, 5),
+			     scheme_make_noncm_prim(sch_peek_bytes_bang,
+						    "peek-bytes!",
+						    2, 5),
 			     env);
   scheme_add_global_constant("read-bytes-avail!",
-			     scheme_make_prim_w_arity(read_bytes_bang,
-						      "read-bytes-avail!",
-						      1, 4),
+			     scheme_make_noncm_prim(read_bytes_bang,
+						    "read-bytes-avail!",
+						    1, 4),
 			     env);
   scheme_add_global_constant("read-bytes-avail!*",
-			     scheme_make_prim_w_arity(read_bytes_bang_nonblock,
-						      "read-bytes-avail!*",
-						      1, 4),
+			     scheme_make_noncm_prim(read_bytes_bang_nonblock,
+						    "read-bytes-avail!*",
+						    1, 4),
 			     env);
   scheme_add_global_constant("read-bytes-avail!/enable-break",
-			     scheme_make_prim_w_arity(read_bytes_bang_break,
-						      "read-bytes-avail!/enable-break",
-						      1, 4),
+			     scheme_make_noncm_prim(read_bytes_bang_break,
+						    "read-bytes-avail!/enable-break",
+						    1, 4),
 			     env);
   scheme_add_global_constant("peek-bytes-avail!",
-			     scheme_make_prim_w_arity(peek_bytes_bang,
-						      "peek-bytes-avail!",
-						      2, 6),
+			     scheme_make_noncm_prim(peek_bytes_bang,
+						    "peek-bytes-avail!",
+						    2, 6),
 			     env);
   scheme_add_global_constant("peek-bytes-avail!*",
-			     scheme_make_prim_w_arity(peek_bytes_bang_nonblock,
-						      "peek-bytes-avail!*",
-						      2, 6),
+			     scheme_make_noncm_prim(peek_bytes_bang_nonblock,
+						    "peek-bytes-avail!*",
+						    2, 6),
 			     env);
   scheme_add_global_constant("peek-bytes-avail!/enable-break",
-			     scheme_make_prim_w_arity(peek_bytes_bang_break,
-						      "peek-bytes-avail!/enable-break",
-						      2, 6),
+			     scheme_make_noncm_prim(peek_bytes_bang_break,
+						    "peek-bytes-avail!/enable-break",
+						    2, 6),
 			     env);
   scheme_add_global_constant("port-provides-progress-evts?",
-			     scheme_make_prim_w_arity(can_provide_progress_evt,
-						      "port-provides-progress-evts?",
-						      1, 1),
+			     scheme_make_noncm_prim(can_provide_progress_evt,
+						    "port-provides-progress-evts?",
+						    1, 1),
 			     env);
   scheme_add_global_constant("write-bytes",
-			     scheme_make_prim_w_arity(write_bytes,
-						      "write-bytes",
-						      1, 4),
+			     scheme_make_noncm_prim(write_bytes,
+						    "write-bytes",
+						    1, 4),
 			     env);
   scheme_add_global_constant("write-string",
-			     scheme_make_prim_w_arity(write_string,
-						      "write-string",
-						      1, 4),
+			     scheme_make_noncm_prim(write_string,
+						    "write-string",
+						    1, 4),
 			     env);
   scheme_add_global_constant("write-bytes-avail",
-			     scheme_make_prim_w_arity(write_bytes_avail,
-						      "write-bytes-avail",
-						      1, 4),
+			     scheme_make_noncm_prim(write_bytes_avail,
+						    "write-bytes-avail",
+						    1, 4),
 			     env);
   scheme_add_global_constant("write-bytes-avail*",
-			     scheme_make_prim_w_arity(write_bytes_avail_nonblock,
-						      "write-bytes-avail*",
-						      1, 4),
+			     scheme_make_noncm_prim(write_bytes_avail_nonblock,
+						    "write-bytes-avail*",
+						    1, 4),
 			     env);
   scheme_add_global_constant("write-bytes-avail/enable-break",
-			     scheme_make_prim_w_arity(write_bytes_avail_break,
-						      "write-bytes-avail/enable-break",
-						      1, 4),
+			     scheme_make_noncm_prim(write_bytes_avail_break,
+						    "write-bytes-avail/enable-break",
+						    1, 4),
 			     env);
   scheme_add_global_constant("port-writes-atomic?",
-			     scheme_make_prim_w_arity(can_write_atomic,
-						      "port-writes-atomic?",
-						      1, 1),
+			     scheme_make_noncm_prim(can_write_atomic,
+						    "port-writes-atomic?",
+						    1, 1),
 			     env);
   scheme_add_global_constant("port-writes-special?",
-			     scheme_make_prim_w_arity(can_write_special,
-						      "port-writes-special?",
-						      1, 1),
+			     scheme_make_noncm_prim(can_write_special,
+						    "port-writes-special?",
+						    1, 1),
 			     env);
   scheme_add_global_constant("write-special",
-			     scheme_make_prim_w_arity(scheme_write_special,
-						      "write-special",
-						      1, 2),
+			     scheme_make_noncm_prim(scheme_write_special,
+						    "write-special",
+						    1, 2),
 			     env);
   scheme_add_global_constant("write-special-avail*",
-			     scheme_make_prim_w_arity(scheme_write_special_nonblock,
-						      "write-special-avail*",
-						      1, 2),
+			     scheme_make_noncm_prim(scheme_write_special_nonblock,
+						    "write-special-avail*",
+						    1, 2),
 			     env);
   scheme_add_global_constant("peek-char",
-			     scheme_make_prim_w_arity(peek_char,
-						      "peek-char",
-						      0, 2),
+			     scheme_make_noncm_prim(peek_char,
+						    "peek-char",
+						    0, 2),
 			     env);
   scheme_add_global_constant("peek-char-or-special",
-			     scheme_make_prim_w_arity(peek_char_spec,
-						      "peek-char-or-special",
-						      0, 2),
+			     scheme_make_noncm_prim(peek_char_spec,
+						    "peek-char-or-special",
+						    0, 2),
 			     env);
   scheme_add_global_constant("peek-byte",
-			     scheme_make_prim_w_arity(peek_byte,
-						      "peek-byte",
-						      0, 2),
+			     scheme_make_noncm_prim(peek_byte,
+						    "peek-byte",
+						    0, 2),
 			     env);
   scheme_add_global_constant("peek-byte-or-special",
-			     scheme_make_prim_w_arity(peek_byte_spec,
-						      "peek-byte-or-special",
-						      0, 3),
+			     scheme_make_noncm_prim(peek_byte_spec,
+						    "peek-byte-or-special",
+						    0, 3),
 			     env);
-  scheme_add_global_constant("eof-object?",
-			     scheme_make_folding_prim(eof_object_p,
-						      "eof-object?",
-						      1, 1, 1),
-			     env);
+
+  p = scheme_make_folding_prim(eof_object_p, "eof-object?", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant("eof-object?", p, env);
+
   scheme_add_global_constant("byte-ready?",
-			     scheme_make_prim_w_arity(byte_ready_p,
-						      "byte-ready?",
-						      0, 1),
+			     scheme_make_noncm_prim(byte_ready_p,
+						    "byte-ready?",
+						    0, 1),
 			     env);
   scheme_add_global_constant("char-ready?",
-			     scheme_make_prim_w_arity(char_ready_p,
-						      "char-ready?",
-						      0, 1),
+			     scheme_make_noncm_prim(char_ready_p,
+						    "char-ready?",
+						    0, 1),
 			     env);
 
   scheme_add_global_constant("write", scheme_write_proc, env);
   scheme_add_global_constant("display", scheme_display_proc, env);
   scheme_add_global_constant("print", scheme_print_proc, env);
   scheme_add_global_constant("newline",
-			     scheme_make_prim_w_arity(newline,
-						      "newline",
-						      0, 1),
+			     scheme_make_noncm_prim(newline,
+						    "newline",
+						    0, 1),
 			     env);
 
   scheme_add_global_constant("write-char",
-			     scheme_make_prim_w_arity(write_char,
-						      "write-char",
-						      1, 2),
+			     scheme_make_noncm_prim(write_char,
+						    "write-char",
+						    1, 2),
 			     env);
   scheme_add_global_constant("write-byte",
-			     scheme_make_prim_w_arity(write_byte,
-						      "write-byte",
-						      1, 2),
+			     scheme_make_noncm_prim(write_byte,
+						    "write-byte",
+						    1, 2),
 			     env);
 
   scheme_add_global_constant("port-commit-peeked",
-			     scheme_make_prim_w_arity(peeked_read,
-						      "port-commit-peeked",
-						      3, 4),
+			     scheme_make_noncm_prim(peeked_read,
+						    "port-commit-peeked",
+						    3, 4),
 			     env);
   scheme_add_global_constant("port-progress-evt",
-			     scheme_make_prim_w_arity(progress_evt,
-						      "port-progress-evt",
-						      0, 1),
+			     scheme_make_noncm_prim(progress_evt,
+						    "port-progress-evt",
+						    0, 1),
 			     env);
 
   scheme_add_global_constant("write-bytes-avail-evt",
-			     scheme_make_prim_w_arity(write_bytes_avail_evt,
-						      "write-bytes-avail-evt",
-						      1, 4),
+			     scheme_make_noncm_prim(write_bytes_avail_evt,
+						    "write-bytes-avail-evt",
+						    1, 4),
 			     env);
   scheme_add_global_constant("write-special-evt",
-			     scheme_make_prim_w_arity(write_special_evt,
-						      "write-special-evt",
-						      2, 2),
+			     scheme_make_noncm_prim(write_special_evt,
+						    "write-special-evt",
+						    2, 2),
 			     env);
 
   scheme_add_global_constant("port-read-handler",
-			     scheme_make_prim_w_arity(port_read_handler,
-						      "port-read-handler",
-						      1, 2),
+			     scheme_make_noncm_prim(port_read_handler,
+						    "port-read-handler",
+						    1, 2),
 			     env);
   scheme_add_global_constant("port-display-handler",
-			     scheme_make_prim_w_arity(port_display_handler,
-						      "port-display-handler",
-						      1, 2),
+			     scheme_make_noncm_prim(port_display_handler,
+						    "port-display-handler",
+						    1, 2),
 			     env);
   scheme_add_global_constant("port-write-handler",
-			     scheme_make_prim_w_arity(port_write_handler,
-						      "port-write-handler",
-						      1, 2),
+			     scheme_make_noncm_prim(port_write_handler,
+						    "port-write-handler",
+						    1, 2),
 			     env);
   scheme_add_global_constant("port-print-handler",
-			     scheme_make_prim_w_arity(port_print_handler,
-						      "port-print-handler",
-						      1, 2),
+			     scheme_make_noncm_prim(port_print_handler,
+						    "port-print-handler",
+						    1, 2),
 			     env);
   scheme_add_global_constant("global-port-print-handler",
 			     scheme_register_parameter(global_port_print_handler,
@@ -639,7 +642,7 @@ scheme_init_port_fun(Scheme_Env *env)
 						       "load",
 						       1, 1,
 						       0, -1),
-			      env);
+			     env);
   scheme_add_global_constant("current-load",
 			     scheme_register_parameter(current_load,
 						       "current-load",
@@ -649,6 +652,11 @@ scheme_init_port_fun(Scheme_Env *env)
 			     scheme_register_parameter(current_load_directory,
 						       "current-load-relative-directory",
 						       MZCONFIG_LOAD_DIRECTORY),
+			     env);
+  scheme_add_global_constant("current-write-relative-directory",
+			     scheme_register_parameter(current_write_directory,
+						       "current-write-relative-directory",
+						       MZCONFIG_WRITE_DIRECTORY),
 			     env);
 
   scheme_add_global_constant ("transcript-on",
@@ -663,24 +671,24 @@ scheme_init_port_fun(Scheme_Env *env)
 			      env);
 
   scheme_add_global_constant("flush-output",
-			     scheme_make_prim_w_arity(flush_output,
-						      "flush-output",
-						      0, 1),
+			     scheme_make_noncm_prim(flush_output,
+						    "flush-output",
+						    0, 1),
 			     env);
   scheme_add_global_constant("file-position",
-			     scheme_make_prim_w_arity(scheme_file_position,
-						      "file-position",
-						      1, 2),
+			     scheme_make_noncm_prim(scheme_file_position,
+						    "file-position",
+						    1, 2),
 			     env);
   scheme_add_global_constant("file-stream-buffer-mode",
-			     scheme_make_prim_w_arity(scheme_file_buffer,
-						      "file-stream-buffer-mode",
-						      1, 2),
+			     scheme_make_noncm_prim(scheme_file_buffer,
+						    "file-stream-buffer-mode",
+						    1, 2),
 			     env);
   scheme_add_global_constant("port-file-identity",
-			     scheme_make_prim_w_arity(scheme_file_identity,
-						      "port-file-identity",
-						      1, 1),
+			     scheme_make_noncm_prim(scheme_file_identity,
+						    "port-file-identity",
+						    1, 1),
 			     env);
 
   scheme_add_global_constant("make-pipe",
@@ -690,16 +698,16 @@ scheme_init_port_fun(Scheme_Env *env)
 						       2, 2),
 			     env);
   scheme_add_global_constant("pipe-content-length", 
-			     scheme_make_prim_w_arity(pipe_length, 
-						      "pipe-content-length", 
-						      1, 1), 
+			     scheme_make_noncm_prim(pipe_length, 
+						    "pipe-content-length", 
+						    1, 1), 
 			     env);
   
 
   scheme_add_global_constant("port-count-lines!",
-			     scheme_make_prim_w_arity(port_count_lines,
-						      "port-count-lines!",
-						      1, 1),
+			     scheme_make_noncm_prim(port_count_lines,
+						    "port-count-lines!",
+						    1, 1),
 			     env);
   scheme_add_global_constant("port-next-location",
 			     scheme_make_prim_w_arity2(port_next_location,
@@ -718,9 +726,14 @@ scheme_init_port_fun(Scheme_Env *env)
 void scheme_init_port_fun_config(void)
 {
   scheme_set_root_param(MZCONFIG_LOAD_DIRECTORY, scheme_false);
+  scheme_set_root_param(MZCONFIG_WRITE_DIRECTORY, scheme_false);
   scheme_set_root_param(MZCONFIG_USE_COMPILED_KIND,
 			scheme_make_immutable_pair(scheme_make_path("compiled"),
 						   scheme_null));
+  scheme_set_root_param(MZCONFIG_USE_USER_PATHS, 
+			(scheme_ignore_user_paths 
+			 ? scheme_false
+			 : scheme_true));
 
   {
     Scheme_Object *dlh;
@@ -758,7 +771,14 @@ string_get_or_peek_bytes(Scheme_Input_Port *port,
   is = (Scheme_Indexed_String *) port->port_data;
   if (is->index + skip >= is->size)
     return EOF;
-  else {
+  else if (size == 1) {
+    int pos = is->index;
+    if (buffer)
+      buffer[offset] = is->string[pos + skip];
+    if (!peek)
+      is->index = pos + 1;
+    return 1;
+  } else {
     long l, delta;
 
     delta = is->index + skip;
@@ -1475,9 +1495,7 @@ user_write_result(const char *who, Scheme_Output_Port *port, int evt_ok,
   while (1) {
     if (SCHEME_FALSEP(val)) {
       if (!rarely_block)
-	scheme_arg_mismatch(who,
-			    "bad result for blocking mode: ",
-			    val);
+	return 0; /* #f result is allowed, though not preferred */
       else if (rarely_block == 2)
 	return -1;
       else if (!evt_ok)
@@ -1501,7 +1519,10 @@ user_write_result(const char *who, Scheme_Output_Port *port, int evt_ok,
 			    val);
       }
 
-      return n;
+      if (!len && !rarely_block)
+	return 1; /* turn 0 into 1 to indicate a successful blocking flush */
+      else
+	return n;
     } else if (evt_ok && scheme_is_evt(val)) {
       /* A write failed, and we were given a evt that unblocks when
 	 the write succeeds. */
@@ -1572,10 +1593,17 @@ user_write_bytes(Scheme_Output_Port *port, const char *str, long offset, long le
 
     scheme_pop_break_enable(&cframe, 1);
 
-    if (n || (rarely_block != 1))
-      return n;
+    if (!n && !rarely_block) {
+      /* Try blocking write/flush again */
+    } else {
+      if (n || (rarely_block != 1)) {
+	if (!rarely_block && !len)
+	  return 0; /* n == 1 for success, but caller wants 0 */
+	return n;
+      }
+      /* else rarely_block == 1, and we haven't written anything. */
+    }
 
-    /* rarely_block == 1, and we haven't written anything. */
     scheme_thread_block(0.0);
     scheme_current_thread->ran_some = 1;
   }
@@ -4263,17 +4291,19 @@ static Scheme_Object *default_load(int argc, Scheme_Object *argv[])
   }
 
   config = scheme_current_config();
-  config = scheme_extend_config(config, MZCONFIG_CASE_SENS, (scheme_case_sensitive ? scheme_true : scheme_false)); // for legacy code
-  config = scheme_extend_config(config, MZCONFIG_SQUARE_BRACKETS_ARE_PARENS, scheme_true);
-  config = scheme_extend_config(config, MZCONFIG_CURLY_BRACES_ARE_PARENS, scheme_true);
-  config = scheme_extend_config(config, MZCONFIG_CAN_READ_GRAPH, scheme_true);
-  config = scheme_extend_config(config, MZCONFIG_CAN_READ_COMPILED, scheme_true);
-  config = scheme_extend_config(config, MZCONFIG_CAN_READ_BOX, scheme_true);
-  config = scheme_extend_config(config, MZCONFIG_CAN_READ_PIPE_QUOTE, scheme_true);
-  config = scheme_extend_config(config, MZCONFIG_CAN_READ_DOT, scheme_true);
-  config = scheme_extend_config(config, MZCONFIG_CAN_READ_QUASI, scheme_true);
-  config = scheme_extend_config(config, MZCONFIG_CAN_READ_READER, scheme_true);
-  config = scheme_extend_config(config, MZCONFIG_READ_DECIMAL_INEXACT, scheme_true);
+  if (SCHEME_TRUEP(expected_module)) {
+    config = scheme_extend_config(config, MZCONFIG_CASE_SENS, (scheme_case_sensitive ? scheme_true : scheme_false)); /* for legacy code */
+    config = scheme_extend_config(config, MZCONFIG_SQUARE_BRACKETS_ARE_PARENS, scheme_true);
+    config = scheme_extend_config(config, MZCONFIG_CURLY_BRACES_ARE_PARENS, scheme_true);
+    config = scheme_extend_config(config, MZCONFIG_CAN_READ_GRAPH, scheme_true);
+    config = scheme_extend_config(config, MZCONFIG_CAN_READ_COMPILED, scheme_true);
+    config = scheme_extend_config(config, MZCONFIG_CAN_READ_BOX, scheme_true);
+    config = scheme_extend_config(config, MZCONFIG_CAN_READ_PIPE_QUOTE, scheme_true);
+    config = scheme_extend_config(config, MZCONFIG_CAN_READ_DOT, scheme_true);
+    config = scheme_extend_config(config, MZCONFIG_CAN_READ_QUASI, scheme_true);
+    config = scheme_extend_config(config, MZCONFIG_CAN_READ_READER, scheme_true);
+    config = scheme_extend_config(config, MZCONFIG_READ_DECIMAL_INEXACT, scheme_true);
+  }
 
   lhd = MALLOC_ONE_RT(LoadHandlerData);
 #ifdef MZTAG_REQUIRED
@@ -4286,13 +4316,17 @@ static Scheme_Object *default_load(int argc, Scheme_Object *argv[])
   lhd->stxsrc = name;
   lhd->expected_module = expected_module;
 
-  scheme_push_continuation_frame(&cframe);
-  scheme_set_cont_mark(scheme_parameterization_key, (Scheme_Object *)config);
+  if (SCHEME_TRUEP(expected_module)) {
+    scheme_push_continuation_frame(&cframe);
+    scheme_set_cont_mark(scheme_parameterization_key, (Scheme_Object *)config);
+  }
 
   v = scheme_dynamic_wind(NULL, do_load_handler, post_load_handler,
 			  NULL, (void *)lhd);
 
-  scheme_pop_continuation_frame(&cframe);
+  if (SCHEME_TRUEP(expected_module)) {
+    scheme_pop_continuation_frame(&cframe);
+  }
 
   return v;
 }
@@ -4348,7 +4382,7 @@ current_load(int argc, Scheme_Object *argv[])
 			     2, NULL, NULL, 0);
 }
 
-static Scheme_Object *abs_directory_p(int argc, Scheme_Object **argv)
+static Scheme_Object *abs_directory_p(const char *name, int argc, Scheme_Object **argv)
 {
   Scheme_Object *d = argv[0];
 
@@ -4367,10 +4401,11 @@ static Scheme_Object *abs_directory_p(int argc, Scheme_Object **argv)
 
     if (!scheme_is_complete_path(s, len))
       scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-		       "current-load-relative-directory: not a complete path: \"%q\"",
+		       "%s: not a complete path: \"%q\"",
+		       name,
 		       s);
 
-    expanded = scheme_expand_string_filename(d, "current-load-relative-directory", NULL,
+    expanded = scheme_expand_string_filename(d, name, NULL,
 					     SCHEME_GUARD_FILE_EXISTS);
     ed = scheme_make_sized_path(expanded, strlen(expanded), 1);
 
@@ -4380,13 +4415,32 @@ static Scheme_Object *abs_directory_p(int argc, Scheme_Object **argv)
   return scheme_false;
 }
 
+static Scheme_Object *lr_abs_directory_p(int argc, Scheme_Object **argv)
+{
+  return abs_directory_p("current-load-relative-directory", argc, argv);
+}
+
 static Scheme_Object *
 current_load_directory(int argc, Scheme_Object *argv[])
 {
   return scheme_param_config("current-load-relative-directory",
 			     scheme_make_integer(MZCONFIG_LOAD_DIRECTORY),
 			     argc, argv,
-			     -1, abs_directory_p, "path, string, or #f", 1);
+			     -1, lr_abs_directory_p, "path, string, or #f", 1);
+}
+
+static Scheme_Object *wr_abs_directory_p(int argc, Scheme_Object **argv)
+{
+  return abs_directory_p("current-write-relative-directory", argc, argv);
+}
+
+static Scheme_Object *
+current_write_directory(int argc, Scheme_Object *argv[])
+{
+  return scheme_param_config("current-write-relative-directory",
+			     scheme_make_integer(MZCONFIG_WRITE_DIRECTORY),
+			     argc, argv,
+			     -1, wr_abs_directory_p, "path, string, or #f", 1);
 }
 
 Scheme_Object *scheme_load(const char *file)

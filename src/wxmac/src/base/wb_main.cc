@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	August 1994
- * Copyright:	(c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:	(c) 2004-2006 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  */
 
@@ -75,15 +75,15 @@ void wxCommonInit(void)
 {
   wx_init_patterns();
   wxREGGLOB(wxBuffer);
-  wxBuffer = new char[1500];
+  wxBuffer = new WXGC_ATOMIC char[1500];
   wxREGGLOB(wxTheColourDatabase);
-  wxTheColourDatabase = new wxColourDatabase();
+  wxTheColourDatabase = new WXGC_PTRS wxColourDatabase();
   wxTheColourDatabase->Initialize();
   wxInitializeFontNameDirectory();
   wxInitializeStockObjects();
   wxInitStandardTypes();
   wxREGGLOB(wxThePrintPaperDatabase);
-  wxThePrintPaperDatabase = new wxPrintPaperDatabase;
+  wxThePrintPaperDatabase = new WXGC_PTRS wxPrintPaperDatabase;
   wxREGGLOB(wxWindow::gMouseWindow);
   wxRegisterAbortWindow();
   wxRegisterSplinePointList();

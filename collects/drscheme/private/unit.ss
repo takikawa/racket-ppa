@@ -1,3 +1,4 @@
+
 #|
 
 closing:
@@ -11,14 +12,15 @@ module browser threading seems wrong.
 |#
 
 (module unit mzscheme
-  (require (lib "unitsig.ss")
-	   (lib "class.ss")
+  (require (lib "contract.ss")
+           (lib "unitsig.ss")
+           (lib "class.ss")
            (lib "file.ss")
            (lib "etc.ss")
            (lib "list.ss")
            (lib "port.ss")
            (lib "string-constant.ss" "string-constants")
-	   (lib "framework.ss" "framework")
+           (lib "framework.ss" "framework")
            (lib "name-message.ss" "mrlib")
            (lib "bitmap-label.ss" "mrlib")
            
@@ -37,6 +39,7 @@ module browser threading seems wrong.
   (define module-browser-progress-constant (string-constant module-browser-progress))
   (define status-compiling-definitions (string-constant module-browser-compiling-defns))
   (define show-lib-paths (string-constant module-browser-show-lib-paths/short))
+  (define show-planet-paths (string-constant module-browser-show-planet-paths/short))
   (define refresh (string-constant module-browser-refresh))
   
   (define unit@
@@ -566,7 +569,7 @@ module browser threading seems wrong.
             (super-new)
 
 	    (inherit set-max-undo-history)
-	    (set-max-undo-history 5000))))
+	    (set-max-undo-history 'forever))))
       
       
                                                        
@@ -602,19 +605,28 @@ module browser threading seems wrong.
         (keymap:add-to-right-button-menu
          (λ (menu editor event)
            (when (is-a? editor text%)
-             (let* ([current-pos (get-pos editor event)]
-                    [current-word (and current-pos (get-current-word editor current-pos))]
-                    [defn (and current-word
-                               (ormap (λ (defn) (and (string=? current-word (defn-name defn))
-                                                          defn))
-                                      (get-definitions #f editor)))])
-               (when defn
-                 (new separator-menu-item% (parent menu))
-                 (new menu-item%
-                   (parent menu)
-                   (label (format (string-constant jump-to-defn) (defn-name defn)))
-                   (callback (λ (x y)
-                               (send editor set-position (defn-start-pos defn))))))))
+             (let* ([canvas (send editor get-canvas)]
+                    [frame (and canvas (send canvas get-top-level-window))])
+               (when (is-a? frame -frame<%>)
+                 (let* ([language-settings (send (send frame get-definitions-text) get-next-settings)]
+                        [new-language (drscheme:language-configuration:language-settings-language language-settings)]
+                        [capability-info (send new-language capability-value 'drscheme:define-popup)])
+                   (when capability-info
+                     (let* ([current-pos (get-pos editor event)]
+                            [current-word (and current-pos (get-current-word editor current-pos))]
+                            [defn (and current-word
+                                       (ormap (λ (defn) (and (string=? current-word (defn-name defn))
+                                                             defn))
+                                              (get-definitions (car capability-info)
+                                                               #f
+                                                               editor)))])
+                       (when defn
+                         (new separator-menu-item% (parent menu))
+                         (new menu-item%
+                              (parent menu)
+                              (label (format (string-constant jump-to-defn) (defn-name defn)))
+                              (callback (λ (x y)
+                                          (send editor set-position (defn-start-pos defn))))))))))))
            (old menu editor event))))
 
       ;; get-current-word : editor number -> string
@@ -649,60 +661,73 @@ module browser threading seems wrong.
                                    (string-constant sort-by-position) 
                                    (string-constant sort-by-name))))
           
+          (define capability-info (drscheme:language:get-capability-default 'drscheme:define-popup))
+          
+          (inherit set-message set-hidden?)
+          (define/public (language-changed new-language)
+            (set! capability-info (send new-language capability-value 'drscheme:define-popup))
+            (cond
+              [capability-info
+               (set-message #f (cdr capability-info))
+               (set-hidden? #f)]
+              [else
+               (set-hidden? #t)]))
           (define/override (fill-popup menu reset)
-	    (let* ([text (send frame get-definitions-text)]
-                   [unsorted-defns (get-definitions (not sort-by-name?) text)]
-                   [defns (if sort-by-name?
-                              (quicksort 
-                               unsorted-defns
-                               (λ (x y) (string-ci<=? (defn-name x) (defn-name y))))
-                              unsorted-defns)])
-              (make-object menu:can-restore-menu-item% sorting-name
-                menu
-                (λ (x y)
-                  (change-sorting-order)))
-              (make-object separator-menu-item% menu)
-              (if (null? defns)
-                  (send (make-object menu:can-restore-menu-item%
-                          (string-constant no-definitions-found)
-                          menu
-                          void)
-                        enable #f)
-                  (let loop ([defns defns])
-                    (unless (null? defns)
-                      (let* ([defn (car defns)]
-                             [checked? 
-                              (let ([t-start (send text get-start-position)]
-                                    [t-end (send text get-end-position)]
-                                    [d-start (defn-start-pos defn)]
-                                    [d-end (defn-end-pos defn)])
-                                (or (<= t-start d-start t-end)
-                                    (<= t-start d-end t-end)
-                                    (<= d-start t-start t-end d-end)))]
-                             [item
-                              (make-object (if checked?
-                                               menu:can-restore-checkable-menu-item%
-                                               menu:can-restore-menu-item%)
-                                (gui-utils:trim-string (defn-name defn) 200)
-                                menu
-                                (λ (x y)
-                                  (reset)
-                                  (send text set-position (defn-start-pos defn) (defn-start-pos defn))
-                                  (let ([canvas (send text get-canvas)])
-                                    (when canvas
-                                      (send canvas focus)))))])
-                        (when checked?
-                          (send item check #t))
-                        (loop (cdr defns))))))))
+            (when capability-info
+              (let* ([text (send frame get-definitions-text)]
+                     [unsorted-defns (get-definitions (car capability-info)
+                                                      (not sort-by-name?)
+                                                      text)]
+                     [defns (if sort-by-name?
+                                (sort
+                                 unsorted-defns
+                                 (λ (x y) (string-ci<=? (defn-name x) (defn-name y))))
+                                unsorted-defns)])
+                (make-object menu:can-restore-menu-item% sorting-name
+                  menu
+                  (λ (x y)
+                    (change-sorting-order)))
+                (make-object separator-menu-item% menu)
+                (if (null? defns)
+                    (send (make-object menu:can-restore-menu-item%
+                            (string-constant no-definitions-found)
+                            menu
+                            void)
+                          enable #f)
+                    (let loop ([defns defns])
+                      (unless (null? defns)
+                        (let* ([defn (car defns)]
+                               [checked? 
+                                (let ([t-start (send text get-start-position)]
+                                      [t-end (send text get-end-position)]
+                                      [d-start (defn-start-pos defn)]
+                                      [d-end (defn-end-pos defn)])
+                                  (or (<= t-start d-start t-end)
+                                      (<= t-start d-end t-end)
+                                      (<= d-start t-start t-end d-end)))]
+                               [item
+                                (make-object (if checked?
+                                                 menu:can-restore-checkable-menu-item%
+                                                 menu:can-restore-menu-item%)
+                                  (gui-utils:trim-string (defn-name defn) 200)
+                                  menu
+                                  (λ (x y)
+                                    (reset)
+                                    (send text set-position (defn-start-pos defn) (defn-start-pos defn))
+                                    (let ([canvas (send text get-canvas)])
+                                      (when canvas
+                                        (send canvas focus)))))])
+                          (when checked?
+                            (send item check #t))
+                          (loop (cdr defns)))))))))
           
           (super-new (label "(define ...)"))))
 
       ;; defn = (make-defn number string number number)
       (define-struct defn (indent name start-pos end-pos))
-      (define tag-string "(define")
 
       ;; get-definitions : boolean text -> (listof defn)
-      (define (get-definitions indent? text)
+      (define (get-definitions tag-string indent? text)
         (let* ([min-indent 0]
                [defs (let loop ([pos 0])
                        (let ([defn-pos (send text find-string tag-string 'forward pos 'eof #t #f)])
@@ -1007,7 +1032,12 @@ module browser threading seems wrong.
           on-tab-change
           enable-evaluation
           disable-evaluation
-          get-definitions/interactions-panel-parent))
+          get-definitions/interactions-panel-parent
+          register-capability-menu-item
+          
+          ensure-rep-shown
+          ensure-rep-hidden
+          ensure-defs-shown))
       
       (define frame-mixin
         (mixin (drscheme:frame:<%> frame:searchable-text<%> frame:delegate<%> frame:open-here<%>)
@@ -1262,6 +1292,16 @@ module browser threading seems wrong.
                   (set! save-init-shown? mod?))
               (update-tab-label current-tab)))
 
+          (define/private (language-changed)
+            (let* ([settings (send definitions-text get-next-settings)]
+                   [language (drscheme:language-configuration:language-settings-language settings)])
+              (send func-defs-canvas language-changed language)
+              
+              (let ([label (send scheme-menu get-label)]
+                    [new-label (send language capability-value 'drscheme:language-menu-title)])
+                (unless (equal? label new-label)
+                  (send scheme-menu set-label new-label)))))
+            
           ;; update-save-message : -> void
           ;; sets the save message. If input is #f, uses the frame's
           ;; title.
@@ -1385,8 +1425,7 @@ module browser threading seems wrong.
               (toggle-show/hide-interactions)
               (update-shown)))
           
-          (override get-editor%)
-          [define get-editor% (λ () (drscheme:get/extend:get-definitions-text))]
+          (define/override (get-editor%) (drscheme:get/extend:get-definitions-text))
           (define/public (still-untouched?)
             (and (= (send definitions-text last-position) 0)
                  (not (send definitions-text is-modified?))
@@ -1455,47 +1494,46 @@ module browser threading seems wrong.
                           (close-current-tab)))))
             (super file-menu:between-close-and-quit file-menu))
           
-          [define/override file-menu:save-string (λ () (string-constant save-definitions))]
-          [define/override file-menu:save-as-string (λ () (string-constant save-definitions-as))]
-          [define/override file-menu:between-save-as-and-print
-            (λ (file-menu)
-              (let ([sub-menu (make-object menu% (string-constant save-other) file-menu)])
-                (make-object menu:can-restore-menu-item%
-                  (string-constant save-definitions-as-text)
-                  sub-menu
-                  (λ (_1 _2)
-                    (let ([filename (send definitions-text put-file #f #f)])
-                      (when filename
-                        (send definitions-text save-file/gui-error filename 'text)))))
-                (make-object menu:can-restore-menu-item%
-                  (string-constant save-interactions)
-                  sub-menu
-                  (λ (_1 _2) 
-                    (send interactions-text save-file/gui-error)))
-                (make-object menu:can-restore-menu-item%
-                  (string-constant save-interactions-as)
-                  sub-menu
-                  (λ (_1 _2)
-                    (let ([filename (send interactions-text put-file #f #f)])
-                      (when filename
-                        (send interactions-text save-file/gui-error filename 'standard)))))
-                (make-object menu:can-restore-menu-item%
-                  (string-constant save-interactions-as-text)
-                  sub-menu
-                  (λ (_1 _2)
-                    (let ([filename (send interactions-text put-file #f #f)])
-                      (when filename
-                        (send interactions-text save-file/gui-error filename 'text)))))
-                (make-object separator-menu-item% file-menu)
-                (set! logging-menu-item
-                      (make-object menu:can-restore-menu-item%
-                        (string-constant log-definitions-and-interactions)
-                        file-menu
-                        (λ (x y)
-                          (if logging
-                              (stop-logging)
-                              (start-logging)))))
-                (make-object separator-menu-item% file-menu)))]
+          (define/override (file-menu:save-string) (string-constant save-definitions))
+          (define/override (file-menu:save-as-string) (string-constant save-definitions-as))
+          (define/override (file-menu:between-save-as-and-print file-menu)
+            (let ([sub-menu (make-object menu% (string-constant save-other) file-menu)])
+              (make-object menu:can-restore-menu-item%
+                (string-constant save-definitions-as-text)
+                sub-menu
+                (λ (_1 _2)
+                  (let ([filename (send definitions-text put-file #f #f)])
+                    (when filename
+                      (send definitions-text save-file/gui-error filename 'text)))))
+              (make-object menu:can-restore-menu-item%
+                (string-constant save-interactions)
+                sub-menu
+                (λ (_1 _2) 
+                  (send interactions-text save-file/gui-error)))
+              (make-object menu:can-restore-menu-item%
+                (string-constant save-interactions-as)
+                sub-menu
+                (λ (_1 _2)
+                  (let ([filename (send interactions-text put-file #f #f)])
+                    (when filename
+                      (send interactions-text save-file/gui-error filename 'standard)))))
+              (make-object menu:can-restore-menu-item%
+                (string-constant save-interactions-as-text)
+                sub-menu
+                (λ (_1 _2)
+                  (let ([filename (send interactions-text put-file #f #f)])
+                    (when filename
+                      (send interactions-text save-file/gui-error filename 'text)))))
+              (make-object separator-menu-item% file-menu)
+              (set! logging-menu-item
+                    (make-object menu:can-restore-menu-item%
+                      (string-constant log-definitions-and-interactions)
+                      file-menu
+                      (λ (x y)
+                        (if logging
+                            (stop-logging)
+                            (start-logging)))))
+              (make-object separator-menu-item% file-menu)))
           
           [define/override file-menu:print-string (λ () (string-constant print-definitions))]
           (define/override (file-menu:between-print-and-close file-menu)
@@ -1967,14 +2005,13 @@ module browser threading seems wrong.
                       (string-constant revert)
                       #f
                       this
-                      '(caution no-default number-order)
+                      '(caution default=2 number-order)
                       1)])
                 (case user-choice
                   [(1) (void)]
                   [(2) (revert)]))))
           
           (inherit get-menu-bar get-focus-object get-edit-target-object)
-          (define language-menu 'uninited-language-menu)
           
           (define/override on-size
             (lambda (w h)
@@ -2068,6 +2105,7 @@ module browser threading seems wrong.
               (restore-visible-tab-regions)
               (update-save-message)
               (update-save-button)
+              (language-changed)
               
               (send definitions-text update-frame-filename)
               (send definitions-text set-delegate old-delegate)
@@ -2135,21 +2173,17 @@ module browser threading seems wrong.
           
           (define/private (save-visible-tab-regions)
             (define (get-visible-regions txt)
-              (map (λ (canvas) (get-visible-region txt canvas))
+              (map (λ (canvas) 
+                     (let-values ([(x y w h _) (get-visible-region canvas)])
+                       (list x y w h)))
                    (send txt get-canvases)))
-            (define (get-visible-region txt canvas)
-              (let ([xb (box 0)]
-                    [yb (box 0)]
-                    [wb (box 0)]
-                    [hb (box 0)])
-                (send canvas call-as-primary-owner
-                      (λ ()
-                        (let ([admin (send txt get-admin)])
-                          (when admin
-                            (send admin get-view xb yb wb hb)))))
-                (list (unbox xb) (unbox yb) (unbox wb) (unbox hb))))
-            (send current-tab set-visible-ints (get-visible-regions interactions-text) interactions-shown?)
-            (send current-tab set-visible-defs (get-visible-regions definitions-text) definitions-shown?)
+            
+            (send current-tab set-visible-ints
+                  (get-visible-regions interactions-text)
+                  interactions-shown?)
+            (send current-tab set-visible-defs 
+                  (get-visible-regions definitions-text)
+                  definitions-shown?)
             (send current-tab set-focus-d/i
                   (if (ormap (λ (x) (send x has-focus?)) interactions-canvases)
                       'ints
@@ -2162,20 +2196,23 @@ module browser threading seems wrong.
                   (when (equal? (length canvases) (length regions))
                     (for-each (λ (c r) (set-visible-region txt c r)) canvases regions)))))
             (define (set-visible-region txt canvas region)
-              (send canvas scroll-to 
-                    (first region)
-                    (second region)
-                    (third region)
-                    (fourth region)
-                    #t))
-            
-            (let-values ([(vi is?) (send current-tab get-visible-ints)])
-              (set-visible-regions interactions-text vi)
-              (set! interactions-shown? is?))
-            (let-values ([(vd ds?) (send current-tab get-visible-defs)])
+              (let ([admin (send txt get-admin)])
+                ;(printf "setting to ~s\n" region)
+                (send admin scroll-to 
+                      (first region)
+                      (second region)
+                      (third region)
+                      (fourth region))
+                #;
+                (let-values ([(x y w h _) (get-visible-region canvas)])
+                  (printf "    set to ~s\n" (list x y w h)))))
+            (let-values ([(vi is?) (send current-tab get-visible-ints)]
+                         [(vd ds?) (send current-tab get-visible-defs)])
+              (set! interactions-shown? is?)
+              (set! definitions-shown? ds?)
+              (update-shown)
               (set-visible-regions definitions-text vd)
-              (set! definitions-shown? ds?))
-            (update-shown)
+              (set-visible-regions interactions-text vi))
             (case (send current-tab get-focus-d/i)
               [(defs) (send (car definitions-canvases) focus)]
               [(ints) (send (car interactions-canvases) focus)]))
@@ -2222,6 +2259,7 @@ module browser threading seems wrong.
           (define/private (update-close-tab-menu-item-shortcut item)
             (let ([just-one? (and (pair? tabs) (null? (cdr tabs)))])
               (send item set-shortcut (if just-one? #f #\w))))
+          
           (define/private (update-close-menu-item-shortcut item)
             (let ([just-one? (and (pair? tabs) (null? (cdr tabs)))])
               (send item set-shortcut (if just-one? #\w #f))))
@@ -2346,6 +2384,7 @@ module browser threading seems wrong.
                  [module-browser-ec #f]
                  [module-browser-button #f]
                  [module-browser-lib-path-check-box #f]
+                 [module-browser-planet-path-check-box #f]
                  [module-browser-name-length-choice #f]
                  [module-browser-pb #f]
                  [module-browser-menu-item 'module-browser-menu-item-unset])
@@ -2380,7 +2419,6 @@ module browser threading seems wrong.
                 (message-box (string-constant drscheme)
                              (string-constant module-browser-only-in-plt-and-module-langs)))
               can-browse?))
-                  
           
           (define/private (update-module-browser-pane)
             (open-status-line 'plt:module-browser:mouse-over)
@@ -2393,16 +2431,24 @@ module browser threading seems wrong.
               (set! module-browser-ec (make-object editor-canvas%
                                         module-browser-panel
                                         module-browser-pb))
-              (set! module-browser-lib-path-check-box
-                    (new check-box%
-                      (parent module-browser-panel)
-                      (label show-lib-paths)
-                      (value (preferences:get 'drscheme:module-browser:show-lib-paths?))
-                      (callback 
-                       (λ (x y) 
-                         (let ([val (send module-browser-lib-path-check-box get-value)])
-                           (preferences:set 'drscheme:module-browser:show-lib-paths? val)
-                           (send module-browser-pb show-lib-paths val))))))
+              
+              (let* ([show-callback
+                      (λ (cb key)
+                        (if (send cb get-value)
+                            (send module-browser-pb show-visible-paths key)
+                            (send module-browser-pb remove-visible-paths key))
+                        (preferences:set 'drscheme:module-browser:hide-paths (send module-browser-pb get-hidden-paths)))]
+                     [mk-checkbox
+                      (λ (key label)
+                        (new check-box%
+                             (parent module-browser-panel)
+                             (label label)
+                             (value (not (memq key (preferences:get 'drscheme:module-browser:hide-paths))))
+                             (callback 
+                              (λ (cb _) 
+                                (show-callback cb key)))))])
+                (set! module-browser-lib-path-check-box (mk-checkbox 'lib show-lib-paths))
+                (set! module-browser-planet-path-check-box (mk-checkbox 'planet show-planet-paths)))
               
               (set! module-browser-name-length-choice
                     (new choice%
@@ -2463,6 +2509,7 @@ module browser threading seems wrong.
                 (update-status-line 'plt:module-browser status-compiling-definitions)
                 (send module-browser-button enable #f)
                 (send module-browser-lib-path-check-box enable #f)
+                (send module-browser-planet-path-check-box enable #f)
                 (send module-browser-name-length-choice enable #f)
                 (disable-evaluation-in-tab current-tab)
                 (drscheme:module-overview:fill-pasteboard 
@@ -2480,6 +2527,7 @@ module browser threading seems wrong.
                 (send mod-tab enable-evaluation)
                 (send module-browser-button enable #t)
                 (send module-browser-lib-path-check-box enable #t)
+                (send module-browser-planet-path-check-box enable #t)
                 (send module-browser-name-length-choice enable #t)
                 (close-status-line 'plt:module-browser))))
           
@@ -2513,9 +2561,68 @@ module browser threading seems wrong.
 ;                                            
 ;                                            
 
+          ;; capability-menu-items : hash-table[menu -o> (listof (list menu-item number key)))
+          (define capability-menu-items (make-hash-table))
+          (define/public (register-capability-menu-item key menu)
+            (let ([items (send menu get-items)])
+              (when (null? items)
+                (error 'register-capability-menu-item "menu ~e has no items" menu))
+              (let* ([menu-item (car (last-pair items))]
+                     [this-one (list menu-item (- (length items) 1) key)]
+                     [old-ones (hash-table-get capability-menu-items menu (λ () '()))])
+                (hash-table-put! capability-menu-items menu (cons this-one old-ones)))))
+          
+          (define/private (update-items/capability menu)
+            (let ([new-items (get-items/capability menu)])
+              (for-each (λ (i) (send i delete)) (send menu get-items))
+              (for-each (λ (i) (send i restore)) new-items)))
+          (define/private (get-items/capability menu)
+            (let loop ([capability-items 
+                        (reverse
+                         (hash-table-get capability-menu-items menu (λ () '())))]
+                       [all-items (send menu get-items)]
+                       [i 0])
+              (cond
+                [(null? capability-items) all-items]
+                [else
+                 (let* ([cap-item-list (car capability-items)]
+                        [cap-item (list-ref cap-item-list 0)]
+                        [cap-num (list-ref cap-item-list 1)]
+                        [cap-key (list-ref cap-item-list 2)])
+                   (cond
+                     [(= cap-num i)
+                      (let ([is-on? (get-current-capability-value cap-key)])
+                        (cond
+                          [is-on?
+                           (cond
+                             [(null? all-items)
+                              (cons cap-item (loop (cdr capability-items) null (+ i 1)))]
+                             [(eq? (car all-items) cap-item)
+                              (cons cap-item (loop (cdr capability-items) (cdr all-items) (+ i 1)))]
+                             [else
+                              (cons cap-item (loop (cdr capability-items) all-items (+ i 1)))])]
+                          [else
+                           (cond
+                             [(null? all-items)
+                              (loop (cdr capability-items) null (+ i 1))]
+                             [(eq? (car all-items) cap-item)
+                              (loop (cdr capability-items) (cdr all-items) (+ i 1))]
+                             [else
+                              (loop (cdr capability-items) all-items (+ i 1))])]))]
+                     [else (cons (car all-items)
+                                 (loop capability-items
+                                       (cdr all-items)
+                                       (+ i 1)))]))])))
+          
+          (define/private (get-current-capability-value key)
+            (let* ([language-settings (send (get-definitions-text) get-next-settings)]
+                   [new-language (drscheme:language-configuration:language-settings-language language-settings)])
+              (send new-language capability-value key)))
+          
+          (define language-menu 'uninited-language-menu)
+          (define scheme-menu 'scheme-menu-not-yet-init)
           (define special-menu 'special-menu-not-yet-init)
           (define/public (get-special-menu) special-menu)
-
           
           (define/private (initialize-menus)
             (let* ([mb (get-menu-bar)]
@@ -2527,13 +2634,19 @@ module browser threading seems wrong.
                                             mb
                                             #f
                                             language-menu-on-demand))]
-                   [scheme-menu (make-object (get-menu%) (string-constant scheme-menu-name) mb)]
+                   [_ (set! scheme-menu (new (get-menu%) 
+                                             [label (drscheme:language:get-capability-default
+                                                     'drscheme:language-menu-title)]
+                                             [parent mb]))]
                    [send-method
                     (λ (method)
                       (λ (_1 _2)
                         (let ([text (get-focus-object)])
                           (when (is-a? text scheme:text<%>)
-                            (method text)))))])
+                            (method text)))))]
+                   [show/hide-capability-menus
+                    (λ ()
+                      (for-each (λ (menu) (update-items/capability menu)) (send (get-menu-bar) get-items)))])
               
               (make-object menu:can-restore-menu-item%
                 (string-constant choose-language-menu-item-label)
@@ -2545,6 +2658,7 @@ module browser threading seems wrong.
                                        this)])
                     (when new-settings
                       (send definitions-text set-next-settings new-settings)
+                      (language-changed)
                       (preferences:set
                        drscheme:language-configuration:settings-preferences-symbol
                        new-settings))))
@@ -2650,7 +2764,13 @@ module browser threading seems wrong.
                           [else (send text uncomment-selection)]))))))
             
               (set! special-menu
-                    (make-object (get-menu%) (string-constant special-menu) mb))
+                    (new (get-menu%)
+                         [label (string-constant special-menu)]
+                         [parent mb]
+                         [demand-callback
+                          (λ (special-menu)
+                            ;; just here for convience -- it actually works on all menus, not just the special menu
+                            (show/hide-capability-menus))]))
 
               (let ([has-editor-on-demand
                      (λ (menu-item)
@@ -2721,8 +2841,8 @@ module browser threading seems wrong.
                                                           (loop (- x 1)))))))])
                                        (send bdc set-font the-font)
                                        (let* ([all-chars '(#\@ #\# #\+ #\- #\: #\$ #\& #\* #\space)]
-                                              [prs 
-                                               (quicksort
+                                              [prs
+                                               (sort
                                                 (map (lambda (c) (cons c (index-char (string c))))
                                                      all-chars)
                                                 (lambda (x y) (> (cdr x) (cdr y))))]
@@ -2778,23 +2898,38 @@ module browser threading seems wrong.
                                        (loop (- y 1)))))
                                  (send edit end-edit-sequence)))))))]
                     [c% (get-menu-item%)])
-                (frame:add-snip-menu-items special-menu c%)
                 
+                (frame:add-snip-menu-items 
+                 special-menu 
+                 c%
+                 (λ (item)
+                   (let ([label (send item get-label)])
+                     (cond
+                       [(equal? label (string-constant insert-comment-box-menu-item-label))
+                        (register-capability-menu-item 'drscheme:special:insert-comment-box special-menu)]
+                       [(equal? label (string-constant insert-image-item))
+                        (register-capability-menu-item 'drscheme:special:insert-image special-menu)]))))
+                                           
                 (make-object c% (string-constant insert-fraction-menu-item-label)
                   special-menu callback 
                   #f #f
                   has-editor-on-demand)
+                (register-capability-menu-item 'drscheme:special:insert-fraction special-menu)
+                
                 (make-object c% (string-constant insert-large-letters...)
                   special-menu
                   (λ (x y) (insert-large-semicolon-letters))
                   #f #f
                   has-editor-on-demand)
+                (register-capability-menu-item 'drscheme:special:insert-large-letters special-menu)
+                
                 (make-object c% (string-constant insert-lambda)
                   special-menu
                   (λ (x y) (insert-lambda))
                   #\\
                   #f
-                  has-editor-on-demand))
+                  has-editor-on-demand)
+                (register-capability-menu-item 'drscheme:special:insert-lambda special-menu))
 
               (make-object separator-menu-item% (get-show-menu))
               
@@ -2982,6 +3117,7 @@ module browser threading seems wrong.
 
 	  (update-save-message)
           (update-save-button)
+          (language-changed)
           
 	  (cond
             [filename
@@ -3017,15 +3153,17 @@ module browser threading seems wrong.
                                  (car percentages))))
             (inner (void) after-percentage-change))
           (super-new)))
-      
+
       (define drs-name-message%
         (class name-message%
           (define/override (on-choose-directory dir)
-            (let ([file (finder:get-file dir)])
+            (let ([file (parameterize ([finder:dialog-parent-parameter
+                                        (send this get-top-level-window)])
+                          (finder:get-file dir))])
               (when file
                 (handler:edit-file file))))
           (super-new)))
-      
+
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;
       ;; lambda-snipclass is for backwards compatibility

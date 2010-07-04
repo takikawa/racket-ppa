@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	August 1994
- * Copyright:	(c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:	(c) 2004-2006 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -41,6 +41,13 @@ Bool wxFrame::Create(wxFrame *Parent, char *title, int x, int y,
                  int width, int height, long style, char *name)
 {
   wxWnd *cparent = NULL;
+
+  if ((x == -1) && (y == -1)) {
+    RECT r;
+    SystemParametersInfo(SPI_GETWORKAREA, 0, &r, 0);
+    x = r.left;
+    y = r.top;
+  }
 
   wxbFrame::Create(Parent, title, x, y, width, height, style, name);
   

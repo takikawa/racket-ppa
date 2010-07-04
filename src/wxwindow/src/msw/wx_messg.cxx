@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	April 1995
- * Copyright:	(c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:	(c) 2004-2006 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -50,13 +50,15 @@ Bool wxMessage::Create(wxPanel *panel, char *label, wxBitmap *image, int iconID,
     bm_label = image;
   } else if (iconID) {
     if (!icon_w) {
-      char name[1024];
+      wchar_t *name;
+
+      name = new WXGC_ATOMIC wchar_t[1024];
 
       icon_w = GetSystemMetrics(SM_CXICON);
       icon_h = GetSystemMetrics(SM_CYICON);
 
-      ::GetModuleFileName(NULL, name, 1023);
-      icn = ExtractIcon(NULL, name, 0);
+      ::GetModuleFileNameW(NULL, name, 1023);
+      icn = ExtractIconW(NULL, name, 0);
       icons[wxMSGICON_APP - 1] = (icn ? icn : LoadIcon(NULL, IDI_APPLICATION));
       icons[wxMSGICON_WARNING - 1] = LoadIcon(NULL, IDI_WARNING);
       icons[wxMSGICON_ERROR - 1] = LoadIcon(NULL, IDI_ERROR);
@@ -168,7 +170,7 @@ void wxMessage::SetSize(int x, int y, int width, int height, int sizeFlags)
     y = currentY;
 
   GetWindowTextW((HWND)ms_handle, buf, 300);
-  GetTextExtent(wxStripMenuCodes(wxNARROW_STRING(buf)), &current_width, &cyf, NULL, NULL,font);
+  GetLabelExtent(wxStripMenuCodes(wxNARROW_STRING(buf)), &current_width, &cyf);
 
   GetSize(&ww, &hh);
 

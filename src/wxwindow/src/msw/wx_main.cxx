@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	August 1994
- * Copyright:	(c) 2004-2005 PLT Scheme, Inc.
+ * Copyright:	(c) 2004-2006 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -247,7 +247,7 @@ int wxWinMain(int wm_is_mred,
     } else {
       char name[1024], *s;
       int i;
-      ::GetModuleFileName(hInstance, name, 10923);
+      ::GetModuleFileName(hInstance, name, 1023);
 
        i = strlen(name) - 1;    
        while (i && (name[i] != '\\')) {

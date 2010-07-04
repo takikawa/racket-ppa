@@ -48,8 +48,9 @@
            (with-handlers ([void (lambda (e) (err error-message e))]) expr)]))
       ;; Get server information, carefully
       (define version-info
+        '((stable "310") (recent "310")) #;
         (parameterize ([current-input-port
-                        (try (url->port version-url)
+                        (try (url->port (format "~a?~a" version-url (version)))
                              "could not connect to website")])
           (try (read) "unexpected response from server")))
       (define (get key)
@@ -71,7 +72,7 @@
          ;; we have the newest version (can be > if we have an svn build)
          [(string>=? current recent) 'ok]
          ;; we're stable, but there's a newer version
-         [(equal? current stable)
+         [(string>=? current stable)
           `(ok-but ,recent)]
          ;; new version out -- no alphas or we have an alpha => show recent
          ;; (also for svn builds of a stable version -- anything with ".")

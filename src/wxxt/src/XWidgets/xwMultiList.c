@@ -36,7 +36,7 @@
  */ 
 
 /*
- * Copyright 2004-2005 PLT Scheme, Inc.
+ * Copyright 2004-2006 PLT Scheme Inc.
  * Copyright 1989 Massachusetts Institute of Technology
  *
  * Permission to use, copy, modify, distribute, and sell this software and its
@@ -268,7 +268,7 @@ static char defaultTranslations[] =
 static char extendTranslations[] =
 "	Ctrl <Btn1Down>:			Toggle()\n\
 	Shift <Btn1Down>:			SelectOne()\n\
-	<Btn1Down>:			        SelectOne()\n\
+	<Btn1Down>:			        Toggle()\n\
 	Button1 <Btn1Motion>:			Extend()\n\
 	<Btn1Up>:				Notify()";
 

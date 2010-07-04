@@ -9,7 +9,7 @@
   (system s))
 
 (define accounting-gc? #t)
-(define opt-flags "/O2")
+(define opt-flags "/O2 /Oy-")
 (define re:only #f)
 
 (unless (directory-exists? "xsrc")
@@ -30,6 +30,7 @@
     "fun"
     "hash"
     "image"
+    "jit"
     "list"
     "module"
     "network"
@@ -54,7 +55,7 @@
     "type"
     "vector"))
 
-(define (try src deps dest objdest includes use-precomp extra-compile-flags expand-extra-flags msvc-pch)
+(define (try src deps dest objdest includes use-precomp extra-compile-flags expand-extra-flags msvc-pch indirect?)
   (when (or (not re:only) (regexp-match re:only dest))
     (unless (and (file-exists? dest)
 		 (let ([t (file-or-directory-modify-seconds dest)])
@@ -83,6 +84,9 @@
 					   (list "--precompiled" use-precomp)
 					   null)
 				       (list "--precompile"))
+				   (if indirect?
+				       '("--indirect")
+				       null)
 				   (list
 				    "--depends"
 				    "--cpp"
@@ -125,7 +129,7 @@
 			common-deps)
      "xsrc/precomp.h" #f 
      (string-append mz-inc "/I ../../mzscheme/src")
-     #f "" "" #f)
+     #f "" "" #f #f)
 
 (for-each
  (lambda (x)
@@ -137,8 +141,9 @@
 	mz-inc
 	"xsrc/precomp.h"
 	""
-	""
-	"mz.pch"))
+	"/D LIBMZ_EXPORTS "
+	"mz.pch"
+	#f))
  srcs)
 
 (try "../../mzscheme/main.c"
@@ -150,7 +155,8 @@
      #f
      ""
      ""
-     #f)
+     #f
+     #t)
 
 (try "../../foreign/foreign.c"
      (list* "../../foreign/foreign.c"
@@ -164,6 +170,7 @@
      #f
      ""
      ""
+     #f
      #f)
 
 (compile "../../mzscheme/gc2/gc2.c" "xsrc/gc2.obj"
@@ -182,12 +189,12 @@
 	  mz-inc))
 (compile "../../mzscheme/src/mzsj86.c" "xsrc/mzsj86.obj" '() mz-inc)
 
-(define dll "../../../libmzsch3mxxxxxxx.dll")
+(define dll "../../../lib/libmzsch3mxxxxxxx.dll")
 (define exe "../../../MzScheme3m.exe")
 
 (define libs "kernel32.lib user32.lib wsock32.lib shell32.lib advapi32.lib")
 
-(define (link-dll objs sys-libs dll link-options exe?)
+(define (link-dll objs delayloads sys-libs dll link-options exe?)
   (let ([ms (if (file-exists? dll)
 		(file-or-directory-modify-seconds dll)
 		0)])
@@ -196,7 +203,7 @@
 	     (> (file-or-directory-modify-seconds f)
 		ms))
 	   objs)
-      (unless (system- (format "cl.exe ~a /MT /Zi /Fe~a unicows.lib ~a ~a ~a"
+      (unless (system- (format "cl.exe ~a /MT /Zi /Fe~a unicows.lib ~a ~a /link ~a~a~a"
 			       (if exe? "" "/LD /DLL")
 			       dll
 			       (let loop ([objs (append objs sys-libs)])
@@ -207,7 +214,20 @@
 				      " "
 				      (loop (cdr objs)))))
 			       libs
-			       link-options))
+			       (let loop ([delayloads delayloads])
+				 (if (null? delayloads)
+				     ""
+				     (string-append
+				      " /DELAYLOAD:"
+				      (car delayloads)
+				      " "
+				      (loop (cdr delayloads)))))
+			       link-options
+			       (let ([s (regexp-match "^(.*)/([a-z0-9]*)[.]dll$" dll)])
+				 (if s
+				     (format " /IMPLIB:~a/msvc/~a.lib"
+					     (cadr s) (caddr s))
+				     ""))))
 	(error 'winmake "~a link failed" (if exe? "EXE" "DLL"))))))
 
 (let ([objs (list*
@@ -224,13 +244,27 @@
 	      (lambda (n)
 		(format "xsrc/~a.obj" n))
 	      srcs))])
-  (link-dll objs null dll "" #f))
+  (link-dll objs null null dll "" #f))
+
+(define (check-rc res rc)
+  (unless (and (file-exists? res)
+	       (>= (file-or-directory-modify-seconds res)
+		   (file-or-directory-modify-seconds rc)))
+	  (system- (string-append 
+		    "rc /l 0x409  /I ../../wxwindow/include/msw /I ../../wxwindow/contrib/fafa "
+		    (format "/fo~a ~a" res rc)))))
+
+(check-rc "mzscheme.res" "../mzscheme/mzscheme.rc")
 
 (let ([objs (list
+	     "mzscheme.res"
 	     "xsrc/main.obj"
-	     "../libmzsch/Release/uniplt.obj"
-	     "../../../libmzsch3mxxxxxxx.lib")])
-  (link-dll objs null exe "" #t))
+	     "../mzscheme/Release/uniplt.obj"
+	     "../../../lib/msvc/libmzsch3mxxxxxxx.lib")])
+  (link-dll objs 
+	    '("libmzsch3mxxxxxxx.dll")
+	    '("delayimp.lib")
+	    exe "" #t))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -244,9 +278,9 @@
 			      "/I ../../wxWindow/contrib/fafa "
 			      "/I ../../wxcommon/jpeg /I ../jpeg /I ../../wxcommon/zlib "))
 (try "wxprecomp.cxx" (list* "../../mzscheme/src/schvers.h" common-deps)
-     "xsrc/wxprecomp.h" #f wx-inc #f "" "-DGC2_AS_IMPORT" #f)
+     "xsrc/wxprecomp.h" #f wx-inc #f "" "-DGC2_AS_IMPORT" #f #f)
 
-(define (wx-try base proj x use-precomp? suffix)
+(define (wx-try base proj x use-precomp? suffix indirect?)
   (let ([cxx-file (format "../../~a/~a.~a" base x suffix)])
     (try cxx-file
 	 (list* cxx-file
@@ -257,7 +291,8 @@
 	 (and use-precomp? "xsrc/wxprecomp.h")
 	 "-DGC2_JUST_MACROS /FI../../../mzscheme/gc2/gc2.h"
 	 "-DGC2_AS_IMPORT"
-	 "wx.pch")))
+	 "wx.pch"
+	 indirect?)))
 
 (define wxwin-base-srcs
   '("wb_canvs"
@@ -283,7 +318,7 @@
     "wb_win"))
 
 (map (lambda (x)
-       (wx-try "wxwindow/src/base" "wxwin" x #t "cxx"))
+       (wx-try "wxwindow/src/base" "wxwin" x #t "cxx" #f))
      wxwin-base-srcs)
 
 (define wxwin-msw-srcs
@@ -316,7 +351,7 @@
     "wximgfil"))
 
 (map (lambda (x)
-       (wx-try "wxwindow/src/msw" "wxwin" x #t "cxx"))
+       (wx-try "wxwindow/src/msw" "wxwin" x #t "cxx" #f))
      wxwin-msw-srcs)
 
 (define wxs-srcs
@@ -351,7 +386,7 @@
     "wxscheme"))
 
 (map (lambda (x)
-       (wx-try "mred/wxs" "wxs" x #t "cxx"))
+       (wx-try "mred/wxs" "wxs" x #t "cxx" #f))
      wxs-srcs)
 
 (define wxme-srcs
@@ -369,7 +404,7 @@
     "wx_style"))
 
 (map (lambda (x)
-       (wx-try "mred/wxme" "wxme" x #t "cxx"))
+       (wx-try "mred/wxme" "wxme" x #t "cxx" #f))
      wxme-srcs)
 
 (define mred-srcs
@@ -377,18 +412,18 @@
     "mredmsw"))
 
 (map (lambda (x)
-       (wx-try "mred" "libmred" x #t "cxx"))
+       (wx-try "mred" "libmred" x #t "cxx" #f))
      mred-srcs)
 
-(wx-try "wxcommon" "wxme" "wxJPEG" #t "cxx")
-(wx-try "mzscheme/utils" "wxme" "xcglue" #f "c")
+(wx-try "wxcommon" "wxme" "wxJPEG" #t "cxx" #f)
+(wx-try "mzscheme/utils" "wxme" "xcglue" #f "c" #f)
 (compile "../../wxcommon/wxGC.cxx"
 	 "xsrc/wxGC.obj"
 	 (list "../wxme/Release/wxGC.obj")
 	 (string-append wx-inc " -DMZ_PRECISE_GC -DGC2_AS_IMPORT -Dwx_msw"))
 
 (let ([objs (append (list
-		     "../libmzsch/Release/uniplt.obj"
+		     "../libmred/Release/uniplt.obj"
 		     "xsrc/wxGC.obj"
 		     "xsrc/wxJPEG.obj"
 		     "xsrc/xcglue.obj")
@@ -401,7 +436,7 @@
 			     wxme-srcs
 			     mred-srcs)))]
       [libs (list
-	     "../../../libmzsch3mxxxxxxx.lib"
+	     "../../../lib/msvc/libmzsch3mxxxxxxx.lib"
 	     "../wxutils/Release/wxutils.lib"
 	     "../jpeg/Release/jpeg.lib"
 	     "../png/Release/png.lib"
@@ -411,22 +446,24 @@
 		 "gdi32.lib" "comdlg32.lib" "advapi32.lib" 
 		 "shell32.lib" "ole32.lib" "oleaut32.lib"
 		 "winmm.lib")])
-  (link-dll (append objs libs) win-libs "../../../libmred3mxxxxxxx.dll" "" #f))
+  (link-dll (append objs libs) null win-libs "../../../lib/libmred3mxxxxxxx.dll" "" #f))
 
-(wx-try "mred" "mred" "mrmain" #f "cxx")
+(wx-try "mred" "mred" "mrmain" #f "cxx" #t)
 
-(unless (file-exists? "mred.res")
-  (system- (string-append 
-	    "rc /l 0x409 /I ../../wxwindow/include/msw /I ../../wxwindow/contrib/fafa "
-	    "/fomred.res ../mred/mred.rc")))
+(check-rc "mred.res" "../mred/mred.rc")
 
 (let ([objs (list
 	     "mred.res"
 	     "xsrc/mrmain.obj"
-	     "../libmzsch/Release/uniplt.obj"
-	     "../../../libmzsch3mxxxxxxx.lib"
-	     "../../../libmred3mxxxxxxx.lib")])
-  (link-dll objs (list "advapi32.lib") "../../../MrEd3m.exe" "/link /subsystem:windows" #t))
+	     "../mred/Release/uniplt.obj"
+	     "../../../lib/msvc/libmzsch3mxxxxxxx.lib"
+	     "../../../lib/msvc/libmred3mxxxxxxx.lib")])
+  (link-dll objs 
+	    '("libmzsch3mxxxxxxx.dll" 
+	      "libmred3mxxxxxxx.dll")
+	    '("advapi32.lib" 
+	      "delayimp.lib") 
+	    "../../../MrEd3m.exe" " /subsystem:windows" #t))
 
 (system- "cl.exe /MT /O2 /DMZ_PRECISE_GC /I../../mzscheme/include /I.. /c ../../mzscheme/dynsrc/mzdyn.c /Fomzdyn3m.obj")
 (system- "lib.exe -def:../../mzscheme/dynsrc/mzdyn.def -out:mzdyn3m.lib")
@@ -441,4 +478,4 @@
 
 (copy-file/diff "mzdyn3m.exp" "../../../lib/msvc/mzdyn3m.exp")
 (copy-file/diff "mzdyn3m.obj" "../../../lib/msvc/mzdyn3m.obj")
-(copy-file/diff "../../../libmzsch3mxxxxxxx.lib" "../../../lib/msvc/libmzsch3mxxxxxxx.lib")
+

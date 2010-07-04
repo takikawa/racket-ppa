@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 1995-2000 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -105,8 +105,14 @@ extern BOOL WINAPI DllMain(HINSTANCE inst, ULONG reason, LPVOID reserved);
 static char *get_init_filename(Scheme_Env *env)
 {
   Scheme_Object *f;
+  Scheme_Thread * volatile p;
+  mz_jmp_buf * volatile save, newbuf;
 
-  if (!scheme_setjmp(scheme_error_buf)) {
+  p = scheme_get_current_thread();
+  save = p->error_buf;
+  p->error_buf = &newbuf;
+
+  if (!scheme_setjmp(newbuf)) {
     f = scheme_builtin_value("find-system-path");
     if (f) {
       Scheme_Object *a[1];
@@ -115,10 +121,13 @@ static char *get_init_filename(Scheme_Env *env)
 
       f = _scheme_apply(f, 1, a);
 
-      if (SCHEME_PATHP(f))
+      if (SCHEME_PATHP(f)) {
+	p->error_buf = save;
 	return SCHEME_PATH_VAL(f);
+      }
     }
   }
+  p->error_buf = save;
 
   return NULL;
 }
@@ -141,6 +150,7 @@ extern Scheme_Object *scheme_initialize(Scheme_Env *env);
 #define PRINTF printf
 #define PROGRAM "MzScheme"
 #define PROGRAM_LC "mzscheme"
+#define INITIAL_BIN_TYPE "zi"
 #define BANNER scheme_banner()
 #define MZSCHEME_CMD_LINE
 
@@ -216,9 +226,36 @@ int actual_main(int argc, char *argv[]);
 #endif
 
 /*****************************     main    ********************************/
-/*            Phase 1 setup, then call actual_main (indirectly)           */
+/*          Prepare for delayload, then call main_after_dlls              */
+
+static int main_after_dlls(int argc, MAIN_char **MAIN_argv);
+
+# ifdef MZ_PRECISE_GC
+START_XFORM_SKIP;
+# endif
 
 int MAIN(int argc, MAIN_char **MAIN_argv)
+{
+#ifdef DOS_FILE_SYSTEM
+  /* Order matters: load dependencies first */
+# ifndef MZ_PRECISE_GC
+  load_delayed_dll(NULL, "libmzgcxxxxxxx.dll");
+# endif
+  load_delayed_dll(NULL, "libmzsch" DLL_3M_SUFFIX "xxxxxxx.dll");
+  record_dll_path();
+#endif
+
+  return main_after_dlls(argc, MAIN_argv);
+}
+
+# ifdef MZ_PRECISE_GC
+END_XFORM_SKIP;
+# endif
+
+/************************     main_after_dlls    **************************/
+/*            Phase 1 setup, then call actual_main (indirectly)           */
+
+static int main_after_dlls(int argc, MAIN_char **MAIN_argv)
 {
   void *stack_start;
   int rval;
@@ -239,7 +276,7 @@ int MAIN(int argc, MAIN_char **MAIN_argv)
   oskit_prepare(&argc, &argv);
 #endif
 
-  scheme_actual_main = actual_main;
+  scheme_set_actual_main(actual_main);
 
 #ifdef WINDOWS_UNICODE_MAIN
  {

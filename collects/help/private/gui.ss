@@ -8,6 +8,7 @@
            (lib "etc.ss")
            (lib "unitsig.ss")
            (lib "list.ss")
+           (lib "file.ss")
            
            (lib "string-constant.ss" "string-constants")
            (lib "external.ss" "browser")
@@ -15,6 +16,7 @@
            (lib "browser-sig.ss" "browser")
            (lib "url-sig.ss" "net")
            (lib "url-structs.ss" "net")
+           (lib "uri-codec.ss" "net")
            "sig.ss"
            "../bug-report.ss"
            (lib "bday.ss" "framework" "private")
@@ -22,6 +24,7 @@
            "standard-urls.ss"
            "docpos.ss"
            "manuals.ss"
+	   "get-help-url.ss"
            
            "internal-hp.ss")
   
@@ -105,7 +108,7 @@
                      ;; they will be caught elsewhere.
                      [(and (url-path url)
                            (not (null? (url-path url)))
-                           (regexp-match #rx".plt$" (car (last-pair (url-path url)))))
+                           (regexp-match #rx".plt$" (path/param-path (car (last-pair (url-path url))))))
                       url]
                      
                      ;; files on download.plt-scheme.org in /doc are considered
@@ -113,30 +116,60 @@
                      [(is-download.plt-scheme.org/doc-url? url)
                       url]
                      
-                     ;; on the internal host
-                     [(and (equal? internal-host (url-host url))
-                           (equal? internal-port (url-port url)))
-                      (let* ([path (url-path url)]
-                             [coll (and (pair? path)
-                                        (pair? (cdr path))
-                                        (cadr path))]
-                             [coll-path (and coll (string->path coll))]
-                             [doc-pr (and coll-path (assoc coll-path known-docs))])
-                        
-                        ;; check to see if the docs are installed
-                        (if (and doc-pr
-                                 (not (has-index-installed? coll-path)))
-                            (let ([url-str (url->string url)])
-                              (string->url 
-                               (make-missing-manual-url coll (cdr doc-pr) url-str)))
-                            url))]
-                     
-                     [(and (equal? addon-host (url-host url))
-                           (equal? internal-port (url-port url)))
-                      url]
+                     ;; one of the "collects" hosts:
+                     [(and (equal? internal-port (url-port url))
+                           (ormap (lambda (host)
+				    (equal? host (url-host url)))
+				  doc-hosts))
+		      ;; Two things can go wrong with the URL:
+		      ;;  1. The corresponding doc might not be installed
+		      ;;  2. There's a relative reference from X to Y, and
+		      ;;     X and Y are installed in different directories,
+		      ;;     so the host is wrong for Y
+		      ;; Resolve 2, then check 1.
+		      (let* ([path (url-path url)]
+			     [manual (and (pair? path)
+					  (path/param-path (car path)))])
+			(if manual
+			    ;; Find out where this manual is really located:
+			    (let* ([path (find-doc-directory (string->path manual))]
+				   [real-url (and path
+						  (get-help-url path))]
+				   [url (if real-url
+					    ;; Use the actual host:
+					    (make-url (url-scheme url)
+						      (url-user url)
+						      (url-host (string->url real-url))
+						      (url-port url)
+						      (url-path-absolute? url)
+						      (url-path url)
+						      (url-query url)
+						      (url-fragment url))
+					    ;; Can't do better than the original URL?
+					    ;;  The manual is not installed.
+					    url)])
+			      (if (or (not path)
+				      (not (has-index-installed? path)))
+				  ;; Manual not installed...
+				  (let ([doc-pr (assoc (string->path manual) known-docs)])
+				    (string->url
+				     (make-missing-manual-url manual
+							      (cdr doc-pr) 
+							      (url->string url))))
+				  ;; Manual here; use revised URL
+				  url))
+			    ;; Not a manual? Shouldn't happen.
+			    url))]
+
+		     ;; one of the other internal hosts
+                     [(and (equal? internal-port (url-port url))
+			   (is-internal-host? (url-host url)))
+		      url]
                      
                      ;; send the url off to another browser
-                     [(or (and (preferences:get 'drscheme:help-desk:ask-about-external-urls)
+                     [(or (and (string? (url-scheme url))
+                               (not (member (url-scheme url) '("http"))))
+                          (and (preferences:get 'drscheme:help-desk:ask-about-external-urls)
                                (ask-user-about-separate-browser))
                           (preferences:get 'drscheme:help-desk:separate-browser))
                       (send-url (url->string url))
@@ -147,23 +180,15 @@
               (super-new)))
           
           ;; has-index-installed? : path -> boolean
-          (define (has-index-installed? doc-coll)
-            (let loop ([docs-dirs (find-doc-directories)])
-              (cond
-                [(null? docs-dirs) #f]
-                [else
-                 (let ([doc-dir (car docs-dirs)])
-                   (let-values ([(base name dir?) (split-path doc-dir)])
-                     (or (and (equal? doc-coll name)
-                              (get-index-file doc-dir))
-                         (loop (cdr docs-dirs)))))])))
+          (define (has-index-installed? path)
+	    (and (get-index-file path) #t))
           
           (define sk-bitmap #f)
           
           (define hd-editor-mixin
             (mixin (hyper-text<%> editor<%>) ()
               (define/augment (url-allows-evaling? url)
-                (and (equal? internal-host (url-host url))
+                (and (is-internal-host? (url-host url))
                      (equal? internal-port (url-port url))))
               
               (define show-sk? #t)
@@ -240,7 +265,7 @@
       (define (is-download.plt-scheme.org/doc-url? url)
         (and (equal? "download.plt-scheme.org" (url-host url))
              (not (null? (url-path url)))
-             (equal? (car (url-path url)) "^/doc")))
+             (equal? (path/param-path (car (url-path url))) "doc")))
       
       (define (ask-user-about-separate-browser)
         (define separate-default? (preferences:get 'drscheme:help-desk:separate-browser))
@@ -249,7 +274,7 @@
 		      (message+check-box/custom
 		       (string-constant help-desk)
 		       (string-constant plt:hd:ask-about-separate-browser)
-		       (string-constant dont-ask-again)
+		       (string-constant dont-ask-again-always-current)
 		       (string-constant plt:hd:homebrew-browser)
 		       (string-constant plt:hd:separate-browser)
 		       #f
@@ -554,8 +579,17 @@
                          (lambda (b e)
                            (let ([f (get-file)])
                              (when f
-                               (send t set-value (string-append "file:" (path->string f)))
+                               (send t set-value (encode-file-path-as-url f))
                                (update-ok))))))
+          
+        (define (encode-file-path-as-url f)
+          (apply
+           string-append
+           "file:"
+           (map
+            (λ (x) (string-append "/" (uri-path-segment-encode (path->string x))))
+            (explode-path f))))
+        
         (define spacer (make-object vertical-pane% p))
         (define result #f)
         (define (ok-callback b e)

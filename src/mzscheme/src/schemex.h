@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2005 PLT Scheme, Inc.
+  Copyright (c) 2004-2006 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -28,7 +28,7 @@ typedef struct {
 /*========================================================================*/
 void (*scheme_init_jmpup_buf)(Scheme_Jumpup_Buf *b);
 int (*scheme_setjmpup_relative)(Scheme_Jumpup_Buf *b, void *base,
-				       void * volatile start, Scheme_Jumpup_Buf *cont);
+				       void * volatile start, struct Scheme_Cont *cont);
 void (*scheme_longjmpup)(Scheme_Jumpup_Buf *b);
 void (*scheme_reset_jmpup_buf)(Scheme_Jumpup_Buf *b);
 #ifdef USE_MZ_SETJMP
@@ -60,6 +60,7 @@ volatile int scheme_fuel_counter;
 Scheme_Thread **scheme_current_thread_ptr;
 volatile int *scheme_fuel_counter_ptr;
 #endif
+Scheme_Thread *(*scheme_get_current_thread)();
 void (*scheme_start_atomic)(void);
 void (*scheme_end_atomic)(void);
 void (*scheme_end_atomic_no_swap)(void);
@@ -181,10 +182,12 @@ Scheme_Object *scheme_tail_call_waiting;
 Scheme_Object *scheme_multiple_values;
 unsigned short **scheme_uchar_table;
 unsigned char **scheme_uchar_cases_table;
+unsigned char **scheme_uchar_cats_table;
 int *scheme_uchar_ups;
 int *scheme_uchar_downs;
 int *scheme_uchar_titles;
 int *scheme_uchar_folds;
+unsigned char *scheme_uchar_combining_classes;
 /*========================================================================*/
 /*                              evaluation                                */
 /*========================================================================*/
@@ -202,14 +205,14 @@ Scheme_Object *(*scheme_apply_to_list)(Scheme_Object *rator, Scheme_Object *args
 Scheme_Object *(*scheme_eval_string)(const char *str, Scheme_Env *env);
 Scheme_Object *(*scheme_eval_string_multi)(const char *str, Scheme_Env *env);
 Scheme_Object *(*scheme_eval_string_all)(const char *str, Scheme_Env *env, int all);
-Scheme_Object *(*_scheme_apply_known_closed_prim)(Scheme_Object *rator, int argc,
-					       Scheme_Object **argv);
-Scheme_Object *(*_scheme_apply_known_closed_prim_multi)(Scheme_Object *rator, int argc,
-						     Scheme_Object **argv);
-Scheme_Object *(*_scheme_apply_closed_prim)(Scheme_Object *rator, int argc,
-					 Scheme_Object **argv);
-Scheme_Object *(*_scheme_apply_closed_prim_multi)(Scheme_Object *rator, int argc,
-					       Scheme_Object **argv);
+Scheme_Object *(*_scheme_apply_known_prim_closure)(Scheme_Object *rator, int argc,
+							  Scheme_Object **argv);
+Scheme_Object *(*_scheme_apply_known_prim_closure_multi)(Scheme_Object *rator, int argc,
+								Scheme_Object **argv);
+Scheme_Object *(*_scheme_apply_prim_closure)(Scheme_Object *rator, int argc,
+						    Scheme_Object **argv);
+Scheme_Object *(*_scheme_apply_prim_closure_multi)(Scheme_Object *rator, int argc,
+							  Scheme_Object **argv);
 Scheme_Object *(*scheme_values)(int c, Scheme_Object **v);
 Scheme_Object *(*scheme_check_one_value)(Scheme_Object *v);
 /* Tail calls - only use these when you're writing new functions/syntax */
@@ -219,7 +222,8 @@ Scheme_Object *(*scheme_tail_apply_to_list)(Scheme_Object *f, Scheme_Object *l);
 Scheme_Object *(*scheme_tail_eval_expr)(Scheme_Object *obj);
 void (*scheme_set_tail_buffer_size)(int s);
 Scheme_Object *(*scheme_force_value)(Scheme_Object *);
-void (*scheme_set_cont_mark)(Scheme_Object *key, Scheme_Object *val);
+Scheme_Object *(*scheme_force_one_value)(Scheme_Object *);
+void *(*scheme_set_cont_mark)(Scheme_Object *key, Scheme_Object *val);
 void (*scheme_push_continuation_frame)(Scheme_Cont_Frame_Data *);
 void (*scheme_pop_continuation_frame)(Scheme_Cont_Frame_Data *);
 void (*scheme_temp_dec_mark_depth)();
@@ -311,28 +315,40 @@ Scheme_Hash_Table *(*scheme_clone_hash_table)(Scheme_Hash_Table *bt);
 /*========================================================================*/
 Scheme_Object *(*scheme_make_prim)(Scheme_Prim *prim);
 Scheme_Object *(*scheme_make_noneternal_prim)(Scheme_Prim *prim);
-Scheme_Object *(*scheme_make_closed_prim)(Scheme_Closed_Prim *prim, void *data);
 Scheme_Object *(*scheme_make_prim_w_arity)(Scheme_Prim *prim, const char *name,
 					mzshort mina, mzshort maxa);
 Scheme_Object *(*scheme_make_folding_prim)(Scheme_Prim *prim,
 					const char *name,
 					mzshort mina, mzshort maxa,
 					short functional);
+Scheme_Object *(*scheme_make_noncm_prim)(Scheme_Prim *prim,
+						const char *name,
+						mzshort mina, mzshort maxa);
 Scheme_Object *(*scheme_make_noneternal_prim_w_arity)(Scheme_Prim *prim,
 						   const char *name,
 						   mzshort mina, mzshort maxa);
-Scheme_Object *(*scheme_make_closed_prim_w_arity)(Scheme_Closed_Prim *prim,
-					       void *data, const char *name,
-					       mzshort mina, mzshort maxa);
-Scheme_Object *(*scheme_make_folding_closed_prim)(Scheme_Closed_Prim *prim,
-					       void *data, const char *name,
-					       mzshort mina, mzshort maxa,
-					       short functional);
 Scheme_Object *(*scheme_make_prim_w_everything)(Scheme_Prim *fun, int eternal,
 						       const char *name,
 						       mzshort mina, mzshort maxa,
-						       short folding,
+						       int folding,
 						       mzshort minr, mzshort maxr);
+Scheme_Object *(*scheme_make_prim_closure_w_arity)(Scheme_Primitive_Closure_Proc *prim,
+							  int size, Scheme_Object **vals,
+							  const char *name,
+							  mzshort mina, mzshort maxa);
+Scheme_Object *(*scheme_make_folding_prim_closure)(Scheme_Primitive_Closure_Proc *prim,
+							  int size, Scheme_Object **vals,
+							  const char *name,
+							  mzshort mina, mzshort maxa,
+							  short functional);
+Scheme_Object *(*scheme_make_closed_prim)(Scheme_Closed_Prim *prim, void *data);
+Scheme_Object *(*scheme_make_closed_prim_w_arity)(Scheme_Closed_Prim *prim,
+							 void *data, const char *name,
+							 mzshort mina, mzshort maxa);
+Scheme_Object *(*scheme_make_folding_closed_prim)(Scheme_Closed_Prim *prim,
+							 void *data, const char *name,
+							 mzshort mina, mzshort maxa,
+							 short functional);
 Scheme_Object *(*scheme_make_closed_prim_w_everything)(Scheme_Closed_Prim *fun,
 							      void *data,
 							      const char *name,
@@ -342,6 +358,7 @@ Scheme_Object *(*scheme_make_closed_prim_w_everything)(Scheme_Closed_Prim *fun,
 void (*scheme_prim_is_method)(Scheme_Object *o);
 Scheme_Object *(*scheme_make_pair)(Scheme_Object *car, Scheme_Object *cdr);
 Scheme_Object *(*scheme_make_immutable_pair)(Scheme_Object *car, Scheme_Object *cdr);
+Scheme_Object *(*scheme_make_raw_pair)(Scheme_Object *, Scheme_Object *);
 Scheme_Object *(*scheme_make_byte_string)(const char *chars);
 Scheme_Object *(*scheme_make_sized_byte_string)(char *chars, long len, int copy);
 Scheme_Object *(*scheme_make_sized_offset_byte_string)(char *chars, long d, long len, int copy);
@@ -647,10 +664,13 @@ void (*scheme_add_fd_handle)(void *h, void *fds, int repost);
 void (*scheme_add_fd_eventmask)(void *fds, int mask);
 void (*scheme_security_check_file)(const char *who, const char *filename, int guards);
 void (*scheme_security_check_network)(const char *who, const char *host, int port, int client);
-struct addrinfo *(*scheme_get_host_address)(const char *address, int id, int *err, 
-					    int family, int passive, int tcp);
-void (*scheme_free_host_address)(struct addrinfo *a);
+struct mz_addrinfo *(*scheme_get_host_address)(const char *address, int id, int *err, 
+						      int family, int passive, int tcp);
+void (*scheme_free_host_address)(struct mz_addrinfo *a);
 const char *(*scheme_host_address_strerror)(int errnum);
+void (*scheme_getnameinfo)(void *sa, int salen, 
+				  char *host, int hostlen,
+				  char *serv, int servlen);
 int (*scheme_get_port_file_descriptor)(Scheme_Object *p, long *_fd);
 int (*scheme_get_port_socket)(Scheme_Object *p, long *_s);
 void (*scheme_set_type_printer)(Scheme_Type stype, Scheme_Type_Printer printer);
@@ -672,10 +692,6 @@ Scheme_Object *(*scheme_lookup_global)(Scheme_Object *symbol, Scheme_Env *env);
 Scheme_Bucket *(*scheme_global_bucket)(Scheme_Object *symbol, Scheme_Env *env);
 Scheme_Bucket *(*scheme_global_keyword_bucket)(Scheme_Object *symbol, Scheme_Env *env);
 Scheme_Bucket *(*scheme_module_bucket)(Scheme_Object *mod, Scheme_Object *var, int pos, Scheme_Env *env);
-Scheme_Bucket *(*scheme_exptime_global_bucket)(Scheme_Object *symbol, Scheme_Env *env);
-Scheme_Bucket *(*scheme_exptime_expdef_global_bucket)(Scheme_Object *symbol, Scheme_Env *env);
-Scheme_Bucket *(*scheme_exptime_module_bucket)(Scheme_Object *mod, Scheme_Object *var, int pos, Scheme_Env *env);
-Scheme_Bucket *(*scheme_exptime_expdef_module_bucket)(Scheme_Object *mod, Scheme_Object *var, int pos, Scheme_Env *env);
 Scheme_Object *(*scheme_builtin_value)(const char *name); /* convenience */
 void (*scheme_set_global_bucket)(char *proc, Scheme_Bucket *var, Scheme_Object *val,
 			      int set_undef);

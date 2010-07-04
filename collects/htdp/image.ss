@@ -76,14 +76,20 @@ plt/collects/tests/mzscheme/image-test.ss
   (define (check name p? v desc arg-posn) (check-arg name (p? v) desc arg-posn v))
 
   (define (check-coordinate name val arg-posn) (check name number? val "number" arg-posn))
+  (define (check-integer-coordinate name val arg-posn) (check name nii? val "integer" arg-posn))
   (define (check-size name val arg-posn) (check name posi? val "positive exact integer" arg-posn))
   (define (check-size/0 name val arg-posn) (check name nnosi? val "non-negative exact integer" arg-posn))
   (define (check-image name val arg-posn) (check name image? val "image" arg-posn))
-  (define (check-image-color name val arg-posn) (check name image-color? val "image-color" arg-posn))
+  (define (check-image-color name val arg-posn) 
+    (let ([simple-check (λ (x) (or (string? x) (symbol? x) (color? x)))])
+      (check name simple-check val "image-color" arg-posn)
+      (unless (image-color? val)
+        (error name "~e is not a valid color name" val))))
   (define (check-mode name val arg-posn) (check name mode? val mode-str arg-posn))
   
   (define (posi? i) (and (number? i) (integer? i) (positive? i) (exact? i)))
   (define (nnosi? i) (and (number? i) (integer? i) (exact? i) (or (zero? i) (positive? i))))
+  (define (nii? x) (and (integer? x) (not (= x +inf.0)) (not (= x -inf.0))))
 
   
   (define (check-sizes who w h)
@@ -192,10 +198,14 @@ plt/collects/tests/mzscheme/image-test.ss
 
   (define (overlay/xy a dx dy b)
     (check-image 'overlay/xy a "first")
-    (check-coordinate 'overlay/xy dx "second")
-    (check-coordinate 'overlay/xy dy "third")
+    (check-integer-coordinate 'overlay/xy dx "second")
+    (check-integer-coordinate 'overlay/xy dy "third")
     (check-image 'overlay/xy b "fourth")
-    (real-overlay/xy 'overlay/xy a dx dy b))
+    (real-overlay/xy 'overlay/xy 
+                     a
+                     (if (exact? dx) dx (inexact->exact dx))
+                     (if (exact? dy) dy (inexact->exact dy))
+                     b))
 
   (define (real-overlay/xy name raw-a raw-delta-x raw-delta-y raw-b)
     (let ([a (coerce-to-cache-image-snip raw-a)]
@@ -302,18 +312,17 @@ plt/collects/tests/mzscheme/image-test.ss
     (check-coordinate 'line x "first")
     (check-coordinate 'line y "second")
     (check-image-color 'line color "third")
-    (check-sizes 'line (+ x 1) (+ y 1))
-    (let ([draw-proc 
-           (make-color-wrapper
-            color 'transparent 'solid
-            (lambda (dc dx dy)
-              (send dc draw-line dx dy (+ dx x) (+ dy y))))]
-          [mask-proc
-           (make-color-wrapper
-            'black 'transparent 'solid
-            (lambda (dc dx dy)
-              (send dc draw-line dx dy (+ dx x) (+ dy y))))])
-      (make-simple-cache-image-snip (+ x 1) (+ y 1) 0 0 draw-proc mask-proc)))
+    (let ([w (+ (abs x) 1)]
+          [h (+ (abs y) 1)]
+          [px (abs (min x 0))]
+          [py (abs (min y 0))])
+      (check-sizes 'line w h)
+      (let* ([do-draw
+              (λ (dc dx dy)
+                (send dc draw-line (+ px dx) (+ py dy) (+ dx px x) (+ dy py y)))]
+             [draw-proc (make-color-wrapper color 'transparent 'solid do-draw)]
+             [mask-proc (make-color-wrapper 'black 'transparent 'solid do-draw)])
+        (make-simple-cache-image-snip w h px py draw-proc mask-proc))))
   
   ;; test what happens when the line moves out of the box.
   (define (add-line raw-i pre-x1 pre-y1 pre-x2 pre-y2 color-in)
@@ -330,37 +339,32 @@ plt/collects/tests/mzscheme/image-test.ss
                     (if (<= pre-x1 pre-x2)
                         (values pre-x1 pre-y1 pre-x2 pre-y2)
                         (values pre-x2 pre-y2 pre-x1 pre-y1))])
-        (let* ([line-w (+ (abs (- x2 x1)) 1)]
-               [line-h (+ (abs (- y2 y1)) 1)])
+        (let* ([line-w (abs (- x2 x1))]
+               [line-h (abs (- y2 y1))]
+               [build-snip
+                (λ (do-draw py-offset)
+                  (let* ([draw-proc 
+                          (make-color-wrapper color-in 'transparent 'solid do-draw)]
+                         [mask-proc
+                          (make-color-wrapper 'black 'transparent 'solid do-draw)]
+                         [line
+                          (make-simple-cache-image-snip (+ line-w 1) (+ line-h 1) px py draw-proc mask-proc)])
+                    (real-overlay/xy 'add-line i (+ px x1) (+ py py-offset) line)))])
           (if (y1 . <= . y2)
-              (let* ([do-draw
-                      (lambda (dc dx dy)
-                        (send dc draw-line 
-                              dx
-                              dy
-                              (+ dx (- x2 x1))
-                              (+ dy (- y2 y1))))]
-                     [draw-proc 
-                      (make-color-wrapper color-in 'transparent 'solid do-draw)]
-                     [mask-proc
-                      (make-color-wrapper 'black 'transparent 'solid do-draw)]
-                     [line
-                      (make-simple-cache-image-snip line-w line-h px py draw-proc mask-proc)])
-                (real-overlay/xy 'add-line i (+ px x1) (+ py y1) line))
-              (let* ([do-draw
-                      (lambda (dc dx dy)
-                        (send dc draw-line 
-                              dx
-                              (+ dy (- line-h 1))
-                              (+ dx (- line-w 1))
-                              dy))]
-                     [draw-proc 
-                      (make-color-wrapper color-in 'transparent 'solid do-draw)]
-                     [mask-proc
-                      (make-color-wrapper 'black 'transparent 'solid do-draw)]
-                     [line
-                      (make-simple-cache-image-snip line-w line-h px py draw-proc mask-proc)])
-                (real-overlay/xy 'add-line i (+ px x1) (+ py y2) line)))))))
+              (build-snip (λ (dc dx dy)
+                            (send dc draw-line 
+                                  dx
+                                  dy
+                                  (+ dx (- x2 x1))
+                                  (+ dy (- y2 y1))))
+                          y1)
+              (build-snip (λ (dc dx dy)
+                            (send dc draw-line 
+                                  dx
+                                  (+ dy line-h)
+                                  (+ dx line-w)
+                                  dy))
+                          y2))))))
 
   (define (text str size color-in)
     (check 'text string? str "string" "first")

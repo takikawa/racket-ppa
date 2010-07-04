@@ -1,7 +1,7 @@
 /*
  * @(#)regexp.c	1.3 of 18 April 87
  * Revised for PLT MzScheme, 1995-2001
- * Copyright (c) 2004-2005 PLT Scheme, Inc.
+ * Copyright (c) 2004-2006 PLT Scheme Inc.
  *
  *	Copyright (c) 1986 by University of Toronto.
  *	Written by Henry Spencer.  Not derived from licensed software.
@@ -1660,6 +1660,8 @@ regmatch(Regwork *rw, rxpos prog)
 	case CLOSEN:
 	  isopen = 0;
 	  no = OPLEN(OPERAND(scan));
+	  if (!no)
+	    no = -1; /* => don't set in result array */
 	  break;
 	default:
 	  if (OP(scan) < CLOSE) {
@@ -1671,36 +1673,40 @@ regmatch(Regwork *rw, rxpos prog)
 	  }
 	}
 
-	save = rw->input;
-
-	if (isopen) {
-	  if (regmatch(rw, next)) {
-	    if (no >= 0) {
-	      /*
-	       * Don't set startp if some later
-	       * invocation of the same parentheses
-	       * already has.
-	       */
-	      if (rw->startp[no] == -1)
-		rw->startp[no] = save;
-	    }
-	    return(1);
-	  } else
-	    return(0);
+	if (no < 0) {
+	  /* No need to recur */
 	} else {
-	  if (regmatch(rw, next)) {
-	    if (no >= 0) {
-	      /*
-	       * Don't set endp if some later
-	       * invocation of the same parentheses
-	       * already has.
-	       */
-	      if (rw->endp[no] == -1)
-		rw->endp[no] = save;
-	    }
-	    return(1);
-	  } else
-	    return(0);
+	  save = rw->input;
+
+	  if (isopen) {
+	    if (regmatch(rw, next)) {
+	      if (no >= 0) {
+		/*
+		 * Don't set startp if some later
+		 * invocation of the same parentheses
+		 * already has.
+		 */
+		if (rw->startp[no] == -1)
+		  rw->startp[no] = save;
+	      }
+	      return(1);
+	    } else
+	      return(0);
+	  } else {
+	    if (regmatch(rw, next)) {
+	      if (no >= 0) {
+		/*
+		 * Don't set endp if some later
+		 * invocation of the same parentheses
+		 * already has.
+		 */
+		if (rw->endp[no] == -1)
+		  rw->endp[no] = save;
+	      }
+	      return(1);
+	    } else
+	      return(0);
+	  }
 	}
       }
       break;
@@ -1930,7 +1936,12 @@ END_XFORM_SKIP;
 
 static int compare_ranges(const void *a, const void *b)
 {
-  if (*(unsigned int *)a < *(unsigned int *)b)
+  unsigned int av, bv;
+  av = *(unsigned int *)a;
+  bv = *(unsigned int *)b;
+  if (av == bv)
+    return 0;
+  else if (av < bv)
     return -1;
   else
     return 1;
@@ -1952,7 +1963,7 @@ static unsigned char *make_room(unsigned char *r, int j, int need_extra, RoomSta
 
   if ((rs->size - j - (rs->orig_len - rs->i)) < need_extra) {
     nrs = ((rs->size) * 2) + need_extra;
-    nr = (char *)scheme_malloc_atomic(nrs+1);
+    nr = (unsigned char *)scheme_malloc_atomic(nrs+1);
     memcpy(nr, r, j);
     r = nr;
     rs->size = nrs;
@@ -1971,8 +1982,8 @@ static unsigned char *add_byte_range(const unsigned char *lo, const unsigned cha
 	through hi lexicographically. See add_range to get started. */
 {
   int same_chars, j, i;
-  const unsigned char *lowest = "\200\200\200\200\200";
-  const unsigned char *highest = "\277\277\277\277\277";
+  const unsigned char *lowest = (unsigned char *)"\200\200\200\200\200";
+  const unsigned char *highest = (unsigned char *)"\277\277\277\277\277";
   unsigned char p, q;
 
   /* Look for a common prefix: */
@@ -2167,7 +2178,7 @@ static unsigned char *add_range(unsigned char *r, int *_j, RoomState *rs,
   return add_byte_range(lo, hi, count, r, _j, rs, did_alt, 0);
 }
 
-static int translate(unsigned char *s, int len, char **result)
+static int translate(unsigned char *s, int len, unsigned char **result)
 {
   int j;
   RoomState rs;
@@ -2176,7 +2187,7 @@ static int translate(unsigned char *s, int len, char **result)
   rs.orig_len = len;
   rs.size = len;
   
-  r = (char *)scheme_malloc_atomic(rs.size + 1);
+  r = (unsigned char *)scheme_malloc_atomic(rs.size + 1);
 
   /* We need to translate if the pattern contains any use of ".", if
      there's a big character in a range, if there's a not-range, or if
@@ -2279,15 +2290,16 @@ static int translate(unsigned char *s, int len, char **result)
 	/* Turn the ranges list into an array */
 	range_len = scheme_list_length(ranges);
 	range_array = (unsigned int *)scheme_malloc_atomic(2 * range_len * sizeof(unsigned int));
-	for (rp = 0; SCHEME_PAIRP(ranges); ranges = SCHEME_CDR(ranges), rp++) {
-	  long hi, lo;
+	for (rp = 0; SCHEME_PAIRP(ranges); ranges = SCHEME_CDR(ranges), rp += 2) {
+	  unsigned long hi, lo;
 	  scheme_get_unsigned_int_val(SCHEME_CAAR(ranges), &lo);
 	  scheme_get_unsigned_int_val(SCHEME_CDR(SCHEME_CAR(ranges)), &hi);
-	  range_array[rp] = lo;
-	  range_array[rp+1] = hi;
+	  range_array[rp] = (unsigned int)lo;
+	  range_array[rp+1] = (unsigned int)hi;
 	}
+	range_len *= 2;
 	/* Sort the ranges by the starting index. */
-	my_qsort(range_array, range_len >> 1, 2 * sizeof(unsigned long), compare_ranges);
+	my_qsort(range_array, range_len >> 1, 2 * sizeof(unsigned int), compare_ranges);
 	
 	/* If a range starts below 128, fill in the simple array */
 	for (rp = 0; rp < range_len; rp += 2) {
@@ -2485,7 +2497,7 @@ static Scheme_Object *do_make_regexp(const char *who, int is_byte, int argc, Sch
   slen = SCHEME_BYTE_STRTAG_VAL(bs);
 
   if (!is_byte) {
-    slen = translate(s,slen, &s);
+    slen = translate((unsigned char *)s, slen, (unsigned char **)&s);
 #if 0
     /* Debugging, to see the translated regexp: */
     {
@@ -2496,7 +2508,7 @@ static Scheme_Object *do_make_regexp(const char *who, int is_byte, int argc, Sch
       for (i = 0; i < slen; i++) {
 	if (!cp[i]) cp[i] = '0';
       } 
-      printf("%d %s\n", slen, cp);
+      printf("%d %s\n", slen, scheme_write_to_string(scheme_make_byte_string(cp), 0));
     }
 #endif
   }
@@ -2687,7 +2699,7 @@ static Scheme_Object *gen_compare(char *name, int pos,
 				0 /* not UTF-16 */);
       full_s = (char *)scheme_malloc_atomic(blen);
       scheme_utf8_encode(SCHEME_CHAR_STR_VAL(argv[1]), offset, endset,
-			 full_s, 0,
+			 (unsigned char *)full_s, 0,
 			 0 /* not UTF-16 */);
       orig_offset = offset;
       offset = 0;
@@ -2732,12 +2744,12 @@ static Scheme_Object *gen_compare(char *name, int pos,
 	       unicode chars, so the start and end points can't be in
 	       the middle of encoded characters. */
 	    int uspd, uepd;
-	    uspd = scheme_utf8_decode(full_s, offset, startp[i],
+	    uspd = scheme_utf8_decode((const unsigned char *)full_s, offset, startp[i],
 				      NULL, 0, -1,
 				      NULL, 0, 0);
 	    uspd += orig_offset;
 	    startpd = scheme_make_integer(uspd);
-	    uepd = scheme_utf8_decode(full_s, startp[i], endp[i],
+	    uepd = scheme_utf8_decode((const unsigned char *)full_s, startp[i], endp[i],
 				      NULL, 0, -1,
 				      NULL, 0, 0);
 	    uepd += uspd;
@@ -2811,6 +2823,17 @@ static Scheme_Object *positions_peek_nonblock(int argc, Scheme_Object *argv[])
   return gen_compare("regexp-match-peek-positions-immediate", 1, argc, argv, 1, 1);
 }
 
+static char *build_call_name(const char *n)
+{
+  char *m;
+  int l;
+  l = strlen(n);
+  m = (char *)scheme_malloc_atomic(l + 32);
+  memcpy(m, n, l);
+  strcpy(m XFORM_OK_PLUS l, " (calling given filter procedure)");
+  return m;
+}
+
 static Scheme_Object *gen_replace(const char *name, int argc, Scheme_Object *argv[], int all)
 {
   Scheme_Object *orig;
@@ -2827,18 +2850,18 @@ static Scheme_Object *gen_replace(const char *name, int argc, Scheme_Object *arg
       && !SCHEME_CHAR_STRINGP(argv[1]))
     scheme_wrong_type(name, "string or byte string", 1, argc, argv);
   if (!SCHEME_BYTE_STRINGP(argv[2])
-      && !SCHEME_CHAR_STRINGP(argv[2]))
-    scheme_wrong_type(name, "string or byte string", 2, argc, argv);
+      && !SCHEME_CHAR_STRINGP(argv[2])
+      && !SCHEME_PROCP(argv[2]))
+    scheme_wrong_type(name, "string, byte string, or procedure", 2, argc, argv);
 
-  if (SCHEME_BYTE_STRINGP(argv[1])) {
-    if (!SCHEME_BYTE_STRINGP(argv[2])) {
-      scheme_arg_mismatch(name, "cannot replace a byte string with a string: ",
-			  argv[2]);
-    }
-  } else {
-    if (!SCHEME_CHAR_STRINGP(argv[2])) {
-      scheme_arg_mismatch(name, "cannot replace a string with a byte string: ",
-			  argv[2]);
+  if (SCHEME_BYTE_STRINGP(argv[2])) {
+    if (SCHEME_CHAR_STRINGP(argv[0])
+	|| ((SCHEME_TYPE(argv[0]) == scheme_regexp_type)
+	    && ((regexp *)argv[0])->is_utf8)) {
+      if (SCHEME_CHAR_STRINGP(argv[1])) {
+	scheme_arg_mismatch(name, "cannot replace a string with a byte string: ",
+			    argv[2]);
+      }
     }
   }
 
@@ -2847,6 +2870,16 @@ static Scheme_Object *gen_replace(const char *name, int argc, Scheme_Object *arg
     r = regcomp_object(argv[0]);
   else
     r = (regexp *)argv[0];
+
+  if (SCHEME_PROCP(argv[2])) {
+    if (!scheme_check_proc_arity(NULL, r->nsubexp, 2, argc, argv)) {
+      scheme_raise_exn(MZEXN_FAIL_CONTRACT,
+		       "%s: regexp produces %d matches: %V; procedure does not accept %d arguments: %V",
+		       name, 
+		       r->nsubexp, (Scheme_Object *)r,
+		       r->nsubexp, argv[2]);
+    }
+  }
 
   if (SCHEME_CHAR_STRINGP(argv[1])) {
     orig = scheme_char_string_to_byte_string(argv[1]);
@@ -2869,7 +2902,7 @@ static Scheme_Object *gen_replace(const char *name, int argc, Scheme_Object *arg
   while (1) {
     int m;
 
-    m = regexec("regexp-replace", r, source, srcoffset, sourcelen - srcoffset, startp, endp,
+    m = regexec(name, r, source, srcoffset, sourcelen - srcoffset, startp, endp,
 		NULL, NULL, 0,
 		NULL, 0, 0, NULL, NULL, NULL, NULL);
 
@@ -2884,19 +2917,68 @@ static Scheme_Object *gen_replace(const char *name, int argc, Scheme_Object *arg
 	return NULL;
       }
       
-      if (!deststr) {
-	if (was_non_byte) {
-	  Scheme_Object *bs;
-	  bs = scheme_char_string_to_byte_string(argv[2]);
-	  deststr = SCHEME_BYTE_STR_VAL(bs);
-	  destlen = SCHEME_BYTE_STRTAG_VAL(bs);
-	} else {
-	  deststr = SCHEME_BYTE_STR_VAL(argv[2]);
-	  destlen = SCHEME_BYTE_STRTAG_VAL(argv[2]);
-	}
-      }
+      if (SCHEME_PROCP(argv[2])) {
+        int i;
+        Scheme_Object *m, **args, *quick_args[5];
 
-      insert = regsub(r, deststr, destlen, &len, source, startp, endp);
+	if (r->nsubexp <= 5) {
+	  args = quick_args;
+	} else {
+	  args = MALLOC_N(Scheme_Object*, r->nsubexp);
+	}
+
+        for (i = r->nsubexp; i--; ) {
+          if (startp[i] == -1) {
+            args[i] = scheme_false;
+          } else {
+            long len;
+            len = endp[i] - startp[i];
+            if (was_non_byte) {
+	      m = scheme_make_sized_offset_utf8_string(source, startp[i], len);
+              args[i] = m;
+            } else {
+	      m = scheme_make_sized_offset_byte_string(source, startp[i], len, 1);
+              args[i] = m;
+            }
+          }
+        }
+
+        m = _scheme_apply(argv[2], r->nsubexp, args);
+
+	if (!was_non_byte) {
+          if (!SCHEME_BYTE_STRINGP(m)) {
+	    args[0] = m;
+	    scheme_wrong_type(build_call_name(name), "byte string", -1, -1, args);
+	  }
+	  insert = SCHEME_BYTE_STR_VAL(m);
+          len = SCHEME_BYTE_STRLEN_VAL(m);
+        } else {
+	  if (!SCHEME_CHAR_STRINGP(m)) {
+	    args[0] = m;
+	    scheme_wrong_type(build_call_name(name), "string", -1, -1, args);
+	  }
+          len = scheme_utf8_encode(SCHEME_CHAR_STR_VAL(m), 0,
+                                   SCHEME_CHAR_STRLEN_VAL(m),
+                                   NULL, 0, 0 /* not UTF-16 */);
+          insert = (char *)scheme_malloc_atomic(len);
+          scheme_utf8_encode(SCHEME_CHAR_STR_VAL(m), 0,
+                             SCHEME_CHAR_STRLEN_VAL(m),
+                             (unsigned char *)insert, 0, 0 /* not UTF-16 */);
+        }
+      } else {
+	if (!deststr) {
+	  if (SCHEME_CHAR_STRINGP(argv[2])) {
+	    Scheme_Object *bs;
+	    bs = scheme_char_string_to_byte_string(argv[2]);
+	    deststr = SCHEME_BYTE_STR_VAL(bs);
+	    destlen = SCHEME_BYTE_STRTAG_VAL(bs);
+	  } else {
+	    deststr = SCHEME_BYTE_STR_VAL(argv[2]);
+	    destlen = SCHEME_BYTE_STRTAG_VAL(argv[2]);
+	  }
+	}
+	insert = regsub(r, deststr, destlen, &len, source, startp, endp);
+      }
       
       end = sourcelen;
       
