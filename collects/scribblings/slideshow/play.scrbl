@@ -51,7 +51,7 @@ effectively calls @scheme[gen] on @scheme[1.0] without a timeout to
 complete the animation and stop the auto-advance of slides. The
 @scheme[play-n] function also manages with multi-step animations.
 
-If @scheme[skip-first?] is @scheme[#f], then one less slide is
+If @scheme[skip-first?] is @scheme[#f], then one fewer slide is
 generated, because @scheme[gen] is not called on @scheme[0.0].
 
 The @scheme[title], @scheme[name], and @scheme[layout] arguments are
@@ -97,7 +97,10 @@ from @scheme[0.0] to @scheme[1.0], and so on.
 For example,
 
 @schemeblock[
-(play-n (lambda (n1 n2) (cellophane (t "Hello") (* n1 (- 1.0 n2)))))
+(play-n 
+ (lambda (n1 n2)
+   (cellophane (t "Hello")
+               (* n1 (- 1.0 n2)))))
 ]
 
 generates an animation to fade in the word ``Hello,'' and then pauses

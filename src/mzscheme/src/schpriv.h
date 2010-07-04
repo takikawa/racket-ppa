@@ -230,7 +230,12 @@ void scheme_init_eval_places(void);
 void scheme_init_port_places(void);
 void scheme_init_regexp_places(void);
 void scheme_init_stx_places(void);
+void scheme_init_fun_places(void);
+void scheme_init_sema_places(void);
+void scheme_init_gmp_places(void);
+void scheme_init_print_global_constants(void);
 
+void register_network_evts();
 
 void scheme_free_dynamic_extensions(void);
 
@@ -330,7 +335,7 @@ extern Scheme_Object *scheme_stack_dump_key;
 
 extern Scheme_Object *scheme_default_prompt_tag;
 
-extern Scheme_Object *scheme_system_idle_channel;
+extern THREAD_LOCAL Scheme_Object *scheme_system_idle_channel;
 
 extern Scheme_Object *scheme_input_port_property, *scheme_output_port_property;
 
@@ -360,7 +365,7 @@ extern THREAD_LOCAL MZ_MARK_POS_TYPE scheme_current_cont_mark_pos;
 # define MZ_CONT_MARK_POS (scheme_current_thread->cont_mark_pos)
 #endif
 
-extern volatile int scheme_fuel_counter;
+extern THREAD_LOCAL volatile int scheme_fuel_counter;
 
 extern THREAD_LOCAL Scheme_Thread *scheme_main_thread;
 
@@ -414,9 +419,8 @@ void scheme_forget_subthread(struct Scheme_Thread_Memory *);
 void scheme_suspend_remembered_threads(void);
 void scheme_resume_remembered_threads(void);
 #endif
-#if defined(USE_WIN32_THREAD_TIMER) || defined(USE_PTHREAD_THREAD_TIMER)
-void scheme_start_itimer_thread(long usec);
-#endif
+
+void scheme_kickoff_green_thread_time_slice_timer(long usec);
 
 #ifdef UNIX_PROCESSES
 void scheme_block_child_signals(int block);
@@ -902,6 +906,7 @@ void scheme_load_delayed_syntax(struct Resolve_Prefix *rp, long i);
 XFORM_NONGCING Scheme_Object *scheme_phase_index_symbol(int src_phase_index);
 
 Scheme_Object *scheme_explode_syntax(Scheme_Object *stx, Scheme_Hash_Table *ht);
+void scheme_populate_pt_ht(struct Scheme_Module_Phase_Exports * pt);
 
 /*========================================================================*/
 /*                   syntax run-time structures                           */
@@ -1144,12 +1149,14 @@ typedef struct Scheme_Cont_Mark {
 } Scheme_Cont_Mark;
 
 typedef struct Scheme_Cont_Mark_Chain {
-  Scheme_Object so;
+  Scheme_Inclhash_Object iso; /* 0x1 => next is from different meta-continuation */
   Scheme_Object *key;
   Scheme_Object *val;
   MZ_MARK_POS_TYPE pos;
   struct Scheme_Cont_Mark_Chain *next;
 } Scheme_Cont_Mark_Chain;
+
+#define SCHEME_MARK_CHAIN_FLAG(c) MZ_OPT_HASH_KEY(&(c)->iso)
 
 typedef struct Scheme_Cont_Mark_Set {
   Scheme_Object so;
@@ -1645,6 +1652,7 @@ extern int scheme_is_nan(double);
 #      define MZ_IS_NAN(d) _isnan(d)
 #     else
        /* USE_IEEE_FP_PREDS */
+#      include <math.h>
 #      define MZ_IS_INFINITY(d) (isinf(d))
 #      define MZ_IS_POS_INFINITY(d) (isinf(d) && (d > 0))
 #      define MZ_IS_NEG_INFINITY(d) (isinf(d) && (d < 0))
@@ -2350,6 +2358,16 @@ void scheme_finish_application(Scheme_App_Rec *app);
 
 Scheme_Object *scheme_jit_expr(Scheme_Object *);
 Scheme_Object *scheme_jit_closure(Scheme_Object *, Scheme_Object *context);
+void scheme_jit_fill_threadlocal_table();
+
+struct Start_Module_Args;
+
+#ifdef MZ_USE_JIT
+void *scheme_module_run_start(Scheme_Env *menv, Scheme_Env *env, Scheme_Object *name);
+void *scheme_module_start_start(struct Start_Module_Args *a, Scheme_Object *name);
+#endif
+void *scheme_module_run_finish(Scheme_Env *menv, Scheme_Env *env);
+void *scheme_module_start_finish(struct Start_Module_Args *a);
 
 Scheme_Object *scheme_build_closure_name(Scheme_Object *code, Scheme_Compile_Info *rec, int drec);
 
@@ -3029,7 +3047,7 @@ extern char *scheme_convert_from_wchar(const wchar_t *ws);
 # define USE_SOCKETS_TCP
 #endif
 
-extern int scheme_active_but_sleeping;
+extern THREAD_LOCAL int scheme_active_but_sleeping;
 extern int scheme_file_open_count;
 
 typedef struct Scheme_Indexed_String {
@@ -3103,6 +3121,7 @@ int scheme_is_user_port(Scheme_Object *port);
 int scheme_byte_ready_or_user_port_ready(Scheme_Object *p, Scheme_Schedule_Info *sinfo);
 
 int scheme_pipe_char_count(Scheme_Object *p);
+void scheme_alloc_global_fdset();
 
 #define CURRENT_INPUT_PORT(config) scheme_get_param(config, MZCONFIG_INPUT_PORT)
 #define CURRENT_OUTPUT_PORT(config) scheme_get_param(config, MZCONFIG_OUTPUT_PORT)
@@ -3203,8 +3222,13 @@ unsigned short * scheme_ucs4_to_utf16(const mzchar *text, int start, int end,
 
 Scheme_Object *scheme_current_library_collection_paths(int argc, Scheme_Object *argv[]);
 
+#ifdef MZ_USE_JIT
 int scheme_can_inline_fp_op();
 int scheme_can_inline_fp_comp();
+#else
+# define scheme_can_inline_fp_op() 0
+# define scheme_can_inline_fp_comp() 0
+#endif
 
 /*========================================================================*/
 /*                           places                                       */
@@ -3231,6 +3255,8 @@ typedef struct Scheme_Place {
 } Scheme_Place;
 
 Scheme_Env *scheme_place_instance_init();
+void scheme_place_instance_destroy();
+void kill_green_thread_timer();
 
 /*========================================================================*/
 /*                           engine                                       */

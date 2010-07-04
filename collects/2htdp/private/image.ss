@@ -20,10 +20,13 @@
 (provide (all-from-out htdp/image))
 
 (provide
- ;; Scene is Image with pinhole in origin 
+ ;; type Scene = Image with pinhole in origin 
  nw:rectangle ;; Number Number Mode Color -> Image
+ ;; create a rectangle with pinhole in the upper-left corner 
  place-image  ;; Image Number Number Scene -> Scene
+ ;; place image at (x,y) in given scene 
  empty-scene  ;; Number Number -> Scene 
+ ;; create an empty scene of size width x height (!= (nw:rectangle width height))
  scene+line   ;; Scene Number Number Number Number Color -> Scene 
  ;; cut all pieces that are outside the given rectangle 
  )
@@ -37,8 +40,8 @@
 
 (define (place-image image x y scene)
   (check-image 'place-image image "first")
-  (check-arg 'place-image (number? x) 'integer "second" x)
-  (check-arg 'place-image (number? y) 'integer "third" y)
+  (check-arg 'place-image (real? x) 'real "second" x)
+  (check-arg 'place-image (real? y) 'real "third" y)
   (check-scene 'place-image scene "fourth")
   (let ([x (number->integer x)]
         [y (number->integer y)])
@@ -55,14 +58,14 @@
 (define (scene+line img x0 y0 x1 y1 c)
   ;; img and c are checked via calls to add-line from image.ss
   (check-arg 'scene+line (scene? img) "scene" "first" "plain image")
-  (check-arg 'scene+line (number? x0) "number" "second" x0)
-  (check-arg 'scene+line (number? y0) "number" "third" y0)
-  (check-arg 'scene+line (number? x1) "number" "fourth" x1)
-  (check-arg 'scene+line (number? y1) "number" "fifth" y1)
-  (let ([x0 (number->integer x0)]
-        [x1 (number->integer x1)]
-        [y0 (number->integer y0)]
-        [y1 (number->integer y1)])
+  (check-arg 'scene+line (real? x0) "number" "second" x0)
+  (check-arg 'scene+line (real? y0) "number" "third" y0)
+  (check-arg 'scene+line (real? x1) "number" "fourth" x1)
+  (check-arg 'scene+line (real? y1) "number" "fifth" y1)
+  (let ([x0 (number->integer x0 'scene+line 'second)]
+        [x1 (number->integer x1 'scene+line 'third)]
+        [y0 (number->integer y0 'scene+line 'fourth)]
+        [y1 (number->integer y1 'scene+line 'fifth)])
     (add-line-to-scene0 img x0 y0 x1 y1 c)))
 
 ;; Image Number Number Image -> Image 
@@ -79,13 +82,22 @@
   (define w (image-width img))  
   (define h (image-height img))
   (cond
-    [(and (<= 0 x0) (< x0 w) (<= 0 x1) (< x1 w) (<= 0 y0) (< y0 w) (<= 0 y1) (< y1 w))
+    [(and (<= 0 x0) (< x0 w) (<= 0 y0) (< y0 w)
+          (<= 0 x1) (< x1 w) (<= 0 y1) (< y1 w))
+     ;; everything is inside 
      (add-line img x0 y0 x1 y1 c)]
-    [(= x0 x1) ;; vertical 
+    [(and (or (> 0 x0) (>= x0 w)) (or (> 0 y0) (>= y0 w))
+          (or (> 0 x1) (>= x1 w)) (or (> 0 y1) (>= y1 w)))
+     ;; everythhing is outside 
+     img]
+    [(= x0 x1) 
+     ;; vertical 
      (if (<= 0 x0 w) (add-line img x0 (app y0 h) x0 (app y1 h) c) img)]
-    [(= y0 y1) ;; horizontal 
+    [(= y0 y1) 
+     ;; horizontal 
      (if (<= 0 y0 h) (add-line img (app x0 w) y0 (app x1 w) y0 c) img)]
     [else 
+     ;; partial off-screen 
      (local ((define lin (points->line x0 y0 x1 y1))
              (define dir (direction x0 y0 x1 y1))
              (define-values (upp low lft rgt) (intersections lin w h))
@@ -125,7 +137,7 @@
    (string-append 
     (if (<= y0 y1) "lower" "upper") "-" (if (<= x0 x1) "right" "left"))))
 
-#| TESTS
+#| TESTS 
 'direction 
 (equal? (direction 10 10 0 0) 'upper-left)
 (equal? (direction 10 10 20 20) 'lower-right)
@@ -186,8 +198,3 @@
          list)
         (list false false 10 80))
 |#
-
-;; -----------------------------------------------------------------------------
-
-;                                                                               
-;                                                                               

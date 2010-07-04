@@ -77,7 +77,6 @@ static int mzerrno = 0;
 extern int osk_not_console; /* set by cmd-line flag */
 #endif
 #include <math.h> /* for fmod , used by default_sleep */
-#include "schfd.h"
 
 #ifndef MZ_BINARY
 # define MZ_BINARY 0
@@ -114,6 +113,8 @@ static void init_thread_memory();
 # define OS_MUTEX_TYPE CRITICAL_SECTION
 # define OS_THREAD_TYPE HANDLE
 #endif
+
+#include "schfd.h"
 
 #ifdef WINDOWS_FILE_HANDLES
 
@@ -306,6 +307,8 @@ THREAD_LOCAL Scheme_Object *scheme_orig_stdout_port;
 THREAD_LOCAL Scheme_Object *scheme_orig_stderr_port;
 THREAD_LOCAL Scheme_Object *scheme_orig_stdin_port;
 
+THREAD_LOCAL fd_set *scheme_fd_set;
+
 Scheme_Object *(*scheme_make_stdin)(void) = NULL;
 Scheme_Object *(*scheme_make_stdout)(void) = NULL;
 Scheme_Object *(*scheme_make_stderr)(void) = NULL;
@@ -350,7 +353,8 @@ static int flush_err;
 static THREAD_LOCAL Scheme_Custodian *new_port_cust; /* back-door argument */
 
 #if defined(FILES_HAVE_FDS)
-static int external_event_fd, put_external_event_fd;
+static THREAD_LOCAL int external_event_fd;
+static THREAD_LOCAL int put_external_event_fd;
 #endif
 
 static void register_port_wait();
@@ -416,7 +420,7 @@ Scheme_Object *scheme_none_symbol, *scheme_line_symbol, *scheme_block_symbol;
 static Scheme_Object *exact_symbol;
 
 #define READ_STRING_BYTE_BUFFER_SIZE 1024
-static char *read_string_byte_buffer;
+static THREAD_LOCAL char *read_string_byte_buffer;
 
 #define fail_err_symbol scheme_false
 
@@ -561,21 +565,6 @@ scheme_init_port (Scheme_Env *env)
      custodian). */
 #endif
 
-#if defined(FILES_HAVE_FDS)
-# ifndef USE_OSKIT_CONSOLE
-  /* Set up a pipe for signalling external events: */
-  {
-    int fds[2];
-    if (!pipe(fds)) {
-      external_event_fd = fds[0];
-      put_external_event_fd = fds[1];
-      fcntl(external_event_fd, F_SETFL, MZ_NONBLOCKING);
-      fcntl(put_external_event_fd, F_SETFL, MZ_NONBLOCKING);
-    }
-  }
-# endif
-#endif
-
   register_port_wait();
 
   scheme_add_global_constant("subprocess", scheme_make_prim_w_arity2(subprocess, "subprocess", 4, -1, 4, 4), env);
@@ -590,7 +579,6 @@ scheme_init_port (Scheme_Env *env)
 
   scheme_add_global_constant("shell-execute", scheme_make_prim_w_arity(sch_shell_execute, "shell-execute", 5, 5), env);
 
-  REGISTER_SO(read_string_byte_buffer);
 
   scheme_add_evt(scheme_progress_evt_type, (Scheme_Ready_Fun)progress_evt_ready, NULL, NULL, 1);
   scheme_add_evt(scheme_write_evt_type, (Scheme_Ready_Fun)rw_evt_ready, rw_evt_wakeup, NULL, 1);
@@ -598,6 +586,7 @@ scheme_init_port (Scheme_Env *env)
 
 void scheme_init_port_places(void)
 {
+  REGISTER_SO(read_string_byte_buffer);
   REGISTER_SO(scheme_orig_stdout_port);
   REGISTER_SO(scheme_orig_stderr_port);
   REGISTER_SO(scheme_orig_stdin_port);
@@ -650,6 +639,21 @@ void scheme_init_port_places(void)
 			     : scheme_make_file_output_port(stderr)
 #endif
 			     );
+
+#if defined(FILES_HAVE_FDS)
+# ifndef USE_OSKIT_CONSOLE
+  /* Set up a pipe for signalling external events: */
+  {
+    int fds[2];
+    if (!pipe(fds)) {
+      external_event_fd = fds[0];
+      put_external_event_fd = fds[1];
+      fcntl(external_event_fd, F_SETFL, MZ_NONBLOCKING);
+      fcntl(put_external_event_fd, F_SETFL, MZ_NONBLOCKING);
+    }
+  }
+# endif
+#endif
 }
 
 void scheme_init_port_config(void)
@@ -675,6 +679,13 @@ Scheme_Object * scheme_make_eof (void)
 /* Implement fd arrays (FD_SET, etc) with a runtime-determined size.
    Also implement special hooks for Windows "descriptors", like
    even queues and semaphores. */
+
+void scheme_alloc_global_fdset() {
+#ifdef USE_FAR_MZ_FDCALLS
+  REGISTER_SO(scheme_fd_set);
+  scheme_fd_set = scheme_alloc_fdset_array(3, 0);
+#endif
+}
 
 #ifdef USE_DYNAMIC_FDSET_SIZE
 static int dynamic_fd_size;
@@ -4924,8 +4935,8 @@ fd_byte_ready (Scheme_Input_Port *port)
     DECL_FDSET(exnfds, 1);
     struct timeval time = {0, 0};
 
-    INIT_DECL_FDSET(readfds, 1);
-    INIT_DECL_FDSET(exnfds, 1);
+    INIT_DECL_RD_FDSET(readfds);
+    INIT_DECL_ER_FDSET(exnfds);
 
     MZ_FD_ZERO(readfds);
     MZ_FD_ZERO(exnfds);
@@ -5937,8 +5948,8 @@ fd_write_ready (Scheme_Object *port)
     struct timeval time = {0, 0};
     int sr;
 
-    INIT_DECL_FDSET(writefds, 1);
-    INIT_DECL_FDSET(exnfds, 1);
+    INIT_DECL_WR_FDSET(writefds);
+    INIT_DECL_ER_FDSET(exnfds);
 
     MZ_FD_ZERO(writefds);
     MZ_FD_ZERO(exnfds);
@@ -8146,7 +8157,7 @@ static void default_sleep(float v, void *fds)
     if (external_event_fd) {
       DECL_FDSET(readfds, 1);
 
-      INIT_DECL_FDSET(readfds, 1);
+      INIT_DECL_RD_FDSET(readfds);
 
       MZ_FD_ZERO(readfds);
       MZ_FD_SET(external_event_fd, readfds);
@@ -8339,8 +8350,11 @@ static void default_sleep(float v, void *fds)
 #if defined(FILES_HAVE_FDS)
   /* Clear external event flag */
   if (external_event_fd) {
+    int rc;
     char buf[10];
-    read(external_event_fd, buf, 10);
+    do {
+      rc = read(external_event_fd, buf, 10);
+    } while ((rc == -1) && errno == EINTR);
   }
 #endif
 }
@@ -8411,7 +8425,7 @@ static long ITimer(void)
 END_XFORM_SKIP;
 #endif
 
-void scheme_start_itimer_thread(long usec)
+static void scheme_start_itimer_thread(long usec)
 {
   DWORD id;
 
@@ -8430,65 +8444,159 @@ void scheme_start_itimer_thread(long usec)
 #ifdef USE_PTHREAD_THREAD_TIMER
 
 #include <pthread.h>
+typedef struct ITimer_Data {
+  int itimer;
+  int state;
+  int die;
+  pthread_t thread;
+  pthread_mutex_t mutex;
+  pthread_cond_t cond;
+  int delay;
+  volatile int * fuel_counter_ptr;
+  volatile unsigned long * jit_stack_boundary_ptr;
+} ITimer_Data;
 
-static int itimer = 0, itimer_continue = 0;
-static pthread_mutex_t itimer_mutex;
-static pthread_cond_t itimer_cond;
-static volatile long itimer_delay;
+static THREAD_LOCAL ITimer_Data itimerdata;
 
 #ifdef MZ_XFORM
 START_XFORM_SKIP;
 #endif
-static void *run_itimer(void *p)
-{
-  while (1) {
-    usleep(itimer_delay);
-    scheme_fuel_counter = 0;
-    scheme_jit_stack_boundary = (unsigned long)-1;
 
-    pthread_mutex_lock(&itimer_mutex);
-    if (itimer_continue) {
-      itimer_continue = 0;
-    } else {
-      itimer_continue = -1;
-      pthread_cond_wait(&itimer_cond, &itimer_mutex);
+static void *green_thread_timer(void *data)
+{
+  ITimer_Data *itimer_data;
+  itimer_data = (ITimer_Data *)data;
+  
+  while (1) {
+    if (itimer_data->die) {
+      return NULL;
     }
-    pthread_mutex_unlock(&itimer_mutex);
+    usleep(itimer_data->delay);
+    *(itimer_data->fuel_counter_ptr) = 0;
+    *(itimer_data->jit_stack_boundary_ptr) = (unsigned long)-1;
+
+    pthread_mutex_lock(&itimer_data->mutex);
+    if (!itimer_data->die) {
+      if (itimer_data->state) {
+        itimer_data->state = 0;
+      } else {
+        itimer_data->state = -1;
+        pthread_cond_wait(&itimer_data->cond, &itimer_data->mutex);
+      }
+    }
+    pthread_mutex_unlock(&itimer_data->mutex);
   }
+  return NULL;
 }
+
 #ifdef MZ_XFORM
 END_XFORM_SKIP;
 #endif
 
-void scheme_start_itimer_thread(long usec)
-{
-  itimer_delay = usec;
+static void start_green_thread_timer(long usec) {
+  itimerdata.die = 0;
+  itimerdata.delay = usec;
+  itimerdata.fuel_counter_ptr = &scheme_fuel_counter;
+  itimerdata.jit_stack_boundary_ptr = &scheme_jit_stack_boundary;
+  pthread_mutex_init(&itimerdata.mutex, NULL);
+  pthread_cond_init(&itimerdata.cond, NULL);
+  pthread_create(&itimerdata.thread, NULL, green_thread_timer, &itimerdata);
+  itimerdata.itimer = 1;
+}
 
-  if (!itimer) {
-    pthread_t t;
-    pthread_mutex_init(&itimer_mutex, NULL);
-    pthread_cond_init(&itimer_cond, NULL);
-    pthread_create(&t, NULL, run_itimer,  NULL);
-    itimer = 1;
-  } else {
-    pthread_mutex_lock(&itimer_mutex);
-    if (!itimer_continue) {
+void kill_green_thread_timer() {
+    void *rc;
+    pthread_mutex_lock(&itimerdata.mutex);
+    itimerdata.die = 1;
+    if (!itimerdata.state) {
       /* itimer thread is currently running working */
-      itimer_continue = 1;
-    } else if (itimer_continue < 0) {
+    } else if (itimerdata.state < 0) {
       /* itimer thread is waiting on cond */
-      itimer_continue = 0;
-      pthread_cond_signal(&itimer_cond);
+      pthread_cond_signal(&itimerdata.cond);
     } else {
       /* itimer thread is working, and we've already
          asked it to continue */
     }
-    pthread_mutex_unlock(&itimer_mutex);
+    pthread_mutex_unlock(&itimerdata.mutex);
+    pthread_join(itimerdata.thread, &rc);
+}
+
+static void kickoff_green_thread_timer(long usec) {
+    pthread_mutex_lock(&itimerdata.mutex);
+    itimerdata.delay = usec;
+    if (!itimerdata.state) {
+      /* itimer thread is currently running working */
+      itimerdata.state = 1;
+    } else if (itimerdata.state < 0) {
+      /* itimer thread is waiting on cond */
+      itimerdata.state = 0;
+      pthread_cond_signal(&itimerdata.cond);
+    } else {
+      /* itimer thread is working, and we've already
+         asked it to continue */
+    }
+    pthread_mutex_unlock(&itimerdata.mutex);
+}
+
+static void scheme_start_itimer_thread(long usec)
+{
+  if (!itimerdata.itimer) {
+    start_green_thread_timer(usec);
+  } else {
+    kickoff_green_thread_timer(usec);
   }
 }
 
 #endif
 
+#ifdef USE_ITIMER
+
+#ifdef MZ_XFORM
+START_XFORM_SKIP;
+#endif
+
+static void itimer_expired(int ignored)
+{
+  scheme_fuel_counter = 0;
+  scheme_jit_stack_boundary = (unsigned long)-1;
+#  ifdef SIGSET_NEEDS_REINSTALL
+  MZ_SIGSET(SIGPROF, itimer_expired);
+#  endif
+}
+
+static void kickoff_itimer(long usec) {
+  struct itimerval t;
+  struct itimerval old;
+  static int itimer_handler_installed = 0;
+
+  if (!itimer_handler_installed) {
+    itimer_handler_installed = 1;
+    MZ_SIGSET(SIGPROF, itimer_expired);
+  }
+
+  t.it_value.tv_sec = 0;
+  t.it_value.tv_usec = usec;
+  t.it_interval.tv_sec = 0;
+  t.it_interval.tv_usec = 0;
+
+  setitimer(ITIMER_PROF, &t, &old);
+}
+
+#ifdef MZ_XFORM
+END_XFORM_SKIP;
+#endif
+
+#endif
+
+void scheme_kickoff_green_thread_time_slice_timer(long usec) {
+#ifdef USE_ITIMER
+  kickoff_itimer(usec);
+#elif defined(USE_WIN32_THREAD_TIMER)
+  scheme_start_itimer_thread(usec);
+#elif defined(USE_PTHREAD_THREAD_TIMER)
+  scheme_start_itimer_thread(usec);
+#endif
+}
 
 #ifdef OS_X
 

@@ -73,8 +73,8 @@
 
       (define gcc-compile-flags (append '("-c" "-O2" "-fPIC")
 					(case (string->symbol (path->string (system-library-subpath #f)))
-					  [(ppc-macosx i386-macosx x86_64-macosx) '("-fno-common")]
-					  [(ppc-darwin) '("-fno-common")]
+					  [(i386-macosx i386-darwin) '("-m32" "-fno-common")]
+					  [(ppc-macosx ppc-darwin x86_64-macosx x86_64-darwin) '("-fno-common")]
 					  [(win32\\i386) '("-DAS_MSVC_EXTENSION")]
 					  [else null])
 					gcc-cpp-flags))
@@ -286,7 +286,7 @@
 							 (lambda (s) 
 							   ((current-make-compile-include-strings) s)) 
 							 includes))
-						 ((current-make-compile-include-strings) include-dir)
+						 ((current-make-compile-include-strings) (include-dir))
 						 ((current-make-compile-input-strings) in)
 						 ((current-make-compile-output-strings) out))])
 				   (unless quiet? 

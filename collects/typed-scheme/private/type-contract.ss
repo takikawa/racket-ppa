@@ -2,8 +2,8 @@
 
 (provide type->contract define/fixup-contract? generate-contract-def change-contract-fixups)
 
-(require (except-in "../utils/utils.ss" extend))
 (require
+ "../utils/utils.ss"
  (rep type-rep filter-rep object-rep)
  (typecheck internal-forms)
  (utils tc-utils require-contract)
@@ -11,13 +11,9 @@
  (types resolve utils)
  (prefix-in t: (types convenience))
  (private parse-type)
- scheme/match
- syntax/struct
- syntax/stx
- mzlib/trace
- scheme/list
+ scheme/match syntax/struct syntax/stx mzlib/trace unstable/syntax scheme/list
  (only-in scheme/contract -> ->* case-> cons/c flat-rec-contract provide/contract any/c)
- (for-template scheme/base scheme/contract (utils poly-c) (only-in scheme/class object% is-a?/c subclass?/c)))
+ (for-template scheme/base scheme/contract unstable/poly-c (only-in scheme/class object% is-a?/c subclass?/c)))
 
 (define (define/fixup-contract? stx)
   (or (syntax-property stx 'typechecker:contract-def)
@@ -111,8 +107,8 @@
                       [else (int-err "unknown var: ~a" v)])]
 	[(Poly: vs (and b (Function: _)))
          (match-let ([(Poly-names: vs-nm _) ty])
-           (with-syntax ([(vs+ ...) (generate-temporaries (for/list ([v vs-nm]) (symbol-append v '+)))]
-			 [(vs- ...) (generate-temporaries (for/list ([v vs-nm]) (symbol-append v '-)))])
+           (with-syntax ([(vs+ ...) (generate-temporaries (for/list ([v vs-nm]) (format-symbol "~a+" v)))]
+			 [(vs- ...) (generate-temporaries (for/list ([v vs-nm]) (format-symbol "~a-" v)))])
              (parameterize ([vars (append (map list
 					       vs
 					       (syntax->list #'(vs+ ...))

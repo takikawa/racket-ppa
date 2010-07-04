@@ -30,16 +30,27 @@
                          (parameterize ([read-accept-reader #t])
                            (call-with-input-file path read)))])
          (match sexp
-           [`(module ,name ,(or `(lib "keybinding-lang.ss" "framework")
-                                `(lib "framework/keybinding-lang.ss")
-                                `framework/keybinding-lang)
+           [`(module ,name ,lang
                ,@(x ...)) 
-            (let ([km (dynamic-require spec '#%keymap)])
-              (hash-set! user-keybindings-files spec km)
-              (send user-keymap chain-to-keymap km #t))]
+	    (cond
+	     [(valid-keybindings-lang? lang)
+	      (let ([km (dynamic-require spec '#%keymap)])
+		(hash-set! user-keybindings-files spec km)
+		(send user-keymap chain-to-keymap km #t))]
+	     [else
+	      (error 'add-user-keybindings-file
+		     (string-constant user-defined-keybinding-malformed-file/found-lang)
+		     (path->string path)
+		     lang)])]
            [else (error 'add-user-keybindings-file 
                         (string-constant user-defined-keybinding-malformed-file)
                         (path->string path))])))))
+  
+  (define (valid-keybindings-lang? x)
+    (member x
+            (list `(lib "keybinding-lang.ss" "framework")
+                  `(lib "framework/keybinding-lang.ss")
+                  `framework/keybinding-lang)))
   
   (define (spec->path p)
     (cond

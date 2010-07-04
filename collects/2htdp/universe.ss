@@ -40,7 +40,9 @@
             except
             [(_ x rate) 
              #'(list (proc> 'on-tick (f2h x) 1) 
-                     (num> 'on-tick rate positive? "pos. number" "rate"))])]
+                     (num> 'on-tick rate (lambda (x)
+                                           (and (real? x) (positive? x)))
+                           "pos. number" "rate"))])]
   ;; -- state specifies whether to display the current state 
   [state (expr-with-check bool> "expected a boolean (show state or not)")]
   ;; -- check-with must specify a predicate 
@@ -150,7 +152,7 @@
   ;; -- should the session be recorded and turned into PNGs and an animated GIF
   [record? (expr-with-check bool> "expected a boolean (to record? or not)")]
   [name (expr-with-check string> "expected a name (string) for the world")]
-  ;; -- register must specify the internet address of a host (including LOCALHOST)
+  ;; -- register must specify the internet address of a host (e.g., LOCALHOST)
   [register (expr-with-check ip> "expected a host (ip address)")])
 
 (define-syntax (big-bang stx)
@@ -160,15 +162,19 @@
     [(big-bang w clause ...)
      (let* ([rec? #'#f]
             [->rec? 
-             (lambda (kw)
+             (lambda (kw E)
                (when (free-identifier=? kw #'record?)
-                 (syntax-case #'E ()
+                 (syntax-case E ()
                    [(V) (set! rec? #'V)]
-                   [_ (err 'record? stx)])))]
-            [args (->args stx (syntax (clause ...)) AllSpec WldSpec ->rec? "world")])
-       #`(parameterize ([current-eventspace (make-eventspace)])
-           (let ([o (new (if #,rec? aworld% world%) [world0 w] #,@args)])
-             (send o last))))]))
+                   [_ (err '#'record? stx)])))]
+            [args 
+             (->args stx (syntax (clause ...)) AllSpec WldSpec ->rec? "world")])
+       #`(let* ([esp (make-eventspace)]
+                [thd (eventspace-handler-thread esp)])
+           (with-handlers ((exn:break? (lambda (x) (break-thread thd))))
+             (parameterize ([current-eventspace esp])
+               (let ([o (new (if #,rec? aworld% world%) [world0 w] #,@args)])
+                 (send o last))))))]))
 
 (define (run-simulation f)
   (check-proc 'run-simulation f 1 "first" "one argument")
@@ -255,14 +261,18 @@
     [(universe) (raise-syntax-error #f "not a legal universe description" stx)]
     [(universe u) (raise-syntax-error #f "not a legal universe description" stx)]
     [(universe u bind ...)
-     (let* ([args (->args stx (syntax (bind ...)) AllSpec UniSpec void "universe")]
-            [domain (map (compose syntax-e car) args)])
+     (let*
+         ([args (->args stx (syntax (bind ...)) AllSpec UniSpec void "universe")]
+          [domain (map (compose syntax-e car) args)])
        (cond
          [(not (memq 'on-new domain))
           (raise-syntax-error #f "missing on-new clause" stx)]
          [(not (memq 'on-msg domain))
           (raise-syntax-error #f "missing on-msg clause" stx)]
          [else ; (and (memq #'on-new domain) (memq #'on-msg domain))
-          #`(parameterize ([current-eventspace (make-eventspace)])
-              (send (new universe% [universe0 u] #,@args) last))]))]))
+          #`(let* ([esp (make-eventspace)]
+                   [thd (eventspace-handler-thread esp)])
+              (with-handlers ((exn:break? (lambda (x) (break-thread thd))))
+                (parameterize ([current-eventspace esp])
+                  (send (new universe% [universe0 u] #,@args) last))))]))]))
 

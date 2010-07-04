@@ -91,7 +91,6 @@ static Scheme_Stx_Srcloc *empty_srcloc;
 
 static Scheme_Object *empty_simplified;
 
-static Scheme_Hash_Table *empty_hash_table;
 static THREAD_LOCAL Scheme_Hash_Table *quick_hash_table;
 
 static THREAD_LOCAL Scheme_Object *last_phase_shift;
@@ -216,8 +215,6 @@ typedef struct Scheme_Lexical_Rib {
   int *sealed;
   struct Scheme_Lexical_Rib *next;
 } Scheme_Lexical_Rib;
-
-static Module_Renames *krn;
 
 #define SCHEME_RENAMESP(obj) (SAME_TYPE(SCHEME_TYPE(obj), scheme_rename_table_type))
 #define SCHEME_RENAMES_SETP(obj) (SAME_TYPE(SCHEME_TYPE(obj), scheme_rename_table_set_type))
@@ -364,6 +361,11 @@ XFORM_NONGCING static void WRAP_POS_SET_FIRST(Wrap_Pos *w)
       w->is_limb = 0;
       w->a = a;
     }
+  }
+  /* silence gcc "may be used uninitialized in this function" warnings */
+  else {
+    w->a = NULL;
+    w->is_limb = 0;
   }
 }
 
@@ -614,14 +616,8 @@ void scheme_init_stx(Scheme_Env *env)
   REGISTER_SO(empty_simplified);
   empty_simplified = scheme_make_vector(2, scheme_false);
 
-  REGISTER_SO(nominal_ipair_cache);
 
-  REGISTER_SO(quick_hash_table);
 
-  REGISTER_SO(last_phase_shift);
-
-  REGISTER_SO(empty_hash_table);
-  empty_hash_table = scheme_make_hash_table(SCHEME_hash_ptr);
 
   REGISTER_SO(no_nested_inactive_certs);
   no_nested_inactive_certs = scheme_make_raw_pair(NULL, NULL);
@@ -633,6 +629,9 @@ void scheme_init_stx(Scheme_Env *env)
 }
 
 void scheme_init_stx_places() {
+  REGISTER_SO(last_phase_shift);
+  REGISTER_SO(nominal_ipair_cache);
+  REGISTER_SO(quick_hash_table);
   REGISTER_SO(id_marks_ht);
   REGISTER_SO(than_id_marks_ht);
   REGISTER_SO(interned_skip_ribs);
@@ -1379,11 +1378,6 @@ Scheme_Object *scheme_make_module_rename(Scheme_Object *phase, int kind, Scheme_
   mr->marked_names = marked_names;
   mr->shared_pes = scheme_null;
   mr->unmarshal_info = scheme_null;
-
-  if (!krn) {
-    REGISTER_SO(krn);
-    krn = mr;
-  }
 
   return (Scheme_Object *)mr;
 }
@@ -3803,6 +3797,20 @@ static int check_matching_marks(Scheme_Object *p, Scheme_Object *orig_id, Scheme
   }
 }
 
+
+void scheme_populate_pt_ht(Scheme_Module_Phase_Exports * pt) {
+  if (!pt->ht) {
+    /* Lookup table (which is created lazily) not yet created, so do that now... */
+    Scheme_Hash_Table *ht;
+    int i;
+    ht = scheme_make_hash_table(SCHEME_hash_ptr);
+    for (i = pt->num_provides; i--; ) {
+      scheme_hash_set(ht, pt->provides[i], scheme_make_integer(i));
+    }
+    pt->ht = ht;
+  }
+}
+
 static Scheme_Object *search_shared_pes(Scheme_Object *shared_pes, 
                                         Scheme_Object *glob_id, Scheme_Object *orig_id,
                                         Scheme_Object **get_names, int get_orig_name,
@@ -3811,7 +3819,6 @@ static Scheme_Object *search_shared_pes(Scheme_Object *shared_pes,
 {
   Scheme_Object *pr, *idx, *pos, *src, *best_match = NULL;
   Scheme_Module_Phase_Exports *pt;
-  Scheme_Hash_Table *ht;
   int i, phase, best_match_len = -1, skip = 0;
   Scheme_Object *marks_cache = NULL;
 
@@ -3826,11 +3833,7 @@ static Scheme_Object *search_shared_pes(Scheme_Object *shared_pes,
     if (!pt->ht) {
       /* Lookup table (which is created lazily) not yet created, so do that now... */
       EXPLAIN(fprintf(stderr, "%d     {create lookup}\n", depth));
-      ht = scheme_make_hash_table(SCHEME_hash_ptr);
-      for (i = pt->num_provides; i--; ) {
-        scheme_hash_set(ht, pt->provides[i], scheme_make_integer(i));
-      }
-      pt->ht = ht;
+      scheme_populate_pt_ht(pt);
     }
 
     pos = scheme_hash_get(pt->ht, glob_id);

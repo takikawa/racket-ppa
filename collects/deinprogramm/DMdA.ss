@@ -9,7 +9,7 @@
 (require deinprogramm/contract/module-begin
 	 deinprogramm/contract/contract
 	 deinprogramm/contract/contract-test-engine
-	 deinprogramm/contract/contract-syntax)
+	 (except-in deinprogramm/contract/contract-syntax property))
 
 (require (for-syntax scheme/base)
 	 (for-syntax stepper/private/shared))
@@ -30,14 +30,15 @@
 (provide (all-from-out deinprogramm/define-record-procedures))
 (provide (all-from-out test-engine/scheme-tests))
 (provide contract define-contract :
-	 -> mixed one-of predicate combined property)
+	 -> mixed one-of predicate combined)
 
 (provide number real rational integer natural
 	 boolean true false
 	 string symbol
 	 empty-list
 	 chocolate-cookie
-	 unspecific)
+	 unspecific
+	 property)
 
 (define-syntax provide/rename
   (syntax-rules ()
@@ -72,8 +73,7 @@
 
 (provide for-all ==>
 	 check-property
-	 expect
-	 expect-within)
+	 expect expect-within expect-member-of expect-range)
 
 (provide quote)
 
@@ -316,7 +316,9 @@
   (symbol? (%a -> boolean)
 	   "feststellen, ob ein Wert ein Symbol ist")
   (symbol->string (symbol -> string)
-		  "Symbol in Zeichenkette umwandeln"))
+		  "Symbol in Zeichenkette umwandeln")
+  (string->symbol (string -> symbol)
+		  "Zeichenkette in Symbol umwandeln"))
  
  ("Verschiedenes"
   (equal? (%a %b -> boolean)
@@ -1006,8 +1008,8 @@
      (stepper-syntax-property
       (check-expect-maker stx #'check-property-error #'?prop '() 
 			  'comes-from-check-property)
-      'stepper-skip-completely
-      #t))
+      'stepper-replace
+      #'#t))
     (_ (raise-syntax-error #f "`check-property' erwartet einen einzelnen Operanden"
 			   stx))))
 
@@ -1042,5 +1044,33 @@
 (define (expect v1 v2)
   (quickcheck:property () (beginner-equal? v1 v2)))
 
+(define (ensure-real who n val)
+  (unless (real? val)
+    (raise
+     (make-exn:fail:contract
+      (string->immutable-string
+       (format "~a Argument ~e zu `~a' keine reelle Zahl." n val who))
+      (current-continuation-marks)))))
+
 (define (expect-within v1 v2 epsilon)
+  (ensure-real 'expect-within "Drittes" epsilon)
   (quickcheck:property () (beginner-equal~? v1 v2 epsilon)))
+
+(define (expect-range val min max)
+  (ensure-real 'expect-range "Erstes" val)
+  (ensure-real 'expect-range "Zweites" min)
+  (ensure-real 'expect-range "Drittes" max)
+  (quickcheck:property ()
+		       (and (<= min val)
+			    (<= val max))))
+
+(define (expect-member-of val . candidates)
+  (quickcheck:property () 
+		       (ormap (lambda (cand)
+				(beginner-equal? val cand))
+			      candidates)))
+
+(define property (contract (predicate (lambda (x)
+					(or (boolean? x)
+					    (property? x))))))
+

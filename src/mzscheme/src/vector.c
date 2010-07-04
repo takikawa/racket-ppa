@@ -47,6 +47,12 @@ static Scheme_Object *unsafe_vector_ref (int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_vector_set (int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_struct_ref (int argc, Scheme_Object *argv[]);
 static Scheme_Object *unsafe_struct_set (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_string_len (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_string_ref (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_string_set (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_bytes_len (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_bytes_ref (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_bytes_set (int argc, Scheme_Object *argv[]);
 
 void
 scheme_init_vector (Scheme_Env *env)
@@ -165,7 +171,52 @@ scheme_init_unsafe_vector (Scheme_Env *env)
 			     3, 3);
   SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_NARY_INLINED;
   scheme_add_global_constant("unsafe-struct-set!", p, env);  
+
+
+  p = scheme_make_immed_prim(unsafe_string_len, 
+			     "unsafe-string-length", 
+			     1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant("unsafe-string-length", p, env);
+
+  p = scheme_make_immed_prim(unsafe_string_ref, 
+			     "unsafe-string-ref", 
+			     2, 2);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("unsafe-string-ref", p, env);
+
+  p = scheme_make_immed_prim(unsafe_string_set,
+			     "unsafe-string-set!", 
+			     3, 3);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_NARY_INLINED;
+  scheme_add_global_constant("unsafe-string-set!", p, env);  
+  p = scheme_make_immed_prim(unsafe_string_ref, 
+			     "unsafe-string-ref", 
+			     2, 2);
+
+  p = scheme_make_immed_prim(unsafe_bytes_len, 
+			     "unsafe-bytes-length", 
+			     1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant("unsafe-bytes-length", p, env);
+
+  p = scheme_make_immed_prim(unsafe_bytes_ref, 
+			     "unsafe-bytes-ref", 
+			     2, 2);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("unsafe-bytes-ref", p, env);
+
+  p = scheme_make_immed_prim(unsafe_bytes_set,
+			     "unsafe-bytes-set!", 
+			     3, 3);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_NARY_INLINED;
+  scheme_add_global_constant("unsafe-bytes-set!", p, env);  
+  p = scheme_make_immed_prim(unsafe_bytes_ref, 
+			     "unsafe-bytes-ref", 
+			     2, 2);
 }
+
+#define VECTOR_BYTES(size) (sizeof(Scheme_Vector) + ((size) - 1) * sizeof(Scheme_Object *))
 
 Scheme_Object *
 scheme_make_vector (long size, Scheme_Object *fill)
@@ -179,12 +230,9 @@ scheme_make_vector (long size, Scheme_Object *fill)
   }
 
   if (size < 1024) {
-    vec = (Scheme_Object *)scheme_malloc_tagged(sizeof(Scheme_Vector) 
-						+ (size - 1) * sizeof(Scheme_Object *));
+    vec = (Scheme_Object *)scheme_malloc_tagged(VECTOR_BYTES(size));
   } else {
-    vec = (Scheme_Object *)scheme_malloc_fail_ok(scheme_malloc_tagged,
-						 sizeof(Scheme_Vector) 
-						 + (size - 1) * sizeof(Scheme_Object *));
+    vec = (Scheme_Object *)scheme_malloc_fail_ok(scheme_malloc_tagged, VECTOR_BYTES(size));
   }
 
   vec->type = scheme_vector_type;
@@ -215,7 +263,9 @@ make_vector (int argc, Scheme_Object *argv[])
 
   len = scheme_extract_index("make-vector", 0, argc, argv, -1, 0);
 
-  if (len == -1) {
+  if ((len == -1) 
+      /* also watch for overflow: */
+      || ((long)VECTOR_BYTES(len) < len)) {
     scheme_raise_out_of_memory("make-vector", "making vector of length %s",
 			       scheme_make_provided_string(argv[0], 1, NULL));
   }
@@ -552,3 +602,42 @@ static Scheme_Object *unsafe_struct_set (int argc, Scheme_Object *argv[])
   ((Scheme_Structure *)argv[0])->slots[SCHEME_INT_VAL(argv[1])] = argv[2];
   return scheme_void;
 }
+
+static Scheme_Object *unsafe_string_len (int argc, Scheme_Object *argv[])
+{
+  long n = SCHEME_CHAR_STRLEN_VAL(argv[0]);
+  return scheme_make_integer(n);
+}
+
+static Scheme_Object *unsafe_string_ref (int argc, Scheme_Object *argv[])
+{
+  mzchar v;
+  v = SCHEME_CHAR_STR_VAL(argv[0])[SCHEME_INT_VAL(argv[1])];
+  return scheme_make_ascii_character(v);
+}
+
+static Scheme_Object *unsafe_string_set (int argc, Scheme_Object *argv[])
+{
+  SCHEME_CHAR_STR_VAL(argv[0])[SCHEME_INT_VAL(argv[1])] = SCHEME_CHAR_VAL(argv[2]);
+  return scheme_void;
+}
+
+static Scheme_Object *unsafe_bytes_len (int argc, Scheme_Object *argv[])
+{
+  long n = SCHEME_BYTE_STRLEN_VAL(argv[0]);
+  return scheme_make_integer(n);
+}
+
+static Scheme_Object *unsafe_bytes_ref (int argc, Scheme_Object *argv[])
+{
+  long v;
+  v = (unsigned char)SCHEME_BYTE_STR_VAL(argv[0])[SCHEME_INT_VAL(argv[1])];
+  return scheme_make_integer(v);
+}
+
+static Scheme_Object *unsafe_bytes_set (int argc, Scheme_Object *argv[])
+{
+  SCHEME_BYTE_STR_VAL(argv[0])[SCHEME_INT_VAL(argv[1])] = (char)SCHEME_INT_VAL(argv[2]);
+  return scheme_void;
+}
+

@@ -1,11 +1,10 @@
 #lang scheme/base
 (require (for-syntax scheme/base
-                     scheme/match
                      scheme/private/sc
+                     unstable/syntax
+                     unstable/struct
                      "rep-data.ss"
-                     "rep.ss"
-                     "../util.ss")
-         scheme/match
+                     "rep.ss")
          syntax/stx
          "parse.ss"
          "runtime.ss"
@@ -21,23 +20,28 @@
 
          debug-rhs
          debug-pattern
+         debug-parse
 
          syntax-parse
          syntax-parser
 
          pattern
+         ~var
+         ~datum
+         ~literal
          ~and
          ~or
+         ~not
          ~seq
          ~bounds
          ~once
          ~optional
          ~rest
-         ~struct
-         ~!
          ~describe
+         ~!
          ~bind
          ~fail
+         ~parse
 
          attribute
          this-syntax)
@@ -77,7 +81,7 @@
      (identifier? #'name)
      (defstxclass stx #'name #'() #'rhss #t)]
     [(define-splicing-syntax-class (name arg ...) . rhss)
-     (andmap identifier? #'(name arg ...))
+     (andmap identifier? (syntax->list #'(name arg ...)))
      (defstxclass stx #'name #'(arg ...) #'rhss #t)]))
 
 (define-syntax (define-conventions stx)
@@ -172,6 +176,14 @@
     [(debug-pattern p)
      (let ([p (parse-whole-pattern #'p (new-declenv null) #:context stx)])
        #`(quote #,p))]))
+
+(define-syntax-rule (debug-parse x p)
+  (let/ec escape
+    (parameterize ((current-failure-handler
+                    (lambda (_ f)
+                      (escape (failure->sexpr f)
+                              (failure->sexpr (simplify-failure f))))))
+      (syntax-parse x [p 'success]))))
 
 (define-syntax (syntax-parse stx)
   (syntax-case stx ()

@@ -11,7 +11,7 @@
         (namespace-require '(for-syntax scheme/base))
         (namespace-require '(for-template scheme/base))
         (namespace-require 'scheme/contract)
-        (namespace-require '(only scheme/private/contract-arrow procedure-accepts-and-more?))
+        (namespace-require '(only scheme/contract/private/arrow procedure-accepts-and-more?))
         (namespace-require 'scheme/class)
         (namespace-require 'scheme/promise))
       n))
@@ -1607,7 +1607,7 @@
    '((contract (->d () 
                     ([a number?])
                     #:rest rest any/c 
-                    any
+                    [_ any/c]
                     #:post-cond (equal? (list a rest) (list the-unsupplied-arg '())))
                (λ ([a 1] . rest) 1)
                'pos
@@ -2940,9 +2940,30 @@
   (test/spec-passed
    'with-contract9
    '(let ()
-      (with-contract region1 (f)
+      (with-contract region1 ()
         (define f 3))
       f))
+  
+  (test/spec-failed
+   'with-contract10
+   '(let ()
+      (with-contract r
+        ([x number?])
+        (define x 3)
+        (define-values () 
+          (begin (set! x #f) (values))))
+      x)
+   "(region r)")
+  
+  (test/spec-failed
+   'with-contract11
+   '(let ()
+      (with-contract r
+        ([x number?])
+        (define x 3))
+      (set! x #f)
+      x)
+   "top-level")
 
 ;                                                                                                                         
 ;                                                                                                                         
@@ -5319,10 +5340,15 @@ so that propagation occurs.
 
   (test-flat-contract '(not/c integer?) #t 1)
   (test-flat-contract '(=/c 2) 2 3)
+  (test-flat-contract '(>/c 5) 10 5)
   (test-flat-contract '(>=/c 5) 5 0)
   (test-flat-contract '(<=/c 5) 5 10)
   (test-flat-contract '(</c 5) 0 5)
-  (test-flat-contract '(>/c 5) 10 5)
+  (test-flat-contract '(=/c 2) 2 0+1i)
+  (test-flat-contract '(>/c 5) 10 0+1i)
+  (test-flat-contract '(>=/c 5) 5 0+1i)
+  (test-flat-contract '(<=/c 5) 5 0+1i)
+  (test-flat-contract '(</c 5) 0 0+1i)
   (test-flat-contract '(integer-in 0 10) 0 11)
   (test-flat-contract '(integer-in 0 10) 10 3/2)
   (test-flat-contract '(integer-in 0 10) 1 1.0)

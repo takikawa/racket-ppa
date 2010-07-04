@@ -33,7 +33,7 @@
 (define tests
   '([no-handler load "mzscheme/quiet.ss" (lib "scheme/init")]
     ;; [require "planet/lang.ss"]
-    [require "typed-scheme/run.ss"]
+    [require "typed-scheme/nightly-run.ss"]
     [require "match/plt-match-tests.ss"]
     ;; [require "stepper/automatic-tests.ss" (lib "scheme/base")]
     [require "lazy/main.ss"]
@@ -82,6 +82,6 @@
                                   (abort 1 "error: ~a" (exn-message exn)))])
             (thunk))))
       (kill-thread timeout-thread)
-      (echo "all tests passed."))))
+      (echo "no failures found."))))
 
 (exit exit-code)

@@ -1,6 +1,7 @@
 #lang scribble/doc
 @(require "mz.ss"
-          scheme/math)
+          scheme/math
+          (for-label scheme/math))
 
 @(define math-eval (make-base-eval))
 @(interaction-eval #:eval math-eval (require scheme/math))
@@ -508,7 +509,9 @@ produces @scheme[+nan.0] in the case that neither @scheme[y] nor
 @defproc[(make-polar [magnitude real?] [angle real?]) number?]{ Returns
  @scheme[(+ (* magnitude (cos angle)) (* magnitude (sin angle) 0+1i))].
 
-@mz-examples[(make-polar 2 3.14159)]}
+@mz-examples[#:eval math-eval
+                    (make-polar 10 (* pi 1/2))
+                    (make-polar 10 (* pi 1/4))]}
 
 
 @defproc[(real-part [z number?]) real?]{ Returns the real part of
@@ -893,6 +896,19 @@ Returns the hyperbolic cosine of @scheme[z].}
 @defproc[(tanh [z number?]) number?]{
 
 Returns the hyperbolic tangent of @scheme[z].}
+
+@defproc[(order-of-magnitude [r (and/c real? positive?)]) (and/c exact? integer?)]{
+Computes the greatest exact integer @scheme[m] such that:
+@schemeblock[(<= (expt 10 m)
+                 (inexact->exact r))]
+Hence also
+@schemeblock[(< (inexact->exact r)
+                (expt 10 (add1 m)))].
+
+@mz-examples[#:eval math-eval 
+                    (order-of-magnitude 999)
+                    (order-of-magnitude 1000)]
+}
 
 @; ----------------------------------------------------------------------
 

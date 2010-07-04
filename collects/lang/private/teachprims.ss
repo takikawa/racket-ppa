@@ -192,15 +192,13 @@ namespace.
           (apply append x)))))
 
 (define-teach beginner error
-  (lambda (sym str)
-    (unless (and (symbol? sym)
-                 (string? str))
+  (lambda (str)
+    (unless  (string? str)
       (raise
        (make-exn:fail:contract
-        (format "error: expected a symbol and a string, got ~e and ~e"
-                sym str)
+        (format "error: expected a string, got ~e and ~e" str)
         (current-continuation-marks))))
-    (error sym "~a" str)))
+    (error str)))
 
 (define-teach beginner struct?
   (lambda (x)

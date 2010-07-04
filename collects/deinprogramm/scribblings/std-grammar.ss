@@ -29,7 +29,6 @@
    [definition @#,scheme[(define id expr)]
      @#,scheme[(define-record-procedures id id id (id (... ...)))]
      @#,scheme[(define-record-procedures-parametric (id id (... ...)) id id (id (... ...)))]
-     @#,scheme[(contract id contr)]
      @#,scheme[(: id contr)]
      def-rule ...]
    prod ...
@@ -49,6 +48,7 @@
 	 @#,scheme[(letrec ((id expr) (... ...)) expr)]
 	 @#,scheme[(let* ((id expr) (... ...)) expr) ]
 	 @#,scheme[(begin expr expr (... ...))]
+	 @#,scheme[(contract contr)]
 	 @#,scheme[(for-all ((id contr) (... ...)) expr)]
 	 @#,scheme[(==> expr expr)]
 	 expr-rule ...]
@@ -60,10 +60,12 @@
 	      @#,scheme[(list contr)]
 	      @#,scheme[(code:line %a %b %c (code:comment @#,seclink["contract-variable"]{Vertrags-Variable}))]
 	      @#,scheme[(combined contr (... ...))]
-	      @#,scheme[(property expr contr)]
+	      @#,scheme[contract]
    ]
    [test-case @#,scheme[(check-expect expr expr)]
               @#,scheme[(check-within expr expr expr)]
+	      @#,scheme[(check-member-of expr expr (... ...))]
+	      @#,scheme[(check-range expr expr expr)]
               @#,scheme[(check-error expr expr)]
 	      @#,scheme[(check-property expr)]]
    #;(...
@@ -71,7 +73,7 @@
 		     @#,scheme[(require module-id)]
                      @#,scheme[(require (lib string string ...))]
                      @#,scheme[(require (planet string package))]])
-   (...
+   #;(...
     [package @#,scheme[(string string number number)]])))
 
 (define prim-nonterms

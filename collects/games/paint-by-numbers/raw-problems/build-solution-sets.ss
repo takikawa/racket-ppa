@@ -1,6 +1,4 @@
-#!/bin/sh
-
-string=? ; exec mred -qr $0 "$@"
+#lang mzscheme
 
 #|
 
@@ -24,17 +22,20 @@ The col and row type specs are in sig.ss and the solution type is:
          mzlib/list
          mzlib/file
          mzlib/pretty
+         mzlib/class
+         mred
+         "raw-hattori.ss"
          (prefix solve: "../solve.ss"))
 
-(if (eq? (vector) argv)
-    (fprintf (current-error-port) "pass any command line argument to skip the solver~n~n")
-    (fprintf (current-error-port) "skipping the solver~n"))
+(if (equal? (vector) argv)
+    (printf "pass any command line argument to skip the solver~n~n")
+    (printf "skipping the solver~n"))
 
 (define memory-limit (* 1024 1024 400)) ;; in bytes (500 megs)
 
 (define memory-frame%
   (class frame%
-    (define/override (can-close?) #f)
+    (define/augment (can-close?) #f)
     (super-instantiate ())))
 
 (define memory-frame (parameterize ([current-eventspace (make-eventspace)])
@@ -45,7 +46,7 @@ The col and row type specs are in sig.ss and the solution type is:
 (define memory-ec (make-object editor-canvas% memory-vp memory-text '(hide-hscroll hide-vscroll)))
 (define memory-gauge (make-object gauge% #f 10000 memory-vp))
 (define memory-canvas (make-object canvas% memory-hp))
-(define memory-on-bitmap (make-object bitmap% (build-path (collection-path "icons") "recycle.gif")))
+(define memory-on-bitmap (make-object bitmap% (build-path (collection-path "icons") "recycle.png")))
 (define memory-off-bitmap (make-object bitmap%
                             (send memory-on-bitmap get-width)
                             (send memory-on-bitmap get-height)))
@@ -82,9 +83,6 @@ The col and row type specs are in sig.ss and the solution type is:
 
 (define hattori-sets
   (let* ([set-size 30]
-         [raw-hattori
-          (call-with-input-file (build-path problems-dir "raw-problems" "raw-hattori.ss")
-            (compose eval read))]
          [hattori-count (length raw-hattori)])
     (let o-loop ([n 0])
       (cond
@@ -111,13 +109,14 @@ The col and row type specs are in sig.ss and the solution type is:
         output-file
         (call-with-input-file (build-path problems-dir input-file) (compose eval read))))
 
-(define games-set (build-set "Games Magazine" "games" "raw-problems/raw-problems.ss"))
+(require "raw-problems.ss")
+(define games-set (list "Games Magazine" "games" raw-problems))
 
-(define misc-set (build-set "Misc" "misc" "raw-problems/raw-misc.ss"))
+(require "raw-misc.ss")
+(define misc-set (list "Misc" "misc" raw-misc))
 
-(define kajitani-sets
-  (call-with-input-file (build-path (collection-path "games" "paint-by-numbers") "raw-problems" "raw-kajitani.ss")
-    read))
+(require "raw-kajitani.ss")
+(define kajitani-sets raw-kajitani)
 
 (define sets (append (list games-set)
                      (list misc-set)
@@ -157,12 +156,12 @@ The col and row type specs are in sig.ss and the solution type is:
          (let loop ([n (- progress-bar-max dots-printed)])
            (cond
              [(zero? n) (void)]
-             [else (display "." (current-error-port))
+             [else (display ".")
                    (loop (- n 1))]))
-         (newline (current-error-port))]
+         (newline)]
         [else
          (let ([dots-to-print (floor (- (* progress-bar-max (/ counter (- max 1))) dots-printed))])
-           '(fprintf (current-error-port) "~spercentage: ~a ~a ~a ~a~n"
+           '(printf "~spercentage: ~a ~a ~a ~a~n"
                      cleanup
                      dots-to-print
                      counter
@@ -173,19 +172,19 @@ The col and row type specs are in sig.ss and the solution type is:
              (cond
                [(zero? n) (void)]
                [else
-                (display "." (current-error-port))
+                (display ".")
                 (loop (- n 1))]))
-           (flush-output (current-error-port)))]))))
+           (flush-output))]))))
 
 (define (setup-progress max cleanup)
-  (display guide-string (current-error-port))
-  (newline (current-error-port))
+  (display guide-string)
+  (newline)
   (build-progress-outputer max cleanup))
 
 (define (solve name rows cols)
   (cond
     [(equal? argv (vector))
-     (fprintf (current-error-port) "Solving ~s; memory limit ~a~n"
+     (printf "Solving ~s; memory limit ~a~n"
               name (format-memory-txt memory-limit))
      (let ([row-count (length rows)]
            [col-count (length cols)])
@@ -241,8 +240,8 @@ The col and row type specs are in sig.ss and the solution type is:
                   (update-memory-display)
                   (semaphore-post done)))])
        (semaphore-wait done)
-       (newline (current-error-port))
-       (newline (current-error-port))
+       (newline)
+       (newline)
        (if sucessful?
            board
            #f))]

@@ -191,6 +191,10 @@ static void out_of_memory()
   abort();
 }
 
+inline static void out_of_memory_gc(NewGC* gc) {
+  out_of_memory();
+}
+
 static void *ofm_malloc(size_t size) {
   void *ptr = malloc(size);
   if (!ptr) out_of_memory();
@@ -206,7 +210,10 @@ static void *ofm_malloc_zero(size_t size) {
 
 inline static void check_used_against_max(NewGC *gc, size_t len) 
 {
-  gc->used_pages += (len / APAGE_SIZE) + (((len % APAGE_SIZE) == 0) ? 0 : 1);
+  long delta;
+
+  delta = (len / APAGE_SIZE) + (((len % APAGE_SIZE) == 0) ? 0 : 1);
+  gc->used_pages += delta;
 
   if(gc->in_unsafe_allocation_mode) {
     if(gc->used_pages > gc->max_pages_in_heap)
@@ -219,8 +226,10 @@ inline static void check_used_against_max(NewGC *gc, size_t len)
         if(gc->used_pages > gc->max_pages_for_use) {
           /* too much memory allocated. 
            * Inform the thunk and then die semi-gracefully */
-          if(GC_out_of_memory)
+          if(GC_out_of_memory) {
+            gc->used_pages -= delta;
             GC_out_of_memory();
+          }
           out_of_memory();
         }
       }
@@ -517,12 +526,27 @@ static inline int BTC_single_allocation_limit(NewGC *gc, size_t sizeb);
 #define PAGE_END_VSS(page) ((void**) (((char *)((page)->addr)) + ((page)->size)))
 #define MED_OBJHEAD_TO_OBJECT(ptr, page_size) ((void*) (((char *)MED_OBJHEAD((ptr), (page_size))) + OBJHEAD_SIZE));
 
+static inline void* TAG_AS_BIG_PAGE_PTR(void *p) {
+  return ((void *)(((unsigned long) p)|1));
+}
+
+static inline int IS_BIG_PAGE_PTR(void *p) {
+  return (((unsigned long) p) & ((unsigned long) 1));
+}
+
+static inline void* REMOVE_BIG_PAGE_PTR_TAG(void *p) {
+  return ((void *)((~((unsigned long) 1)) & ((unsigned long) p)));
+}
+
+
+
 /* the core allocation functions */
 static void *allocate_big(const size_t request_size_bytes, int type)
 {
   NewGC *gc = GC_get_GC();
   mpage *bpage;
   size_t allocate_size;
+  void *addr;
 
 #ifdef NEWGC_BTC_ACCOUNT
   if(GC_out_of_memory) {
@@ -549,16 +573,20 @@ static void *allocate_big(const size_t request_size_bytes, int type)
     if (!gc->dumping_avoid_collection)
       garbage_collect(gc, 0);
   }
-  gc->gen0.current_size += allocate_size;
 
-  /* We not only need APAGE_SIZE alignment, we 
+  /* The following allocations may fail and escape if GC_out_of_memory is set.
+     We not only need APAGE_SIZE alignment, we 
      need everything consisently mapped within an APAGE_SIZE
      segment. So round up. */
-  bpage = malloc_mpage();
   if (type == PAGE_ATOMIC)
-    bpage->addr = malloc_dirty_pages(gc, round_to_apage_size(allocate_size), APAGE_SIZE);
+    addr = malloc_dirty_pages(gc, round_to_apage_size(allocate_size), APAGE_SIZE);
   else
-    bpage->addr = malloc_pages(gc, round_to_apage_size(allocate_size), APAGE_SIZE);
+    addr = malloc_pages(gc, round_to_apage_size(allocate_size), APAGE_SIZE);
+
+  gc->gen0.current_size += allocate_size;
+
+  bpage = malloc_mpage();
+  bpage->addr = addr;
   bpage->size = allocate_size;
   bpage->size_class = 2;
   bpage->page_type = type;
@@ -677,7 +705,7 @@ static void *allocate_medium(const size_t request_size_bytes, const int type)
 inline static mpage *gen0_create_new_mpage(NewGC *gc) {
   mpage *newmpage;
 
-  newmpage = malloc_mpage(gc);
+  newmpage = malloc_mpage();
   newmpage->addr = malloc_dirty_pages(gc, GEN0_PAGE_SIZE, APAGE_SIZE);
   newmpage->size_class = 0;
   newmpage->size = PREFIX_SIZE;
@@ -1552,6 +1580,8 @@ inline static void reset_pointer_stack(void)
   mark_stack->top = MARK_STACK_START(mark_stack);
 }
 
+static inline void propagate_marks_worker(PageMap pagemap, Mark_Proc *mark_table, void *p);
+
 /*****************************************************************************/
 /* MEMORY ACCOUNTING                                                         */
 /*****************************************************************************/
@@ -1840,6 +1870,7 @@ void GC_gcollect(void)
   garbage_collect(gc, 1);
 }
 
+static inline int atomic_mark(void *p) { return 0; }
 void GC_register_traversers(short tag, Size_Proc size, Mark_Proc mark,
                             Fixup_Proc fixup, int constant_Size, int atomic)
 {
@@ -1944,7 +1975,7 @@ void GC_mark(const void *const_p)
       GCDEBUG((DEBUGOUTF, "Marking %p on big page %p\n", p, page));
       /* Finally, we want to add this to our mark queue, so we can 
          propagate its pointers */
-      push_ptr(p);
+      push_ptr(TAG_AS_BIG_PAGE_PTR(p));
     } else {
       /* A medium page. */
       objhead *info = MED_OBJHEAD(p, page->size);
@@ -2077,6 +2108,67 @@ void GC_mark(const void *const_p)
 
 /* this is the second mark routine. It's not quite as complicated. */
 /* this is what actually does mark propagation */
+static inline void propagate_marks_worker(PageMap pagemap, Mark_Proc *mark_table, void *pp)
+{
+  void **start, **end;
+  int alloc_type;
+  void *p;
+
+  /* we can assume a lot here -- like it's a valid pointer with a page --
+     because we vet bad cases out in GC_mark, above */
+  if (IS_BIG_PAGE_PTR(pp)) {
+    mpage *page;
+    p = REMOVE_BIG_PAGE_PTR_TAG(pp);
+    page = pagemap_find_page(pagemap, p);
+    start = PPTR(BIG_PAGE_TO_OBJECT(page));
+    alloc_type = page->page_type;
+    end = PAGE_END_VSS(page);
+  } else {
+    objhead *info;
+    p = pp;
+    info = OBJPTR_TO_OBJHEAD(p);
+    start = p;
+    alloc_type = info->type;
+    end = PPTR(info) + info->size;
+  }
+
+  set_backtrace_source(start, alloc_type);
+
+  switch(alloc_type) {
+    case PAGE_TAGGED: 
+      {
+        const unsigned short tag = *(unsigned short*)start;
+        Mark_Proc markproc;
+        ASSERT_TAG(tag);
+        markproc = mark_table[tag];
+        if(((unsigned long) markproc) >= PAGE_TYPES) {
+          GC_ASSERT(markproc);
+          markproc(start);
+        }
+        break;
+      }
+    case PAGE_ATOMIC: 
+      break;
+    case PAGE_ARRAY: 
+      {
+        while(start < end) gcMARK(*start++); break;
+      }
+    case PAGE_TARRAY: 
+      {
+        const unsigned short tag = *(unsigned short *)start;
+        ASSERT_TAG(tag);
+        end -= INSET_WORDS;
+        while(start < end) {
+          GC_ASSERT(mark_table[tag]);
+          start += mark_table[tag](start);
+        }
+        break;
+      }
+    case PAGE_XTAGGED: 
+      GC_mark_xtagged(start); break;
+  }
+}
+
 static void propagate_marks(NewGC *gc) 
 {
   void *p;
@@ -2084,104 +2176,8 @@ static void propagate_marks(NewGC *gc)
   Mark_Proc *mark_table = gc->mark_table;
 
   while(pop_ptr(&p)) {
-    mpage *page = pagemap_find_page(pagemap, p);
     GCDEBUG((DEBUGOUTF, "Popped pointer %p\n", p));
-
-    /* we can assume a lot here -- like it's a valid pointer with a page --
-       because we vet bad cases out in GC_mark, above */
-    if(page->size_class) {
-      if(page->size_class > 1) {
-        void **start = PPTR(BIG_PAGE_TO_OBJECT(page));
-        void **end = PAGE_END_VSS(page);
-
-        set_backtrace_source(start, page->page_type);
-
-        switch(page->page_type) {
-        case PAGE_TAGGED: 
-          {
-            unsigned short tag = *(unsigned short*)start;
-            ASSERT_TAG(tag);
-            if((unsigned long)mark_table[tag] < PAGE_TYPES) {
-              /* atomic */
-            } else {
-              GC_ASSERT(mark_table[tag]);
-              mark_table[tag](start); break;
-            }
-          }
-        case PAGE_ATOMIC: break;
-        case PAGE_ARRAY: while(start < end) gcMARK(*(start++)); break;
-        case PAGE_XTAGGED: GC_mark_xtagged(start); break;
-        case PAGE_TARRAY: 
-          {
-            unsigned short tag = *(unsigned short *)start;
-            ASSERT_TAG(tag);
-            end -= INSET_WORDS;
-            while(start < end) {
-              GC_ASSERT(mark_table[tag]);
-              start += mark_table[tag](start);
-            }
-            break;
-          }
-        }
-      } else {
-        /* Medium page */
-        objhead *info = OBJPTR_TO_OBJHEAD(p);
-
-        set_backtrace_source(p, info->type);
-
-        switch(info->type) {
-        case PAGE_TAGGED: 
-          {
-            unsigned short tag = *(unsigned short*)p;
-            ASSERT_TAG(tag);
-            GC_ASSERT(mark_table[tag]);
-            mark_table[tag](p);
-            break;
-          }
-        case PAGE_ARRAY:
-          {
-            void **start = p;
-            void **end = PPTR(info) + info->size;
-            while(start < end) gcMARK(*start++);
-            break;
-          }
-        }
-      }
-    } else {
-      objhead *info = OBJPTR_TO_OBJHEAD(p);
-
-      set_backtrace_source(p, info->type);
-
-      switch(info->type) {
-      case PAGE_TAGGED: 
-        {
-          unsigned short tag = *(unsigned short*)p;
-          ASSERT_TAG(tag);
-          GC_ASSERT(mark_table[tag]);
-          mark_table[tag](p);
-          break;
-        }
-      case PAGE_ATOMIC: break;
-      case PAGE_ARRAY: {
-        void **start = p;
-        void **end = PPTR(info) + info->size;
-        while(start < end) gcMARK(*start++);
-        break;
-      }
-      case PAGE_TARRAY: {
-        void **start = p;
-        void **end = PPTR(info) + (info->size - INSET_WORDS);
-        unsigned short tag = *(unsigned short *)start;
-        ASSERT_TAG(tag);
-        while(start < end) {
-          GC_ASSERT(mark_table[tag]);
-          start += mark_table[tag](start);
-        }
-        break;
-      }
-      case PAGE_XTAGGED: GC_mark_xtagged(p); break;
-      }
-    }
+    propagate_marks_worker(pagemap, mark_table, p);
   }
 }
 
@@ -2552,7 +2548,7 @@ static void mark_backpointers(NewGC *gc)
           if(work->size_class) {
             /* must be a big page */
             work->size_class = 3;
-            push_ptr(BIG_PAGE_TO_OBJECT(work));
+            push_ptr(TAG_AS_BIG_PAGE_PTR(BIG_PAGE_TO_OBJECT(work)));
           } else {
             if(work->page_type != PAGE_ATOMIC) {
               void **start = PAGE_START_VSS(work);
@@ -3087,7 +3083,7 @@ static void garbage_collect(NewGC *gc, int force_full)
   /* we don't want the low-level allocator freaking because we've gone past
      half the available memory */
   gc->in_unsafe_allocation_mode = 1;
-  gc->unsafe_allocation_abort = out_of_memory;
+  gc->unsafe_allocation_abort = out_of_memory_gc;
 
   TIME_INIT();
 

@@ -179,10 +179,8 @@ static THREAD_LOCAL Scheme_Object *cached_beg_stx;
 static THREAD_LOCAL Scheme_Object *cached_dv_stx;
 static THREAD_LOCAL Scheme_Object *cached_ds_stx;
 static THREAD_LOCAL int cached_stx_phase;
-
-/* NEED TO BE THREAD LOCAL */
-static Scheme_Cont *offstack_cont;
-static Scheme_Overflow *offstack_overflow;
+static THREAD_LOCAL Scheme_Cont *offstack_cont;
+static THREAD_LOCAL Scheme_Overflow *offstack_overflow;
 
 
 typedef void (*DW_PrePost_Proc)(void *);
@@ -223,14 +221,8 @@ scheme_init_fun (Scheme_Env *env)
   scheme_tail_call_waiting->type = scheme_tail_call_waiting_type;
 #endif
 
-  REGISTER_SO(cached_beg_stx);
-  REGISTER_SO(cached_dv_stx);
-  REGISTER_SO(cached_ds_stx);
   REGISTER_SO(scheme_procedure_p_proc);
   REGISTER_SO(scheme_procedure_arity_includes_proc);
-
-  REGISTER_SO(offstack_cont);
-  REGISTER_SO(offstack_overflow);
 
   o = scheme_make_folding_prim(procedure_p, "procedure?", 1, 1, 1);
   SCHEME_PRIM_PROC_FLAGS(o) |= SCHEME_PRIM_IS_UNARY_INLINED;
@@ -559,6 +551,7 @@ scheme_init_fun (Scheme_Env *env)
     Scheme_Object *a[1];
     a[0] = scheme_intern_symbol("default");
     scheme_default_prompt_tag = make_prompt_tag(1, a);
+    (void)scheme_hash_key(SCHEME_PTR_VAL(scheme_default_prompt_tag));
   }
 
   REGISTER_SO(original_default_prompt);
@@ -566,6 +559,17 @@ scheme_init_fun (Scheme_Env *env)
   original_default_prompt->so.type = scheme_prompt_type;
   original_default_prompt->tag = scheme_default_prompt_tag;
 }
+
+void
+scheme_init_fun_places()
+{
+  REGISTER_SO(cached_beg_stx);
+  REGISTER_SO(cached_dv_stx);
+  REGISTER_SO(cached_ds_stx);
+  REGISTER_SO(offstack_cont);
+  REGISTER_SO(offstack_overflow);
+}
+
 
 Scheme_Object *
 scheme_make_void (void)
@@ -6620,8 +6624,8 @@ static Scheme_Object *continuation_marks(Scheme_Thread *p,
   Scheme_Cont_Mark_Set *set;
   Scheme_Object *cache, *nt;
   long findpos, bottom;
-  long cmpos, cdelta = 0;
-  int found_tag = 0;
+  long cmpos, first_cmpos = 0, cdelta = 0;
+  int found_tag = 0, at_mc_boundary = 0;
 
   if (cont && SAME_OBJ(cont->prompt_tag, prompt_tag))
     found_tag = 1;
@@ -6647,6 +6651,7 @@ static Scheme_Object *continuation_marks(Scheme_Thread *p,
       cmpos = (long)mc->cont_mark_pos;
       cdelta = mc->cont_mark_offset;
       bottom = 0;
+      at_mc_boundary = 1;
     } else {
       findpos = (long)MZ_CONT_MARK_STACK;
       cmpos = (long)MZ_CONT_MARK_POS;
@@ -6732,10 +6737,16 @@ static Scheme_Object *continuation_marks(Scheme_Thread *p,
 
       if (cache) {
         if (((Scheme_Cont_Mark_Chain *)cache)->key) {
-          if (last)
+          if (last) {
             last->next = (Scheme_Cont_Mark_Chain *)cache;
-          else
+            if (at_mc_boundary) {
+              SCHEME_MARK_CHAIN_FLAG(last) |= 0x1;
+              at_mc_boundary = 0;
+            }
+          } else {
             first = (Scheme_Cont_Mark_Chain *)cache;
+            first_cmpos = cmpos;
+          }
           
           found_tag = 1; /* cached => tag is there */
         } else {
@@ -6752,7 +6763,7 @@ static Scheme_Object *continuation_marks(Scheme_Thread *p,
       } else {
         Scheme_Cont_Mark_Chain *pr;
         pr = MALLOC_ONE_RT(Scheme_Cont_Mark_Chain);
-        pr->so.type = scheme_cont_mark_chain_type;
+        pr->iso.so.type = scheme_cont_mark_chain_type;
         pr->key = find[pos].key;
         pr->val = find[pos].val;
         pr->pos = find[pos].pos;
@@ -6818,10 +6829,16 @@ static Scheme_Object *continuation_marks(Scheme_Thread *p,
                           (Scheme_Object *)pr);
           find[pos].cache = cache;
         }
-        if (last)
+        if (last) {
           last->next = pr;
-        else
+          if (at_mc_boundary) {
+            SCHEME_MARK_CHAIN_FLAG(last) |= 1;
+            at_mc_boundary = 0;
+          }
+        } else {
           first = pr;
+          first_cmpos = cmpos;
+        }
 
         last = pr;
       }
@@ -6872,10 +6889,13 @@ static Scheme_Object *continuation_marks(Scheme_Thread *p,
   nt = NULL;
 #endif
 
+  if (first && (first_cmpos < first->pos))
+    scheme_signal_error("internal error: bad mark-stack position");
+
   set = MALLOC_ONE_TAGGED(Scheme_Cont_Mark_Set);
   set->so.type = scheme_cont_mark_set_type;
   set->chain = first;
-  set->cmpos = cmpos;
+  set->cmpos = first_cmpos;
   set->native_stack_trace = nt;
 
   return (Scheme_Object *)set;
@@ -7095,10 +7115,12 @@ extract_cc_markses(int argc, Scheme_Object *argv[])
   prompt_tag = SCHEME_PTR_VAL(prompt_tag);
 
   chain = ((Scheme_Cont_Mark_Set *)argv[0])->chain;
-  last_pos = ((Scheme_Cont_Mark_Set *)argv[0])->cmpos + 2;
+  last_pos = -1;
 
   while (chain) {
     for (i = 0; i < len; i++) {
+      if (SCHEME_MARK_CHAIN_FLAG(chain) & 0x1)
+        last_pos = -1;
       if (SAME_OBJ(chain->key, keys[i])) {
 	long pos;
 	pos = (long)chain->pos;
@@ -7182,6 +7204,24 @@ scheme_get_stack_trace(Scheme_Object *mark_set)
 	name = scheme_make_pair(scheme_false, loc);
       else
 	name = scheme_make_pair(SCHEME_VEC_ELS(name)[0], loc);
+    } else if (SCHEME_PAIRP(name)
+               && SAME_TYPE(SCHEME_TYPE(SCHEME_CAR(name)), 
+                            scheme_resolved_module_path_type)) {
+      /* a resolved module path means that we're running a module body */
+      const char *what;
+
+      if (SCHEME_FALSEP(SCHEME_CDR(name)))
+        what = "[traversing imports]";
+      else
+        what = "[running body]";
+
+      name = SCHEME_CAR(name);
+      name = SCHEME_PTR_VAL(name);
+      loc = scheme_make_location(name, scheme_false, 
+                                 scheme_false, scheme_false, scheme_false);
+
+      name = scheme_intern_symbol(what);
+      name = scheme_make_pair(name, loc);
     } else {
       name = scheme_make_pair(name, scheme_false);
     }

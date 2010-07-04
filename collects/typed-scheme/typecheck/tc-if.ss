@@ -1,18 +1,18 @@
 #lang scheme/unit
 
 
-(require (rename-in "../utils/utils.ss" [infer r:infer] [extend r:extend]))
+(require (rename-in "../utils/utils.ss" [infer r:infer]))
 (require "signatures.ss"
          (rep type-rep filter-rep object-rep)
          (rename-in (types convenience subtype union utils comparison remove-intersect)
                     [remove *remove])
          (env lexical-env type-environments)
          (r:infer infer)
-	 (utils tc-utils mutated-vars)
+	 (utils tc-utils)
          (typecheck tc-envops tc-metafunctions)
          syntax/kerncase
          mzlib/trace
-         mzlib/plt-match)
+         scheme/match)
 
 ;; if typechecking   
 (import tc-expr^)
@@ -53,6 +53,12 @@
                   (if expected
                       (check-below r expected)
                       r))]
+               ;; special case if one of the branches is unreachable
+               [(and (= 1 (length us)) (type-equal? (car us) (Un)))
+                (if expected (check-below (ret ts fs2 os2)) (ret ts fs2 os2))]
+               [(and (= 1 (length ts)) (type-equal? (car ts) (Un)))
+                (if expected (check-below (ret us fs3 os3)) (ret us fs3 os3))]
+               ;; otherwise, error
                [else
                 (tc-error/expr #:return (ret (or expected Err))
                                "Expected the same number of values from both branches of if expression, but got ~a and ~a"

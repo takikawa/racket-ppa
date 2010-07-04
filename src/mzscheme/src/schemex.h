@@ -475,6 +475,8 @@ int (*scheme_get_unsigned_long_long_val)(Scheme_Object *o, umzlonglong *v);
 double (*scheme_real_to_double)(Scheme_Object *r);
 Scheme_Object *(*scheme_make_cptr)(void *cptr, Scheme_Object *typetag);
 Scheme_Object *(*scheme_make_offset_cptr)(void *cptr, long offset, Scheme_Object *typetag);
+Scheme_Object *(*scheme_make_external_cptr)(void *cptr, Scheme_Object *typetag);
+Scheme_Object *(*scheme_make_offset_external_cptr)(void *cptr, long offset, Scheme_Object *typetag);
 const char *(*scheme_get_proc_name)(Scheme_Object *p, int *len, int for_error);
 /*========================================================================*/
 /*                               strings                                  */
@@ -821,10 +823,6 @@ Scheme_Object *(*scheme_make_struct_type)(Scheme_Object *base,
 Scheme_Object *(*scheme_make_struct_instance)(Scheme_Object *stype,
 						     int argc,
 						     Scheme_Object **argv);
-Scheme_Object *(*scheme_make_struct_exptime)(Scheme_Object **names, int count,
-						    Scheme_Object *super_sym,
-						    Scheme_Object *super_exptime,
-						    int flags);
 int (*scheme_is_struct_instance)(Scheme_Object *type, Scheme_Object *v);
 Scheme_Object *(*scheme_struct_ref)(Scheme_Object *s, int pos);
 void (*scheme_struct_set)(Scheme_Object *s, int pos, Scheme_Object *v);

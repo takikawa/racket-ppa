@@ -3,6 +3,7 @@
 
 (require (rename-in "../utils/utils.ss" [infer r:infer]))
 (require syntax/kerncase
+	 unstable/list
          mzlib/etc
          scheme/match
          "signatures.ss"
@@ -11,7 +12,8 @@
          (types utils convenience)
          (private parse-type type-annotation type-contract)
          (env type-env init-envs type-name-env type-alias-env lexical-env)
-         (utils tc-utils mutated-vars)
+	 unstable/mutated-vars
+         (utils tc-utils)
          "provide-handling.ss"
          "def-binding.ss"
          (for-template
@@ -172,10 +174,10 @@
       
       ;; definitions just need to typecheck their bodies
       [(define-values (var ...) expr)
-       (let* ([vars (syntax->list #'(var ...))]
-              [ts (map lookup-type vars)])
-         (tc-expr/check #'expr (ret ts)))
-       (void)]
+       (begin (let* ([vars (syntax->list #'(var ...))]
+                     [ts (map lookup-type vars)])
+                (tc-expr/check #'expr (ret ts)))
+              (void))]
       
       ;; to handle the top-level, we have to recur into begins
       [(begin) (void)]

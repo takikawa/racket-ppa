@@ -89,6 +89,7 @@
 (define current-no-links (make-parameter #f))
 (define extra-breaking? (make-parameter #f))
 (define current-version (make-parameter (version)))
+(define current-part-files (make-parameter #f))
 
 (define (toc-part? d)
   (part-style? d 'toc))
@@ -190,7 +191,8 @@
     (init-field [alt-paths null]
                 ;; up-path is either a link "up", or #t which uses
                 ;; goes to start page (using cookies to get to the
-                ;; user start page)
+                ;; user start page). If it's a path, then it's also
+                ;; used for the "top" link on the page.
                 [up-path #f]
                 [script-path #f]
                 [script-file #f]
@@ -690,6 +692,7 @@
                 [(equal? x "index.html") (values x "the manual top")]
                 [(equal? x "../index.html") (values x "the documentation top")]
                 [(string? x) (values x #f)]
+                [(path? x) (values (url->string (path->url x)) #f)]
                 [else (error 'navigation "internal error ~e" x)]))
         (define title*
           (if (and tfrom (part? tfrom))
@@ -705,7 +708,9 @@
              ,@more)))))
       (define top-link
         (titled-url
-         "up" "../index.html"
+         "up" (if (path? up-path)
+                  (url->string (path->url up-path))
+                  "../index.html")
          `[onclick . ,(format "return GotoPLTRoot(\"~a\");" (version))]))
       (define navleft
         `(span ([class "navleft"])
@@ -1281,14 +1286,22 @@
       (collecting-whole-page))
 
     (define/override (start-collect ds fns ci)
-      (map (lambda (d fn)
-             (parameterize ([collecting-sub
-                             (if (part-style? d 'non-toc)
-                                 1
-                                 0)])
-               (super start-collect (list d) (list fn) ci)))
-           ds
-           fns))
+      (parameterize ([current-part-files (make-hash)])
+        (map (lambda (d fn)
+               (parameterize ([collecting-sub
+                               (if (part-style? d 'non-toc)
+                                   1
+                                   0)])
+                 (super start-collect (list d) (list fn) ci)))
+             ds
+             fns)))
+
+    (define/private (check-duplicate-filename orig-s)
+      (let ([s (string-downcase (path->string orig-s))])
+        (when (hash-ref (current-part-files) s #f)
+          (error 'htmls-render "multiple parts have the same filename (modulo case): ~e"
+                 orig-s))
+        (hash-set! (current-part-files) s #t)))
 
     (define/override (collect-part d parent ci number)
       (let ([prev-sub (collecting-sub)])
@@ -1298,10 +1311,11 @@
                        [collecting-whole-page (prev-sub . <= . 1)])
           (if (and (current-part-whole-page? d)
                    (not (eq? d (current-top-part))))
-            (let ([filename (derive-filename d ci #f)])
-              (parameterize ([current-output-file
-                              (build-path (path-only (current-output-file))
-                                          filename)])
+            (let* ([filename (derive-filename d ci #f)]
+                   [full-filename (build-path (path-only (current-output-file))
+                                              filename)])
+              (check-duplicate-filename full-filename)
+              (parameterize ([current-output-file full-filename])
                 (super collect-part d parent ci number)))
             (super collect-part d parent ci number)))))
 

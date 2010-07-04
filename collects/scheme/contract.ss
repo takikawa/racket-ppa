@@ -9,27 +9,34 @@ differences from v3:
 
 |#
 
-(require "private/contract.ss"
-         "private/contract-arrow.ss"
-         "private/contract-guts.ss"
-         "private/contract-ds.ss"
-         "private/contract-opt.ss"
-         "private/contract-basic-opters.ss")
+(require "contract/private/arrow.ss"
+         "contract/private/base.ss"
+         scheme/contract/exists
+         "contract/private/misc.ss"
+         "contract/private/provide.ss"
+         scheme/contract/regions
+         "contract/private/guts.ss"
+         "contract/private/ds.ss"
+         "contract/private/opt.ss"
+         "contract/private/basic-opters.ss")
 
 (provide 
- opt/c define-opt/c ;(all-from-out "private/contract-opt.ss")
- (except-out (all-from-out "private/contract-ds.ss")
+ opt/c define-opt/c ;(all-from-out "contract/private/opt.ss")
+ (except-out (all-from-out "contract/private/ds.ss")
              lazy-depth-to-look)
  
- (except-out (all-from-out "private/contract-arrow.ss") 
+ (except-out (all-from-out "contract/private/arrow.ss") 
              making-a-method
              procedure-accepts-and-more?
              check-procedure
              check-procedure/more)
- (except-out (all-from-out "private/contract.ss")
-             ∃?
+ (except-out (all-from-out scheme/contract/exists) ∃?)
+ (except-out (all-from-out "contract/private/misc.ss")
              check-between/c
-             check-unary-between/c))
+             check-unary-between/c)
+ (all-from-out scheme/contract/regions)
+ (all-from-out "contract/private/provide.ss")
+ (all-from-out "contract/private/base.ss"))
 
 ;; from contract-guts.ss
 

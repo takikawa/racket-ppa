@@ -485,6 +485,14 @@ for two @scheme[term-let]-bound identifiers bound to lists of
 different lengths to appear together inside an ellipsis.
 }
 
+@defidform[hole]{ Recognized specially within
+  @scheme[term]. A @scheme[hole] form is an
+  error elsewhere.  }
+
+@defidform[in-hole]{ Recognized specially within
+  @scheme[reduction-relation]. An @scheme[in-hole] form is an
+  error elsewhere.  }
+
 @defform/subs[(term-let ([tl-pat expr] ...) body)
               ([tl-pat identifier (tl-pat-ele ...)]
                [tl-pat-ele tl-pat (code:line tl-pat ... (code:comment "a literal ellipsis"))])]{
@@ -1062,33 +1070,38 @@ counters so that next time this function is called, it
 prints the test results for the next round of tests.
 }
 
-@defproc[(make-coverage [r reduction-relation?]) coverage?]{
-Constructs a structure to contain the per-case test coverage of
-the relation @scheme[r]. Use with @scheme[relation-coverage]
-and @scheme[covered-cases].
+@defform/subs[(make-coverage subject)
+              ([subject (code:line metafunction)
+                        (code:line relation-expr)])]{
+Constructs a structure (recognized by @scheme[coverage?])
+to contain per-case test coverage of the supplied metafunction
+or reduction relation. Use with @scheme[relation-coverage] and 
+@scheme[covered-cases].
 }
 
 @defproc[(coverage? [v any/c]) boolean?]{
 Returns @scheme[#t] for a value produced by @scheme[make-coverage]
 and @scheme[#f] for any other.}
 
-@defparam[relation-coverage c (or/c false/c coverage?)]{
-When @scheme[c] is a @scheme[coverage] structure, rather than 
-@scheme[#f] (the default), procedures such as
-@scheme[apply-reduction-relation], @scheme[traces], etc. count 
-the number applications of each case of the
-@scheme[reduction-relation], storing the results in @scheme[c].
-}
+@defparam[relation-coverage tracked (listof coverage?)]{
+Redex populates the coverage records in @scheme[tracked] (default @scheme[null]),
+counting the times that tests exercise each case of the associated metafunction
+and relations.}
 
 @defproc[(covered-cases 
           [c coverage?])
          (listof (cons/c string? natural-number/c))]{
 Extracts the coverage information recorded in @scheme[c], producing
-an association list mapping names to application counts.}
+an association list mapping names (or source locations, in the case of
+metafunctions or unnamed reduction-relation cases) to application counts.}
 
 @examples[
 #:eval redex-eval
        (define-language empty-lang)
+       
+       (define-metafunction empty-lang
+         [(plus number_1 number_2)
+          ,(+ (term number_1) (term number_2))])
        
        (define equals
          (reduction-relation 
@@ -1096,13 +1109,16 @@ an association list mapping names to application counts.}
           (--> (+) 0 "zero")
           (--> (+ number) number)
           (--> (+ number_1 number_2 number ...)
-               (+ ,(+ (term number_1) (term number_2))
+               (+ (plus number_1 number_2)
                   number ...)
                "add")))
-       (let ([coverage (make-coverage equals)])
-         (parameterize ([relation-coverage coverage])
+       (let ([equals-coverage (make-coverage equals)]
+             [plus-coverage (make-coverage plus)])
+         (parameterize ([relation-coverage (list equals-coverage 
+                                                 plus-coverage)])
            (apply-reduction-relation* equals (term (+ 1 2 3)))
-           (covered-cases coverage)))]
+           (values (covered-cases equals-coverage)
+                   (covered-cases plus-coverage))))]
 
 @defform/subs[(generate-term language @#,ttpattern size-exp kw-args ...)
               ([kw-args (code:line #:attempts attempts-expr)
@@ -1129,8 +1145,9 @@ sub-term---regenerating the sub-term if necessary. The optional keyword
 argument @scheme[retries-expr] (default @scheme[100]) bounds the number of times that 
 @scheme[generate-term] retries the generation of any sub-term. If 
 @scheme[generate-term] is unable to produce a satisfying term after 
-@scheme[retries-expr] attempts, it raises an error}
-
+@scheme[retries-expr] attempts, it raises an exception recognized by
+@scheme[exn:fail:redex:generation-failure?].}
+                                                            
 @defform/subs[(redex-check language @#,ttpattern property-expr kw-arg ...)
               ([kw-arg (code:line #:attempts attempts-expr)
                        (code:line #:source metafunction)
@@ -1222,6 +1239,12 @@ when @scheme[relation] is a relation on @scheme[L] with @scheme[n] rules.}
                            [retries-expr natural-number/c])]{
 Like @scheme[check-reduction-relation] but for metafunctions.}
 
+@defproc[(exn:fail:redex:generation-failure? [v any/c]) boolean?]{
+  Recognizes the exceptions raised by @scheme[generate-term], 
+  @scheme[redex-check], etc. when those forms are unable to produce
+  a term matching some pattern.
+}
+                                                            
 @deftech{Debugging PLT Redex Programs}
 
 It is easy to write grammars and reduction rules that are
@@ -1334,7 +1357,10 @@ filled in for the remaining colors.
 The @scheme[scheme-colors?] argument, if @scheme[#t] causes
 @scheme[traces] to color the contents of each of the windows according
 to DrScheme's Scheme mode color Scheme. If it is @scheme[#f],
-@scheme[traces] just uses black for the color scheme.
+@scheme[traces] just uses black for the color scheme. 
+In addition, Scheme-mode parenthesis highlighting is
+enabled when @scheme[scheme-colors?]
+is @scheme[#t] and not when it is @scheme[#f].
 
 The @scheme[term-filter] function is called each time a new node is
 about to be inserted into the graph. If the filter returns false, the
@@ -1578,12 +1604,14 @@ Slideshow (see
 This section documents two classes of operations, one for
 direct use of creating postscript figures for use in papers
 and for use in DrScheme to easily adjust the typesetting:
+@scheme[render-term],
 @scheme[render-language],
 @scheme[render-reduction-relation], 
 @scheme[render-metafunctions], and
 @scheme[render-lw], 
 and one
 for use in combination with other libraries that operate on picts
+@scheme[term->pict],
 @scheme[language->pict],
 @scheme[reduction-relation->pict],
 @scheme[metafunction->pict], and
@@ -1591,6 +1619,24 @@ for use in combination with other libraries that operate on picts
 The primary difference between these functions is that the former list
 sets @scheme[dc-for-text-size] and the latter does not.
 
+@defproc[(render-term [lang compiled-lang?] [term any/c] [file (or/c #f path-string?)]) 
+         (if file void? pict?)]{
+  Renders the term @scheme[term]. If @scheme[file] is @scheme[#f],
+  it produces a pict; if @scheme[file] is a path,  it saves
+  Encapsulated PostScript in the provided filename. See
+  @scheme[render-language] for details on the construction of the pict.
+  }
+
+                               
+@defproc[(term->pict [lang compiled-lang?] [term any/c]) pict?]{
+ Produces a pict like @scheme[render-term], but without
+ adjusting @scheme[dc-for-text-size].
+
+ This function is primarily designed to be used with
+ Slideshow or with other tools that combine picts together.
+}
+
+                               
 @defproc[(render-language [lang compiled-lang?]
                           [file (or/c false/c path-string?) #f]
                           [#:nts nts (or/c false/c (listof (or/c string? symbol?)))
@@ -1616,7 +1662,7 @@ are otherwise setting @scheme[dc-for-text-size].  }
          pict?]{
 
 Produce a pict like @scheme[render-language], but without
-adjust @scheme[dc-for-text-size].
+adjusting @scheme[dc-for-text-size].
 
 This function is primarily designed to be used with
 Slideshow or with other tools that combine picts together.

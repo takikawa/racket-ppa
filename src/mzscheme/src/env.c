@@ -32,6 +32,9 @@
 #include "schminc.h"
 #include "schmach.h"
 #include "schexpobs.h"
+#ifdef FUTURES_ENABLED
+# include "future.h"
+#endif
 
 #define GLOBAL_TABLE_SIZE 500
 #define TABLE_CACHE_MAX_SIZE 2048
@@ -397,6 +400,7 @@ static void place_instance_init_pre_kernel(void *stack_base) {
 
 static void init_unsafe(Scheme_Env *env)
 {
+  Scheme_Module_Phase_Exports *pt;
   REGISTER_SO(unsafe_env);
 
   unsafe_env = scheme_primitive_module(scheme_intern_symbol("#%unsafe"), env);
@@ -408,6 +412,8 @@ static void init_unsafe(Scheme_Env *env)
   scheme_init_unsafe_vector(unsafe_env);
 
   scheme_finish_primitive_module(unsafe_env);
+  pt = unsafe_env->module->me->rt;
+  scheme_populate_pt_ht(pt);
   scheme_protect_primitive_provide(unsafe_env, NULL);
 
 #if USE_COMPILED_STARTUP
@@ -428,6 +434,7 @@ static Scheme_Env *place_instance_init_post_kernel() {
   /* error handling and buffers */
   /* this check prevents initializing orig ports twice for the first initial
    * place.  The kernel initializes orig_ports early. */
+  scheme_init_fun_places();
   if (!scheme_orig_stdout_port) {
     scheme_init_port_places();
   }
@@ -436,6 +443,9 @@ static Scheme_Env *place_instance_init_post_kernel() {
   scheme_init_eval_places();
   scheme_init_regexp_places();
   scheme_init_stx_places();
+  scheme_init_sema_places();
+  scheme_init_gmp_places();
+  scheme_alloc_global_fdset();
 
   env = scheme_make_empty_env();
   scheme_set_param(scheme_current_config(), MZCONFIG_ENV, (Scheme_Object *)env); 
@@ -455,6 +465,12 @@ static Scheme_Env *place_instance_init_post_kernel() {
   scheme_init_parameterization(env);
   scheme_init_expand_observe(env);
   scheme_init_place(env);
+#if defined(MZ_USE_PLACES)
+  scheme_jit_fill_threadlocal_table();
+#endif
+#ifdef FUTURES_ENABLED 
+  scheme_init_futures(env);
+#endif
 
 #ifndef DONT_USE_FOREIGN
   scheme_init_foreign(env);
@@ -483,6 +499,12 @@ static Scheme_Env *place_instance_init_post_kernel() {
 Scheme_Env *scheme_place_instance_init(void *stack_base) {
   place_instance_init_pre_kernel(stack_base);
   return place_instance_init_post_kernel();
+}
+
+void scheme_place_instance_destroy() {
+#if defined(USE_PTHREAD_THREAD_TIMER) && defined(MZ_USE_PLACES)
+  kill_green_thread_timer();
+#endif
 }
 
 static void make_kernel_env(void)
@@ -626,6 +648,8 @@ static void make_kernel_env(void)
   scheme_install_type_writer(scheme_resolve_prefix_type, write_resolve_prefix);
   scheme_install_type_reader2(scheme_resolve_prefix_type, read_resolve_prefix);
 
+  register_network_evts();
+
   REGISTER_SO(kernel_symbol);
   kernel_symbol = scheme_intern_symbol("#%kernel");
 
@@ -643,6 +667,8 @@ static void make_kernel_env(void)
 #endif
 
   init_unsafe(env);
+  
+  scheme_init_print_global_constants();
 
   scheme_defining_primitives = 0;
 }
@@ -1849,13 +1875,6 @@ Scheme_Object *scheme_make_local(Scheme_Type type, int pos, int flags)
   return v;
 }
 
-static Scheme_Object *force_lazy_macro(Scheme_Object *val, long phase)
-{
-  Lazy_Macro_Fun f = (Lazy_Macro_Fun)SCHEME_PTR1_VAL(val);
-  Scheme_Object *data = SCHEME_PTR2_VAL(val);
-  return f(data, phase);
-}
-
 static Scheme_Local *get_frame_loc(Scheme_Comp_Env *frame,
 				   int i, int j, int p, int flags)
 /* Generates a Scheme_Local record for a static distance coodinate, and also
@@ -2767,8 +2786,6 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
 	  if (!(flags & SCHEME_ENV_CONSTANTS_OK)) {
 	    if (SAME_TYPE(SCHEME_TYPE(val), scheme_macro_type))
 	      return val;
-	    else if (SAME_TYPE(SCHEME_TYPE(val), scheme_lazy_macro_type))
-	      return force_lazy_macro(val, phase);
 	    else
 	      scheme_wrong_syntax(scheme_set_stx_string, NULL, find_id,
 				  "local syntax identifier cannot be mutated");
@@ -2885,8 +2902,6 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
   }
   
   if (val) {
-    if (SAME_TYPE(SCHEME_TYPE(val), scheme_lazy_macro_type))
-      return force_lazy_macro(val, phase);
     return val;
   }
 

@@ -242,6 +242,12 @@ Vertrag für Zeichenketten.
 Vertrag für die leere Liste.
 }
 
+@defform/none[contract]{
+Vertrag für Verträge.}
+
+@defidform[property]{
+Vertrag für Eigenschaften.}
+
 @subsection{@scheme[predicate]}
 @defform[(predicate expr)]{
 Bei diesem Vertrag muß @scheme[expr] als Wert ein Prädikat haben, also
@@ -271,17 +277,6 @@ Prozedur ist.  Er erklärt außerdem, daß die Verträge vor dem @scheme[->]
 für die Argumente der Prozedur gelten und der Vertrag nach dem @scheme[->]
 für den Rückgabewert.
 }}
-}
-
-@subsection{@scheme[property]}
-@defform[(property expr contr)]{
-Dieser Vertrag ist für ein Objekt @scheme[obj] gültig, wenn der
-Vertrag @scheme[contr] für @scheme[(expr obj)] gültig ist.
-
-(In der Regel ist @scheme[expr] ein Record-Selektor @scheme[s].  In
-dem Fall ist der Vertrag @scheme[(property s c)] für alle Records
-gültig, bei denen der Wert des zu @scheme[s] gehörigen Felds den
-Vertrag @scheme[c] erfüllt.)
 }
 
 @subsection{@scheme[list]} 
@@ -319,6 +314,17 @@ der als Wert eine Zahl @scheme[_delta] hat. Der Testfall überprüft, daß jede 
 des ersten @scheme[expr] maximal um @scheme[_delta] 
 von der entsprechenden Zahl im zweiten @scheme[expr] abweicht.}
 
+@defform[(check-member-of expr expr ...)]{
+
+Ähnlich wie @scheme[check-expect]: Der Testfall überprüft, daß das Resultat
+des ersten Operanden gleich dem Wert eines der folgenden Operanden ist.}
+
+@defform[(check-range expr expr expr)]{
+
+Ähnlich wie @scheme[check-expect]: Alle drei Operanden müssen 
+Zahlen sein.  Der Testfall überprüft, ob die erste Zahl zwischen der
+zweiten und der dritten liegt (inklusive).}
+
 @defform[(check-error expr expr)]{
 
 Dieser Testfall überprüft, ob der erste @scheme[expr] einen Fehler produziert,
@@ -327,7 +333,7 @@ wobei die Fehlermeldung der Zeichenkette entspricht, die der Wert des zweiten
 
 @defform[(check-property expr)]{
 
-Dieser Testfall überprüft experimentell, ob die Eigenschaft
+Dieser Testfall überprüft experimentell, ob die @tech{Eigenschaft}
 @scheme[expr] erfüllt ist.  Dazu werden zufällige Werte für die mit
 @scheme[for-all] quantifizierten Variablen eingesetzt: Damit wird
 überprüft, ob die Bedingung gilt.
@@ -453,6 +459,20 @@ weiteren Ausdruck, der als Wert eine Zahl @scheme[_delta] hat. Die
 resultierende Eigenschaft gilt, wenn jede Zahl im Resultat des ersten
 @scheme[expr] maximal um @scheme[_delta] von der entsprechenden Zahl
 im zweiten @scheme[expr] abweicht.}
+
+@defform[(expect-member-of expr expr ...)]{
+
+Wie @scheme[expect], aber entsprechend @scheme[check-member-of] mit
+weiteren Ausdrücken, die mit dem ersten verglichen werden.  Die
+resultierende Eigenschaft gilt, wenn das erste Argument gleich 
+einem der anderen Argumente ist.}
+
+@defform[(expect-range expr expr expr)]{
+
+Wie @scheme[expect], aber entsprechend @scheme[check-range]: Die
+Argumente müssen Zahlen sein.  Die Eigenschaft gilt, wenn die erste Zahl
+zwischen der zweiten und dritten Zahl liegt (inklusive).}
+
 
 @defform[(==> expr expr)]{
 Der erste Operand ist ein boolescher Ausdruck, der zweite Operand eine

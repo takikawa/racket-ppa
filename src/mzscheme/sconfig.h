@@ -337,6 +337,12 @@
 #  error Unported platform.
 # endif
 
+/* pthreads always enabled via configure', and
+   initial pthread's stack size doesn't use rlimit: */
+# define ASSUME_FIXED_STACK_SIZE
+# define FIXED_STACK_SIZE 1048576
+# define USE_PTHREAD_INSTEAD_OF_ITIMER
+
 # include "uconfig.h"
 # undef HAS_STANDARD_IOB
 

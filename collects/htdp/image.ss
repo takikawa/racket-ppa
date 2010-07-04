@@ -109,7 +109,7 @@ plt/collects/tests/mzscheme/htdp-image.ss
 
 (define (check-sizes who w h)
   (unless (and (< 0 w 10000) (< 0 h 10000))
-    (error (format "cannot make ~a x ~a image" w h))))
+    (error who (format "cannot make ~a x ~a image" w h))))
 
 (define (mode? x)
   (member x '(solid "solid" outline "outline")))
@@ -247,7 +247,8 @@ plt/collects/tests/mzscheme/htdp-image.ss
                         (lambda (dc dx dy)
                           (a-f dc (+ dx a-dx) (+ dy a-dy))
                           (b-f dc (+ dx b-dx) (+ dy b-dy))))])
-        (check-sizes name new-w new-h)
+        (unless (and (<= 0 new-w 10000) (<= 0 new-h 10000))
+          (error name (format "cannot make ~a x ~a image" new-w new-h)))
         (new cache-image-snip%
              [dc-proc (combine (send a get-dc-proc)
                                (send b get-dc-proc))]

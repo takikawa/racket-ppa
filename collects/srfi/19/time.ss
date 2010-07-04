@@ -111,7 +111,7 @@
                                 (current-country)))
             ;; less specific
             (load-bundle! (list 'srfi-19 (current-language)))
-            ;; the least specific one (this one *do* exists!, it comes with this srfi) don't worry:
+            ;; the least specific one (this one *does* exist!, it comes with this srfi) don't worry:
             (load-bundle! (list 'srfi-19)))
         (set! localized? #t))
       
@@ -390,13 +390,13 @@
   
   (define (time>=? time1 time2)
     (tm:time-compare-check time1 time2 'time>=?)
-    (or (>= (time-second time1) (time-second time2))
+    (or (> (time-second time1) (time-second time2))
 	(and (= (time-second time1) (time-second time2))
 	     (>= (time-nanosecond time1) (time-nanosecond time2)))))
   
   (define (time<=? time1 time2)
     (tm:time-compare-check time1 time2 'time<=?)
-    (or (<= (time-second time1) (time-second time2))
+    (or (< (time-second time1) (time-second time2))
 	(and (= (time-second time1) (time-second time2))
 	     (<= (time-nanosecond time1) (time-nanosecond time2)))))
   

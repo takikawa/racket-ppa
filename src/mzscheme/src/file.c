@@ -2358,7 +2358,7 @@ Scheme_Object *scheme_get_fd_identity(Scheme_Object *port, long fd, char *path)
                      FILE_SHARE_READ | FILE_SHARE_WRITE,
                      NULL,
                      OPEN_EXISTING,
-                     0,
+                     FILE_FLAG_BACKUP_SEMANTICS,
                      NULL);
     if (fd == INVALID_HANDLE_VALUE) {
       errid = GetLastError();
@@ -4628,7 +4628,7 @@ static Scheme_Object *cleanse_path(int argc, Scheme_Object *argv[])
 				"cleanse-path",
 				&expanded,
 				1, 0,
-				SCHEME_GUARD_FILE_EXISTS, 
+				0, /* no security check, since the filesystem is not used */ 
                                 SCHEME_PLATFORM_PATH_KIND,
                                 0);
   

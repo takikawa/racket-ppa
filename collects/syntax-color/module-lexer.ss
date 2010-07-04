@@ -19,8 +19,8 @@
                                                      (eq? (car g) 'planet))
                                                 (error "#lang planet disbled")
                                                 (old g))))])
-                          ;; FIXME: set the reader guard to disable access to 
-                          ;; untrusted planet packages.
+                          ;; FIXME: do something so that we don't
+                          ;; have to disable all planet packages.
                           (read-language p (lambda () #f))))]
             [sync-ports (lambda ()
                           (read-bytes (- (file-position p) init) in))])
@@ -36,7 +36,7 @@
              start-pos
              end-pos
              0
-             (or (let ([v (get-info 'color-lexer)])
+             (or (let ([v (get-info 'color-lexer #f)])
                    (and v
                         (if (procedure-arity-includes? v 3)
                             (cons v #f)

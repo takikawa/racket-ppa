@@ -470,7 +470,7 @@
         b)))
 
 (test '('#%kernel case-lambda (lib "scheme/init") case-lambda 0 0 0)  identifier-binding* #'case-lambda)
-(test '(scheme/promise delay (lib "scheme/init") delay 0 0 0)  identifier-binding* #'delay)
+(test '(scheme/promise delay* (lib "scheme/init") delay 0 0 0)  identifier-binding* #'delay)
 (test '('#%kernel #%module-begin (lib "scheme/init") #%plain-module-begin 0 0 0)  identifier-binding* #'#%plain-module-begin)
 (require (only-in scheme/base [#%plain-module-begin #%pmb]))
 (test '('#%kernel #%module-begin scheme/base #%plain-module-begin 0 0 0)  identifier-binding* #'#%pmb)
@@ -1340,12 +1340,17 @@
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;  Test namespace-attach with phase-levels -2 and 2
 
-(when (file-exists? "tmp10")
-  (delete-file "tmp10"))
+
+(module tn scheme/base
+  (require scheme/file)
+  (define tmp10 (make-temporary-file))
+  (provide tmp10)
+)
 
 (module @!a scheme/base
+  (require 'tn)
   (provide x)
-  (with-output-to-file "tmp10" 
+  (with-output-to-file tmp10
     #:exists 'append
     (lambda ()
       (printf "a\n")))
@@ -1357,6 +1362,7 @@
   (define (get-x) #'x))
 
 (module @!c scheme/base
+  (require 'tn)
   (require (for-meta 2 '@!b)
            (for-syntax scheme/base
                        (for-syntax scheme/base)))
@@ -1365,13 +1371,15 @@
                           #`(quote-syntax #,(get-x)))])
       (ref-x)))
   
-  (with-output-to-file "tmp10" 
+  (with-output-to-file tmp10 
     #:exists 'append
     (lambda ()
       (printf "~s\n" (foo)))))
 
+(require 'tn)
+
 (define (check-tmp10 s)
-  (test s with-input-from-file "tmp10" (lambda () (read-string 1000))))
+  (test s with-input-from-file tmp10 (lambda () (read-string 1000))))
 
 (require '@!c)
 (check-tmp10 "a\n5\n")
@@ -1388,8 +1396,8 @@
           (eval 'x)))
   (check-tmp10 "a\n5\n"))
 
-(when (file-exists? "tmp10")
-  (delete-file "tmp10"))
+(when (file-exists? tmp10)
+  (delete-file tmp10))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Make sure post-ex renames aren't simplied away too soon:

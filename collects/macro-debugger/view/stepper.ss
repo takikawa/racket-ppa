@@ -1,7 +1,10 @@
-
 #lang scheme/base
 (require scheme/class
-         macro-debugger/util/class-iop
+         (rename-in unstable/class-iop
+                    [define/i define:]
+                    [send/i send:]
+                    [send*/i send*:]
+                    [init-field/i init-field:])
          scheme/unit
          scheme/list
          scheme/match
@@ -18,12 +21,11 @@
 	 (prefix-in sb: "../syntax-browser/interfaces.ss")
          "../model/deriv.ss"
          "../model/deriv-util.ss"
-         "../model/deriv-find.ss"
          "../model/trace.ss"
          "../model/reductions.ss"
          "../model/steps.ss"
          "cursor.ss"
-         "../util/notify.ss"
+         unstable/gui/notify
          (only-in mzscheme [#%top-interaction mz-top-interaction]))
 (provide macro-stepper-widget%
          macro-stepper-widget/process-mixin)
@@ -309,7 +311,7 @@
       (define text (send: sbview sb:syntax-browser<%> get-text))
       (define position-of-interest 0)
       (define multiple-terms? (> (length (cursor->list terms)) 1))
-      (send text begin-edit-sequence)
+      (send text begin-edit-sequence #f)
       (send: sbview sb:syntax-browser<%> erase-all)
 
       (update:show-prefix)
@@ -427,10 +429,15 @@
     (define/private (adjust-deriv/lift deriv)
       (match deriv
         [(Wrap lift-deriv (e1 e2 first lifted-stx second))
-         (let ([first (adjust-deriv/top first)])
+         (let ([first (adjust-deriv/lift first)])
            (and first
                 (let ([e1 (wderiv-e1 first)])
                   (make-lift-deriv e1 e2 first lifted-stx second))))]
+        [(Wrap ecte (e1 e2 first second))
+         (let ([first (adjust-deriv/lift first)])
+           (and first
+                (let ([e1 (wderiv-e1 first)])
+                  (make ecte e1 e2 first second))))]
         [else (adjust-deriv/top deriv)]))
 
     ;; adjust-deriv/top : Derivation -> Derivation
@@ -442,18 +449,10 @@
           ;; It's not original...
           ;; Strip out mzscheme's top-interactions
           ;; Keep anything that is a non-mzscheme top-interaction
-          ;; Drop everything else (not original program)
-          (cond [(not (mrule? deriv)) #f]
-                [(for/or ([x (base-resolves deriv)]) (top-interaction-kw? x))
+          (cond [(for/or ([x (base-resolves deriv)]) (top-interaction-kw? x))
                  ;; Just mzscheme's top-interaction; strip it out
                  (adjust-deriv/top (mrule-next deriv))]
-                [(equal? (map syntax-e (base-resolves deriv))
-                         '(#%top-interaction))
-                 ;; A *different* top interaction; keep it
-                 deriv]
-                [else
-                 ;; Not original and not tagged with top-interaction
-                 #f])))
+                [else deriv])))
 
     (define/public (top-interaction-kw? x)
       (or (free-identifier=? x #'#%top-interaction)

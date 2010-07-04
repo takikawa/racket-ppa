@@ -94,6 +94,7 @@
                (copy-directory/files dir/f f)]
               [(or (<= (file-or-directory-modify-seconds f)
                        (file-or-directory-modify-seconds dir/f))
+                   ;; just in case, check the size too:
                    (and (file-exists? f) (file-exists? dir/f)
                         (not (= (file-size f) (file-size dir/f)))))
                ;; f is newer in dir than in the working directory
@@ -291,8 +292,10 @@
                      (let ([m (with-input-from-file f
                                 (lambda () (read-bytes mlen)))])
                        (ormap (lambda (magic)
-                                (equal? magic
-                                        (subbytes m 0 (bytes-length magic))))
+                                (and (>= (bytes-length m) (bytes-length magic))
+                                     (equal? magic
+                                             (subbytes m 0
+                                                       (bytes-length magic)))))
                               magics))
                      (or (not file)
                          (> (file-or-directory-modify-seconds f) time)))
@@ -325,7 +328,8 @@
    orig-custodian))
 
 (define (get-user-data username)
-  (get-preference (string->symbol username) (lambda () #f) #f "users.ss"))
+  (get-preference (string->symbol username) (lambda () #f) 'timestamp
+                  "users.ss"))
 (define (check-field value field-re field-name field-desc)
   (unless (cond [(or (string? field-re) (regexp? field-re))
                  (regexp-match field-re value)]
@@ -626,10 +630,14 @@
 
 (define session-count 0)
 
-(parameterize ([error-display-handler (lambda (msg exn) (log-line msg))])
+(define default-context-length (error-print-context-length))
+(parameterize ([error-display-handler (lambda (msg exn) (log-line msg))]
+               [error-print-context-length 0]
+               [current-directory server-dir])
   (run-server
    (get-conf 'port-number)
    (lambda (r w)
+     (error-print-context-length default-context-length)
      (set! connection-num (add1 connection-num))
      (when ((current-memory-use) . > . (get-conf 'session-memory-limit))
        (collect-garbage))
@@ -677,6 +685,4 @@
        (ssl-load-certificate-chain! l "server-cert.pem")
        (ssl-load-private-key! l "private-key.pem")
        l))
-   ssl-close
-   ssl-accept
-   ssl-accept/enable-break))
+   ssl-close ssl-accept ssl-accept/enable-break))

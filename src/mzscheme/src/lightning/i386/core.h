@@ -374,6 +374,7 @@ struct jit_local_state {
 #ifdef JIT_X86_64
 # define jit_pusharg_i(rs)	(_jitl.argssize++, MOVQrr(rs, JIT_CALLTMPSTART + _jitl.argssize - 1))
 # define jit_finish(sub)        (jit_shift_args(), (void)jit_calli((sub)), jit_restore_locals())
+# define jit_normal_finish(sub) jit_calli((sub))
 # define jit_reg_is_arg(reg) ((reg == _EDI) || (reg ==_ESI) || (reg == _EDX))
 # define jit_finishr(reg)	((jit_reg_is_arg((reg)) ? MOVQrr(reg, JIT_REXTMP) : (void)0), \
                                  jit_shift_args(), \
@@ -397,6 +398,7 @@ struct jit_local_state {
 # define jit_pusharg_i(rs)	PUSHLr(rs)
 # define jit_finish(sub)        ((void)jit_calli((sub)), ADDLir(sizeof(long) * _jitl.argssize, JIT_SP), _jitl.argssize = 0)
 # define jit_finishr(reg)	(jit_callr((reg)), ADDLir(sizeof(long) * _jitl.argssize, JIT_SP), _jitl.argssize = 0)
+# define jit_normal_finish(sub) jit_finish(sub)
 #endif
 #define jit_pusharg_l(rs) jit_pusharg_i(rs)
 #define jit_retval_i(rd)	((void)jit_movr_i ((rd), _EAX))
@@ -597,15 +599,15 @@ static int jit_arg_reg_order[] = { _EDI, _ESI, _EDX, _ECX };
 #define jit_stxr_i(d1, d2, rs)		MOVLrm((rs), 0,    (d1), (d2), 1)
 #define jit_stxi_i(id, rd, rs)		MOVLrm((rs), (id), (rd), 0,    0)
 
-#define _jit_ldi_l(d, is)		MOVQmr((is), 0,    0,    0,  (d))
-#define jit_ldr_l(d, rs)		MOVQmr(0,    (rs), 0,    0,  (d))
-#define jit_ldxr_l(d, s1, s2)		MOVQmr(0,    (s1), (s2), 1,  (d))
-#define jit_ldxi_l(d, rs, is)		MOVQmr((is), (rs), 0,    0,  (d))
+#define _jit_ldi_l(d, is)		MOVQmQr((is), 0,    0,    0,  (d))
+#define jit_ldr_l(d, rs)		MOVQmQr(0,    (rs), 0,    0,  (d))
+#define jit_ldxr_l(d, s1, s2)		MOVQmQr(0,    (s1), (s2), 1,  (d))
+#define jit_ldxi_l(d, rs, is)		MOVQmQr((is), (rs), 0,    0,  (d))
 
-#define _jit_sti_l(id, rs)		MOVQrm((rs), (id), 0,    0,    0)
-#define jit_str_l(rd, rs)		MOVQrm((rs), 0,    (rd), 0,    0)
-#define jit_stxr_l(d1, d2, rs)		MOVQrm((rs), 0,    (d1), (d2), 1)
-#define jit_stxi_l(id, rd, rs)		MOVQrm((rs), (id), (rd), 0,    0)
+#define _jit_sti_l(id, rs)		MOVQrQm((rs), (id), 0,    0,    0)
+#define jit_str_l(rd, rs)		MOVQrQm((rs), 0,    (rd), 0,    0)
+#define jit_stxr_l(d1, d2, rs)		MOVQrQm((rs), 0,    (d1), (d2), 1)
+#define jit_stxi_l(id, rd, rs)		MOVQrQm((rs), (id), (rd), 0,    0)
 
 #ifdef JIT_X86_64
 # define jit_ldi_l(d, is) (_u32P((long)(is)) ? _jit_ldi_l(d, is) : (jit_movi_l(d, is), jit_ldr_l(d, d)))

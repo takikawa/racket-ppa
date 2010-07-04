@@ -9,7 +9,8 @@
          (rename-in (types utils union convenience)
                     [Un t:Un]
                     [-> t:->])
-         (utils tc-utils mutated-vars)
+         (utils tc-utils)
+         unstable/mutated-vars
          (env type-name-env type-environments init-envs)
          (schemeunit)
          syntax/parse)
@@ -439,7 +440,12 @@
                             (boolean? x))
                         (if (boolean? x) 1 x)
                         4))
-              Univ]
+              #:proc (get-let-name 
+                      x 0 
+                      (ret Univ
+                           (-FS 
+                            null
+                            (list (make-NotTypeFilter -Boolean null #'x) (make-TypeFilter (-val #f) null #'x)))))]
         
         ;; T-AbsPred
         [tc-e/t (let ([p? (lambda: ([x : Any]) (number? x))])

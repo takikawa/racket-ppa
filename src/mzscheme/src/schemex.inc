@@ -337,6 +337,8 @@
   scheme_extension_table->scheme_real_to_double = scheme_real_to_double;
   scheme_extension_table->scheme_make_cptr = scheme_make_cptr;
   scheme_extension_table->scheme_make_offset_cptr = scheme_make_offset_cptr;
+  scheme_extension_table->scheme_make_external_cptr = scheme_make_external_cptr;
+  scheme_extension_table->scheme_make_offset_external_cptr = scheme_make_offset_external_cptr;
   scheme_extension_table->scheme_get_proc_name = scheme_get_proc_name;
   scheme_extension_table->scheme_utf8_decode = scheme_utf8_decode;
   scheme_extension_table->scheme_utf8_decode_as_prefix = scheme_utf8_decode_as_prefix;
@@ -569,7 +571,6 @@
   scheme_extension_table->scheme_make_struct_names = scheme_make_struct_names;
   scheme_extension_table->scheme_make_struct_type = scheme_make_struct_type;
   scheme_extension_table->scheme_make_struct_instance = scheme_make_struct_instance;
-  scheme_extension_table->scheme_make_struct_exptime = scheme_make_struct_exptime;
   scheme_extension_table->scheme_is_struct_instance = scheme_is_struct_instance;
   scheme_extension_table->scheme_struct_ref = scheme_struct_ref;
   scheme_extension_table->scheme_struct_set = scheme_struct_set;

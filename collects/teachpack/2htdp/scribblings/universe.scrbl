@@ -370,10 +370,10 @@ All @tech{MouseEvent}s are represented via strings:
 ]
 
 @defproc[(mouse-event? [x any]) boolean?]{
- determines whether @scheme[x] is a @tech{KeyEvent}}
+ determines whether @scheme[x] is a @tech{MouseEvent}}
 
 @defproc[(mouse=? [x mouse-event?][y mouse-event?]) boolean?]{
- compares two @tech{KeyEvent} for equality}
+ compares two @tech{MouseEvent}s for equality}
 
 @defform[(on-mouse clack-expr)
          #:contracts
@@ -971,9 +971,9 @@ The mandatory clauses of a @scheme[universe] server description are
  @defform[(on-msg msg-expr)
           #:contracts
           ([msg-expr (-> (unsyntax @tech{UniverseState}) iworld? sexp? bundle?)])]{
- tell DrScheme to apply @scheme[msg-expr] to the current state of the universe, the world
- @scheme[w] that sent the message, and the message itself. Note that
- @scheme[w] is guaranteed to be on the list @scheme[low]. 
+ tell DrScheme to apply @scheme[msg-expr] to the current state of the
+ universe, the world 
+ @scheme[w] that sent the message, and the message itself. 
  }
 }]
  All proper event handlers produce a @emph{bundle}.  The state in the
@@ -1020,10 +1020,11 @@ optional handlers:
           #:contracts
           ([dis-expr (-> (unsyntax @tech{UniverseState}) iworld? bundle?)])]{
  tell DrScheme to invoke @scheme[dis-expr] every time a participating
- @tech{world} drops its connection to the server. The first two arguments
- are the current list of participating worlds and the state of the
- universe; the third one is the world that got disconnected. 
- }
+ @tech{world} drops its connection to the server. The first argument
+ is the current state of the universe server, while the second argument is
+ the (representation of the) world that got disconnected. The resulting
+ bundle usually includes this second argument in the third field, telling
+ drscheme not to wait for messages from this world anymore.}
 }
 
 @item{
@@ -1078,12 +1079,12 @@ Once you have designed a world program, add a function definition
 (define (main n)
   (big-bang ... (name n) ...))
 ))
- Then in DrScheme's Interactions area, use @scheme[launch-with-many-worlds]
+ Then in DrScheme's Interactions area, use @scheme[launch-many-worlds]
  to create several distinctively named worlds: 
 @(begin
 #reader scribble/comment-reader
 (schemeblock
-> (launch-with-many-worlds (main "matthew") 
+> (launch-many-worlds (main "matthew") 
                            (main "kathi") 
                            (main "h3"))
 10
@@ -1344,7 +1345,7 @@ The preceding subsection dictates that our server program starts like this:
 
 ;; [Listof iworld?] iworld? -> Result 
 ;; add world @scheme[iw] to the universe, when server is in state @scheme[u]
-(define (add-world u @scheme[iw]) ...)
+(define (add-world u iw) ...)
 
 ;; [Listof iworld?] iworld? StopMessage -> Result
 ;; world @scheme[iw] sent message @scheme[m] when server is in state @scheme[u] 
@@ -1393,7 +1394,7 @@ The protocol tells us that @emph{add-world} just adds the given
 @(begin
 #reader scribble/comment-reader
 [schemeblock
-(define (add-world univ state wrld)
+(define (add-world univ wrld)
   (local ((define univ* (append univ (list wrld))))
     (make-bundle univ*
                  (list (make-mail (first univ*) 'it-is-your-turn))

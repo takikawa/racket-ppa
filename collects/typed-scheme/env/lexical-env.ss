@@ -1,10 +1,11 @@
 #lang scheme/base
 
-(require (except-in "../utils/utils.ss" extend))
-(require "type-environments.ss" 
+(require "../utils/utils.ss"
+	 "type-environments.ss" 
 	 "type-env.ss"
+	 unstable/mutated-vars
          (only-in scheme/contract ->* ->)
-         (utils tc-utils mutated-vars)
+         (utils tc-utils)
          (only-in (rep type-rep) Type/c)
 	 (except-in (types utils convenience) -> ->*))
 

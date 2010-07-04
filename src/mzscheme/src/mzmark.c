@@ -156,14 +156,18 @@ static int cpointer_obj_SIZE(void *p) {
 }
 
 static int cpointer_obj_MARK(void *p) {
-  gcMARK(SCHEME_CPTR_VAL(p));
+  if (!(SCHEME_CPTR_FLAGS(p) & 0x1)) {
+    gcMARK(SCHEME_CPTR_VAL(p));
+  }
   gcMARK(SCHEME_CPTR_TYPE(p));
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Cptr));
 }
 
 static int cpointer_obj_FIXUP(void *p) {
-  gcFIXUP(SCHEME_CPTR_VAL(p));
+  if (!(SCHEME_CPTR_FLAGS(p) & 0x1)) {
+    gcFIXUP(SCHEME_CPTR_VAL(p));
+  }
   gcFIXUP(SCHEME_CPTR_TYPE(p));
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Cptr));
@@ -179,14 +183,18 @@ static int offset_cpointer_obj_SIZE(void *p) {
 }
 
 static int offset_cpointer_obj_MARK(void *p) {
-  gcMARK(SCHEME_CPTR_VAL(p));
+  if (!(SCHEME_CPTR_FLAGS(p) & 0x1)) {
+    gcMARK(SCHEME_CPTR_VAL(p));
+  }
   gcMARK(SCHEME_CPTR_TYPE(p));
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Offset_Cptr));
 }
 
 static int offset_cpointer_obj_FIXUP(void *p) {
-  gcFIXUP(SCHEME_CPTR_VAL(p));
+  if (!(SCHEME_CPTR_FLAGS(p) & 0x1)) {
+    gcFIXUP(SCHEME_CPTR_VAL(p));
+  }
   gcFIXUP(SCHEME_CPTR_TYPE(p));
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Offset_Cptr));
@@ -194,27 +202,6 @@ static int offset_cpointer_obj_FIXUP(void *p) {
 
 #define offset_cpointer_obj_IS_ATOMIC 0
 #define offset_cpointer_obj_IS_CONST_SIZE 1
-
-
-static int second_of_cons_SIZE(void *p) {
-  return
-  gcBYTES_TO_WORDS(sizeof(Scheme_Simple_Object));
-}
-
-static int second_of_cons_MARK(void *p) {
-  gcMARK(SCHEME_PTR2_VAL((Scheme_Object *)p));
-  return
-  gcBYTES_TO_WORDS(sizeof(Scheme_Simple_Object));
-}
-
-static int second_of_cons_FIXUP(void *p) {
-  gcFIXUP(SCHEME_PTR2_VAL((Scheme_Object *)p));
-  return
-  gcBYTES_TO_WORDS(sizeof(Scheme_Simple_Object));
-}
-
-#define second_of_cons_IS_ATOMIC 0
-#define second_of_cons_IS_CONST_SIZE 1
 
 
 static int twoptr_obj_SIZE(void *p) {

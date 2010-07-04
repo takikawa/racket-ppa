@@ -10,7 +10,8 @@
 	 scheme/promise
 	 (for-syntax scheme/base)
 	 (for-syntax syntax/stx)
-	 (for-syntax stepper/private/shared))
+	 (for-syntax stepper/private/shared)
+	 (only-in lang/private/teachprims beginner-equal?))
 
 (define-for-syntax (phase-lift stx)
   (with-syntax ((?stx stx))
@@ -18,7 +19,9 @@
       #'?stx1)))
 
 (define-for-syntax (parse-contract name stx)
-  (syntax-case* stx (mixed one-of predicate list -> combined property reference at) module-or-top-identifier=?
+  (syntax-case* stx
+		(mixed one-of predicate list -> combined property reference at contract)
+		module-or-top-identifier=?
     ((mixed ?contract ...)
      (with-syntax ((?stx (phase-lift stx))
 		   (?name name)
@@ -46,7 +49,7 @@
 			   (syntax->list #'((?temp ?exp) ...)))))
        #'(let ((?temp ?exp) ...)
 	   ?check ...
-	   (make-case-contract '?name (list ?temp ...) ?stx)))))
+	   (make-case-contract '?name (list ?temp ...) beginner-equal? ?stx)))))
     ((predicate ?exp)
      (with-syntax ((?stx (phase-lift stx))
 		   (?name name))
@@ -75,6 +78,9 @@
     ((at ?loc ?ctr)
      (with-syntax ((?ctr-expr (parse-contract #f #'?ctr)))
        #'(contract-update-syntax ?ctr-expr #'?loc)))
+    (contract
+     (with-syntax ((?stx (phase-lift stx)))
+       #'(contract-update-syntax contract/contract #'?loc)))
     (?id
      (identifier? #'?id)
      (with-syntax ((?stx (phase-lift stx)))
@@ -111,17 +117,25 @@
 				 ?stx)))
     ((?contract-abstr ?contract ...)
      (identifier? #'?contract-abstr)
-     (with-syntax (((?contract-expr ...) (map (lambda (ctr)
+     (with-syntax ((?stx (phase-lift stx))
+		   ((?contract-expr ...) (map (lambda (ctr)
 						(parse-contract #f ctr))
 					      (syntax->list #'(?contract ...)))))
        (with-syntax
 	   ((?call (syntax/loc stx (?contract-abstr ?contract-expr ...))))
 	 #'(make-delayed-contract '?name
 				  (delay ?call)
-				  #'?stx))))
+				  ?stx))))
     (else
      (raise-syntax-error 'contract
 			 "ungültiger Vertrag" stx))))
+
+; regrettable
+(define contract/contract
+  (make-predicate-contract 'contract
+			   (delay contract?)
+			   #f))
+			     
 
 (define-syntax contract
   (lambda (stx)

@@ -5,13 +5,13 @@
          syntax/stx
          syntax/kerncase
          scheme/struct-info
-         scheme/private/contract-helpers
+         scheme/contract/private/helpers
          (for-syntax scheme/base
                      syntax/kerncase
                      "rep.ss"
                      (only-in "rep-data.ss" make-literalset))
          (for-template scheme/base
-                       scheme/contract))
+                       scheme/contract/base))
 
 (provide identifier
          boolean
@@ -36,7 +36,7 @@
          kernel-literals)
 
 (define-syntax-rule (define-pred-stxclass name pred)
-  (define-syntax-class name #:attributes ()
+  (define-syntax-class name #:attributes () #:opaque
     (pattern x
              #:fail-unless (pred (syntax-e #'x)) #f)))
 

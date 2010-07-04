@@ -1,12 +1,17 @@
 #lang scheme/base
 (require scheme/class
-         macro-debugger/util/class-iop
+         (rename-in unstable/class-iop
+                    [define/i define:]
+                    [send/i send:]
+                    [init-field/i init-field:])
          scheme/unit
          scheme/list
          scheme/match
          scheme/gui
          framework/framework
          syntax/boundmap
+         syntax/stx
+         unstable/find
          "interfaces.ss"
          "prefs.ss"
          "extensions.ss"
@@ -15,13 +20,12 @@
          "step-display.ss"
          "../model/deriv.ss"
          "../model/deriv-util.ss"
-         "../model/deriv-find.ss"
          "../model/deriv-parser.ss"
          "../model/trace.ss"
          "../model/reductions-config.ss"
          "../model/reductions.ss"
          "../model/steps.ss"
-         "../util/notify.ss"
+         unstable/gui/notify
          "cursor.ss"
          "debug-format.ss")
 
@@ -47,12 +51,12 @@
 
     (define deriv #f)
     (define deriv-hidden? #f)
-    (define binders #f)
     (define shift-table #f)
 
     (define raw-steps #f)
     (define raw-steps-estx #f) ;; #f if raw-steps-exn is exn
     (define raw-steps-exn #f) ;; #f if raw-steps-estx is syntax
+    (define raw-steps-binders #f)
     (define raw-steps-definites #f)
     (define raw-steps-oops #f)
 
@@ -75,9 +79,9 @@
     (define-guarded-getters (recache-deriv!)
       [get-deriv deriv]
       [get-deriv-hidden? deriv-hidden?]
-      [get-binders binders]
       [get-shift-table shift-table])
     (define-guarded-getters (recache-raw-steps!)
+      [get-raw-steps-binders raw-steps-binders]
       [get-raw-steps-definites raw-steps-definites]
       [get-raw-steps-exn raw-steps-exn]
       [get-raw-steps-oops raw-steps-oops])
@@ -95,6 +99,7 @@
       (set! raw-steps #f)
       (set! raw-steps-estx #f)
       (set! raw-steps-exn #f)
+      (set! raw-steps-binders #f)
       (set! raw-steps-definites #f)
       (set! raw-steps-oops #f))
 
@@ -108,7 +113,6 @@
       (invalidate-synth!)
       (set! deriv #f)
       (set! deriv-hidden? #f)
-      (set! binders #f)
       (set! shift-table #f))
 
     ;; recache! : -> void
@@ -135,14 +139,8 @@
               (when (not d)
                 (set! deriv-hidden? #t))
               (when d
-                (let ([alpha-table (make-module-identifier-mapping)]
-                      [binder-ids (extract-all-fresh-names d)])
-                  (for-each (lambda (id)
-                              (module-identifier-mapping-put! alpha-table id id))
-                            binder-ids)
-                  (set! deriv d)
-                  (set! binders alpha-table)
-                  (set! shift-table (compute-shift-table d)))))))))
+                (set! deriv d)
+                (set! shift-table (compute-shift-table d))))))))
 
     ;; recache-synth! : -> void
     (define/private (recache-synth!)
@@ -158,12 +156,13 @@
             (with-handlers ([(lambda (e) #t)
                              (lambda (e)
                                (set! raw-steps-oops e))])
-              (let-values ([(raw-steps* definites* estx* error*)
+              (let-values ([(raw-steps* binders* definites* estx* error*)
                             (parameterize ((macro-policy show-macro?))
                               (reductions+ deriv))])
                 (set! raw-steps raw-steps*)
                 (set! raw-steps-estx estx*)
                 (set! raw-steps-exn error*)
+                (set! raw-steps-binders binders*)
                 (set! raw-steps-definites definites*)))))))
 
     ;; recache-steps! : -> void
@@ -283,7 +282,7 @@
       (recache-steps!)
       (cond [(syntax? raw-steps-estx)
              (send: displayer step-display<%> add-syntax raw-steps-estx
-                    #:binders binders
+                    #:binders raw-steps-binders
                     #:shift-table shift-table
                     #:definites raw-steps-definites)]
             [(exn? raw-steps-exn)
@@ -297,10 +296,9 @@
              (let ([step (cursor:next steps)])
                (if step
                    (send: displayer step-display<%> add-step step
-                          #:binders binders
                           #:shift-table shift-table)
                    (send: displayer step-display<%> add-final raw-steps-estx raw-steps-exn
-                          #:binders binders
+                          #:binders raw-steps-binders
                           #:shift-table shift-table
                           #:definites raw-steps-definites)))]
             [else (display-oops #t)]))
@@ -318,3 +316,29 @@
             [else
              (error 'term-record::display-oops "internal error")]))
     ))
+
+
+;; compute-shift-table : deriv -> hash[id => (listof id)]
+(define (compute-shift-table d)
+  (define ht (make-hasheq))
+  (define module-forms
+    (find p:module? d #:stop-on-found? #t))
+  (define module-shift-renamers
+    (for/list ([mf module-forms])
+      (let ([shift (p:module-shift mf)]
+            [body (p:module-body mf)])
+        (and shift body
+             (with-syntax ([(_module _name _lang shifted-body) shift])
+               (add-rename-mapping ht (wderiv-e2 body) #'shifted-body))))))
+  ht)
+
+(define (add-rename-mapping ht from to)
+  (define (loop from to)
+    (cond [(and (stx-pair? from) (stx-pair? to))
+           (loop (stx-car from) (stx-car to))
+           (loop (stx-cdr from) (stx-cdr to))]
+          [(and (identifier? from) (identifier? to))
+           (hash-set! ht from (cons to (hash-ref ht from null)))]
+          [else (void)]))
+  (loop from to)
+  (void))

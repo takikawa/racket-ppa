@@ -58,11 +58,34 @@
 
 (define (poly-fail t argtypes #:name [name #f] #:expected [expected #f])
   (match t
-    [(or (Poly-names: msg-vars (Function: (list (arr: msg-doms msg-rngs msg-rests msg-drests '()) ...)))
-         (PolyDots-names: msg-vars (Function: (list (arr: msg-doms msg-rngs msg-rests msg-drests '()) ...))))
+    [(or (Poly-names: 
+          msg-vars 
+          (Function: (list (arr: msg-doms msg-rngs msg-rests msg-drests (list (Keyword: _ _ #f) ...)) ...)))
+         (PolyDots-names:
+          msg-vars
+          (Function: (list (arr: msg-doms msg-rngs msg-rests msg-drests (list (Keyword: _ _ #f) ...)) ...))))
      (let ([fcn-string (if name
                            (format "function ~a" (syntax->datum name))
                            "function")])
+       (if (and (andmap null? msg-doms)
+                (null? argtypes))
+           (tc-error/expr #:return (ret (Un))
+                          (string-append 
+                           "Could not infer types for applying polymorphic "
+                           fcn-string
+                           "\n"))
+           (tc-error/expr #:return (ret (Un))
+                          (string-append
+                           "Polymorphic " fcn-string " could not be applied to arguments:~n"
+                           (domain-mismatches t msg-doms msg-rests msg-drests msg-rngs argtypes #f #f #:expected expected)
+                           (if (not (for/and ([t (apply append (map fv/list msg-doms))]) (memq t msg-vars)))
+                               (string-append "Type Variables: " (stringify msg-vars) "\n")
+                               "")))))]
+    [(or (Poly-names: msg-vars (Function: (list (arr: msg-doms msg-rngs msg-rests msg-drests kws) ...)))
+         (PolyDots-names: msg-vars (Function: (list (arr: msg-doms msg-rngs msg-rests msg-drests kws) ...))))
+     (let ([fcn-string (if name
+                           (format "function with keywords ~a" (syntax->datum name))
+                           "function with keywords")])
        (if (and (andmap null? msg-doms)
                 (null? argtypes))
            (tc-error/expr #:return (ret (Un))

@@ -164,7 +164,14 @@ This form is used to measure the time taken to evaluate
 @scheme[expr]. After evaluating @scheme[expr], Scheme prints out the
 time taken by the evaluation (including real time, time taken by the
 cpu, and the time spent collecting free memory) and returns the result
-of the expression.}
+of the expression.
+
+(The reported time is measured as the number of milliseconds of CPU time
+required to obtain this result, the number of “real” milliseconds required
+for the result, and the number of milliseconds of CPU time (included in the
+first result) spent on garbage collection. The reliability of the timing
+numbers depends on the platform.) 
+}
 
 @; ----------------------------------------------------------------------
 
@@ -217,6 +224,8 @@ The same as Beginning's @|beg-and| and @|beg-or|.}
 @defform[(check-expect expr expr)]
 @defform[(check-within expr expr expr)]
 @defform[(check-error expr expr)]
+@defform[(check-member-of expr expr expr ...)]
+@defform[(check-range expr expr expr)]
 )]{
 
 The same as Beginning's @|beg-check-expect|, etc.}

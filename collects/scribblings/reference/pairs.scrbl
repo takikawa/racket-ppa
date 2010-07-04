@@ -1,11 +1,32 @@
 #lang scribble/doc
 @(require "mz.ss"
           scribble/scheme
+          scheme/generator
+          scheme/list
           (for-syntax scheme/base))
+
+@(define (generate-c_r-example proc)
+  (define (make-it start n)
+    (generator
+      (let loop ([start start]
+                 [n n])
+        (yield (list* n start))
+        (yield (append start (list n)))
+        (when (< (length (flatten start)) 8)
+          (loop (list* n start) (add1 n))
+          (loop (list start n) (add1 n))
+          ))))
+  (define (example proc)
+    (define maker (make-it '() 1))
+    (let loop ([value (maker)])
+      (with-handlers ([exn? (lambda (e) (loop (maker)))])
+        (proc value)
+        value)))
+  (example proc))
 
 @(define-syntax (defc_r stx)
    (syntax-case stx ()
-     [(_ x ...)
+     [(_ x ... example)
       (let ([xs (map syntax-e (syntax->list #'(x ...)))])
         (let ([name (string->symbol
                      (string-append
@@ -37,9 +58,10 @@
                                                              span)))
                                       (datum->syntax #'here c 
                                                      (list (syntax-source stx) 1 pos (add1 pos) 1))))]
+                        [example (datum->syntax #'here (syntax->datum #'example))]
                         [equiv equiv])
             #'(defproc (name [v contract]) any/c
-                "Returns " (to-element 'equiv)))))]))
+                "Returns " (to-element 'equiv) (mz-examples (name example))))))]))
 
 
 @title[#:tag "pairs"]{Pairs and Lists}
@@ -67,35 +89,78 @@ then the pair is not a list.
 @section{Pair Constructors and Selectors}
 
 @defproc[(pair? [v any/c]) boolean?]{Returns @scheme[#t] if @scheme[v] is
-a pair, @scheme[#f] otherwise.}
+a pair, @scheme[#f] otherwise.
+@mz-examples[
+(pair? 1)
+(pair? (cons 1 2))
+(pair? (list 1 2))
+(pair? '(1 2))
+(pair? '())
+]}
 
 @defproc[(null? [v any/c]) boolean?]{Returns @scheme[#t] if @scheme[v] is
-the empty list, @scheme[#f] otherwise.}
+the empty list, @scheme[#f] otherwise.
+@mz-examples[
+(null? 1)
+(null? '(1 2))
+(null? '())
+(null? (cdr (list 1)))
+]}
 
 @defproc[(cons [a any/c] [d any/c]) pair?]{Returns a pair whose first
-element is @scheme[a] and second element is @scheme[d].}
+element is @scheme[a] and second element is @scheme[d].
+@mz-examples[
+(cons 1 2)
+(cons 1 '())
+]}
 
 @defproc[(car [p pair?]) any/c]{Returns the first element of the
-pair @scheme[p].}
+pair @scheme[p].
+@mz-examples[
+(car '(1 2))
+(car (cons 2 3))
+]}
 
 @defproc[(cdr [p pair?]) any/c]{Returns the second element of the
-pair @scheme[p].}
+pair @scheme[p].
+@mz-examples[
+(cdr '(1 2))
+(cdr '(1))
+]}
 
-@defthing[null null?]{The empty list.}
+@defthing[null null?]{The empty list.
+@mz-examples[
+null
+'()
+(eq? '() null)
+]}
 
 
 @defproc[(list? [v any/c]) boolean?]{Returns @scheme[#t] if @scheme[v]
  is a list: either the empty list, or a pair whose second element is a
- list. This procedure takes amortized constant time.}
+ list. This procedure takes amortized constant time.
+@mz-examples[
+(list? '(1 2))
+(list? (cons 1 (cons 2 '())))
+(list? (cons 1 2))
+]}
 
 @defproc[(list [v any/c] ...) list?]{Returns a newly allocated list
-containing the @scheme[v]s as its elements.}
+containing the @scheme[v]s as its elements.
+@mz-examples[
+(list 1 2 3 4)
+(list (list 1 2) (list 3 4))
+]}
 
 @defproc[(list* [v any/c] ... [tail any/c]) any/c]{
 
 Like @scheme[list], but the last argument is used as the tail of
 the result, instead of the final element. The result is a list
-only if the last argument is a list.}
+only if the last argument is a list.
+@mz-examples[
+(list* 1 2)
+(list* 1 2 (list 3 4))
+]}
 
 @defproc[(build-list [n exact-nonnegative-integer?]
                      [proc (exact-nonnegative-integer? . -> . any)])
@@ -117,7 +182,11 @@ is the value produced by @scheme[(proc _i)].
 @defproc[(length [lst list?])
          exact-nonnegative-integer?]{
 
-Returns the number of elements in @scheme[lst].}
+Returns the number of elements in @scheme[lst].
+@mz-examples[
+(length (list 1 2 3 4))
+(length '())
+]}
 
 
 @defproc[(list-ref [lst any/c] [pos exact-nonnegative-integer?])
@@ -129,7 +198,12 @@ the list's first element is position @scheme[0]. If the list has
 @exnraise[exn:fail:contract].
 
 The @scheme[lst] argument need not actually be a list; @scheme[lst]
-must merely start with a chain of at least @scheme[pos] pairs.}
+must merely start with a chain of at least @scheme[pos] pairs.
+@mz-examples[
+(list-ref (list 'a 'b 'c) 0)
+(list-ref (list 'a 'b 'c) 1)
+(list-ref (list 'a 'b 'c) 2)
+]}
 
 
 @defproc[(list-tail [lst any/c] [pos exact-nonnegative-integer?])
@@ -140,7 +214,10 @@ Returns the list after the first @scheme[pos] elements of
 the @exnraise[exn:fail:contract].
 
 The @scheme[lst] argument need not actually be a list; @scheme[lst]
-must merely start with a chain of at least @scheme[pos] pairs.}
+must merely start with a chain of at least @scheme[pos] pairs.
+@mz-examples[
+(list-tail (list 1 2 3 4) 2)
+]}
 
 
 @defproc*[([(append [lst list?] ...) list?]
@@ -151,12 +228,21 @@ of the elements of the given lists in order. The last argument is used
 directly in the tail of the result.
 
 The last argument need not be a list, in which case the result is an
-``improper list.''}
+``improper list.''
+
+@mz-examples[
+(append (list 1 2) (list 3 4))
+(append (list 1 2) (list 3 4) (list 5 6) (list 7 8))
+]}
 
 @defproc[(reverse [lst list?]) list?]{
 
 Returns a list that has the same elements as @scheme[lst], but in
-reverse order.}
+reverse order.
+
+@mz-examples[
+(reverse (list 1 2 3 4))
+]}
 
 
 @; ----------------------------------------
@@ -169,7 +255,17 @@ Applies @scheme[proc] to the elements of the @scheme[lst]s from the
  first elements to the last. The @scheme[proc] argument must accept
  the same number of arguments as the number of supplied @scheme[lst]s,
  and all @scheme[lst]s must have the same number of elements.  The
- result is a list containing each result of @scheme[proc] in order.}
+ result is a list containing each result of @scheme[proc] in order.
+
+@mz-examples[
+(map (lambda (number)
+       (+ 1 number))
+     '(1 2 3 4))
+(map (lambda (number1 number2)
+       (+ number1 number2))
+     '(1 2 3 4)
+     '(10 100 1000 10000))
+]}
 
 @defproc[(andmap [proc procedure?] [lst list?] ...+)
           any]{
@@ -232,7 +328,14 @@ If the @scheme[lst]s are empty, then @scheme[#f] is returned.}
 
 Similar to @scheme[map], but @scheme[proc] is called only for its
  effect, and its result (which can be any number of values) is
- ignored.}
+ ignored.
+
+(mz-examples[
+(for-each (lambda (arg)
+            (printf "Got ~a\n" arg)
+            23)
+          '(1 2 3 4))
+]}
 
 
 @defproc[(foldl [proc procedure?] [init any/c] [lst list?] ...+)
@@ -260,6 +363,11 @@ Unlike @scheme[foldr], @scheme[foldl] processes the @scheme[lst]s in
 @mz-examples[
 (foldl cons '() '(1 2 3 4))
 (foldl + 0 '(1 2 3 4))
+(foldl (lambda (a b result)
+         (* result (- a b)))
+       1
+       '(1 2 3)
+       '(4 5 6))
 ]}
 
 @defproc[(foldr [proc procedure?] [init any/c] [lst list?] ...+)
@@ -283,7 +391,11 @@ Like @scheme[foldl], but the lists are traversed from right to left.
 
 Returns a list with the elements of @scheme[lst] for which
  @scheme[pred] produces a true value. The @scheme[pred] procedure is
- applied to each element from first to last.}
+ applied to each element from first to last.
+
+@mz-examples[
+(filter positive? '(1 -2 3 4 -5))
+]}
 
 
 @defproc[(remove [v any/c] [lst list?] [proc procedure? equal?])
@@ -291,38 +403,58 @@ Returns a list with the elements of @scheme[lst] for which
 
 Returns a list that is like @scheme[lst], omitting the first element
  of @scheme[lst] that is equal to @scheme[v] using the comparison
- procedure @scheme[proc] (which must accept two arguments).}
+ procedure @scheme[proc] (which must accept two arguments).
+
+@mz-examples[
+(remove 2 (list 1 2 3 2 4))
+]}
 
 
 @defproc[(remq [v any/c] [lst list?])
          list?]{
 
-Returns @scheme[(remove v lst eq?)].}
+Returns @scheme[(remove v lst eq?)].
+@mz-examples[
+(remq (list 1 2) (list 1 2 3 4 5))
+]}
 
 
 @defproc[(remv [v any/c] [lst list?])
          list?]{
 
-Returns @scheme[(remove v lst eqv?)].}
+Returns @scheme[(remove v lst eqv?)].
+@mz-examples[
+(remv 2 (list 1 2 3 4 5))
+]}
 
 
 @defproc[(remove* [v-lst list?] [lst list?] [proc procedure? equal?])
          list?]{
 
 Like @scheme[remove], but removes from @scheme[lst] every instance of
-every element of @scheme[v-lst].}
+every element of @scheme[v-lst].
+@mz-examples[
+(remove* (list 1 2) (list 1 2 3 2 4 5 2))
+]}
 
 
 @defproc[(remq* [v-lst list?] [lst list?])
          list?]{
 
-Returns @scheme[(remove* v-lst lst eq?)].}
+Returns @scheme[(remove* v-lst lst eq?)].
+
+@mz-examples[
+(remq* (list 1 2) (list 1 2 3 2 4 5 2))
+]}
 
 
 @defproc[(remv* [v-lst list?] [lst list?])
          list?]{
 
-Returns @scheme[(remove* v-lst lst eqv?)].}
+Returns @scheme[(remove* v-lst lst eqv?)].
+@mz-examples[
+(remv* (list 1 2) (list 1 2 3 2 4 5 2))
+]}
 
 
 @defproc[(sort [lst list?] [less-than? (any/c any/c . -> . any/c)]
@@ -381,19 +513,34 @@ By default, @scheme[extract-key] is applied to two list elements for
 Locates the first element of @scheme[lst] that is @scheme[equal?] to
  @scheme[v]. If such an element exists, the tail of @scheme[lst]
  starting with that element is returned. Otherwise, the result is
- @scheme[#f].}
+ @scheme[#f].
+
+@mz-examples[
+(member 2 (list 1 2 3 4))
+(member 9 (list 1 2 3 4))
+]}
 
 
 @defproc[(memv [v any/c] [lst list?])
          (or/c list? #f)]{
 
-Like @scheme[member], but finds an element using @scheme[eqv?].}
+Like @scheme[member], but finds an element using @scheme[eqv?].
+@mz-examples[
+(memv 2 (list 1 2 3 4))
+(memv 9 (list 1 2 3 4))
+]}
 
 
 @defproc[(memq [v any/c] [lst list?])
          (or/c list? #f)]{
 
-Like @scheme[member], but finds an element using @scheme[eq?].}
+Like @scheme[member], but finds an element using @scheme[eq?].
+
+@mz-examples[
+(memq 2 (list 1 2 3 4))
+(memq 9 (list 1 2 3 4))
+]}
+}
 
 
 @defproc[(memf [proc procedure?] [lst list?])
@@ -401,13 +548,24 @@ Like @scheme[member], but finds an element using @scheme[eq?].}
 
 Like @scheme[member], but finds an element using the predicate
  @scheme[proc]; an element is found when @scheme[proc] applied to the
- element returns a true value.}
+ element returns a true value.
+
+@mz-examples[
+(memf (lambda (arg)
+        (> arg 9))
+      '(7 8 9 10 11))
+]}
 
 
 @defproc[(findf [proc procedure?] [lst list?]) any/c]{
 
 Like @scheme[memf], but returns the element or @scheme[#f]
- instead of a tail of @scheme[lst] or @scheme[#f].}
+ instead of a tail of @scheme[lst] or @scheme[#f].
+@mz-examples[
+(findf (lambda (arg)
+        (> arg 9))
+       '(7 8 9 10 11))
+]}
 
 
 @defproc[(assoc [v any/c] [lst (listof pair?)])
@@ -416,19 +574,29 @@ Like @scheme[memf], but returns the element or @scheme[#f]
 Locates the first element of @scheme[lst] whose @scheme[car] is
  @scheme[equal?] to @scheme[v]. If such an element exists, the pair
  (i.e., an element of @scheme[lst]) is returned. Otherwise, the result
- is @scheme[#f].}
+ is @scheme[#f].
+@mz-examples[
+(assoc 3 (list (list 1 2) (list 3 4) (list 5 6)))
+(assoc 9 (list (list 1 2) (list 3 4) (list 5 6)))
+]}
 
 
 @defproc[(assv [v any/c] [lst (listof pair?)])
          (or/c pair? #f)]{
 
-Like @scheme[assoc], but finds an element using @scheme[eqv?].}
+Like @scheme[assoc], but finds an element using @scheme[eqv?].
+@mz-examples[
+(assv 3 (list (list 1 2) (list 3 4) (list 5 6)))
+]}
 
 
 @defproc[(assq [v any/c] [lst (listof pair?)])
          (or/c pair? #f)]{
 
-Like @scheme[assoc], but finds an element using @scheme[eq?].}
+Like @scheme[assoc], but finds an element using @scheme[eq?].
+@mz-examples[
+(assq 3 (list (list 1 2) (list 3 4) (list 5 6)))
+]}
 
 
 @defproc[(assf [proc procedure?] [lst list?])
@@ -436,41 +604,46 @@ Like @scheme[assoc], but finds an element using @scheme[eq?].}
 
 Like @scheme[assoc], but finds an element using the predicate
  @scheme[proc]; an element is found when @scheme[proc] applied to the
- @scheme[car] of an @scheme[lst] element returns a true value.}
+ @scheme[car] of an @scheme[lst] element returns a true value.
+@mz-examples[
+(assf (lambda (arg)
+        (> arg 2))
+      (list (list 1 2) (list 3 4) (list 5 6)))
+]}
 
 
 
 @; ----------------------------------------
 @section{Pair Accessor Shorthands}
 
-@defc_r[a a]
-@defc_r[a d]
-@defc_r[d a]
-@defc_r[d d]
-@defc_r[a a a]
-@defc_r[a a d]
-@defc_r[a d a]
-@defc_r[a d d]
-@defc_r[d a a]
-@defc_r[d a d]
-@defc_r[d d a]
-@defc_r[d d d]
-@defc_r[a a a a]
-@defc_r[a a a d]
-@defc_r[a a d a]
-@defc_r[a a d d]
-@defc_r[a d a a]
-@defc_r[a d a d]
-@defc_r[a d d a]
-@defc_r[a d d d]
-@defc_r[d a a a]
-@defc_r[d a a d]
-@defc_r[d a d a]
-@defc_r[d a d d]
-@defc_r[d d a a]
-@defc_r[d d a d]
-@defc_r[d d d a]
-@defc_r[d d d d]
+@defc_r[a a '((1 2) 3 4)]
+@defc_r[a d '((1 2) 3 4)]
+@defc_r[d a '((7 6 5 4 3 2 1) 8 9)]
+@defc_r[d d '(2 1)]
+@defc_r[a a a '(((6 5 4 3 2 1) 7) 8 9)]
+@defc_r[a a d '(9 (7 6 5 4 3 2 1) 8)]
+@defc_r[a d a '((7 6 5 4 3 2 1) 8 9)]
+@defc_r[a d d '(3 2 1)]
+@defc_r[d a a '(((6 5 4 3 2 1) 7) 8 9)]
+@defc_r[d a d '(9 (7 6 5 4 3 2 1) 8)]
+@defc_r[d d a '((7 6 5 4 3 2 1) 8 9)]
+@defc_r[d d d '(3 2 1)]
+@defc_r[a a a a '((((5 4 3 2 1) 6) 7) 8 9)]
+@defc_r[a a a d '(9 ((6 5 4 3 2 1) 7) 8)]
+@defc_r[a a d a '((7 (5 4 3 2 1) 6) 8 9)]
+@defc_r[a a d d '(9 8 (6 5 4 3 2 1) 7)]
+@defc_r[a d a a '(((6 5 4 3 2 1) 7) 8 9)]
+@defc_r[a d a d '(9 (7 6 5 4 3 2 1) 8)]
+@defc_r[a d d a '((7 6 5 4 3 2 1) 8 9)]
+@defc_r[a d d d '(4 3 2 1)]
+@defc_r[d a a a '((((5 4 3 2 1) 6) 7) 8 9)]
+@defc_r[d a a d '(9 ((6 5 4 3 2 1) 7) 8)]
+@defc_r[d a d a '((7 (5 4 3 2 1) 6) 8 9)]
+@defc_r[d a d d '(9 8 (6 5 4 3 2 1) 7)]
+@defc_r[d d a a '(((6 5 4 3 2 1) 7) 8 9)]
+@defc_r[d d a d '(9 (7 6 5 4 3 2 1) 8)]
+@defc_r[d d d a '((7 6 5 4 3 2 1) 8 9)]
+@defc_r[d d d d '(4 3 2 1)]
 
 @; ----------------------------------------
 @section{Additional List Functions and Synonyms}
@@ -480,38 +653,89 @@ Like @scheme[assoc], but finds an element using the predicate
 @(interaction-eval #:eval list-eval
                    (require scheme/list (only-in scheme/function negate)))
 
-@defthing[empty null?]{The empty list.}
+@defthing[empty null?]{The empty list.
+@mz-examples[#:eval list-eval
+empty
+(eq? empty null)
+]}
 
-@defproc[(cons? [v any/c]) boolean?]{The same as @scheme[(pair? v)].}
+@defproc[(cons? [v any/c]) boolean?]{The same as @scheme[(pair? v)].
+@mz-examples[#:eval list-eval
+(cons? '(1 2))
+]}
 
-@defproc[(empty? [v any/c]) boolean?]{The same as @scheme[(null? v)].}
+@defproc[(empty? [v any/c]) boolean?]{The same as @scheme[(null? v)].
+@mz-examples[#:eval list-eval
+(empty? '(1 2))
+(empty? '())
+]}
 
-@defproc[(first [lst list?]) any/c]{The same as @scheme[(car lst)], but only for lists (that are not empty).}
+@defproc[(first [lst list?]) any/c]{The same as @scheme[(car lst)], but only for lists (that are not empty).
+@mz-examples[#:eval list-eval
+(first '(1 2 3 4 5 6 7 8 9 10))
+]}
 
-@defproc[(rest [lst list?]) list?]{The same as @scheme[(cdr lst)], but only for lists (that are not empty).}
+@defproc[(rest [lst list?]) list?]{The same as @scheme[(cdr lst)], but only for lists (that are not empty).
 
-@defproc[(second [lst list?]) any]{Returns the second element of the list.}
+@mz-examples[#:eval list-eval
+(rest '(1 2 3 4 5 6 7 8 9 10))
+]}
 
-@defproc[(third [lst list?]) any]{Returns the third element of the list.}
+@defproc[(second [lst list?]) any]{Returns the second element of the list.
+@mz-examples[#:eval list-eval
+(second '(1 2 3 4 5 6 7 8 9 10))
+]}
 
-@defproc[(fourth [lst list?]) any]{Returns the fourth element of the list.}
+@defproc[(third [lst list?]) any]{Returns the third element of the list.
+@mz-examples[#:eval list-eval
+(third '(1 2 3 4 5 6 7 8 9 10))
+]}
 
-@defproc[(fifth [lst list?]) any]{Returns the fifth element of the list.}
+@defproc[(fourth [lst list?]) any]{Returns the fourth element of the list.
+@mz-examples[#:eval list-eval
+(fourth '(1 2 3 4 5 6 7 8 9 10))
+]}
 
-@defproc[(sixth [lst list?]) any]{Returns the sixth element of the list.}
+@defproc[(fifth [lst list?]) any]{Returns the fifth element of the list.
+@mz-examples[#:eval list-eval
+(fifth '(1 2 3 4 5 6 7 8 9 10))
+]}
 
-@defproc[(seventh [lst list?]) any]{Returns the seventh element of the list.}
+@defproc[(sixth [lst list?]) any]{Returns the sixth element of the list.
+@mz-examples[#:eval list-eval
+(sixth '(1 2 3 4 5 6 7 8 9 10))
+]}
 
-@defproc[(eighth [lst list?]) any]{Returns the eighth element of the list.}
+@defproc[(seventh [lst list?]) any]{Returns the seventh element of the list.
+@mz-examples[#:eval list-eval
+(seventh '(1 2 3 4 5 6 7 8 9 10))
+]}
 
-@defproc[(ninth [lst list?]) any]{Returns the ninth element of the list.}
+@defproc[(eighth [lst list?]) any]{Returns the eighth element of the list.
+@mz-examples[#:eval list-eval
+(eighth '(1 2 3 4 5 6 7 8 9 10))
+]}
 
-@defproc[(tenth [lst list?]) any]{Returns the tenth element of the list.}
+@defproc[(ninth [lst list?]) any]{Returns the ninth element of the list.
+@mz-examples[#:eval list-eval
+(ninth '(1 2 3 4 5 6 7 8 9 10))
+]}
 
-@defproc[(last [lst list?]) any]{Returns the last element of the list.}
+@defproc[(tenth [lst list?]) any]{Returns the tenth element of the list.
+@mz-examples[#:eval list-eval
+(tenth '(1 2 3 4 5 6 7 8 9 10))
+]}
+
+@defproc[(last [lst list?]) any]{Returns the last element of the list.
+@mz-examples[#:eval list-eval
+(last '(1 2 3 4 5 6 7 8 9 10))
+]}
 
 @defproc[(last-pair [p pair?]) pair?]{
-Returns the last pair of a (possibly improper) list.}
+Returns the last pair of a (possibly improper) list.
+@mz-examples[#:eval list-eval
+(last-pair '(1 2 3 4))
+]}
 
 @defproc[(make-list [k exact-nonnegative-integer?] [v any?]) list?]{
 Returns a newly constructed list of length @scheme[k], holding
@@ -576,7 +800,12 @@ Returns the same result as
 
 @schemeblock[(values (drop-right lst pos) (take-right lst pos))]
 
-except that it can be faster.}
+except that it can be faster.
+
+@mz-examples[#:eval list-eval
+(split-at-right '(1 2 3 4 5 6) 3)
+(split-at-right '(1 2 3 4 5 6) 4)
+]}
 
 @defproc[(add-between [lst list?] [v any/c]) list?]{
 
@@ -618,7 +847,10 @@ traversal.
   (flatten 'a)
 ]}
 
-@defproc[(remove-duplicates [lst list?] [same? (any/c any/c . -> . any/c) equal?])
+@defproc[(remove-duplicates [lst list?]
+                            [same? (any/c any/c . -> . any/c) equal?]
+                            [#:key extract-key (any/c . -> . any/c)
+                                   (lambda (x) x)])
          list?]{
 
 Returns a list that has all items in @scheme[lst], but without
@@ -626,6 +858,10 @@ duplicate items, where @scheme[same?] determines whether two elements
 of the list are equivalent.  The resulting list is in the same order
 as @scheme[lst], and for any item that occurs multiple times, the
 first one is kept.
+
+The @scheme[#:key] argument @scheme[extract-key] is used to extract a
+ key value from each list element, so two items are considered equal if
+ @scheme[(same? (extract-key x) (extract-key y))] is true.
 
 @mz-examples[#:eval list-eval
   (remove-duplicates '(a b b a))
@@ -637,14 +873,21 @@ first one is kept.
          list?]{
 
 Returns @scheme[(filter (lambda (x) x) (map proc lst ...))], but
-without building the intermediate list.}
+without building the intermediate list.
 
+@mz-examples[#:eval list-eval
+(filter-map (lambda (x) (and (positive? x) x)) '(1 2 3 -2 8))
+]}
 
 @defproc[(count [proc procedure?] [lst list?] ...+)
          list?]{
 
 Returns @scheme[(length (filter proc lst ...))], but
-without building the intermediate list.}
+without building the intermediate list.
+
+@mz-examples[
+(count positive? '(1 -1 2 3 -2 5))
+]}
 
 
 @defproc[(partition [pred procedure?] [lst list?])
@@ -694,8 +937,7 @@ the result of @scheme[proc].
 @mz-examples[#:eval list-eval
 (argmin car '((3 pears) (1 banana) (2 apples)))
 (argmin car '((1 banana) (1 orange)))
-]
-}
+]}
 
 @defproc[(argmax [proc (-> any/c real?)] [lst (and/c pair? list?)]) any/c]{
 
@@ -705,8 +947,7 @@ the result of @scheme[proc].
 @mz-examples[#:eval list-eval
 (argmax car '((3 pears) (1 banana) (2 apples)))
 (argmax car '((3 pears) (3 oranges)))
-]
-}
+]}
 
 @close-eval[list-eval]
 

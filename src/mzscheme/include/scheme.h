@@ -176,8 +176,10 @@ typedef struct FSSpec mzFSSpec;
 # define THREAD_LOCAL /* empty */
 #endif
 
-#if defined(MZ_USE_JIT_PPC) || defined(MZ_USE_JIT_I386) || defined(MZ_USE_JIT_X86_64)
-# define MZ_USE_JIT
+#ifndef MZ_DONT_USE_JIT
+# if defined(MZ_USE_JIT_PPC) || defined(MZ_USE_JIT_I386) || defined(MZ_USE_JIT_X86_64)
+#  define MZ_USE_JIT
+# endif
 #endif
 
 /* Define _W64 for MSC if needed. */
@@ -562,7 +564,7 @@ typedef long (*Scheme_Secondary_Hash_Proc)(Scheme_Object *obj, void *cycle_data)
 
 typedef struct Scheme_Cptr
 {
-  Scheme_Object so;
+  Scheme_Inclhash_Object so; /* 0x1 => an external pointer (not GCable) */
   void *val;
   Scheme_Object *type;
 } Scheme_Cptr;
@@ -575,6 +577,7 @@ typedef struct Scheme_Offset_Cptr
 #define SCHEME_CPTR_VAL(obj) (((Scheme_Cptr *)(obj))->val)
 #define SCHEME_CPTR_TYPE(obj) (((Scheme_Cptr *)(obj))->type)
 #define SCHEME_CPTR_OFFSET(obj) (SAME_TYPE(_SCHEME_TYPE(obj), scheme_offset_cpointer_type) ? ((Scheme_Offset_Cptr *)obj)->offset : 0)
+#define SCHEME_CPTR_FLAGS(obj) MZ_OPT_HASH_KEY(&((Scheme_Cptr *)(obj))->so)
 
 #define SCHEME_SET_IMMUTABLE(obj)  ((MZ_OPT_HASH_KEY((Scheme_Inclhash_Object *)(obj)) |= 0x1))
 #define SCHEME_SET_CHAR_STRING_IMMUTABLE(obj) SCHEME_SET_IMMUTABLE(obj)
@@ -1489,7 +1492,7 @@ typedef void (*Scheme_Invoke_Proc)(Scheme_Env *env, long phase_shift,
 #  define scheme_fuel_counter (*scheme_fuel_counter_ptr)
 # endif
 #else
-MZ_EXTERN volatile int scheme_fuel_counter;
+MZ_EXTERN THREAD_LOCAL volatile int scheme_fuel_counter;
 #endif
 
 #ifdef FUEL_AUTODECEREMENTS

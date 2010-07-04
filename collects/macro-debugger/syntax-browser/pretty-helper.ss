@@ -1,8 +1,10 @@
-
 #lang scheme/base
 (require scheme/class
-         macro-debugger/util/class-iop
+         scheme/pretty
+         (rename-in unstable/class-iop
+                    [send/i send:])
          syntax/stx
+         unstable/struct
          "interfaces.ss")
 (provide (all-defined-out))
 
@@ -19,6 +21,18 @@
 ;; NOTE: Nulls are only wrapped when *not* list-terminators.  
 ;; If they were always wrapped, the pretty-printer would screw up
 ;; list printing (I think).
+
+(define (pretty-print/defaults datum [port (current-output-port)])
+  (parameterize
+    (;; Printing parameters (defaults from MzScheme and DrScheme 4.2.2.2)
+     [print-unreadable #t]
+     [print-graph #f]
+     [print-struct #t]
+     [print-box #t]
+     [print-vector-length #f]
+     [print-hash-table #t]
+     [print-honu #f])
+    (pretty-print datum port)))
 
 (define-struct syntax-dummy (val))
 
@@ -127,7 +141,7 @@
 ;; unfold-pstruct : prefab-struct -> (values (list -> prefab-struct) list)
 (define (unfold-pstruct obj)
   (define key (prefab-struct-key obj))
-  (define fields (cdr (vector->list (struct->vector obj))))
+  (define fields (struct->list obj))
   (values (lambda (new-fields)
             (apply make-prefab-struct key new-fields))
           fields))

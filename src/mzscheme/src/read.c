@@ -117,6 +117,8 @@ static Scheme_Object *print_mpair_curly(int, Scheme_Object *[]);
 static Scheme_Object *print_honu(int, Scheme_Object *[]);
 static Scheme_Object *print_syntax_width(int, Scheme_Object *[]);
 
+static int scheme_ellipses(mzchar* buffer, int length);
+
 #define NOT_EOF_OR_SPECIAL(x) ((x) >= 0)
 
 #define mzSPAN(port, pos)  ()
@@ -3607,7 +3609,8 @@ read_number_or_symbol(int init_ch, int skip_rt, Scheme_Object *port,
     return NULL;
   }
 
-  if (honu_mode && !is_symbol) {
+  /* special case for ellipses in honu */
+  if (honu_mode && !is_symbol && !scheme_ellipses(buf, i)) {
     /* Honu inexact syntax is not quite a subset of Scheme: it can end
        in an "f" or "d" to indicate the precision. We can easily check
        whether the string has the right shape, and then move the "f"
@@ -3653,7 +3656,8 @@ read_number_or_symbol(int init_ch, int skip_rt, Scheme_Object *port,
   }
 
   if (SAME_OBJ(o, scheme_false)) {
-    if (honu_mode && !is_symbol) {
+    /* special case for ellipses in honu */
+    if (honu_mode && !is_symbol && !scheme_ellipses(buf, i)) {
       scheme_read_err(port, stxsrc, line, col, pos, SPAN(port, pos), 0, indentation,
 		      "read: bad number: %5", buf);
       return NULL;
@@ -3789,6 +3793,10 @@ static int u_strcmp(mzchar *s, const char *_t)
   if (s[i] || t[i])
     return 1;
   return 0;
+}
+
+static int scheme_ellipses(mzchar* buffer, int length){
+    return u_strcmp(buffer, "...") == 0;
 }
 
 /* "#\" has been read */
@@ -5649,8 +5657,8 @@ static Scheme_Object *readtable_call(int w_char, int ch, Scheme_Object *proc, Re
 
   if (get_info) {
     a[0] = v;
-    if (!scheme_check_proc_arity(NULL, 1, 0, 1, a)) {
-      scheme_wrong_type("read-language", "procedure (arity 1)", -1, -1, a);
+    if (!scheme_check_proc_arity(NULL, 2, 0, 1, a)) {
+      scheme_wrong_type("read-language", "procedure (arity 2)", -1, -1, a);
     }
   }
 

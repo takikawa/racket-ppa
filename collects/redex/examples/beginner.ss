@@ -551,7 +551,7 @@ reflects the (broken) spec).
 (define (show-test-results)
   (cond
     [(= failed-tests 0) 
-     (fprintf (current-error-port) "passed all ~a tests\n" total-tests)]
+     (fprintf (current-output-port) "passed all ~a tests\n" total-tests)]
     [else
      (fprintf (current-error-port) "failed ~a out of ~a tests\n" failed-tests total-tests)]))
 
@@ -565,13 +565,14 @@ reflects the (broken) spec).
         args ...
         (show-test-results)))]))
 
-(define (run-tests)
+(define (run-tests [run-struct-test? #t])
   (tests
-   (test
-    '((define-struct s ())
-      (s? (make-s)))
-    '((define-struct s ())
-      true))
+   (when run-struct-test?
+     (test
+      '((define-struct s ())
+	(s? (make-s)))
+      '((define-struct s ())
+	true)))
    
    (test
     '((define-struct s (a b))

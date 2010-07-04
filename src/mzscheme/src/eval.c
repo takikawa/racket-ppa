@@ -147,7 +147,7 @@
 #define EMBEDDED_DEFINES_START_ANYWHERE 0
 
 /* globals */
-volatile int scheme_fuel_counter;
+THREAD_LOCAL volatile int scheme_fuel_counter;
 
 int scheme_startup_use_jit = 1;
 void scheme_set_startup_use_jit(int v) { scheme_startup_use_jit =  v; }
@@ -2283,7 +2283,8 @@ static Scheme_Object *apply_inlined(Scheme_Object *p, Scheme_Closure_Data *data,
 Scheme_Object *optimize_for_inline(Optimize_Info *info, Scheme_Object *le, int argc,
 				   Scheme_App_Rec *app, Scheme_App2_Rec *app2, Scheme_App3_Rec *app3,
                                    int *_flags)
-/* If not app, app2, or app3, just return a known procedure, if any */
+/* If not app, app2, or app3, just return a known procedure, if any,
+   and do not check arity. */
 {
   int offset = 0, single_use = 0;
   Scheme_Object *bad_app = NULL;
@@ -2325,7 +2326,7 @@ Scheme_Object *optimize_for_inline(Optimize_Info *info, Scheme_Object *le, int a
 
     *_flags = SCHEME_CLOSURE_DATA_FLAGS(data);
       
-    if (data->num_params == argc) {
+    if ((data->num_params == argc) || (!app && !app2 && !app3)) {
       sz = scheme_closure_body_size(data, 1);
 
       if ((sz >= 0) && (single_use || (sz <= (info->inline_fuel * (argc + 2))))) {
@@ -2357,7 +2358,7 @@ Scheme_Object *optimize_for_inline(Optimize_Info *info, Scheme_Object *le, int a
       *_flags = (CLOS_PRESERVES_MARKS | CLOS_SINGLE_RESULT);
   }
 
-  if (le && SCHEME_PROCP(le)) {
+  if (le && SCHEME_PROCP(le) && (app || app2 || app3)) {
     Scheme_Object *a[1];
     a[0] = le;
     if (!scheme_check_proc_arity(NULL, argc, 0, 1, a))  {
@@ -2956,6 +2957,18 @@ int scheme_compiled_duplicate_ok(Scheme_Object *fb)
 	  || SCHEME_PRIMP(fb));
 }
 
+static int equivalent_exprs(Scheme_Object *a, Scheme_Object *b)
+{
+  if (SAME_OBJ(a, b))
+    return 1;
+  if (SAME_TYPE(SCHEME_TYPE(a), scheme_local_type)
+      && SAME_TYPE(SCHEME_TYPE(b), scheme_local_type)
+      && (SCHEME_LOCAL_POS(a) == SCHEME_LOCAL_POS(b)))
+    return 1;
+
+  return 0;
+}
+
 static Scheme_Object *optimize_branch(Scheme_Object *o, Optimize_Info *info)
 {
   Scheme_Branch_Rec *b;
@@ -3037,6 +3050,12 @@ static Scheme_Object *optimize_branch(Scheme_Object *o, Optimize_Info *info)
       && (SCHEME_LOCAL_POS(t) == SCHEME_LOCAL_POS(tb))
       && SCHEME_FALSEP(fb)) {
     return t;
+  }
+
+  /* Try optimize: (if <omitable-expr> v v) => v */
+  if (scheme_omittable_expr(t, 1, 20, 0, NULL)
+      && equivalent_exprs(tb, fb)) {
+    return tb;
   }
 
   /* Convert: (if (if M N #f) M2 K) => (if M (if N M2 K) K)

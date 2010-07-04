@@ -54,11 +54,6 @@
 #  include <be/net/socket.h>
 # endif
 #endif
-#ifdef USE_ITIMER
-# include <sys/types.h>
-# include <sys/time.h>
-# include <signal.h>
-#endif
 #ifdef USE_WINSOCK_TCP
 # ifdef USE_TCP
 #  include <winsock.h>
@@ -153,16 +148,16 @@ void scheme_set_current_thread_ran_some() { scheme_current_thread->ran_some = 1;
 
 THREAD_LOCAL Scheme_Thread_Set *scheme_thread_set_top;
 
-static int num_running_threads = 1;
+static THREAD_LOCAL int num_running_threads = 1;
 
 #ifdef LINK_EXTENSIONS_BY_TABLE
 Scheme_Thread **scheme_current_thread_ptr;
 volatile int *scheme_fuel_counter_ptr;
 #endif
-static int swap_no_setjmp = 0;
+static THREAD_LOCAL int swap_no_setjmp = 0;
 
-static int thread_swap_count;
-static int did_gc_count;
+static THREAD_LOCAL int thread_swap_count;
+static THREAD_LOCAL int did_gc_count;
 
 static int init_load_on_demand = 1;
 
@@ -192,7 +187,7 @@ extern int GC_is_marked(void *);
    to the target thread. */
 static THREAD_LOCAL Scheme_Thread *swap_target;
 
-static Scheme_Object *scheduled_kills;
+static THREAD_LOCAL Scheme_Object *scheduled_kills;
 
 Scheme_Object *scheme_parameterization_key;
 Scheme_Object *scheme_exn_handler_key;
@@ -215,16 +210,16 @@ void (*scheme_wakeup_on_input)(void *fds);
 int (*scheme_check_for_break)(void);
 void (*scheme_on_atomic_timeout)(void);
 
-static int do_atomic = 0;
-static int missed_context_switch = 0;
-static int have_activity = 0;
-int scheme_active_but_sleeping = 0;
-static int thread_ended_with_activity;
+static THREAD_LOCAL int do_atomic = 0;
+static THREAD_LOCAL int missed_context_switch = 0;
+static THREAD_LOCAL int have_activity = 0;
+THREAD_LOCAL int scheme_active_but_sleeping = 0;
+static THREAD_LOCAL int thread_ended_with_activity;
 THREAD_LOCAL int scheme_no_stack_overflow;
 
-static int needs_sleep_cancelled;
+static THREAD_LOCAL int needs_sleep_cancelled;
 
-static int tls_pos = 0;
+static THREAD_LOCAL int tls_pos = 0;
 
 #ifdef MZ_PRECISE_GC
 extern long GC_get_memory_use(void *c);
@@ -247,17 +242,17 @@ typedef struct Thread_Cell {
 static Scheme_Object *read_symbol, *write_symbol, *execute_symbol, *delete_symbol, *exists_symbol;
 static Scheme_Object *client_symbol, *server_symbol;
 
-static Scheme_Object *nested_exn_handler;
+static THREAD_LOCAL Scheme_Object *nested_exn_handler;
 
-static Scheme_Object *closers;
+static THREAD_LOCAL Scheme_Object *closers;
 
-static Scheme_Object *thread_swap_callbacks,  *thread_swap_out_callbacks;
+static THREAD_LOCAL Scheme_Object *thread_swap_callbacks,  *thread_swap_out_callbacks;
 
-static Scheme_Object *recycle_cell;
-static Scheme_Object *maybe_recycle_cell;
-static int recycle_cc_count;
+static THREAD_LOCAL Scheme_Object *recycle_cell;
+static THREAD_LOCAL Scheme_Object *maybe_recycle_cell;
+static THREAD_LOCAL int recycle_cc_count;
 	
-static mz_jmp_buf main_init_error_buf;
+static THREAD_LOCAL mz_jmp_buf main_init_error_buf;
 	
 #ifdef MZ_PRECISE_GC
 /* This is a trick to get the types right. Note that 
@@ -3531,7 +3526,7 @@ static int check_sleep(int need_activity, int sleep_now)
       scheme_notify_multithread(0);
     
 #if defined(USING_FDS)
-    INIT_DECL_FDSET(set, 3);
+    INIT_DECL_FDSET(set, set1, set2);
     set1 = (fd_set *) MZ_GET_FDSET(set, 1);
     set2 = (fd_set *) MZ_GET_FDSET(set, 2);
 
@@ -3635,28 +3630,6 @@ void scheme_out_of_fuel(void)
   scheme_thread_block((float)0);
   scheme_current_thread->ran_some = 1;
 }
-
-#ifdef USE_ITIMER
-static int itimer_handler_installed = 0;
-
-#ifdef MZ_XFORM
-START_XFORM_SKIP;
-#endif
-
-static void timer_expired(int ignored)
-{
-  scheme_fuel_counter = 0;
-  scheme_jit_stack_boundary = (unsigned long)-1;
-#  ifdef SIGSET_NEEDS_REINSTALL
-  MZ_SIGSET(SIGPROF, timer_expired);
-#  endif
-}
-
-#ifdef MZ_XFORM
-END_XFORM_SKIP;
-#endif
-
-#endif
 
 static void init_schedule_info(Scheme_Schedule_Info *sinfo, Scheme_Thread *false_pos_ok, 
 			       double sleep_end)
@@ -4251,26 +4224,7 @@ void scheme_thread_block(float sleep_time)
   scheme_fuel_counter = p->engine_weight;
   scheme_jit_stack_boundary = scheme_stack_boundary;
 
-#ifdef USE_ITIMER
-  {
-    struct itimerval t, old;
-
-    if (!itimer_handler_installed) {
-      itimer_handler_installed = 1;
-      MZ_SIGSET(SIGPROF, timer_expired);
-    }
-
-    t.it_value.tv_sec = 0;
-    t.it_value.tv_usec = MZ_THREAD_QUANTUM_USEC;
-    t.it_interval.tv_sec = 0;
-    t.it_interval.tv_usec = 0;
-
-    setitimer(ITIMER_PROF, &t, &old);
-  }
-#endif
-#if defined(USE_WIN32_THREAD_TIMER) || defined(USE_PTHREAD_THREAD_TIMER)
-  scheme_start_itimer_thread(MZ_THREAD_QUANTUM_USEC);
-#endif
+  scheme_kickoff_green_thread_time_slice_timer(MZ_THREAD_QUANTUM_USEC);
 
   /* Check scheduled_kills early and often. */
   check_scheduled_kills();
@@ -5198,8 +5152,8 @@ typedef struct Evt {
   int can_redirect;
 } Evt;
 
-static THREAD_LOCAL int evts_array_size;
-static THREAD_LOCAL Evt **evts;
+static int evts_array_size;
+static Evt **evts;
 
 void scheme_add_evt(Scheme_Type type,
 		    Scheme_Ready_Fun ready, 

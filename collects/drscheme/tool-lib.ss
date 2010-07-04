@@ -28,9 +28,7 @@ all of the names in the tools library, for use defining keybindings
 
 (require/doc (for-label errortrace/errortrace-key))
 
-(shutdown-splash)
 (define-values/invoke-unit/infer drscheme@)
-(close-splash)
 (provide-signature-elements drscheme:tool-cm^) ;; provide all of the classes & interfaces
 
 (provide drscheme:unit:program-editor-mixin)
@@ -458,6 +456,38 @@ all of the names in the tools library, for use defining keybindings
      window (when it has not been saved) or the interactions window.
      })
  
+  
+  
+;                                                              
+;                                                              
+;                                                              
+;   ;;             ;;                  ;;;               ;;    
+;   ;;             ;;                   ;;               ;;    
+;   ;;             ;;                   ;;               ;;    
+;   ;;;;;;  ;;;;   ;;  ;;;;;         ;;;;;  ;;;;    ;;;; ;;  ;;
+;   ;;  ;; ;;; ;;  ;;  ;;  ;;       ;; ;;; ;;; ;;  ;;  ; ;; ;  
+;   ;;  ;; ;;;;;;  ;;  ;;  ;;  ;;;;;;;  ;; ;;;;;;  ;;;;  ;;;;  
+;   ;;  ;; ;;      ;;  ;;  ;;  ;;;;;;;  ;; ;;      ;;;;  ;;;;; 
+;   ;;  ;; ;;;  ;  ;;  ;;  ;;       ;;  ;; ;;;  ; ;  ;;  ;; ;; 
+;   ;; ;;;  ;;;;   ;;  ;;;;;        ;;;;;;  ;;;;  ;;;;   ;; ;;;
+;                      ;;                                      
+;                      ;;                                      
+;                      ;;                                      
+
+  (proc-doc/names
+   drscheme:help-desk:help-desk
+   (->* ()
+        ((or/c #f string?)
+         (or/c #f string? (list/c string? string?)))
+       any)
+   (()
+    ((search-key #f)
+     (search-context #f)))
+   @{if @scheme[search-key] is a string, calls @scheme[perform-search] with
+        @scheme[search-key] and @scheme[search-context].
+        
+        Otherwise, calls @scheme[send-main-page] with no arguments.})
+  
   
   ;                           
   ;                           

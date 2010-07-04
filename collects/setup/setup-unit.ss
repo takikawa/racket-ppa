@@ -197,21 +197,24 @@
     v)
 
   ;; collection->cc : listof path -> cc/#f
+  (define collection->cc-table (make-hash))
   (define (collection->cc collection-p)
-    (let ([root-dir
-           (ormap (lambda (p)
-                    (parameterize ([current-library-collection-paths (list p)])
-                      (and (with-handlers ([exn:fail? (lambda (x) #f)])
-                             (apply collection-path collection-p))
-                           p)))
-                  (current-library-collection-paths))])
-      (make-cc* collection-p
-                (apply collection-path collection-p)
-                root-dir
-                (build-path root-dir "info-domain" "compiled" "cache.ss")
-                ;; by convention, all collections have "version" 1 0. This
-                ;; forces them to conflict with each other.
-                (list (cons 'lib (map path->string collection-p)) 1 0))))
+    (hash-ref! collection->cc-table collection-p
+      (lambda ()
+        (define root-dir
+          (ormap (lambda (p)
+                   (parameterize ([current-library-collection-paths (list p)])
+                     (and (with-handlers ([exn:fail? (lambda (x) #f)])
+                            (apply collection-path collection-p))
+                          p)))
+                 (current-library-collection-paths)))
+        (make-cc* collection-p
+                  (apply collection-path collection-p)
+                  root-dir
+                  (build-path root-dir "info-domain" "compiled" "cache.ss")
+                  ;; by convention, all collections have "version" 1 0. This
+                  ;; forces them to conflict with each other.
+                  (list (cons 'lib (map path->string collection-p)) 1 0)))))
 
   ;; planet-spec->planet-list : (list string string nat nat) -> (list path string string (listof string) nat nat) | #f
   ;; converts a planet package spec into the information needed to create a cc structure
@@ -305,90 +308,42 @@
             subs))))
 
   (define (check-again-all given-ccs)
-    ;; the function below has two parts: the first (doubly) commented part is
-    ;; od code that relies on having an identity for a directory, and cannot be
-    ;; used as explained there.  The solution was to put "marker" files to
-    ;; identify directories, but that doesn't work out too, since it requires
-    ;; writing into the directories which might not be possible and not needed.
-    ;; Specifically, installing planet libraries calls setup on
-    ;; scribblings/main/user -- but there's no need to write in there.  (This
-    ;; is especially bad on vista which creates a virtual user directory...)
-    ;; So the whole thing is disabled for now, and we plan to add a new new
-    ;; system level function for getting the identity of a file or a directory
-    ;; and use the original code here.
-    given-ccs)
-  #;
-  (define (check-again-all given-ccs)
-    #|
-    ;; This code is better than using marker files, but an older version of it
-    ;; relied on the obligatory existence of an "info.ss" file to implement
-    ;; `file-or-directory-identity'.  That is no longer required, so it needs
-    ;; to identify directories and that is currently not available.  So use the
-    ;; code below it instead.  Perhaps there will be some robust way to do this
-    ;; in the future, eg -- for directories, use the identity of their first
-    ;; file.
-    (define all-cc+ids
-      (map (lambda (cc)
-             (cons cc (file-or-directory-identity (cc-path cc))))
-           (plt-collection-closure all-collections)))
-    (for ([cc given-ccs])
-      (define given-id
-        (file-or-directory-identity (cc-path cc)))
-      (for ([found-cc+id all-cc+ids]
-            #:when (not (same-collection-name? cc (car found-cc+id))))
-        (when (eq? (cdr found-cc+id) given-id)
-          (error 'setup-plt
-                 "given collection path: ~e refers to the same info file as another path: ~e"
-                 (apply build-path (cc-collection cc))
-                 (apply build-path (cc-collection (car found-cc+id)))))))
-    |#
-    ;; Note: this is not a locking mechanism; specifically, if we find a marker
-    ;; file we assume that we generated it rather than another setup-plt
-    ;; process
-    (define all-ccs (plt-collection-closure all-collections))
     (define (cc->name cc)
       (string-join (map path->string (cc-collection cc)) "/"))
-    (define all-names   (map cc->name all-ccs))
-    (define given-names (map cc->name given-ccs))
-    (define (cc-mark cc) (build-path (cc-path cc) ".setup-plt-marker"))
-    (define (complain-about-mark name mark)
-      (let ([given (with-handlers ([void (lambda (_) '???)])
-                     (with-input-from-file mark read-line))])
-        (error 'setup-plt
-               "given collection path: \"~a\" refers to the same directory as another given collection path, \"~a\""
-               name given)))
-    ;; For cleanup: try to remove all files, be silent
-    (define (cleanup)
-      (for ([cc (append given-ccs all-ccs)])
-        (let ([mark (cc-mark cc)])
-          (when (file-exists? mark)
-            (with-handlers ([void void]) (delete-file mark))))))
-    ;; First remove all marker files if any, let it fail if we can't remove it
-    (define (remove-markers)
-      (for ([cc given-ccs])
-        (let ([mark (cc-mark cc)])
-          (when (file-exists? mark)
-            (setup-printf "WARNING"
-                          "found a marker file, deleting: ~a"
-                          (path->name mark))
-            (delete-file mark)))))
-    ;; Now create all marker files, signalling an error if duplicate
-    (define (put-markers)
-      (for ([cc given-ccs] [name given-names])
-        (let ([mark (cc-mark cc)])
-          (if (file-exists? mark)
-            (complain-about-mark name mark)
-            (with-output-to-file mark (lambda () (printf "~a\n" name)))))))
-    ;; Finally scan all ccs and look for duplicates
-    (define (scan-all)
-      (for ([cc all-ccs] [name all-names])
-        (when (and (not (member name given-names))
-                   (file-exists? (cc-mark cc)))
-          (complain-about-mark name (cc-mark cc)))))
-    (dynamic-wind
-      void
-      (lambda () (remove-markers) (put-markers) (scan-all) given-ccs)
-      cleanup))
+    (define (cc->cc+name+id cc)
+      (list cc (cc->name cc) (file-or-directory-identity (cc-path cc))))
+    (define all-ccs+names+ids
+      (map cc->cc+name+id (plt-collection-closure all-collections)))
+    ;; given collections
+    (define given-ccs+names+ids (map cc->cc+name+id given-ccs))
+    ;; descendants of given collections
+    (define descendants-names
+      (remove-duplicates
+       (append-map
+        (lambda (cc)
+          (map cc->name (remq cc (plt-collection-closure (list cc)))))
+        given-ccs)))
+    ;; given collections without duplicates and without ones that are already
+    ;; descendants
+    (define given*-ccs+names+ids
+      (remove-duplicates
+       (filter (lambda (cc+name+id)
+                 (not (member (cadr cc+name+id) descendants-names)))
+               given-ccs+names+ids)
+       (lambda (x y) (equal? (cadr x) (cadr y)))))
+    ;; check that there are no bad duplicates in the given list
+    (for ([given-cc+name+id (in-list given*-ccs+names+ids)])
+      (cond
+        [(ormap (lambda (cc+name+id)
+                  (and (not (equal? (cadr cc+name+id) (cadr given-cc+name+id)))
+                       (equal? (caddr cc+name+id) (caddr given-cc+name+id))
+                       (cadr cc+name+id)))
+                all-ccs+names+ids)
+         => (lambda (bad)
+              (error 'setup-plt
+                     "given collection path: \"~a\" refers to the same directory as another given collection path, \"~a\""
+                     (cadr given-cc+name+id) bad))]))
+    (map car given*-ccs+names+ids))
 
   (define (sort-collections ccs)
     (sort ccs string<? #:key cc-name))
@@ -527,7 +482,7 @@
                     [else (void)])))))))
 
   (when (clean)
-    (setup-printf #f "--- cleaning collections ---")    
+    (setup-printf #f "--- cleaning collections ---")
     (let ([dependencies (make-hash)])
       ;; Main deletion:
       (for ([cc ccs-to-compile]) (clean-collection cc dependencies))
@@ -680,25 +635,27 @@
     (setup-printf #f "--- compiling collections ---")
     (with-specified-mode
      (lambda ()
-       (make-it ".zos"
-                (lambda (dir info)
-                  ;; Clean up bad .zos:
-                  (unless (info 'assume-virtual-sources (lambda () #f))
-                    (let ([c (build-path dir "compiled")])
-                      (when (directory-exists? c)
-                        (let ([ok-zo-files (make-immutable-hash
-                                            (map (lambda (p)
-                                                   (cons (path-add-suffix p #".zo") #t))
-                                                 (append (directory-list dir)
-                                                         (info 'virtual-sources (lambda () null)))))])
-                          (for ([p (directory-list c)])
-                            (when (and (regexp-match #rx#".zo$" (path-element->bytes p))
-                                       (not (hash-ref ok-zo-files p #f)))
-                              (setup-fprintf (current-error-port) #f " deleting ~a" (build-path c p))
-                              (delete-file (build-path c p))))))))
-                  ;; Make .zos
-                  (compile-directory-zos dir info #:skip-path compile-skip-directory #:skip-doc-sources? (not (make-docs))))
-                make-base-empty-namespace))))
+       (make-it
+        ".zos"
+        (lambda (dir info)
+          ;; Clean up bad .zos:
+          (unless (info 'assume-virtual-sources (lambda () #f))
+            (let ([c (build-path dir "compiled")])
+              (when (directory-exists? c)
+                (let ([ok-zo-files
+                       (make-immutable-hash
+                        (map (lambda (p)
+                               (cons (path-add-suffix p #".zo") #t))
+                             (append (directory-list dir)
+                                     (info 'virtual-sources (lambda () null)))))])
+                  (for ([p (directory-list c)])
+                    (when (and (regexp-match #rx#".(zo|dep)$" (path-element->bytes p))
+                               (not (hash-ref ok-zo-files (path-replace-suffix p #".zo") #f)))
+                      (setup-fprintf (current-error-port) #f " deleting ~a" (build-path c p))
+                      (delete-file (build-path c p))))))))
+          ;; Make .zos
+          (compile-directory-zos dir info #:skip-path compile-skip-directory #:skip-doc-sources? (not (make-docs))))
+        make-base-empty-namespace))))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;               Info-Domain Cache               ;;

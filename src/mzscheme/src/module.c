@@ -124,6 +124,8 @@ static void eval_exptime(Scheme_Object *names, int count,
 
 static Scheme_Module_Exports *make_module_exports();
 
+static Scheme_Object *scheme_sys_wraps_phase_worker(long p);
+
 #define cons scheme_make_pair
 
 
@@ -336,6 +338,7 @@ void scheme_init_module(Scheme_Env *env)
                                                       scheme_make_pair(kernel_symbol, 
                                                                        scheme_null)),
                                      scheme_false, kernel_modname);
+  (void)scheme_hash_key(kernel_modidx);
   unsafe_modname = scheme_intern_resolved_module_path(scheme_intern_symbol("#%unsafe"));
 
   REGISTER_SO(module_symbol);
@@ -485,6 +488,12 @@ void scheme_finish_kernel(Scheme_Env *env)
   }
   scheme_seal_module_rename(rn, STX_SEAL_ALL);
 
+  REGISTER_SO(scheme_sys_wraps0);
+  REGISTER_SO(scheme_sys_wraps1);
+
+  scheme_sys_wraps0 = scheme_sys_wraps_phase_worker(0);
+  scheme_sys_wraps1 = scheme_sys_wraps_phase_worker(1);
+
   scheme_sys_wraps(NULL);
 
   REGISTER_SO(scheme_module_stx);
@@ -608,22 +617,11 @@ Scheme_Object *scheme_sys_wraps(Scheme_Comp_Env *env)
   return scheme_sys_wraps_phase(scheme_make_integer(phase));
 }
 
-Scheme_Object *scheme_sys_wraps_phase(Scheme_Object *phase)
+static Scheme_Object *scheme_sys_wraps_phase_worker(long p)
 {
   Scheme_Object *rn, *w;
-  long p;
 
-  if (SCHEME_INTP(phase))
-    p = SCHEME_INT_VAL(phase);
-  else
-    p = -1;
-
-  if ((p == 0) && scheme_sys_wraps0)
-    return scheme_sys_wraps0;
-  if ((p == 1) && scheme_sys_wraps1)
-    return scheme_sys_wraps1;
-
-  rn = scheme_make_module_rename(phase, mzMOD_RENAME_NORMAL, NULL);
+  rn = scheme_make_module_rename(scheme_make_integer(p), mzMOD_RENAME_NORMAL, NULL);
 
   /* Add a module mapping for all kernel provides: */
   scheme_extend_module_rename_with_shared(rn, kernel_modidx, 
@@ -637,16 +635,23 @@ Scheme_Object *scheme_sys_wraps_phase(Scheme_Object *phase)
 
   w = scheme_datum_to_syntax(kernel_symbol, scheme_false, scheme_false, 0, 0);
   w = scheme_add_rename(w, rn);
-  if (p == 0) {
-    REGISTER_SO(scheme_sys_wraps0);
-    scheme_sys_wraps0 = w;
-  }
-  if (p == 1) {
-    REGISTER_SO(scheme_sys_wraps1);
-    scheme_sys_wraps1 = w;
-  }
 
   return w;
+}
+
+Scheme_Object *scheme_sys_wraps_phase(Scheme_Object *phase)
+{
+  long p;
+
+  if (SCHEME_INTP(phase))
+    p = SCHEME_INT_VAL(phase);
+  else
+    p = -1;
+
+  if (p == 0) return scheme_sys_wraps0;
+  if (p == 1) return scheme_sys_wraps1;
+
+  return scheme_sys_wraps_phase_worker(p);
 }
 
 void scheme_save_initial_module_set(Scheme_Env *env)
@@ -2213,7 +2218,7 @@ static int do_add_simple_require_renames(Scheme_Object *rn,
     return 0;
 
   if (with_shared) {
-    if (!pt->src_modidx)
+    if (!pt->src_modidx && im->me->src_modidx)
       pt->src_modidx = im->me->src_modidx;
     scheme_extend_module_rename_with_shared(rn, idx, pt, 
                                             marshal_phase_index, 
@@ -3863,6 +3868,44 @@ static void chain_start_module(Scheme_Env *menv, Scheme_Env *env, int eval_exp, 
   }
 }
 
+typedef struct Start_Module_Args {
+  Scheme_Env *menv;
+  Scheme_Env *env;
+  int eval_exp;
+  int eval_run;
+  long base_phase;
+  Scheme_Object *cycle_list;
+  Scheme_Object *syntax_idx;
+} Start_Module_Args;
+
+static void chain_start_module_w_push(Scheme_Env *menv, Scheme_Env *env, int eval_exp, int eval_run, 
+                                      long base_phase, Scheme_Object *cycle_list, Scheme_Object *syntax_idx)
+{
+  Start_Module_Args a;
+  
+  a.menv = menv;
+  a.env = env;
+  a.eval_exp = eval_exp;
+  a.eval_run = eval_run;
+  a.base_phase = base_phase;
+  a.cycle_list = cycle_list;
+  a.syntax_idx = syntax_idx;
+
+#ifdef MZ_USE_JIT
+  (void)scheme_module_start_start(&a, scheme_make_pair(menv->module->modname, scheme_false));
+#else
+  (void)scheme_module_start_finish(&a);
+#endif
+}
+
+void *scheme_module_start_finish(struct Start_Module_Args *a)
+{
+  chain_start_module(a->menv, a->env,
+                     a->eval_exp, a->eval_run, a->base_phase,
+                     a->cycle_list, a->syntax_idx);
+  return NULL;
+}
+
 static Scheme_Env *instantiate_module(Scheme_Module *m, Scheme_Env *env, int restart, Scheme_Object *syntax_idx)
 {
   Scheme_Env *menv;
@@ -4074,8 +4117,8 @@ static void should_run_for_compile(Scheme_Env *menv)
 }
 
 static void start_module(Scheme_Module *m, Scheme_Env *env, int restart, 
-			 Scheme_Object *syntax_idx, int eval_exp, int eval_run, long base_phase,
-			 Scheme_Object *cycle_list)
+                         Scheme_Object *syntax_idx, int eval_exp, int eval_run, long base_phase,
+                         Scheme_Object *cycle_list)
 /* eval_exp == -1 => make it ready, eval_exp == 1 => run exp-time, eval_exp = 0 => don't even make ready */
 {
   Scheme_Env *menv;
@@ -4113,7 +4156,7 @@ static void start_module(Scheme_Module *m, Scheme_Env *env, int restart,
     menv->did_starts = v;
   }
 
-  chain_start_module(menv, env, eval_exp, eval_run, base_phase, cycle_list, syntax_idx);
+  chain_start_module_w_push(menv, env, eval_exp, eval_run, base_phase, cycle_list, syntax_idx);
 
   if (restart) {
     if (menv->rename_set_ready) {
@@ -4224,6 +4267,15 @@ static void *eval_module_body_k(void)
 
 static void eval_module_body(Scheme_Env *menv, Scheme_Env *env)
 {
+#ifdef MZ_USE_JIT
+  (void)scheme_module_run_start(menv, env, scheme_make_pair(menv->module->modname, scheme_true));
+#else
+  (void)scheme_module_run_finish(menv, env);
+#endif
+}
+
+void *scheme_module_run_finish(Scheme_Env *menv, Scheme_Env *env)
+{
   Scheme_Thread *p;
   Scheme_Module *m = menv->module;
   Scheme_Object *body, **save_runstack;
@@ -4244,7 +4296,7 @@ static void eval_module_body(Scheme_Env *menv, Scheme_Env *env)
     p->ku.k.p1 = menv;
     p->ku.k.p2 = env;
     (void)scheme_enlarge_runstack(depth, eval_module_body_k);
-    return;
+    return NULL;
   }
 
   LOG_START_RUN(menv->module);
@@ -4309,6 +4361,8 @@ static void eval_module_body(Scheme_Env *menv, Scheme_Env *env)
   }
 
   LOG_END_RUN(menv->module);
+
+  return NULL;
 }
 
 static void run_module(Scheme_Env *menv, int set_ns)
@@ -5514,6 +5568,7 @@ static Scheme_Object *do_module(Scheme_Object *form, Scheme_Comp_Env *env,
     REGISTER_SO(empty_self_modidx);
     REGISTER_SO(empty_self_modname);
     empty_self_modidx = scheme_make_modidx(scheme_false, scheme_false, scheme_false);
+    (void)scheme_hash_key(empty_self_modidx);
     empty_self_modname = scheme_make_symbol("expanded module"); /* uninterned */
     empty_self_modname = scheme_intern_resolved_module_path(empty_self_modname);
   }
@@ -8521,7 +8576,7 @@ void add_single_require(Scheme_Module_Exports *me, /* from module */
           && pt->num_provides
           && !do_copy_vars) {
         /* Simple "import everything" whose mappings can be shared via the exporting module: */
-        if (!pt->src_modidx)
+        if (!pt->src_modidx && me->src_modidx)
           pt->src_modidx = me->src_modidx;
         scheme_extend_module_rename_with_shared(rn, idx, pt, pt->phase_index, src_phase_index, context_marks, 1);
         skip_rename = 1;
@@ -8774,7 +8829,7 @@ void scheme_do_module_rename_unmarshal(Scheme_Object *rn, Scheme_Object *info,
       pt = (Scheme_Module_Phase_Exports *)scheme_hash_get(me->other_phases, pt_phase);
     
     if (pt) {
-      if (!pt->src_modidx)
+      if (!pt->src_modidx && me->src_modidx)
         pt->src_modidx = me->src_modidx;
       scheme_extend_module_rename_with_shared(rn, orig_idx, pt, pt->phase_index, src_phase_index, marks, 0);
     }

@@ -1,4 +1,5 @@
 (module run mzscheme
+  (require (only scheme/runtime-path define-runtime-path))
   (define input-map
     `(
       ("ackermann.ss" "11")
@@ -41,8 +42,11 @@
       ("wordfreq.ss")
       ))
 
+  (define-runtime-path here ".")
+
   (define (dynreq f)
-    (dynamic-require f #f))
+    (parameterize ([current-load-relative-directory here])
+      (dynamic-require f #f)))
 
   (define (mk-fasta n suffix)
     (let ([f (build-path (find-system-path 'temp-dir) (string-append "fasta-" suffix))])
@@ -85,8 +89,9 @@
   (define iters
     (let ([len (vector-length (current-command-line-arguments))])
       (unless (<= 1 len 2)
-        (error 'run "provide ~athe name of a benchmark on the command line and an optional iteration count"
-               (if (zero? len) "" "ONLY ")))
+        (printf "provide ~athe name of a benchmark on the command line and an optional iteration count\n"
+                (if (zero? len) "" "ONLY "))
+        (exit))
       (if (= len 2)
           (string->number (vector-ref (current-command-line-arguments) 1))
           1)))

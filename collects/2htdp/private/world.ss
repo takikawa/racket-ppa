@@ -53,7 +53,7 @@
       (init-field
        world0            ;; World
        (name #f)         ;; (U #f String)
-       (state #f)         ;; Boolean 
+       (state #f)        ;; Boolean 
        (register #f)     ;; (U #f IP)
        (check-with True) ;; Any -> Boolean 
        (tick K))         ;; (U (World -> World) (list (World -> World) Nat))
@@ -213,7 +213,7 @@
         (define/public (name arg ...) 
           (queue-callback 
            (lambda ()
-             (with-handlers ([exn:break? (handler #f)][exn? (handler #t)])
+             (with-handlers ([exn? (handler #t)])
                (define tag (format "~a callback" 'transform))
                (define nw (transform (send world get) arg ...))
                (when (package? nw)
@@ -266,12 +266,15 @@
       
       (define (handler re-raise)
         (lambda (e)
+          (printf "breaking ..\n")
           (disable-images-button)
           (stop! (if re-raise e (send world get)))))
       
       (define/public (start!)
-        (when draw (show-canvas))
-        (when register (register-with-host)))
+        (queue-callback
+         (lambda ()
+           (when draw (show-canvas))
+           (when register (register-with-host)))))
       
       (define/public (stop! w)
         (set! live #f)

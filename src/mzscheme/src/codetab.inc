@@ -20,10 +20,10 @@ extern MZ_DLLIMPORT int GC_is_marked(void *);
 #define NODE_STARTS_OFFSET 1
 #define NODE_GCABLE_OFFSET 2
 
-static void **tree;
+static THREAD_LOCAL void **tree;
+static THREAD_LOCAL int during_set;
 
 static int do_clear_symbols(void **t, unsigned long start, int offset, unsigned long addr, int clearing);
-static int during_set;
 
 static void *find_symbol(unsigned long v)
 {
@@ -197,7 +197,7 @@ static int do_clear_symbols(void **t, unsigned long start, int offset, unsigned 
 	/* GCable pointer starts here */
 #ifndef MZ_PRECISE_GC
 	/* Conservative GC: GCable flag means use GC_is_marked */
-	p = (void *)(addr + (i << offset));
+	p = (void *)(addr + ((unsigned long)i << offset));
 	if (!GC_is_marked(p))
 	  clearing = 1;
 #else
@@ -228,7 +228,7 @@ static int do_clear_symbols(void **t, unsigned long start, int offset, unsigned 
 	subt = (void **)val;
 	clearing = do_clear_symbols(subt, start,
 				    offset - LOG_KEY_SIZE,
-				    (addr + (i << offset)),
+				    (addr + ((unsigned long)i << offset)),
 				    clearing);
 	if (!during_set) {
 	  /* If the branch is empty, then drop it. */

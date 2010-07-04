@@ -119,6 +119,35 @@
   (test-bin 8 'unsafe-fxrshift 32 2)
   (test-bin 8 'unsafe-fxrshift 8 0)
 
+  (test-un 5 unsafe-fxabs 5)
+  (test-un 5 unsafe-fxabs -5)
+  (test-un 5.0 unsafe-flabs 5.0)
+  (test-un 5.0 unsafe-flabs -5.0)
+  (test-un 0.0 unsafe-flabs -0.0)
+  (test-un +inf.0 unsafe-flabs -inf.0)
+
+  (test-un 8.0 'unsafe-fx->fl 8)
+  (test-un -8.0 'unsafe-fx->fl -8)
+
+  ;; test unboxing:
+  (test-tri 9.0 '(lambda (x y z) (unsafe-fl+ (unsafe-fl- x z) y)) 4.5 7.0 2.5)
+  (test-tri 9.0 '(lambda (x y z) (unsafe-fl+ y (unsafe-fl- x z))) 4.5 7.0 2.5)
+  (test-bin 10.0 '(lambda (x y) (unsafe-fl+ (unsafe-fx->fl x) y)) 2 8.0)
+  (test-bin 10.0 '(lambda (x y) (unsafe-fl+ (unsafe-fx->fl x) y)) 2 8.0)
+  (test-bin 9.5 '(lambda (x y) (unsafe-fl+ (unsafe-flabs x) y)) -2.0 7.5)
+  (test-tri (/ 20.0 0.8) '(lambda (x y z) (unsafe-fl/ (unsafe-fl* x z) y)) 4.0 0.8 5.0)
+  (test-tri (/ 0.8 20.0) '(lambda (x y z) (unsafe-fl/ y (unsafe-fl* x z))) 4.0 0.8 5.0)
+  (test-tri #t '(lambda (x y z) (unsafe-fl< (unsafe-fl+ x y) z)) 1.2 3.4 5.0)
+  (test-tri 'yes '(lambda (x y z) (if (unsafe-fl< (unsafe-fl+ x y) z) 'yes 'no)) 1.2 3.4 5.0)
+  (test-tri #f '(lambda (x y z) (unsafe-fl> (unsafe-fl+ x y) z)) 1.2 3.4 5.0)
+  (test-tri 'no '(lambda (x y z) (if (unsafe-fl> (unsafe-fl+ x y) z) 'yes 'no)) 1.2 3.4 5.0)
+  
+  ;; test unboxing interaction with free variables:
+  (test-tri 4.4 '(lambda (x y z) (with-handlers ([exn:fail:contract:variable? 
+                                                  (lambda (exn) (unsafe-fl+ x y))])
+                                   (unsafe-fl- (unsafe-fl+ x y) NO-SUCH-VARIABLE)))
+            1.1 3.3 5.2)
+
   (test-un 5 'unsafe-car (cons 5 9))
   (test-un 9 'unsafe-cdr (cons 5 9))
   (test-un 15 'unsafe-mcar (mcons 15 19))
@@ -136,9 +165,25 @@
   (test-bin 5 'unsafe-vector-ref #(1 5 7) 1)
   (test-un 3 'unsafe-vector-length #(1 5 7))
   (let ([v (vector 0 3 7)])
-    (test-tri 5 'unsafe-vector-set! v 2 5 
+    (test-tri (list (void) 5) 'unsafe-vector-set! v 2 5 
               #:pre (lambda () (vector-set! v 2 0)) 
-              #:post (lambda (x) (vector-ref v 2))
+              #:post (lambda (x) (list x (vector-ref v 2)))
+              #:literal-ok? #f))
+
+  (test-bin 53 'unsafe-bytes-ref #"157" 1)
+  (test-un 3 'unsafe-bytes-length #"157")
+  (let ([v (bytes 0 3 7)])
+    (test-tri (list (void) 135) 'unsafe-bytes-set! v 2 135
+              #:pre (lambda () (bytes-set! v 2 0)) 
+              #:post (lambda (x) (list x (bytes-ref v 2)))
+              #:literal-ok? #f))
+
+  (test-bin #\5 'unsafe-string-ref "157" 1)
+  (test-un 3 'unsafe-string-length "157")
+  (let ([v (string #\0 #\3 #\7)])
+    (test-tri (list (void) #\5) 'unsafe-string-set! v 2 #\5 
+              #:pre (lambda () (string-set! v 2 #\0)) 
+              #:post (lambda (x) (list x (string-ref v 2)))
               #:literal-ok? #f))
 
   (let ()

@@ -151,6 +151,7 @@
   ;; menu items connected to the logger -- also in a button in the planet status line in the drs frame
   (show-log "&Log anzeigen")
   (hide-log "&Log ausblenden")
+  (logging-all "Alle") ;; in the logging window in drscheme, shows all logs simultaneously
 
  ;; modes
  (mode-submenu-label "Modi")
@@ -410,7 +411,7 @@
  
   ;;; find/replace
  (search-next "Weiter")
- (search-next "Zurück")
+ (search-previous "Zurück")
  (search-match "Fundort")  ;;; this one and the next one are singular/plural variants of each other
  (search-matches "Fundorte") 
  (search-replace "Ersetzen")
@@ -602,6 +603,7 @@
 
  (user-defined-keybinding-error "Fehler beim Ausführen der Tastenbelegung ~a\n\n~a")
  (user-defined-keybinding-malformed-file "Die Datei ~a enthält kein Modul, das in der Sprache framework/keybinding-lang geschrieben ist.")  
+ (user-defined-keybinding-malformed-file/found-lang "Die Datei ~a enthält kein Modul, das in der Sprache framework/keybinding-lang geschrieben ist.  Stattdessen wurde Sprache ~s vorgefunden.")  
  (keybindings-planet-malformed-spec "Die PLaneT-Spezifikation ist fehlerhaft: ~a") ; the string will be what the user typed in
  (keybindings-type-planet-spec "Bitte PLaneT-require-Spezifikation eingeben (ohne das `require')")
   
@@ -765,10 +767,6 @@
  (execute-menu-item-label "Start")
  (execute-menu-item-help-string "Das Programm im Definitionsfenster neu starten")
 
- (break-menu-item-label "Stop")
- (break-menu-item-help-string "Momentane Auswertung unterbrechen")
- (kill-menu-item-label "Abbrechen")
- (kill-menu-item-help-string "Momentante Auswertung abbrechen")
  (ask-quit-menu-item-label "Programm bitten aufzuhören")
  (ask-quit-menu-item-help-string "Benutzt break-thread, um den primären Thread der Auswertung zu stoppen")
  (force-quit-menu-item-label "Programm zwingen aufzuhören")
@@ -1304,8 +1302,6 @@
   (test-engine-must-be-tested "Dieses Programm muss noch getestet werden!")
   (test-engine-is-unchecked "Dieses Programm hat keine Checks!")
   (test-engine-tests-disabled "Tests deaktiviert.")
-  (test-engine-zero-tests-passed "Keine Tests waren erfolgreich!")
-  (test-engine-the-only-test-passed "Der einzige Test war erfolgreich.")
   (test-engine-both-tests-passed "Beide Tests waren erfolgreich.")
   ; ~a is replaced by count
   (test-engine-all-tests-passed "Alle ~a Tests waren erfolgreich!")

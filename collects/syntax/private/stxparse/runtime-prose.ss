@@ -1,33 +1,37 @@
 #lang scheme/base
-(require scheme/contract
+(require scheme/contract/base
          scheme/list
-         scheme/match
+         "minimatch.ss"
          scheme/stxparam
          syntax/stx
          (for-syntax scheme/base)
          (for-syntax syntax/stx)
          (for-syntax scheme/private/sc)
          (for-syntax "rep-data.ss")
-         (for-syntax "../util/error.ss")
+         (for-syntax "../util.ss")
          "runtime.ss")
 (provide syntax-patterns-fail
-         current-failure-handler)
+         current-failure-handler
+         simplify-failure)
 
 ;; Failure reporting parameter & default
 
 (define (default-failure-handler stx0 f)
   (match (simplify-failure f)
-    [(struct failure (x frontier frontier-stx expected))
-     (report-failure stx0 x (last frontier) frontier-stx expected)]))
+    [#s(failure x frontier expectation)
+     (report-failure stx0 x (dfc->index frontier) (dfc->stx frontier) expectation)]))
 
 (define current-failure-handler
   (make-parameter default-failure-handler))
 
 (define ((syntax-patterns-fail stx0) f)
-  (let ([value ((current-failure-handler) stx0 f)])
-    (error 'current-failure-handler
-           "current-failure-handler: did not escape, produced ~e" value)))
-
+  (call-with-values (lambda () ((current-failure-handler) stx0 f))
+    (lambda vals
+      (error 'current-failure-handler
+             "current-failure-handler: did not escape, produced ~e"
+             (case (length vals)
+               ((1) (car vals))
+               (else (cons 'values vals)))))))
 
 ;; report-failure : stx stx number stx Expectation -> (escapes)
 (define (report-failure stx0 x index frontier-stx expected)
@@ -39,6 +43,7 @@
            [(one)
             (err "unexpected term" stx0 #'one)]
            [(first . more)
+            ;; TODO: report error with all elements (use improper-stx->list)
             (err "unexpected terms starting here" stx0 #'first)]
            [_
             (err "unexpected term" stx0 x)])]
@@ -48,7 +53,6 @@
            (err (format "~a~a"
                         msg
                         (cond [(zero? index) ""]
-                              [(= index +inf.0) " after matching main pattern"]
                               [else (format " after ~s ~a"
                                             index
                                             (if (= 1 index) "term" "terms"))]))
@@ -57,47 +61,66 @@
         [else
          (err "bad syntax" stx0 stx0)]))
 
-;; FIXME: try different selection/simplification algorithms/heuristics
+;; simplify-failure : Failure -> SimpleFailure
 (define (simplify-failure f)
+  (simplify* f))
+
+;; simplify* : Failure -> SimpleFailure
+(define (simplify* f)
   (match f
-    [(struct join-failures (f1 f2))
-     (choose-error (simplify-failure f1) (simplify-failure f2))]
-    [(struct failure (x frontier frontier-stx expectation))
+    [#s(join-failures f1 f2)
+     (choose-error (simplify* f1) (simplify* f2))]
+    [#s(failure x frontier expectation)
      (match expectation
-       [(struct expect:thing (description (and transparent? #t) chained))
-        (match (simplify-failure (adjust-failure chained frontier frontier-stx))
-          [(struct failure (_ _ _ (? ineffable?)))
-           ;; If unfolded failure is ineffable, fall back to the one with description
-           f]
-          [new-f new-f])]
+       [#s(expect:thing description '#t chained)
+        (let ([chained* (simplify* chained)])
+          (match chained*
+            [#s(failure _ chained*-frontier chained*-expectation)
+             (cond [(ineffable? chained*-expectation)
+                    ;; If simplified chained failure is ineffable,
+                    ;; keep (& adjust) its frontier
+                    ;; and attach enclosing description
+                    (adjust-failure
+                     (make-failure x chained*-frontier
+                                   (make-expect:thing description #f #f))
+                     frontier)]
+                   [else
+                    ;; Otherwise, "expose" the chained failure and
+                    ;; adjust its frontier
+                    (adjust-failure chained* frontier)])]))]
        [_ f])]))
 
-(define (adjust-failure f base-frontier base-frontier-stx)
+;; FIXME: try different selection/simplification algorithms/heuristics
+(define (simplify-failure0 f)
   (match f
-    [(struct join-failures (f1 f2))
-     (make-join-failures
-      (adjust-failure f1 base-frontier base-frontier-stx)
-      (adjust-failure f2 base-frontier base-frontier-stx))]
-    [(struct failure (x frontier frontier-stx expectation))
-     (let-values ([(frontier frontier-stx)
-                   (combine-frontiers base-frontier base-frontier-stx
-                                      frontier frontier-stx)])
-       (make-failure x frontier frontier-stx expectation))]))
+    [#s(join-failures f1 f2)
+     (choose-error (simplify-failure0 f1) (simplify-failure0 f2))]
+    [#s(failure x frontier expectation)
+     (match expectation
+       [#s(expect:thing description '#t chained)
+        (let ([chained* (simplify-failure0 chained)])
+          (match chained*
+            [#s(failure _ _ chained*-expectation)
+             (cond [(ineffable? chained*-expectation)
+                    ;; If simplified chained failure is ineffable, ignore it
+                    ;; and stick to the one with the description
+                    f]
+                   [else
+                    ;; Otherwise, "expose" the chained failure
+                    ;; and adjust its frontier
+                    (adjust-failure chained* frontier)])]))]
+       [_ f])]))
 
-(define (combine-frontiers dfc0 stx0 dfc stx)
-  (cond [(null? (cdr dfc0))
-         (values (cons (+ (car dfc0) (car dfc))
-                       (cdr dfc))
-                 (if (null? (cdr dfc))
-                     stx0
-                     stx))]
-        [else
-         (let-values ([(f s) (combine-frontiers (cdr dfc0) stx0 dfc stx)])
-           (values (cons (car dfc0) f) s))]))
+(define (adjust-failure f base-frontier)
+  (match f
+    [#s(failure x frontier expectation)
+     (let ([frontier (dfc-append base-frontier frontier)])
+       (make-failure x frontier expectation))]))
 
-;; choose-error : Failure Failure -> Result
+;; choose-error : Failure Failure -> Failure
 (define (choose-error f1 f2)
-  (case (compare-dfcs (failure-frontier f1) (failure-frontier f2))
+  (case (compare-idfcs (invert-dfc (failure-frontier f1))
+                       (invert-dfc (failure-frontier f2)))
     [(>) f1]
     [(<) f2]
     [(=) (merge-failures f1 f2)]))
@@ -106,7 +129,6 @@
 (define (merge-failures f1 f2)
   (make-failure (failure-stx f1)
                 (failure-frontier f1)
-                (failure-frontier-stx f1)
                 (merge-expectations (failure-expectation f1)
                                     (failure-expectation f2))))
 
@@ -125,15 +147,15 @@
 
 (define (for-alternative e index stx)
   (match e
-    [(struct expect:thing (description transparent? chained))
+    [#s(expect:thing description transparent? chained)
      (format "expected ~a" description)]
-    [(struct expect:atom (atom))
+    [#s(expect:atom atom)
      (format "expected the literal ~s" atom)]
-    [(struct expect:literal (literal))
+    [#s(expect:literal literal)
      (format "expected the literal identifier ~s" (syntax-e literal))]
-    [(struct expect:message (message))
+    [#s(expect:message message)
      (format "~a" message)]
-    [(struct expect:pair ())
+    [#s(expect:pair)
      (cond [(= index 0)
             "expected sequence of terms"]
            [else
@@ -160,3 +182,9 @@
     [(2) (format "~a~a ~a~a" prefix (car items) ult (cadr items))]
     [else (let ([strings (list* (car items) (loop (cdr items)))])
             (apply string-append prefix strings))]))
+
+(define (improper-stx->list stx)
+  (syntax-case stx ()
+    [(a . b) (cons #'a (improper-stx->list #'b))]
+    [() null]
+    [rest (list #'rest)]))

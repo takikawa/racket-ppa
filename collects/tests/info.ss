@@ -5,7 +5,8 @@
 (define tool-names '("DrScheme Test Suites" "Time Keystrokes"))
 
 (define compile-omit-paths
-  '("aligned-pasteboard"
+  '("2htdp"
+    "aligned-pasteboard"
     "deinprogramm"
     "honu"
     "match"
@@ -22,10 +23,11 @@
     "srfi"
     "srpersist"
     "stepper"
-    "stxclass"
+    "stxparse"
     "syntax-color"
     "typed-scheme"
     "units"
+    "unstable"
     "xml"
     "html"
     "web-server"))
