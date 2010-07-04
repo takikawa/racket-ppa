@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2007 PLT Scheme Inc.
+  Copyright (c) 2004-2008 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -61,6 +61,11 @@ static Scheme_Object *complex_p (int argc, Scheme_Object *argv[]);
 static Scheme_Object *real_p (int argc, Scheme_Object *argv[]);
 static Scheme_Object *rational_p (int argc, Scheme_Object *argv[]);
 static Scheme_Object *integer_p (int argc, Scheme_Object *argv[]);
+static Scheme_Object *exact_integer_p (int argc, Scheme_Object *argv[]);
+static Scheme_Object *exact_nonnegative_integer_p (int argc, Scheme_Object *argv[]);
+static Scheme_Object *exact_positive_integer_p (int argc, Scheme_Object *argv[]);
+static Scheme_Object *fixnum_p (int argc, Scheme_Object *argv[]);
+static Scheme_Object *inexact_real_p (int argc, Scheme_Object *argv[]);
 static Scheme_Object *exact_p (int argc, Scheme_Object *argv[]);
 static Scheme_Object *even_p (int argc, Scheme_Object *argv[]);
 static Scheme_Object *bitwise_or (int argc, Scheme_Object *argv[]);
@@ -245,6 +250,27 @@ scheme_init_number (Scheme_Env *env)
 						      "integer?",
 						      1, 1, 1),
 			     env);
+
+  p = scheme_make_folding_prim(exact_integer_p, "exact-integer?", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant("exact-integer?", p, env);
+
+  p = scheme_make_folding_prim(exact_nonnegative_integer_p, "exact-nonnegative-integer?", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant("exact-nonnegative-integer?", p, env);
+
+  p = scheme_make_folding_prim(exact_positive_integer_p, "exact-positive-integer?", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant("exact-positive-integer?", p, env);
+
+  p = scheme_make_noncm_prim(fixnum_p, "fixnum?", 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant("fixnum?", p, env);
+
+  p = scheme_make_folding_prim(inexact_real_p, "inexact-real?", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant("inexact-real?", p, env);
+
   scheme_add_global_constant("exact?", 
 			     scheme_make_folding_prim(exact_p,
 						      "exact?",
@@ -614,8 +640,6 @@ double scheme_real_to_double(Scheme_Object *r)
     return scheme_bignum_to_double(r);
   else if (SCHEME_RATIONALP(r))
     return scheme_rational_to_double(r);
-  else if (SCHEME_COMPLEX_IZIP(r))
-    return scheme_real_to_double(IZI_REAL_PART(r));
   else
     return 0.0;
 }
@@ -628,6 +652,18 @@ XFORM_NONGCING static MZ_INLINE int minus_zero_p(double d)
 int scheme_minus_zero_p(double d)
 {
   return minus_zero_p(d);
+}
+
+#ifdef MZ_USE_SINGLE_FLOATS
+static int rational_flt_p(float f) {
+  return !(MZ_IS_NAN(f)
+           || MZ_IS_INFINITY(f));
+}
+#endif
+
+static int rational_dbl_p(double f) {
+  return !(MZ_IS_NAN(f)
+           || MZ_IS_INFINITY(f));
 }
 
 #ifdef DEFEAT_FP_COMP_OPTIMIZATION
@@ -720,7 +756,11 @@ static Scheme_Object *
 rational_p(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *o = argv[0];
-  return (SCHEME_REALP(o) ? scheme_true : scheme_false);
+
+  if (SCHEME_FLOATP(o))
+    return (rational_dbl_p(SCHEME_FLOAT_VAL(o)) ? scheme_true : scheme_false);
+  else
+    return (SCHEME_REALP(o) ? scheme_true : scheme_false);
 }
 
 int scheme_is_integer(const Scheme_Object *o)
@@ -735,12 +775,11 @@ int scheme_is_integer(const Scheme_Object *o)
     if (MZ_IS_NAN(d))
       return 0;
 # endif
+    if (MZ_IS_INFINITY(d))
+      return 0;
     if (floor(d) == d)
       return 1;
   }
-
-  if (SCHEME_COMPLEX_IZIP(o))
-    return scheme_is_integer(IZI_REAL_PART(o));
 
   return 0;
 }
@@ -750,6 +789,62 @@ static Scheme_Object *
 integer_p (int argc, Scheme_Object *argv[])
 {
   return scheme_is_integer(argv[0]) ? scheme_true : scheme_false;
+}
+
+static Scheme_Object *
+exact_integer_p (int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *n = argv[0];
+  if (SCHEME_INTP(n))
+    return scheme_true;
+  else if (SCHEME_BIGNUMP(n))
+    return scheme_true;
+  else
+    return scheme_false;
+}
+
+static Scheme_Object *
+exact_nonnegative_integer_p (int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *n = argv[0];
+  if (SCHEME_INTP(n))
+    return ((SCHEME_INT_VAL(n) >= 0) ? scheme_true : scheme_false);
+  else if (SCHEME_BIGNUMP(n))
+    return (SCHEME_BIGPOS(n) ? scheme_true : scheme_false);
+  else
+    return scheme_false;
+}
+
+static Scheme_Object *
+exact_positive_integer_p (int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *n = argv[0];
+  if (SCHEME_INTP(n))
+    return ((SCHEME_INT_VAL(n) > 0) ? scheme_true : scheme_false);
+  else if (SCHEME_BIGNUMP(n))
+    return (SCHEME_BIGPOS(n) ? scheme_true : scheme_false);
+  else
+    return scheme_false;
+}
+
+static Scheme_Object *
+fixnum_p (int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *n = argv[0];
+  if (SCHEME_INTP(n))
+    return scheme_true;
+  else
+    return scheme_false;
+}
+
+static Scheme_Object *
+inexact_real_p (int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *n = argv[0];
+  if (SCHEME_FLOATP(n))
+    return scheme_true;
+  else
+    return scheme_false;
 }
 
 int scheme_is_exact(const Scheme_Object *n)
@@ -769,8 +864,6 @@ int scheme_is_exact(const Scheme_Object *n)
     else if (type == scheme_float_type)
       return 0;
 #endif
-    else if (type == scheme_complex_izi_type)
-      return 0;
     else {
       return -1;
     }
@@ -806,8 +899,6 @@ int scheme_is_inexact(const Scheme_Object *n)
     else if (type == scheme_float_type)
       return 1;
 #endif
-    else if (type == scheme_complex_izi_type)
-      return 1;
     else {
       return -1;
     }
@@ -836,14 +927,10 @@ scheme_odd_p (int argc, Scheme_Object *argv[])
     return (SCHEME_INT_VAL(v) & 0x1) ? scheme_true : scheme_false;
   if (SCHEME_BIGNUMP(v))
     return (SCHEME_BIGDIG(v)[0] & 0x1) ? scheme_true : scheme_false;
-  if (SCHEME_COMPLEX_IZIP(v)) {
-    Scheme_Object *r = IZI_REAL_PART(v);
-    return scheme_odd_p(1, &r);
-  }
   
   if (scheme_is_integer(v)) {
     double d = SCHEME_FLOAT_VAL(v);
-    if (MZ_IS_POS_INFINITY(d) || MZ_IS_NEG_INFINITY(d))
+    if (MZ_IS_INFINITY(d))
       return scheme_true;
     return (fmod(d, 2.0) == 0.0) ? scheme_false : scheme_true;
   }
@@ -862,14 +949,10 @@ even_p (int argc, Scheme_Object *argv[])
     return (SCHEME_INT_VAL(v) & 0x1) ? scheme_false : scheme_true;
   if (SCHEME_BIGNUMP(v))
     return (SCHEME_BIGDIG(v)[0] & 0x1) ? scheme_false : scheme_true;
-  if (SCHEME_COMPLEX_IZIP(v)) {
-    Scheme_Object *r = IZI_REAL_PART(v);
-    return even_p(1, &r);
-  }
 
   if (scheme_is_integer(v)) {
     double d = SCHEME_FLOAT_VAL(v);
-    if (MZ_IS_POS_INFINITY(d) || MZ_IS_NEG_INFINITY(d))
+    if (MZ_IS_INFINITY(d))
       return scheme_true;
     return (fmod(d, 2.0) == 0.0) ? scheme_true : scheme_false;
   }
@@ -881,15 +964,20 @@ even_p (int argc, Scheme_Object *argv[])
 
 static Scheme_Object *bin_lcm (Scheme_Object *n1, Scheme_Object *n2);
 
-GEN_NARY_OP(static, gcd, "gcd", scheme_bin_gcd, 0, scheme_is_integer, "integer")
-GEN_NARY_OP(static, lcm, "lcm", bin_lcm, 1, scheme_is_integer, "integer")
+static Scheme_Object *int_abs(Scheme_Object *v)
+{
+  if (scheme_is_negative(v))
+    return scheme_bin_minus(scheme_make_integer(0), v);
+  else
+    return v;
+}
+
+GEN_NARY_OP(static, gcd, "gcd", scheme_bin_gcd, 0, scheme_is_integer, "integer", int_abs)
+GEN_NARY_OP(static, lcm, "lcm", bin_lcm, 1, scheme_is_integer, "integer", int_abs)
 
 Scheme_Object *
 scheme_bin_gcd (const Scheme_Object *n1, const Scheme_Object *n2)
 {
-  if (SCHEME_COMPLEX_IZIP(n1)) n1 = IZI_REAL_PART(n1);
-  if (SCHEME_COMPLEX_IZIP(n2)) n2 = IZI_REAL_PART(n2);
-
   if (SCHEME_INTP(n1) && SCHEME_INTP(n2)) {
     long i1, i2, a, b, r;
 
@@ -1009,19 +1097,19 @@ floor_prim (int argc, Scheme_Object *argv[])
     return o;
   t = _SCHEME_TYPE(o);
 #ifdef MZ_USE_SINGLE_FLOATS
-  if (t == scheme_float_type)
-    return scheme_make_float(floor(SCHEME_FLT_VAL(o)));
+  if (t == scheme_float_type) {
+    float d = SCHEME_FLT_VAL(o);
+    return scheme_make_float(floor(d));
+  }
 #endif
-  if (t == scheme_double_type)
-    return scheme_make_double(floor(SCHEME_DBL_VAL(o)));
+  if (t == scheme_double_type) {
+    double d = SCHEME_DBL_VAL(o);
+    return scheme_make_double(floor(d));
+  }
   if (t == scheme_bignum_type)
     return o;
   if (t == scheme_rational_type)
     return scheme_rational_floor(o);
-  if (t == scheme_complex_izi_type) {
-    Scheme_Object *r = IZI_REAL_PART(o);
-    return floor_prim(1, &r);
-  }
 
   NEED_REAL(floor);
 
@@ -1038,19 +1126,19 @@ ceiling (int argc, Scheme_Object *argv[])
     return o;
   t = _SCHEME_TYPE(o);
 #ifdef MZ_USE_SINGLE_FLOATS
-  if (t == scheme_float_type)
-    return scheme_make_float(ceil(SCHEME_FLT_VAL(o)));
+  if (t == scheme_float_type) {
+    float d = SCHEME_FLT_VAL(o);
+    return scheme_make_float(ceil(d));
+  }
 #endif
-  if (t == scheme_double_type)
-    return scheme_make_double(ceil(SCHEME_DBL_VAL(o)));
+  if (t == scheme_double_type) {
+    double d = SCHEME_DBL_VAL(o);
+    return scheme_make_double(ceil(d));
+  }
   if (t == scheme_bignum_type)
     return o;
   if (t == scheme_rational_type)
     return scheme_rational_ceiling(o);
-  if (t == scheme_complex_izi_type) {
-    Scheme_Object *r = IZI_REAL_PART(o);
-    return ceiling(1, &r);
-  }
 
   NEED_REAL(ceiling);
 
@@ -1088,10 +1176,6 @@ sch_truncate (int argc, Scheme_Object *argv[])
     return o;
   if (t == scheme_rational_type)
     return scheme_rational_truncate(o);
-  if (t == scheme_complex_izi_type) {
-    Scheme_Object *r = IZI_REAL_PART(o);
-    return sch_truncate(1, &r);
-  }
 
   NEED_REAL(truncate);
 
@@ -1125,7 +1209,7 @@ sch_round (int argc, Scheme_Object *argv[])
     else if (frac > 0.5)
       d = i + 1;
     else if (fmod(i, 2.0) != 0.0)
-	d = i + 1;
+      d = i + 1;
     else
       d = i;
 
@@ -1140,6 +1224,11 @@ sch_round (int argc, Scheme_Object *argv[])
     double i, frac;
     int invert;
 
+#ifdef FMOD_CAN_RETURN_POS_ZERO
+    if ((d == 0.0) && minus_zero_p(d))
+      return o;
+#endif
+
     if (d < 0) {
       d = -d;
       invert = 1;
@@ -1152,7 +1241,7 @@ sch_round (int argc, Scheme_Object *argv[])
     else if (frac > 0.5)
       d = i + 1;
     else if (fmod(i, 2.0) != 0.0)
-	d = i + 1;
+      d = i + 1;
     else
       d = i;
 
@@ -1165,10 +1254,6 @@ sch_round (int argc, Scheme_Object *argv[])
     return o;
   if (t == scheme_rational_type)
     return scheme_rational_round(o);
-  if (t == scheme_complex_izi_type) {
-    Scheme_Object *r = IZI_REAL_PART(o);
-    return sch_round(1, &r);
-  }
 
   NEED_REAL(round);
 
@@ -1194,8 +1279,6 @@ float TO_FLOAT_VAL(const Scheme_Object *n)
     return scheme_bignum_to_float(n);
   if (t == scheme_rational_type)
     return scheme_rational_to_float(n);
-  if (t == scheme_complex_izi_type)
-    return TO_FLOAT_VAL(IZI_REAL_PART(n));
   return 0.0f;
 }
 
@@ -1227,8 +1310,6 @@ double TO_DOUBLE_VAL(const Scheme_Object *n)
     return scheme_bignum_to_double(n);
   if (t == scheme_rational_type)
     return scheme_rational_to_double(n);
-  if (t == scheme_complex_izi_type)
-    return TO_DOUBLE_VAL(IZI_REAL_PART(n));
   return 0.0;
 }
 
@@ -1244,9 +1325,6 @@ Scheme_Object *scheme_TO_DOUBLE(const Scheme_Object *n)
 
 Scheme_Object *scheme_TO_DOUBLE(const Scheme_Object *n)
 {
-  if (SCHEME_COMPLEX_IZIP(n))
-    n = IZI_REAL_PART(n);
-
   return scheme_exact_to_inexact(1, (Scheme_Object **)&n);
 }
 
@@ -1268,34 +1346,21 @@ Scheme_Object *scheme_to_bignum(const Scheme_Object *o)
 }
 
 static Scheme_Object *get_frac(char *name, int low_p, 
-			       int argc, Scheme_Object *argv[]);
-
-static Scheme_Object *get_frac(char *name, int low_p, 
 			       int argc, Scheme_Object *argv[])
 {
   Scheme_Object *n = argv[0], *orig;
-
-  if (SCHEME_COMPLEX_IZIP(n)) n = IZI_REAL_PART(n);
 
   orig = n;
 
   if (SCHEME_FLOATP(n)) {
     double d = SCHEME_FLOAT_VAL(n);
     
-    if (MZ_IS_NAN(d))
-      return n;
-    else if (MZ_IS_POS_INFINITY(d)
-	     || MZ_IS_NEG_INFINITY(d)) {
-      if (low_p) {
-#ifdef MZ_USE_SINGLE_FLOATS
-	if (SCHEME_FLTP(n))
-	  return scheme_make_float(1.0);
-#endif
-	return scheme_make_double(1.0);
-      } else
-	return n;
+    if (MZ_IS_NAN(d)
+        || MZ_IS_INFINITY(d)) {
+      scheme_wrong_type(name, "rational number", 0, argc, argv);
+      ESCAPED_BEFORE_HERE;
     }
-
+    
 #ifdef MZ_USE_SINGLE_FLOATS
     if (SCHEME_FLTP(n))
       n = scheme_rational_from_float((float)d);
@@ -1312,7 +1377,7 @@ static Scheme_Object *get_frac(char *name, int low_p,
     else
       n = scheme_rational_numerator(n);
   } else {
-    scheme_wrong_type(name, REAL_NUMBER_STR, 0, argc, argv);
+    scheme_wrong_type(name, "rational number", 0, argc, argv);
     ESCAPED_BEFORE_HERE;   
   }
   
@@ -1527,8 +1592,20 @@ double SCH_LOG(double d) { if (d == 0.0) return scheme_minus_infinity_val; else 
 #endif
 #define BIGNUM_LOG(o) return bignum_log(o);
 
+static Scheme_Object *scheme_inf_plus_pi()
+{
+  return scheme_make_complex(scheme_inf_object, scheme_pi);
+}
+
+#ifdef MZ_USE_SINGLE_FLOATS
+static Scheme_Object *scheme_single_inf_plus_pi()
+{
+  return scheme_make_complex(scheme_single_inf_object, scheme_single_pi);
+}
+#endif
+
 GEN_UNARY_OP(exp_prim, exp, exp, scheme_inf_object, scheme_single_inf_object, scheme_zerod, scheme_zerof, scheme_nan_object, scheme_single_nan_object, complex_exp, GEN_ZERO_IS_ONE, NEVER_RESORT_TO_COMPLEX, BIGNUMS_AS_DOUBLES)
-GEN_UNARY_OP(log_prim, log, SCH_LOG, scheme_inf_object, scheme_single_inf_object, scheme_nan_object, scheme_single_nan_object, scheme_nan_object, scheme_single_nan_object, complex_log, GEN_ONE_IS_ZERO_AND_ZERO_IS_ERR, NEGATIVE_USES_COMPLEX, BIGNUM_LOG)
+GEN_UNARY_OP(log_prim, log, SCH_LOG, scheme_inf_object, scheme_single_inf_object, scheme_inf_plus_pi(), scheme_single_inf_plus_pi(), scheme_nan_object, scheme_single_nan_object, complex_log, GEN_ONE_IS_ZERO_AND_ZERO_IS_ERR, NEGATIVE_USES_COMPLEX, BIGNUM_LOG)
 GEN_UNARY_OP(sin_prim, sin, SCH_SIN, scheme_nan_object, scheme_single_nan_object, scheme_nan_object, scheme_single_nan_object, scheme_nan_object, scheme_single_nan_object, complex_sin, GEN_ZERO_IS_ZERO, NEVER_RESORT_TO_COMPLEX, BIGNUMS_AS_DOUBLES)
 GEN_UNARY_OP(cos_prim, cos, SCH_COS, scheme_nan_object, scheme_single_nan_object, scheme_nan_object, scheme_single_nan_object, scheme_nan_object, scheme_single_nan_object, complex_cos, GEN_ZERO_IS_ONE, NEVER_RESORT_TO_COMPLEX, BIGNUMS_AS_DOUBLES)
 GEN_UNARY_OP(tan_prim, tan, SCH_TAN, scheme_nan_object, scheme_single_nan_object, scheme_nan_object, scheme_single_nan_object, scheme_nan_object, scheme_single_nan_object, complex_tan, GEN_ZERO_IS_ZERO, NEVER_RESORT_TO_COMPLEX, BIGNUMS_AS_DOUBLES)
@@ -1551,8 +1628,6 @@ atan_prim (int argc, Scheme_Object *argv[])
 #endif
 
   n1 = argv[0];
-
-  if (SCHEME_COMPLEX_IZIP(n1)) n1 = IZI_REAL_PART(n1);
 
   if (SCHEME_INTP(n1))
     v = SCHEME_INT_VAL(n1);
@@ -1596,8 +1671,6 @@ atan_prim (int argc, Scheme_Object *argv[])
       ESCAPED_BEFORE_HERE;
     }
 
-    if (SCHEME_COMPLEX_IZIP(n2)) n2 = IZI_REAL_PART(n2);
-
     if (SCHEME_INTP(n2))
       v2 = SCHEME_INT_VAL(n2);
 #ifdef MZ_USE_SINGLE_FLOATS
@@ -1631,8 +1704,7 @@ atan_prim (int argc, Scheme_Object *argv[])
     }
 
 #ifdef ATAN2_DOESNT_WORK_WITH_INFINITIES
-    if ((MZ_IS_POS_INFINITY(v) || MZ_IS_NEG_INFINITY(v))
-	&& (MZ_IS_POS_INFINITY(v2) || MZ_IS_NEG_INFINITY(v2))) {
+    if (MZ_IS_INFINITY(v) && MZ_IS_INFINITY(v2)) {
       v = MZ_IS_POS_INFINITY(v) ? 1.0 : -1.0;
       v2 = MZ_IS_POS_INFINITY(v2) ? 1.0 : -1.0;
     }
@@ -1686,16 +1758,6 @@ Scheme_Object *scheme_sqrt (int argc, Scheme_Object *argv[])
   
   n = argv[0];
 
-  /* Special case for x+0.0i: */
-  if (SCHEME_COMPLEX_IZIP(n)) {
-    Scheme_Object *r = IZI_REAL_PART(n), *v;
-    v = scheme_sqrt(1, &r);
-    if (!SCHEME_COMPLEXP(v))
-      return scheme_make_complex(v, scheme_complex_imaginary_part(n));
-    else
-      return v;
-  }
-
   if (SCHEME_COMPLEXP(n))
     return scheme_complex_sqrt(n);
 
@@ -1738,24 +1800,9 @@ Scheme_Object *do_int_sqrt (const char *name, int argc, Scheme_Object *argv[], i
     return NULL;
   }
 
-  /* Special case for x+0.0i: */
-  if (SCHEME_COMPLEX_IZIP(v)) {
-    Scheme_Object *r = IZI_REAL_PART(v), *orig = v;
-    v = do_int_sqrt(name, 1, &r, w_rem);
-    if (w_rem) {
-      Scheme_Thread *p = scheme_current_thread;
-      v = p->ku.multiple.array[0];
-      rem = p->ku.multiple.array[1];
-    }
-    
-    if (!SCHEME_COMPLEXP(v))
-      v = scheme_make_complex(v, scheme_complex_imaginary_part(orig));
-
-    if (w_rem && !SCHEME_COMPLEXP(rem))
-      rem = scheme_make_complex(rem, scheme_complex_imaginary_part(orig));
-  } else if (SCHEME_INTP(v) || SCHEME_BIGNUMP(v)) {
+  if (SCHEME_INTP(v) || SCHEME_BIGNUMP(v)) {
     int imaginary = 0;
-
+    
     if (scheme_is_negative(v)) {
       v = scheme_bin_minus(zeroi, v);
       imaginary = 1;
@@ -1984,8 +2031,7 @@ scheme_expt(int argc, Scheme_Object *argv[])
 	  d2 = SCHEME_FLOAT_VAL(e);
 	  
 	  if ((d2 == 0.0)
-	      || MZ_IS_POS_INFINITY(d2)
-	      || MZ_IS_NEG_INFINITY(d2)
+	      || MZ_IS_INFINITY(d2)
 	      || MZ_IS_NAN(d2))
 	    norm = 1;
 	}
@@ -2059,9 +2105,6 @@ static Scheme_Object *make_rectangular (int argc, Scheme_Object *argv[])
   if (!SCHEME_REALP(b))
     scheme_wrong_type("make-rectangular", REAL_NUMBER_STR, 1, argc, argv);
 
-  if (SCHEME_COMPLEX_IZIP(a)) a = IZI_REAL_PART(a);
-  if (SCHEME_COMPLEX_IZIP(b)) b = IZI_REAL_PART(b);
-
   af = SCHEME_FLOATP(a);
   bf = SCHEME_FLOATP(b);
 
@@ -2090,9 +2133,6 @@ Scheme_Object *scheme_make_polar (int argc, Scheme_Object *argv[])
 
   if (b == zeroi)
     return a;
-
-  if (SCHEME_COMPLEX_IZIP(a)) a = IZI_REAL_PART(a);
-  if (SCHEME_COMPLEX_IZIP(b)) b = IZI_REAL_PART(b);
 
   v = b;
 
@@ -2287,7 +2327,7 @@ scheme_exact_to_inexact (int argc, Scheme_Object *argv[])
     return scheme_make_double(scheme_rational_to_double(o));
 #endif
   }
-  if ((t == scheme_complex_type) || (t == scheme_complex_izi_type)) {
+  if (t == scheme_complex_type) {
     Scheme_Object *realpart, *imaginarypart;
 
     realpart = _scheme_complex_real_part(o);
@@ -2335,7 +2375,7 @@ scheme_inexact_to_exact (int argc, Scheme_Object *argv[])
     return o;
   if (t == scheme_rational_type)
     return o;
-  if ((t == scheme_complex_type) || (t == scheme_complex_izi_type)) {
+  if (t == scheme_complex_type) {
     Scheme_Object *realpart, *imaginarypart;
 
     realpart = _scheme_complex_real_part(o);
@@ -2369,9 +2409,9 @@ GEN_BIN_INT_OP(bin_bitwise_xor, "bitwise-xor", ^, scheme_bignum_xor)
 
 #define MZ_PUBLIC /**/
 
-GEN_NARY_OP(MZ_PUBLIC, scheme_bitwise_and, "bitwise-and", bin_bitwise_and, -1, SCHEME_EXACT_INTEGERP, "exact integer")
-GEN_NARY_OP(static, bitwise_or, "bitwise-ior", bin_bitwise_or, 0, SCHEME_EXACT_INTEGERP, "exact integer")
-GEN_NARY_OP(static, bitwise_xor, "bitwise-xor", bin_bitwise_xor, 0, SCHEME_EXACT_INTEGERP, "exact integer")
+GEN_NARY_OP(MZ_PUBLIC, scheme_bitwise_and, "bitwise-and", bin_bitwise_and, -1, SCHEME_EXACT_INTEGERP, "exact integer", GEN_IDENT)
+GEN_NARY_OP(static, bitwise_or, "bitwise-ior", bin_bitwise_or, 0, SCHEME_EXACT_INTEGERP, "exact integer", GEN_IDENT)
+GEN_NARY_OP(static, bitwise_xor, "bitwise-xor", bin_bitwise_xor, 0, SCHEME_EXACT_INTEGERP, "exact integer", GEN_IDENT)
 
 static Scheme_Object *
 bitwise_not(int argc, Scheme_Object *argv[])
@@ -2499,4 +2539,12 @@ integer_length(int argc, Scheme_Object *argv[])
   }
 
   return scheme_make_integer(base);
+}
+
+long scheme_integer_length(Scheme_Object *n)
+{
+  Scheme_Object *a[1], *r;
+  a[0] = n;
+  r = integer_length(1, a);
+  return SCHEME_INT_VAL(r);
 }

@@ -1,16 +1,16 @@
 (module status mzscheme
-  (require (lib "file.ss")
-           (lib "list.ss")
-           (lib "string.ss")
-           (lib "date.ss")
-           (lib "servlet.ss" "web-server")
-           (lib "servlet-structs.ss" "web-server" "servlet")
-           (lib "timeouts.ss" "web-server" "managers")
-           (lib "uri-codec.ss" "net")
-           (lib "md5.ss"    "handin-server" "private")
-           (lib "logger.ss" "handin-server" "private")
-           (lib "config.ss" "handin-server" "private")
-           (lib "hooker.ss" "handin-server" "private"))
+  (require mzlib/file
+           mzlib/list
+           mzlib/string
+           mzlib/date
+           web-server/servlet
+           web-server/servlet/servlet-structs
+           web-server/managers/timeouts
+           net/uri-codec
+           handin-server/private/md5
+           handin-server/private/logger
+           handin-server/private/config
+           handin-server/private/hooker)
 
   (define get-user-data
     (let ([users-file (build-path server-dir "users.ss")])
@@ -261,8 +261,6 @@
                    (a ([href ,this]) "restarting") " in 3 seconds."))))
 
   (define manager
-    (create-timeout-manager instance-expiration-handler
-                            600 
-                            600))
+    (create-timeout-manager instance-expiration-handler 600 600))
 
   (provide interface-version start name manager))

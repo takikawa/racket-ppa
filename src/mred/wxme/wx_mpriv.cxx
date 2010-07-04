@@ -3,7 +3,7 @@
  * Purpose:     wxMediaEdit private methods implementation
  * Author:      Matthew Flatt
  * Created:     1995
- * Copyright:   (c) 2004-2007 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2008 PLT Scheme Inc.
  * Copyright:   (c) 1995, Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -1541,10 +1541,10 @@ void wxMediaEdit::SetClickbackHilited(wxClickback *click, Bool on)
       for (node = click->unhilite->First(); node; node = node->Next()) {
 	wxChangeRecord *cr;
 	cr = (wxChangeRecord *)node->Data();
-	DELETE_OBJ cr;
+	/* DELETE_OBJ cr; */
       }
   
-      DELETE_OBJ click->unhilite;
+      /* DELETE_OBJ click->unhilite; */
       FlashOff();
     }
     click->hilited = on;

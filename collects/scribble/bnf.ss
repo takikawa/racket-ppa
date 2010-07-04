@@ -2,13 +2,13 @@
 (module bnf mzscheme
   (require "struct.ss"
            "decode.ss"
-           (lib "kw.ss")
-           (lib "class.ss"))
+           mzlib/kw
+           mzlib/class)
 
   (provide BNF 
            nonterm
            BNF-seq
-           BNF-alt ; single-lie alternatives
+           BNF-alt  BNF-alt/close ; single-line alternatives
            BNF-etc
            BNF-group
            optional kleenestar kleeneplus kleenerange)
@@ -47,12 +47,15 @@
   (define (BNF-alt . l)
     (interleave l alt))
 
+  (define (BNF-alt/close . l)
+    (interleave l " | "))
+
   (define BNF-etc "...")
 
   (define/kw (nonterm #:body s)
-    (make-element #f (append (list "<") 
+    (make-element #f (append (list 'lang)
                              (list (make-element 'italic (decode-content s)))
-                             (list ">"))))
+                             (list 'rang))))
 
   (define/kw (optional #:body s)
     (make-element #f (append (list "[") (decode-content s) (list "]"))))

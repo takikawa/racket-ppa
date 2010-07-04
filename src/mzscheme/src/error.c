@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2007 PLT Scheme Inc.
+  Copyright (c) 2004-2008 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -64,7 +64,7 @@ static Scheme_Object *emergency_error_display_proc(int, Scheme_Object *[]);
 static Scheme_Object *def_error_value_string_proc(int, Scheme_Object *[]);
 static Scheme_Object *def_exit_handler_proc(int, Scheme_Object *[]);
 
-static Scheme_Object *do_raise(Scheme_Object *arg, int need_debug);
+static Scheme_Object *do_raise(Scheme_Object *arg, int need_debug, int barrier);
 
 static Scheme_Object *nested_exn_handler(void *old_exn, int argc, Scheme_Object *argv[]);
 
@@ -75,11 +75,12 @@ Scheme_Object *scheme_def_exit_proc;
 
 Scheme_Object *scheme_raise_arity_error_proc;
 
+static Scheme_Object *arity_property;
+static Scheme_Object *check_arity_property_value_ok(int argc, Scheme_Object *argv[]);
+
 static char *init_buf(long *len, long *blen);
 static char *prepared_buf;
 static long prepared_buf_len;
-
-static Scheme_Object *kernel_symbol;
 
 typedef struct {
   int args;
@@ -146,6 +147,7 @@ Scheme_Config *scheme_init_error_escape_proc(Scheme_Config *config)
   %q = truncated-to-256 string
   %Q = truncated-to-256 Scheme string
   %V = scheme_value
+  %D = scheme value to display
 
   %L = line number, -1 means no line
   %e = error number for strerror()
@@ -208,6 +210,7 @@ static long sch_vsprintf(char *s, long maxlen, const char *msg, va_list args)
 	break;
       case 'S':
       case 'V':
+      case 'D':
       case 'T':
       case 'Q':
 	ptrs[pp++] = mzVA_ARG(args, Scheme_Object*);
@@ -384,6 +387,15 @@ static long sch_vsprintf(char *s, long maxlen, const char *msg, va_list args)
 	    t = scheme_make_provided_string(o, 1, &tlen);
 	  }
 	  break;
+	case 'D':
+	  {
+	    Scheme_Object *o;
+            long dlen;
+	    o = (Scheme_Object *)ptrs[pp++];
+	    t = scheme_display_to_string(o, &dlen);
+            tlen = dlen;
+	  }
+	  break;
 	case 'T':
 	case 'Q':
 	  {
@@ -480,33 +492,33 @@ void scheme_init_error(Scheme_Env *env)
   REGISTER_SO(scheme_raise_arity_error_proc);
 
   scheme_add_global_constant("error",
-			     scheme_make_prim_w_arity(error,
-						      "error",
-						      1, -1),
+			     scheme_make_noncm_prim(error,
+                                                    "error",
+                                                    1, -1),
 			     env);
   scheme_add_global_constant("raise-user-error",
-			     scheme_make_prim_w_arity(raise_user_error,
-						      "raise-user-error",
-						      1, -1),
+			     scheme_make_noncm_prim(raise_user_error,
+                                                    "raise-user-error",
+                                                    1, -1),
 			     env);
   scheme_add_global_constant("raise-syntax-error",
-			     scheme_make_prim_w_arity(raise_syntax_error,
-						      "raise-syntax-error",
-						      2, 4),
+			     scheme_make_noncm_prim(raise_syntax_error,
+                                                    "raise-syntax-error",
+                                                    2, 4),
 			     env);
   scheme_add_global_constant("raise-type-error",
-			     scheme_make_prim_w_arity(raise_type_error,
-						      "raise-type-error",
-						      3, -1),
+			     scheme_make_noncm_prim(raise_type_error,
+                                                    "raise-type-error",
+                                                    3, -1),
 			     env);
   scheme_add_global_constant("raise-mismatch-error",
-			     scheme_make_prim_w_arity(raise_mismatch_error,
-						      "raise-mismatch-error",
-						      3, 3),
+			     scheme_make_noncm_prim(raise_mismatch_error,
+                                                    "raise-mismatch-error",
+                                                    3, 3),
 			     env);
-  scheme_raise_arity_error_proc = scheme_make_prim_w_arity(raise_arity_error,
-                                                           "raise-arity-error",
-                                                           2, -1);
+  scheme_raise_arity_error_proc = scheme_make_noncm_prim(raise_arity_error,
+                                                         "raise-arity-error",
+                                                         2, -1);
   scheme_add_global_constant("raise-arity-error",
 			     scheme_raise_arity_error_proc,
 			     env);
@@ -546,9 +558,9 @@ void scheme_init_error(Scheme_Env *env)
 						       MZCONFIG_ERROR_PRINT_SRCLOC),
 			     env);
   scheme_add_global_constant("exit",
-			     scheme_make_prim_w_arity(scheme_do_exit,
-						      "exit",
-						      0, 1),
+			     scheme_make_noncm_prim(scheme_do_exit,
+                                                    "exit",
+                                                    0, 1),
 			     env);
 
   REGISTER_SO(scheme_def_exit_proc);
@@ -565,8 +577,17 @@ void scheme_init_error(Scheme_Env *env)
   prepared_buf = "";
   prepared_buf = init_buf(NULL, &prepared_buf_len);
 
-  REGISTER_SO(kernel_symbol);
-  kernel_symbol = scheme_intern_symbol("#%kernel");
+  REGISTER_SO(arity_property);
+  {
+    Scheme_Object *guard;
+    guard = scheme_make_prim_w_arity(check_arity_property_value_ok,
+				     "guard-for-prop:arity-string",
+				     2, 2);
+    arity_property = scheme_make_struct_type_property_w_guard(scheme_intern_symbol("arity-string"),
+                                                              guard);
+  }
+                                                            
+  scheme_add_global_constant("prop:arity-string", arity_property, env);
 
   scheme_init_error_config();
 }
@@ -814,7 +835,7 @@ static char *error_write_to_string_w_max(Scheme_Object *v, int len, int *lenout)
     scheme_push_continuation_frame(&cframe);
     scheme_install_config(config);
     scheme_push_break_enable(&cframe2, 0, 0);
- 
+
     o = _scheme_apply(o, 2, args);
 
     scheme_pop_break_enable(&cframe2, 0);
@@ -844,6 +865,15 @@ static char *error_write_to_string_w_max(Scheme_Object *v, int len, int *lenout)
   }
 }
 
+static Scheme_Object *check_arity_property_value_ok(int argc, Scheme_Object *argv[])
+{
+  if (!scheme_check_proc_arity(NULL, 1, 0, 1, argv))
+    scheme_arg_mismatch("guard-for-prop:arity-string",
+                        "property value is not a procedure (arity 1): ",
+                        argv[0]);
+  return argv[0];
+}
+
 static char *make_arity_expect_string(const char *name, int namelen,
 				      int minc, int maxc,
 				      int argc, Scheme_Object **argv,
@@ -853,7 +883,8 @@ static char *make_arity_expect_string(const char *name, int namelen,
 {
   long len, pos, slen;
   int xargc, xminc, xmaxc;
-  char *s;
+  char *s, *arity_str = NULL;
+  int arity_len = 0;
 
   s = init_buf(&len, &slen);
 
@@ -865,22 +896,60 @@ static char *make_arity_expect_string(const char *name, int namelen,
   xmaxc = maxc - (is_method ? 1 : 0);
 
   if ((minc == -1) && SCHEME_PROC_STRUCTP((Scheme_Object *)name)) {
-    /* If the arity is something simple, we'll make a good error
-       message. Otherwise, we'll just use the "no matching case"
-       version. */
-    Scheme_Object *arity;
-    arity = scheme_arity((Scheme_Object *)name);
-    if (SCHEME_INTP(arity)) {
-      xminc = xmaxc = minc = maxc = SCHEME_INT_VAL(arity);
-      name = scheme_get_proc_name((Scheme_Object *)name, &namelen, 1);
-      if (!name) {
-        name = "#<procedure>";
-	namelen = strlen(name);
+    Scheme_Object *arity_maker;
+
+    while (1) {
+      arity_maker = scheme_struct_type_property_ref(arity_property, (Scheme_Object *)name);
+      if (arity_maker) {
+        Scheme_Object *v, *a[1];
+        a[0] = (Scheme_Object *)name;
+        v = scheme_apply(arity_maker, 1, a);
+        if (SCHEME_CHAR_STRINGP(v)) {
+          v = scheme_char_string_to_byte_string(v);
+          arity_str = SCHEME_BYTE_STR_VAL(v);
+          arity_len = SCHEME_BYTE_STRLEN_VAL(v);
+          if (arity_len > len)
+            arity_len = len;
+          name = scheme_get_proc_name((Scheme_Object *)name, &namelen, 1);
+          if (!name) {
+            name = "#<procedure>";
+            namelen = strlen(name);
+          }
+          break;
+        } else
+          break;
+      } else {
+        Scheme_Object *v;
+        int is_method;
+        v = scheme_extract_struct_procedure((Scheme_Object *)name, -1, NULL, &is_method);
+        if (!v || is_method || !SCHEME_PROC_STRUCTP(v))
+          break;
+        name = (const char *)v;
+      }
+      SCHEME_USE_FUEL(1);
+    }
+
+    if (!arity_str) {
+      /* If the arity is something simple, we'll make a good error
+         message. Otherwise, we'll just use the "no matching case"
+         version. */
+      Scheme_Object *arity;
+      arity = scheme_arity((Scheme_Object *)name);
+      if (SCHEME_INTP(arity)) {
+        xminc = xmaxc = minc = maxc = SCHEME_INT_VAL(arity);
+        name = scheme_get_proc_name((Scheme_Object *)name, &namelen, 1);
+        if (!name) {
+          name = "#<procedure>";
+          namelen = strlen(name);
+        }
       }
     }
   }
 
-  if (minc < 0) {
+  if (arity_str) {
+    pos = scheme_sprintf(s, slen, "%t: expects %t, given %d",
+			 name, namelen, arity_str, arity_len, xargc);
+  } else if (minc < 0) {
     const char *n;
     int nlen;
 
@@ -939,7 +1008,7 @@ static char *make_arity_expect_string(const char *name, int namelen,
 
 void scheme_wrong_count_m(const char *name, int minc, int maxc,
 			  int argc, Scheme_Object **argv, int is_method)
-/* minc == -1 => name is really a case-lambda, native closure, or proc-struct.
+/* minc == -1 => name is really a proc.
    minc == -2 => use generic "no matching clause" message */
 {
   char *s;
@@ -957,8 +1026,19 @@ void scheme_wrong_count_m(const char *name, int minc, int maxc,
   /* minc = 1 -> name is really a case-lambda or native proc */
 
   if (minc == -1) {
-    /* Check for is_method in case-lambda */
-    if (SCHEME_CLOSUREP((Scheme_Object *)name)) {
+    /* Extract arity, check for is_method in case-lambda, etc. */
+    if (SAME_TYPE(SCHEME_TYPE((Scheme_Object *)name), scheme_closure_type)) {
+      Scheme_Closure_Data *data;
+      data = SCHEME_COMPILED_CLOS_CODE((Scheme_Object *)name);
+      name = scheme_get_proc_name((Scheme_Object *)name, NULL, 1);
+      
+      minc = data->num_params;
+      if (SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_REST) {
+        minc -= 1;
+        maxc = -1;
+      } else
+        maxc = minc;
+    } else if (SAME_TYPE(SCHEME_TYPE((Scheme_Object *)name), scheme_case_closure_type)) {
       Scheme_Case_Lambda *cl = (Scheme_Case_Lambda *)name;
       if (cl->count) {
 	Scheme_Closure_Data *data;
@@ -1392,7 +1472,7 @@ void scheme_read_err(Scheme_Object *port,
 		    : ((gotc == SCHEME_SPECIAL) 
 		       ? MZEXN_FAIL_READ_NON_CHAR 
 		       : MZEXN_FAIL_READ)),
-		   scheme_make_immutable_pair(loc, scheme_null),
+		   scheme_make_pair(loc, scheme_null),
 		   "%t%s%t%s",
 		   fn, fnlen, ls,
 		   s, slen, suggests);
@@ -1473,7 +1553,7 @@ static void do_wrong_syntax(const char *where,
  	  if (scheme_current_thread->current_local_env)
 	    phase = scheme_current_thread->current_local_env->genv->phase;
 	  else phase = 0;
-	  scheme_stx_module_name(&first, phase, &mod, &nomwho, NULL);
+	  scheme_stx_module_name(&first, scheme_make_integer(phase), &mod, &nomwho, NULL, NULL, NULL);
 	}
       }
     } else {
@@ -1559,7 +1639,7 @@ static void do_wrong_syntax(const char *where,
   if (SCHEME_FALSEP(form))
     form = extra_sources;
   else
-    form = scheme_make_immutable_pair(form, extra_sources);
+    form = scheme_make_pair(form, extra_sources);
 
   scheme_raise_exn(MZEXN_FAIL_SYNTAX, 
 		   form,
@@ -1793,7 +1873,7 @@ void scheme_unbound_global(Scheme_Bucket *b)
     const char *errmsg;
     
     if (SCHEME_TRUEP(scheme_get_param(scheme_current_config(), MZCONFIG_ERROR_PRINT_SRCLOC)))
-      errmsg = "reference to an identifier before its definition: %S in module: %S";
+      errmsg = "reference to an identifier before its definition: %S in module: %D";
     else
       errmsg = "reference to an identifier before its definition: %S";
 
@@ -1887,7 +1967,8 @@ static Scheme_Object *do_error(int for_user, int argc, Scheme_Object *argv[])
   newargs[1] = TMP_CMARK_VALUE;
   do_raise(scheme_make_struct_instance(exn_table[for_user ? MZEXN_FAIL_USER : MZEXN_FAIL].type,
 				       2, newargs),
-	   1);
+	   1,
+           1);
 
   return scheme_void;
 #else
@@ -2436,7 +2517,8 @@ scheme_raise_exn(int id, ...)
 
   do_raise(scheme_make_struct_instance(exn_table[id].type,
 				       c, eargs),
-	   1);
+	   1,
+           1);
 #else
   call_error(buffer, alen, scheme_false);
 #endif
@@ -2538,96 +2620,116 @@ nested_exn_handler(void *old_exn, int argc, Scheme_Object *argv[])
   return scheme_void;
 }
 
-static Scheme_Object *
-do_raise(Scheme_Object *arg, int need_debug)
+static void *do_raise_inside_barrier(void)
 {
+  Scheme_Object *arg;
   Scheme_Object *v, *p[1], *h, *marks;
   Scheme_Cont_Mark_Chain *chain;
   Scheme_Cont_Frame_Data cframe, cframe2;
   int got_chain;
 
- if (scheme_current_thread->skip_error) {
-   scheme_longjmp (scheme_error_buf, 1);
- }
+  arg = scheme_current_thread->ku.k.p1;
+  scheme_current_thread->ku.k.p1 = NULL;
 
- if (need_debug) {
-   marks = scheme_current_continuation_marks(NULL);
-   ((Scheme_Structure *)arg)->slots[1] = marks;
- }
+  h = scheme_extract_one_cc_mark(NULL, scheme_exn_handler_key);
 
- h = scheme_extract_one_cc_mark(NULL, scheme_exn_handler_key);
+  chain = NULL;
+  got_chain = 0;
 
- chain = NULL;
- got_chain = 0;
+  while (1) {
+    if (!h) {
+      h = scheme_get_param(scheme_current_config(), MZCONFIG_INIT_EXN_HANDLER);
+      chain = NULL;
+      got_chain = 1;
+    }
 
- while (1) {
-   if (!h) {
-     h = scheme_get_param(scheme_current_config(), MZCONFIG_INIT_EXN_HANDLER);
-     chain = NULL;
-     got_chain = 1;
-   }
+    v = scheme_make_byte_string_without_copying("exception handler");
+    v = scheme_make_closed_prim_w_arity(nested_exn_handler,
+                                        scheme_make_pair(v, arg),
+                                        "nested-exception-handler", 
+                                        1, 1);
 
-   v = scheme_make_byte_string_without_copying("exception handler");
-   v = scheme_make_closed_prim_w_arity(nested_exn_handler,
-                                       scheme_make_pair(v, arg),
-                                       "nested-exception-handler", 
-                                       1, 1);
+    scheme_push_continuation_frame(&cframe);
+    scheme_set_cont_mark(scheme_exn_handler_key, v);
+    scheme_push_break_enable(&cframe2, 0, 0);
 
-   scheme_push_continuation_frame(&cframe);
-   scheme_set_cont_mark(scheme_exn_handler_key, v);
-   scheme_push_break_enable(&cframe2, 0, 0);
+    p[0] = arg;
+    v = _scheme_apply(h, 1, p);
 
-   p[0] = arg;
-   v = scheme_apply(h, 1, p);
+    scheme_pop_break_enable(&cframe2, 0);
+    scheme_pop_continuation_frame(&cframe);
 
-   scheme_pop_break_enable(&cframe2, 0);
-   scheme_pop_continuation_frame(&cframe);
+    /* Getting a value back means that we should chain to the
+       next exception handler; we supply the returned value to
+       the next exception handler (if any). */
+    if (!got_chain) {
+      marks = scheme_all_current_continuation_marks();
+      chain = ((Scheme_Cont_Mark_Set *)marks)->chain;
+      marks = NULL;
+      /* Init chain to position of the handler we just
+         called. */
+      while (chain->key != scheme_exn_handler_key) {
+        chain = chain->next;
+      }
+      got_chain = 1;
+    }
 
-   /* Getting a value back means that we should chain to the
-      next exception handler; we supply the returned value to
-      the next exception handler (if any). */
-   if (!got_chain) {
-     marks = scheme_all_current_continuation_marks();
-     chain = ((Scheme_Cont_Mark_Set *)marks)->chain;
-     marks = NULL;
-     /* Init chain to position of the handler we just
-        called. */
-     while (chain->key != scheme_exn_handler_key) {
-       chain = chain->next;
-     }
-     got_chain = 1;
-   }
+    if (chain) {
+      chain = chain->next;
+      while (chain && (chain->key != scheme_exn_handler_key)) {
+        chain = chain->next;
+      }
 
-   if (chain) {
-     chain = chain->next;
-     while (chain && (chain->key != scheme_exn_handler_key)) {
-       chain = chain->next;
-     }
+      if (!chain)
+        h = NULL; /* use uncaught handler */
+      else
+        h = chain->val;
+      arg = v;
+    } else {
+      /* return from uncaught-exception handler */
+      p[0] = scheme_false;
+      return nested_exn_handler(scheme_make_pair(scheme_false, arg), 1, p);
+    }
+  }
 
-     if (!chain)
-       h = NULL; /* use uncaught handler */
-     else
-       h = chain->val;
-     arg = v;
-   } else {
-     /* return from uncaught-exception handler */
-     p[0] = scheme_false;
-     return nested_exn_handler(scheme_make_pair(scheme_false, arg), 1, p);
-   }
- }
+  return scheme_void;
+}
 
- return scheme_void;
+static Scheme_Object *
+do_raise(Scheme_Object *arg, int need_debug, int eb)
+{
+  Scheme_Thread *p = scheme_current_thread;
+
+  if (p->skip_error) {
+    scheme_longjmp (scheme_error_buf, 1);
+  }
+  
+  if (need_debug) {
+    Scheme_Object *marks;
+    marks = scheme_current_continuation_marks(NULL);
+    ((Scheme_Structure *)arg)->slots[1] = marks;
+  }
+
+  p->ku.k.p1 = arg;
+
+  if (eb)
+    return (Scheme_Object *)scheme_top_level_do(do_raise_inside_barrier, 1);
+  else
+    return (Scheme_Object *)do_raise_inside_barrier();
 }
 
 static Scheme_Object *
 sch_raise(int argc, Scheme_Object *argv[])
 {
-  return do_raise(argv[0], 0);
+  if ((argc > 1) && SCHEME_FALSEP(argv[1]))
+    return do_raise(argv[0], 0, 0);
+  else
+    return do_raise(argv[0], 0, 1);
 }
 
 void scheme_raise(Scheme_Object *exn)
 {
-  do_raise(exn, 0);
+  do_raise(exn, 0, 1);
 }
 
 typedef Scheme_Object (*Scheme_Struct_Field_Guard_Proc)(int argc, Scheme_Object *v);
@@ -2669,16 +2771,6 @@ static Scheme_Object *syntax_field_check(int argc, Scheme_Object **argv)
 
   l = argv[2];
   while (SCHEME_PAIRP(l)) {
-    if (!SCHEME_IMMUTABLE_PAIRP(l))
-      all_imm = 0;
-    
-    pr = scheme_make_immutable_pair(SCHEME_CAR(l), scheme_null);
-    if (last)
-      SCHEME_CDR(last) = pr;
-    else
-      first = pr;
-    last = pr;
-    
     if (!SCHEME_STXP(SCHEME_CAR(l)))
       break;
     l = SCHEME_CDR(l);
@@ -2703,14 +2795,14 @@ static Scheme_Object *read_field_check(int argc, Scheme_Object **argv)
   Scheme_Object *l;
 
   l = argv[2];
-  while (SCHEME_IMMUTABLE_PAIRP(l)) {
+  while (SCHEME_PAIRP(l)) {
     if (!scheme_is_location(SCHEME_CAR(l)))
       break;
     l = SCHEME_CDR(l);
   }
 
   if (!SCHEME_NULLP(l))
-    scheme_wrong_field_type(argv[3], "immutable list of locations", argv[2]);
+    scheme_wrong_field_type(argv[3], "list of locations", argv[2]);
 
   return scheme_values(3, argv);
 }
@@ -2829,9 +2921,9 @@ void scheme_init_exn(Scheme_Env *env)
 			     env);
 
   scheme_add_global_constant("raise",
-			     scheme_make_prim_w_arity(sch_raise,
-						      "raise",
-						      1, 1),
+			     scheme_make_noncm_prim(sch_raise,
+                                                    "raise",
+                                                    1, 2),
 			     env);
 
   scheme_init_exn_config();

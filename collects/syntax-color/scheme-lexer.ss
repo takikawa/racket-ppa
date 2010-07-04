@@ -1,7 +1,7 @@
 (module scheme-lexer mzscheme
   
-  (require (lib "lex.ss" "parser-tools")
-           (prefix : (lib "lex-sre.ss" "parser-tools")))
+  (require parser-tools/lex
+           (prefix : parser-tools/lex-sre))
   
   (provide scheme-lexer)
    
@@ -43,7 +43,8 @@
 
    [langchar (:or (:/ "az" "AZ" "09") "+" "-" "_")]
 
-   [scheme-whitespace (:or #\newline #\return #\tab #\space #\vtab #\page)]
+   [scheme-whitespace whitespace]
+
    [line-comment (:: ";" (:* (:~ #\newline)))]
 
    
@@ -133,8 +134,9 @@
     
    [reader-command (:or (:: "#" c s) (:: "#" c i))]
    [sharing (:or (:: "#" (make-uinteger digit10) "=")
-                 (:: "#" (make-uinteger digit10) "#"))])
-  
+                 (:: "#" (make-uinteger digit10) "#"))]
+
+   [list-prefix (:or "" "#hash" "#hasheq" "#s" (:: "#" (:* digit10)))])
   
   (define-lex-trans make-num
     (syntax-rules ()
@@ -247,13 +249,13 @@
                   (next-char (peek-char-or-special i)))
              (cond
                ((not (or (char? next-char) (eof-object? next-char))) ;; a special
-                (values (apply string-append (reverse! (cons next-line acc)))
+                (values (apply string-append (reverse (cons next-line acc)))
                         'error #f start-pos (get-offset i)))
                ((equal? next-line ender)  ;; end of string
-                (values (apply string-append (reverse! (cons next-line acc)))
+                (values (apply string-append (reverse (cons next-line acc)))
                         'string #f start-pos (get-offset i)))
                ((eof-object? next-char)
-                (values (apply string-append (reverse! (cons next-line acc)))
+                (values (apply string-append (reverse (cons next-line acc)))
                         'error #f start-pos (get-offset i)))
                (else
                 (read-char i)
@@ -263,12 +265,13 @@
     (lexer
      [(:+ scheme-whitespace)
       (ret lexeme 'white-space #f start-pos end-pos)]
-     [(:or "#t" "#f" "#T" "#F" character keyword
+     [(:or "#t" "#f" "#T" "#F" character
            (make-num digit2 radix2)
            (make-num digit8 radix8)
            (make-num digit10 (:? radix10))
            (make-num digit16 radix16))
       (ret lexeme 'constant #f start-pos end-pos)]
+     [keyword (ret lexeme 'parenthesis #f start-pos end-pos)]
      [str (ret lexeme 'string #f start-pos end-pos)]
      [line-comment
       (ret lexeme 'comment #f start-pos end-pos)]
@@ -277,11 +280,11 @@
      ["#|" (read-nested-comment 1 start-pos input-port)]
      [script
       (ret lexeme 'comment #f start-pos end-pos)]
-     [(:: (:or "" "#hash" "#hasheq" (:: "#" (:* digit10))) "(")
+     [(:: list-prefix "(")
       (ret lexeme 'parenthesis '|(| start-pos end-pos)]
-     [(:: (:or "" "#hash" "#hasheq" (:: "#" (:* digit10))) "[")
+     [(:: list-prefix "[")
       (ret lexeme 'parenthesis '|[| start-pos end-pos)]
-     [(:: (:or "" "#hash" "#hasheq" (:: "#" (:* digit10))) "{")
+     [(:: list-prefix "{")
       (ret lexeme 'parenthesis '|{| start-pos end-pos)]
      [(:or ")" "]" "}")
       (ret lexeme 'parenthesis (string->symbol lexeme) start-pos end-pos)]
@@ -290,11 +293,11 @@
      [(:or sharing reader-command "." "," ",@" "#," "#,@")
       (ret lexeme 'other #f start-pos end-pos)]
 
-     [(:: "#lang " 
+     [(:: (:or "#lang " "#!")
           (:or langchar
                (:: langchar (:* (:or langchar "/")) langchar)))
       (ret lexeme 'other #f start-pos end-pos)]
-     [(:: "#lang " (:* (:& any-char (complement whitespace))))
+     [(:: (:or "#lang " "#!") (:* (:& any-char (complement whitespace))))
       (ret lexeme 'error #f start-pos end-pos)]
      
      [identifier

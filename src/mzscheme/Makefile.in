@@ -36,8 +36,6 @@ FOREIGN_OBJSLIB = @FOREIGN_OBJSLIB@
 # The foreign build always uses libtool, so that's why we use .la instead of @LTA@
 #  in FOREIGN_LIB.
 
-LLVM_DIR = ../llvm
-
 # About EXE_SUFFIX:
 #  Cygwin offers the illusion that binaries have no ".exe" suffix by
 #  having the file-open syscall open an ".exe" file for reading when
@@ -57,7 +55,6 @@ normal-bin:
 common:
 	$(MAKE) g-c
 	$(MAKE) @FOREIGNTARGET@
-	$(MAKE) @LLVMTARGET@
 
 cgc:
 	$(MAKE) common
@@ -114,19 +111,17 @@ foreign-stuff:
 foreign-nothing:
 	echo no foreign
 
-# llvm
-llvm-stuff:
-	cd $(LLVM_DIR); $(MAKE) all
-
-llvm-nothing:
-	echo no llvm
-
 mzlibrary:
 	cd src; $(MAKE) all 
 	$(MAKE) libmzscheme.@LIBSFX@
 
-libmzscheme.@LIBSFX@: src/*.@LTO@ @FOREIGN_LIB_IF_USED@
-	$(AR) $(ARFLAGS) libmzscheme.@LIBSFX@ src/*.@LTO@ @FOREIGN_OBJSLIB_IF_USED@ @LIBMZSCHEME_DEP@
+FOREIGN_USED_LIB = $(FOREIGN_OBJ) $(FOREIGN_LIB)
+FOREIGN_USED_OBJSLIB = $(FOREIGN_OBJSLIB)
+FOREIGN_NOT_USED_LIB = 
+FOREIGN_NOT_USED_OBJSLIB = 
+
+libmzscheme.@LIBSFX@: src/*.@LTO@ $(@FOREIGN_IF_USED@_LIB)
+	$(AR) $(ARFLAGS) libmzscheme.@LIBSFX@ src/*.@LTO@ $(@FOREIGN_IF_USED@_OBJSLIB) @LIBMZSCHEME_DEP@
 	$(RANLIB) libmzscheme.@LIBSFX@
 
 # Irix sproc, only
@@ -144,12 +139,12 @@ MZFW = PLT_MzScheme.framework/Versions/$(FWVERSION)/PLT_MzScheme
 
 $(MZFW): libmzscheme.@LIBSFX@ libmzgc.@LIBSFX@ $(SPECIALIZINGOBJECTS)
 	mkdir -p  PLT_MzScheme.framework/Versions/$(FWVERSION)
-	$(CC) -o $(MZFW) -framework CoreFoundation -dynamiclib -all_load $(SPECIALIZINGOBJECTS) libmzscheme.@LIBSFX@ libmzgc.@LIBSFX@ @LDFLAGS@ @LIBS@
+	@MZLINKER@ -o $(MZFW) @LDFLAGS@ -framework CoreFoundation -dynamiclib -all_load $(SPECIALIZINGOBJECTS) libmzscheme.@LIBSFX@ libmzgc.@LIBSFX@ @LIBS@
 	rm -f PLT_MzScheme.framework/PLT_MzScheme
 	ln -s Versions/$(FWVERSION)/PLT_MzScheme PLT_MzScheme.framework/PLT_MzScheme
 
 mzscheme@CGC@@OSX@: $(MZFW) main.@LTO@
-	$(CC) -o mzscheme@CGC@ @PROFFLAGS@ main.@LTO@ -Wl,-headerpad_max_install_names -F. -framework PLT_MzScheme
+	@MZLINKER@ -o mzscheme@CGC@ @PROFFLAGS@ @LDFLAGS@ main.@LTO@ -Wl,-headerpad_max_install_names -F. -framework PLT_MzScheme @LIBS@
 	/usr/bin/install_name_tool -change "PLT_MzScheme.framework/Versions/$(FWVERSION)/PLT_MzScheme" "@executable_path/PLT_MzScheme.framework/Versions/$(FWVERSION)/PLT_MzScheme" "mzscheme@CGC@"
 
 # OSKit ----------------------------------------
@@ -200,16 +195,16 @@ mark:
 	$(MAKE) $(srcdir)/src/mzmark.c
 
 headers:
-	./mzscheme@CGC@ -qr $(srcdir)/mkincludes.ss "$(DESTDIR)$(includepltdir)" "$(srcdir)" .
+	./mzscheme@CGC@ -cqu $(srcdir)/mkincludes.ss "$(DESTDIR)$(includepltdir)" "$(srcdir)" .
 
 $(srcdir)/src/schexn.h: $(srcdir)/src/exnsrc.ss $(srcdir)/src/makeexn
 	./mzscheme@CGC@ -gqr $(srcdir)/src/makeexn < $(srcdir)/src/exnsrc.ss > $(srcdir)/src/schexn.h
 
 $(srcdir)/src/$(CSTARTUPDEST): $(srcdir)/src/startup.ss $(srcdir)/src/schvers.h $(srcdir)/src/schminc.h
-	./mzscheme@CGC@ -qr $(srcdir)/src/sstoinc.ss $(CSTARTUPEXTRA) < $(srcdir)/src/startup.ss > $(srcdir)/src/$(CSTARTUPDEST)
+	./mzscheme@CGC@ -cqu $(srcdir)/src/sstoinc.ss $(CSTARTUPEXTRA) < $(srcdir)/src/startup.ss > $(srcdir)/src/$(CSTARTUPDEST)
 
 $(srcdir)/src/mzmark.c: $(srcdir)/src/mzmarksrc.c $(srcdir)/src/mkmark.ss
-	mzscheme -qr $(srcdir)/src/mkmark.ss < $(srcdir)/src/mzmarksrc.c > $(srcdir)/src/mzmark.c
+	mzscheme -cu $(srcdir)/src/mkmark.ss < $(srcdir)/src/mzmarksrc.c > $(srcdir)/src/mzmark.c
 
 cstartup.zo:
 	$(MAKE) startup CSTARTUPEXTRA='zo' CSTARTUPDEST="../cstartup.zo"
@@ -227,7 +222,6 @@ clean@NOT_OSX@:
 	cd src; $(MAKE) clean
 	cd dynsrc; $(MAKE) clean
 	if [ -d ../foreign ] ; then cd ../foreign ; $(MAKE) clean ; fi
-	if [ -d ../llvm    ] ; then cd ../llvm    ; $(MAKE) clean ; fi
 
 clean@OSX@:
 	rm -rf PLT_MzScheme.framework
@@ -279,7 +273,7 @@ unix-install-cgc:
 	cd ..; $(ICP) mzscheme/libmzscheme.@LIBSFX@ "$(DESTDIR)$(libdir)/libmzscheme.@LIBSFX@"
 	cd ..; $(ICP) mzscheme/mzscheme@CGC@ "$(DESTDIR)$(bindir)/mzscheme@CGC_INSTALLED@"
 	cd ..; cp mzscheme/mzdyn.o "$(DESTDIR)$(libpltdir)/mzdyn.o"
-	./mzscheme@CGC@ -mvqu "$(srcdir)/collects-path.ss" "$(DESTDIR)$(bindir)/mzscheme@CGC_INSTALLED@@EXE_SUFFIX@" @COLLECTS_PATH@
+	./mzscheme@CGC@ -cu "$(srcdir)/collects-path.ss" "$(DESTDIR)$(bindir)/mzscheme@CGC_INSTALLED@@EXE_SUFFIX@" @COLLECTS_PATH@
 
 unix-install-cgc-final:
 	cd .
@@ -288,7 +282,7 @@ unix-install-3m:
 	cd ..; $(ICP) mzscheme/mzscheme@MMM@ "$(DESTDIR)$(bindir)/mzscheme@MMM_INSTALLED@"
 	cd ..; $(ICP) mzscheme/libmzscheme3m.@LIBSFX@ "$(DESTDIR)$(libdir)/libmzscheme3m.@LIBSFX@"
 	cd ..; $(ICP) mzscheme/mzdyn3m.o "$(DESTDIR)$(libpltdir)/mzdyn3m.o"
-	./mzscheme@MMM@ -mvqu "$(srcdir)/collects-path.ss" "$(DESTDIR)$(bindir)/mzscheme@MMM_INSTALLED@@EXE_SUFFIX@" @COLLECTS_PATH@
+	./mzscheme@MMM@ -cu "$(srcdir)/collects-path.ss" "$(DESTDIR)$(bindir)/mzscheme@MMM_INSTALLED@@EXE_SUFFIX@" @COLLECTS_PATH@
 
 unix-install-3m-final:
 	cd .

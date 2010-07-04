@@ -1,9 +1,9 @@
 
 ; (require-library "errortrace.ss" "errortrace")
-(require (lib "list.ss")
-	 (lib "etc.ss")
-	 (lib "class100.ss")
-	 (lib "defmacro.ss"))
+(require mzlib/list
+	 mzlib/etc
+	 mzlib/class100
+	 mzlib/defmacro)
 
 (define example-list%
   (class100 object% (-name-in -parents [-filter (lambda (x) (not (void? x)))])
@@ -1083,12 +1083,12 @@
 		  (parameterize ([current-namespace n])
 		    (namespace-mapped-symbols)))]
        [expect-n (list* 'mred@ 'mred^ 
-			(append (get-all (let ([n (make-namespace)])
+			(append (get-all (let ([n (make-base-namespace)])
 					   (parameterize ([current-namespace n])
-					     (namespace-require '(lib "class.ss")))
+					     (namespace-require 'mzlib/class))
 					   n))
 				in-top-level))]
-       [actual-n (get-all (make-namespace-with-mred))])
+       [actual-n (get-all (make-gui-namespace))])
   (for-each
    (lambda (i)
      (unless (memq i expect-n)

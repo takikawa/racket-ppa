@@ -1,30 +1,19 @@
 (module frp-snip mzscheme
-  (require (lib "class.ss")
-           (lib "string.ss")
-           (lib "list.ss")
-           (lib "port.ss")
+  (require mzlib/class
+           mzlib/string
+           mzlib/list
+           mzlib/port
+
+           framework
            
            ;; FRP requires
            
-           (lib "frp-core.ss" "frtime")
-           (all-except (lib "lang-ext.ss" "frtime") undefined?)
-           (only (lib "mzscheme-core.ss" "frtime") any-nested-reactivity? raise-reactivity)
-;           (rename (lib "frp-core.ss" "frtime") behavior? behavior?)
-;           (rename (lib "lang-ext.ss" "frtime") event? event?)
-;           (rename (lib "frp-core.ss" "frtime") signal? signal?)
-;           
-;           (rename (lib "frp-core.ss" "frtime") econs? econs?)
-;           (rename (lib "frp-core.ss" "frtime") efirst efirst)
-;
-;           (rename (lib "frp-core.ss" "frtime") value-now value-now)
-;           (rename (lib "frp-core.ss" "frtime") signal-value signal-value)
-;           (rename (lib "lang-ext.ss" "frtime") undefined undefined)
-;           (rename (lib "lang-ext.ss" "frtime") undefined? frp:undefined?)
-;           
-;           (rename (lib "frp-core.ss" "frtime") proc->signal proc->signal)
+           frtime/frp-core
+           (all-except frtime/lang-ext undefined?)
+           (only frtime/mzscheme-core any-nested-reactivity? raise-reactivity)
 
            ;; MrEd require
-           (all-except (lib "mred.ss" "mred") send-event))
+           (all-except mred send-event))
   
   (define drs-eventspace #f)
   
@@ -56,7 +45,8 @@
                       [(event? bhvr) (signal-value bhvr)]
                       [else bhvr])])
            (cond
-             [(econs? tmp) (format "#<event (last: ~a)>" (efirst tmp))]
+             [(event-set? tmp) (format "#<event (last: ~a@~a)>"
+                                       (event-set-events tmp) (event-set-time tmp))]
              [(undefined? tmp) "<undefined>"]
              [else (expr->string tmp)])))]
       [(bhvr super-render-fun)
@@ -81,31 +71,29 @@
       (super-instantiate (" "))))
   
   (define dynamic-snip-copy%
-    (class snip%
+    (class editor-snip%
       (init-field current parent)
-      (inherit get-admin)
+      (inherit get-editor)
       (define/public (set-current c)
         (parameterize ([current-eventspace drs-eventspace])
           (queue-callback
            (lambda ()
-             (set! current c)
-             (let ([admin (get-admin)])
-               (when admin
-                 (send admin resized this #t)
-                 #;(send admin needs-update this 0 0 2000 100)))))))
-      #;(define/override (resize w h)
-        (super resize w h)
-        (send (get-admin) resized this #t)
-        #t)
-      (define/override (size-cache-invalid)
-        (send current size-cache-invalid))
-              
-      (define/override (get-extent dc x y w h descent space lspace rspace)
-        (send current get-extent dc x y w h descent space lspace rspace))
+             (send (get-editor) lock #f)
+             (send (get-editor) delete 0 (send (get-editor) last-position))
+             (for-each (lambda (thing)
+                         (send (get-editor) insert thing
+                               (send (get-editor) last-position) (send (get-editor) last-position)))
+                       c)
+             (send (get-editor) lock #t)))))
 
-      (define/override (draw dc x y left top right bottom dx dy draw-caret)
-        (send current draw dc x y left top right bottom dx dy draw-caret))
-      (super-new)))
+      (super-new
+       [editor (new scheme:text%)]
+       [with-border? #f]
+       [left-margin 0]
+       [right-margin 0]
+       [top-margin 0]
+       [bottom-margin 0])
+      (set-current current)))
     
   (define dynamic-snip%
     (class snip%
@@ -116,7 +104,7 @@
              [current (make-snip bhvr super-render-fun)])
       
       (define/override (copy)
-        (let ([ret (make-object value-snip-copy% current this)])
+        (let ([ret (make-object dynamic-snip-copy% current this)])
           (set! copies (cons ret copies))
           ret))
       
@@ -139,7 +127,7 @@
       [as-snip? (watch beh)]
       [(undefined? (value-now beh)) "<undefined>"]
       [(behavior? beh) (format "#<behavior (~a)>" (value-now beh))]
-      [(event? beh) (format "#<event (last: ~a)>" (efirst (signal-value beh)))]
+      [(event? beh) (format "#<event (last: ~a)>" (event-set-events (signal-value beh)))]
       [else beh]))
   
   (define (render/dynamic-snip val super-render-fun)
@@ -156,17 +144,14 @@
       (thread (lambda () (super-render-fun val out) (close-output-port out)))
       (let loop ([chars empty])
         (let ([c (read-char-or-special in)])
-          ;(fprintf (current-error-port) "read ~a~n" c)
-          (cond
-            [(eof-object? c) (make-object string-snip% (list->string (reverse (rest chars))))]
-            [(char? c) (loop (cons c chars))]
-            [else c])))))
+          (if (eof-object? c)
+              (reverse (rest chars))
+              (loop (cons c chars)))))))
   
   (define (watch beh super-render-fun)
     (cond
       [(undefined? beh)
        (begin
-         ;(printf "~a was regarded as undefined~n" beh)
          (make-object string-snip% "<undefined>")
          )
          ]
@@ -176,9 +161,6 @@
        (make-object dynamic-snip% (raise-reactivity beh) super-render-fun)]
       [(signal? beh)
        (make-object dynamic-snip% beh super-render-fun)]
-       #;(let ([pb (new pasteboard%)])
-         (send pb insert (make-object dynamic-snip% beh super-render-fun))
-         (new editor-snip% [editor (new pasteboard%)]))
       [else beh]))
   
   (provide (all-defined))

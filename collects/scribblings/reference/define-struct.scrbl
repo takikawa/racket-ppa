@@ -1,5 +1,10 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss"
+          (for-syntax scheme/base)
+          (for-label scheme/serialize))
+
+@(define posn-eval (make-base-eval))
+@(interaction-eval #:eval posn-eval (require (for-syntax scheme/base)))
 
 @title[#:tag "define-struct"]{Defining Structure Types: @scheme[define-struct]}
 
@@ -11,27 +16,30 @@
                                (id super-id)]
                [field field-id
                       [field-id field-option ...]]
-               [struct-option #:immutable
+               [struct-option #:mutable
                               (code:line #:super super-expr)
                               (code:line #:inspector inspector-expr)
                               (code:line #:auto-value auto-expr)
                               (code:line #:guard guard-expr)
                               (code:line #:property prop-expr val-exr)
+                              (code:line #:transparent)
+                              (code:line #:prefab)
                               #:omit-define-syntaxes
                               #:omit-define-values]
-               [field-option #:immutable
+               [field-option #:mutable
                              #:auto])]{
 
-Creates a new @techlink{structure type}, and binds transformers and
-variables related to the new @tech{structure type}. A
-@scheme[define-struct] form with @math{n} @scheme[field]s defines
-up to @math{4+2n} names:
+Creates a new @techlink{structure type} (or uses a pre-existing
+structure type if @scheme[#:prefab] is specified), and binds
+transformers and variables related to the @tech{structure type}.
+
+A @scheme[define-struct] form with @math{n} @scheme[field]s defines up
+to @math{4+2n} names:
 
 @itemize{
 
  @item{@schemeidfont{struct:}@scheme[id], a @deftech{structure type
-       descriptor} value that represents the new @tech{structure
-       type}.}
+       descriptor} value that represents the @tech{structure type}.}
 
  @item{@schemeidfont{make-}@scheme[id], a @deftech{constructor}
        procedure that takes @math{m} arguments and returns a new
@@ -51,9 +59,9 @@ up to @math{4+2n} names:
        for the corresponding field.}
 
  @item{@schemeidfont{set-}@scheme[id]@schemeidfont{-}@scheme[field-id]@schemeidfont{!},
-       for each @scheme[field] that does not include a
-       @scheme[#:immutable] option, and only when the
-       @scheme[#:immutable] option is not specified as a
+       for each @scheme[field] that includes a
+       @scheme[#:mutable] option, or when the
+       @scheme[#:mutable] option is specified as a
        @scheme[struct-option]; a @deftech{mutator} procedure that
        takes an instance of the @tech{structure type} and a new field
        value. The structure is destructively updated with the new
@@ -70,29 +78,38 @@ up to @math{4+2n} names:
 
 If @scheme[super-id] is provided, it must have a transformer binding
 of the same sort bound to @scheme[id] (see @secref["structinfo"]),
-and it specifies a supertype for the new structure type. Alternately,
+and it specifies a supertype for the structure type. Alternately,
 the @scheme[#:super] option can be used to specify an expression that
 must produce a @tech{structure type descriptor}. See
 @secref["structures"] for more information on structure subtypes
 and supertypes. If both @scheme[super-id] and @scheme[#:super] are
 provided, a syntax error is reported.
 
-If the @scheme[#:immutable] option is specified for an individual
-field, then the field cannot be mutated in instances of the structure
-type, and no @tech{mutator} procedure is bound. Supplying
-@scheme[#:immutable] as a @scheme[struct-option] is the same as
-supplying it for all @scheme[field]s. If @scheme[#:immutable] is
+If the @scheme[#:mutable] option is specified for an individual
+field, then the field can be mutated in instances of the structure
+type, and a @tech{mutator} procedure is bound. Supplying
+@scheme[#:mutable] as a @scheme[struct-option] is the same as
+supplying it for all @scheme[field]s. If @scheme[#:mutable] is
 specified as both a @scheme[field-option] and @scheme[struct-option],
 a syntax error is reported.
 
 The @scheme[#:inspector], @scheme[#:auto-value], and @scheme[#:guard]
 options specify an inspector, value for automatic fields, and guard
-procedure, respectively. See @scheme[make-struct-type] (in
-@secref["creatingmorestructs"]) for more information on these
-properties of a structure type. The @scheme[#:property] option, which
-is the only one that can be specified multiple times, attaches a
-property value to the structure type; see @secref["structprops"]
-for more information on properties.
+procedure, respectively. See @scheme[make-struct-type] for more
+information on these attributes of a structure type.  The
+@scheme[#:property] option, which is the only one that can be supplied
+multiple times, attaches a property value to the structure type; see
+@secref["structprops"] for more information on properties. The
+@scheme[#:transparent] option is a shorthand for @scheme[#:inspector
+#f]. 
+
+The @scheme[#:prefab] option obtains a @techlink{prefab} (pre-defined,
+globally shared) structure type, as opposed to creating a new
+structure type. Such a structure type is inherently transparent and
+cannot have a guard or properties, so using @scheme[#:prefab] with
+@scheme[#:transparent], @scheme[#:inspector], @scheme[#:guard], or
+@scheme[#:property] is a syntax error. If a supertype is specified, it
+must also be a @tech{prefab} structure type.
 
 If the @scheme[#:omit-define-syntaxes] option is supplied, then
 @scheme[id] is not bound as a transformer. If the
@@ -113,17 +130,21 @@ error is reported. If any @scheme[field-option] or
 @scheme[struct-option] keyword is repeated, other than
 @scheme[#:property], a syntax error is reported.
 
+For serialization, see @scheme[define-serializable-struct].
+
 @defexamples[
+#:eval posn-eval
 (define-struct posn (x y [z #:auto])
                #:auto-value 0
-               #:inspector #f)
+               #:transparent)
 (make-posn 1 2)
 (posn? (make-posn 1 2))
 (posn-y (make-posn 1 2))
 ]
 
 @defs+int[
-[(define-struct (color-posn posn) (hue))
+#:eval posn-eval
+[(define-struct (color-posn posn) (hue) #:mutable)
  (define cp (make-color-posn 1 2 "blue"))]
 (color-posn-hue cp)
 cp
@@ -138,9 +159,38 @@ This form can only appear as an expression within a
 @scheme[prop:procedure]. The result of
 
 @defexamples[
-(define-struct mood-procedure ([base #:immutable] rating)
+#:eval posn-eval
+(define-struct mood-procedure ([base] rating)
                #:property prop:procedure (struct-field-index base))
 (define happy+ (make-mood-procedure add1 10))
 (happy+ 2)
 (mood-procedure-rating happy+)
 ]}
+
+@defform[(define-struct/derived (id . rest-form) 
+           id-maybe-super (field ...) struct-option ...)]{
+
+Like @scheme[define-struct], but intended for use by macros that
+expand to @scheme[define-struct]. The form immediately after
+@scheme[define-struct/derived] is used for all syntax-error reporting,
+and the only constraint on the form is that it starts with some
+@scheme[id].
+
+@defexamples[
+#:eval posn-eval
+(define-syntax (define-xy-struct stx)
+  (syntax-case stx ()
+   [(ds name . rest) 
+    (with-syntax ([orig stx])
+      #'(define-struct/derived orig name (x y) . rest))]))
+
+(define-xy-struct posn)
+(posn-x (make-posn 1 2))
+(define-xy-struct posn #:mutable)
+(set-posn-x! (make-posn 1 2) 0)
+(define-xy-struct posn #:bad-option)
+]}
+
+@; ----------------------------------------
+
+@close-eval[posn-eval]

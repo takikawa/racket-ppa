@@ -202,7 +202,7 @@
       (test #t procedure-struct-type? type)
       (let* ([bad1 (make 17)]
 	     [bad2 (make2 18 -18)]
-	     [bad3 (make3 #f 19)]
+	     [bad3 (make3 700 19)]
 	     [bad11 (make bad1)])
 	(test #t pred bad1)
 	(test #t pred2 bad2)
@@ -254,7 +254,7 @@
 
       (let* ([cons1 (make cons)]
 	     [cons2 (make2 cons -18)]
-	     [cons3 (make3 #f cons)]
+	     [cons3 (make3 700 cons)]
 	     [cons11 (make cons1)])
 	(test #t pred cons1)
 	(test #t pred2 cons2)
@@ -415,7 +415,7 @@
 	     exn:application:mismatch?)
 
 
-(define-struct a (b c))
+(define-struct a (b c) #:mutable)
 (define-struct aa ())
 (define ai (make-a 1 2))
 (define aai (make-aa))
@@ -435,7 +435,7 @@
 (test 2 a-c ai)
 (test 3 a-b ai2)
 (test 4 a-c ai2)
-(define-struct a (b c))
+(define-struct a (b c) #:mutable)
 (test #f a? ai)
 (arity-test make-a 2 2)
 (err/rt-test (make-aa 1) exn:application:arity?)
@@ -452,24 +452,30 @@
 (arity-test struct-type? 1 1)
 
 (define (gen-struct-syntax-test formname suffix)
-  (syntax-test (datum->syntax-object #f `(,formname 1 (x) ,@suffix) #f))
-  (syntax-test (datum->syntax-object #f `(,formname a (1) ,@suffix) #f))
-  (syntax-test (datum->syntax-object #f `(,formname a (x 1) ,@suffix) #f))
-  (syntax-test (datum->syntax-object #f `(,formname a (x . y) ,@suffix) #f))
-  (syntax-test (datum->syntax-object #f `(,formname (a) (x) ,@suffix) #f))
-  (syntax-test (datum->syntax-object #f `(,formname (a . y) (x) ,@suffix) #f))
-  (syntax-test (datum->syntax-object #f `(,formname (a 2) (x) ,@suffix) #f))
-  (syntax-test (datum->syntax-object #f `(,formname (a 2 3) (x) ,@suffix) #f)))
+  (syntax-test (datum->syntax #f `(,formname 1 (x) ,@suffix) #f))
+  (syntax-test (datum->syntax #f `(,formname a (1) ,@suffix) #f))
+  (syntax-test (datum->syntax #f `(,formname a (x 1) ,@suffix) #f))
+  (syntax-test (datum->syntax #f `(,formname a (x . y) ,@suffix) #f))
+  (syntax-test (datum->syntax #f `(,formname (a) (x) ,@suffix) #f))
+  (syntax-test (datum->syntax #f `(,formname (a . y) (x) ,@suffix) #f))
+  (syntax-test (datum->syntax #f `(,formname (a 2) (x) ,@suffix) #f))
+  (syntax-test (datum->syntax #f `(,formname (a 2 3) (x) ,@suffix) #f)))
 (define (struct-syntax-test formname)
-  (syntax-test (datum->syntax-object #f `(,formname) #f))
-  (syntax-test (datum->syntax-object #f `(,formname . a) #f))
-  (syntax-test (datum->syntax-object #f `(,formname a . x) #f))
-  (syntax-test (datum->syntax-object #f `(,formname (a 9) (x)) #f))
-  (syntax-test (datum->syntax-object #f `(,formname a x) #f))
+  (syntax-test (datum->syntax #f `(,formname) #f))
+  (syntax-test (datum->syntax #f `(,formname . a) #f))
+  (syntax-test (datum->syntax #f `(,formname a . x) #f))
+  (syntax-test (datum->syntax #f `(,formname (a 9) (x)) #f))
+  (syntax-test (datum->syntax #f `(,formname a x) #f))
   (gen-struct-syntax-test formname '()))
 
 (struct-syntax-test 'define-struct)
-(gen-struct-syntax-test 'let-struct '(5))
+
+(syntax-test #'(define-struct a (b c) #:transparent #:inspector #f))
+(syntax-test #'(define-struct a (b c) #:transparent #:prefab))
+(syntax-test #'(define-struct a (b c) #:prefab #:guard 10))
+(syntax-test #'(define-struct a (b c) #:prefab #:property 1 10))
+(syntax-test #'(define-struct a (b c) #:guard 10 #:prefab))
+(syntax-test #'(define-struct a (b c) #:property 1 10 #:prefab))
 
 (define-struct base0 ())
 (define-struct base1 (a))
@@ -640,6 +646,43 @@
   (test 100 a-x (make-c 100 200 300 400)))
 
 ;; ------------------------------------------------------------
+;; Prefab
+
+(let ([v1 #s(v one)]
+      [v2 #s(v one two)]
+      [v2-prime #s((v 2) one two)]
+      [vw3 #s((v w 2) one two three)]
+      [vw3-prime #s((v 1 w 2) one two three)])
+  (test #f equal? v1 v2)
+  (test #t equal? v2 v2-prime)
+  (test #t equal? vw3 vw3-prime)
+  (let ()
+    (define-struct v (a) #:prefab)
+    (test #t v? v1)
+    (test #f v? v2)
+    (test #f v? vw3)
+    (test 'one v-a v1))
+  (let ()
+    (define-struct v (a b) #:prefab)
+    (test #f v? v1)
+    (test #t v? v2)
+    (test #f v? vw3)
+    (test 'one v-a v2)
+    (test 'two v-b v2))
+  (let ()
+    (define-struct w (a b) #:prefab)
+    (define-struct (v w) (c) #:prefab)
+    (test #f v? v1)
+    (test #f v? v2)
+    (test #t v? vw3)
+    (test #t w? vw3)
+    (test 'one w-a vw3)
+    (test 'two w-b vw3)
+    (test 'three v-c vw3)))
+
+(err/rt-test (make-struct-type 'bad struct:date 2 0 #f null 'prefab))
+
+;; ------------------------------------------------------------
 ;; Misc. built-in structures
 
 (test #f srcloc? 10)
@@ -706,10 +749,10 @@
   (test "1, 2, a" with-output-string 
 	(lambda ()
 	  (display (make-tuple '(1 2 "a")))))
-  (test "#0=<#0#, 2, \"a\">" with-output-string 
+  (test "#0=<#&#0#, 2, \"a\">" with-output-string 
 	(lambda ()
-	  (let ([t (make-tuple (list 1 2 "a"))])
-	    (set-car! (tuple-ref t 0) t)
+	  (let ([t (make-tuple (list (box 1) 2 "a"))])
+	    (set-box! (car (tuple-ref t 0)) t)
 	    (write t))))
   (test "ack: here: <10, 2, \"a\">" with-output-string 
 	(lambda ()
@@ -726,6 +769,75 @@
 
 (custom-write-check #t)
 (custom-write-check #f)
+
+;; ----------------------------------------
+
+(let ()
+  (define-struct t1 (a b) #:transparent)
+  (define-struct t2 (c d) #:transparent #:mutable)
+  (define-struct o (x y z)
+    #:property prop:equal+hash (list
+                                (lambda (a b equal?)
+                                  (and (equal? (o-x a) (o-x b))
+                                       (equal? (o-z a) (o-z b))))
+                                (lambda (a hash)
+                                  (+ (hash (o-x a)) (* 9 (hash (o-z a)))))
+                                (lambda (a hash)
+                                  (+ (hash (o-x a)) (hash (o-z a)))))
+    #:mutable)
+
+  (test #f equal? (make-t1 0 1) (make-t2 0 1))
+  (test #t equal? (make-t1 0 1) (make-t1 0 1))
+  (test #t equal? (make-t2 0 1) (make-t2 0 1))
+  (test #t equal? 
+        (shared ([t (make-t2 0 t)]) t) 
+        (shared ([t (make-t2 0 t)]) t))
+  (test #f equal?
+        (shared ([t (make-t2 0 t)]) t) 
+        (shared ([t (make-t2 1 t)]) t))
+  (test #t = 
+        (equal-hash-code (make-t1 0 1))
+        (equal-hash-code (make-t1 0 1)))
+  (test #t =
+        (equal-hash-code (shared ([t (make-t2 0 t)]) t))
+        (equal-hash-code (shared ([t (make-t2 0 t)]) t)))
+  (test #t = 
+        (equal-secondary-hash-code (make-t1 0 1))
+        (equal-secondary-hash-code (make-t1 0 1)))
+  (test #t =
+        (equal-secondary-hash-code (shared ([t (make-t2 0 t)]) t))
+        (equal-secondary-hash-code (shared ([t (make-t2 0 t)]) t)))
+  
+  (test #t equal? (make-o 1 2 3) (make-o 1 20 3))
+  (test #f equal? (make-o 10 2 3) (make-o 1 2 3))
+  (test #f equal? (make-o 1 2 3) (make-o 1 2 30))
+  (test #t equal? 
+        (shared ([t (make-o t 0 t)]) t) 
+        (shared ([t (make-o t 0 t)]) t))
+  (test #t equal?
+        (shared ([t (make-o t 0 t)]) t) 
+        (shared ([t (make-o t 1 t)]) t))
+  (test #f equal?
+        (shared ([t (make-o t 0 0)]) t) 
+        (shared ([t (make-o t 0 1)]) t))
+
+  (test #t = 
+        (equal-hash-code (make-o 1 2 3))
+        (equal-hash-code (make-o 1 20 3)))
+  (test #t =
+        (equal-hash-code (shared ([t (make-o t 0 t)]) t))
+        (equal-hash-code (shared ([t (make-o t 0 t)]) t)))
+  (test #t =
+        (equal-hash-code (shared ([t (make-o t 1 t)]) t))
+        (equal-hash-code (shared ([t (make-o t 1 t)]) t)))
+  (test #t =
+        (equal-secondary-hash-code (shared ([t (make-o t 0 t)]) t))
+        (equal-secondary-hash-code (shared ([t (make-o t 0 t)]) t)))
+  (test #t =
+        (equal-secondary-hash-code (shared ([t (make-o t 1 t)]) t))
+        (equal-secondary-hash-code (shared ([t (make-o t 1 t)]) t)))
+
+  (void))
 
 ;; ----------------------------------------
 

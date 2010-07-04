@@ -1,12 +1,13 @@
 
-(module comment-box (lib "a-unit.ss")
-  (require (lib "class.ss")
-           (lib "etc.ss")
-           (lib "mred.ss" "mred")
+#lang scheme/unit
+
+  (require mzlib/class
+           mzlib/etc
+           mred
            "sig.ss"
            "../decorated-editor-snip.ss"
            (lib "include-bitmap.ss" "mrlib")
-           (lib "string-constant.ss" "string-constants"))
+           string-constants)
   
   (import [prefix text: framework:text^]
           [prefix scheme: framework:scheme^]
@@ -121,4 +122,4 @@
         (make-special-comment "comment"))
       (super-instantiate ())
       (inherit set-snipclass)
-      (set-snipclass snipclass))))
+      (set-snipclass snipclass)))

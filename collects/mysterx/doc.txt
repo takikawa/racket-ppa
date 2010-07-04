@@ -37,8 +37,8 @@ _MysterX_
  setup program (as an executable) in your distribution:
 
   (module setup mzscheme
-    (require (lib "runtime-path.ss")
-             (lib "process.ss"))
+    (require mzlib/runtime-path
+             mzlib/process)
 
     ;; Ensure that DLLs are included with the distibution:
     (define-runtime-path myspage-dll '(so "myspage"))
@@ -66,12 +66,12 @@ _MysterX_
 
  Load the MysterX module with 
 
-  (require (lib "mysterx.ss" "mysterx"))
+  (require mysterx)
 
  Because some MysterX code relies on the PLT Scheme class system, you
  will likely need to run
 
-  (require (lib "class.ss"))
+  (require mzlib/class)
 
  Using the xml collection
  ------------------------
@@ -655,9 +655,9 @@ _Remote COM servers_
 
   There are a number of configuration issues relating to 
   DCOM, which MysterX uses to invoke remote COM servers.
-  The Web page 
+  The Web page
 
-    http://www.distribucon.com/dcom95.html 
+    http://www.distribucon.com/dcom95.aspx
 
   discusses how to setup client and server machines for 
   DCOM.

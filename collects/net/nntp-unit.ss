@@ -1,149 +1,150 @@
-(module nntp-unit (lib "a-unit.ss")
-  (require (lib "etc.ss") "nntp-sig.ss")
+#lang scheme/unit
 
-  (import)
-  (export nntp^)
+(require scheme/tcp "nntp-sig.ss")
 
-  ;; sender : oport
-  ;; receiver : iport
-  ;; server : string
-  ;; port : number
+(import)
+(export nntp^)
 
-  (define-struct communicator (sender receiver server port))
+;; sender : oport
+;; receiver : iport
+;; server : string
+;; port : number
 
-  ;; code : number
-  ;; text : string
-  ;; line : string
-  ;; communicator : communicator
-  ;; group : string
-  ;; article : number
+(define-struct communicator (sender receiver server port))
 
-  (define-struct (nntp exn) ())
-  (define-struct (unexpected-response nntp) (code text))
-  (define-struct (bad-status-line nntp) (line))
-  (define-struct (premature-close nntp) (communicator))
-  (define-struct (bad-newsgroup-line nntp) (line))
-  (define-struct (non-existent-group nntp) (group))
-  (define-struct (article-not-in-group nntp) (article))
-  (define-struct (no-group-selected nntp) ())
-  (define-struct (article-not-found nntp) (article))
-  (define-struct (authentication-rejected nntp) ())
+;; code : number
+;; text : string
+;; line : string
+;; communicator : communicator
+;; group : string
+;; article : number
 
-  ;; signal-error :
-  ;; (exn-args ... -> exn) x format-string x values ... ->
-  ;;   exn-args -> ()
+(define-struct (nntp exn) ())
+(define-struct (unexpected-response nntp) (code text))
+(define-struct (bad-status-line nntp) (line))
+(define-struct (premature-close nntp) (communicator))
+(define-struct (bad-newsgroup-line nntp) (line))
+(define-struct (non-existent-group nntp) (group))
+(define-struct (article-not-in-group nntp) (article))
+(define-struct (no-group-selected nntp) ())
+(define-struct (article-not-found nntp) (article))
+(define-struct (authentication-rejected nntp) ())
 
-  ;; - throws an exception
+;; signal-error :
+;; (exn-args ... -> exn) x format-string x values ... ->
+;;   exn-args -> ()
 
-  (define (signal-error constructor format-string . args)
-    (lambda exn-args
-      (raise (apply constructor
-                    (apply format format-string args)
-                    (current-continuation-marks)
-                    exn-args))))
+;; - throws an exception
 
-  ;; default-nntpd-port-number :
-  ;; number
+(define (signal-error constructor format-string . args)
+  (lambda exn-args
+    (raise (apply constructor
+                  (apply format format-string args)
+                  (current-continuation-marks)
+                  exn-args))))
 
-  (define default-nntpd-port-number 119)
+;; default-nntpd-port-number :
+;; number
 
-  ;; connect-to-server*:
-  ;; input-port output-port -> communicator
+(define default-nntpd-port-number 119)
 
-  (define connect-to-server*
-    (case-lambda
-      [(receiver sender)
-       (connect-to-server* receiver sender "unspecified" "unspecified")]
-      [(receiver sender server-name port-number)
-       (file-stream-buffer-mode sender 'line)
-       (let ([communicator (make-communicator sender receiver server-name
-                                              port-number)])
-         (let-values ([(code response)
-                       (get-single-line-response communicator)])
-           (case code
-             [(200 201) communicator]
-             [else ((signal-error make-unexpected-response
-                                  "unexpected connection response: ~s ~s"
-                                  code response)
-                    code response)])))]))
+;; connect-to-server*:
+;; input-port output-port -> communicator
 
-  ;; connect-to-server :
-  ;; string [x number] -> commnicator
+(define connect-to-server*
+  (case-lambda
+   [(receiver sender)
+    (connect-to-server* receiver sender "unspecified" "unspecified")]
+   [(receiver sender server-name port-number)
+    (file-stream-buffer-mode sender 'line)
+    (let ([communicator (make-communicator sender receiver server-name
+                                           port-number)])
+      (let-values ([(code response)
+                    (get-single-line-response communicator)])
+        (case code
+          [(200 201) communicator]
+          [else ((signal-error make-unexpected-response
+                               "unexpected connection response: ~s ~s"
+                               code response)
+                 code response)])))]))
 
-  (define connect-to-server
-    (opt-lambda (server-name (port-number default-nntpd-port-number))
-      (let-values ([(receiver sender)
-                    (tcp-connect server-name port-number)])
-        (connect-to-server* receiver sender server-name port-number))))
+;; connect-to-server :
+;; string [x number] -> commnicator
 
-  ;; close-communicator :
-  ;; communicator -> ()
+(define connect-to-server
+  (lambda (server-name (port-number default-nntpd-port-number))
+    (let-values ([(receiver sender)
+                  (tcp-connect server-name port-number)])
+      (connect-to-server* receiver sender server-name port-number))))
 
-  (define (close-communicator communicator)
-    (close-input-port (communicator-receiver communicator))
-    (close-output-port (communicator-sender communicator)))
+;; close-communicator :
+;; communicator -> ()
 
-  ;; disconnect-from-server :
-  ;; communicator -> ()
+(define (close-communicator communicator)
+  (close-input-port (communicator-receiver communicator))
+  (close-output-port (communicator-sender communicator)))
 
-  (define (disconnect-from-server communicator)
-    (send-to-server communicator "QUIT")
-    (let-values ([(code response)
-                  (get-single-line-response communicator)])
-      (case code
-        [(205)
-         (close-communicator communicator)]
-        [else
-         ((signal-error make-unexpected-response
-                        "unexpected dis-connect response: ~s ~s"
-                        code response)
-          code response)])))
+;; disconnect-from-server :
+;; communicator -> ()
 
-  ;; authenticate-user :
-  ;; communicator x user-name x password -> ()
-  ;; the password is not used if the server does not ask for it.
+(define (disconnect-from-server communicator)
+  (send-to-server communicator "QUIT")
+  (let-values ([(code response)
+                (get-single-line-response communicator)])
+    (case code
+      [(205)
+       (close-communicator communicator)]
+      [else
+       ((signal-error make-unexpected-response
+                      "unexpected dis-connect response: ~s ~s"
+                      code response)
+        code response)])))
 
-  (define (authenticate-user communicator user password)
-    (define (reject code response)
-      ((signal-error make-authentication-rejected
-                     "authentication rejected (~s ~s)"
-                     code response)))
-    (define (unexpected code response)
-      ((signal-error make-unexpected-response
-                     "unexpected response for authentication: ~s ~s"
-                     code response)
-       code response))
-    (send-to-server communicator "AUTHINFO USER ~a" user)
-    (let-values ([(code response) (get-single-line-response communicator)])
-      (case code
-        [(281) (void)] ; server doesn't ask for a password
-        [(381)
-         (send-to-server communicator "AUTHINFO PASS ~a" password)
-         (let-values ([(code response)
-                       (get-single-line-response communicator)])
-           (case code
-             [(281) (void)] ; done
-             [(502) (reject code response)]
-             [else (unexpected code response)]))]
-        [(502) (reject code response)]
-        [else (reject code response)
-              (unexpected code response)])))
+;; authenticate-user :
+;; communicator x user-name x password -> ()
+;; the password is not used if the server does not ask for it.
 
-  ;; send-to-server :
-  ;; communicator x format-string x list (values) -> ()
+(define (authenticate-user communicator user password)
+  (define (reject code response)
+    ((signal-error make-authentication-rejected
+                   "authentication rejected (~s ~s)"
+                   code response)))
+  (define (unexpected code response)
+    ((signal-error make-unexpected-response
+                   "unexpected response for authentication: ~s ~s"
+                   code response)
+     code response))
+  (send-to-server communicator "AUTHINFO USER ~a" user)
+  (let-values ([(code response) (get-single-line-response communicator)])
+    (case code
+      [(281) (void)] ; server doesn't ask for a password
+      [(381)
+       (send-to-server communicator "AUTHINFO PASS ~a" password)
+       (let-values ([(code response)
+                     (get-single-line-response communicator)])
+         (case code
+           [(281) (void)] ; done
+           [(502) (reject code response)]
+           [else (unexpected code response)]))]
+      [(502) (reject code response)]
+      [else (reject code response)
+            (unexpected code response)])))
 
-  (define (send-to-server communicator message-template . rest)
-    (let ([sender (communicator-sender communicator)])
-      (apply fprintf sender
-             (string-append message-template "\r\n")
-             rest)
-      (flush-output sender)))
+;; send-to-server :
+;; communicator x format-string x list (values) -> ()
 
-  ;; parse-status-line :
-  ;; string -> number x string
+(define (send-to-server communicator message-template . rest)
+  (let ([sender (communicator-sender communicator)])
+    (apply fprintf sender
+           (string-append message-template "\r\n")
+           rest)
+    (flush-output sender)))
 
-  (define (parse-status-line line)
-    (if (eof-object? line)
+;; parse-status-line :
+;; string -> number x string
+
+(define (parse-status-line line)
+  (if (eof-object? line)
       ((signal-error make-bad-status-line "eof instead of a status line")
        line)
       (let ([match (cdr (or (regexp-match #rx"([0-9]+) (.*)" line)
@@ -153,99 +154,99 @@
         (values (string->number (car match))
                 (cadr match)))))
 
-  ;; get-one-line-from-server :
-  ;; iport -> string
+;; get-one-line-from-server :
+;; iport -> string
 
-  (define (get-one-line-from-server server->client-port)
-    (read-line server->client-port 'return-linefeed))
+(define (get-one-line-from-server server->client-port)
+  (read-line server->client-port 'return-linefeed))
 
-  ;; get-single-line-response :
-  ;; communicator -> number x string
+;; get-single-line-response :
+;; communicator -> number x string
 
-  (define (get-single-line-response communicator)
-    (let* ([receiver (communicator-receiver communicator)]
-           [status-line (get-one-line-from-server receiver)])
-      (parse-status-line status-line)))
+(define (get-single-line-response communicator)
+  (let* ([receiver (communicator-receiver communicator)]
+         [status-line (get-one-line-from-server receiver)])
+    (parse-status-line status-line)))
 
-  ;; get-rest-of-multi-line-response :
-  ;; communicator -> list (string)
+;; get-rest-of-multi-line-response :
+;; communicator -> list (string)
 
-  (define (get-rest-of-multi-line-response communicator)
-    (let ([receiver (communicator-receiver communicator)])
-      (let loop ()
-        (let ([l (get-one-line-from-server receiver)])
-          (cond
-            [(eof-object? l)
-             ((signal-error make-premature-close
-                            "port prematurely closed during multi-line response")
-              communicator)]
-            [(string=? l ".")
-             '()]
-            [(string=? l "..")
-             (cons "." (loop))]
-            [else
-             (cons l (loop))])))))
+(define (get-rest-of-multi-line-response communicator)
+  (let ([receiver (communicator-receiver communicator)])
+    (let loop ()
+      (let ([l (get-one-line-from-server receiver)])
+        (cond
+         [(eof-object? l)
+          ((signal-error make-premature-close
+                         "port prematurely closed during multi-line response")
+           communicator)]
+         [(string=? l ".")
+          '()]
+         [(string=? l "..")
+          (cons "." (loop))]
+         [else
+          (cons l (loop))])))))
 
-  ;; get-multi-line-response :
-  ;; communicator -> number x string x list (string)
+;; get-multi-line-response :
+;; communicator -> number x string x list (string)
 
-  ;; -- The returned values are the status code, the rest of the status
-  ;; response line, and the remaining lines.
+;; -- The returned values are the status code, the rest of the status
+;; response line, and the remaining lines.
 
-  (define (get-multi-line-response communicator)
-    (let* ([receiver (communicator-receiver communicator)]
-           [status-line (get-one-line-from-server receiver)])
-      (let-values ([(code rest-of-line)
-                    (parse-status-line status-line)])
-        (values code rest-of-line (get-rest-of-multi-line-response)))))
-
-  ;; open-news-group :
-  ;; communicator x string -> number x number x number
-
-  ;; -- The returned values are the number of articles, the first
-  ;; article number, and the last article number for that group.
-
-  (define (open-news-group communicator group-name)
-    (send-to-server communicator "GROUP ~a" group-name)
+(define (get-multi-line-response communicator)
+  (let* ([receiver (communicator-receiver communicator)]
+         [status-line (get-one-line-from-server receiver)])
     (let-values ([(code rest-of-line)
-                  (get-single-line-response communicator)])
-      (case code
-        [(211)
-         (let ([match (map string->number
-                           (cdr
-                            (or (regexp-match #rx"([0-9]+) ([0-9]+) ([0-9]+)" rest-of-line)
-                                ((signal-error make-bad-newsgroup-line
-                                               "malformed newsgroup open response: ~s"
-                                               rest-of-line)
-                                 rest-of-line))))])
-           (let ([number-of-articles (car match)]
-                 [first-article-number (cadr match)]
-                 [last-article-number (caddr match)])
-             (values number-of-articles
-                     first-article-number
-                     last-article-number)))]
-        [(411)
-         ((signal-error make-non-existent-group
-                        "group ~s does not exist on server ~s"
-                        group-name (communicator-server communicator))
-          group-name)]
-        [else
-         ((signal-error make-unexpected-response
-                        "unexpected group opening response: ~s" code)
-          code rest-of-line)])))
+                  (parse-status-line status-line)])
+      (values code rest-of-line (get-rest-of-multi-line-response)))))
 
-  ;; generic-message-command :
-  ;; string x number -> communicator x (number U string) -> list (string)
+;; open-news-group :
+;; communicator x string -> number x number x number
 
-  (define (generic-message-command command ok-code)
-    (lambda (communicator message-index)
-      (send-to-server communicator (string-append command " ~a")
-                      (if (number? message-index)
+;; -- The returned values are the number of articles, the first
+;; article number, and the last article number for that group.
+
+(define (open-news-group communicator group-name)
+  (send-to-server communicator "GROUP ~a" group-name)
+  (let-values ([(code rest-of-line)
+                (get-single-line-response communicator)])
+    (case code
+      [(211)
+       (let ([match (map string->number
+                         (cdr
+                          (or (regexp-match #rx"([0-9]+) ([0-9]+) ([0-9]+)" rest-of-line)
+                              ((signal-error make-bad-newsgroup-line
+                                             "malformed newsgroup open response: ~s"
+                                             rest-of-line)
+                               rest-of-line))))])
+         (let ([number-of-articles (car match)]
+               [first-article-number (cadr match)]
+               [last-article-number (caddr match)])
+           (values number-of-articles
+                   first-article-number
+                   last-article-number)))]
+      [(411)
+       ((signal-error make-non-existent-group
+                      "group ~s does not exist on server ~s"
+                      group-name (communicator-server communicator))
+        group-name)]
+      [else
+       ((signal-error make-unexpected-response
+                      "unexpected group opening response: ~s" code)
+        code rest-of-line)])))
+
+;; generic-message-command :
+;; string x number -> communicator x (number U string) -> list (string)
+
+(define (generic-message-command command ok-code)
+  (lambda (communicator message-index)
+    (send-to-server communicator (string-append command " ~a")
+                    (if (number? message-index)
                         (number->string message-index)
                         message-index))
-      (let-values ([(code response)
-                    (get-single-line-response communicator)])
-        (if (= code ok-code)
+    (let-values ([(code response)
+                  (get-single-line-response communicator)])
+      (if (= code ok-code)
           (get-rest-of-multi-line-response communicator)
           (case code
             [(423)
@@ -264,54 +265,54 @@
                             "unexpected message access response: ~s" code)
               code response)])))))
 
-  ;; head-of-message :
-  ;; communicator x (number U string) -> list (string)
+;; head-of-message :
+;; communicator x (number U string) -> list (string)
 
-  (define head-of-message
-    (generic-message-command "HEAD" 221))
+(define head-of-message
+  (generic-message-command "HEAD" 221))
 
-  ;; body-of-message :
-  ;; communicator x (number U string) -> list (string)
+;; body-of-message :
+;; communicator x (number U string) -> list (string)
 
-  (define body-of-message
-    (generic-message-command "BODY" 222))
+(define body-of-message
+  (generic-message-command "BODY" 222))
 
-  ;; newnews-since :
-  ;; communicator x (number U string) -> list (string)
+;; newnews-since :
+;; communicator x (number U string) -> list (string)
 
-  (define newnews-since
-    (generic-message-command "NEWNEWS" 230))
+(define newnews-since
+  (generic-message-command "NEWNEWS" 230))
 
-  ;; make-desired-header :
-  ;; string -> desired
+;; make-desired-header :
+;; string -> desired
 
-  (define (make-desired-header raw-header)
-    (regexp
-     (string-append
-      "^"
-      (list->string
-       (apply append
-              (map (lambda (c)
-                     (cond
-                       [(char-lower-case? c)
-                        (list #\[ (char-upcase c) c #\])]
-                       [(char-upper-case? c)
-                        (list #\[ c (char-downcase c) #\])]
-                       [else
-                        (list c)]))
-                   (string->list raw-header))))
-      ":")))
+(define (make-desired-header raw-header)
+  (regexp
+   (string-append
+    "^"
+    (list->string
+     (apply append
+            (map (lambda (c)
+                   (cond
+                    [(char-lower-case? c)
+                     (list #\[ (char-upcase c) c #\])]
+                    [(char-upper-case? c)
+                     (list #\[ c (char-downcase c) #\])]
+                    [else
+                     (list c)]))
+                 (string->list raw-header))))
+    ":")))
 
-  ;; extract-desired-headers :
-  ;; list (string) x list (desired) -> list (string)
+;; extract-desired-headers :
+;; list (string) x list (desired) -> list (string)
 
-  (define (extract-desired-headers headers desireds)
-    (let loop ([headers headers])
-      (if (null? headers) null
-          (let ([first (car headers)]
-                [rest (cdr headers)])
-            (if (ormap (lambda (matcher)
-                         (regexp-match matcher first))
-                       desireds)
+(define (extract-desired-headers headers desireds)
+  (let loop ([headers headers])
+    (if (null? headers) null
+        (let ([first (car headers)]
+              [rest (cdr headers)])
+          (if (ormap (lambda (matcher)
+                       (regexp-match matcher first))
+                     desireds)
               (cons first (loop rest))
-              (loop rest)))))))
+              (loop rest))))))

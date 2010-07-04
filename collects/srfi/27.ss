@@ -1,3 +1,2 @@
-(module |27| mzscheme
-  (require (lib "random-bits.ss" "srfi" "27"))
-  (provide (all-from (lib "random-bits.ss" "srfi" "27"))))
+;; module loader for SRFI-27
+#lang s-exp srfi/provider srfi/27/random-bits

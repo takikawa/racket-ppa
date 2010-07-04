@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["common.ss"]
+#lang scribble/doc
+@(require "common.ss")
 
 @title[#:tag "eventspace-funcs"]{Eventspaces}
 
@@ -137,7 +137,7 @@ A second (optional) boolean argument indicates whether the callback
             boolean?]
            [(yield [v (or/c (one-of/c 'wait) evt?)])
             any/c])]{
-\index{pause}\index{wait}
+@;\index{pause}\index{wait}
 Yields control to event dispatching. See
  @secref["eventspaceinfo"] for details.
 
@@ -186,7 +186,7 @@ If @scheme[v] is an event in MzScheme's sense (not to be confused with
  multiple times (but it will complete a @scheme[sync] on @scheme[v] at
  most one time). If the current thread is the current eventspace's
  handler thread, events are dispatched until a @scheme[v] sync
- succeeds on a MrEd event boundary. For other threads, calling
+ succeeds on an event boundary. For other threads, calling
  @scheme[yield] with a MzScheme event is equivalent to calling
  @scheme[sync]. In either case, the result is the same that of
  @scheme[sync]; however, if a wrapper procedure is associated with

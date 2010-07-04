@@ -1,6 +1,9 @@
+
+#lang scheme/base
+
 (use-compiled-file-paths null)
 
-(require (lib "restart.ss"))
+(require mzlib/restart)
 
 (define cpp-flags "/D _CRT_SECURE_NO_DEPRECATE /D WIN32")
 (define includes 
@@ -39,9 +42,10 @@
     (restart-mzscheme #() (lambda (x) x)
                       (list->vector 
                        (append
-                        (list "-r"
+                        (list "-u"
                               "../../mzscheme/gc2/xform.ss"
                               "--setup"
+			      "../gc2"
                               "--indirect"
                               "--depends")
 			(cond
@@ -60,9 +64,10 @@
 
 (with-output-to-file
  "gc_traverse.inc"
+ #:exists 'truncate
  (lambda ()
-   (load "../../mysterx/gc-trav.ss"))
- 'truncate)
+   (parameterize ([use-compiled-file-paths null])
+     (dynamic-require `(file "../../mysterx/gc-trav.ss") #f))))
 
 (try "../../mysterx/precomp.cxx"
      use-precomp

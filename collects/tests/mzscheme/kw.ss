@@ -3,9 +3,11 @@
 
 (Section 'kw)
 
-(require (lib "kw.ss"))
+(require mzlib/kw
+         (prefix-in mz: mzscheme))
 
-(let ()
+(let-syntax ([#%datum (syntax-rules () [(_ . xs) (mz:#%datum . xs)])]
+             [#%app   (syntax-rules () [(_ . xs) (mz:#%app   . xs)])])
   (define-syntax t
     (syntax-rules (=> <= :rt-err: :st-err:)
       [(t E => :rt-err:) (err/rt-test E)]
@@ -406,3 +408,5 @@
        (f 1 #:a 2 #:a 3) => '(1 (#:a 2 #:a 3))))
 
   )
+
+(report-errs)

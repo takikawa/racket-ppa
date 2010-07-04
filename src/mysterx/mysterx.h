@@ -626,7 +626,8 @@ void signalCodedEventSinkError(char *,HRESULT);
 // array procedures
 
 Scheme_Object *safeArrayToSchemeVector(SAFEARRAY *);
-SAFEARRAY *schemeVectorToSafeArray(Scheme_Object *);
+SAFEARRAY *schemeVectorToSafeArray(Scheme_Object *, VARTYPE *);
+VARTYPE getSchemeVectorType(Scheme_Object *vec);
 
 extern MYSSINK_TABLE myssink_table;
 extern HINSTANCE hInstance;
@@ -705,8 +706,8 @@ extern unsigned long browserCount;
     else { \
       vaPtr->vt = getVarTypeFromElemDesc(&pFuncDesc->lprgelemdescParam[j]); \
       if (vaPtr->vt == VT_VARIANT) { \
-	marshalSchemeValueToVariant(argv[i],vaPtr); \
-        va = *vaPtr; \
+        marshalSchemeValueToVariant(argv[i],vaPtr);     \
+        va = *vaPtr;                                    \
         pushVariant(va); \
         continue; \
       } \
@@ -739,15 +740,15 @@ extern unsigned long browserCount;
     for ( ; j > 0; i--,j--,vaPtr--) { \
       VariantInit(vaPtr); \
       if (isDefaultParam(pFuncDesc,i)) { \
-	vaPtr = &(pFuncDesc->lprgelemdescParam[i].paramdesc.pparamdescex->varDefaultValue); \
+        vaPtr = &(pFuncDesc->lprgelemdescParam[i].paramdesc.pparamdescex->varDefaultValue); \
       } \
       else if (i == lcidIndex) { \
         vaPtr->vt = VT_UI4; \
         vaPtr->ulVal = LOCALE_SYSTEM_DEFAULT; \
       } \
       else { \
-	vaPtr->vt = VT_ERROR; \
-	vaPtr->lVal = DISP_E_PARAMNOTFOUND; \
+        vaPtr->vt = VT_ERROR;       \
+        vaPtr->lVal = DISP_E_PARAMNOTFOUND;     \
         va = *vaPtr; \
         pushVariant(va); \
         continue; \
@@ -902,6 +903,9 @@ extern unsigned long browserCount;
       scheme_signal_error(buff); }; } while (0)
 
 void *mx_wrap_handler(Scheme_Object *h);
+
+// So array.cxx sees it
+extern Scheme_Object * mx_marshal_raw_scheme_objects;
 
 /* This indirection lets us delayload libmzsch.dll: */
 #define scheme_false (scheme_make_false())

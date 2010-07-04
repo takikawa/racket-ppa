@@ -12,7 +12,7 @@
 
 (Section 'pretty)
 
-(require (lib "pretty.ss"))
+(require mzlib/pretty)
 
 (define (pprec-print pprec port write?)
   (define (print-one n port)
@@ -64,14 +64,24 @@
 (test "#&10" pretty-format (box 10))
 (parameterize ([print-box #f])
   (test "#<box>" pretty-format (box 10)))
-(test "#1(10)" pretty-format (vector 10))
-(test "#2(10)" pretty-format (vector 10 10))
-(parameterize ([print-vector-length #f])
-  (test "#(10 10)" pretty-format (vector 10 10)))
-(test "#<hash-table>" pretty-format (let ([ht (make-hash-table)])
-                                  (hash-table-put! ht 1 2)
-                                  ht))
-
+(test "#(10)" pretty-format (vector 10))
+(test "#(10 10)" pretty-format (vector 10 10))
+(parameterize ([print-vector-length #t])
+  (test "#1(10)" pretty-format (vector 10))
+  (test "#2(10)" pretty-format (vector 10 10))
+  (test "#2(10 20)" pretty-format (vector 10 20)))
+(test "#hasheq((1 . 2))" pretty-format (let ([ht (make-hasheq)])
+                                         (hash-set! ht 1 2)
+                                         ht))
+(test "#hash((1 . 2))" pretty-format (let ([ht (make-hash)])
+                                       (hash-set! ht 1 2)
+                                       ht))
+(test "#hash((1 . 2))" pretty-format #hash((1 . 2)))
+(test "#hasheq((1 . 2))" pretty-format #hasheq((1 . 2)))
+(parameterize ([print-hash-table #f])
+  (test "#<hash>" pretty-format (let ([ht (make-hasheq)])
+                                  (hash-set! ht 1 2)
+                                  ht)))
 
 (parameterize ([pretty-print-abbreviate-read-macros #f])
   (test "(quote a)" pretty-format ''a)
@@ -85,8 +95,8 @@
 (test "(1 2)" pretty-format '(1 2) 'infinity)
 
 (parameterize ([print-hash-table #t])
-  (test "#hasheq((1 . 2))" pretty-format (let ([ht (make-hash-table)])
-                                       (hash-table-put! ht 1 2)
+  (test "#hasheq((1 . 2))" pretty-format (let ([ht (make-hasheq)])
+                                       (hash-set! ht 1 2)
                                        ht)))
 
 (test #t pretty-print-style-table? (pretty-print-current-style-table))
@@ -151,7 +161,7 @@
 
 (parameterize ([print-struct #t])
   (let ()
-    (define-struct s (x) (make-inspector))
+    (define-struct s (x) #:inspector (make-inspector))
     (test "#(struct:s 1)" pretty-format (make-s 1))))
 
 (err/rt-test (pretty-print-extend-style-table 'ack '(a) '(b)))
@@ -178,6 +188,8 @@
      '(1)
      '(1 2 3)
      '(1 . 2)
+     (mcons 1 2)
+     (mcons 1 (mcons 2 null))
      #(1 2 3 4 5)
      (read (open-input-string "(#0=() . #0#)"))
      (read (open-input-string "#1=(1 . #1#)"))
@@ -208,6 +220,7 @@
   (list
    (list "DEPTH=2" pretty-print-depth 2)
    (list "GRAPH-ON" print-graph #t)
+   (list "HASH-TABLE-ON" print-hash-table #t)
    (list "STRUCT-ON" print-struct #t)
    (list "LINE-NO-ON" pretty-print-print-line print-line-no)
    (list "SUPER-WIDE" pretty-print-columns 300)))
@@ -253,8 +266,8 @@
 
 (when record-for-regression?
   (with-output-to-file regression-path
-    (lambda () (write recorded))
-    'truncate/replace))
+    #:exists 'truncate/replace
+    (lambda () (write recorded))))
 
 (test #t 'use-regression? use-regression?)
 

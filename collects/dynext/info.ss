@@ -1,5 +1,3 @@
+#lang setup/infotab
 
-(module info (lib "infotab.ss" "setup")
-  (define doc.txt "doc.txt")
-  (define name "Dynext"))
-
+(define scribblings '(("dynext.scrbl" (multi-page) (tool-library))))

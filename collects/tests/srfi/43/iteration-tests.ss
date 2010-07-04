@@ -1,7 +1,7 @@
 (module iteration-tests mzscheme
   
   (require (planet "test.ss" ("schematics" "schemeunit.plt" 2)))
-  (require (lib "vector-lib.ss" "srfi" "43"))
+  (require srfi/43/vector-lib)
   
   (provide iteration-tests)
   
@@ -66,7 +66,7 @@
      
      (test-case
       "vector-map!"
-      (let ((vec '#(1 2 3 4)))
+      (let ((vec (vector 1 2 3 4)))
         (check-equal?
          (begin (vector-map! (lambda (i x) (* x x))
                              vec)
@@ -79,7 +79,7 @@
                              vec1 vec2)
                 vec1)
          '#(5 8 9 8 5)))
-      (let ((vec '#(1 2 3 4)))
+      (let ((vec (vector 1 2 3 4)))
         (check-equal?
          (begin (vector-map! (lambda (i elt) (+ i elt))
                              vec)
@@ -88,7 +88,7 @@
      
      (test-case
       "vector-for-each"
-      (let ((vec1 '#(1 2 3 4))
+      (let ((vec1 (vector 1 2 3 4))
             (vec2 (make-vector 4)))
         (check-equal?
          (begin (vector-for-each (lambda (i elt)

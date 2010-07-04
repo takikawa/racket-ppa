@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["common.ss"]
+#lang scribble/doc
+@(require "common.ss")
 
 @defclass/title[dc-path% object% ()]{
 
@@ -99,8 +99,8 @@ Closes the path's @tech{open sub-path}. If the path has no @tech{open
 
 Extends the path's @tech{open sub-path} with a Bezier curve to the
  given point @math{(@scheme[x3],@scheme[y3])}, using the points
- @math{(@scheme[x1], @scheme[y1])}$ and @math{(@scheme[x2],
- @scheme[y2])}$ as control points. If the path has no @tech{open
+ @math{(@scheme[x1], @scheme[y1])} and @math{(@scheme[x2],
+ @scheme[y2])} as control points. If the path has no @tech{open
  sub-path}, @|MismatchExn|.
 
 }

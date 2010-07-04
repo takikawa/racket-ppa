@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
 @title[#:tag "stringport"]{String Ports}
 

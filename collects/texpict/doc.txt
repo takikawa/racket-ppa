@@ -81,7 +81,7 @@ and a bitmap-dc% will work fine for bitmap-dc% or canvas% output.
 The `draw-pict' function takes a picture, a device context
 
  ;; Example of producing PostScript output
- (require (lib "mrpict.ss" "texpict"))
+ (require texpict/mrpict)
 
  ;; Create PS context
  (define ps-dc (make-object post-script-dc%))
@@ -106,7 +106,7 @@ usual policy for reporting size information.
 LaTeX output
 ------------
 
-The LaTeX texpict function set is loaded by the _texpict.ss_ library.
+The LaTeX texpict function set is loaded by the _texpict_ library.
 The library is available in unit form via _texpict-unit.ss_, which
 provides a `texpict@' unit with no imports and taht exports
 `texpict-common^' and `texpict-extra^'. The _texpict-sig.ss_ library
@@ -944,7 +944,7 @@ _slideshow-run.ss_ and _slideshow.ss_
 ------------------------------------------------------------
 
 The "slideshow-run.ss" and "slideshow.ss" modules simply re-export
-`(lib "run.ss" "slideshow")' and `(lib "slideshow.ss" "slideshow")'
+`slideshow/run' and `slideshow/slideshow'
 for backward compatibility.
 
 See the "slideshow" collection for more details.

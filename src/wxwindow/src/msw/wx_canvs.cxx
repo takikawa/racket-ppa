@@ -4,7 +4,7 @@
  * Author:      Julian Smart
  * Created:     1993
  * Updated:	August 1994
- * Copyright:   (c) 2004-2007 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2008 PLT Scheme Inc.
  * Copyright:   (c) 1993, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -126,6 +126,10 @@ wxCanvas::~wxCanvas (void)
     wx_dc->SelectOldObjects(dc);
     wxwmReleaseDC(wnd->handle, dc);
     delete wx_dc;
+  }
+  if (need_update) {
+    DeleteObject(need_update);
+    need_update = NULL;
   }
 }
 
@@ -505,7 +509,7 @@ wxCanvasWnd::wxCanvasWnd (wxWnd * parent, wxWindow * wx_win,
 
 static HBRUSH btnface_brush;
 
-BOOL wxCanvasWnd::OnEraseBkgnd (HDC pDC)
+static void DoErase(HWND handle, wxWindow *wx_window, HDC pDC)
 {
   long wstyle;
 
@@ -549,8 +553,13 @@ BOOL wxCanvasWnd::OnEraseBkgnd (HDC pDC)
       SetWindowExtEx(pDC, canvas->wx_dc->window_ext_x, canvas->wx_dc->window_ext_y, NULL);
     }
   }
-  
-  return TRUE;
+}
+
+BOOL wxCanvasWnd::OnEraseBkgnd (HDC pDC)
+{
+  DoErase(handle, wx_window, pDC);
+ 
+  return TRUE;  
 }
 
 void wxCanvas::SetCanvasBackground(wxColor *c)
@@ -669,11 +678,22 @@ BOOL wxCanvasWnd::OnPaint(void)
     
     if (GetUpdateRgn(handle, tRgn, FALSE)) {
       PAINTSTRUCT ps;
+      HRGN need_update;
 
       BeginPaint(handle, &ps);
 
       /* We used to call wx_window->OnPaint directly;
-	 now we queue an event. */
+	 now we queue an event. The need_update flag
+         avoids multiple updats with we queue multiple
+         events before the first is handled. */
+
+      need_update = ((wxCanvas *)wx_window)->need_update;
+      if (!need_update) {
+	need_update = CreateRectRgn(0,0,0,0);
+	((wxCanvas *)wx_window)->need_update = need_update;
+      }
+      CombineRgn(need_update, tRgn, need_update, RGN_OR);
+
       MrEdQueuePaint(wx_window);
 
       EndPaint(handle, &ps);
@@ -686,4 +706,56 @@ BOOL wxCanvasWnd::OnPaint(void)
   }
 
   return retval;
+}
+
+void wxCanvas::DoPaint()
+{
+  if (need_update) {
+    RECT r;
+    if (GetRgnBox(need_update, &r) != NULLREGION) {
+      long wstyle;
+      wstyle = GetWindowStyleFlag();
+
+      if (wstyle & wxTRANSPARENT_WIN) {
+        wxDC *dc;
+        HDC hdc;
+        HRGN paint_rgn;
+
+        paint_rgn = CreateRectRgn(0,0,0,0);
+        CombineRgn(paint_rgn, need_update, paint_rgn, RGN_COPY);
+        SetRectRgn(need_update, 0, 0, 0, 0);
+    
+        dc = GetDC();
+        dc->limit_rgn = paint_rgn;
+        hdc = dc->ThisDC(FALSE);
+        dc->DoClipping(hdc);
+        dc->DoneDC(hdc);
+
+        OnPaint();
+
+        dc->limit_rgn = NULL;
+        hdc = dc->ThisDC(FALSE);
+        dc->DoClipping(hdc);
+        dc->DoneDC(hdc);
+
+        DeleteObject(paint_rgn);
+      } else {
+        SetRectRgn(need_update, 0, 0, 0, 0);
+        if (!(wstyle & wxNO_AUTOCLEAR)) {
+          /* The erase through OnEraseBkgnd() was confine to the clipping
+             area. Erase the full area. */
+          wxDC *dc;
+          HDC hdc;
+
+          dc = GetDC();
+          hdc = dc->ThisDC(FALSE);
+
+          DoErase(GetHWND(), this, hdc);
+          
+          dc->DoneDC(hdc);
+        }
+        OnPaint();
+      }
+    }
+  }
 }

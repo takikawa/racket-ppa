@@ -1,23 +1,24 @@
-#reader(lib "docreader.ss" "scribble")
-@require["common.ss"]
+#lang scribble/doc
+@(require "common.ss")
 
-@title[#:tag-prefix '(lib "gui.scrbl" "scribblings" "gui") 
-       #:tag "top"]{PLT Scheme GUI: MrEd}
+@title{@bold{GUI}: PLT Graphics Toolkit}
 
-@declare-exporting[(lib "mred")]
+@declare-exporting[scheme/gui/base scheme/gui #:use-sources (mred)]
 
-This reference manual describes the MrEd GUI toolbox that is part of
- PLT Scheme. See @secref[#:doc '(lib "guide.scrbl" "scribblings"
- "guide") "mred"] in @italic{@link["../guide/index.html"]{A Guide to
- PLT Scheme}} for an introduction to MrEd.
+This reference manual describes the GUI toolbox that is part of PLT
+ Scheme and whose core is implemented by the MrEd executable.
 
-The @scheme[(lib "mred")] module provides all of the class, interface,
- and procedure bindings defined in this manual. The
- @schememodname[big-gui] language (for use with @schemefont{#module})
- extends the @schememodname[big] language with @scheme[(lib "mred")].
+@defmodule*/no-declare[(scheme/gui/base)]{The
+@schememodname[scheme/gui/base] library provides all of the class,
+interface, and procedure bindings defined in this manual. At run time,
+this library needs primitive graphics support that the MrEd executable
+provides; this library cannot run in MzScheme.}
 
-@bold{This reference describes a potential future version of PLT Scheme.
-      It does not match the current implementation.}
+@defmodulelang*/no-declare[(scheme/gui)]{The
+@schememodname[scheme/gui] language combines all bindings of the
+@schememodname[scheme] language and the
+@schememodname[scheme/gui/base] modules.}
+
 
 @table-of-contents[]
 
@@ -26,7 +27,8 @@ The @scheme[(lib "mred")] module provides all of the class, interface,
 @include-section["guide.scrbl"]
 @include-section["reference.scrbl"]
 @include-section["config.scrbl"]
+@include-section["dynamic.scrbl"]
 
 @;------------------------------------------------------------------------
 
-@index-section["mred-index"]
+@index-section[]

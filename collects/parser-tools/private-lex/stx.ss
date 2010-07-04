@@ -1,5 +1,5 @@
 (module stx mzscheme
-  (require (lib "boundmap.ss" "syntax")
+  (require syntax/boundmap
            "util.ss")
   
   (provide parse)
@@ -47,7 +47,7 @@
                                "undefined abbreviation"
                                stx))
          (set-box! disappeared-uses (cons stx (unbox disappeared-uses)))
-         (parse (lex-abbrev-abbrev expansion))))
+         (parse ((lex-abbrev-get-abbrev expansion)))))
       (_
        (or (char? (syntax-e stx)) (string? (syntax-e stx)))
        (syntax-e stx))

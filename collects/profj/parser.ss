@@ -1,4 +1,4 @@
-#cs
+
 (module parser mzscheme
   (require "parsers/full-parser.ss"
            "parsers/advanced-parser.ss"
@@ -12,9 +12,9 @@
            "ast.ss"
            "parameters.ss")
   
-  (require (all-except (lib "lex.ss" "parser-tools") input-port)
-           (lib "readerr.ss" "syntax")
-           (lib "force.ss" "lazy"))
+  (require (all-except parser-tools/lex input-port)
+           syntax/readerr
+           )
   (provide parse parse-interactions parse-expression parse-type parse-name lex-stream)
   
   ;function to lex in the entire port
@@ -28,7 +28,7 @@
                   (if (eq? 'EOF (position-token-token cur-tok))
                       (cons cur-tok acc)
                       (getter (cons cur-tok acc)))))))
-      (reverse! (getter null))))
+      (reverse (getter null))))
   ;getter: (list position-token) -> (-> position-token)
   (define (getter token-list)
     (lambda ()
@@ -40,8 +40,7 @@
     (if (new-parser?)
         (lambda ()
           (printf "Syntax error detected~n")
-          (let ([result (!!! (parser lexed loc))])
-            #;(printf "~a~n" result)
+          (let ([result (parser lexed loc)])
             (if (list? result)
                 (raise-read-error (cadr result)
                                   (car (car result))

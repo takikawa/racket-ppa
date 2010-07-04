@@ -1,6 +1,6 @@
-#reader(lib "docreader.ss" "scribble")
-@require["common.ss"]
-@require["diagrams.ss"]
+#lang scribble/doc
+@(require "common.ss"
+          "diagrams.ss")
 
 @title[#:style '(toc quiet)]{Drawing Classes}
 

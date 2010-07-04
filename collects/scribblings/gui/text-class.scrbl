@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["common.ss"]
+#lang scribble/doc
+@(require "common.ss")
 
 @defclass/title[text% object% (editor<%>)]{
 
@@ -808,9 +808,12 @@ Returns @scheme[#t] if the editor is in overwrite mode, @scheme[#f]
                          [end (or/c (box/c nonnegative-exact-integer?) false/c) #f])
            void?]{
 
-Returns the current selection range in @techlink{position}s.  See also
- @method[text% get-start-position] and @method[text%
- get-end-position].
+Returns the current selection range in @techlink{position}s.  If
+nothing is selected, the @scheme[start] and @scheme[end] will be
+the same number and that number will be where the insertion point is.
+
+See also @method[text% get-start-position] 
+and @method[text% get-end-position].
 
 @boxisfillnull[(scheme start) @elem{the starting @techlink{position} of the selection}]
 @boxisfillnull[(scheme end) @elem{the ending @techlink{position} of the selection}]
@@ -1825,7 +1828,7 @@ Sets a paragraph-specific horizontal alignment. The alignment is only
 
 @italic{This method is experimental.} It works reliably only when the
  paragraph is not merged or split. Merging or splitting a paragraph
- with alignment settings causes the settings to be transfered
+ with alignment settings causes the settings to be transferred
  unpredictably (although other paragraphs in the editor can be safely
  split or merged). If the last paragraph in an editor is empty,
  settings assigned to it are ignored.

@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
 @title[#:tag "networking" #:style 'toc]{Networking}
 
@@ -7,6 +7,8 @@
 
 @;------------------------------------------------------------------------
 @section[#:tag "tcp"]{TCP}
+
+@note-lib[scheme/tcp]
 
 For information about TCP in general, see @italic{TCP/IP Illustrated,
  Volume 1} by W. Richard Stevens.
@@ -65,7 +67,8 @@ If the server cannot be started by @scheme[tcp-listen], the
                       [local-hostname (or/c string? false/c) #f]
                       [local-port-no (or/c (and/c nonnegative-exact-integer?
                                                   (integer-in 1 65535))
-                                           false/c)])
+                                           false/c)
+                                     #f])
           (values input-port? output-port?)]{
 
 Attempts to connect as a client to a listening server.  The
@@ -252,6 +255,8 @@ Returns @scheme[#t] if @scheme[v] is a port returned by
 
 @;------------------------------------------------------------------------
 @section[#:tag "udp"]{UDP}
+
+@note-lib[scheme/udp]
 
 For information about UDP in general, see @italic{TCP/IP Illustrated,
 Volume 1} by W. Richard Stevens.

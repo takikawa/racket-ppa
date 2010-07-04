@@ -1,7 +1,7 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
-@title{Environment and Runtime Information}
+@title[#:tag "runtime"]{Environment and Runtime Information}
 
 @defproc[(getenv [name string?]) (or/c string? false/c)]{
 
@@ -114,6 +114,21 @@ banner text for an embedding program, such as MrEd). The banner string
 ends with a newline.}
 
 
+@defparam[current-command-line-arguments argv (vectorof (and/c string? immutable?))]{
+
+A parameter that is initialized with command-line arguments when
+Scheme starts (not including any command-line arguments that were
+treated as flags for the system).}
+
+
+@defparam[current-thread-initial-stack-size size exact-positive-integer?]{
+
+A parameter that provides a hint about how much space to reserve for a
+newly created thread's local variables. The actual space used by a
+computation is affected by just-in-time (JIT) compilation, but it is
+otherwise platform-independent.}
+
+
 @defproc[(vector-set-performance-stats! [results (and/c vector?
                                                         (not/c immutable?))]
                                         [thd (or/c thread? false/c) #f])
@@ -158,10 +173,17 @@ follows, in the order that they are set within @scheme[results]:
   @item{@scheme[7]: The number of syntax objects read from compiled code
   since start-up.}
 
-  @item{@scheme[8]: The number of hash-table searches performed.}
+  @item{@scheme[8]: The number of hash-table searches performed. When
+  this counter reaches the maximum value of a @tech{fixnum}, it
+  overflows to the most negative @tech{fixnum}.}
 
-  @item{@scheme[9]: The number of additional hash slots searched to complete
-  hash searches (using double hashing).}
+  @item{@scheme[9]: The number of additional hash slots searched to
+  complete hash searches (using double hashing).  When this counter
+  reaches the maximum value of a @tech{fixnum}, it overflows to the
+  most negative @tech{fixnum}.}
+
+  @item{@scheme[10]: The number of bytes allocated for machine code
+  that is not reported by @scheme[current-memory-use].}
 
  }
 

@@ -1,5 +1,10 @@
 (module mred mzscheme
-  (require (lib "etc.ss")
+  (require (only scheme/base
+                 define-namespace-anchor
+                 namespace-anchor->empty-namespace
+                 make-base-empty-namespace)
+           scheme/class
+           mzlib/etc
 	   (prefix wx: "private/kernel.ss")
 	   "private/wxtop.ss"
 	   "private/app.ss"
@@ -22,7 +27,8 @@
 	   "private/gdi.ss"
 	   "private/snipfile.ss"
 	   "private/repl.ss"
-	   "private/afm.ss")
+	   "private/afm.ss"
+           "private/dynamic.ss")
 
   ;; Initialize AFM/PS:
   (wx:set-ps-procs
@@ -36,26 +42,23 @@
   (wx:set-dialogs get-file put-file get-ps-setup-from-user message-box)
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-  
-  (define mred-module-name ((current-module-name-resolver)
-			    '(lib "mred.ss" "mred") #f #f))
-  (define class-module-name ((current-module-name-resolver)
-			     '(lib "class.ss") #f #f))
 
-  (define make-namespace-with-mred
-    (opt-lambda ([flag 'mred])
-      (unless (memq flag '(initial mred empty))
-	(raise-type-error 'make-namespace-with-mred
-			  "flag symbol, one of 'mred, 'initial, or 'empty"
-			  flag))
-      (let ([orig (current-namespace)]
-	    [ns (make-namespace (if (eq? flag 'empty) 'empty 'initial))])
-	(parameterize ([current-namespace ns])
-	  (namespace-attach-module orig mred-module-name)
-	  (when (eq? flag 'mred)
-	    (namespace-require mred-module-name)
-	    (namespace-require class-module-name)))
-	ns)))
+  (define-namespace-anchor anchor)
+
+  (define (make-gui-empty-namespace)
+    (let ([ns (make-base-empty-namespace)])
+      (namespace-attach-module (namespace-anchor->empty-namespace anchor)
+                               'mred
+                               ns)
+      ns))
+
+  (define (make-gui-namespace)
+    (let ([ns (make-gui-empty-namespace)])
+      (parameterize ([current-namespace ns])
+        (namespace-require 'scheme/base)
+        (namespace-require 'mred)
+        (namespace-require 'scheme/class))
+      ns))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -229,6 +232,7 @@
 	   text%
 	   pasteboard%
 	   graphical-read-eval-print-loop
+	   textual-read-eval-print-loop
 	   message-box
 	   message+check-box
 	   message-box/custom
@@ -289,7 +293,8 @@
 	   current-eventspace-has-standard-menus?
 	   current-eventspace-has-menu-root?
 	   eventspace-handler-thread
-	   make-namespace-with-mred
+	   make-gui-namespace
+	   make-gui-empty-namespace
 	   file-creator-and-type
 	   current-ps-afm-file-paths
 	   current-ps-cmap-file-paths

@@ -3,7 +3,7 @@
  * Purpose:     MrEd MacOS event loop
  * Author:      Matthew Flatt
  * Created:     1996
- * Copyright:   (c) 2004-2007 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2008 PLT Scheme Inc.
  * Copyright:   (c) 1996, Matthew Flatt
  */
 
@@ -533,17 +533,25 @@ void WakeUpMrEd()
    nothing and return 0. */
 
 static unsigned long lastTime;
+
+static int wne_delay_on;
+static unsigned long wne_delay_until;
  
 static int TransferQueue(int all)
 {
   EventRecord e;
+  unsigned long tc;
   int sleep_time = 0;
   int delay_time = 0;
   
   /* Don't call WaitNextEvent() too often. */
-  if (TickCount() <= lastTime + delay_time)
+  tc = TickCount();
+  if (tc <= lastTime + delay_time)
     return 0;
-  
+  if (wne_delay_on && (tc < wne_delay_until))
+    return 0;
+  wne_delay_on = 0;
+
   while (WNE(&e, dispatched ? ((double)sleep_time/60.0) : 0)) {
     QueueTransferredEvent(&e);
   }
@@ -551,6 +559,26 @@ static int TransferQueue(int all)
   lastTime = TickCount();
   
   return 1;
+}
+
+void wxStartRefreshSequence(void)
+{
+  /* Editors are not buffered offscreen under Mac OS X, instead
+     relying on the OS's buffering of all windows, which are updated
+     on WNE boundaries. To avoid flicker, avoid calling WNE in the
+     middle of an editor refresh.  The refresh might get stuck,
+     though, so we only wait a little while. */
+
+  if (!wne_delay_on) {
+    wne_delay_until = TickCount() + 10;
+  }
+  wne_delay_on++;
+}
+
+void wxEndRefreshSequence(void)
+{
+  if (wne_delay_on)
+    --wne_delay_on;
 }
 
 static void MrDequeue(MrQueueElem *q)
@@ -1491,10 +1519,6 @@ static int has_null(const char *s, long l)
   return 0;
 }
 
-#ifdef OS_X
-
-/* Provided by MzScheme for Classic: */
-
 int scheme_mac_path_to_spec(const char *filename, FSSpec *spec)
 {
   FSRef fsref;
@@ -1507,6 +1531,8 @@ int scheme_mac_path_to_spec(const char *filename, FSSpec *spec)
   if (err != noErr) {
     return 0;
   }
+
+  memset(spec, 0, sizeof(FSSpec));
 	
   // then, convert to an FSSpec
   err = FSGetCatalogInfo(&fsref, kFSCatInfoNone, NULL, NULL, spec, NULL);
@@ -1543,8 +1569,6 @@ char *scheme_mac_spec_to_path(FSSpec *spec)
     
   return str;
 }
-
-#endif // OS_X
 
 static int ae_marshall(AEDescList *ae, AEDescList *list_in, AEKeyword kw, Scheme_Object *v, 
 		       char *name, OSErr *err, char **stage)

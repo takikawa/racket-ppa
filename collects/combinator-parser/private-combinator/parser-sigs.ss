@@ -1,12 +1,10 @@
-(module parser-sigs mzscheme
+(module parser-sigs scheme
   
-  (require (lib "unit.ss"))
-
-  (require (only (lib "etc.ss") opt-lambda))    ; Required for expansion
+  (require (only-in (lib "etc.ss") opt-lambda))    ; Required for expansion
   (require (lib "lex.ss" "parser-tools")
-           (lib "string.ss") (lib "list.ss"))
+           (lib "string.ss"))
   
-  (provide (all-defined))
+  (provide (all-defined-out))
   
   (define-signature-form (terminals stx)
     (syntax-case stx ()
@@ -15,10 +13,20 @@
             (andmap identifier? (syntax->list #'(elt ...))))
        (syntax->list #`(elt ...
                         #,@(map (lambda (e) 
-                                  (datum->syntax-object e
-                                                        (string->symbol 
-                                                         (format "token-~a" (syntax-e e)))))
+                                  (datum->syntax e
+                                                 (string->symbol 
+                                                  (format "token-~a" (syntax-e e)))))
                                 (syntax->list #'(elt ...)))))]))
+  
+  (define-signature-form (recurs stx)
+    (syntax-case stx ()
+      [(_ id ...)
+       (andmap identifier? (syntax->list #'(id ...)))
+       (syntax->list #`(id ...
+                        #,@(map (lambda (e) #`(define-syntaxes 
+                                                (#,(datum->syntax e (string->symbol (format "~a@" (syntax-e e)))))
+                                                (values (syntax-id-rules () [_ #'(eta #,e)]))))
+                                (syntax->list #'(id ...)))))]))
   
   (define-signature language-dictionary^ (misspelled misscap missclass))
     
@@ -189,4 +197,3 @@
   (define-signature err^ (err? err-msg err-src))
     
   )
-     

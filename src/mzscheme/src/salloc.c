@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2007 PLT Scheme Inc.
+  Copyright (c) 2004-2008 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
  
     This library is free software; you can redistribute it and/or
@@ -64,7 +64,7 @@ void scheme_set_stack_base(void *base, int no_auto_statics)
 {
 #ifdef MZ_PRECISE_GC
   GC_init_type_tags(_scheme_last_type_, 
-                    scheme_pair_type, scheme_weak_box_type, 
+                    scheme_pair_type, scheme_mutable_pair_type, scheme_weak_box_type, 
                     scheme_ephemeron_type, scheme_rt_weak_array,
                     scheme_cust_box_type);
   /* We want to be able to allocate symbols early. */
@@ -86,6 +86,24 @@ void scheme_set_stack_base(void *base, int no_auto_statics)
   }
 #endif
   use_registered_statics = no_auto_statics;
+}
+
+int scheme_main_setup(int no_auto_statics, Scheme_Main _main, int argc, char **argv)
+{
+  void *start_addr = &start_addr;
+
+#ifdef MZ_PRECISE_GC
+  start_addr = &__gc_var_stack__;
+#endif
+  
+  scheme_set_stack_base(start_addr, no_auto_statics);
+
+#ifdef MZ_PRECISE_GC
+  /* Trick xform conversion to keep start_addr: */
+  start_addr = start_addr;
+#endif
+
+  return _main(scheme_basic_env(), argc, argv);
 }
 
 void scheme_set_stack_bounds(void *base, void *deepest, int no_auto_statics)
@@ -1099,10 +1117,11 @@ static void print_tagged_value(const char *prefix,
       char *t2;
       int len2;
 	    
-      sprintf(buffer, "[%ld:%.100s]",
+      sprintf(buffer, "[%ld/%ld:%.100s]",
 	      ((Scheme_Env *)v)->phase,
+              ((Scheme_Env *)v)->mod_phase,
 	      (((Scheme_Env *)v)->module
-	       ? SCHEME_SYM_VAL(((Scheme_Env *)v)->module->modname)
+	       ? scheme_write_to_string(((Scheme_Env *)v)->module->modname, NULL)
 	       : "(toplevel)"));
 	    
       len2 = strlen(buffer);
@@ -1253,6 +1272,61 @@ Scheme_Object *scheme_dump_gc_stats(int c, Scheme_Object *p[])
 #  define GC_get_xtagged_name NULL
 #  define print_tagged_value NULL
 # endif
+#endif
+
+#if 0
+  /* Syntax-object debugging support: */
+  if ((c == 1) && SCHEME_STXP(p[0])) {
+    return scheme_explode_syntax(p[0], scheme_make_hash_table(SCHEME_hash_ptr));
+  }
+
+  if (c && SAME_TYPE(SCHEME_TYPE(p[0]), scheme_compilation_top_type)) {
+    Scheme_Hash_Table *ht;
+    Scheme_Compilation_Top *top;
+    Scheme_Object *vec, *v, *lst = scheme_null;
+    Scheme_Module *m;
+    Resolve_Prefix *prefix;
+    int i, j;
+
+    ht = scheme_make_hash_table(SCHEME_hash_ptr);
+
+    top = (Scheme_Compilation_Top *)p[0];
+
+    j = 0;
+    while (1) {
+      if (j)
+        m = scheme_extract_compiled_module(p[0]);
+      else
+        m = NULL;
+
+      if (m) {
+        if (j == 1) {
+          prefix = m->prefix;
+        } else {
+          int k = j - 2;
+          if (k >= SCHEME_VEC_SIZE(m->et_body))
+            break;
+          v = SCHEME_VEC_ELS(m->et_body)[k];
+          prefix = (Resolve_Prefix *)SCHEME_VEC_ELS(v)[3];
+        }
+      } else {
+        if (j)
+          break;
+        prefix = top->prefix;
+      }
+      
+      vec = scheme_make_vector(prefix->num_stxes, NULL);
+      for (i = 0; i < prefix->num_stxes; i++) {
+        v = scheme_explode_syntax(prefix->stxes[i], ht);
+        SCHEME_VEC_ELS(vec)[i] = v;
+      }
+
+      lst = scheme_make_pair(vec, lst);
+      j++;
+    }
+
+    return scheme_reverse(lst);
+  }
 #endif
 
   scheme_start_atomic();
@@ -2112,7 +2186,6 @@ long scheme_count_memory(Scheme_Object *root, Scheme_Hash_Table *ht)
     e = COUNT(SCHEME_BOX_VAL(root));
     break;
   case scheme_complex_type:
-  case scheme_complex_izi_type:
     s = sizeof(Scheme_Complex);
     e = COUNT(((Scheme_Complex *)root)->r) + COUNT(((Scheme_Complex *)root)->i);
     break;

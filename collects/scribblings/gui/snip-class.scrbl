@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["common.ss"]
+#lang scribble/doc
+@(require "common.ss")
 
 @defclass/title[snip% object% ()]{
 
@@ -47,7 +47,10 @@ To define a class of snips that can be saved or cut-and-pasted:
 @itemize{
 
  @item{Create an instance of @scheme[snip-class%], implementing the
-       @method[snip-class% read] method.}
+       @method[snip-class% read] method. Export the
+       @scheme[snip-class%] instance as @scheme[snip-class] from a
+       module, and use a classname of the form @scheme["(lib ...)"] as
+       described in @|snipclassdiscuss|.}
 
  @item{For each instance of the snip class, set the snip's class object 
        with @method[snip% set-snipclass].}
@@ -108,7 +111,7 @@ Returns @scheme[#f].
            void?]{
 
 Tells the snip to blink the selection caret. This method is called
- periodically when the snips's editor's @techlink{display} has the
+ periodically when the snip's editor's @techlink{display} has the
  keyboard focus, and the snip has the editor-local focus.
 
 The drawing context and snip's @techlink{location}s in drawing context
@@ -280,7 +283,7 @@ A drawing context is provided for the purpose of finding font sizes,
  sizing that overrides that device context's current font.
 
 The snip's left and top @techlink{location}s are provided in editor
- coordinates. In a text editor, the y-coordinate is the {\em line's}
+ coordinates. In a text editor, the y-coordinate is the @italic{line's}
  top @techlink{location}; the snip's actual top @techlink{location} is potentially
  undetermined until its height is known.
 

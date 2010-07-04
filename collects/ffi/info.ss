@@ -1,4 +1,5 @@
-(module info (lib "infotab.ss" "setup")
-  (define name "Foreign Function Interfaces")
-  (define blurb
-    '("A few foreign interfaces to various libraries.")))
+#lang setup/infotab
+
+(define name "Sample FFIs")
+
+(define compile-omit-paths '("examples"))

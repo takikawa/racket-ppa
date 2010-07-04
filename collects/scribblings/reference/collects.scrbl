@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
 @title[#:tag "collects"]{Libraries and Collections}
 
@@ -13,7 +13,7 @@ referenced through a @scheme[planet] module path (see
 @scheme[require]) and are downloaded by Scheme on demand.
 
 Other collections are distributed with PLT Scheme, in which case each
-collection is a directory that is located in a @file{collects}
+collection is a directory that is located in a @filepath{collects}
 directory relative to the @exec{mzscheme}. A collection can also be
 installed in a user-specific directory.  More generally, the search
 path for installed collections can be configured through the
@@ -21,24 +21,23 @@ path for installed collections can be configured through the
 cases, the collections are referenced through @scheme[lib] paths (see
 @scheme[require]).
 
-For example, the following module uses the @file{match.ss} library module
-from the default @file{mzlib} collection, the @file{getinfo.ss}
-library module from the @file{setup} collection, and the
-@file{cards.ss} library module from the @file{games} collection's
-@file{cards} subcollection:
+For example, the following module uses the @filepath{getinfo.ss}
+library module from the @filepath{setup} collection, and the
+@filepath{cards.ss} library module from the @filepath{games}
+collection's @filepath{cards} subcollection:
 
-@schemeblock[
-(module my-game mzscheme
-  (require (lib "mzlib/match.ss")
-           (lib "setup/getinfo.ss" "setup")
-           (lib "games/cards/cards.ss"))
-  ....)
+@schememod[
+scheme
+(require (lib "setup/getinfo.ss")
+         (lib "games/cards/cards.ss"))
+....
 ]
 
 In general, the @scheme[_rel-string] in @scheme[(lib _rel-string)]
 consists of one or more path elements that name collections, and then
 a final path element that names a library file; the path elements are
-separated by @litchar{/}.
+separated by @litchar{/}. If the final element has no file suffix,
+then @litchar{/main.ss} is implicitly appended to the path.
 
 The translation of a @scheme{planet} or @scheme{lib} path to a
 @scheme[module] declaration is determined by the @tech{module name
@@ -64,7 +63,8 @@ is initialized in @exec{mzscheme} to the result of
 @scheme[(find-library-collection-paths)].
 
 
-@defproc[(find-library-collection-paths) (listof path?)]{
+@defproc[(find-library-collection-paths [extras (listof path-string?) null]) 
+         (listof path?)]{
 
 Produces a list of paths as follows:
 
@@ -75,10 +75,8 @@ Produces a list of paths as follows:
   default collection path list, unless the value of the
   @scheme[use-user-specific-search-paths] parameter is @scheme[#f].}
 
- @item{If the executable embeds a list of search paths, they are
-  included (in order) after the first element in the default
-  collection path list. Embedded relative paths are included only when
-  the corresponding directory exists relative to the executable.}
+ @item{Extra directories provided in @scheme[extras] are included next,
+  converted to complete paths relative to the executable.}
 
  @item{If the directory specified by @scheme[(find-system-path
     'collects-dir)] is absolute, or if it is relative (to the

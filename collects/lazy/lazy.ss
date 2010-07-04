@@ -103,11 +103,11 @@
                 (definition? #'head)
                 (loop #'(expr ...) (cons #'(head . rest) defs))]
                ;; only definitions
-               [() #`(begin #,@(reverse! defs))]
+               [() #`(begin #,@(reverse defs))]
                ;; single expr
-               [(expr) #`(begin #,@(reverse! defs) expr)]
+               [(expr) #`(begin #,@(reverse defs) expr)]
                [(expr ...)
-                #`(begin #,@(reverse! defs) (~ (begin (! expr) ...)))]))]))))
+                #`(begin #,@(reverse defs) (~ (begin (! expr) ...)))]))]))))
 
   ;; redefined to use lazy-proc and ~begin
   (define-syntax (~lambda stx)
@@ -119,6 +119,7 @@
                                (lambda args (~begin body0 body ...)))
                              'inferred-name n)])
            (syntax/loc stx (lazy-proc lam))))]))
+  (provide (rename ~lambda λ))
   (defsubst
     (~define (f . xs) body0 body ...) (define f (~lambda xs body0 body ...))
     (~define v x) (define v x))
@@ -309,8 +310,8 @@
   ;;   (let ([a 1] [b 2]) (set! a (add1 b)) (set! b (add1 a)) a)
   ;; goes into an infinite loop.  (Thanks to Jos Koot)
 
-  (define* (~set-car! pair val) (~ (set-car! (! pair) val)))
-  (define* (~set-cdr! pair val) (~ (set-cdr! (! pair) val)))
+  (define* (~set-mcar! mpair val) (~ (set-mcar! (! mpair) val)))
+  (define* (~set-mcdr! mpair val) (~ (set-mcdr! (! mpair) val)))
   (define* (~vector-set! vec i val) (~ (vector-set! (! vec) (! i) val)))
   (define* (~set-box! box val) (~ (set-box! (! box) val)))
 
@@ -512,12 +513,12 @@
     loop ->
       (~ (loop (! (cdr l)) (~!*app proc (car l) acc)))
       (~ (loop (map !cdr ls)
-               (~!*apply proc (append! (map car ls) (list acc))))))
+               (~!*apply proc (append (map car ls) (list acc))))))
   (deflistiter (foldr proc init l . ls)
     null -> init
     loop ->
       (~!*app proc (car l) (~ (loop (! (cdr l)))))
-      (~!*apply proc (append! (map car ls) (list (~ (loop (map !cdr ls)))))))
+      (~!*apply proc (append (map car ls) (list (~ (loop (map !cdr ls)))))))
 
   (define (do-member name = elt list) ; no currying for procedure names
     ;; `elt', `=', and `name' are always forced values
@@ -563,7 +564,7 @@
       r))
 
   ;; --------------------------------------------------------------------------
-  ;; (lib "list.ss") functionality
+  ;; mzlib/list functionality
 
   (define* (rest x) (~cdr x))
   (define* (first   x) (~car    x))
@@ -578,7 +579,7 @@
   (define* empty null)
   (define* (empty? x) (null? (! x)))
 
-  (require (rename (lib "list.ss") !last-pair last-pair))
+  (require (rename mzlib/list !last-pair last-pair))
   (define* (last-pair list) (!last-pair (!list list)))
 
   (define (do-remove name item list =)
@@ -641,15 +642,15 @@
                  (if (! (!*app pred x)) (cons x xs) xs))]
               [else (error 'filter "not a proper list: ~e" list)]))))
 
-  (require (rename (lib "list.ss") !sort sort))
+  (require (rename mzlib/list !sort sort))
   (define* (sort list less?)
     (let ([less? (! less?)])
       (!sort (!list list) (lambda (x y) (! (!*app less? x y))))))
 
   ;; --------------------------------------------------------------------------
-  ;; (lib "etc.ss") functionality
+  ;; mzlib/etc functionality
 
-  (require (only (lib "etc.ss") boolean=? symbol=?))
+  (require (only mzlib/etc boolean=? symbol=?))
   (define* true  #t)
   (define* false #f)
 
@@ -695,14 +696,15 @@
                            [~id (string->symbol (string-append "~" str))])
                       (datum->syntax-object id ~id id)))
                   (syntax->list #'(id ...)))])
-         #'(provide (all-from-except mzscheme module #%app apply #%top id ...)
+         #'(provide (all-from-except mzscheme module #%app apply #%top λ
+                                     id ...)
                     (rename ~id id) ...))]))
   (renaming-provide
    lambda define let let* letrec parameterize
    values define-values let-values let*-values letrec-values make-struct-type
    cons list list* vector box
    if and or begin begin0 when unless
-   set! set-car! set-cdr! vector-set! set-box!
+   set! set-mcar! set-mcdr! vector-set! set-box!
    cond case error printf fprintf display write print
    eq? eqv? equal?
    list? length list-ref list-tail append map for-each andmap ormap

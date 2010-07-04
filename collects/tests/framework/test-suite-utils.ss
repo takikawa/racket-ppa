@@ -1,9 +1,9 @@
 
 (module test-suite-utils mzscheme
-  (require (lib "launcher.ss" "launcher")
-	   (lib "pretty.ss")
-	   (lib "list.ss")
-           (lib "process.ss")
+  (require launcher
+	   mzlib/pretty
+	   mzlib/list
+           mzlib/process
 	   "debug.ss")
 
   (provide
@@ -15,7 +15,6 @@
 
    load-framework-automatically
    shutdown-listener shutdown-mred mred-running?
-   use-3m
    send-sexp-to-mred queue-sexp-to-mred
    test
    wait-for-frame
@@ -31,10 +30,9 @@
    reset-section-name!
    set-section-name!
    set-only-these-tests!
-   get-only-these-tests)
+   get-only-these-tests
+   debug-printf)
   
-  (define use-3m (make-parameter #f))
-
   (define section-jump void)
   (define (set-section-jump! _s) (set! section-jump _s))
   (define (reset-section-jump!) (set! section-jump #f))
@@ -55,63 +53,51 @@
   (define load-framework-automatically? #t)
 
   (define initial-port 6012)
-  (define port-filename (build-path
-			 (collection-path "tests" "framework")
-			 "receive-sexps-port.ss"))
+  (define port-filename
+    (build-path (find-system-path 'temp-dir)
+                "framework-tests-receive-sexps-port.ss"))
 
   (unless (file-exists? port-filename)
     (call-with-output-file port-filename
-      (lambda (port)
-	(write initial-port port))))
+      (lambda (port) (write initial-port port))))
 
   (define listener
-    (let loop ()
-      (let ([port (load port-filename)])
-	(with-handlers ([exn:fail?
-			 (lambda (x)
-			   (let ([next (+ port 1)])
-			     (call-with-output-file port-filename
-			       (lambda (p)
-				 (write next p))
-			       'truncate)
-			     (debug-printf mz-tcp "  tcp-listen failed for port ~a, attempting ~a~n"
-					   port
-					   next)
-			     (loop)))])
-	  (debug-printf mz-tcp "listening to ~a~n" port)
-	  (tcp-listen port)))))
+    (let loop ([port (call-with-input-file port-filename read)])
+      (let ([l (with-handlers ([exn:fail? (lambda (_) #f)])
+                 (tcp-listen port))])
+        (if l
+          (begin (debug-printf mz-tcp "listening to ~a\n" port)
+                 (call-with-output-file port-filename
+                   (lambda (p) (write port p)) 'truncate)
+                 l)
+          (begin (debug-printf mz-tcp "  tcp-listen failed for port ~a\n" port)
+                 (loop (add1 port)))))))
 
   (define in-port #f)
   (define out-port #f)
 
   (define (restart-mred)
     (shutdown-mred)
-    (case (system-type)
-      [(macosx)
-       (thread
-        (lambda ()
-          (system*
-           (path->string
-            (build-path (collection-path "mzlib")
-                        'up
-                        'up
-                        "bin" 
-                        (if (use-3m)
-                            "mred3m"
-                            "mred")))
-           "-mvqt"
-           (path->string 
-            (build-path (collection-path "tests" "framework")
-                        "framework-test-engine.ss")))))]
-      [else (error 'test-suite-utils.ss "don't know how to start mred")])
-    (debug-printf mz-tcp "accepting listener~n")
+    (thread
+     (lambda ()
+       (system*
+        (path->string
+         (build-path
+          (let-values ([(dir exe _)
+                        (split-path (find-system-path 'exec-file))])
+            dir)
+          (if (eq? 'windows (system-type)) "MrEd.exe" "mred")))
+        (path->string
+         (build-path (collection-path "tests" "framework")
+                     "framework-test-engine.ss")))))
+    (debug-printf mz-tcp "accepting listener\n")
     (let-values ([(in out) (tcp-accept listener)])
       (set! in-port in)
       (set! out-port out))
     (when load-framework-automatically?
       (queue-sexp-to-mred
-       '(begin (eval '(require (lib "framework.ss" "framework")))
-	       (eval '(require (lib "gui.ss" "tests" "utils")))))))
+       '(begin (eval '(require framework))
+	       (eval '(require tests/utils/gui))))))
 
   (define load-framework-automatically
     (case-lambda
@@ -125,7 +111,7 @@
   (define shutdown-listener
     (lambda ()
       (shutdown-mred)
-      (debug-printf mz-tcp "closing listener~n")
+      (debug-printf mz-tcp "closing listener\n")
       (tcp-close listener)))
 
   (define shutdown-mred
@@ -161,31 +147,31 @@
     (or (regexp-match re:tcp-read-error (exn-message exn))
 	(regexp-match re:tcp-write-error (exn-message exn))))
 
+  (namespace-require 'scheme/base) ;; in order to make the eval below work right.
   (define (send-sexp-to-mred sexp)
     (let/ec k
-      (let ([show-text 
+      (let ([show-text
 	     (lambda (sexp)
-	       
 	       (debug-when messages
-			   (parameterize ([pretty-print-print-line
-					   (let ([prompt "  "]
-						 [old-liner (pretty-print-print-line)])
-					     (lambda (ln port ol cols)
-					       (let ([ov (old-liner ln port ol cols)])
-						 (if ln 
-						     (begin (display prompt port)
-							    (+ (string-length prompt) ov))
-						     ov))))])
-			     (pretty-print sexp)
-			     (newline))))])
+	         (parameterize ([pretty-print-print-line
+                                 (let ([prompt "  "]
+                                       [old-liner (pretty-print-print-line)])
+                                   (lambda (ln port ol cols)
+                                     (let ([ov (old-liner ln port ol cols)])
+                                       (if ln 
+                                         (begin (display prompt port)
+                                                (+ (string-length prompt) ov))
+                                         ov))))])
+                   (pretty-print sexp)
+                   (newline))))])
 	(unless (and in-port
 		     out-port
-		     (with-handlers ([tcp-error?
-				      (lambda (x) #f)])
+		     (with-handlers ([tcp-error? (lambda (x) #f)])
 		       (or (not (char-ready? in-port))
 			   (not (eof-object? (peek-char in-port))))))
 	  (restart-mred))
-	(debug-printf messages "  ~a // ~a: sending to mred:~n" section-name test-name)
+	(debug-printf messages "  ~a // ~a: sending to mred:\n"
+                      section-name test-name)
 	(show-text sexp)
 	(with-handlers ([exn:fail?
 			 (lambda (x)
@@ -222,14 +208,14 @@
 							   (cons char (loop))))
 						     null))))))))])
 		 (read in-port))])
-	  (debug-printf messages "  ~a // ~a: received from mred:~n" section-name test-name)
+	  (debug-printf messages "  ~a // ~a: received from mred:\n" section-name test-name)
 	  (show-text answer)
 	  (unless (or (eof-object? answer)
 		      (and (list? answer)
 			   (= 2 (length answer))
 			   (memq (car answer)
 				 '(error last-error cant-read normal))))
-	    (error 'send-sexp-to-mred "unpected result from mred: ~s~n" answer))
+	    (error 'send-sexp-to-mred "unpected result from mred: ~s\n" answer))
 	  (if (eof-object? answer)
 	      (raise (make-eof-result))
 	      (case (car answer)
@@ -267,7 +253,7 @@
 						 (format "~s" x))))])
 			   (not (passed? result)))])
 	    (when failed
-	      (debug-printf schedule "FAILED ~a:~n  ~s~n" test-name result)
+	      (debug-printf schedule "FAILED ~a:\n  ~s\n" test-name result)
 	      (set! failed-tests (cons (cons section-name test-name) failed-tests))
 	      (case jump
 		[(section) (section-jump)]

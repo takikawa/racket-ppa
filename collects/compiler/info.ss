@@ -1,7 +1,6 @@
+#lang setup/infotab
 
-(module info (lib "infotab.ss" "setup")
-  (define doc.txt "doc.txt")
-  (define name "mzc")
+(define scribblings '(("cffi.scrbl" () (foreign -9))))
 
-  (define mzscheme-launcher-libraries (list "start.ss"))
-  (define mzscheme-launcher-names (list "mzc")))
+(define mzscheme-launcher-libraries (list "main.ss"))
+(define mzscheme-launcher-names (list "mzc"))

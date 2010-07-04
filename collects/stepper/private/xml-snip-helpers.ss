@@ -1,10 +1,10 @@
 
 (module xml-snip-helpers mzscheme
   (require (lib "xml.ss" "xml")
-           (lib "readerr.ss" "syntax")
-           (lib "mred.ss" "mred")
-           (lib "class.ss")
-           (lib "list.ss")
+           syntax/readerr
+           mred
+           mzlib/class
+           mzlib/list
            "shared.ss")
   
   (provide xml-read-special
@@ -23,7 +23,7 @@
                "read: bad syntax: empty scheme box")
            txt line col pos 1)))
       (let ([stx (read-syntax
-                  text
+                  (get-source-name text)
                   (open-input-text-editor text 0 (send text last-position)))])
         (when (eof-object? stx)
           (raise-read-error
@@ -32,6 +32,13 @@
                "read: bad syntax: empty scheme box")
            text 1 1 1 (send text last-position)))
 	stx)))
+  
+  (define (get-source-name text)
+    (cond
+      [(method-in-interface? 'get-port-name (object-interface text))
+       (send text get-port-name)]
+      [else
+       (send text get-filename)]))
   
   (define (xml-read-special eliminate-whitespace-in-empty-tags? snip file line col pos)
     (let ([editor (send snip get-editor)]

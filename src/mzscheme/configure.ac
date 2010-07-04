@@ -40,7 +40,6 @@ AC_ARG_ENABLE(lt,      [  --enable-lt=<prog>      use <prog> instead of bundled 
 AC_ARG_ENABLE(origtree,[  --enable-origtree       install with original directory structure])
 
 AC_ARG_ENABLE(foreign, [  --enable-foreign        compile foreign support (enabled by default)], , enable_foreign=yes)
-AC_ARG_ENABLE(llvm,    [  --enable-llvm           compile llvm support (disabled by default)], , enable_llvm=no)
 
 AC_ARG_ENABLE(cgcdefault, [  --enable-cgcdefault     use CGC (Boehm or Senora) as default build])
 AC_ARG_ENABLE(sgc,     [  --enable-sgc            use Senora GC instead of the Boehm GC])
@@ -66,6 +65,8 @@ AC_ARG_ENABLE(gprof,   [  --enable-gprof          compile for profiling with gpr
 AC_ARG_ENABLE(gcov,    [  --enable-gcov           compile to gather gcov statistics (gcc3 only)])
 
 AC_ARG_ENABLE(noopt,   [  --enable-noopt          drop -O C flags])
+
+AC_ARG_ENABLE(noopt,   [  --enable-sdk=<path>     use Mac OS X 10.4 SDK directory])
 
 AC_ARG_ENABLE(xonx,    [  --enable-xonx           compile X11 (not Quartz) MrEd for Mac OS X])
 AC_ARG_ENABLE(libfw,   [  --enable-libfw          install Mac OS X frameworks to /Library/Frameworks])
@@ -162,7 +163,14 @@ if test "${bindir}" != '${exec_prefix}/bin' ; then
  unixstyle=yes
 fi
 if test "${datadir}" != '${prefix}/share' ; then
- unixstyle=yes
+ # Newer autoconf uses datarootdir:
+ if test "${datadir}" = '${datarootdir}' ; then
+   if test "${datarootdir}" != '${prefix}/share' ; then
+    unixstyle=yes
+   fi
+ else
+   unixstyle=yes
+ fi
 fi
 if test "${libdir}" != '${exec_prefix}/lib' ; then
  unixstyle=yes
@@ -171,7 +179,13 @@ if test "${includedir}" != '${prefix}/include' ; then
  unixstyle=yes
 fi
 if test "${mandir}" != '${prefix}/man' ; then
- unixstyle=yes
+ if test "${mandir}" = '${datarootdir}/man' ; then
+   if test "${datarootdir}" != '${prefix}/share' ; then
+    unixstyle=yes
+   fi
+ else
+   unixstyle=yes
+ fi
 fi
 
 MAKE_COPYTREE=no
@@ -259,7 +273,6 @@ fi
 show_explicitly_enabled "${enable_orig}" "Original install tree"
 
 show_explicitly_disabled "${enable_foreign}" Foreign
-show_explicitly_enabled "${enable_llvm}" LLVM
 
 show_explicitly_enabled "${enable_sgc}" SGC
 show_explicitly_enabled "${enable_sgcdebug}" "SGC debug mode"
@@ -577,7 +590,12 @@ case $OS in
     ;;
   Darwin)
 
-    PREFLAGS="$PREFLAGS -DOS_X"
+    if test "${enable_sdk}" != "" ; then 
+      PREFLAGS="$PREFLAGS -isysroot ${enable_sdk} -mmacosx-version-min=10.4 -DEXTRA_EXCEPTION_STUBS"
+      LDFLAGS="$LDFLAGS -isysroot ${enable_sdk} -mmacosx-version-min=10.4"
+    fi
+    
+    PREFLAGS="$PREFLAGS -DOS_X -D_DARWIN_UNLIMITED_SELECT"
 
     # zlib comes with the OS
     ZLIB_A=""
@@ -636,6 +654,7 @@ case $OS in
     else
       PREFLAGS="$PREFLAGS -DXONX "
       X_EXTRA_LIBS="$X_EXTRA_LIBS -lz"
+      X_LIBS="$X_LIBS -L/usr/X11R6/lib"
 
       # need help finding fontconfig and freetype headers:
       XFT_EXTRA_FLAGS="-I/usr/X11R6/include -I/usr/X11R6/include/freetype2"
@@ -1216,16 +1235,16 @@ if test "${enable_shared}" = "yes" ; then
   MZOPTIONS="$MZOPTIONS -DMZ_USES_SHARED_LIB"
 else
   LIBSFX=a
-  MREDLINKER="$CXX"
+  MREDLINKER='$(CXX)'
   WXLIBS=WXLIBSNORM
   ICP=cp
   MRLIBINSTALL="install-no-lib"
   LIBFINISH=echo
   LTO="o"
   LTA="a"
-  MZLINKER="$CC"
+  MZLINKER='$(CC)'
   STATIC_AR="$AR"
-  PLAIN_CC="$CC"
+  PLAIN_CC='$(CC)'
   FOREIGN_CONVENIENCE=""
   FOREIGN_OBJSLIB="\$(FOREIGN_OBJS)"
 fi
@@ -1309,16 +1328,13 @@ AC_SUBST(PNG_A)
 AC_SUBST(OSKHOME)
 AC_SUBST(EXTRA_OSK_LIBS)
 
-AC_SUBST(FOREIGN_OBJSLIB_IF_USED)
-AC_SUBST(FOREIGN_LIB_IF_USED)
+AC_SUBST(FOREIGN_IF_USED)
 AC_SUBST(FOREIGN_OBJSLIB)
 AC_SUBST(FOREIGN_CONVENIENCE)
 AC_SUBST(FOREIGNTARGET)
 
 AC_SUBST(LIBMZSCHEME_DEP)
 AC_SUBST(LIBMRED_DEP)
-
-AC_SUBST(LLVMTARGET)
 
 AC_SUBST(LTO)
 AC_SUBST(LTA)
@@ -1356,15 +1372,13 @@ if test "${enable_shared}" = "yes" ; then
 fi
 
 FOREIGNTARGET=
-FOREIGN_OBJSLIB_IF_USED=
-FOREIGN_LIB_IF_USED=
+FOREIGN_IF_USED="FOREIGN_NOT_USED"
 if test -d "${srcdir}/foreign" && test "${enable_foreign}" = "yes" ; then
   AC_CONFIG_AUX_DIR( foreign/gcc )
   AC_CONFIG_SUBDIRS( foreign/gcc/libffi )
   makefiles="$makefiles foreign/Makefile"
   FOREIGNTARGET="foreign-stuff"
-  FOREIGN_OBJSLIB_IF_USED="\$(FOREIGN_OBJSLIB)"
-  FOREIGN_LIB_IF_USED="\$(FOREIGN_OBJ) \$(FOREIGN_LIB)"
+  FOREIGN_IF_USED="FOREIGN_USED"
   # --disable-multilib is needed to avoid problems when running libffi's
   # configure script.  This thing affects all usages of AC_CONFIG_SUBDIRS, but
   # other scripts do not use it anyway.
@@ -1372,20 +1386,6 @@ if test -d "${srcdir}/foreign" && test "${enable_foreign}" = "yes" ; then
 else
   FOREIGNTARGET="foreign-nothing"
   MZOPTIONS="$MZOPTIONS -DDONT_USE_FOREIGN"
-fi
-
-LLVMTARGET=
-if test -d "${srcdir}/llvm" && test "${enable_llvm}" = "yes" ; then
-  AC_CONFIG_SUBDIRS( llvm/llvm )
-  makefiles="$makefiles llvm/Makefile"
-  LLVMTARGET="llvm-stuff"
-  # Again, this changes arguments that are passed to *all* sub-configure
-  # invocations, which might be a problem.  Hopefully nobody else uses
-  # "--enable-targets" and if someone else uses "--enable-optimized" we might
-  # as well just go with it...
-  ac_configure_args="$ac_configure_args --enable-optimized --enable-targets=host-only"
-else
-  LLVMTARGET="llvm-nothing"
 fi
 
 if test "${enable_mred}" = "yes" ; then
@@ -1451,8 +1451,9 @@ else
   echo " C headers    : ${includepltdir}/..."
   echo " extra C objs : ${libpltdir}/..."
   echo " man pages    : ${mandir}/..."
-  echo "  where prefix = ${prefix}"
+  echo "     where prefix = ${prefix}"
+  echo "  and datarootdir = ${datarootdir}"
   if test "${unixstyle}" = "yes" ; then
-    echo "    and exec_prefix = ${exec_prefix}"
+    echo "  and exec_prefix = ${exec_prefix}"
   fi
 fi

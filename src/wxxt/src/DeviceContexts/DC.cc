@@ -4,7 +4,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2007 PLT Scheme Inc.
+ * Copyright: (C) 2004-2008 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -258,6 +258,10 @@ double wxDC::GetAlpha()
   return current_alpha;
 }
 
+int wxDC::CacheFontMetricsKey()
+{
+  return 0;
+}
 
 //-----------------------------------------------------------------------------
 // wxDC::DrawOpenSpline(wxList *pts), may be virtually overridden by any child

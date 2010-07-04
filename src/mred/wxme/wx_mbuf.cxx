@@ -3,7 +3,7 @@
  * Purpose:     wxMediaBuffer implementation
  * Author:      Matthew Flatt
  * Created:     1995
- * Copyright:   (c) 2004-2007 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2008 PLT Scheme Inc.
  * Copyright:   (c) 1995-98, Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -464,6 +464,10 @@ Bool wxMediaBuffer::ReadyOffscreen(double width, double height)
   if ((width > REDICULOUS_SIZE)
       || (height > REDICULOUS_SIZE))
     return FALSE;
+
+#ifdef wx_mac
+  return FALSE;
+#endif
 
   if (!offscreenInUse && (height > bmHeight || width > bmWidth)) {
     wxBitmap *oldbm = bitmap;

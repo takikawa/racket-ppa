@@ -1,3 +1,3 @@
+#lang setup/infotab
 
-(module info (lib "infotab.ss" "setup")
-  (define name "Macro Debugger expansion model"))
+(define name "Expansion Model")

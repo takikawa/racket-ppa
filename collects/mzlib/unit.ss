@@ -1,18 +1,17 @@
 (module unit mzscheme
-  (require-for-syntax (lib "list.ss")
-                      (lib "boundmap.ss" "syntax")
-                      (lib "context.ss" "syntax")
-                      (lib "kerncase.ss" "syntax")
-                      (lib "name.ss" "syntax")
-                      (lib "struct.ss" "syntax")
-                      (lib "stx.ss" "syntax")
+  (require-for-syntax mzlib/list
+                      syntax/boundmap
+                      syntax/context
+                      syntax/kerncase
+                      syntax/name
+                      syntax/struct
+                      syntax/stx
                       "private/unit-compiletime.ss"
                       "private/unit-syntax.ss")
   
-  (require (lib "etc.ss")
+  (require mzlib/etc
            "private/unit-keywords.ss"
-           "private/unit-runtime.ss"
-           (only "private/unit-compiletime.ss" apply-mac))
+           "private/unit-runtime.ss")
   
   (provide define-signature-form struct open
            define-signature provide-signature-elements
@@ -73,10 +72,10 @@
                (if omit-constructor
                    #f
                    (caddr l)))
-             (cons-immutable (car l)
-                             (cons-immutable new-type
-                                             (cons-immutable new-ctor
-                                                             (cdddr l)))))
+             (cons (car l)
+                   (cons new-type
+                         (cons new-ctor
+                               (cdddr l)))))
            (check-id #'name)
            (for-each check-id (syntax->list #'(field ...)))
            (for-each
@@ -344,6 +343,8 @@
         ((= n 0) acc)
         (else (loop (sub1 n) (cons (sub1 n) acc))))))
   
+  (define-syntax-rule (equal-hash-table [k v] ...)
+    (make-immutable-hash-table (list (cons k v) ...) 'equal))
 
   (define-syntax (unit-export stx)
     (syntax-case stx ()
@@ -356,7 +357,7 @@
                            (syntax->list esigs)))
                         (syntax->list #'((esig ...) ...))
                         (syntax->list #'(elocs ...)))))
-         #'(hash-table 'equal kv ... ...)))))
+         #'(equal-hash-table kv ... ...)))))
   
   ;; build-key : (or symbol #f) identifier -> syntax-object
   (define-for-syntax (build-key tag i)
@@ -379,7 +380,7 @@
      (lambda (tinfo s)
        (define key (cons (car tinfo)
                          (car (siginfo-ctime-ids (cdr tinfo)))))
-       (when (hash-table-get import-idx key (lambda () #f))
+       (when (hash-table-get import-idx key #f)
          (raise-stx-err "duplicate import signature" s))
        (hash-table-put! import-idx key #t))
      tagged-siginfos
@@ -389,7 +390,7 @@
        (unless (hash-table-get import-idx
                                (cons (car dep)
                                      (car (siginfo-ctime-ids (cdr dep))))
-                               (lambda () #f))
+                               #f)
          (raise-stx-err "initialization dependency on unknown import" s)))
      tagged-deps
      dsources))
@@ -495,11 +496,11 @@
             (quasisyntax/loc (error-syntax)
               (make-unit
                'name
-               (vector-immutable (cons-immutable 'import-name
-                                                 (vector-immutable import-key import-super-keys ...)) ...)
-               (vector-immutable (cons-immutable 'export-name 
-                                                 (vector-immutable export-key ...)) ...)
-               (list-immutable (cons-immutable 'dept depr) ...)
+               (vector-immutable (cons 'import-name
+                                       (vector-immutable import-key import-super-keys ...)) ...)
+               (vector-immutable (cons 'export-name 
+                                       (vector-immutable export-key ...)) ...)
+               (list (cons 'dept depr) ...)
                (lambda ()
                  (let ([eloc (box undefined)] ... ...)
                    (values 
@@ -547,7 +548,7 @@
                 [local-evars (syntax->list (localify #'evars def-ctx))]
                 [stop-list
                  (append
-                  (kernel-form-identifier-list (quote-syntax here))
+                  (kernel-form-identifier-list)
                   (syntax->list #'ivars)
                   (syntax->list #'evars))]
                 [definition?
@@ -839,19 +840,19 @@
                   (check-unit unit-tmp 'form)
                   (check-sigs unit-tmp
                               (vector-immutable
-                               (cons-immutable 'orig-import-name
-                                               (vector-immutable orig-import-key ...)) ...)
+                               (cons 'orig-import-name
+                                     (vector-immutable orig-import-key ...)) ...)
                               (vector-immutable 
-                               (cons-immutable 'orig-export-name 
-                                               (vector-immutable orig-export-key ...)) ...)
+                               (cons 'orig-export-name 
+                                     (vector-immutable orig-export-key ...)) ...)
                               'form)
                   (make-unit
                    'name
-                   (vector-immutable (cons-immutable 'import-name
-                                                     (vector-immutable import-key ...)) ...)
-                   (vector-immutable (cons-immutable 'export-name 
-                                                     (vector-immutable export-key ...)) ...)
-                   (list-immutable (cons-immutable 'dept depr) ...)
+                   (vector-immutable (cons 'import-name
+                                           (vector-immutable import-key ...)) ...)
+                   (vector-immutable (cons 'export-name 
+                                           (vector-immutable export-key ...)) ...)
+                   (list (cons 'dept depr) ...)
                    (lambda ()
                      (let-values ([(unit-fn export-table) ((unit-go unit-tmp))])
                        (values (lambda (import-table)
@@ -1079,26 +1080,26 @@
                                        #,(syntax/loc #'sub-exp
                                            (check-sigs sub-tmp
                                                        (vector-immutable
-                                                        (cons-immutable 'sub-in-signame
-                                                                        (vector-immutable sub-in-key ...))
+                                                        (cons 'sub-in-signame
+                                                              (vector-immutable sub-in-key ...))
                                                         ...)
                                                        (vector-immutable
-                                                        (cons-immutable 'sub-out-signame
-                                                                        (vector-immutable sub-out-key ...))
+                                                        (cons 'sub-out-signame
+                                                              (vector-immutable sub-out-key ...))
                                                         ...)
                                                        'form))
-                                       (let ([fht (hash-table 'equal
-                                                              ((cons-immutable 'fdep-tag fdep-rtime)
-                                                               (cons-immutable 'fsig-name 'flnk-name))
-                                                              ...)]
-                                             [rht (hash-table 'equal
-                                                              ((cons-immutable 'rdep-tag rdep-rtime)
-                                                               #t)
-                                                              ...)])
+                                       (let ([fht (equal-hash-table
+                                                   ((cons 'fdep-tag fdep-rtime)
+                                                    (cons 'fsig-name 'flnk-name))
+                                                   ...)]
+                                             [rht (equal-hash-table
+                                                   ((cons 'rdep-tag rdep-rtime)
+                                                    #t)
+                                                   ...)])
                                          #,(syntax/loc #'sub-exp (check-deps fht sub-tmp 'form))
                                          (for-each
                                           (lambda (dep)
-                                            (when (hash-table-get rht dep (lambda () #f))
+                                            (when (hash-table-get rht dep #f)
                                               (set! deps (cons dep deps))))
                                           (unit-deps sub-tmp)))))))
                              (syntax->list #'((sub-exp
@@ -1124,12 +1125,12 @@
                     (make-unit
                      'name
                      (vector-immutable
-                      (cons-immutable 'import-name
-                                      (vector-immutable import-key ...))
+                      (cons 'import-name
+                            (vector-immutable import-key ...))
                       ...)
                      (vector-immutable
-                      (cons-immutable 'export-name
-                                      (vector-immutable export-key ...))
+                      (cons 'export-name
+                            (vector-immutable export-key ...))
                       ...)
                      deps
                      (lambda ()
@@ -1137,7 +1138,7 @@
                                     ...)
                          (values (lambda (import-table-id)
                                    (void)
-                                   (sub-tmp (hash-table 'equal sub-in-key-code-workaround ...))
+                                   (sub-tmp (equal-hash-table sub-in-key-code-workaround ...))
                                    ...)
                                  (unit-export ((export-key ...) export-code) ...)))))))
                 (map syntax-e (syntax->list #'((import-tag . import-sigid) ...)))
@@ -1308,12 +1309,12 @@
                 #,(syntax/loc #'unit-exp
                     (check-sigs unit-tmp 
                                 (vector-immutable
-                                 (cons-immutable 'import-name
-                                                 (vector-immutable import-keys ...))
+                                 (cons 'import-name
+                                       (vector-immutable import-keys ...))
                                  ...)
                                 (vector-immutable
-                                 (cons-immutable 'export-name
-                                                 (vector-immutable export-keys ...))
+                                 (cons 'export-name
+                                       (vector-immutable export-keys ...))
                                  ...)
                                 'form))
                 unit-tmp)
@@ -1478,7 +1479,7 @@
           (lambda (b)
             (for-each
              (lambda (cid)
-               (define there? (hash-table-get sig-table cid (lambda () #f)))
+               (define there? (hash-table-get sig-table cid #f))
                (hash-table-put! sig-table cid (if there? 'duplicate (link-record-linkid b))))
              (siginfo-ctime-ids (link-record-siginfo b))))
           link-defs)
@@ -1529,7 +1530,7 @@
                       (let ([lnkid (hash-table-get
                                     sig-table
                                     (car (siginfo-ctime-ids (signature-siginfo (lookup-signature (cdr tid)))))
-                                    (lambda () #f))])
+                                    #f)])
                         (cond
                           [(not lnkid)
                            (raise-stx-err "no sub unit exports this signature" (cdr tid))]

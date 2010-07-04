@@ -1,16 +1,17 @@
 
 (module classes mzscheme
-  (require (lib "class.ss")
-	   (lib "class100.ss")
-	   (prefix mred: (lib "mred.ss" "mred"))
-	   (lib "list.ss")
-	   (lib "etc.ss")
+  (require mzlib/class
+	   mzlib/class100
+	   (prefix mred: mred)
+	   mzlib/list
+	   mzlib/etc
 	   (prefix util: "utils.ss")
 	   "constants.ss"
 	   "make-cards.ss"
 	   "region.ss"
-	   (lib "string-constant.ss" "string-constants")
-	   "../show-help.ss")
+	   string-constants
+	   "../show-help.ss"
+	   "../show-scribbling.ss")
 
   (provide pasteboard%
 	   table%)
@@ -369,7 +370,7 @@
 		  (when (send s user-can-flip)
 		    (send s flip)))
 		l)
-	       (let loop ([l (reverse! l)])
+	       (let loop ([l (reverse l)])
 		 (unless (null? l)
 		   (set-before (car l) #f)
 		   (loop (cdr l)))))
@@ -601,6 +602,15 @@
 		(label (string-constant help-menu-label))
 		(callback
 		 (let ([show-help (show-help where title tt?)])
+		   (lambda x
+		     (show-help))))))]
+	[add-scribble-button
+	 (lambda (pane mod tag)
+	   (new mred:button% 
+		(parent pane)
+		(label (string-constant help-menu-label))
+		(callback
+		 (let ([show-help (show-scribbling mod tag)])
 		   (lambda x
 		     (show-help))))))])
       (begin

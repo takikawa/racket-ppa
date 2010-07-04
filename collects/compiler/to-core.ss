@@ -1,8 +1,9 @@
-(module to-core mzscheme
-  (require (lib "kerncase.ss" "syntax")
-           (lib "stx.ss" "syntax")
-           (lib "list.ss")
-           (lib "boundmap.ss" "syntax"))
+(module to-core scheme/base
+  (require syntax/kerncase
+           syntax/stx
+           mzlib/list
+           syntax/boundmap
+           (for-syntax scheme/base))
 
   (provide top-level-to-core)
 
@@ -45,25 +46,25 @@
                     [else (list stx)]))
                 l)))
   
-  (define-struct lifted-info (counter id-map slot-map))
+  (define-struct lifted-info ([counter #:mutable] id-map slot-map))
   
   (define (make-vars)
     (make-lifted-info 
      0
      (make-module-identifier-mapping)
-     (make-hash-table 'equal)))
+     (make-hash)))
   
   (define (is-id-ref? v)
     (or (identifier? v)
         (and (stx-pair? v)
              (identifier? (stx-car v))
-             (module-identifier=? #'#%top (stx-car v)))))
+             (free-identifier=? #'#%top (stx-car v)))))
   
   (define (vars-sequence li)
     (let loop ([i 0])
       (if (= i (lifted-info-counter li))
           null
-          (cons (let ([v (hash-table-get (lifted-info-slot-map li) i)])
+          (cons (let ([v (hash-ref (lifted-info-slot-map li) i)])
                   (if (is-id-ref? v)
                       #`(#%variable-reference #,v)
                       v))
@@ -73,7 +74,7 @@
     (let loop ([i 0])
       (if (= i (lifted-info-counter li))
           null
-          (let ([v (hash-table-get (lifted-info-slot-map li) i)])
+          (let ([v (hash-ref (lifted-info-slot-map li) i)])
             (if (is-id-ref? v)
                 (cons #`(#,extract-stx #,vec-id #,i)
                       (loop (add1 i)))
@@ -81,16 +82,16 @@
   
   (define (is-run-time? stx)
     (not (and (stx-pair? stx)
-              (or (module-identifier=? #'define-syntaxes (stx-car stx))
-                  (module-identifier=? #'define-values-for-syntax (stx-car stx))))))
+              (or (free-identifier=? #'define-syntaxes (stx-car stx))
+                  (free-identifier=? #'define-values-for-syntax (stx-car stx))))))
 
   (define (has-symbol? decl magic-sym table)
     (cond
-     [(hash-table-get table decl (lambda () #f))
+     [(hash-ref table decl (lambda () #f))
       ;; cycle/graph
       #f]
      [else
-      (hash-table-put! table decl #t)
+      (hash-set! table decl #t)
       (cond
        [(eq? magic-sym decl)
 	#t]
@@ -108,21 +109,21 @@
     (let ([magic-sym (string->symbol (format "magic~a~a" 
 					     (current-seconds)
 					     (current-milliseconds)))])
-      (if (has-symbol? (map syntax-object->datum decls) magic-sym (make-hash-table))
+      (if (has-symbol? (map syntax->datum decls) magic-sym (make-hasheq))
 	  (generate-magic decls)
 	  magic-sym)))
 
   (define (need-thunk? rhs)
     (not (and (stx-pair? rhs)
-	      (or (module-identifier=? #'lambda (stx-car rhs))
-		  (module-identifier=? #'case-lambda (stx-car rhs))))))
+	      (or (free-identifier=? #'lambda (stx-car rhs))
+		  (free-identifier=? #'case-lambda (stx-car rhs))))))
 
   (define (lift-sequence decls lookup-stx set-stx safe-vector-ref-stx extract-stx 
 			 in-module? simple-constant? stop-properties)
     (let ([ct-vars (make-vars)]
           [rt-vars (make-vars)]
-          [compile-time (datum->syntax-object #f (gensym 'compile-time))]
-          [run-time (datum->syntax-object #f (gensym 'run-time))]
+          [compile-time (datum->syntax #f (gensym 'compile-time))]
+          [run-time (datum->syntax #f (gensym 'run-time))]
 	  [magic-sym (generate-magic decls)]
 	  [magic-indirect (gensym)])
       (let ([ct-converted 
@@ -136,23 +137,21 @@
                                                    in-module?
 						   simple-constant? stop-properties)])
                                (if (and (not in-module?)
-                                        (module-identifier=? #'def #'define-syntaxes))
+                                        (free-identifier=? #'def #'define-syntaxes))
                                    ;; Don't try to name macro procedures, because it
                                    ;;  inteferes with the 0-values hack at the top level
                                    cvted
                                    #`(let-values ([ids #,cvted])
-                                       (values . ids))))])))
+                                       (#%plain-app values . ids))))])))
                   (filter (lambda (x) (not (is-run-time? x))) decls))]
             [rt-converted
              (map (lambda (stx)
-		    (syntax-case stx (define-values provide require require-for-syntax require-for-template)
-		      [(provide . _)
+		    (syntax-case stx (define-values 
+                                       #%provide
+                                       #%require)
+		      [(#%provide . _)
 		       #'void]
-		      [(require . _)
-		       #'void]
-		      [(require-for-syntax . _)
-		       #'void]
-		      [(require-for-template . _)
+		      [(#%require . _)
 		       #'void]
 		      [(define-values ids rhs)
 		       (let ([converted (convert #'rhs #f
@@ -163,7 +162,7 @@
 			 (if (need-thunk? #'rhs)
 			     #`(lambda () #,converted)
 			     #`(let-values ([ids #,converted])
-				 (values . ids))))]
+				 (#%plain-app values . ids))))]
 		      [else
 		       #`(lambda ()
 			   #,(convert stx #f 
@@ -172,22 +171,26 @@
 				      in-module?
 				      simple-constant? stop-properties))]))
 		  (filter is-run-time? decls))]
-            [ct-rhs #`((let ([magic (car (cons '#,magic-sym 2))])
-                         (if (symbol? magic) 
-                             (lambda (x) (vector
-					  #,@(map (lambda (stx)
-						    (syntax-case stx ()
-						      [(def (id) . _)
-						       #'void]
-						      [(def (id ...) . _)
-						       (with-syntax ([(v ...) (map (lambda (x) #f)
-										   (syntax->list #'(id ...)))])
-							 
-							 #`(lambda () (values v ...)))]))
-						  (filter (lambda (x) (not (is-run-time? x))) decls))))
-                             (car magic)))
-                       (vector #,@(vars-sequence ct-vars)))]
-            [rt-rhs #`((cdr '#,magic-sym) (vector #,@(vars-sequence rt-vars)))]
+            [ct-rhs #`(#%plain-app
+                       (let-values ([(magic) (#%plain-app car (#%plain-app cons '#,magic-sym 2))])
+                         (if (#%plain-app symbol? magic) 
+                             (#%plain-lambda (x) 
+                               (#%plain-app
+                                vector
+                                #,@(map (lambda (stx)
+                                          (syntax-case stx ()
+                                            [(def (id) . _)
+                                             #'void]
+                                            [(def (id ...) . _)
+                                             (with-syntax ([(v ...) (map (lambda (x) #f)
+                                                                         (syntax->list #'(id ...)))])
+                                               
+                                               #`(#%plain-lambda () (#%plain-app values v ...)))]))
+                                        (filter (lambda (x) (not (is-run-time? x))) decls))))
+                             (#%plain-app car magic)))
+                       (#%plain-app vector #,@(vars-sequence ct-vars)))]
+            [rt-rhs #`(#%plain-app (#%plain-app cdr '#,magic-sym)
+                                   (#%plain-app vector #,@(vars-sequence rt-vars)))]
             [just-one-ct? (>= 1 (apply +
                                        (map (lambda (decl)
                                               (syntax-case decl (define-syntaxes define-values-for-syntax)
@@ -197,29 +200,27 @@
                                             decls)))]
             [just-one-rt? (>= 1 (apply +
                                        (map (lambda (decl)
-                                              (syntax-case decl (define-values provide require 
-                                                                  require-for-syntax require-for-template
+                                              (syntax-case decl (define-values #%provide #%require 
                                                                   define-syntaxes define-values-for-syntax)
-                                                [(provide . _) 0]
-                                                [(require . _) 0]
-                                                [(require-for-syntax . _) 0]
+                                                [(#%provide . _) 0]
+                                                [(#%require . _) 0]
                                                 [(define-values-for-syntax . _) 0]
                                                 [(define-syntaxes . _) 0]
                                                 [_else 1]))
                                             decls)))])
         (values
-         #`(cons (lambda (#,compile-time)
+         #`(#%plain-app
+            cons (#%plain-lambda (#,compile-time)
                    #,@(extract-vars ct-vars compile-time extract-stx)
-                   (vector #,@ct-converted))
-                 (lambda (#,run-time)
-                   #,@(extract-vars rt-vars run-time extract-stx)
-                   (vector #,@rt-converted)))
+                   (#%plain-app vector #,@ct-converted))
+            (#%plain-lambda (#,run-time)
+              #,@(extract-vars rt-vars run-time extract-stx)
+              (#%plain-app vector #,@rt-converted)))
          #`(;; Lift require and require-for-syntaxes to the front, so they're ready for
 	    ;;  variable references
 	    #,@(filter (lambda (decl)
-			 (syntax-case decl (require require-for-syntax)
-			   [(require . _) #t]
-			   [(require-for-syntax . _) #t]
+			 (syntax-case decl (#%require)
+			   [(#%require . _) #t]
 			   [_else #f]))
 		       decls)
 	    ;; Lift define-for-values binding to front, so they can be referenced
@@ -246,34 +247,33 @@
                  (cond
                    [(null? decls) null]
                    [(is-run-time? (car decls))
-                    (cons (syntax-case (car decls) (define-values provide require require-for-syntax require-for-template)
-                            [(provide . _)
+                    (cons (syntax-case (car decls) (define-values #%provide #%require)
+                            [(#%provide . _)
                              (car decls)]
-                            [(require . _)
-                             #'(void)]
-                            [(require-for-syntax . _)
-                             #'(void)]
-                            [(require-for-template . _)
-                             (car decls)]
+                            [(#%require . _)
+                             #'(#%plain-app void)]
                             [(define-values (id ...) rhs)
 			     #`(define-values (id ...)
-				 #,(let ([lookup #`(vector-ref #,(if just-one-rt? rt-rhs run-time) #,rt-pos)])
+				 #,(let ([lookup #`(#%plain-app vector-ref #,(if just-one-rt? rt-rhs run-time) #,rt-pos)])
 				     (if (need-thunk? #'rhs)
-					 #`(#,lookup)
+					 #`(#%plain-app #,lookup)
 					 lookup)))]
                             [else
-                             #`((vector-ref #,(if just-one-rt? rt-rhs run-time) #,rt-pos))])
+                             #`(#%plain-app (#%plain-app vector-ref #,(if just-one-rt? rt-rhs run-time) #,rt-pos))])
                           (loop (cdr decls) ct-pos (add1 rt-pos)))]
                    [else
                     (cons (syntax-case (car decls) (define-syntaxes define-values-for-syntax)
                             [(define-syntaxes (id ...) . rhs)
                              #`(define-syntaxes (id ...)
-                                 ((vector-ref #,(if just-one-ct? ct-rhs compile-time) #,ct-pos)))]
+                                 (#%plain-app (#%plain-app vector-ref #,(if just-one-ct? ct-rhs compile-time) #,ct-pos)))]
                             [(define-values-for-syntax (id ...) . rhs)
                              #`(define-values-for-syntax ()
                                  (begin
-                                   (set!-values (id ...) ((vector-ref #,(if just-one-ct? ct-rhs compile-time) #,ct-pos)))
-                                   (values)))])
+                                   (set!-values (id ...) 
+                                                (#%plain-app
+                                                 (#%plain-app vector-ref #,(if just-one-ct? ct-rhs compile-time) 
+                                                              #,ct-pos)))
+                                   (#%plain-app values)))])
                           (loop (cdr decls) (add1 ct-pos) rt-pos))])))
 	 magic-sym))))
 
@@ -293,12 +293,12 @@
        [(and (pair? b)
 	     (eq? '#%kernel (car b)))
 	;; Generate a syntax object that has the right run-time binding:
-	(datum->syntax-object #'here (cadr b) stx stx)]
+	(datum->syntax #'here (cadr b) stx stx)]
        [else #f])))
 
   (define (add-literal/pos stx li)
     (let ([pos (lifted-info-counter li)])
-      (hash-table-put! (lifted-info-slot-map li) pos stx)
+      (hash-set! (lifted-info-slot-map li) pos stx)
       (set-lifted-info-counter! li (add1 pos))
       pos))
   
@@ -331,10 +331,10 @@
       [(_ stx e) (let ([old-s stx]
 		       [new-s (quasisyntax e)])
 		   (syntax-recertify
-		    (datum->syntax-object new-s
-					  (syntax-e new-s)
-					  old-s
-					  old-s)
+		    (datum->syntax new-s
+                                   (syntax-e new-s)
+                                   old-s
+                                   old-s)
 		    new-s
 		    code-insp
 		    #f))]))
@@ -353,12 +353,12 @@
 	       (identifier? stx)
 	       (or (simple-identifier stx trans?)
 		   (add-identifier (apply-certs certs stx) li trans? lookup-stx id))]
-	      [(provide . _)
+	      [(#%provide . _)
 	       stx]
-	      [(lambda formals e ...)
+	      [(#%plain-lambda formals e ...)
 	       (quasisyntax/loc+props 
 		stx
-		(lambda formals #,@(map loop (syntax->list #'(e ...)))))]
+		(#%plain-lambda formals #,@(map loop (syntax->list #'(e ...)))))]
 	      [(case-lambda [formals e ...] ...)
 	       (with-syntax ([((e ...) ...)
 			      (map (lambda (l)
@@ -396,10 +396,6 @@
 				   #`(#%top . tid)
 				   #'tid))])
 		 (add-identifier (apply-certs certs target) li trans? lookup-stx id))]
-	      [(#%datum . e)
-	       (if (simple-constant? #'e)
-		   #'(#%datum . e)
-		   (add-literal stx li safe-vector-ref-stx id))]
 	      [(set! x e)
 	       (if (local-identifier? #'x trans?)
 		   (quasisyntax/loc+props stx (set! x #,(loop #'e)))
@@ -424,10 +420,10 @@
 	       (quasisyntax/loc+props 
 		stx
 		(with-continuation-mark #,@(map loop (syntax->list #'(e ...)))))]
-	      [(#%app e ...)
+	      [(#%plain-app e ...)
 	       (quasisyntax/loc+props 
 		stx
-		(#%app #,@(map loop (syntax->list #'(e ...)))))]))))
+		(#%plain-app #,@(map loop (syntax->list #'(e ...)))))]))))
     ((loop #'certs) stx))
   
   (define (apply-certs from to)

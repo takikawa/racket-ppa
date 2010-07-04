@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2007 PLT Scheme Inc.
+  Copyright (c) 2004-2008 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -75,9 +75,6 @@ static int mzerrno = 0;
 # endif
 extern int osk_not_console; /* set by cmd-line flag */
 #endif
-#ifdef MAC_FILE_SYSTEM
-# include <Carbon.h>
-#endif
 #include <math.h> /* for fmod , used by default_sleep */
 #include "schfd.h"
 
@@ -151,6 +148,7 @@ typedef struct Win_FD_Output_Thread {
      flush-checking thread to work, ready_sema indicates that a flush
      finished, and you_clean_up_sema is essentially a reference
      count */
+  HANDLE thread;
 } Win_FD_Output_Thread;
 
 int scheme_stupid_windows_machine;
@@ -188,13 +186,6 @@ typedef struct Scheme_Subprocess {
 # define MZ_FDS
 #endif
 
-
-/******************** Mac Classic input ********************/
-
-#ifdef MAC_FILE_SYSTEM
-# define MZ_FDS
-# define MAC_FILE_HANDLES
-#endif
 
 /******************** file-descriptor I/O ********************/
 
@@ -235,7 +226,7 @@ typedef struct Scheme_FD {
 # include <fcntl.h>
 #endif
 
-#if defined(WINDOWS_FILE_HANDLES) || defined(MAC_FILE_HANDLES)
+#if defined(WINDOWS_FILE_HANDLES)
 # define FILENAME_EXN_E "%E"
 #else
 # define FILENAME_EXN_E "%e"
@@ -293,8 +284,10 @@ Scheme_Object *scheme_redirect_output_port_type;
 
 int scheme_force_port_closed;
 
+static int flush_out, flush_err;
+
 #if defined(FILES_HAVE_FDS)
-static int external_event_fd, put_external_event_fd, event_fd_set;
+static int external_event_fd, put_external_event_fd;
 #endif
 
 static void register_port_wait();
@@ -340,7 +333,7 @@ OS_SEMAPHORE_TYPE scheme_break_semaphore;
 #endif
 
 #ifdef MZ_FDS
-static Scheme_Object *make_fd_input_port(int fd, Scheme_Object *name, int regfile, int textmode, int *refcount);
+static Scheme_Object *make_fd_input_port(int fd, Scheme_Object *name, int regfile, int textmode, int *refcount, int internal);
 static Scheme_Object *make_fd_output_port(int fd, Scheme_Object *name, int regfile, int textmode, int read_too);
 #endif
 #ifdef USE_OSKIT_CONSOLE
@@ -351,8 +344,9 @@ static void force_close_output_port(Scheme_Object *port);
 static void force_close_input_port(Scheme_Object *port);
 
 static Scheme_Object *text_symbol, *binary_symbol;
-static Scheme_Object *append_symbol, *error_symbol, *update_symbol;
+static Scheme_Object *append_symbol, *error_symbol, *update_symbol, *can_update_symbol;
 static Scheme_Object *replace_symbol, *truncate_symbol, *truncate_replace_symbol;
+static Scheme_Object *must_truncate_symbol;
 
 Scheme_Object *scheme_none_symbol, *scheme_line_symbol, *scheme_block_symbol;
 
@@ -384,6 +378,8 @@ scheme_init_port (Scheme_Env *env)
   REGISTER_SO(truncate_symbol);
   REGISTER_SO(truncate_replace_symbol);
   REGISTER_SO(update_symbol);
+  REGISTER_SO(can_update_symbol);
+  REGISTER_SO(must_truncate_symbol);
 
   text_symbol = scheme_intern_symbol("text");
   binary_symbol = scheme_intern_symbol("binary");
@@ -393,6 +389,8 @@ scheme_init_port (Scheme_Env *env)
   truncate_symbol = scheme_intern_symbol("truncate");
   truncate_replace_symbol = scheme_intern_symbol("truncate/replace");
   update_symbol = scheme_intern_symbol("update");
+  can_update_symbol = scheme_intern_symbol("can-update");
+  must_truncate_symbol = scheme_intern_symbol("must-truncate");
 
   REGISTER_SO(scheme_none_symbol);
   REGISTER_SO(scheme_line_symbol);
@@ -498,9 +496,9 @@ scheme_init_port (Scheme_Env *env)
 #else
 # ifdef MZ_FDS
 #  ifdef WINDOWS_FILE_HANDLES
-			    : make_fd_input_port((int)GetStdHandle(STD_INPUT_HANDLE), scheme_intern_symbol("stdin"), 0, 0, NULL)
+			    : make_fd_input_port((int)GetStdHandle(STD_INPUT_HANDLE), scheme_intern_symbol("stdin"), 0, 0, NULL, 0)
 #  else
-			    : make_fd_input_port(0, scheme_intern_symbol("stdin"), 0, 0, NULL)
+			    : make_fd_input_port(0, scheme_intern_symbol("stdin"), 0, 0, NULL, 0)
 #  endif
 # else
 			    : scheme_make_named_file_input_port(stdin, scheme_intern_symbol("stdin"))
@@ -535,6 +533,9 @@ scheme_init_port (Scheme_Env *env)
 			     : scheme_make_file_output_port(stderr)
 #endif
 			     );
+
+  flush_out = SCHEME_TRUEP(scheme_terminal_port_p(1, &scheme_orig_stdout_port));
+  flush_err = SCHEME_TRUEP(scheme_terminal_port_p(1, &scheme_orig_stderr_port));
 
 #ifdef MZ_FDS
   scheme_add_atexit_closer(flush_if_output_fds);
@@ -641,6 +642,9 @@ Scheme_Object * scheme_make_eof (void)
 #ifdef USE_DYNAMIC_FDSET_SIZE
 static int dynamic_fd_size;
 
+# define STORED_ACTUAL_FDSET_LIMIT
+# define FDSET_LIMIT(fd) (*(int *)((char *)fd XFORM_OK_PLUS dynamic_fd_size))
+
 #ifdef MZ_XFORM
 START_XFORM_SKIP;
 #endif
@@ -665,9 +669,9 @@ void *scheme_alloc_fdset_array(int count, int permanent)
   }
 
   if (permanent)
-    return scheme_malloc_eternal(count * dynamic_fd_size);
+    return scheme_malloc_eternal(count * (dynamic_fd_size + sizeof(long)));
   else
-    return scheme_malloc_atomic(count * dynamic_fd_size);
+    return scheme_malloc_atomic(count * (dynamic_fd_size + sizeof(long)));
 }
 
 #ifdef MZ_XFORM
@@ -681,12 +685,12 @@ void *scheme_init_fdset_array(void *fdarray, int count)
 
 void *scheme_get_fdset(void *fdarray, int pos)
 {
-  return ((char *)fdarray) + (pos * dynamic_fd_size);
+  return ((char *)fdarray) + (pos * (dynamic_fd_size + sizeof(long)));
 }
 
 void scheme_fdzero(void *fd)
 {
-  memset(fd, 0, dynamic_fd_size);
+  memset(fd, 0, dynamic_fd_size + sizeof(long));
 }
 
 #else
@@ -770,6 +774,12 @@ void scheme_fdset(void *fd, int n)
     ((win_extended_fd_set *)fd)->added++;
 #endif
 #if defined(FILES_HAVE_FDS) || defined(USE_SOCKETS_TCP)
+# ifdef STORED_ACTUAL_FDSET_LIMIT
+  int mx;
+  mx = FDSET_LIMIT(fd);
+  if (n > mx)
+    FDSET_LIMIT(fd) = n;
+# endif
   FD_SET(n, ((fd_set *)fd));
 #endif
 }
@@ -853,8 +863,10 @@ extern MZ_DLLIMPORT void (*GC_collect_end_callback)(void);
 
 void scheme_init_thread_memory()
 {
+#ifndef MZ_PRECISE_GC
   REGISTER_SO(tm_start);
   REGISTER_SO(tm_next);
+#endif
 
   /* We start with a pre-allocated tm because we
      want to register a thread before performing any
@@ -1216,6 +1228,11 @@ XFORM_NONGCING static int pipe_char_count(Scheme_Object *p)
     return 0;
 }
 
+int scheme_pipe_char_count(Scheme_Object *p)
+{
+  return pipe_char_count(p);
+}
+
 /****************************** main input reader ******************************/
 
 static void post_progress(Scheme_Input_Port *ip)
@@ -1279,7 +1296,7 @@ XFORM_NONGCING static void do_count_lines(Scheme_Port *ip, const char *buffer, l
     int state = ip->utf8state;
     int n;
     degot += state_len(state);
-    n = scheme_utf8_decode_count((const unsigned char *)buffer, offset, offset + i + 1, &state, 0, '?');
+    n = scheme_utf8_decode_count((const unsigned char *)buffer, offset, offset + i + 1, &state, 0, 0xFFFD);
     degot += (i + 1 - n);
     ip->utf8state = 0; /* assert: state == 0, because we ended with a newline */
   }
@@ -1322,7 +1339,7 @@ XFORM_NONGCING static void do_count_lines(Scheme_Port *ip, const char *buffer, l
     col -= n;
     for (i = prev_i; i < got; i++) {
       if (buffer[offset + i] == '\t') {
-	n = scheme_utf8_decode_count((const unsigned char *)buffer, offset + prev_i, offset + i, &state, 0, '?');
+	n = scheme_utf8_decode_count((const unsigned char *)buffer, offset + prev_i, offset + i, &state, 0, 0xFFFD);
 	degot += ((i - prev_i) - n);
 	col += n;
 	col = col - (col & 0x7) + 8;
@@ -1330,7 +1347,7 @@ XFORM_NONGCING static void do_count_lines(Scheme_Port *ip, const char *buffer, l
       }
     }
     if (prev_i < i) {
-      n = scheme_utf8_decode_count((const unsigned char *)buffer, offset + prev_i, offset + i, &state, 1, '?');
+      n = scheme_utf8_decode_count((const unsigned char *)buffer, offset + prev_i, offset + i, &state, 1, 0xFFFD);
       n += state_len(state);
       col += n;
       degot += ((i - prev_i) - n);
@@ -2169,7 +2186,7 @@ long scheme_get_char_string(const char *who,
 	  long ulen, glen;
 	  glen = scheme_utf8_decode_as_prefix((const unsigned char *)s, 0, got + leftover,
 					      buffer, offset, offset + size,
-					      &ulen, 0, '?');
+					      &ulen, 0, 0xFFFD);
 	  if (glen && (ulen < got + leftover)) {
 	    /* Got one, with a decoding error. If we weren't peeking,
 	       don't read the lookahead bytes after all, yet. */
@@ -2212,7 +2229,7 @@ long scheme_get_char_string(const char *who,
 	     sequence in an error. We may have more leftover chars
 	     than we need, but they haven't been read, yet. */
 	  while (leftover && size) {
-	    buffer[offset++] = '?';
+	    buffer[offset++] = 0xFFFD;
 	    total_got++;
 	    --leftover;
 	    --size;
@@ -2239,7 +2256,7 @@ long scheme_get_char_string(const char *who,
 
       glen = scheme_utf8_decode_as_prefix((const unsigned char *)s, 0, got + leftover,
 					  buffer, offset, offset + size,
-					  &ulen, 0, '?');
+					  &ulen, 0, 0xFFFD);
       
       total_got += glen;
       if (glen == size) {
@@ -2259,7 +2276,7 @@ long scheme_get_char_string(const char *who,
 
       /* Leftover bytes must be decoding-error bytes: */
       while (leftover) {
-	buffer[offset++] = '?';
+	buffer[offset++] = 0xFFFD;
 	total_got++;
 	--leftover;
       }
@@ -2392,7 +2409,7 @@ scheme_getc(Scheme_Object *port)
       else {
 	/* This counts as a decoding error. The high bit
 	   on the first character must be set. */
-	return '?';
+	return 0xFFFD;
       }
     } else {
       v = scheme_utf8_decode_prefix((const unsigned char *)s, delta + 1, r, 0);
@@ -2408,7 +2425,7 @@ scheme_getc(Scheme_Object *port)
 	return r[0];
       } else if (v == -2) {
 	/* -2 => decoding error */
-	return '?';
+	return 0xFFFD;
       } else if (v == -1) {
 	/* In middle of sequence; start/continue peeking bytes */
 	delta++;
@@ -2534,8 +2551,8 @@ static int do_peekc_skip(Scheme_Object *port, Scheme_Object *skip,
       if (!delta)
 	return v;
       else {
-	/* This counts as a decoding error, so return '?' */
-	return '?';
+	/* This counts as a decoding error, so return 0xFFFD */
+	return 0xFFFD;
       }
     } else {
       v = scheme_utf8_decode_prefix((const unsigned char *)s, delta + 1, r, 0);
@@ -2543,7 +2560,7 @@ static int do_peekc_skip(Scheme_Object *port, Scheme_Object *skip,
 	return r[0];
       else if (v == -2) {
 	/* -2 => decoding error */
-	return '?';
+	return 0xFFFD;
       } else if (v == -1) {
 	/* In middle of sequence - keep getting bytes. */
 	delta++;
@@ -3279,8 +3296,10 @@ force_close_output_port(Scheme_Object *port)
 void scheme_flush_orig_outputs(void)
 {
   /* Flush original output ports: */
-  scheme_flush_output(scheme_orig_stdout_port);
-  scheme_flush_output(scheme_orig_stderr_port);
+  if (flush_out)
+    scheme_flush_output(scheme_orig_stdout_port);
+  if (flush_err)
+    scheme_flush_output(scheme_orig_stderr_port);
 }
 
 void scheme_flush_output(Scheme_Object *o)
@@ -3419,9 +3438,13 @@ Scheme_Object *scheme_file_identity(int argc, Scheme_Object *argv[])
 static int is_fd_terminal(int fd)
 {
 #if defined(WIN32_FD_HANDLES)
-  if (GetFileType((HANDLE)fd) == FILE_TYPE_CHAR)
-    return 1;
-  else
+  if (GetFileType((HANDLE)fd) == FILE_TYPE_CHAR) {
+    DWORD mode;
+    if (GetConsoleMode((HANDLE)fd, &mode))
+      return 1;
+    else
+      return 0;
+  } else
     return 0;
 #else
   return isatty(fd);
@@ -3511,7 +3534,7 @@ static void filename_exn(char *name, char *msg, char *filename, int err)
 }
 
 Scheme_Object *
-scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[])
+scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[], int internal)
 {
 #ifdef USE_FD_PORTS
   int fd;
@@ -3568,9 +3591,10 @@ scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[
   filename = scheme_expand_string_filename(argv[0],
 					   name,
 					   NULL,
-					   SCHEME_GUARD_FILE_READ);
+					   (internal ? 0 : SCHEME_GUARD_FILE_READ));
 
-  scheme_custodian_check_available(NULL, name, "file-stream");
+  if (!internal)
+    scheme_custodian_check_available(NULL, name, "file-stream");
 
 #ifdef USE_FD_PORTS
   /* Note: assuming there's no difference between text and binary mode */
@@ -3598,7 +3622,7 @@ scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[
     } else {
       regfile = S_ISREG(buf.st_mode);
       scheme_file_open_count++;
-      result = make_fd_input_port(fd, scheme_make_path(filename), regfile, 0, NULL);
+      result = make_fd_input_port(fd, scheme_make_path(filename), regfile, 0, NULL, internal);
     }
   }
 #else
@@ -3623,32 +3647,13 @@ scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[
     return NULL;
   }
 
-  result = make_fd_input_port((int)fd, scheme_make_path(filename), regfile, mode[1] == 't', NULL);
+  result = make_fd_input_port((int)fd, scheme_make_path(filename), regfile, mode[1] == 't', NULL, internal);
 # else
   if (scheme_directory_exists(filename)) {
     filename_exn(name, "cannot open directory as a file", filename, 0);
     return NULL;
   }
 
-#  ifdef MAC_FILE_SYSTEM
-  {
-    FSSpec spec;
-    SInt16 refnum;
-
-    if (scheme_mac_path_to_spec(filename, &spec)) {
-      errno = FSpOpenDF(&spec, fsRdWrShPerm, &refnum);
-      if (errno == noErr)
-	result = make_fd_input_port(refnum, scheme_make_path(filename), 1, mode[1] == 't', NULL);
-      else {
-	filename_exn(name, "could not open file", filename, errno);
-	return NULL;
-      }
-    } else {
-      filename_exn(name, "could not open file", filename, 0);
-      return NULL;
-    }
-  }
-#  else
   regfile = scheme_is_regular_file(filename);
 
   fp = fopen(filename, mode);
@@ -3659,7 +3664,6 @@ scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[
   scheme_file_open_count++;
 
   result = scheme_make_named_file_input_port(fp, scheme_make_path(filename));
-#  endif
 # endif
 #endif
 
@@ -3684,7 +3688,7 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
 # endif
 #endif
   int e_set = 0, m_set = 0, i;
-  int existsok = 0;
+  int existsok = 0, must_exist = 0;
   char *filename;
   char mode[4];
   int typepos;
@@ -3712,11 +3716,25 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
     } else if (SAME_OBJ(argv[i], truncate_symbol)) {
       existsok = -1;
       e_set++;
+    } else if (SAME_OBJ(argv[i], must_truncate_symbol)) {
+      existsok = -1;
+      must_exist = 1;
+      e_set++;
     } else if (SAME_OBJ(argv[i], truncate_replace_symbol)) {
       existsok = -2;
       e_set++;
     } else if (SAME_OBJ(argv[i], update_symbol)) {
       existsok = 2;
+      must_exist = 1;
+      if (typepos == 1) {
+	mode[2] = mode[1];
+	typepos = 2;
+      }
+      mode[0] = 'r';
+      mode[1] = '+';
+      e_set++;
+    } else if (SAME_OBJ(argv[i], can_update_symbol)) {
+      existsok = 3;
       if (typepos == 1) {
 	mode[2] = mode[1];
 	typepos = 2;
@@ -3759,7 +3777,7 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
   filename = scheme_expand_string_filename(argv[0],
 					   name, NULL,
 					   (SCHEME_GUARD_FILE_WRITE
-					    | ((existsok && (existsok != -1))
+					    | ((existsok && ((existsok == 1) || (existsok == -2)))
 					       ? SCHEME_GUARD_FILE_DELETE
 					       : 0)
 					    /* append mode: */
@@ -3776,16 +3794,14 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
 #ifdef USE_FD_PORTS
   /* Note: assuming there's no difference between text and binary mode */
 
-  flags = (and_read ? O_RDWR : O_WRONLY) | O_CREAT;
+  flags = (and_read ? O_RDWR : O_WRONLY) | (must_exist ? 0 : O_CREAT);
 
   if (mode[0] == 'a')
     flags |= O_APPEND;
   else if (existsok < 0)
     flags |= O_TRUNC;
 
-  if (existsok > 1)
-    flags -= O_CREAT;
-  else if (existsok > -1)
+  if ((existsok <= 1) && (existsok > -1))
     flags |= O_EXCL;
 
   do {
@@ -3842,12 +3858,19 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
 # ifdef WINDOWS_FILE_HANDLES
   if (!existsok)
     hmode = CREATE_NEW;
-  else if (existsok < 0)
-    hmode = OPEN_ALWAYS;
-  else if (existsok  == 1)
+  else if (existsok < 0) {
+    if (must_exist)
+      hmode = TRUNCATE_EXISTING;
+    else
+      hmode = OPEN_ALWAYS;
+  } else if (existsok  == 1) {
+    /* assert: !must_exist */
     hmode = CREATE_ALWAYS;
-  else if (existsok  == 2)
+  } else if (existsok == 2) {
+    hmode = OPEN_EXISTING;
+  } else if (existsok == 3) {
     hmode = OPEN_ALWAYS;
+  }
 
   fd = CreateFileW(WIDE_PATH(filename),
 		   GENERIC_WRITE | (and_read ? GENERIC_READ : 0),
@@ -3929,50 +3952,6 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
   }
 
 
-#  ifdef MAC_FILE_SYSTEM
-  {
-    FSSpec spec;
-    SInt16 refnum;
-    int creating = 0;
-
-    if (scheme_mac_path_to_spec(filename, &spec)) {
-      if (existsok == 1) {
-	/* In case it's there: */
-	FSpDelete(&spec);
-      }
-
-      errno = FSpCreate(&spec, 'MrEd', 'TEXT', smSystemScript);
-      if (errno == dupFNErr) {
-	if (!existsok) {
-	  scheme_raise_exn(MZEXN_FAIL_FILESYSTEM_EXISTS,
-			   "%s: file \"%q\" exists", name, filename);
-	  return NULL;
-	}
-      } else
-	creating = 1;
-      errno = FSpOpenDF(&spec, fsRdWrShPerm, &refnum);
-      if ((errno == noErr) && (existsok < 0)) {
-	/* truncate or truncate/replace */
-	SetEOF(refnum, 0);
-      }
-
-      if (errno == noErr) {
-	if (creating)
-	  scheme_file_create_hook(filename);
-
-	scheme_file_open_count++;
-	return make_fd_output_port(refnum, scheme_make_path(filename), 1, mode[1] == 't', and_read);
-      } else {
-	filename_exn(name, "could not open file", filename, errno);
-	return NULL;
-      }
-    } else {
-      filename_exn(name, "could not open file", filename, 0);
-      return NULL;
-    }
-  }
-#  else
-
   if (and_read) {
     scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,
 		     "%s: not supported on this platform",
@@ -4022,7 +4001,6 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
   scheme_file_open_count++;
 
   return scheme_make_file_output_port(fp);
-#  endif
 # endif
 #endif
 }
@@ -4032,7 +4010,7 @@ Scheme_Object *scheme_open_input_file(const char *name, const char *who)
   Scheme_Object *a[1];
 
   a[0]= scheme_make_path(name);
-  return scheme_do_open_input_file((char *)who, 0, 1, a);
+  return scheme_do_open_input_file((char *)who, 0, 1, a, 0);
 }
 
 Scheme_Object *scheme_open_output_file(const char *name, const char *who)
@@ -4640,9 +4618,6 @@ fd_byte_ready (Scheme_Input_Port *port)
 
     return 0;
 #else
-# ifdef MAC_FILE_HANDLES
-    return 1;
-# else
     int r;
     DECL_FDSET(readfds, 1);
     DECL_FDSET(exnfds, 1);
@@ -4678,7 +4653,6 @@ fd_byte_ready (Scheme_Input_Port *port)
 # endif
 
     return r;
-# endif
 #endif
   }
 }
@@ -4846,17 +4820,6 @@ static long fd_get_string_slow(Scheme_Input_Port *port,
       }
     }
 #else
-# ifdef MAC_FILE_HANDLES
-    {
-      SInt32 cnt = target_size;
-
-      errno = FSRead(fip->fd, &cnt, target + target_offset);
-      if (!cnt && (errno != eofErr))
-        bc = -1;
-      else
-        bc = cnt;
-    }
-# else
     if (fip->regfile) {
       do {
         bc = read(fip->fd, target + target_offset, target_size);
@@ -4879,7 +4842,6 @@ static long fd_get_string_slow(Scheme_Input_Port *port,
         bc = 0;
       }
     }
-# endif
 #endif
 
     if (!none_avail) {
@@ -4988,23 +4950,17 @@ fd_close_input(Scheme_Input_Port *port)
   }
   if (!fip->refcount || !*fip->refcount) {
     CloseHandle((HANDLE)fip->fd);
+    --scheme_file_open_count;
   }
 #else
   if (!fip->refcount || !*fip->refcount) {
-# ifdef MAC_FILE_HANDLES
-    FSClose(fip->fd);
-# else
-    {
-      int cr;
-      do {
-	cr = close(fip->fd);
-      } while ((cr == -1) && (errno == EINTR));
-    }
-# endif
+    int cr;
+    do {
+      cr = close(fip->fd);
+    } while ((cr == -1) && (errno == EINTR));
+    --scheme_file_open_count;
   }
 #endif
-
-  --scheme_file_open_count;
 }
 
 static void
@@ -5014,11 +4970,8 @@ fd_need_wakeup(Scheme_Input_Port *port, void *fds)
 
 #ifdef WINDOWS_FILE_HANDLES
 #else
-# ifdef MAC_FILE_HANDLES
-# else
   void *fds2;
   int n;
-# endif
 #endif
 
   fip = (Scheme_FD *)port->port_data;
@@ -5046,13 +4999,10 @@ fd_need_wakeup(Scheme_Input_Port *port, void *fds)
     scheme_add_fd_handle((void *)fip->fd, fds, 0);
   }
 #else
-# ifdef MAC_FILE_HANDLES
-# else
   n = fip->fd;
   MZ_FD_SET(n, (fd_set *)fds);
   fds2 = MZ_GET_FDSET(fds, 2);
   MZ_FD_SET(n, (fd_set *)fds2);
-# endif
 #endif
 }
 
@@ -5072,7 +5022,7 @@ static int fd_input_buffer_mode(Scheme_Port *p, int mode)
 }
 
 static Scheme_Object *
-make_fd_input_port(int fd, Scheme_Object *name, int regfile, int win_textmode, int *refcount)
+make_fd_input_port(int fd, Scheme_Object *name, int regfile, int win_textmode, int *refcount, int internal)
 {
   Scheme_Input_Port *ip;
   Scheme_FD *fip;
@@ -5111,7 +5061,7 @@ make_fd_input_port(int fd, Scheme_Object *name, int regfile, int win_textmode, i
 			      fd_byte_ready,
 			      fd_close_input,
 			      fd_need_wakeup,
-			      1);
+			      !internal);
   ip->p.buffer_mode_fun = fd_input_buffer_mode;
 
   ip->pending_eof = 1; /* means that pending EOFs should be tracked */
@@ -5243,7 +5193,7 @@ Scheme_Object *
 scheme_make_fd_input_port(int fd, Scheme_Object *name, int regfile, int textmode)
 {
 #ifdef MZ_FDS
-  return make_fd_input_port(fd, name, regfile, textmode, NULL);
+  return make_fd_input_port(fd, name, regfile, textmode, NULL, 0);
 #else
   return NULL;
 #endif
@@ -5657,9 +5607,6 @@ fd_write_ready (Scheme_Object *port)
   } else
     return 1; /* non-blocking output, such as a console, or haven't written yet */
 #else
-# ifdef MAC_FILE_HANDLES
-  return 1;
-# else
   {
     DECL_FDSET(writefds, 1);
     DECL_FDSET(exnfds, 1);
@@ -5680,7 +5627,6 @@ fd_write_ready (Scheme_Object *port)
 
     return sr;
   }
-# endif
 #endif
 }
 
@@ -5693,11 +5639,8 @@ fd_write_need_wakeup(Scheme_Object *port, void *fds)
 
 #ifdef WINDOWS_FILE_HANDLES
 #else
-# ifdef MAC_FILE_HANDLES
-# else
   void *fds2;
   int n;
-# endif
 #endif
 
   op = scheme_output_port_record(port);
@@ -5709,14 +5652,11 @@ fd_write_need_wakeup(Scheme_Object *port, void *fds)
   else
     scheme_add_fd_nosleep(fds);
 #else
-# ifdef MAC_FILE_HANDLES
-# else
   n = fop->fd;
   fds2 = MZ_GET_FDSET(fds, 1);
   MZ_FD_SET(n, (fd_set *)fds2);
   fds2 = MZ_GET_FDSET(fds, 2);
   MZ_FD_SET(n, (fd_set *)fds2);
-# endif
 #endif
 }
 
@@ -5778,8 +5718,7 @@ static long flush_fd(Scheme_Output_Port *op,
       if (fop->regfile) {
 	/* Regular files never block, so this code looks like the Unix
 	   code.  We've cheated in the make_fd proc and called
-	   FILE_TYPE_CHAR devices (e.g., console) regular files,
-	   because they cannot block, either. */
+	   consoles regular files, because they cannot block, either. */
 	int orig_len;
 
 	if (fop->textmode) {
@@ -5984,6 +5923,19 @@ static long flush_fd(Scheme_Output_Port *op,
 	    h = CreateThread(NULL, 4096, (LPTHREAD_START_ROUTINE)WindowsFDWriter, oth, 0, &id);
 
 	    scheme_remember_thread(h, 1);
+
+	    /* scheme_remember_thread() is in charge of releasing h, so
+	       duplicate it for use in closing: */
+	    DuplicateHandle(GetCurrentProcess(), 
+			    h,
+			    GetCurrentProcess(),
+			    &h, 
+			    0,
+			    FALSE,
+			    DUPLICATE_SAME_ACCESS);
+
+	    oth->thread = h;
+
 	  }
 	}
 
@@ -5991,16 +5943,15 @@ static long flush_fd(Scheme_Output_Port *op,
 	   done... */
 
 	if (!fop->oth->nonblocking) {
-	  /* This case is only for Win 95/98/Me anonymous pipes.  We
-	     haven't written anything yet! We write to a buffer read
-	     by the other thread, and return -- the other thread takes
-	     care of writing. Thus, as long as there's room in the
-	     buffer, we don't block, and we can tell whether there's
-	     room. Technical problem: if multiple ports are attched to
-	     the same underlying pipe (different handle, same
-	     "device"), the port writes can get out of order. We try
-	     to avoid the problem by sleeping --- it's only Win
-	     95/98/Me, after all. */
+	  /* This case is for Win 95/98/Me anonymous pipes and
+	     character devices.  We haven't written anything yet! We
+	     write to a buffer read by the other thread, and return --
+	     the other thread takes care of writing. Thus, as long as
+	     there's room in the buffer, we don't block, and we can
+	     tell whether there's room. Technical problem: if multiple
+	     ports are attched to the same underlying pipe (different
+	     handle, same "device"), the port writes can get out of
+	     order. We try to avoid the problem by sleeping. */
 
 	  Win_FD_Output_Thread *oth = fop->oth;
 
@@ -6069,17 +6020,6 @@ static long flush_fd(Scheme_Output_Port *op,
 	}
       }
 #else
-# ifdef MAC_FILE_HANDLES
-      {
-	SInt32 put = buflen - offset;
-	errsaved = FSWrite(fop->fd, &put, bufstr + offset);
-	if (errsaved != noErr)
-	  len = -1;
-	else
-	  len = put;
-	full_write_buffer = 0;
-      }
-# else
       int flags;
 
       flags = fcntl(fop->fd, F_GETFL, 0);
@@ -6093,7 +6033,6 @@ static long flush_fd(Scheme_Output_Port *op,
       fcntl(fop->fd, F_SETFL, flags);
 
       full_write_buffer = (errsaved == EAGAIN);
-# endif
 #endif
 
       if (len < 0) {
@@ -6208,6 +6147,10 @@ fd_write_string(Scheme_Output_Port *port,
   return len;
 }
 
+#ifdef WINDOWS_FILE_HANDLES
+typedef BOOL (WINAPI* CSI_proc)(HANDLE);
+#endif
+
 static void
 fd_close_output(Scheme_Output_Port *port)
 {
@@ -6238,6 +6181,29 @@ fd_close_output(Scheme_Output_Port *port)
 
 #ifdef WINDOWS_FILE_HANDLES
   if (fop->oth) {
+    static int tried_csi = 0;
+    static CSI_proc csi;
+
+    START_XFORM_SKIP;      
+    if (!tried_csi) {
+      HMODULE hm;
+      hm = LoadLibrary("kernel32.dll");
+      if (hm)
+	csi = (BOOL (WINAPI*)(HANDLE))GetProcAddress(hm, "CancelSynchronousIo");
+      else
+	csi = NULL;
+      tried_csi = 1;
+    }
+    END_XFORM_SKIP;
+
+    if (csi) {
+      csi(fop->oth->thread);
+      /* We're hoping that if CancelSyncrhonousIo isn't available, that
+	 CloseHandle() will work, or that WriteFile() didn't block after
+	 all (which seems to be the case with pre-Vista FILE_TYPE_CHAR
+	 handles). */
+    }
+    CloseHandle(fop->oth->thread);
     fop->oth->done = 1;
     ReleaseSemaphore(fop->oth->work_sema, 1, NULL);
 
@@ -6250,23 +6216,17 @@ fd_close_output(Scheme_Output_Port *port)
   }
   if (!fop->refcount || !*fop->refcount) {
     CloseHandle((HANDLE)fop->fd);
+    --scheme_file_open_count;
   }
 #else
   if (!fop->refcount || !*fop->refcount) {
-# ifdef MAC_FILE_HANDLES
-    FSClose(fop->fd);
-# else
-    {
-      int cr;
-      do {
-	cr = close(fop->fd);
-      } while ((cr == -1) && (errno == EINTR));
-    }
-# endif
+    int cr;
+    do {
+      cr = close(fop->fd);
+    } while ((cr == -1) && (errno == EINTR));
+    --scheme_file_open_count;
   }
 #endif
-
-  --scheme_file_open_count;
 }
 
 static int fd_output_buffer_mode(Scheme_Port *p, int mode)
@@ -6308,7 +6268,7 @@ make_fd_output_port(int fd, Scheme_Object *name, int regfile, int win_textmode, 
 
 #ifdef WINDOWS_FILE_HANDLES
   /* Character devices can't block output, right? */
-  if (GetFileType((HANDLE)fop->fd) == FILE_TYPE_CHAR)
+  if (is_fd_terminal(fop->fd))
     regfile = 1;
   /* The work thread is created on demand in fd_flush. */
 #endif
@@ -6347,7 +6307,7 @@ make_fd_output_port(int fd, Scheme_Object *name, int regfile, int win_textmode, 
     *rc = 2;
     fop->refcount = rc;
     a[1] = the_port;
-    a[0] = make_fd_input_port(fd, name, regfile, win_textmode, rc);
+    a[0] = make_fd_input_port(fd, name, regfile, win_textmode, rc, 0);
     return scheme_values(2, a);
   } else
     return the_port;
@@ -6388,8 +6348,9 @@ static long WindowsFDWriter(Win_FD_Output_Thread *oth)
       ReleaseSemaphore(oth->lock_sema, 1, NULL);
     }
   } else {
-    /* Blocking mode. We do the writing work.  This case is only for
-       Win 95/98/Me anonymous pipes. */
+    /* Blocking mode. We do the writing work.  This case is for
+       Win 95/98/Me anonymous pipes and character devices (such 
+       as LPT1). */
     while (!oth->err_no) {
       if (!more_work)
 	WaitForSingleObject(oth->work_sema, INFINITE);
@@ -6553,38 +6514,7 @@ void scheme_block_child_signals(int block)
 
 static void child_done(int ingored)
 {
-  pid_t result;
-  int status;
-  System_Child *sc, *prev;
-
-  do {
-    do {
-      result = WAITANY(&status);
-    } while ((result == -1) && (errno == EINTR));
-
-    if (result > 0) {
-      if (WIFEXITED(status))
-	status = WEXITSTATUS(status);
-      else
-	status = MZ_FAILURE_STATUS;
-
-      prev = NULL;
-      for (sc = scheme_system_children; sc; prev = sc, sc = sc->next) {
-	if (sc->id == result) {
-          sc->done = 1;
-	  sc->status = status;
-
-	  if (prev) {
-	    prev->next = sc->next;
-	  } else
-	    scheme_system_children = sc->next;
-
-	  scheme_signal_received();
-	  break;
-	}
-      }
-    }
-  } while (result > 0);
+  scheme_signal_received();
 
 # ifdef SIGSET_NEEDS_REINSTALL
   MZ_SIGSET(SIGCHLD, child_done);
@@ -6606,6 +6536,45 @@ static void init_sigchld(void)
     END_XFORM_SKIP;
 
     sigchld_installed = 1;
+  }
+}
+
+static void check_child_done()
+{
+  pid_t result;
+  int status;
+  System_Child *sc, *prev;
+
+  if (scheme_system_children) {
+    do {
+      do {
+        START_XFORM_SKIP;
+        result = WAITANY(&status);
+        END_XFORM_SKIP;
+      } while ((result == -1) && (errno == EINTR));
+
+      if (result > 0) {
+        START_XFORM_SKIP;
+        if (WIFEXITED(status))
+          status = WEXITSTATUS(status);
+        else
+          status = MZ_FAILURE_STATUS;
+        END_XFORM_SKIP;
+
+        prev = NULL;
+        for (sc = scheme_system_children; sc; prev = sc, sc = sc->next) {
+          if (sc->id == result) {
+            sc->done = 1;
+            sc->status = status;
+
+            if (prev) {
+              prev->next = sc->next;
+            } else
+              scheme_system_children = sc->next;
+          }
+        }
+      }
+    } while (result > 0);
   }
 }
 
@@ -6766,6 +6735,7 @@ static int subp_done(Scheme_Object *sp)
 
 #if defined(UNIX_PROCESSES)
   System_Child *sc = (System_Child *)sci;
+  check_child_done();
   return sc->done;
 #endif
 #ifdef WINDOWS_PROCESSES
@@ -6803,6 +6773,8 @@ static Scheme_Object *subprocess_status(int argc, Scheme_Object **argv)
 
 #if defined(UNIX_PROCESSES)
     System_Child *sc = (System_Child *)sp->handle;
+
+    check_child_done();
 
     if (sc->done)
       status = sc->status;
@@ -6875,6 +6847,8 @@ static Scheme_Object *subprocess_kill(int argc, Scheme_Object **argv)
 #if defined(UNIX_PROCESSES)
     {
       System_Child *sc = (System_Child *)sp->handle;
+
+      check_child_done();
 
       while (1) {
 	if (sc->done)
@@ -7030,9 +7004,9 @@ static long mz_spawnv(char *command, const char * const *argv,
 
   /* If none of the stdio handles are consoles, specifically
      create the subprocess without a console: */
-  if ((GetFileType(startup.hStdInput) != FILE_TYPE_CHAR)
-      && (GetFileType(startup.hStdOutput) != FILE_TYPE_CHAR)
-      && (GetFileType(startup.hStdError) != FILE_TYPE_CHAR))
+  if (!is_fd_terminal((int)startup.hStdInput)
+      && !is_fd_terminal((int)startup.hStdOutput)
+      && !is_fd_terminal((int)startup.hStdError))
     cr_flag = CREATE_NO_WINDOW;
   else
     cr_flag = 0;
@@ -7476,9 +7450,9 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
   /*        Create new port objects       */
   /*--------------------------------------*/
 
-  in = (in ? in : make_fd_input_port(from_subprocess[0], scheme_intern_symbol("subprocess-stdout"), 0, 0, NULL));
+  in = (in ? in : make_fd_input_port(from_subprocess[0], scheme_intern_symbol("subprocess-stdout"), 0, 0, NULL, 0));
   out = (out ? out : make_fd_output_port(to_subprocess[1], scheme_intern_symbol("subprocess-stdin"), 0, 0, 0));
-  err = (err ? err : make_fd_input_port(err_subprocess[0], scheme_intern_symbol("subprocess-stderr"), 0, 0, 0));
+  err = (err ? err : make_fd_input_port(err_subprocess[0], scheme_intern_symbol("subprocess-stderr"), 0, 0, NULL, 0));
 
   /*--------------------------------------*/
   /*          Return result info          */
@@ -7594,11 +7568,12 @@ static Scheme_Object *sch_shell_execute(int c, Scheme_Object *argv[])
   if (!SCHEME_PATH_STRINGP(argv[3]))
     scheme_wrong_type("shell-execute", SCHEME_PATH_STRING_STR, 3, c, argv);
   {
+    int show_set = 0;
     show = 0;
 # define mzseCMP(id, str)			       \
     if (SAME_OBJ(scheme_intern_symbol(str), argv[4])   \
-        || SAME_OBJ(scheme_intern_symbol(# id), argv[4])) \
-      show = mzseSHOW(id)
+        || SAME_OBJ(scheme_intern_symbol(# id), argv[4])) { \
+      show = mzseSHOW(id); show_set = 1; }
     mzseCMP(SW_HIDE, "sw_hide");
     mzseCMP(SW_MAXIMIZE, "sw_maximize");
     mzseCMP(SW_MINIMIZE, "sw_minimize");
@@ -7612,7 +7587,7 @@ static Scheme_Object *sch_shell_execute(int c, Scheme_Object *argv[])
     mzseCMP(SW_SHOWNOACTIVATE, "sw_shownoactivate");
     mzseCMP(SW_SHOWNORMAL, "sw_shownormal");
 
-    if (!show)
+    if (!show_set)
       scheme_wrong_type("shell-execute", "show-mode symbol", 4, c, argv);
   }
 
@@ -7679,6 +7654,39 @@ static Scheme_Object *sch_shell_execute(int c, Scheme_Object *argv[])
   return NULL;
 #endif
 }
+
+/*========================================================================*/
+/*                          fd reservation                                */
+/*========================================================================*/
+
+/* We don't want on-demand loading of code to fail because we run out of
+   file descriptors. So, keep one in reserve. */
+
+#ifdef USE_FD_PORTS
+static int fd_reserved, the_fd;
+#endif
+
+void scheme_reserve_file_descriptor(void)
+{
+#ifdef USE_FD_PORTS
+  if (!fd_reserved) {
+    the_fd = open("/dev/null", O_RDONLY); 
+    if (the_fd != -1)
+      fd_reserved = 1;
+  }
+#endif
+}
+
+void scheme_release_file_descriptor(void)
+{
+#ifdef USE_FD_PORTS
+  if (fd_reserved) {
+    close(the_fd);
+    fd_reserved = 0;
+  }
+#endif
+}
+
 
 /*========================================================================*/
 /*                             sleeping                                   */
@@ -7815,7 +7823,7 @@ static void default_sleep(float v, void *fds)
     /* Something to block on - sort our the parts in Windows. */
 
 #if defined(FILES_HAVE_FDS) || defined(USE_WINSOCK_TCP)
-    int limit;
+    int limit, actual_limit;
     fd_set *rd, *wr, *ex;
     struct timeval time;
 
@@ -7859,6 +7867,16 @@ static void default_sleep(float v, void *fds)
     rd = (fd_set *)fds;
     wr = (fd_set *)MZ_GET_FDSET(fds, 1);
     ex = (fd_set *)MZ_GET_FDSET(fds, 2);
+# ifdef STORED_ACTUAL_FDSET_LIMIT
+    actual_limit = FDSET_LIMIT(rd);
+    if (FDSET_LIMIT(wr) > actual_limit)
+      actual_limit = FDSET_LIMIT(wr);
+    if (FDSET_LIMIT(ex) > actual_limit)
+      actual_limit = FDSET_LIMIT(ex);
+    actual_limit++;
+# else
+    actual_limit = limit;
+# endif
 
     /******* Start Windows stuff *******/
 
@@ -7989,11 +8007,14 @@ static void default_sleep(float v, void *fds)
 
 #if defined(FILES_HAVE_FDS)
     /* Watch for external events, too: */
-    if (external_event_fd)
+    if (external_event_fd) {
       MZ_FD_SET(external_event_fd, rd);
+      if (external_event_fd >= actual_limit)
+        actual_limit = external_event_fd + 1;
+    }
 #endif
 
-    select(limit, rd, wr, ex, v ? &time : NULL);
+    select(actual_limit, rd, wr, ex, v ? &time : NULL);
 
 #endif
   }
@@ -8003,7 +8024,6 @@ static void default_sleep(float v, void *fds)
   if (external_event_fd) {
     char buf[10];
     read(external_event_fd, buf, 10);
-    event_fd_set = 0;
   }
 #endif
 }
@@ -8022,9 +8042,11 @@ void scheme_signal_received(void)
 /* Ensure that MzScheme wakes up if asleep. */
 {
 #if defined(FILES_HAVE_FDS)
-  if (put_external_event_fd && !event_fd_set) {
-    event_fd_set = 1;
-    write(put_external_event_fd, "!", 1);
+  if (put_external_event_fd) {
+    int v;
+    do {
+      v = write(put_external_event_fd, "!", 1);
+    } while ((v == -1) && (errno == EINTR));
   }
 #endif
 #if defined(WINDOWS_PROCESSES) || defined(WINDOWS_FILE_HANDLES)

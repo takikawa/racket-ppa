@@ -1,8 +1,8 @@
-(module modes (lib "a-unit.ss")
-  (require (lib "string-constant.ss" "string-constants")
-           (lib "class.ss")
-           (lib "list.ss")
-           (lib "framework.ss" "framework")
+#lang scheme/unit
+  (require string-constants
+           mzlib/class
+           mzlib/list
+           framework
            "drsig.ss")
   
   (import)
@@ -43,4 +43,4 @@
      (λ (l) 
        (and l
             (or (not-a-language-language? l)
-                (ormap (λ (x) (regexp-match #rx"Algol" x)) l)))))))
+                (ormap (λ (x) (regexp-match #rx"Algol" x)) l))))))

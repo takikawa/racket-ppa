@@ -2,11 +2,11 @@
 ; REPL by getting & setting values in the top-level environment
 
 (module debugger-bindings mzscheme
-  (require (lib "contract.ss")
+  (require mzlib/contract
            "marks.ss"
-           (lib "etc.ss")
-           (lib "list.ss")
-           (prefix kernel: (lib "kerncase.ss" "syntax")))
+           mzlib/etc
+           mzlib/list
+           (prefix kernel: syntax/kerncase))
   
   (provide/contract [set-event-num! (-> number? void?)] 
                     [bt (-> void?)] 
@@ -73,8 +73,7 @@
   ; stolen from MrFlow
   (define (simplify t)
     (kernel:kernel-syntax-case t #f
-      [(#%app . rest) (map simplify (syntax->list #`rest))]
-      [(#%datum . d) #`d]
+      [(#%plain-app . rest) (map simplify (syntax->list #`rest))]
       [(#%top . v) #`v]
       [(a ...) (map simplify (syntax->list #`(a ...)))]
       [x #`x]))
@@ -85,9 +84,9 @@
           (if (list? t)
               (cond
                 [(eq? kw '#%app) (map unexpand (cdr t))]
+                [(eq? kw '#%plain-app) (map unexpand (cdr t))]
                 [else (map unexpand t)])
               (cond
-                [(eq? kw '#%datum) (cdr t)]
                 [(eq? kw '#%top) (cdr t)]
                 [else t])))
         t))

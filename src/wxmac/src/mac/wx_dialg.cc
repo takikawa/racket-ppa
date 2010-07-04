@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2007 PLT Scheme Inc.
+// Copyright:  (c) 2004-2008 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -248,14 +248,8 @@ int wxMessageBox(char* message, char* caption, long style,
 // File selector
 //****************************************************************************
 
-#ifndef OS_X
-extern "C" {
-#endif
-  extern char *scheme_mac_spec_to_path(FSSpec *f);
-  extern int scheme_mac_path_to_spec(const char *filename, FSSpec *spec);
-#ifndef OS_X
-}
-#endif
+extern char *scheme_mac_spec_to_path(FSSpec *f);
+extern int scheme_mac_path_to_spec(const char *filename, FSSpec *spec);
 extern "C" {
   extern char *scheme_expand_filename(char* filename, int ilen, const char *errorin, int *ex, int guards);
   extern int scheme_is_complete_path(const char *s, long len, int kind);
@@ -339,7 +333,8 @@ static OSStatus ok_evt_handler(EventHandlerCallRef inHandlerCallRef,
     AEDesc desc;
     AECreateDesc (typeFSS, &spec, sizeof(FSSpec), &desc);
     if (scheme_file_exists(result)) {
-      NavCustomControl(ccbi->cbi->dialog, kNavCtlSetSelection, &desc);
+      NavCustomControl(ccbi->cbi->dialog, kNavCtlSetLocation, &desc); /* Leopard */
+      NavCustomControl(ccbi->cbi->dialog, kNavCtlSetSelection, &desc); /* Tiger */
       if (ccbi->cbi->is_put) {
 	NavCustomControl(ccbi->cbi->dialog, kNavCtlSetEditFileName, spec.name);
       }

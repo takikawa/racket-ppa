@@ -1,5 +1,7 @@
-(module icon (lib "a-unit.ss")
-  (require (lib "class.ss")
+#lang scheme/unit
+  (require (for-syntax scheme/base)
+           scheme/promise
+           mzlib/class
            (lib "include-bitmap.ss" "mrlib")
            "bday.ss"
            "sig.ss"
@@ -44,8 +46,8 @@
   (define get-up/down-cursor (make-get-cursor "up-down-cursor.xbm" "up-down-mask.xbm" 'size-n/s))
   (define get-left/right-cursor (make-get-cursor "left-right-cursor.xbm" "left-right-mask.xbm" 'size-e/w))
   
-  (define mrf-on-bitmap (delay (include-bitmap (lib "mrf.jpg" "icons"))))
-  (define gc-on-bitmap (delay (include-bitmap (lib "recycle.gif" "icons"))))
+  (define mrf-on-bitmap (delay (include-bitmap (lib "mrf.png" "icons"))))
+  (define gc-on-bitmap (delay (include-bitmap (lib "recycle.png" "icons"))))
   
   (define (make-off-bitmap onb)
     (let* ([bitmap (make-object bitmap%
@@ -69,4 +71,4 @@
     (force
      (if (mrf-bday?)
          mrf-off-bitmap
-         gc-off-bitmap))))
+         gc-off-bitmap)))

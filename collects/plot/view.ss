@@ -1,16 +1,8 @@
 (module view mzscheme
-  (require 
-   (lib "plplot.ss" "plot")
-   (lib "math.ss" "plot")
-   (lib "class.ss")
-   (lib "file.ss")
-   (lib "mred.ss" "mred")
-   (lib "math.ss")
-   ;(lib "4.ss" "srfi")
-   )
+  (require plot/plplot plot/math mzlib/class mzlib/file mred mzlib/math)
 
   ;; including suggested fix from Doug Williams
-  
+
   ; macro for creating a field in a class with a getter and a setter
   (define-syntax (fields-with-accessors stx) 
     (define (join-identifier prefix ident)
@@ -164,24 +156,23 @@
       ;    (begin0
       ;      (send bmdc get-bitmap)
       ;      (send bmdc set-bitmap #f))))
-           
+
       (super-instantiate ())))
-        
+
   ;; a 2d plot view
-  (define 2d-view% 
+  (define 2d-view%
     (class* plot-view% ()
-      (public 
-        set-labels 
+      (public
+        set-labels
         plot-y-errors
         plot-vector
-        plot-vectors      
+        plot-vectors
         plot-points
         plot-line
         plot-contours
         plot-shades
-        fill
-                )
-      
+        fill)
+
       ; set-labels : string string string -> nothing
       ; sets the x, y and title lables
       (define (set-labels x-label y-label title)
@@ -342,5 +333,6 @@
       (plot)))
  
   (provide
+   plot-view%
    2d-view%
    3d-view%))

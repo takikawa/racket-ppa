@@ -1,6 +1,6 @@
 (module xform-mod mzscheme
   (require (lib "xform.ss" "compiler" "private")
-	   (lib "cmdline.ss"))
+	   mzlib/cmdline)
 
   (define precompiling-header? (getenv "XFORM_PRECOMP"))
   (define precompiled-header (getenv "XFORM_USE_PRECOMP"))
@@ -21,7 +21,7 @@
    "xform"
    (current-command-line-arguments)
    [once-each
-    [("--setup") "ignored; for compatbility with makefile"
+    [("--setup") dir "ignored; for compatbility with makefile"
      (void)]
     [("--precompile") "generate precompiled header; or set XFORM_PRECOMP"
      (set! precompiling-header? #t)]

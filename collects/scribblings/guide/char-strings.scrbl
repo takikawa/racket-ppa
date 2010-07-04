@@ -1,18 +1,18 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require[(lib "eval.ss" "scribble")]
-@require["guide-utils.ss"]
+#lang scribble/doc
+@(require scribble/manual
+          scribble/eval
+          "guide-utils.ss")
 
 @title[#:tag "strings"]{Strings (Unicode)}
 
-A @defterm{string} is a fixed-length array of
+A @deftech{string} is a fixed-length array of
 @seclink["characters"]{characters}. It prints using doublequotes,
 where doublequote and backslash characters within the string are
 escaped with backslashes. Other common string escapes are supported,
 including @litchar["\\n"] for a linefeed, @litchar["\\r"] for a
 carriage return, octal escapes using @litchar["\\"] followed by up
-to three octal digits, and hexadimal escapes with @litchar["\\u"]
-(up to four digits).  Unprintable characters in a string normally
+to three octal digits, and hexadecimal escapes with @litchar["\\u"]
+(up to four digits).  Unprintable characters in a string are normally
 shown with @litchar["\\u"] when the string is printed.
 
 @refdetails/gory["parse-string"]{the syntax of strings}

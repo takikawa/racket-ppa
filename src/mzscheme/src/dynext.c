@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2007 PLT Scheme Inc.
+  Copyright (c) 2004-2008 PLT Scheme Inc.
   Copyright (c) 1995-2002 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -28,6 +28,7 @@
 #endif
 
 #include "schpriv.h"
+#include "schvers.h"
 #include "schgc.h"
 
 #ifdef UNIX_DYNAMIC_LOAD
@@ -265,14 +266,14 @@ static Scheme_Object *do_load_extension(const char *filename,
 		       "load-extension: bad version %s (not %s) from \"%s\"",
 		       vers, VERSION_AND_VARIANT, filename);
     }
-    
+
     init_f = (Init_Procedure)dlsym(dl, SO_SYMBOL_PREFIX "scheme_initialize");
     if (init_f) {
       reload_f = (Reload_Procedure)dlsym(dl, SO_SYMBOL_PREFIX "scheme_reload");
       if (reload_f)
 	modname_f = (Modname_Procedure)dlsym(dl, SO_SYMBOL_PREFIX "scheme_module_name");
     }
-    
+
     if (!init_f || !reload_f || !modname_f) {
       const char *err;
       err = dlerror();
@@ -399,7 +400,7 @@ static Scheme_Object *do_load_extension(const char *filename,
 		       filename);
 #endif
 #ifdef NO_DYNAMIC_LOAD
-    scheme_raise_exn(MZEXN_MISC_UNSUPPORTED,
+    scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,
 		     "load-extension: not supported on this platform");
     return NULL;
 #else
@@ -505,6 +506,25 @@ Scheme_Object *scheme_load_extension(const char *filename, Scheme_Env *env)
 
   a[0] = scheme_make_byte_string(filename);
   return load_extension(1, a);
+}
+
+void scheme_free_dynamic_extensions()
+{
+  if (loaded_extensions) {
+    int i;
+    ExtensionData *ed;
+    for (i = 0; i < loaded_extensions->size; i++) {
+      if (loaded_extensions->vals[i]) {
+        ed = (ExtensionData *)loaded_extensions->vals[i];
+#       ifdef UNIX_DYNAMIC_LOAD
+        dlclose(ed->handle);
+#       endif
+#       ifdef WINDOWS_DYNAMIC_LOAD
+        FreeLibrary(ed->handle);
+#       endif
+      }
+    }
+  }
 }
 
 #if defined(CODEFRAGMENT_DYNAMIC_LOAD)

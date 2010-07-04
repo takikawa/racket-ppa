@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2007 PLT Scheme Inc.
+// Copyright:  (c) 2004-2008 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -143,6 +143,27 @@ static short cgf_txFont, cgf_txFace;
 extern "C" void CGContextSetFontRenderingMode(CGContextRef cg, int v);
 
 //-----------------------------------------------------------------------------
+
+static RgnHandle GetCurrentClipRgn(CGrafPtr qdp)
+{
+  RgnHandle clipRgn;
+
+  clipRgn = NewRgn();
+  if (clipRgn) {
+    RgnHandle visRgn;
+    visRgn = NewRgn();
+    if (visRgn) {
+      GetPortClipRegion(qdp, clipRgn);
+      GetPortVisibleRegion(qdp, visRgn);
+      SectRgn(clipRgn, visRgn, clipRgn);
+      DisposeRgn(visRgn);
+    }
+  }
+
+  return clipRgn;
+}
+
+//-----------------------------------------------------------------------------
 void wxCanvasDC::DrawText(const char* text, double x, double y, Bool combine, Bool ucs4, int d, double angle)
 {
   FontInfo fontInfo;
@@ -155,7 +176,7 @@ void wxCanvasDC::DrawText(const char* text, double x, double y, Bool combine, Bo
      gleaned from ATSUI on a previous round. We can save a factor of
      10 for all but the smallest strings by avoiding ATSUI this
      time. */
-  if (!combine 
+  if (!combine
       && ucs4 
       && (angle == 0.0) 
       && table_key
@@ -947,17 +968,7 @@ static double DrawMeasUnicodeText(const char *text, int d, int theStrlen, int uc
 
     if (use_cgctx) {
       /* Make clipping regions match (including BeginUpdate effect) */
-      clipRgn = NewRgn();
-      if (clipRgn) {
-	RgnHandle visRgn;
-	visRgn = NewRgn();
-	if (visRgn) {
-	  GetPortClipRegion(qdp, clipRgn);
-	  GetPortVisibleRegion(qdp, visRgn);
-	  SectRgn(clipRgn, visRgn, clipRgn);
-	  DisposeRgn(visRgn);
-	}
-      }
+      clipRgn = GetCurrentClipRgn(qdp);
     } else
       clipRgn = NULL;
   } else

@@ -1,9 +1,9 @@
 
-(module init (lib "a-unit.ss")
-  (require (lib "string-constant.ss" "string-constants")
+#lang scheme/unit
+  (require string-constants
            "drsig.ss"
-           (lib "list.ss")
-           (lib "mred.ss" "mred"))
+           mzlib/list
+           mred)
   
   
   (import)
@@ -48,4 +48,4 @@
          
          (parameterize ([current-custodian system-custodian])
            (parameterize ([current-eventspace error-display-eventspace])
-             (message-box title text #f '(stop ok)))))))))
+             (message-box title text #f '(stop ok))))))))

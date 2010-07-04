@@ -5,7 +5,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2007 PLT Scheme Inc.
+ * Copyright: (C) 2004-2008 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -2736,6 +2736,14 @@ void wxWindowDC::SetTextBackground(wxColour *col)
     XSetBackground(DPY, TEXT_GC, pixel);
 }
 
+int wxCanvasDC::CacheFontMetricsKey()
+{
+  if ((scale_x == 1.0)
+      && (scale_y == 1.0))
+    return 1;
+  return 0;
+}
+
 //-----------------------------------------------------------------------------
 // clipping region
 //-----------------------------------------------------------------------------
@@ -3821,16 +3829,6 @@ Bool wxWindowDC::SetCairoBrush()
     return FALSE;
 }
 
-void wxWindowDC::SetAntiAlias(int v)
-{
-  if (v != anti_alias) {
-    /* In case we go from aligned to not: */
-    X->reset_cairo_clip = 1;
-  }
-    
-  wxDC::SetAntiAlias(v);
-}
-
 void wxWindowDC::SetAlpha(double d)
 {
   wxDC::SetAlpha(d);
@@ -3923,3 +3921,15 @@ double wxWindowDC::SmoothingXFormHL(double h, double y)
     return h;
 }
 #endif
+
+void wxWindowDC::SetAntiAlias(int v)
+{
+#ifdef WX_USE_CAIRO
+  if (v != anti_alias) {
+    /* In case we go from aligned to not: */
+    X->reset_cairo_clip = 1;
+  }
+    
+  wxDC::SetAntiAlias(v);
+#endif
+}

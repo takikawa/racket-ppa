@@ -1,9 +1,6 @@
-(module info (lib "infotab.ss" "setup")
-  (define name "PLaneT")
-  (define doc.txt "doc.txt")
-  (define mzscheme-launcher-names '("planet"))
-  (define mzscheme-launcher-libraries '("planet.ss"))
-  (define blurb 
-    (list
-     "The PLaneT collection provides a suite of libraries to implement the "
-     "PLaneT module distribution system.")))
+#lang setup/infotab
+
+(define name "PLaneT")
+(define mzscheme-launcher-names '("planet"))
+(define mzscheme-launcher-libraries '("planet.ss"))
+(define scribblings '(("planet.scrbl" (multi-page) (tool))))

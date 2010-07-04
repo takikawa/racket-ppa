@@ -1,5 +1,5 @@
 (module random-bits-examples mzscheme
-  (require (lib "random-bits.ss" "srfi" "27"))
+  (require srfi/27/random-bits)
 
   (define ascii->char integer->char)
 
@@ -78,7 +78,7 @@
 ;    evals expr and issues an error if it is not #t.
 
 (define (check expr)
-  (if (not (eq? (eval expr (interaction-environment)) #t))
+  (if (not (eq? (eval expr) #t))
       (error "check failed" expr)))
 
 ; Basic Tests of the Interface

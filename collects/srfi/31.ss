@@ -1,4 +1,2 @@
-;; SRFI 31: A special form rec for recursive evaluation
-(module |31| mzscheme
-  (require (lib "rec.ss" "srfi" "31"))
-  (provide rec))
+;; module loader for SRFI-31: A special form rec for recursive evaluation
+#lang s-exp srfi/provider srfi/31/rec

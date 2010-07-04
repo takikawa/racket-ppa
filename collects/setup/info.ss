@@ -1,13 +1,6 @@
-(module info (lib "infotab.ss" "setup")
-  (define name "Setup PLT")
-  (define doc.txt "doc.txt")
+#lang setup/infotab
 
-  (define compile-omit-files
-    (list "setup.ss"))
+(define compile-omit-paths '("main.ss"))
 
-  (define mzscheme-launcher-libraries (list "setup.ss"))
-  (define mzscheme-launcher-names (list "Setup PLT"))
-
-  ;(define mred-launcher-libraries (list "setup.ss"))
-  ;(define mred-launcher-names (list "GSetup PLT"))
-  )
+(define mzscheme-launcher-libraries '("main.ss"))
+(define mzscheme-launcher-names '("Setup PLT"))

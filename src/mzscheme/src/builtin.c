@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2007 PLT Scheme Inc.
+  Copyright (c) 2004-2008 PLT Scheme Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -64,7 +64,7 @@ Scheme_Object *scheme_eval_compiled_sized_string(const char *str, int len, Schem
 
 void scheme_add_embedded_builtins(Scheme_Env *env)
 {
-#define EVAL_ONE_STR(str) scheme_eval_string(str, env)
+#define EVAL_ONE_STR(str) scheme_eval_module_string(str, env)
 #define EVAL_ONE_SIZED_STR(str, len) scheme_eval_compiled_sized_string(str, len, env)
 
 #if USE_COMPILED_STARTUP

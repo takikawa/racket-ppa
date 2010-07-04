@@ -1,115 +1,112 @@
 
-(module steps mzscheme
-  (require "deriv.ss"
-           "deriv-util.ss")
-  (provide (all-defined))
+#lang scheme/base
+(require "deriv.ss"
+         "deriv-util.ss"
+         "deriv-find.ss")
+(provide (struct-out protostep)
+         (struct-out step)
+         (struct-out misstep)
+         (struct-out state)
+         (struct-out bigframe)
+         context-fill
+         state-term
+         step-term1
+         step-term2
+         misstep-term1
+         bigframe-term
+         step-type?
+         step-type->string
+         rewrite-step?
+         rename-step?)
 
-  ;; A ReductionSequence is a (list-of Reduction)
+;; A ReductionSequence is (listof Step)
+;; A Step is one of
+;;  - (make-step StepType State State)
+;;  - (make-misstep StepType State exn)
+(define-struct protostep (type s1) #:transparent)
+(define-struct (step protostep) (s2) #:transparent)
+(define-struct (misstep protostep) (exn) #:transparent)
 
-  ;; A ProtoStep is (make-protostep Derivation BigContext StepType Context Definites)
+;; A State is
+;;  (make-state stx stxs Context BigContext (listof id) (listof id) (listof stx) nat/#f)
+(define-struct state (e foci ctx lctx binders uses frontier seq) #:transparent)
 
-  ;; A Context is a list of Frames
-  ;; A Frame is either:
-  ;;  - (syntax -> syntax)
-  ;;  - (make-renames syntax syntax)
-  ;;  - 'phase-up
-  (define-struct renames (old new))
+;; A Context is a list of Frames
+;; A Frame is (syntax -> syntax)
 
-  ;; A Definite is a (list-of identifier)
+;; A BigContext is (list-of BigFrame)
+;; A BigFrame is (make-bigframe Context Syntaxes Syntax)
+(define-struct bigframe (ctx foci e))
 
-  ;; A BigContext is (list-of BigFrame)
-  ;; A BigFrame is (make-bigframe Derivation Context Syntaxes Syntax)
-  (define-struct bigframe (deriv ctx foci e))
+;; context-fill : Context Syntax -> Syntax
+(define (context-fill ctx stx)
+  (let loop ([ctx ctx] [stx stx])
+    (if (null? ctx)
+        stx
+        (let ([frame0 (car ctx)])
+          (loop (cdr ctx) (frame0 stx))))))
 
-  ;; A Reduction is one of 
-  ;;   - (make-step ... Syntaxes Syntaxes Syntax Syntax)
-  ;;   - (make-mono ... Syntaxes Syntax)
-  ;;   - (make-misstep ... Syntax Syntax Exception)
+(define (state-term s)
+  (context-fill (state-ctx s) (state-e s)))
 
-  (define-struct protostep (deriv lctx type ctx definites frontier) #f)
+(define (step-term1 s)
+  (state-term (protostep-s1 s)))
+(define (step-term2 s)
+  (state-term (step-s2 s)))
 
-  (define-struct (step protostep) (foci1 foci2 e1 e2) #f)
-  (define-struct (mono protostep) (foci1 e1) #f)
-  (define-struct (misstep protostep) (foci1 e1 exn) #f)
+(define (misstep-term1 s)
+  (state-term (protostep-s1 s)))
 
-  ;; context-fill : Context Syntax -> Syntax
-  (define (context-fill ctx stx)
-    (let loop ([ctx ctx] [stx stx])
-      (if (null? ctx)
-          stx
-          (let ([frame0 (car ctx)])
-            (if (procedure? frame0)
-                (loop (cdr ctx) (frame0 stx))
-                (loop (cdr ctx) stx))))))
+(define (bigframe-term bf)
+  (context-fill (bigframe-ctx bf) (bigframe-e bf)))
 
-  ;; context-env : Context -> (list-of identifier)
-  (define (context-env ctx)
-    (let loop ([ctx ctx] [env null])
-      (if (null? ctx)
-          env
-          (let ([frame0 (car ctx)])
-            (if (renames? frame0)
-                (loop (cdr ctx)
-                      (append (flatten-identifiers (renames-new frame0))
-                              env))
-                (loop (cdr ctx) env))))))
+;; A StepType is a simple in the following alist.
 
-  (define (step-term1 s)
-    (context-fill (protostep-ctx s) (step-e1 s)))
-  (define (step-term2 s)
-    (context-fill (protostep-ctx s) (step-e2 s)))
+(define step-type-meanings
+  '((macro            . "Macro transformation")
+    
+    (rename-lambda    . "Rename formal parameters")
+    (rename-case-lambda . "Rename formal parameters")
+    (rename-let-values . "Rename bound variables")
+    (rename-letrec-values . "Rename bound variables")
+    (rename-lsv       . "Rename bound variables")
+    (lsv-remove-syntax . "Remove syntax bindings")
 
-  (define (mono-term1 s)
-    (context-fill (protostep-ctx s) (mono-e1 s)))
+    (resolve-variable . "Resolve variable (remove extra marks)")
+    (tag-module-begin . "Tag #%module-begin")
+    (tag-app          . "Tag application")
+    (tag-datum        . "Tag datum")
+    (tag-top          . "Tag top-level variable")
+    (capture-lifts    . "Capture lifts")
+    (provide          . "Expand provide-specs")
 
-  (define (misstep-term1 s)
-    (context-fill (protostep-ctx s) (misstep-e1 s)))
+    (local-lift       . "Macro lifted expression to top-level")
+    (module-lift      . "Macro lifted declaration to end of module")
+    (block->letrec    . "Transform block to letrec")
+    (splice-block     . "Splice block-level begin")
+    (splice-module    . "Splice module-level begin")
+    (splice-lifts     . "Splice definitions from lifted expressions")
+    (splice-module-lifts . "Splice lifted module declarations")
 
-  (define (bigframe-term bf)
-    (context-fill (bigframe-ctx bf) (bigframe-e bf)))
+    (error            . "Error")))
 
-  ;; A StepType is a simple in the following alist.
+(define (step-type->string x)
+  (cond [(assq x step-type-meanings) => cdr]
+        [(string? x) x]
+        [else (error 'step-type->string "not a step type: ~s" x)]))
 
-  (define step-type-meanings
-    '((macro-step       . "Macro transformation")
-      
-      (rename-lambda    . "Rename formal parameters")
-      (rename-case-lambda . "Rename formal parameters")
-      (rename-let-values . "Rename bound variables")
-      (rename-letrec-values . "Rename bound variables")
-      (rename-lsv       . "Rename bound variables")
-      (lsv-remove-syntax . "Remove syntax bindings")
+(define step-type?
+  (let ([step-types (map car step-type-meanings)])
+    (lambda (x)
+      (and (memq x step-types) #t))))
 
-      (resolve-variable . "Resolve variable (remove extra marks)")
-      (tag-module-begin . "Tag #%module-begin")
-      (tag-app          . "Tag application")
-      (tag-datum        . "Tag datum")
-      (tag-top          . "Tag top-level variable")
-      (capture-lifts    . "Capture lifts")
+(define (rename-step? x)
+  (memq (protostep-type x) 
+        '(rename-lambda
+          rename-case-lambda
+          rename-let-values
+          rename-letrec-values
+          rename-lsv)))
 
-      (local-lift       . "Macro lifted expression to top-level")
-      (module-lift      . "Macro lifted declaration to end of module")
-      (block->letrec    . "Transform block to letrec")
-      (splice-block     . "Splice block-level begin")
-      (splice-module    . "Splice module-level begin")
-      (splice-lifts     . "Splice definitions from lifted expressions")
-      (splice-module-lifts . "Splice lifted module declarations")
-
-      (error            . "Error")))
-
-  (define (step-type->string x)
-    (cond [(assq x step-type-meanings) => cdr]
-          [(string? x) x]
-          [else (error 'step-type->string "not a step type: ~s" x)]))
-
-  (define (rename-step? x)
-    (memq (protostep-type x) 
-          '(rename-lambda
-            rename-case-lambda
-            rename-let-values
-            rename-letrec-values
-            rename-lsv)))
-
-  (define (rewrite-step? x)
-    (and (step? x) (not (rename-step? x))))
-)
+(define (rewrite-step? x)
+  (and (step? x) (not (rename-step? x))))

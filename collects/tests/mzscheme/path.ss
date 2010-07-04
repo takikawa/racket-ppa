@@ -45,7 +45,7 @@
 (arity-test complete-path? 1 1)
 (err/rt-test (complete-path? 'a))
 
-(call-with-output-file "tmp6" void 'replace)
+(call-with-output-file "tmp6" void #:exists 'replace)
 (define existant "tmp6")
 
 (test #t file-exists? existant)
@@ -89,11 +89,11 @@
 	    exn:fail:filesystem?)
 
 (define start-time (current-seconds))
-(let ([p (open-output-file "tmp5" 'replace)])
+(let ([p (open-output-file "tmp5" #:exists 'replace)])
   (display "123456789" p)
   (close-output-port p))
-(close-output-port (open-output-file (build-path "down" "tmp8") 'replace))
-(close-output-port (open-output-file (build-path deepdir "tmp7") 'replace))
+(close-output-port (open-output-file (build-path "down" "tmp8") #:exists 'replace))
+(close-output-port (open-output-file (build-path deepdir "tmp7") #:exists 'replace))
 (define end-time (current-seconds))
 
 (map
@@ -284,9 +284,9 @@
  rels)
 
 (define (test-path expect f . args)
-  (test (normal-case-path (expand-path expect))
+  (test (normal-case-path (cleanse-path expect))
 	(or (object-name f) 'unknown)
-	(normal-case-path (expand-path (apply f args)))))
+	(normal-case-path (cleanse-path (apply f args)))))
 
 (for-each
  (lambda (absol)
@@ -387,7 +387,8 @@
 (test (path->directory-path (build-path 'same)) simplify-path (build-path 'same "a" 'same 'up 'same) #f)
 (arity-test simplify-path 1 2)
 
-(arity-test expand-path 1 1)
+(arity-test cleanse-path 1 1)
+(arity-test expand-user-path 1 1)
 (arity-test resolve-path 1 1)
 
 (map
@@ -396,7 +397,7 @@
  (list build-path split-path file-exists? directory-exists?
        delete-file directory-list make-directory delete-directory
        file-or-directory-modify-seconds file-or-directory-permissions 
-       expand-path resolve-path simplify-path path->complete-path
+       cleanse-path resolve-path simplify-path path->complete-path
        open-input-file open-output-file))
 (map 
  (lambda (f)
@@ -416,7 +417,7 @@
 	       (string-append
 		"\\\\?\\"
 		(path->string
-		 (normal-case-path (simplify-path (expand-path (current-directory))))))
+		 (normal-case-path (simplify-path (cleanse-path (current-directory))))))
 	       "")]
 	[drive (path->string (current-drive))])
 
@@ -482,7 +483,7 @@
       (unless (directory-exists? dir)
 	(make-directory dir))
       (close-output-port (open-output-file (build-path here "tmp78" "\\\\?\\REL\\aux")
-					   'replace))
+					   #:exists 'replace))
       (test (list (string->path "\\\\?\\REL\\\\aux")) directory-list dir)
       (delete-file (build-path here "tmp78" "\\\\?\\REL\\aux"))
       (delete-directory dir))
@@ -672,26 +673,26 @@
   (test (string->path "\\\\?\\UNC\\foo\\A") normal-case-path (coerce "\\\\?\\UNC\\foo\\A"))
   (test (string->path "\\\\?\\RED\\..\\..") normal-case-path (coerce "\\\\?\\RED\\..\\.."))
 
-  ;; expand-path removes redundant backslashes
+  ;; cleanse-path removes redundant backslashes
   (when (eq? 'windows (system-type))
-    (test (string->path "\\\\?\\\\UNC\\x\\y") expand-path (coerce "\\\\?\\\\UNC\\x\\y"))
-    (test (string->path "\\\\?\\c:\\") expand-path (coerce "\\\\?\\c:\\\\")))
+    (test (string->path "\\\\?\\\\UNC\\x\\y") cleanse-path (coerce "\\\\?\\\\UNC\\x\\y"))
+    (test (string->path "\\\\?\\c:\\") cleanse-path (coerce "\\\\?\\c:\\\\")))
 
-  ;; expand-path removes redundant backslashes, and
-  ;; simplify-path uses expand-path under Windows:
+  ;; cleanse-path removes redundant backslashes, and
+  ;; simplify-path uses cleanse-path under Windows:
   (let ([go
-         (lambda (expand-path)
-           (test (string->path "c:\\") expand-path (coerce "c:"))
-           (test (string->path "\\\\?\\c:\\a\\.") expand-path (coerce "\\\\?\\c:\\\\a\\\\."))
-           (test (string->path "\\\\?\\c:\\a\\\\") expand-path (coerce "\\\\?\\c:\\a\\\\"))
-           (test (string->path "\\\\?\\c:\\a\\.") expand-path (coerce "\\\\?\\c:\\a\\\\."))
-           (test (string->path "\\\\?\\UNC\\a\\b\\.") expand-path (coerce "\\\\?\\UNC\\\\a\\b\\."))
-           (test (string->path "\\\\?\\UNC\\a\\b\\.") expand-path (coerce "\\\\?\\UNC\\\\a\\b\\\\."))
-           (test (string->path "\\\\?\\RED\\\\..") expand-path (coerce "\\\\?\\RED\\.."))
-           (test (string->path "\\\\?\\") expand-path (coerce "\\\\?\\\\")))])
+         (lambda (cleanse-path)
+           (test (string->path "c:\\") cleanse-path (coerce "c:"))
+           (test (string->path "\\\\?\\c:\\a\\.") cleanse-path (coerce "\\\\?\\c:\\\\a\\\\."))
+           (test (string->path "\\\\?\\c:\\a\\\\") cleanse-path (coerce "\\\\?\\c:\\a\\\\"))
+           (test (string->path "\\\\?\\c:\\a\\.") cleanse-path (coerce "\\\\?\\c:\\a\\\\."))
+           (test (string->path "\\\\?\\UNC\\a\\b\\.") cleanse-path (coerce "\\\\?\\UNC\\\\a\\b\\."))
+           (test (string->path "\\\\?\\UNC\\a\\b\\.") cleanse-path (coerce "\\\\?\\UNC\\\\a\\b\\\\."))
+           (test (string->path "\\\\?\\RED\\\\..") cleanse-path (coerce "\\\\?\\RED\\.."))
+           (test (string->path "\\\\?\\") cleanse-path (coerce "\\\\?\\\\")))])
     (when (eq? 'windows (system-type))
-      (go expand-path)
-      (test (string->path "\\\\?\\c:") expand-path (coerce "\\\\?\\c:"))
+      (go cleanse-path)
+      (test (string->path "\\\\?\\c:") cleanse-path (coerce "\\\\?\\c:"))
       (go simplify-path))
     (go (lambda (p) (simplify-path p #f)))
     (test (string->path "a\\b") simplify-path (coerce "a/b") #f)
@@ -709,7 +710,7 @@
   (test (bytes->path #"\\\\?\\\\\\c:") simplify-path (coerce "\\\\?\\\\\\c:") #f)
 
   (when (eq? 'windows (system-type))
-    (test (bytes->path #"\\\\?\\c:\\a\\b//c\\d") expand-path (coerce "\\\\?\\c:\\a\\b//c\\d")))
+    (test (bytes->path #"\\\\?\\c:\\a\\b//c\\d") cleanse-path (coerce "\\\\?\\c:\\a\\b//c\\d")))
 
   (test (bytes->path #"\\\\?\\UNC\\a\\b/c\\") simplify-path (coerce "\\\\?\\\\UNC\\a\\b/c") #f)
   (test (bytes->path #"\\\\a\\b\\") simplify-path (coerce "\\\\?\\\\UNC\\a\\b") #f)
@@ -720,7 +721,7 @@
   (test (bytes->path #"..\\") simplify-path (coerce "\\\\?\\REL\\..") #f)
   (test (bytes->path #"..\\") simplify-path (coerce "\\\\?\\REL\\..\\") #f)
   (when (eq? 'windows (system-type))
-    (test (bytes->path #"\\\\foo\\bar\\") expand-path (coerce "\\\\foo\\bar\\")))
+    (test (bytes->path #"\\\\foo\\bar\\") cleanse-path (coerce "\\\\foo\\bar\\")))
   (test (bytes->path #"\\\\foo\\bar\\") simplify-path (coerce "\\\\foo\\bar\\") #f)
   (test (bytes->path #"\\\\foo\\bar\\") simplify-path (coerce "\\\\?\\UNC\\foo\\bar") #f)
   (test (bytes->path #"\\\\foo\\bar\\") simplify-path (coerce "\\\\?\\UNC\\foo\\bar\\") #f)
@@ -760,10 +761,10 @@
   (test (bytes->path #"\\a\\b") simplify-path (coerce "\\\\?\\RED\\\\a\\\\b") #f))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; ~ paths and other subtleties in Unix
+;; ~ paths (no longer special) and other subtleties in Unix
 
-(test (and (memq (system-path-convention-type) '(unix)) #t) absolute-path? "~")
-(test #t absolute-path? (bytes->path #"~" 'unix))
+(test #f absolute-path? "~")
+(test #f absolute-path? (bytes->path #"~" 'unix))
 (test #f absolute-path? (bytes->path #"~" 'windows))
 
 (define (test-~-paths kind fs-ok?)
@@ -777,13 +778,14 @@
                                   bytes->path-element
                                   (lambda (s) (bytes->path-element s kind)))])
     (test #t relative-path? (bytes->path #"./~"))
-    (test (bytes->path #"./~") bytes->path-element #"~")
-    (test #"~" path-element->bytes (bytes->path #"./~"))
-    (test #"~" path-element->bytes (bytes->path #"./~/"))
+    (test (bytes->path #"~") bytes->path-element #"~")
+    (test #"~" path-element->bytes (bytes->path #"~"))
     (test #"a" path-element->bytes (bytes->path #"a////////////"))
-    (test (bytes->path #"./~me") bytes->path-element #"~me")
-    (test #"~me" path-element->bytes (bytes->path #"./~me"))
+    (test (bytes->path #"~me") bytes->path-element #"~me")
+    (test #"~me" path-element->bytes (bytes->path #"~me"))
     (err/rt-test (path-element->bytes (bytes->path #"x/y")))
+    (err/rt-test (path-element->bytes (bytes->path #"./~")))
+    (err/rt-test (path-element->bytes (bytes->path #"./~me")))
     (err/rt-test (path-element->bytes (bytes->path #"x/~me")))
     (err/rt-test (path-element->bytes (bytes->path #"/me")))
     (err/rt-test (path-element->bytes (bytes->path #"/")))
@@ -791,13 +793,14 @@
     (err/rt-test (bytes->path-element #"x/y"))
     (err/rt-test (bytes->path-element #"/x"))
     (err/rt-test (bytes->path-element #"/"))
-    (test (bytes->path #"~/") simplify-path (bytes->path #"~") use-fs?)
-    (test (bytes->path #"~/") simplify-path (bytes->path #"~/") use-fs?)
-    (test (bytes->path #"~/") simplify-path (bytes->path #"~/.") use-fs?)
-    (test (bytes->path #"./~") simplify-path (bytes->path #"./~") use-fs?)
-    (test (bytes->path #"./~/") simplify-path (bytes->path #"./~/") use-fs?)
-    (test (bytes->path #"~/../../") simplify-path (bytes->path #"~/../..") #f)
-    (test (bytes->path #"~/../") simplify-path (bytes->path #"~/../x/..") #f)
+    (unless use-fs?
+      (test (bytes->path #"~") simplify-path (bytes->path #"~") use-fs?)
+      (test (bytes->path #"~/") simplify-path (bytes->path #"~/") use-fs?)
+      (test (bytes->path #"~/") simplify-path (bytes->path #"~/.") use-fs?)
+      (test (bytes->path #"~") simplify-path (bytes->path #"./~") use-fs?)
+      (test (bytes->path #"~/") simplify-path (bytes->path #"./~/") use-fs?))
+    (test (bytes->path #"../") simplify-path (bytes->path #"~/../..") #f)
+    (test (bytes->path #"./") simplify-path (bytes->path #"~/../x/..") #f)
     (test (bytes->path #"../") simplify-path (bytes->path #"../x/..") #f)
     (test (bytes->path #"x/") simplify-path (bytes->path #"x/~/..") #f)
     (test (bytes->path #"./") simplify-path (bytes->path #"./") #f)
@@ -820,31 +823,31 @@
     (test (bytes->path #"~/") path->directory-path (bytes->path #"~/"))
     (test (bytes->path #"~me/") path->directory-path (bytes->path #"~me/"))
     (test (bytes->path #"./~/") path->directory-path (bytes->path #"./~"))
-    (test-values (list #f (bytes->path #"~me") #t) (lambda () (split-path (bytes->path #"~me"))))
-    (test-values (list #f (bytes->path #"~me") #t) (lambda () (split-path (bytes->path #"~me/"))))
-    (test-values (list 'relative (bytes->path #"./~me") #f) (lambda () (split-path (bytes->path #"./~me"))))
-    (test-values (list 'relative (bytes->path #"./~me") #t) (lambda () (split-path (bytes->path #"./~me/"))))
-    (test-values (list (bytes->path #"././") (bytes->path #"./~me") #f) (lambda () (split-path (bytes->path #"././~me"))))
-    (test-values (list 'relative (bytes->path #"./~me") #f) (lambda () (split-path (bytes->path #".//~me"))))
-    (test-values (list (bytes->path #"y/x/") (bytes->path #"./~me") #f) (lambda () (split-path (bytes->path #"y/x/~me"))))
-    (test-values (list (bytes->path #"y/x/") (bytes->path #"./~me") #f) (lambda () (split-path (bytes->path #"y//x//~me"))))
-    (test-values (list (bytes->path #"y/x/./") (bytes->path #"./~me") #f) (lambda () (split-path (bytes->path #"y/x/./~me"))))
-    (test-values (list (bytes->path #"x/") (bytes->path #"./~me") #f) (lambda () (split-path (bytes->path #"x/~me"))))
-    (test-values (list (bytes->path #"x/") (bytes->path #"./~me") #t) (lambda () (split-path (bytes->path #"x/~me/"))))
+    (test-values (list 'relative (bytes->path #"~me") #f) (lambda () (split-path (bytes->path #"~me"))))
+    (test-values (list 'relative (bytes->path #"~me") #t) (lambda () (split-path (bytes->path #"~me/"))))
+    (test-values (list (bytes->path #"./") (bytes->path #"~me") #f) (lambda () (split-path (bytes->path #"./~me"))))
+    (test-values (list (bytes->path #"./") (bytes->path #"~me") #t) (lambda () (split-path (bytes->path #"./~me/"))))
+    (test-values (list (bytes->path #"././") (bytes->path #"~me") #f) (lambda () (split-path (bytes->path #"././~me"))))
+    (test-values (list (bytes->path #"./") (bytes->path #"~me") #f) (lambda () (split-path (bytes->path #".//~me"))))
+    (test-values (list (bytes->path #"y/x/") (bytes->path #"~me") #f) (lambda () (split-path (bytes->path #"y/x/~me"))))
+    (test-values (list (bytes->path #"y/x/") (bytes->path #"~me") #f) (lambda () (split-path (bytes->path #"y//x//~me"))))
+    (test-values (list (bytes->path #"y/x/./") (bytes->path #"~me") #f) (lambda () (split-path (bytes->path #"y/x/./~me"))))
+    (test-values (list (bytes->path #"x/") (bytes->path #"~me") #f) (lambda () (split-path (bytes->path #"x/~me"))))
+    (test-values (list (bytes->path #"x/") (bytes->path #"~me") #t) (lambda () (split-path (bytes->path #"x/~me/"))))
     (test-values (list (bytes->path #"x/./") (bytes->path #"y") #f) (lambda () (split-path (bytes->path #"x/./y"))))
     (test-values (list (bytes->path #"x/../") (bytes->path #"y") #f) (lambda () (split-path (bytes->path #"x/../y"))))
     (test-values (list (bytes->path #"~me/") (bytes->path #"y") #f) (lambda () (split-path (bytes->path #"~me/y"))))
     (test-values (list (bytes->path #"~me/y/") (bytes->path #"z") #f) (lambda () (split-path (bytes->path #"~me/y/z"))))
-    (test (bytes->path #"/home/mflatt/~") build-path (bytes->path #"/home/mflatt") (bytes->path #"./~"))
+    (test (bytes->path #"/home/mflatt/./~") build-path (bytes->path #"/home/mflatt") (bytes->path #"./~"))
     (test (bytes->path #"/home/mflatt/././~") build-path (bytes->path #"/home/mflatt") (bytes->path #"././~"))
     (test (bytes->path #"./~") build-path (bytes->path #"./~"))
     (when use-fs?
       (let ([dir "tmp79"])
         (unless (directory-exists? dir)
           (make-directory dir))
-        (close-output-port (open-output-file "tmp79/~me" 'replace))
-        (test (list (bytes->path #"./~me")) directory-list dir)
-        (delete-file (build-path "tmp79" (bytes->path #"./~me")))
+        (close-output-port (open-output-file "tmp79/~me" #:exists 'replace))
+        (test (list (bytes->path #"~me")) directory-list dir)
+        (delete-file (build-path "tmp79" (bytes->path #"~me")))
         (delete-directory dir)))
     (void)))
 

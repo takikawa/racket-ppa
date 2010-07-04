@@ -3,11 +3,11 @@
 
 (Section 'parameters)
 
-(let ([p (open-output-file "tmp5" 'replace)])
+(let ([p (open-output-file "tmp5" #:exists 'replace)])
   (display (compile '(cons 1 2)) p)
   (close-output-port p))
 
-(define-struct tester (x) (make-inspector))
+(define-struct tester (x) #:inspector (make-inspector))
 (define a-tester (make-tester 5))
 
 (define (check-write-string display v s)
@@ -219,7 +219,7 @@
 		      (list #t #f)
 		      '(let ([p (open-input-string "(1 . 2)")])
 			 (read p))
-		      exn:fail:read?
+		      exn:fail?
 		      #f)
 		(list read-accept-quasiquote
 		      (list #t #f)
@@ -236,7 +236,7 @@
 		      #f)
 		(list print-graph
 		      (list #t #f)
-		      '(check-write-string display (quote (#0=(1 2) . #0#)) "(#0=(1 2) . #0#)")
+		      '(check-write-string display (let ([v '(1 2)]) (cons v v)) "(#0=(1 2) . #0#)")
 		      exn:check-string?
 		      #f)
 		(list print-struct
@@ -291,8 +291,8 @@
 		      #f)
 
 		(list current-namespace
-		      (list (make-namespace)
-			    (make-namespace 'empty))
+		      (list (make-base-namespace)
+			    (make-empty-namespace))
 		      '(begin 0)
 		      exn:fail:syntax?
 		      '("bad setting"))
@@ -419,7 +419,7 @@
      (parameterize ([param alt1])
 	  (test (void) void (teval expr)))
      (parameterize ([param alt2])
-	  (error-test (datum->syntax-object #f expr #f) exn?))))
+	  (error-test (datum->syntax #f expr #f) exn?))))
  params)
 
 (define test-param3 (make-parameter 'hi))

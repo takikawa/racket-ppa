@@ -1,7 +1,7 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require[(lib "eval.ss" "scribble")]
-@require["guide-utils.ss"]
+#lang scribble/doc
+@(require scribble/manual
+          scribble/eval
+          "guide-utils.ss")
 
 @title[#:tag "to-scheme" #:style 'toc]{Scheme Essentials}
 

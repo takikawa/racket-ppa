@@ -4,16 +4,17 @@
 ;
 ; modified by Gregory Cooper to support FrTime
 
-(module graphics-posn-less-unit (lib "a-unit.ss")
+#lang scheme/unit
+
   (require (lib "mred-sig.ss" "mred")
-	   (lib "class.ss")
-	   (lib "class100.ss")
-	   (lib "etc.ss")
+	   mzlib/class
+	   mzlib/class100
+	   mzlib/etc
            "erl.ss"
            ;(rename "frp-core.ss" event-receiver event-receiver)
            ;(rename "frp-core.ss" frp-man man)
            ;(rename "frp-core.ss" send-event send-event)
-           (lib "frp-core.ss" "frtime")
+           frtime/frp-core
 	   "graphics-sig.ss")
 
   (import (prefix mred: mred^)
@@ -121,7 +122,7 @@
 |#       
        [on-char
 	(lambda (key-event)
-          (if key-listener
+          (when key-listener
               (send-event
                key-listener
                (make-sixkey
@@ -922,7 +923,7 @@
   (define draw-pixmap-posn
     (opt-lambda (filename [type 'unknown/mask])
       (check 'draw-pixmap-posn
-	     (andp string? file-exists?) filename "filename"
+	     string? filename "filename"
 	     (lambda (x) (memq x '(gif xbm xpm bmp pict unknown unknown/mask gif/mask))) type "file type symbol")
       (let* ([bitmap (make-object mred:bitmap% filename type)])
 	(lambda (viewport)
@@ -1119,5 +1120,3 @@
   (define (andp . preds)
     (lambda (TST)
       (andmap (lambda (p) (p TST)) preds)))
-  )
-

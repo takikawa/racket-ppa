@@ -1,152 +1,175 @@
 
-(module keymap mzscheme
-  (require (lib "class.ss")
-           (lib "mred.ss" "mred")
-           "interfaces.ss"
-           "partition.ss")
-  (provide syntax-keymap%
-           context-menu%)
+#lang scheme/base
+(require scheme/class
+         scheme/gui
+         "interfaces.ss"
+         "partition.ss")
+(provide smart-keymap%
+         syntax-keymap%)
 
-  (define syntax-keymap%
-    (class keymap%
-      (init editor)
-      (init-field controller)
+(define smart-keymap%
+  (class keymap%
+    (init editor)
 
-      (inherit add-function
-               map-function
-               chain-to-keymap)
-      (super-new)
+    (inherit add-function
+             map-function
+             chain-to-keymap)
 
-      (define/public (get-context-menu%)
-        context-menu%)
+    (super-new)
 
-      (define/public (make-context-menu)
-        (new (get-context-menu%) (controller controller) (keymap this)))
+    (define/public (get-context-menu%)
+      smart-context-menu%)
 
-      ;; Key mappings
+    (field (the-context-menu #f))
+    (set! the-context-menu (new (get-context-menu%)))
 
-      (map-function "rightbutton" "popup-context-window")
+    (map-function "rightbutton" "popup-context-window")
+    (add-function "popup-context-window"
+                  (lambda (editor event)
+                    (do-popup-context-window editor event)))
 
-      ;; Functionality
+    (chain-to-keymap (send editor get-keymap) #t)
+    (send editor set-keymap this)
 
-      (add-function "popup-context-window"
-                    (lambda (editor event)
-                      (do-popup-context-window editor event)))
+    (define/private (do-popup-context-window editor event)
+      (define-values (x y)
+        (send editor dc-location-to-editor-location
+              (send event get-x)
+              (send event get-y)))
+      (define admin (send editor get-admin))
+      (send admin popup-menu the-context-menu x y))
 
-      (add-function "copy-text"
-                    (lambda (_ event)
-                      (define stx (send controller get-selected-syntax))
-                      (send the-clipboard set-clipboard-string
-                            (if stx 
-                                (format "~s" (syntax-object->datum stx))
-                                "")
-                            (send event get-time-stamp))))
+    ))
 
-      (add-function "clear-syntax-selection"
-                    (lambda (i e)
-                      (send controller set-selected-syntax #f)))
+(define smart-context-menu%
+  (class popup-menu%
+    (define on-demand-actions null)
+    (define/public (add-on-demand p)
+      (set! on-demand-actions (cons p on-demand-actions)))
 
-      (add-function "show-syntax-properties"
-                    (lambda (i e)
-                      (error 'show-syntax-properties "not provided by this keymap")))
+    (define/override (on-demand)
+      (for-each (lambda (p) (p)) on-demand-actions))
 
-      ;; Attach to editor
+    (super-new)))
 
-      (chain-to-keymap (send editor get-keymap) #t)
-      (send editor set-keymap this)
+(define syntax-keymap%
+  (class smart-keymap%
+    (init-field controller
+                config)
 
-      (define/public (get-controller) controller)
+    (inherit add-function
+             map-function
+             call-function
+             chain-to-keymap)
+    (inherit-field the-context-menu)
+    (field [copy-menu #f]
+           [clear-menu #f]
+           [props-menu #f])
+    (super-new)
 
-      (define/private (do-popup-context-window editor event)
-        (define-values (x y)
-          (send editor dc-location-to-editor-location
-                (send event get-x)
-                (send event get-y)))
-        (define admin (send editor get-admin))
-        (send admin popup-menu (make-context-menu) x y))))
+    ;; Functionality
 
-  (define context-menu%
-    (class popup-menu%
-      (init-field keymap)
-      (init-field controller)
-      (super-new)
+    (define/public (get-controller) controller)
 
-      (field [copy-menu #f]
-             [clear-menu #f]
-             [props-menu #f])
+    (add-function "copy-text"
+                  (lambda (_ event)
+                    (define stx (send controller get-selected-syntax))
+                    (send the-clipboard set-clipboard-string
+                          (if stx 
+                              (format "~s" (syntax->datum stx))
+                              "")
+                          (send event get-time-stamp))))
 
-      (define/public (add-edit-items)
-        (set! copy-menu
-              (new menu-item% (label "Copy") (parent this)
-                   (callback (lambda (i e)
-                               (send keymap call-function "copy-text" i e)))))
-        (void))
+    (add-function "clear-syntax-selection"
+                  (lambda (i e)
+                    (send controller set-selected-syntax #f)))
 
-      (define/public (after-edit-items)
-        (void))
+    (add-function "show-syntax-properties"
+                  (lambda (i e)
+                    (send config set-props-shown? #t)))
 
-      (define/public (add-selection-items)
-        (set! clear-menu
-              (new menu-item%
-                   (label "Clear selection")
-                   (parent this)
-                   (callback 
-                    (lambda (i e)
-                      (send keymap call-function "clear-syntax-selection" i e)))))
-        (set! props-menu
-              (new menu-item%
-                   (label "Show syntax properties")
-                   (parent this)
-                   (callback 
-                    (lambda (i e) 
-                      (send keymap call-function "show-syntax-properties" i e)))))
-        (void))
+    (add-function "hide-syntax-properties"
+                  (lambda (i e)
+                    (send config set-props-shown? #f)))
 
-      (define/public (after-selection-items)
-        (void))
+    (define/public (add-edit-items)
+      (set! copy-menu
+            (new menu-item% (label "Copy") (parent the-context-menu)
+                 (callback (lambda (i e)
+                             (call-function "copy-text" i e)))))
+      (void))
 
-      (define/public (add-partition-items)
-        (let ([secondary (new menu% (label "identifier=?") (parent this))])
-          (for-each
-           (lambda (name func)
-             (let ([this-choice
-                    (new checkable-menu-item%
-                         (label name)
-                         (parent secondary)
-                         (callback 
-                          (lambda (i e)
-                            (send controller set-identifier=? 
-                                  (cons name func)))))])
-               (send controller listen-identifier=?
-                     (lambda (name+proc)
-                       (send this-choice check (eq? name (car name+proc)))))))
-           (map car (identifier=-choices))
-           (map cdr (identifier=-choices))))
-        (void))
+    (define/public (after-edit-items)
+      (void))
 
-      (define/public (after-partition-items)
-        (void))
+    (define/public (add-selection-items)
+      (set! clear-menu
+            (new menu-item%
+                 (label "Clear selection")
+                 (parent the-context-menu)
+                 (callback 
+                  (lambda (i e)
+                    (call-function "clear-syntax-selection" i e)))))
+      (set! props-menu
+            (new menu-item%
+                 (label "Show syntax properties")
+                 (parent the-context-menu)
+                 (callback 
+                  (lambda (i e)
+                    (if (send config get-props-shown?)
+                        (call-function "hide-syntax-properties" i e)
+                        (call-function "show-syntax-properties" i e))))))
+      (void))
 
-      (define/public (add-separator)
-        (new separator-menu-item% (parent this)))
+    (define/public (after-selection-items)
+      (void))
 
-      (define/override (on-demand)
-        (define stx (send controller get-selected-syntax))
-        (send copy-menu enable (and stx #t))
-        (send clear-menu enable (and stx #t))
-        (super on-demand))
+    (define/public (add-partition-items)
+      (let ([secondary (new menu% (label "identifier=?") (parent the-context-menu))])
+        (for-each
+         (lambda (name func)
+           (let ([this-choice
+                  (new checkable-menu-item%
+                       (label name)
+                       (parent secondary)
+                       (callback 
+                        (lambda (i e)
+                          (send controller set-identifier=? 
+                                (cons name func)))))])
+             (send controller listen-identifier=?
+                   (lambda (name+proc)
+                     (send this-choice check (eq? name (car name+proc)))))))
+         (map car (identifier=-choices))
+         (map cdr (identifier=-choices))))
+      (void))
 
-      ;; Initialization
-      (add-edit-items)
-      (after-edit-items)
+    (define/public (after-partition-items)
+      (void))
 
-      (add-separator)
-      (add-selection-items)
-      (after-selection-items)
+    (define/public (add-separator)
+      (new separator-menu-item% (parent the-context-menu)))
 
-      (add-separator)
-      (add-partition-items)
-      (after-partition-items)
-      ))
+    ;; Initialize menu
 
-  )
+    (add-edit-items)
+    (after-edit-items)
+
+    (add-separator)
+    (add-selection-items)
+    (after-selection-items)
+
+    (add-separator)
+    (add-partition-items)
+    (after-partition-items)
+
+    (send the-context-menu add-on-demand
+          (lambda ()
+            (define stx (send controller get-selected-syntax))
+            (send copy-menu enable (and stx #t))
+            (send clear-menu enable (and stx #t))))
+    (send config listen-props-shown?
+          (lambda (shown?)
+            (send props-menu set-label
+                  (if shown?
+                      "Hide syntax properties"
+                      "Show syntax properties"))))))

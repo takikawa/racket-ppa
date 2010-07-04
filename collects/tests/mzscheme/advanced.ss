@@ -8,7 +8,7 @@
 (define no-extra-if-tests? #t)
 
 ;; Check export names:
-(require (lib "docprovide.ss" "syntax"))
+(require syntax/docprovide)
 (let ([docs (lookup-documentation '(lib "htdp-advanced.ss" "lang") 'procedures)])
   (for-each
    (lambda (row)
@@ -21,7 +21,7 @@
       (cdr row)))
    docs))
 
-(define current-htdp-lang '(lib "htdp-advanced.ss" "lang"))
+(define current-htdp-lang 'lang/htdp-advanced)
 (load-relative "htdp-test.ss")
 
 (require (lib "htdp-advanced.ss" "lang"))
@@ -193,21 +193,28 @@
 (load (build-path (collection-path "tests" "mzscheme") "shared-tests.ss"))
 
 (htdp-test #t 'equal? (equal? (vector (list 10) 'apple) (vector (list 10) 'apple)))
+(htdp-test #t 'equal? (equal?  (shared ([x (cons 10 x)]) x) (shared ([x (cons 10 x)]) x)))
+(htdp-test #t 'equal? (equal?  (shared ([x (cons (vector x) x)]) x) (shared ([x (cons (vector x) x)]) x)))
+(htdp-test #f 'equal? (equal?  (shared ([x (cons 10 x)]) x) (shared ([x (cons 10 (cons 11 x))]) x)))
+(htdp-test #f 'equal? (equal?  (shared ([x (cons (vector x) x)]) x) (shared ([x (cons (box x) x)]) x)))
+
 (htdp-test #t 'equal~? (equal~? (vector (list 10) 'apple) (vector (list 10) 'apple) 0.1))
 (htdp-test #t 'equal~? (equal~? (vector (list 10) 'apple) (vector (list 10.02) 'apple) 0.1))
 (htdp-test #f 'equal~? (equal~? (vector (list 10) 'apple) (vector (list 10.2) 'apple) 0.1))
 (htdp-test #t 'equal? (equal? (box (list 10)) (box (list 10))))
 (htdp-test #t 'equal~? (equal~? (box (list 10)) (box (list 10)) 0.1))
 (htdp-test #t 'equal~? (equal~? (box (list 10)) (box (list 10.02)) 0.1))
-(htdp-test #f 'equal~? (equal~? (box (list 10)) (box (list 10.2)) 0.1))
+
+(htdp-test #t 'equal~? (equal~?  (shared ([x (cons 10 x)]) x) (shared ([x (cons 10.02 x)]) x) 0.1))
+(htdp-test #f 'equal~? (equal~?  (shared ([x (cons 10 x)]) x) (shared ([x (cons 10.2 x)]) x) 0.1))
 
 ;; Simulate set! in the repl
 (module my-advanced-module (lib "htdp-advanced.ss" "lang")
   (define x 10)
   (define (f y) f)
   (define-struct s (x y)))
-(mz-require my-advanced-module)
-(parameterize ([current-namespace (module->namespace 'my-advanced-module)])
+(mz-require 'my-advanced-module)
+(parameterize ([current-namespace (module->namespace ''my-advanced-module)])
   (eval #'(set! x 12))
   (eval #'(set! f 12))
   (eval #'(set! make-s 12))

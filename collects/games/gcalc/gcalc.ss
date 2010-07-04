@@ -3,24 +3,22 @@
 ;;;   based on http://www.grame.fr/Research/GCalcul/Graphic_Calculus.html
 ;;;   implemented by Eli Barzilay: Maze is Life! (eli@barzilay.org)
 
-(module gcalc mzscheme
-  (require (lib "class.ss") (lib "mred.ss" "mred") (lib "etc.ss")
-           "../show-help.ss" (lib "unit.ss"))
-  (provide game@)
+#lang mzscheme
 
-  (define customs '())
-  (define (add-custom! name get set type desc)
-    (set! customs
-          (append! customs (list (make-custom name get set type desc)))))
-  (define-struct custom (name getter setter type description))
-  (define-syntax defcustom
-    (syntax-rules ()
-      [(_ var default type description)
-       (begin (define var default)
-              (add-custom! 'var (lambda () var) (lambda (v) (set! var v))
-                           type description))]))
-  (define game@
-    (unit (import) (export)
+(require mzlib/class mred mzlib/etc "../show-scribbling.ss" mzlib/unit)
+(provide game@)
+
+(define customs '())
+(define (add-custom! name get set type desc)
+  (set! customs (append customs (list (make-custom name get set type desc)))))
+(define-struct custom (name getter setter type description))
+(define-syntax defcustom
+  (syntax-rules ()
+    [(_ var default type description)
+     (begin (define var default)
+            (add-custom! 'var (lambda () var) (lambda (v) (set! var v))
+                         type description))]))
+(define game@ (unit (import) (export)
 
 ;;;============================================================================
 ;;; Customizations etc
@@ -338,22 +336,23 @@
 ;;;============================================================================
 ;;; GCalc drawing
 
+(define transparent?-cache (make-hash-table 'weak))
+
 (define (expr-contains-transparent? expr)
   (if (simple-expr? expr)
     (or (null-expr? expr) (eq? expr 'transparent)
         (and (var-expr? expr) (eq? (var-val expr) 'transparent)))
-    (let ([last (cddr expr)])
-      (when (null? (cdr last))
-        (set-cdr!
-         last
-         (list
-          (cond [(abstraction-expr? expr)
-                 (expr-contains-transparent? (expr-2nd expr))]
-                [(application-expr? expr)
-                 #t]
-                [else (or (expr-contains-transparent? (expr-1st expr))
-                          (expr-contains-transparent? (expr-2nd expr)))]))))
-      (2nd last))))
+    (let ([v (hash-table-get transparent?-cache expr 'unknown)])
+      (if (eq? v 'unknown)
+          (let ([v (cond [(abstraction-expr? expr)
+                          (expr-contains-transparent? (expr-2nd expr))]
+                         [(application-expr? expr)
+                          #t]
+                         [else (or (expr-contains-transparent? (expr-1st expr))
+                                   (expr-contains-transparent? (expr-2nd expr)))])])
+            (hash-table-put! transparent?-cache expr v)
+            v)
+          v))))
 
 ;; Draw an exprression - the smart way.
 (define (draw-expr dc expr name . r)
@@ -528,7 +527,9 @@
   (instantiate horizontal-pane% (gcalc-frame)))
 
 (define help
-  (show-help (list "games" "gcalc") "GCalc Help" #t))
+  (show-scribbling
+   '(lib "games/scribblings/games.scrbl")
+   "gcalc"))
 
 (define file-name #f)
 (define modified? #f)
@@ -1012,7 +1013,7 @@
 (define storage-cells
   (let loop ([n (* STORE-CELL-ROW STORE-CELL-COL)] [cells '()])
     (if (zero? n)
-      (reverse! cells)
+      (reverse cells)
       (loop (sub1 n)
             (cons (send store-panel add-cell #f #f #t 'copy) cells)))))
 (define (get-storage-contents)
@@ -1024,4 +1025,4 @@
 ;; start the whole thing
 (send gcalc-frame show #t)
 
-)))
+))

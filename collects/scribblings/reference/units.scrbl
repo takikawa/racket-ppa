@@ -1,46 +1,37 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(all-except "mz.ss" link)]
-@require[(lib "unit.ss")]
-@require-for-syntax[mzscheme]
-@require-for-label[(lib "unit.ss")]
+#lang scribble/doc
+@(require (except-in "mz.ss" link)
+          (for-label scheme/unit-exptime))
 
-@begin[
-(define-syntax defkeywords
-  (syntax-rules (*)
-    [(_ [* (form ...) as see])
-     (defform* [form ...]
-       "Allowed only in a " (scheme as) "; see " (scheme see) ".")]
-    [(_ [* (form ...) see-eg])
-     (defform* [form ...]
-       "Allowed only in certain forms; see, for example, " (scheme see-eg) ".")]
-    [(_ [form as see])
-     (defkeywords [* (form) as see])]
-    [(_ [form see-eg])
-     (defkeywords [* (form) see-eg])]
-    [(_ f ...)
-     (begin (defkeywords f) ...)]))
-]
+@(define-syntax defkeywords
+   (syntax-rules (*)
+     [(_ [* (form ...) as see])
+      (defform* [form ...]
+        "Allowed only in a " (scheme as) "; see " (scheme see) ".")]
+     [(_ [* (form ...) see-eg])
+      (defform* [form ...]
+        "Allowed only in certain forms; see, for example, " (scheme see-eg) ".")]
+     [(_ [form as see])
+      (defkeywords [* (form) as see])]
+     [(_ [form see-eg])
+      (defkeywords [* (form) see-eg])]
+     [(_ f ...)
+      (begin (defkeywords f) ...)]))
 
 @title[#:tag "mzlib:unit" #:style 'toc]{Units}
 
-@declare-exporting[big (lib "big/unit")]
+@deftech{Units} organize a program into separately compilable and
+reusable components. The imports and exports of a unit are grouped
+into a @deftech{signature}, which can include ``static'' information
+(such as macros) in addition to placeholders for run-time values.
+Units with suitably matching signatures can be @deftech{linked}
+together to form a larger unit, and a unit with no imports can be
+@deftech{invoked} to execute its body.
+
+@note-lib[scheme/unit #:use-sources (mzlib/unit)]{ The
+@schememodname[scheme/unit] module name can be used as a language name
+with @schemefont{#lang}; see @secref["single-unit"].}
 
 @local-table-of-contents[]
-
-@deftech{Units} are used to organize a program into separately
-compilable and reusable components. A unit resembles a procedure in
-that both are first-class values that are used for abstraction. While
-procedures abstract over values in expressions, units abstract over
-names in collections of definitions. Just as a procedure is invoked to
-evaluate its expressions given actual arguments for its formal
-parameters, a unit is invoked to evaluate its definitions given actual
-references for its imported variables. Unlike a procedure, however, a
-unit's imported variables can be partially linked with the exported
-variables of another unit @italic{prior to invocation}. Linking merges
-multiple units together into a single compound unit. The compound unit
-itself imports variables that will be propagated to unresolved
-imported variables in the linked units, and re-exports some variables
-from the linked units for further linking.
 
 @; ------------------------------------------------------------------------
 
@@ -396,7 +387,8 @@ See @scheme[unit] for information on @scheme[tagged-sig-spec],
   sig-id]
 
  [infer-linkage-decl
-  ((link-binding ...) unit-id tagged-link-id)
+  ((link-binding ...) unit-id 
+                      tagged-link-id)
   unit-id])]{
 
 Like @scheme[compound-unit]. Syntactically, the difference between
@@ -593,28 +585,20 @@ declarations; @scheme[define-signature] has no splicing @scheme[begin]
 form.)}
 
 @defform/subs[
-#:literals (-type -selectors -setters -constructor)
-(struct id (field-id ...) omit-decl ...) 
+(struct id (field ...) option ...) 
 
-([omit-decl
-  -type
-  -selectors
-  -setters
-  -constructor])]{
+([field id
+        [id #:mutable]]
+ [option #:mutable
+         #:omit-constructor
+         #:omit-define-syntaxes
+         #:omit-define-values])]{
 
 For use with @scheme[define-signature]. The expansion of a
 @scheme[struct] signature form includes all of the identifiers that
-would be bound by @scheme[(define-struct id (field-id ...))], except
-that a @scheme[omit-decl] can cause some of the bindings to be
-omitted.  Specifically @scheme[-type] causes
-@schemeidfont{struct:}@scheme[id] to be omitted, @scheme[-selectors]
-causes all @scheme[id]@schemeidfont{-}@scheme[_field-id]s to be
-omitted, @scheme[-setters] causes all
-@schemeidfont{set-}@scheme[id]@schemeidfont{-}@scheme[field-id]@schemeidfont{!}s
-to be omitted, and @scheme[-construct] causes
-@schemeidfont{make-}@scheme[id] to be omitted.  These omissions are
-reflected in the static information bound to @scheme[id] (which is
-used by, for example, pattern matchers).}
+would be bound by @scheme[(define-struct id (field ...) option ...)],
+where the extra option @scheme[#:omit-constructor] omits the
+@schemeidfont{make-}@scheme[id] identifier.}
 
 @; ------------------------------------------------------------------------
 
@@ -630,3 +614,130 @@ Returns @scheme[#t] if @scheme[v] is a unit, @scheme[#f] otherwise.}
 Expands to a @scheme[provide] of all identifiers implied by the
 @scheme[sig-spec]s. See @scheme[unit] for the grammar of
 @scheme[sig-spec].}
+
+@; ------------------------------------------------------------------------
+
+@section[#:tag "single-unit"]{Single-Unit Modules}
+
+When @schememodname[scheme/unit] is used as a language name with
+@schemefont{#lang}, the module body is treated as a unit body.  The
+body must match the following @scheme[_module-body] grammar:
+
+@schemegrammar*[
+#:literals (import export require begin)
+[module-body (code:line
+              require-decl ...
+              (import tagged-sig-expr ...)
+              (export tagged-sig-expr ...)
+              init-depends-decl
+              unit-body-expr-or-defn
+              ...)]
+[require-decl (require require-spec ...)
+              (begin require-decl ...)
+              derived-require-form]]
+
+After any number of @scheme[_require-decl]s, the content of the module
+is the same as a @scheme[unit] body.
+
+The resulting unit is exported as @scheme[_base]@schemeidfont["@"],
+where @scheme[_base] is derived from the enclosing module's name
+(i.e., its symbolic name, or its path without the directory and file
+suffix). If the module name ends in @schemeidfont{-unit}, then
+@scheme[_base] corresponds to the module name before
+@schemeidfont{-unit}. Otherwise, the module name serves as
+@scheme[_base].
+
+@; ------------------------------------------------------------------------
+
+@section{Single-Signature Modules}
+
+@defmodulelang[scheme/signature]{The @schememodname[scheme/signature]
+language treats a module body as a unit signature.}
+
+The body must match the following @scheme[_module-body] grammar:
+
+@schemegrammar*[
+#:literals (require)
+[module-body (code:line (require require-spec ...) ... sig-spec ...)]
+]
+
+See @secref["creatingunits"] for the grammar of @scheme[_sig-spec].
+Unlike the body of a @schememodname[scheme/unit] module, a
+@scheme[require] in a @schememodname[scheme/signature] module must be
+a literal use of @scheme[require].
+
+
+The resulting signature is exported as
+@scheme[_base]@schemeidfont["^"], where @scheme[_base] is derived from
+the enclosing module's name (i.e., its symbolic name, or its path
+without the directory and file suffix). If the module name ends in
+@schemeidfont{-sig}, then @scheme[_base] corresponds to the module
+name before @schemeidfont{-sig}. Otherwise, the module name serves as
+@scheme[_base].
+
+@; ----------------------------------------------------------------------
+
+@section{Transformer Helpers}
+
+@defmodule[scheme/unit-exptime #:use-sources (mzlib/unit-exptime)]
+
+The @schememodname[scheme/unit-exptime] library provides procedures
+that are intended for use by macro transformers. In particular, the
+library is typically imported using @scheme[for-syntax] into a module
+that defines macro with @scheme[define-syntax].
+
+@defproc[(unit-static-signatures [unit-identifier identifier?]
+                                 [err-syntax syntax?])
+         (values (list/c (cons/c (or/c symbol? false/c)
+                                 identifier?))
+                 (list/c (cons/c (or/c symbol? false/c)
+                                 identifier?)))]{
+
+If @scheme[unit-identifier] is bound to static unit information via
+@scheme[define-unit] (or other such forms), the result is two
+values. The first value is for the unit's imports, and the second is
+for the unit's exports. Each result value is a list, where each list
+element pairs a symbol or @scheme[#f] with an identifier. The symbol
+or @scheme[#f] indicates the import's or export's tag (where
+@scheme[#f] indicates no tag), and the identifier indicates the
+binding of the corresponding signature.
+
+If @scheme[unit-identifier] is not bound to static unit information,
+then the @exnraise[exn:fail:syntax]. In that case, the given
+@scheme[err-syntax] argument is used as the source of the error, where
+@scheme[unit-identifer] is used as the detail source location.}
+
+
+@defproc[(signature-members [sig-identifier identifier?]
+                            [err-syntax syntax?])
+         (values (or/c identifier? false/c)
+                 (listof identifier?)
+                 (listof identifier?)
+                 (listof identifier?))]{
+
+If @scheme[sig-identifier] is bound to static unit information via
+@scheme[define-signature] (or other such forms), the result is four
+values:
+
+@itemize{
+
+  @item{an identifier or @scheme[#f] indicating the signature (of any)
+        that is extended by the @scheme[sig-identifier] binding;}
+
+  @item{a list of identifiers representing the variables
+        supplied/required by the signature;}
+
+  @item{a list of identifiers for variable definitions in the
+        signature (i.e., variable bindings that are provided on
+        import, but not defined by units that implement the
+        signature); and}
+
+  @item{a list of identifiers with syntax definitions in the signature.}
+
+}
+
+If @scheme[sig-identifier] is not bound to a signature, then the
+@exnraise[exn:fail:syntax]. In that case, the given
+@scheme[err-syntax] argument is used as the source of the error, where
+@scheme[sig-identifier] is used as the detail source location.}
+

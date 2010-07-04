@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2007 PLT Scheme Inc.
+  Copyright (c) 2004-2008 PLT Scheme Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -100,14 +100,13 @@ static Scheme_Object *write_char (int, Scheme_Object *[]);
 static Scheme_Object *write_byte (int, Scheme_Object *[]);
 static Scheme_Object *load (int, Scheme_Object *[]);
 static Scheme_Object *current_load (int, Scheme_Object *[]);
+static Scheme_Object *current_load_use_compiled (int, Scheme_Object *[]);
 static Scheme_Object *current_load_directory(int argc, Scheme_Object *argv[]);
 static Scheme_Object *current_write_directory(int argc, Scheme_Object *argv[]);
 #ifdef LOAD_ON_DEMAND
 static Scheme_Object *load_on_demand_enabled(int argc, Scheme_Object *argv[]);
 #endif
 static Scheme_Object *default_load (int, Scheme_Object *[]);
-static Scheme_Object *transcript_on(int, Scheme_Object *[]);
-static Scheme_Object *transcript_off(int, Scheme_Object *[]);
 static Scheme_Object *flush_output (int, Scheme_Object *[]);
 static Scheme_Object *open_input_char_string (int, Scheme_Object *[]);
 static Scheme_Object *open_input_byte_string (int, Scheme_Object *[]);
@@ -130,6 +129,10 @@ static Scheme_Object *sch_default_display_handler(int argc, Scheme_Object *argv[
 static Scheme_Object *sch_default_write_handler(int argc, Scheme_Object *argv[]);
 static Scheme_Object *sch_default_print_handler(int argc, Scheme_Object *argv[]);
 static Scheme_Object *sch_default_global_port_print_handler(int argc, Scheme_Object *argv[]);
+
+static int pipe_input_p(Scheme_Object *o);
+static int pipe_output_p(Scheme_Object *o);
+static int pipe_out_ready(Scheme_Output_Port *p);
 
 #ifdef MZ_PRECISE_GC
 static void register_traversers(void);
@@ -661,6 +664,11 @@ scheme_init_port_fun(Scheme_Env *env)
 						       "current-load",
 						       MZCONFIG_LOAD_HANDLER),
 			     env);
+  scheme_add_global_constant("current-load/use-compiled",
+			     scheme_register_parameter(current_load_use_compiled,
+						       "current-load/use-compiled",
+						       MZCONFIG_LOAD_COMPILED_HANDLER),
+			     env);
   scheme_add_global_constant("current-load-relative-directory",
 			     scheme_register_parameter(current_load_directory,
 						       "current-load-relative-directory",
@@ -678,17 +686,6 @@ scheme_init_port_fun(Scheme_Env *env)
 						       MZCONFIG_LOAD_DELAY_ENABLED),
 			     env);
 #endif
-
-  scheme_add_global_constant ("transcript-on",
-			      scheme_make_prim_w_arity(transcript_on,
-						       "transcript-on",
-						       1, 1),
-			      env);
-  scheme_add_global_constant ("transcript-off",
-			      scheme_make_prim_w_arity(transcript_off,
-						       "transcript-off",
-						       0, 0),
-			      env);
 
   scheme_add_global_constant("flush-output",
 			     scheme_make_noncm_prim(flush_output,
@@ -718,7 +715,7 @@ scheme_init_port_fun(Scheme_Env *env)
 						       2, 2),
 			     env);
   scheme_add_global_constant("pipe-content-length", 
-			     scheme_make_noncm_prim(pipe_length, 
+			     scheme_make_immed_prim(pipe_length, 
 						    "pipe-content-length", 
 						    1, 1), 
 			     env);
@@ -748,8 +745,8 @@ void scheme_init_port_fun_config(void)
   scheme_set_root_param(MZCONFIG_LOAD_DIRECTORY, scheme_false);
   scheme_set_root_param(MZCONFIG_WRITE_DIRECTORY, scheme_false);
   scheme_set_root_param(MZCONFIG_USE_COMPILED_KIND,
-			scheme_make_immutable_pair(scheme_make_path("compiled"),
-						   scheme_null));
+			scheme_make_pair(scheme_make_path("compiled"),
+                                         scheme_null));
   scheme_set_root_param(MZCONFIG_USE_USER_PATHS, 
 			(scheme_ignore_user_paths 
 			 ? scheme_false
@@ -1162,6 +1159,7 @@ typedef struct User_Input_Port {
   Scheme_Object *buffer_mode_proc;
   Scheme_Object *reuse_str;
   Scheme_Object *peeked;
+  Scheme_Object *prefix_pipe;
 } User_Input_Port;
 
 #define MAX_USER_INPUT_REUSE_SIZE 1024
@@ -1215,6 +1213,9 @@ static long user_read_result(const char *who, Scheme_Input_Port *port,
 	} else
 	  val = NULL;
 	n = 0;
+      } else if (evt_ok && pipe_input_p(val)) {
+        ((User_Input_Port *)port->port_data)->prefix_pipe = val;
+        return 0;
       } else if (evt_ok && scheme_is_evt(val)) {
 	/* A peek/read failed, and we were given a evt that unblocks
 	   when the read/peek (at some offset) succeeds. */
@@ -1263,13 +1264,13 @@ static long user_read_result(const char *who, Scheme_Input_Port *port,
 			  (peek
 			   ? (evt_ok
 			      ? (special_ok
-				 ? "non-negative exact integer, eof, evt, #f, or procedure for special"
-				 : "non-negative exact integer, eof, evt, or #f")
+				 ? "non-negative exact integer, eof, evt, pipe input port, #f, or procedure for special"
+				 : "non-negative exact integer, eof, evt, pipe input port, or #f")
 			      : "non-negative exact integer, eof, #f, or procedure for special")
 			   : (evt_ok
 			      ? (special_ok
-				 ? "non-negative exact integer, eof, evt, or procedure for special"
-				 : "non-negative exact integer, eof, or evt")
+				 ? "non-negative exact integer, eof, evt, pipe input port, or procedure for special"
+				 : "non-negative exact integer, eof, evt, or pipe input port")
 			      : "non-negative exact integer, eof, or procedure for special")),
 			  -1, -1, a);
 	return 0;
@@ -1332,6 +1333,30 @@ user_get_or_peek_bytes(Scheme_Input_Port *port,
 
   while (1) {
     int nb;
+
+    if (uip->prefix_pipe) {
+      /* Guarantee: if we call into a client, then we're not using the
+         pipe anywhere. */
+      r = scheme_pipe_char_count(uip->prefix_pipe);
+      if (r && (!peek || (SCHEME_INTP(peek_skip) && (SCHEME_INT_VAL(peek_skip) < r)))) {
+        /* Need atomic to ensure the guarantee: this thread shouldn't get 
+           swapped out while it's using the pipe, because another thread might
+           somehow arrive at the port's procedures. (Pipe reading is probably atomic, 
+           anyway, due to the way that pipes are implemented.) */
+        scheme_start_atomic();
+        r = scheme_get_byte_string_unless("custom-port-pipe-read", uip->prefix_pipe,
+                                          buffer, offset, size,
+                                          2, peek, peek_skip,
+                                          unless);
+        scheme_end_atomic_no_swap();
+        return r;
+      } else {
+        /* Setting the pipe to NULL ensures that we don't start using it while
+           we're in the call that we just started. If another thread returns
+           a pipe before the user's code returns, though, all bets are off. */
+        uip->prefix_pipe = NULL;
+      }
+    }
 
     if (uip->reuse_str && (size == SCHEME_BYTE_STRLEN_VAL(uip->reuse_str))) {
       bstr = uip->reuse_str;
@@ -1616,6 +1641,7 @@ typedef struct User_Output_Port {
   Scheme_Object *location_proc;
   Scheme_Object *count_lines_proc;
   Scheme_Object *buffer_mode_proc;
+  Scheme_Object *buffer_pipe;
 } User_Output_Port;
 
 int scheme_user_port_write_probably_ready(Scheme_Output_Port *port, Scheme_Schedule_Info *sinfo)
@@ -1679,6 +1705,18 @@ user_write_result(const char *who, Scheme_Output_Port *port, int evt_ok,
 	return 1; /* turn 0 into 1 to indicate a successful blocking flush */
       else
 	return n;
+    } else if (evt_ok && pipe_output_p(val)) {
+      if (rarely_block || !len) {
+        scheme_arg_mismatch(who,
+			    (rarely_block
+                             ? "bad result for a non-blocking write: "
+                             : "bad result for a flushing write: "),
+			    val);
+      }
+
+      ((User_Output_Port *)port->port_data)->buffer_pipe = val;
+      
+      return 0;
     } else if (evt_ok && scheme_is_evt(val)) {
       /* A write failed, and we were given a evt that unblocks when
 	 the write succeeds. */
@@ -1739,6 +1777,21 @@ user_write_bytes(Scheme_Output_Port *port, const char *str, long offset, long le
 
   while (1) {
 
+    if (uop->buffer_pipe) {
+      if (!rarely_block && len) {
+        if (pipe_out_ready((Scheme_Output_Port *)uop->buffer_pipe)) {
+          /* Need atomic for same reason as using prefix_pipe for input. */
+          scheme_start_atomic();
+          n = scheme_put_byte_string("user output pipe buffer", uop->buffer_pipe,
+                                     str, offset, len,
+                                     1);
+          scheme_end_atomic_no_swap();
+          return n;
+        }
+      }
+      uop->buffer_pipe = NULL;
+    }
+
     /* Disable breaks while calling the port's function: */
     scheme_push_break_enable(&cframe, 0, 0);
 
@@ -1757,7 +1810,9 @@ user_write_bytes(Scheme_Output_Port *port, const char *str, long offset, long le
 	  return 0; /* n == 1 for success, but caller wants 0 */
 	return n;
       }
-      /* else rarely_block == 1, and we haven't written anything. */
+      /* else rarely_block == 1, and we haven't written anything,
+         or rarely_block == 0 and we haven't written anything but we
+         received a pipe. */
     }
 
     scheme_thread_block(0.0);
@@ -1854,6 +1909,9 @@ user_write_special (Scheme_Output_Port *port, Scheme_Object *v, int nonblock)
   v = scheme_apply(uop->write_special_proc, 3, a);
 
   while (1) {
+    if (uop->buffer_pipe)
+      uop->buffer_pipe = NULL;
+
     if (scheme_is_evt(v)) {
       if (!nonblock) {
 	a[0] = v;
@@ -2459,6 +2517,34 @@ static Scheme_Object *pipe_length(int argc, Scheme_Object **argv)
   return scheme_make_integer(avail);
 }
 
+static int pipe_input_p(Scheme_Object *o)
+{
+  /* Need an immediate pipe: */
+  if (SAME_TYPE(SCHEME_TYPE(o), scheme_input_port_type)) {
+    Scheme_Input_Port *ip;
+    ip = scheme_input_port_record(o);
+    if (ip->sub_type == scheme_pipe_read_port_type) {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int pipe_output_p(Scheme_Object *o)
+{
+  /* Need an immediate pipe: */
+  if (SAME_TYPE(SCHEME_TYPE(o), scheme_output_port_type)) {
+    Scheme_Output_Port *op;
+    op = scheme_output_port_record(o);
+    if (op->sub_type == scheme_pipe_write_port_type) {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
 /*========================================================================*/
 /*                    Scheme functions and helpers                        */
 /*========================================================================*/
@@ -2741,7 +2827,7 @@ make_output_port (int argc, Scheme_Object *argv[])
 static Scheme_Object *
 open_input_file (int argc, Scheme_Object *argv[])
 {
-  return scheme_do_open_input_file("open-input-file", 0, argc, argv);
+  return scheme_do_open_input_file("open-input-file", 0, argc, argv, 0);
 }
 
 static Scheme_Object *
@@ -2933,7 +3019,7 @@ call_with_input_file(int argc, Scheme_Object *argv[])
 
   scheme_check_proc_arity("call-with-input-file", 1, 1, argc, argv);
 
-  port = scheme_do_open_input_file("call-with-input-file", 1, argc, argv);
+  port = scheme_do_open_input_file("call-with-input-file", 1, argc, argv, 0);
 
   v = _scheme_apply_multi(argv[1], 1, &port);
 
@@ -3004,7 +3090,7 @@ with_input_from_file(int argc, Scheme_Object *argv[])
 
   scheme_check_proc_arity("with-input-from-file", 0, 1, argc, argv);
 
-  port = scheme_do_open_input_file("with-input-from-file", 1, argc, argv);
+  port = scheme_do_open_input_file("with-input-from-file", 1, argc, argv, 0);
 
   config = scheme_extend_config(scheme_current_config(),
 				MZCONFIG_INPUT_PORT,
@@ -4082,7 +4168,7 @@ display_write(char *name,
     Scheme_Object *a[2];
 
     a[0] = argv[0];
-    a[1] = port;
+    a[1] = (Scheme_Object *)port;
 
     h = op->print_handler;
 
@@ -4376,7 +4462,7 @@ static Scheme_Object *do_load_handler(void *data)
 
       m = scheme_extract_compiled_module(SCHEME_STX_VAL(d));
       if (m) {
-	if (!SAME_OBJ(m->modname, lhd->expected_module)) {
+	if (!SAME_OBJ(SCHEME_PTR_VAL(m->modname), lhd->expected_module)) {
 	  other = m->modname;
 	  d = NULL;
 	}
@@ -4454,7 +4540,7 @@ static Scheme_Object *do_load_handler(void *data)
 	a = SCHEME_STX_CAR(obj);
 	d = SCHEME_STX_CDR(obj);
 	a = scheme_datum_to_syntax(module_symbol, a, scheme_sys_wraps(NULL), 0, 1);
-	d = scheme_make_immutable_pair(a, d);
+	d = scheme_make_pair(a, d);
 	obj = scheme_datum_to_syntax(d, obj, scheme_false, 0, 1);
       }
     } else {
@@ -4467,12 +4553,8 @@ static Scheme_Object *do_load_handler(void *data)
     /* ... end special support for module loading ... */
 
     genv = scheme_get_env(config);
-    if (genv->rename)
-      obj = scheme_add_rename(obj, genv->rename);
-    if (genv->exp_env && genv->exp_env->rename)
-      obj = scheme_add_rename(obj, genv->exp_env->rename);
-    if (genv->template_env && genv->template_env->rename)
-      obj = scheme_add_rename(obj, genv->template_env->rename);
+    if (genv->rename_set)
+      obj = scheme_add_rename(obj, genv->rename_set);
 
     last_val = _scheme_apply_multi_with_prompt(scheme_get_param(config, MZCONFIG_EVAL_HANDLER),
                                                1, &obj);
@@ -4524,7 +4606,7 @@ static Scheme_Object *default_load(int argc, Scheme_Object *argv[])
   if (!SCHEME_FALSEP(expected_module) && !SCHEME_SYMBOLP(expected_module))
     scheme_wrong_type("default-load-handler", "symbol or #f", 1, argc, argv);
 
-  port = scheme_do_open_input_file("default-load-handler", 0, 1, argv);
+  port = scheme_do_open_input_file("default-load-handler", 0, 1, argv, 0);
 
   /* Turn on line/column counting, unless it's a .zo file: */
   if (SCHEME_PATHP(argv[0])) {
@@ -4650,6 +4732,15 @@ current_load(int argc, Scheme_Object *argv[])
 			     2, NULL, NULL, 0);
 }
 
+static Scheme_Object *
+current_load_use_compiled(int argc, Scheme_Object *argv[])
+{
+  return scheme_param_config("current-load/use-compiled",
+			     scheme_make_integer(MZCONFIG_LOAD_COMPILED_HANDLER),
+			     argc, argv,
+			     2, NULL, NULL, 0);
+}
+
 static Scheme_Object *abs_directory_p(const char *name, int argc, Scheme_Object **argv)
 {
   Scheme_Object *d = argv[0];
@@ -4739,27 +4830,6 @@ Scheme_Object *scheme_load(const char *file)
   scheme_current_thread->error_buf = savebuf;
 
   return val;
-}
-
-static Scheme_Object *
-transcript_on(int argc, Scheme_Object *argv[])
-{
-  if (!SCHEME_PATH_STRINGP(argv[0]))
-    scheme_wrong_type("transcript-on", SCHEME_PATH_STRING_STR, 0, argc, argv);
-
-  scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,
-		   "transcript-on: not supported");
-
-  return scheme_void;
-}
-
-static Scheme_Object *
-transcript_off(int argc, Scheme_Object *argv[])
-{
-  scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,
-		   "transcript-off: not supported");
-
-  return scheme_void;
 }
 
 static Scheme_Object *

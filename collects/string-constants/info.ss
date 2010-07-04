@@ -1,3 +1,3 @@
-(module info (lib "infotab.ss" "setup")
-  (define name "String constants")
-  (define doc.txt "doc.txt"))
+#lang setup/infotab
+
+(define scribblings '(("string-constants.scrbl" () (gui-library))))

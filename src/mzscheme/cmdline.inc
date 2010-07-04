@@ -100,182 +100,17 @@ static int is_number_arg(const char *s)
   return 1;
 }
 
-static char *protect_quote_backslash(const char *file)
-{
-  int i, c;
-  
-  for (i = c = 0; file[i]; i++) {
-    if ((file[i] == '"') || (file[i] == '\\'))
-      c++;
-  }
-
-  if (c) {
-    char *s;
-  
-    s = (char *)malloc(i + c + 1);
-
-    for (i = c = 0; file[i]; i++) {
-      if ((file[i] == '"') || (file[i] == '\\'))
-	s[c++] = '\\';
-      s[c++] = file[i];
-    }
-    s[c] = 0;
-
-    return s;
-  } else
-    return (char *)file;
-}
-
-static char *check_script_runner(char *prog)
-{
-  /* Check whether the program name is "...scheme-...": */
-  int i;
-
-#ifdef UNIX_FILE_SYSTEM
-# define IS_A_SEP(x) ((x) == '/')
-#endif
-#ifdef DOS_FILE_SYSTEM
-# define IS_A_SEP(x) (((x) == '/') || ((x) == '\\'))
-#endif
-#ifdef MAC_FILE_SYSTEM
-# define IS_A_SEP(x) ((x) == ':')
-#endif
-
-  for (i = 0; prog[i]; i++) {
-    if ((prog[i] == 's')
-	&& (prog[i+1] == 'c')
-	&& (prog[i+2] == 'h')
-	&& (prog[i+3] == 'e')
-	&& (prog[i+4] == 'm')
-	&& (prog[i+5] == 'e')
-	&& (prog[i+6] == '-')) {
-      /* Maybe. Check directory separators. */
-      if (!i || IS_A_SEP(prog[i-1])) {
-	int j;
-	for (j = i + 7; prog[j]; j++) {
-	  if (IS_A_SEP(prog[j]))
-	    break;
-	}
-	if (!prog[j]) {
-	  /* Yes, this is a script runner. */
-	  char *lang;
-#ifdef DOS_FILE_SYSTEM
-	  /* Remove ".exe": */
-	  j -= 4;
-#endif
-
-	  i += 7;
-	  j -= i;
-	  lang = (char *)malloc(j + 55);
-	  memcpy(lang, "(require (lib \"init.ss\" \"script-lang\" \"", 39);
-	  memcpy(lang + 39, prog + i, j);
-	  memcpy(lang + 39 + j, "\"))", 4); /* gets null term */
-
-	  return lang;
-	}
-      }
-    }
-  }
-
-  return NULL;
-}
-
-static char *make_load_cd(char *file)
-{
-  char *s;
-
-  file = protect_quote_backslash(file);
-  
-  s = (char *)malloc(strlen(file) + 13);
-  strcpy(s, "(load/cd \"");
-  strcat(s, file);
-  strcat(s, "\")");
-  return s;
-}
-
-static char *make_require(char *file)
-{
-  char *s;
-  
-  file = protect_quote_backslash(file);
-  
-  s = (char *)malloc(strlen(file) + 20);
-  strcpy(s, "(require (file \"");
-  strcat(s, file);
-  strcat(s, "\"))");
-  return s;
-}
-
-static char *make_require_lib(const char *file, const char *coll)
-{
-  char *s;
-  
-  file = protect_quote_backslash(file);
-  coll = protect_quote_backslash(coll);
-  
-  s = (char *)malloc(strlen(file) + strlen(coll) + 31);
-  strcpy(s, "(require (lib \"");
-  strcat(s, file);
-  strcat(s, "\" \"");
-  strcat(s, coll);
-  strcat(s, "\"))");
-  return s;
-}
-
-static char *make_require_coll(const char *coll)
-{
-  char *s;
-
-  s = (char *)malloc(strlen(coll) + 4);
-  strcpy(s, coll);
-  strcat(s, ".ss");
-  return make_require_lib(s, coll);
-}
-
-static char *make_require_planet(const char *file, const char *file_sfx, 
-                                 const char *user, 
-                                 const char *pkg, char *pkg_sfx)
-{
-  char *s;
-  
-  pkg = protect_quote_backslash(pkg);
-  user = protect_quote_backslash(user);
-  
-  s = (char *)malloc(strlen(file) 
-                     + strlen(file_sfx) 
-                     + strlen(user) 
-                     + strlen(pkg) 
-                     + strlen(pkg_sfx) + 46);
-  strcpy(s, "(require (planet \"");
-  strcat(s, file);
-  strcat(s, file_sfx);
-  strcat(s, "\" (\"");
-  strcat(s, user);
-  strcat(s, "\" \"");
-  strcat(s, pkg);
-  strcat(s, pkg_sfx);
-  strcat(s, "\")))");
-  return s;
-}
-
 static char *make_embedded_load(const char *start, const char *end)
 {
   char *s;
+  int slen, elen;
 
-  s = (char *)malloc((2 * strlen(start)) + strlen(end) + 512);
-  
-  sprintf(s, "%s %s %s %s %s %s",
-	  "(let* ([sp (find-system-path 'exec-file)] [exe (find-executable-path sp #f)]"
-                   "[s (with-input-from-file exe (lambda () "
-	                "(file-position (current-input-port)", start, ") "
-                                         "(read-bytes (- ", end, start, "))))]"
-                   "[p (open-input-bytes s)])"
-	    "(when (and (> (bytes-length s) 2)"
-                           "(= (bytes-ref s 0) (char->integer #\\#))"
-                           "(= (bytes-ref s 1) (char->integer #\\!)))"
-               "(read-bytes-line p))"
-	    "(let loop () (let ([e (parameterize ([read-accept-compiled #t]) (read p))])"
- 			     "(unless (eof-object? e) (eval e) (loop)))))");
+  slen = strlen(start);
+  elen = strlen(end);
+
+  s = (char *)malloc(slen + elen + 2);
+  memcpy(s, start, slen + 1);
+  memcpy(s + slen + 1, end, elen + 1);
 
   return s;
 }
@@ -284,13 +119,17 @@ static char *make_embedded_load(const char *start, const char *end)
 #define mzcmd_EVAL 0
 #define mzcmd_LOAD 1
 #define mzcmd_MAIN 2
+#define mzcmd_REQUIRE_FILE 3
+#define mzcmd_REQUIRE_LIB 4
+#define mzcmd_REQUIRE_PLANET 5
+#define mzcmd_EMBEDDED 6
 
 /* To avoid having to create a specific mark procedure for
    prcise GC, split argument information into purely atomic
    and purely non-atomic records. */
 
 typedef struct {
-  int start_with_req;
+  int init_ns;
 #ifndef DONT_PARSE_COMMAND_LINE
   int num_enl;
 #endif  
@@ -298,10 +137,10 @@ typedef struct {
   int no_init_file;
 #endif
 #ifndef DONT_RUN_REP
-  int no_rep;
+  int use_repl;
   int script_mode;
 #endif
-#ifdef VERSION_YIELD_FLAG
+#ifdef YIELD_BEFORE_EXIT
   int add_yield;
 #endif
 #ifdef CMDLINE_STDIO_FLAG
@@ -318,6 +157,7 @@ typedef struct {
   Scheme_Object *main_args;
 #endif  
   Scheme_Env *global_env;
+  char *init_lib;
 } FinishArgs;
 
 typedef void (*Repl_Proc)(Scheme_Env *);
@@ -326,21 +166,26 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
 {
   volatile int exit_val = 0;
 
-  if (fa->a->start_with_req) {
-    scheme_eval_string("(require mzscheme)", fa->global_env);    
-  }
+  if (fa->a->init_ns) {
+    Scheme_Object *nsreq, *a[1];
+    Scheme_Thread * volatile p;
+    mz_jmp_buf * volatile save, newbuf;
 
-#ifndef DONT_LOAD_INIT_FILE
-  if (!fa->a->no_init_file) {
-    char *filename;
-    filename = GET_INIT_FILENAME(fa->global_env);
-    if (filename) {
-      filename = scheme_expand_filename(filename, -1, "startup", NULL, SCHEME_GUARD_FILE_EXISTS);
-      if (scheme_file_exists(filename))
-	scheme_load(filename);
-    }
+    nsreq = scheme_builtin_value("namespace-require");
+    a[0] = scheme_make_pair(scheme_intern_symbol("lib"),
+                            scheme_make_pair(scheme_make_utf8_string(fa->init_lib),
+                                             scheme_make_null()));
+
+    p = scheme_get_current_thread();
+    save = p->error_buf;
+    p->error_buf = &newbuf;
+    if (!scheme_setjmp(newbuf))
+      scheme_apply(nsreq, 1, a);
+    else {
+      exit_val = 1;
+    }        
+    p->error_buf = save;
   }
-#endif /* DONT_LOAD_INIT_FILE */
 
 #ifndef DONT_PARSE_COMMAND_LINE
   {
@@ -353,14 +198,45 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
 	  exit_val = 1;
 	  break;
 	}
-      } else if (fa->eval_kind[i] == mzcmd_EVAL) {
+      } else if ((fa->eval_kind[i] == mzcmd_EVAL)
+                 || (fa->eval_kind[i] == mzcmd_REQUIRE_FILE)
+                 || (fa->eval_kind[i] == mzcmd_REQUIRE_LIB)
+                 || (fa->eval_kind[i] == mzcmd_REQUIRE_PLANET)
+                 || (fa->eval_kind[i] == mzcmd_EMBEDDED)) {
 	Scheme_Thread * volatile p;
 	p = scheme_get_current_thread();
 	save = p->error_buf;
 	p->error_buf = &newbuf;
-	if (!scheme_setjmp(newbuf))
-	  scheme_eval_string_all_with_prompt(fa->evals_and_loads[i], fa->global_env, 0);
-	else {
+        
+        if (!scheme_setjmp(newbuf)) {
+          if (fa->eval_kind[i] == mzcmd_EVAL) {
+            scheme_eval_string_all_with_prompt(fa->evals_and_loads[i], fa->global_env, 2);
+          } else if (fa->eval_kind[i] == mzcmd_EMBEDDED) {
+            Scheme_Object *s, *e, *a[3], *eload;
+            eload = scheme_builtin_value("embedded-load");
+            s = scheme_make_utf8_string(fa->evals_and_loads[i]);
+            e = scheme_make_utf8_string(fa->evals_and_loads[i] + strlen(fa->evals_and_loads[i]) + 1);
+            a[0] = s;
+            a[1] = e;
+            a[2] = scheme_make_false();
+            scheme_apply(eload, 3, a);
+          } else {
+            Scheme_Object *a[1], *nsreq;
+            char *name;
+            nsreq = scheme_builtin_value("namespace-require");
+            if (fa->eval_kind[i] == mzcmd_REQUIRE_LIB) {
+              name = "lib";
+            } else if (fa->eval_kind[i] == mzcmd_REQUIRE_PLANET) {
+              name = "planet";
+            } else {
+              name = "file";
+            }
+            a[0] = scheme_make_pair(scheme_intern_symbol(name),
+                                    scheme_make_pair(scheme_make_utf8_string(fa->evals_and_loads[i]),
+                                                     scheme_make_null()));
+            scheme_apply(nsreq, 1, a);
+          }
+        } else {
 	  exit_val = 1;
 	  p->error_buf = save;
 	  break;
@@ -372,13 +248,54 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
 	save = p->error_buf;
 	p->error_buf = &newbuf;
 	if (!scheme_setjmp(newbuf)) {
-	  Scheme_Object *a[1], *m, *fn;
-	  
-	  m = scheme_eval_string_with_prompt("main", fa->global_env);
-	  fn = scheme_make_locale_string(fa->evals_and_loads[i]);
-	  SCHEME_SET_CHAR_STRING_IMMUTABLE(fn);
-	  a[0] = scheme_make_pair(fn, scheme_vector_to_list(fa->main_args));
-	  (void)scheme_apply_multi_with_prompt(m, 1, a);
+	  Scheme_Object *e, *a[2], *d2s, *nsi, *idb, *b, *cp;
+
+          d2s = scheme_builtin_value("datum->syntax");
+          a[0] = scheme_make_false();
+          e = scheme_intern_symbol("main");
+          a[1] = e;
+          e = scheme_apply(d2s, 2, a);
+
+          nsi = scheme_builtin_value("namespace-syntax-introduce");
+          a[0] = e;
+          e = scheme_apply(nsi, 1, a);
+
+          /* Check that `main' is imported and/or defined: */
+          idb = scheme_builtin_value("identifier-binding");
+          a[0] = e;
+          b = scheme_apply(idb, 1, a);
+          if (b == scheme_make_false()) {
+            if (!scheme_lookup_global(scheme_intern_symbol("main"), fa->global_env)) {
+              scheme_signal_error("main: not defined or required into the top-level environment");
+            }
+          }
+
+          e = scheme_make_pair(e, scheme_vector_to_list(fa->main_args));
+          e = scheme_datum_to_kernel_stx(e);
+          
+	  e = scheme_eval_multi_with_prompt(e, fa->global_env);
+
+          if (SAME_OBJ(e, SCHEME_MULTIPLE_VALUES)) {
+            Scheme_Object **mv;
+            int cnt;
+            mv = p->ku.multiple.array;
+            cnt = p->ku.multiple.count;
+            scheme_detach_multple_array(mv);
+            e = scheme_make_null();
+            while (cnt--) {
+              e = scheme_make_pair(mv[cnt], e);
+            }
+          } else {
+            e = scheme_make_pair(e, scheme_make_null());
+          }
+
+          cp = scheme_get_param(scheme_current_config(), MZCONFIG_PRINT_HANDLER);
+          
+          while (SCHEME_PAIRP(e)) {
+            a[0] = SCHEME_CAR(e);
+            scheme_apply_multi(cp, 1, a);
+            e = SCHEME_CDR(e);
+          }
 	} else {
 	  exit_val = 1;
 	  p->error_buf = save;
@@ -414,8 +331,20 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
   }
 #endif
 
+#ifndef DONT_LOAD_INIT_FILE
+  if (fa->a->use_repl && !fa->a->no_init_file) {
+    char *filename;
+    filename = GET_INIT_FILENAME(fa->global_env);
+    if (filename) {
+      filename = scheme_expand_filename(filename, -1, "startup", NULL, SCHEME_GUARD_FILE_EXISTS);
+      if (scheme_file_exists(filename))
+	scheme_load(filename);
+    }
+  }
+#endif /* DONT_LOAD_INIT_FILE */
+
 #ifndef DONT_RUN_REP
-  if (!fa->a->no_rep && !fa->a->script_mode) {
+  if (fa->a->use_repl) {
     /* enter read-eval-print loop */
     mz_jmp_buf * volatile save, newbuf;
     Scheme_Thread * volatile p;
@@ -427,7 +356,7 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
       exit_val = 0;
     } else {
       exit_val = 1;
-#ifdef VERSION_YIELD_FLAG
+#ifdef YIELD_BEFORE_EXIT
       fa->a->add_yield = 0;
 #endif
     }
@@ -435,7 +364,7 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
   }
 #endif /* DONT_RUN_REP */
 
-#ifdef VERSION_YIELD_FLAG
+#ifdef YIELD_BEFORE_EXIT
   if (fa->a->add_yield) {
     mz_jmp_buf * volatile save, newbuf;
     Scheme_Thread * volatile p;
@@ -451,50 +380,6 @@ static int finish_cmd_line_run(FinishArgs *fa, Repl_Proc repl)
 
   return exit_val;
 }
-
-#ifndef NO_FILE_SYSTEM_UTILS
-static void init_collection_paths(Scheme_Env *global_env, Scheme_Object *extra_dirs)
-{		
-  mz_jmp_buf * volatile save, newbuf;
-  Scheme_Thread * volatile p;
-  p = scheme_get_current_thread();
-  save = p->error_buf;
-  p->error_buf = &newbuf;
-  if (!scheme_setjmp(newbuf)) {
-    Scheme_Object *clcp, *flcp, *a[1];
-
-    clcp = scheme_builtin_value("current-library-collection-paths");
-    flcp = scheme_builtin_value("find-library-collection-paths");
-
-    if (clcp && flcp) {
-      a[0] = extra_dirs;
-      a[0] = _scheme_apply(flcp, 1, a);
-      _scheme_apply(clcp, 1, a);
-    }
-  }
-  p->error_buf = save;
-}
-#endif
-
-#ifndef MZSCHEME_CMD_LINE  
-static void init_mred(Scheme_Env *global_env)
-{
-  mz_jmp_buf * volatile save, newbuf;
-  Scheme_Thread * volatile p;
-  p = scheme_get_current_thread();
-  save = p->error_buf;
-  p->error_buf = &newbuf;
-  if (!scheme_setjmp(newbuf)) {
-    scheme_eval_string("(require (lib \"class.ss\"))", 
-		       global_env);
-    scheme_eval_string("(require (lib \"mred.ss\" \"mred\"))", 
-		       global_env);
-    scheme_eval_string("(current-load text-editor-load-handler)", 
-		       global_env);
-  }
-  p->error_buf = save;
-}
-#endif
 
 #ifdef USE_OSKIT_CONSOLE
 /* Hack to disable normal input mode: */
@@ -517,31 +402,29 @@ static int run_from_cmd_line(int argc, char *_argv[],
   Scheme_Object *sch_argv, *collects_path = NULL, *collects_extra = NULL;
   int i;
 #ifndef DONT_PARSE_COMMAND_LINE
-  char **evals_and_loads, *real_switch = NULL, *runner;
+  char **evals_and_loads, *real_switch = NULL, specific_switch[2];
   int *eval_kind, num_enl;
   int no_more_switches = 0;
-  int mute_banner = 0;
-  int no_argv = 0;
-  int start_with_req = 0;
+  int show_vers = 0;
 #endif
 #if !defined(DONT_RUN_REP) || !defined(DONT_PARSE_COMMAND_LINE)
-  int no_rep = 0;
+  int use_repl = 0;
   int script_mode = 0;
-#endif
-#if !defined(MZSCHEME_CMD_LINE)
-  int skip_init_mred = 0;
 #endif
 #if !defined(DONT_LOAD_INIT_FILE) || !defined(DONT_PARSE_COMMAND_LINE)
   int no_init_file = 0;
 #endif
-#ifdef VERSION_YIELD_FLAG
+#ifdef YIELD_BEFORE_EXIT
   int add_yield = 1;
 #endif
 #ifdef CMDLINE_STDIO_FLAG
   int alternate_rep = 0;
   int no_front = 0;
 #endif
-  int no_lib_path = 0;
+  char *init_lib = INITIAL_NAMESPACE_MODULE;
+  int was_config_flag = 0, saw_nc_flag = 0;
+  int no_compiled = 0;
+  int init_ns = 0, no_init_ns = 0;
   FinishArgs *fa;
   FinishArgsAtoms *fa_a;
 
@@ -707,29 +590,6 @@ static int run_from_cmd_line(int argc, char *_argv[],
   eval_kind = (int *)malloc(sizeof(int) * argc);
   num_enl = 0;
 
-  runner = check_script_runner(prog);
-  if (runner) {
-    if (!argc) {
-      PRINTF("%s: missing script filename to load\n",
-	     prog);
-      return 1;
-    }
-
-    evals_and_loads[0] = runner;
-    eval_kind[0] = mzcmd_EVAL;
-    evals_and_loads[1] = argv[0];
-    eval_kind[1] = mzcmd_LOAD;
-    evals_and_loads[2] = argv[0];
-    eval_kind[2] = mzcmd_MAIN;
-    num_enl = 3;
-    script_mode = 1;
-    no_more_switches = 1;
-    no_init_file = 1;
-    no_argv = 1;
-    argv++;
-    --argc;
-  }
-
   while (!no_more_switches && argc && argv[0][0] == '-' && !is_number_arg(argv[0] + 1)) {
     real_switch = argv[0];
 
@@ -739,76 +599,53 @@ static int run_from_cmd_line(int argc, char *_argv[],
       argv[0] = "-e";
     else if (!strcmp("--load", argv[0]))
       argv[0] = "-f";
-    else if (!strcmp("--load-cd", argv[0]))
-      argv[0] = "-d";
     else if (!strcmp("--require", argv[0]))
       argv[0] = "-t";
-    else if (!strcmp("--Load", argv[0]))
-      argv[0] = "-F";
-    else if (!strcmp("--Load-cd", argv[0]))
-      argv[0] = "-D";
-    else if (!strcmp("--Require", argv[0]))
-      argv[0] = "-T";
-    else if (!strcmp("--mzlib", argv[0]))
+    else if (!strcmp("--lib", argv[0]))
       argv[0] = "-l";
-    else if (!strcmp("--case-sens", argv[0]))
-      argv[0] = "-g";
-    else if (!strcmp("--case-insens", argv[0]))
-      argv[0] = "-G";
-    else if (!strcmp("--set-undef", argv[0]))
-      argv[0] = "-s";
     else if (!strcmp("--script", argv[0]))
       argv[0] = "-r";
-    else if (!strcmp("--script-cd", argv[0]))
-      argv[0] = "-i";
     else if (!strcmp("--require-script", argv[0]))
       argv[0] = "-u";
     else if (!strcmp("--main", argv[0]))
-      argv[0] = "-I";
+      argv[0] = "-m";
     else if (!strcmp("--name", argv[0]))
       argv[0] = "-N";
-    else if (!strcmp("--no-lib-path", argv[0]))
-      argv[0] = "-x";
+    else if (!strcmp("--no-compiled", argv[0]))
+      argv[0] = "-c";
+    else if (!strcmp("--no-lib", argv[0]))
+      argv[0] = "-n";
     else if (!strcmp("--version", argv[0]))
       argv[0] = "-v";
     else if (!strcmp("--no-init-file", argv[0]))
       argv[0] = "-q";
     else if (!strcmp("--no-jit", argv[0]))
       argv[0] = "-j";
+    else if (!strcmp("--no-delay", argv[0]))
+      argv[0] = "-d";
     else if (!strcmp("--no-argv", argv[0]))
       argv[0] = "-A";
-    else if (!strcmp("--mute-banner", argv[0]))
-      argv[0] = "-m";
-    else if (!strcmp("--awk", argv[0]))
-      argv[0] = "-w";
+    else if (!strcmp("--repl", argv[0]))
+      argv[0] = "-i";
     else if (!strcmp("--binary", argv[0]))
       argv[0] = "-b";
     else if (!strcmp("--collects", argv[0]))
       argv[0] = "-X";
     else if (!strcmp("--search", argv[0]))
       argv[0] = "-S";
-    else if (!strcmp("--prim", argv[0]))
-      argv[0] = "-Q";
-# ifndef MZSCHEME_CMD_LINE
-    else if (!strcmp("--nogui", argv[0]))
-      argv[0] = "-Z";
-# endif
 # ifdef CMDLINE_STDIO_FLAG
     else if (!strcmp("--stdio", argv[0]))
       argv[0] = "-z";
     else if (!strcmp("--back", argv[0]))
       argv[0] = "-G";
 # endif
-# ifdef VERSION_YIELD_FLAG
-    else if (!strcmp("--yield", argv[0]))
+# ifdef YIELD_BEFORE_EXIT
+    else if (!strcmp("--no-yield", argv[0]))
       argv[0] = "-V";
 # endif
-    else if (!strcmp("--restore", argv[0])) {
-      PRINTF("--restore or -R<file> must be the first (and only) switch\n");
-      goto show_need_help;
-    }
     
     if (!argv[0][1] || (argv[0][1] == '-' && argv[0][2])) {
+      specific_switch[0] = 0;
       goto bad_switch;
     } else {
       GC_CAN_IGNORE char *str;
@@ -817,15 +654,6 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	switch (*str) {
 	case 'h':
 	  goto show_help;
-	  break;
-	case 'g':
-	  scheme_set_case_sensitive(1);
-	  break;
-	case 'G':
-	  scheme_set_case_sensitive(0);
-	  break;
-	case 's':
-	  scheme_set_allow_set_undefined(1);
 	  break;
 	case 'e':
 	  if (argc < 2) {
@@ -837,6 +665,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  --argc;
 	  evals_and_loads[num_enl] = argv[0];
 	  eval_kind[num_enl++] = mzcmd_EVAL;
+          init_ns = 1;
 	  break;
 	case 'X':
 	  if (argc < 2) {
@@ -847,10 +676,23 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  argv++;
 	  --argc;
 	  collects_path = scheme_make_path(argv[0]);
+          was_config_flag = 1;
 	  break;
 	case 'U':
 	  scheme_set_ignore_user_paths(1);
+          was_config_flag = 1;
 	  break;
+        case 'I':
+          if (argc < 2) {
+	    PRINTF("%s: missing path after %s switch\n", 
+		   prog, real_switch);
+	    goto show_need_help;
+	  }
+	  argv++;
+	  --argc;
+	  init_lib = argv[0];
+          was_config_flag = 1;
+          break;
 	case 'S':
 	  if (argc < 2) {
 	    PRINTF("%s: missing path after %s switch\n", 
@@ -863,14 +705,22 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	    collects_extra = scheme_make_null();
 	  collects_extra = scheme_make_pair(scheme_make_path(argv[0]),
 					    collects_extra);
+          was_config_flag = 1;
 	  break;
-	case 'x':
-	  no_lib_path = 1;
+        case 'c':
+          no_compiled = 1;
+          was_config_flag = 1;
+          break;
+	case 'm':
+          evals_and_loads[num_enl] = "";
+          eval_kind[num_enl++] = mzcmd_MAIN;
+          init_ns = 1;
 	  break;
-	case 'C':
 	case 'r':
 	  script_mode = 1;
 	  no_more_switches = 1;
+          if (argc > 1)
+            sprog = argv[1];
 	case 'f':
 	  if (argc < 2) {
 	    PRINTF("%s: missing file name after %s switch\n", 
@@ -881,29 +731,13 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  --argc;
 	  evals_and_loads[num_enl] = argv[0];
 	  eval_kind[num_enl++] = mzcmd_LOAD;
-	  if (*str == 'C') {
-	    evals_and_loads[num_enl] = argv[0];
-	    eval_kind[num_enl++] = mzcmd_MAIN;
-	  }
-	  break;
-	case 'i':
-	  script_mode = 1;
-	  no_more_switches = 1;
-	case 'd':
-	  if (argc < 2) {
-	    PRINTF("%s: missing file name after %s switch\n", 
-		   prog, real_switch);
-	    goto show_need_help;
-	  }
-	  argv++;
-	  --argc;
-	  se = make_load_cd(argv[0]);
-	  evals_and_loads[num_enl] = se;
-	  eval_kind[num_enl++] = mzcmd_EVAL;
+          init_ns = 1;
 	  break;
 	case 'u':
 	  script_mode = 1;
 	  no_more_switches = 1;
+          if (argc > 1)
+            sprog = argv[1];
 	case 't':
 	  if (argc < 2) {
 	    PRINTF("%s: missing file name after %s switch\n", 
@@ -912,120 +746,36 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  }
 	  argv++;
 	  --argc;
-	  se = make_require(argv[0]);
-	  evals_and_loads[num_enl] = se;
-	  eval_kind[num_enl++] = mzcmd_EVAL;
-	  break;
-	case 'F':
-	  while (argc > 1) {
-	    argv++;
-	    --argc;
-	    evals_and_loads[num_enl] = argv[0];
-	    eval_kind[num_enl++] = mzcmd_LOAD;
-	  }
-	  break;
-	case 'D':
-	  while (argc > 1) {
-	    argv++;
-	    --argc;
-	    se = make_load_cd(argv[0]);
-	    evals_and_loads[num_enl] = se;
-	    eval_kind[num_enl++] = mzcmd_EVAL;
-	  }
-	  break;
-	case 'T':
-	  while (argc > 1) {
-	    argv++;
-	    --argc;
-	    se = make_require(argv[0]);
-	    evals_and_loads[num_enl] = se;
-	    eval_kind[num_enl++] = mzcmd_EVAL;
-	  }
+	  evals_and_loads[num_enl] = argv[0];
+	  eval_kind[num_enl++] = mzcmd_REQUIRE_FILE;
+          if (!init_ns)
+            no_init_ns = 1;
 	  break;
 	case 'l':
 	  if (argc < 2) {
-	    PRINTF("%s: missing file after %s switch\n", 
+	    PRINTF("%s: missing library name after %s switch\n", 
 		   prog, real_switch);
 	    goto show_need_help;
 	  }
 	  argv++;
 	  --argc;
-	  se = make_require_lib(argv[0], "mzlib");
-	  evals_and_loads[num_enl] = se;
-	  eval_kind[num_enl++] = mzcmd_EVAL;
-	  break;
-	case 'L':
-	  if (argc < 3) {
-	    PRINTF("%s: missing %s after %s switch\n", 
-		   prog, 
-		   (argc < 2) ? "file and collection" : "collection",
-		   real_switch);
-	    goto show_need_help;
-	  }
-	  argv++;
-	  --argc;
-	  se = make_require_lib(argv[0], argv[1]);
-	  evals_and_loads[num_enl] = se;
-	  argv++;
-	  --argc;
-	  eval_kind[num_enl++] = mzcmd_EVAL;
-	  break;
-	case 'M':
-	  if (argc < 2) {
-	    PRINTF("%s: missing collection after %s switch\n", 
-		   prog, 
-		   real_switch);
-	    goto show_need_help;
-	  }
-	  argv++;
-	  --argc;
-	  se = make_require_coll(argv[0]);
-	  evals_and_loads[num_enl] = se;
-	  eval_kind[num_enl++] = mzcmd_EVAL;
+	  evals_and_loads[num_enl] = argv[0];
+	  eval_kind[num_enl++] = mzcmd_REQUIRE_LIB;
+          if (!init_ns)
+            no_init_ns = 1;
 	  break;
 	case 'p':
-	  if (argc < 4) {
-	    PRINTF("%s: missing %s after %s switch\n", 
-		   prog, 
-		   ((argc > 2) 
-                    ? "package"
-                    : ((argc > 1) 
-                       ? "user and package" 
-                       : "file, user, and package")),
-		   real_switch);
+	  if (argc < 2) {
+	    PRINTF("%s: missing package name after %s switch\n", 
+		   prog, real_switch);
 	    goto show_need_help;
 	  }
 	  argv++;
 	  --argc;
-	  se = make_require_planet(argv[0], "", argv[1], argv[2], "");
-	  evals_and_loads[num_enl] = se;
-	  argv += 2;
-	  argc -= 2;
-	  eval_kind[num_enl++] = mzcmd_EVAL;
-	  break;
-	case 'P':
-	  if (argc < 3) {
-	    PRINTF("%s: missing %s after %s switch\n", 
-		   prog, 
-		   (argc < 2) ? "package/file base name and user" : "package",
-		   real_switch);
-	    goto show_need_help;
-	  }
-	  argv++;
-	  --argc;
-	  se = make_require_planet(argv[0], ".ss", argv[1], argv[0], ".plt");
-	  evals_and_loads[num_enl] = se;
-	  argv++;
-	  --argc;
-	  eval_kind[num_enl++] = mzcmd_EVAL;
-	  break;
-        case 'Q':
-          start_with_req = 1;
-          break;
-	case 'w':
-	  se = make_require_lib("awk.ss", "mzlib");
-	  evals_and_loads[num_enl] = se;
-	  eval_kind[num_enl++] = mzcmd_EVAL;
+	  evals_and_loads[num_enl] = argv[0];
+	  eval_kind[num_enl++] = mzcmd_REQUIRE_PLANET;
+          if (!init_ns)
+            no_init_ns = 1;
 	  break;
 	case 'k':
 	  if (argc < 3) {
@@ -1041,7 +791,7 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  evals_and_loads[num_enl] = se;
 	  argv++;
 	  --argc;
-	  eval_kind[num_enl++] = mzcmd_EVAL;
+	  eval_kind[num_enl++] = mzcmd_EMBEDDED;
 	  break;
 	case 'N':
 	  if (argc < 2) {
@@ -1053,43 +803,50 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  argv++;
 	  --argc;
 	  sprog = argv[0];
-	  break;
-	case 'A':
-	  no_argv = 1;
+          was_config_flag = 1;
 	  break;
 	case 'q':
 	  no_init_file = 1;
+          was_config_flag = 1;
 	  break;
+        case 'n':
+          no_init_ns = 1;
+          break;
 	case 'v':
-	  no_rep = 1;
+	  show_vers = 1;
 	  break;
-#ifdef VERSION_YIELD_FLAG
+#ifdef YIELD_BEFORE_EXIT
 	case 'V':
-	  no_rep = 1;
+	  show_vers = 1;
 	  add_yield = 0;
 	  break;
 #endif
-	case 'm':
-	  mute_banner = 1;
+	case 'i':
+	  use_repl = 1;
+          init_ns = 1;
 	  break;
 	case '-':
 	  no_more_switches = 1;
+          was_config_flag = 1;
 	  break;
 	case 'j':
 	  scheme_set_startup_use_jit(0);
+          was_config_flag = 1;
+	  break;
+	case 'd':
+	  scheme_set_startup_load_on_demand(0);
+          was_config_flag = 1;
 	  break;
 	case 'b':
 	  scheme_set_binary_mode_stdio(1);
+          was_config_flag = 1;
 	  break;
-#ifndef MZSCHEME_CMD_LINE
-	case 'Z':
-	  skip_init_mred = 1;
-	  break;
-#endif
 #ifdef CMDLINE_STDIO_FLAG
        	case 'z':
 	  alternate_rep = 1;
 	  no_front = 1;
+          use_repl = 1;
+          init_ns = 1;
 	  break;
 	case 'K':
 	  no_front = 1;
@@ -1100,22 +857,49 @@ static int run_from_cmd_line(int argc, char *_argv[],
 	  osk_not_console = 1;
 	  break;
 #endif
-	case 'R':
-	  PRINTF("--restore or -R<file> must be the first (and only) switch\n");
-	  goto show_need_help;
-	  break;
 	default:
+          specific_switch[0] = *str;
+          specific_switch[1] = 0;
 	  goto bad_switch;
 	}
+
+        if (was_config_flag)
+          was_config_flag = 0;
+        else
+          saw_nc_flag = 1;
       }
+      argv++;
+      --argc;
     }
-    argv++;
-    --argc;
   }
 
-  if (!script_mode && !mute_banner) {
+  if (!saw_nc_flag) {
+    if (!argc) {
+      /* No args => repl */
+      use_repl = 1;
+      init_ns = 1;
+    } else if (argv[0][0] != '-') {
+      /* No switches => -u mode */
+      script_mode = 1;
+      no_more_switches = 1;
+      sprog = argv[0];
+      evals_and_loads[num_enl] = argv[0];
+      eval_kind[num_enl++] = mzcmd_REQUIRE_FILE;
+      argv++;
+      --argc;
+    }
+  }
+
+  if (use_repl) {
+    show_vers = 1;
+  }
+
+  if (no_init_ns)
+    init_ns = 0;
+
+  if (show_vers) {
 #ifndef MZSCHEME_CMD_LINE  
-    if (no_rep
+    if (!use_repl
 #ifdef CMDLINE_STDIO_FLAG
 	|| alternate_rep
 #endif
@@ -1123,8 +907,6 @@ static int run_from_cmd_line(int argc, char *_argv[],
 #endif
       PRINTF(BANNER);
 #ifdef MZSCHEME_CMD_LINE  
-    if (scheme_get_allow_set_undefined())
-      PRINTF(SDESC ".\n");
 # ifdef DOS_FILE_SYSTEM
 #  if !defined(FILES_HAVE_FDS)
 #   if !defined(WINDOWS_FILE_HANDLES)
@@ -1153,25 +935,21 @@ static int run_from_cmd_line(int argc, char *_argv[],
     SCHEME_SET_VECTOR_IMMUTABLE(sch_argv);
   scheme_set_param(scheme_current_config(), MZCONFIG_CMDLINE_ARGS, sch_argv);
 
-#ifndef DONT_PARSE_COMMAND_LINE
-  if (!no_argv)
-#endif
-    scheme_add_global("argv", sch_argv, global_env);
+  if (no_compiled)
+    scheme_set_param(scheme_current_config(), MZCONFIG_USE_COMPILED_KIND, scheme_make_null());
+
   {	
     Scheme_Object *ps;
     scheme_set_exec_cmd(prog);
     if (!sprog)
       sprog = prog;
+  
     ps = scheme_set_run_cmd(sprog);
-#ifndef DONT_PARSE_COMMAND_LINE
-    if (!no_argv)
-#endif
-      scheme_add_global("program", ps, global_env);
   }
 
 #ifndef NO_FILE_SYSTEM_UTILS
   /* Setup path for "collects" collection directory: */
-  if (!no_lib_path) {
+  {
     Scheme_Object *l, *r;
     int len, offset;
 
@@ -1201,19 +979,14 @@ static int run_from_cmd_line(int argc, char *_argv[],
       l = SCHEME_CDR(l);
     }
     
-    init_collection_paths(global_env, r);
+    scheme_init_collection_paths(global_env, r);
   }
 #endif /* NO_FILE_SYSTEM_UTILS */
-
-#ifndef MZSCHEME_CMD_LINE
-  if (!skip_init_mred)
-    init_mred(global_env);
-#endif
 
   fa_a = (FinishArgsAtoms *)scheme_malloc_atomic(sizeof(FinishArgsAtoms));
   fa = (FinishArgs *)scheme_malloc(sizeof(FinishArgs));
   fa->a = fa_a;
-  fa->a->start_with_req = start_with_req;
+  fa->a->init_ns = init_ns;
 #ifndef DONT_PARSE_COMMAND_LINE
   fa->evals_and_loads = evals_and_loads;
   fa->eval_kind = eval_kind;
@@ -1224,21 +997,28 @@ static int run_from_cmd_line(int argc, char *_argv[],
   fa->a->no_init_file = no_init_file;
 #endif
 #ifndef DONT_RUN_REP
-  fa->a->no_rep = no_rep;
+  fa->a->use_repl = use_repl;
   fa->a->script_mode = script_mode;
 #endif
-#ifdef VERSION_YIELD_FLAG
+#ifdef YIELD_BEFORE_EXIT
   fa->a->add_yield = add_yield;
 #endif
 #ifdef CMDLINE_STDIO_FLAG
   fa->a->alternate_rep = alternate_rep;
   fa->a->no_front = no_front;
 #endif
+  fa->init_lib = init_lib;
   fa->global_env = global_env;
 
   scheme_set_can_break(1);
 
   return cont_run(fa);
+
+#ifdef CMDLINE_STDIO_FLAG
+# define REPL_FLAGS "-i/-z"
+#else
+# define REPL_FLAGS "-i"
+#endif
 
 #ifndef DONT_PARSE_COMMAND_LINE
  show_help:
@@ -1246,108 +1026,72 @@ static int run_from_cmd_line(int argc, char *_argv[],
          PROGRAM_LC " [<option> ...] <argument> ...\n"
 # ifndef MZSCHEME_CMD_LINE
 #  ifdef wx_x
-	 " X options (must precede all other options):\n"
+	 " X configuration options (must precede all other options):\n"
 	 "  -display <display>, -geometry <geometry>, -fn <font>, -font <font>,\n"
          "  -bg <color>, -background <color>, -fg <color>, -foreground <color>,\n"
 	 "  -iconic, -name <name>, -rv, -reverse, +rv, -selectionTimeout <timeout>,\n"
 	 "  -synchronous, -title <title>, -xnllanguage <language>, -xrm <file>\n"
 #  endif
 # endif
-	 " Startup file and expression options:\n"
-	 "  -e <expr>, --eval <expr> : Evaluates <expr> after " PROGRAM " starts\n"
-	 "  -f <file>, --load <file> : Loads <file> after " PROGRAM " starts\n"
-	 "  -d <file>, --load-cd <file> : Load/cds <file> after " PROGRAM " starts\n"
-	 "  -t <file>, --require <file> : Requires <file> after " PROGRAM " starts\n"
-	 "  -F, --Load : Loads all remaining arguments after " PROGRAM " starts\n"
-	 "  -D, --Load-cd : Load/cds all remaining arguments after " PROGRAM " starts\n"
-	 "  -T, --Require : Requires all remaining arguments after " PROGRAM " starts\n"
-	 "  -l <file>, --mzlib <file> : Same as -e '(require (lib \"<file>\"))'\n"
-	 "  -L <file> <coll> : Same as -e '(require (lib \"<file>\" \"<coll>\"))'\n"
-	 "  -M <coll> : Same as -e '(require (lib \"<coll>.ss\" \"<coll>\"))'\n"
-	 "  -p <fl> <u> <pkg> : Same as -e '(require (planet \"<fl>\" (\"<u>\" \"<pkg>\"))'\n"
-	 "  -P <nm> <u> : Same as -e '(require (planet \"<nm>.ss\" (\"<u>\" \"<nm>.plt\"))'\n"
-	 "  -r, --script : Script mode: use as last option for scripts; same as -fmv-\n" 
-	 "  -i, --script-cd : Like -r, but also sets the directory; same as -dmv-\n"
-	 "  -u, --require-script : Like -r, but requires a module; same as -tmv-\n" 
-# ifndef MZSCHEME_CMD_LINE
-	 "  -Z, --nogui : Skip \"class.ss\" & \"mred.ss\" require, load handler set\n"
-# endif
+	 " File and expression options:\n"
+	 "  -e <exprs>, --eval <exprs> : Evaluate <exprs>, prints results\n"
+	 "  -f <file>, --load <file> : Like -e '(load \"<file>\")' without printing\n"
+	 "  -t <file>, --require <file> : Like -e '(require (file \"<file>\"))'\n"
+	 "  -l <path>, --lib <path> : Like -e '(require (lib \"<path>\"))'\n"
+	 "  -p <package> : Like -e '(require (planet \"<package>\")'\n"
+	 "  -r <file>, --script <file> : Same as -f <file> -N <file> --\n" 
+	 "  -u <file>, --require-script <file> : Same as -t <file> -N <file> --\n" 
+	 "  -k <n> <m> : Load executable-embedded code from file offset <n> to <m>\n"
+	 "  -m, --main : Call `main' with command-line arguments, print results\n"
+	 " Interaction options:\n"
+         "  -i, --repl : Run interactive read-eval-print loop; implies -v\n"
 # ifdef CMDLINE_STDIO_FLAG
-	 "  -z, --stdio : Show version, use read-eval-print-loop (not graphical-...)\n"
+	 "  -z, --text-repl : Like -i, but use text read-eval-print loop\n"
+# endif
+         "  -n, --no-lib : Skip `(require (lib \"<init-lib>\"))' for " REPL_FLAGS "/-e/-f/-r\n"
+	 "  -v, --version : Show version\n"
+# ifdef CMDLINE_STDIO_FLAG
 	 "  -K, --back : Don't bring application to the foreground (Mac OS X)\n"
 # endif
-	 "  -w, --awk : Same as -l awk.ss\n"
-	 "  -k <n> <m> : Load executable-embedded code from file offset <n> to <m>\n"
-	 "  -C, --main : Like -r, then call `main' w/argument list; car is file name\n"
-	 " Initialization options:\n"
+# ifdef YIELD_BEFORE_EXIT
+	 "  -V, --no-yield : Don't `(yield 'wait)'\n"
+# endif
+	 " Configuration options:\n"
+         "  -c, --no-compiled : Disable loading of compiled files\n"
+	 "  -q, --no-init-file : Skip load of " INIT_FILENAME " for " REPL_FLAGS "\n"
+         "  -I <path> : Set <init-lib> to <path>\n"
 	 "  -X <dir>, --collects <dir> : Main collects at <dir> relative to " PROGRAM "\n"
 	 "  -S <dir>, --search <dir> : More collects at <dir> relative to " PROGRAM "\n"
-	 "  -U, --no-user-path : Ignores user-specific collects, etc.\n"
-         "  -x, --no-lib-path : Skips trying to set current-library-collection-paths\n"
-	 "  -q, --no-init-file : Skips trying to load " INIT_FILENAME "\n"
-	 "  -N <file>, --name <file> : Sets `program' to <file>\n"
-	 "  -A : Skips defining `argv' and `program'\n"
+	 "  -U, --no-user-path : Ignore user-specific collects, etc.\n"
+	 "  -N <file>, --name <file> : Sets `(find-system-path 'run-file)' to <file>\n"
 # ifdef MZ_USE_JIT
-	 "  -j, --no-jit : Disables just-in-time compiler\n"
+	 "  -j, --no-jit : Disable the just-in-time compiler\n"
 # else
 	 "  -j, --no-jit : No effect, since the just-in-time compiler is unavailable\n"
 # endif
-	 " Language setting options:\n"
-         "  -Q, --prim : Assume primitive bindings at top level\n"
-	 "  -g, --case-sens : Identifiers/symbols are initially case-sensitive\n"
-	 "  -G, --case-insens : Identifiers/symbols are initially case-insensitive\n"
-	 "  -s, --set-undef : " SDESC "\n"
-	 " Miscellaneous options:\n"
-	 "  -- : No argument following this switch is used as a switch\n"
-	 "  -m, --mute-banner : Suppresses "
-# ifdef MZSCHEME_CMD_LINE  
-	 "the startup banner"
-# else
-	 "-v/--version/-z/--stdio"
-# endif
-	 " text\n"
-	 "  -v, --version : Suppresses the read-eval-print loop"
-# ifdef MZSCHEME_CMD_LINE  
-	 "\n"
-# else
-	 ", prints version\n"
-# endif
-# ifdef VERSION_YIELD_FLAG
-	 "  -V, --no-yield : Like -v, also suppresses (yield 'wait)\n"
-# endif
+         "  -d, --no-delay: Disable on-demand loading of syntax and code\n"
 	 "  -b, --binary : Read stdin and write stdout/stderr in binary mode\n"
-	 "  -h, --help : Shows this information and exits, ignoring other options\n"
-	 "Multiple single-letter switches can be collapsed, with arguments placed\n"
-	 " after the collapsed switches; the first collapsed switch cannot be --.\n"
-	 " E.g.: `-vfme file expr' is the same as `-v -f file -m -e expr'\n"
-	 "Extra arguments following the last option are put into the Scheme global\n"
-	 " variable `argv' as a vector of strings. The name used to start " PROGRAM "\n"
-	 " is put into the global variable `program' as a string.\n"
-         "Expressions/files/--main/etc. are evaluated/loaded in order as provided.\n"
-	 " An error during evaluation/loading causes later ones to be skipped.\n"
-	 "The current-library-collection-paths is automatically set before any\n"
-	 " expressions/files are evaluated/loaded, unless the -x or --no-lib-path\n"
-	 " option is used.\n"
-	 "The file " INIT_FILENAME
-	 " is loaded before any provided expressions/files\n"
-	 " are evaluated/loaded, unless the -q or --no-init-file option is used.\n"
-# ifdef MACINTOSH_EVENTS
-	 "\n"
-	 "Macintosh Startup files are alphabetized and put after the -F switch\n"
-	 " on the command line.\n"
-	 "If a single startup file is provided and it begins with #!, it\n"
-	 " is handled specially. Starting with the next whitespace, the rest\n"
-	 " of the line is used as command line arguments. Unless #!! is used,\n"
-	 " the startup file name is added to the end of this command line.\n"
+	 " Meta options:\n"
+	 "  -- : No argument following this switch is used as a switch\n"
+	 "  -h, --help : Show this information and exits, ignoring other options\n"
+         "Default options:\n"
+         " If only configuration options are provided, -i is added\n"
+         " If only configuration options are before the first argument, -u is added\n"
+         " If -t/-l/-p/-u apears before the first -i/-e/-f/-r, -n is added\n"
+         " <init-lib> defaults to " INITIAL_NAMESPACE_MODULE "\n"
+         "Switch syntax:\n"
+	 " Multiple single-letter switches can be collapsed, with arguments placed\n"
+	 "   after the collapsed switches; the first collapsed switch cannot be --\n"
+	 " Example: `-ifve file expr' is the same as `-i -f file -v -e expr'\n"
+         "Start-up sequence:\n"
+         " 1. Set `current-library-collection-paths'\n"
+         " 2. Require `(lib \"<init-lib>\")' [when " REPL_FLAGS "/-e/-f/-r, unless -n]\n"
+         " 3. Evaluate/load expressions/files in order, until first error\n"
+         " 4. Load \"" INIT_FILENAME "\" [when " REPL_FLAGS "]\n"
+         " 5. Run read-eval-print loop [when " REPL_FLAGS "]\n"
+# ifdef YIELD_BEFORE_EXIT
+         " 6. Run `(yield 'wait)' [unless -V]\n"
 # endif
-	 "If the executable name has the form scheme-<dialect>, then the command\n"
-	 " line is effectively prefixed with:\n"
-	 "    -qAeC '(require (lib \"init.ss\" \"script-lang\" \"<dialect>\"))'\n"
-	 " Thus, the first command-line argument serves as the name of a file;\n"
-	 " the file should define `main', which is called with the arguments in a\n"
-	 " list, starting with the path of the loaded file.\n"
-	 "For general information about " PROGRAM ", see:\n"
-	 "  http://www.plt-scheme.org/software/" PROGRAM_LC "/\n"
 	 );
   PRINTF(prog, BANNER);
 #if defined(WINDOWS_FILE_HANDLES)
@@ -1355,7 +1099,11 @@ static int run_from_cmd_line(int argc, char *_argv[],
 #endif
   return 0;
  bad_switch:
-  PRINTF("%s: bad switch %s\n", prog, real_switch);
+  if (specific_switch[0] && real_switch[2]) {
+    PRINTF("%s: bad switch: -%s within: %s\n", prog, specific_switch, real_switch);
+  } else {
+    PRINTF("%s: bad switch: %s\n", prog, real_switch);
+  }
  show_need_help:
   PRINTF("Use the --help or -h flag for help.\n");
 #if defined(DETECT_WIN32_CONSOLE_STDIN)
@@ -1364,3 +1112,86 @@ static int run_from_cmd_line(int argc, char *_argv[],
   return 1;
 #endif
 }
+
+#if defined(OS_X) && defined(MZ_PRECISE_GC) && defined(EXTRA_EXCEPTION_STUBS)
+
+/* These declarations avoid linker problems when using
+   -mmacosx-version-min. See gc2/vm_osx.c for details. */
+
+START_XFORM_SKIP;
+
+#include <mach/mach.h>
+#include <mach/mach_error.h>
+
+# ifdef __cplusplus
+extern "C" {
+# endif
+
+extern kern_return_t GC_catch_exception_raise_state(mach_port_t port,
+                                                    exception_type_t exception_type,
+                                                    exception_data_t exception_data,
+                                                    mach_msg_type_number_t data_cnt,
+                                                    thread_state_flavor_t *flavor,
+                                                    thread_state_t in_state,
+                                                    mach_msg_type_number_t is_cnt,
+                                                    thread_state_t out_state,
+                                                    mach_msg_type_number_t os_cnt);
+extern kern_return_t GC_catch_exception_raise_state_identitity
+  (mach_port_t port,  mach_port_t thread_port, mach_port_t task_port,
+   exception_type_t exception_type, exception_data_t exception_data,
+   mach_msg_type_number_t data_count, thread_state_flavor_t *state_flavor,
+   thread_state_t in_state, mach_msg_type_number_t in_state_count,
+   thread_state_t out_state, mach_msg_type_number_t out_state_count);
+extern kern_return_t GC_catch_exception_raise(mach_port_t port,
+                                              mach_port_t thread_port,
+                                              mach_port_t task_port,
+                                              exception_type_t exception_type,
+                                              exception_data_t exception_data,
+                                              mach_msg_type_number_t data_count);
+
+kern_return_t catch_exception_raise_state(mach_port_t port,
+					  exception_type_t exception_type,
+					  exception_data_t exception_data,
+					  mach_msg_type_number_t data_cnt,
+					  thread_state_flavor_t *flavor,
+					  thread_state_t in_state,
+					  mach_msg_type_number_t is_cnt,
+					  thread_state_t out_state,
+					  mach_msg_type_number_t os_cnt)
+{
+  return GC_catch_exception_raise_state(port, exception_type, exception_data,
+                                        data_cnt, flavor,
+                                        in_state, is_cnt,
+                                        out_state, os_cnt);
+}
+
+kern_return_t catch_exception_raise_state_identitity
+  (mach_port_t port,  mach_port_t thread_port, mach_port_t task_port,
+   exception_type_t exception_type, exception_data_t exception_data,
+   mach_msg_type_number_t data_count, thread_state_flavor_t *state_flavor,
+   thread_state_t in_state, mach_msg_type_number_t in_state_count,
+   thread_state_t out_state, mach_msg_type_number_t out_state_count)
+{
+  return GC_catch_exception_raise_state_identitity(port, thread_port, task_port,
+                                                   exception_type, exception_data,
+                                                   data_count, state_flavor,
+                                                   in_state, in_state_count,
+                                                   out_state, out_state_count);
+}
+
+kern_return_t catch_exception_raise(mach_port_t port,
+				    mach_port_t thread_port,
+				    mach_port_t task_port,
+				    exception_type_t exception_type,
+				    exception_data_t exception_data,
+				    mach_msg_type_number_t data_count)
+{
+  return GC_catch_exception_raise(port, thread_port, task_port,
+                                  exception_type, exception_data, data_count);
+}
+
+# ifdef __cplusplus
+};
+# endif
+END_XFORM_SKIP;
+#endif

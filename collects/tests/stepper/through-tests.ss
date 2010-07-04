@@ -3,42 +3,49 @@
 ;;exec mred -u "$0" "$@"
 ;;|#
 
-(module through-tests mzscheme
-  (require (lib "shared.ss" "stepper" "private")
-           (lib "model.ss" "stepper" "private")
-           (lib "model-settings.ss" "stepper" "private")
-           (lib "match.ss")
-           (lib "sexp-diff.ss" "tests" "utils")
-           "module-elaborator.ss"
-           (lib "list.ss")
-           (only (lib "13.ss" "srfi") string-contains)
+#lang scheme/base
+
+  (require (for-syntax scheme/base)
+           (for-syntax scheme/mpair)
+           scheme/match
+           stepper/private/shared
+           stepper/private/model
+           stepper/private/model-settings
+           tests/utils/sexp-diff
+           lang/run-teaching-program
+           (only-in srfi/13 string-contains)
            ;; for xml testing:
-           ;; (lib "class.ss")
+           ;; mzlib/class
            ;; (all-except (lib "xml-snipclass.ss" "xml") snip-class)
            ;; (all-except (lib "scheme-snipclass.ss" "xml") snip-class)
-           ;; (lib "mred.ss" "mred")
+           ;; mred
+           #;(file "/Users/clements/clements/scheme-scraps/eli-debug.ss")
            )
   
-  (provide (all-defined))
+  (provide (all-defined-out))
 
   (define test-directory (find-system-path 'temp-dir))
   
   (define display-only-errors (make-parameter #f))
   
   (define error-has-occurred-box (make-parameter #f))
+  
+  (define show-all-steps (make-parameter #f))
 
-  (define (stream-ify expr-list iter)
+  (define disable-stepper-error-handling (make-parameter #f))
+  
+  (define (stream-ify stx-thunk iter)
     (lambda ()
-      (if (null? expr-list)
-        (iter eof void)
-        (iter (expand (car expr-list)) (stream-ify (cdr expr-list) iter)))))
+      (let* ([next (stx-thunk)]
+             [followup-thunk (if (eof-object? next) void (stream-ify stx-thunk iter))])
+        (iter (expand next) followup-thunk))))
 
   (define (warn who fmt . args)
     (set-box! (error-has-occurred-box) #t)
     (fprintf (current-error-port) "~a: ~a\n" who (apply format fmt args)))
 
   (define (test-sequence-core namespace-spec teachpack-specs render-settings
-                              show-lambdas-as-lambdas? in-port expected-steps)
+                              show-lambdas-as-lambdas? enable-testing? in-port expected-steps)
     (let* ([current-error-display-handler (error-display-handler)]
            [all-steps
             (append expected-steps '((finished-stepping)))]
@@ -49,27 +56,18 @@
                       "ran out of expected steps. Given result: ~v" result)
                 (begin
                   (if (compare-steps result (car all-steps))
-                      (begin
-                        ;; uncomment to see successful steps, too:
-                        #;(printf "test-sequence: steps match for expected result: ~v\n"
-                                (car all-steps))
-                        (void))
+                      (when (and (show-all-steps) (not (display-only-errors)))
+                        (printf "test-sequence: steps match for expected result: ~v\n"
+                                (car all-steps)))
                       (warn 'test-sequence
                           "steps do not match\n   given: ~v\nexpected: ~v"
-                          result (car all-steps)))
-
+                          (show-result result) (car all-steps)))
                   (set! all-steps (cdr all-steps)))))]
            [program-expander
+            (let ([module-id (gensym "stepper-module-name-")])
             (lambda (init iter)
               (init)
-              (let* ([exps (let read-loop ()
-                             (let ([expr (read-syntax "test-input" in-port)])
-                               (if (eof-object? expr)
-                                 null
-                                 (cons expr (read-loop)))))]
-                     [exprs (wrap-in-module
-                             exps namespace-spec teachpack-specs)])
-                ((stream-ify exprs iter))))])
+              ((stream-ify (expand-teaching-program in-port read-syntax namespace-spec teachpack-specs #f module-id enable-testing?) iter))))])
       (let/ec escape
         (parameterize ([error-escape-handler (lambda () (escape (void)))])
           (go program-expander receive-result render-settings
@@ -77,46 +75,48 @@
               ;; language level:
               'testing
               ;; run-in-drscheme thunk:
-              (lambda (thunk) (thunk)))))
+              (lambda (thunk) (thunk))
+              (disable-stepper-error-handling))))
       (error-display-handler current-error-display-handler)))
 
   (define (test-sequence namespace-spec teachpack-specs render-settings
-                         show-lambdas-as-lambdas? exp-str expected-steps)
+                         show-lambdas-as-lambdas? enable-testing? exp-str expected-steps)
     (let ([filename (build-path test-directory "stepper-test")])
       (call-with-output-file filename
         (lambda (port) (fprintf port "~a" exp-str))
+        #:exists
         'truncate)
       (unless (display-only-errors)
         (printf "testing string: ~v\n" exp-str))
       (letrec ([port (open-input-file filename)])
         (test-sequence-core namespace-spec teachpack-specs render-settings
-                            show-lambdas-as-lambdas? port expected-steps))))
+                            show-lambdas-as-lambdas? enable-testing? port expected-steps))))
 
-  (define (lang-level-test-sequence namespace-spec rs show-lambdas-as-lambdas?)
+  (define (lang-level-test-sequence namespace-spec rs show-lambdas-as-lambdas? enable-testing?)
     (lambda args
-      (apply test-sequence namespace-spec `() rs show-lambdas-as-lambdas? args)))
+      (apply test-sequence namespace-spec `() rs show-lambdas-as-lambdas? enable-testing? args)))
 
   (define (make-multi-level-test-sequence level-fns)
     (lambda args
       (for-each (lambda (fn) (apply fn args)) level-fns)))
 
   (define test-mz-sequence
-    (lang-level-test-sequence 'mzscheme fake-mz-render-settings #t))
+    (lang-level-test-sequence 'mzscheme fake-mz-render-settings #t #f))
   (define test-beginner-sequence
     (lang-level-test-sequence `(lib "htdp-beginner.ss" "lang")
-                              fake-beginner-render-settings #f))
+                              fake-beginner-render-settings #f #t))
   (define test-beginner-wla-sequence
     (lang-level-test-sequence `(lib "htdp-beginner-abbr.ss" "lang")
-                              fake-beginner-wla-render-settings #f))
+                              fake-beginner-wla-render-settings #f #t))
   (define test-intermediate-sequence
     (lang-level-test-sequence `(lib "htdp-intermediate.ss" "lang")
-                              fake-intermediate-render-settings #f))
+                              fake-intermediate-render-settings #f #t))
   (define test-intermediate/lambda-sequence
     (lang-level-test-sequence `(lib "htdp-intermediate-lambda.ss" "lang")
-                              fake-intermediate/lambda-render-settings #t))
+                              fake-intermediate/lambda-render-settings #t #t))
   (define test-advanced-sequence
     (lang-level-test-sequence `(lib "htdp-advanced.ss" "lang")
-                              fake-advanced-render-settings #t))
+                              fake-advanced-render-settings #t #t))
 
   (define test-upto-int/lam
     (make-multi-level-test-sequence
@@ -144,7 +144,7 @@
 
   (define test-lazy-sequence
     (lang-level-test-sequence `(lib "lazy.ss" "lazy")
-                              fake-mz-render-settings #f))
+                              fake-mz-render-settings #f #f))
 
   ;; mutate these to values you want to examine in the repl:
   (define bell-jar-specimen-1 #f)
@@ -184,10 +184,24 @@
                                'before)
                  (equal? err-msg (before-error-result-err-msg actual))))]
       [`(finished-stepping) (finished-stepping? actual)]
-      [`(ignore) (warn 'compare-steps "ignoring one step")]
+      [`(ignore) (warn 'compare-steps "ignoring one step") #t]
       [else (begin (warn 'compare-steps
                          "unexpected expected step type: ~v" expected)
                    #f)]))
+  
+  ;; used to display results in an error message
+  (define (show-result r)
+    (if (before-after-result? r)
+        (list 'before-after-result
+              (map (lambda (fn)
+                     (unless (list? (fn r))
+                       (warn 'show-result "not a list: ~v"
+                             (syntax-object->hilite-datum (fn r))))
+                     (map syntax-object->hilite-datum
+                          (fn r)))
+             (list before-after-result-pre-exps
+                   before-after-result-post-exps)))
+        r))
 
   ;; noisy-equal? : (any any . -> . boolean)
   ;; like equal?, but prints a noisy error message
@@ -234,13 +248,18 @@
   ;; Eli can't help adding his own convenient but complex syntax here (JBC, 2006-11-14):
 
   (define-syntax (t stx)
+    (define (maybe-mlist->list r)
+      (if (mpair? r) 
+          (mlist->list r)
+          r))
     (define (split l)
       (let loop ([l l] [r '()])
-        (cond [(null? l) (reverse! r)]
+        (cond [(null? l) (reverse (map maybe-mlist->list r))]
               [(symbol? (car l)) (loop (cdr l) (cons (car l) r))]
-              [(or (null? r) (not (pair? (car r))))
-               (loop (cdr l) (cons (list (car l)) r))]
-              [else (append! (car r) (list (car l))) (loop (cdr l) r)])))
+              [(or (null? r) (not (mpair? (car r))))
+               (loop (cdr l) (cons (mlist (car l)) r))]
+              [else (mappend! (car r) (mlist (car l))) 
+                    (loop (cdr l) r)])))
     (define (process-hilites s)
       (syntax-case s ()
         [(x) (eq? #\{ (syntax-property s 'paren-shape))
@@ -401,7 +420,8 @@
      -> {(+ 5 6)}
      -> {11})
 
-  (t 2armed-if test-mz-sequence
+  ;; not really a part of base mzscheme anymore
+  #;(t 2armed-if test-mz-sequence
      (if 3 4)
      :: {(if 3 4)} -> {4})
 
@@ -1322,54 +1342,98 @@
   ;
 
   ; as you can see, many teachpack tests work only in mred:
-  ;; (require (lib "mred.ss" "mred"))
+  ;; (require mred)
 
 
   (define test-teachpack-sequence (lambda (teachpack-specs expr-string expected-results)
                                     ;(let ([new-custodian (make-custodian)])
                                      ; (parameterize ([current-custodian new-custodian])
                                       ;  (parameterize ([current-eventspace (make-eventspace)])
-                                          (test-sequence `(lib "htdp-beginner.ss" "lang") teachpack-specs fake-beginner-render-settings #f expr-string expected-results)
+                                          (test-sequence `(lib "htdp-beginner.ss" "lang") teachpack-specs fake-beginner-render-settings #f #f expr-string expected-results)
                                     ;))
                                      ; (custodian-shutdown-all new-custodian))
       ))
   
   (t1 check-expect
-      (test-teachpack-sequence
-       `((lib "testing.ss" "htdp"))
-       "(check-expect (+ 3 4) (+ 8 9)) (+ 4 5)"
-       `((before-after ((check-expect (+ 3 4) (hilite (+ 8 9))))
-                       ((check-expect (+ 3 4) (hilite 17))))
-         (before-after ((check-expect (hilite (+ 3 4)) 17))
-                       ((check-expect (hilite 7) 17)))
-         (before-after ((finished-test-case) (hilite (+ 4 5)))
-                       ((finished-test-case) (hilite 9))))))
+      (test-bwla-to-int/lam
+       "(check-expect (+ 3 4) (+ 8 9)) (check-expect (+ 1 1) 2) (check-expect (+ 2 2) 4)(+ 4 5)"
+       `((before-after ((hilite (+ 4 5)))
+                       ((hilite 9)))
+         (before-after (9 (check-expect (+ 3 4) (hilite (+ 8 9))))
+                       (9 (check-expect (+ 3 4) (hilite 17))))
+         (before-after (9 (check-expect (hilite (+ 3 4)) 17))
+                       (9 (check-expect (hilite 7) 17)))
+         (before-after (9 (list 'check-expect-failed 7 17) (check-expect (hilite (+ 1 1)) 2))
+                       (9 (list 'check-expect-failed 7 17) (check-expect (hilite 2) 2)))
+         (before-after (9 (list 'check-expect-failed 7 17) (list 'check-expect-passed 2 2) (check-expect (hilite (+ 2 2)) 4))
+                       (9 (list 'check-expect-failed 7 17) (list 'check-expect-passed 2 2) (check-expect (hilite 4) 4))))))
+  
+  (t1 check-expect-2
+      (test-upto-int/lam
+       "(check-expect (+ 3 4) (+ 8 9)) (check-expect (+ 3 1) 4) (+ 4 5)"
+       `((before-after ((hilite (+ 4 5)))
+                       ((hilite 9)))
+         (before-after (9 (check-expect (+ 3 4) (hilite (+ 8 9))))
+                       (9 (check-expect (+ 3 4) (hilite 17))))
+         (before-after (9 (check-expect (hilite (+ 3 4)) 17))
+                       (9 (check-expect (hilite 7) 17)))
+         (before-after (9 (check-expect (hilite (+ 3 1)) 4))
+                       (9 (check-expect (hilite 4) 4))))))
+  
+  
+  
   
   (t1 check-within
-      (test-teachpack-sequence
-       `((lib "testing.ss" "htdp"))
-       "(check-within (+ 3 4) (+ 8 10) (+ 10 90)) (+ 4 5)"
-       `((before-after ((check-within (+ 3 4) (hilite (+ 8 10)) (+ 10 90)))
-                       ((check-within (+ 3 4) (hilite 18) (+ 10 90))))
-         (before-after ((check-within (+ 3 4) 18 (hilite (+ 10 90))))
-                       ((check-within (+ 3 4) 18 (hilite 100))))
-         (before-after ((check-within (hilite (+ 3 4)) 18 100))
-                       ((check-within (hilite 7) 18 100)))
-         (before-after ((finished-test-case) (hilite (+ 4 5)))
-                       ((finished-test-case) (hilite 9))))))
+      (test-bwla-to-int/lam
+       "(check-within (+ 3 4) (+ 8 10) (+ 10 90)) (check-expect (+ 1 1) 2)(+ 4 5)"
+       `((before-after ((hilite (+ 4 5)))
+                       ((hilite 9)))
+         (before-after (9 (check-within (+ 3 4) (hilite (+ 8 10)) (+ 10 90)))
+                       (9 (check-within (+ 3 4) (hilite 18) (+ 10 90))))
+         (before-after (9 (check-within (+ 3 4) 18 (hilite (+ 10 90))))
+                       (9 (check-within (+ 3 4) 18 (hilite 100))))
+         (before-after (9 (check-within (hilite (+ 3 4)) 18 100))
+                       (9 (check-within (hilite 7) 18 100)))
+         (before-after (9 (list 'check-within-passed 7 18 100) (check-expect (hilite (+ 1 1)) 2))
+                       (9 (list 'check-within-passed 7 18 100) (check-expect (hilite 2) 2))))))
+  
+  
+  (t1 check-within-bad
+      (test-bwla-to-int/lam
+       "(check-within (+ 3 4) (+ 8 10) 0.01) (+ 4 5) (check-expect (+ 1 1) 2)"
+       `((before-after ((hilite (+ 4 5)))
+                       ((hilite 9)))
+         (before-after (9 (check-within (+ 3 4) (hilite (+ 8 10)) 0.01))
+                       (9 (check-within (+ 3 4) (hilite 18) 0.01)))
+         (before-after (9 (check-within (hilite (+ 3 4)) 18 0.01))
+                       (9 (check-within (hilite 7) 18 0.01)))
+         (before-after (9 (list 'check-within-failed 7 18 0.01) (check-expect (hilite (+ 1 1)) 2))
+                       (9 (list 'check-within-failed 7 18 0.01) (check-expect (hilite 2) 2))))))
 
+  (let ([errmsg "rest: expected argument of type <non-empty list>; given ()"])
   (t1 check-error
-      (test-teachpack-sequence
-       `((lib "testing.ss" "htdp"))
-       "(check-error (+ (+ 3 4) (rest empty)) (string-append \"b\" \"ogus\")) (+ 4 5)"
-       `((before-after ((check-error (+ (+ 3 4) (rest empty)) (hilite (string-append "b" "ogus"))))
-                       ((check-error (+ (+ 3 4) (rest empty)) (hilite "bogus"))))
-         (before-after ((check-error (+ (hilite (+ 3 4)) (rest empty)) "bogus"))
-                       ((check-error (+ (hilite 7) (rest empty)) "bogus")))
-         #;(before-after ((check-error (+ 7 (hilite (rest empty))) "bogus"))
-                       ((check-error-string "crunch!" "bogus")))
-         (before-after ((finished-test-case) (hilite (+ 4 5)))
-                       ((finished-test-case) (hilite 9))))))
+      (test-bwla-to-int/lam
+       "(check-error (+ (+ 3 4) (rest empty)) (string-append \"rest: \" \"expected argument of type <non-empty list>; given ()\")) (check-expect (+ 3 1) 4) (+ 4 5)"
+       `((before-after ((hilite (+ 4 5)))
+                       ((hilite 9)))
+         (before-after (9 (check-error (+ (+ 3 4) (rest empty)) (hilite (string-append "rest: " "expected argument of type <non-empty list>; given ()"))))
+                       (9 (check-error (+ (+ 3 4) (rest empty)) (hilite ,errmsg))))
+         (before-after (9 (check-error (+ (hilite (+ 3 4)) (rest empty)) ,errmsg))
+                       (9 (check-error (+ (hilite 7) (rest empty)) ,errmsg)))
+         (before-after (9 (list 'check-error-passed ,errmsg ,errmsg) (check-expect (hilite (+ 3 1)) 4))
+                       (9 (list 'check-error-passed ,errmsg ,errmsg) (check-expect (hilite 4) 4)))))))
+  
+  (t1 check-error-bad
+      (test-bwla-to-int/lam
+       "(check-error (+ (+ 3 4) (rest empty)) (string-append \"b\" \"ogus\")) (check-expect (+ 3 1) 4) (+ 4 5)"
+       `((before-after ((hilite (+ 4 5)))
+                       ((hilite 9)))
+         (before-after (9 (check-error (+ (+ 3 4) (rest empty)) (hilite (string-append "b" "ogus"))))
+                       (9 (check-error (+ (+ 3 4) (rest empty)) (hilite "bogus"))))
+         (before-after (9 (check-error (+ (hilite (+ 3 4)) (rest empty)) "bogus"))
+                       (9 (check-error (+ (hilite 7) (rest empty)) "bogus")))
+         (before-after (9 (list 'check-error-failed "rest: expected argument of type <non-empty list>; given ()" "bogus") (check-expect (hilite (+ 3 1)) 4))
+                       (9 (list 'check-error-failed "rest: expected argument of type <non-empty list>; given ()" "bogus") (check-expect (hilite 4) 4))))))
 
   ; uses set-render-settings!
   ;(reconstruct:set-render-settings! fake-beginner-render-settings)
@@ -1382,7 +1446,7 @@
   #;
   (t1 teachpack-drawing
   (test-teachpack-sequence
-   `((lib "draw.ss" "htdp"))
+   `(htdp/draw)
    "(define (draw-limb i) (cond
  [(= i 1) (draw-solid-line (make-posn 20 20) (make-posn 20 100) 'blue)]
  [(= i 0) (draw-solid-line (make-posn (+ 1 10) 10) (make-posn 10 100) 'red)]))
@@ -1445,7 +1509,7 @@
   #;
   (t1 teachpack-web-interaction
   (test-teachpack-sequence
-   `((lib "servlet2.ss" "htdp"))
+   `(htdp/servlet2)
    "(define (adder go) (inform (number->string (+ (single-query (make-number \"enter 10\")) (single-query (make-number \"enter 20\")))))) (adder true)"
    `((before-after-finished ((define (adder go) (inform (number->string (+ (single-query (make-number "enter 10")) (single-query (make-number "enter 20")))))))
                             ((hilite (adder true)))
@@ -1637,18 +1701,14 @@
       "(define (f2c x) x) (convert-gui f2c)" `() ; placeholder
       ))
 
-  ;; make sure to leave these off when saving, or the nightly tests will run these too...
-  #;(run-all-tests)
-  #;(parameterize ([store-steps? #t])
-    (run-tests '(check-error)))
-  #;(parameterize ([display-only-errors #t])
-    (run-all-tests-except '(prims qq-splice time set! local-set! lazy1 lazy2 lazy3)))
-  
+  ;; run whatever tests are enabled (intended for interactive use):
+  (define (ggg)
+    (parameterize (#;[disable-stepper-error-handling #t]
+                   #;[display-only-errors #f]
+                   #;[store-steps #f]
+                   #;[show-all-steps #t])
+      #;(run-tests '(check-expect check-within check-within-bad check-error) #;'(#;check-expect #;check-expect-2 check-within check-within-bad check-error))
+      (run-all-tests)))
   
 
-  )
-;; Local variables:
-;; enable-local-eval: t
-;; eval:(add-color-pattern "{[^{}]+}" '*/h404)
-;; hide-local-variable-section: t
-;; End:
+

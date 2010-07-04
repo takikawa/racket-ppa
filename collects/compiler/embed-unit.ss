@@ -1,15 +1,14 @@
 
-(module embed-unit mzscheme
-  (require (lib "unit.ss")
-	   (lib "file.ss")
-	   (lib "list.ss")
-	   (lib "etc.ss")
-	   (lib "port.ss")
-	   (lib "moddep.ss" "syntax")
-	   (lib "plist.ss" "xml")
-	   (lib "dirs.ss" "setup")
-           (lib "variant.ss" "setup")
-	   (lib "kw.ss")
+(module embed-unit scheme/base
+  (require scheme/unit
+	   scheme/path
+           scheme/file
+	   scheme/port
+	   scheme/promise
+           syntax/moddep
+           xml/plist
+           setup/dirs
+           setup/variant
 	   "embed-sig.ss"
 	   "private/winicon.ss"
            "private/winsubsys.ss"
@@ -143,6 +142,10 @@
                            (and m
                                 (pair? (cdr m))
                                 (cdr m)))]
+             [uti-exports (let ([m (assq 'uti-exports aux)])
+                            (and m
+                                 (pair? (cdr m))
+                                 (cdr m)))]
              [resource-files (let ([m (assq 'resource-files aux)])
                                (and m
                                     (cdr m)))])
@@ -213,10 +216,25 @@
                              
                              "CFBundleIdentifier" 
                              (format "org.plt-scheme.~a" (path->string name)))]
-                 [new-plist (if file-types
+                 [new-plist (if uti-exports
                                 (plist-replace
                                  new-plist
-                                 
+                                 "UTExportedTypeDeclarations"
+                                 (cons 'array
+                                       (map (lambda (spec)
+                                              (cons
+                                               'dict
+                                               (map (lambda (p)
+                                                      (list
+                                                       'assoc-pair
+                                                       (car p)
+                                                       (cadr p)))
+                                                    spec)))
+                                            uti-exports)))
+                                new-plist)]
+                 [new-plist (if file-types
+                                (plist-replace
+                                 new-plist                                 
                                  "CFBundleDocumentTypes"
                                  (cons 'array
                                        (map (lambda (spec)
@@ -228,21 +246,20 @@
                                                        (car p)
                                                        (cadr p)))
                                                     spec)))
-                                            file-types)))
-                                
+                                            file-types)))                                
                                 new-plist)])
             (call-with-output-file (build-path dest 
                                                "Contents" 
                                                "Info.plist")
+              #:exists 'truncate
               (lambda (port)
-                (write-plist new-plist port))
-              'truncate)))
+                (write-plist new-plist port)))))
         (call-with-output-file (build-path dest 
                                            "Contents" 
                                            "PkgInfo")
+          #:exists 'truncate
           (lambda (port)
-            (fprintf port "APPL~a" creator))
-          'truncate)
+            (fprintf port "APPL~a" creator)))
         (when resource-files
           (for-each (lambda (p)
                       (let-values ([(base name dir?) (split-path p)])
@@ -258,6 +275,7 @@
                                          "Contents" 
                                          "Resources" 
                                          "starter-info")
+        #:exists 'truncate
         (lambda (port)
           (write-plist 
            `(dict ,@(if keep-exe?
@@ -271,8 +289,7 @@
                         null)
                   (assoc-pair "stored arguments"
                               (array ,@flags)))
-           port))
-        'truncate))
+           port))))
     
     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
     
@@ -295,7 +312,7 @@
       (format "#%embedded:~a:" (gensym)))
     
     (define (normalize filename)
-      (let ([f (simplify-path (expand-path filename))])
+      (let ([f (simplify-path (cleanse-path filename))])
         ;; Use normal-case-path on just the base part, to avoid
         ;; changing the filename case (which should match the
         ;; module-name case within the file):
@@ -305,9 +322,10 @@
               f))))
     
     (define (is-lib-path? a)
-      (and (pair? a)
-           (eq? 'lib (car a))))
-    
+      (or (and (pair? a)
+               (eq? 'lib (car a)))
+          (symbol? a)))
+      
     (define (unix-style-split p)
       (let ([m (regexp-match #rx"^([^/]*)/(.*)$" p)])
         (if m
@@ -321,17 +339,13 @@
             (loop (cdr l) (cons (car l) dirs)))))
     
     (define (lib-module-filename collects-dest module-path)
-      (let-values ([(dir file)
-                    (extract-last
-                     (append (apply append (map unix-style-split 
-                                                (if (null? (cddr module-path))
-                                                    '("mzlib")
-                                                    (cddr module-path))))
-                             (unix-style-split (cadr module-path))))])
+      (let-values ([(dir file) 
+                    (let ([s (lib-path->string module-path)])
+                      (extract-last (unix-style-split s)))])
         (let ([p (build-path collects-dest
                              (apply build-path dir)
                              "compiled"
-                             (path-replace-suffix file #".zo"))])
+                             (path-add-suffix file #".zo"))])
           (let-values ([(base name dir?) (split-path p)])
             (make-directory* base)
             p))))
@@ -402,15 +416,18 @@
                                              null null)
                                    (unbox codes)))]
                   [code
-                   (let-values ([(imports fs-imports ft-imports fl-imports) (module-compiled-imports code)])
-                     (let ([all-file-imports (filter (lambda (x) (not (symbol? x)))
-                                                     (append imports fs-imports ft-imports fl-imports))]
+                   (let ([importss (module-compiled-imports code)])
+                     (let ([all-file-imports (filter (lambda (x) 
+                                                       (let-values ([(x base) (module-path-index-split x)])
+                                                         (not (and (pair? x)
+                                                                   (eq? 'quote (car x))))))
+                                                     (apply append (map cdr importss)))]
                            [extra-paths (get-extra-imports filename code)])
                        (let ([sub-files (map (lambda (i) (normalize (resolve-module-path-index i filename)))
                                              all-file-imports)]
                              [sub-paths (map (lambda (i) (collapse-module-path-index i module-path))
                                              all-file-imports)]
-                             [extra-files (map (lambda (i) (normalize (resolve-module-path-index (module-path-index-join i 'root)
+                             [extra-files (map (lambda (i) (normalize (resolve-module-path-index (module-path-index-join i #f)
                                                                                                  filename)))
                                                extra-paths)])
                          ;; Get code for imports:
@@ -434,12 +451,12 @@
                                          (if (path? module-path)
                                              (path->complete-path module-path)
                                              module-path)])
-                                    (syntax-case (expand `(module m mzscheme
+                                    (syntax-case (expand `(,#'module m mzscheme
                                                             (require (only ,module-path)
-                                                                     (lib "runtime-path.ss"))
+                                                                     mzlib/runtime-path)
                                                             (runtime-paths ,module-path))) (quote)
                                       [(_ m mz (#%mb rfs req (quote (spec ...))))
-                                       (syntax-object->datum #'(spec ...))]
+                                       (syntax->datum #'(spec ...))]
                                       [_else (error 'create-empbedding-executable
                                                     "expansion mismatch when getting external paths")])))])
                            (when verbose?
@@ -452,9 +469,9 @@
                                ;; Install code as .zo:
                                (begin
                                  (with-output-to-file (lib-module-filename collects-dest module-path)
+                                   #:exists 'truncate/replace
                                    (lambda ()
-                                     (write code))
-                                   'truncate/replace)
+                                     (write code)))
                                  ;; Record module as copied
                                  (set-box! codes
                                            (cons (make-mod filename module-path #f
@@ -466,12 +483,14 @@
                                                       (and (not (and collects-dest
                                                                      (is-lib-path? sub-path)))
                                                            (let-values ([(path base) (module-path-index-split sub-i)])
-                                                             ;; Assert: base should refer to this module:
-                                                             (let-values ([(path2 base2) (module-path-index-split base)])
-                                                               (when (or path2 base2)
-                                                                 (error 'embed "unexpected nested module path index")))
-                                                             (let ([m (assoc sub-filename (unbox codes))])
-                                                               (cons path (mod-full-name m))))))
+                                                             (and base ; can be #f if path isn't relative
+                                                                  (begin
+                                                                    ;; Assert: base should refer to this module:
+                                                                    (let-values ([(path2 base2) (module-path-index-split base)])
+                                                                      (when (or path2 base2)
+                                                                        (error 'embed "unexpected nested module path index")))
+                                                                    (let ([m (assoc sub-filename (unbox codes))])
+                                                                      (cons path (mod-full-name m))))))))
                                                     all-file-imports sub-files sub-paths)])
                                  ;; Record the module
                                  (set-box! codes
@@ -491,90 +510,123 @@
                                    (unbox codes)))]))))))
     
     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+    (define (compile-using-kernel e)
+      (let ([ns (make-empty-namespace)])
+        (namespace-attach-module (current-namespace) ''#%kernel ns)
+        (parameterize ([current-namespace ns])
+          (namespace-require ''#%kernel)
+          (compile e))))
+
+    ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+    (define (lib-path->string path)
+      (cond
+       [(null? (cddr path))
+        (if (regexp-match #rx"^[^/]*[.]" (cadr path))
+            ;; mzlib
+            (string-append "mzlib/" (cadr path))
+            ;; new-style
+            (if (regexp-match #rx"^[^/.]*$" (cadr path))
+                (string-append (cadr path) "/main.ss")
+                (if (regexp-match #rx"^[^.]*$" (cadr path))
+                    ;; need a suffix:
+                    (string-append (cadr path) ".ss")
+                    (cadr path))))]
+       [else
+        ;; old-style multi-string:
+        (string-append (apply string-append
+                              (map (lambda (s)
+                                     (string-append s "/"))
+                                   (cddr path)))
+                       (cadr path))]))
     
     (define (make-module-name-resolver code-l)
       (let ([extensions (filter (lambda (m) (extension? (mod-code m))) code-l)])
-        `(let ([orig (current-module-name-resolver)]
-               [ns (current-namespace)]
-               [mapping-table (quote
-                               ,(map
-                                 (lambda (m)
-                                   `(,(mod-full-name m)
-                                     ,(mod-mappings m)))
-                                 code-l))]
-               [library-table (quote
-                               ,(filter values
-                                        (map (lambda (m)
-                                               (let ([path (mod-mod-path m)])
-                                                 (if (and (pair? path)
-                                                          (eq? 'lib (car path)))
-                                                     (cons path (mod-full-name m))
-                                                     #f)))
-                                             code-l)))])
-           (letrec ([embedded-resolver
-                     (case-lambda 
-                       [(name)
-                        ;; a notification
-                        (orig name)]
-                       [(name rel-to stx)
-                        (embedded-resolver name rel-to stx #t)]
-                       [(name rel-to stx load?)
-                        (if (not (eq? (current-namespace) ns))
-                            ;; Wrong namespace
-                            (orig name rel-to stx load?)
-                            ;; Have a relative mapping?
-                            (let ([a (assoc rel-to mapping-table)])
-                              (if a
-                                  (let ([a2 (assoc name (cadr a))])
-                                    (if a2
-                                        (cdr a2)
-                                        ;; No relative mapping found (presumably a lib)
-                                        (orig name rel-to stx load?)))
-                                  ;; A library mapping that we have? 
-                                  (let ([a3 (and (pair? name)
-                                                 (eq? (car name) 'lib)
-                                                 (ormap (lambda (lib-entry)
-                                                          (with-handlers ([exn:fail? (lambda (x) #f)])
-                                                            ;; To check equality of library references,
-                                                            ;; we have to consider relative paths in the
-                                                            ;; filename part of the name.
-                                                            (let loop ([a (build-path
-                                                                           (apply build-path 
-                                                                                  'same
-                                                                                  (cddar lib-entry))
-                                                                           (cadar lib-entry))]
-                                                                       [b (build-path
-                                                                           (apply build-path 
-                                                                                  'same
-                                                                                  (let ([d (cddr name)])
-                                                                                    (if (null? d)
-                                                                                        '("mzlib")
-                                                                                        d)))
-                                                                           (cadr name))])
-                                                              (if (equal? a b)
-                                                                  lib-entry
-                                                                  (let-values ([(abase aname d?) (split-path a)])
-                                                                    (if (eq? aname 'same)
-                                                                        (loop abase b)
-                                                                        (let-values ([(bbase bname a?) (split-path b)])
-                                                                          (if (eq? bname 'same)
-                                                                              (loop a bbase)
-                                                                              (if (equal? aname bname)
-                                                                                  (loop abase bbase)
-                                                                                  #f)))))))))
-                                                        library-table))])
-                                    (if a3
-                                        ;; Have it:
-                                        (cdr a3)
-                                        ;; Let default handler try:
-                                        (orig name rel-to stx load?))))))])])
-             (current-module-name-resolver embedded-resolver)))))
+        `(module #%resolver '#%kernel
+           (let-values ([(orig) (current-module-name-resolver)]
+                        [(reg) (namespace-module-registry (current-namespace))]
+                        [(mapping-table) (quote
+                                          ,(map
+                                            (lambda (m)
+                                              `(,(mod-full-name m)
+                                                ,(mod-mappings m)))
+                                            code-l))]
+                        [(library-table) (quote
+                                          ,(filter values
+                                                   (map (lambda (m)
+                                                          (let ([path (mod-mod-path m)])
+                                                            (if (and (pair? path)
+                                                                     (eq? 'lib (car path)))
+                                                                (cons (lib-path->string path)
+                                                                      (mod-full-name m))
+                                                                #f)))
+                                                        code-l)))])
+             (letrec-values ([(embedded-resolver)
+                              (case-lambda 
+                               [(name)
+                                ;; a notification
+                                (orig name)]
+                               [(name rel-to stx)
+                                (embedded-resolver name rel-to stx #t)]
+                               [(name rel-to stx load?)
+                                (if (not (module-path? name))
+                                    ;; Bad input
+                                    (orig name rel-to stx load?)
+                                    (if (not (eq? reg (namespace-module-registry (current-namespace))))
+                                        ;; Wrong registry
+                                        (orig name rel-to stx load?)
+                                        ;; Have a relative mapping?
+                                        (let-values ([(a) (if rel-to
+                                                              (assq (resolved-module-path-name rel-to) mapping-table)
+                                                              #f)])
+                                          (if a
+                                              (let-values ([(a2) (assoc name (cadr a))])
+                                                (if a2
+                                                    (make-resolved-module-path (cdr a2))
+                                                    ;; No relative mapping found (presumably a lib)
+                                                    (orig name rel-to stx load?)))
+                                              (let-values ([(lname)
+                                                            ;; normalize `lib' to single string (same as lib-path->string):
+                                                            (let-values ([(name)
+                                                                          (if (symbol? name)
+                                                                              (list 'lib (symbol->string name))
+                                                                              name)])
+                                                              (if (pair? name)
+                                                                  (if (eq? 'lib (car name))
+                                                                      (if (null? (cddr name))
+                                                                          (if (regexp-match #rx"^[^/]*[.]" (cadr name))
+                                                                              ;; mzlib
+                                                                              (string-append "mzlib/" (cadr name))
+                                                                              ;; new-style
+                                                                              (if (regexp-match #rx"^[^/.]*$" (cadr name))
+                                                                                  (string-append (cadr name) "/main.ss")
+                                                                                  (if (regexp-match #rx"^[^.]*$" (cadr name))
+                                                                                      ;; need a suffix:
+                                                                                      (string-append (cadr name) ".ss")
+                                                                                      (cadr name))))
+                                                                          ;; old-style multi-string
+                                                                          (string-append (apply string-append
+                                                                                                (map (lambda (s)
+                                                                                                       (string-append s "/"))
+                                                                                                     (cddr name)))
+                                                                                         (cadr name)))
+                                                                      #f)
+                                                                  #f))])
+                                                ;; A library mapping that we have? 
+                                                (let-values ([(a3) (assoc lname library-table)])
+                                                  (if a3
+                                                      ;; Have it:
+                                                      (make-resolved-module-path (cdr a3))
+                                                      ;; Let default handler try:
+                                                      (orig name rel-to stx load?))))))))])])
+               (current-module-name-resolver embedded-resolver))))))
     
     ;; Write a module bundle that can be loaded with 'load' (do not embed it
     ;; into an executable). The bundle is written to the current output port.
-    (define (write-module-bundle verbose? modules literal-files literal-expression collects-dest
-                                 on-extension program-name compiler expand-namespace 
-                                 src-filter get-extra-imports)
+    (define (do-write-module-bundle verbose? modules literal-files literal-expressions collects-dest
+                                    on-extension program-name compiler expand-namespace 
+                                    src-filter get-extra-imports)
       (let* ([module-paths (map cadr modules)]
              [files (map
                      (lambda (mp)
@@ -585,7 +637,7 @@
                      module-paths)]
              [collapsed-mps (map
                              (lambda (mp)
-                               (collapse-module-path mp "."))
+                               (collapse-module-path mp (build-path (current-directory) "dummy.ss")))
                              module-paths)]
              [prefix-mapping (map (lambda (f m)
                                     (cons f (let ([p (car m)])
@@ -609,9 +661,12 @@
                   collapsed-mps)
         ;; Drop elements of `codes' that just record copied libs:
         (set-box! codes (filter mod-code (unbox codes)))
+        ;; Bind `module' to get started:
+        (write (compile-using-kernel '(namespace-require '(only '#%kernel module))))
         ;; Install a module name resolver that redirects
         ;; to the embedded modules
         (write (make-module-name-resolver (filter mod-code (unbox codes))))
+        (write (compile-using-kernel '(namespace-require ''#%resolver)))
         ;; Write the extension table and copy module code:
         (let* ([l (reverse (unbox codes))]
                [extensions (filter (lambda (m) (extension? (mod-code m))) l)]
@@ -621,85 +676,90 @@
                     #f
                     (let* ([table-sym (module-path-index-resolve 
                                        (module-path-index-join '(lib "runtime-path-table.ss" "mzlib" "private")
-                                                               'mzscheme))]
-                           [table-path (bytes->path
-                                        (bytes-append
-                                         (subbytes (string->bytes/latin-1 (symbol->string table-sym)) 
-                                                   1)
-                                         #".ss"))])
+                                                               #f))]
+                           [table-path (resolved-module-path-name table-sym)])
                       (assoc (normalize table-path) l)))])
           (unless (null? extensions)
-            ;; The extension table:
+            ;; The extension table:`
             (write 
-             `(let ([eXtEnSiOn-modules ;; this name is magic for the exe->distribution process
-                     (quote ,(map (lambda (m)
-                                    (let ([p (extension-path (mod-code m))])
-                                      (when verbose?
-                                        (fprintf (current-error-port) "Recording extension at ~s~n" p))
-                                      (list (path->bytes p)
-                                            (string->symbol (mod-prefix m))
-                                            ;; The program name isn't used. It just helps ensures that
-                                            ;; there's plenty of room in the executable for patching
-                                            ;; the path later when making a distribution.
-                                            (path->bytes program-name))))
-                                  extensions))])
-                (for-each (lambda (pr)
-                            (current-module-name-prefix (cadr pr))
-                            (let ([p (bytes->path (car pr))])
-                              (load-extension (if (relative-path? p)
-                                                  (parameterize ([current-directory (find-system-path 'orig-dir)])
-                                                    (or (find-executable-path (find-system-path 'exec-file) p #t)
-                                                        (path->complete-path p (current-directory))))
-                                                  p))))
-                          eXtEnSiOn-modules))))
+             `(module #%extension-table '#%kernel
+                (#%require '#%utils)
+                (let-values ([(eXtEnSiOn-modules) ;; this name is magic for the exe->distribution process
+                              (quote ,(map (lambda (m)
+                                             (let ([p (extension-path (mod-code m))])
+                                               (when verbose?
+                                                 (fprintf (current-error-port) "Recording extension at ~s~n" p))
+                                               (list (path->bytes p)
+                                                     (mod-full-name m)
+                                                     ;; The program name isn't used. It just helps ensures that
+                                                     ;; there's plenty of room in the executable for patching
+                                                     ;; the path later when making a distribution.
+                                                     (path->bytes program-name))))
+                                           extensions))])
+                  (for-each (lambda (pr)
+                              (current-module-declare-name (make-resolved-module-path (cadr pr)))
+                              (let-values ([(p) (bytes->path (car pr))])
+                                (load-extension (if (relative-path? p)
+                                                    (let-values ([(d) (current-directory)])
+                                                      (current-directory (find-system-path 'orig-dir))
+                                                      (begin0
+                                                       (let-values ([(p2) (find-executable-path (find-system-path 'exec-file) p #t)])
+                                                         (if p2
+                                                             p2
+                                                             (path->complete-path p (current-directory))))
+                                                       (current-directory d)))
+                                                    p))))
+                            eXtEnSiOn-modules))))
+            (write (compile-using-kernel '(namespace-require ''#%extension-table))))
           ;; Runtime-path table:
           (unless (null? runtimes)
             (unless table-mod
               (error 'create-embedding-executable "cannot find module for runtime-path table"))
-            (write `(current-module-name-prefix ',(string->symbol (mod-prefix table-mod))))
-            (write `(module runtime-path-table mzscheme
-                      (provide table)
-                      (define table
-                        (make-immutable-hash-table
-                         (let ([rUnTiMe-paths ; this is a magic name for exe->distribution process
-                                ',(apply append
-                                         (map (lambda (nc)
-                                                (map (lambda (p)
-                                                       (list
-                                                        (cons (mod-full-name nc)
-                                                              (if (path? p)
-                                                                  (path->bytes p)
-                                                                  p))
-                                                        (let ([p (cond
-                                                                  [(bytes? p) (bytes->path p)]
-                                                                  [(and (list? p) (= 2 (length p)) 
-                                                                        (eq? 'so (car p)))
-                                                                   (let ([f (path-replace-suffix (cadr p) 
-                                                                                                 (system-type 'so-suffix))])
-                                                                     (ormap (lambda (p)
-                                                                              (let ([p (build-path p f)])
-                                                                                (and (file-exists? p)
-                                                                                     p)))
-                                                                            (get-lib-search-dirs)))]
-                                                                  [(and (list? p)
-                                                                        (eq? 'lib (car p)))
-                                                                   (build-path (if (null? (cddr p))
-                                                                                   (collection-path "mzlib")
-                                                                                   (apply collection-path (cddr p)))
-                                                                               (cadr p))]
-                                                                  [else p])])
-                                                          (and p
-                                                               (path->bytes 
-                                                                (if (absolute-path? p)
-                                                                    p
-                                                                    (build-path (path-only (mod-file nc)) p)))))
-                                                        ;; As for the extension table, a placeholder to save 
-                                                        ;; room likely needed by the distribution-mangler
-                                                        (bytes-append #"................." (path->bytes program-name))))
-                                                     (mod-runtime-paths nc)))
-                                              runtimes))])
-                           rUnTiMe-paths)
-                        'equal)))))
+            (write (compile-using-kernel
+                    `(current-module-declare-name (make-resolved-module-path 
+                                                   ',(mod-full-name table-mod)))))
+            (write `(module runtime-path-table '#%kernel
+                      (#%provide table)
+                      (define-values (table)
+                        (make-immutable-hash
+                         (let-values ([(rUnTiMe-paths) ; this is a magic name for exe->distribution process
+                                       ',(apply append
+                                                (map (lambda (nc)
+                                                       (map (lambda (p)
+                                                              (list
+                                                               (cons (mod-full-name nc)
+                                                                     (if (path? p)
+                                                                         (path->bytes p)
+                                                                         p))
+                                                               (let ([p (cond
+                                                                         [(bytes? p) (bytes->path p)]
+                                                                         [(and (list? p) (= 2 (length p)) 
+                                                                               (eq? 'so (car p)))
+                                                                          (let ([f (path-replace-suffix (cadr p) 
+                                                                                                        (system-type 'so-suffix))])
+                                                                            (ormap (lambda (p)
+                                                                                     (let ([p (build-path p f)])
+                                                                                       (and (file-exists? p)
+                                                                                            p)))
+                                                                                   (get-lib-search-dirs)))]
+                                                                         [(and (list? p)
+                                                                               (eq? 'lib (car p)))
+                                                                          (build-path (if (null? (cddr p))
+                                                                                          (collection-path "mzlib")
+                                                                                          (apply collection-path (cddr p)))
+                                                                                      (cadr p))]
+                                                                         [else p])])
+                                                                 (and p
+                                                                      (path->bytes 
+                                                                       (if (absolute-path? p)
+                                                                           p
+                                                                           (build-path (path-only (mod-file nc)) p)))))
+                                                               ;; As for the extension table, a placeholder to save 
+                                                               ;; room likely needed by the distribution-mangler
+                                                               (bytes-append #"................." (path->bytes program-name))))
+                                                            (mod-runtime-paths nc)))
+                                                     runtimes))])
+                           rUnTiMe-paths))))))
           ;; Copy module code:
           (for-each
            (lambda (nc)
@@ -707,35 +767,58 @@
                          (eq? nc table-mod))
                (when verbose?
                  (fprintf (current-error-port) "Writing module from ~s~n" (mod-file nc)))
-               (write `(current-module-name-prefix ',(string->symbol (mod-prefix nc))))
+               (write (compile-using-kernel
+                       `(current-module-declare-name 
+                         (make-resolved-module-path
+                          ',(mod-full-name nc)))))
                (if (src-filter (mod-file nc))
                    (with-input-from-file (mod-file nc)
                      (lambda ()
                        (copy-port (current-input-port) (current-output-port))))
                    (write (mod-code nc)))))
            l))
-        (write '(current-module-name-prefix #f))
+        (write (compile-using-kernel '(current-module-declare-name #f)))
+        ;; Remove `module' binding before we start running user code:
+        (write (compile-using-kernel '(namespace-set-variable-value! 'module #f #t)))
+        (write (compile-using-kernel '(namespace-undefine-variable! 'module)))
         (newline)
         (for-each (lambda (f)
                     (when verbose?
                       (fprintf (current-error-port) "Copying from ~s~n" f))
-                    (call-with-input-file*
-                        f
+                    (call-with-input-file* f
                       (lambda (i)
                         (copy-port i (current-output-port)))))
                   literal-files)
-        (when literal-expression
-          (write literal-expression))))
+        (for-each write literal-expressions)))
+
+    (define (write-module-bundle #:verbose? [verbose? #f]
+                                 #:modules [modules null]
+                                 #:literal-files [literal-files null]
+                                 #:literal-expressions [literal-expressions null]
+                                 #:on-extension [on-extension #f]
+                                 #:expand-namespace [expand-namespace (current-namespace)]
+                                 #:compiler [compiler (lambda (expr)
+                                                        (parameterize ([current-namespace expand-namespace])
+                                                          (compile expr)))]
+                                 #:src-filter [src-filter (lambda (filename) #f)]
+                                 #:get-extra-imports [get-extra-imports (lambda (filename code) null)])
+      (do-write-module-bundle verbose? modules literal-files literal-expressions
+                              #f ; collects-dest
+                              on-extension
+                              "?" ; program-name 
+                              compiler expand-namespace 
+                              src-filter get-extra-imports))
+
     
     ;; The old interface:
     (define make-embedding-executable
-      (opt-lambda (dest mred? verbose? 
-                        modules 
-                        literal-files literal-expression
-                        cmdline
-                        [aux null]
-                        [launcher? #f]
-                        [variant (system-type 'gc)])
+      (lambda (dest mred? verbose? 
+                    modules 
+                    literal-files literal-expression
+                    cmdline
+                    [aux null]
+                    [launcher? #f]
+                    [variant (system-type 'gc)])
         (create-embedding-executable dest
                                      #:mred? mred?
                                      #:verbose? verbose?
@@ -748,26 +831,29 @@
                                      #:variant variant)))
     
     ;; Use `write-module-bundle', but figure out how to put it into an executable
-    (define/kw (create-embedding-executable dest
-                                            #:key
-                                            [mred? #f]
-                                            [verbose? #f]
-                                            [modules null]
-                                            [literal-files null]
-                                            [literal-expression #f]
-                                            [cmdline null]
-                                            [aux null]
-                                            [launcher? #f]
-                                            [variant (system-type 'gc)]
-                                            [collects-path #f]
-                                            [collects-dest #f]
-                                            [on-extension #f]
-                                            [expand-namespace (current-namespace)]
-                                            [compiler (lambda (expr)
-                                                        (parameterize ([current-namespace expand-namespace])
-                                                          (compile expr)))]
-                                            [src-filter (lambda (filename) #f)]
-                                            [get-extra-imports (lambda (filename code) null)])
+    (define (create-embedding-executable dest
+                                         #:mred? [mred? #f]
+                                         #:verbose? [verbose? #f]
+                                         #:modules [modules null]
+                                         #:literal-files [literal-files null]
+                                         #:literal-expression [literal-expression #f]
+                                         #:literal-expressions [literal-expressions
+                                                                (if literal-expression
+                                                                    (list literal-expression)
+                                                                    null)]
+                                         #:cmdline [cmdline null]
+                                         #:aux [aux null]
+                                         #:launcher? [launcher? #f]
+                                         #:variant [variant (system-type 'gc)]
+                                         #:collects-path [collects-path #f]
+                                         #:collects-dest [collects-dest #f]
+                                         #:on-extension [on-extension #f]
+                                         #:expand-namespace [expand-namespace (current-namespace)]
+                                         #:compiler [compiler (lambda (expr)
+                                                                (parameterize ([current-namespace expand-namespace])
+                                                                  (compile expr)))]
+                                         #:src-filter [src-filter (lambda (filename) #f)]
+                                         #:get-extra-imports [get-extra-imports (lambda (filename code) null)])
       (define keep-exe? (and launcher?
                              (let ([m (assq 'forget-exe? aux)])
                                (or (not m)
@@ -862,13 +948,13 @@
                           (update-dll-dir dest (build-path orig-dir dir))))))))
             (let ([write-module
                    (lambda ()
-                     (write-module-bundle verbose? modules literal-files literal-expression collects-dest
-                                          on-extension
-                                          (file-name-from-path dest)
-                                          compiler
-                                          expand-namespace
-                                          src-filter
-                                          get-extra-imports))])
+                     (do-write-module-bundle verbose? modules literal-files literal-expressions collects-dest
+                                             on-extension
+                                             (file-name-from-path dest)
+                                             compiler
+                                             expand-namespace
+                                             src-filter
+                                             get-extra-imports))])
               (let-values ([(start end)
                             (if (and (eq? (system-type) 'macosx)
                                      (not unix-starter?))
@@ -882,7 +968,8 @@
                                               (+ start (bytes-length s))))))
                                 ;; Other platforms: just add to the end of the file:
                                 (let ([start (file-size dest-exe)])
-                                  (with-output-to-file dest-exe write-module 'append)
+                                  (with-output-to-file dest-exe write-module 
+						       #:exists 'append)
                                   (values start (file-size dest-exe))))])
                 (when verbose?
                   (fprintf (current-error-port) "Setting command line~n"))
@@ -937,7 +1024,7 @@
                                                            dir)
                                                        "")))
                                            full-cmdline)))]
-                             [out (open-output-file dest-exe 'update)])
+                             [out (open-output-file dest-exe #:exists 'update)])
                          (let ([cmdline-end (+ end (bytes-length cmdline))]
                                [write-num (lambda (n)
                                             (write-bytes (integer->integer-bytes n 4 #t #f) out))])
@@ -978,7 +1065,7 @@
                                                 (lambda () (find-cmdline 
                                                             "instance-check"
                                                             #"yes, please check for another"))))]
-                             [out (open-output-file dest-exe 'update)])
+                             [out (open-output-file dest-exe #:exists 'update)])
                          (dynamic-wind
                           void
                           (lambda ()

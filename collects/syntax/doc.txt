@@ -328,7 +328,8 @@ _modcode.ss_: getting module compiled code
 ======================================================================
 
 > (get-module-code path [compiled-subdir compile-proc ext-proc]
-                   [#:choose choose-proc]) -
+                   [#:choose choose-proc]
+                   [#:notify notify-proc]) -
   returns a compiled expression for the declaration of the module
   specified by `module-path-v'. The `module-path-v' argument is a
   quoted module path, as for MzScheme's `dynamic-require' using the
@@ -365,6 +366,9 @@ _modcode.ss_: getting module compiled code
   supplied to `ext-proc' when `ext-proc' is #f, or an exception is
   raised (to report that an extension file cannot be used) when
   `ext-proc' is #f.
+
+   If `notify-proc' is supplied, it is called for the file (source,
+   ".zo" or extension) that is chosen.
 
 > moddep-current-open-input-file
  
@@ -417,10 +421,10 @@ currently exist).
 > (collapse-module-path module-path-v rel-to-module-path-v) - returns
   a "simplified" module path by combining `module-path-v' with
   `rel-to-module-path', where the latter must have the form '(lib
-  <relative-path> <collection>), '(file <string>), a path, or a thunk
-  to generate one of those. The `module-path-v' argument is a quoted
-  module path, as for MzScheme's `dynamic-require' using the default
-  module path resolver.
+  ....), '(file <string>), '(path ....) a path, or a thunk to generate
+  one of those. The `module-path-v' argument is a quoted module path,
+  as for MzScheme's `dynamic-require' using the default module path
+  resolver.
 
   The result can be a path if `module-path-v' contains a path element
   that is needed for the result, or if `rel-to-module-path-v' is a
@@ -603,3 +607,10 @@ _to-string.ss_: rendering syntax objects with formatting
   and indenting according to the source locations in stx-list
 
   the outer pair of parens are not rendered from stx-list.
+
+======================================================================
+_free-vars.ss_: computing the free variables of an expression
+======================================================================
+
+> (free-vars expr-stx) - Returns a list of free lambda- and let-bound
+  identifiers in expr-stx. The expression must be fully expanded.

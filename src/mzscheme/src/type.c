@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2007 PLT Scheme Inc.
+  Copyright (c) 2004-2008 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -25,9 +25,6 @@
 
 #include "schpriv.h"
 #include <string.h>
-
-/* REMOVEME */
-# define scheme_stx_placeholder_type scheme_multiple_values_type
 
 Scheme_Type_Reader *scheme_type_readers;
 Scheme_Type_Writer *scheme_type_writers;
@@ -137,6 +134,7 @@ scheme_init_type (Scheme_Env *env)
   set_name(scheme_tail_call_waiting_type, "<tail-call-waiting>");
   set_name(scheme_null_type, "<empty-list>");
   set_name(scheme_pair_type, "<pair>");
+  set_name(scheme_mutable_pair_type, "<mutable-pair>");
   set_name(scheme_raw_pair_type, "<raw-pair>");
   set_name(scheme_box_type, "<box>");
   set_name(scheme_integer_type, "<fixnum-integer>");
@@ -169,17 +167,17 @@ scheme_init_type (Scheme_Env *env)
   set_name(scheme_sema_type, "<semaphore>");
   set_name(scheme_channel_type, "<channel>");
   set_name(scheme_channel_put_type, "<channel-put>");
-  set_name(scheme_hash_table_type, "<hash-table>");
-  set_name(scheme_bucket_table_type, "<hash-table>");
+  set_name(scheme_hash_table_type, "<hash>");
+  set_name(scheme_hash_tree_type, "<hash>");
+  set_name(scheme_bucket_table_type, "<hash>");
   set_name(scheme_module_registry_type, "<module-registry>");
   set_name(scheme_case_closure_type, "<procedure>");
   set_name(scheme_placeholder_type, "<placeholder>");
-  set_name(scheme_stx_placeholder_type, "<syntax<->datum-placeholder>");
+  set_name(scheme_table_placeholder_type, "<hash-table-placeholder>");
   set_name(scheme_weak_box_type, "<weak-box>");
   set_name(scheme_ephemeron_type, "<ephemeron>");
   set_name(scheme_rational_type, "<fractional-number>");
   set_name(scheme_complex_type, "<complex-number>");
-  set_name(scheme_complex_izi_type, "<inexactly-real-number>");
   set_name(scheme_struct_type_type, "<struct-type>");
   set_name(scheme_listener_type, "<tcp-listener>");
   set_name(scheme_tcp_accept_evt_type, "<tcp-accept-evt>");
@@ -239,6 +237,7 @@ scheme_init_type (Scheme_Env *env)
   set_name(scheme_write_evt_type, "<write-evt>");
   set_name(scheme_always_evt_type, "<always-evt>");
   set_name(scheme_never_evt_type, "<never-evt>");
+  set_name(scheme_thread_recv_evt_type, "<thread-receive-evt>");
 
   set_name(scheme_thread_resume_type, "<thread-resume-evt>");
   set_name(scheme_thread_suspend_type, "<thread-suspend-evt>");
@@ -259,6 +258,8 @@ scheme_init_type (Scheme_Env *env)
   set_name(scheme_certifications_type, "<certifications>");
 
   set_name(scheme_global_ref_type, "<variable-reference>");
+
+  set_name(scheme_delay_syntax_type, "<on-demand-stub>");
 
   set_name(scheme_intdef_context_type, "<internal-definition-context>");
   set_name(scheme_lexical_rib_type, "<internal:lexical-rib>");
@@ -513,7 +514,6 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_rational_type, rational_obj);
   GC_REG_TRAV(scheme_float_type,  float_obj);
   GC_REG_TRAV(scheme_double_type, double_obj);
-  GC_REG_TRAV(scheme_complex_izi_type, complex_obj);
   GC_REG_TRAV(scheme_complex_type, complex_obj);
   GC_REG_TRAV(scheme_char_string_type, string_obj);
   GC_REG_TRAV(scheme_byte_string_type, bstring_obj);
@@ -523,6 +523,7 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_keyword_type, symbol_obj);
   GC_REG_TRAV(scheme_null_type, char_obj); /* small */
   GC_REG_TRAV(scheme_pair_type, cons_cell);
+  GC_REG_TRAV(scheme_mutable_pair_type, cons_cell);
   GC_REG_TRAV(scheme_raw_pair_type, cons_cell);
   GC_REG_TRAV(scheme_vector_type, vector_obj);
   GC_REG_TRAV(scheme_cpointer_type, cpointer_obj);
@@ -564,7 +565,7 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_tail_call_waiting_type, bad_trav);
   GC_REG_TRAV(scheme_undefined_type, char_obj); /* small */
   GC_REG_TRAV(scheme_placeholder_type, small_object);
-  GC_REG_TRAV(scheme_stx_placeholder_type, small_object);
+  GC_REG_TRAV(scheme_table_placeholder_type, iptr_obj);
   GC_REG_TRAV(scheme_case_lambda_sequence_type, case_closure);
   GC_REG_TRAV(scheme_begin0_sequence_type, seq_rec);
 
@@ -578,7 +579,7 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_expanded_syntax_type, twoptr_obj);
   GC_REG_TRAV(scheme_module_type, module_val);
   GC_REG_TRAV(scheme_rt_module_exports, module_exports_val);
-  GC_REG_TRAV(scheme_rt_module_phase_exports, module_phase_exports_val);
+  GC_REG_TRAV(scheme_module_phase_exports_type, module_phase_exports_val);
   GC_REG_TRAV(scheme_module_index_type, modidx_val);
 
   GC_REG_TRAV(scheme_security_guard_type, guard_val);
@@ -586,6 +587,7 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_nack_evt_type, twoptr_obj);
   GC_REG_TRAV(scheme_always_evt_type, char_obj);
   GC_REG_TRAV(scheme_never_evt_type, char_obj);
+  GC_REG_TRAV(scheme_thread_recv_evt_type, char_obj);
 
   GC_REG_TRAV(scheme_inspector_type, mark_inspector);
 
@@ -605,6 +607,8 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_global_ref_type, small_object);
 
   GC_REG_TRAV(scheme_delay_syntax_type, small_object);
+
+  GC_REG_TRAV(scheme_resolved_module_path_type, small_object);
 
   GC_REG_TRAV(scheme_rt_runstack, runstack_val);
 }

@@ -1,7 +1,7 @@
-(require (lib "plot.ss" "plot"))
+#lang scheme
+(require plot)
 
-(require (lib "class.ss")
-         (lib "plot-extend.ss" "plot"))
+(require mzlib/class plot/plot-extend)
 ; (number -> number) mumbo-jumbo -> 2d-renderer
 (define-plot-type dashed-line
   fun 2dview (x-min x-max) ((samples 100) (segments 20) (color 'red) (width 1))    

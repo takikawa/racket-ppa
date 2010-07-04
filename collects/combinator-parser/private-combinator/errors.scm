@@ -1,13 +1,10 @@
-(module errors mzscheme
+(module errors scheme/base
   
   (require "structs.scm" "parser-sigs.ss")
   
-  (require (lib "force.ss" "lazy")
-           (lib "etc.ss")
-           (lib "unit.ss")
-           (lib "list.ss"))
-  
-  (provide (all-defined))
+  (require scheme/unit)
+    
+  (provide (all-defined-out))
   
   (define-unit error-formatting@
     (import error-format-parameters^ language-format-parameters^ out^)
@@ -19,9 +16,7 @@
     
     ;fail-type->message: fail-type (listof err) -> err
     (define (fail-type->message fail-type message-to-date)
-      (let* ([fail-type (!!!-fail fail-type)]
-             [input->output-name (!!! input->output-name)]
-             [name (fail-type-name fail-type)]
+      (let* ([name (fail-type-name fail-type)]
              [a (a/an name)]
              [msg (lambda (m) (make-err m (fail-type-src fail-type)))])
         #;(printf "fail-type->message ~a~n" fail-type)
@@ -131,12 +126,15 @@
                         (collapse-message
                          (add-to-message (car messages) name #f message-to-date))]
                        [else
-                        (collapse-message
-                         (add-to-message 
-                          (msg (format "An error occured in the ~a. Possible errors were: ~n ~a"
-                                       name 
-                                       (alternate-error-list (map err-msg messages))))
-                          name #f message-to-date))]))]
+                        (let ([msg (cond
+                                     [(apply equal? (map err-src messages)) (lambda (m) (make-err m (err-src (car messages))))]
+                                     [else msg])])
+                          (collapse-message
+                           (add-to-message 
+                            (msg (format "An error occured in the ~a. Possible errors were: ~n ~a"
+                                         name 
+                                         (alternate-error-list (map err-msg messages))))
+                            name #f message-to-date)))]))]
                   [else
                    (fail-type->message 
                     (car winners)
@@ -180,8 +178,8 @@
                        (add-to-message (car messages) #f #f
                                        (add-to-message
                                         (msg (format "An error occured in this ~a, expected ~a instead."
-                                                     name (nice-list no-dup-names))
-                                             name #f message-to-date))))]
+                                                     name (nice-list no-dup-names)))
+                                        name #f message-to-date)))]
                      [else
                       (collapse-message 
                        (add-to-message
@@ -219,7 +217,7 @@
     
     (define (select-errors opts-list)
       (let* ([composite-winners 
-              (narrow-opts composite (!!list opts-list))]
+              (narrow-opts composite opts-list)]
              
              [chance-used-winners
               (narrow-opts chance-used composite-winners)]
@@ -228,16 +226,16 @@
               (narrow-opts chance-may-use chance-used-winners)]
              
              [winners (narrow-opts chance chance-may-winners)])
-        #;(printf "all options: ~a~n" (!!list opts-list))
+        #;(printf "all options: ~a~n" opts-list)
         #;(printf "~a ~a ~a ~a ~n"
-                  (map fail-type-name (map !!! (!!list opts-list)))
-                  (map !!! (map fail-type-chance (!!list opts-list)))
-                  (map !!! (map fail-type-used (!!list opts-list)))
-                  (map !!! (map fail-type-may-use (!!list opts-list))))
+                  (map fail-type-name opts-list)
+                  (map fail-type-chance opts-list)
+                  (map fail-type-used opts-list)
+                  (map fail-type-may-use opts-list))
         #;(printf "composite round: ~a ~a ~n"
-                  (map fail-type-name (map !!! composite-winners))
-                  (map composite (map !!! composite-winners)))
-        #;(printf "final sorting: ~a~n" (map fail-type-name (map !!! winners)))
+                  (map fail-type-name composite-winners)
+                  (map composite composite-winners))
+        #;(printf "final sorting: ~a~n" (map fail-type-name winners))
         winners))
     
     (define (first-n n lst)

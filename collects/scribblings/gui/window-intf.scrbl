@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["common.ss"]
+#lang scribble/doc
+@(require "common.ss")
 
 @definterface/title[window<%> (area<%>)]{
 
@@ -35,6 +35,11 @@ All @scheme[window<%>] classes accept the following named instantiation
 
 @index["global coordinates"]{Converts} local window coordinates to
 screen coordinates.
+
+Under Mac OS X, the screen coordinates start with @math{(0, 0)} at the
+upper left of the menu bar. In contrast, @xmethod[top-level-window<%>
+move] considers @math{(0, 0)} to be below the menu bar. See also
+@scheme[get-display-left-top-inset].
 
 }
 
@@ -456,7 +461,8 @@ Enqueues an event to repaint the window.
                    (integer-in -10000 10000))]{
 
 @index["global coordinates"]{Converts} global coordinates to window
-local coordinates.
+ local coordinates. See also @scheme[client->screen] for information
+ on screen coordinates.
 
 }
 

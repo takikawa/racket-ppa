@@ -361,8 +361,6 @@ cont_proc {
   gcMARK(c->prompt_id);
   gcMARK(c->prompt_buf);
 
-  /* These shouldn't actually persist across a GC, but
-     just in case... */
   gcMARK(c->value);
   gcMARK(c->resume_to);
   gcMARK(c->use_next_cont);
@@ -381,6 +379,7 @@ meta_cont_proc {
   gcMARK(c->overflow);
   gcMARK(c->next);
   gcMARK(c->cont_mark_stack_copied);
+  gcMARK(c->cont);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Meta_Continuation));
@@ -610,6 +609,7 @@ thread_val {
   gcMARK(pr->t_set_prev);
 
   MARK_cjs(&pr->cjs);
+  gcMARK(pr->decompose_mc);
 
   gcMARK(pr->cell_values);
   gcMARK(pr->init_config);
@@ -648,6 +648,9 @@ thread_val {
   gcMARK(pr->current_local_certs);
   gcMARK(pr->current_local_modidx);
   gcMARK(pr->current_local_menv);
+  gcMARK(pr->current_local_bindings);
+
+  gcMARK(pr->current_mt);
   
   gcMARK(pr->overflow_reply);
 
@@ -689,6 +692,9 @@ thread_val {
   gcMARK(pr->dead_box);
   gcMARK(pr->running_box);
 
+  gcMARK(pr->mbox_first);
+  gcMARK(pr->mbox_last);
+  gcMARK(pr->mbox_sema);
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Thread));
 }
@@ -811,14 +817,12 @@ namespace_val {
   gcMARK(e->export_registry);
   gcMARK(e->insp);
 
-  gcMARK(e->rename);
-  gcMARK(e->et_rename);
-  gcMARK(e->tt_rename);
-  gcMARK(e->dt_rename);
+  gcMARK(e->rename_set);
 
   gcMARK(e->syntax);
   gcMARK(e->exp_env);
   gcMARK(e->template_env);
+  gcMARK(e->label_env);
 
   gcMARK(e->shadowed_syntax);
 
@@ -827,13 +831,13 @@ namespace_val {
   gcMARK(e->et_require_names);
   gcMARK(e->tt_require_names);
   gcMARK(e->dt_require_names);
+  gcMARK(e->other_require_names);
 
   gcMARK(e->toplevel);
   gcMARK(e->modchain);
 
   gcMARK(e->modvars);
 
-  gcMARK(e->marked_names);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Env));
@@ -917,6 +921,7 @@ module_val {
   gcMARK(m->requires);
   gcMARK(m->tt_requires);
   gcMARK(m->dt_requires);
+  gcMARK(m->other_requires);
 
   gcMARK(m->body);
   gcMARK(m->et_body);
@@ -944,9 +949,6 @@ module_val {
   gcMARK(m->dummy);
 
   gcMARK(m->rn_stx);
-  gcMARK(m->et_rn_stx);
-  gcMARK(m->tt_rn_stx);
-  gcMARK(m->dt_rn_stx);
 
   gcMARK(m->primitive);
  size:
@@ -957,12 +959,20 @@ module_phase_exports_val {
  mark:
   Scheme_Module_Phase_Exports *m = (Scheme_Module_Phase_Exports *)p;
 
+  gcMARK(m->phase_index);
+
+  gcMARK(m->src_modidx);
+
   gcMARK(m->provides);
   gcMARK(m->provide_srcs);
   gcMARK(m->provide_src_names);
+  gcMARK(m->provide_nominal_srcs);
   gcMARK(m->provide_src_phases);
 
   gcMARK(m->kernel_exclusion);
+  gcMARK(m->kernel_exclusion2);
+
+  gcMARK(m->ht);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Module_Phase_Exports));
@@ -975,6 +985,7 @@ module_exports_val {
   gcMARK(m->rt);
   gcMARK(m->et);
   gcMARK(m->dt);
+  gcMARK(m->other_phases);
 
   gcMARK(m->src_modidx);
  size:
@@ -1105,6 +1116,17 @@ mark_optimize_info {
   gcBYTES_TO_WORDS(sizeof(Optimize_Info));
 }
 
+mark_sfs_info {
+ mark:
+  SFS_Info *i = (SFS_Info *)p;
+  
+  gcMARK(i->max_used);
+  gcMARK(i->max_calls);
+  gcMARK(i->saved);
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(SFS_Info));
+}
 
 END env;
 
@@ -1133,6 +1155,17 @@ mark_saved_stack {
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Saved_Stack));
+}
+
+mark_validate_clearing {
+ mark:
+  Validate_Clearing *vc = (Validate_Clearing *)p;
+  
+  gcMARK(vc->stack);
+  gcMARK(vc->ncstack);
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(Validate_Clearing));
 }
 
 END eval;
@@ -1207,6 +1240,41 @@ END fun;
 
 /**********************************************************************/
 
+START hash;
+
+hash_tree_val {
+ mark:
+  Scheme_Hash_Tree *ht = (Scheme_Hash_Tree *)p;
+
+  gcMARK(ht->root);
+  gcMARK(ht->elems_box);
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Hash_Tree));
+}
+
+mark_rb_node {
+ mark:
+  RBNode *rb = (RBNode *)p;
+
+  /* Short-circuit on NULL pointers, which are especially likely */
+  if (rb->left) {
+    gcMARK(rb->left);
+  }
+  if (rb->right) {
+    gcMARK(rb->right);
+  }
+  gcMARK(rb->key);
+  gcMARK(rb->val);
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(RBNode));
+}
+
+END hash;
+
+/**********************************************************************/
+
 START portfun;
 
 mark_load_handler_data {
@@ -1248,6 +1316,7 @@ mark_user_input {
   gcMARK(uip->close_proc);
   gcMARK(uip->reuse_str);
   gcMARK(uip->peeked);
+  gcMARK(uip->prefix_pipe);
  size:
   gcBYTES_TO_WORDS(sizeof(User_Input_Port));
 }
@@ -1265,6 +1334,7 @@ mark_user_output {
   gcMARK(uop->count_lines_proc);
   gcMARK(uop->buffer_mode_proc);
   gcMARK(uop->close_proc);
+  gcMARK(uop->buffer_pipe);
  size:
   gcBYTES_TO_WORDS(sizeof(User_Output_Port));
 }
@@ -1399,9 +1469,12 @@ mark_marshal_tables {
   gcMARK(mt->st_ref_stack);
   gcMARK(mt->reverse_map);
   gcMARK(mt->same_map);
+  gcMARK(mt->cert_lists);
+  gcMARK(mt->shift_map);
   gcMARK(mt->top_map);
   gcMARK(mt->key_map);
   gcMARK(mt->delay_map);
+  gcMARK(mt->cdata_map);
   gcMARK(mt->rn_saved);
   gcMARK(mt->shared_offsets);
   gcMARK(mt->sorted_keys);
@@ -1589,17 +1662,6 @@ mark_will {
   gcBYTES_TO_WORDS(sizeof(ActiveWill));
 }
 
-mark_will_registration {
- mark:
-  WillRegistration *r = (WillRegistration *)p;
- 
-  gcMARK(r->proc);
-  gcMARK(r->w);
-
- size:
-  gcBYTES_TO_WORDS(sizeof(WillRegistration));
-}
-
 mark_evt {
  mark:
  size:
@@ -1749,6 +1811,7 @@ mark_struct_type_val {
   gcMARK(t->inspector);
   gcMARK(t->accessor);
   gcMARK(t->mutator);
+  gcMARK(t->prefab_key);
   gcMARK(t->uninit_val);
   gcMARK(t->props);
   gcMARK(t->proc_attr);
@@ -1828,6 +1891,7 @@ mark_cport {
   gcMARK(cp->ut);
   gcMARK(cp->symtab);
   gcMARK(cp->insp);
+  gcMARK(cp->relto);
   gcMARK(cp->magic_sym);
   gcMARK(cp->magic_val);
   gcMARK(cp->shared_offsets);
@@ -1865,7 +1929,11 @@ mark_delay_load {
   gcMARK(ld->symtab);
   gcMARK(ld->shared_offsets);
   gcMARK(ld->insp);
-  gcMARK(ld->rn_memory);
+  gcMARK(ld->relto);
+  gcMARK(ld->ut);
+  gcMARK(ld->current_rp);
+  gcMARK(ld->cached);
+  gcMARK(ld->cached_port);
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Load_Delay));
 }
@@ -1934,13 +2002,28 @@ START stxobj;
 mark_rename_table {
  mark:
   Module_Renames *rn = (Module_Renames *)p;
+  gcMARK(rn->phase);
   gcMARK(rn->ht);
   gcMARK(rn->nomarshal_ht);
   gcMARK(rn->unmarshal_info);
+  gcMARK(rn->shared_pes);
   gcMARK(rn->plus_kernel_nominal_source);
+  gcMARK(rn->set_identity);
   gcMARK(rn->marked_names);
  size:
   gcBYTES_TO_WORDS(sizeof(Module_Renames));
+}
+
+mark_rename_table_set {
+ mark:
+  Module_Renames_Set *rns = (Module_Renames_Set *)p;
+  gcMARK(rns->et);
+  gcMARK(rns->rt);
+  gcMARK(rns->other_phases);
+  gcMARK(rns->share_marked_names);
+  gcMARK(rns->set_identity);
+ size:
+  gcBYTES_TO_WORDS(sizeof(Module_Renames_Set));
 }
 
 mark_srcloc {

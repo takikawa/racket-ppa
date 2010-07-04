@@ -1,3 +1,5 @@
-(module info (lib "infotab.ss" "setup")
-  (define name "Handin Server")
-  (define doc.txt "doc.txt"))
+#lang setup/infotab
+
+(define scribblings '(("scribblings/handin-server.scrbl" (user-doc))))
+
+(define compile-omit-paths '("status-web-root"))

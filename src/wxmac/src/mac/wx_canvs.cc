@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2007 PLT Scheme Inc.
+// Copyright:  (c) 2004-2008 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -95,6 +95,10 @@ wxCanvas::wxCanvas // Constructor (given parentWindow)
 wxCanvas::~wxCanvas(void)
 {
   if (wx_dc) DELETE_OBJ wx_dc;
+  if (needs_update) {
+    DisposeRgn(needs_update);
+    needs_update = NULL;
+  }
 }
 
 //=============================================================================
@@ -501,8 +505,10 @@ void wxCanvas::SetScrollData
 	scrollRect.right = clientArea->Width();
 	OffsetRect(&scrollRect,SetOriginX,SetOriginY);
 	::ScrollRect(&scrollRect, -dH, -dV, theUpdateRgn);
-	if (!EmptyRgn(theUpdateRgn))
+	if (!EmptyRgn(theUpdateRgn)) {
+          AddPaintRegion(theUpdateRgn);
 	  need_repaint = 1;
+        }
 	::DisposeRgn(theUpdateRgn);
       }
       theDC->auto_device_origin_x += -dH;
@@ -857,6 +863,30 @@ int wxCanvas::GetScrollRange(int dir)
 void wxCanvas::DoPaint(void)
 {
   if (!cHidden) {
+    RgnHandle rgn;
+
+    if (needs_update) {
+      if (EmptyRgn(needs_update))
+        return;
+
+      if (cStyle & wxTRANSPARENT_WIN)
+        rgn = NewRgn();
+      else
+        rgn = NULL;
+      if (rgn) {
+        CopyRgn(needs_update, rgn);
+        SetRectRgn(needs_update, 0, 0, 0, 0);
+        if (wx_dc->clip_reg) {
+          /* FIXME: nested on-paint... */
+        }
+        wx_dc->clip_reg = rgn;
+        wx_dc->SetCanvasClipping();
+      } else {
+        SetRectRgn(needs_update, 0, 0, 0, 0);
+      }
+    } else
+      rgn = NULL;
+
     if (!(cStyle & wxTRANSPARENT_WIN)
 	&& !(cStyle & wxNO_AUTOCLEAR)) {
       Rect itemRect;
@@ -864,31 +894,70 @@ void wxCanvas::DoPaint(void)
       RGBColor pixel;
       
       pixel = bgcol->pixel;
-
+      
       SetCurrentDC();
+      if (rgn)
+        SetClip(rgn);
       GetThemeDrawingState(&s);
       GetControlBounds(cPaintControl, &itemRect);
       RGBBackColor(&pixel);
       BackPat(GetWhitePattern());
       EraseRect(&itemRect);
       SetThemeDrawingState(s, TRUE);
+      if (rgn)
+        cMacDC->setCurrentUser(NULL);
     }
-    
+
     OnPaint();
+
+    if (rgn) {
+      wx_dc->clip_reg = NULL;
+      wx_dc->SetCanvasClipping();
+      DisposeRgn(rgn);
+    }
   }
 }
 
-void wxCanvas::Paint(void)
+void wxCanvas::AddPaintRegion(RgnHandle rgn)
+{
+  if (!needs_update) {
+    needs_update = NewRgn();
+  }
+
+  if (rgn) {
+    UnionRgn(rgn, needs_update, needs_update);
+  } else {
+    SetRectRgn(needs_update, -32000, -32000, 32000, 32000);
+  }
+}
+
+void wxCanvas::PaintRgn(RgnHandle rgn)
 {
   if (!cHidden) {
     if (cStyle & wxAS_CONTROL) {
       /* Run on-paint atomically */
+      RgnHandle old;
+
+      old = wx_dc->clip_reg;
+
+      wx_dc->clip_reg = rgn;
+      wx_dc->SetCanvasClipping();
+
       MrEdAtomicallyPaint(this);
+
+      wx_dc->clip_reg = old;
+      wx_dc->SetCanvasClipping();
     } else {
+      AddPaintRegion(rgn);
       /* In wx_frame.cc: */
       wxCallDoPaintOrQueue(this);
     }
   }
+}
+
+void wxCanvas::Paint()
+{
+  PaintRgn(NULL);
 }
 
 void wxCanvas::OnPaint(void)

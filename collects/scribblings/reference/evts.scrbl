@@ -1,11 +1,11 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "struct.ss" "scribble")]
-@require["mz.ss"]
+#lang scribble/doc
+@(require scribble/struct
+          "mz.ss")
 
-@define[(ResultItself x)
-        (make-element #f (list "The "
-                      (tech "synchronization result")
-                      " of " x " is " x " itself"))]
+@(define (ResultItself x)
+   (make-element #f (list "The "
+                          (tech "synchronization result")
+                          " of " x " is " x " itself")))
 
 @title[#:tag "sync"]{Events}
 
@@ -349,7 +349,7 @@ and the @scheme[prop:input-port] property takes precedence over
 @scheme[prop:output-port] for synchronization.
 
 @examples[
-(define-struct wt ([base #:immutable] val)
+(define-struct wt (base val)
                #:property prop:evt (struct-field-index base))
 
 (define sema (make-semaphore))

@@ -1,11 +1,13 @@
 
 (module modcollapse mzscheme
-  (require (lib "list.ss")
-           (lib "contract.ss")
+  (require mzlib/list
+           scheme/string
+           mzlib/contract
+           (only scheme/base regexp-split)
            "private/modhelp.ss")
 
   (define (collapse-module-path s relto-mp)
-    ;; relto-mp should be a relative path, '(lib relative-path collection),
+    ;; relto-mp should be a path, '(lib relative-path collection) or symbol,
     ;;   or '(file path) or a thunk that produces one of those
 
     ;; Used for 'lib paths, so it's always Unix-style
@@ -29,6 +31,11 @@
           (let ([m (regexp-match #rx"^(.*/)/*[^/]*$" relto)])
             (string-append (cadr m) elem-str)))))
 
+    (define (add-main s)
+      (if (regexp-match #rx"[.][^/]*$" s)
+          s
+          (string-append s "/main.ss")))
+
     (define (combine-relative-elements elements)
 
       ;; Used for 'file paths, so it's platform specific:
@@ -40,6 +47,7 @@
                     elements)))
 
       (when (procedure? relto-mp) (set! relto-mp (relto-mp)))
+      (when (symbol? relto-mp) (set! relto-mp `(lib ,(symbol->string relto-mp))))
       (cond
         [(or (path? relto-mp) (and (string? relto-mp) (ormap path? elements)))
          (apply build-path
@@ -66,19 +74,128 @@
                       (attach-to-relative-path (cadr relto-mp)))])
            (if (path? path) path `(file ,path)))]
         [(eq? (car relto-mp) 'lib)
-         (let ([path (attach-to-relative-path-string
-                      elements (cadr relto-mp))])
-           `(lib ,path ,(caddr relto-mp)))]
-        [(eq? (car relto-mp) 'planet)
+         (let ([relto-mp (if (null? (cddr relto-mp))
+                             ;; old style => add 'mzlib
+                             ;; new style => add main.ss or split
+                             (let ([m (regexp-match-positions #rx"[/]" (cadr relto-mp))])
+                               (if m
+                                   ;; new style: split
+                                   `(lib ,(substring (cadr relto-mp) (cdar m))
+                                         ,(substring (cadr relto-mp) 0 (caar m)))
+                                   (if (regexp-match? #rx"[.]" (cadr relto-mp))
+                                       ;; old style:
+                                       `(lib ,(cadr relto-mp) "mzlib")
+                                       ;; new style, add "main.ss":
+                                       `(lib "main.ss" ,(cadr relto-mp)))))
+                             ;; already has at least two parts:
+                             relto-mp)])
+           (let ([path (attach-to-relative-path-string
+                        elements (apply string-append
+                                        (append
+                                         (map (lambda (s)
+                                                (string-append s "/"))
+                                              (cddr relto-mp))
+                                         (list (cadr relto-mp)))))])
+             (let ([simpler (let loop ([s (regexp-replace* #px"(?<![.])[.]/" path "")])
+                              (let ([s2 (regexp-replace #rx"([^/.]*)/[.][.]/" s "")])
+                                (if (equal? s s2)
+                                    s
+                                    (loop s2))))])
+               (let ([m (regexp-match #rx"^(.*)/([^/]*)$" simpler)])
+                 (if m
+                     (normalize-lib `(lib ,(caddr m) ,(cadr m)))
+                     (error 'combine-relative-elements
+                            "relative path escapes collection: ~s relative to ~s"
+                            elements relto-mp))))))]
+         [(eq? (car relto-mp) 'planet)
          (let ([pathstr (attach-to-relative-path-string
                          elements (cadr relto-mp))])
-           `(planet ,pathstr ,(caddr relto-mp)))]
+           (normalize-planet `(planet ,pathstr ,(caddr relto-mp))))]
         [else (error 'combine-relative-elements
                      "don't know how to deal with: ~s" relto-mp)]))
+
+    (define (normalize-lib s)
+      (if (null? (cddr s))
+          ;; single-string version:
+          (let ([e (cadr s)])
+            (cond
+             [(regexp-match? #rx"[.]" e)
+              ;; It has a suffix:
+              (if (regexp-match? #rx"/" e)
+                  ;; It has a path, so it's fine:
+                  s
+                  ;; No path, so add "mzlib/":
+                  `(lib ,(string-append "mzlib/" e)))]
+             [(regexp-match? #rx"/" e)
+              ;; It has a separator, so add a suffix:
+              `(lib ,(string-append e ".ss"))]
+             [else
+              ;; No separator or suffix, so add "/main.ss":
+             `(lib ,(string-append e "/main.ss"))]))
+          ;; multi-string version:
+          (if (regexp-match? #rx"[.]" (cadr s))
+              ;; there's a suffix, so we can collapse to a single string:
+              `(lib ,(string-join (append (cddr s) 
+                                          (list (cadr s)))
+                                  "/"))
+              ;; No suffix, so we must keep the old style:
+              s)))
+
+    (define (normalize-planet s)
+      (cond
+       [(symbol? (cadr s))
+        ;; normalize via string form:
+        (normalize-planet `(planet ,(symbol->string (cadr s))))]
+       [(null? (cddr s))
+        ;; normalize to long form:
+        (let* ([strs (regexp-split #rx"/" (cadr s))])
+          (let ([owner (car strs)]
+                [pkg+vers (regexp-split #rx":" (cadr strs))]
+                [path (cddr strs)])
+            `(planet ,(if (null? path)
+                          "main.ss"
+                          (let ([str (car (last-pair path))])
+                            (if (regexp-match? #rx"[.]" str)
+                                str
+                                (string-append str ".ss"))))
+                     (,owner
+                      ,(string-append (car pkg+vers) ".plt")
+                      ,@(if (null? (cdr pkg+vers))
+                            null
+                            `(,(string->number (cadr pkg+vers))
+                              . ,(if (null? (cddr pkg+vers))
+                                     null
+                                     (list
+                                      (let ([vers (caddr pkg+vers)])
+                                        (cond
+                                         [(regexp-match? #rx"<=" vers)
+                                          `(- ,(string->number (substring vers 2)))]
+                                         [(regexp-match? #rx">=" vers)
+                                          `(+ ,(string->number (substring vers 2)))]
+                                         [(regexp-match? #rx"=" vers)
+                                          (string->number (substring vers 1))]
+                                         [(regexp-match #rx"(.*)-(.*)" vers)
+                                          => (lambda (m)
+                                               `(,(string->number (cadr m))
+                                                 ,(string->number (caddr m))))]
+                                         [(string->number vers)
+                                          => (lambda (n) n)]
+                                         [else (error 'collapse-module-path
+                                                      "confused when normalizing planet path: ~e"
+                                                      s)])))))))
+                     ,@(if (null? path)
+                           null
+                           (reverse (cdr (reverse path)))))))]
+       [else 
+        ;; Long form is the normal form:
+        s]))
 
     (cond [(string? s)
            ;; Parse Unix-style relative path string
            (combine-relative-elements (explode-relpath-string s))]
+          [(symbol? s)
+           ;; Convert to `lib' form:
+           (normalize-lib `(lib ,(symbol->string s)))]
           [(and (or (not (pair? s)) (not (list? s))) (not (path? s)))
            #f]
           [(or (path? s) (eq? (car s) 'file))
@@ -90,54 +207,38 @@
                    (cond [(eq? base 'relative)
                           (combine-relative-elements (cons name elements))]
                          [else (loop base (cons name elements))])))))]
-          [(eq? (car s) 'lib)
-           (let ([cols (let ([len (length s)])
-                         (if (= len 2) (list "mzlib") (cddr s)))])
-             `(lib ,(attach-to-relative-path-string
-                     (append (cdr cols) (list (cadr s)))
-                     ".")
-                   ,(car cols)))]
-          [(eq? (car s) 'planet)
-           (let ([cols (cdddr s)])
-             `(planet
-               ,(attach-to-relative-path-string
-                 (append cols (list (cadr s)))
-                 ".")
-               ,(caddr s)))]
+          [(eq? (car s) 'lib) (normalize-lib s)]
+          [(eq? (car s) 'planet) (normalize-planet s)]
+          [(eq? (car s) 'quote) s]
           [else #f]))
 
   (define (collapse-module-path-index mpi relto-mp)
     (let-values ([(path base) (module-path-index-split mpi)])
       (if path
-        (collapse-module-path
-         path
-         (cond
-           [(symbol? base)
-            (let ([s (symbol->string base)])
-              (if (and ((string-length s) . > . 0)
-                       (char=? #\, (string-ref s 0)))
-                `(file ,(substring s 1))
-                relto-mp))]
-           [(module-path-index? base)
-            (collapse-module-path-index base relto-mp)]
-           [else relto-mp]))
-        relto-mp)))
+          (collapse-module-path
+           path
+           (if base
+               (collapse-module-path-index base relto-mp)
+               relto-mp))
+          relto-mp)))
 
   (define simple-rel-to-module-path-v/c
-    (or/c
-     (list/c (symbols 'lib) module-path-v-string? module-path-v-string?)
-     (list/c (symbols 'file) (and/c string? path-string?))
-     ;; not quite specific enough of a contract -- it should also spell out
-     ;; what's allowed in the package spec
-     (cons/c (symbols 'planet)
-             (cons/c string? (cons/c (listof any/c) (listof string?))))
-     path-string?))
+    (or/c (and/c module-path?
+                 (or/c
+                  symbol?
+                  (cons/c (symbols 'lib) any/c)
+                  (cons/c (symbols 'file) any/c)
+                  (cons/c (symbols 'planet) any/c)
+                  (cons/c (symbols 'quote) any/c)))
+          path?))
 
   (define rel-to-module-path-v/c
-    (or/c simple-rel-to-module-path-v/c (-> simple-rel-to-module-path-v/c)))
+    (or/c simple-rel-to-module-path-v/c 
+          path?
+          (-> simple-rel-to-module-path-v/c)))
 
   (provide/contract
-   [collapse-module-path (module-path-v? rel-to-module-path-v/c
+   [collapse-module-path ((or/c module-path? path?) rel-to-module-path-v/c
                           . -> . simple-rel-to-module-path-v/c)]
    [collapse-module-path-index ((or/c symbol? module-path-index?)
                                 rel-to-module-path-v/c

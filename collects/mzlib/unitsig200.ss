@@ -10,7 +10,7 @@
 
   (require-for-syntax "private/sigutil.ss")
   (require-for-syntax "private/sigmatch.ss")
-  (require-for-syntax (lib "kerncase.ss" "syntax"))
+  (require-for-syntax syntax/kerncase)
 
   (define-struct signed-unit (unit imports exports))
 
@@ -42,7 +42,7 @@
 	[(_ sig . rest)
 	 (let ([sig (get-sig 'unit/sig expr #f (syntax sig) #f)])
 	  (let ([a-unit (parse-unit expr (syntax rest) sig
-				    (kernel-form-identifier-list (quote-syntax here))
+				    (kernel-form-identifier-list)
 				    (quote-syntax define-values)
 				    (quote-syntax define-syntaxes)
 				    (quote-syntax begin))])
@@ -62,7 +62,7 @@
 				       (signature-vars sig)))
 				    expr)]
 			  [body (append
-				 (reverse! (parsed-unit-body a-unit))
+				 (reverse (parsed-unit-body a-unit))
 				 ((parsed-unit-stx-checks a-unit) expr))]
 			  [import-sigs (explode-named-sigs (parsed-unit-imports a-unit) #f)]
 			  [export-sig (explode-sig sig #f)])

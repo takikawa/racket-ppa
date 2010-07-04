@@ -1,7 +1,7 @@
 
-(require (lib "package.ss")
-	 (lib "pretty.ss")
-	 (lib "toplevel.ss" "syntax"))
+(require mzlib/package
+	 mzlib/pretty
+	 syntax/toplevel)
 
 (define (check x)
   (unless (equal? x 'this-is-right)
@@ -98,7 +98,7 @@
 		(printf "~a/~a~n" cnt total))
 	      (when ((add1 (random 10)) . >= . do-threshold)
 		; (pretty-print form)
-		(parameterize ([current-namespace (make-namespace)])
+		(parameterize ([current-namespace (make-base-namespace)])
 		  (namespace-attach-module ns m)
 		  (let ([done? #f]
 			[mode "top-level"])

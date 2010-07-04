@@ -1,5 +1,5 @@
+#lang setup/infotab
 
-(module info (lib "infotab.ss" "setup")
-  (define doc.txt "doc.txt")
-  (define name "Parser-tools"))
+(define scribblings '(("parser-tools.scrbl" (multi-page) (parsing-library))))
 
+(define compile-omit-paths '("examples"))

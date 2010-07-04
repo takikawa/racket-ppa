@@ -1,9 +1,15 @@
 #lang scribble/doc
-@require[(lib "manual.ss" "scribble")
-         (lib "bnf.ss" "scribble")]
-@require["utils.ss"]
+@(require scribble/manual
+          scribble/bnf
+          "utils.ss")
 
 @title{How to Scribble Documentation}
+
+Although the @exec{scribble} command-line utility generates output
+from a Scribble document (run @exec{scribble -h} for more
+information), documentation of PLT Scheme libraries is normally built
+by @exec{setup-plt}. This chapter emphasizes the @exec{setup-plt}
+approach, which more automatically supports links across documents.
 
 @;----------------------------------------
 @section[#:tag "getting-started"]{Getting Started}
@@ -12,20 +18,21 @@ To document a collection or @|PLaneT| package:
 
 @itemize{
 
- @item{Create a file in your collection or planet package with the
-       file extension @file{.scrbl}. The remainder of these
-       instructions assume that the file is called @file{manual.scrbl}.}
+  @item{Create a file in your collection or planet package with the
+        file extension @filepath{.scrbl}. Beware that the file name
+        you choose will determine the output directory's name. The
+        remainder of these instructions assume that the file is called
+        @filepath{manual.scrbl}.}
 
- @item{Start @file{manual.scrbl} like this:
-@verbatim[#<<EOS
-  #lang scribble/doc
-  @begin[(require (lib "manual.ss" "scribble"))]
+  @item{Start @filepath{manual.scrbl} like this:
+          @verbatim[#:indent 2]|{
+            #lang scribble/doc
+            @(require scribble/manual)
 
-  @title{My Library}
+            @title{My Library}
 
-  Welcome to my documentation: @scheme[(list 'testing 1 2 3)].
-EOS
-]
+            Welcome to my documentation: @scheme[(list 'testing 1 2 3)].
+          }|
 
         The first line starts the file in ``text'' mode, and
         introduces the @litchar["@"] syntax to use Scheme bindings.
@@ -35,7 +42,7 @@ EOS
         declaration in the text stream.}
 
   @item{Add the following entry to your collect or package's
-        @file{info.ss}:
+        @filepath{info.ss}:
 
         @schemeblock[
           (define scribblings '(("manual.scrbl" ())))
@@ -45,20 +52,34 @@ EOS
         gets large enough that you want it split into multiple pages,
         add the @scheme['multi-page] option (omitting the quote, since
         the whole right-hand side of the definition is already
-        quoted).}
+        quoted).
+
+        If you do not already have an @filepath{info.ss} module,
+        here's a suitable complete module:
+
+        @schememod[
+          setup/infotab
+          (define scribblings '(("manual.scrbl" ())))
+        ]}
 
   @item{Run @exec{setup-plt} to build your documentation. For a
         collection, optionally supply @Flag{l} followed by the
-        collection name to limit the build process to the collection.}
+        collection name to limit the build process to that
+        collection. For a @|PLaneT| package, optionally supply
+        @Flag{P} followed by the package information to limit the
+        build process to that package.}
 
-  @item{The generated documentation is
-        @file{compiled/doc/manual/index.html} within the collection or
-        @|PLaneT| package directory.}
+  @item{The generated documentation is normally
+        @filepath{doc/manual/index.html} within the collection or
+        @|PLaneT| package directory. If the collection is in PLT
+        Scheme's main @filepath{collects} directory, however, then the
+        documentation is generated as @filepath{manual/index.html} in
+        the installation's main @filepath{doc} directory.}
 
 }
 
 @; ----------------------------------------
-@section{Document Syntax}
+@section[#:tag "how-to:reader"]{Document Syntax}
 
 Whether in ``text'' mode or Scheme mode, @litchar["@"] in a document
 provides an escape to Scheme mode. The syntax of @litchar["@"] is
@@ -86,15 +107,22 @@ one must be present. No spaces are allowed between
 A @nonterm{cmd} or @nonterm{datum} is a Scheme datum, while a
 @nonterm{text-body} is itself in text mode.
 
-The expansion of a @litchar["@"] form into Scheme code is
+The expansion of @litchar["@"]@nonterm{cmd} into Scheme code is
+
+@schemeblock[
+  #, @nonterm{cmd}
+]
+
+When either @litchar["["] @litchar["]"] or @litchar["{"] @litchar["}"]
+are used, the expansion is
 
 @schemeblock[
   (#, @nonterm{cmd} #, @kleenestar{@nonterm{datum}} #, @kleenestar{@nonterm{parsed-body}})
 ]
 
 where @kleenestar{@nonterm{parsed-body}} is the parse result of the
-@nonterm{text-body}. It often turns out to be a sequence of Scheme
-strings.
+@nonterm{text-body}. The @kleenestar{@nonterm{parsed-body}} part often
+turns out to be a sequence of Scheme strings.
 
 In practice, the @nonterm{cmd} is normally a Scheme identifier that is
 bound to a procedure or syntactic form. If the procedure or form
@@ -107,16 +135,17 @@ that precede text to typeset.
 
 Thus,
 
-@verbatim[#<<EOS
+@verbatim[#:indent 2]|{
+  @(require scribble/manual)
   @title{My Library}
   @scheme[(list 'testing 1 2 3)]
   @section[#:tag "here"]{You Are Here}
-EOS
-]
+}|
 
 means
 
 @schemeblock[
+(require scribble/manual)
 (title "My Library")
 (scheme (list 'testing 1 2 3))
 (section #:tag "here" "You Are Here")
@@ -125,61 +154,63 @@ means
 For more information on the syntax of @litchar["@"], see
 @secref["reader"].
 
-In a document that starts @tt{#lang scribble/doc},
-the top level is a text-mode sequence. The parsed sequence is further
+In a document that starts @hash-lang[] @schememodname[scribble/doc],
+the top level is a text-mode sequence, as the @nonterm{text-body} in a
+@litchar["@"] form.  The parsed sequence is further
 decoded to turn it into a hierarchy of sections and paragraphs. For
 example, a linear sequence of @scheme[section] declarations with
 interleaved text is turned into a list of @scheme[part] instances with
-all text assigned to a particular part. See @secref["decode"] for more
-information on the decoding process.
+all text assigned to a particular part. See @secref["layers"] for more
+information on these layers.
 
 @; ----------------------------------------
 @section[#:tag "scheme-hyperlinks"]{Scheme Typesetting and Hyperlinks}
 
-With the document source in @secref["getting-started"], the Scheme
-expression @scheme[(#,(schemeidfont "list") 'testing 1 2 3)] is
-typeset properly, but the @schemeidfont{list} identifier is not
-hyperlinked to the usual definition. To cause @schemeidfont{list} to
-be hyperlinked, add the following to the @tt["@begin"] body:
+In the document source at the start of this chapter
+(@secref["getting-started"]), the Scheme expression
+@scheme[(#,(schemeidfont "list") 'testing 1 2 3)] is typeset properly,
+but the @schemeidfont{list} identifier is not hyperlinked to the usual
+definition. To cause @schemeidfont{list} to be hyperlinked, extend the
+@scheme[require] form like this:
 
 @schemeblock[
-(require-for-label (lib "big.ss" "lang"))
+(require scribble/manual
+         (for-label #,(schememodname scheme)))
 ]
 
-This @scheme[require-for-label] declaration introduces a document-time
-binding for each export of the @scheme[(lib "big.ss" "lang")]
+This @scheme[require] with @scheme[for-label] declaration introduces a
+document-time binding for each export of the @schememodname[scheme]
 module. When the document is built, the @scheme[scheme] form detects
 the binding for @scheme[list], and so it generates a reference to the
 specification of @scheme[list]. The setup process detects the
 reference, and it finds the matching specification in the existing
-documentation, and it ultimately directs the hyperlink to that
+documentation, and ultimately directs the hyperlink to that
 specification.
 
-Hyperlinks based on @scheme[require-for-label] and @scheme[scheme] are
-the preferred mechanism for linking to information outside of a single
+Hyperlinks based on @scheme[for-label] and @scheme[scheme] are the
+preferred mechanism for linking to information outside of a single
 document. Such links require no information about where and how a
 binding is documented elsewhere:
 
-@verbatim[#<<EOS
+@verbatim[#:indent 2]|{
   #lang scribble/doc
-  @begin[(require (lib "manual.ss" "scribble"))
-         (require-for-label (lib "lang.ss" "big"))]
+  @(require scribble/manual
+            (for-label scheme))
 
   @title{My Library}
 
   See also @scheme[list].
-EOS
-]
+}|
 
 The @scheme[scheme] form typesets a Scheme expression for inline text,
 so it ignores the source formatting of the expression. The
 @scheme[schemeblock] form, in contrast, typesets inset Scheme code,
 and it preserves the expression's formatting from the document source.
 
-@verbatim[#<<EOS
+@verbatim[#:indent 2]|{
   #lang scribble/doc
-  @begin[(require (lib "manual.ss" "scribble"))
-         (require-for-label (lib "lang.ss" "big"))]
+  @(require scribble/manual
+            (for-label scheme))
 
   @title{My Library}
 
@@ -192,8 +223,7 @@ and it preserves the expression's formatting from the document source.
            "I've tried so hard to explain!"))
   (nobody-understands-me "glorble snop")
   ]
-EOS
-]
+}|
 
 
 @; ----------------------------------------
@@ -207,10 +237,10 @@ hyperlink with text other than the section title.
 
 The following example illustrates section hyperlinks:
 
-@verbatim[#<<EOS
+@verbatim[#:indent 2]|{
   #lang scribble/doc
-  @begin[(require (lib "manual.ss" "scribble"))
-         (require-for-label (lib "lang.ss" "big"))]
+  @(require scribble/manual
+            (for-label scheme))
 
 
   @title{My Library}
@@ -221,19 +251,18 @@ The following example illustrates section hyperlinks:
 
 
   @section[#:tag "chickens"]{Philadelphia Chickens}
-  
+
   Dancing tonight!
 
 
   @section{Reprise}
 
   See @secref{chickens}.
-EOS
-]
+}|
 
-Since the page is so short, it the hyperlinks are more effective if
- you change the @file{info.ss} file to add the @scheme['multi-file]
- flag:
+Since the page is so short, the hyperlinks in the above example are
+ more effective if you change the @filepath{info.ss} file to add the
+ @scheme['multi-file] flag:
 
 @schemeblock[
 (define scribblings '(("manual.scrbl" (multi-page))))
@@ -247,23 +276,22 @@ prefix, which is based on the target document's main source file.  The
 following example links to a section in the PLT Scheme reference
 manual:
 
-@verbatim[#<<EOS
+@verbatim[#:indent 2]|{
   #lang scribble/doc
-  @begin[(require (lib "manual.ss" "scribble"))
-         (require-for-label (lib "lang.ss" "big"))
-         (define ref-src
-           '(lib "reference.scrbl" "scribblings" "reference"))]
+  @(require scribble/manual
+            (for-label scheme))
+  @(define ref-src
+     '(lib "scribblings/reference/reference.scrbl"))
 
   @title{My Library}
 
-  See also @italic{@secref[#:doc reference-src]{pairs}}.
-EOS
-]
+  See also @italic{@secref[#:doc ref-src]{pairs}}.
+}|
 
 As mentioned in @secref{scheme-hyperlinks}, however, cross-document
-references based on @scheme[require-for-label] and @scheme[scheme] are
-usually better than to cross-document references using
-@scheme[secref].
+references based on @scheme[(require (for-label ....))] and
+@scheme[scheme] are usually better than cross-document references
+using @scheme[secref].
 
 @; ----------------------------------------
 @section{Defining Scheme Bindings}
@@ -275,18 +303,43 @@ and they declare hyperlink targets for @scheme[scheme]-based
 hyperlinks.
 
 To document a @scheme[my-helper] procedure that is exported by
-@file{helper.ss} in the collection that contains @file{manual.scrbl},
-first use @scheme[require-for-label] to import the binding information
-of @file{helper.ss}. Then use @scheme[defproc] to document the
-procedure:
+@filepath{helper.ss} in the @scheme{my-lib} collection that contains
+@filepath{manual.scrbl}:
 
-@verbatim[#<<EOS
+@itemize[
+
+ @item{Use @scheme[(require (for-label "helper.ss"))] to import the
+       binding information about the bindings of @filepath{helper.ss}
+       for use when typesetting identifiers. A relative reference
+       @scheme["helper.ss"] works since it is relative to the
+       documentation source.}
+
+ @item{Add a @tt|{@defmodule[my-lib/helper]}| declaration, which
+       specifies the library that is being documented within the
+       section. The @scheme[defmodule] form needs an absolute module
+       name @scheme[mylib/helper], instead of a relative reference
+       @scheme["helper.ss"], since the module path given to
+       @scheme[defmodule] appears verbatim in the generated
+       documentation.}
+
+ @item{Use @scheme[defproc] to document the procedure.}
+
+]
+
+Adding these pieces to @filepath{"manual.scrbl"} gives us the
+following:
+
+@; [Eli] This is also using `my-lib/helper' which doesn't work with
+@; planet libraries
+@verbatim[#:indent 2]|{
   #lang scribble/doc
-  @begin[(require (lib "manual.ss" "scribble"))
-         (require-for-label (lib "lang.ss" "big")
-                            "helper.ss")]
+  @(require scribble/manual
+            (for-label scheme
+                       "helper.ss"))
 
   @title{My Library}
+
+  @defmodule[my-lib/helper]
 
   @defproc[(my-helper [lst list?])
            (listof 
@@ -294,8 +347,7 @@ procedure:
 
    Replaces each @scheme['cow] in @scheme[lst] with
    @scheme['aardvark].}
-EOS
-]
+}|
 
 In @scheme[defproc], a contract is specified with each argument to the
 procedure. In this example, the contract for the @scheme[_lst]
@@ -324,9 +376,12 @@ generates:
        it's used in the scope of a procedure with argument
        @scheme[_lst].}
 
+ @item{If you hover the mouse pointer over @scheme[my-helper], a popup
+       reports that it is provided from @schemeidfont{my-lib/helper}.}
+
  @item{If you use @scheme[my-helper] in any documentation now, as long
-       as that documentation source also has a
-       @scheme[require-for-label] of @file{my-helper.ss}, then the
+       as that documentation source also has a @scheme[(require
+       (for-label ....))] of @filepath{helper.ss}, then the
        reference is hyperlinked to the definition above.}
 
 }
@@ -337,7 +392,7 @@ on forms to document Scheme bindings.
 @; ----------------------------------------
 @section{Showing Scheme Examples}
 
-The @scheme[examples] form from @scheme[(lib "eval.ss" "scribble")]
+The @scheme[examples] form from @scheme[scribble/eval]
 helps you generate examples in your documentation. @bold{Warning:} the
 @scheme[examples] form is especially likely to change or be replaced.
 
@@ -345,18 +400,21 @@ To use @scheme[examples], the procedures to document must be suitable
 for use at documentation time; in fact, @scheme[examples] uses
 bindings introduced into the document source by
 @scheme[require]. Thus, to generate examples using @scheme[my-helper]
-from the previous section, then @file{helper.ss} must be imported both
+from the previous section, @filepath{helper.ss} must be imported both
 via @scheme[require-for-label] and @scheme[require]:
 
-@verbatim[#<<EOS
+@verbatim[#:indent 2]|{
   #lang scribble/doc
-  @begin[(require (lib "manual.ss" "scribble")
-                  (lib "eval.ss" "scribble")  ; <--- added
-                  "helper.ss")                ; <--- added
-         (require-for-label (lib "lang.ss" "big")
-                            "helper.ss")]
+  @(require scribble/manual
+            scribble/eval    ; <--- added
+            "helper.ss"      ; <--- added
+            (for-label scheme
+                       "helper.ss"))
 
   @title{My Library}
+
+  @defmodule[my-lib/helper]{The @schememodname[my-lib/helper]
+  module---now with extra cows!}
 
   @defproc[(my-helper [lst list?])
            (listof (not/c (one-of/c 'cow)))]{
@@ -368,50 +426,50 @@ via @scheme[require-for-label] and @scheme[require]:
      (my-helper '())
      (my-helper '(cows such remarkable cows))
    ]}
-EOS
-]
+}|
 
 @;----------------------------------------
 @section{Splitting the Document Source}
 
-In general, a @file{.scrbl} file produces a @techlink{part}. A part
+In general, a @filepath{.scrbl} file produces a @techlink{part}. A part
 produced by a document's main source (as specified in the
 @scheme{info.ss} file) represents the whole document. The
 @scheme[include-section] procedure can be used to incorporate a part
 as a sub-part of the enclosing part.
 
-In @file{manual.scrbl}:
+In @filepath{manual.scrbl}:
 
-@verbatim[#<<EOS
+@verbatim[#:indent 2]|{
   #lang scribble/doc
-  @begin[(require (lib "manual.ss" "scribble"))]
+  @(require scribble/manual)
 
   @title{My Library}
 
+  @defmodule[my-lib/helper]{The @schememodname[my-lib/helper]
+  module---now with extra cows!}
+
   @include-section["cows.scrbl"]
   @include-section["aardvarks.scrbl"]
-EOS
-]
+}|
 
-In @file{cows.scrbl}:
+In @filepath{cows.scrbl}:
 
-@verbatim[#<<EOS
+@verbatim[#:indent 2]|{
   #lang scribble/doc
-  @begin[(require (lib "manual.ss" "scribble"))]
+  @(require scribble/manual)
 
   @title{Cows}
 
   Wherever they go, it's a quite a show.
-EOS
-]
+}|
 
-In @file{aardvarks.scrbl}:
+In @filepath{aardvarks.scrbl}:
 
-@verbatim[#<<EOS
+@verbatim[#:indent 2]|{
   #lang scribble/doc
-  @begin[(require (lib "manual.ss" "scribble"))
-         (require-for-label (lib "lang.ss" "big")
-                            "helper.ss")]
+  @(require scribble/manual
+            (for-label scheme
+                       "helper.ss"))
 
   @title{Aardvarks}
 
@@ -420,9 +478,7 @@ In @file{aardvarks.scrbl}:
 
    Replaces each @scheme['cow] in @scheme[lst] with
    @scheme['aardvark].}
-EOS
-]
-
+}|
 
 @;----------------------------------------
 @section{Multi-Page Sections}
@@ -437,11 +493,11 @@ for the enclosing section (as started by @scheme[title],
 @scheme[local-table-of-contents] to generate hyperlinks to the
 sub-sections.
 
-Revising @file{cows.scrbl} from the previous section:
+Revising @filepath{cows.scrbl} from the previous section:
 
-@verbatim[#<<EOS
+@verbatim[#:indent 2]|{
   #lang scribble/doc
-  @begin[(require (lib "manual.ss" "scribble"))]
+  @(require scribble/manual)
 
   @title[#:style '(toc)]{Cows}
 
@@ -452,23 +508,22 @@ Revising @file{cows.scrbl} from the previous section:
 
   @section{Dancing}
   See @secref["singing"].
-EOS
-]
+}|
 
-To run this example, remember to change @file{info.ss} to add the
+To run this example, remember to change @filepath{info.ss} to add the
 @scheme['multi-page] style. You may also want to add a call to
-@scheme[table-of-contents] in @file{manual.scrbl}.
+@scheme[table-of-contents] in @filepath{manual.scrbl}.
 
 The difference between @scheme[table-of-contents] and
 @scheme[local-table-of-contents] is that the latter is ignored for
 Latex output.
 
-When using @scheme[local-table-of-contents], often it makes sense to
+When using @scheme[local-table-of-contents], it often makes sense to
 include introductory text before the call of
 @scheme[local-table-of-contents]. When the introductory text is less
 important and when when local table of contents is short, putting the
 introductory text after the call of @scheme[local-table-of-contents]
-make be appropriate.
+may be appropriate.
 
 @;----------------------------------------
 @include-section["style.scrbl"]

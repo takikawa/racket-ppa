@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
 @title[#:tag "ports" #:style 'toc]{Ports}
 
@@ -34,3 +34,4 @@ it produces.
 @include-section["pipes.scrbl"]
 @include-section["prop-port.scrbl"]
 @include-section["custom-ports.scrbl"]
+@include-section["port-lib.scrbl"]

@@ -1,7 +1,7 @@
 
-(require (lib "string.ss")
-         (only (lib "url.ss" "net") get-pure-port string->url)
-         (only (lib "port.ss") copy-port))
+(require mzlib/string
+         (only-in net/url get-pure-port string->url)
+         (only-in mzlib/port copy-port))
 
 (load-relative "loadtest.ss")
 
@@ -16,7 +16,7 @@
 
 (define (get-test-file)
   (define name "NormalizationTest.txt")
-  (define base "http://www.unicode.org/Public/4.1.0/ucd/")
+  (define base "http://www.unicode.org/Public/5.0.0/ucd/")
   (define (existing)
     (let loop ([dirs (list (current-load-relative-directory)
                            (current-directory))])
@@ -28,10 +28,10 @@
                     (get-pure-port (string->url (string-append base name)))])
       (with-output-to-file name
         (lambda () (copy-port (current-input-port) (current-output-port)))
-        'truncate)))
+        #:exists 'truncate)))
   (or (existing)
       (begin (get-it) (existing))
-      (error "file not found: ~s" file)))
+      (error "file not found: ~s" (string-append base name))))
 
 (printf "Reading tests...\n")
 (define test-strings
@@ -44,7 +44,7 @@
 	  (if (eof-object? l)
             (if (null? a)
               (error "No tests found (couldn't retreive tests?)")
-              (reverse! a))
+              (reverse a))
             (let ([m (regexp-match #rx#"^([0-9A-F ]+);([0-9A-F ]+);([0-9A-F ]+);([0-9A-F ]+);([0-9A-F ]+)" l)])
               (if m
                 (loop (cons (cons l (map parse-string (cdr m))) a))

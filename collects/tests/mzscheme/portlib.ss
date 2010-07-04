@@ -5,7 +5,7 @@
 
 (define SLEEP-TIME 0.1)
 
-(require (lib "port.ss"))
+(require (lib "mzlib/port.ss"))
 
 ;; ----------------------------------------
 
@@ -476,6 +476,7 @@
 			  (set! v (read-bytes 6 p))))])
 	(test (void) sync (system-idle-evt) t)
 	(display "56" out)
+	(test (void) sync (system-idle-evt))
 	(test t sync/timeout SLEEP-TIME t)
 	(test #"123456" values v)))))
 
@@ -529,6 +530,37 @@
 (try-eip-seq "UTF-8" #f #"ap\251ple" `((#t 3 #"ap.") (#f 1 #"p") (#t 4 #"!le") (#t 5 ,eof)))
 (try-eip-seq "UTF-8" #f #"ap\251ple" `((#t 4 #"ap.!") (#f 1 #"l") (#t 4 #"pe") (#t 5 ,eof)))
 
+(let ([try (lambda (s s2)
+             (let ([mk (lambda ()
+                         (reencode-input-port (open-input-string s) "UTF-8" #f #f 'test #t))])
+               (let ([p (mk)])
+                 (for ([c (in-string s2)])
+                   (test c read-char p))
+                 (test eof read-char p))
+               (let ([p (mk)])
+                 (test s2 read-string (add1 (string-length s2)) p))
+               (when ((string-length s2) . > . 2)
+                 (test (substring s2 0 2) read-string 2 (mk)))
+               (let-values ([(r w) (make-pipe-with-specials)])
+                 (display s w)
+                 (write-special 'x w)
+                 (display s w)
+                 (close-output-port w)
+                 (let ([p (reencode-input-port r "UTF-8" #f #f 'test #t)])
+                   (test s2 read-string (string-length s2) p)
+                   (test 'x read-char-or-special p)
+                   (test s2 read-string (string-length s2) p)
+                   (test eof read-char-or-special p)))))])
+  (for-each (lambda (cr)
+              (try cr "\n")
+              (try (format "a~a" cr) "a\n")
+              (try (format "a~a12" cr) "a\n12")
+              (try (format "~a12" cr) "\n12")
+              (try (format "a\n~a12" cr) "a\n\n12")
+              (try (format "a~a\r12" cr) "a\n\n12"))
+            '("\n" "\r" "\r\n" "\x85" "\r\x85" "\u2028"))
+  (try "a\u2028\r\n12" "a\n\n12"))
+
 (let-values ([(in out) (make-pipe-with-specials)])
   (display "ok" out)
   (write-special 'special! out)
@@ -548,7 +580,7 @@
   
   (test 3 write-bytes #"abc" w2)
   (test 0 read-bytes-avail!* (make-bytes 10) r)
-  (test 1 write-bytes-avail #"wx" w2)
+  (test 1 write-bytes-avail #"wx" w2) ; implementation converts minimal prefix
   (test #"abcw" read-bytes 4 r)
 
   ;; Check encoding error
@@ -631,6 +663,30 @@
     (test eof peek-char i)
     (test #\c read-char ei)
     (test eof read-char ei)))
+
+;; --------------------------------------------------
+
+(let-values ([(in out) (make-pipe)])
+  (let ([in2 (dup-input-port in #f)]
+        [out2 (dup-output-port out #f)])
+    (port-count-lines! in2)
+    (test-values (list 1 0 1) (lambda ()
+                                (port-next-location in2)))
+    (display "\"hel\u03BBo\"\n" out)
+    (test "hel\u03BBo" read in2)
+    (test-values (list 1 7 8)
+                 (lambda ()
+                   (port-next-location in2)))
+    (test #\newline read-char in2)
+    (test-values (list 2 0 9) 
+                 (lambda () 
+                   (port-next-location in2)))
+    (close-output-port out2)
+    (test #f char-ready? in2)
+    (close-input-port in2)
+    (display "x " out)
+    (test 'x read in)))
+    
 
 ;; --------------------------------------------------
 

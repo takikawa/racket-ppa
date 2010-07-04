@@ -1,10 +1,10 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
-@require[(lib "class.ss")]
-@require-for-syntax[mzscheme]
-@require-for-label[(lib "class.ss")]
+#lang scribble/doc
+@(require "mz.ss"
+          scheme/class
+          (for-syntax scheme/base)
+          (for-label scheme/trait))
 
-@begin[
+@(begin
 
 (define-syntax sees
   (syntax-rules ()
@@ -30,13 +30,13 @@
                            (let ([s (symbol->string (syntax-e #'form))])
                              (substring s 0 (sub1 (string-length s)))))]
                    [tmpl (let ([s #'(... (thing (id expr) ...))])
-                           (datum->syntax-object s
-                                                 (cons (datum->syntax-object
-                                                        #'form
-                                                        (syntax-e #'form)
-                                                        (car (syntax-e s)))
-                                                       (cdr (syntax-e s)))
-                                                 s))])
+                           (datum->syntax s
+                                          (cons (datum->syntax
+                                                 #'form
+                                                 (syntax-e #'form)
+                                                 (car (syntax-e s)))
+                                                (cdr (syntax-e s)))
+                                          s))])
        #'(...
           (defform tmpl
             "Shorthand for " (scheme (begin (#,(scheme name) id) ... (define id _expr) ...)) ".")))]
@@ -50,13 +50,13 @@
                           (let ([s (symbol->string (syntax-e #'form))])
                             (string-append "define/" s)))])
        (with-syntax ([tmpl1 (let ([s #'(define id expr)])
-                              (datum->syntax-object s
-                                                    (cons (datum->syntax-object
-                                                           #'form
-                                                           (syntax-e #'name)
-                                                           (car (syntax-e s)))
-                                                          (cdr (syntax-e s)))
-                                                    s))])
+                              (datum->syntax s
+                                             (cons (datum->syntax
+                                                    #'form
+                                                    (syntax-e #'name)
+                                                    (car (syntax-e s)))
+                                                   (cdr (syntax-e s)))
+                                             s))])
          #'(...
             (defform* [tmpl1 (#,(scheme name) (id . formals) body ...+)]
               "Shorthand for "
@@ -65,14 +65,17 @@
               (scheme (begin (#,(scheme form) id) (define (id . formals) body ...+)))))))]
      [(_ form ...)
       #'(begin (defdefshorthands form) ...)]))
-       
 
-]
-  
+(define class-eval (make-base-eval))
+
+)
+
+@(interaction-eval #:eval class-eval (require scheme/class))
+
 
 @title[#:tag "mzlib:class" #:style 'toc]{Classes and Objects}
 
-@declare-exporting[big (lib "big/class")]
+@note-lib[scheme/class #:use-sources (scheme/private/class-internal)]
 
 @local-table-of-contents[]
 
@@ -91,10 +94,11 @@ A @deftech{class} specifies
 
 }
 
-An @deftech{object} is a collection of bindings for fields that are
-instantiated according to a class description.
+In the context of the class system, an @defterm{object} is a
+collection of bindings for fields that are instantiated according to a
+class description.
 
-The object system allows a program to define a new class (a
+The class system allows a program to define a new class (a
 @deftech{derived class}) in terms of an existing class (the
 @deftech{superclass}) using inheritance, overriding, and augmenting:
 
@@ -197,7 +201,7 @@ interface @scheme[(class->interface object%)], and is transparent
             public pubment public-final override override-final overment augment augride
             augment-final private inherit inherit/super inherit/inner rename-super
             rename-inner begin lambda case-lambda let-values letrec-values
-            define-values)
+            define-values #%plain-lambda)
 (class* superclass-expr (interface-expr ...)
   class-clause
   ...)
@@ -248,8 +252,9 @@ interface @scheme[(class->interface object%)], and is transparent
   (define-values (id) method-procedure)]
 
 [method-procedure
-  (lambda formals expr ...+)
+  (lambda kw-formals expr ...+)
   (case-lambda (formals expr ...+) ...)
+  (#%plain-lambda formals expr ...+)
   (let-values (((id) method-procedure) ...)
     method-procedure)
   (letrec-values (((id) method-procedure) ...)
@@ -329,9 +334,10 @@ Like @scheme[class*], but omits the @scheme[interface-expr]s, for the case that 
 
 @defidform[this]{
 
-Within a @scheme[class*] form, refers to the current object (i.e., the
-object being initialized or whose method was called). Use outside the
-body of a @scheme[class*] form is a syntax error.}
+@index['("self")]{Within} a @scheme[class*] form, @scheme[this] refers
+to the current object (i.e., the object being initialized or whose
+method was called). Use outside the body of a @scheme[class*] form is
+a syntax error.}
 
 @defclassforms[
   [(inspect inspector-expr) ()]
@@ -612,24 +618,26 @@ using the @scheme[inner] form. The only difference between
 @scheme[inner] is that @scheme[public-final] prevents the declaration
 of augmenting methods that would be ignored.
 
-@defform*[[(super id arg-expr ...)
-           (super id arg-expr ... . arg-list-expr)]]{
+@defform*[[(super id arg ...)
+           (super id arg ... . arg-list-expr)]]{
 
 Always accesses the superclass method, independent of whether the
 method is overridden again in subclasses. Using the @scheme[super]
-form outside of @scheme[class*] is an syntax error.
+form outside of @scheme[class*] is an syntax error. Each @scheme[arg]
+is as for @scheme[#%app]: either @scheme[_arg-expr] or
+@scheme[_keyword _arg-expr].
 
 The second form is analogous to using @scheme[apply] with a procedure;
 the @scheme[arg-list-expr] must not be a parenthesized expression.}
 
-@defform*[[(inner default-expr id arg-expr ...)
-           (inner default-expr id arg-expr ... . arg-list-expr)]]{
+@defform*[[(inner default-expr id arg ...)
+           (inner default-expr id arg ... . arg-list-expr)]]{
 
 If the object's class does not supply an augmenting method, then
-@scheme[default-expr] is evaluated, and the @scheme[arg-expr]s are not
-evaluated. Otherwise, the augmenting method is called with the
-@scheme[arg-expr] results as arguments, and @scheme[default-expr] is
-not evaluated. If no @scheme[inner] call is evaluated for a particular
+@scheme[default-expr] is evaluated, and the @scheme[arg] expressions
+are not evaluated. Otherwise, the augmenting method is called with the
+@scheme[arg] results as arguments, and @scheme[default-expr] is not
+evaluated. If no @scheme[inner] call is evaluated for a particular
 method, then augmenting methods supplied by subclasses are never
 used. Using the @scheme[inner] form outside of @scheme[class*] is an
 syntax error.
@@ -666,14 +674,14 @@ superclass's implementation at run-time. Methods declared with
 and must be called with the form
 
 @schemeblock[
-(_id (lambda () _default-expr) _arg-expr ...)
+(_id (lambda () _default-expr) _arg ...)
 ]
 
 so that a @scheme[default-expr] is available to evaluate when no
 augmenting method is available. In such a form, @scheme[lambda] is a
-keyword to separate the @scheme[default-expr] from the
-@scheme[arg-expr]. When an augmenting method is available, it receives
-the results of the @scheme[arg-expr]s as arguments.
+literal identifier to separate the @scheme[default-expr] from the
+@scheme[arg]. When an augmenting method is available, it receives the
+results of the @scheme[arg] expressions as arguments.
 
 Methods that are present in the superclass but not declared with
 @scheme[inherit], @scheme[inherit/super], or @scheme[inherit/inner] or
@@ -704,7 +712,7 @@ method. The internal name is used to access the method directly within
 the class expression (including within @scheme[super] or
 @scheme[inner] forms), while the external name is used with
 @scheme[send] and @scheme[generic] (see @secref["ivaraccess"]).  If
-a single @scheme[identifier] is provided for a method declaration, the
+a single @scheme[id] is provided for a method declaration, the
 identifier is used for both the internal and external names.
 
 Method inheritance, overriding, and augmentation are based external
@@ -772,6 +780,7 @@ hidden name (except as a top-level definitions). The
 names.
 
 @defexamples[
+#:eval class-eval
 (define-values (r o)
   (let ()
     (define-local-member-name m)
@@ -811,7 +820,7 @@ Returns @scheme[#t] for values produced by @scheme[member-name-key]
 and @scheme[generate-member-key], @scheme[#f]
 otherwise.}
 
-@defproc[(member-name-key=? [a-key memebr-name-key?][b-key member-name-key?]) boolean?]{
+@defproc[(member-name-key=? [a-key member-name-key?][b-key member-name-key?]) boolean?]{
 
 Produces @scheme[#t] if member-name keys @scheme[a-key] and
 @scheme[b-key] represent the same external name, @scheme[#f]
@@ -821,10 +830,11 @@ otherwise.}
 @defproc[(member-name-key-hash-code [a-key member-name-key?]) integer?]{
 
 Produces an integer hash code consistent with
-@scheme[member-name-key=?]  comparsions, analogous to
+@scheme[member-name-key=?]  comparisons, analogous to
 @scheme[equal-hash-code].}
 
 @defexamples[
+#:eval class-eval
 (define (make-c% key)
   (define-member-name m key)
   (class object% 
@@ -837,6 +847,7 @@ Produces an integer hash code consistent with
 ]
 
 @defs+int[
+#:eval class-eval
 [(define (fresh-c%)
    (let ([key (generate-member-key)])
      (values (make-c% key) key)))
@@ -892,7 +903,7 @@ it receives any by-name initialization arguments, then
 @exnraise[exn:fail:object].
 
 If the end of initialization is reached for any class in the
-hierarchy without invoking superclasses initialization, the
+hierarchy without invoking the superclass's initialization, the
 @exnraise[exn:fail:object]. Also, if superclass initialization is
 invoked more than once, the @exnraise[exn:fail:object].
 
@@ -970,37 +981,39 @@ To allow methods to be applied to lists of arguments, a method
 application can have the following form:
 
 @specsubform[
-(method-id arg-expr ... . arg-list-expr)
+(method-id arg ... . arg-list-expr)
 ]
 
 This form calls the method in a way analogous to @scheme[(apply
-_method-id _arg-expr ... _arg-list-expr)]. The @scheme[arg-list-expr]
+_method-id _arg ... _arg-list-expr)]. The @scheme[arg-list-expr]
 must not be a parenthesized expression.
 
 Methods are called from outside a class with the @scheme[send] and 
 @scheme[send/apply] forms.
 
-@defform*[[(send obj-expr method-id arg-expr ...)
-           (send obj-expr method-id arg-expr ... . arg-list-expr)]]{
+@defform*[[(send obj-expr method-id arg ...)
+           (send obj-expr method-id arg ... . arg-list-expr)]]{
 
 Evaluates @scheme[obj-expr] to obtain an object, and calls the method
 with (external) name @scheme[method-id] on the object, providing the
-@scheme[arg-expr] results as arguments. In the second form,
-@scheme[arg-list-expr] cannot be a parenthesized expression.
+@scheme[arg] results as arguments. Each @scheme[arg] is as for
+@scheme[#%app]: either @scheme[_arg-expr] or @scheme[_keyword
+_arg-expr]. In the second form, @scheme[arg-list-expr] cannot be a
+parenthesized expression.
 
 If @scheme[obj-expr] does not produce an object, the
 @exnraise[exn:fail:contract]. If the object has no public method named
 @scheme[method-id], the @exnraise[exn:fail:object].}
 
-@defform[(send/apply obj-expr method-id arg-expr ... arg-list-expr)]{
+@defform[(send/apply obj-expr method-id arg ... arg-list-expr)]{
 
 Like the dotted form of @scheme[send], but @scheme[arg-list-expr] can
 be any expression.}
 
 
 @defform/subs[(send* obj-expr msg ...)
-              ([msg (method-id arg-expr ...)
-                    (method-id arg-expr ... . arg-list-expr)])]{
+              ([msg (method-id arg ...)
+                    (method-id arg ... . arg-list-expr)])]{
 
 Calls multiple methods (in order) of the same object. Each
 @scheme[msg] corresponds to a use of @scheme[send].
@@ -1115,19 +1128,28 @@ interface, the @exnraise[exn:fail:contract]. If the resulting class or
 interface does not contain a method named @scheme[id], the
 @exnraise[exn:fail:object].}
 
-@defform*[[(send-generic obj-expr generic-expr arg-expr ...)
-           (send-generic obj-expr generic-expr arg-expr ... . arg-list-expr)]]{
+@defform*[[(send-generic obj-expr generic-expr arg ...)
+           (send-generic obj-expr generic-expr arg ... . arg-list-expr)]]{
 
 Calls a method of the object produced by @scheme[obj-expr] as
-indicated by the generic produced by @scheme[generic-expr]. The second
-form is analogous to calling a procedure with @scheme[apply], where
-@scheme[arg-list-expr] is not a parenthesized expression.
+indicated by the generic produced by @scheme[generic-expr]. Each
+@scheme[arg] is as for @scheme[#%app]: either @scheme[_arg-expr] or
+@scheme[_keyword _arg-expr]. The second form is analogous to calling a
+procedure with @scheme[apply], where @scheme[arg-list-expr] is not a
+parenthesized expression.
 
 If @scheme[obj-expr] does not produce a object, or if
 @scheme[generic-expr] does not produce a generic, the
 @exnraise[exn:fail:contract]. If the result of @scheme[obj-expr] is
 not an instance of the class or interface encapsulated by the result
 of @scheme[generic-expr], the @exnraise[exn:fail:object].}
+
+@defproc[(make-generic [type (or/c class? interface?)]
+                       [method-name symbol?])
+         generic?]{
+
+Like the @scheme[generic] form, but as a procedure that accepts a
+symbolic method name.}
 
 @; ------------------------------------------------------------------------
 
@@ -1151,6 +1173,288 @@ the mixin.
 Evaluation of a @scheme[mixin] form checks that the
 @scheme[class-clause]s are consistent with both sets of
 @scheme[interface-expr]s.}
+
+@; ------------------------------------------------------------------------
+
+@section[#:tag "trait"]{Traits}
+
+@note-lib-only[scheme/trait]
+
+A @deftech{trait} is a collection of methods that can be converted to
+a @tech{mixin} and then applied to a @tech{class}. Before a trait is
+converted to a mixin, the methods of a trait can be individually
+renamed, and multiple traits can be merged to form a new trait.
+
+@defform/subs[#:literals (public pubment public-final override override-final overment augment augride
+                          augment-final private inherit inherit/super inherit/inner rename-super
+                          inherit-field)
+
+              (trait trait-clause ...)
+              ([trait-clause (public maybe-renamed ...)
+                             (pubment maybe-renamed ...)
+                             (public-final maybe-renamed ...)
+                             (override maybe-renamed ...)
+                             (overment maybe-renamed ...)
+                             (override-final maybe-renamed ...)
+                             (augment maybe-renamed ...)
+                             (augride maybe-renamed ...)
+                             (augment-final maybe-renamed ...)
+                             (inherit maybe-renamed ...)
+                             (inherit/super maybe-renamed ...)
+                             (inherit/inner maybe-renamed ...)
+                             method-definition
+                             (field field-declaration ...)
+                             (inherit-field maybe-renamed ...)])]{
+
+Creates a @tech{trait}.  The body of a @scheme[trait] form is similar to the
+body of a @scheme[class*] form, but restricted to non-private method
+definitions.  In particular, the grammar of
+@scheme[maybe-renamed], @scheme[method-definition], and
+@scheme[field-declaration] are the same as for @scheme[class*], and
+every @scheme[method-definition] must have a corresponding declaration
+(one of @scheme[public], @scheme[override], etc.).  As in
+@scheme[class], uses of method names in direct calls, @scheme[super]
+calls, and @scheme[inner] calls depend on bringing method names into
+scope via @scheme[inherit], @scheme[inherit/super],
+@scheme[inherit/inner], and other method declarations in the same
+trait; an exception, compared to @scheme[class] is that
+@scheme[overment] binds a method name only in the corresponding
+method, and not in other methods of the same trait. Finally, macros
+such as @scheme[public*] and @scheme[define/public] work in
+@scheme[trait] as in @scheme[class].
+
+External identifiers in @scheme[trait], @scheme[trait-exclude],
+@scheme[trait-exclude-field], @scheme[trait-alias],
+@scheme[trait-rename], and @scheme[trait-rename-field] forms are
+subject to binding via @scheme[define-member-name] and
+@scheme[define-local-member-name]. Although @scheme[private] methods
+or fields are not allowed in a @scheme[trait] form, they can be
+simulated by using a @scheme[public] or @scheme[field] declaration and
+a name whose scope is limited to the @scheme[trait] form.}
+
+
+@defproc[(trait? [v any/c]) boolean?]{
+
+Returns @scheme[#t] if @scheme[v] is a trait, @scheme[#f] otherwise.}
+
+
+@defproc[(trait->mixin [tr trait?]) (class? . -> . class?)]{
+
+Converts a @tech{trait} to a @tech{mixin}, which can be applied to a
+@tech{class} to produce a new @tech{class}. An expression of the form
+
+@schemeblock[
+(trait->mixin
+ (trait
+   _trait-clause ...))
+]
+
+is equivalent to
+
+@schemeblock[
+(lambda (%)
+  (class %
+    _trait-clause ...
+    (super-new)))
+]
+
+Normally, however, a trait's methods are changed and combined with
+other traits before converting to a mixin.}
+
+
+@defproc[(trait-sum [tr trait?] ...+) trait?]{
+
+Produces a @tech{trait} that combines all of the methods of the given
+@scheme[tr]s. For example,
+
+@schemeblock[
+(define t1
+ (trait
+  (define/public (m1) 1)))
+(define t2
+ (trait
+  (define/public (m2) 2)))
+(define t3 (trait-sum t1 t2))
+]
+
+creates a trait @scheme[t3] that is equivalent to
+
+@schemeblock[
+(trait
+ (define/public (m1) 1)
+ (define/public (m2) 2))
+]
+
+but @scheme[t1] and @scheme[t2] can still be used individually or
+combined with other traits.
+
+When traits are combined with @scheme[trait-sum], the combination
+drops @scheme[inherit], @scheme[inherit/super],
+@scheme[inherit/inner], and @scheme[inherit-field] declarations when a
+definition is supplied for the same method or field name by another
+trait. The @scheme[trait-sum] operation fails (the
+@exnraise[exn:fail:contract]) if any of the traits to combine define a
+method or field with the same name, or if an @scheme[inherit/super] or
+@scheme[inherit/inner] declaration to be dropped is inconsistent with
+the supplied definition. In other words, declaring a method with
+@scheme[inherit], @scheme[inherit/super], or @scheme[inherit/inner],
+does not count as defining the method; at the same time, for example,
+a trait that contains an @scheme[inherit/super] declaration for a
+method @scheme[m] cannot be combined with a trait that defines
+@scheme[m] as @scheme[augment], since no class could satisfy the
+requirements of both @scheme[augment] and @scheme[inherit/super] when
+the trait is later converted to a mixin and applied to a class.}
+
+
+@defform[(trait-exclude trait-expr id)]{
+
+Produces a new @tech{trait} that is like the @tech{trait} result of
+@scheme[trait-expr], but with the definition of a method named by
+@scheme[id] removed; as the method definition is removed, either a
+@scheme[inherit], @scheme[inherit/super], or @scheme[inherit/inner]
+declaration is added:
+
+@itemize{
+
+ @item{A method declared with @scheme[public], @scheme[pubment], or
+  @scheme[public-final] is replaced with a @scheme[inherit]
+  declaration.}
+
+ @item{A method declared with @scheme[override] or @scheme[override-final]
+ is replaced with a @scheme[inherit/super] declaration.}
+
+  @item{A method declared with @scheme[augment], @scheme[augride], or
+  @scheme[augment-final] is replaced with a @scheme[inherit/inner] declaration.}
+
+ @item{A method declared with @scheme[overment] is not replaced
+  with any @scheme[inherit] declaration.}
+
+}
+
+If the trait produced by @scheme[trait-expr] has no method definition for
+@scheme[id], the @exnraise[exn:fail:contract].}
+
+
+@defform[(trait-exclude-field trait-expr id)]{
+
+Produces a new @tech{trait} that is like the @tech{trait} result of
+@scheme[trait-expr], but with the definition of a field named by
+@scheme[id] removed; as the field definition is removed, an
+@scheme[inherit-field] declaration is added.}
+
+
+@defform[(trait-alias trait-expr id new-id)]{
+
+Produces a new @tech{trait} that is like the @tech{trait} result of
+@scheme[trait-expr], but the definition and declaration of the method
+named by @scheme[id] is duplicated with the name @scheme[new-id]. The
+consistency requirements for the resulting trait are the same as for
+@scheme[trait-sum], otherwise the @exnraise[exn:fail:contract]. This
+operation does not rename any other use of @scheme[id], such as in
+method calls (even method calls to @scheme[identifier] in the cloned
+definition for @scheme[new-id]).}
+
+
+@defform[(trait-rename trait-expr id new-id)]{
+
+Produces a new @tech{trait} that is like the @tech{trait} result of
+@scheme[trait-expr], but all definitions and references to methods
+named @scheme[id] are replaced by definitions and references to
+methods named by @scheme[new-id]. The consistency requirements for the
+resulting trait is the same as for @scheme[trait-sum], otherwise the
+@exnraise[exn:fail:contract].}
+
+
+@defform[(trait-rename-field trait-expr id new-id)]{
+
+Produces a new @tech{trait} that is like the @tech{trait} result of
+@scheme[trait-expr], but all definitions and references to fields
+named @scheme[id] are replaced by definitions and references to fields
+named by @scheme[new-id]. The consistency requirements for the
+resulting trait is the same as for @scheme[trait-sum], otherwise the
+@exnraise[exn:fail:contract].}
+
+@; ------------------------------------------------------------------------
+
+@section{Object and Class Contracts}
+
+@defform/subs[
+#:literals (field -> ->* ->d)
+
+(object-contract member-spec ...)
+
+([member-spec
+  (method-id method-contract)
+  (field field-id contract-expr)]
+
+ [method-contract
+  (-> dom ... range)
+  (->* (mandatory-dom ...)
+       (optional-dom ...)
+       rest
+       range)
+  (->d (mandatory-dependent-dom ...) 
+       (optional-dependent-dom ...) 
+       dependent-rest
+       pre-cond
+       dep-range)]
+
+ [dom dom-expr (code:line keyword dom-expr)]
+ [range range-expr (values range-expr ...) any]
+ [mandatory-dom dom-expr (code:line keyword dom-expr)]
+ [optional-dom dom-expr (code:line keyword dom-expr)]
+ [rest (code:line) (code:line #:rest rest-expr)]
+ [mandatory-dependent-dom [id dom-expr] (code:line keyword [id dom-expr])]
+ [optional-dependent-dom [id dom-expr] (code:line keyword [id dom-expr])]
+ [dependent-rest (code:line) (code:line #:rest id rest-expr)]
+ [pre-cond (code:line) (code:line #:pre-cond boolean-expr)]
+ [dep-range any
+            (code:line [id range-expr] post-cond)
+            (code:line (values [id range-expr] ...) post-cond)]
+ [post-cond (code:line) (code:line #:post-cond boolean-expr)]
+)]{
+
+Produces a contract for an object.
+
+Each of the contracts for a method has the same semantics as
+the corresponding function contract, but the syntax of the
+method contract must be written directly in the body of the
+object-contract---much like the way that methods in class
+definitions use the same syntax as regular function
+definitions, but cannot be arbitrary procedures.  The only
+exception is that @scheme[->d] contracts implicitly bind
+@scheme[this] to the object itself.}
+
+
+@defthing[mixin-contract contract?]{
+
+A @tech{function contract} that recognizes mixins. It guarantees that
+the input to the function is a class and the result of the function is
+a subclass of the input.}
+
+@defproc[(make-mixin-contract [type (or/c class? interface?)] ...) contract?]{
+
+Produces a @tech{function contract} that guarantees the input to the
+function is a class that implements/subclasses each @scheme[type], and
+that the result of the function is a subclass of the input.}
+
+@defproc[(is-a?/c [type (or/c class? interface?)]) flat-contract?]{
+
+Accepts a class or interface and returns a flat contract that
+recognizes objects that instantiate the class/interface.}
+
+
+@defproc[(implementation?/c [interface interface?]) flat-contract?]{
+
+Returns a flat contract that recognizes classes that implement
+@scheme[interface].}
+
+
+@defproc[(subclass?/c [class class?]) flat-contract?]{
+
+Returns a flat-contract that recognizes classes that
+are subclasses of @scheme[class].}
+
 
 @; ------------------------------------------------------------------------
 
@@ -1253,6 +1557,11 @@ Returns @scheme[#t] if @scheme[v] is a class, @scheme[#f] otherwise.}
 @defproc[(interface? [v any/c]) boolean?]{
 
 Returns @scheme[#t] if @scheme[v] is an interface, @scheme[#f] otherwise.}
+
+
+@defproc[(generic? [v any/c]) boolean?]{
+
+Returns @scheme[#t] if @scheme[v] is a @tech{generic}, @scheme[#f] otherwise.}
 
 
 @defproc[(object=? [a object?][b object?]) eq?]{
@@ -1400,3 +1709,9 @@ Raised for @scheme[class]-related failures, such as attempting to call
 a method that is not supplied by an object.
 
 }
+
+@; ----------------------------------------------------------------------
+
+@include-section["surrogate.scrbl"]
+
+@close-eval[class-eval]

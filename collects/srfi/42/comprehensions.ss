@@ -1,11 +1,14 @@
 ; SRFI 42 as a module in PLT -----------------------------------------------
+; sebastian_egner@yahoo.com, 26-Dec-2007, PLT 371.
+;   + bugs found by sunnan and jens axel soegaard fixed
 ; Sebastian.Egner@philips.com, 15-May-2003, PLT 204.
-; For running demos: (require (lib "examples.ss" "srfi" "42"))
+; For running demos: (require srfi/42/examples)
 ; For anything else: http://srfi.schemers.org/srfi-42/
 
 (module |comprehensions| mzscheme
 
- (require (lib "23.ss" "srfi"))
+ (require srfi/23
+          (rename scheme/base base-if if))
 
  (provide 
     do-ec list-ec append-ec string-ec string-append-ec vector-ec 
@@ -25,13 +28,13 @@
 ; as expected when the exported macro is used outside.
 ;    As a fix, Matthew Flatt suggested to use syntax-case*
 ; with equivalence predicate module-or-top-identifier=? as
-; require-for-syntax'ed by (lib "stx.ss" "syntax"). To limit
+; require-for-syntax'ed by syntax/stx. To limit
 ; the amount of modification to the SRFI 42 code below, we
 ; replace define-syntax by the new define-syntax-globally
 ; which constructs the proper code. The new transformer
 ; must be used for all exported macros recognizing `not'.
 
-  (require-for-syntax (lib "stx.ss" "syntax"))
+  (require-for-syntax syntax/stx)
   
   (define-syntax define-syntax-globally
     (syntax-rules (syntax-rules)
@@ -102,7 +105,7 @@
 ;   The code generation for a :do is delegated to do-ec:do.
 
 (define-syntax-globally do-ec
-  (syntax-rules (nested if not and or begin :do let)
+  (syntax-rules (nested if base-if not and or begin :do let)
 
     ; explicit nesting -> implicit nesting
     ((do-ec (nested q ...) etc ...)
@@ -120,6 +123,8 @@
 
     ; filter -> make conditional
     ((do-ec (if test) cmd)
+     (if test (do-ec cmd)) )
+    ((do-ec (base-if test) cmd)
      (if test (do-ec cmd)) )
     ((do-ec (not test) cmd)
      (if (not test) (do-ec cmd)) )
@@ -178,7 +183,7 @@
 ;   and takes care of special cases.
 
 (define-syntax-globally ec-simplify
-  (syntax-rules (if not let begin)
+  (syntax-rules (if base-if not let begin)
 
 ; one- and two-sided if
 
@@ -196,6 +201,20 @@
     ((ec-simplify (if (not (not test)) consequent))
      (ec-simplify (if test consequent)) )
     ((ec-simplify (if (not (not test)) consequent alternate))
+     (ec-simplify (if test consequent alternate)) )
+
+    ; base-if variants:
+    ((ec-simplify (base-if #t consequent))
+     consequent )
+    ((ec-simplify (base-if #f consequent))
+     (if #f #f) )
+    ((ec-simplify (base-if #t consequent alternate))
+     consequent )
+    ((ec-simplify (base-if #f consequent alternate))
+     alternate )
+    ((ec-simplify (base-if (not (not test)) consequent))
+     (ec-simplify (if test consequent)) )
+    ((ec-simplify (base-if (not (not test)) consequent alternate))
      (ec-simplify (if test consequent alternate)) )
 
 ; (let () <command>*) 
@@ -305,7 +324,7 @@
   (syntax-rules ()
     ((:while cc (g arg1 arg ...) test)
      (g (:while-1 cc test) arg1 arg ...) )))
-  
+
 (define-syntax :while-1
   (syntax-rules (:do let)
     ((:while-1 cc test (:do olet lbs ne1? ilet ne2? lss))
@@ -313,27 +332,27 @@
 
 (define-syntax :while-2
   (syntax-rules (:do let)
-    ((:while-2 cc
-               test
+    ((:while-2 cc 
+               test 
                (ib-let     ...)
                (ib-save    ...)
                (ib-restore ...)
-               (:do olet
-                    lbs
-                    ne1?
+               (:do olet 
+                    lbs 
+                    ne1? 
                     (let ((ib-var ib-rhs) ib ...) ic ...)
-                    ne2?
+                    ne2? 
                     lss))
-     (:while-2 cc
-               test
+     (:while-2 cc 
+               test 
                (ib-let     ... (ib-tmp #f))
                (ib-save    ... (ib-var ib-rhs))
                (ib-restore ... (ib-var ib-tmp))
-               (:do olet
-                    lbs
-                    ne1?
-                    (let (ib ...) ic ... (set! ib-tmp ib-var))
-                    ne2?
+               (:do olet 
+                    lbs 
+                    ne1? 
+                    (let (ib ...) ic ... (set! ib-tmp ib-var)) 
+                    ne2? 
                     lss)))
     ((:while-2 cc
                test
@@ -345,9 +364,10 @@
           (let (ob ... ib-let ...) oc ...)
           lbs
           (let ((ne1?-value ne1?))
-            (let (ib-save ...)
-                ic ...
-                (and ne1?-value test)))
+	    (and ne1?-value
+		 (let (ib-save ...)
+		   ic ...
+		   test)))
           (let (ib-restore ...))
           ne2?
           lss))))
@@ -974,12 +994,14 @@
 ;   replaced by (:until gen stop).
 
 (define-syntax-globally ec-guarded-do-ec
-  (syntax-rules (nested if not and or begin)
+  (syntax-rules (nested if base-if not and or begin)
 
     ((ec-guarded-do-ec stop (nested (nested q1 ...) q2 ...) cmd)
      (ec-guarded-do-ec stop (nested q1 ... q2 ...) cmd) )
 
     ((ec-guarded-do-ec stop (nested (if test) q ...) cmd)
+     (if test (ec-guarded-do-ec stop (nested q ...) cmd)) )
+    ((ec-guarded-do-ec stop (nested (base-if test) q ...) cmd)
      (if test (ec-guarded-do-ec stop (nested q ...) cmd)) )
     ((ec-guarded-do-ec stop (nested (not test) q ...) cmd)
      (if (not test) (ec-guarded-do-ec stop (nested q ...) cmd)) )

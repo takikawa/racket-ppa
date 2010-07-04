@@ -1,4 +1,7 @@
+#lang setup/infotab
 
-(module info (lib "infotab.ss" "setup")
-  (define name "MzScheme")
-  (define version '(370)))
+(define version '(400))
+
+(define scribblings '(("mzscheme.scrbl" (multi-page) (legacy))))
+
+(define compile-omit-paths '("examples"))

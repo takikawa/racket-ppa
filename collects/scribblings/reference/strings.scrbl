@@ -1,11 +1,13 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
 @title[#:tag "strings"]{Strings}
 
 @guideintro["strings"]{strings}
 
-A @pidefterm{string} is a fixed-length arary of
+@local-table-of-contents[]
+
+A @deftech{string} is a fixed-length array of
 @seclink["characters"]{characters}.
 
 @index['("strings" "immutable")]{A} string can be @defterm{mutable} or
@@ -63,7 +65,7 @@ Returns an immutable string with the same content as
 
 @defproc[(string-ref [str string?] [k exact-nonnegative-integer?])
  char?]{  Returns the character at position @scheme[k] in @scheme[str].
- The first position in the string cooresponds to @scheme[0], so the
+ The first position in the string corresponds to @scheme[0], so the
  position @scheme[k] must be less than the length of the string,
  otherwise the @exnraise[exn:fail:contract].
 
@@ -73,7 +75,7 @@ Returns an immutable string with the same content as
 @defproc[(string-set! [str (and/c string? (not/c immutable?))] [k
  exact-nonnegative-integer?] [char char?]) void?]{  Changes the
  character position @scheme[k] in @scheme[str] to @scheme[char].  The first
- position in the string cooresponds to @scheme[0], so the position
+ position in the string corresponds to @scheme[0], so the position
  @scheme[k] must be less than the length of the string, otherwise the
  @exnraise[exn:fail:contract].
 
@@ -133,7 +135,7 @@ Returns an immutable string with the same content as
 
 @defproc[(string-append [str string?] ...) string?]{
 
-@index["strings" "concatenate"]{Returns} a new mutable string that is
+@index['("strings" "concatenate")]{Returns} a new mutable string that is
 as long as the sum of the given @scheme[str]s' lengths, and that
 contains the concatenated characters of the given @scheme[str]s. If no
 @scheme[str]s are provided, the result is a zero-length string.
@@ -159,6 +161,20 @@ contains the concatenated characters of the given @scheme[str]s. If no
 @examples[(list->string (list #\A #\p #\p #\l #\e))]}
 
 
+@defproc[(build-string [n exact-nonnegative-integer?]
+                       [proc (exact-nonnegative-integer? . -> . char?)])
+         string?]{
+
+Creates a string of @scheme[n] characters by applying @scheme[proc] to
+the integers from @scheme[0] to @scheme[(sub1 n)] in order. If
+@scheme[_str] is the resulting string, then @scheme[(string-ref _str
+_i)] is the character produced by @scheme[(proc _i)].
+
+@examples[
+(build-string 5 (lambda (i) (integer->char (+ i 97))))
+]}
+
+
 @; ----------------------------------------
 @section{String Comparisons}
 
@@ -169,10 +185,10 @@ contains the concatenated characters of the given @scheme[str]s. If no
 @examples[(string=? "Apple" "apple")
           (string=? "a" "as" "a")]
 
-@define[(string-sort direction folded?)
-         (if folded?
-             @elem{Like @scheme[string-ci<?], but checks whether the arguments would be @direction after case-folding.}
-             @elem{Like @scheme[string<?], but checks whether the arguments are @|direction|.})]
+@(define (string-sort direction folded?)
+(if folded?
+  @elem{Like @scheme[string-ci<?], but checks whether the arguments would be @direction after case-folding.}
+  @elem{Like @scheme[string<?], but checks whether the arguments are @|direction|.}))
 
 @defproc[(string<? [str1 string?] [str2 string?] ...+) boolean?]{
  Returns @scheme[#t] if the arguments are lexicographically sorted
@@ -345,3 +361,37 @@ allocated string).}
  @scheme[string-downcase], but using locale-specific case-conversion
  rules based the value of @scheme[current-locale].
 }
+
+@; ----------------------------------------
+@section{Additional String Functions}
+
+@note-lib[scheme/string]
+@(define string-eval (make-base-eval))
+@(interaction-eval #:eval string-eval (require scheme/string scheme/list))
+
+@defproc[(string-append* [str string?] ... [strs (listof string?)]) string?]{
+@; Note: this is exactly the same description as the one for append*
+
+Like @scheme[string-append], but the last argument is used as a list
+of arguments for @scheme[string-append], so @scheme[(string-append*
+str ... strs)] is the same as @scheme[(apply string-append str
+... strs)].  In other words, the relationship between
+@scheme[string-append] and @scheme[string-append*] is similar to the
+one between @scheme[list] and @scheme[list*].
+
+@examples[#:eval string-eval
+  (string-append* "a" "b" '("c" "d"))
+  (string-append* (cdr (append* (map (lambda (x) (list ", " x))
+                                     '("Alpha" "Beta" "Gamma")))))
+]}
+
+@defproc[(string-join [strs (listof string?)] [sep string?]) string?]{
+
+Appends the strings in @scheme[strs], inserting @scheme[sep] between
+each pair of strings in @scheme[strs].
+
+@examples[#:eval string-eval
+ (string-join '("one" "two" "three" "four") " potato ")
+]}
+
+@close-eval[string-eval]

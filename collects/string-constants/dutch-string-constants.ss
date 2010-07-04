@@ -81,10 +81,7 @@
  
  ;;; info bar at botttom of drscheme frame
  (collect-button-label "GC")
- (read-only-line1 "Alleen")
-  (read-only-line2 "lezen")
- (read/write-line1 "Lezen/")
-  (read/write-line2 "Schrijven")
+ (read-only "Alleen lezen")
  (auto-extend-selection "Auto-extend") ; <**> -- when does this appear?
  (overwrite "Vervang")
  (running "Bezig")
@@ -199,9 +196,6 @@
  
  ;;; about box
  (about-drscheme-frame-title "Omtrent DrScheme")
- (take-a-tour "Rondleiding!")
- (release-notes "Versienotities")
- 
  
  ;;; save file in particular format prompting.
  (save-as-plain-text "Bestand opslaan als platte tekst?")
@@ -636,7 +630,7 @@
  (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
  (pretty-big-scheme "Vrij groot (bevat MrEd en Gevorderde)")
  (pretty-big-scheme-one-line-summary "Inclusief syntaxis and functies van de HtDP-talen")
- (r5rs-lang-name "Standaard (R5RS)")
+ (r5rs-language-name "R5RS")
  (r5rs-one-line-summary "R5RS, kaal")
  (unknown-debug-frame "[onbekend]")
  

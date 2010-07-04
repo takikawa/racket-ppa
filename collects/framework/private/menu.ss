@@ -1,5 +1,5 @@
-(module menu (lib "a-unit.ss")
-  (require (lib "class.ss")
+#lang scheme/unit
+  (require mzlib/class
            "sig.ss"
            "../preferences.ss"
            (lib "mred-sig.ss" "mred"))
@@ -45,4 +45,4 @@
   
   (define can-restore-menu-item% (can-restore-mixin menu-item%))
   (define can-restore-checkable-menu-item% (can-restore-mixin checkable-menu-item%))
-  (define can-restore-underscore-menu% (can-restore-underscore-mixin menu%)))
+  (define can-restore-underscore-menu% (can-restore-underscore-mixin menu%))

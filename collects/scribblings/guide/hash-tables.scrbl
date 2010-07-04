@@ -1,36 +1,43 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require[(lib "eval.ss" "scribble")]
-@require["guide-utils.ss"]
+#lang scribble/doc
+@(require scribble/manual
+          scribble/eval
+          "guide-utils.ss")
 
 @title[#:tag "hash-tables"]{Hash Tables}
 
-A @defterm{hash table} implements a maping from keys to values, where
-both keys can values can be arbitrary Scheme values, and access and
-update to the tabel are normally constant-time operations. Keys are
+A @defterm{hash table} implements a mapping from keys to values, where
+both keys and values can be arbitrary Scheme values, and access and
+update to the table are normally constant-time operations. Keys are
 compared using @scheme[equal?] or @scheme[eq?], depending on whether
-the hash table is created with the @scheme['equal] flag.
+the hash table is created with @scheme[make-hash] or
+@scheme[make-hasheq].
 
 @examples[
-(define ht (make-hash-table 'equal))
-(hash-table-put! ht "apple" '(red round))
-(hash-table-put! ht "banana" '(yellow long))
-(hash-table-get ht "apple")
-(hash-table-get ht "coconut")
-(hash-table-get ht "coconut" "not there")
+(define ht (make-hash))
+(hash-set! ht "apple" '(red round))
+(hash-set! ht "banana" '(yellow long))
+(hash-ref ht "apple")
+(hash-ref ht "coconut")
+(hash-ref ht "coconut" "not there")
 ]
 
 A literal hash table can be written as an expression by using
 @litchar{#hash} (for an @scheme[equal?]-based table) or
 @litchar{#hasheq} (for an @scheme[eq?]-based table). A parenthesized
-sequence must immediately follow @litchar{#hash} or
-@litchar{#hasheq}, where each element is a sequence is a dotted
-key--value pair. Literal hash tables are immutable.
+sequence must immediately follow @litchar{#hash} or @litchar{#hasheq},
+where each element is a sequence is a dotted key--value pair. Literal
+hash tables are immutable, but they can be extended functionally
+(producing a new hash table without changing the old one) using
+@scheme[hash-set].
 
 @examples[
-(define ht #hash(("apple" . (red round))
-                 ("banana" . (yellow long))))
-(hash-table-get ht "apple")
+(define ht #hash(("apple" . red)
+                 ("banana" . yellow)))
+(hash-ref ht "apple")
+(define ht2 (hash-set ht "coconut" 'brown))
+(hash-ref ht "coconut")
+(hash-ref ht2 "coconut")
+ht2
 ]
 
 @refdetails/gory["parse-hashtable"]{the syntax of hash table literals}
@@ -39,33 +46,33 @@ A hash table can optionally retain its keys @defterm{weakly}, so each
 mapping is retained only so long as the key is retained elsewhere.
 
 @examples[
-(define ht (make-hash-table 'weak))
-(hash-table-put! ht (gensym) "can you see me?")
+(define ht (make-weak-hasheq))
+(hash-set! ht (gensym) "can you see me?")
 (collect-garbage)
-(eval:alts (hash-table-count ht) 0)
+(eval:alts (hash-count ht) 0)
 ]
 
 Beware that even a weak hash table retains its values strongly, as
 long as the corresponding key is accessible. This creates a catch-22
 dependency when a value refers back to its key, so that the mapping is
-retained permanently. To break the cycle, map the key to an
-@seclink["ephemerons"]{ephemeron} that pairs the value with its key (in
-addition to the implicit pairing of the hash table).
+retained permanently. To break the cycle, map the key to an ephemeron
+that pairs the value with its key (in addition to the implicit pairing
+of the hash table).
 
 @examples[
-(define ht (make-hash-table 'weak))
+(define ht (make-weak-hasheq))
 (let ([g (gensym)])
-  (hash-table-put! ht g (list g)))
+  (hash-set! ht g (list g)))
 (collect-garbage)
-(eval:alts (hash-table-count ht) 1)
+(eval:alts (hash-count ht) 1)
 ]
 
 @interaction[
-(define ht (make-hash-table 'weak))
+(define ht (make-weak-hasheq))
 (let ([g (gensym)])
-  (hash-table-put! ht g (make-ephemeron g (list g))))
+  (hash-set! ht g (make-ephemeron g (list g))))
 (collect-garbage)
-(eval:alts (hash-table-count ht) 0)
+(eval:alts (hash-count ht) 0)
 ]
 
 @refdetails["hashtables"]{hash tables and hash-table procedures}

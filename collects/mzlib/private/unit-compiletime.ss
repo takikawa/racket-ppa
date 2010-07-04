@@ -1,12 +1,12 @@
 (module unit-compiletime mzscheme
-  (require-for-syntax (lib "struct.ss" "syntax"))
-  (require (lib "boundmap.ss" "syntax")
-           (lib "list.ss")
-           "unit-runtime.ss"
+  (require-for-syntax syntax/struct)
+  (require syntax/boundmap
+           mzlib/list
            "unit-syntax.ss")
   (require-for-template mzscheme
                         "unit-keywords.ss"
                         "unit-runtime.ss")
+  (require (lib "define-struct.ss" "scheme/private"))
   
   (provide (struct var-info (syntax? exported? id))
            (struct signature (siginfo vars val-defs stx-defs))
@@ -21,7 +21,6 @@
            lookup-signature lookup-def-unit make-id-mapper make-id-mappers sig-names sig-int-names sig-ext-names
            map-sig split-requires apply-mac complete-exports complete-imports check-duplicate-subs
            process-spec process-spec2)
-  
   
   (define-syntax (apply-mac stx)
     (syntax-case stx ()
@@ -60,6 +59,7 @@
                               #,(/ (- (length defined-name-stxes) 3) 2)
                               0 #f null (current-inspector)
                               p))))))
+
   ;; An int/ext is
   ;; - (cons identifier identifier)
   ;; A def is

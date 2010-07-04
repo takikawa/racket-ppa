@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2007 PLT Scheme Inc.
+  Copyright (c) 2004-2008 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -246,7 +246,7 @@ void scheme_init_char (Scheme_Env *env)
 			     env);
 
   scheme_add_global_constant("make-known-char-range-list", 
-			     scheme_make_noncm_prim(char_map_list, 
+			     scheme_make_immed_prim(char_map_list, 
 						    "make-known-char-range-list", 
 						    0, 0),
 			     env);
@@ -442,7 +442,7 @@ static Scheme_Object *char_map_list (int argc, Scheme_Object *argv[])
   int i, bottom, top, uniform;
   Scheme_Object *l = scheme_null;
 
-# define icons scheme_make_immutable_pair
+# define cons scheme_make_pair
 
   for (i = 2 * (NUM_UCHAR_RANGES - 1); i >= 0; i -= 2) {
     bottom = mapped_uchar_ranges[i];
@@ -452,9 +452,9 @@ static Scheme_Object *char_map_list (int argc, Scheme_Object *argv[])
       uniform = 0;
     } else
       uniform = 1;
-    l = icons(icons(scheme_make_integer_value(bottom),
-		    icons(scheme_make_integer_value(top),
-			  icons((uniform ? scheme_true : scheme_false),
+    l = cons(cons(scheme_make_integer_value(bottom),
+		    cons(scheme_make_integer_value(top),
+			  cons((uniform ? scheme_true : scheme_false),
 				scheme_null))),
 	      l);
   }

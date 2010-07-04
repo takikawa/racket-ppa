@@ -118,15 +118,14 @@
   (cs-status-expanding-expression "语法检查：扩展表达式")
   (cs-mouse-over-import "绑定~s由~s导入")
   
+  (cs-view-docs "察看~a的文档")
+  
   (cs-lexical-variable "词汇变量")
   (cs-imported-variable "导入变量")
   
   ;;; info bar at botttom of drscheme frame
   (collect-button-label "垃圾回收")
-  (read-only-line1 "只")
-  (read-only-line2 "读")
-  (read/write-line1 "读/")
-  (read/write-line2 "写")
+  (read-only "只读")
   (auto-extend-selection "自动扩展")
   (overwrite "覆盖")
   (running "运行中")
@@ -159,6 +158,7 @@
   
   (save "保存")
   (close-anyway "强制关闭")
+  (dont-save "不保存")
   (clear-anyway "强制清空")
   
   ;; menu item title
@@ -186,6 +186,16 @@
   (syntax-coloring-choose-color "为~a选择颜色")
   (preferences-colors "颜色") ;; used in the preferences dialog
   
+  ;; parenthesis color scheme string constants
+  (parenthesis-color-scheme "括号色彩调配") ;; label for the choice% menu in the preferences dialog
+  (paren-color-basic-grey "单一灰色")
+  (paren-color-shades-of-gray "渐变灰色")
+  (paren-color-shades-of-blue "渐变蓝色")
+  (paren-color-spring "春")
+  (paren-color-fall "秋")
+  (paren-color-winter "冬")
+
+
   (url: "URL:")
   (open-url... "打开URL...")
   (open-url "打开URL")
@@ -246,6 +256,11 @@
   (help-desk-this-is-just-example-text
    "这里显示的只是示例字体大小的文字。要察看这些链接，请通过帮助菜单打开真正的Help Desk。")
   
+  ;; this appears in the bottom part of the frame the first time the user hits `f1' 
+  ;; (assuming nothing else has loaded the documentation index first)
+  ;; see also: cs-status-loading-docs-index
+  (help-desk-loading-documentation-index "Help Desk：正在读入文档索引")
+  
   ;; Help desk htty proxy
   (http-proxy "HTTP代理")
   (proxy-direct-connection "直接连接")
@@ -296,9 +311,6 @@
   
   ;;; about box
   (about-drscheme-frame-title "关于DrScheme")
-  (take-a-tour "教程")
-  (release-notes "发行记录")
-  
   
   ;;; save file in particular format prompting.
   (save-as-plain-text "保存本文件为纯文本？")
@@ -716,8 +728,11 @@
   (show-interactions-menu-item-label "显示交互(&I)")
   (hide-interactions-menu-item-label "隐藏交互(&I)")
   (interactions-menu-item-help-string "显示/隐藏交互窗口")
-  (show-toolbar "显示工具栏(&T)")
-  (hide-toolbar "隐藏工具栏(&T)")
+  (toolbar "工具栏")
+  (toolbar-on-top "顶置工具栏")
+  (toolbar-on-left "左置工具栏")
+  (toolbar-on-right "右置工具栏")
+  (toolbar-hidden "隐藏工具栏")
   
   ;;; file menu
   (save-definitions-as "将定义另存为(&A)")
@@ -883,10 +898,11 @@
   (use-mixed-fractions "带分数")
   (use-repeating-decimals "循环小数")
   (decimal-notation-for-rationals "使用十进制表示有理数")
+  (enforce-primitives-group-box-label "初始绑定")
+  (enforce-primitives-check-box-label "不允许改变初始绑定")
   
   ; used in the bottom left of the drscheme frame as the label
   ; above the programming language's name
-  (programming-language-label "编程语言：")
   ; used the popup menu from the just above; greyed out and only
   ; visible when some languages are in the history
   (recent-languages "最近使用的语言：")
@@ -911,11 +927,11 @@
   (how-to-design-programs "程序设计方法/How to Design Programs") ;; should agree with MIT Press on this one...
   (pretty-big-scheme "相当大（包括MrEd和HtDP高级）")
   (pretty-big-scheme-one-line-summary "增加了HtDP(程序设计方法)语言的语法和函数")
-  (r5rs-lang-name "标准(R5RS)")
+  (r5rs-lang-name "R5RS")
   (r5rs-one-line-summary "Scheme语言标准第5修改稿")
   (expander "Expander")
   (expander-one-line-summary "展开表达式，而不是求值")
-  (professional-languages "正式语言")
+  (legacy-languages "历代语言")
   (teaching-languages "教学语言")
   (experimental-languages "实验语言")
   (initial-language-category "初始语言")
@@ -979,6 +995,16 @@
   (profiling-no-information-available "没有可用的profiling信息。请确定你（在语言设置中）启用了profiling，并且运行了当前程序。")
   (profiling-clear? "改变定义窗口的内容将导致profiling信息失效。是否继续？")
   
+  ;;The Test engine tool
+  ;;
+  (test-engine-window-title "测试结果")
+  ;;Following two appear in View menu, attach and free test report window from DrScheme frame
+  (test-engine-dock-report "在面板中显示测试报告")
+  (test-engine-undock-report "独立显示测试报告")
+  ;;Following two appear in Scheme (Java, etc) menu, cause Tests to be Run automatically or not
+  (test-engine-enable-tests "启用测试功能")
+  (test-engine-disable-tests "停用测试功能")
+
   ;; test coverage
   (test-coverage-clear? "改变定义窗口将导致测试覆盖信息失效。是否继续？")
   (test-coverage-clear-and-do-not-ask-again "是，并且不再询问")
@@ -1032,8 +1058,8 @@
   ;; This is used in this context: "PLT Scheme vNNN <<<*>>> http://download..."
   (version:now-available-at   "可以从这里获取：")
   
-  ;; special menu
-  (special-menu "特殊符号(&P)")
+  ;; insert menu
+  (insert-menu "插入(&I)")
   
   ;; large semi colon letters
   (insert-large-letters... "插入大字...")

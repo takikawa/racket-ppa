@@ -3,11 +3,11 @@
 ;; (c)1997-2001 PLT
 
 (module zlayer mzscheme
-  (require (lib "unit.ss")
-	  (lib "list.ss")
-	  (lib "etc.ss"))
+  (require mzlib/unit
+	  mzlib/list
+	  mzlib/etc)
   
-  (require (lib "zodiac-sig.ss" "syntax"))
+  (require syntax/zodiac-sig)
 
   (require "../sig.ss")
   (require "sig.ss")
@@ -91,10 +91,11 @@
 	(compose cadr zodiac:begin0-form-bodies))
       (define zodiac:set-begin0-form-first!
 	(lambda (ast v)
-	  (set-car! (zodiac:begin0-form-bodies ast) v)))
+          (zodiac:set-begin0-form-bodies! ast (cons v (cdr (zodiac:begin0-form-bodies ast))))))
       (define zodiac:set-begin0-form-rest!
 	(lambda (ast v)
-	  (set-car! (cdr (zodiac:begin0-form-bodies ast)) v)))
+          (zodiac:set-begin0-form-bodies! ast (list (car (zodiac:begin0-form-bodies ast))
+                                                    v))))
       
       ;;----------------------------------------------------------------------------
       ;; SPECIAL CONSTANTS

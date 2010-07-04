@@ -1,8 +1,8 @@
 
 (module stxset mzscheme
 
-  (require-for-syntax (lib "kerncase.ss" "syntax")
-		      (lib "context.ss" "syntax"))
+  (require-for-syntax syntax/kerncase
+		      syntax/context)
 
   (provide finish-syntax-set)
 
@@ -31,7 +31,7 @@
 				    (let ([defn (local-expand
 						 defn
 						 expand-context
-						 (kernel-form-identifier-list (quote-syntax here)))])
+						 (kernel-form-identifier-list))])
 				      (syntax-case defn (define-values define-syntaxes begin)
 					[(define-values (id ...) expr)
 					 (andmap identifier? (syntax->list (syntax (id ...))))

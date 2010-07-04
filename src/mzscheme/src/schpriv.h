@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2007 PLT Scheme Inc.
+  Copyright (c) 2004-2008 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -131,6 +131,11 @@ void scheme_clear_ephemerons(void);
 # define CLEAR_KEY_FIELD(o) /* empty */
 #endif
 
+#define SCHEME_PAIR_FLAGS(pr) MZ_OPT_HASH_KEY(&((Scheme_Simple_Object *)pr)->iso)
+#define PAIR_IS_LIST 0x1
+#define PAIR_IS_NON_LIST 0x2
+#define PAIR_FLAG_MASK 0x3
+
 /*========================================================================*/
 /*                             initialization                             */
 /*========================================================================*/
@@ -194,6 +199,8 @@ void scheme_init_getenv(void);
 void scheme_init_foreign(Scheme_Env *env);
 #endif
 
+void scheme_free_dynamic_extensions(void);
+
 /* Type readers & writers for compiled code data */
 typedef Scheme_Object *(*Scheme_Type_Reader)(Scheme_Object *list);
 typedef Scheme_Object *(*Scheme_Type_Writer)(Scheme_Object *obj);
@@ -215,6 +222,7 @@ void scheme_init_exn_config(void);
 #ifdef WINDOWS_PROCESSES
 void scheme_init_thread_memory(void);
 #endif
+void scheme_init_module_resolver(void);
 
 void scheme_finish_kernel(Scheme_Env *env);
 
@@ -223,7 +231,7 @@ Scheme_Object *scheme_make_initial_inspectors(void);
 extern int scheme_builtin_ref_counter;
 
 Scheme_Object **scheme_make_builtin_references_table(void);
-Scheme_Object *scheme_make_local(Scheme_Type type, int pos);
+Scheme_Object *scheme_make_local(Scheme_Type type, int pos, int flags);
 
 void scheme_add_embedded_builtins(Scheme_Env *env);
 void scheme_do_add_global_symbol(Scheme_Env *env, Scheme_Object *sym,
@@ -239,6 +247,7 @@ extern Scheme_Object *scheme_procedure_p_proc;
 extern Scheme_Object *scheme_void_proc;
 extern Scheme_Object *scheme_call_with_values_proc;
 extern Scheme_Object *scheme_make_struct_type_proc;
+extern Scheme_Object *scheme_current_inspector_proc;
 
 extern Scheme_Object *scheme_define_values_syntax, *scheme_define_syntaxes_syntax;
 extern Scheme_Object *scheme_lambda_syntax;
@@ -282,6 +291,10 @@ extern Scheme_Object *scheme_default_prompt_tag;
 extern Scheme_Object *scheme_system_idle_channel;
 
 extern Scheme_Object *scheme_input_port_property, *scheme_output_port_property;
+
+extern Scheme_Object *scheme_equal_property;
+
+extern Scheme_Object *scheme_reduced_procedure_struct;
 
 /*========================================================================*/
 /*                    thread state and maintenance                        */
@@ -470,7 +483,15 @@ scheme_get_primitive_global(Scheme_Object *var, Scheme_Env *env,
 void scheme_add_bucket_to_table(Scheme_Bucket_Table *table, Scheme_Bucket *b);
 Scheme_Bucket *scheme_bucket_or_null_from_table(Scheme_Bucket_Table *table, const char *key, int add);
 
-void scheme_require_from_original_env(Scheme_Env *env, int syntax_only);
+struct Scheme_Hash_Tree
+{
+  Scheme_Inclhash_Object iso; /* 0x1 flag => equal?-based hashing */
+  int count;
+  struct RBNode *root;
+  Scheme_Object *elems_box; /* vector in a weak box */
+};
+
+#define SCHEME_HASHTR_FLAGS(tr) MZ_OPT_HASH_KEY(&(tr)->iso)
 
 /*========================================================================*/
 /*                              structs                                   */
@@ -491,14 +512,16 @@ typedef struct Scheme_Struct_Property {
 int scheme_inspector_sees_part(Scheme_Object *s, Scheme_Object *insp, int pos);
 
 typedef struct Scheme_Struct_Type {
-  Scheme_Object so; /* scheme_structure_type or scheme_proc_struct_type */
-  mzshort num_slots, num_islots;
+  Scheme_Inclhash_Object iso; /* scheme_structure_type or scheme_proc_struct_type */
+  mzshort num_slots;   /* initialized + auto + parent-initialized + parent-auto */
+  mzshort num_islots; /* initialized + parent-initialized */
   mzshort name_pos;
 
   Scheme_Object *name;
 
   Scheme_Object *inspector;
   Scheme_Object *accessor, *mutator;
+  Scheme_Object *prefab_key;
 
   Scheme_Object *uninit_val;
 
@@ -512,6 +535,8 @@ typedef struct Scheme_Struct_Type {
 
   struct Scheme_Struct_Type *parent_types[1];
 } Scheme_Struct_Type;
+
+#define STRUCT_TYPE_ALL_IMMUTABLE 0x1
 
 typedef struct Scheme_Structure
 {
@@ -562,6 +587,11 @@ Scheme_Object *scheme_is_writable_struct(Scheme_Object *s);
 
 extern Scheme_Object *scheme_source_property;
 
+Scheme_Struct_Type *scheme_lookup_prefab_type(Scheme_Object *key, int field_count);
+Scheme_Object *scheme_make_prefab_struct_instance(Scheme_Struct_Type *stype,
+                                                         Scheme_Object *vec);
+Scheme_Object *scheme_clone_prefab_struct_instance(Scheme_Structure *s);
+
 /*========================================================================*/
 /*                         syntax objects                                 */
 /*========================================================================*/
@@ -583,7 +613,7 @@ typedef struct Scheme_Stx {
   Scheme_Stx_Srcloc *srcloc;
   Scheme_Object *wraps;
   union {
-    long lazy_prefix; /* # of initial items in wraps to propagate */
+    long lazy_prefix; /* # of insitial items in wraps to propagate */
     Scheme_Object *modinfo_cache;
   } u;
   Scheme_Object *certs; /* cert chain or pair of cert chains */
@@ -606,8 +636,6 @@ Scheme_Object *scheme_make_stx_w_offset(Scheme_Object *val,
 					long line, long col, long pos, long span,
 					Scheme_Object *src,
 					Scheme_Object *props);
-Scheme_Object *scheme_make_graph_stx(Scheme_Object *stx,
-				     long line, long col, long pos);
 Scheme_Object *scheme_make_renamed_stx(Scheme_Object *sym,
 				       Scheme_Object *rn);
 
@@ -622,8 +650,6 @@ Scheme_Object *scheme_syntax_to_datum(Scheme_Object *stx, int with_marks,
 Scheme_Object *scheme_unmarshal_datum_to_syntax(Scheme_Object *o,
                                                 struct Scheme_Unmarshal_Tables *ut,
                                                 int can_graph);
-
-int scheme_syntax_is_graph(Scheme_Object *stx);
 
 Scheme_Object *scheme_stx_track(Scheme_Object *naya,
 				Scheme_Object *old,
@@ -652,40 +678,66 @@ Scheme_Object *scheme_stx_remove_extra_marks(Scheme_Object *o, Scheme_Object *re
 #define mzMOD_RENAME_NORMAL   1
 #define mzMOD_RENAME_MARKED   2
 
-Scheme_Object *scheme_make_module_rename(long phase, int kind, Scheme_Hash_Table *mns);
+struct Scheme_Module_Phase_Exports; /* forward declaration */
+
+Scheme_Object *scheme_make_module_rename_set(int kind, Scheme_Object *share_marked_names);
+void scheme_add_module_rename_to_set(Scheme_Object *set, Scheme_Object *rn);
+Scheme_Object *scheme_get_module_rename_from_set(Scheme_Object *set, Scheme_Object *phase, int create);
+
+Scheme_Hash_Table *scheme_get_module_rename_marked_names(Scheme_Object *set, Scheme_Object *phase, int create);
+
+void scheme_append_rename_set_to_env(Scheme_Object *rns, Scheme_Env *env);
+
+void scheme_seal_module_rename(Scheme_Object *rn, int level);
+void scheme_seal_module_rename_set(Scheme_Object *rns, int level);
+#define STX_SEAL_BOUND 1
+#define STX_SEAL_ALL   2
+
+Scheme_Object *scheme_make_module_rename(Scheme_Object *phase, int kind, Scheme_Hash_Table *mns);
 void scheme_extend_module_rename(Scheme_Object *rn, Scheme_Object *modname,
 				 Scheme_Object *locname, Scheme_Object *exname,
 				 Scheme_Object *nominal_src, Scheme_Object *nominal_ex,
-				 int mod_phase, int drop_for_marshal);
+				 int mod_phase, Scheme_Object *src_phase_index, 
+                                 Scheme_Object *nom_export_phase, int drop_for_marshal);
+void scheme_extend_module_rename_with_shared(Scheme_Object *rn, Scheme_Object *modidx, 
+                                             struct Scheme_Module_Phase_Exports *pt, 
+                                             Scheme_Object *unmarshal_phase_index,
+                                             Scheme_Object *src_phase_index, 
+                                             int save_unmarshal);
 void scheme_extend_module_rename_with_kernel(Scheme_Object *rn, Scheme_Object *nominal_src);
 void scheme_save_module_rename_unmarshal(Scheme_Object *rn, Scheme_Object *info);
 void scheme_do_module_rename_unmarshal(Scheme_Object *rn, Scheme_Object *info,
 				       Scheme_Object *modidx_shift_from, Scheme_Object *modidx_shift_to,
 				       Scheme_Hash_Table *export_registry);
+Scheme_Object *scheme_get_kernel_modidx(void);
 void scheme_remove_module_rename(Scheme_Object *mrn,
 				 Scheme_Object *localname);
-void scheme_append_module_rename(Scheme_Object *src, Scheme_Object *dest);
+void scheme_append_module_rename(Scheme_Object *src, Scheme_Object *dest, int with_unmarshal);
 void scheme_list_module_rename(Scheme_Object *src, Scheme_Hash_Table *ht);
 
 Scheme_Object *scheme_rename_to_stx(Scheme_Object *rn);
 Scheme_Object *scheme_stx_to_rename(Scheme_Object *stx);
 Scheme_Object *scheme_stx_shift_rename(Scheme_Object *mrn, Scheme_Object *old_midx, Scheme_Object *new_midx);
+Scheme_Object *scheme_stx_shift_rename_set(Scheme_Object *mrns, Scheme_Object *old_midx, Scheme_Object *new_midx);
 Scheme_Hash_Table *scheme_module_rename_marked_names(Scheme_Object *rn);
 
 Scheme_Object *scheme_stx_content(Scheme_Object *o);
 Scheme_Object *scheme_flatten_syntax_list(Scheme_Object *lst, int *islist);
 
-int scheme_stx_free_eq(Scheme_Object *a, Scheme_Object *b, long phase);
 int scheme_stx_module_eq(Scheme_Object *a, Scheme_Object *b, long phase);
-Scheme_Object *scheme_stx_module_name(Scheme_Object **name, long phase,
+int scheme_stx_module_eq2(Scheme_Object *a, Scheme_Object *b, Scheme_Object *phase, Scheme_Object *asym);
+Scheme_Object *scheme_stx_get_module_eq_sym(Scheme_Object *a, Scheme_Object *phase);
+Scheme_Object *scheme_stx_module_name(Scheme_Object **name, Scheme_Object *phase,
 				      Scheme_Object **nominal_modidx,
 				      Scheme_Object **nominal_name,
-				      int *mod_phase);
-Scheme_Object *scheme_stx_moduleless_env(Scheme_Object *a, long phase);
+				      Scheme_Object **mod_phase, 
+                                      Scheme_Object **src_phase_index, 
+                                      Scheme_Object **nominal_src_phase);
+Scheme_Object *scheme_stx_moduleless_env(Scheme_Object *a);
 int scheme_stx_parallel_is_used(Scheme_Object *sym, Scheme_Object *stx);
 
-int scheme_stx_bound_eq(Scheme_Object *a, Scheme_Object *b, long phase);
-int scheme_stx_env_bound_eq(Scheme_Object *a, Scheme_Object *b, Scheme_Object *uid, long phase);
+int scheme_stx_bound_eq(Scheme_Object *a, Scheme_Object *b, Scheme_Object *phase);
+int scheme_stx_env_bound_eq(Scheme_Object *a, Scheme_Object *b, Scheme_Object *uid, Scheme_Object *phase);
 
 Scheme_Object *scheme_stx_source_module(Scheme_Object *stx, int resolve);
 
@@ -705,7 +757,7 @@ int scheme_stx_proper_list_length(Scheme_Object *list);
 
 Scheme_Object *scheme_stx_extract_marks(Scheme_Object *stx);
 
-Scheme_Object *scheme_resolve_placeholders(Scheme_Object *obj, int mkstx, Scheme_Type ph_type);
+Scheme_Object *scheme_resolve_placeholders(Scheme_Object *obj);
 Scheme_Hash_Table *scheme_setup_datum_graph(Scheme_Object *o, void *for_print);
 
 Scheme_Object *scheme_stx_strip_module_context(Scheme_Object *stx);
@@ -738,6 +790,13 @@ int scheme_stx_has_more_certs(Scheme_Object *id, Scheme_Object *certs,
 			      Scheme_Object *than_id, Scheme_Object *than_certs);
 
 Scheme_Object *scheme_delayed_rename(Scheme_Object **o, long i);
+
+struct Resolve_Prefix;
+void scheme_load_delayed_syntax(struct Resolve_Prefix *rp, long i);
+
+XFORM_NONGCING Scheme_Object *scheme_phase_index_symbol(int src_phase_index);
+
+Scheme_Object *scheme_explode_syntax(Scheme_Object *stx, Scheme_Hash_Table *ht);
 
 /*========================================================================*/
 /*                   syntax run-time structures                           */
@@ -807,7 +866,7 @@ typedef struct {
 } Scheme_With_Continuation_Mark;
 
 typedef struct Scheme_Local {
-  Scheme_Object so;
+  Scheme_Inclhash_Object iso; /* keyex used for clear-on-read flag */
   mzshort position;
 #ifdef MZ_PRECISE_GC
 # ifdef MZSHORT_IS_SHORT
@@ -818,9 +877,14 @@ typedef struct Scheme_Local {
 } Scheme_Local;
 
 #define SCHEME_LOCAL_POS(obj)    (((Scheme_Local *)(obj))->position)
+#define SCHEME_LOCAL_FLAGS(obj)  MZ_OPT_HASH_KEY(&((Scheme_Local *)(obj))->iso)
+
+#define SCHEME_LOCAL_CLEAR_ON_READ 0x1
+#define SCHEME_LOCAL_OTHER_CLEARS  0x2
+#define SCHEME_LOCAL_CLEARING_MASK 0x3
 
 typedef struct Scheme_Toplevel {
-  Scheme_Inclhash_Object iso; /* keyex used for const flag */
+  Scheme_Inclhash_Object iso; /* keyex used for const & ready flags */
   mzshort depth;
   int position;
 } Scheme_Toplevel;
@@ -892,7 +956,7 @@ typedef struct {
    Otherwise, name is a boxed symbol (or #f) to indicate a method. */
 
 #define scheme_make_prim_w_arity2(f, n, mina, maxa, minr, maxr) \
-  scheme_make_prim_w_everything(f, 0, n, mina, maxa, 0, minr, maxr)
+  scheme_make_prim_w_everything(f, 1, n, mina, maxa, 0, minr, maxr)
 
 Scheme_Object *scheme_unclose_case_lambda(Scheme_Object *expr, int jit);
 
@@ -919,6 +983,8 @@ extern void *scheme_deepest_stack_start;
 # define PROMPT_STACK(id) ((void *)(&id))
 # define ADJUST_STACK_START(start) (start ? start : scheme_deepest_stack_start)
 #endif
+
+struct Scheme_Overflow_Jmp *scheme_prune_jmpup(struct Scheme_Overflow_Jmp *jmp, void *stack_boundary);
 
 void scheme_jmpup_free(Scheme_Jumpup_Buf *);
 void *scheme_enlarge_runstack(long size, void *(*k)());
@@ -1007,7 +1073,7 @@ typedef struct Scheme_Dynamic_Wind {
 
 typedef struct Scheme_Cont {
   Scheme_Object so;
-  char composable, has_prompt_dw;
+  char composable, has_prompt_dw, need_meta_prompt;
   struct Scheme_Meta_Continuation *meta_continuation;
   Scheme_Jumpup_Buf buf;
   Scheme_Dynamic_Wind *dw;
@@ -1121,6 +1187,8 @@ typedef struct Scheme_Meta_Continuation {
   MZ_MARK_POS_TYPE cont_mark_pos;
   long cont_mark_total, cont_mark_offset;
   Scheme_Cont_Mark *cont_mark_stack_copied;
+  /* Continuation (whose cont-mark info is the same as above) */
+  struct Scheme_Cont *cont;
   /* Next: */
   struct Scheme_Meta_Continuation *next;
 } Scheme_Meta_Continuation;
@@ -1326,6 +1394,8 @@ XFORM_NONGCING float scheme_bignum_to_float_inf_info(const Scheme_Object *n, int
 
 void scheme_clear_bignum_cache(void);
 
+long scheme_integer_length(Scheme_Object *n);
+
 /****** Rational numbers *******/
 
 typedef struct {
@@ -1445,6 +1515,7 @@ extern int scheme_is_nan(double);
 #    define MZ_IS_NAN(d) isnan(d)
 #   else
 #    ifdef USE_CARBON_FP_PREDS
+#     define MZ_IS_INFINITY(d) (!__isfinited(d))
 #     define MZ_IS_POS_INFINITY(d) (!__isfinited(d) && (d > 0))
 #     define MZ_IS_NEG_INFINITY(d) (!__isfinited(d) && (d < 0))
 #     define MZ_IS_NAN(d) __isnand(d)
@@ -1456,6 +1527,7 @@ extern int scheme_is_nan(double);
 #      define MZ_IS_NAN(d) _isnan(d)
 #     else
        /* USE_IEEE_FP_PREDS */
+#      define MZ_IS_INFINITY(d) (isinf(d))
 #      define MZ_IS_POS_INFINITY(d) (isinf(d) && (d > 0))
 #      define MZ_IS_NEG_INFINITY(d) (isinf(d) && (d < 0))
 #      define MZ_IS_NAN(d) isnan(d)
@@ -1464,6 +1536,10 @@ extern int scheme_is_nan(double);
 #   endif
 #  endif
 # endif
+#endif
+
+#ifndef MZ_IS_INFINITY
+# define MZ_IS_INFINITY(d) (MZ_IS_POS_INFINITY(d) || MZ_IS_NEG_INFINITY(d))
 #endif
 
 #define IZI_REAL_PART(n) (((Scheme_Complex *)(n))->r)
@@ -1559,6 +1635,9 @@ long scheme_rand(Scheme_Random_State *rs);
 /*========================================================================*/
 /*                     read, eval, print                                  */
 /*========================================================================*/
+
+#define LOAD_ON_DEMAND
+void scheme_clear_delayed_load_cache();
 
 #define _scheme_do_eval(obj, env, v) \
   ((SCHEME_INTP(obj) || !SCHEME_STRTAG_VAL(_SCHEME_TYPE(obj))) \
@@ -1670,10 +1749,12 @@ typedef struct Scheme_Comp_Env
 #define CLOS_HAS_REST 1
 #define CLOS_HAS_REF_ARGS 2
 #define CLOS_PRESERVES_MARKS 4
-#define CLOS_FOLDABLE 8
+#define CLOS_SFS 8
 #define CLOS_IS_METHOD 16
 #define CLOS_SINGLE_RESULT 32
 #define CLOS_RESULT_TENTATIVE 64
+#define CLOS_VALIDATED 128
+/* BITS 8-15 used by write_compiled_closure() */
 
 typedef struct Scheme_Compile_Expand_Info
 {
@@ -1762,10 +1843,14 @@ typedef struct Scheme_Object *(*Scheme_Syntax_Shifter)(Scheme_Object *data, int 
 
 typedef struct CPort Mz_CPort;
 
+typedef mzshort **Validate_TLS;
+struct Validate_Clearing;
+
 typedef void (*Scheme_Syntax_Validater)(Scheme_Object *data, Mz_CPort *port, 
-                                        char *stack, Scheme_Hash_Table *ht, Scheme_Object **tls,
+                                        char *stack, Validate_TLS tls,
 					int depth, int letlimit, int delta,
-					int num_toplevels, int num_stxes, int num_lifts);
+					int num_toplevels, int num_stxes, int num_lifts,
+                                        struct Validate_Clearing *vc, int tailpos);
 
 typedef struct Scheme_Object *(*Scheme_Syntax_Executer)(struct Scheme_Object *data);
 
@@ -1836,7 +1921,7 @@ Scheme_Native_Closure_Data *scheme_generate_lambda(Scheme_Closure_Data *obj, int
 						   Scheme_Native_Closure_Data *case_lam);
 
 #define MAX_CONST_LOCAL_POS 64
-extern Scheme_Object *scheme_local[MAX_CONST_LOCAL_POS][2];
+extern Scheme_Object *scheme_local[MAX_CONST_LOCAL_POS][2][3];
 
 #define scheme_new_frame(n) scheme_new_special_frame(n, 0)
 #define scheme_extend_env(f, e) (f->basic.next = e, f)
@@ -1908,6 +1993,8 @@ Scheme_Object *scheme_make_native_case_closure(Scheme_Native_Closure_Data *code)
 
 Scheme_Native_Closure_Data *scheme_generate_case_lambda(Scheme_Case_Lambda *cl);
 
+void scheme_delay_load_closure(Scheme_Closure_Data *data);
+
 #define scheme_add_good_binding(i,v,f) (f->values[i] = v)
 
 Scheme_Object *scheme_compiled_void(void);
@@ -1924,6 +2011,31 @@ void scheme_bind_syntaxes(const char *where, Scheme_Object *names, Scheme_Object
                           int *_pos);
 int scheme_is_sub_env(Scheme_Comp_Env *stx_env, Scheme_Comp_Env *env);
 
+typedef struct SFS_Info {
+  MZTAG_IF_REQUIRED  
+  int for_mod, pass;
+  int tail_pos;
+  int depth, stackpos, tlpos;
+  int selfpos, selfstart, selflen;
+  int ip, seqn, max_nontail;
+  int min_touch, max_touch;
+  int *max_used, *max_calls;
+  Scheme_Object *saved;
+} SFS_Info;
+
+SFS_Info *scheme_new_sfs_info(int depth);
+Scheme_Object *scheme_sfs(Scheme_Object *expr, SFS_Info *info, int max_let_depth);
+Scheme_Object *scheme_sfs_expr(Scheme_Object *expr, SFS_Info *si, int self_pos);
+Scheme_Object *scheme_sfs_closure(Scheme_Object *expr, SFS_Info *si, int self_pos);
+
+void scheme_sfs_used(SFS_Info *info, int pos);
+void scheme_sfs_push(SFS_Info *info, int count, int track);
+void scheme_sfs_start_sequence(SFS_Info *si, int cnt, int last_is_tail);
+
+Scheme_Object *scheme_sfs_add_clears(Scheme_Object *expr, Scheme_Object *clears, int pre);
+
+typedef struct Scheme_Object *(*Scheme_Syntax_SFSer)(Scheme_Object *data, SFS_Info *info);
+
 /* Resolving & linking */
 #define DEFINE_VALUES_EXPD 0
 #define DEFINE_SYNTAX_EXPD 1
@@ -1939,10 +2051,11 @@ int scheme_is_sub_env(Scheme_Comp_Env *stx_env, Scheme_Comp_Env *env);
 #define SPLICE_EXPD        11
 #define _COUNT_EXPD_       12
 
-#define scheme_register_syntax(i, fo, fr, fv, fe, fj, cl, sh, pa)        \
+#define scheme_register_syntax(i, fo, fr, fs, fv, fe, fj, cl, sh, pa)    \
      (scheme_syntax_optimizers[i] = fo, \
       scheme_syntax_resolvers[i] = fr, \
       scheme_syntax_executers[i] = fe, \
+      scheme_syntax_sfsers[i] = fs, \
       scheme_syntax_validaters[i] = fv, \
       scheme_syntax_jitters[i] = fj, \
       scheme_syntax_cloners[i] = cl, \
@@ -1950,6 +2063,7 @@ int scheme_is_sub_env(Scheme_Comp_Env *stx_env, Scheme_Comp_Env *env);
       scheme_syntax_protect_afters[i] = pa)
 extern Scheme_Syntax_Optimizer scheme_syntax_optimizers[_COUNT_EXPD_];
 extern Scheme_Syntax_Resolver scheme_syntax_resolvers[_COUNT_EXPD_];
+extern Scheme_Syntax_SFSer scheme_syntax_sfsers[_COUNT_EXPD_];
 extern Scheme_Syntax_Validater scheme_syntax_validaters[_COUNT_EXPD_];
 extern Scheme_Syntax_Executer scheme_syntax_executers[_COUNT_EXPD_];
 extern Scheme_Syntax_Jitter scheme_syntax_jitters[_COUNT_EXPD_];
@@ -1996,8 +2110,8 @@ Scheme_Object *scheme_merge_expression_resolve_lifts(Scheme_Object *expr, Resolv
 
 Optimize_Info *scheme_optimize_info_create(void);
 
-void scheme_optimize_propagate(Optimize_Info *info, int pos, Scheme_Object *value);
-Scheme_Object *scheme_optimize_info_lookup(Optimize_Info *info, int pos, int *closure_offset);
+void scheme_optimize_propagate(Optimize_Info *info, int pos, Scheme_Object *value, int single_use);
+Scheme_Object *scheme_optimize_info_lookup(Optimize_Info *info, int pos, int *closure_offset, int *single_use);
 void scheme_optimize_info_used_top(Optimize_Info *info);
 
 void scheme_optimize_mutated(Optimize_Info *info, int pos);
@@ -2165,11 +2279,13 @@ Scheme_Comp_Env *scheme_no_defines(Scheme_Comp_Env *env);
 Scheme_Env *scheme_make_empty_env(void);
 void scheme_prepare_exp_env(Scheme_Env *env);
 void scheme_prepare_template_env(Scheme_Env *env);
+void scheme_prepare_label_env(Scheme_Env *env);
+void scheme_prepare_env_renames(Scheme_Env *env, int kind);
 
 int scheme_used_app_only(Scheme_Comp_Env *env, int which);
 int scheme_used_ever(Scheme_Comp_Env *env, int which);
 
-int scheme_omittable_expr(Scheme_Object *o, int vals);
+int scheme_omittable_expr(Scheme_Object *o, int vals, int fuel, int resolved);
 
 int scheme_is_env_variable_boxed(Scheme_Comp_Env *env, int which);
 
@@ -2194,16 +2310,18 @@ void scheme_pop_prefix(Scheme_Object **rs);
 Scheme_Object *scheme_make_environment_dummy(Scheme_Comp_Env *env);
 Scheme_Env *scheme_environment_from_dummy(Scheme_Object *dummy);
 
-void scheme_validate_code(Mz_CPort *port, Scheme_Object *code, Scheme_Hash_Table *ht,
+void scheme_validate_code(Mz_CPort *port, Scheme_Object *code,
                           int depth,
-			  int num_toplevels, int num_stxes, int num_lifts);
+			  int num_toplevels, int num_stxes, int num_lifts,
+                          int code_vec);
 void scheme_validate_expr(Mz_CPort *port, Scheme_Object *expr, 
-			  char *stack, Scheme_Hash_Table *ht, Scheme_Object **tls,
+			  char *stack, Validate_TLS tls,
                           int depth, int letlimit, int delta,
 			  int num_toplevels, int num_stxes, int num_lifts,
-                          Scheme_Object *app_rator, int proc_with_refs_ok);
+                          Scheme_Object *app_rator, int proc_with_refs_ok, 
+                          int result_ignored, struct Validate_Clearing *vc, int tailpos);
 void scheme_validate_toplevel(Scheme_Object *expr, Mz_CPort *port,
-			      char *stack, Scheme_Hash_Table *ht, Scheme_Object **tls,
+			      char *stack, Validate_TLS tls,
                               int depth, int delta,
 			      int num_toplevels, int num_stxes, int num_lifts,
                               int skip_refs_check);
@@ -2212,8 +2330,13 @@ void scheme_validate_boxenv(int pos, Mz_CPort *port,
 
 int scheme_validate_rator_wants_box(Scheme_Object *app_rator, int pos,
                                     int hope,
-                                    Scheme_Object **tls,
+                                    Validate_TLS tls,
                                     int num_toplevels, int num_stxes, int num_lifts);
+
+void scheme_validate_closure(Mz_CPort *port, Scheme_Object *expr, 
+                             char *new_stack, Validate_TLS tls,
+                             int num_toplevels, int num_stxes, int num_lifts,
+                             int self_pos_in_closure);
 
 #define TRACK_ILL_FORMED_CATCH_LINES 1
 #if TRACK_ILL_FORMED_CATCH_LINES
@@ -2239,10 +2362,14 @@ typedef struct Scheme_Marshal_Tables {
   Scheme_Object *st_ref_stack;
   Scheme_Hash_Table *reverse_map; /* used on first pass */
   Scheme_Hash_Table *same_map;    /* set on first pass, used on later passes */
+  Scheme_Hash_Table *cert_lists;  /* effectively set on first pass */
+  Scheme_Hash_Table *shift_map;   /* effectively set on first pass */
   Scheme_Hash_Table *top_map;     /* used on every pass */
   Scheme_Hash_Table *key_map;     /* set after first pass, used on later passes */
   Scheme_Hash_Table *delay_map;   /* set during first pass, used on later passes */
   Scheme_Hash_Table *rn_saved;    /* maps each original object to generated marshaling */
+  Scheme_Object **cdata_map;      /* for delay-load wrappers */
+  int cdata_counter;              /* used with cdata_map */
   long *shared_offsets;           /* set in second pass */
   long sorted_keys_count;
   Scheme_Object **sorted_keys;
@@ -2275,6 +2402,8 @@ void scheme_unmarshal_wrap_set(Scheme_Unmarshal_Tables *ut,
 struct Scheme_Env {
   Scheme_Object so; /* scheme_namespace_type */
 
+  char disallow_unbound, rename_set_ready;
+
   struct Scheme_Module *module; /* NULL => top-level */
 
   Scheme_Hash_Table *module_registry; /* symbol -> module ; loaded modules,
@@ -2283,16 +2412,12 @@ struct Scheme_Env {
   Scheme_Object *insp; /* instantiation-time inspector, for granting
 			  protected access and certificates */
 
-  /* For compilation, per-declaration: */
-  /* First two are passed from module to module-begin: */
-  Scheme_Object *rename;    /* module rename record */
-  Scheme_Object *et_rename; /* exp-time rename record */
-  Scheme_Object *tt_rename; /* template-time rename record */
-  Scheme_Object *dt_rename; /* template-time rename record */
+  Scheme_Object *rename_set;
 
   Scheme_Bucket_Table *syntax;
   struct Scheme_Env *exp_env;
   struct Scheme_Env *template_env;
+  struct Scheme_Env *label_env;
 
   Scheme_Hash_Table *shadowed_syntax; /* top level only */
 
@@ -2300,7 +2425,8 @@ struct Scheme_Env {
   long phase, mod_phase;
   Scheme_Object *link_midx;
   Scheme_Object *require_names, *et_require_names, *tt_require_names, *dt_require_names; /* resolved */
-  char running, et_running, tt_running, lazy_syntax, attached;
+  Scheme_Hash_Table *other_require_names;
+  char running, et_running, did_eval_exp, did_eval_run, did_compute, lazy_syntax, attached, ran, et_ran;
 
   Scheme_Bucket_Table *toplevel;
   Scheme_Object *modchain; /* Vector of:
@@ -2310,8 +2436,6 @@ struct Scheme_Env {
                                3. modchain for previous phase (or #f) */
 
   Scheme_Hash_Table *modvars; /* for scheme_module_variable_type hashing */
-
-  Scheme_Hash_Table *marked_names; /* for mapping marked ids to uninterned symbols */
 
   int id_counter;
 };
@@ -2333,6 +2457,7 @@ typedef struct Scheme_Module
   Scheme_Object *requires;     /* list of symbol-or-module-path-index */
   Scheme_Object *tt_requires;  /* list of symbol-or-module-path-index */
   Scheme_Object *dt_requires;  /* list of symbol-or-module-path-index */
+  Scheme_Hash_Table *other_requires;  /* phase to list of symbol-or-module-path-index */
 
   Scheme_Invoke_Proc prim_body;
   Scheme_Invoke_Proc prim_et_body;
@@ -2370,22 +2495,30 @@ typedef struct Scheme_Module
 
   Scheme_Env *primitive;
 
-  Scheme_Object *rn_stx, *et_rn_stx, *tt_rn_stx, *dt_rn_stx;
+  Scheme_Object *rn_stx;
 } Scheme_Module;
 
 typedef struct Scheme_Module_Phase_Exports
 {
-  MZTAG_IF_REQUIRED
+  Scheme_Object so;
+
+  Scheme_Object *phase_index;
+
+  Scheme_Object *src_modidx;  /* same as in enclosing Scheme_Module_Exports */
 
   Scheme_Object **provides;          /* symbols (extenal names) */
   Scheme_Object **provide_srcs;      /* module access paths, #f for self */
   Scheme_Object **provide_src_names; /* symbols (original internal names) */
+  Scheme_Object **provide_nominal_srcs; /* import source if re-exported; NULL or array of lists */
   char *provide_src_phases;          /* NULL, or src phase for for-syntax import */
   int num_provides;
   int num_var_provides;              /* non-syntax listed first in provides */
 
   int reprovide_kernel;              /* if true, extend provides with kernel's */
-  Scheme_Object *kernel_exclusion;  /* we allow one exn, but it must be shadowed */
+  Scheme_Object *kernel_exclusion;   /* we allow up to two exns, but they must be shadowed */
+  Scheme_Object *kernel_exclusion2;
+
+  Scheme_Hash_Table *ht;             /* maps external names to array indicies; created lazily */
 } Scheme_Module_Phase_Exports;
 
 typedef struct Scheme_Module_Exports
@@ -2396,7 +2529,10 @@ typedef struct Scheme_Module_Exports
      unmarshal syntax-object context. */
   MZTAG_IF_REQUIRED
 
+  /* Most common phases: */
   Scheme_Module_Phase_Exports *rt, *et, *dt;
+  /* All others: */
+  Scheme_Hash_Table *other_phases;
 
   Scheme_Object *src_modidx;  /* the one used in marshalled syntax */
 } Scheme_Module_Exports;
@@ -2424,7 +2560,7 @@ void scheme_add_global_keyword_symbol(Scheme_Object *name, Scheme_Object *v, Sch
 void scheme_add_global_constant(const char *name, Scheme_Object *v, Scheme_Env *env);
 void scheme_add_global_constant_symbol(Scheme_Object *name, Scheme_Object *v, Scheme_Env *env);
 
-Scheme_Object *scheme_tl_id_sym(Scheme_Env *env, Scheme_Object *id, Scheme_Object *bdg, int is_def);
+Scheme_Object *scheme_tl_id_sym(Scheme_Env *env, Scheme_Object *id, Scheme_Object *bdg, int is_def, Scheme_Object *phase);
 int scheme_tl_id_is_sym_used(Scheme_Hash_Table *marked_names, Scheme_Object *sym);
 
 Scheme_Object *scheme_sys_wraps(Scheme_Comp_Env *env);
@@ -2449,6 +2585,8 @@ Scheme_Object *scheme_modidx_shift(Scheme_Object *modidx,
 				   Scheme_Object *shift_from_modidx,
 				   Scheme_Object *shift_to_modidx);
 
+Scheme_Object *scheme_intern_resolved_module_path(Scheme_Object *o);
+
 Scheme_Object *scheme_hash_module_variable(Scheme_Env *env, Scheme_Object *modidx, 
 					   Scheme_Object *stxsym, Scheme_Object *insp,
 					   int pos, int mod_phase);
@@ -2464,9 +2602,20 @@ void scheme_clean_dead_env(Scheme_Env *env);
 
 Scheme_Module *scheme_extract_compiled_module(Scheme_Object *o);
 
+int scheme_is_kernel_modname(Scheme_Object *modname);
+
 void scheme_clear_modidx_cache(void);
 void scheme_clear_shift_cache(void);
 void scheme_clear_prompt_cache(void);
+
+Scheme_Object *scheme_module_imported_list(Scheme_Env *genv, Scheme_Object *bindings, Scheme_Object *modpath,
+                                           Scheme_Object *mode);
+Scheme_Object *scheme_module_exported_list(Scheme_Object *modpath, Scheme_Env *genv);
+
+void scheme_run_module(Scheme_Env *menv, int set_ns);
+void scheme_run_module_exptime(Scheme_Env *menv, int set_ns);
+
+Scheme_Object *scheme_module_to_namespace(Scheme_Object *name, Scheme_Env *env);
 
 /*========================================================================*/
 /*                         errors and exceptions                          */
@@ -2511,6 +2660,9 @@ long scheme_extract_index(const char *name, int pos, int argc,
 void scheme_get_substring_indices(const char *name, Scheme_Object *str,
 				  int argc, Scheme_Object **argv,
 				  int spos, int fpos, long *_start, long *_finish);
+void scheme_do_get_substring_indices(const char *name, Scheme_Object *str,
+                                     int argc, Scheme_Object **argv,
+                                     int spos, int fpos, long *_start, long *_finish, long len);
 
 void scheme_out_of_string_range(const char *name, const char *which,
 				Scheme_Object *i, Scheme_Object *s,
@@ -2697,11 +2849,14 @@ extern int scheme_force_port_closed;
 void scheme_flush_orig_outputs(void);
 Scheme_Object *scheme_file_stream_port_p(int, Scheme_Object *[]);
 Scheme_Object *scheme_terminal_port_p(int, Scheme_Object *[]);
-Scheme_Object *scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_do_open_input_file(char *name, int offset, int argc, Scheme_Object *argv[], int internal);
 Scheme_Object *scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv[], int and_read);
 Scheme_Object *scheme_file_position(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_file_buffer(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_file_identity(int argc, Scheme_Object *argv[]);
+
+void scheme_reserve_file_descriptor(void);
+void scheme_release_file_descriptor(void);
 
 long scheme_get_byte_string_or_ch_put(const char *who,
 				      Scheme_Object *port,
@@ -2724,6 +2879,8 @@ int scheme_user_port_write_probably_ready(Scheme_Output_Port *op, Scheme_Schedul
 int scheme_is_user_port(Scheme_Object *port);
 
 int scheme_byte_ready_or_user_port_ready(Scheme_Object *p, Scheme_Schedule_Info *sinfo);
+
+int scheme_pipe_char_count(Scheme_Object *p);
 
 #define CURRENT_INPUT_PORT(config) scheme_get_param(config, MZCONFIG_INPUT_PORT)
 #define CURRENT_OUTPUT_PORT(config) scheme_get_param(config, MZCONFIG_OUTPUT_PORT)
@@ -2775,8 +2932,10 @@ Scheme_Object *scheme_checked_caar(int argc, Scheme_Object **argv);
 Scheme_Object *scheme_checked_cadr(int argc, Scheme_Object **argv);
 Scheme_Object *scheme_checked_cdar(int argc, Scheme_Object **argv);
 Scheme_Object *scheme_checked_cddr(int argc, Scheme_Object **argv);
-Scheme_Object *scheme_checked_set_car (int argc, Scheme_Object *argv[]);
-Scheme_Object *scheme_checked_set_cdr (int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_checked_mcar(int argc, Scheme_Object **argv);
+Scheme_Object *scheme_checked_mcdr(int argc, Scheme_Object **argv);
+Scheme_Object *scheme_checked_set_mcar (int argc, Scheme_Object *argv[]);
+Scheme_Object *scheme_checked_set_mcdr (int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_checked_vector_ref(int argc, Scheme_Object **argv);
 Scheme_Object *scheme_checked_vector_set(int argc, Scheme_Object **argv);
 Scheme_Object *scheme_checked_string_ref(int argc, Scheme_Object *argv[]);
@@ -2784,6 +2943,12 @@ Scheme_Object *scheme_checked_string_set(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_checked_byte_string_ref(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_checked_byte_string_set(int argc, Scheme_Object *argv[]);
 Scheme_Object *scheme_checked_syntax_e(int argc, Scheme_Object **argv);
+
+Scheme_Bucket_Table *scheme_make_weak_equal_table(void);
+
+int scheme_hash_table_equal_rec(Scheme_Hash_Table *t1, Scheme_Hash_Table *t2, void *eql);
+int scheme_bucket_table_equal_rec(Scheme_Bucket_Table *t1, Scheme_Bucket_Table *t2, void *eql);
+int scheme_hash_tree_equal_rec(Scheme_Hash_Tree *t1, Scheme_Hash_Tree *t2, void *eql);
 
 void scheme_set_root_param(int p, Scheme_Object *v);
 

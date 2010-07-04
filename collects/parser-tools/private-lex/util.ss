@@ -1,11 +1,11 @@
 (module util mzscheme
-  (require (lib "list.ss"))
+  (require mzlib/list)
   
   (provide (all-defined))
 
   (define max-char-num #x10FFFF)
   
-  (define-struct lex-abbrev (abbrev))
+  (define-struct lex-abbrev (get-abbrev))
   (define-struct lex-trans (f))
   
   #;(define-syntax test-block

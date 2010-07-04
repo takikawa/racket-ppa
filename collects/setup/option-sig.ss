@@ -1,6 +1,6 @@
 
 (module option-sig mzscheme
-  (require (lib "unit.ss"))
+  (require mzlib/unit)
   
   (provide setup-option^)
 
@@ -11,10 +11,11 @@
      clean
      compile-mode
      make-zo
-     make-so
      make-info-domain
      make-launchers
      make-docs
+     make-user
+     make-planet
      call-install
      call-post-install
      pause-on-errors

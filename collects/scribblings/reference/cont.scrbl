@@ -1,15 +1,12 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
 @title[#:tag "cont"]{Continuations}
 
-See @secref["cont-model"] and @secref["prompt-model"] for
-general information about continuations. PLT Scheme's support for
-prompts and composable continuations most closely resembles Dorai
-Sitaram's @scheme[\%] and @scheme[fcontrol] operator @cite[#:key
-"cite:fcontrol" #:title "Handling Control" #:author "Dorai Sitaram"
-#:location "Programming Language Design and Implementation" #:date
-1993].
+See @secref["cont-model"] and @secref["prompt-model"] for general
+information about continuations. PLT Scheme's support for prompts and
+composable continuations most closely resembles Dorai Sitaram's
+@scheme[\%] and @scheme[fcontrol] operator @cite["Sitaram93"].
 
 Scheme installs a @defterm{continuation barrier} around evaluation in
 the following contexts, preventing full-continuation jumps across the
@@ -339,3 +336,7 @@ restore; in that case, the first step in a @scheme[pre-thunk] or
         (k (cons void esc)))))
   l)
 ]}
+
+@; ----------------------------------------------------------------------
+
+@include-section["control-lib.scrbl"]

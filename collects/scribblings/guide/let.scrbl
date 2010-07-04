@@ -1,7 +1,7 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require[(lib "eval.ss" "scribble")]
-@require["guide-utils.ss"]
+#lang scribble/doc
+@(require scribble/manual
+          scribble/eval
+          "guide-utils.ss")
 
 @title[#:tag "let"]{Local Binding}
 
@@ -177,7 +177,7 @@ results in a definition (see @secref["multiple-values"]),
 @specform[(letrec-values ([(id ...) expr] ...)
             body ...+)]
 
-Each @scheme[_expr] must produce as many values as coresponding
+Each @scheme[_expr] must produce as many values as corresponding
 @scheme[_id]s. The binding rules are the same for the forms
 without @schemekeywordfont{-values} forms: the @scheme[_id]s of
 @scheme[let-values] are bound only in the @scheme[_body]s, the

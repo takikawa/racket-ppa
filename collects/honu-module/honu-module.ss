@@ -1,15 +1,15 @@
 (module honu-module "private/mzscheme.ss"
 
-  (require-for-syntax (lib "stx.ss" "syntax")
+  (require-for-syntax syntax/stx
 		      "private/ops.ss"
 		      "private/util.ss"
-		      (lib "kerncase.ss" "syntax")
-                      (lib "name.ss" "syntax")
+		      syntax/kerncase
+                      syntax/name
 		      "private/contexts.ss")
   
   (begin-for-syntax
 
-   (define kernel-forms (kernel-form-identifier-list #'here))
+   (define kernel-forms (kernel-form-identifier-list))
    (define prop-expand-stop-forms (list* #'honu-typed
                                          #'honu-unparsed-block
                                          kernel-forms))
@@ -1268,7 +1268,7 @@
       
   (define-syntax (honu-type-info stx) (raise-syntax-error #f "shouldn't appear unquoted!" stx))
 
-  (require-for-syntax (lib "context.ss" "syntax"))
+  (require-for-syntax syntax/context)
   (define-syntax (honu-block stx)
     ;; A block can have mixed exprs and defns. Wrap expressions with
     ;; `(define-values () ... (values))' as needed, and add a (void)
@@ -1387,7 +1387,7 @@
   ;; --------------------------------------------------------
   ;; Defining a new transformer or new type
 
-  (require-for-syntax (lib "define.ss" "syntax"))
+  (require-for-syntax syntax/define)
   (define-syntax (define-honu-syntax stx)
     (let-values ([(id rhs) (normalize-definition stx #'lambda #f)])
       (with-syntax ([id id]
@@ -1685,9 +1685,6 @@
 
   ;; ----------------------------------------
   ;;  Pre-defined types
-
-  (define (exact-integer? v)
-    (and (integer? v) (exact? v)))
 
   (define-type int exact-integer?)
   (define-type bool boolean?)

@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
 @title[#:tag "inspectors"]{Structure Inspectors}
 
@@ -34,6 +34,14 @@ Returns a new inspector that is a subinspector of
 @scheme[inspector]. Any structure type controlled by the new inspector
 is also controlled by its ancestor inspectors, but no other
 inspectors.}
+
+
+@defproc[(make-sibling-inspector [inspector inspector? (current-inspector)])
+         inspector?]{
+
+Returns a new inspector that is a subinspector of the same inspector
+as @scheme[inspector]. That is, @scheme[inspector] and the result
+inspector control mutually disjoint sets of structure types.}
 
 
 @defparam[current-inspector insp inspector?]{

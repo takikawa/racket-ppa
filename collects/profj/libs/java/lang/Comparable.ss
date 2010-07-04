@@ -1,5 +1,4 @@
-#cs
-(module Comparable mzscheme
-  (require (lib "class.ss"))
-  (provide (all-defined))
+(module Comparable scheme/base
+  (require scheme/class)
+  (provide (all-defined-out))
   (define Comparable (interface () compareTo-java.lang.Object)))

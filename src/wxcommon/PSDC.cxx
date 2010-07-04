@@ -4,7 +4,7 @@
  * Author:      Julian Smart
  * Created:     1993
  * Updated:	August 1994
- * Copyright:   (c) 2004-2007 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2008 PLT Scheme Inc.
  * Copyright:   (c) 1993, AIAI, University of Edinburgh
  */
 
@@ -2020,6 +2020,11 @@ void wxPostScriptDC::GetTextExtent (const char *string, double *x, double *y,
 			    x, y, descent, topSpace, sym_map);
 }
 
+int wxPostScriptDC::CacheFontMetricsKey()
+{
+  return 2;
+}
+
 void wxPostScriptDC::SetMapMode (int WXXTUNUSED(mode))
 {
 #ifndef wx_xt
@@ -2379,11 +2384,6 @@ Bool wxPrintSetupData::ShowNative(wxWindow *parent)
 void wxInitializePrintSetupData(Bool /* init */)
 {
   wxPrintSetupData *wxThePrintSetupData;
-  
-#ifdef wx_mac
-  wxThePrintPaperDatabase = new WXGC_PTRS wxPrintPaperDatabase;
-  wxThePrintPaperDatabase->CreateDatabase();
-#endif
   
   wxThePrintSetupData = new WXGC_PTRS wxPrintSetupData;
   

@@ -21,11 +21,11 @@
 ;;; ------------------------------------------------------------
 
 (module known mzscheme
-  (require (lib "unit.ss")
-	  (lib "list.ss")
-	  (lib "etc.ss"))
+  (require mzlib/unit
+	  mzlib/list
+	  mzlib/etc)
 
-  (require (lib "zodiac-sig.ss" "syntax"))
+  (require syntax/zodiac-sig)
 
   (require "sig.ss")
   (require "../sig.ss")
@@ -73,11 +73,13 @@
 	  (make-binding #f #f #f #f #f #f
 			#f #f #f (make-rep:atomic 'wcm-saver))))
 
+      (define ns (make-namespace))
+
       ;; Determine whether a varref is a known primitive
       (define (analyze:prim-fun fun)
 	(and (zodiac:top-level-varref? fun)
 	     (varref:has-attribute? fun varref:primitive)
-	     (primitive? (namespace-variable-value (zodiac:varref-var fun)))
+	     (primitive? (namespace-variable-value (zodiac:varref-var fun) #t #f ns))
 	     (zodiac:varref-var fun)))
 
       ;; Some prims call given procedures directly, some install procedures
@@ -227,7 +229,7 @@
 		      [(char->integer) 
 		       (with-handlers ([void (lambda (x) v)])
 			 (let ([args (map (lambda (a) (syntax-e (zodiac:zodiac-stx (zodiac:quote-form-expr a)))) args)])
-			   (let ([new-v (apply (namespace-variable-value fun) args)])
+			   (let ([new-v (apply (namespace-variable-value fun #t #f ns) args)])
 			     (zodiac:make-quote-form
 			      (zodiac:zodiac-stx v)
 			      (make-empty-box)
@@ -323,7 +325,10 @@
 					vars)])
 			
 			(for-each set-annotation! vars bindings)
-			(set-car! (zodiac:let-values-form-vals ast) val)
+                        (zodiac:set-let-values-form-vals!
+                         ast
+                         (cons val
+                               (cdr (zodiac:let-values-form-vals ast))))
 			
 			(if (= 1 (length vars))
 			    
@@ -406,13 +411,9 @@
 		     ;; analyze the branches
 		     [(zodiac:begin-form? ast)
 		      
-		      (let loop ([bodies (zodiac:begin-form-bodies ast)])
-			(if (null? (cdr bodies))
-			    (let ([e (analyze! (car bodies))])
-			      (set-car! bodies e))
-			    (begin
-			      (set-car! bodies (analyze! (car bodies)))
-			      (loop (cdr bodies)))))
+                      (zodiac:set-begin-form-bodies!
+                       ast
+                       (map analyze! (zodiac:begin-form-bodies ast)))
 		      
 		      ast]
 		     
@@ -493,7 +494,7 @@
 			      (and primfun
 				   (let* ([num-args (length args)]
 					  [arity-ok? (procedure-arity-includes?
-						      (namespace-variable-value primfun)
+						      (namespace-variable-value primfun #t #f ns)
 						      num-args)])
 				     (unless arity-ok?
 				       ((if (compiler:option:stupid)

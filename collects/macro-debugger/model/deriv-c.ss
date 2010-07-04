@@ -1,165 +1,174 @@
 
-(module deriv-c mzscheme
-  (provide (all-defined))
+#lang scheme/base
+(provide (all-defined-out))
 
-  ;; A Derivation is either
-  ;;   - a PRule
-  ;;   - (make-mrule syntax syntax Transformation Derivation)
-  ;;   - (make-lift-deriv syntax syntax Derivation syntax Derivation)
-  ;;   - (make-lift/let-deriv syntax syntax Derivation syntax Derivation)
-  (define-struct deriv (e1 e2) #f)
-  (define-struct (mrule deriv) (transformation next) #f)
-  (define-struct (lift-deriv deriv) (first lift-stx second) #f)
-  (define-struct (lift/let-deriv deriv) (first lift-stx second) #f)
+;; A Node(a) is:
+;;   (make-node a ?a)
+(define-struct node (z1 z2) #:transparent)
 
-  ;; A Transformation is
-  ;;   (make-transformation syntax syntax (listof identifier) syntax syntax (listof LocalAction))
-  ;; - resolves is the list of identifiers resolved by the macro keyword
-  ;; - me1 is the marked version of the input syntax
-  ;; - me2 is the marked version of the output syntax
-  (define-struct transformation (e1 e2 resolves me1 me2 locals seq) #f)
+;; A TopDeriv is one of
+;;   (make-lift-deriv <Node(Stx)> Deriv Stxs TopDeriv)
+;;   Deriv
 
-  ;; A LocalAction is one of
-  ;;  - (make-local-expansion Syntax Syntax Syntax Syntax boolean Derivation)
-  ;;  - (make-local-expansion/expr Syntax Syntax Syntax Syntax boolean Derivation)
-  ;;  - (make-local-lift Syntax Identifier)
-  (define-struct local-expansion (e1 e2 me1 me2 for-stx? deriv) #f)
-  (define-struct local-expansion/expr (e1 e2 me1 me2 for-stx? opaque deriv) #f)
-  (define-struct local-lift (expr id) #f)
-  (define-struct local-lift-end (decl) #f)
-  (define-struct local-bind (deriv) #f)
+;; A Deriv is one of
+;;   MRule
+;;   PrimDeriv
 
-  ;; A PRule is one of ...
-  (define-struct (prule deriv) (resolves) #f)
+;; Base = << Node(Stx) Rs ?exn >>
 
-  ;; Lexical or Mapped Variable
-  (define-struct (p:variable prule) () #f)
-  
-  ;; Definitions: one subterm each
-  (define-struct (p:define-syntaxes prule) (rhs) #f)
-  (define-struct (p:define-values prule) (rhs) #f)
-  
-  ;; Simple expressions
-  (define-struct (p:expression prule) (inner) #f)
-  (define-struct (p:if prule) (full? test then else) #f)
-  (define-struct (p:wcm prule) (key mark body) #f)
-  (define-struct (p:set! prule) (id-resolves rhs) #f)
-  (define-struct (p:set!-macro prule) (deriv) #f)
-  
-  ;; Sequence-containing expressions
-  (define-struct (p:begin prule) (lderiv) #f)
-  (define-struct (p:begin0 prule) (first lderiv) #f)
-  (define-struct (p:#%app prule) (tagged-stx lderiv) #f)
+(define-struct (deriv node) () #:transparent)
+(define-struct (base deriv) (resolves ?1) #:transparent)
 
-  ;; Binding expressions
-  (define-struct (p:lambda prule) (renames body) #f)
-  (define-struct (p:case-lambda prule) (renames+bodies) #f)
-  (define-struct (p:let-values prule) (renames rhss body) #f)
-  (define-struct (p:letrec-values prule) (renames rhss body) #f)
-  (define-struct (p:letrec-syntaxes+values prule) (srenames srhss vrenames vrhss body) #f)
-  
-  ;; Atomic primitives: no subterms
-  (define-struct (p::STOP prule) () #f)
-  (define-struct (p:#%datum p::STOP) (tagged-stx) #f)
-  (define-struct (p:#%top p::STOP) (tagged-stx) #f)
-  (define-struct (p:quote p::STOP) () #f)
-  (define-struct (p:quote-syntax p::STOP) () #f)
-  (define-struct (p:require p::STOP) () #f)
-  (define-struct (p:require-for-syntax p::STOP) () #f)
-  (define-struct (p:require-for-template p::STOP) () #f)
-  (define-struct (p:provide p::STOP) () #f)
+(define-struct (lift-deriv deriv) (first lift-stx second) #:transparent)
+(define-struct (tagrule deriv) (tagged-stx next) #:transparent)
 
-  ;; for stop expander
-  (define-struct (p:stop p::STOP) () #f)
-  ;; for early primitive errors
-  (define-struct (p:unknown p::STOP) () #f)
-  
-  ;; Module stuff.... hairy
-  (define-struct (p:module prule) (one-body-form? body) #f)
-  (define-struct (p:#%module-begin prule) (pass1 pass2) #f)
-  ;; where pass1 is a ModPass1
-  ;;   and pass2 is a ModPass2
+;; A DerivLL is one of
+;;   (make-lift/let-deriv <Node(Stx)> Deriv Stx Deriv)
+;;   Deriv
+(define-struct (lift/let-deriv deriv) (first lift-stx second) #:transparent)
 
-  ;; Artificial Rename
-  ;; FIXME: Go back and add more info later, such as rename-identity
-  (define-struct (p:rename prule) (renames inner) #f)
+;; A MRule is
+;;   (make-mrule <Base(Stx)> ?Stx (listof LocalAction) ?exn ?Stx ?Deriv)
+(define-struct (mrule base) (me1 locals me2 ?2 etx next) #:transparent)
 
-  ;; Synthetic primitive
-  (define-struct (p:synth prule) (subterms) #f)
-  ;; where subterms is list-of-Subterm
+;; A LocalAction is one of
+;;   (make-local-expansion <Node(Stx)> Stx ?Stx Boolean Deriv)
+;;   (make-local-expansion/expr <Node(Stx)> Stx ?Stx Boolean ?Opaque Deriv)
+;;   (make-local-lift Stx Identifier)
+;;   (make-local-lift-end Stx)
+;;   (make-local-bind BindSyntaxes)
+(define-struct (local-expansion node) (for-stx? me1 inner lifted me2 opaque)
+  #:transparent)
+(define-struct local-lift (expr id) #:transparent)
+(define-struct local-lift-end (decl) #:transparent)
+(define-struct local-bind (names ?1 renames bindrhs) #:transparent)
 
-  ;; A Subterm is one of
-  ;;   - (make-s:subterm Path Derivation)
-  ;;   - (make-s:rename Path Syntax Syntax)
-  (define-struct s:subterm (path deriv) #f)
-  (define-struct s:rename (path before after) #f)
+;; A PrimDeriv is one of
+(define-struct (prule base) () #:transparent)
+(define-struct (p:variable prule) () #:transparent)
 
-  ;; A ListDerivation is (make-lderiv Syntaxes Syntaxes (listof Derivation))
-  (define-struct lderiv (es1 es2 derivs) #f)
+;;   (make-p:module <Base> ?exn ?stx stx ?Deriv ?stx ?exn Deriv ?stx)
+;;   (make-p:#%module-begin <Base> Stx ModulePass1 ModulePass2 ?exn)
+(define-struct (p:module prule) (?2 tag rename check tag2 ?3 body shift)
+  #:transparent)
+(define-struct (p:#%module-begin prule) (me pass1 pass2 ?2) #:transparent)
 
-  ;; A BlockDerivation is (make-bderiv syntax-list syntax-list BlockPass1 Transition LDeriv)
-  ;;   where Transition = (union 'letrec 'list)
-  (define-struct bderiv (es1 es2 pass1 trans pass2) #f)
+;;   (make-p:define-syntaxes <Base> DerivLL)
+;;   (make-p:define-values <Base> Deriv)
+(define-struct (p:define-syntaxes prule) (rhs ?2) #:transparent)
+(define-struct (p:define-values prule) (rhs) #:transparent)
 
-  ;; A BlockPass1 is list-of-BRule
-  ;; A BRule is one of
-  ;;   - (make-b:defvals BlockRename Derivation/#f)
-  ;;   - (make-b:devstx BlockRename Derivation Derivation)
-  ;;   - (make-b:splice BlockRename Derivation Syntaxes)
-  ;;   - (make-b:expr BlockRename Derivation)
-  ;;   - (make-b:begin BlockRename Derivation List-of-BRule)
-  ;;     This last only used in macro-hiding
-  ;; A BlockRename is (cons syntax syntax)
-  ;; It always applies only to the current block element
+;;   (make-p:#%expression <Base> Deriv ?Stx)
+;;   (make-p:if <Base> Boolean Deriv Deriv Deriv)
+;;   (make-p:wcm <Base> Deriv Deriv Deriv)
+;;   (make-p:set! <Base> Rs Deriv)
+;;   (make-p:set!-macro <Base> Rs Deriv)
+(define-struct (p:#%expression prule) (inner untag) #:transparent)
+(define-struct (p:if prule) (test then else) #:transparent)
+(define-struct (p:wcm prule) (key mark body) #:transparent)
+(define-struct (p:set! prule) (id-resolves rhs) #:transparent)
+(define-struct (p:set!-macro prule) (deriv) #:transparent)
 
-  (define-struct brule (renames) #f)
-  (define-struct (b:defvals brule) (head) #f)
-  (define-struct (b:defstx brule) (deriv rhs) #f)
-  (define-struct (b:splice brule) (head tail) #f)
-  (define-struct (b:expr brule) (head) #f)
-  (define-struct (b:begin brule) (head inner) #f)
+;;   (make-p:#%app <Base> Stx LDeriv)
+;;   (make-p:begin <Base> LDeriv)
+;;   (make-p:begin0 <Base> Deriv LDeriv)
+(define-struct (p:#%app prule) (lderiv) #:transparent)
+(define-struct (p:begin prule) (lderiv) #:transparent)
+(define-struct (p:begin0 prule) (first lderiv) #:transparent)
 
-  ;; A ModPass1 is a list of ModRule1
-  ;; A ModRule1 is one of 
-  ;;   - (make-mod:prim Derivation ModPrim)
-  ;;   - (make-mod:splice Derivation tail)
-  ;;   - (make-mod:lift Derivation tail)
-  ;;   - (make-mod:begin Derivation (list-of ModRule1))
+;;   (make-p:lambda <Base> LambdaRenames BDeriv)
+;;   (make-p:case-lambda <Base> (list-of CaseLambdaClause))
+;;   (make-p:let-values <Base> LetRenames (list-of Deriv) BDeriv)
+;;   (make-p:letrec-values <Base> LetRenames (list-of Deriv) BDeriv)
+;;   (make-p:letrec-syntaxes+values <Base> LSVRenames (list-of BindSyntaxes) (list-of Deriv) BDeriv ?Stx)
+(define-struct (p:lambda prule) (renames body) #:transparent)
+(define-struct (p:case-lambda prule) (renames+bodies) #:transparent)
+(define-struct (p:let-values prule) (renames rhss body) #:transparent)
+(define-struct (p:letrec-values prule) (renames rhss body) #:transparent)
+(define-struct (p:letrec-syntaxes+values prule)
+  (srenames sbindrhss vrenames vrhss body tag)
+  #:transparent)
 
-  ;; A ModPrim is a PRule in:
-  ;;   - (make-p:define-values syntax syntax () #f)
-  ;;   - (make-p:define-syntaxes syntax syntax () Derivation)
-  ;;   - (make-p:require syntax syntax ())
-  ;;   - (make-p:require-for-syntax syntax syntax ())
-  ;;   - (make-p:require-for-template syntax syntax ())
-  ;;   - (make-p:provide syntax syntax ())
-  ;;   - #f
+;;   (make-p:stop <Base>)
+;;   (make-p:unknown <Base>)
+;;   (make-p:#%top <Base> Stx)
+;;   (make-p:#%datum <Base> Stx)
+;;   (make-p:quote <Base>)
+;;   (make-p:quote-syntax <Base>)
+;;   (make-p:require <Base>)
+;;   (make-p:require-for-syntax <Base>)
+;;   (make-p:require-for-template <Base>)
+;;   (make-p:provide <Base>)
+;;   (make-p:#%variable-reference <Base>)
+(define-struct (p::STOP prule) () #:transparent)
+(define-struct (p:stop p::STOP) () #:transparent)
+(define-struct (p:unknown p::STOP) () #:transparent)
+(define-struct (p:#%top p::STOP) () #:transparent)
+(define-struct (p:#%datum p::STOP) () #:transparent)
+(define-struct (p:quote p::STOP) () #:transparent)
+(define-struct (p:quote-syntax p::STOP) () #:transparent)
+(define-struct (p:require p::STOP) () #:transparent)
+(define-struct (p:require-for-syntax p::STOP) () #:transparent)
+(define-struct (p:require-for-template p::STOP) () #:transparent)
+(define-struct (p:provide p::STOP) () #:transparent)
+(define-struct (p:#%variable-reference p::STOP) () #:transparent)
 
-  ;; A ModPass2 is a list of ModRule2
-  ;; A ModRule2 is one of
-  ;;   - (make-mod:skip)
-  ;;   - (make-mod:cons Derivation)
-  ;;   - (make-mod:lift Derivation syntaxes)
+;; A LDeriv is
+;;   (make-lderiv <Node(Stxs)> ?exn (list-of Deriv))
+(define-struct (lderiv node) (?1 derivs) #:transparent)
 
-  (define-struct modrule () #f)
-  (define-struct (mod:cons modrule) (head) #f)
-  (define-struct (mod:prim modrule) (head prim) #f)
-  (define-struct (mod:skip modrule) () #f)
-  (define-struct (mod:splice modrule) (head tail) #f)
-  (define-struct (mod:lift modrule) (head tail) #f)
-  (define-struct (mod:lift-end modrule) (tail) #f)
-  (define-struct (mod:begin modrule) (head inner) #f)
+;; A BDeriv is
+;;   (make-bderiv <Node(Stxs)> (list-of BRule) (U 'list 'letrec) LDeriv)
+(define-struct (bderiv node) (pass1 trans pass2) #:transparent)
 
-  ;; Handling Syntax Errors
-  ;; ----------------------
+;; A BRule is one of
+;;   (make-b:error exn)
+;;   (make-b:expr BlockRenames Deriv)
+;;   (make-b:splice BlockRenames Deriv ?exn Stxs ?exn)
+;;   (make-b:defvals BlockRenames Deriv ?exn Stx ?exn)
+;;   (make-b:defstx BlockRenames Deriv ?exn Stx ?exn BindSyntaxes)
+(define-struct b:error (?1) #:transparent)
+(define-struct brule (renames) #:transparent)
+(define-struct (b:expr brule) (head) #:transparent)
+(define-struct (b:splice brule) (head ?1 tail ?2) #:transparent)
+(define-struct (b:defvals brule) (head ?1 rename ?2) #:transparent)
+(define-struct (b:defstx brule) (head ?1 rename ?2 bindrhs) #:transparent)
 
-  ;; An interrupted node is (make-interrupted-wrap symbol node)
-  ;; where node is one of Derivation, ListDerivation, BlockDerivation,
-  ;;   PRule, MRule, BRule, or ModRule
-  (define-struct interrupted-wrap (tag inner) #f)
+;; A BindSyntaxes is
+;;   (make-bind-syntaxes DerivLL ?exn)
+(define-struct bind-syntaxes (rhs ?1) #:transparent)
 
-  ;; An error-wrapped node is (make-error-wrap exception symbol node)
-  ;; where node is one of PRule, MRule, BRule, or ModRule
-  (define-struct error-wrap (exn tag inner) #f)
-  
-  )
+;; A CaseLambdaClause is
+;;   (make-clc ?exn CaseLambdaRename BDeriv)
+(define-struct clc (?1 renames body) #:transparent)
+
+;; A BlockRename is (cons Stx Stx)
+
+;; A ModPass1 is (list-of ModRule1)
+;; A ModPass2 is (list-of ModRule2)
+
+;; A ModRule1 is one of 
+;;   (make-mod:prim Deriv Stx ModPrim)
+;;   (make-mod:splice Deriv Stx ?exn Stxs)
+;;   (make-mod:lift Deriv ?Stxs Stxs)
+;;   (make-mod:lift-end Stxs)
+;; A ModRule2 is one of
+;;   (make-mod:skip)
+;;   (make-mod:cons Deriv)
+;;   (make-mod:lift Deriv Stxs)
+(define-struct modrule () #:transparent)
+(define-struct (mod:prim modrule) (head rename prim) #:transparent)
+(define-struct (mod:splice modrule) (head rename ?1 tail) #:transparent)
+(define-struct (mod:lift modrule) (head renames tail) #:transparent)
+(define-struct (mod:lift-end modrule) (tail) #:transparent)
+(define-struct (mod:cons modrule) (head) #:transparent)
+(define-struct (mod:skip modrule) () #:transparent)
+
+;; A ModPrim is a PRule in:
+;;   (make-p:define-values <Base> #:transparent)
+;;   (make-p:define-syntaxes <Base> Deriv)
+;;   (make-p:require <Base>)
+;;   (make-p:require-for-syntax <Base>)
+;;   (make-p:require-for-template <Base>)
+;;   (make-p:provide <Base>)
+;;   #f

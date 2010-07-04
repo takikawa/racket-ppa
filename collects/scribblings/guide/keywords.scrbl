@@ -1,11 +1,11 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require[(lib "eval.ss" "scribble")]
-@require["guide-utils.ss"]
+#lang scribble/doc
+@(require scribble/manual
+          scribble/eval
+          "guide-utils.ss")
 
 @title[#:tag "keywords"]{Keywords}
 
-A @defterm{keyword} value is similar to a symbol (see
+A @deftech{keyword} value is similar to a symbol (see
 @secref["symbols"]), but its printed form is prefixed with
 @litchar{#:}.
 
@@ -31,15 +31,19 @@ not-a-symbol-expression
 ]
 
 Despite their similarities, keywords are used in a different way than
-identifiers or symbols. Keywords are intented for use (unquoted) as
-special markers in argument lists and in certain syntactic forms.
-
-@italic{Need some examples here, once we have more keyword-based
-procedures and syntax in place...}
-
-Keywords should not be used simply as another kind of symbol. Use
-symbols, instead of keywords, for run-time flags and enumerations.
+identifiers or symbols. Keywords are intended for use (unquoted) as
+special markers in argument lists and in certain syntactic forms.  For
+run-time flags and enumerations, use symbols instead of keywords.  The
+example below illustrates the distinct roles of keywords and symbols.
 
 @examples[
-(code:line (bytes->path #"/usr/tmp" 'unix) (code:comment #, @t{@scheme['unix], not @scheme['#:unix]}))
+(code:line (define dir (find-system-path 'temp-dir)) (code:comment #, @t{not @scheme['#:temp-dir]}))
+(with-output-to-file (build-path dir "stuff.txt")
+  (lambda () (printf "example\n"))
+  (code:comment #, @t{optional @scheme[#:mode] argument can be @scheme['text] or @scheme['binary]})
+  #:mode 'text
+  (code:comment #, @t{optional @scheme[#:exists] argument can be @scheme['replace], @scheme['truncate], ...})
+  #:exists 'replace)
 ]
+
+@interaction-eval[(delete-file (build-path (find-system-path 'temp-dir) "stuff.txt"))]

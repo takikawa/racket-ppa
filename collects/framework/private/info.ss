@@ -1,3 +1,3 @@
-(module info (lib "infotab.ss" "setup")
-  (define name "Framework private")
-  (define compile-omit-files '("standard-menus.ss")))
+#lang setup/infotab
+
+(define compile-omit-paths '("standard-menus.ss"))

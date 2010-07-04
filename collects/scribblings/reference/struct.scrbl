@@ -1,14 +1,19 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss"
+          (for-label scheme/struct-info))
 
-@title[#:tag "structures"]{Structures}
+@(define struct-eval (make-base-eval))
+
+@title[#:tag "structures" #:style 'toc]{Structures}
 
 @guideintro["define-struct"]{structure types via @scheme[define-struct]}
 
-A @deftech{structure type} is a record datatype composing a number
-of @idefterm{fields}. A @pidefterm{structure}, an instance of a
-structure type, is a first-class value that contains a value for each
-field of the structure type. A structure instance is created with a
+@local-table-of-contents[]
+
+A @deftech{structure type} is a record datatype composing a number of
+@idefterm{fields}. A @deftech{structure}, an instance of a structure
+type, is a first-class value that contains a value for each field of
+the structure type. A structure instance is created with a
 type-specific @tech{constructor} procedure, and its field values are
 accessed and changed with type-specific @tech{accessor} and
 @tech{mutator} procedures. In addition, each structure type has a
@@ -46,6 +51,21 @@ accessed with subtype-specific selectors. Subtype-specific
 @tech{accessors} and @tech{mutators} for the first @math{m} fields do
 not exist.
 
+The @scheme[define-struct] form and @scheme[make-struct-type]
+procedure typically create a new structure type, but they can also
+access @deftech{prefab} (i.e., previously fabricated) structure types
+that are globally shared, and whose instances can be parsed and
+written by the default reader (see @secref["reader"]) and printer (see
+@secref["printing"]). Prefab structure types can inherit only from
+other prefab structure types, and they cannot have guards (see
+@secref["creatingmorestructs"]) or properties (see
+@secref["structprops"]). Exactly one prefab structure type exists for
+each combination of name, supertype, field count, automatic field
+count, automatic field value (when there is at least one automatic
+field), and field mutability.
+
+@refalso["serialization"]{reading and writing structures}
+
 @index['("structures" "equality")]{Two} structure values are
 @scheme[eqv?] if and only if they are @scheme[eq?]. Two structure
 values are @scheme[equal?] if they are @scheme[eq?], or if they are
@@ -62,19 +82,19 @@ structures depends on the current inspector.)
 
 @defproc[(make-struct-type [name symbol?]
                            [super-type (or/c struct-type? false/c)]
-                           [init-field-cnt nonnegative-exact-integer?]
-                           [auto-field-cnt nonnegative-exact-integer?]
+                           [init-field-cnt exact-nonnegative-integer?]
+                           [auto-field-cnt exact-nonnegative-integer?]
                            [auto-v any/c #f]
                            [props (listof (cons/c struct-type-property?
                                                   any/c))
                                   null]
-                           [inspector (or/c inspector? false/c)
+                           [inspector (or/c inspector? false/c (one-of/c 'prefab))
                                       (current-inspector)]
                            [proc-spec (or/c procedure?
-                                            nonnegative-exact-integer?
+                                            exact-nonnegative-integer?
                                             false/c)
                                       #f]
-                           [immutables (listof nonnegative-exact-integer?)
+                           [immutables (listof exact-nonnegative-integer?)
                                        null]
                            [guard (or/c procedure? false/c) #f])
           (values struct-type?
@@ -83,24 +103,31 @@ structures depends on the current inspector.)
                   struct-accessor-procedure?
                   struct-mutator-procedure?)]{
 
-Creates a new structure type.  The @scheme[name] argument is used as
-the type name. If @scheme[super-type] is not @scheme[#f], the new type
-is a subtype of the corresponding structure type.
+Creates a new structure type, unless @scheme[inspector] is
+@scheme['prefab], in which case @scheme[make-struct-type] accesses a
+@techlink{prefab} structre type.  The @scheme[name] argument is used
+as the type name. If @scheme[super-type] is not @scheme[#f], the
+resulting type is a subtype of the corresponding structure type.
 
-The new structure type has @math{@scheme[init-field-cnt]+@scheme[auto-field-cnt]}
-fields (in addition to any fields from @scheme[super-type]), but only
+The resulting structure type has
+@math{@scheme[init-field-cnt]+@scheme[auto-field-cnt]} fields (in
+addition to any fields from @scheme[super-type]), but only
 @scheme[init-field-cnt] constructor arguments (in addition to any
-constructor arguments from @scheme[super-type]). The remaining
-fields are initialized with @scheme[auto-v].
+constructor arguments from @scheme[super-type]). The remaining fields
+are initialized with @scheme[auto-v]. The total field count (including
+@scheme[super-type] fields) must be no more than 32768.
 
 The @scheme[props] argument is a list of pairs, where the @scheme[car]
 of each pair is a structure type property descriptor, and the
 @scheme[cdr] is an arbitrary value. See @secref["structprops"] for
-more information about properties.
+more information about properties. When @scheme[inspector] is
+@scheme['prefab], then @scheme[props] must be @scheme[null].
 
-The @scheme[inspector] argument controls access to reflective
+The @scheme[inspector] argument normally controls access to reflective
 information about the structure type and its instances; see
-@secref["inspectors"] for more information.
+@secref["inspectors"] for more information. If @scheme[inspector] is
+@scheme['prefab], then the resulting @tech{prefab} structure type and
+its instances are always transparent.
 
 If @scheme[proc-spec] is an integer or procedure, instances of the
 structure type act as procedures. See @scheme[prop:procedure] for
@@ -118,21 +145,22 @@ positions. Each element in the list must be unique, otherwise
 
 The @scheme[guard] argument is either a procedure of @math{n}
 arguments or @scheme[#f], where @math{n} is the number of arguments
-for the new structure type's constructor (i.e., @scheme[init-field-cnt]
-plus constructor arguments implied by @scheme[super-type], if any). If
-@scheme[guard] is a procedure, then the procedure is called
-whenever an instance of the type is constructed, or whenever an
-instance of a subtype is created.  The arguments to
-@scheme[guard] are the values provided for the structure's first
-@math{n} fields, followed by the name of the instantiated structure
-type (which is @scheme[name], unless a subtype is instantiated). The
-@scheme[guard] result must be @math{n} values, which become the
-actual values for the structure's fields. The @scheme[guard] can
-raise an exception to prevent creation of a structure with the given
-field values. If a structure subtype has its own guard, the subtype
-guard is applied first, and the first @math{n} values produced by the
-subtype's guard procedure become the first @math{n} arguments to
-@scheme[guard].
+for the new structure type's constructor (i.e.,
+@scheme[init-field-cnt] plus constructor arguments implied by
+@scheme[super-type], if any). If @scheme[guard] is a procedure, then
+the procedure is called whenever an instance of the type is
+constructed, or whenever an instance of a subtype is created.  The
+arguments to @scheme[guard] are the values provided for the
+structure's first @math{n} fields, followed by the name of the
+instantiated structure type (which is @scheme[name], unless a subtype
+is instantiated). The @scheme[guard] result must be @math{n} values,
+which become the actual values for the structure's fields. The
+@scheme[guard] can raise an exception to prevent creation of a
+structure with the given field values. If a structure subtype has its
+own guard, the subtype guard is applied first, and the first @math{n}
+values produced by the subtype's guard procedure become the first
+@math{n} arguments to @scheme[guard]. When @scheme[inspector] is
+@scheme['prefab], then @scheme[guard] must be @scheme[#f].
 
 The result of @scheme[make-struct-type] is five values:
 
@@ -155,6 +183,7 @@ The result of @scheme[make-struct-type] is five values:
 }
 
 @examples[
+#:eval struct-eval
 (define-values (struct:a make-a a? a-ref a-set!)
   (make-struct-type 'a #f 2 1 'uninitialized))
 (define an-a (make-a 'x 'y))
@@ -165,6 +194,7 @@ The result of @scheme[make-struct-type] is five values:
 ]
 
 @interaction[
+#:eval struct-eval
 (define-values (struct:b make-b b? b-ref b-set!)
   (make-struct-type 'b struct:a 1 2 'b-uninitialized))
 (define a-b (make-b 'x 'y 'z))
@@ -176,6 +206,7 @@ The result of @scheme[make-struct-type] is five values:
 ]
 
 @interaction[
+#:eval struct-eval
 (define-values (struct:c make-c c? c-ref c-set!)
   (make-struct-type
    'c struct:b 0 0 #f null (make-inspector) #f null
@@ -189,6 +220,16 @@ The result of @scheme[make-struct-type] is five values:
 (define a-c (make-c 'x 2 'z))
 (a-ref a-c 1)
 ]}
+
+@interaction[
+#:eval struct-eval
+(define p1 #s(p a b c))
+(define-values (struct:p make-p p? p-ref p-set!)
+  (make-struct-type 'p #f 3 0 #f null 'prefab #f '(0 1 2)))
+(p? p1)
+(p-ref p1 0)
+(make-p 'x 'y 'z)
+]
 
 @defproc[(make-struct-field-accessor [accessor-proc struct-accessot-procedure?]
                                      [field-pos exact-nonnegative-integer?]
@@ -277,6 +318,7 @@ exception. Such an exception prevents @scheme[make-struct-type] from
 returning a structure type descriptor.
 
 @examples[
+#:eval struct-eval
 (define-values (prop:p p? p-ref) (make-struct-type-property 'p))
 
 (define-values (struct:a make-a a? a-ref a-set!)
@@ -299,6 +341,40 @@ Returns @scheme[#t] if @scheme[v] is a @tech{structure type property
 descriptor} value, @scheme[#f] otherwise.
 
 }
+
+@;------------------------------------------------------------------------
+@section[#:tag "struct-copy"]{Copying and Updating Structures}
+
+@defform[(struct-copy id struct-expr [field-id expr] ...)]{
+
+Creates a new instance of the structure type @scheme[id] with the same
+field values as the structure produced by @scheme[struct-expr], except
+that the value of each supplied @scheme[field-id] is instead
+determined by the corresponding @scheme[expr].
+
+The @scheme[id] must have a @tech{transformer binding} that
+encapsulates information about a structure type (i.e., like the
+initial identifier bound by @scheme[define-struct]), and the binding
+must supply a constructor, a predicate, and all field accessors.
+
+Each @scheme[field-id] is combined with @scheme[id] to form
+@scheme[id]@schemeidfont{-}@scheme[field-id] (using the lexical
+context of @scheme[field-id]), which must be one of the accessor
+bindings in @scheme[id]. The accessor bindings determined by different
+@scheme[field-id]s must be distinct. The order of the
+@scheme[field-id]s need not match the order of the corresponding
+fields in the structure type.
+
+The @scheme[struct-expr] is evaluated first. The result must be an
+instance of the @scheme[id] structure type, otherwise the
+@exnraise[exn:fail:contract]. Next, the field @scheme[expr]s are
+evaluated in order (even if the fields that correspond to the
+@scheme[field-id]s are in a different order). Finally, the new
+structure instance is created.
+
+The result of @scheme[struct-expr] can be an instance of a sub-type of
+@scheme[id], but the resulting copy is an immediate instance of
+@scheme[id] (not the sub-type).}
 
 @;------------------------------------------------------------------------
 @section[#:tag "structutils"]{Structure Utilities}
@@ -343,6 +419,83 @@ is inaccessible.)}
  @scheme[define-struct], @scheme[make-struct-type], or
  @scheme[make-struct-field-mutator], @scheme[#f] otherwise.}
 
+@defproc[(prefab-struct-key [v any/c]) (or/c false/c symbol? list?)]{
+
+Returns @scheme[#f] if @scheme[v] is not an instance of a
+@tech{prefab} structure type. Otherwise, the result is the shorted key
+that could be with @scheme[make-prefab-struct] to create an instance
+of the structure type.
+
+@examples[
+(prefab-struct-key #s(cat "Garfield"))
+(define-struct cat (name) #:prefab)
+(define-struct (cute-cat cat) (shipping-dest) #:prefab)
+(make-cute-cat "Nermel" "Abu Dhabi")
+]}
+
+
+@defproc[(make-prefab-struct [key (or/c symbol? list?)] [v any/c] ...) struct?]{
+
+Creates an instance of a @tech{prefab} structure type, using the
+@scheme[v]s as field values. The @scheme[key] and the number of
+@scheme[v]s determine the @tech{prefab} structure type.
+
+A @scheme[key] identifies a structure type based on a list with the
+following items:
+
+@itemize{
+
+ @item{A symbol for the structure type's name.}
+
+ @item{An exact, nonnegative integer representing the number of
+       non-automatic fields in the structure type, not counting fields
+       from the supertype (if any).}
+
+ @item{A list of two items, where the first is an exact, nonnegative
+       integer for the number of automatic fields in the structure
+       type that are not from the supertype (if any), and the second
+       element is an arbitrary value that is the value for the
+       automatic fields.}
+
+ @item{A vector of exact, nonnegative integers that indicate mutable
+       non-automatic fields in the structure type, counting from
+       @scheme[0] and not including fields from the supertype (if
+       any).}
+
+ @item{Nothing else, if the structure type has no
+       supertype. Otherwise, the rest of the list matches is the key
+       for the supertype.}
+
+}
+
+An empty vector and an auto-field list that starts with @scheme[0] can
+be omitted. Furthermore, the first integer (which indicates the number
+of non-automatic fields) can be omitted, since it can be inferred from
+the number of supplied @scheme[v]s. Finally, a single symbol can be
+used instead of a list that contains only a symbol (in the case that
+the structure type has no supertype, no automatic fields, and no
+mutable fields).
+
+The total field count must be no more than 32768. If the number of
+fields indicated by @scheme[key] is inconsistent with the number of
+supplied @scheme[v]s, the @exnraise[exn:fail:contract].
+
+@examples[
+(make-prefab-struct 'clown "Binky" "pie")
+(make-prefab-struct '(clown 2) "Binky" "pie")
+(make-prefab-struct '(clown 2 (0 #f) #()) "Binky" "pie")
+(make-prefab-struct '(clown 1 (1 #f) #()) "Binky" "pie")
+(make-prefab-struct '(clown 1 (1 #f) #(0)) "Binky" "pie")
+]}
+
+@defproc[(prefab-key->struct-type [key (or/c symbol? list?)] 
+                                  [field-count (integer-in 0 32768)])
+         struct-type?]{
+
+Returns a @tech{structure type descriptor} for the @tech{prefab}
+structure type specified by the combination of @scheme[key] and
+@scheme[field-count].}
+
 @;------------------------------------------------------------------------
 @section[#:tag "structinfo"]{Structure Type Transformer Binding}
 
@@ -354,8 +507,8 @@ information can be used during the expansion of other expressions via
 @scheme[syntax-local-value].
 
 For example, the @scheme[define-struct] variant for subtypes uses the
-base type name @scheme[t] to find the variable
-@scheme[struct@scheme[:t]] containing the base type's descriptor; it
+base type name @scheme[_t] to find the variable
+@schemeidfont{struct:}@scheme[_t] containing the base type's descriptor; it
 also folds the field accessor and mutator information for the base
 type into the information for the subtype. As another example, the
 @scheme[match] form uses a type name to find the predicates and field
@@ -365,8 +518,11 @@ transformer to generate information about imported structure types, so
 that @scheme[match] and subtyping @scheme[define-struct] forms work
 within the unit.
 
-The expansion-time information for a structure type is represented as
-a list of six elements:
+The expansion-time information for a structure type is represented
+either as a structure that encapsulates a procedure that takes no
+arguments and returns a list of six element, or it can be represented
+directly as a list of six elements (of the same sort that the
+encapsulated procedure must return):
 
 @itemize{
 
@@ -404,6 +560,11 @@ a list of six elements:
 
 }
 
+Use @scheme[struct-info?] to recognize both forms of information, and
+use @scheme[extract-struct-info] to obtain a list from either
+representation. Use @scheme[make-struct-info] to encapsulate a
+procedure that represents structure type information.
+
 The implementor of a syntactic form can expect users of the form to
 know what kind of information is available about a structure type. For
 example, the @scheme[match] implementation works with structure
@@ -414,3 +575,42 @@ context of the @scheme[match] expression. In particular, the
 imported structure type, in which case the user is expected to know
 the set of fields that are listed in the signature for the structure
 type.
+
+@note-lib-only[scheme/struct-info]
+
+@defproc[(struct-info? [v any/c]) boolean?]{
+
+Returns @scheme[#t] if @scheme[v] is either a six-element list with
+the correct shape for representing structure-type information, or a
+procedure encapsulated by @scheme[make-struct-info].}
+
+@defproc[(checked-struct-info? [v any/c]) boolean?]{
+
+Returns @scheme[#t] if @scheme[v] is a procedure encapsulated by
+@scheme[make-struct-info] and produced by @scheme[define-struct], but
+only when no parent type is specified or the parent type is also
+specified through a transformer binding to such a value).}
+
+@defproc[(make-struct-info [thunk (-> (and/c struct-info? list?))])
+         struct-info?]{
+
+Encapsulates a thunk that returns structure-type information in list
+form.}
+
+@defproc[(extract-struct-info [v struct-info?])
+         (and/c struct-info? list?)]{
+
+Extracts the list form of the structure type information represented
+by @scheme[v].}
+
+@defthing[struct:struct-info struct-type?]{
+
+The @tech{structure type descriptor} for the structure type returned
+by @scheme[make-struct-info]. This @tech{structure type descriptor} is
+mostly useful for creating structure subtypes. The structure type
+includes a guard that checks an instance's first field in the same way
+as @scheme[make-struct-info].}
+
+@; ----------------------------------------------------------------------
+
+@close-eval[struct-eval]

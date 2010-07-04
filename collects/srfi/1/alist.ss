@@ -2,7 +2,7 @@
 ;;; <alist.ss> ---- Association list functions
 ;;; Time-stamp: <02/03/01 13:56:33 noel>
 ;;;
-;;; Copyright (C) 2002 by Noel Welsh. 
+;;; Copyright (C) 2002 by Noel Welsh.
 ;;;
 ;;; This file is part of SRFI-1.
 
@@ -32,44 +32,31 @@
 ;; hold me liable for its use. Please send bug reports to shivers@ai.mit.edu.
 ;;     -Olin
 
-(module alist
-  mzscheme
+#lang scheme/base
 
-  (require (lib "etc.ss" "mzlib")
-		   (lib "optional.ss" "srfi")
-		   (only "search.ss" find)
-		   "filter.ss"
-		   (rename "fold.ss" s:map map))
+(require (only-in "search.ss" find))
 
-  (provide (rename my-assoc assoc)
-		   alist-cons
-		   alist-copy
-		   alist-delete
-		   alist-delete!)
+(provide (rename-out [my-assoc assoc])
+         alist-cons
+         alist-copy
+         alist-delete
+         #; alist-delete! ; lists are immutable
+         )
 
-  
-  ;; Extended from R4RS to take an optional comparison argument.
-  (define my-assoc
-	(opt-lambda (x lis (maybe-= equal?))
-	  (let ((= maybe-=))
-		(find (lambda (entry) (= x (car entry))) lis))))
+;; Extended from R4RS to take an optional comparison argument.
+(define (my-assoc x lis [= equal?])
+  (find (lambda (entry) (= x (car entry))) lis))
 
-  (define (alist-cons key datum alist) (cons (cons key datum) alist))
+(define (alist-cons key datum alist) (cons (cons key datum) alist))
 
-  (define (alist-copy alist)
-	(s:map (lambda (elt) (cons (car elt) (cdr elt)))
-		   alist))
+(define (alist-copy alist)
+  (map (lambda (elt) (cons (car elt) (cdr elt))) alist))
 
-  (define alist-delete
-	(opt-lambda (key alist (maybe-= equal?))
-	  (let ((= maybe-=))
-		(filter (lambda (elt) (not (= key (car elt)))) alist))))
+(define (alist-delete key alist [= equal?])
+  (filter (lambda (elt) (not (= key (car elt)))) alist))
 
-  (define alist-delete!
-	(opt-lambda (key alist (maybe-= equal?))
-	  (let ((= maybe-=))
-		(filter! (lambda (elt) (not (= key (car elt)))) alist))))
-
-  )
+#; ; lists are immutable
+(define (alist-delete! key alist [= equal?])
+  (filter! (lambda (elt) (not (= key (car elt)))) alist))
 
 ;;; alist.ss ends here

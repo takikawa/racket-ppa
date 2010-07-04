@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	
- * Copyright:	(c) 2004-2007 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2008 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -22,6 +22,7 @@ class wxCanvas: public wxbCanvas
 {
  public:
   wxWindow *combo;
+  HRGN need_update;
 
   wxCanvas(void);
   wxCanvas(wxWindow *parent, int x=-1, int y=-1, int width=-1, int height=-1,
@@ -71,6 +72,8 @@ class wxCanvas: public wxbCanvas
   virtual void GetSize(int *width, int *height);
 
   virtual Bool AcceptsExplicitFocus();
+
+  void DoPaint(void);
 
  private:
   wxColour *bgcol;

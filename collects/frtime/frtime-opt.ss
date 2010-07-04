@@ -8,14 +8,14 @@
   (provide (rename my-module-begin #%module-begin)
            #%app #%top #%datum optimize-expr optimize-module dont-optimize)
   
-  (require-for-syntax (lib "lowered-equivs.ss" "frtime"))
-  (require-for-syntax (only (lib "1.ss" "srfi") lset-union lset-difference every))
-  (require-for-syntax (lib "list.ss"))
-  (require (only (lib "frp-core.ss" "frtime") super-lift undefined undefined?))
-  (require (rename (lib "lang-ext.ss" "frtime") frtime:lift lift)
-           (rename (lib "mzscheme-core.ss" "frtime") frtime:if if)
-           (only (lib "mzscheme-core.ss" "frtime") frp:copy-list))
-;  (require (lib "unit.ss") (lib "unitsig.ss"))
+  (require-for-syntax frtime/lowered-equivs)
+  (require-for-syntax (only srfi/1 lset-union lset-difference every))
+  (require-for-syntax mzlib/list)
+  (require (only frtime/frp-core super-lift undefined undefined?))
+  (require (rename frtime/lang-ext frtime:lift lift)
+           (rename frtime/mzscheme-core frtime:if if)
+           (only frtime/mzscheme-core frp:copy-list))
+;  (require mzlib/unit mzlib/unitsig)
   
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Helper functions
@@ -81,7 +81,7 @@
   ;; The variables are projected before evaluating the expression,
   ;; and the result is then injected into the dataflow graph as a
   ;; single node.
-  (require (only (lib "frp-core.ss" "frtime") proc->signal value-now))
+  (require (only frtime/frp-core proc->signal value-now))
   (define-syntax (dip stx)
     (syntax-case stx (begin)
       ;; special case: don't dip lone identifiers
@@ -113,7 +113,7 @@
     (syntax-case stx ()
       [(_ FORMS ...)
        (let* (;; get a list of all the symbols provided by the frtime-opt-lang module
-              [lang-symbols (all-provided-ids #'(lib "frtime-opt-lang.ss" "frtime") stx)]
+              [lang-symbols (all-provided-ids #'frtime/frtime-opt-lang stx)]
               ;; convert those symbols into an equiv-map by pairing up functions
               ;; with their lowered equivalents
               [lang-equiv-map (symbol-list-to-equiv-map lang-symbols)]
@@ -122,7 +122,7 @@
               [equiv-map-stx (equiv-map-to-stx lang-equiv-map)])
          #`(#%plain-module-begin 
             (require-for-syntax #,(so->d->so stx #`mzscheme))
-            (require #,(so->d->so stx #`(lib "frtime-opt-lang.ss" "frtime")))
+            (require #,(so->d->so stx #`frtime/frtime-opt-lang))
             (optimize-module #,equiv-map-stx FORMS ...)))]))
   
   
@@ -136,10 +136,10 @@
       [(_ EQUIV-MAP FORM FORMS ...)
        (let ([expanded-form 
               (local-expand #'FORM 'module 
-                            (list #'begin #'begin0 #'provide #'require #'require-for-syntax
+                            (list #'begin #'begin0 #'#%provide #'#%require
                                   #'define-syntaxes #'define-values-for-syntax
                                   #'define-values #'#%app #'unit #'unit/sig))])
-         (syntax-case expanded-form (begin begin0 provide require require-for-syntax
+         (syntax-case expanded-form (begin begin0 #%provide #%require
                                            define-syntaxes define-values-for-syntax
                                            define-values #%app)
            ;; explode top-level begin statements
@@ -147,16 +147,11 @@
             #`(optimize-module EQUIV-MAP MORE-FORMS ... FORMS ...)]
 
            ;; require
-           [(require . __)
+           [(#%require . __)
             #`(optimize-require EQUIV-MAP #,expanded-form FORMS ...)]
            
-           ;; require-for-syntax
-           [(require-for-syntax . __)
-            #`(begin #,expanded-form
-                     (optimize-module EQUIV-MAP FORMS ...))]
-           
            ;; provide
-           [(provide . __)
+           [(#%provide . __)
             ;; TBD: provide lowered equivs as well.
             ;; TBD: support frtime-specific provide specs (lifted, etc)
             #`(begin #,expanded-form
@@ -402,12 +397,10 @@
   ;; Note: this function does not intercept syntax errors due to misused
   ;; certificates.  It's up to the caller to handle that.
   (define-for-syntax (recursively-optimize-expr stx equiv-map lower-lambda)
-    (syntax-case stx (#%datum #%top #%app quote begin begin0 lambda case-lambda 
+    (syntax-case stx (#%top #%app quote begin begin0 lambda case-lambda 
                       let-values letrec-values letrec-syntaxes+values 
                       unit unit/sig if super-lift undefined? undefined rename
                       frp:copy-list frp:->boolean dont-optimize)
-      [(#%datum . _)
-       #`(dip () #,stx)]
       
       [(#%top . X)
        #`(dip (X) X)]

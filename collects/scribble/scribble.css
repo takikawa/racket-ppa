@@ -1,438 +1,472 @@
 
-               body {
-               color: black;
-               background-color: #ffffff;
-               font-family: Times;
-               }
-
-               table td { 
-                 padding-left: 0;
-                 padding-right: 0;
-               }
-
-               .main {
-               width: 35em;
-               margin-left: 12em;
-               text-align: left;
-               }
-
-               .refpara { 
-                position: relative;
-                float: right;
-                left: 1em;
-                top: -1em;
-                height: 0em;
-                width: 10em;
-                margin: 0em -10em 0em 0em;
-                }
-
-               .refcontent { 
-                background-color: #F5F5DC;
-                display: block;
-                position: relative;
-                width: 10em;
-                font-size: 85%;
-                border: 0.5em solid #F5F5DC;
-               }
-
-               .tocset { 
-                 position: relative;
-                 float: left;
-                 width: 10em;
-                 margin-right: 2em;
-               }
-
-               .tocview {
-                 text-align: left;
-                 background-color: #F5F5DC;
-               }
-
-               .tocsub {
-                 margin-top: 1em;
-                 text-align: left;
-                 background-color: #DCF5F5;
-               }
-
-               .tocviewtitle { 
-                  font-size: 80%;
-                  font-weight: bold;
-                  margin: 0.2em 0.2em 0.2em 0.2em;
-                }
-
-               .tocviewlist { 
-                  margin: 0.2em 0.2em 0.2em 0.2em;
-                }
-
-               .tocviewlist td { 
-                  font-size: 80%;
-                  vertical-align: top;
-               }
-
-               .tocviewlink { 
-                  text-decoration: none;
-                }
-
-               .tocsublist { 
-                  margin: 0.2em 0.2em 0.2em 0.2em;
-                }
-
-               .tocsublist td { 
-                  vertical-align: top;
-                  padding-left: 1em;
-                  text-indent: -1em;
-               }
-
-               .tocsublinknumber { 
-                  font-size: 80%;
-                }
-
-               .tocsublink { 
-                  text-decoration: none;
-                }
-
-               .tocsubseclink { 
-                  font-size: 80%;
-                  text-decoration: none;
-                }
-
-               .tocsubtitle { 
-                  font-size: 80%;
-                  font-style: italic;
-                  margin: 0.2em 0.2em 0.2em 0.2em;
-                }
-
-               .leftindent { 
-                margin-left: 1em;
-                margin-right: 0em;
-               }
-
-               .toclink { 
-               text-decoration: none;
-               color: blue;
-               font-size: 85%;
-               }
-
-               .toptoclink { 
-               text-decoration: none;
-               color: blue;
-               font-weight: bold;
-               }
-
-               .inherited {
-                 width: 100%;
-                 margin-top: 1em;
-                 text-align: left;
-                 background-color: #ECF5F5;
-               }
-
-               .inherited td {
-                 padding-left: 1em;
-                 text-indent: -0.8em;
-                 padding-right: 0.2em;
-               }
-
-               .inheritedlbl { 
-                 font-style: italic;
-                 font-size: 85%;
-               }
-
-               .indexlink { 
-                  text-decoration: none;
-                }
-
-               .nobreak { 
-                  white-space: nowrap;
-                }
-
-               .title {
-               font-size: 200%;
-               font-weight: normal;
-               margin-top: 2.8em;
-               text-align: center;
-               }
-
-               .partheading {
-               font-size: 100%;
-               }
-
-               .chapterheading {
-               font-size: 100%;
-               }
-
-               .beginsection {
-               font-size: 110%;
-               }
-
-               .tiny {
-               font-size: 40%;
-               }
-
-               .scriptsize {
-               font-size: 60%;
-               }
-
-               .footnotesize {
-               font-size: 75%;
-               }
-
-               .small {
-               font-size: 90%;
-               }
-
-               .normalsize {
-               font-size: 100%;
-               }
-
-               .large {
-               font-size: 120%;
-               }
-
-               .largecap {
-               font-size: 150%;
-               }
-
-               .largeup {
-               font-size: 200%;
-               }
-
-               .huge {
-               font-size: 300%;
-               }
-
-               .hugecap {
-               font-size: 350%;
-               }
-
-               pre {
-               margin-left: 2em;
-               }
-
-               blockquote {
-               margin-left: 2em;
-               }
-
-               ol {
-               list-style-type: decimal;
-               }
-
-               ol ol {
-               list-style-type: lower-alpha;
-               }
-
-               ol ol ol {
-               list-style-type: lower-roman;
-               }
-
-               ol ol ol ol {
-               list-style-type: upper-alpha;
-               }
-
-               i {
-               font-family: serif;
-               }
-
-               .boxed { 
-                 width: 100%;
-                 background-color: #E8E8FF;
-               }
-
-               .prototype td { 
-                 vertical-align: top;
-               }
-               .longprototype td { 
-                 vertical-align: bottom;
-               }
-
-               .schemeblock td { 
-                 vertical-align: baseline;
-               }
-
-               .argcontract td { 
-                 vertical-align: top;
-               }
-
-               .centered { 
-                 horiz-align: center;
-               }
-
-               .verbatim em {
-               font-family: serif;
-               }
-
-               .ghost {
-               color: white;
-               }
-
-               .scheme em {
-               color: black;
-               font-family: serif;
-               }
-
-               .highlighted {
-               background-color: #ddddff;
-               }
-
-               .specgrammar {
-               float: right;
-               }
-
-               .hspace {
-               font-family: Courier; font-size: 80%;
-               }
-
-               .smaller {
-               font-size: 80%;
-               }
-
-               .inferencetop td { 
-                border-bottom: 1px solid black;
-                text-align: center;
-               }
-               .inferencebottom td { 
-                text-align: center;
-               }
-
-               .schemeinput {
-               color: brown;
-               background-color: #eeeeee;
-               font-family: Courier; font-size: 80%;
-               }
-
-               .schemeinputbg {
-               background-color: #eeeeee;
-               }
-
-               .schemereader {
-               font-family: Courier; font-size: 80%;
-               }
-
-               .schemeparen {
-               color: #843c24;
-               font-family: Courier; font-size: 80%;
-               }
-
-               .schememeta {
-               color: #262680;
-               font-family: Courier; font-size: 80%;
-               }
-
-               .schememod {
-               color: black;
-               font-family: Courier; font-size: 80%;
-               }
-
-               .schemeopt {
-               color: black;
-               }
-
-               .schemekeyword {
-               color: black;
-               font-weight: bold;
-               font-family: Courier; font-size: 80%;
-               }
-
-               .schemeerror {
-               color: red;
-               font-style: italic;             
-               }
-
-               .schemevariable {
-               color: #262680;
-               font-style: italic;             
-               font-family: Courier; font-size: 80%;
-               }
-
-               .schemesymbol {
-               color: #262680;
-               font-family: Courier; font-size: 80%;
-               }
-
-               .schemevaluelink { 
-               text-decoration: none;
-               color: blue;
-               }
-
-               .schemesyntaxlink { 
-               text-decoration: none;
-               color: black;
-               font-weight: bold;
-               }
-
-               .badlink { 
-               text-decoration: underline;
-               color: red;
-               }
-
-               .techlink { 
-               text-decoration: none;
-               color: black;
-               }
-               .techlink:hover { 
-               text-decoration: underline;
-               color: blue;
-               }
-
-               .schemeresult {
-               color: #0000af;
-               font-family: Courier; font-size: 80%;
-               }
-
-               .schemestdout {
-               color: #960096;
-               font-family: Courier; font-size: 80%;
-               }
-
-               .schemecomment {
-               color: #c2741f;
-               font-family: Courier; font-size: 80%;
-               }
-
-               .schemevalue {
-               color: #228b22;
-               font-family: Courier; font-size: 80%;
-               }
-
-               .imageleft { 
-                 float: left;
-                 margin-right: 0.3em;
-               }
-
-               .nonavigation {
-               color: #EEEEEE;
-               }
-
-               .disable {
-               /* color: #e5e5e5; */
-               color: gray;
-               }
-
-               .smallcaps {
-               font-size: 75%;
-               }
-
-               .smallprint {
-               color: gray;
-               font-size: 75%;
-               text-align: right;
-               }
-
-               .footnoterule {
-               text-align: left;
-               width: 40%;
-               }
-
-               .colophon {
-               color: gray;
-               font-size: 80%;
-               font-style: italic;
-               text-align: right;
-               }
-
-               .colophon a {
-               color: gray;
-               }
-
-               .mywbr { 
-                 width: 0;
-                 font-size: 1px;
-               }
+/* CSS seems backward: List all the classes for which we want a
+   particular font, so that the font can be changed in one place.  (It
+   would be nicer to reference a font definition from all the places
+   that we want it.) 
+
+   As you read the rest of the file, remember to double-check here to
+   see if any font is set. */
+
+/* Monospace: */
+.maincolumn, .refpara, .tocset, .stt, .hspace,
+.schemeinput, .schemereader, .schemeparen, .schememeta,
+.schememod, .schemekeyword, .schemevariable, .schemesymbol,
+.schemeresult, .schemestdout, .schemecomment, .schemevalue {
+  font-family: monospace;
+}
+
+/* Serif: */
+.main, .refcontent, .tocview, .tocsub, .inheritedlbl, i {
+  font-family: serif;
+}
+
+/* Sans-serif: */
+.version {
+  font-family: sans-serif;
+}
+
+/* ---------------------------------------- */
+/* Main */
+
+body {
+  color: black;
+  background-color: #ffffff;
+}
+
+table td {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.maincolumn {
+  width: 43em;
+  margin-right: -40em;
+  margin-left: 15em;
+}
+
+.main {
+  text-align: left;
+}
+
+/* ---------------------------------------- */
+/* Navigation */
+
+.navleft { 
+  position: relative;
+  float: left;
+  white-space: nowrap;
+}
+.navright { 
+  position: relative;
+  float: right;
+  white-space: nowrap;
+}
+.nonavigation {
+  color: #EEEEEE;
+}
+
+/* ---------------------------------------- */
+/* Version */
+
+.versionbox {
+  position: relative;
+  float: right;
+  left: 2em;
+  height: 0em;
+  width: 13em;
+  margin: 0em -13em 0em 0em;
+}
+.version {
+  font-size: small;
+}
+
+/* ---------------------------------------- */
+/* Margin notes */
+
+.refpara {
+  position: relative;
+  float: right;
+  left: 2em;
+  top: -1em;
+  height: 0em;
+  width: 13em;
+  margin: 0em -13em 0em 0em;
+}
+
+.refcolumn {
+  background-color: #F5F5DC;
+  display: block;
+  position: relative;
+  width: 13em;
+  font-size: 85%;
+  border: 0.5em solid #F5F5DC;
+}
+
+.refcontent {
+}
+
+/* ---------------------------------------- */
+/* Table of contents, inline */
+
+.toclink {
+text-decoration: none;
+color: blue;
+font-size: 85%;
+}
+
+.toptoclink {
+text-decoration: none;
+color: blue;
+font-weight: bold;
+}
+
+/* ---------------------------------------- */
+/* Table of contents, left margin */
+
+.tocset {
+  position: relative;
+  float: left;
+  width: 12.5em;
+  margin-right: 2em;
+}
+
+.tocview {
+  text-align: left;
+  background-color: #F5F5DC;
+}
+
+.tocsub {
+  text-align: left;
+  margin-top: 0.5em;
+  background-color: #F5F5F5;
+}
+
+.tocviewtitle {
+  font-size: 82%;
+  font-weight: bold;
+  margin: 0.2em 0.2em 0.2em 0.2em;
+}
+
+.tocviewlist {
+  margin: 0.2em 0.2em 0.2em 0.2em;
+}
+
+.tocviewlist td {
+  font-size: 82%;
+  vertical-align: top;
+}
+
+.tocviewlink {
+  text-decoration: none;
+  color: blue;
+}
+
+.tocviewselflink {
+  color: blue;
+}
+
+.tocsublist {
+  margin: 0.2em 0.2em 0.2em 0.2em;
+}
+
+.tocsublist td {
+  vertical-align: top;
+  padding-left: 1em;
+  text-indent: -1em;
+}
+
+.tocsublinknumber {
+  font-size: 82%;
+}
+
+.tocsublink {
+  font-size: 82%;
+  text-decoration: none;
+}
+
+.tocsubseclink {
+  font-size: 82%;
+  text-decoration: none;
+}
+
+.tocsubnonseclink {
+  font-size: 82%;
+  text-decoration: none;
+  padding-left: 0.5em;
+}
+
+.tocsubtitle {
+  font-size: 82%;
+  font-style: italic;
+  margin: 0.2em 0.2em 0.2em 0.2em;
+}
+
+.sepspace { 
+  font-size: 40%;
+}
+
+.septitle { 
+  font-size: 70%;
+}
+
+/* ---------------------------------------- */
+/* Inherited methods, left margin */
+
+.inherited {
+  width: 100%;
+  margin-top: 0.5em;
+  text-align: left;
+  background-color: #ECF5F5;
+}
+
+.inherited td {
+  font-size: 82%;
+  padding-left: 1em;
+  text-indent: -0.8em;
+  padding-right: 0.2em;
+}
+
+.inheritedlbl {
+  font-style: italic;
+}
+
+/* ---------------------------------------- */
+/* Scheme text styles */
+
+.schemeinput {
+  color: #cc6633;
+  background-color: #eeeeee;
+}
+
+.schemeinputbg {
+  background-color: #eeeeee;
+}
+
+.schemereader {
+}
+
+.schemeparen {
+  color: #843c24;
+}
+
+.schememeta {
+  color: #262680;
+}
+
+.schememod {
+  color: black;
+}
+
+.schemeopt {
+  color: black;
+}
+
+.schemekeyword {
+  color: black;
+  font-weight: bold;
+}
+
+.schemeerror {
+  color: red;
+  font-style: italic;
+}
+
+.schemevariable {
+  color: #262680;
+  font-style: italic;
+}
+
+.schemesymbol {
+  color: #262680;
+}
+
+.schemevaluelink {
+  text-decoration: none;
+  color: blue;
+}
+
+.schememodlink {
+  text-decoration: none;
+  color: blue;
+}
+
+.schemesyntaxlink {
+  text-decoration: none;
+  color: black;
+  font-weight: bold;
+}
+
+.schemeresult {
+  color: #0000af;
+}
+
+.schemestdout {
+  color: #960096;
+}
+
+.schemecomment {
+  color: #c2741f;
+}
+
+.schemevalue {
+  color: #228b22;
+}
+
+/* ---------------------------------------- */
+/* Some inline styles */
+
+.leftindent {
+ margin-left: 1em;
+ margin-right: 0em;
+}
+
+.insetpara {
+ margin-left: 1em;
+ margin-right: 1em;
+}
+
+.indexlink {
+  text-decoration: none;
+}
+
+.nobreak {
+  white-space: nowrap;
+}
+
+.stt {
+}
+
+.title {
+  font-size: 200%;
+  font-weight: normal;
+  margin-top: 2.8em;
+  text-align: center;
+}
+
+pre {
+  margin-left: 2em;
+}
+
+blockquote {
+  margin-left: 2em;
+}
+
+ol {
+  list-style-type: decimal;
+}
+
+ol ol {
+  list-style-type: lower-alpha;
+}
+
+ol ol ol {
+  list-style-type: lower-roman;
+}
+
+ol ol ol ol {
+  list-style-type: upper-alpha;
+}
+
+i {
+}
+
+.boxed {
+  width: 100%;
+  background-color: #E8E8FF;
+}
+
+.inlinetop{ 
+  display: inline;
+  vertical-align: top;
+}
+
+.together {
+  width: 100%;
+}
+
+.prototype td {
+  vertical-align: top;
+}
+.longprototype td {
+  vertical-align: bottom;
+}
+
+.schemeblock td {
+  vertical-align: baseline;
+}
+
+.argcontract td {
+  vertical-align: top;
+}
+
+.ghost {
+  color: white;
+}
+
+.highlighted {
+  background-color: #ddddff;
+}
+
+.defmodule {
+  width: 100%;
+  background-color: #F5F5DC;
+}
+
+.specgrammar {
+  float: right;
+}
+
+.hspace {
+}
+
+.inferencetop td {
+  border-bottom: 1px solid black;
+  text-align: center;
+}
+.inferencebottom td {
+  text-align: center;
+}
+
+.badlink {
+  text-decoration: underline;
+  color: red;
+}
+
+.plainlink {
+  text-decoration: none;
+  color: blue;
+}
+
+.techlink {
+  text-decoration: none;
+  color: black;
+}
+
+.techlink:hover {
+  text-decoration: underline;
+  color: blue;
+}
+
+.bibliography td {
+  vertical-align: top;
+}
+
+.imageleft {
+  float: left;
+  margin-right: 0.3em;
+}
+
+.smaller{ 
+  font-size: 82%;
+}
+
+/* A hack, inserted to break some Scheme ids: */
+.mywbr {
+  width: 0;
+  font-size: 1px;
+}
+
+.compact li p { 
+  margin: 0 0 0 0;
+  padding: 0 0 0 0;
+}

@@ -8,11 +8,11 @@
 
 (module vmopt mzscheme
   
-  (require (lib "unit.ss")
-	  (lib "list.ss")
-	  (lib "etc.ss"))
+  (require mzlib/unit
+	  mzlib/list
+	  mzlib/etc)
 
-  (require (lib "zodiac-sig.ss" "syntax"))
+  (require syntax/zodiac-sig)
 
   (require "sig.ss")
   (require "../sig.ss")
@@ -143,7 +143,7 @@
 		       ;;
 		       [(vm:sequence? ast)
 			(set-vm:sequence-vals! ast
-					       (apply append! 
+					       (apply append
 						      (map process! (vm:sequence-vals ast))))
 			ast]
 		       
@@ -161,7 +161,7 @@
 			(let*-values ([(test) (apply append (map process! (vm:if-test ast)))]
 				      [(test-setup test) (let loop ([l test][acc null])
 							   (if (null? (cdr l))
-							       (values (reverse! acc) (car l))
+							       (values (reverse acc) (car l))
 							       (loop (cdr l) (cons (car l) acc))))])
 			  (append
 			   test-setup

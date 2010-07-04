@@ -1,7 +1,7 @@
 (module re mzscheme
-  (require (lib "match.ss")
-           (lib "list.ss")
-           (prefix is: (lib "integer-set.ss"))
+  (require mzlib/list
+           scheme/match
+           (prefix is: mzlib/integer-set)
            "util.ss")
   
   (provide ->re build-epsilon build-zero build-char-set build-concat

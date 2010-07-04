@@ -3,7 +3,7 @@
 
 (load-relative "loadtest.ss")
 
-(require (lib "class.ss"))
+(require scheme/class)
 
 (Section 'object)
 
@@ -119,7 +119,7 @@
     (syntax-test #`(class #,object% (#,public (x y1) (x y))))
     (syntax-test #`(class #,object% (#,public (x y) (x2 y)))))
 
-  (unless (module-identifier=? public #'private)
+  (unless (free-identifier=? public #'private)
     (if (and (or (not over?) over-ok?)
 	     (or (not aug?) aug-ok?))
 	(begin
@@ -928,7 +928,7 @@
 ;; *do* shadow for definition RHSs
 (let ([mk-syntax-test
        (lambda (mk)
-	 (syntax-test (datum->syntax-object
+	 (syntax-test (datum->syntax
 		       (quote-syntax here)
 		       `(let-syntax ([dont-see-outer (lambda (x) (syntax (lambda () 10)))])
 			  (class object% 
@@ -1058,7 +1058,7 @@
 (syntax-test #'(new x ("a" x)))
 
 (test #t object? (new object%))
-(test #t object? (new (class object% () (init-field x) (super-instantiate ())) (x 1)))
+(test #t object? (new (class object% (init-field x) (super-instantiate ())) (x 1)))
 
 ;; ------------------------------------------------------------
 ;; `field' tests
@@ -1129,7 +1129,7 @@
   (define class-cert-%%-client (gensym 'class-cert-%%-client))
   (teval
    `(module ,class-cert-%%-init mzscheme
-      (require (lib "class.ss"))
+      (require mzlib/class)
       (define-syntax (init-private stx)
 	(syntax-case stx ()
 	  [(_ name value)
@@ -1143,8 +1143,8 @@
   ;; Shouldn't fail with a cert erorr:
   (teval
    `(module ,class-cert-%%-client mzscheme
-      (require (lib "class.ss")
-	       ,class-cert-%%-init)
+      (require mzlib/class
+	       ',class-cert-%%-init)
       (define cert-error%
 	(class object%
 	  (init-private thing "value")

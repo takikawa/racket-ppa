@@ -1,6 +1,6 @@
-(module xmmsctrl mzscheme
+#lang scheme/base
 
-(require (lib "foreign.ss")) (unsafe!)
+(require mzlib/foreign) (unsafe!)
 
 (define libxmms (ffi-lib "libxmms"))
 
@@ -107,5 +107,3 @@
 (defxmms quit : _session -> _void)
 (defxmms play-pause : _session -> _void)
 (defxmms playlist-ins-url-string : _session _string _pos -> _void)
-
-)

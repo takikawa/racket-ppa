@@ -1,13 +1,13 @@
 
-(module group (lib "a-unit.ss")
-  (require (lib "string-constant.ss" "string-constants")
-           (lib "class.ss")
+#lang scheme/unit
+  (require string-constants
+           mzlib/class
            "sig.ss"
            "../preferences.ss"
            "../gui-utils.ss"
            (lib "mred-sig.ss" "mred")
-           (lib "list.ss")
-           (lib "file.ss"))
+           mzlib/list
+           scheme/path)
   
   (import mred^
           [prefix application: framework:application^]
@@ -341,4 +341,4 @@
       (internal-get-the-frame-group)))
   
   (define (get-the-frame-group)
-    (internal-get-the-frame-group)))
+    (internal-get-the-frame-group))

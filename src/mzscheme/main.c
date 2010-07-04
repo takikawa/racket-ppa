@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2007 PLT Scheme Inc.
+  Copyright (c) 2004-2008 PLT Scheme Inc.
   Copyright (c) 1995-2000 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -147,6 +147,7 @@ extern Scheme_Object *scheme_initialize(Scheme_Env *env);
 #define INITIAL_BIN_TYPE "zi"
 #define BANNER scheme_banner()
 #define MZSCHEME_CMD_LINE
+#define INITIAL_NAMESPACE_MODULE "scheme/init"
 
 /*========================================================================*/
 /*                        command-line parsing                            */
@@ -168,7 +169,7 @@ extern Scheme_Object *scheme_initialize(Scheme_Env *env);
 
 static void user_break_hit(int ignore)
 {
-  scheme_break_thread(NULL);
+  scheme_break_main_thread();
   scheme_signal_received();
 
 #  ifdef SIGSET_NEEDS_REINSTALL
@@ -322,8 +323,12 @@ static void do_scheme_rep(Scheme_Env *env)
 {
   /* enter read-eval-print loop */
   {
-    Scheme_Object *rep;
-    rep = scheme_builtin_value("read-eval-print-loop");
+    Scheme_Object *rep, *a[2];
+
+    a[0] = scheme_intern_symbol("scheme/base");
+    a[1] = scheme_intern_symbol("read-eval-print-loop");
+    rep = scheme_dynamic_require(2, a);
+    
     if (rep) {
       scheme_apply(rep, 0, NULL);
       printf("\n");

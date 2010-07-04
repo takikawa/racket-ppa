@@ -1,9 +1,9 @@
 
 (module mrpict mzscheme
-  (require (lib "unit.ss")
-           (lib "contract.ss")
-           (lib "class.ss")
-           (lib "mred.ss" "mred"))
+  (require mzlib/unit
+           mzlib/contract
+           mzlib/class
+           mred)
 
   (require (lib "mred-sig.ss" "mred")
 	   (lib "mred-unit.ss" "mred"))
@@ -30,13 +30,17 @@
    draw-pict
    make-pict-drawer)
   
+  (define family/c
+    (symbols 'base 'default 'decorative 'roman 'script 'swiss 'modern 'symbol 'system))
+
   (define text-style/c
     (flat-rec-contract
      text-style/c
      (or/c null?
            (is-a?/c font%)
-           (symbols 'base 'default 'decorative 'roman 'script 'swiss 'modern 'symbol 'system)
+           family/c
            string? ;; could be more specific, I guess.
+           (cons/c string? family/c)
            (cons/c (symbols 'bold 'italic 'superscript 'subscript 'combine 'no-combine 'caps)
                    text-style/c))))
   

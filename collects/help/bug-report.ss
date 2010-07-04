@@ -1,18 +1,17 @@
 
 (module bug-report mzscheme
-  (require (lib "string-constant.ss" "string-constants")
-           (lib "head.ss" "net")
-           (lib "mred.ss" "mred")
-           (lib "framework.ss" "framework")
-           (lib "class.ss")
-           (lib "etc.ss")
-           (lib "list.ss")
-           (lib "url.ss" "net")
-           (lib "uri-codec.ss" "net")
+  (require string-constants
+           net/head
+           mred
+           framework
+           mzlib/class
+           mzlib/etc
+           mzlib/list
+           net/url
+           net/uri-codec
            (lib "htmltext.ss" "browser")
-           (lib "dirs.ss" "setup")
-           "private/buginfo.ss"
-           "private/manuals.ss")
+           setup/dirs
+           "private/buginfo.ss")
 
   (provide help-desk:report-bug)
 
@@ -222,6 +221,7 @@
                                     (editor text))])
                   (send text set-paste-text-only #t)
                   (send text auto-wrap #t)
+                  (send text set-max-undo-history 'forever)
                   (send text set-styles-fixed #t)
                   canvas))
               #t
@@ -293,12 +293,6 @@
        #f
        #f
        synthesized-panel))
-    
-    (define docs-installed
-      (make-big-text
-       (string-constant bug-report-field-docs-installed)
-       #t
-       synthesized-panel))
 
     (define collections
       (make-big-text
@@ -354,9 +348,6 @@
     
     (define (get-environment)
       (string-append (send environment get-value)
-                     "\n"
-                     "Docs Installed:\n" 
-                     (format "~a" (send (send docs-installed get-editor) get-text))
                      "\n"
                      (format "Human Language: ~a\n" (send human-language get-value))
                      (format "(current-memory-use) ~a\n" (send memory-use get-value))
@@ -481,7 +472,7 @@
            dirs))
 
     (define (split-by-directories dirs split-by)
-      (let ([res (append! (map list (map path->string split-by)) '((*)))]
+      (let ([res (append (map list (map path->string split-by)) '((*)))]
             [dirs (map path->string dirs)])
         (for-each
          (lambda (d)
@@ -493,9 +484,9 @@
                               (and (< l2 l) (equal? d2 (substring d 0 l2))
                                    (member (string-ref d l2) '(#\/ #\\))))))
                            res)])
-             (append! x (list (if (string? (car x))
-                                (substring d (add1 (string-length (car x))))
-                                d)))))
+             (append x (list (if (string? (car x))
+                                 (substring d (add1 (string-length (car x))))
+                                 d)))))
          dirs)
         (filter (lambda (x) (pair? (cdr x))) res)))
 
@@ -519,17 +510,12 @@
     (send memory-use set-value (format "~a" (current-memory-use)))
 
     (send (send collections get-editor) auto-wrap #t)
-    (send (send docs-installed get-editor) auto-wrap #t)
 
     ;; Currently, the help-menu is left empty
     (frame:remove-empty-menus bug-frame)
 
     (align-labels)
     (switch-to-compose-view)
-
-    (send (send docs-installed get-editor) insert
-          (format "~s" (split-by-directories (find-doc-directories)
-                                             (get-doc-search-dirs))))
 
     (send bug-frame show #t))
 

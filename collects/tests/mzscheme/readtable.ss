@@ -3,7 +3,8 @@
 
 (Section 'readtable)
 
-(require (rename (lib "port.ss") relocate-input-port relocate-input-port))
+(require (only-in (lib "mzlib/port.ss") 
+                  [relocate-input-port relocate-input-port]))
 (define (shift-rt-port p deltas)
   (let ([p (relocate-input-port p 
 				(add1 (car deltas))
@@ -61,6 +62,12 @@
 	[(ch port src line col pos)
 	 (test #\_ values ch)
 	 (read-char port) (read-char port) (read-char port)
+	 (make-special-comment #f)])]
+      [comment3.2
+       (case-lambda
+	[(ch port src line col pos)
+	 (test #\? values ch)
+	 (read-char port) (read-char port) (read-char port)
 	 (make-special-comment #f)])])
   (let ([t (make-readtable #f 
 			   #\$ 'terminating-macro plain-dollar
@@ -70,7 +77,8 @@
 			   #\= #\\ #f
 			   #\~ #\space #f
 			   #\_ 'terminating-macro comment3
-			   #\$ 'dispatch-macro  hash-dollar)])
+			   #\$ 'dispatch-macro  hash-dollar
+                           #\? 'dispatch-macro comment3.2)])
     (test-values '(#\a #f #f) (lambda () (readtable-mapping t #\a)))
     (test-values '(#\| #f #f) (lambda () (readtable-mapping t #\^)))
     (test-values '(#\( #f #f) (lambda () (readtable-mapping t #\<)))
@@ -90,7 +98,7 @@
 
       (letrec ([test-read
 		(case-lambda 
-		 [(s l check-pos?)
+		 [(s l check-pos? try-syntax?)
 		  (define (go read)
 		    (let* ([o (open-input-string s)])
 		      (port-count-lines! o)
@@ -100,15 +108,17 @@
 			      null
 			      (cons v (loop)))))))
 		  (test l (lambda (a b) (go read)) 'read s)
-		  (test l (lambda (a b) (map syntax-object->datum 
-					     (go (lambda (p) (read-syntax 'string p)))))
-			'read-syntax s)
-		  (when check-pos?
-		    (let ([stx (car (go (lambda (p) (read-syntax 'string (shift-rt-port p (list 1 2 3))))))])
-		      (test 2 syntax-line stx)
-		      (test 2 syntax-column stx)
-		      (test 4 syntax-position stx)))]
-		 [(s l) (test-read s l #t)])])
+                  (when try-syntax?
+                    (test l (lambda (a b) (map syntax->datum 
+                                               (go (lambda (p) (read-syntax 'string p)))))
+                          'read-syntax s)
+                    (when check-pos?
+                      (let ([stx (car (go (lambda (p) (read-syntax 'string (shift-rt-port p (list 1 2 3))))))])
+                        (test 2 syntax-line stx)
+                        (test 2 syntax-column stx)
+                        (test 4 syntax-position stx))))]
+		 [(s l) (test-read s l #t #t)]
+		 [(s l check-pos?) (test-read s l check-pos? #t)])])
 	
 	(test-read "a$%_^b" '(a$%_^b))
 
@@ -119,16 +129,18 @@
 		   (when old-caret?
 		     (test-read "a&b" '(a dollar b)))
 		   (test-read "a #$ b" '(a (dollar . b)))
-		   (test-read "(#1=a #$ #1#)" '((a (dollar . a))))
-		   (test-read "(#1=a #$ (#1#))" '((a (dollar a))))
+		   (test-read "(#1=a #$ #1#)" '((a (dollar . a))) #t #f)
+		   (test-read "(#1=a #$ (#1#))" '((a (dollar a))) #t #f)
 		   (test-read "a%b" '(a%b))
 		   (test-read "a % b" '(a (percent b)))
-		   (test-read "(#1=a % #1#)" '((a (percent a))))
-		   (test-read "(#1=a % (#1#))" '((a (percent (a)))))
+		   (test-read "(#1=a % #1#)" '((a (percent a))) #t #f)
+		   (test-read "(#1=a % (#1#))" '((a (percent (a)))) #t #f)
 		   (test-read "a _xxx b" '(a b))
 		   (test-read "(a _xxx b)" '((a b)))
 		   (test-read "(a _xxx . b)" '((a . b)))
+		   (test-read "(a #?xxx . b)" '((a . b)))
 		   (test-read "(a . _xxx b)" '((a . b)))
+		   (test-read "(a . #?xxx b)" '((a . b)))
 		   (if old-caret?
 		       (test-read "(a ^_xxx^ b)" '((a ^ ^ b)))
 		       (test-read "(a ^_xxx^ b)" '((a _xxx b))))
@@ -188,8 +200,8 @@
 
 (let ([result #f]
       [mk (lambda (v)
-	    `(,v ,(vector v) ,(box v) ,(let ([ht (make-hash-table)])
-					 (hash-table-put! ht v v)
+	    `(,v ,(vector v) ,(box v) ,(let ([ht (make-hasheq)])
+					 (hash-set! ht v v)
 					 ht)))])
   (let ([get-zero
 	 (case-lambda
@@ -204,23 +216,24 @@
     (let ([t (make-readtable #f 
 			     #\$ 'terminating-macro get-zero)])
       (let ([go
-	     (lambda (read car cadr caddr cadddr unbox vector-ref hash-table-map
-			   list? vector? box? hash-table?)
+	     (lambda (read car cadr caddr cadddr unbox vector-ref hash-map
+			   list? vector? box? hash?)
 	       (let ([v (parameterize ([current-readtable t])
 			  (read (open-input-string "#0=$")))])
 		 (test #t list? v)
 		 (test #t list? (car v))
 		 (test #t vector? (cadr v))
 		 (test #t box? (caddr v))
-		 (test #t hash-table? (cadddr v))
+		 (test #t hash? (cadddr v))
 		 (test #t eq? v (car v))
 		 (test #t eq? v (vector-ref (cadr v) 0))
 		 (test #t eq? v (unbox (caddr v)))
-		 (test #f memq v (hash-table-map (cadddr v) (lambda (k v) k)))
-		 (test #f memq v (hash-table-map (cadddr v) (lambda (k v) v)))
+		 (test #t pair? (memq v (hash-map (cadddr v) (lambda (k v) k))))
+		 (test #t pair? (memq v (hash-map (cadddr v) (lambda (k v) v))))
 		 (test #f eq? v result)))])
-	(go read car cadr caddr cadddr unbox vector-ref hash-table-map
-	    list? vector? box? hash-table?)
+	(go read car cadr caddr cadddr unbox vector-ref hash-map
+	    list? vector? box? hash?)
+        #;
 	(go (lambda (p) (read-syntax 'string p))
 	    (lambda (stx) (car (syntax->list stx))) 
 	    (lambda (stx) (cadr (syntax->list stx))) 
@@ -228,20 +241,20 @@
 	    (lambda (stx) (cadddr (syntax->list stx))) 
 	    (lambda (stx) (unbox (syntax-e stx)))
 	    (lambda (stx p) (vector-ref  (syntax-e stx) p))
-	    (lambda (stx f) (hash-table-map (syntax-e stx) f))
+	    (lambda (stx f) (hash-map (syntax-e stx) f))
 	    (lambda (stx) (and (syntax->list stx) #t))
 	    (lambda (stx) (vector? (syntax-e stx)))
 	    (lambda (stx) (box? (syntax-e stx)))
-	    (lambda (stx) (hash-table? (syntax-e stx))))))))
+	    (lambda (stx) (hash? (syntax-e stx))))))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Check that sharing is preserved
 	    
 (let ([get-graph
        (case-lambda
-	[(ch port) '#0=(#0#)]
+	[(ch port) (read (open-input-string "#0=(#0#)"))]
 	[(ch port src line col pos)
-	 (datum->syntax-object #f '#1=(#1#) #f)])])
+	 (datum->syntax-object #f (read (open-input-string "#1=(#1#)")) #f)])])
   (let ([t (make-readtable #f 
 			   #\$ 'terminating-macro get-graph)])
     (let ([go
@@ -251,8 +264,9 @@
 	       ;; Check that cycle is preserved by unrolling lots
 	       (test #f boolean? (car (car (car (car v)))))))])
       (go read car)
-      (go (lambda (p) (read-syntax 'string p))
-	  (lambda (stx) (car (syntax->list stx)))))))
+      (err/rt-test
+       (go (lambda (p) (read-syntax 'string p))
+           (lambda (stx) (car (syntax->list stx))))))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Replace the symbol reader

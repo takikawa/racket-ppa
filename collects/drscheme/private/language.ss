@@ -3,23 +3,24 @@
 ;;          user's io ports, to aid any debugging printouts.
 ;;          (esp. useful when debugging the users's io)
 
-(module language (lib "a-unit.ss")
-  (require "drsig.ss"
-           (lib "string-constant.ss" "string-constants")
-           (lib "pconvert.ss")
-           (lib "pretty.ss")
-           (lib "etc.ss")
-           (lib "struct.ss")
-           (lib "class.ss")
-           (lib "file.ss")
-           (lib "list.ss")
-           (lib "embed.ss" "compiler")
-           (lib "launcher.ss" "launcher")
-           (lib "mred.ss" "mred")
-           (lib "framework.ss" "framework")
+#lang scheme/unit
+(require "drsig.ss"
+           string-constants
+           mzlib/pconvert
+           mzlib/pretty
+           mzlib/etc
+           mzlib/struct
+           mzlib/class
+           scheme/file
+           mzlib/list
+           compiler/embed
+           launcher
+           mred
+           framework
            (lib "syntax-browser.ss" "mrlib")
-           (lib "distribute.ss" "compiler")
-           (lib "bundle-dist.ss" "compiler"))
+           compiler/distribute
+           compiler/bundle-dist
+           "rep.ss")
   
   (import [prefix drscheme:debug: drscheme:debug^]
           [prefix drscheme:tools: drscheme:tools^]
@@ -39,8 +40,6 @@
       unmarshall-settings
       default-settings
       default-settings?
-      
-      order-manuals
       
       front-end/complete-program
       front-end/interaction
@@ -79,6 +78,7 @@
       get-module
       get-transformer-module
       use-namespace-require/copy?
+      use-namespace-require/copy-from-setting?
       config-panel
       
       get-reader
@@ -105,21 +105,6 @@
       get-reader))
   
   
-  
-  ;                  ;;;          
-  ;          
-  ;          
-  ;;;   ;;;   ;;; ;  ; ;;;     ;     ;;;  
-  ;   ;    ;    ; ; ;  ;   ;    ;    ;   ; 
-  ;;;     ;    ; ; ;  ;   ;    ;    ;;;;; 
-  ;    ;    ; ; ;  ;   ;    ;    ;     
-  ;   ;    ;    ; ; ;  ;   ;    ;    ;   ; 
-  ;;;   ;;;;; ;; ; ;; ;;;;   ;;;;;;  ;;;  
-  ;                   
-  ;                   
-  ;;;                  
-  
-  
   (define simple-module-based-language%
     (class* object% (simple-module-based-language<%>)
       (init-field module
@@ -130,7 +115,8 @@
                   (documentation-reference #f)
                   (reader (λ (src port)
                             (let ([v (parameterize ([read-accept-reader #t])
-                                       (read-syntax src port))])
+                                        (with-stacktrace-name 
+                                         (read-syntax src port)))])
                               (if (eof-object? v)
                                   v
                                   (namespace-syntax-introduce v)))))
@@ -148,25 +134,14 @@
   
   
   
-  ;;         ;;;                 ;;                              ;; 
-  ;           ;                  ;                               ; 
-  ;                       ;           ;                  ;                               ; 
-  ;   ;;; ;    ;;;    ;;;; ;;  ;;    ;     ;;;          ;;;;   ;;;;    ;;;    ;;;    ;;;; 
-  ;   ; ; ;  ;   ;  ;   ;  ;   ;    ;    ;   ;         ;   ;      ;  ;   ;  ;   ;  ;   ; 
-  ;;;;;      ;  ; ; ;  ;   ;  ;   ;  ;   ;    ;    ;;;;;  ;;;;;  ;   ;   ;;;;   ;;;   ;;;;;  ;   ; 
-  ;   ; ; ;  ;   ;  ;   ;  ;   ;    ;    ;             ;   ;  ;   ;      ;  ;      ;   ; 
-  ;    ; ; ;  ;   ;  ;   ;  ;   ;    ;    ;   ;         ;   ;  ;   ;  ;   ;  ;   ;  ;   ; 
-  ;    ;; ; ;;  ;;;    ;;; ;  ;;; ; ;;;;;;  ;;;         ; ;;;    ;;; ;  ;;;    ;;;    ;;; ;
-  
-  
-  
-  
   ;; simple-module-based-language->module-based-language : module-based-language<%>
   ;; transforms a simple-module-based-language into a module-based-language<%>
   (define simple-module-based-language->module-based-language-mixin
     (mixin (simple-module-based-language<%>) (module-based-language<%>)
       (define/public (get-transformer-module) 'mzscheme)
       (define/public (use-namespace-require/copy?) #f)
+      (define/public (use-namespace-require/copy-from-setting? setting)
+        (use-namespace-require/copy?))
       (define/public (use-mred-launcher) #t)
       
       (inherit get-module)
@@ -177,7 +152,7 @@
              (= (vector-length printable)
                 (procedure-arity make-simple-settings))
              (boolean? (vector-ref printable 0))
-             (memq (vector-ref printable 1) '(constructor quasiquote write current-print))
+             (memq (vector-ref printable 1) '(constructor quasiquote write))
              (memq (vector-ref printable 2) 
                    '(mixed-fraction 
                      mixed-fraction-e
@@ -214,7 +189,7 @@
                                   insert-newlines
                                   annotations))
   ;;  case-sensitive  : boolean
-  ;;  printing-style  : (union 'write 'constructor 'quasiquote 'current-print)
+  ;;  printing-style  : (union 'write 'constructor 'quasiquote)
   ;;  fraction-style  : (union 'mixed-fraction 'mixed-fraction-e 'repeating-decimal 'repeating-decimal-e)
   ;;  show-sharing    : boolean
   ;;  insert-newlines : boolean
@@ -259,8 +234,7 @@
                              (string-constant output-style-label)
                              (list (string-constant constructor-printing-style)
                                    (string-constant quasiquote-printing-style)
-                                   (string-constant write-printing-style)
-                                   (string-constant print-printing-style))
+                                   (string-constant write-printing-style))
                              output-panel
                              (λ (rb evt)
                                (let ([on? (not (= (send rb get-selection) 3))])
@@ -287,8 +261,7 @@
           (case (send output-style get-selection)
             [(0) 'constructor]
             [(1) 'quasiquote]
-            [(2) 'write]
-            [(3) 'current-print])
+            [(2) 'write])
           (if (send fraction-style get-value)
               'repeating-decimal-e
               'mixed-fraction-e)
@@ -305,12 +278,7 @@
                (case (simple-settings-printing-style settings)
                  [(constructor) 0]
                  [(quasiquote) 1]
-                 [(write) 2]
-                 [(current-print) 3]))
-         (let ([on? (not (eq? 'current-print (simple-settings-printing-style settings)))])
-           (send fraction-style enable on?)
-           (send show-sharing enable on?)
-           (send insert-newlines enable on?))
+                 [(write) 2]))
          (send fraction-style set-value (eq? (simple-settings-fraction-style settings)
                                              'repeating-decimal-e))
          (send show-sharing set-value (simple-settings-show-sharing settings))
@@ -324,9 +292,6 @@
   
   ;; simple-module-based-language-render-value/format : TST settings port (union #f (snip% -> void)) (union 'infinity number) -> void
   (define (simple-module-based-language-render-value/format value settings port width)
-    (if (eq? (simple-settings-printing-style settings) 'current-print)
-        (parameterize ([current-output-port port])
-          ((current-print) value))
         (let ([converted-value (simple-module-based-language-convert-value value settings)])
           (setup-printing-parameters 
            (λ ()
@@ -341,7 +306,7 @@
                   (pretty-print converted-value port))
                 (newline port)]))
            settings
-           width))))
+           width)))
   
   ;; setup-printing-parameters : (-> void) simple-settings number -> void
   (define (setup-printing-parameters thunk settings width)
@@ -351,7 +316,17 @@
                   (exact? x)
                   (real? x)
                   (not (integer? x))))])
-      (parameterize ([pretty-print-columns width]
+      (parameterize (
+                     ;; these three handlers aren't used, but are set to override the user's settings
+                     [pretty-print-print-line (λ (line-number op old-line dest-columns) 
+                                                (when (and (not (equal? line-number 0))
+                                                           (not (equal? dest-columns 'infinity)))
+                                                  (newline op))
+                                                0)]
+                     [pretty-print-pre-print-hook (λ (val port) (void))]
+                     [pretty-print-post-print-hook (λ (val port) (void))]
+                     
+                     [pretty-print-columns width]
                      [pretty-print-size-hook
                       (λ (value display? port)
                         (cond
@@ -399,7 +374,6 @@
   (define (simple-module-based-language-convert-value value settings)
     (case (simple-settings-printing-style settings)
       [(write) value]
-      [(current-print) value]
       [(constructor)
        (parameterize ([constructor-style-printing #t]
                       [show-sharing (simple-settings-show-sharing settings)]
@@ -447,8 +421,8 @@
   ;; simple-module-based-language-get-init-code : setting -> sexp[module]
   (define (simple-module-based-language-get-init-code setting)
     `(module mod-name mzscheme
-       (require (lib "pconvert.ss")
-                (lib "pretty.ss"))
+       (require mzlib/pconvert
+                mzlib/pretty)
        
        (provide init-code)
        
@@ -469,7 +443,6 @@
        (define (convert-value value)
          ,(case (simple-settings-printing-style setting)
             [(write) `value]
-            [(current-print) `value]
             [(constructor)
              `(parameterize ([constructor-style-printing #t]
                              [show-sharing ,(simple-settings-show-sharing setting)])
@@ -489,28 +462,11 @@
          (read-case-sensitive ,(simple-settings-case-sensitive setting)))))
   
   
-  
-  
-  ;;;                                                    
-  ;                                                    
-  ;       ;                                                    
-  ;      ;    ;;;;  ; ;;;    ;;; ;;;  ;;  ;;;;    ;;; ;  ;;;  
-  ;     ;        ;  ;;  ;  ;   ;  ;   ;      ;  ;   ;  ;   ; 
-  ;;;;;      ;    ;     ;;;;  ;   ;  ;   ;  ;   ;   ;;;;  ;   ;  ;;;;; 
-  ;     ;    ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;     
-  ;      ;    ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;   ; 
-  ;     ;;;;;;  ;;; ;;;;  ;;  ;;;;   ;;; ;  ;;; ;  ;;;;   ;;;  
-  ;                    ;        
-  ;                    ;        
-  ;;;                  ;;;         
-  
-  
-  
   ;; module-based-language->language : module-based-language -> language<%>
   ;; given a module-based-language, implements a language
   (define module-based-language->language-mixin
     (mixin (module-based-language<%>) (language<%>)
-      (inherit get-module get-transformer-module use-namespace-require/copy?
+      (inherit get-module get-transformer-module use-namespace-require/copy-from-setting?
                get-init-code use-mred-launcher get-reader)
       
       (define/pubment (capability-value s) 
@@ -518,7 +474,6 @@
       
       (define/public (first-opened) (void))
       (define/public (get-comment-character) (values ";  " #\;))
-      (define/public (order-manuals x) (values x #t))
       
       (inherit get-language-position)
       (define/public (get-language-name)
@@ -529,7 +484,7 @@
       (define/public (get-style-delta) #f)
       (define/override (on-execute setting run-in-user-thread)
         (super on-execute setting run-in-user-thread)
-        (initialize-module-based-language (use-namespace-require/copy?)
+        (initialize-module-based-language (use-namespace-require/copy-from-setting? setting)
                                           (get-module)
                                           (get-transformer-module)
                                           run-in-user-thread))
@@ -544,7 +499,7 @@
                                                  (get-transformer-module)
                                                  (get-init-code setting)
                                                  (use-mred-launcher)
-                                                 (use-namespace-require/copy?)))
+                                                 (use-namespace-require/copy-from-setting? setting)))
       (define/public (extra-repl-information _1 _2) (void))
       (define/public (get-reader-module) #f)
       (define/public (get-metadata a b c) #f)
@@ -554,7 +509,7 @@
       (super-new)))
   
   ;; create-module-based-language-executable :  
-  ;; (is-a?/c area-container<%>) string module-spec module-spec sexp (union boolean? 'ask) boolean?
+  ;; (is-a?/c area-container<%>) string (or #f module-spec) module-spec sexp (union boolean? 'ask) boolean?
   ;;  -> void
   (define (create-module-based-language-executable parent
                                                    program-filename
@@ -877,19 +832,20 @@
         (call-with-output-file bootstrap-tmp-filename
           (λ (port)
             (write `(let () ;; cannot use begin, since it gets flattened to top-level (and re-compiled!)
-                      ,@(if use-copy?
-                            (list 
-                             `(namespace-require ',module-language-spec)
-                             `(namespace-require/copy ',module-language-spec))
-                            (list
-                             `(namespace-require ',module-language-spec)))
+                      ,@(if module-language-spec
+                            (if use-copy?
+                                (list 
+                                 `(namespace-require/copy ',module-language-spec))
+                                (list
+                                 `(namespace-require/constant ',module-language-spec)))
+                            '())
                       ,@(if transformer-module-language-spec
-                            (list `(namespace-transformer-require ',transformer-module-language-spec))
+                            (list `(namespace-require `(for-syntax ,transformer-module-language-spec)))
                             (list))
                       ((dynamic-require ',init-code-mod-name 'init-code)))
                    port))
-          'truncate
-          'text)
+          #:exists 'truncate
+          #:mode 'text)
         
         (let ([new-init-code 
                (list*
@@ -899,17 +855,22 @@
           (call-with-output-file init-code-tmp-filename
             (λ (port)
               (write new-init-code port))
-            'truncate 'text)))
+            #:exists 'truncate #:mode 'text)))
       
       (let* ([pre-to-be-embedded-module-specs0
-              (if (or (not transformer-module-language-spec)
-                      (equal? module-language-spec transformer-module-language-spec))
-                  (list module-language-spec)
-                  (list module-language-spec
-                        transformer-module-language-spec))]
+              (cond
+                [(and module-language-spec transformer-module-language-spec)
+                 (if (equal? module-language-spec transformer-module-language-spec)
+                     (list module-language-spec)
+                     (list module-language-spec transformer-module-language-spec))]
+                [module-language-spec 
+                 (list module-language-spec)]
+                [transformer-module-language-spec
+                 (list transformer-module-language-spec)]
+                [else '()])]
              [pre-to-be-embedded-module-specs1
               (if gui?
-                  (cons '(lib "mred.ss" "mred")
+                  (cons '(lib "mred/mred.ss")
                         pre-to-be-embedded-module-specs0)
                   pre-to-be-embedded-module-specs0)]
              [pre-to-be-embedded-module-specs2
@@ -957,7 +918,7 @@
                                                    gui?
                                                    use-copy?))))
   
-  ;; create-module-based-distribution : ... -> void (see docs)
+  ;; create-distribution-for-executable : ... -> void (see docs)
   (define (create-distribution-for-executable distribution-filename
                                               gui?
                                               make-executable)
@@ -1087,24 +1048,21 @@
       
       ((if gui? make-mred-launcher make-mzscheme-launcher)
        (list
-        "-qmvt"
         (path->string
          (build-path (collection-path "drscheme" "private") 
-                     "launcher-bootstrap.ss"))
-        "--"
+                     (if gui? 
+                         "launcher-mred-bootstrap.ss"
+                         "launcher-mz-bootstrap.ss")))
         (condense-scheme-code-string (format "~s" init-code))
         (path->string program-filename)
         (format "~s" module-language-spec)
         (format "~s" transformer-module-language-spec)
-        (format "~s" use-copy?)
-        (format "~s" (if gui?  
-                         (list 'mzscheme '(lib "mred.ss" "mred"))
-                         (list 'mzscheme))))
+        (format "~s" use-copy?))
        (if (path? executable-filename)
            (path->string executable-filename)
            executable-filename))))
   
-  ;; initialize-module-based-language : boolean module-spec module-spec ((-> void) -> void)
+  ;; initialize-module-based-language : boolean (or #f module-spec) module-spec ((-> void) -> void)
   (define (initialize-module-based-language use-copy?
                                             module-spec
                                             transformer-module-spec
@@ -1115,14 +1073,12 @@
                         (λ (x)
                           (display (exn-message x))
                           (newline))])
-         (namespace-require module-spec)
-         ;; we always do a require to get the provide-for-syntax bindings
-         ;; if copy semantics is wanted, we do a copy next to clobber (some of)
-         ;; the bindings
-         (when use-copy?
-           (namespace-require/copy module-spec))
+         (when module-spec
+           (if use-copy?
+               (namespace-require/copy module-spec)
+               (namespace-require/constant module-spec)))
          (when transformer-module-spec
-           (namespace-transformer-require transformer-module-spec))))))
+           (namespace-require `(for-syntax ,transformer-module-spec)))))))
   
   ;; module-based-language-front-end : (port reader -> (-> (union sexp syntax eof)))
   ;; type reader = type-spec-of-read-syntax (see mz manual for details)
@@ -1130,9 +1086,11 @@
     (λ () 
       (let ([s (reader (object-name port) port)])
         (if (syntax? s)
-            (with-syntax ([s s]
-                          [t (namespace-syntax-introduce (datum->syntax-object #f '#%top-interaction))])
-              (syntax (t . s)))
+            (namespace-syntax-introduce
+             (datum->syntax 
+              #f 
+              (cons '#%top-interaction s)
+              s))
             s))))
   
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1210,5 +1168,4 @@
      'drscheme:language:extend-language-interface
      'phase1)
     (set! default-mixin (compose default-impl default-mixin))
-    (set! language-extensions (cons extension<%> language-extensions))))
-
+    (set! language-extensions (cons extension<%> language-extensions)))

@@ -30,7 +30,7 @@
 ;;; DAMAGES.
 ;;; ***************************************************************************
 
-(module tiny-clos (lib "base.ss" "swindle")
+#lang s-exp swindle/base
 
 ;;; A very simple CLOS-like language, embedded in Scheme, with a simple MOP.
 ;;; The features of the default base language are:
@@ -116,7 +116,7 @@
 ;;; OK, now let's get going.  But, as usual, before we can do anything
 ;;; interesting, we have to muck around for a bit first.  First, we need to
 ;;; load the support library.  [-- replaced with a module.]
-(require (lib "misc.ss" "swindle"))
+(require swindle/misc)
 
 ;; This is a convenient function for raising exceptions
 (define (raise* exn-maker fmt . args)
@@ -131,8 +131,8 @@
       (if (zero? a)
         (raise (exn-maker
                 (if sym
-                  (apply format (concat "~s: " fmt) sym (reverse! fmt-args))
-                  (apply format fmt (reverse! fmt-args)))
+                  (apply format (concat "~s: " fmt) sym (reverse fmt-args))
+                  (apply format fmt (reverse fmt-args)))
                 (current-continuation-marks) . args))
         (loop (cons (car args) fmt-args) (cdr args) (sub1 a))))))
 
@@ -334,7 +334,7 @@
                 [dslots  (map list (getarg initargs :direct-slots '()))]
                 [cpl     (let loop ([sups dsupers] [so-far (list new)])
                            (if (null? sups)
-                             (reverse! so-far)
+                             (reverse so-far)
                              (loop (append (cdr sups)
                                            (%class-direct-supers (car sups)))
                                    (if (memq (car sups) so-far)
@@ -352,8 +352,8 @@
                    (let ([f nfields])
                      (set! nfields (+ nfields 1))
                      (set! field-initializers (cons init field-initializers))
-                     (list (lambda (o)   (%instance-ref  o f))
-                           (lambda (o n) (%instance-set! o f n)))))]
+                     (mcons (lambda (o)   (%instance-ref  o f))
+                            (lambda (o n) (%instance-set! o f n)))))]
                 [getters-n-setters
                  (map (lambda (s)
                         (cons (car s) (allocator unspecified-initializer)))
@@ -363,7 +363,7 @@
            (%set-class-cpl!                new cpl)
            (%set-class-slots!              new slots)
            (%set-class-nfields!            new nfields)
-           (%set-class-field-initializers! new (reverse! field-initializers))
+           (%set-class-field-initializers! new (reverse field-initializers))
            (%set-class-getters-n-setters!  new getters-n-setters)
            (%set-class-name!               new name)
            (%set-class-initializers!       new '()) ; no class inits now
@@ -398,29 +398,29 @@
 ;;>   Note that slot names are usually symbols, but can be other values as
 ;;>   well.
 (define* (slot-ref object slot-name)
-  ((lookup-slot-info (class-of object) slot-name cadr) object))
+  ((lookup-slot-info (class-of object) slot-name mcar) object))
 (defsubst (%slot-ref object slot-name)
-  ((lookup-slot-info (class-of object) slot-name cadr) object))
+  ((lookup-slot-info (class-of object) slot-name mcar) object))
 
 ;;>> (slot-set! obj slot new)
 ;;>   Change the contents of the `slot' slot of `obj' to the given `new'
 ;;>   value.
 (define* (slot-set! object slot-name new-value)
-  ((lookup-slot-info (class-of object) slot-name caddr) object new-value))
+  ((lookup-slot-info (class-of object) slot-name mcdr) object new-value))
 (defsubst (%slot-set! object slot-name new-value)
-  ((lookup-slot-info (class-of object) slot-name caddr) object new-value))
+  ((lookup-slot-info (class-of object) slot-name mcdr) object new-value))
 ;;>> (set-slot-ref! obj slot new)
 ;;>   An alias for `slot-set!', to enable using `setf!' on it.
 (define* set-slot-ref! slot-set!)
 
 ;; This is a utility that is used to make locked slots
 (define (make-setter-locked! g+s key error)
-  (let ([setter (cadr g+s)])
-    (set-cadr! g+s
+  (let ([setter (mcdr g+s)])
+    (set-mcdr! g+s
       (lambda (o n)
         (cond [(and (pair? n) (eq? key (car n)) (not (eq? key #t)))
                (setter o (cdr n))]
-              [(eq? ??? ((car g+s) o)) (setter o n)]
+              [(eq? ??? ((mcar g+s) o)) (setter o n)]
               [else (error)])))))
 
 ;;>> (slot-bound? object slot)
@@ -430,21 +430,21 @@
   (not (eq? ??? (%slot-ref object slot-name))))
 
 (define (lookup-slot-info class slot-name selector)
-  (selector (or (assq slot-name
-                      ;; no need to ground slot-ref any more! -- see below
-                      ;; (if (eq? class <class>)
-                      ;;   ;;* This grounds out the slot-ref tower
-                      ;;   getters-n-setters-for-class
-                      ;;   (%class-getters-n-setters class))
-                      (%class-getters-n-setters class))
-                (raise* make-exn:fail:contract
-                        "slot-ref: no slot `~e' in ~e" slot-name class))))
+  (selector (cdr (or (assq slot-name
+                           ;; no need to ground slot-ref any more! -- see below
+                           ;; (if (eq? class <class>)
+                           ;;   ;;* This grounds out the slot-ref tower
+                           ;;   getters-n-setters-for-class
+                           ;;   (%class-getters-n-setters class))
+                           (%class-getters-n-setters class))
+                     (raise* make-exn:fail:contract
+                             "slot-ref: no slot `~e' in ~e" slot-name class)))))
 
 ;;; These are for optimizations - works only for single inheritance!
 (define (%slot-getter class slot-name)
-  (lookup-slot-info class slot-name cadr))
+  (lookup-slot-info class slot-name mcar))
 (define (%slot-setter class slot-name)
-  (lookup-slot-info class slot-name caddr))
+  (lookup-slot-info class slot-name mcdr))
 
 ;;>>... Singleton and Struct Specifiers
 
@@ -627,9 +627,8 @@
 (define getters-n-setters-for-class ; see lookup-slot-info
   (map (lambda (s)
          (let ([f (position-of s the-slots-of-a-class)])
-           (list s
-                 (lambda (o)   (%instance-ref  o f))
-                 (lambda (o n) (%instance-set! o f n)))))
+           (cons s (mcons (lambda (o)   (%instance-ref  o f))
+                          (lambda (o n) (%instance-set! o f n))))))
        the-slots-of-a-class))
 
 ;;>>...
@@ -663,12 +662,12 @@
 ;; slot-ref definition above is fine. So,
 ;;   (%set-class-getters-n-setters! <class> getters-n-setters-for-class)
 ;; translates into this:
-((caddr (assq 'getters-n-setters getters-n-setters-for-class))
+((mcdr (cdr (assq 'getters-n-setters getters-n-setters-for-class)))
  <class> getters-n-setters-for-class)
 ;; and now the direct `%class-getters-n-setters' version:
 (set! %class-getters-n-setters
-      ;; and (lookup-slot-info <class> 'getters-n-setters caddr) translates to:
-      (cadr (assq 'getters-n-setters getters-n-setters-for-class)))
+      ;; and (lookup-slot-info <class> 'getters-n-setters mcar) translates to:
+      (mcar (cdr (assq 'getters-n-setters getters-n-setters-for-class))))
 
 ;;>> <top>
 ;;>   This is the "mother of all values": every value is an instance of
@@ -782,7 +781,7 @@
 ;; Do this since compute-apply-method relies on them not changing, as well as a
 ;; zillion other places.  A method should be very similar to a lambda.
 (dolist [slot '(specializers procedure qualifier)]
-  (make-setter-locked! (lookup-slot-info <method> slot cdr) #t
+  (make-setter-locked! (lookup-slot-info <method> slot values) #t
     (lambda ()
       (raise* make-exn:fail:contract
               "slot-set!: slot `~e' in <method> is locked" slot))))
@@ -986,12 +985,16 @@
   ;; add singleton specializer value (if any) to the corresponding hash table
   ;; in singletons-list.
   (define (add-to-singletons-list specs tables)
-    (unless (null? specs)
-      (when (%singleton? (car specs))
-        (unless (car tables)
-          (set-car! tables (make-hash-table 'weak)))
-        (hash-table-put! (car tables) (singleton-value (car specs)) #t))
-      (add-to-singletons-list (cdr specs) (cdr tables))))
+    (cond
+     [(null? specs) null]
+     [(%singleton? (car specs))
+      (let ([ht (or (car tables)
+                    (make-hash-table 'weak))])
+        (hash-table-put! ht (singleton-value (car specs)) #t)
+        (cons ht (add-to-singletons-list (cdr specs) (cdr tables))))]
+     [else
+      (cons (car tables)
+            (add-to-singletons-list (cdr specs) (cdr tables)))]))
   (define (n-falses n)
     (let loop ([n n] [r '()]) (if (zero? n) r (loop (sub1 n) (cons #f r)))))
   (let ([tables    (%generic-singletons-list generic)]
@@ -999,14 +1002,13 @@
         [qualifier (%method-qualifier method)])
     ;; make sure that tables always contain enough hash tables (or #f's)
     (cond [(eq? tables ???)
-           (set! tables (n-falses (length specs)))
-           (%set-generic-singletons-list! generic tables)]
+           (set! tables (n-falses (length specs)))]
           [(< (length tables) (length specs))
-           (set! tables (append!
+           (set! tables (append
                          tables
-                         (n-falses (- (length specs) (length tables)))))
-           (%set-generic-singletons-list! generic tables)])
-    (add-to-singletons-list specs tables)
+                         (n-falses (- (length specs) (length tables)))))])
+    (set! tables (add-to-singletons-list specs tables))
+    (%set-generic-singletons-list! generic tables)
     (if (memq generic generic-invocation-generics)
       ;; reset all caches by changing the value of *generic-app-cache-tag*
       (set! *generic-app-cache-tag* (list #f))
@@ -1053,7 +1055,7 @@
       (define (get-keys args tables)
         (let loop ([args args] [tables tables] [ks '()])
           (if (or (null? tables) (null? args))
-            (reverse! ks)
+            (reverse ks)
             (loop (cdr args) (cdr tables)
                   (cons (if (and (car tables)
                                  (hash-table-get
@@ -1213,10 +1215,10 @@
                 ;;              (%method-qualifier (car methods)))]
                 )
             (loop (cdr ms)))))
-        (set! primaries (reverse! primaries))
-        (set! arounds   (reverse! arounds))
-        (set! befores   (reverse! befores))
-        ;; no reverse! for afters
+        (set! primaries (reverse primaries))
+        (set! arounds   (reverse arounds))
+        (set! befores   (reverse befores))
+        ;; no reverse for afters
         (cond [(null? primaries)
                (lambda args (no-applicable-method generic . args))]
               ;; optimize common case of only primaries
@@ -1315,17 +1317,17 @@
 (define* generic-+-combination
   (make-generic-combination :init 0 :combine +))
 (define* generic-list-combination
-  (make-generic-combination :process-result reverse!))
+  (make-generic-combination :process-result reverse))
 (define* generic-min-combination
   (make-generic-combination :process-result (lambda (r) (apply min r))))
 (define* generic-max-combination
   (make-generic-combination :process-result (lambda (r) (apply max r))))
 (define* generic-append-combination
   (make-generic-combination
-   :process-result (lambda (r) (apply append (reverse! r)))))
+   :process-result (lambda (r) (apply append (reverse r)))))
 (define* generic-append!-combination
   (make-generic-combination
-   :process-result (lambda (r) (apply append! (reverse! r)))))
+   :process-result (lambda (r) (apply append (reverse r)))))
 (define* generic-begin-combination
   (make-generic-combination :init #f :combine (lambda (x y) x)))
 (define* generic-and-combination
@@ -1455,7 +1457,7 @@
                                               class slot allocator)))
                                      (%class-slots class))])
         (%set-class-nfields! class nfields)
-        (%set-class-field-initializers! class (reverse! field-initializers))
+        (%set-class-field-initializers! class (reverse field-initializers))
         (%set-class-getters-n-setters! class getters-n-setters))
       (%set-class-initializers!
        class (reverse
@@ -1530,13 +1532,13 @@
                                 #t))
                             to-process)])
               (collect remaining-to-process
-                       (cons (cons name (apply append (reverse! others)))
+                       (cons (cons name (apply append (reverse others)))
                              result)))))
         ;; Sort the slots by order of appearance in cpl, makes them stay in the
         ;; same index, allowing optimizations for single-inheritance
-        (let collect ([to-process (apply append (reverse! all-slots))]
+        (let collect ([to-process (apply append (reverse all-slots))]
                       [result '()])
-          (cond [(null? to-process) (reverse! result)]
+          (cond [(null? to-process) (reverse result)]
                 [(assq (caar to-process) result)
                  (collect (cdr to-process) result)]
                 [else (collect (cdr to-process)
@@ -1582,16 +1584,16 @@
           (case allocation
             [(:instance)
              (let* ([f (allocator init-slot)]
-                    [g+s (list (lambda (o) (%instance-ref o f))
-                               (if (and type (not (eq? <top> type)))
-                                 (lambda (o n)
-                                   (if (instance-of? n type)
-                                     (%instance-set! o f n)
-                                     (raise* make-exn:fail:contract
-                                             "slot-set!: wrong type for slot ~
+                    [g+s (mcons (lambda (o) (%instance-ref o f))
+                                (if (and type (not (eq? <top> type)))
+                                  (lambda (o n)
+                                    (if (instance-of? n type)
+                                      (%instance-set! o f n)
+                                      (raise* make-exn:fail:contract
+                                              "slot-set!: wrong type for slot ~
                                               ~e in ~e (~e not in ~e)"
-                                             (car slot) class n type)))
-                                 (lambda (o n) (%instance-set! o f n))))])
+                                              (car slot) class n type)))
+                                  (lambda (o n) (%instance-set! o f n))))])
                (when lock
                  (make-setter-locked! g+s lock
                    (lambda ()
@@ -1609,9 +1611,9 @@
                             ;; cache the setter
                             (unless setter
                               (set! setter
-                                    (caddr (assq (car slot)
-                                                 (%class-getters-n-setters
-                                                  class)))))
+                                    (mcdr (cdr (assq (car slot)
+                                                     (%class-getters-n-setters
+                                                      class))))))
                             (unless (eq? result nothing)
                               (setter #f result))))
                         (%class-initializers class)))))
@@ -1621,15 +1623,15 @@
                               :allocation #f))
                ;; the slot was declared as :class here
                (let* ([cell (init)] ; default value - no arguments
-                      [g+s (list (lambda (o) cell)
-                                 (lambda (o n)
-                                   (if (and type (not (instance-of? n type)))
-                                     (raise*
-                                      make-exn:fail:contract
-                                      "slot-set!: wrong type for shared slot ~
+                      [g+s (mcons (lambda (o) cell)
+                                  (lambda (o n)
+                                    (if (and type (not (instance-of? n type)))
+                                      (raise*
+                                       make-exn:fail:contract
+                                       "slot-set!: wrong type for shared slot ~
                                        ~e in ~e (~e not in ~e)"
-                                      (car slot) class n type)
-                                     (set! cell n))))])
+                                       (car slot) class n type)
+                                      (set! cell n))))])
                  (when lock
                    (make-setter-locked! (car slot) g+s lock
                      (lambda ()
@@ -1911,14 +1913,11 @@
 ;;>> <sequence>
 ;;>> <mutable>
 ;;>> <immutable>
-;;>> <improper-list>
 ;;>> <pair>
 ;;>> <mutable-pair>
 ;;>> <immutable-pair>
 ;;>> <list>
 ;;>> <nonempty-list>
-;;>> <mutable-nonempty-list>
-;;>> <immutable-nonempty-list>
 ;;>> <null>
 ;;>> <vector>
 ;;>> <char>
@@ -2001,14 +2000,11 @@
 (defprimclass <sequence>)
 (defprimclass <mutable>)
 (defprimclass <immutable>)
-(defprimclass <improper-list> <sequence>)
-(defprimclass <pair> <improper-list>)
+(defprimclass <pair> <sequence>)
 (defprimclass <mutable-pair> <pair> <mutable>)
 (defprimclass <immutable-pair> <pair> <immutable>)
-(defprimclass <list> <improper-list>)
-(defprimclass <nonempty-list> <pair> <list>)
-(defprimclass <mutable-nonempty-list> <nonempty-list> <mutable>)
-(defprimclass <immutable-nonempty-list> <nonempty-list> <immutable>)
+(defprimclass <list> <sequence>)
+(defprimclass <nonempty-list> <pair> <list> <immutable>)
 (defprimclass <null> <list>)
 (defprimclass <vector> <sequence> <mutable>)
 (defprimclass <char>)
@@ -2121,12 +2117,7 @@
                                       [(primitive? x) <primitive-procedure>]
                                       [else <procedure>])]
               [(string?      x) (if (immutable? x) <immutable-string> <string>)]
-              [(pair?        x)
-               (if (list? x)
-                 (if (immutable? x)
-                   <immutable-nonempty-list> <mutable-nonempty-list>)
-                 (if (immutable? x)
-                   <immutable-pair> <mutable-pair>))]
+              [(pair?        x) (if (list? x) <nonempty-list> <immutable-pair>)]
               [(null?        x) <null>]
               [(symbol?      x) (if (keyword? x) <keyword> <symbol>)]
               [(number?      x)
@@ -2146,6 +2137,7 @@
               [(bytes?       x) (if (immutable? x) <immutable-bytes> <bytes>)]
               [(path?        x) <path>]
               [(vector?      x) <vector>]
+              [(mpair?       x) <mutable-pair>]
               [(eof-object?  x) <end-of-file>]
               [(input-port?  x)
                (if (file-stream-port? x) <input-stream-port> <input-port>)]
@@ -2210,18 +2202,13 @@
 ;;>         <primitive-procedure> : <procedure-class>
 ;;>     <builtin> : <class>
 ;;>       <sequence> : <primitive-class>
-;;>         <improper-list> : <primitive-class>
-;;>           <pair> : <primitive-class>
-;;>             <mutable-pair> : <primitive-class>
-;;>             <immutable-pair> : <primitive-class>
-;;>             <nonempty-list> : <primitive-class>
-;;>               <mutable-nonempty-list> : <primitive-class>
-;;>               <immutable-nonempty-list> : <primitive-class>
-;;>           <list> : <primitive-class>
-;;>             <nonempty-list> : <primitive-class>
-;;>               <mutable-nonempty-list> : <primitive-class>
-;;>               <immutable-nonempty-list> : <primitive-class>
-;;>             <null> : <primitive-class>
+;;>         <pair> : <primitive-class>
+;;>           <mutable-pair> : <primitive-class>
+;;>           <immutable-pair> : <primitive-class>
+;;>           <nonempty-list> : <primitive-class>
+;;>         <list> : <primitive-class>
+;;>           <nonempty-list> : <primitive-class>
+;;>           <null> : <primitive-class>
 ;;>         <vector> : <primitive-class>
 ;;>         <string-like> : <primitive-class>
 ;;>           <string> : <primitive-class>
@@ -2233,15 +2220,14 @@
 ;;>           <path> : <primitive-class>
 ;;>       <mutable> : <primitive-class>
 ;;>         <mutable-pair> : <primitive-class>
-;;>         <mutable-nonempty-list> : <primitive-class>
 ;;>         <mutable-string-like> : <primitive-class>
 ;;>           <mutable-string> : <primitive-class>
 ;;>           <mutable-bytes> : <primitive-class>
 ;;>         <vector>
 ;;>         <box>
 ;;>       <immutable> : <primitive-class>
-;;>         <immutable-nonempty-list> : <primitive-class>
-;;>         <immutable-pair> : <primitive-class>
+;;>         <list> : <primitive-class>
+;;>         <pair> : <primitive-class>
 ;;>         <immutable-string-like> : <primitive-class>
 ;;>           <immutable-string> : <primitive-class>
 ;;>           <immutable-bytes> : <primitive-class>
@@ -2333,5 +2319,3 @@
 ;;>       compute-methods
 ;;>         compute-method-more-specific?
 ;;>       compute-apply-methods
-
-)

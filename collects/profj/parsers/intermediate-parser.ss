@@ -5,9 +5,9 @@
            "../ast.ss"
            "../parameters.ss")
   
-  (require (lib "yacc.ss" "parser-tools")
-           (all-except (lib "lex.ss" "parser-tools") input-port)
-           (lib "readerr.ss" "syntax"))
+  (require parser-tools/yacc
+           (all-except parser-tools/lex input-port)
+           syntax/readerr)
   
   (require-for-syntax "lexer.ss")
   ;(require (lib "build-grammar.ss" "tester"))
@@ -212,7 +212,7 @@
 
       (VariableDeclarators
        [(VariableDeclarator) (list $1)]
-       [(VariableDeclarators COMMA VariableDeclarator) (cons $3 $1)])
+       #;[(VariableDeclarators COMMA VariableDeclarator) (cons $3 $1)])
       
       (VariableDeclarator
        [(VariableDeclaratorId) $1]

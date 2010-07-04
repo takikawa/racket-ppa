@@ -1,8 +1,8 @@
 (module compile mzscheme
   (require "parameters.ss" "ast.ss" "types.ss" "parser.ss" "build-info.ss" "check.ss" "to-scheme.ss" "profj-pref.ss")
-  (require (lib "list.ss")
-           (lib "file.ss")
-           (lib "class.ss"))
+  (require mzlib/list
+           mzlib/file
+           mzlib/class)
 
   (provide compile-java compile-interactions compile-files compile-ast compile-interactions-ast
            compilation-unit-code compilation-unit-contains set-compilation-unit-code!
@@ -38,7 +38,9 @@
       (cond
         ((and (eq? src 'file) (eq? dest 'file))
          (let-values  (((path-base file dir?) (split-path (path->complete-path (build-path name)))))
-           (let ((compiled-path (build-path path-base "compiled" (path-replace-suffix file ".zo")))
+           (let ((compiled-path (build-path path-base "compiled" (path-add-suffix
+                                                                  (path-replace-suffix file ".ss")
+                                                                  ".zo")))
                  (type-path (build-path path-base "compiled" (path-replace-suffix file ".jinfo"))))
              (unless 
                  (and (file-exists? compiled-path)
@@ -54,7 +56,9 @@
          (compile-to-file port loc level))
         ((eq? src 'file)
          (let-values  (((path-base file dir?) (split-path (path->complete-path (build-path name)))))
-           (let ((compiled-path (build-path path-base "compiled" (path-replace-suffix file ".zo")))
+           (let ((compiled-path (build-path path-base "compiled" (path-add-suffix
+                                                                  (path-replace-suffix file ".ss")
+                                                                  ".zo")))
                  (type-path (build-path path-base "compiled" (path-replace-suffix file ".jinfo"))))
              (unless (or (and (file-exists? compiled-path)
                               (> (file-or-directory-modify-seconds compiled-path)
@@ -68,6 +72,10 @@
                  (lambda (port) (compile-java-internal port name type-recs #f level)))))))
         (else
          (compile-java-internal port loc type-recs #f level)))))
+
+  (define (compile-module expr)
+    (parameterize ([current-namespace (make-namespace)])
+      (compile expr)))
 
   ;compile-to-file: port location level -> void
   ;Should have side-effect of writing to file all files needed for compilation
@@ -94,7 +102,7 @@
                                                  (build-path (send type-recs get-compilation-location)
                                                              (file-name-from-path
                                                               (send type-recs get-composite-location (car names))))
-                                                 (lambda (port) (write (compile (car syntaxes)) port)) 'truncate/replace)
+                                                 (lambda (port) (write (compile-module (car syntaxes)) port)) 'truncate/replace)
                       (set! syntaxes (cdr syntaxes)))
                     (unless (= (length names) (length syntaxes) (length locations))
                       (error 'compile-to-file "Internal error: compilation unit not represented as expected"))
@@ -104,8 +112,8 @@
                                 (let ((directory (send type-recs get-compilation-location)))
                                   (unless (directory-exists? directory) (make-directory directory))
                                   (call-with-output-zo-file* location
-                                                             (build-path directory (string-append name ".zo"))
-                                                             (lambda (port) (write (compile code) port))
+                                                             (build-path directory (string-append name "_ss.zo"))
+                                                             (lambda (port) (write (compile-module code) port))
                                                              'truncate/replace)
                                   (call-with-output-file* (build-path directory (string-append name ".jinfo"))
                                                           (lambda (port) (write-record (send type-recs get-class-record 

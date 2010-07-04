@@ -2,7 +2,7 @@
 ;;; <delete.ss> ---- List deletion functions
 ;;; Time-stamp: <02/03/01 07:26:12 noel>
 ;;;
-;;; Copyright (C) 2002 by Noel Welsh. 
+;;; Copyright (C) 2002 by Noel Welsh.
 ;;;
 ;;; This file is part of SRFI-1.
 
@@ -33,61 +33,46 @@
 ;; hold me liable for its use. Please send bug reports to shivers@ai.mit.edu.
 ;;     -Olin
 
-(module delete
-  mzscheme
+#lang scheme/base
 
-  (require (lib "etc.ss" "mzlib")
-		   (lib "optional.ss" "srfi")
-		   "predicate.ss"
-		   "filter.ss")
+(require srfi/optional "predicate.ss")
 
-  (provide delete
-		   delete!
-		   delete-duplicates
-		   delete-duplicates!)
+(provide delete (rename-out [delete delete!])
+         delete-duplicates (rename-out [delete-duplicates delete-duplicates!]))
 
-  (define delete
-	(opt-lambda (x lis (maybe-= equal?))
-				(let ((= maybe-=))
-				  (filter (lambda (y) (not (= x y))) lis))))
+(define (delete x lis [= equal?])
+  (filter (lambda (y) (not (= x y))) lis))
 
-  (define delete!
-	(opt-lambda (x lis  (maybe-= equal?))
-				(let ((= maybe-=))
-				  (filter! (lambda (y) (not (= x y))) lis))))
+#; ; lists are immutable
+(define delete! (x lis [= equal?])
+  (filter! (lambda (y) (not (= x y))) lis))
 
-  ;; right-duplicate deletion
-  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-  ;; delete-duplicates delete-duplicates!
-  ;;
-  ;; Beware -- these are N^2 algorithms. To efficiently remove duplicates
-  ;; in long lists, sort the list to bring duplicates together, then use a 
-  ;; linear-time algorithm to kill the dups. Or use an algorithm based on
-  ;; element-marking. The former gives you O(n lg n), the latter is linear.
+;; right-duplicate deletion
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; delete-duplicates delete-duplicates!
+;;
+;; Beware -- these are N^2 algorithms. To efficiently remove duplicates
+;; in long lists, sort the list to bring duplicates together, then use a
+;; linear-time algorithm to kill the dups. Or use an algorithm based on
+;; element-marking. The former gives you O(n lg n), the latter is linear.
 
-  (define delete-duplicates
-	(opt-lambda (lis (maybe-= equal?))
-				(let ((elt= maybe-=))
-				  (check-arg procedure? elt= 'delete-duplicates)
-				  (let recur ((lis lis))
-					(if (null-list? lis) lis
-						(let* ((x (car lis))
-							   (tail (cdr lis))
-							   (new-tail (recur (delete x tail elt=))))
-						  (if (eq? tail new-tail) lis (cons x new-tail))))))))
+(define (delete-duplicates lis [elt= equal?])
+  (check-arg procedure? elt= 'delete-duplicates)
+  (let recur ((lis lis))
+    (if (null-list? lis) lis
+        (let* ((x (car lis))
+               (tail (cdr lis))
+               (new-tail (recur (delete x tail elt=))))
+          (if (eq? tail new-tail) lis (cons x new-tail))))))
 
-  (define delete-duplicates!
-	(opt-lambda (lis (maybe-= equal?))
-				(let ((elt= maybe-=))
-				  (check-arg procedure? elt= 'delete-duplicates!)
-				  (let recur ((lis lis))
-					(if (null-list? lis) lis
-						(let* ((x (car lis))
-							   (tail (cdr lis))
-							   (new-tail (recur (delete! x tail elt=))))
-						  (if (eq? tail new-tail) lis (cons x new-tail))))))))
-
-  )
-
+#; ; lists are immutable
+(define (delete-duplicates! lis [elt= equal?])
+  (check-arg procedure? elt= 'delete-duplicates!)
+  (let recur ((lis lis))
+    (if (null-list? lis) lis
+        (let* ((x (car lis))
+               (tail (cdr lis))
+               (new-tail (recur (delete! x tail elt=))))
+          (if (eq? tail new-tail) lis (cons x new-tail))))))
 
 ;;; delete.ss ends here

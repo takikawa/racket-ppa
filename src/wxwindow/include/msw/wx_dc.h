@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	
- * Copyright:	(c) 2004-2007 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2008 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -36,6 +36,7 @@ class wxDC: public wxbDC
   int window_ext_x;
   int window_ext_y;
 
+  HRGN limit_rgn;
   int canvas_scroll_dx, canvas_scroll_dy;
 
   wxCanvas *canvas;
@@ -198,6 +199,8 @@ class wxDC: public wxbDC
   double SmoothingXFormHL(double h, double y);
 
   void SetAlpha(double d);
+  
+  virtual int CacheFontMetricsKey();
 };
 
 // This class specific to Windows 3.1
@@ -210,6 +213,8 @@ class wxPrinterDC: public wxDC
   wxPrinterDC(HDC theDC);
 
   ~wxPrinterDC(void);
+
+  virtual int CacheFontMetricsKey();
 };
 
 // Gets an HDC for the default printer configuration

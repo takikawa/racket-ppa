@@ -1,6 +1,6 @@
 
 (module boundmap mzscheme
-  (require (lib "etc.ss"))
+  (require mzlib/etc)
   
   (define-syntax (make-mapping-code stx)
     (syntax-case stx ()
@@ -33,13 +33,15 @@
                                        (error 'identifier-mapping-get
                                               "no mapping for ~e"
                                               id))])
-              (or (ormap (lambda (i)
-                           (and (identifier=? (car i) id)
-                                (cdr i)))
-                         (hash-table-get (identifier-mapping-ht bi)
-                                         (identifier->symbol id) 
-                                         null))
-                  (fail))))
+              (let ([i (ormap (lambda (i)
+                                (and (identifier=? (car i) id)
+                                     i))
+                              (hash-table-get (identifier-mapping-ht bi)
+                                              (identifier->symbol id) 
+                                              null))])
+                (if i
+                    (cdr i)
+                    (fail)))))
           
           (define identifier-mapping-put!
             (lambda (bi id v)
@@ -67,15 +69,12 @@
           
           (define identifier-mapping-map
             (lambda (bi f)
-              (let* ([first (cons #f null)]
-                     [last first])
+              (let* ([r null])
                 (identifier-mapping-for-each
                  bi
                  (lambda (k v)
-                   (let ([pr (cons (f k v) null)])
-                     (set-cdr! last pr)
-                     (set! last pr))))
-                (cdr first))))
+                   (set! r (cons (f k v) r))))
+                (reverse r))))
           
           (provide (rename mk-identifier-mapping make-identifier-mapping))
           (provide identifier-mapping?

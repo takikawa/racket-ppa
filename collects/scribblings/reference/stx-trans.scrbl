@@ -1,10 +1,17 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
-@require-for-syntax[mzscheme]
+#lang scribble/doc
+@(require (except-in "mz.ss" import export)
+          (for-syntax scheme/base)
+          (for-label scheme/require-transform
+                     scheme/require-syntax
+                     scheme/provide-transform
+                     scheme/provide-syntax))
 
-@define[(transform-time) @t{This procedure must be called during the
+@(define stx-eval (make-base-eval))
+@(interaction-eval #:eval stx-eval (require (for-syntax scheme/base)))
+
+@(define (transform-time) @t{This procedure must be called during the
 dynamic extent of a @tech{syntax transformer} application by the
-expander, otherwise the @exnraise[exn:fail:contract].}]
+expander, otherwise the @exnraise[exn:fail:contract].})
 
 
 @title[#:tag "stxtrans"]{Syntax Transformers}
@@ -22,6 +29,7 @@ identifier appears as a @scheme[set!] target, the entire @scheme[set!]
 expression is provided to the transformer.
 
 @examples[
+#:eval stx-eval
 (let ([x 1]
       [y 2])
   (let-syntax ([x (make-set!-transformer
@@ -129,7 +137,7 @@ stop list, but with two results: a syntax object for the fully
 expanded expression, and a syntax object whose content is opaque. The
 latter can be used in place of the former (perhaps in a larger
 expression produced by a macro transformer), and when the macro
-expander encouters the opaque object, it substitutes the fully
+expander encounters the opaque object, it substitutes the fully
 expanded expression without re-expanding it; the
 @exnraise[exn:fail:syntax] if the expansion context includes bindings
 or marks that were not present for the original expansion, in which
@@ -161,16 +169,20 @@ transformer expression instead of a run-time expression.}
                        [stop-ids (or/c (listof identifier?) false/c)]
                        [intdef-ctx (or/c internal-definition-context?
                                          false/c)
-                                          #f])
+                                          #f]
+                       [lift-ctx any/c (gensym 'lifts)])
          syntax?]{
 
-Like @scheme[local-expand], but if
-@scheme[syntax-local-lift-expression] is called during the expansion
-of @scheme[stx], the result is a syntax object that represents a
-@scheme[begin] expression; lifted expression appear with their
-identifiers in @scheme[define-values] forms, and the expansion of
-@scheme[stx] is the last expression in the @scheme[begin]. The lifted
-expressions are not expanded.}
+Like @scheme[local-expand], the result is a syntax object that
+represents a @scheme[begin] expression. Lifted expressions---from
+calls to @scheme[syntax-local-lift-expression] during the expansion of
+@scheme[stx]---appear with their identifiers in @scheme[define-values]
+forms, and the expansion of @scheme[stx] is the last expression in the
+@scheme[begin]. The @scheme[lift-ctx] value is reported by
+@scheme[syntax-local-lift-context] during local expansion. The lifted
+expressions are not expanded, but instead left as provided in the
+@scheme[begin] form.}
+
 
 @defproc[(local-transformer-expand/capture-lifts [stx syntax?]
                        [context-v (or/c (one-of 'expression 'top-level 'module
@@ -283,6 +295,21 @@ Other syntactic forms can capture lifts by using
 @transform-time[]}
 
 
+@defproc[(syntax-local-lift-context)
+         any/c]{
+
+Returns a value that represents the target for expressions lifted via
+@scheme[syntax-local-lift-expression]. That is, for different
+transformer calls for which this procedure returns the same value (as
+determined by @scheme[eq?]), lifted expressions for the two
+transformer are moved to the same place. Thus, the result is useful
+for caching lift information to avoid redundant lifts.
+
+@transform-time[]}
+
+
+
+
 @defproc[(syntax-local-lift-module-end-declaration [stx syntax?])
          void?]{
 
@@ -331,6 +358,26 @@ contexts.
 @transform-time[]}
 
 
+@defproc[(syntax-local-phase-level) (or/c exact-integer? false/c)]{
+
+During the dynamic extent of a @tech{syntax transformer} application
+by the expander, the result is the @tech{phase level} of the form
+being expanded. Otherwise, the result is @scheme[0].}
+
+
+@defproc[(syntax-local-module-exports [mod-path module-path?]) 
+         (values (listof symbol?) (listof symbol?) (listof symbol?))]{
+
+Returns three lists of symbols that represent the @scheme[provide]d
+bindings of the module named by @scheme[mod-path]. The first list
+corresponds to the @tech{phase level} 0 exports of the module, the
+second list corresponds to the @tech{phase level} -1 exports of the
+module, and the last list corresponds to the @tech{label phase level}
+exports of the module.
+
+@transform-time[]}
+
+
 @defproc[(syntax-local-get-shadower [id-stx identifier?]) identifier?]{
 
 Returns @scheme[id-stx] if no binding in the current expansion context
@@ -356,8 +403,8 @@ and a module-contextless version of @scheme[id-stx] otherwise.
 
 
 @defproc[(syntax-local-certifier [active? boolean? #f])
-         (syntax? (any/c (or/c procedure? false/c)) 
-                  . opt-> . syntax?)]{
+         ((syntax?) (any/c (or/c procedure? false/c)) 
+          . ->* . syntax?)]{
 
 Returns a procedure that captures any certificates currently available
 for @scheme[syntax-local-value] or @scheme[local-expand]. The
@@ -410,3 +457,270 @@ mark}. Multiple applications of the same
 @scheme[make-syntax-introducer] result procedure use the same mark,
 and different result procedures use distinct marks.}
 
+
+@defproc[(syntax-local-transforming-module-provides?) boolean?]{
+
+Returns @scheme[#t] while a @tech{provide transformer} is running (see
+@scheme[make-provide-transformer]) or while a @schemeidfont{expand} sub-form of
+@scheme[#%provide] is expanded, @scheme[#f] otherwise.}
+
+
+@defproc[(syntax-local-module-defined-identifiers) 
+         (values (listof identifier?) (listof identifier?))]{
+
+Can be called only while
+@scheme[syntax-local-transforming-module-provides?] returns
+@scheme[#t].
+
+It returns two lists of identifiers corresponding to all definitions
+within the module being expanded. This information is used for
+implementing @scheme[provide] sub-forms like @scheme[all-defined-out].
+
+The first result list corresponds to @tech{phase} 0 (i.e., normal)
+definitions, and the second corresponds to @tech{phase} -1 (i.e.,
+for-syntax) definitions.}
+
+
+@defproc[(syntax-local-module-required-identifiers
+          [mod-path (or/c module-path? false/c)]
+          [phase-level (or/c exact-integer? false/c (one-of/c #t))])
+         (listof (cons/c (or/c exact-integer? false/c)
+                         (listof identifier?)))]{
+
+Can be called only while
+@scheme[syntax-local-transforming-module-provides?] returns
+@scheme[#t].
+
+It returns an association list mapping phase levels to lists of
+identifiers.  Each list of identifiers includes all bindings imported
+(into the module being expanded) using the module path
+@scheme[mod-path], or all modules if @scheme[mod-path] is
+@scheme[#f]. The association list includes all identifiers imported
+with a @scheme[phase-level] shift, of all shifts if
+@scheme[phase-level] is @scheme[#t].
+
+When an identifier is renamed on import, the result association list
+includes the identifier by its internal name. Use
+@scheme[identifier-binding] to obtain more information about the
+identifier.}
+
+@; ----------------------------------------------------------------------
+
+@section[#:tag "require-trans"]{@scheme[require] Transformers}
+
+@note-lib-only[scheme/require-transform]
+
+A @tech{transformer binding} whose value is a structure with the
+@scheme[prop:require-transformer] property implements a derived
+@scheme[_require-spec] for @scheme[require].
+
+The transformer is called with the syntax object representing its use
+as a @scheme[_require-spec] within a @scheme[require] form, and the
+result must be two lists: a list of @scheme[import]s and a list of
+@scheme[import-source]s.
+
+If the derived form contains a sub-form that is a
+@scheme[_require-spec], then it can call @scheme[expand-import] to
+transform the sub-@scheme[_require-spec] to lists of imports and
+import sources.
+
+See also @scheme[define-require-syntax], which supports macro-style
+@scheme[require] transformers.
+
+@defproc[(expand-import [stx syntax?])
+         (values (listof import?)
+                 (listof import-source?))]{
+
+Expands the given @scheme[_require-spec] to lists of imports and
+import sources.  The latter specifies modules to be
+@tech{instantiate}d or @tech{visit}ed, so the modules that it
+represents should be a superset of the modules represented in the
+former list (so that a module will be @tech{instantiate}d or
+@tech{visit}ed even if all of imports are eventually filtered from the
+former list).}
+
+
+@defproc[(make-require-transformer [proc (syntax? . -> . (values
+                                                          (listof import?)
+                                                          (listof import-source?)))])
+         require-transformer?]{
+
+Creates a @deftech{require transformer} (i.e., a structure with the
+@scheme[prop:require-transformer] property) using the given procedure
+as the transformer.}
+
+
+@defthing[prop:require-transformer struct-type-property?]{
+
+A property to identify @scheme[require] transformers. The property
+value must be a procedure that takes a syntax object and returns
+import and import-source lists.}
+
+
+@defproc[(require-transformer? [v any/c]) boolean?]{
+
+Returns @scheme[#t] if @scheme[v] has the
+@scheme[prop:require-transformer] property, @scheme[#f] otherwise.}
+
+
+@defstruct[import ([local-id identifier?]
+                   [src-sym symbol?]
+                   [src-mod-path module-path?]
+                   [mode (or/c exact-integer? false/c)]
+                   [req-mode (or/c exact-integer? false/c)]
+                   [orig-mode (or/c exact-integer? false/c)]
+                   [orig-stx syntax?])]{
+
+A structure representing a single imported identifier:
+
+@itemize{
+
+ @item{@scheme[local-id] --- the identifier to be bound within the
+       importing module.}
+
+ @item{@scheme[src-sym] --- the external name of the binding as
+       exported from its source module.}
+
+ @item{@scheme[src-mod-path] --- a @tech{module path} (relative to the
+       importing module) for the source of the imported binding.}
+
+ @item{@scheme[orig-stx] --- a @tech{syntax object} for the source of
+       the import, used for error reporting.}
+
+ @item{@scheme[mode] --- the @tech{phase level} of the binding in the
+       importing module.}
+
+ @item{@scheme[req-mode] --- the @tech{phase level} shift of the
+       import relative to the exporting module.}
+
+ @item{@scheme[orig-mode] --- the @tech{phase level} of the
+       binding as exported by the exporting module.}
+
+}}
+
+
+@defstruct[import-source ([mod-path-stx (and/c syntax?
+                                               (lambda (x)
+                                                 (module-path? (syntax->datum x))))]
+                          [mode (or/c exact-integer? false/c)])]{
+
+A structure representing an imported module, which must be
+@tech{instantiate}d or @tech{visit}ed even if no binding is imported
+into a module.
+
+@itemize{
+
+ @item{@scheme[mod-path-stx] --- a @tech{module path} (relative
+       to the importing module) for the source of the imported binding.}
+
+ @item{@scheme[mode] --- the @tech{phase level} shift the import.}
+
+}}
+
+
+@defproc[(syntax-local-require-certifier)
+         ((syntax?) (or/c false/c (syntax? . -> . syntax?)) 
+          . ->* . syntax?)]{
+
+Like @scheme[syntax-local-certifier], but to certify @tech{syntax
+objects} that correspond to @scheme[require] sub-forms, so that
+@scheme[expand-import] can deconstruct the @tech{syntax object} as
+necessary to expand it.}
+
+
+@; ----------------------------------------------------------------------
+
+@section[#:tag "provide-trans"]{@scheme[provide] Transformers}
+
+@note-lib-only[scheme/provide-transform]
+
+A @tech{transformer binding} whose value is a structure with the
+@scheme[prop:provide-transformer] property implements a derived
+@scheme[_provide-spec] for @scheme[provide].
+
+The transformer is called with the syntax object representing its use
+as a @scheme[_provide-spec] within a @scheme[provide] form and a list
+of symbols representing the export modes specified by enclosing
+@scheme[_provide-spec]s. The result must be a list of
+@scheme[export]s.
+
+If the derived form contains a sub-form that is a
+@scheme[_provide-spec], then it can call @scheme[expand-export] to
+transform the sub-@scheme[_provide-spec] to a lists of exports.
+
+See also @scheme[define-provide-syntax], which supports macro-style
+@scheme[provide] transformers.
+
+
+@defproc[(expand-export [stx syntax?] [modes (listof (or/c exact-integer? false/c))])
+         (listof export?)]{
+
+Expands the given @scheme[_provide-spec] to a list of exports. The
+@scheme[modes] list controls the expansion of
+sub-@scheme[_provide-specs]; for example, an identifier refers to a
+@tech{phase level} 0 binding unless the @scheme[modes] list specifies
+otherwise. Normally, @scheme[modes] is either empty or contains a
+single element.}
+
+
+@defproc[(make-provide-transformer [proc (syntax? (listof (or/c exact-integer? false/c))
+                                          . -> . (listof export?))])
+         provide-transformer?]{
+
+Creates a @deftech{provide transformer} (i.e., a structure with the
+@scheme[prop:provide-transformer] property) using the given procedure
+as the transformer.}
+
+
+@defthing[prop:provide-transformer struct-type-property?]{
+
+A property to identify @scheme[provide] transformers. The property
+value must be a procedure that takes a syntax object and mode list and
+returns an export list.}
+
+
+@defproc[(provide-transformer? [v any/c]) boolean?]{
+
+Returns @scheme[#t] if @scheme[v] has the
+@scheme[prop:provide-transformer] property, @scheme[#f] otherwise.}
+
+
+@defstruct[export ([local-id identifier?]
+                   [out-sym symbol?]
+                   [mode (or/c exact-integer? false/c)]
+                   [protect? any/c]
+                   [orig-stx syntax?])]{
+
+A structure representing a single imported identifier:
+
+@itemize{
+
+ @item{@scheme[local-id] --- the identifier that is bound within the
+       exporting module.}
+
+ @item{@scheme[out-sym] --- the external name of the binding.}
+
+ @item{@scheme[orig-stx] --- a @tech{syntax object} for the source of
+       the export, used for error reporting.}
+
+ @item{@scheme[protect?] --- indicates whether the identifier should
+       be protected (see @secref["modprotect"]).}
+
+ @item{@scheme[mode] --- the @tech{phase level} of the binding in the
+       exporting module.}
+
+}}
+
+
+@defproc[(syntax-local-provide-certifier)
+         ((syntax?) (or/c false/c (syntax? . -> . syntax?)) 
+          . ->* . syntax?)]{
+
+Like @scheme[syntax-local-certifier], but to certify @tech{syntax
+objects} that correspond to @scheme[provide] sub-forms, so that
+@scheme[expand-export] can deconstruct the @tech{syntax object} as
+necessary to expand it.}
+
+@; ----------------------------------------------------------------------
+
+@close-eval[stx-eval]

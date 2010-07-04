@@ -1,7 +1,8 @@
 
-(module texpict-extra (lib "a-unit.ss")
-  (require (lib "etc.ss")
-	   (lib "list.ss"))
+#lang scheme/unit
+
+  (require mzlib/etc
+	   mzlib/list)
 
   (require "texpict-sig.ss"
 	   "common-sig.ss")
@@ -141,7 +142,8 @@
 		       (+ d h)
 		       h d
 		       null
-		       #f))]))
+		       #f
+                       #f))]))
 
       (define (text-line/phantom text phantom . args)
 	(apply tex (format "\\makebox[0pt]{\\vphantom{~a}}~a" phantom text) args))
@@ -463,5 +465,4 @@
 		   (error 'pict->string "cannot handle prog pict")]
 		  [else (error 'pict->string "bad tag: ~s" tag)])))))
 
-      (define pict->commands pict->command-list))
-
+      (define pict->commands pict->command-list)

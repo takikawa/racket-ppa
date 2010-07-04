@@ -3,7 +3,7 @@
 
 (Section 'command-line)
 
-(require (lib "cmdline.ss"))
+(require mzlib/cmdline)
 
 (define (r-append opt . rest)
   (append opt (list (list->vector rest))))
@@ -125,7 +125,7 @@
 	  (with-handlers ([void
 			   (lambda (exn)
 			     (if (regexp-match
-				  (format "unknown switch: ~s" name)
+				  (format "unknown switch: ~a" name)
 				  (exn-message exn))
 				 'yes-it-worked
 				 exn))])

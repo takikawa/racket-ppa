@@ -1,3 +1,5 @@
-(module info (lib "infotab.ss" "setup")
-  (define name "Scribblings: Guide")
-  (define scribblings '(("guide.scrbl" (multi-page main-doc)))))
+#lang setup/infotab
+
+(define scribblings '(("guide.scrbl" (multi-page) (getting-started))))
+
+(define compile-omit-paths '("contracts-examples"))

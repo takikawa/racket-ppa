@@ -104,10 +104,7 @@
  
  ;;; info bar at botttom of drscheme frame
  (collect-button-label "Recolectar")
- (read-only-line1 "Sólo")
- (read-only-line2 "lectura")
- (read/write-line1 "Lectura/")
- (read/write-line2 "Escritura")
+ (read-only "Sólo lectura")
  (auto-extend-selection "Selección Auto-Extendida")
  (overwrite "Sobreescribir")
  (running "ejecutando")
@@ -274,8 +271,6 @@
 
  ;;; about box
  (about-drscheme-frame-title "Acerca de DrScheme")
- (take-a-tour "¡Haz un recorrido!")
- (release-notes "Notas sobre ésta versión")
  
  ;;; save file in particular format prompting.
  (save-as-plain-text "¿Salvar este archivo como texto plano?")
@@ -799,7 +794,7 @@
  (no-language-chosen "No ha seleccionado un lenguaje")
  (pretty-big-scheme "Muy Grande (incluye MrEd y Avanzado)")
  (pretty-big-scheme-one-line-summary "Añade syntaxis y funciones de los lenguajes HtDP")
- (r5rs-lang-name "R5RS estándar")
+ (r5rs-language-name "R5RS")
  (r5rs-one-line-summary "R5RS, sin ornamentos")
  (expander "Expandir")
  (expander-one-line-summary "Expande expresiones en lugar de evaluarlas")
@@ -1085,10 +1080,6 @@
  (profjBoxes-insert-java-interactions "Insertar Interacciones Java")
 
  ;; Slideshow
- (slideshow-show-slideshow-panel "Mostrar Panel de Slideshow")
- (slideshow-hide-slideshow-panel "Esconder Panel de Slideshow")
- (slideshow-freeze-picts "Congelar Estas Imágenes")
- (slideshow-thaw-picts "Mostrar las Imágenes debajo del Puntero")
  (slideshow-hide-picts "Mostrar Cajas Anidadas")
  (slideshow-show-picts "Mostrar Imágenes")
  (slideshow-cannot-show-picts "No puedo mostrar imágenes; ejecuta el programa para capturar primero sus tamaños")

@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["common.ss"]
+#lang scribble/doc
+@(require "common.ss")
 
 @defclass/title[frame% object% (top-level-window<%>)]{
 
@@ -95,7 +95,8 @@ some platforms:
  shares the focus with an active non-floating frame; when this style
  is combined with @scheme['no-caption], then showing the frame does
  not cause the keyboard focus to shift to the window, and under X,
- clicking the frame does not move the focus}
+ clicking the frame does not move the focus; under Windows, a floating
+ frame has no taskbar button}
 
  @item{@scheme['metal] --- draws the frame with a brushed-metal
  background (Mac OS X); this style is ignored when
@@ -277,7 +278,7 @@ The icon is used in a platform-specific way:
 
  @item{Windows --- the small icon is used for the frame's icon (in the
        top-left) and in the task bar, and the large icon is used for
-       the Atl-Tab task switcher.}
+       the Alt-Tab task switcher.}
 
  @item{Mac OS X --- both icons are ignored.}
 

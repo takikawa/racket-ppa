@@ -1,8 +1,13 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require[(lib "eval.ss" "scribble")]
-@require["guide-utils.ss"]
-@require[(lib "list.ss")]
+#lang scribble/doc
+@(require scribble/manual
+          scribble/eval
+          scheme/list
+          "guide-utils.ss"
+
+          (for-label scheme/list))
+
+@(define list-eval (make-base-eval))
+@(interaction-eval #:eval list-eval (require scheme/list))
 
 @title{Pairs, Lists, and Scheme Syntax}
 
@@ -27,12 +32,15 @@ names are also nonsense. Just remember that ``a'' comes before ``d,''
 and @scheme[cdr] is pronounced ``could-er.'')
 
 @examples[
+#:eval list-eval
 (car (cons 1 2))
 (cdr (cons 1 2))
 (pair? empty)
 (pair? (cons 1 2))
 (pair? (list 1 2 3))
 ]
+
+@close-eval[list-eval]
 
 Scheme's pair datatype and its relation to lists is essentially a
 historical curiosity, along with the dot notation for printing and the
@@ -47,8 +55,8 @@ mistake, such as accidentally reversing the arguments to
 @interaction[(cons (list 2 3) 1) (cons 1 (list 2 3))]
 
 Non-list pairs are used intentionally, sometimes. For example, the
-@scheme[make-immutable-hash-table] function takes a list of pairs,
-where the @scheme[car] of each pair is a key and the @scheme[cdr] is an
+@scheme[make-immutable-hash] function takes a list of pairs, where the
+@scheme[car] of each pair is a key and the @scheme[cdr] is an
 arbitrary value.
 
 The only thing more confusing to new Schemers than non-list pairs is
@@ -65,21 +73,21 @@ becomes @schemeresult[(0 1 . 2)], and
 @schemeresultfont{(1 . (2 . (3 . ())))} becomes @schemeresult[(1 2 3)].
 
 @;------------------------------------------------------------------------
-@section{Quoting Pairs and Symbols with @scheme[quote]}
+@section[#:tag "quoting-lists"]{Quoting Pairs and Symbols with @scheme[quote]}
 
 After you see
 
 @interaction[
-(list 1 2 3)
+(list (list 1) (list 2) (list 3))
 ]
 
 enough times, you'll wish (or you're already wishing) that there was a
-way to write just @scheme[(1 2 3)] and have it mean the list that
-prints as @schemeresult[(1 2 3)]. The @scheme[quote] form does exactly
-that:
+way to write just @scheme[((1) (2) (3))] and have it mean the list of
+lists that prints as @schemeresult[((1) (2) (3))]. The @scheme[quote]
+form does exactly that:
 
 @interaction[
-(eval:alts (#, @scheme[quote] (1 2 3)) '(1 2 3))
+(eval:alts (#, @scheme[quote] ((1) (2) (3))) '((1) (2) (3)))
 (eval:alts (#, @scheme[quote] ("red" "green" "blue")) '("red" "green" "blue"))
 (eval:alts (#, @scheme[quote] ()) '())
 ]
@@ -93,7 +101,7 @@ not:
 (eval:alts (#, @scheme[quote] (0 #, @schemeparenfont{.} (1 . 2))) '(0 . (1 . 2)))
 ]
 
-Naturaly, lists can be nested:
+Naturally, lists of any kind can be nested:
 
 @interaction[
 (list (list 1 2 3) 5 (list "a" "b" "c"))
@@ -108,7 +116,7 @@ that looks like an identifier:
 ]
 
 A value that prints like an identifier is a @defterm{symbol}. In the
-same way that parentehsized output should not be confused with
+same way that parenthesized output should not be confused with
 expressions, a printed symbol should not be confused with an
 identifier. In particular, the symbol @scheme[(#, @scheme[quote] #,
 @schemeidfont{map})] has nothing to do with the @schemeidfont{map}
@@ -181,6 +189,10 @@ Beware, however, that the @tech{REPL}'s printer recognizes the symbol
 (eval:alts '(#, @schemevalfont{quote} #, @schemevalfont{road}) ''road)
 ]
 
+@; FIXME:
+@; warning about how "quote" creates constant data, which is subtly
+@; different than what "list" creates
+
 @;------------------------------------------------------------------------
 @section[#:tag "lists-and-syntax"]{Lists and Scheme Syntax}
 
@@ -194,7 +206,7 @@ streams. Instead, the syntax is determined by two layers:
 @itemize{
 
  @item{a @defterm{read} layer, which turns a sequence of characters
-       into a lists, symbols, and other constants; and}
+       into lists, symbols, and other constants; and}
 
  @item{an @defterm{expand} layer, which processes the lists, symbols,
        and other constants to parse them as an expression.}
@@ -232,7 +244,7 @@ conversion enables a kind of general infix notation:
 '(1 . < . 2)
 ]
 
-This two-dot convension is non-traditional, and it has essentially
+This two-dot convention is non-traditional, and it has essentially
 nothing to do with the dot notation for non-list pairs. PLT Scheme
-programmers use the infix convension sparingly---mostly for asymmetric
+programmers use the infix convention sparingly---mostly for asymmetric
 binary operators such as @scheme[<] and @scheme[is-a?].

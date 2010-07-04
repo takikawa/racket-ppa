@@ -1,22 +1,21 @@
 
-(module distribute mzscheme
-  (require (lib "kw.ss")
-	   (lib "file.ss")
-	   (lib "dirs.ss" "setup")
-	   (lib "list.ss")
+(module distribute scheme/base
+  (require scheme/file
+           scheme/path
+           setup/dirs
+	   mzlib/list
 	   (lib "variant.ss" "setup")
-	   (lib "filename-version.ss" "dynext")
+	   dynext/filename-version
 	   "private/macfw.ss"
 	   "private/windlldir.ss"
 	   "private/collects-path.ss")
 
   (provide assemble-distribution)
 
-  (define/kw (assemble-distribution dest-dir 
-				    orig-binaries
-				    #:key
-				    [collects-path #f] ; relative to dest-dir
-				    [copy-collects null])
+  (define (assemble-distribution dest-dir 
+                                 orig-binaries
+                                 #:collects-path [collects-path #f] ; relative to dest-dir
+                                 #:copy-collects [copy-collects null])
     (let* ([types (map get-binary-type orig-binaries)]
 	   [_ (unless (directory-exists? dest-dir)
 		(make-directory dest-dir))]
@@ -346,6 +345,7 @@
 			(add1 (bytes-length exe-bytes))
 			(add1 (bytes-length shared-lib-bytes)))])
 	  (with-output-to-file b
+	    #:exists 'update
 	    (lambda ()
 	      (let ([o (current-output-port)])
 		(file-position o (+ config-pos 8)) ; update the end of the program data
@@ -357,8 +357,7 @@
 		(write-bytes shared-lib-bytes o)
 		(write-bytes #"\0" o)
 		(write-bytes rest o)
-		(flush-output o)))
-	    'update)))))
+		(flush-output o))))))))
 
   (define (copy-and-patch-binaries copy? magic
                                    extract-src construct-dest transform-entry
@@ -430,6 +429,7 @@
                              "not enough room in executable for revised ~s table"
                              magic))
                     (with-output-to-file (car binaries)
+                      #:exists 'update
                       (lambda ()
                         (let ([o (current-output-port)])
                           (file-position o start-pos)
@@ -438,14 +438,13 @@
                           ;; Add space before final closing paren. This preserves space in case the
                           ;; genereated binary is input for a future distribution build.
                           (write-bytes (make-bytes delta (char->integer #\space)) o)
-                          (write-bytes #")" o)))
-                      'update)))
+                          (write-bytes #")" o))))))
                 (loop (cdr orig-binaries) (cdr binaries) (cdr types) (cdr sub-dirs) counter)))))))
 
   (define (copy-extensions-and-patch-binaries orig-binaries binaries types sub-dirs 
                                               exts-dir relative-exts-dir
                                               relative->binary-relative)
-    (copy-and-patch-binaries #t #rx#"eXtEnSiOn-modules"
+    (copy-and-patch-binaries #t #rx#"eXtEnSiOn-modules[)]"
                              ;; extract-src:
                              (lambda (ext orig-binary)
                                (path->complete-path 
@@ -471,7 +470,7 @@
                                                  relative->binary-relative)
     (let ([paths null])
       ;; Pass 1: collect all the paths
-      (copy-and-patch-binaries #f #rx#"rUnTiMe-paths"
+      (copy-and-patch-binaries #f #rx#"rUnTiMe-paths[)]"
                                ;; extract-src:
                                (lambda (rt orig-binary)
                                  (and (cadr rt)
@@ -489,14 +488,14 @@
                                relative->binary-relative)
       (unless (null? paths)
         ;; Determine the shared path prefix:
-        (let* ([root-table (make-hash-table 'equal)]
+        (let* ([root-table (make-hash)]
                [root->path-element (lambda (root)
-                                     (hash-table-get root-table
-                                                     root
-                                                     (lambda ()
-                                                       (let ([v (format "r~a" (hash-table-count root-table))])
-                                                         (hash-table-put! root-table root v)
-                                                         v))))]
+                                     (hash-ref root-table
+                                               root
+                                               (lambda ()
+                                                 (let ([v (format "r~a" (hash-count root-table))])
+                                                   (hash-set! root-table root v)
+                                                   v))))]
                [explode (lambda (src)
                           (reverse
                            (let loop ([src src])
@@ -520,7 +519,7 @@
 
                
           ;; Pass 2: change all the paths
-          (copy-and-patch-binaries #t #rx#"rUnTiMe-paths"
+          (copy-and-patch-binaries #t #rx#"rUnTiMe-paths[)]"
                                    ;; extract-src:
                                    (lambda (rt orig-binary)
                                      (and (cadr rt)

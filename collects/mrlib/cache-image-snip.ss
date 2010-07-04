@@ -1,11 +1,12 @@
 (module cache-image-snip mzscheme
-  (require (lib "mred.ss" "mred")
-           (lib "class.ss")
-           (lib "string.ss")
-	   (lib "contract.ss")
-           (lib "list.ss"))
+  (require mred
+           mzlib/class
+           mzlib/string
+	   mzlib/contract
+           mzlib/list)
   
   (provide cache-image-snip%
+           cache-image-snip-class%
            snip-class)
            
   ;; type argb = (make-argb (vectorof rational[between 0 & 255]) int)
@@ -143,18 +144,24 @@
   (define cache-image-snip-class%
     (class snip-class%
       (define/override (read f)
-        (let ([data (read-from-string (send f get-bytes) (lambda () #f))])
-          (if data
+        (data->snip (read-from-string (send f get-bytes) (lambda () #f))))
+      (define/public (data->snip data)
+        (if data
             (argb->cache-image-snip (make-argb (first data) (second data))
                                     (third data)
                                     (fourth data))
-            (make-null-cache-image-snip))))
+            (make-null-cache-image-snip)))
       (super-new)))
 
   (define snip-class (new cache-image-snip-class%))
   (send snip-class set-version 1)
   (send snip-class set-classname (format "~s" `(lib "cache-image-snip.ss" "mrlib")))
-  (send (get-the-snip-class-list) add snip-class)
+  
+  ;; ***** WARNING: illegal activities **** -- MF 
+  (define the-drscheme-snip-class  (get-the-snip-class-list))
+  (send the-drscheme-snip-class add snip-class)
+  (provide the-drscheme-snip-class)
+  ;; ***** WARNING: illegal activities ****
   
   (define (make-null-cache-image-snip)
     (define size 10)
@@ -190,6 +197,7 @@
            [h (send bm get-height)]
            [new-bm (make-object bitmap% w h)]
            [bdc (make-object bitmap-dc% new-bm)])
+      (send bdc clear)
       (send bdc draw-bitmap bm 0 0 'solid 
             (send the-color-database find-color "black")
             (send bm get-loaded-mask))

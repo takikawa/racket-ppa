@@ -13,13 +13,13 @@ add this test:
 (module io mzscheme
   (require "drscheme-test-util.ss"
            (lib "gui.ss" "tests" "utils")
-           (lib "class.ss")
-           (lib "list.ss")
-           (lib "pretty.ss")
-           (lib "mred.ss" "mred")
-           (lib "framework.ss" "framework")
+           mzlib/class
+           mzlib/list
+           mzlib/pretty
+           mred
+           framework
            (lib "text-string-style-desc.ss" "mrlib")
-           (prefix fw: (lib "framework.ss" "framework")))
+           (prefix fw: framework))
   
   (provide run-test)
   
@@ -62,9 +62,8 @@ add this test:
     (define prompt '("\n> " default-color))
     
     ;; this test has to be first to test an uninitialized state of the port
-    ;; NOTE: missing a name for the "value" style ... so this test appears to fail (altho it actually passes)
     (check-output "(port-next-location (current-input-port))" 
-                  (list `("1\n0\n1\n" ,value-style)
+                  (list `("1\n0\n1" ,value-style)
                         prompt))
     
     (check-output "(display 1)" (list (list "1" output-style) prompt))
@@ -185,7 +184,7 @@ add this test:
   
   (define drs-frame (wait-for-drscheme-frame))
   (define interactions-text (send drs-frame get-interactions-text))
-  (set-language-level! (list "PLT" (regexp "Textual")))
+  (set-language-level! (list "Pretty Big (includes MrEd and Advanced Student)"))
   
   (define (run-test)
     (output-err-port-checking) ;; must come first

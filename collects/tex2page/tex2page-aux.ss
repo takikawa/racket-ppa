@@ -1,10 +1,45 @@
 ;tex2page
 ;(c) Dorai Sitaram, 1997-2002
 
-(module tex2page-aux mzscheme
+;; Based on the mzscheme-specific version of tex2page for PLT Scheme v372,
+;; adjusted for v4.0 to use `r5rs', instead, since v4.0 makes pairs
+;; immutable.
+
+;; Converting the code to use immutable pairs and boxes seemed to work
+;; fine (after some testing), but switching to `r5rs' seems safer.
+
+(module tex2page-aux r5rs
+  (#%require (only mzscheme 
+                   require
+                   require-for-syntax
+                   provide))
   (require (lib "process.ss"))
-  (require (lib "date.ss"))
-  (provide (all-defined-except ))
+  (require (lib "date.ss")
+           (only mzscheme
+                 make-hash-table hash-table-get hash-table-put!
+                 hash-table-for-each
+                 getenv file-exists? delete-file file-or-directory-modify-seconds
+                 current-seconds seconds->date
+                 date-hour date-minute date-day date-month date-year
+                 string-upcase
+                 version read-line error
+                 unless when fluid-let
+                 open-input-string open-output-string get-output-string eof
+                 parameterize))
+  (require-for-syntax mzscheme)
+  (provide (all-defined-except))
+
+(define (ormap f l)
+  (if (null? l)
+      #f
+      (if (null? (cdr l))
+          (f (car l))
+          (or (f (car l)) (ormap f (cdr l))))))
+
+(define (reverse! l) (reverse l))
+(define append! append)
+
+(define (eval-expr e) (eval e (interaction-environment)))
 
 (define make-table
   (lambda z (if (null? z) (make-hash-table) (make-hash-table 'equal))))
@@ -7617,7 +7652,7 @@
       s
       (lambda (i)
         (let loop ()
-          (let ((x (read i))) (unless (eof-object? x) (eval x) (loop))))))))
+          (let ((x (read i))) (unless (eof-object? x) (eval-expr x) (loop))))))))
 
 (define with-output-to-port
   (lambda (o th) (parameterize ((current-output-port o)) (th))))

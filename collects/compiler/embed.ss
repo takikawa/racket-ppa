@@ -1,7 +1,7 @@
 
 (module embed mzscheme
-  (require (lib "unit.ss")
-           (lib "contract.ss"))
+  (require mzlib/unit
+           mzlib/contract)
   
   (require "sig.ss")
   
@@ -25,6 +25,7 @@
   (provide write-module-bundle
 	   create-embedding-executable
            embedding-executable-is-directory?
+           embedding-executable-is-actually-directory?
            embedding-executable-put-file-extension+style+filters
 	   embedding-executable-add-suffix))
 

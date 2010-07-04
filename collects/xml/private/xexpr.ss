@@ -1,8 +1,8 @@
 
 (module xexpr mzscheme
-  (require (lib "unitsig.ss")
-	  (lib "list.ss")
-	  (lib "etc.ss"))
+  (require mzlib/unitsig
+	  mzlib/list
+	  mzlib/etc)
 
   (require "sig.ss")
 
@@ -49,7 +49,7 @@
       ;; ;; ;; ;; ;; ;; ;
       ;; ; xexpr? helpers
 
-      (define-struct (exn:invalid-xexpr exn) (code))
+      (define-struct (exn:invalid-xexpr exn:fail) (code))
 
       ;; correct-xexpr? : any (-> a) (exn -> a) -> a
       (define (correct-xexpr? x true false)
@@ -169,9 +169,9 @@
               [(pcdata? x) (pcdata-string x)]
               [(entity? x) (entity-text x)]
               [(or (comment? x) (pi? x) (cdata? x)) x]
-              [(document? x) (error 'xml->xexpr "Expected content, given ~e~nUse document-element to extract the content." x)]
+              [(document? x) (error 'xml->xexpr "Expected content, given ~e\nUse document-element to extract the content." x)]
               [else ;(error 'xml->xexpr "Expected content, given ~e" x)
-              x]))))
+               x]))))
 
       ;; attribute->srep : Attribute -> Attribute-srep
       (define (attribute->srep a)
@@ -205,8 +205,8 @@
           [(or (symbol? x) (and (integer? x) (>= x 0)))
           (make-entity 'scheme 'scheme x)]
           [(or (comment? x) (pi? x) (cdata? x)) x]
-          [else ;(error 'xexpr->xml "malformed xexpr ~s" x)
-          x]))
+          [else ;(error 'xexpr->xml "malformed xexpr ~e" x)
+           x]))
 
       ;; xexpr->string : Xexpression -> String
       (define (xexpr->string xexpr)

@@ -1,6 +1,6 @@
-(module icons (lib "lang.ss" "big")
-  (require (lib "manual.ss" "scribble")
-           (lib "struct.ss" "scribble"))
+(module icons scheme/base
+  (require scribble/manual
+           scribble/struct)
 
   (provide magnify
            finger)
@@ -9,7 +9,8 @@
     (make-element "imageleft"
                   (list
                    (make-element (make-image-file (build-path (collection-path "scribblings")
-                                                              name))
+                                                              name)
+                                                  1.0)
                                  (list "+")))))
   (define magnify (mk "magnify.png"))
   (define finger (mk "finger.png")))

@@ -64,7 +64,7 @@ GC2_EXTERN void GC_add_roots(void *start, void *end);
    Called by MzScheme to install roots. The memory between
    `start' (inclusive) and `end' (exclusive) contains pointers. */
 
-GC2_EXTERN void GC_init_type_tags(int count, int pair, int weakbox, 
+GC2_EXTERN void GC_init_type_tags(int count, int pair, int mutable_pair, int weakbox, 
                                   int ephemeron, int weakarray, int custbox);
 /*
    Called by MzScheme to indicate the number of different type tags it
@@ -73,6 +73,10 @@ GC2_EXTERN void GC_init_type_tags(int count, int pair, int weakbox,
    ephemeron is the value to tagging an ephemeron, etc. (The GC has some
    freedom in the layout of a weak box or ephemeron, so it performs weak
    box traversals itself, but MzScheme gets to choose the tag.) */
+
+GC2_EXTERN void GC_register_root_custodian(void *);
+/*
+   Registers the root custodian. */
 
 GC2_EXTERN void GC_register_new_thread(void *, void *);
 /*
@@ -114,6 +118,12 @@ GC2_EXTERN void GC_gcollect(void);
 /*
    Performs an immediate (full) collection. */
 
+GC2_EXTERN void GC_free_all(void);
+/*
+   Releases all memory, removes all signal handlers, etc.
+   This is mainly useful for unloading a DLL within an embedding
+   program tht will keep running. */
+
 /***************************************************************************/
 /* Allocation                                                              */
 /***************************************************************************/
@@ -139,6 +149,7 @@ GC2_EXTERN void *GC_malloc_one_small_dirty_tagged(size_t);
    object before a GC can occur. */
 
 GC2_EXTERN void *GC_malloc_pair(void *car, void *cdr);
+GC2_EXTERN void *GC_malloc_mutable_pair(void *car, void *cdr);
 /* 
    Like GC_malloc_one_tagged, but even more streamline. */
 

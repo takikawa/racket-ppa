@@ -1,13 +1,11 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "eval.ss" "scribble")]
-@require["common.ss"]
-@require["diagrams.ss"]
+#lang scribble/doc
+@(require scribble/eval
+          "common.ss"
+          "diagrams.ss")
 
 @title[#:tag "windowing-overview"]{Windowing}
 
-@section{Basic GUI Building Blocks}
-
-MrEd's windowing toolbox provides the basic building blocks of GUI
+The PLT Scheme windowing toolbox provides the basic building blocks of GUI
  programs, including frames (top-level windows), modal dialogs, menus,
  buttons, check boxes, text fields, and radio buttons.  The toolbox
  provides these building blocks via built-in classes, such as the
@@ -74,7 +72,7 @@ If a window receives multiple kinds of events, the events are
     (code:comment #, @t{Define overriding method to handle keyboard events})
     (define/override (#,(:: canvas<%> on-char) event)
       (send msg #,(:: message% set-label) "Canvas keyboard"))
-    (code:comment #, @t{Call the superclass initialization (and pass on all init args)})
+    (code:comment #, @t{Call the superclass init, passing on all init args})
     (super-new)))
 
 (code:comment #, @t{Make a canvas that handles events in the frame})
@@ -109,7 +107,7 @@ In addition to dispatching events, the GUI classes also handle the
  graphical layout of windows. Our example frame demonstrates a simple
  layout; the frame's elements are lined up top-to-bottom. In general,
  a programmer specifies the layout of a window by assigning each GUI
- element to a parent @deftech{container}. A vertical container, such
+ element to a parent @tech{container}. A vertical container, such
  as a frame, arranges its children in a column, and a horizontal
  container arranges its children in a row. A container can be a child
  of another container; for example, to place two buttons side-by-side
@@ -132,7 +130,7 @@ For more information about window layout and containers, see
 
 @section{Core Windowing Classes}
 
-The fundamental graphical element in MrEd's windowing toolbox is an
+The fundamental graphical element in the windowing toolbox is an
  @deftech{area}. The following classes implement the different types
  of areas in the windowing toolbox:
 
@@ -296,9 +294,9 @@ Menu bars, menus, and menu items are graphical elements, but not areas
   @item{@scheme[separator-menu-item%] --- a @deftech{separator} is
   an unselectable line in a menu or popup menu.}
 
-  @item{@scheme[menu-item%] --- a @deftech{menu item} is a selectable
-  text item in a menu. When the item is selected, its callback procedure
-  is invoked.}
+  @item{@scheme[menu-item%] --- a @deftech{plain menu item} is a
+  selectable text item in a menu. When the item is selected, its
+  callback procedure is invoked.}
 
   @item{@scheme[checkable-menu-item%] --- a @deftech{checkable menu
   item} is a text item in a menu; the user selects a checkable menu
@@ -320,7 +318,7 @@ system:
 
 @section[#:tag "containeroverview"]{Geometry Management}
 
-MrEd's geometry management makes it easy to design windows that look
+The windowing toolbox's geometry management makes it easy to design windows that look
  right on all platforms, despite different graphical representations
  of GUI elements. Geometry management is based on containers; each
  container arranges its children based on simple constraints, such as
@@ -332,8 +330,7 @@ The built-in container classes include horizontal panels (and panes),
  vertical containers, a programmer can achieve most any layout.  For
  example, we can construct a dialog with the following shape:
 
-@verbatim[
-#<<IMG
+@verbatim[#:indent 2]{
   ------------------------------------------------------
  |              -------------------------------------   |
  |  Your name: |                                     |  |
@@ -342,8 +339,7 @@ The built-in container classes include horizontal panels (and panes),
  |                   ( Cancel )   ( OK )                |
  |                    --------     ----                 |
   ------------------------------------------------------
-IMG
-]
+}
 
 with the following program:
 
@@ -405,7 +401,7 @@ Each @tech{containee}, or child, has the following properties:
 
  @item{horizontal and vertical @deftech{stretchability} (on or off); and}
 
- @item{horizontal and vertical @deftech{margins}.}
+ @item{horizontal and vertical @tech{margins}.}
 
 }
 
@@ -742,7 +738,7 @@ Despite the programming convenience provided by a purely sequential
 
 }
 
-In MrEd, an @deftech{eventspace} is a context for processing GUI
+An @deftech{eventspace} is a context for processing GUI
  events. Each eventspace maintains its own queue of events, and events
  in a single eventspace are dispatched sequentially by a designated
  @deftech{handler thread}. An event-handling procedure running in this
@@ -822,7 +818,7 @@ Although a programmer has no direct control over the order in which
 
 @subsection[#:tag "espacethreads"]{Eventspaces and Threads}
 
-When a new eventspace is created, a corresponding @deftech{handler
+When a new eventspace is created, a corresponding @tech{handler
  thread} is created for the eventspace. When the system dispatches an
  event for an eventspace, it always does so in the eventspace's
  handler thread. A handler procedure can create new threads that run

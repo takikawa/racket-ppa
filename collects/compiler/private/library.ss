@@ -3,11 +3,11 @@
 ;; (c) 1997-8 PLT, Rice University
 
 (module library mzscheme
-  (require (lib "unit.ss")
-	  (lib "list.ss")
-	  (lib "etc.ss"))
+  (require mzlib/unit
+	  mzlib/list
+	  mzlib/etc)
 
-  (require (lib "zodiac-sig.ss" "syntax"))
+  (require syntax/zodiac-sig)
 
   (require "sig.ss")
 
@@ -55,17 +55,6 @@
 	   ((null? ilist) null)
 	   (else (f ilist)))))
 
-      (define begin-map!
-	(lambda (non-tail tail list)
-	  (if (null? list)
-	      null
-	      (begin
-		(let loop ([list list] [next (cdr list)])
-		  (let ([tail? (null? next)])
-		    (set-car! list ((if tail? tail non-tail) (car list)))
-		    (unless tail? (loop next (cdr next)))))
-		list))))
-
       (define begin-map
 	(lambda (non-tail tail list)
 	  (if (null? list)
@@ -73,13 +62,6 @@
 	      (let ([tail? (null? (cdr list))])
 		(cons ((if tail? tail non-tail) (car list)) 
 		      (begin-map non-tail tail (cdr list)))))))
-
-      (define map!
-	(lambda (fun list)
-	  (let loop ([l list])
-	    (if (null? l)
-		list
-		(begin (set-car! l (fun (car l))) (loop (cdr l)))))))
 
       (define list-index
 	(lambda (obj list)
@@ -331,5 +313,12 @@
 			  "-")
 	 " "))
 
+      (define ns (make-namespace))
+
       (define (global-defined-value* v)
-	(and v (namespace-variable-value v)))))
+	(and v (namespace-variable-value v #t #f ns)))
+
+      (define (kernel-modname? modname)
+        (and modname
+             (equal? ''#%kernel (let-values ([(name base) (module-path-index-split modname)])
+                                  name))))))

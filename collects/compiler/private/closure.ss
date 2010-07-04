@@ -17,11 +17,11 @@
 ;;; ------------------------------------------------------------
 
 (module closure mzscheme
-  (require (lib "unit.ss")
-	  (lib "list.ss")
-	  (lib "etc.ss"))
+  (require mzlib/unit
+	  mzlib/list
+	  mzlib/etc)
 
-  (require (lib "zodiac-sig.ss" "syntax"))
+  (require syntax/zodiac-sig)
 
   (require "sig.ss")
   (require "../sig.ss")
@@ -182,7 +182,9 @@
 		 ;; BEGIN EXPRESSIONS
 		 ;;
 		 [(zodiac:begin-form? ast)
-		  (map! transform! (zodiac:begin-form-bodies ast))
+                  (zodiac:set-begin-form-bodies!
+                   ast
+                   (map transform! (zodiac:begin-form-bodies ast)))
 		  ast]
 		 
 		 ;;------------------------------------------------------------------

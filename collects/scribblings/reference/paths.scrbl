@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
 @title[#:tag "pathutils" #:style 'toc]{Paths}
 
@@ -28,13 +28,13 @@ string containing nul is provided as a path to any procedure except
 @scheme[absolute-path?], @scheme[relative-path?], or
 @scheme[complete-path?], the @exnraise[exn:fail:contract].
 
-Most Scheme primitives that accept paths first @deftech{path-expand}
-the path before using it. Procedures that build paths or merely check
-the form of a path do not perform this expansion, with the exception
-of @scheme[simplify-path] for Windows paths.  For more information
-about path expansion and other platform-specific details, see
-@secref["unixpaths"] for @|AllUnix| paths and
-@secref["windowspaths"] for Windows paths.
+Most Scheme primitives that accept paths first @deftech{cleanse} the
+path before using it. Procedures that build paths or merely check the
+form of a path do not cleanse paths, with the exceptions of
+@scheme[cleanse-path], @scheme[expand-user-path], and
+@scheme[simplify-path].  For more information about path cleansing and
+other platform-specific details, see @secref["unixpaths"] for
+@|AllUnix| paths and @secref["windowspaths"] for Windows paths.
 
 @;------------------------------------------------------------------------
 @section{Manipulating Paths}
@@ -110,10 +110,9 @@ path for any platform.
 Conversion to and from byte values is useful for marshaling and
 unmarshaling paths, but manipulating the byte form of a path is
 generally a mistake. In particular, the byte string may start with a
-@litchar{\\?\REL} encoding for Windows paths or a @litchar{./~}
-encoding for @|AllUnix| paths. Instead of @scheme[path->bytes], use
-@scheme[split-path] and @scheme[path-element->bytes] to manipulate
-individual path elements.}
+@litchar{\\?\REL} encoding for Windows paths. Instead of
+@scheme[path->bytes], use @scheme[split-path] and
+@scheme[path-element->bytes] to manipulate individual path elements.}
 
 @defproc[(string->path-element [str string?]) path?]{
 
@@ -198,21 +197,22 @@ Returns the path convention type of the current platform:
 Windows.}
 
 
-@defproc[(build-path [base path-string?]
-                     [sub (or/c path-string? 
+@defproc[(build-path [base (or/c path-string?
+                                 (one-of/c 'up 'same))]
+                     [sub (or/c (and/c path-string? 
+                                       (not/c complete-path?))
                                 (one-of/c 'up 'same))] ...)
          path?]{
 
 Creates a path given a base path and any number of sub-path
 extensions. If @scheme[base] is an absolute path, the result is an
-absolute path; if @scheme[base] is a relative path, the result is a
-relative path.
+absolute path, otherwise the result is a relative path.
 
-Each @scheme[sub] must be either a relative path, the symbol
-@indexed-scheme['up] (indicating the relative parent directory), or
-the symbol @indexed-scheme['same] (indicating the relative current
-directory).  For Windows paths, if @scheme[base] is a drive
-specification (with or without a trailing slash) the first
+The @scheme[base] and each @scheme[sub] must be either a relative
+path, the symbol @indexed-scheme['up] (indicating the relative parent
+directory), or the symbol @indexed-scheme['same] (indicating the
+relative current directory).  For Windows paths, if @scheme[base] is a
+drive specification (with or without a trailing slash) the first
 @scheme[sub] can be an absolute (driveless) path. For all platforms,
 the last @scheme[sub] can be a filename.
 
@@ -320,10 +320,10 @@ This procedure does not access the filesystem.}
 Returns @scheme[path] if @scheme[path] syntactically refers to a
 directory and ends in a separator, otherwise it returns an extended
 version of @scheme[path] that specifies a directory and ends with a
-separator. For example, under @|AllUnix|, the path @file{x/y/}
+separator. For example, under @|AllUnix|, the path @filepath{x/y/}
 syntactically refers to a directory and ends in a separator, but
-@file{x/y} would be extended to @file{x/y/}, and @file{x/..} would be
-extended to @file{x/../}. The @scheme[path] argument can be a path for
+@filepath{x/y} would be extended to @filepath{x/y/}, and @filepath{x/..} would be
+extended to @filepath{x/../}. The @scheme[path] argument can be a path for
 any platform, and the result will be for the same platform.  
 
 This procedure does not access the filesystem.}
@@ -331,19 +331,28 @@ This procedure does not access the filesystem.}
 
 @defproc[(resolve-path [path path-string?]) path?]{
 
-@tech{Path-expands} @scheme[path] and returns a path that references
-the same file or directory as @scheme[path]. Under @|AllUnix|, if
+@tech{Cleanse}s @scheme[path] and returns a path that references the
+same file or directory as @scheme[path]. Under @|AllUnix|, if
 @scheme[path] is a soft link to another path, then the referenced path
 is returned (this may be a relative path with respect to the directory
 owning @scheme[path]), otherwise @scheme[path] is returned (after
 expansion).}
 
 
-@defproc[(expand-path [path path-string?]) path]{
+@defproc[(cleanse-path [path path-string?] [expand-tilde? any/c #f]) path]{
 
-@tech{Path-expands} @scheme[path] (as described at the beginning of
+@techlink{Cleanse}s @scheme[path] (as described at the beginning of
 this section). The filesystem might be accessed, but the source or
 expanded path might be a non-existent path.}
+
+
+@defproc[(expand-user-path [path path-string?]) path]{
+
+@techlink{Cleanse}s @scheme[path]. In addition, under @|AllUnix|, a
+leading @litchar{~} is treated as user's home directory and expanded;
+the username follows the @litchar{~} (before a @litchar{/} or the end
+of the path), where @litchar{~} by itself indicates the home directory
+of the current user.}
 
 
 @defproc[(simplify-path [path path-string?][use-filesystem? boolean? #t]) path?]{
@@ -369,22 +378,19 @@ that the resulting path refers to the same directory as before).
 When @scheme[use-filesystem?] is @scheme[#f], up-directory indicators
 are removed by deleting a preceding path element, and the result can
 be a relative path with up-directory indicators remaining at the
-beginning of the path or, for @|AllUnix| paths, after an initial path
-element that starts with @litchar{~}; otherwise, up-directory
-indicators are dropped when they refer to the parent of a root
-directory. Similarly, the result can be the same as
+beginning of the path or, for @|AllUnix| paths; otherwise,
+up-directory indicators are dropped when they refer to the parent of a
+root directory. Similarly, the result can be the same as
 @scheme[(build-path 'same)] (but with a trailing separator) if
 eliminating up-directory indicators leaves only same-directory
-indicators, and the result can start with a same-directory indicator
-for @|AllUnix| paths if eliminating it would make the result start
-with a @litchar{~}.
+indicators.
 
 The @scheme[path] argument can be a path for any platform when
 @scheme[use-filesystem?] is @scheme[#f], and the resulting path is for
 the same platform.
 
 The filesystem might be accessed when @scheme[use-filesystem?] is
-true, but the source or expanded path might be a non-existent path. If
+true, but the source or simplified path might be a non-existent path. If
 @scheme[path] cannot be simplified due to a cycle of links, the
 @exnraise[exn:fail:filesystem] (but a successfully simplified path may
 still involve a cycle of links if the cycle did not inhibit the
@@ -473,10 +479,86 @@ Returns a path that is the same as @scheme[path], except that the
 suffix for the last element of the path is changed to
 @scheme[suffix]. If the last element of @scheme[path] has no suffix,
 then @scheme[suffix] is added to the path. A suffix is defined as a
-period followed by any number of non-period characters/bytes at the
-end of the path element. The @scheme[path] argument can be a path for
-any platform, and the result is for the same platform. If
+@litchar{.} followed by any number of non-@litchar{.} characters/bytes
+at the end of the path element, as long as the path element is not
+@scheme[".."] or @scheme["."]. The @scheme[path] argument can be a
+path for any platform, and the result is for the same platform. If
 @scheme[path] represents a root, the @exnraise[exn:fail:contract].}
+
+@defproc[(path-add-suffix [path path-string?]
+                          [suffix (or/c string? bytes?)])
+         path?]{
+
+Similar to @scheme[path-replace-suffix], but any existing suffix on
+@scheme[path] is preserved by replacing every @litchar{.} in the last
+path element with @litchar{_}, and then the @scheme[suffix] is added
+to the end.}
+
+@;------------------------------------------------------------------------
+@section{More Path Utilities}
+
+@note-lib[scheme/path]
+
+@defproc[(explode-path [path path-string?]) 
+         (listof (or/c path? (one-of/c 'up 'same)))]{
+
+Returns the list of path element that constitute @scheme[path].  If
+@scheme[path] is simplified in the sense of @scheme[simple-form-path],
+then the result is always a list of paths, and the first element of
+the list is a root.}
+
+@defproc[(file-name-from-path [path path-string?]) (or/c path? false/c)]{
+
+Returns the last element of @scheme[path]. If @scheme[path]
+syntactically a directory path (see @scheme[split-path]), then then
+result is @scheme[#f].}
+
+@defproc[(filename-extension [path path-string?]) 
+         (or/c bytes? false/c)]{
+
+Returns a byte string that is the extension part of the filename in
+@scheme[path] without the @litchar{.} separator. If @scheme[path] is
+syntactically a directory (see @scheme[split-path]) or if the path has
+no extension, @scheme[#f] is returned.}
+
+@defproc[(find-relative-path [base path-string?][path path-string?]) path?]{
+
+Finds a relative pathname with respect to @scheme[basepath] that names
+the same file or directory as @scheme[path]. Both @scheme[basepath]
+and @scheme[path] must be simplified in the sense of
+@scheme[simple-form-path].  If @scheme[path] is not a proper subpath
+of @scheme[basepath] (i.e., a subpath that is strictly longer),
+@scheme[path] is returned.}
+
+@defproc[(normalize-path [path path-string?]
+                         [wrt (and/c path-string? complete-path?)
+                              (current-directory)]) 
+         path?]{
+
+Returns a normalized, complete version of @scheme[path], expanding the
+path and resolving all soft links. If @scheme[path] is relative, then
+@scheme[wrt] is used as the base path.
+
+Letter case is @italic{not} normalized by @scheme[normalize-path]. For
+this and other reasons, such as whether the path is syntactically a
+directory, the result of @scheme[normalize-path] is not suitable for
+comparisons that determine whether two paths refer to the same file or
+directory (i.e., the comparison may produce false negatives).
+
+An error is signaled by @scheme[normalize-path] if the input
+path contains an embedded path for a non-existent directory,
+or if an infinite cycle of soft links is detected.}
+
+@defproc[(path-only [path path-string?]) (or/c path? false/c)]{
+
+If @scheme[path] is a filename, the file's path is returned. If
+@scheme[path] is syntactically a directory, @scheme[#f] is returned.}
+
+@defproc[(simple-form-path [path path-string?]) path?]{
+
+Returns @scheme[(simplify-path (path->complete-path path))], which
+ensures that the result is a complete path containing no up- or
+same-directory indicators.}
 
 @;------------------------------------------------------------------------
 @include-section["unix-paths.scrbl"]

@@ -1,5 +1,5 @@
 (module path-dialog mzscheme
-  (require (lib "class.ss") (lib "list.ss") (lib "string.ss") (lib "file.ss")
+  (require mzlib/class mzlib/list mzlib/string mzlib/file
 	   (prefix wx: "kernel.ss")
 	   "helper.ss" "mrtop.ss" "mritem.ss" "mrpanel.ss" "mrtextfield.ss"
            "messagebox.ss" "mrmenu.ss")
@@ -245,7 +245,7 @@
                               (directory-list))]
                      [pnames '()])
             (if (null? paths)
-              (let ([ps (sort! pnames pname<?)])
+              (let ([ps (sort pnames pname<?)])
                 (if (root? dir) ps (cons up-dir-pname ps)))
               (let* ([path   (car paths)]
                      [paths  (cdr paths)]
@@ -321,7 +321,7 @@
                  (send path-list enable #t))
           (begin (set! pnames '())
                  (set! pnames-nulstrings '())
-                 (send path-list set (list "Bad Directory:" dir))
+                 (send path-list set (list "Bad Directory:" (path->string dir)))
                  (send path-list enable #f)))
         (wx:end-busy-cursor))
 

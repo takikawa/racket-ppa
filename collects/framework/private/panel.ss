@@ -1,10 +1,10 @@
 
-(module panel (lib "a-unit.ss")
-  (require (lib "class.ss")
+#lang scheme/unit
+  (require mzlib/class
            "sig.ss"
            (lib "mred-sig.ss" "mred")
-           (lib "list.ss")
-           (lib "etc.ss"))
+           mzlib/list
+           mzlib/etc)
   
   (import [prefix icon: framework:icon^]
           mred^)
@@ -164,7 +164,7 @@
   (define-struct gap (before before-dim before-percentage after after-dim after-percentage))
   
   ;; type percentage : (make-percentage number)
-  (define-struct percentage (%))
+  (define-struct percentage (%) #:mutable)
   
   (define dragable<%>
     (interface (window<%> area-container<%>)
@@ -267,10 +267,10 @@
                 [(and gap (send evt button-down? 'left))
                  (set! resizing-dim (event-get-dim evt))
                  (set! resizing-gap gap)]
-                [(and resizing-dim (send evt button-up?))
+                [(send evt button-up? 'left)
                  (set! resizing-dim #f)
                  (set! resizing-gap #f)]
-                [(and resizing-dim (send evt moving?))
+                [(and resizing-dim resizing-gap (send evt moving?))
                  (let-values ([(width height) (get-client-size)])
                    (let* ([before-percentage (gap-before-percentage resizing-gap)]
                           [orig-before (percentage-% before-percentage)]
@@ -419,5 +419,5 @@
   
   (define vertical-dragable% (vertical-dragable-mixin (dragable-mixin vertical-panel%)))
   
-  (define horizontal-dragable% (horizontal-dragable-mixin (dragable-mixin horizontal-panel%))))
+  (define horizontal-dragable% (horizontal-dragable-mixin (dragable-mixin horizontal-panel%)))
 

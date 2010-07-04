@@ -1,12 +1,12 @@
 
-(module finder (lib "a-unit.ss")
-  (require (lib "string-constant.ss" "string-constants")
+#lang scheme/unit
+  (require string-constants
            "sig.ss"
            "../preferences.ss"
            (lib "mred-sig.ss" "mred")
-           (lib "string.ss")
-           (lib "file.ss")
-           (lib "etc.ss"))
+           mzlib/string
+           scheme/path
+           mzlib/etc)
   
   
   (import mred^
@@ -100,4 +100,4 @@
       (apply (case (preferences:get 'framework:file-dialogs)
                [(std) std-get-file]
                [(common) common-get-file])
-             args))))
+             args)))

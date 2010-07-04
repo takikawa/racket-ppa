@@ -1,170 +1,165 @@
 
-(module interfaces mzscheme
-  (require (lib "class.ss"))
-  (provide (all-defined))
+#lang scheme/base
+(require scheme/class)
+(provide (all-defined-out))
 
-  ;; displays-manager<%>
-  (define displays-manager<%>
-    (interface ()
-      ;; add-syntax-display : display<%> -> void
-      add-syntax-display
+;; displays-manager<%>
+(define displays-manager<%>
+  (interface ()
+    ;; add-syntax-display : display<%> -> void
+    add-syntax-display
 
-      ;; remove-all-syntax-displays : -> void
-      remove-all-syntax-displays))
+    ;; remove-all-syntax-displays : -> void
+    remove-all-syntax-displays))
 
-  ;; selection-manager<%>
-  (define selection-manager<%>
-    (interface ()
-      ;; set-selected-syntax : syntax -> void
-      set-selected-syntax
+;; selection-manager<%>
+(define selection-manager<%>
+  (interface ()
+    ;; selected-syntax : syntax/#f
+    set-selected-syntax
+    get-selected-syntax
+    listen-selected-syntax
+    ))
 
-      ;; get-selected-syntax : -> syntax
-      get-selected-syntax
+;; mark-manager<%>
+;; Manages marks, mappings from marks to colors
+(define mark-manager<%>
+  (interface ()
+    ;; get-primary-partition : -> partition
+    get-primary-partition))
 
-      ;; listen-selected-syntax : (syntax -> void) -> void
-      listen-selected-syntax))
+;; secondary-partition<%>
+(define secondary-partition<%>
+  (interface (displays-manager<%>)
+    ;; get-secondary-partition : -> partition<%>
+    get-secondary-partition
 
-  ;; mark-manager<%>
-  ;; Manages marks, mappings from marks to colors
-  (define mark-manager<%>
-    (interface ()
-      ;; get-primary-partition : -> partition
-      get-primary-partition))
+    ;; set-secondary-partition : partition<%> -> void
+    set-secondary-partition
 
-  ;; secondary-partition<%>
-  (define secondary-partition<%>
-    (interface (displays-manager<%>)
-      ;; get-secondary-partition : -> partition<%>
-      get-secondary-partition
+    ;; listen-secondary-partition : (partition<%> -> void) -> void
+    listen-secondary-partition
 
-      ;; set-secondary-partition : partition<%> -> void
-      set-secondary-partition
+    ;; get-identifier=? : -> (cons string procedure)
+    get-identifier=?
 
-      ;; listen-secondary-partition : (partition<%> -> void) -> void
-      listen-secondary-partition
+    ;; set-identifier=? : (cons string procedure) -> void
+    set-identifier=?
 
-      ;; get-identifier=? : -> (cons string procedure)
-      get-identifier=?
+    ;; listen-identifier=? : ((cons string procedure) -> void) -> void
+    listen-identifier=?))
 
-      ;; set-identifier=? : (cons string procedure) -> void
-      set-identifier=?
+;; controller<%>
+(define controller<%>
+  (interface (displays-manager<%>
+              selection-manager<%>
+              mark-manager<%> 
+              secondary-partition<%>)))
 
-      ;; listen-identifier=? : ((cons string procedure) -> void) -> void
-      listen-identifier=?))
+;; host<%>
+(define host<%>
+  (interface ()
+    ;; get-controller : -> controller<%>
+    get-controller
 
-  ;; controller<%>
-  (define controller<%>
-    (interface (displays-manager<%>
-                selection-manager<%>
-                mark-manager<%> 
-                secondary-partition<%>)))
-
-  ;; host<%>
-  (define host<%>
-    (interface ()
-      ;; get-controller : -> controller<%>
-      get-controller
-
-      ;; add-keymap : text snip
-      add-keymap
-      ))
+    ;; add-keymap : text snip
+    add-keymap
+    ))
 
 
-  ;; display<%>
-  (define display<%>
-    (interface ()
-      ;; refresh : -> void
-      refresh
+;; display<%>
+(define display<%>
+  (interface ()
+    ;; refresh : -> void
+    refresh
 
-      ;; highlight-syntaxes : (list-of syntax) color -> void
-      highlight-syntaxes
+    ;; highlight-syntaxes : (list-of syntax) color -> void
+    highlight-syntaxes
 
-      ;; get-start-position : -> number
-      get-start-position
+    ;; get-start-position : -> number
+    get-start-position
 
-      ;; get-end-position : -> number
-      get-end-position
+    ;; get-end-position : -> number
+    get-end-position
 
-      ;; get-range : -> range<%>
-      get-range))
+    ;; get-range : -> range<%>
+    get-range))
 
-  ;; range<%>
-  (define range<%>
-    (interface ()
-      ;; get-ranges : datum -> (list-of (cons number number))
-      get-ranges
+;; range<%>
+(define range<%>
+  (interface ()
+    ;; get-ranges : datum -> (list-of (cons number number))
+    get-ranges
 
-      ;; all-ranges : (list-of Range)
-      ;; Sorted outermost-first
-      all-ranges
+    ;; all-ranges : (list-of Range)
+    ;; Sorted outermost-first
+    all-ranges
 
-      ;; get-identifier-list : (list-of identifier)
-      get-identifier-list))
+    ;; get-identifier-list : (list-of identifier)
+    get-identifier-list))
 
-  ;; A Range is (make-range datum number number)
-  (define-struct range (obj start end))
-
-
-  ;; syntax-prefs<%>
-  (define syntax-prefs<%>
-    (interface ()
-      pref:width
-      pref:height
-      pref:props-percentage
-      pref:props-shown?))
-
-  ;; widget-hooks<%>
-  (define widget-hooks<%>
-    (interface ()
-      ;; setup-keymap : -> void
-      setup-keymap
-
-      ;; shutdown : -> void
-      shutdown
-      ))
-
-  ;; keymap-hooks<%>
-  (define keymap-hooks<%>
-    (interface ()
-      ;; make-context-menu : -> context-menu<%>
-      make-context-menu
-
-      ;; get-context-menu% : -> class
-      get-context-menu%))
-
-  ;; context-menu-hooks<%>
-  (define context-menu-hooks<%>
-    (interface ()
-      add-edit-items
-      after-edit-items
-      add-selection-items
-      after-selection-items
-      add-partition-items
-      after-partition-items))
+;; A Range is (make-range datum number number)
+(define-struct range (obj start end))
 
 
-  ;;----------
+;; syntax-prefs<%>
+(define syntax-prefs<%>
+  (interface ()
+    pref:width
+    pref:height
+    pref:props-percentage
+    pref:props-shown?))
 
-  ;; Convenience widget, specialized for displaying stx and not much else
-  (define syntax-browser<%>
-    (interface ()
-      add-syntax
-      add-text
-      add-separator
-      erase-all
-      select-syntax
-      get-text
-      ))
+;; widget-hooks<%>
+(define widget-hooks<%>
+  (interface ()
+    ;; setup-keymap : -> void
+    setup-keymap
 
-  (define partition<%>
-    (interface ()
-      ;; get-partition : any -> number
-      get-partition
+    ;; shutdown : -> void
+    shutdown
+    ))
 
-      ;; same-partition? : any any -> number
-      same-partition?
+;; keymap-hooks<%>
+(define keymap-hooks<%>
+  (interface ()
+    ;; make-context-menu : -> context-menu<%>
+    make-context-menu
 
-      ;; count : -> number
-      count))
+    ;; get-context-menu% : -> class
+    get-context-menu%))
 
-  )
+;; context-menu-hooks<%>
+(define context-menu-hooks<%>
+  (interface ()
+    add-edit-items
+    after-edit-items
+    add-selection-items
+    after-selection-items
+    add-partition-items
+    after-partition-items))
+
+
+;;----------
+
+;; Convenience widget, specialized for displaying stx and not much else
+(define syntax-browser<%>
+  (interface ()
+    add-syntax
+    add-text
+    add-separator
+    erase-all
+    select-syntax
+    get-text
+    ))
+
+(define partition<%>
+  (interface ()
+    ;; get-partition : any -> number
+    get-partition
+
+    ;; same-partition? : any any -> number
+    same-partition?
+
+    ;; count : -> number
+    count))

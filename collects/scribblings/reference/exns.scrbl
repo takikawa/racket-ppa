@@ -1,15 +1,12 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "bnf.ss" "scribble")]
-@require["mz.ss"]
+#lang scribble/doc
+@(require scribble/bnf
+          "mz.ss")
 
 @title[#:tag "exns"]{Exceptions}
 
-See @secref["exn-model"] for information on the PLT Scheme
-exception model. It is based on @cite[#:key "friedman-exns" #:title
-"Exception system proposal" #:author "Daniel P. Friedman and
-C. T. Haynes and R. Kent Dybvig" #:location
-"http://www.cs.indiana.edu/scheme-repository/doc.proposals.exceptions.html"
-#:date ""].
+See @secref["exn-model"] for information on the PLT Scheme exception
+model. It is based on a proposal by Friedman, Haynes, and Dybvig
+@cite["Friedman95"].
 
 Whenever a primitive error occurs in PLT Scheme, an exception is
 raised.  The value that is passed to the current @tech{exception
@@ -28,15 +25,22 @@ particular required arity (e.g., @scheme[call-with-input-file],
 @;------------------------------------------------------------------------
 @section[#:tag "errorproc"]{Raising Exceptions}
 
-@defproc[(raise [v any/c]) any]{
+@defproc[(raise [v any/c][barrier? any/c #t]) any]{
 
 Raises an exception, where @scheme[v] represents the exception being
 raised. The @scheme[v] argument can be anything; it is passed to the
-current @deftech{exception handler}.  Breaks are disabled from the
-time the exception is raised until the exception handler obtains
-control, and the handler itself is @scheme[parameterize-break]ed to
-disable breaks initially; see @secref["breakhandler"] for more
-information on breaks.}
+current @deftech{exception handler}.
+
+If @scheme[barrier?] is true, then the call to the @tech{exception
+handler} is protected by a @tech{continuation barrier}, so that
+multiple returns/escapes are impossible. All exceptions raised by
+@schememodname[scheme] functions effectively use @scheme[raise] with a
+@scheme[#t] value for @scheme[barrier?].
+
+Breaks are disabled from the time the exception is raised until the
+exception handler obtains control, and the handler itself is
+@scheme[parameterize-break]ed to disable breaks initially; see
+@secref["breakhandler"] for more information on breaks.}
 
 
 @defproc*[([(error [sym symbol?]) any]
@@ -182,24 +186,23 @@ See also @scheme[error-print-source-location].}
 
 @defproc[(call-with-exception-handler [f (any/c . -> . any)][thunk (-> any)]) any]{
 
-Installs @scheme[f] as the @tech{exception handler} for the current
-continuation---i.e., for the dynamic extent of a call to
-@scheme[thunk].  The @scheme[thunk] is called in tail position with
-respect to the call to @scheme[call-with-exception-handler]. If an
-exception is raised during the evaluation of @scheme[thunk] (in an
-extension of the current continuation that does not have its own
-exception handler), then @scheme[f] is applied to the @scheme[raise]d
-value in the continuation of the @scheme[raise] call (but extended
-with a @tech{continuation barrier}; see @secref["prompt-model"]).
+Installs @scheme[f] as the @tech{exception handler} for the
+@tech{dynamic extent} of the call to @scheme[thunk]. If an exception
+is raised during the evaluation of @scheme[thunk] (in an extension of
+the current continuation that does not have its own exception
+handler), then @scheme[f] is applied to the @scheme[raise]d value in
+the continuation of the @scheme[raise] call (but normally extended
+with a @tech{continuation barrier}; see @secref["prompt-model"] and
+@scheme[raise]).
 
 Any procedure that takes one argument can be an exception handler.  If
 the exception handler returns a value when invoked by @scheme[raise],
 then @scheme[raise] propagates the value to the ``previous'' exception
-handler (still in the dynamic extent of the call to
-@scheme[raise]). The previous exception handler is the exception
-handler associated with the rest of the continuation after the point
-where the called exception handler was associated with the
-continuation; if no previous handler is available, the
+handler (still in the dynamic extent of the call to @scheme[raise],
+and under the same barrier, if any). The previous exception handler is
+the exception handler associated with the rest of the continuation
+after the point where the called exception handler was associated with
+the continuation; if no previous handler is available, the
 uncaught-exception handler is used (see below). In all cases, a call
 to an exception handler is @scheme[parameterize-break]ed to disable
 breaks, and it is wrapped with @scheme[call-with-exception-handler] to
@@ -232,7 +235,7 @@ error-display call is parameterized to install an emergency error
 display handler that attempts to print directly to a console and never
 fails.}
 
-@defform[(with-handlers ((pred-expr handler-expr))
+@defform[(with-handlers ([pred-expr handler-expr] ...)
            body ...+)]{
 
 Evaluates each @scheme[pred-expr] and and @scheme[handler-expr] in the
@@ -269,7 +272,7 @@ break). Beware, also, of catching and discarding exceptions, because
 discarding an error message can make debugging unnecessarily
 difficult.}
 
-@defform[(with-handlers* ((pred-expr handler-expr))
+@defform[(with-handlers* ([pred-expr handler-expr] ...)
            body ...+)]{
 
 Like @scheme[with-handlers], but if a @scheme[handler-expr] procedure
@@ -379,7 +382,6 @@ structure is affected by the parameter. The default is @scheme[#t].}
 
 @defstruct[exn ([message string?]
                 [continuation-marks continuation-mark-set?])
-           #:immutable
            #:inspector #f]{
 
 The base @tech{structure type} for exceptions. The @scheme[message]
@@ -417,14 +419,12 @@ Raised when a continuation is applied where the jump would cross a
 continuation barrier.}
 
 @defstruct[(exn:fail:contract:variable exn:fail:contract) ([id symbol?])
-           #:immutable
            #:inspector #f]{
 
 Raised for a reference to a not-yet-defined @tech{top-level variable}
 or @tech{module-level variable}.}
 
 @defstruct[(exn:fail:syntax exn:fail) ([exprs (listof syntax?)])
-           #:immutable
            #:inspector #f]{
 
 Raised for a syntax error that is not a @scheme[read] error. The
@@ -433,7 +433,6 @@ least-specific to most-specific.}
 
 
 @defstruct[(exn:fail:read exn:fail) ([srclocs (listof srcloc?)])
-           #:immutable
            #:inspector #f]{
 
 Raised for a @scheme[read] error. The @scheme[srclocs] indicate the
@@ -496,7 +495,6 @@ particular, the default error printer does not show the program
 context when printing the error message.}
 
 @defstruct[(exn:break exn) ([continuation continuation?])
-           #:immutable
            #:inspector #f]{
 
 Raised asynchronously (when enabled) in response to a break request.
@@ -504,13 +502,34 @@ The @scheme[continuation] field can be used by a handler to resume the
 interrupted computation.}
 
 
+@defthing[prop:exn:srclocs struct-type-property?]{
+
+A property that identifiers structure types that provide a list of
+@scheme[srcloc] values. The property is normally attached to structure
+types used to represent exception information.
+
+The property value must be a procedure that accepts a single
+value---the structure type instance from which to extract source
+locations---and returns a list of @scheme[srcloc]s.}
+
+
+@defproc[(exn:srclocs? [v any/c]) boolean?]{
+
+Returns @scheme[#t] if @scheme[v] has the @scheme[prop:exn:srclocs]
+property, @scheme[#f] otherwise.}
+
+
+@defproc[(exn:srclocs-accessor [v exn:srclocs?])
+         (exn:srclocs?. -> . (listof srcloc))]{
+
+Returns the @scheme[srcloc]-getting procedure associated with @scheme[v].}
+
 
 @defstruct[srcloc ([source any/c]
                    [line (or/c positive-exact-integer? false/c)]
                    [column (or/c nonnegative-exact-integer? false/c)]
                    [position (or/c positive-exact-integer? false/c)]
                    [span (or/c nonnegative-exact-integer? false/c)])
-                  #:immutable
                   #:inspector #f]{
 
 The fields of an @scheme[srcloc] instance are as follows:

@@ -87,10 +87,9 @@ stepper-hint :
 		        box (inside an xml box)
  [ 'comes-from-recur ] : expression was expanded from a 'recur'
  [ 'comes-from-check-expect ] : expression was expanded from a 'check-expect'
- comes-from-check-within 
- comes-from-check-error
+ [ 'comes-from-check-within ] : ... from a 'check-within'
+ [ 'comes-from-check-error ] : ... from a 'check-error'
  
-
 stepper-define-type:
  this is attached to the right-hand sides of defines to indicate what
  kind of define they came from.
@@ -102,8 +101,6 @@ stepper-define-type:
 
  [ 'lambda-define ] : this lambda arose from the expansion of
     (define id (lambda (
-
-
 
   (Transferred.)
 
@@ -176,6 +173,13 @@ stepper-binding-type :
  [ 'let-bound ] : this variable's binding was in a let/*/rec
  [ 'lambda-bound ] : this variable's binding was in a lambda
 
+stepper-no-lifting-info :
+ this label is applied to a let-bound-variable whose binding is not
+ being annotated (because the annotator is skipping inward past it).
+ For such a binding, no corresponding lifting variable is generated,
+ and so the marks shouldn't try to capture it.
+
+ 
 stepper-and/or-clauses-consumed :
  indicates the number of clauses to the left of the one associated
  with a given 'if' in the expansion of an 'and' or 'or'.
@@ -227,19 +231,18 @@ stepper-fake-exp :
   this expression does not occur directly in the source; reconstruct specially.
   used for begin.
 
-;; wrong name:
-args-of-call [ADDED BY RECONSTRUCTOR] :
+stepper-args-of-call [ADDED BY RECONSTRUCTOR] :
   this reconstructed (...) expression is the result of a call with these args.
   used by the check-expect unwinder to figure out the expected values.
 
-stepper-no-retval-wrap:
-  don't annotate this with a return-values-wrap
+stepper-hide-completed : don't show the final top-level expression binding
+  for this identifier.
 
-stepper-render-completed-as:
-  use this syntax object to represent the completed expression
+stepper-hide-reduction : don't show any reductions where this term is 
+  associated with the topmost mark
 
-stepper-dont-show-reduction:
-  don't show the reduction of this application
+stepper-use-val-as-final : use the return value of this expression as a
+  "completed" val in the stepper. Used for test cases.
 
 STEPPER-HINT COLLISIONS
 

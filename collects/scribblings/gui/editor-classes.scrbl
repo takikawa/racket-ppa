@@ -1,6 +1,6 @@
-#reader(lib "docreader.ss" "scribble")
-@require["common.ss"]
-@require["diagrams.ss"]
+#lang scribble/doc
+@(require "common.ss"
+          "diagrams.ss")
 
 @title[#:style '(toc quiet)]{Editor Classes}
 
@@ -14,7 +14,7 @@ Snips:
 
 Displays, Administrators, and Mappings:
 
-@diagram->table[editor-diagram]
+@diagram->table[admin-diagram]
 
 Styles:
 

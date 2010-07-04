@@ -1,11 +1,12 @@
 
 (module slatex-wrapper mzscheme
-  (require (lib "file.ss")
-	   (lib "process.ss")
-	   (lib "sendevent.ss")
+  (require mzlib/file
+	   mzlib/process
+	   mzlib/sendevent
            "slatex.ss")
 
-  (provide slatex latex pdf-slatex pdf-latex slatex/no-latex)
+  (provide slatex latex pdf-slatex pdf-latex slatex/no-latex
+           filename->latex-filename)
 
   (define (add-suffix p s)
     (path->string
@@ -70,7 +71,7 @@
                        (send-event "OTEX" "aevt" "odoc" (vector 'file file))
                        #t]
                       [(windows) (exec-latex (add-suffix command-name #".exe") file)]
-                      [(unix macosx) ;; is this also okay for beos?
+                      [(unix macosx)
                        (exec-latex command-name file)]
                       [else
                        (error 'latex "do not know how to run ~s on ~s" command-name (system-type))]))))])

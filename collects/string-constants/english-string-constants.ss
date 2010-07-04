@@ -189,17 +189,16 @@ please adhere to these guidelines:
  (cs-status-coloring-program "Check Syntax: coloring expression")
  (cs-status-eval-compile-time "Check Syntax: eval compile time")
  (cs-status-expanding-expression "Check Syntax: expanding expression")
+ (cs-status-loading-docs-index "Check Syntax: loading documentation index")
  (cs-mouse-over-import "binding ~s imported from ~s")
-
+ (cs-view-docs "View documentation for ~a")
+  
  (cs-lexical-variable "lexical variable")
  (cs-imported-variable "imported variable")
 
  ;;; info bar at botttom of drscheme frame
  (collect-button-label "GC")
-  (read-only-line1 "Read")
-  (read-only-line2 "only")
-  (read/write-line1 "Read/")
-  (read/write-line2 "Write")
+  (read-only "Read only")
  (auto-extend-selection "Auto-extend")
  (overwrite "Overwrite")
  (running "running")
@@ -232,6 +231,7 @@ please adhere to these guidelines:
  (file-is-not-saved "The file \"~a\" is not saved.")
  (save "Save")
  (close-anyway "Close Anyway")
+ (dont-save "Don't Save")
  (clear-anyway "Clear Anyway")
 
  ;; menu item title
@@ -259,6 +259,16 @@ please adhere to these guidelines:
  (syntax-coloring-choose-color "Choose a color for ~a")
  (preferences-colors "Colors") ;; used in the preferences dialog
  
+  ;; parenthesis color scheme string constants
+  (parenthesis-color-scheme "Parenthesis color scheme") ;; label for the choice% menu in the preferences dialog
+  (paren-color-basic-grey "Basic grey")
+  (paren-color-shades-of-gray "Shades of grey")
+  (paren-color-shades-of-blue "Shades of blue")
+  (paren-color-spring "Spring")
+  (paren-color-fall "Fall")
+  (paren-color-winter "Winter")
+
+  
  (url: "URL:")
  (open-url... "Open URL...")
  (open-url "Open URL")
@@ -319,6 +329,11 @@ please adhere to these guidelines:
   (help-desk-this-is-just-example-text
    "This is just example text for setting the font size. Open Help Desk proper (from Help menu) to follow these links.")
 
+  ;; this appears in the bottom part of the frame the first time the user hits `f1' 
+  ;; (assuming nothing else has loaded the documentation index first)
+  ;; see also: cs-status-loading-docs-index
+  (help-desk-loading-documentation-index "Help Desk: loading documentation index")
+  
  ;; Help desk htty proxy
  (http-proxy "HTTP Proxy")
  (proxy-direct-connection "Direct connection")
@@ -369,9 +384,6 @@ please adhere to these guidelines:
 
  ;;; about box
  (about-drscheme-frame-title "About DrScheme")
- (take-a-tour "Take a Tour!")
- (release-notes "Release Notes")
- 
  
  ;;; save file in particular format prompting.
  (save-as-plain-text "Save this file as plain text?")
@@ -413,7 +425,7 @@ please adhere to these guidelines:
  (separate-dialog-for-searching "Use separate dialog for searching")
  (reuse-existing-frames "Reuse existing frames when opening new files")
  (default-fonts "Default Fonts")
- (paren-match-color "Parenthesis highlight color") ; in prefs dialog
+ (basic-gray-paren-match-color "Basic gray parenthesis highlight color") ; in prefs dialog
  (online-coloring-active "Color syntax interactively")
  (open-files-in-tabs "Open files in separate tabs (not separate windows)")
  (show-interactions-on-execute "Automatically open interactions window when running a program")
@@ -789,8 +801,11 @@ please adhere to these guidelines:
  (show-interactions-menu-item-label "Show &Interactions")
  (hide-interactions-menu-item-label "Hide &Interactions")
  (interactions-menu-item-help-string "Show/Hide the interactions window")
- (show-toolbar "Show &Toolbar")
- (hide-toolbar "Hide &Toolbar")
+ (toolbar "Toolbar")
+ (toolbar-on-top "Toolbar On Top")
+ (toolbar-on-left "Toolbar On Left")
+ (toolbar-on-right "Toolbar On Right")
+ (toolbar-hidden "Toolbar Hidden")
 
  ;;; file menu
  (save-definitions-as "Save Definitions &As...")
@@ -957,10 +972,10 @@ please adhere to these guidelines:
  (use-mixed-fractions "Mixed fractions")
  (use-repeating-decimals "Repeating decimals")
  (decimal-notation-for-rationals "Use decimal notation for rationals")
+ (enforce-primitives-group-box-label "Initial Bindings")
+ (enforce-primitives-check-box-label "Disallow redefinition of initial bindings")
 
-  ; used in the bottom left of the drscheme frame as the label
-  ; above the programming language's name
-  (programming-language-label "Programming language:")
+  ; used in the bottom left of the drscheme frame 
   ; used the popup menu from the just above; greyed out and only
   ; visible when some languages are in the history
   (recent-languages "Recent languages:")
@@ -985,11 +1000,11 @@ please adhere to these guidelines:
  (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
  (pretty-big-scheme "Pretty Big (includes MrEd and Advanced Student)")
  (pretty-big-scheme-one-line-summary "Adds syntax and functions from the HtDP languages")
- (r5rs-lang-name "Standard (R5RS)")
+ (r5rs-language-name "R5RS")
  (r5rs-one-line-summary "R5RS, with no frills")
  (expander "Expander")
  (expander-one-line-summary "Expands, rather than evaluates, expressions")
- (professional-languages "Professional Languages")
+ (legacy-languages "Legacy Languages")
  (teaching-languages "Teaching Languages")
  (experimental-languages "Experimental Languages")
   (initial-language-category "Initial language")
@@ -1106,8 +1121,8 @@ please adhere to these guidelines:
  ;; This is used in this context: "PLT Scheme vNNN <<<*>>> http://download..."
  (version:now-available-at   "is now available at")
 
- ;; special menu
- (special-menu "S&pecial")
+ ;; insert menu
+ (insert-menu "&Insert")
  
  ;; large semi colon letters
  (insert-large-letters... "Insert Large Letters...")
@@ -1271,7 +1286,7 @@ please adhere to these guidelines:
   (profj-language-config-class "Class")
   (profj-language-config-display-array "Print entire contents of arrays?")
   (profj-language-config-testing-preferences "Testing Preferences") ; Heading for preferences controlling test behavior
-  (profj-language-config-testing-enable "Display testing results on Run?") ; Run should be the word found on the Run button
+  ;(profj-language-config-testing-enable "Display testing results on Run?") ; Run should be the word found on the Run button
   (profj-language-config-testing-coverage "Collect coverage information for tests?")
   (profj-language-config-support-test-language "Support test Language extension?")
   (profj-language-config-testing-check "Allow check expression?") ; check should not be translated
@@ -1283,10 +1298,11 @@ please adhere to these guidelines:
   (profj-test-name-example-miscapitalized "Class ~a's name contains a miscapitalized example.")
   
    ;; Close testing window and do not run test cases any more
-  (profj-test-results-close-and-disable "Close and Disable Testing")
+  ;(profj-test-results-close-and-disable "Close and Disable Testing")
   ;; Hide docked testing window and do not run test cases any more
-  (profj-test-results-hide-and-disable "Hide and Disable Testing")
-  (profj-test-results-window-title "Test Results")
+  ;(profj-test-results-hide-and-disable "Hide and Disable Testing")
+  ;Renamed below
+  ;(profj-test-results-window-title "Test Results")
   
   (profj-unsupported "Unsupported")
   (profj-executables-unsupported "Sorry - executables are not supported for Java at this time")
@@ -1299,9 +1315,19 @@ please adhere to these guidelines:
   (profj-insert-java-comment-box "Insert Java Comment Box")
   (profj-insert-java-interactions-box "Insert Java Interactions Box")
 
+  ;;The Test engine tool
+  ;;
+  (test-engine-window-title "Test Results")
+  ;;Following two appear in View menu, attach and free test report window from DrScheme frame
+  (test-engine-dock-report "Dock Test Report")
+  (test-engine-undock-report "Undock Test Report")
+  ;;Following two appear in Scheme (Java, etc) menu, cause Tests to be Run automatically or not
+  (test-engine-enable-tests "Enable Tests")
+  (test-engine-disable-tests "Disable Tests")
+  
   (profjWizward-insert-java-class "Insert Java Class")
   (profjWizard-insert-java-union "Insert Java Union")
-
+  
   ;; The Test Suite Tool
   ;; Errors
   (test-case-empty-error "Empty test case")
@@ -1351,10 +1377,6 @@ please adhere to these guidelines:
   (profjBoxes-insert-java-interactions "Insert Java Interactions")
 
   ;; Slideshow
-  (slideshow-show-slideshow-panel "Show Slideshow Panel")
-  (slideshow-hide-slideshow-panel "Hide Slideshow Panel")
-  (slideshow-freeze-picts "Freeze These Picts")
-  (slideshow-thaw-picts "Show Picts Under Mouse")
   (slideshow-hide-picts "Show Nested Boxes")
   (slideshow-show-picts "Show Picts")
   (slideshow-cannot-show-picts "Cannot show picts; run program to cache sizes first")

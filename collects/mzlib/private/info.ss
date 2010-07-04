@@ -1,4 +1,3 @@
+#lang setup/infotab
 
-(module info (lib "infotab.ss" "setup")
-  (define name "MzLib private")
-  (define compile-omit-files '("shared-body.ss")))
+(define compile-omit-paths '("shared-body.ss"))

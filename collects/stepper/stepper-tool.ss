@@ -1,15 +1,16 @@
 (module stepper-tool mzscheme
 
-  (require (lib "contract.ss")
+  (require mzlib/contract
            (lib "tool.ss" "drscheme")
-           (lib "mred.ss" "mred")
-           (lib "pconvert.ss")
-           (lib "string-constant.ss" "string-constants")
-           (lib "async-channel.ss")
-           (prefix frame: (lib "framework.ss" "framework"))
-           (lib "unit.ss")
-           (lib "class.ss")
-           (lib "list.ss")
+           mred
+           mzlib/pconvert
+           string-constants
+           mzlib/async-channel
+           (prefix frame: framework)
+           mzlib/unit
+           mzlib/class
+           mzlib/list
+           mrlib/switchable-button
            (prefix model: "private/model.ss")
            "private/my-macros.ss"
            (prefix x: "private/mred-extensions.ss")
@@ -27,38 +28,38 @@
     (import drscheme:tool^ xml^)
     (export drscheme:tool-exports^)
 
-      ;; tool magic here:
-      (define (phase1)
-        
-        ;; experiment with extending the language... parameter-like fields for stepper parameters
-        (drscheme:language:extend-language-interface
-         stepper-language<%>
-         (lambda (superclass)
-           (class* superclass (stepper-language<%>)
-	           (public stepper:supported?)
-		   (define (stepper:supported?) #f)
-                   (public stepper:enable-let-lifting?)
-                   (define (stepper:enable-let-lifting?) #f)
-		   (public stepper:show-lambdas-as-lambdas?)
-		   (define (stepper:show-lambdas-as-lambdas?) #t)
-		   (public stepper:render-to-sexp)
-		   (define (stepper:render-to-sexp val settings language-level)
-		     (parameterize ([current-print-convert-hook
-				     (make-print-convert-hook settings)])
-		       (set-print-settings
-			language-level
-			settings
-			(lambda ()
-			  (simple-module-based-language-convert-value
-			   val
-			   (drscheme:language:simple-settings-printing-style settings)
-			   (drscheme:language:simple-settings-show-sharing settings))))))
-
-                   (super-instantiate ())))))
+    ;; tool magic here:
+    (define (phase1)
+      
+      ;; experiment with extending the language... parameter-like fields for stepper parameters
+      (drscheme:language:extend-language-interface
+       stepper-language<%>
+       (lambda (superclass)
+         (class* superclass (stepper-language<%>)
+           (public stepper:supported?)
+           (define (stepper:supported?) #f)
+           (public stepper:enable-let-lifting?)
+           (define (stepper:enable-let-lifting?) #f)
+           (public stepper:show-lambdas-as-lambdas?)
+           (define (stepper:show-lambdas-as-lambdas?) #t)
+           (public stepper:render-to-sexp)
+           (define (stepper:render-to-sexp val settings language-level)
+             (parameterize ([current-print-convert-hook
+                             (make-print-convert-hook settings)])
+               (set-print-settings
+                language-level
+                settings
+                (lambda ()
+                  (simple-module-based-language-convert-value
+                   val
+                   (drscheme:language:simple-settings-printing-style settings)
+                   (drscheme:language:simple-settings-show-sharing settings))))))
+           
+           (super-instantiate ())))))
       
       (define (phase2) (void))
 
-      ;; this should be a preference
+      ;; this should be a preference:
       (define stepper-initial-width 500)
       (define stepper-initial-height 500)
 
@@ -77,83 +78,84 @@
 	(or (send language-level stepper:supported?)
 	    (getenv "PLTSTEPPERUNSAFE")))
 
-      ;; the stepper's frame:
-      (define stepper-frame%
-        (class (drscheme:frame:basics-mixin
-                (frame:frame:standard-menus-mixin frame:frame:basic%))
-
-          (init-field drscheme-frame)
-
-          ;; PRINTING-PROC
-          ;; I frankly don't think that printing (i.e., to a printer) works
-          ;; correctly. 2005-07-01, JBC
-          (public set-printing-proc)
-
-          (define (set-printing-proc proc)
-            (set! printing-proc proc))
-
-          (define (printing-proc item evt)
-            (message-box "error?" "shouldn't be called"))
-
-          (define/private (file-menu:print a b) (printing-proc a b))
-
-          ;; MENUS
-
-          (define/override (edit-menu:between-find-and-preferences edit-menu)
-            (void))
-          (define/override (edit-menu:between-select-all-and-find edit-menu)
-            (void))
-          (define/override (file-menu:between-save-as-and-print file-menu)
-            (void))
-
-          ;; CUSTODIANS
-          ;; The custodian is used to halt the stepped computation when the
-          ;; stepper window closes.  The custodian is captured when the stepped
-          ;; computation starts.
-
-          (define custodian #f)
-          (define/public (set-custodian! cust)
-            (set! custodian cust))
-          (define/augment (on-close)
-            (when custodian
-              (custodian-shutdown-all custodian))
-            (send drscheme-frame on-stepper-close)
-            (inner (void) on-close))
-
-          ;; WARNING BOXES:
-
-          (define program-changed-warning-str
-            (string-constant stepper-program-has-changed))
-          (define window-closed-warning-str
-            (string-constant stepper-program-window-closed))
-
-          (define warning-message-visible-already #f)
-          (define/private (add-warning-message warning-str)
-            (let ([warning-msg (new x:stepper-warning%
-                                 [warning-str warning-str]
-                                 [parent (get-area-container)])])
-              (send (get-area-container)
-                    change-children
-                    (if warning-message-visible-already
+    ;; the stepper's frame:
+    
+    (define stepper-frame%
+      (class (drscheme:frame:basics-mixin
+              (frame:frame:standard-menus-mixin frame:frame:basic%))
+        
+        (init-field drscheme-frame)
+        
+        ;; PRINTING-PROC
+        ;; I frankly don't think that printing (i.e., to a printer) works
+        ;; correctly. 2005-07-01, JBC
+        (public set-printing-proc)
+        
+        (define (set-printing-proc proc)
+          (set! printing-proc proc))
+        
+        (define (printing-proc item evt)
+          (message-box "error?" "shouldn't be called"))
+        
+        (define/private (file-menu:print a b) (printing-proc a b))
+        
+        ;; MENUS
+        
+        (define/override (edit-menu:between-find-and-preferences edit-menu)
+          (void))
+        (define/override (edit-menu:between-select-all-and-find edit-menu)
+          (void))
+        (define/override (file-menu:between-save-as-and-print file-menu)
+          (void))
+        
+        ;; CUSTODIANS
+        ;; The custodian is used to halt the stepped computation when the
+        ;; stepper window closes.  The custodian is captured when the stepped
+        ;; computation starts.
+        
+        (define custodian #f)
+        (define/public (set-custodian! cust)
+          (set! custodian cust))
+        (define/augment (on-close)
+          (when custodian
+            (custodian-shutdown-all custodian))
+          (send drscheme-frame on-stepper-close)
+          (inner (void) on-close))
+        
+        ;; WARNING BOXES:
+        
+        (define program-changed-warning-str
+          (string-constant stepper-program-has-changed))
+        (define window-closed-warning-str
+          (string-constant stepper-program-window-closed))
+        
+        (define warning-message-visible-already #f)
+        (define/private (add-warning-message warning-str)
+          (let ([warning-msg (new x:stepper-warning%
+                                  [warning-str warning-str]
+                                  [parent (get-area-container)])])
+            (send (get-area-container)
+                  change-children
+                  (if warning-message-visible-already
                       (lambda (l)
                         (list (car l) warning-msg (caddr l)))
                       (lambda (l)
                         (list (car l) warning-msg (cadr l)))))
-              (set! warning-message-visible-already #t)))
-
-          (inherit get-area-container)
-          (define program-change-already-warned? #f)
-          (define/public (original-program-changed)
-            (unless program-change-already-warned?
-              (set! program-change-already-warned? #t)
-              (add-warning-message program-changed-warning-str)))
-
-          (define/public (original-program-gone)
-            (add-warning-message window-closed-warning-str))
-
-          (super-new [label "Stepper"] [parent #f]
-                     [width stepper-initial-width]
-                     [height stepper-initial-height])))
+            (set! warning-message-visible-already #t)))
+        
+        (inherit get-area-container)
+        (define program-change-already-warned? #f)
+        (define/public (original-program-changed)
+          (unless program-change-already-warned?
+            (set! program-change-already-warned? #t)
+            (add-warning-message program-changed-warning-str)))
+        
+        (define/public (original-program-gone)
+          (add-warning-message window-closed-warning-str))
+        
+        (super-new [label "Stepper"] [parent #f]
+                   [width stepper-initial-width]
+                   [height stepper-initial-height])))
 
       ;; view-controller-go: called when the stepper starts; starts the
       ;;                     stepper's view&controller
@@ -468,7 +470,8 @@
                               (send language-level stepper:enable-let-lifting?))
 	 (send language-level stepper:show-lambdas-as-lambdas?)
          language-level
-         run-on-drscheme-side)
+         run-on-drscheme-side
+         #f)
         (send s-frame show #t)
 
         s-frame)
@@ -485,7 +488,7 @@
       (define (stepper-unit-frame-mixin super%)
         (class* super% (stepper-unit-frame<%>)
 
-          (inherit get-button-panel get-interactions-text get-definitions-text)
+          (inherit get-button-panel register-toolbar-button get-interactions-text get-definitions-text)
 
           (define stepper-frame #f)
           (define/public (on-stepper-close)
@@ -518,30 +521,42 @@
                         (if ((string-length str) . <= . len)
                           str
                           (string-append (substring str 0 (max 0 (- len 3)))
-                                         "...")))))))
+                                         "..."))))))
+                 (current-print void))
                void ; kill
                iter)))
 
           ;; STEPPER BUTTON
 
           (define/public (get-stepper-button) stepper-button)
+          
+          (define stepper-button-parent-panel 
+            (new horizontal-panel%
+                 [parent (get-button-panel)]
+                 [stretchable-width #f]
+                 [stretchable-height #f]))
+                    
           (define stepper-button
-            (make-object button%
-              (x:stepper-bitmap this)
-              (make-object vertical-pane% (get-button-panel))
-              (lambda (button evt)
-                (if stepper-frame
-                  (send stepper-frame show #t)
-                  (let* ([language-level
-			  (extract-language-level (get-definitions-text))]
-			 [language-level-name (language-level->name language-level)])
-                    (if (stepper-works-for? language-level)
-                      (set! stepper-frame
-                            (view-controller-go this program-expander))
-                      (message-box
-                       (string-constant stepper-name)
-                       (format (string-constant stepper-language-level-message)
-                               language-level-name))))))))
+            (new switchable-button% 
+                 [parent stepper-button-parent-panel]
+                 [label (string-constant stepper-button-label)]
+                 [bitmap x:foot-img/horizontal]
+                 [alternate-bitmap x:foot-img/vertical]
+                 [callback (lambda (button)
+                             (if stepper-frame
+                                 (send stepper-frame show #t)
+                                 (let* ([language-level
+                                         (extract-language-level (get-definitions-text))]
+                                        [language-level-name (language-level->name language-level)])
+                                   (if (stepper-works-for? language-level)
+                                       (set! stepper-frame
+                                             (view-controller-go this program-expander))
+                                       (message-box
+                                        (string-constant stepper-name)
+                                        (format (string-constant stepper-language-level-message)
+                                                language-level-name))))))]))
+          
+          (register-toolbar-button stepper-button)
 
           (define/augment (enable-evaluation)
             (send stepper-button enable #t)
@@ -571,8 +586,9 @@
                         delete-child stepper-button))))
 
           ;; add the stepper button to the button panel:
-          (let ([p (send stepper-button get-parent)])
-            (send (get-button-panel) change-children (lx (cons p (remq p _)))))
+          (send (get-button-panel) change-children 
+                (lx (cons stepper-button-parent-panel
+                          (remq stepper-button-parent-panel _))))
           
           ;; hide stepper button if it's not supported for the initial language:
           (check-current-language-for-stepper)))
@@ -592,11 +608,13 @@
                     (send stepper-window original-program-changed))))))
 
           (define/augment (on-insert x y)
-            (notify-stepper-frame-of-change)
+            (unless metadata-changing-now?
+              (notify-stepper-frame-of-change))
             (inner (void) on-insert x y))
 
           (define/augment (on-delete x y)
-            (notify-stepper-frame-of-change)
+            (unless metadata-changing-now?
+              (notify-stepper-frame-of-change))
             (inner (void) on-delete x y))
 
           (define/augment (after-set-next-settings s)
@@ -604,6 +622,18 @@
               (when tlw
                 (send tlw check-current-language-for-stepper)))
             (inner (void) after-set-next-settings s))
+          
+          (define metadata-changing-now? #f)
+          
+          ;; don't pay attention to changes that occur on metadata.
+          ;; this assumes that metadata changes cannot be nested.
+          (define/augment (begin-metadata-changes)
+            (set! metadata-changing-now? #t)
+            (inner (void) begin-metadata-changes))
+          
+          (define/augment (end-metadata-changes)
+            (set! metadata-changing-now? #f)
+            (inner (void) end-metadata-changes))
 
           (super-new)))
 

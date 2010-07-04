@@ -1,6 +1,6 @@
 
 (module modhelp mzscheme
-  (require (lib "string.ss"))
+  (require mzlib/string)
 
   (provide explode-relpath-string
            module-path-v?
@@ -18,16 +18,6 @@
          (not (regexp-match? #rx"/$" v))))
 
   (define (module-path-v? v)
-    (cond [(path? v) #t]
-          [(string? v) (module-path-v-string? v)]
-          [(pair? v)
-           (case (car v)
-             [(file) (and (pair? (cdr v))
-                          (path-string? (cadr v))
-                          (null? (cddr v)))]
-             [(lib) (and (pair? (cdr v))
-                         (list? (cdr v))
-                         (andmap module-path-v-string? (cdr v)))]
-             [(planet) #t]
-             [else #f])]
-          [else #f])))
+    (or (path? v)
+        (module-path? v))))
+

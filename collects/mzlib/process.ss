@@ -9,7 +9,7 @@
 	   system/exit-code
 	   system*/exit-code)
 
-  (require (lib "port.ss"))
+  (require mzlib/port)
 
   ;; Helpers: ----------------------------------------
 
@@ -62,7 +62,7 @@
 			       (lambda ()
 				 (with-handlers ([exn:break? void])
 				   (ready-for-break #t)
-				   (copy-port cin in)
+                                   (copy-port cin in)
 				   (ready-for-break #f)))
 			       (lambda () (close-output-port in)))
 			   (ready-for-break #t)))])

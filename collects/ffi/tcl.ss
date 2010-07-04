@@ -1,6 +1,6 @@
-(module tcl mzscheme
+#lang scheme/base
 
-(require (lib "foreign.ss")) (unsafe!)
+(require mzlib/foreign) (unsafe!)
 
 (define libtcl (ffi-lib "libtcl"))
 
@@ -47,5 +47,3 @@
 
 (define eval-tcl
   (get-ffi-obj "Tcl_Eval" libtcl (_fun _interp* (expr : _string) -> _tclret)))
-
-)

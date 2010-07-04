@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
 @title{Reading}
 
@@ -110,7 +110,7 @@ See @secref["readtables"] for an extended example that uses
 A parameter that controls parsing and printing of symbols. When this
 parameter's value is @scheme[#f], the reader case-folds symbols (e.g.,
 producing @scheme['hi] when the input is any one of \litchar{hi},
-\litchar{Hi}, \litchar{HI}, or \litchar{hI}). The parameter also
+@litchar{Hi}, @litchar{HI}, or @litchar{hI}). The parameter also
 affects the way that @scheme[write] prints symbols containing
 uppercase characters; if the parameter's value is @scheme[#f], then
 symbols are printed with uppercase characters quoted by a
@@ -197,6 +197,23 @@ a module-path datum following @litchar{#reader}. See
 A parameter whose value determines a readtable that
 adjusts the parsing of S-expression input, where @scheme[#f] implies the
 default behavior. See @secref["readtables"] for more information.}
+
+
+@defparam[read-on-demand-source path (and/c path? complete-path?)]{
+
+A parameter that enables lazy parsing of compiled code, so that
+closure bodies and syntax objects are extracted (and validated) from
+marshaled compiled code on demand. Normally, this parameter is set by
+the default @tech{load handler} when @scheme[load-on-demand-enabled]
+is @scheme[#t].
+
+Even when parsing is delayed, compiled code is loaded into memory. If
+the @as-index{@envvar{PLT_DELAY_FROM_ZO}} environment variable is set
+(to any value) on start up, however, even loading from disk is
+delayed. If the file at @tech{path} changes before the delayed code or
+syntax object is demanded, the read-on-demand most likely will
+encounter garbage, leading to an exception.}
+
 
 @defproc*[([(port-read-handler [in input-port?]) (case->
                                                   (input-port? . -> . any)

@@ -1,15 +1,15 @@
 
 (module setup-extension mzscheme
-  (require (lib "make.ss" "make")
-	   (lib "link.ss" "dynext")
-	   (lib "compile.ss" "dynext")
-	   (lib "file.ss" "dynext")
-	   (lib "file.ss")
-	   (lib "list.ss")
-	   (lib "etc.ss")
-	   (lib "launcher.ss" "launcher")
-	   (lib "xform.ss" "compiler")
-	   (lib "dirs.ss" "setup"))
+  (require make
+	   dynext/link
+	   dynext/compile
+	   dynext/file
+	   mzlib/file
+	   mzlib/list
+	   mzlib/etc
+	   launcher
+	   compiler/xform
+	   setup/dirs)
   
   (provide pre-install
 	   with-new-flags)
@@ -85,7 +85,8 @@
                                 "precompiled"
                                 "native")]
 	   [variant-dir (system-library-subpath (link-variant))]
-	   [base-file (extract-base-filename file.c)]
+	   [base-file (string-append (path-element->string (extract-base-filename file.c))
+				     "_ss")]
 	   [file.so (build-path pre-dir variant-dir (append-extension-suffix base-file))])
       (if (file-exists? file.so)
 	  ;; Just copy pre-compiled file:
@@ -175,7 +176,8 @@
 			     '("scheme.h" "schvers.h" "schemef.h" "sconfig.h" "stypes.h")))
 	
 	(define dir (build-path "compiled" "native" (system-library-subpath (link-variant))))
-	(define base-file (extract-base-filename file.c))
+	(define base-file (string-append (path-element->string (extract-base-filename file.c))
+					 "_ss"))
 	(define file.so (build-path dir (append-extension-suffix base-file)))
 	(define file.o (build-path dir (append-object-suffix base-file)))
         

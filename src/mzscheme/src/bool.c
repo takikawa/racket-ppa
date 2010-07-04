@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2007 PLT Scheme Inc.
+  Copyright (c) 2004-2008 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -49,8 +49,16 @@ static Scheme_Object *eq_prim (int argc, Scheme_Object *argv[]);
 static Scheme_Object *eqv_prim (int argc, Scheme_Object *argv[]);
 static Scheme_Object *equal_prim (int argc, Scheme_Object *argv[]);
 
-static int vector_equal (Scheme_Object *vec1, Scheme_Object *vec2);
-static int struct_equal (Scheme_Object *s1, Scheme_Object *s2);
+typedef struct Equal_Info {
+  long depth; /* always odd */
+  long car_depth; /* always odd */
+  Scheme_Hash_Table *ht;
+  Scheme_Object *recur;
+} Equal_Info;
+
+static int is_equal (Scheme_Object *obj1, Scheme_Object *obj2, Equal_Info *eql);
+static int vector_equal (Scheme_Object *vec1, Scheme_Object *vec2, Equal_Info *eql);
+static int struct_equal (Scheme_Object *s1, Scheme_Object *s2, Equal_Info *eql);
 
 void scheme_init_true_false(void)
 {
@@ -116,7 +124,14 @@ eqv_prim (int argc, Scheme_Object *argv[])
 static Scheme_Object *
 equal_prim (int argc, Scheme_Object *argv[])
 {
-  return (scheme_equal(argv[0], argv[1]) ? scheme_true : scheme_false);
+  Equal_Info eql;
+
+  eql.depth = 1;
+  eql.car_depth = 1;
+  eql.ht = NULL;
+  eql.recur = NULL;
+
+  return (is_equal(argv[0], argv[1], &eql) ? scheme_true : scheme_false);
 }
 
 int scheme_eq (Scheme_Object *obj1, Scheme_Object *obj2)
@@ -189,7 +204,7 @@ int scheme_eqv (Scheme_Object *obj1, Scheme_Object *obj2)
     return scheme_bignum_eq(obj1, obj2);
   else if (t1 == scheme_rational_type)
     return scheme_rational_eq(obj1, obj2);
-  else if ((t1 == scheme_complex_type) || (t1 == scheme_complex_izi_type)) {
+  else if (t1 == scheme_complex_type) {
     Scheme_Complex *c1 = (Scheme_Complex *)obj1;
     Scheme_Complex *c2 = (Scheme_Complex *)obj2;
     return scheme_eqv(c1->r, c2->r) && scheme_eqv(c1->i, c2->i);
@@ -199,33 +214,139 @@ int scheme_eqv (Scheme_Object *obj1, Scheme_Object *obj2)
     return 0;
 }
 
-static Scheme_Object *equal_k(void)
+int scheme_equal (Scheme_Object *obj1, Scheme_Object *obj2)
+{
+  Equal_Info eql;
+
+  eql.depth = 1;
+  eql.car_depth = 1;
+  eql.ht = NULL;
+  eql.recur = NULL;
+
+  return is_equal(obj1, obj2, &eql);
+}
+
+static Scheme_Object *union_find(Scheme_Object *obj1, Scheme_Hash_Table *ht)
+{
+  Scheme_Object *v, *prev = obj1, *prev_prev = obj1;
+
+  while (1) {
+    v = scheme_hash_get(ht, prev);
+    if (v) {
+      prev_prev = prev;
+      prev = v;
+    } else 
+      break;
+  }
+
+  /* Point all items to prev */
+  while (obj1 != prev_prev) {
+    v = scheme_hash_get(ht, obj1);
+    scheme_hash_set(ht, obj1, prev);
+    obj1 = v;
+  }
+
+  return prev;
+}
+
+static int union_check(Scheme_Object *obj1, Scheme_Object *obj2, Equal_Info *eql) 
+{
+  if (eql->depth < 50) {
+    eql->depth += 2;
+    return 0;
+  } else {
+    Scheme_Hash_Table *ht = eql->ht;
+    if (!ht) {
+      ht = scheme_make_hash_table(SCHEME_hash_ptr);
+      eql->ht = ht;
+    }
+    obj1 = union_find(obj1, ht);
+    obj2 = union_find(obj2, ht);
+
+    if (SAME_OBJ(obj1, obj2))
+      return 1;
+
+    scheme_hash_set(ht, obj2, obj1);
+
+    return 0;
+  }
+}
+
+static Scheme_Object *equal_k()
 {
   Scheme_Thread *p = scheme_current_thread;
   Scheme_Object *v1 = (Scheme_Object *)p->ku.k.p1;
   Scheme_Object *v2 = (Scheme_Object *)p->ku.k.p2;
+  Equal_Info *eql = (Equal_Info *)p->ku.k.p3;
 
-  p->ku.k.p1 = p->ku.k.p2 = NULL;
+  p->ku.k.p1 = NULL;
+  p->ku.k.p2 = NULL;
+  p->ku.k.p3 = NULL;
 
-  return scheme_equal(v1, v2) ? scheme_true : scheme_false;
+  return is_equal(v1, v2, eql) ? scheme_true : scheme_false;
+}
+
+static Scheme_Object *equal_recur(int argc, Scheme_Object **argv, Scheme_Object *prim)
+{
+  Equal_Info *eql = (Equal_Info *)SCHEME_PRIM_CLOSURE_ELS(prim)[0];
+
+  return (is_equal(argv[0], argv[1], eql)
+          ? scheme_true
+          : scheme_false);
+}
+
+static int is_equal_overflow(Scheme_Object *obj1, Scheme_Object *obj2, Equal_Info *eql)
+{
+  Scheme_Thread *p = scheme_current_thread;
+  Equal_Info *eql2;
+  Scheme_Object *v;
+
+  eql2 = (Equal_Info *)scheme_malloc(sizeof(Equal_Info));
+  memcpy(eql2, eql, sizeof(Equal_Info));
+
+  p->ku.k.p1 = (void *)obj1;
+  p->ku.k.p2 = (void *)obj2;
+  p->ku.k.p3 = (void *)eql2;
+
+  v = scheme_handle_stack_overflow(equal_k);
+
+  memcpy(eql, eql2, sizeof(Equal_Info));
+  
+  return SCHEME_TRUEP(v);
 }
 
 /* Number of lists/vectors/structs/boxes to compare before
    paying for a stack check. */
 #define EQUAL_COUNT_START 20
 
-int scheme_equal (Scheme_Object *obj1, Scheme_Object *obj2)
+int is_equal (Scheme_Object *obj1, Scheme_Object *obj2, Equal_Info *eql)
 {
   static int equal_counter = EQUAL_COUNT_START;
 
  top:
-  if (scheme_eqv (obj1, obj2))
+  if (scheme_eqv(obj1, obj2))
     return 1;
-  else if (NOT_SAME_TYPE(SCHEME_TYPE(obj1), SCHEME_TYPE(obj2)))
+  else if (NOT_SAME_TYPE(SCHEME_TYPE(obj1), SCHEME_TYPE(obj2))) {
     return 0;
-  else if (SCHEME_PAIRP(obj1)) {
+  } else if (SCHEME_PAIRP(obj1)) {
 #   include "mzeqchk.inc"
-    if (scheme_equal(SCHEME_CAR(obj1), SCHEME_CAR(obj2))) {
+    if ((eql->car_depth > 2) || !scheme_is_list(obj1)) {
+      if (union_check(obj1, obj2, eql))
+        return 1;
+    }
+    eql->car_depth += 2;
+    if (is_equal(SCHEME_CAR(obj1), SCHEME_CAR(obj2), eql)) {
+      eql->car_depth -= 2;
+      obj1 = SCHEME_CDR(obj1);
+      obj2 = SCHEME_CDR(obj2);
+      goto top;
+    } else
+      return 0;
+  } else if (SCHEME_MUTABLE_PAIRP(obj1)) {
+#   include "mzeqchk.inc"
+    if (union_check(obj1, obj2, eql))
+      return 1;
+    if (is_equal(SCHEME_CAR(obj1), SCHEME_CAR(obj2), eql)) {
       obj1 = SCHEME_CDR(obj1);
       obj2 = SCHEME_CDR(obj2);
       goto top;
@@ -233,7 +354,9 @@ int scheme_equal (Scheme_Object *obj1, Scheme_Object *obj2)
       return 0;
   } else if (SCHEME_VECTORP(obj1)) {
 #   include "mzeqchk.inc"
-    return vector_equal(obj1, obj2);
+    if (union_check(obj1, obj2, eql))
+      return 1;
+    return vector_equal(obj1, obj2, eql);
   } else if (SCHEME_BYTE_STRINGP(obj1)
 	     || SCHEME_GENERAL_PATHP(obj1)) {
     int l1, l2;
@@ -248,41 +371,111 @@ int scheme_equal (Scheme_Object *obj1, Scheme_Object *obj2)
     return ((l1 == l2)
 	    && !memcmp(SCHEME_CHAR_STR_VAL(obj1), SCHEME_CHAR_STR_VAL(obj2), l1 * sizeof(mzchar)));
   } else if (SCHEME_STRUCTP(obj1)) {
-    if (SCHEME_STRUCT_TYPE(obj1) != SCHEME_STRUCT_TYPE(obj2))
+    Scheme_Struct_Type *st1, *st2;
+    Scheme_Object *procs1, *procs2;
+
+    st1 = SCHEME_STRUCT_TYPE(obj1);
+    st2 = SCHEME_STRUCT_TYPE(obj2);
+
+    procs1 = scheme_struct_type_property_ref(scheme_equal_property, (Scheme_Object *)st1);
+    if (procs1 && (st1 != st2)) {
+      procs2 = scheme_struct_type_property_ref(scheme_equal_property, (Scheme_Object *)st2);
+      if (!procs2
+          || !SAME_OBJ(SCHEME_VEC_ELS(procs1)[0], SCHEME_VEC_ELS(procs2)[0]))
+        procs1 = NULL;
+    }
+
+    if (procs1) {
+      /* Has an equality property: */
+      Scheme_Object *a[3], *recur;
+      Equal_Info *eql2;
+#     include "mzeqchk.inc"
+
+      if (union_check(obj1, obj2, eql))
+        return 1;
+
+      /* Create/cache closure to use for recursive equality checks: */
+      if (eql->recur) {
+        recur = eql->recur;
+        eql2 = (Equal_Info *)SCHEME_PRIM_CLOSURE_ELS(recur)[0];
+      } else {
+        eql2 = (Equal_Info *)scheme_malloc(sizeof(Equal_Info));
+        a[0] = (Scheme_Object *)eql2;
+        recur = scheme_make_prim_closure_w_arity(equal_recur,
+                                                 1, a,
+                                                 "equal?/recur",
+                                                 2, 2);
+        eql->recur = recur;
+      }
+      memcpy(eql2, eql, sizeof(Equal_Info));
+
+      a[0] = obj1;
+      a[1] = obj2;
+      a[2] = recur;
+
+      procs1 = SCHEME_VEC_ELS(procs1)[1];
+
+      recur = _scheme_apply(procs1, 3, a);
+
+      memcpy(eql, eql2, sizeof(Equal_Info));
+
+      return SCHEME_TRUEP(recur);
+    } else if (st1 != st2) {
       return 0;
-    else {
+    } else {
+      /* Same types, but doesn't have an equality property, 
+         so check transparency: */
       Scheme_Object *insp;
       insp = scheme_get_param(scheme_current_config(), MZCONFIG_INSPECTOR);
       if (scheme_inspector_sees_part(obj1, insp, -2)
 	  && scheme_inspector_sees_part(obj2, insp, -2)) {
 #       include "mzeqchk.inc"
-	return struct_equal(obj1, obj2);
+        if (union_check(obj1, obj2, eql))
+          return 1;
+	return struct_equal(obj1, obj2, eql);
       } else
 	return 0;
     }
   } else if (SCHEME_BOXP(obj1)) {
     SCHEME_USE_FUEL(1);
+    if (union_check(obj1, obj2, eql))
+      return 1;
     obj1 = SCHEME_BOX_VAL(obj1);
     obj2 = SCHEME_BOX_VAL(obj2);
     goto top;
   } else if (SCHEME_HASHTP(obj1)) {
 #   include "mzeqchk.inc"
-    return scheme_hash_table_equal((Scheme_Hash_Table *)obj1, (Scheme_Hash_Table *)obj2);
+    if (union_check(obj1, obj2, eql))
+      return 1;
+    return scheme_hash_table_equal_rec((Scheme_Hash_Table *)obj1, (Scheme_Hash_Table *)obj2, eql);
+  } else if (SCHEME_HASHTRP(obj1)) {
+#   include "mzeqchk.inc"
+    if (union_check(obj1, obj2, eql))
+      return 1;
+    return scheme_hash_tree_equal_rec((Scheme_Hash_Tree *)obj1, (Scheme_Hash_Tree *)obj2, eql);
   } else if (SCHEME_BUCKTP(obj1)) {
 #   include "mzeqchk.inc"
-    return scheme_bucket_table_equal((Scheme_Bucket_Table *)obj1, (Scheme_Bucket_Table *)obj2);
+    if (union_check(obj1, obj2, eql))
+      return 1;
+    return scheme_bucket_table_equal_rec((Scheme_Bucket_Table *)obj1, (Scheme_Bucket_Table *)obj2, eql);
   } else if (SAME_TYPE(SCHEME_TYPE(obj1), scheme_wrap_chunk_type)) {
-    return vector_equal(obj1, obj2);
+    return vector_equal(obj1, obj2, eql);
+  } else if (SAME_TYPE(SCHEME_TYPE(obj1), scheme_resolved_module_path_type)) {
+    obj1 = SCHEME_PTR_VAL(obj1);
+    obj2 = SCHEME_PTR_VAL(obj2);
+    goto top;
   } else {
-    Scheme_Equal_Proc eql = scheme_type_equals[SCHEME_TYPE(obj1)];
-    if (eql)
-      return eql(obj1, obj2);
-    else
+    Scheme_Equal_Proc eqlp = scheme_type_equals[SCHEME_TYPE(obj1)];
+    if (eqlp) {
+      if (union_check(obj1, obj2, eql))
+        return 1;
+      return eqlp(obj1, obj2, eql);
+    } else
       return 0;
   }
 }
 
-static int vector_equal(Scheme_Object *vec1, Scheme_Object *vec2)
+static int vector_equal(Scheme_Object *vec1, Scheme_Object *vec2, Equal_Info *eql)
 {
   int i, len;
 
@@ -293,14 +486,14 @@ static int vector_equal(Scheme_Object *vec1, Scheme_Object *vec2)
   SCHEME_USE_FUEL(len);
 
   for (i = 0; i < len; i++) {
-    if (!scheme_equal(SCHEME_VEC_ELS(vec1)[i], SCHEME_VEC_ELS(vec2)[i]))
+    if (!is_equal(SCHEME_VEC_ELS(vec1)[i], SCHEME_VEC_ELS(vec2)[i], eql))
       return 0;
   }
 
   return 1;
 }
 
-int struct_equal(Scheme_Object *obj1, Scheme_Object *obj2)
+int struct_equal(Scheme_Object *obj1, Scheme_Object *obj2, Equal_Info *eql)
 {
   Scheme_Structure *s1, *s2;
   int i;
@@ -309,11 +502,16 @@ int struct_equal(Scheme_Object *obj1, Scheme_Object *obj2)
   s2 = (Scheme_Structure *)obj2;
 
   for (i = SCHEME_STRUCT_NUM_SLOTS(s1); i--; ) {
-    if (!scheme_equal(s1->slots[i], s2->slots[i]))
+    if (!is_equal(s1->slots[i], s2->slots[i], eql))
       return 0;
   }
 
   return 1;
+}
+
+int scheme_recur_equal(Scheme_Object *obj1, Scheme_Object *obj2, void *cycle_info)
+{
+  return is_equal(obj1, obj2, (Equal_Info *)cycle_info);
 }
 
 /* used by external programs that cannot link to variables */

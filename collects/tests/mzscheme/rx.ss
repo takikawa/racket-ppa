@@ -795,6 +795,8 @@
        (#"[\1]" #"\1" (#"\1"))
        (#"\\10()()()()()()()()()()" #"a" #f)
        (#"a(?<=)b" #"ab" (#"ab")) ;; << added "=" to pattern
+       (#"(?<=qq)b*" #"aqbbbqqbb" (#"bb")) ;; << added
+       (#"(?<=q?q)b*" #"aqbbbqqbb" (#"bbb")) ;; << added
        (#"()" #"a" (#"" #""))
        #"[\\x]"
        #"[\\x]"
@@ -871,6 +873,8 @@
        #"{}"
        #"{}"
        (#"|" #"x" (#""))
+       (#"|x" #"x" (#""))
+       (#"x|" #"x" (#"x"))
        (#"\0000" #"\0000" (#"\0\x30"))
        (#"a(?<=)b" #"ab" (#"ab"))
        (#"a(?i:b)" #"ab" (#"ab"))
@@ -1578,67 +1582,67 @@
 
 (let ([just-once? #t]
       [kcrl (make-known-char-range-list)]
-      [ht (make-hash-table)]
+      [ht (make-hasheq)]
       [bformat (lambda (s v)
 		 (string->bytes/latin-1 (format s v)))])
   (for-each (lambda (str)
-	      (hash-table-put! ht 
-			       (string->symbol (string-downcase str))
-			       (vector
-				(byte-pregexp (bformat "\\p{~a}" str))
-				(pregexp (format "\\p{~a}" str))
-				(byte-pregexp (bformat "\\p{~a}*" str))
-				(pregexp (format "\\p{~a}*" str))
-				(byte-pregexp (bformat "\\P{~a}" str))
-				(pregexp (format "\\P{~a}" str))
-				(byte-pregexp (bformat "\\P{~a}*" str))
-				(pregexp (format "\\P{~a}*" str)))))
+	      (hash-set! ht 
+                         (string->symbol (string-downcase str))
+                         (vector
+                          (byte-pregexp (bformat "\\p{~a}" str))
+                          (pregexp (format "\\p{~a}" str))
+                          (byte-pregexp (bformat "\\p{~a}*" str))
+                          (pregexp (format "\\p{~a}*" str))
+                          (byte-pregexp (bformat "\\P{~a}" str))
+                          (pregexp (format "\\P{~a}" str))
+                          (byte-pregexp (bformat "\\P{~a}*" str))
+                          (pregexp (format "\\P{~a}*" str)))))
 	    '("Cn" "Cc" "Cf" "Cs" "Co" "Ll" "Lu" "Lt" "Lm" "Lo" "Nd" "Nl" "No"
 	      "Ps" "Pe" "Pi" "Pf" "Pc" "Pd" "Po" "Mn" "Mc" "Me" "Sc" "Sk" "Sm" "So" "Zl" "Zp" "Zs"))
-  (hash-table-for-each ht
-		       (lambda (k v)
-			 (let ([bad1 #"\377\377"]
-			       [bad2 (regexp-replace #rx#".$" 
-						     (string->bytes/utf-8 "\U10FFF1")
-						     #"\377")]
-			       [bad3 (regexp-replace #rx#".$" 
-						     (string->bytes/utf-8 "\u1234")
-						     #"")])
-			   (test #f regexp-match (vector-ref v 0) bad1)
-			   (test #f regexp-match (vector-ref v 0) bad2)
-			   (test #f regexp-match (vector-ref v 0) bad3)
-			   (test #f regexp-match (vector-ref v 1) bad1)
-			   (test #f regexp-match (vector-ref v 1) bad2)
-			   (test #f regexp-match (vector-ref v 1) bad3)
-			   (test #f regexp-match (vector-ref v 4) bad1)
-			   (test #f regexp-match (vector-ref v 4) bad2)
-			   (test #f regexp-match (vector-ref v 4) bad3)
-			   (test #f regexp-match (vector-ref v 5) bad1)
-			   (test #f regexp-match (vector-ref v 5) bad2)
-			   (test #f regexp-match (vector-ref v 5) bad3)
-			   (let ([other (ormap (lambda (e)
-						 (and (not (eq? k (char-general-category
-								   (integer->char (car e)))))
-						      (integer->char (car e))))
-					       kcrl)])
-			     (let* ([s (string other)]
-				    [bs (string->bytes/utf-8 s)]
-				    [s* (string-append s s s)]
-				    [bs* (bytes-append bs bs bs)])
-			       (test #f regexp-match (vector-ref v 0) bs)
-			       (test #f regexp-match (vector-ref v 1) s)
-			       (test '(#"") regexp-match (vector-ref v 2) bs)
-			       (test '("") regexp-match (vector-ref v 3) s)
-			       (test (list bs) regexp-match (vector-ref v 4) bs)
-			       (test (list s) regexp-match (vector-ref v 5) s)
-			       (test (list bs*) regexp-match (vector-ref v 6) bs*)
-			       (test (list s*) regexp-match (vector-ref v 7) s*))))))
+  (hash-for-each ht
+                 (lambda (k v)
+                   (let ([bad1 #"\377\377"]
+                         [bad2 (regexp-replace #rx#".$" 
+                                               (string->bytes/utf-8 "\U10FFF1")
+                                               #"\377")]
+                         [bad3 (regexp-replace #rx#".$" 
+                                               (string->bytes/utf-8 "\u1234")
+                                               #"")])
+                     (test #f regexp-match (vector-ref v 0) bad1)
+                     (test #f regexp-match (vector-ref v 0) bad2)
+                     (test #f regexp-match (vector-ref v 0) bad3)
+                     (test #f regexp-match (vector-ref v 1) bad1)
+                     (test #f regexp-match (vector-ref v 1) bad2)
+                     (test #f regexp-match (vector-ref v 1) bad3)
+                     (test #f regexp-match (vector-ref v 4) bad1)
+                     (test #f regexp-match (vector-ref v 4) bad2)
+                     (test #f regexp-match (vector-ref v 4) bad3)
+                     (test #f regexp-match (vector-ref v 5) bad1)
+                     (test #f regexp-match (vector-ref v 5) bad2)
+                     (test #f regexp-match (vector-ref v 5) bad3)
+                     (let ([other (ormap (lambda (e)
+                                           (and (not (eq? k (char-general-category
+                                                             (integer->char (car e)))))
+                                                (integer->char (car e))))
+                                         kcrl)])
+                       (let* ([s (string other)]
+                              [bs (string->bytes/utf-8 s)]
+                              [s* (string-append s s s)]
+                              [bs* (bytes-append bs bs bs)])
+                         (test #f regexp-match (vector-ref v 0) bs)
+                         (test #f regexp-match (vector-ref v 1) s)
+                         (test '(#"") regexp-match (vector-ref v 2) bs)
+                         (test '("") regexp-match (vector-ref v 3) s)
+                         (test (list bs) regexp-match (vector-ref v 4) bs)
+                         (test (list s) regexp-match (vector-ref v 5) s)
+                         (test (list bs*) regexp-match (vector-ref v 6) bs*)
+                         (test (list s*) regexp-match (vector-ref v 7) s*))))))
   (let ([try (lambda (n)
 	       (let* ([cat (char-general-category (integer->char n))]
-		      [v (hash-table-get ht cat #f)])
+		      [v (hash-ref ht cat #f)])
 		 (when v
 		   (when just-once?
-		     (hash-table-remove! ht cat))
+		     (hash-remove! ht cat))
 		   (let* ([s (string (integer->char n))]
 			  [bs (string->bytes/utf-8 s)]
 			  [bs* (string->bytes/utf-8 (string-append s s s s s))]
@@ -1659,6 +1663,14 @@
 		    (unless (= n end)
 		      (loop (if uniform? end (+ n 1)))))))
 	      kcrl)))
+
+
+(test '(#" ") regexp-match #px#"\t|\\p{Zs}" " ")
+(test '(" ") regexp-match #px"\t|\\p{Zs}" " ")
+(test '(#"\t") regexp-match #px#"\t|\\p{Zs}" "\t")
+(test '("\t") regexp-match #px"\t|\\p{Zs}" "\t")
+(test #f regexp-match #px#"\t|\\p{Zs}" "a")
+(test #f regexp-match #px"\t|\\p{Zs}" "a")
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

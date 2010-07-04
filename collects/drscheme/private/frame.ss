@@ -1,21 +1,18 @@
 
-(module frame (lib "a-unit.ss")
-  (require (lib "name-message.ss" "mrlib")
-           (lib "string-constant.ss" "string-constants")
-           (lib "unit.ss")
-           (lib "match.ss")
-           (lib "class.ss")
-           (lib "string.ss")
-           (lib "list.ss")
+#lang scheme/unit
+  (require string-constants
+           mzlib/match
+           mzlib/class
+           mzlib/string
+           mzlib/list
            "drsig.ss"
-           (lib "mred.ss" "mred")
-           (lib "framework.ss" "framework")
-           (lib "url.ss" "net")
-           (lib "head.ss" "net")
+           mred
+           framework
+           net/url
+           net/head
            (lib "plt-installer.ss" "setup")
            (lib "bug-report.ss" "help")
-           (prefix mzlib:file: (lib "file.ss")) (lib "file.ss")
-           (prefix mzlib:list: (lib "list.ss")))
+           scheme/file)
   
   (import [prefix drscheme:unit: drscheme:unit^]
           [prefix drscheme:app: drscheme:app^]
@@ -33,7 +30,7 @@
     (mixin (frame:standard-menus<%>) (basics<%>)
       (inherit get-edit-target-window get-edit-target-object get-menu-bar)
       (define/private (get-menu-bindings)
-        (let ([name-ht (make-hash-table)])
+        (let ([name-ht (make-hasheq)])
           (let loop ([menu-container (get-menu-bar)])
             (for-each
              (λ (item)
@@ -50,7 +47,7 @@
                                  [(#\:) "colon"]
                                  [(#\space) "space"]
                                  [else (string short-cut)]))))])
-                       (hash-table-put! name-ht keyname (send item get-plain-label))))))
+                       (hash-set! name-ht keyname (send item get-plain-label))))))
                (when (is-a? item menu-item-container<%>)
                  (loop item)))
              (send menu-container get-items)))
@@ -72,12 +69,12 @@
                                              (string-downcase this-amp)])))]
                                      [else #f]))])
                             (when amp-key
-                              (hash-table-put! name-ht 
-                                               (format "m:~a" amp-key)
-                                               (format "~a menu" (send top-level-menu get-plain-label)))
-                              (hash-table-put! name-ht 
-                                               (format "m:s:~a" amp-key)
-                                               (format "~a menu" (send top-level-menu get-plain-label)))))))
+                              (hash-set! name-ht 
+                                         (format "m:~a" amp-key)
+                                         (format "~a menu" (send top-level-menu get-plain-label)))
+                              (hash-set! name-ht 
+                                         (format "m:s:~a" amp-key)
+                                         (format "~a menu" (send top-level-menu get-plain-label)))))))
                       (send (get-menu-bar) get-items)))
           name-ht))
       
@@ -98,10 +95,10 @@
       
       [define/private copy-hash-table
         (λ (ht)
-          (let ([res (make-hash-table)])
-            (hash-table-for-each
+          (let ([res (make-hasheq)])
+            (hash-for-each
              ht
-             (λ (x y) (hash-table-put! res x y)))
+             (λ (x y) (hash-set! res x y)))
             res))]
       [define/private can-show-keybindings?
         (λ ()
@@ -117,13 +114,13 @@
                    [keymap (send edit-object get-keymap)]
                    [menu-names (get-menu-bindings)]
                    [table (send keymap get-map-function-table)]
-                   [bindings (hash-table-map table list)]
+                   [bindings (hash-map table list)]
                    [w/menus 
-                    (append (hash-table-map menu-names list)
+                    (append (hash-map menu-names list)
                             (filter (λ (binding) (not (bound-by-menu? binding menu-names)))
                                     bindings))]
                    [structured-list
-                    (mzlib:list:sort
+                    (sort
                      w/menus
                      (λ (x y) (string-ci<=? (cadr x) (cadr y))))])
               (show-keybindings-to-user structured-list this))
@@ -131,17 +128,11 @@
       
       (define/private (bound-by-menu? binding menu-table)
         (ormap (λ (constituent)
-                 (hash-table-get menu-table (string->symbol constituent) (λ () #f)))
+                 (hash-ref menu-table (string->symbol constituent) (λ () #f)))
                (regexp-split #rx";" (symbol->string (car binding)))))
       
       (define/override (help-menu:before-about help-menu)
-        (make-help-desk-menu-item help-menu)
-        '(make-object menu-item%
-           (format (string-constant welcome-to-something)
-                   (string-constant drscheme))
-           help-menu
-           (λ (item evt)
-             (drscheme:app:invite-tour))))
+        (make-help-desk-menu-item help-menu))
       
       (define/override (help-menu:about-callback item evt) (drscheme:app:about-drscheme))
       (define/override (help-menu:about-string) (string-constant about-drscheme))
@@ -161,7 +152,6 @@
         
         (drscheme:app:add-language-items-to-help-menu menu))
       
-      (define/override (file-menu:open-callback item evt) (handler:open-file))
       (define/override (file-menu:new-string) (string-constant new-menu-item))
       (define/override (file-menu:open-string) (string-constant open-menu-item))
       
@@ -440,7 +430,7 @@
                                (unless (eof-object? s) 
                                  (display s) 
                                  (loop (+ total (string-length s))))))))
-                       'binary 'truncate))
+                       #:mode 'binary #:exists 'truncate))
                    (send d show #f)))]) 
         (send d center) 
         (make-object button% (string-constant &stop)
@@ -477,18 +467,36 @@
                   (height (cdr (preferences:get 'drscheme:keybindings-window-size)))
                   (style '(resize-border)))]
              [bp (make-object horizontal-panel% f)]
+             [search-field (new text-field% 
+                                [parent f]
+                                [label (string-constant mfs-search-string)]
+                                [callback (λ (a b) (update-bindings))])]
              [b-name (make-object button% (string-constant keybindings-sort-by-name)
-                       bp (λ x (update-bindings #f)))]
+                       bp (λ x 
+                            (set! by-key? #f)
+                            (update-bindings)))]
              [b-key (make-object button% (string-constant keybindings-sort-by-key)
-                      bp (λ x (update-bindings #t)))]
+                      bp (λ x 
+                           (set! by-key? #t)
+                           (update-bindings)))]
              [lb
               (make-object list-box% #f null f void)]
              [bp2 (make-object horizontal-panel% f)]
              [cancel (make-object button% (string-constant close)
                        bp2 (λ x (send f show #f)))]
              [space (make-object grow-box-spacer-pane% bp2)]
+             [filter-search
+              (λ (bindings)
+                (let ([str (send search-field get-value)])
+                  (if (equal? str "")
+                      bindings
+                      (let ([reg (regexp (regexp-quote str #f))])
+                        (filter (λ (x) (or (regexp-match reg (cadr x))
+                                           (regexp-match reg (format "~a" (car x)))))
+                                bindings)))))]
+             [by-key? #f]
              [update-bindings
-              (λ (by-key?)
+              (λ ()
                 (let ([format-binding/name
                        (λ (b) (format "~a (~a)" (cadr b) (car b)))]
                       [format-binding/key
@@ -500,13 +508,14 @@
                        (λ (a b) (string-ci<=? (cadr a) (cadr b)))])
                   (send lb set
                         (if by-key?
-                            (map format-binding/key (mzlib:list:sort bindings predicate/key))
-                            (map format-binding/name (mzlib:list:sort bindings predicate/name))))))])
+                            (map format-binding/key (sort (filter-search bindings) predicate/key))
+                            (map format-binding/name (sort (filter-search bindings) predicate/name))))))])
+      (send search-field focus)
       (send bp stretchable-height #f)
       (send bp set-alignment 'center 'center)
       (send bp2 stretchable-height #f)
       (send bp2 set-alignment 'right 'center)
-      (update-bindings #f)
+      (update-bindings)
       (send f show #t)))
   
   (define <%>
@@ -584,6 +593,3 @@
       (λ (item evt)
         (help:help-desk)
         #t)))
-  
-  
-  )

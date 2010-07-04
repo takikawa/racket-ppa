@@ -1,11 +1,12 @@
 
 (module frp-core mzscheme
-  (require (lib "etc.ss")
-           (lib "list.ss")
-           (lib "match.ss")
+  (require mzlib/etc
+           mzlib/list
+           mzlib/match
            "erl.ss"
            "heap.ss")
   
+  (require-for-syntax (lib "struct-info.ss" "scheme"))
  
   
   
@@ -13,6 +14,11 @@
   ;;;;;;;;;;;;;
   ;; Globals ;;
   ;;;;;;;;;;;;;
+
+  ;; the current logical time step
+  (define logical-time (box 0))
+  (define (current-logical-time)
+    (unbox logical-time))
   
   (define frtime-inspector (make-inspector))
   (print-struct #t)
@@ -20,9 +26,7 @@
   (define snap? (make-parameter #f))
   
   (define named-dependents (make-hash-table))
-  
-  (define frtime-version "0.4b -- Tue Jun 26 17:39:45 2007")
-  
+    
   (define (compose-continuation-mark-sets2 s1 s2)
     s2)
   
@@ -88,25 +92,25 @@
                                     'depth 'continuation-marks 'parameterization
                                     'producers)]
           [cert (syntax-local-certifier #t)])
-      (list-immutable
-       (cert #'struct:signal)
-       (cert #'make-signal)
-       (cert #'signal?)
-       (apply list-immutable
-              (map
-               (lambda (fd)
-                 (cert (datum->syntax-object
-                        #'here
-                        (string->symbol (format "signal-~a" fd)))))
-               (reverse field-name-symbols)))
-       (apply list-immutable
-              (map
-               (lambda (fd)
-                 (cert (datum->syntax-object
-                        #'here
-                        (string->symbol (format "set-signal-~a!" fd)))))
-               (reverse field-name-symbols)))
-       #t)))
+      (make-struct-info
+       (lambda ()
+         (list
+          (cert #'struct:signal)
+          (cert #'make-signal)
+          (cert #'signal?)
+          (map
+           (lambda (fd)
+             (cert (datum->syntax-object
+                    #'here
+                    (string->symbol (format "signal-~a" fd)))))
+           (reverse field-name-symbols))
+          (map
+           (lambda (fd)
+             (cert (datum->syntax-object
+                    #'here
+                    (string->symbol (format "set-signal-~a!" fd)))))
+           (reverse field-name-symbols))
+          #t)))))
   
   (define (signal-custodian sig)
     (call-with-parameterization
@@ -125,14 +129,10 @@
   
   (define-struct multiple (values) frtime-inspector)
   
-  (define-struct event-cons (head tail))
-  (define econs make-event-cons)
-  (define efirst event-cons-head)
-  (define erest event-cons-tail)
-  (define econs? event-cons?)
-  (define set-efirst! set-event-cons-head!)
-  (define set-erest! set-event-cons-tail!)
-  
+  (define-struct event-set (time events))
+  (define (make-events-now events)
+    (make-event-set (current-logical-time) events))
+    
   (define-struct (signal:unchanged signal) () frtime-inspector)
   (define-struct (signal:compound signal:unchanged) (content copy) frtime-inspector)
   (define-struct (signal:switching signal:unchanged) (current trigger) frtime-inspector)
@@ -164,21 +164,25 @@
     (event-producer2
      (lambda (emit)
        (lambda the-args
-         (when (cons? the-args)
-           (emit (first the-args)))))))
+         (if (cons? the-args)
+             (emit (first the-args))
+             (make-events-now empty))))))
   
   (define (event-producer2 proc . deps)
-    (let* ([out (econs undefined undefined)]
+    (let* ([result (apply proc->signal (lambda args (make-events-now empty)) deps)]
            [proc/emit (proc
                        (lambda (val)
-                         (set-erest! out (econs val undefined))
-                         (set! out (erest out))
-                         val))])
-      (apply proc->signal (lambda the-args (apply proc/emit the-args) out) deps)))
+                         (let ([old-value (signal-value result)])
+                           (make-events-now
+                            (if (and (event-set? old-value)
+                                     (= (current-logical-time) (event-set-time old-value)))
+                                (append (event-set-events old-value) (list val))
+                                (list val))))))])
+      (set-signal-thunk! result proc/emit)
+      result))
   
   (define (build-signal ctor thunk producers)
     (let ([ccm (effective-continuation-marks)])
-      ;(printf "*")
       (do-in-manager
        (let* ([cust (current-cust)]
               [cust-sig (and cust (ft-cust-signal cust))]
@@ -191,7 +195,6 @@
                                    [extra-cont-marks ccm])
                       (current-parameterization))
                     (if cust-sig (append producers (list cust-sig)) producers))])
-         ;(printf "~a custodians~n" (length custs))
          (when (cons? producers)
            (register sig producers))
          (when cust-sig
@@ -217,7 +220,6 @@
                     (if cust-sig (cons cust-sig producers) producers)
                     current-box
                     trigger)])
-         ;(printf "~a custodians~n" (length custs))
          (when (cons? producers)
            (register sig producers))
          (when cust-sig
@@ -228,7 +230,7 @@
          (iq-enqueue sig)
          sig))))
     
-  (define ht (make-hash-table 'weak))
+  (define ht (make-hash-table))
   
   (define (proc->signal thunk . producers)
     (build-signal make-signal thunk producers))
@@ -240,61 +242,6 @@
      
   (define (proc->signal:unchanged thunk . producers)
     (build-signal make-signal:unchanged thunk producers))
-  
-  ;; mutate! : compound num -> (any -> ())
-  (define (procs->signal:compound ctor mutate! . args)
-    (let ([ccm (effective-continuation-marks)])
-      (do-in-manager
-       (let* ([cust (current-cust)]
-              [cust-sig (and cust (ft-cust-signal cust))]
-              [value (apply ctor (map value-now/no-copy args))]
-              #;[mutators
-                 (foldl
-                  (lambda (arg idx acc)
-                    (if (signal? arg) ; behavior?
-                        (cons (proc->signal
-                               (let ([m (mutate! value idx)])
-                                 (lambda ()
-                                   (let ([v (value-now/no-copy arg)])
-                                     (m v)
-                                     'struct-mutator)))
-                               arg) acc)
-                        acc))
-                  empty args (build-list (length args) identity))]
-                [sig (make-signal:compound
-                      undefined
-                      empty
-                      #f
-                      (lambda () ;mutators
-                        (let loop ([i 0] [args args] [val value])
-                          (if (cons? args)
-                              (let ([fd (value-now/no-copy (car args))])
-                                ((mutate! value i) fd)
-                                (loop (add1 i) (cdr args)
-                                      (if (undefined? fd)
-                                          undefined
-                                          val)))
-                              val)))
-                      (add1 (apply max 0 (cons (safe-signal-depth cust-sig) (map safe-signal-depth args))))
-                      ccm
-                      (parameterize ([uncaught-exception-handler
-                                      (lambda (exn) (exn-handler exn))]
-                                     [extra-cont-marks ccm])
-                        (current-parameterization))
-                      (if cust-sig (cons cust-sig args) args)
-                      (apply ctor args)
-                      (lambda () (apply ctor (map value-now args))))])
-         ;(printf "mutators = ~a~n" mutators)
-         (when (cons? args)
-           (register sig args))
-         (when cust-sig
-           (register (make-non-scheduled sig) cust-sig))
-         (when cust
-           (set-ft-cust-constructed-sigs! cust (cons (make-weak-box sig) (ft-cust-constructed-sigs cust))))
-         (iq-enqueue sig)
-         ;(printf "~n*made a compound [~a]*~n~n" (value-now/no-copy sig))
-         sig))))
-  
   
   
   
@@ -323,7 +270,9 @@
 
   ; set-cell! : cell[a] a -> void
   (define (set-cell! ref beh)
-    (! man (make-external-event (list (list ((signal-thunk ref) #t) beh)))))
+    (if (man?)
+        (iq-enqueue (list ((signal-thunk ref) #t) beh))
+        (! man (make-external-event (list (list ((signal-thunk ref) #t) beh))))))
   
   
   (define-values (undefined undefined?)
@@ -335,7 +284,7 @@
   
   
   (define (behavior? v)
-    (and (signal? v) (not (event-cons? (signal-value v)))))
+    (and (signal? v) (not (event-set? (signal-value v)))))
   
   (define (undef b)
     (match b
@@ -382,29 +331,8 @@
     (do-in-manager-after
      (apply values (map value-now sigs))))
   
-  #;(define-syntax value-now/sync
-      (syntax-rules ()
-        [(_ beh ...)
-         (begin
-           (! man (list 'run-thunk/stabalized (self) (lambda () (list (value-now beh) ...))))
-           (receive [('val v) v]
-                    [('exn e) (raise e)]))]))
-  
-  
-  
-  (define (extract k evs)
-    (if (cons? evs)
-        (let ([ev (first evs)])
-          (if (or (eq? ev undefined) (undefined? (erest ev)))
-              (extract k (rest evs))
-              (begin
-                (let ([val (efirst (erest ev))])
-                  (set-first! evs (erest ev))
-                  (k val)))))))
-  
   
   (define (kill-signal sig)
-    ;(printf "killing~n")
     (for-each
      (lambda (prod)
        (unregister sig prod))
@@ -412,17 +340,7 @@
     (set-signal-thunk! sig (lambda _ 'really-dead))
     (set-signal-value! sig 'dead)
     (set-signal-dependents! sig empty)
-    (set-signal-producers! sig empty)
-    #;(for-each
-     (lambda (c)
-       (set-ft-cust-constructed-sigs!
-        c
-        (filter (lambda (wbox)
-                   (cond
-                     [(weak-box-value wbox) => (lambda (v) (not (eq? sig v)))]
-                     [else (begin #;(printf "empty weak box~n") #f)]))
-                (ft-cust-constructed-sigs c))))
-     (signal-custodians sig)))
+    (set-signal-producers! sig empty))
   
   
   
@@ -432,49 +350,7 @@
   ;; Dataflow Graph Maintenance ;;
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   
-  
-  (define (fix-streams streams args)
-    (if (empty? streams)
-        empty
-        (cons
-         (if (undefined? (first streams))
-             (let ([stream (signal-value (first args))])
-               stream
-               #;(if (undefined? stream)
-                     stream
-                     (if (equal? stream (econs undefined undefined))
-                         stream
-                         (econs undefined stream))))
-             (first streams))
-         (fix-streams (rest streams) (rest args)))))
-  
-  (define (event-forwarder sym evt f+l)
-    (let ([proc (lambda (emit)
-                  (lambda (the-event)
-                    (for-each (lambda (tid) 
-                                (! tid (list 'remote-evt sym the-event))) (rest f+l))))]
-          
-          [args (list evt)])
-      (let* ([out (econs undefined undefined)]
-             [proc/emit (proc
-                         (lambda (val)
-                           (set-erest! out (econs val undefined))
-                           (set! out (erest out))
-                           val))]
-             [streams (map signal-value args)]
-             [thunk (lambda ()
-                      (when (ormap undefined? streams)
-                        ;(fprintf (current-error-port) "had an undefined stream~n")
-                        (set! streams (fix-streams streams args)))
-                      (let loop ()
-                        (extract (lambda (the-event) (proc/emit the-event) (loop))
-                                 streams))
-                      (set! streams (map signal-value args))
-                      out)])
-        (apply proc->signal thunk args))))
-  
-  
-  
+    
   (define (safe-signal-depth v)
     (cond
       [(signal? v) (signal-depth v)]
@@ -482,16 +358,6 @@
       [0]))
   
   
-  ; *** will have to change significantly to support depth-guided recomputation ***
-  ; Basically, I'll have to check that I'm not introducing a cycle.
-  ; If there is no cycle, then I simply ensure that inf's depth is at least one more than
-  ; sup's.  If this requires an increase to inf's depth, then I need to propagate the
-  ; new depth to inf's dependents.  Since there are no cycles, this step is guaranteed to
-  ; terminate.  When checking for cycles, I should of course stop when I detect a pre-existing
-  ; cycle.
-  ; If there is a cycle, then 'inf' has (and retains) a lower depth than 'sup' (?), which
-  ; indicates the cycle.  Importantly, 'propagate' uses the external message queue whenever
-  ; a dependency crosses an inversion of depth.
   (define fix-depths
     (opt-lambda (inf sup [mem empty])
       (if (memq sup mem)
@@ -513,15 +379,20 @@
   (define-values (iq-enqueue iq-dequeue iq-empty? iq-resort)
     (let* ([depth
             (lambda (msg)
-              (if (signal? msg) 
-                  (signal-depth msg)
-                  (signal-depth (first msg))))]
+              (let ([msg (if (weak-box? msg) (weak-box-value msg) msg)])
+                (cond
+                  [(cons? msg) (signal-depth (first msg))]
+                  [(signal? msg) (signal-depth msg)]
+                  [else 0])))]
            [heap (make-heap
                   (lambda (b1 b2) (< (depth b1) (depth b2)))
                   eq?)])
       (values
        (lambda (b) (heap-insert heap b))
-       (lambda () (heap-pop heap))
+       (lambda () (let ([v (heap-pop heap)])
+                    (if (weak-box? v)
+                        (weak-box-value v)
+                        v)))
        (lambda () (heap-empty? heap))
        (lambda () (let loop ([elts empty])
                     (if (heap-empty? heap)
@@ -644,14 +515,12 @@
                           (cust-killall! cust)
                           (set-ft-cust-constructed-sigs! cust empty)
                           (set-ft-cust-children! cust empty)
-                          #;(for-each kill-signal
-                                    (filter identity
-                                            (map weak-box-value (ft-cust-constructed-sigs cust))))
                           (unregister rtn (unbox current))
                           (set-box! current (pfun (value-now/no-copy bhvr)))
                           (register rtn (unbox current))
                           ;; keep rtn's producers up-to-date
-                          (set-car! (signal-producers rtn) (unbox current))
+                          (set-signal-producers! rtn (cons (unbox current)
+                                                           (cdr (signal-producers rtn))))
                           (iq-resort)
                           'custodian)
                         bhvr)]
@@ -675,7 +544,7 @@
             ; then I send a message.  Otherwise, I add to the internal
             ; priority queue.
             (if (< depth (signal-depth dep))
-                (iq-enqueue dep)
+                (iq-enqueue wb)
                 (! man dep))]
            [_
             (set! empty-boxes (add1 empty-boxes))]))
@@ -685,7 +554,6 @@
          b
          (filter weak-box-value dependents)))))
   
-
   (define (update0 b)
     (match b
       [(and (? signal?)
@@ -696,27 +564,13 @@
        (let ([new-value (call-with-parameterization
                          params
                          thunk)])
-         (if (or (signal:unchanged? b)
-                 (not (or (boolean? new-value)
-                          (symbol? new-value)
-                          (number? new-value)
-                          (string? new-value)))
-                 (not (eq? value new-value)))
+         (when (or (signal:unchanged? b)
+                   (and (not (eq? value new-value))
+                        (or (not (event-set? new-value)) (cons? (event-set-events new-value))
+                            (not (event-set? value)))))
            (begin
-             #;(if (signal? new-value)
-                 (raise (make-exn:fail
-                         "signal from update thunk!!!"
-                         (signal-continuation-marks b))))
-             #;(printf "~n[~a]: ~a --> ~a~n" (cond
-                                         [(signal:switching? b) 'signal:switching]
-                                         [(signal:compound? b) 'signal:compound]
-                                         [(signal:unchanged? b) 'signal:unchanged]
-                                         [else 'signal])
-                     value new-value)
              (set-signal-value! b new-value)
-             (propagate b))
-           #;(parameterize ([print-struct #f])
-             (printf "~a ... ~a (~a)~n" value new-value b))))]
+             (propagate b))))]
       [_ (void)]))
   
   (define (update1 b a)
@@ -735,6 +589,12 @@
     (! man `(stat ,(self)))
     (receive [n n]))
 
+  (define (hash-table-size ht)
+    (let ([x 0])
+      (hash-table-for-each ht (lambda (k v) 
+                                (if k (set! x (add1 x)))))
+      x))
+
   (define exn-handler (lambda (exn) (raise exn)))
   
   ;;;;;;;;;;;;;
@@ -748,6 +608,7 @@
      (let* ([named-providers (make-hash-table)] 
             [cur-beh #f]
             [signal-cache (make-hash-table 'weak)]
+            [last-known-signal-count 50]
             [notifications empty]
             
             ;; added for run-thunk/stablized
@@ -764,21 +625,16 @@
        (let outer ()
          (with-handlers ([exn:fail?
                           (lambda (exn)
-                            (when (and cur-beh
-                                       #;(not (undefined? (signal-value cur-beh))))
-                              ;(when (empty? (continuation-mark-set->list
-                               ;              (exn-continuation-marks exn) 'frtime))
-                                (set! exn (make-exn:fail
-                                           (exn-message exn)
-                                           (compose-continuation-mark-sets2
-                                            (signal-continuation-marks
-                                             cur-beh)
-                                            (exn-continuation-marks exn))));)
-                              ;(raise exn)
+                            (when cur-beh
+                              (set! exn (make-exn:fail
+                                         (exn-message exn)
+                                         (compose-continuation-mark-sets2
+                                          (signal-continuation-marks
+                                           cur-beh)
+                                          (exn-continuation-marks exn))));)
                               (iq-enqueue (list exceptions (list exn cur-beh)))
                               (when (behavior? cur-beh)
-                                (undef cur-beh)
-                                #;(kill-signal cur-beh)))
+                                (undef cur-beh)))
                             (outer))])
            (set! exn-handler (uncaught-exception-handler))
            (let inner ()
@@ -818,21 +674,12 @@
                         
                         
                         [('stat rtn-pid)
-                         (let ([x 0])
-                           (hash-table-for-each signal-cache (lambda (k v) 
-                                                               (if k (set! x (add1 x)))))
-                           (! rtn-pid x))]
+                         (! rtn-pid (hash-table-size signal-cache))]
                         
-                        [('bind sym evt)
-                         (let ([forwarder+listeners (cons #f empty)])
-                           (set-car! forwarder+listeners
-                                     (event-forwarder sym evt forwarder+listeners))
-                           (hash-table-put! named-providers sym forwarder+listeners))
-                         (loop)]
                         [('remote-reg tid sym)
                          (let ([f+l (hash-table-get named-providers sym)])
-                           (when (not (member tid (rest f+l)))
-                             (set-rest! f+l (cons tid (rest f+l)))))
+                           (when (not (member tid (mcdr f+l)))
+                             (set-mcdr! f+l (cons tid (mcdr f+l)))))
                          (loop)]
                         [('remote-evt sym val)
                          (iq-enqueue
@@ -883,6 +730,8 @@
              
              (set! notifications empty)
              (set! thunks-to-run empty)
+
+             (set-box! logical-time (add1 (unbox logical-time)))
              
              (inner)))))))
   

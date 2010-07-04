@@ -8,7 +8,7 @@
 (define no-extra-if-tests? #t)
 
 ;; Check export names:
-(require (lib "docprovide.ss" "syntax"))
+(require syntax/docprovide)
 (let ([docs (lookup-documentation '(lib "htdp-intermediate.ss" "lang") 'procedures)])
   (for-each
    (lambda (row)
@@ -20,7 +20,7 @@
       (cdr row)))
    docs))
 
-(define current-htdp-lang '(lib "htdp-intermediate.ss" "lang"))
+(define current-htdp-lang 'lang/htdp-intermediate)
 (load-relative "htdp-test.ss")
 
 (require (lib "htdp-intermediate.ss" "lang"))

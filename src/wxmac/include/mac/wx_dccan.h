@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2007 PLT Scheme Inc.
+// Copyright:  (c) 2004-2008 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -38,7 +38,7 @@ class wxCanvasDC: public wxbCanvasDC
   int pixmapWidth;
   int pixmapHeight;
 
-  RgnHandle current_reg, onpaint_reg;
+  RgnHandle current_reg, onpaint_reg, clip_reg;
 
   int current_pen_join;
   int current_pen_cap;
@@ -189,6 +189,8 @@ class wxCanvasDC: public wxbCanvasDC
   void DrawTab(char *str, double x, double y, double w, double h, int state);
 
   virtual void SetAlpha(double d);
+
+  virtual int CacheFontMetricsKey();
 };
 
 long wxTextFontInfo(int font, int size, int face, FontInfo *finfo, char *str, int d = 0, int len = -1);

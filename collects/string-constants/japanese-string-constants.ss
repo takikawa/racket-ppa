@@ -188,15 +188,16 @@ please adhere to these guidelines:
  (cs-status-coloring-program "構文の検証: 式にカラーを付けています")
  (cs-status-eval-compile-time "構文の検証: コンパイル時間を評価しています")
  (cs-status-expanding-expression "構文の検証: 式を展開しています")
- (cs-mouse-over-import "束縛 ~s が ~s がインポートされました")
+ (cs-status-loading-docs-index "構文の検証: ドキュメントの索引をロードしています")
+ (cs-mouse-over-import "束縛 ~s が ~s からインポートされました")
+ (cs-view-docs "~a のドキュメントを表示する")
 
  (cs-lexical-variable "レキシカル変数")
  (cs-imported-variable "インポート変数")
 
  ;;; info bar at botttom of drscheme frame
  (collect-button-label "GC")
- (read-only "読み取り専用")
- (read/write "読み書き可能")
+  (read-only "読み取り専用")
  (auto-extend-selection "自動拡張")
  (overwrite "上書き")
  (running "実行中")
@@ -229,6 +230,7 @@ please adhere to these guidelines:
  (file-is-not-saved "ファイル \"~a\" は保存されていません。")
  (save "保存")
  (close-anyway "とにかく閉じる")
+ (dont-save "保存しない")
  (clear-anyway "とにかく消去する")
 
  ;; menu item title
@@ -255,6 +257,16 @@ please adhere to these guidelines:
  ;; the ~a is filled in with one of the above (scheme-mode-*)
  (syntax-coloring-choose-color "~aのカラーを選択してください。")
  (preferences-colors "カラー") ;; used in the preferences dialog
+
+  ;; parenthesis color scheme string constants
+  (parenthesis-color-scheme "括弧のカラースキーム") ;; label for the choice% menu in the preferences dialog
+  (paren-color-basic-grey "Basic grey")
+  (paren-color-shades-of-gray "Shades of grey")
+  (paren-color-shades-of-blue "Shades of blue")
+  (paren-color-spring "Spring")
+  (paren-color-fall "Fall")
+  (paren-color-winter "Winter")
+
 
  (url: "URL:")
  (open-url... "URL を開く...")
@@ -293,9 +305,9 @@ please adhere to these guidelines:
  (plt:hd:refreshing-manuals-finished "完了しました。")
  (plt:hd:about-help-desk "ヘルプデスクについて")
  (plt:hd:help-desk-about-string
-  "ヘルプデスクは PLT のソフトウェア (DrScheme, MzScheme, MrEd など) に関する完全な情報を提供します。\n\nバージョン ~a\nCopyright (c) ~a-~a PLT")
+  "ヘルプデスクは PLT ソフトウェア (DrScheme, MzScheme, MrEd など) に関する完全な情報を提供します。\n\nバージョン ~a\nCopyright (c) ~a-~a PLT")
  (plt:hd:help-on-help "ヘルプのヘルプ")
- (plt:hd:help-on-help-details "ヘルプデスクの使い方については、ヘルプデスクのホームページにある `How to use Help Desk' というリンクをたどってください。(ホームページが表示されていない場合は、ヘルプデスク ウィンドウの上部にある [ホーム] ボタンを押すことで表示されます。)")
+ (plt:hd:help-on-help-details "ヘルプデスクの使い方については、ヘルプデスクのホームページにある最初の `Help Desk' というリンクをたどってください。(ホームページを表示するには、ヘルプデスク ウィンドウの上部にある [ホーム] ボタンを押します。)")
   (reload "再読み込み") ;; refresh the page in a web browser
   (plt:hd:ask-about-separate-browser
    "ウェブ上のコンテンツへのリンクを選択しました。リンクをヘルプデスク ブラウザで表示しますか？それとも別のブラウザで表示しますか？")
@@ -359,8 +371,6 @@ please adhere to these guidelines:
 
  ;;; about box
  (about-drscheme-frame-title "DrScheme について")
- (take-a-tour "ツアーの紹介！")
- (release-notes "リリースノート")
 
 
  ;;; save file in particular format prompting.
@@ -372,7 +382,12 @@ please adhere to these guidelines:
  ;;; preferences
  (preferences "環境設定")
  (error-saving-preferences "環境設定を保存時にエラーが発生しました: ~a")
+ (error-saving-preferences-title "環境設定保存時のエラー")
+ (steal-the-lock-and-retry "ロックを解除して再試行") ;; in the preferences error dialog; this happens when the lockfile exists (after 3 pref writes).
  (error-reading-preferences "環境設定を読み取り時にエラーが発生しました")
+ (prefs-file-locked "環境設定ファイルがロックされています (ファイル ~a が存在します), 環境設定の変更を保存できません。環境設定の変更をキャンセルしますか？")
+ (try-again "再試行") ;; button label
+ (prefs-file-still-locked "環境設定ファイルが依然としてロックされているため (ファイル ~a が存在します), 環境設定の変更を保存できません。")
  (scheme-prefs-panel-label "Scheme")
  (warnings-prefs-panel-label "警告")
  (editor-prefs-panel-label "編集")
@@ -391,18 +406,24 @@ please adhere to these guidelines:
  (display-line-numbers "バッファの行番号を表示 (文字オフセットではなく)")
  (enable-keybindings-in-menus "メニューのキーバインドを有効にする")
  (automatically-to-ps "自動的に PostScript ファイルに印刷する")
- (option-as-meta "Option キーを Meta キーとして処理する") ;; macos/macos x only
+ (command-as-meta "Command キーを Meta キーとして処理する") ;; macos/macos x only
  (separate-dialog-for-searching "検索に別のダイアログを使う")
  (reuse-existing-frames "新しいファイルを開くときに既存のフレームを再利用する")
  (default-fonts "既定のフォント")
- (paren-match-color "括弧の強調表示のカラー") ; in prefs dialog
+ (basic-gray-paren-match-color "基本グレー括弧の強調表示カラー") ; in prefs dialog
  (online-coloring-active "入力と同時に構文の色付けをする")
  (open-files-in-tabs "ファイルを別のタブに開く (別のウィンドウではなく)")
  (show-interactions-on-execute "プログラムを実行するときは、自動的に対話ウィンドウを開く")
+  (switch-to-module-language-automatically "モジュールを開くときは、自動的にそのモジュール言語に切り替える")
+  (interactions-beside-definitions "対話ウィンドウを定義ウィンドウの横に配置する") ;; in preferences, below the checkbox one line above this one
  (limit-interactions-size "対話ウィンドウに表示する文字数を制限する")
  (background-color "背景色")
  (default-text-color "既定のテキスト") ;; used for configuring colors, but doesn't need the word "color"
  (choose-a-background-color "背景色を選択してください")
+ (revert-to-defaults "デフォルトに戻す")
+
+  (black-on-white-color-scheme "白地に黒") ;; these two appear in the color preferences dialog on butttons
+  (white-on-black-color-scheme "黒地に白") ;; clicking the buttons changes teh color schemes to some defaults that've been set up.
 
  ; title of the color choosing dialog
 
@@ -411,6 +432,7 @@ please adhere to these guidelines:
 
  (change-font-button-label "変更")
  (fonts "フォント")
+ (other... "その他...") ;; used in the font choice menu item
 
  ; filled with type of font, eg modern, swiss, etc.
  (choose-a-new-font "フォントタイプが \"~a\" のフォントを選択してください")
@@ -450,6 +472,12 @@ please adhere to these guidelines:
  (already-used-keyword "\"~a\" はすでに特別にインデントされるキーワードです")
  (add-keyword "追加")
  (remove-keyword "削除")
+
+  ; repl color preferences
+  (repl-colors "REPL")
+  (repl-out-color "出力")
+  (repl-value-color "値")
+  (repl-error-color "エラー")
 
  ;;; find/replace
  (find-and-replace "検索と置換")
@@ -562,6 +590,9 @@ please adhere to these guidelines:
  (print-info "このファイルをプリンタで印刷します")
  (print-menu-item "印刷(&P)...")
 
+ (page-setup-info "印刷パラメータの設定")
+ (page-setup-menu-item "ページ設定...")
+
  (close-info "このファイルを閉じます")
  (close-menu-item "閉じる(&C)")
 
@@ -601,6 +632,9 @@ please adhere to these guidelines:
  (replace-and-find-again-info "現在のテキストを置換し、直前の検索文字列と同じ文字列を検索します")
  (replace-and-find-again-menu-item "置換と再検索")
 
+  (complete-word "自動補完") ; the complete word menu item in the edit menu
+  (no-completions "... 自動補完できません") ; shows up in the completions menu when there are no completions (in italics)
+
  (preferences-info "環境設定を行います")
  (preferences-menu-item "環境設定...")
 
@@ -626,6 +660,8 @@ please adhere to these guidelines:
  (wrap-text-item "テキストを折り返す")
 
  (windows-menu-label "ウィンドウ(&W)")
+ (minimize "最小化") ;; minimize and zoom are only used under mac os x
+ (zoom "拡大")
  (bring-frame-to-front "フレームを前面に移動")       ;;; title of dialog
  (bring-frame-to-front... "フレームを前面に移動...") ;;; corresponding title of menu item
  (most-recent-window "最近使用したウィンドウ")
@@ -733,6 +769,11 @@ please adhere to these guidelines:
  (interactions-menu-item-help-string "対話ウィンドウを表示/非表示します")
  (show-toolbar "ツールバーを表示(&T)")
  (hide-toolbar "ツールバーを非表示(&T)")
+ (toolbar "ツールバー")
+ (toolbar-on-top "ツールバーを上側に表示する")
+ (toolbar-on-left "ツールバーを左側に表示する")
+ (toolbar-on-right "ツールバーを右側に表示する")
+ (toolbar-hidden "ツールバーを非表示にする")
 
  ;;; file menu
  (save-definitions-as "定義に名前を付けて保存(&A)...")
@@ -747,6 +788,7 @@ please adhere to these guidelines:
  (print-interactions "対話を印刷...")
  (new-tab "新規タブ")
  (close-tab "タブを閉じる") ;; must not have any &s in it.
+ (close-tab-amp "タブを閉じる(&C)") ;; like close-tab, but with an ampersand on the same letter as the one in close-menu-item
 
  ;;; edit-menu
  (split-menu-item-label "分割(&S)")
@@ -763,6 +805,12 @@ please adhere to these guidelines:
  (break-menu-item-help-string "現在の評価を停止します")
  (kill-menu-item-label "強制終了")
  (kill-menu-item-help-string "現在の評価を強制終了します")
+ (limit-memory-menu-item-label "メモリを制限する...")
+ (limit-memory-msg-1 "ここで指定したメモリ制限値は、プログラムを次に実行するときに有効になります。")
+ (limit-memory-msg-2 "制限値は 100MB 以上にしてください。")
+ (limit-memory-unlimited "制限しない")
+ (limit-memory-limited "制限する")
+ (limit-memory-megabytes "MB")
  (clear-error-highlight-menu-item-label "エラー強調表示を消去")
  (clear-error-highlight-item-help-string "ピンク色のエラー強調表示を消去します")
  (reindent-menu-item-label "再インデント(&R)")
@@ -842,6 +890,16 @@ please adhere to these guidelines:
  (drscheme-teachpack-message-title "DrScheme ティーチパック")
  (already-added-teachpack "ティーチパック ~a はすでに追加されています")
 
+  ; ~a is filled with the teachpack's name; the message appears in the teachpack selection dialog when a user installs a new teachpack
+  (compiling-teachpack "ティーチパック ~a をコンパイルしています ...")
+  (teachpack-pre-installed "プレインストール済みのティーチパック")
+  (teachpack-user-installed "ユーザーがインストールしたティーチパック")
+  (add-teachpack-to-list... "ティーチパックをリストに追加する...")
+  (teachpack-already-installed "'~a' という名前のティーチパックは既にインストールされています。上書きしますか？")
+  ; ~a is filled with a list of language names. Each name is separated by a newline and is indented two spaces (no commas, no 'and')
+  (teachpacks-only-in-languages "ティーチパックは次の言語でのみ使用可能です: ~a")
+
+
  ;;; Language dialog
  (introduction-to-language-dialog
   "言語を選択してください。ほとんどの入門コースの学生は、既定の言語を使うとよいでしょう。")
@@ -857,6 +915,8 @@ please adhere to these guidelines:
  (input-syntax "入力の構文")
  (dynamic-properties "実行時のオプション") ;; "Dynamic Properties" の訳だが、これでいいか？
  (output-syntax "出力の構文")
+  (teachpacks "ティーチパック") ;; label in the language dialog for the teaching languages
+  (teachpacks-none "<< なし >>") ;; shows up under the previous string, when there are no teachpacks
  (no-debugging-or-profiling "デバッグもプロファイリングもしない")
  (debugging "デバッグ")
  (debugging-and-profiling "デバッグとプロファイリング")
@@ -869,6 +929,15 @@ please adhere to these guidelines:
  (use-mixed-fractions "帯分数")
  (use-repeating-decimals "循環小数")
  (decimal-notation-for-rationals "有理数を10進数で表示する")
+ (enforce-primitives-group-box-label "初期束縛")
+ (enforce-primitives-check-box-label "初期束縛の再定義を禁止する")
+
+  ; used in the bottom left of the drscheme frame
+  ; used the popup menu from the just above; greyed out and only
+  ; visible when some languages are in the history
+  (recent-languages "最近使用した言語:")
+  ; shows up in bottom-left programming language menu popup, when no langs are recorded
+  (no-recently-chosen-languages "最近使用した言語はありません")
 
  ;; startup wizard screen language selection section
  (please-select-a-language "言語を選択してください")
@@ -888,11 +957,11 @@ please adhere to these guidelines:
  (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
  (pretty-big-scheme "Pretty Big (MrEd と Advanced Student を含む)")
  (pretty-big-scheme-one-line-summary "syntax と HtDP 言語の関数を追加")
- (r5rs-lang-name "Standard (R5RS)")
+ (r5rs-language-name "R5RS")
  (r5rs-one-line-summary "純粋な R5RS")
  (expander "Expander")
  (expander-one-line-summary "式を評価するのではなく展開する")
- (professional-languages "プロフェッショナル用の言語")
+ (legacy-languages "レガシーな言語")
  (teaching-languages "学習用の言語")
  (experimental-languages "実験的な言語")
   (initial-language-category "初期言語")
@@ -909,6 +978,7 @@ please adhere to these guidelines:
 
   ; next two are before and after a language
   (start-with-before "")
+  (start-with-after "")
 
   (seasoned-plt-schemer? "経験豊かな PLT Scheme のユーザーですか？")
   (looking-for-standard-scheme? "標準的な Scheme をお探しですか？")
@@ -970,6 +1040,14 @@ please adhere to these guidelines:
  (evaluation-terminated "評価が終了しました。")
  (evaluation-terminated-explanation
   "評価スレッドはもう実行されていませんので、次に実行するまでは評価は行われません。")
+
+  ; The next three constants show up in the same dialog as the above evaluation-terminated string
+  ; constants.
+  ; The first two show up only when the user calls 'exit' (possibly with a status code).
+  ; The third shows up when the program runs out of memory.
+  (exited-successfully "正常に終了しました。")
+  (exited-with-error-code "エラーコード ~a で終了しました。") ;; ~a is filled in with a number between 1 and 255
+  (program-ran-out-of-memory "このプログラムはメモリを使い切りました。")
  (last-stack-frame "最後のスタックフレームを表示する")
  (last-stack-frames "最後の  ~a スタックフレームを表示する")
  (next-stack-frames "次の ~a スタックフレームを表示する")
@@ -988,10 +1066,20 @@ please adhere to these guidelines:
  (kill? "強制終了？")
 
  ;;; version checker
- (version:update-menu-item "アップデートの確認...")
+ (version:update-menu-item   "アップデートの確認...")
+ (version:update-check       "アップデートの確認") ; dialog title, with the next line
+ (version:connecting-server  "PLT バージョン サーバーに接続しています")
+ (version:results-title      "PLT バージョンの確認")
+ (version:do-periodic-checks "PLT Scheme の新しいバージョンを定期的に確認してください")
+ (version:take-me-there      "ダウンロードする") ; ...to the download website
+ ;; the next one can appear alone, or followed by a comma and the one after that
+ (version:plt-up-to-date     "この PLT バージョンは最新です")
+ (version:but-newer-alpha    "しかし、これより新しいアルファ リリースが存在します")
+ ;; This is used in this context: "PLT Scheme vNNN <<<*>>> http://download..."
+ (version:now-available-at   "が次のサイトから入手できます")
 
- ;; special menu
- (special-menu "特殊(&P)")
+ ;; insert menu
+ (insert-menu "挿入(&I)")
 
  ;; large semi colon letters
  (insert-large-letters... "大きな文字を挿入...")
@@ -1072,16 +1160,17 @@ please adhere to these guidelines:
  (stepper-program-has-changed "警告: プログラムが変更されました。")
  (stepper-program-window-closed "警告: プログラム ウィンドウが閉じました。")
 
- (stepper-home "ホーム")
  (stepper-name "ステッパ")
- (stepper-language-level-message
-  "言語レベルが \"~a\" に設定されています。現状では、言語レベルが \"~a\" から \"~a\" までのときにだけ、ステッパを使用できます。")
+ (stepper-language-level-message "ステッパは \"~a\" 言語に対しては動作しません")
  (stepper-button-label "ステップ")
- (stepper-previous-application "|< Application")
+ (stepper-home "ホーム")
+ (stepper-previous-application "|< アプリケーション")
  (stepper-previous "< ステップ")
  (stepper-next "ステップ >")
- (stepper-next-application "Application >|")
+ (stepper-next-application "アプリケーション >|")
+ (stepper-jump-to-end "終端まで")
 
+ (debug-tool-button-name "デバッグ")
 
  (dialog-back "戻る")
 
@@ -1120,16 +1209,80 @@ please adhere to these guidelines:
   ;; Profj
   (profj-java "Java")
   (profj-java-mode "Java モード")
+
+  (profj-beginner-lang "Beginner")
+  (profj-beginner-lang-one-line-summary "Java ライクな初級用のティーチング言語")
+  (profj-full-lang "完全")
+  (profj-full-lang-one-line-summary "Java 1.0 (一部は 1.1) のような言語")
+  (profj-advanced-lang "Advanced")
+  (profj-advanced-lang-one-line-summary "Java ライクナ上級用のティーチング言語")
+  (profj-intermediate-lang "Intermediate")
+  (profj-intermediate-lang-one-line-summary "Java ライクな中級用のティーチング言語")
+  (profj-intermediate-access-lang "Intermediate + access")
+  (profj-intermediate-access-lang-one-line-summary "Java ライクな中級用のティーチング言語 (アクセス修飾子付き)")
+  (profj-dynamic-lang "Java+dynamic")
+  (profj-dynamic-lang-one-summary "Java に動的型付け機能を付加した言語")
+
+  (profj-java-mode-color-heading "カラーの編集") ; Heading for preference to choose editing colors
   (profj-java-mode-color-keyword "キーワード")
   (profj-java-mode-color-string "文字列")
   (profj-java-mode-color-literal "リテラル")
   (profj-java-mode-color-comment "コメント")
   (profj-java-mode-color-error "エラー")
   (profj-java-mode-color-identifier "識別子")
+  (profj-java-mode-color-prim-type "基本型") ; Example text for built-in Java types
   (profj-java-mode-color-default "デフォルト")
+
+  (profj-coverage-color-heading "カバレージのカラー") ; Heading for preference to choose coverage colors
+  (profj-coverage-color-covered "カバーされた式")
+
+  (profj-language-config-display-preferences "表示の環境設定") ; Heading for preferences controlling printing
+  (profj-language-config-display-style "表示のスタイル")
+  (profj-language-config-display-field "クラス + フィールド")
+  (profj-language-config-class "クラス")
+  (profj-language-config-display-array "配列の要素をすべて表示しますか？")
+  (profj-language-config-testing-preferences "テストの環境設定") ; Heading for preferences controlling test behavior
+  ;(profj-language-config-testing-enable "実行時にテスト結果を表示しますか？") ; Run should be the word found on the Run button
+  (profj-language-config-testing-coverage "テストのためのカバレージ情報を収集しますか？")
+  (profj-language-config-support-test-language "Support test Language extension?")
+  (profj-language-config-testing-check "check 式を使用しますか？") ; check should not be translated
+  (profj-language-config-classpath "クラスパス")
+  (profj-language-config-choose-classpath-directory "クラスパスに追加するディレクトリを選択してください")
+  (profj-language-config-classpath-display "現在のクラスパスを表示") ; Button label to print the current classpath
+
+  (profj-test-name-close-to-example "クラス ~a の名前が Example に近いフレーズを含んでいます。")
+  (profj-test-name-example-miscapitalized "クラス ~a の名前の大小文字が誤っています。")
+
+   ;; Close testing window and do not run test cases any more
+  ;(profj-test-results-close-and-disable "テストを閉じて無効にする")
+  ;; Hide docked testing window and do not run test cases any more
+  ;(profj-test-results-hide-and-disable "テストを非表示にして無効にする")
+  ;Renamed below
+  ;(profj-test-results-window-title "テスト結果")
+
+  (profj-unsupported "サポートされていません")
+  (profj-executables-unsupported "申し訳ありません。現バージョンでは Java の実行ファイルはサポートされていません")
+
+  (profj-convert-to-text-comment "テキスト コメントに変換")
+  (profj-convert-to-comment "コメントに変換")
+
+  (profj-executing-main "main を実行しています")
 
   (profj-insert-java-comment-box "Java コメント ボックスを挿入")
   (profj-insert-java-interactions-box "Java 対話ボックスを挿入")
+
+  ;;The Test engine tool
+  ;;
+  (test-engine-window-title "テスト結果")
+  ;;Following two appear in View menu, attach and free test report window from DrScheme frame
+  (test-engine-dock-report "テスト結果を切り離して表示する")
+  (test-engine-undock-report "テスト結果を統合して表示する")
+  ;;Following two appear in Scheme (Java, etc) menu, cause Tests to be Run automatically or not
+  (test-engine-enable-tests "テストを有効にする")
+  (test-engine-disable-tests "テストを無効にする")
+  
+  (profjWizward-insert-java-class "Java クラスを挿入")
+  (profjWizard-insert-java-union "Java Union を挿入")
 
   ;; The Test Suite Tool
   ;; Errors
@@ -1180,10 +1333,6 @@ please adhere to these guidelines:
   (profjBoxes-insert-java-interactions "Insert Java Interactions")
 
   ;; Slideshow
-  (slideshow-show-slideshow-panel "スライドショー パネルを表示")
-  (slideshow-hide-slideshow-panel "スライドショー パネルを非表示")
-  (slideshow-freeze-picts "Freeze These Picts")
-  (slideshow-thaw-picts "Show Picts Under Mouse")
   (slideshow-hide-picts "Show Nested Boxes")
   (slideshow-show-picts "Show Picts")
   (slideshow-cannot-show-picts "Cannot show picts; run program to cache sizes first")

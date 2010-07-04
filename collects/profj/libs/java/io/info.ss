@@ -1,3 +1,3 @@
-(module info (lib "infotab.ss" "setup")
-  (define name "ProfessorJ: libs java io")
-  #;(define install-collection "installer.ss"))
+#lang setup/infotab
+
+;; (define install-collection "installer.ss")

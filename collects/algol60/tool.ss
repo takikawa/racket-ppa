@@ -1,19 +1,19 @@
 (module tool mzscheme
   (require (lib "tool.ss" "drscheme")
-           (lib "mred.ss" "mred")
-           (lib "unit.ss")
-           (lib "class.ss")
+           mred
+           mzlib/unit
+           mzlib/class
            "parse.ss"
            "simplify.ss"
            "compile.ss"
-	   (lib "embed.ss" "compiler")
-	   (lib "string-constant.ss" "string-constants")
+	   compiler/embed
+	   string-constants
 	   (prefix bd: "bd-tool.ss"))
 
   (provide tool@)
 
-  (define base-importing-stx (dynamic-require '(lib "base.ss" "algol60")
-					     'base-importing-stx))
+  (define base-importing-stx (dynamic-require 'algol60/base
+					      'base-importing-stx))
 
   (define tool@
     (unit 
@@ -78,20 +78,14 @@
           (define/public (get-language-position)
 	    (list (string-constant experimental-languages)
 		  "Algol 60"))
-          (define/public (order-manuals x) 
-            (values 
-             (list #"drscheme" #"tour" #"help")
-	     ;; We allow doc.txt search results, because the Algol60
-	     ;; docs are in doc.txt:
-             #t))
           (define/public (get-language-name) "Algol 60")
           (define/public (get-language-url) #f)
           (define/public (get-language-numbers) (list 1000 10))
           (define/public (get-teachpack-names) null)
           (define/public (marshall-settings x) x)
           (define/public (on-execute settings run-in-user-thread)
-            (dynamic-require '(lib "base.ss" "algol60") #f)
-            (let ([path ((current-module-name-resolver) '(lib "base.ss" "algol60") #f #f)]
+            (dynamic-require 'algol60/base #f)
+            (let ([path ((current-module-name-resolver) 'algol60/base #f #f)]
                   [n (current-namespace)])
               (run-in-user-thread
                (lambda ()
@@ -117,10 +111,10 @@
 						base-importing-stx)])
 		  (make-embedding-executable dst-file
 					     #f #f
-					     '((#f (lib "base.ss" "algol60")))
+					     '((#f algol60/base))
 					     null
 					     (compile
-					      `(module m (lib "base.ss" "algol60")
+					      `(module m algol60/base
 						 ,code))
 					     (list "-mvqe" "(require m)"))))))
 	  (define/public (get-one-line-summary) "Algol 60 (not Scheme at all!)")

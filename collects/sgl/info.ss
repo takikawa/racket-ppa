@@ -1,8 +1,9 @@
-(module info (lib "infotab.ss" "setup")
-  (define name "sgl")
-  (define doc.txt "doc.txt")
-  (define pre-install-collection "makefile.ss")
-  (define compile-omit-files (list))
-  (define clean (list (build-path "compiled" "native" (system-library-subpath))
-                      "compiled"
-                      )))
+#lang setup/infotab
+
+(define pre-install-collection "makefile.ss")
+(define virtual-sources '("gl-info.ss"))
+(define clean (list (build-path "compiled" "native" (system-library-subpath))
+                    "compiled"))
+(define compile-omit-paths '("examples"))
+
+(define scribblings '(("scribblings/sgl.scrbl" (multi-page) (gui-library 50))))

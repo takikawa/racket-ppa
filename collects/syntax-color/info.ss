@@ -1,5 +1,3 @@
-(module info (lib "infotab.ss" "setup")
-  (define name "Syntax Color")
-  (define doc.txt "doc.txt"))
+#lang setup/infotab
 
-
+(define scribblings '(("syntax-color.scrbl" () (gui-library))))

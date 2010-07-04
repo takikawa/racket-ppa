@@ -1,12 +1,13 @@
 
-(module multi-file-search (lib "a-unit.ss")
-  (require (lib "framework.ss" "framework")
-           (lib "class.ss")
-           (lib "mred.ss" "mred")
-           (lib "file.ss")
-           (lib "thread.ss")
-           (lib "async-channel.ss")
-           (lib "string-constant.ss" "string-constants")
+#lang scheme/unit
+  (require framework
+           mzlib/class
+           mred
+           scheme/file
+           scheme/path
+           mzlib/thread
+           mzlib/async-channel
+           string-constants
            "drsig.ss")
   
   (import [prefix drscheme:frame: drscheme:frame^]
@@ -612,17 +613,17 @@
   ;; build-recursive-file-list : string (union regexp #f) -> (-> (union string #f))
   ;; thread: search thread
   (define (build-recursive-file-list dir filter)
-    (letrec ([touched (make-hash-table 'equal)]
+    (letrec ([touched (make-hash)]
              [next-thunk (λ () (process-dir dir (λ () #f)))]
              [process-dir
               ; string[dirname] (listof string[filename]) -> (listof string[filename])
               (λ (dir k)
                 (let* ([key (normalize-path dir)]
-                       [traversed? (hash-table-get touched key (λ () #f))])
+                       [traversed? (hash-ref touched key (λ () #f))])
                   (if traversed? 
                       (k)
                       (begin
-                        (hash-table-put! touched key #t)
+                        (hash-set! touched key #t)
                         (process-dir-contents 
                          (map (λ (x) (build-path dir x))
                               (directory-list dir))
@@ -712,4 +713,4 @@
                                         (car pos)
                                         (- (cdr pos) (car pos))))))
                        (loop (+ line-number 1))]))))
-              'text))))))
+              #:mode 'text)))))

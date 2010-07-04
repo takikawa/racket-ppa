@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
 @title{Printer Extension}
 
@@ -49,22 +49,33 @@ so that graph and cycle structure can be represented.
 (define (tuple-print tuple port write?)
   (when write? (write-string "<" port))
   (let ([l (tuple-ref tuple 0)])
-    (unless (null? l)
-      ((if write? write display) (car l) port)
+    (unless (zero? (vector-length l))
+      ((if write? write display) (vector-ref l 0) port)
       (for-each (lambda (e)
                   (write-string ", " port)
                   ((if write? write display) e port))
-                (cdr l))))
+                (cdr (vector->list l)))))
   (when write? (write-string ">" port)))
 
 (define-values (s:tuple make-tuple tuple? tuple-ref tuple-set!)
   (make-struct-type 'tuple #f 1 0 #f
                     (list (cons prop:custom-write tuple-print))))
 
-(display (make-tuple '(1 2 "a")))
+(display (make-tuple #(1 2 "a")))
 
-(let ([t (make-tuple (list 1 2 "a"))])
-  (set-car! (tuple-ref t 0) t)
+(let ([t (make-tuple (vector 1 2 "a"))])
+  (vector-set! (tuple-ref t 0) 0 t)
   (write t))
 ]
 }
+
+@defproc[(custom-write? [v any/c]) boolean?]{
+
+Returns @scheme[#t] if @scheme[v] has the @scheme[prop:custom-write]
+property, @scheme[#f] otherwise.}
+
+
+@defproc[(custom-write-accessor [v custom-write?])
+         (custom-write? output-port? boolean?. -> . any)]{
+
+Returns the custom-write procedure associated with @scheme[v].}

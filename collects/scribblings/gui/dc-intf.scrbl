@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["common.ss"]
+#lang scribble/doc
+@(require "common.ss")
 
 @definterface/title[dc<%> ()]{
 
@@ -86,14 +86,14 @@ If the mask bitmap is grayscale and the bitmap to draw is not
  opacity of the drawn pixel (i.e., the mask acts as an inverted alpha
  channel), at least on most platforms. (Non-monochrome masks
  are collapsed to monochrome under X when the RENDER extension is not
- available, and under Windows 95 and NT when @file{msing32.dll} is not
+ available, and under Windows 95 and NT when @filepath{msing32.dll} is not
  available.) Other combinations involving a non-monochrome mask (i.e.,
  a non-grayscale mask or a monochrome bitmap to draw) produce
  platform-specific results.
 
-The current brush, current pen, and current text settings for the DC
- have no effect on how the bitmap is drawn, but the bitmap is scaled
- if the DC has a scale.
+The current brush, current pen, current text, and current alpha
+ settings for the DC have no effect on how the bitmap is drawn, but
+ the bitmap is scaled if the DC has a scale.
 
 For @scheme[post-script-dc%] output, the mask bitmap is currently
  ignored, and the @scheme['solid] style is treated the same as
@@ -429,6 +429,14 @@ For printer or PostScript output, an exception is raised if
 
 }
 
+@defmethod[(get-alpha)
+           (real-in 0 1)]{
+
+Gets the current opacity for drawing; see
+@method[dc<%> set-alpha].
+
+}
+
 @defmethod[(get-background)
            (is-a?/c color%)]{
 
@@ -641,6 +649,30 @@ Returns @scheme[#t] if the drawing context is usable.
 
 }
 
+@defmethod[(set-alpha [opacity (real-in 0 1)])
+           void?]{
+
+Determines the opacity of drawing, under certain conditions:
+
+@itemize{
+
+ @item{pen- and brush-based drawing when @method[dc<%> get-smoothing]
+       produces @scheme['smoothed] or @scheme['aligned], and when the
+       drawing context is not an instance of @scheme[post-script-dc%];
+       and}
+
+ @item{text drawing for most platforms (Mac OS X, X with
+       Xft/fontconfig; transparency approximated under Windows by
+       fading the drawing color), and when the drawing context is not
+       an instance of @scheme[post-script-dc].}
+
+}
+
+A value of @scheme[0.0] corresponds to completely transparent (i.e.,
+invisible) drawing, and @scheme[1.0] corresponds to completely opaque
+drawing. For intermediate values, drawing is blended with the existing
+content of the drawing context.}
+
 @defmethod[(set-background [color (is-a?/c color%)])
            void?]{
 
@@ -780,7 +812,7 @@ Enables or disables anti-aliased smoothing of lines, curves,
  instead controlled through the @scheme[font%] object.)
 
 Smoothing is supported under Windows only when Microsoft's
- @file{gdiplus.dll} is installed (which is always the case for Windows
+ @filepath{gdiplus.dll} is installed (which is always the case for Windows
  XP). Smoothing is supported under Mac OS X always. Smoothing is
  supported under X only when Cairo is installed when MrEd is compiled.
  Smoothing is never supported for black-and-white contexts. Smoothing

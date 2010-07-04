@@ -1,9 +1,6 @@
-(module info (lib "infotab.ss" "setup")
-  (define name "htdch")
-  (define compile-subcollections
-    (list
-      (list "htdch" "draw")
-      (list "htdch" "geometry")
-      (list "htdch" "colors")
-      (list "htdch" "graphics")
-      (list "htdch" "idraw"))))
+#lang setup/infotab
+
+(define name "Java Teachpacks")
+
+(define compile-omit-paths '("Examples"))
+(define install-collection "installer.scm")

@@ -1,14 +1,14 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require[(lib "eval.ss" "scribble")]
-@require["guide-utils.ss"]
+#lang scribble/doc
+@(require scribble/manual
+          scribble/eval
+          "guide-utils.ss")
 
 @title[#:tag "application"]{Function Calls@aux-elem{ (Procedure Applications)}}
 
 An expression of the form
 
 @specsubform[
-(_proc-expr _arg-expr ...)
+(proc-expr arg-expr ...)
 ]
 
 is a function call---also known as a @defterm{procedure
@@ -49,7 +49,7 @@ by-position arguments. For that case, an @scheme[_arg] can be an
 @guideother{@secref["keywords"] introduces keywords.}
 
 @specform/subs[
-(_proc-expr _arg ...)
+(_proc-expr arg ...)
 ([arg arg-expr
       (code:line arg-keyword arg-expr)])
 ]

@@ -1,9 +1,9 @@
-(module list (lib "frtime.ss" "frtime")
+(module list frtime/frtime-lang-only
   
-  (require (lifted (lib "list.ss") sort
+  (require (lifted mzlib/list sort
                    fifth sixth seventh eighth
                    last-pair)
-           (rename (lib "list.ss") empty empty))
+           (rename mzlib/list empty empty))
 
   (define first car)
   (define rest cdr)
@@ -149,10 +149,15 @@
 
   
   (define (filter f l)
-    (cond
-      [(empty? l) empty]
-      [(f (first l)) (cons (first l) (filter f (rest l)))]
-      [else (filter f (rest l))]))
+    (list-match
+     l
+     (lambda (a d) (if (f a)
+                       (cons a (filter f d))
+                       (filter f d)))
+     (lambda () empty)))
+;      [(empty? l) empty]
+;      [(f (first l)) (cons (first l) (filter f (rest l)))]
+;      [else (filter f (rest l))]))
   
   
   (define (cons? x) (pair? x))

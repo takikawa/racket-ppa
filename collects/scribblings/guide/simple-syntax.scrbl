@@ -1,23 +1,25 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require[(lib "eval.ss" "scribble")]
-@require[(lib "bnf.ss" "scribble")]
-@require["guide-utils.ss"]
+#lang scribble/doc
+@(require scribble/manual
+          scribble/eval
+          scribble/bnf
+          "guide-utils.ss")
+
+@(define ex-eval (make-base-eval))
 
 @title[#:tag "syntax-overview"]{Simple Definitions and Expressions}
 
 A program module is written as
 
 @schemeblock[
-#, @BNF-seq[@litchar{#module} @nonterm{langname} @kleenestar{@nonterm{topform}}]
+#, @BNF-seq[@litchar{#lang} @nonterm{langname} @kleenestar{@nonterm{topform}}]
 ]
 
 where a @nonterm{topform} is either a @nonterm{definition} or an
 @nonterm{expr}. The @tech{REPL} also evaluates @nonterm{topform}s.
 
 In syntax specifications, text with a gray background, such as
-@litchar{#module}, represents literal text. Whitespace must appear
-between separate such literals and nonterminals like @nonterm{id},
+@litchar{#lang}, represents literal text. Whitespace must appear
+between such literals and nonterminals like @nonterm{id},
 except that whitespace is not required before or after @litchar{(},
 @litchar{)}, @litchar{[}, or @litchar{]}.  A comment, which starts
 with @litchar{;} and runs until the end of the line, is treated the
@@ -28,34 +30,35 @@ or more repetitions of the preceding element, @kleeneplus{} means one
 or more repetitions of the preceding element, and @BNF-group{} groups
 a sequence as an element for repetition.
 
-@define[val-defn-stx @BNF-seq[@litchar{(}@litchar{define} @nonterm{id} @nonterm{expr} @litchar{)}]]
-@define[fun-defn-stx
-         @BNF-seq[@litchar{(}@litchar{define} @litchar{(} @nonterm{id} @kleenestar{@nonterm{id}} @litchar{)}
-                  @kleeneplus{@nonterm{expr}} @litchar{)}]]
-@define[fun-defn2-stx
+@(define val-defn-stx
+   @BNF-seq[@litchar{(}@litchar{define} @nonterm{id} @nonterm{expr} @litchar{)}])
+@(define fun-defn-stx
    @BNF-seq[@litchar{(}@litchar{define} @litchar{(} @nonterm{id} @kleenestar{@nonterm{id}} @litchar{)}
-                  @kleenestar{@nonterm{definition}} @kleeneplus{@nonterm{expr}} @litchar{)}]]
-@define[app-expr-stx @BNF-seq[@litchar{(} @nonterm{id} @kleenestar{@nonterm{expr}} @litchar{)}]]
-@define[app2-expr-stx @BNF-seq[@litchar{(} @nonterm{expr} @kleenestar{@nonterm{expr}} @litchar{)}]]
-@define[if-expr-stx @BNF-seq[@litchar{(} @litchar{if} @nonterm{expr} @nonterm{expr} @nonterm{expr} @litchar{)}]]
+                  @kleeneplus{@nonterm{expr}} @litchar{)}])
+@(define fun-defn2-stx
+   @BNF-seq[@litchar{(}@litchar{define} @litchar{(} @nonterm{id} @kleenestar{@nonterm{id}} @litchar{)}
+            @kleenestar{@nonterm{definition}} @kleeneplus{@nonterm{expr}} @litchar{)}])
+@(define app-expr-stx @BNF-seq[@litchar{(} @nonterm{id} @kleenestar{@nonterm{expr}} @litchar{)}])
+@(define app2-expr-stx @BNF-seq[@litchar{(} @nonterm{expr} @kleenestar{@nonterm{expr}} @litchar{)}])
+@(define if-expr-stx @BNF-seq[@litchar{(} @litchar{if} @nonterm{expr} @nonterm{expr} @nonterm{expr} @litchar{)}])
 
-@define[lambda-expr-stx @BNF-seq[@litchar{(} @litchar{lambda} @litchar{(} @kleenestar{@nonterm{id}} @litchar{)}
-                                              @kleeneplus{@nonterm{expr}} @litchar{)}]]
-@define[lambda2-expr-stx
-         @BNF-seq[@litchar{(} @litchar{lambda} @litchar{(} @kleenestar{@nonterm{id}} @litchar{)}
-                  @kleenestar{@nonterm{definition}} @kleeneplus{@nonterm{expr}} @litchar{)}]]
-@define[and-expr-stx @BNF-seq[@litchar{(} @litchar{and} @kleenestar{@nonterm{expr}} @litchar{)}]]
-@define[or-expr-stx @BNF-seq[@litchar{(} @litchar{or} @kleenestar{@nonterm{expr}} @litchar{)}]]
-@define[cond-expr-stx @BNF-seq[@litchar{(} @litchar{cond}
-                                              @kleenestar{@BNF-group[@litchar{[} @nonterm{expr} @kleenestar{@nonterm{expr}} @litchar{]}]}
-                                              @litchar{)}]]
-@define[(make-let-expr-stx kw)
-         @BNF-seq[@litchar{(} kw @litchar{(}
-                      @kleenestar{@BNF-group[@litchar{[} @nonterm{id} @nonterm{expr} @litchar{]}]}
-                      @litchar{)}
-                   @kleeneplus{@nonterm{expr}} @litchar{)}]]
-@define[let-expr-stx (make-let-expr-stx @litchar{let})]
-@define[let*-expr-stx (make-let-expr-stx @litchar{let*})]
+@(define lambda-expr-stx @BNF-seq[@litchar{(} @litchar{lambda} @litchar{(} @kleenestar{@nonterm{id}} @litchar{)}
+                                              @kleeneplus{@nonterm{expr}} @litchar{)}])
+@(define lambda2-expr-stx
+   @BNF-seq[@litchar{(} @litchar{lambda} @litchar{(} @kleenestar{@nonterm{id}} @litchar{)}
+            @kleenestar{@nonterm{definition}} @kleeneplus{@nonterm{expr}} @litchar{)}])
+@(define and-expr-stx @BNF-seq[@litchar{(} @litchar{and} @kleenestar{@nonterm{expr}} @litchar{)}])
+@(define or-expr-stx @BNF-seq[@litchar{(} @litchar{or} @kleenestar{@nonterm{expr}} @litchar{)}])
+@(define cond-expr-stx @BNF-seq[@litchar{(} @litchar{cond}
+                                @kleenestar{@BNF-group[@litchar{[} @nonterm{expr} @kleenestar{@nonterm{expr}} @litchar{]}]}
+                                @litchar{)}])
+@(define (make-let-expr-stx kw)
+   @BNF-seq[@litchar{(} kw @litchar{(}
+            @kleenestar{@BNF-group[@litchar{[} @nonterm{id} @nonterm{expr} @litchar{]}]}
+            @litchar{)}
+            @kleeneplus{@nonterm{expr}} @litchar{)}])
+@(define let-expr-stx (make-let-expr-stx @litchar{let}))
+@(define let*-expr-stx (make-let-expr-stx @litchar{let*}))
 
 @;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 @section{Definitions}
@@ -77,6 +80,7 @@ of the function. When the function is called, it returns the result of
 the last @nonterm{expr}.
 
 @defexamples[
+#:eval ex-eval
 (code:line (define five 5)            (code:comment #, @t{defines @scheme[five] to be @scheme[5]}))
 (code:line (define (piece str)        (code:comment #, @t{defines @scheme[piece] as a function})
              (substring str 0 five))  (code:comment #, @t{of one argument}))
@@ -91,9 +95,12 @@ though the printed form is necessarily less complete than the printed
 form of a number or string.
 
 @examples[
+#:eval ex-eval
 piece
 substring
 ]
+
+@; FIXME: check that everything says "procedure" and not "primitive"
 
 A function definition can include multiple expressions for the
 function's body. In that case, only the value of the last expression
@@ -101,24 +108,26 @@ is returned when the function is called. The other expressions are
 evaluated only for some side-effect, such as printing.
 
 @defexamples[
+#:eval ex-eval
 (define (greet name)
   (printf "returning a greeting for ~a...\n" name)
   (string-append "hello " name))
 (greet "universe")
 ]
 
-Scheme programmers prefer to avoid assignment statements; it's
+Scheme programmers prefer to avoid assignment statements. It's
 important, though, to understand that multiple expressions are allowed
 in a definition body, because it explains why the following
 @scheme[nogreet] function simply returns its argument:
 
 @def+int[
+#:eval ex-eval
 (define (nogreet name)
   string-append "hello " name)
 (nogreet "world")
 ]
 
-Withing @scheme[nogreet], there are no parentheses around
+Within @scheme[nogreet], there are no parentheses around
 @scheme[string-append "hello " name], so they are three separate
 expressions instead of one function-call expression. The expressions
 @scheme[string-append] and @scheme["hello "] are evaluated, but the
@@ -129,7 +138,7 @@ the result of the expression @scheme[name].
 @section[#:tag "indentation"]{An Aside on Indenting Code}
 
 Line breaks and indentation are not significant for parsing Scheme
-programs, but most Scheme programmer use a standard set of conventions
+programs, but most Scheme programmers use a standard set of conventions
 to make code more readable. For example, the body of a definition is
 typically indented under the first line of the definition. Identifiers
 are written immediately after an open parenthesis with no extra space,
@@ -158,7 +167,7 @@ next line under the first argument, instead of under the
 
 Furthermore, when an open parenthesis has no matching close
 parenthesis in a program, both @exec{mzscheme} and DrScheme use the
-source's indentation information to suggest where it might be missing.
+source's indentation to suggest where it might be missing.
 
 @;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 @section{Identifiers}
@@ -194,9 +203,9 @@ more examples:
 @;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 @section{Function Calls@aux-elem{ (Procedure Applications)}}
 
-We have already seen many function calls---or @defterm{procedure
-applications} in more traditional Scheme terminology. The syntax of a
-function call is
+We have already seen many function calls, which are called
+@defterm{procedure applications} in more traditional Scheme
+terminology. The syntax of a function call is
 
 @moreguide["application"]{function calls}
 
@@ -207,7 +216,7 @@ function call is
 where the number of @nonterm{expr}s determines the number of
 arguments supplied to the function named by @nonterm{id}.
 
-The @schememodname[big] language pre-defines many function
+The @schememodname[scheme] language pre-defines many function
 identifiers, such as @scheme[substring] and
 @scheme[string-append]. More examples are below.
 
@@ -244,9 +253,9 @@ The next simplest kind of expression is an @scheme[if] conditional:
 
 @moreguide["conditionals"]{conditionals}
 
-The first @nonterm{expr} is always evaluted. If it produces a
+The first @nonterm{expr} is always evaluated. If it produces a
 non-@scheme[#f] value, then the second @nonterm{expr} is
-evaluted for the result of the whole @scheme[if] expression, otherwise
+evaluated for the result of the whole @scheme[if] expression, otherwise
 the third @nonterm{expr} is evaluated for the result.
 
 @examples[
@@ -301,7 +310,7 @@ provides more readable shortcuts through the @scheme[and] and
 ]
 
 The @scheme[and] form short-circuits: it stops and returns @scheme[#f]
-when and expression produces @scheme[#f], otherwise it keeps
+when an expression produces @scheme[#f], otherwise it keeps
 going. The @scheme[or] form similarly short-circuits when it
 encounters a true result.
 
@@ -428,6 +437,7 @@ a function and an argument. Using @scheme[twice] is convenient if you
 already have a name for the function, such as @scheme[sqrt]:
 
 @def+int[
+#:eval ex-eval
 (define (twice f v)
   (f (f v)))
 (twice sqrt 16)
@@ -437,6 +447,7 @@ If you want to call a function that is not yet defined, you could
 define it, and then pass it to @scheme[twice]:
 
 @def+int[
+#:eval ex-eval
 (define (louder s)
   (string-append s "!"))
 (twice louder "hello")
@@ -461,6 +472,7 @@ Using @scheme[lambda], the above call to @scheme[twice] can be
 re-written as
 
 @interaction[
+#:eval ex-eval
 (twice (lambda (s) (string-append s "!"))
        "hello")
 (twice (lambda (s) (string-append s "?!"))
@@ -471,6 +483,7 @@ Another use of @scheme[lambda] is as a result for a function that
 generates functions:
 
 @def+int[
+#:eval ex-eval
 (define (make-add-suffix s2)
   (lambda (s) (string-append s s2)))
 (twice (make-add-suffix "!") "hello")
@@ -485,6 +498,7 @@ function. In other words, the @scheme[lambda]-generated function
 ``remembers'' the right @scheme[s2]:
 
 @interaction[
+#:eval ex-eval
 (define louder (make-add-suffix "!"))
 (define less-sure (make-add-suffix "?"))
 (twice less-sure "really")
@@ -500,6 +514,7 @@ form. For example, the following two definitions of @scheme[louder]
 are equivalent:
 
 @defs+int[
+#:eval ex-eval
 [(define (louder s)
    (string-append s "!"))
  code:blank
@@ -544,7 +559,8 @@ function body.
    [else "huh?"]))
 (converse "hello!")
 (converse "urp")
-(code:line starts? (code:comment #, @t{outside of @scheme[converse], so...}))
+(eval:alts (code:line starts? (code:comment #, @t{outside of @scheme[converse], so...}))
+           (parameterize ([current-namespace (make-base-namespace)]) (eval 'starts?)))
 ]
 
 Another way to create local bindings is the @scheme[let] form. An
@@ -581,3 +597,7 @@ use earlier bindings:
        [z (+ x y)])
   (format "adding ~s and ~s produces ~s" x y z))
 ]
+
+@; ----------------------------------------------------------------------
+
+@close-eval[ex-eval]

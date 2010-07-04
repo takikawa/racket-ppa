@@ -1,9 +1,9 @@
-(module pop3 mzscheme
-  (require (lib "unit.ss") "pop3-sig.ss" "pop3-unit.ss")
+#lang scheme/base
+(require scheme/unit "pop3-sig.ss" "pop3-unit.ss")
 
-  (define-values/invoke-unit/infer pop3@)
+(define-values/invoke-unit/infer pop3@)
 
-  (provide-signature-elements pop3^))
+(provide-signature-elements pop3^)
 
 #|
 

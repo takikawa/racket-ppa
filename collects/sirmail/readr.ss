@@ -11,33 +11,33 @@
 ;;
 
 (module readr mzscheme
-  (require (lib "unit.ss")
-	   (lib "class.ss")
-           (lib "file.ss")
+  (require mzlib/unit
+	   mzlib/class
+           mzlib/file
 	   (lib "mred-sig.ss" "mred")
-           (lib "framework.ss" "framework")
-           (lib "process.ss"))
+           framework
+           mzlib/process)
 
-  (require (lib "string.ss")
-           (lib "list.ss")
-	   (lib "thread.ss")
+  (require mzlib/string
+           mzlib/list
+	   mzlib/thread
            "spell.ss")
 
   (require "sirmails.ss")
 
   (require "pref.ss")
 
-  (require (lib "imap-sig.ss" "net")
-	   (lib "smtp-sig.ss" "net")
-	   (lib "head-sig.ss" "net")
-	   (lib "base64-sig.ss" "net")
-	   (lib "mime-sig.ss" "net")
-	   (lib "qp-sig.ss" "net")
+  (require net/imap-sig
+	   net/smtp-sig
+	   net/head-sig
+	   net/base64-sig
+	   net/mime-sig
+	   net/qp-sig
            (lib "htmltext.ss" "browser"))
 
   (require (lib "hierlist-sig.ss" "hierlist"))
 
-  (require (lib "sendurl.ss" "net"))
+  (require net/sendurl)
 
   (require (lib "mzssl.ss" "openssl"))
 
@@ -62,7 +62,8 @@
       
       ;; This will be set to the frame object
       (define main-frame #f)
-      
+      (define done? #f)
+
       ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;  Error Handling                                         ;;
       ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -159,37 +160,39 @@
 			;;  the uidvalidity value. Otherwise, for backward
 			;;  compatibility, we allow the case that it wasn't
 			;;  recorded.
-			(if (and (pair? l)
-				 (or (not (car l)) (integer? (car l))))
-			    (begin
-			      (set! uid-validity (car l))
-			      (cdr l))
-			    l)))
+			(let ([l (if (and (pair? l)
+                                          (or (not (car l)) (integer? (car l))))
+                                     (begin
+                                       (set! uid-validity (car l))
+                                       (cdr l))
+                                     l)])
+                          ;; Convert each entry to a vector:
+                          (map list->vector l))))
 
       (define mailbox-ht #f)
       (define (rebuild-mailbox-table!)
 	(set! mailbox-ht (make-hash-table 'equal))
-	(for-each (lambda (m) (hash-table-put! mailbox-ht (car m) m))
+	(for-each (lambda (m) (hash-table-put! mailbox-ht (vector-ref m 0) m))
 		  mailbox))
       (rebuild-mailbox-table!)
 
       (define (find-message id)
 	(hash-table-get mailbox-ht id (lambda () #f)))
       
-      (define message-uid car)
-      (define message-position cadr)
-      (define message-downloaded? caddr)
-      (define message-from cadddr)
-      (define message-subject (lambda (m) (list-ref m 4)))
-      (define message-flags (lambda (m) (list-ref m 5)))
-      (define message-size (lambda (m) (let ([l (list-tail m 6)])
-                                         ;; For backward compatibility:
-					 (if (pair? l)
-					     (car l)
-					     #f))))
-      (define set-message-position! (lambda (m v) (set-car! (cdr m) v)))
-      (define set-message-downloaded?! (lambda (m v) (set-car! (cddr m) v)))
-      (define set-message-flags! (lambda (m v) (set-car! (list-tail m 5) v)))
+      (define (message-uid m) (vector-ref m 0))
+      (define (message-position m) (vector-ref m 1))
+      (define (message-downloaded? m) (vector-ref m 2))
+      (define (message-from m) (vector-ref m 3))
+      (define (message-subject m) (vector-ref m 4))
+      (define (message-flags m) (vector-ref m 5))
+      (define (message-size m)
+        ;; For backward compatibility:
+        (if ((vector-length m) . < . 7)
+            #f
+            (vector-ref m 6)))
+      (define (set-message-position! m v) (vector-set! m 1 v))
+      (define (set-message-downloaded?! m v) (vector-set! m 2 v))
+      (define (set-message-flags! m v) (vector-set! m 5 v))
 
       (define (message-marked? m) (memq 'marked (message-flags m)))
       
@@ -197,7 +200,7 @@
 	(status "Saving mailbox information...")
 	(with-output-to-file (build-path mailbox-dir "mailbox")
 	  (lambda ()
-	    (write (cons uid-validity mailbox)))
+	    (write (cons uid-validity (map vector->list mailbox))))
 	  'truncate))
       
       ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -353,7 +356,7 @@
 					     '(uid))
 			  (break-bad)))]
 		 [uids (map car data)]
-		 [curr-uids (map car mailbox)]
+		 [curr-uids (map (lambda (m) (vector-ref m 0)) mailbox)]
 		 [deleted (if continue?
 			      null
 			      (remove* uids curr-uids))]
@@ -411,26 +414,30 @@
 			   (if continue? mailbox null)
 			   (map
 			    (lambda (uid pos)
-			      (let ([old (assoc uid mailbox)])
-				`(,uid ,pos 
-				       ,(if old
-					    (message-downloaded? old)
-					    #f)
-				       ,(if old
-					    (message-from old)
-					    (extract-field "From" (get-header uid)))
-				       ,(if old
-					    (message-subject old)
-					    (extract-field "Subject" (get-header uid)))
-				       ,(if old
-					    (message-flags old)
-					    null)
-				       ,(if old
-					    (message-size old)
-					    (let ([new (assoc uid new-uid/size-map)])
-					      (if new
-						  (cdr new)
-						  0))))))
+			      (let ([old (ormap (lambda (m)
+                                                  (and (equal? uid (message-uid m))
+                                                       m))
+                                                mailbox)])
+                                (list->vector
+                                 `(,uid ,pos 
+                                        ,(if old
+                                             (message-downloaded? old)
+                                             #f)
+                                        ,(if old
+                                             (message-from old)
+                                             (extract-field "From" (get-header uid)))
+                                        ,(if old
+                                             (message-subject old)
+                                             (extract-field "Subject" (get-header uid)))
+                                        ,(if old
+                                             (message-flags old)
+                                             null)
+                                        ,(if old
+                                             (message-size old)
+                                             (let ([new (assoc uid new-uid/size-map)])
+                                               (if new
+                                                   (cdr new)
+                                                   0)))))))
 			    uids positions)))
 		    (rebuild-mailbox-table!)
 		    (write-mailbox)
@@ -786,14 +793,25 @@
             (let ([w (get-width)])
               (let-values ([(_1 h _2 _3) (send dc get-text-extent "yX")])
                 
-                (let ([old-clip (send dc get-clipping-region)])
-                  (send dc set-clipping-rect x y (+ FROM-WIDTH (/ first-gap 2) (- line-space)) h)
+                (let* ([old-clip (send dc get-clipping-region)]
+                       [new-clip #f]
+                       [set-clip
+                        (lambda (x y w h)
+                          (if old-clip
+                              (begin
+                                (send dc set-clipping-region #f)
+                                (unless new-clip
+                                  (set! new-clip (make-object region% dc)))
+                                (send new-clip set-rectangle x y w h)
+                                (send new-clip intersect old-clip)
+                                (send dc set-clipping-region new-clip))
+                              (send dc set-clipping-rect x y w h)))])
+                  (set-clip x y (+ FROM-WIDTH (/ first-gap 2) (- line-space)) h)
                   (send dc draw-text from (+ x left-edge-space) y #t)
-                  (send dc set-clipping-rect 
-                        (+ x FROM-WIDTH (/ first-gap 2) line-space)
-                        y 
-                        (+ SUBJECT-WIDTH (/ second-gap 2) (- line-space))
-                        h)
+                  (set-clip (+ x FROM-WIDTH (/ first-gap 2) line-space)
+                            y 
+                            (+ SUBJECT-WIDTH (/ second-gap 2) (- line-space))
+                            h)
                   (send dc draw-text subject (+ x FROM-WIDTH (/ first-gap 2) line-space) y #t)
                   (send dc set-clipping-region old-clip)
                   (send dc draw-text
@@ -969,9 +987,9 @@
       (send global-keymap add-function "next-msg"
 	    (lambda (w e) (send header-list select-next)))
       (send global-keymap add-function "mark-msg"
-	    (lambda (w e) (send header-list mark-message)))
+	    (lambda (w e) (send header-list mark-message #t)))
       (send global-keymap add-function "unmark-msg"
-	    (lambda (w e) (send header-list unmark-message)))
+	    (lambda (w e) (send header-list unmark-message #t)))
       (send global-keymap add-function "hit-msg"
 	    (lambda (w e) (send header-list hit)))
       (send global-keymap add-function "scroll-down"
@@ -1000,7 +1018,7 @@
 	    (lambda (w e) 
 	      (purge-marked/update-headers)))
       (send global-keymap add-function "gc"
-	    (lambda (w e) (dump-memory-stats) (collect-garbage)))
+	    (lambda (w e) (collect-garbage) (collect-garbage)))
       (send global-keymap add-function "show-memory-graph"
 	    (lambda (w e) (show-memory-graph)))
       
@@ -1136,6 +1154,7 @@
 					    (inner #t can-close?)))]
           [define/augment on-close (lambda () 
 				     (logout)
+                                     (set! done? #t)
 				     (inner (void) on-close))]
           [define/override on-subwindow-char
             (lambda (w e)
@@ -1180,13 +1199,13 @@
       (make-object separator-menu-item% msg-menu)
       (make-object menu-item% "&Mark Selected" msg-menu
 		   (lambda (i e)
-		     (send header-list mark-message))
+		     (send header-list mark-message #t))
 		   #\D)
       (make-object menu-item% "&Unmark Selected" msg-menu
         (lambda (i e)
-          (send header-list unmark-message))
+          (send header-list unmark-message #t))
         #\U)
-      (define (mark-all mark?)
+      (define (mark-all mark? between?)
 	(let* ([marked-uids (map message-uid (filter (if mark?
 							 (lambda (x) (not (message-marked? x)))
 							 message-marked?)
@@ -1198,17 +1217,31 @@
 	     (when (member (send i user-data) marked-uids)
 	       (send i select #t)
 	       (if mark?
-		   (send header-list mark-message)
-		   (send header-list unmark-message))))
-	   items)
+		   (send header-list mark-message #f)
+		   (send header-list unmark-message #f))))
+           (if between?
+               (let ([drop-some
+                      (lambda (items)
+                        (let loop ([items items])
+                          (if (null? items)
+                              null
+                              (if (message-marked? (find-message (send (car items) user-data)))
+                                  items
+                                  (loop (cdr items))))))])
+                 (reverse (drop-some (reverse (drop-some items)))))
+               items))
+          (write-mailbox)
+          (status "~aarked all" (if mark? "M" "Unm"))
 	  (if selected
 	      (send selected select #t)
 	      (send (send header-list get-selected) select #f))))
       
       (make-object menu-item% "Mark All" msg-menu
-        (lambda (i e) (mark-all #t)))
+        (lambda (i e) (mark-all #t #f)))
       (make-object menu-item% "Unmark All" msg-menu
-        (lambda (i e) (mark-all #f)))
+        (lambda (i e) (mark-all #f #f)))
+      (make-object menu-item% "Mark All Between Marked" msg-menu
+        (lambda (i e) (mark-all #t #t)))
       
       (make-object separator-menu-item% msg-menu)
       (make-object menu-item% "&Delete Marked" msg-menu
@@ -1294,6 +1327,7 @@
       (make-object menu-item% "by Subject" sort-menu (lambda (i e) (sort-by-subject)))
       (make-object menu-item% "by Date" sort-menu (lambda (i e) (sort-by-date)))
       (make-object menu-item% "by Order Received" sort-menu (lambda (i e) (sort-by-order-received)))
+      (make-object menu-item% "by Size" sort-menu (lambda (i e) (sort-by-size)))
       (make-object menu-item% "by Header Field..." sort-menu (lambda (i e) (sort-by-header-field)))
       
       ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1310,7 +1344,7 @@
           (inherit get-items show-focus set-cursor select)
           (field [selected #f])
           
-          (define/public (mark marked?)
+          (define/public (mark marked? update?)
             (when selected
               (let* ([uid (send selected user-data)]
                      [m (find-message uid)]
@@ -1320,13 +1354,15 @@
                   (set-message-flags! m (if marked?
                                             (cons 'marked flags)
                                             (remq 'marked flags)))
-                  (write-mailbox)
+                  (when update?
+                    (write-mailbox))
                   (apply-style selected 
                                (if marked? 
                                    marked-delta
                                    unmarked-delta))
-                  (status "~aarked" 
-                          (if marked? "M" "Unm"))))))
+                  (when update?
+                    (status "~aarked" 
+                            (if marked? "M" "Unm")))))))
           
           (define/public (archive-current-message)
             (when selected
@@ -1349,10 +1385,10 @@
             (when selected
               (on-double-select selected)))
           
-          (define/public (mark-message)
-            (mark #t))
-          (define/public (unmark-message)
-            (mark #f))
+          (define/public (mark-message update?)
+            (mark #t update?))
+          (define/public (unmark-message update?)
+            (mark #f update?))
           (define/public (selected-hit?) (eq? selected current-selected))
           (define/override (on-select i)
             (set! selected i))
@@ -1572,15 +1608,19 @@
 				(set-current-selected #f))
 			  (send header-list delete-item i)))))
 		items)
-	       (for-each
-		(lambda (m)
-		  (unless (assoc (message-uid m) old-mailbox)
-			  (let ([i (add-message m)])
-			    (unless set-selection?
-				    (set! set-selection? #t)
-				    (send i select #t)
-				    (send i scroll-to)))))
-		mailbox)
+               (let ([old-ids (make-hash-table 'equal)])
+                 (for-each (lambda (m)
+                             (hash-table-put! old-ids (message-uid m) #t))
+                           old-mailbox)
+                 (for-each
+                  (lambda (m)
+                    (unless (hash-table-get old-ids (message-uid m) #f)
+                      (let ([i (add-message m)])
+                        (unless set-selection?
+                          (set! set-selection? #t)
+                          (send i select #t)
+                          (send i scroll-to)))))
+                  mailbox))
 	       (send (send header-list get-editor) end-edit-sequence))))))
       
       ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1858,12 +1898,13 @@
 
       ;; Optional GC icon (lots of work for this little thing!)
       (when (get-pref 'sirmail:show-gc-icon)
-	(let* ([gif (make-object bitmap% (build-path (collection-path "icons") "recycle.gif"))]
+	(let* ([gif (make-object bitmap% (build-path (collection-path "icons") "recycle.png"))]
 	       [w (send gif get-width)]
 	       [h (send gif get-height)]
-	       [recycle-bm (make-object bitmap% (quotient w 2) (quotient h 2))]
+               [scale 1]
+	       [recycle-bm (make-object bitmap% (quotient w scale) (quotient h scale))]
 	       [dc (make-object bitmap-dc% recycle-bm)])
-	  (send dc set-scale 0.5 0.5)
+	  (send dc set-scale (/ 1 scale) (/ 1 scale))
 	  (send dc draw-bitmap gif 0 0)
 	  (send dc set-bitmap #f)
 	  (let* ([w (send recycle-bm get-width)]
@@ -1926,7 +1967,8 @@
              (update-status-text))
            (semaphore-post status-sema)
 	   (sleep 5)
-           (loop))))
+           (unless done?
+             (loop)))))
       
       (define vsz #f)
       (define rss #f)
@@ -2025,6 +2067,10 @@
         (identify-sorted sorting-text-from))
       (define (sort-by-subject) 
         (sort-by subject<?)
+        (reset-sorting-text-styles)
+        (identify-sorted sorting-text-subject))
+      (define (sort-by-size) 
+        (sort-by size<?)
         (reset-sorting-text-styles)
         (identify-sorted sorting-text-subject))
       (define (sort-by-order-received) 
@@ -2250,6 +2296,13 @@
                                       s))
                                 "")))])
           (string-cmp/default-uid (simplify a) (simplify b) a b)))
+
+      (define (size<? a b)
+        (let ([sa (or (message-size a) 0)]
+              [sb (or (message-size b) 0)])
+          (if (= sa sb)
+              (< (message-uid a) (message-uid b))
+              (< sa sb))))
       
       ;; string-cmp : string string message message -> boolean
       (define (string-cmp/default-uid str-a str-b a b)
@@ -2513,8 +2566,8 @@
 					      (send t change-style url-delta s e)))
 				    (when (eq? (system-type) 'macosx)
                                       (when fn
-                                        (let ([safer-fn (normalize-path (string-append "~/Desktop/" 
-                                                                                       (regexp-replace* #rx"[/\"|:<>\\]" fn "-")))])
+                                        (let ([safer-fn (normalize-path (build-path (find-system-path 'desk-dir)
+                                                                                    (regexp-replace* #rx"[/\"|:<>\\]" fn "-")))])
 					  (insert " " set-standard-style)
                                           (insert "[save to ~/Desktop/ & open]"
                                                   (lambda (t s e)
@@ -3126,7 +3179,7 @@
                   info)
         (send text end-edit-sequence)
         
-        (set-cdr! (last-pair colors) colors)
+        ; (set-cdr! (last-pair colors) colors) ;; FIXME: need a cyclic list
         (send frame show #t))
       
       (define (make-and-regexp first second)

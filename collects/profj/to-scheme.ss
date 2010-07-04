@@ -4,9 +4,11 @@
            "name-utils.scm"
            "graph-scc.ss"
            "parameters.ss"
-           (lib "class.ss")
-           (lib "list.ss")
-           (lib "etc.ss"))
+           mzlib/class
+           mzlib/list
+           mzlib/etc
+           (prefix int-set: (lib "integer-set.ss"))
+           )
   
   (provide translate-program translate-interactions (struct compilation-unit (contains code locations depends)))
   
@@ -370,12 +372,12 @@
      (if (to-file) 
          (let ((location (build-path (begin (send type-recs set-location! (def-file (car defs)))
                                             (send type-recs get-compilation-location) "compiled")
-                                     (string-append (symbol->string (module-name)) ".zo"))))
+                                     (string-append (symbol->string (module-name)) "_ss.zo"))))
            (for-each 
             (lambda (def) (send type-recs set-composite-location (id-string (def-name def)) location))
             defs)
-           `(file ,(path->string (build-path (string-append (symbol->string (module-name)) ".zo")))))
-         (module-name)))
+           `(file ,(path->string (build-path (string-append (symbol->string (module-name)) ".ss")))))
+         #`(quote #,(module-name))))
     (let* ((translated-defs 
             (map (lambda (d)
                    (cond
@@ -388,11 +390,11 @@
            (reqs (filter-reqs group-reqs defs type-recs)))
       (values (if (> (length translated-defs) 1)
                   (cons (make-syntax #f `(module ,(module-name) mzscheme
-                                           (require (lib "class.ss")
-                                                    (prefix javaRuntime: (lib "runtime.scm" "profj" "libs" "java"))
-                                                    (prefix c: (lib "contract.ss"))
+                                           (require mzlib/class
+                                                    (prefix javaRuntime: profj/libs/java/runtime)
+                                                    (prefix c: mzlib/contract)
                                                     ,@(remove-dup-syntax (translate-require reqs type-recs)))
-                                           ,@(map car translated-defs))
+                                           ,@(apply append (map car translated-defs)))
                                      #f)
                         (map cadr translated-defs))
                   (list (make-syntax #f 
@@ -400,14 +402,15 @@
                                                                                  (symbol->string (module-name)) 
                                                                                  ""))
                                         mzscheme
-                                        (require (lib "class.ss")
-                                                 (prefix javaRuntime: (lib "runtime.scm" "profj" "libs" "java"))
-                                                 (prefix c: (lib "contract.ss"))
+                                        (require mzlib/class
+                                                 (prefix javaRuntime: profj/libs/java/runtime)
+                                                 #;(prefix javaRuntime: (lib "runtime.scm" "profj" "libs" "java"))
+                                                 (prefix c: mzlib/contract)
                                                  ,@(remove-dup-syntax
                                                     (translate-require (map (lambda (r) (list (def-file (car defs)) r))
                                                                             (def-uses (car defs)))
                                                                        type-recs)))
-                                        ,(car (car translated-defs)))
+                                        ,@(car (car translated-defs)))
                                      #f)))
               (filter (lambda (req) (not (member req reqs)))
                       (map (lambda (r-pair) (cadr r-pair)) group-reqs)))))
@@ -596,38 +599,36 @@
                                    ,@field-getters/setters)))
 
           (let ((class-syntax
-                 (create-syntax 
-                  #f
-                  `(begin ,(unless (or (memq 'private (map modifier-kind (header-modifiers header)))
-                                       (eq? 'anonymous kind)
-                                       (eq? 'statement kind))
-                             provides)
-                          ,@(if (null? (accesses-private methods))
-                                null
-                                (list
-                                 (create-local-names (make-method-names (accesses-private methods) null))))
-                          #;(if (null? restricted-methods)
-                                null
-                                (list (create-local-names (append (make-method-names (accesses-private methods) null)
-                                                                  restricted-methods))))
-                          (define ,class
-                            (,class* ,(if extends-object?
-                                          (translate-id parent parent-src)
-                                          `(Object-Mix ,(translate-id parent parent-src)))
-                                     ,(translate-implements (header-implements header))
-                             
-                             (super-instantiate ())
-                             
-                             ,@(if (> depth 0)
-                                   `((init-field 
-                                      ,@(let loop ((d depth))
-                                          (cond
-                                            ((= d 0) null)
-                                            (else 
-                                             (cons (string->symbol (format "encl-this-~a~~f" d))
-                                                   (loop (sub1 d))))))))
-                                   null)
-                             
+                 `(,(unless (or (memq 'private (map modifier-kind (header-modifiers header)))
+                                 (eq? 'anonymous kind)
+                                 (eq? 'statement kind))
+                       provides)
+                    ,@(if (null? (accesses-private methods))
+                          null
+                          (list
+                           (create-local-names (make-method-names (accesses-private methods) null))))
+                    #;(if (null? restricted-methods)
+                          null
+                          (list (create-local-names (append (make-method-names (accesses-private methods) null)
+                                                            restricted-methods))))
+                    (define ,class
+                      (,class* ,(if extends-object?
+                                    (translate-id parent parent-src)
+                                    `(Object-Mix ,(translate-id parent parent-src)))
+                               ,(translate-implements (header-implements header))
+                               
+                               (super-instantiate ())
+                               
+                               ,@(if (> depth 0)
+                                     `((init-field 
+                                        ,@(let loop ((d depth))
+                                            (cond
+                                              ((= d 0) null)
+                                              (else 
+                                               (cons (string->symbol (format "encl-this-~a~~f" d))
+                                                     (loop (sub1 d))))))))
+                                     null)
+                               
                              ,@(if (null? closure-args)
                                    null
                                    `((init-field 
@@ -653,8 +654,8 @@
                                  (append
                                   (map car translated-fields)
                                   (map cadr translated-fields)))
-                                 
-                                 
+                             
+                             
                              ,@(create-private-setters/getters (accesses-private fields))
                              
                              ,@(generate-inner-makers (members-inner class-members) 
@@ -736,14 +737,28 @@
                                                              (filter (lambda (m)
                                                                        (and (method? m) (method-src m))) (def-members d))))
                                                      class-defs))
-                                               (class/lookup-funcs
+                                               (tested-methods
+                                                (map (lambda (c/m)
+                                                       (cons (car c/m)
+                                                             (map (lambda (m) (id-string (method-name m))) (cdr c/m))))
+                                                     class/methods-list))
+                                               (tested-methods-expr-srcs
+                                                (map (lambda (c/m)
+                                                       (cons (car c/m)
+                                                             (map 
+                                                              (lambda (m)
+                                                                (let ([srcs (get-srcs (method-body m))])
+                                                                  (srcs->spans srcs)))
+                                                              (cdr c/m))))
+                                                     class/methods-list))
+                                               #;(class/lookup-funcs
                                                 (map (lambda (c)
                                                        (let* ((m-name (lambda (m) (id-string (method-name m))))
                                                               (m-start (lambda (m) (src-pos (method-src m))))
                                                               (m-stop (lambda (m)
                                                                         (+ (m-start m) (src-span (method-src m))))))                                                       
                                                          `(let ((methods-covered ',(map (lambda (m) `(,(m-name m) #f))
-                                                                                 (cdr c)))                                                              
+                                                                                        (cdr c)))                                                              
                                                                 (srcs ',(map (lambda (m)
                                                                                `(,(m-name m) ,(get-srcs (method-body m))))
                                                                              (cdr c))))
@@ -761,7 +776,16 @@
                                                                                    (set-cdr! (assq ,(m-name m) methods-covered) (list #t)))))))
                                                                          (cdr c))))))))
                                                      class/methods-list)))
-                                          (list `(define/override (testCoverage-boolean-int report? src)
+                                          (list 
+                                           `(define/override (testedClasses)
+                                              (append (list ,@test-classes) (super testedClasses)))
+                                           `(define/override (testedMethods-dynamic class-name)
+                                              (or (assq class-name (list ,@tested-methods))
+                                                  (super testedMethods-dynamic class-name)))
+                                           `(define/override (testMethodsSrcs-dynamic class-name)
+                                              (or (assq class-name (list ,@tested-methods-expr-srcs))
+                                                  (super testedMethodsSrcs-dynamic class-name)))
+                                           #;`(define/override (testCoverage-boolean-int report? src)
                                                    (let ((class/lookups (list ,@class/lookup-funcs)))
                                                      (if report?
                                                          (append (map (lambda (c) (list (car c) (cadr c)))
@@ -815,12 +839,12 @@
                                  (members-static-init class-members))
                           
                           )
-                  #f)))
+                  ))
             
             ;reset the old class-specific info if in inner-class
             (begin0
               (if (> depth 0)
-                  class-syntax
+                  (cons 'begin class-syntax)
                   (list class-syntax 
                         (make-syntax 
                          #f
@@ -1308,32 +1332,32 @@
          extends))
   
   (define (get-srcs stmt) 
-  (cond
-    [(ifS? stmt)
-     (append (get-expr-srcs (ifS-cond stmt))
-             (get-srcs (ifS-then stmt))
-             (get-srcs (ifS-else stmt)))]
-    [(throw? stmt)
-     (get-expr-srcs (throw-expr stmt))]
-    [(return? stmt)
-     (get-expr-srcs (return-expr stmt))]
-    [(while? stmt)
-     (append (get-expr-srcs (while-cond stmt))
-             (get-srcs (while-loop stmt)))]
-    [(doS? stmt)
-     (append (get-srcs (doS-loop stmt))
-             (get-expr-srcs (doS-cond stmt)))]
-    [(for? stmt)
-     (get-srcs (for-loop stmt))]
-    [(try? stmt)
-     (append (get-srcs (try-body stmt))
-             (apply append
-                    (map (compose get-srcs catch-body) (try-catches stmt))))
-     ]
-    [(block? stmt)
-     (apply append (map get-srcs (block-stmts stmt)))]
-    [(statement-expression? stmt) (get-expr-srcs stmt)]
-    [else null]))
+    (cond
+      [(ifS? stmt)
+       (append (get-expr-srcs (ifS-cond stmt))
+               (get-srcs (ifS-then stmt))
+               (get-srcs (ifS-else stmt)))]
+      [(throw? stmt)
+       (get-expr-srcs (throw-expr stmt))]
+      [(return? stmt)
+       (get-expr-srcs (return-expr stmt))]
+      [(while? stmt)
+       (append (get-expr-srcs (while-cond stmt))
+               (get-srcs (while-loop stmt)))]
+      [(doS? stmt)
+       (append (get-srcs (doS-loop stmt))
+               (get-expr-srcs (doS-cond stmt)))]
+      [(for? stmt)
+       (get-srcs (for-loop stmt))]
+      [(try? stmt)
+       (append (get-srcs (try-body stmt))
+               (apply append
+                      (map (compose get-srcs catch-body) (try-catches stmt))))
+       ]
+      [(block? stmt)
+       (apply append (map get-srcs (block-stmts stmt)))]
+      [(statement-expression? stmt) (get-expr-srcs stmt)]
+      [else null]))
   
   (define (get-expr-srcs expr)
     (cond
@@ -1391,6 +1415,13 @@
              (get-expr-srcs (assignment-right expr))))
       (else (list (src-pos (expr-src expr))))))
   
+  (define (srcs->spans srcs)
+    (cond
+      [(null? srcs) (int-set:make-range)]
+      [else (int-set:union (int-set:make-range (src-pos (car srcs))
+                                               (+ (src-pos (car srcs)) (src-span (car srcs))))
+                           (srcs->spans (cdr srcs)))]))
+  
   ;translate-interface: interface-def type-records-> (list syntax)
   (define (translate-interface iface type-recs)
     (let* ((header (def-header iface))
@@ -1413,21 +1444,21 @@
                                                                (format "dynamic-~a/c" (class-name))
                                                                (format "static-~a/c" (class-name)))))))
         
-        (list `(begin ,provides
-                      (define ,syntax-name (,interface ,(translate-parents (header-extends header))
-                                            ,@(make-iface-method-names (members-method members))))
-                      ,@(create-static-fields static-field-names (members-field members))
-                      ,@(append (generate-wrappers (class-name)
-                                                   "Object"
-                                                   (append
-                                                    (class-record-methods 
-                                                     (send type-recs get-class-record (list (class-name))))
-                                                    (class-record-methods
-                                                     (send type-recs get-class-record (list "Object" "java" "lang"))))
-                                                   null)
-                                (generate-contract-defs (class-name)))
-                      )
-              (make-syntax #f `(module ,name mzscheme (require ,(module-name)) ,provides) #f)))))
+        (list `(,provides
+                (define ,syntax-name (,interface ,(translate-parents (header-extends header))
+                                                 ,@(make-iface-method-names (members-method members))))
+                ,@(create-static-fields static-field-names (members-field members))
+                ,@(append (generate-wrappers (class-name)
+                                             "Object"
+                                             (append
+                                              (class-record-methods 
+                                               (send type-recs get-class-record (list (class-name))))
+                                              (class-record-methods
+                                               (send type-recs get-class-record (list "Object" "java" "lang"))))
+                                             null)
+                          (generate-contract-defs (class-name)))
+                )
+              (make-syntax #f `(module ,name mzscheme (require ,(module-require)) ,provides) #f)))))
 
   ;-----------------------------------------------------------------------------------------------------------------
   ;Member translation functions
@@ -2200,12 +2231,12 @@
   
   (define (translate-expression expr)
     (let ((translated-expr (translate-expression-unannotated expr)))
-      (if (and (not (to-file)) (coverage?) (expr-src expr))
+      (if (and (not (to-file)) (coverage?) (not (check? expr)) (expr-src expr))
           (make-syntax #f `(begin0 ,translated-expr
                                    (cond 
                                      ((namespace-variable-value 'current~test~object% #f (lambda () #f))
                                       => (lambda (test)
-                                           (send test covered-position ,(expr-src expr))))))
+                                           (send test analyze-position (quote ,(src->list (expr-src expr))))))))
                        #f)
           translated-expr)))
   
@@ -2999,6 +3030,9 @@
                                                     (check-expect-actual expr)
                                                     (check-expect-range expr)
                                                     (expr-src expr)))
+      ((check-rand? expr) (translate-check-rand (check-rand-test expr)
+                                                (check-rand-range expr)
+                                                (expr-src expr)))
       ((check-catch? expr) (translate-check-catch (check-catch-test expr)
                                                   (check-catch-exn expr)
                                                   (expr-src expr)))
@@ -3020,10 +3054,22 @@
       (make-syntax #f 
                    `(,(if (not range) 'javaRuntime:compare 'javaRuntime:compare-within)
                       ,@(if range (list t a r) (list t a))
-                      ,extracted-info ,src
+                      ,extracted-info (quote ,(src->list src))
                       (namespace-variable-value 'current~test~object% #f 
                                                 (lambda () #f))
                       ,(testcase-ext?))
+                   (build-src src))))
+  
+  ;translate-check-rand: expression expression src -> syntax
+  (define (translate-check-rand test range src)
+    (let ([t (make-syntax #f `(lambda () ,(translate-expression test)) #f)]
+          [r (translate-expression range)]
+          [extracted-info (checked-info test)])
+      (make-syntax #f
+                   `(javaRuntime:compare-rand ,t ,r ,extracted-info (quote ,(src->list src))
+                                              (namespace-variable-value 'current~test~object% #f
+                                                                        (lambda () #f))
+                                              )
                    (build-src src))))
   
   ;translate-check-catch: expression type-spec src -> syntax
@@ -3031,7 +3077,8 @@
     (let ((t (create-syntax #f `(lambda () ,(translate-expression test)) #f))
           (n (get-class-name catch)))
       (make-syntax #f
-                   `(javaRuntime:check-catch ,t ,(symbol->string (syntax-object->datum n)) ,n ,(checked-info test) ,src
+                   `(javaRuntime:check-catch ,t ,(symbol->string (syntax-object->datum n)) ,n ,(checked-info test) 
+                                             (quote ,(src->list src))
                                              (namespace-variable-value 'current~test~object% #f
                                                                        (lambda () #f)))
                    (build-src src))))
@@ -3055,7 +3102,7 @@
                                                  'eq?)
                                             ,info
                                             ,(if (method-record? comp) (method-record-name comp) "==")
-                                            ,src
+                                            (quote ,(src->list src))
                                             (namespace-variable-value 'current~test~object% #f (lambda () #f)))
                    (build-src src))))
   
@@ -3064,7 +3111,7 @@
     (let ((t (create-syntax #f `(lambda () ,(translate-expression mutatee)) #f))
           (c (create-syntax #f `(lambda () ,(translate-expression check)) #f)))
       (make-syntax #f
-                   `(javaRuntime:check-mutate ,t ,c ,(checked-info mutatee) ,src
+                   `(javaRuntime:check-mutate ,t ,c ,(checked-info mutatee) (quote ,(src->list src))
                                               (namespace-variable-value 'current~test~object% #f
                                                                         (lambda () #f)))
                    (build-src src))))

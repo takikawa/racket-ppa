@@ -1,8 +1,7 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
 @title{Evaluation and Compilation}
-
 
 @defparam[current-eval proc (any/c . -> . any)]{
 
@@ -10,7 +9,7 @@ A parameter that determines the current @deftech{evaluation handler}.
 The evaluation handler is a procedure that takes a top-level form and
 evaluates it, returning the resulting values. The @tech{evaluation
 handler} is called by @scheme[eval], @scheme[eval-syntax], the default
-load handler, and @scheme[read-eval-print-loop] to evaluate a
+@tech{load handler}, and @scheme[read-eval-print-loop] to evaluate a
 top-level form. The handler should evaluate its argument in tail
 position.
 
@@ -56,7 +55,12 @@ it is sent to the @tech{evaluation handler}:
        @scheme[namespace-syntax-introduce] is applied to the entire
        syntax object.}
 
-}}
+}
+
+For interactive evaluation in the style of
+@scheme[read-eval-print-loop] and @scheme[load], wrap each expression
+with @schemeidfont{#%top-interaction}, which is normally bound to
+@scheme[#%top-interaction], before passing it to @scheme[eval].}
 
 
 @defproc[(eval-syntax [stx syntax?]
@@ -83,13 +87,18 @@ contain a module declaration), or @scheme[#f] for any other load.
  
 The default load handler reads forms from the file in
 @scheme[read-syntax] mode with line-counting enabled for the file
-port. It also @scheme[parameterize]s each read to set both
+port, unless the path has a @scheme[".zo"] suffix. It also
+@scheme[parameterize]s each read to set both
 @scheme[read-accept-compiled] and @scheme[read-accept-reader] to
-@scheme[#t]. After reading a single form, the form is passed to the
-current evaluation handler, wrapping the evaluation in a continuation
-prompt (see @scheme[call-with-continuation-prompt]) for the default
-continuation prompt tag with handler that propagates the abort to the
-continuation of the @scheme[load] call.
+@scheme[#t]. In addition, if @scheme[load-on-demand-enabled] is
+@scheme[#t], then @scheme[read-on-demand-source] is effectively set to
+the @tech{cleanse}d, absolute form of @scheme[path] during the
+@scheme[read-syntax] call. After reading a single form, the form is
+passed to the current @tech{evaluation handler}, wrapping the
+evaluation in a continuation prompt (see
+@scheme[call-with-continuation-prompt]) for the default continuation
+prompt tag with handler that propagates the abort to the continuation
+of the @scheme[load] call.
 
 If the second argument to the load handler is a symbol, then:
 
@@ -126,6 +135,12 @@ If the second argument to the load handler is a symbol, then:
        declaration independent of the current namespace's bindings.}
 
 }
+
+If the second argument to the load handler is @scheme[#f], then each
+expression read from the file is wrapped with
+@schemeidfont{#%top-interaction}, which is normally bound to
+@scheme[#%top-interaction], before passing it to the @tech{evaluation
+handler}.
 
 The return value from the default @tech{load handler} is the value of
 the last form from the loaded file, or @|void-const| if the file
@@ -166,11 +181,12 @@ handler}.
 
 An @tech{extension-load handler} takes the same arguments as a
 @tech{load handler}, but the file should be a platform-specific
-@deftech{dynamic extension}, typically with the file suffix @file{.so}
-(Unix), @file{.dll} (Windows), or @file{.dylib} (Mac OS X).  The file
-is loaded using internal, OS-specific primitives. See
-@secref["inside-mzscheme"] for more information on @tech{dynamic
-extensions}.}
+@deftech{dynamic extension}, typically with the file suffix
+@filepath{.so} (Unix), @filepath{.dll} (Windows), or @filepath{.dylib}
+(Mac OS X).  The file is loaded using internal, OS-specific
+primitives. See @other-manual['(lib
+"scribblings/inside/inside.scrbl")] for more information on
+@tech{dynamic extensions}.}
 
 
 @defproc[(load-extension [file path-string?]) any]{
@@ -192,54 +208,33 @@ handler} to load from a file that may have a compiled form. The
 @tech{compiled-load handler} is called by @scheme[load/use-compiled].
 
 The protocol for a @tech{compiled-load handler} is the same as for the
-@scheme{load handler} (see @scheme[current-load]), except that a
+@tech{load handler} (see @scheme[current-load]), except that a
 @tech{compiled-load handler} is expected to set
 @scheme[current-load-relative-directory] itself. The default
-@tech{compiled-load handler}, however, checks for @file{.zo} files
-(usually produced with @scheme[compile-file]) and @file{.so} (Unix),
-@file{.dll} (Windows), or @file{.dylib} (Mac OS X) files.
+@tech{compiled-load handler}, however, checks for @filepath{.zo} files
+(usually produced with @scheme[compile-file]) and @filepath{.so} (Unix),
+@filepath{.dll} (Windows), or @filepath{.dylib} (Mac OS X) files.
 
 The check for a compiled file occurs whenever the given path
-@scheme[_file] ends with any extension (e.g., @file{.ss} or
-@file{.scm}), and the check consults the subdirectories indicated by
+@scheme[_file] ends with any extension (e.g., @filepath{.ss} or
+@filepath{.scm}), and the check consults the subdirectories indicated by
 the @scheme[use-compiled-file-paths] parameter relative to
-@scheme[_file].  The subdirectories are checked in order. A @file{.zo}
+@scheme[_file].  The subdirectories are checked in order. A @filepath{.zo}
 version of the file is loaded if it exists directly in one of the
-indicated subdirectories, or a @file{.so}/@file{.dll}/@file{.dylib}
-version of the file is loaded if it exists within a @file{native}
+indicated subdirectories, or a @filepath{.so}/@filepath{.dll}/@filepath{.dylib}
+version of the file is loaded if it exists within a @filepath{native}
 subdirectory of a @scheme[use-compiled-file-paths] directory, in an
 even deeper subdirectory as named by
 @scheme[system-library-subpath]. A compiled file is loaded only if its
 modification date is not older than the date for @scheme[_file]. If
-both @file{.zo} and @file{.so}/@file{.dll}/@file{.dylib} files are
-available, the @file{.so}/@file{.dll}/@file{.dylib} file is used.
+both @filepath{.zo} and @filepath{.so}/@filepath{.dll}/@filepath{.dylib} files are
+available, the @filepath{.so}/@filepath{.dll}/@filepath{.dylib} file is used.
 
-Multiple files can be combined into a single
-@file{.so}/@file{.dll}/@file{.dylib} file by creating a special file
-@indexed-file{_loader.so}, @indexed-file{_loader.dll}, or
-@indexed-file{_loader.dylib}. When such a file is present where a
-normal @file{.so}/@file{.dll}/@file{.dylib} would be loaded, then the
-@file{_loader} file is first loaded via @scheme[load-extension]. The
-result returned by @file{_loader} must be a procedure that accepts a
-symbol. This procedure will be called with a symbol matching the base
-part of @scheme[_file] (without the directory path part of the name
-and without the filename extension), and the result must be two
-values; if @scheme[#f] is returned as the first result, then
-@scheme[load/use-compiled] ignores @file{_loader} for @scheme[_file]
-and continues as normal. Otherwise, the first return value is yet
-another procedure. When this procedure is applied to no arguments, it
-should have the same effect as loading @scheme[_file]. The second
-return value is either a symbol or @scheme[#f]; a symbol indicates
-that calling the returned procedure has the effect of declaring the
-module named by the symbol (which is potentially useful information to
-a @tech{load handler}).
+While a @filepath{.zo}, @filepath{.so}, @filepath{.dll}, or
+@filepath{.dylib} file is loaded, the current @scheme[load-relative]
+directory is set to the directory of the original @scheme[_file].
 
-While a @file{.zo}, @file{.so}, @file{.dll}, or @file{.dylib} file is
-loaded (or while a thunk returned by @file{_loader} is invoked), the
-current @scheme[load-relative] directory is set to the directory of
-the original @scheme[_file].
-
-If the original @scheme[_file] is loaded or a @file{.zo} variant is
+If the original @scheme[_file] is loaded or a @filepath{.zo} variant is
 loaded, the @tech{load handler} is called to load the file. If any
 other kind of file is loaded, the @tech{extension-load handler} is
 called.}
@@ -265,7 +260,7 @@ immediately expanded (see @secref["pathutils"]) and converted to a
 path. (The directory need not exist.)}
 
 
-@defparam[use-compiled-file-paths paths (listof path?)]{
+@defparam*[use-compiled-file-paths paths (listof path-string?) (listof path?)]{
 
 A list of relative paths, which defaults to @scheme[(list
 (string->path "compiled"))]. It is used by the @tech{compiled-load
@@ -274,12 +269,14 @@ handler} (see @scheme[current-load/use-compiled]).}
 
 @defproc[(read-eval-print-loop) any]{
 
-Starts a new REPL using the current input, output, and error
-ports. The REPL wraps each evaluation with a continuation prompt using
-the default continuation prompt tag and prompt handler (see
-@scheme[call-with-continuation-prompt]). The REPL also wraps the read
-and print operations with a prompt for the default tag whose handler
-ignores abort arguments and continues the loop. The
+Starts a new @deftech{REPL} using the current input, output, and error
+ports. The REPL wraps each expression to evaluate with
+@schemeidfont{#%top-interaction}, which is normally bound to
+@scheme[#%top-interaction], and it wraps each evaluation with a
+continuation prompt using the default continuation prompt tag and
+prompt handler (see @scheme[call-with-continuation-prompt]). The REPL
+also wraps the read and print operations with a prompt for the default
+tag whose handler ignores abort arguments and continues the loop. The
 @scheme[read-eval-print-loop] procedure does not return until
 @scheme[eof] is read, at which point it returns @|void-const|.
 
@@ -395,3 +392,33 @@ Enforcing constants allows the compiler to inline some variable
 values, and it allows the native-code just-in-time compiler to
 generate code that skips certain run-time checks.}
 
+
+@defboolparam[compile-allow-set!-undefined allow?]{
+
+A parameter that determines how a @scheme[set!] expression is compiled
+when it mutates a global variable. If the value of this parameter is a
+true value, @scheme[set!] expressions for global variables are
+compiled so that the global variable is set even if it was not
+previously defined.  Otherwise, @scheme[set!] expressions for global
+variables are compiled to raise the
+@scheme[exn:fail:contract:variable] exception if the global variable
+is not defined at the time the @scheme[set!] is performed.  Note that
+this parameter is used when an expression is @italic{compiled}, not
+when it is @italic{evaluated}.}
+
+@defboolparam[eval-jit-enabled on?]{
+
+A parameter that determines whether the native-code just-in-time
+compiler (JIT) is enabled for code (compiled or not) that is passed to
+the default evaluation handler.  The default is @scheme[#t], unless
+the JIT is disabled through the @Flag{j}/@DFlag{no-jit} command-line
+flag to stand-alone MzScheme (or MrEd), or through the
+@as-index{@envvar{PLTNOMZJIT}} environment variable (set to any
+value).}
+
+@defboolparam[load-on-demand-enabled on?]{
+
+A parameter that determines whether the default @tech{load handler}
+sets @scheme[read-on-demand-source]. See @scheme[current-load] for
+more information. The default is @scheme[#t], unless it is disabled
+through the @Flag{d}/@DFlag{no-delay} command-line flag.}

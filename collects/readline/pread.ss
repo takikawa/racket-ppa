@@ -1,6 +1,5 @@
 (module pread mzscheme
-  (require (lib "readline.ss" "readline") (lib "file.ss")
-           (lib "list.ss") (lib "string.ss"))
+  (require readline/readline mzlib/file mzlib/list mzlib/string)
 
   ;; --------------------------------------------------------------------------
   ;; Configuration
@@ -32,7 +31,7 @@
         (let ([syms (namespace-mapped-symbols)])
           (unless (equal? syms last-syms)
             (set! last-syms syms)
-            (set! last-bstrs (sort! (map symbol->bstring syms) bytes<?)))
+            (set! last-bstrs (sort (map symbol->bstring syms) bytes<?)))
           last-bstrs))))
 
   (define (namespace-completion pat)
@@ -72,10 +71,14 @@
                      (not (equal? s (car local-history)))))
         (add-history-bytes s)
         (set! local-history (cons s local-history))
-        (let loop ([n (max-history)] [l local-history])
-          (cond [(null? l) 'done]
-                [(zero? n) (set-cdr! l '())]
-                [else (loop (sub1 n) (cdr l))])))
+        (set! local-history
+              (let loop ([n (max-history)] [l local-history])
+                (cond [(null? l) null]
+                      [(zero? n) null]
+                      [else (let ([p (loop (sub1 n) (cdr l))])
+                              (if (eq? p (cdr l))
+                                  l
+                                  (cons (car l) p)))]))))
       s))
 
   (exit-handler

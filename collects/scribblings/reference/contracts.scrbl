@@ -1,20 +1,27 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
-@title[#:tag "mzlib:contract" #:style 'toc]{Contracts}
+@title[#:tag "contracts" #:style 'toc]{Contracts}
 
-@declare-exporting[big (lib "big/contract")]
+This chapter is long on detail and short on the motivation
+and pragmatics of using contracts. See
+@guidesecref["contracts"] in the Guide for more of the
+latter and less of the former.
 
 A @defterm{contract} controls the flow of values to ensure that the
 expectations of one party are met by another party.  The
 @scheme[provide/contract] form is the primary mechanism for
 associating a contract with a binding.
 
+@note-lib[scheme/contract #:use-sources (scheme/private/contract-ds
+                                         scheme/private/contract
+                                         scheme/private/contract-guts)]
+
 @local-table-of-contents[]
 
 @; ----------------------------------------
 
-@section{Flat Contracts}
+@section{Data-structure Contracts}
 
 A @deftech{flat contract} can be fully checked immediately for
 a given value.
@@ -73,8 +80,6 @@ The @scheme[or/c] result tests any value by applying the contracts in
 order, from left to right, with the exception that it always moves the
 non-@tech{flat contracts} (if any) to the end, checking them last.}
  
-\scmutilsectiono{and/c}{contract}{contract}
-
 @defproc[(and/c [contract (or/c contract? (any/c . -> . any/c))] ...)
          contract?]{
 
@@ -118,6 +123,10 @@ Like @scheme[</c], but for @scheme[<=].}
 @defproc[(>=/c [n number?]) flat-contract?]{
 Like @scheme[</c], but for @scheme[>=].}
 
+@defproc[(between/c [n number?] [m number?])
+flat-contract?]{ Returns a flat contract that requires the
+input to be a between @scheme[n] and @scheme[m] or equal to
+one of them.}
 
 @defproc[(real-in [n real?][m real?]) flat-contract?]{
 
@@ -136,7 +145,7 @@ between @scheme[j] and @scheme[k], inclusive.}
 A flat contract that requires the input to be an exact non-negative integer.}
 
 
-@defproc[(string/len [len nonnegative-exact-integer?]) flat-contract?]{
+@defproc[(string-len/c [len nonnegative-exact-integer?]) flat-contract?]{
 
 Returns a flat contract that recognizes strings that have fewer than
 @scheme[len] characters.}
@@ -166,24 +175,6 @@ void, and undefined.}
 
 Accepts any number of symbols and returns a flat contract that
 recognizes those symbols.}
-
-
-@defproc[(is-a?/c [type (or/c class? interface?)]) flat-contract?]{
-
-Accepts a class or interface and returns a flat contract that
-recognizes objects that instantiate the class/interface.}
-
-
-@defproc[(implementation?/c [interface interface?]) flat-contract?]{
-
-Returns a flat contract that recognizes classes that implement
-@scheme[interface].}
-
-
-@defproc[(subclass?/c [class class?]) flat-contract?]{
-
-Returns a flat-contract that recognizes classes that
-are subclasses of @scheme[class].}
 
 
 @defproc[(vectorof [c (or/c flat-contract? (any/c . -> . any/c))]) flat-contract?]{
@@ -230,52 +221,28 @@ contract}. Beware that when this contract is applied to a value, the
 result is not @scheme[eq?] to the input.}
 
 
-@defproc[(list-mutableof [c (or/c flat-contract? (any/c . -> . any/c))]) flat-contract?]{
-
-Accepts a @tech{flat contract} (or a predicate that is converted to a
-flat contract via @scheme[flat-contract]) and returns a flat contract
-that checks for lists and mutable lists whose elements match the
-original contract.}
-
-
 @defproc[(listof [c (or/c contract? (any/c . -> . any/c))]) contract?]{
 
-Like @scheme[list-mutableof], but does recognize mutable lists, and
-the contract need not be a @tech{flat contract}. Beware that when this
-contract is applied to a value, the result is not @scheme[eq?] to the
-input.}
+Returns a contract that recognizes a list whose every element matches
+the contract @scheme[c]. Beware that when this contract is applied to
+a value, the result is not necessarily @scheme[eq?] to the input.}
 
-
-@defproc[(cons-mutable/c [car-c flat-contract?][cdr-c flat-contract?]) flat-contract?]{
-
-Returns a flat contract that recognizes apirs or mutable pairs whose
-first and second elements match @scheme[car-c] and @scheme[cdr-c],
-respectively.}
 
 @defproc[(cons/c [car-c contract?][cdr-c contract?]) contract?]{
 
-Like @scheme[cons-mutable/c], but does recognize mutable pairs, and
-the contracts need not be @tech{flat contracts}. Beware that when this
-contract is applied to a value, the result is not @scheme[eq?] to the
-input.}
-
-
-@defproc[(list-mutable/c [c (or/c flat-contract? (any/c . -> . any/c))] ...) flat-contract?]{
-
-Accepts any number of flat contracts (or predicates that are converted
-to flat contracts via @scheme[flat-contract]) and returns a
-flat-contract that recognizes mutable and immutable lists. The number
-of elements in the list must match the number of arguments supplied to
-@scheme[vector/c], and each element of the list must match the
-corresponding flat contract.}
+Produces a contract the recognizes pairs first and second elements
+match @scheme[car-c] and @scheme[cdr-c], respectively. Beware that
+when this contract is applied to a value, the result is not
+necessarily @scheme[eq?] to the input.}
 
 
 @defproc[(list/c [c (or/c contract? (any/c . -> . any/c))] ...) contract?]{
 
-Like @scheme[list-mutable/c], but does not recognize mutable lists,
-and the individual contracts need not be @tech{flat contracts}. Beware
+Produces a contract for a list. The number of elements in the list
+must match the number of arguments supplied to @scheme[list/c], and
+each element of the list must match the corresponding contract. Beware
 that when this contract is applied to a value, the result is not
-@scheme[eq?] to the input.}
+necessarily @scheme[eq?] to the input.}
 
 
 @defproc[(syntax/c [c flat-contract?]) flat-contract?]{
@@ -330,30 +297,59 @@ result of the final @scheme[body] is the result of the entire form.}
 
 @defidform[any]{
 
-The @scheme[any] form can only be used in a result position of
-contracts like @scheme[->]. Using @scheme[any] elsewhere is a syntax
-error.}
+Represents a contract that is always satisfied. In particular, it can accept
+multiple values.  It can only be used in a result position of contracts like
+@scheme[->]. Using @scheme[any] elsewhere is a syntax error.}
 
+@defform[(promise/c expr)]{
+
+Constructs a contract on a promise. The contract does not force the
+promise, but when the promise is forced, the contract checks that the
+result value meets the contract produced by @scheme[expr].}
 
 @; ------------------------------------------------------------------------
 
 @section{Function Contracts}
 
 A @deftech{function contract} wraps a procedure to delay
-checks for its arguments and results.
+checks for its arguments and results. There are three
+primary function contract combinators that have increasing
+amounts of expressiveness and increasing additional
+overheads. The first @scheme[->] is the cheapest. It
+generates wrapper functions that can call the original
+function directly. Contracts built with @scheme[->*] require
+packaging up arguments as lists in the wrapper function and
+then using either @scheme[keyword-apply] or
+@scheme[apply]. Finally, @scheme[->d] is the most expensive,
+because it requires delaying the evaluation of the contract
+expressions for the domain and range until the function
+itself is called or returns.
 
-@defform*[#:literals (any)
-          [(-> expr ... res-expr)
-           (-> expr ... any)]]{
+The @scheme[case->] contract is a specialized contract,
+designed to match @scheme[case-lambda] and
+@scheme[unconstrained-domain->] allows range checking
+without requiring that the domain have any particular shape
+(see below for an exmaple use).
 
-Produces a contract for a function that accepts a fixed number of
-arguments and returns either a single result or an unspecified number
-of results (the latter when @scheme[any] is specified).
+@defform*/subs[#:literals (any values)
+               [(-> dom ... range)]
+               ([dom dom-expr (code:line keyword dom-expr)]
+                [range range-expr (values range-expr ...) any])]{
 
-Each @scheme[expr] is a contract on the argument to a function, and
-either @scheme[res-expr] or @scheme[any] specifies the result
-contract. Each @scheme[expr] or @scheme[res-expr] must produce a
-contract or a predicate.
+Produces a contract for a function that accepts a fixed
+number of arguments and returns either a fixed number of
+results or completely unspecified results (the latter when
+@scheme[any] is specified).
+
+Each @scheme[dom-expr] is a contract on an argument to a
+function, and each @scheme[res-expr] is a contract on a
+result of the function.
+
+@margin-note{Using an @scheme[->] between two whitespace-delimited
+@schemeparenfont{.}s is the same as putting the @scheme[->] right
+after the enclosing open parenthesis. See
+@guidesecref["lists-and-syntax"] or @secref["parse-pair"] for more
+information.}
 
 For example,
 
@@ -361,158 +357,116 @@ For example,
 
 produces a contract on functions of two arguments. The first argument
 must be an integer, and the second argument must be a boolean. The
-function must produce an integer. (This example uses Scheme's infix
-notation so that the @scheme[->] appears in a suggestive place; see
-@secref["parse-pair"]).
+function must produce an integer.
 
-If @scheme[any] is used as the last argument to @scheme[->], no
+A domain specification may include a keyword. If so, the function must
+accept corresponding (mandatory) keyword arguments, and the values for
+the keyword arguments must match the corresponding contracts. For
+example:
+
+@schemeblock[(integer? #:x boolean? . -> . integer?)]
+
+is a contract on a function that accepts a by-position argument that
+is an integer and a @scheme[#:x] argument is that a boolean.
+
+If @scheme[any] is used as the last sub-form for @scheme[->], no
 contract checking is performed on the result of the function, and
 tail-recursion is preserved. Note that the function may return
-multiple values in that case.}
+multiple values in that case.
+
+If @scheme[(values res-expr ...)] is used as the last sub-form of
+@scheme[->], the function must produce a result for each contract, and
+each values must match its respective contract.}
 
 
-@defform*[#:literals (any)
-          [(->* (expr ...) (res-expr ...))
-           (->* (expr ...) rest-expr (res-expr ...))
-           (->* (expr ...) any)
-           (->* (expr ...) rest-expr any)]]{
+@defform*/subs[#:literals (any values)
+          [(->* (mandatory-dom ...) (optional-dom ...) rest range)]
+          ([mandatory-dom dom-expr (code:line keyword dom-expr)]
+           [optional-dom dom-expr (code:line keyword dom-expr)]
+           [rest (code:line) (code:line #:rest rest-expr)]
+           [range range-expr (values range-expr ...) any])]{
 
-Like @scheme[->], but for functions that return multiple results
-and/or have ``rest'' arguments. The @scheme[expr]s specify contracts
-on the initial arguments, and @scheme[rest-expr] (if supplied)
-specifies a contract on an additional ``rest'' argument, which is
-always a list. Each @scheme[res-expr] specifies a contract on a
-result from the function.
+The @scheme[->*] contract combinator produces contracts for
+functions that accept optional arguments (either keyword or
+positional) and or arbitrarily many arguments. The first
+clause of a @scheme[->*] contract describes the mandatory
+arguments, and is similar to the argument description of a
+@scheme[->] contract. The second clause describes the
+optional arguments. The last clause describes the range of
+the function. It can either be @scheme[any] or a
+sequence of contracts, indicating that the function must
+return multiple values. If present, the @scheme[rest-expr]
+contract governs the arguments in the rest parameter.
 
-For example, a function that accepts one or more integer arguments and
-returns one boolean would have the following contract:
+As an example, the contract 
+@schemeblock[(->* () (boolean? #:x integer?) #:rest (listof symbol?) (symbol?))] 
+matches functions that optionally accept a boolean, an
+integer keyword argument @scheme[#:x] and arbitrarily more
+symbols, and that return a symbol.
 
-@schemeblock[
-((integer?) (listof integer?) . ->* . (boolean?))
-]}
+}
 
+@defform*/subs[#:literals (any values)
+[(->d (mandatory-dependent-dom ...) 
+      (optional-dependent-dom ...) 
+      dependent-rest
+      pre-cond
+      dep-range)]
+([mandatory-dependent-dom [id dom-expr] (code:line keyword [id dom-expr])]
+ [optional-dependent-dom [id dom-expr] (code:line keyword [id dom-expr])]
+ [dependent-rest (code:line) (code:line #:rest id rest-expr)]
+ [pre-cond (code:line) (code:line #:pre-cond boolean-expr)]
+ [dep-range any
+            (code:line [_ range-expr] post-cond)
+            (code:line (values [_ range-expr] ...) post-cond)
+            (code:line [id range-expr] post-cond)
+            (code:line (values [id range-expr] ...) post-cond)]
+ [post-cond (code:line) (code:line #:post-cond boolean-expr)]
+)]{
 
-@defform[(->d expr ... res-gen-expr)]{
+The @scheme[->d] is similar in shape to @scheme[->*], with
+two extensions: names have been added to each argument and
+result, which allows the contracts to depend on the values
+of the arguments and results, and pre- and post-condition
+expressions have been added in order to express contracts
+that are not naturally tied to a particular argument or
+result.
 
-Like @scheme[->], but instead of a @scheme[_res-expr] to produce a
-result contract, @scheme[res-gen-expr] should produce a function
-that accepts that arguments and returns as many contracts as the
-function should produce values; each contract is associated with the
-corresponding result.
+The first two subforms of a @scheme[->d] contract cover the
+mandatory and optional arguments. Following that is an
+optional rest-args contract, and an optional
+pre-condition. The @scheme[dep-range] non-terminal covers
+the possible post-condition contracts. If it is
+@scheme[any], then any result (or results) are
+allowed. Otherwise, the result contract can be a name and a
+result contract, or a multiple values return and, in either
+of the last two cases, it may be optionally followed by a
+post-condition.
 
-For example, the following contract is satisfied by @scheme[sqrt] when
-@scheme[sqrt] is applied to small numbers:
+Each of the @scheme[id]s on an argument (including the rest
+argument) is visible in all of the sub-expressions of
+@scheme[->d]. Each of the @scheme[id]s on a result is
+visible in the subexpressions of the @scheme[dep-range].
 
-@schemeblock[
-(number?
- . ->d .
- (lambda (in)
-   (lambda (out)
-     (and (number? out)
-          (< (abs (- (* out out) in)) 0.01)))))
-]
+If the identifier position of the range contract is
+@scheme[_] (an underscore), then the range contract
+expressions are evaluated when the function is called (and
+the underscore is not bound in the range). Otherwise the
+range expressions are evaluated when the function returns.
+}
 
-This contract says that the input must be a number and that the
-difference between the square of the result and the original number is
-less than @scheme[0.01].}
-
-@defform*[[(->d* (expr ...) expr res-gen-expr)
-           (->d* (expr ...) res-gen-expr)]]{
-
-Like @scheme[->*], but with @scheme[res-gen-expr] like @scheme[->d].}
-
-
-@defform*[#:literals (any values)
-          [(->r ([id expr] ...) res-expr)
-           (->r ([id expr] ...) any)
-           (->r ([id expr] ...) (values [res-id res-expr] ...))
-           (->r ([id expr] ...) id rest-expr res-expr)
-           (->r ([id expr] ...) id rest-expr any)
-           (->r ([id expr] ...) id rest-expr (values [res-id res-expr] ...))]]{
-              
-
-Produces a contract where allowed arguments to a function may all
-depend on each other, and where the allowed result of the function may
-depend on all of the arguments. The cases with a @scheme[rest-expr]
-are analogous to @scheme[->*] to support rest arguments.
-
-Each of the @scheme[id]s names one of the actual arguments to the
-function with the contract, an each @scheme[id] is bound in all
-@scheme[expr]s, the @scheme[res-expr] (if supplied), and
-@scheme[res-expr]s (if supplied). An @scheme[any] result
-specification is treated as in @scheme[->]. A @scheme[values] result
-specification indicates multiple result values, each with the
-corresponding contract; the @scheme[res-id]s are bound only in the
-@scheme[res-expr]s to the corresponding results.
-
-For example, the following contract specifies a function that accepts
-three arguments where the second argument and the result must both be
-between the first:
-
-@schemeblock[
-(->r ([x number?] [y (and/c (>=/c x) (<=/c z))] [z number?])
-     (and/c number? (>=/c x) (<=/c z)))
-]
-
-The contract
-
-@schemeblock[
-(->r () (values [x number?]
-                [y (and/c (>=/c x) (<=/c z))]
-                [z number?]))
-]
-
-matches a function that accepts no arguments and that returns three
-numeric values that are in ascending order.}
-
-
-@defform*[[(->pp ([id expr] ...) pre-expr expr res-id post-expr)
-           (->pp ([id expr] ...) pre-expr any)
-           (->pp ([id expr] ...) pre-expr (values [id expr] ...) post-expr)]]{
-
-Generalizes @scheme[->r] (without ``rest'' arguments) to support pre-
-and post-condition expression. The @scheme[id]s are bound in
-@scheme[pre-expr] and @scheme[post-expr], and @scheme[res-id] (if
-specified) corresponds to the result value and is bound in
-@scheme[post-id].
-
-If @scheme[pre-expr] evaluates to @scheme[#f], the caller is blamed.
-If @scheme[post-expr] evaluates to @scheme[#f], the function itself is
-blamed.}
-
-@defform*[[(->pp-rest ([id expr] ...) id expr pre-expr res-expr res-id post-expr)
-           (->pp-rest ([id expr] ...) id expr pre-expr any)
-           (->pp-rest ([id expr] ...) id expr pre-expr 
-                      (values [id expr] ...) post-expr)]]{
-
-Like @scheme[->pp], but for the ``rest''-argument cases of
-@scheme[->r].}
-
-
-@defform[(case-> arrow-contract-expr ...)]{
-
-Constructs a contract for a @scheme[case-lambda] procedure. Its
-arguments must all be function contracts, built by one of @scheme[->],
-@scheme[->d], @scheme[->*], @scheme[->d*], @scheme[->r],
-@scheme[->pp], or @scheme[->pp-rest].}
-
-
-@defform*[#:literals (any)
-          [(opt-> (req-expr ...) (opt-expr ...) res-expr)
-           (opt-> (req-expr ...) (opt-expr ...) any)]]{
-
-Like @scheme[->], but for a function with a fixed number of optional
-by-position arguments. Each @scheme[req-expr] corresponds to a
-required argument, and each @scheme[opt-expr] corresponds to an
-optional argument.}
-
-
-@defform*[#:literals (any)
-          [(opt->* (req-expr ...) (opt-expr ...) (res-expr ...))
-           (opt->* (req-expr ...) (opt-expr ...) any)]]{
-
-Like @scheme[opt->], but with support for multiple results as in
-@scheme[->*].}
+@defform*/subs[#:literals (any values ->)
+[(case-> (-> dom-expr ... rest range) ...)]
+([rest (code:line) (code:line #:rest rest-expr)]
+ [range range-expr (values range-expr ...) any])]{
+This contract form is designed to match
+@scheme[case-lambda]. Each argument to @scheme[case->] is a
+contract that governs a clause in the
+@scheme[case-lambda]. If the @scheme[#:rest] keyword is
+present, the corresponding clause must accept an arbitrary
+number of arguments. The @scheme[range] specification is
+just like that for @scheme[->] and @scheme[->*]. 
+}
 
 
 @defform[(unconstrained-domain-> res-expr ...)]{
@@ -529,10 +483,11 @@ For example, the contract
 
 @schemeblock[
 (provide/contract 
- [f (->r ([size natural-number/c]
+ [f (->d ([size natural-number/c]
           [proc (and/c (unconstrained-domain-> number?)
                        (lambda (p) 
                          (procedure-arity-includes? p size)))])
+         ()
          number?)])
 ]
 
@@ -550,12 +505,6 @@ be blamed using the above contract:
   (apply g (build-list i add1)))
 ]}
 
-
-@defform[(promise/c expr)]{
-
-Constructs a contract on a promise. The contract does not force the
-promise, but when the promise is forced, the contract checks that the
-result value meets the contract produced by @scheme[expr].}
 
 @; ------------------------------------------------------------------------
 
@@ -599,11 +548,11 @@ earlier fields.}
 
 As an example, consider the following module:
 
-@begin[
-#reader(lib "comment-reader.ss" "scribble")
+@(begin
+#reader scribble/comment-reader
 [schemeblock
 (module product mzscheme
-  (require (lib "contract.ss"))
+  (require mzlib/contract)
 
   (define-contract-struct kons (hd tl))
   
@@ -632,7 +581,7 @@ As an example, consider the following module:
   
   (provide kons? make-kons kons-hd kons-tl)
   (provide/contract [product (-> (sorted-list/gt -inf.0) number?)]))
-]]
+])
 
 The module provides a single function, @scheme[product] whose contract
 indicates that it accepts sorted lists of numbers and produces
@@ -643,77 +592,6 @@ function is called. As written above, however, when the product
 function aborts the traversal of the list, the contract checking also
 stops, since the @scheme[kons/dc] contract constructor generates a
 lazy contract.}
-
-@; ------------------------------------------------------------------------
-
-@section{Object and Class Contracts}
-
-@defform/subs[
-#:literals (field opt-> opt->* case-> -> ->* ->d ->d* ->r ->pp ->pp-rest)
-
-(object-contract member-spec ...)
-
-([member-spec
-  (method-id method-contract)
-  (field field-id contract-expr)]
-
- [method-contract
-   (opt-> (required-contract-expr ...)
-          (optional-contract-expr ...)
-          any)
-   (opt-> (required-contract-expr ...)
-          (optional-contract-expr ...)
-          result-contract-expr)
-   (opt->* (required-contract-expr ...)
-           (optional-contract-expr ...)
-           (result-contract-expr ...))
-   (case-> arrow-contract ...)
-   arrow-contract]
-
- [arrow-contract
-   (-> expr ... res-expr)
-   (-> expr ... (values res-expr ...))
-   (->* (expr ...) (res-expr ...))
-   (->* (expr ...) rest-expr (res-expr ...))
-   (->d expr ... res-proc-expr)
-   (->d* (expr ...) res-proc-expr)
-   (->d* (expr ...) rest-expr res-gen-expr)
-   (->r ((id expr) ...) expr)
-   (->r ((id expr) ...) id expr expr)
-   (->pp ((id expr) ...) pre-expr 
-              res-expr res-id post-expr)
-   (->pp ((id expr) ...) pre-expr any)
-   (->pp ((id expr) ...) pre-expr 
-              (values (id expr) ...) post-expr)
-   (->pp-rest ((id expr) ...) id expr pre-expr 
-              res-expr res-id post-expr)
-   (->pp-rest ((id expr) ...) id expr pre-expr any)
-   (->pp-rest ((id expr) ...) id expr pre-expr 
-              (values (id expr) ...) post-expr)])]{
-
-Produces a contract for an object (see @secref["mzlib:class"]).
-
-Each of the contracts for a method has the same semantics as the
-corresponding function contract, but the syntax of the method contract
-must be written directly in the body of the object-contract---much
-like the way that methods in class definitions use the same syntax as
-regular function definitions, but cannot be arbitrary procedures.  The
-only exception is that the @scheme[->r], @scheme[->pp], and
-@scheme[->pp-rest] contracts implicitly bind @scheme[this] to the
-object itself.}
-
-
-@defthing[mixin-contract contract?]{
-
-A @tech{function contract} that recognizes mixins. It guarantees that
-the input to the function is a class and the result of the function is
-a subclass of the input.}
-
-@defproc[(make-mixin-contract [type (or/c class? interface?)] ...) contract?]{
-
-Produces a @tech{function contract} that guarantees the input to the
-function is a class that implements/subclasses each @scheme[type], and
-that the result of the function is a subclass of the input.}
 
 @; ------------------------------------------------------------------------
 
@@ -974,8 +852,8 @@ below, but it is the right choice for new contract
 constructors or first-time contract builders.
 
 The first argument is the name of the contract. It can be an
-arbitrary s-expression. The second is a projection (see
-above). 
+arbitrary S-expression. The second is a projection (see
+above).
 
 The final argument is a predicate that is a
 conservative, first-order test of a value. It should be a
@@ -991,7 +869,7 @@ functions, but reject all other values.}
 
 @defproc[(build-compound-type-name [c/s any/c] ...) any]{
 
-Produces an s-expression to be used as a name
+Produces an S-expression to be used as a name
 for a contract. The arguments should be either contracts or
 symbols. It wraps parenthesis around its arguments and
 extracts the names from any contracts it is supplied with.}

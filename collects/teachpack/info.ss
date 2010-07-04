@@ -1,5 +1,3 @@
-(module info (lib "infotab.ss" "setup")
-  (define name "Teachpacks")
-  (define scribblings '(("teachpacks.scrbl" (multi-page))))
-  (define compile-omit-files '())
-  )
+#lang setup/infotab
+
+(define scribblings '(("teachpack.scrbl" (multi-page) (language -11))))

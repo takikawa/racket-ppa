@@ -1,4 +1,4 @@
-(module mzscheme-utils (lib "mzscheme-core.ss" "frtime") 
+(module mzscheme-utils "mzscheme-core.ss"
   
   (require (all-except mzscheme
                        module
@@ -18,7 +18,7 @@
                        letrec
                        match
                        cons car cdr pair? null?
-                       caar cdar cadr cddr caddr cdddr cadddr cddddr
+                       caar caadr cdar cadar cadr cddr caddr cdddr cadddr cddddr
                        make-struct-type
                        make-struct-field-accessor
                        make-struct-field-mutator
@@ -34,22 +34,21 @@
                        and
                        or
                        cond when unless ;case
+                       ; else =>
                        map ormap andmap assoc member)
            (rename mzscheme mzscheme:if if)
-           (rename (lib "lang-ext.ss" "frtime") lift lift)
-           (rename (lib "frp-core.ss" "frtime") super-lift super-lift)
-           (rename (lib "frp-core.ss" "frtime") behavior? behavior?)
-           (rename (lib "lang-ext.ss" "frtime") undefined undefined)
-           (rename (lib "lang-ext.ss" "frtime") undefined? undefined?)
-	   (lib "class.ss"))
-  (require (lib "list.ss"))  
+           (rename "lang-ext.ss" lift lift)
+           (only "frp-core.ss" super-lift behavior? value-now)
+           (rename "lang-ext.ss" undefined undefined)
+           (rename "lang-ext.ss" undefined? undefined?)
+	   mzlib/class)
+  (require mzlib/list)
   
   (define-syntax (lifted-send stx)
     (syntax-case stx ()
       [(_ obj meth arg ...)
        (with-syntax ([(obj-tmp) (generate-temporaries '(obj))]
-                     [(arg-tmp ...) (generate-temporaries (syntax->list
-#'(arg ...)))])
+                     [(arg-tmp ...) (generate-temporaries (syntax->list #'(arg ...)))])
          #'(lift #t 
                  (lambda (obj-tmp arg-tmp ...)
                    (send obj-tmp meth arg-tmp ...))
@@ -133,13 +132,33 @@
     (syntax-rules ()
       [(_ test body ...) (if (not test) (begin body ...))]))
   
-  (define (ormap proc lst)
-    (and (pair? lst)
-         (or (proc (car lst)) (ormap proc (cdr lst)))))
+  (define ormap
+    (case-lambda
+      [(pred lst) (list-match
+                   lst
+                   (lambda (a d) (or (pred a) (ormap pred d)))
+                   (lambda () #f))]
+      [(pred l1 l2) (list-match
+                     l1
+                     (lambda (a1 d1)
+                       (list-match
+                        l2
+                        (lambda (a2 d2)
+                          (or (pred a1 a2) (ormap pred d1 d2)))
+                        (lambda ()
+                          (error "expected lists of same length, but got" l1 l2))))
+                     (lambda ()
+                       (list-match
+                        l2
+                        (lambda (a d)
+                          (error "expected lists of same length, but got" l1 l2))
+                        (lambda () #f))))]))
   
   (define (andmap proc lst)
-    (or (null? lst)
-        (and (proc (car lst)) (andmap proc (cdr lst)))))
+    (list-match
+     lst
+     (lambda (a d) (and (proc a) (andmap proc d)))
+     (lambda () #t)))
   
   (define (caar v)
     (car (car v)))
@@ -149,6 +168,12 @@
   
   (define (cadr v)
     (car (cdr v)))
+  
+  (define (cadar v)
+    (car (cdar v)))
+  
+  (define (caadr v)
+    (car (cadr v)))
   
   (define (cddr v)
     (cdr (cdr v)))
@@ -171,21 +196,26 @@
       [(_ expr clause ...)
        (super-lift (lambda (v) (case v clause ...)) expr)]))
   |#
+  
   (define (split-list acc lst)
     (if (null? (cdr lst))
         (values acc (car lst))
         (split-list (append acc (list (car lst))) (cdr lst))))
   
+  (define (all-but-last lst)
+    (if (null? (cdr lst))
+        '()
+        (cons (car lst) (all-but-last (cdr lst)))))
+  
   (define frp:apply
     (lambda (fn . args)
-      (if (behavior? args)
-          (super-lift
-           (lambda (args)
-             (if (and (list? args) (list? (last-pair args)))
-                 (apply apply fn args)
-                 undefined))
-           args)
-          (apply apply fn args))))
+      (let* ([first-args (all-but-last args)]
+             [last-args (raise-list-for-apply (first (last-pair args)))])
+        (super-lift
+         (lambda (last-args)
+           (apply apply fn (append first-args (cons last-args empty))))
+         last-args))))
+  
   #|
   ;; taken from startup.ss
   (define-syntax frp:case
@@ -244,12 +274,28 @@
   
   (define map
     (case-lambda
-      [(f l) (if (pair? l)
+      [(f l) #;(if (pair? l)
                  (cons (f (car l)) (map f (cdr l)))
-                 null)]
-      [(f l1 l2) (if (and (pair? l1) (pair? l2))
-                     (cons (f (car l1) (car l2)) (map f (cdr l1) (cdr l2)))
-                     null)]
+                 null)
+             (list-match
+              l
+              (lambda (a d) (cons (f a) (map f d)))
+              (lambda () null))]
+      [(f l1 l2) (list-match
+                  l1
+                  (lambda (a1 d1)
+                    (list-match
+                     l2
+                     (lambda (a2 d2) (cons (f a1 a2) (map f d1 d2)))
+                     (lambda () (error "map expected lists of same length but got" l1 l2))))
+                  (lambda ()
+                    (list-match
+                     l2
+                     (lambda (a2 d2) (error "map expected lists of same length but got" l1 l2))
+                     (lambda () null))))
+      #;(if (and (pair? l1) (pair? l2))
+          (cons (f (car l1) (car l2)) (map f (cdr l1) (cdr l2)))
+          null)]
       [(f l . ls) (if (and (pair? l) (andmap pair? ls))
                       (cons (apply f (car l) (map car ls)) (apply map f (cdr l) (map cdr ls)))
                       null)]))
@@ -274,6 +320,7 @@
   (define (dont-optimize x) x)
 
   (provide cond 
+           ; else =>
            and 
            or 
            or-undef 
@@ -283,6 +330,9 @@
            ormap 
            andmap
            caar
+           caadr
+           cdar
+           cadar
            cadr
            cddr
            caddr
@@ -393,6 +443,6 @@
            )
   
   ; from core
-  (provide (all-from (lib "mzscheme-core.ss" "frtime")))
+  (provide (all-from "mzscheme-core.ss"))
            
   )

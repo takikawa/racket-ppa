@@ -6,12 +6,13 @@
 ;;  'method-arity-error, and 'inferred-name properties are
 ;;  specially preserved for `lambda' expressions.
 
-(module src2src mzscheme
-  (require (lib "class.ss")
-	   (lib "kerncase.ss" "syntax")
-	   (lib "primitives.ss" "syntax")
-	   (lib "etc.ss")
-	   (lib "list.ss"))
+(module src2src scheme/base
+  (require mzlib/class
+	   syntax/kerncase
+	   syntax/primitives
+	   mzlib/etc
+	   mzlib/list
+           (for-syntax scheme/base))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Optimizer
@@ -77,10 +78,9 @@
     (class object%
       
       (init-field src-stx)
-      (if (not (syntax? src-stx))
-          (begin
-            (printf "~a~n" src-stx)
-            (error 'stx)))
+      (when (not (syntax? src-stx))
+        (printf "~a~n" src-stx)
+        (error 'stx))
       (init-field [cert-stxes (list src-stx)])
       (field (known-value #f))
       
@@ -219,18 +219,18 @@
   (define (get-sexpr o) (send o sexpr))
   (define (get-body-sexpr o) (send o body-sexpr))
 
-  (define-struct bucket (mutated? inited-before-use?))
+  (define-struct bucket (mutated? inited-before-use?) #:mutable)
 
   (define (global-bucket table stx)
-    (let ([l (hash-table-get table (syntax-e stx) (lambda () null))])
+    (let ([l (hash-ref table (syntax-e stx) (lambda () null))])
       (let ([s (ormap (lambda (b)
-			(and (module-identifier=? stx (car b))
+			(and (free-identifier=? stx (car b))
 			     (cdr b)))
 		      l)])
 	(if s
 	    s
 	    (let ([s (make-bucket #f #f)])
-	      (hash-table-put! table (syntax-e stx) (cons (cons stx s) l))
+	      (hash-set! table (syntax-e stx) (cons (cons stx s) l))
 	      s)))))
 
   (define-struct tables (global-ht et-global-ht))
@@ -280,7 +280,7 @@
 
       (define/override (global->local env)
         (or (ormap (lambda (e)
-                     (and (module-identifier=? (car e) src-stx)
+                     (and (free-identifier=? (car e) src-stx)
                           (make-object ref% (cdr e) src-stx cert-stxes)))
                    env)
             this))
@@ -322,7 +322,7 @@
       (define/public (clone-binder env) 
         (make-object binding% 
           always-inited?
-          (datum->syntax-object
+          (datum->syntax
            #f
            (gensym (syntax-e src-stx))
            src-stx
@@ -404,7 +404,7 @@
       (inherit recertify)
       (define/override (sexpr) 
         (let ([x (send binding sexpr)])
-	  (recertify (datum->syntax-object
+	  (recertify (datum->syntax
 		      x
 		      (syntax-e x)
 		      src-stx))))
@@ -574,7 +574,7 @@
       
       (inherit recertify)
       (define/override (sexpr)
-	(let ([vstx (datum->syntax-object (quote-syntax here) val src-stx)])
+	(let ([vstx (datum->syntax (quote-syntax here) val src-stx)])
 	  (cond
 	   [(or (number? val)
 		(string? val)
@@ -595,7 +595,7 @@
       (super-instantiate ((void) stx))
       (inherit-field src-stx cert-stxes)
 
-      (define/override (sexpr) (quote-syntax (void)))
+      (define/override (sexpr) (quote-syntax (#%plain-app void)))
 
       (define/override (simplify ctx)
         (if (eq? 'bool (context-need ctx))
@@ -779,8 +779,8 @@
            (let ([xformed
                   (let ([l (send (cadr rands) get-const-val)]
                         [l-stx (send (cadr rands) get-stx)]
-                        [false (make-object constant% #f (datum->syntax-object #f #f))]
-                        [true (make-object constant% #t (datum->syntax-object #f #t))])
+                        [false (make-object constant% #f (datum->syntax #f #f))]
+                        [true (make-object constant% #t (datum->syntax #f #t))])
                     (if (null? l)
                         false
                         (let loop ([l l])
@@ -887,7 +887,7 @@
 	 (keep-mzc-property
 	  (with-syntax ([rator (get-sexpr rator)]
 			[(rand ...) (map get-sexpr rands)])
-	    (syntax/loc src-stx (rator rand ...)))
+	    (syntax/loc src-stx (#%plain-app rator rand ...)))
 	  src-stx)))
 
       ;; Checks whether the expression is an app of `values'
@@ -1027,7 +1027,7 @@
 		   [vars . body] ...))
 		(with-syntax ([body (car (syntax->list (syntax (body ...))))])
 		  (syntax/loc src-stx
-		    (lambda vars ... . body))))
+		    (#%plain-lambda vars ... . body))))
 	    src-stx))))))
 
   (define local% 
@@ -1416,7 +1416,7 @@
                       (let loop ([l l][etb et-body][accum null])
                         (cond
                           [(null? etb)
-                           (values (reverse! accum) l)]
+                           (values (reverse accum) l)]
                           [else (loop (cdr l) (cdr etb) (cons (car l)
                                                               accum))]))])
           (set! body body)
@@ -1453,7 +1453,7 @@
                                             (map (lambda (var)
                                                    (make-object binding%
                                                      #t
-                                                     (datum->syntax-object
+                                                     (datum->syntax
                                                       #f
                                                       (syntax-e var)
                                                       var)))
@@ -1516,7 +1516,7 @@
                                null
                                (let loop2 ([bindings (car bindingss)][vars vars][accum null])
                                  (if (null? bindings)
-                                     (cons (reverse! accum)
+                                     (cons (reverse accum)
                                            (loop (cdr bindingss) vars))
                                      (loop2 (cdr bindings) (cdr vars) (cons (car vars) accum))))))]
                   [bindings (apply append bindingss)])
@@ -1585,7 +1585,7 @@
       (fprintf (current-output-port) 
 	       "~a: ~e~n"
 	       msg
-	       (syntax-object->datum (send exp sexpr)))))
+	       (syntax->datum (send exp sexpr)))))
 
   (define (warning msg exp)
     ; (print-warning msg exp)
@@ -1676,9 +1676,6 @@
 	[(#%top . id)
 	 (make-object global% trans? tables #t (syntax id))]
 	
-	[(#%datum . val)
-	 (make-object constant% (syntax-object->datum (syntax val)) stx)]
-
 	[(#%variable-reference . val)
 	 (make-object constant% (#%variable-reference dummy) stx)]
 
@@ -1716,12 +1713,12 @@
            stx)]
 
 	[(quote expr)
-	 (make-object constant% (syntax-object->datum (syntax expr)) stx)]
+	 (make-object constant% (syntax->datum (syntax expr)) stx)]
 
 	[(quote-syntax expr)
 	 (make-object constant% (syntax expr) stx)]
 
-	[(lambda args . body)
+	[(#%plain-lambda args . body)
 	 (let-values ([(env args norm?) (parse-args env (syntax args))])
 	   (make-object lambda%
              (list args)
@@ -1764,13 +1761,11 @@
            (parse (syntax rhs) env trans? in-module? tables)
            stx)]
 
-	[(if test then . else)
+	[(if test then else)
 	 (make-object if%
            (parse (syntax test) env trans? in-module? tables)
            (parse (syntax then) env trans? in-module? tables)
-           (if (null? (syntax-e (syntax else)))
-               (parse (quote-syntax (#%app void)) env trans? in-module? tables)
-               (parse (car (syntax-e (syntax else))) env trans? in-module? tables))
+           (parse (syntax else) env trans? in-module? tables)
            stx)]
 	
 	[(with-continuation-mark k v body)
@@ -1780,10 +1775,10 @@
            (parse (syntax body) env trans? in-module? tables)
            stx)]
 	
-	[(#%app)
+	[(#%plain-app)
 	 (make-object constant% null stx)]
 	
-	[(#%app func . args)
+	[(#%plain-app func . args)
 	 (make-object app% 
            (parse (syntax func) env trans? in-module? tables)
            (map (lambda (v) (parse v env trans? in-module? tables)) (syntax->list (syntax args)))
@@ -1817,18 +1812,20 @@
                [(m n ir mb) #'mb])
              stx))]
         
-	[(require . i) (make-object require/provide% stx)]
-	[(require-for-syntax . i) (make-object require/provide% stx)]
-	[(require-for-template . i) (make-object require/provide% stx)]
-	[(provide i ...) (make-object require/provide% stx)]
+	[(#%require . i) (make-object require/provide% stx)]
+	[(#%provide i ...) (make-object require/provide% stx)]
 
-	[else (error 'parse "unknown expression: ~a" (syntax-object->datum stx))])))
+        [(#%expression e)
+         (parse (syntax e) env trans? in-module? tables)]
+
+	[else 
+         (error 'parse "unknown expression: ~a" (syntax->datum stx))])))
 
   (define parse (make-parse #f))
   (define parse-top (make-parse #t))
 
   (define (create-tables)
-    (make-tables (make-hash-table) (make-hash-table)))
+    (make-tables (make-hasheq) (make-hasheq)))
 
   
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

@@ -1,7 +1,7 @@
 
 (module space mzscheme
-  (require (lib "unitsig.ss")
-	  (lib "list.ss"))
+  (require mzlib/unitsig
+	  mzlib/list)
 
   (require "sig.ss")
 
@@ -29,7 +29,7 @@
 			 (filter (lambda (s)
 				   (not (and (pcdata? s)
 					     (or (all-blank (pcdata-string s))
-						 (error 'eliminate-blanks "Element <~a> is not allowed to contain text ~s" name (pcdata-string s))))))
+						 (error 'eliminate-blanks "Element <~a> is not allowed to contain text ~e" name (pcdata-string s))))))
 				 content)]
 			[else content]))))])
 	  blank-it))

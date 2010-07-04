@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2007 PLT Scheme Inc.
+// Copyright:  (c) 2004-2008 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -39,6 +39,7 @@ class wxCanvas: public wxbCanvas
   wxBorderArea *canvas_border;
   wxColour *bgcol;
   wxScrollArea* cScrollArea;
+  RgnHandle needs_update;
 
   //=============================================================================
   // Public constructors
@@ -164,6 +165,7 @@ class wxCanvas: public wxbCanvas
   virtual void Paint(void);
   void DoPaint(void);
   virtual void OnPaint(void);
+  virtual void PaintRgn(RgnHandle rgn);
         
   virtual void OnSetFocus(void);
   virtual void OnKillFocus(void);
@@ -179,6 +181,8 @@ class wxCanvas: public wxbCanvas
   wxColor *GetCanvasBackground();
 
   Bool SetAsControl();
+
+  void AddPaintRegion(RgnHandle r);
 
  protected:
   void ChangeToGray(Bool Gray);

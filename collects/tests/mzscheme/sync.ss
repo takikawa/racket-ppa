@@ -688,6 +688,67 @@
 	(test d thread-dead-evt t)))))
 
 ;; ----------------------------------------
+;;  thread mbox
+
+(test #f thread-try-receive)
+(test #f sync/timeout 0 (thread-receive-evt))
+(test (void) thread-send (current-thread) 10)
+(let ([t (thread-receive-evt)])
+  (test t sync/timeout 10 t))
+(test 10 thread-try-receive)
+(test #f thread-try-receive)
+(let ([t (current-thread)])
+  (thread (lambda ()
+            (sync (system-idle-evt))
+            (thread-send t 35))))
+(test 35 thread-receive)
+(test #f thread-try-receive)
+(test (void) thread-rewind-receive '(1 2 3))
+(test 3 thread-try-receive)
+(test 2 thread-try-receive)
+(test (void) thread-rewind-receive '(4))
+(test 4 thread-try-receive)
+(test 1 thread-try-receive)
+(test #f thread-try-receive)
+(test (void) thread-rewind-receive (vector->list (make-vector 500 'x)))
+(let loop ([n 500])
+  (unless (zero? n)
+    (test 'x thread-try-receive)
+    (loop (sub1 n))))
+(test #f thread-try-receive)
+(let* ([s #f]
+       [t1 (let ([t (current-thread)])
+             (thread (lambda ()
+                       (set! s (thread-receive)))))])
+  (sync (system-idle-evt))
+  (thread-suspend t1)
+  (thread-send t1 'apple)
+  (sync (system-idle-evt))
+  (test #f values s)
+  (thread-resume t1)
+  (sync (system-idle-evt))
+  (test 'apple values s))
+(let* ([s 0]
+       [t (thread (lambda ()
+                    (set! s (list (thread-receive)
+                                  (thread-receive)
+                                  (thread-receive)))))])
+  (thread-send t 0)
+  (thread-send t 1)
+  (thread-send t 2)
+  (sync (system-idle-evt))
+  (test '(0 1 2) values s))
+(let ([t (thread void)])
+  (sync (system-idle-evt))
+  (test 'z thread-send t 'x (lambda () 'z))
+  (test-values '(a z) (lambda ()
+                        (thread-send t 'x (lambda () (values 'a 'z)))))
+  (err/rt-test (thread-send t 'x)))
+
+;; make sure it's ok for rewind to be the first action:
+(test (void) thread-wait (thread (lambda () (thread-rewind-receive '(1 2 3)))))
+
+;; ----------------------------------------
 ;;  Garbage collection
 
 (define (num-scheduled)

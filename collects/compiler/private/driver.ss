@@ -60,20 +60,23 @@
 ;;    the binding.
 
 (module driver mzscheme
-  (require (lib "unit.ss")
-	   (lib "list.ss")
-	   (lib "file.ss")
-	   (lib "port.ss")
-	   (lib "etc.ss")
-	   (lib "pretty.ss")
+  (require mzlib/unit
+	   mzlib/list
+	   mzlib/file
+	   mzlib/port
+	   mzlib/etc
+	   mzlib/pretty
 	   (prefix src2src: "../src2src.ss"))
   
-  (require (lib "zodiac-sig.ss" "syntax")
-	   (lib "toplevel.ss" "syntax")
-	   (lib "compile-sig.ss" "dynext")
-	   (lib "link-sig.ss" "dynext")
-	   (lib "file-sig.ss" "dynext")
-	   (lib "dirs.ss" "setup"))
+  (require syntax/zodiac-sig
+	   syntax/toplevel
+	   dynext/compile-sig
+	   dynext/link-sig
+	   dynext/file-sig
+	   setup/dirs
+           (only scheme/base 
+                 define-namespace-anchor 
+                 namespace-anchor->empty-namespace))
 
   (require "../sig.ss"
 	   "sig.ss"
@@ -81,6 +84,8 @@
 	   "../xform.ss")
 
   (provide driver@)
+
+  (define-namespace-anchor anchor)
 
   (define-unit driver@
       (import (prefix compiler:option: compiler:option^)
@@ -151,7 +156,9 @@
 				  (bytes->path (bytes-append (path->bytes b) a)))]
 		   [sbase (extract-base-filename/ss file (if from-c? #f 'mzc))]
 		   [cbase (extract-base-filename/c file (if from-c? 'mzc #f))]
-		   [base (or sbase cbase)]
+		   [base (if sbase 
+                             (path-replace-suffix (path-add-suffix input-name #".x") #"")
+                             cbase)]
 		   [c-dir (if tmp-c?
 			      (find-system-path 'temp-dir)
 			      dest-dir)]
@@ -209,7 +216,7 @@
       
       (define top-level-exn-handler
 	(lambda (exn)
-	  (set! compiler:messages (reverse! compiler:messages))
+	  (set! compiler:messages (reverse compiler:messages))
 	  (compiler:report-messages! #t)
 	  (raise-user-error "compile failed")))
   
@@ -248,8 +255,13 @@
 			    opt-expanded)))))
 		   exprs)))))
 
-      (define elaborate-namespace (make-namespace))
-	   
+      (define elaborate-namespace 
+        (let ([ns (make-namespace)])
+          (namespace-attach-module (namespace-anchor->empty-namespace anchor)
+                                   'scheme/base
+                                   ns)
+          ns))
+
       (define has-prefix? #f)
 
       (define (eval-compile-prefix prefix)
@@ -260,7 +272,7 @@
 	      (eval (or prefix
 			;; Need MzScheme and cffi:
 			'(begin
-			   (require (lib "cffi.ss" "compiler"))
+			   (require compiler/cffi)
 			   (require-for-syntax mzscheme))))))))
 
       ;;----------------------------------------------------------------------
@@ -282,7 +294,7 @@
 				    [children-acc null]
 				    [max-arity 0])
 	    (if (null? sexps)
-		(values (reverse! source-acc)
+		(values (reverse source-acc)
 			(map (lambda (loc glob used cap children)
 			       (let ([c (make-code empty-set
 						   loc
@@ -294,11 +306,11 @@
 						   children)])
 				 (for-each (lambda (child) (set-code-parent! child c)) children)
 				 c))
-			     (reverse! locals-acc)
-			     (reverse! globals-acc)
-			     (reverse! used-acc)
-			     (reverse! captured-acc)
-			     (reverse! children-acc))
+			     (reverse locals-acc)
+			     (reverse globals-acc)
+			     (reverse used-acc)
+			     (reverse captured-acc)
+			     (reverse children-acc))
 			max-arity)
 		(begin
 
@@ -344,7 +356,7 @@
 		    (if (zero? n)
 			(let ([lifted-lambdas (compiler:get-lifted-lambdas)]
 			      [once-closures (compiler:get-once-closures-list)])
-			  
+
 			  (let ([naya (append lifted-lambdas once-closures)])
 			    (set-block-magics! s:file-block (append (map (lambda (x) #f) naya)
 								    (block-magics s:file-block)))
@@ -426,7 +438,7 @@
 
       (define (open-input-scheme-file path)
 	(let ([p (let ([open (with-handlers ([exn:fail? (lambda (x) #f)])
-			       (dynamic-require '(lib "mred.ss" "mred") 'open-input-graphical-file))])
+			       (dynamic-require 'mred 'open-input-graphical-file))])
 		   (if open
 		       ;; Handles WXME files:
 		       (open path)
@@ -455,7 +467,7 @@
 	(case-lambda
 	 [(ast message)
 	  (set! compiler:messages 
-		(reverse! (cons (make-compiler:internal-error-msg ast message)
+		(reverse (cons (make-compiler:internal-error-msg ast message)
 				compiler:messages)))
 	  (compiler:report-messages! #t)]
 	 [(ast fmt . args)
@@ -467,7 +479,7 @@
 	(lambda (stop-on-errors?)
 	  (let ([error-count 0]
 		[fatal-error-count 0]
-		[msgs (reverse! compiler:messages)])
+		[msgs (reverse compiler:messages)])
 	    (set! compiler:messages null)
 	    (for-each (lambda (message)
 			(when (compiler:error-msg? message) 
@@ -629,7 +641,8 @@
 				  (s:expand-top-level-expressions! 
 				   input-directory
 				   (lambda ()
-				     (read-syntax (path->complete-path input-path) input-port))
+                                     (parameterize ([read-accept-reader #t])
+                                       (read-syntax (path->complete-path input-path) input-port)))
 				   (compiler:option:verbose)))))))])
 		    (verbose-time read-thunk)
 		    (close-input-port input-port)
@@ -698,7 +711,7 @@
 			   (parameterize ([current-namespace elaborate-namespace]
 					  [current-load-relative-directory input-directory]
 					  [compile-enforce-module-constants #f])
-			     (let ([sources+bytecodes+magics
+                             (let ([sources+bytecodes+magics
 				    (map (lambda (src)
 					   (let-values ([(src bytecode magic-sym)
 							 (top-level-to-core src 
@@ -712,7 +725,7 @@
 						   bytecode magic-sym)))
 					 (block-source s:file-block))])
 			       (set-block-source! s:file-block (map car sources+bytecodes+magics))
-			       (set-block-bytecodes! s:file-block 
+                               (set-block-bytecodes! s:file-block 
 						     (map compile
 							  (map cadr sources+bytecodes+magics)))
 			       (set-block-magics! s:file-block (map caddr sources+bytecodes+magics)))))])
@@ -929,30 +942,33 @@
 		     (lambda ()
 		       ; top-level.  The last expression will be in tail position and should
 		       ; return its value
-		       (let loop ([s (block-source s:file-block)]
-				  [l (block-codes s:file-block)]
-				  [m (block-magics s:file-block)])
-			 (unless (null? s)
-			   (let-values ([(vm new-locals)
-					 (vm-phase (car s) 
-						   #t
-						   #f
-						   (if (null? (cdr s))
-						       (lambda (ast)
-							 (make-vm:return 
-							  (zodiac:zodiac-stx ast)
-							  ast
-							  (and (car m) #t)))
-						       (lambda (ast)
-							 (make-vm:void
-							  (zodiac:zodiac-stx ast)
-							  ast
-							  (and (car m) #t))))
-						   (null? (cdr s))
-						   (and (car m) #t))])
-			     (set-car! s vm)
-			     (add-code-local+used-vars! (car l) new-locals))
-			   (loop (cdr s) (cdr l) (cdr m))))
+                       (set-block-source!
+                        s:file-block
+                        (let loop ([s (block-source s:file-block)]
+                                   [l (block-codes s:file-block)]
+                                   [m (block-magics s:file-block)])
+                          (if (null? s)
+                              null
+                              (let-values ([(vm new-locals)
+                                            (vm-phase (car s) 
+                                                      #t
+                                                      #f
+                                                      (if (null? (cdr s))
+                                                          (lambda (ast)
+                                                            (make-vm:return 
+                                                             (zodiac:zodiac-stx ast)
+                                                             ast
+                                                             (and (car m) #t)))
+                                                          (lambda (ast)
+                                                            (make-vm:void
+                                                             (zodiac:zodiac-stx ast)
+                                                             ast
+                                                             (and (car m) #t))))
+                                                      (null? (cdr s))
+                                                      (and (car m) #t))])
+                                (add-code-local+used-vars! (car l) new-locals)
+                                (cons vm
+                                      (loop (cdr s) (cdr l) (cdr m)))))))
 		       ; code-bodies
 		       (for-each 
 			(lambda (L)
@@ -971,7 +987,7 @@
 									  (get-annotation L))]
 							     [vms null])
 						    (if (null? l)
-							(values (reverse! vms) 
+							(values (reverse vms) 
 								; empty: already added via case
 								empty-set) 
 							(let-values ([(vm new-locals)
@@ -1006,30 +1022,35 @@
 	      (let ([vmopt-thunk
 		     (lambda ()
 		       ; top-level
-		       (let loop ([bl (block-source s:file-block)]
-				  [cl (block-codes s:file-block)])
-			 (unless (null? bl)
-			   (let-values ([(b new-locs) ((vm-optimize! #f #f) (car bl))])
-			     (set-car! bl b)
-			     (add-code-local+used-vars! (car cl) new-locs))
-			   (loop (cdr bl) (cdr cl))))
+                       (set-block-source!
+                        s:file-block
+                        (let loop ([bl (block-source s:file-block)]
+                                   [cl (block-codes s:file-block)])
+                          (if (null? bl)
+                              null
+                              (let-values ([(b new-locs) ((vm-optimize! #f #f) (car bl))])
+                                (add-code-local+used-vars! (car cl) new-locs)
+                                (cons b (loop (cdr bl) (cdr cl)))))))
 		       
 		       ; code-bodies
 		       (for-each (lambda (L)
 				   (let ([code (get-annotation L)])
 				     (cond
 				      [(zodiac:case-lambda-form? L)
-				       (let loop ([bodies (zodiac:case-lambda-form-bodies L)]
-						  [case-codes (procedure-code-case-codes code)]
-						  [i 0])
-					 (unless (null? bodies)
-					   (let-values ([(new-body new-locs) ((vm-optimize! L i) (car bodies))])
-					     (set-car! bodies new-body)
-					     (add-code-local+used-vars! (car case-codes)
-									new-locs)
-					     (loop (cdr bodies)
-						   (cdr case-codes)
-						   (add1 i)))))]
+                                       (zodiac:set-case-lambda-form-bodies!
+                                        L
+                                        (let loop ([bodies (zodiac:case-lambda-form-bodies L)]
+                                                   [case-codes (procedure-code-case-codes code)]
+                                                   [i 0])
+                                          (if (null? bodies)
+                                              null
+                                              (let-values ([(new-body new-locs) ((vm-optimize! L i) (car bodies))])
+                                                (add-code-local+used-vars! (car case-codes)
+                                                                           new-locs)
+                                                (cons new-body
+                                                      (loop (cdr bodies)
+                                                            (cdr case-codes)
+                                                            (add1 i)))))))]
 				      [else (compiler:internal-error
 					     L
 					     "vmopt: unknown closure type")])))
@@ -1160,8 +1181,7 @@
 								 #f #f ; no module entries
 								 c-port)])
 				   (fprintf c-port
-					    "Scheme_Object * scheme_reload~a(Scheme_Env * env)~n{~n"
-					    compiler:setup-suffix)
+					    "static Scheme_Object * do_scheme_reload(Scheme_Env * env)~n{~n")
 				   (fprintf c-port"~aScheme_Per_Load_Statics *PLS;~n"
 					    vm->c:indent-spaces)
 				   (fprintf c-port 
@@ -1177,9 +1197,17 @@
 				   (fprintf c-port 
 					    "}~n~n")
 
+
 				   (fprintf c-port
-					    "~nvoid scheme_setup~a(Scheme_Env * env)~n{~n"
+					    "Scheme_Object * scheme_reload~a(Scheme_Env * env)~n{~n"
 					    compiler:setup-suffix)
+				   (fprintf c-port"~areturn do_scheme_reload(env);~n"
+					    vm->c:indent-spaces)
+				   (fprintf c-port 
+					    "}~n~n")
+
+				   (fprintf c-port
+					    "~nstatic void do_scheme_setup(Scheme_Env * env)~n{~n")
 				   (fprintf c-port
 					    "~ascheme_set_tail_buffer_size(~a);~n"
 					    vm->c:indent-spaces
@@ -1207,14 +1235,23 @@
 
 				   (fprintf c-port 
 					    "}~n~n")
+
+                                   (fprintf c-port
+					    "~nvoid scheme_setup~a(Scheme_Env * env)~n{~n"
+					    compiler:setup-suffix)
+				   (fprintf c-port
+					    "~ado_scheme_setup(env);~n"
+					    vm->c:indent-spaces)
+				   (fprintf c-port 
+					    "}~n~n")
 				   
 				   (when (string=? "" compiler:setup-suffix)
 				     (fprintf c-port
 					      "~nScheme_Object * scheme_initialize(Scheme_Env * env)~n{~n")
-				     (fprintf c-port "~ascheme_setup~a(env);~n"
+				     (fprintf c-port "~ado_scheme_setup~a(env);~n"
 					      vm->c:indent-spaces
 					      compiler:setup-suffix)
-				     (fprintf c-port "~areturn scheme_reload~a(env);~n"
+				     (fprintf c-port "~areturn do_scheme_reload~a(env);~n"
 					      vm->c:indent-spaces
 					      compiler:setup-suffix)
 				     (fprintf c-port 

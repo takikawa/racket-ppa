@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["common.ss"]
+#lang scribble/doc
+@(require "common.ss")
 
 @defclass/title[radio-box% object% (control<%>)]{
 
@@ -143,7 +143,7 @@ box, @|MismatchExn|.
            void?]{
 
 Sets the selected radio button by position. (The control's callback
- procedure is {\em not} invoked.) Radio buttons are numbered from
+ procedure is @italic{not} invoked.) Radio buttons are numbered from
  @scheme[0]. If @scheme[n] is equal to or larger than the number of
  radio buttons in the radio box, @|MismatchExn|.
 

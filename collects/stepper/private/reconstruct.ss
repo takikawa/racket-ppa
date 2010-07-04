@@ -3,15 +3,18 @@
 ; a varref at the top of the mark-list must either be a top-level-variable
 ;  or have a value in some mark somewhere (or both).
 
-(module reconstruct mzscheme
-  (require (prefix kernel: (lib "kerncase.ss" "syntax"))
-           (lib "list.ss")
-           (lib "etc.ss")
-	   (lib "contract.ss")
+(module reconstruct scheme/base
+  (require (prefix-in kernel: syntax/kerncase)
+           mzlib/list
+           mzlib/etc
+	   mzlib/contract
+           scheme/match
            "marks.ss"
            "model-settings.ss"
            "shared.ss"
-           "my-macros.ss")
+           "my-macros.ss"
+           (for-syntax scheme/base)
+           #;(file "/Users/clements/clements/scheme-scraps/eli-debug.ss"))
 
   (provide/contract 
    [reconstruct-completed (syntax? 
@@ -20,6 +23,7 @@
                            render-settings? 
                            . -> .
                            (vector/c syntax? boolean?))]
+   [hide-completed? (syntax? . -> . boolean?)]
    
    ;; front ends for reconstruct-current
    [reconstruct-left-side (mark-list?
@@ -105,8 +109,8 @@
   
   (define recon-value
     (opt-lambda (val render-settings [assigned-name #f])
-      (if (hash-table-get finished-xml-box-table val (lambda () #f))
-          (stepper-syntax-property #`(#%datum . #,val) 'stepper-xml-value-hint 'from-xml-box)
+      (if (hash-ref finished-xml-box-table val (lambda () #f))
+          (stepper-syntax-property #`(quote #,val) 'stepper-xml-value-hint 'from-xml-box)
           (let ([closure-record (closure-table-lookup val (lambda () #f))])     
             (if closure-record
                 (let* ([mark (closure-record-mark closure-record)]
@@ -123,7 +127,7 @@
                 (let* ([rendered ((render-settings-render-to-sexp render-settings) val)])
                   (if (symbol? rendered)
                       #`#,rendered
-                      #`(#%datum . #,rendered))))))))
+                      #`(quote #,rendered))))))))
     
   (define (final-mark-list? mark-list)
     (and (not (null? mark-list)) (eq? (mark-label (car mark-list)) 'final)))
@@ -144,7 +148,9 @@
   (define (skip-step? break-kind mark-list render-settings)
     (case break-kind
       [(result-value-break)
-       #f]
+       (and (pair? mark-list)
+            (let ([expr (mark-source (car mark-list))])
+              (stepper-syntax-property expr 'stepper-hide-reduction)))]
       [(result-exp-break)
        ;; skip if clauses that are the result of and/or reductions
        (let ([and/or-clauses-consumed (stepper-syntax-property (mark-source (car mark-list)) 'stepper-and/or-clauses-consumed)])
@@ -161,6 +167,7 @@
         (not (render-settings-lifting? render-settings)))]
       [(expr-finished-break define-struct-break late-let-break) #f]))
   
+  ;; skip-redex-step : mark-list? render-settings? -> boolean?
   (define (skip-redex-step? mark-list render-settings)
     
     (define (varref-skip-step? varref)
@@ -179,36 +186,35 @@
     
     (and (pair? mark-list)
          (let ([expr (mark-source (car mark-list))])
-           (or (kernel:kernel-syntax-case expr #f
-                  [id
-                   (identifier? expr)
-                   (case (stepper-syntax-property expr 'stepper-binding-type)
-                       [(lambda-bound) #t]  ; don't halt for lambda-bound vars
-                       [(let-bound)
-                        (varref-skip-step? expr)]
-                       [(non-lexical)
-                        (varref-skip-step? expr)])]
-                  [(#%top . id-stx)
-                   (varref-skip-step? #`id-stx)]
-                  [(#%app . terms)
-                   (or
-                    (stepper-syntax-property expr 'stepper-dont-show-reduction)
-                    ; don't halt for proper applications of constructors
-                   (let ([fun-val (lookup-binding mark-list (get-arg-var 0))])
-                     (and (procedure? fun-val)
-                          (procedure-arity-includes? 
-                           fun-val
-                           (length (cdr (syntax->list (syntax terms)))))
-                          (or (and (render-settings-constructor-style-printing? render-settings)
-                                   (if (render-settings-abbreviate-cons-as-list? render-settings)
-                                       (eq? fun-val special-list-value)
-                                       (and (eq? fun-val special-cons-value)
-                                            (second-arg-is-list? mark-list))))
-                              ;(model-settings:special-function? 'vector fun-val)
-                              (and (eq? fun-val void)
-                                   (eq? (cdr (syntax->list (syntax terms))) null))
-                              (struct-constructor-procedure? fun-val)))))]
-                 [else #f])))))
+           (or (stepper-syntax-property expr 'stepper-hide-reduction)
+               (kernel:kernel-syntax-case expr #f
+                                          [id
+                                           (identifier? expr)
+                                           (case (stepper-syntax-property expr 'stepper-binding-type)
+                                             [(lambda-bound) #t]  ; don't halt for lambda-bound vars
+                                             [(let-bound)
+                                              (varref-skip-step? expr)]
+                                             [(non-lexical)
+                                              (varref-skip-step? expr)])]
+                                          [(#%top . id-stx)
+                                           (varref-skip-step? #`id-stx)]
+                                          [(#%plain-app . terms)
+                                           ; don't halt for proper applications of constructors
+                                           (let ([fun-val (lookup-binding mark-list (get-arg-var 0))])
+                                             (and (procedure? fun-val)
+                                                  (procedure-arity-includes? 
+                                                   fun-val
+                                                   (length (cdr (syntax->list (syntax terms)))))
+                                                  (or (and (render-settings-constructor-style-printing? render-settings)
+                                                           (if (render-settings-abbreviate-cons-as-list? render-settings)
+                                                               (eq? fun-val special-list-value)
+                                                               (and (eq? fun-val special-cons-value)
+                                                                    (second-arg-is-list? mark-list))))
+                                                      ;(model-settings:special-function? 'vector fun-val)
+                                                      (and (eq? fun-val void)
+                                                           (eq? (cdr (syntax->list (syntax terms))) null))
+                                                      (struct-constructor-procedure? fun-val))))]
+                                          [else #f])))))
   
   ;; find-special-value finds the value associated with the given name.  Applications of functions
   ;; like 'list' should not be shown as steps, because the before and after steps will be the same.
@@ -217,7 +223,7 @@
     (let* ([expanded-application (expand (cons name valid-args))]
            [stepper-safe-expanded (skipto/auto expanded-application 'discard (lambda (x) x))]
            [just-the-fn (kernel:kernel-syntax-case stepper-safe-expanded #f
-                          [(#%app fn . rest)
+                          [(#%plain-app fn . rest)
                            #`fn]
                           [else (error 'find-special-name "couldn't find expanded name for ~a" name)])])      
       (eval (syntax-recertify just-the-fn expanded-application (current-code-inspector) #f))))
@@ -270,8 +276,8 @@
   
   (define (step-was-app? mark-list)
     (and (not (null? mark-list))
-         (syntax-case (mark-source (car mark-list)) (#%app)
-           [(#%app . rest)
+         (syntax-case (mark-source (car mark-list)) (#%plain-app)
+           [(#%plain-app . rest)
             #t]
            [else
             #f])))
@@ -354,9 +360,9 @@
                      [recon (kernel:kernel-syntax-case expr #f
                               
                               ; lambda
-                              [(lambda . clause-stx)
+                              [(#%plain-lambda . clause-stx)
                                (let* ([clause (recon-lambda-clause (syntax clause-stx))])
-                                 #`(lambda #,@clause))]
+                                 #`(#%plain-lambda #,@clause))]
                               
                               ; case-lambda
                               [(case-lambda . clauses-stx)
@@ -402,11 +408,7 @@
                               [(with-continuation-mark . rest) (recon-basic)]
                               
                               ; application
-                              [(#%app . terms) (recon-basic)]
-                              
-                              ; #%datum
-                              [(#%datum . datum) 
-                               #`#,(recon-value (syntax-e #'datum) render-settings)]
+                              [(#%plain-app . terms) (recon-basic)]
                               
                               ; varref                        
                               [var-stx
@@ -432,16 +434,18 @@
                                                    ; for the moment, let-bound vars occur only in and/or :
                                                    (recon-value (lookup-binding mark-list var) render-settings))
                                                   ((let-bound)
-                                                   (stepper-syntax-property var
-                                                                            'stepper-lifted-name
-                                                                            (binding-lifted-name mark-list var)))
+                                                   (if (stepper-syntax-property var 'stepper-no-lifting-info)
+                                                       var
+                                                       (stepper-syntax-property var
+                                                                                'stepper-lifted-name
+                                                                                (binding-lifted-name mark-list var))))
                                                   ((stepper-temp)
                                                    (error 'recon-source-expr "stepper-temp showed up in source?!?"))
                                                   ((non-lexical)
                                                    (error 'recon-source-expr "can't get here: lexical identifier labeled as non-lexical"))
                                                   (else
-                                                   (error 'recon-source-expr "unknown 'stepper-binding-type property: ~a" 
-                                                          (stepper-syntax-property var 'stepper-binding-type)))))]
+                                                   (error 'recon-source-expr "unknown 'stepper-binding-type property: ~a on var: ~a" 
+                                                          (stepper-syntax-property var 'stepper-binding-type) (syntax->datum var)))))]
                                            [else ; top-level-varref
                                             (fixup-name
                                              var)])))]
@@ -450,7 +454,7 @@
                               
                               [else
                                (error 'recon-source "no matching clause for syntax: ~a" (if (syntax? expr)
-                                                                                            (syntax-object->datum expr)
+                                                                                            (syntax->datum expr)
                                                                                             expr))])])
                 (attach-info recon expr)))))))
   
@@ -488,7 +492,7 @@
   (define (fixup-name s)
     (let ([m (regexp-match re:beginner: (symbol->string (syntax-e s)))])
       (if m
-	  (datum->syntax-object s (string->symbol (cadr m)) s s)
+	  (datum->syntax s (string->symbol (cadr m)) s s)
 	  s)))
   (define re:beginner: (regexp "^beginner:(.*)$"))
   
@@ -519,8 +523,9 @@
   ; Accepts the source expression, a lifting-index which is either a number (indicating
   ;  a lifted binding) or false (indicating a top-level expression), a list of values
   ;  currently bound to the bindings, and the language level's render-settings.
-  ;; returns a vectory containing a reconstructed expression and a boolean indicating whether this is source syntax
-  ;; from a define-struct and therefore should not be unwound.
+  ;; returns a vector containing a reconstructed expression and a boolean indicating 
+  ;; whether this should not be unwound (e.g., is source syntax
+  ;; from a define-struct).
   
   (define (reconstruct-completed exp lifting-indices vals-getter render-settings)
     (if lifting-indices
@@ -535,6 +540,9 @@
             [(stepper-syntax-property exp 'stepper-define-struct-hint)
              ;; the hint contains the original syntax
              (vector (stepper-syntax-property exp 'stepper-define-struct-hint) #t)]
+            ;; for test cases, use the result here as the final result of the expression:
+            [(stepper-syntax-property exp 'stepper-use-val-as-final)
+             (vector (recon-value (car (vals-getter)) render-settings) #f)]
             [else
              (vector
               (kernel:kernel-syntax-case exp #f
@@ -577,8 +585,14 @@
          [else
           reconstructed]))))
   
-                                                                                                                
-                                                                                                                
+                                                   
+  ;; hide-completed? : syntax? -> boolean?
+  (define (hide-completed? stx)
+    (syntax-case stx ()
+      [(define-values (v) rhs)
+       (stepper-syntax-property #'v 'stepper-hide-completed)]
+      [else #f]))
+  
                                                                                                                 
                                        ;                     ;                                               ;  
  ; ;;  ;;;    ;;;   ;;;   ; ;;    ;;; ;;;; ; ;; ;   ;   ;;; ;;;;         ;;;  ;   ;  ; ;; ; ;;  ;;;   ; ;;  ;;;;
@@ -701,16 +715,16 @@
                  (kernel:kernel-syntax-case exp #f
                    [(begin . bodies)
                     (if (eq? so-far nothing-so-far)
-                        (error 'recon-inner "breakpoint before a begin reduction should have a result value in exp: ~a" (syntax-object->datum exp))
+                        (error 'recon-inner "breakpoint before a begin reduction should have a result value in exp: ~a" (syntax->datum exp))
                         #`(begin #,so-far #,@(map recon-source-current-marks (cdr (syntax->list #'bodies)))))]
                    [(begin0 first-body . rest-bodies)
                     (if (eq? so-far nothing-so-far)
-                        (error 'recon-inner "breakpoint before a begin0 reduction should have a result value in exp: ~a" (syntax-object->datum exp))
+                        (error 'recon-inner "breakpoint before a begin0 reduction should have a result value in exp: ~a" (syntax->datum exp))
                         #`(begin0 #,(recon-value (lookup-binding mark-list begin0-temp) render-settings)
                                   #,so-far
                                   #,@(map recon-source-current-marks (syntax->list #`rest-bodies))))]
                    [else
-                    (error 'recon-inner "unexpected fake-exp expression: ~a" (syntax-object->datum exp))])
+                    (error 'recon-inner "unexpected fake-exp expression: ~a" (syntax->datum exp))])
                  
                  (kernel:kernel-syntax-case exp #f 
                                             ; variable references
@@ -726,35 +740,32 @@
                                                  (error 'recon-inner "variable reference given as context: ~a" exp))]
                                             
                                             ; applications
-                                            [(#%app . terms)
+                                            [(#%plain-app . terms)
                                              (attach-info
-                                              (let* ([sub-exprs (syntax->list (syntax terms))]
-                                                     [arg-temps (build-list (length sub-exprs) get-arg-var)]
-                                                     [arg-vals (map (lambda (arg-temp) 
-                                                                      (lookup-binding mark-list arg-temp))
-                                                                    arg-temps)])
-                                                (let*-2vals ([(evaluated unevaluated) (split-list (lambda (x) (eq? (cadr x) *unevaluated*))
-                                                                                                  (zip sub-exprs arg-vals))]
-                                                             [rectified-evaluated (map (lx (recon-value _ render-settings)) (map cadr evaluated))])
+                                              (match-let* 
+                                                  ([sub-exprs (syntax->list (syntax terms))]
+                                                   [arg-temps (build-list (length sub-exprs) get-arg-var)]
+                                                   [arg-vals (map (lambda (arg-temp) 
+                                                                    (lookup-binding mark-list arg-temp))
+                                                                  arg-temps)]
+                                                   [(vector evaluated unevaluated) (split-list (lambda (x) (eq? (cadr x) *unevaluated*))
+                                                                                               (zip sub-exprs arg-vals))]
+                                                   [rectified-evaluated (map (lx (recon-value _ render-settings)) (map cadr evaluated))])
                                                 (case (mark-label (car mark-list))
                                                   ((not-yet-called)
                                                    (if (null? unevaluated)
-                                                       #`(#%app . #,rectified-evaluated)
-                                                       #`(#%app 
+                                                       #`(#%plain-app . #,rectified-evaluated)
+                                                       #`(#%plain-app 
                                                           #,@rectified-evaluated
                                                           #,so-far 
                                                           #,@(map recon-source-current-marks (cdr (map car unevaluated))))))
                                                   ((called)
-                                                   (unless (null? unevaluated)
-                                                     (error "stepper internal error: unevaluated args in called mark"))
                                                    (stepper-syntax-property
                                                     (if (eq? so-far nothing-so-far)
-                                                        (datum->syntax-object #'here `(,#'#%app ...)) ; in unannotated code
-                                                        (datum->syntax-object #'here `(,#'#%app ... ,so-far ...)))
-                                                    'stepper-evaled-args
-                                                    ;; store thunks of recon-values:
-                                                    (map (lx (lambda () (recon-value _ render-settings)))
-                                                         (map cadr evaluated))))
+                                                        (datum->syntax #'here `(,#'#%plain-app ...)) ; in unannotated code ... can this occur?
+                                                        (datum->syntax #'here `(,#'#%plain-app ... ,so-far ...)))
+                                                    'stepper-args-of-call 
+                                                    rectified-evaluated))
                                                   (else
                                                    (error 'recon-inner "bad label (~v) in application mark in expr: ~a" (mark-label (car mark-list)) exp)))))
                                               exp)]
@@ -818,7 +829,7 @@
                                                   #`(begin #,(recon-source-current-marks (syntax clause)))
                                                   (error 
                                                    'recon-inner
-                                                   "stepper:reconstruct: one-clause begin appeared as context: ~a" (syntax-object->datum exp)))
+                                                   "stepper:reconstruct: one-clause begin appeared as context: ~a" (syntax->datum exp)))
                                               exp)]
                                             
                                             #;[(begin)
@@ -827,7 +838,7 @@
                                                   #`(begin)
                                                   (error 
                                                    'recon-inner
-                                                   "stepper-reconstruct: zero-clause begin appeared as context: ~a" (syntax-object->datum exp))))]
+                                                   "stepper-reconstruct: zero-clause begin appeared as context: ~a" (syntax->datum exp))))]
                                             
                                             ; begin0 : 
                                             ;; one-body begin0: perhaps this will turn out to be a special case of the
@@ -865,7 +876,7 @@
                                             [else
                                              (error
                                               'recon-inner
-                                              "stepper:reconstruct: unknown object to reconstruct: ~a" (syntax-object->datum exp))]))))
+                                              "stepper:reconstruct: unknown object to reconstruct: ~a" (syntax->datum exp))]))))
          
          ; the main recursive reconstruction loop is in recon:
          ; recon : (syntax-object mark-list boolean -> syntax-object)
@@ -894,7 +905,7 @@
          #;(define _ (printf "break-kind: ~a\ninnermost source: ~a\nreturned-value-list: ~a\n" 
                            break-kind
                            (and (pair? mark-list)
-                                (syntax-object->datum (mark-source (car mark-list))))
+                                (syntax->datum (mark-source (car mark-list))))
                            returned-value-list))
              
          (define answer
@@ -922,7 +933,7 @@
                                               [(let-values ([vars . rest] ...) . bodies)
                                                (apply append (map syntax->list (syntax->list #`(vars ...))))]
                                               [else (error 'reconstruct "expected a let-values as source for a double-break, got: ~e"
-                                                           (syntax-object->datum source-expr))])]
+                                                           (syntax->datum source-expr))])]
                      [innermost-after (mark-as-highlight (recon-source-expr (mark-source (car mark-list)) mark-list null newly-lifted-bindings render-settings))])
                 (list (recon innermost-before (cdr mark-list) #f)
                       (recon innermost-after (cdr mark-list) #f))))))

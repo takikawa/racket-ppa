@@ -1,10 +1,10 @@
 
-(module reader-example (lib "lang.ss" "big")
-  (require (lib "struct.ss" "scribble")
-           (lib "decode.ss" "scribble")
-           (lib "manual.ss" "scribble")
-           (lib "scheme.ss" "scribble")
-           (lib "class.ss"))
+(module reader-example scheme/base
+  (require scribble/struct
+           scribble/decode
+           scribble/manual
+           scribble/scheme
+           scheme/class)
 
   (provide reader-examples
            read-quote-table
@@ -13,7 +13,7 @@
            metavar
            cilitchar)
 
-  (define (as-flow i) (make-flow (list (if (flow-element? i)
+  (define (as-flow i) (make-flow (list (if (block? i)
                                            i
                                            (make-paragraph (if (list? i)
                                                                i
@@ -88,13 +88,13 @@
                                                           [(byte-regexp? v) 'byte-regexp]
                                                           [else 'regexp])
                                                         ,(object-name v))]
-                                                     [(hash-table? v)
-                                                      `(make-... (quote ,(hash-table-map v cons))
-                                                                 ,@(if (hash-table? v 'equal)
-                                                                       '('equal)
-                                                                       '()))]
+                                                     [(hash? v)
+                                                      `(,(if (hash-eq? v)
+                                                             'make-...eq
+                                                             'make-...)
+                                                        (quote ,(hash-map v cons)))]
                                                      [else v]))])
-                                           (if (flow-element? e)
+                                           (if (block? e)
                                                e
                                                (to-element (syntax-ize e 0))))])))))
                     strs))))))))

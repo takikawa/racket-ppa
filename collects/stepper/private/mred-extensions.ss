@@ -1,15 +1,16 @@
 (module mred-extensions mzscheme
-  (require (lib "class.ss")
-           (lib "mred.ss" "mred")
-           (prefix f: (lib "framework.ss" "framework"))
-           (lib "pretty.ss")
+  (require mzlib/class
+           mred
+           (prefix f: framework)
+           mzlib/pretty
            "testing-shared.ss"
            "shared.ss"
-	   (lib "string-constant.ss" "string-constants")
+	   string-constants
            (lib "bitmap-label.ss" "mrlib"))
 
   (provide
-   stepper-bitmap
+   foot-img/horizontal
+   foot-img/vertical
    stepper-canvas%
    stepper-text%
    snip?
@@ -520,9 +521,16 @@
     
     (strip-regular stx))
   
+  ;; the bitmap to use in a horizontal toolbar:
+  (define foot-img/horizontal (make-object bitmap% (build-path (collection-path
+                                                                "icons") "foot.png") 'png/mask))
+  
+  ;; the bitmap to use in a vertical toolbar:
+  (define foot-img/vertical (make-object bitmap% (build-path (collection-path
+                                                              "icons") "foot-up.png") 'png/mask))
   
   ;; stepper-bitmap : the image used for the stepper button
-  (define stepper-bitmap
+  #;(define stepper-bitmap
     (bitmap-label-maker
      (string-constant stepper-button-label)
      (build-path (collection-path "icons") "foot.png")))

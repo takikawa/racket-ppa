@@ -1,7 +1,7 @@
 (module reader mzscheme
-  (require (lib "unitsig.ss")
-           (lib "list.ss")
-           (lib "etc.ss"))
+  (require mzlib/unitsig
+           mzlib/list
+           mzlib/etc)
   
   (require "sig.ss")
   
@@ -33,7 +33,7 @@
                              (let-values ([(misc1 end-of-file) (read-misc in pos)])
                                (unless (eof-object? end-of-file)
                                  (let ([loc-after (pos)])
-                                   (parse-error (list-immutable
+                                   (parse-error (list
                                                  (make-srcloc
                                                   (object-name in)
                                                   #f
@@ -41,7 +41,7 @@
                                                   (location-offset loc-before)
                                                   (- (location-offset loc-after)
                                                      (location-offset loc-before))))
-                                                "extra stuff at end of document ~a"
+                                                "extra stuff at end of document ~e"
                                                 end-of-file)))
                                misc1))))))
       
@@ -57,14 +57,14 @@
         (cond
           [(start-tag? start) (read-element start in pos)]
           [(element? start) start]
-          [else (parse-error (list-immutable
+          [else (parse-error (list
                               (make-srcloc
                                (object-name in)
                                #f
                                #f
                                1
                                (- (location-offset (pos)) 1)))
-                             "expected root element - received ~a"
+                             "expected root element - received ~e"
                              (if (pcdata? start) (pcdata-string start) start))]))
       
       ;; read-misc : Input-port (-> Location) -> (listof Misc) Token
@@ -96,7 +96,7 @@
             (let ([x (lex in pos)])
               (cond
                 [(eof-object? x)
-                 (parse-error (list-immutable
+                 (parse-error (list
                                (make-srcloc
                                 (object-name in)
                                 #f
@@ -117,7 +117,7 @@
                  (let ([end-loc (source-stop x)])
                    (unless (eq? name (end-tag-name x))
                      (parse-error
-                      (list-immutable
+                      (list
                        (make-srcloc (object-name in)
                                     #f
                                     #f
@@ -323,7 +323,7 @@
       (define (lex-name in pos)
         (let ([c (non-eof read-char-or-special in pos)])
           (unless (name-start? c)
-            (lex-error in pos "expected name, received ~s" c))
+            (lex-error in pos "expected name, received ~e" c))
           (string->symbol
            (list->string
             (cons c (let lex-rest ()
@@ -447,7 +447,7 @@
                     (format-source the-pos)
                     (apply format str rest))
             (current-continuation-marks)
-            (list-immutable
+            (list
              (make-srcloc (object-name in) #f #f offset 1))))))
 
       ;; parse-error : (listof srcloc) (listof TST) *-> alpha

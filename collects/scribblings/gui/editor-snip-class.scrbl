@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["common.ss"]
+#lang scribble/doc
+@(require "common.ss")
 
 @defclass/title[editor-snip% snip% ()]{
 
@@ -231,7 +231,7 @@ See also @method[editor-snip% get-align-top-line].
 
 Sets the editor contained by the snip, releasing the old editor in the
  snip (if any). If the new editor already has an administrator, then
- the new editor is {\em not} installed into the snip.
+ the new editor is @italic{not} installed into the snip.
 
 When an @scheme[editor-snip%] object is not inserted in an editor, it
  does not have an administrator. During this time, it does not give
@@ -328,7 +328,7 @@ Shows or hides the snip's border.
            boolean?]{
 
 Returns @scheme[#t] if the snip uses its style's background and
- transparency informaiton when drawing, @scheme[#f] otherwise.
+ transparency information when drawing, @scheme[#f] otherwise.
 
 See also @method[editor-snip% use-style-background].
 

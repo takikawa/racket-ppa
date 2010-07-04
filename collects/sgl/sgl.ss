@@ -1,6 +1,6 @@
 ;; sgl -- An OpenGL extension of MzScheme
 ;;
-;; Copyright (C) 2003-2007 Scott Owens <sowens@cs.utah.edu>
+;; Copyright (C) 2003-2008 Scott Owens <sowens@cs.utah.edu>
 ;;
 ;; This  library is  free  software; you  can  redistribute it  and/or
 ;; modify it under the terms  of the GNU Lesser General Public License
@@ -13,7 +13,7 @@
 ;; Lesser General Public License for more details.
  
 (module sgl mzscheme
-  (require (lib "etc.ss")
+  (require mzlib/etc
            "gl-vectors.ss"
            "gl.ss")
   

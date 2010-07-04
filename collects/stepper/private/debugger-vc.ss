@@ -1,9 +1,9 @@
 (module debugger-vc mzscheme
-  (require (lib "unitsig.ss")
+  (require mzlib/unitsig
            (lib "debugger-sig.ss" "stepper")
-           (lib "mred.ss" "mred")
-           (lib "class.ss")
-           (lib "framework.ss" "framework")
+           mred
+           mzlib/class
+           framework
            "marks.ss"
            "debugger-bindings.ss")
   
@@ -100,5 +100,3 @@
   ; send-output-to-debugger-window : (string text:basic% -> void)
   (define (send-output-to-debugger-window str text)
     (send text insert str (send text last-position))))      
-      
-    

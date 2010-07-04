@@ -1,10 +1,10 @@
 (module same mzscheme
-  (require (lib "etc.ss")
-           (lib "class.ss")
-           (lib "unit.ss")
-           (lib "mred.ss" "mred")
-           (lib "list.ss")
-           "../show-help.ss")
+  (require mzlib/etc
+           mzlib/class
+           mzlib/unit
+           mred
+           mzlib/list
+           "../show-scribbling.ss")
   
   (provide game@)
   
@@ -352,9 +352,9 @@
       (define help-button (make-object button% "Help"
                             hp
                             (let ([show-help
-                                   (show-help
-                                    (list "games" "same")
-                                    "Same Help")])
+                                   (show-scribbling
+                                    '(lib "games/scribblings/games.scrbl")
+                                    "same")])
                               (lambda (_1 _2)
                                 (show-help)))))
       

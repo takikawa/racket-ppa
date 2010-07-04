@@ -1,20 +1,21 @@
 
 (module language-configuration mzscheme
-  (require (lib "unit.ss")
+  (require mzlib/unit
            (lib "hierlist.ss" "hierlist")
-           (lib "class.ss")
-           (lib "contract.ss")
-           (lib "kw.ss")
-           (lib "string.ss")
+           mzlib/class
+           mzlib/contract
+           mzlib/kw
+           mzlib/string
+           mzlib/struct
            "drsig.ss"
-           (lib "string-constant.ss" "string-constants")
-           (lib "mred.ss" "mred")
-           (lib "framework.ss" "framework")
-           (lib "list.ss")
-           (lib "etc.ss")
-           (lib "file.ss")
+           string-constants
+           mred
+           framework
+           mzlib/list
+           mzlib/etc
+           mzlib/file
            (lib "getinfo.ss" "setup")
-           (lib "toplevel.ss" "syntax"))
+           syntax/toplevel)
   
   (define original-output (current-output-port))
   (define (printfo . args) (apply fprintf original-output args))
@@ -132,7 +133,7 @@
     ;; as the defaults in the dialog and the output language setting is the user's choice
     ;; todo: when button is clicked, ensure language is selected
     (define language-dialog
-      (opt-lambda (show-welcome? language-settings-to-show [parent #f] [manuals? #f])
+      (opt-lambda (show-welcome? language-settings-to-show [parent #f])
         (define ret-dialog%
           (class dialog%
             (define/override (on-subwindow-char receiver evt)
@@ -211,7 +212,6 @@
                                 button-panel
                                 language-settings-to-show
                                 #f
-                                manuals?
                                 ok-handler))
         
         ;; create ok/cancel buttons
@@ -246,7 +246,7 @@
     ;; if re-center is a dialog, when the show details button is clicked, the dialog is recenterd.
     (define fill-language-dialog
       (opt-lambda (parent show-details-parent language-settings-to-show
-                          [re-center #f] [manuals? #f]
+                          [re-center #f]
                           [ok-handler void]) ; en/disable button, execute it
         
         (define-values (language-to-show settings-to-show)
@@ -364,14 +364,6 @@
         (define details-outer-panel (make-object vertical-pane% outermost-panel))
         (define details/manual-parent-panel (make-object vertical-panel% details-outer-panel))
         (define details-panel (make-object panel:single% details/manual-parent-panel))
-        (define manual-ordering-panel (new vertical-panel% (parent details/manual-parent-panel)))
-        
-        (define manual-ordering-text (new panel-background-text%))
-        (define manual-ordering-canvas (new panel-background-editor-canvas% 
-                                            (parent manual-ordering-panel)
-                                            (editor manual-ordering-text)
-                                            (style '(no-hscroll))
-                                            (min-width 300)))
         
         (define one-line-summary-message (instantiate message% ()
                                            (parent parent)
@@ -410,7 +402,6 @@
                     (send details-panel active-child ldp)))
                 (send one-line-summary-message set-label (send language get-one-line-summary))
                 (send revert-to-defaults-button enable #t)
-                (update-manual-ordering-text language)
                 (set! get/set-selected-language-settings get/set-settings)
                 (set! selected-language language))
               (apply super-make-object args))))
@@ -433,63 +424,6 @@
           (send details-button enable #t)
           (send item selected))
         
-        ;; update-manual-ordering-text : -> void
-        ;; updates the manual ordering text with the order the manuals are searched for this language
-        (define (update-manual-ordering-text language)
-          (send manual-ordering-text begin-edit-sequence)
-          (send manual-ordering-text lock #f)
-          (send manual-ordering-text erase)
-          (send manual-ordering-text insert (string-constant plt:hd:manual-search-ordering))
-          (send manual-ordering-text insert "\n\n")
-          (send manual-ordering-text change-style 
-                (make-object style-delta% 'change-bold)
-                0
-                (- (send manual-ordering-text last-position) 2))
-          (let ([docs (drscheme:help-desk:get-docs)]
-                [manual-name-style-delta
-                 (make-object style-delta%)])
-            (let-values ([(ordered-bytes doc.txt?)
-                          (send language order-manuals (map path->bytes (map car docs)))])
-              (let loop ([ordered (map bytes->path ordered-bytes)]
-                         [n 1])
-                (cond
-                  [(null? ordered) 
-                   (when doc.txt?
-                     (insert-single "doc.txt files" n))]
-                  [else 
-                   (let* ([ent (car ordered)]
-                          [full-name (assoc ent docs)])
-                     (cond
-                       [full-name
-                        (insert-single (cdr full-name) n)
-                        (loop (cdr ordered) (+ n 1))]
-                       [else
-                        (loop (cdr ordered) n)]))]))))
-          (send manual-ordering-text change-style
-                (make-object style-delta% 'change-family 'system)
-                0
-                (send manual-ordering-text last-position))
-          (send manual-ordering-text set-position 0)
-          (send manual-ordering-text lock #t)
-          (send manual-ordering-text end-edit-sequence))
-        
-        (define manual-number-style-delta (make-object style-delta%))
-        (define stupid-internal-define-syntax1
-          (send manual-number-style-delta set-delta-foreground "darkblue"))
-        
-        (define (insert-single name n)
-          (let ([n-sp (send manual-ordering-text last-position)])
-            (send manual-ordering-text insert (number->string n))
-            (let ([n-ep (send manual-ordering-text last-position)])
-              (send manual-ordering-text insert ") ")
-              (send manual-ordering-text insert name)
-              (send manual-ordering-text insert "\n")
-              
-              (send manual-ordering-text change-style
-                    manual-number-style-delta
-                    n-sp
-                    (+ n-ep 1)))))
-        
         ;; construct-details : (union (-> void) #f)
         (define construct-details void)
         
@@ -511,10 +445,16 @@
                            (andmap number? numbers)
                            (andmap string? positions)
                            (= (length positions) (length numbers))
-                           ((length numbers) . >= . 2))
+                           ((length numbers) . >= . 1))
                 (error 'drscheme:language
-                       "languages position and numbers must be lists of strings and numbers, respectively, must have the same length,  and must each contain at least two elements, got: ~e ~e"
+                       "languages position and numbers must be lists of strings and numbers, respectively, must have the same length,  and must each contain at least one element, got: ~e ~e"
                        positions numbers))
+              
+              (when (null? (cdr positions))
+                (unless (equal? positions (list "Module"))
+                  (error 'drscheme:language
+                         "Only the module language may be at the top level. Other languages must have at least two levels")))
+              
               (send languages-hier-list clear-fringe-cache)
               
               #|
@@ -547,8 +487,7 @@
                                 [else
                                  (send language default-settings)])]
                              [(x) (void)])]
-                          [get-language-details-panel
-                           (lambda () language-details-panel)]
+                          [get-language-details-panel (lambda () language-details-panel)]
                           [get/set-settings (lambda x (apply real-get/set-settings x))]
                           [position (car positions)]
                           [number (car numbers)]
@@ -723,24 +662,32 @@
         ;; and selects the current language
         (define (open-current-language)
           (when (and language-to-show settings-to-show)
-            (let loop ([hi languages-hier-list]
-                       
-                       ;; skip the first position, since it is flattened into the dialog
-                       [first-pos (cadr (send language-to-show get-language-position))]
-                       [position (cddr (send language-to-show get-language-position))])
-              (let ([child
-                     ;; know that this `car' is okay by construction of the dialog
-                     (car 
-                      (filter (λ (x)
-                                (equal? (send (send x get-editor) get-text)
-                                        first-pos))
-                              (send hi get-items)))])
-                (cond
-                  [(null? position)
-                   (send child select #t)]
-                  [else
-                   (send child open)
-                   (loop child (car position) (cdr position))])))))
+            (let ([language-position (send language-to-show get-language-position)])
+              (cond
+                [(null? (cdr language-position))
+                 ;; nothing to open here
+                 ;; this should only be the module language
+                 (send (car (send languages-hier-list get-items)) select #t)
+                 (void)]
+                [else
+                 (let loop ([hi languages-hier-list]
+                            
+                            ;; skip the first position, since it is flattened into the dialog
+                            [first-pos (cadr language-position)]
+                            [position (cddr language-position)])
+                   (let ([child
+                          ;; know that this `car' is okay by construction of the dialog
+                          (car 
+                           (filter (λ (x)
+                                     (equal? (send (send x get-editor) get-text)
+                                             first-pos))
+                                   (send hi get-items)))])
+                     (cond
+                       [(null? position)
+                        (send child select #t)]
+                       [else
+                        (send child open)
+                        (loop child (car position) (cdr position))])))]))))
         
         ;; docs-callback : -> void
         (define (docs-callback)
@@ -851,29 +798,16 @@
                    (< (send x get-number) (send y get-number))]
                   [else #f])))
         
-        ;; remove the newline at the front of the first inlined category
-        (send (send (car (send languages-hier-list get-items)) get-editor) delete 0 1)
+        ;; remove the newline at the front of the first inlined category (if there)
+        ;; it won't be there if the module language is at the top.
+        (let ([t (send (car (send languages-hier-list get-items)) get-editor)])
+          (when (equal? "\n" (send t get-text 0 1))
+            (send t delete 0 1)))
         
-        (cond
-          [manuals? 
-           (unless details-shown?
-             (details-callback))
-           (send show-details-parent change-children
-                 (λ (l)
-                   (remq revert-to-defaults-outer-panel
-                         (remq details-button l))))
-           (send details/manual-parent-panel change-children 
-                 (λ (l)
-                   (list manual-ordering-panel)))]
-          [else 
-           (send details-outer-panel stretchable-width #f)
-           (send details/manual-parent-panel change-children 
-                 (λ (l)
-                   (list details-panel)))])
-        
-        (send manual-ordering-text hide-caret #t)
-        (send manual-ordering-text auto-wrap #t)
-        (send manual-ordering-text lock #t)
+        (send details-outer-panel stretchable-width #f)
+        (send details/manual-parent-panel change-children 
+              (λ (l)
+                (list details-panel)))
         
         (send languages-hier-list stretchable-width #t)
         (send languages-hier-list stretchable-height #t)
@@ -1067,36 +1001,35 @@
         (+ 10 ;; upper bound on some platform specific space I don't know how to get.
            (floor (inexact->exact (unbox y-box))))))
     
-    
-    
-    
-    ;             ;;;                             
-    ;                                
-    ;                                
-    ;;;   ; ;;;   ;;;;;   ;;;           ;;;    ;;;  
-    ;    ;;  ;   ;     ;   ;         ;   ;  ;   ; 
-    ;    ;   ;   ;     ;   ;          ;;;    ;;;  
-    ;    ;   ;   ;     ;   ;             ;      ; 
-    ;    ;   ;   ;     ;   ;         ;   ;  ;   ; 
-    ;;;;; ;;;  ;; ;;;;    ;;;    ;      ;;;    ;;;  
-    
-    
-    
-    
-    
-    ;;;                                                           
-    ;                                                           
-    ;                                                           
-    ;    ;;;;  ; ;;;    ;;; ;;;  ;;  ;;;;    ;;; ;  ;;;    ;;;  
-    ;        ;  ;;  ;  ;   ;  ;   ;      ;  ;   ;  ;   ;  ;   ; 
-    ;     ;;;;  ;   ;  ;   ;  ;   ;   ;;;;  ;   ;  ;;;;;   ;;;  
-    ;    ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;          ; 
-    ;    ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;   ; 
-    ;;;;;;  ;;; ;;;;  ;;  ;;;;   ;;; ;  ;;; ;  ;;;;   ;;;    ;;;  
-    ;                    ;               
-    ;                    ;               
-    ;;;                  ;;;                
-    
+
+;                                                   
+;                                                   
+;     ;             ;;;                             
+;                  ;                                
+;   ;;;   ;; ;;   ;;;;;   ;;;           ;;;;   ;;;; 
+;     ;    ;;  ;   ;     ;   ;         ;   ;  ;   ; 
+;     ;    ;   ;   ;     ;   ;          ;;;    ;;;  
+;     ;    ;   ;   ;     ;   ;             ;      ; 
+;     ;    ;   ;   ;     ;   ;   ;;    ;   ;  ;   ; 
+;   ;;;;; ;;; ;;; ;;;;;   ;;;    ;;    ;;;;   ;;;;  
+;                                                   
+;                                                   
+;                                                   
+;                                                   
+;                                                                 
+;                                                                 
+;    ;;                                                           
+;     ;                                                           
+;     ;     ;;;  ;; ;;    ;; ;;;;  ;;   ;;;    ;; ;;  ;;;    ;;;; 
+;     ;    ;   ;  ;;  ;  ;  ;;  ;   ;  ;   ;  ;  ;;  ;   ;  ;   ; 
+;     ;     ;;;;  ;   ;  ;   ;  ;   ;   ;;;;  ;   ;  ;;;;;   ;;;  
+;     ;    ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;          ; 
+;     ;    ;   ;  ;   ;  ;   ;  ;  ;;  ;   ;  ;   ;  ;      ;   ; 
+;   ;;;;;   ;;;;;;;; ;;;  ;;;;   ;; ;;  ;;;;;  ;;;;   ;;;;  ;;;;  
+;                            ;                    ;               
+;                         ;;;                  ;;;                
+;                                                                 
+;                                                                 
     
     (define (add-info-specified-languages)
       (for-each add-info-specified-language
@@ -1241,35 +1174,36 @@
               v))))
     
     
-    
-    ;;               ;    ;;;                    ;          
-    ;                      ;     ;                         
-    ;                      ;     ;                         
-    ;;;;  ;;  ;;  ;;;      ;    ;;;;;         ;;;   ; ;;;  
-    ;   ;  ;   ;    ;      ;     ;              ;    ;;  ; 
-    ;   ;  ;   ;    ;      ;     ;              ;    ;   ; 
-    ;   ;  ;   ;    ;      ;     ;              ;    ;   ; 
-    ;   ;  ;   ;    ;      ;     ;   ;          ;    ;   ; 
-    ; ;;;    ;;; ; ;;;;;  ;;;;;;   ;;;         ;;;;; ;;;  ;;
-    
-    
-    
-    
-    
-    ;;;                                                           
-    ;                                                           
-    ;                                                           
-    ;    ;;;;  ; ;;;    ;;; ;;;  ;;  ;;;;    ;;; ;  ;;;    ;;;  
-    ;        ;  ;;  ;  ;   ;  ;   ;      ;  ;   ;  ;   ;  ;   ; 
-    ;     ;;;;  ;   ;  ;   ;  ;   ;   ;;;;  ;   ;  ;;;;;   ;;;  
-    ;    ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;          ; 
-    ;    ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;   ; 
-    ;;;;;;  ;;; ;;;;  ;;  ;;;;   ;;; ;  ;;; ;  ;;;;   ;;;    ;;;  
-    ;                    ;               
-    ;                    ;               
-    ;;;                  ;;;                
-    
-    
+
+;                                                          
+;                                                          
+;  ;;               ;     ;;                    ;          
+;   ;                      ;     ;                         
+;   ; ;;  ;;  ;;  ;;;      ;    ;;;;;         ;;;   ;; ;;  
+;   ;;  ;  ;   ;    ;      ;     ;              ;    ;;  ; 
+;   ;   ;  ;   ;    ;      ;     ;     ;;;;;    ;    ;   ; 
+;   ;   ;  ;   ;    ;      ;     ;              ;    ;   ; 
+;   ;   ;  ;  ;;    ;      ;     ;   ;          ;    ;   ; 
+;  ;;;;;    ;; ;; ;;;;;  ;;;;;    ;;;         ;;;;; ;;; ;;;
+;                                                          
+;                                                          
+;                                                          
+;                                                          
+;                                                                 
+;                                                                 
+;    ;;                                                           
+;     ;                                                           
+;     ;     ;;;  ;; ;;    ;; ;;;;  ;;   ;;;    ;; ;;  ;;;    ;;;; 
+;     ;    ;   ;  ;;  ;  ;  ;;  ;   ;  ;   ;  ;  ;;  ;   ;  ;   ; 
+;     ;     ;;;;  ;   ;  ;   ;  ;   ;   ;;;;  ;   ;  ;;;;;   ;;;  
+;     ;    ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;          ; 
+;     ;    ;   ;  ;   ;  ;   ;  ;  ;;  ;   ;  ;   ;  ;      ;   ; 
+;   ;;;;;   ;;;;;;;; ;;;  ;;;;   ;; ;;  ;;;;;  ;;;;   ;;;;  ;;;;  
+;                            ;                    ;               
+;                         ;;;                  ;;;                
+;                                                                 
+;                                                                 
+   
     
     ;; add-expand-to-front-end : mixin
     ;; overrides front-end to make the language a language that expands its arguments
@@ -1292,6 +1226,66 @@
                 [else `(expand ',res)]))))
         (super-instantiate ())))
     
+    (define-struct (simple-settings+assume drscheme:language:simple-settings) (no-redef?))
+    (define simple-settings+assume->vector (make-->vector simple-settings+assume))
+
+    (define (assume-mixin %)
+      (class %
+        (define/override (default-settings) 
+          (extend-simple-settings (super default-settings) #t))
+
+        (define/override (marshall-settings settings)
+          (simple-settings+assume->vector settings))
+
+        (define/override (unmarshall-settings printable)
+          (and (vector? printable)
+               (= (vector-length printable) 7)
+               (let ([base
+                      (super unmarshall-settings
+                             (list->vector
+                              (reverse
+                               (cdr (reverse (vector->list printable))))))])
+                 (and base
+                      (extend-simple-settings
+                       base
+                       (and (vector-ref printable 6) #t))))))
+
+        (define/override (config-panel parent)
+          (let ([p (new vertical-panel% [parent parent])])
+            (let ([base-config (super config-panel p)]
+                  [assume-cb (new check-box%
+                                  [parent 
+                                   (new group-box-panel%
+                                        [parent p]
+                                        [label (string-constant enforce-primitives-group-box-label)]
+                                        [stretchable-height #f]
+                                        [stretchable-width #f])]
+                                  [label (string-constant enforce-primitives-check-box-label)])])
+              (case-lambda
+               [() (extend-simple-settings (base-config)
+                                           (send assume-cb get-value))]
+               [(c)
+                (base-config c)
+                (send assume-cb set-value (simple-settings+assume-no-redef? c))]))))
+
+        (define/override (default-settings? x)
+          (equal? (simple-settings+assume->vector x)
+                  (simple-settings+assume->vector (default-settings))))
+
+        (define/private (extend-simple-settings s no-redef?)
+          (make-simple-settings+assume (drscheme:language:simple-settings-case-sensitive s)
+                                       (drscheme:language:simple-settings-printing-style s)
+                                       (drscheme:language:simple-settings-fraction-style s)
+                                       (drscheme:language:simple-settings-show-sharing s)
+                                       (drscheme:language:simple-settings-insert-newlines s)
+                                       (drscheme:language:simple-settings-annotations s)
+                                       no-redef?))
+
+        (define/override (use-namespace-require/copy-from-setting? s)
+          (not (simple-settings+assume-no-redef? s)))
+
+        (super-new)))
+
     (define (r5rs-mixin %)
       (class %
         (define/override (on-execute setting run-in-user-thread)
@@ -1301,32 +1295,20 @@
              (read-square-bracket-as-paren #f)
              (read-curly-brace-as-paren #f)
              (read-accept-infix-dot #f)
+             (print-mpair-curly-braces #f)
              (print-vector-length #f))))
         (define/override (get-transformer-module) #f)
+
         (define/override (default-settings) 
-          (drscheme:language:make-simple-settings #f 'write 'mixed-fraction-e #f #t 'debug))
-        (define/override (order-manuals x)
-          (values 
-           (list #"r5rs" #"drscheme" #"tour" #"help")
-           #f))
+          (make-simple-settings+assume #f 'write 'mixed-fraction-e #f #t 'debug #t))
+
         (super-new)))
     
     (define get-all-scheme-manual-keywords
       (let ([words #f])
         (λ ()
           (unless words
-            (set! words (text:get-completions/manuals 
-                         (list "gui"
-                               "guide"
-                               "help"
-                               "mzscheme"
-                               "mred"
-                               "quick"
-                               "r5rs"
-                               "reference"
-                               "scribble"
-                               "web-server-guide"
-                               "web-server-reference"))))
+            (set! words (text:get-completions/manuals '(scheme/base scheme/contract))))
           words)))
     
     ;; add-built-in-languages : -> void
@@ -1337,8 +1319,8 @@
                 (λ (%)
                   (class* % (drscheme:language:language<%>)
                     (define/override (get-one-line-summary) one-line-summary)
-                    (define/override (use-namespace-require/copy?) #t)
-                    (inherit get-module get-transformer-module get-init-code)
+                    (inherit get-module get-transformer-module get-init-code
+                             use-namespace-require/copy-from-setting?)
                     (define/augment (capability-value key)
                       (cond
                         [(eq? key 'drscheme:autocomplete-words) 
@@ -1362,7 +1344,7 @@
                            (get-transformer-module)
                            (get-init-code setting)
                            mred-launcher?
-                           (use-namespace-require/copy?)))))
+                           (use-namespace-require/copy-from-setting? setting)))))
                     (super-new))))]
              [make-simple
               (λ (module id position numbers mred-launcher? one-line-summary extra-mixin)
@@ -1379,54 +1361,23 @@
                     (language-position position)
                     (language-numbers numbers))))])
         (add-language
-         (make-simple '(lib "plt-mzscheme.ss" "lang") 
-                      "plt:mz"
-                      (list (string-constant professional-languages)
-                            (string-constant plt)
-                            (string-constant mzscheme-w/debug))
-                      (list -1000 -10 1)
-                      #f
-                      (string-constant mzscheme-one-line-summary)
-                      (λ (x) x)))
-        (add-language
-         (make-simple '(lib "plt-mred.ss" "lang")
-                      "plt:mred"
-                      (list (string-constant professional-languages)
-                            (string-constant plt)
-                            (string-constant mred-w/debug))
-                      (list -1000 -10 2)
-                      #t
-                      (string-constant mred-one-line-summary)
-                      (λ (x) x)))
-        (add-language
-         (make-simple '(lib "plt-pretty-big.ss" "lang")
+         (make-simple '(lib "lang/plt-pretty-big.ss")
                       "plt:pretty-big"
-                      (list (string-constant professional-languages)
-                            (string-constant plt)
+                      (list (string-constant legacy-languages)
                             (string-constant pretty-big-scheme))
-                      (list -1000 -10 3)
+                      (list -200 3)
                       #t
                       (string-constant pretty-big-scheme-one-line-summary)
-                      (λ (x) x)))
+                      assume-mixin))
         (add-language
-         (make-simple '(lib "plt-mzscheme.ss" "lang")
-                      "plt:expander"
-                      (list (string-constant professional-languages)
-                            (string-constant plt)
-                            (string-constant expander))
-                      (list -1000 -10 4)
-                      #t
-                      (string-constant expander-one-line-summary)
-                      add-expand-to-front-end))
-        (add-language
-         (make-simple '(lib "lang.ss" "r5rs")
+         (make-simple '(lib "r5rs/lang.ss")
                       "plt:r5rs"
-                      (list (string-constant professional-languages)
-                            (string-constant r5rs-lang-name))
-                      (list -1000 -1000)
+                      (list (string-constant legacy-languages)
+                            (string-constant r5rs-language-name))
+                      (list -200 -1000)
                       #f
                       (string-constant r5rs-one-line-summary)
-                      r5rs-mixin))
+                      (lambda (%) (r5rs-mixin (assume-mixin %)))))
         
         (add-language
          (make-simple 'mzscheme
@@ -1465,20 +1416,21 @@
       (interface ()))
     
     
-    ;                                                                                                    
-    ;                                                                                                    
-    ;                                              @@                                                    
-    ;                  @                            @                                                    
-    ;  @@:@@:   $@$   @@@@@          $@$:           @     $@$: @@:@@:   $@-@@@@  @@   $@$:   $@-@@ -@@$  
-    ;   @+ :@  $- -$   @               -@           @       -@  @+ :@  $* :@  @   @     -@  $* :@  $  -$ 
-    ;   @   @  @   @   @     @@@@@  -$@$@  @@@@@    @    -$@$@  @   @  @   @  @   @  -$@$@  @   @  @@@@@ 
-    ;   @   @  @   @   @            $*  @           @    $*  @  @   @  @   @  @   @  $*  @  @   @  $     
-    ;   @   @  $- -$   @: :$        @- *@           @    @- *@  @   @  $* :@  @: +@  @- *@  $* :@  +:    
-    ;  @@@ @@@  $@$    :@@$-        -$$-@@        @@@@@  -$$-@@@@@ @@@  $@:@  :@$-@@ -$$-@@  $@:@   $@@+ 
-    ;                                                                     -$                   -$        
-    ;                                                                  -@@$                 -@@$         
-    ;                                                                                                    
-    ;                                                                                                    
+
+;                                                                                                    
+;                                                                                                    
+;                                              ;;                                                    
+;                  ;                            ;                                                    
+;  ;; ;;    ;;;   ;;;;;          ;;;            ;     ;;;  ;; ;;    ;; ;;;;  ;;   ;;;    ;; ;;  ;;;  
+;   ;;  ;  ;   ;   ;            ;   ;           ;    ;   ;  ;;  ;  ;  ;;  ;   ;  ;   ;  ;  ;;  ;   ; 
+;   ;   ;  ;   ;   ;     ;;;;;   ;;;;  ;;;;;    ;     ;;;;  ;   ;  ;   ;  ;   ;   ;;;;  ;   ;  ;;;;; 
+;   ;   ;  ;   ;   ;            ;   ;           ;    ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;   ;  ;     
+;   ;   ;  ;   ;   ;   ;        ;   ;           ;    ;   ;  ;   ;  ;   ;  ;  ;;  ;   ;  ;   ;  ;     
+;  ;;; ;;;  ;;;     ;;;          ;;;;;        ;;;;;   ;;;;;;;; ;;;  ;;;;   ;; ;;  ;;;;;  ;;;;   ;;;; 
+;                                                                      ;                    ;        
+;                                                                   ;;;                  ;;;         
+;                                                                                                    
+;                                                                                                    
     
     
     (define (not-a-language-message)
@@ -1635,8 +1587,7 @@
                            (new canvas-message% 
                                 (parent parent)
                                 (label (string-constant seasoned-plt-schemer?))))
-                         (list (string-constant professional-languages)
-                               "(module ...)")
+                         (list "Module")
                          (list "PLT-206-small.png" 
                                "icons")))
       
@@ -1645,7 +1596,7 @@
                            (new canvas-message% 
                                 (parent parent)
                                 (label (string-constant looking-for-standard-scheme?))))
-                         (list (string-constant professional-languages)
+                         (list (string-constant legacy-languages)
                                (string-constant plt)
                                (string-constant pretty-big-scheme))
                          (list "r5rs.png" "icons")))

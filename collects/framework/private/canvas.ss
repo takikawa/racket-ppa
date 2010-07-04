@@ -1,5 +1,5 @@
-(module canvas (lib "a-unit.ss")
-  (require (lib "class.ss")
+#lang scheme/unit
+  (require mzlib/class
            "sig.ss"
            "../preferences.ss"
            (lib "mred-sig.ss" "mred"))
@@ -178,4 +178,4 @@
   (define -color% (color-mixin basic%))
   (define info% (info-mixin basic%))
   (define delegate% (delegate-mixin basic%))
-  (define wide-snip% (wide-snip-mixin basic%)))
+  (define wide-snip% (wide-snip-mixin basic%))

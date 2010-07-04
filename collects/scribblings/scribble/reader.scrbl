@@ -1,11 +1,16 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require[(lib "bnf.ss" "scribble")]
-@require[(lib "eval.ss" "scribble")]
-@require["utils.ss"]
-@require-for-syntax[mzscheme]
+#lang scribble/doc
+@(require scribble/manual
+          scribble/bnf
+          scribble/eval
+          "utils.ss"
+          (for-syntax scheme/base)
+          (for-label (only-in scribble/reader
+                              use-at-readtable)))
 
-@title[#:tag "reader"]{The Scribble Reader}
+@(define read-eval (make-base-eval))
+@(interaction-eval #:eval read-eval (require (for-syntax scheme/base)))
+
+@title[#:tag "reader"]{@"@"-Reader}
 
 The Scribble @"@"-reader is designed to be a convenient facility for
 using free-form text in Scheme code, where ``@"@"'' is chosen as one of
@@ -23,19 +28,18 @@ meaning of these S-expressions depends on the rest of your own code.
 
 A PLT Scheme manual more likely starts with
 
-@schemeblock[
- #, @schemefont{#reader(lib "docreader.ss" "scribble")}
-]
+@schememod[scribble/doc]
 
 which installs a reader, wraps the file content afterward into a
 MzScheme module, and parses the body into a document using
-@file{decode.ss}.  See @secref["docreader"] for more information.
+@schememodname[scribble/decode].  See @secref["docreader"] for more
+information.
 
 Another way to use the reader is to use the @scheme[use-at-readtable]
 function to switch the current readtable to a readtable that parses
 @"@"-forms.  You can do this in a single command line:
 
-@commandline{mzscheme -Le reader.ss scribble "(use-at-readtable)"}
+@commandline{mzscheme -ile scribble/reader "(use-at-readtable)"}
 
 @;--------------------------------------------------------------------
 @section{Concrete Syntax}
@@ -197,11 +201,11 @@ following spaces (or tabs) are part of the comment (similar to
 Tip: if you're editing in a Scheme-aware editor (like DrScheme or
 Emacs), it is useful to comment out blocks like this:
 
-@verbatim["
+@verbatim[#:indent 2]|==={
   @;{
     ...
   ;}
-"]
+}===|
 
 so the editor does not treat the file as having unbalanced
 parenthesis.
@@ -280,8 +284,8 @@ are valid text.
 As described above, the text turns to a sequence of string arguments
 for the resulting form.  Spaces at the beginning and end of lines are
 discarded, and newlines turn to individual @scheme["\n"] strings
-(i.e., they are not merged with other body parts).  (See also the
-information about newlines and indentation below.)  Spaces are
+(i.e., they are not merged with other body parts); see also the
+information about newlines and indentation below. Spaces are
 @italic{not} discarded if they appear after the open @litchar["{"]
 (before the closing @litchar["}"]) when there is also text that
 follows (precedes) it; specifically, they are preserved in a
@@ -423,8 +427,8 @@ you want to control the sub expressions in the form.
 }===|
 
 Note that @litchar["@|{...}|"] can be parsed as either an escape expression or
-as a no-command @"@"-form.  The latter is used in this case (since there
-is little point in Scheme code that uses braces.
+as the Scheme command part of a @"@"-form.  The latter is used in this case
+(since there is little point in Scheme code that uses braces.
 
 @scribble-examples|==={
   @|{blah}|
@@ -548,7 +552,7 @@ the reader does not know about the "@litchar["> "]" prompt.)
     c}
 }===|
 
-If the first string came from the openning @litchar["{"] line, it is
+If the first string came from the opening @litchar["{"] line, it is
 not prepended with an indentation (but it can affect the leftmost
 syntax object used for indentation).  This makes sense when formatting
 structured code as well as text (see the last example in the following
@@ -636,9 +640,9 @@ matter, you can begin (or end) a line with a "@||".
 @section{Syntax Properties}
 
 The Scribble reader attaches properties to syntax objects.  These
-properties might be useful in rare situations.
+properties might be useful in some rare situations.
 
-Forms that Scribble reads is marked with a @scheme['scribble]
+Forms that Scribble reads are marked with a @scheme['scribble]
 property, and a value of a list of three elements: the first is
 @scheme['form], the second is the number of items that were read from
 the datum part, and the third is the number of items in the body part
@@ -651,8 +655,10 @@ example, implicitly quoted keywords:
 
 @; FIXME: a bit of code duplication here
 @def+int[
+  #:eval read-eval
   (define-syntax (foo stx)
     (let ([p (syntax-property stx 'scribble)])
+      (printf ">>> ~s\n" (syntax->datum stx))
       (syntax-case stx ()
         [(_ x ...)
          (and (pair? p) (eq? (car p) 'form) (even? (cadr p)))
@@ -669,10 +675,14 @@ example, implicitly quoted keywords:
                            #'(key ,val))
                          as)
                    (cddr xs))))])))
-(eval:alts
- (code:line
-  #, @tt["@foo[x 1 y (* 2 3)]{blah}"])
-  @foo[x 1 y (* 2 3)]{blah})
+  (eval:alts
+   (code:line
+    #, @tt["@foo[x 1 y (* 2 3)]{blah}"])
+    ;; Unfortunately, expressions are preserved by `def+int'
+    ;; using `quote', not `quote-syntax' (which would create all sorts
+    ;; or binding trouble), so we manually re-attach the property:
+    (eval (syntax-property #'@foo[x 1 y (* 2 3)]{blah}
+                           'scribble '(form 4 1))))
 ]
 
 In addition, the Scribble parser uses syntax properties to mark syntax
@@ -684,11 +694,12 @@ have a @scheme['(newline S)] value where @scheme[S] is the original
 newline string including spaces that precede and follow it (which
 includes the indentation for the following item).  This can be used to
 implement a verbatim environment: drop indentation strings, and use
-the original source strings instead of single-newline string.  Here is
-an example of this.
+the original source strings instead of the single-newline string.  Here
+is an example of this.
 
 @; FIXME: a bit of code duplication here
 @def+int[
+  #:eval read-eval
   (define-syntax (verb stx)
     (syntax-case stx ()
       [(_ cmd item ...)
@@ -706,32 +717,33 @@ an example of this.
                          [else (cons (datum->syntax-object
                                       fst (cadr prop) fst)
                                      rst)])))))]))
-(eval:alts
- (code:line
-  #, @tt["@verb[string-append]{"]
-  #, @tt["  foo"]
-  #, @tt["    bar"]
-  #, @tt["}"])
- @verb[string-append]{
-   foo
-     bar
- })
+  (eval:alts
+   (code:line
+    #, @tt["@verb[string-append]{"]
+    #, @tt["  foo"]
+    #, @tt["    bar"]
+    #, @tt["}"])
+   @verb[string-append]{
+     foo
+       bar
+   })
 ]
 
 @;--------------------------------------------------------------------
 @section{Interface}
 
-The @file{reader.ss} module provides functionality for advanced needs.
+@defmodule[scribble/reader]{The @schememodname[scribble/reader] module
+provides direct Scribble reader functionality for advanced needs.}
 
 @; The `with-scribble-read' trick below shadows `read' and
 @;  `read-syntax' with for-label bindings from the Scribble reader
 
-@define-syntax[with-scribble-read
- (syntax-rules ()
-  [(_)
-   (...
-    (begin
-     (require-for-label (lib "reader.ss" "scribble"))
+@(define-syntax with-scribble-read
+   (syntax-rules ()
+     [(_)
+      (...
+       (begin
+         (require (for-label scribble/reader))
 
 @; *** Start reader-import section ***
 @defproc[(read [in input-port? (current-input-port)]) any]{}
@@ -744,32 +756,44 @@ in reading.
 }
 
 @defproc[(read-inside [in input-port? (current-input-port)]) any]{}
-@defproc[(read-inside-syntax [source-name any/c (object-name in)]
+@defproc[(read-syntax-inside [source-name any/c (object-name in)]
                              [in input-port? (current-input-port)])
          (or/c syntax? eof-object?)]{
 These @schemeid[-inside] variants parse as if starting inside a
 @litchar["@{"]...@litchar["}"], and they return a (syntactic) list.
 Useful for implementing languages that are textual by default (see
-@file{docreader.ss} for example).
+@filepath{docreader.ss} for example).
 }
 
-@defform[(make-at-readtable [keyword-args ...])]{
+@defproc[(make-at-readtable [#:readtable readtable readtable? (current-readtable)]
+                            [#:command-char command-char character? #\@]
+                            [#:start-inside? start-inside? any/c #f]
+                            [#:datum-readtable datum-readtable 
+                                               (or/c readtable? boolean? 
+                                                     (readtable? . -> . readtable?)) 
+                                               #t]
+                            [#:syntax-post-processor syntax-post-proc (syntax? . -> . syntax?) values])
+          readtable?]{
+
 Constructs an @"@"-readtable.  The keyword arguments can customize the
-resulting reader in several ways.
+resulting reader in several ways:
 
 @itemize{
-@item{@scheme[#:readtable] --- a readtable to base the @"@"-readtable
-  on.  Defaults to the current readtable.}
-@item{@scheme[#:command-char] --- the character used for @"@"-forms;
-  defaults to @scheme[#\@].}
-@item{@scheme[#:datum-readtable] --- determines the readtable used for
-  reading the datum part.  The default (@scheme[#t]) is to use the
+
+@item{@scheme[readtable] --- a readtable to base the @"@"-readtable
+  on.}
+
+@item{@scheme[command-char] --- the character used for @"@"-forms.}
+
+@item{@scheme[datum-readtable] --- determines the readtable used for
+  reading the datum part.  A @scheme[#t] values uses the
   @"@"-readtable, otherwise it can be a readtable, or a
   readtable-to-readtable function that will construct one from the
   @"@"-readtable.  The idea is that you may want to have completely
   different uses for the datum part, for example, introducing a
   convenient @litchar["key=val"] syntax for attributes.}
-@item{@scheme[#:syntax-post-processor] --- function that is applied on
+
+@item{@scheme[syntax-post-proc] --- function that is applied on
   each resulting syntax value after it has been parsed (but before it
   is wrapped quoting punctuations).  You can use this to further
   control uses of @"@"-forms, for example, making the command be the
@@ -782,43 +806,20 @@ resulting reader in several ways.
         (syntax-case stx ()
           [(cmd rest ...) #'(list 'cmd rest ...)]
           [_else (error "@ forms must have a body")])))
-  ]
+  ]}
 
-  Beware that the syntax may contain placeholder values at this stage
-  (e.g: the command part), so you can `plant' your own form that will
-  do some plain processing later.  For example, here's a setup that
-  uses a @schemeid[mk-] prefix for all command names:
+@item{@scheme[start-inside?] --- if true, creates a readtable for
+use starting in text mode, instead of S-expression mode.}
 
-  @schemeblock[
-    (use-at-readtable
-      #:syntax-post-processor
-      (lambda (stx)
-        (syntax-case stx ()
-          [(cmd rest ...) #'(add-mk cmd rest ...)]
-          [_else (error "@ forms must have a body")])))
-    (define-syntax (add-mk stx)
-      (syntax-case stx ()
-        [(_ cmd rest ...)
-         (identifier? #'cmd)
-         (with-syntax ([mk-cmd (datum->syntax-object
-                                #'cmd
-                                (string->symbol
-                                 (format "mk-~a" (syntax-e #'cmd)))
-                                #'cmd)])
-           (syntax/loc stx (mk-cmd rest ...)))]))
-  ]
-}
-@item{@scheme[#:start-inside?] --- used internally by the above
-  @schemeid[-inside] variants.}
 }}
 
 @defproc[(use-at-readtable ...) void?]{
-Installs the Scribble readtable as the default.  Useful for REPL
-experimentation.  (Note: enables line and column tracking.)  The given
-keyword arguments are used with `make-at-readtable'.
-}
+
+Passes all arguments to @scheme[make-at-readtable], and installs the
+resulting readtable using @scheme[current-readtable]. It also enables
+line counting for the current input-port via @scheme[port-count-lines!].}
 
 @; *** End reader-import section ***
-))])]
+))]))
 @with-scribble-read[]
  

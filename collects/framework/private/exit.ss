@@ -1,5 +1,6 @@
-(module exit (lib "a-unit.ss")
-  (require (lib "string-constant.ss" "string-constants")
+#lang scheme/unit
+
+  (require string-constants
            "sig.ss"
            "../preferences.ss"
            "../gui-utils.ss"
@@ -19,7 +20,7 @@
         (set! can?-callbacks
               (let loop ([cb-list can?-callbacks])
                 (cond
-                  [(null? cb-list) ()]
+                  [(null? cb-list) '()]
                   [(eq? cb (car cb-list)) (cdr cb-list)]
                   [else (cons (car cb-list) (loop (cdr cb-list)))]))))))
   
@@ -30,7 +31,7 @@
         (set! on-callbacks
               (let loop ([cb-list on-callbacks])
                 (cond
-                  [(null? cb-list) ()]
+                  [(null? cb-list) '()]
                   [(eq? cb (car cb-list)) (cdr cb-list)]
                   [else (cons (car cb-list) (loop (cdr cb-list)))]))))))
   
@@ -72,4 +73,4 @@
           (exit)
           (set! is-exiting? #f)))]
       [else
-       (set! is-exiting? #f)])))
+       (set! is-exiting? #f)]))

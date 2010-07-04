@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2007 PLT Scheme Inc.
+  Copyright (c) 2004-2008 PLT Scheme Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -54,24 +54,22 @@ void scheme_init_numarith(Scheme_Env *env)
   scheme_add_global_constant("+", p, env);
 
   p = scheme_make_folding_prim(minus, "-", 1, -1, 1);
-  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_UNARY_INLINED);
   scheme_add_global_constant("-", p, env);
 
-  scheme_add_global_constant("*", 
-			     scheme_make_folding_prim(mult,
-						      "*", 
-						      0, -1, 1),
-			     env);
-  scheme_add_global_constant("/", 
-			     scheme_make_folding_prim(div_prim,
-						      "/",
-						      1, -1, 1),
-			     env);
-  scheme_add_global_constant("abs", 
-			     scheme_make_folding_prim(scheme_abs,
-						      "abs",
-						      1, 1, 1),
-			     env);
+  p = scheme_make_folding_prim(mult, "*", 0, -1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("*", p, env);
+
+  p = scheme_make_folding_prim(div_prim, "/", 1, -1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant("/", p, env);
+
+  p = scheme_make_folding_prim(scheme_abs, "abs", 1, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant("abs", p, env);
+
   scheme_add_global_constant("quotient", 
 			     scheme_make_folding_prim(quotient,
 						      "quotient", 
@@ -122,7 +120,7 @@ scheme_add1 (int argc, Scheme_Object *argv[])
     return scheme_bignum_add1(o);
   if (t == scheme_rational_type)
     return scheme_rational_add1(o);
-  if ((t == scheme_complex_type) || (t == scheme_complex_izi_type))
+  if (t == scheme_complex_type)
     return scheme_complex_add1(o);
 
   NEED_NUMBER(add1);
@@ -157,7 +155,7 @@ scheme_sub1 (int argc, Scheme_Object *argv[])
     return scheme_bignum_sub1(o);
   if (t == scheme_rational_type)
     return scheme_rational_sub1(o);
-  if ((t == scheme_complex_type) || (t == scheme_complex_izi_type))
+  if (t == scheme_complex_type)
     return scheme_complex_sub1(o);
   
   NEED_NUMBER(sub1);
@@ -256,8 +254,8 @@ GEN_BIN_OP(scheme_bin_minus, "-", SUBTRACT, F_SUBTRACT, FS_SUBTRACT, scheme_bign
 GEN_BIN_OP(scheme_bin_mult, "*", MULTIPLY, F_MULTIPLY, FS_MULTIPLY, scheme_bignum_multiply, scheme_rational_multiply, scheme_complex_multiply, GEN_RETURN_0, GEN_RETURN_0, NO_NAN_CHECK, NO_NAN_CHECK)
 GEN_BIN_DIV_OP(scheme_bin_div, "/", DIVIDE, F_DIVIDE, FS_DIVIDE, scheme_make_rational, scheme_rational_divide, scheme_complex_divide)
 
-GEN_NARY_OP(static, plus, "+", scheme_bin_plus, 0, SCHEME_NUMBERP, "number")
-GEN_NARY_OP(static, mult, "*", scheme_bin_mult, 1, SCHEME_NUMBERP, "number")
+GEN_NARY_OP(static, plus, "+", scheme_bin_plus, 0, SCHEME_NUMBERP, "number", GEN_IDENT)
+GEN_NARY_OP(static, mult, "*", scheme_bin_mult, 1, SCHEME_NUMBERP, "number", GEN_IDENT)
 
 static MZ_INLINE Scheme_Object *
 minus_slow (Scheme_Object *ret, int argc, Scheme_Object *argv[])
@@ -355,7 +353,7 @@ scheme_abs(int argc, Scheme_Object *argv[])
   o = argv[0];
 
   if (SCHEME_INTP(o)) {
-    int n = SCHEME_INT_VAL(o);
+    long n = SCHEME_INT_VAL(o);
     return scheme_make_integer_value(ABS(n));
   } 
   t = _SCHEME_TYPE(o);
@@ -375,10 +373,6 @@ scheme_abs(int argc, Scheme_Object *argv[])
       return o;
     else
       return scheme_rational_negate(o);
-  }
-  if (t == scheme_complex_izi_type) {
-    Scheme_Object *r = IZI_REAL_PART(o);
-    return scheme_abs(1, &r);
   }
 
   NEED_REAL(abs);
@@ -403,9 +397,6 @@ do_bin_quotient(const char *name, const Scheme_Object *n1, const Scheme_Object *
     a[1] = (Scheme_Object *)n2;
     scheme_wrong_type(name, "integer", 1, 2, a);
   }
-
-  if (SCHEME_COMPLEX_IZIP(n1)) n1 = IZI_REAL_PART(n1);
-  if (SCHEME_COMPLEX_IZIP(n2)) n2 = IZI_REAL_PART(n2);
 
   if (SCHEME_INTP(n2) && !SCHEME_INT_VAL(n2))
     scheme_raise_exn(MZEXN_FAIL_CONTRACT_DIVIDE_BY_ZERO,
@@ -509,9 +500,6 @@ rem_mod (int argc, Scheme_Object *argv[], char *name, int first_sign)
     scheme_wrong_type(name, "integer", 0, argc, argv);
   if (!scheme_is_integer(n2))
     scheme_wrong_type(name, "integer", 1, argc, argv);
-
-  if (SCHEME_COMPLEX_IZIP(n1)) n1 = IZI_REAL_PART(n1);
-  if (SCHEME_COMPLEX_IZIP(n2)) n2 = IZI_REAL_PART(n2);
 
   if (SCHEME_INTP(n2) && !SCHEME_INT_VAL(n2))
     scheme_raise_exn(MZEXN_FAIL_CONTRACT_DIVIDE_BY_ZERO,

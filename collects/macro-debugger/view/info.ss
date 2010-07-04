@@ -1,4 +1,3 @@
+#lang setup/infotab
 
-(module info (lib "infotab.ss" "setup")
-  (define name "Macro Debugger view")
-  (define compile-omit-files '("browse-deriv.ss" "show-deriv.ss")))
+(define compile-omit-paths '("browse-deriv.ss" "show-deriv.ss"))

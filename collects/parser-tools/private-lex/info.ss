@@ -1,5 +1,3 @@
+#lang setup/infotab
 
-(module info (lib "infotab.ss" "setup")
-  (define compile-omit-files (list "error-tests.ss"))
-  (define name "Parser-tools private-lex"))
-
+(define compile-omit-paths '("error-tests.ss"))

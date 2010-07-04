@@ -7,8 +7,8 @@
 ;; Written by Dima Dorfman, 2004
 ;; Converted to MzScheme by Brent Fulgham
 
-(module nseive mzscheme
-  (require (only (lib "13.ss" "srfi") string-index string-pad))
+(module nsieve mzscheme
+  (require (only srfi/13 string-index string-pad))
 
   (define (nsieve m)
     (let ((a (make-vector m #t)))

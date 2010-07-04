@@ -6,35 +6,43 @@
 
 |#
 
-(module htdp-langs mzscheme
-  (require (lib "string-constant.ss" "string-constants")
-           (lib "framework.ss" "framework")
-           (prefix et: (lib "stacktrace.ss" "errortrace"))
-           (prefix tr: (lib "stacktrace.ss" "trace"))
-           (lib "pretty.ss")
-           (prefix pc: (lib "pconvert.ss"))
-           (lib "file.ss")
-           (lib "unit.ss")
-           (lib "class.ss")
-           (lib "list.ss")
-           (lib "struct.ss")
-           (lib "compile.ss")
-           (lib "struct.ss")
+#lang scheme
+(require string-constants
+           framework
+           (prefix-in et: (lib "stacktrace.ss" "errortrace"))
+           (prefix-in tr: (lib "stacktrace.ss" "trace"))
+           mzlib/pretty
+           (prefix-in pc: mzlib/pconvert)
+           mzlib/file
+           mzlib/unit
+           mzlib/class
+           mzlib/list
+           mzlib/struct
+           mzlib/compile
+           mzlib/struct
            (lib "tool.ss" "drscheme")
-           (lib "mred.ss" "mred")
+           mred
            (lib "bday.ss" "framework" "private")
-           (lib "moddep.ss" "syntax")
+           syntax/moddep
            (lib "cache-image-snip.ss" "mrlib")
-           (lib "embed.ss" "compiler")
+           compiler/embed
            (lib "wxme.ss" "wxme")
-           (lib "dirs.ss" "setup")
+           setup/dirs
            
            ;; this module is shared between the drscheme's namespace (so loaded here) 
            ;; and the user's namespace in the teaching languages
            "private/set-result.ss"
            
-           "stepper-language-interface.ss"
-           "debugger-language-interface.ss")
+           "stepper-language-interface.ss"           
+           "debugger-language-interface.ss"
+           "run-teaching-program.ss"
+           stepper/private/shared
+           
+           (only-in test-engine/scheme-gui make-formatter)
+           (only-in test-engine/scheme-tests scheme-test-data test-format test-execute)
+           (lib "test-display.scm" "test-engine")
+           )
+  
   
   (provide tool@)
   
@@ -151,18 +159,26 @@
           (define/override (on-execute settings run-in-user-thread)
             (let ([drs-namespace (current-namespace)]
                   [set-result-module-name 
-                   ((current-module-name-resolver) '(lib "set-result.ss" "lang" "private") #f #f)])
+                   ((current-module-name-resolver) '(lib "lang/private/set-result.ss") #f #f)]
+                  [scheme-test-module-name
+                   ((current-module-name-resolver) '(lib "test-engine/scheme-tests.ss") #f #f)])
               (run-in-user-thread
                (lambda ()
                  (read-accept-quasiquote (get-accept-quasiquote?))
-                 (namespace-attach-module drs-namespace 'drscheme-secrets)
-                 (namespace-attach-module drs-namespace set-result-module-name)
+                 (namespace-attach-module drs-namespace ''drscheme-secrets)
+                 (namespace-attach-module drs-namespace set-result-module-name)                 
                  (error-display-handler teaching-languages-error-display-handler)
                  (error-value->string-handler (λ (x y) (teaching-languages-error-value->string settings x y)))
                  (current-eval (add-annotation (htdp-lang-settings-tracing? settings) (current-eval)))
                  (error-print-source-location #f)
                  (read-decimal-as-inexact #f)
-                 (read-accept-dot (get-read-accept-dot)))))
+                 (read-accept-dot (get-read-accept-dot))
+                 (namespace-attach-module drs-namespace scheme-test-module-name)
+                 (namespace-require scheme-test-module-name)
+                 (scheme-test-data (list (drscheme:rep:current-rep) drs-eventspace test-display%))
+                 (test-execute (get-preference 'tests:enable? (lambda () #t)))
+                 (test-format (make-formatter (lambda (v o) (render-value/format v settings o 40))))
+                 )))
             (super on-execute settings run-in-user-thread))
           
           (define/private (teaching-languages-error-value->string settings v len)
@@ -262,6 +278,7 @@
                                   (string-constant use-pretty-printer-label)
                                   output-panel
                                   void)]
+               #;
                [tracing (new check-box%
                              (parent output-panel)
                              (label sc-tracing)
@@ -300,7 +317,7 @@
               (and allow-sharing-config? (send show-sharing get-value))
               (send insert-newlines get-value)
               'none
-              (send tracing get-value)
+              #f ;; (send tracing get-value) -- disabled tracing
               tps)]
             [(settings)
              (send case-sensitive set-value (drscheme:language:simple-settings-case-sensitive settings))
@@ -335,7 +352,9 @@
                                [parent tp-panel]
                                [label (format "~s" tp)]))
                   tps))
-             (send tracing set-value (htdp-lang-settings-tracing? settings))])))
+             ;; disabled tracing
+             #; (send tracing set-value (htdp-lang-settings-tracing? settings))
+             (void)])))
       
       (define simple-htdp-language%
         (class* drscheme:language:simple-module-based-language% (htdp-language<%>)
@@ -400,11 +419,6 @@
                       (loop (cdr these-tps))]))])
               (go "." (drscheme:rep:get-welcome-delta))
               (newline port)))
- 
-          (define/private (htdp-manuals) (list (get-manual) #"teachpack" #"drscheme" #"help"))
-          
-          (define/override (order-manuals x) 
-            (values (htdp-manuals) #f))
           
           (inherit get-module get-transformer-module get-init-code
                    use-namespace-require/copy?)
@@ -423,8 +437,10 @@
                    (create-embedding-executable 
                     exe-name
                     #:modules `((#f ,program-filename))
-                    #:literal-expression `(require ,(filename->require-symbol program-filename))
-                    #:cmdline '("-Zmvq")
+                    #:cmdline `("-l" 
+                                "scheme/base"
+                                "-e"
+                                ,(format "~s" `(#%require ',(filename->require-symbol program-filename))))
                     #:src-filter
                     (λ (path) (cannot-compile? path))
                     #:get-extra-imports
@@ -436,8 +452,8 @@
                              (let-values ([(snip-class-names data-class-names)
                                            (extract-used-classes port)])
                                (list*
-                                '(lib "read.ss" "wxme")
-                                '(lib "mred.ss" "mred")
+                                '(lib "wxme/read.ss")
+                                '(lib "mred/mred.ss")
                                 reader-module
                                 (filter
                                  values
@@ -502,86 +518,22 @@
           (inherit get-reader set-printing-parameters)
           
           (define/override (front-end/complete-program port settings)
-            (let ([state 'init]
-                  ;; state : 'init => 'require => 'done-or-exn
-                  [reader (get-reader)]
-                  
-                  ;; in state 'done-or-exn, if this is an exn, we raise it
-                  ;; otherwise, we just return eof
-                  [saved-exn #f])
-              
-              (lambda ()
-                (case state
-                  [(init)
-                   (set! state 'require)
-                   (let ([language-module (get-module)])
-                     (with-handlers ([exn:fail?
-                                      (λ (x)
-                                        (set! saved-exn x)
-                                        (expand
-                                         (datum->syntax-object
-                                          #f
-                                          `(,#'module #%htdp ,language-module 
-                                                      ,@(map (λ (x) `(require ,x))
-                                                             (htdp-lang-settings-teachpacks settings))))))])
-                       (let ([body-exps 
-                              (let loop ()
-                                (let ([result (reader (object-name port) port)])
-                                  (if (eof-object? result)
-                                      null
-                                      (cons result (loop)))))])
-                         (for-each
-                          (λ (tp)
-                            (with-handlers ((exn:fail? (λ (x) (error 'teachpack (missing-tp-message tp)))))
-                              (unless (file-exists? (build-path (apply collection-path (cddr tp))
-                                                                (cadr tp)))
-                                (error))))
-                          (htdp-lang-settings-teachpacks settings))
-                         (rewrite-module
-                          settings
-                          (expand
-                           (datum->syntax-object
-                            #f
-                            `(,#'module #%htdp ,language-module 
-                                        ,@(map (λ (x) `(require ,x))
-                                               (htdp-lang-settings-teachpacks settings))
-                                        ,@body-exps)))))))]
-                  [(require) 
-                   (set! state 'done-or-exn)
-                   (syntax
-                    (let ([done-already? #f])
-                      (dynamic-wind
-                       void
-                       (lambda () 
-                         ;(dynamic-require '#%htdp #f)
-                         (eval #'(require #%htdp)))  ;; work around a bug in dynamic-require
-                       (lambda () 
-                         (unless done-already?
-                           (set! done-already? #t)
-                           (current-namespace (module->namespace '#%htdp)))))))]
-                  [(done-or-exn)
-                   (cond
-                     [saved-exn
-                      (raise saved-exn)]
-                     [else
-                      eof])]))))
-          
-          (define/private (missing-tp-message x)
-            (let* ([m (regexp-match #rx"/([^/]*)$" (cadr x))]
-                   [name (if m
-                             (cadr m)
-                             (cadr x))])
-              (format "the teachpack '~a' was not found" name)))
+            (expand-teaching-program port  
+                                     (get-reader)
+                                     (get-module)
+                                     (htdp-lang-settings-teachpacks settings)
+                                     (drscheme:rep:current-rep)))
 
           (define keywords #f)
           (define/augment (capability-value key)
             (case key
               [(drscheme:autocomplete-words)
                (unless keywords 
-                 (set! keywords (text:get-completions/manuals (map bytes->string/utf-8 (htdp-manuals)))))
+                 (set! keywords (text:get-completions/manuals #f))) ;; complete with everything, which is wrong ..
                keywords]
               [(drscheme:teachpack-menu-items) htdp-teachpack-callbacks]
               [(drscheme:special:insert-lambda) #f]
+              [(tests:test-menu tests:dock-menu) #t]
               [else (inner (drscheme:language:get-capability-default key) 
                            capability-value
                            key)]))
@@ -904,55 +856,11 @@
       (define (debugger-settings-language %)
         (if (implementation? % debugger-language<%>)
             (class* % (debugger-language<%>)
-              (define/override (debugger:supported?) #f)
+              (init-field [debugger:supported #f])
+              (define/override (debugger:supported?) debugger:supported)
               (super-new))
             %))
 
-      ;; rewrite-module : settings syntax -> syntax
-      ;; rewrites te module to print out results of non-definitions
-      (define (rewrite-module settings stx)
-        (syntax-case stx (module #%plain-module-begin)
-          [(module name lang (#%plain-module-begin bodies ...))
-           (with-syntax ([(rewritten-bodies ...) 
-                          (rewrite-bodies (syntax->list (syntax (bodies ...))))])
-             #`(module name lang
-                 (#%plain-module-begin 
-                  rewritten-bodies ...)))]
-          [else
-           (raise-syntax-error 'htdp-languages "internal error .1")]))
-      
-      ;; rewrite-bodies : (listof syntax) -> syntax
-      (define (rewrite-bodies bodies)
-        (let loop ([bodies bodies])
-          (cond
-            [(null? bodies) null]
-            [else
-             (let ([body (car bodies)])
-               (syntax-case body (require define-values define-syntaxes require-for-syntax provide)
-                 [(define-values (new-vars ...) e)
-                  (cons body (loop (cdr bodies)))]
-                 [(define-syntaxes (new-vars ...) e)
-                  (cons body (loop (cdr bodies)))]
-                 [(require specs ...)
-                  (cons body (loop (cdr bodies)))]
-                 [(require-for-syntax specs ...)
-                  (cons body (loop (cdr bodies)))]
-                 [(provide specs ...)
-                  (loop (cdr bodies))]
-                 [else 
-                  (let ([new-exp
-                         (with-syntax ([body body]
-                                       [print-results
-                                        (lambda results
-                                          (let ([rep (drscheme:rep:current-rep)])
-                                            (when rep
-                                              (send rep display-results/void results))))])
-                           (syntax 
-                            (call-with-values
-                             (lambda () body)
-                             print-results)))])
-                    (cons new-exp (loop (cdr bodies))))]))])))
-      
       ;; filter/hide-ids : syntax[list] -> listof syntax
       (define (filter/hide-ids ids)
         ;; When a `define-values' or `define-syntax' declaration
@@ -994,11 +902,10 @@
       ;; this inspector should be powerful enough to see
       ;; any structure defined in the user's namespace
       (define drscheme-inspector (current-inspector))
-      
-      (eval `(module drscheme-secrets mzscheme
-               (provide drscheme-inspector)
-               (define drscheme-inspector ,drscheme-inspector)))
-      (namespace-require 'drscheme-secrets)
+      (eval `(,#'module drscheme-secrets mzscheme
+                        (provide drscheme-inspector)
+                        (define drscheme-inspector ,drscheme-inspector)))
+      (namespace-require ''drscheme-secrets)
       
       
       
@@ -1064,7 +971,8 @@
                                                [source (car cms)]
                                                [pos (cadr cms)]
                                                [span (cddr cms)])
-                                          (if (is-a? source text%)
+                                          (if (or (path? source)
+                                                  (symbol? source))
                                               (list (make-srcloc source #f #f pos span))
                                               (loop (cdr cms))))]))
                               '()))]
@@ -1085,7 +993,7 @@
         (let ([source (syntax-source source-stx)]
               [start-position (syntax-position source-stx)]
               [span (syntax-span source-stx)])
-          (if (and (is-a? source text:basic<%>)
+          (if (and (or (symbol? source) (path? source))
                    (number? start-position)
                    (number? span))
               (with-syntax ([expr expr]
@@ -1118,7 +1026,7 @@
       
       (define (initialize-test-coverage-point key expr)
         (unless (thread-cell-ref current-test-coverage-info)
-          (let ([ht (make-hash-table)])
+          (let ([ht (make-hasheq)])
             (thread-cell-set! current-test-coverage-info ht)
             (let ([rep (drscheme:rep:current-rep)])
               (when rep
@@ -1133,13 +1041,13 @@
                       #f)))))
         (let ([ht (thread-cell-ref current-test-coverage-info)])
           (when ht
-            (hash-table-put! ht key (list #f expr)))))
+            (hash-set! ht key (mcons #f expr)))))
       
       (define (test-covered key)
         (let ([ht (thread-cell-ref current-test-coverage-info)])
           (when ht
-            (let ([v (hash-table-get ht key)])
-              (set-car! v #t)))))
+            (let ([v (hash-ref ht key)])
+              (set-mcar! v #t)))))
       
       (define-values/invoke-unit et:stacktrace@
         (import et:stacktrace-imports^) (export (prefix et: et:stacktrace^)))
@@ -1391,7 +1299,7 @@
         (add-htdp-language
          (instantiate htdp-language% ()
            (one-line-summary (string-constant advanced-one-line-summary))
-           (module '(lib "htdp-advanced.ss" "lang"))
+           (module '(lib "lang/htdp-advanced.ss"))
            (manual #"advanced")
            (language-position
             (list (string-constant teaching-languages)
@@ -1403,6 +1311,7 @@
            (abbreviate-cons-as-list #t)
            (allow-sharing? #t)
            (reader-module '(lib "htdp-advanced-reader.ss" "lang"))
+           (debugger:supported #t)
 	   (stepper:supported #f)
 	   (stepper:enable-let-lifting #t)
 	   (stepper:show-lambdas-as-lambdas #t)))
@@ -1410,7 +1319,7 @@
         (add-htdp-language
          (instantiate htdp-language% ()
            (one-line-summary (string-constant intermediate/lambda-one-line-summary))
-           (module '(lib "htdp-intermediate-lambda.ss" "lang"))
+           (module '(lib "lang/htdp-intermediate-lambda.ss"))
            (manual #"intermediate-lambda")
            (language-position
             (list (string-constant teaching-languages)
@@ -1438,7 +1347,7 @@
 	(add-htdp-language
          (instantiate htdp-language% ()
            (one-line-summary (string-constant intermediate-one-line-summary))
-           (module '(lib "htdp-intermediate.ss" "lang"))
+           (module '(lib "lang/htdp-intermediate.ss"))
            (manual #"intermediate")
            (language-position
             (list (string-constant teaching-languages)
@@ -1458,7 +1367,7 @@
         (add-htdp-language
          (instantiate htdp-language% ()
            (one-line-summary (string-constant beginning/abbrev-one-line-summary))
-           (module '(lib "htdp-beginner-abbr.ss" "lang"))
+           (module '(lib "lang/htdp-beginner-abbr.ss"))
            (manual #"beginning-abbr")
            (language-position
             (list (string-constant teaching-languages)
@@ -1477,7 +1386,7 @@
         (add-htdp-language
          (instantiate htdp-language% ()
            (one-line-summary (string-constant beginning-one-line-summary))
-           (module '(lib "htdp-beginner.ss" "lang"))
+           (module '(lib "lang/htdp-beginner.ss"))
            (manual #"beginning")
            (language-position
             (list (string-constant teaching-languages)
@@ -1495,4 +1404,5 @@
 	   (stepper:show-lambdas-as-lambdas #f)))
         
         (drscheme:get/extend:extend-unit-frame frame-tracing-mixin)
-        (drscheme:get/extend:extend-tab tab-tracing-mixin)))))
+        (drscheme:get/extend:extend-tab tab-tracing-mixin))))
+  

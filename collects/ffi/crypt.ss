@@ -1,6 +1,6 @@
-(module crypt mzscheme
+#lang scheme/base
 
-(require (lib "foreign.ss")) (unsafe!)
+(require mzlib/foreign) (unsafe!)
 
 (define libcrypt (ffi-lib "libcrypt"))
 
@@ -61,5 +61,3 @@
                r
                (loop (- n 8) (cons (string->number (substring bin n (+ n 8)) 2)
                                    r)))))))
-
-)

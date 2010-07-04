@@ -1,15 +1,15 @@
-(module frame (lib "a-unit.ss")
-  (require (lib "string-constant.ss" "string-constants")
-           (lib "class.ss")
-           (lib "include.ss")
+#lang scheme/unit
+  (require string-constants
+           mzlib/class
+           mzlib/include
            "sig.ss"
            "../preferences.ss"
            "../gui-utils.ss"
            "bday.ss"
            (lib "mred-sig.ss" "mred")
-           (lib "list.ss")
-           (lib "file.ss")
-           (lib "etc.ss"))
+           mzlib/list
+           scheme/path
+           mzlib/etc)
   
   (import mred^
           [prefix group: framework:group^]
@@ -254,10 +254,7 @@
       (super-new)
       (send (group:get-the-frame-group) insert-frame this)))
   
-  (define locked-message-line1 (string-constant read-only-line1))
-  (define locked-message-line2 (string-constant read-only-line2))
-  (define unlocked-message-line1 (string-constant read/write-line1))
-  (define unlocked-message-line2 (string-constant read/write-line2))
+  (define locked-message (string-constant read-only))
   
   (define lock-canvas%
     (class canvas%
@@ -272,38 +269,26 @@
       (define/override (on-paint)
         (let* ([dc (get-dc)]
                [draw
-                (λ (str1 str2 bg-color bg-style line-color line-style)
+                (λ (str bg-color bg-style line-color line-style)
                   (send dc set-font small-control-font)
                   (let-values ([(w h) (get-client-size)]
-                               [(tw1 th1 _1 _2) (send dc get-text-extent str1)]
-                               [(tw2 th2 _3 _4) (send dc get-text-extent str2)])
+                               [(tw th _1 _2) (send dc get-text-extent str)])
                     (send dc set-pen (send the-pen-list find-or-create-pen line-color 1 line-style))
                     (send dc set-brush (send the-brush-list find-or-create-brush bg-color bg-style))
                     (send dc draw-rectangle 0 0 w h)
-                    (cond
-                      [(string=? str2 "")
-                       (send dc draw-text str1
-                             (- (/ w 2) (/ tw1 2))
-                             (- (* h 1/2) (/ th1 2)))]
-                      [else
-                       (send dc draw-text str1
-                             (- (/ w 2) (/ tw1 2))
-                             (- (* h 1/2) th1))
-                       (send dc draw-text str2
-                             (- (/ w 2) (/ tw2 2))
-                             (* h 1/2))])))])
+                    (send dc draw-text str
+                          (- (/ w 2) (/ tw 2))
+                          (- (/ h 2) (/ th 2)))))])
           (when locked?
-            (draw locked-message-line1 locked-message-line2
-                  "yellow" 'solid "black" 'solid))))
+            (draw locked-message "yellow" 'solid "black" 'solid))))
       
       (inherit get-parent min-width min-height stretchable-width stretchable-height)
       (define/private (setup-sizes)
         (let ([dc (get-dc)])
           (if locked?
-              (let-values ([(wl1 hl1 _1 _2) (send dc get-text-extent locked-message-line1)]
-                           [(wl2 hl2 _3 _4) (send dc get-text-extent locked-message-line2)])
-                (min-width (inexact->exact (floor (+ 2 (max (+ wl1 2) (+ wl2 2))))))
-                (min-height (inexact->exact (floor (+ 2 hl1 hl2)))))
+              (let-values ([(w h _1 _2) (send dc get-text-extent locked-message)])
+                (min-width (inexact->exact (floor (+ w 4))))
+                (min-height (inexact->exact (floor (+ h 2)))))
               (begin
                 (min-width 0)
                 (min-height 0)))))
@@ -315,58 +300,6 @@
       (stretchable-width #f)
       (stretchable-height #t)))
   
-  #;
-  (define lock-canvas%
-    (class canvas%
-      (field [locked? #f])
-      (inherit refresh)
-      (define/public (set-locked l)
-        (set! locked? l)
-        (refresh))
-      (inherit get-client-size get-dc)
-      (define/override (on-paint)
-        (let* ([dc (get-dc)]
-               [draw
-                (λ (str1 str2 bg-color bg-style line-color line-style)
-                  (send dc set-font small-control-font)
-                  (let-values ([(w h) (get-client-size)]
-                               [(tw1 th1 _1 _2) (send dc get-text-extent str1)]
-                               [(tw2 th2 _3 _4) (send dc get-text-extent str2)])
-                    (send dc set-pen (send the-pen-list find-or-create-pen line-color 1 line-style))
-                    (send dc set-brush (send the-brush-list find-or-create-brush bg-color bg-style))
-                    (send dc draw-rectangle 0 0 w h)
-                    (cond
-                      [(string=? str2 "")
-                       (send dc draw-text str1
-                             (- (/ w 2) (/ tw1 2))
-                             (- (* h 1/2) (/ th1 2)))]
-                      [else
-                       (send dc draw-text str1
-                             (- (/ w 2) (/ tw1 2))
-                             (- (* h 1/2) th1))
-                       (send dc draw-text str2
-                             (- (/ w 2) (/ tw2 2))
-                             (* h 1/2))])))])
-          (if locked?
-              (draw locked-message-line1 locked-message-line2
-                    "yellow" 'solid "black" 'solid)
-              (draw unlocked-message-line1 unlocked-message-line2
-                    (get-panel-background) 'transparent (get-panel-background) 'transparent))))
-      (inherit get-parent min-width min-height stretchable-width stretchable-height)
-      
-      (super-new [style '(transparent)])
-      
-      (let ([dc (get-dc)])
-        (send dc set-font small-control-font)
-        (let-values ([(wl1 hl1 _1 _2) (send dc get-text-extent locked-message-line1)]
-                     [(wl2 hl2 _3 _4) (send dc get-text-extent locked-message-line2)]
-                     [(wu1 hu1 _5 _6) (send dc get-text-extent unlocked-message-line1)]
-                     [(wu2 hu2 _7 _8) (send dc get-text-extent unlocked-message-line2)])
-          (stretchable-width #f)
-          (stretchable-height #t)
-          (min-width (inexact->exact (floor (+ 2 (max (+ wl1 2) (+ wl2 2) wu1 wu2)))))
-          (min-height (inexact->exact (floor (+ 2 hu1 hu2))))))))
-  
   (define status-line<%>
     (interface (basic<%>)
       open-status-line
@@ -377,7 +310,7 @@
   (define-struct status-line (id count))
   
   ;; status-line-msg : (make-status-line-msg (is-a?/c message%) (union symbol #f))
-  (define-struct status-line-msg (message id))
+  (define-struct status-line-msg (message [id #:mutable]))
   
   (define status-line-mixin
     (mixin (basic<%>) (status-line<%>)
@@ -783,11 +716,12 @@
       (define/private (update-client-width str)
         (let ([dc (get-dc)])
           (let-values ([(cw _4) (get-client-size)]
-                       [(tw _1 _2 _3) (send dc get-text-extent str)])
+                       [(tw _1 _2 _3) (send dc get-text-extent str normal-control-font)])
             (when (< cw tw)
               (min-client-width (inexact->exact (floor tw)))))))
       (define/override (on-paint)
         (let ([dc (get-dc)])
+	  (send dc set-font normal-control-font)
           (let-values ([(cw ch) (get-client-size)]
                        [(tw th _1 _2) (send dc get-text-extent str)])
             (send dc draw-text str 0 (/ (- ch th) 2)))))
@@ -987,34 +921,26 @@
       (define-values (anchor-message
                       overwrite-message 
                       macro-recording-message)
-        (let* ([text-info-messages-parent
-                (new vertical-panel% 
-                     [parent (get-info-panel)]
-                     [stretchable-width #f])]
-               [anchor-message
+        (let* ([anchor-message
                 (new message%
                      [font small-control-font]
                      [label (string-constant auto-extend-selection)]
-                     [parent text-info-messages-parent])]
-               [hp (new horizontal-panel% 
-                        [alignment '(left center)]
-                        [parent text-info-messages-parent]
-                        [stretchable-height #f])]
+                     [parent (get-info-panel)])]
                [overwrite-message 
                 (new message%
                      [font small-control-font]
                      [label (string-constant overwrite)]
-                     [parent hp])]
+                     [parent (get-info-panel)])]
                [macro-recording-message
                 (new message%
                      [label "c-x;("]
                      [font small-control-font]
-                     [parent hp])])
+                     [parent (get-info-panel)])]
+               [msgs (list anchor-message
+                           overwrite-message
+                           macro-recording-message)])
           (send (get-info-panel) change-children
-                (λ (l)
-                  (cons
-                   text-info-messages-parent
-                   (remq text-info-messages-parent l))))
+                (λ (l) (append msgs (remq* msgs l))))
           (values anchor-message
                   overwrite-message 
                   macro-recording-message)))
@@ -1093,8 +1019,9 @@
       (define/override (editing-this-file? filename)
         (let ([path-equal?
                (λ (x y)
-                 (equal? (normal-case-path (normalize-path x))
-                         (normal-case-path (normalize-path y))))])
+                 (with-handlers ((exn:fail:filesystem? (λ (x) #f)))
+                   (equal? (normal-case-path (normalize-path x))
+                           (normal-case-path (normalize-path y)))))])
           (let ([this-fn (get-filename)])
             (and this-fn
                  (path-equal? filename (get-filename))))))
@@ -1113,23 +1040,20 @@
         (super set-label (gui-utils:trim-string (get-entire-label) 200))
         (send (group:get-the-frame-group) frame-label-changed this))
       
-      (public get-entire-label get-label-prefix set-label-prefix)
-      [define get-entire-label
-        (λ ()
-          (cond
-            [(string=? "" label)
-             label-prefix]
-            [(string=? "" label-prefix)
-             label]
-            [else 
-             (string-append label " - " label-prefix)]))]
-      [define get-label-prefix (λ () label-prefix)]
-      [define set-label-prefix
-        (λ (s)
-          (when (and (string? s)
-                     (not (string=? s label-prefix)))
-            (set! label-prefix s)
-            (do-label)))]
+      (define/public (get-entire-label)
+        (cond
+          [(string=? "" label)
+           label-prefix]
+          [(string=? "" label-prefix)
+           label]
+          [else 
+           (string-append label " - " label-prefix)]))
+      (define/public (get-label-prefix) label-prefix)
+      (define/public (set-label-prefix s)
+        (when (and (string? s)
+                   (not (string=? s label-prefix)))
+          (set! label-prefix s)
+          (do-label)))
       [define/override get-label (λ () label)]
       [define/override set-label
         (λ (t)
@@ -1189,6 +1113,14 @@
           base))
       
       (inherit get-checkable-menu-item% get-menu-item%)
+      
+      (define/override (file-menu:open-callback item evt)
+        (let* ([e (get-editor)]
+               [fn (and e (send e get-filename))]
+               [dir (and fn
+                         (let-values ([(base name dir) (split-path fn)])
+                           base))])
+          (handler:open-file dir)))
       
       (define/override (file-menu:revert-on-demand item)
         (send item enable (not (send (get-editor) is-locked?))))
@@ -2037,15 +1969,38 @@
                         (bell))
                       #f)]
                    [found
-                    (λ (edit first-pos)
+                    (λ (text first-pos)
                       (let ([last-pos ((if (eq? searching-direction 'forward) + -)
                                        first-pos (string-length string))])
-                        (send* edit 
-                          (set-caret-owner #f 'display)
-                          (set-position
-                           (min first-pos last-pos)
-                           (max first-pos last-pos)
-                           #f #t 'local))
+                        (send text begin-edit-sequence)
+                        (send text set-caret-owner #f 'display)
+                        (send text set-position
+                              (min first-pos last-pos)
+                              (max first-pos last-pos)
+                              #f #f 'local)
+                        
+                        
+                        ;; scroll to the middle if the search result isn't already visible
+                        (let ([search-result-line (send text position-line (send text get-start-position))]
+                              [bt (box 0)]
+                              [bb (box 0)])
+                          (send text get-visible-line-range bt bb #f)
+                          (unless (<= (unbox bt) search-result-line (unbox bb))
+                            (let* ([half (sub1 (quotient (- (unbox bb) (unbox bt)) 2))]
+                                   [last-pos (send text position-line (send text last-position))]
+                                   [top-pos (send text line-start-position 
+                                                  (max (min (- search-result-line half) last-pos) 0))]
+                                   [bottom-pos (send text line-start-position 
+                                                     (max 0
+                                                          (min (+ search-result-line half)
+                                                               last-pos)))])
+                              (send text scroll-to-position 
+                                    top-pos
+                                    #f
+                                    bottom-pos))))
+                        
+                        (send text end-edit-sequence)
+                        
                         #t))])
               (if (string=? string "")
                   (not-found top-searching-edit #t)
@@ -2526,4 +2481,4 @@
   (define searchable% (searchable-text-mixin (searchable-mixin -text%)))
   (define delegate% (delegate-mixin searchable%))
   
-  (define -pasteboard% (pasteboard-mixin open-here%)))
+  (define -pasteboard% (pasteboard-mixin open-here%))

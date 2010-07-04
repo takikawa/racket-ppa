@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2007 PLT Scheme Inc.
+// Copyright:  (c) 2004-2008 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -1262,6 +1262,11 @@ Bool wxCanvasDC::GCBlit(double xdest, double ydest, double width, double height,
   Rect clientRect = {-32767, -32767, 32767, 32767};
   CGrafPtr theMacGrafPort;
   RgnHandle rgn;
+
+  if (cMacDC->GetCG(TRUE)) {
+    /* The dc is in CG mode. Too bad; just give up. */
+    return FALSE;
+  }
 
   ::GetGWorld(&savep, &savegd);  
 

@@ -1,10 +1,10 @@
 (module include-bitmap mzscheme
-  (require (lib "mred.ss" "mred")
-	   (lib "class.ss")
-	   (lib "file.ss")
+  (require mred
+	   mzlib/class
+	   mzlib/file
            (lib "main-collects.ss" "setup"))
-  (require-for-syntax (lib "path-spec.ss" "syntax")
-		      (lib "cm-accomplice.ss")
+  (require-for-syntax syntax/path-spec
+		      mzlib/cm-accomplice
                       (lib "main-collects.ss" "setup"))
 
   (provide include-bitmap
@@ -13,7 +13,7 @@
   (define-syntax (-include-bitmap stx)
     (syntax-case stx ()
       [(_ orig-stx source path-spec type)
-       (let* ([c-file (resolve-path-spec #'path-spec #'source #'orig-stx #'build-path)]
+       (let* ([c-file (resolve-path-spec #'path-spec #'source #'orig-stx)]
 	      [content
 	       (with-handlers ([exn:fail?
 				(lambda (exn)

@@ -3,7 +3,7 @@
 
 (Section 'macrolib)
 
-(require (lib "etc.ss"))
+(require mzlib/etc)
 
 (let ([u (letrec ([x x]) x)])
   (let ([l1
@@ -23,23 +23,6 @@
 	       (list a b c d e x y f g h i))]
 	[l2 (list u u u 1 1 2 1 1 2 3 5)])
     (test l1 'let-plus l2)))
-
-(require (lib "shared.ss"))
-
-(test "((car . cdr) #(one two three four five six) #&box (list1 list2 list3 list4) #<weak-box> 3 3)"
-      'shared
-      (let ([s (open-output-string)])
-	(display
-	 (shared ((a (cons 'car 'cdr)) 
-		  (b (vector 'one 'two 'three 'four 'five 'six))
-		  (c (box 'box))
-		  (d (list 'list1 'list2 'list3 'list4))
-		  (e (make-weak-box 'weak-box))
-		  (f (+ 1 2))
-		  (g 3))
-		 (list a b c d e f g))
-	 s)
-	(get-output-string s)))
 
 (test 'hi 'local (local () 'hi))
 (define x 7)
@@ -83,6 +66,8 @@
 (syntax-test #'(let ([define-values 10]) (local ((define-values (x) 4)) 10)))
 (syntax-test #'(let ([define-struct 10]) (local ((define-struct x ())) 10)))
 
+(define else #t) ;; `evcase' needs unbound `else' !!!! <------------------ WARNING
+
 (for-each syntax-test 
 	  (list #'(evcase)
 		#'(evcase 1 (a))
@@ -106,6 +91,8 @@
        (evcase 3 [3 => 17])
        (let ([=> 12]) (evcase 3 [3 => 17]))
        (let ([=> 17]) (evcase 3 [3 =>]))))
+
+(require (only-in scheme/base else)) ; fix `else'
 
 (define (opt-lam-test exp expected)
    (let ([got (eval exp)])

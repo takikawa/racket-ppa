@@ -41,18 +41,13 @@
           (lambda ()
             (init)
             (loop))))
-       (lambda new-state
-         (let ([num (length new-state)])
-           (unless (procedure-arity-includes? f num)
-             (raise
-              (make-exn:fail:contract:arity
-               (format "<procedure-from-consumer-thread>: consumer procedure arity is ~e; provided ~s argument~a"
-                       (procedure-arity f) num (if (= 1 num) "" "s"))
-               (current-continuation-marks)))))
-         (semaphore-wait protect)
-         (set! front-state (cons new-state front-state))
-         (semaphore-post protect)
-         (semaphore-post sema)))))
+       (procedure-reduce-arity
+        (lambda new-state
+          (semaphore-wait protect)
+          (set! front-state (cons new-state front-state))
+          (semaphore-post protect)
+          (semaphore-post sema))
+        (procedure-arity f)))))
 
   (define/kw (run-server port-number handler connection-timeout
                          #:optional
@@ -163,7 +158,9 @@
           void
           ;; Let the co-routine run...
           (lambda ()
-            (sync (choice-evt (wrap-evt (alarm-evt (+ timeout (current-inexact-milliseconds)))
+            (sync (choice-evt (wrap-evt (if (evt? timeout)
+                                            timeout
+                                            (alarm-evt (+ timeout (current-inexact-milliseconds))))
                                         (lambda (x)
                                           #;(printf "2. alarm-evt~n")
                                           (semaphore-wait can-stop-lock)
@@ -208,6 +205,6 @@
   (provide coroutine?)
   (provide/contract
    (coroutine (((any/c . -> . any) . -> . any) . -> . coroutine?))
-   (coroutine-run (real? coroutine? . -> . boolean?))
+   (coroutine-run ((or/c evt? real?) coroutine? . -> . boolean?))
    (coroutine-result (coroutine? . -> . any))
    (coroutine-kill (coroutine? . -> . any))))

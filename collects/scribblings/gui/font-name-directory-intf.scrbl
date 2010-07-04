@@ -1,6 +1,6 @@
-#reader(lib "docreader.ss" "scribble")
-@require["common.ss"]
-@require[(lib "bnf.ss" "scribble")]
+#lang scribble/doc
+@(require "common.ss"
+          scribble/bnf)
 
 @definterface/title[font-name-directory<%> ()]{
 

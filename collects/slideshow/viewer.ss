@@ -1,24 +1,25 @@
 
-(module viewer mzscheme
-  (require (lib "class.ss")
-           (lib "unit.ss")
-	   (lib "file.ss")
-	   (lib "etc.ss")
-	   (lib "contract.ss")
-	   (lib "mred.ss" "mred")
-	   (lib "mrpict.ss" "texpict")
-	   (lib "utils.ss" "texpict")
-	   (lib "math.ss")
-	   (lib "list.ss")
+(module viewer scheme/base
+  (require scheme/class
+           scheme/unit
+	   scheme/contract
+	   (only-in scheme/list last)
+           scheme/path
+           scheme/file
+	   mred
+	   texpict/mrpict
+	   texpict/utils
+	   scheme/math
 	   (lib "include-bitmap.ss" "mrlib")
 	   "sig.ss"
 	   "core.ss"
-	   "util.ss")
+	   "private/utils.ss")
 
   (provide viewer@)
 
   ;; Needed for browsing
   (define original-security-guard (current-security-guard))
+  (define orig-err-string-handler (error-value->string-handler))
       
   (define-unit viewer@
       (import (prefix config: cmdline^) core^)
@@ -62,23 +63,28 @@
 	    (list-ref talk-slide-list n)
 	    empty-slide))
 
+      (define (mlist->list l)
+        (cond
+         [(null? l) null]
+         [else (cons (mcar l) (mlist->list (mcdr l)))]))
+
       (define (given->main!)
 	(if config:quad-view?
 	    (begin
 	      ;; WARNING: This make slide creation O(n^2) for n slides
-	      (set! talk-slide-list (make-quad given-talk-slide-list))
+	      (set! talk-slide-list (make-quad (mlist->list given-talk-slide-list)))
 	      (set! slide-count (length talk-slide-list)))
 	    (begin
-	      (set! talk-slide-list given-talk-slide-list)
+	      (set! talk-slide-list (mlist->list given-talk-slide-list))
 	      (set! slide-count given-slide-count))))
 
       (define (add-talk-slide! s)
 	(when error-on-slide?
 	  (error "slide window has been closed"))
-	(let ([p (cons s null)])
+	(let ([p (mcons s null)])
 	  (if (null? talk-slide-reverse-cell-list)
 	      (set! given-talk-slide-list p)
-	      (set-cdr! (car talk-slide-reverse-cell-list) p))
+	      (set-mcdr! (car talk-slide-reverse-cell-list) p))
 	  (set! talk-slide-reverse-cell-list (cons p talk-slide-reverse-cell-list)))
 	(set! given-slide-count (add1 given-slide-count))
 	(given->main!)
@@ -96,7 +102,7 @@
 	  (set! talk-slide-reverse-cell-list (cdr talk-slide-reverse-cell-list))
 	  (if (null? talk-slide-reverse-cell-list)
 	      (set! given-talk-slide-list null)
-	      (set-cdr! (car talk-slide-reverse-cell-list) null)))
+	      (set-mcdr! (car talk-slide-reverse-cell-list) null)))
 	(set! given-slide-count (sub1 given-slide-count))
 	(given->main!)
 	(unless config:printing?
@@ -105,7 +111,7 @@
 
       (define (most-recent-talk-slide)
 	(and (pair? talk-slide-reverse-cell-list)
-	     (caar talk-slide-reverse-cell-list)))
+	     (mcar (car talk-slide-reverse-cell-list))))
       
       (define (set-init-page! p)
 	(set! current-page p)
@@ -135,7 +141,7 @@
 				(make-vector
 				 (- 4 (length l))
 				 (make-sliderec void #f #f 
-						(sliderec-page (car (last-pair l)))
+						(sliderec-page (last l))
 						1 
 						zero-inset 
 						null
@@ -480,15 +486,17 @@
       (define c-frame (new (class talk-frame%
 			     (define/override (on-move x y)
 			       (super on-move x y)
-			       (parameterize ([current-security-guard original-security-guard])
-				 (with-handlers ([void raise]) ; prevents exn handler from grabbing security guard
+			       (parameterize ([current-security-guard original-security-guard]
+                                              [error-value->string-handler orig-err-string-handler])
+				 (with-handlers ([void void]) ; also prevents exn handler from grabbing security guard
 				   (put-preferences '(slideshow:commentary-x slideshow:commentary-y)
 						    (list x y)
 						    void))))
 			     (define/override (on-size w h)
 			       (super on-size w h)
-			       (parameterize ([current-security-guard original-security-guard])
-				 (with-handlers ([void raise]) ; prevents exn handler from grabbing security guard
+			       (parameterize ([current-security-guard original-security-guard]
+                                              [error-value->string-handler orig-err-string-handler])
+				 (with-handlers ([void void]) ; also prevents exn handler from grabbing security guard
 				   (put-preferences '(slideshow:commentary-width slideshow:commentary-height)
 						    (list w h)
 						    void))))
@@ -561,11 +569,16 @@
       (define black-color (make-object color% "BLACK"))
 
       (define (slide-page-string slide)
-	(if (= 1 (sliderec-page-count slide))
-	    (format "~a" (sliderec-page slide))
-	    (format "~a-~a" (sliderec-page slide) (+ (sliderec-page slide)
-						     (sliderec-page-count slide)
-						     -1))))
+        (let ([s ((current-page-number-adjust)
+                  (sliderec-page slide)
+                  (if (= 1 (sliderec-page-count slide))
+                      (format "~a" (sliderec-page slide))
+                      (format "~a-~a" (sliderec-page slide) (+ (sliderec-page slide)
+                                                               (sliderec-page-count slide)
+                                                               -1))))])
+          (unless (string? s)
+            (error 'current-page-number-adjust "expected a procedure that returned a string, but it returned ~s" s))
+          s))
       
       (define (calc-progress)
 	(if (and start-time config:talk-duration-minutes)
@@ -988,7 +1001,7 @@
       (define c-both (make-object two-c% f-both))
       
       (define refresh-page
-	(opt-lambda ([immediate-prefetch? #f])
+	(lambda ([immediate-prefetch? #f])
 	  (hide-cursor-until-moved)
 	  (send f set-blank-cursor #t)
 	  (when (= current-page 0)

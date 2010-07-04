@@ -1,12 +1,12 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require[(lib "eval.ss" "scribble")]
-@require["guide-utils.ss"]
+#lang scribble/doc
+@(require scribble/manual
+          scribble/eval
+          "guide-utils.ss")
 
 @title[#:tag "datatypes" #:style 'toc]{Built-In Datatypes}
 
 The @seclink["to-scheme"]{previous chapter} introduced some of
-Scheme's built-in datatype: numbers, booleans, strings, lists, and
+Scheme's built-in datatypes: numbers, booleans, strings, lists, and
 procedures. This section provides a more complete coverage of the
 built-in datatypes for simple forms of data.
 

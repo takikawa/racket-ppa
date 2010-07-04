@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["common.ss"]
+#lang scribble/doc
+@(require "common.ss")
 
 @definterface/title[readable-snip<%> ()]{
 
@@ -17,7 +17,7 @@ A @scheme[readable-snip<%>] object is treated specially by the port
 
 The arguments are the same as the arguments to a procedure returned by
  a custom input port's @scheme[read]; see @secref[#:doc '(lib
- "reference.scrbl" "scribblings" "reference") "customport"] for
+ "scribblings/reference/reference.scrbl") "customport"] for
  details. The result is also the same as the result from a
  @scheme[read]-produced procedure.
 

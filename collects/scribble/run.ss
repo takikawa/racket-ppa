@@ -2,9 +2,9 @@
 (module run mzscheme
   (require "struct.ss"
            "base-render.ss"
-           (lib "cmdline.ss")
-           (lib "class.ss")
-           (lib "file.ss")
+           mzlib/cmdline
+           mzlib/class
+           mzlib/file
            (prefix text: "text-render.ss")
            (prefix html: "html-render.ss")
            (prefix latex: "latex-render.ss"))
@@ -29,6 +29,10 @@
     (make-parameter #f))
   (define current-info-input-files
     (make-parameter null))
+  (define current-style-file
+    (make-parameter #f))
+  (define current-redirect
+    (make-parameter #f))
 
   (define (get-command-line-files argv)
     (command-line
@@ -48,17 +52,21 @@
        (current-dest-directory dir)]
       [("--dest-name") name "write output as <name>"
        (current-dest-name name)]
+      [("--style") file "use given .css/.tex file"
+       (current-style-file file)]
+      [("--redirect") url "redirect external tag links to <url>"
+       (current-redirect url)]
       [("--info-out") file "write format-specific link information to <file>"
        (current-info-output-file file)]]
      [multi
       [("++info-in") file "load format-specific link information form <file>"
        (current-info-input-files
         (cons file (current-info-input-files)))]]
-     [args file file]))
+     [args (file . another-file) (cons file another-file)]))
 
   (define (build-docs-files files)
     (build-docs (map (lambda (file)
-                       (dynamic-require file 'doc))
+                       (dynamic-require `(file ,file) 'doc))
                      files)
                 files))
     
@@ -68,7 +76,11 @@
         (make-directory* dir))
 
       (let ([renderer (new ((current-render-mixin) render%)
-                           [dest-dir dir])])
+                           [dest-dir dir]
+                           [style-file (current-style-file)])])
+        (when (current-redirect)
+          (send renderer set-external-tag-path (current-redirect)))
+        (send renderer report-output!)
         (let* ([fns (map (lambda (fn)
                            (let-values ([(base name dir?) (split-path fn)])
                              (let ([fn (path-replace-suffix (or (current-dest-name) name)

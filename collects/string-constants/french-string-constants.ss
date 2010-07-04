@@ -189,17 +189,16 @@
   (cs-status-coloring-program "Vérificateur de syntaxe : coloriage d'une expression")
   (cs-status-eval-compile-time "Vérificateur de syntaxe : évaluation pour l'expansion") ; peut mieux faire?
   (cs-status-expanding-expression "Vérificateur de syntaxe : expansion d'une expression")
+  (cs-status-loading-docs-index "Vérificateur de syntaxe : chargement de l'index de la documentation")
   (cs-mouse-over-import "l'identificateur ~s est importé de ~s")
-  
+  (cs-view-docs "Regarder la documentation pour ~a")
+
   (cs-lexical-variable "variables lexicales")
   (cs-imported-variable "variables importées")
 
   ;;; info bar at botttom of drscheme frame
   (collect-button-label "Ramassage") ; de miettes
-  (read-only-line1 "Lecture")
-  (read-only-line2 "seulement")
-  (read/write-line1 "Lecture/")
-  (read/write-line2 "écriture")
+  (read-only "Lecture seulement")
   (auto-extend-selection "Autosélection") ; "Sélection auto-étendable" ?
   (overwrite "Correction") ; vs Insertion ? surimpression ?
   (running "en cours")
@@ -232,6 +231,7 @@
   (file-is-not-saved "Le fichier \"~a\" n'a pas été sauvegardé.")
   (save "Sauvegarder")
   (close-anyway "Fermer quand même")
+  (dont-save "Ne pas sauvegarder")
   (clear-anyway "Effacer quand même")
   
   ;; menu item title
@@ -259,6 +259,16 @@
   (syntax-coloring-choose-color "Choisissez une couleur pour ~a")
   (preferences-colors "Couleurs") ;; used in the preferences dialog
  
+  ;; parenthesis color scheme string constants
+  (parenthesis-color-scheme "Couleurs des parenthèses") ;; label for the choice% menu in the preferences dialog
+  (paren-color-basic-grey "Gris simple")
+  (paren-color-shades-of-gray "Nuances de gris")
+  (paren-color-shades-of-blue "Nuances de bleu")
+  (paren-color-spring "Printemps")
+  (paren-color-fall "Automne")
+  (paren-color-winter "Hiver")
+
+  
   (url: "URL :")
   (open-url... "Ouvrir l'URL...")
   (open-url "Ouvrir l'URL")
@@ -368,10 +378,7 @@
   (plt-installer-aborted "Installation abandonnée.") ;; msg that appears in the installation window when installation is aborted
   
   ;;; about box
-  (about-drscheme-frame-title "A propos de DrScheme")
-  (take-a-tour "Faire un tour !")
-  (release-notes "Notes pour la révision")
-  
+  (about-drscheme-frame-title "À propos de DrScheme")
   
   ;;; save file in particular format prompting.
   (save-as-plain-text "Sauvegarder ce fichier au format texte ?")
@@ -413,7 +420,7 @@
   (separate-dialog-for-searching "Utiliser un dialogue séparé pour les recherches.")
   (reuse-existing-frames "Réutiliser les fenêtres existantes lors de l'ouverture de nouveaux fichiers")
   (default-fonts "Polices par défaut")
-  (paren-match-color "Couleur de surlignage des parenthèses") ; in prefs dialog
+  (basic-gray-paren-match-color "Couleur grise simple de surlignage des parenthèses") ; in prefs dialog
   (online-coloring-active "Colorier la syntaxe interactivement")
   (open-files-in-tabs "Ouvrir les fichiers dans de nouveaux onglets (pas dans de nouvelles fenêtres)")
   (show-interactions-on-execute "Automatiquement montrer la fenêtre d'interaction lors de l'exécution d'un programme")
@@ -492,7 +499,7 @@
   (find "Chercher")
   (replace "Remplacer")
   (dock "Attacher")
-  (undock "Séparer")
+  (undock "Détacher")
   (replace&find-again "Remplacer && chercher à nouveau") ;;; need double & to get a single &
   (replace-to-end "Remplacer jusqu'à la fin")
   (forward "En avant")
@@ -789,8 +796,11 @@
   (show-interactions-menu-item-label "Montrer les &interactions")
   (hide-interactions-menu-item-label "Cacher les &interactions")
   (interactions-menu-item-help-string "Montrer/cacher la fenêtre d'interaction")
-  (show-toolbar "Montrer la barre d'ou&tils")
-  (hide-toolbar "Cacher la barre d'ou&tils")
+  (toolbar "Barre d'outils")
+  (toolbar-on-top "Barre d'outils en haut")
+  (toolbar-on-left "Barre d'outils sur la gauche")
+  (toolbar-on-right "Barre d'outils sur la droite")
+  (toolbar-hidden "Barre d'outils cachée")
   
   ;;; file menu
   (save-definitions-as "Sauvegarder les définitions...")
@@ -957,10 +967,10 @@
   (use-mixed-fractions "Fractions mêlées")
   (use-repeating-decimals "Décimales répétitives")
   (decimal-notation-for-rationals "Utiliser la notation décimale pour les nombres rationnels")
+  (enforce-primitives-group-box-label "Définitions initiales")
+  (enforce-primitives-check-box-label "Interdire la redéfinition des définition initiales")
 
   ; used in the bottom left of the drscheme frame as the label
-  ; above the programming language's name
-  (programming-language-label "Langage de programmation :")
   ; used the popup menu from the just above; greyed out and only
   ; visible when some languages are in the history
   (recent-languages "Langages récents :")
@@ -985,11 +995,11 @@
   (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
   (pretty-big-scheme "Assez gros Scheme")
   (pretty-big-scheme-one-line-summary "Graphique, plus de nombreuses bibliothèques standards")
-  (r5rs-lang-name "Standard (R5RS)")
+  (r5rs-language-name "R5RS")
   (r5rs-one-line-summary "R5RS, de base")
   (expander "Expanseur") ; compression, compresseur, compresser => expansion, expanseur, expanser (expandeur, expander fait trop franglais et expandion n'existe pas)
   (expander-one-line-summary "Expanse les expressions au lieu de les évaluer")
-  (professional-languages "Langages professionnels")
+  (legacy-languages "Langages du passé")
   (teaching-languages "Langages d'enseignement")
   (experimental-languages "Langages expérimentaux")
   (initial-language-category "Langage initial")
@@ -1106,9 +1116,9 @@
   ;; This is used in this context: "PLT Scheme vNNN <<<*>>> http://download..."
   (version:now-available-at   "est maintenant disponible à")
   
-  ;; special menu
-  (special-menu "Spécial")
-  
+  ;; insert menu
+  (insert-menu "&Insérer")
+ 
   ;; large semi colon letters
   (insert-large-letters... "Insérer de grandes lettres...")
   (large-semicolon-letters "Grandes lettres en points-virgules")
@@ -1271,7 +1281,7 @@
   (profj-language-config-class "Classe")
   (profj-language-config-display-array "Montrer le contenu des tableaux ?")
   (profj-language-config-testing-preferences "Préférences pour les tests") ; Heading for preferences controlling test behavior
-  (profj-language-config-testing-enable "Montrer le résultat des tests lors de l'exécution ?") ; Run should be the word found on the Run button
+  ;(profj-language-config-testing-enable "Montrer le résultat des tests lors de l'exécution ?") ; Run should be the word found on the Run button
   (profj-language-config-testing-coverage "Collecter l'information de couvrage durant les tests ?")
   (profj-language-config-support-test-language "Supporter l'extension de langage \"test\" ?")
   (profj-language-config-testing-check "Permettre les expressions de type \"check\" ?") ; check should not be translated
@@ -1283,10 +1293,11 @@
   (profj-test-name-example-miscapitalized "Le mot \"example\" dans le nom de classe ~a doit être écrit \"Example\".")
   
   ;; Close testing window and do not run test cases any more
-  (profj-test-results-close-and-disable "Fermer la fenêtre et arrêter l'exécution des tests")
+  ;(profj-test-results-close-and-disable "Fermer la fenêtre et arrêter l'exécution des tests")
   ;; Hide docked testing window and do not run test cases any more
-  (profj-test-results-hide-and-disable "Cacher la fenêtre et arrêter l'exécution des tests")
-  (profj-test-results-window-title "Résultats des tests")
+  ;(profj-test-results-hide-and-disable "Cacher la fenêtre et arrêter l'exécution des tests")
+  ;Renamed below
+  ;(profj-test-results-window-title "Résultats des tests")
 
   (profj-unsupported "Non-supporté")
   (profj-executables-unsupported "Désolé - la création d'exécutables n'est pour l'instant pas supportée pour Java")
@@ -1298,6 +1309,16 @@
 
   (profj-insert-java-comment-box "Insérer une boite à commentaires Java")
   (profj-insert-java-interactions-box "Insérer une boite à interactions Java")
+  
+  ;The Test engine tool
+  ;;
+  (test-engine-window-title "Résultats des tests")
+  ;;Following two appear in View menu, attach and free test report window from DrScheme frame
+  (test-engine-dock-report "Attacher le rapport de test")
+  (test-engine-undock-report "Détacher le rapport de test")
+  ;;Following two appear in Scheme (Java, etc) menu, cause Tests to be Run automatically or not
+  (test-engine-enable-tests "Revalider les tests")
+  (test-engine-disable-tests "Invalider les tests")
   
   (profjWizward-insert-java-class "Insérer une classe Java")
   (profjWizard-insert-java-union "Insérer un union Java")
@@ -1351,10 +1372,6 @@
   (profjBoxes-insert-java-interactions "Insérer des interactions Java")
 
   ;; Slideshow
-  (slideshow-show-slideshow-panel "Montrer la sous-fenêtre Slideshow")
-  (slideshow-hide-slideshow-panel "Cacher la sous-fenêtre Slideshow")
-  (slideshow-freeze-picts "Geler ces images")
-  (slideshow-thaw-picts "Montrer les images sous la souris")
   (slideshow-hide-picts "Montrer les boîtes nichées")
   (slideshow-show-picts "Montrer les images")
   (slideshow-cannot-show-picts "Il est impossible de montrer les images; exécutez d'abord le programme pour calculer les dimensions")

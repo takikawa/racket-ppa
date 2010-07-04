@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2007 PLT Scheme Inc.
+  Copyright (c) 2004-2008 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -74,6 +74,8 @@ Scheme_Object *(*scheme_thread_w_details)(Scheme_Object *thunk,
 						 int suspend_to_kill);
 void (*scheme_kill_thread)(Scheme_Thread *p);
 void (*scheme_break_thread)(Scheme_Thread *p);
+void (*scheme_break_main_thread)();
+void (*scheme_set_break_main_target)(Scheme_Thread *p);
 void (*scheme_thread_block)(float sleep_time);
 void (*scheme_thread_block_enable_break)(float sleep_time, int enable);
 void (*scheme_swap_thread)(Scheme_Thread *process);
@@ -121,6 +123,7 @@ Scheme_Object *(*scheme_sync_enable_break)(int argc, Scheme_Object *argv[]);
 Scheme_Object *(*scheme_sync_timeout)(int argc, Scheme_Object *argv[]);
 Scheme_Object *(*scheme_make_evt_set)(int argc, Scheme_Object **argv);
 void (*scheme_add_swap_callback)(Scheme_Closure_Func f, Scheme_Object *data);
+void (*scheme_add_swap_out_callback)(Scheme_Closure_Func f, Scheme_Object *data);
 Scheme_Object *(*scheme_call_enable_break)(Scheme_Prim *prim, int argc, Scheme_Object *argv[]);
 int (*scheme_close_should_force_port_closed)();
 void (*scheme_push_kill_action)(Scheme_Kill_Action_Func f, void *d);
@@ -214,6 +217,7 @@ Scheme_Object *(*scheme_eval_string_all)(const char *str, Scheme_Env *env, int a
 Scheme_Object *(*scheme_eval_string_with_prompt)(const char *str, Scheme_Env *env);
 Scheme_Object *(*scheme_eval_string_multi_with_prompt)(const char *str, Scheme_Env *env);
 Scheme_Object *(*scheme_eval_string_all_with_prompt)(const char *str, Scheme_Env *env, int all);
+Scheme_Object *(*scheme_eval_module_string)(const char *str, Scheme_Env *env);
 Scheme_Object *(*_scheme_apply_known_prim_closure)(Scheme_Object *rator, int argc,
 							  Scheme_Object **argv);
 Scheme_Object *(*_scheme_apply_known_prim_closure_multi)(Scheme_Object *rator, int argc,
@@ -257,6 +261,7 @@ Scheme_Object *(*scheme_eval_compiled_sized_string)(const char *str, int len, Sc
 Scheme_Object *(*scheme_eval_compiled_sized_string_with_magic)(const char *str, int len, Scheme_Env *env, 
 								      Scheme_Object *magic_symbol, Scheme_Object *magic_val,
 								      int multi_ok);
+void (*scheme_detach_multple_array)(Scheme_Object **a);
 /*========================================================================*/
 /*                           memory management                            */
 /*========================================================================*/
@@ -334,6 +339,13 @@ Scheme_Object *(*scheme_hash_get_atomic)(Scheme_Hash_Table *table, Scheme_Object
 int (*scheme_hash_table_equal)(Scheme_Hash_Table *t1, Scheme_Hash_Table *t2);
 int (*scheme_is_hash_table_equal)(Scheme_Object *o);
 Scheme_Hash_Table *(*scheme_clone_hash_table)(Scheme_Hash_Table *bt);
+Scheme_Hash_Tree *(*scheme_make_hash_tree)(int eql);
+Scheme_Hash_Tree *(*scheme_hash_tree_set)(Scheme_Hash_Tree *tree, Scheme_Object *key, Scheme_Object *val);
+Scheme_Object *(*scheme_hash_tree_get)(Scheme_Hash_Tree *tree, Scheme_Object *key);
+long (*scheme_hash_tree_next)(Scheme_Hash_Tree *tree, long pos);
+int (*scheme_hash_tree_index)(Scheme_Hash_Tree *tree, long pos, Scheme_Object **_key, Scheme_Object **_val);
+int (*scheme_hash_tree_equal)(Scheme_Hash_Tree *t1, Scheme_Hash_Tree *t2);
+int (*scheme_is_hash_tree_equal)(Scheme_Object *o);
 /*========================================================================*/
 /*                   basic Scheme value constructors                      */
 /*========================================================================*/
@@ -345,6 +357,9 @@ Scheme_Object *(*scheme_make_folding_prim)(Scheme_Prim *prim,
 					const char *name,
 					mzshort mina, mzshort maxa,
 					short functional);
+Scheme_Object *(*scheme_make_immed_prim)(Scheme_Prim *prim,
+					        const char *name,
+					        mzshort mina, mzshort maxa);
 Scheme_Object *(*scheme_make_noncm_prim)(Scheme_Prim *prim,
 						const char *name,
 						mzshort mina, mzshort maxa);
@@ -381,7 +396,7 @@ Scheme_Object *(*scheme_make_closed_prim_w_everything)(Scheme_Closed_Prim *fun,
 							      mzshort minr, mzshort maxr);
 void (*scheme_prim_is_method)(Scheme_Object *o);
 Scheme_Object *(*scheme_make_pair)(Scheme_Object *car, Scheme_Object *cdr);
-Scheme_Object *(*scheme_make_immutable_pair)(Scheme_Object *car, Scheme_Object *cdr);
+Scheme_Object *(*scheme_make_mutable_pair)(Scheme_Object *car, Scheme_Object *cdr);
 Scheme_Object *(*scheme_make_raw_pair)(Scheme_Object *, Scheme_Object *);
 Scheme_Object *(*scheme_make_byte_string)(const char *chars);
 Scheme_Object *(*scheme_make_sized_byte_string)(char *chars, long len, int copy);
@@ -671,6 +686,7 @@ long (*scheme_set_file_position)(Scheme_Object *port, long pos);
 int (*scheme_file_exists)(char *filename);
 int (*scheme_directory_exists)(char *dirname);
 char *(*scheme_expand_filename)(char* filename, int ilen, const char *errorin, int *ex, int guards);
+char *(*scheme_expand_user_filename)(char* filename, int ilen, const char *errorin, int *ex, int guards);
 char *(*scheme_expand_string_filename)(Scheme_Object *f, const char *errorin, int *ex, int guards);
 char *(*scheme_os_getcwd)(char *buf, int buflen, int *actlen, int noexn);
 int (*scheme_os_setcwd)(char *buf, int noexn);
@@ -733,7 +749,7 @@ Scheme_Bucket *(*scheme_global_keyword_bucket)(Scheme_Object *symbol, Scheme_Env
 Scheme_Bucket *(*scheme_module_bucket)(Scheme_Object *mod, Scheme_Object *var, int pos, Scheme_Env *env);
 Scheme_Object *(*scheme_builtin_value)(const char *name); /* convenience */
 void (*scheme_set_global_bucket)(char *proc, Scheme_Bucket *var, Scheme_Object *val,
-			      int set_undef);
+                                        int set_undef);
 void (*scheme_install_macro)(Scheme_Bucket *b, Scheme_Object *v);
 void (*scheme_save_initial_module_set)(Scheme_Env *env);
 Scheme_Env *(*scheme_primitive_module)(Scheme_Object *name, Scheme_Env *for_env);
@@ -744,6 +760,9 @@ Scheme_Object *(*scheme_make_modidx)(Scheme_Object *path,
 				  Scheme_Object *resolved);
 Scheme_Object *(*scheme_apply_for_syntax_in_env)(Scheme_Object *proc, Scheme_Env *env);
 Scheme_Object *(*scheme_dynamic_require)(int argc, Scheme_Object *argv[]);
+Scheme_Object *(*scheme_namespace_require)(Scheme_Object *);
+int (*scheme_is_module_path)(Scheme_Object *);
+Scheme_Object *(*scheme_datum_to_kernel_stx)(Scheme_Object *e);
 /*========================================================================*/
 /*                                symbols                                 */
 /*========================================================================*/
@@ -806,13 +825,16 @@ long (*scheme_hash_key)(Scheme_Object *o);
 #endif
 long (*scheme_equal_hash_key)(Scheme_Object *o);
 long (*scheme_equal_hash_key2)(Scheme_Object *o);
+long (*scheme_recur_equal_hash_key)(Scheme_Object *o, void *cycle_data);
+long (*scheme_recur_equal_hash_key2)(Scheme_Object *o, void *cycle_data);
 void (*scheme_set_type_equality)(Scheme_Type type, 
                                         Scheme_Equal_Proc f,
                                         Scheme_Primary_Hash_Proc hash1,
                                         Scheme_Secondary_Hash_Proc hash2);
+int (*scheme_recur_equal)(Scheme_Object *obj1, Scheme_Object *obj2, void *cycle_info);
 Scheme_Object *(*scheme_build_list)(int argc, Scheme_Object **argv);
 Scheme_Object *(*scheme_build_list_offset)(int argc, Scheme_Object **argv, int delta);
-void (*scheme_make_list_immutable)(Scheme_Object *l);
+int (*scheme_is_list)(Scheme_Object *obj1);
 int (*scheme_list_length)(Scheme_Object *list);
 int (*scheme_proper_list_length)(Scheme_Object *list);
 Scheme_Object *(*scheme_alloc_list)(int size);
@@ -832,6 +854,7 @@ void (*scheme_set_box)(Scheme_Object *b, Scheme_Object *v);
 Scheme_Object *(*scheme_make_weak_box)(Scheme_Object *v);
 Scheme_Object *(*scheme_make_ephemeron)(Scheme_Object *key, Scheme_Object *val);
 Scheme_Object *(*scheme_ephemeron_value)(Scheme_Object *o);
+Scheme_Object *(*scheme_ephemeron_key)(Scheme_Object *o);
 Scheme_Object *(*scheme_load)(const char *file);
 Scheme_Object *(*scheme_load_extension)(const char *filename, Scheme_Env *env);
 void (*scheme_register_extension_global)(void *ptr, long size);

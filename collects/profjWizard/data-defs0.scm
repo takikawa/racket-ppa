@@ -30,8 +30,8 @@
   (define datat1 (list "ATree" (list vc1 vc2) "a tree for ints"))
   
   
-  (require (file "aux-contract.scm"))
-  (require (lib "contract.ss"))
+  (require "aux-contract.scm")
+  (require mzlib/contract)
   
   (provide 
    Class   ;; flat-contract

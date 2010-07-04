@@ -7,9 +7,9 @@
 ;; of expression.
 
 (module cffi mzscheme
-  (require (lib "stx.ss" "syntax"))
-  (require-for-syntax (lib "name.ss" "syntax")
-                      (lib "path-spec.ss" "syntax"))
+  (require syntax/stx)
+  (require-for-syntax syntax/name
+                      syntax/path-spec)
 
   (define-syntax c-lambda
     (let ([re:fname (regexp "^[a-zA-Z_0-9]+$")]
@@ -188,87 +188,91 @@
 
       (lambda (stx)
 	(syntax-case stx ()
-	  [(_ (arg-type ...) result-type code)
+	  [(_ (arg-type ...) result-type code0 code1 ...)
 	   (let ([arg-types (map
 			     (lambda (t)
 			       (parse-type t stx #f))
 			     (syntax->list (syntax (arg-type ...))))]
 		 [result-type (parse-type (syntax result-type) stx #t)]
-		 [code (syntax code)]
+		 [codes (syntax->list (syntax (code0 code1 ...)))]
 		 [proc-name (or (let ([s (syntax-local-infer-name stx)])
 				  (if (syntax? s)
 				      (syntax-e s)
 				      s))
 				'c-lambda-procedure)])
-	     (unless (string? (syntax-e code))
-	       (raise-syntax-error
-		'c-lambda
-		"not a code or function-name string"
-		stx
-		code))
+             (for-each (lambda (code)
+                         (unless (string? (syntax-e code))
+                           (raise-syntax-error
+                            'c-lambda
+                            "not a code or function-name string"
+                            stx
+                            code)))
+                       codes)
 	     
 	     ;; Generate the function body
-	     (let ([fname (format "mzc_cffi_~a" ffi-index)]
-		   [code (apply
-			  string-append
-			  (append
-			   (let loop ([n 1][arg-types arg-types])
-			     (if (null? arg-types)
-				 null
-				 (cons
-				  (make-declaration (car arg-types) (format "___arg~a" n))
-				  (loop (add1 n) (cdr arg-types)))))
-			   (if (eq? 'void result-type)
-			       null
-			       (list (make-declaration result-type "___result")
-				     "  Scheme_Object *converted_result;\n"))
-			   (let loop ([n 1][arg-types arg-types])
-			     (if (null? arg-types)
-				 null
-				 (cons
-				  (extract-c-value (car arg-types)
-						   (format "___arg~a" n) 
-						   (format "argv[~a]" (sub1 n))
-						   (sub1 n)
-						   proc-name)
-				  (loop (add1 n) (cdr arg-types)))))
-			   (list " {\n")
-			   (list
-			    (if (regexp-match re:fname (syntax-e code))
-				;; Generate function call
-				(string-append
-				 (if (eq? result-type 'void)
-				     "  "
-				     "  ___result = ")
-				 (syntax-e code)
-				 "("
-				 (let loop ([n 1][arg-types arg-types])
-				   (if (null? arg-types)
-				       ""
-				       (string-append
-					(format "___arg~a~a" 
-						n
-						(if (pair? (cdr arg-types))
-						    ", "
-						    ""))
-					(loop (add1 n) (cdr arg-types)))))
-				 ");\n")
-				;; Use literal code
-				(string-append (syntax-e code) "\n")))
-			   (if (eq? result-type 'void)
-			       null
-			       (list
-				(build-scheme-value result-type "converted_result" "___result")))
-			   (list
-			    "#ifdef ___AT_END\n"
-			    "  ___AT_END\n"
-			    "#undef ___AT_END\n"
-			    "#endif\n")
-			   (list " }\n")
-			   (list
-			    (if (eq? result-type 'void)
-				"  return scheme_void;\n"
-				"  return converted_result;\n"))))])
+	     (let* ([all-code (apply string-append (map syntax-e codes))]
+                    [fname (format "mzc_cffi_~a" ffi-index)]
+                    [code (apply
+                           string-append
+                           (append
+                            (let loop ([n 1][arg-types arg-types])
+                              (if (null? arg-types)
+                                  null
+                                  (cons
+                                   (make-declaration (car arg-types) (format "___arg~a" n))
+                                   (loop (add1 n) (cdr arg-types)))))
+                            (if (eq? 'void result-type)
+                                null
+                                (list (make-declaration result-type "___result")
+                                      "  Scheme_Object *converted_result;\n"))
+                            (let loop ([n 1][arg-types arg-types])
+                              (if (null? arg-types)
+                                  null
+                                  (cons
+                                   (extract-c-value (car arg-types)
+                                                    (format "___arg~a" n) 
+                                                    (format "argv[~a]" (sub1 n))
+                                                    (sub1 n)
+                                                    proc-name)
+                                   (loop (add1 n) (cdr arg-types)))))
+                            (list " {\n")
+                            (list
+                             (if (and (= 1 (length codes))
+                                      (regexp-match re:fname all-code))
+                                 ;; Generate function call
+                                 (string-append
+                                  (if (eq? result-type 'void)
+                                      "  "
+                                      "  ___result = ")
+                                  all-code
+                                  "("
+                                  (let loop ([n 1][arg-types arg-types])
+                                    (if (null? arg-types)
+                                        ""
+                                        (string-append
+                                         (format "___arg~a~a" 
+                                                 n
+                                                 (if (pair? (cdr arg-types))
+                                                     ", "
+                                                     ""))
+                                         (loop (add1 n) (cdr arg-types)))))
+                                  ");\n")
+                                 ;; Use literal code
+                                 (string-append all-code "\n")))
+                            (if (eq? result-type 'void)
+                                null
+                                (list
+                                 (build-scheme-value result-type "converted_result" "___result")))
+                            (list
+                             "#ifdef ___AT_END\n"
+                             "  ___AT_END\n"
+                             "#undef ___AT_END\n"
+                             "#endif\n")
+                            (list " }\n")
+                            (list
+                             (if (eq? result-type 'void)
+                                 "  return scheme_void;\n"
+                                 "  return converted_result;\n"))))])
 	       (set! ffi-index (add1 ffi-index))
 	       (with-syntax ([fname fname]
 			     [code code]
@@ -304,7 +308,7 @@
       (raise-syntax-error #f "only allowed at the top-level or a module top-level" stx))
     (syntax-case stx () 
       [(_ path)
-       (let ([pathname (resolve-path-spec #'path #'path stx #'build-path)])
+       (let ([pathname (resolve-path-spec #'path #'path stx)])
          (let ([str
                 (with-handlers ([exn:fail?
                                  (lambda (x)

@@ -4,7 +4,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2007 PLT Scheme Inc.
+ * Copyright: (C) 2004-2008 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -230,6 +230,8 @@ public:
 
     virtual void SetAlpha(double d);
     double GetAlpha();
+
+    virtual int CacheFontMetricsKey();
 
     // public data members
     Bool  Colour;

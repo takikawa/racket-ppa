@@ -1,11 +1,11 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require[(lib "eval.ss" "scribble")]
-@require["guide-utils.ss"]
+#lang scribble/doc
+@(require scribble/manual
+          scribble/eval
+          "guide-utils.ss")
 
 @title[#:tag "symbols"]{Symbols}
 
-A @defterm{symbol} is an atomic value that prints like an identifier.
+A @deftech{symbol} is an atomic value that prints like an identifier.
 An expression that starts with @litchar{'} and continues with an
 identifier produces a symbol value.
 
@@ -15,13 +15,13 @@ identifier produces a symbol value.
 ]
 
 For any sequence of characters, exactly one corresponding symbol is
-@defterm{interned}; the @scheme[string->symbol] procedure or
-@scheme[read]ing a syntactic identifier produces an interned
+@defterm{interned}; calling the @scheme[string->symbol] procedure, or
+@scheme[read]ing a syntactic identifier, produces an interned
 symbol. Since interned symbols can be cheaply compared with
 @scheme[eq?] (and thus @scheme[eqv?] or @scheme[equal?]), they serves
 as a convenient values to use for tags and enumerations.
 
-Symbols are case-sensitive. By using a @schemefont{#ci} suffix or in
+Symbols are case-sensitive. By using a @schemefont{#ci} prefix or in
 other ways, the reader can be made to case-fold character sequences to
 arrive at a symbol, but the reader preserves case by default.
 

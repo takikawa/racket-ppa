@@ -583,6 +583,8 @@ typedef _uc		jit_insn;
 #define JNLEm(D,B,I,S)			JCCim(0xf,0xe,D,B,I,S)
 #define JGm(D,B,I,S)			JCCim(0xf,0xe,D,B,I,S)
 
+#define JCm(D,B,I,S) JBm(D,B,I,S)
+#define JNCm(D,B,I,S) JNBm(D,B,I,S)
 
 #define JMPSm(D,B,I,S)			((_r0P(B) && _r0P(I)) ? _O_D8	(0xeb			,(long)(D)		) : \
 								JITFAIL("illegal mode in short jump"))
@@ -1139,10 +1141,12 @@ typedef _uc		jit_insn;
 #define FSTPr(RD)		ESCri(RD,053)
 #define FCOMr(RD)		ESCri(RD,002)
 #define FCOMPr(RD)		ESCri(RD,003)
+#define FCOMPPr(RD)		ESCri(RD,073)
 #define FCOMIr(RD)		ESCri(RD,036)
 #define FCOMIPr(RD)		ESCri(RD,076)
 #define FUCOMr(RD)		ESCri(RD,054)
 #define FUCOMPr(RD)		ESCri(RD,055)
+#define FUCOMPPr(RD)		ESCri(RD,025)
 #define FUCOMIr(RD)		ESCri(RD,035)
 #define FUCOMIPr(RD)		ESCri(RD,075)
 #define FADDPr(RD)		ESCri(RD,060)

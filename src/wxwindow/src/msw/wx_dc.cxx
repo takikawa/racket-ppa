@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	August 1994
- * Copyright:	(c) 2004-2007 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2008 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -437,17 +437,31 @@ void wxDC::DoClipping(HDC dc)
     HRGN rgn;
     rgn = clipping->GetRgn();
     if (rgn) {
-      SelectClipRgn(dc, rgn);
-      OffsetClipRgn(dc, canvas_scroll_dx, canvas_scroll_dy);
+      if (limit_rgn) {
+	HRGN together_rgn;
+	together_rgn = CreateRectRgn(0,0,0,0);
+	CombineRgn(together_rgn, rgn, together_rgn, RGN_COPY);
+	OffsetRgn(together_rgn, canvas_scroll_dx, canvas_scroll_dy);
+	CombineRgn(together_rgn, limit_rgn, together_rgn, RGN_AND);
+	SelectClipRgn(dc, together_rgn);
+	DeleteObject(together_rgn);
+      } else {
+	SelectClipRgn(dc, rgn);
+	OffsetClipRgn(dc, canvas_scroll_dx, canvas_scroll_dy);
+      }
     } else {
       if (!empty_rgn)
 	empty_rgn = CreateRectRgn(0, 0, 0, 0);
       SelectClipRgn(dc, empty_rgn);
     }
   } else {
-    if (!full_rgn)
-      full_rgn = CreateRectRgn(0, 0, 32000, 32000);
-    SelectClipRgn(dc, full_rgn);
+    if (limit_rgn) {
+      SelectClipRgn(dc, limit_rgn);
+    } else {
+      if (!full_rgn)
+	full_rgn = CreateRectRgn(0, 0, 32000, 32000);
+      SelectClipRgn(dc, full_rgn);
+    }
   }
 }
 
@@ -480,6 +494,14 @@ Bool wxDC::CanGetTextExtent(void)
   DoneDC(dc);
   
   return tok;
+}
+
+int wxDC::CacheFontMetricsKey()
+{
+  if ((user_scale_x == 1.0)
+      && (user_scale_y == 1.0))
+    return 1;
+  return 0;
 }
 
 void wxDC::SetColourMap(wxColourMap *cmap)
@@ -3042,6 +3064,11 @@ wxPrinterDC::wxPrinterDC(HDC theDC)
 
   SetBrush(wxBLACK_BRUSH);
   SetPen(wxBLACK_PEN);
+}
+
+int wxPrinterDC::CacheFontMetricsKey()
+{
+  return 0;
 }
 
 wxPrinterDC::~wxPrinterDC(void)

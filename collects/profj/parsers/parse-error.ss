@@ -2,9 +2,9 @@
   
   (require "lexer.ss" "general-parsing.ss"
            "../parameters.ss"
-           (lib "etc.ss")
-           (lib "readerr.ss" "syntax")
-           (all-except (lib "lex.ss" "parser-tools") input-port))
+           mzlib/etc
+           syntax/readerr
+           (all-except parser-tools/lex input-port))
   
   (provide
    find-beginner-error find-beginner-error-interactions find-beginner-error-expression find-beginner-error-type           
@@ -763,7 +763,7 @@
                   "'[' cannot appear here. Array specifications must immediately follow the type. Methods begin with '('."
                   srt ne))
                 ((open-separator? n-tok) 
-                 (parse-error (format "Method parameters must begin with '(' found ~a." n-out) srt ne))
+                 (parse-error (format "Method parameter list must begin with '(', found ~a." n-out) srt ne))
                 ((id-token? n-tok)
                  (parse-error
                   (string-append 
@@ -2563,5 +2563,3 @@
            ((beginner?) (parse-error "Fields may not be set in this position, only expressions are permitted here" ps end))
            (else (parse-error "Assignment is not permitted in this position. Only expressions are permitted here" ps end)))))))
   )
-  
- 

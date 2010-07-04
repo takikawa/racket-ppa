@@ -1,11 +1,12 @@
 
 (module wxme mzscheme
-  (require (lib "port.ss")
-           (lib "string.ss")
-           (lib "kw.ss")
-           (lib "class.ss")
-           (lib "contract.ss")
-           (lib "list.ss")
+  (require mzlib/port
+           mzlib/string
+           mzlib/kw
+           mzlib/class
+           mzlib/contract
+           mzlib/list
+           scheme/gui/dynamic
            "image.ss"
            "editor.ss"
            "private/compat.ss")
@@ -529,6 +530,8 @@
 
       (super-new)))
 
+  (define stream<%> (class->interface stream%))
+
   ;; ----------------------------------------
   
   (define lib-mapping (make-hash-table 'equal))
@@ -660,12 +663,10 @@
     (wxme-convert-port port close? #f))
 
   (define (do-read port who read)
-    (let ([port (if (with-handlers ([exn:fail? (lambda (x) #f)])
-                      (dynamic-require '#%mred-kernel #f)
-                      #t)
+    (let ([port (if (gui-available?)
                     ;; GUI mode, since MrEd is available:
-                    (let ([text% (dynamic-require '(lib "mred.ss" "mred") 'text%)]
-                          [open-input-text-editor (dynamic-require '(lib "mred.ss" "mred") 'open-input-text-editor)])
+                    (let ([text% (dynamic-require 'mred 'text%)]
+                          [open-input-text-editor (dynamic-require 'mred 'open-input-text-editor)])
                       (let ([t (new text%)])
                         (send t insert-port port 'standard)
                         (open-input-text-editor t 0 'end values (object-name port) #t)))
@@ -715,5 +716,6 @@
            broken-wxme-big-endian?
            snip-reader<%>
            readable<%>
+           stream<%>
            wxme-read
            wxme-read-syntax))

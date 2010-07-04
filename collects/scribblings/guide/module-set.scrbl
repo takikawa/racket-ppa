@@ -1,7 +1,7 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require[(lib "eval.ss" "scribble")]
-@require["guide-utils.ss"]
+#lang scribble/doc
+@(require scribble/manual
+          scribble/eval
+          "guide-utils.ss")
 
 @title[#:tag "module-set"]{Assignment and Redefinition}
 
@@ -12,12 +12,12 @@ are visible to importing modules. However, an importing context is not
 allowed to change the value of an imported binding.
 
 @examples[
-(module m (lib "big/lang.ss")
+(module m scheme
   (provide counter increment!)
   (define counter 0)
   (define (increment!)
     (set! counter (add1 counter))))
-(require m)
+(require 'm)
 (eval:alts counter (eval 'counter))
 (eval:alts (increment!) (eval '(increment!)))
 (eval:alts counter (eval 'counter))
@@ -32,7 +32,7 @@ The prohibition on assignment of imported variables helps support
 modular reasoning about programs. For example, in the module,
 
 @schemeblock[
-(module m (lib "big/lang.ss")
+(module m scheme
   (provide rx:fish fishy-string?)
   (define rx:fish #rx"fish")
   (define (fishy-string? s)
@@ -55,26 +55,26 @@ in the @tech{REPL}; in such cases, the redeclaration may fail if it
 involves the re-definition of a previously immutable binding.
 
 @interaction[
-(module m (lib "big/lang.ss")
-  (define pi 3.141597))
-(require m)
-(module m (lib "big/lang.ss")
-  (define pi 3))
+(module m scheme
+  (define pie 3.141597))
+(require 'm)
+(module m scheme
+  (define pie 3))
 ]
 
 For exploration and debugging purposes, the Scheme reflective layer
-provides a @scheme[compile-enforce-module-constants] @tech{parameter}
+provides a @scheme[compile-enforce-module-constants] parameter
 to disable the enforcement of constants.
 
 @interaction[
 (compile-enforce-module-constants #f)
-(module m2 (lib "big/lang.ss")
-  (provide pi)
-  (define pi 3.141597))
-(require m2)
-(module m2 (lib "big/lang.ss")
-  (provide pi)
-  (define pi 3))
+(module m2 scheme
+  (provide pie)
+  (define pie 3.141597))
+(require 'm2)
+(module m2 scheme
+  (provide pie)
+  (define pie 3))
 (compile-enforce-module-constants #t)
-(eval:alts pi (eval 'pi))
+(eval:alts pie (eval 'pie))
 ]

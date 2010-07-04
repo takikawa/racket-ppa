@@ -1,13 +1,13 @@
 (module external mzscheme
-  (require (lib "string-constant.ss" "string-constants")
-           (lib "mred.ss" "mred")
-           (lib "class.ss")
-           (lib "file.ss")
-           (lib "list.ss")
-           (lib "match.ss")
-           (prefix raw: (lib "sendurl.ss" "net"))
-           (lib "url.ss" "net")
-           (prefix fw: (lib "framework.ss" "framework")))
+  (require string-constants
+           mred
+           mzlib/class
+           mzlib/file
+           mzlib/list
+           mzlib/match
+           (prefix raw: net/sendurl)
+           net/url
+           (prefix fw: framework))
   (provide send-url
            (rename raw:browser-preference? browser-preference?)
            update-browser-preference
@@ -82,8 +82,7 @@
 
   (define unix-browser-names
     (map (lambda (s)
-           (let ([l (string->list (symbol->string s))])
-             (list->string (cons (char-upcase (car l)) (cdr l)))))
+           (string-titlecase (regexp-replace* #rx"-" (symbol->string s) " ")))
          raw:unix-browser-list))
 
   ;; : (U str #f) -> (U symbol #f)
@@ -230,15 +229,7 @@
              (set! callbacks
                    (cons (fw:preferences:add-callback 'external-browser
                            (lambda (name browser) (refresh-controls browser)))
-                    callbacks))
-
-             (let disable ([x raw:unix-browser-list] [n 0])
-               (cond
-                 [(null? x) (void)]
-                 [else (unless (find-executable-path
-                                (symbol->string (car x)) #f)
-                         (send r enable n #f))
-                       (disable (cdr x) (add1 n))]))))
+                    callbacks))))
 
          ;; -------------------- proxy for doc downloads --------------------
          (when set-help?

@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2007 PLT Scheme Inc.
+  Copyright (c) 2004-2008 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
  
     This library is free software; you can redistribute it and/or
@@ -38,6 +38,12 @@ static Scheme_Object *make_channel(int n, Scheme_Object **p);
 static Scheme_Object *make_channel_put(int n, Scheme_Object **p);
 static Scheme_Object *channel_p(int n, Scheme_Object **p);
 
+static Scheme_Object *thread_send(int n, Scheme_Object **p);
+static Scheme_Object *thread_receive(int n, Scheme_Object **p);
+static Scheme_Object *thread_try_receive(int n, Scheme_Object **p);
+static Scheme_Object *thread_receive_evt(int n, Scheme_Object **p);
+static Scheme_Object *thread_rewind_receive(int n, Scheme_Object **p);
+
 static Scheme_Object *make_alarm(int n, Scheme_Object **p);
 static Scheme_Object *make_sys_idle(int n, Scheme_Object **p);
 
@@ -47,12 +53,14 @@ static int channel_syncer_ready(Scheme_Object *ch, Scheme_Schedule_Info *sinfo);
 static int alarm_ready(Scheme_Object *ch, Scheme_Schedule_Info *sinfo);
 static int always_ready(Scheme_Object *w);
 static int never_ready(Scheme_Object *w);
+static int thread_recv_ready(Scheme_Object *ch, Scheme_Schedule_Info *sinfo);
 
 static int pending_break(Scheme_Thread *p);
 
 int scheme_main_was_once_suspended;
 
 static Scheme_Object *system_idle_put_evt;
+static Scheme_Object *thread_recv_evt;
 
 #ifdef MZ_PRECISE_GC
 static void register_traversers(void);
@@ -136,6 +144,32 @@ void scheme_init_sema(Scheme_Env *env)
 						      1, 1, 1), 
 			     env);  
 
+  scheme_add_global_constant("thread-send", 
+			     scheme_make_prim_w_arity(thread_send,
+						      "thread-send", 
+						      2, 3), 
+			     env);
+  scheme_add_global_constant("thread-receive", 
+			     scheme_make_prim_w_arity(thread_receive,
+						      "thread-receive", 
+						      0, 0), 
+			     env);
+  scheme_add_global_constant("thread-try-receive", 
+			     scheme_make_prim_w_arity(thread_try_receive,
+						      "thread-try-receive", 
+						      0, 0), 
+			     env);
+  scheme_add_global_constant("thread-receive-evt", 
+			     scheme_make_prim_w_arity(thread_receive_evt,
+						      "thread-receive-evt", 
+						      0, 0), 
+			     env);
+  scheme_add_global_constant("thread-rewind-receive", 
+			     scheme_make_prim_w_arity(thread_rewind_receive,
+						      "thread-rewind-receive", 
+						      1, 1), 
+			     env);
+
   scheme_add_global_constant("alarm-evt", 
 			     scheme_make_prim_w_arity(make_alarm,
 						      "alarm-evt",
@@ -157,6 +191,11 @@ void scheme_init_sema(Scheme_Env *env)
   o->type = scheme_never_evt_type;
   scheme_add_global_constant("never-evt", o, env);
 
+  REGISTER_SO(thread_recv_evt);
+  o = scheme_alloc_small_object();
+  o->type = scheme_thread_recv_evt_type;
+  thread_recv_evt = o;
+
   REGISTER_SO(scheme_system_idle_channel);
   scheme_system_idle_channel = scheme_make_channel();
 
@@ -168,6 +207,7 @@ void scheme_init_sema(Scheme_Env *env)
   scheme_add_evt(scheme_alarm_type, (Scheme_Ready_Fun)alarm_ready, NULL, NULL, 0);
   scheme_add_evt(scheme_always_evt_type, always_ready, NULL, NULL, 0);
   scheme_add_evt(scheme_never_evt_type, never_ready, NULL, NULL, 0);
+  scheme_add_evt(scheme_thread_recv_evt_type, (Scheme_Ready_Fun)thread_recv_ready, NULL, NULL, 0);
 }
 
 Scheme_Object *scheme_make_sema(long v)
@@ -842,7 +882,7 @@ static Scheme_Object *block_sema(int n, Scheme_Object **p)
 
   scheme_wait_sema(p[0], 0);
 
-  /* In case a break appeared after wwe received the post,
+  /* In case a break appeared after we received the post,
      check for a break, because scheme_wait_sema() won't: */
   scheme_check_break_now();
 
@@ -973,6 +1013,178 @@ int scheme_try_channel_get(Scheme_Object *ch)
     return 1;
   }
   return 0;
+}
+
+/**********************************************************************/
+/*                           Thread mbox                              */
+/**********************************************************************/
+
+static void make_mbox_sema(Scheme_Thread *p)
+{
+  if (!p->mbox_sema) {
+    Scheme_Object *sema = NULL;
+    sema = scheme_make_sema(0); 
+    p->mbox_sema = sema;
+  }
+}
+
+static void mbox_push(Scheme_Thread *p, Scheme_Object *o)
+{
+  Scheme_Object *next;
+
+  next = scheme_make_raw_pair(o, NULL);
+  
+  if (p->mbox_first) {
+    SCHEME_CDR(p->mbox_last) = next;
+    p->mbox_last = next;
+  } else {
+    p->mbox_first = next;
+    p->mbox_last = next;
+  }
+
+  make_mbox_sema(p);
+  scheme_post_sema(p->mbox_sema);
+  /* Post can't overflow the semaphore, because we'd run out of
+     memory for the queue, first. */
+}
+
+static void mbox_push_front(Scheme_Thread *p, Scheme_Object *lst) 
+{
+  int cnt = -1;
+  Scheme_Object *next, *hd;
+
+  make_mbox_sema(p);
+
+  next = lst;
+  while (!SCHEME_NULLP(next)) {
+    /* Push one: */
+    hd = scheme_make_raw_pair(SCHEME_CAR(next), p->mbox_first);
+    if (!p->mbox_first)
+      p->mbox_last = hd;
+    p->mbox_first = hd;
+
+    ++cnt;
+    next = SCHEME_CDR(next);
+
+    if (SCHEME_NULLP(next) || (cnt == 256)) {
+      /* Either done or need to pause to allow breaks/swaps; */
+      /* do a single post for all messages so far. */
+      ((Scheme_Sema*)p->mbox_sema)->value += cnt;
+      scheme_post_sema(p->mbox_sema);
+      SCHEME_USE_FUEL(cnt+1); /* might sleep */
+      cnt = -1;
+    }
+  }
+}
+
+static Scheme_Object *mbox_pop( Scheme_Thread *p, int dec)
+{
+  /* Assertion: mbox_first != NULL */
+  Scheme_Object *r = NULL;
+
+  r = SCHEME_CAR(p->mbox_first);
+  p->mbox_first = SCHEME_CDR(p->mbox_first);
+  if (!p->mbox_first)
+    p->mbox_last = NULL;
+  
+  if (dec)
+    scheme_try_plain_sema(p->mbox_sema);
+
+  return r;
+}
+
+static Scheme_Object *thread_send(int argc, Scheme_Object **argv)
+{
+  if (SCHEME_THREADP(argv[0])) {
+    int running;
+
+    if (argc > 2) {
+      if (!SCHEME_FALSEP(argv[2])) /* redundant, but keeps it fast as possible */
+        scheme_check_proc_arity2("thread-send", 0, 2, argc, argv, 1);
+    }
+
+    running = ((Scheme_Thread*)argv[0])->running;
+    if (MZTHREAD_STILL_RUNNING(running)) {
+      mbox_push((Scheme_Thread*)argv[0], argv[1]);
+      return scheme_void;
+    } else {
+      if (argc > 2) {
+        if (SCHEME_FALSEP(argv[2]))
+          return scheme_false;
+        else
+          return _scheme_tail_apply(argv[2], 0, NULL);
+      } else
+        scheme_raise_exn(MZEXN_FAIL_CONTRACT, "thread-send: target thread is not running");
+    }
+  } else 
+    scheme_wrong_type("thread-send", "thread", 0, argc, argv);
+
+  return NULL;
+}
+
+static Scheme_Object *thread_receive(int argc, Scheme_Object **argv)
+{
+  /* The mbox semaphore can only be downed by the current thread, so
+     receive/try-receive can directly dec+pop without syncing 
+     (by calling mbox_pop with dec=1). */
+  if (scheme_current_thread->mbox_first) {
+    return mbox_pop(scheme_current_thread, 1);
+  } else {
+    Scheme_Object *v;
+    Scheme_Thread *p = scheme_current_thread;
+
+    make_mbox_sema(p);
+
+    scheme_wait_sema(p->mbox_sema, 0);
+    /* We're relying on atomicity of return after wait succeeds to ensure
+       that a semaphore wait guarantees a mailbox dequeue. */
+    v = mbox_pop(p, 0);
+    
+    /* Due to that atomicity, though, we're obliged to check for
+       a break at this point: */
+    scheme_check_break_now();
+    
+    return v;
+  }
+}
+
+static Scheme_Object *thread_try_receive(int argc, Scheme_Object **argv)
+{
+  if (scheme_current_thread->mbox_first)
+    return mbox_pop(scheme_current_thread, 1);
+  else
+    return scheme_false;
+}
+
+static Scheme_Object *thread_receive_evt(int argc, Scheme_Object **argv)
+{
+  return thread_recv_evt;
+}
+
+static int thread_recv_ready(Scheme_Object *ch, Scheme_Schedule_Info *sinfo)
+{
+  Scheme_Thread *p;
+
+  p = sinfo->false_positive_ok;
+  if (!p)
+    p = scheme_current_thread;
+
+  make_mbox_sema(p);
+
+  scheme_set_sync_target(sinfo, p->mbox_sema, thread_recv_evt, NULL, 1, 1);
+
+  return 0;
+}
+
+static Scheme_Object *thread_rewind_receive(int argc, Scheme_Object **argv)
+{
+  if (scheme_is_list(argv[0])) {
+    mbox_push_front(scheme_current_thread, argv[0]);
+    return scheme_void;
+  } else
+    scheme_wrong_type("thread-rewind", "list", 0, argc, argv);
+
+  return NULL;
 }
 
 /**********************************************************************/

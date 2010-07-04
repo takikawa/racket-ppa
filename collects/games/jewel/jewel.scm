@@ -3,18 +3,18 @@
 
 (module jewel mzscheme
 
-  (require (lib "unit.ss")
-	   (lib "string.ss")
-           (lib "class.ss")
-	   (lib "file.ss")
-           (lib "mred.ss" "mred")
-           (lib "gl.ss" "sgl")
-           (lib "gl-vectors.ss" "sgl")
-	   (only (lib "sgl.ss" "sgl") get-gl-version-number)
+  (require mzlib/unit
+	   mzlib/string
+           mzlib/class
+           mzlib/file
+           mred
+           sgl/gl
+           sgl/gl-vectors
+	   (only sgl/sgl get-gl-version-number)
 	   "shapes.scm"
 	   "array.scm"
 	   "text.scm"
-	   "../show-help.ss"
+	   "../show-scribbling.ss"
   )
 
   (provide game@)
@@ -50,17 +50,18 @@
   (define jewel-difficulty 0)
 
   ; table of high scores, loaded from a file
-  (define high-scores #( ("NOBODY" "0" "1")
-                         ("NOBODY" "0" "1")
-                         ("NOBODY" "0" "1") 
-                         ("NOBODY" "0" "1")
-                         ("NOBODY" "0" "1")
-                         ("NOBODY" "0" "1")
-                         ("NOBODY" "0" "1")
-                         ("NOBODY" "0" "1")
-                         ("NOBODY" "0" "1")
-                         ("NOBODY" "0" "1")
-                      ))
+  (define high-scores (vector
+                       '("NOBODY" "0" "1")
+                       '("NOBODY" "0" "1")
+                       '("NOBODY" "0" "1") 
+                       '("NOBODY" "0" "1")
+                       '("NOBODY" "0" "1")
+                       '("NOBODY" "0" "1")
+                       '("NOBODY" "0" "1")
+                       '("NOBODY" "0" "1")
+                       '("NOBODY" "0" "1")
+                       '("NOBODY" "0" "1")
+                       ))
   
   (define startlife    1000.0)
   (define lifevisible  (* startlife 2.0))
@@ -1308,7 +1309,7 @@
     ; generate an expose event, redraw the opengl window
     (queue-callback 
       (lambda x (send *OPENGL_WINDOW* on-paint))
-      #t
+      #f
     )
   )
 
@@ -1786,8 +1787,7 @@
   (jewel-init-game)
 
   (define show-jewel-help
-    (show-help (list "games" "jewel")
-	       "Jewel Help" #f))
+    (show-scribbling '(lib "games/scribblings/games.scrbl") "jewel"))
 
   (define *MAIN_WINDOW* 
           (new jewel-frame%

@@ -6,13 +6,13 @@
            "data-defs.scm"
            (lib "tool.ss" "drscheme")
            (only (lib "drsig.ss" "drscheme" "private") drscheme:language-configuration^)
-           (lib "framework.ss" "framework")
-           (lib "mred.ss" "mred")
-           (lib "unit.ss") 
-           (lib "etc.ss")
-           (lib "class.ss")
-	   (lib "string-constant.ss" "string-constants")
-           (lib "contract.ss"))
+           framework
+           mred
+           mzlib/unit 
+           mzlib/etc
+           mzlib/class
+	   string-constants
+           mzlib/contract)
   
   (provide tool@)
   
@@ -32,7 +32,7 @@
       
       (define (java-class-wizard-mixin %)
         (class %
-          (inherit get-special-menu get-edit-target-object register-capability-menu-item)
+          (inherit get-insert-menu get-edit-target-object register-capability-menu-item)
           
           (super-new)
           
@@ -87,14 +87,16 @@
               (send mi enable ((get-edit-target-object) . is-a? . text%)))
             (new menu-item% 
                  (label descr) 
-                 (parent (get-special-menu))
+		 (parent (get-insert-menu))
                  (callback A)
                  (demand-callback enable)))
           
           (make-menu-item% (string-constant profjWizward-insert-java-class) get-class-info make-class class-draw)
-          (register-capability-menu-item 'profjWizard:special:java-class (get-special-menu))
+          (register-capability-menu-item 'profjWizard:special:java-class
+	    (get-insert-menu))
           (make-menu-item% (string-constant profjWizard-insert-java-union) get-union-info make-union dt-draw)
-          (register-capability-menu-item 'profjWizard:special:java-union (get-special-menu))))
+          (register-capability-menu-item 'profjWizard:special:java-union
+	    (get-insert-menu))))
       
       (drscheme:get/extend:extend-unit-frame java-class-wizard-mixin)
       (drscheme:language:register-capability 'profjWizard:special:java-class 

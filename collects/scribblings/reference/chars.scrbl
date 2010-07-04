@@ -1,11 +1,13 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
-@define[(UCat x) x]
+@(define (UCat x) x)
 
 @title[#:tag "characters"]{Characters}
 
 @guideintro["characters"]{characters}
+
+@local-table-of-contents[]
 
 MzScheme characters range over Unicode scalar values, which includes
 characters whose values range from @schemevalfont{#x0} to
@@ -60,10 +62,10 @@ Returns @scheme[#t] if all of the arguments are @scheme[eqv?].
 @examples[(char=? #\a #\a)
           (char=? #\a #\A #\a)]}
 
-@define[(char-sort direction folded?)
-         (if folded?
-             @elem{Like @scheme[char-ci<?], but checks whether the arguments would be @direction after case-folding.}
-             @elem{Like @scheme[char<?], but checks whether the arguments are @|direction|.})]
+@(define (char-sort direction folded?)
+   (if folded?
+     @elem{Like @scheme[char-ci<?], but checks whether the arguments would be @direction after case-folding.}
+     @elem{Like @scheme[char<?], but checks whether the arguments are @|direction|.}))
 
 @defproc[(char<? [char1 char?] [char2 char?] ...+) boolean?]{
 
@@ -139,9 +141,8 @@ otherwise.
 
 @defproc[(char-alphabetic? [char char?]) boolean?]{
 
-Returns @scheme[#t] if @scheme[char]'s Unicode general category is
-@UCat{Lu}, @UCat{Ll}, @UCat{Lt}, @UCat{Lm}, or @UCat{Lo}, @scheme[#f]
-otherwise.}
+Returns @scheme[#t] if @scheme[char] has the Unicode ``Alphabetic''
+property.}
 
 @defproc[(char-lower-case? [char char?]) boolean?]{
 
@@ -161,8 +162,8 @@ Returns @scheme[#t] if @scheme[char]'s Unicode general category is
 
 @defproc[(char-numeric? [char char?]) boolean?]{
 
-Returns @scheme[#t] if @scheme[char]'s Unicode general category is
-@UCat{Nd}, @scheme[#f] otherwise.}
+Returns @scheme[#t] if @scheme[char] has the Unicode ``Numeric''
+property.}
 
 @defproc[(char-symbolic? [char char?]) boolean?]{
 
@@ -185,10 +186,8 @@ Returns @scheme[#t] if @scheme[char]'s Unicode general category is
 
 @defproc[(char-whitespace? [char char?]) boolean?]{
 
-Returns @scheme[#t] if @scheme[char]'s Unicode general category is
-@UCat{Zs}, @UCat{Zl}, or @UCat{Zp}, or if @scheme[char] is one of the
-following: @scheme[#\tab], @scheme[#\newline], @scheme[#\vtab],
-@scheme[#\page], @scheme[#\return], or @scheme[#\u0085].}
+Returns @scheme[#t] if @scheme[char] has the Unicode ``White_Space''
+property.}
 
 @defproc[(char-blank? [char char?]) boolean?]{
 

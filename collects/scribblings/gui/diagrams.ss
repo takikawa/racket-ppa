@@ -1,9 +1,8 @@
-(module diagrams mzscheme
-  (require (lib "string.ss")
-           (lib "struct.ss" "scribble")
-           (lib "scheme.ss" "scribble")
-           (lib "manual.ss" "scribble"))
-  (require-for-label (lib "mred.ss" "mred"))
+(module diagrams scheme/base
+  (require scribble/struct
+           scribble/scheme
+           scribble/manual
+           (for-label scheme/gui/base))
 
   (provide diagram->table
            short-windowing-diagram
@@ -88,11 +87,11 @@ DIAG
  
   (define event-diagram
 #<<DIAG
-       event%                                        timer%
-        |- key-event%                                cursor%
+       event%                                 timer%
+        |- key-event%                         cursor%
         |- mouse-event%                    
-        |- scroll-event%                             clipboard<%>
-        |- control-event%                            clipboard-client%
+        |- scroll-event%                      clipboard<%>
+        |- control-event%                     clipboard-client%
 DIAG
 )
 
@@ -132,12 +131,12 @@ DIAG
  
   (define admin-diagram
 #<<DIAG
-  editor-canvas%       
-
-  editor-admin<%>                   snip-admin%
+  editor-canvas%
+ 
+  editor-admin%                     snip-admin%
    |- editor-snip-editor-admin<%>
-
-  editor-wordbreak-map%   keymap%
+ 
+  editor-wordbreak-map%    keymap%
 DIAG
 )
  
@@ -154,8 +153,8 @@ DIAG
  editor-data-class%                     snip-class%
  editor-data-class-list<%>              snip-class-list<%>
  
- editor-stream-in%                   editor-stream-out%
- editor-stream-in-base%              editor-stream-out-base%
-  |- editor-stream-in-bytes-base%     |- editor-stream-out-bytes-base%
+ editor-stream-in%                 editor-stream-out%
+ editor-stream-in-base%            editor-stream-out-base%
+  |- editor-stream-in-bytes-base%   |- editor-stream-out-bytes-base%
 DIAG
 ))

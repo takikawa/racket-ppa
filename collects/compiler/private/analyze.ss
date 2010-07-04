@@ -39,11 +39,11 @@
 ;;; ------------------------------------------------------------
 
 (module analyze mzscheme
-  (require (lib "unit.ss")
-	  (lib "list.ss")
-	  (lib "etc.ss"))
+  (require mzlib/unit
+	  mzlib/list
+	  mzlib/etc)
 
-  (require (lib "zodiac-sig.ss" "syntax"))
+  (require syntax/zodiac-sig)
 
   (require "sig.ss")
   (require "../sig.ss")
@@ -90,23 +90,27 @@
 	  (let* ([et? (and et?
 			   ;; Just use run-time for #%kernel, since it's the same, and
 			   ;;  the compiler generates references to #%kernel names
-			   (not (eq? '#%kernel modname)))]
+			   (not (kernel-modname? modname)))]
 		 [info (hash-table-get compiler:global-symbols modname
 				       (lambda ()
 					 (let ([p (make-modref-info 
-						   #f #f
-						   (if (module-path-index? modname)
-						       (let-values ([(name base) (module-path-index-split modname)])
-							 (if name
-							     (compiler:construct-const-code!
-							      (zodiac:make-zread
-							       (datum->syntax-object
-								#f
-								modname
-								(zodiac:zodiac-stx ast)))
-							      #t)
-							     #f))
-						       modname))])
+                                                   #f #f
+                                                   (if (kernel-modname? modname)
+                                                       (begin
+                                                         (compiler:get-symbol-const! #f '#%kernel)
+                                                         '#%kernel)
+                                                       (if (module-path-index? modname)
+                                                           (let-values ([(name base) (module-path-index-split modname)])
+                                                             (if name
+                                                                 (compiler:construct-const-code!
+                                                                  (zodiac:make-zread
+                                                                   (datum->syntax-object
+                                                                    #f
+                                                                    modname
+                                                                    (zodiac:zodiac-stx ast)))
+                                                                  #t)
+                                                                 #f))
+                                                           modname)))])
 					   (hash-table-put! compiler:global-symbols modname p)
 					   p)))]
 		 [t (or ((if et? modref-info-et-globals modref-info-globals) info)
@@ -192,11 +196,11 @@
 
       (define (move-over-local-lists)
 	(set! compiler:define-list
-	      (append! compiler:define-list 
-		       (reverse! compiler:local-define-list)))
+	      (append compiler:define-list 
+                      (reverse compiler:local-define-list)))
 	(set! compiler:per-load-define-list
-	      (append! compiler:per-load-define-list 
-		       (reverse! compiler:local-per-load-define-list)))
+	      (append compiler:per-load-define-list 
+                      (reverse compiler:local-per-load-define-list)))
 	
 	(set! compiler:local-define-list null)
 	(set! compiler:local-per-load-define-list null))
@@ -841,7 +845,7 @@
 		    (when (compiler:option:debug)
 		      (zodiac:print-start! (debug:get-port) ast)
 		      (newline (debug:get-port)))
-		    
+
 		    (cond
 		     
 		     ;;-----------------------------------------------------------------
@@ -1002,17 +1006,19 @@
 				    [(vars) (car (zodiac:let-values-form-vars ast))]
 				    [(convert-set!-val)
 				     (lambda ()   
-				       (set-car! (zodiac:let-values-form-vals ast)
-						 (zodiac:make-special-constant 
-						  'void))
-				       (zodiac:make-begin-form 	   
+                                       (zodiac:set-let-values-form-vals! 
+                                        ast
+                                        (cons (zodiac:make-special-constant 
+                                               'void)
+                                              (cdr (zodiac:let-values-form-vals ast))))
+				       (zodiac:make-begin-form
 					(zodiac:zodiac-stx ast)
 					(make-empty-box)
 					(list val ast)))])
 			
 			(if (= 1 (length (car (zodiac:let-values-form-vars ast))))
 			    
-					; this is a one-value binding let
+                            ;; this is a one-value binding let
 			    (let* ([var (car vars)]
 				   [binding (get-annotation var)])
 			      
@@ -1046,9 +1052,12 @@
 
 				    ;; otherwise, process normally
 				    (begin
-				      
-				      (set-car! (car (zodiac:let-values-form-vars ast)) 
-						var)
+				      (zodiac:set-let-values-form-vars!
+                                       ast
+                                       (cons (cons var
+                                                   (cdr (car (zodiac:let-values-form-vars ast))))
+                                             (cdr (zodiac:let-values-form-vars ast)) ))
+
 				      (zodiac:set-let-values-form-body! ast body)
 				      
 				      (if (zodiac:set!-form? val)
@@ -1060,18 +1069,24 @@
 					  
 					  ;; if it's any other expression, we're done.
 					  (begin
-					    (set-car! (zodiac:let-values-form-vals ast)
-						      val)
+                                            (zodiac:set-let-values-form-vals!
+                                             ast
+                                             (cons val
+                                                   (cdr (zodiac:let-values-form-vals ast))))
 					    (values ast body-multi)))))))
 			    
 			    ;; this is a multiple (or zero) value binding let
 			    ;; the values are unknown to simple analysis so skip
 			    ;; that stuff
 			    (begin
-			      (set-car! (zodiac:let-values-form-vars ast) vars)
-					; these are all new bindings
+                              (zodiac:set-let-values-form-vars!
+                               ast
+                               (cons vars
+                                     (cdr (zodiac:let-values-form-vars ast))))
+
+                              ;; these are all new bindings
 			      (for-each add-local-var! vars)
-					; analyze the body
+                              ;; analyze the body
 			      (let-values ([(body body-multi) 
 					    (analyze! (zodiac:let-values-form-body ast)
 						      (append vars env)
@@ -1090,7 +1105,10 @@
 					(values (convert-set!-val) #f)))
 					; if it's any other option, we're done
 				    (begin
-				      (set-car! (zodiac:let-values-form-vals ast) val)
+                                      (zodiac:set-let-values-form-vals!
+                                       ast
+                                       (cons val
+                                             (cdr (zodiac:let-values-form-vals ast))))
 				      (values ast body-multi)))))
 			    
 			    ))]
@@ -1171,16 +1189,17 @@
 		     ;; analyze the branches
 		     [(zodiac:begin-form? ast)
 
-		      (let ([last-multi
-			     (let loop ([bodies (zodiac:begin-form-bodies ast)])
-			       (if (null? (cdr bodies))
-				   (let-values ([(e last-multi) (analyze! (car bodies) env inlined tail? wcm-tail?)])
-				     (set-car! bodies e)
-				     last-multi)
-				   (begin
-				     (set-car! bodies (analyze!-ast (car bodies) env inlined))
-				     (loop (cdr bodies)))))])
+		      (let-values ([(bodies last-multi)
+                                    (let loop ([bodies (zodiac:begin-form-bodies ast)])
+                                      (if (null? (cdr bodies))
+                                          (let-values ([(e last-multi) (analyze! (car bodies) env inlined tail? wcm-tail?)])
+                                            (values (list e)
+                                                    last-multi))
+                                          (let-values ([(e) (analyze!-ast (car bodies) env inlined)]
+                                                       [(bodies last-multi) (loop (cdr bodies))])
+                                            (values (cons e bodies) last-multi))))])
 
+                        (zodiac:set-begin-form-bodies! ast bodies)
 			(values ast last-multi))]
 		     
 		     
@@ -1290,7 +1309,7 @@
 				[primfun (app-prim-name (get-annotation ast))]
 				[multi (if primfun
 					   (let ([a (primitive-result-arity 
-						     (dynamic-require '#%kernel primfun))])
+						     (dynamic-require ''#%kernel primfun))])
 					     (cond
 					      [(and (number? a) (= a 1)) #f]
 					      [(number? a) #t]

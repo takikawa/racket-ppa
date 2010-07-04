@@ -1,6 +1,6 @@
 (module a-unit mzscheme
   (require "unit.ss")
-  (require-for-syntax (lib "kerncase.ss" "syntax"))
+  (require-for-syntax syntax/kerncase)
   
   (provide (rename module-begin #%module-begin)
            (all-from-except mzscheme #%module-begin)
@@ -59,7 +59,7 @@
                                 #'require
                                 #'require-for-syntax
                                 #'require-for-template
-                                (kernel-form-identifier-list #'here))))])
+                                (kernel-form-identifier-list))))])
          (syntax-case e (begin)
            [(req r ...)
             (or (module-identifier=? #'req #'require)

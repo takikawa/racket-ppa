@@ -3,11 +3,11 @@
 ;; (c) 1997-2001 PLT
 
 (module vm2c mzscheme
-  (require (lib "unit.ss")
-	   (lib "list.ss"))
+  (require mzlib/unit
+	   mzlib/list)
 
-  (require (lib "zodiac-sig.ss" "syntax")
-	   (lib "primitives.ss" "syntax"))
+  (require syntax/zodiac-sig
+	   syntax/primitives)
 
   (require "sig.ss")
   (require "../sig.ss")
@@ -214,7 +214,7 @@
 			(fprintf port "  Scheme_Object * ~a;~n"
 				 (vm->c:convert-symbol 
 				  (vm->c:bucket-name
-				   '#%kernel
+                                   (module-path-index-join ''#%kernel #f)
 				   a))))
 		      (set->list (compiler:get-primitive-refs)))
 	    (fprintf port "} P;~n")
@@ -227,7 +227,7 @@
 	    (for-each (lambda (a)
 			(fprintf port "~aP.~a = scheme_module_bucket(~a, ~a, -1, env)->val;~n"
 				 vm->c:indent-spaces
-				 (vm->c:convert-symbol (vm->c:bucket-name '#%kernel a))
+				 (vm->c:convert-symbol (vm->c:bucket-name (module-path-index-join ''#%kernel #f) a))
 				 (vm->c:make-symbol-const-string (compiler:get-symbol-const! #f '#%kernel))
 				 (vm->c:make-symbol-const-string (compiler:get-symbol-const! #f a))))
 		      (set->list (compiler:get-primitive-refs))))))

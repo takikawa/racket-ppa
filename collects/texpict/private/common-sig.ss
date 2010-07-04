@@ -1,10 +1,10 @@
-(module common-sig mzscheme
-  (require (lib "unit.ss"))
+(module common-sig scheme/base
+  (require scheme/unit)
 
   (provide texpict-common^)
   (define-signature texpict-common^
-    ((struct pict (draw width height ascent descent children panbox))
-     (struct child (pict dx dy))
+    ((struct pict (draw width height ascent descent children panbox last))
+     (struct child (pict dx dy sx sy))
 
      black-and-white
 
@@ -56,6 +56,9 @@
                     ; pict l t r b -> pict
      refocus        ; pict pict -> pict
      panorama       ; pict -> pict
+
+     use-last       ; pict pict -> pict
+     use-last*      ; pict pict -> pict
 
      hline        ; w h -> pict
      dash-hline   ; w h seg-length -> pict ; default seg-length is 5

@@ -2,7 +2,7 @@
 ;; Provides `define-primitive' and `define-higher-order-primitive'
 ;; for use in teachpacks for Beginner, especially those that
 ;; define a primitive operator that consumes a procedure.
-;; See doc.txt for more information.
+;; See manual for more information.
 
 (module prim mzscheme
   (require (lib "error.ss" "lang")
@@ -31,17 +31,17 @@
                                             'stepper-prim-name
                                             (quote-syntax name))])
                   (syntax-case stx ()
-                    [(__ . ___)
+                    [(_ . body)
                      ;; HACK: we disable all checks if #%app is not beginner-app
                      (not (module-identifier=? #'beginner-app (datum->syntax-object stx '#%app)))
-                     (syntax/loc stx (tagged-impl . ___))]
-                    [__
+                     (syntax/loc stx (tagged-impl . body))]
+                    [_
                      ;; HACK: see above
                      (not (module-identifier=? #'beginner-app (datum->syntax-object stx '#%app)))
                      (syntax/loc stx tagged-impl)]
                     [(id . args)
-                     (syntax/loc stx (#%app tagged-impl . args))]
-                    [_else
+                     (syntax/loc stx (#%plain-app tagged-impl . args))]
+                    [_
                      (raise-syntax-error
                       #f
                       (string-append
@@ -97,29 +97,29 @@
                                                     'stepper-prim-name
                                                     (quote-syntax name))])
                           (syntax-case s ()
-                            [(__ . ___)
+                            [(_ . body)
                              ;; HACK: see above
                              (not (module-identifier=? #'beginner-app (datum->syntax-object s '#%app)))
-                             (syntax/loc s (tagged-impl . ___))]
-                            [__
+                             (syntax/loc s (tagged-impl . body))]
+                            [_
                              ;; HACK: see above
                              (not (module-identifier=? #'beginner-app (datum->syntax-object s '#%app)))
                              (syntax/loc s tagged-impl)]
-                            [(__ new-arg ...)
+                            [(_ new-arg ...)
                              (begin
                                checks ...
                                ;; s is a well-formed use of the primitive;
                                ;; generate the primitive implementation
                                (syntax/loc s (tagged-impl wrapped-arg ...))
                                )]
-                            [(__ . rest)
+                            [(_ . rest)
                              (raise-syntax-error
                               #f
                               (format
                                "primitive operator requires ~a arguments"
                                num-arguments)
                               s)]
-                            [_else
+                            [_
                              (raise-syntax-error
                               #f
                               (string-append

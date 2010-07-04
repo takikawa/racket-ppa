@@ -2,7 +2,7 @@
   (require "counter.ss"
            "board.ss"
            "utils.ss"
-           (lib "unitsig.ss"))
+           mzlib/unitsig)
   
   (provide robot)
   
@@ -309,5 +309,3 @@
               (add1 (cdr move))))
       
       (go))))
-    
-    

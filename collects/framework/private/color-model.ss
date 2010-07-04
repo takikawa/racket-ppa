@@ -1,8 +1,8 @@
-(module color-model (lib "a-unit.ss")
-  (require (lib "class.ss")
+#lang scheme/unit
+  (require mzlib/class
            "sig.ss"
            (lib "mred-sig.ss" "mred")
-           (lib "list.ss"))
+           mzlib/list)
   
   (import)
   (export framework:color-model^)
@@ -265,4 +265,3 @@
   ;; (print-struct #t)
   ;; (xyz->luv (make-xyz 95.0 100.0 141.0))
   ;; (xyz->luv (make-xyz 60.0 80.0 20.0))
-  )

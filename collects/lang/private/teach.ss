@@ -34,16 +34,17 @@
 ;; error.
 
 (module teach mzscheme
-  (require (lib "etc.ss")
-	   (lib "list.ss")
-	   (lib "math.ss")
+  (require mzlib/etc
+	   mzlib/list
+	   mzlib/math
            "set-result.ss")
   (require-for-syntax "teachhelp.ss"
-		      (lib "kerncase.ss" "syntax")
-		      (lib "stx.ss" "syntax")
-		      (lib "struct.ss" "syntax")
-		      (lib "context.ss" "syntax")
-		      (lib "include.ss")
+                      "teach-shared.ss"
+		      syntax/kerncase
+		      syntax/stx
+		      syntax/struct
+		      syntax/context
+		      mzlib/include
                       (lib "shared.ss" "stepper" "private"))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -142,18 +143,21 @@
 			      
 			      intermediate-define
 			      intermediate-define-struct
+                              intermediate-pre-lambda
 			      intermediate-local
 			      intermediate-letrec
 			      intermediate-let
 			      intermediate-let*
 			      intermediate-recur
-			      intermediate-lambda
 			      intermediate-app
 			      intermediate-quote
 			      intermediate-quasiquote
 			      intermediate-unquote
 			      intermediate-unquote-splicing
 			      intermediate-time
+
+                              intermediate-lambda-define
+			      intermediate-lambda
 
 			      advanced-define
 			      advanced-lambda
@@ -192,7 +196,7 @@
          (make-exn:fail:syntax
           (exn-message exn)
           (exn-continuation-marks exn)
-          (apply list-immutable details)))))
+          details))))
     
     (define (binding-in-this-module? b)
       (and (list? b)
@@ -407,7 +411,7 @@
     ;; define (beginner)
     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-    (define (define/proc first-order? assign? stx)
+    (define (define/proc first-order? assign? stx lambda-stx)
 
       (define (wrap-func-definition name argc k)
 	(wrap-func-definitions first-order? 
@@ -439,7 +443,8 @@
 	 (identifier/non-kw? (syntax name))
 	 (let ([lam (syntax expr)])
 	   (check-defined-lambda lam)
-	   (syntax-case (syntax expr) (beginner-lambda)
+	   (syntax-case* (syntax expr) (beginner-lambda) (lambda (a b)
+                                                           (module-identifier=? a lambda-stx))
 	     ;; Well-formed lambda def:
 	     [(beginner-lambda arg-seq lexpr ...)
               (begin
@@ -572,10 +577,14 @@
 	 (bad-use-error 'define stx)]))
 
     (define (beginner-define/proc stx)
-      (define/proc #t #f stx))
+      (define/proc #t #f stx #'beginner-lambda))
 
     (define (intermediate-define/proc stx)
-      (define/proc #f #f stx))
+      (define/proc #f #f stx #'intermediate-pre-lambda))
+
+    (define (intermediate-lambda-define/proc stx)
+      ;; no special treatment of intermediate-lambda:
+      (define/proc #f #f stx #'beginner-lambda))
 
     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
     ;; lambda (beginner; only works with define)
@@ -592,56 +601,64 @@
 	[_else
 	 (bad-use-error 'lambda stx)]))
 
+    (define (intermediate-pre-lambda/proc stx)
+      (beginner-lambda/proc stx))
 
-    (define (check-defined-lambda lam)
-      (syntax-case lam (beginner-lambda)
-	[(beginner-lambda arg-seq lexpr ...)
-	 (syntax-case (syntax arg-seq) () [(arg ...) #t][_else #f])
-	 (let ([args (syntax->list (syntax arg-seq))])
-	   (for-each (lambda (arg)
-		       (unless (identifier/non-kw? arg)
-			 (teach-syntax-error
-			  'lambda
-			  lam
-			  arg
-			  "expected a name for a function argument, but found ~a"
-			  (something-else/kw arg))))
-		     args)
-	   (when (null? args)
-	     (teach-syntax-error
-	      'lambda
-	      lam
-	      (syntax arg-seq)
-	      "expected at least one argument name in the sequence after `lambda', but found none"))
-	   (let ([dup (check-duplicate-identifier args)])
-	     (when dup
-	       (teach-syntax-error
-		'lambda
-		lam
-		dup
-		"found an argument name that was used more than once: ~a"
-		(syntax-e dup))))
-	   (check-single-result-expr (syntax->list (syntax (lexpr ...)))
-				     #f
-				     lam
-				     args)
-	   'ok)]
-	;; Bad lambda because bad args:
-	[(beginner-lambda args . _)
-	 (teach-syntax-error
-	  'lambda
-	  lam
-	  (syntax args)
-	  "expected a sequence of function arguments after `lambda', but found ~a"
-	  (something-else (syntax args)))]
-	;; Bad lambda, no args:
-	[(beginner-lambda)
-	 (teach-syntax-error
-	  'lambda
-	  lam
-	  (syntax args)
-	  "expected a sequence of function arguments after `lambda', but nothing's there")]
-	[_else 'ok]))
+    (define (check-defined-lambda rhs)
+      (syntax-case rhs ()
+        [(lam . _)
+         (and (identifier? #'lam)
+              (or (module-identifier=? #'lam #'beginner-lambda)
+                  (module-identifier=? #'lam #'intermediate-pre-lambda)))
+         (syntax-case rhs ()
+           [(lam arg-seq lexpr ...)
+            (syntax-case (syntax arg-seq) () [(arg ...) #t][_else #f])
+            (let ([args (syntax->list (syntax arg-seq))])
+              (for-each (lambda (arg)
+                          (unless (identifier/non-kw? arg)
+                            (teach-syntax-error
+                             'lambda
+                             rhs
+                             arg
+                             "expected a name for a function argument, but found ~a"
+                             (something-else/kw arg))))
+                        args)
+              (when (null? args)
+                (teach-syntax-error
+                 'lambda
+                 rhs
+                 (syntax arg-seq)
+                 "expected at least one argument name in the sequence after `lambda', but found none"))
+              (let ([dup (check-duplicate-identifier args)])
+                (when dup
+                  (teach-syntax-error
+                   'lambda
+                   rhs
+                   dup
+                   "found an argument name that was used more than once: ~a"
+                   (syntax-e dup))))
+              (check-single-result-expr (syntax->list (syntax (lexpr ...)))
+                                        #f
+                                        rhs
+                                        args)
+              'ok)]
+           ;; Bad lambda because bad args:
+           [(lam args . _)
+            (teach-syntax-error
+             'lambda
+             rhs
+             (syntax args)
+             "expected a sequence of function arguments after `lambda', but found ~a"
+             (something-else (syntax args)))]
+           ;; Bad lambda, no args:
+           [(lam)
+            (teach-syntax-error
+             'lambda
+             rhs
+             (syntax args)
+             "expected a sequence of function arguments after `lambda', but nothing's there")]
+           [_else 'ok])]
+        [_else 'ok]))
 
     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
     ;; define-struct (beginner)
@@ -1269,7 +1286,7 @@
 			     (local-expand
 			      d
 			      int-def-ctx
-			      (kernel-form-identifier-list (quote-syntax here))))
+			      (kernel-form-identifier-list)))
 			   defns)]
 		     [flattened-defns
 		      (let loop ([l partly-expanded-defns][origs defns])
@@ -1506,20 +1523,20 @@
 	       'comes-from-let*))]
 	   [_else (bad-let-form 'let* stx stx)]))))
 
-    ;; Helper function: allows `beginner-lambda' instead
+    ;; Helper function: allows `intermediate-pre-lambda' instead
     ;; of rejecting it:
     (define (allow-local-lambda stx)
-      (syntax-case stx (beginner-lambda)
-	[(beginner-lambda . rest)
+      (syntax-case stx (intermediate-pre-lambda)
+	[(intermediate-pre-lambda . rest)
 	 (begin
 	   (check-defined-lambda stx)
 	   ;; pattern-match again to pull out the formals:
 	   (syntax-case stx ()
 	     [(_ formals . rest)
 	      (quasisyntax/loc stx (lambda formals #,(stepper-syntax-property
-                                                    #`make-lambda-generative
-                                                    'stepper-skip-completely
-                                                    #t) 
+                                                      #`make-lambda-generative
+                                                      'stepper-skip-completely
+                                                      #t)
                                      . rest))]))]
 	[_else stx]))
 
@@ -1878,7 +1895,7 @@
 	 ;; new syntax object that is an `intermediate-define' form;
 	 ;; that's important for syntax errors, so that they
 	 ;; report `advanced-define' as the source.
-	 (define/proc #f #t stx)]
+	 (define/proc #f #t stx #'beginner-lambda)]
 	[_else
 	 (bad-use-error 'define stx)]))
 
@@ -2353,4 +2370,4 @@
 	     [_else (bad-use-error 'shared stx)])
 
 	   ;; The main implementation
-	   (include (build-path up up "mzlib" "private" "shared-body.ss"))))))))
+           (shared/proc stx make-check-cdr #'undefined)))))))

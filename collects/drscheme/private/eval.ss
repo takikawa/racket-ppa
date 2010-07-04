@@ -1,15 +1,18 @@
 
 (module eval mzscheme
-  (require (lib "mred.ss" "mred")
-           (lib "unit.ss")
-           (lib "port.ss")
-           (lib "class.ss")
-           (lib "toplevel.ss" "syntax")
-           (lib "framework.ss" "framework")
+  (require mred
+           mzlib/unit
+           mzlib/port
+           mzlib/class
+           syntax/toplevel
+           framework
            "drsig.ss")
   
   ;; to ensure this guy is loaded (and the snipclass installed) in the drscheme namespace & eventspace
-  (require (lib "cache-image-snip.ss" "mrlib"))
+  ;; these things are for effect only!
+  (require (lib "cache-image-snip.ss" "mrlib")
+           #;
+           (prefix foo htdp/matrix))
   
   (define op (current-output-port))
   (define (oprintf . args) (apply fprintf op args))
@@ -19,7 +22,8 @@
     (import [prefix drscheme:language-configuration: drscheme:language-configuration/internal^]
             [prefix drscheme:rep: drscheme:rep^]
             [prefix drscheme:init: drscheme:init^]
-            [prefix drscheme:language: drscheme:language^])
+            [prefix drscheme:language: drscheme:language^]
+            [prefix drscheme:unit: drscheme:unit^])
     (export drscheme:eval^)
     
     (define (traverse-program/multiple language-settings
@@ -42,7 +46,8 @@
                                    (let* ([text (drscheme:language:text/pos-text input)]
                                           [start (drscheme:language:text/pos-start input)]
                                           [end (drscheme:language:text/pos-end input)]
-                                          [text-port (open-input-text-editor text start end)])
+                                          [text-port (open-input-text-editor text start end values 
+                                                                             (send text get-port-name))])
                                      (port-count-lines! text-port)
                                      (let* ([line (send text position-paragraph start)]
                                             [column (- start (send text paragraph-start-position line))]
@@ -176,10 +181,11 @@
     ;; these module specs are copied over to each new user's namespace 
     (define to-be-copied-module-specs
       (list 'mzscheme
-            '(lib "foreign.ss")
-            '(lib "mred.ss" "mred")
-            '(lib "cache-image-snip.ss" "mrlib")
-            '(lib "pconvert-prop.ss")))
+            '(lib "mzlib/foreign.ss")
+            '(lib "mred/mred.ss")
+            '(lib "mrlib/cache-image-snip.ss")
+	    '(lib "mrlib/matrix-snip.ss")
+            '(lib "mzlib/pconvert-prop.ss")))
     
     ;; ensure that they are all here.
     (for-each (λ (x) (dynamic-require x #f)) to-be-copied-module-specs)

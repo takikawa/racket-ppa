@@ -1,5 +1,8 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss"
+          (for-label framework/preferences
+                     scheme/runtime-path
+                     setup/dirs))
 
 @title{Filesystem}
 
@@ -17,7 +20,7 @@ by @scheme[kind], which must be one of the following:
  directory.
 
  Under Unix and Mac OS X, this directory is determined by expanding
- the path @file{~}, which is expanded by first checking for a
+ the path @filepath{~}, which is expanded by first checking for a
  @indexed-envvar{HOME} environment variable. If none is defined, the
  @indexed-envvar{USER} and @indexed-envvar{LOGNAME} environment
  variables are consulted (in that order) to find a user name, and then
@@ -36,25 +39,29 @@ by @scheme[kind], which must be one of the following:
 
  @item{@indexed-scheme['pref-dir] --- the standard directory for
  storing the current user's preferences. Under Unix, the directory is
- @file{.plt-scheme} in the user's home directory.  Under Windows, it
- is @file{PLT Scheme} in the user's application-data folder as
+ @filepath{.plt-scheme} in the user's home directory.  Under Windows, it
+ is @filepath{PLT Scheme} in the user's application-data folder as
  specified by the Windows registry; the application-data folder is
- usually @file{Application Data} in the user's profile
- directory. Under Mac OS X, it is @file{Library/Preferences} in the
+ usually @filepath{Application Data} in the user's profile
+ directory. Under Mac OS X, it is @filepath{Library/Preferences} in the
  user's home directory. This directory might not exist.}
 
  @item{@indexed-scheme['pref-file] --- a file that contains a
  symbol-keyed association list of preference values. The file's
  directory path always matches the result returned for
- @scheme['pref-dir]. The file name is @file{plt-prefs.ss} under Unix
- and Windows, and it is @file{org.plt-scheme.prefs.ss} under Mac OS
+ @scheme['pref-dir]. The file name is @filepath{plt-prefs.ss} under Unix
+ and Windows, and it is @filepath{org.plt-scheme.prefs.ss} under Mac OS
  X. The file's directory might not exist. See also
  @scheme[get-preference].}
 
  @item{@indexed-scheme['temp-dir] --- the standard directory for
  storing temporary files. Under @|AllUnix|, this is the directory
  specified by the @indexed-envvar{TMPDIR} environment variable, if it
- is defined.}
+ is defined, otherwise it is the first path that exists among
+ @filepath{/var/tmp}, @filepath{/usr/tmp}, and @filepath{/tmp}. Under
+ Windows, the result is the directory specified by the
+ @indexed-envvar{TMP} or @indexed-envvar{TEMP} environment variable,
+ if it is defined, otherwise it is the current directory.}
 
  @item{@indexed-scheme['init-dir] --- the directory containing the
  initialization file used by stand-alone @exec{mzscheme} executable.
@@ -75,21 +82,23 @@ by @scheme[kind], which must be one of the following:
 
  @item{@indexed-scheme['addon-dir] --- a directory for installing PLT Scheme
  extensions. It's the same as @scheme['pref-dir], except under Mac OS
- X, where it is @file{Library/PLT Scheme} in the user's home
+ X, where it is @filepath{Library/PLT Scheme} in the user's home
  directory. This directory might not exist.}
 
- @item{@indexed-scheme['doc-dir] --- the standard directory for storing the
- current user's documents. It's the same as @scheme['home-dir] under
- @|AllUnix|. Under Windows, it is the user's documents folder as
- specified by the Windows registry; the documents folder is usually
- @file{My Documents} in the user's home directory.}
+ @item{@indexed-scheme['doc-dir] --- the standard directory for
+ storing the current user's documents. Under Unix, it's the same as
+ @scheme['home-dir]. Under Mac OS X, it's the
+ @filepath{Documents} directory in the user's home directory. Under
+ Windows, it is the user's documents folder as specified by the
+ Windows registry; the documents folder is usually @filepath{My Documents}
+ in the user's home directory.}
 
  @item{@indexed-scheme['desk-dir] --- the directory for the current user's
  desktop. Under Unix, it's the same as @scheme['home-dir]. Under
  Windows, it is the user's desktop folder as specified by the Windows
- registry; the documents folder is usually @file{Desktop} in the
+ registry; the documents folder is usually @filepath{Desktop} in the
  user's home directory. Under Mac OS X, it is the desktop directory,
- which is specifically @file{~/Desktop} under Mac OS X.}
+ which is specifically @filepath{~/Desktop} under Mac OS X.}
 
  @item{@indexed-scheme['sys-dir] --- the directory containing the
  operating system for Windows. Under @|AllUnix|, the
@@ -114,10 +123,13 @@ by @scheme[kind], which must be one of the following:
 
  @item{@indexed-scheme['collects-dir] --- a path to the main
  collection of libraries (see @secref["collects"]). If this path is
- relative, it's relative to the directory of @scheme[(find-system-path
- 'exec-file)].  This path is normally embedded in the @exec{mzscheme}
- executable, but it can be overridden by the @DFlag{collects} or
- @Flag{X} command-line flag.}
+ relative, then it is relative to the executable as reported by
+ @scheme[(find-system-path 'exec-file)]---though the latter could be a
+ soft-link or relative to the user's executable search path, so that
+ the two results should be combined with
+ @scheme[find-executable-path].  The @scheme['collects-dir] path is
+ normally embedded in the @exec{mzscheme} executable, but it can be
+ overridden by the @DFlag{collects} or @Flag{X} command-line flag.}
 
  @item{@indexed-scheme['orig-dir] --- the current directory at
  start-up, which can be useful in converting a relative-path result
@@ -310,12 +322,12 @@ A parameter that determines the current directory for resolving
 relative paths.
 
 When the parameter procedure is called to set the current directory,
-the path argument is expanded using @scheme[expand-path], simplified
-using @scheme[simplify-path], and then converted to a directory path
-with @scheme[path->directory-path]; expansion and simplification raise
-an exception if the path is ill-formed. Thus, the current value of
-@scheme[current-directory] is always an expanded, simplified,
-complete, directory path.
+the path argument is @tech{cleanse}d using @scheme[cleanse-path],
+simplified using @scheme[simplify-path], and then converted to a
+directory path with @scheme[path->directory-path]; cleansing and
+simplification raise an exception if the path is ill-formed. Thus, the
+current value of @scheme[current-directory] is always a cleansed,
+simplified, complete, directory path.
 
 The path is not checked for existence when the parameter is set.}
 
@@ -360,3 +372,407 @@ start with @litchar["\\\\?\\REL\\\\"].}
 
 Returns a list of all current root directories. Obtaining this list
 can be particularly slow under Windows.}
+
+@;------------------------------------------------------------------------
+@section[#:tag "runtime-path"]{Declaring Paths Needed at Run Time}
+
+@note-lib-only[scheme/runtime-path]
+
+The @schememodname[scheme/runtime-path] library provides forms for
+accessing files and directories at run time using a path that are
+usually relative to an enclosing source file. Unlike using
+@scheme[collection-path], @scheme[define-runtime-path] exposes each
+run-time path to tools like the executable and distribution creators,
+so that files and directories needed at run time are carried along in
+a distribution.
+
+In addition to the bindings described below,
+@schememodname[scheme/runtime-path] provides @scheme[#%datum] in
+@tech{phase level} 1, since string constants are often used as
+compile-time expression with @scheme[define-runtime-path].
+
+@defform[(define-runtime-path id expr)]{
+
+Uses @scheme[expr] as both a compile-time (i.e., @tech{phase} 1)
+expression and a run-time (i.e., @tech{phase} 0) expression. In either
+context, @scheme[expr] should produce a path, a string that represents
+a path, a list of the form @scheme[(list 'lib _str ...+)], or a list
+of the form @scheme[(list 'so _str)].
+
+For run time, @scheme[id] is bound to a path that is based on the
+result of @scheme[expr]. The path is normally computed by taking a
+relative path result from @scheme[expr] and adding it to a path for
+the enclosing file (which is computed as described below). However,
+tools like the executable creator can also arrange (by colluding with
+@schememodname[scheme/runtime-path]) to have a different base path
+substituted in a generated executable. If @scheme[expr] produces an
+absolute path, it is normally returned directly, but again may be
+replaced by an executable creator. In all cases, the executable
+creator preserves the relative locations of all paths.  When
+@scheme[expr] produces a relative or absolute path, then the path
+bound to @scheme[id] is always an absolute path.
+
+If @scheme[expr] produces a list of the form @scheme[(list 'lib _str
+...+)], the value bound to @scheme[id] is an absolute path. The path
+refers to a collection-based file similar to using the value as a
+@tech{module path}.
+
+If @scheme[expr] produces a list of the form @scheme[(list 'so _str)],
+the value bound to @scheme[id] can be either @scheme[_str] or an
+absolute path; it is an absolute path when adding the
+platform-specific shared-library extension --- as produced by
+@scheme[(system-type 'so-suffix)] --- and then searching in the
+PLT-specific shared-object library directories (as determined by
+@scheme[find-dll-dirs]) locates the path. In this way, shared-object
+libraries that are installed specifically for PLT Scheme get carried
+along in distributions.
+
+For compile-time, the @scheme[expr] result is used by an executable
+creator---but not the result when the containing module is
+compiled. Instead, @scheme[expr] is preserved in the module as a
+compile-time expression (in the sense of
+@scheme[begin-for-syntax]). Later, at the time that an executable is
+created, the compile-time portion of the module is executed (again),
+and the result of @scheme[expr] is the file to be included with the
+executable. The reason for the extra compile-time execution is that
+the result of @scheme[expr] might be platform-dependent, so the result
+should not be stored in the (platform-independent) bytecode form of
+the module; the platform at executable-creation time, however, is the
+same as at run time for the executable. Note that @scheme[expr] is
+still evaluated at run-time; consequently, avoid procedures like
+@scheme[collection-path], which depends on the source installation,
+and instead use relative paths and forms like @scheme[(list 'lib _str
+...+)].
+
+If a path is needed only on some platforms and not on others, use
+@scheme[define-runtime-path-list] with an @scheme[expr] that produces an
+empty list on platforms where the path is not needed.
+
+The enclosing path for a @scheme[define-runtime-path] is determined as
+follows from the @scheme[define-runtime-path] syntactic form:
+
+@itemize{
+
+ @item{If the form has a source module according to
+       @scheme[syntax-source-module], then the source location is
+       determined by preserving the original expression as a syntax
+       object, extracting its source module path at run time (again
+       using @scheme[syntax-source-module]), and then resolving the
+       resulting module path index.}
+
+ @item{If the expression has no source module, the
+       @scheme[syntax-source] location associated with the form is
+       used, if is a string or path.}
+
+ @item{If no source module is available, and @scheme[syntax-source]
+       produces no path, then @scheme[current-load-relative-directory]
+       is used if it is not @scheme[#f]. Finally,
+       @scheme[current-directory] is used if all else fails.}
+
+}
+
+In the latter two cases, the path is normally preserved in
+(platform-specific) byte form. If it is is within the result of
+@scheme[find-collects-dir], however, it the path is recorded relative
+to @scheme[(find-collects-dir)], and it is reconstructed using
+@scheme[(find-collects-dir)] at run time.
+
+Examples:
+
+@schemeblock[
+(code:comment #, @t{Access a file @filepath{data.txt} at run-time that is originally})
+(code:comment #, @t{located in the same directory as the module source file:})
+(define-runtime-path data-file "data.txt")
+(define (read-data) 
+  (with-input-from-file data-file 
+    (lambda () 
+      (read-bytes (file-size data-file)))))
+
+(code:comment #, @t{Load a platform-specific shared object (using @scheme[ffi-lib])})
+(code:comment #, @t{that is located in a platform-specific sub-directory of the})
+(code:comment #, @t{module's source directory:})
+(define-runtime-path libfit-path
+  (build-path "compiled" "native" (system-library-subpath #f)
+              (path-replace-suffix "libfit" 
+                                   (system-type 'so-suffix))))
+(define libfit (ffi-lib libfit-path))
+
+(code:comment #, @t{Load a platform-specific shared object that might be installed})
+(code:comment #, @t{as part of the operating system, or might be installed})
+(code:comment #, @t{specifically for PLT Scheme:})
+(define-runtime-path libssl-so
+  (case (system-type)
+    [(windows) '(so "ssleay32")]
+    [else '(so "libssl")]))
+(define libssl (ffi-lib libssl-so))
+]}
+
+
+@defform[(define-runtime-paths (id ...) expr)]{
+
+Like @scheme[define-runtime-path], but declares and binds multiple
+paths at once. The @scheme[expr] should produce as many values as
+@scheme[id]s.}
+
+
+@defform[(define-runtime-path-list id expr)]{
+
+Like @scheme[define-runtime-path], but @scheme[expr] should produce a
+list of paths.}
+
+
+@defform[(runtime-paths module-path)]{
+
+This form is mainly for use by tools such as executable builders. It
+expands to a quoted list containing the run-time paths declared by
+@scheme[module-path], returning the compile-time results of the
+declaration @scheme[expr]s, except that paths are converted to byte
+strings. The enclosing module must require (directly or indirectly)
+the module specified by @scheme[module-path], which is an unquoted
+module path.}
+
+@;------------------------------------------------------------------------
+@section[#:tag "file-lib"]{More File and Directory Utilities}
+
+@note-lib[scheme/file]
+
+@defproc[(copy-directory/files [src path-string?][dest path-string?]) 
+         void?]{
+
+Copies the file or directory @scheme[src] to @scheme[dest], raising
+@scheme[exn:fail:filesystem] if the file or directory cannot be
+copied, possibly because @scheme[dest] exists already. If @scheme[src]
+is a directory, the copy applies recursively to the directory's
+content. If a source is a link, the target of the link is copied
+rather than the link itself.}
+
+@defproc[(delete-directory/files [path path-string?])
+         void?]{
+
+Deletes the file or directory specified by @scheme[path], raising
+@scheme[exn:fail:filesystem] if the file or directory cannot be
+deleted. If @scheme[path] is a directory, then
+@scheme[delete-directory/files] is first applied to each file and
+directory in @scheme[path] before the directory is deleted.}
+
+@defproc[(find-files [predicate (path? . -> . any/c)]
+                     [start-path (or/c path-string? false/c) #f])
+         (listof path?)]{
+
+Traverses the filesystem starting at @scheme[start-path] and creates a
+list of all files and directories for which @scheme[predicate] returns
+true. If @scheme[start-path] is @scheme[#f], then the traversal starts
+from @scheme[(current-directory)]. In the resulting list, each
+directory precedes its content.
+
+The @scheme[predicate] procedure is called with a single argument for
+each file or directory. If @scheme[start-path] is @scheme[#f], the
+argument is a pathname string that is relative to the current
+directory. Otherwise, it is a path building on
+@scheme[start-path]. Consequently, supplying
+@scheme[(current-directory)] for @scheme[start-path] is different from
+supplying @scheme[#f], because @scheme[predicate] receives complete
+paths in the former case and relative paths in the latter.  Another
+difference is that @scheme[predicate] is not called for the current
+directory when @scheme[start-path] is @scheme[#f].
+
+The @scheme[find-files] traversal follows soft links. To avoid
+following links, use the more general @scheme[fold-files] procedure.
+
+If @scheme[start-path] does not refer to an existing file or
+directory, then @scheme[predicate] will be called exactly once with
+@scheme[start-path] as the argument.}
+
+@defproc[(pathlist-closure [path-list (listof path-string?)])
+         (listof path?)]{
+
+Given a list of paths, either absolute or relative to the current
+directory, returns a list such that
+
+@itemize{
+
+ @item{if a nested path is given, all of its ancestors are also
+       included in the result (but the same ancestor is not added
+       twice);}
+
+ @item{if a path refers to directory, all of its descendants are also
+       included in the result;}
+
+ @item{ancestor directories appear before their descendants in the
+       result list.}
+
+}}
+
+
+@defproc[(fold-files [proc (and/c (path? (one-of/c 'file 'dir 'link) any/c 
+                                   . -> . any/c)
+                                  (or/c procedure?
+                                        ((path? (one-of/c 'dir) any/c) 
+                                         . -> . (values any/c any/c))))]
+                     [init-val any/c]
+                     [start-path (or/c path-string? false/c) #f]
+                     [follow-links? any/c #t])
+         any]{
+
+Traverses the filesystem starting at @scheme[start-path], calling
+@scheme[proc] on each discovered file, directory, and link. If
+@scheme[start-path] is @scheme[#f], then the traversal starts from
+@scheme[(current-directory)].
+
+The @scheme[proc] procedure is called with three arguments for each
+file, directory, or link:
+
+@itemize{
+
+ @item{If @scheme[start-path] is @scheme[#f], the first argument is a
+ pathname string that is relative to the current directory. Otherwise,
+ the first argument is a pathname that starts with
+ @scheme[start-path]. Consequently, supplying
+ @scheme[(current-directory)] for @scheme[start-path] is different
+ from supplying @scheme[#f], because @scheme[proc] receives complete
+ paths in the former case and relative paths in the latter. Another
+ difference is that @scheme[proc] is not called for the current
+ directory when @scheme[start-path] is @scheme[#f].}
+
+ @item{The second argument is a symbol, either @scheme['file],
+ @scheme['dir], or @scheme['link]. The second argument can be
+ @scheme['link] when @scheme[follow-links?] is @scheme[#f],
+ in which case the filesystem traversal does not follow links. If
+ @scheme[follow-links?] is @scheme[#t], then @scheme[proc]
+ will only get a @scheme['link] as a second argument when it
+ encounters a dangling symbolic link (one that does not resolve to an
+ existing file or directory).}
+
+ @item{The third argument is the accumulated result. For the first
+ call to @scheme[proc], the third argument is @scheme[init-val]. For the
+ second call to @scheme[proc] (if any), the third argument is the result
+ from the first call, and so on. The result of the last call to
+ @scheme[proc] is the result of @scheme[fold-files].}
+
+}
+
+The @scheme[proc] argument is used in an analogous way to the
+procedure argument of @scheme[foldl], where its result is used as the
+new accumulated result.  There is an exception for the case of a
+directory (when the second argument is @scheme['dir]): in this case
+the procedure may return two values, the second indicating whether the
+recursive scan should include the given directory or not.  If it
+returns a single value, the directory is scanned.
+
+An error is signaled if the @scheme[start-path] is provided but no
+such path exists, or if paths disappear during the scan.}
+
+
+@defproc[(make-directory* [path path-string?]) void?]{
+
+Creates directory specified by @scheme[path], creating intermediate
+directories as necessary.}
+
+
+@defproc[(make-temporary-file [template string? "mztmp~a"]
+                              [copy-from-filename (or/c path-string? false/c (one-of/c 'directory)) #f]
+                              [directory (or/c path-string? false/c) #f])
+         path?]{
+
+Creates a new temporary file and returns a pathname string for the
+file.  Instead of merely generating a fresh file name, the file is
+actually created; this prevents other threads or processes from
+picking the same temporary name.
+
+The @scheme[template] argument must be a format string suitable
+for use with @scheme[format] and one additional string argument (where
+the string contains only digits). If the resulting string is a
+relative path, it is combined with the result of
+@scheme[(find-system-path 'temp-dir)], unless @scheme[directory] is
+provided and non-@scheme[#f], in which case the
+file name generated from @scheme[template] is combined with
+@scheme[directory] to obtain a full path.
+
+If @scheme[copy-from-filename] is provided as path, the temporary file
+is created as a copy of the named file (using @scheme[copy-file]). If
+@scheme[copy-from-filename] is @scheme[#f], the temporary file is
+created as empty. If @scheme[copy-from-filename] is
+@scheme['directory], then the temporary ``file'' is created as a
+directory.
+
+When a temporary file is created, it is not opened for reading or
+writing when the pathname is returned. The client program calling
+@scheme[make-temporary-file] is expected to open the file with the
+desired access and flags (probably using the @scheme['truncate] flag;
+see @scheme[open-output-file]) and to delete it when it is no longer
+needed.}
+
+@defproc[(get-preference [name symbol?]
+                         [failure-thunk (-> any) (lambda () #f)]
+                         [flush-mode any/c 'timestamp]
+                         [filename (or/c string-path? false/c) #f])
+         any]{
+
+Extracts a preference value from the file designated by
+@scheme[(find-system-path 'pref-file)], or by @scheme[filename] if it
+is provided and is not @scheme[#f].  In the former case, if the
+preference file doesn't exist, @scheme[get-preferences] attempts to
+read a @filepath{plt-prefs.ss} file in the @filepath{defaults}
+collection, instead. If neither file exists, the preference set is
+empty.
+
+The preference file should contain a symbol-keyed association list
+(written to the file with the default parameter settings).  Keys
+starting with @scheme[mzscheme:], @scheme[mred:], and @scheme[plt:] in
+any letter case are reserved for use by PLT.
+
+The result of @scheme[get-preference] is the value associated with
+@scheme[name] if it exists in the association list, or the result of
+calling @scheme[failure-thunk] otherwise.
+
+Preference settings are cached (weakly) across calls to
+@scheme[get-preference], using @scheme[(path->complete-path filename)]
+as a cache key. If @scheme[flush-mode] is provided as @scheme[#f], the
+cache is used instead of the re-consulting the preferences file. If
+@scheme[flush-mode] is provided as @scheme['timestamp] (the default),
+then the cache is used only if the file has a timestamp that is the
+same as the last time the file was read. Otherwise, the file is
+re-consulted.
+
+See also @scheme[put-preferences]. For a more elaborate preference
+system, see @scheme[preferences:get].}
+
+
+
+@defproc[(put-preferences [names (listof symbol?)]
+                          [vals list?]
+                          [locked-proc (path? . -> . any) (lambda (p) (error ....))]
+                          [filename (or/c false/c path-string?) #f])
+         void?]{
+
+Installs a set of preference values and writes all current values to
+the preference file designated by @scheme[(find-system-path
+'pref-file)], or @scheme[filename] if it is supplied and not
+@scheme[#f].
+
+The @scheme[names] argument supplies the preference names, and
+@scheme[vals] must have the same length as @scheme[names]. Each
+element of @scheme[vals] must be an instance of a built-in data type
+whose @scheme[write] output is @scheme[read]able (i.e., the
+@scheme[print-unreadable] parameter is set to @scheme[#f] while
+writing preferences).
+
+Current preference values are read from the preference file before
+updating, and an update ``lock'' is held starting before the file
+read, and lasting until after the preferences file is updated. The
+lock is implemented by the existence of a file in the same directory
+as the preference file. If the directory of the preferences file does
+not already exist, it is created.
+
+If the update lock is already held (i.e., the lock file exists), then
+@scheme[locked] is called with a single argument: the path of the lock
+file. The default @scheme[locked] reports an error; an alternative
+thunk might wait a while and try again, or give the user the choice to
+delete the lock file (in case a previous update attempt encountered
+disaster).
+
+If @scheme[filename] is @scheme[#f] or not supplied, and the
+preference file does not already exist, then values read from the
+@filepath{defaults} collection (if any) are written for preferences
+that are not mentioned in @scheme[names].}
+

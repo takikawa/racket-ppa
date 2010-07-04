@@ -1,7 +1,7 @@
-#reader(lib "docreader.ss" "scribble")
-@require["common.ss"]
+#lang scribble/doc
+@(require "common.ss")
 
-@define[lbnumnote @elem{List box items are indexed from @scheme[0].}]
+@(define lbnumnote @elem{List box items are indexed from @scheme[0].})
 
 
 @defclass/title[list-box% object% (list-control<%>)]{

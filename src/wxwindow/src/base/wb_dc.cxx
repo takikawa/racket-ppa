@@ -4,7 +4,7 @@
  * Author:      Julian Smart
  * Created:     1993
  * Updated:	August 1994
- * Copyright:   (c) 2004-2007 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2008 PLT Scheme Inc.
  * Copyright:   (c) 1993, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -170,6 +170,11 @@ void wxbDC::SetAlpha(double a)
 double wxbDC::GetAlpha()
 {
   return current_alpha;
+}
+
+int wxbDC::CacheFontMetricsKey()
+{
+  return 0;
 }
 
 wxbMemoryDC::wxbMemoryDC(void) { }

@@ -25,11 +25,14 @@ LIBS = @LIBS@
 
 DEF_COLLECTS_DIR = +D INITIAL_COLLECTS_DIRECTORY='"'"`cd $(srcdir)/../../../collects; pwd`"'"'
 
-XFORM_SETUP = ../mzscheme@CGC@ -rq $(srcdir)/xform.ss --setup
+XFORM_SETUP = ../mzscheme@CGC@ -cqu $(srcdir)/xform.ss --setup .
 XFORM_NOPRECOMP = $(XFORM_SETUP) --cpp "$(CPP) $(CPPFLAGS)" -o
 XSRCDIR = xsrc
 XFORM = env XFORM_USE_PRECOMP=$(XSRCDIR)/precomp.h $(XFORM_NOPRECOMP)
 SRCDIR = $(srcdir)/../src
+
+FOREIGN_USED_OBJ = foreign.@LTO@
+FOREIGN_NOT_USED_OBJ = 
 
 OBJS =  salloc.@LTO@ \
 	bignum.@LTO@ \
@@ -69,8 +72,11 @@ OBJS =  salloc.@LTO@ \
 	thread.@LTO@ \
 	type.@LTO@ \
 	vector.@LTO@ \
-	foreign.@LTO@ \
+	$(@FOREIGN_IF_USED@_OBJ) \
 	gc2.@LTO@
+
+FOREIGN_USED_C = $(XSRCDIR)/foreign.c
+FOREIGN_NOT_USED_C =
 
 XSRCS = $(XSRCDIR)/salloc.c \
 	$(XSRCDIR)/bignum.c \
@@ -110,10 +116,11 @@ XSRCS = $(XSRCDIR)/salloc.c \
 	$(XSRCDIR)/thread.c \
 	$(XSRCDIR)/type.c \
 	$(XSRCDIR)/vector.c \
-	$(XSRCDIR)/foreign.c \
+	$(@FOREIGN_IFUSED@_C) \
 	$(XSRCDIR)/main.c
 
 all: xsrc
+	$(MAKE) $(XSRCDIR)/precomp.h
 	$(MAKE) xobjects
 
 xsrcs: $(XSRCS)
@@ -123,12 +130,12 @@ xsrc:
 
 xobjects: $(OBJS) main.@LTO@
 
-XFORMDEP_NOPRECOMP = $(srcdir)/gc2.h $(srcdir)/xform.ss $(srcdir)/xform-mod.ss
-XFORMDEP = $(XFORMDEP_NOPRECOMP) $(XSRCDIR)/precomp.h
+XFORMDEP = $(srcdir)/gc2.h $(srcdir)/xform.ss $(srcdir)/xform-mod.ss \
+           $(srcdir)/precomp.c $(srcdir)/../src/schpriv.h $(srcdir)/../include/scheme.h \
+           $(srcdir)/../sconfig.h $(srcdir)/../uconfig.h $(srcdir)/../src/schemef.h \
+           $(srcdir)/../src/stypes.h 
 
-$(XSRCDIR)/precomp.h : $(XFORMDEP_NOPRECOMP) $(srcdir)/precomp.c $(srcdir)/../src/schpriv.h $(srcdir)/../include/scheme.h \
-                       $(srcdir)/../sconfig.h $(srcdir)/../uconfig.h $(srcdir)/../src/schvers.h $(srcdir)/../src/schemef.h \
-                       $(srcdir)/../src/stypes.h 
+$(XSRCDIR)/precomp.h : $(XFORMDEP)  $(srcdir)/../src/schvers.h
 	env XFORM_PRECOMP=yes $(XFORM_NOPRECOMP) $(XSRCDIR)/precomp.h $(srcdir)/precomp.c
 
 $(XSRCDIR)/salloc.c: ../src/salloc.@LTO@ $(XFORMDEP)
@@ -306,8 +313,13 @@ FOREIGN_OBJS = ../../foreign/gcc/libffi/src/*.@LTO@ ../../foreign/gcc/libffi/src
 FOREIGN_LIB = ../../foreign/gcc/libffi/libffi@FOREIGN_CONVENIENCE@.la
 FOREIGN_OBJSLIB = @FOREIGN_OBJSLIB@
 
-EXTRA_OBJS_T = ../src/gmp.@LTO@ @FOREIGN_LIB_IF_USED@
-EXTRA_OBJS_L = ../src/gmp.@LTO@ @FOREIGN_OBJSLIB_IF_USED@
+FOREIGN_USED_LIB = $(FOREIGN_OBJ) $(FOREIGN_LIB)
+FOREIGN_USED_OBJSLIB = $(FOREIGN_OBJSLIB)
+FOREIGN_NOT_USED_LIB = 
+FOREIGN_NOT_USED_OBJSLIB = 
+
+EXTRA_OBJS_T = ../src/gmp.@LTO@ $(@FOREIGN_IF_USED@_LIB)
+EXTRA_OBJS_L = ../src/gmp.@LTO@ $(@FOREIGN_IF_USED@_OBJSLIB)
 
 ../libmzscheme3m.@LIBSFX@: $(OBJS) $(EXTRA_OBJS_T)
 	$(AR) $(ARFLAGS) ../libmzscheme3m.@LIBSFX@ $(OBJS) $(EXTRA_OBJS_L)
@@ -323,12 +335,12 @@ MZFWMMM = PLT_MzScheme.framework/Versions/$(FWVERSION)_3m/PLT_MzScheme
 
 $(MZFWMMM): ../libmzscheme3m.@LIBSFX@
 	mkdir -p "PLT_MzScheme.framework/Versions/$(FWVERSION)_3m"
-	$(CC) -o $(MZFWMMM) -framework CoreFoundation -dynamiclib -all_load ../libmzscheme3m.@LIBSFX@ @LDFLAGS@ $(LIBS)
+	@MZLINKER@ -o $(MZFWMMM) -framework CoreFoundation -dynamiclib -all_load ../libmzscheme3m.@LIBSFX@ @LDFLAGS@ $(LIBS)
 	rm -f PLT_MzScheme.framework/PLT_MzScheme
 	ln -s Versions/$(FWVERSION)_3m/PLT_MzScheme PLT_MzScheme.framework/PLT_MzScheme	
 
 ../mzscheme@MMM@@OSX@: $(MZFWMMM) main.@LTO@
-	$(CC) -o ../mzscheme@MMM@ @PROFFLAGS@ main.@LTO@ -Wl,-headerpad_max_install_names -F. -framework PLT_MzScheme
+	@MZLINKER@ -o ../mzscheme@MMM@ @PROFFLAGS@ @LDFLAGS@ main.@LTO@ -Wl,-headerpad_max_install_names -F. -framework PLT_MzScheme
 	mkdir -p "../PLT_MzScheme.framework/Versions/$(FWVERSION)_3m"
 	cp "PLT_MzScheme.framework/Versions/$(FWVERSION)_3m/PLT_MzScheme" "../PLT_MzScheme.framework/Versions/$(FWVERSION)_3m/PLT_MzScheme"
 	/usr/bin/install_name_tool -change "PLT_MzScheme.framework/Versions/$(FWVERSION)_3m/PLT_MzScheme" "@executable_path/PLT_MzScheme.framework/Versions/$(FWVERSION)_3m/PLT_MzScheme" "../mzscheme@MMM@"

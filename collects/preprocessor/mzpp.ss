@@ -1,7 +1,7 @@
-(module mzpp mzscheme
+#lang scheme/base
 
-(require (lib "pp-utils.ss" "preprocessor"))
-(provide (all-from (lib "pp-utils.ss" "preprocessor")))
+(require preprocessor/pp-utils scheme/promise)
+(provide (all-from-out preprocessor/pp-utils))
 
 (provide beg-mark end-mark skip-to no-spaces? debug?)
 (define beg-mark   (make-parameter "<<"))
@@ -124,7 +124,7 @@
 
 (define (pp-repl)
   (let loop ()
-    (let ([x (read)])
+    (let ([x (read-syntax)])
       (unless (eof-object? x)
         (call-with-values (lambda () (eval x)) show)
         (loop)))))
@@ -170,8 +170,7 @@
 (provide preprocess)
 (define (preprocess . files)
   (read-case-sensitive #t)
-  (namespace-require '(lib "mzpp.ss" "preprocessor"))
+  (namespace-require 'scheme/base)
+  (namespace-require 'preprocessor/mzpp)
   (do-evals)
   (run files))
-
-)

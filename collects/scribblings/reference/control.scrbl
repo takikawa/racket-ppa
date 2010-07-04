@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
 @title[#:tag "control" #:style 'toc]{Control Flow}
 
@@ -7,6 +7,7 @@
 
 @include-section["values.scrbl"]
 @include-section["exns.scrbl"]
+@include-section["promise.scrbl"]
 @include-section["cont.scrbl"]
 @include-section["cont-marks.scrbl"]
 @include-section["breaks.scrbl"]

@@ -1,3 +1,3 @@
-(module info (lib "infotab.ss" "setup")
-  (define name "Config")
-  (define doc.txt "doc.txt"))
+#lang setup/infotab
+
+(define scribblings '(("config.scrbl" () (tool-library))))

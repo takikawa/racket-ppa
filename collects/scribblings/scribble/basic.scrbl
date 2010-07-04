@@ -1,70 +1,88 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require["utils.ss"]
-@require-for-syntax[mzscheme]
+#lang scribble/doc
+@(require scribble/manual
+          "utils.ss"
+          (for-syntax scheme/base)
+          (for-label setup/main-collects))
 
-@define-syntax[def-section-like
-               (syntax-rules ()
-                 [(_ id result/c x ...) (defproc (id [#:tag tag (or/c false/c string?) #f]
-                                                     [pre-content any/c] (... ...+))
-                                                 result/c
-                                                 x ...)])]
+@(define-syntax def-section-like
+   (syntax-rules ()
+     [(_ id result/c x ...)
+      (defproc (id [#:tag tag (or/c false/c string?) #f]
+                   [#:tag-prefix tag-prefix (or/c false/c string? module-path?) #f]
+                   [#:style style any/c #f]
+                   [pre-content any/c] (... ...+))
+        result/c
+        x ...)]))
 
-@define-syntax[def-elem-proc
-               (syntax-rules ()
-                 [(_ id x ...) (defproc (id [pre-content any/c] (... ...))
-                                        element?
-                                        x ...)])]
-@define-syntax[def-style-proc
-               (syntax-rules ()
-                 [(_ id) @def-elem-proc[id]{Like @scheme[elem], but with style @scheme['id]}])]
+@(define-syntax def-elem-proc
+   (syntax-rules ()
+     [(_ id x ...)
+      (defproc (id [pre-content any/c] (... ...))
+        element?
+        x ...)]))
+@(define-syntax def-style-proc
+   (syntax-rules ()
+     [(_ id)
+      @def-elem-proc[id]{Like @scheme[elem], but with style @scheme['id]}]))
 
 @title[#:tag "basic"]{Basic Document Forms}
 
-The @file{basic.ss} libraryprovides functions and forms that can be
-used from code written either in Scheme or with @elem["@"]
-expressions. For example, the @scheme[title] and @scheme[italic]
-functions might be called from Scheme as
+@defmodule[scribble/basic]{The @schememodname[scribble/basic] library
+provides functions and forms that can be used from code written either
+in Scheme or with @elem["@"] expressions.}
+
+For example, the @scheme[title] and @scheme[italic] functions might be
+called from Scheme as
 
 @schemeblock[
-(title #:tag "how-to" "How to Design " (italic "Great") " Programs")
+(title #:tag "how-to" 
+       "How to Design " (italic "Great") " Programs")
 ]
 
 or with an @elem["@"] expression as
 
-@verbatim[
-#<<EOS
+@verbatim[#:indent 2]|{
   @title[#:tag "how-to"]{How to Design @italic{Great} Programs}
-EOS
-]
+}|
 
 Although the procedures are mostly design to be used from @elem["@"]
 mode, they are easier to document in Scheme mode (partly because we
-have Scribble's @file{scheme.ss} and @file{manual.ss}).
+have @schememodname[scribble/manual]).
 
 @; ------------------------------------------------------------------------
 
 @section{Document Structure}
 
 @defproc[(title [#:tag tag (or/c false/c string?) #f]
+                [#:tag-prefix tag-prefix (or/c false/c string? module-path?) #f]
                 [#:style style any/c #f]
+                [#:version vers (or/c string? false/c) #f]
                 [pre-content any/c] ...+)
          title-decl?]{
 
 Generates a @scheme[title-decl] to be picked up by @scheme[decode] or
-@scheme[decode-part].  The @scheme[pre-content]s list is parsed with
-@scheme[decode-content] for the title content. If @scheme[tag] is
-@scheme[#f], a tag string is generated automatically from the
-content. The tag string is combined with the symbol @scheme['part] to
-form the full tag.
+@scheme[decode-part].  The @tech{decode}d @scheme[pre-content] (i.e.,
+parsed with @scheme[decode-content]) supplies the title content. If
+@scheme[tag] is @scheme[#f], a tag string is generated automatically
+from the content. The tag string is combined with the symbol
+@scheme['part] to form the full tag.
 
 A style of @scheme['toc] causes sub-sections to be generated as
 separate pages in multi-page HTML output. A style of @scheme['index]
 indicates an index section whose body is rendered in two columns for
 Latex output.
 
-The section title is automatically indexed. For the index key, a
-leading ``A'', ``An'', or ``The'' (followed by whitespace) is
+The @scheme[tag-prefix] argument is propagated to the generated
+structure (see @secref["tags"]). If @scheme[tag-prefix] is a module
+path, it is converted to a string using
+@scheme[module-path-prefix->string].
+
+The @scheme[vers] argument is propagated to the @scheme[title-decl]
+structure.
+
+The section title is automatically indexed by
+@scheme[decode-part]. For the index key, leading whitespace and a
+leading ``A'', ``An'', or ``The'' (followed by more whitespace) is
 removed.}
 
 
@@ -92,27 +110,36 @@ removed.}
  }
 
 @defproc[(item [pre-flow any/c] ...) item?]{
- Creates an item for use with @scheme[itemize]. The
- @scheme[pre-flow] list is parsed with @scheme[decode-flow].
-}
+
+Creates an item for use with @scheme[itemize]. The @tech{decode}d
+@scheme[pre-flow] (i.e., parsed with @scheme[decode-flow]) is the item
+content.}
+
 
 @defproc[(item? [v any/c]) boolean?]{
 
 Returns @scheme[#t] if @scheme[v] is an item produced by
 @scheme[item], @scheme[#f] otherwise.}
 
+
 @defform[(include-section module-path)]{ Requires @scheme[module-path]
  and returns its @scheme[doc] export (without making any imports
  visible to the enclosing context). Since this form expands to
  @scheme[require], it must be used in a module or top-level context.}
 
+@defproc[(module-path-prefix->string [mod-path module-path?])
+         string?]{
+
+Converts a module path to a string by resolving it to a path, and
+using @scheme[path->main-collects-relative].}
+
+
 @; ------------------------------------------------------------------------
 
 @section{Text Styles}
 
-@def-elem-proc[elem]{ Parses the @scheme[pre-content] list using
-@scheme[decode-content], and wraps the result as an element with
-style @scheme[#f].}
+@def-elem-proc[elem]{ Wraps the @tech{decode}d @scheme[pre-content] as
+an element with style @scheme[#f].}
 
 @def-elem-proc[aux-elem]{Like @scheme[elem], but creates an
 @scheme[aux-element].}
@@ -124,16 +151,16 @@ style @scheme[#f].}
 @def-style-proc[superscript]
 
 @defproc[(hspace [n nonnegative-exact-integer?]) element?]{
-Produces an element containing @scheme[n] spaces and style @scheme['hspace].
-}
+
+Produces an element containing @scheme[n] spaces and style
+@scheme['hspace].}
+
 
 @defproc[(span-class [style-name string?] [pre-content any/c] ...)
          element?]{
 
-Parses the @scheme[pre-content] list using @scheme[decode-content],
-and produces an element with style @scheme[style-name].
-
-}
+Wraps the @tech{decode}d @scheme[pre-content] as an element with style
+@scheme[style-name].}
 
 @; ------------------------------------------------------------------------
 
@@ -145,13 +172,12 @@ and produces an element with style @scheme[style-name].
 
 Creates an index element given a plain-text string---or list of
 strings for a hierarchy, such as @scheme['("strings" "plain")] for a
-``plain'' entry until a more general ``strings'' entry. The strings
-also serve as the text to render in the index. The
-@scheme[pre-content] list, as parsed by @scheme[decode-content] is the
-text to appear in place of the element, to which the index entry
-refers.
+``plain'' entry below a more general ``strings'' entry. As index keys,
+the strings are ``cleaned'' using @scheme[clean-up-index-strings]. The
+strings (without clean-up) also serve as the text to render in the
+index. The @tech{decode}d @scheme[pre-content] is the text to appear
+inline as the index target.}
 
-}
 
 @defproc[(index* [words (listof string?)]
                  [word-contents (listof list?)]
@@ -166,21 +192,22 @@ the list of contents render in the index (in parallel to
          index-element?]{
 
 Like @scheme[index], but the word to index is determined by applying
-@scheme[content->string] on the parsed @scheme[pre-content] list.}
+@scheme[content->string] on the @tech{decode}d @scheme[pre-content].}
 
 
-@defproc[(section-index [word string?] ...)]{
+@defproc[(section-index [word string?] ...)
+         part-index-decl?]{
 
 Creates a @scheme[part-index-decl] to be associated with the enclosing
 section by @scheme[decode]. The @scheme[word]s serve as both the keys
 and as the rendered forms of the keys.}
 
 
-@defproc[(index-section [tag string?])]{
+@defproc[(index-section [#:tag tag (or/c false/c string?) "doc-index"])
+         part?]{
 
-Produces a section that shows the index the enclosing document. The
-@scheme[tag] is required to be unique for each index among a set of
-documents that share ``collected'' information.}
+Produces a part that shows the index the enclosing document. The
+optional @scheme[tag] argument is used as the index section's tag.}
 
 
 @; ------------------------------------------------------------------------

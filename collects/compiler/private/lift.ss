@@ -21,11 +21,11 @@
 ;;; ------------------------------------------------------------
 
 (module lift mzscheme
-  (require (lib "unit.ss")
-	  (lib "list.ss")
-	  (lib "etc.ss"))
+  (require mzlib/unit
+	  mzlib/list
+	  mzlib/etc)
 
-  (require (lib "zodiac-sig.ss" "syntax"))
+  (require syntax/zodiac-sig)
 
   (require "sig.ss")
   (require "../sig.ss")
@@ -196,7 +196,7 @@
 				    [(var)
 				     (or (not (mod-glob? var))
 					 (let ([modname (mod-glob-modname var)])
-					   (if (eq? modname '#%kernel)
+					   (if (kernel-modname? modname)
 					       #t
 					       (not modname))))])
 				   (set->list (code-global-vars code)))))
@@ -377,7 +377,10 @@
 		     ;;
 		     [(zodiac:let-values-form? ast)
 		      (let* ([val (lift! (car (zodiac:let-values-form-vals ast)) code)])
-			(set-car! (zodiac:let-values-form-vals ast) val)
+                        (zodiac:set-let-values-form-vals!
+                         ast
+                         (cons val
+                               (cdr (zodiac:let-values-form-vals ast))))
 			
 			;; lift in body expressions
 			(let ([body (lift! (zodiac:let-values-form-body ast) code)])
@@ -416,8 +419,8 @@
 			  (if (null? varses)
 
 			      (begin
-				(zodiac:set-letrec-values-form-vars! ast (reverse! vss-accum))
-				(zodiac:set-letrec-values-form-vals! ast (reverse! vs-accum)))
+				(zodiac:set-letrec-values-form-vars! ast (reverse vss-accum))
+				(zodiac:set-letrec-values-form-vals! ast (reverse vs-accum)))
 
 			      (let ([vars (car varses)]
 				    [val (car vals)])

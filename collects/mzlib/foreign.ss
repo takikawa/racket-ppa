@@ -1,9 +1,10 @@
+#lang scheme/base
+
 ;; Foreign Scheme interface
-
-(module foreign mzscheme
-
-(require #%foreign (lib "dirs.ss" "setup"))
-(require-for-syntax (lib "stx.ss" "syntax"))
+(require '#%foreign
+         setup/dirs
+         (for-syntax scheme/base
+                     syntax/stx))
 
 ;; This module is full of unsafe bindings that are not provided to requiring
 ;; modules.  Instead, an `unsafe!' binding is provided that makes these unsafe
@@ -28,12 +29,12 @@
                      (with-syntax ([(p ...) provides]) #'(provide p ...)))
               (syntax-case (car ps) (unsafe)
                 [(unsafe u)
-                 (syntax-case #'u (rename)
-                   [(rename from to)
+                 (syntax-case #'u (rename-out)
+                   [(rename-out [from to])
                     (loop provides (cons (cons #'from #'to) unsafes) (cdr ps))]
                    [id (identifier? #'id)
                     (loop provides (cons (cons #'id #'id) unsafes) (cdr ps))]
-                   [_else
+                   [_
                     (raise-syntax-error 'provide* "bad unsafe usage"
                                         (car ps) stx)])]
                 [_ (loop (cons (car ps) provides) unsafes (cdr ps))])))]))
@@ -45,10 +46,10 @@
                         [(id   ...) (generate-temporaries unsafe-bindings)])
             (set! unsafe-bindings '())
             #'(begin
-                (provide (protect unsafe))
+                (provide (protect-out unsafe))
                 (define-syntax (unsafe stx)
                   (syntax-case stx ()
-                    [(_) (with-syntax ([(id ...) (list (datum->syntax-object
+                    [(_) (with-syntax ([(id ...) (list (datum->syntax
                                                         stx 'to stx)
                                                        ...)])
                            #'(begin (define-syntax id
@@ -56,9 +57,10 @@
                                     ...))]))))])))))
 
 (provide* ctype-sizeof ctype-alignof compiler-sizeof
-          (unsafe malloc) (unsafe free) end-stubborn-change
+          (unsafe malloc) (unsafe free) (unsafe end-stubborn-change)
           cpointer? ptr-equal? ptr-add (unsafe ptr-ref) (unsafe ptr-set!)
-          ctype? make-ctype make-cstruct-type make-sized-byte-string
+          ptr-offset ptr-add! offset-ptr? set-ptr-offset!
+          ctype? make-ctype make-cstruct-type (unsafe make-sized-byte-string)
           _void _int8 _uint8 _int16 _uint16 _int32 _uint32 _int64 _uint64
           _fixint _ufixint _fixnum _ufixnum
           _float _double _double*
@@ -136,8 +138,8 @@
 (define lib-suffix (bytes->string/latin-1 (subbytes (system-type 'so-suffix) 1)))
 (define lib-suffix-re (regexp (string-append "\\." lib-suffix "$")))
 
-(provide (rename get-ffi-lib ffi-lib)
-         ffi-lib? ffi-lib-name)
+(provide* (unsafe (rename-out [get-ffi-lib ffi-lib]))
+          ffi-lib? ffi-lib-name)
 (define get-ffi-lib
   (case-lambda
    [(name) (get-ffi-lib name "")]
@@ -161,9 +163,9 @@
                                (if (or (not v) (zero? (string-length v)))
                                  "" (string-append "." v)))
                              versions)]
-              [fullpath (lambda (p) (path->complete-path (expand-path p)))]
+              [fullpath (lambda (p) (path->complete-path (cleanse-path p)))]
               [absolute? (absolute-path? name)]
-              [name0 (path->string (expand-path name))]     ; orig name
+              [name0 (path->string (cleanse-path name))]     ; orig name
               [names (map (if (regexp-match lib-suffix-re name0) ; name+suffix
                             (lambda (v) (string-append name0 v))
                             (lambda (v) (string-append name0 "." lib-suffix v)))
@@ -198,11 +200,11 @@
   (ptr-ref ffi-obj type))
 (define (ffi-set! ffi-obj type new)
   (let-values ([(new type) (get-lowlevel-object new type)])
-    (hash-table-put! ffi-objects-ref-table ffi-obj new)
+    (hash-set! ffi-objects-ref-table ffi-obj new)
     (ptr-set! ffi-obj type new)))
 
 ;; This is better handled with `make-c-parameter'
-(provide* ffi-obj-ref)
+(provide* (unsafe ffi-obj-ref))
 (define ffi-obj-ref
   (case-lambda
    [(name lib) (ffi-obj-ref name lib #f)]
@@ -280,7 +282,7 @@
 
 ;; This table keeps references to values that are set in foreign libraries, to
 ;; avoid them being GCed.  See set-ffi-obj! above.
-(define ffi-objects-ref-table (make-hash-table))
+(define ffi-objects-ref-table (make-hasheq))
 
 ;; ----------------------------------------------------------------------------
 ;; Compile-time support for fun-expanders
@@ -352,15 +354,16 @@
 
   (define (split-by key args)
     (let loop ([args args] [r (list '())])
-      (cond [(null? args) (reverse! (map reverse! r))]
+      (cond [(null? args) (reverse (map reverse r))]
             [(eq? key (car args)) (loop (cdr args) (cons '() r))]
-            [else (set-car! r (cons (car args) (car r)))
-                  (loop (cdr args) r)])))
+            [else (loop (cdr args) 
+                        (cons (cons (car args) (car r))
+                              (cdr r)))])))
 
   (define (filtmap f l)
     (let loop ([l l] [r '()])
       (if (null? l)
-        (reverse! r)
+        (reverse r)
         (let ([x (f (car l))]) (loop (cdr l) (if x (cons x r) r))))))
 
   (define (add-renamer body from to)
@@ -370,7 +373,7 @@
           body)))
 
   (define (custom-type->keys type err)
-    (define stops (map (lambda (s) (datum->syntax-object type s #f))
+    (define stops (map (lambda (s) (datum->syntax type s #f))
                        '(#%app #%top #%datum)))
     ;; Expand `type' using expand-fun-syntax/fun
     (define orig (expand-fun-syntax/fun type))
@@ -513,9 +516,9 @@
            [inputs #f] [output #f] [bind '()] [pre '()] [post '()]
            [input-names #f] [output-type #f] [output-expr #f]
            [1st-arg #f] [prev-arg #f])
-       (define (bind! x) (set! bind (append! bind (list x))))
-       (define (pre!  x) (set! pre  (append! pre  (list x))))
-       (define (post! x) (set! post (append! post (list x))))
+       (define (bind! x) (set! bind (append bind (list x))))
+       (define (pre!  x) (set! pre  (append pre  (list x))))
+       (define (post! x) (set! post (append post (list x))))
        (define ((t-n-e clause) type name expr)
          (let ([keys (custom-type->keys type err)])
            (define (getkey key) (cond [(assq key keys) => cdr] [else #f]))
@@ -638,7 +641,7 @@
                             #,output-expr)))]
                 ;; if there is a string 'ffi-name property, use it as a name
                 [body (let ([n (cond [(syntax-property stx 'ffi-name)
-                                      => syntax-object->datum]
+                                      => syntax->datum]
                                      [else #f])])
                         (if (string? n)
                           (syntax-property
@@ -702,18 +705,18 @@
 
 (provide _path)
 ;; `file' type: path-expands a path string, provide _path too.
-(define* _file (make-ctype _path expand-path #f))
+(define* _file (make-ctype _path cleanse-path #f))
 
 ;; `string/eof' type: converts an output #f (NULL) to an eof-object.
 (define string-type->string/eof-type
-  (let ([table (make-hash-table)])
+  (let ([table (make-hasheq)])
     (lambda (string-type)
-      (hash-table-get table string-type
+      (hash-ref table string-type
         (lambda ()
           (let ([new-type (make-ctype string-type
                             (lambda (x) (and (not (eof-object? x)) x))
                             (lambda (x) (or x eof)))])
-            (hash-table-put! table string-type new-type)
+            (hash-set! table string-type new-type)
             new-type))))))
 (provide _string/eof _bytes/eof)
 (define _bytes/eof
@@ -738,14 +741,17 @@
     (if name (string->symbol (format "enum:~a->int" name)) 'enum->int))
   (let loop ([i 0] [symbols symbols])
     (unless (null? symbols)
-      (when (and (pair? (cdr symbols))
-                 (eq? '= (cadr symbols))
-                 (pair? (cddr symbols)))
-        (set! i (caddr symbols))
-        (set-cdr! symbols (cdddr symbols)))
-      (set! sym->int (cons (cons (car symbols) i) sym->int))
-      (set! int->sym (cons (cons i (car symbols)) int->sym))
-      (loop (add1 i) (cdr symbols))))
+      (let-values ([(i rest)
+                    (if (and (pair? (cdr symbols))
+                             (eq? '= (cadr symbols))
+                             (pair? (cddr symbols)))
+                        (values (caddr symbols)
+                                (cdddr symbols))
+                        (values i
+                                (cdr symbols)))])
+        (set! sym->int (cons (cons (car symbols) i) sym->int))
+        (set! int->sym (cons (cons i (car symbols)) int->sym))
+        (loop (add1 i) rest))))
   (make-ctype basetype
     (lambda (x)
       (let ([a (assq x sym->int)])
@@ -771,19 +777,23 @@
 ;; the above with '= -- but the numbers have to be specified in some way.  The
 ;; generated type will convert a list of these symbols into the logical-or of
 ;; their values and back.
-(define (_bitmask* name symbols->integers . base?)
+(define (_bitmask* name orig-symbols->integers . base?)
   (define basetype (if (pair? base?) (car base?) _uint))
   (define s->c
     (if name (string->symbol (format "bitmask:~a->int" name)) 'bitmask->int))
-  (let loop ([s->i symbols->integers])
-    (unless (null? s->i)
-      (when (and (pair? (cdr s->i)) (eq? '= (cadr s->i)) (pair? (cddr s->i)))
-        (set-car! s->i (list (car s->i) (caddr s->i)))
-        (set-cdr! s->i (cdddr s->i)))
-      (unless (and (pair? (car s->i)) (pair? (cdar s->i)) (null? (cddar s->i))
-                   (symbol? (caar s->i)) (integer? (cadar s->i)))
-        (error '_bitmask "bad spec in ~e" symbols->integers))
-      (loop (cdr s->i))))
+  (define symbols->integers
+    (let loop ([s->i orig-symbols->integers])
+      (cond
+       [(null? s->i)
+        null]
+       [(and (pair? (cdr s->i)) (eq? '= (cadr s->i)) (pair? (cddr s->i)))
+        (cons (list (car s->i) (caddr s->i))
+              (loop (cdddr s->i)))]
+       [(and (pair? (car s->i)) (pair? (cdar s->i)) (null? (cddar s->i))
+             (symbol? (caar s->i)) (integer? (cadar s->i)))
+        (cons (car s->i) (loop (cdr s->i)))]
+       [else
+        (error '_bitmask "bad spec in ~e" orig-symbols->integers)])))
   (make-ctype basetype
     (lambda (symbols)
       (if (null? symbols) ; probably common
@@ -799,7 +809,7 @@
         '()
         (let loop ([s->i symbols->integers] [l '()])
           (if (null? s->i)
-            (reverse! l)
+            (reverse l)
             (loop (cdr s->i)
                   (let ([i (cadar s->i)])
                     (if (and (not (= i 0)) (= i (bitwise-and i n)))
@@ -927,7 +937,7 @@
 ;; be just like _bytes since the string carries its size information (so there
 ;; is no real need for the `o', but it's there for consistency with the above
 ;; macros).
-(provide (rename _bytes* _bytes))
+(provide (rename-out [_bytes* _bytes]))
 (define-fun-syntax _bytes*
   (syntax-id-rules (o)
     [(_ o n) (type: _bytes
@@ -944,7 +954,7 @@
 
 (provide* cvector? cvector-length cvector-type
           ;; make-cvector* is a dangerous operation
-          (unsafe (rename make-cvector make-cvector*)))
+          (unsafe (rename-out [make-cvector make-cvector*])))
 
 (define _cvector* ; used only as input types
   (make-ctype _pointer cvector-ptr
@@ -968,13 +978,13 @@
     [(_ . xs)   (_cvector* . xs)]
     [_          _cvector*]))
 
-(provide (rename allocate-cvector make-cvector))
+(provide (rename-out [allocate-cvector make-cvector]))
 (define (allocate-cvector type len)
   (make-cvector (if (zero? len) #f ; 0 => NULL
                     (malloc len type))
                 type len))
 
-(provide (rename cvector-args cvector))
+(provide (rename-out [cvector-args cvector]))
 (define (cvector-args type . args)
   (list->cvector args type))
 
@@ -999,137 +1009,90 @@
 ;; ----------------------------------------------------------------------------
 ;; SRFI-4 implementation
 
-(define-syntaxes (make-srfi-4 define-srfi-4-provider)
-  (let ([bindings '()])
-    (define (define-srfi-4-provider stx)
-      (syntax-case stx ()
-        [(_ x) (with-syntax ([(binding ...) bindings])
-                 #'(define-syntax x
-                     (syntax-rules ()
-                       [(_) (provide binding ...)])))]))
-    (define (make-srfi-4 stx)
-      (syntax-case stx ()
-        [(_ TAG type more ...) (identifier? #'TAG)
-         (let ([name (string-append
-                      (symbol->string (syntax-object->datum #'TAG))
-                      "vector")])
-           (define (make-TAG-id prefix suffix)
-             (datum->syntax-object #'TAG
-                                   (string->symbol
-                                    (string-append prefix name suffix))
-                                   #'TAG))
-           (with-syntax ([TAG?         (make-TAG-id "" "?")]
-                         [TAG          (make-TAG-id "" "")]
-                         [make-TAG     (make-TAG-id "make-" "")]
-                         [TAG-ptr      (make-TAG-id "" "-ptr")]
-                         [TAG-length   (make-TAG-id "" "-length")]
-                         [allocate-TAG (make-TAG-id "allocate-" "")]
-                         [TAG*         (make-TAG-id "" "*")]
-                         [list->TAG    (make-TAG-id "list->" "")]
-                         [TAG->list    (make-TAG-id "" "->list")]
-                         [TAG-ref      (make-TAG-id "" "-ref")]
-                         [TAG-set!     (make-TAG-id "" "-set!")]
-                         [_TAG         (make-TAG-id "_" "")]
-                         [_TAG*        (make-TAG-id "_" "*")]
-                         [TAGname      name])
-             (set! bindings (list* #'TAG?
-                                   #'TAG-length
-                                   #'make-TAG
-                                   #'TAG
-                                   #'TAG-ref
-                                   #'TAG-set!
-                                   #'TAG->list
-                                   #'list->TAG
-                                   #'_TAG
-                                   bindings))
-             (syntax-case #'(more ...) ()
-               [(X? X-length make-X X X-ref X-set! X->list list->X _X)
-                #'(provide (rename X?       TAG?      )
-                           (rename X-length TAG-length)
-                           (rename make-X   make-TAG  )
-                           (rename X        TAG       )
-                           (rename X-ref    TAG-ref   )
-                           (rename X-set!   TAG-set!  )
-                           (rename X->list  TAG->list )
-                           (rename list->X  list->TAG )
-                           (rename _X       _TAG      ))]
-               [()
-                #'(begin
-                    (define-struct TAG (ptr length))
-                    (provide TAG? TAG-length)
-                    (provide (rename allocate-TAG make-TAG))
-                    (define (allocate-TAG n . init)
-                      (let* ([p (if (eq? n 0) #f (malloc n type))]
-                             [v (make-TAG p n)])
-                        (when (and p (pair? init))
-                          (let ([init (car init)])
-                            (let loop ([i (sub1 n)])
-                              (unless (< i 0)
-                                (ptr-set! p type i init)
-                                (loop (sub1 i))))))
-                        v))
-                    (provide (rename TAG* TAG))
-                    (define (TAG* . vals)
-                      (list->TAG vals))
-                    (define* (TAG-ref v i)
-                      (if (TAG? v)
-                        (if (and (integer? i) (< -1 i (TAG-length v)))
-                          (ptr-ref (TAG-ptr v) type i)
-                          (error 'TAG-ref "bad index ~e for ~a bounds of 0..~e"
-                                 i 'TAG (sub1 (TAG-length v))))
-                        (raise-type-error 'TAG-ref TAGname v)))
-                    (define* (TAG-set! v i x)
-                      (if (TAG? v)
-                        (if (and (integer? i) (< -1 i (TAG-length v)))
-                          (ptr-set! (TAG-ptr v) type i x)
-                          (error 'TAG-set! "bad index ~e for ~a bounds of 0..~e"
-                                 i 'TAG (sub1 (TAG-length v))))
-                        (raise-type-error 'TAG-set! TAGname v)))
-                    (define* (TAG->list v)
-                      (if (TAG? v)
-                        (cblock->list (TAG-ptr v) type (TAG-length v))
-                        (raise-type-error 'TAG->list TAGname v)))
-                    (define* (list->TAG l)
-                      (make-TAG (list->cblock l type) (length l)))
-                    ;; same as the _cvector implementation
-                    (provide _TAG)
-                    (define _TAG*
-                      (make-ctype _pointer TAG-ptr
-                        (lambda (x)
-                          (error
-                           '_TAG
-                           "cannot automatically convert a C pointer to a ~a"
-                           TAGname))))
-                    (define-fun-syntax _TAG
-                      (syntax-id-rules (i o io)
-                        [(_ i   ) _TAG*]
-                        [(_ o  n) (type: _pointer
-                                         pre:  (malloc n type)
-                                         post: (x => (make-TAG x n)))]
-                        [(_ io  ) (type: _cvector*
-                                         bind: tmp
-                                         pre:  (x => (TAG-ptr x))
-                                         post: (x => tmp))]
-                        [(_ . xs)   (_TAG* . xs)]
-                        [_          _TAG*]))
-                    )])))]))
-    (values make-srfi-4 define-srfi-4-provider)))
-
-(make-srfi-4 s8  _int8)
-;; this one is implemented as byte strings
-(make-srfi-4 u8 _uint8
-             bytes? bytes-length make-bytes bytes bytes-ref bytes-set!
-             bytes->list list->bytes _bytes)
-(make-srfi-4 s16 _int16)
-(make-srfi-4 u16 _uint16)
-(make-srfi-4 s32 _int32)
-(make-srfi-4 u32 _uint32)
-(make-srfi-4 s64 _int64)
-(make-srfi-4 u64 _uint64)
-(make-srfi-4 f32 _float)
-(make-srfi-4 f64 _double*)
-(define-srfi-4-provider provide-srfi-4)
-(provide provide-srfi-4)
+(define-syntax (srfi-4-define/provide stx)
+  (syntax-case stx ()
+    [(_ TAG type)
+     (identifier? #'TAG)
+     (let ([name (format "~avector" (syntax->datum #'TAG))])
+       (define (id prefix suffix)
+         (let* ([name (if prefix (string-append prefix name) name)]
+                [name (if suffix (string-append name suffix) name)])
+           (datum->syntax #'TAG (string->symbol name) #'TAG)))
+       (with-syntax ([TAG?         (id "" "?")]
+                     [TAG          (id "" "")]
+                     [s:TAG        (id "s:" "")]
+                     [make-TAG     (id "make-" "")]
+                     [TAG-ptr      (id "" "-ptr")]
+                     [TAG-length   (id "" "-length")]
+                     [allocate-TAG (id "allocate-" "")]
+                     [TAG*         (id "" "*")]
+                     [list->TAG    (id "list->" "")]
+                     [TAG->list    (id "" "->list")]
+                     [TAG-ref      (id "" "-ref")]
+                     [TAG-set!     (id "" "-set!")]
+                     [_TAG         (id "_" "")]
+                     [_TAG*        (id "_" "*")]
+                     [TAGname      name])
+         #'(begin
+             (define-struct TAG (ptr length))
+             (provide TAG? TAG-length (rename-out [TAG s:TAG]))
+             (provide (rename-out [allocate-TAG make-TAG]))
+             (define (allocate-TAG n . init)
+               (let* ([p (if (eq? n 0) #f (malloc n type))]
+                      [v (make-TAG p n)])
+                 (when (and p (pair? init))
+                   (let ([init (car init)])
+                     (let loop ([i (sub1 n)])
+                       (unless (< i 0)
+                         (ptr-set! p type i init)
+                         (loop (sub1 i))))))
+                 v))
+             (provide (rename-out [TAG* TAG]))
+             (define (TAG* . vals)
+               (list->TAG vals))
+             (define* (TAG-ref v i)
+               (if (TAG? v)
+                   (if (and (integer? i) (< -1 i (TAG-length v)))
+                       (ptr-ref (TAG-ptr v) type i)
+                       (error 'TAG-ref "bad index ~e for ~a bounds of 0..~e"
+                              i 'TAG (sub1 (TAG-length v))))
+                   (raise-type-error 'TAG-ref TAGname v)))
+             (define* (TAG-set! v i x)
+               (if (TAG? v)
+                   (if (and (integer? i) (< -1 i (TAG-length v)))
+                       (ptr-set! (TAG-ptr v) type i x)
+                       (error 'TAG-set! "bad index ~e for ~a bounds of 0..~e"
+                              i 'TAG (sub1 (TAG-length v))))
+                   (raise-type-error 'TAG-set! TAGname v)))
+             (define* (TAG->list v)
+               (if (TAG? v)
+                   (cblock->list (TAG-ptr v) type (TAG-length v))
+                   (raise-type-error 'TAG->list TAGname v)))
+             (define* (list->TAG l)
+               (make-TAG (list->cblock l type) (length l)))
+             ;; same as the _cvector implementation
+             (provide _TAG)
+             (define _TAG*
+               (make-ctype _pointer TAG-ptr
+                           (lambda (x)
+                             (error
+                              '_TAG
+                              "cannot automatically convert a C pointer to a ~a"
+                              TAGname))))
+             (define-fun-syntax _TAG
+               (syntax-id-rules (i o io)
+                 [(_ i   ) _TAG*]
+                 [(_ o  n) (type: _pointer
+                                  pre:  (malloc n type)
+                                  post: (x => (make-TAG x n)))]
+                 [(_ io  ) (type: _cvector*
+                                  bind: tmp
+                                  pre:  (x => (TAG-ptr x))
+                                  post: (x => tmp))]
+                 [(_ . xs)   (_TAG* . xs)]
+                 [_          _TAG*])))))]
+    [(_ TAG type)
+     (identifier? #'TAG)]))
 
 ;; check that the types that were used above have the proper sizes
 (unless (= 4 (ctype-sizeof _float))
@@ -1138,6 +1101,35 @@
 (unless (= 8 (ctype-sizeof _double*))
   (error 'foreign "internal error: double has a bad size (~s)"
          (ctype-sizeof _double*)))
+
+(srfi-4-define/provide s8  _int8)
+(srfi-4-define/provide s16 _int16)
+(srfi-4-define/provide u16 _uint16)
+(srfi-4-define/provide s32 _int32)
+(srfi-4-define/provide u32 _uint32)
+(srfi-4-define/provide s64 _int64)
+(srfi-4-define/provide u64 _uint64)
+(srfi-4-define/provide f32 _float)
+(srfi-4-define/provide f64 _double*)
+
+;; simply rename bytes* to implement the u8vector type
+(provide (rename-out [bytes?       u8vector?      ]
+                     [bytes-length u8vector-length]
+                     [make-bytes   make-u8vector  ]
+                     [bytes        u8vector       ]
+                     [bytes-ref    u8vector-ref   ]
+                     [bytes-set!   u8vector-set!  ]
+                     [bytes->list  u8vector->list ]
+                     [list->bytes  list->u8vector ]
+                     [_bytes       _u8vector      ]))
+;; additional `u8vector' bindings for srfi-66
+(provide (rename-out [bytes-copy u8vector-copy] [bytes=? u8vector=?]))
+(define* (u8vector-compare v1 v2)
+  (cond [(bytes<? v1 v2) -1]
+        [(bytes>? v1 v2)  1]
+        [else             0]))
+(define* (u8vector-copy! src src-start dest dest-start n)
+  (bytes-copy! dest dest-start src src-start (+ src-start n)))
 
 ;; ----------------------------------------------------------------------------
 ;; Tagged pointers
@@ -1230,14 +1222,14 @@
 (define-syntax (define-cpointer-type stx)
   (syntax-case stx ()
     [(_ _TYPE) #'(_ _TYPE #f #f #f)]
-    [(_ _TYPE ptr-type) #'(_ _TYPE ptr-type #f #f)]
+    [(frm _TYPE ptr-type) #'(frm _TYPE ptr-type #f #f)]
     [(_ _TYPE ptr-type scheme->c c->scheme)
      (and (identifier? #'_TYPE)
           (regexp-match #rx"^_.+" (symbol->string (syntax-e #'_TYPE))))
      (let ([name (cadr (regexp-match #rx"^_(.+)$"
                                      (symbol->string (syntax-e #'_TYPE))))])
        (define (id . strings)
-         (datum->syntax-object
+         (datum->syntax
           #'_TYPE (string->symbol (apply string-append strings)) #'_TYPE))
        (with-syntax ([name-string name]
                      [TYPE?      (id name "?")]
@@ -1257,7 +1249,7 @@
 (define (compute-offsets types)
   (let loop ([ts types] [cur 0] [r '()])
     (if (null? ts)
-      (reverse! r)
+      (reverse r)
       (let* ([algn (ctype-alignof (car ts))]
              [pos  (+ cur (modulo (- (modulo cur algn)) algn))])
         (loop (cdr ts)
@@ -1306,17 +1298,17 @@
     (define 1st-type
       (let ([xs (syntax->list slot-types-stx)]) (and (pair? xs) (car xs))))
     (define (id . strings)
-      (datum->syntax-object
+      (datum->syntax
        _TYPE-stx (string->symbol (apply string-append strings)) _TYPE-stx))
     (define (ids name-func)
       (map (lambda (s)
-             (datum->syntax-object
+             (datum->syntax
               _TYPE-stx
               (string->symbol (apply string-append (name-func s)))
               _TYPE-stx))
            slot-names))
     (define (safe-id=? x y)
-      (and (identifier? x) (identifier? y) (module-identifier=? x y)))
+      (and (identifier? x) (identifier? y) (free-identifier=? x y)))
     (with-syntax
         ([has-super?           has-super?]
          [name-string          name]
@@ -1460,17 +1452,22 @@
      (make-syntax #'_TYPE #f #'(slot ...) #'(slot-type ...))]
     [(_ (_TYPE _SUPER) ([slot slot-type] ...))
      (and (_-identifier? #'_TYPE) (identifiers? #'(slot ...)))
-     (with-syntax ([super (datum->syntax-object #'_TYPE 'super #'_TYPE)])
+     (with-syntax ([super (datum->syntax #'_TYPE 'super #'_TYPE)])
        (make-syntax #'_TYPE #t #'(super slot ...) #'(_SUPER slot-type ...)))]))
 
 ;; helper for the above: keep runtime information on structs
 (define cstruct-info
-  (let ([table (make-hash-table 'weak)])
+  (let ([table (make-weak-hasheq)])
     (lambda (cstruct msg/fail-thunk . args)
-      (cond [(eq? 'set! msg/fail-thunk) (hash-table-put! table cstruct args)]
+      (cond [(eq? 'set! msg/fail-thunk) 
+             (hash-set! table cstruct (make-ephemeron cstruct args))]
             [(and cstruct ; might get a #f if there were no slots
-                  (hash-table-get table cstruct (lambda () #f)))
-             => (lambda (xs) (apply values xs))]
+                  (hash-ref table cstruct (lambda () #f)))
+             => (lambda (xs) 
+                  (let ([v (ephemeron-value xs)])
+                    (if v 
+                        (apply values v)
+                        (msg/fail-thunk))))]
             [else (msg/fail-thunk)]))))
 
 ;; ----------------------------------------------------------------------------
@@ -1547,12 +1544,14 @@
 ;; version that uses finalizers, but that leads to calling Scheme from the GC
 ;; which is not a good idea.
 (define killer-executor (make-will-executor))
-(define killer-thread
-  (delay
-    (thread (lambda () (let loop () (will-execute killer-executor) (loop))))))
-(define* (register-finalizer obj finalizer)
-  (force killer-thread)
+(define killer-thread #f)
+
+(provide* (unsafe register-finalizer))
+(define (register-finalizer obj finalizer)
+  (unless killer-thread
+    (set! killer-thread
+          (thread (lambda ()
+                    (let loop () (will-execute killer-executor) (loop))))))
   (will-register killer-executor obj finalizer))
 
 (define-unsafer unsafe!)
-)

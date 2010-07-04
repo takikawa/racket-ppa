@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["common.ss"]
+#lang scribble/doc
+@(require "common.ss")
 
 @title[#:style '(toc reveal)]{Reference}
 
@@ -11,3 +11,4 @@
 @include-section["draw-funcs.scrbl"]
 @include-section["editor-classes.scrbl"]
 @include-section["editor-funcs.scrbl"]
+@include-section["wxme.scrbl"]

@@ -1,13 +1,12 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require[(lib "bnf.ss" "scribble")]
-@require["utils.ss"]
+#lang scribble/doc
+@(require scribble/manual
+          scribble/bnf
+          "utils.ss")
 
 @title[#:tag "docreader"]{Document Reader}
 
-The @file{docreader.ss} module is suitable for use with
-@schemefont{#reader} at the beginning of a file. It reads the entire
-file with @scheme[read-inside-syntax] from Scribble's
-@file{reader.ss}, and then wraps the result with @scheme[(module #,
-@nonterm{name} (lib "doclang.ss" "scribble") ...)], where
-@nonterm{name} is derived from the enclosing file's name.
+@defmodulelang[scribble/doc]{The @schememodname[scribble/doc] language is
+the same as @schememodname[scribble/doclang], except that
+@scheme[read-syntax-inside] is used to read the body of the module. In
+other words, the module body starts in Scribble ``text'' mode instead
+of S-expression mode.}

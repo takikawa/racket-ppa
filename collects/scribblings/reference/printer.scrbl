@@ -1,6 +1,6 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "bnf.ss" "scribble")]
-@require["mz.ss"]
+#lang scribble/doc
+@(require scribble/bnf
+          "mz.ss")
 
 @title[#:tag "printing" #:style 'quiet]{The Printer}
 
@@ -13,14 +13,14 @@ render the character/byte content directly to the output port.
 
 When the @scheme[print-graph] parameter is set to @scheme[#t], then
 the printer first scans an object to detect cycles. The scan traverses
-the components of pairs, vectors, boxes (when @scheme[print-box] is
-@scheme[#t]), hash tables (when @scheme[print-hash-table] is
-@scheme[#t]), and fields of structures exposed by
-@scheme[struct->vector] (when @scheme[print-struct] is
+the components of pairs, mutable pairs, vectors, boxes (when
+@scheme[print-box] is @scheme[#t]), hash tables (when
+@scheme[print-hash-table] is @scheme[#t]), and fields of structures
+exposed by @scheme[struct->vector] (when @scheme[print-struct] is
 @scheme[#t]). If @scheme[print-graph] is @scheme[#t], then this
 information is used to display sharing by printing graph definitions
-and references (see @secref["parse-graph"]). If a cycle is detected
-in the initial scan, then @scheme[print-graph] is effectively set to
+and references (see @secref["parse-graph"]). If a cycle is detected in
+the initial scan, then @scheme[print-graph] is effectively set to
 @scheme[#t] automatically.
 
 With the exception of displaying byte strings, printing is defined in
@@ -120,6 +120,18 @@ The printed form of a pair is the same in both @scheme[write] and
 @scheme[display] modes, except as the printed form of the pair's
 @scheme[car]and @scheme[cdr] vary with the mode.
 
+By default, mutable pairs (as created with @scheme[mcons]) print the
+same as pairs, except that @litchar["{"] and @litchar["}"] are used
+instead of @litchar["("] and @litchar[")"]. Note that the reader
+treats @litchar["{"]...@litchar["}"] and @litchar["("]...@litchar[")"]
+equivalently on input, creating immutable pairs in both cases.
+
+If the @scheme[print-pair-curly-braces] parameter is set to
+@scheme[#t], then immutable pairs print using @litchar["{"] and
+@litchar["}"].  If the @scheme[print-mpair-curly-braces] parameter is
+set to @scheme[#f], then mutable pairs print using @litchar["("] and
+@litchar[")"].
+
 @section{Printing Strings}
 
 All strings @scheme[display] as their literal character sequences.
@@ -157,8 +169,41 @@ to three octal digits (only as many as necessary).
 In @scheme[display] mode, the printed form of a vector is @litchar{#}
 followed by the printed form of @scheme[vector->list] applied to the
 vector. In @scheme[write] mode, the printed form is the same, except
-that a decimal integer is printed after the @litchar{#} when the
-@scheme[print-vector-length] parameter is @scheme[#t].
+that when the @scheme[print-vector-length] parameter is @scheme[#t], a
+decimal integer is printed after the @litchar{#}, and a repeated last
+element is printed only once..
+
+
+@section[#:tag "print-structure"]{Printing Structures}
+
+When the @scheme[print-struct] parameter is set to @scheme[#t], then
+the way that structures print depends on details of the structure type
+for which the structure is an instance:
+
+@itemize{
+
+ @item{If the structure type is a @techlink{prefab} structure type,
+       then it prints using @litchar{#s(} followed by the @tech{prefab}
+       structure type key, then the printed form each field in the
+       structure, and then @litchar{)}.}
+
+ @item{If the structure has a @scheme[prop:custom-write] property
+       value, then the associated procedure is used to print the
+       structure.}
+
+ @item{If the structure type is transparent, or if any ancestor is
+       transparent, then the structure prints as the vector produced
+       by @scheme[struct->vector].}
+
+ @item{For any other structure type, the structure prints as an
+       unreadable value; see @secref["print-unreadable"] for more
+       information.}
+}
+
+If the @scheme[print-struct] parameter is set to @scheme[#f], then all
+structures without a @scheme[prop:custom-write] property print as
+unreadable values.
+
 
 @section[#:tag "print-hashtable"]{Printing Hash Tables}
 
@@ -173,7 +218,7 @@ After all key-value pairs, the printed form completes with
 @litchar{)}.
 
 When the @scheme[print-hash-table] parameter is set to @scheme[#f], a
-hash table prints (un@scheme[read]ably) as @litchar{#<hash-table>}.
+hash table prints (un@scheme[read]ably) as @litchar{#<hash>}.
 
 @section[#:tag "print-box"]{Printing Boxes}
 
@@ -214,3 +259,10 @@ starting with @litchar{#px} (for @scheme[pregexp]-based regexps) or
 @litchar{#rx} (for @scheme[regexp]-based regexps) followed by the
 @scheme[write] form of the regexp's source string or byte string.
 
+
+@section[#:tag "print-unreadable"]{Printing Unreadable Values}
+
+For any value with no other printing specification, the output form is
+@litchar{#<}@nonterm{something}@litchar{>}, where @nonterm{something}
+is specific to the type of the value and sometimes to the value
+itself.

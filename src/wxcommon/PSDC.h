@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	
- * Copyright:	(c) 2004-2007 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2008 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  */
 
@@ -178,6 +178,8 @@ class wxPostScriptDC: public wxDC
   void CalcBoundingBoxClip(double x, double y);
 
   void SetAntiAlias(int mode);
+
+  virtual int CacheFontMetricsKey();
 
   virtual Bool Ok() { return ok; }
 };

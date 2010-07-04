@@ -1,8 +1,8 @@
 (module snipfile mzscheme
-  (require (lib "class.ss")
-	   (lib "etc.ss")
-	   (lib "port.ss")
-	   (lib "moddep.ss" "syntax")
+  (require mzlib/class
+	   mzlib/etc
+	   mzlib/port
+	   syntax/moddep
 	   (prefix wx: "kernel.ss")
 	   "check.ss"
 	   "editor.ss")
@@ -211,7 +211,9 @@
       (dynamic-wind
 	  (lambda () (void))
 	  (lambda ()
-	    (parameterize ([read-accept-compiled #t])
+	    (parameterize ([read-accept-compiled #t]
+                           [read-on-demand-source (and (load-on-demand-enabled)
+                                                       (path->complete-path filename))])
 	      (if expected-module
 		  (with-module-reading-parameterization 
 		   (lambda ()

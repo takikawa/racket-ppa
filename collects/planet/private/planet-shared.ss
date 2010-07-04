@@ -3,53 +3,17 @@
 Various common pieces of code that both the client and server need to access
 ==========================================================================================
 |#
-
-(module planet-shared mzscheme
+#lang scheme/base
   
-  (require (lib "list.ss")
-           (lib "etc.ss")
-           (lib "port.ss")
-           (lib "file.ss")
+  (require (only-in mzlib/file path-only)
+	   mzlib/port
            (lib "getinfo.ss" "setup")
-           (prefix srfi1: (lib "1.ss" "srfi"))
-           "../config.ss")
+           (prefix-in srfi1: srfi/1)
+           "../config.ss"
+           "data.ss")
   
-  (provide (all-defined))
- 
-  
-  ; ==========================================================================================
-  ; DATA
-  ; defines common data used by the PLaneT system
-  ; ==========================================================================================
-  
-  ; exn:i/o:protocol: exception indicating that a protocol error occured
-  (define-struct (exn:i/o:protocol exn:fail:network) ())
-
-  ; FULL-PKG-SPEC : struct pkg-spec
-  (define-struct pkg-spec 
-    (name           ; string
-     maj            ; (Nat | #f)
-     minor-lo       ; (Nat | #f)
-     minor-hi       ; (Nat | #f)
-     path           ; (listof string)
-     stx            ; (syntax | #f)
-     core-version   ; string
-     )
-    (make-inspector))
-  ; PKG : string (listof string) Nat Nat path ORIGIN
-  (define-struct pkg (name route maj min path origin))
-  ; UNINSTALLED-PKG : path FULL-PKG-SPEC Nat Nat
-  (define-struct uninstalled-pkg (path spec maj min))
-  ; PKG-PROMISE : PKG | UNINSTALLED-PKG
-  ; ORIGIN : 'normal | 'development-link
-  
-  (define (pkg-promise? p) (or (pkg? p) (uninstalled-pkg? p)))
-
-  (define (normally-installed-pkg? p)
-    (eq? (pkg-origin p) 'normal))
-  
-  (define (development-link-pkg? p)
-    (eq? (pkg-origin p) 'development-link))
+  (provide (all-defined-out)
+           (all-from-out "data.ss")) 
   
   ; ==========================================================================================
   ; CACHE LOGIC
@@ -208,15 +172,14 @@ Various common pieces of code that both the client and server need to access
   ;; saves the given table, overwriting any file that might be there
   (define (save-hard-link-table table)
     (verify-well-formed-hard-link-parameter!)
-    (with-output-to-file (HARD-LINK-FILE)
+    (with-output-to-file (HARD-LINK-FILE) #:exists 'truncate
       (lambda ()
         (display "")
         (for-each 
          (lambda (row)
            (write (update-element 4 path->bytes row))
            (newline))
-         table))
-      'truncate))
+         table))))
   
   ;; add-hard-link! string (listof string) num num path -> void
   ;; adds the given hard link, clearing any previous ones already in place
@@ -350,11 +313,11 @@ Various common pieces of code that both the client and server need to access
                       (or (not hi) (<= n hi))
                       (compatible-version? x spec))))
                  table)))
-          (if (null? matches)
+        (if (null? matches)
               #f
               (let ((best-row
                      (car 
-                      (quicksort
+                      (sort
                        matches
                        (λ (a b) (> (assoc-table-row->min a) (assoc-table-row->min b)))))))
                 (make-pkg
@@ -382,7 +345,7 @@ Various common pieces of code that both the client and server need to access
   ; returns eof. If n characters are not available from the given input port, calls
   ; the given function and then returns eof
   (define make-cutoff-port
-    (opt-lambda (ip n [underflow-fn void])
+    (lambda (ip n [underflow-fn void])
       (let ((to-read n))
         (make-input-port 
          'cutoff-port
@@ -428,7 +391,7 @@ Various common pieces of code that both the client and server need to access
   ; copies exactly n chars to the given file from the given port. Raises an exception
   ; if the given number of characters are not available.
   (define (read-n-chars-to-file n ip file)
-    (let ((op (open-output-file file 'truncate)))
+    (let ((op (open-output-file file #:exists 'truncate)))
       (copy-n-chars n ip op)
       (close-output-port op)))
   
@@ -455,20 +418,20 @@ Various common pieces of code that both the client and server need to access
   ; build-hash-table : listof (list X Y) -> equal-hash-table[X -> Y]
   ; builds a new hash-table mapping all given X's to their appropriate Y values
   (define (build-hash-table asl)
-    (let ((ht (make-hash-table 'equal)))
-      (for-each (lambda (item) (hash-table-put! ht (car item) (cadr item))) asl)
+    (let ((ht (make-hash)))
+      (for-each (lambda (item) (hash-set! ht (car item) (cadr item))) asl)
       ht))
   
   ; categorize : (X -> Y) (listof X) -> (listof (cons Y (listof X)))
   ; sorts the l into categories given by f
   (define (categorize f l)
-    (let ((ht (make-hash-table 'equal)))
+    (let ((ht (make-hash)))
       (for-each 
        (lambda (i)
          (let ((key (f i)))
-           (hash-table-put! ht key (cons i (hash-table-get ht key (lambda () '()))))))
+           (hash-set! ht key (cons i (hash-ref ht key (lambda () '()))))))
        l)
-      (hash-table-map ht cons)))
+      (hash-map ht cons)))
   
   (define (drop-last l) (reverse (cdr (reverse l))))
   
@@ -490,7 +453,7 @@ Various common pieces of code that both the client and server need to access
            (outport
             (if logfile
                 (with-handlers ((exn:fail:filesystem? (lambda (e) null-out)))
-                  (open-output-file logfile 'append))
+                  (open-output-file logfile #:exists 'append))
                 null-out)))
       (parameterize ([current-output-port outport])
         (f))))
@@ -509,13 +472,13 @@ Various common pieces of code that both the client and server need to access
   ;; ============================================================
   
   ;; tree[X] ::= (make-branch X (listof tree[X])
-  (define-struct branch (node children) (make-inspector))
+  (define-struct branch (node children) #:transparent)
   
   (define-struct (exn:fail:filesystem:no-directory exn:fail:filesystem) (dir))
   
   ;; directory->tree : directory (string -> bool) [nat | bool] [path->X] -> tree[X] | #f
   (define directory->tree
-    (opt-lambda (directory valid-dir? [max-depth #f] [path->x path->string])
+    (lambda (directory valid-dir? [max-depth #f] [path->x path->string])
       (unless (directory-exists? directory)
         (raise (make-exn:fail:filesystem:no-directory 
                 "Directory ~s does not exist"
@@ -562,7 +525,7 @@ Various common pieces of code that both the client and server need to access
   ;; applies f to every path from root to leaf and
   ;; accumulates all results in a list
   (define tree-apply
-    (opt-lambda (f t [depth 0])
+    (lambda (f t [depth 0])
       (let loop ((t t)
                  (priors '())
                  (curr-depth 0))
@@ -578,4 +541,4 @@ Various common pieces of code that both the client and server need to access
   
   ;; tree->list : tree[x] -> sexp-tree[x]
   (define (tree->list tree)
-    (cons (branch-node tree) (map tree->list (branch-children tree)))))
+    (cons (branch-node tree) (map tree->list (branch-children tree))))

@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
 @title[#:tag "all-sync" #:style 'toc]{Synchronization}
 
@@ -25,3 +25,4 @@ for synchronization.}
 @include-section["evts.scrbl"]
 @include-section["channels.scrbl"]
 @include-section["semaphores.scrbl"]
+@include-section["async-channels.scrbl"]

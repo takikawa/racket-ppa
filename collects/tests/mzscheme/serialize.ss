@@ -4,7 +4,7 @@
 
 (Section 'serialization)
 
-(require (lib "serialize.ss"))
+(require mzlib/serialize)
 
 ;; ----------------------------------------
 
@@ -16,10 +16,12 @@
 (define-serializable-struct (d b) (w) insp)
 
 (define (same? v1 v2)
-  (define ht (make-hash-table))
+  ;; This is not quite the same as `equal?', veuase it knows
+  ;; about the structure types a, b, etc.
+  (define ht (make-hasheq))
   (let loop ([v1 v1][v2 v2])
     (cond
-     [(hash-table-get ht v1 (lambda () #f))
+     [(hash-ref ht v1 (lambda () #f))
       => (lambda (x) (eq? x v2))]
      [(and (a? v1)
 	   (a? v2)
@@ -30,62 +32,64 @@
 	   (b? v2)
 	   (not (d? v1))
 	   (not (d? v2)))
-      (hash-table-put! ht v1 v2)
+      (hash-set! ht v1 v2)
       (and (loop (b-x v1) (b-x v2))
 	   (loop (b-y v1) (b-y v2)))]
      [(and (c? v1) (c? v2))
-      (hash-table-put! ht v1 v2)
+      (hash-set! ht v1 v2)
       (loop (c-z v1) (c-z v2))]
      [(and (d? v1) (d? v2))
-      (hash-table-put! ht v1 v2)
+      (hash-set! ht v1 v2)
       (and (loop (b-x v1) (b-x v2))
 	   (loop (b-y v1) (b-y v2))
 	   (loop (d-w v1) (d-w v2)))]
      [(and (pair? v1)
 	   (pair? v2))
-      (hash-table-put! ht v1 v2)
+      (hash-set! ht v1 v2)
       (and (eq? (immutable? v1) (immutable? v2))
 	   (loop (car v1) (car v2))
 	   (loop (cdr v1) (cdr v2)))]
      [(and (vector? v1)
 	   (vector? v2))
-      (hash-table-put! ht v1 v2)
+      (hash-set! ht v1 v2)
       (and (eq? (immutable? v1) (immutable? v2))
 	   (= (vector-length v1) (vector-length v2))
 	   (andmap loop
 		   (vector->list v1)
 		   (vector->list v2)))]
      [(and (box? v1) (box? v2))
-      (hash-table-put! ht v1 v2)
+      (hash-set! ht v1 v2)
       (and (eq? (immutable? v1) (immutable? v2))
 	   (loop (unbox v1) (unbox v2)))]
-     [(and (hash-table? v1) (hash-table? v2))
-      (hash-table-put! ht v1 v2)
+     [(and (hash? v1) (hash? v2))
+      (hash-set! ht v1 v2)
       (and (eq? (immutable? v1) (immutable? v2))
-	   (eq? (hash-table? v1 'equal) (hash-table? v2 'equal))
-	   (eq? (hash-table? v1 'weak) (hash-table? v2 'weak))
-	   (= (hash-table-count v1) (hash-table-count v2))
+	   (eq? (hash-eq? v1) (hash-eq? v2))
+	   (eq? (hash-weak? v1) (hash-weak? v2))
+	   (= (hash-count v1) (hash-count v2))
 	   (let ([ok? #t])
-	     (hash-table-for-each
+	     (hash-for-each
 	      v1
 	      (lambda (k v)
 		(set! ok?
 		      (and ok?
-			   (loop v (hash-table-get v2 k (lambda () 'not-found)))))))
+			   (loop v (hash-ref v2 k (lambda () 'not-found)))))))
 	     ok?))]
      [(and (date? v1) (date? v2))
-      (hash-table-put! ht v1 v2)
+      (hash-set! ht v1 v2)
       (andmap loop 
 	      (vector->list (struct->vector v1))
 	      (vector->list (struct->vector v2)))]
      [(and (arity-at-least? v1) (arity-at-least? v2))
-      (hash-table-put! ht v1 v2)
+      (hash-set! ht v1 v2)
       (loop (arity-at-least-value v1)
 	    (arity-at-least-value v2))]
+     [(and (struct? v1) (prefab-struct-key v1)
+           (struct? v2) (prefab-struct-key v2))
+      (equal? (struct->vector v1) (struct->vector v2))]
      [else
       (and (equal? v1 v2)
 	   (eq? (immutable? v1) (immutable? v2)))])))
-      
 
 (define (test-ser v)
   (parameterize ([print-graph #t])
@@ -93,10 +97,10 @@
     (test #t same? v v)
     (test #t same? v (deserialize (serialize v)))))
 
-(define (mk-ht . args)
-  (let ([ht (apply make-hash-table args)])
-    (hash-table-put! ht 'apple 'ok)
-    (hash-table-put! ht 'banana 'better)
+(define (mk-ht mk)
+  (let ([ht (mk)])
+    (hash-set! ht 'apple 'ok)
+    (hash-set! ht 'banana 'better)
     ht))
 
 ;; ----------------------------------------
@@ -117,19 +121,21 @@
 (test-ser (current-directory))
 (test-ser (seconds->date (current-seconds)))
 (test-ser (procedure-arity (lambda (x . y) 10)))
-(test-ser (make-immutable-hash-table '((1 . a) (2 . b))))
-(test-ser (make-immutable-hash-table '(("x" . a) ("y" . b)) 'equal))
-(test-ser (mk-ht))
-(test-ser (mk-ht 'equal))
-(test-ser (mk-ht 'weak))
-(test-ser (mk-ht 'equal 'weak))
+(test-ser (make-immutable-hasheq '((1 . a) (2 . b))))
+(test-ser (make-immutable-hash '(("x" . a) ("y" . b))))
+(test-ser (mk-ht make-hasheq))
+(test-ser (mk-ht make-hash))
+(test-ser (mk-ht make-weak-hasheq))
+(test-ser (mk-ht make-weak-hash))
+(test-ser #s(a 0 1 2))
+(test-ser #s((a q 2) 0 1 2))
 
 (test-ser '(1))
 (test-ser '#(1))
 (test-ser '#&1)
 
+(test-ser (mcons 1 2))
 (test-ser (cons 1 2))
-(test-ser (cons-immutable 1 2))
 (test-ser (vector))
 (test-ser (vector 1 2))
 (test-ser (vector-immutable))
@@ -166,14 +172,16 @@
   (test-ser (cons p p)))
 (let ([p (make-arity-at-least 10)])
   (test-ser (cons p p)))
-(let ([p (mk-ht)])
+(let ([p (mk-ht make-hasheq)])
   (test-ser (cons p p)))
+(let ([p #s(a 1 2 3)])
+  (test-ser (list p p)))
 
 ;; Cycles
-(let ([p (cons 1 2)])
-  (set-car! p p)
+(let ([p (mcons 1 2)])
+  (set-mcar! p p)
   (test-ser p)
-  (set-cdr! p p)
+  (set-mcdr! p p)
   (test-ser p)
   (test-ser (make-c p))
   (test-ser (make-b p p)))
@@ -214,22 +222,20 @@
   (test-ser p)
   (test-ser (make-c p)))
 (let ([p (seconds->date (current-seconds))])
-  (set-date-second! p p)
   (test-ser p)
   (test-ser (cons p p)))
 (let ([p (make-arity-at-least 10)])
-  (set-arity-at-least-value! p p)
   (test-ser p)
   (test-ser (cons p p)))
-(let ([p (mk-ht)])
-  (hash-table-put! p 'banana p)
+(let ([p (mk-ht make-hasheq)])
+  (hash-set! p 'banana p)
   (test-ser p)
   (test-ser (cons p p)))
 
 ;; Cycles with immutable parts
-(let* ([p1 (cons 1 2)]
-       [p2 (cons-immutable 0 p1)])
-  (set-cdr! p1 p2)
+(let* ([p1 (mcons 1 2)]
+       [p2 (cons 0 p1)])
+  (set-mcdr! p1 p2)
   (test-ser p1)
   (test-ser p2)
   (test-ser (cons p1 p2))
@@ -253,10 +259,10 @@
   (test-ser (make-c p1))
   (test-ser (make-b p1 p2))
   (test-ser (make-b p2 p1)))
-(let* ([p1 (cons 1 2)]
-       [p2 (make-immutable-hash-table
+(let* ([p1 (mcons 1 2)]
+       [p2 (make-immutable-hasheq
 	    (cons (cons 'x p1) '((a . 2) (b . 4))))])
-  (set-cdr! p1 p2)
+  (set-mcdr! p1 p2)
   (test-ser p1)
   (test-ser p2)
   (test-ser (cons p1 p2))
@@ -265,7 +271,7 @@
 ;; ----------------------------------------
 
 (module ser-mod mzscheme
-   (require (lib "serialize.ss"))
+   (require mzlib/serialize)
    (provide ser-mod-test)
 
    (define-serializable-struct foo (a b))
@@ -273,13 +279,13 @@
    (define (ser-mod-test)
      (foo-a (deserialize (serialize (make-foo 1 2))))))
 
-(require ser-mod)
+(require 'ser-mod)
 (test 1 ser-mod-test)
 
 ;; ----------------------------------------
 ;; Classes
 
-(require (lib "class.ss"))
+(require mzlib/class)
 
 (define-serializable-class s:c% object%
   (init-field [one 0])

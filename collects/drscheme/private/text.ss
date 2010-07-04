@@ -1,8 +1,8 @@
 
-(module text (lib "a-unit.ss")
-  (require (lib "class.ss")
+#lang scheme/unit
+  (require mzlib/class
            "drsig.ss"
-           (lib "framework.ss" "framework"))
+           framework)
   
   (import)
   (export drscheme:text^)
@@ -31,4 +31,4 @@
       ;			    (get-filename)
       ;			    "Untitled"))])
       ;	      (send dc draw-text str dx dy)))])
-      (super-new))))
+      (super-new)))

@@ -1,3 +1,4 @@
-(module framework-sig mzscheme
-  (require "private/sig.ss")
-  (provide framework^))
+#lang scheme/base
+(require "private/sig.ss")
+(provide framework^)
+

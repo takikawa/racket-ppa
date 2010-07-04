@@ -1,8 +1,8 @@
 
-(module stacktrace mzscheme
-  (require (lib "unit.ss")
-           (lib "kerncase.ss" "syntax")
-           (lib "stx.ss" "syntax"))
+(module stacktrace scheme/base
+  (require mzlib/unit
+           syntax/kerncase
+           syntax/stx)
   
   (provide stacktrace@ stacktrace^ stacktrace-imports^)
   
@@ -33,7 +33,7 @@
       
       (define (module-level-expr-iterator stx)
         (kernel-syntax-case stx #f
-          [(provide . provide-specs)
+          [(#%provide . provide-specs)
            stx]
           [else-stx
            (general-top-level-expr-iterator stx)]))
@@ -48,9 +48,7 @@
            #`(define-syntaxes (var ...) #,(expr-iterator #'expr #f (current-code-inspector)))]
           [(begin . top-level-exprs)
            #`(begin #,@(map top-level-expr-iterator (syntax->list #'top-level-exprs)))]
-          [(require . require-specs)
-           stx]
-          [(require-for-syntax . require-specs)
+          [(#%require . require-specs)
            stx]
           [else
            (expr-iterator stx #f (current-code-inspector))]))
@@ -88,9 +86,9 @@
                                                #,@(recur-on-sequence (syntax->list #'bodies)))))
                            #`(arglist #,@(recur-on-sequence (syntax->list #'bodies)))))]
                     [else
-                     (error 'expr-syntax-object-iterator 
+                     (error 'expr-syntax-iterator 
                             "unexpected (case-)lambda clause: ~a" 
-                            (syntax-object->datum stx))]))]
+                            (syntax->datum stx))]))]
                [let-values-abstraction
                 (lambda (stx)
                   (kernel-syntax-case stx #f
@@ -108,22 +106,20 @@
                                            (syntax->list #`(rhs ...)))])
                          #`(kwd (new-clause ...) #,@(recur-on-sequence (syntax->list #'bodies)))))]
                     [else
-                     (error 'expr-syntax-object-iterator 
+                     (error 'expr-syntax-iterator 
                             "unexpected let(rec) expression: ~a"
                             stx
-                            ;(syntax-object->datum stx)
+                            ;(syntax->datum stx)
                             )]))]) 
           (syntax-recertify
            (kernel-syntax-case stx #f
              [var-stx
               (identifier? (syntax var-stx))
               stx]
-             [(lambda . clause)
-              #`(lambda #,@(lambda-clause-abstraction #'clause))]
+             [(#%plain-lambda . clause)
+              #`(#%plain-lambda #,@(lambda-clause-abstraction #'clause))]
              [(case-lambda . clauses)
               #`(case-lambda #,@(map lambda-clause-abstraction (syntax->list #'clauses)))]
-             [(if test then)
-              #`(if #,(recur-non-tail #'test) #,(recur-tail #'then))]
              [(if test then else)
               #`(if
                  #,(recur-non-tail #'test)
@@ -148,15 +144,13 @@
                     #,(recur-non-tail #'key)
                   #,(recur-non-tail #'mark)
                   #,(recur-tail #'body))]
-             [(#%app . exprs)
-              #`(#%app #,@(map recur-non-tail (syntax->list #'exprs)))]
-             [(#%datum . _)
-              stx]
+             [(#%plain-app . exprs)
+              #`(#%plain-app #,@(map recur-non-tail (syntax->list #'exprs)))]
              [(#%top . var)
               stx]
              [else
               (error 'expr-iterator "unknown expr: ~a" 
-                     (syntax-object->datum stx))])
+                     (syntax->datum stx))])
            stx
            insp
            #f)))

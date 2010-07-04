@@ -5,16 +5,16 @@
 ;;; Authors: Robby Findler, Paul Steckler
 
 (module drscheme-test-util mzscheme
-  (require (prefix fw: (lib "framework.ss" "framework"))
+  (require (prefix fw: framework)
            (lib "hierlist.ss" "hierlist")
-           (lib "mred.ss" "mred")
-           (lib "class.ss")
-           (lib "list.ss")
-           (lib "contract.ss")
-           (lib "etc.ss")
+           mred
+           mzlib/class
+           mzlib/list
+           mzlib/contract
+           mzlib/etc
            (lib "gui.ss" "tests" "utils")
-           (lib "contract.ss"))
-  
+           mzlib/contract)
+
   (provide/contract 
    [use-get/put-dialog ((-> any) path? . -> . void?)])
   
@@ -166,7 +166,7 @@
      [(frame wait-for-finish?)
       (verify-drscheme-frame-frontmost 'do-execute frame)
       (let ([button (send frame get-execute-button)])
-	(fw:test:button-push button)
+	(fw:test:run-one (lambda () (send button command)))
 	(when wait-for-finish?
 	  (wait-for-computation frame)))]))
   

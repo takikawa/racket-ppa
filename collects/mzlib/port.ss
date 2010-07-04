@@ -1,12 +1,9 @@
 
 (module port mzscheme
-  (require (lib "etc.ss")
-	   (lib "contract.ss")
-	   (lib "list.ss")
+  (require mzlib/etc
+	   mzlib/contract
+	   mzlib/list
 	   "private/port.ss")
-
-  (define (exact-non-negative-integer? i)
-    (and (number? i) (exact? i) (integer? i) (i . >= . 0)))
 
   (define (input-port-with-progress-evts? ip)
     (and (input-port? ip)
@@ -94,7 +91,7 @@
 	  (copy b)
 	  rd))]))
 
-  ;; `make-input-port/read-to-peek' sometimes need to wrap a special-value
+  ;; `make-input-port/read-to-peek' sometimes needs to wrap a special-value
   ;; procedure so that it's only called once when the value is both
   ;; peeked and read.
   (define-values (struct:memoized make-memoized memoized? memoized-ref memoized-set!)
@@ -116,13 +113,16 @@
 
   ;; Not kill-safe.
   ;; If the `read' proc returns an event, the event must produce 
-  ;;  0 always
+  ;;  0 always (which implies that the `read' proc must not return
+  ;;  a pipe input port).
   (define make-input-port/read-to-peek 
     (opt-lambda (name read fast-peek close 
 		      [location-proc #f] 
 		      [count-lines!-proc void] 
 		      [init-position 1]
-		      [buffer-mode-proc #f])
+		      [buffer-mode-proc #f]
+                      [buffering? #f]
+                      [on-consumed #f])
       (define lock-semaphore (make-semaphore 1))
       (define commit-semaphore (make-semaphore 1))
       (define-values (peeked-r peeked-w) (make-pipe))
@@ -146,8 +146,18 @@
 	(thread-resume manager-th (current-thread))
 	(dynamic-wind suspend-manager thunk resume-manager))
       (define (make-progress)
+        ;; We dont worry about this byte getting picked up directly
+        ;;  from peeked-r, because the pipe must have been empty when
+        ;;  we grabed the lock, and since we've grabbed the lock,
+        ;;  no other thread could have re-returned the pipe behind
+        ;;  our back.
 	(write-byte 0 peeked-w)
 	(read-byte peeked-r))
+      (define (consume-from-peeked s)
+        (let ([n (read-bytes-avail!* s peeked-r)])
+          (when on-consumed
+            (on-consumed n))
+          n))
       (define (read-it-with-lock s)
 	(if use-manager?
 	    (with-manager-lock (lambda () (do-read-it s)))
@@ -160,27 +170,50 @@
 	 s))
       (define (do-read-it s)
 	(if (byte-ready? peeked-r)
-            (read-bytes-avail!* s peeked-r)
+            (if on-consumed
+                (consume-from-peeked s)
+                peeked-r)
 	    ;; If nothing is saved from a peeking read,
 	    ;; dispatch to `read', otherwise return
 	    ;; previously peeked data
 	    (cond
 	     [(null? special-peeked) 
 	      (when progress-requested? (make-progress))
-	      (read s)]
-	     [else (if (bytes? (car special-peeked))
-		       (let ([b (car special-peeked)])
+              (if (and buffering?
+                       ((bytes-length s) . < . 10))
+                  ;; Buffering is enabled, so read more to move things
+                  ;; along:
+                  (let ([r (read buf)])
+                    (if (and (number? r) (positive? r))
+                        (begin
+                          (write-bytes buf peeked-w 0 r)
+                          (if on-consumed
+                              (consume-from-peeked s)
+                              peeked-r))
+                        (begin
+                          (when on-consumed
+                            (on-consumed r))
+                          r)))
+                  ;; Just read requested amount:
+                  (let ([v (read s)])
+                    (when on-consumed
+                      (on-consumed v))
+                    v))]
+	     [else (if (bytes? (mcar special-peeked))
+		       (let ([b (mcar special-peeked)])
 			 (write-bytes b peeked-w)
-			 (set! special-peeked (cdr special-peeked))
+			 (set! special-peeked (mcdr special-peeked))
 			 (when (null? special-peeked)
 			   (set! special-peeked-tail #f))
-			 (read-bytes-avail!* s peeked-r))
-		       (begin0
-			(car special-peeked)
+                         (consume-from-peeked s))
+		       (let ([v (mcar special-peeked)])
 			(make-progress)
-			(set! special-peeked (cdr special-peeked))
+			(set! special-peeked (mcdr special-peeked))
+                        (when on-consumed
+                          (on-consumed v))
 			(when (null? special-peeked)
-			  (set! special-peeked-tail #f))))])))
+			  (set! special-peeked-tail #f))
+                        v))])))
       (define (peek-it-with-lock s skip unless-evt)
         (if use-manager?
             (with-manager-lock (lambda () (do-peek-it s skip unless-evt)))
@@ -208,13 +241,17 @@
 		;; Empty special queue, so read through the original proc.
 		;; We only only need 
 		;;  (- (+ skip (bytes-length s)) (pipe-content-length peeked-w))
-		;; bytes, but read more (up to size of buf) to help move
-		;; things along.
-		(let* ([r (read buf)])
+		;; bytes, but if buffering is enabled, read more (up to size of
+                ;; buf) to help move things along.
+		(let* ([dest (if buffering?
+                                 buf
+                                 (make-bytes (- (+ skip (bytes-length s)) 
+                                                (pipe-content-length peeked-w))))]
+                       [r (read dest)])
 		  (cond
 		   [(number? r)
 		    ;; The nice case --- reading gave us more bytes
-		    (write-bytes buf peeked-w 0 r)
+		    (write-bytes dest peeked-w 0 r)
 		    ;; Now try again
 		    (peek-bytes-avail!* s skip #f peeked-r)]
 		   [(evt? r)
@@ -227,7 +264,7 @@
 			(choice-evt r (wrap-evt unless-evt (lambda (x) #f)))
 			r)]
 		   [else
-		    (set! special-peeked (cons r null))
+		    (set! special-peeked (mcons r null))
 		    (set! special-peeked-tail special-peeked)
 		    ;; Now try again
 		    (do-peek-it s skip unless-evt)]))]
@@ -256,34 +293,34 @@
 			 [else (let ([v (if (number? r)
 					    (subbytes t 0 r)
 					    r)])
-				 (let ([pr (cons v null)])
-				   (set-cdr! special-peeked-tail pr)
+				 (let ([pr (mcons v null)])
+				   (set-mcdr! special-peeked-tail pr)
 				   (set! special-peeked-tail pr))
 				 ;; Got something; now try again
 				 (do-peek-it s skip unless-evt))]))]
-		     [(eof-object? (car l)) 
+		     [(eof-object? (mcar l)) 
 		      ;; No peeking past an EOF
 		      eof]
-		     [(procedure? (car l))
+		     [(procedure? (mcar l))
 		      (if (zero? sk)
                           ;; We should call the procedure only once. Change
-                          ;;  (car l) to a memoizing function, if it isn't already:
-                          (let ([proc (car l)])
+                          ;;  (mcar l) to a memoizing function, if it isn't already:
+                          (let ([proc (mcar l)])
                             (if (memoized? proc)
                                 proc
                                 (let ([proc (memoize proc)])
-                                  (set-car! l proc)
+                                  (set-mcar! l proc)
                                   proc)))
                           ;; Skipping over special...
-			  (loop (sub1 sk) (cdr l)))]
-		     [(bytes? (car l))
-		      (let ([len (bytes-length (car l))])
+			  (loop (sub1 sk) (mcdr l)))]
+		     [(bytes? (mcar l))
+		      (let ([len (bytes-length (mcar l))])
 			(if (sk . < . len)
 			    (let ([n (min (bytes-length s)
 					  (- len sk))])
-			      (bytes-copy! s 0 (car l) sk (+ sk n))
+			      (bytes-copy! s 0 (mcar l) sk (+ sk n))
 			      n)
-			    (loop (- sk len) (cdr l))))])))])
+			    (loop (- sk len) (mcdr l))))])))])
 	      v)))
       (define (commit-it-with-lock amt unless-evt done-evt)
 	(if use-manager?
@@ -309,22 +346,22 @@
 		 [(null? l)
 		  ;; Requested commit was larger than previous peeks
 		  #f]
-		 [(bytes? (car l))
-		  (let ([bl (bytes-length (car l))])
+		 [(bytes? (mcar l))
+		  (let ([bl (bytes-length (mcar l))])
 		    (if (bl . > . amt)
 			;; Split the string
-			(let ([next (cons
-				     (subbytes (car l) amt)
-				     (cdr l))])
-			  (set-car! l (subbytes (car l) 0 amt))
-			  (set-cdr! l next)
+			(let ([next (mcons
+				     (subbytes (mcar l) amt)
+				     (mcdr l))])
+			  (set-mcar! l (subbytes (mcar l) 0 amt))
+			  (set-mcdr! l next)
 			  (when (eq? l special-peeked-tail)
 			    (set! special-peeked-tail next))
-			  (loop 0 (cdr l)))
+			  (loop 0 (mcdr l)))
 			;; Consume this string...
-			(loop  (- amt bl) (cdr l))))]
+			(loop  (- amt bl) (mcdr l))))]
 		 [else
-		  (loop (sub1 amt) (cdr l))])))))
+		  (loop (sub1 amt) (mcdr l))])))))
       (define (actual-commit p-commit l unless-evt done-evt)
 	;; The `finish' proc finally, actually, will commit...
 	(define (finish)
@@ -418,7 +455,7 @@
 	     (lambda (s skip unless-evt)
 	       (if (or unless-evt
 		       (byte-ready? peeked-r)
-		       (pair? special-peeked))
+		       (mpair? special-peeked))
 		   (peek-it s skip unless-evt)
 		   (fast-peek s skip fast-peek-k))))
 	   peek-it)
@@ -430,7 +467,12 @@
        location-proc
        count-lines!-proc
        init-position
-       buffer-mode-proc)))
+       (and buffer-mode-proc
+            (case-lambda
+             [() (buffer-mode-proc)]
+             [(mode)
+              (set! buffering? (eq? mode 'block))
+              (buffer-mode-proc mode)])))))
 
   (define peeking-input-port
     (opt-lambda (orig-in [name (object-name orig-in)] [delta 0])
@@ -507,19 +549,19 @@
 		(set! more-last #f)
 		(when close-w?
 		  (close-output-port w)))
-	      (when (bytes? (car more))
-		(let ([amt (bytes-length (car more))])
-		  (let ([wrote (write-bytes-avail* (car more) w)])
+	      (when (bytes? (mcar more))
+		(let ([amt (bytes-length (mcar more))])
+		  (let ([wrote (write-bytes-avail* (mcar more) w)])
 		    (if (= wrote amt)
 			(begin
-			  (set! more (cdr more))
+			  (set! more (mcdr more))
 			  (flush-more))
 			(begin
 			  ;; This means that we let too many bytes
 			  ;;  get written while a special was pending.
 			  ;;  (The limit is disabled when a special
                           ;;  is in the pipe.)
-			  (set-car! more (subbytes (car more) wrote))
+			  (set-mcar! more (subbytes (mcar more) wrote))
 			  ;; By peeking, make room for more:
 			  (peek-byte r (sub1 (min (pipe-content-length w)
 						  (- amt wrote))))
@@ -529,8 +571,8 @@
 	    (if (eq? v 0)
 		(if more-last
 		    ;; Return a special
-		    (let ([a (car more)])
-		      (set! more (cdr more))
+		    (let ([a (mcar more)])
+		      (set! more (mcdr more))
 		      (flush-more)
 		      (lambda (file line col ppos)
 			a))
@@ -550,8 +592,8 @@
 	(define (write-these-bytes str start end)
 	  (begin0
 	   (if more-last
-	       (let ([p (cons (subbytes str start end) null)])
-		 (set-cdr! more-last p)
+	       (let ([p (mcons (subbytes str start end) null)])
+		 (set-mcdr! more-last p)
 		 (set! more-last p)
 		 (- end start))
 	       (let ([v (write-bytes-avail* str w start end)])
@@ -562,9 +604,9 @@
 	     (semaphore-post more-sema)
 	     (set! more-sema #f))))
 	(define (write-spec v)
-	  (let ([p (cons v null)])
+	  (let ([p (mcons v null)])
 	    (if more-last
-		(set-cdr! more-last p)
+		(set-mcdr! more-last p)
 		(set! more p))
 	    (set! more-last p)
 	    (when more-sema
@@ -1156,10 +1198,128 @@
        eof)))
 
   ;; --------------------------------------------------
+
+  ;; Helper for reencode-input-port: simulate the composition
+  ;;  of a CRLF/CRNEL/NEL/LS -> LF decoding and some other
+  ;;  decoding.
+  ;; The "converter" `c' is (mcons converter saved), where
+  ;;  saved is #f if no byte is saved, otherwise it's a saved
+  ;;  byte. It would be nicer and closer to the `bytes-convert'
+  ;;  interface to not consume a trailing CR, but we don't
+  ;;  know the inner encoding, and so we can't rewind it.
+  (define (bytes-convert/post-nl c buf buf-start buf-end dest)
+    (cond
+     [(and (mcdr c) (= buf-start buf-end))
+      ;; No more bytes to convert; provide single
+      ;;  saved byte if it's not #\return, otherwise report 'aborts
+      (if (eq? (mcdr c) (char->integer #\return))
+          (values 0 0 'aborts)
+          (begin
+            (bytes-set! dest 0 (mcdr c))
+            (set-mcdr! c #f)
+            (values 1 0 'complete)))]
+     [(and (mcdr c) (= 1 (bytes-length dest)))
+      ;; We have a saved byte, but the destination is only 1 byte.
+      ;; If the saved byte is a return, we need to try decoding more,
+      ;; which means we may end up saving a non-#\return byte:
+      (if (eq? (mcdr c) (char->integer #\return))
+          (let-values ([(got-c used-c status)
+                        (bytes-convert (mcar c) buf buf-start buf-end dest)])
+            (if (positive? got-c)
+                (cond
+                 [(eq? (bytes-ref dest 0) (char->integer #\newline))
+                  ;; Found CRLF, so just produce LF (and nothing to save)
+                  (set-mcdr! c #f)
+                  (values 1 used-c status)]
+                 [else
+                  ;; Next char fits in a byte, so it isn't NEL, etc.
+                  ;; Save it, and for now return the #\return.
+                  (set-mcdr! c (bytes-ref dest 0))
+                  (bytes-set! dest 0 (char->integer #\newline))
+                  (values 1 used-c 'continues)])
+                ;; Didn't decode any more; ask for bigger input, etc.
+                (values 0 0 status)))
+          ;; Saved a non-#\return, so use that up now.
+          (begin
+            (bytes-set! dest 0 (mcdr c))
+            (set-mcdr! c #f)
+            (values 1 0 'continues)))]
+     [else
+      ;; Normal convert, maybe prefixed:
+      (let-values ([(got-c used-c status)
+                    (bytes-convert (mcar c) buf buf-start buf-end dest
+                                   (if (mcdr c) 1 0))])
+        (let* ([got-c (if (mcdr c)
+                          ;; Insert saved character:
+                          (begin
+                            (bytes-set! dest 0 (char->integer #\return))
+                            (set-mcdr! c #f)
+                            (add1 got-c))
+                          got-c)]
+               [got-c (if (and (positive? got-c)
+                               (eq? (bytes-ref dest (sub1 got-c)) (char->integer #\return))
+                               (not (eq? status 'error)))
+                          ;; Save trailing carriage return:
+                          (begin
+                            (set-mcdr! c (char->integer #\return))
+                            (sub1 got-c))
+                          got-c)])
+          ;; Iterate through the converted bytes to apply the newline conversions:
+          (let loop ([i 0]
+                     [j 0])
+            (cond
+             [(= i got-c) 
+              (values (- got-c (- i j)) used-c (if (and (eq? 'complete status)
+                                                        (mcdr c))
+                                                   'aborts
+                                                   status))]
+             [(eq? (bytes-ref dest i) (char->integer #\return))
+              (cond
+               [(= (add1 i) got-c) 
+                ;; Found lone CR:
+                (bytes-set! dest j (char->integer #\newline))
+                (loop (add1 i) (add1 j))]
+               [(eq? (bytes-ref dest (add1 i)) (char->integer #\newline))
+                ;; Found CRLF:
+                (bytes-set! dest j (char->integer #\newline))
+                (loop (+ i 2) (add1 j))]
+               [(and (eq? (bytes-ref dest (add1 i)) #o302)
+                     (eq? (bytes-ref dest (+ i 2)) #o205))
+                ;; Found CRNEL:
+                (bytes-set! dest j (char->integer #\newline))
+                (loop (+ i 3) (add1 j))]
+               [else
+                ;; Found lone CR:
+                (bytes-set! dest j (char->integer #\newline))
+                (loop (add1 i) (add1 j))])]
+             [(and (eq? (bytes-ref dest i) #o302)
+                   (eq? (bytes-ref dest (+ i 1)) #o205))
+              ;; Found NEL:
+              (bytes-set! dest j (char->integer #\newline))
+              (loop (+ i 2) (add1 j))]
+             [(and (eq? (bytes-ref dest i) #o342)
+                   (eq? (bytes-ref dest (+ i 1)) #o200)
+                   (eq? (bytes-ref dest (+ i 2)) #o250))
+              ;; Found LS:
+              (bytes-set! dest j (char->integer #\newline))
+              (loop (+ i 3) (add1 j))]
+             [else
+              ;; Anything else:
+              (unless (= i j)
+                (bytes-set! dest j (bytes-ref dest i)))
+              (loop (add1 i) (add1 j))]))))]))
   
   (define reencode-input-port
-    (opt-lambda (port encoding [error-bytes #f] [close? #f] [name (object-name port)])
-      (let ([c (bytes-open-converter encoding "UTF-8")]
+    (opt-lambda (port encoding [error-bytes #f] [close? #f] [name (object-name port)] 
+                      [newline-convert? #f]
+                      [decode-error (lambda (msg port)
+                                      (error 'reencode-input-port
+                                             (format "~a: ~e" msg)
+                                             port))])
+      (let ([c (let ([c (bytes-open-converter encoding "UTF-8")])
+                 (if newline-convert?
+                     (mcons c #f)
+                     c))]
 	    [ready-bytes (make-bytes 1024)]
 	    [ready-start 0]
 	    [ready-end 0]
@@ -1184,20 +1344,33 @@
 	    ;; Try converting already-read bytes:
 	    (let-values ([(got-c used-c status) (if (= buf-start buf-end)
 						    (values 0 0 'aborts)
-						    (bytes-convert c buf buf-start buf-end s))])
+						    ((if newline-convert? 
+                                                         bytes-convert/post-nl 
+                                                         bytes-convert)
+                                                     c buf buf-start buf-end s))])
+              (when (positive? used-c)
+                (set! buf-start (+ used-c buf-start)))
 	      (cond
 	       [(positive? got-c)
 		;; We converted some bytes into s.
-		(set! buf-start (+ used-c buf-start))
 		got-c]
 	       [(eq? status 'aborts)
 		(if buf-eof?
 		    ;; Had an EOF or special in the stream.
 		    (if (= buf-start buf-end)
-			(begin0
-			 buf-eof-result
-			 (set! buf-eof? #f)
-			 (set! buf-eof-result #f))
+                        (if (and newline-convert? (mcdr c)) ; should be bytes-convert-end
+                            ;; Have leftover CR:
+                            (begin
+                              (bytes-set! s 0 (if (eq? (mcdr c) (char->integer #\return))
+                                                  (char->integer #\newline)
+                                                  (mcdr c)))
+                              (set-mcdr! c #f)
+                              1)
+                            ;; Return EOF:
+                            (begin0
+                             buf-eof-result
+                             (set! buf-eof? #f)
+                             (set! buf-eof-result #f)))
 			(handle-error s))
 		    ;; Need more bytes.
 		    (begin
@@ -1230,11 +1403,13 @@
 	       [(eq? status 'continues)
 		;; Need more room to make progress at all.
 		;; Decode into ready-bytes.
-		(let-values ([(got-c used-c status) (bytes-convert c buf buf-start buf-end ready-bytes)])
-		  (unless (memq status '(continues complete))
-		    (error 'reencode-input-port-read
-			   "unable to make decoding progress: ~e"
-			   port))
+		(let-values ([(got-c used-c status) ((if newline-convert? 
+                                                         bytes-convert/post-nl 
+                                                         bytes-convert)
+                                                     c buf buf-start buf-end ready-bytes)])
+                  (unless (memq status '(continues complete))
+		    (decode-error "unable to make decoding progress"
+                                  port))
 		  (set! ready-start 0)
 		  (set! ready-end got-c)
 		  (set! buf-start (+ used-c buf-start))
@@ -1253,11 +1428,9 @@
 		  (set! ready-start 0)
 		  (set! ready-end (- (bytes-length error-bytes) cnt))
 		  cnt))
-	      (error
-	       'converting-input-port
-	       "decoding error in input stream: ~e"
-	       port)))
-
+              (decode-error "decoding error in input stream"
+                            port)))
+        
 	(unless c
 	  (error 'reencode-input-port 
 		 "could not create converter from ~e to UTF-8"
@@ -1270,16 +1443,24 @@
 	 (lambda ()
 	   (when close?
 	     (close-input-port port))
-	   (bytes-close-converter c))
+	   (bytes-close-converter (if newline-convert? 
+                                      (mcar c)
+                                      c)))
 	 #f void 1
 	 (case-lambda 
 	  [() buffer-mode]
-	  [(mode) (set! buffer-mode mode)])))))
+	  [(mode) (set! buffer-mode mode)])
+         (eq? buffer-mode 'block)))))
   
   ;; --------------------------------------------------
   
   (define reencode-output-port
-    (opt-lambda (port encoding [error-bytes #f] [close? #f] [name (object-name port)])
+    (opt-lambda (port encoding [error-bytes #f] [close? #f] [name (object-name port)]
+                      [convert-newlines-to #f]
+                      [decode-error (lambda (msg port)
+                                      (error 'reencode-input-port
+                                             (format "~a: ~e" msg)
+                                             port))])
       (let ([c (bytes-open-converter "UTF-8" encoding)]
 	    [ready-bytes (make-bytes 1024)]
 	    [ready-start 0]
@@ -1288,7 +1469,10 @@
 	    [out-start 0]
 	    [out-end 0]
 	    [buffer-mode (or (file-stream-buffer-mode port)
-			     'block)])
+			     'block)]
+            [debuffer-buf #f]
+            [newline-buffer #f])
+        (define-values (buffered-r buffered-w) (make-pipe 4096))
 	
 	;; The main writing entry point:
 	(define (write-it s start end no-buffer&block? enable-break?)
@@ -1297,6 +1481,7 @@
 	    ;; This is a flush request; no-buffer&block? must be #f
 	    ;; Note: we could get stuck because only half an encoding
 	    ;;  is available in out-bytes.
+            (flush-buffer-pipe #f enable-break?)
 	    (flush-some #f enable-break?)
 	    (if (buffer-flushed?)
 		0
@@ -1320,32 +1505,99 @@
 			  (set! out-start 0)
 			  (set! out-end 0)
 			  (- c out-len)))))])]
+           [(and (eq? buffer-mode 'block)
+                 (zero? (pipe-content-length buffered-r)))
+            ;; The port system can buffer to a pipe faster, so give it a pipe.
+            buffered-w]
 	   [else
-	    (when (or (> ready-end ready-start)
-		      (< (- (bytes-length out-bytes) out-end) 100))
-	      ;; Make room for conversion.
-	      (flush-some #f enable-break?))
-	    ;; Make room in buffer
-	    (when (positive? out-start)
-	      (bytes-copy! out-bytes 0 out-bytes out-start out-end)
-	      (set! out-end (- out-end out-start))
-	      (set! out-start 0))
+            ;; Flush/buffer from pipe, first:
+            (flush-buffer-pipe #f enable-break?)
+            ;; Flush as needed to make room in the buffer:
+            (make-buffer-room #f enable-break?)
 	    ;; Buffer some bytes:
-	    (let ([cnt (min (- end start)
-			    (- (bytes-length out-bytes) out-end))])
-	      (if (zero? cnt)
+	    (let-values ([(s2 start2 cnt2 used) (convert-newlines s start 
+                                                                  (- end start) 
+                                                                  (- (bytes-length out-bytes) out-end))])
+	      (if (zero? used)
 		  ;; No room --- try flushing again:
 		  (write-it s start end #f enable-break?)
 		  ;; Buffer and report success:
 		  (begin
-		    (bytes-copy! out-bytes out-end s start (+ start cnt))
-		    (set! out-end (+ cnt out-end))
+		    (bytes-copy! out-bytes out-end s2 start2 (+ start2 cnt2))
+		    (set! out-end (+ cnt2 out-end))
 		    (case buffer-mode
 		      [(none) (flush-all-now enable-break?)]
-		      [(line) (when (regexp-match-positions #rx#"[\r\n]" s start (+ start cnt))
+		      [(line) (when (regexp-match-positions #rx#"[\r\n]" s start (+ start used))
 				(flush-all-now enable-break?))])
-		    cnt)))]))
-	   
+		    used)))]))
+
+        (define (convert-newlines s start cnt avail)
+          ;; If newline converting is on, try convert up to cnt
+          ;;  bytes to produce a result that fits in avail bytes.
+          (if convert-newlines-to
+              ;; Conversion:
+              (let ([end (+ start cnt)]
+                    [avail (min avail 1024)])
+                (unless newline-buffer
+                  (set! newline-buffer (make-bytes 1024)))
+                (let loop ([i start][j 0])
+                  (cond
+                   [(or (= j avail) (= i end)) (values newline-buffer 0 j i)]
+                   [(eq? (char->integer #\newline) (bytes-ref s i))
+                    ;; Newline conversion
+                    (let ([len (bytes-length convert-newlines-to)])
+                      (if ((+ j len) . > . avail)
+                          ;; No room
+                          (values newline-buffer 0 j i)
+                          ;; Room
+                          (begin
+                            (bytes-copy! newline-buffer j convert-newlines-to)
+                            (loop (add1 i) (+ j len)))))]
+                   [else
+                    (bytes-set! newline-buffer j (bytes-ref s i))
+                    (loop (add1 i) (add1 j))])))
+              ;; No conversion:
+              (let ([cnt (min cnt avail)])
+                (values s start cnt cnt))))
+
+        (define (make-buffer-room non-block? enable-break?)
+          (when (or (> ready-end ready-start)
+                    (< (- (bytes-length out-bytes) out-end) 100))
+            ;; Make room for conversion.
+            (flush-some non-block? enable-break?)  ;; convert some
+            (flush-some non-block? enable-break?)) ;; write converted
+          ;; Make room in buffer
+          (when (positive? out-start)
+            (bytes-copy! out-bytes 0 out-bytes out-start out-end)
+            (set! out-end (- out-end out-start))
+            (set! out-start 0)))
+
+        (define (flush-buffer-pipe non-block? enable-break?)
+          (let loop ()
+            (if (zero? (pipe-content-length buffered-r))
+                'done
+                (begin
+                  (unless debuffer-buf
+                    (set! debuffer-buf (make-bytes 4096)))
+                  (make-buffer-room non-block? enable-break?)
+                  (let ([amt (- (bytes-length out-bytes) out-end)])
+                    (if (zero? amt)
+                        'stuck
+                        (if convert-newlines-to
+                            ;; Peek, convert newlines, write, then read converted amount:
+                             (let ([cnt (peek-bytes-avail! debuffer-buf 0 #f buffered-r 0 amt)])
+                              (let-values ([(s2 start2 cnt2 used) 
+                                            (convert-newlines debuffer-buf 0 cnt amt)])
+                                (bytes-copy! out-bytes out-end s2 start2 cnt2)
+                                (set! out-end (+ cnt2 out-end))
+                                (read-bytes-avail! debuffer-buf buffered-r 0 used)
+                                (loop)))
+                            ;; Skip an indirection: read directly and write:
+                             (let ([cnt (read-bytes-avail! debuffer-buf buffered-r 0 amt)])
+                               (bytes-copy! out-bytes out-end debuffer-buf 0 cnt)
+                               (set! out-end (+ cnt out-end))
+                               (loop)))))))))
+        
 	(define (non-blocking-write s start end)
 	  ;; For now, everything that we can flushed is flushed.
 	  ;;  Try to write the minimal number of bytes, and hope for the
@@ -1353,31 +1605,43 @@
 	  ;;  everyone is happy enough. If some of the bytes get written,
 	  ;;  the we will have buffered bytes when we shouldn't have.
 	  ;;  That probably won't happen, but we can't guarantee it.
-	  (let loop ([len 1])
-	    (let-values ([(got-c used-c status) (bytes-convert c s start (+ start len) ready-bytes)])
-	      (cond
-	       [(positive? got-c)
-		(try-flush-ready got-c used-c)]
-	       [(eq? status 'aborts)
-		(if (< len (- end start))
-		    ;; Try converting a bigger chunk
-		    (loop (add1 len))
-		    ;; We can't flush half an encoding, so just buffer it.
-		    (let ([cnt (- start end)])
-		      (when (> (- end start) (bytes-length out-bytes))
-			(raise-insane-decoding-length))
-		      (bytes-copy out-bytes 0 s start end)
-		      (set! out-start 0)
-		      (set! out-end cnt)
-		      cnt))]
-	       [(eq? status 'continues)
-		;; Not enough room in ready-bytes!? We give up.
-		(raise-insane-decoding-length)]
-	       [else
-		;; Encoding error. Try to flush error bytes.
-		(let ([cnt (bytes-length error-bytes)])
-		  (bytes-copy! ready-bytes 0 error-bytes)
-		  (try-flush-ready cnt 1))]))))
+          (if (sync/timeout 0.0 port)
+              ;; We should be able to write one byte...
+              (let loop ([len 1])
+                (let*-values ([(s2 start2 len2 used) (convert-newlines s start (- end start) len)]
+                              [(got-c used-c status) (bytes-convert c s2 start2 (+ start2 len2) ready-bytes)])
+                  (cond
+                   [(positive? got-c)
+                    (try-flush-ready got-c used-c)
+                    ;; If used-c < len2, then we converted only partially --- which
+                    ;;  is strange, because we kept adding bytes one at a time.
+                    ;;  we will just guess is that the unused bytes were not converted
+                    ;;  bytes, and generally hope that this sort of encoding doesn't
+                    ;;  show up.
+                    (- used (- len2 used-c))]
+                   [(eq? status 'aborts)
+                    (if (< len (- end start))
+                        ;; Try converting a bigger chunk
+                        (loop (add1 len))
+                        ;; We can't flush half an encoding, so just buffer it.
+                        (begin
+                          (when (> len2 (bytes-length out-bytes))
+                            (raise-insane-decoding-length))
+                          (bytes-copy out-bytes 0 s2 start2 (+ start2 len2))
+                          (set! out-start 0)
+                          (set! out-end len2)
+                          used))]
+                   [(eq? status 'continues)
+                    ;; Not enough room in ready-bytes!? We give up.
+                    (raise-insane-decoding-length)]
+                   [else
+                    ;; Encoding error. Try to flush error bytes.
+                    (let ([cnt (bytes-length error-bytes)])
+                      (bytes-copy! ready-bytes 0 error-bytes)
+                      (try-flush-ready cnt 1)
+                      used)])))
+              ;; Port is not ready for writing:
+              #f))
 
 	(define (write-special-it v no-buffer&block? enable-break?)
 	  (cond
@@ -1392,6 +1656,7 @@
 	   [else
 	    ;; Note: we could get stuck because only half an encoding
 	    ;;  is available in out-bytes.
+            (flush-buffer-pipe no-buffer&block? enable-break?)
 	    (flush-some no-buffer&block? enable-break?)
 	    (if (or (buffer-flushed?)
 		    (not no-buffer&block?))
@@ -1400,20 +1665,22 @@
 	
 	;; flush-all : -> 'done, 'not-done, or 'stuck
 	(define (flush-all non-block? enable-break?)
-	  (let ([orig-none-ready? (= ready-start ready-end)]
-		[orig-out-start out-start]
-		[orig-out-end out-end])
-	    (flush-some non-block? enable-break?)
-	    (if (buffer-flushed?)
-		'done
-		;; Couldn't flush everything. One possibility is that we need
-		;;  more bytes to convert before a flush.
-		(if (and orig-none-ready?
-			 (= ready-start ready-end)
-			 (= orig-out-start out-start)
-			 (= orig-out-end out-end))
-		    'stuck
-		    'not-done))))
+          (if (eq? (flush-buffer-pipe non-block? enable-break?) 'done)
+              (let ([orig-none-ready? (= ready-start ready-end)]
+                    [orig-out-start out-start]
+                    [orig-out-end out-end])
+                (flush-some non-block? enable-break?)
+                (if (buffer-flushed?)
+                    'done
+                    ;; Couldn't flush everything. One possibility is that we need
+                    ;;  more bytes to convert before a flush.
+                    (if (and orig-none-ready?
+                             (= ready-start ready-end)
+                             (= orig-out-start out-start)
+                             (= orig-out-end out-end))
+                        'stuck
+                        'not-done)))
+              'stuck))
 
 	(define (flush-all-now enable-break?)
 	  (case (flush-all #f enable-break?)
@@ -1421,20 +1688,17 @@
 	
 	(define (buffer-flushed?)
 	  (and (= ready-start ready-end)
-	       (= out-start out-end)))
+	       (= out-start out-end)
+               (zero? (pipe-content-length buffered-r))))
 	
-	;; Try to flush immediately a certain number of bytes
+	;; Try to flush immediately a certain number of bytes.
+        ;;   we've already converted them, so we have to keep
+        ;;   the bytes in any case.
 	(define (try-flush-ready got-c used-c)
 	  (let ([c (write-bytes-avail* ready-bytes port 0 got-c)])
-	    (if (zero? c)
-		;; Didn't flush any - give up:
-		#f
-		;; Hopefully, we flushed them all, but set ready-start and ready-end,
-		;;  just in case.
-		(begin	    
-		  (set! ready-start c)
-		  (set! ready-end got-c)
-		  used-c))))
+            (unless (= c got-c)
+              (set! ready-start c)
+              (set! ready-end got-c))))
 
 	;; Try to make progress flushing buffered bytes
 	(define (flush-some non-block? enable-break?)
@@ -1469,18 +1733,16 @@
 			(set! ready-end (bytes-length error-bytes)))
 		      ;; Raise an exception:
 		      (begin
-			(set! out-start (add1 out-start))
-			(error
-			 'reencode-output-port
-			 "error decoding output to stream: ~e"
+			(set! out-start out-end) ;; flush buffer so close can work
+			(decode-error
+			 "error decoding output to stream"
 			 port))))))))
 
 	;; This error is used when decoding wants more bytes to make progress even
 	;;  though we've supplied hundreds of bytes
 	(define (raise-insane-decoding-length)
-	  (error 'reencode-output-port-write
-		 "unable to make decoding progress: ~e"
-		 port))
+          (decode-error "unable to make decoding progress"
+                        port))
 
 	;; Check that a decoder is available:
 	(unless c
@@ -1494,7 +1756,7 @@
 	 write-it
 	 (lambda ()
 	   ;; Flush output
-	   (write-it #"" 0 0 #f #f)
+           (write-it #"" 0 0 #f #f)
 	   (when close?
 	     (close-output-port port))
 	   (bytes-close-converter c))
@@ -1512,6 +1774,41 @@
 				   (memq mode '(none))))
 		      ;; Flush output
 		      (write-it #"" 0 0 #f #f)))])))))
+
+  ;; ----------------------------------------
+
+  (define dup-output-port
+    (opt-lambda (p [close? #f])
+      (let ([new (transplant-output-port p 
+                                         (lambda ()
+                                           (port-next-location p))
+                                         (let-values ([(line col pos)
+                                                       (port-next-location p)])
+                                           (or pos
+                                               (file-position p)))
+                                         close?
+                                         (lambda ()
+                                           (port-count-lines! p)))])
+        (port-display-handler new (port-display-handler p))
+        (port-write-handler new (port-write-handler p))
+        new)))
+
+  (define dup-input-port
+    (opt-lambda (p [close? #f])
+      (let ([new (transplant-input-port p 
+                                        (lambda ()
+                                          (port-next-location p))
+                                        (let-values ([(line col pos)
+                                                      (port-next-location p)])
+                                          (or pos
+                                              (file-position p)))
+                                        close?
+                                        (lambda ()
+                                          (port-count-lines! p)))])
+        (port-read-handler new (port-read-handler p))
+        new)))
+
+  ;; ----------------------------------------
   
   (provide open-output-nowhere
 	   make-pipe-with-specials
@@ -1528,30 +1825,32 @@
 	   make-limited-input-port
 	   reencode-input-port
 	   reencode-output-port
+           dup-input-port
+           dup-output-port
 	   strip-shell-command-start)
   
   (provide/contract (read-bytes-avail!-evt (mutable-bytes? input-port-with-progress-evts?
 							   . -> . evt?))
-		    (peek-bytes-avail!-evt (mutable-bytes? exact-non-negative-integer? evt?/false
+		    (peek-bytes-avail!-evt (mutable-bytes? exact-nonnegative-integer? evt?/false
 							   input-port-with-progress-evts? 
 							   . -> . evt?))
 		    (read-bytes!-evt (mutable-bytes? input-port-with-progress-evts? . -> . evt?))
-		    (peek-bytes!-evt (mutable-bytes? exact-non-negative-integer? evt?/false
+		    (peek-bytes!-evt (mutable-bytes? exact-nonnegative-integer? evt?/false
 						     input-port-with-progress-evts? 
 						     . -> . evt?))
-		    (read-bytes-evt (exact-non-negative-integer? input-port-with-progress-evts? 
+		    (read-bytes-evt (exact-nonnegative-integer? input-port-with-progress-evts? 
 								 . -> . evt?))
-		    (peek-bytes-evt (exact-non-negative-integer? exact-non-negative-integer? evt?/false
+		    (peek-bytes-evt (exact-nonnegative-integer? exact-nonnegative-integer? evt?/false
 								 input-port-with-progress-evts? 
 								 . -> . evt?))
 		    (read-string!-evt (mutable-string? input-port-with-progress-evts? 
 						       . -> . evt?))
-		    (peek-string!-evt (mutable-string? exact-non-negative-integer? evt?/false
+		    (peek-string!-evt (mutable-string? exact-nonnegative-integer? evt?/false
 						       input-port-with-progress-evts? 
 						       . -> . evt?))
-		    (read-string-evt (exact-non-negative-integer? input-port-with-progress-evts? 
+		    (read-string-evt (exact-nonnegative-integer? input-port-with-progress-evts? 
 								  . -> . evt?))
-		    (peek-string-evt (exact-non-negative-integer? exact-non-negative-integer? evt?/false
+		    (peek-string-evt (exact-nonnegative-integer? exact-nonnegative-integer? evt?/false
 								  input-port-with-progress-evts? 
 								  . -> . evt?))
 		    (regexp-match-evt ((or/c regexp? byte-regexp? string? bytes?)

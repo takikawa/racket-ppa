@@ -1,11 +1,13 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
 @title[#:tag "bytestrings"]{Byte Strings}
 
 @guideintro["bytestrings"]{byte strings}
 
-A @pidefterm{byte string} is a fixed-length arary of bytes. A
+@local-table-of-contents[]
+
+A @deftech{byte string} is a fixed-length array of bytes. A
  @pidefterm{byte} is an exact integer between @scheme[0] and
  @scheme[255] inclusive.
 
@@ -140,7 +142,7 @@ positions are initialized with the given @scheme[b]s.
 
 @defproc[(bytes-append [bstr bytes?] ...) bytes?]{ 
 
-@index["byte strings" "concatenate"]{Returns} a new mutable byte string
+@index['("byte strings" "concatenate")]{Returns} a new mutable byte string
 that is as long as the sum of the given @scheme[bstr]s' lengths, and
 that contains the concatenated bytes of the given @scheme[bstr]s. If
 no @scheme[bstr]s are provided, the result is a zero-length byte
@@ -170,15 +172,14 @@ string.
 @; ----------------------------------------
 @section{Byte String Comparisons}
 
-
 @defproc[(bytes=? [bstr1 bytes?] [bstr2 bytes?] ...+) boolean?]{ Returns
  @scheme[#t] if all of the arguments are @scheme[eqv?].}
 
 @examples[(bytes=? #"Apple" #"apple")
           (bytes=? #"a" #"as" #"a")]
 
-@define[(bytes-sort direction)
-         @elem{Like @scheme[bytes<?], but checks whether the arguments are @|direction|.}]
+@(define (bytes-sort direction)
+   @elem{Like @scheme[bytes<?], but checks whether the arguments are @|direction|.})
 
 @defproc[(bytes<? [bstr1 bytes?] [bstr2 bytes?] ...+) boolean?]{
  Returns @scheme[#t] if the arguments are lexicographically sorted
@@ -198,7 +199,6 @@ string.
 
 @; ----------------------------------------
 @section{Bytes to/from Characters, Decoding and Encoding}
-
 
 @defproc[(bytes->string/utf-8 [bstr bytes?]
                               [err-char (or/c false/c char?) #f]
@@ -353,9 +353,10 @@ Certain encoding combinations are always available:
  @item{@scheme[(bytes-open-converter "UTF-8-permissive" "UTF-8")] ---
    @index['("UTF-8-permissive")]{the} identity conversion, except that
    any input byte that is not part of a valid encoding sequence is
-   effectively replaced by @scheme[(char->integer #\?)].  (This
-   handling of invalid sequences is consistent with the interpretation
-   of port bytes streams into characters; see @secref["ports"].)}
+   effectively replaced by the UTF-8 encoding sequence for
+   @schemevalfont{#\uFFFD}.  (This handling of invalid sequences is
+   consistent with the interpretation of port bytes streams into
+   characters; see @secref["ports"].)}
 
  @item{@scheme[(bytes-open-converter "" "UTF-8")] --- converts from
    the current locale's default encoding (see @secref["encodings"])
@@ -403,15 +404,15 @@ is any of the guaranteed combinations (including @scheme[""]) under
 Windows and Mac OS X.
 
 @margin-note{In PLT's software distributions for Windows, a suitable
-@file{iconv.dll} is included with @file{libmzsch@italic{VERS}.dll}.}
+@filepath{iconv.dll} is included with @filepath{libmzsch@italic{VERS}.dll}.}
 
 The set of available encodings and combinations varies by platform,
 depending on the @exec{iconv} library that is installed. Under
-Windows, @file{iconv.dll} or @file{libiconv.dll} must be in the same
-directory as @file{libmzsch@italic{VERS}.dll} (where @italic{VERS} is
+Windows, @filepath{iconv.dll} or @filepath{libiconv.dll} must be in the same
+directory as @filepath{libmzsch@italic{VERS}.dll} (where @italic{VERS} is
 a version number), in the user's path, in the system directory, or in
 the current executable's directory at run time, and the DLL must
-either supply @tt{_errno} or link to @file{msvcrt.dll} for
+either supply @tt{_errno} or link to @filepath{msvcrt.dll} for
 @tt{_errno}; otherwise, only the guaranteed combinations are
 available.}
 

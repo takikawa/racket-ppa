@@ -1,6 +1,6 @@
 
 (module number mzscheme
-  (require (lib "class.ss")
+  (require mzlib/class
            "wxme.ss")
 
   (provide reader)
@@ -19,8 +19,3 @@
                number
                (string->number (bytes->string/latin-1 number)))))
        (super-new)))))
-
-                   
-  
-  
-  

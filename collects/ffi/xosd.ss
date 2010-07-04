@@ -1,6 +1,6 @@
-(module xosd mzscheme
+#lang scheme/base
 
-(require (lib "foreign.ss")) (unsafe!)
+(require mzlib/foreign) (unsafe!)
 
 (define libxosd (ffi-lib "libxosd"))
 
@@ -102,5 +102,3 @@
 
 (defxosd* xosd-set-bar-length : _xosd _int -> _status)
 (defxosd* xosd-scroll : _xosd _int -> _status)
-
-)

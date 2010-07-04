@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2007 PLT Scheme Inc.
+// Copyright:  (c) 2004-2008 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -50,6 +50,8 @@ extern void wxMouseEventHandled(void);
 int wxTranslateRawKey(int key);
 
 int wxMenuBarHeight;
+
+extern int wx_leave_all_input_alone;
 
 extern wxApp *wxTheApp;
 //-----------------------------------------------------------------------------
@@ -369,7 +371,9 @@ void wxApp::doMacMouseDown(void)
 
 	wxTracking();
 	wxPrepareMenuDraw();
+        wx_leave_all_input_alone++;
 	menuResult = MenuSelect(cCurrentEvent.where);
+        --wx_leave_all_input_alone;
 	wxDoneMenuDraw(!!menuResult);
 	doMacInMenuBar(menuResult, FALSE);
       }
@@ -1436,8 +1440,6 @@ void wxApp::DoDefaultAboutItem(void)
 }
 
 //-----------------------------------------------------------------------------
-
-extern int wx_leave_all_input_alone;
 
 void wxPrimDialogSetUp()
 {

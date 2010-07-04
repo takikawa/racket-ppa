@@ -1,12 +1,20 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require["utils.ss"]
-@require-for-syntax[mzscheme]
+#lang scribble/doc
+@(require scribble/manual
+          "utils.ss"
+          (for-syntax scheme/base)
+          (for-label scribble/manual-struct))
 
-@title[#:tag "manual"]{PLT Manual Forms}
+@(define ellipses (scheme ...))
+@(define ellipses+ (scheme ...+))
 
-The @file{manual.ss} module provides all of @file{basic.ss}, and
-more...
+@title[#:tag "manual" #:style 'toc]{Manual Forms}
+
+@defmodule[scribble/manual]{The @schememodname[scribble/manual]
+library provides all of @schememodname[scribble/basic], plus
+additional functions that are relatively specific to writing PLT
+Scheme documentation.}
+
+@local-table-of-contents[]
 
 @; ------------------------------------------------------------------------
 @section[#:tag "scribble:manual:code"]{Typesetting Code}
@@ -36,9 +44,9 @@ because that's the way it is idented the use of @scheme[schemeblock].
 Furthermore, @scheme[define] is typeset as a keyword (bold and black)
 and as a hyperlink to @scheme[define]'s definition in the reference
 manual, because this document was built using a for-label binding of
-@scheme[define] (in the source) that match the for-label binding of
-the definition in the reference manual. Similarly, @scheme[not] is a
-hyperlink to the its definition in the reference manual.
+@scheme[define] (in the source) that matches a definition in the
+reference manual. Similarly, @scheme[not] is a hyperlink to the its
+definition in the reference manual.
 
 Use @scheme[unsyntax] to escape back to an expression that produces an
 @scheme[element]. For example,
@@ -73,15 +81,28 @@ A few other escapes are recognized symbolically:
 
 @itemize{
 
- @item{@scheme[(#,(scheme code:line) datum ...)] typesets as the
-       sequence of @scheme[datum]s (i.e., without the
-       @scheme[code:line] wrapper.}
+ @item{@scheme[(#,(scheme code:line) _datum ...)] typesets as the
+       sequence of @scheme[_datum]s (i.e., without the
+       @scheme[code:line] wrapper).}
 
- @item{@scheme[(#,(scheme code:comment) content-expr)] typesets as a
-       comment whose content (i.e., sequence of elements) is produced
-       by @scheme[content-expr].}
+ @item{@scheme[(#,(scheme code:comment) _datum)] typesets like
+       @scheme[_datum], but colored as a comment and prefixed with a
+       semi-colon. A typical @scheme[_datum] escapes from
+       Scheme-typesetting mode using @scheme[unsyntax] and
+       produces a paragraph using @scheme[t]: 
 
- @item{@schemeidfont{code:blank} typesets as a blank line.}
+       @verbatim[#:indent 2]|{
+         (code:comment #, @t{this is a comment})
+       }|}
+
+ @item{@schemeidfont{code:blank} typesets as a blank space.}
+
+ @item{@schemeidfont{_}@scheme[_id] typesets as @scheme[id], but
+       colored as a variable (like @scheme[schemevarfont]); this
+       escape applies only if @schemeidfont{_}@scheme[_id] has no
+       for-label binding and is not specifically colored as a subform
+       non-terminal via @scheme[defform], a variable via
+       @scheme[defproc], etc.}
 
 }
 
@@ -100,12 +121,15 @@ without insetting the code.}
 @scheme[datum] are typeset after a prompt representing a REPL.}
 
 @defform[(schememod lang datum ...)]{Like @scheme[schemeblock], but
-the @scheme[datum] are typeset inside a @schemefont{#module}-form
+the @scheme[datum] are typeset inside a @schememodfont{#lang}-form
 module whose language is @scheme[lang].}
 
 @defform[(scheme datum ...)]{Like @scheme[schemeblock], but typeset on
 a single line and wrapped with its enclosing paragraph, independent of
 the formatting of @scheme[datum].}
+
+@defform[(SCHEME datum ...)]{Like @scheme[scheme], but with the
+@scheme[UNSYNTAX] escape like @scheme[schemeblock].}
 
 @defform[(schemeresult datum ...)]{Like @scheme[scheme], but typeset
 as a REPL value (i.e., a single color with no hyperlinks).}
@@ -113,23 +137,26 @@ as a REPL value (i.e., a single color with no hyperlinks).}
 @defform[(schemeid datum ...)]{Like @scheme[scheme], but typeset
 as an unbound identifier (i.e., no coloring or hyperlinks).}
 
-@defform[(schememodname datum ...)]{Like @scheme[scheme], but typeset
-as a @schemefont{#module} language name.}
+@defform[(schememodname datum)]{Like @scheme[scheme], but typeset as a
+module path. If @scheme[datum] is an identifier, then it is
+hyperlinked to the module path's definition as created by
+@scheme[defmodule].}
 
 @defproc[(litchar [str string?]) element?]{Typesets @scheme[str] as a
 representation of literal text. Use this when you have to talk about
 the individual characters in a stream of text, as as when documenting
 a reader extension.}
 
-@defproc[(verbatim [str string?]) flow-element?]{Typesets @scheme[str]
+@defproc[(verbatim [#:indent indent integer? 0] [str string?] ...)
+         flow-element?]{Typesets @scheme[str]
 as a table/paragraph in typewriter font with the linebreaks specified
 by newline characters in @scheme[str]. ``Here strings'' are often
 useful with @scheme[verbatim].}
 
-@defproc[(schemefont [pre-content any/c] ...) element?]{Typesets the given
-content as uncolored, unhyperlinked Scheme. This procedure is useful
-for typesetting things like @scheme{#module}, which are not
-@scheme[read]able by themselves.}
+@defproc[(schemefont [pre-content any/c] ...) element?]{Typesets
+@tech{decode}d @scheme[pre-content] as uncolored, unhyperlinked
+Scheme. This procedure is useful for typesetting things like
+@schemefont{#lang}, which are not @scheme[read]able by themselves.}
 
 @defproc[(schemevalfont [pre-content any/c] ...) element?]{Like
 @scheme[schemefont], but colored as a value.}
@@ -139,6 +166,10 @@ for typesetting things like @scheme{#module}, which are not
 
 @defproc[(schemeidfont [pre-content any/c] ...) element?]{Like
 @scheme[schemefont], but colored as an identifier.}
+
+@defproc[(schemevarfont [pre-content any/c] ...) element?]{Like
+@scheme[schemefont], but colored as a variable (i.e., an argument or
+sub-form in a procedure being documented).}
 
 @defproc[(schemekeywordfont [pre-content any/c] ...) element?]{Like
 @scheme[schemefont], but colored as a syntactic form name.}
@@ -150,38 +181,152 @@ for typesetting things like @scheme{#module}, which are not
 @scheme[schemefont], but colored as meta-syntax, such as backquote or
 unquote.}
 
-@defproc[(procedure [pre-content any/c] ...) element?]{Typesets the given
-content as a procedure name in a REPL result (e.g., in typewriter font
-with a @litchar{#<procedure:} prefix and @litchar{>} suffix.).}
+@defproc[(schemeerror [pre-content any/c] ...) element?]{Like
+@scheme[schemefont], but colored as error-message text.}
 
-@defform[(var datum)]{Typesets @scheme[var] as an identifier that is
-an argument or sub-form in a procedure being
-documented. Normally, the @scheme[defproc] and @scheme[defform]
-arrange for @scheme[scheme] to format such identifiers automatically
-in the description of the procedure, but use @scheme[var] if that
-cannot work for some reason.}
+@defproc[(procedure [pre-content any/c] ...) element?]{Typesets
+@tech{decode}d @scheme[pre-content] as a procedure name in a REPL
+result (e.g., in typewriter font with a @litchar{#<procedure:} prefix
+and @litchar{>} suffix.).}
+
+@defform[(var datum)]{Typesets @scheme[datum] as an identifier that is
+an argument or sub-form in a procedure being documented. Normally, the
+@scheme[defproc] and @scheme[defform] arrange for @scheme[scheme] to
+format such identifiers automatically in the description of the
+procedure, but use @scheme[var] if that cannot work for some reason.}
 
 @defform[(svar datum)]{Like @scheme[var], but for subform non-terminals
 in a form definition.}
 
 @; ------------------------------------------------------------------------
-@section{Definition Reference}
+@section[#:tag "doc-modules"]{Documenting Modules}
 
-@defform/subs[(defproc (id arg-spec ...)
-                       result-contract-expr-datum
-                       pre-flow ...)
-              ([arg-spec (arg-id contract-expr-datum)
-                         (arg-id contract-expr-datum default-expr)
-                         (keyword arg-id contract-expr-datum)
-                         (keyword arg-id contract-expr-datum default-expr)])]{
+@defform/subs[(defmodule id maybe-sources pre-flow ...)
+              ([maybe-sources code:blank
+                              (code:line #:use-sources (mod-path ...))])]{
 
 Produces a sequence of flow elements (encaptured in a @scheme[splice])
-to document a procedure named @scheme[id]. The @scheme[id] is indexed,
-and it also registered so that @scheme[scheme]-typeset uses of the
-identifier (with the same for-label binding) are hyperlinked to this
-documentation. The @scheme[id] should have a for-label binding (as
-introduced by @scheme[require-for-label]) that determines the module
-binding being defined.
+to start the documentation for a module that can be @scheme[require]d
+using the path @scheme[id]. The @tech{decode}d @scheme[pre-flow]s
+introduce the module, but need not include all of the module content.
+
+Besides generating text, this form expands to a use of
+@scheme[declare-exporting] with @scheme[id]; the
+@scheme[#:use-sources] clause, if provided, is propagated to
+@scheme[declare-exporting]. Consequently, @scheme[defmodule] should be
+used at most once in a section, though it can be shadowed with
+@scheme[defmodule]s in sub-sections.
+
+Hyperlinks created by @scheme[schememodname] are associated with the
+enclosing section, rather than the local @scheme[id] text.}
+
+
+@defform[(defmodulelang id maybe-sources pre-flow ...)]{
+
+Like @scheme[defmodule], but documents @scheme[id] as a module path
+suitable for use by either @scheme[require] or @schememodfont{#lang}.}
+
+
+@defform[(defmodule* (id ...+) maybe-sources pre-flow ...)]{
+
+Like @scheme[defmodule], but introduces multiple module paths instead
+of just one.}
+
+
+@defform[(defmodulelang* (id ...+) maybe-sources pre-flow ...)]{
+
+Like @scheme[defmodulelang], but introduces multiple module paths
+instead of just one.}
+
+
+@defform[(defmodule*/no-declare (id ...) pre-flow ...)]{
+
+Like @scheme[defmodule*], but without expanding to
+@scheme[declare-exporting]. Use this form when you want to provide a
+more specific list of modules (e.g., to name both a specific module
+and one that combines several modules) via your own
+@scheme[declare-exporting] declaration.}
+
+
+@defform[(defmodulelang*/no-declare (id ...) pre-flow ...)]{
+
+Like @scheme[defmodulelang*], but without expanding to
+@scheme[declare-exporting].}
+
+
+@defform/subs[(declare-exporting mod-path ... maybe-sources)
+              ([maybe-sources #:use-sources (mod-path ...)])]{
+                                 
+Associates the @scheme[mod-path]s to all bindings defined within the
+enclosing section, except as overridden by other
+@scheme[declare-exporting] declarations in nested sub-sections.  The
+list of @scheme[mod-path]s is shown, for example, when the user hovers
+the mouse over one of the bindings defined within the section.
+
+More significantly, the first @scheme[mod-path] plus the
+@scheme[#:use-sources] @scheme[mod-path]s determine the binding that
+is documented by each @scheme[defform], @scheme[defproc], or similar
+form within the section that contains the @scheme[declare-exporting]
+declaration:
+
+@itemize{
+
+ @item{If no @scheme[#:use-sources] clause is supplied, then the
+       documentation applies to the given name as exported by the first
+       @scheme[mod-path].}
+
+ @item{If @scheme[#:use-sources] @scheme[mod-path]s are supplied, then
+       they are tried in order. The first one to provide an export
+       with the same symbolic name and
+       @scheme[free-label-identifier=?] to the given name is used as
+       the documented binding. This binding is assumed to be the same
+       as the identifier as exported by the first @scheme[mod-path] in
+       the @scheme[declare-exporting] declaration.}
+
+}
+
+The initial @scheme[mod-path]s sequence can be empty if
+@scheme[mod-path]s are given with @scheme[#:use-sources]. In that
+case, the rendered documentation never reports an exporting module for
+identifiers that are documented within the section, but the
+@scheme[mod-path]s in @scheme[#:use-sources] provide a binding context
+for connecting (via hyperlinks) definitions and uses of identifiers.
+
+The @scheme[declare-exporting] form should be used no more than once
+per section, since the declaration applies to the entire section,
+although overriding @scheme[declare-exporting] forms can appear in
+sub-sections.}
+
+@; ------------------------------------------------------------------------
+@section[#:tag "doc-forms"]{Documenting Forms, Functions, Structure Types, and Values}
+
+@defform/subs[(defproc prototype
+                       result-contract-expr-datum
+                       pre-flow ...)
+              ([prototype (id arg-spec ...)
+                          (prototype arg-spec ...)]
+               [arg-spec (arg-id contract-expr-datum)
+                         (arg-id contract-expr-datum default-expr)
+                         (keyword arg-id contract-expr-datum)
+                         (keyword arg-id contract-expr-datum default-expr)
+                         ellipses
+                         ellipses+]
+               [ellipses #, @ellipses]
+               [ellipses+ #, @ellipses+])]{
+
+Produces a sequence of flow elements (encapsulated in a
+@scheme[splice]) to document a procedure named @scheme[id]. Nesting
+@scheme[prototype]s corresponds to a curried function, as in
+@scheme[define]. The @scheme[id] is indexed, and it also registered so
+that @scheme[scheme]-typeset uses of the identifier (with the same
+for-label binding) are hyperlinked to this documentation.
+
+A @scheme[defmodule] or @scheme[declare-exporting] form (or one of the
+variants) in an enclosing section determines the @scheme[id] binding
+that is being defined. The @scheme[id] should also have a for-label
+binding (as introduced by @scheme[(require (for-label ....))]) that
+matches the definition binding; otherwise, the defined @scheme[id]
+will not typeset correctly within the definition.
 
 Each @scheme[arg-spec] must have one of the following forms:
 
@@ -202,25 +347,29 @@ Each @scheme[arg-spec] must have one of the following forms:
        Like the previous case, but with a default
        value.}
 
-@specsubform[#, @schemeidfont{...}]{ Any number of the preceding argument
-      (normally at the end).}
+@specsubform[#, @ellipses]{Any number of the preceding argument.  This
+       form is normally used at the end, but keyword-based arguments
+       can sensibly appear afterward. See also the documentation for
+       @scheme[append] for a use of @ellipses before the last
+       argument.}
 
-@specsubform[#, @schemeidfont{...+}]{One or more of the preceding argument
-       (normally at the end).}
+@specsubform[#, @ellipses+]{One or more of the preceding argument
+       (normally at the end, like @ellipses).}
 
 The @scheme[result-contract-expr-datum] is typeset via
 @scheme[schemeblock0], and it represents a contract on the procedure's
 result.
 
-The @scheme[pre-flow]s list is parsed as a flow that documents the
-procedure. In this description, references to @svar[arg-id]s
-are typeset as procedure arguments.
+The @tech{decode}d @scheme[pre-flow] documents the procedure. In this
+description, references to @svar[arg-id]s using @scheme[scheme],
+@scheme[schemeblock], @|etc| are typeset as procedure arguments.
 
-The typesetting of all data before the @scheme[pre-flow]s ignores the
-source layout.}
+The typesetting of all information before the @scheme[pre-flow]s
+ignores the source layout, except that the local formatting is
+preserved for contracts and default-values expressions.}
 
 
-@defform[(defproc* ([(id arg-spec ...)
+@defform[(defproc* ([prototype
                      result-contract-expr-datum] ...)
                    pre-flow ...)]{
 
@@ -234,45 +383,59 @@ can also be defined by a single @scheme[defproc*], for the case that
 it's best to document a related group of procedures at once.}
 
 
-@defform/subs[(defform maybe-literals (id . datum) pre-flow ...)
-              ([maybe-literals code:blank
+@defform/subs[(defform maybe-id maybe-literals form-datum pre-flow ...)
+              ([maybe-id code:blank
+                         (code:line #:id id)]
+               [maybe-literals code:blank
                                (code:line #:literals (literal-id ...))])]{
 
-Produces a a sequence of flow elements (encaptured in a
-@scheme[splice]) to document a syntatic form named by @scheme[id]. The
-@scheme[id] is indexed, and it is also registered so that
+Produces a sequence of flow elements (encapsulated in a
+@scheme[splice]) to document a syntatic form named by @scheme[id]
+whose syntax described by @scheme[form-datum]. If no @scheme[#:id] is used
+to specify @scheme[id], then @scheme[form-datum] must have the form
+@scheme[(id . _datum)].
+
+The @scheme[id] is indexed, and it is also registered so that
 @scheme[scheme]-typeset uses of the identifier (with the same
-for-label binding) are hyperlinked to this documentation.  The
-@scheme[id] should have a for-label binding (as introduced by
-@scheme[require-for-label]) that determines the module binding being
-defined.
+for-label binding) are hyperlinked to this documentation.
 
-The @scheme[pre-flow]s list is parsed as a flow that documents the
-procedure. In this description, a reference to any identifier in
-@scheme[datum] is typeset as a sub-form non-terminal. If
-@scheme[#:literals] clause is provided, however, instances of the
-@scheme[literal-id]s are typeset normally.
+The @scheme[defmodule] or @scheme[declare-exporting] requirements, as
+well as the binding requirements for @scheme[id], are the same as for
+@scheme[defproc].
 
-The typesetting of @scheme[(id . datum)] preserves the source
-layout, like @scheme[schemeblock], and unlike @scheme[defproc].}
+The @tech{decode}d @scheme[pre-flow] documents the form. In this
+description, a reference to any identifier in @scheme[form-datum] via
+@scheme[scheme], @scheme[schemeblock], @|etc| is typeset as a sub-form
+non-terminal. If @scheme[#:literals] clause is provided, however,
+instances of the @scheme[literal-id]s are typeset normally (i.e., as
+determined by the enclosing context).
 
-@defform[(defform* maybe-literals [(id . datum) ..+] pre-flow ...)]{
+The typesetting of @scheme[form-datum] preserves the source layout,
+like @scheme[schemeblock].}
+
+@defform[(defform* maybe-id maybe-literals [form-datum ...+] pre-flow ...)]{
 
 Like @scheme[defform], but for multiple forms using the same
-@scheme[id].}
+@scheme[_id].}
 
-@defform[(defform/subs maybe-literals (id . datum)
+@defform[(defform/subs maybe-id maybe-literals form-datum
            ([nonterm-id clause-datum ...+] ...)
            pre-flow ...)]{
 
 Like @scheme[defform], but including an auxiliary grammar of
-non-terminals shown with the @scheme[id] form. Each
+non-terminals shown with the @scheme[_id] form. Each
 @scheme[nonterm-id] is specified as being any of the corresponding
 @scheme[clause-datum]s, where the formatting of each
 @scheme[clause-datum] is preserved.}
 
 
-@defform[(defform/none datum pre-flow ...)]{
+@defform[(defform*/subs maybe-id maybe-literals [form-datum ...]
+           pre-flow ...)]{
+
+Like @scheme[defform/subs], but for multiple forms for @scheme[_id].}
+
+
+@defform[(defform/none maybe-literal form-datum pre-flow ...)]{
 
 Like @scheme[defform], but without registering a definition.}
 
@@ -282,9 +445,9 @@ Like @scheme[defform], but without registering a definition.}
 Like @scheme[defform], but with a plain @scheme[id] as the form.}
 
 
-@defform[(specform maybe-literals (id . datum) pre-flow ...)]{
+@defform[(specform maybe-literals datum pre-flow ...)]{
 
-Like @scheme[defform], with without indexing or registering a
+Like @scheme[defform], but without indexing or registering a
 definition, and with indenting on the left for both the specification
 and the @scheme[pre-flow]s.}
 
@@ -352,12 +515,22 @@ Like @scheme[defproc], but for a non-procedure binding.}
               ([struct-name id
                             (id super-id)]
                [flag-keywords code:blank
-                              #:immutable
+                              #:mutable
                               (code:line #:inspector #f)
-                              (code:line #:immutable #:inspector #f)])]{
+                              (code:line #:mutable #:inspector #f)])]{
 
 Similar to @scheme[defform] or @scheme[defproc], but for a structure
 definition.}
+
+
+@defform[(deftogether [def-expr ...] pre-flow ...)]{
+
+Combines the definitions created by the @scheme[def-expr]s into a
+single definition box. Each @scheme[def-expr] should produce a
+definition point via @scheme[defproc], @scheme[defform], etc. Each
+@scheme[def-expr] should have an empty @scheme[pre-flow]; the
+@tech{decode}d @scheme[pre-flow] sequence for the @scheme[deftogether]
+form documents the collected bindings.}
 
 
 @defform/subs[(schemegrammar maybe-literals id clause-datum ...+)
@@ -376,14 +549,17 @@ Like @scheme[schemegrammar], but for typesetting multiple productions
 at once, aligned around the @litchar{=} and @litchar{|}.}
 
 @; ------------------------------------------------------------------------
-@section{Classes and Interfaces}
+@section[#:tag "doc-classes"]{Documenting Classes and Interfaces}
 
-@defform[(defclass id super-id (intf-id ...) pre-flow ...)]{
+@defform/subs[(defclass id super (intf-id ...) pre-flow ...)
+              ([super super-id
+                      (mixin-id super)])]{
 
 Creates documentation for a class @scheme[id] that is a subclass of
-@scheme[super-id] and implements each interface @scheme[intf-id]. Each
-@scheme[super-id] (except @scheme[object%]) and @scheme[intf-id] must
-be documented somewhere via @scheme[defclass] or @scheme[definterface].
+@scheme[super] and implements each interface @scheme[intf-id]. Each
+identifier in @scheme[super] (except @scheme[object%]) and
+@scheme[intf-id] must be documented somewhere via @scheme[defclass] or
+@scheme[definterface].
 
 The decoding of the @scheme[pre-flow] sequence should start with
 general documentation about the class, followed by constructor
@@ -392,7 +568,7 @@ definitions (see @scheme[defmethod]). In rendered form, the
 constructor and method specification are indented to visually group
 them under the class definition.}
 
-@defform[(defclass/title id super-id (intf-id ...) pre-flow ...)]{
+@defform[(defclass/title id super (intf-id ...) pre-flow ...)]{
 
 Like @scheme[defclass], also includes a @scheme[title] declaration
 with the style @scheme['hidden]. In addition, the constructor and
@@ -410,6 +586,19 @@ Like @scheme[defclass], but for an interfaces. Naturally,
 @defform[(definterface/title id (intf-id ...) pre-flow ...)]{
 
 Like @scheme[definterface], but for single-page rendering as in
+@scheme[defclass/title].}
+
+@defform[(defmixin id (domain-id ...) (range-id ...) pre-flow ...)]{
+
+Like @scheme[defclass], but for a mixin. Any number of
+@scheme[domain-id] classes and interfaces are specified for the
+mixin's input requires, and any number of result classes and (more
+likely) interfaces are specified for the @scheme[range-id]. The
+@scheme[domain-id]s supply inherited methods.}
+
+@defform[(defmixin/title id (domain-id ...) (range-id ...) pre-flow ...)]{
+
+Like @scheme[defmixin], but for single-page rendering as in
 @scheme[defclass/title].}
 
 @defform/subs[(defconstructor (arg-spec ...) pre-flow ...)
@@ -432,6 +621,12 @@ of by-name arguments (for use with @scheme[new]).}
 Like @scheme[defconstructor/make], but with multiple constructor
 patterns analogous @scheme[defproc*].}
 
+@defform[(defconstructor/auto-super [(arg-spec ...) ...] pre-flow ...)]{
+
+Like @scheme[defconstructor], but the constructor is
+annotated to indicate that additional initialization arguments are
+accepted and propagated to the superclass.}
+
 @defform[(defmethod (id arg-spec ...)
                     result-contract-expr-datum
                     pre-flow ...)]{
@@ -446,39 +641,102 @@ Like @scheme[defproc], but for a method within a @scheme[defclass] or
 Like @scheme[defproc*], but for a method within a @scheme[defclass] or
 @scheme[definterface] body.}
 
+
+@defform[(method class/intf-id method-id)]{
+
+Creates a hyperlink to the method named by @scheme[method-id] in the
+class or interface named by @scheme[class/intf-id]. The hyperlink
+names the method, only; see also @scheme[xmethod].
+
+For-label binding information is used with @scheme[class/intf-id], but
+not @scheme[method-id].}
+
+@defform[(xmethod class/intf-id method-id)]{
+
+Like @scheme[method], but the hyperlink shows both the method name and
+the containing class/interface.}
+
 @; ------------------------------------------------------------------------
-@section{Various String Forms}
+@section[#:tag "doc-signatures"]{Documenting Signatures}
+
+@defform[(defsignature id (super-id ...) pre-flow ...)]{
+
+Defines a signature @scheme[id] that extends the @scheme[super-id]
+signatures. Any elements defined in @tech{decode}d
+@scheme[pre-flow]s---including forms, procedures, structure types,
+classes, interfaces, and mixins---are defined as members of the
+signature instead of direct bindings. These definitions can be
+referenced through @scheme[sigelem] instead of @scheme[scheme].
+
+The @tech{decode}d @scheme[pre-flow]s inset under the signature
+declaration in the typeset output, so no new sections, @|etc| can be
+started.}
+
+@defform[(defsignature/splice id (super-id ...) pre-flow ...)]{
+
+Like @scheme[defsignature], but the @tech{decode}d @scheme[pre-flow]s
+are not typeset under the signature declaration, and new sections,
+@|etc| can be started in the @scheme[pre-flow]s.}
+
+@defproc[(signature-desc [pre-flow any/c] ...) any/c]{
+
+Produces an opaque value that @scheme[defsignature] recognizes to
+outdent in the typeset form. This is useful for text describing the
+signature as a whole to appear right after the signature declaration.}
+
+@defform[(sigelem sig-id id)]{
+
+Typesets the identifier @scheme[id] with a hyperlink to its definition
+as a member of the signature named by @scheme[sig-id].}
+
+@; ------------------------------------------------------------------------
+@section[#:tag "doc-strings"]{Various String Forms}
+
+@defproc[(emph [pre-content any/c] ...) element?]{Typesets the
+@tech{decode}d @scheme[pre-content] with emphasis (e.g., in italic).}
 
 @defproc[(defterm [pre-content any/c] ...) element?]{Typesets the
-given content as a defined term (e.g., in italic). Consider using
-@scheme[deftech] instead, though, so that uses of @scheme[tech] can
-hyper-link to the definition.}
+@tech{decode}d @scheme[pre-content] as a defined term (e.g., in
+italic). Consider using @scheme[deftech] instead, though, so that uses
+of @scheme[tech] can hyper-link to the definition.}
 
-@defproc[(onscreen [pre-content any/c] ...) element?]{ Typesets the given
-content as a string that appears in a GUI, such as the name of a
-button.}
+@defproc[(onscreen [pre-content any/c] ...) element?]{ Typesets the
+@tech{decode}d @scheme[pre-content] as a string that appears in a GUI,
+such as the name of a button.}
 
 @defproc[(menuitem [menu-name string?] [item-name string?]) element?]{
 Typesets the given combination of a GUI's menu and item name.}
 
-@defproc[(file [pre-content any/c] ...) element?]{Typesets the given content
-as a file name (e.g., in typewriter font and in in quotes).}
+@defproc[(filepath [pre-content any/c] ...) element?]{Typesets the
+@tech{decode}d @scheme[pre-content] as a file name (e.g., in
+typewriter font and in in quotes).}
 
-@defproc[(exec [pre-content any/c] ...) element?]{Typesets the given content
-as a command line (e.g., in typewriter font).}
+@defproc[(exec [pre-content any/c] ...) element?]{Typesets the
+@tech{decode}d @scheme[pre-content] as a command line (e.g., in
+typewriter font).}
 
 @defproc[(envvar [pre-content any/c] ...) element?]{Typesets the given
-content as an environment variable (e.g., in typewriter font).}
+@tech{decode}d @scheme[pre-content] as an environment variable (e.g.,
+in typewriter font).}
 
 @defproc[(Flag [pre-content any/c] ...) element?]{Typesets the given
-content as a flag (e.g., in typewriter font with a leading hyphen).}
+@tech{decode}d @scheme[pre-content] as a flag (e.g., in typewriter
+font with a leading @litchar{-}).}
 
 @defproc[(DFlag [pre-content any/c] ...) element?]{Typesets the given
-content a long flag (e.g., in typewriter font with two leading
-hyphens).}
+@tech{decode}d @scheme[pre-content] a long flag (e.g., in typewriter
+font with two leading @litchar{-}s).}
 
-@defproc[(math [pre-content any/c] ...) element?]{The content form of
-@scheme[pre-content] is transformed:
+@defproc[(PFlag [pre-content any/c] ...) element?]{Typesets the given
+@tech{decode}d @scheme[pre-content] as a @litchar{+} flag (e.g., in typewriter
+font with a leading @litchar{+}).}
+
+@defproc[(DPFlag [pre-content any/c] ...) element?]{Typesets the given
+@tech{decode}d @scheme[pre-content] a long @litchar{+} flag (e.g., in
+typewriter font with two leading @litchar{+}s).}
+
+@defproc[(math [pre-content any/c] ...) element?]{The @tech{decode}d
+@scheme[pre-content] is further transformed:
 
  @itemize{
 
@@ -493,30 +751,61 @@ Extensions to @scheme[math] are likely, such as recognizing @litchar{_}
 and @litchar{^} for subscripts and superscripts.}
 
 @; ------------------------------------------------------------------------
-@section[#:tag "scribble:manual:section-links"]{Links}
+@section[#:tag "section-links"]{Links}
 
-@defproc[(secref [tag string?]) element?]{
+@defproc[(secref [tag string?]
+                 [#:doc module-path (or/c module-path? false/c) #f]
+                 [#:underline? underline? any/c #t])
+         element?]{
 
 Inserts the hyperlinked title of the section tagged @scheme[tag], but
 @scheme{aux-element} items in the title content are omitted in the
-hyperlink label.}
+hyperlink label.
+
+If @scheme[module-path] is provided, the @scheme[tag] refers to a tag
+with a prefix determined by @scheme[module-path]. When
+@exec{setup-plt} renders documentation, it automatically adds a tag
+prefix to the document based on the source module. Thus, for example,
+to refer to a section of the PLT Scheme reference,
+@scheme[module-path] would be @scheme['(lib
+"scribblings/reference/reference.scrbl")].
+
+If @scheme[underline?] is @scheme[#f], then the hyperlink is rendered
+in HTML without an underline.}
 
 
-@defproc[(seclink [tag string?] [pre-content any/c] ...) element?]{
+@defproc[(seclink [tag string?] 
+                  [#:doc module-path (or/c module-path? false/c) #f]
+                  [#:underline? underline? any/c #t]
+                  [pre-content any/c] ...) element?]{
 
-The content from @scheme[pre-content] is hyperlinked to the section
-tagged @scheme[tag].}
+Like @scheme[secref], but the link label is the @tech{decode}d
+@scheme[pre-content] instead of the target section's name.}
+
+@defproc[(other-manual [module-path module-path?]
+                       [#:underline? underline? any/c #t])
+         element?]{
+
+Like @scheme[secref] for the document's implicit @scheme["top"]
+tag. Use this function to refer to a whole manual instead of
+@scheme[secref], in case a special style in the future is used for
+manual titles.}
 
 
 @defproc[(schemelink [id symbol?] [pre-content any/c] ...) element?]{
 
-The content from @scheme[pre-content] is hyperlinked to the definition
+The @tech{decode}d @scheme[pre-content] is hyperlinked to the definition
 of @scheme[id].}
 
 
-@defproc[(link [url string?] [pre-content any/c] ...) element?]{
+@defproc[(link [url string?] [pre-content any/c] ...
+               [#:underline? underline? any/c #t]
+               [#:style style any/c (if underline? #f "plainlink")]) 
+         element?]{
 
-The content from @scheme[pre-content] is hyperlinked to @scheme[url].}
+The @tech{decode}d @scheme[pre-content] is hyperlinked to
+@scheme[url].  If @scheme[style] is not supplied, then
+@scheme[underline?] determines how the link is rendered.}
 
 
 @defproc[(elemtag [t tag?] [pre-content any/c] ...) element?]{
@@ -527,17 +816,17 @@ The tag @scheme[t] refers to the content form of
 
 @defproc[(elemref [t tag?] [pre-content any/c] ...) element?]{
 
-The content from @scheme[pre-content] is hyperlinked to @scheme[t],
+The @tech{decode}d @scheme[pre-content] is hyperlinked to @scheme[t],
 which is normally defined using @scheme[elemtag].}
 
 
 @defproc[(deftech [pre-content any/c] ...) element?]{
 
-Produces an element for the content form of @scheme[pre-content], and
+Produces an element for the @tech{decode}d @scheme[pre-content], and
 also defines a term that can be referenced elsewhere using
 @scheme[tech].
 
-The @scheme[content->string] result of the content form of
+The @scheme[content->string] result of the @tech{decode}d
 @scheme[pre-content] is used as a key for references, but normalized
 as follows:
 
@@ -556,12 +845,15 @@ These normalization steps help support natural-language references
 that differ slightly from a defined form. For example, a definition of
 ``bananas'' can be referenced with a use of ``banana''.}
 
-@defproc[(tech [pre-content any/c] ...) element?]{
+@defproc[(tech [pre-content any/c] ...
+               [#:doc module-path (or/c module-path? false/c) #f])
+         element?]{
 
-Produces an element for the content form of @scheme[pre-content], and
+Produces an element for the @tech{decode}d @scheme[pre-content], and
 hyperlinks it to the definition of the content as established by
 @scheme[deftech]. The content's string form is normalized in the same
-way as for @scheme[deftech].
+way as for @scheme[deftech]. The @scheme[#:doc] argument supports
+cross-document references, like in @scheme[secref].
 
 The hyperlink is relatively quiet, in that underlining in HTML output
 appears only when the mouse is moved over the term.
@@ -572,14 +864,16 @@ normalization performed on the term. For example, if ``bind'' is
 defined, but a sentence uses the term ``binding,'' the latter can be
 linked to the former using @schemefont["@tech{bind}ing"].}
 
-@defproc[(techlink [pre-content any/c] ...) element?]{
+@defproc[(techlink [pre-content any/c] ...
+                   [#:doc module-path (or/c module-path? false/c) #f]) 
+         element?]{
 
 Like @scheme[tech], but the link is not a quiet. For example, in HTML
 output, a hyperlink underline appears even when the mouse is not over
 the link.}
 
 @; ------------------------------------------------------------------------
-@section{Indexing}
+@section[#:tag "manual-indexing"]{Indexing}
 
 @defform[(indexed-scheme datum ...)]{
 
@@ -614,10 +908,97 @@ key for the index iterm does not include quotes.}
 combination of @scheme[envvar] and @scheme[as-index].}
 
 @; ------------------------------------------------------------------------
+@section{Images}
+
+@defproc[(image [filename-relative-to-source string?]
+                [pre-element any/c] ...)
+         flow-element?]{
+ Creates a centered image from the given relative source path. The
+ @tech{decode}d @scheme[pre-content] serves as the alternate text for
+ contexts where the image cannot be displayed.
+
+ The path is relative to the current directory, which is set by
+ @exec{setup-plt} and @exec{scribble} to the directory of the main
+ document file.}
+
+@defproc[(image/plain [filename-relative-to-source string?]
+                      [pre-element any/c] ...)
+         element?]{
+ Like @scheme[image], but the result is an element to appear inline in
+ a paragraph.}
+
+@; ------------------------------------------------------------------------
+@section{Bibliography}
+
+@defproc[(cite [key string?]) element?]{
+
+Links to a bibliography entry, using @scheme[key] both to indicate the
+bibliography entry and, in square brackets, as the link text.}
+
+@defproc[(bibliography [#:tag string? "doc-bibliography"]
+                       [entry bib-entry?] ...)
+         part?]{
+
+Creates a bibliography part containing the given entries, each of
+which is created with @scheme[bib-entry]. The entries are typeset in
+order as given}
+
+@defproc[(bib-entry [#:key key string?]
+                    [#:title title any/c]
+                    [#:is-book? is-book? any/c #f]
+                    [#:author author any/c]
+                    [#:location location any/c]
+                    [#:date date any/c] 
+                    [#:url url any/c #f])
+         bib-entry?]{
+
+Creates a bibliography entry. The @scheme[key] is used to refer to the
+entry via @scheme[cite]. The other arguments are used as elements in
+the entry:
+
+@itemize{
+
+ @item{@scheme[title] is the title of the cited work. It will be
+       surrounded by quotes in typeset form if @scheme[is-book?] is
+       @scheme[#f], otherwise it is typeset via @scheme[italic].}
+
+ @item{@scheme[author] lists the authors. Use names in their usual
+       order (as opposed to ``last, first''), and separate multiple
+       names with commas using ``and'' before the last name (where
+       there are multiple names). The @scheme[author] is typeset in
+       the bibliography as given.}
+
+ @item{@scheme[location] names the publication venue, such as a
+       conference name or a journal with volume, number, and
+       pages. The @scheme[location] is typeset in the bibliography as
+       given.}
+
+ @item{@scheme[date] is a date, usually just a year (as a string). It
+       is typeset in the bibliography as given.}
+
+ @item{@scheme[url] is an optional URL. It is typeset in the
+       bibliography using @scheme[tt] and hyperlinked.}
+
+}}
+
+
+@defproc[(bib-entry? [v any/c]) boolean?]{
+
+Returns @scheme[#t] if @scheme[v] is a bibliography entry created by
+@scheme[bib-entry], @scheme[#f] otherwise.}
+
+
+@; ------------------------------------------------------------------------
 @section{Miscellaneous}
+
+@defproc[(t [pre-content any/c] ...) paragraph?]{Wraps the
+@tech{decode}d @scheme[pre-content] as a paragraph.}
 
 @defthing[PLaneT string?]{@scheme["PLaneT"] (to help make sure you get
 the letters in the right case).}
+
+@defproc[(hash-lang) element?]{Returns an element for @hash-lang[]
+that is hyperlinked to an explanation.}
 
 @defthing[void-const element?]{Returns an element for @|void-const|.}
 
@@ -632,3 +1013,74 @@ an inset command-line example (e.g., in typewriter font).}
 
 @defproc[(margin-note [pre-content any/c] ...) paragraph?]{Produces
 a paragraph to be typeset in the margin instead of inlined.}
+
+@; ------------------------------------------------------------------------
+@section[#:tag "index-entries"]{Index-Entry Descriptions}
+
+@defmodule[scribble/manual-struct]{The
+@schememodname[scribble/manual-struct] library provides types used to
+describe index entries created by @schememodname[scribble/manual]
+functions. These structure types are provided separate from
+@schememodname[scribble/manual] so that
+@schememodname[scribble/manual] need not be loaded when deserializing
+cross-reference information that was generated by a previously
+rendered document.}
+
+@defstruct[module-path-index-desc ()]{
+
+Indicates that the index entry corresponds to a module definition via
+@scheme[defmodule] and company.}
+
+@defstruct[exported-index-desc ([name symbol?]
+                               [from-libs (listof module-path?)])]{
+
+Indicates that the index entry corresponds to the definition of an
+exported binding. The @scheme[name] field and @scheme[from-libs] list
+correspond to the documented name of the binding and the primary
+modules that export the documented name (but this list is not
+exhaustive, because new modules can re-export the binding).}
+
+@defstruct[(form-index-desc exported-index-desc) ()]{
+
+Indicates that the index entry corresponds to the definition of a
+syntactic form via @scheme[defform] and company.}
+
+@defstruct[(procedure-index-desc exported-index-desc) ()]{
+
+Indicates that the index entry corresponds to the definition of a
+procedure binding via @scheme[defproc] and company.}
+
+@defstruct[(thing-index-desc exported-index-desc) ()]{
+
+Indicates that the index entry corresponds to the definition of a
+binding via @scheme[defthing] and company.}
+
+@defstruct[(struct-index-desc exported-index-desc) ()]{
+
+Indicates that the index entry corresponds to the definition of a
+structure type via @scheme[defstruct] and company.}
+
+@defstruct[(class-index-desc exported-index-desc) ()]{
+
+Indicates that the index entry corresponds to the definition of a
+class via @scheme[defclass] and company.}
+
+@defstruct[(interface-index-desc exported-index-desc) ()]{
+
+Indicates that the index entry corresponds to the definition of an
+interface via @scheme[definterface] and company.}
+
+@defstruct[(mixin-index-desc exported-index-desc) ()]{
+
+Indicates that the index entry corresponds to the definition of a
+mixin via @scheme[defmixin] and company.}
+
+@defstruct[(method-index-desc exported-index-desc) ([method-name symbol?]
+                                                    [class-tag tag?])]{
+
+Indicates that the index entry corresponds to the definition of an
+method via @scheme[defmethod] and company. The @scheme[_name] field
+from @scheme[exported-index-desc] names the class or interface that
+contains the method. The @scheme[method-name] field names the method.
+The @scheme[class-tag] field provides a pointer to the start of the
+documentation for the method's class or interface.}

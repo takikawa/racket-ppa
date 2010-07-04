@@ -1,5 +1,6 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss"
+          (for-label scheme/port))
 
 @title[#:tag "encodings"]{Encodings and Locales}
 
@@ -16,15 +17,15 @@ stream to discover that the stream is not a valid encoding.
 When an input port produces a sequence of bytes that is not a valid
 UTF-8 encoding in a character-reading context, then bytes that
 constitute an invalid sequence are converted to the character
-@litchar{?}. Specifically, bytes 255 and 254 are always converted to
-@litchar{?}, bytes in the range 192 to 253 produce @litchar{?} when
-they are not followed by bytes that form a valid UTF-8 encoding, and
-bytes in the range 128 to 191 are converted to @litchar{?} when they
-are not part of a valid encoding that was started by a preceding byte
-in the range 192 to 253. To put it another way, when reading a
-sequence of bytes as characters, a minimal set of bytes are changed to
-63 (which is the value that @scheme[(char->integer #\?)] produces) so
-that the entire sequence of bytes is a valid UTF-8 encoding.
+@schemevalfont{#\uFFFD}. Specifically, bytes 255 and 254 are always converted
+to @schemevalfont{#\uFFFD}, bytes in the range 192 to 253 produce
+@schemevalfont{#\uFFFD} when they are not followed by bytes that form a valid
+UTF-8 encoding, and bytes in the range 128 to 191 are converted to
+@schemevalfont{#\uFFFD} when they are not part of a valid encoding that was
+started by a preceding byte in the range 192 to 253. To put it another
+way, when reading a sequence of bytes as characters, a minimal set of
+bytes are changed to the encoding of @schemevalfont{#\uFFFD} so that the
+entire sequence of bytes is a valid UTF-8 encoding.
 
 See @secref["bytestrings"] for procedures that facilitate
 conversions using UTF-8 or other encodings. See also
@@ -76,7 +77,7 @@ UTF-8 for encoding.
 
 @defparam[current-locale locale (or/c string? false/c)]{
 
-A parameter that determines the current @deftech{locale} for
+A parameter that determines the current @tech{locale} for
 procedures such as @scheme[string-locale-ci=?].
 
 When locale sensitivity is disabled by setting the parameter to

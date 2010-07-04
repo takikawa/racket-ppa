@@ -1,9 +1,8 @@
-#cs
 (module compile-lang mzscheme
-  (require (lib "compile.ss" "profj")
-           (lib "list.ss")
-           (lib "file.ss")
-           (lib "pretty.ss"))
+  (require profj/compile
+           mzlib/list
+           mzlib/file
+           mzlib/pretty)
  
   (provide compile-exceptions make-compilation-path)
   
@@ -99,6 +98,7 @@
                                            #f))
                    names (map get-provides bodies))))
  
+  (define foo #t)
   (define (compile-exceptions so)
     (set-syntax-location so)
     (let* ((files (filter (lambda (f) (regexp-match "Exception[.]java$" (path->string f)))

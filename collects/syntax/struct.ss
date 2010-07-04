@@ -1,15 +1,19 @@
 
-(module struct mzscheme
-  (require (lib "etc.ss")
-           (lib "contract.ss")
-	   "stx.ss")
-  (require-for-template mzscheme)
+(module struct scheme/base
+  (require (for-syntax scheme/base)
+           mzlib/etc
+           mzlib/contract
+	   "stx.ss"
+           (lib "struct-info.ss" "scheme"))
+  (require (for-template mzscheme))
   
   (provide parse-define-struct
 
 	   build-struct-generation
+	   build-struct-generation*
 	   build-struct-expand-info
 	   struct-declaration-info?
+	   extract-struct-info
 	   generate-struct-declaration)
 
 
@@ -94,7 +98,7 @@
 	    [fields (map symbol->string (map syntax-e fields))]
 	    [+ string-append])
 	(map (lambda (s)
-	       (datum->syntax-object name-stx (string->symbol s) srcloc-stx))
+	       (datum->syntax name-stx (string->symbol s) srcloc-stx))
 	     (append
 	      (list 
 	       (+ "struct:" name)
@@ -153,8 +157,14 @@
 		   ,@acc/mut-makers)))))
 
   (define build-struct-expand-info
-    (lambda (name-stx fields omit-sel? omit-set? base-name base-getters base-setters)
-      (let* ([names (build-struct-names name-stx fields omit-sel? omit-set?)])
+    (lambda (name-stx fields omit-sel? omit-set? base-name base-getters base-setters 
+                      #:omit-constructor? [no-ctr? #f])
+      (let* ([names (build-struct-names name-stx fields omit-sel? omit-set?)]
+             [names (if no-ctr?
+                        (list* (car names)
+                               #f
+                               (cddr names))
+                        names)])
 	(build-struct-expand-info* names name-stx fields omit-sel? omit-set? base-name base-getters base-setters))))
 
   (define build-struct-expand-info*
@@ -181,16 +191,16 @@
 				 x
 				 (and x `(,cert-f (quote-syntax ,x)))))])
         `(let ([,cert-f (syntax-local-certifier #t)])
-           (list-immutable
+           (list
             ,(qs (car names))
             ,(qs (cadr names))
             ,(qs (caddr names))
-            (list-immutable 
+            (list 
              ,@(reverse (if omit-sel?
                             null
                             (map qs (if omit-set? flds (every-other flds)))))
              ,@(map qs (add-#f omit-sel? base-getters)))
-            (list-immutable
+            (list
              ,@(reverse (if omit-set?
                             null
                             (map qs (if omit-sel?
@@ -203,26 +213,7 @@
 
 
   (define (struct-declaration-info? x)
-    (define (identifier/#f? x)
-      (or (not x) 
-	  (identifier? x)))
-    (define (id/#f-list? id? x)
-      (or (null? x)
-	  (and (pair? x)
-	       (if (null? (cdr x))
-		   (identifier/#f? (car x))
-		   (and (id? (car x))
-			(id/#f-list? id? (cdr x)))))))
-
-    (and (list? x)
-	 (= (length x) 6)
-	 (identifier/#f? (car x))
-	 (identifier/#f? (cadr x))
-	 (identifier/#f? (caddr x))
-	 (id/#f-list? identifier? (list-ref x 3))
-	 (id/#f-list? identifier/#f? (list-ref x 4))
-	 (or (eq? #t (list-ref x 5)) (identifier/#f? (list-ref x 5)))))
-
+    (struct-info? x))
 
   ;; ----------------------------------------
 
@@ -246,15 +237,18 @@
                              [(null? l) r]
                              [(null? (cdr l)) (cons (car l) r)]
                              [else (loop (cddr l) (cons (car l) r))])))]
-           [super-info (and super-id 
-                            (syntax-local-value super-id (lambda () #f)))])
+           [super-si (and super-id 
+                          (syntax-local-value super-id (lambda () #f)))]
+           [super-info (and super-si
+                            (struct-declaration-info? super-si)
+                            (extract-struct-info super-si))])
       (when super-id 
 	;; Did we get valid super-info ?
-	(when (or (not (struct-declaration-info? super-info))
+	(when (or (not (struct-declaration-info? super-si))
 		  (not (struct-info-type-id super-info)))
 	  (raise-syntax-error
 	   #f
-	   (if (struct-declaration-info? super-info)
+	   (if (struct-declaration-info? super-si)
 	       "parent struct information does not include a type for subtyping"
 	       (format "parent struct type not defined~a"
 		       (if super-info
@@ -267,34 +261,36 @@
       (values
        super-info
        (if defined-names
-	   (let-values ([(initial-gets initial-sets)
-			 (if super-info
-			     (values (map qs (struct-info-accessor-ids super-info))
-				     (map qs (struct-info-mutator-ids super-info)))
-			     (values null null))]
-			[(fields) (cdddr defined-names)]
-			[(wrap) (lambda (x) #`(list-immutable #,@x))])
+           (let-values ([(initial-gets initial-sets)
+                         (if super-info
+                             (values (map qs (struct-info-accessor-ids super-info))
+                                     (map qs (struct-info-mutator-ids super-info)))
+                             (values null null))]
+                        [(fields) (cdddr defined-names)]
+                        [(wrap) (lambda (x) #`(list #,@x))])
              #`(let ([#,cert-f (syntax-local-certifier)])
-                 #,(wrap
-                    (list-immutable (qs (car defined-names))
-                                    (qs (cadr defined-names))
-                                    (qs (caddr defined-names))
-                                    (wrap
-                                     (apply
-                                      list-immutable
-                                      (append (map qs (every-other fields)) 
-                                              initial-gets)))
-                                    (wrap
-                                     (apply
-                                      list-immutable
-                                      (append (map qs (if (null? fields) 
-                                                          null 
-                                                          (every-other (cdr fields)))) 
-                                              initial-sets)))
-                                    (if super-id
-                                        (qs super-id)
-                                        #t)))))
-	   #f))))
+                 (make-struct-info
+                  (lambda ()
+                    #,(wrap
+                       (list (qs (car defined-names))
+                                       (qs (cadr defined-names))
+                                       (qs (caddr defined-names))
+                                       (wrap
+                                        (apply
+                                         list
+                                         (append (map qs (every-other fields)) 
+                                                 initial-gets)))
+                                       (wrap
+                                        (apply
+                                         list
+                                         (append (map qs (if (null? fields) 
+                                                             null 
+                                                             (every-other (cdr fields)))) 
+                                                 initial-sets)))
+                                       (if super-id
+                                           (qs super-id)
+                                           #t)))))))
+           #f))))
 
   (define (make-core make-make-struct-type orig-stx defined-names super-info name field-names)
     #`(let-values ([(type maker pred access mutate)

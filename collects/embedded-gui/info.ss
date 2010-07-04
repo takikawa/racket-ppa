@@ -1,5 +1,3 @@
-(module info (lib "infotab.ss" "setup")
-  (define name "Embedded GUI")
-  (define doc.txt "doc.txt"))
+#lang setup/infotab
 
-
+(define scribblings '(("scribblings/embedded-gui.scrbl" (multi-page) (gui-library))))

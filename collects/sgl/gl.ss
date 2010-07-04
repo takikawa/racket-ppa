@@ -1,5 +1,5 @@
 (module gl mzscheme
-  (require (lib "foreign.ss")
+  (require mzlib/foreign
            "gl-types.ss"
            "gl-vectors.ss")
   
@@ -13,6 +13,11 @@
                    [(macosx) (ffi-lib "/System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGLU")]
 		   [else (ffi-lib "libGLU")]))
   
+  (define (unavailable name)
+    (lambda ()
+      (lambda x
+        (error name "unavailable on this system"))))
+  
   (define-syntax define-foreign-lib
     (syntax-rules (->)
       ((_ lib name type ... ->)
@@ -22,10 +27,7 @@
          ;(printf "~a~n" 'name)
          (provide name)
          (define name
-           (get-ffi-obj 'name lib (_fun type ...)
-                        (lambda ()
-                          (lambda x
-                            (error 'name "unavailable on this system")))))))))
+           (get-ffi-obj 'name lib (_fun type ...) (unavailable 'name)))))))
 
   (define-syntax define-foreign
     (syntax-rules ()

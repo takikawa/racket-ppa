@@ -8,13 +8,11 @@
 
 |#
 
-(use-compiled-file-paths null)
-
 (module osx_appl mzscheme
 
   (require (lib "plist.ss" "xml")
-	   (lib "process.ss")
-	   (lib "file.ss"))
+	   mzlib/process
+	   mzlib/file)
 
   (define rez-path (or (getenv "REZ")
 		       "/Developer/Tools/Rez"))
@@ -137,6 +135,3 @@
                 "Starter"
                 "APPLMrSt"
                 (make-info-plist "Starter" "MrSt" #t)))
-
-(require osx_appl)
-

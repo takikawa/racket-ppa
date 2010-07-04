@@ -1,4 +1,3 @@
+#lang setup/infotab
 
-(module info (lib "infotab.ss" "setup")
-  (define doc.txt "doc.txt")
-  (define name "Make"))
+(define scribblings '(("make.scrbl" (multi-page) (tool-library))))

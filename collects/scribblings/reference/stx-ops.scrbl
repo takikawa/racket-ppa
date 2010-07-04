@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
 @title[#:tag "stxops"]{Syntax Object Content}
 
@@ -10,7 +10,7 @@ otherwise. See also @secref["stxobj-model"].}
 
 @defproc[(syntax-source [stx syntax?]) any]{
 
-Returns the source for the syntax object @scheme[stx], or @scheme[#f]
+Returns the source for the @tech{syntax object} @scheme[stx], or @scheme[#f]
 if none is known. The source is represented by an arbitrary value
 (e.g., one passed to @scheme[read-syntax]), but it is typically a file
 path string. Source-location information is dropped for a syntax
@@ -23,23 +23,23 @@ object that is marshaled as part of compiled code; see also
                false/c)]{
 
 Returns the line number (positive exact integer) for the start of the
-syntax object in its source, or @scheme[#f] if the line number or
+@tech{syntax object} in its source, or @scheme[#f] if the line number or
 source is unknown. The result is @scheme[#f] if and only if
 @scheme[(syntax-column stx)] produces @scheme[#f]. See also
 @secref["linecol"], and see @scheme[syntax-source] for information
-about marshaling compiled syntax objects.}
+about marshaling compiled @tech{syntax object}s.}
 
 
 @defproc[(syntax-column [stx syntax?])
-         (or/c nonnegative-exact-integer?
+         (or/c exact-nonnegative-integer?
                false/c)]{
 
 Returns the column number (non-negative exact integer) for the start
-of the syntax object in its source, or @scheme[#f] if the source
+of the @tech{syntax object} in its source, or @scheme[#f] if the source
 column is unknown. The result is @scheme[#f] if and only if
 @scheme[(syntax-line stx)] produces @scheme[#f]. See also
 @secref["linecol"], and see @scheme[syntax-source] for information
-about marshaling compiled syntax objects.}
+about marshaling compiled @tech{syntax object}s.}
 
 
 @defproc[(syntax-position [stx syntax?])
@@ -47,37 +47,37 @@ about marshaling compiled syntax objects.}
                false/c)]{
 
 Returns the character position (positive exact integer) for the start
-of the syntax object in its source, or @scheme[#f] if the source
+of the @tech{syntax object} in its source, or @scheme[#f] if the source
 position is unknown. See also @secref["linecol"], and see
 @scheme[syntax-source] for information about marshaling compiled
-syntax objects.}
+@tech{syntax object}s.}
 
 
 @defproc[(syntax-span [stx syntax?])
-         (or/c nonnegative-exact-integer?
+         (or/c exact-nonnegative-integer?
                false/c)]{
 
 Returns the span (non-negative exact integer) in characters of the
-syntax object in its source, or @scheme[#f] if the span is
+@tech{syntax object} in its source, or @scheme[#f] if the span is
 unknown. See also @scheme[syntax-source] for information about
-marshaling compiled syntax objects.}
+marshaling compiled @tech{syntax object}s.}
 
 
 @defproc[(syntax-original? [stx syntax?]) boolean?]{
 
 Returns @scheme[#t] if @scheme[stx] has the property that
 @scheme[read-syntax] and @scheme[read-honu-syntax] attach to the
-syntax objects that they generate (see @secref["stxprops"]), and if
+@tech{syntax object}s that they generate (see @secref["stxprops"]), and if
 @scheme[stx]'s @tech{lexical information} does not indicate that the
 object was introduced by a syntax transformer (see
 @secref["stxobj-model"]). The result is @scheme[#f] otherwise. This
-predicate can be used to distinguish syntax objects in an expanded
+predicate can be used to distinguish @tech{syntax object}s in an expanded
 expression that were directly present in the original expression, as
-opposed to syntax objects inserted by macros.}
+opposed to @tech{syntax object}s inserted by macros.}
 
 
 @defproc[(syntax-source-module [stx syntax?])
-         (or/c module-path-index? symbol?)]{
+         (or/c module-path-index? symbol? false/c)]{
 
 Returns a module path index or symbol (see @secref["modpathidx"])
 for the module whose source contains @scheme[stx], or @scheme[#f] if
@@ -86,7 +86,7 @@ for the module whose source contains @scheme[stx], or @scheme[#f] if
 
 @defproc[(syntax-e [stx syntax?]) any]{
 
-Unwraps the immediate datum structure from a syntax object,
+Unwraps the immediate datum structure from a @tech{syntax object},
 leaving nested syntax structure (if any) in place.  The result of
 @scheme[(syntax-e @scheme[stx])] is one of the following:
 
@@ -98,73 +98,90 @@ leaving nested syntax structure (if any) in place.  The result of
 
        @item{the empty list}
 
-       @item{a vector containing syntax objects}
+       @item{an immutable vector containing @tech{syntax object}s}
+
+       @item{an immutable box containing @tech{syntax object}s}
 
        @item{some other kind of datum---usually a number, boolean, or string}
 
     }
 
-A @deftech{syntax pair} is a pair containing a syntax object as its
+A @deftech{syntax pair} is a pair containing a @tech{syntax object} as its
 first element, and either the empty list, a syntax pair, or a syntax
 object as its second element.
 
-A syntax object that is the result of @scheme[read-syntax] reflects
+A @tech{syntax object} that is the result of @scheme[read-syntax] reflects
 the use of delimited @litchar{.} in the input by creating a syntax
 object for every pair of parentheses in the source, and by creating a
-pair-valued syntax object @italic{only} for parentheses in the
+pair-valued @tech{syntax object} @italic{only} for parentheses in the
 source. See @secref["parse-pair"] for more information.}
 
 
 @defproc[(syntax->list [stx syntax?])
          (or/c list? false/c)]{
 
-Returns an immutable list of syntax objects or @scheme[#f]. The result
-is a list of syntax objects when @scheme[(syntax->datum stx)]
-would produce a list. In other words, @tech{syntax pairs} in
-@scheme[(syntax-e @scheme[stx])] are flattened.}
+Returns a list of @tech{syntax object}s or @scheme[#f]. The result is a list
+of @tech{syntax object}s when @scheme[(syntax->datum stx)] would produce a
+list. In other words, @tech{syntax pairs} in @scheme[(syntax-e stx)]
+are flattened.}
 
 
-@defproc[(syntax->datum ...) any]{
+@defproc[(syntax->datum [stx syntax?]) any]{
 
-Returns a datum by stripping the lexical and source-location
-information from @scheme[stx]. Graph structure is preserved by the
-conversion.}
+Returns a datum by stripping the lexical information, source-location
+information, properties, and certificates from @scheme[stx]. Inside of
+pairs, (immutable) vectors, and (immutable) boxes, @tech{syntax object}s are
+recursively stripped.
 
-@defproc[(syntax-object->datum [stx syntax?]) any]{
-
-FIXME: this entry is a temporary target for references that should be
-to @scheme[syntax->datum]. }
-
+The stripping operation does not mutate @scheme[stx]; it creates new
+pairs, vectors, and boxes as needed to strip lexical and
+source-location information recursively.}
 
 @defproc[(datum->syntax [ctxt (or/c syntax? false/c)]
                         [v any/c]
                         [srcloc (or/c syntax? false/c
                                       (list/c any/c
-                                              (or/c positive-exact-integer? false/c)
-                                              (or/c nonnegative-exact-integer? false/c)
-                                              (or/c nonnegative-exact-integer? false/c)
-                                              (or/c positive-exact-integer? false/c)))]
+                                              (or/c exact-positive-integer? false/c)
+                                              (or/c exact-nonnegative-integer? false/c)
+                                              (or/c exact-nonnegative-integer? false/c)
+                                              (or/c exact-positive-integer? false/c))
+                                      (vector/c any/c
+                                               (or/c exact-positive-integer? false/c)
+                                               (or/c exact-nonnegative-integer? false/c)
+                                               (or/c exact-nonnegative-integer? false/c)
+                                               (or/c exact-positive-integer? false/c)))]
                         [prop (or/c syntax? false/c) #f]
                         [cert (or/c syntax? false/c) #f])
           syntax?]{
 
-Converts the @tech{datum} @scheme[v] to a @tech{syntax object}, using
-syntax objects already in @scheme[v] in the result. Converted objects
-in @scheme[v] are given the lexical context information of
-@scheme[ctxt] and the source-location information of
-@scheme[srcloc]. If @scheme[v] is not already a syntax object, then
-the resulting immediate syntax object it is given the properties (see
-@secref["stxprops"]) of @scheme[prop] and the @tech{inactive certificates}
-(see @secref["stxcerts"]) of @scheme[cert].  Any of
-@scheme[ctxt], @scheme[srcloc], @scheme[prop], or @scheme[cert] can be
-@scheme[#f], in which case the resulting syntax has no lexical
+Converts the @tech{datum} @scheme[v] to a @tech{syntax object}. If
+@scheme[v] is a pair, vector, or box, then the contents are
+recursively converted; mutable vectors and boxes are essentially
+replaced by immutable vectors and boxes. @tech{Syntax object}s already in
+@scheme[v] are preserved as-is in the result. For any kind of value
+other than a pair, vector, box, or @tech{syntax object}, conversion means
+wrapping the value with lexical information, source-location
+information, properties, and certificates.
+
+Converted objects in @scheme[v] are given the lexical context
+information of @scheme[ctxt] and the source-location information of
+@scheme[srcloc]. If @scheme[v] is not already a @tech{syntax object}, then
+the resulting immediate @tech{syntax object} is given the properties (see
+@secref["stxprops"]) of @scheme[prop] and the @tech{inactive
+certificates} (see @secref["stxcerts"]) of @scheme[cert]; if
+@scheme[v] is a pair, vector, or box, recursively converted values are
+not given properties or certificates.
+
+Any of @scheme[ctxt], @scheme[srcloc], @scheme[prop], or @scheme[cert]
+can be @scheme[#f], in which case the resulting syntax has no lexical
 context, source information, new properties, and/or certificates.
 
-If @scheme[srcloc] is not @scheme[#f]
-or a syntax object, it must be a list of five elements:
+If @scheme[srcloc] is not @scheme[#f] or a @tech{syntax object}, it
+must be a list or vector of five elements:
 
 @schemeblock[
   (list source-name line column position span)
+  #, @elem{or} (vector source-name line column position span)
 ]
 
 where @scheme[source-name-v] is an arbitrary value for the source
@@ -176,36 +193,14 @@ name; @scheme[line] is an integer for the source line, or @scheme[#f];
 numbers or both be @scheme[#f], otherwise the
 @exnraise[exn:fail:contract].
 
-Graph structure is preserved by the conversion of @scheme[v] to a
-syntax object, but graph structure that is distributed among distinct
-syntax objects in @scheme[v] may be hidden from future applications of
-@scheme[syntax->datum] and @scheme[syntax-graph?] to the new
-syntax object.}
-
-@defproc[(datum->syntax-object ...) any]{
-
-FIXME: this entry is a temporary target for references that should be
-to @scheme[datum->syntax]. }
-
-
-@defproc[(syntax-graph? [stx syntax?]) boolean?]{
-
-Returns @scheme[#t] if @scheme[stx] might be preservably shared within
-a syntax object created by @scheme[read-syntax],
-@scheme[read-honu-syntax], or @scheme[datum->syntax]. In general,
-sharing detection is approximate---@scheme[datum->syntax] can
-construct syntax objects with sharing that is hidden from
-@scheme[syntax-graph?]---but @scheme[syntax-graph?] reliably returns
-@scheme[#t] for at least one syntax object in a cyclic
-structure. Meanwhile, deconstructing a syntax object with procedures
-such as @scheme[syntax-e] and comparing the results with @scheme[eq?]
-can also fail to detect sharing (even cycles), due to the way lexical
-information is lazily propagated; only @scheme[syntax->datum] reliably
-exposes sharing in a way that can be detected with @scheme[eq?].}
+Graph structure is not preserved by the conversion of @scheme[v] to a
+@tech{syntax object}. Instead, @scheme[v] is essentially unfolded into a
+tree. If @scheme[v] has a cycle through pairs, vectors, and boxes,
+then the @exnraise[exn:fail:contract].}
 
 @defproc[(identifier? [v any/c]) boolean?]{
 
-Returns @scheme[#t] if @scheme[v] is a syntax object and
+Returns @scheme[#t] if @scheme[v] is a @tech{syntax object} and
 @scheme[(syntax-e stx)] produces a symbol.}
 
 
@@ -216,8 +211,9 @@ Returns a list of identifiers that are distinct from all other
 identifiers. The list contains as many identifiers as
 @scheme[stx-pair] contains elements. The @scheme[stx-pair] argument
 must be a syntax pair that can be flattened into a list. The elements
-of @scheme[stx-pair] can be anything, but string, symbol, and
-identifier elements will be embedded in the corresponding generated
-name (useful for debugging purposes). The generated identifiers are
-built with interned symbols (not @scheme[gensym]s), so the limitations
-described with @scheme[current-compile] do not apply.}
+of @scheme[stx-pair] can be anything, but string, symbol, keyword
+(possibly wrapped as syntax), and identifier elements will be embedded
+in the corresponding generated name, which is useful for debugging
+purposes. The generated identifiers are built with interned symbols
+(not @scheme[gensym]s), so the limitations described with
+@scheme[current-compile] do not apply.}

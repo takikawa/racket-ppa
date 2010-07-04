@@ -1,7 +1,8 @@
 
-(module mrpict-extra (lib "a-unit.ss")
-  (require (lib "class.ss")
-           (lib "etc.ss"))
+#lang scheme/unit
+
+  (require mzlib/class
+           mzlib/etc)
 
   (require (lib "mred-sig.ss" "mred"))
 
@@ -68,7 +69,7 @@
       (define dc 
 	(case-lambda
 	 [(f w h a d)
-	  (make-pict `(prog ,f ,h) w h a d null #f)]
+	  (make-pict `(prog ,f ,h) w h a d null #f #f)]
 	 [(f w h)
 	  (dc f w h h 0)]))
       (define prog-picture dc)
@@ -123,6 +124,8 @@
              (caps-text str (il-remq 'caps style) size))
            (not-caps-text str style size angle))]))
   
+  (define families '(default decorative roman script swiss modern symbol system))
+
   (define (il-memq sym s)
     (and (pair? s)
          (or (eq? sym (car s))
@@ -143,12 +146,17 @@
 			   size 'default 'normal 'normal #f 'default #t)]
 		    [(is-a? style font%)
 		     style]
-		    [(memq style '(default decorative roman script swiss modern symbol system))
+		    [(memq style families)
 		     (send the-font-list find-or-create-font
 			   size style 'normal 'normal #f 'default #t)]
 		    [(string? style)
 		     (send the-font-list find-or-create-font
 			   size style 'default 'normal 'normal #f 'default #t)]
+                    [(and (pair? style)
+                          (string? (car style))
+                          (memq (cdr style) families))
+                     (send the-font-list find-or-create-font
+			   size (car style) (cdr style) 'normal 'normal #f 'default #t)]
 		    [(and (pair? style)
 			  (memq (car style)
 				'(superscript 
@@ -263,10 +271,10 @@
 	  (let ([strings
 		 (let loop ([l (string->list string)][this null][results null][up? #f])
 		   (if (null? l)
-		       (reverse! (cons (reverse! this) results))
+		       (reverse (cons (reverse this) results))
 		       (if (eq? up? (char-upper-case? (car l)))
 			   (loop (cdr l) (cons (car l) this) results up?)
-			   (loop (cdr l) (list (car l)) (cons (reverse! this) results) (not up?)))))]
+			   (loop (cdr l) (list (car l)) (cons (reverse this) results) (not up?)))))]
 		[cap-style
 		 (let loop ([s style])
 		   (cond
@@ -432,4 +440,4 @@
 		    dx 0))))
 
       (define (draw-pict p dc dx dy)
-	((make-pict-drawer p) dc dx dy)))
+	((make-pict-drawer p) dc dx dy))

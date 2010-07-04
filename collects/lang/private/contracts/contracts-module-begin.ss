@@ -2,10 +2,32 @@
   
   (require "contracts.ss")
   
-  (require-for-syntax (lib "list.ss")
-		      (lib "boundmap.ss" "syntax"))
+  (require-for-syntax mzlib/list
+		      syntax/boundmap)
   
   (provide beginner-module-begin intermediate-module-begin advanced-module-begin)
+
+  (define-syntax (print-results stx)
+    (syntax-case stx ()
+      [(_ expr)
+       (not (or (syntax-property #'expr 'stepper-hide-completed)
+                (syntax-property #'expr 'stepper-skip-completely)
+                (syntax-property #'expr 'test-call)))
+       (syntax-property
+        (syntax-property
+         #'(#%app call-with-values (lambda () expr)
+                  do-print-results)
+         'stepper-skipto 
+         '(syntax-e cdr cdr car syntax-e cdr cdr car))
+        'certify-mode
+        'transparent)]
+      [(_ expr) #'expr]))
+
+  (define (do-print-results . vs)
+    (for-each (current-print) vs)
+    ;; Returning 0 values avoids any further result printing
+    ;; (even if void values are printed)
+    (values))
   
   (define-syntaxes (beginner-module-begin intermediate-module-begin advanced-module-begin
 					  beginner-continue intermediate-continue advanced-continue)
@@ -18,12 +40,12 @@
 	  (lambda (lostx) 
 	    (filter contract-stx? lostx)))
 	
-					; negate previous
+        ;; negate previous
 	(define extract-not-contracts
 	  (lambda (stx-list) 
 	    (filter (lambda (x) (not (contract-stx? x))) stx-list)))
 	
-					; predicate: is this syntax object a contract expr?
+        ;; predicate: is this syntax object a contract expr?
 	(define contract-stx?
 	  (lambda (stx) 
 	    (syntax-case stx () 
@@ -32,7 +54,7 @@
 		    (module-identifier=? #'contract language-level-contract))]
 	      [_ #f])))
 	
-					; pred: is this syntax obj a define-data?
+        ;; pred: is this syntax obj a define-data?
 	(define define-data-stx?
 	  (lambda (stx)
 	    (syntax-case stx ()
@@ -122,8 +144,8 @@
               [_ (raise-syntax-error 'contract "internal error.5")])))
 	
 	(define local-expand-stop-list 
-          (list 'contract 'define-values 'define-syntaxes 'require 'require-for-syntax 
-                'provide 'define-data '#%app '#%datum 'define-struct 'begin 'begin0))
+          (list 'contract 'define-values 'define-syntaxes '#%require
+                '#%provide 'define-data '#%app '#%datum 'define-struct 'begin 'begin0))
 	
 	;; parse-contract-expressions 
 	;; takes in a list of top level expressions and a list of contracts, and outputs the correct transformation. 
@@ -217,23 +239,23 @@
 					      language-level-define-data
 					      cnt-list
 					      expr-list)))]
-	     [(_ e1s (e2 . e3s) def-ids)
+	     [(frm e1s (e2 . e3s) def-ids)
 	      (let ([e2 (local-expand #'e2 'module local-expand-stop-list)])
 		;; Lift out certain forms to make them visible to the module
 		;;  expander:
-		(syntax-case e2 (require define-syntaxes define-values-for-syntax define-values begin)
-		  [(require . __)
-		   #`(begin #,e2 (_ e1s e3s def-ids))]
-		  [(define-syntaxes (id ...) . __)
-		   #`(begin #,e2 (_ e1s e3s (id ... . def-ids)))]
-		  [(define-values-for-syntax . __)
-		   #`(begin #,e2 (_ e1s e3s def-ids))]
+		(syntax-case e2 (#%require define-syntaxes define-values-for-syntax define-values begin)
+		  [(#%require . __)
+		   #`(begin #,e2 (frm e1s e3s def-ids))]
+		  [(define-syntaxes (id ...) . _)
+		   #`(begin #,e2 (frm e1s e3s (id ... . def-ids)))]
+		  [(define-values-for-syntax . _)
+		   #`(begin #,e2 (frm e1s e3s def-ids))]
 		  [(begin b1 ...)
-		   #`(_ e1s (b1 ... . e3s) def-ids)]
-		  [(define-values (id ...) . __)
-		   #`(_ (#,e2 . e1s) e3s (id ... . def-ids))]
-		  [else
-		   #`(_ (#,e2 . e1s) e3s def-ids)]))]))))
+		   #`(frm e1s (b1 ... . e3s) def-ids)]
+		  [(define-values (id ...) . _)
+		   #`(frm (#,e2 . e1s) e3s (id ... . def-ids))]
+		  [_
+		   #`(frm ((print-results #,e2) . e1s) e3s def-ids)]))]))))
       
       (define-values (parse-beginner-contract/func continue-beginner-contract/func)
         (parse-contracts #'beginner-contract #'beginner-define-data #'beginner-continue))

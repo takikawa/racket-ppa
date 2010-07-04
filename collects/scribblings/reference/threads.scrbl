@@ -1,6 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "bnf.ss" "scribble")]
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
 @title[#:tag "threads"]{Threads}
 
@@ -29,7 +28,7 @@ thread-safe because they are @defterm{atomic}. For example,
 @scheme[set!] assigns to a variable as an atomic action with respect
 to all threads, so that no thread can see a ``half-assigned''
 variable. Similarly, @scheme[vector-set!] assigns to a vector
-atomically. The @scheme[hash-table-put!] procedure is not atomic, but
+atomically. The @scheme[hash-set!] procedure is not atomic, but
 the table is protected by a lock; see @secref["hashtables"] for more
 information. Port operations are generally not atomic, but they are
 thread-safe in the sense that a byte consumed by one thread from an
@@ -223,3 +222,47 @@ suspended and then resumes after a call to
 @scheme[thread-suspend-evt], the result event remains ready; after
 each resume of @scheme[thd] created a fresh event to be returned by
 @scheme[thread-suspend-evt].}
+
+@;------------------------------------------------------------------------
+@section[#:tag "threadmbox"]{Thread Mailboxes}
+
+Each thread has a @defterm{mailbox} through which it can receive
+arbitrary message. In other words, each thread has a built-in
+asynchronous channel.
+
+@margin-note/ref{See also @secref["async-channel"].}
+
+@defproc[(thread-send [thd thread?] [v any/c] 
+                      [fail-thunk (or/c (-> any) false/c)
+                                  (lambda () (raise-mismatch-error ....))]) 
+         any]{
+
+Queues @scheme[v] as a message to @scheme[thd] without blocking. If
+the message is queued, the result is @|void-const|. If @scheme[thd]
+stops running---as in @scheme[thread-running?]---before the message is
+queued, then @scheme[fail-thunk] is called (through a tail call) if is
+a procedure to produce the result, or @scheme[#f] is returned if
+@scheme[fail-thunk] is @scheme[#f].}
+
+@defproc[(thread-receive) any/c]{
+
+Receives and dequeues a message queued for the current thread, if
+any. If no message is available, @scheme[thread-receive] blocks until
+one is available.}
+
+@defproc[(thread-try-receive) any/c]{
+
+Receives and dequeues a message queued for the current thread, if any,
+or returns @scheme[#f] immediately if no message is available.}
+
+@defproc[(thread-receive-evt) evt?]{
+
+Returns a constant @tech{synchronizable event} (see @secref["sync"])
+that becomes ready when the synchronizing thread has a message to
+receive. The event result is itself.}
+
+@defproc[(thread-rewind-receive [lst list?]) void?]{
+
+Pushes the elements of @scheme[lst] back onto the front of the current
+thread's queue. The elements are pushed one by one, so that the first
+available message is the last element of @scheme[lst].}

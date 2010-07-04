@@ -1,13 +1,14 @@
 
-(module autosave (lib "a-unit.ss")
-  (require (lib "class.ss")
-           (lib "file.ss")
+#lang scheme/unit
+
+  (require mzlib/class
+           scheme/file
            "sig.ss"
            "../gui-utils.ss"
            "../preferences.ss"
            (lib "mred-sig.ss" "mred")
-           (lib "list.ss")
-           (lib "string-constant.ss" "string-constants"))
+           mzlib/list
+           string-constants)
   
   (import mred^
           [prefix exit: framework:exit^]
@@ -55,8 +56,8 @@
               (call-with-output-file autosave-toc-filename
                 (λ (port)
                   (write new-name-mapping port))
-                'truncate
-                'text))))
+                #:exists 'truncate
+                #:mode 'text))))
         (let ([seconds (preferences:get 'framework:autosave-delay)])
           (start (* 1000 seconds) #t)))
       (super-new)
@@ -312,4 +313,4 @@
                (delete-file autosave-name)
                (when tmp-name
                  (delete-file tmp-name))
-               orig-name))))))
+               orig-name)))))

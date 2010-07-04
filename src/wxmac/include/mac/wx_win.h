@@ -4,7 +4,7 @@
 // Author:	Bill Hale 
 // Created:	1994 
 // Updated:	 
-// Copyright:  (c) 2004-2007 PLT Scheme Inc.
+// Copyright:  (c) 2004-2008 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved. 
 /////////////////////////////////////////////////////////////////////////////// 
 
@@ -321,6 +321,7 @@ class wxWindow: public wxbWindow
   /* Other methods */
   /*+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
   virtual void Paint(void);
+  virtual void PaintRgn(RgnHandle rgn);
   virtual void Refresh(void);
   virtual void RefreshIfUpdating(void);
 	

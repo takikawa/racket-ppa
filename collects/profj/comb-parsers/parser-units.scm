@@ -1,14 +1,13 @@
-(module parser-units (lib "lazy.ss" "lazy")
-  
-  (require (lib "unit.ss"))
-  
-  (require (lib "lex.ss" "parser-tools")
-           (lib "combinator-unit.ss" "combinator-parser")
-           "java-signatures.scm"
-           (lib "string.ss"))
-
+(module parser-units scheme/base
     
-  (define-signature language-forms^ (program statement expression field interact)) ;value-type method-type))
+  (require parser-tools/lex
+           scheme/unit
+           combinator-parser/combinator-unit
+           #;(lib "combinator-unit.ss" "combinator-parser")
+           "java-signatures.scm"
+           mzlib/string)
+    
+  (define-signature language-forms^ (program statement (recurs expression) field interact)) ;value-type method-type))
   
   (define-signature token-proc^ (old-tokens->new))
   
@@ -21,48 +20,48 @@
     (define class-type "keyword")
     
     (define (output-map x)
-      #;(!!! (printf "in output-map ~a~n" x))
-      (!!! (when (position-token? x)
-             (set! x (position-token-token x))))
-      (!!! (case (token-name x)
-             [(PIPE) "|"]
-             [(OR) "||"]
-             [(OREQUAL) "|="]
-             [(EQUAL) "="]
-             [(GT) ">"]
-             [(LT) "<"]
-             [(LTEQ) "<="]
-             [(GTEQ) ">="]
-             [(PLUS) "+"]
-             [(MINUS) "-"]
-             [(TIMES) "*"]
-             [(DIVIDE) "/"]
-             [(^T) "^"]
-             [(O_PAREN) "("]
-             [(C_PAREN) ")"]
-             [(O_BRACE) "{"]
-             [(C_BRACE) "}"]
-             [(O_BRACKET) "["]
-             [(C_BRACKET) "]"]
-             [(SEMI_COLON) ";"]
-             [(PERIOD) "."]
-             [(COMMA) ","]
-             [(NULL_LIT) "null"]
-             [(TRUE_LIT) "true"]
-             [(FALSE_LIT) "false"]
-             [(EOF) "end of input"]
-             [(caseT) "case"]
-             [(doT) "do"]
-             [(elseT) "else"]
-             [(ifT) "if"]
-             [(voidT) "void"]
-             [(STRING_LIT) (format "\"~a\"" (token-value x))]
-             [(CHAR_LIT) (format "'~a'" (token-value x))]
-             [(INTEGER_LIT LONG_LIT FLOAT_LIT DOUBLE_LIT
-                           HEX_LIT OCT_LIT HEXL_LIT OCTL_LIT) (token-value x)]
-             [(IDENTIFIER) (format "identifier ~a" (token-value x))]
-             [(STRING_ERROR) (format "misformatted string ~a" (token-value x))]
-             [else (token-name x)])))
+      #;(printf "in output-map ~a~n" x)
+      (when (position-token? x)
+        (set! x (position-token-token x)))
+      (case (token-name x)
+           [(PIPE) "|"]
+           [(OR) "||"]
+           [(OREQUAL) "|="]
+           [(EQUAL) "="]
+           [(GT) ">"]
+           [(LT) "<"]
+           [(LTEQ) "<="]
+           [(GTEQ) ">="]
+           [(PLUS) "+"]
+           [(MINUS) "-"]
+           [(TIMES) "*"]
+           [(DIVIDE) "/"]
+           [(^T) "^"]
+           [(O_PAREN) "("]
+           [(C_PAREN) ")"]
+           [(O_BRACE) "{"]
+           [(C_BRACE) "}"]
+           [(O_BRACKET) "["]
+           [(C_BRACKET) "]"]
+           [(SEMI_COLON) ";"]
+           [(PERIOD) "."]
+           [(COMMA) ","]
+           [(NULL_LIT) "null"]
+           [(TRUE_LIT) "true"]
+           [(FALSE_LIT) "false"]
+           [(EOF) "end of input"]
+           [(caseT) "case"]
+           [(doT) "do"]
+           [(elseT) "else"]
+           [(ifT) "if"]
+           [(voidT) "void"]
+           [(STRING_LIT) (format "\"~a\"" (token-value x))]
+           [(CHAR_LIT) (format "'~a'" (token-value x))]
+           [(INTEGER_LIT LONG_LIT FLOAT_LIT DOUBLE_LIT
+                         HEX_LIT OCT_LIT HEXL_LIT OCTL_LIT) (token-value x)]
+           [(IDENTIFIER) (format "identifier ~a" (token-value x))]
+           [(STRING_ERROR) (format "misformatted string ~a" (token-value x))]
+           [else (token-name x)]))
     
     (define (java-keyword? t)
       (memq  t `(? this super new instanceof while try throw synchronized switch return ifT goto for finally
@@ -204,7 +203,7 @@
       (choose (base-type name) "type"))
     
     (define (method-type base-t)
-      (choice (list base-t voidT) "method return"))
+      (choose (base-t voidT) "method return"))
     
     (define (array-type base-t)
       (sequence (base-t (repeat (sequence (O_BRACKET C_BRACKET) id "array type"))) id "type"))
@@ -264,10 +263,11 @@
     (export general-productions^)
   
     (define (comma-sep term name)
-      (sequence (term (repeat (sequence (COMMA term) id))) id (string-append "a list of " name)))
+      (sequence (term (repeat (sequence (COMMA term) id (string-append "a list of " name))))
+                id (string-append "a list of " name)))
     
     (define name
-      (sequence (IDENTIFIER (repeat (sequence (PERIOD IDENTIFIER) id))) id "name"))
+      (sequence (IDENTIFIER (repeat (sequence (PERIOD IDENTIFIER) id "name"))) id "name"))
     
     )
   
@@ -288,7 +288,7 @@
              [base (sequence (type (^ identifier)) id var-name)]
              [decl
               (cond
-                [(and expr share-type?) (choose (s&e e base) var-name)]
+                [(and expr share-type?) s&e #;(choose (s&e e base) var-name)]
                 [share-type? s]
                 [expr (choose (e base) var-name)]
                 [else base])])
@@ -304,9 +304,6 @@
             java-operators^ java-extras^ language-forms^)
     (export expr-lits^ expr-terms+^ expr-tails^)
             
-    (define (simple-expression exprs)
-      (choice exprs "expression"))
-    
     (define boolean-lits
       (choose (TRUE_LIT FALSE_LIT) "boolean literal"))
     
@@ -333,11 +330,13 @@
     
     (define new-class
       (choose ((sequence (new name O_PAREN C_PAREN) id)
-               (sequence (new name O_PAREN (comma-sep expression "arguments") C_PAREN) id))
+               (sequence (new name O_PAREN (comma-sep (eta expression) "arguments") C_PAREN) id))
               "class instantiation"))
     
     (define (new-array type-name)
-      (sequence (new type-name O_BRACKET expression C_BRACKET (repeat (sequence (O_BRACKET expression C_BRACKET) id)))
+      (sequence (new type-name O_BRACKET (eta expression) C_BRACKET 
+                     (repeat (sequence (O_BRACKET (eta expression) C_BRACKET) id))
+                     (repeat (sequence (O_BRACKET C_BRACKET) id)))
                 id "array instantiation"))
     
     (define field-access-end
@@ -349,14 +348,15 @@
     (define (array-init-maker contents)
       (sequence (O_BRACE (comma-sep contents "array elements") C_BRACE) id "array initializations"))
     
-    (define array-init 
+    (define array-init
       (letrec ([base-init (array-init-maker (eta expression))]
-               [simple-init (array-init-maker (choose (expression base-init (eta init)) "array initializations"))]
-               [init (array-init-maker (choose (expression simple-init) "array initialization"))])
+               [simple-init (array-init-maker 
+                             (choose ((eta expression) base-init (eta init)) "array initializations"))]
+               [init (array-init-maker (choose ((eta expression) simple-init) "array initialization"))])
         init #;(sequence (new type-name init) "array initialization")))
     
     (define (binary-expression-end op)
-      (sequence (op expression) id "binary expression"))
+      (sequence (op (eta expression)) id "binary expression"))
     
     (define if-expr-end 
       (sequence (? (eta expression) : (eta expression)) id "conditional expression"))
@@ -364,40 +364,40 @@
     (define simple-method-call
       (choose
        ((sequence ((^ identifier) O_PAREN C_PAREN) id)
-        (sequence ((^ identifier) O_PAREN (comma-sep expression "arguments") C_PAREN) id))
+        (sequence ((^ identifier) O_PAREN (comma-sep (eta expression) "arguments") C_PAREN) id))
        "method invocation"))
     
     (define method-call-end
       (choose
        ((sequence (PERIOD (^ identifier) O_PAREN C_PAREN) id)
-        (sequence (PERIOD (^ identifier) O_PAREN (comma-sep expression "arguments") C_PAREN) id))
+        (sequence (PERIOD (^ identifier) O_PAREN (comma-sep (eta expression) "arguments") C_PAREN) id))
        "method invocation"))
     
     (define (assignment asignee op)
-      (sequence ((^ asignee) op expression) id "assignment"))
+      (sequence ((^ asignee) op (eta expression)) id "assignment"))
     
     (define unary-assignment-front
-      (choose ((sequence (++ expression) id)
-               (sequence (-- expression) id)) "unary modification"))
+      (choose ((sequence (++ (eta expression)) id)
+               (sequence (-- (eta expression)) id)) "unary modification"))
     
     (define (unary-assignment-back base)
       (choose ((sequence (base ++) id)
                (sequence (base --) id)) "unary modification"))
     
     (define (cast type)
-      (sequence (O_PAREN type C_PAREN expression) id "cast expression"))
+      (sequence (O_PAREN type C_PAREN (eta expression)) id "cast expression"))
     
     (define instanceof-back
       (sequence (instanceof name) id "instanceof expression"))
     
     (define super-ctor
       (choose ((sequence (super O_PAREN C_PAREN) id)
-               (sequence (super O_PAREN (comma-sep expression "arguments") C_PAREN) id))
+               (sequence (super O_PAREN (comma-sep (eta expression) "arguments") C_PAREN) id))
               "super constructor call"))
     
     (define super-call
       (choose ((sequence (super PERIOD identifier O_PAREN C_PAREN) id)
-               (sequence (super PERIOD identifier O_PAREN (comma-sep expression "arguments") C_PAREN) id))
+               (sequence (super PERIOD identifier O_PAREN (comma-sep (eta expression) "arguments") C_PAREN) id))
               "super method invocation"))
     
     (define checks
@@ -428,18 +428,18 @@
     
     (define this-call
       (choose ((sequence (this O_PAREN C_PAREN SEMI_COLON) id)
-               (sequence (this O_PAREN (comma-sep expression "arguments") C_PAREN SEMI_COLON) id)) "this constructor call"))
+               (sequence (this O_PAREN (comma-sep (eta expression) "arguments") C_PAREN SEMI_COLON) id)) "this constructor call"))
     
     (define super-ctor-call
       (choose ((sequence (super O_PAREN C_PAREN SEMI_COLON) id)
-               (sequence (super O_PAREN (comma-sep expression "arguments") C_PAREN SEMI_COLON) id)) "super constructor call"))
+               (sequence (super O_PAREN (comma-sep (eta expression) "arguments") C_PAREN SEMI_COLON) id)) "super constructor call"))
     
     (define (block repeat?)
-      (let ([body (if repeat? (repeat-greedy statement) statement)])
+      (let ([body (if repeat? (repeat-greedy (eta statement)) (eta statement))])
         (sequence (O_BRACE body C_BRACE) id "block statement")))
     
     (define expression-stmt
-      (sequence (expression SEMI_COLON) id "statement"))
+      (sequence ((eta expression) SEMI_COLON) id "statement"))
     
     (define (while-l stmt)
       (sequence (while O_PAREN expression C_PAREN stmt) id "while loop"))
@@ -484,9 +484,6 @@
     
     (define init
       (sequence (this PERIOD IDENTIFIER EQUAL IDENTIFIER SEMI_COLON) id "field initialization"))
-    
-    (define (make-statement statements)
-      (choice statements "statement"))
 
     )
     
@@ -512,10 +509,10 @@
                                (choose ((sequence (O_PAREN C_PAREN) id)
                                         (sequence (O_PAREN a C_PAREN) id)) "method parameter list")
                                (sequence (O_PAREN C_PAREN) id "method parameter list"))]
-             [full (sequence ((repeat m) ret (^ identifier) method-parms throws (comma-sep n "thrown types")) id "method signature")]
              [full-no-t (sequence ((repeat m) ret (^ identifier) method-parms) id "method signature")]
-             [no-mods-t (sequence (ret (^ identifier) method-parms throws (comma-sep n "thrown types")) id "method signature")]
-             [no-mods (sequence (ret (^ identifier) method-parms) id "method signature")])
+             [full (sequence ((^ full-no-t) throws (comma-sep n "thrown types")) id "method signature")]
+             [no-mods (sequence (ret (^ identifier) method-parms) id "method signature")]
+             [no-mods-t (sequence ((^ no-mods) throws (comma-sep n "thrown types")) id "method signature")])
          (cond 
            [(and m t?) (choose (full full-no-t) "method signature")]
            [m full-no-t]
@@ -552,12 +549,11 @@
             [m (sequence ((repeat modifier) interface (^ IDENTIFIER) O_BRACE body C_BRACE) id "interface definition")]
             [e (sequence (interface (^ IDENTIFIER) extends O_BRACE body C_BRACE) id "interface definition")]
             [always (sequence (interface (^ IDENTIFIER) O_BRACE body C_BRACE) id "interface definition")])
-        (choice (cond 
-                  [(and modifier extends) (list m&e m e always)]
-                  [modifier (list m always)]
-                  [extends (list e always)]
-                  [else (list always)])
-                "interface definition")))
+        (cond 
+          [(and modifier extends) (choose (m&e m) "interface definition")]
+          [modifier m]
+          [extends (choose (e always) "interface definition")]
+          [else always])))
     
     )
     
@@ -600,7 +596,6 @@
     (define (top-member mems)
       (choice mems "class or interface"))
     
-    ;Note -- should enfore name to be identifier.identifier instead of name
     (define import-dec
       (let ([name (sequence (identifier (repeat-greedy (sequence (PERIOD identifier) id "import name")))
                             id "import name")])
@@ -614,17 +609,15 @@
             [i (sequence (import body) id "program")])
         (cond
           [(and package import)
-           (choice (list p&i i ) "program")]
+           (choose (p&i i) "program")]
           [package
-           (choice (list p body) "program")]
-          [import
-           (choice (list i body) "program")]
+           (choose (p body) "program")]
+          [import i]
           [else body])))
     
     ) 
   
   ;Remembered Unsupported Features
-  ;throws clause
   ;strictfp
   ;allowing static fields in interface
   
@@ -660,7 +653,7 @@
     (define statement
       (choose ((return-s #f) (if-s (block #f) #f)) "statement"))
     
-    (define field (make-field #f (value+name-type prim-type) expression #f))
+    (define field (make-field #f (value+name-type prim-type) (eta expression) #f))
     
     (define method-sig
       (method-signature #f (value+name-type prim-type) (args (value+name-type prim-type)) #f identifier))
@@ -670,15 +663,16 @@
     (define constructor (make-constructor #f (repeat-greedy init) (value+name-type prim-type)))
     
     (define interface (interface-def #f #f 
-                                     (repeat-greedy 
-                                      (sequence (method-sig SEMI_COLON) id "method signature"))))
+                                     (repeat (sequence (method-sig SEMI_COLON) id "method signature"))))
     
     (define class
-      (class-def #f #f (implements-dec identifier)
+      (class-def #f #f 
+                 (implements-dec identifier)
                  (repeat-greedy (class-body (list field method constructor)))))
     
     (define program 
-      (make-program #f (repeat-greedy import-dec) 
+      (make-program #f 
+                    (repeat-greedy import-dec) 
                     (repeat-greedy (top-member (list class interface)))))
     
     (define interact
@@ -743,7 +737,7 @@
     
     (define statement (statement-c #f))
     
-    (define field (make-field #f (value+name-type prim-type) expression #t))
+    (define field (make-field #f (value+name-type prim-type) (eta expression) #f))
     
     (define method-sig-no-abs
       (method-signature #f (method-type (value+name-type prim-type)) 
@@ -775,7 +769,8 @@
 
     
     (define program
-      (make-program #f (repeat-greedy import-dec) 
+      (make-program #f 
+                    (repeat-greedy import-dec) 
                     (repeat-greedy (choose (class interface) "class or interface"))))
     
     (define interact
@@ -850,7 +845,7 @@
     
     (define statement (statement-c #f))
     
-    (define field (make-field access-mods (value+name-type prim-type) expression #t))
+    (define field (make-field access-mods (value+name-type prim-type) (eta expression) #f))
         
     (define method-sig-no-abs
       (method-signature access-mods (method-type (value+name-type prim-type)) 
@@ -944,7 +939,7 @@
     (define (statement-c interact?)
       (if interact?
           (choose ((return-s #t)
-                   (if-s statement #t)
+                   (if-s (eta statement) #t)
                    (block #t)
                    (for-l (choose ((variable-declaration (array-type (value+name-type prim-type)) expression #t #f "for loop variable")
                                    (comma-sep stmt-expr "initializations")) "for loop initialization") 
@@ -962,7 +957,7 @@
                     assignment-ops)
                    ) "statement")
           (choose ((return-s #t)
-                   (if-s statement #t)
+                   (if-s (eta statement) #t)
                    (variable-declaration (array-type (value+name-type prim-type)) 
                                          (choose (expression array-init) "variable initialization") #t #t "local variable")
                    (block #t)
@@ -980,7 +975,7 @@
     
     (define field (make-field (global-mods access-mods) 
                               (array-type (value+name-type prim-type)) 
-                              (choose (expression array-init) "field initializer") #t))
+                              (eta (choose (expression array-init) "field initializer")) #f))
     
     (define method-sig-no-abs
       (method-signature (global-mods access-mods) 
@@ -1008,7 +1003,8 @@
        (sequence (tok:extends (comma-sep IDENTIFIER "interfaces")) id "extends")
        (repeat-greedy (choose ((sequence (method-sig-no-abs SEMI_COLON) id "method header")
                          (make-field (global-mods access-mods) 
-                                     (array-type (value+name-type prim-type)) expression #t))
+                                     (array-type (value+name-type prim-type)) 
+                                     (eta expression) #f))
                        "interface member definition"))))
     
     (define class

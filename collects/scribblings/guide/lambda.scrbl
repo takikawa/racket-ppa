@@ -1,7 +1,9 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require[(lib "eval.ss" "scribble")]
-@require["guide-utils.ss"]
+#lang scribble/doc
+@(require scribble/manual
+          scribble/eval
+          "guide-utils.ss")
+
+@(define greet-eval (make-base-eval))
 
 @title[#:tag "lambda"]{Functions@aux-elem{ (Procedures)}: @scheme[lambda]}
 
@@ -167,6 +169,7 @@ An @scheme[(code:line _arg-keyword [_arg-id _default-expr])] argument
 specifies a keyword-based argument with a default value.
 
 @defexamples[
+#:eval greet-eval
 (define greet
   (lambda (#:hi [hi "Hello"] given #:last [surname "Smith"])
     (string-append hi ", " given " " surname)))
@@ -186,9 +189,10 @@ through parallel lists in the first two (by-position) arguments,
 and then all by-position arguments from an application as the
 remaining by-position arguments.
 
-@guideother{@secref["apply"] inroduces @scheme[keyword-apply].}
+@guideother{@secref["apply"] introduces @scheme[keyword-apply].}
 
 @defexamples[
+#:eval greet-eval
 (define (trace-wrap f)
   (make-keyword-procedure
    (lambda (kws kw-args . rest)
@@ -233,3 +237,7 @@ case that matches the number of given arguments.
 
 A @scheme[case-lambda] function cannot directly support optional or
 keyword arguments.
+
+@; ----------------------------------------------------------------------
+
+@close-eval[greet-eval]

@@ -1,7 +1,7 @@
 #cs(module simplify mzscheme
      (require "parse.ss"
               "prims.ss"
-              (lib "match.ss"))
+              mzlib/match)
      
      (provide simplify)
       
@@ -167,4 +167,3 @@
          [($ a60:compound statements)
           (flatten/label-block null statements ->stx)]
          [else stmt])))
-   

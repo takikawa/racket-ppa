@@ -12,18 +12,20 @@
 
   ; mzlib
 
-  (require (prefix mzlib: (lib "list.ss")))
-  (require (lib "string.ss"))
-  (require (lib "class.ss"))
-  (require (lib "url.ss" "net"))
-  (require (lib "etc.ss"))
-  (require (lib "thread.ss"))
+  (require (prefix mzlib: mzlib/list))
+  (require mzlib/string)
+  (require mzlib/class)
+  (require net/url)
+  (require mzlib/etc)
+  (require mzlib/thread)
 
   ; exports
 
   (provide
     mx-browser%
     mx-element%
+    mx-document<%>
+    mx-event<%>
     mx-version
     block-while-browsers
     com-invoke
@@ -2292,6 +2294,8 @@
 	(define y (lambda () (mxprims:event-y event)))
 	(super-make-object)))
 
+  (define mx-event<%> (class->interface mx-event%))
+
   (define mx-browser%
     (class object% (init (label "MysterX")
 			 (width 'default)
@@ -2589,6 +2593,8 @@
 	 (apply append-object-from-progid-raw args)))
 
      (super-make-object)))
+
+  (define mx-document<%> (class->interface mx-document%))
 
   (thread
    (lambda ()

@@ -5,7 +5,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2007 PLT Scheme Inc.
+ * Copyright: (C) 2004-2008 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -190,6 +190,8 @@ public:
 
   virtual Bool Ok(void);
 
+  virtual int CacheFontMetricsKey();
+
 #ifdef WX_USE_XRENDER
   virtual void InitPicture();
   void InitPictureClip();
@@ -200,13 +202,13 @@ public:
   void SetGLConfig(wxGLConfig *cfg);
 #endif
 
+  void SetAntiAlias(int v);
+
 #ifdef WX_USE_CAIRO
   void InitCairoDev();
   void ReleaseCairoDev();
   Bool SetCairoPen();
   Bool SetCairoBrush();
-
-  void SetAntiAlias(int v);
 
   void SetAlpha(double d);
 

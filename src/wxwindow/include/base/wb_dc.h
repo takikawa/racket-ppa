@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	
- * Copyright:	(c) 2004-2007 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2008 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  *
  * Renovated by Matthew for MrEd, 1995-2000
@@ -211,6 +211,8 @@ class wxbDC: public wxObject
 
   virtual void SetAlpha(double d);
   double GetAlpha();
+
+  virtual int CacheFontMetricsKey();
 };
 
 /*

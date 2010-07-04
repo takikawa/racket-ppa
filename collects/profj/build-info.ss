@@ -1,6 +1,6 @@
 (module build-info mzscheme
   
-  (require (lib "class.ss") (lib "file.ss") (lib "list.ss")
+  (require mzlib/class mzlib/file mzlib/list
            "ast.ss" "types.ss" "error-messaging.ss" "parameters.ss" 
            "restrictions.ss" "parser.ss" "profj-pref.ss")
 
@@ -45,7 +45,7 @@
                        (htdch-lib? 
                         `(lib ,name "htdch" ,@(if scheme? (cdddr path) path)))
                        (scheme-lib? `(lib ,name ,@(cddr path)))
-                       ((and local? (not (to-file))) name)
+                       ((and local? (not (to-file))) `(quote ,name))
                        (else `(file ,(path->string (build-path dir name)))))))
            (make-name (lambda ()
                         (let ((n (if scheme? (java-name->scheme name) name)))
@@ -452,7 +452,7 @@
                                 (directory-list (build-path (dir-path-path base-dir) "compiled")))))))
            (lang-classes (get-classes lang-dir)) 
            (test-classes (when (testcase-ext?) (get-classes test-dir)))
-           (array (datum->syntax-object #f `(lib "array.ss" "profj" "libs" "java" "lang") #f))
+           (array (datum->syntax-object #f `(lib "array.ss" "profj/libs/java/lang") #f))
            
            (add
             (lambda (path classes dir array?)
@@ -2070,4 +2070,3 @@
   (define raise-error (make-error-pass build-info-location))
   
   )
-  

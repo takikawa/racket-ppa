@@ -1,15 +1,15 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require[(lib "eval.ss" "scribble")]
-@require["guide-utils.ss"]
+#lang scribble/doc
+@(require scribble/manual
+          scribble/eval
+          "guide-utils.ss")
 
 @title[#:tag "characters"]{Characters}
 
-A Scheme @defterm{character} corresponds to a Unicode @defterm{scalar
+A Scheme @deftech{character} corresponds to a Unicode @defterm{scalar
 value}. Roughly, a scalar value is an unsigned integer whose
 representation fits into 21 bits, and that maps to some notion of a
 natural-language character or piece of a character. Technically, a
-scalar value is a simpler notion that the concept called a
+scalar value is a simpler notion than the concept called a
 ``character'' in the Unicode standard, but it's an approximation that
 works well for many purposes. For example, any accented Roman letter
 can be represented as a scalar value, as can any Chinese character.
@@ -21,7 +21,7 @@ between scalar-value numbers and the corresponding character.
 
 A printable character normally prints as @litchar["#\\"] followed
 by the represented character. An unprintable character normally prints
-as @litchar{#\u} followed by the scalar value as hexdecimal
+as @litchar{#\u} followed by the scalar value as hexadecimal
 number. A few characters are printed specially; for example, the space
 and linefeed characters print as @scheme[#\space] and
 @scheme[#\newline], respectively.

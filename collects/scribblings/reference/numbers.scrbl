@@ -1,15 +1,24 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss"
+          scheme/math)
+
+@(define math-eval (make-base-eval))
+@(interaction-eval #:eval math-eval (require scheme/math))
 
 @title[#:tag "numbers"]{Numbers}
 
 @guideintro["numbers"]{numbers}
 
+@local-table-of-contents[]
+
 All numbers are @deftech{complex numbers}. Some of them are
 @deftech{real numbers}, and all of the real numbers that can be
-represented are also @deftech{rational numbers}. Among the real
-numbers, some are @deftech{integers}, because @scheme[round] applied
-to the number produces the same number.
+represented are also @deftech{rational numbers}, except for
+@as-index{@scheme[+inf.0]} (positive @as-index{infinity}),
+@as-index{@scheme[-inf.0]} (negative infinity), and
+@as-index{@scheme[+nan.0]} (@as-index{not-a-number}). Among the
+rational numbers, some are @deftech{integers}, because @scheme[round]
+applied to the number produces the same number.
 
 Orthogonal to those categories, each number is also either an
 @deftech{exact number} or an @deftech{inexact number}. Unless
@@ -22,8 +31,8 @@ produce inexact results even for exact arguments.
 
 In the case of complex numbers, either the real and imaginary parts
 are both exact or inexact, or the number has an exact zero real part
-and an inexact imaginary part; a complex number with an zero imaginary
-part (inexact or exact) is a real number.
+and an inexact imaginary part; a complex number with an exact zero
+imaginary part is a real number.
 
 Inexact real numbers are implemented as either single- or
 double-precision @as-index{IEEE floating-point numbers}---the latter
@@ -35,31 +44,26 @@ single-precision numbers.
 The precision and size of exact numbers is limited only by available
 memory (and the precision of operations that can produce irrational
 numbers). In particular, adding, multiplying, subtracting, and
-dividing exact numbers always produces an extract result.
+dividing exact numbers always produces an exact result.
 
 Inexact numbers can be coerced to exact form, except for the inexact
-numbers @as-index{@scheme[+inf.0]} (positive @as-index{infinity}),
-@as-index{@scheme[-inf.0]} (negative infinity), and
-@as-index{@scheme[+nan.0]} (@as-index{not-a-number}), which have no
-exact form. @index["division by inexact zero"]{Dividing} a number by
-exact zero raises an exception; dividing a non-zero number other than
-@scheme[+nan.0] by an inexact zero returns @scheme[+inf.0] or
-@scheme[-inf.0], depending on the sign of the dividend.  The
-infinities @scheme[+inf.0] and @scheme[-inf.0] are integers, and they
-answer @scheme[#t] for both @scheme[even?] and @scheme[odd?]. The
-@scheme[+nan.0] value is not an integer and is not @scheme[=] to
-itself, but @scheme[+nan.0] is @scheme[eqv?] to itself. Conversely,
-@scheme[(= 0.0 -0.0)] is @scheme[#t], but @scheme[(eqv? 0.0 -0.0)] is
-@scheme[#f]. The datum @scheme[-nan.0] refers to the same constant as
-@scheme[+nan.0].
+numbers @scheme[+inf.0], @scheme[-inf.0], and @scheme[+nan.0], which
+have no exact form. @index["division by inexact zero"]{Dividing} a
+number by exact zero raises an exception; dividing a non-zero number
+other than @scheme[+nan.0] by an inexact zero returns @scheme[+inf.0]
+or @scheme[-inf.0], depending on the sign of the dividend. The
+@scheme[+nan.0] value is not @scheme[=] to itself, but @scheme[+nan.0]
+is @scheme[eqv?] to itself. Conversely, @scheme[(= 0.0 -0.0)] is
+@scheme[#t], but @scheme[(eqv? 0.0 -0.0)] is @scheme[#f]. The datum
+@schemevalfont{-nan.0} refers to the same constant as @scheme[+nan.0].
 
 Calculations with infinites produce results consistent with IEEE
 double-precision floating point where IEEE specifies the result; in
 cases where IEEE provides no specification (e.g., @scheme[(angle
-+inf.0+inf.0)]), the result corresponds to the limit approaching
++inf.0+inf.0i)]), the result corresponds to the limit approaching
 infinity, or @scheme[+nan.0] if no such limit exists.
 
-A @pidefterm{fixnum} is an exact integer whose two's complement
+A @deftech{fixnum} is an exact integer whose two's complement
 representation fit into 31 bits on a 32-bit platform or 63 bits on a
 64-bit platform. Two fixnums that are @scheme[=] are also the same
 according to @scheme[eq?]. Otherwise, the result of @scheme[eq?]
@@ -73,33 +77,66 @@ noted above). Two numbers are @scheme[equal?] when they are
 @; ----------------------------------------
 @section{Number Types}
 
-@defproc[(number? [v any/c]) boolean?]{ Returns @scheme[#t] if @scheme[v]
+@defproc[(number? [v any/c]) boolean?]{Returns @scheme[#t] if @scheme[v]
  is a number, @scheme[#f] otherwise.
 
 @examples[(number? 1) (number? 2+3i) (number? "hello")]}
 
 
-@defproc[(complex? [v any/c]) boolean?]{ Returns @scheme[(number? #,
- @scheme[v])], because all numbers are complex numbers.}
+@defproc[(complex? [v any/c]) boolean?]{ Returns @scheme[(number? v)],
+because all numbers are @tech{complex numbers}.}
 
 
 @defproc[(real? [v any/c]) boolean?]{ Returns @scheme[#t] if @scheme[v] is
- a real number, @scheme[#f] otherwise. A number with an inexact zero
- imaginary part is a real number.
+ a @techlink{real number}, @scheme[#f] otherwise.
 
-@examples[(real? 1) (real? 2+3i) (real? "hello")]}
+@examples[(real? 1) (real? +inf.0) (real? 2+3i) 
+          (real? 2+0.0i) (real? "hello")]}
 
 
-@defproc[(rational? [v any/c]) boolean?]{ Returns @scheme[(real? #,
- @scheme[v])].}
+@defproc[(rational? [v any/c]) boolean?]{ Returns @scheme[#t] if
+ @scheme[v] is a @techlink{rational number}, @scheme[#f] otherwise.
+
+@examples[(rational? 1) (rational? +inf.0) (real? "hello")]}
 
 
 @defproc[(integer? [v any/c]) boolean?]{ Returns @scheme[#t] if @scheme[v]
- is a number that is an integer, @scheme[#f] otherwise. The inexact
- numbers @scheme[+inf.0] and @scheme[-inf.0] are integers, but
- @scheme[+nan.0] is not.
+ is a number that is an @techlink{integer}, @scheme[#f] otherwise.
 
-@examples[(integer? 1) (integer? 2.3) (integer? 4.0) (integer? 2+3i) (integer? "hello")]}
+@examples[(integer? 1) (integer? 2.3) (integer? 4.0) (integer? +inf.0) 
+          (integer? 2+3i) (integer? "hello")]}
+
+
+@defproc[(exact-integer? [v any/c]) boolean?]{
+
+Returns @scheme[(and (integer? v) (exact? v))].
+
+@examples[(exact-integer? 1) (exact-integer? 4.0)]}
+
+
+@defproc[(exact-nonnegative-integer? [v any/c]) boolean?]{
+
+Returns @scheme[(and (exact-integer? v) (not (negative? v)))].
+
+@examples[(exact-nonnegative-integer? 0) (exact-nonnegative-integer? -1)]}
+
+
+@defproc[(exact-positive-integer? [v any/c]) boolean?]{
+
+Returns @scheme[(and (exact-integer? v) (positive? v))].
+
+@examples[(exact-positive-integer? 1) (exact-positive-integer? 0)]}
+
+
+@defproc[(inexact-real? [v any/c]) boolean?]{
+
+Returns @scheme[(and (real? v) (inexact? v))].}
+
+
+@defproc[(fixnum? [v any/c]) boolean?]{
+
+Return @scheme[#t] if @scheme[v] is a @techlink{fixnum}, @scheme[#f]
+otherwise.}
 
 
 @defproc[(zero? [z number?]) boolean?]{ Returns @scheme[(= 0 z)].
@@ -293,26 +330,36 @@ noted above). Two numbers are @scheme[equal?] when they are
 @examples[(truncate 17/4) (truncate -17/4) (truncate 2.5) (truncate -2.5)]}
 
 
-@defproc[(numerator [x real?]) (or/c integer? (one-of/c +nan.0))]{
- Coreces @scheme[x] to an exact number, finds the numerator of the number
+@defproc[(numerator [q rational?]) integer?]{
+ Coreces @scheme[q] to an exact number, finds the numerator of the number
  expressed in its simplest fractional form, and returns this number
- coerced to the exactness of @scheme[x]. An exception is when @scheme[x] is
- @scheme[+inf.0], @scheme[-inf.0], and @scheme[+nan.0], in which case
- @scheme[x] is returned.
+ coerced to the exactness of @scheme[q].
 
-@examples[(numerator 5) (numerator 34/8) (numerator 2.3) (numerator +inf.0)]}
+@examples[(numerator 5) (numerator 34/8) (numerator 2.3)]}
 
 
-@defproc[(denominator [x real?]) (or/c integer? (one-of/c +nan.0))]{
- Coreces @scheme[x] to an exact number, finds the numerator of the number
+@defproc[(denominator [q rational?]) integer?]{
+ Coreces @scheme[q] to an exact number, finds the numerator of the number
  expressed in its simplest fractional form, and returns this number
- coerced to the exactness of @scheme[x]. Exceptions are when @scheme[x] is
- @scheme[+inf.0] or @scheme[-inf.0], in which case @scheme[1.0] is
- returned, or when @scheme[x] is @scheme[+nan.0], in which case
- @scheme[+nan.0] is returned.
+ coerced to the exactness of @scheme[q].
 
-@examples[(denominator 5) (denominator 34/8) (denominator 2.3) (denominator +inf.0)]}
+@examples[(denominator 5) (denominator 34/8) (denominator 2.3)]}
 
+
+@defproc[(rationalize [x real?][tolerance real?]) real?]{
+
+Among the real numbers within @scheme[(abs tolerance)] of @scheme[x],
+returns the one corresponding to an exact number whose
+@scheme[denominator] is smallest.  If multiple integers are within
+@scheme[tolerance] of @scheme[x], the one closest to @scheme[0] is
+used.
+
+@examples[
+(rationalize 1/4 1/10)
+(rationalize -1/4 1/10)
+(rationalize 1/4 1/4)
+(rationalize 11/40 1/4)
+]}
 
 @; ----------------------------------------
 @section{Number Comparison}
@@ -365,7 +412,7 @@ noted above). Two numbers are @scheme[equal?] when they are
 @examples[(sqrt 4/9) (sqrt 2) (sqrt -1)]}
 
 
-@defproc[(integer-sqrt [n integer?]) integer?]{ Returns @scheme[(floor
+@defproc[(integer-sqrt [n integer?]) complex?]{ Returns @scheme[(floor
  (sqrt n))] for positive @scheme[n]. For negative @scheme[n], the result is
  @scheme[(* (integer-sqrt (- n)) 0+i)].
 
@@ -433,11 +480,20 @@ noted above). Two numbers are @scheme[equal?] when they are
 
 
 @defproc*[([(atan [z number?]) number?]
-           [(atan [y real?] [x real?]) number?])]{Returns the arctangent of
- @scheme[z] or of @scheme[(make-rectangular #, @scheme[x] #, @scheme[y])].}
+           [(atan [y real?] [x real?]) number?])]{
 
-@examples[(atan 0.5) (atan 2 1) (atan -2 -1) (atan 1+05.i)]
+In the one-argument case, returns the arctangent of the inexact
+approximation of @scheme[z], except that the result is an exact
+@scheme[0] for an exact @scheme[0] argument.
 
+In the two-argument case, the result is roughly the same as @scheme[(/
+(exact->inexact y) (exact->inexact x))], but the signs of @scheme[y]
+and @scheme[x] determine the quadrant of the result. Moreover, a
+suitable angle is returned when @scheme[y] divided by @scheme[x]
+produces @scheme[+nan.0] in the case that neither @scheme[y] nor
+@scheme[x] is @scheme[+nan.0].
+
+@examples[(atan 0.5) (atan 2 1) (atan -2 -1) (atan 1+05.i) (atan +inf.0 -inf.0)]}
 
 @; ------------------------------------------------------------------------
 @section{Complex Numbers}
@@ -448,8 +504,8 @@ noted above). Two numbers are @scheme[equal?] when they are
 @examples[(make-rectangular 3 4.0)]}
 
 
-@defproc[(make-polar [x real?] [y real?]) number?]{ Returns
- @scheme[(+ (* x (cos y)) (* x (sin y) 0+1i))].
+@defproc[(make-polar [magnitude real?] [angle real?]) number?]{ Returns
+ @scheme[(+ (* magnitude (cos angle)) (* magnitude (sin angle) 0+1i))].
 
 @examples[(make-polar 2 3.14159)]}
 
@@ -466,8 +522,9 @@ noted above). Two numbers are @scheme[equal?] when they are
 @examples[(imag-part 3+4i) (imag-part 5.0) (imag-part 5.0+0.0i)]}
 
 
-@defproc[(magnitude [z number?]) real?]{ Returns the magnitude of
- the complex number @scheme[z] in polar coordinates.
+@defproc[(magnitude [z number?]) (and/c real? (not/c negative?))]{
+ Returns the magnitude of the complex number @scheme[z] in polar
+ coordinates.
 
 @examples[(magnitude -3) (magnitude 3.0) (magnitude 3+4i)]}
 
@@ -534,25 +591,28 @@ noted above). Two numbers are @scheme[equal?] when they are
 @; ------------------------------------------------------------------------
 @section{Random Numbers}
 
-@defproc*[([(random [k (and/c positive-exact-integer?
-                              (integer-in 1 (sub1 (expt 2 31))))])
+@defproc*[([(random [k (integer-in 1 4294967087)]
+                    [generator pseudo-random-generator?
+                               (current-pseudo-random-generator)])
             nonnegative-exact-integer?]
-           [(random) (and/c real? inexact? (>/c 0) (</c 1))])]{  
+           [(random [generator pseudo-random-generator?
+                               (current-pseudo-random-generator)]) 
+            (and/c real? inexact? (>/c 0) (</c 1))])]{  
 
-When called with one argument, returns a random exact integer in the
-range @scheme[0] to @math{@scheme[k]-1}. The number is provided by the
-current pseudo-random number generator (see
-@scheme[current-pseudo-random-generator]), which maintains an internal
-state for generating numbers. The random number generator uses a
-54-bit version of L'Ecuyer's MRG32k3a algorithm.
+When called with and integer argument @scheme[k], returns a random
+exact integer in the range @scheme[0] to @math{@scheme[k]-1}. When
+called with zero arguments, returns a random inexact number between
+@scheme[0] and @scheme[1], exclusive.
 
-When called with zero arguments, returns a random inexact number
-between @scheme[0] and @scheme[1], exclusive, using the current
-pseudo-random number generator.}
+In each case, the number is provided by the given pseudo-random number
+generator (which defaults to the current one, as produced by
+@scheme[current-pseudo-random-generator]). The generator maintains an
+internal state for generating numbers. The random number generator
+uses a 54-bit version of L'Ecuyer's MRG32k3a algorithm
+@cite["L'Ecuyer02"].}
 
 
-@defproc[(random-seed [k (and/c nonnegative-exact-integer?
-                                (integer-in 1 (sub1 (expt 2 31))))])
+@defproc[(random-seed [k (integer-in 1 (sub1 (expt 2 31)))])
           void?]{
 
 Seeds the current pseudo-random number generator with
@@ -600,6 +660,14 @@ must be in the range @scheme[0] to @scheme[4294944442], inclusive; at
 least one of the first three integers must be non-zero; and at least
 one of the last three integers must be non-zero.}
 
+@defproc[(vector->pseudo-random-generator! [generator pseudo-random-generator?]
+                                           [vec vector?])
+         void?]{
+
+Like @scheme[vector->pseudo-random-generator], but changes
+@scheme[generator] to the given state, instead of creating a new
+generator.}
+
 @; ------------------------------------------------------------------------
 @section{Number--String Conversions}
 
@@ -619,32 +687,57 @@ one of the last three integers must be non-zero.}
 @examples[(number->string 3.0) (number->string 255 8)]}
 
 
-@defproc[(string->number [s string?] [radix (exact-integer-in/c 2 16)
- 10]) (or/c number? false/c)]{ Reads and returns a number datum from
- @scheme[s] (see @secref["parse-number"]), returning @scheme[#f] if
- @scheme[s] does not parse exactly as a number datum (with no
- whitespace). The optional @scheme[radix] argument specifies the default
- base for the number, which can be overriden by @litchar{#b},
- @litchar{#o}, @litchar{#d}, or @litchar{#x} in the string.
+@defproc[(string->number [s string?] [radix (integer-in 2 16) 10]) 
+         (or/c number? false/c)]{
+
+Reads and returns a number datum from @scheme[s] (see
+@secref["parse-number"]), returning @scheme[#f] if @scheme[s] does not
+parse exactly as a number datum (with no whitespace). The optional
+@scheme[radix] argument specifies the default base for the number,
+which can be overriden by @litchar{#b}, @litchar{#o}, @litchar{#d}, or
+@litchar{#x} in the string.
 
 @examples[(string->number "3.0+2.5i") (string->number "hello")
           (string->number "111" 7)  (string->number "#b111" 7)]
 }
 
+@defproc[(real->decimal-string [n real?] [decimal-digits nonnegative-exact-integer? 2])
+         string?]{
+
+Prints @scheme[n] into a string and returns the string. The printed
+form of @scheme[n] shows exactly @scheme[decimal-digits] digits after
+the decimal point. The printed for uses a minus sign if @scheme[n] is
+negative, and it does not use a plus sign if @scheme[n] is positive.
+
+Before printing, @scheme[n] is converted to an exact number,
+multiplied by @scheme[(expt 10 decimal-digits)], rounded, and then
+divided again by @scheme[(expt 10 decimal-digits)].  The result of ths
+process is an exact number whose decimal representation has no more
+than @scheme[decimal-digits] digits after the decimal (and it is
+padded with trailing zeros if necessary).
+
+@examples[
+#:eval math-eval
+(real->decimal-string pi)
+(real->decimal-string pi 5)
+]}
 
 @defproc[(integer-bytes->integer [bstr bytes?]
                                  [signed? any/c]
-                                 [big-endian? any/c (system-big-endian?)])
+                                 [big-endian? any/c (system-big-endian?)]
+                                 [start exact-nonnegative-integer? 0]
+                                 [end exact-nonnegative-integer? (bytes-length bstr)])
          exact-integer?]{
 
 Converts the machine-format number encoded in @scheme[bstr] to an
-exact integer. The @scheme[bstr] must contain either 2, 4, or 8
-bytes. If @scheme[signed?] is true, then the bytes are decoded as a
-two's-complement number, otherwise it is decoded as an unsigned
-integer. If @scheme[big-endian?] is true, then the first character's
-ASCII value provides the most significant eight bits of the number,
-otherwise the first character provides the least-significant eight
-bits, and so on..}
+exact integer. The @scheme[start] and @scheme[end] arguments specify
+the substring to decode, where @scheme[(- end start)] must be
+@scheme[2], @scheme[4], or @scheme[8]. If @scheme[signed?] is true,
+then the bytes are decoded as a two's-complement number, otherwise it
+is decoded as an unsigned integer. If @scheme[big-endian?] is true,
+then the first character's ASCII value provides the most significant
+eight bits of the number, otherwise the first character provides the
+least-significant eight bits, and so on.}
 
 
 @defproc[(integer->integer-bytes [n exact-integer?]
@@ -653,21 +746,23 @@ bits, and so on..}
                                  [big-endian? any/c (system-big-endian?)]
                                  [dest-bstr (and/c bytes? 
                                                    (not/c immutable?))
-                                            (make-bytes size-n)])
+                                            (make-bytes size-n)]
+                                 [start exact-nonnegative-integer? 0])
           bytes?]{
 
 Converts the exact integer @scheme[n] to a machine-format number
-encoded in a byte string of length @scheme[size-n], which must be 2,
-4, or 8. If @scheme[signed?] is true, then the number is encoded as
-two's complement, otherwise it is encoded as an unsigned bit
-stream. If @scheme[big-endian?] is true, then the most significant
-eight bits of the number are encoded in the first character of the
-resulting byte string, otherwise the least-significant bits are
-encoded in the first byte, and so on.
+encoded in a byte string of length @scheme[size-n], which must be
+@scheme[2], @scheme[4], or @scheme[8]. If @scheme[signed?] is true,
+then the number is encoded as two's complement, otherwise it is
+encoded as an unsigned bit stream. If @scheme[big-endian?] is true,
+then the most significant eight bits of the number are encoded in the
+first character of the resulting byte string, otherwise the
+least-significant bits are encoded in the first byte, and so on.
 
 The @scheme[dest-bstr] argument must be a mutable byte string of
 length @scheme[size-n]. The encoding of @scheme[n] is written into
-@scheme[dest-bstr], and @scheme[dest-bstr] is returned as the result.
+@scheme[dest-bstr] starting at offset @scheme[start], and
+@scheme[dest-bstr] is returned as the result.
 
 If @scheme[n] cannot be encoded in a string of the requested size and
 format, the @exnraise[exn:fail:contract]. If @scheme[dest-bstr] is not
@@ -675,15 +770,18 @@ of length @scheme[size-n], the @exnraise[exn:fail:contract].}
 
 
 @defproc[(floating-point-bytes->real [bstr bytes?]
-                                     [big-endian? any/c (system-big-endian?)])
+                                     [big-endian? any/c (system-big-endian?)]
+                                     [start exact-nonnegative-integer? 0]
+                                     [end exact-nonnegative-integer? (bytes-length bstr)])
          (and/c real? inexact?)]{
 
-Converts the IEEE floating-point number encoded in @scheme[bstr] to an
-inexact real number. The @scheme[bstr] must contain either 4 or 8
-bytes. If @scheme[big-endian?] is true, then the first byte's ASCII
-value provides the most significant eight bits of the IEEE
-representation, otherwise the first byte provides the
-least-significant eight bits, and so on.}
+Converts the IEEE floating-point number encoded in @scheme[bstr] from
+position @scheme[start] (inclusive) to @scheme[end] (exclusive) to an
+inexact real number. The difference between @scheme[start] an
+@scheme[end] must be either 4 or 8 bytes. If @scheme[big-endian?] is
+true, then the first byte's ASCII value provides the most significant
+eight bits of the IEEE representation, otherwise the first byte
+provides the least-significant eight bits, and so on.}
 
 
 @defproc[(real->floating-point-bytes [x real?]
@@ -691,22 +789,24 @@ least-significant eight bits, and so on.}
                                      [big-endian? any/c (system-big-endian?)]
                                      [dest-bstr (and/c bytes? 
                                                        (not/c immutable?))
-                                                 (make-bytes size-n)])
+                                                 (make-bytes size-n)]
+                                     [start exact-nonnegative-integer? 0])
           bytes?]{
 
 Converts the real number @scheme[x] to its IEEE representation in a
-byte string of length @scheme[size-n], which must be 4 or 8. If
-@scheme[big-endian?] is true, then the most significant eight bits of
-the number are encoded in the first byte of the resulting byte string,
-otherwise the least-significant bits are encoded in the first
-character, and so on.
+byte string of length @scheme[size-n], which must be @scheme[4] or
+@scheme[8]. If @scheme[big-endian?] is true, then the most significant
+eight bits of the number are encoded in the first byte of the
+resulting byte string, otherwise the least-significant bits are
+encoded in the first character, and so on.
 
 The @scheme[dest-bstr] argument must be a mutable byte string of
 length @scheme[size-n]. The encoding of @scheme[n] is written into
-@scheme[dest-bstr], and @scheme[dest-bstr] is returned as the result.
+@scheme[dest-bstr] starting with byte @scheme[start], and
+@scheme[dest-bstr] is returned as the result.
 
-If @scheme[dest-bstr] is provided and it is not of length
-@scheme[size-n], the @exnraise[exn:fail:contract].}
+If @scheme[dest-bstr] is provided and it has less than @scheme[start]
+plus @scheme[size-n] bytes, the @exnraise[exn:fail:contract].}
 
 
 @defproc[(system-big-endian?) boolean?]{
@@ -714,3 +814,51 @@ If @scheme[dest-bstr] is provided and it is not of length
 Returns @scheme[#t] if the native encoding of numbers is big-endian
 for the machine running Scheme, @scheme[#f] if the native encoding
 is little-endian.}
+
+@; ------------------------------------------------------------------------
+@section{Extra Constants and Functions}
+
+@note-lib[scheme/math]
+
+@defthing[pi real]{
+
+An approximation to the ratio of a circle's circumference to its
+diameter: @number->string[pi].}
+
+@defproc[(sqr [z number?]) number?]{
+
+Returns @scheme[(* z z)].}
+
+@defproc[(sgn [x real?]) (one-of/c 1 0 -1 1.0 0.0 -1.0)]{
+
+Returns the sign of @scheme[x] as either @math{-1}, @math{0}, or
+@math{1}.
+
+@examples[
+#:eval math-eval
+(sgn 10)
+(sgn -10.0)
+(sgn 0)
+]}
+
+@defproc[(conjugate [z number?]) number?]{
+
+Returns the complex conjugate of @scheme[z].
+
+@examples[
+#:eval math-eval
+(conjugate 1)
+(conjugate 3+4i)
+]}
+
+@defproc[(sinh [z number?]) number?]{
+
+Returns the hyperbolic sine of @scheme[z].}
+
+@defproc[(cosh [z number?]) number?]{
+
+Returns the hyperbolic cosine of @scheme[z].}
+
+@; ----------------------------------------------------------------------
+
+@close-eval[math-eval]

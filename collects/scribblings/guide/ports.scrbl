@@ -1,11 +1,11 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require[(lib "eval.ss" "scribble")]
-@require["guide-utils.ss"]
+#lang scribble/doc
+@(require scribble/manual
+          scribble/eval
+          "guide-utils.ss")
 
 @title[#:tag "ports"]{Input and Output Ports}
 
-A @defterm{port} encapsulates an I/O stream, normally for just one
+A @deftech{port} encapsulates an I/O stream, normally for just one
 direction. An @defterm{input port} reads from a stream, and an
 @defterm{output port} writes to a string.
 
@@ -14,7 +14,7 @@ optional, and it defaults to either the @defterm{current input port}
 or @defterm{current output port}. For @exec{mzscheme}, the current
 ports are initialized to the process's stdin and stdout. The
 @scheme[current-input-port] and @scheme[current-output-port]
-procedures, whien called with no arguments, return the current output
+procedures, when called with no arguments, return the current output
 and input port, respectively.
 
 @examples[

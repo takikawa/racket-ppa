@@ -1,6 +1,6 @@
 /*
   Precise GC for MzScheme
-  Copyright (c) 2004-2007 PLT Scheme Inc.
+  Copyright (c) 2004-2008 PLT Scheme Inc.
   Copyright (c) 1999 Matthew Flatt
   All rights reserved.
 
@@ -160,6 +160,7 @@ void GC_set_variable_stack(void **p) { GC_variable_stack = p; }
 
 /********************* Type tags *********************/
 Type_Tag pair_tag = 42; /* set by client */
+Type_Tag mutable_pair_tag = 42; /* set by client */
 Type_Tag weak_box_tag = 42; /* set by client */
 Type_Tag ephemeron_tag = 42; /* set by client */
 Type_Tag weak_array_tag  = 42; /* set by client */
@@ -385,7 +386,7 @@ static int running_finals;
 static char zero_sized[4];
 
 /* Temporary pointer-holder used by routines that allocate */
-static void *park[2];
+static void *park[2], *park_save[2];
 
 static int during_gc, avoid_collection;
 
@@ -431,9 +432,10 @@ void GC_set_stack_base(void *base)
   stack_base = (unsigned long)base;
 }
 
-void GC_init_type_tags(int count, int pair, int weakbox, int ephemeron, int weakarray, int custbox)
+void GC_init_type_tags(int count, int pair, int mutable_pair, int weakbox, int ephemeron, int weakarray, int custbox)
 {
   pair_tag = pair;
+  mutable_pair_tag = mutable_pair;
   weak_box_tag = weakbox;
   ephemeron_tag = ephemeron;
   weak_array_tag = weakarray;
@@ -2823,6 +2825,7 @@ static void init(void)
     GC_add_roots(&run_queue, (char *)&run_queue + sizeof(run_queue) + 1);
     GC_add_roots(&last_in_queue, (char *)&last_in_queue + sizeof(last_in_queue) + 1);
     GC_add_roots(&park, (char *)&park + sizeof(park) + 1);
+    GC_add_roots(&park_save, (char *)&park_save + sizeof(park_save) + 1);
 
     sets[0] = &tagged;
     sets[1] = &array;
@@ -3485,6 +3488,12 @@ static void gcollect(int full)
   if (!running_finals) {
     running_finals = 1;
 
+    /* Finalization might allocate, which might need park: */
+    park_save[0] = park[0];
+    park_save[1] = park[1];
+    park[0] = NULL;
+    park[1] = NULL;
+
     while (run_queue) {
       Fnl *f;
       void **gcs;
@@ -3503,6 +3512,11 @@ static void gcollect(int full)
     }
 
     running_finals = 0;
+
+    park[0] = park_save[0];
+    park[1] = park_save[1];
+    park_save[0] = NULL;
+    park_save[1] = NULL;
   }
 }
 
@@ -3818,6 +3832,23 @@ void *GC_malloc_pair(void *a, void *b)
   return p;
 }
 
+void *GC_malloc_mutable_pair(void *a, void *b)
+{
+  void *p;
+
+  park[0] = a;
+  park[1] = b;
+  p = GC_malloc_one_tagged(3 << LOG_WORD_SIZE);
+  a = park[0];
+  b = park[1];
+
+  ((Type_Tag *)p)[0] = mutable_pair_tag;
+  ((void **)p)[1] = a;
+  ((void **)p)[2] = b;
+
+  return p;
+}
+
 #ifndef gcINLINE
 # define gcINLINE inline
 #endif
@@ -3936,7 +3967,10 @@ void *GC_malloc_atomic(size_t size_in_bytes)
 /* Plain malloc: */
 void *GC_malloc_atomic_uncollectable(size_t size_in_bytes)
 {
-  return malloc(size_in_bytes);
+  void *p;
+  p = malloc(size_in_bytes);
+  memset(p, 0, size_in_bytes);
+  return p;
 }
 
 /******************************************************************************/
@@ -4723,5 +4757,13 @@ void GC_dump_with_traces(int flags,
 void GC_dump(void)
 {
   GC_dump_with_traces(0, NULL, NULL, NULL, 0, NULL, 0);
+}
+
+/******************************************************************************/
+/*                              GC free all                                   */
+/******************************************************************************/
+
+void GC_free_all(void)
+{
 }
 

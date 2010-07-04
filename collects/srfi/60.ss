@@ -1,5 +1,1 @@
-(module |60| mzscheme
-
-  (require (lib "60.ss" "srfi" "60"))
-  (provide (all-from (lib "60.ss" "srfi" "60")))
-  )
+#lang s-exp srfi/provider srfi/60/60

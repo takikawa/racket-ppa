@@ -1,8 +1,8 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "bnf.ss" "scribble")]
-@require["mz.ss"]
+#lang scribble/doc
+@(require scribble/bnf
+          "mz.ss")
 
-@define[(FmtMark . s) (apply litchar "~" s)]
+@(define (FmtMark . s) (apply litchar "~" s))
 
 @title{Writing}
 
@@ -60,7 +60,7 @@ escapes:
 
 @itemize{
 
-  @item{@FmtMark{n} or @FmtMark{%} prints a newline}
+  @item{@FmtMark{n} or @FmtMark{%} prints a newline, the same as @litchar{\n}}
 
   @item{@FmtMark{a} or @FmtMark{A} @scheme[display]s the next argument
   among the @scheme[v]s}
@@ -92,12 +92,13 @@ escapes:
 
   @item{@FmtMark{~} prints a tilde.}
 
-  @item{@FmtMark{}@nonterm{w}, where @nonterm{w} is a whitespace character,
-  skips characters in @scheme[form] until a non-whitespace
-  character is encountered or until a second end-of-line is
-  encountered (whichever happens first). An end-of-line is either
-  @scheme[#\return], @scheme[#\newline], or @scheme[#\return] followed
-  immediately by @scheme[#\newline] (on all platforms).}
+  @item{@FmtMark{}@nonterm{w}, where @nonterm{w} is a whitespace
+  character (see @scheme[char-whitespace?]), skips characters in
+  @scheme[form] until a non-whitespace character is encountered or
+  until a second end-of-line is encountered (whichever happens
+  first). On all platforms, an end-of-line can be @scheme[#\return],
+  @scheme[#\newline], or @scheme[#\return] followed immediately by
+  @scheme[#\newline].}
 
 }
 
@@ -132,6 +133,19 @@ Formats to a string. The result is the same as
 (format "~a as a string is ~s.~n" '(3 4) "(3 4)")
 ]}
 
+@defboolparam[print-pair-curly-braces on?]{
+
+A parameter that control pair printing. If the value is true, then
+pairs print using @litchar["{"] and @litchar["}"] instead of
+@litchar["("] and @litchar[")"]. The default is @scheme[#f].}
+
+
+@defboolparam[print-mpair-curly-braces on?]{
+
+A parameter that control pair printing. If the value is true, then
+mutable pairs print using @litchar["{"] and @litchar["}"] instead of
+@litchar["("] and @litchar[")"]. The default is @scheme[#t].}
+
 @defboolparam[print-unreadable on?]{
 
 A parameter that controls printing values that have no
@@ -147,9 +161,9 @@ A parameter that controls printing data with sharing; defaults to
 
 @defboolparam[print-struct on?]{
 
-A parameter that controls printing structure values in vector form;
-defaults to @scheme[#t]. See @secref["printing"] for more
-information. This parameter has no effect on the printing of
+A parameter that controls printing structure values in vector or
+@tech{prefab} form; defaults to @scheme[#t]. See @secref["printing"]
+for more information. This parameter has no effect on the printing of
 structures that have a custom-write procedure (see
 @scheme[prop:custom-write]).}
 
@@ -161,7 +175,7 @@ A parameter that controls printing box values; defaults to
 @defboolparam[print-vector-length on?]{
 
 A parameter that controls printing vectors; defaults to
-@scheme[#t]. See @secref["print-vectors"] for more information.}
+@scheme[#f]. See @secref["print-vectors"] for more information.}
 
 @defboolparam[print-hash-table on?]{
 
@@ -171,21 +185,35 @@ A parameter that controls printing hash tables; defaults to
 @defboolparam[print-honu on?]{
 
 A parameter that controls printing values in an alternate syntax.  See
-@secref["honu"] for more information.}
+@|HonuManual| for more information.}
+
+
+@defparam*[current-write-relative-directory path 
+                                            (or/c (and/c path-string? complete-path?) false/c)
+                                            (or/c (and/c path? complete-path?) false/c)]{
+
+A parameter that is used when writing compiled code that contains
+pathname literals, including source-location pathnames for procedure
+names. When not @scheme[#f], paths that syntactically extend the
+parameter's value are converted to relative paths; when the resulting
+compiled code is read, relative paths are converted back to complete
+paths using the @scheme[current-load-relative-directory] parameter (if
+it is not @scheme[#f], otherwise the path is left relative).}
+
 
 
 @defproc*[([(port-write-handler [out output-port?]) (any/c output-port? . -> . any)]
-           [(port-write-handler [in input-port?]
+           [(port-write-handler [out output-port?]
                                 [proc (any/c output-port? . -> . any)])
             void?])]{}
 
 @defproc*[([(port-display-handler [out output-port?]) (any/c output-port? . -> . any)]
-           [(port-display-handler [in input-port?]
-                                 [proc (any/c output-port? . -> . any)])
+           [(port-display-handler [out output-port?]
+                                  [proc (any/c output-port? . -> . any)])
             void?])]{}
 
 @defproc*[([(port-print-handler [out output-port?]) (any/c output-port? . -> . any)]
-           [(port-print-handler [in input-port?]
+           [(port-print-handler [out output-port?]
                                 [proc (any/c output-port? . -> . any)])
             void?])]{
 

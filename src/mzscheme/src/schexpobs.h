@@ -38,13 +38,13 @@ extern Scheme_Object *scheme_get_expand_observe();
 #define SCHEME_EXPAND_OBSERVE_NEXT_GROUP(observer)       _SCHEME_EXPOBS(observer,13,NULL)
 #define SCHEME_EXPAND_OBSERVE_BLOCK_TO_LETREC(observer,stx) _SCHEME_EXPOBS(observer,14,stx)
 #define SCHEME_EXPAND_OBSERVE_LET_RENAMES(observer,vars,body)        \
-  _SCHEME_EXPOBS(observer,16, scheme_make_immutable_pair(vars, body))
+  _SCHEME_EXPOBS(observer,16, scheme_make_pair(vars, body))
 #define SCHEME_EXPAND_OBSERVE_LAMBDA_RENAMES(observer,vars,body)     \
-  _SCHEME_EXPOBS(observer,17, scheme_make_immutable_pair(vars, body))
+  _SCHEME_EXPOBS(observer,17, scheme_make_pair(vars, body))
 #define SCHEME_EXPAND_OBSERVE_CASE_LAMBDA_RENAMES(observer,vars,body)        \
-  _SCHEME_EXPOBS(observer,18, scheme_make_immutable_pair(vars, body))
+  _SCHEME_EXPOBS(observer,18, scheme_make_pair(vars, body))
 #define SCHEME_EXPAND_OBSERVE_LETREC_SYNTAXES_RENAMES(observer,sbinds,vbinds,body) \
-  _SCHEME_EXPOBS(observer,19, scheme_make_immutable_pair(sbinds, scheme_make_immutable_pair(vbinds, body)))
+  _SCHEME_EXPOBS(observer,19, scheme_make_pair(sbinds, scheme_make_pair(vbinds, body)))
 #define SCHEME_EXPAND_OBSERVE_PHASE_UP(observer)           _SCHEME_EXPOBS(observer,20,NULL)
 
 #define SCHEME_EXPAND_OBSERVE_MACRO_PRE_X(observer,stx)   _SCHEME_EXPOBS(observer,21,stx)
@@ -52,7 +52,7 @@ extern Scheme_Object *scheme_get_expand_observe();
 
 #define SCHEME_EXPAND_OBSERVE_MODULE_BODY(observer,list)  _SCHEME_EXPOBS(observer,23,list)
 #define SCHEME_EXPAND_OBSERVE_BLOCK_RENAMES(observer,old,new)        \
-  _SCHEME_EXPOBS(observer,24, scheme_make_immutable_pair(old, new))
+  _SCHEME_EXPOBS(observer,24, scheme_make_pair(old, new))
 
 /* Prim signals */
 #define SCHEME_EXPAND_OBSERVE_PRIM_STOP(observer) \
@@ -108,6 +108,9 @@ extern Scheme_Object *scheme_get_expand_observe();
         _SCHEME_EXPOBS(observer,124,NULL)
 #define SCHEME_EXPAND_OBSERVE_PRIM_EXPRESSION(obs) \
         _SCHEME_EXPOBS(obs,138,scheme_false)
+#define SCHEME_EXPAND_OBSERVE_PRIM_VARREF(obs) \
+        _SCHEME_EXPOBS(obs,149,scheme_false)
+
 
 #define SCHEME_EXPAND_OBSERVE_VARIABLE(observer,e1,e2)       \
         _SCHEME_EXPOBS(observer,125,scheme_make_pair(e1, e2))
@@ -146,5 +149,24 @@ extern Scheme_Object *scheme_get_expand_observe();
 
 #define SCHEME_EXPAND_OBSERVE_START_EXPAND(obs) \
         _SCHEME_EXPOBS(obs,141,scheme_false)
+
+#define SCHEME_EXPAND_OBSERVE_TAG(obs,stx) \
+        _SCHEME_EXPOBS(obs,142,stx)
+
+#define SCHEME_EXPAND_OBSERVE_LOCAL_BIND(obs,ids) \
+        _SCHEME_EXPOBS(obs,143,ids)
+#define SCHEME_EXPAND_OBSERVE_ENTER_BIND(obs) \
+        _SCHEME_EXPOBS(obs,144,scheme_false)
+#define SCHEME_EXPAND_OBSERVE_EXIT_BIND(obs) \
+        _SCHEME_EXPOBS(obs,145,scheme_false)
+
+#define SCHEME_EXPAND_OBSERVE_OPAQUE_EXPR(obs,val) \
+        _SCHEME_EXPOBS(obs,146,val)
+
+#define SCHEME_EXPAND_OBSERVE_RENAME_LIST(obs,vals) \
+        _SCHEME_EXPOBS(obs,147,vals)
+
+#define SCHEME_EXPAND_OBSERVE_RENAME_ONE(obs,val) \
+        _SCHEME_EXPOBS(obs,148,val)
 
 #endif

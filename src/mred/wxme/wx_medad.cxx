@@ -3,7 +3,7 @@
  * Purpose:     wxMediaCanvas & wxDrawableMediaAdmin implementation
  * Author:      Matthew Flatt
  * Created:     1995
- * Copyright:   (c) 2004-2007 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2008 PLT Scheme Inc.
  * Copyright:   (c) 1995, Matthew Flatt
  */
 
@@ -26,6 +26,14 @@
 #include "wx_main.h"
 
 static wxMemoryDC *wx_canvasless_offscreen;
+
+#ifdef wx_mac
+extern void wxStartRefreshSequence(void);
+extern void wxEndRefreshSequence(void);
+#else
+# define wxStartRefreshSequence() /* empty */
+# define wxEndRefreshSequence() /* empty */
+#endif
 
 extern void *MrEdGetWindowContext(wxWindow *w);
 
@@ -812,6 +820,8 @@ void wxMediaCanvas::Redraw(double localx, double localy, double fw, double fh)
   if (!media || media->printing)
     return;
 
+  wxStartRefreshSequence();
+
   GetView(&x, &y, &w, &h);
 
   right = x + w;
@@ -851,6 +861,8 @@ void wxMediaCanvas::Redraw(double localx, double localy, double fw, double fh)
       media->SetAdmin(oldadmin);
     }
   }
+
+  wxEndRefreshSequence();
 }
 
 Bool wxMediaCanvas::ScrollTo(double localx, double localy, double fw, double fh,

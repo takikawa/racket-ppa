@@ -196,10 +196,7 @@ please adhere to these guidelines:
 
  ;;; info bar at botttom of drscheme frame
  (collect-button-label "GC")
- (read-only-line1 "Apenas")
- (read-only-line2 "Leitura")
- (read/write-line1 "Leitura/")
- (read/write-line2 "Escrita")
+ (read-only "Apenas Leitura")
  (auto-extend-selection "Auto-Extensível")
  (overwrite "Reescrever")
  (running "a executar")
@@ -369,9 +366,6 @@ please adhere to these guidelines:
 
  ;;; about box
  (about-drscheme-frame-title "Sobre o DrScheme")
- (take-a-tour "Dar uma Volta!")
- (release-notes "Notas sobre esta Versão")
- 
  
  ;;; save file in particular format prompting.
  (save-as-plain-text "Gravar este ficheiro como texto?")
@@ -908,7 +902,7 @@ please adhere to these guidelines:
  (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
  (pretty-big-scheme "Pretty Big (includes MrEd and Advanced)")
  (pretty-big-scheme-one-line-summary "Adds syntax and functions from the HtDP languages")
- (r5rs-lang-name "Standard (R5RS)")
+ (r5rs-language-name "R5RS")
  (r5rs-one-line-summary "R5RS, with no frills")
  (expander "Expander")
  (expander-one-line-summary "Expands, rather than evaluates, expressions")
@@ -1179,10 +1173,6 @@ please adhere to these guidelines:
   (profjBoxes-insert-java-interactions "Insert Java Interactions")
 
   ;; Slideshow
-  (slideshow-show-slideshow-panel "Mostrar Painel de Apresentação")
-  (slideshow-hide-slideshow-panel "Esconder Painel de Apresentação")
-  (slideshow-freeze-picts "Congelar estas Imagens")
-  (slideshow-thaw-picts "Mostrar Imagens Debaixo do Ponteiro")
   (slideshow-hide-picts "Show Nested Boxes")
   (slideshow-show-picts "Mostrar Imagens")
   (slideshow-cannot-show-picts "Cannot show picts; run program to cache sizes first")

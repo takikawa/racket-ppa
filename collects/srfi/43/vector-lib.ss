@@ -1,10 +1,10 @@
-;;; Copyright (C) 2005-2007 by Chongkai Zhu.
+;;; Copyright (C) 2005-2008 by Chongkai Zhu.
 
 (module vector-lib mzscheme
   
-  (require (lib "receive.ss" "srfi" "8")
-           (lib "etc.ss" "mzlib")
-           (lib "contract.ss"))
+  (require srfi/8/receive
+           mzlib/etc
+           mzlib/contract)
   
   (define mutable-vector/c
     (and/c vector? (not/c immutable?)))

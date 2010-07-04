@@ -1,8 +1,10 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require[(lib "eval.ss" "scribble")]
-@require[(lib "bnf.ss" "scribble")]
-@require["guide-utils.ss"]
+#lang scribble/doc
+@(require scribble/manual
+          scribble/eval
+          scribble/bnf
+          "guide-utils.ss")
+
+@(define posn-eval (make-base-eval))
 
 @title[#:tag "define-struct"]{Programmer-Defined Datatypes}
 
@@ -30,12 +32,13 @@ only to static information about the structure type that cannot be
 used directly:
 
 @def+int[
+#:eval posn-eval
 (define-struct posn (x y))
 posn
 ]
 
-We explain one use of the @scheme[_struct-id] binding in the next
-section, @secref["struct-subtypes"].
+We show two uses of the @scheme[_struct-id] binding below in
+@secref["struct-copy"] and @secref["struct-subtypes"].
 
 Meanwhile, in addition to defining @scheme[_struct-id],
 @scheme[define-struct] also defines a number of identifiers that are
@@ -48,31 +51,22 @@ built from @scheme[_struct-id] and the @scheme[_field-id]s:
        the number of @scheme[_field-id]s, and returns an instance of
        the structure type.
 
-       @examples[(make-posn 1 2)]}
+       @examples[#:eval posn-eval (make-posn 1 2)]}
 
  @item{@scheme[_struct-id]@schemeidfont{?} : a @deftech{predicate}
        function that takes a single argument and returns @scheme[#t]
        if it is an instance of the structure type, @scheme[#f]
        otherwise.
 
-       @examples[(posn? 3) (posn? (make-posn 1 2))]}
+       @examples[#:eval posn-eval (posn? 3) (posn? (make-posn 1 2))]}
 
  @item{@scheme[_struct-id]@schemeidfont{-}@scheme[_field-id] : for
        each @scheme[_field-id], an @deftech{accessor} that extracts
        the value of the corresponding field from an instance of the
        structure type.
 
-       @examples[(posn-x (make-posn 1 2)) (posn-y (make-posn 1 2))]}
-
- @item{@schemeidfont{set-}@scheme[_struct-id]@schemeidfont{-}@scheme[_field-id]@schemeidfont{!} : for
-       each @scheme[_field-id], a @deftech{mutator} that sets
-       the value of the corresponding field in an instance of the
-       structure type.
-
-       @examples[(define p (make-posn 1 2))
-                 (posn-x p)
-                 (set-posn-x! p 10)
-                 (posn-x p)]}
+       @examples[#:eval posn-eval 
+                 (posn-x (make-posn 1 2)) (posn-y (make-posn 1 2))]}
 
  @item{@schemeidfont{struct:}@scheme[_struct-id] : a
        @deftech{structure type descriptor}, which is a value that
@@ -92,6 +86,36 @@ as requiring them to be numbers, is normally the job of a contract, as
 discussed later in @secref["contracts"].
 
 @; ------------------------------------------------------------
+@section[#:tag "struct-copy"]{Copying and Update}
+
+The @scheme[struct-copy] form clones a structure and optionally
+updates specified fields in the clone. This process is sometimes
+called a @deftech{functional update}, because the result is a
+structure with updated field values. but the original structure is not
+modified.
+
+@specform[
+(struct-copy struct-id struct-expr [field-id expr] ...)
+]
+
+The @scheme[_struct-id] that appears after @scheme[struct-copy] must
+be a structure type name bound by @scheme[define-struct] (i.e., the
+name that cannot be used directly as an expression). The
+@scheme[_struct-expr] must produce an instance of the structure type.
+The result is a new instance of the structure tpe that is like the old
+one, except that the field indicated by each @scheme[_field-id] gets
+the value of the corresponding @scheme[_expr].
+
+@examples[
+#:eval posn-eval 
+(define p1 (make-posn 1 2))
+(define p2 (struct-copy posn p1 [x 3]))
+(list (posn-x p2) (posn-y p2))
+(list (posn-x p1) (posn-x p2))
+]
+
+
+@; ------------------------------------------------------------
 @section[#:tag "struct-subtypes"]{Structure Subtypes}
 
 An extended form of @scheme[define-struct] can be used to define a
@@ -107,6 +131,7 @@ The @scheme[_super-id] must be a structure type name bound by
 an expression).
 
 @as-examples[@schemeblock+eval[
+#:eval posn-eval 
 (define-struct posn (x y))
 (define-struct (3d-posn posn) (z))
 ]]
@@ -114,10 +139,11 @@ an expression).
 A structure subtype inherits the fields of its supertype, and the
 subtype constructor accepts the values for the subtype fields after
 values for the supertype fields. An instance of a structure subtype
-can be used with the predicate, accessor, and mutator fields of the
+can be used with the predicate and accessors of the
 supertype.
 
 @examples[
+#:eval posn-eval 
 (define p (make-3d-posn 1 2 3))
 p
 (posn? p)
@@ -136,17 +162,17 @@ With a structure type definition like
 
 an instance of the structure type prints in a way that does not show
 any information about the fields values. That is, structure types by
-default are @defterm{opaque}. If the accessors and mutators of a
+default are @deftech{opaque}. If the accessors and mutators of a
 structure type are kept private to a module, then no other module can
 rely on the representation of the type's instances.
 
-To make a structure type @defterm{transparent}, use the
-@scheme[#:inspector] keyword with the value @scheme[#f] after the
-field-name sequence:
+To make a structure type @deftech{transparent}, use the
+@scheme[#:transparent] keyword after the field-name sequence:
 
 @def+int[
+#:eval posn-eval
 (define-struct posn (x y)
-               #:inspector #f)
+               #:transparent)
 (make-posn 1 2)
 ]
 
@@ -154,14 +180,162 @@ An instance of a transparent structure type prints like a vector, and
 it shows the content of the structure's fields. A transparent
 structure type also allows reflective operations, such as
 @scheme[struct?] and @scheme[struct-info], to be used on its instances
-(see @secref["reflection"]). Different values for @scheme[#:inspector]
-support more controlled access to reflective operations.
+(see @secref["reflection"]).
 
 Structure types are opaque by default, because opaque structure
 instances provide more encapsulation guarantees. That is, a library
 can use an opaque structure to encapsulate data, and clients of the
 library cannot manipulate the data in the structure except as allowed
 by the library.
+
+@; ------------------------------------------------------------
+@section{Structure Type Generativity}
+
+Each time that a @scheme[define-struct] form is evaluated, it
+generates a structure type that is distinct from all existing
+structure types, even if some other structure type has the same name
+and fields.
+
+This generativity is useful for enforcing abstractions and
+implementing programs such as interpreters, but beware of placing a
+@scheme[define-struct] form in positions that are evaluated multiple
+times.
+
+@defexamples[
+(define (add-bigger-fish lst)
+  (define-struct fish (size) #:transparent) (code:comment #,(t "new every time"))
+  (cond
+   [(null? lst) (list (make-fish 1))]
+   [else (cons (make-fish (* 2 (fish-size (car lst))))
+               lst)]))
+
+(add-bigger-fish null)
+(add-bigger-fish (add-bigger-fish null))
+]
+@defs+int[
+[(define-struct fish (size) #:transparent)
+ (define (add-bigger-fish lst)
+   (cond
+    [(null? lst) (list (make-fish 1))]
+    [else (cons (make-fish (* 2 (fish-size (car lst))))
+                lst)]))]
+(add-bigger-fish (add-bigger-fish null))
+]
+
+@; ------------------------------------------------------------
+@section[#:tag "prefab-struct"]{Prefab Stucture Types}
+
+Although a @tech{transparent} structure type prints in a way that
+shows its content, the printed form of the structure cannot be used in
+an expression to get the structure back, unlike the printed form of a
+number, string, symbol, or list.
+
+A @deftech{prefab} (``previously fabricated'') structure type is a
+built-in type that is known to the Scheme printer and expression
+reader. Infinitely many such types exist, and they are indexed by
+name, field count, supertype, and other such details. The printed form
+of a prefab structure is similar to a vector, but it starts
+@litchar{#s} instead of just @litchar{#}, and the first element in the
+printed form is the prefab structure type's name.
+
+The following examples show instances of the @schemeidfont{sprout}
+prefab structure type that has one field. The first instance has a
+field value @scheme['bean], and the second has field value
+@scheme['alfalfa]:
+
+@interaction[
+'#s(sprout bean)
+'#s(sprout alfalfa)
+]
+
+Like numbers and strings, prefab structures are ``self-quoting,'' so
+the quotes above are optional:
+
+@interaction[
+#s(sprout bean)
+]
+
+When you use the @scheme[#:prefab] keyword with
+@scheme[define-struct], instead of generating a new structure type,
+you obtain bindings that work with the existing prefab structure type:
+
+@interaction[
+#:eval posn-eval
+(define lunch '#s(sprout bean))
+(define-struct sprout (kind) #:prefab)
+(sprout? lunch)
+(sprout-kind lunch)
+(make-sprout 'garlic)
+]
+
+The field name @schemeidfont{kind} above does not matter for finding
+the prefab structure type; only the name @schemeidfont{sprout} and the
+number of fields matters. At the same time, the prefab structure type
+@schemeidfont{sprout} with three fields is a different structure type
+than the one with a single field:
+
+@interaction[
+#:eval posn-eval
+(sprout? #s(sprout bean #f 17))
+(code:line (define-struct sprout (kind yummy? count) #:prefab) (code:comment #, @t{redefine}))
+(sprout? #s(sprout bean #f 17))
+(sprout? lunch)
+]
+
+A prefab structure type can have another prefab structure type as its
+supertype, it can have mutable fields, and it can have auto
+fields. Variations in any of these dimensions correspond to different
+prefab structure types, and the printed form of the structure type's
+name encodes all of the relevant details.
+
+@interaction[
+(define-struct building (rooms [location #:mutable]) #:prefab)
+(define-struct (house building) ([occupied #:auto]) #:prefab
+  #:auto-value 'no)
+(make-house 5 'factory)
+]
+
+Every @tech{prefab} structure type is @tech{transparent}---but even
+less abstract than a @tech{transparent} type, because instances can be
+created without any access to a particular structure-type declaration
+or existing examples. Overall, the different options for structure
+types offer a spectrum of possibilities from more abstract to more
+convenient:
+
+@itemize{
+
+ @item{@tech{Opaque} (the default) : Instances cannot be inspected or
+       forged without access to the structure-type declaration. As
+       discussed in the next section, @tech{constructor guards} and
+       @tech{properties} can be attached to the structure type to
+       further protect or to specialize the behavior of its
+       instances.}
+
+ @item{@tech{Transparent} : Anyone can inspect or create an instance
+       without access to the structure-type declaration, which means
+       that the value printer can show the content of an instance. All
+       instance creation passes through a @tech{constructor guard},
+       however, so that the content of an instance can be controlled,
+       and the behavior of instances can be specialized through
+       @tech{properties}. Since the structure type is generated by its
+       definition, instances cannot be manufactured simply through the
+       name of the structure type, and therefore cannot be generated
+       automatically by the expression reader. }
+
+ @item{@tech{Prefab} : Anyone can inspect or create an instance at any
+       time, without prior access to a structure-type declaration or
+       an example instance. Consequently, the expression reader can
+       manufacture instances directly. The instance cannot have a
+       @tech{constructor guard} or @tech{properties}.}
+
+}
+
+Since the expression reader can generate @tech{prefab} instances, they
+are useful when convenient @tech{serialization} is more important than
+abstraction. @tech{Opaque} and @tech{transparent} structures also can
+be serialized, however, if they are defined with
+@scheme[define-serializable-struct] as described in
+@secref["serialization"].
 
 @; ------------------------------------------------------------
 @section[#:tag "struct-options"]{More Structure Type Options}
@@ -178,54 +352,72 @@ at the structure-type level and at the level of individual fields:
 
 A @scheme[_struct-option] always starts with a keyword:
 
- @specspecsubform[#:immutable]{
+ @specspecsubform[#:mutable]{
 
-   Causes all fields of the structure type to be immutable, and
-   supresses the definition of @tech{mutator} procedures.
+    Causes all fields of the structure to be mutable, and introduces
+    for each @scheme[_field-id] a @deftech{mutator}
+     @schemeidfont{set-}@scheme[_struct-id]@schemeidfont{-}@scheme[_field-id]@schemeidfont{!}
+    that sets the value of the corresponding field in an instance of
+    the structure type.
 
-   @defexamples[(define-struct fixed-posn (x y) #:immutable)
-                (set-fixed-posn-x! (make-fixed-posn 1 2) 0)]
+     @defexamples[(define-struct dot (x y) #:mutable)]
+                  (define d (make-dot 1 2))
+                  (dot-x d)
+                  (set-dot-x! d 10)
+                  (dot-x d)]
 
-   Th @scheme[#:immutable] option can also be used as a
+   The @scheme[#:mutable] option can also be used as a
    @scheme[_field-option], in which case it makes an individual field
-   immutable.
-
+   mutable.
+       
    @defexamples[
-   (define-struct person ([name #:immutable] age))
+   (define-struct person (name [age #:mutable]))
    (define friend (make-person "Barney" 5))
    (set-person-age! friend 6)
    (set-person-name! friend "Mary")]}
 
- @specspecsubform[(code:line #:inspector inspector-expr)]{
+ @specspecsubform[(code:line #:transparent)]{
   Controls reflective access to structure instances, as discussed
-  in the previous section (@secref["trans-struct"]).
- }
+  in a previous section, @secref["trans-struct"].}
+
+ @specspecsubform[(code:line #:inspector inspector-expr)]{
+  Generalizes @scheme[#:transparent] to support more controlled access
+  to reflective operations.}
+
+ @specspecsubform[(code:line #:prefab)]{
+  Accesses a built-in structure type, as discussed
+  in a previous section, @secref["prefab-struct"].}
 
  @specspecsubform[(code:line #:auto-value auto-expr)]{
 
   Specifies a value to be used for all automatic fields in the
   structure type, where an automatic field is indicated by the
   @scheme[#:auto] field option. The constructor procedure does not
-  accept arguments for automatic fields.
+  accept arguments for automatic fields, and they are implicitly
+  mutable.
 
   @defexamples[
     (define-struct posn (x y [z #:auto])
-                   #:inspector #f
+                   #:transparent
                    #:auto-value 0)
     (make-posn 1 2)
   ]}
 
+@;-- FIXME:
+@;-- Explain when to use guards instead of contracts, and vice-versa
+
  @specspecsubform[(code:line #:guard guard-expr)]{
-  Specifies a guard procedure to be called whenever an instance of
-  the structure type is created. The guard takes as many arguments
-  as non-automatic fields in the structure type, and it should return
-  the same number of values. The guard can raise an exception if one
-  of the given arguments is unacceptable, or it can convert an
-  argument.
+  Specifies a @deftech{constructor guard} procedure to be called
+  whenever an instance of the structure type is created. The guard
+  takes as many arguments as non-automatic fields in the structure
+  type, and it should return the same number of values. The guard can
+  raise an exception if one of the given arguments is unacceptable, or
+  it can convert an argument.
 
  @defexamples[
+   #:eval posn-eval
    (define-struct thing (name)
-                  #:inspector #f
+                  #:transparent
                   #:guard (lambda (name type-name)
                             (cond
                               [(string? name) name]
@@ -236,14 +428,15 @@ A @scheme[_struct-option] always starts with a keyword:
    (make-thing 1/2)
    (make-thing #f)]
 
-  Unlike the constructor for a procedure type, the guard is called even when
-  subtype instances are created. In that case, only the fields accepted by
-  the constructor are provided to the guard (but the subtype's guard gets
-  both the original fields and fields added by the subtype).
+  The guard is called even when subtype instances are created. In that
+  case, only the fields accepted by the constructor are provided to
+  the guard (but the subtype's guard gets both the original fields and
+  fields added by the subtype).
 
  @defexamples[
+  #:eval posn-eval
   (define-struct (person thing) (age)
-                 #:inspector #f
+                 #:transparent
                  #:guard (lambda (name age type-name)
                            (if (negative? age)
                                (error "bad age" age)
@@ -252,11 +445,12 @@ A @scheme[_struct-option] always starts with a keyword:
   (make-person "Mary" -1)
   (make-person #f 10)]}
 
- @specspecsubform[(code:line #:property prop-expr val-exr)]{
-   Associates a property and value with the structure type.  For
-   example, the @scheme[prop:procedure] property allows a structure
-   instance to be used as a function; the property value determines
-   how a call is implemented when using the structure as a function.
+ @specspecsubform[(code:line #:property prop-expr val-expr)]{
+   Associates a @deftech{property} and value with the structure type.
+   For example, the @scheme[prop:procedure] property allows a
+   structure instance to be used as a function; the property value
+   determines how a call is implemented when using the structure as a
+   function.
 
  @defexamples[
    (define-struct greeter (name)
@@ -280,10 +474,11 @@ A @scheme[_struct-option] always starts with a keyword:
   they can be passed to procedures.
 
   @defexamples[
+    #:eval posn-eval
     (define (make-raven-constructor super-type)
       (define-struct raven ()
                      #:super super-type
-                     #:inspector #f
+                     #:transparent
                      #:property prop:procedure (lambda (self)
                                                  'nevermore))
       make-raven)
@@ -292,39 +487,8 @@ A @scheme[_struct-option] always starts with a keyword:
     (let ([r ((make-raven-constructor struct:thing) "apple")])
       (list r (r)))]}
 
-
-@; ------------------------------------------------------------
-@section{Structure Type Generativity}
-
-Each time that a @scheme[define-struct] form is evaluated, it
-generates a structure type that is distinct from all existing
-structure types, even if some other structure type has the same name
-and fields.
-
-This generativity is useful for enforcing abstractions and
-implementing programs such as interpreters, but beware of placing a
-@scheme[define-struct] form in positions that are evaluated multiple
-times.
-
-@defexamples[
-(define (add-bigger-fish lst)
-  (define-struct fish (size) #:inspector #f) (code:comment #,(t "new every time"))
-  (cond
-   [(null? lst) (list (make-fish 1))]
-   [else (cons (make-fish (* 2 (fish-size (car lst))))
-               lst)]))
-
-(add-bigger-fish null)
-(add-bigger-fish (add-bigger-fish null))
-]
-@defs+int[
-[(define-struct fish (size) #:inspector #f)
- (define (add-bigger-fish lst)
-   (cond
-    [(null? lst) (list (make-fish 1))]
-    [else (cons (make-fish (* 2 (fish-size (car lst))))
-                lst)]))]
-(add-bigger-fish (add-bigger-fish null))
-]
+@; ----------------------------------------
 
 @refdetails["structures"]{structure types}
+
+@close-eval[posn-eval]

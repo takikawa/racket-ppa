@@ -1,6 +1,6 @@
 (module mrpanel mzscheme
-  (require (lib "class.ss")
-	   (lib "class100.ss")
+  (require mzlib/class
+	   mzlib/class100
 	   (prefix wx: "kernel.ss")
 	   "lock.ss"
 	   "const.ss"
@@ -94,8 +94,18 @@
 	       (send (send wx area-parent) add-child wx))))
 	  (send parent after-new-child this)))))
 
-  (define vertical-panel% (class100*/kw panel% () [(parent [style null]) panel%-keywords] (sequence (super-init parent style))))
-  (define horizontal-panel% (class100*/kw panel% () [(parent [style null]) panel%-keywords] (sequence (super-init parent style))))
+  (define vertical-panel% 
+    (class100*/kw panel% () 
+                  [(parent [style null]) panel%-keywords] 
+                  (sequence (super-init parent style))
+                  (public [set-orientation (λ (x) (send (mred->wx this) set-orientation x))]
+                          [get-orientation (λ () (send (mred->wx this) get-orientation))])))
+  (define horizontal-panel% 
+    (class100*/kw panel% () 
+                  [(parent [style null]) panel%-keywords] 
+                  (sequence (super-init parent style))
+                  (public [set-orientation (λ (x) (send (mred->wx this) set-orientation x))]
+                          [get-orientation (λ () (send (mred->wx this) get-orientation))])))
 
   (define list-append append)
 
@@ -154,7 +164,10 @@
 			   (check-item 'set-item-label i)
 			   (check-label-string '(method tab-panel% set-item-label) s)
 			   (let ([s (string->immutable-string s)])
-			     (set-car! (list-tail save-choices i) s)
+                             (set! save-choices (let loop ([save-choices save-choices][i i])
+                                                  (if (zero? i)
+                                                      (cons s (cdr save-choices))
+                                                      (cons (car save-choices) (loop (cdr save-choices) (sub1 i))))))
 			     (send (mred->wx tabs) set-label i s))))]
 	[set
 	 (entry-point (lambda (l) 

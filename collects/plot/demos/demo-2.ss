@@ -1,4 +1,4 @@
-(require (lib "plot.ss" "plot"))
+#lang scheme
+(require plot)
 
-(plot 
- (line identity (color 'red)))
+(plot (line (lambda (x) x) #:color 'red))

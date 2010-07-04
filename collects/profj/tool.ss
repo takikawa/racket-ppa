@@ -1,18 +1,24 @@
-(module tool mzscheme
-  (require (lib "tool.ss" "drscheme") (lib "contract.ss")
-           (lib "mred.ss" "mred") (lib "framework.ss" "framework")
-           (lib "errortrace-lib.ss" "errortrace")
-           (prefix u: (lib "unit.ss")) 
-           (lib "file.ss")
-           (lib "include-bitmap.ss" "mrlib") (lib "etc.ss")
-           (lib "class.ss")
-	   (lib "string-constant.ss" "string-constants")
-           (lib "Object.ss" "profj" "libs" "java" "lang") (lib "array.ss" "profj" "libs" "java" "lang")
-           (lib "String.ss" "profj" "libs" "java" "lang"))
-  (require "compile.ss" "parameters.ss" "parsers/lexer.ss" "parser.ss" "ast.ss" "tester.scm"
+(module tool scheme/base
+  (require drscheme/tool mzlib/contract
+           mred framework
+           errortrace/errortrace-lib
+           (prefix-in u: mzlib/unit)
+           scheme/file
+           mrlib/include-bitmap
+           mzlib/etc
+           mzlib/class
+	   string-constants
+           profj/libs/java/lang/Object profj/libs/java/lang/array
+           profj/libs/java/lang/String)
+  (require "compile.ss" "parameters.ss" "parsers/lexer.ss" "parser.ss"
+           (lib "test-engine.scm" "test-engine")
+           (lib "java-tests.scm" "test-engine")
+           (lib "test-coverage.scm" "test-engine")
+           (except-in "ast.ss" for) #;"tester.scm"
            "display-java.ss")
 
-  (require-for-syntax "compile.ss")
+  (require (for-syntax scheme/base
+                       "compile.ss"))
   
   (provide tool@)
 
@@ -34,6 +40,9 @@
           (comment ,(make-object color% 194 116 31) ,(string-constant profj-java-mode-color-comment))
           (error ,(make-object color% "red") ,(string-constant profj-java-mode-color-error))
           (default ,(make-object color% "black") ,(string-constant profj-java-mode-color-default))))
+      (define colors-table
+        (cons `(block-comment ,(make-object color% 194 116 31) ,(string-constant profj-java-mode-color-comment))
+              color-prefs-table))
       
       ;Set the Java coverage colors
       (define coverage-color-prefs
@@ -112,9 +121,13 @@
       (send java-keymap add-function "tabify-at-caret" (λ (edit event) (send edit java-tabify-selection)))
       (send java-keymap map-function "TAB" "tabify-at-caret")
       
-      (define defs-text-mixin
+      (send java-keymap add-function "insert-{" (lambda (edit event) (send edit open-brace)))
+      (send java-keymap map-function "{" "insert-{")
+      (keymap:send-map-function-meta java-keymap "{" "insert-{")
+      
+      (define indent-mixin
         (mixin (color:text<%> editor:keymap<%>) ()
-          (inherit insert classify-position
+          (inherit insert classify-position set-position
                    get-start-position get-end-position get-character delete
                    backward-match backward-containing-sexp
                    find-string position-paragraph paragraph-start-position
@@ -132,72 +145,125 @@
               (and sexp-start+whitespace
                    (skip-whitespace sexp-start+whitespace 'backward #t))))
           
+          ;Returns whether a block comment just ended when at the end of the buffer
+          (define/private (blockcomment-end? pos)
+            (and (eq? (classify-position pos) 'block-comment)
+                 (let ([close (find-string "*/" 'backward pos 0 #f)])
+                   (and close (= pos (+ 2 close))))))
+          
           (define/private (get-indentation start-pos)
-            (letrec ([indent
+            (letrec ([last-offset
+                      (lambda (previous-line last-line-start)
+                        (max (sub1 (if (> last-line-start start-pos)
+                                       (- start-pos previous-line)
+                                       (- last-line-start previous-line)))
+                             0))]
+                     [blockcomment-open
+                      (lambda (pos)
+                        (let loop ([open-pos (find-string "/*" 'backward pos 0 #f)])
+                          (cond
+                            [(or (not open-pos) (zero? open-pos)) #f]
+                            [(eq? (classify-position (sub1 open-pos)) 'block-comment)
+                             (loop (find-string "/*" 'backward open-pos 0 #f))]
+                            [else open-pos])))]
+                     [indent
                       (if (or (is-stopped?) (is-frozen?))
                           0
                           (let* ([base-offset 0]
                                  [curr-open (get-sexp-start start-pos)])
+                            #;(printf "indent ~a, ~a :~a ~n" start-pos (classify-position start-pos) curr-open)
                             (cond 
-                              [(and (eq? (classify-position start-pos) 'comment) 
-                                    (eq? (classify-position (add1 start-pos)) 'comment))
-                               base-offset]
+                              [(and (eq? (classify-position start-pos) 'block-comment)
+                                         (not (blockcomment-end? start-pos)))
+                               (let* ([comment-open (blockcomment-open start-pos)]
+                                      [comment-line-start (and comment-open
+                                                               (find-string eol 'backward comment-open 0 #f))])
+                                 (+ single-tab-stop
+                                    (cond
+                                      [(not comment-line-start) base-offset]
+                                      [else (max 0
+                                                 (sub1 (- comment-open comment-line-start)))])))]
                               [(or (not curr-open) (= curr-open 0)) base-offset]
                               [else
                                (let ([previous-line (find-string eol 'backward start-pos 0 #f)])
+                                 #;(printf "prev-line ~a~n" previous-line)
                                  (cond 
                                    [(not previous-line) (+ base-offset single-tab-stop)]
+                                   [(eq? (classify-position previous-line) 'block-comment)
+                                    (let* ([comment-open (blockcomment-open previous-line)]
+                                           [comment-line-start (and comment-open
+                                                                    (find-string eol 'backward comment-open 0 #f))])
+                                      (cond
+                                        [(not comment-line-start) base-offset]
+                                        [else (max 0
+                                                   (sub1 (- comment-open comment-line-start)))]))]
+                                   [(or (eq? (classify-position previous-line) 'comment)
+                                        (eq? (classify-position previous-line) 'block-comment))
+                                    (let* ([last-line-start (skip-whitespace (add1 previous-line) 'forward #f)]
+                                           [last-line-indent (last-offset previous-line last-line-start)]
+                                           [old-open (get-sexp-start last-line-start)])
+                                      #;(printf "lls ~a lli ~a oo ~a~n" last-line-start last-line-indent old-open)
+                                      (cond
+                                        [(not old-open) last-line-indent]
+                                        [(and old-open (<= curr-open old-open)) last-line-indent]
+                                        [else (+ single-tab-stop last-line-indent)]))]
                                    [else
                                     (let* ([last-line-start (skip-whitespace previous-line 'forward #f)]
-                                           [last-line-indent 
-                                            (sub1 (if (> last-line-start start-pos)
-                                                      (- start-pos previous-line)
-                                                      (- last-line-start previous-line)))]
+                                           [last-line-indent (last-offset previous-line last-line-start)]
                                            [old-open (get-sexp-start last-line-start)])
+                                      #;(printf "lls ~a lli ~a oo~a~n" last-line-start last-line-indent old-open)
                                       (cond
                                         [(not old-open) last-line-indent]
                                         [(and old-open (<= curr-open old-open)) last-line-indent]
                                         [else (+ single-tab-stop last-line-indent)]))]))])))])
-              (build-string (max indent 0) (λ (x) #\space)))
-            #;(let ([to-insert 0])
-              (let loop ([pos start-pos])
-                (let ([pos-before (backward-containing-sexp pos 0)])
-                  (when pos-before
-                    (let ([brace-pos (find-string "{" 'backward pos-before 0 #f)])
-                      (when brace-pos
-                        (set! to-insert (+ single-tab-stop to-insert))
-                        (loop brace-pos))))))
-              (build-string to-insert (λ (x) #\space))))
-            
+              (build-string (max indent 0) (λ (x) #\space))))
+          
           (define/public (do-return)
             (let ([start-pos (get-start-position)]
                   [end-pos (get-end-position)])
-              (let ([to-insert ""])
-                (if (= start-pos end-pos)
-                    (insert (string-append "\n" (get-indentation start-pos)))
-                    (insert "\n")))))
+              (if (= start-pos end-pos)
+                  (insert (string-append "\n" (get-indentation start-pos)))
+                  (insert "\n"))))
           
+          (define/public (open-brace)
+            (let* ([start-pos (get-start-position)]
+                   [end-pos (get-end-position)]
+                   [cur-class (classify-position start-pos)])
+              (cond 
+                [(and (= start-pos end-pos) 
+                      (or (and (eq? cur-class 'block-comment) (blockcomment-end? start-pos))
+                          (not (memq cur-class '(comment string error block-comment)))))
+                 (insert (string-append "{\n" (get-indentation start-pos) "}"))
+                 (set-position (add1 start-pos))
+                 ]
+                [else (insert "{")])))
+                 
           (define/public (java-tabify-selection)
             (let ([start-para (position-paragraph (get-start-position))]
                   [end-para (position-paragraph (get-end-position))])
               (begin-edit-sequence)
               (let loop ([para start-para])
                 (let* ([para-start (paragraph-start-position para)]
-                       [insertion (get-indentation (max 0 (sub1 para-start)) #;para-start)]
-                       [closer? #f])
+                       [insertion (get-indentation (max 0 (sub1 para-start)))]
+                       [closer? #f]
+                       [delete? #f])
                   (let loop ()
-                    (let ([c (get-character para-start)])
+                    (let ([c (get-character para-start)]
+                          [class (classify-position para-start)])
                       (cond
-                        [(and (char-whitespace? c)
+                        [(and (eq? 'white-space class)
                               (not (char=? c #\015))
                               (not (char=? c #\012)))
+                         (set! delete? #t)
                          (delete para-start (+ para-start 1))
                          (loop)]
-                        [(char=? #\} c)
+                        [(and (not (eq? 'block-comment class)) (char=? #\} c))
                          (set! closer? #t)])))
-                  (if closer?
-                      (insert (substring insertion 0 (max 0 (- (string-length insertion) single-tab-stop))) para-start para-start)
-                      (insert insertion para-start para-start)))
+                  (cond
+                    [closer?
+                     (insert (substring insertion 0 (max 0 (- (string-length insertion) single-tab-stop))) para-start para-start)]
+                    [(or delete? (not (eq? 'block-comment (classify-position para-start))))
+                     (insert insertion para-start para-start)]))
                 (unless (= para end-para)
                   (loop (+ para 1))))
               (end-edit-sequence)))
@@ -273,7 +339,8 @@
       
       ;(make-profj-settings symbol boolean boolean boolean boolean (list string))
       (define-struct profj-settings 
-        (print-style print-full? allow-check? allow-test? run-tests? coverage? classpath) (make-inspector))
+        (print-style print-full? allow-check? allow-test? run-tests? coverage? classpath)
+        #:transparent)
       
       ;ProfJ general language mixin
       (define (java-lang-mixin level name number one-line dyn? manual-dirname)
@@ -302,23 +369,15 @@
                          profjWizard:special:java-class
                          profjWizard:special:java-union
                          drscheme:special:insert-image
-                         drscheme:special:insert-large-letters)) #t]
+                         drscheme:special:insert-large-letters
+                         tests:dock-menu
+                         tests:test-menu)) #t]
               [(memq s '(slideshow:special-menu 
                          drscheme:define-popup
                          profj:special:java-interactions-box)) #f]
               [(regexp-match #rx"^drscheme:special:" (format "~a" s)) #f]
               [else (drscheme:language:get-capability-default s)]))
           (define/public (first-opened) (void))
-          
-          (define/public (order-manuals x)
-            (let* ((beg-list '(#"profj-beginner" #"teachpack-htdc"
-                               #"tour" #"drscheme" #"help"))
-                   (int-list (cons #"profj-intermediate" beg-list)))
-              (values (case level
-                        ((beginner) beg-list)
-                        ((intermediate intermediate+access) int-list)
-                        ((advanced full) (cons #"profj-advanced" int-list)))
-                      #f)))
           
           ;default-settings: -> profj-settings
           (define/public (default-settings) 
@@ -393,7 +452,7 @@
                      [allow-test (when (eq? level 'full)
                                    (make-object check-box% (string-constant profj-language-config-support-test-language)
                                      testing-prefs (lambda (x y) update-at2)))]
-                     [display-testing 
+                     #;[display-testing 
                       (make-object check-box% (string-constant profj-language-config-testing-enable)
                         testing-prefs (lambda (x y) (update-dt x y)))]
                      [collect-coverage 
@@ -558,8 +617,8 @@
                                           (send allow-testing get-value))
                                       (and (eq? level 'full)
                                            (send allow-test get-value))
-                                      (send display-testing get-value)
-                                      (and (send display-testing get-value)
+                                      #t #;(send display-testing get-value)
+                                      (and #t #;(send display-testing get-value)
                                            (send collect-coverage get-value))
                                       (get-classpath))]
                 [(settings)
@@ -574,8 +633,8 @@
                    (send allow-testing set-value (profj-settings-allow-check? settings)))
                  (when (eq? level 'full)
                    (send allow-test set-value (profj-settings-allow-test? settings)))
-                 (send display-testing set-value (profj-settings-run-tests? settings))
-                 (if (send display-testing get-value)
+                 #;(send display-testing set-value (profj-settings-run-tests? settings))
+                 (if #t #;(send display-testing get-value)
                      (send collect-coverage set-value (profj-settings-coverage? settings))
                      (send collect-coverage enable #f))
                  (install-classpath (profj-settings-classpath settings))])))
@@ -593,8 +652,8 @@
                  (let ((end? (eof-object? (peek-char-or-special port))))
                    (if end? 
                        eof 
-                       (datum->syntax-object #f `(parse-java-full-program ,(parse port name level)
-                                                                          ,name) #f)))))))
+                       (datum->syntax #f `(parse-java-full-program ,(parse port (get-defn-editor name) #;(quote name) level)
+                                                                   ,name) #f)))))))
           (define/public (front-end/interaction port settings)
             (mred? #t)
             (let ([name (object-name port)]
@@ -605,13 +664,27 @@
                     (begin
                       (set! executed? #t)
                       (syntax-as-top
-                       (datum->syntax-object 
+                       (datum->syntax
                         #f
                         #;`(compile-interactions-helper ,(lambda (ast) (compile-interactions-ast ast name level execute-types))
                                                         ,(parse-interactions port name level))
                           `(parse-java-interactions ,(parse-interactions port name level) ,name)
                           #f)))))))
-
+          
+          (define (get-defn-editor port-name)
+            (let* ([dr-frame (send (drscheme:rep:current-rep) get-top-level-window)]
+                   [tabs (and dr-frame  (send dr-frame get-tabs))]
+                   [defs (if dr-frame
+                             (map (lambda (t) (send t get-defs)) tabs)
+                             null)]
+                   [def (filter (lambda (d)
+                                  (and (is-a? d drscheme:unit:definitions-text<%>)
+                                       (send d port-name-matches? port-name)))
+                                    defs)])
+              (and dr-frame 
+                   (= 1 (length def))
+                   (car def))))
+           
           ;process-extras: (list struct) type-record -> (list syntax)
           (define/private (process-extras extras type-recs)
             (cond
@@ -639,15 +712,15 @@
                   (syntax-case tc (parse-java-interactions)
                     ((test-case eq (parse-java-interactions ast-1 ed-1) 
                                 (parse-java-interactions ast-2 ed-2) end1 end2)
-                     (datum->syntax-object #f
-                                           `(,(syntax test-case)
-                                              ,(dynamic-require '(lib "profj-testing.ss" "profj") 'java-values-equal?);,(syntax eq)
-                                              ,(compile-interactions-ast (syntax-object->datum (syntax ast-1))
-                                                                         (syntax-object->datum (syntax ed-1)) level type-recs #f)
-                                              ,(compile-interactions-ast (syntax-object->datum (syntax ast-2))
-                                                                         (syntax-object->datum (syntax ed-2)) level type-recs #f)
-                                              ,(syntax end1) ,(syntax end2))
-                                           #f))
+                     (datum->syntax #f
+                                    `(,(syntax test-case)
+                                      ,(dynamic-require '(lib "profj-testing.ss" "profj") 'java-values-equal?);,(syntax eq)
+                                      ,(compile-interactions-ast (syntax->datum (syntax ast-1))
+                                                                 (syntax->datum (syntax ed-1)) level type-recs #f)
+                                      ,(compile-interactions-ast (syntax->datum (syntax ast-2))
+                                                                 (syntax->datum (syntax ed-2)) level type-recs #f)
+                                      ,(syntax end1) ,(syntax end2))
+                                    #f))
                     (_ tc))) (process-extras (cdr extras) type-recs))
                #;(cons (test-case-test (car extras)) (process-extras (cdr extras) type-recs)))
               #;((interact-case? (car extras))
@@ -740,24 +813,38 @@
           (define/private (syntax-as-top s)
 	    (if (syntax? s) (namespace-syntax-introduce s) s))
           
+          (define/private (get-program-windows rep source)
+            (let* ([dr-frame (send rep get-top-level-window)]
+                   [tabs (and dr-frame 
+                              (send dr-frame get-tabs))]
+                   [tab/defs (if dr-frame
+                                 (map (lambda (t) (cons (send t get-defs) t)) tabs)
+                                 null)]
+                   [tab/def (filter (lambda (t/d)
+                                      (and (is-a? (car t/d) drscheme:unit:definitions-text<%>)
+                                           (send (car t/d) port-name-matches? source)))
+                                    tab/defs)])
+              (and dr-frame 
+                   (= 1 (length tab/def))
+                   (list dr-frame (car (car tab/def)) (cdr (car tab/def))))))               
+          
           (define/public (on-execute settings run-in-user-thread)
-            (dynamic-require '(lib "Object.ss" "profj" "libs" "java" "lang") #f)
-            (let ([obj-path ((current-module-name-resolver) '(lib "Object.ss" "profj" "libs" "java" "lang") #f #f)]
-                  [string-path ((current-module-name-resolver) '(lib "String.ss" "profj" "libs" "java" "lang") #f #f)]
-                  [class-path ((current-module-name-resolver) '(lib "class.ss") #f #f)]
-                  [mred-path ((current-module-name-resolver) '(lib "mred.ss" "mred") #f #f)]
+            (dynamic-require 'profj/libs/java/lang/Object #f)
+            (let ([obj-path ((current-module-name-resolver) 'profj/libs/java/lang/Object #f #f)]
+                  [string-path ((current-module-name-resolver) 'profj/libs/java/lang/String #f #f)]
+                  [class-path ((current-module-name-resolver) 'mzlib/class #f #f)]
+                  [mred-path ((current-module-name-resolver) 'mred #f #f)]
                   [n (current-namespace)]
                   [e (current-eventspace)])
               (test-ext? (profj-settings-allow-check? settings))
               (testcase-ext? (profj-settings-allow-test? settings))
               (let ((execute-types (create-type-record)))
-                (read-case-sensitive #t)
                 (run-in-user-thread
                  (lambda ()
                    (test-ext? (profj-settings-allow-check? settings))
                    (testcase-ext? (profj-settings-allow-test? settings))
-                   (tests? (profj-settings-run-tests? settings))
-                   (coverage? (and (tests?) (profj-settings-coverage? settings)))
+                   (test-execute (get-preference 'tests:enable? (lambda () #t)))
+                   (coverage? (and (test-execute) (profj-settings-coverage? settings)))
                    (error-display-handler 
                     (drscheme:debug:make-debug-error-display-handler (error-display-handler)))
                    (let ((old-current-eval (drscheme:debug:make-debug-eval-handler (current-eval))))
@@ -766,7 +853,7 @@
                         (syntax-case exp (parse-java-full-program parse-java-interactions)
                           ((parse-java-full-program ex s)
                            (let ((exp (old-current-eval (syntax ex)))
-                                 (src (old-current-eval (syntax s))))
+                                 (src (old-current-eval (syntax (quote s)))))
                              (execution? #t)
                              (set! execute-types (create-type-record))
                              (let* ((compilation-units (compile-ast exp level execute-types))
@@ -784,36 +871,42 @@
                                    (cond
                                      ((and (not require?) (null? mods) tests-run? (null? extras)) (void))
                                      ((and (not require?) (null? mods) (not tests-run?))
-                                      (when (tests?)
-                                        (let ((tc (make-object test-info%)))
-                                          (namespace-set-variable-value! 'current~test~object% tc)
-                                          (let ((objs (send tc run-tests 
-                                                            (map (lambda (c)
-                                                                   (list c (old-current-eval (string->symbol c))))
-                                                                 (car examples))
-                                                            (cadr examples))))
-                                            (let inner-loop ((os objs))
-                                              (unless (null? os)
-                                                (let ((formatted 
-                                                       (format-java-value (car os) (make-format-style #t 'field #f))))
-                                                  (when (< 24 (total-length formatted))
-                                                    (set! formatted 
-                                                          (format-java-value (car os) (make-format-style #t 'field #t))))
-                                                  (let loop ((out formatted))
-                                                    (unless (null? out)
-                                                      (write-special (car out))
-                                                      (loop (cdr out))))
-                                                  (newline))
-                                                (inner-loop (cdr os))))
-                                            (parameterize ([current-eventspace e])
-                                              (queue-callback 
-                                               (lambda ()
-                                                 (let* ((tab (and (is-a? src drscheme:unit:definitions-text<%>)
-                                                                  (send src get-tab)))
-                                                        (frame (and tab (send tab get-frame)))
-                                                        (test-window 
-                                                         (make-object test-display% frame tab)))
-                                                   (send test-window pop-up-window tc))))))))
+                                      (let* ([test-engine-obj 
+                                              (make-object (if (testcase-ext?) java-test-base% java-examples-engine%))]
+                                             [tc-info (send test-engine-obj get-info)])
+                                        (namespace-set-variable-value! 'current~test~object% tc-info)
+                                        (send test-engine-obj install-tests 
+                                              (map (lambda (c)
+                                                     (list c (old-current-eval (string->symbol c)) c))
+                                                   (car examples)))
+                                        (when (coverage?)
+                                          (send (send test-engine-obj get-info) add-analysis 
+                                                (make-object coverage-analysis%)))
+                                        (send test-engine-obj refine-display-class 
+                                              (cond
+                                                [(and (testcase-ext?) (coverage?)) java-test-coverage-graphics%]
+                                                [(coverage?) java-examples-coverage-graphics%]
+                                                [(testcase-ext?) java-test-graphics%]
+                                                [else java-examples-graphics%]))
+                                        #;(printf "About to run tests~n")
+                                        (send test-engine-obj run)
+                                        #;(printf "Test methods run~n")
+                                        (send test-engine-obj setup-display (drscheme:rep:current-rep) e)
+                                        (send test-engine-obj summarize-results (current-output-port))
+                                        (let ([test-objs (send test-engine-obj test-objects)])
+                                          (let inner-loop ((os test-objs))
+                                            (unless (null? os)
+                                              (let ((formatted 
+                                                     (format-java-value (car os) (make-format-style #t 'field #f))))
+                                                (when (< 24 (total-length formatted))
+                                                  (set! formatted 
+                                                        (format-java-value (car os) (make-format-style #t 'field #t))))
+                                                (let loop ((out formatted))
+                                                  (unless (null? out)
+                                                    (write-special (car out))
+                                                    (loop (cdr out))))
+                                                (newline))
+                                              (inner-loop (cdr os))))))
                                       (set! tests-run? #t)
                                       (loop mods extras require?))
                                      ((and (not require?) (null? mods) tests-run?)
@@ -822,9 +915,10 @@
                                      (require? 
                                       (old-current-eval 
                                        (syntax-as-top (with-syntax ([name name-to-require])
-                                                        (syntax (require name)))))
+                                                        (syntax (require (quote name))))))
                                       (loop mods extras #f))
                                      (else 
+                                      #;(printf "~a~n" (syntax->datum (car mods)))
                                       (let-values (((name syn) (get-module-name (expand (car mods)))))
                                         (set! name-to-require name)
                                         (syntax-as-top #;(eval (annotate-top (compile syn)))
@@ -832,7 +926,7 @@
                                           (errortrace-annotate syn)))
                                         (loop (cdr mods) extras #t)))))))))
                           ((parse-java-interactions ex loc)
-                           (let ((exp (syntax-object->datum (syntax ex))))
+                           (let ((exp (syntax->datum (syntax ex))))
                              (old-current-eval 
                               (syntax-as-top (compile-interactions-ast exp (syntax loc) level execute-types #t)))))
                           (_ (old-current-eval exp))))))
@@ -846,8 +940,8 @@
                      (namespace-require string-path)
                      (namespace-require class-path)
                      (namespace-require mred-path)
-                     (namespace-require '(prefix javaRuntime: (lib "runtime.scm" "profj" "libs" "java")))
-                     (namespace-require '(prefix c: (lib "contract.ss")))
+                     (namespace-require '(prefix javaRuntime: profj/libs/java/runtime))
+                     (namespace-require '(prefix c: mzlib/contract))
                      ))))))
           
           #;(define/public (render-value value settings port); port-write)
@@ -923,7 +1017,7 @@
           (color-prefs:register-color-preference (short-sym->pref-name sym)
                                                  (short-sym->style-name sym)
                                                  color)))
-      (for-each register color-prefs-table)
+      (for-each register colors-table)
       (for-each register coverage-color-prefs)
       
       ;;Java Boxes
@@ -1028,12 +1122,14 @@
           
       (define (java-comment-box-mixin %)
         (class %
-          (inherit get-special-menu get-edit-target-object register-capability-menu-item)
+          (inherit
+            get-insert-menu
+            get-special-menu get-edit-target-object register-capability-menu-item)
           
           (super-new)
           (new menu-item%
             (label  (string-constant profj-insert-java-comment-box))
-            (parent (get-special-menu))
+            (parent (get-insert-menu))
             (callback
              (lambda (menu event)
                (let ([c-box (new java-comment-box%)]
@@ -1043,7 +1139,7 @@
             (demand-callback
              (lambda (mi)
                (send mi enable ((get-edit-target-object) . is-a? . text%)))))
-          (register-capability-menu-item 'profj:special:java-comment-box (get-special-menu))
+          (register-capability-menu-item 'profj:special:java-comment-box (get-insert-menu))
           ))
       
       (drscheme:get/extend:extend-unit-frame java-comment-box-mixin)
@@ -1113,7 +1209,7 @@
                 ;(printf "~a~n~a~n" syntax-list (map remove-requires syntax-list))
                 (if ret-list?
                     syntax-list
-                    (datum->syntax-object #f `(begin ,@(map remove-requires syntax-list)) #f)))))
+                    (datum->syntax #f `(begin ,@(map remove-requires syntax-list)) #f)))))
           (define (remove-requires syn)
             (syntax-case* syn (begin require) (lambda (r1 r2) (eq? (syntax-e r1) (syntax-e r2)))
               ((begin (require x ...) exp1 exp ...) (syntax (begin exp1 exp ...)))
@@ -1131,22 +1227,24 @@
       
       (define (java-interactions-box-mixin %)
         (class %
-          (inherit get-special-menu get-edit-target-object register-capability-menu-item)
+          (inherit get-insert-menu
+                   get-special-menu get-edit-target-object register-capability-menu-item)
           
           (super-new)
           (new menu-item%
                (label (string-constant profj-insert-java-interactions-box))
-               (parent (get-special-menu))
+               (parent (get-insert-menu))
                (callback
                 (lambda (menu event)
                   (let ([i-box (new java-interactions-box%)]
                         [text (get-edit-target-object)])
                     (send text insert i-box)
                     (send text set-caret-owner i-box 'global)))))
-          (register-capability-menu-item 'profj:special:java-interactions-box (get-special-menu))
+          (register-capability-menu-item 'profj:special:java-interactions-box (get-insert-menu))
           ))
       
-      (drscheme:get/extend:extend-definitions-text defs-text-mixin)
+      (drscheme:get/extend:extend-definitions-text indent-mixin)
+      (drscheme:get/extend:extend-interactions-text indent-mixin)
       (drscheme:get/extend:extend-unit-frame java-interactions-box-mixin)
       (drscheme:language:register-capability 'profj:special:java-interactions-box (flat-contract boolean?) #t)
  
@@ -1165,8 +1263,8 @@
   (define-syntax (compile-interactions-helper syn)
     (syntax-case syn ()
       ((_ comp ast)
-        (namespace-syntax-introduce ((syntax-object->datum (syntax comp))
-                                     (syntax-object->datum (syntax ast)))))))
+        (namespace-syntax-introduce ((syntax->datum (syntax comp))
+                                     (syntax->datum (syntax ast)))))))
   
   (define (get-module-name stx)
     (syntax-case stx (module #%plain-module-begin)
@@ -1188,7 +1286,7 @@
                                   (display " - ")
                                   (display (,(string->symbol (string-append (cadr (main)) "-main_java.lang.String1")) x)))
                                'void)])
-         (with-syntax ([main (datum->syntax-object #f execute-body #f)]) 
+         (with-syntax ([main (datum->syntax #f execute-body #f)]) 
            (values (syntax name)
                    (syntax (module name lang 
                              (#%plain-module-begin 

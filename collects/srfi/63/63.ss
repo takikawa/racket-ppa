@@ -1,6 +1,6 @@
 ;; Implementation of SRFI 63 "Homogeneous and Heterogeneous Arrays" for PLT 
 ;; Scheme.
-;; Copyright (C) 2007 Chongkai Zhu
+;; Copyright (C) 2007-2008 Chongkai Zhu
 
 ;; Released under the same terms as the SRFI reference implementation.
 
@@ -9,8 +9,8 @@
 
 (module |63| mzscheme
   
-  (require (lib "4.ss" "srfi")
-           (lib "contract.ss"))
+  (require srfi/4
+           mzlib/contract)
   
   (define-syntax make-cvector
     (syntax-rules ()

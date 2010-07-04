@@ -1,6 +1,6 @@
 (module installer mzscheme
-  (require (lib "process.ss")
-	   (lib "dirs.ss" "setup"))
+  (require mzlib/process
+	   setup/dirs)
   (provide post-installer)
   (define (post-installer plt-home)
     (define (make-dll-path . more)
@@ -13,7 +13,8 @@
            [regsvr (and winsys-dir (build-path winsys-dir "REGSVR32.EXE"))])
       (cond
        [(not (eq? (system-type) 'windows))
-        (printf "Warning: can't install MysterX on non-Windows machine\n")]
+        ;; (printf "Warning: can't install MysterX on non-Windows machine\n")
+        (void)]
        [(not (andmap file-exists? dll-paths))
         (printf "Warning: MysterX binaries not installed\n")]
        [(not winsys-dir)

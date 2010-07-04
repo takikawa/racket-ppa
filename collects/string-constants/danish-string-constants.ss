@@ -196,10 +196,7 @@ please adhere to these guidelines:
   
   ;;; info bar at botttom of drscheme frame
   (collect-button-label "GC")
-  (read-only-line1 "Skrivebeskyttet")
-  (read-only-line2 "")
-  (read/write-line1 "Læs/")
-  (read/write-line2 "Skriv")
+  (read-only "Skrivebeskyttet")
   (auto-extend-selection "Auto-udvid")
   (overwrite "Overskriv")
   (running "kører")
@@ -371,9 +368,6 @@ please adhere to these guidelines:
   
   ;;; about box
   (about-drscheme-frame-title "Om DrScheme")
-  (take-a-tour "Tag en rundvisning!")
-  (release-notes "Udgivelsesbemærkninger")
-  
   
   ;;; save file in particular format prompting.
   (save-as-plain-text "Gem denne fil som tekt?")
@@ -934,7 +928,7 @@ please adhere to these guidelines:
   (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
   (pretty-big-scheme "Temmelig omfattende Scheme (inklusiv MrEd og Avanceret)")
   (pretty-big-scheme-one-line-summary "Grafisk, med mange standardbiblioteker")
-  (r5rs-lang-name "Standard (R5RS)")
+  (r5rs-language-name "R5RS")
   (r5rs-one-line-summary "R5RS, uden dikkedarer")
   (expander "Ekspanderen")
   (expander-one-line-summary "Ekspanderer, snarere end evaluerer udtryk")
@@ -1242,10 +1236,6 @@ please adhere to these guidelines:
   (profjBoxes-insert-java-interactions "Indsæt Java-interaktioner")
   
   ;; Slideshow
-  (slideshow-show-slideshow-panel "Vis diasshow-panel")
-  (slideshow-hide-slideshow-panel "Skjul diasshow-panel")
-  (slideshow-freeze-picts "Frys disse billeder")
-  (slideshow-thaw-picts "Vis billeder under mus")
   (slideshow-hide-picts "Vis indlejrede kasser")
   (slideshow-show-picts "Vis billeder")
   (slideshow-cannot-show-picts "Kan ikke vise billeder; kør programmet for at cache størrelserne først")

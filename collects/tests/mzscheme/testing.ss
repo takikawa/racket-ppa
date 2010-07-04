@@ -76,18 +76,49 @@ transcript.
 (define number-of-error-tests 0)
 (define number-of-exn-tests 0)
 
-(define (test expect fun . args)
-  (set! number-of-tests (add1 number-of-tests))
-  (printf "~s ==> " (cons fun args))
-  (flush-output)
-  (let ([res (if (procedure? fun) (apply fun args) (car args))])
-    (printf "~s\n" res)
-    (let ([ok? (equal? expect res)])
-      (unless ok?
-        (record-error (list res expect (cons fun args)))
-        (printf "  BUT EXPECTED ~s\n" expect))
-      ok?)))
+(define (load-in-sandbox file)
+  (let ([e (parameterize ([(dynamic-require 'scheme/sandbox 'sandbox-security-guard)
+                           (current-security-guard)]
+                          [(dynamic-require 'scheme/sandbox 'sandbox-input)
+                           current-input-port]
+                          [(dynamic-require 'scheme/sandbox 'sandbox-output)
+                           current-output-port]
+                          [(dynamic-require 'scheme/sandbox 'sandbox-error-output)
+                           current-error-port]
+                          [(dynamic-require 'scheme/sandbox 'sandbox-eval-limits)
+                           #f])
+             ((dynamic-require 'scheme/sandbox 'make-evaluator) '(begin) #:requires (list 'scheme)))])
+    (e `(load-relative "testing.ss"))
+    (e `(define real-error-port (quote ,real-error-port)))
+    (e `(define Section-prefix ,Section-prefix))
+    (e `(load-relative (quote ,file)))
+    (let ([l (e '(list number-of-tests
+                       number-of-error-tests
+                       number-of-exn-tests
+                       errs))])
+      (set! number-of-tests (+ number-of-tests (list-ref l 0)))
+      (set! number-of-error-tests (+ number-of-error-tests (list-ref l 1)))
+      (set! number-of-exn-tests (+ number-of-exn-tests (list-ref l 2)))
+      (set! errs (append (list-ref l 3) errs)))))
 
+(define test
+  (let ()
+    (define (test* expect fun args kws kvs)
+      (set! number-of-tests (add1 number-of-tests))
+      (printf "~s ==> " (cons fun args))
+      (flush-output)
+      (let ([res (if (procedure? fun)
+                   (if kws (keyword-apply fun kws kvs args) (apply fun args))
+                   (car args))])
+        (printf "~s\n" res)
+        (let ([ok? (equal? expect res)])
+          (unless ok?
+            (record-error (list res expect (cons fun args)))
+            (printf "  BUT EXPECTED ~s\n" expect))
+          ok?)))
+    (define (test/kw kws kvs expect fun . args) (test* expect fun args kws kvs))
+    (define (test    expect fun         . args) (test* expect fun args #f #f))
+    (make-keyword-procedure test/kw test)))
 
 (define (nonneg-exact? x)
   (and (exact? x)
@@ -117,7 +148,7 @@ transcript.
   (case-lambda
    [(th expr) (thunk-error-test th expr exn:application:type?)]
    [(th expr exn-type?)
-    (set! expr (syntax-object->datum expr))
+    (set! expr (syntax->datum expr))
     (set! number-of-error-tests (add1 number-of-error-tests))
     (printf "~s  =e=> " expr)
     (flush-output)
@@ -178,7 +209,7 @@ transcript.
     [(expr) (error-test expr exn:application:type?)]
     [(expr exn-type?) (thunk-error-test (lambda () (eval expr)) expr exn-type?)]))
 
-(require (rename mzscheme err:mz:lambda lambda)) ; so err/rt-test works with beginner.ss
+(require (only-in (lib "scheme") [lambda err:mz:lambda])) ; so err/rt-test works with beginner.ss
 (define-syntax err/rt-test
   (lambda (stx)
     (syntax-case stx ()
@@ -194,7 +225,7 @@ transcript.
 (define (syntax-test expr)
   (error-test expr exn:fail:syntax?)
   (unless no-extra-if-tests?
-    (error-test (datum->syntax-object expr `(if #f ,expr) expr)
+    (error-test (datum->syntax expr `(if #f ,expr (void)) expr)
                 exn:fail:syntax?)))
 
 (define arity-test
@@ -281,8 +312,8 @@ transcript.
     (printf "\n~aPerformed ~a expression tests (~a ~a, ~a ~a)\n"
             Section-prefix
             (+ number-of-tests number-of-error-tests)
-            number-of-tests "good expressions"
-            number-of-error-tests "bad expressions")
+            number-of-tests "value expressions"
+            number-of-error-tests "exn expressions")
     (printf "~aand ~a exception field tests.\n\n"
             Section-prefix
             number-of-exn-tests)

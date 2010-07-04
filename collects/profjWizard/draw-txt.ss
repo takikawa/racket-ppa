@@ -2,9 +2,9 @@
 (module draw-txt mzscheme
   (require "data-defs.scm"
            "class.scm"
-           (lib "etc.ss")
-           (lib "list.ss")
-           (lib "contract.ss"))
+           mzlib/etc
+           mzlib/list
+           mzlib/contract)
   
   (provide/contract
    [dt-draw    (Union . -> . string?)]
@@ -108,8 +108,8 @@
   ;; add the containment arrow to an abstract class from the right fringe
   (define (add-<-- x0) 
     (list->string
-     (reverse!
-      (let loop ([x (reverse! (string->list x0))])
+     (reverse
+      (let loop ([x (reverse (string->list x0))])
         (cond
           [(char=? (cadr x) #\|) (cons #\< (cdr x))]
           [else (cons #\- (loop (cdr x)))])))))

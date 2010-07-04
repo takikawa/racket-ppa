@@ -1,12 +1,14 @@
 
-(module keymap (lib "a-unit.ss")
-  (require (lib "string-constant.ss" "string-constants")
-           (lib "class.ss")
-           (lib "list.ss")
-           (lib "mred-sig.ss" "mred")
-           (lib "match.ss")
-           "../preferences.ss"
-           "sig.ss")
+#lang scheme/unit
+
+(require string-constants
+         mzlib/class
+         mzlib/list
+         (lib "mred-sig.ss" "mred")
+         mzlib/match
+         "../preferences.ss"
+         "tex-table.ss"
+         "sig.ss")
 
   (import mred^
           [prefix finder: framework:finder^]
@@ -17,10 +19,10 @@
                   [-get-file get-file]))
   (init-depend mred^)
   
-  (define user-keybindings-files (make-hash-table 'equal))
+  (define user-keybindings-files (make-hash))
   
   (define (add-user-keybindings-file spec)
-    (hash-table-get 
+    (hash-ref
      user-keybindings-files
      spec
      (λ ()
@@ -30,7 +32,7 @@
          (match sexp
            [`(module ,name (lib "keybinding-lang.ss" "framework") ,@(x ...)) 
             (let ([km (dynamic-require spec '#%keymap)])
-              (hash-table-put! user-keybindings-files spec km)
+              (hash-set! user-keybindings-files spec km)
               (send global chain-to-keymap km #t))]
            [else (error 'add-user-keybindings-file 
                         (string-constant user-defined-keybinding-malformed-file)
@@ -60,9 +62,9 @@
   
   (define (remove-user-keybindings-file spec)
     (let/ec k
-      (let ([km (hash-table-get user-keybindings-files spec (λ () (k (void))))])
+      (let ([km (hash-ref user-keybindings-files spec (λ () (k (void))))])
         (send global remove-chained-keymap km)
-        (hash-table-remove! user-keybindings-files spec))))
+        (hash-remove! user-keybindings-files spec))))
   
   (define (remove-chained-keymap ed keymap-to-remove)
     (let ([ed-keymap (send ed get-keymap)])
@@ -114,23 +116,23 @@
         (super remove-chained-keymap keymap)
         (set! chained-keymaps (remq keymap chained-keymaps)))
       
-      (define function-table (make-hash-table))
+      (define function-table (make-hasheq))
       (define/public (get-function-table) function-table)
       (define/override (map-function keyname fname)
         (super map-function (canonicalize-keybinding-string keyname) fname)
-        (hash-table-put! function-table (string->symbol keyname) fname))
+        (hash-set! function-table (string->symbol keyname) fname))
       
       (define/public (get-map-function-table)
-        (get-map-function-table/ht (make-hash-table)))
+        (get-map-function-table/ht (make-hasheq)))
       
       (define/public (get-map-function-table/ht table)
-        (hash-table-for-each
+        (hash-for-each
          function-table
          (λ (keyname fname)
-           (unless (hash-table-get table keyname (λ () #f))
+           (unless (hash-ref table keyname (λ () #f))
              (let ([cs (canonicalize-keybinding-string (format "~a" keyname))])
                (when (on-this-platform? cs)
-                 (hash-table-put! table keyname fname))))))
+                 (hash-set! table keyname fname))))))
         (for-each
          (λ (chained-keymap)
            (when (is-a? chained-keymap aug-keymap<%>)
@@ -510,7 +512,7 @@
             (λ (edit event)
               (let ([sel-start (send edit get-start-position)]
                     [sel-end (send edit get-end-position)])
-                (if (= sel-start sel-end)
+                (when (= sel-start sel-end)
                     (send* edit 
                       (insert #\newline)
                       (set-position sel-start)))))]
@@ -728,7 +730,7 @@
                         (get-text-from-user 
                          (string-constant goto-position)
                          (string-constant goto-position))))])
-                (if (string? num-str)
+                (when (string? num-str)
                     (let ([pos (string->number num-str)])
                       (when pos
                         (send edit set-position (sub1 pos))))))
@@ -946,6 +948,20 @@
               (send text lock #t)
               #t)]
            
+           [TeX-compress
+            (let* ([biggest (apply max (map (λ (x) (string-length (car x))) tex-shortcut-table))])
+              (λ (text event)
+                (let ([pos (send text get-start-position)])
+                  (when (= pos (send text get-end-position))
+                    (let ([slash (send text find-string "\\" 'backward pos (max 0 (- pos biggest 1)))])
+                      (when slash
+                        (let ([to-replace (assoc (send text get-text slash pos) tex-shortcut-table)])
+                          (when to-replace
+                            (send text begin-edit-sequence)
+                            (send text delete (- slash 1) pos)
+                            (send text insert (cadr to-replace))
+                            (send text end-edit-sequence)))))))))]
+           
            [greek-letters "αβγδεζηθι κλμνξοπρςστυφχψω"]
            [Greek-letters "ΑΒΓΔΕΖΗΘΙ ΚΛΜΝΞΟΠΡ ΣΤΥΦΧΨΩ"]) ;; don't have a capital ς, just comes out as \u03A2 (or junk) 
       
@@ -967,6 +983,8 @@
                (add (format "insert ~a" c) 
                     (λ (txt evt) (send txt insert c)))))
            (string->list (string-append greek-letters Greek-letters)))
+          
+          (add "TeX compress" TeX-compress)
           
           (add "down-into-embedded-editor" down-into-embedded-editor)
           (add "up-out-of-embedded-editor" up-out-of-embedded-editor)
@@ -1060,6 +1078,9 @@
                        (loop (+ i 1)))))])
             (setup-mappings greek-letters #f)
             (setup-mappings Greek-letters #t))
+          
+          (map "c:\\" "TeX compress")
+          (map "m:\\" "TeX compress")
           
           (map-meta "c:down" "down-into-embedded-editor")
           (map "a:c:down" "down-into-embedded-editor")
@@ -1328,7 +1349,11 @@
               #t)]
            [load-file
             (λ (edit event)
-              (handler:open-file)
+              (let ([fn (send edit get-filename)])
+                (handler:open-file
+                 (and fn
+                      (let-values ([(base name dir) (split-path fn)])
+                        base))))
               #t)])
       (λ (kmap)
         (let* ([map (λ (key func) 
@@ -1404,4 +1429,4 @@
                       (λ (keymap)
                         (send keymap chain-to-keymap global #t)
                         (ctki keymap))])
-        (thunk)))))
+        (thunk))))

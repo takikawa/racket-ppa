@@ -1,15 +1,15 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "eval.ss" "scribble")]
-@require["common.ss"]
-@require["diagrams.ss"]
+#lang scribble/doc
+@(require scribble/eval
+          "common.ss"
+          "diagrams.ss")
 
 @title[#:tag "drawing-overview"]{Drawing}
 
-Drawing in MrEd requires a @deftech{device context} (@deftech{DC}),
- which is an instance of the @scheme[dc<%>] interface. For example,
- the @method[canvas<%> get-dc] method of a canvas returns a
- @scheme[dc<%>] instance for drawing into the canvas window.  Other
- kinds of DCs draw to different kinds of devices:
+Drawing in PLT Scheme requires a @deftech{device context}
+(@deftech{DC}), which is an instance of the @scheme[dc<%>]
+interface. For example, the @method[canvas<%> get-dc] method of a
+canvas returns a @scheme[dc<%>] instance for drawing into the canvas
+window.  Other kinds of DCs draw to different kinds of devices:
 
 @itemize{
 
@@ -135,7 +135,7 @@ Suppose that @scheme[draw-face] creates a particularly complex face that
                           [width 300]
                           [height 300]))
 
-(code:comment #, @t{Make the drawing area with a paint callback that copies the bitmap})
+(code:comment #, @t{Make a drawing area whose paint callback copies the bitmap})
 (define canvas
   (new canvas% [parent frame]
                [paint-callback
@@ -157,13 +157,13 @@ More complex shapes are typically best implemented with
  Scheme logo. It also enables smoothing, so that the logo's curves are
  anti-aliased when smoothing is available. (Smoothing is always
  available under Mac OS X, smoothing is available under Windows XP or
- when @file{gdiplus.dll} is installed, and smoothing is available
+ when @filepath{gdiplus.dll} is installed, and smoothing is available
  under X when Cairo is installed before MrEd is compiled.)
 
-@begin[
-#reader(lib "comment-reader.ss" "scribble")
+@(begin
+#readerscribble/comment-reader
 [schemeblock
-(require (lib "math.ss")) ; for @scheme[pi]
+(require mzlib/math) ; for @scheme[pi]
 
 ;; Construct paths for a 630 x 630 logo
 
@@ -264,7 +264,7 @@ More complex shapes are typically best implemented with
 (send c canvas::min-client-width (/ 650 2))
 (send c canvas::min-client-height (/ 650 2))
 (send f show #t)
-]]
+])
 
 Drawing effects are not completely portable across platforms or across
  types of DC. Drawing in smoothed mode tends to produce more reliable

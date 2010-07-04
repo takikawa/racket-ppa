@@ -1,8 +1,12 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require["utils.ss"]
+#lang scribble/doc
+@(require scribble/manual
+          "utils.ss"
+          (for-label scribble/manual-struct
+                     setup/main-collects))
 
-@title[#:tag "struct"]{Document Structures And Processing}
+@title[#:tag "struct"]{Structures And Processing}
+
+@defmodule[scribble/struct]
 
 A document is represented as a @techlink{part}, as described in
  @secref["parts"]. This representation is intended to
@@ -27,17 +31,18 @@ A document is processed in three passes. The first pass is the
 A @deftech{part} is an instance of @scheme[part]; among other things,
  it has a title @techlink{content}, an initial @techlink{flow}, and a
  list of subsection @techlink{parts}. An @scheme[unnumbered-part] is
- the same as a @scheme[part], but it isn't numbered. There's no
- difference between a part and a full document; a particular source
- module just as easily defines a subsection (incorporated via
- @scheme[include-section]) as a document.
+ the same as a @scheme[part], but it isn't numbered. A
+ @scheme[versioned-part] is add a version field to
+ @scheme[part]. There's no difference between a part and a full
+ document; a particular source module just as easily defines a
+ subsection (incorporated via @scheme[include-section]) as a document.
 
 A @deftech{flow} is an instance of @scheme[flow]; it has a list of
- @techlink{flow elements}.
+ @techlink{blocks}.
 
-A @deftech{flow element} is either a @techlink{table}, an
+A @deftech{block} is either a @techlink{table}, an
  @techlink{itemization}, @techlink{blockquote}, @techlink{paragraph},
- or a @techlink{delayed flow element}.
+ or a @techlink{delayed block}.
 
 @itemize{
 
@@ -50,8 +55,8 @@ A @deftech{flow element} is either a @techlink{table}, an
              it has a list of @techlink{flows}.}
 
        @item{A @deftech{blockquote} is an instance of
-             @scheme[blockquote]; it has list of flow elements that
-             are indented according to a specified style.}
+             @scheme[blockquote]; it has list of @tech{blocks}
+             that are indented according to a specified style.}
 
        @item{A @deftech{paragraph} is an instance of
              @scheme[paragraph]; it has a @deftech{content}, which is
@@ -61,9 +66,10 @@ A @deftech{flow element} is either a @techlink{table}, an
 
              @item{An @deftech{element} can be a string, one of a few
                    symbols, an instance of @scheme[element] (possibly
-                   @scheme[link-element], etc.), a @techlink{delayed
-                   element}, or anything else allowed by the current
-                   renderer.
+                   @scheme[link-element], etc.), a
+                   @techlink{part-relative element}, a
+                   @techlink{delayed element}, or anything else
+                   allowed by the current renderer.
 
                    @itemize{
 
@@ -115,6 +121,17 @@ A @deftech{flow element} is either a @techlink{table}, an
                          processing to record information used by
                          later passes.}
 
+                   @item{A @deftech{part-relative element} is an
+                         instance of @scheme[part-relative-element],
+                         which has a procedure that is called in the
+                         @techlink{collect pass} of document
+                         processing to obtain @defterm{content} (i.e.,
+                         a list of @defterm{elements}). When the
+                         part-relative element's procedure is called,
+                         collected information is not yet available,
+                         but information about the enclosing parts is
+                         available.}
+
                    @item{A @deftech{delayed element} is an instance of
                          @scheme[delayed-element], which has a
                          procedure that is called in the
@@ -126,12 +143,24 @@ A @deftech{flow element} is either a @techlink{table}, an
                          excluded in the text of a link when it
                          appears in a referenced section name.}
 
+                   @item{An instance of @scheme[hover-element] adds
+                         text to show in render HTML when the mouse
+                         hovers over the elements.}
+
+                   @item{An instance of @scheme[script-element]
+                         provides script code (usually
+                         @as-index{Javascript}) to run in the browser
+                         to generate the element; the element's normal
+                         content is used when scripting is disabled in
+                         the browser, or for rendering to other
+                         formats.}
+
              }}}}
 
-       @item{A @deftech{delayed flow element} is an instance of
-             @scheme[delayed-flow-element], which has a procedure that
+       @item{A @deftech{delayed block} is an instance of
+             @scheme[delayed-block], which has a procedure that
              is called in the @techlink{resolve pass} of document
-             processing to obtain a @defterm{flow element}.}
+             processing to obtain a @defterm{block}.}
 
 }
 
@@ -139,26 +168,31 @@ A @deftech{flow element} is either a @techlink{table}, an
 
 @section[#:tag "tags"]{Tags}
 
-A @deftech{tag} is a list containing a symbol and a string. The symbol
- effectively identifies the type of the tag, such as @scheme['part]
- for a tag that links to a part, or @scheme['def] for a Scheme
- function definition.
+A @deftech{tag} is a list containing a symbol and either a string, a
+@scheme[generated-tag] instance, or an arbitrary list. The symbol
+effectively identifies the type of the tag, such as @scheme['part] for
+a tag that links to a part, or @scheme['def] for a Scheme function
+definition. The symbol also effectively determines the interpretation
+of the second half of the tag.
 
-A section can have a @deftech{tag prefix}, which is effectively
- prefixed onto the string part of each @scheme['part] and
- @scheme['tech] tag within the part for reference outside the part,
- including the tags in the @scheme[tags] field. Typically, a
- document's main part has a tag prefix that applies to the whole
- document; references to sections and defined terms within the
- document from other documents must include the prefix plus a
- separating @litchar{:}, while references within the same document
- omit the prefix. Part prefixes can be used within a document as well,
- to help disambiguate references within the document.
+A part can have a @deftech{tag prefix}, which is effectively added
+onto the second item within each tag whose first item is
+@scheme['part] or @scheme['tech]. The prefix is added to a string
+value by creating a list containing the prefix and string, and it is
+added to a list value using @scheme[cons]; a prefix is not added to a
+@scheme[generated-tag] instance. The prefix is used for reference
+outside the part, including the use of tags in the part's
+@scheme[tags] field. Typically, a document's main part has a tag
+prefix that applies to the whole document; references to sections and
+defined terms within the document from other documents must include,
+while references within the same document omit the prefix. Part
+prefixes can be used within a document as well, to help disambiguate
+references within the document.
 
 Some procedures accept a ``tag'' that is just the string part of the
- full tag, where the symbol part is supplied automatically. For
- example, @scheme[section] and @scheme[secref] both accept a string
- ``tag'', where @scheme['part] is implicit.
+full tag, where the symbol part is supplied automatically. For
+example, @scheme[section] and @scheme[secref] both accept a string
+``tag'', where @scheme['part] is implicit.
 
 @; ------------------------------------------------------------------------
 
@@ -191,7 +225,7 @@ can be extracted with @scheme[part-collected-info], which includes a
 part's number and its parent part (or @scheme[#f]). More generally,
 the @scheme[resolve-get] method looks up information previously
 collected. This resolve-time information is normally obtained by the
-procedure associated with a @techlink{delayed flow element} or
+procedure associated with a @techlink{delayed block} or
 @techlink{delayed element}.
 
 The @scheme[resolve-get] information accepts both a @scheme[part] and
@@ -235,6 +269,14 @@ are as follows:
 
  @item{@scheme['hidden] --- the part title is not shown in rendered output.}
 
+ @item{@scheme['no-toc] --- as a style for the main part of a
+       document, causes the HTML output to not include a margin box
+       for the main table of contents; the ``on this page'' box that
+       contains @scheme[toc-element] and @scheme[toc-target-element]
+       links (and that only includes an ``on this page'' label for
+       multi-page documents) takes on the location and color of the
+       main table of contents, instead.}
+
 }
 
 The @scheme[to-collect] field contains @techlink{content} that is
@@ -257,15 +299,27 @@ during the @techlink{collect pass}, the number is not rendered.
 }
 
 
+@defstruct[(versioned-part part) ([version (or/c string? false/c)])]{
+
+Supplies a version number for this part and its sub-parts (except as
+overridden). A @scheme[#f] version is the same as not supplying a
+version.
+
+The version number may be used when rendering a document. At a
+minimum, a version is rendered when it is attached to a part
+representing the whole document. The default version for a document is
+@scheme[(version)].}
+
+
 @defstruct[flow ([paragraphs (listof flow-element?)])]{
 
-A @techlink{flow} has a list of flow elements.
+A @techlink{flow} has a list of @tech{blocks}.
 
 }
 
 @defstruct[paragraph ([content list?])]{
 
-A @techlink{paragraph} has a list of elements.
+A @techlink{paragraph} has a list of @tech{elements}.
 
 }
 
@@ -297,16 +351,16 @@ A @techlink{itemization} has a list of flows.
 @defstruct[blockquote ([style any/c]
                        [paragraphs (listof flow-element?)])]{
 
-A @techlink{blockquote} has a style and a list of flow elements.  The
+A @techlink{blockquote} has a style and a list of @tech{blocks}.  The
 @scheme[style] field is normally a string that corresponds to a CSS
 class for HTML output.
 
 }
 
-@defstruct[delayed-flow-element ([resolve (any/c part? resolve-info? . -> . flow-element?)])]{
+@defstruct[delayed-block ([resolve (any/c part? resolve-info? . -> . flow-element?)])]{
 
 The @scheme[resolve] procedure is called during the @techlink{resolve
-pass} to obtain a normal flow element. The first argument to
+pass} to obtain a normal @tech{block}. The first argument to
 @scheme[resolve] is the renderer.
 
 }
@@ -319,16 +373,34 @@ The @scheme[style] field is normally either
 
 @itemize{
 
- @item{a string, which corresponds to a CSS class for HTML output;}
+ @item{a string, which corresponds to a CSS class for HTML output and
+       a macro name for Latex output;}
 
  @item{one of the symbols that all renderers recognize: @scheme['tt],
        @scheme['italic], @scheme['bold], @scheme['sf],
-       @scheme['subscript], @scheme['superscript], or
-       @scheme['hspace];}
+       @scheme['subscript], @scheme['superscript], @scheme['hspace],
+       or @scheme['newline] (which renders a line break independent of
+       the @scheme[content]);}
 
- @item{an instance of @scheme[target-url] to generate a hyperlink; or}
+ @item{a list of the form @scheme[(list 'color _name)] or
+       @scheme[(list 'color _byte _byte _byte)] to set the text color,
+       where @scheme[_name] is one of @scheme["white"],
+       @scheme["black"], @scheme["red"], @scheme["green"],
+       @scheme["blue"], @scheme["cyan"], @scheme["magenta"], or
+       @scheme["yellow"], or three @scheme[_byte]s specify RGB
+       values;}
 
- @item{an instance of @scheme[image-file] to support an inline image.}
+ @item{a list of the form @scheme[(list 'bg-color _name)] or
+       @scheme[(list 'bg-color _byte _byte _byte)] to set the text
+       background color (with the same constraints and meanings as for
+       @scheme['color]);}
+
+ @item{an instance of @scheme[target-url] to generate a hyperlink;}
+
+ @item{an instance of @scheme[image-file] to support an inline image; or}
+
+ @item{an instance of @scheme[with-attributes], which combines a base
+       style with a set of additional HTML attributes.}
 
 }
 
@@ -352,7 +424,16 @@ label to be shown in the ``on this page'' table for HTML output.
 }
 
 
-@defstruct[(link-element element) ([tag any/c])]{
+@defstruct[(toc-element element) ([toc-content list?])]{
+
+Similar to @scheme[toc-target-element], but with specific content for
+the ``on this page'' table specified in the @scheme[toc-content]
+field.
+
+}
+
+
+@defstruct[(link-element element) ([tag tag?])]{
 
 Hyperlinks the content to @scheme[tag].
 
@@ -360,16 +441,33 @@ Hyperlinks the content to @scheme[tag].
 
 
 @defstruct[(index-element element) ([tag tag?]
-                                    [plain-seq (listof string?)]
-                                    [entry-seq list?])]{
+                                    [plain-seq (and/c pair? (listof string?))]
+                                    [entry-seq list?]
+                                    [desc any/c])]{
 
 The @scheme[plain-seq] specifies the keys for sorting, where the first
- element is the main key, the second is a sub-key, etc. The
- @scheme[entry-seq] list must have the same length, and it provides
- the form of each key to render in the final document. See also
- @scheme[index].
+@tech{element} is the main key, the second is a sub-key, etc. For
+example, an ``night'' portion of an index might have sub-entries for
+``night, things that go bump in'' and ``night, defender of the''. The
+former would be represented by @scheme[plain-seq] @scheme['("night"
+"things that go bump in")], and the latter by @scheme['("night"
+"defender of the")]. Naturally, single-@tech{element}
+@scheme[plain-seq] lists are the common case, and at least one word is
+required, but there is no limit to the word-list length. The strings in 
+@scheme[plain-seq] must not contain a newline character.
 
-}
+The @scheme[entry-seq] list must have the same length as
+@scheme[plain-seq]. It provides the form of each key to render in the
+final document.
+
+The @scheme[desc] field provides additional information about the
+index entry as supplied by the entry creator. For example, a reference
+to a procedure binding can be recognized when @scheme[desc] is an
+instance of @scheme[procedure-index-desc]. See
+@schememodname[scribble/manual-struct] for other typical types of
+@scheme[desc] values.
+
+See also @scheme[index].}
 
 
 @defstruct[(aux-element element) ()]{
@@ -380,21 +478,58 @@ Instances of this structure type are intended for use in titles, where
 
 }
 
+@defstruct[(hover-element element) ([text string?])]{
+
+The @scheme[text] is displayed in HTML output when the mouse hovers
+over the element's content.}
+
+
+@defstruct[(script-element element) ([type string?]
+                                     [script (or/c path-string?
+                                                   (listof string?))])]{
+
+For HTML rendering, when scripting is enabled in the browser,
+@scheme[script] is used for the element instead of its normal
+content---it can be either path naming a script file to refer to, or
+the contents of the script. The @scheme[type] string is normally
+@scheme["text/javascript"].}
+
+
 @defstruct[delayed-element ([resolve (any/c part? resolve-info? . -> . list?)]
                             [sizer (-> any/c)]
                             [plain (-> any/c)])]{
 
 The @scheme[render] procedure's arguments are the same as for
- @scheme[delayed-flow-element]. Unlike @scheme[delayed-flow-element],
- the result of the @scheme[render] procedure's argument is remembered
- on the first call.
+@scheme[delayed-block], but the result is @techlink{content} (i.e.,
+a list of @techlink{elements}). Unlike @scheme[delayed-block], the
+result of the @scheme[render] procedure's argument is remembered on
+the first call for re-use for a particular resolve pass.
 
 The @scheme[sizer] field is a procedure that produces a substitute
- element for the delayed element for the purposes of determining the
- element's width (see @scheme[element-width]).
+@techlink{element} for the delayed element for the purposes of
+determining the delayed element's width (see @scheme[element-width]).
 
-The @scheme[plain] field is a procedure that produces a substitute for
- the element when needed before the @techlink{collect pass}.
+The @scheme[plain] field is a procedure that produces a substitute
+@techlink{element} when needed before the @techlink{collect pass},
+such as when @scheme[element->string] is used before the @tech{collect
+pass}.
+
+}
+
+
+@defstruct[part-relative-element ([resolve (collect-info? . -> . list?)]
+                                  [sizer (-> any/c)]
+                                  [plain (-> any/c)])]{
+
+Similar to @scheme[delayed-block], but the replacement
+@techlink{content} is obtained in the @techlink{collect pass} by
+calling the function in the @scheme[resolve] field.
+
+The @scheme[resolve] function can call @scheme[collect-info-parents]
+to obtain a list of @techlink{parts} that enclose the element,
+starting with the nearest enclosing section. Functions like
+@scheme[part-collected-info] and @scheme[collected-info-number] can
+extract information like the part number.
 
 }
 
@@ -405,7 +540,17 @@ Like @scheme[element], but the @scheme[collect] procedure is called
 during the @techlink{collect pass}. The @scheme[collect] procedure
 normally calls @scheme[collect-put!].
 
+Unlike @scheme[delayed-element] or @scheme[part-relative-element], the
+element remains intact (i.e., it is not replaced) by either the
+@tech{collect pass} or @tech{resolve pass}.
+
 }
+
+@defstruct[with-attributes ([style any/c]
+                            [assoc (listof (cons/c symbol? string?))])]{
+
+Used for an @scheme[element]'s style to combine a base style with
+arbitrary HTML attributes.}
 
 
 @defstruct[collected-info ([number (listof (or/c false/c integer?))]
@@ -417,30 +562,37 @@ Computed for each part by the @techlink{collect pass}.
 }
 
 
-@defstruct[target-url ([addr string?])]{
+@defstruct[target-url ([addr path-string?]
+                       [style any/c])]{
 
-Used as a style for an @scheme[element].}
-
-
-@defstruct[image-file ([path path-string?])]{
-
-Used as a style for an @scheme[element].}
+Used as a style for an @scheme[element]. The @scheme[style] at this
+layer is a style for the hyperlink.}
 
 
-@defproc[(flow-element? [v any/c]) boolean?]{
+@defstruct[image-file ([path (or/c path-string?
+                                   (cons/c 'collects (listof bytes?)))]
+                       [scale real?])]{
+
+Used as a style for an @scheme[element] to inline an image. The
+@scheme[path] field can be a result of
+@scheme[path->main-collects-relative].}
+
+
+@defproc[(block? [v any/c]) boolean?]{
 
 Returns @scheme[#t] if @scheme[v] is a @scheme[paragraph],
 @scheme[table], @scheme[itemization], @scheme[blockquote], or
-@scheme[delayed-flow-element], @scheme[#f] otherwise.
+@scheme[delayed-block], @scheme[#f] otherwise.
 
 }
 
 
 @defproc[(tag? [v any/c]) boolean?]{
 
-Returns @scheme[#t] if @scheme[v] is acceptable as a link tag, which
-is a list containing a symbol and either a string or a
-@scheme[generated-tag] instance.}
+Returns @scheme[#t] if @scheme[v] is acceptable as a link
+@techlink{tag}, which is a list containing a symbol and either a
+string, a @scheme[generated-tag] instance, or a list (of arbitrary
+values).}
 
 
 @defstruct[generated-tag ()]{
@@ -453,37 +605,45 @@ A placeholder for a tag to be generated during the @scheme{collect
 
 
 @defproc*[([(content->string (content list?)) string?]
-           [(content->string (content list?) (p part?) (info resolve-info?)) string?])]{
+           [(content->string (content list?) (renderer any/c) (p part?) (info resolve-info?)) string?])]{
 
-Converts a list of elements to a single string (essentially
+Converts a list of @tech{elements} to a single string (essentially
 rendering the content as ``plain text'').
 
 If @scheme[p] and @scheme[info] arguments are not supplied, then a
-pre-``collect'' substitute is obtained for delayed
-elements. Otherwise, the two arguments are used to force the delayed
-element (if it has not been forced already).}
+pre-``collect'' substitute is obtained for @tech{delayed
+elements}. Otherwise, the two arguments are used to force the
+@tech{delayed element} (if it has not been forced already).}
 
 
 @defproc*[([(element->string (element any/c)) string?]
-           [(element->string (element any/c) (p part?) (info resolve-info?)) string?])]{
+           [(element->string (element any/c) (renderer any/c) (p part?) (info resolve-info?)) string?])]{
 
-Like @scheme[content->string], but for a single element.
+Like @scheme[content->string], but for a single @tech{element}.
+
 }
 
 @defproc[(element-width (element any/c)) nonnegative-exact-integer?]{
 
-Returns the width in characters of the given element.}
+Returns the width in characters of the given @tech{element}.
+
+}
 
 
-@defproc[(flow-element-width (e flow-element?)) nonnegative-exact-integer?]{
+@defproc[(block-width (e block?)) nonnegative-exact-integer?]{
 
-Returns the width in characters of the given flow element.}
+Returns the width in characters of the given @tech{block}.}
 
-@defstruct[collect-info ([ht any/c] [ext-ht any/c] [parts any/c] [tags any/c] [gen-prefix any/c])]{
+
+@defstruct[collect-info ([ht any/c] [ext-ht any/c] [parts any/c] 
+                         [tags any/c] [gen-prefix any/c] 
+                         [relatives any/c] 
+                         [parents (listof part?)])]{
 
 Encapsulates information accumulated (or being accumulated) from the
 @techlink{collect pass}. The fields are exposed, but not currently
-intended for external use.
+intended for external use, except that @scheme[collect-info-parents]
+is intended for external use.
 
 }
 
@@ -495,7 +655,25 @@ intended for external use.
 
 }
 
-@defproc[(collect-put! [ci collect-info?] [key any/c] [val any/c])
+@defproc[(info-key? [v any/c]) boolean?]{
+
+Returns @scheme[#t] if @scheme[v] is an @deftech{info key}: a list of
+at least two elements whose first element is a symbol. The result is
+@scheme[#f] otherwise.
+
+For a list that is an info tag, the interpretation of the second
+element of the list is effectively determined by the leading symbol,
+which classifies the key. However, a @scheme[#f] value as the second
+element has an extra meaning: collected information mapped by such
+info keys is not propagated out of the part where it is collected;
+that is, the information is available within the part and its
+sub-parts, but not in ancestor or sibling parts.
+
+Note that every @techlink{tag} is an info key.
+
+}
+
+@defproc[(collect-put! [ci collect-info?] [key info-key?] [val any/c])
          void?]{
 
 Registers information in @scheme[ci]. This procedure should be called
@@ -503,13 +681,62 @@ only during the @techlink{collect pass}.
 
 }
 
-@defproc[(resolve-get [ri resolve-info?] [key any/c])
-         void?]{
+@defproc[(resolve-get [p (or/c part? false/c)] [ri resolve-info?] [key info-key?])
+         any/c]{
 
 Extract information during the @techlink{resolve pass} or
-@techlink{render pass} from @scheme[ri], where the information was
-previously registered during the @techlink{collect pass}. See also
-@secref["passes"].
+@techlink{render pass} for @scheme[p] from @scheme[ri], where the
+information was previously registered during the @techlink{collect
+pass}. See also @secref["passes"].
+
+The result is @scheme[#f] if the no value for the given key is found.
+Furthermore, the search failure is recorded for potential consistency
+reporting, such as when @exec{setup-plt} is used to build
+documentation.
+
+}
+
+
+@defproc[(resolve-get/ext? [p (or/c part? false/c)] [ri resolve-info?] [key info-key?])
+         (values any/c boolean?)]{
+
+Like @scheme[render-get], but returns a second value to indicate
+whether the resulting information originated from an external source
+(i.e., a different document).}
+
+
+@defproc[(resolve-search [dep-key any/c][p (or/c part? false/c)] [ri resolve-info?] [key info-key?])
+         void?]{
+
+Like @scheme[resolve-get], but a shared @scheme[dep-key] groups
+multiple searches as a single request for the purposes of consistency
+reporting and dependency tracking. That is, a single success for the
+same @scheme[dep-key] means that all of the failed attempts for the
+same @scheme[dep-key] have been satisfied. However, for dependency
+checking, such as when using @exec{setup-plt} to re-build
+documentation, all attempts are recorded (in case external changes
+mean that an earlier attempt would succeed next time).
+
+}
+
+@defproc[(resolve-get/tentative [p (or/c part? false/c)] [ri resolve-info?] [key info-key?])
+         any/c]{
+
+Like @scheme[resolve-search], but without dependency tracking. For
+multi-document settings where dependencies are normally tracked, such
+as when using @exec{setup-plt} to build documentation, this function
+is suitable for use only for information within a single document.
+
+}
+
+@defproc[(resolve-get-keys [p (or/c part? false/c)]
+                           [ri resolve-info?] 
+                           [pred (info-key? . -> . any/c)])
+         list?]{
+
+Applies @scheme[pred] to each key mapped for @scheme[p] in
+@scheme[ri], returning a list of all keys for which @scheme[pred]
+returns a true value.
 
 }
 

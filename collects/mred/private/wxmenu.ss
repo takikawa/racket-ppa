@@ -1,7 +1,7 @@
 (module wxmenu mzscheme
-  (require (lib "class.ss")
-	   (lib "class100.ss")
-	   (lib "list.ss")
+  (require mzlib/class
+	   mzlib/class100
+	   mzlib/list
 	   (prefix wx: "kernel.ss")
 	   "lock.ss"
 	   "const.ss"
@@ -64,8 +64,8 @@
 					   (ormap
 					    (lambda (i)
 					      (let* ([data (send (mred->wx i) get-menu-data)]
-						     [label (car data)]
-						     [menu (cdr data)])
+						     [label (mcar data)]
+						     [menu (mcdr data)])
 						(if (regexp-match re label)
 						    (begin
 						      (send menu select this)

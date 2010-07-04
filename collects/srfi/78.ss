@@ -1,3 +1,2 @@
-(module |78| mzscheme
-  (require (lib "check.ss" "srfi" "78"))
-  (provide (all-from (lib "check.ss" "srfi" "78"))))
+;; module loader for SRFI-78
+#lang s-exp srfi/provider srfi/78/check

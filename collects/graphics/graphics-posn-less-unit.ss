@@ -3,12 +3,12 @@
 ; Originally written by Johnathan Franklin
 
 (module graphics-posn-less-unit mzscheme
-  (require (lib "unit.ss")
+  (require mzlib/unit
 	   (lib "mred-sig.ss" "mred")
-           (lib "mred.ss" "mred")
-	   (lib "class.ss")
-	   (lib "class100.ss")
-	   (lib "etc.ss")
+           mred
+	   mzlib/class
+	   mzlib/class100
+	   mzlib/etc
 	   "graphics-sig.ss")
   (provide graphics-posn-less@)
 
@@ -94,10 +94,10 @@
 		(semaphore-wait lock)
 		(if last
 		    (begin
-		      (set-cdr! last (cons v '()))
-		      (set! last (cdr last)))
+		      (set-mcdr! last (mcons v '()))
+		      (set! last (mcdr last)))
 		    (begin
-		      (set! queue (cons v '()))
+		      (set! queue (mcons v '()))
 		      (set! last queue)))
 		(semaphore-post ready)
 		(semaphore-post lock))]
@@ -108,9 +108,9 @@
 		 (if (null? queue)
 		     #f
 		     (begin0
-		      (car queue)
+		      (mcar queue)
 		      (semaphore-wait ready)
-		      (set! queue (cdr queue))
+		      (set! queue (mcdr queue))
 		      (if (null? queue)
 			  (set! last #f))))
 		 (semaphore-post lock)))]

@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2007 PLT Scheme Inc.
+  Copyright (c) 2004-2008 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -31,12 +31,6 @@
 # include "sconfig.h"
 #else
 # include "../sconfig.h"
-#endif
-
-#ifdef INCLUDE_WITHOUT_PATHS
-# include "schvers.h"
-#else
-# include "../src/schvers.h"
 #endif
 
 #if defined(__MWERKS__)
@@ -288,7 +282,7 @@ typedef struct Scheme_Object *(*Scheme_Closure_Func)(struct Scheme_Object *);
 
 /* Scheme_Small_Object is used for several types of MzScheme values: */
 typedef struct {
-  Scheme_Object so;
+  Scheme_Inclhash_Object iso;
   union {
     mzchar char_val;
     Scheme_Object *ptr_value;
@@ -325,9 +319,9 @@ typedef struct Scheme_Vector {
 typedef struct Scheme_Print_Params Scheme_Print_Params;
 typedef void (*Scheme_Type_Printer)(Scheme_Object *v, int for_display, Scheme_Print_Params *pp);
 
-typedef int (*Scheme_Equal_Proc)(Scheme_Object *obj1, Scheme_Object *obj2);
-typedef long (*Scheme_Primary_Hash_Proc)(Scheme_Object *obj, long base);
-typedef long (*Scheme_Secondary_Hash_Proc)(Scheme_Object *obj);
+typedef int (*Scheme_Equal_Proc)(Scheme_Object *obj1, Scheme_Object *obj2, void *cycle_data);
+typedef long (*Scheme_Primary_Hash_Proc)(Scheme_Object *obj, long base, void *cycle_data);
+typedef long (*Scheme_Secondary_Hash_Proc)(Scheme_Object *obj, void *cycle_data);
 
 /* This file defines all the built-in types */
 #ifdef INCLUDE_WITHOUT_PATHS
@@ -384,11 +378,10 @@ typedef long (*Scheme_Secondary_Hash_Proc)(Scheme_Object *obj);
 #endif
 #define SCHEME_BIGNUMP(obj)     SAME_TYPE(SCHEME_TYPE(obj), scheme_bignum_type)
 #define SCHEME_RATIONALP(obj)     SAME_TYPE(SCHEME_TYPE(obj), scheme_rational_type)
-#define SCHEME_COMPLEXP(obj)     (!SCHEME_INTP(obj) && ((_SCHEME_TYPE(obj) >= scheme_complex_izi_type) && (_SCHEME_TYPE(obj) <= scheme_complex_type)))
-#define SCHEME_COMPLEX_IZIP(obj)     (SCHEME_TYPE(obj) == scheme_complex_izi_type)
+#define SCHEME_COMPLEXP(obj)     (!SCHEME_INTP(obj) && ((_SCHEME_TYPE(obj) == scheme_complex_type)))
 #define SCHEME_EXACT_INTEGERP(obj)  (SCHEME_INTP(obj) || (_SCHEME_TYPE(obj) == scheme_bignum_type))
 #define SCHEME_EXACT_REALP(obj)  (SCHEME_INTP(obj) || (_SCHEME_TYPE(obj) == scheme_bignum_type) || (_SCHEME_TYPE(obj) == scheme_rational_type))
-#define SCHEME_REALP(obj)  (SCHEME_INTP(obj) || ((_SCHEME_TYPE(obj) >= scheme_bignum_type) && (_SCHEME_TYPE(obj) <= scheme_complex_izi_type)))
+#define SCHEME_REALP(obj)  (SCHEME_INTP(obj) || ((_SCHEME_TYPE(obj) >= scheme_bignum_type) && (_SCHEME_TYPE(obj) < scheme_complex_type)))
 #define SCHEME_NUMBERP(obj)  (SCHEME_INTP(obj) || ((_SCHEME_TYPE(obj) >= scheme_bignum_type) && (_SCHEME_TYPE(obj) <= scheme_complex_type)))
 
 #define SCHEME_CHAR_STRINGP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_char_string_type)
@@ -422,8 +415,7 @@ typedef long (*Scheme_Secondary_Hash_Proc)(Scheme_Object *obj);
 
 #define SCHEME_NULLP(obj)    SAME_OBJ(obj, scheme_null)
 #define SCHEME_PAIRP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_pair_type)
-#define SCHEME_MUTABLE_PAIRP(obj)    (SCHEME_PAIRP(obj) && SCHEME_MUTABLEP(obj))
-#define SCHEME_IMMUTABLE_PAIRP(obj)    (SCHEME_PAIRP(obj) && SCHEME_IMMUTABLEP(obj))
+#define SCHEME_MUTABLE_PAIRP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_mutable_pair_type)
 #define SCHEME_LISTP(obj)    (SCHEME_NULLP(obj) || SCHEME_PAIRP(obj))
 
 #define SCHEME_RPAIRP(obj)    SAME_TYPE(SCHEME_TYPE(obj), scheme_raw_pair_type)
@@ -434,6 +426,7 @@ typedef long (*Scheme_Secondary_Hash_Proc)(Scheme_Object *obj);
 
 #define SCHEME_BUCKTP(obj) SAME_TYPE(SCHEME_TYPE(obj),scheme_bucket_table_type)
 #define SCHEME_HASHTP(obj) SAME_TYPE(SCHEME_TYPE(obj),scheme_hash_table_type)
+#define SCHEME_HASHTRP(obj) SAME_TYPE(SCHEME_TYPE(obj),scheme_hash_tree_type)
 
 #define SCHEME_VECTORP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_vector_type)
 #define SCHEME_MUTABLE_VECTORP(obj)  (SCHEME_VECTORP(obj) && SCHEME_MUTABLEP(obj))
@@ -572,7 +565,6 @@ typedef struct Scheme_Offset_Cptr
 #define SCHEME_SET_IMMUTABLE(obj)  ((MZ_OPT_HASH_KEY((Scheme_Inclhash_Object *)(obj)) |= 0x1))
 #define SCHEME_SET_CHAR_STRING_IMMUTABLE(obj) SCHEME_SET_IMMUTABLE(obj)
 #define SCHEME_SET_BYTE_STRING_IMMUTABLE(obj) SCHEME_SET_IMMUTABLE(obj)
-#define SCHEME_SET_PAIR_IMMUTABLE(obj) SCHEME_SET_IMMUTABLE(obj)
 #define SCHEME_SET_VECTOR_IMMUTABLE(obj) SCHEME_SET_IMMUTABLE(obj)
 #define SCHEME_SET_BOX_IMMUTABLE(obj) SCHEME_SET_IMMUTABLE(obj)
 
@@ -620,26 +612,31 @@ typedef struct Scheme_Offset_Cptr
 
 /* Constants for flags in Scheme_Primitive_[Closed]_Proc.
    Do not use them directly. */
-#define SCHEME_PRIM_IS_FOLDING 1
-#define SCHEME_PRIM_IS_PRIMITIVE 2
-#define SCHEME_PRIM_IS_STRUCT_INDEXED_GETTER 4
-#define SCHEME_PRIM_IS_STRUCT_PRED 8
-#define SCHEME_PRIM_IS_PARAMETER 16
-#define SCHEME_PRIM_IS_STRUCT_OTHER 32
-#define SCHEME_PRIM_STRUCT_OTHER_TYPE_MASK (64 | 128)
-#define SCHEME_PRIM_IS_MULTI_RESULT 256
-#define SCHEME_PRIM_IS_BINARY_INLINED 512
-#define SCHEME_PRIM_IS_USER_PARAMETER 1024
-#define SCHEME_PRIM_IS_METHOD 2048
-#define SCHEME_PRIM_IS_CLOSURE 4096
-#define SCHEME_PRIM_IS_NONCM 8192
+#define SCHEME_PRIM_OPT_MASK (1 | 2)
+#define SCHEME_PRIM_IS_PRIMITIVE 4
+#define SCHEME_PRIM_IS_STRUCT_INDEXED_GETTER 8
+#define SCHEME_PRIM_IS_STRUCT_PRED 16
+#define SCHEME_PRIM_IS_PARAMETER 32
+#define SCHEME_PRIM_IS_STRUCT_OTHER 64
+#define SCHEME_PRIM_STRUCT_OTHER_TYPE_MASK (128 | 256)
+#define SCHEME_PRIM_IS_MULTI_RESULT 512
+#define SCHEME_PRIM_IS_BINARY_INLINED 1024
+#define SCHEME_PRIM_IS_USER_PARAMETER 2048
+#define SCHEME_PRIM_IS_METHOD 4096
+#define SCHEME_PRIM_IS_CLOSURE 8192
 #define SCHEME_PRIM_IS_UNARY_INLINED 16384
 #define SCHEME_PRIM_IS_MIN_NARY_INLINED 32768
 
+/* Values with SCHEME_PRIM_OPT_MASK, earlier implies later: */
+#define SCHEME_PRIM_OPT_FOLDING    3
+#define SCHEME_PRIM_OPT_IMMEDIATE  2
+#define SCHEME_PRIM_OPT_NONCM      1
+
+/* Values with SCHEME_PRIM_STRUCT_OTHER_TYPE_MASK */
 #define SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_GETTER 0
-#define SCHEME_PRIM_STRUCT_TYPE_CONSTR 64
-#define SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_SETTER 128
-#define SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER (64 | 128)
+#define SCHEME_PRIM_STRUCT_TYPE_CONSTR           128
+#define SCHEME_PRIM_STRUCT_TYPE_INDEXLESS_SETTER 256
+#define SCHEME_PRIM_STRUCT_TYPE_INDEXED_SETTER   (128 | 256)
 
 #define SCHEME_PRIM_IS_STRUCT_PROC (SCHEME_PRIM_IS_STRUCT_INDEXED_GETTER | SCHEME_PRIM_IS_STRUCT_PRED | SCHEME_PRIM_IS_STRUCT_OTHER)
 
@@ -790,6 +787,7 @@ typedef struct Scheme_Hash_Table
   int mcount; /* number of non-NULL keys, >= count (which is non-NULL vals) */
 } Scheme_Hash_Table;
 
+typedef struct Scheme_Hash_Tree Scheme_Hash_Tree;
 
 typedef struct Scheme_Bucket
 {
@@ -926,6 +924,7 @@ typedef struct Scheme_Thread {
 
   mz_jmp_buf *error_buf;
   Scheme_Continuation_Jump_State cjs;
+  struct Scheme_Meta_Continuation *decompose_mc; /* set during a jump */
 
   Scheme_Thread_Cell_Table *cell_values;
   Scheme_Config *init_config;
@@ -1002,6 +1001,10 @@ typedef struct Scheme_Thread {
   Scheme_Object *current_local_certs;
   Scheme_Object *current_local_modidx;
   Scheme_Env *current_local_menv;
+  Scheme_Object *current_local_bindings;
+  int current_phase_shift;
+
+  struct Scheme_Marshal_Tables *current_mt;
 
   char skip_error;
 
@@ -1066,8 +1069,12 @@ typedef struct Scheme_Thread {
 
   Scheme_Object *name;
 
+  Scheme_Object *mbox_first;
+  Scheme_Object *mbox_last;
+  Scheme_Object *mbox_sema;
+
 #ifdef MZ_PRECISE_GC
-  int gc_owner_set;
+  struct gc_thread_info *gc_info; /* managed by the GC */
 #endif
 } Scheme_Thread;
 
@@ -1114,6 +1121,7 @@ enum {
   MZCONFIG_EVAL_HANDLER,
   MZCONFIG_COMPILE_HANDLER,
   MZCONFIG_LOAD_HANDLER,
+  MZCONFIG_LOAD_COMPILED_HANDLER,
 
   MZCONFIG_PRINT_HANDLER,
   MZCONFIG_PROMPT_READ_HANDLER,
@@ -1137,6 +1145,8 @@ enum {
   MZCONFIG_PRINT_VEC_SHORTHAND,
   MZCONFIG_PRINT_HASH_TABLE,
   MZCONFIG_PRINT_UNREADABLE,
+  MZCONFIG_PRINT_PAIR_CURLY,
+  MZCONFIG_PRINT_MPAIR_CURLY,
 
   MZCONFIG_CASE_SENS,
   MZCONFIG_SQUARE_BRACKETS_ARE_PARENS,
@@ -1174,7 +1184,7 @@ enum {
   MZCONFIG_RANDOM_STATE,
 
   MZCONFIG_CURRENT_MODULE_RESOLVER,
-  MZCONFIG_CURRENT_MODULE_PREFIX,
+  MZCONFIG_CURRENT_MODULE_NAME,
 
   MZCONFIG_ERROR_PRINT_SRCLOC,
 
@@ -1618,6 +1628,7 @@ MZ_EXTERN void scheme_set_case_sensitive(int);
 MZ_EXTERN void scheme_set_allow_set_undefined(int);
 MZ_EXTERN void scheme_set_binary_mode_stdio(int);
 MZ_EXTERN void scheme_set_startup_use_jit(int);
+MZ_EXTERN void scheme_set_startup_load_on_demand(int);
 MZ_EXTERN void scheme_set_ignore_user_paths(int);
 
 MZ_EXTERN int scheme_get_allow_set_undefined();
@@ -1661,9 +1672,12 @@ MZ_EXTERN Scheme_Object *scheme_set_run_cmd(char *s);
 MZ_EXTERN void scheme_set_collects_path(Scheme_Object *p);
 MZ_EXTERN void scheme_set_original_dir(Scheme_Object *d);
 
+MZ_EXTERN void scheme_init_collection_paths(Scheme_Env *global_env, Scheme_Object *extra_dirs);
+
 /* Initialization */
 MZ_EXTERN Scheme_Env *scheme_basic_env(void);
 MZ_EXTERN void scheme_reset_overflow(void);
+MZ_EXTERN void scheme_free_all(void);
 
 #ifdef USE_MSVC_MD_LIBRARY
 MZ_EXTERN void GC_pre_init(void);
@@ -1681,6 +1695,11 @@ MZ_EXTERN void scheme_set_actual_main(int (*m)(int argc, char **argv));
 /* GC registration: */
 MZ_EXTERN void scheme_set_stack_base(void *base, int no_auto_statics);
 MZ_EXTERN void scheme_set_stack_bounds(void *base, void *deepest, int no_auto_statics);
+
+/* More automatic start-up: */
+typedef int (*Scheme_Main)(Scheme_Env *env, int argc, char **argv);
+MZ_EXTERN int scheme_main_setup(int no_auto_statics, Scheme_Main _main, int argc, char **argv);
+
 
 MZ_EXTERN void scheme_register_static(void *ptr, long size);
 #if defined(MUST_REGISTER_GLOBALS) || defined(GC_MIGHT_USE_REGISTERED_STATICS)

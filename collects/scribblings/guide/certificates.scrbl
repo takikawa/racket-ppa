@@ -1,11 +1,9 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require[(lib "eval.ss" "scribble")]
-@require["guide-utils.ss"]
+#lang scribble/doc
+@(require scribble/manual
+          scribble/eval
+          "guide-utils.ss")
 
-@require-for-syntax[mzscheme]
-
-@title[#:style 'quiet]{Syntax Certificates}
+@title[#:tag "stx-certs" #:style 'quiet]{Syntax Certificates}
 
 A use of a macro can expand into a use of an identifier that is not
 exported from the module that binds the macro. In general, such an
@@ -20,9 +18,9 @@ expands to a use of @scheme[unchecked-go]:
 (module m mzscheme
   (provide go)
   (define (unchecked-go n x) 
-    ;; to avoid disaster, @scheme[n] must be a number
+    (code:comment #, @t{to avoid disaster, @scheme[n] must be a number})
     (+ n 17))
-  (define-syntaxKW (go stx)
+  (define-syntax (go stx)
     (syntax-case stx ()
      [(_ x)
       #'(unchecked-go 8 x)])))
@@ -68,7 +66,7 @@ output. Building on the previous example,
   (require m)
   (provide go-more)
   (define y 'hello)
-  (define-syntaxKW (go-more stx)
+  (define-syntax (go-more stx)
     #'(go y)))
 ]
 
@@ -108,10 +106,10 @@ a macro:
   (provide def-go)
   (define (unchecked-go n x) 
     (+ n 17))
-  (define-syntaxKW (def-go stx)
+  (define-syntax (def-go stx)
    (syntax-case stx ()
      [(_ go)
-      #'(define-syntaxKW (go stx)
+      #'(define-syntax (go stx)
           (syntax-case stx ()
            [(_ x)
             #'(unchecked-go 8 x)]))])))
@@ -146,10 +144,10 @@ inactive certificate instead of an active one, it's helpful to write
 the @scheme[def-go] macro as follows:
 
 @schemeblock[
-(define-syntaxKW (def-go stx)
+(define-syntax (def-go stx)
  (syntax-case stx ()
    [(_ go)
-    #'(define-syntaxKW (go stx)
+    #'(define-syntax (go stx)
         (syntax-case stx ()
          [(_ x)
           (with-syntax ([ug (quote-syntax unchecked-go)])

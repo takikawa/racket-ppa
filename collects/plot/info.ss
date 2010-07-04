@@ -1,3 +1,7 @@
-(module info (lib "infotab.ss" "setup")
-  (define name "Plot library")
-  (define pre-install-collection "pre-installer.ss"))
+#lang setup/infotab
+
+(define pre-install-collection "pre-installer.ss")
+
+(define scribblings '(("plot.scrbl" (multi-page) (gui-library 50))))
+
+(define compile-omit-paths '("demos"))

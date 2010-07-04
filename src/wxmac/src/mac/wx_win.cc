@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2007 PLT Scheme Inc.
+// Copyright:  (c) 2004-2008 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -33,6 +33,8 @@
 // these offsets are used to eliminate calls to the real SetOrigin
 int SetOriginX = 0;
 int SetOriginY = 0;
+
+extern int wx_leave_all_input_alone;
 
 /* The gMouseWindow declaration confises xform.ss. */
 #ifdef MZ_PRECISE_GC
@@ -485,10 +487,11 @@ static OSStatus paintControlHandler(EventHandlerCallRef inCallRef,
 	  if (wx_window) {
 	    RgnHandle clipRgn;
 	    wxMacDC *mdc;
-
+            int need_reset_user = 0;
+          
 	    GetGWorld(&savep, &savegd);
 	    GetThemeDrawingState(&s);
-
+            
 	    clipRgn = NewRgn();
 	    if (clipRgn)
 	      GetClip(clipRgn);
@@ -499,6 +502,20 @@ static OSStatus paintControlHandler(EventHandlerCallRef inCallRef,
 
 	    wx_window->SetCurrentDC();
             ::TextMode(srcOr); /* for drawing labels */
+
+            if (clipRgn && (wx_window->__type == wxTYPE_MESSAGE)) {
+              /* Need proper clipping for messages, since we draw 
+                 manually and transparently. */
+              RgnHandle r2;
+              r2 = NewRgn();
+              if (r2) {
+                CopyRgn(clipRgn, r2);
+                OffsetRgn(r2, SetOriginX, SetOriginY);
+                SetClip(r2);
+                DisposeRgn(r2);
+                need_reset_user = 1;
+              }
+            }
 #if 0
 	    {
 	      Rect bounds;
@@ -507,7 +524,10 @@ static OSStatus paintControlHandler(EventHandlerCallRef inCallRef,
 	      FrameRect(&bounds);
 	    }
 #endif
-	    wx_window->Paint();
+	    wx_window->PaintRgn(clipRgn);
+
+            if (need_reset_user)
+              mdc->setCurrentUser(NULL);
 
 	    SetGWorld(savep, savegd);
 	    SetThemeDrawingState(s, TRUE);
@@ -1777,6 +1797,11 @@ void wxWindow::Paint(void)
 {
 }
 
+void wxWindow::PaintRgn(RgnHandle rgn)
+{
+  Paint();
+}
+
 //-----------------------------------------------------------------------------
 
 // Enabling Logic:  a window (or control) is shown as OS-activated when
@@ -2092,7 +2117,9 @@ Bool wxWindow::PopupMenu(wxMenu *menu, double x, double y)
   pos.h = (short)x + SetOriginX;
   LocalToGlobal(&pos);
   wxTracking();
+  wx_leave_all_input_alone++;
   sel = ::PopUpMenuSelect(m, pos.v, pos.h, 0);
+  --wx_leave_all_input_alone;
 
   ReleaseCurrentDC();
 

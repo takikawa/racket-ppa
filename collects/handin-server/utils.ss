@@ -1,11 +1,11 @@
 (module utils mzscheme
-  (require (lib "list.ss")
-           (lib "class.ss")
-           (lib "mred.ss" "mred")
+  (require mzlib/list
+           mzlib/class
+           mred
            (lib "posn.ss" "lang")
-           (prefix pc: (lib "pconvert.ss"))
-           (lib "pretty.ss")
-           (only "handin-server.ss" timeout-control)
+           (prefix pc: mzlib/pconvert)
+           mzlib/pretty
+           (only "main.ss" timeout-control)
            "private/run-status.ss"
            "private/config.ss"
            "private/logger.ss"

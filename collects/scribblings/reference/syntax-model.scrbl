@@ -1,7 +1,7 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "struct.ss" "scribble")]
-@require-for-syntax[mzscheme]
-@require["mz.ss"]
+#lang scribble/doc
+@(require scribble/struct
+          (for-syntax mzscheme)
+          "mz.ss")
 
 @;------------------------------------------------------------------------
 @title[#:tag "syntax-model"]{Syntax Model}
@@ -76,10 +76,10 @@ referenced, where a @tech{phase level} normally corresponds to an
 integer (but the special @deftech{label phase level} does not
 correspond to an integer).  @tech{Phase level} 0 corresponds to the
 run time of the enclosing module (or the run time of top-level
-expression). Bindings in @tech{phase level} 0 constitute the
+expressions). Bindings in @tech{phase level} 0 constitute the
 @deftech{base environment}.  @tech{Phase level} 1 corresponds to the
 time during which the enclosing module (or top-level expression) is
-expanded; bindings in @tech{phase level} 0 constitute the
+expanded; bindings in @tech{phase level} 1 constitute the
 @deftech{transformer environment}.  Phase level -1 corresponds to the
 run time of a different module for which the enclosing module is
 imported for use at @tech{phase level} 1 (relative to the importing
@@ -109,7 +109,7 @@ other information.
 
 For example, a @schemeidfont{car} @tech{identifier} might have
 @tech{lexical information} that designates it as the @scheme[car] from
-the @schememodname[big] language (i.e., the built-in
+the @schememodname[scheme/base] language (i.e., the built-in
 @scheme[car]). Similarly, a @schemeidfont{lambda} identifier's
 @tech{lexical information} may indicate that it represents a procedure
 form. Some other @tech{identifier}'s @tech{lexical information} may
@@ -174,36 +174,33 @@ expression.
 A complete expansion produces a @tech{syntax object} matching the
 following grammar:
 
+@margin-note{Beware that the symbolic names of identifiers in a fully
+expanded program may not match the symbolic names in the grammar. Only
+the binding (according to @scheme[free-identifier=?]) matters.}
+
 @schemegrammar*[
-#:literals (#%expression module #%module-begin begin provide
-            provide-for-syntax provide-for-label
+#:literals (#%expression module #%plain-module-begin begin #%provide
             define-values define-syntaxes define-values-for-syntax
-            require require-for-syntax require-for-template require-for-label
+            #%require
             #%plain-lambda case-lambda if begin begin0 let-values letrec-values
             set! quote-syntax quote with-continuation-mark
-            #%plain-app #%datum #%top #%variable-reference)
+            #%plain-app #%top #%variable-reference)
 [top-level-form general-top-level-form
                 (#%expression expr)
                 (module id name-id
-                  (#%module-begin
+                  (#%plain-module-begin
                    module-level-form ...))
                 (begin top-level-form ...)]
 [module-level-form general-top-level-form
-                   (provide provide-spec ...)
-                   (provide-for-syntax provide-spec ...)
-                   (provide-for-label provide-spec ...)]
+                   (#%provide raw-provide-spec ...)]
 [general-top-level-form expr
                         (define-values (id ...) expr)
                         (define-syntaxes (id ...) expr)
                         (define-values-for-syntax (id ...) expr)
-                        (require require-spec ...)
-                        (require-for-syntax require-spec ...)
-                        (require-for-template require-spec ...)
-                        (require-for-label require-spec ...)]
+                        (#%require raw-require-spec ...)]
 [expr id
       (#%plain-lambda formals expr ...+)
       (case-lambda (formals expr ...+) ...)
-      (if expr expr)
       (if expr expr expr)
       (begin expr ...+)
       (begin0 expr expr ...)
@@ -225,17 +222,19 @@ following grammar:
 
 A fully-expanded @tech{syntax object} corresponds to a @deftech{parse}
 of a program (i.e., a @deftech{parsed} program), and @tech{lexical
-information} on its @tech{identifiers} indicates the @tech{parse}.
+information} on its @tech{identifiers} indicates the
+@tech{parse}.
 
 More specifically, the typesetting of identifiers in the above grammar
 is significant. For example, the second case for @scheme[_expr] is a
 @tech{syntax-object} list whose first element is an @tech{identifier},
 where the @tech{identifier}'s @tech{lexical information} specifies a
-binding to the @scheme[define-values] of the @schememodname[big]
-language (i.e., the @tech{identifier} is @scheme[free-identifier=?] to
-one whose binding is @scheme[define-values]). In all cases,
-identifiers above typeset as syntactic-form names refer to the
-bindings defined in @secref["syntax"].
+binding to the @scheme[define-values] of the
+@schememodname[scheme/base] language (i.e., the @tech{identifier} is
+@scheme[free-identifier=?] to one whose binding is
+@scheme[define-values]). In all cases, identifiers above typeset as
+syntactic-form names refer to the bindings defined in
+@secref["syntax"].
 
 Only @tech{phase levels} 0 and 1 are relevant for the parse of a
 program (though the @scheme[_datum] in a @scheme[quote-syntax] form
@@ -381,26 +380,26 @@ core syntactic forms are encountered:
  @item{When a @scheme[require] form is encountered at the top level or
        module level, all lexical information derived from the top
        level or the specific module's level are extended with bindings
-       from the specified modules, and at the @tech{phase level}s
-       specified by the exporting modules: @tech{phase level} 0 for
-       each @scheme[provide], @tech{phase level} 1 for each
-       @scheme[provide-for-syntax], and the @tech{label phase level}
-       for each @scheme[provide-for-label].}
+       from the specified modules. If not otherwise indicated in the
+       @scheme[require] form, bindings are introduced at the
+       @tech{phase level}s specified by the exporting modules:
+       @tech{phase level} 0 for each normal @scheme[provide],
+       @tech{phase level} 1 for each @scheme[for-syntax]
+       @scheme[provide], and so on. The @scheme[for-meta]
+       @scheme[provide] form allows exports at an arbitrary
+       @tech{phase level} (as long as a binding exists within the
+       module at the @tech{phase level}).
 
- @item{When a @scheme[require-for-syntax] form is encountered at the
-       top level or module level, it is treated like @scheme[require],
-       except that only @tech{phase level} 0 exports are imported,
-       and the resulting bindings are for @tech{phase level} 1.}
-
- @item{When a @scheme[require-for-template] form is encountered at the
-       top level or module level, it is treated like @scheme[require],
-       except that only @tech{phase level} 0 exports are imported,
-       and the resulting bindings are for @tech{phase level} -1.}
-
- @item{When a @scheme[require-for-label] form is encountered at the
-       top level or module level, it is treated like @scheme[require],
-       except that only @tech{phase level} 0 exports are imported, and
-       the resulting bindings are for the @tech{label phase level}.}
+       A @scheme[for-syntax] sub-form within @scheme[require] imports
+       similarly, but the resulting bindings have a @tech{phase level}
+       that is one more than the exported @tech{phase levels}, when
+       exports for the @tech{label phase level} are still imported at
+       the @tech{label phase level}. More generally, a
+       @scheme[for-meta] sub-form within @scheme[require] imports with
+       the specified @tech{phase level} shift; if the specified shift
+       is @scheme[#f], or if @scheme[for-label] is used to import,
+       then all bindings are imported into the @tech{label phase
+       level}.}
 
  @item{When a @scheme[define], @scheme[define-values],
        @scheme[define-syntax], or @scheme[define-syntaxes] form is
@@ -466,7 +465,7 @@ time, rather than run time (though the two times can overlap), though
 the binding itself is introduced with @tech{phase level} 0 (i.e., in
 the @tech{base environment}).
 
-The @deftech{value} for the binding is obtained by evaluating the
+The @tech{value} for the binding is obtained by evaluating the
 expression in the @scheme[define-syntaxes] form. This expression must
 be @tech{expand}ed (i.e. parsed) before it can be evaluated, and it is
 expanded at @tech{phase level} 1 (i.e., in the @tech{transformer
@@ -735,7 +734,7 @@ expand code and to start evaluating expanded/compiled code.
 (code:comment #, @t{The following @scheme[let] expression is compiled in the original})
 (code:comment #, @t{namespace, so direct references to @scheme[x] see @scheme['orig].})
 (code:line
- (let ([n (make-namespace)]) ; make new namespace 
+ (let ([n (make-base-namespace)]) (code:comment #, @t{make new namespace})
    (parameterize ([current-namespace n]) 
      (eval '(define x 'new)) (code:comment #, @t{evals in the new namespace})
      (display x) (code:comment #, @t{displays @scheme['orig]})
@@ -765,7 +764,7 @@ x
 x
 (f)
 (module m mzscheme (define x 8) (provide x))
-(require m)
+(require 'm)
 (eval:alts x (eval 'x))
 (f)
 ]

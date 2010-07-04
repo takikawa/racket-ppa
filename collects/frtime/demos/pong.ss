@@ -1,7 +1,7 @@
 (require
- (lib "animation.ss" "frtime")
- (lib "gui.ss" "frtime")
- (all-except (lib "match.ss") match))
+ frtime/animation
+ frtime/gui
+ (all-except mzlib/match match))
 
 (define paddle-radius (make-slider "Paddle radius" 10 30 20))
 (define key-control-speed (* 0.01 (make-slider "Key control speed" 1 50 25)))
@@ -101,11 +101,11 @@
  (list 
   (make-line (make-posn 200 0) (make-posn 200 399) "gray")
   (make-circle ball-pos 10 "blue")
-  ;(make-circle (delay-by ball-pos 200) 8 "lightblue")
   (make-circle paddle1-pos paddle-radius "black")
   (make-circle paddle2-pos paddle-radius "black")
-  (make-graph-string (make-posn 30 30) (number->string p2-score) "black")
-  (make-graph-string (make-posn 350 30) (number->string p1-score) "black")
-  ;(make-graph-string (make-posn 120 30) (number->string (posn-len ball-vel)) "black")
+  (make-graph-string (make-posn 30 30) (number->string p2-score)
+                     (if (= p2-score (delay-by p2-score 600)) "black" "red" "black"))
+  (make-graph-string (make-posn 350 30) (number->string p1-score)
+                     (if (= p1-score (delay-by p1-score 600)) "black" "red" "black"))
   (make-line (make-posn 0 150) (make-posn 0 250) "red")
   (make-line (make-posn 399 150) (make-posn 399 250) "red")))

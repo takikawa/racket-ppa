@@ -1,7 +1,7 @@
 (module xform mzscheme
-  (require (lib "list.ss")
-	   (lib "etc.ss")
-	   (lib "process.ss"))
+  (require mzlib/list
+	   mzlib/etc
+	   mzlib/process)
   
   (provide xform)
   
@@ -318,7 +318,7 @@
           (let loop ([l null])
             (let ([s (read-bytes 4096 p)])
               (if (eof-object? s)
-                  (apply bytes-append (reverse! l))
+                  (apply bytes-append (reverse l))
                   (loop (cons s l))))))
         
         (define (tokenize)
@@ -326,7 +326,7 @@
                  [len (bytes-length s)])
             (let loop ([p 0][result null])
               (if (= p len)
-                  (cons (reverse! result) p)
+                  (cons (reverse result) p)
                   (let ([char (bytes-ref s p)])
                     (when (eq? char 10)
                       (set! source-line (add1 source-line)))
@@ -382,7 +382,7 @@
                               [else
                                (error 'c-tokenize "strange: ~e ~e" p (subbytes s p (min len (+ p 100))))])]
                            [(not (car simple))
-                            (cons (reverse! result) (cdr simple))]
+                            (cons (reverse result) (cdr simple))]
                            [(eq? (car simple) 'start)
                             (let ([sf source-file]
                                   [sl source-line]
@@ -835,7 +835,8 @@
                ;; So we can ignore them:
                
                strlen cos sin exp pow log sqrt atan2 
-               isnan isinf fpclass _fpclass _isnan __isfinited __isnanl __isinfl isnanf isinff
+               isnan isinf fpclass _fpclass _isnan __isfinited __isnanl 
+               __isinff __isinfl isnanf isinff
                floor ceil round fmod fabs __maskrune _errno __errno
                isalpha isdigit isspace tolower toupper
                fread fwrite socket fcntl setsockopt connect send recv close
@@ -1001,32 +1002,35 @@
         
         ;; A precompiled header saves the above state variables.
         (when precompiled-header
-          ;; Put constructors into the namespace:
-          (hash-table-for-each makers
-                               (lambda (k v)
-                                 (namespace-set-variable-value! (car v) (cdr v))))
-          (namespace-set-variable-value! 'make-short-tok make-short-tok)
-          ;; Load the pre-compiled-header-as-.zo:
-          (let ([l (load (change-suffix precompiled-header #".zo"))])
-            (for-each (lambda (x)
-                        (hash-table-put! used-symbols (car x) 
-                                         (+
-                                          (hash-table-get
-                                           used-symbols (car x)
-                                           (lambda () 0))
-                                          (cdr x))))
-                      (list-ref l 0))
-            
-            
-            (set! c++-classes (list-ref l 1))
-            (prototyped (list-ref l 2))
-            (top-vars (list-ref l 3))
-            
-            (set! pointer-types (list-ref l 4))
-            (set! non-pointer-types (list-ref l 5))
-            (set! struct-defs (list-ref l 6))
-
-	    (set! non-gcing-functions (hash-table-copy (list-ref l 7)))))
+          (let ([orig (current-namespace)])
+            (parameterize ([current-namespace (make-namespace)])
+              (namespace-attach-module orig 'mzscheme)
+              (namespace-require 'mzscheme)
+              ;; Put constructors into the namespace:
+              (hash-table-for-each makers
+                                   (lambda (k v)
+                                     (namespace-set-variable-value! (car v) (cdr v))))
+              (namespace-set-variable-value! 'make-short-tok make-short-tok)
+              ;; Load the pre-compiled-header-as-.zo:
+              (let ([l (load (change-suffix precompiled-header #".zo"))])
+                (for-each (lambda (x)
+                            (hash-table-put! used-symbols (car x) 
+                                             (+
+                                              (hash-table-get
+                                               used-symbols (car x)
+                                               (lambda () 0))
+                                              (cdr x))))
+                          (list-ref l 0))
+                
+                (set! c++-classes (list-ref l 1))
+                (prototyped (list-ref l 2))
+                (top-vars (list-ref l 3))
+                
+                (set! pointer-types (list-ref l 4))
+                (set! non-pointer-types (list-ref l 5))
+                (set! struct-defs (list-ref l 6))
+                
+                (set! non-gcing-functions (hash-table-copy (list-ref l 7)))))))
         
         ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ;; Pretty-printing output
@@ -2362,7 +2366,7 @@
                                    (log-error "[SHADOW++] ~a in ~a: Class variable ~a shadowed in decls."
                                               (tok-line (caar decls)) (tok-file (caar decls))
                                               (car var))))
-                               (append! pointers non-pointers))))
+                               (append pointers non-pointers))))
                           decls))))
           (let loop ([e body-e][can-convert? #t][paren-arrows? #t])
             (cond
@@ -3106,7 +3110,7 @@
                               setups
                               (make-parens
                                "(" (tok-line args) (tok-file args) ")"
-                               (list->seq (apply append (reverse! new-args))))
+                               (list->seq (apply append (reverse new-args))))
                               new-vars
                               ok-calls
                               live-vars))]
@@ -3189,7 +3193,7 @@
                                                    (tok-line (car e-)) (tok-file (car e-))) 
                                          (make-parens
                                           "(" (tok-line (car e-)) (tok-file (car e-)) ")"
-                                          (list->seq (reverse! l)))
+                                          (list->seq (reverse l)))
                                          (make-tok (if has-empty-funccall?
                                                        RET_VALUE_EMPTY_END 
                                                        RET_VALUE_END)
@@ -3733,7 +3737,7 @@
                     (not (pragma? (car e))))
                 (values
                  (reverse pragmas)
-                 (reverse!
+                 (reverse
                   (foldl-statement
                    e
                    comma-sep?
@@ -3746,7 +3750,7 @@
         (define (split-decls el)
           (let loop ([el el][decls null])
             (if (null? el)
-                (values (reverse! decls) null)
+                (values (reverse decls) null)
                 (let ([e (car el)])
                   (if (or 
                        ;; These keywords appear only in decls:
@@ -3772,14 +3776,14 @@
                       ;; Looks like a decl
                       (loop (cdr el) (cons e decls))
                       ;; Not a decl
-                      (values (reverse! decls) el))))))
+                      (values (reverse decls) el))))))
         
         (define braces-then-semi '(typedef struct union enum __extension__))
         
         (define (get-one e comma-sep?)
           (let loop ([e e][result null][first #f][second #f])
             (cond
-              [(null? e) (values (reverse! result) null)]
+              [(null? e) (values (reverse result) null)]
               [(pragma? (car e)) 
                (unless (null? result)
                  (error 'pragma "unexpected pragma: ~a at: ~a:~a" 
@@ -3787,9 +3791,9 @@
                         (pragma-file (car e)) (pragma-line (car e))))
                (values (list (car e)) (cdr e))]
               [(eq? semi (tok-n (car e)))
-               (values (reverse! (cons (car e) result)) (cdr e))]
+               (values (reverse (cons (car e) result)) (cdr e))]
               [(and (eq? '|,| (tok-n (car e))) comma-sep?)
-               (values (reverse! (cons (car e) result)) (cdr e))]
+               (values (reverse (cons (car e) result)) (cdr e))]
               [(and (braces? (car e))
                     (not (memq first '(typedef enum __extension__)))
                     (or (not (memq first '(static extern const struct union)))
@@ -3800,8 +3804,8 @@
                  (if (or (null? rest)
                          (pragma? (car rest))
                          (not (eq? semi (tok-n (car rest)))))
-                     (values (reverse! (cons (car e) result)) rest)
-                     (values (reverse! (list* (car rest) (car e) result)) (cdr rest))))]
+                     (values (reverse (cons (car e) result)) rest)
+                     (values (reverse (list* (car rest) (car e) result)) (cdr rest))))]
               [else (loop (cdr e) (cons (car e) result)
                           (or first (tok-n (car e)))
                           (or second (and first (tok-n (car e)))))])))
@@ -3878,7 +3882,12 @@
 		    non-gcing-functions)])
               (with-output-to-file (change-suffix file-out #".zo")
                 (lambda ()
-                  (write (compile e)))
+                  (let ([orig (current-namespace)])
+                    (parameterize ([current-namespace (make-namespace)])
+                      (namespace-attach-module orig 'mzscheme)
+                      (namespace-require 'mzscheme)
+                      (eval #'(define-syntaxes (#%top-interaction) (lambda (stx) (cdr (syntax-e stx)))))
+                      (write (compile e)))))
                 'truncate))))
         
         (when precompiling-header?

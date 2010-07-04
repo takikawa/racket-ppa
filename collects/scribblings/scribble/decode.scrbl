@@ -1,17 +1,18 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "manual.ss" "scribble")]
-@require["utils.ss"]
+#lang scribble/doc
+@(require scribble/manual
+          "utils.ss")
 
-@title[#:tag "decode"]{Text Decoder}
+@title[#:tag "decode"]{Decoding Text}
 
-The @file{decode.ss} library helps you write document content in a
-natural way---more like plain text, except for @litchar["@"] escapes.
-Roughly, it processes a stream of strings to produces instances of the
-@file{struct.ss} datatypes (see @secref["struct"]).
+@defmodule[scribble/decode]{The @schememodname[scribble/decode]
+library helps you write document content in a natural way---more like
+plain text, except for @litchar["@"] escapes.  Roughly, it processes a
+stream of strings to produces instances of the
+@schememodname[scribble/struct] datatypes (see @secref["struct"]).}
 
-At the flow level, decoding recognizes a blank line as a paragraph
-separator. At the paragraph-content level, decoding makes just a few
-special text conversions:
+At the @tech{flow} level, decoding recognizes a blank line as a
+@tech{paragraph} separator. At the @tech{paragraph}-content level,
+decoding makes just a few special text conversions:
 
 @itemize{
 
@@ -29,15 +30,28 @@ special text conversions:
 
 }
 
+Some functions @deftech{decode} a sequence of @scheme[_pre-flow] or
+@scheme[_pre-content] arguments using @scheme[decode-flow] or
+@scheme[decode-content], respectively. For example, the @scheme[bold]
+function accepts any number of @scheme[_pre-content] arguments, so
+that in
+
+@verbatim[#:indent 2]|{@bold{``apple''}}|
+
+the @litchar{``apple''} argument is decoded to use fancy quotes, and
+then it is bolded.
+
 @defproc[(decode [lst list?]) part?]{
 
 Decodes a document, producing a part. In @scheme[lst], instances of
 @scheme[splice] are inlined into the list. An instance of
-@scheme[title-decl] supplies the title for the part. Instances of
-@scheme[part-index-decl] (that precede any sub-part) add index entries
-that point to the section. Instances of @scheme[part-collect-decl] add
-elements to the part that are used only during the @techlink{collect
-pass}. Instances of @scheme[part-start] at level 0 trigger sub-part
+@scheme[title-decl] supplies the title for the part, plus tag, style
+and version information. Instances of @scheme[part-index-decl] (that
+precede any sub-part) add index entries that point to the
+section. Instances of @scheme[part-collect-decl] add elements to the
+part that are used only during the @techlink{collect pass}. Instances
+of @scheme[part-tag-decl] add hyperlink tags to the section
+title. Instances of @scheme[part-start] at level 0 trigger sub-part
 parsing. Instances of @scheme[section] trigger are used as-is as
 subsections, and instances of @scheme[paragraph] and other
 flow-element datatypes are used as-is in the enclosing flow.
@@ -79,6 +93,11 @@ Decodes a sequence of elements.
 
 }
 
+@defproc[(decode-elements [lst list?]) list?]{
+
+An alias for @scheme[decode-content].
+}
+
 @defproc[(decode-string [s string?]) list?]{
 
 Decodes a single string to produce a list of elements.
@@ -94,6 +113,7 @@ otherwise.
 
 @defstruct[title-decl ([tag-prefix (or/c false/c string?)]
                        [tags (listof string?)]
+                       [version (or/c string? false/c)]
                        [style any/c]
                        [content list?])]{
 
@@ -127,9 +147,20 @@ See @scheme[decode].
 
 }
 
+@defstruct[part-tag-decl ([tag tag?])]{
+
+See @scheme[decode].
+
+}
+
 @defstruct[splice ([run list?])]{
 
 See @scheme[decode], @scheme[decode-part], and @scheme[decode-flow].
 
 }
+
+@defproc[(clean-up-index-string [str string?]) string?]{
+
+Trims leading and trailing whitespace, and converts non-empty
+sequences of whitespace to a single space character.}
 

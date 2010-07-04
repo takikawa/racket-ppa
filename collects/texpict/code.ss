@@ -1,42 +1,39 @@
 (module code mzscheme
   (require "mrpict.ss"
-	   (lib "class.ss")
-	   (lib "list.ss")
-           (lib "mred.ss" "mred")
-	   (lib "unit.ss"))
+	   mzlib/class
+	   mzlib/list
+           mred
+	   mzlib/unit)
 
   (provide define-code code^ code-params^ code@)
 
-  (define-struct (code-pict pict) (bottom-line))
-
-
   (define (to-code-pict p extension)
-    (make-code-pict (pict-draw p)
-		    (pict-width p)
-		    (pict-height p)
-		    (pict-ascent p)
-		    (pict-descent p)
-		    (pict-children p)
-		    (pict-panbox p)
-		    (if (code-pict? extension)
-			(code-pict-bottom-line extension)
-			extension)))
+    (use-last* p extension))
+
+  (define (code-pict? p)
+    (and (pict-last p) #t))
+
+  (define (code-pict-bottom-line p)
+    (pict-last p))
 
   (define (make-code-append htl-append)
     (case-lambda
-     [(a b) (if (code-pict? a)
-		(let ([extension (htl-append (ghost (code-pict-bottom-line a)) b)])
-		  (let ([p (lt-superimpose
-			    a
-			    (let-values ([(x y) (lt-find a (code-pict-bottom-line a))])
-			      (inset extension x y 0 0)))])
-		    (to-code-pict p (if (code-pict? b)
-					(code-pict-bottom-line b)
-					extension))))
-		(let ([p (htl-append a b)])
-		  (if (code-pict? b)
-		      (to-code-pict p (code-pict-bottom-line b))
-		      p)))]
+     [(a b) (let ([a-last (pict-last a)])
+              (if a-last
+                  (let ([extension (htl-append (ghost a-last) b)])
+                    (let ([p (let-values ([(x y) (lt-find a a-last)]
+                                          [(dx dy) (lt-find extension a-last)])
+                               (let ([ex (- x dx)]
+                                     [ey (- y dy)])
+                                 (if (negative? ey)
+                                     (lt-superimpose
+                                      (inset a 0 (- ey) 0 0)
+                                      (inset extension ex 0 0 0))
+                                     (lt-superimpose
+                                      a
+                                      (inset extension ex ey 0 0)))))])
+                      (use-last* p b)))
+                  (htl-append a b)))]
      [(a) a]
      [(a . rest)
       ((make-code-append htl-append)
@@ -105,7 +102,7 @@
 
   (define-signature code-params^
     (current-font-size 
-     line-sep))
+     current-code-line-sep))
 
   (define-syntax (define-computed stx)
     (syntax-case stx ()
@@ -132,7 +129,12 @@
 	((current-code-tt) s))
 
       (define (code-align p)
-	(lift (inset p 0 (pict-height p) 0 0) (pict-height p)))
+        (let ([b (dc void 
+                     (pict-width p)
+                     (pict-height p)
+                     (pict-height p)
+                     0)])
+          (refocus (cc-superimpose p b) b)))
 
       (define (code-pict-bottom-line-pict p)
 	(if (code-pict? p)
@@ -144,10 +146,8 @@
 	    (to-code-pict p bottom-line)
 	    p))
       
-      (define mzscheme-ns (let ([n (make-namespace 'empty)]
-				[orig (current-namespace)])
+      (define mzscheme-ns (let ([n (make-namespace)])
 			    (parameterize ([current-namespace n])
-			      (namespace-attach-module orig 'mzscheme)
 			      (namespace-require/copy 'mzscheme))
 			    n))
       (define mzscheme-bindings (namespace-mapped-symbols mzscheme-ns))
@@ -278,7 +278,7 @@
       (define (pad-bottom space p)
 	(if (= 0 space)
 	    p
-	    (code-vl-append line-sep (tt " ") (pad-bottom (sub1 space) p))))
+	    (code-vl-append (current-code-line-sep) (tt " ") (pad-bottom (sub1 space) p))))
 
       (define (colorize-id str mode)
 	(cond
@@ -347,7 +347,7 @@
       (define (add-semis p)
 	(let loop ([p p] [semis (color-semi-p)])
 	  (if ((pict-height p) . > . (+ (pict-height semis) 1))
-	      (loop p (vl-append line-sep (color-semi-p) semis))
+	      (loop p (vl-append (current-code-line-sep) (color-semi-p) semis))
 	      (htl-append semis p))))
 
       (define (add-unquote unquote-p loop x closes mode)
@@ -481,7 +481,7 @@
 		      [else
 		       ;; Start on next line:
 		       (code-vl-append
-			line-sep
+			(current-code-line-sep)
 			line-so-far
 			(let* ([space (max 0 (- (or (syntax-column (car stxs)) 0) left))]
 			       [p 

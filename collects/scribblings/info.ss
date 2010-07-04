@@ -1,2 +1,3 @@
-(module info (lib "infotab.ss" "setup")
-  (define name "Scribblings"))
+#lang setup/infotab
+
+(define name "Documentation Sources")

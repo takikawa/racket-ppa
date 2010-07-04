@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
 @title[#:tag "file-ports"]{File Ports}
 
@@ -47,7 +47,7 @@ attempting to use @scheme['text] with other kinds of files triggers an
 
 Otherwise, the file specified by @scheme[path] need not be a regular
 file. It might a device that is connected through the filesystem, such
-as @file{aux} under Windows or @file{/dev/null} under Unix. In all
+as @filepath{aux} under Windows or @filepath{/dev/null} under Unix. In all
 cases, the port is buffered by default.
 
 The port produced by @scheme[open-input-port] should be explicitly
@@ -58,13 +58,14 @@ otherwise available for garbage collection (see
 @secref["gc-model"]); a @tech{will} could be associated input port
 to close it more automatically (see @secref["willexecutor"]).
 
-A @tech{path} value that is the expanded version of @scheme[path] is
-used as the name of the opened port.}
+A @tech{path} value that is the @tech{cleanse}d version of
+@scheme[path] is used as the name of the opened port.}
 
 @defproc[(open-output-file [path path-string?]
                            [#:mode mode-flag (one-of/c 'binary 'text) 'binary]
-                           [#:exists exists-flag (one-of/c 'error 'append 'update
-                                                           'replace 'truncate 'truncate/replace) 'error])
+                           [#:exists exists-flag (one-of/c 'error 'append 'update 'can-update
+                                                           'replace 'truncate 
+                                                           'must-truncate 'truncate/replace) 'error])
           output-port?]{
 
 Opens the file specified by @scheme[path] for output. The
@@ -86,16 +87,23 @@ Under Windows, @scheme['text] mode works only with regular files;
 attempting to use @scheme['text] with other kinds of files triggers an
 @scheme[exn:fail:filesystem] exception.
 
-The @scheme[exists-flag] argument specifies how to handle the case
-that the file already exists. 
+The @scheme[exists-flag] argument specifies how to handle/require
+files that already exist:
 
 @itemize{
 
- @item{@indexed-scheme['error] --- raise @scheme[exn:fail:filesystem].}
+ @item{@indexed-scheme['error] --- raise @scheme[exn:fail:filesystem]
+       if the file exists.}
 
- @item{@indexed-scheme['replace] --- remove the old file and write a new one.}
+ @item{@indexed-scheme['replace] --- remove the old file, if it
+       exists, and write a new one.}
 
- @item{@indexed-scheme['truncate] --- removed all old data.}
+ @item{@indexed-scheme['truncate] --- remove all old data, if the file
+       exists.}
+
+ @item{@indexed-scheme['must-truncate] --- remove all old data in an
+       existing file; if the file does not exist, the
+       @exnraise[exn:fail:filesystem].}
 
  @item{@indexed-scheme['truncate/replace] --- try @scheme['truncate];
        if it fails (perhaps due to file permissions), try
@@ -105,16 +113,20 @@ that the file already exists.
        truncating it; if the file does not exist, the
        @exnraise[exn:fail:filesystem].}
 
- @item{@indexed-scheme['append] --- append to the end of the file
-       under @|AllUnix|; under Windows, @scheme['append] is equivalent
-       to @scheme['update], except that the file position is
+ @item{@indexed-scheme['can-update] --- open an existing file without
+       truncating it, or create the file if it does not exist.}
+
+ @item{@indexed-scheme['append] --- append to the end of the file,
+       whether it already exists or not; under Windows,
+       @scheme['append] is equivalent to @scheme['update], except that
+       the file is not required to exist, and the file position is
        immediately set to the end of the file after opening it.}
 
 }
 
 The file specified by @scheme[path] need not be a regular file. It
 might a device that is connected through the filesystem, such as
-@file{aux} under Windows or @file{/dev/null} under Unix. The output
+@filepath{aux} under Windows or @filepath{/dev/null} under Unix. The output
 port is block-buffered by default, unless the file corresponds to a
 terminal, in which case is it line buffered bu default.
 
@@ -126,8 +138,8 @@ otherwise available for garbage collection (see
 @secref["gc-model"]); a @tech{will} could be associated input port
 to close it more automatically (see @secref["willexecutor"]).
 
-A @tech{path} value that is the expanded version of @scheme[path] is
-used as the name of the opened port.}
+A @tech{path} value that is the @tech{cleanse}d version of
+@scheme[path] is used as the name of the opened port.}
 
 @defproc[(open-input-output-file [path path-string?]
                            [#:mode mode-flag (one-of/c 'binary 'text) 'binary]
@@ -139,7 +151,7 @@ Like @scheme[open-output-file], but producing two values: an input
 port and an output port. The two ports are connected in that they
 share the underlying file device. This procedure is intended for use
 with special devices that can be opened by only one process, such as
-@file{COM1} in Windows. For regular files, sharing the device can be
+@filepath{COM1} in Windows. For regular files, sharing the device can be
 confusing. For example, using one port does not automatically flush
 the other port's buffer, and reading or writing in one port moves the
 file position (if any) for the other port. For regular files, use
@@ -205,3 +217,17 @@ Like @scheme[call-with-output-file*], but instead of passing the newly
 opened port to the given procedure argument, the port is installed as
 the current output port (see @scheme[current-output-port]) using
 @scheme[parameterize] around the call to @scheme[thunk].}
+
+@defproc[(port-file-identity [port file-stream-port?]) any]{
+
+@index['("inode")]{Returns} an exact positive integer that represents
+the identity of the device and file read or written by
+@scheme[file-stream-port]. For two ports whose open times overlap, the
+result of @scheme[port-file-identity] is the same for both ports if
+and only if the ports access the same device and file. For ports whose
+open times do not overlap, no guarantee is provided for the port
+identities (even if the ports actually access the same file)---except
+as can be inferred through relationships with other ports. If
+@scheme[file-stream-port] is closed, the @exnraise[exn:fail].  Under
+Windows 95, 98, and Me, if @scheme[file-stream-port] is connected to a
+pipe instead of a file, the @exnraise[exn:fail:filesystem].}

@@ -1,15 +1,19 @@
 
 (module code "slideshow.ss"
   (require (lib "code.ss" "texpict")
-	   (lib "unit.ss"))
-  (require-for-syntax (lib "to-string.ss" "syntax")
-                      (lib "list.ss"))
+	   mzlib/unit)
+  (require-for-syntax syntax/to-string
+                      mzlib/list)
+
+  (define current-code-line-sep (make-parameter line-sep))
 
   (define-values/invoke-unit/infer code@)
 
   (define-code code typeset-code)
 
-  (provide code)
+  (provide code
+           current-code-line-sep
+           define-code)
   (provide-signature-elements code^)
     
   (provide define-exec-code/scale

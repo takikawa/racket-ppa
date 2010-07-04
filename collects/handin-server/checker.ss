@@ -1,7 +1,6 @@
-(module checker mzscheme
+#lang mzscheme
 
-(require "utils.ss" (lib "file.ss") (lib "list.ss") (lib "class.ss")
-         (lib "mred.ss" "mred"))
+(require "utils.ss" mzlib/file mzlib/list mzlib/class mred)
 
 (provide (all-from-except mzscheme #%module-begin) (all-from "utils.ss"))
 
@@ -93,7 +92,7 @@
 ;; * snip->text is used earlier in the process, where comment-box text is still
 ;;   available
 
-(require (lib "framework.ss" "framework")) ; for drscheme snips, used below
+(require framework) ; for drscheme snips, used below
 
 ;; input-port->text-input-port : input-port (any -> any) -> input-port
 ;;  the `filter' function is applied to special values; the filter result is
@@ -143,7 +142,7 @@
                 (list* (make-bytes (- newpos pos) 32)
                        (subbytes str idx (caar tab))
                        strs)))
-        (apply bytes-append (reverse! (cons (subbytes str idx) strs)))))))
+        (apply bytes-append (reverse (cons (subbytes str idx) strs)))))))
 
 (define current-processed-file ; set when processing multi-file submissions
   (make-parameter #f))
@@ -325,7 +324,7 @@
 (provide add-header-line!)
 (define (add-header-line! line)
   (let ([new (list line)] [cur (thread-cell-ref added-lines)])
-    (if cur (append! cur new) (thread-cell-set! added-lines new))))
+    (if cur (append cur new) (thread-cell-set! added-lines new))))
 
 (define ((wrap-evaluator eval) expr)
   (define unknown "unknown")
@@ -347,16 +346,19 @@
 (define-syntax (check: stx)
   (define (id s) (datum->syntax-object stx s stx))
   (let loop ([stx (syntax-case stx () [(_ x ...) #'(x ...)])]
-             [keyvals '()])
+             [keyvals '()]
+             [got null])
     (define (get key . default)
-      (cond [(assq key keyvals) => (lambda (x) (set-car! x #f) (caddr x))]
+      (cond [(assq key keyvals) => (lambda (x) (set! got (cons x got)) (caddr x))]
             [(pair? default) (car default)]
             [else #f]))
     (syntax-case stx ()
       [(key val x ...)
        (and (identifier? #'key)
             (regexp-match? #rx"^:" (symbol->string (syntax-e #'key))))
-       (loop #'(x ...) (cons (list (syntax-e #'key) #'key #'val) keyvals))]
+       (loop #'(x ...) 
+             (cons (list (syntax-e #'key) #'key #'val) keyvals)
+             (cons (syntax-e #'key) got))]
       [(body ...)
        (with-syntax
            ([users*         (get ':users         #'#f)]
@@ -392,7 +394,7 @@
             [(body ...) (syntax-case #'(body ...) ()
                           [() #'(void)] [_ #'(body ...)])])
          (for-each (lambda (x)
-                     (when (car x)
+                     (unless (memq (car x) got)
                        (raise-syntax-error #f "unknown keyword" stx (cadr x))))
                    keyvals)
          #'(begin
@@ -624,7 +626,7 @@
                 (lambda ()
                   (let loop ([r '()])
                     (let ([x (read)])
-                      (cond [(eof-object? x) (reverse! r)]
+                      (cond [(eof-object? x) (reverse r)]
                             [(null? x) (loop r)]
                             [(list? x) (loop (cons (sort x string<?) r))]
                             [else      (loop (cons (list x) r))])))))))))
@@ -727,5 +729,3 @@
          ((if (pair? proc) (car proc) handler) loc)))]
     [(null? uncovered) #f]
     [else (error* "bad checker: no coverage information for !all-covered")]))
-
-)

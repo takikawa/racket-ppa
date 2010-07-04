@@ -1,11 +1,11 @@
 (module make-gl-info mzscheme
-  (require (prefix dynext: (lib "compile.ss" "dynext"))
-           (all-except (lib "file.ss" "dynext") append-c-suffix)
-           (prefix dynext: (lib "link.ss" "dynext"))
-           (lib "file.ss")
-	   (lib "dirs.ss" "setup")
-	   (lib "launcher.ss" "launcher")
-           (lib "string.ss" "srfi" "13"))
+  (require (prefix dynext: dynext/compile)
+           dynext/file
+           (prefix dynext: dynext/link)
+           mzlib/file
+	   setup/dirs
+	   launcher
+           srfi/13/string)
   
   (provide make-gl-info)
   
@@ -115,12 +115,12 @@ end-string
       (delete/continue file.o)))
 
   (define (build-helper compile-directory home variant)
-    (let ((file (build-path compile-directory "make-gl-info-helper"))
-          (c (build-path compile-directory "make-gl-info-helper.c"))
-          (so (build-path compile-directory
-                          "native"
-                          (system-library-subpath variant) 
-                          (path-replace-suffix "make-gl-info-helper.so" (system-type 'so-suffix)))))
+    (let* ((file "make-gl-info-helper.ss")
+           (c (build-path compile-directory (append-c-suffix file)))
+           (so (build-path compile-directory
+                           "native"
+                           (system-library-subpath variant) 
+                           (append-extension-suffix file))))
       (make-directory* (build-path compile-directory "native" (system-library-subpath variant)))
       (with-output-to-file c
         (lambda () (display c-file))
@@ -145,12 +145,12 @@ end-string
 	  t)))
   
   (define (make-gl-info compile-directory home)
-    (let ((zo (build-path compile-directory "gl-info.zo"))
+    (let ((zo (build-path compile-directory (append-zo-suffix "gl-info.ss")))
           (mod
            (compile
             (case (effective-system-type home)
               ((macosx windows no-gl)
-               '(module gl-info mzscheme
+               `(,#'module gl-info mzscheme
                   (provide (all-defined))
                   (define gl-byte-size 1)
                   (define gl-ubyte-size 1)
@@ -171,7 +171,7 @@ end-string
                           (parameterize ([dynext:link-variant variant])
                             (build-helper compile-directory home variant)))
                         (available-mzscheme-variants))
-              `(module gl-info mzscheme
+              `(,#'module gl-info mzscheme
                  (provide (all-defined))
                  ,@(map 
                     (lambda (x)

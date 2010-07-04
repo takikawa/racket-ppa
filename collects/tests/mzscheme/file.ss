@@ -15,10 +15,10 @@
 (define this-file (open-input-file testing.ss))
 (test #t input-port? this-file)
 (close-input-port this-file)
-(define this-file (open-input-file testing.ss 'binary))
+(define this-file (open-input-file testing.ss #:mode 'binary))
 (test #t input-port? this-file)
 (close-input-port this-file)
-(define this-file (open-input-file testing.ss 'text))
+(define this-file (open-input-file testing.ss #:mode 'text))
 (test #t input-port? this-file)
 (arity-test input-port? 1 1)
 (arity-test output-port? 1 1)
@@ -81,8 +81,8 @@
 	   (newline test-file)
 	   (write load-test-obj test-file)
 	   (output-port? test-file))])
-  (test #t call-with-output-file
-	"tmp1" f 'truncate))
+  (test #t 'cwo (call-with-output-file
+                    "tmp1" f #:exists 'truncate)))
 (check-test-file "tmp1")
 
 (test (string #\null #\null #\" #\\ #\u #\0 #\0 #\0 #\0 #\")
@@ -110,10 +110,10 @@
 
 ;; Test escape printing:
 (parameterize ([current-locale #f])
-  (test "\"\\a\\b\\t\\n\\f\\r\\e\\v\\\\\\\"A \\u0005A\\u000FP\\u000FP\u00DDD\u00FF7\\u00011\\U00012345\""
+  (test "\"\\a\\b\\t\\n\\f\\r\\e\\v\\\\\\\"A \\u0005A\\u000FP\\u000FP\u00DDD\u00FF7\\u00011\\U00054321\""
 	'output-escapes
 	(let ([p (open-output-string)])
-	  (write "\a\b\t\n\f\r\e\v\\\"\101\40\5A\xFP\xfP\xdDD\3777\0011\U12345" p)
+	  (write "\a\b\t\n\f\r\e\v\\\"\101\40\5A\xFP\xfP\xdDD\3777\0011\U54321" p)
 	  (get-output-string p))))
 
 (parameterize ([current-locale #f])
@@ -250,13 +250,13 @@
 (err/rt-test (read-line (current-input-port) 8))
 (err/rt-test (read-line (current-input-port) 'anyx))
 
-(arity-test open-input-file 1 2)
+(arity-test open-input-file 1 1)
 (err/rt-test (open-input-file 8))
 (err/rt-test (open-input-file "x" 8))
 (err/rt-test (open-input-file "x" 'something-else))
 (err/rt-test (open-input-file "badfile") exn:fail:filesystem?)
 
-(arity-test open-output-file 1 3)
+(arity-test open-output-file 1 1)
 (err/rt-test (open-output-file 8))
 (err/rt-test (open-output-file "x" 8))
 (err/rt-test (open-output-file "x" 'something-else))
@@ -305,23 +305,23 @@
   (err/rt-test (port-file-identity p) exn:fail?))
 (err/rt-test (let ([c (make-custodian)])
 	       (let ([p (parameterize ([current-custodian c])
-				      (open-output-file "tmp4" 'replace))])
+				      (open-output-file "tmp4" #:exists 'replace))])
 		 (custodian-shutdown-all c)
 		 (display 'hi p)))
 	    exn:fail?)
-(err/rt-test (open-output-file "tmp4" 'error) exn:fail:filesystem?)
-(define p (open-output-file "tmp4" 'replace))
+(err/rt-test (open-output-file "tmp4" #:exists 'error) exn:fail:filesystem?)
+(define p (open-output-file "tmp4" #:exists 'replace))
 (display 7 p)
 (display "" p)
 (close-output-port p)
-(close-output-port (open-output-file "tmp4" 'truncate))
+(close-output-port (open-output-file "tmp4" #:exists 'truncate))
 (define p (open-input-file "tmp4"))
 (test eof read p)
 (close-input-port p)
-(define p (open-output-file "tmp4" 'replace))
+(define p (open-output-file "tmp4" #:exists 'replace))
 (display 7 p)
 (close-output-port p)
-(define p (open-output-file "tmp4" 'append))
+(define p (open-output-file "tmp4" #:exists 'append))
 (display 7 p)
 (close-output-port p)
 (err/rt-test (display 9 p) exn:fail?)
@@ -341,14 +341,14 @@
 (err/rt-test (read-char p) exn:fail?)
 (err/rt-test (char-ready? p) exn:fail?)
 
-(define-values (in-p out-p) (open-input-output-file "tmp4" 'update))
+(define-values (in-p out-p) (open-input-output-file "tmp4" #:exists 'update))
 (test #\7 read-char in-p)
 (close-output-port out-p)
 (test #\7 read-char in-p)
 (test eof read-char in-p)
 (close-input-port in-p)
 
-(define p (open-output-file "tmp4" 'update))
+(define p (open-output-file "tmp4" #:exists 'update))
 (display 6 p)
 (close-output-port p)
 (test 2 file-size "tmp4")
@@ -357,7 +357,7 @@
 (test eof read p)
 (close-input-port p)
 
-(define p (open-output-file "tmp4" 'update))
+(define p (open-output-file "tmp4" #:exists 'update))
 (file-position p 1)
 (display 68 p)
 (close-output-port p)
@@ -381,12 +381,12 @@
 (test 3 file-position p)
 (close-input-port p)
 
-(close-output-port (open-output-file "tmp4" 'truncate/replace))
+(close-output-port (open-output-file "tmp4" #:exists 'truncate/replace))
 (define p (open-input-file "tmp4"))
 (test eof read p)
 (close-input-port p)
 
-(define-values (in-p out-p) (open-input-output-file "tmp4" 'update))
+(define-values (in-p out-p) (open-input-output-file "tmp4" #:exists 'update))
 (fprintf out-p "hi~n")
 (flush-output out-p)
 (test eof read-char in-p)
@@ -403,10 +403,10 @@
 (close-output-port out-p)
 (test 'hx with-input-from-file "tmp4" read)
 
-(arity-test call-with-input-file 2 3)
-(arity-test call-with-output-file 2 4)
-(arity-test with-input-from-file 2 3)
-(arity-test with-output-to-file 2 4)
+(arity-test call-with-input-file 2 2)
+(arity-test call-with-output-file 2 2)
+(arity-test with-input-from-file 2 2)
+(arity-test with-output-to-file 2 2)
 
 (err/rt-test (call-with-input-file "x" 8))
 (err/rt-test (call-with-input-file  8 (lambda (x) x)))
@@ -635,7 +635,7 @@
 	   void)])
   (test '(apple "banana" [coconut]) read p))
 
-(let ([test-file (open-output-file "tmp2" 'truncate)])
+(let ([test-file (open-output-file "tmp2" #:exists 'truncate)])
   (test 7 write-string (make-string 7 #\a) test-file)
   (test 4095 write-string (make-string 4095 #\b) test-file)
   (test 4096 write-string (make-string 4096 #\c) test-file)
@@ -646,7 +646,7 @@
 
 (let ([go
        (lambda (write-bytes)
-	 (let ([test-file (open-output-file "tmp2" 'truncate)])
+	 (let ([test-file (open-output-file "tmp2" #:exists 'truncate)])
 	   (test 7 write-bytes-avail (make-bytes 7 97) test-file)
 	   (test 4095 write-bytes (make-bytes 4095 98) test-file)
 	   (test 4096 write-bytes (make-bytes 4096 99) test-file)
@@ -665,7 +665,7 @@
   (close-input-port q))
 
 (define test-file 
-  (open-output-file "tmp2" 'truncate))
+  (open-output-file "tmp2" #:exists 'truncate))
 (write-char #\; test-file)
 (display write-test-obj test-file)
 (newline test-file)
@@ -1091,8 +1091,8 @@
 	   (newline test-file)
 	   (write load-test-obj test-file)
 	   (output-port? test-file))])
-  (test #t call-with-output-file
-	"tmp3" f 'truncate))
+  (test #t 'cwo (call-with-output-file
+                    "tmp3" f #:exists 'truncate)))
 (check-test-file "tmp3")
 (set! write-test-obj wto)
 (set! display-test-obj dto)
@@ -1367,7 +1367,7 @@
 	 (equal? (cdr x) who))))
 
 (parameterize ([current-security-guard (make-file-sg '(exists read))])
-  (test #t path? (expand-path "tmp1"))
+  (test #t path? (cleanse-path "tmp1"))
   (test #t file-exists? "tmp1")
   (test #f directory-exists? "tmp1")
   (test #f link-exists? "tmp1")
@@ -1383,10 +1383,10 @@
   (test #t list? (directory-list)))
 
 (parameterize ([current-security-guard (make-file-sg '(exists write))])
-  (test #t path? (expand-path "tmp1"))
+  (test #t path? (cleanse-path "tmp1"))
   (err/rt-test (open-input-file "tmp1") (fs-reject? 'open-input-file))
-  (err/rt-test (open-output-file "tmp1" 'append) (fs-reject? 'open-output-file))
-  (err/rt-test (open-output-file "tmp1" 'update) (fs-reject? 'open-output-file))
+  (err/rt-test (open-output-file "tmp1" #:exists 'append) (fs-reject? 'open-output-file))
+  (err/rt-test (open-output-file "tmp1" #:exists 'update) (fs-reject? 'open-output-file))
   (err/rt-test (directory-list) (fs-reject? 'directory-list))
   (err/rt-test (directory-list (current-directory)) (fs-reject? 'directory-list))
   (err/rt-test (delete-directory (current-directory)) (fs-reject? 'delete-directory))
@@ -1404,7 +1404,7 @@
   (err/rt-test (current-directory "tmp1") (fs-reject? 'current-directory))
   (err/rt-test (current-drive) (lambda (x)
 				 (or (exn:unsupported? x) ((fs-reject? 'current-drive) x))))
-  (err/rt-test (expand-path "tmp1") (fs-reject? 'expand-path))
+  (err/rt-test (cleanse-path "tmp1") (fs-reject? 'cleanse-path))
   (err/rt-test (resolve-path "tmp1") (fs-reject? 'resolve-path))
   (err/rt-test (simplify-path "../tmp1") (fs-reject? 'simplify-path))
   (err/rt-test (file-exists? "tmp1") (fs-reject? 'file-exists?))

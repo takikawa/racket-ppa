@@ -2,31 +2,30 @@
 ;; This module implements the mail-composing window. The `new-mailer'
 ;;  function creates a compose-window instance.
 
-(module sendr mzscheme
-  (require (lib "unit.ss")
-	   (lib "class.ss")
+(module sendr scheme/base
+  (require scheme/tcp
+           scheme/unit
+           scheme/class
 	   (lib "mred-sig.ss" "mred")
-           (lib "framework.ss" "framework"))
+           framework)
 
-  (require (lib "list.ss")
-	   (lib "file.ss")
-	   (lib "string.ss")
-	   (lib "process.ss")
+  (require scheme/file
+	   mzlib/process
 	   (lib "mzssl.ss" "openssl"))
 
   (require "sirmails.ss"
 	   "pref.ss"
            "spell.ss")
 
-  (require (lib "imap-sig.ss" "net")
-	   (lib "smtp-sig.ss" "net")
-	   (lib "head-sig.ss" "net")
-	   (lib "base64-sig.ss" "net")
-	   (lib "qp-sig.ss" "net"))
+  (require net/imap-sig
+	   net/smtp-sig
+	   net/head-sig
+	   net/base64-sig
+	   net/qp-sig)
 
   (require (lib "hierlist-sig.ss" "hierlist"))
 
-  (define smtp-passwords (make-hash-table 'equal))
+  (define smtp-passwords (make-hash))
 
   (provide send@)
   (define-unit send@
@@ -126,7 +125,8 @@
       
       (define-struct enclosure (name            ; identifies enclosure in the GUI
 				subheader       ; header for enclosure
-				data-thunk))    ; gets enclosure data as bytes (already encoded)
+				data-thunk)     ; gets enclosure data as bytes (already encoded)
+        #:mutable)
 
       ;; Create a message with enclosures.
       ;;  `header' is a message header created with the head.ss library
@@ -412,8 +412,8 @@
           (define-values (smtp-ssl? smtp-auth-user smtp-server-to-use smtp-port-to-use)
             (parse-server-name+user+type (SMTP-SERVER) 25))
 	  (define smtp-auth-passwd (and smtp-auth-user
-					(or (hash-table-get smtp-passwords (cons smtp-auth-user smtp-server-to-use)
-							    (lambda () #f))
+					(or (hash-ref smtp-passwords (cons smtp-auth-user smtp-server-to-use)
+                                                      (lambda () #f))
 					    (let ([p (get-pw-from-user smtp-auth-user mailer-frame)])
 					      (unless p (raise-user-error 'send "send canceled"))
 					      p))))
@@ -442,8 +442,8 @@
                        (loop))))))
            message-count)
 	  (when smtp-auth-passwd
-	    (hash-table-put! smtp-passwords (cons smtp-auth-user smtp-server-to-use) 
-			     smtp-auth-passwd)))
+	    (hash-set! smtp-passwords (cons smtp-auth-user smtp-server-to-use) 
+                       smtp-auth-passwd)))
         
         ;; enq-msg : -> void
         ;; enqueues a message for a later send

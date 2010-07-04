@@ -37,10 +37,11 @@
 
 
 (module model mzscheme
-  (require (lib "contract.ss")
-           (lib "etc.ss")
-           (lib "match.ss")
-           (lib "class.ss")
+  (require mzlib/contract
+           mzlib/etc
+           scheme/match
+           mzlib/class
+           scheme/list
            (prefix a: "annotate.ss")
            (prefix r: "reconstruct.ss")
            "shared.ss"
@@ -48,6 +49,8 @@
            "model-settings.ss"
            "macro-unwind.ss"
            "lifting.ss"
+           (prefix test-engine: test-engine/scheme-tests)
+           #;(file "/Users/clements/clements/scheme-scraps/eli-debug.ss")
            ;; for breakpoint display
            ;; (commented out to allow nightly testing)
            #;"display-break-stuff.ss")
@@ -66,14 +69,16 @@
         boolean?                        ; track-inferred-names?
         (or/c object? (symbols 'testing))   ;; FIXME: can do better: subclass of language%       ; the language level
         (procedure? . -> . void?)       ; run-on-drscheme-side
+        boolean?                        ; disable-error-handling (to allow debugging)
         . -> .
         void?)])
 
   ; go starts a stepper instance
   ; see provide stmt for contract
   (define (go program-expander receive-result render-settings
-              show-lambdas-as-lambdas? language-level run-on-drscheme-side)
-    
+              show-lambdas-as-lambdas? language-level run-on-drscheme-side
+              disable-error-handling)
+
     ;; finished-exps:
     ;;   (listof (list/c syntax-object? (or/c number? false?)( -> any)))
     ;; because of mutation, these cannot be fixed renderings, but must be
@@ -104,7 +109,7 @@
     ;;   whole be highlighted.  Is either one "wrong?"  equivalences between
     ;;   reduction semantics?
     ;;
-    ;; 2005-11-14: punting. just highlight the whole damn thing if there are
+    ;; 2005-11-14: punting. just highlight the whole darn thing if there are
     ;; any differences.  In fact, just test for eq?-ness.
 
     #;
@@ -176,26 +181,31 @@
         (let* ([mark-list (and mark-set (extract-mark-list mark-set))])
 
           (define (reconstruct-all-completed)
-            (map (match-lambda
-                   [`(,source-thunk ,lifting-indices ,getter)
-                     (match (r:reconstruct-completed
-                             (source-thunk) lifting-indices
-                             getter render-settings)
-                       [#(exp #f) (unwind exp render-settings)]
-                       [#(exp #t) exp])])
-                 finished-exps))
+            (filter-map 
+             (match-lambda
+               [(list source-thunk lifting-indices getter)
+                (let ([source (source-thunk)])
+                  (if (r:hide-completed? source)
+                      #f
+                      (match (r:reconstruct-completed
+                              source lifting-indices
+                              getter render-settings)
+                        [(vector exp #f) (unwind exp render-settings)]
+                        [(vector exp #t) exp])))])
+             finished-exps))
 
-          ;; (printf "break called with break-kind: ~a ..." break-kind)
+          #;(>>> break-kind)
+          #;(fprintf (current-error-port) "break called with break-kind: ~a ..." break-kind)
           (if (r:skip-step? break-kind mark-list render-settings)
             (begin
-              ;; (printf " but it was skipped!\n")
+              #;(fprintf (current-error-port) " but it was skipped!\n")
               (when (or (eq? break-kind 'normal-break)
                         ;; not sure about this...
                         (eq? break-kind 'nomal-break/values))
                 (set! held-exp-list skipped-step)))
 
             (begin
-              ;; (printf "and it wasn't skipped.\n")
+              #;(fprintf (current-error-port) "and it wasn't skipped.\n")
               (case break-kind
                 [(normal-break normal-break/values)
                  (begin
@@ -306,7 +316,8 @@
     (define (step-through-expression expanded expand-next-expression)
       (let* ([annotated (a:annotate expanded break show-lambdas-as-lambdas?
                                     language-level)])
-        (eval-syntax annotated)
+        (parameterize ([test-engine:test-silence #t])
+          (eval-syntax annotated))
         (expand-next-expression)))
 
     (define (err-display-handler message exn)
@@ -323,10 +334,8 @@
     
     (program-expander
      (lambda ()
-       ;; swap these to allow errors to escape (e.g., when debugging)
-       (error-display-handler err-display-handler)
-       ;;(void)
-       )
+       (unless disable-error-handling
+         (error-display-handler err-display-handler)))
      (lambda (expanded continue-thunk) ; iter
        (r:reset-special-values)
        (if (eof-object? expanded)

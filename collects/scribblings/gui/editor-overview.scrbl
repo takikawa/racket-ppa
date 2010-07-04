@@ -1,6 +1,6 @@
-#reader(lib "docreader.ss" "scribble")
-@require[(lib "bnf.ss" "scribble")]
-@require["common.ss"]
+#lang scribble/doc
+@(require scribble/bnf
+          "common.ss")
 
 @title[#:tag "editor-overview"]{Editor}
 
@@ -23,8 +23,9 @@ The editor toolbox provides a foundation for two common kinds of
 
 Both kinds of applications need an extensible editor that can handle
  text, images, programmer-defined items, and even embedded
- editors. The difference between them is the layout of items.  MrEd
- therefore provides two kinds of editors via two classes:
+ editors. The difference between them is the layout of items. The
+ editor toolbox therefore provides two kinds of editors via two
+ classes:
 
 @itemize{
 
@@ -36,7 +37,7 @@ Both kinds of applications need an extensible editor that can handle
 
 }
 
-MrEd's editor architecture addresses the full range of real-world
+This editor architecture addresses the full range of real-world
  issues for an editor---including cut-and-paste, extensible file
  formats, and layered text styles---while supporting a high level of
  extensibility.  Unfortunately, the system is fairly complex as a
@@ -46,7 +47,7 @@ MrEd's editor architecture addresses the full range of real-world
  descriptions above to justify the depth and complexity of the toolbox
  and the learning investment required to use it.
 
-A brief example illustrates how MrEd editors work. To start, an editor
+A brief example illustrates how editors work. To start, an editor
  needs an @scheme[editor-canvas%] to display its contents. Then, we
  can create a text editor and install it into the canvas:
 
@@ -82,11 +83,11 @@ Now, the standard cut and paste operations work, and the user can even
  on the outside of the box is rearranged as the box changes
  sizes. Note that the box itself can be copied and pasted.
 
-The content of an editor is made up of @deftech{snips}. An embedded
- editor is a single snip from the embedding editor's point-of-view. To
- encode immediate text, a snip can be a single character, but more
- often a snip is a sequence of adjacent characters on the same
- line. The @method[text% find-snip] method extracts a snip
+The content of an editor is made up of @defterm{@tech{snips}}. An
+ embedded editor is a single snip from the embedding editor's
+ point-of-view. To encode immediate text, a snip can be a single
+ character, but more often a snip is a sequence of adjacent characters
+ on the same line. The @method[text% find-snip] method extracts a snip
  from a text editor:
 
 @schemeblock[
@@ -149,15 +150,15 @@ Applications that use the editor classes typically derive new versions
 (define append-only-text% 
   (class text%
     (inherit #,(:: text% last-position))
-    (define/override (#,(:: text% can-insert?) s l) (= s #,(:: text% last-position)))
-    (define/override (#,(:: text% can-delete?) s l) #f)
+    (define/augment (#,(:: text% can-insert?) s l) (= s (#,(:: text% last-position))))
+    (define/augment (#,(:: text% can-delete?) s l) #f)
     (super-new)))
 ]
 
 @section[#:tag "tb:miaoverview"]{Editor Structure and Terminology}
 
-MrEd supports extensible and nestable editors by decomposing an editor
- assembly into three functional parts:
+The editor toolbox supports extensible and nestable editors by
+ decomposing an editor assembly into three functional parts:
 
 @itemize{
 
@@ -309,7 +310,7 @@ Each new style is defined in one of two ways:
  @item{A @deftech{join style} is defined in terms of two other styles:
  a base style and a @deftech{shift style}. The meaning of a join style
  is determined by reinterpreting the shift style; in the
- reinterpretation, the base style is used as the {\em root\/} style
+ reinterpretation, the base style is used as the @italic{root} style
  for the shift style. (This is analogous to multi-level
  styles, like the paragraph and character styles in FrameMaker. In
  this analogy, the paragraph style is the base style, and the
@@ -339,18 +340,19 @@ See @xmethod[text% get-styles-sticky] for more information about the
 @section[#:tag "editorfileformat"]{File Format}
 
 To allow editor content to be saved to a file, the editor classes
- implement a special file format. (The format is used when cutting and
- pasting between applications or eventspaces, too). The file format is
- not documented, except that it begins
- @litchar{WXME01}@nonterm{digit}@nonterm{digit} ## }.  Otherwise, the
+ implement a special file format called @deftech{WXME}. (The format is
+ used when cutting and pasting between applications or eventspaces,
+ too). The file format is not documented, except that it begins
+ @litchar{WXME01}@nonterm{digit}@nonterm{digit}@litchar{ ## }. Otherwise, the
  @method[editor<%> load-file] and @method[editor<%> save-file] methods
  define the format internally. The file format is the same for text
  and pasteboard editors. When a pasteboard saves its content to a
  file, it saves the snips from front to back, and also includes extra
- location information.
+ location information. The @schememodname[wxme] library provides
+ utilities for manipulating WXME files.
 
 Editor data is read and written using @scheme[editor-stream-in%] and
- @scheme[editor-stream-out%] objects.  Editor information can only be
+@scheme[editor-stream-out%] objects.  Editor information can only be
  read from or written to one stream at a time. To write one or more
  editors to a stream, first call the function
  @scheme[write-editor-global-header] to write initialization data into
@@ -358,7 +360,7 @@ Editor data is read and written using @scheme[editor-stream-in%] and
  @scheme[write-editor-global-footer]. Similarly, reading editors from
  a stream is initialized with @scheme[read-editor-global-header] and
  finalized with @scheme[read-editor-global-footer]. Optionally, to
- support streams that span versions of MrEd, use
+ support streams that span versions of PLT Scheme, use
  @scheme[write-editor-version] and @scheme[read-editor-version] before
  the header operations.
 
@@ -395,15 +397,15 @@ Graceful and extensible encoding of snips requires that
  @item{Some editors may require additional information to be stored
  about a snip; this information is orthogonal to the type-specific
  information stored by the snip itself. For example, a pasteboard
- needs to remember a snip's @techlink{location}, while a text editor does not
- need this information.  If data is being cut and pasted from one
- pasteboard to another, then information about relative @techlink{location}s
- needs to be maintained, but this information should not inhibit
- pasting into an editor. Extra data is associated with a snip through
- @deftech{editor data} objects, instances of the
- @scheme[editor-data%] class; decoding requires that each editor data
- object has an @deftech{editor data class}, an instance of the
- @scheme[editor-data-class%] class.}
+ needs to remember a snip's @techlink{location}, while a text editor
+ does not need this information.  If data is being cut and pasted from
+ one pasteboard to another, then information about relative
+ @techlink{location}s needs to be maintained, but this information
+ should not inhibit pasting into an editor. Extra data is associated
+ with a snip through @deftech{editor data} objects, which are
+ instances of the @scheme[editor-data%] class; decoding requires that
+ each editor data object has an @deftech{editor data class}, which is
+ an instance of the @scheme[editor-data-class%] class.}
 
 }
 
@@ -414,10 +416,10 @@ Snip classes, snip data, and snip data classes solve problems related
 
 @subsubsection[#:tag "editorsnipclasses"]{Snip Classes}
 
-Each snip can be associated to a @deftech{snip class}. This ``class''
+Each snip can be associated to a @tech{snip class}. This ``class''
  is not a class description in the programmer's language; it is an
  object which provides a way to create new snips of the appropriate
- type from an encoded snip specification. 
+ type from an encoded snip specification.
 
 Snip class objects can be added to the eventspace-specific
  @deftech{snip class list}, which is returned by
@@ -427,32 +429,46 @@ Snip class objects can be added to the eventspace-specific
  snip's class. The snip class will then provide a decoding function
  that can create a new snip from the encoding.
 
-If a snip class's name is of the form @scheme["(lib ...)"], then the
- snip class implementation can be loaded on demand. The name is parsed
- using @scheme[read]; if the result has the form @scheme[(libKW string
- ...)], then it is supplied to @scheme[dynamic-require] along with
- @scheme['snip-class]. If the result is a @scheme[snip-class%] object,
- it is inserted into the current eventspace's snip class list, and
- loading or saving continues using the new class.
+If a snip class's name is of the form
+@;-
+@scheme["((lib ...) (lib ...))"], 
+@;-
+ then the snip class implementation can be loaded on
+ demand. The name is parsed using @scheme[read]; if the result has the
+ form @scheme[((lib _string ...) (lib _string ...))], then the first
+ element used with @scheme[dynamic-require] along with
+ @scheme['snip-class]. If the @scheme[dynamic-require] result is a
+ @scheme[snip-class%] object, then it is inserted into the current
+ eventspace's snip class list, and loading or saving continues using
+ the new class.
+
+The second @scheme[lib] form in @scheme["((lib ...) (lib ...))"]
+ supplies a reader for a text-only version of the snip. See
+ @schememodname[wxme] for more information.
+
+A snip class's name can also be just @scheme["(lib ...)"], which is
+ used like the first part of the two-@scheme[lib] form. However, this
+ form provides no information for the text-only @schememodname[wxme]
+ reader.
 
 @subsubsection[#:tag "editordata"]{Editor Data}
 
 While a snip belongs to an editor, the editor may store extra
  information about a snip in some specialized way. When the snip is to
  be encoded, this extra information needs to be put into an
- @deftech{editor data} object so that the extra information can be
+ @tech{editor data} object so that the extra information can be
  encoded as well.  In a text editor, extra information can be
  associated with ranges of @techlink{item}s, as well as snips.
 
 Just as a snip must be associated with a snip class to be decoded (see
- @|snipclassdiscuss|), an editor data object needs an @deftech{editor
+ @|snipclassdiscuss|), an editor data object needs an @tech{editor
  data class} for decoding. Every editor data class object can be added
  to the eventspace-specific @deftech{editor data class list}, returned
  by @scheme[get-the-editor-data-class-list]. Alternatively, like snip
- classes, editor data class names can use the form @scheme["(lib ...)"]
- to enable on-demand loading. The corresponding module should export an
- @scheme[editor-data-class%] object named
- @scheme['editor-data-class].
+ classes (see @secref["editorsnipclasses"]), editor data class names
+ can use the form @scheme["((lib ...)  (lib ...))"]  to enable
+ on-demand loading. The corresponding module should export an
+ @scheme[editor-data-class%] object named @scheme['editor-data-class].
 
 To store and load information about a snip or region in an editor:
 
@@ -682,7 +698,7 @@ Instances of @scheme[editor<%>] have three levels of internal
 
 }
 
-The internal lock for an editor is {\em not\/} affected by calls to
+The internal lock for an editor is @italic{not} affected by calls to
  @method[editor<%> lock].
 
 Methods that report @techlink{location}-independent information about an

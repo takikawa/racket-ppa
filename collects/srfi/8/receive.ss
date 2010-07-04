@@ -10,13 +10,13 @@
 ;;;
 ;;; oh well, there is no such comment.
 
-(module receive mzscheme
-  (provide receive)
+#lang scheme/base
+(provide receive)
 
-  ;; (receive vars producer . body)
-  (define-syntax receive
-    (syntax-rules ()
-		  ((receive ?vars ?producer . ?body)
-		   (call-with-values (lambda () ?producer)
-				     (lambda ?vars . ?body)))))
-  )
+;; (receive vars producer . body)
+(define-syntax receive
+  (syntax-rules ()
+    ((receive (var ...) ?producer . ?body)
+     (let-values ([(var ...) ?producer]) . ?body))
+    ((receive ?vars ?producer . ?body)
+     (call-with-values (lambda () ?producer) (lambda ?vars . ?body)))))

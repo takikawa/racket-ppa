@@ -1,7 +1,7 @@
-(module sig mzscheme
-  (require (lib "unit.ss"))
+(module sig scheme/base
+  (require scheme/unit)
   
-  (provide (prefix-all-defined-except framework: framework^)
+  (provide (prefix-out framework: (except-out (all-defined-out) framework^))
            framework^)
   
   (define-signature number-snip-class^ 
@@ -365,7 +365,7 @@
      text-mode-mixin
      text-mode%))
   (define-signature color^ extends color-class^
-    ())
+    (get-parenthesis-colors-table))
   
   (define-signature color-prefs-class^
     ())
@@ -376,7 +376,9 @@
      add-background-preferences-panel
      marshall-style-delta
      unmarshall-style-delta
-     set-default/color-scheme))  
+     set-default/color-scheme
+     white-on-black
+     black-on-white))
   
   (define-signature scheme-class^
     (text<%>

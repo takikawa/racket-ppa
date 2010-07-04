@@ -1,11 +1,11 @@
 (module module-lang-test mzscheme
   (require "drscheme-test-util.ss"
-           (lib "class.ss")
-           (lib "file.ss")
-           (lib "etc.ss")
-           (lib "mred.ss" "mred")
-           (lib "framework.ss" "framework")
-           (prefix fw: (lib "framework.ss" "framework")))
+           mzlib/class
+           mzlib/file
+           mzlib/etc
+           mred
+           framework
+           (prefix fw: framework))
   
   (provide run-test)
   
@@ -27,6 +27,7 @@
      (make-test "(module m mzscheme) 1" 
                 #f 
                 (regexp "module-language: there can only be one expression in the definitions window"))
+     (make-test "#lang mzscheme\n(define x 1)" "x" "1")
      (make-test "(module m mzscheme (provide x) (define x 1))" "x" "1")
      (make-test "(module m mzscheme (define x 1))" "x" "1")
      (make-test "(module m mzscheme (define x 1) (define y 1) (provide y))" "x" "1")
@@ -44,13 +45,13 @@
                 (regexp "first>"))
      (make-test "(module m mzscheme (require (all-except (lib \"list.ss\") foldl)))" 
                 "foldl"
-                ". reference to an identifier before its definition: foldl")
+                ". . reference to an identifier before its definition: foldl")
      
-     (make-test "(module m mzscheme (require (prefix mz: mzscheme)))" "mz:+" #rx"primitive:+")
+     (make-test "(module m mzscheme (require (prefix mz: mzscheme)))" "mz:+" #rx"procedure:+")
      
      (make-test "(module n mzscheme (provide (all-from-except mzscheme +)))"
                 "+"
-                #rx"primitive:+")
+                #rx"procedure:+")
      
      (make-test "(module m mzscheme (require (prefix x: (lib \"list.ss\")) (lib \"list.ss\")))" 
                 "foldl"
@@ -71,7 +72,7 @@
                         `(module m (file ,(path->string (build-path this-dir "module-lang-test-tmp.ss")))
                            x))
                 "+"
-                ". reference to an identifier before its definition: +")
+                ". . reference to an identifier before its definition: +")
      
      (make-test (format "~s" '(module m mzscheme (provide lambda)))
                 "(lambda (x) x)"
@@ -82,14 +83,14 @@
                 "1")
      (make-test (format "~s" '(module m mzscheme (define-syntax s (syntax 1)) (provide s)))
                 "s"
-                "s: illegal use of syntax in: s")
+                ". s: illegal use of syntax in: s")
      
      (make-test (format "~s" '(module m mzscheme (define-syntax (x stx) #'(define a 10)) x x))
                 "a"
-                ". reference to an identifier before its definition: a")
+                ". . reference to an identifier before its definition: a")
      (make-test (format "~s" '(module m mzscheme (define-syntax (x stx) #'(define-syntax (a stx) #'10)) x x))
                 "a"
-                ". reference to an identifier before its definition: a")
+                ". . reference to an identifier before its definition: a")
      (make-test (format "~s" '(module m mzscheme (define-syntax (x stx) #'(define a 10)) x x (define a 77)))
                 "a"
                 "77")
@@ -103,7 +104,7 @@
                       (provide s)
                       (define-syntax (s stx) e)))
       (format "~s ~s" '(require m) 's)
-      #rx"module-lang-test-tmp2.ss:1:70: compile: bad syntax; literal data is not allowed, because no #%datum syntax transformer is bound in: 1$")
+      #rx"module-lang-test-tmp2.ss:1:[67][90]: compile: bad syntax; literal data is not allowed, because no #%datum syntax transformer is bound in: 1$")
     
      (make-test (format "~s"
                         '(module tmp mzscheme
@@ -118,6 +119,11 @@
                                ((app . x) '(app . x))))))
                 "x"
                 "2")
+     
+     (make-test
+      "#lang scheme\n(eval 'cons)"
+      #f
+      ". compile: bad syntax; reference to top-level identifier is not allowed, because no #%top syntax transformer is bound in: cons")
      
      (make-test
       (format "~s" `(module m (file ,(path->string (build-path this-dir "module-lang-test-tmp.ss"))) 1 2 3))
@@ -204,12 +210,12 @@
                   [(regexp? (test-result test))
                    (regexp-match (test-result test) after-int-output)])])
           (unless passed?
-            (printf "FAILED: ~a\n        ~a\n  expected: ~a\n       got: ~a\n"
+            (printf "FAILED: ~a\n        ~a\n  expected: ~s\n       got: ~s\n"
                     (test-definitions test)
                     (or (test-interactions test) 'no-interactions)
                     (test-result test)
                     after-int-output))))))
   
   (define (run-test)
-    (set-language-level! '("(module ...)") #t)
+    (set-language-level! '("Module") #t)
     (for-each single-test tests)))

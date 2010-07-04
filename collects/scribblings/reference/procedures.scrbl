@@ -1,5 +1,5 @@
-#reader(lib "docreader.ss" "scribble")
-@require["mz.ss"]
+#lang scribble/doc
+@(require "mz.ss")
 
 @title[#:tag "procedures"]{Procedures}
 
@@ -7,61 +7,92 @@
 @scheme[v] is a procedure, @scheme[#f] otherwise.}
 
 
-@defproc[(apply [proc procedure?] [v any/c] ... [lst list?]) any]{
+@defproc[(apply [proc procedure?] 
+                [v any/c] ... [lst list?]
+                [#:<kw> kw-arg any/c] ...) any]{
 
 @guideintro["apply"]{@scheme[apply]}
 
 Applies @scheme[proc] using the content of @scheme[(list* v ... lst)]
-as the (by-position) arguments. The given @scheme[proc] must accept as
-many arguments as the number of @scheme[v]s plus length of
-@scheme[lst], and it must not require any keyword arguments;
-otherwise, the @exnraise[exn:fail:contract]. The given @scheme[proc]
-is called in tail position with respect to the @scheme[apply] call.
+as the (by-position) arguments. The @scheme[#:<kw> kw-arg] sequence is
+also supplied as keyword arguments to @scheme[proc], where
+@scheme[#:<kw>] stands for any keyword.
+
+The given @scheme[proc] must accept as many arguments as the number of
+@scheme[v]s plus length of @scheme[lst], it must accept the supplied
+keyword arguments, and it must not require any other keyword
+arguments; otherwise, the @exnraise[exn:fail:contract]. The given
+@scheme[proc] is called in tail position with respect to the
+@scheme[apply] call.
 
 @examples[
 (apply + '(1 2 3))
 (apply + 1 2 '(3))
 (apply + '())
+(apply sort (list (list '(2) '(1)) <) #:key car)
 ]}
 
+@defproc[(compose [proc procedure?] ...) procedure?]{
+
+Returns a procedure that composes the given functions, applying the
+last @scheme[proc] first and the first @scheme[proc] last. The
+composed functions can consume and produce any number of values, as
+long as each function produces as many values as the preceding
+function consumes.
+
+@examples[
+((compose - sqrt) 10)
+((compose sqrt -) 10)
+((compose list split-path) (bytes->path #"/a" 'unix))
+]}
+
+@; ----------------------------------------
+@section{Keywords and Arity}
 
 @defproc[(keyword-apply [proc procedure?]
                         [kw-lst (listof keyword?)]
                         [kw-val-lst list?]
                         [v any/c] ...
-                        [lst list?])
+                        [lst list?]
+                        [#:<kw> kw-arg any/c] ...)
          any]{
 
 @guideintro["apply"]{@scheme[keyword-apply]}
 
 Like @scheme[apply], but @scheme[kw-lst] and @scheme[kw-val-lst]
 supply by-keyword arguments in addition to the by-position arguments
-of the @scheme[v]s and @scheme[lst]. The given @scheme[kw-lst] must be
-sorted using @scheme[keyword<], and no keyword can appear twice in
-@scheme[kw-lst], otherwise, the @exnraise[exn:fail:contract]. The
-given @scheme[kw-val-lst] must have the same length as
-@scheme[kw-lst], otherwise, the @exnraise[exn:fail:contract]. The
-given @scheme[proc] must accept all of the keywords in
-@scheme[kw-lst], it must not require any other keywords, and it must
-accept as many by-position arguments as supplied via the @scheme[v]s
-and @scheme[lst]; otherwise, the @exnraise[exn:fail:contract].
+of the @scheme[v]s and @scheme[lst], and in addition to the directly
+supplied keyword arguments in the @scheme[#:<kw> kw-arg] sequence,
+where @scheme[#:<kw>] stands for any keyword.
+
+The given @scheme[kw-lst] must be sorted using @scheme[keyword<?].  No
+keyword can appear twice in @scheme[kw-lst] or in both
+@scheme[kw-list] and as a @scheme[#:<kw>], otherwise, the
+@exnraise[exn:fail:contract]. The given @scheme[kw-val-lst] must have
+the same length as @scheme[kw-lst], otherwise, the
+@exnraise[exn:fail:contract]. The given @scheme[proc] must accept all
+of the keywords in @scheme[kw-lst] plus the @scheme[#:<kw>]s, it must
+not require any other keywords, and it must accept as many by-position
+arguments as supplied via the @scheme[v]s and @scheme[lst]; otherwise,
+the @exnraise[exn:fail:contract].
 
 @defexamples[
 (define (f x #:y y #:z [z 10])
   (list x y z))
 (keyword-apply f '(#:y) '(2) '(1))
 (keyword-apply f '(#:y #:z) '(2 3) '(1))
+(keyword-apply f #:z 7 '(#:y) '(2) '(1))
 ]}
 
 @defproc[(procedure-arity [proc procedure?])
-         arity?]{
+         procedure-arity?]{
 
 Returns information about the number of by-position arguments accepted
-by @scheme[proc]. See also @scheme[arity?].}
+by @scheme[proc]. See also @scheme[procedure-arity?].}
 
-@defproc[(arity? [v any/c]) boolean?]{
+@defproc[(procedure-arity? [v any/c]) boolean?]{
 
-A valid arity is one of the following:
+A valid arity @scheme[_a] is one of the following:
 
 @itemize{
 
@@ -99,7 +130,7 @@ when no keyword arguments are supplied, @scheme[#f] otherwise.
 ]}
 
 @defproc[(procedure-reduce-arity [proc procedure?]
-                                 [arity arity?])
+                                 [arity procedure-arity?])
          procedure?]{
 
 Returns a procedure that is the same as @scheme[proc] (including
@@ -110,7 +141,13 @@ procedure, it returns a value that is @scheme[equal?] to
 @scheme[arity].
 
 If the @scheme[arity] specification allows arguments that are not
-in @scheme[(procedure-arity proc)], the @exnraise[exn:fail:contract].}
+in @scheme[(procedure-arity proc)], the @exnraise[exn:fail:contract].
+
+@examples[
+(define my+ (procedure-reduce-arity + 2))
+(my+ 1 2)
+(my+ 1 2 3)
+]}
 
 @defproc[(procedure-keywords [proc procedure?])
          (values
@@ -120,9 +157,9 @@ in @scheme[(procedure-arity proc)], the @exnraise[exn:fail:contract].}
 
 Returns information about the keyword arguments required and accepted
 by a procedure. The first result is a list of keywords (sorted by
-@scheme[keyword<]) that are required when applying @scheme[proc]. The
+@scheme[keyword<?]) that are required when applying @scheme[proc]. The
 second result is a list of accepted keywords (sorted by
-@scheme[keyword<]), or @scheme[#f] to mean that any keyword is
+@scheme[keyword<?]), or @scheme[#f] to mean that any keyword is
 accepted. When the second result is a list, every element in the first
 list is also in the second list.
 
@@ -133,22 +170,23 @@ list is also in the second list.
 ]}
 
 @defproc[(make-keyword-procedure
-          [proc (((listof keyword?) list?) list? . ->* . any)]
-          [plain-proc procedure? (lambda args (apply proc null null args))])
+          [proc (((listof keyword?) list?) () #:rest list? . ->* . any)]
+          [plain-proc procedure? (lambda args (keyword-apply proc null null args))])
          procedure?]{
 
 Returns a procedure that accepts all keyword arguments (without
-requiring any keyword arguments).
+requiring any keyword arguments). See also
+@scheme[procedure-reduce-keyword-arity].
 
 When the result is called with keyword arguments, then @scheme[proc]
 is called; the first argument is a list of keywords sorted by
-@scheme[keyword<], the second argument is a parllel list containing a
+@scheme[keyword<?], the second argument is a parallel list containing a
 value for each keyword, and the remaining arguments are the
 by-position arguments.
 
 When the result is called without keyword arguments, then
 @scheme[plain-proc] is called. Furthermore, @scheme[procedure-arity]
-obtains its result frmo @scheme[plain-proc].
+obtains its result from @scheme[plain-proc].
 
 @defexamples[
 (define show
@@ -159,11 +197,39 @@ obtains its result frmo @scheme[plain-proc].
 (show #:init 0 1 2 3 #:extra 4)
 ]}
 
+@defproc[(procedure-reduce-keyword-arity [proc procedure?]
+                                         [arity procedure-arity?]
+                                         [required-kws (listof keyword?)]
+                                         [allowed-kws (or/c (listof keyword?)
+                                                            false/c)])
+         procedure?]{
+
+Like @scheme[procedure-reduce-arity], but constrains the keyword
+arguments according to @scheme[required-kws] and @scheme[allowed-kws],
+which must be sorted using @scheme[keyword<?]. If @scheme[allowed-kws]
+is @scheme[#f], then the resulting procedure still accepts any
+keyword, otherwise the keywords in @scheme[required-kws] must be a
+subset of those in @scheme[allowed-kws]. The original @scheme[proc]
+must require no more keywords than the ones listed din
+@scheme[required-kws], and it must allow at least the keywors in
+@scheme[allowed-kws] (or it must allow all keywords if
+@scheme[allowed-kws] is @scheme[#f]).
+
+@defexamples[
+(define orig-show
+  (make-keyword-procedure (lambda (kws kw-args . rest)
+                            (list kws kw-args rest))))
+(define show (procedure-reduce-keyword-arity 
+              orig-show 3 '(#:init) '(#:extra #:init)))
+(show #:init 0 1 2 3 #:extra 4)
+(show 1)
+(show #:init 0 1 2 3 #:extra 4 #:more 7)
+]}
 
 @defstruct[arity-at-least ([value nonnegative-exact-integer?])]{
 
 This structure type is used for the result of @scheme[procedure-arity].
-See also @scheme[arity?].}
+See also @scheme[procedure-arity?].}
 
 
 @defthing[prop:procedure struct-type-property?]{
@@ -195,7 +261,7 @@ from the application expression. The procedure's name (see
 used for the name and arity of the structure. If the value in the
 designated field is not a procedure, then the instance behaves like
 @scheme[(case-lambda)] (i.e., a procedure which does not accept any
-number of arguments).
+number of arguments). See also @scheme[procedure-extract-target].
 
 Providing an integer @scheme[proc-spec] argument to
 @scheme[make-struct-type] is the same as both supplying the value with
@@ -204,8 +270,9 @@ immutable (so that a property binding or immutable designation is
 redundant and disallowed).
 
 @examples[
-(define-struct annotated-proc ([base #:immutable] note)
-               #:property prop:procedure (struct-field-index base))
+(define-struct annotated-proc (base note)
+               #:property prop:procedure 
+                          (struct-field-index base))
 (define plus1 (make-annotated-proc
                 (lambda (x) (+ x 1))
                 "adds 1 to its argument"))
@@ -236,9 +303,12 @@ is disallowed).
 
 @examples[
 (define-struct fish (weight color)
+               #:mutable
                #:property 
                prop:procedure  
-               (lambda (f n) (set-fish-weight! f (+ n (fish-weight f)))))
+               (lambda (f n) 
+                 (let ([w (fish-weight f)])
+                  (set-fish-weight! f (+ n w)))))
 (define wanda (make-fish 12 'red))
 (fish? wanda)
 (procedure? wanda)
@@ -260,3 +330,145 @@ Returns @scheme[#t] if instances of the structure type represented by
 @scheme[type] are procedures (according to @scheme[procedure?]),
 @scheme[#f] otherwise.}
 
+@defproc[(procedure-extract-target [proc procedure?]) (or/c false/c procedure?)]{
+
+If @scheme[proc] is an instance of a structure type with property
+@scheme[prop:procedure], and if the property value indicates a field
+of the structure, and if the field value is a procedure, then
+@scheme[procedure-extract-target] returns the field value. Otherwise,
+the result if @scheme[#f].}
+
+@defthing[prop:arity-string struct-type-property?]{
+
+This property is used for reporting arity-mismatch errors when a
+structure type with the @scheme[prop:procedure] property is applied to
+the wrong number of arguments. The value of the
+@scheme[prop:arity-string] property must be a procedure that takes a
+single argument, which is the misapplied structure, and returns a
+string. The result string is used after the word ``expects,'' and it
+is followed in the error message by the number of actual arguments.
+
+Arity-mismatch reporting automatically uses
+@scheme[procedure-extract-target] when the @scheme[prop:arity-string]
+property is not associated with a procedure structure type.
+
+@examples[
+(define-struct evens (proc)
+  #:property prop:procedure (struct-field-index proc)
+  #:property prop:arity-string
+  (lambda (p)
+    "an even number of arguments"))
+
+(define pairs
+  (make-evens
+   (case-lambda
+    [() null]
+    [(a b . more)
+     (cons (cons a b)
+           (apply pairs more))])))
+
+(pairs 1 2 3 4)
+(pairs 5)]}
+
+@; ----------------------------------------------------------------------
+
+@section{Reflecting on Primitives}
+
+A @idefterm{primitive procedure} is a built-in procedure that is
+implemented in low-level language. Not all procedures of
+@schememodname[scheme/base] are primitives, but many are. The
+distinction is mainly useful to other low-level code.
+
+@defproc[(primitive? [v any/c]) boolean?]{
+
+Returns @scheme[#t] if @scheme[v] is a primitive procedure,
+@scheme[#f] otherwise.}
+
+@defproc[(primitive-closure? [v any/c]) boolean]{
+
+Returns @scheme[#t] if @scheme[v] is internally implemented as a
+primitive closure rather than a simple primitive procedure,
+@scheme[#f] otherwise.}
+
+
+@defproc[(primitive-result-arity [prim primitive?]) procedure-arity?]{
+
+Returns the arity of the result of the primitive procedure
+@scheme[prim] (as opposed to the procedure's input arity as returned
+by @scheme[arity]). For most primitives, this procedure returns
+@scheme[1], since most primitives return a single value when
+applied.}
+
+@; ----------------------------------------
+@section{Additional Procedure Functions}
+
+@note-lib[scheme/function]
+@(define fun-eval (make-base-eval))
+@(interaction-eval #:eval fun-eval (require scheme/function))
+
+@defproc[(negate [proc procedure?]) procedure?]{
+
+Returns a procedure that is just like @scheme[proc], except that it
+returns the @scheme[not] of @scheme[proc]'s result.
+
+@examples[#:eval fun-eval
+(filter (negate symbol?) '(1 a 2 b 3 c))
+(map (negate =) '(1 2 3) '(1 1 1))
+]}
+
+@defproc*[([(curry [proc procedure?]) procedure?]
+           [(curry [proc procedure?] [v any/c] ...+) any/c])]{
+
+Returns a procedure that is a curried version of @scheme[proc]. When
+the resulting procedure is first applied, unless it is given the
+maximum number of arguments that it can accept, the result is a
+procedure to accept additional arguments.
+
+@examples[#:eval fun-eval
+((curry list) 1 2)
+((curry cons) 1)
+((curry cons) 1 2)
+]
+
+After the first application of the result of @scheme[curry], each
+further application accumulates arguments until an acceptable number
+of arguments have been accumulated, at which point the original
+@scheme[proc] is called.
+
+@examples[#:eval fun-eval
+(((curry list) 1 2) 3)
+(((curry list) 1) 3)
+((((curry foldl) +) 0) '(1 2 3))
+]
+
+A function call @scheme[(curry proc v ...)] is equivalent to
+@scheme[((curry proc) v ...)]. In other words, @scheme[curry] itself
+is curried.
+
+The @scheme[curry] function provides limited support for keyworded
+functions: only the @scheme[curry] call itself can receive keyworded
+arguments to be propagated eventually to @scheme[proc].
+
+@examples[#:eval fun-eval
+  (map ((curry +) 10) '(1 2 3))
+  (map (curry + 10) '(1 2 3))
+  (map (compose (curry * 2) (curry + 10)) '(1 2 3))
+  (define foo (curry (lambda (x y z) (list x y z))))
+  (foo 1 2 3)
+  (((((foo) 1) 2)) 3)
+]}
+
+
+@defproc*[([(curryr [proc procedure?]) procedure?]
+           [(curryr [proc procedure?] [v any/c] ...+) any/c])]{
+
+Like @scheme[curry], except that the arguments are collected in the
+opposite direction: the first step collects the rightmost group of
+arguments, and following steps add arguments to the left of these.
+
+@examples[#:eval fun-eval
+  (map (curryr list 'foo) '(1 2 3))
+]}
+
+
+@close-eval[fun-eval]

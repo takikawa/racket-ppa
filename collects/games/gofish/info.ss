@@ -1,5 +1,5 @@
-(module info (lib "infotab.ss" "setup")
-  (define name "Go Fish")
-  (define doc.txt "doc.txt")
-  (define game "gofish.ss")
-  (define game-set "Card Games"))
+#lang setup/infotab
+
+(define name "Go Fish")
+(define game "gofish.ss")
+(define game-set "Card Games")

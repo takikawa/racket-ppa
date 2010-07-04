@@ -1,34 +1,26 @@
-#reader(lib "docreader.ss" "scribble")
+#lang scribble/doc
 
-@title[#:tag-prefix '(lib "quick.scrbl" "scribblings" "quick") 
-       #:tag "top"]{An Introduction to PLT Scheme with Pictures}
-
-@bold{This reference describes a potential future version of PLT Scheme.
-      It does not match the current implementation.}
+@title{@bold{Quick}: An Introduction to PLT Scheme with Pictures}
 
 @; ----------------------------------------------------------------------
 
-@require[(lib "manual.ss" "scribble")]
-@require["mreval.ss"]
-@require[(lib "urls.ss" "scribble")]
-@require[(lib "class.ss")]
-@require["slideshow-doc.ss"]
-@require["slideshow-code-doc.ss"]
-@require["mred-doc.ss"]
+@(require scribble/manual
+          "mreval.ss"
+          "keep.ss"
+          scribble/urls
+          scribble/struct
+          scheme/class
 
-@require-for-label[(lib "lang.ss" "big")]
-@require-for-label[(lib "mred.ss" "mred")]
-@require-for-label[(lib "class.ss")]
+          (for-label scheme/base
+                     scheme/gui/base
+                     scheme/class
+                     slideshow
+                     slideshow/code
+                     slideshow/flash)
 
-@require-for-syntax[mzscheme]
-
-@define[filled-flash (lambda args (apply (eval 'filled-flash) args))]
-@define[random-gaussian (lambda args (apply (eval 'random-gaussian) args))]
-@define-syntax[code (syntax-rules () [(_ v) (typeset-code (quote-syntax v))])]
-@provide[filled-flash random-gaussian code]
+          (for-syntax scheme/base))
 
 @; ----------------------------------------------------------------------
-@section{Why Pictures? Why DrScheme?}
 
 This tutorial provides a brief introduction to the PLT Scheme
 programming language by using one of its picture-drawing
@@ -50,7 +42,8 @@ start DrScheme.
 @; ----------------------------------------------------------------------
 @section{Set...}
 
-To draw pictures, we must first load the picture library.  Copy the
+To draw pictures, we must first load some picture functions, which are
+part of a library for creating slide presentations.  Copy the
 following into the @defterm{definitions area}, which is the top text
 area that you see in DrScheme:
 
@@ -67,9 +60,9 @@ Language..."] menu item before clicking @onscreen{Run}.
 @section{Go!}
 
 When you type an expression after the @onscreen{>} in the interactions
-window and hit Enter, DrScheme evaluates the expression and prints its result. An
-expression can be just a value, such as the number @scheme[5] or the
-string @scheme["art gallery"]:
+window and hit Enter, DrScheme evaluates the expression and prints its
+result. An expression can be just a value, such as the number
+@scheme[5] or the string @scheme["art gallery"]:
 
 @mr-interaction[5 "art gallery"]
 
@@ -92,7 +85,8 @@ what happens:
 
 @mr-interaction[(circle 10 20)]
 
-Note that DrScheme highlights the source of the error in pink.
+Note that DrScheme highlights in pink the expression that triggered
+the error (but pink highlighting is not shown in this documentation).
 
 In addition to basic picture constructors like @scheme[circle] and
 @scheme[rectangle], there's a @scheme[hc-append] function that
@@ -102,15 +96,21 @@ it looks like this:
 @mr-interaction[(hc-append (circle 10) (rectangle 10 20))]
 
 The hyphen in the name @scheme[hc-append] is just a part of the
-identifier; it's not @scheme[hc] minus @scheme[append]. The function
-name starts with @scheme[h] because it combines pictures horizontally,
-and the next letter is @scheme[c] because the pictures are centered
-vertically. If you wonder what other functions exist (perhaps a way to
-stack pictures vertically and left-aligned), move the text caret to
-the name @scheme[hc-append] and press the F1 key in DrScheme. A Help
-Desk window will appear, and it will give you a link to the
-documentation for @scheme[hc-append]. Click the link, and you'll see
-lots of other functions.
+identifier; it's not @schemeidfont{hc} minus
+@schemeidfont{append}. The function name starts with @scheme[h]
+because it combines pictures horizontally, and the next letter is
+@scheme[c] because the pictures are centered vertically.
+
+If you wonder what other functions exist---perhaps a way to stack
+pictures vertically and left-aligned?---move the text caret to the
+name @scheme[hc-append] and press the F1 key in DrScheme. A browser
+window will open, and it will give you a link to the documentation for
+@scheme[hc-append]. Click the link, and you'll see lots of other
+functions.
+
+If you're reading this in HTML form, you can also just click on
+@scheme[hc-append] or any other imported identifier that is used in
+this tutorial.
 
 @; ----------------------------------------------------------------------
 @section{Definitions}
@@ -137,20 +137,20 @@ number of picture arguments. When a number is provided, it specifies
 the amount of space to add between pictures.
 
 We could have evaluated the @scheme[define] forms for @scheme[c] and
-@scheme[r] in the interactions area instead of the interactions
+@scheme[r] in the interactions area instead of the definitions
 area. In practice, though, the definitions area is where your program
 lives---it's the file that you save---while the interaction area is
 for transient explorations and debugging tasks.
 
-Let's add a function definition to the program. A function
-definition uses @scheme[define], just like our shape definitions, but with
-an open parenthesis before the function name, and names for the
-function arguments before the matching close parenthesis:
+Let's add a function definition to the program. A function definition
+uses @scheme[define], just like our shape definitions, but with an
+open parenthesis before the function name, and names for the function
+arguments before the matching close parenthesis:
 
 @mr-schemeblock+eval[
 (define (square n)
   (code:comment #, @t{A semi-colon starts a line comment.})
-  (code:comment #, @t{The expresson below is the function body.})
+  (code:comment #, @t{The expression below is the function body.})
   (filled-rectangle n n))
 ]
 
@@ -219,7 +219,7 @@ Instead of calling @scheme[circle] as a function, try evaluating just
 
 That is, the identifier @scheme[circle] is bound to a function
 (a.k.a. ``procedure''), just like @scheme[c] is bound to a
-circle. Unlike a cicrle picture, there's not a simple way of
+circle. Unlike a circle picture, there's not a simple way of
 completely printing the function, so DrScheme just prints
 @procedure{circle}.
 
@@ -249,9 +249,9 @@ the function, and the expression after the argument names is the
 function body. Using the word ``lambda'' instead of ``function'' or
 ``procedure'' is part of Scheme's history and culture.
 
-A function @scheme[define] is really a shorthand for a simple
-@scheme[define] using @scheme[lambda] as the value. For example, the
-@scheme[series] definition could be written as
+A @scheme[define] form for a function is really a shorthand for a
+simple @scheme[define] using @scheme[lambda] as the value. For
+example, the @scheme[series] definition could be written as
 
 @schemeblock[
 (define series
@@ -271,9 +271,9 @@ environment of the expression determines the identifier's
 binding. This rule applies to identifiers in a @scheme[lambda] body as
 well as anywhere else.
 
-For example, in the following @scheme[color-series] function the uses
+For example, in the following @scheme[rgb-series] function the uses
 of @scheme[mk] in each @scheme[lambda] form to refer to the argument of
-@scheme[color-series], since that's the binding that is textually in
+@scheme[rgb-series], since that's the binding that is textually in
 scope:
 
 @mr-def+int[
@@ -306,7 +306,7 @@ different alignment of objects within the picture compared to using
 @; ----------------------------------------------------------------------
 @section{Lists}
 
-Scheme inherits much of its style from the langauge Lisp, whose name
+Scheme inherits much of its style from the language Lisp, whose name
 originally stood for ``LISt Processor,'' and lists remain an important
 part of Scheme.
 
@@ -322,9 +322,10 @@ here, because parentheses are used for both expressions, such as
 @scheme[(circle 10)], and printed results, such as
 @schemeresult[("red" "green" "blue")]. This connection between
 expressions and printed results is no coincidence, but we save that
-bit of culture for @link["elsewhere"]{discussion elsewhere}. In the
-documentation and in DrScheme, result parentheses are printed in blue,
-unlike expression parentheses.
+bit of culture for @seclink[#:doc '(lib
+"scribblings/guide/guide.scrbl") "quoting-lists"]{discussion
+elsewhere}. In the documentation and in DrScheme, result parentheses
+are printed in blue, unlike expression parentheses.
 
 If you have a list, then you'll eventually want to do something with
 each of the elements. The @scheme[map] function takes a list and a
@@ -365,17 +366,17 @@ Since your program in the definitions window starts with
 @schememod[slideshow]
 
 all of the code that you put in the definitions window is inside a
-module. Furthermore, the module intially imports everything from the
+module. Furthermore, the module initially imports everything from the
 module designated by @schememodname[slideshow], which exports
 picture-making functions as well as more commonly used functions
 such as @scheme[list] and @scheme[map].
 
 To import additional libraries, use the @scheme[require] form. For
-example, the library @scheme[(lib "flash.ss" "texpict")] provides a
+example, the library @schememodname[slideshow/flash] provides a
 @scheme[filled-flash] function:
 
 @mr-def+int[
-(require (lib "flash.ss" "texpict"))
+(require slideshow/flash)
 (filled-flash 40 30)
 ]
 
@@ -386,11 +387,10 @@ Modules are named and distributed in various ways:
  @item{Some modules are packaged in the PLT Scheme distribution or
        otherwise installed into a hierarchy of
        @defterm{collections}. For example, the module name
-       @schememodname[(lib "flash.ss" "texpict")] means ``the module
-       implemented in the file @file{flash.ss} that is located in the
-       @file{texpict} collection.''  The @schememodname[slideshow]
-       specification with @schemefont{#module} is a shorthand for
-       @schememodname[(lib "lang.ss" "slideshow")].}
+       @schememodname[slideshow/flash] means ``the module implemented
+       in the file @filepath{flash.ss} that is located in the
+       @filepath{slideshow} collection.'' When a module name includes
+       no slash, then it refers to a @filepath{main.ss} file.}
 
  @item{Some modules are distributed through the
        @link[url:planet]{@PLaneT} server, and they can be
@@ -403,28 +403,29 @@ Modules are named and distributed in various ways:
        ]
 
        DrScheme automatically downloads version 1.0 of the
-       @file{random.plt} library and then imports the
-       @file{random.ss} module.}
+       @filepath{random.plt} library and then imports the
+       @filepath{random.ss} module.}
 
  @item{Some modules live relative to other modules, without
        necessarily belonging to any particular collection or package.
        For example, in DrScheme, if save your definitions so far in a
-       file @file{quick.ss} and add the line
+       file @filepath{quick.ss} and add the line
 
         @schemeblock[(provide rainbow square)]
 
        then you can open a new tab or window in DrScheme, type the new
-       program @file{use.ss} in the same directory as @file{quick.ss}:
+       program @filepath{use.ss} in the same directory as
+       @filepath{quick.ss}:
 
         @schememod[
-         little
+         scheme
          (require "quick.ss")
-         (rainbow square)
+         (rainbow (square 5))
         ]
 
-        and when you run this later program, a rainbow list of squares
-        is the output. Note that @file{use.ss} is written using the
-        initial import @schememodname[little], which does not
+        and when you run @filepath{use.ss}, a rainbow list of squares
+        is the output. Note that @filepath{use.ss} is written using
+        the initial import @schememodname[scheme], which does not
         supply any picture-making functions itself---but does provide
         @scheme[require] and the function-calling syntax.}
 
@@ -432,7 +433,7 @@ Modules are named and distributed in various ways:
 
 Schemers typically write new programs and libraries as modules that
 import each other through relative paths, and that use existing
-libraries via @scheme[lib] and @scheme[planet]. When a program or
+libraries from collections and @scheme[planet]. When a program or
 library developed this way seems useful to others, it can be uploaded
 as a @PLaneT package or distributed in the more old-fashioned way as
 an installable collection archive (in either case without modifying
@@ -444,24 +445,24 @@ the internal relative references among modules).
 Here's another library to try:
 
 @mr-def+int[
-(require (lib "code.ss" "slideshow"))
+(require slideshow/code)
 (code (circle 10))
 ]
 
 Instead of a circle, the result is a picture of the code that, if it
 were used as an expression, would produce a circle. In other words,
 @scheme[code] is not a function, but instead a new syntactic form for
-creating pictures; the bit between the opening parenthesese with
+creating pictures; the bit between the opening parenthesis with
 @scheme[code] is not an expression, but instead manipulated by the
 @scheme[code] syntactic form.
 
 This helps explain what we meant in the previous section when we said
-that @schememodname[little] provides @scheme[require] and the
+that @schememodname[scheme] provides @scheme[require] and the
 function-calling syntax. Libraries are not restricted to exporting
-values, such as functions; they can also define new syntax. In this
-sense, Scheme isn't exactly language at all; it's more of an idea for
-how to structure a language so that you can extend it or create
-entirely new languages.
+values, such as functions; they can also define new syntactic
+forms. In this sense, Scheme isn't exactly a language at all; it's
+more of an idea for how to structure a language so that you can extend
+it or create entirely new languages.
 
 One way to introduce a new syntactic form is through
 @scheme[define-syntax] with @scheme[syntax-rules]:
@@ -485,38 +486,38 @@ is @scheme[(hc-append 10 expr (code expr))].  In particular,
 @scheme[(hc-append 10 (circle 10) (code (circle 10)))].
 
 Of course, the sword of syntactic extension cuts both ways: inventing
-a new language can make it easer to say what you want, but harder for
-others to understand. As it happens, the developers of Scheme are
+a new language can make it easier to say what you want, but harder for
+others to understand. As it happens, the developers of PLT Scheme are
 constantly giving talks and writing papers that involve Scheme code,
 and it's worthwhile for everyone who works on those products to know
 about @scheme[code].
 
-In fact, you might want to take a look at the @link["quick.scrbl"]{source of
-this document}. You'll see that it starts with @schemefont{#module},
-but otherwise doesn't look a lot like Scheme; nevertheless, we build
-this document by running its source as a PlT Scheme program. We have
-to use a lot more than @scheme[syntax-rules] to extend Scheme's syntax
-enough for writing documents, but Scheme's syntactic extension can
-take you a long way!
+In fact, you might want to take a look at the @keep-file["quick.scrbl"]
+@link["quick.scrbl"]{source of this document}. You'll see that it
+starts with @schemefont{#lang}, but otherwise doesn't look a lot
+like Scheme; nevertheless, we build this document by running its
+source as a PLT Scheme program. We have to use a lot more than
+@scheme[syntax-rules] to extend Scheme's syntax enough for writing
+documents, but Scheme's syntactic extension can take you a long way.
 
 @; ----------------------------------------------------------------------
 @section{Objects}
 
 An object system is another example of a sophisticated language
-extension that is worth learning and using for a Scheme users. Objects
+extension that is worth learning and using for Scheme users. Objects
 are sometimes better than functions, even when you have
 @scheme[lambda], and objects work especially well for graphical user
 interfaces. The API for Scheme's GUI and graphics system is expressed
 in terms of objects and classes.
 
-The class system itself is implemented by the @schememodname[(lib
-"class.ss" "mzlib")] library, and the @schememodname[(lib "mred.ss"
-"mred")] library provides the GUI and drawing classes. By convention,
-the MrEd classes are given names that end with @scheme[%]:
+The class system itself is implemented by the
+@schememodname[scheme/class] library, and the
+@schememodname[scheme/gui/base] library provides the GUI and drawing
+classes. By convention, the classes are given names that end with
+@scheme[%]:
 
 @mr-defs+int[
-[(require (lib "class.ss" "mzlib")
-          (lib "mred.ss" "mred"))
+[(require scheme/class scheme/gui/base)
  (define f (new frame% [label "My Art"]
                        [width 300]
                        [height 300]
@@ -524,17 +525,17 @@ the MrEd classes are given names that end with @scheme[%]:
 (send f show #t)
 ]
 
-@mr-interaction-eval[(send f show #f)]
+@(mr-interaction-eval (send f show #f))
 
-The @scheme[new] form creates an instances of a class, where
+The @scheme[new] form creates an instance of a class, where
 initialization arguments like @scheme[label] and @scheme[width] are
 provided by name. The @scheme[send] form calls a method of the object,
 such as @scheme[show], with arguments after the method name; the
 argument @scheme[#t] in this case is the boolean constant ``true.''
 
 Pictures generated with @schememodname[slideshow] encapsulate a
-function that uses MrEd's drawing commands to render the picture to a
-drawing context, such as a canvas in a frame. The
+function that uses the graphics toolbox's drawing commands to render
+the picture to a drawing context, such as a canvas in a frame. The
 @scheme[make-pict-drawer] function from @schememodname[slideshow]
 exposes a picture's drawing function. We can use
 @scheme[make-pict-drawer] in a canvas-painting callback to draw a
@@ -551,9 +552,15 @@ picture into a canvas:
 (add-drawing (colorize (filled-flash 50 30) "yellow"))
 ]
 
-@centerline{@mr-interaction-eval-show[(scale (bitmap "art.png") 0.5)]}
+@centerline{
+@(mr-interaction-eval-show (scale
+                            (bitmap
+                             (build-path
+                              (collection-path "scribblings/quick") 
+                              "art.png"))
+                            0.5))}
 
-Each canvas stratches to fill an equal portion of the frame, because
+Each canvas stretches to fill an equal portion of the frame, because
 that's how a frame manages its children by default.
 
 @; ----------------------------------------------------------------------
@@ -573,6 +580,10 @@ threads. That is, instead of a ``minimalist'' language---which is the
 way that Scheme is often described---PLT Scheme offers a rich language
 with an extensive set of libraries and tools.
 
-To start learning about the full PLT Scheme language and tools in
-depth, move on to @italic[@secref[#:doc '(lib "guide.scrbl"
-"scribblings" "guide") "top"]].
+To continue touring PLT Scheme, but from a systems-oriented
+perspective instead of pictures, your next stop is @other-manual['(lib
+"scribblings/more/more.scrbl")].
+
+To instead start learning about the full PLT Scheme language and tools
+in depth, move on to @other-manual['(lib "guide.scrbl"
+"scribblings/guide")].

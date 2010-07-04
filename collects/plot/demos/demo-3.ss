@@ -1,3 +1,4 @@
-(require (lib "plot.ss" "plot"))
+#lang scheme
+(require plot)
 
-(plot (line (lambda (x) (sin x)) (color 'red)))
+(plot (line sin #:color 'red))

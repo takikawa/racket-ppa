@@ -1,9 +1,9 @@
-(module extra (lib "turbo.ss" "swindle")
+#lang s-exp swindle/turbo
 
 ;;> This module defines some additional useful functionality which requires
 ;;> Swindle.
 
-(require (lib "clos.ss" "swindle"))
+(require swindle/clos)
 
 ;;; ---------------------------------------------------------------------------
 ;;; A convenient `defstruct'
@@ -381,7 +381,7 @@
   (syntax-case stx ()
     [(_ x i ...)
      (let* ([ris  (reverse (syntax->list #'(i ...)))]
-            [idxs (reverse! (cdr ris))]
+            [idxs (reverse (cdr ris))]
             [val  (car ris)])
        (quasisyntax/loc stx
          (put! x #,val #,@(datum->syntax-object #'(i ...) idxs #'(i ...)))))]))
@@ -394,8 +394,10 @@
             typename args))
    (car args)))
 
+#|
 (defmethod (put! [l <list>] x . i_)
   (list-set! l (put!-arg '<list> i_) x))
+|#
 (defmethod (put! [v <vector>] x . i_)
   (vector-set! v (put!-arg '<vector> i_) x))
 (defmethod (put! [s <string>] [c <char>] . i_)
@@ -431,8 +433,10 @@
 (define* *print-level*  (make-parameter 6))
 (define* *print-length* (make-parameter 20))
 
-(define orig-write-handler   (port-write-handler   (current-error-port)))
-(define orig-display-handler (port-display-handler (current-error-port)))
+;; grab the builtin write/display handlers
+(define-values (mz:write mz:display)
+  (let ([p (open-output-bytes)])
+    (values (port-write-handler p) (port-display-handler p))))
 
 ;;>> (print-object obj esc? port)
 ;;>   Prints `obj' on `port' using the above parameters -- the effect of
@@ -448,73 +452,69 @@
 (defgeneric* print-object (object esc? port))
 
 (defmethod (print-object o esc? port)
-  (orig-display-handler "#" port)
-  (orig-display-handler (class-name (class-of o)) port))
+  (mz:display "#" port)
+  (mz:display (class-name (class-of o)) port))
 
 (defmethod (print-object [o <builtin>] esc? port)
-  ((if esc? orig-write-handler orig-display-handler) o port))
+  ((if esc? mz:write mz:display) o port))
 
 (define printer:too-deep "#?#")
 (define printer:too-long "...")
 
-(defmethod (print-object [o <improper-list>] esc? port)
+(defmethod (print-object [o <pair>] esc? port)
   (cond
-   [(null? o) (orig-display-handler "()" port)]
+   [(null? o) (mz:display "()" port)]
    [(and (pair? (cdr o)) (null? (cddr o))
          (memq (car o) '(quote quasiquote unquote unquote-splicing
                                syntax quasisyntax unsyntax unsyntax-splicing)))
-    (orig-display-handler (case (car o)
-                            [(quote)             "'"]
-                            [(quasiquote)        "`"]
-                            [(unquote)           ","]
-                            [(unquote-splicing)  ",@"]
-                            [(syntax)            "#'"]
-                            [(quasisyntax)       "#`"]
-                            [(unsyntax)          "#,"]
-                            [(unsyntax-splicing) "#,@"])
-                          port)
+    (mz:display (case (car o)
+                  [(quote)             "'"]
+                  [(quasiquote)        "`"]
+                  [(unquote)           ","]
+                  [(unquote-splicing)  ",@"]
+                  [(syntax)            "#'"]
+                  [(quasisyntax)       "#`"]
+                  [(unsyntax)          "#,"]
+                  [(unsyntax-splicing) "#,@"])
+                port)
     (print-object (cadr o) esc? port)]
-   [(eq? (*print-level*) 0)
-    (orig-display-handler printer:too-deep port)]
+   [(eq? (*print-level*) 0) (mz:display printer:too-deep port)]
    [else
-    (orig-display-handler "(" port)
+    (mz:display "(" port)
     (if (eq? (*print-length*) 0)
-      (orig-display-handler printer:too-long port)
+      (mz:display printer:too-long port)
       (parameterize ([*print-level* (sub1 (or (*print-level*) 0))])
         (print-object (car o) esc? port)
         (do ([o (cdr o) (if (pair? o) (cdr o) '())]
              [n (sub1 (or (*print-length*) 0)) (sub1 n)])
             [(or (null? o)
                  (and (zero? n)
-                      (begin (orig-display-handler " " port)
-                             (orig-display-handler printer:too-long port)
+                      (begin (mz:display " " port)
+                             (mz:display printer:too-long port)
                              #t)))]
           (if (pair? o)
-            (begin (orig-display-handler " " port)
-                   (print-object (car o) esc? port))
-            (begin (orig-display-handler " . " port)
-                   (print-object o esc? port))))))
-    (orig-display-handler ")" port)]))
+            (begin (mz:display " " port) (print-object (car o) esc? port))
+            (begin (mz:display " . " port) (print-object o esc? port))))))
+    (mz:display ")" port)]))
 
 (defmethod (print-object [o <vector>] esc? port)
-  (cond [(eq? (*print-level*) 0)
-         (orig-display-handler printer:too-deep port)]
-        [(zero? (vector-length o)) (orig-display-handler "#()" port)]
-        [else (orig-display-handler "#(" port)
+  (cond [(eq? (*print-level*) 0) (mz:display printer:too-deep port)]
+        [(zero? (vector-length o)) (mz:display "#()" port)]
+        [else (mz:display "#(" port)
               (if (eq? (*print-length*) 0)
-                (orig-display-handler printer:too-long port)
+                (mz:display printer:too-long port)
                 (parameterize ([*print-level* (sub1 (or (*print-level*) 0))])
                   (print-object (vector-ref o 0) esc? port)
                   (let ([len (if (*print-length*)
                                (min (vector-length o) (*print-length*))
                                (vector-length o))])
                     (do ([i 1 (add1 i)]) [(>= i len)]
-                      (orig-display-handler " " port)
+                      (mz:display " " port)
                       (print-object (vector-ref o i) esc? port))
                     (when (< len (vector-length o))
-                      (orig-display-handler " " port)
-                      (orig-display-handler printer:too-long port)))))
-              (orig-display-handler ")" port)]))
+                      (mz:display " " port)
+                      (mz:display printer:too-long port)))))
+              (mz:display ")" port)]))
 
 ;;>> (name-sans-<> name)
 ;;>   Given a string or symbol for name, return a string where the outermost
@@ -533,11 +533,11 @@
          [cc (class-of c)]
          [(name x) (name-sans-<> (slot-ref x 'name))])
     (if (and (assq 'name (class-slots c)) (assq 'name (class-slots cc)))
-      (begin (orig-display-handler "#<" port)
-             (orig-display-handler (name c) port)
-             (orig-display-handler ":" port)
-             (orig-display-handler (name o) port)
-             (orig-display-handler ">" port))
+      (begin (mz:display "#<" port)
+             (mz:display (name c) port)
+             (mz:display ":" port)
+             (mz:display (name o) port)
+             (mz:display ">" port))
       (call-next-method))))
 
 ;;>> (print-object-with-slots obj esc? port)
@@ -547,26 +547,26 @@
 ;;>   `print-object'.
 (define* (print-object-with-slots o esc? port)
   (if (eq? (*print-level*) 0)
-    (orig-display-handler printer:too-deep port)
+    (mz:display printer:too-deep port)
     (let ([class (class-of o)])
-      (orig-display-handler "#<" port)
-      (orig-display-handler (name-sans-<> (class-name class)) port)
-      (orig-display-handler ":" port)
+      (mz:display "#<" port)
+      (mz:display (name-sans-<> (class-name class)) port)
+      (mz:display ":" port)
       (parameterize ([*print-level* (sub1 (or (*print-level*) 0))])
         (do ([s (class-slots class) (cdr s)]
              [n (or (*print-length*) -1) (sub1 n)])
             [(or (null? s)
                  (and (zero? n)
-                      (begin (orig-display-handler " " port)
-                             (orig-display-handler printer:too-long port))))]
+                      (begin (mz:display " " port)
+                             (mz:display printer:too-long port))))]
           (let ([val (slot-ref o (caar s))])
             (if (eq? ??? val)
               (set! n (add1 n))
-              (begin (orig-display-handler " " port)
-                     (orig-display-handler (caar s) port)
-                     (orig-display-handler "=" port)
+              (begin (mz:display " " port)
+                     (mz:display (caar s) port)
+                     (mz:display "=" port)
                      (print-object val esc? port))))))
-      (orig-display-handler ">" port))))
+      (mz:display ">" port))))
 
 ;; Add a hook to make <class> so it will initialize a printer if given
 (defmethod :after (initialize [c <class>] initargs)
@@ -603,8 +603,6 @@
 ;;>   Swindle values in errors, when using `printf' etc.
 (define* (install-swindle-printer)
   (global-port-print-handler write-object)
-  (current-print ; see PR7782
-   (lambda (x) (unless (void? x) (write-object x) (newline))))
   (port-display-handler (current-output-port) display-object)
   (port-display-handler (current-error-port)  display-object)
   (port-write-handler   (current-output-port) write-object)
@@ -836,7 +834,7 @@
 ;;; Add a matcher - normally at the end, with add-matcher0 at the beginning
 (define (add-matcher matcher m)
   (slot-set! matcher 'matchers
-             (append! (slot-ref matcher 'matchers) (list m))))
+             (append (slot-ref matcher 'matchers) (list m))))
 (define (add-matcher0 matcher m)
   (slot-set! matcher 'matchers
              (cons m (slot-ref matcher 'matchers))))
@@ -917,7 +915,7 @@
             (let ([v e]) (push! v results) (k #t)))
       ((amb-fail)))
     (amb-fail prev-amb-fail)
-    (reverse! results)))
+    (reverse results)))
 
 ;;; ---------------------------------------------------------------------------
 ;;>>... Very basic UI - works also in console mode
@@ -967,5 +965,3 @@
   (ui-question str args "Ok/Cancel" 'ok '(ok-cancel) #\o #\c))
 (define* (yes/no? str . args)
   (ui-question str args "Yes/No" 'yes '(yes-no) #\y #\n))
-
-)

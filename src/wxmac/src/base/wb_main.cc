@@ -4,7 +4,7 @@
  * Author:	Julian Smart
  * Created:	1993
  * Updated:	August 1994
- * Copyright:	(c) 2004-2007 PLT Scheme Inc.
+ * Copyright:	(c) 2004-2008 PLT Scheme Inc.
  * Copyright:	(c) 1993, AIAI, University of Edinburgh
  */
 
@@ -84,6 +84,7 @@ void wxCommonInit(void)
   wxInitStandardTypes();
   wxREGGLOB(wxThePrintPaperDatabase);
   wxThePrintPaperDatabase = new WXGC_PTRS wxPrintPaperDatabase;
+  wxThePrintPaperDatabase->CreateDatabase();
   wxREGGLOB(wxWindow::gMouseWindow);
   wxRegisterAbortWindow();
   wxRegisterSplinePointList();

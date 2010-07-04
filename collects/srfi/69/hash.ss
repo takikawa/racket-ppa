@@ -5,7 +5,8 @@
 
 (module hash mzscheme
   
-  (require (lib "etc.ss"))
+  (require mzlib/etc
+           scheme/mpair)
   
   (provide (rename my-make-hash-table s:make-hash-table)
            (rename my-hash-table? s:hash-table?)
@@ -58,15 +59,12 @@
     (opt-lambda ([comparison equal?]
                  [hash (appropriate-hash-function-for comparison)]
                  [size *default-table-size*]
-                 [association (cond ((eq? comparison eq?) assq)
-                                    ((eq? comparison eqv?) assv)
-                                    ((eq? comparison equal?) assoc)
-                                    (else (letrec ((associate
-                                                   (lambda (val alist)
-                                                     (cond ((null? alist) #f)
-                                                           ((comparison val (caar alist)) (car alist))
-                                                           (else (associate val (cdr alist)))))))
-                                            associate)))])
+                 [association (letrec ((associate
+                                        (lambda (val alist)
+                                          (cond ((null? alist) #f)
+                                                ((comparison val (mcar (mcar alist))) (mcar alist))
+                                                (else (associate val (mcdr alist)))))))
+                                associate)])
       (make-my-hash-table 0 hash comparison association (make-vector size '()))))
   
   (define (%hash-table-hash hash-table key)
@@ -78,24 +76,24 @@
   
   (define (%hash-table-add! entries hash key value)
     (vector-set! entries hash
-                 (cons (cons key value)
-                       (vector-ref entries hash))))
+                 (mcons (mcons key value)
+                        (vector-ref entries hash))))
   
   (define (%hash-table-delete! entries compare hash key)
     (let ((entrylist (vector-ref entries hash)))
       (cond ((null? entrylist) #f)
-            ((compare key (caar entrylist))
-             (vector-set! entries hash (cdr entrylist)) #t)
+            ((compare key (mcar (mcar entrylist)))
+             (vector-set! entries hash (mcdr entrylist)) #t)
             (else
-             (let loop ((current (cdr entrylist)) (previous entrylist))
+             (let loop ((current (mcdr entrylist)) (previous entrylist))
                (cond ((null? current) #f)
-                     ((compare key (caar current))
-                      (set-cdr! previous (cdr current)) #t)
-                     (else (loop (cdr current) current))))))))
+                     ((compare key (mcar (mcar current)))
+                      (set-mcdr! previous (mcdr current)) #t)
+                     (else (loop (mcdr current) current))))))))
   
   (define (%hash-table-walk proc entries)
     (do ((index (- (vector-length entries) 1) (- index 1)))
-      ((< index 0)) (for-each proc (vector-ref entries index))))
+      ((< index 0)) (mfor-each proc (vector-ref entries index))))
   
   (define (%hash-table-maybe-resize! hash-table)
     (let* ((old-entries (my-hash-table-entries hash-table))
@@ -107,8 +105,8 @@
             (%hash-table-walk
               (lambda (node)
                 (%hash-table-add! new-entries
-                                  (hash (car node) new-length)
-                                  (car node) (cdr node)))
+                                  (hash (mcar node) new-length)
+                                  (mcar node) (mcdr node)))
               old-entries)
             (set-my-hash-table-entries! hash-table new-entries)))))
   
@@ -116,7 +114,7 @@
     (cond ((%hash-table-find (my-hash-table-entries hash-table)
                              (my-hash-table-association-function hash-table)
                              (%hash-table-hash hash-table key) key)
-            => cdr)
+            => mcdr)
           ((null? maybe-default)
            (raise-mismatch-error 'hash-table-ref "no value associated with " key))
           (else ((car maybe-default)))))
@@ -130,7 +128,7 @@
       (cond ((%hash-table-find entries
                                (my-hash-table-association-function hash-table)
                                hash key)
-              => (lambda (node) (set-cdr! node value)))
+              => (lambda (node) (set-mcdr! node value)))
             (else (%hash-table-add! entries hash key value)
                   (set-my-hash-table-size! hash-table
                                            (+ 1 (my-hash-table-size hash-table)))
@@ -143,7 +141,7 @@
                                (my-hash-table-association-function hash-table)
                                hash key)
               => (lambda (node)
-                   (set-cdr! node (function (cdr node)))))
+                   (set-mcdr! node (function (mcdr node)))))
             ((null? maybe-default)
              (raise-mismatch-error 'hash-table-update "no value exists for key " key))
             (else (%hash-table-add! entries hash key
@@ -168,7 +166,7 @@
   
   (define (hash-table-walk hash-table proc)
     (%hash-table-walk
-      (lambda (node) (proc (car node) (cdr node)))
+      (lambda (node) (proc (mcar node) (mcdr node)))
       (my-hash-table-entries hash-table)))
   
   (define (hash-table-fold hash-table f acc)
@@ -212,6 +210,5 @@
   
   (define (hash-table-values hash-table)
     (hash-table-fold hash-table (lambda (key val acc) (cons val acc)) '()))
-  
+
   )
- 

@@ -7,8 +7,8 @@
 
 ;; Require the animation library, the gui library, and the library
 ;; containing the build-list function.
-(require (lib "animation.ss" "frtime")
-         (lib "gui.ss" "frtime"))
+(require frtime/animation
+         frtime/gui)
 
 (define clock-radius (make-slider "Clock Size" 40 200 100))
 
@@ -134,4 +134,5 @@
   (list clock-face hour-hand minute-hand second-hand))
 
 ;; Draw the clock!
-(display-shapes analog-clock)
+(display-shapes
+ (list analog-clock (make-graph-string (make-posn 20 20) "Drag me around!" "black")))

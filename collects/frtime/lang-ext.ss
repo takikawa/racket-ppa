@@ -1,9 +1,9 @@
 (module lang-ext mzscheme
-  (require (lib "frp-core.ss" "frtime")
-           (lib "etc.ss")
-           (lib "list.ss"))
+  (require frtime/frp-core
+           mzlib/etc
+           mzlib/list)
 
-  (require-for-syntax (lib "list.ss"))
+  (require-for-syntax mzlib/list)
   
   (define nothing (void));(string->uninterned-symbol "nothing"))
   
@@ -17,14 +17,14 @@
          [(assq obj table) => second]
          [(behavior? obj)
           (deep-value-now (signal-value obj) (cons (list obj (signal-value obj)) table))]
+         [(event? obj)
+          (signal-value obj)]
          [(cons? obj)
           (let* ([result (cons #f #f)]
                  [new-table (cons (list obj result) table)]
                  [car-val (deep-value-now (car obj) new-table)]
                  [cdr-val (deep-value-now (cdr obj) new-table)])
-            (set-car! result car-val)
-            (set-cdr! result cdr-val)
-            result)]
+            (cons car-val cdr-val))]
          [(struct? obj)
           (let*-values ([(info skipped) (struct-info obj)]
                         [(name init-k auto-k acc mut immut sup skipped?) (struct-type-info info)]
@@ -38,6 +38,23 @@
              (deep-value-now (vector-ref obj i) table)))]
          [else obj])]))
       
+  (define (lift strict? fn . args)
+    (if (snap?) ;; maybe fix later to handle undefined-strictness
+        (apply fn (map value-now/no-copy args))
+        (with-continuation-mark
+            'frtime 'lift-active
+          (cond
+            [(ormap signal? args)
+             (apply
+              proc->signal
+              (apply (if strict? create-strict-thunk create-thunk) fn args)
+              args)]
+            [(and strict? (ormap undefined? args)) undefined]
+            [else (apply fn args)]))))
+  
+  (define (lift-strict . args)
+    (apply lift #t args))
+  
   
   
   ; new-cell : behavior[a] -> behavior[a] (cell)
@@ -92,21 +109,8 @@
     (and (signal? v)
          (if (undefined? (signal-value v))
              undefined
-             (event-cons? (signal-value v)))))
-  
-  
-  (define-syntax (event-producer stx)
-    (syntax-case stx ()
-      [(src-event-producer expr dep ...)
-       (with-syntax ([emit (datum->syntax-object (syntax src-event-producer) 'emit)]
-                     [the-args (datum->syntax-object
-                                (syntax src-event-producer) 'the-args)])
-         (syntax (let* ([out (econs undefined undefined)]
-                        [emit (lambda (val)
-                                (set-erest! out (econs val undefined))
-                                (set! out (erest out)))])
-                   (proc->signal (lambda the-args expr out) dep ...))))]))
-    
+             (event-set? (signal-value v)))))
+      
   ; switch : event[behavior] behavior -> behavior
   (define switch
     (opt-lambda (e [init undefined])
@@ -134,30 +138,29 @@
   
   ; event ... -> event
   (define (merge-e . args)
-    (apply event-processor
-           (lambda (emit)
-             (lambda (the-event)
-               (emit the-event)))
+    (apply lift #t (lambda args
+                     (make-events-now
+                      (apply append
+                             (map event-set-events
+                                  (filter (lambda (es) (= (current-logical-time) (event-set-time es)))
+                                          args)))))
            args))
   
   (define (once-e e)
-    (let ([b #t])
-      (rec ret (event-processor
-                (lambda (emit)
-                  (lambda (the-event)
-                    (when b
-                      (set! b false)
-                      (unregister ret e)
-                      (emit the-event))))
-                e))))
+    (map-e second (filter-e (lambda (p) (= 1 (first p)))
+                            (collect-e e (list 0) (lambda (e p) (list (add1 (first p)) e))))))
   
   ; behavior[a] -> event[a]
   (define (changes b)
-    (event-producer2
-     (lambda (emit)
-       (lambda the-args
-         (emit (deep-value-now b))))
-     b))
+    (lift #f (let ([first-time #t])
+               (lambda (bh)
+                 (begin0
+                   (make-events-now
+                    (if first-time
+                        empty
+                        (list (deep-value-now bh))))
+                   (set! first-time #f))))
+          b))
   
   (define never-e
     (changes #f))
@@ -166,14 +169,15 @@
   ; when-e : behavior[bool] -> event
   (define (when-e b)
     (let* ([last (value-now b)])
-      (event-producer2
-       (lambda (emit)
-         (lambda the-args
-           (let ([current (value-now b)])
-             (when (and (not last) current)
-               (emit current))
-             (set! last current))))
-       b)))
+      (lift #t (lambda (bh)
+                 (make-events-now
+                  (let ([current bh])
+                    (begin0
+                      (if (and (not last) current)
+                          (list current)
+                          empty)
+                      (set! last current)))))
+            b)))
   
   ; while-e : behavior[bool] behavior[number] -> event
   (define (while-e b interval)
@@ -189,21 +193,13 @@
   
   ; ==> : event[a] (a -> b) -> event[b]
   (define (e . ==> . f)
-    (event-processor
-     (lambda (emit)
-       (lambda (the-event)
-         (emit ((value-now f) the-event))))
-     e))
-  
-  
-  
-  #|
-  (define (e . =>! . f)
-    (event-processor
-     ((value-now f) the-event)
-     (list e)))
-  |#
-  
+    (lift #t (lambda (es)
+               (make-events-now
+                (if (= (current-logical-time) (event-set-time es))
+                    (map f (event-set-events es))
+                    empty)))
+          e))
+    
   ; -=> : event[a] b -> event[b]
   (define-syntax -=>
     (syntax-rules ()
@@ -211,24 +207,21 @@
   
   ; =#> : event[a] (a -> bool) -> event[a]
   (define (e . =#> . p)
-    (event-processor
-     (lambda (emit)
-       (lambda (the-event)
-         (when (value-now (p the-event))
-           (emit the-event))))
-     e))
-  
-  
+    (lift #t (lambda (es)
+               (make-events-now
+                (if (= (current-logical-time) (event-set-time es))
+                    (filter (value-now p) (map value-now (event-set-events es)))
+                    empty)))
+          e))  
   
   ; =#=> : event[a] (a -> b U nothing) -> event[b]
   (define (e . =#=> . f)
-    (event-processor
-     (lambda (emit)
-       (lambda (the-event)
-         (let ([x (f the-event)])
-           (unless (or (nothing? x) (undefined? x))
-             (emit x)))))
-     e))
+    (lift #t (lambda (es)
+               (make-events-now
+                (if (= (current-logical-time) (event-set-time es))
+                    (filter (compose not nothing?) (map f (event-set-events es)))
+                    empty)))
+          e))
   
   (define (map-e f e)
     (==> e f))
@@ -237,25 +230,38 @@
   (define (filter-map-e f e)
     (=#=> e f))
   
+  (define (scan trans acc lst)
+    (if (cons? lst)
+        (let ([new-acc (trans (first lst) acc)])
+          (cons new-acc (scan trans new-acc (rest lst))))
+        empty))
+        
+  
   ; event[a] b (a b -> b) -> event[b]
   (define (collect-e e init trans)
-    (event-processor
-     (lambda (emit)
-       (lambda (the-event)
-         (let ([ret (trans the-event init)])
-           (set! init ret)
-           (emit ret))))
-     e))
+    (lift #t (lambda (es)
+               (make-events-now
+                (cond
+                  [(= (current-logical-time) (event-set-time es))
+                   (let ([all-events (scan trans init (event-set-events es))])
+                     (when (cons? all-events)
+                       (set! init (first (last-pair all-events))))
+                     all-events)]
+                  [else empty])))
+          e))
   
   ; event[(a -> a)] a -> event[a]
   (define (accum-e e init)
-    (event-processor
-     (lambda (emit)
-       (lambda (the-event)
-         (let ([ret (the-event init)])
-           (set! init ret)
-           (emit ret))))
-     e))
+    (lift #t (lambda (es)
+               (make-events-now
+                (cond
+                  [(= (current-logical-time) (event-set-time es))
+                   (let ([all-events (scan (lambda (t a) (t a)) init (event-set-events es))])
+                     (when (cons? all-events)
+                       (set! init (first (last-pair all-events))))
+                     all-events)]
+                  [else empty])))
+          e))
   
   ; event[a] b (a b -> b) -> behavior[b]
   (define (collect-b ev init trans)
@@ -269,14 +275,12 @@
   (define hold 
     (opt-lambda (e [init undefined])
       (let ([val init])
-        (let* ([updator (event-processor
-                         (lambda (emit)
-                           (lambda (the-event)
-                             (set! val the-event)
-                             (emit the-event)))
-                         e)]
-               [rtn (proc->signal (lambda () updator val) updator)])
-          rtn))))
+        (lift #t (lambda (es) (let ([events (event-set-events es)])
+                                (when (and (= (current-logical-time) (event-set-time es))
+                                           (cons? events))
+                                  (set! val (first (last-pair (event-set-events es)))))
+                                val))
+              e))))
   
   (define-syntax snapshot/sync
     (syntax-rules ()
@@ -300,11 +304,14 @@
          expr ...)]))
   
   (define (snapshot-e e . bs)
-    (event-processor
-     (lambda (emit)
-       (lambda (the-event)
-         (emit (cons the-event (map value-now bs)))))
-     e))
+    (apply lift #t (lambda (es . bs)
+                     (make-events-now
+                      (cond
+                        [(= (current-logical-time) (event-set-time es))
+                         (map (lambda (the-event) (cons the-event (map value-now bs)))
+                              (event-set-events es))]
+                        [else empty])))
+           e bs))
   
   (define (snapshot/apply fn . args)
     (apply fn (map value-now args)))
@@ -317,42 +324,17 @@
       [(_ obj meth arg ...)
        (if (snap?)
            (send obj meth (value-now arg) ...)
-           (send obj meth arg ...))]))
+           (send obj meth arg ...))]))  
   
-  ;; Depricated
-  (define (magic dtime thunk)
-    (let* ([last-time (current-inexact-milliseconds)]
-           [ret (let ([myself #f])
-                  (event-producer
-                   (let ([now (current-inexact-milliseconds)])
-                     (snapshot (dtime)
-                               (when (cons? the-args)
-                                 (set! myself (first the-args)))
-                               (when (and dtime (>= now (+ last-time dtime)))
-                                 (emit (thunk))
-                                 (set! last-time now))
-                               (when dtime
-                                 (schedule-alarm (+ last-time dtime) myself))))
-                   dtime))])
-      (send-event ret ret)
-      ret))
-  
-  
-  ;; Depricated
   (define (make-time-b ms)
     (let ([ret (proc->signal void)])
       (set-signal-thunk! ret
                          (lambda ()
                            (let ([t (current-inexact-milliseconds)])
-                             (schedule-alarm (+ ms t) ret)
+                             (schedule-alarm (+ (value-now ms) t) ret)
                              t)))
       (set-signal-value! ret ((signal-thunk ret)))
       ret))
-  
-  
-  
-  (define milliseconds (make-time-b 20))
-  (define time-b milliseconds)
   
   (define seconds
     (let ([ret (proc->signal void)])
@@ -368,32 +350,35 @@
   ; general efficiency fix for delay
   ; signal[a] signal[num] -> signal[a]
   (define (delay-by beh ms-b)
-    (letrec ([last (cons (cons (if (zero? (value-now ms-b))
-                                   (value-now/no-copy beh)
-                                   undefined)
-                               (current-inexact-milliseconds))
-                         empty)]
+    (letrec ([last (mcons (cons (if (zero? (value-now ms-b))
+                                    (value-now/no-copy beh)
+                                    undefined)
+                                (current-inexact-milliseconds))
+                          empty)]
              [head last]
              [producer (proc->signal
                         (lambda ()
-                          (let* ([now (current-inexact-milliseconds)]
+                          (let* ([now (and (signal? consumer) (current-inexact-milliseconds))]
                                  [ms (value-now ms-b)])
                             (let loop ()
-                              (if (or (empty? (rest head))
-                                      (< now (+ ms (cdadr head))))
-                                  (caar head)
+                              (if (or (empty? (mcdr head))
+                                      (< now (+ ms (cdr (mcar (mcdr head))))))
+                                  (let ([val (car (mcar head))])
+                                    (if (event-set? val)
+                                        (make-events-now (event-set-events val))
+                                        val))
                                   (begin
-                                    (set! head (rest head))
+                                    (set! head (mcdr head))
                                     (loop)))))))]
              [consumer (proc->signal/dont-gc-unless producer
                         (lambda ()
                           (let* ([now (current-inexact-milliseconds)]
                                  [new (deep-value-now beh)]
                                  [ms (value-now ms-b)])
-                            (when (not (equal? new (caar last)))
-                              (set-rest! last (cons (cons new now)
-                                                    empty))
-                              (set! last (rest last))
+                            (when (not (equal? new (car (mcar last))))
+                              (set-mcdr! last (mcons (cons new now)
+                                                     empty))
+                              (set! last (mcdr last))
                               (schedule-alarm (+ now ms) producer))))
                         beh ms-b)])
       producer))
@@ -410,8 +395,8 @@
                [last-time (current-inexact-milliseconds)]
                [last-val (value-now b)]
                [last-alarm 0]
-               [producer (proc->signal (lambda () accum))]
-               [consumer (proc->signal/dont-gc-unless producer void b ms-b)])
+               [producer (proc->signal (lambda () (and (signal? consumer) accum)))]
+               [consumer (proc->signal void b ms-b)])
         (set-signal-thunk!
          consumer
          (lambda ()
@@ -502,27 +487,7 @@
       [(fn . args) (lambda () (apply fn (map value-now/no-copy args)))]))
   
   
-  (define (lift strict? fn . args)
-    (if (snap?) ;; maybe fix later to handle undefined-strictness
-        (apply fn (map value-now/no-copy args))
-        (with-continuation-mark
-            'frtime 'lift-active
-          (if (ormap behavior? args)
-              (begin
-                #;(when (ormap signal:compound? args)
-                  (printf "attempting to lift ~a over a signal:compound in ~a!~n" fn (map value-now args)))
-                (apply
-                 proc->signal
-                 (apply (if strict? create-strict-thunk create-thunk) fn args)
-                 args))
-              (if (and strict? (ormap undefined? args))
-                  undefined
-                  (apply fn args))))))
-  
-  (define (lift-strict . args)
-    (apply lift #t args))
-  
-  
+  #;
   (define (general-event-processor proc . args)
     ; proc : (lambda (emit suspend first-evt) ...)
     (let* ([out (econs undefined undefined)]
@@ -542,13 +507,13 @@
                        (when (ormap undefined? streams)
                          ;(fprintf (current-error-port) "had an undefined stream~n")
                          (set! streams (fix-streams streams args)))
-                       (let loop ()
-                         (extract (lambda (the-event)
+                       (let loop ([streams streams])
+                         (extract (lambda (the-event strs)
                                     (when proc-k
                                       (call/cc
                                        (lambda (k)
                                          (set! esc k)
-                                         (proc-k the-event)))) (loop))
+                                         (proc-k the-event)))) (loop strs))
                                   streams))
                        (set! streams (map signal-value args))
                        out)])
@@ -579,6 +544,7 @@
   (define (flush . strs)
     (select-proc (map (lambda (str) (list str void)) strs)))
   
+  #;
   (define (general-event-processor2 proc)
     (do-in-manager
      (let* ([out (econs undefined undefined)]
@@ -641,34 +607,24 @@
          (iq-enqueue rtn)
          rtn))))
   
-  (define (event-processor proc . args)
-    (let* ([out (econs undefined undefined)]
-           [proc/emit (proc
-                       (lambda (val)
-                         (set-erest! out (econs val undefined))
-                         (set! out (erest out))
-                         val))]
-           [streams (map signal-value args)]
-           [thunk (lambda ()
-                    (when (ormap undefined? streams)
-                      ;(fprintf (current-error-port) "had an undefined stream~n")
-                      (set! streams (fix-streams streams args)))
-                    (let loop ()
-                      (extract (lambda (the-event) (proc/emit the-event) (loop))
-                               streams))
-                    (set! streams (map signal-value args))
-                    out)])
-      (apply proc->signal thunk args)))
-  
+  (define (make-mutable lst)
+    (printf "make-mutable called on ~a~n" lst)
+    lst
+    #;(if (pair? lst)
+        (mcons (first lst) (make-mutable (rest lst)))
+        lst))
+    
   ;; split : event[a] (a -> b) -> (b -> event[a])
   (define (split ev fn)
     (let* ([ht (make-hash-table 'weak)]
-           [sig (map-e (lambda (e)
-                         (let/ec k
-                           (send-event
-                            (hash-table-get ht (fn e) (lambda () (k (void))))
-                            e)))
-                       ev)])                             
+           [sig (for-each-e!
+                 ev
+                 (lambda (e)
+                   (let/ec k
+                     (send-event
+                      (hash-table-get ht (fn e) (lambda () (k (void))))
+                      e)))
+                 ht)])
       (lambda (x)
         sig
         (hash-table-get
@@ -682,7 +638,12 @@
       [(_ [ev k] ...)
        ()]))
   
-    ;;;;;;;;;;;;;;;;;;;;;;
+  (define fine-timer-granularity (new-cell 20))
+  
+  (define milliseconds (make-time-b fine-timer-granularity))
+  (define time-b milliseconds)
+  
+  ;;;;;;;;;;;;;;;;;;;;;;
   ;; Command Lambda 
   
   
@@ -811,11 +772,10 @@
   (provide raise-exceptions
            nothing
            nothing?
-           general-event-processor
-           general-event-processor2
+           ;general-event-processor
+           ;general-event-processor2
            emit
            select
-           event-processor
            switch
            merge-e
            once-e
@@ -841,8 +801,8 @@
            snapshot
            snapshot-e
            snapshot/apply
-           magic
            milliseconds
+           fine-timer-granularity
            seconds
            delay-by
            inf-delay
@@ -871,10 +831,9 @@
            value-now
            value-now/no-copy
            value-now/sync
-           frtime-version
            signal-count
            signal?
-           
+
            )
   )
 

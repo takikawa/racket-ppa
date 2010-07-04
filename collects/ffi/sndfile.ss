@@ -1,6 +1,6 @@
-(module sndfile mzscheme
+#lang scheme/base
 
-(require (lib "foreign.ss")) (unsafe!)
+(require mzlib/foreign) (unsafe!)
 
 (define libsndfile (ffi-lib "libsndfile"))
 
@@ -14,7 +14,7 @@
 ;; translating from c->scheme, ie. creating the object in scheme it will be
 ;; wraped by an object finilazer that uses the libsndfile fuction sf_close that
 ;; return a 0 upon sucsessfull termination or an error.
-(define-struct sndfile (ptr info))
+(define-struct sndfile (ptr [info #:mutable]))
 (define _sndfile
   (make-ctype _pointer sndfile-ptr
     (lambda (p)
@@ -149,16 +149,15 @@
        (get-ffi-obj (regexp-replaces 'name '((#rx"-" "_")))
                     libsndfile (_fun type ...)))]))
 
-(define (n-split! l n)
-  (let ([r '()])
-    (let loop ([i 0] [l (reverse! l)])
-      (unless (null? l)
-        (when (zero? i) (set! r (cons '() r)))
-        (let ([next (cdr l)])
-          (set-cdr! l (car r))
-          (set-car! r l)
-          (loop (modulo (add1 i) n) next))))
-    r))
+(define (n-split l n)
+  (let loop ([l l][i 0][a2 null][a null])
+    (cond
+     [(null? l) (let ([a (if (null? a2)
+                             a
+                             (cons (reverse a2) a))])
+                  (reverse a))]
+     [(= i n) (loop l 0 null (cons (reverse a2) a))]
+     [else (loop (cdr l) (add1 i) (cons (car l) a2) a)])))
 
 ;; ==================== sndfile API ====================
 
@@ -189,7 +188,7 @@
 
 (define (get-strings sndfile)
   (let loop ([sts str-types] [r '()])
-    (cond [(null? sts) (reverse! r)]
+    (cond [(null? sts) (reverse r)]
           [(sf-get-string sndfile (car sts)) =>
            (lambda (x)
              (loop (cdr sts) (cons (list (car sts) (string-copy x)) r)))]
@@ -216,7 +215,7 @@
          [cblock   (malloc (* frames channels) stype)]
          [num-read (readf sndfile cblock frames)]
          [data     (cblock->list cblock stype (* num-read channels))]
-         [data     (if (> channels 1) (n-split! data channels) data)])
+         [data     (if (> channels 1) (n-split data channels) data)])
     (unless (= frames num-read)
       (error 'read-sound-internal
              "wanted ~s frames, but got ~s" frames num-read))
@@ -342,5 +341,3 @@
 (provide write-sound*)
 (define (write-sound* file data meta)
   (write-sound-internal file data meta))
-
-)

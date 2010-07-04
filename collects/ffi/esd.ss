@@ -1,6 +1,6 @@
-(module esd mzscheme
+#lang scheme/base
 
-(require (lib "foreign.ss")) (unsafe!)
+(require mzlib/foreign) (unsafe!)
 
 (define libesd (ffi-lib "libesd"))
 
@@ -76,5 +76,3 @@
 (defesd* esd-sample-kill  : [_esd] _sample -> _int)
 (provide default-esd)
 (define default-esd (make-parameter (esd-open-sound) esd?))
-
-)

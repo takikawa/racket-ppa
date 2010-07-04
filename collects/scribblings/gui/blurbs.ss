@@ -1,12 +1,12 @@
-#reader(lib "reader.ss" "scribble")
-(module blurbs (lib "lang.ss" "big")
-  (require (lib "struct.ss" "scribble")
-           (lib "manual.ss" "scribble")
-           (lib "scheme.ss" "scribble")
-           (lib "decode.ss" "scribble"))
-  (require-for-label (lib "mred.ss" "mred"))
+#readerscribble/reader
+(module blurbs scheme/base
+  (require scribble/struct
+           scribble/manual
+           scribble/scheme
+           scribble/decode
+           (for-label scheme/gui/base))
 
-  (provide (all-defined-except p))
+  (provide (except-out (all-defined-out) p))
 
   (define (p . l)
     (decode-paragraph l))
@@ -160,7 +160,7 @@ information@|details|, even if the editor currently has delayed refreshing (see
                @item{@method[dc<%> end-doc]}}
       @p{Attempts to use a drawing method outside of an active page raises an exception.})))
 
-  (define reference-doc '(lib "reference.scrbl" "scribblings" "reference"))
+  (define reference-doc '(lib "scribblings/reference/reference.scrbl"))
 
   (define SeeMzParam @elem{(see @secref[#:doc reference-doc "parameters"])})
   
@@ -247,7 +247,11 @@ information@|details|, even if the editor currently has delayed refreshing (see
                    @elem{snip @techlink{position}}))
 
   (define (colorName name name2 r g b)
-    (make-element `(show-color ,r ,g ,b) (list (to-element (bytes->string/latin-1 name)))))
+    (make-element #f
+                  (list (make-element `(bg-color ,r ,g ,b)
+                                      (list (hspace 5)))
+                        (hspace 1)
+                        (bytes->string/latin-1 name))))
   
   (define (Resource s)
     @elem{@to-element[`(quote ,(string->symbol (string-append "MrEd:" s)))]

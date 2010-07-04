@@ -1,7 +1,8 @@
-(module mztext mzscheme
+#lang scheme/base
 
-(require (lib "string.ss") (lib "port.ss") (lib "pp-utils.ss" "preprocessor"))
-(provide (all-from (lib "pp-utils.ss" "preprocessor")))
+(require preprocessor/pp-utils scheme/port scheme/promise
+         (only-in mzlib/string read-from-string-all))
+(provide (all-from-out preprocessor/pp-utils))
 
 ;;=============================================================================
 ;; Composite port
@@ -90,16 +91,16 @@
   (port->adder-op (stdin) 'add args))
 
 (define port->adder-op
-  (let ([table (make-hash-table 'weak)])
+  (let ([table (make-weak-hasheq)])
     (lambda (port msg . args)
       (case msg
-        [(add) (apply (hash-table-get table port
+        [(add) (apply (hash-ref table port
                         (lambda ()
                           (error 'add-to-input
                                  "current input is not a composite port")))
                       args)]
-        [(set!) (hash-table-put! table port (car args))]
-        [(get?) (hash-table-get table port (lambda () #f))]
+        [(set!) (hash-set! table port (car args))]
+        [(get?) (hash-ref table port (lambda () #f))]
         [else (error 'port->adder-op "unknown message: ~e" msg)]))))
 
 ;;=============================================================================
@@ -113,7 +114,7 @@
 (define (dispatch dispatcher continue failure . copy?)
   (let ([m (if (and (pair? copy?) (car copy?))
              (regexp-match (car dispatcher) (stdin) 0 #f (stdout))
-             (regexp-match/fail-without-reading (car dispatcher) (stdin)))])
+             (regexp-try-match (car dispatcher) (stdin)))])
     (if m
       (ormap (lambda (x y) (and x (y x continue))) (cdr m) (cdr dispatcher))
       (failure))))
@@ -184,9 +185,9 @@
         ((if (andmap (lambda (x) (or (not x) (void? x))) vs)
            (begin (swallow-newline) cont)
            (value->cont vs cont))))))
-  (cond [(regexp-match/fail-without-reading (command-marker-here-re) (stdin))
+  (cond [(regexp-try-match (command-marker-here-re) (stdin))
          => (lambda (here) (display (car here)) (cont))]
-        [else (let ((r (read))) (do-thunk (lambda () (eval r))))]))
+        [else (let ((r (read-syntax))) (do-thunk (lambda () (eval r))))]))
 
 (provide paren-pairs)
 (define paren-pairs
@@ -232,11 +233,10 @@
    (arg-dispatcher)
    #f
    (lambda ()
-     (cond [(regexp-match/fail-without-reading
-             (if (get-arg-reads-word?) #rx"[^ \t\r\n]+" #rx"[^ \t\r\n]")
-             (stdin))
-            => car]
-           [else eof]))))
+     (let ([m (regexp-try-match
+               (if (get-arg-reads-word?) #rx"[^ \t\r\n]+" #rx"[^ \t\r\n]")
+               (stdin))])
+       (if m (car m) eof)))))
 
 (provide get-arg*)
 (define (get-arg*)
@@ -254,7 +254,7 @@
 (provide swallow-newline)
 (define (swallow-newline)
   ;; careful: if there's no match, we don't want to consume the input
-  (regexp-match/fail-without-reading #rx"^[ \t]*\r?\n" (stdin))
+  (regexp-try-match #rx"^[ \t]*\r?\n" (stdin))
   (void))
 
 (define (string->substlist args str)
@@ -271,8 +271,8 @@
       (define (sub n . m) (apply substring str n m))
       (let loop ([pos 0] [posns posns] [r '()])
         (cond [(null? posns)
-               (cons 'list (reverse! (if (= pos (string-length str))
-                                       r (cons (sub pos) r))))]
+               (cons 'list (reverse (if (= pos (string-length str))
+                                        r (cons (sub pos) r))))]
               [(= pos (caar posns))
                (loop (cdar posns) (cdr posns)
                      (cons (string->symbol (sub (caar posns) (cdar posns)))
@@ -308,7 +308,8 @@
 (define (initialize)
   (read-case-sensitive #t)
   (unless (command-marker) (command-marker "@"))
-  (namespace-require '(lib "mztext.ss" "preprocessor"))
+  (namespace-require 'scheme/base)
+  (namespace-require 'preprocessor/mztext)
   (do-evals))
 
 (define (run)
@@ -344,5 +345,3 @@
   (unless (null? files)
     (parameterize ([stdin (make-composite-input)])
       (apply include files))))
-
-)
