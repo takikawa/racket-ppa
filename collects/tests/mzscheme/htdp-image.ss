@@ -201,6 +201,32 @@
       (image=? (color-list->image (list 'blue 'blue 'blue 'blue) 2 2 0 0)
                (p00 (rectangle 2 2 'solid 'blue))))
 
+(test 10
+      'color-list8
+      (image-width (color-list->image '() 10 0 0 0)))
+
+(test 0
+      'color-list9
+      (image-height (color-list->image '() 10 0 0 0)))
+
+(test 0
+      'color-list10
+      (image-width (color-list->image '() 0 10 0 0)))
+
+(test 10
+      'color-list11
+      (image-height (color-list->image '() 0 10 0 0)))
+
+(test 3
+      'color-list12
+      (pinhole-x (color-list->image '() 10 0 3 0)))
+
+(test 3
+      'color-list13
+      (pinhole-y (color-list->image '() 0 10 0 3)))
+
+
+
 (test #t
       'alpha-color-list1
       (equal? (make-alpha-color 0 255 0 0)
@@ -277,6 +303,32 @@
               (list red  blue red
                     blue blue blue
                     red  blue red)))
+
+(test 10
+      'alpha-color-list11
+      (image-width (alpha-color-list->image '() 10 0 0 0)))
+
+(test 0
+      'alpha-color-list12
+      (image-height (alpha-color-list->image '() 10 0 0 0)))
+
+(test 0
+      'alpha-color-list13
+      (image-width (alpha-color-list->image '() 0 10 0 0)))
+
+(test 10
+      'alpha-color-list14
+      (image-height (alpha-color-list->image '() 0 10 0 0)))
+
+
+(test 3
+      'alpha-color-list15
+      (pinhole-x (alpha-color-list->image '() 10 0 3 0)))
+
+(test 3
+      'alpha-color-list16
+      (pinhole-y (alpha-color-list->image '() 0 10 0 3)))
+
 
 (test #t
       'image=?1
@@ -1021,6 +1073,10 @@
       (image? image-snip2))
 (test #t
       'bs-image=?
+      (image=? image-snip1 (send image-snip1 copy)))
+(test #f
+      'bs-image=?
+      ;; They have different masks:
       (image=? image-snip1 image-snip2))
 (test 2
       'bs-image-width

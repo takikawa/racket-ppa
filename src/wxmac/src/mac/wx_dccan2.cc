@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2008 PLT Scheme Inc.
+// Copyright:  (c) 2004-2009 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -532,6 +532,32 @@ void wxCanvasDC::DrawPoint(double x, double y)
   
   if (!current_pen || current_pen->GetStyle() == wxTRANSPARENT)
     return;
+
+  if (anti_alias) {
+    double xx, yy;
+    CGContextRef cg;
+
+    SetCurrentDC(TRUE);
+    cg = GetCG();
+
+    CGContextSaveGState(cg);
+
+    xx = SmoothingXFormX(x);
+    yy = SmoothingXFormY(y);
+
+    CGContextMoveToPoint(cg, xx, yy);
+    CGContextAddLineToPoint(cg, xx, yy);
+    
+    wxMacSetCurrentTool(kPenTool);
+    CGContextStrokePath(cg);
+    wxMacSetCurrentTool(kNoTool);
+
+    CGContextRestoreGState(cg);
+
+    ReleaseCurrentDC();
+
+    return;
+  }
 
   SetCurrentDC();
   wxMacSetCurrentTool(kPenTool);

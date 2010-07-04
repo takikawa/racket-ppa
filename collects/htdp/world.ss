@@ -471,7 +471,6 @@ Matthew
              (define dir (direction x0 y0 x1 y1))
              (define-values (upp low lft rgt) (intersections lin w h))
              (define (add x y) (add-line img x0 y0 x y c)))
-       (printf "up/low: ~s x ~s ~s\n" upp low dir)
        (cond
          [(and (< 0 x0 w) (< 0 y0 h)) ;; (x0,y0) is in the interior
           (case dir
@@ -903,9 +902,11 @@ Matthew
     (queue-callback 
      (lambda ()
        (with-handlers ([exn:break? break-handler][exn? exn-handler])
-         (set! the-world (f the-world e))
-         (add-event KEY e)
-         (redraw-callback))))))
+         (let ([new-world (f the-world e)])
+           (unless (equal? new-world the-world)
+             (set! the-world new-world)
+             (add-event KEY e)
+             (redraw-callback))))))))
 
 ;; f : [World Nat Nat MouseEventType -> World]
 ;; esp : EventSpace 
@@ -920,7 +921,7 @@ Matthew
        (when (and (<= 0 x WIDTH) (<= 0 y HEIGHT))
 	 (with-handlers ([exn:break? break-handler][exn? exn-handler])
            (let ([new-world (f the-world x y m)])
-             (unless (eq? new-world the-world)
+             (unless (equal? new-world the-world)
                (set! the-world new-world)
                (add-event MOUSE x y m)
                (redraw-callback)))))))))

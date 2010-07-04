@@ -194,9 +194,23 @@
         [#:pattern (?top . ?var)]
         [#:learn (list #'?var)])]
 
-    [(Wrap p:provide (e1 e2 rs ?1))
-     (R [! ?1]
-        [#:walk e2 'provide])]
+    [(Wrap p:provide (e1 e2 rs ?1 inners ?2))
+     (let ([wrapped-inners
+            (for/list ([inner inners])
+              (match inner
+                [(Wrap deriv (e1 e2))
+                 (make local-expansion e1 e2
+                       #f e1 inner #f e2 #f)]))])
+       (R [! ?1]
+          [#:pattern ?form]
+          [#:pass1]
+          [#:left-foot]
+          [LocalActions ?form wrapped-inners]
+          [! ?2]
+          [#:pass2]
+          [#:set-syntax e2]
+          [#:step 'provide]
+          [#:set-syntax e2]))]
 
     [(Wrap p:stop (e1 e2 rs ?1))
      (R [! ?1])]
@@ -258,7 +272,7 @@
           [#:pass1]
           [Expr ?form first]
           [#:do (when (pair? (available-lift-stxs))
-                  (error 'lift-deriv "available lifts left over"))]
+                  (lift-error 'lift-deriv "available lifts left over"))]
           [#:let begin-stx (stx-car lifted-stx)]
           [#:with-visible-form
            ;; If no lifts visible, then don't show begin-wrapping
@@ -285,7 +299,7 @@
           [#:pass1]
           [Expr ?form first]
           [#:do (when (pair? (available-lift-stxs))
-                  (error 'lift/let-deriv "available lifts left over"))]
+                  (lift-error 'lift/let-deriv "available lifts left over"))]
           [#:let visible-lifts (visible-lift-stxs)]
           [#:with-visible-form
            [#:left-foot]
@@ -374,7 +388,7 @@
          [#:pass1]
          [Expr ?form inner]
          [#:do (when (pair? (available-lift-stxs))
-                 (error 'local-expand/capture-lifts "available lifts left over"))]
+                 (lift-error 'local-expand/capture-lifts "available lifts left over"))]
          [#:let visible-lifts (visible-lift-stxs)]
          [#:with-visible-form
           [#:left-foot]
@@ -388,7 +402,7 @@
     [(struct local-lift (expr id))
      ;; FIXME: add action
      (R [#:do (unless (pair? (available-lift-stxs))
-                (error 'local-lift "out of lifts!"))
+                (lift-error 'local-lift "out of lifts!"))
               (when (pair? (available-lift-stxs))
                 (let ([lift-d (car (available-lift-stxs))]
                       [lift-stx (car (available-lift-stxs))])
@@ -562,7 +576,7 @@
           [#:pass1]
           [Expr ?firstL head]
           [#:do (when (pair? (available-lift-stxs))
-                  (error 'mod:lift "available lifts left over"))]
+                  (lift-error 'mod:lift "available lifts left over"))]
           [#:let visible-lifts (visible-lift-stxs)]
           [#:pattern ?forms]
           [#:pass2]
@@ -588,3 +602,10 @@
      (R [#:pattern (?firstC . ?rest)]
         [Expr ?firstC head]
         [ModulePass ?rest rest])]))
+
+
+;; lift-error
+(define (lift-error sym . args)
+  (apply fprintf (current-error-port) args)
+  (when #t
+    (apply error sym args)))

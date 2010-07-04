@@ -4,7 +4,7 @@
 // Author:	Bill Hale
 // Created:	1994
 // Updated:	
-// Copyright:  (c) 2004-2008 PLT Scheme Inc.
+// Copyright:  (c) 2004-2009 PLT Scheme Inc.
 // Copyright:  (c) 1993-94, AIAI, University of Edinburgh. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -2148,6 +2148,10 @@ Bool wxWindow::PopupMenu(wxMenu *menu, double x, double y)
       theWxMenuItem = (wxMenuItem*) node->Data();
       if (!theWxMenuItem) wxFatalError("No wxMenuItem for wxNode.");
       
+      if (theWxMenuItem->IsCheckable()) {
+        theWxMenuItem->Check(!theWxMenuItem->IsChecked());
+      }
+
       itemId = theWxMenuItem->itemId;
     }
   }

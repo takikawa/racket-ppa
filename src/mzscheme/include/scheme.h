@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2008 PLT Scheme Inc.
+  Copyright (c) 2004-2009 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -1197,6 +1197,7 @@ enum {
   MZCONFIG_ALLOW_SET_UNDEFINED,
   MZCONFIG_COMPILE_MODULE_CONSTS,
   MZCONFIG_USE_JIT,
+  MZCONFIG_DISALLOW_INLINE,
 
   MZCONFIG_CUSTODIAN,
   MZCONFIG_INSPECTOR,

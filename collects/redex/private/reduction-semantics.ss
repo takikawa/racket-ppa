@@ -5,14 +5,17 @@
          "term.ss"
          "loc-wrapper.ss"
 	 "error.ss"
+         mzlib/trace
          (lib "list.ss")
          (lib "etc.ss"))
 
 (require (for-syntax (lib "name.ss" "syntax")
                      "rewrite-side-conditions.ss"
                      "term-fn.ss"
+                     "underscore-allowed.ss"
                      (lib "boundmap.ss" "syntax")
-                     scheme/base))
+                     scheme/base
+                     (prefix-in pattern- scheme/match)))
 
 (define (language-nts lang)
   (hash-map (compiled-lang-ht lang) (λ (x y) x)))
@@ -440,16 +443,17 @@
                       (syntax->list (syntax (extras ...)))
                       lang-id))]
       [((rhs-arrow rhs-from rhs-to) (lhs-arrow lhs-frm-id lhs-to-id))
-       (let ([lang-nts (language-id-nts lang-id orig-name)])
+       (let* ([lang-nts (language-id-nts lang-id orig-name)]
+              [rewrite-side-conds
+               (λ (pat) (rewrite-side-conditions/check-errs lang-nts orig-name #t pat))])
          (let-values ([(names names/ellipses) (extract-names lang-nts orig-name #t (syntax rhs-from))])
            (with-syntax ([(names ...) names]
                          [(names/ellipses ...) names/ellipses]
-                         [side-conditions-rewritten (rewrite-side-conditions/check-errs
-                                                     lang-nts
-                                                     orig-name
-                                                     #t
+                         [side-conditions-rewritten (rewrite-side-conds
                                                      (rewrite-node-pat (syntax-e (syntax lhs-frm-id))
-                                                                       (syntax->datum (syntax rhs-from))))]
+                                                                       (syntax rhs-from)))]
+                         [fresh-rhs-from (rewrite-side-conds 
+                                          (freshen-names #'rhs-from #'lhs-frm-id lang-nts orig-name))]
                          [lang lang])
              (map
               (λ (child-proc)
@@ -460,30 +464,59 @@
                    (λ (bindings rhs-binder)
                      (term-let ([lhs-to-id rhs-binder]
                                 [names/ellipses (lookup-binding bindings 'names)] ...)
-                       (term rhs-to)))
-                   #,child-proc))
+                               (term rhs-to)))
+                   #,child-proc
+                   `fresh-rhs-from))
               (get-choices stx orig-name bm #'lang
                            (syntax lhs-arrow) 
                            name-table lang-id 
-                           allow-zero-rules?)))))]))  
+                           allow-zero-rules?)))))]))
   (define (rewrite-node-pat id term)
-    (let loop ([term term])
-      (cond
-        [(eq? id term) `(name ,id any)]
-        [(pair? term) (cons (loop (car term))
-                            (loop (cdr term)))]
-        [else term])))
+    (let loop ([t term])
+      (syntax-case t (side-condition)
+        [(side-condition p c)
+         #`(side-condition #,(loop #'p) c)]
+        [(p ...)
+         (map loop (syntax->list #'(p ...)))]
+        [else 
+         (if (and (identifier? t) (eq? id (syntax-e t)))
+             `(name ,id any)
+             t)])))
+  
+  (define (freshen-names pat hole-id nts what)
+    (define (fresh x)
+      (gensym
+       (if (or (memq x nts) (memq x underscore-allowed))
+           (string-append (symbol->string x) "_")
+           x)))
+    (let-values ([(bound _) (extract-names nts what #t pat #f)])
+      (let ([renames (make-bound-identifier-mapping)])
+        (for-each 
+         (λ (x)
+           (unless (bound-identifier=? x hole-id)
+             (bound-identifier-mapping-put! renames x (fresh (syntax-e x)))))
+         bound)
+        (let recur ([p pat])
+          (syntax-case p (side-condition)
+            [(side-condition p c)
+             #`(side-condition 
+                #,(recur #'p)
+                (term-let (#,@(bound-identifier-mapping-map renames (λ (x y) #`(#,x (term #,y)))))
+                          c))]
+            [(p ...)
+             #`(#,@(map recur (syntax->list #'(p ...))))]
+            [else
+             (if (identifier? p)
+                 (bound-identifier-mapping-get renames p (λ () p))
+                 p)])))))
   
   (define (do-leaf stx orig-name lang name-table from to extras lang-id)
-    (let ([lang-nts (language-id-nts lang-id orig-name)])
+    (let* ([lang-nts (language-id-nts lang-id orig-name)]
+           [rw-sc (λ (pat) (rewrite-side-conditions/check-errs lang-nts orig-name #t pat))])
       (let-values ([(name fresh-vars side-conditions/withs) (process-extras stx orig-name name-table extras)])
         (let-values ([(names names/ellipses) (extract-names lang-nts orig-name #t from)])
-          (with-syntax ([side-conditions-rewritten 
-                         (rewrite-side-conditions/check-errs 
-                          lang-nts
-                          orig-name
-                          #t
-                          from)]
+          (with-syntax ([side-conditions-rewritten (rw-sc from)]
+                        [lhs-w/extras (rw-sc #`(side-condition #,from #,(bind-withs side-conditions/withs #'#t)))]
                         [to to]
                         [name name]
                         [lang lang]
@@ -515,14 +548,15 @@
             #`(do-leaf-match
                name
                `side-conditions-rewritten
+               `lhs-w/extras
                (λ (main bindings)
                  ;; nested term-let's so that the bindings for the variables 
                  ;; show up in the `fresh' side-conditions, the bindings for the variables
                  ;; show up in the withs, and the withs show up in the 'fresh' side-conditions
                  (term-let ([names/ellipses (lookup-binding bindings 'names)] ...)
-                   (term-let (fresh-var-clauses ...)
-                     #,(bind-withs side-conditions/withs
-                                    #'(make-successful (term to))))))))))))
+                           (term-let (fresh-var-clauses ...)
+                                     #,(bind-withs side-conditions/withs
+                                                   #'(make-successful (term to))))))))))))
   
   ;; the withs and side-conditions come in backwards order
   (define (bind-withs stx body)
@@ -639,6 +673,18 @@
           (cons (format " ~s" (syntax->datum (car stxs)))
                 (loop (cdr stxs)))])))))
 
+(define (substitute from to pat)
+  (let recur ([p pat])
+    (syntax-case p (side-condition)
+      [(side-condition p c)
+       #`(side-condition #,(recur #'p) c)]
+      [(p ...)
+       #`(#,@(map recur (syntax->list #'(p ...))))]
+      [else
+       (if (and (identifier? p) (bound-identifier=? p from))
+           to
+           p)])))
+
 (define (verify-name-ok orig-name the-name)
   (unless (symbol? the-name)
     (error orig-name "expected a single name, got ~s" the-name)))
@@ -679,7 +725,12 @@
      (apply append (map reduction-relation-lws lst))
      `any)))
 
-(define (do-node-match lhs-frm-id lhs-to-id pat rhs-proc child-make-proc)
+(define (do-node-match lhs-frm-id lhs-to-id pat rhs-proc child-make-proc rhs-from)
+  (define (subst from to in)
+    (let recur ([p in])
+      (cond [(eq? from p) to]
+            [(pair? p) (map recur p)]
+            [else p])))
   ;; need call to make-rewrite-proc
   ;; also need a test case here to check duplication of names.
   (make-rewrite-proc
@@ -701,23 +752,54 @@
                                           (λ (x) (f (rhs-proc (mtch-bindings (car mtchs)) x)))
                                           acc)))]))
                other-matches)))))
-   (rewrite-proc-name child-make-proc)))
+   (rewrite-proc-name child-make-proc)
+   (subst lhs-frm-id (rewrite-proc-lhs child-make-proc) rhs-from)
+   (rewrite-proc-id child-make-proc)))
 
-(define (do-leaf-match name pat proc)
-  (make-rewrite-proc
-   (λ (lang)
-     (let ([cp (compile-pattern lang pat #t)])
-       (λ (main-exp exp f other-matches)
-         (let ([mtchs (match-pattern cp exp)])
-           (if mtchs
-               (map/mt (λ (mtch) 
-                         (let ([really-matched (proc main-exp (mtch-bindings mtch))])
-                           (and really-matched
-                                (list name (f (successful-result really-matched))))))
-                       mtchs
-                       other-matches)
-               other-matches)))))
-   name))
+(define relation-coverage (make-parameter #f))
+
+(define (cover-case id name cov)
+  (hash-update! (coverage-unwrap cov) id 
+                (λ (c) (cons (car c) (add1 (cdr c))))
+                (λ () (raise-user-error 
+                       'relation-coverage
+                       "coverage structure not initilized for this relation"))))
+
+(define (covered-cases cov)
+  (hash-map (coverage-unwrap cov) (λ (k v) v)))
+
+(define-struct coverage (unwrap))
+
+(define (fresh-coverage relation)
+  (let ([h (make-hasheq)])
+    (for-each 
+     (λ (rwp) 
+       (hash-set! h (rewrite-proc-id rwp) (cons (or (rewrite-proc-name rwp) "unnamed") 0)))
+     (reduction-relation-make-procs relation))
+    (make-coverage h)))
+
+;(define fresh-coverage (compose make-coverage make-hasheq))
+
+(define (do-leaf-match name pat w/extras proc)
+  (let ([case-id (gensym)])
+    (make-rewrite-proc
+     (λ (lang)
+       (let ([cp (compile-pattern lang pat #t)])
+         (λ (main-exp exp f other-matches)
+           (let ([mtchs (match-pattern cp exp)])
+             (if mtchs
+                 (map/mt (λ (mtch) 
+                           (let ([really-matched (proc main-exp (mtch-bindings mtch))])
+                             (and really-matched
+                                  (when (relation-coverage)
+                                    (cover-case case-id name (relation-coverage)))
+                                  (list name (f (successful-result really-matched))))))
+                         mtchs
+                         other-matches)
+                 other-matches)))))
+     name
+     w/extras
+     case-id)))
 
 (define-syntax (test-match stx)
   (syntax-case stx ()
@@ -758,7 +840,7 @@
                           (symbol->string (bind-name y))))))
 
 (define-values (struct:metafunc-proc make-metafunc-proc metafunc-proc? metafunc-proc-ref metafunc-proc-set!)
-  (make-struct-type 'metafunc-proc #f 9 0 #f null (current-inspector) 0))
+  (make-struct-type 'metafunc-proc #f 10 0 #f null (current-inspector) 0))
 (define metafunc-proc-pict-info (make-struct-field-accessor metafunc-proc-ref 1))
 (define metafunc-proc-lang (make-struct-field-accessor metafunc-proc-ref 2))
 (define metafunc-proc-multi-arg? (make-struct-field-accessor metafunc-proc-ref 3))
@@ -767,6 +849,7 @@
 (define metafunc-proc-rhss (make-struct-field-accessor metafunc-proc-ref 6))
 (define metafunc-proc-in-dom? (make-struct-field-accessor metafunc-proc-ref 7))
 (define metafunc-proc-dom-pat (make-struct-field-accessor metafunc-proc-ref 8))
+(define metafunc-proc-lhs-pats (make-struct-field-accessor metafunc-proc-ref 9))
 (define-struct metafunction (proc))
 
 (define-syntax (in-domain? stx)
@@ -937,7 +1020,8 @@
                                cps
                                rhss
                                (let ([name (lambda (x) (name-predicate x))]) name)
-                               `dom-side-conditions-rewritten))
+                               `dom-side-conditions-rewritten
+                               `(side-conditions-rewritten ...)))
                             `dom-side-conditions-rewritten
                             `codom-side-conditions-rewritten
                             'name))
@@ -991,25 +1075,35 @@
            
   (define (check-clauses stx syn-error-name rest)
     (syntax-case rest ()
-      [([(lhs ...) roc ...] ...)
+      [([(lhs ...) roc1 roc2 ...] ...)
        rest]
+      [([(lhs ...) rhs ...] ...)
+       (begin
+         (for-each 
+          (λ (clause)
+            (syntax-case clause ()
+              [(a b) (void)]
+              [x (raise-syntax-error syn-error-name "expected a pattern and a right-hand side" stx clause)]))
+          (syntax->list #'([(lhs ...) rhs ...] ...)))
+         (raise-syntax-error syn-error-name "error checking failed.3" stx))]
       [([x roc ...] ...)
-       (for-each 
-        (λ (x)
-          (syntax-case x ()
-            [(lhs ...) (void)]
-            [x (raise-syntax-error syn-error-name "expected a function prototype" stx #'x)]))
-        (syntax->list #'(x ...)))
-       (raise-syntax-error syn-error-name "error checking failed.1" stx)]
+       (begin
+         (for-each 
+          (λ (x)
+            (syntax-case x ()
+              [(lhs ...) (void)]
+              [x (raise-syntax-error syn-error-name "expected a function prototype" stx #'x)]))
+          (syntax->list #'(x ...)))
+         (raise-syntax-error syn-error-name "error checking failed.1" stx))]
       [(x ...)
-       (for-each 
-        (λ (x)
-          (syntax-case x ()
-            [(stuff ...) (void)]
-            [x (raise-syntax-error syn-error-name "expected a metafunction clause" stx #'x)]))
-        (syntax->list #'(x ...)))
-       (raise-syntax-error syn-error-name "error checking failed.2" stx)]))
-        
+       (begin
+         (for-each 
+          (λ (x)
+            (syntax-case x ()
+              [(stuff ...) (void)]
+              [x (raise-syntax-error syn-error-name "expected a metafunction clause" stx #'x)]))
+          (syntax->list #'(x ...)))
+         (raise-syntax-error syn-error-name "error checking failed.2" stx))]))
   
   (define (extract-side-conditions name stx stuffs)
     (let loop ([stuffs (syntax->list stuffs)]
@@ -1054,7 +1148,7 @@
                 (λ (exp)
                   (let ([cache-ref (hash-ref cache exp not-in-cache)])
                     (cond
-                      [(eq? cache-ref not-in-cache)
+                      [(or (not (caching-enabled?)) (eq? cache-ref not-in-cache))
                        (when dom-compiled-pattern
                          (unless (match-pattern dom-compiled-pattern exp)
                            (redex-error name
@@ -1082,20 +1176,31 @@
                                                 `(,name ,@exp)
                                                 (length mtchs))]
                                   [else
-                                   (let ([ans (rhs metafunc (mtch-bindings (car mtchs)))])
+                                   (let ([ans (rhs traced-metafunc (mtch-bindings (car mtchs)))])
                                      (unless (match-pattern codom-compiled-pattern ans)
                                        (redex-error name "codomain test failed for ~s, call was ~s" ans `(,name ,@exp)))
                                      (hash-set! cache exp ans)
                                      ans)])))]))]
                       [else 
-                       cache-ref])))])
-        metafunc)
+                       cache-ref])))]
+               [ot (current-trace-print-args)]
+               [traced-metafunc (lambda (exp)
+                                  (if (or (eq? (current-traced-metafunctions) 'all)
+                                          (memq name (current-traced-metafunctions)))
+                                      (parameterize ([current-trace-print-args
+                                                      (λ (name args kws kw-args level)
+                                                        (ot name (car args) kws kw-args level))])
+                                        (trace-apply name metafunc '() '() exp))
+                                      (metafunc exp)))])
+        traced-metafunc)
       compiled-patterns
       rhss)
      (if dom-compiled-pattern
          (λ (exp) (and (match-pattern dom-compiled-pattern exp) #t))
          (λ (exp) (and (ormap (λ (pat) (match-pattern pat exp)) compiled-patterns) 
                        #t))))))
+
+(define current-traced-metafunctions (make-parameter '()))
 
 (define-syntax (metafunction-form stx)
   (syntax-case stx ()
@@ -1706,6 +1811,7 @@
          (rename-out [metafunction-form metafunction])
          metafunction? metafunction-proc
          in-domain?
+         current-traced-metafunctions
          metafunc-proc-lang
          metafunc-proc-pict-info
          metafunc-proc-name
@@ -1714,6 +1820,7 @@
          metafunc-proc-rhss
          metafunc-proc-in-dom?
          metafunc-proc-dom-pat
+         metafunc-proc-lhs-pats
          
          (struct-out binds))
 
@@ -1736,3 +1843,8 @@
          apply-reduction-relation*
          variable-not-in
          variables-not-in)
+
+(provide relation-coverage
+         covered-cases
+         (rename-out [fresh-coverage make-coverage])
+         coverage?)

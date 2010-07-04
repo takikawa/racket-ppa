@@ -3,7 +3,37 @@
 
 (Section 'sandbox)
 
-(require mzlib/sandbox)
+(require scheme/sandbox)
+
+;; test call-in-nested-thread*
+(let ()
+  (define (kill) (kill-thread (current-thread)))
+  (define (shut) (custodian-shutdown-all (current-custodian)))
+  (define-syntax-rule (nested body ...)
+    (call-in-nested-thread* (lambda () body ...)))
+  (define-syntax-rule (nested* body ...)
+    (call-in-nested-thread* (lambda () body ...)
+                            (lambda () 'kill)
+                            (lambda () 'shut)))
+  (test 1 values (nested 1))
+  ;; propagates parameters
+  (let ([p (make-parameter #f)])
+    (nested (p 1))
+    (test 1 p)
+    (with-handlers ([void void]) (nested (p 2) (error "foo") (p 3)))
+    (test 2 p))
+  ;; propagates kill-thread
+  (test (void) thread-wait
+        (thread (lambda ()
+                  (nested (kill))
+                  ;; never reach here
+                  (semaphore-wait (make-semaphore 0)))))
+  ;; propagates custodian-shutdown-all
+  (test (void) values
+        (parameterize ([current-custodian (make-custodian)]) (nested (shut))))
+  ;; test handlers parameters
+  (test 'kill (lambda () (nested* (kill))))
+  (test 'shut (lambda () (nested* (shut)))))
 
 (let ([ev void])
   (define (run thunk)
@@ -44,13 +74,13 @@
 
    ;; basic stuff, limits
    --top--
-   (set! ev (make-evaluator 'mzscheme '()
+   (set! ev (make-evaluator 'scheme/base
               (make-prog "(define x 1)"
                          "(define (id x) x)"
                          "(define (plus1 x) x)"
                          "(define (loop) (loop))"
                          "(define (memory x) (make-vector x))")))
-   (set-eval-limits ev 1 3)
+   (set-eval-limits ev 0.5 5)
    --eval--
    x => 1
    (id 1) => 1
@@ -72,7 +102,7 @@
    (loop) =err> "out of time"
    --top--
    (when (custodian-memory-accounting-available?)
-     (t --eval-- (memory 1000000) =err> "out of memory"))
+     (t --eval-- (memory 3000000) =err> "out of memory"))
    ;; test parameter settings (tricky to get this right since
    ;; with-limits runs stuff in a different thread)
    (set-eval-limits ev #f #f)
@@ -100,19 +130,37 @@
    (thread (lambda () (sleep 1) (break-evaluator ev)))
    --eval--
    (sleep 2) =err> "user break"
+   (printf "x = ~s\n" x) => (void)
    ;; termination
    --eval--
-   (printf "x = ~s\n" x) => (void)
-   ,eof =err> "terminated"
-   x =err> "terminated"
-   ,eof =err> "terminated"
+   ,eof =err> "terminated .eof.$"
+   123  =err> "terminated .eof.$"
+   ,eof =err> "terminated .eof.$"
+
+   ;; other termination messages
+   --top-- (set! ev (make-evaluator 'scheme/base)) (kill-evaluator ev)
+   --eval-- 123 =err> "terminated .evaluator-killed.$"
+
+   ;; eval-limits apply to the sandbox creation too
+   --top--
+   (set! ev (parameterize ([sandbox-eval-limits '(0.25 5)])
+              (make-evaluator 'scheme/base '(sleep 2))))
+   =err> "out of time"
+   (when (custodian-memory-accounting-available?)
+     (t --top--
+        (set! ev (parameterize ([sandbox-eval-limits '(2 2)])
+                   (make-evaluator 'scheme/base
+                                   '(define a (for/list ([i (in-range 10)])
+                                                (collect-garbage)
+                                                (make-bytes 500000))))))
+        =err> "out of memory"))
 
    ;; i/o
    --top--
    (set! ev (parameterize ([sandbox-input "3\n"]
                            [sandbox-output 'string]
                            [sandbox-error-output current-output-port])
-              (make-evaluator 'mzscheme '() '(define x 123))))
+              (make-evaluator 'scheme/base '(define x 123))))
    --eval-- (printf "x = ~s\n" x) => (void)
    --top--  (get-output ev) => "x = 123\n"
    --eval-- (printf "x = ~s\n" x) => (void)
@@ -128,7 +176,7 @@
    --top--
    (set! ev (parameterize ([sandbox-output 'string]
                            [sandbox-error-output 'string])
-              (make-evaluator 'mzscheme '())))
+              (make-evaluator 'scheme/base)))
    --eval-- (begin (printf "a\n") (fprintf (current-error-port) "b\n"))
    --top--  (get-output ev) => "a\n"
             (get-error-output ev) => "b\n"
@@ -137,7 +185,7 @@
                            [sandbox-output 'bytes]
                            [sandbox-error-output current-output-port]
                            [sandbox-eval-limits '(0.25 10)])
-              (make-evaluator 'mzscheme '() '(define x 123))))
+              (make-evaluator 'scheme/base '(define x 123))))
    --eval--  (begin (printf "x = ~s\n" x)
                     (fprintf (current-error-port) "err\n"))
    --top--   (get-output ev) => #"x = 123\nerr\n"
@@ -156,14 +204,14 @@
    --top--
    (kill-evaluator ev) => (void)
    --eval--
-   x =err> "terminated"
-   y =err> "terminated"
-   ,eof =err> "terminated"
+   x =err> "terminated .evaluator-killed.$"
+   y =err> "terminated .evaluator-killed.$"
+   ,eof =err> "terminated .evaluator-killed.$"
    --top--
    (let-values ([(i1 o1) (make-pipe)] [(i2 o2) (make-pipe)])
      ;; o1 -> i1 -ev-> o2 -> i2
      (set! ev (parameterize ([sandbox-input i1] [sandbox-output o2])
-                (make-evaluator 'mzscheme '() '(define x 123))))
+                (make-evaluator 'scheme/base '(define x 123))))
      (t --eval-- (printf "x = ~s\n" x) => (void)
         --top--  (read-line i2) => "x = 123"
         --eval-- (printf "x = ~s\n" x) => (void)
@@ -179,126 +227,163 @@
 
    ;; sexprs as a program
    --top--
-   (set! ev (make-evaluator 'mzscheme '() '(define id (lambda (x) x))))
+   (set! ev (make-evaluator 'scheme/base '(define id (lambda (x) x))))
    --eval--
    (id 123) => 123
    --top--
-   (set! ev (make-evaluator 'mzscheme '() '(define id (lambda (x) x))
-                                          '(define fooo 999)))
+   (set! ev (make-evaluator 'scheme/base '(define id (lambda (x) x))
+                                         '(define fooo 999)))
    --eval--
    (id fooo) => 999
 
    ;; test source locations too
    --top--
-   (make-evaluator 'mzscheme '() 0 1 2 '(define foo))
+   (make-evaluator 'scheme/base 0 1 2 '(define foo))
      =err> "program:4:0: define"
 
    ;; empty program for clean repls
    --top--
-   (set! ev (make-evaluator '(begin) '()))
+   (set! ev (make-evaluator '(begin)))
    --eval--
    (define x (+ 1 2 3)) => (void)
    x => 6
    (define x (+ x 10)) => (void)
    x => 16
    --top--
-   (set! ev (make-evaluator 'mzscheme '()))
+   (set! ev (make-evaluator 'scheme/base))
    --eval--
    (define x (+ 1 2 3)) => (void)
    x => 6
    (define x (+ x 10)) => (void)
    x => 16
    --top--
-   (set! ev (make-evaluator 'mzscheme '() '(define x (+ 1 2 3))))
+   (set! ev (make-evaluator 'scheme/base '(define x (+ 1 2 3))))
    --eval--
    (define x (+ x 10)) =err> "cannot re-define a constant"
 
    ;; whole program argument
    --top--
-   (set! ev (make-evaluator '(module foo mzscheme (define x 1))))
+   (set! ev (make-module-evaluator '(module foo scheme/base (define x 1))))
    --eval--
    x => 1
    --top--
-   (set! ev (make-evaluator '(module foo mzscheme (provide x) (define x 1))))
+   (set! ev (make-module-evaluator
+             '(module foo scheme/base (provide x) (define x 1))))
    --eval--
    x => 1
    (define x 2) =err> "cannot re-define a constant"
 
    ;; limited FS access, allowed for requires
    --top--
-   (let* ([tmp      (find-system-path 'temp-dir)]
-          [mzlib    (path->string (collection-path "mzlib"))]
-          [list-lib (path->string (build-path mzlib "list.ss"))]
-          [test-lib (path->string (build-path tmp "sandbox-test.ss"))])
-       (t --top--
-          (set! ev (make-evaluator 'mzscheme '()))
-          --eval--
-          ;; reading from collects is allowed
-          (list (directory-list ,mzlib))
-          (file-exists? ,list-lib) => #t
-          (input-port? (open-input-file ,list-lib)) => #t
-          ;; writing is forbidden
-          (open-output-file ,list-lib) =err> "`write' access denied"
-          ;; reading from other places is forbidden
-          (directory-list ,tmp) =err> "`read' access denied"
-          ;; no network too
-          (tcp-listen 12345) =err> "network access denied"
-          --top--
-          ;; reading from a specified require is fine
-          (with-output-to-file test-lib
-            (lambda ()
-              (printf "~s\n" '(module sandbox-test mzscheme
-                                (define x 123) (provide x))))
-            #:exists 'replace)
-          (set! ev (make-evaluator 'mzscheme `(,test-lib)))
-          --eval--
-          x => 123
-          (length (with-input-from-file ,test-lib read)) => 5
-          ;; the directory is still not kosher
-          (directory-list ,tmp) =err> "`read' access denied"
-          --top--
-          ;; should work also for module evaluators
-          ;; --> NO!  Shouldn't make user code require whatever it wants
-          ;; (set! ev (make-evaluator `(module foo mzscheme
-          ;;                             (require (file ,test-lib)))))
-          ;; --eval--
-          ;; x => 123
-          ;; (length (with-input-from-file ,test-lib read)) => 5
-          ;; ;; the directory is still not kosher
-          ;; (directory-list tmp) =err> "file access denied"
-          --top--
-          ;; explicitly allow access to tmp
-          (set! ev (parameterize ([sandbox-path-permissions
-                                   `((read ,tmp)
-                                     ,@(sandbox-path-permissions))])
-                     (make-evaluator 'mzscheme '())))
-          --eval--
-          (length (with-input-from-file ,test-lib read)) => 5
-          (list? (directory-list ,tmp))
-          (open-output-file ,(build-path tmp "blah")) =err> "access denied"
-          (delete-directory ,(build-path tmp "blah")) =err> "access denied")
-       (delete-file test-lib))
+   (let* ([tmp       (make-temporary-file "sandboxtest~a" 'directory)]
+          [strpath   (lambda xs (path->string (apply build-path xs)))]
+          [schemelib (strpath (collection-path "scheme"))]
+          [list-lib  (strpath schemelib "list.ss")]
+          [list-zo   (strpath schemelib "compiled" "list_ss.zo")]
+          [test-lib  (strpath tmp "sandbox-test.ss")]
+          [test-zo   (strpath tmp "compiled" "sandbox-test_ss.zo")]
+          [test2-lib (strpath tmp "sandbox-test2.ss")]
+          [test2-zo  (strpath tmp "compiled" "sandbox-test2_ss.zo")])
+     (t --top--
+        (set! ev (make-evaluator 'scheme/base))
+        --eval--
+        ;; reading from collects is allowed
+        (list? (directory-list ,schemelib))
+        (file-exists? ,list-lib) => #t
+        (input-port? (open-input-file ,list-lib)) => #t
+        ;; writing is forbidden
+        (open-output-file ,list-lib) =err> "`write' access denied"
+        ;; reading from other places is forbidden
+        (directory-list ,tmp) =err> "`read' access denied"
+        ;; no network too
+        (require scheme/tcp)
+        (tcp-listen 12345) =err> "network access denied"
+        --top--
+        ;; reading from a specified require is fine
+        (with-output-to-file test-lib
+          (lambda ()
+            (printf "~s\n" '(module sandbox-test scheme/base
+                              (define x 123) (provide x)))))
+        (set! ev (make-evaluator 'scheme/base #:requires `(,test-lib)))
+        --eval--
+        x => 123
+        (length (with-input-from-file ,test-lib read)) => 5
+        ;; the directory is still not kosher
+        (directory-list ,tmp) =err> "`read' access denied"
+        --top--
+        ;; should work also for module evaluators
+        ;; --> NO!  Shouldn't make user code require whatever it wants
+        ;; (set! ev (make-evaluator `(module foo scheme/base
+        ;;                             (require (file ,test-lib)))))
+        ;; --eval--
+        ;; x => 123
+        ;; (length (with-input-from-file ,test-lib read)) => 5
+        ;; ;; the directory is still not kosher
+        ;; (directory-list tmp) =err> "file access denied"
+        --top--
+        ;; explicitly allow access to tmp, and write access to a single file
+        (make-directory (build-path tmp "compiled"))
+        (set! ev (parameterize ([sandbox-path-permissions
+                                 `((read ,tmp)
+                                   (write ,test-zo)
+                                   ,@(sandbox-path-permissions))])
+                   (make-evaluator 'scheme/base)))
+        --eval--
+        (length (with-input-from-file ,test-lib read)) => 5
+        (list? (directory-list ,tmp))
+        (open-output-file ,(build-path tmp "blah")) =err> "access denied"
+        (delete-directory ,(build-path tmp "blah")) =err> "access denied"
+        (list? (directory-list ,schemelib))
+        ;; we can read/write/delete list-zo, but we can't load bytecode from
+        ;; it due to the code inspector
+        (copy-file ,list-zo ,test-zo) => (void)
+        (copy-file ,test-zo ,list-zo) =err> "access denied"
+        (load/use-compiled ,test-lib) => (void)
+        (require 'list) =err> "access from an uncertified context"
+        (delete-file ,test-zo) => (void)
+        (delete-file ,test-lib) =err> "`delete' access denied"
+        --top--
+        ;; a more explicit test of bytcode loading, allowing rw access to the
+        ;; complete tmp directory, but read-bytecode only for test2-lib
+        (set! ev (parameterize ([sandbox-path-permissions
+                                 `((write ,tmp)
+                                   (read-bytecode ,test2-lib)
+                                   ,@(sandbox-path-permissions))])
+                   (make-evaluator 'scheme/base)))
+        --eval--
+        (define (cp from to)
+          (when (file-exists? to) (delete-file to))
+          (copy-file from to))
+        (cp ,list-lib ,test-lib)  (cp ,list-zo ,test-zo)
+        (cp ,list-lib ,test2-lib) (cp ,list-zo   ,test2-zo)
+        ;; bytecode from test-lib is bad, even when we can read/write to it
+        (load/use-compiled ,test-zo)
+        (require 'list) =err> "access from an uncertified context"
+        ;; bytecode from test2-lib is explicitly allowed
+        (load/use-compiled ,test2-lib)
+        (require 'list) => (void))
+     ((dynamic-require 'scheme/file 'delete-directory/files) tmp))
 
    ;; languages and requires
    --top--
-   (set! ev (make-evaluator 'r5rs '() "(define x (eq? 'x 'X))"))
+   (set! ev (make-evaluator '(special r5rs) "(define x (eq? 'x 'X))"))
    --eval--
    x => #t
    --top--
-   (set! ev (make-evaluator 'mzscheme '() "(define l null)"))
+   (set! ev (make-evaluator 'scheme/base "(define l null)"))
    --eval--
    (cond [null? l 0]) => 0
    (last-pair l) =err> "reference to an identifier"
    --top--
-   (set! ev (make-evaluator 'beginner '() (make-prog "(define l null)"
-                                                     "(define x 3.5)")))
+   (set! ev (make-evaluator '(special beginner)
+                            (make-prog "(define l null)" "(define x 3.5)")))
    --eval--
    (cond [null? l 0]) =err> "expected an open parenthesis"
    --top--
    (eq? (ev "6") (ev "(sub1 (* 2 3.5))"))
    (eq? (ev "6") (ev "(sub1 (* 2 x))"))
    --top--
-   (set! ev (make-evaluator 'mzscheme '(mzlib/list) '()))
+   (set! ev (make-evaluator 'scheme/base #:requires '(scheme/list)))
    --eval--
    (last-pair '(1 2 3)) => '(3)
    (last-pair null) =err> "expected argument of type"
@@ -306,7 +391,7 @@
    ;; coverage
    --top--
    (set! ev (parameterize ([sandbox-coverage-enabled #t])
-              (make-evaluator 'mzscheme '()
+              (make-evaluator 'scheme/base
                               (make-prog "(define (foo x) (+ x 1))"
                                          "(define (bar x) (+ x 2))"
                                          "(equal? (foo 3) 4)"))))
@@ -327,12 +412,92 @@
                                 (old)
                                 (compile-enforce-module-constants #f)
                                 (compile-allow-set!-undefined #t)))])
-              (make-evaluator 'mzscheme '() '(define x 123))))
+              (make-evaluator 'scheme/base '(define x 123))))
    --eval--
    (set! x 456) ; would be an error without the `enforce' parameter
    x => 456
    (set! y 789) ; would be an error without the `set!' parameter
    y => 789
+
+   ;; test that output is also collected under the limit
+   --top--
+   (set! ev (parameterize ([sandbox-output 'bytes]
+                           [sandbox-error-output current-output-port]
+                           [sandbox-memory-limit 2]
+                           [sandbox-eval-limits '(0.25 1)])
+              (make-evaluator 'scheme/base)))
+   ;; GCing is needed to allow these to happen (note: the memory limit is very
+   ;; tight here, this test usually fails if the sandbox library is not
+   ;; compiled)
+   (let ([t (lambda ()
+              (t --eval-- (display (make-bytes 400000 65)) (collect-garbage)
+                 --top--  (bytes-length (get-output ev)) => 400000))])
+     ;; can go arbitrarily high here
+     (for ([i (in-range 20)]) (t)))
+
+   ;; test that killing the custodian works fine
+   ;; first try it without limits (limits imply a nested thread/custodian)
+   --top--
+   (set! ev (parameterize ([sandbox-eval-limits #f])
+              (make-evaluator 'scheme/base)))
+   --eval--
+   (kill-thread (current-thread)) =err> "terminated .thread-killed.$"
+   --top--
+   (set! ev (parameterize ([sandbox-eval-limits #f])
+              (make-evaluator 'scheme/base)))
+   --eval--
+   (custodian-shutdown-all (current-custodian))
+   =err> "terminated .custodian-shutdown.$"
+   --top--
+   ;; also happens when it's done directly
+   (set! ev (parameterize ([sandbox-eval-limits #f])
+              (make-evaluator 'scheme/base)))
+   (call-in-sandbox-context ev (lambda () (kill-thread (current-thread))))
+   =err> "terminated .thread-killed.$"
+   (set! ev (parameterize ([sandbox-eval-limits #f])
+              (make-evaluator 'scheme/base)))
+   (call-in-sandbox-context ev
+     (lambda () (custodian-shutdown-all (current-custodian))))
+   =err> "terminated .custodian-shutdown.$"
+   --top--
+   ;; now make sure it works with per-expression limits too
+   (set! ev (make-evaluator 'scheme/base))
+   --eval--
+   (kill-thread (current-thread)) =err> "terminated .thread-killed.$"
+   --top--
+   (set! ev (make-evaluator 'scheme/base))
+   --eval--
+   (custodian-shutdown-all (current-custodian))
+   =err> "terminated .custodian-shutdown.$"
+   --top--
+   (set! ev (make-evaluator 'scheme/base))
+   (call-in-sandbox-context ev (lambda () (kill-thread (current-thread))))
+   =err> "terminated .thread-killed.$"
+   (set! ev (make-evaluator 'scheme/base))
+   (call-in-sandbox-context ev
+     (lambda () (custodian-shutdown-all (current-custodian))))
+   =err> "terminated .custodian-shutdown.$"
+
+   ;; when an expression is out of memory, the sandbox should stay alive
+   --top--
+   (when (custodian-memory-accounting-available?)
+     (t --top--
+        (set! ev (parameterize ([sandbox-eval-limits '(2 5)]
+                                [sandbox-memory-limit 100])
+                   (make-evaluator 'scheme/base)))
+        --eval--
+        (define a '())
+        (define b 1)
+        (length
+         (for/fold ([v null]) ([i (in-range 20)])
+           ;; increases size of sandbox: it's reachable from it (outside of
+           ;; this evaluation) because `a' is defined there
+           (set! a (cons (make-bytes 500000) a))
+           (collect-garbage)
+           ;; increases size of the current evaluation
+           (cons (make-bytes 500000) v)))
+        =err> "out of memory"
+        b => 1))
 
    ))
 

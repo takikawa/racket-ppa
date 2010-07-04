@@ -3,6 +3,8 @@
 
 @title[#:tag "parameters"]{Parameters}
 
+@guideintro["parameterize"]{parameters}
+
 See @secref["parameter-model"] for basic information on the
 parameter model. Parameters correspond to @defterm{preserved thread
 fluids} in Scsh @cite["Gasbichler02"].
@@ -43,7 +45,11 @@ reject a change to the parameter's value. The @scheme[guard] is not
 applied to the initial @scheme[v].}
 
 @defform[(parameterize ((parameter-expr value-expr) ...)
-           body ...+)]{
+           body ...+)
+         #:contracts
+         ([parameter-expr parameter?])]{
+
+@guideintro["parameterize"]{@scheme[parameterize]}
 
 The result of a @scheme[parameterize] expression is the result of the
 last @scheme[body]. The @scheme[parameter-expr]s determine the
@@ -120,7 +126,7 @@ is the same as a nested series of single-parameter @scheme[parameterize]
 forms.}
 
 
-@defproc[(make-derived-parameter [v any/c]
+@defproc[(make-derived-parameter [parameter parameter?]
                                  [guard (any/c . -> . any)]
                                  [wrap (any/c . -> . any)])
          parameter?]{

@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2008 PLT Scheme Inc.
+  Copyright (c) 2004-2009 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -1977,20 +1977,28 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
 	    src = obj;
 
 	  if (SAME_OBJ(src, obj)) {
+            int l;
+            const char *s;
+            Scheme_Object *name;
+
 	    print_utf8_string(pp, "#<", 0, 2); /* used to have "struct:" prefix */
-	    {
-	      int l;
-	      const char *s;
-	      Scheme_Object *name = SCHEME_STRUCT_NAME_SYM(obj);
-	      
-	      s = scheme_symbol_name_and_size(name, (unsigned int *)&l, 
-					      (pp->print_struct
-					       ? SCHEME_SNF_FOR_TS
-					       : (pp->can_read_pipe_quote 
-						  ? SCHEME_SNF_PIPE_QUOTE
-						  : SCHEME_SNF_NO_PIPE_QUOTE)));
-	      print_utf8_string(pp, s, 0, l);
-	    }
+            if (scheme_reduced_procedure_struct
+                && scheme_is_struct_instance(scheme_reduced_procedure_struct, obj)) {
+              /* Since scheme_proc_struct_name_source() didn't redirect, this one
+                 must have a name. */
+              print_utf8_string(pp, "procedure:", 0, 10);
+              name = ((Scheme_Structure *)obj)->slots[2];
+            } else {
+	      name = SCHEME_STRUCT_NAME_SYM(obj);
+            }
+
+            s = scheme_symbol_name_and_size(name, (unsigned int *)&l, 
+                                            (pp->print_struct
+                                             ? SCHEME_SNF_FOR_TS
+                                             : (pp->can_read_pipe_quote 
+                                                ? SCHEME_SNF_PIPE_QUOTE
+                                                : SCHEME_SNF_NO_PIPE_QUOTE)));
+            print_utf8_string(pp, s, 0, l);
 	    PRINTADDRESS(pp, obj);
 	    print_utf8_string(pp, ">", 0, 1);
 	  } else {
@@ -2358,8 +2366,7 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
         symtab_set(pp, mt, obj);
       }
     }
-  else if (compact && SAME_TYPE(SCHEME_TYPE(obj), scheme_module_variable_type)
-	   && !((Module_Variable *)obj)->mod_phase)
+  else if (compact && SAME_TYPE(SCHEME_TYPE(obj), scheme_module_variable_type))
     {
       Scheme_Object *idx;
 
@@ -2378,7 +2385,11 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
           print(mv->modidx, notdisplay, 1, ht, mt, pp);
         }
 	print(mv->sym, notdisplay, 1, ht, mt, pp);
-	print_compact_number(pp, mv->pos);
+        if (((Module_Variable *)obj)->mod_phase) {
+          /* mod_phase must be 1 */
+          print_compact_number(pp, -2);
+        }
+        print_compact_number(pp, mv->pos);
 
         symtab_set(pp, mt, obj);
       }

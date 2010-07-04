@@ -2,6 +2,8 @@
 #lang scheme/base
 (require scheme/class
          framework/framework
+         "interfaces.ss"
+         "../syntax-browser/prefs.ss"
          "../util/notify.ss"
          "../util/misc.ss")
 (provide macro-stepper-config-base%
@@ -24,13 +26,13 @@
 (preferences:set-default 'MacroStepper:ExtraNavigation? #f boolean?)
 (preferences:set-default 'MacroStepper:DebugCatchErrors? #t boolean?)
 (preferences:set-default 'MacroStepper:ForceLetrecTransformation? #f boolean?)
+(preferences:set-default 'MacroStepper:SplitContext? #f boolean?)
 
 (pref:get/set pref:width MacroStepper:Frame:Width)
 (pref:get/set pref:height MacroStepper:Frame:Height)
 (pref:get/set pref:props-shown? MacroStepper:PropertiesShown?)
 (pref:get/set pref:props-percentage MacroStepper:PropertiesPanelPercentage)
 (pref:get/set pref:macro-hiding-mode MacroStepper:MacroHidingMode)
-(pref:get/set pref:show-syntax-properties? MacroStepper:ShowSyntaxProperties?)
 (pref:get/set pref:show-hiding-panel? MacroStepper:ShowHidingPanel?)
 (pref:get/set pref:identifier=? MacroStepper:IdentifierComparison)
 (pref:get/set pref:highlight-foci? MacroStepper:HighlightFoci?)
@@ -41,15 +43,11 @@
 (pref:get/set pref:extra-navigation? MacroStepper:ExtraNavigation?)
 (pref:get/set pref:debug-catch-errors? MacroStepper:DebugCatchErrors?)
 (pref:get/set pref:force-letrec-transformation? MacroStepper:ForceLetrecTransformation?)
+(pref:get/set pref:split-context? MacroStepper:SplitContext?)
 
 (define macro-stepper-config-base%
-  (class object%
-    (notify-methods width)
-    (notify-methods height)
-    (notify-methods props-shown?)
-    (notify-methods props-percentage)
+  (class* syntax-prefs-base% (config<%>)
     (notify-methods macro-hiding-mode)
-    (notify-methods show-syntax-properties?)
     (notify-methods show-hiding-panel?)
     (notify-methods identifier=?)
     (notify-methods highlight-foci?)
@@ -60,16 +58,16 @@
     (notify-methods extra-navigation?)
     (notify-methods debug-catch-errors?)
     (notify-methods force-letrec-transformation?)
+    (notify-methods split-context?)
     (super-new)))
 
 (define macro-stepper-config/prefs%
   (class macro-stepper-config-base%
     (connect-to-pref width pref:width)
     (connect-to-pref height pref:height)
-    (connect-to-pref props-shown? pref:props-shown?)
     (connect-to-pref props-percentage pref:props-percentage)
+    (connect-to-pref props-shown? pref:props-shown?)
     (connect-to-pref macro-hiding-mode pref:macro-hiding-mode)
-    (connect-to-pref show-syntax-properties? pref:show-syntax-properties?)
     (connect-to-pref show-hiding-panel? pref:show-hiding-panel?)
     (connect-to-pref identifier=? pref:identifier=?)
     (connect-to-pref highlight-foci? pref:highlight-foci?)
@@ -80,6 +78,7 @@
     (connect-to-pref extra-navigation? pref:extra-navigation?)
     (connect-to-pref debug-catch-errors? pref:debug-catch-errors?)
     (connect-to-pref force-letrec-transformation? pref:force-letrec-transformation?)
+    (connect-to-pref split-context? pref:split-context?)
     (super-new)))
 
 (define macro-stepper-config/prefs/readonly%
@@ -88,7 +87,6 @@
     (connect-to-pref/readonly height pref:height)
     (connect-to-pref/readonly macro-hiding-mode pref:macro-hiding-mode)
     (connect-to-pref/readonly props-percentage pref:props-percentage)
-    (connect-to-pref/readonly show-syntax-properties? pref:show-syntax-properties?)
     (connect-to-pref/readonly show-hiding-panel? pref:show-hiding-panel?)
     (connect-to-pref/readonly identifier=? pref:identifier=?)
     (connect-to-pref/readonly highlight-foci? pref:highlight-foci?)
@@ -99,4 +97,5 @@
     (connect-to-pref/readonly extra-navigation? pref:extra-navigation?)
     (connect-to-pref/readonly debug-catch-errors? pref:debug-catch-errors?)
     (connect-to-pref/readonly force-letrec-transformation? pref:force-letrec-transformation?)
+    (connect-to-pref/readonly split-context? pref:split-context?)
     (super-new)))

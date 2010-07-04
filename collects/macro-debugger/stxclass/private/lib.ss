@@ -14,11 +14,11 @@
 
 (define-syntax-rule (define-pred-stxclass name pred)
   (define-basic-syntax-class name
-    ([datum 0])
+    () ;; ([datum 0])
     (lambda (x)
       (let ([d (if (syntax? x) (syntax-e x) x)])
         (if (pred d)
-            (list d)
+            null ;; (list d)
             (fail-sc x #:pattern 'name))))))
 
 (define-pred-stxclass identifier symbol?)
@@ -68,6 +68,20 @@
         (fail-sc x
                  #:pattern 'static
                  #:reason "not an identifier"))))
+
+(define-basic-syntax-class (static-of name pred)
+  ([value 0])
+  (lambda (x name pred)
+    (let/ec escape
+      (define (bad)
+        (escape (fail-sc x
+                         #:pattern 'name
+                         #:reason (format "not bound as ~a" name))))
+      (if (identifier? x)
+          (let ([value (syntax-local-value x bad)])
+            (unless (pred value) (bad))
+            (list value))
+          (bad)))))
 
 (define-basic-syntax-class struct-name
   ([descriptor 0]

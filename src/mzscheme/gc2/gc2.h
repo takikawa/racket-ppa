@@ -21,6 +21,10 @@
 typedef int (*Size_Proc)(void *obj);
 typedef int (*Mark_Proc)(void *obj);
 typedef int (*Fixup_Proc)(void *obj);
+typedef void (*GC_collect_start_callback_Proc)(void);
+typedef void (*GC_collect_end_callback_Proc)(void);
+typedef void (*GC_collect_inform_callback_Proc)(int major_gc, long pre_used, long post_used);
+typedef unsigned long (*GC_get_thread_stack_base_Proc)(void);
 /* 
    Types of the traversal procs (supplied by MzScheme); see overview in README
    for information about traversals. The return value is the size of
@@ -56,9 +60,9 @@ extern "C" {
 /* Administration                                                          */
 /***************************************************************************/
 
-GC2_EXTERN unsigned long (*GC_get_thread_stack_base)(void);
+GC2_EXTERN void GC_set_get_thread_stack_base(unsigned long (*)(void));
 /* 
-   Called by GC to get the base for stack traversal in the current
+   Sets callback called by GC to get the base for stack traversal in the current
    thread (see README). The returned address must not be in the middle
    of a variable-stack record. */
 
@@ -96,11 +100,11 @@ GC2_EXTERN void GC_register_thread(void *, void *);
 /*
    Indicates that a a thread record is owned by a particular custodian. */
 
-GC2_EXTERN void (*GC_collect_start_callback)(void);
-GC2_EXTERN void (*GC_collect_end_callback)(void);
-GC2_EXTERN void (*GC_collect_inform_callback)(int major_gc, long pre_used, long post_used);
+GC2_EXTERN GC_collect_start_callback_Proc GC_set_collect_start_callback(GC_collect_start_callback_Proc);
+GC2_EXTERN GC_collect_end_callback_Proc GC_set_collect_end_callback(GC_collect_end_callback_Proc);
+GC2_EXTERN void GC_set_collect_inform_callback(GC_collect_inform_callback_Proc);
 /*
-   Called by GC before/after performing a collection. Used by MzScheme
+   Sets callbacks called by GC before/after performing a collection.  Used by MzScheme
    to zero out some data and record collection times. The end
    procedure should be called before finalizations are performed. */
 
@@ -367,10 +371,30 @@ GC2_EXTERN void GC_fixup_variable_stack(void **var_stack,
    The `stack_mem' argument indicates the start of the allocated memory
    that contains `var_stack'. It is used for backtraces. */
 
+GC2_EXTERN int GC_merely_accounting();
+/*
+   Can be called by a mark or fixup traversal proc to determine whether
+   the traversal is merely for accounting, in which case some marking
+   can be skipped if the corresponding data should be charged to a
+   different object. */
+
 GC2_EXTERN void GC_write_barrier(void *p);
 /* 
    Explicit write barrier to ensure that a write-barrier signal is not
    triggered by a memory write.
+*/
+GC2_EXTERN void GC_switch_in_master_gc();
+/*
+   Makes the current thread the master GC thread.
+*/
+GC2_EXTERN void GC_switch_out_master_gc();
+/*
+   Makes the current GC the master GC.
+   Creates a new place specific GC and links it to the master GC.
+*/
+GC2_EXTERN void GC_construct_child_gc();
+/*
+   Creates a new place specific GC and links to the master GC.
 */
 
 # ifdef __cplusplus

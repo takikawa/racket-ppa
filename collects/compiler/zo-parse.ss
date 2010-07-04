@@ -7,10 +7,17 @@
 ;; ----------------------------------------
 ;;  Structures to represent bytecode
 
-(define-syntax-rule (define-form-struct id (field-id ...))
+(define-syntax-rule (define-form-struct* id id+par (field-id ...))
   (begin
-    (define-struct id (field-id ...) #:transparent)
+    (define-struct id+par (field-id ...) #:transparent)
     (provide (struct-out id))))
+
+(define-syntax define-form-struct
+  (syntax-rules ()
+    [(_ (id sup) . rest)
+     (define-form-struct* id (id sup) . rest)]
+    [(_ id . rest)
+     (define-form-struct* id id . rest)]))
 
 (define-form-struct compilation-top (max-let-depth prefix code)) ; compiled code always wrapped with this
 
@@ -21,43 +28,46 @@
 (define-form-struct module-variable (modidx sym pos phase)) ; direct access to exported id
 
 ;; In stxs of prefix:
-(define-form-struct stx (encoded)) ; todo: decode syntax objects
+(define-form-struct stx (encoded))
 
-(define-form-struct mod (name self-modidx prefix provides requires body syntax-body max-let-depth))
+(define-form-struct form ())
+(define-form-struct (expr form) ())
 
-(define-form-struct lam (name flags num-params rest? closure-map max-let-depth body)) ; `lambda'
-(define-form-struct closure (code gen-id)) ; a static closure (nothing to close over)
-(define-form-struct case-lam (name clauses)) ; each clause is an lam
+(define-form-struct (mod form) (name self-modidx prefix provides requires body syntax-body max-let-depth))
 
-(define-form-struct let-one (rhs body)) ; pushes one value onto stack
-(define-form-struct let-void (count boxes? body)) ; create new stack slots
-(define-form-struct install-value (count pos boxes? rhs body)) ; set existing stack slot(s)
-(define-form-struct let-rec (procs body)) ; put `letrec'-bound closures into existing stack slots
-(define-form-struct boxenv (pos body)) ; box existing stack element
+(define-form-struct (lam expr) (name flags num-params rest? closure-map max-let-depth body)) ; `lambda'
+(define-form-struct (closure expr) (code gen-id)) ; a static closure (nothing to close over)
+(define-form-struct (case-lam expr) (name clauses)) ; each clause is an lam
 
-(define-form-struct localref (unbox? offset clear?)) ; access local via stack
+(define-form-struct (let-one expr) (rhs body)) ; pushes one value onto stack
+(define-form-struct (let-void expr) (count boxes? body)) ; create new stack slots
+(define-form-struct (install-value expr) (count pos boxes? rhs body)) ; set existing stack slot(s)
+(define-form-struct (let-rec expr) (procs body)) ; put `letrec'-bound closures into existing stack slots
+(define-form-struct (boxenv expr) (pos body)) ; box existing stack element
 
-(define-form-struct toplevel (depth pos const? mutated?))  ; access binding via prefix array (which is on stack)
-(define-form-struct topsyntax (depth pos midpt)) ; access syntax object via prefix array (which is on stack)
+(define-form-struct (localref expr) (unbox? pos clear?)) ; access local via stack
 
-(define-form-struct application (rator rands)) ; function call
-(define-form-struct branch (test then else)) ; `if'
-(define-form-struct with-cont-mark (key val body)) ; `with-continuation-mark'
-(define-form-struct beg0 (seq)) ; `begin0'
-(define-form-struct sequence (forms)) ; `begin'
-(define-form-struct splice (forms)) ; top-level `begin'
-(define-form-struct varref (toplevel)) ; `#%variable-reference'
-(define-form-struct assign (id rhs undef-ok?)) ; top-level or module-level set!
-(define-form-struct apply-values (proc args-expr)) ; `(call-with-values (lambda () ,args-expr) ,proc)
-(define-form-struct primitive (id)) ; direct preference to a kernel primitive
+(define-form-struct (toplevel expr) (depth pos const? ready?))  ; access binding via prefix array (which is on stack)
+(define-form-struct (topsyntax expr) (depth pos midpt)) ; access syntax object via prefix array (which is on stack)
+
+(define-form-struct (application expr) (rator rands)) ; function call
+(define-form-struct (branch expr) (test then else)) ; `if'
+(define-form-struct (with-cont-mark expr) (key val body)) ; `with-continuation-mark'
+(define-form-struct (beg0 expr) (seq)) ; `begin0'
+(define-form-struct (seq form) (forms)) ; `begin'
+(define-form-struct (splice form) (forms)) ; top-level `begin'
+(define-form-struct (varref expr) (toplevel)) ; `#%variable-reference'
+(define-form-struct (assign expr) (id rhs undef-ok?)) ; top-level or module-level set!
+(define-form-struct (apply-values expr) (proc args-expr)) ; `(call-with-values (lambda () ,args-expr) ,proc)
+(define-form-struct (primval expr) (id)) ; direct preference to a kernel primitive
 
 ;; Definitions (top level or within module):
-(define-form-struct def-values (ids rhs))
-(define-form-struct def-syntaxes (ids rhs prefix max-let-depth))
-(define-form-struct def-for-syntax (ids rhs prefix max-let-depth))
+(define-form-struct (def-values form) (ids rhs))
+(define-form-struct (def-syntaxes form) (ids rhs prefix max-let-depth))
+(define-form-struct (def-for-syntax form) (ids rhs prefix max-let-depth))
 
 ;; Top-level `require'
-(define-form-struct req (reqs dummy))
+(define-form-struct (req form) (reqs dummy))
 
 ;; A static closure can refer directly to itself, creating a cycle
 (define-struct indirect ([v #:mutable]) #:prefab)
@@ -68,12 +78,12 @@
 
 (define (read-toplevel v)
   (define SCHEME_TOPLEVEL_CONST #x01)
-  (define SCHEME_TOPLEVEL_MUTATED #x02)
+  (define SCHEME_TOPLEVEL_READY #x02)
   (match v
     [(cons depth (cons pos flags))
      (make-toplevel depth pos 
                     (positive? (bitwise-and flags SCHEME_TOPLEVEL_CONST))
-                    (positive? (bitwise-and flags SCHEME_TOPLEVEL_MUTATED)))]
+                    (positive? (bitwise-and flags SCHEME_TOPLEVEL_READY)))]
     [(cons depth pos)
      (make-toplevel depth pos #f #f)]))
 
@@ -85,15 +95,10 @@
 (define (read-variable v)
   (if (symbol? v)
       (make-global-bucket v)
-      (let-values ([(phase modname varname)
-                    (match v
-                      [(list* phase modname varname)
-                       (values phase modname varname)]
-                      [(list* modname varname)
-                       (values 0 modname varname)])])
-        (if (and (zero? phase) (eq? modname '#%kernel))
-            (error 'bucket "var ~a" varname)
-            (make-module-variable modname varname -1 phase)))))
+      (error "expected a symbol")))
+
+(define (do-not-read-variable v)
+  (error "should not get here"))
 
 (define (read-compilation-top v)
   (match v
@@ -150,7 +155,7 @@
      (make-with-cont-mark key val body)]))
 
 (define (read-sequence v) 
-  (make-sequence v))
+  (make-seq v))
 
 (define (read-define-values v)
   (make-def-values
@@ -178,7 +183,7 @@
 
 (define (read-begin0 v) 
   (match v
-    [(struct sequence (exprs))
+    [(struct seq (exprs))
      (make-beg0 exprs)]))
 
 (define (read-boxenv v)
@@ -197,7 +202,10 @@
     [`(,name ,self-modidx ,lang-info ,functional? ,et-functional?
              ,rename ,max-let-depth ,dummy
              ,prefix ,kernel-exclusion ,reprovide-kernel?
-             ,indirect-provides ,num-indirect-provides ,protects
+             ,indirect-provides ,num-indirect-provides 
+             ,indirect-syntax-provides ,num-indirect-syntax-provides 
+             ,indirect-et-provides ,num-indirect-et-provides 
+             ,protects ,et-protects
              ,provide-phase-count . ,rest)
      (let ([phase-data (take rest (* 8 provide-phase-count))])
        (match (list-tail rest (* 8 provide-phase-count))
@@ -280,7 +288,7 @@
     (cons 'with-cont-mark-type read-with-cont-mark)
     (cons 'quote-syntax-type read-topsyntax)
     (cons 'variable-type read-variable)
-    (cons 'module-variable-type read-variable)
+    (cons 'module-variable-type do-not-read-variable)
     (cons 'compilation-top-type read-compilation-top)
     (cons 'case-lambda-sequence-type read-case-lambda)
     (cons 'begin0-sequence-type read-sequence)
@@ -431,9 +439,12 @@
 ;; Synatx unmarshaling
 
 (define-form-struct wrapped (datum wraps certs))
-(define-form-struct lexical-rename (alist))
-(define-form-struct phase-shift (amt src dest))
-(define-form-struct module-rename (phase kind set-id unmarshals renames mark-renames plus-kern?))
+
+(define-form-struct wrap ())
+(define-form-struct (lexical-rename wrap) (alist))
+(define-form-struct (phase-shift wrap) (amt src dest))
+(define-form-struct (module-rename wrap) (phase kind set-id unmarshals renames mark-renames plus-kern?))
+
 (define-form-struct all-from-module (path phase src-phase exceptions prefix))
 (define-form-struct module-binding (path mod-phase import-phase id nominal-path nominal-phase nominal-id))
 
@@ -661,7 +672,7 @@
 ;; Main parsing loop
 
 (define (read-compact cp)
-  (let loop ([need-car 0] [proper #f] [last #f] [first #f])
+  (let loop ([need-car 0] [proper #f])
     (begin-with-definitions
       (define ch (cp-getc cp))
       (define-values (cpt-start cpt-tag) (let ([x (cpt-table-lookup ch)])
@@ -698,7 +709,7 @@
                             [read-accept-quasiquote #t])
                (read (open-input-bytes s))))]
           [(reference)
-           (make-primitive (read-compact-number cp))]
+           (make-primval (read-compact-number cp))]
           [(small-list small-proper-list)
            (let* ([l (- ch cpt-start)]
                   [ppr (eq? cpt-tag 'small-proper-list)])
@@ -707,7 +718,7 @@
                      (cons (read-compact cp)
                            (if ppr null (read-compact cp)))
                      (read-compact-list l ppr cp))
-                 (loop l ppr last first)))]
+                 (loop l ppr)))]
           [(let-one)
            (make-let-one (read-compact cp) (read-compact cp))]
           [(branch)
@@ -717,7 +728,11 @@
            (let ([mod (read-compact cp)]
                  [var (read-compact cp)]
                  [pos (read-compact-number cp)])
-             (make-module-variable mod var pos 0))]
+             (let-values ([(mod-phase pos)
+                           (if (= pos -2)
+                                  (values 1 (read-compact-number cp))
+                                  (values 0 pos))])
+               (make-module-variable mod var pos mod-phase)))]
           [(local-unbox)
            (let* ([p* (read-compact-number cp)]
                   [p (if (< p* 0)
@@ -747,8 +762,10 @@
                                   (read-compact cp))])
                       (vector->immutable-vector (list->vector lst)))]
           [(list) (let* ([n (read-compact-number cp)])
-                    (for/list ([i (in-range n)])
-                      (read-compact cp)))]
+                    (append
+                     (for/list ([i (in-range n)])
+                       (read-compact cp))
+                     (read-compact cp)))]
           [(prefab)
            (let ([v (read-compact cp)])
              (apply make-prefab-struct
@@ -845,9 +862,8 @@
                                             [(symbol? s) s]
                                             [(vector? s) (vector-ref s 0)]
                                             [else 'closure]))))])
-               (vector-set! (cport-symtab cp) l cl)
                (set-indirect-v! ind cl)
-               cl))]
+               ind))]
           [(svector)
            (read-compact-svector cp (read-compact-number cp))]
           [(small-svector)
@@ -858,7 +874,7 @@
         [(and proper (= need-car 1))
          (cons v null)]
         [else
-         (cons v (loop (sub1 need-car) proper last first))]))))
+         (cons v (loop (sub1 need-car) proper))]))))
 
 ;; path -> bytes
 ;; implementes read.c:read_compiled
@@ -898,11 +914,13 @@
    (define symtab (make-vector symtabsize (make-not-ready)))
 
    (define cp (make-cport 0 port size* rst symtab so* (make-vector symtabsize #f) (make-hash) (make-hash)))
+
    (for/list ([i (in-range 1 symtabsize)])
      (when (not-ready? (vector-ref symtab i))
        (set-cport-pos! cp (vector-ref so* (sub1 i)))
        (let ([v (read-compact cp)])
          (vector-set! symtab i v))))
+
    (set-cport-pos! cp shared-size)
    (read-marshalled 'compilation-top-type cp)))
 

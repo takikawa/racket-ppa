@@ -146,9 +146,11 @@
              (pair? (cdr b))
              (string? (cadr b))
              (null? (cddr b))))
+      
+      ; permissive? : parameter bool
+      (define permissive? (make-parameter #f))
 
       ;; xml->xexpr : Content -> Xexpr
-      ;; The contract is loosely enforced.
       (define (xml->xexpr x)
         (let* ([non-dropping-combine
                 (lambda (atts body)
@@ -170,8 +172,8 @@
               [(entity? x) (entity-text x)]
               [(or (comment? x) (pi? x) (cdata? x)) x]
               [(document? x) (error 'xml->xexpr "Expected content, given ~e\nUse document-element to extract the content." x)]
-              [else ;(error 'xml->xexpr "Expected content, given ~e" x)
-               x]))))
+              [(permissive?) x]
+              [else (error 'xml->xexpr "Expected content, given ~e" x)]))))
 
       ;; attribute->srep : Attribute -> Attribute-srep
       (define (attribute->srep a)

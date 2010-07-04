@@ -1,6 +1,7 @@
 #lang scheme/base
 
-(require (for-syntax scheme/base) "utils.ss" scheme/file scheme/list scheme/class mred)
+(require (for-syntax scheme/base) "utils.ss"
+         scheme/file scheme/list scheme/class mred)
 
 (provide (except-out (all-from-out scheme/base) #%module-begin)
          (all-from-out "utils.ss"))
@@ -78,7 +79,7 @@
     (let ([line (bytes->string/utf-8 line)])
       (unless (or (< (string-length line) len)
                   (< (string-width line) len))
-        (error* "~a \"~a\" in \"~a\" is longer than ~a characters"
+        (error* "~a \"~a\" in ~a is longer than ~a characters"
                 (if n (format "Line #~a" n) "The line")
                 (regexp-replace #rx"^[ \t]*(.*?)[ \t]*$" line "\\1")
                 (currently-processed-file-name)
@@ -148,7 +149,8 @@
 (define current-processed-file ; set when processing multi-file submissions
   (make-parameter #f))
 (define (currently-processed-file-name)
-  (or (current-processed-file) "your code"))
+  (let ([c (current-processed-file)])
+    (if c (format "\"~a\"" c) "your code")))
 
 (define (input->process->output maxwidth textualize? untabify? bad-re)
   (let loop ([n 1])
@@ -164,7 +166,7 @@
                [line (if (and untabify? (regexp-match? #rx"\t" line))
                        (untabify line) line)])
           (when (and bad-re (regexp-match? bad-re line))
-            (error* "You cannot use \"~a\" in \"~a\"!~a"
+            (error* "You cannot use \"~a\" in ~a!~a"
                     (if (regexp? bad-re) (object-name bad-re) bad-re)
                     (currently-processed-file-name)
                     (if textualize? "" (format " (line ~a)" n))))
@@ -650,8 +652,24 @@
 (define (procedure/arity? proc arity)
   (and (procedure? proc) (procedure-arity-includes? proc arity)))
 
+(define (get-namespace evaluator)
+  (call-in-sandbox-context evaluator current-namespace))
+
+;; checks that ids are defined, either as variables or syntaxes
 (provide !defined)
 (define-syntax-rule (!defined id ...)
+  ;; expected to be used only with identifiers
+  (begin (with-handlers ([exn:fail:contract:variable?
+                          (lambda (_)
+                            (error* "missing binding: ~e" (->disp 'id)))]
+                         [exn:fail:syntax? void])
+           (parameterize ([current-namespace (get-namespace (submission-eval))])
+             (namespace-variable-value `id)))
+         ...))
+
+;; checks that ids are defined as variables, not syntaxes
+(provide !bound)
+(define-syntax-rule (!bound id ...)
   ;; expected to be used only with identifiers
   (begin (with-handlers ([exn:fail:contract:variable?
                           (lambda (_)
@@ -664,6 +682,7 @@
              (namespace-variable-value `id)))
          ...))
 
+;; checks that ids are defined as syntaxes, not variables
 (provide !syntax)
 (define-syntax-rule (!syntax id ...)
   ;; expected to be used only with identifiers
@@ -722,9 +741,10 @@
 (define-syntax (!test/exn stx)
   (syntax-case stx ()
      [(_ test-exp)
-      #`(with-handlers ([exn:fail? (lambda (exn) #t)])
-	  ((submission-eval) `test-exp)
-	  (error* "expected exception on test expression: ~v" 
+      #`(unless (with-handlers ([exn:fail? (lambda (exn) #t)])
+                  ((submission-eval) `test-exp)
+                  #f)
+	  (error* "expected exception on test expression: ~v"
 		  (->disp 'test-exp)))]))
 
 (provide !all-covered)

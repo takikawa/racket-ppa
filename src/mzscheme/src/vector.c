@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2008 PLT Scheme Inc.
+  Copyright (c) 2004-2009 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -24,6 +24,10 @@
 */
 
 #include "schpriv.h"
+
+/* globals */
+Scheme_Object *scheme_vector_proc;
+Scheme_Object *scheme_vector_immutable_proc;
 
 /* locals */
 static Scheme_Object *vector_p (int argc, Scheme_Object *argv[]);
@@ -53,13 +57,17 @@ scheme_init_vector (Scheme_Env *env)
 						    1, 2), 
 			     env);
   
+  REGISTER_SO(scheme_vector_proc);
   p = scheme_make_immed_prim(vector, "vector", 0, -1);
+  scheme_vector_proc = p;
   SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
                                 | SCHEME_PRIM_IS_BINARY_INLINED
                                 | SCHEME_PRIM_IS_NARY_INLINED);
   scheme_add_global_constant("vector", p, env);
 
+  REGISTER_SO(scheme_vector_immutable_proc);
   p = scheme_make_immed_prim(vector_immutable, "vector-immutable", 0, -1);
+  scheme_vector_immutable_proc = p;
   SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
                                 | SCHEME_PRIM_IS_BINARY_INLINED
                                 | SCHEME_PRIM_IS_NARY_INLINED);

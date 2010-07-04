@@ -3,6 +3,7 @@
 
 (require (rep type-rep effect-rep)
          (utils tc-utils)
+         scheme/list
          scheme/match
          "type-comparison.ss"
          "type-effect-printer.ss"
@@ -12,14 +13,16 @@
          scheme/promise
          (for-syntax macro-debugger/stxclass/stxclass)
          (for-syntax scheme/base)
-         (for-template scheme/base scheme/contract))
+         (for-template scheme/base scheme/contract scheme/tcp))
 
 (provide (all-defined-out) 
          ;; these should all eventually go away
-         make-Name make-ValuesDots make-Function make-top-arr make-Latent-Restrict-Effect make-Latent-Remove-Effect)
+         make-Name make-ValuesDots make-Function make-Latent-Restrict-Effect make-Latent-Remove-Effect)
 
 (define (one-of/c . args)
   (apply Un (map -val args)))
+
+(define top-func (make-Function (list (make-top-arr))))
 
 (define (-vet id) (make-Var-True-Effect id))
 (define (-vef id) (make-Var-False-Effect id))
@@ -84,7 +87,7 @@
   (define (funty-arities f)
     (match f
       [(Function: as) as]))
-  (make-Function (map car (map funty-arities args))))
+  (make-Function (apply append (map funty-arities args))))
 
 (define-syntax (->key stx)
   (syntax-parse stx
@@ -134,6 +137,7 @@
 (define -Namespace (make-Base 'Namespace #'namespace?))
 (define -Output-Port (make-Base 'Output-Port #'output-port?))
 (define -Input-Port (make-Base 'Input-Port #'input-port?))
+(define -TCP-Listener (make-Base 'TCP-Listener #'tcp-listener?))
 
 (define -Syntax make-Syntax)
 (define -HT make-Hashtable)
@@ -141,6 +145,8 @@
 
 (define Univ (make-Univ))
 (define Err (make-Error))
+
+(define -Nat -Integer)
 
 (define-syntax -v 
   (syntax-rules ()
@@ -212,6 +218,14 @@
 
 (define (-Tuple l)
   (foldr -pair (-val '()) l))
+
+(define (untuple t)
+  (match t
+    [(Value: '()) null]
+    [(Pair: a b) (cond [(untuple b) => (lambda (l) (cons a l))]
+                       [else #f])]
+    [_ #f]))
+
 (define -box make-Box)
 (define -vec make-Vector)
 
@@ -276,3 +290,9 @@
 
 
 
+(define (opt-fn args opt-args result)
+  (apply cl->* (for/list ([i (in-range (add1 (length opt-args)))])                         
+                 (make-Function (list (make-arr* (append args (take opt-args i)) result))))))
+
+(define-syntax-rule (->opt args ... [opt ...] res)
+  (opt-fn (list args ...) (list opt ...) res))

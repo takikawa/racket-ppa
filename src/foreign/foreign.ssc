@@ -10,6 +10,8 @@ exec mzpp -s "---begin" -o `echo "$0" | sed 's/ssc$/c/'` "$0"
  ** to make changes, edit that file and
  ** run it to generate an updated version
  ** of this file.
+ ** NOTE: This is no longer true, foreign.ssc needs to be updated to work with
+ ** the scribble/text preprocessor instead.
  ********************************************/
 
 {:(load "ssc-utils.ss"):}
@@ -390,7 +392,15 @@ inline int scheme_get_unsigned_realint_val(Scheme_Object *o, unsigned int *v)
 #endif
 #endif
 
-unsigned short *ucs4_string_to_utf16_pointer(Scheme_Object *ucs)
+#define SCHEME_FALSEP_OR_CHAR_STRINGP(o) (SCHEME_FALSEP(o) || SCHEME_CHAR_STRINGP(o))
+
+static mzchar *ucs4_string_or_null_to_ucs4_pointer(Scheme_Object *ucs)
+{
+  if (SCHEME_FALSEP(ucs)) return NULL;
+  return SCHEME_CHAR_STR_VAL(ucs);
+}
+
+static unsigned short *ucs4_string_to_utf16_pointer(Scheme_Object *ucs)
 {
   long ulen;
   unsigned short *res;
@@ -400,11 +410,18 @@ unsigned short *ucs4_string_to_utf16_pointer(Scheme_Object *ucs)
   return res;
 }
 
+static unsigned short *ucs4_string_or_null_to_utf16_pointer(Scheme_Object *ucs)
+{
+  if (SCHEME_FALSEP(ucs)) return NULL;
+  return ucs4_string_to_utf16_pointer(ucs);
+}
+
 Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
 {
   long ulen;
   mzchar *res;
   int end;
+  if (!utf) return scheme_false;
   for (end=0; utf[end] != 0; end++) { /**/ }
   res = scheme_utf16_to_ucs4(utf, 0, end, NULL, -1, &ulen, 0);
   return scheme_make_sized_char_string(res, ulen, 0);
@@ -445,7 +462,7 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
 
 (define *type-counter* 0)
 
-(define (describe-type stype cname ftype ctype pred s->c c->s offset)
+(define (describe-type type stype cname ftype ctype pred s->c c->s offset)
   (set! *type-counter* (add1 *type-counter*))
   (~ "#define FOREIGN_"cname" ("*type-counter*")" \\
      "/* Type Name:   "stype (and (not (equal? cname stype))
@@ -466,7 +483,10 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
      " * C->Scheme:   "(cond [(not c->s) "-none-"]
                              [(procedure? c->s) (c->s "<C>")]
                              [else (list c->s"(<C>)")]) \\
-     " */" \\))
+     " */" \\
+     ;; no need for these, at least for now:
+     ;; "static Scheme_Object *"cname"_sym;"\\
+     ))
 
 (define (make-ctype type args)
   (define (prop p . default)
@@ -491,7 +511,7 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
          [s->c  (prop 's->c (and macro (list "SCHEME_"macro"_VAL")))]
          [c->s  (prop 'c->s)]
          [offset (prop 'offset #f)])
-    (describe-type stype cname ftype ctype pred s->c c->s offset)
+    (describe-type type stype cname ftype ctype pred s->c c->s offset)
     `(,type (stype ,stype) (cname ,cname) (ftype ,ftype) (ctype ,ctype)
       (macro ,macro) (pred ,pred) (s->c ,s->c) (c->s ,c->s) (offset ,offset))))
 
@@ -635,15 +655,15 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
 (defctype 'string/ucs-4
   'ftype "pointer"
   'ctype "mzchar*"
-  'pred  "SCHEME_CHAR_STRINGP"
-  's->c  "SCHEME_CHAR_STR_VAL"
+  'pred  "SCHEME_FALSEP_OR_CHAR_STRINGP"
+  's->c  "ucs4_string_or_null_to_ucs4_pointer"
   'c->s  "scheme_make_char_string_without_copying")
 
 (defctype 'string/utf-16
   'ftype "pointer"
   'ctype "unsigned short*"
-  'pred  "SCHEME_CHAR_STRINGP"
-  's->c  "ucs4_string_to_utf16_pointer"
+  'pred  "SCHEME_FALSEP_OR_CHAR_STRINGP"
+  's->c  "ucs4_string_or_null_to_utf16_pointer"
   'c->s  "utf16_pointer_to_ucs4_string")
 
 (~ "/* Byte strings -- not copying C strings, #f is NULL." \\
@@ -709,7 +729,7 @@ Scheme_Object *utf16_pointer_to_ucs4_string(unsigned short *utf)
 (~ "/* Special type, not actually used for anything except to mark values" \\
    " * that are treated like pointers but not referenced.  Used for" \\
    " * creating function types. */")
-(defctype 'fpointer 'ftype "pointer" 'ctype #f)
+(defctype 'fpointer 'ftype "pointer" 'ctype "void*")
 
 :}
 typedef union _ForeignAny {
@@ -726,17 +746,24 @@ typedef union _ForeignAny {
 /* Type objects */
 
 /* This struct is used for both user types and primitive types (including
- * struct types).  If it is a primitive type then basetype will be NULL, and
+ * struct types).  If it is a user type then basetype will be another ctype,
+ * otherwise,
+ * - if it's a primitive type, then basetype will be a symbol naming that type
+ * - if it's a struct, then basetype will be the list of ctypes that
+ *   made this struct
  * scheme_to_c will have the &ffi_type pointer, and c_to_scheme will have an
- * integer (a label value) for non-struct type. */
+ * integer (a label value) for non-struct type.  (Note that the
+ * integer is not really needed, since it is possible to identify the
+ * type by the basetype field.)
+ */
 {:(cdefstruct ctype
     (basetype    "Scheme_Object*")
     (scheme_to_c "Scheme_Object*")
     (c_to_scheme "Scheme_Object*")):}
 
 #define CTYPE_BASETYPE(x)  (((ctype_struct*)(x))->basetype)
-#define CTYPE_PRIMP(x)     (NULL == (CTYPE_BASETYPE(x)))
-#define CTYPE_USERP(x)     (!(CTYPE_PRIMP(x)))
+#define CTYPE_USERP(x)     (CTYPE_BASETYPE(x) != NULL && SCHEME_CTYPEP(CTYPE_BASETYPE(x)))
+#define CTYPE_PRIMP(x)     (!CTYPE_USERP(x))
 #define CTYPE_PRIMTYPE(x)  ((ffi_type*)(((ctype_struct*)(x))->scheme_to_c))
 #define CTYPE_PRIMLABEL(x) ((long)(((ctype_struct*)(x))->c_to_scheme))
 #define CTYPE_USER_S2C(x)  (((ctype_struct*)(x))->scheme_to_c)
@@ -745,12 +772,9 @@ typedef union _ForeignAny {
 /* Returns #f for primitive types. */
 {:(cdefine ctype-basetype 1):}
 {
-  Scheme_Object *base;
   if (!SCHEME_CTYPEP(argv[0]))
     scheme_wrong_type(MYNAME, "ctype", 0, argc, argv);
-  base = CTYPE_BASETYPE(argv[0]);
-  if (NULL == base) return scheme_false;
-  else              return base;
+  return CTYPE_BASETYPE(argv[0]);
 }
 
 {:(cdefine ctype-scheme->c 1):}
@@ -892,7 +916,7 @@ ffi_abi sym_to_abi(char *who, Scheme_Object *sym)
   dummy = &libffi_type;
   if (ffi_prep_cif(&cif, abi, 1, &ffi_type_void, dummy) != FFI_OK)
     scheme_signal_error("internal error: ffi_prep_cif did not return FFI_OK");
-  {:(cmake-object "type" ctype "NULL"
+  {:(cmake-object "type" ctype "argv[0]"
                   "(Scheme_Object*)libffi_type"
                   "(Scheme_Object*)FOREIGN_struct"):}
   scheme_register_finalizer(type, free_libffi_type, libffi_type, NULL, NULL);
@@ -900,18 +924,29 @@ ffi_abi sym_to_abi(char *who, Scheme_Object *sym)
 }
 
 /*****************************************************************************/
+/* Callback type */
+
+{:(cdefstruct ffi-callback
+    (callback "void*")
+    (proc     "Scheme_Object*")
+    (itypes   "Scheme_Object*")
+    (otype    "Scheme_Object*")
+    (call_in_scheduler "int")):}
+
+/*****************************************************************************/
 /* Pointer objects */
 /* use cpointer (with a NULL tag when creating), #f for NULL */
 
 #define SCHEME_FFIANYPTRP(x) \
   (SCHEME_FALSEP(x) || SCHEME_CPTRP(x) || SCHEME_FFIOBJP(x) || \
-   SCHEME_BYTE_STRINGP(x))
+   SCHEME_BYTE_STRINGP(x) || SCHEME_FFICALLBACKP(x))
 #define SCHEME_FFIANYPTR_VAL(x) \
   (SCHEME_CPTRP(x) ? SCHEME_CPTR_VAL(x) : \
     (SCHEME_FALSEP(x) ? NULL : \
       (SCHEME_FFIOBJP(x) ? (((ffi_obj_struct*)x)->obj) : \
-       SCHEME_BYTE_STRINGP(x) ? SCHEME_BYTE_STR_VAL(x) : \
-         NULL)))
+       (SCHEME_BYTE_STRINGP(x) ? SCHEME_BYTE_STR_VAL(x) : \
+         (SCHEME_FFICALLBACKP(x) ? ((ffi_callback_struct *)x)->callback : \
+          NULL)))))
 #define SCHEME_FFIANYPTR_OFFSET(x) \
   (SCHEME_CPTRP(x) ? SCHEME_CPTR_OFFSET(x) : 0)
 #define SCHEME_FFIANYPTR_OFFSETVAL(x) \
@@ -946,15 +981,6 @@ ffi_abi sym_to_abi(char *who, Scheme_Object *sym)
 }
 
 /*****************************************************************************/
-/* Callback type */
-
-{:(cdefstruct ffi-callback
-    (callback "void*")
-    (proc     "Scheme_Object*")
-    (itypes   "Scheme_Object*")
-    (otype    "Scheme_Object*")):}
-
-/*****************************************************************************/
 /* Scheme<-->C conversions */
 
 /* On big endian machines we need to know whether we're pulling a value from an
@@ -974,19 +1000,17 @@ ffi_abi sym_to_abi(char *who, Scheme_Object *sym)
 static Scheme_Object *C2SCHEME(Scheme_Object *type, void *src,
                                int delta, int args_loc)
 {
-  Scheme_Object *res, *base;
+  Scheme_Object *res;
   if (!SCHEME_CTYPEP(type))
     scheme_wrong_type("C->Scheme", "C-type", 0, 1, &type);
-  base = CTYPE_BASETYPE(type);
-  if (base != NULL) {
-    res = C2SCHEME(base, src, delta, args_loc);
+  if (CTYPE_USERP(type)) {
+    res = C2SCHEME(CTYPE_BASETYPE(type), src, delta, args_loc);
     if (SCHEME_FALSEP(CTYPE_USER_C2S(type)))
       return res;
     else
       return _scheme_apply(CTYPE_USER_C2S(type), 1, (Scheme_Object**)(&res));
   } else if (CTYPE_PRIMLABEL(type) == FOREIGN_fpointer) {
-    /* No need for the REF_CTYPE trick for pointers */
-    return (Scheme_Object*)W_OFFSET(src, delta);
+    return scheme_make_foreign_cpointer(*(void **)W_OFFSET(src, delta));
   } else switch (CTYPE_PRIMLABEL(type)) {
     {:(for-each-type
         (~ "case FOREIGN_"cname": return "
@@ -1008,13 +1032,6 @@ static Scheme_Object *C2SCHEME(Scheme_Object *type, void *src,
  * is used for both the function definition and calls, but the actual code in
  * the function is different: in the relevant cases zero an int and offset the
  * ptr */
-#ifdef SCHEME_BIG_ENDIAN
-#define SCHEME2C(typ,dst,delta,val,basep,_offset,retloc) \
-          scheme_to_c(typ,dst,delta,val,basep,_offset,retloc)
-#else
-#define SCHEME2C(typ,dst,delta,val,basep,_offset,retloc) \
-          scheme_to_c(typ,dst,delta,val,basep,_offset)
-#endif
 
 /* Usually writes the C object to dst and returns NULL.  When basetype_p is not
  * NULL, then any pointer value (any pointer or a struct) is returned, and the
@@ -1032,13 +1049,15 @@ static void* SCHEME2C(Scheme_Object *type, void *dst, long delta,
     type = CTYPE_BASETYPE(type);
   }
   if (CTYPE_PRIMLABEL(type) == FOREIGN_fpointer) {
-    /* No need for the SET_CTYPE trick for pointers */
+    /* No need for the SET_CTYPE trick for pointers. */
     if (SCHEME_FFICALLBACKP(val))
       ((void**)W_OFFSET(dst,delta))[0] = ((ffi_callback_struct*)val)->callback;
     else if (SCHEME_CPTRP(val))
       ((void**)W_OFFSET(dst,delta))[0] = SCHEME_CPTR_VAL(val);
     else if (SCHEME_FFIOBJP(val))
       ((void**)W_OFFSET(dst,delta))[0] = ((ffi_obj_struct*)val)->obj;
+    else if (SCHEME_FALSEP(val))
+      ((void**)W_OFFSET(dst,delta))[0] = NULL;
     else /* ((void**)W_OFFSET(dst,delta))[0] = val; */
          scheme_wrong_type("Scheme->C", "cpointer", 0, 1, &val);
   } else switch (CTYPE_PRIMLABEL(type)) {
@@ -1046,7 +1065,7 @@ static void* SCHEME2C(Scheme_Object *type, void *dst, long delta,
         (define (wrong-type obj type)
           (list "scheme_wrong_type(\"Scheme->C\",\""type"\",0,1,&("obj"));"))
         (~ "case FOREIGN_"cname":")
-        (if ctype
+        (if (and ctype (not (equal? stype "fpointer")))
           (let* ([x (list "((("ctype"*)W_OFFSET(dst,delta))[0])")]
                  [f (lambda (p)
                       (if (procedure? p) (p "val" x) (list p"(val)")))])
@@ -1091,7 +1110,8 @@ static void* SCHEME2C(Scheme_Object *type, void *dst, long delta,
                 (error 'scheme->c "unhandled pointer type: ~s" ctype)
                 (~ "  if (!("(pred "val" x)")) "(wrong-type "val" stype) \\
                    "  return NULL;"))))
-          (~ "  "(wrong-type "type" "non-void-C-type")))):}
+          (~ "  if (!ret_loc) "(wrong-type "type" "non-void-C-type")
+             ~ "  break;"))):}
     case FOREIGN_struct:
       if (!SCHEME_FFIANYPTRP(val))
         scheme_wrong_type("Scheme->C", "pointer", 0, 1, &val);
@@ -1569,19 +1589,24 @@ static Scheme_Object *do_memop(const char *who, int mode,
     scheme_wrong_type(MYNAME, "non-null-cpointer", 0, argc, argv);
   if (NULL == (base = get_ctype_base(argv[1])))
     scheme_wrong_type(MYNAME, "C-type", 1, argc, argv);
-  else size = ctype_sizeof(base);
+  size = ctype_sizeof(base);
+
   if (CTYPE_PRIMLABEL(base) == FOREIGN_fpointer) {
-    if (argc > 2)
-      scheme_signal_error
-        (MYNAME": referencing fpointer with extra arguments");
-    else
+    if (SCHEME_FFIOBJP(argv[0])) {
+      /* The ffiobj pointer is the function pointer. */
       ptr = argv[0];
-  } else if (size < 0) {
+      delta = (long)&(((ffi_obj_struct*)0x0)->obj);
+    }
+  }
+
+  if (size < 0) {
     /* should not happen */
     scheme_wrong_type(MYNAME, "C-type", 1, argc, argv);
   } else if (size == 0) {
     scheme_wrong_type(MYNAME, "non-void-C-type", 1, argc, argv);
-  } else if (argc > 3) {
+  }
+
+  if (argc > 3) {
     if (!SAME_OBJ(argv[2],abs_sym))
       scheme_wrong_type(MYNAME, "abs-flag", 2, argc, argv);
     if (!SCHEME_INTP(argv[3]))
@@ -1590,6 +1615,8 @@ static Scheme_Object *do_memop(const char *who, int mode,
   } else if (argc > 2) {
     if (!SCHEME_INTP(argv[2]))
       scheme_wrong_type(MYNAME, "integer", 2, argc, argv);
+    if (!size)
+      scheme_signal_error(MYNAME": cannot multiply fpointer type by offset");
     delta += (size * SCHEME_INT_VAL(argv[2]));
   }
   return C2SCHEME(argv[1], ptr, delta, 0);
@@ -1613,33 +1640,26 @@ static Scheme_Object *do_memop(const char *who, int mode,
     scheme_wrong_type(MYNAME, "non-null-cpointer", 0, argc, argv);
   if (NULL == (base = get_ctype_base(argv[1])))
     scheme_wrong_type(MYNAME, "C-type", 1, argc, argv);
-  else size = ctype_sizeof(base);
-  if (CTYPE_PRIMLABEL(base) == FOREIGN_fpointer) {
-    if (argc > 3) {
-      scheme_signal_error
-        (MYNAME": setting fpointer value with extra arguments");
-    } else if (SCHEME_CPTRP(argv[0])) {
-      ptr = SCHEME_CPTR_VAL(argv[0]);
-    } else if SCHEME_FFIOBJP(argv[0]) {
-      ptr = ((ffi_obj_struct*)(argv[0]))->obj;
-    } else {
-      scheme_signal_error
-        (MYNAME": bad lvalue (NULL or string)");
-    }
-  } else if (size < 0) {
+  size = ctype_sizeof(base);
+
+  if (size < 0) {
     /* should not happen */
     scheme_wrong_type(MYNAME, "C-type", 1, argc, argv);
   } else if (size == 0) {
     scheme_wrong_type(MYNAME, "non-void-C-type", 1, argc, argv);
-  } else if (argc > 4) {
+  }
+
+  if (argc > 4) {
     if (!SAME_OBJ(argv[2],abs_sym))
-      scheme_wrong_type(MYNAME, "abs-flag", 2, argc, argv);
+      scheme_wrong_type(MYNAME, "'abs", 2, argc, argv);
     if (!SCHEME_INTP(argv[3]))
       scheme_wrong_type(MYNAME, "integer", 3, argc, argv);
     delta += SCHEME_INT_VAL(argv[3]);
   } else if (argc > 3) {
     if (!SCHEME_INTP(argv[2]))
       scheme_wrong_type(MYNAME, "integer", 2, argc, argv);
+    if (!size)
+      scheme_signal_error(MYNAME": cannot multiply fpointer type by offset");
     delta += (size * SCHEME_INT_VAL(argv[2]));
   }
   SCHEME2C(argv[1], ptr, delta, val, NULL, NULL, 0);
@@ -1677,6 +1697,9 @@ static Scheme_Object *do_memop(const char *who, int mode,
                                        len, 0);
 }
 
+/* *** Calling Scheme code while the GC is working leads to subtle bugs, so
+   *** this is implemented now in Scheme using will executors. */
+
 /* internal: apply Scheme finalizer */
 void do_scm_finalizer(void *p, void *finalizer)
 {
@@ -1706,9 +1729,6 @@ void do_ptr_finalizer(void *p, void *finalizer)
 /* unreachable, and it will get a new cpointer object that points to it. */
 /* (Only needed in cases where pointer aliases might be created.) */
 /*
-
-  *** Calling Scheme code while the GC is working leads to subtle bugs, so
-  *** this is implemented now in Scheme using will executors.
 
 {:"(defsymbols pointer)":}
 {:"(cdefine register-finalizer 2 3)":}
@@ -1789,7 +1809,7 @@ Scheme_Object *ffi_do_call(void *data, int argc, Scheme_Object *argv[])
     offset = 0;
     p = SCHEME2C(SCHEME_CAR(itypes), &(ivals[i]), 0, argv[i], &basetype,
                  &offset, 0);
-    if (p != NULL) {
+    if ((p != NULL) || offset) {
       avalues[i] = p;
       ivals[i].x_fixnum = basetype; /* remember the base type */
     } else {
@@ -1812,7 +1832,7 @@ Scheme_Object *ffi_do_call(void *data, int argc, Scheme_Object *argv[])
   /* We finished with all possible mallocs, clear up the avalues and offsets
    * mess */
   for (i=0; i<nargs; i++) {
-    if (avalues[i] == NULL)     /* if this was a non-pointer... */
+    if ((avalues[i] == NULL) && !offsets[i]) /* if this was a non-pointer... */
       avalues[i] = &(ivals[i]); /* ... set the avalues pointer */
     else if (ivals[i].x_fixnum != FOREIGN_struct) { /* if *not* a struct... */
       /* ... set the ivals pointer (pointer type doesn't matter) and avalues */
@@ -1832,9 +1852,6 @@ Scheme_Object *ffi_do_call(void *data, int argc, Scheme_Object *argv[])
   for (i=0; i<nargs; i++) { avalues[i] = NULL; } /* no need for these refs */
   avalues = NULL;
   switch (CTYPE_PRIMLABEL(base)) {
-  case FOREIGN_fpointer: /* need to allocate a pointer */
-    p = scheme_make_foreign_cpointer(oval.x_pointer);
-    break;
   case FOREIGN_struct:
     memcpy(newp, p, CTYPE_PRIMTYPE(base)->size);
     free(p);
@@ -1939,12 +1956,16 @@ void ffi_do_callback(ffi_cif* cif, void* resultp, void** args, void *userdata)
     argv = argv_stack;
   else
     argv = scheme_malloc(argc * sizeof(Scheme_Object*));
+  if (data->call_in_scheduler)
+    scheme_start_in_scheduler();
   for (i=0, p=data->itypes; i<argc; i++, p=SCHEME_CDR(p)) {
     v = C2SCHEME(SCHEME_CAR(p), args[i], 0, 0);
     argv[i] = v;
   }
   p = _scheme_apply(data->proc, argc, argv);
   SCHEME2C(data->otype, resultp, 0, p, NULL, NULL, 1);
+  if (data->call_in_scheduler)
+    scheme_end_in_scheduler();
 }
 
 /* see ffi-callback below */
@@ -1961,7 +1982,7 @@ typedef struct closure_and_cif_struct {
 void free_cl_cif_args(void *ignored, void *p)
 {
   /*
-  scheme_warning("Releaseing cl+cif+args %V %V (%d)",
+  scheme_warning("Releasing cl+cif+args %V %V (%d)",
                  ignored,
                  (((closure_and_cif*)p)->data),
                  SAME_OBJ(ignored,(((closure_and_cif*)p)->data)));
@@ -1975,7 +1996,7 @@ void free_cl_cif_args(void *ignored, void *p)
 /* (ffi-callback scheme-proc in-types out-type [abi]) -> ffi-callback */
 /* the treatment of in-types and out-types is similar to that in ffi-call */
 /* the real work is done by ffi_do_callback above */
-{:(cdefine ffi-callback 3 4):}
+{:(cdefine ffi-callback 3 5):}
 {
   ffi_callback_struct *data;
   Scheme_Object *itypes = argv[1];
@@ -2040,7 +2061,8 @@ void free_cl_cif_args(void *ignored, void *p)
   if (ffi_prep_cif(cif, abi, nargs, rtype, atypes) != FFI_OK)
     scheme_signal_error("internal error: ffi_prep_cif did not return FFI_OK");
   {:(cmake-object "data" ffi-callback
-                  "cl_cif_args" "argv[0]" "argv[1]" "argv[2]"):}
+                  "cl_cif_args" "argv[0]" "argv[1]" "argv[2]" 
+                  "((argc > 4) && SCHEME_TRUEP(argv[4]))"):}
 #ifdef MZ_PRECISE_GC
   {
     /* put data in immobile, weak box */
@@ -2060,12 +2082,35 @@ void free_cl_cif_args(void *ignored, void *p)
 }
 
 /*****************************************************************************/
+
+void ctype_printer(Scheme_Object *ctype, int dis, Scheme_Print_Params *pp)
+{
+  char *str;
+  if (!SCHEME_CTYPEP(ctype))
+    scheme_wrong_type("Scheme->C", "C-type", 0, 1, &ctype);
+  if (CTYPE_PRIMP(ctype)) {
+    scheme_print_bytes(pp, "#<ctype:", 0, 8);
+    ctype = CTYPE_BASETYPE(ctype);
+    if (SCHEME_SYMBOLP(ctype)) {
+      str = SCHEME_SYM_VAL(ctype);
+      scheme_print_bytes(pp, str, 0, strlen(str));
+    } else {
+      scheme_print_bytes(pp, "cstruct", 0, 7);
+    }
+    scheme_print_bytes(pp, ">", 0, 1);
+  } else {
+    scheme_print_bytes(pp, "#<ctype>", 0, 8);
+  }
+}
+
+/*****************************************************************************/
 /* Initialization */
 
 void scheme_init_foreign(Scheme_Env *env)
 {
   Scheme_Env *menv;
   ctype_struct *t;
+  Scheme_Object *s;
   menv = scheme_primitive_module(scheme_intern_symbol("#%foreign"), env);
   {:(for-each (lambda (x)
                 (~ (cadr x)"_tag = scheme_make_type(\"<"(car x)">\");"))
@@ -2076,6 +2121,7 @@ void scheme_init_foreign(Scheme_Env *env)
                    (cadr x)"_MARK, " (cadr x)"_FIXUP, 1, 0);"))
               (reverse cstructs)):}
 #endif
+  scheme_set_type_printer(ctype_tag, ctype_printer);
   MZ_REGISTER_STATIC(opened_libs);
   opened_libs = scheme_make_hash_table(SCHEME_hash_string);
   {:(for-each
@@ -2090,7 +2136,11 @@ void scheme_init_foreign(Scheme_Env *env)
                 (cadr x)", \""(car x)"\", "(caddr x)", "(cadddr x)"), menv);"))
       (reverse! cfunctions))
     (for-each-type
-      (cmake-object "t" ctype "NULL"
+      ;; no need for these, at least for now:
+      ;; (~ "MZ_REGISTER_STATIC("cname"_sym);" \\
+      ;;    cname"_sym = scheme_intern_symbol(\""stype"\");")
+      (~ "s = scheme_intern_symbol(\""stype"\");")
+      (cmake-object "t" ctype "s"
         (list "(Scheme_Object*)(void*)(&ffi_type_"ftype")")
         (list "(Scheme_Object*)FOREIGN_"cname))
       (~ "scheme_add_global(\"_"stype"\", (Scheme_Object*)t, menv);")):}
