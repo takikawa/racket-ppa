@@ -1,3 +1,12 @@
+plt-scheme (4.1.1-1) unstable; urgency=low
+
+  * Make sure cdbs' and dpkg-buildpackage's CFLAGS and CXXFLAGS aren't passed
+    through to configure and make, so we don't get surprising behavior that
+    upstream isn't expecting.
+  * Update package description from PLT website (Closes: #491636)
+
+ -- Ari Pollak <ari@debian.org>  Sun, 05 Oct 2008 16:45:08 -0400
+
 plt-scheme (4.0.1-2) unstable; urgency=low
 
   * Rename package to plt-scheme, combining the drscheme and mzscheme
