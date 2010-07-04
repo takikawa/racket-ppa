@@ -31,6 +31,13 @@
           (let ([m (regexp-match #rx"^(.*/)/*[^/]*$" relto)])
             (string-append (cadr m) elem-str)))))
 
+    (define (simpler-relpath path)
+      (let loop ([s (regexp-replace* #px"(?<![.])[.]/" path "")])
+        (let ([s2 (regexp-replace #rx"([^/.]*)/[.][.]/" s "")])
+          (if (equal? s s2)
+              s
+              (loop s2)))))
+
     (define (add-main s)
       (if (regexp-match #rx"[.][^/]*$" s)
           s
@@ -38,11 +45,18 @@
 
     (define (combine-relative-elements elements)
 
+      (define (extract-base relto)
+        (let-values ([(base n d?) (split-path relto)])
+          (if (eq? base 'relative) 
+              'same 
+              (if (not base)
+                  relto ; strange case: relto is a root directory
+                  base))))
+
       ;; Used for 'file paths, so it's platform specific:
       (define (attach-to-relative-path relto)
         (apply build-path
-               (let-values ([(base n d?) (split-path relto)])
-                 (if (eq? base 'relative) 'same base))
+               (extract-base relto)
                (map (lambda (i) (if (bytes? i) (bytes->path i) i))
                     elements)))
 
@@ -51,8 +65,7 @@
       (cond
         [(or (path? relto-mp) (and (string? relto-mp) (ormap path? elements)))
          (apply build-path
-                (let-values ([(base name dir?) (split-path relto-mp)])
-                  (if (eq? base 'relative) 'same base))
+                (extract-base relto-mp)
                 (map (lambda (x) (if (bytes? x) (bytes->path x) x))
                      elements))]
         [(string? relto-mp)
@@ -96,11 +109,7 @@
                                                 (string-append s "/"))
                                               (cddr relto-mp))
                                          (list (cadr relto-mp)))))])
-             (let ([simpler (let loop ([s (regexp-replace* #px"(?<![.])[.]/" path "")])
-                              (let ([s2 (regexp-replace #rx"([^/.]*)/[.][.]/" s "")])
-                                (if (equal? s s2)
-                                    s
-                                    (loop s2))))])
+             (let ([simpler (simpler-relpath path)])
                (let ([m (regexp-match #rx"^(.*)/([^/]*)$" simpler)])
                  (if m
                      (normalize-lib `(lib ,(caddr m) ,(cadr m)))
@@ -108,8 +117,9 @@
                             "relative path escapes collection: ~s relative to ~s"
                             elements relto-mp))))))]
          [(eq? (car relto-mp) 'planet)
-         (let ([pathstr (attach-to-relative-path-string
-                         elements (cadr relto-mp))])
+         (let ([pathstr (simpler-relpath
+                         (attach-to-relative-path-string
+                          elements (cadr relto-mp)))])
            (normalize-planet `(planet ,pathstr ,(caddr relto-mp))))]
         [else (error 'combine-relative-elements
                      "don't know how to deal with: ~s" relto-mp)]))

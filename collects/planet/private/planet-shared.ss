@@ -46,7 +46,7 @@ Various common pieces of code that both the client and server need to access
       [(pkg dir)
        (let* ((at (build-assoc-table pkg dir)))
          (get-best-match at pkg))]))
-
+  
   ;; lookup-package-by-keys : string string nat nat nat -> (list path string string (listof string) nat nat) | #f
   ;; looks up and returns a list representation of the package named by the given owner,
   ;; package name, major and (exact) minor version.
@@ -249,16 +249,52 @@ Various common pieces of code that both the client and server need to access
   
   (define-struct mz-version (major minor))
   
+  
   ;; string->mz-version : string -> mz-version | #f
+  ;; Converts a string into mz-version.  We need to account
+  ;; for the change in numbering style from the 372 era to the 4.0 era.
   (define (string->mz-version str)
-    (let ((ver (regexp-match #rx"^([0-9]+)(\\.([0-9]+))?$" str)))
-      (if ver
-          (make-mz-version 
-           (string->number (list-ref ver 1))
-           (if (list-ref ver 3)
-               (string->number (list-ref ver 3))
-               0))
-          #f)))
+    (define (minor+maint-chunks->minor chunks)
+      (+ (* (string->number (car chunks)) 1000)
+         (if (> (length chunks) 1)
+             (string->number (cadr chunks))
+             0)))
+    
+    (cond
+      ;; Old style numbering with three digits in front.  The first digit
+      ;; goes up to three.
+      [(regexp-match #rx"^([0-3][0-9][0-9])\\.?([.0-9]*)$" str)
+       =>
+       (lambda (ver)
+         (let ([major (string->number (list-ref ver 1))])
+           (cond
+             [(= (string-length (list-ref ver 2)) 0)
+              (make-mz-version major 0)]
+             [else
+              (let* ([minor+maint (regexp-split #rx"\\." (list-ref ver 2))]
+                     [minor (minor+maint-chunks->minor minor+maint)])
+                (make-mz-version major minor))])))]
+      ;; New style numbering
+      [(regexp-match #rx"^([0-9]+)(\\.([.0-9]+))?$" str)
+       =>
+       (lambda (ver)
+         (cond [(list-ref ver 3)
+                (let* ([chunks (regexp-split #rx"\\." (list-ref ver 3))])
+                  (make-mz-version (+ (* (string->number (list-ref ver 1))
+                                         100)
+                                      (if (> (length chunks) 0)
+                                          (string->number (car chunks))
+                                          0))
+                                   (if (> (length (cdr chunks)) 0)
+                                       (minor+maint-chunks->minor (cdr chunks))
+                                       0)))]
+               [else
+                (make-mz-version (* (string->number (list-ref ver 1))
+                                    100)
+                                 0)]))]
+      [else #f]))
+  
+  
   
   ;; version<= : mz-version mz-version -> boolean
   ;; determines if a is the version string of an earlier mzscheme release than b
@@ -313,7 +349,7 @@ Various common pieces of code that both the client and server need to access
                       (or (not hi) (<= n hi))
                       (compatible-version? x spec))))
                  table)))
-        (if (null? matches)
+          (if (null? matches)
               #f
               (let ((best-row
                      (car 
@@ -328,13 +364,13 @@ Various common pieces of code that both the client and server need to access
                  (assoc-table-row->dir best-row)
                  (assoc-table-row->type best-row)))))))
   
-   
+  
   ;; get-installed-package : string string nat nat -> PKG | #f
   ;; gets the package associated with this package specification, if any
   (define (get-installed-package owner name maj min)
     (lookup-package (make-pkg-spec name maj min min (list owner) #f (version))))
-    
-    
+  
+  
   ; ==========================================================================================
   ; UTILITY
   ; Miscellaneous utility functions
