@@ -20,15 +20,15 @@ extern MZ_DLLIMPORT int GC_is_marked(void *);
 #define NODE_STARTS_OFFSET 1
 #define NODE_GCABLE_OFFSET 2
 
-static void **tree;
+THREAD_LOCAL_DECL(static void **codetab_tree);
+THREAD_LOCAL_DECL(static int during_set);
 
 static int do_clear_symbols(void **t, unsigned long start, int offset, unsigned long addr, int clearing);
-static int during_set;
 
 static void *find_symbol(unsigned long v)
 {
   unsigned long k;
-  void **t = tree, *val;
+  void **t = codetab_tree, *val;
   int offset = (JIT_WORD_SIZE * 8);
   
   while (offset) {
@@ -68,14 +68,14 @@ static void add_symbol(unsigned long start, unsigned long end, void *value, int 
   int offset = (JIT_WORD_SIZE * 8), split_offset = 0;
   void **t1, **t2, **split_t, *val1, *val2;
 
-  if (!tree) {
-    REGISTER_SO(tree);
-    tree = malloc_node();
+  if (!codetab_tree) {
+    REGISTER_SO(codetab_tree);
+    codetab_tree = malloc_node();
   }
 
   during_set++;
   
-  t1 = t2 = tree;
+  t1 = t2 = codetab_tree;
   split_t = NULL;
   while (offset) {
     offset -= LOG_KEY_SIZE;
@@ -175,7 +175,7 @@ static void add_symbol(unsigned long start, unsigned long end, void *value, int 
     /* Prune empty branches in the tree. Only do this if this
        object is mapped deeply enough in the tree, otherwise
        we end up scanning the whole tree. */
-    do_clear_symbols(tree, start, 0, 0, 0);
+    do_clear_symbols(codetab_tree, start, 0, 0, 0);
   }
 #endif
 }
@@ -197,7 +197,7 @@ static int do_clear_symbols(void **t, unsigned long start, int offset, unsigned 
 	/* GCable pointer starts here */
 #ifndef MZ_PRECISE_GC
 	/* Conservative GC: GCable flag means use GC_is_marked */
-	p = (void *)(addr + (i << offset));
+	p = (void *)(addr + ((unsigned long)i << offset));
 	if (!GC_is_marked(p))
 	  clearing = 1;
 #else
@@ -228,7 +228,7 @@ static int do_clear_symbols(void **t, unsigned long start, int offset, unsigned 
 	subt = (void **)val;
 	clearing = do_clear_symbols(subt, start,
 				    offset - LOG_KEY_SIZE,
-				    (addr + (i << offset)),
+				    (addr + ((unsigned long)i << offset)),
 				    clearing);
 	if (!during_set) {
 	  /* If the branch is empty, then drop it. */
@@ -258,8 +258,8 @@ static int do_clear_symbols(void **t, unsigned long start, int offset, unsigned 
 
 static void clear_symbols_for_collected()
 {
-  if (tree) {
-    do_clear_symbols(tree, 0, (JIT_WORD_SIZE * 8) - LOG_KEY_SIZE, 0, 0); 
+  if (codetab_tree) {
+    do_clear_symbols(codetab_tree, 0, (JIT_WORD_SIZE * 8) - LOG_KEY_SIZE, 0, 0); 
   }
 }
 

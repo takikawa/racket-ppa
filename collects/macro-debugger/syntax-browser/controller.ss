@@ -1,10 +1,11 @@
-
 #lang scheme/base
 (require scheme/class
-         macro-debugger/util/class-iop
+         (rename-in unstable/class-iop
+                    [send/i send:]
+                    [init-field/i init-field:])
          "interfaces.ss"
          "partition.ss"
-         "../util/notify.ss")
+         unstable/gui/notify)
 (provide controller%)
 
 ;; displays-manager-mixin
@@ -27,8 +28,8 @@
 (define selection-manager-mixin
   (mixin (displays-manager<%>) (selection-manager<%>)
     (inherit-field displays)
-    (field/notify selected-syntax (new notify-box% (value #f)))
-    
+    (define-notify selected-syntax (new notify-box% (value #f)))
+
     (super-new)
     (listen-selected-syntax
      (lambda (new-value)
@@ -53,8 +54,8 @@
 (define secondary-partition-mixin
   (mixin (displays-manager<%>) (secondary-partition<%>)
     (inherit-field displays)
-    (field/notify identifier=? (new notify-box% (value #f)))
-    (field/notify secondary-partition (new notify-box% (value #f)))
+    (define-notify identifier=? (new notify-box% (value #f)))
+    (define-notify secondary-partition (new notify-box% (value #f)))
 
     (listen-identifier=?
      (lambda (name+proc)

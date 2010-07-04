@@ -20,7 +20,7 @@
 
 @section{Primary Slide Functions}
 
-@defproc[(slide [#:title title (or/c #f string?) #f]
+@defproc[(slide [#:title title (or/c #f string? pict?) #f]
                 [#:name  name (or/c #f string?) title]
                 [#:layout layout (or/c 'auto 'center 'top 'tall) 'auto]
                 [#:inset inset slide-inset? (make-slide-inset 0 0 0 0)]
@@ -28,7 +28,7 @@
                 [#:condense? condense? any/c (and timeout #t)]
                 [element (flat-rec-contract elem/c
                            (or/c pict? 
-                                (or/c 'next 'next! 'alts 'alts~ 'nothing)
+                                'next 'next! 'alts 'alts~ 'nothing
                                 comment?
                                 (listof (listof elem/c))))] ...)
           void?]{
@@ -120,7 +120,10 @@ among the @scheme[element]s are decoded by performing the following
 substitutions: @litchar{---} @d=> @litchar["\u2014"], @litchar{--}
 @d=> @litchar["\u2013"], @litchar{``} @d=> @litchar["\u201C"],
 @litchar{''} @d=> @litchar["\u201D"], @litchar{'} @d=>
-@litchar["\u2019"].
+@litchar["\u2019"]. In addition, to better work with
+@schememodname[at-exp] notation, if an @scheme[element] is @scheme["\n"],
+then it is dropped along with any spaces at the start of the next
+element.
 
 Strings are split at spaces for word-wrapping to fit the page, and a
 space is added between elements. If a string element starts with one
@@ -429,7 +432,7 @@ a single pict; the assembling function takes a string for the title
 (or @scheme[#f]), a separation for the title (if any) and pict, and a
 pict for the slide content (not counting the title).
 
-The result is of the assembler is @scheme[lt-superimpose]d with the
+The result is of the assembler is @scheme[ct-superimpose]d with the
 client area, but the result pict might draw outside the client region
 to paint the screen margins, too.
 

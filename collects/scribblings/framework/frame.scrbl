@@ -1,7 +1,10 @@
-#lang scribble/doc @(require scribble/manual
-scribble/extract scheme/include) @(require (for-label
-framework)) @(require (for-label scheme/gui)) @(require
-(for-syntax (prefix-in s: scribble/reader))) @title{Frame}
+#lang scribble/doc 
+@(require scribble/manual scribble/extract scheme/include)
+@(require (for-label framework))
+@(require (for-label scheme/gui))
+@(require (for-syntax (prefix-in s: scribble/reader)))
+
+@title{Frame}
 
 @definterface[frame:basic<%> (frame%)]{
   Classes matching this interface support the basic 
@@ -104,7 +107,7 @@ framework)) @(require (for-label scheme/gui)) @(require
   object returned by
   @scheme[group:get-the-frame-group].
 
-  Do not give @scheme[panel%]s or @scheme[control<%>]s this frame as
+  Do not give @scheme[panel%] or @scheme[control<%>] objects this frame as
   parent. Instead, use the result of the
   @method[frame:basic<%> get-area-container]
   method.
@@ -115,6 +118,11 @@ framework)) @(require (for-label scheme/gui)) @(require
   @method[frame:basic<%> get-menu-bar%]. It only passes the frame as an initialization argument.
   In addition, it creates the windows menu in the menu bar.
 
+  This mixin calls its @method[window<%> accept-drop-files] with @scheme[#t].
+  
+  It also calls its @method[frame% set-icon] method according to the current
+  value of @scheme[frame:current-icon].
+  
   See also
   @scheme[frame:reorder-menus].
   @defmethod*[#:mode override (((show (on? boolean?)) void))]{
@@ -921,7 +929,7 @@ framework)) @(require (for-label scheme/gui)) @(require
     frame.
 
   }
-  @defmethod[(unhide-search [move-focus? boolean? #f]) void?]{
+  @defmethod[(unhide-search [move-focus? boolean?]) void?]{
     When the searching sub window is hidden, makes it visible. If 
     @scheme[move-focus?] is @scheme[#f], the focus is not moved,
     but if it is any other value, the focus is moved to the find

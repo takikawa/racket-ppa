@@ -1238,11 +1238,15 @@
   
   (def/public (add [snip-class% c])
     (let ([name (send c get-classname)])
-      (hash-set! ht name c)
-      (let ([n (hash-count pos-ht)])
-        (hash-set! pos-ht c n)
-        (hash-set! rev-pos-ht n c))))
-
+      (let ([old (hash-ref ht name #f)])
+        (hash-set! ht name c)
+        (let ([n (if old
+                     (hash-ref pos-ht old)
+                     (hash-count pos-ht))])
+          (when old (hash-remove! pos-ht old))
+          (hash-set! pos-ht c n)
+          (hash-set! rev-pos-ht n c)))))
+    
   (def/public (number) (hash-count ht))
 
   (def/public (nth [exact-nonnegative-integer? n]) (hash-ref rev-pos-ht n #f)))
@@ -1315,13 +1319,21 @@
                   (begin
                     (when (snip-class-link-name s)
                       (let ([c (find (snip-class-link-name s))])
-                        (when (or (not c)
-                                  ((send c get-version) . < . (snip-class-link-reading-version s)))
-                          ;; unknown class/version;
-                          ;; since we #f out sl->name, error is only shown once
-                          (log-error (format "unknown snip class: ~e or version: ~e" 
-                                             (snip-class-link-name s)
-                                             (snip-class-link-reading-version s))))
+                        (cond
+                          [(not c)
+                           (log-error (format "unknown snip class: ~e (version: ~e)" 
+                                              (snip-class-link-name s)
+                                              (snip-class-link-reading-version s)))]
+                          [((send c get-version) . < . (snip-class-link-reading-version s))
+                           ;; unknown class/version;
+                           ;; since we #f out sl->name, error is only shown once
+                           (log-error (format "unknown snip class: ~e; found version: ~e, need at least version ~e" 
+                                              (snip-class-link-name s)
+                                              (send c get-version)
+                                              (snip-class-link-reading-version s)))]
+                          [else
+                           ;; no prolems
+                           (void)])
                         (set-snip-class-link-name! s #f)
                         (set-snip-class-link-c! s c)))
                     (snip-class-link-c s))))

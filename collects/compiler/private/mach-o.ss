@@ -24,13 +24,18 @@
 
 (define move-link-edit? #t)
 
+(define exe-id
+  (if (equal? (path->bytes (system-library-subpath #f)) #"x86_64-macosx")
+      #xFeedFacf
+      #xFeedFace))
+
 (define (add-plt-segment file segdata)
   (let-values ([(p out) (open-input-output-file file #:exists 'update)])
     (dynamic-wind
         void
         (lambda ()
           (file-stream-buffer-mode out 'none)
-          (check-same #xFeedFace (read-ulong p))
+          (check-same exe-id (read-ulong p))
           (read-ulong p)
           (read-ulong p)
           (check-same #x2 (read-ulong p))
@@ -43,7 +48,9 @@
                  [link-edit-pos #f]
                  [link-edit-addr 0]
                  [link-edit-offset 0]
-                 [link-edit-len 0])
+                 [link-edit-len 0]
+                 [dyld-info-pos #f]
+                 [dyld-info-offs #f])
             ;; (printf "~a cmds, length 0x~x\n" cnt cmdssz)
             (read-ulong p)
             (let loop ([cnt cnt])
@@ -98,6 +105,20 @@
                     [(#x16)
                      ;; 2-level hints table
                      (set! hints-pos pos)]
+                    [(#x22 #x80000022)
+                     ;; LC_DYLD_INFO
+                     (let ([rebaseoff (read-ulong p)]
+                           [rebasesize (read-ulong p)]
+                           [bindoff (read-ulong p)]
+                           [bindsize (read-ulong p)]
+                           [weakbindoff (read-ulong p)]
+                           [weakbindsize (read-ulong p)]
+                           [lazybindoff (read-ulong p)]
+                           [lazybindsize (read-ulong p)]
+                           [exportbindoff (read-ulong p)]
+                           [exportbindsize (read-ulong p)])
+                       (set! dyld-info-pos pos)
+                       (set! dyld-info-offs (vector bindoff weakbindoff lazybindoff exportbindoff)))]
                     [else
                      (void)])
                   (file-position p (+ pos sz))
@@ -181,7 +202,17 @@
                   (file-position p (+ hints-pos 8))
                   (let ([hints-offset (read-ulong p)])
                     (file-position out (+ hints-pos 8))
-                    (write-ulong (+ hints-offset outlen) out))))
+                    (write-ulong (+ hints-offset outlen) out)))
+                ;; Shift dyld-info offs
+                (when dyld-info-pos
+                  (let ([update (lambda (n)
+                                  (unless (< (vector-ref dyld-info-offs n) out-offset)
+                                    (file-position out (+ dyld-info-pos 56 16 (* n 8)))
+                                    (write-ulong (+ (vector-ref dyld-info-offs n) outlen) out)))])
+                    (update 0)
+                    (update 1)
+                    (update 2)
+                    (update 3))))
               ;; Write segdata to former link-data offset:
               (file-position out out-offset)
               (display segdata out)
@@ -209,7 +240,7 @@
     (dynamic-wind
         void
         (lambda ()
-          (check-same #xFeedFace (read-ulong p))
+          (check-same exe-id (read-ulong p))
           (read-ulong p)
           (read-ulong p)
           (check-same #x2 (read-ulong p))

@@ -58,7 +58,7 @@
 @(define redex-eval (make-base-eval))
 @(interaction-eval #:eval redex-eval (require redex/reduction-semantics))
 
-@title{@bold{Redex}: Debugging Operational Semantics}
+@title{@bold{Redex}: Practical Semantics Engineering}
 
 @author["Robert Bruce Findler" "Casey Klein"]
 
@@ -128,7 +128,7 @@ in the grammar are terminals.
 
 @itemize[
 
-@item{The @defpattech[any] @pattern matches any sepxression.
+@item{The @defpattech[any] @pattern matches any sexpression.
 This @pattern may also be suffixed with an underscore and another
 identifier, in which case they bind the full name (as if it
 were an implicit @pattech[name] @pattern) and match the portion
@@ -192,9 +192,9 @@ symbol except those that are used as literals elsewhere in
 the language.
 }
 
-@item{The @defpattech[hole] @pattern matches anything when inside a matching
+@item{The @defpattech[hole] @pattern matches anything when inside
 the first argument to an @pattech[in-hole] @|pattern|. Otherwise, 
-it matches only the hole.
+it matches only a hole.
 }
 
 @item{The @defpattech[symbol] @pattern stands for a literal symbol that must
@@ -202,7 +202,10 @@ match exactly, unless it is the name of a non-terminal in a
 relevant language or contains an underscore. 
 
 If it is a non-terminal, it matches any of the right-hand
-sides of that non-terminal.
+sides of that non-terminal. If the non-terminal appears
+twice in a single pattern, then the match is constrained
+to expressions that are the same, unless the pattern is part
+of a grammar, in which case there is no constraint.
 
 If the symbol is a non-terminal followed by an underscore,
 for example @tt{e_1}, it is implicitly the same as a name @pattern
@@ -369,28 +372,19 @@ clause is followed by an ellipsis.  Nested ellipses produce
 nested lists.
 }
 
-@defproc[(set-cache-size! [size positive-integer?]) void?]{
-
-Changes the cache size; the default size is @scheme[350].
-
-The cache is per-pattern (ie, each pattern has a cache of size at most
-350 (by default)) and is a simple table that maps expressions to how
-they matched the pattern (ie, the bindings for the pattern
-variables). When the cache gets full, it is thrown away and a new
-cache is started.
+@defparam[caching-enabled? on? boolean?]{
+  When this parameter is @scheme[#t] (the default), Redex caches the results of 
+  pattern matching and metafunction evaluation. There is a separate cache for
+  each pattern and metafunction; when one fills (see @scheme[set-cache-size!]),
+  Redex evicts all of the entries in that cache.
+                                         
+  Caching should be disabled when matching a pattern that depends on values
+  other than the in-scope pattern variables or evaluating a metafunction
+  that reads or writes mutable external state.
 }
 
-@defparam[caching-enabled? on? boolean?]{
-  This is a parameter that controls whether or not a cache
-  is consulted (and updated) while matching and while evaluating
-  metafunctions.
-
-  If it is @scheme[#t], then side-conditions and the right-hand sides
-  of metafunctions are assumed to only depend on the values of the
-  pattern variables in scope (and thus not on any other external
-  state).
-
-  Defaults to @scheme[#t].
+@defproc[(set-cache-size! [size positive-integer?]) void?]{                                                           
+Changes the size of the per-pattern and per-metafunction caches. The default size is @scheme[350].
 }
 
 @section{Terms}
@@ -484,6 +478,14 @@ with which it was bound by @scheme[term-let]. It is also an error
 for two @scheme[term-let]-bound identifiers bound to lists of
 different lengths to appear together inside an ellipsis.
 }
+
+@defidform[hole]{ Recognized specially within
+  @scheme[term]. A @scheme[hole] form is an
+  error elsewhere.  }
+
+@defidform[in-hole]{ Recognized specially within
+  @scheme[reduction-relation]. An @scheme[in-hole] form is an
+  error elsewhere.  }
 
 @defform/subs[(term-let ([tl-pat expr] ...) body)
               ([tl-pat identifier (tl-pat-ele ...)]
@@ -626,18 +628,17 @@ extended non-terminals. For example, this language:
 @schemeblock[
   (define-extended-language lc-num-lang
     lc-lang
-    (e ....     (code:comment "extend the previous `e' non-terminal")
+    (v ....     (code:comment "extend the previous `v' non-terminal")
        +
-       number)
-    (v ....
-       + 
        number)
     (x (variable-except lambda +)))
 ]
 
-extends lc-lang with two new alternatives for both the @scheme[e]
-and @scheme[v] nonterminal, replaces the @scheme[x] non-terminal with a
-new one, and carries the @scheme[c] non-terminal forward. 
+extends lc-lang with two new alternatives for the @scheme[v]
+non-terminal, carries forward the @scheme[e] and @scheme[c]
+non-terminals, and replaces the @scheme[x] non-terminal with a
+new one (which happens to be equivalent to the one that would 
+have been inherited).
 
 The four-period ellipses indicates that the new language's
 non-terminal has all of the alternatives from the original
@@ -701,18 +702,19 @@ The fresh variables clause generates variables that do not
 occur in the term being matched. If the @scheme[fresh-clause] is a
 variable, that variable is used both as a binding in the
 rhs-exp and as the prefix for the freshly generated
-variable. 
+variable. (The variable does not have to be
+a non-terminal in the language of the reduction relation.)
 
 The second case of a @scheme[fresh-clause] is used when you want to
 generate a sequence of variables. In that case, the ellipses
 are literal ellipses; that is, you must actually write
-ellipses in your rule. The variable var1 is like the
+ellipses in your rule. The variable @scheme[var1] is like the
 variable in first case of a @scheme[fresh-clause], namely it is
 used to determine the prefix of the generated variables and
 it is bound in the right-hand side of the reduction rule,
 but unlike the single-variable fresh clause, it is bound to
-a sequence of variables. The variable var2 is used to
-determine the number of variables generated and var2 must be
+a sequence of variables. The variable @scheme[var2] is used to
+determine the number of variables generated and @scheme[var2] must be
 bound by the left-hand side of the rule.
 
 The side-conditions are expected to all hold, and have the
@@ -883,16 +885,16 @@ all non-GUI portions of Redex) and also exported by
 @schememodname[redex] (which includes all of Redex).
 
 @defform/subs[#:literals (: ->)
-              (define-metafunction language-exp
+             (define-metafunction language
                contract
                [(name @#,ttpattern ...) @#,tttterm extras ...] 
                ...)
-               ([contract (code:line) 
-                          (code:line id : @#,ttpattern ... -> @#,ttpattern)]
-                [extras (side-condition scheme-expression)
-                        (where tl-pat @#,tttterm)]
-                [tl-pat identifier (tl-pat-ele ...)]
-                [tl-pat-ele tl-pat (code:line tl-pat ... (code:comment "a literal ellipsis"))])]{
+             ([contract (code:line) 
+                        (code:line id : @#,ttpattern ... -> @#,ttpattern)]
+              [extras (side-condition scheme-expression)
+                      (where tl-pat @#,tttterm)]
+              [tl-pat identifier (tl-pat-ele ...)]
+              [tl-pat-ele tl-pat (code:line tl-pat ... (code:comment "a literal ellipsis"))])]{
 
 The @scheme[define-metafunction] form builds a function on
 sexpressions according to the pattern and right-hand-side
@@ -913,7 +915,7 @@ or if the contract is violated.
 
 Note that metafunctions are assumed to always return the same results
 for the same inputs, and their results are cached, unless
-@scheme[caching-enable?] is set to @scheme[#f]. Accordingly, if a
+@scheme[caching-enabled?] is set to @scheme[#f]. Accordingly, if a
 metafunction is called with the same inputs twice, then its body is
 only evaluated a single time.
 
@@ -932,9 +934,7 @@ an expression in the lc-lang above:
 
 The first argument to define-metafunction is the grammar
 (defined above). Following that are three cases, one for
-each variation of expressions (e in lc-lang). The right-hand
-side of each clause begins with a comma, since they are
-implicitly wrapped in @|tttterm|. The free variables of an
+each variation of expressions (e in lc-lang). The free variables of an
 application are the free variables of each of the subterms;
 the free variables of a variable is just the variable
 itself, and the free variables of a lambda expression are
@@ -968,17 +968,32 @@ match.
 
 }
 
-@defform[(define-metafunction/extension extending-name language-exp 
+@defform[(define-metafunction/extension f language 
            contract
-           [(name @#,ttpattern ...) @#,tttterm (side-condition scheme-expression) ...]
+           [(g @#,ttpattern ...) @#,tttterm extras ...] 
            ...)]{
 
-This defines a metafunction as an extension of an existing
-one. The extended metafunction behaves as if the original
-patterns were in this definitions, with the name of the
-function fixed up to be @scheme[extending-name]. 
+Defines a metafunction @scheme[g] as an extension of an existing
+metafunction @scheme[f]. The metafunction @scheme[g] behaves as 
+if @scheme[f]'s clauses were appended to its definition (with 
+occurrences of @scheme[f] changed to @scheme[g] in the inherited
+clauses).
 }
 
+For example, @scheme[define-metafunction/extension] may be used to extend
+the free-vars function above to the forms introduced by the language
+lc-num-lang.
+                
+@schemeblock[
+(define-metafunction/extension free-vars lc-num-lang
+  free-vars-num : e -> (x ...)
+  [(free-vars-num number) 
+   ()]
+  [(free-vars-num (+ e_1 e_2))
+   (∪ (free-vars-num e_1)
+      (free-vars-num e_2))])
+]
+                
 @defform[(in-domain? (metafunction-name @#,tttterm ...))]{
 Returns @scheme[#t] if the inputs specified to @scheme[metafunction-name] are
 legtimate inputs according to @scheme[metafunction-name]'s contract,
@@ -986,7 +1001,7 @@ and @scheme[#f] otherwise.
 }
 
 @defform/subs[#:literals ()
-              (define-relation language-exp
+              (define-relation language
                [(name @#,ttpattern ...) @#,tttterm ...] ...)
                ([tl-pat identifier (tl-pat-ele ...)]
                 [tl-pat-ele tl-pat (code:line tl-pat ... (code:comment "a literal ellipsis"))])]{
@@ -1062,33 +1077,38 @@ counters so that next time this function is called, it
 prints the test results for the next round of tests.
 }
 
-@defproc[(make-coverage [r reduction-relation?]) coverage?]{
-Constructs a structure to contain the per-case test coverage of
-the relation @scheme[r]. Use with @scheme[relation-coverage]
-and @scheme[covered-cases].
+@defform/subs[(make-coverage subject)
+              ([subject (code:line metafunction)
+                        (code:line relation-expr)])]{
+Constructs a structure (recognized by @scheme[coverage?])
+to contain per-case test coverage of the supplied metafunction
+or reduction relation. Use with @scheme[relation-coverage] and 
+@scheme[covered-cases].
 }
 
 @defproc[(coverage? [v any/c]) boolean?]{
 Returns @scheme[#t] for a value produced by @scheme[make-coverage]
 and @scheme[#f] for any other.}
 
-@defparam[relation-coverage c (or/c false/c coverage?)]{
-When @scheme[c] is a @scheme[coverage] structure, rather than 
-@scheme[#f] (the default), procedures such as
-@scheme[apply-reduction-relation], @scheme[traces], etc. count 
-the number applications of each case of the
-@scheme[reduction-relation], storing the results in @scheme[c].
-}
+@defparam[relation-coverage tracked (listof coverage?)]{
+Redex populates the coverage records in @scheme[tracked] (default @scheme[null]),
+counting the times that tests exercise each case of the associated metafunction
+and relations.}
 
 @defproc[(covered-cases 
           [c coverage?])
          (listof (cons/c string? natural-number/c))]{
 Extracts the coverage information recorded in @scheme[c], producing
-an association list mapping names to application counts.}
+an association list mapping names (or source locations, in the case of
+metafunctions or unnamed reduction-relation cases) to application counts.}
 
 @examples[
 #:eval redex-eval
        (define-language empty-lang)
+       
+       (define-metafunction empty-lang
+         [(plus number_1 number_2)
+          ,(+ (term number_1) (term number_2))])
        
        (define equals
          (reduction-relation 
@@ -1096,13 +1116,16 @@ an association list mapping names to application counts.}
           (--> (+) 0 "zero")
           (--> (+ number) number)
           (--> (+ number_1 number_2 number ...)
-               (+ ,(+ (term number_1) (term number_2))
+               (+ (plus number_1 number_2)
                   number ...)
                "add")))
-       (let ([coverage (make-coverage equals)])
-         (parameterize ([relation-coverage coverage])
+       (let ([equals-coverage (make-coverage equals)]
+             [plus-coverage (make-coverage plus)])
+         (parameterize ([relation-coverage (list equals-coverage 
+                                                 plus-coverage)])
            (apply-reduction-relation* equals (term (+ 1 2 3)))
-           (covered-cases coverage)))]
+           (values (covered-cases equals-coverage)
+                   (covered-cases plus-coverage))))]
 
 @defform/subs[(generate-term language @#,ttpattern size-exp kw-args ...)
               ([kw-args (code:line #:attempts attempts-expr)
@@ -1129,8 +1152,9 @@ sub-term---regenerating the sub-term if necessary. The optional keyword
 argument @scheme[retries-expr] (default @scheme[100]) bounds the number of times that 
 @scheme[generate-term] retries the generation of any sub-term. If 
 @scheme[generate-term] is unable to produce a satisfying term after 
-@scheme[retries-expr] attempts, it raises an error}
-
+@scheme[retries-expr] attempts, it raises an exception recognized by
+@scheme[exn:fail:redex:generation-failure?].}
+                                                            
 @defform/subs[(redex-check language @#,ttpattern property-expr kw-arg ...)
               ([kw-arg (code:line #:attempts attempts-expr)
                        (code:line #:source metafunction)
@@ -1222,6 +1246,12 @@ when @scheme[relation] is a relation on @scheme[L] with @scheme[n] rules.}
                            [retries-expr natural-number/c])]{
 Like @scheme[check-reduction-relation] but for metafunctions.}
 
+@defproc[(exn:fail:redex:generation-failure? [v any/c]) boolean?]{
+  Recognizes the exceptions raised by @scheme[generate-term], 
+  @scheme[redex-check], etc. when those forms are unable to produce
+  a term matching some pattern.
+}
+                                                            
 @deftech{Debugging PLT Redex Programs}
 
 It is easy to write grammars and reduction rules that are
@@ -1334,7 +1364,10 @@ filled in for the remaining colors.
 The @scheme[scheme-colors?] argument, if @scheme[#t] causes
 @scheme[traces] to color the contents of each of the windows according
 to DrScheme's Scheme mode color Scheme. If it is @scheme[#f],
-@scheme[traces] just uses black for the color scheme.
+@scheme[traces] just uses black for the color scheme. 
+In addition, Scheme-mode parenthesis highlighting is
+enabled when @scheme[scheme-colors?]
+is @scheme[#t] and not when it is @scheme[#f].
 
 The @scheme[term-filter] function is called each time a new node is
 about to be inserted into the graph. If the filter returns false, the
@@ -1578,12 +1611,14 @@ Slideshow (see
 This section documents two classes of operations, one for
 direct use of creating postscript figures for use in papers
 and for use in DrScheme to easily adjust the typesetting:
+@scheme[render-term],
 @scheme[render-language],
 @scheme[render-reduction-relation], 
 @scheme[render-metafunctions], and
 @scheme[render-lw], 
 and one
 for use in combination with other libraries that operate on picts
+@scheme[term->pict],
 @scheme[language->pict],
 @scheme[reduction-relation->pict],
 @scheme[metafunction->pict], and
@@ -1591,6 +1626,24 @@ for use in combination with other libraries that operate on picts
 The primary difference between these functions is that the former list
 sets @scheme[dc-for-text-size] and the latter does not.
 
+@defproc[(render-term [lang compiled-lang?] [term any/c] [file (or/c #f path-string?)]) 
+         (if file void? pict?)]{
+  Renders the term @scheme[term]. If @scheme[file] is @scheme[#f],
+  it produces a pict; if @scheme[file] is a path,  it saves
+  Encapsulated PostScript in the provided filename. See
+  @scheme[render-language] for details on the construction of the pict.
+  }
+
+                               
+@defproc[(term->pict [lang compiled-lang?] [term any/c]) pict?]{
+ Produces a pict like @scheme[render-term], but without
+ adjusting @scheme[dc-for-text-size].
+
+ This function is primarily designed to be used with
+ Slideshow or with other tools that combine picts together.
+}
+
+                               
 @defproc[(render-language [lang compiled-lang?]
                           [file (or/c false/c path-string?) #f]
                           [#:nts nts (or/c false/c (listof (or/c string? symbol?)))
@@ -1616,7 +1669,7 @@ are otherwise setting @scheme[dc-for-text-size].  }
          pict?]{
 
 Produce a pict like @scheme[render-language], but without
-adjust @scheme[dc-for-text-size].
+adjusting @scheme[dc-for-text-size].
 
 This function is primarily designed to be used with
 Slideshow or with other tools that combine picts together.

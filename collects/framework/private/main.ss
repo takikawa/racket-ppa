@@ -76,13 +76,17 @@
                          '("local")
                          (λ (x) (and (list? x) (andmap string? x))))
 (preferences:set-default 'framework:square-bracket:letrec
-                         '("let" 
-                           "let*" "let-values" "let*-values"
-                           "let-syntax" "let-struct" "let-syntaxes"
-                           "letrec"
-                           "letrec-syntaxes" "letrec-syntaxes+values" "letrec-values"
-                           "parameterize"
-                           "with-syntax")
+                         (let ([fors '("for" "for/list" "for/hash" "for/and" "for/or" "for/first" "for/last")])
+                           (append fors
+                                   (map (λ (x) (regexp-replace #rx"for" x "for*"))
+                                        fors)
+                                   '("let" 
+                                     "let*" "let-values" "let*-values"
+                                     "let-syntax" "let-struct" "let-syntaxes"
+                                     "letrec"
+                                     "letrec-syntaxes" "letrec-syntaxes+values" "letrec-values"
+                                     "parameterize"
+                                     "with-syntax")))
                          (λ (x) (and (list? x) (andmap string? x))))
 
 (preferences:set-default 'framework:white-on-black? #f boolean?)
@@ -96,7 +100,7 @@
 (preferences:add-callback 'framework:special-meta-key (λ (p v) (map-command-as-meta-key v)))
 (map-command-as-meta-key (preferences:get 'framework:special-meta-key))
 
-(preferences:set-default 'framework:fraction-snip-style 'mixed (λ (x) (memq x '(mixed improper))))
+(preferences:set-default 'framework:fraction-snip-style 'mixed (λ (x) (memq x '(mixed improper decimal))))
 
 (preferences:set-default 'framework:standard-style-list:font-name
                          (get-family-builtin-face 'modern)
@@ -199,7 +203,7 @@
 
 (preferences:set-default 'framework:highlight-parens #t boolean?)
 (preferences:set-default 'framework:fixup-parens #t boolean?)
-(preferences:set-default 'framework:fixup-open-parens #t boolean?)
+(preferences:set-default 'framework:fixup-open-parens #f boolean?)
 (preferences:set-default 'framework:paren-match #t boolean?)
 (let ([hash-table (make-hasheq)])
   (for-each (λ (x) 
@@ -257,7 +261,10 @@
                parameterize
                call-with-input-file call-with-input-file* with-input-from-file
                with-input-from-port call-with-output-file
-               with-output-to-file with-output-to-port))
+               with-output-to-file with-output-to-port
+
+	       for-all
+	       ))
   (preferences:set-default 
    'framework:tabify
    (list hash-table #rx"^begin" #rx"^def" #f)

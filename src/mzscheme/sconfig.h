@@ -337,6 +337,12 @@
 #  error Unported platform.
 # endif
 
+/* pthreads always enabled via configure', and
+   initial pthread's stack size doesn't use rlimit: */
+# define ASSUME_FIXED_STACK_SIZE
+# define FIXED_STACK_SIZE 1048576
+# define USE_PTHREAD_INSTEAD_OF_ITIMER
+
 # include "uconfig.h"
 # undef HAS_STANDARD_IOB
 
@@ -645,13 +651,21 @@
 # ifdef __POWERPC__
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "ppc-darwin"
 # else
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-darwin"
+#  ifdef __x86_64__
+#   define SCHEME_PLATFORM_LIBRARY_SUBPATH "x86_64-darwin"
+#  else
+#   define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-darwin"
+#  endif
 # endif
 #else
 # ifdef __POWERPC__
 #  define SCHEME_PLATFORM_LIBRARY_SUBPATH "ppc-macosx"
 # else
-#  define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-macosx"
+#  ifdef __x86_64__
+#   define SCHEME_PLATFORM_LIBRARY_SUBPATH "x86_64-macosx"
+#  else
+#   define SCHEME_PLATFORM_LIBRARY_SUBPATH "i386-macosx"
+#  endif
 # endif
 #endif
 
@@ -693,8 +707,10 @@
 #  define OS_X 1
 #endif
 
-#ifdef __POWERPC__
+#if defined(__POWERPC__)
 # define MZ_USE_JIT_PPC
+#elif defined(__x86_64__)
+# define MZ_USE_JIT_X86_64
 #else
 # define MZ_USE_JIT_I386
 # define ASM_DBLPREC_CONTROL_87

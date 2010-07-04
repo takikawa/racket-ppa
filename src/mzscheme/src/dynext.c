@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 1995-2002 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -105,8 +105,9 @@ Scheme_Extension_Table *scheme_extension_table;
 #endif
 
 #ifndef NO_DYNAMIC_LOAD
-static Scheme_Hash_Table *loaded_extensions; /* hash on scheme_initialize pointer */
-static Scheme_Hash_Table *fullpath_loaded_extensions; /* hash on full path name */
+/* FIXME disallow extensions under places */
+FIXME_LATER static Scheme_Hash_Table *loaded_extensions; /* hash on scheme_initialize pointer */
+FIXME_LATER static Scheme_Hash_Table *fullpath_loaded_extensions; /* hash on full path name */
 #endif
 
 #ifdef MZ_PRECISE_GC 
@@ -463,18 +464,11 @@ static Scheme_Object *do_load_extension(const char *filename,
 #endif
 }
 
-#ifdef MZ_XFORM
-START_XFORM_SKIP;
-#endif
-
 void scheme_register_extension_global(void *ptr, long size)
+  XFORM_SKIP_PROC
 {
   GC_add_roots((char *)ptr, (char *)(((char *)ptr) + size + 1));
 }
-
-#ifdef MZ_XFORM
-END_XFORM_SKIP;
-#endif
 
 static Scheme_Object *load_extension(int argc, Scheme_Object **argv)
 {

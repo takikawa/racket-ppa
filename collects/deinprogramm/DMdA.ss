@@ -2,17 +2,26 @@
 
 (require syntax/docprovide)
 
-(require test-engine/scheme-tests)
+(require test-engine/scheme-tests
+	 (lib "test-info.scm" "test-engine")
+	 scheme/class)
 
 (require deinprogramm/contract/module-begin
-	 deinprogramm/contract/contract-syntax)
+	 deinprogramm/contract/contract
+	 deinprogramm/contract/contract-test-engine
+	 (except-in deinprogramm/contract/contract-syntax property))
 
 (require (for-syntax scheme/base)
 	 (for-syntax stepper/private/shared))
 
 (require deinprogramm/define-record-procedures)
 
+(require (only-in lang/private/teachprims beginner-equal? beginner-equal~?))
+
 (require (for-syntax deinprogramm/syntax-checkers))
+
+(require (rename-in deinprogramm/quickcheck/quickcheck
+		    (property quickcheck:property)))
 
 (provide provide lib planet rename-out require #%datum #%module-begin #%top-interaction) ; so we can use this as a language
 
@@ -20,15 +29,16 @@
 
 (provide (all-from-out deinprogramm/define-record-procedures))
 (provide (all-from-out test-engine/scheme-tests))
-(provide define-contract :
-	 -> mixed one-of predicate combined property)
+(provide contract define-contract :
+	 -> mixed one-of predicate combined)
 
 (provide number real rational integer natural
 	 boolean true false
 	 string symbol
 	 empty-list
 	 chocolate-cookie
-	 unspecific)
+	 unspecific
+	 property)
 
 (define-syntax provide/rename
   (syntax-rules ()
@@ -60,6 +70,10 @@
 
 (provide DMdA-advanced-lambda
 	 DMdA-advanced-define)
+
+(provide for-all ==>
+	 check-property
+	 expect expect-within expect-member-of expect-range)
 
 (provide quote)
 
@@ -302,7 +316,9 @@
   (symbol? (%a -> boolean)
 	   "feststellen, ob ein Wert ein Symbol ist")
   (symbol->string (symbol -> string)
-		  "Symbol in Zeichenkette umwandeln"))
+		  "Symbol in Zeichenkette umwandeln")
+  (string->symbol (string -> symbol)
+		  "Zeichenkette in Symbol umwandeln"))
  
  ("Verschiedenes"
   (equal? (%a %b -> boolean)
@@ -844,18 +860,18 @@
       ""
       (string-append (car l) (strings-list->string (cdr l)))))
 
-(define-contract integer (predicate integer?))
-(define-contract number (predicate number?))
-(define-contract rational (predicate rational?))
-(define-contract real (predicate real?))
+(define integer (contract/arbitrary arbitrary-integer (predicate integer?)))
+(define number (contract/arbitrary arbitrary-real (predicate number?)))
+(define rational (contract/arbitrary arbitrary-rational (predicate rational?)))
+(define real (contract/arbitrary arbitrary-real (predicate real?)))
 
 (define (natural? x)
   (and (integer? x)
        (not (negative? x))))
 
-(define-contract natural (predicate natural?))
+(define natural (contract/arbitrary arbitrary-natural (predicate natural?)))
 
-(define-contract boolean (predicate boolean?))
+(define boolean (contract/arbitrary arbitrary-boolean (predicate boolean?)))
 
 (define (true? x)
   (eq? x #t))
@@ -863,14 +879,14 @@
 (define (false? x)
   (eq? x #f))
 
-(define-contract true (predicate true?))
-(define-contract false (predicate false?))
+(define true (contract (one-of #f)))
+(define false (contract (one-of #f)))
 
-(define-contract string (predicate string?))
-(define-contract symbol (predicate symbol?))
-(define-contract empty-list (predicate empty?))
+(define string (contract/arbitrary arbitrary-printable-ascii-string (predicate string?)))
+(define symbol (contract/arbitrary arbitrary-symbol (predicate symbol?)))
+(define empty-list (contract (one-of empty)))
 
-(define-contract unspecific (predicate (lambda (_) #t)))
+(define unspecific (contract (predicate (lambda (_) #t))))
 
 ;; aus collects/lang/private/teach.ss
 
@@ -951,3 +967,110 @@
 		    stx)))))))))
     (values (proc #f)
 	    (proc #t))))
+
+; QuickCheck
+
+(define-syntax (for-all stx)
+  (syntax-case stx ()
+    ((_ (?clause ...) ?body)
+     (with-syntax ((((?id ?arb) ...)
+		    (map (lambda (pr)
+			   (syntax-case pr ()
+			     ((?id ?contract)
+			      (identifier? #'?id)
+			      (with-syntax ((?error-call
+					     (syntax/loc #'?contract (error "Vertrag hat keinen Generator"))))
+				#'(?id
+				   (or (contract-arbitrary (contract ?contract))
+				       ?error-call))))
+			     (_
+			      (raise-syntax-error #f "inkorrekte `for-all'-Klausel - sollte die Form (id contr) haben"
+						  pr))))
+			 (syntax->list #'(?clause ...)))))
+
+       (stepper-syntax-property #'(quickcheck:property 
+				   ((?id ?arb) ...) ?body)
+				'stepper-skip-completely
+				#t)))
+    ((_ ?something ?body)
+     (raise-syntax-error #f "keine Klauseln der Form (id contr)"
+			 stx))
+    ((_ ?thing1 ?thing2 ?thing3 ?things ...)
+     (raise-syntax-error #f "zuviele Operanden"
+			 stx))))
+
+(define-syntax (check-property stx)
+  (unless (memq (syntax-local-context) '(module top-level))
+    (raise-syntax-error
+     #f "`check-property' muss ganz außen stehen" stx))
+  (syntax-case stx ()
+    ((_ ?prop)
+     (stepper-syntax-property
+      (check-expect-maker stx #'check-property-error #'?prop '() 
+			  'comes-from-check-property)
+      'stepper-replace
+      #'#t))
+    (_ (raise-syntax-error #f "`check-property' erwartet einen einzelnen Operanden"
+			   stx))))
+
+(define (check-property-error test src-info test-info)
+  (let ((info (send test-info get-info)))
+    (send info add-check)
+    (with-handlers ((exn:fail?
+		     (lambda (e)
+		       (send info property-error e src-info)
+		       (raise e))))
+      (call-with-values
+	  (lambda ()
+	    (with-handlers
+		((exn:assertion-violation?
+		  (lambda (e)
+		    ;; minor kludge to produce comprehensible error message
+		    (if (eq? (exn:assertion-violation-who e) 'coerce->result-generator)
+			(raise (make-exn:fail (string-append "Wert muß Eigenschaft oder boolesch sein: "
+							     ((error-value->string-handler)
+							      (car (exn:assertion-violation-irritants e))
+							      100))
+					      (exn-continuation-marks e)))
+			(raise e)))))
+	      (quickcheck-results (test))))
+	(lambda (ntest stamps result)
+	  (if (check-result? result)
+	      (begin
+		(send info property-failed result src-info)
+		#f)
+	      #t))))))
+
+(define (expect v1 v2)
+  (quickcheck:property () (beginner-equal? v1 v2)))
+
+(define (ensure-real who n val)
+  (unless (real? val)
+    (raise
+     (make-exn:fail:contract
+      (string->immutable-string
+       (format "~a Argument ~e zu `~a' keine reelle Zahl." n val who))
+      (current-continuation-marks)))))
+
+(define (expect-within v1 v2 epsilon)
+  (ensure-real 'expect-within "Drittes" epsilon)
+  (quickcheck:property () (beginner-equal~? v1 v2 epsilon)))
+
+(define (expect-range val min max)
+  (ensure-real 'expect-range "Erstes" val)
+  (ensure-real 'expect-range "Zweites" min)
+  (ensure-real 'expect-range "Drittes" max)
+  (quickcheck:property ()
+		       (and (<= min val)
+			    (<= val max))))
+
+(define (expect-member-of val . candidates)
+  (quickcheck:property () 
+		       (ormap (lambda (cand)
+				(beginner-equal? val cand))
+			      candidates)))
+
+(define property (contract (predicate (lambda (x)
+					(or (boolean? x)
+					    (property? x))))))
+

@@ -55,6 +55,8 @@
 
 (define default-plt-name "archive")
 
+(define disable-inlining (make-parameter #f))
+
 (define plt-output (make-parameter #f))
 (define plt-name (make-parameter default-plt-name))
 (define plt-files-replace (make-parameter #f))
@@ -130,7 +132,7 @@
       [("--expand")
        ,(lambda (f) 'expand)
        ((,(format "Write macro-expanded Scheme source(s) to stdout") ""))]
-      [("--decompile")
+      [("-r" "--decompile")
        ,(lambda (f) 'decompile)
        ((,(format "Write quasi-Scheme for ~a file(s) to stdout" (extract-suffix append-zo-suffix)) ""))]
       [("-z" "--zo")
@@ -177,6 +179,12 @@
        (,(format "Output -z to \"compiled\", -e to ~s"
                  (path->string (build-path "compiled" "native"
                                            (system-library-subpath #f)))))]]
+     [help-labels
+      "----------------------- bytecode compilation flags --------------------------"]
+     [once-each
+      [("--disable-inline")
+       ,(lambda (f) (disable-inlining #t))
+       ("Disable procedure inlining during compilation")]]
      [help-labels
       "--------------------- executable configuration flags ------------------------"]
      [once-each
@@ -401,7 +409,7 @@
   (parse-options (current-command-line-arguments)))
 
 (when (compiler:option:somewhat-verbose)
-  (printf "mzc v~a [~a], Copyright (c) 2004-2009 PLT Scheme Inc.\n"
+  (printf "mzc v~a [~a], Copyright (c) 2004-2010 PLT Scheme Inc.\n"
           (version)
           (system-type 'gc)))
 
@@ -457,14 +465,15 @@
      (for ([zo-file source-files])
        (let ([zo-file (path->complete-path zo-file)])
          (let-values ([(base name dir?) (split-path zo-file)])
-           (parameterize ([current-load-relative-directory base]
-                          [print-graph #t])
-             (pretty-print
-              (decompile
-               (call-with-input-file*
-                zo-file
-                (lambda (in)
-                  (zo-parse in))))))))))]
+           (let ([alt-file (build-path base "compiled" (path-add-suffix name #".zo"))])
+             (parameterize ([current-load-relative-directory base]
+                            [print-graph #t])
+               (pretty-print
+                (decompile
+                 (call-with-input-file*
+                  (if (file-exists? alt-file) alt-file zo-file)
+                  (lambda (in)
+                    (zo-parse in)))))))))))]
   [(make-zo)
    (let ([n (make-base-empty-namespace)]
          [mc (dynamic-require 'compiler/cm 'managed-compile-zo)]
@@ -486,7 +495,9 @@
          (let ([name (extract-base-filename/ss file 'mzc)])
            (when (compiler:option:somewhat-verbose)
              (printf "\"~a\":\n" file))
-           (mc file)
+           (parameterize ([compile-context-preservation-enabled
+                           (disable-inlining)])
+             (mc file))
            (let ([dest (append-zo-suffix
                         (let-values ([(base name dir?) (split-path file)])
                           (build-path (if (symbol? base) 'same base)

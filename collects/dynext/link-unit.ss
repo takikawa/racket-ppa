@@ -124,6 +124,8 @@
       (define win-gcc-linker-flags (list "--dll"))
       (define borland-linker-flags (list "/Tpd" "/c"))
 
+      (define mac-link-flags (list "-bundle" "-flat_namespace" "-undefined" "suppress"))
+
       (define (get-unix-link-flags)
 	(case (string->symbol (path->string (system-library-subpath #f)))
 	  [(sparc-solaris i386-solaris) (list "-G")]
@@ -133,13 +135,13 @@
 			    "-brtl"
 			    (lambda () 
 			      (map (lambda (mz-exp)
-				     (format "-bI:~a/~a" include-dir mz-exp))
+				     (format "-bI:~a/~a" (include-dir) mz-exp))
 				   ((wrap-3m "mzscheme~a.exp"))))
-			    (format "-bE:~a/ext.exp" include-dir)
+			    (format "-bE:~a/ext.exp" (include-dir))
 			    "-bnoentry")]
 	  [(parisc-hpux) (list "-b")]
-	  [(ppc-macosx ppc-darwin i386-macosx i386-darwin) 
-	   (list "-bundle" "-flat_namespace" "-undefined" "suppress")]
+	  [(ppc-macosx ppc-darwin x86_64-macosx x86_86-darwin) mac-link-flags]
+          [(i386-macosx i386-darwin) (append mac-link-flags '("-m32"))]
 	  [(i386-cygwin) win-gcc-linker-flags]
 	  [else (list "-fPIC" "-shared")]))
 
@@ -184,7 +186,7 @@
                                                              "," "," "c0d32.obj" "cw32.lib" "import32.lib"
                                                              (if (current-use-mzdyn)
                                                                (list "," (path->string
-                                                                          (build-path std-library-dir 
+                                                                          (build-path (std-library-dir)
                                                                                       "bcc" 
                                                                                       "mzdynb.def")))
                                                                null))))
@@ -210,7 +212,7 @@
       (define (make-win-link-libraries win-gcc? win-borland? unix?)
 	(let* ([file (lambda (f)
 		       (path->string
-			(build-path std-library-dir 
+			(build-path (std-library-dir)
 				    (cond
                                      [win-gcc? "gcc"]
                                      [win-borland? "bcc"]
@@ -218,7 +220,7 @@
 				    f)))]
 	       [dllfile (lambda (f)
 			  (path->string
-			   (build-path std-library-dir f)))]
+			   (build-path (std-library-dir) f)))]
                [filethunk (lambda (f)
                             (lambda ()
 			      (map file (f))))]
@@ -261,7 +263,7 @@
 	   (list (lambda ()
 		   (if (current-use-mzdyn)
 		       (map (lambda (mz.o)
-			      (path->string (build-path std-library-dir mz.o)))
+			      (path->string (build-path (std-library-dir) mz.o)))
 			    ((wrap-3m "mzdyn~a.o")))
 		       null)))]))
 
@@ -367,7 +369,7 @@
 				;; Generate DLL link information
 				`("--dllname" ,(if (path? out) (path->string out) out)
 				  ,@(if (current-use-mzdyn)
-                                      `("--def" ,(path->string (build-path std-library-dir "gcc" "mzdyn.def")))
+                                      `("--def" ,(path->string (build-path (std-library-dir) "gcc" "mzdyn.def")))
                                       `())
 				  "--base-file" ,basefile
 				  "--output-exp" ,(path->string expfile))]

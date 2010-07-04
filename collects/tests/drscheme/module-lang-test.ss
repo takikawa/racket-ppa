@@ -1,5 +1,4 @@
-#reader scribble/reader
-#lang scheme/gui
+#lang at-exp scheme/gui
 (require "module-lang-test-utils.ss")
 (provide run-test)
 
@@ -158,8 +157,7 @@
 (test @t{#lang scheme
          (eval 'cons)}
       #f
-      @rx{. compile: bad syntax; reference to top-level identifier is not
-          allowed, because no #%top syntax transformer is bound in: cons})
+      @rx{. compile: unbound identifier \(and no #%top syntax transformer is bound\) in: cons})
 (test @t{(module m (file @in-here{module-lang-test-tmp1.ss}) 1 2 3)}
       @t{1} ;; just make sure no errors.
       "1")
@@ -245,7 +243,7 @@
       @t{(f)}
       #<<--
 > (f)
-. . both in:
+. both in:
   f
   (f)
 --

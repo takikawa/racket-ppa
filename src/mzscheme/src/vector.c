@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -26,8 +26,8 @@
 #include "schpriv.h"
 
 /* globals */
-Scheme_Object *scheme_vector_proc;
-Scheme_Object *scheme_vector_immutable_proc;
+READ_ONLY Scheme_Object *scheme_vector_proc;
+READ_ONLY Scheme_Object *scheme_vector_immutable_proc;
 
 /* locals */
 static Scheme_Object *vector_p (int argc, Scheme_Object *argv[]);
@@ -41,6 +41,18 @@ static Scheme_Object *vector_fill (int argc, Scheme_Object *argv[]);
 static Scheme_Object *vector_copy_bang(int argc, Scheme_Object *argv[]);
 static Scheme_Object *vector_to_immutable (int argc, Scheme_Object *argv[]);
 static Scheme_Object *vector_to_values (int argc, Scheme_Object *argv[]);
+
+static Scheme_Object *unsafe_vector_len (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_vector_ref (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_vector_set (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_struct_ref (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_struct_set (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_string_len (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_string_ref (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_string_set (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_bytes_len (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_bytes_ref (int argc, Scheme_Object *argv[]);
+static Scheme_Object *unsafe_bytes_set (int argc, Scheme_Object *argv[]);
 
 void
 scheme_init_vector (Scheme_Env *env)
@@ -122,6 +134,94 @@ scheme_init_vector (Scheme_Env *env)
 			     env);
 }
 
+void
+scheme_init_unsafe_vector (Scheme_Env *env)
+{
+  Scheme_Object *p;
+
+  p = scheme_make_immed_prim(unsafe_vector_len, 
+			     "unsafe-vector-length", 
+			     1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
+  scheme_add_global_constant("unsafe-vector-length", p, env);
+
+  p = scheme_make_immed_prim(unsafe_vector_ref, 
+			     "unsafe-vector-ref", 
+			     2, 2);
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
+  scheme_add_global_constant("unsafe-vector-ref", p, env);
+
+  p = scheme_make_immed_prim(unsafe_vector_set,
+			     "unsafe-vector-set!", 
+			     3, 3);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_NARY_INLINED;
+  scheme_add_global_constant("unsafe-vector-set!", p, env);  
+  p = scheme_make_immed_prim(unsafe_vector_ref, 
+			     "unsafe-vector-ref", 
+			     2, 2);
+
+  p = scheme_make_immed_prim(unsafe_struct_ref, 
+			     "unsafe-struct-ref", 
+			     2, 2);
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
+  scheme_add_global_constant("unsafe-struct-ref", p, env);
+
+  p = scheme_make_immed_prim(unsafe_struct_set,
+			     "unsafe-struct-set!", 
+			     3, 3);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_NARY_INLINED;
+  scheme_add_global_constant("unsafe-struct-set!", p, env);  
+
+
+  p = scheme_make_immed_prim(unsafe_string_len, 
+			     "unsafe-string-length", 
+			     1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
+  scheme_add_global_constant("unsafe-string-length", p, env);
+
+  p = scheme_make_immed_prim(unsafe_string_ref, 
+			     "unsafe-string-ref", 
+			     2, 2);
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
+  scheme_add_global_constant("unsafe-string-ref", p, env);
+
+  p = scheme_make_immed_prim(unsafe_string_set,
+			     "unsafe-string-set!", 
+			     3, 3);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_NARY_INLINED;
+  scheme_add_global_constant("unsafe-string-set!", p, env);  
+
+  p = scheme_make_immed_prim(unsafe_bytes_len, 
+			     "unsafe-bytes-length", 
+			     1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
+  scheme_add_global_constant("unsafe-bytes-length", p, env);
+
+  p = scheme_make_immed_prim(unsafe_bytes_ref, 
+			     "unsafe-bytes-ref", 
+			     2, 2);
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_UNSAFE_FUNCTIONAL);
+  scheme_add_global_constant("unsafe-bytes-ref", p, env);
+
+  p = scheme_make_immed_prim(unsafe_bytes_set,
+			     "unsafe-bytes-set!", 
+			     3, 3);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_NARY_INLINED;
+  scheme_add_global_constant("unsafe-bytes-set!", p, env);  
+  p = scheme_make_immed_prim(unsafe_bytes_ref, 
+			     "unsafe-bytes-ref", 
+			     2, 2);
+}
+
+#define VECTOR_BYTES(size) (sizeof(Scheme_Vector) + ((size) - 1) * sizeof(Scheme_Object *))
+
 Scheme_Object *
 scheme_make_vector (long size, Scheme_Object *fill)
 {
@@ -134,12 +234,9 @@ scheme_make_vector (long size, Scheme_Object *fill)
   }
 
   if (size < 1024) {
-    vec = (Scheme_Object *)scheme_malloc_tagged(sizeof(Scheme_Vector) 
-						+ (size - 1) * sizeof(Scheme_Object *));
+    vec = (Scheme_Object *)scheme_malloc_tagged(VECTOR_BYTES(size));
   } else {
-    vec = (Scheme_Object *)scheme_malloc_fail_ok(scheme_malloc_tagged,
-						 sizeof(Scheme_Vector) 
-						 + (size - 1) * sizeof(Scheme_Object *));
+    vec = (Scheme_Object *)scheme_malloc_fail_ok(scheme_malloc_tagged, VECTOR_BYTES(size));
   }
 
   vec->type = scheme_vector_type;
@@ -170,7 +267,9 @@ make_vector (int argc, Scheme_Object *argv[])
 
   len = scheme_extract_index("make-vector", 0, argc, argv, -1, 0);
 
-  if (len == -1) {
+  if ((len == -1) 
+      /* also watch for overflow: */
+      || ((long)VECTOR_BYTES(len) < len)) {
     scheme_raise_out_of_memory("make-vector", "making vector of length %s",
 			       scheme_make_provided_string(argv[0], 1, NULL));
   }
@@ -226,27 +325,33 @@ Scheme_Object *scheme_vector_length(Scheme_Object *v)
   return vector_length(1, a);
 }
 
-static Scheme_Object *
-bad_index(char *name, Scheme_Object *i, Scheme_Object *vec, int bottom)
+void scheme_bad_vec_index(char *name, Scheme_Object *i, const char *what, Scheme_Object *vec, 
+                          long bottom, long len)
 {
-  int n = SCHEME_VEC_SIZE(vec) - 1;
-
-  if (SCHEME_VEC_SIZE(vec)) {
+  if (len) {
+    long n = len - 1;
     char *vstr;
     int vlen;
     vstr = scheme_make_provided_string(vec, 2, &vlen);
     scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-		     "%s: index %s out of range [%d, %d] for vector: %t",
+		     "%s: index %s out of range [%ld, %ld] for %s: %t",
 		     name, 
 		     scheme_make_provided_string(i, 2, NULL), 
 		     bottom, n,
+                     what,
 		     vstr, vlen);
   } else
     scheme_raise_exn(MZEXN_FAIL_CONTRACT,
-		     "%s: bad index %s for empty vector",
+		     "%s: bad index %s for empty %s",
 		     name,
-		     scheme_make_provided_string(i, 0, NULL));
-  
+		     scheme_make_provided_string(i, 0, NULL),
+                     what);
+}
+
+static Scheme_Object *
+bad_index(char *name, Scheme_Object *i, Scheme_Object *vec, int bottom)
+{
+  scheme_bad_vec_index(name, i, "vector", vec, bottom, SCHEME_VEC_SIZE(vec));
   return NULL;
 }
 
@@ -475,3 +580,74 @@ static Scheme_Object *vector_to_values (int argc, Scheme_Object *argv[])
 
   return SCHEME_MULTIPLE_VALUES;
 }
+
+/************************************************************/
+/*                        unsafe                            */
+/************************************************************/
+
+static Scheme_Object *unsafe_vector_len (int argc, Scheme_Object *argv[])
+{
+  long n = SCHEME_VEC_SIZE(argv[0]);
+  return scheme_make_integer(n);
+}
+
+static Scheme_Object *unsafe_vector_ref (int argc, Scheme_Object *argv[])
+{
+  return SCHEME_VEC_ELS(argv[0])[SCHEME_INT_VAL(argv[1])];
+}
+
+static Scheme_Object *unsafe_vector_set (int argc, Scheme_Object *argv[])
+{
+  SCHEME_VEC_ELS(argv[0])[SCHEME_INT_VAL(argv[1])] = argv[2];
+  return scheme_void;
+}
+
+static Scheme_Object *unsafe_struct_ref (int argc, Scheme_Object *argv[])
+{
+  return ((Scheme_Structure *)argv[0])->slots[SCHEME_INT_VAL(argv[1])];
+}
+
+static Scheme_Object *unsafe_struct_set (int argc, Scheme_Object *argv[])
+{
+  ((Scheme_Structure *)argv[0])->slots[SCHEME_INT_VAL(argv[1])] = argv[2];
+  return scheme_void;
+}
+
+static Scheme_Object *unsafe_string_len (int argc, Scheme_Object *argv[])
+{
+  long n = SCHEME_CHAR_STRLEN_VAL(argv[0]);
+  return scheme_make_integer(n);
+}
+
+static Scheme_Object *unsafe_string_ref (int argc, Scheme_Object *argv[])
+{
+  mzchar v;
+  v = SCHEME_CHAR_STR_VAL(argv[0])[SCHEME_INT_VAL(argv[1])];
+  return scheme_make_ascii_character(v);
+}
+
+static Scheme_Object *unsafe_string_set (int argc, Scheme_Object *argv[])
+{
+  SCHEME_CHAR_STR_VAL(argv[0])[SCHEME_INT_VAL(argv[1])] = SCHEME_CHAR_VAL(argv[2]);
+  return scheme_void;
+}
+
+static Scheme_Object *unsafe_bytes_len (int argc, Scheme_Object *argv[])
+{
+  long n = SCHEME_BYTE_STRLEN_VAL(argv[0]);
+  return scheme_make_integer(n);
+}
+
+static Scheme_Object *unsafe_bytes_ref (int argc, Scheme_Object *argv[])
+{
+  long v;
+  v = (unsigned char)SCHEME_BYTE_STR_VAL(argv[0])[SCHEME_INT_VAL(argv[1])];
+  return scheme_make_integer(v);
+}
+
+static Scheme_Object *unsafe_bytes_set (int argc, Scheme_Object *argv[])
+{
+  SCHEME_BYTE_STR_VAL(argv[0])[SCHEME_INT_VAL(argv[1])] = (char)SCHEME_INT_VAL(argv[2]);
+  return scheme_void;
+}
+

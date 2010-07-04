@@ -5,13 +5,13 @@
          syntax/stx
          syntax/kerncase
          scheme/struct-info
-         scheme/private/contract-helpers
+         scheme/contract/private/helpers
          (for-syntax scheme/base
                      syntax/kerncase
                      "rep.ss"
                      (only-in "rep-data.ss" make-literalset))
          (for-template scheme/base
-                       scheme/contract))
+                       scheme/contract/base))
 
 (provide identifier
          boolean
@@ -29,13 +29,14 @@
          char
 
          expr
+         expr/c
          static
          atom-in-list
 
          kernel-literals)
 
 (define-syntax-rule (define-pred-stxclass name pred)
-  (define-syntax-class name #:attributes ()
+  (define-syntax-class name #:attributes () #:opaque
     (pattern x
              #:fail-unless (pred (syntax-e #'x)) #f)))
 
@@ -65,7 +66,8 @@
            #:fail-unless (syntax-transforming?)
                          "not within the extent of a macro transformer"
            #:attr value (syntax-local-value #'x (lambda () notfound))
-           #:fail-when (eq? (attribute value) notfound) #f))
+           #:fail-when (eq? (attribute value) notfound) #f
+           #:fail-unless (pred (attribute value)) #f))
 
 (define-syntax-class (atom-in-list atoms name)
   #:attributes ()
@@ -103,11 +105,19 @@
   (pattern x
            #:fail-when (keyword? (syntax-e #'x)) #f))
 
+(define-syntax-class (expr/c ctc)
+  #:attributes (c)
+  (pattern x:expr
+           #:with c #`(contract #,ctc
+                                x
+                                (quote #,(string->symbol (or (build-src-loc-string #'x) "")))
+                                (quote #,(or '<this-macro>))
+                                (quote-syntax #,(syntax/loc #'x (<there>))))))
+
+;; Literal sets
+  
 (define-syntax kernel-literals
   (make-literalset
-   (list* (quote-syntax module)
-          (quote-syntax #%plain-module-begin)
-          (quote-syntax #%require)
-          (quote-syntax #%provide)
+   (list* (list '#%plain-module-begin (quote-syntax #%plain-module-begin))
           (for/list ([id (kernel-form-identifier-list)])
             (list (syntax-e id) id)))))

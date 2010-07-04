@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -139,26 +139,26 @@ static int pipe_out_ready(Scheme_Output_Port *p);
 static void register_traversers(void);
 #endif
 
-static Scheme_Object *any_symbol;
-static Scheme_Object *any_one_symbol;
-static Scheme_Object *cr_symbol;
-static Scheme_Object *lf_symbol;
-static Scheme_Object *crlf_symbol;
-static Scheme_Object *module_symbol;
+ROSYM static Scheme_Object *any_symbol;
+ROSYM static Scheme_Object *any_one_symbol;
+ROSYM static Scheme_Object *cr_symbol;
+ROSYM static Scheme_Object *lf_symbol;
+ROSYM static Scheme_Object *crlf_symbol;
+ROSYM static Scheme_Object *module_symbol;
 
-static Scheme_Object *default_read_handler;
-static Scheme_Object *default_display_handler;
-static Scheme_Object *default_write_handler;
-static Scheme_Object *default_print_handler;
+READ_ONLY static Scheme_Object *default_read_handler;
+READ_ONLY static Scheme_Object *default_display_handler;
+READ_ONLY static Scheme_Object *default_write_handler;
+READ_ONLY static Scheme_Object *default_print_handler;
 
-Scheme_Object *scheme_default_global_print_handler;
+READ_ONLY Scheme_Object *scheme_default_global_print_handler;
 
-Scheme_Object *scheme_write_proc;
-Scheme_Object *scheme_display_proc;
-Scheme_Object *scheme_print_proc;
+READ_ONLY Scheme_Object *scheme_write_proc;
+READ_ONLY Scheme_Object *scheme_display_proc;
+READ_ONLY Scheme_Object *scheme_print_proc;
 
-static Scheme_Object *dummy_input_port;
-static Scheme_Object *dummy_output_port;
+THREAD_LOCAL_DECL(static Scheme_Object *dummy_input_port);
+THREAD_LOCAL_DECL(static Scheme_Object *dummy_output_port);
 
 #define fail_err_symbol scheme_false
 
@@ -208,8 +208,6 @@ scheme_init_port_fun(Scheme_Env *env)
   default_display_handler = scheme_make_prim_w_arity(sch_default_display_handler, "default-port-display-handler", 2, 2);
   default_write_handler   = scheme_make_prim_w_arity(sch_default_write_handler,   "default-port-write-handler",   2, 2);
   default_print_handler   = scheme_make_prim_w_arity(sch_default_print_handler,   "default-port-print-handler",   2, 2);
-
-  scheme_init_port_fun_config();
 
   scheme_add_global_constant("eof", scheme_eof, env);
   
@@ -263,7 +261,7 @@ scheme_init_port_fun(Scheme_Env *env)
   GLOBAL_NONCM_PRIM("read-honu/recursive",            read_honu_recur_f,              0, 1, env);
   GLOBAL_NONCM_PRIM("read-honu-syntax",               read_honu_syntax_f,             0, 2, env);
   GLOBAL_NONCM_PRIM("read-honu-syntax/recursive",     read_honu_syntax_recur_f,       0, 2, env);
-  GLOBAL_NONCM_PRIM("read-language",                  read_language,                  0, 2, env);
+  GLOBAL_PRIM_W_ARITY2("read-language",               read_language,                  0, 2, 0, -1, env);
   GLOBAL_NONCM_PRIM("read-char",                      read_char,                      0, 1, env);
   GLOBAL_NONCM_PRIM("read-char-or-special",           read_char_spec,                 0, 1, env);
   GLOBAL_NONCM_PRIM("read-byte",                      read_byte,                      0, 1, env);
@@ -346,6 +344,12 @@ void scheme_init_port_fun_config(void)
   scheme_default_global_print_handler
     = scheme_make_prim_w_arity(sch_default_global_port_print_handler, "default-global-port-print-handler", 2, 2);
   scheme_set_root_param(MZCONFIG_PORT_PRINT_HANDLER, scheme_default_global_print_handler);
+
+  /* Use dummy port: */
+  REGISTER_SO(dummy_input_port);
+  REGISTER_SO(dummy_output_port);
+  dummy_input_port = scheme_make_byte_string_input_port("");
+  dummy_output_port = scheme_make_null_output_port(1);
 }
 
 /*========================================================================*/
@@ -369,11 +373,6 @@ static MZ_INLINE Scheme_Input_Port *input_port_record_slow(Scheme_Object *port)
       return (Scheme_Input_Port *)port;
 
     if (!SCHEME_STRUCTP(port)) {
-      /* Use dummy port: */
-      if (!dummy_input_port) {
-        REGISTER_SO(dummy_input_port);
-        dummy_input_port = scheme_make_byte_string_input_port("");
-      }
       return (Scheme_Input_Port *)dummy_input_port;
     }
     
@@ -406,11 +405,6 @@ static MZ_INLINE Scheme_Output_Port *output_port_record_slow(Scheme_Object *port
       return (Scheme_Output_Port *)port;
 
     if (!SCHEME_STRUCTP(port)) {
-      /* Use dummy port: */
-      if (!dummy_output_port) {
-        REGISTER_SO(dummy_output_port);
-        dummy_output_port = scheme_make_null_output_port(1);
-      }
       return (Scheme_Output_Port *)dummy_output_port;
     }
     
@@ -775,22 +769,17 @@ static long user_read_result(const char *who, Scheme_Input_Port *port,
 			    "returned #f when no progress evt was supplied: ",
 			    val);
 	return 0;
-      } else if (SCHEME_PROCP(val)) {
-	Scheme_Object *orig = val;
-	a[0] = val;
-	if (scheme_check_proc_arity(NULL, 4, 0, 1, a)) {
-	  if (!special_ok) {
-	    scheme_arg_mismatch(who,
-				"the port has no specific peek procedure, so"
-				" a special read result is not allowed: ",
-				orig);
-	    return 0;
-	  }
-	  port->special = a[0];
-	  return SCHEME_SPECIAL;
-	} else
-	  val = NULL;
-	n = 0;
+      } else if (SCHEME_PROCP(val)
+                 && scheme_check_proc_arity(NULL, 4, 0, 1, a)) {
+	if (!special_ok) {
+          scheme_arg_mismatch(who,
+                              "the port has no specific peek procedure, so"
+                              " a special read result is not allowed: ",
+                              val);
+          return 0;
+        }
+        port->special = val;
+        return SCHEME_SPECIAL;
       } else if (evt_ok && pipe_input_p(val)) {
         ((User_Input_Port *)port->port_data)->prefix_pipe = val;
         return 0;
@@ -942,7 +931,7 @@ user_get_or_peek_bytes(Scheme_Input_Port *port,
     } else {
       char *vb;
       vb = scheme_malloc_atomic(size + 1);
-      memset(vb, size + 1, 0); /* must initialize for security */
+      memset(vb, 0, size + 1); /* must initialize for security */
       bstr = scheme_make_sized_byte_string(vb, size, 0);
     }
     a[0] = bstr;

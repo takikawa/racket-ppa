@@ -68,8 +68,8 @@ time.}
 
 @defproc[(current-inexact-milliseconds) real?]{
 
-Like @scheme[current-milliseconds], but the result never decreases
-(until the machine is turned off).}
+Returns the current time in milliseconds since midnight UTC, January
+1, 1970.}
 
 
 @defproc[(current-process-milliseconds [thread (or/c thread? #f)]) 
@@ -104,10 +104,10 @@ time is a portion of the time reported by
 Collects timing information for a procedure application.
 
 Four values are returned: a list containing the result(s) of applying
-@scheme[proc], the number of milliseconds of CPU time required to
-obtain this result, the number of ``real'' milliseconds required for
-the result, and the number of milliseconds of CPU time (included in
-the first result) spent on garbage collection.
+@scheme[proc] to the arguments in @scheme[lst], the number of milliseconds of
+CPU time required to obtain this result, the number of ``real'' milliseconds
+required for the result, and the number of milliseconds of CPU time (included
+in the first result) spent on garbage collection.
 
 The reliability of the timing numbers depends on the platform. If
 multiple MzScheme threads are running, then the reported time may

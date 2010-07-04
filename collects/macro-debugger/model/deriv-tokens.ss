@@ -30,18 +30,21 @@
    ...                  ; .
    EOF                  ; .
    syntax-error         ; exn
-   lift-loop            ; syntax
-   lift/let-loop        ; syntax
-   module-lift-loop     ; syntaxes
-   module-lift-end-loop ; syntaxes
-   lift                 ; (cons syntax id)
+   lift-loop            ; syntax = new form (let or begin; let if for_stx)
+   lift/let-loop        ; syntax = new let form
+   module-lift-loop     ; syntaxes = def-lifts, in reverse order lifted (???)
+   module-lift-end-loop ; syntaxes = statement-lifts ++ provide-lifts, in order lifted
+   lift                 ; (cons (listof id) syntax)
    lift-statement       ; syntax
+   lift-require         ; (cons syntax (cons syntax syntax))
+   lift-provide         ; syntax
+
    enter-local          ; syntax
    local-pre            ; syntax
    local-post           ; syntax
    exit-local           ; syntax
 
-   local-bind           ; (list-of identifier)
+   local-bind           ; (listof identifier)
    enter-bind           ; .
    exit-bind            ; .
    opaque               ; opaque-syntax
@@ -53,6 +56,9 @@
    rename-list          ; (list-of syntax)
 
    IMPOSSIBLE           ; useful for error-handling clauses that have no NoError counterpart
+
+   top-begin            ; identifier
+   top-non-begin        ; .
    ))
 
 (define-tokens renames-tokens
@@ -155,6 +161,16 @@
     (147 . ,token-rename-list)
     (148 . ,token-rename-one)
     (149 . prim-varref)
+    (150 . ,token-lift-require)
+    (151 . ,token-lift-provide)
+
+    ;; Emitted from Scheme
+    (start . ,token-start)
+    (visit . ,token-visit)
+    (return . ,token-return)
+    (next . ,token-next)
+    (top-begin . ,token-top-begin)
+    (top-non-begin . ,token-top-non-begin)
     ))
 
 (define (tokenize sig-n val pos)

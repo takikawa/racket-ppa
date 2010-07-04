@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 2000-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -56,12 +56,14 @@ static Scheme_Object *sch_pack_bang(int argc, Scheme_Object *argv[]);
 
 static char *number_to_allocated_string(int radix, Scheme_Object *obj, int alloc);
 
-static char *infinity_str = "+inf.0";
-static char *minus_infinity_str = "-inf.0";
-static char *not_a_number_str = "+nan.0";
-static char *other_not_a_number_str = "-nan.0";
+READ_ONLY static char *infinity_str = "+inf.0";
+READ_ONLY static char *minus_infinity_str = "-inf.0";
+READ_ONLY static char *not_a_number_str = "+nan.0";
+READ_ONLY static char *other_not_a_number_str = "-nan.0";
 
-static Scheme_Object *num_limits[3];
+#if !defined(SIXTY_FOUR_BIT_INTEGERS) && defined(NO_LONG_LONG_TYPE)
+SHARED_OK static Scheme_Object *num_limits[3];
+#endif
 
 #ifdef SCHEME_BIG_ENDIAN
 # define MZ_IS_BIG_ENDIAN 1
@@ -158,7 +160,25 @@ void scheme_init_numstr(Scheme_Env *env)
 						       MZCONFIG_SCHEDULER_RANDOM_STATE),
 			     env);
 
+#if !defined(SIXTY_FOUR_BIT_INTEGERS) && defined(NO_LONG_LONG_TYPE)
   REGISTER_SO(num_limits);
+  {
+    Scheme_Object *a[2], *v;
+
+    a[0] = scheme_make_integer(1);
+    a[1] = scheme_make_integer(64);
+    a[0] = scheme_bitwise_shift(2, a);
+    v = scheme_sub1(1, a);
+    num_limits[MZ_U8HI] = v;
+    a[0] = v;
+    a[1] = scheme_make_integer(-1);
+    v = scheme_bitwise_shift(2, a);
+    num_limits[MZ_S8HI] = v;
+    a[0] = v;
+    v = scheme_bin_minus(scheme_make_integer(0), scheme_add1(1, a));
+    num_limits[MZ_S8LO] = v;
+  }
+#endif
 }
 
 # ifdef SIN_COS_NEED_DEOPTIMIZE
@@ -176,7 +196,7 @@ MK_SCH_TRIG(SCH_COS, cos)
 /*                           number parsing                               */
 /*========================================================================*/
 
-static int u_strcmp(mzchar *s, char *t)
+static int u_strcmp(mzchar *s, const char *t)
 {
   int i;
 
@@ -228,11 +248,6 @@ static Scheme_Object *read_special_number(const mzchar *str, int pos)
 /* Don't bother reading more than the following number of digits in a
    floating-point mantissa: */
 #define MAX_FLOATREAD_PRECISION_DIGITS 50
-
-/* We'd like to use strtod() for the common case, but we don't trust
-   it entirely. */
-#define MAX_FAST_FLOATREAD_LEN 50
-static char ffl_buf[MAX_FAST_FLOATREAD_LEN + 1];
 
 /* Exponent threshold for obvious infinity. Must be at least
    max(MAX_FAST_FLOATREAD_LEN, MAX_FLOATREAD_PRECISION_DIGITS) more
@@ -1014,6 +1029,7 @@ Scheme_Object *scheme_read_number(const mzchar *str, long len,
 #endif
 
 
+#define MAX_FAST_FLOATREAD_LEN 50
   /* When possible, use the standard floating-point parser */
   if (!is_not_float && (is_float || decimal_means_float) 
       && !has_slash && !has_hash && (radix == 10) 
@@ -1031,28 +1047,33 @@ Scheme_Object *scheme_read_number(const mzchar *str, long len,
     }
 
     {
-      int k;
-      for (k = delta; k < len; k++) {
-	if (str[k] > 127)
-	  ffl_buf[k - delta] = '?';
-	else
-	  ffl_buf[k - delta] = str[k];
+      /* We'd like to use strtod() for the common case, but we don't trust it entirely. */
+      char ffl_buf[MAX_FAST_FLOATREAD_LEN + 1];
+
+      {
+        int k;
+        for (k = delta; k < len; k++) {
+          if (str[k] > 127)
+            ffl_buf[k - delta] = '?';
+          else
+            ffl_buf[k - delta] = str[k];
+        }
+        ffl_buf[len - delta] = 0;
       }
-      ffl_buf[len - delta] = 0;
-    }
 
-    if (has_expt && (str[has_expt] != 'e' && str[has_expt] != 'E')) {
-      ffl_buf[has_expt - delta] = 'e';
-    }
-    d = STRTOD(ffl_buf, &ptr);
+      if (has_expt && (str[has_expt] != 'e' && str[has_expt] != 'E')) {
+        ffl_buf[has_expt - delta] = 'e';
+      }
+      d = STRTOD(ffl_buf, &ptr);
 
-    if ((ptr XFORM_OK_MINUS ffl_buf) < (len - delta)) {
-      if (report)
-	scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
-			"read-number: bad decimal number %u",
-			str, len);
-      return scheme_false;
-    } 
+      if ((ptr XFORM_OK_MINUS ffl_buf) < (len - delta)) {
+        if (report)
+          scheme_read_err(complain, stxsrc, line, col, pos, span, 0, indentation,
+              "read-number: bad decimal number %u",
+              str, len);
+        return scheme_false;
+      } 
+    }
 
     if (!saw_nonzero_digit) {
       /* Assert: d = 0.0 or -0.0 */
@@ -1676,23 +1697,41 @@ static Scheme_Object *bytes_to_integer (int argc, Scheme_Object *argv[])
 
   switch(slen) {
   case 2:
-    if (sgned)
-      return scheme_make_integer(((short *)str)[0]);
-    else
-      return scheme_make_integer(((unsigned short *)str)[0]);
+    if (sgned) {
+      short val;
+      memcpy(&val, str, sizeof(short));
+      return scheme_make_integer(val);
+      }
+    else {
+      unsigned short val;
+      memcpy(&val, str, sizeof(unsigned short));
+      return scheme_make_integer(val);
+      }
     break;
   case 4:
-    if (sgned)
-      return scheme_make_integer_value(((int *)str)[0]);
-    else
-      return scheme_make_integer_value_from_unsigned(((unsigned int *)str)[0]);
+    if (sgned) {
+      int val;
+      memcpy(&val, str, sizeof(int));
+      return scheme_make_integer_value(val);
+      }
+    else {
+      unsigned int val;
+      memcpy(&val, str, sizeof(unsigned int));
+      return scheme_make_integer_value_from_unsigned(val);
+      }
     break;
   default:
 #ifdef SIXTY_FOUR_BIT_INTEGERS
-    if (sgned)
-      return scheme_make_integer_value(((long *)str)[0]);
-    else
-      return scheme_make_integer_value_from_unsigned(((unsigned long *)str)[0]);
+    if (sgned) {
+      long val;
+      memcpy(&val, str, sizeof(long));
+      return scheme_make_integer_value(val);
+      }
+    else {
+      unsigned long val;
+      memcpy(&val, str, sizeof(unsigned long));
+      return scheme_make_integer_value_from_unsigned(val);
+      }
     break;
 #else
 # ifndef NO_LONG_LONG_TYPE
@@ -1734,6 +1773,8 @@ static Scheme_Object *bytes_to_integer (int argc, Scheme_Object *argv[])
 #endif
     break;
   }
+
+  /* throw an error here */
 }
 
 #define MZ_U8HI 0
@@ -1831,23 +1872,6 @@ static Scheme_Object *integer_to_bytes(int argc, Scheme_Object *argv[])
     else
       bad = !scheme_get_unsigned_long_long_val(n, (umzlonglong *)&llval);
 # else
-    if (!num_limits[MZ_U8HI]) {
-      Scheme_Object *a[2], *v;
-
-      a[0] = scheme_make_integer(1);
-      a[1] = scheme_make_integer(64);
-      a[0] = scheme_bitwise_shift(2, a);
-      v = scheme_sub1(1, a);
-      num_limits[MZ_U8HI] = v;
-      a[0] = v;
-      a[1] = scheme_make_integer(-1);
-      v = scheme_bitwise_shift(2, a);
-      num_limits[MZ_S8HI] = v;
-      a[0] = v;
-      v = scheme_bin_minus(scheme_make_integer(0), scheme_add1(1, a));
-      num_limits[MZ_S8LO] = v;
-    }
-
     if (sgned)
       bad = (scheme_bin_lt(n, num_limits[MZ_S8LO])
 	     || scheme_bin_lt(num_limits[MZ_S8HI], n));
@@ -1873,19 +1897,21 @@ static Scheme_Object *integer_to_bytes(int argc, Scheme_Object *argv[])
   case 2:
     {
       if (sgned) {
-	*(unsigned short *)str = (unsigned short)(val);
+        unsigned short value = val;
+        memcpy(str, &value, sizeof(unsigned short));
       } else {
-	*(short *)str = (short)(val);
+        short value = val;
+        memcpy(str, &value, sizeof(short));
       }
     }
     break;
   case 4:
     if (sgned) {
-      unsigned int sv = val;
-      *(unsigned int *)str = sv;
+        unsigned int value = val;
+        memcpy(str, &value, sizeof(unsigned int));
     } else {
-      int sv = val;
-      *(int *)str = sv;
+        int value = val;
+        memcpy(str, &value, sizeof(int));
     }
     break;
   default:

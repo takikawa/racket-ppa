@@ -1735,7 +1735,7 @@ If @scheme[end] is not @scheme['same] and not the same as @scheme[start],
 
 When the specified range cannot fit in the visible area, @scheme[bias]
  indicates which end of the range to display. When @scheme[bias] is
- @scheme['same], then the start of the range is displayed. When
+ @scheme['start], then the start of the range is displayed. When
  @scheme[bias] is @scheme['end], then the end of the range is
  displayed. Otherwise, @scheme[bias] must be @scheme['none].
 
@@ -1747,7 +1747,7 @@ If the editor is scrolled, then the editor is redrawn and the return
  scroll-editor-to].
 
 Scrolling is disallowed when the editor is internally locked for
- reflowing (see also @|lockdiscuss|). 
+ reflowing (see also @|lockdiscuss|).
 
 The system may scroll the editor without calling this method. For
  example, a canvas displaying an editor might scroll the editor to
@@ -1808,10 +1808,10 @@ See also
 
 @defmethod[(set-clickback [start exact-nonnegative-integer?]
                           [end exact-nonnegative-integer?]
-                          [f ((is-a?/c text% 
-                                       exact-nonnegative-integer?
-                                       exact-nonnegative-integer?)
-                              . -> . any)]
+                          [f (-> (is-a?/c text%) 
+                                 exact-nonnegative-integer?
+                                 exact-nonnegative-integer?
+                                 any)]
                           [hilite-delta (or/c (is-a?/c style-delta%) #f) #f]
                           [call-on-down? any/c #f])
            void?]{

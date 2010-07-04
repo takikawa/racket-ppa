@@ -4,7 +4,9 @@
 (require scribble/decode
          scribble/decode-struct
          scribble/basic
-         scribble/struct
+         scribble/core
+         scribble/scheme
+         scribble/html-properties
          scribble/manual-struct
          scheme/list
          scheme/string
@@ -98,18 +100,18 @@
                     `(,@e ,(make-element "smaller"
                              `(" (method of "
                                ,(make-element 
-                                 "schemesymbol"
+                                 symbol-color
                                  (list
                                   (make-element 
-                                   "schemevaluelink"
+                                   value-link-color
                                    (list (symbol->string
                                           (exported-index-desc-name desc))))))
                                ")")))
                     e)]
                [e (make-link-element "indexlink" e tag)]
-               [e (send renderer render-element e sec ri)])
+               [e (send renderer render-content e sec ri)])
           (match e ; should always render to a single `a'
-            [`((a ([href ,href] [class "indexlink"]) . ,body))
+            [`((a ([href ,href] [class "indexlink"] [pltdoc ,_]) . ,body))
              (cond [(and (part-index-desc? desc)
                          (regexp-match #rx"(?:^|/)([^/]+)/index\\.html$" href))
                     => (lambda (man) (hash-set! manual-refs (cadr man) idx))])
@@ -119,10 +121,11 @@
                             (if (regexp-match? #rx"^Provided from: " label)
                               body
                               ;; if this happens, this code should be updated
-                              (error "internal error: unexpected tooltip"))]
+                              (error 'make-script
+                                     "internal error: unexpected tooltip"))]
                            [else body])])
                (values (compact-url href) (compact-body body)))]
-            [else (error "unexpected value rendered: ~e" e)])))
+            [else (error 'make-script "unexpected value rendered: ~e" e)])))
       (define (lib->name lib)
         (quote-string (let loop ([lib lib])
                         (match lib
@@ -181,12 +184,15 @@
   (make-splice
    (list
     (make-paragraph
+     plain
      (list
       (script-ref "plt-index.js"
                   #:noscript
                   @list{Sorry, you must have JavaScript to use this page.})
       (script-ref "search.js")
-      (make-render-element null null
+      (make-render-element #f null
                            (lambda (r s i) (make-script user-dir? r s i)))))
-    (make-styled-paragraph '()
-                           (make-with-attributes 'div '([id . "plt_search_container"]))))))
+    (make-paragraph (make-style #f
+                                (list 'div
+                                      (make-attributes '([id . "plt_search_container"]))))
+                    '()))))

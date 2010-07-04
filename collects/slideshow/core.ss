@@ -266,7 +266,7 @@
 	(make-parameter default-slide-assembler))
 
       (define-struct name-only (title))
-      (define-struct name+title (title name))
+      (define-struct name+title (name title))
 
       (define (one-slide/title/inset do-add-slide! use-assem? process v-sep skipped-pages s inset timeout . x) 
 	(let-values ([(x c)
@@ -483,7 +483,7 @@
                        (lambda (x)
                          (list
                           (cc-superimpose
-                           (apply-slide-inset inset (if (string? s)
+                           (apply-slide-inset inset (if (and s (not (name-only? s)))
                                                         titleless-page 
                                                         full-page))
                            (ct-superimpose
@@ -669,7 +669,7 @@
                                               [else vl-append])
                                             width
                                             (if decode?
-                                                (map decode s)
+                                                (decode s)
                                                 s))])
                         (if fill?
                             ((case align
@@ -684,7 +684,23 @@
       (define (decode s)
         (let loop ([s s])
           (cond
-           [(list? s) (map loop s)]
+           [(list? s) 
+            (map 
+             decode
+             ;; Remove "\n", and also cancel extra spaces after "\n":
+             (let loop ([s s])
+               (cond
+                [(null? s) null]
+                [(equal? (car s) "\n")
+                 (let nloop ([s (cdr s)])
+                   (if (and (pair? s)
+                            (string? (car s)))
+                       (let ([a (regexp-replace #rx"^ +" (car s) "")])
+                         (if (string=? a "")
+                             (nloop (cdr s))
+                             (loop (cons a (cdr s)))))
+                       (loop s)))]
+                [else (cons (car s) (loop (cdr s)))])))]
            [(not (string? s)) s]
            [(regexp-match-positions #rx"---" s)
             => (lambda (m)

@@ -37,17 +37,17 @@
 (define-form-struct (mod form) (name self-modidx prefix provides requires body syntax-body unexported 
                                      max-let-depth dummy lang-info internal-context))
 
-(define-form-struct (lam expr) (name flags num-params param-types rest? closure-map max-let-depth body)) ; `lambda'
+(define-form-struct (lam expr) (name flags num-params param-types rest? closure-map closure-types max-let-depth body)) ; `lambda'
 (define-form-struct (closure expr) (code gen-id)) ; a static closure (nothing to close over)
 (define-form-struct (case-lam expr) (name clauses)) ; each clause is an lam
 
-(define-form-struct (let-one expr) (rhs body)) ; pushes one value onto stack
+(define-form-struct (let-one expr) (rhs body flonum?)) ; pushes one value onto stack
 (define-form-struct (let-void expr) (count boxes? body)) ; create new stack slots
 (define-form-struct (install-value expr) (count pos boxes? rhs body)) ; set existing stack slot(s)
 (define-form-struct (let-rec expr) (procs body)) ; put `letrec'-bound closures into existing stack slots
 (define-form-struct (boxenv expr) (pos body)) ; box existing stack element
 
-(define-form-struct (localref expr) (unbox? pos clear? other-clears?)) ; access local via stack
+(define-form-struct (localref expr) (unbox? pos clear? other-clears? flonum?)) ; access local via stack
 
 (define-form-struct (toplevel expr) (depth pos const? ready?))  ; access binding via prefix array (which is on stack)
 (define-form-struct (topsyntax expr) (depth pos midpt)) ; access syntax object via prefix array (which is on stack)
@@ -113,9 +113,12 @@
      (make-compilation-top ld prefix code)]))
 
 (define (read-resolve-prefix v)
-  (match v
-    [`(,i ,tv . ,sv)
-     (make-prefix i (vector->list tv) (vector->list sv))]))
+  (let-values ([(v unsafe?) (if (integer? (car v))
+                                (values v #f)
+                                (values (cdr v) #t))])
+    (match v
+      [`(,i ,tv . ,sv)
+       (make-prefix i (vector->list tv) (vector->list sv))])))
 
 (define (read-unclosed-procedure v)
   (define CLOS_HAS_REST 1)
@@ -131,16 +134,28 @@
                       (if (zero? (bitwise-and flags CLOS_HAS_REF_ARGS))
                           (values (vector-length v) v rest)
                           (values v (car rest) (cdr rest)))]
-                     [(arg-types) (let ([num-params ((if rest? sub1 values) num-params)])
+                     [(check-bit) (lambda (i)
                                     (if (zero? (bitwise-and flags CLOS_HAS_REF_ARGS))
-                                        (for/list ([i (in-range num-params)]) 'val)
-                                        (for/list ([i (in-range num-params)])
-                                          (if (bitwise-bit-set?
-                                               (vector-ref closed-over
-                                                           (+ closure-size (quotient i BITS_PER_MZSHORT)))
-                                               (remainder i BITS_PER_MZSHORT))
-                                              'ref
-                                              'val))))])
+                                        0
+                                        (let ([byte (vector-ref closed-over
+                                                                (+ closure-size (quotient (* 2 i) BITS_PER_MZSHORT)))])
+                                          (+ (if (bitwise-bit-set? byte (remainder (* 2 i) BITS_PER_MZSHORT))
+                                                 1
+                                                 0)
+                                             (if (bitwise-bit-set? byte (add1 (remainder (* 2 i) BITS_PER_MZSHORT)))
+                                                 2
+                                                 0)))))]
+                     [(arg-types) (let ([num-params ((if rest? sub1 values) num-params)])
+                                    (for/list ([i (in-range num-params)]) 
+                                      (case (check-bit i)
+                                        [(0) 'val]
+                                        [(1) 'ref]
+                                        [(2) 'flonum])))]
+                     [(closure-types) (for/list ([i (in-range closure-size)]
+                                                 [j (in-naturals num-params)])
+                                        (case (check-bit j)
+                                          [(0) 'val/ref]
+                                          [(2) 'flonum]))])
          (make-lam name
                    (append
                     (if (zero? (bitwise-and flags flags CLOS_PRESERVES_MARKS)) null '(preserves-marks))
@@ -154,6 +169,7 @@
                        (let ([v2 (make-vector closure-size)])
                          (vector-copy! v2 0 closed-over 0 closure-size)
                          v2))
+                   closure-types
                    max-let-depth
                    body)))]))
 
@@ -331,7 +347,7 @@
     [(96) 'case-lambda-sequence-type]
     [(97) 'begin0-sequence-type]
     [(100) 'module-type]
-    [(103) 'resolve-prefix-type]
+    [(102) 'resolve-prefix-type]
     [else (error 'int->type "unknown type: ~e" i)]))
 
 (define type-readers
@@ -407,7 +423,7 @@
     [16 vector]
     [17 hash-table]
     [18 stx]
-    [19 gstx] ; unused
+    [19 let-one-flonum]
     [20 marshalled]
     [21 quote]
     [22 reference]
@@ -488,9 +504,11 @@
 (define (make-local unbox? pos flags)
   (define SCHEME_LOCAL_CLEAR_ON_READ #x01)
   (define SCHEME_LOCAL_OTHER_CLEARS #x02)
+  (define SCHEME_LOCAL_FLONUM #x03)
   (make-localref unbox? pos 
-                 (positive? (bitwise-and flags SCHEME_LOCAL_CLEAR_ON_READ))
-                 (positive? (bitwise-and flags SCHEME_LOCAL_OTHER_CLEARS))))
+                 (= flags SCHEME_LOCAL_CLEAR_ON_READ)
+                 (= flags SCHEME_LOCAL_OTHER_CLEARS)
+                 (= flags SCHEME_LOCAL_FLONUM)))
 
 (define (a . << . b)
   (arithmetic-shift a b))
@@ -783,8 +801,9 @@
                            (if ppr null (read-compact cp)))
                      (read-compact-list l ppr cp))
                  (loop l ppr)))]
-          [(let-one)
-           (make-let-one (read-compact cp) (read-compact cp))]
+          [(let-one let-one-flonum)
+           (make-let-one (read-compact cp) (read-compact cp)
+                         (eq? cpt-tag 'let-one-flonum))]
           [(branch)
            (make-branch (read-compact cp) (read-compact cp) (read-compact cp))]
           [(module-index) (module-path-index-join (read-compact cp) (read-compact cp))]

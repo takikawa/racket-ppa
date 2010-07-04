@@ -3,6 +3,9 @@
 
 (Section 'basic)
 
+(require scheme/flonum
+         scheme/private/norm-arity)
+
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (test '() 'null null)
@@ -1270,51 +1273,6 @@
 (arity-test regexp-replace 3 3)
 (arity-test regexp-replace* 3 3)
 
-(test #t vector? '#(0 (2 2 2 2) "Anna"))
-(test #t vector? '#())
-(arity-test vector? 1 1)
-(test '#(a b c) vector 'a 'b 'c)
-(test '#() vector)
-(test 3 vector-length '#(0 (2 2 2 2) "Anna"))
-(test 0 vector-length '#())
-(arity-test vector-length 1 1)
-(err/rt-test (vector-length "apple"))
-(test 8 vector-ref '#(1 1 2 3 5 8 13 21) 5)
-(arity-test vector-ref 2 2)
-(err/rt-test (vector-ref "apple" 3))
-(err/rt-test (vector-ref #(4 5 6) 3) exn:application:mismatch?)
-(err/rt-test (vector-ref #() 0) exn:application:mismatch?)
-(err/rt-test (vector-ref #() (expt 2 100)) exn:application:mismatch?)
-(err/rt-test (vector-ref #(4 5 6) -1))
-(err/rt-test (vector-ref #(4 5 6) 2.0))
-(err/rt-test (vector-ref #(4 5 6) "2"))
-(test '#(0 ("Sue" "Sue") "Anna") 'vector-set
-	(let ((vec (vector 0 '(2 2 2 2) "Anna")))
-	  (vector-set! vec 1 '("Sue" "Sue"))
-	  vec))
-(test '#(hi hi) make-vector 2 'hi)
-(test '#() make-vector 0)
-(test '#() make-vector 0 'a)
-(test 2048 vector-length (make-vector 2048 'a))
-(arity-test make-vector 1 2)
-(err/rt-test (make-vector "a" 'a))
-(err/rt-test (make-vector 1.0 'a))
-(err/rt-test (make-vector 10.2 'a))
-(err/rt-test (make-vector -1 'a))
-(err/rt-test (make-vector 1000000000000000000000 'a) exn:fail:out-of-memory?)
-(arity-test vector-set! 3 3)
-(err/rt-test (vector-set! #() 0 'x) exn:application:mismatch?)
-(err/rt-test (vector-set! #(1 2 3) -1 'x))
-(err/rt-test (vector-set! #(1 2 3) 3 'x) exn:application:mismatch?)
-(err/rt-test (vector-set! #(1 2 3) (expt 2 100) 'x) exn:application:mismatch?)
-(err/rt-test (vector-set! '(1 2 3) 2 'x))
-(err/rt-test (vector-set! #(1 2 3) "2" 'x))
-(define v (vector 1 2 3))
-(vector-fill! v 0)
-(test (quote #(0 0 0)) 'vector-fill! v)
-(arity-test vector-fill! 2 2)
-(err/rt-test (vector-fill! '(1 2 3) 0))
-
 (test #t procedure? car)
 (test #f procedure? 'car)
 (test #t procedure? (lambda (x) (* x x)))
@@ -1861,11 +1819,107 @@
 (test (list 1 3 (make-arity-at-least 5))
       procedure-arity (case-lambda [(x) 0] [(x y z) 1] [(x y z w u . rest) 2]))
 (test (make-arity-at-least 0) procedure-arity (lambda x 1))
-(test (list 0 (make-arity-at-least 0)) procedure-arity (case-lambda 
-							[() 10]
-							[x 1]))
+(test (make-arity-at-least 0) procedure-arity (case-lambda [() 10] [x 1]))
 (test (make-arity-at-least 0) procedure-arity (lambda x x))
 (arity-test procedure-arity 1 1)
+
+(test '() normalize-arity '())
+(test 1 normalize-arity 1)
+(test 1 normalize-arity '(1))
+(test '(1 2) normalize-arity '(1 2))
+(test '(1 2) normalize-arity '(2 1))
+(test (make-arity-at-least 2) normalize-arity (list (make-arity-at-least 2) 3))
+(test (list 1 (make-arity-at-least 2))
+      normalize-arity (list (make-arity-at-least 2) 1))
+(test (list 1 (make-arity-at-least 2)) 
+      normalize-arity (list (make-arity-at-least 2) 1 3))
+(test (list 0 1 (make-arity-at-least 2))
+      normalize-arity (list (make-arity-at-least 2) 1 0 3))
+(test (list 0 1 (make-arity-at-least 2))
+      normalize-arity (list (make-arity-at-least 2)
+                            (make-arity-at-least 4) 1 0 3))
+(test (list 0 1 (make-arity-at-least 2))
+      normalize-arity (list (make-arity-at-least 4)
+                            (make-arity-at-least 2) 1 0 3))
+(test (list 1 2) normalize-arity (list 1 1 2 2))
+(test 1 normalize-arity (list 1 1 1))
+(test (list 1 (make-arity-at-least 2))
+      normalize-arity (list (make-arity-at-least 2) 1 1))
+(test (list 1 (make-arity-at-least 2))
+      normalize-arity 
+      (list (make-arity-at-least 2)
+            (make-arity-at-least 2) 1 1))
+
+(let ()
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  ;;
+  ;; randomized testing
+  ;; predicate: normalize-arity produces a normalized arity
+  ;;
+  
+  (define (normalized-arity? a)
+    (or (null? a)
+        (arity? a)
+        (and (list? a)
+             ((length a) . >= . 2)
+             (andmap arity? a)
+             (if (arity-at-least? (last a))
+                 (non-empty-non-singleton-sorted-list-ending-with-arity? a)
+                 (non-singleton-non-empty-sorted-list? a)))))
+  
+  (define (arity? a)
+    (or (nat? a)
+        (and (arity-at-least? a)
+             (nat? (arity-at-least-value a)))))
+  
+  (define (nat? a)
+    (and (number? a)
+         (integer? a)
+         (a . >= . 0)))
+  
+  ;; non-empty-non-singleton-sorted-list-ending-with-arity? : xx -> boolean
+  ;; know that 'a' is a list of at least 2 elements
+  (define (non-empty-non-singleton-sorted-list-ending-with-arity? a)
+    (let loop ([bound (car a)]
+               [lst (cdr a)])
+      (cond
+        [(null? (cdr lst))
+         (and (arity-at-least? (car lst))
+              (> (arity-at-least-value (car lst)) bound))]
+        [else
+         (and (nat? (car lst))
+              ((car lst) . > . bound)
+              (loop (car lst)
+                    (cdr lst)))])))
+  
+  (define (non-empty-sorted-list? a)
+    (and (pair? a)
+         (sorted-list? a)))
+  
+  (define (non-singleton-non-empty-sorted-list? a)
+    (and (pair? a)
+         (pair? (cdr a))
+         (sorted-list? a)))
+  
+  (define (sorted-list? a)
+    (or (null? a)
+        (sorted/bounded-list? (cdr a) (car a))))
+  
+  (define (sorted/bounded-list? a bound)
+    (or (null? a)
+        (and (number? (car a))
+             (< bound (car a))
+             (sorted/bounded-list? (cdr a) (car a)))))
+  
+  (for ((i (in-range 1 2000)))
+    (let* ([rand-bound (ceiling (/ i 10))]
+           [l (build-list (random rand-bound)
+                          (λ (i) (if (zero? (random 5))
+                                     (make-arity-at-least (random rand-bound))
+                                     (random rand-bound))))]
+           [res (normalize-arity l)])
+      (unless (normalized-arity? res)
+        (error 'normalize-arity-failed "input ~s; output ~s" l res)))))
 
 (test #t procedure-arity-includes? cons 2)
 (test #f procedure-arity-includes? cons 0)
@@ -1896,6 +1950,7 @@
 (err/rt-test (list->string 'hello))
 (err/rt-test (list->string '(#\h . #\e)))
 (err/rt-test (list->string '(#\h 1 #\e)))
+
 (test '(dah dah didah) vector->list '#(dah dah didah))
 (test '() vector->list '#())
 (test '#(dididit dah) list->vector '(dididit dah))
@@ -1905,6 +1960,7 @@
 (err/rt-test (vector->list 'hello))
 (err/rt-test (list->vector 'hello))
 (err/rt-test (list->vector '(#\h . #\e)))
+
 
 (test-cont)
 
@@ -1977,7 +2033,8 @@
           [l (list 1 2 3)]
           [v (vector 5 6 7)]
           [a (make-a 1 (make-a 2 3))]
-          [b (box (list 1 2 3))])
+          [b (box (list 1 2 3))]
+          [fl (flvector 1.0 +nan.0 0.0)])
 
       (test 0 hash-count h1)
 
@@ -1990,7 +2047,8 @@
                      (hash-set! h1 (save 3.45) 'flonum)
                      (hash-set! h1 (save 3/45) 'rational)
                      (hash-set! h1 (save 3+45i) 'complex)
-                     (hash-set! h1 (save (integer->char 955)) 'char))]
+                     (hash-set! h1 (save (integer->char 955)) 'char)
+                     (hash-set! h1 (save fl) 'flvector))]
             [puts2 (lambda ()
                      (hash-set! h1 (save (list 5 7)) 'another-list)
                      (hash-set! h1 (save 3+0.0i) 'izi-complex)
@@ -2005,7 +2063,7 @@
             (puts1))
           (begin
             (puts1)
-            (test 7 hash-count h1)
+            (test 8 hash-count h1)
             (puts2))))
 
       (when reorder?
@@ -2017,7 +2075,7 @@
             (loop (add1 i))
             (hash-remove! h1 i))))
 
-      (test 13 hash-count h1)
+      (test 14 hash-count h1)
       (test 'list hash-ref h1 l)
       (test 'list hash-ref h1 (list 1 2 3))
       (test 'another-list hash-ref h1 (list 5 7))
@@ -2036,6 +2094,7 @@
       (test 'box hash-ref h1 b)
       (test 'box hash-ref h1 #&(1 2 3))
       (test 'char hash-ref h1 (integer->char 955))
+      (test 'flvector hash-ref h1 (flvector 1.0 +nan.0 0.0))
       (test #t
             andmap
             (lambda (i)
@@ -2053,13 +2112,14 @@
               (,(make-a 1 (make-a 2 3)) . struct)
               (,an-ax . structx)
               (#\u3BB . char)
-              (#&(1 2 3) . box)))
+              (#&(1 2 3) . box)
+              (,(flvector 1.0 +nan.0 0.0) . flvector)))
       (hash-remove! h1 (list 1 2 3))
-      (test 12 hash-count h1)
+      (test 13 hash-count h1)
       (test 'not-there hash-ref h1 l (lambda () 'not-there))
       (let ([c 0])
         (hash-for-each h1 (lambda (k v) (set! c (add1 c))))
-        (test 12 'count c))
+        (test 13 'count c))
       ;; return the hash table:
       h1))
 
@@ -2336,7 +2396,7 @@
           (lambda (proc)
             (let ([a (procedure-reduce-arity proc ar)])
               (test #t procedure? a)
-              (test ar procedure-arity a)
+              (test (normalize-arity ar) procedure-arity a)
               (map (lambda (i)
                      (test #t procedure-arity-includes? a i)
                      (when (i . < . 100)
@@ -2368,7 +2428,7 @@
            (check-ok + (expt 2 70) (list (expt 2 70)) (list 0 10  (add1 (expt 2 70))))
            (check-ok + (make-arity-at-least 2) (list 2 5 (expt 2 70)) (list 0 1))
            (check-ok + (list 2 4) '(2 4) '(0 3))
-           (check-ok + (list 4 2) '(4 2) '(0 3))
+           (check-ok + (list 2 4) '(4 2) '(0 3))
            (check-ok + (list 0 (make-arity-at-least 2)) (list 0 2 5 (expt 2 70)) (list 1))
            (check-ok + (list 4 (make-arity-at-least 2)) '(2 3 4 10) '(0 1))
            (check-ok + (list 2 (make-arity-at-least 4)) '(2 4 10) '(0 1 3)))])

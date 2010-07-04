@@ -1,150 +1,178 @@
-(module promise '#%kernel
-(#%require "private/small-scheme.ss" "private/more-scheme.ss" "private/define.ss"
-           (rename "private/define-struct.ss" define-struct define-struct*)
-           (for-syntax '#%kernel "private/stxcase-scheme.ss"))
-(#%provide lazy delay force promise? promise-forced? promise-running?)
+#lang scheme/base
+(require "private/promise.ss" (for-syntax scheme/base))
+(provide delay lazy force promise? promise-forced? promise-running?)
 
-;; This module implements "lazy" (composable) promises and a `force'
-;; that is iterated through them.
+;; ----------------------------------------------------------------------------
+;; More delay-like values, with different ways of deferring computations
 
-;; This is similar to the *new* version of srfi-45 -- see the
-;; post-finalization discussion at http://srfi.schemers.org/srfi-45/ for
-;; more details; specifically, this version is the `lazy2' version from
-;; http://srfi.schemers.org/srfi-45/post-mail-archive/msg00013.html.
-;; Note: if you use only `force'+`delay' it behaves as in Scheme (except
-;; that `force' is identity for non promise values), and `force'+`lazy'
-;; are sufficient for implementing the lazy language.
+(define-struct (promise/name promise) ()
+  #:property prop:force (lambda (p) ((pref p))))
 
-(define (promise-printer promise port write?)
-  (let loop ([p (promise-val promise)])
-    (cond [(reraise? p)
-           (let ([v (reraise-val p)])
-             (if (exn? v)
-               (fprintf port (if write? "#<promise!exn!~s>" "#<promise!exn!~a>")
-                        (exn-message v))
-               (fprintf port (if write? "#<promise!~s>" "#<promise!~a>")
-                        `(raise ,v))))]
-          [(running? p)
-           (let ([n (running-name p)])
-             (if n
-               (fprintf port "#<promise:!running!~a>" n)
-               (fprintf port "#<promise:!running>")))]
-          [(procedure? p)
-           (cond [(object-name p)
-                  => (lambda (n) (fprintf port "#<promise:~a>" n))]
-                 [else (display "#<promise>" port)])]
-          [(promise? p) (loop (promise-val p))] ; hide sharing
-          ;; values
-          [(null? p) (fprintf port "#<promise!(values)>")]
-          [(null? (cdr p))
-           (fprintf port (if write? "#<promise!~s>" "#<promise!~a>") (car p))]
-          [else
-           (display "#<promise!(values" port)
-           (let ([fmt (if write? " ~s" " ~a")])
-             (for-each (lambda (x) (fprintf port fmt x)) p))
-           (display ")>" port)])))
+(provide (rename-out [delay/name* delay/name]))
+(define delay/name make-promise/name)
+(define-syntax (delay/name* stx) (make-delayer stx #'delay/name '()))
 
-(define-struct promise (val)
-  #:mutable
-  #:property prop:custom-write promise-printer)
-;; A promise value can hold
-;; - (list <value> ...): forced promise (possibly multiple-values, usually one)
-;; - <promise>: a shared (redirected) promise that points at another one
-;; - <thunk>: usually a delayed promise,
-;;        - can also hold a `running' thunk that will throw a reentrant error
-;;        - can also hold a raising-a-value thunk on exceptions and other
-;;          `raise'd values (actually, applicable structs for printouts)
+;; utility struct
+(define-struct (running-thread running) (thread))
 
-;; Creates a `composable' promise
-;;   X = (force (lazy X)) = (force (lazy (lazy X))) = (force (lazy^n X))
-(define-syntax (lazy stx)
-  (syntax-case stx ()
-    [(_ expr)
-     (with-syntax ([proc (syntax-property (syntax/loc stx (lambda () expr))
-                                          'inferred-name (syntax-local-name))])
-       (syntax/loc stx (make-promise proc)))]))
+;; used in promise/sync until it's forced
+(define-struct syncinfo ([thunk #:mutable] done-evt done-sema access-sema))
 
-;; Creates a promise that does not compose
-;;   X = (force (delay X)) = (force (lazy (delay X)))
-;;                         = (force (lazy^n (delay X)))
-;;   X = (force (force (delay (delay X)))) != (force (delay (delay X)))
-;; so each sequence of `(lazy^n o delay)^m' requires m `force's and a
-;; sequence of `(lazy^n o delay)^m o lazy^k' requires m+1 `force's (for k>0)
-;; (This is not needed with a lazy language (see the above URL for details),
-;; but provided for regular delay/force uses.)
-(define-syntax (delay stx)
-  (syntax-case stx ()
-    [(_ expr)
-     (syntax/loc stx
-       (lazy (make-promise (call-with-values (lambda () expr) list))))]))
+(define-struct (promise/sync promise) ()
+  #:property prop:custom-write
+  (lambda (p port write?)
+    (promise-printer
+     (let ([v (pref p)])
+       (if (syncinfo? v) (make-promise (syncinfo-thunk v)) p))
+     port write?))
+  #:property prop:force
+  (lambda (p)
+    (reify-result
+     (let ([v (pref p)])
+       (cond
+         ;; already forced
+         [(not (syncinfo? v)) v]
+         ;; being forced...
+         [(running-thread? (syncinfo-thunk v))
+          (let ([r (syncinfo-thunk v)])
+            (if (eq? (running-thread-thread r) (current-thread))
+              ;; ... by the current thread => throw the usual reentrant error
+              (r)
+              ;; ... by a different thread => just wait for it
+              (begin (sync (syncinfo-done-evt v)) (pref p))))]
+         [else
+          ;; wasn't forced yet: try to do it now
+          (call-with-semaphore (syncinfo-access-sema v)
+            (lambda ()
+              (let ([thunk (syncinfo-thunk v)] [done (syncinfo-done-sema v)])
+                ;; set the thread last
+                (set-syncinfo-thunk!
+                 v (make-running-thread (object-name thunk) (current-thread)))
+                (call-with-exception-handler
+                 (lambda (e)
+                   (pset! p (make-reraise e))
+                   (semaphore-post done)
+                   e)
+                 (lambda ()
+                   (pset! p (call-with-values thunk list))
+                   (semaphore-post done))))))
+          ;; whether it was this thread that forced it or not, the results are
+          ;; now in
+          (pref p)]))))
+  #:property prop:evt
+  (lambda (p)
+    (let ([v (pref p)])
+      (handle-evt (if (syncinfo? v) (syncinfo-done-evt v) always-evt) void))))
 
-;; For simplicity and efficiency this code uses thunks in promise values for
-;; exceptions: this way, we don't need to tag exception values in some special
-;; way and test for them -- we just use a thunk that will raise the exception.
-;; But it's still useful to refer to the exception value, so use an applicable
-;; struct for them.  The same goes for a promise that is being forced: we use a
-;; thunk that will throw a "reentrant promise" error -- and use an applicable
-;; struct so it is identifiable.
-(define-struct reraise (val)
-  #:property prop:procedure (lambda (this) (raise (reraise-val this))))
-(define-struct running (name)
-  #:property prop:procedure (lambda (this)
-                              (let ([name (running-name this)])
-                                (if name
-                                  (error 'force "reentrant promise ~v" name)
-                                  (error 'force "reentrant promise")))))
+(provide (rename-out [delay/sync* delay/sync]))
+(define (delay/sync thunk)
+  (let ([done-sema (make-semaphore 0)])
+    (make-promise/sync (make-syncinfo thunk
+                                      (semaphore-peek-evt done-sema) done-sema
+                                      (make-semaphore 1)))))
+(define-syntax (delay/sync* stx) (make-delayer stx #'delay/sync '()))
 
-;; force iterates on lazy promises (forbids dependency cycles)
-;; * (force X) = X for non promises
-;; * does not deal with multiple values, except for `delay' promises at the
-;;   leaves
+;; threaded promises
 
-(define (force-proc p root)
-  (let loop1 ([v (p)]) ; does not handle multiple values!
-    (if (promise? v)
-      (let loop2 ([promise* v])
-        (let ([p* (promise-val promise*)])
-          (set-promise-val! promise* root) ; share with root
-          (cond [(procedure? p*) (loop1 (p*))]
-                [(promise? p*) (loop2 p*)]
-                [else (set-promise-val! root p*)
-                      (cond [(null? p*) (values)]
-                            [(null? (cdr p*)) (car p*)]
-                            [else (apply values p*)])])))
-      (begin ; error here for "library approach" (see above URL)
-        (set-promise-val! root (list v))
-        v))))
+(define-struct (promise/thread promise) ()
+  #:property prop:force
+  (lambda (p)
+    (reify-result (let ([v (pref p)])
+                    (if (running-thread? v)
+                      (begin (thread-wait (running-thread-thread v))
+                             (pref p))
+                      v))))
+  #:property prop:evt
+  (lambda (p)
+    (let ([v (pref p)])
+      (handle-evt (if (running? v) (running-thread-thread v) always-evt)
+                  void))))
 
-(define (force promise)
-  (if (promise? promise)
-    (let loop ([p (promise-val promise)])
-      (cond [(procedure? p)
-             ;; mark the root as running: avoids cycles, and no need to keep
-             ;; banging the root promise value; it makes this non-r5rs, but
-             ;; only practical uses of these things could be ones that use
-             ;; state.
-             ;; (careful: avoid holding a reference to the thunk, to allow
-             ;; safe-for-space loops)
-             (set-promise-val! promise (make-running (object-name p)))
-             (call-with-exception-handler
-               (lambda (e) (set-promise-val! promise (make-reraise e)) e)
-               (lambda () (force-proc p promise)))]
-            [(promise? p) (loop (promise-val p))]
-            [(null? p) (values)]
-            [(null? (cdr p)) (car p)]
-            [else (apply values p)]))
-    ;; different from srfi-45: identity for non-promises
-    promise))
+(provide (rename-out [delay/thread* delay/thread]))
+(define (delay/thread thunk group)
+  (define (run)
+    (call-with-exception-handler
+     (lambda (e) (pset! p (make-reraise e)) (kill-thread (current-thread)))
+     (lambda () (pset! p (call-with-values thunk list)))))
+  (define p
+    (make-promise/thread
+     (make-running-thread
+      (object-name thunk)
+      (if group
+        (parameterize ([current-thread-group (make-thread-group)]) (thread run))
+        (thread run)))))
+  p)
+(define-syntax delay/thread*
+  (let ([kwds (list (cons '#:group #'#t))])
+    (lambda (stx) (make-delayer stx #'delay/thread kwds))))
 
-(define (promise-forced? promise)
-  (if (promise? promise)
-    (let ([p (promise-val promise)])
-      (or (not (procedure? p)) (reraise? p))) ; #f when running
-    (raise-type-error 'promise-forced? "promise" promise)))
+(define-struct (promise/idle promise/thread) ()
+  #:property prop:force
+  (lambda (p)
+    (reify-result (let ([v (pref p)])
+                    (if (procedure? v)
+                      ;; either running-thread, or returns the controller
+                      (let ([controller (if (running-thread? v)
+                                          (running-thread-thread v)
+                                          (v))])
+                        (thread-send controller 'force!)
+                        (thread-wait controller)
+                        (pref p))
+                      v)))))
 
-(define (promise-running? promise)
-  (if (promise? promise)
-    (running? (promise-val promise))
-    (raise-type-error 'promise-running? "promise" promise)))
-
-)
+(provide (rename-out [delay/idle* delay/idle]))
+(define (delay/idle thunk wait-for work-while tick use*)
+  (define use (cond [(use* . <= . 0) 0] [(use* . >= . 1) 1] [else use*]))
+  (define work-time (* tick use))
+  (define rest-time (- tick work-time))
+  (define (work)
+    (call-with-exception-handler
+     (lambda (e) (pset! p (make-reraise e)) (kill-thread (current-thread)))
+     (lambda () (pset! p (call-with-values thunk list)))))
+  (define (run)
+    ;; this thread is dedicated to controlling the worker thread, so it's
+    ;; possible to dedicate messages to signaling a `force'.
+    (define force-evt (thread-receive-evt))
+    (sync wait-for force-evt)
+    (pset! p (make-running-thread (object-name thunk) controller-thread))
+    (let ([worker (parameterize ([current-thread-group (make-thread-group)])
+                    (thread work))])
+      (cond
+        [(and (use . >= . 1) (equal? work-while always-evt))
+         ;; as if it was pre-forced
+         (thread-wait worker)]
+        [(use . <= . 0)
+         ;; work only when explicitly forced
+         (thread-suspend worker)
+         (sync force-evt)
+         (thread-wait worker)]
+        [else
+         (thread-suspend worker)
+         (let loop ()
+           ;; rest, then wait for idle time, then resume working
+           (if (eq? (begin0 (or (sync/timeout rest-time force-evt)
+                                (sync work-while force-evt))
+                      (thread-resume worker))
+                    force-evt)
+             ;; forced during one of these => let it run to completion
+             (thread-wait worker)
+             ;; not forced
+             (unless (sync/timeout work-time worker)
+               (thread-suspend worker)
+               (loop))))])))
+  ;; I don't think that a thread-group here is needed, but it doesn't hurt
+  (define controller-thread
+    (parameterize ([current-thread-group (make-thread-group)])
+      (thread run)))
+  ;; the thunk is not really used in the above, make it a function that returns
+  ;; the controller thread so it can be forced (used in the `prop:force')
+  (define p (make-promise/idle
+             (procedure-rename (lambda () controller-thread)
+                               (or (object-name thunk) 'idle-thread))))
+  p)
+(define-syntax delay/idle*
+  (let ([kwds (list (cons '#:wait-for   #'(system-idle-evt))
+                    (cons '#:work-while #'(system-idle-evt))
+                    (cons '#:tick       #'0.2)
+                    (cons '#:use        #'0.12))])
+    (lambda (stx) (make-delayer stx #'delay/idle kwds))))

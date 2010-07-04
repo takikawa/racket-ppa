@@ -13,6 +13,7 @@
 
          )
 
+
 (provide run-test run-tests run-all-tests run-all-tests-except)
 
 (define list-of-tests null)
@@ -1130,6 +1131,21 @@
                       (9 (check-error (+ (hilite 7) (rest empty)) "bogus")))
         (before-after (9 false (check-expect (hilite (+ 3 1)) 4))
                       (9 false (check-expect (hilite 4) 4)))))
+  
+  ;;;;;;;;;;;;
+  ;;
+  ;;    DMdA TESTS
+  ;;
+  ;;;;;;;;;;;
+  
+  (t1 'dmda-certificate-bug
+       m:dmda-a
+      "(: apply-nim-move (integer? -> integer?))
+  (define apply-nim-move
+    (lambda (s)
+      (if s s s)))"
+      '())
+
 
   ;  ;;;;;;;;;;;;;
   ;  ;;
@@ -1252,7 +1268,6 @@
         (before-after ((hilite (inform "30")))
                       ((hilite true)))
         (finished-stepping)))
-
 
   ;;;;;;;;;;;;;
   ;;
@@ -1440,17 +1455,13 @@
                    #;[display-only-errors #t]
                    #;[store-steps #f]
                    #;[show-all-steps #t])
-      #;(run-tests '(check-expect forward-ref check-within #;check-within-bad #;check-error) #;'(#;check-expect #;check-expect-2 check-within check-within-bad check-error))
+      #;(run-tests '(check-expect forward-ref check-within check-within-bad check-error check-error-bad))
       #;(run-tests '(teachpack-universe))
-      #;(run-test 'bad-parens)
+      #;(run-tests '(simple-if))
       (run-all-tests)))
   
+  
 
-(define (hhh)
-  (run-one-test 'bogus 
-              m:mz "abc" 
-              `()))
 
-(run-one-test 'bogus 
-              m:mz "abc" 
-              `())
+  
+  

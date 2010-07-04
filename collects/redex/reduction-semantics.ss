@@ -11,6 +11,7 @@
 
 (provide reduction-relation 
          --> fresh with ;; keywords for reduction-relation
+         hole in-hole ;; keywords for term
          extend-reduction-relation
          reduction-relation?
          
@@ -29,7 +30,8 @@
          define-relation
          metafunction
          in-domain?
-         caching-enabled?)
+         caching-enabled?
+         make-coverage)
 
 (provide (rename-out [test-match redex-match])
          term-match
@@ -47,7 +49,8 @@
          generate-term
          check-metafunction
          check-metafunction-contract
-         check-reduction-relation)
+         check-reduction-relation
+         exn:fail:redex:generation-failure?)
 
 (provide/contract
  [current-traced-metafunctions (parameter/c (or/c 'all (listof symbol?)))]
@@ -68,6 +71,5 @@
                   (-> bindings? symbol? (-> any) any))]
  [variable-not-in (any/c symbol? . -> . symbol?)]
  [variables-not-in (any/c (listof symbol?) . -> . (listof symbol?))]
- [relation-coverage (parameter/c (or/c false/c coverage?))]
- [make-coverage (-> reduction-relation? coverage?)]
+ [relation-coverage (parameter/c (listof coverage?))]
  [covered-cases (-> coverage? (listof (cons/c string? natural-number/c)))])

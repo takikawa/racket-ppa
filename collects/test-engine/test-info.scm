@@ -20,6 +20,10 @@
 (define-struct (incorrect-error check-fail) (expected message exn))
 ;; (make-expected-error src format string scheme-val)
 (define-struct (expected-error check-fail) (message value))
+;; (make-not-mem src format scheme-val scheme-val)
+(define-struct (not-mem check-fail) (test set))
+;; (make-not-range src format scheme-val scheme-val scheme-val)
+(define-struct (not-range check-fail) (test min max))
 
 ;; (make-message-error src format (listof string))
 (define-struct (message-error check-fail) (strings))
@@ -58,17 +62,21 @@
       (set! total-tsts (add1 total-tsts))
       (inner (void) add-test))
 
+    (define/pubment (add-check-failure fail exn?)
+      (set! failed-cks (add1 failed-cks))
+      (set! failures (cons (make-failed-check fail exn?) failures))
+      (inner (void) add-check-failure fail exn?))
+
     ;; check-failed: (U check-fail (list (U string snip%))) src (U exn false) -> void
     (define/pubment (check-failed msg src exn?)
-      (set! failed-cks (add1 failed-cks))
-      (let ((fail 
+      (let ((fail
 	     ;; We'd like every caller to make a check-fail object,
 	     ;; but some (such as ProfessorJ's run time) cannot because
 	     ;; of phase problems.  Therefore, do the coercion here.
 	     (if (check-fail? msg)
 		 msg
 		 (make-message-error src #f msg))))
-	(set! failures (cons (make-failed-check fail exn?) failures))
+	(add-check-failure fail exn?)
 	(inner (void) check-failed fail src exn?)))
 
     (define/pubment (test-failed failed-info)
@@ -111,6 +119,16 @@
 	     (formatter (expected-error-value fail))
 	     (expected-error-message fail))]
      [(message-error? fail)
-      (for-each print-formatted (message-error-strings fail))])
+      (for-each print-formatted (message-error-strings fail))]
+     [(not-mem? fail)
+      (print "Actual value ~F differs from all given members in ~F."
+             (formatter (not-mem-test fail))
+             (formatter (not-mem-set fail)))]
+     [(not-range? fail)
+      (print "Actual value ~F is not between ~F and ~F, inclusive."
+             (formatter (not-range-test fail))
+             (formatter (not-range-min fail))
+             (formatter (not-range-max fail)))]
+     )
     (print-string "\n")))
 

@@ -1,14 +1,27 @@
 #lang scheme/base
-(require "../decode.ss"
+(require scheme/contract
+         "../decode.ss"
          "../struct.ss"
          "../basic.ss"
+         "on-demand.ss"
+         (only-in "../core.ss" make-style)
+         "manual-sprop.ss"
          "manual-utils.ss"
          "manual-style.ss")
 
-(provide cite
-         bib-entry
-         (rename-out [a-bib-entry? bib-entry?])
-         bibliography)
+(define-struct a-bib-entry (key val))
+
+(provide/contract
+ [cite ((string?) () #:rest (listof string?) . ->* . element?)]
+ [bib-entry ((#:key string? #:title (or/c false/c pre-content?))
+             (#:is-book? boolean? #:author (or/c false/c pre-content?) 
+                         #:location (or/c false/c pre-content?) 
+                         #:date (or/c false/c pre-content?) 
+                         #:url (or/c false/c pre-content?))
+             . ->* .
+             a-bib-entry?)]
+ [rename a-bib-entry? bib-entry? (any/c . -> . boolean?)]
+ [bibliography (() (#:tag string?) #:rest (listof a-bib-entry?) . ->* . part?)]) 
 
 (define (cite key . keys)
   (make-element
@@ -26,8 +39,6 @@
                     ", "
                     (loop (cdr keys))))))
          "]")))
-
-(define-struct a-bib-entry (key val))
 
 (define (bib-entry #:key key
                    #:title title
@@ -54,6 +65,8 @@
      (if date `(" " ,@(decode-content (list date)) ".") null)
      (if url `(" " ,(link url (tt url))) null)))))
 
+(define-on-demand bib-style (make-style "SBibliography" scheme-properties))
+
 (define (bibliography #:tag [tag "doc-bibliography"] . citations)
   (make-unnumbered-part
    #f
@@ -64,7 +77,7 @@
    (make-flow
     (list
      (make-table
-      "SBibliography"
+      bib-style
       (map (lambda (c)
              (let ([key (a-bib-entry-key c)]
                    [val (a-bib-entry-val c)])

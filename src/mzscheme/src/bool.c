@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -29,18 +29,15 @@
 #ifdef USE_STACKAVAIL
 # include <malloc.c>
 #endif
-#ifdef USE_IEEE_FP_PREDS
-# include <math.h>
-#endif
 
 /* global_constants */
-Scheme_Object scheme_true[1];
-Scheme_Object scheme_false[1];
+READ_ONLY Scheme_Object scheme_true[1];
+READ_ONLY Scheme_Object scheme_false[1];
 
-Scheme_Object *scheme_not_prim;
-Scheme_Object *scheme_eq_prim;
-Scheme_Object *scheme_eqv_prim;
-Scheme_Object *scheme_equal_prim;
+READ_ONLY Scheme_Object *scheme_not_prim;
+READ_ONLY Scheme_Object *scheme_eq_prim;
+READ_ONLY Scheme_Object *scheme_eqv_prim;
+READ_ONLY Scheme_Object *scheme_equal_prim;
 
 /* locals */
 static Scheme_Object *not_prim (int argc, Scheme_Object *argv[]);
@@ -343,13 +340,8 @@ static int is_equal_overflow(Scheme_Object *obj1, Scheme_Object *obj2, Equal_Inf
   return SCHEME_TRUEP(v);
 }
 
-/* Number of lists/vectors/structs/boxes to compare before
-   paying for a stack check. */
-#define EQUAL_COUNT_START 20
-
 int is_equal (Scheme_Object *obj1, Scheme_Object *obj2, Equal_Info *eql)
 {
-  static int equal_counter = EQUAL_COUNT_START;
 
  top:
   if (eql->next_next) {
@@ -396,6 +388,19 @@ int is_equal (Scheme_Object *obj1, Scheme_Object *obj2, Equal_Info *eql)
     if (union_check(obj1, obj2, eql))
       return 1;
     return vector_equal(obj1, obj2, eql);
+  } else if (SCHEME_FLVECTORP(obj1)) {
+    long l1, l2, i;
+    l1 = SCHEME_FLVEC_SIZE(obj1);
+    l2 = SCHEME_FLVEC_SIZE(obj2);
+    if (l1 == l2) {
+      for (i = 0; i < l1; i++) {
+        if (!double_eqv(SCHEME_FLVEC_ELS(obj1)[i],
+                        SCHEME_FLVEC_ELS(obj2)[i]))
+          return 0;
+      }
+      return 1;
+    }
+    return 0;
   } else if (SCHEME_BYTE_STRINGP(obj1)
 	     || SCHEME_GENERAL_PATHP(obj1)) {
     int l1, l2;

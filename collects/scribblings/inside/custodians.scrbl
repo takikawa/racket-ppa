@@ -36,7 +36,6 @@ Creates a new custodian as a subordinate of @var{m}. If @var{m} is
 Places the value @var{o} into the management of the custodian
  @var{m}. If @var{m} is @cpp{NULL}, the current custodian is used.
 
-
 The @var{f} function is called by the custodian if it is ever asked to
 ``shutdown'' its values; @var{o} and @var{data} are passed on to
 @var{f}, which has the type
@@ -52,6 +51,10 @@ be remembered until either the custodian shuts it down or
 zero, the value is allowed to be garbaged collected (and automatically
 removed from the custodian).
 
+Independent of whether @var{strong} is zero, the value @var{o} is
+initially weakly held. A value associated with a custodian can
+therefore be finalized via will executors.
+
 The return value from @cpp{scheme_add_managed} can be used to refer
 to the value's custodian later in a call to
 @cpp{scheme_remove_managed}. A value can be registered with at
@@ -64,7 +67,16 @@ down, then @var{f} is called immediately, and the result is
 @function[(void scheme_custodian_check_available
            [Scheme_Custodian* m]
            [const-char* name]
-           [const-char* resname]
+           [const-char* resname])]{
+
+Checks whether @var{m} is already shut down, and raises an error if
+  so.  If @var{m} is @cpp{NULL}, the current custodian is used. The
+  @var{name} argument is used for error reporting. The @var{resname}
+  argument will likely be used for checking pre-set limits in the
+  future; pre-set limits will have symbolic names, and the
+  @var{resname} string will be compared to the symbols.}
+
+@function[(void scheme_remove_managed
            [Scheme_Custodian_Reference* mref]
            [Scheme_Object* o])]{
 

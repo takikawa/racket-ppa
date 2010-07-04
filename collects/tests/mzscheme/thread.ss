@@ -557,13 +557,17 @@
       (test #f semaphore-try-wait? s)
       (test #f semaphore-try-wait? s2))))
 
+(define (listen-port x)
+  (let-values ([(la lp pa pp) (tcp-addresses x #t)])
+    lp))
+
 (let ([s (make-semaphore)]
       [s-t (make-semaphore)]
-      [portnum (+ 40000 (random 100))]) ; so parallel tests work ok
+	    [l (tcp-listen 0 5 #t)])
   (let ([t (thread
 	    (lambda ()
 	      (sync s-t)))]
-	[l (tcp-listen portnum 5 #t)]
+  [portnum (listen-port l)] ; so parallel tests work ok
 	[orig-thread (current-thread)])
     (let-values ([(r w) (make-pipe)])
       
@@ -1281,6 +1285,66 @@
 (test #f 'no-breaks (with-handlers ([void (lambda (x) (break-enabled))]) (/ 0)))
 (test #t 'no-breaks (with-handlers ([(lambda (x) (break-enabled #t)) (lambda (x) (break-enabled))]) (/ 0)))
 (test #f 'no-breaks (with-handlers ([void (lambda (x) (break-enabled))]) (/ 0)))
+
+; --------------------
+
+;; Make sure that transitive thread-resume keeps a strong link
+;; when thread is explicitly suspended (instead of just blocked)
+(let ([run
+       (lambda (suspend-first?)
+         (let ([go (make-semaphore)]
+               [done (make-semaphore)])
+           (for ([i (in-range 100)])
+             (let ([t
+                    (thread (lambda ()
+                              (semaphore-wait go)
+                              (semaphore-post done)))])
+               (when suspend-first?
+                 (thread-suspend t))
+               (thread-resume t (current-thread))
+               (thread-suspend t)))
+           (let ([me (current-thread)])
+             (thread (lambda ()
+                       (sync (system-idle-evt))
+                       (collect-garbage)
+                       (collect-garbage)
+                       (thread-resume me)))
+             (thread-suspend me))
+           (for ([i (in-range 100)])
+             (semaphore-post go))
+           (for ([i (in-range 100)])
+             (semaphore-wait done))
+           (test 'resume-worked values 'resume-worked)))])
+  (run #f)
+  (run #t))
+
+;; Make sure that transitive thread-resume keeps a weak link
+;; when thread is blocked:
+(let ([run
+       (lambda (suspend-first?)
+         (let ([done (make-semaphore)])
+           (let ([boxes
+                  (for/list ([i (in-range 100)])
+                    (let ([t
+                           (thread (lambda ()
+                                     (semaphore-wait (make-semaphore))
+                                     (semaphore-post done)))])
+                      (when suspend-first?
+                        (sync (system-idle-evt))
+                        (thread-suspend t))
+                      (thread-resume t (current-thread))
+                      (make-weak-box t)))])
+             (sync (system-idle-evt))
+             (collect-garbage)
+             (collect-garbage)
+             (test #t > (apply + (map (lambda (b) (if (weak-box-value b)
+                                                      0
+                                                      1))
+                                      boxes))
+                   50)
+             (test #f sync/timeout 0.0 done))))])
+  (run #f)
+  (run #t))
 
 ; --------------------
 

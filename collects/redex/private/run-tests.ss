@@ -1,7 +1,11 @@
 ;; require this file to run all of the test suites for redex.
 
 #lang scheme/base
-(require scheme/runtime-path)
+(require scheme/runtime-path
+         "config.ss"
+         "test-util.ss")
+
+(set-show-bitmaps? #t)
 
 (define test-files
   '("lw-test.ss" 
@@ -12,7 +16,8 @@
     "keyword-macros-test.ss"
     "core-layout-test.ss" 
     "bitmap-test.ss" 
-    "pict-test.ss"))
+    "pict-test.ss"
+    "hole-test.ss"))
 
 (define-runtime-path here ".")
 

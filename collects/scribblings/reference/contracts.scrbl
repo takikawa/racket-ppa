@@ -2,6 +2,12 @@
 @(require "mz.ss")
 @(require (for-label syntax/modcollapse))
 
+@(define contract-eval
+   (lambda ()
+     (let ([the-eval (make-base-eval)])
+       (the-eval '(require scheme/contract))
+       the-eval)))
+
 @title[#:tag "contracts" #:style 'toc]{Contracts}
 
 @guideintro["contracts"]{contracts}
@@ -10,6 +16,12 @@ The contract system guards one part of a program from
 another. Programmers specify the behavior of a module exports via
 @scheme[provide/contract] and the contract system enforces those
 constraints.
+
+@note-lib[scheme/contract #:use-sources (scheme/contract/private/ds
+                                         scheme/contract/private/base
+                                         scheme/contract/private/guts
+                                         scheme/contract/private/misc
+                                         scheme/contract/private/provide)]
 
 @deftech{Contracts} come in two forms: those constructed by the
 various operations listed in this section of the manual, and various
@@ -34,10 +46,6 @@ failed, and anything else to indicate it passed.}
 
 ]
 
-@note-lib[scheme/contract #:use-sources (scheme/private/contract-ds
-                                         scheme/private/contract
-                                         scheme/private/contract-guts)]
-
 @local-table-of-contents[]
 
 @; ----------------------------------------
@@ -53,16 +61,19 @@ Constructs a @tech{flat contract} from @scheme[predicate]. A value
 satisfies the contract if the predicate returns a true value.}
 
 
-@defproc[(flat-named-contract [type-name any/c][predicate (any/c . -> . any)])
+@defproc[(flat-named-contract [type-name any/c] [predicate (or/c flat-contract? (any/c . -> . any))])
          flat-contract?]{
 
-Like @scheme[flat-contract], but the first argument must be the
+On predicates like @scheme[flat-contract], but the first argument must be the
 (quoted) name of a contract used for error reporting. 
 For example, 
 @schemeblock[(flat-named-contract
               'odd-integer 
               (lambda (x) (and (integer? x) (odd? x))))]
 turns the predicate into a contract with the name @tt{odd-integer}.
+
+On flat contracts, the new flat contract is the same as the old except for
+the name.
 }
 
 @defthing[any/c flat-contract?]{
@@ -138,7 +149,7 @@ Accepts a flat contracts or a predicate and returns a flat contract
 that checks the inverse of the argument.}
 
 
-@defproc[(=/c [z number?]) flat-contract?]{
+@defproc[(=/c [z real?]) flat-contract?]{
 
 Returns a flat contract that requires the input to be a number and
 @scheme[=] to @scheme[z].}
@@ -150,18 +161,18 @@ Returns a flat contract that requires the input to be a number and
 @scheme[<] to @scheme[n].}
 
 
-@defproc[(>/c [n number?]) flat-contract?]{
+@defproc[(>/c [n real?]) flat-contract?]{
 Like @scheme[</c], but for @scheme[>].}
 
 
-@defproc[(<=/c [n number?]) flat-contract?]{
+@defproc[(<=/c [n real?]) flat-contract?]{
 Like @scheme[</c], but for @scheme[<=].}
 
 
-@defproc[(>=/c [n number?]) flat-contract?]{
+@defproc[(>=/c [n real?]) flat-contract?]{
 Like @scheme[</c], but for @scheme[>=].}
 
-@defproc[(between/c [n number?] [m number?])
+@defproc[(between/c [n real?] [m real?])
 flat-contract?]{ Returns a flat contract that requires the
 input to be a between @scheme[n] and @scheme[m] or equal to
 one of them.}
@@ -266,6 +277,12 @@ the contract @scheme[c]. Beware that when this contract is applied to
 a value, the result is not necessarily @scheme[eq?] to the input.}
 
 
+@defproc[(non-empty-listof [c (or/c contract? (any/c . -> . any/c))]) contract?]{
+
+Returns a contract that recognizes non-empty lists whose elements match
+the contract @scheme[c]. Beware that when this contract is applied to
+a value, the result is not necessarily @scheme[eq?] to the input.}
+
 @defproc[(cons/c [car-c contract?][cdr-c contract?]) contract?]{
 
 Produces a contract the recognizes pairs first and second elements
@@ -313,7 +330,7 @@ If the @scheme[immutable] argument is @scheme[#f] or
 and the @scheme[key] and @scheme[val] arguments must also be flat
 contracts. 
 
-If @scheme[immtable] is @scheme[#t], then the other arguments do not
+If @scheme[immutable] is @scheme[#t], then the other arguments do not
 have to be flat contracts, the result is not a flat contract, and
 checking this contract involves making a copy of the hash-table.
 }
@@ -361,6 +378,27 @@ multiple values.  It can only be used in a result position of contracts like
 Constructs a contract on a promise. The contract does not force the
 promise, but when the promise is forced, the contract checks that the
 result value meets the contract produced by @scheme[expr].}
+
+@defproc[(new-∃/c [name symbol?]) contract?]{
+  Constructs a new existential contract. 
+  
+  Existential contracts accept all values when in positive positions (e.g., function
+  returns) and wraps the value in an opaque struct, hiding the precise value. 
+  In negative positions (e.g. function inputs), 
+  it accepts only values that were previously accepted in negative positions (by checking
+  for the wrappers).
+  
+  For example, this contract:
+  @schemeblock[(let ([a (new-∃/c 'a)])
+                 (-> (-> a a)
+                     any/c))]
+  describes a function that accepts the identity function (or a non-terminating function)
+  and returns an arbitrary value. That is, the first use of the @scheme[a] appears in a
+  positive position and thus inputs to that function are wrapped with an opaque struct.
+  Then, when the function returns, it is checked to see if the result is wrapped, since
+  the second @scheme[a] appears in a negative position.
+  
+}
 
 @; ------------------------------------------------------------------------
 
@@ -663,7 +701,11 @@ lazy contract.}
   (struct id ((id contract-expr) ...))
   (struct (id identifier) ((id contract-expr) ...))
   (rename orig-id id contract-expr)
-  (id contract-expr)])]{
+  (id contract-expr)
+  (code:line #:∃ exists-variables)
+  (code:line #:exists exists-variables)]
+ [exists-variables identifier
+                   (identifier ...)])]{
 
 Can only appear at the top-level of a @scheme[module]. As with
 @scheme[provide], each @scheme[id] is provided from the module. In
@@ -693,12 +735,17 @@ referring to the parent struct. Unlike @scheme[define-struct],
 however, all of the fields (and their contracts) must be listed. The
 contract on the fields that the sub-struct shares with its parent are
 only used in the contract for the sub-struct's maker, and the selector
-or mutators for the super-struct are not provided.}
+or mutators for the super-struct are not provided.
+
+The @scheme[#:∃] and @scheme[#:exists] clauses define new abstract
+contracts. The variables are bound in the remainder of the @scheme[provide/contract]
+expression to new contracts that hide the values they accept and
+ensure that the exported functions are treated parametrically.
+}
 
 @defform/subs[
  (with-contract blame-id (wc-export ...) free-var-list body ...+)
  ([wc-export
-   id
    (id contract-expr)]
   [free-var-list
    code:blank
@@ -707,10 +754,9 @@ or mutators for the super-struct are not provided.}
 Generates a local contract boundary.  The @scheme[contract-expr]
 form cannot appear in expression position.  The @scheme[body] of the
 form allows definition/expression interleaving like a @scheme[module]
-body.  Names bound within the @scheme[body] must be exported to be
-accessible from outside the @scheme[with-contract] form.  Such
-@scheme[id]s can either be paired with a @scheme[contract-expr] or
-exported without a contract.
+body.  All names defined within the @scheme[with-contract] form are
+visible externally, but those names listed in the @scheme[wc-export]
+list are protected with the corresponding contract.
 
 The @scheme[blame-id] is used for the positive positions of
 contracts paired with exported @scheme[id]s.  Contracts broken
@@ -743,6 +789,9 @@ blame the context of the @scheme[define/contract] form for the positive
 positions and the @scheme[define/contract] form for the negative ones.}
 
 @defform*[[(define-struct/contract struct-id ([field contract-expr] ...)
+                                   struct-option ...)
+           (define-struct/contract (struct-id super-struct-id)
+                                   ([field contract-expr] ...)
                                    struct-option ...)]]{
 Works like @scheme[define-struct], except that the arguments to the constructor,
 accessors, and mutators are protected by contracts.  For the definitions of
@@ -750,8 +799,19 @@ accessors, and mutators are protected by contracts.  For the definitions of
 
 The @scheme[define-struct/contract] form only allows a subset of the
 @scheme[struct-option] keywords: @scheme[#:mutable], @scheme[#:transparent],
-@scheme[#:auto-value], @scheme[#:omit-define-syntaxes], and
-@scheme[#:omit-define-values].}
+@scheme[#:auto-value], @scheme[#:omit-define-syntaxes], @scheme[#:property] and
+@scheme[#:omit-define-values].
+
+@examples[#:eval (contract-eval)
+(define-struct/contract fish ([color number?]))
+(make-fish 5)
+(make-fish #f)
+
+(define-struct/contract (salmon fish) ([ocean symbol?]))
+(make-salmon 5 'atlantic)
+(make-salmon 5 #f)
+(make-salmon #f 'pacific)
+]}
 
 @defform*[[(contract contract-expr to-protect-expr
                      positive-blame-expr negative-blame-expr)
@@ -779,7 +839,7 @@ If specified, @scheme[contract-source-info], indicates where the
 contract was assumed. Its value must be a either:
 @itemize[
 @item{a list of two elements: @scheme[srcloc] struct and
-either a string or @scheme[#f]. The srcloc struct inidates
+either a string or @scheme[#f]. The srcloc struct indicates
 where the contract was assumed. Its @tt{source} field
 should be a syntax object, and @scheme[module-path-index-resolve]
 is called on it to extract the path of syntax object.
@@ -804,6 +864,9 @@ source location information from compiled files.
 @; ------------------------------------------------------------------------
 
 @section{Building New Contract Combinators}
+
+@emph{@bold{Note:}
+ The interface in this section is unstable and subject to change.}
 
 Contracts are represented internally as functions that
 accept information about the contract (who is to blame,
@@ -846,13 +909,13 @@ as well as a record of the source location where the
 contract was established and the name of the contract. They
 can then, in turn, pass that information
 to @scheme[raise-contract-error] to signal a good error
-message (see below for details on its behavior).
+message.
 
 Here is the first of those two projections, rewritten for
 use in the contract system:
 
 @schemeblock[
-(define (int-proj pos neg src-info name)
+(define (int-proj pos neg src-info name positive-position?)
   (lambda (x)
     (if (integer? x)
         x
@@ -867,7 +930,9 @@ use in the contract system:
 
 The first two new arguments specify who is to be blamed for
 positive and negative contract violations,
-respectively. Contracts, in this system, are always
+respectively. 
+
+Contracts, in this system, are always
 established between two parties. One party provides some
 value according to the contract, and the other consumes the
 value, also according to the contract. The first is called
@@ -881,9 +946,11 @@ to @scheme[raise-contract-error]).
 Compare that to the projection for our function contract:
 
 @schemeblock[
-(define (int->int-proj pos neg src-info name)
-  (let ([dom (int-proj neg pos src-info name)]
-        [rng (int-proj pos neg src-info name)])
+(define (int->int-proj pos neg src-info name positive-position?)
+  (let ([dom (int-proj neg pos src-info 
+                       name (not positive-position?))]
+        [rng (int-proj pos neg src-info
+                       name positive-position?)])
     (lambda (f)
       (if (and (procedure? f)
                (procedure-arity-includes? f 1))
@@ -938,9 +1005,11 @@ returns a contract for functions between them.
 
 @schemeblock[
 (define (make-simple-function-contract dom-proj range-proj)
-  (lambda (pos neg src-info name)
-    (let ([dom (dom-proj neg pos src-info name)]
-          [rng (range-proj pos neg src-info name)])
+  (lambda (pos neg src-info name positive-position?)
+    (let ([dom (dom-proj neg pos src-info 
+                         name (not positive-position?))]
+          [rng (range-proj pos neg src-info
+                           name positive-position?)])
       (lambda (f)
         (if (and (procedure? f)
                  (procedure-arity-includes? f 1))
@@ -960,18 +1029,20 @@ other, new kinds of value you might make, can be used with
 the contract library primitives below.
 
 @defproc[(make-proj-contract [name any/c]
-                             [proj (symbol? symbol? any/c any/c . -> . any/c)]
-                             [first-order-test (any/c . -> . any/c)])
+                             [proj (or/c (-> symbol? symbol? any/c any/c any/c)
+                                         (-> symbol? symbol? any/c any/c boolean? any/c))]
+                             [first-order-test (-> any/c any/c)])
          contract?]{
 
-The simplest way to build a contract. It can be less
-efficient than using other contract constructors described
-below, but it is the right choice for new contract
-constructors or first-time contract builders.
-
+Builds a new contract.
+                    
 The first argument is the name of the contract. It can be an
 arbitrary S-expression. The second is a projection (see
 above).
+
+If the projection only takes four arguments, then the
+positive position boolean is not passed to it (this is
+for backwards compatibility).
 
 The final argument is a predicate that is a
 conservative, first-order test of a value. It should be a
@@ -982,8 +1053,13 @@ when the projection is invoked. If it returns true,
 the value may or may not violate the contract, but any
 violations must not be signaled immediately. 
 
-From the example above, the predicate should accept unary
-functions, but reject all other values.}
+This function is a convenience function, implemented 
+using @scheme[proj-prop], @scheme[name-prop], 
+@scheme[first-order-prop], and @scheme[stronger-prop].
+Consider using those directly (as well as @scheme[flat-prop] as necessary), 
+as they allow more flexibility
+and generally produce more efficient contracts.
+}
 
 @defproc[(build-compound-type-name [c/s any/c] ...) any]{
 
@@ -1049,6 +1125,94 @@ to build an actual error message.}
 %           flat-prop flat-pred? flat-get
 %           first-order-prop first-order-get
 %           contract-stronger?
+}
+
+@subsection{Contracts as structs}
+
+@emph{@bold{Note:}
+ The interface in this section is unstable and subject to change.}
+
+A contract is an arbitrary struct that has all of the 
+struct properties 
+(see @secref["structprops"] in the reference manual)
+in this section
+(except that @scheme[flat-prop] is optional). 
+
+Generally speaking, the contract should be a struct with 
+fields that specialize the contract in some way and then
+properties that implement all of the details of checking
+the contract and reporting errors, etc. 
+
+For example, an @scheme[between/c] contract is a struct that
+holds the bounds on the number and then has the properties below
+that inspect the bounds and take the corresponding action
+(the @scheme[proj-prop] checks the numbers, the @scheme[name-prop]
+     constructs a name to print out for the contract, etc.).
+
+@deftogether[(@defthing[proj-prop struct-type-property?]
+              @defproc[(proj-pred? [v any/c]) boolean?]{}
+              @defproc[(proj-get [v proj-pred?])
+                       (-> proj-prop?
+                           (-> symbol? symbol? (or/c #f syntax?) string? boolean?
+                               (-> any/c any/c)))]{})]{
+
+This is the workhorse property that implements the contract. 
+The property should be bound to a function that accepts
+the struct and then returns a projection, as described 
+in the docs for @scheme[make-proj-contract] above.
+
+
+}
+@deftogether[(@defthing[name-prop struct-type-property?]{}
+              @defproc[(name-pred? [v any/c]) boolean?]{}
+              @defproc[(name-get [v name-pred?]) (-> name-pred? printable/c)]{})]{
+                                                                               
+This property should be a function that accepts the struct and returns
+     an s-expression representing the name of the property.
+     
+     @mz-examples[#:eval (contract-eval)
+                         (write (between/c 1 10))
+                         (let ([c (between/c 1 10)])
+                           ((name-get c) c))]
+                                                                               
+}
+@deftogether[(@defthing[stronger-prop struct-type-property?]{}
+              @defproc[(stronger-pred? [v any/c]) boolean?]{}
+              @defproc[(stronger-get [v stronger-pred?]) (-> stronger-pred? stronger-pred? boolean?)]{})]{
+
+This property is used when optimizing contracts, in order to tell if some contract is stronger than another one.
+In some situations, if a contract that is already in place is stronger than one about to be put in place,
+then the new one is ignored.
+                                                                                                    
+}
+
+@deftogether[(@defthing[flat-prop struct-type-property?]{}
+              @defproc[(flat-pred? [v any/c]) boolean?]{}
+              @defproc[(flat-get [v flat-pred?]) (-> flat-pred? (-> any/c boolean?))]{})]{
+
+This property should only be present if the contract is a flat contract. In the case that it is
+     a flat contract, the value of the property should be a predicate that determines if the
+     contract holds.
+     
+     @mz-examples[#:eval (contract-eval)
+                         (flat-pred? (-> integer? integer?))
+                         (let* ([c (between/c 1 10)]
+                                [pred ((flat-get c) c)])
+                           (list (pred 9)
+                                 (pred 11)))]
+}
+
+@deftogether[(@defthing[first-order-prop struct-type-property?]{}
+              @defproc[(first-order-pred? [v any/c]) boolean?]{}
+              @defproc[(first-order-get [v proj-pred?]) (-> first-order-pred? (-> any/c boolean?))]{})]{
+
+This property is used with @scheme[or/c] to determine which branch of the 
+     @scheme[or/c] applies. These don't have to be precise (i.e., returning @scheme[#f] is always safe),
+     but the more often a contract can honestly return @scheme[#t], the more often 
+     it will work with @scheme[or/c].
+     
+     For example, function contracts typically check arity in their @scheme[first-order-prop]s.
+
 }
 
 @; ------------------------------------------------------------------------

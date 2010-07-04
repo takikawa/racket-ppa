@@ -4,7 +4,7 @@
 
 (require (private base-types)
          (for-syntax 
-          (except-in stxclass id)
+          (except-in syntax/parse id)
           scheme/base
           (private type-contract)
           (types utils convenience)
@@ -13,7 +13,7 @@
 	  (r:infer infer)
 	  (utils tc-utils)
 	  (rep type-rep)
-	  (except-in (utils utils) infer extend)
+	  (except-in (utils utils) infer)
           (only-in (r:infer infer-dummy) infer-param)
           scheme/nest
           syntax/kerncase
@@ -36,11 +36,7 @@
 (define-syntax (module-begin stx)
   (define module-name (syntax-property stx 'enclosing-module-name))
   ;(printf "BEGIN: ~a~n" (syntax->datum stx))
-  (with-logging-to-file 
-   (build-path (find-system-path 'temp-dir) "ts-poly.log")
-   #;
-   (log-file-name (syntax-source stx) module-name)
-   (syntax-case stx ()
+  (syntax-case stx ()
      [(mb forms ...)
       (nest
           ([begin (set-box! typed-context? #t)
@@ -69,7 +65,7 @@
                           [type-name-references null])]
            [begin (do-time "Initialized Envs")]
            ;; local-expand the module
-           ;; pmb = #%plain-module-begin                            
+           ;; pmb = #%plain-module-begin    
            [with-syntax ([new-mod 
                           (local-expand (syntax/loc stx
                                           (#%plain-module-begin 
@@ -78,7 +74,7 @@
                                         null)])]
            [with-syntax ([(pmb body2 ...) #'new-mod])]
            [begin (do-time "Local Expand Done")]
-           [with-syntax ([after-code (parameterize ([orig-module-stx stx]
+           [with-syntax ([after-code (parameterize ([orig-module-stx (or (orig-module-stx) stx)]
                                                     [expanded-module-stx #'new-mod])
                                        (type-check #'(body2 ...)))]
                          [check-syntax-help (syntax-property #'(void) 'disappeared-use (type-name-references))]
@@ -90,7 +86,7 @@
         #;(printf "tried to create ~a types~n" (all-count!))
         #;(printf "created ~a union types~n" (union-count!))
         ;; reconstruct the module with the extra code
-        #'(#%module-begin transformed-body ... after-code check-syntax-help))])))
+        #'(#%module-begin transformed-body ... after-code check-syntax-help))]))
 
 (define-syntax (top-interaction stx)
   (syntax-case stx ()
@@ -132,7 +128,7 @@
           body2]
          [_ (let ([ty-str (match type
                             [(tc-result1: (? (lambda (t) (type-equal? t -Void)))) #f]
-                            [(tc-result1: t)
+                            [(tc-result1: t f o)
                              (format "- : ~a\n" t)]
                             [(tc-results: t)
                              (format "- : ~a\n" (cons 'Values t))]

@@ -6,9 +6,8 @@
          (private type-contract)	 
 	 (rep type-rep filter-rep object-rep)
          (types utils union convenience)
-         (utils tc-utils mutated-vars)
-         (schemeunit)
-         stxclass)
+         (utils tc-utils)
+         (schemeunit))
 
 (define-syntax-rule (t e)
   (test-not-exn (format "~a" e) (lambda () (type->contract e (lambda _ (error "type could not be converted to contract"))))))

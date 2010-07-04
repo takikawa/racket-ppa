@@ -2,9 +2,9 @@
 
 @(require scribble/manual "shared.ss" 
           (for-label scheme
-	  	     (only-in lang/htdp-beginner check-expect)
+                     (only-in lang/htdp-beginner check-expect)
 		     teachpack/2htdp/universe
-		     teachpack/htdp/image))
+		     2htdp/image))
 @(require scribble/struct)
 
 @(define (table* . stuff)
@@ -50,36 +50,21 @@ The purpose of this documentation is to give experienced Schemers and HtDP
  communicating worlds.
 
 @emph{Note}: For a quick and educational introduction to just worlds, see
- @link["http://www.ccs.neu.edu/home/matthias/HtDP/Prologue/book.html"]{How
+ @link["http://www.ccs.neu.edu/home/matthias/HtDP2e/prologue.html"]{How
  to Design Programs, Second Edition: Prologue}. As of August 2008, we also
  have a series of projects available as a small booklet on
  @link["http://world.cs.brown.edu/"]{How to Design Worlds}.
 
 @; -----------------------------------------------------------------------------
+@section{Background}
+ 
+The universe teachpack assumes working knowledge of the basic image manipulation primitives, 
+either @schememodname[htdp/image] or @schememodname[2htdp/image]. Its operations
+sometimes require scenes which for @scheme[htdp/image] images means an image whose
+pinhole is at (0,0). For @schememodname[2htdp/image], every image is a scene.
 
-@section[#:tag "basics"]{Basics}
-
-The teachpack assumes working knowledge of the basic image manipulation
- primitives and supports several functions that require a special kind of
- image, called a @deftech{scene}, which is an image whose pinholes are at
- position @math{(0, 0)}. For example, the teachpack displays only
- @tech{scene}s in its canvas. 
-
-@defproc[(scene? [x any/c]) boolean?]{
- determines whether @scheme[x] is a @tech{scene}.}
-
-@defproc[(empty-scene [width natural-number/c]
-                      [height natural-number/c])
-         scene?]{
- creates a plain white, @scheme[width] x @scheme[height] @tech{scene}.}
-
-@defproc[(place-image [img image?] [x number?] [y number?]
-                      [s scene?])
-         scene?]{
- creates a scene by placing @scheme[img] at
- @math{(@scheme[x], @scheme[y])} into @scheme[s];
- @math{(@scheme[x], @scheme[y])} are computer graphics coordinates,
- i.e., they count right and down from the upper-left corner.}
+The example programs in this document are all written using @schememodname[2htdp/image]
+primitives.
 
 @; -----------------------------------------------------------------------------
 @section[#:tag "simulations"]{Simple Simulations}
@@ -89,7 +74,7 @@ The simplest kind of animated @tech{world} program is a time-based
  supply a function that creates a scene for each natural number. By handing
  this function to the teachpack displays the simulation. 
 
-@defproc[(run-simulation [create-image (-> natural-number/c scene)])
+@defproc[(animate [create-image (-> natural-number/c scene?)])
          true]{
 
  opens a canvas and starts a clock that tick 28 times per second.  Every
@@ -97,21 +82,29 @@ The simplest kind of animated @tech{world} program is a time-based
  number of ticks passed since this function call. The results of these
  function calls are displayed in the canvas. The simulation runs until you
  click the @tt{Stop} button in DrScheme or close the window. At that
- point, @scheme[run-simulation] returns the number of ticks that have
+ point, @scheme[animate] returns the number of ticks that have
  passed. 
 }
 
 Example:
 @schemeblock[
 (define (create-UFO-scene height)
-  (place-image UFO 50 height (empty-scene 100 100)))
+  (underlay/xy (rectangle 100 100 "solid" "white") 50 height UFO))
 
 (define UFO
-  (overlay (circle 10 'solid 'green)
-           (rectangle 40 4 'solid 'green)))
+  (underlay/align "center"
+                  "center"
+                  (circle 10 "solid" "green")
+                  (rectangle 40 4 "solid" "green")))
 
-(run-simulation create-UFO-scene)
+(animate create-UFO-scene)
 ]
+
+@defproc[(run-simulation [create-image (-> natural-number/c scene?)])
+         true]{
+
+ @scheme[animate] was originally called @scheme[run-simulation], and this
+ binding is retained for backwards compatibility}
 
 @;-----------------------------------------------------------------------------
 @section[#:tag "interactive"]{Interactions}
@@ -161,7 +154,8 @@ The design of a world program demands that you come up with a data
 
 @defform/subs[#:id big-bang
               #:literals 
-	      (on-tick on-draw on-key on-mouse on-receive stop-when check-with register record? name)
+	      (on-tick on-draw on-key on-mouse on-receive stop-when
+	      check-with register record? state name)
               (big-bang state-expr clause ...)
               ([clause
 		 (on-tick tick-expr)
@@ -170,9 +164,10 @@ The design of a world program demands that you come up with a data
 		 (on-mouse key-expr)
 		 (on-draw draw-expr)
 		 (on-draw draw-expr width-expr height-expr)
-		 (stop-when stop-expr)	   
+		 (stop-when stop-expr) (stop-when stop-expr last-scene-expr)	   
 		 (check-with world?-expr)	   
 		 (record? boolean-expr)
+		 (state boolean-expr)
 		 (on-receive rec-expr)
 		 (register IP-expr)
 		 (name name-expr)
@@ -205,10 +200,11 @@ world every time the clock ticks. The result of the call becomes the
 current world. The clock ticks at the rate of 28 times per second.}}
 
 @item{
-@defform/none[(on-tick tick-expr rate-expr)
+@defform/none[#:literals(on-tick)
+              (on-tick tick-expr rate-expr)
               #:contracts
               ([tick-expr (-> (unsyntax @tech{WorldState}) (unsyntax @tech{WorldState}))]
-               [rate-expr natural-number/c])]{
+               [rate-expr (and/c real? positive?)])]{
 tell DrScheme to call the @scheme[tick-expr] function on the current
 world every time the clock ticks. The result of the call becomes the
 current world. The clock ticks at the rate of @scheme[rate-expr].}}
@@ -328,7 +324,7 @@ Second, some keys have multiple-character string representations. Strings
   (cond
     [(key=? a-key "left")  (world-go w -DELTA)]
     [(key=? a-key "right") (world-go w +DELTA)]
-    [(= (string-length a-key) 1) w] (code:comment "to demonstrate order-free checking")
+    [(= (string-length a-key) 1) w] (code:comment "order-free checking")
     [(key=? a-key "up")    (world-go w -DELTA)]
     [(key=? a-key "down")  (world-go w +DELTA)]
     [else w]))
@@ -361,15 +357,17 @@ All @tech{MouseEvent}s are represented via strings:
 ]
 
 @defproc[(mouse-event? [x any]) boolean?]{
- determines whether @scheme[x] is a @tech{KeyEvent}}
+ determines whether @scheme[x] is a @tech{MouseEvent}}
 
 @defproc[(mouse=? [x mouse-event?][y mouse-event?]) boolean?]{
- compares two @tech{KeyEvent} for equality}
+ compares two @tech{MouseEvent}s for equality}
 
 @defform[(on-mouse clack-expr)
          #:contracts
 	 ([clack-expr 
-           (-> (unsyntax @tech{WorldState}) natural-number/c natural-number/c (unsyntax @tech{MouseEvent}) (unsyntax @tech{WorldState}))])]{
+           (-> (unsyntax @tech{WorldState}) 
+               natural-number/c natural-number/c (unsyntax @tech{MouseEvent}) 
+               (unsyntax @tech{WorldState}))])]{
  tell DrScheme to call @scheme[clack-expr] on the current world, the current
  @scheme[x] and @scheme[y] coordinates of the mouse, and and a
  @tech{MouseEvent} for every (noticeable) action of the mouse by the
@@ -391,7 +389,8 @@ All @tech{MouseEvent}s are represented via strings:
  dealt with an event. Its size is determined by the size of the first
  generated @tech{scene}.}
 
-@defform/none[(on-draw render-expr width-expr height-expr)
+@defform/none[#:literals (on-draw)
+              (on-draw render-expr width-expr height-expr)
               #:contracts
               ([render-expr (-> (unsyntax @tech{WorldState}) scene?)]
 	       [width-expr natural-number/c]
@@ -399,8 +398,7 @@ All @tech{MouseEvent}s are represented via strings:
 
  tell DrScheme to use a @scheme[width-expr] by @scheme[height-expr]
  canvas instead of one determine by the first generated @tech{scene}.
-}
-}
+}}
 
 @item{
 
@@ -413,7 +411,32 @@ All @tech{MouseEvent}s are represented via strings:
  tick events, @tech{KeyEvent}s, or @tech{MouseEvent}s are forwarded to
  the respective handlers. The @scheme[big-bang] expression returns this
  last world. 
-}}
+}
+
+@defform/none[#:literals (stop-when)
+         (stop-when last-world? last-picture)
+         #:contracts
+         ([last-world? (-> (unsyntax @tech{WorldState}) boolean?)]
+ 	  [last-picture (-> (unsyntax @tech{WorldState}) scene?)])]{
+ tell DrScheme to call the @scheme[last-world?] function whenever the canvas is
+ drawn. If this call produces @scheme[true], the world program is shut
+ down after displaying the world one last time, this time using the scene
+ rendered with @scheme[last-picture]. Specifically, the  clock is stopped; no more
+ tick events, @tech{KeyEvent}s, or @tech{MouseEvent}s are forwarded to
+ the respective handlers. The @scheme[big-bang] expression returns this
+ last world. 
+}
+}
+
+@item{
+
+@defstruct[stop-with ([w (unsyntax @tech{WorldState})])]{signals to
+DrScheme that the world program should shut down. That is, any
+handler may return @scheme[(stop-with w)] provided @scheme[w] is a
+@tech{WorldState}. If it does, the state of the world becomes @scheme[w]
+and @scheme[big-bang] will close down all event handling.}
+
+}
 
 @item{
 
@@ -434,6 +457,17 @@ All @tech{MouseEvent}s are represented via strings:
  interaction. The replay action also generates one png image per scene and
  an animated gif for the entire sequence.
 }}
+
+@item{
+
+@defform[(state boolean-expr)
+         #:contracts
+         ([boolean-expr boolean?])]{
+ tell DrScheme to display a separate window in which the current 
+ state is rendered each time it is updated. This is useful for beginners
+ who wish to see how their world evolves---without having to design a
+ rendering function---plus for the debugging of world programs. 
+}}
 ]
 
 The following example shows that @scheme[(run-simulation create-UFO-scene)] is
@@ -442,12 +476,14 @@ a short-hand for three lines of code:
 @(begin
 #reader scribble/comment-reader
 @schemeblock[ 
-(define (create-UFO-scene height) 
-  (place-image UFO 50 height (empty-scene 100 100)))
+(define (create-UFO-scene height)
+  (underlay/xy (rectangle 100 100 "solid" "white") 50 height UFO))
 
 (define UFO
-  (overlay (circle 10 'solid 'green)
-           (rectangle 40 4 'solid 'green)))
+  (underlay/align "center"
+                  "center"
+                  (circle 10 "solid" "green")
+                  (rectangle 40 4 "solid" "green")))
 
 ;; (run-simulation create-UFO-scene) is short for: 
 (big-bang 0 
@@ -457,26 +493,6 @@ a short-hand for three lines of code:
 
 Exercise: Add a condition for stopping the flight of the UFO when it
 reaches the bottom. 
-
-@; -----------------------------------------------------------------------------
-@section[#:tag "scenes-and-images"]{Scenes and Images}
-
-For the creation of scenes from the world, use the functions from
-@secref["image"].  The teachpack adds the following two functions, which
-are highly useful for creating scenes. 
-
-@defproc[(nw:rectangle [width natural-number/c] [height natural-number/c] [solid-or-outline Mode] [c Color]) image?]{
-   creates a @scheme[width] by @scheme[height] rectangle, solid or outlined as specified by
-   @scheme[solid-or-outline] and colored according to @scheme[c], with a pinhole at the upper left
-   corner.}
-   
-@defproc[(scene+line [s scene?][x0 number?][y0 number?][x1 number?][y1 number?][c Color]) scene?]{
-   creates a scene by placing a line of color @scheme[c] from
-   @math{(@scheme[x0], @scheme[y0])} to @math{(@scheme[x1],
-   @scheme[y1])} using computer graphics coordinates.  In contrast to
-   the @scheme[add-line] function, @scheme[scene+line] cuts off those
-   portions of the line that go beyond the boundaries of the given
-   @scheme[s].}
 
 @; -----------------------------------------------------------------------------
 @section[#:tag "world-example"]{A First Sample World} 
@@ -636,29 +652,34 @@ Each world-producing callback in a world program---those for handling clock
 @defproc[(make-package [w any/c][m sexp?]) package?]{
  create a @tech{Package} from a @tech{WorldState} and an @tech{S-expression}.}
 
-As mentioned, all event handlers may return @tech{WorldState}s or @tech{Package}s;
-here are the revised specifications: 
+As mentioned, all event handlers may return @tech{WorldState}s or
+@tech{Package}s; here are the revised specifications: 
 
-@defform/none[(on-tick tick-expr)
+@defform/none[#:literals (on-tick)
+              (on-tick tick-expr)
               #:contracts
               ([tick-expr (-> (unsyntax @tech{WorldState}) (or/c (unsyntax @tech{WorldState}) package?))])]{
 } 
 
-@defform/none[(on-tick tick-expr rate-expr)
+@defform/none[#:literals (on-tick)
+              (on-tick tick-expr rate-expr)
               #:contracts
               ([tick-expr (-> (unsyntax @tech{WorldState}) (or/c (unsyntax @tech{WorldState}) package?))]
-               [rate-expr natural-number/c])]{
+               [rate-expr (and/c real? positive?)])]{
 }
 
-@defform/none[(on-key change-expr)
+@defform/none[#:literals (on-key)
+              (on-key change-expr)
               #:contracts
               ([change-expr (-> (unsyntax @tech{WorldState}) key-event? (or/c (unsyntax @tech{WorldState}) package?))])]{
 }
 
-@defform/none[(on-mouse clack-expr)
+@defform/none[#:literals (on-mouse)
+              (on-mouse clack-expr)
               #:contracts
               ([clack-expr
-                (-> (unsyntax @tech{WorldState}) natural-number/c natural-number/c (unsyntax @tech{MouseEvent})
+                (-> (unsyntax @tech{WorldState}) 
+                    natural-number/c natural-number/c (unsyntax @tech{MouseEvent})
                     (or/c (unsyntax @tech{WorldState}) package?))])]{
 }
 
@@ -881,7 +902,7 @@ The @tech{server} itself is created with a description that includes the
 
 @defform/subs[#:id universe
               #:literals 
-	      (on-new on-msg on-tick on-disconnect to-string check-with)
+	      (on-new on-msg on-tick on-disconnect to-string check-with state)
               (universe state-expr clause ...)
               ([clause
 		 (on-new new-expr)
@@ -889,6 +910,7 @@ The @tech{server} itself is created with a description that includes the
 		 (on-tick tick-expr)
 		 (on-tick tick-expr rate-expr)
 		 (on-disconnect dis-expr)
+		 (state boolean-expr)
 		 (to-string render-expr)
 		 (check-with universe?-expr)
 		 ])]{
@@ -928,9 +950,9 @@ The mandatory clauses of a @scheme[universe] server description are
  @defform[(on-msg msg-expr)
           #:contracts
           ([msg-expr (-> (unsyntax @tech{UniverseState}) iworld? sexp? bundle?)])]{
- tell DrScheme to apply @scheme[msg-expr] to the current state of the universe, the world
- @scheme[w] that sent the message, and the message itself. Note that
- @scheme[w] is guaranteed to be on the list @scheme[low]. 
+ tell DrScheme to apply @scheme[msg-expr] to the current state of the
+ universe, the world 
+ @scheme[w] that sent the message, and the message itself. 
  }
 }]
  All proper event handlers produce a @emph{bundle}.  The state in the
@@ -953,7 +975,8 @@ optional handlers:
 @itemize[
 
 @item{
-@defform/none[(on-tick tick-expr)
+@defform/none[#:literals (on-tick)
+              (on-tick tick-expr)
               #:contracts
               ([tick-expr (-> (unsyntax @tech{UniverseState}) bundle?)])]{
  tell DrScheme to apply @scheme[tick-expr] to the current list of
@@ -961,14 +984,14 @@ optional handlers:
  universe. 
  }
 
-@defform/none[(on-tick tick-expr rate-expr)
+@defform/none[#:literals (on-tick)
+              (on-tick tick-expr rate-expr)
               #:contracts
               ([tick-expr (-> (unsyntax @tech{UniverseState}) bundle?)]
-               [rate-expr natural-number/c])]{ 
+               [rate-expr (and/c real? positive?)])]{ 
  tell DrScheme to apply @scheme[tick-expr] as above but use the specified
  clock tick rate instead of the default.
  }
-
 }
 
 @item{
@@ -976,10 +999,11 @@ optional handlers:
           #:contracts
           ([dis-expr (-> (unsyntax @tech{UniverseState}) iworld? bundle?)])]{
  tell DrScheme to invoke @scheme[dis-expr] every time a participating
- @tech{world} drops its connection to the server. The first two arguments
- are the current list of participating worlds and the state of the
- universe; the third one is the world that got disconnected. 
- }
+ @tech{world} drops its connection to the server. The first argument
+ is the current state of the universe server, while the second argument is
+ the (representation of the) world that got disconnected. The resulting
+ bundle usually includes this second argument in the third field, telling
+ drscheme not to wait for messages from this world anymore.}
 }
 
 @item{
@@ -992,12 +1016,22 @@ optional handlers:
 }
 
 @item{
- @defform/none[(check-with universe?-expr)
+ @defform/none[#:literals (check-with)
+               (check-with universe?-expr)
           #:contracts
           ([universe?-expr (-> Any boolean?)])]{
  ensure that what the event handlers produce is really an element of
  @tech{UniverseState}.}
 }
+
+@item{
+@defform/none[(state boolean-expr)
+         #:contracts
+         ([boolean-expr boolean?])]{
+ tell DrScheme to display a separate window in which the current 
+ state is rendered each time it is updated. This is mostly useful for
+ debugging server programs. 
+}}
 
 ]
 
@@ -1024,12 +1058,14 @@ Once you have designed a world program, add a function definition
 (define (main n)
   (big-bang ... (name n) ...))
 ))
- Then in DrScheme's Interactions area, use @scheme[launch-with-many-worlds]
+ Then in DrScheme's Interactions area, use @scheme[launch-many-worlds]
  to create several distinctively named worlds: 
 @(begin
 #reader scribble/comment-reader
 (schemeblock
-> (launch-with-many-worlds (main "matthew") (main "kathi") (main "h3") )
+> (launch-many-worlds (main "matthew") 
+                      (main "kathi") 
+                      (main "h3"))
 10
 25
 33
@@ -1057,7 +1093,7 @@ Say we want to represent a universe that consists of a number of worlds and
 Here is an image that illustrates how this universe would work if two
  worlds participated: 
 
-@image["balls.gif"]
+@image["balls" #:suffixes '(".gif" ".png")]
 
  The two @tech{world} programs could be located on two distinct computers
  or on just one. A @tech{server} mediates between the two worlds, including
@@ -1282,11 +1318,13 @@ The preceding subsection dictates that our server program starts like this:
 #reader scribble/comment-reader
 [schemeblock
 ;; Result is 
-;;   (make-bundle [Listof iworld?] (list (make-mail iworld? GoMessage)) '())
+;;   (make-bundle [Listof iworld?]
+;;                (list (make-mail iworld? GoMessage))
+;;                '())
 
 ;; [Listof iworld?] iworld? -> Result 
 ;; add world @scheme[iw] to the universe, when server is in state @scheme[u]
-(define (add-world u @scheme[iw]) ...)
+(define (add-world u iw) ...)
 
 ;; [Listof iworld?] iworld? StopMessage -> Result
 ;; world @scheme[iw] sent message @scheme[m] when server is in state @scheme[u] 
@@ -1335,7 +1373,7 @@ The protocol tells us that @emph{add-world} just adds the given
 @(begin
 #reader scribble/comment-reader
 [schemeblock
-(define (add-world univ state wrld)
+(define (add-world univ wrld)
   (local ((define univ* (append univ (list wrld))))
     (make-bundle univ*
                  (list (make-mail (first univ*) 'it-is-your-turn))
@@ -1519,7 +1557,9 @@ the scene every time @scheme['it-is-your-turn] is received. Design this function
 (define (move x)
   (cond
     [(symbol? x) x]
-    [(number? x) (if (<= x 0) (make-package 'resting 'done) (sub1 x))]))
+    [(number? x) (if (<= x 0) 
+                     (make-package 'resting 'done)
+                     (sub1 x))]))
 ))
 
 Exercise: what could happen if we had designed @emph{receive} so that it
@@ -1536,16 +1576,17 @@ Finally, here is the third function, which renders the state as a scene:
 ; WorldState -> Scene
 ; render the state of the world as a scene 
 
-(check-expect (render HEIGHT) (place-image BALL 50 HEIGHT MT))
+(check-expect (render HEIGHT) (underlay/xy MT 50 HEIGHT BALL))
 (check-expect (render 'resting)
-              (place-image  (text "resting" 11 'red) 10 10 MT))
+              (underlay/xy MT 10 10 (text "resting" 11 "red")))
 
 (define (render w)
-  (place-image 
-    (text name 11 'black) 5 85 
+  (underlay/xy 
     (cond
-      [(symbol? w) (place-image (text "resting" 11 'red) 10 10 MT)]
-      [(number? w) (place-image BALL 50 w MT)])))
+      [(symbol? w) (underlay/xy MT 10 10 (text "resting" 11 "red"))]
+      [(number? w) (underlay/xy MT 50 w BALL)])
+    5 85 
+    (text name 11 "black")))
 
 ))
 
@@ -1560,17 +1601,18 @@ Finally, here is the third function, which renders the state as a scene:
 
 (check-expect 
  ((draw "Carl") 100) 
- (place-image (text "Carl" 11 'black) 
+ (underlay/xy (underlay/xy MT 50 100 BALL) 
               5 85 
-              (place-image BALL 50 100 MT)))
+              (text "Carl" 11 "black")))
 
 (define (draw name)
   (lambda (w)
-    (place-image 
-     (text name 11 'black) 5 85 
+    (overlay/xy 
      (cond
-       [(symbol? w) (place-image (text "resting" 11 'red) 10 10 MT)]
-       [(number? w) (place-image BALL 50 w MT)]))))
+       [(symbol? w) (underlay/xy MT 10 10 (text "resting" 11 "red"))]
+       [(number? w) (underlay/xy MT 50 w BALL)])
+     5 85 
+     (text name 11 'black))))
 
 ))
 

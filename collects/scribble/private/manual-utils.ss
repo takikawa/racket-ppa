@@ -1,27 +1,22 @@
 #lang scheme/base
 (require "../struct.ss"
          "../decode.ss"
-         "../basic.ss"
+         "../base.ss"
+         (only-in "../core.ss"
+                   content?)
+         scheme/contract
          scheme/list)
 
-(provide spacer doc-prefix
-         to-flow
-         flow-spacer flow-empty-line
-         make-table-if-necessary
-         max-proto-width)
+(provide doc-prefix)
+(provide/contract
+ [spacer element?]
+ [to-flow (content? . -> . flow?)]
+ [flow-spacer flow?]
+ [flow-empty-line flow?]
+ [make-table-if-necessary (content? list? . -> . (list/c (or/c omitable-paragraph? table?)))]
+ [max-proto-width exact-nonnegative-integer?])
 
 (define spacer (hspace 1))
-
-(define doc-prefix
-  (case-lambda
-   [(doc s)
-    (if doc
-        (list (module-path-prefix->string doc) s) 
-        s)]
-   [(doc prefix s)
-    (doc-prefix doc (if prefix
-                        (append prefix (list s))
-                        s))]))
 
 (define (to-flow e)
   (make-flow (list (make-omitable-paragraph (list e)))))

@@ -98,7 +98,7 @@ and
 }|
 
 Furthermore, there are no constraints on the Scheme used by templates: they can use macros, structs, continuation marks, threads, etc.
-However, Scheme values that are ultimately returned must be printable by the @text-ref@"."
+However, Scheme values that are ultimately returned must be printable by the @|text-ref|.
 For example, consider the following outputs of the 
 title line of different calls to @scheme[fast-template]:
 
@@ -109,7 +109,7 @@ title line of different calls to @scheme[fast-template]:
  (fast-template 'Templates)
 ] 
 @verbatim[#:indent 2]|{
-  <head><title>Fastest Templates in the West!</title></head>
+  ...<title>Fastest Templates in the West!</title>...
 }|
 }
 
@@ -118,7 +118,7 @@ title line of different calls to @scheme[fast-template]:
  (fast-template 42)
 ] 
 @verbatim[#:indent 2]|{
-  <head><title>Fastest 42 in the West!</title></head>
+  ...<title>Fastest 42 in the West!</title>...
 }|
 }
 
@@ -127,7 +127,7 @@ title line of different calls to @scheme[fast-template]:
  (fast-template (list "Noo" "dles"))
 ] 
 @verbatim[#:indent 2]|{
-  <head><title>Fastest Noodles in the West!</title></head>
+  ...<title>Fastest Noodles in the West!</title>...
 }|
 }
 
@@ -136,7 +136,7 @@ title line of different calls to @scheme[fast-template]:
  (fast-template (lambda () "Thunks"))
 ] 
 @verbatim[#:indent 2]|{
-  <head><title>Fastest Thunks in the West!</title></head>
+  ...<title>Fastest Thunks in the West!</title>...
 }|
 }
 
@@ -145,7 +145,16 @@ title line of different calls to @scheme[fast-template]:
  (fast-template (delay "Laziness"))
 ] 
 @verbatim[#:indent 2]|{
-  <head><title>Fastest Laziness in the West!</title></head>
+  ...<title>Fastest Laziness in the West!</title>...
+}|
+}
+ 
+@item{
+@schemeblock[
+ (fast-template (fast-template "Embedding"))
+] 
+@verbatim[#:indent 2]|{
+  ...<title>Fastest ...<title>Fastest Embedding in the West!</title>... in the West!</title>...
 }|
 }
 ]

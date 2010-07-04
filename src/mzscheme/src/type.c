@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -26,17 +26,19 @@
 #include "schpriv.h"
 #include <string.h>
 
-Scheme_Type_Reader *scheme_type_readers;
-Scheme_Type_Writer *scheme_type_writers;
-Scheme_Equal_Proc *scheme_type_equals;
-Scheme_Primary_Hash_Proc *scheme_type_hash1s;
-Scheme_Secondary_Hash_Proc *scheme_type_hash2s;
+/* types should all be registered before invoking places */
 
-static char **type_names;
-static Scheme_Type maxtype, allocmax;
+SHARED_OK Scheme_Type_Reader2 *scheme_type_readers;
+SHARED_OK Scheme_Type_Writer *scheme_type_writers;
+SHARED_OK Scheme_Equal_Proc *scheme_type_equals;
+SHARED_OK Scheme_Primary_Hash_Proc *scheme_type_hash1s;
+SHARED_OK Scheme_Secondary_Hash_Proc *scheme_type_hash2s;
+
+SHARED_OK static char **type_names;
+SHARED_OK static Scheme_Type maxtype, allocmax;
 
 #ifdef MEMORY_COUNTING_ON
-long scheme_type_table_count;
+SHARED_OK long scheme_type_table_count;
 #endif
 
 static void init_type_arrays()
@@ -54,7 +56,7 @@ static void init_type_arrays()
   allocmax = maxtype + 100;
 
   type_names = MALLOC_N(char *, allocmax);
-  scheme_type_readers = MALLOC_N_ATOMIC(Scheme_Type_Reader, allocmax);
+  scheme_type_readers = MALLOC_N_ATOMIC(Scheme_Type_Reader2, allocmax);
   n = allocmax * sizeof(Scheme_Type_Reader);
   memset((char *)scheme_type_readers, 0, n);
 
@@ -160,8 +162,8 @@ scheme_init_type ()
   set_name(scheme_keyword_type, "<keyword>");
   set_name(scheme_syntax_compiler_type, "<syntax-compiler>");
   set_name(scheme_macro_type, "<macro>");
-  set_name(scheme_lazy_macro_type, "<lazy-macro>");
   set_name(scheme_vector_type, "<vector>");
+  set_name(scheme_flvector_type, "<flvector>");
   set_name(scheme_bignum_type, "<bignum-integer>");
   set_name(scheme_escaping_cont_type, "<escape-continuation>");
   set_name(scheme_sema_type, "<semaphore>");
@@ -269,6 +271,8 @@ scheme_init_type ()
   set_name(scheme_logger_type, "<logger>");
   set_name(scheme_log_reader_type, "<log-receiver>");
 
+  set_name(scheme_future_type, "<future>");
+
   set_name(_scheme_values_types_, "<resurrected>");
   set_name(_scheme_compiled_values_types_, "<internal>");
 
@@ -276,6 +280,7 @@ scheme_init_type ()
   set_name(scheme_rt_meta_cont, "<meta-continuation>");
 #endif
   set_name(scheme_place_type, "<place>");
+  set_name(scheme_place_async_channel_type, "<place_async_channel>");
   set_name(scheme_engine_type, "<engine>");
 }
 
@@ -295,10 +300,10 @@ Scheme_Type scheme_make_type(const char *name)
     memcpy(naya, type_names, maxtype * sizeof(char *));
     type_names = (char **)naya;
 
-    naya = scheme_malloc_atomic(n = allocmax * sizeof(Scheme_Type_Reader));
+    naya = scheme_malloc_atomic(n = allocmax * sizeof(Scheme_Type_Reader2));
     memset((char *)naya, 0, n);
-    memcpy(naya, scheme_type_readers, maxtype * sizeof(Scheme_Type_Reader));
-    scheme_type_readers = (Scheme_Type_Reader *)naya;
+    memcpy(naya, scheme_type_readers, maxtype * sizeof(Scheme_Type_Reader2));
+    scheme_type_readers = (Scheme_Type_Reader2 *)naya;
 
     naya = scheme_malloc_atomic(n = allocmax * sizeof(Scheme_Type_Writer));
     memset((char *)naya, 0, n);
@@ -344,6 +349,14 @@ char *scheme_get_type_name(Scheme_Type t)
 }
 
 void scheme_install_type_reader(Scheme_Type t, Scheme_Type_Reader f)
+{
+  if (t < 0 || t >= maxtype)
+    return;
+
+  scheme_type_readers[t] = (Scheme_Type_Reader2)f;
+}
+
+void scheme_install_type_reader2(Scheme_Type t, Scheme_Type_Reader2 f)
 {
   if (t < 0 || t >= maxtype)
     return;
@@ -531,6 +544,7 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_mutable_pair_type, cons_cell);
   GC_REG_TRAV(scheme_raw_pair_type, cons_cell);
   GC_REG_TRAV(scheme_vector_type, vector_obj);
+  GC_REG_TRAV(scheme_flvector_type, flvector_obj);
   GC_REG_TRAV(scheme_cpointer_type, cpointer_obj);
   GC_REG_TRAV(scheme_offset_cpointer_type, offset_cpointer_obj);
 
@@ -544,7 +558,6 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_void_type, char_obj);  /* small */
   GC_REG_TRAV(scheme_syntax_compiler_type, syntax_compiler);
   GC_REG_TRAV(scheme_macro_type, small_object);
-  GC_REG_TRAV(scheme_lazy_macro_type, second_of_cons);
   GC_REG_TRAV(scheme_box_type, small_object);
   GC_REG_TRAV(scheme_thread_type, thread_val);
   GC_REG_TRAV(scheme_prompt_type, prompt_val);

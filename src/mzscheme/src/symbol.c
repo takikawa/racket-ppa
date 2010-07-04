@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -48,22 +48,23 @@ extern MZ_DLLIMPORT void (*GC_custom_finalize)(void);
 extern int GC_is_marked(void *);
 #endif
 
-Scheme_Hash_Table *scheme_symbol_table = NULL;
-Scheme_Hash_Table *scheme_keyword_table = NULL;
-Scheme_Hash_Table *scheme_parallel_symbol_table = NULL;
+SHARED_OK Scheme_Hash_Table *scheme_symbol_table = NULL;
+SHARED_OK Scheme_Hash_Table *scheme_keyword_table = NULL;
+SHARED_OK Scheme_Hash_Table *scheme_parallel_symbol_table = NULL;
 
 #ifdef MZ_USE_PLACES
-mzrt_rwlock *symbol_table_lock;
+SHARED_OK static mzrt_rwlock *symbol_table_lock;
 #else
 # define mzrt_rwlock_rdlock(l) /* empty */
 # define mzrt_rwlock_wrlock(l) /* empty */
 # define mzrt_rwlock_unlock(l) /* empty */
 #endif
 
-unsigned long scheme_max_found_symbol_name;
+SHARED_OK static unsigned long scheme_max_symbol_length;
 
 /* globals */
-int scheme_case_sensitive = 1;
+SHARED_OK int scheme_case_sensitive = 1;
+THREAD_LOCAL_DECL(static int gensym_counter);
 
 void scheme_set_case_sensitive(int v) { scheme_case_sensitive =  v; }
 
@@ -80,7 +81,6 @@ static Scheme_Object *string_to_keyword_prim (int argc, Scheme_Object *argv[]);
 static Scheme_Object *keyword_to_string_prim (int argc, Scheme_Object *argv[]);
 static Scheme_Object *gensym(int argc, Scheme_Object *argv[]);
 
-static int gensym_counter;
 
 /**************************************************************************/
 
@@ -333,6 +333,12 @@ scheme_init_symbol (Scheme_Env *env)
   GLOBAL_IMMED_PRIM("gensym",                     gensym,                           0, 1, env);
 }
 
+unsigned long scheme_get_max_symbol_length() {
+  /* x86, x86_64, and powerpc support aligned_atomic_loads_and_stores */
+  return scheme_max_symbol_length;
+}
+
+
 static Scheme_Object *
 make_a_symbol(const char *name, unsigned int len, int kind)
 {
@@ -346,9 +352,13 @@ make_a_symbol(const char *name, unsigned int len, int kind)
   memcpy(sym->s, name, len);
   sym->s[len] = 0;
 
-  if (len > scheme_max_found_symbol_name) {
-    scheme_max_found_symbol_name = len;
+#ifdef MZ_USE_PLACES
+  mzrt_ensure_max_cas(&scheme_max_symbol_length, len);
+#else
+  if ( len > scheme_max_symbol_length ) {
+    scheme_max_symbol_length = len;
   }
+#endif
 
   return (Scheme_Object *) sym;
 }

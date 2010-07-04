@@ -1,14 +1,17 @@
 #lang scribble/doc
 @(require "mz.ss"
           (for-syntax scheme/base)
-          scribble/scheme)
+          scribble/scheme
+	  (for-label scheme/generator))
 
-@(define-syntax speed
-   (syntax-rules ()
-     [(_ id what)
-      @t{An @scheme[id] application can provide better performance for
-         @elem[what]
-         iteration when it appears directly in a @scheme[for] clause.}]))
+@(define generator-eval
+   (lambda ()
+     (let ([the-eval (make-base-eval)])
+       (the-eval '(require scheme/generator))
+       the-eval)))
+
+@(define (info-on-seq where what)
+   @margin-note{See @secref[where] for information on using @|what| as sequences.})
 
 @title[#:tag "sequences"]{Sequences}
 
@@ -78,6 +81,7 @@ element. @speed[in-naturals "integer"]}
 
 @defproc[(in-list [lst list?]) sequence?]{
 Returns a sequence equivalent to @scheme[lst].
+@info-on-seq["pairs" "lists"]
 @speed[in-list "list"]}
 
 @defproc[(in-vector [vec vector?]
@@ -88,6 +92,8 @@ Returns a sequence equivalent to @scheme[lst].
 
 Returns a sequence equivalent to @scheme[vec] when no optional
 arguments are supplied.
+
+@info-on-seq["vectors" "vectors"]
 
 The optional arguments @scheme[start], @scheme[stop], and
 @scheme[step] are analogous to @scheme[in-range], except that a
@@ -117,6 +123,8 @@ demanded from the sequence.
 Returns a sequence equivalent to @scheme[str] when no optional
 arguments are supplied.
 
+@info-on-seq["strings" "strings"]
+
 The optional arguments @scheme[start], @scheme[stop], and
 @scheme[step] are as in @scheme[in-vector].
 
@@ -130,29 +138,48 @@ The optional arguments @scheme[start], @scheme[stop], and
 Returns a sequence equivalent to @scheme[bstr] when no optional
 arguments are supplied.
 
+@info-on-seq["bytestrings" "byte strings"]
+
 The optional arguments @scheme[start], @scheme[stop], and
 @scheme[step] are as in @scheme[in-vector].
 
 @speed[in-bytes "byte string"]}
 
+@defproc[(in-port [r (input-port? . -> . any/c) read] 
+		  [in input-port? (current-input-port)])
+	 sequence?]{
+Returns a sequence whose elements are produced by calling @scheme[r]
+on @scheme[in] until it produces @scheme[eof].}
+
 @defproc[(in-input-port-bytes [in input-port?]) sequence?]{
-Returns a sequence equivalent to @scheme[in].}
+Returns a sequence equivalent to @scheme[(in-port read-byte in)].}
 
 @defproc[(in-input-port-chars [in input-port?]) sequence?]{ Returns a
-sequence whose elements are read as characters form @scheme[in] (as
-opposed to using @scheme[in] directly as a sequence to get bytes).}
+sequence whose elements are read as characters form @scheme[in]
+(equivalent to @scheme[(in-port read-char in)]).}
 
 @defproc[(in-lines [in input-port? (current-input-port)]
                    [mode (or/c 'linefeed 'return 'return-linefeed 'any 'any-one) 'any])
          sequence?]{
 
-Returns a sequence whose elements are the result of @scheme[(read-line
-in mode)] until an end-of-file is encountered. Note that the default
-mode is @scheme['any], whereas the default mode of @scheme[read-line]
-is @scheme['linefeed].}
+Returns a sequence equivalent to @scheme[(in-port (lambda (p)
+(read-line p mode)) in)]. Note that the default mode is @scheme['any],
+whereas the default mode of @scheme[read-line] is
+@scheme['linefeed]. }
 
+@defproc[(in-bytes-lines [in input-port? (current-input-port)]
+                         [mode (or/c 'linefeed 'return 'return-linefeed 'any 'any-one) 'any])
+         sequence?]{
+
+Returns a sequence equivalent to @scheme[(in-port (lambda (p)
+(read-bytes-line p mode)) in)]. Note that the default mode is @scheme['any],
+whereas the default mode of @scheme[read-bytes-line] is
+@scheme['linefeed]. }
+                   
 @defproc[(in-hash [hash hash?]) sequence?]{
-Returns a sequence equivalent to @scheme[hash].}
+Returns a sequence equivalent to @scheme[hash].
+
+@info-on-seq["hashtables" "hash tables"]}
 
 @defproc[(in-hash-keys [hash hash?]) sequence?]{
 Returns a sequence whose elements are the keys of @scheme[hash].}
@@ -166,7 +193,17 @@ its value from @scheme[hash] (as opposed to using @scheme[hash] directly
 as a sequence to get the key and value as separate values for each
 element).}
 
-@defproc[(in-value [v any/c]) sequence]{
+@defproc[(in-producer [producer procedure?] [stop any/c] [args any/c] ...)
+         sequence?]{
+Returns a sequence that contains values from sequential calls to
+@scheme[producer].  @scheme[stop] identifies the value that marks the
+end of the sequence --- this value is not included in the sequence.
+@scheme[stop] can be a predicate or a value that is tested against the
+results with @scheme[eq?].  Note that you must use a predicate function
+if the stop value is itself a function, or if the @scheme[producer]
+returns multiple values.}
+
+@defproc[(in-value [v any/c]) sequence?]{
 Returns a sequence that produces a single value: @scheme[v]. This form
 is mostly useful for @scheme[let]-like bindings in forms such as
 @scheme[for*/list].}
@@ -286,3 +323,83 @@ second returns the next element (which may be multiple values) from the
 sequence; if no more elements are available, the
 @exnraise[exn:fail:contract].}
 
+@section{Iterator Generators}
+@defmodule[scheme/generator]
+@defform[(generator body ...)]{ Creates a function that returns a
+value, usually through @scheme[yield], each time it is invoked. When
+the generator runs out of values to yield the last value it computed
+will be returned for future invocations of the generator. Generators
+can be safely nested.
+
+@examples[#:eval (generator-eval)
+(define g (generator
+	    (let loop ([x '(a b c)])
+	      (if (null? x)
+		0
+		(begin
+		  (yield (car x))
+		  (loop (cdr x)))))))
+(g)
+(g)
+(g)
+(g)
+(g)
+]
+
+To use an existing generator as a sequence, you should use @scheme[in-producer]
+with a stop-value known to the generator.
+
+@examples[#:eval (generator-eval)
+(define my-stop-value (gensym))
+(define my-generator (generator
+		       (let loop ([x '(a b c)])
+			 (if (null? x)
+			   my-stop-value
+			   (begin
+			     (yield (car x))
+			     (loop (cdr x)))))))
+
+(for/list ([i (in-producer my-generator my-stop-value)])
+  i)
+]}
+
+@defform[(infinite-generator body ...)]{ Creates a function similar to
+@scheme[generator] but when the last @scheme[body] is executed the function
+will re-execute all the bodies in a loop.
+
+@examples[#:eval (generator-eval)
+(define welcome
+  (infinite-generator
+    (yield 'hello)
+    (yield 'goodbye)))
+(welcome)
+(welcome)
+(welcome)
+(welcome)
+]}
+
+@defproc[(in-generator [expr any?] ...) sequence?]{ Returns a generator
+that can be used as a sequence. The @scheme[in-generator] procedure takes care of the
+case when @scheme[expr] stops producing values, so when the @scheme[expr]
+completes, the generator will end.
+
+@examples[#:eval (generator-eval)
+(for/list ([i (in-generator 
+		(let loop ([x '(a b c)])
+		  (when (not (null? x))
+		    (yield (car x))
+		    (loop (cdr x)))))])
+  i)
+]}
+
+@defform[(yield expr)]{ Saves the point of execution inside a generator
+and returns a value.}
+
+@defproc[(sequence->generator [s sequence?]) (-> any?)]{ Returns a generator
+that returns elements from the sequence, @scheme[s], each time the generator
+is invoked.}
+
+@defproc[(sequence->repeated-generator [s sequence?]) (-> any?)]{ Returns a generator
+that returns elements from the sequence, @scheme[s], similar to
+@scheme[sequence->generator] but looping over the values in the sequence
+when no more values are left.}

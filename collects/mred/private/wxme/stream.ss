@@ -517,10 +517,10 @@
                                   (fail))]
                              [(positive? (bitwise-and b #x02))
                               (if (= 2 (send f read-bytes buf 0 2))
-                                  (integer-bytes->integer b #t #t)
+                                  (integer-bytes->integer buf #t #t 0 2)
                                   (fail))]
                              [else
-                              (if (= 4 (send f read-bytes buf 0 2))
+                              (if (= 4 (send f read-bytes buf 0 4))
                                   (integer-bytes->integer buf #t #t)
                                   (fail))])
                             (if (= 1 (send f read-bytes buf 0 1))
@@ -712,7 +712,7 @@
           (let lloop ([amt (min 50 remain)][retry? #t])
             (let ([s (open-output-bytes)])
               (write (subbytes orig-s offset (+ offset amt)) s)
-              (let* ([v (get-output-bytes s)]
+              (let* ([v (get-output-bytes s #t)]
                      [len (bytes-length v)])
                 (if (len . <= . 71)
                     (if (and (len . < . 71) 
@@ -723,7 +723,7 @@
                           (send f write-bytes #"\n ")
                           (send f write-bytes v)
                           (loop (+ offset amt) (- remain amt))))
-                    (lloop (sub1 amt) #f)))))))
+                    (lloop (quotient amt 2) #f)))))))
       (send f write-bytes #"\n)")
       (set! col 1))
 

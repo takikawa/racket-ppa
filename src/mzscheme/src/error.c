@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -41,37 +41,36 @@
 #endif
 
 /* globals */
-scheme_console_printf_t scheme_console_printf;
+SHARED_OK scheme_console_printf_t scheme_console_printf;
 scheme_console_printf_t scheme_get_console_printf() { return scheme_console_printf; }
-Scheme_Exit_Proc scheme_exit;
+SHARED_OK Scheme_Exit_Proc scheme_exit;
 void scheme_set_exit(Scheme_Exit_Proc p) { scheme_exit = p; }
 
-void (*scheme_console_output)(char *str, long len);
+HOOK_SHARED_OK void (*scheme_console_output)(char *str, long len);
 
-static int init_syslog_level = INIT_SYSLOG_LEVEL;
-static int init_stderr_level = SCHEME_LOG_ERROR;
-Scheme_Logger *scheme_main_logger;
-static void init_logger_config();
+SHARED_OK static int init_syslog_level = INIT_SYSLOG_LEVEL;
+SHARED_OK static int init_stderr_level = SCHEME_LOG_ERROR;
+THREAD_LOCAL_DECL(static Scheme_Logger *scheme_main_logger);
 
 /* readonly globals */
-const char *scheme_compile_stx_string = "compile";
-const char *scheme_expand_stx_string = "expand";
-const char *scheme_application_stx_string = "application";
-const char *scheme_set_stx_string = "set!";
-const char *scheme_var_ref_string = "#%variable-reference";
-const char *scheme_begin_stx_string = "begin";
-static Scheme_Object *fatal_symbol;
-static Scheme_Object *error_symbol; 
-static Scheme_Object *warning_symbol;
-static Scheme_Object *info_symbol;
-static Scheme_Object *debug_symbol;
-static Scheme_Object *arity_property;
-static Scheme_Object *def_err_val_proc;
-static Scheme_Object *def_error_esc_proc;
-static Scheme_Object *default_display_handler;
-static Scheme_Object *emergency_display_handler;
-Scheme_Object *scheme_def_exit_proc;
-Scheme_Object *scheme_raise_arity_error_proc;
+READ_ONLY const char *scheme_compile_stx_string = "compile";
+READ_ONLY const char *scheme_expand_stx_string = "expand";
+READ_ONLY const char *scheme_application_stx_string = "application";
+READ_ONLY const char *scheme_set_stx_string = "set!";
+READ_ONLY const char *scheme_var_ref_string = "#%variable-reference";
+READ_ONLY const char *scheme_begin_stx_string = "begin";
+ROSYM static Scheme_Object *fatal_symbol;
+ROSYM static Scheme_Object *error_symbol; 
+ROSYM static Scheme_Object *warning_symbol;
+ROSYM static Scheme_Object *info_symbol;
+ROSYM static Scheme_Object *debug_symbol;
+ROSYM static Scheme_Object *arity_property;
+ROSYM static Scheme_Object *def_err_val_proc;
+ROSYM static Scheme_Object *def_error_esc_proc;
+ROSYM static Scheme_Object *default_display_handler;
+ROSYM static Scheme_Object *emergency_display_handler;
+READ_ONLY Scheme_Object *scheme_def_exit_proc;
+READ_ONLY Scheme_Object *scheme_raise_arity_error_proc;
 
 
 #ifdef MEMORY_COUNTING_ON
@@ -177,6 +176,7 @@ Scheme_Config *scheme_init_error_escape_proc(Scheme_Config *config)
   %c = unicode char
   %d = int
   %ld = long int
+  %lx = long int
   %o = int, octal
   %f = double
   %% = percent
@@ -333,9 +333,14 @@ static long sch_vsprintf(char *s, long maxlen, const char *msg, va_list args, ch
 	case 'l':
 	  {
 	    long d;
+            int as_hex;
+            as_hex = (msg[j] == 'x');
 	    j++;
 	    d = ints[ip++];
-	    sprintf(buf, "%ld", d);
+            if (as_hex)
+              sprintf(buf, "%lx", d);
+            else
+              sprintf(buf, "%ld", d);
 	    t = buf;
 	    tlen = strlen(t);
 	  }
@@ -343,7 +348,6 @@ static long sch_vsprintf(char *s, long maxlen, const char *msg, va_list args, ch
 	case 'f':
 	  {
 	    double f;
-	    j++;
 	    f = dbls[dp++];
 	    sprintf(buf, "%f", f);
 	    t = buf;
@@ -584,7 +588,13 @@ void scheme_init_error(Scheme_Env *env)
   scheme_add_evt(scheme_log_reader_type, (Scheme_Ready_Fun)log_reader_get, NULL, NULL, 1);
 
   REGISTER_SO(scheme_def_exit_proc);
+  REGISTER_SO(default_display_handler);
+  REGISTER_SO(emergency_display_handler);
+
   scheme_def_exit_proc = scheme_make_prim_w_arity(def_exit_handler_proc, "default-exit-handler", 1, 1);
+  default_display_handler = scheme_make_prim_w_arity(def_error_display_proc, "default-error-display-handler", 2, 2);
+  emergency_display_handler = scheme_make_prim_w_arity(emergency_error_display_proc, "emergency-error-display-handler", 2, 2);
+  
 
   REGISTER_SO(def_err_val_proc);
   def_err_val_proc = scheme_make_prim_w_arity(def_error_value_string_proc, "default-error-value->string-handler", 2, 2);
@@ -600,14 +610,6 @@ void scheme_init_error(Scheme_Env *env)
   info_symbol     = scheme_intern_symbol("info");
   debug_symbol    = scheme_intern_symbol("debug");
 
-  {
-    REGISTER_SO(scheme_main_logger);
-    scheme_main_logger = make_a_logger(NULL, NULL);
-    scheme_main_logger->syslog_level = init_syslog_level;
-    scheme_main_logger->stderr_level = init_stderr_level;
-  }
-  init_logger_config();
-
   REGISTER_SO(arity_property);
   {
     Scheme_Object *guard;
@@ -616,29 +618,29 @@ void scheme_init_error(Scheme_Env *env)
   }
                                                             
   scheme_add_global_constant("prop:arity-string", arity_property, env);
-
-  scheme_init_error_config();
 }
 
-static void init_logger_config()
+void scheme_init_logger()
 {
-  scheme_set_root_param(MZCONFIG_LOGGER, (Scheme_Object *)scheme_main_logger);
+  REGISTER_SO(scheme_main_logger);
+  scheme_main_logger = make_a_logger(NULL, NULL);
+  scheme_main_logger->syslog_level = init_syslog_level;
+  scheme_main_logger->stderr_level = init_stderr_level;
+}
+
+Scheme_Logger *scheme_get_main_logger() {
+  return scheme_main_logger;
 }
 
 void scheme_init_error_config(void)
 {
-  init_logger_config();
-
   scheme_set_root_param(MZCONFIG_EXIT_HANDLER, scheme_def_exit_proc);
-  
-  REGISTER_SO(default_display_handler);
-  REGISTER_SO(emergency_display_handler);
-
-  default_display_handler = scheme_make_prim_w_arity(def_error_display_proc, "default-error-display-handler", 2, 2);
-  emergency_display_handler = scheme_make_prim_w_arity(emergency_error_display_proc, "emergency-error-display-handler", 2, 2);
-  
   scheme_set_root_param(MZCONFIG_ERROR_DISPLAY_HANDLER, default_display_handler);
   scheme_set_root_param(MZCONFIG_ERROR_PRINT_VALUE_HANDLER, def_err_val_proc);
+}
+
+void scheme_init_logger_config() {
+  scheme_set_root_param(MZCONFIG_LOGGER, (Scheme_Object *)scheme_main_logger);
 }
 
 static void
@@ -767,14 +769,18 @@ static long get_print_width(void)
 
 static char *init_buf(long *len, long *_size)
 {
-  long size, print_width;
+  unsigned long local_max_symbol_length;
+  long print_width;
+  long size;
+  
+  local_max_symbol_length = scheme_get_max_symbol_length();
+  print_width             = get_print_width();
 
-  print_width = get_print_width();
+  size = (3 * local_max_symbol_length + 500 + 2 * print_width);
 
+  /* out parameters */
   if (len)
     *len = print_width;
-
-  size = (3 * scheme_max_found_symbol_name + 500 + 2 * print_width);
   if (_size)
     *_size = size;
 
@@ -1296,7 +1302,7 @@ char *scheme_make_args_string(char *s, int which, int argc, Scheme_Object **argv
 
 const char *scheme_number_suffix(int which)
 {
-  static char *ending[] = {"st", "nd", "rd"};
+  READ_ONLY static char *ending[] = {"st", "nd", "rd"};
 
   if (!which)
     return "th";
@@ -1879,6 +1885,13 @@ void scheme_wrong_return_arity(const char *where,
 		   buffer, blen);
 }
 
+void scheme_non_fixnum_result(const char *name, Scheme_Object *o)
+{
+  scheme_raise_exn(MZEXN_FAIL_CONTRACT_NON_FIXNUM_RESULT,
+                   "%s: result is not a fixnum: %V",
+                   name, o);
+}
+
 void scheme_raise_out_of_memory(const char *where, const char *msg, ...)
 {
   char *s;
@@ -2231,7 +2244,7 @@ static Scheme_Object *error_print_width(int argc, Scheme_Object *argv[])
   return scheme_param_config("error-print-width",
 			     scheme_make_integer(MZCONFIG_ERROR_PRINT_WIDTH),
 			     argc, argv,
-			     -1, good_print_width, "integer greater than three", 0);
+			     -1, good_print_width, "exact integer greater than three", 0);
 }
 
 static Scheme_Object *good_print_context_length(int c, Scheme_Object **argv)
@@ -2277,7 +2290,7 @@ void scheme_write_proc_context(Scheme_Object *port, int print_width,
       scheme_display_w_max(line, port, print_width);
       scheme_write_byte_string(":", 1, port);
       scheme_display_w_max(col, port, print_width);
-    } else {
+    } else if (pos && SCHEME_TRUEP(pos)) {
       /* Position */
       scheme_write_byte_string("::", 2, port);
       scheme_display_w_max(pos, port, print_width);
@@ -2498,8 +2511,6 @@ exit_handler(int argc, Scheme_Object *argv[])
 			     1, NULL, NULL, 0);
 }
 
-int scheme_exiting_result; /* used by hack in port.c */
-
 static Scheme_Object *
 def_exit_handler_proc(int argc, Scheme_Object *argv[])
 {
@@ -2511,8 +2522,6 @@ def_exit_handler_proc(int argc, Scheme_Object *argv[])
       status = 0;
   } else
     status = 0;
-
-  scheme_exiting_result = status;
 
   if (scheme_exit)
     scheme_exit(status);
@@ -3465,7 +3474,7 @@ void scheme_init_exn(Scheme_Env *env)
 
   for (i = 0; i < MZEXN_OTHER; i++) {
     if (exn_table[i].count) {
-      Scheme_Object **values, *et;
+      Scheme_Object **values;
       int sp;
 
       values = scheme_make_struct_values(exn_table[i].type,
@@ -3479,12 +3488,6 @@ void scheme_init_exn(Scheme_Env *env)
       }
 
       sp = exn_table[i].super_pos;
-      et = scheme_make_struct_exptime(exn_table[i].names, exn_table[i].count,
-				      (sp >= 0) ? exn_table[sp].names[exn_table[sp].count - 1] : NULL,
-				      (sp >= 0) ? exn_table[sp].exptime : NULL,
-				      EXN_FLAGS);
-      exn_table[i].exptime = et;
-      scheme_add_global_keyword_symbol(exn_table[i].names[exn_table[i].count - 1], et, env);
     }
   }
 
@@ -3499,8 +3502,6 @@ void scheme_init_exn(Scheme_Env *env)
                                                     "raise",
                                                     1, 2),
 			     env);
-
-  scheme_init_exn_config();
 }
 
 void scheme_init_exn_config(void)

@@ -4,7 +4,8 @@
          "timer.ss"
          "last.ss"
          "checked-cell.ss"
-         htdp/image
+         "stop.ss"
+         "universe-image.ss"
          htdp/error
          mzlib/runtime-path
          mrlib/bitmap-label
@@ -49,9 +50,11 @@
    (clock-mixin
     (class* object% (start-stop<%>)
       (inspect #f)
+      
       (init-field
        world0            ;; World
-       (name #f)         ;; (U #f Symbol)
+       (name #f)         ;; (U #f String)
+       (state #f)        ;; Boolean 
        (register #f)     ;; (U #f IP)
        (check-with True) ;; Any -> Boolean 
        (tick K))         ;; (U (World -> World) (list (World -> World) Nat))
@@ -62,12 +65,14 @@
        (on-receive #f)   ;; (U #f (World S-expression -> World))
        (on-draw #f)      ;; (U #f (World -> Scene) (list (World -> Scene) Nat Nat))
        (stop-when False) ;; World -> Boolean 
-       (record? #f)      ;; Boolean 
-       )
+       (record? #f))     ;; Boolean 
+      
       ;; -----------------------------------------------------------------------
       (field
-       (world
-        (new checked-cell% [msg "World"] [value0 world0] [ok? check-with])))
+       [world
+        (new checked-cell% [msg "World"] [value0 world0] [ok? check-with]
+             [display (and state (or name "your world program's state"))])])
+      
       
       ;; -----------------------------------------------------------------------
       (field [*out* #f] ;; (U #f OutputPort), where to send messages to 
@@ -106,21 +111,18 @@
         (parameterize ([current-custodian *rec*])
           ;; try to register with the server n times 
           (let try ([n TRIES])
-              (printf "trying to register with ~a ...\n" register)
-              (with-handlers ((tcp-eof? (lambda (x) (printf FMTcom register)))
-                              (exn:fail:network? 
-                               (lambda (x)
-                                 (if (= n 1) 
-                                     (printf FMTtry register TRIES)
-                                     (begin (sleep PAUSE) (try (- n 1)))))))
-                (define-values (in out) (tcp-connect register SQPORT))
-                (tcp-send
-                 out
-                 `(REGISTER ,(if name name (symbol->string (gensym 'world)))))
-                (unless (eq? (tcp-receive in) 'okay) (raise tcp-eof))
-                (printf "... successful registered and ready to receive\n")
-                (set! *out* out)
-                (thread (RECEIVE in))))))
+            (printf "trying to register with ~a ...\n" register)
+            (with-handlers ((tcp-eof? (lambda (x) (printf FMTcom register)))
+                            (exn:fail:network? 
+                             (lambda (x)
+                               (if (= n 1) 
+                                   (printf FMTtry register TRIES)
+                                   (begin (sleep PAUSE) (try (- n 1)))))))
+              (define-values (in out) (tcp-connect register SQPORT))
+              (tcp-register in out name)
+              (printf "... successful registered and ready to receive\n")
+              (set! *out* out)
+              (thread (RECEIVE in))))))
       
       (define/private (broadcast msg)
         (when *out* 
@@ -145,8 +147,13 @@
       (define (show-canvas)
         (send visible set-cursor (make-object cursor% 'arrow))
         (let ([fst-scene (ppdraw)])
-          (set! width  (if width width (image-width fst-scene)))
-          (set! height (if height height (image-height fst-scene)))
+          (if (2:image? fst-scene)
+              (begin
+                (set! width  (if width width (+ (image-width fst-scene) 1)))
+                (set! height (if height height (+ (image-height fst-scene) 1))))
+              (begin
+                (set! width  (if width width (image-width fst-scene)))
+                (set! height (if height height (image-height fst-scene)))))              
           (create-frame)
           (show fst-scene)))
       
@@ -200,31 +207,71 @@
         (send visible lock #t)
         (send visible end-edit-sequence))
       
-      ;; -----------------------------------------------------------------------
+      ;; ----------------------------------------------------------------------
       ;; callbacks 
       (field
        (key    on-key)
        (mouse  on-mouse)
        (rec    on-receive))
       
+      (define drawing #f) ;; Boolean; is a draw callback scheduled?
+      (define (set-draw#!) (set! draw# (random 3)) (set! drawing #f))
+      (define draw# 0) 
+      (set-draw#!)
+      
       (define-syntax-rule (def/pub-cback (name arg ...) transform)
         ;; Any ... -> Boolean
         (define/public (name arg ...) 
           (queue-callback 
            (lambda ()
-             (with-handlers ([exn:break? (handler #f)][exn? (handler #t)])
+             (with-handlers ([exn? (handler #t)])
                (define tag (format "~a callback" 'transform))
                (define nw (transform (send world get) arg ...))
+               (define (d) (pdraw) (set-draw#!))
+               ;; ---
+               ;; [Listof (Box [d | void])]
+               (define w '()) 
+               ;; set all to void, then w to null 
+               ;; when a high priority draw is scheduledd
+               ;; --- 
                (when (package? nw)
                  (broadcast (package-message nw))
                  (set! nw (package-world nw)))
-               (let ([changed-world? (send world set tag nw)])
-                 (unless changed-world?
-                   (when draw (pdraw))
-                   (when (pstop) 
+               (if (stop-the-world? nw)
+                   (begin
+                     (set! nw (stop-the-world-world nw))
+                     (send world set tag nw)
+                     (when last-picture
+                       (set! draw last-picture))
+                     (when draw (pdraw))
                      (callback-stop! 'name)
-                     (enable-images-button)))
-                 changed-world?))))))
+                     (enable-images-button))
+                   (let ([changed-world? (send world set tag nw)])
+                     ;; this is the old "Robby optimization" see checked-cell:
+                     ; unless changed-world? 
+                     (when draw 
+                       (cond
+                         [(not drawing)
+                          (set! drawing #t)
+                          (let ([b (box d)])
+                            (set! w (cons b w))
+                            ;; low priority, otherwise it's too fast
+                            (queue-callback (lambda () ((unbox b))) #f))]
+                         [(< draw# 0)
+                          (set-draw#!)
+                          (for-each (lambda (b) (set-box! b void)) w)
+                          (set! w '())
+                          ;; high!!  the scheduled callback didn't fire
+                          (queue-callback (lambda () (d)) #t)]
+                         [else 
+                          (set! draw# (- draw# 1))]))
+                     (when (pstop)
+                       (when last-picture 
+                         (set! draw last-picture)
+                         (pdraw))
+                       (callback-stop! 'name)
+                       (enable-images-button))
+                     changed-world?)))))))
       
       ;; tick, tock : deal with a tick event for this world 
       (def/pub-cback (ptock) tick)
@@ -238,35 +285,44 @@
       ;; receive revents 
       (def/pub-cback (prec msg) rec)
       
-      ;; -----------------------------------------------------------------------
-      ;; draw : render this world 
-      (define/private (pdraw) (show (ppdraw)))
+      ;; ----------------------------------------------------------------------
+      ;; -> Void 
+      ;; draw : render the given world or this world (if #f)
+      (define/private (pdraw) 
+        (show (ppdraw)))
       
+      ;; -> Scene
+      ;; produce the scene for the this state
       (define/private (ppdraw)
         (check-scene-result (name-of draw 'your-draw) (draw (send world get))))
       
       ;; -----------------------------------------------------------------------
       ;; stop-when 
-      (field [stop  stop-when])
+      (field [stop (if (procedure? stop-when) stop-when (first stop-when))]
+             [last-picture (if (pair? stop-when) (second stop-when) #f)])
       
       (define/private (pstop)
         (define result (stop (send world get)))
         (check-result (name-of stop 'your-stop-when) boolean? "boolean" result)
         result)
       
-      ;; -----------------------------------------------------------------------
+      ;; ----------------------------------------------------------------------
       ;; start & stop
       (define/public (callback-stop! msg)
         (stop! (send world get)))
       
       (define (handler re-raise)
         (lambda (e)
+          (printf "breaking ..\n")
           (disable-images-button)
           (stop! (if re-raise e (send world get)))))
       
       (define/public (start!)
-        (when draw (show-canvas))
-        (when register (register-with-host)))
+        (queue-callback
+         (lambda ()
+           (with-handlers ([exn? (handler #t)])
+             (when draw (show-canvas))
+             (when register (register-with-host))))))
       
       (define/public (stop! w)
         (set! live #f)
@@ -276,7 +332,11 @@
       ;; initialize the world and run 
       (super-new)
       (start!)
-      (when (stop-when (send world get)) (stop! (send world get)))))))
+      (let ([w (send world get)])
+        (cond
+          [(stop w) (stop! (send world get))]
+          [(stop-the-world? w) 
+           (stop! (stop-the-world-world (send world get)))]))))))
 
 ;; -----------------------------------------------------------------------------
 (define-runtime-path break-btn:path '(lib "icons/break.png"))

@@ -113,7 +113,18 @@
   (for-each (lambda (l) (test '((0 2) (0 3) (1 1)) sort* l))
             '(((1 1) (0 2) (0 3))
               ((0 2) (1 1) (0 3))
-              ((0 2) (0 3) (1 1)))))
+              ((0 2) (0 3) (1 1))))
+  ;; exhaustive tests for 2 and 3 item lists
+  (for-each (lambda (l) (test '((1 x) (2 y)) sort* l))
+            '(((1 x) (2 y))
+              ((2 y) (1 x))))
+  (for-each (lambda (l) (test '((1 x) (2 y) (3 z)) sort* l))
+            '(((1 x) (2 y) (3 z))
+              ((2 y) (1 x) (3 z))
+              ((2 y) (3 z) (1 x))
+              ((3 z) (2 y) (1 x))
+              ((3 z) (1 x) (2 y))
+              ((1 x) (3 z) (2 y)))))
 ;; test #:key and #:cache-keys?
 (let ()
   (define l '((0) (9) (1) (8) (2) (7) (3) (6) (4) (5)))
@@ -242,11 +253,14 @@
   (test '(a b) rd '(a b a b a b))
   (test '(a b) rd '(a a a b b b))
   (test '(a b) rd '(a b b a)) ; keeps first occurrences
+  (test '("a" "b") rd '("a" "A" "b" "B" "a") #:key string-downcase)
   (let ([long (for/list ([i (in-range 300)]) i)])
     (test long rd long)
     (test long rd (append long long))
     (test long rd (append long (reverse long))) ; keeps first
-    (test long rd (append* (map (lambda (x) (list x x)) long)))))
+    (test long rd (append* (map (lambda (x) (list x x)) long)))
+    (test long rd (append long (map (lambda (x) (- x)) long)) #:key abs)
+    (test long rd (append long (map (lambda (x) (- x)) long)) = #:key abs)))
 
 ;; ---------- filter and filter-not ----------
 (let ()

@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 2000-2001 Matthew Flatt
  
     This library is free software; you can redistribute it and/or
@@ -37,7 +37,30 @@
    In addition, the need to marshal syntax objects to bytecode
    introduces some other complications. */
 
-Scheme_Object *scheme_datum_to_syntax_proc;
+READ_ONLY static Scheme_Object *scheme_datum_to_syntax_proc;
+ROSYM static Scheme_Object *source_symbol; /* uninterned! */
+ROSYM static Scheme_Object *share_symbol; /* uninterned! */
+ROSYM static Scheme_Object *origin_symbol;
+ROSYM static Scheme_Object *lexical_symbol;
+ROSYM static Scheme_Object *protected_symbol;
+ROSYM static Scheme_Object *nominal_id_symbol;
+
+READ_ONLY static Scheme_Stx_Srcloc *empty_srcloc;
+READ_ONLY static Scheme_Object *empty_simplified;
+READ_ONLY static Scheme_Object *no_nested_inactive_certs;
+READ_ONLY static Scheme_Object *no_nested_active_certs;
+READ_ONLY static Scheme_Object *no_nested_certs;
+
+THREAD_LOCAL_DECL(static Scheme_Object *nominal_ipair_cache);
+THREAD_LOCAL_DECL(static Scheme_Object *mark_id);
+THREAD_LOCAL_DECL(static Scheme_Object *current_rib_timestamp);
+THREAD_LOCAL_DECL(static Scheme_Hash_Table *quick_hash_table);
+THREAD_LOCAL_DECL(static Scheme_Object *last_phase_shift);
+THREAD_LOCAL_DECL(static Scheme_Object *unsealed_dependencies);
+THREAD_LOCAL_DECL(static Scheme_Hash_Table *id_marks_ht); /* a cache */
+THREAD_LOCAL_DECL(static Scheme_Hash_Table *than_id_marks_ht); /* a cache */
+THREAD_LOCAL_DECL(static Scheme_Bucket_Table *interned_skip_ribs);
+
 
 static Scheme_Object *syntax_p(int argc, Scheme_Object **argv);
 
@@ -73,37 +96,8 @@ static Scheme_Object *syntax_recertify(int argc, Scheme_Object **argv);
 static Scheme_Object *lift_inactive_certs(Scheme_Object *o, int as_active);
 
 static Scheme_Object *write_free_id_info_prefix(Scheme_Object *obj);
-static Scheme_Object *read_free_id_info_prefix(Scheme_Object *obj);
+static Scheme_Object *read_free_id_info_prefix(Scheme_Object *obj, Scheme_Object *insp);
 
-static Scheme_Object *source_symbol; /* uninterned! */
-static Scheme_Object *share_symbol; /* uninterned! */
-static Scheme_Object *origin_symbol;
-static Scheme_Object *lexical_symbol;
-static Scheme_Object *protected_symbol;
-static Scheme_Object *nominal_id_symbol;
-
-static THREAD_LOCAL Scheme_Object *nominal_ipair_cache;
-
-static THREAD_LOCAL Scheme_Object *mark_id = scheme_make_integer(0);
-static THREAD_LOCAL Scheme_Object *current_rib_timestamp = scheme_make_integer(0);
-
-static Scheme_Stx_Srcloc *empty_srcloc;
-
-static Scheme_Object *empty_simplified;
-
-static Scheme_Hash_Table *empty_hash_table;
-static THREAD_LOCAL Scheme_Hash_Table *quick_hash_table;
-
-static THREAD_LOCAL Scheme_Object *last_phase_shift;
-
-static THREAD_LOCAL Scheme_Object *unsealed_dependencies;
-
-static THREAD_LOCAL Scheme_Hash_Table *id_marks_ht; /* a cache */
-static THREAD_LOCAL Scheme_Hash_Table *than_id_marks_ht; /* a cache */
-
-static THREAD_LOCAL Scheme_Bucket_Table *interned_skip_ribs;
-
-static Scheme_Object *no_nested_inactive_certs;
 
 #ifdef MZ_PRECISE_GC
 static void register_traversers(void);
@@ -201,11 +195,16 @@ typedef struct Scheme_Cert {
             maybe inactive certs in nested parts
     - rcons(c1, c2): active certs c1 (maybe NULL), inactive certs c2 (maybe NULL); 
             maybe inactive certs in nested parts 
-    - immutable-rcons(c1, c2): active certs c1 (maybe NULL), inactive certs c2 (maybe NULL); 
-            no inactive certs in nested parts (using the immutable flag as a hack!) */
+    Use flags 0x1 and 02 to indicate no inactive or active certs in nested parts */
 #define ACTIVE_CERTS(stx) ((Scheme_Cert *)((stx)->certs ? (SCHEME_RPAIRP((stx)->certs) ? SCHEME_CAR((stx)->certs) : (stx)->certs) : NULL))
 #define INACTIVE_CERTS(stx) ((Scheme_Cert *)((stx)->certs ? (SCHEME_RPAIRP((stx)->certs) ? SCHEME_CDR((stx)->certs) : NULL) : NULL))
-static Scheme_Object *stx_activate_certs(Scheme_Object *o, Scheme_Cert **cp);
+static Scheme_Object *stx_strip_certs(Scheme_Object *o, Scheme_Cert **cp, int active);
+
+#define SCHEME_NO_INACTIVE_SUBS_P(obj) (MZ_OPT_HASH_KEY((Scheme_Inclhash_Object *)(obj)) & 0x1)
+#define SCHEME_NO_ACTIVE_SUBS_P(obj) (MZ_OPT_HASH_KEY((Scheme_Inclhash_Object *)(obj)) & 0x2)
+#define SCHEME_SET_NO_X_SUBS(obj, flag) (MZ_OPT_HASH_KEY((Scheme_Inclhash_Object *)(obj)) |= flag)
+#define SCHEME_SET_NO_INACTIVE_SUBS(obj) SCHEME_SET_NO_X_SUBS(obj, 0x1)
+#define SCHEME_SET_NO_ACTIVE_SUBS(obj) SCHEME_SET_NO_X_SUBS(obj, 0x2)
 
 #define SCHEME_RENAME_LEN(vec)  ((SCHEME_VEC_SIZE(vec) - 2) >> 1)
 
@@ -216,8 +215,6 @@ typedef struct Scheme_Lexical_Rib {
   int *sealed;
   struct Scheme_Lexical_Rib *next;
 } Scheme_Lexical_Rib;
-
-static Module_Renames *krn;
 
 #define SCHEME_RENAMESP(obj) (SAME_TYPE(SCHEME_TYPE(obj), scheme_rename_table_type))
 #define SCHEME_RENAMES_SETP(obj) (SAME_TYPE(SCHEME_TYPE(obj), scheme_rename_table_set_type))
@@ -364,6 +361,11 @@ XFORM_NONGCING static void WRAP_POS_SET_FIRST(Wrap_Pos *w)
       w->is_limb = 0;
       w->a = a;
     }
+  }
+  /* silence gcc "may be used uninitialized in this function" warnings */
+  else {
+    w->a = NULL;
+    w->is_limb = 0;
   }
 }
 
@@ -600,6 +602,9 @@ void scheme_init_stx(Scheme_Env *env)
   nominal_id_symbol = scheme_intern_symbol("nominal-id");
 
   REGISTER_SO(mark_id);
+  REGISTER_SO(current_rib_timestamp);
+  mark_id = scheme_make_integer(0);
+  current_rib_timestamp = scheme_make_integer(0);
 
   REGISTER_SO(empty_srcloc);
   empty_srcloc = MALLOC_ONE_RT(Scheme_Stx_Srcloc);
@@ -614,29 +619,37 @@ void scheme_init_stx(Scheme_Env *env)
   REGISTER_SO(empty_simplified);
   empty_simplified = scheme_make_vector(2, scheme_false);
 
-  REGISTER_SO(nominal_ipair_cache);
-
-  REGISTER_SO(quick_hash_table);
-
-  REGISTER_SO(last_phase_shift);
-
-  REGISTER_SO(empty_hash_table);
-  empty_hash_table = scheme_make_hash_table(SCHEME_hash_ptr);
-
   REGISTER_SO(no_nested_inactive_certs);
+  REGISTER_SO(no_nested_active_certs);
+  REGISTER_SO(no_nested_certs);
   no_nested_inactive_certs = scheme_make_raw_pair(NULL, NULL);
-  SCHEME_SET_IMMUTABLE(no_nested_inactive_certs);
-
-  REGISTER_SO(unsealed_dependencies);
+  no_nested_active_certs = scheme_make_raw_pair(NULL, NULL);
+  no_nested_certs = scheme_make_raw_pair(NULL, NULL);
+  SCHEME_SET_NO_INACTIVE_SUBS(no_nested_inactive_certs);
+  SCHEME_SET_NO_ACTIVE_SUBS(no_nested_active_certs);
+  SCHEME_SET_NO_INACTIVE_SUBS(no_nested_certs);
+  SCHEME_SET_NO_ACTIVE_SUBS(no_nested_certs);
 
   scheme_install_type_writer(scheme_free_id_info_type, write_free_id_info_prefix);
-  scheme_install_type_reader(scheme_free_id_info_type, read_free_id_info_prefix);
+  scheme_install_type_reader2(scheme_free_id_info_type, read_free_id_info_prefix);
 }
 
-void scheme_init_stx_places() {
+void scheme_init_stx_places(int initial_main_os_thread) {
+  REGISTER_SO(last_phase_shift);
+  REGISTER_SO(nominal_ipair_cache);
+  REGISTER_SO(quick_hash_table);
   REGISTER_SO(id_marks_ht);
   REGISTER_SO(than_id_marks_ht);
   REGISTER_SO(interned_skip_ribs);
+  REGISTER_SO(unsealed_dependencies);
+  
+  if (!initial_main_os_thread) {
+    REGISTER_SO(mark_id);
+    REGISTER_SO(current_rib_timestamp);
+    mark_id = scheme_make_integer(0);
+    current_rib_timestamp = scheme_make_integer(0);
+  }
+
   interned_skip_ribs = scheme_make_weak_equal_table();
 }
 
@@ -1380,11 +1393,6 @@ Scheme_Object *scheme_make_module_rename(Scheme_Object *phase, int kind, Scheme_
   mr->shared_pes = scheme_null;
   mr->unmarshal_info = scheme_null;
 
-  if (!krn) {
-    REGISTER_SO(krn);
-    krn = mr;
-  }
-
   return (Scheme_Object *)mr;
 }
 
@@ -1807,7 +1815,7 @@ Scheme_Object *scheme_stx_to_rename(Scheme_Object *stx)
 Scheme_Object *scheme_stx_shift_rename(Scheme_Object *mrn, 
 				       Scheme_Object *old_midx, Scheme_Object *new_midx)
 {
-  Scheme_Object *nmrn, *a, *l, *nl;
+  Scheme_Object *nmrn, *a, *l, *nl, *first, *last;
 
   nmrn = scheme_make_module_rename(((Module_Renames *)mrn)->phase, 
                                    mzMOD_RENAME_NORMAL, 
@@ -1819,26 +1827,38 @@ Scheme_Object *scheme_stx_shift_rename(Scheme_Object *mrn,
   /* Manually copy unmarshal_infos, where we have to shift anyway: */
 
   l = ((Module_Renames *)mrn)->unmarshal_info;
-  nl = scheme_null;
+  first = scheme_null;
+  last = NULL;
   while (!SCHEME_NULLP(l)) {
     a = SCHEME_CAR(l);
     nl = scheme_make_pair(scheme_make_pair(scheme_modidx_shift(SCHEME_CAR(a), old_midx, new_midx),
 					   SCHEME_CDR(a)),
-			  nl);
+			  scheme_null);
+    if (last)
+      SCHEME_CDR(last) = nl;
+    else
+      first = nl;
+    last = nl;
     l = SCHEME_CDR(l);
   }
-  ((Module_Renames *)nmrn)->unmarshal_info = nl;
+  ((Module_Renames *)nmrn)->unmarshal_info = first;
 
   l = ((Module_Renames *)mrn)->shared_pes;
-  nl = scheme_null;
+  first = scheme_null;
+  last = NULL;
   while (!SCHEME_NULLP(l)) {
     a = SCHEME_CAR(l);
     nl = scheme_make_pair(scheme_make_pair(scheme_modidx_shift(SCHEME_CAR(a), old_midx, new_midx),
 					   SCHEME_CDR(a)),
-			  nl);
+			  scheme_null);
+    if (last)
+      SCHEME_CDR(last) = nl;
+    else
+      first = nl;
+    last = nl;
     l = SCHEME_CDR(l);
   }
-  ((Module_Renames *)nmrn)->shared_pes = nl;
+  ((Module_Renames *)nmrn)->shared_pes = first;
 
   if (((Module_Renames *)mrn)->needs_unmarshal) {
     ((Module_Renames *)nmrn)->needs_unmarshal = 1;
@@ -2316,12 +2336,16 @@ static void phase_shift_certs(Scheme_Object *o, Scheme_Object *owner_wraps, int 
     /* Even if icerts is NULL, may preserve the pair in ->certs, 
        to indicate no nested inactive certs: */
     {
-      int no_sub = (SCHEME_RPAIRP(((Scheme_Stx *)o)->certs)
-                    && SCHEME_IMMUTABLEP(((Scheme_Stx *)o)->certs));
-      if (icerts || no_sub) {
+      int no_ia_sub = (SCHEME_RPAIRP(((Scheme_Stx *)o)->certs)
+                       && SCHEME_NO_INACTIVE_SUBS_P(((Scheme_Stx *)o)->certs));
+      int no_a_sub = (SCHEME_RPAIRP(((Scheme_Stx *)o)->certs)
+                      && SCHEME_NO_ACTIVE_SUBS_P(((Scheme_Stx *)o)->certs));
+      if (icerts || no_ia_sub || no_a_sub) {
         nc = scheme_make_raw_pair((Scheme_Object *)acerts, (Scheme_Object *)icerts);
-        if (no_sub)
-          SCHEME_SET_IMMUTABLE(nc);
+        if (no_ia_sub)
+          SCHEME_SET_NO_INACTIVE_SUBS(nc);
+        if (no_a_sub)
+          SCHEME_SET_NO_ACTIVE_SUBS(nc);
       } else
         nc = (Scheme_Object *)acerts;
       
@@ -2842,13 +2866,19 @@ static Scheme_Object *add_certs(Scheme_Object *o, Scheme_Cert *certs, Scheme_Obj
     if (!active) {
       pr = scheme_make_raw_pair((Scheme_Object *)ACTIVE_CERTS(stx), (Scheme_Object *)orig_certs);
       res->certs = pr;
-      if (stx->certs && SCHEME_RPAIRP(stx->certs) && SCHEME_IMMUTABLEP(stx->certs))
-        SCHEME_SET_IMMUTABLE(pr);
+      if (stx->certs && SCHEME_RPAIRP(stx->certs)) {
+        if (SCHEME_NO_INACTIVE_SUBS_P(stx->certs))
+          SCHEME_SET_NO_INACTIVE_SUBS(pr);
+        if (SCHEME_NO_ACTIVE_SUBS_P(stx->certs))
+          SCHEME_SET_NO_ACTIVE_SUBS(pr);
+      }
     } else if (stx->certs && SCHEME_RPAIRP(stx->certs)) {
       pr = scheme_make_raw_pair((Scheme_Object *)orig_certs, SCHEME_CDR(stx->certs));
       res->certs = pr;
-      if (SCHEME_IMMUTABLEP(stx->certs))
-        SCHEME_SET_IMMUTABLE(pr);
+      if (SCHEME_NO_INACTIVE_SUBS_P(stx->certs))
+        SCHEME_SET_NO_INACTIVE_SUBS(pr);
+      if (SCHEME_NO_ACTIVE_SUBS_P(stx->certs))
+        SCHEME_SET_NO_ACTIVE_SUBS(pr);
     } else
       res->certs = (Scheme_Object *)orig_certs;
     stx = res;
@@ -2867,7 +2897,6 @@ static Scheme_Object *add_certs(Scheme_Object *o, Scheme_Cert *certs, Scheme_Obj
 Scheme_Object *scheme_stx_add_inactive_certs(Scheme_Object *o, Scheme_Object *certs)
   /* Also lifts existing inactive certs to the top. */
 {
-  /* Lift inactive certs*/
   o = lift_inactive_certs(o, 0);
 
   return add_certs(o, (Scheme_Cert *)certs, NULL, 0);
@@ -2951,16 +2980,22 @@ Scheme_Object *scheme_stx_cert(Scheme_Object *o, Scheme_Object *mark, Scheme_Env
 	Scheme_Object *pr;
 	pr = scheme_make_raw_pair((Scheme_Object *)cert, SCHEME_CDR(stx->certs));
 	res->certs = pr;
-        if (SCHEME_IMMUTABLEP(stx->certs))
-          SCHEME_SET_IMMUTABLE(pr);
+        if (SCHEME_NO_INACTIVE_SUBS_P(stx->certs))
+          SCHEME_SET_NO_INACTIVE_SUBS(pr);
+        if (SCHEME_NO_ACTIVE_SUBS_P(stx->certs))
+          SCHEME_SET_NO_ACTIVE_SUBS(pr);
       } else
 	res->certs = (Scheme_Object *)cert;
     } else {
       Scheme_Object *pr;
       pr = scheme_make_raw_pair((Scheme_Object *)ACTIVE_CERTS(stx), (Scheme_Object *)cert);
       res->certs = pr;
-      if (stx->certs && SCHEME_RPAIRP(stx->certs) && SCHEME_IMMUTABLEP(stx->certs))
-        SCHEME_SET_IMMUTABLE(pr);
+      if (stx->certs && SCHEME_RPAIRP(stx->certs)) {
+        if (SCHEME_NO_INACTIVE_SUBS_P(stx->certs))
+          SCHEME_SET_NO_INACTIVE_SUBS(pr);
+        if (SCHEME_NO_ACTIVE_SUBS_P(stx->certs))
+          SCHEME_SET_NO_ACTIVE_SUBS(pr);
+      }
     }
     
     o = (Scheme_Object *)res;
@@ -3153,20 +3188,21 @@ Scheme_Object *scheme_stx_strip_module_context(Scheme_Object *_stx)
 }
 
 #ifdef DO_STACK_CHECK
-static Scheme_Object *stx_activate_certs_k(void)
+static Scheme_Object *stx_strip_certs_k(void)
 {
   Scheme_Thread *p = scheme_current_thread;
   Scheme_Object *o = (Scheme_Object *)p->ku.k.p1;
   Scheme_Cert **cp = (Scheme_Cert **)p->ku.k.p2;
+  int active = p->ku.k.i1;
 
   p->ku.k.p1 = NULL;
   p->ku.k.p2 = NULL;
 
-  return stx_activate_certs(o, cp);
+  return stx_strip_certs(o, cp, active);
 }
 #endif
 
-static Scheme_Object *stx_activate_certs(Scheme_Object *o, Scheme_Cert **cp)
+static Scheme_Object *stx_strip_certs(Scheme_Object *o, Scheme_Cert **cp, int active)
 {
 #ifdef DO_STACK_CHECK
   {
@@ -3178,7 +3214,8 @@ static Scheme_Object *stx_activate_certs(Scheme_Object *o, Scheme_Cert **cp)
       *_cp = *cp;
       p->ku.k.p1 = (void *)o;
       p->ku.k.p2 = (void *)_cp;
-      o = scheme_handle_stack_overflow(stx_activate_certs_k);
+      p->ku.k.i1 = active;
+      o = scheme_handle_stack_overflow(stx_strip_certs_k);
       *cp = *_cp;
       return o;
     }
@@ -3188,8 +3225,8 @@ static Scheme_Object *stx_activate_certs(Scheme_Object *o, Scheme_Cert **cp)
 
   if (SCHEME_PAIRP(o)) {
     Scheme_Object *a, *d;
-    a = stx_activate_certs(SCHEME_CAR(o), cp);
-    d = stx_activate_certs(SCHEME_CDR(o), cp);
+    a = stx_strip_certs(SCHEME_CAR(o), cp, active);
+    d = stx_strip_certs(SCHEME_CDR(o), cp, active);
     if (SAME_OBJ(a, SCHEME_CAR(o))
 	&& SAME_OBJ(d, SCHEME_CDR(o)))
       return o;
@@ -3198,7 +3235,7 @@ static Scheme_Object *stx_activate_certs(Scheme_Object *o, Scheme_Cert **cp)
     return o;
   } else if (SCHEME_BOXP(o)) {
     Scheme_Object *c;
-    c = stx_activate_certs(SCHEME_BOX_VAL(o), cp);
+    c = stx_strip_certs(SCHEME_BOX_VAL(o), cp, active);
     if (SAME_OBJ(c, SCHEME_BOX_VAL(o)))
       return o;
     o = scheme_box(c);
@@ -3209,7 +3246,7 @@ static Scheme_Object *stx_activate_certs(Scheme_Object *o, Scheme_Cert **cp)
     int size = SCHEME_VEC_SIZE(o), i, j;
     
     for (i = 0; i < size; i++) {
-      e = stx_activate_certs(SCHEME_VEC_ELS(o)[i], cp);
+      e = stx_strip_certs(SCHEME_VEC_ELS(o)[i], cp, active);
       if (!SAME_OBJ(e, SCHEME_VEC_ELS(o)[i]))
 	break;
     }
@@ -3224,7 +3261,7 @@ static Scheme_Object *stx_activate_certs(Scheme_Object *o, Scheme_Cert **cp)
     }
     SCHEME_VEC_ELS(v2)[i] = e;
     for (i++; i < size; i++) {
-      e = stx_activate_certs(SCHEME_VEC_ELS(o)[i], cp);
+      e = stx_strip_certs(SCHEME_VEC_ELS(o)[i], cp, active);
       SCHEME_VEC_ELS(v2)[i] = e;
     }
 
@@ -3238,7 +3275,7 @@ static Scheme_Object *stx_activate_certs(Scheme_Object *o, Scheme_Cert **cp)
     j = scheme_hash_tree_next(ht, -1);
     while (j != -1) {
       scheme_hash_tree_index(ht, j, &key, &val);
-      e = stx_activate_certs(val, cp);
+      e = stx_strip_certs(val, cp, active);
       if (!SAME_OBJ(e, val))
         break;
       j = scheme_hash_tree_next(ht, j);
@@ -3260,7 +3297,7 @@ static Scheme_Object *stx_activate_certs(Scheme_Object *o, Scheme_Cert **cp)
     i = scheme_hash_tree_next(ht, i);
     while (i != -1) {
       scheme_hash_tree_index(ht, i, &key, &val);
-      val = stx_activate_certs(val, cp);
+      val = stx_strip_certs(val, cp, active);
       ht2 = scheme_hash_tree_set(ht2, key, val);
       i = scheme_hash_tree_next(ht, i);
     }
@@ -3272,7 +3309,7 @@ static Scheme_Object *stx_activate_certs(Scheme_Object *o, Scheme_Cert **cp)
     int i, size = s->stype->num_slots;
 
     for (i = 0; i < size; i++) {
-      e = stx_activate_certs(s->slots[i], cp);
+      e = stx_strip_certs(s->slots[i], cp, active);
       if (!SAME_OBJ(e, s->slots[i]))
 	break;
     }
@@ -3284,7 +3321,7 @@ static Scheme_Object *stx_activate_certs(Scheme_Object *o, Scheme_Cert **cp)
     s->slots[i] = e;
     
     for (i++; i < size; i++) {
-      e = stx_activate_certs(s->slots[i], cp);
+      e = stx_strip_certs(s->slots[i], cp, active);
       s->slots[i] = e;
     }
     
@@ -3292,17 +3329,18 @@ static Scheme_Object *stx_activate_certs(Scheme_Object *o, Scheme_Cert **cp)
   } else if (SCHEME_STXP(o)) {
     Scheme_Stx *stx = (Scheme_Stx *)o;
 
-    if (INACTIVE_CERTS(stx)) {
-      /* Change inactive certs to active certs. */
+    if ((!active && INACTIVE_CERTS(stx))
+        || (active && ACTIVE_CERTS(stx))) {
       Scheme_Object *np, *v;
       Scheme_Stx *res;
       Scheme_Cert *certs;
 
-      if (SCHEME_IMMUTABLEP(stx->certs)) {
-        /* No sub-object has other inactive certs */
+      if ((!active && SCHEME_NO_INACTIVE_SUBS_P(stx->certs))
+          || (active && stx->certs && SCHEME_RPAIRP(stx->certs) && SCHEME_NO_ACTIVE_SUBS_P(stx->certs))) {
+        /* No sub-object has other [in]active certs */
         v = stx->val;
       } else {
-        v = stx_activate_certs(stx->val, cp);
+        v = stx_strip_certs(stx->val, cp, active);
       }
 
       res = (Scheme_Stx *)scheme_make_stx(v, 
@@ -3310,53 +3348,90 @@ static Scheme_Object *stx_activate_certs(Scheme_Object *o, Scheme_Cert **cp)
 					  stx->props);
       res->wraps = stx->wraps;
       res->u.lazy_prefix = stx->u.lazy_prefix;
-      if (!ACTIVE_CERTS(stx))
-        np = no_nested_inactive_certs;
-      else {
-        np = scheme_make_raw_pair((Scheme_Object *)ACTIVE_CERTS(stx), NULL);
-        SCHEME_SET_IMMUTABLE(np);
+      if (!active) {
+        if (!ACTIVE_CERTS(stx)) {
+          if (stx->certs && SCHEME_RPAIRP(stx->certs) && SCHEME_NO_ACTIVE_SUBS_P(stx->certs))
+            np = no_nested_certs;
+          else
+            np = no_nested_inactive_certs;
+        } else {
+          np = scheme_make_raw_pair((Scheme_Object *)ACTIVE_CERTS(stx), NULL);
+          SCHEME_SET_NO_INACTIVE_SUBS(np);
+          if (stx->certs && SCHEME_RPAIRP(stx->certs) && SCHEME_NO_ACTIVE_SUBS_P(stx->certs))
+            SCHEME_SET_NO_ACTIVE_SUBS(np);
+        }
+      } else {
+        if (!INACTIVE_CERTS(stx)) {
+          if (stx->certs && SCHEME_RPAIRP(stx->certs) && SCHEME_NO_INACTIVE_SUBS_P(stx->certs))
+            np = no_nested_certs;
+          else
+            np = no_nested_active_certs;
+        } else {
+          np = scheme_make_raw_pair(NULL, (Scheme_Object *)INACTIVE_CERTS(stx));
+          SCHEME_SET_NO_ACTIVE_SUBS(np);
+          if (SCHEME_NO_INACTIVE_SUBS_P(stx->certs))
+            SCHEME_SET_NO_INACTIVE_SUBS(np);
+        }
       }
       res->certs = np;
 
-      certs = append_certs(INACTIVE_CERTS(stx), *cp);
+      certs = append_certs((active ? ACTIVE_CERTS(stx) : INACTIVE_CERTS(stx)), *cp);
       *cp = certs;
 
       return (Scheme_Object *)res;
-    } else if (stx->certs && SCHEME_RPAIRP(stx->certs) 
-               && SCHEME_IMMUTABLEP(stx->certs)) {
-      /* Explicit pair, but no inactive certs anywhere in this object. */
+    } else if (stx->certs 
+               && SCHEME_RPAIRP(stx->certs) 
+               && (active
+                   ? SCHEME_NO_ACTIVE_SUBS_P(stx->certs)
+                   : SCHEME_NO_INACTIVE_SUBS_P(stx->certs))) {
+      /* Explicit pair, but no [in]active certs anywhere in this object. */
       return (Scheme_Object *)stx;
     } else {
-      o = stx_activate_certs(stx->val, cp);
+      Scheme_Stx *res;
+      Scheme_Object *prev;
+
+      o = stx_strip_certs(stx->val, cp, active);
 
       if (!SAME_OBJ(o, stx->val)) {
-	Scheme_Stx *res;
 	res = (Scheme_Stx *)scheme_make_stx(o, 
 					    stx->srcloc,
 					    stx->props);
 	res->wraps = stx->wraps;
 	res->u.lazy_prefix = stx->u.lazy_prefix;
-	if (ACTIVE_CERTS(stx)) {
-	  Scheme_Object *np;
-	  np = scheme_make_raw_pair((Scheme_Object *)ACTIVE_CERTS(stx), NULL);
-	  res->certs = np;
-          SCHEME_SET_IMMUTABLE(np);
-	} else
-	  res->certs = no_nested_inactive_certs;
-
-	return (Scheme_Object *)res;
       } else {
-	/* Record the absence of certificates in sub-parts: */
-	if (stx->certs) {
-	  Scheme_Object *np;
-	  np = scheme_make_raw_pair(stx->certs, NULL);
-	  stx->certs = np;
-          SCHEME_SET_IMMUTABLE(np);
-	} else
-	  stx->certs = no_nested_inactive_certs;
-        
-	return (Scheme_Object *)stx;
+        /* No new syntax object, but record the absence of certificates in 
+           sub-parts: */
+        res = stx;
       }
+
+      prev = stx->certs;
+      if (!active) {
+        if (ACTIVE_CERTS(stx)) {
+          Scheme_Object *np;
+          np = scheme_make_raw_pair((Scheme_Object *)ACTIVE_CERTS(stx), NULL);
+          res->certs = np;
+          SCHEME_SET_NO_INACTIVE_SUBS(np);
+          if (prev && SCHEME_RPAIRP(prev) && SCHEME_NO_ACTIVE_SUBS_P(prev))
+            SCHEME_SET_NO_ACTIVE_SUBS(np);
+        } else if (prev && SCHEME_RPAIRP(prev) && SCHEME_NO_ACTIVE_SUBS_P(prev))
+          res->certs = no_nested_certs;
+        else
+          res->certs = no_nested_inactive_certs;
+      } else {
+        if (INACTIVE_CERTS(stx)) {
+          Scheme_Object *np;
+          np = scheme_make_raw_pair(NULL, (Scheme_Object *)INACTIVE_CERTS(stx));
+          res->certs = np;
+          SCHEME_SET_NO_ACTIVE_SUBS(np);
+          if (prev && SCHEME_RPAIRP(prev) && SCHEME_NO_INACTIVE_SUBS_P(prev))
+            SCHEME_SET_NO_INACTIVE_SUBS(np);
+        } else if (prev && SCHEME_RPAIRP(prev) && SCHEME_NO_INACTIVE_SUBS_P(prev))
+          res->certs = no_nested_certs;
+        else
+          res->certs = no_nested_active_certs;
+      }
+      
+      return (Scheme_Object *)res;
     }
   } else
     return o;
@@ -3366,9 +3441,7 @@ static Scheme_Object *lift_inactive_certs(Scheme_Object *o, int as_active)
 {
   Scheme_Cert *certs = NULL;
 
-  o = stx_activate_certs(o, &certs);
-  /* the inactive certs collected into `certs'
-     have been stripped from `o' at this point */
+  o = stx_strip_certs(o, &certs, 0);
 
   if (certs)
     o = add_certs(o, certs, NULL, as_active);
@@ -3379,6 +3452,22 @@ static Scheme_Object *lift_inactive_certs(Scheme_Object *o, int as_active)
 Scheme_Object *scheme_stx_activate_certs(Scheme_Object *o)
 {
   return lift_inactive_certs(o, 1);
+}
+
+Scheme_Object *scheme_stx_lift_active_certs(Scheme_Object *o)
+{
+  Scheme_Cert *certs = NULL;
+  Scheme_Stx *stx = (Scheme_Stx *)o;
+
+  if (stx->certs && SCHEME_RPAIRP(stx->certs) && SCHEME_NO_ACTIVE_SUBS_P(stx->certs))
+    return o;
+
+  o = stx_strip_certs(o, &certs, 1);
+
+  if (certs)
+    o = add_certs(o, certs, NULL, 1);
+
+  return o;  
 }
 
 int scheme_stx_has_empty_wraps(Scheme_Object *o)
@@ -3791,6 +3880,20 @@ static int check_matching_marks(Scheme_Object *p, Scheme_Object *orig_id, Scheme
   }
 }
 
+
+void scheme_populate_pt_ht(Scheme_Module_Phase_Exports * pt) {
+  if (!pt->ht) {
+    /* Lookup table (which is created lazily) not yet created, so do that now... */
+    Scheme_Hash_Table *ht;
+    int i;
+    ht = scheme_make_hash_table(SCHEME_hash_ptr);
+    for (i = pt->num_provides; i--; ) {
+      scheme_hash_set(ht, pt->provides[i], scheme_make_integer(i));
+    }
+    pt->ht = ht;
+  }
+}
+
 static Scheme_Object *search_shared_pes(Scheme_Object *shared_pes, 
                                         Scheme_Object *glob_id, Scheme_Object *orig_id,
                                         Scheme_Object **get_names, int get_orig_name,
@@ -3799,23 +3902,21 @@ static Scheme_Object *search_shared_pes(Scheme_Object *shared_pes,
 {
   Scheme_Object *pr, *idx, *pos, *src, *best_match = NULL;
   Scheme_Module_Phase_Exports *pt;
-  Scheme_Hash_Table *ht;
   int i, phase, best_match_len = -1, skip = 0;
   Scheme_Object *marks_cache = NULL;
 
   for (pr = shared_pes; !SCHEME_NULLP(pr); pr = SCHEME_CDR(pr)) {
     pt = (Scheme_Module_Phase_Exports *)SCHEME_CADR(SCHEME_CAR(pr));
 
-    EXPLAIN(fprintf(stderr, "%d     pes table\n", depth));
+    EXPLAIN(fprintf(stderr, "%d     pes table %s\n", depth, 
+                    pt->src_modidx
+                    ? scheme_write_to_string(scheme_module_resolve(pt->src_modidx, 0), NULL)
+                    : "?"));
 
     if (!pt->ht) {
       /* Lookup table (which is created lazily) not yet created, so do that now... */
       EXPLAIN(fprintf(stderr, "%d     {create lookup}\n", depth));
-      ht = scheme_make_hash_table(SCHEME_hash_ptr);
-      for (i = pt->num_provides; i--; ) {
-        scheme_hash_set(ht, pt->provides[i], scheme_make_integer(i));
-      }
-      pt->ht = ht;
+      scheme_populate_pt_ht(pt);
     }
 
     pos = scheme_hash_get(pt->ht, glob_id);
@@ -3853,6 +3954,7 @@ static Scheme_Object *search_shared_pes(Scheme_Object *shared_pes,
             else
               phase = 0;
 
+            EXPLAIN(fprintf(stderr, "%d     srcname %s\n", depth, SCHEME_SYM_VAL(pt->provide_src_names[i])));
             get_names[0] = pt->provide_src_names[i];
             get_names[1] = idx;
             get_names[2] = glob_id;
@@ -7119,7 +7221,8 @@ static int ok_phase_index(Scheme_Object *o) {
   return ok_phase(o);
 }
 
-static Scheme_Object *datum_to_module_renames(Scheme_Object *a, Scheme_Hash_Table *ht, int lex_ok)
+static Scheme_Object *datum_to_module_renames(Scheme_Object *a, Scheme_Hash_Table *ht, int lex_ok,
+                                              Scheme_Unmarshal_Tables *ut)
 {
   int count, i;
   Scheme_Object *key, *p0, *p;
@@ -7138,7 +7241,10 @@ static Scheme_Object *datum_to_module_renames(Scheme_Object *a, Scheme_Hash_Tabl
     if (SCHEME_PAIRP(p) && SCHEME_INTP(SCHEME_CAR(p))) {
       /* reconstruct inspector info */
       Scheme_Object *insp;
-      insp = scheme_get_param(scheme_current_config(), MZCONFIG_CODE_INSPECTOR);
+      if (ut)
+        insp = scheme_get_cport_inspector(ut->rp);
+      else
+        insp = scheme_get_param(scheme_current_config(), MZCONFIG_CODE_INSPECTOR);
       if (!SAME_OBJ(scheme_make_integer(1), SCHEME_CAR(p))) {
         insp = CONS(scheme_make_inspector(insp), insp);
       }
@@ -7485,7 +7591,7 @@ static Scheme_Object *datum_to_wraps(Scheme_Object *w,
 	mns = SCHEME_CDR(mns);
       }
 
-      if (!datum_to_module_renames(a, mrn->ht, 0))
+      if (!datum_to_module_renames(a, mrn->ht, 0, ut))
         return_NULL;
 
       /* Extract free-id=? renames, if any */
@@ -7493,7 +7599,7 @@ static Scheme_Object *datum_to_wraps(Scheme_Object *w,
         Scheme_Hash_Table *ht;
         ht = scheme_make_hash_table(SCHEME_hash_ptr);
         mrn->free_id_renames = ht;
-        if (!datum_to_module_renames(SCHEME_CAR(mns), mrn->free_id_renames, 1))
+        if (!datum_to_module_renames(SCHEME_CAR(mns), mrn->free_id_renames, 1, ut))
           return_NULL;
         mns = SCHEME_CDR(mns);
       }
@@ -7650,7 +7756,10 @@ Scheme_Object *cert_marks_to_certs(Scheme_Object *cert_marks,
     cert_marks = a;
   }
 
-  insp = scheme_get_param(scheme_current_config(), MZCONFIG_CODE_INSPECTOR);
+  if (ut)
+    insp = scheme_get_cport_inspector(ut->rp);
+  else
+    insp = scheme_get_param(scheme_current_config(), MZCONFIG_CODE_INSPECTOR);
 
   while (SCHEME_PAIRP(cert_marks)) {
     a = SCHEME_CAR(cert_marks);
@@ -9168,9 +9277,9 @@ static Scheme_Object *write_free_id_info_prefix(Scheme_Object *obj)
   return vec;
 }
 
-static Scheme_Object *read_free_id_info_prefix(Scheme_Object *obj)
+static Scheme_Object *read_free_id_info_prefix(Scheme_Object *obj, Scheme_Object *insp)
 {
-  Scheme_Object *vec, *insp;
+  Scheme_Object *vec;
   int i;
 
   if (!SCHEME_VECTORP(obj)
@@ -9182,10 +9291,8 @@ static Scheme_Object *read_free_id_info_prefix(Scheme_Object *obj)
     SCHEME_VEC_ELS(vec)[i] = SCHEME_VEC_ELS(obj)[i];
   }
 
-  if (SCHEME_TRUEP(SCHEME_VEC_ELS(vec)[7])) {
-    insp = scheme_get_param(scheme_current_config(), MZCONFIG_CODE_INSPECTOR);
+  if (SCHEME_TRUEP(SCHEME_VEC_ELS(vec)[7]))
     SCHEME_VEC_ELS(vec)[7] = insp;
-  }
 
   vec->type = scheme_free_id_info_type;
     

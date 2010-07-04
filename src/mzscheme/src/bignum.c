@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt, Scott Owens
 
     This library is free software; you can redistribute it and/or
@@ -95,7 +95,12 @@ void scheme_bignum_use_fuel(long n);
 # define WORD_SIZE 32
 #endif
 
-static Scheme_Object *bignum_one;
+READ_ONLY static Scheme_Object *bignum_one;
+
+void scheme_init_bignum() {
+  REGISTER_SO(bignum_one);
+  bignum_one = scheme_make_bignum(1);
+}
 
 #ifdef MZ_PRECISE_GC
 # define SAFE_SPACE(var) bigdig var[1];
@@ -111,9 +116,8 @@ static Scheme_Object *bignum_one;
 
 extern void GC_check(void *p);
 
-#define BIGNUM_CACHE_SIZE 16
-static THREAD_LOCAL void *bignum_cache[BIGNUM_CACHE_SIZE];
-static THREAD_LOCAL int cache_count;
+THREAD_LOCAL_DECL(static void *bignum_cache[BIGNUM_CACHE_SIZE]);
+THREAD_LOCAL_DECL(static int cache_count);
 
 static void *copy_to_protected(void *p, long len, int zero)
 {
@@ -175,14 +179,10 @@ void scheme_clear_bignum_cache(void)
 void scheme_clear_bignum_cache(void) { }
 #endif
 
-#ifdef MZ_XFORM
-START_XFORM_SKIP;
-#endif
-
-
 #define xor(a, b) (!(a) ^ !(b))
 
 Scheme_Object *scheme_make_small_bignum(long v, Small_Bignum *o)
+  XFORM_SKIP_PROC
 {
   bigdig bv;
 
@@ -208,10 +208,6 @@ Scheme_Object *scheme_make_small_bignum(long v, Small_Bignum *o)
 
   return (Scheme_Object *) mzALIAS o;
 }
-
-#ifdef MZ_XFORM
-END_XFORM_SKIP;
-#endif
 
 Scheme_Object *scheme_make_bignum(long v)
 {
@@ -753,21 +749,11 @@ Scheme_Object *scheme_bignum_subtract(const Scheme_Object *a, const Scheme_Objec
 
 Scheme_Object *scheme_bignum_add1(const Scheme_Object *n)
 {
-  if (!bignum_one) {
-    REGISTER_SO(bignum_one);
-    bignum_one = scheme_make_bignum(1);
-  }
-
   return bignum_add_sub(n, bignum_one, 0);
 }
 
 Scheme_Object *scheme_bignum_sub1(const Scheme_Object *n)
 {
-  if (!bignum_one) {
-    REGISTER_SO(bignum_one);
-    bignum_one = scheme_make_bignum(1);
-  }
-
   return bignum_add_sub(n, bignum_one, 1);
 }
 
@@ -1656,8 +1642,6 @@ Scheme_Object *scheme_integer_sqrt_rem(const Scheme_Object *n, Scheme_Object **r
 #endif
   }
 }
-
-int gcd_calls = 0;
 
 Scheme_Object *scheme_bignum_gcd(const Scheme_Object *n, const Scheme_Object *d)
 {

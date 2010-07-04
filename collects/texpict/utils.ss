@@ -280,9 +280,9 @@
      w
      h))
   
-  (define (rounded-rectangle w h [corner-radius 0.25] #:angle [angle 0])
+  (define (rounded-rectangle w h [corner-radius -0.25] #:angle [angle 0])
     (let ([dc-path (new dc-path%)])
-      (send dc-path rounded-rectangle 0 0 w h (- corner-radius))
+      (send dc-path rounded-rectangle 0 0 w h corner-radius)
       (send dc-path rotate angle)
       (let-values ([(x y w h) (send dc-path get-bounding-box)])
         (dc (λ (dc dx dy) 
@@ -964,7 +964,7 @@
 		     (pict-descent new)
 		     (list (make-child p 0 0 x-factor y-factor))
 		     #f
-                     (pict-last new))))]
+                     (pict-last p))))]
      [(p factor) (scale p factor factor)]))
 
   (define cellophane
@@ -995,7 +995,7 @@
                        (pict-descent new)
                        (list (make-child p 0 0 1 1))
                        #f
-                       (pict-last new))))])]))
+                       (pict-last p))))])]))
 
   (define inset/clip
     (case-lambda
@@ -1023,7 +1023,7 @@
 		     (pict-descent new)
 		     (list (make-child p 0 0 1 1))
 		     #f
-                     (pict-last new))))]
+                     (pict-last p))))]
      [(p h v) (inset/clip p h v h v)]
      [(p a) (inset/clip p a a a a)]))
   

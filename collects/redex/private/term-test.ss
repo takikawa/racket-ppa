@@ -1,4 +1,4 @@
-(module term-test mzscheme
+(module term-test scheme
   (require "term.ss"
            "matcher.ss"
            "test-util.ss")
@@ -67,10 +67,7 @@
           (term ((in-hole E x) ...)))
         (term (1 2 3)))
   
-  (fprintf (current-error-port) "term-test.ss commented out test that fails; matches PR 8765\n")
-  
-  #;
-  (test (term-let-fn ((metafun (λ (x) x)))
+  (test (term-let-fn ((metafun car))
                      (term-let ((x 'whatever)
                                 ((y ...) '(4 5 6)))
                        (term (((metafun x) y) ...))))
@@ -80,5 +77,101 @@
                      (term-let (((y ...) '(4 5 6)))
                        (term ((y (metafun 1)) ...))))
         '((4 1) (5 1) (6 1)))
+  
+  (test (term-let-fn ((f (compose add1 car)))
+                     (term-let (((x ...) '(1 2 3))
+                                ((y ...) '(a b c)))
+                               (term (((f x) y) ...))))
+        '((2 a) (3 b) (4 c)))
+  
+  (test (term-let-fn ((f (curry foldl + 0)))
+                     (term-let (((x ...) '(1 2 3)))
+                               (term (f x ...))))
+        6)
+  
+  (test (term-let-fn ((f (compose add1 car)))
+                     (term-let (((x ...) '(1 2 3))
+                                (((y ...) ...) '((a b c) (d e f) (g h i))))
+                               (term ((((f x) y) ...) ...))))
+        '(((2 a) (3 b) (4 c)) ((2 d) (3 e) (4 f)) ((2 g) (3 h) (4 i))))
+  
+  (test (term-let-fn ((f (curry foldl + 0)))
+                     (term-let ((((x ...) ...) '((1 2) (3 4 5) (6))))
+                               (term ((f x ...) ...))))
+        '(3 12 6))
+
+  (define-namespace-anchor here)
+  (define ns (namespace-anchor->namespace here))
+  
+  (let ([src 'term-template])
+    (test
+     (parameterize ([current-namespace ns])
+       (runtime-error-source
+        '(term-let ([(x ...) '(a b c)]
+                    [((y ...) ...) '((1 2) (4 5 6) (7 8 9))])
+                   (term (((x y) ...) ...)))
+        src))
+     src))
+  
+  (let ([src 'term-template-metafunc])
+    (test
+     (parameterize ([current-namespace ns])
+       (runtime-error-source 
+        '(term-let-fn ((f car))
+                      (term-let ([(x ...) '(a b c)]
+                                 [((y ...) ...) '((1 2) (4 5 6) (7 8 9))])
+                                (term ((((f x) y) ...) ...))))
+        src))
+     src))
+  
+  (let ([src 'ellipsis-args])
+    (test
+     (parameterize ([current-namespace ns])
+       (runtime-error-source 
+        '(term-let-fn ((f car))
+                      (term-let ([(x ...) '(a b)]
+                                 [(y ...) '(c d e)])
+                                (term (f ((x y) ...)))))
+        src))
+     src))
+  
+  (let ([src 'ellipsis-args/map])
+    (test
+     (parameterize ([current-namespace ns])
+       (runtime-error-source 
+        '(term-let-fn ((f car))
+                      (term-let ([(x ...) '(a b)]
+                                 [(y ...) '(c d e)])
+                                (term ((f (x y)) ...))))
+        src))
+     src))
+  
+  (let ([src 'ellipsis-args/in-hole])
+    (test
+     (parameterize ([current-namespace ns])
+       (runtime-error-source 
+        '(term-let ([(x ...) '(a b)]
+                    [(y ...) '(c d e)])
+                   (term ((in-hole hole (x y)) ...)))
+        src))
+     src))
+  
+  (let ([src 'term-let-rhs])
+    (test
+     (parameterize ([current-namespace ns])
+       (runtime-error-source
+        '(term-let ([(x ...) 'a])
+                   3)
+        src))
+     src))
+  
+  (let ([src 'term-template])
+    (test 
+     (parameterize ([current-namespace ns])
+       (syntax-error-sources
+        '(term-let ([(x ...) '(a b c)])
+                   (term x))
+        src))
+     (list src)))
   
   (print-tests-passed 'term-test.ss))

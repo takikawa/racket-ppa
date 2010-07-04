@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2009 PLT Scheme Inc.
+  Copyright (c) 2004-2010 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
   All rights reserved.
 
@@ -67,14 +67,14 @@ MZ_EXTERN Scheme_Object *scheme_current_break_cell();
 /*                                threads                                 */
 /*========================================================================*/
 
-#ifndef LINK_EXTENSIONS_BY_TABLE
-# ifndef MZ_USE_PLACES
-MZ_EXTERN THREAD_LOCAL Scheme_Thread *scheme_current_thread;
-# endif
+#ifndef USE_THREAD_LOCAL
+# ifndef LINK_EXTENSIONS_BY_TABLE
+MZ_EXTERN Scheme_Thread *scheme_current_thread;
 MZ_EXTERN volatile int scheme_fuel_counter;
-#else
+# else
 MZ_EXTERN Scheme_Thread **scheme_current_thread_ptr;
 MZ_EXTERN volatile int *scheme_fuel_counter_ptr;
+# endif
 #endif
 
 MZ_EXTERN Scheme_Thread *scheme_get_current_thread();
@@ -407,7 +407,9 @@ MZ_EXTERN void scheme_gc_ptr_ok(void *p);
 MZ_EXTERN void scheme_collect_garbage(void);
 
 #ifdef MZ_PRECISE_GC
-MZ_EXTERN THREAD_LOCAL void **GC_variable_stack;
+# ifndef USE_THREAD_LOCAL
+MZ_EXTERN void **GC_variable_stack;
+# endif
 MZ_EXTERN void GC_register_traversers(short tag, Size_Proc size, Mark_Proc mark, Fixup_Proc fixup,
 				      int is_constant_size, int is_atomic);
 MZ_EXTERN void *GC_resolve(void *p);
@@ -576,6 +578,8 @@ XFORM_NONGCING MZ_EXTERN double scheme_real_to_double(Scheme_Object *r);
 
 MZ_EXTERN Scheme_Object *scheme_make_cptr(void *cptr, Scheme_Object *typetag);
 MZ_EXTERN Scheme_Object *scheme_make_offset_cptr(void *cptr, long offset, Scheme_Object *typetag);
+MZ_EXTERN Scheme_Object *scheme_make_external_cptr(void *cptr, Scheme_Object *typetag);
+MZ_EXTERN Scheme_Object *scheme_make_offset_external_cptr(void *cptr, long offset, Scheme_Object *typetag);
 
 MZ_EXTERN const char *scheme_get_proc_name(Scheme_Object *p, int *len, int for_error);
 
@@ -988,11 +992,6 @@ MZ_EXTERN Scheme_Object *scheme_make_struct_instance(Scheme_Object *stype,
 						     int argc,
 						     Scheme_Object **argv);
 
-MZ_EXTERN Scheme_Object *scheme_make_struct_exptime(Scheme_Object **names, int count,
-						    Scheme_Object *super_sym,
-						    Scheme_Object *super_exptime,
-						    int flags);
-
 XFORM_NONGCING MZ_EXTERN int scheme_is_struct_instance(Scheme_Object *type, Scheme_Object *v);
 MZ_EXTERN Scheme_Object *scheme_struct_ref(Scheme_Object *s, int pos);
 MZ_EXTERN void scheme_struct_set(Scheme_Object *s, int pos, Scheme_Object *v);
@@ -1092,5 +1091,7 @@ MZ_EXTERN char *scheme_make_args_string(char *s, int which, int argc, Scheme_Obj
 MZ_EXTERN const char *scheme_system_library_subpath();
 
 MZ_EXTERN void scheme_signal_received(void);
+MZ_EXTERN void scheme_signal_received_at(void *);
+MZ_EXTERN void *scheme_get_signal_handle();
 
 MZ_EXTERN int scheme_char_strlen(const mzchar *s);

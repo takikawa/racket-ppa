@@ -660,16 +660,17 @@
                                                                                                         (symbol->string (cadr name))
                                                                                                         (cadr name))])
                                                                                     (letrec-values ([(split)
-                                                                                                     (lambda (s rx suffix?)
+                                                                                                     (lambda (s rx suffix-after)
                                                                                                        (let-values ([(m) (regexp-match-positions 
                                                                                                                           rx
                                                                                                                           s)])
                                                                                                          (if m
                                                                                                              (cons (substring s 0 (caar m))
                                                                                                                    (split (substring s (cdar m))
-                                                                                                                          rx suffix?))
+                                                                                                                          rx 
+                                                                                                                          (- suffix-after 1)))
                                                                                                              (list
-                                                                                                              (if suffix?
+                                                                                                              (if (suffix-after . <= . 0)
                                                                                                                   (if (regexp-match? #rx"[.]" s)
                                                                                                                       s
                                                                                                                       (string-append s ".ss"))
@@ -684,19 +685,24 @@
                                                                                                        (if (null? (cdr l))
                                                                                                            null
                                                                                                            (cons (car l) (not-last (cdr l)))))])
-                                                                                      (let-values ([(parts) (split s #rx"/" #t)])
-                                                                                        (let-values ([(vparts) (split (cadr parts) #rx":" #f)])
+                                                                                      (let-values ([(parts) (split s #rx"/" 2)])
+                                                                                        (let-values ([(vparts) (split (cadr parts) #rx":" +inf.0)])
                                                                                           (cons 'planet
                                                                                                 (cons (if (null? (cddr parts))
                                                                                                           "main.ss"
                                                                                                           (last-of parts))
                                                                                                       (cons
-                                                                                                       (cons (car parts) 
-                                                                                                             (cons (string-append (car vparts) 
-                                                                                                                                  ".plt")
-                                                                                                                   ;; FIXME: finish version parse:
-                                                                                                                   (cdddr parts)))
-                                                                                                       (not-last (cddr parts)))))))))
+                                                                                                       (cons 
+                                                                                                        (car parts) 
+                                                                                                        (cons (string-append (car vparts) 
+                                                                                                                             ".plt")
+                                                                                                              (if (null? (cddr parts))
+                                                                                                                  null
+                                                                                                                  ;; FIXME: finish version parse:
+                                                                                                                  (cdddr parts))))
+                                                                                                       (if (null? (cddr parts))
+                                                                                                           null
+                                                                                                           (not-last (cddr parts))))))))))
                                                                                   ;; already in long form:
                                                                                   name)
                                                                               #f))
@@ -1002,10 +1008,12 @@
                                         mac-mred-collects-path-adjust
                                         values)
                                     collects-path)))
+      (define word-size (if (fixnum? (expt 2 32)) 8 4))
       (unless (or long-cmdline?
-                  ((apply + (length cmdline) (map (lambda (s)
-                                                    (bytes-length (string->bytes/utf-8 s)))
-                                                  cmdline)) . < . 50))
+                  ((apply +
+                          (map (lambda (s)
+                                 (+ word-size (bytes-length (string->bytes/utf-8 s))))
+                               cmdline)) . < . 60))
         (error 'create-embedding-executable "command line too long"))
       (check-collects-path 'create-embedding-executable collects-path collects-path-bytes)
       (let ([exe (find-exe mred? variant)])

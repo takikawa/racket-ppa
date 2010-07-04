@@ -1,6 +1,6 @@
 #lang scheme/base
 (require (for-syntax scheme/base)
-         (for-syntax stxclass)
+         (for-syntax syntax/parse)
          scheme/list
          scheme/contract
          "deriv.ss"
@@ -12,7 +12,10 @@
 (provide (all-from-out "steps.ss")
          (all-from-out "reductions-config.ss")
          DEBUG
-         R)
+         R
+         !)
+
+(define-syntax ! (syntax-rules ()))
 
 (define-syntax-rule (with-syntax1 ([pattern rhs]) . body)
   (syntax-case rhs ()
@@ -21,9 +24,6 @@
                            (format "failed pattern match against ~s"
                                    'pattern)
                            #'x)]))
-
-(begin-for-syntax
- (expr/c-use-contracts? #f))
 
 (define-syntax-rule (DEBUG form ...)
   (when #f
@@ -253,6 +253,12 @@
           (check-same-stx 'rename/no-step real-from from))
          (R** f v p s ws [#:rename pvar to] . more))]
 
+    ;; Add to definite binders
+    [(R** f v p s ws [#:binders ids] . more)
+     #:declare ids (expr/c #'(listof identifier))
+     #'(begin (learn-binders (flatten-identifiers (with-syntax1 ([p f]) ids)))
+              (R** f v p s ws . more))]
+
     ;; Add to definite uses
     [(R** f v p s ws [#:learn ids] . more)
      #:declare ids (expr/c #'(listof identifier?))
@@ -324,16 +330,24 @@
                          #t))]
 
     [(R** f v p s ws [#:with-visible-form clause ...] . more)
-     #'(let ([k (RP p [#:set-syntax f] . more)])
+     #'(let ([k (RP p #| [#:set-syntax f] |# . more)])
          (if (visibility)
              (R** v v p s ws clause ... => k)
              (k f v s ws)))]
 
     [(R** f v p s ws [#:new-local-context clause ...] . more)
-     ;; Note: pass no left-state to subclauses,
-     ;; then discard result state, restore s when return.
-     #'(RSbind (with-new-local-context v (R** f v p #f ws clause ...))
-               (lambda (f2 v2 s2 ws2) (R** f2 v2 p s ws2 . more)))]
+     ;; If vis = #t, then (clause ...) do not affect local config
+     ;; If vis = #f, then proceed normally
+     ;;   *except* must save & restore real term
+     #'(let* ([vis (visibility)]
+              [process-clauses (lambda () (R** #f (if vis #f v) _ #f ws clause ...))])
+         (RSbind (if vis
+                     (with-new-local-context v (process-clauses))
+                     (process-clauses))
+                 (lambda (f2 v2 s2 ws2)
+                   (let ([v2 (if vis v v2)]
+                         [s2 (if vis s s2)])
+                     (R** f v2 p s2 ws2 . more)))))]
 
     ;; Subterm handling
     [(R** f v p s ws [reducer hole fill] . more)
@@ -550,3 +564,15 @@
          (cons (wrongness (stx-car a) (stx-car b))
                (wrongness (stx-cdr a) (stx-cdr b)))]
         [else (stx->datum a)]))
+
+
+;; flatten-identifiers : syntaxlike -> (list-of identifier)
+(define (flatten-identifiers stx)
+  (syntax-case stx ()
+    [id (identifier? #'id) (list #'id)]
+    [() null]
+    [(x . y) (append (flatten-identifiers #'x) (flatten-identifiers #'y))]
+    [else (error 'flatten-identifers "neither syntax list nor identifier: ~s"
+                 (if (syntax? stx)
+                     (syntax->datum stx)
+                     stx))]))

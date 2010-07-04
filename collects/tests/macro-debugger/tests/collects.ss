@@ -66,7 +66,7 @@
       (check-steps deriv policy))))
 
 (define (check-steps deriv policy)
-  (define-values (steps defs stx exn)
+  (define-values (steps binders uses stx exn)
     (parameterize ((macro-policy policy)) (reductions+ deriv)))
   (check-pred syntax? stx)
   (check-eq? exn #f)
@@ -195,15 +195,17 @@
     scheme/mzscheme
     scheme/nest
     scheme/private/class-internal
-    scheme/private/contract
-    scheme/private/contract-arrow
-    scheme/private/contract-basic-opters
-    scheme/private/contract-ds
-    scheme/private/contract-ds-helpers
-    scheme/private/contract-guts
-    scheme/private/contract-helpers
-    scheme/private/contract-opt
-    scheme/private/contract-opt-guts
+    scheme/contract/private/base
+    scheme/contract/private/arrow
+    scheme/contract/private/basic-opters
+    scheme/contract/private/ds
+    scheme/contract/private/ds-helpers
+    scheme/contract/private/exists
+    scheme/contract/private/guts
+    scheme/contract/private/helpers
+    scheme/contract/private/misc
+    scheme/contract/private/opt
+    scheme/contract/private/opt-guts
     scheme/private/define-struct
     scheme/private/define-struct
     scheme/private/for

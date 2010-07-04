@@ -3,7 +3,8 @@
          syntax/modresolve
          setup/main-collects
          scheme/file
-         scheme/list)
+         scheme/list
+         scheme/path)
 
 (provide make-compilation-manager-load/use-compiled-handler
          managed-compile-zo
@@ -11,6 +12,8 @@
          trust-existing-zos
          manager-compile-notify-handler
          manager-skip-file-handler
+         file-date-in-collection
+         file-date-in-paths
          (rename-out [trace manager-trace-handler]))
 
 (define manager-compile-notify-handler (make-parameter void))
@@ -18,6 +21,56 @@
 (define indent (make-parameter ""))
 (define trust-existing-zos (make-parameter #f))
 (define manager-skip-file-handler (make-parameter (λ (x) #f)))
+
+(define (file-date-in-collection p)
+  (file-date-in-paths p (current-library-collection-paths)))
+
+(define (file-date-in-paths p paths)
+  (let ([p-eles (explode-path (simplify-path p))])
+    (let c-loop ([paths paths])
+      (cond
+        [(null? paths) #f]
+        [else
+         (let i-loop ([collects-eles (explode-path (car paths))]
+                      [p-eles p-eles])
+           (cond
+             [(null? collects-eles)
+              ;; we're inside the collection hierarchy, so we just 
+              ;; use the date of the original file (or the zo, whichever
+              ;; is newer).
+              (let-values ([(base name dir) (split-path p)])
+                (let* ([ext (filename-extension p)]
+                       [pbytes (path->bytes name)]
+                       [zo-file-name 
+                        (and ext
+                             (bytes->path
+                              (bytes-append
+                               (subbytes 
+                                pbytes
+                                0
+                                (- (bytes-length pbytes)
+                                   (bytes-length ext)))
+                               #"zo")))]
+                       [zo-path (and zo-file-name
+                                     (build-path 
+                                      base
+                                      (car (use-compiled-file-paths))
+                                      zo-file-name))])
+                  (cond
+                    [(and zo-file-name (file-exists? zo-path))
+                     (max (file-or-directory-modify-seconds p)
+                          (file-or-directory-modify-seconds zo-file-name))]
+                    [else
+                     (file-or-directory-modify-seconds p)])))]
+             [(null? p-eles) 
+              ;; this case shouldn't happen... I think.
+              (c-loop (cdr paths))]
+             [else
+              (cond
+                [(equal? (car p-eles) (car collects-eles))
+                 (i-loop (cdr collects-eles) (cdr p-eles))]
+                [else 
+                 (c-loop (cdr paths))])]))]))))
 
 (define (trace-printf fmt . args)
   (let ([t (trace)])
@@ -78,9 +131,10 @@
           (lambda ()
             (close-output-port out)))))))
 
-(define (write-deps code mode path external-deps)
+(define (write-deps code mode path external-deps reader-deps)
   (let ([dep-path (path-add-suffix (get-compilation-path mode path) #".dep")]
-        [deps (remove-duplicates (get-deps code path))]
+        [deps (remove-duplicates (append (get-deps code path)
+                                         reader-deps))]
         [external-deps (remove-duplicates external-deps)])
     (with-compile-output dep-path
       (lambda (op)
@@ -121,6 +175,7 @@
   ;; External dependencies registered through reader guard and
   ;; accomplice-logged events:
   (define external-deps null)
+  (define reader-deps null)
   (define deps-sema (make-semaphore 1))
   (define done-key (gensym))
   (define (external-dep! p)
@@ -128,6 +183,11 @@
      deps-sema
      (lambda ()
        (set! external-deps (cons (path->bytes p) external-deps)))))
+  (define (reader-dep! p)
+    (call-with-semaphore
+     deps-sema
+     (lambda ()
+       (set! reader-deps (cons (path->bytes p) reader-deps)))))
 
   ;; Set up a logger to receive and filter accomplice events:
   (define accomplice-logger (make-logger))
@@ -164,7 +224,7 @@
                              (let ([p (resolved-module-path-name
                                        (module-path-index-resolve
                                         (module-path-index-join d #f)))])
-                               (when (path? p) (external-dep! p))))
+                               (when (path? p) (reader-dep! p))))
                            d))
                        rg))]
                    [current-logger accomplice-logger])
@@ -199,7 +259,9 @@
         ;; Note that we check time and write .deps before returning from
         ;; with-compile-output...
         (verify-times path zo-name)
-        (write-deps code mode path external-deps)))))
+        (write-deps code mode path external-deps reader-deps)))))
+
+(define depth (make-parameter 0))
 
 (define (compile-zo mode path read-src-syntax)
   ((manager-compile-notify-handler) path)
@@ -210,14 +272,20 @@
       (if (and zo-exists? (trust-existing-zos))
           (touch zo-name)
           (begin (when zo-exists? (delete-file zo-name))
-                 (with-handlers
-                     ([exn:get-module-code?
-                       (lambda (ex)
-                         (compilation-failure mode path zo-name
-                                              (exn:get-module-code-path ex)
-                                              (exn-message ex))
-                         (raise ex))])
-                   (compile-zo* mode path read-src-syntax zo-name))))))
+                 (log-info (format "cm: ~acompiling ~a" 
+                                   (build-string 
+                                    (depth)
+                                    (λ (x) (if (= 2 (modulo x 3)) #\| #\space)))
+                                   path))
+                 (parameterize ([depth (+ (depth) 1)])
+                   (with-handlers
+                       ([exn:get-module-code?
+                         (lambda (ex)
+                           (compilation-failure mode path zo-name
+                                                (exn:get-module-code-path ex)
+                                                (exn-message ex))
+                           (raise ex))])
+                     (compile-zo* mode path read-src-syntax zo-name)))))))
   (trace-printf "end compile: ~a" path))
 
 (define (get-compiled-time mode path)
@@ -303,6 +371,8 @@
     (define (compilation-manager-load-handler path mod-name)
       (cond [(not mod-name)
              (trace-printf "skipping:  ~a mod-name ~s" path mod-name)]
+            [(not (file-exists? path))
+             (trace-printf "skipping:  ~a file does not exist" path)]
             [(or (null? (use-compiled-file-paths))
                  (not (equal? (car modes)
                               (car (use-compiled-file-paths)))))

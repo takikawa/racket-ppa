@@ -220,7 +220,7 @@ inline static unsigned long custodian_usage(NewGC*gc, void *custodian)
   if(!gc->really_doing_accounting) {
     gc->park[0] = custodian;
     gc->really_doing_accounting = 1;
-    garbage_collect(gc, 1);
+    garbage_collect(gc, 1, 0);
     custodian = gc->park[0]; 
     gc->park[0] = NULL;
   }
@@ -247,7 +247,7 @@ inline static void BTC_memory_account_mark(NewGC *gc, mpage *page, void *ptr)
       if(info->btc_mark == gc->old_btc_mark) {
         info->btc_mark = gc->new_btc_mark;
         account_memory(gc, gc->current_mark_owner, gcBYTES_TO_WORDS(page->size));
-        push_ptr(ptr);
+        push_ptr(gc, TAG_AS_BIG_PAGE_PTR(ptr));
       }
     } else {
       /* medium page */
@@ -257,7 +257,7 @@ inline static void BTC_memory_account_mark(NewGC *gc, mpage *page, void *ptr)
         info->btc_mark = gc->new_btc_mark;
         account_memory(gc, gc->current_mark_owner, info->size);
         ptr = OBJHEAD_TO_OBJPTR(info);
-        push_ptr(ptr);
+        push_ptr(gc, ptr);
       }
     }
   } else {
@@ -266,7 +266,7 @@ inline static void BTC_memory_account_mark(NewGC *gc, mpage *page, void *ptr)
     if(info->btc_mark == gc->old_btc_mark) {
       info->btc_mark = gc->new_btc_mark;
       account_memory(gc, gc->current_mark_owner, info->size);
-      push_ptr(ptr);
+      push_ptr(gc, ptr);
     }
   }
 }
@@ -328,67 +328,6 @@ int BTC_cust_box_mark(void *p)
   return gc->mark_table[btc_redirect_cust_box](p);
 }
 
-inline static void mark_normal_obj(NewGC *gc, int type, void *ptr)
-{
-  switch(type) {
-    case PAGE_TAGGED: {
-                        /* we do not want to mark the pointers in a thread or custodian 
-                           unless the object's owner is the current owner. In the case
-                           of threads, we already used it for roots, so we can just
-                           ignore them outright. In the case of custodians, we do need
-                           to do the check; those differences are handled by replacing
-                           the mark procedure in mark_table. */
-                        gc->mark_table[*(unsigned short*)ptr](ptr);
-                        break;
-                      }
-    case PAGE_ATOMIC: break;
-    case PAGE_ARRAY: { 
-                       objhead *info = OBJPTR_TO_OBJHEAD(ptr);
-                       void **temp = ptr;
-                       void **end  = PPTR(info) + info->size;
-
-                       while(temp < end) gcMARK(*(temp++));
-                       break;
-                     };
-    case PAGE_TARRAY: {
-                        objhead *info = OBJPTR_TO_OBJHEAD(ptr);
-                        unsigned short tag = *(unsigned short*)ptr;
-                        void **temp = ptr;
-                        void **end = PPTR(info) + (info->size - INSET_WORDS);
-
-                        while(temp < end) temp += gc->mark_table[tag](temp);
-                        break;
-                      }
-    case PAGE_XTAGGED: GC_mark_xtagged(ptr); break;
-  }
-}
-
-inline static void mark_acc_big_page(NewGC *gc, mpage *page)
-{
-  void **start = PPTR(BIG_PAGE_TO_OBJECT(page));
-  void **end = PPTR(NUM(page->addr) + page->size);
-
-  switch(page->page_type) {
-    case PAGE_TAGGED: 
-      {
-        unsigned short tag = *(unsigned short*)start;
-        if((unsigned long)gc->mark_table[tag] < PAGE_TYPES) {
-          /* atomic */
-        } else
-          gc->mark_table[tag](start); break;
-      }
-    case PAGE_ATOMIC: break;
-    case PAGE_ARRAY: while(start < end) gcMARK(*(start++)); break;
-    case PAGE_XTAGGED: GC_mark_xtagged(start); break;
-    case PAGE_TARRAY: {
-                        unsigned short tag = *(unsigned short *)start;
-                        end -= INSET_WORDS;
-                        while(start < end) start += gc->mark_table[tag](start);
-                        break;
-                      }
-  }
-}
-
 static void btc_overmem_abort(NewGC *gc)
 {
   gc->kill_propagation_loop = 1;
@@ -398,26 +337,16 @@ static void btc_overmem_abort(NewGC *gc)
 
 static void propagate_accounting_marks(NewGC *gc)
 {
-  struct mpage *page;
   void *p;
   PageMap pagemap = gc->page_maps;
-  while(pop_ptr(&p) && !gc->kill_propagation_loop) {
-    page = pagemap_find_page(pagemap, p);
-    set_backtrace_source(p, page->page_type);
-    GCDEBUG((DEBUGOUTF, "btc_account: popped off page %p:%p, ptr %p\n", page, page->addr, p));
-    if(page->size_class) {
-      if (page->size_class > 1)
-        mark_acc_big_page(gc, page);
-      else {
-        objhead *info = MED_OBJHEAD(p, page->size);
-        p = OBJHEAD_TO_OBJPTR(info);
-        mark_normal_obj(gc, info->type, p);
-      }
-    } else
-      mark_normal_obj(gc, page->page_type, p);
+  Mark_Proc *mark_table = gc->mark_table;
+
+  while(pop_ptr(gc, &p) && !gc->kill_propagation_loop) {
+    /* GCDEBUG((DEBUGOUTF, "btc_account: popped off page %p:%p, ptr %p\n", page, page->addr, p)); */
+    propagate_marks_worker(pagemap, mark_table, p); 
   }
   if(gc->kill_propagation_loop)
-    reset_pointer_stack();
+    reset_pointer_stack(gc);
 }
 
 inline static void BTC_initialize_mark_table(NewGC *gc) {
@@ -499,7 +428,7 @@ static void BTC_do_accounting(NewGC *gc)
     gc->new_btc_mark = !gc->new_btc_mark;
   }
 
-  clear_stack_pages();
+  clear_stack_pages(gc);
 }
 
 inline static void BTC_add_account_hook(int type,void *c1,void *c2,unsigned long b)
@@ -511,7 +440,7 @@ inline static void BTC_add_account_hook(int type,void *c1,void *c2,unsigned long
     gc->park[0] = c1; 
     gc->park[1] = c2;
     gc->really_doing_accounting = 1;
-    garbage_collect(gc, 1);
+    garbage_collect(gc, 1, 0);
     c1 = gc->park[0]; gc->park[0] = NULL;
     c2 = gc->park[1]; gc->park[1] = NULL;
   }

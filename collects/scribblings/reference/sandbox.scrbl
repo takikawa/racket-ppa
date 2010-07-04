@@ -16,7 +16,7 @@
 The @schememodname[scheme/sandbox] module provides utilities for
 creating ``sandboxed'' evaluators, which are configured in a
 particular way and can have restricted resources (memory and time),
-filesystem and network access, and much.  Sandboxed evaluators can be
+filesystem and network access, and much more.  Sandboxed evaluators can be
 configured through numerous parameters --- and the defaults are set
 for the common use case where sandboxes are very limited.
 
@@ -312,10 +312,10 @@ hook is used after that initialization, so it can override settings.}
 
 @defparam[sandbox-reader proc (any/c . -> . any)]{
 
-A parameter that determines a function to reads all expressions from
+A parameter that specifies a function that reads all expressions from
 @scheme[(current-input-port)].  The function is used to read program
-source for an evaluator when a string. byte string, or port is
-supplies.  The reader function receives a value to be used as input
+source for an evaluator when a string, byte string, or port is
+supplied.  The reader function receives a value to be used as input
 source (i.e., the first argument to @scheme[read-syntax]), and it
 should return a list of @tech{syntax objects}.  The default reader
 calls @scheme[read-syntax], accumulating results in a list until it
@@ -811,7 +811,7 @@ in a way that depends on the setting of @scheme[(sandbox-output)] or
 
 Retrieves uncovered expression from an evaluator, as longs as the
 @scheme[sandbox-coverage-enabled] parameter had a true value when the
-evaluator was created. Otherwise, and exception is raised to indicate
+evaluator was created. Otherwise, an exception is raised to indicate
 that no coverage information is available.
 
 The @scheme[prog?] argument specifies whether to obtain expressions that

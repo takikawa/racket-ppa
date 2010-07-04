@@ -21,11 +21,16 @@ A @deftech{hash table} (or simply @deftech{hash}) maps each of its
 keys to a single value. For a given hash table, keys are equivalent
 via @scheme[equal?], @scheme[eqv?], or @scheme[eq?], and keys are
 retained either strongly or weakly (see @secref["weakbox"]). A hash
-table is also either mutable or immutable. Immutable tables support
-constant-time access and update, just like mutable hash tables; the
-constant on immutable operations is usually larger, but the
-functional nature of immutable hash tables can pay off in certain
-algorithms.
+table is also either mutable or immutable. Immutable hash tables
+support effectively constant-time access and update, just like mutable
+hash tables; the constant on immutable operations is usually larger,
+but the functional nature of immutable hash tables can pay off in
+certain algorithms.
+
+@margin-note{Immutable hash tables actually provide @math{O(log N)}
+access and update. Since @math{N} is limited by the address space so
+that @math{log N} is limited to less than 30 or 62 (depending on the
+platform), @math{log N} can be treated reasonably as a constant.}
 
 A hash table can be used as a two-valued @tech{sequence} (see
 @secref["sequences"]). The keys and values of the hash table serve as
@@ -51,26 +56,20 @@ a table-specific semaphore as needed. Three caveats apply, however:
 
   @item{If a thread is terminated while applying @scheme[hash-ref],
   @scheme[hash-set!], @scheme[hash-remove!], @scheme[hash-ref!],
-  or @scheme[has-update!] to a hash table that
+  or @scheme[hash-update!] to a hash table that
   uses @scheme[equal?] or @scheme[eqv?] key comparisons, all current
   and future operations on the hash table may block indefinitely.}
 
   @item{The @scheme[hash-map] and @scheme[hash-for-each] procedures do
-  not use the table's semaphore. Consequently, if a hash table is
-  extended with new keys by another thread while a map or for-each
-  traversal is in process, arbitrary key--value pairs can be dropped
-  or duplicated in the traversal. Similarly, if a map or for-each
-  procedure itself extends the table, arbitrary key--value pairs can
-  be dropped or duplicated. However, key mappings can be deleted or
-  remapped by any thread with no adverse affects (i.e., the change
-  does not affect a traversal if the key has been seen already,
-  otherwise the traversal skips a deleted key or uses the remapped
-  key's new value).}
+  not use the table's semaphore to guard the traversal as a whole.
+  Changes by one thread to a hash table can affect the keys and values
+  seen by another thread part-way through its traversal of the same
+  hash table.}
 
- @item{The @scheme[hash-update!] and @scheme[hash-set!] functions 
+ @item{The @scheme[hash-update!] and @scheme[hash-ref!] functions 
  use a table's semaphore
  independently for the @scheme[hash-ref] and @scheme[hash-set!] parts
- of its functionality, which means that the update as a whole is not
+ of their functionality, which means that the update as a whole is not
  ``atomic.''}
 
  ]
@@ -284,8 +283,16 @@ Functionally removes any existing mapping for @scheme[key] in
 Applies the procedure @scheme[proc] to each element in
 @scheme[hash] in an unspecified order, accumulating the results
 into a list. The procedure @scheme[proc] is called each time with a
-key and its value. See the caveat above about concurrent
-modification.
+key and its value.
+
+If a hash table is extended with new keys (either through
+@scheme[proc] or by another thread) while a @scheme[hash-map] or
+@scheme[hash-for-each] traversal is in process, arbitrary key--value
+pairs can be dropped or duplicated in the traversal. Key mappings can
+be deleted or remapped (by any thread) with no adverse affects; the
+change does not affect a traversal if the key has been seen already,
+otherwise the traversal skips a deleted key or uses the remapped key's
+new value.
 
 @see-also-concurrency-caveat[]}
 
@@ -296,10 +303,10 @@ modification.
 
 Applies @scheme[proc] to each element in @scheme[hash] (for the
 side-effects of @scheme[proc]) in an unspecified order. The procedure
-@scheme[proc] is called each time with a key and its value. See the
-caveat above about concurrent modification.
+@scheme[proc] is called each time with a key and its value.
 
-@see-also-concurrency-caveat[]}
+See @scheme[hash-map] for information about modifying @scheme[hash]
+within @scheme[proc]. @see-also-concurrency-caveat[]}
 
 
 @defproc[(hash-count [hash hash?])

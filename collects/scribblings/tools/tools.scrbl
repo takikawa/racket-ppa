@@ -1,6 +1,7 @@
 #lang scribble/doc
 @(begin
 (require scribble/manual
+         (for-label scheme/gui/base)
          (for-label drscheme/tool-lib)
          (for-label scheme/unit)
          (for-label scheme/base)
@@ -40,7 +41,6 @@ Cormac Flanagan,
 Matthew Flatt, 
 Max Hailperin, 
 Philippe Meunier, 
-and
 Christian Queinnec,
 PLT at large, and many others for
 their feedback and help.
@@ -52,13 +52,8 @@ functionality.  To extend the appearance
 or the functionality the DrScheme window (say, to annotate
 programs in certain ways, to add buttons to the DrScheme
 frame or to add additional languages to DrScheme) use a
-tool. The Static Debugger, the Syntax Checker, the Stepper,
+tool. The Macro Stepper, the Syntax Checker, the Stepper,
 and the teaching languages are all implemented as tools.
-
-Libraries are for extensions of DrScheme that only want to
-add new functions and other values bound in the users
-namespace.  See the DrScheme manual for more information on
-constructing libraries.
 
 When DrScheme starts up, it looks for tools by reading
 fields in the @File{info.ss} file of each collection and the
@@ -194,7 +189,7 @@ sufficient, simply create an
 @File{info.ss} file in the collection
 where the module is saved. Include these
 definitions:
-@(itemize
+@itemize[
 @item/cap['drscheme-language-modules]{
   @index{drscheme-language-modules} This must be bound to a
   list of collection path specifications or strings, one for
@@ -257,7 +252,7 @@ This is optional. If
   represents a relative path starting at the directory
   containing the @File{info.ss} file.  It is interpreted
   like the string arguments to @scheme[require].
-})
+}]
 The lists must have the same length.
 
 As an example, the @italic{Essentials of Programming Languages}
@@ -393,13 +388,13 @@ DrScheme.
 @section{Extending the Existing DrScheme Classes}
 
 Each of the names:
-@(itemize
+@itemize[
 @item{@scheme[drscheme:get/extend:extend-interactions-text]}
 @item{@scheme[drscheme:get/extend:extend-definitions-text]}
 @item{@scheme[drscheme:get/extend:extend-interactions-canvas]}
 @item{@scheme[drscheme:get/extend:extend-definitions-canvas]}
 @item{@scheme[drscheme:get/extend:extend-unit-frame]}
-@item{@scheme[drscheme:get/extend:extend-tab]})
+@item{@scheme[drscheme:get/extend:extend-tab]}]
 is bound to an extender function. In order to change the
 behavior of drscheme, you can derive new classes from the
 standard classes for the frame, texts, canvases. Each
@@ -466,6 +461,23 @@ DrScheme automatically selects a mode for each open
 file based on the file's extension. If the file ends with
 @File{.txt}, DrScheme uses text mode. Otherwise, DrScheme
 uses Scheme mode.
+
+@section{@tt{#lang}-specific tools}
+@section-index["drscheme:toolbar-buttons"]
+
+If the result of @scheme[read-language] for a language is a function, 
+DrScheme will query it to determine if there are any new toolbar
+buttons to be used when editing files in this language (when
+DrScheme's language is set to the Module language).
+
+Specifically, DrScheme will pass @scheme['drscheme:toolbar-buttons]
+to the function and expect back a value matching this contract:
+@schemeblock[(listof (list/c string?
+                             (is-a?/c bitmap%)
+                             (-> (is-a?/c drscheme:unit:frame<%>) any)))]
+which is then used to create new toolbar buttons, one for each list in the
+first. The string is the label on the button; the bitmap is the icon (it should be 16x16),
+and the function is called when the button is clicked.
 
 @section{Language-specific capabilities}
 

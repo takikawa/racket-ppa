@@ -1,12 +1,17 @@
 #lang scribble/doc
-@(require scribble/manual scribble/struct "utils.ss"
+@(require scribble/manual 
+          scribble/core scribble/html-properties scribble/latex-properties
+          "utils.ss"
           (for-label scheme/base
                      ;; FIXME: need to get this in
                      ;; scribble/text
                      ))
 @initialize-tests
 
-@title[#:tag "preprocessor"]{Text Preprocessor}
+@title[#:tag "preprocessor"
+       #:style (make-style #f (list (make-tex-addition "shaded.tex")
+                                    (make-css-addition "shaded.css")))
+      ]{Text Preprocessing}
 
 @defmodulelang[scribble/text]{The @schememodname[scribble/text]
 language provides everything from @scheme[scheme/base] with a few
@@ -278,7 +283,7 @@ separate text arguments in the S-expression part of an @"@"-form.
 
 @example|-{#lang scribble/text
            @(define (choose 1st 2nd)
-              @list{Either @1st, or @2nd@"."})
+              @list{Either @1st, or @|2nd|@"."})
            @(define who "us")
            @choose[@list{you're with @who}
                    @list{against @who}]
@@ -292,7 +297,7 @@ sub-parts without dealing with quotes.
 
 @example|-{#lang scribble/text
            @(define (choose 1st 2nd)
-              @list{Either @1st, or @2nd@"."})
+              @list{Either @1st, or @|2nd|@"."})
            @(define who "us")
            @choose[@list{you're with @who}
                    @list{against @who}]
@@ -319,9 +324,9 @@ convenient --- you can even specify the patterns with @"@"-forms.
            @(require scheme/match)
            @(define (features . text)
               (match text
-                [@list{@1st@...
+                [@list{@|1st|@...
                        ---
-                       @2nd@...}
+                       @|2nd|@...}
                  @list{>> Pros <<
                        @1st;
                        >> Cons <<
@@ -364,7 +369,7 @@ number of body expressions must be fixed.
 
 @example|-{#lang scribble/text
            @(define ((choose . 1st) . 2nd)
-              @list{Either you're @1st, or @2nd@"."})
+              @list{Either you're @1st, or @|2nd|.})
            @(define who "me")
            @@choose{with @who}{against @who}
            ---***---
@@ -988,7 +993,7 @@ on whether it is more convenient to write a text file with occasional
 Scheme expressions or the other way.
 
 @example|-{#lang at-exp scheme/base
-           @(require scribble/text scheme/list)
+           (require scribble/text scheme/list)
            (define (itemize . items)
              (add-between (map (lambda (item)
                                  @list{* @item})
@@ -997,15 +1002,15 @@ Scheme expressions or the other way.
            (define summary
              @list{If that's not enough,
                    I don't know what is.})
-           @(output
-             @list{
-               Todo:
-               @itemize[@list{Hack some}
-                        @list{Sleep some}
-                        @list{Hack some
-                              more}]
-               @summary
-             })
+           (output
+            @list{
+              Todo:
+              @itemize[@list{Hack some}
+                       @list{Sleep some}
+                       @list{Hack some
+                             more}]
+              @summary
+            })
            ---***---
            Todo:
            * Hack some

@@ -1,5 +1,5 @@
 
-(module beginner-funs mzscheme
+(module beginner-funs scheme
   (require mzlib/etc mzlib/list mzlib/math syntax/docprovide)
 
   ;; Implements the procedures:
@@ -277,6 +277,8 @@
 	"to extract the indexed item from the list")
     
       (list (any ... -> (listof any)) "to construct a list of its arguments")
+      
+      (make-list (natural-number any -> (listof any)) "(make-list k x) constructs a list of k copies of x")
 
       ((beginner-list* list*) (any ... (listof any) -> (listof any)) 
        "to construct a list by adding multiple items to a list")
@@ -287,10 +289,14 @@
 	"to compute the number of items on a list")
       (memq (any (listof any) -> (union false list))
 	"to determine whether some value is on some list"
-	" (comparing values with eq?)")
+	" if so, it produces the suffix of the list that starts with x"
+	" if not, it produces false."
+	" (It compares values with the eq? predicate.)")
       (memv (any (listof any) -> (union false list))
 	"to determine whether some value is on the list"
-	" (comparing values with eqv?)")
+	" if so, it produces the suffix of the list that starts with x"
+	" if not, it produces false."
+	" (it compares values with the eqv? predicate.)")
       ((beginner-member member) (any (listof any) -> boolean)
 	"to determine whether some value is on the list"
 	" (comparing values with equal?)")
@@ -370,7 +376,7 @@
       
       ((beginner-string-ith string-ith) (string nat -> string)
         "to extract the ith 1-letter substring from the given one")
-      ((beginner-replicate replicate) (string nat -> string)
+      ((beginner-replicate replicate) (nat string -> string)
         "to replicate the given string")
       ((beginner-int->string int->string) (integer -> string)
         "to convert an integer in [0,55295] or [57344 1114111] to a 1-letter string")
@@ -462,15 +468,18 @@
     ("Misc"
       (identity (any -> any)
 	"to return the argument unchanged")
-      ((beginner-error error) (symbol string -> void) "to signal an error")
+      ((beginner-error error) (any ... -> void) "to signal an error, turning the given values into an error message ")
       ((beginner-struct? struct?) (any -> boolean)
        "to determine whether some value is a structure")
       ((beginner-equal? equal?) (any any -> boolean)
-	"to determine whether two values are structurally equal")
+	"to determine whether two values are structurally equal"
+	" where basic values are compared with the eqv? predicate")
       (eq? (any any -> boolean)
-	"to compare two values")
+	"to determine whether two values are equivalent from the"
+	"  computer's perspective (intensional)")
       (eqv? (any any -> boolean)
-	"to compare two values")
+	"to determine whether two values are equivalent from the"
+	"  perspective of all functions that can be applied to it (extensional)")
       ((beginner-=~ =~) (real real non-negative-real -> boolean)
 	"to check whether two real numbers are within some amount (the third argument) of either other")
       ((beginner-equal~? equal~?) (any any non-negative-real -> boolean)

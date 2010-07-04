@@ -22,6 +22,7 @@ If the namespace does not, they are colored the unbound color.
          scheme/contract
          scheme/class
          scheme/list
+         scheme/promise
          drscheme/tool
          syntax/toplevel
          syntax/boundmap
@@ -97,25 +98,8 @@ If the namespace does not, they are colored the unbound color.
     (define (printf . args) (apply fprintf o args))
     
     
-    (define xref 'not-yet-loaded-xref)
-    (define (get-xref) 
-      (cond
-        [(equal? xref 'failed-to-load) #f]
-        [else
-         (when (symbol? xref)
-           (error 'get-xref "xref has not yet been loaded"))
-         xref]))
-    (define (force-xref th) 
-      (cond
-        [(equal? xref 'failed-to-load)
-         (void)]
-        [(symbol? xref)
-         (th)
-         (with-handlers ((exn? (λ (exn) (set! xref 'failed-to-load))))
-           (set! xref (load-collections-xref)))]
-        [else
-         (void)]))
-        
+    (define xref (delay/idle (load-collections-xref)))
+    (define (get-xref) (force xref))
     
     
     ;;;  ;;; ;;; ;;;;; 
@@ -1205,7 +1189,8 @@ If the namespace does not, they are colored the unbound color.
                                   (drscheme:debug:error-display-handler/stacktrace 
                                    msg 
                                    exn 
-                                   '())
+                                   '()
+                                   #:definitions-text definitions-text)
                                   
                                   (semaphore-post error-display-semaphore)))
                                
@@ -1259,7 +1244,6 @@ If the namespace does not, they are colored the unbound color.
                                       definitions-text
                                       (λ ()
                                         (open-status-line 'drscheme:check-syntax)
-                                        (force-xref (λ () (update-status-line 'drscheme:check-syntax status-loading-docs-index)))
                                         (update-status-line 'drscheme:check-syntax status-coloring-program)
                                         (parameterize ([currently-processing-definitions-text definitions-text])
                                           (expanded-expression user-namespace user-directory sexp jump-to-id))
@@ -1355,9 +1339,11 @@ If the namespace does not, they are colored the unbound color.
     
     (define lexically-bound-variable-style-pref 'drscheme:check-syntax:lexically-bound)
     (define imported-variable-style-pref 'drscheme:check-syntax:imported)
+    (define set!d-variable-style-pref 'drscheme:check-syntax:set!d)
     
     (define lexically-bound-variable-style-name (symbol->string lexically-bound-variable-style-pref))
     (define imported-variable-style-name (symbol->string imported-variable-style-pref))
+    (define set!d-variable-style-name (symbol->string set!d-variable-style-pref))
     
     (define error-style-name (fw:scheme:short-sym->style-name 'error))
     ;(define constant-style-name (fw:scheme:short-sym->style-name 'constant))
@@ -1370,12 +1356,20 @@ If the namespace does not, they are colored the unbound color.
       (fw:color-prefs:build-color-selection-panel parent
                                                   imported-variable-style-pref
                                                   imported-variable-style-name
-                                                  (string-constant cs-imported-variable)))
+                                                  (string-constant cs-imported-variable))
+      (fw:color-prefs:build-color-selection-panel parent
+                                                  set!d-variable-style-pref
+                                                  set!d-variable-style-name
+                                                  (string-constant cs-set!d-variable)))
     
     (fw:color-prefs:register-color-preference lexically-bound-variable-style-pref
                                               lexically-bound-variable-style-name
                                               (make-object color% 81 112 203)
                                               (make-object color% 50 163 255))
+    (fw:color-prefs:register-color-preference set!d-variable-style-pref
+                                              set!d-variable-style-name
+                                              (send the-color-database find-color "firebrick")
+                                              (send the-color-database find-color "pink"))
     (fw:color-prefs:register-color-preference imported-variable-style-pref
                                               imported-variable-style-name
                                               (make-object color% 68 0 203)
@@ -1415,6 +1409,8 @@ If the namespace does not, they are colored the unbound color.
              [tl-high-binders (make-id-set)]
              [tl-low-varrefs (make-id-set)]
              [tl-high-varrefs (make-id-set)]
+             [tl-low-varsets (make-id-set)]
+             [tl-high-varsets (make-id-set)]
              [tl-low-tops (make-id-set)]
              [tl-high-tops (make-id-set)]
              [tl-templrefs (make-id-set)]
@@ -1434,6 +1430,8 @@ If the namespace does not, they are colored the unbound color.
                              [high-binders (make-id-set)]
                              [varrefs (make-id-set)]
                              [high-varrefs (make-id-set)]
+                             [varsets (make-id-set)]
+                             [high-varsets (make-id-set)]
                              [low-tops (make-id-set)]
                              [high-tops (make-id-set)]
                              [templrefs (make-id-set)]
@@ -1443,7 +1441,10 @@ If the namespace does not, they are colored the unbound color.
                              [require-for-labels (make-hash)])
                           (annotate-basic sexp
                                           user-namespace user-directory jump-to-id
-                                          low-binders high-binders varrefs high-varrefs low-tops high-tops
+                                          low-binders high-binders
+                                          varrefs high-varrefs
+                                          varsets high-varsets
+                                          low-tops high-tops
                                           templrefs
                                           requires require-for-syntaxes require-for-templates require-for-labels) 
                          (annotate-variables user-namespace
@@ -1452,6 +1453,8 @@ If the namespace does not, they are colored the unbound color.
                                              high-binders
                                              varrefs
                                              high-varrefs
+                                             varsets
+                                             high-varsets
                                              low-tops
                                              high-tops
                                              templrefs
@@ -1463,7 +1466,8 @@ If the namespace does not, they are colored the unbound color.
                        (annotate-basic sexp
                                        user-namespace user-directory jump-to-id
                                        tl-low-binders tl-high-binders
-                                       tl-low-varrefs tl-high-varrefs 
+                                       tl-low-varrefs tl-high-varrefs
+                                       tl-low-varsets tl-high-varsets
                                        tl-low-tops tl-high-tops
                                        tl-templrefs
                                        tl-requires
@@ -1479,6 +1483,8 @@ If the namespace does not, they are colored the unbound color.
                                       tl-high-binders
                                       tl-low-varrefs
                                       tl-high-varrefs
+                                      tl-low-varsets
+                                      tl-high-varsets
                                       tl-low-tops
                                       tl-high-tops
                                       tl-templrefs
@@ -1496,13 +1502,14 @@ If the namespace does not, they are colored the unbound color.
     ;;                  namespace
     ;;                  string[directory]
     ;;                  syntax[id]
-    ;;                  id-set (six of them)
+    ;;                  id-set (8 of them)
     ;;                  hash-table[require-spec -> syntax] (three of them)
     ;;               -> void
     (define (annotate-basic sexp 
                             user-namespace user-directory jump-to-id
                             low-binders high-binders 
                             low-varrefs high-varrefs 
+                            low-varsets high-varsets
                             low-tops high-tops
                             templrefs
                             requires require-for-syntaxes require-for-templates require-for-labels)
@@ -1524,6 +1531,7 @@ If the namespace does not, they are colored the unbound color.
           
           (let* ([loop (λ (sexp) (level-loop sexp high-level?))]
                  [varrefs (if high-level? high-varrefs low-varrefs)]
+                 [varsets (if high-level? high-varsets low-varsets)]
                  [binders (if high-level? high-binders low-binders)]
                  [tops (if high-level? high-tops low-tops)]
                  [collect-general-info
@@ -1611,6 +1619,7 @@ If the namespace does not, they are colored the unbound color.
                  ;; tops are used here because a binding free use of a set!'d variable
                  ;; is treated just the same as (#%top . x).
                  (when (syntax-original? (syntax var))
+                   (add-id varsets (syntax var))
                    (if (identifier-binding (syntax var) 0)
                        (add-id varrefs (syntax var))
                        (add-id tops (syntax var))))
@@ -1811,6 +1820,8 @@ If the namespace does not, they are colored the unbound color.
                                 high-binders
                                 low-varrefs
                                 high-varrefs
+                                low-varsets
+                                high-varsets
                                 low-tops
                                 high-tops
                                 templrefs
@@ -1852,47 +1863,45 @@ If the namespace does not, they are colored the unbound color.
         (hash-for-each require-for-labels
                        (lambda (k v) (hash-set! unused-require-for-labels k #t)))
         
-        (for-each (λ (vars) 
-                    (for-each (λ (var)
-                                (when (syntax-original? var)
-                                  (color-variable var 0)
-                                  (document-variable var 0)
-                                  (record-renamable-var rename-ht var)))
-                              vars))
-                  (append (get-idss high-binders)
-                          (get-idss low-binders)))
+        (let ([handle-var-bind
+               (λ (var varsets)
+                 (when (syntax-original? var)
+                   (color-variable var 0 varsets)
+                   (document-variable var 0)
+                   (record-renamable-var rename-ht var)))])
+          (for-each (λ (vars) 
+                      (for-each (λ (var) (handle-var-bind var high-varsets)) 
+                                vars))
+                    (get-idss high-binders))
+          (for-each (λ (vars) 
+                      (for-each (λ (var) (handle-var-bind var low-varsets)) 
+                                vars))
+                    (get-idss low-binders)))
         
-        (for-each (λ (vars) (for-each 
-                             (λ (var)
-                               (color-variable var 0)
-                               (document-variable var 0)
-                               (connect-identifier var
-                                                   rename-ht
-                                                   low-binders
-                                                   unused/phases
-                                                   requires/phases
-                                                   0
-                                                   user-namespace 
-                                                   user-directory
-                                                   #t))
-                             vars))
-                  (get-idss low-varrefs))
         
-        (for-each (λ (vars) (for-each 
-                             (λ (var)
-                               (color-variable var 1)
-                               (document-variable var 1)
-                               (connect-identifier var
-                                                   rename-ht
-                                                   high-binders
-                                                   unused/phases
-                                                   requires/phases
-                                                   1
-                                                   user-namespace 
-                                                   user-directory
-                                                   #t))
-                             vars))
-                  (get-idss high-varrefs))
+        (let ([handle-var-ref
+               (λ (var index binders varsets)
+                 (color-variable var index varsets)
+                 (when (syntax-original? var)
+                   (document-variable var index))
+                 (connect-identifier var
+                                     rename-ht
+                                     binders
+                                     unused/phases
+                                     requires/phases
+                                     index
+                                     user-namespace 
+                                     user-directory
+                                     #t))])
+          (for-each (λ (vars) (for-each 
+                               (λ (var) (handle-var-ref var 0 low-binders low-varsets))
+                               vars))
+                    (get-idss low-varrefs))
+          
+          (for-each (λ (vars) (for-each 
+                               (λ (var) (handle-var-ref var 1 high-binders high-varsets))
+                               vars))
+                    (get-idss high-varrefs)))
         
         (for-each (lambda (vars) (for-each
                                   (lambda (var)
@@ -2044,10 +2053,12 @@ If the namespace does not, they are colored the unbound color.
                                                        id 
                                                        (syntax->datum req-stx))
                                 (when id
-                                  (add-jump-to-definition
-                                   var
-                                   source-id
-                                   (get-require-filename source-req-path user-namespace user-directory)))
+                                  (let ([filename (get-require-filename source-req-path user-namespace user-directory)])
+                                    (when filename
+                                      (add-jump-to-definition
+                                       var
+                                       source-id
+                                       filename))))
                                 (add-mouse-over var
                                                 (fw:gui-utils:format-literal-label 
                                                  (string-constant cs-mouse-over-import)
@@ -2113,8 +2124,8 @@ If the namespace does not, they are colored the unbound color.
             (color var error-style-name))
         (connect-identifier var rename-ht binders #f #f 0 user-namespace user-directory #t)))
     
-    ;; color-variable : syntax phase-level -> void
-    (define (color-variable var phase-level)
+    ;; color-variable : syntax phase-level module-identifier-mapping -> void
+    (define (color-variable var phase-level varsets)
       (let* ([b (identifier-binding var phase-level)]
              [lexical? 
               (or (not b)
@@ -2126,6 +2137,8 @@ If the namespace does not, they are colored the unbound color.
                                 (and (not a)
                                      (not b)))))))])
         (cond
+          [(get-ids varsets var)
+           (color var set!d-variable-style-name)]
           [lexical? (color var lexically-bound-variable-style-name)]
           [(pair? b) (color var imported-variable-style-name)])))
     
@@ -2250,21 +2263,22 @@ If the namespace does not, they are colored the unbound color.
                             #f
                             (make-require-open-menu file)))))))))))
     
-    ;; get-require-filename : sexp-or-module-path-index namespace string[directory] -> filename
+    ;; get-require-filename : sexp-or-module-path-index namespace string[directory] -> filename or #f
     ;; finds the filename corresponding to the require in stx
     (define (get-require-filename datum user-namespace user-directory)
       (parameterize ([current-namespace user-namespace]
                      [current-directory user-directory]
                      [current-load-relative-directory user-directory])
-        (with-handlers ([exn:fail? (λ (x) 
-                                     (printf "fail ~s\n" (exn-message x))
-                                     #f)])
-          (cond
-            [(module-path-index? datum)
-             (resolved-module-path-name 
-              (module-path-index-resolve datum))]
-            [else
-             ((current-module-name-resolver) datum #f #f)]))))
+        (let ([ans (with-handlers ([exn:fail? (λ (x) #f)])
+                     (cond
+                       [(module-path-index? datum)
+                        (resolved-module-path-name 
+                         (module-path-index-resolve datum))]
+                       [else
+                        (resolved-module-path-name 
+                         ((current-module-name-resolver) datum #f #f))]))])
+          (and (path? ans)
+               ans))))
     
     ;; make-require-open-menu : path -> menu -> void
     (define (make-require-open-menu file)
@@ -2578,51 +2592,50 @@ If the namespace does not, they are colored the unbound color.
 ;                                                                                             
 
     
-    ;; document-variable : stx phase-level -> void
+    ;; document-variable : stx[identifier,original] phase-level -> void
     (define (document-variable stx phase-level)
-      (when (syntax-original? stx)
-        (let ([defs-text (currently-processing-definitions-text)])
-          (when defs-text
-            (let ([binding-info (identifier-binding stx phase-level)])
-              (when (and (pair? binding-info)
-                         (syntax-position stx)
-                         (syntax-span stx))
-                (let* ([start (- (syntax-position stx) 1)]
-                       [fin (+ start (syntax-span stx))]
-                       [source-editor (find-source-editor stx)]
-                       [xref (get-xref)])
-                  (when (and xref source-editor)
-                    (let ([definition-tag (xref-binding->definition-tag xref binding-info #f)])
-                      (when definition-tag
-                        (let-values ([(path tag) (xref-tag->path+anchor xref definition-tag)])
-                          (when path
-                            (let ([index-entry (xref-tag->index-entry xref definition-tag)])
-                              (when index-entry
-                                (send defs-text syncheck:add-background-color
-                                      source-editor "navajowhite" start fin (syntax-e stx))
-                                (send defs-text syncheck:add-menu
-                                      source-editor
-                                      start 
-                                      fin 
-                                      (syntax-e stx)
-                                      (λ (menu)
-                                        (instantiate menu-item% ()
-                                          (parent menu)
-                                          (label (build-docs-label (entry-desc index-entry)))
-                                          (callback
-                                           (λ (x y)
-                                              (let* ([url (path->url path)]
-                                                     [url2 (if tag
-                                                               (make-url (url-scheme url)
-                                                                         (url-user url)
-                                                                         (url-host url)
-                                                                         (url-port url)
-                                                                         (url-path-absolute? url)
-                                                                         (url-path url)
-                                                                         (url-query url)
-                                                                         tag)
-                                                               url)])
-                                                (send-url (url->string url2))))))))))))))))))))))
+      (let ([defs-text (currently-processing-definitions-text)])
+        (when defs-text
+          (let ([binding-info (identifier-binding stx phase-level)])
+            (when (and (pair? binding-info)
+                       (syntax-position stx)
+                       (syntax-span stx))
+              (let* ([start (- (syntax-position stx) 1)]
+                     [fin (+ start (syntax-span stx))]
+                     [source-editor (find-source-editor stx)]
+                     [xref (get-xref)])
+                (when (and xref source-editor)
+                  (let ([definition-tag (xref-binding->definition-tag xref binding-info #f)])
+                    (when definition-tag
+                      (let-values ([(path tag) (xref-tag->path+anchor xref definition-tag)])
+                        (when path
+                          (let ([index-entry (xref-tag->index-entry xref definition-tag)])
+                            (when index-entry
+                              (send defs-text syncheck:add-background-color
+                                    source-editor "navajowhite" start fin (syntax-e stx))
+                              (send defs-text syncheck:add-menu
+                                    source-editor
+                                    start 
+                                    fin 
+                                    (syntax-e stx)
+                                    (λ (menu)
+                                      (instantiate menu-item% ()
+                                        (parent menu)
+                                        (label (build-docs-label (entry-desc index-entry)))
+                                        (callback
+                                         (λ (x y)
+                                           (let* ([url (path->url path)]
+                                                  [url2 (if tag
+                                                            (make-url (url-scheme url)
+                                                                      (url-user url)
+                                                                      (url-host url)
+                                                                      (url-port url)
+                                                                      (url-path-absolute? url)
+                                                                      (url-path url)
+                                                                      (url-query url)
+                                                                      tag)
+                                                            url)])
+                                             (send-url (url->string url2)))))))))))))))))))))
     
     (define (build-docs-label desc)
       (let ([libs (exported-index-desc-from-libs desc)])

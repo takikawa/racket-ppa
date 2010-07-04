@@ -8,14 +8,15 @@ profile todo:
 
 |#
 
-(require scheme/unit
+(require errortrace/errortrace-key
+         scheme/unit
          scheme/contract
          errortrace/stacktrace
          scheme/class
          scheme/path
-         framework
          scheme/gui/base
          string-constants
+         framework
          framework/private/bday
          "embedded-snip-utils.ss"
          "drsig.ss"
@@ -64,21 +65,15 @@ profile todo:
   ;; for debugging -- be sure to print to here, not the current output port
   (define original-output-port (current-output-port))
   
-  ;; cm-key : symbol
-  ;; the key used to put information on the continuation
-  (define cm-key (gensym 'drscheme-debug-continuation-mark-key))
-  
-  (define (get-cm-key) cm-key)
-  
   ;; cms->srclocs : continuation-marks -> (listof srcloc)
   (define (cms->srclocs cms)
     (map 
-     (λ (x) (make-srcloc (list-ref x 0)
-                         (list-ref x 1)
+     (λ (x) (make-srcloc (list-ref x 1)
                          (list-ref x 2)
                          (list-ref x 3)
-                         (list-ref x 4)))
-     (continuation-mark-set->list cms cm-key)))
+                         (list-ref x 4)
+                         (list-ref x 5)))
+     (continuation-mark-set->list cms errortrace-key)))
   
   ;; error-delta : (instanceof style-delta%)
   (define error-delta (make-object style-delta% 'change-style 'italic))
@@ -103,14 +98,20 @@ profile todo:
       (define/public (set-callback cb) (set! callback cb))
       (define/public (get-callback) callback)
       
+      (define in-bounds? #f)
       (define grabbed? #f)
-      (define clicked? #f)
-      (define mouse-x #f)
-      (define mouse-y #f)
+      
+      (define (set-clicked new-grabbed? new-in-bounds? dc)
+        (let ([needs-invalidate? (not (eq? (and grabbed? in-bounds?)
+                                           (and new-grabbed? new-in-bounds?)))])
+          (set! grabbed? new-grabbed?)
+          (set! in-bounds? new-in-bounds?)
+          (when needs-invalidate?
+            (invalidate dc))))
       
       (define/override (draw dc x y left top right bottom dx dy draw-caret)
         (super draw dc x y left top right bottom dx dy draw-caret)
-        (when clicked?
+        (when (and in-bounds? grabbed?)
           (let ([brush (send dc get-brush)]
                 [pen (send dc get-pen)])
             (let-values ([(w h) (get-w/h dc)])
@@ -121,23 +122,21 @@ profile todo:
               (send dc set-brush brush)))))
       
       (define/override (on-event dc x y editorx editory evt)
-        (cond
-          [(send evt button-down? 'left)
-           (set! grabbed? #t)
-           (set! clicked? #t)
-           (set! mouse-x x)
-           (invalidate dc)]
-          [(send evt leaving?)
-           (set! clicked? #f)
-           (set! mouse-x #f)
-           (set! mouse-y #f)
-           (invalidate dc)]
-          [(send evt button-up? 'left)
-           (when clicked?
-             (callback))
-           (set! grabbed? #f)
-           (set! clicked? #f)
-           (invalidate dc)]))
+        (let-values ([(w h) (get-w/h dc)])
+          (let ([in-bounds? (and (<= (- (send evt get-x) x) w)
+                                 (<= (- (send evt get-y) y) h))])
+            (cond
+              [(send evt button-down? 'left)
+               (set-clicked #t in-bounds? dc)]
+              [(send evt button-up? 'left)
+               (let ([admin (send this get-admin)])
+                 (when admin
+                   (send (send admin get-editor) set-caret-owner #f 'global)))
+               (when (and grabbed? in-bounds?)
+                 (callback))
+               (set-clicked #f in-bounds? dc)]
+              [else
+               (set-clicked grabbed? in-bounds? dc)]))))
       
       (define/private (invalidate dc)
         (let ([admin (get-admin)])
@@ -273,7 +272,14 @@ profile todo:
   
   ;; error-display-handler/stacktrace : string any (listof srcloc) -> void
   ;; =User=
-  (define (error-display-handler/stacktrace msg exn [pre-stack #f])
+  (define (error-display-handler/stacktrace 
+           msg exn 
+           [pre-stack #f]
+           #:interactions-text [ints (drscheme:rep:current-rep)]
+           #:definitions-text [defs (let ([rep (drscheme:rep:current-rep)])
+                                      (and rep
+                                           (send rep get-definitions-text)))])
+                                                                     
     (let* ([stack (or pre-stack
                       (if (exn? exn)
                           (map cdr (filter cdr (continuation-mark-set->context (exn-continuation-marks exn))))
@@ -282,26 +288,50 @@ profile todo:
                          ((exn:srclocs-accessor exn) exn)
                          (if (null? stack)
                              '()
-                             (list (car stack))))])
+                             (list (car stack))))]
+           [stack-editions (map (λ (x) (srcloc->edition/pair defs ints x)) stack)]
+           [src-locs-edition (and (pair? src-locs)
+                                  (srcloc->edition/pair defs ints (car src-locs)))])
       (print-planet-icon-to-stderr exn)
       (unless (null? stack)
-        (print-bug-to-stderr msg stack))
-      (display-srclocs-in-error src-locs)
+        (print-bug-to-stderr msg stack stack-editions defs ints))
+      (display-srclocs-in-error src-locs src-locs-edition)
       (display msg (current-error-port))
       (when (exn:fail:syntax? exn)
-        (show-syntax-error-context (current-error-port) exn))
+        (unless (error-print-source-location)
+          (show-syntax-error-context (current-error-port) exn)))
       (newline (current-error-port))
       (flush-output (current-error-port))
-      (let ([rep (drscheme:rep:current-rep)])
-        (when (and (is-a? rep drscheme:rep:text<%>)
-                   (eq? (current-error-port) 
-                        (send rep get-err-port)))
-          (parameterize ([current-eventspace drscheme:init:system-eventspace])
-            (queue-callback
-             (λ ()
-               ;; need to make sure that the user's eventspace is still the same
-               ;; and still running here?
-               (send rep highlight-errors src-locs stack))))))))
+      (when (and ints
+                 (eq? (current-error-port) 
+                      (send ints get-err-port)))
+        (parameterize ([current-eventspace drscheme:init:system-eventspace])
+          (queue-callback
+           (λ ()
+             ;; need to make sure that the user's eventspace is still the same
+             ;; and still running here?
+             (send ints highlight-errors src-locs stack)))))))
+  
+  (define (srcloc->edition/pair defs ints srcloc)
+    (let ([src (srcloc-source srcloc)])
+      (cond
+        [(and (or (symbol? src)
+                  (path? src))
+              ints
+              (send ints port-name-matches? src))
+         (cons (make-weak-box ints) (send ints get-edition-number))]
+        [(and (or (symbol? src)
+                  (path? src))
+              defs
+              (send defs port-name-matches? src))
+         (cons (make-weak-box defs) (send defs get-edition-number))]
+        [(path? src)
+         (let ([frame (send (group:get-the-frame-group) locate-file src)])
+           (and frame
+                (is-a? frame drscheme:unit:frame<%>)
+                (cons (make-weak-box (send frame get-definitions-text))
+                      (send (send frame get-definitions-text) get-edition-number))))]
+        [else #f])))
   
   ;; =User=
   (define (print-planet-icon-to-stderr exn)
@@ -361,19 +391,19 @@ profile todo:
       (get-output-string sp)))
   
   ;; =User=
-  (define (print-bug-to-stderr msg cms)
+  (define (print-bug-to-stderr msg cms editions defs ints)
     (when (port-writes-special? (current-error-port))
       (let ([note% (if (mf-bday?) mf-note% bug-note%)])
         (when note%
           (let ([note (new note%)])
-            (send note set-callback (λ () (show-backtrace-window msg cms)))
+            (send note set-callback (λ () (show-backtrace-window/edition-pairs msg cms editions defs ints)))
             (write-special note (current-error-port))
             (display #\space (current-error-port)))))))
   
   ;; display-srclocs-in-error : (listof src-loc) -> void
   ;; prints out the src location information for src-to-display
   ;; as it would appear in an error message
-  (define (display-srclocs-in-error srcs-to-display)
+  (define (display-srclocs-in-error srcs-to-display edition-pair)
     (unless (null? srcs-to-display)
       (let ([src-to-display (car srcs-to-display)])
         (let* ([src (srcloc-source src-to-display)]
@@ -386,7 +416,7 @@ profile todo:
                     (when (port-writes-special? (current-error-port))
                       (let ([note (new file-note%)])
                         (send note set-callback 
-                              (λ () (open-and-highlight-in-file srcs-to-display)))
+                              (λ () (open-and-highlight-in-file srcs-to-display edition-pair)))
                         (write-special note (current-error-port))
                         (display #\space (current-error-port))))))]
                [do-src
@@ -493,7 +523,7 @@ profile todo:
   
   ;; with-mark : mark-stx syntax (any? -> syntax) -> syntax
   ;; a member of stacktrace-imports^
-  ;; guarantees that the continuation marks associated with cm-key are
+  ;; guarantees that the continuation marks associated with errortrace-key are
   ;; members of the debug-source type, after unwrapped with st-mark-source
   (define (with-mark src-stx expr)
     (let ([source (cond
@@ -518,10 +548,10 @@ profile todo:
           [column (or (syntax-column src-stx) 0)])
       (if source
           (with-syntax ([expr expr]
-                        [mark (list source line column position span)]
-                        [cm-key cm-key])
+                        [mark (list 'dummy-thing source line column position span)]
+                        [errortrace-key errortrace-key])
             (syntax
-             (with-continuation-mark 'cm-key
+             (with-continuation-mark 'errortrace-key
                'mark
                expr)))
           expr)))
@@ -576,103 +606,108 @@ profile todo:
   ;;                         (listof srcloc?)
   ;;                         -> 
   ;;                         void
-  (define (show-backtrace-window error-text dis/exn)
+  (define (show-backtrace-window error-text dis/exn [rep #f] [defs #f])
     (let ([dis (if (exn? dis/exn)
                    (cms->srclocs (exn-continuation-marks dis/exn))
                    dis/exn)])
-      (reset-backtrace-window)
-      (letrec ([text (make-object (text:wide-snip-mixin text:hide-caret/selection%))]
-               [mf-bday-note (when (mf-bday?)
-                               (instantiate message% ()
-                                 (label (string-constant happy-birthday-matthias))
-                                 (parent (send current-backtrace-window get-area-container))))]
-               [ec (make-object (canvas:color-mixin canvas:wide-snip%)
-                     (send current-backtrace-window get-area-container)
-                     text)]
-               [di-vec (list->vector dis)]
-               [index 0]
-               [how-many-at-once 15]
-               [show-next-dis
-                (λ ()
-                  (let ([start-pos (send text get-start-position)]
-                        [end-pos (send text get-end-position)])
-                    (send text begin-edit-sequence)
-                    (send text set-position (send text last-position))
-                    (let loop ([n index])
-                      (cond
-                        [(and (< n (vector-length di-vec))
-                              (< n (+ index how-many-at-once)))
-                         (show-frame ec text (vector-ref di-vec n))
-                         (loop (+ n 1))]
-                        [else
-                         (set! index n)]))
-                    
-                    ;; add 'more frames' link
-                    (when (< index (vector-length di-vec))
-                      (let ([end-of-current (send text last-position)])
-                        (send text insert #\newline)
-                        (let ([hyper-start (send text last-position)])
-                          (send text insert 
-                                (let* ([num-left
-                                        (- (vector-length di-vec)
-                                           index)]
-                                       [num-to-show
-                                        (min how-many-at-once
-                                             num-left)])
-                                  (if (= num-left 1)
-                                      (string-constant last-stack-frame)
-                                      (format (if (num-left . <= . num-to-show)
-                                                  (string-constant last-stack-frames)
-                                                  (string-constant next-stack-frames))
-                                              num-to-show))))
-                          (let ([hyper-end (send text last-position)])
-                            (send text change-style (gui-utils:get-clickback-delta
-                                                     (preferences:get 'framework:white-on-black?))
-                                  hyper-start hyper-end)
-                            (send text set-clickback
-                                  hyper-start hyper-end
-                                  (λ x
-                                    (send text begin-edit-sequence)
-                                    (send text lock #f)
-                                    (send text delete end-of-current (send text last-position))
-                                    (show-next-dis)
-                                    (send text set-position 
-                                          (send text last-position)
-                                          (send text last-position))
-                                    (send text lock #t)
-                                    (send text end-edit-sequence)))
-                            
-                            (send text insert #\newline)
-                            (send text set-paragraph-alignment (send text last-paragraph) 'center)))))
-                    
-                    (send text set-position start-pos end-pos)
-                    (send text end-edit-sequence)))])
-        (send current-backtrace-window set-alignment 'center 'center)
-        (send current-backtrace-window reflow-container)
-        (send text auto-wrap #t)
-        (send text set-autowrap-bitmap #f)
-        (send text insert error-text)
-        (send text insert "\n\n")
-        (send text change-style error-delta 0 (- (send text last-position) 1))
-        (show-next-dis)
-        (send text set-position 0 0)
-        (send text lock #t)
-        (send text hide-caret #t)
-        (send current-backtrace-window show #t))))
+    (show-backtrace-window/edition-pairs error-text dis (map (λ (x) #f) dis/exn) defs rep)))
+  
+  (define (show-backtrace-window/edition-pairs error-text dis editions defs ints)
+    (reset-backtrace-window)
+    (letrec ([text (make-object (text:wide-snip-mixin text:hide-caret/selection%))]
+             [mf-bday-note (when (mf-bday?)
+                             (instantiate message% ()
+                               (label (string-constant happy-birthday-matthias))
+                               (parent (send current-backtrace-window get-area-container))))]
+             [ec (make-object (canvas:color-mixin canvas:wide-snip%)
+                   (send current-backtrace-window get-area-container)
+                   text)]
+             [di-vec (list->vector dis)]
+             [editions-vec (list->vector editions)]
+             [index 0]
+             [how-many-at-once 15]
+             [show-next-dis
+              (λ ()
+                (let ([start-pos (send text get-start-position)]
+                      [end-pos (send text get-end-position)])
+                  (send text begin-edit-sequence)
+                  (send text set-position (send text last-position))
+                  (let loop ([n index])
+                    (cond
+                      [(and (< n (vector-length di-vec))
+                            (< n (+ index how-many-at-once)))
+                       (show-frame ec text (vector-ref di-vec n) (vector-ref editions-vec n) defs ints)
+                       (loop (+ n 1))]
+                      [else
+                       (set! index n)]))
+                  
+                  ;; add 'more frames' link
+                  (when (< index (vector-length di-vec))
+                    (let ([end-of-current (send text last-position)])
+                      (send text insert #\newline)
+                      (let ([hyper-start (send text last-position)])
+                        (send text insert 
+                              (let* ([num-left
+                                      (- (vector-length di-vec)
+                                         index)]
+                                     [num-to-show
+                                      (min how-many-at-once
+                                           num-left)])
+                                (if (= num-left 1)
+                                    (string-constant last-stack-frame)
+                                    (format (if (num-left . <= . num-to-show)
+                                                (string-constant last-stack-frames)
+                                                (string-constant next-stack-frames))
+                                            num-to-show))))
+                        (let ([hyper-end (send text last-position)])
+                          (send text change-style (gui-utils:get-clickback-delta
+                                                   (preferences:get 'framework:white-on-black?))
+                                hyper-start hyper-end)
+                          (send text set-clickback
+                                hyper-start hyper-end
+                                (λ x
+                                  (send text begin-edit-sequence)
+                                  (send text lock #f)
+                                  (send text delete end-of-current (send text last-position))
+                                  (show-next-dis)
+                                  (send text set-position 
+                                        (send text last-position)
+                                        (send text last-position))
+                                  (send text lock #t)
+                                  (send text end-edit-sequence)))
+                          
+                          (send text insert #\newline)
+                          (send text set-paragraph-alignment (send text last-paragraph) 'center)))))
+                  
+                  (send text set-position start-pos end-pos)
+                  (send text end-edit-sequence)))])
+      (send current-backtrace-window set-alignment 'center 'center)
+      (send current-backtrace-window reflow-container)
+      (send text auto-wrap #t)
+      (send text set-autowrap-bitmap #f)
+      (send text insert error-text)
+      (send text insert "\n\n")
+      (send text change-style error-delta 0 (- (send text last-position) 1))
+      (show-next-dis)
+      (send text set-position 0 0)
+      (send text lock #t)
+      (send text hide-caret #t)
+      (send current-backtrace-window show #t)))
   
   ;; show-frame : (instanceof editor-canvas%)
   ;;              (instanceof text%) 
   ;;              st-mark?
+  ;;              def ints  // definitions and interactions texts
   ;;              -> 
   ;;              void 
   ;; shows one frame of the continuation
-  (define (show-frame editor-canvas text di)
+  (define (show-frame editor-canvas text di edition defs ints)
     (let* ([debug-source (srcloc-source di)]
+           [fn (get-filename debug-source)]
            [line (srcloc-line di)]
            [column (srcloc-column di)]
            [start (srcloc-position di)]
            [span (srcloc-span di)]
-           [fn (get-filename debug-source)]
            [start-pos (send text last-position)])
       
       ;; make hyper link to the file
@@ -685,8 +720,8 @@ profile todo:
               end-pos)
         (send text set-clickback
               start-pos end-pos
-              (λ x
-                (open-and-highlight-in-file (list (make-srcloc debug-source #f #f start span))))))
+              (λ (ed start end)
+                (open-and-highlight-in-file (list di) edition))))
       
       ;; make bindings hier-list
       (let ([bindings (st-mark-bindings di)])
@@ -694,25 +729,23 @@ profile todo:
           (send text insert (render-bindings/snip bindings))))
       (send text insert #\newline)
       
-      (insert-context editor-canvas text debug-source start span)
+      (insert-context editor-canvas text debug-source start span defs ints)
       (send text insert #\newline)))
   
   ;; insert-context : (instanceof editor-canvas%)
   ;;                  (instanceof text%)
   ;;                  debug-info
   ;;                  number
+  ;;                  defs ints // definitions and interactions texts
   ;;                  -> 
   ;;                  void
-  (define (insert-context editor-canvas text file start span)
+  (define (insert-context editor-canvas text file start span defs ints)
     (let-values ([(from-text close-text)
                   (cond
-                    [(symbol? file)
-                     ;; can this case happen?
-                     (let ([text (new text:basic%)])
-                       (if (send text load-file (symbol->string file))
-                           (values text 
-                                   (λ () (send text on-close)))
-                           (values #f (λ () (void)))))]
+                    [(and ints (send ints port-name-matches? file))
+                     (values ints void)]
+                    [(and defs (send defs port-name-matches? file))
+                     (values defs void)]
                     [(path? file)
                      (let ([file (with-handlers ((exn:fail? (λ (x) #f)))
                                    (normal-case-path (normalize-path file)))])
@@ -819,7 +852,7 @@ profile todo:
               untitled))))
   
   ;; open-and-highlight-in-file : (or/c srcloc (listof srcloc)) -> void
-  (define (open-and-highlight-in-file raw-srcloc)
+  (define (open-and-highlight-in-file raw-srcloc [edition-pair #f])
     (let* ([srclocs (if (srcloc? raw-srcloc) (list raw-srcloc) raw-srcloc)]
            [sources (filter values (map srcloc-source srclocs))])
       (unless (null? sources)
@@ -852,6 +885,14 @@ profile todo:
                          (send frame get-interactions-text))])
           (when frame
             (send frame show #t))
+          (when (and edition-pair
+                     (let ([wbv (weak-box-value (car edition-pair))])
+                       (and wbv (eq? editor wbv))))
+            (unless (= (cdr edition-pair) (send editor get-edition-number))
+              (message-box (string-constant drscheme)
+                           (string-constant editor-changed-since-srcloc-recorded)
+                           frame
+                           '(ok caution))))
           (when (and rep editor)
             (when (is-a? editor text:basic<%>)
               (send rep highlight-errors same-src-srclocs '())
@@ -1265,8 +1306,8 @@ profile todo:
     (let ([profile-info (thread-cell-ref current-profile-info)])
       (when profile-info
         (hash-set! profile-info
-                         key 
-                         (make-prof-info #f 0 0 (and (syntax? name) (syntax-e name)) expr))))
+                   key 
+                   (make-prof-info #f 0 0 (and (syntax? name) (syntax-e name)) expr))))
     (void))
   
   ;; register-profile-start : sym -> (union #f number)

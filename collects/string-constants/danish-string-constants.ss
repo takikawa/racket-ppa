@@ -936,7 +936,7 @@ please adhere to these guidelines:
   (initial-language-category "Startsprog")
   (no-language-chosen "Intet sprog valgt")
   
-  (module-language-one-line-summary "En kørsel åbner en REPL i i modulets sammenhæng, inkluderer modulets deklarede sprog")
+  ;(module-language-one-line-summary "En kørsel åbner en REPL i i modulets sammenhæng, inkluderer modulets deklarede sprog")
   
   ;;; from the `not a language language' used initially in drscheme.
   (must-choose-language "DrScheme kan ikke køre programmer før du vælger et programmeringssprog.")
@@ -1124,7 +1124,6 @@ please adhere to these guidelines:
   (stepper-program-has-changed "ADVARSEL: Programmet er ændret.")
   (stepper-program-window-closed "ADVARSEL: Programvinduet er væk.")
   
-  (stepper-home "Hjem")
   (stepper-name "Stepper")
   (stepper-language-level-message
    "Sprogniveauet er sat til \"~a\". Indtil videre virker stepperen kun for sprogniveauerne fra \"~a\" til \"~a\".")
@@ -1133,6 +1132,7 @@ please adhere to these guidelines:
   (stepper-previous "< Step")
   (stepper-next "Step >")
   (stepper-next-application "Funktionskald >|")
+  (stepper-jump-to-beginning "Hjem")
   
   (debug-tool-button-name "Debug")
   

@@ -9,16 +9,21 @@
 
 @title[#:tag "manual" #:style 'toc]{Manual Forms}
 
-@defmodule[scribble/manual]{The @schememodname[scribble/manual]
-library provides all of @schememodname[scribble/basic] plus additional
-functions, including many that are relatively specific to writing PLT
-Scheme documentation.
+@defmodulelang[scribble/manual]{The @schememodname[scribble/manual]
+language provides all of @schememodname[scribble/base] plus many
+additional functions that are specific to writing PLT Scheme
+documentation.
 
-The @schememodname[scribble/manual] name can also be used as a
-language with @hash-lang[]. It acts like the
-@schememodname[scribble/doc] language, except that the
-@schememodname[scribble/manual] library is also required into
-the module.}
+The @schememodname[scribble/manual] name can also be used as a library
+with @scheme[require], in which case it provides all of the same
+bindings, but without setting the reader or setting the default
+rendering format to the PLT Scheme manual format.}
+
+With @hash-lang[], @schememodname[scribble/manual] associates a
+@scheme[latex-defaults] @tech{style property} with its @scheme[doc]
+export to select the default PLT Scheme manual style for Latex
+rendering---unless a style is supplied to @scheme[title] that already
+includes a @scheme[latex-defaults] @tech{style property}.
 
 @local-table-of-contents[]
 
@@ -158,49 +163,54 @@ is an identifier or @scheme[expr] produces a symbol, then it is
 hyperlinked to the module path's definition as created by
 @scheme[defmodule].}
 
-@defproc[(litchar [str string?]) element?]{Typesets @scheme[str] as a
+@defform[(schememodlink datum pre-content-expr ...)]{
+Like @scheme[schememod], but separating the module path to link
+from the content to be linked. The @scheme[datum] module path is always
+linked, even if it is not an identifier.}
+
+@defproc[(litchar [str string?] ...) element?]{Typesets @scheme[str]s as a
 representation of literal text. Use this when you have to talk about
 the individual characters in a stream of text, as as when documenting
 a reader extension.}
 
-@defproc[(verbatim [#:indent indent integer? 0] [str string?] ...)
-         flow-element?]{Typesets @scheme[str]
-as a table/paragraph in typewriter font with the linebreaks specified
-by newline characters in @scheme[str]. ``Here strings'' are often
-useful with @scheme[verbatim].}
-
-@defproc[(schemefont [pre-content any/c] ...) element?]{Typesets
+@defproc[(schemefont [pre-content pre-content?] ...) element?]{Typesets
 @tech{decode}d @scheme[pre-content] as uncolored, unhyperlinked
 Scheme. This procedure is useful for typesetting things like
 @schemefont{#lang}, which are not @scheme[read]able by themselves.}
 
-@defproc[(schemevalfont [pre-content any/c] ...) element?]{Like
+@defproc[(schemevalfont [pre-content pre-content?] ...) element?]{Like
 @scheme[schemefont], but colored as a value.}
 
-@defproc[(schemeresultfont [pre-content any/c] ...) element?]{Like
+@defproc[(schemeresultfont [pre-content pre-content?] ...) element?]{Like
 @scheme[schemefont], but colored as a REPL result.}
 
-@defproc[(schemeidfont [pre-content any/c] ...) element?]{Like
+@defproc[(schemeidfont [pre-content pre-content?] ...) element?]{Like
 @scheme[schemefont], but colored as an identifier.}
 
-@defproc[(schemevarfont [pre-content any/c] ...) element?]{Like
+@defproc[(schemevarfont [pre-content pre-content?] ...) element?]{Like
 @scheme[schemefont], but colored as a variable (i.e., an argument or
 sub-form in a procedure being documented).}
 
-@defproc[(schemekeywordfont [pre-content any/c] ...) element?]{Like
+@defproc[(schemekeywordfont [pre-content pre-content?] ...) element?]{Like
 @scheme[schemefont], but colored as a syntactic form name.}
 
-@defproc[(schemeparenfont [pre-content any/c] ...) element?]{Like
+@defproc[(schemeparenfont [pre-content pre-content?] ...) element?]{Like
 @scheme[schemefont], but colored like parentheses.}
 
-@defproc[(schememetafont [pre-content any/c] ...) element?]{Like
+@defproc[(schememetafont [pre-content pre-content?] ...) element?]{Like
 @scheme[schemefont], but colored as meta-syntax, such as backquote or
 unquote.}
 
-@defproc[(schemeerror [pre-content any/c] ...) element?]{Like
+@defproc[(schemeerror [pre-content pre-content?] ...) element?]{Like
 @scheme[schemefont], but colored as error-message text.}
 
-@defproc[(procedure [pre-content any/c] ...) element?]{Typesets
+@defproc[(schememodfont [pre-content pre-content?] ...) element?]{Like
+@scheme[schemefont], but colored as module name.}
+
+@defproc[(schemeoutput [pre-content pre-content?] ...) element?]{Like
+@scheme[schemefont], but colored as output.}
+
+@defproc[(procedure [pre-content pre-content?] ...) element?]{Typesets
 @tech{decode}d @scheme[pre-content] as a procedure name in a REPL
 result (e.g., in typewriter font with a @litchar{#<procedure:} prefix
 and @litchar{>} suffix.).}
@@ -285,11 +295,15 @@ Hyperlinks created by @scheme[schememodname] are associated with the
 enclosing section, rather than the local @scheme[id] text.}
 
 
-@defform[(defmodulelang id maybe-sources pre-flow ...)]{
+@defform*[[(defmodulelang id maybe-sources pre-flow ...)
+           (defmodulelang content-expr #:module-paths (mod-path ...) 
+                          maybe-sources pre-flow ...)]]{
 
 Like @scheme[defmodule], but documents @scheme[id] as a module path
-suitable for use by either @scheme[require] or @schememodfont{#lang}.}
-
+suitable for use by either @scheme[require] or @hash-lang[].  If the
+module path for @scheme[require] is syntactically different from the
+@hash-lang[] form, use the @scheme[#:module-paths] to provide them
+separately.}
 
 @defform[(defmodulereader id maybe-sources pre-flow ...)]{
 
@@ -299,7 +313,9 @@ suitable for use with @schememetafont{#reader}.}
 
 @deftogether[(
 @defform[(defmodule* maybe-req  (id ...+) maybe-sources pre-flow ...)]
-@defform[(defmodulelang* (id ...+) maybe-sources pre-flow ...)]
+@defform*[[(defmodulelang* (id ...+) maybe-sources pre-flow ...)
+           (defmodulelang* (content-expr ...+) #:module-paths (mod-path ...+) 
+                           maybe-sources pre-flow ...)]]
 @defform[(defmodulereader* (id ...+) maybe-sources pre-flow ...)]
 )]{
 
@@ -308,7 +324,9 @@ of just one.}
 
 @deftogether[(
 @defform[(defmodule*/no-declare maybe-req (id ...) pre-flow ...)]
-@defform[(defmodulelang*/no-declare (id ...) pre-flow ...)]
+@defform*[[(defmodulelang*/no-declare (id ...) pre-flow ...)
+           (defmodulelang*/no-declare (content-expr ...) 
+                                      #:module-paths (mod-path ...+) pre-flow ...)]]
 @defform[(defmodulereader*/no-declare (id ...) pre-flow ...)]
 )]{
 
@@ -633,9 +651,9 @@ Like @scheme[schemegrammar], but for typesetting multiple productions
 at once, aligned around the @litchar{=} and @litchar{|}.}
 
 @defproc[(defidentifier [id identifier?]
-                        [#:form? form? any/c #f]
-                        [#:index? index? any/c #t]
-                        [#:show-libs? show-libs? any/c #t])
+                        [#:form? form? boolean? #f]
+                        [#:index? index? boolean? #t]
+                        [#:show-libs? show-libs? boolean? #t])
          element?]{
 
 Typesets @scheme[id] as a Scheme identifier, and also establishes the
@@ -805,7 +823,7 @@ Like @scheme[defsignature], but the @tech{decode}d @scheme[pre-flow]s
 are not typeset under the signature declaration, and new sections,
 @|etc| can be started in the @scheme[pre-flow]s.}
 
-@defproc[(signature-desc [pre-flow any/c] ...) any/c]{
+@defproc[(signature-desc [pre-flow pre-flow?] ...) any/c]{
 
 Produces an opaque value that @scheme[defsignature] recognizes to
 outdent in the typeset form. This is useful for text describing the
@@ -819,147 +837,76 @@ as a member of the signature named by @scheme[sig-id].}
 @; ------------------------------------------------------------------------
 @section[#:tag "doc-strings"]{Various String Forms}
 
-@defproc[(emph [pre-content any/c] ...) element?]{Typesets the
-@tech{decode}d @scheme[pre-content] with emphasis (e.g., in italic).}
+@defproc[(aux-elem [pre-content pre-content?] ...) element?]{
+Like @scheme[elem], but adds an @scheme['aux] @tech{style property}.}
 
-@defproc[(defterm [pre-content any/c] ...) element?]{Typesets the
+@defproc[(defterm [pre-content pre-content?] ...) element?]{Typesets the
 @tech{decode}d @scheme[pre-content] as a defined term (e.g., in
 italic). Consider using @scheme[deftech] instead, though, so that uses
 of @scheme[tech] can hyper-link to the definition.}
 
-@defproc[(onscreen [pre-content any/c] ...) element?]{ Typesets the
+@defproc[(onscreen [pre-content pre-content?] ...) element?]{ Typesets the
 @tech{decode}d @scheme[pre-content] as a string that appears in a GUI,
 such as the name of a button.}
 
 @defproc[(menuitem [menu-name string?] [item-name string?]) element?]{
 Typesets the given combination of a GUI's menu and item name.}
 
-@defproc[(filepath [pre-content any/c] ...) element?]{Typesets the
+@defproc[(filepath [pre-content pre-content?] ...) element?]{Typesets the
 @tech{decode}d @scheme[pre-content] as a file name (e.g., in
 typewriter font and in in quotes).}
 
-@defproc[(exec [pre-content any/c] ...) element?]{Typesets the
+@defproc[(exec [pre-content pre-content?] ...) element?]{Typesets the
 @tech{decode}d @scheme[pre-content] as a command line (e.g., in
 typewriter font).}
 
-@defproc[(envvar [pre-content any/c] ...) element?]{Typesets the given
+@defproc[(envvar [pre-content pre-content?] ...) element?]{Typesets the given
 @tech{decode}d @scheme[pre-content] as an environment variable (e.g.,
 in typewriter font).}
 
-@defproc[(Flag [pre-content any/c] ...) element?]{Typesets the given
+@defproc[(Flag [pre-content pre-content?] ...) element?]{Typesets the given
 @tech{decode}d @scheme[pre-content] as a flag (e.g., in typewriter
 font with a leading @litchar{-}).}
 
-@defproc[(DFlag [pre-content any/c] ...) element?]{Typesets the given
+@defproc[(DFlag [pre-content pre-content?] ...) element?]{Typesets the given
 @tech{decode}d @scheme[pre-content] a long flag (e.g., in typewriter
 font with two leading @litchar{-}s).}
 
-@defproc[(PFlag [pre-content any/c] ...) element?]{Typesets the given
+@defproc[(PFlag [pre-content pre-content?] ...) element?]{Typesets the given
 @tech{decode}d @scheme[pre-content] as a @litchar{+} flag (e.g., in typewriter
 font with a leading @litchar{+}).}
 
-@defproc[(DPFlag [pre-content any/c] ...) element?]{Typesets the given
+@defproc[(DPFlag [pre-content pre-content?] ...) element?]{Typesets the given
 @tech{decode}d @scheme[pre-content] a long @litchar{+} flag (e.g., in
 typewriter font with two leading @litchar{+}s).}
-
-@defproc[(math [pre-content any/c] ...) element?]{The @tech{decode}d
-@scheme[pre-content] is further transformed:
-
- @itemize[
-
-  @item{Any immediate @scheme['rsquo] is converted to @scheme['prime].}
-
-  @item{Parentheses and sequences of decimal digits in immediate
-        strings are left as-is, but any other immediate string is
-        italicized.}
- ]
-
-Extensions to @scheme[math] are likely, such as recognizing @litchar{_}
-and @litchar{^} for subscripts and superscripts.}
 
 @; ------------------------------------------------------------------------
 @section[#:tag "section-links"]{Links}
 
-@defproc[(secref [tag string?]
-                 [#:doc module-path (or/c module-path? false/c) #f]
-                 [#:tag-prefixes prefixes (or/c (listof string?) false/c) #f]
-                 [#:underline? underline? any/c #t])
+See also @secref["base-links"].
+
+@defform[(schemelink id pre-content ...)
+         #:contracts ([id identifier?]
+                      [pre-content pre-content?])]{
+
+An element where the @tech{decode}d @scheme[pre-content] is hyperlinked to the definition
+of @scheme[id].}
+
+@defproc[(link [url string?] [pre-content any/c] ...
+                [#:underline? underline? any/c #t]
+                [#:style style (or/c style? string? symbol? #f) (if underline? #f "plainlink")]) 
          element?]{
 
-Inserts the hyperlinked title of the section tagged @scheme[tag], but
-@schemeidfont{aux-element} items in the title content are omitted in the
-hyperlink label.
-
-If @scheme[#:doc module-path] is provided, the @scheme[tag] refers to
-a tag with a prefix determined by @scheme[module-path]. When
-@exec{setup-plt} renders documentation, it automatically adds a tag
-prefix to the document based on the source module. Thus, for example,
-to refer to a section of the PLT Scheme reference,
-@scheme[module-path] would be @scheme['(lib
-"scribblings/reference/reference.scrbl")].
-
-The @scheme[#:tag-prefixes prefixes] argument similarly supports
-selecting a particular section as determined by a path of tag
-prefixes. When a @scheme[#:doc] argument is provided, then
-@scheme[prefixes] should trace a path of tag-prefixed subsections to
-reach the @scheme[tag] section. When @scheme[#:doc] is not provided,
-the @scheme[prefixes] path is relative to any enclosing section (i.e.,
-the youngest ancestor that produces a match).
-
-If @scheme[underline?] is @scheme[#f], then the hyperlink is rendered
-in HTML without an underline.}
-
-
-@defproc[(seclink [tag string?] 
-                  [#:doc module-path (or/c module-path? false/c) #f]
-                  [#:tag-prefixes prefixes (or/c (listof string?) false/c) #f]
-                  [#:underline? underline? any/c #t]
-                  [pre-content any/c] ...) element?]{
-
-Like @scheme[secref], but the link label is the @tech{decode}d
-@scheme[pre-content] instead of the target section's name.}
+An alias of @scheme[hyperlink] for backward compatibility.}
 
 @defproc[(other-manual [module-path module-path?]
                        [#:underline? underline? any/c #t])
          element?]{
 
-Like @scheme[secref] for the document's implicit @scheme["top"]
-tag. Use this function to refer to a whole manual instead of
-@scheme[secref], in case a special style in the future is used for
-manual titles.}
+An alias of @scheme[other-doc] for backward compatibility.}
 
-
-@defproc[(schemelink [id symbol?] [pre-content any/c] ...) element?]{
-
-The @tech{decode}d @scheme[pre-content] is hyperlinked to the definition
-of @scheme[id].}
-
-
-@defproc[(link [url string?] [pre-content any/c] ...
-               [#:underline? underline? any/c #t]
-               [#:style style any/c (if underline? #f "plainlink")]) 
-         element?]{
-
-The @tech{decode}d @scheme[pre-content] is hyperlinked to
-@scheme[url].  If @scheme[style] is not supplied, then
-@scheme[underline?] determines how the link is rendered.}
-
-
-@defproc[(elemtag [t tag?] [pre-content any/c] ...) element?]{
-
-The tag @scheme[t] refers to the content form of
-@scheme[pre-content].}
-
-
-@defproc[(elemref [t tag?] [pre-content any/c] ... 
-                  [#:underline? underline? any/c #t]) element?]{
-
-The @tech{decode}d @scheme[pre-content] is hyperlinked to @scheme[t],
-which is normally defined using @scheme[elemtag].}
-
-
-@defproc[(deftech [pre-content any/c] ...
-                  [#:style? style? any/c #t]) element?]{
+@defproc[(deftech [pre-content pre-content?] ...
+                  [#:style? style? boolean? #t]) element?]{
 
 Produces an element for the @tech{decode}d @scheme[pre-content], and
 also defines a term that can be referenced elsewhere using
@@ -987,7 +934,7 @@ that differ slightly from a defined form. For example, a definition of
 If @scheme[style?] is true, then @scheme[defterm] is used on
 @scheme[pre-content].}
 
-@defproc[(tech [pre-content any/c] ...
+@defproc[(tech [pre-content pre-content?] ...
                [#:doc module-path (or/c module-path? false/c) #f]
                [#:tag-prefixes prefixes (or/c (listof string?) false/c) #f])
          element?]{
@@ -1010,7 +957,7 @@ normalization performed on the term. For example, if ``bind'' is
 defined, but a sentence uses the term ``binding,'' the latter can be
 linked to the former using @schemefont["@tech{bind}ing"].}
 
-@defproc[(techlink [pre-content any/c] ...
+@defproc[(techlink [pre-content pre-content?] ...
                    [#:doc module-path (or/c module-path? false/c) #f]
                    [#:tag-prefixes prefixes (or/c (listof string?) false/c) #f]) 
          element?]{
@@ -1021,6 +968,8 @@ the link.}
 
 @; ------------------------------------------------------------------------
 @section[#:tag "manual-indexing"]{Indexing}
+
+See also @secref["base-indexing"].
 
 @defform[(indexed-scheme datum ...)]{
 
@@ -1038,54 +987,39 @@ following special cases when a single @scheme[datum] is provided:
 
 ]}
 
-@defproc[(idefterm [pre-content any/c] ...) element?]{Combines
+@defproc[(idefterm [pre-content pre-content?] ...) element?]{Combines
 @scheme[as-index] and @scheme[defterm]. The content normally should be
 plural, rather than singular. Consider using @scheme[deftech],
 instead, which always indexes.}
 
-@defproc[(pidefterm [pre-content any/c] ...) element?]{Like
+@defproc[(pidefterm [pre-content pre-content?] ...) element?]{Like
 @scheme[idefterm], but plural: adds an ``s'' on the end of the content
 for the index entry. Consider using @scheme[deftech], instead.}
 
-@defproc[(indexed-file [pre-content any/c] ...) element?]{A
+@defproc[(indexed-file [pre-content pre-content?] ...) element?]{A
 combination of @scheme[file] and @scheme[as-index], but where the sort
 key for the index iterm does not include quotes.}
 
-@defproc[(indexed-envvar [pre-content any/c] ...) element?]{A
+@defproc[(indexed-envvar [pre-content pre-content?] ...) element?]{A
 combination of @scheme[envvar] and @scheme[as-index].}
 
 @; ------------------------------------------------------------------------
-@section{Images}
-
-@defproc[(image [filename-relative-to-source string?]
-                [pre-element any/c] ...)
-         flow-element?]{
- Creates a centered image from the given relative source path. The
- @tech{decode}d @scheme[pre-content] serves as the alternate text for
- contexts where the image cannot be displayed.
-
- The path is relative to the current directory, which is set by
- @exec{setup-plt} and @exec{scribble} to the directory of the main
- document file.
-
- When generating Latex output, if the filename has a @filepath{.gif}
- suffix, then the suffix is changed to @filepath{.png} (so a PNG file
- must exist in addition to the GIF file).}
+@section[#:tag "manual-images"]{Images}
 
 @defproc[(image/plain [filename-relative-to-source string?]
                       [pre-element any/c] ...)
          element?]{
- Like @scheme[image], but the result is an element to appear inline in
- a paragraph.}
+
+ An alias for @scheme[image] for backward compatibility.}
 
 @; ------------------------------------------------------------------------
 @section{Bibliography}
 
 @margin-note{See also @schememodname[scriblib/autobib].}
 
-@defproc[(cite [key string?]) element?]{
+@defproc[(cite [key string?] ...+) element?]{
 
-Links to a bibliography entry, using @scheme[key] both to indicate the
+Links to a bibliography entry, using the @scheme[key]s both to indicate the
 bibliography entry and, in square brackets, as the link text.}
 
 @defproc[(bibliography [#:tag tag string? "doc-bibliography"]
@@ -1097,12 +1031,12 @@ which is created with @scheme[bib-entry]. The entries are typeset in
 order as given.}
 
 @defproc[(bib-entry [#:key key string?]
-                    [#:title title any/c]
-                    [#:is-book? is-book? any/c #f]
-                    [#:author author any/c #f]
-                    [#:location location any/c #f]
-                    [#:date date any/c #f] 
-                    [#:url url any/c #f])
+                    [#:title title (or/c false/c pre-content?)]
+                    [#:is-book? is-book? boolean? #f]
+                    [#:author author (or/c false/c pre-content?) #f]
+                    [#:location location (or/c false/c pre-content?) #f]
+                    [#:date date (or/c false/c pre-content?) #f] 
+                    [#:url url (or/c false/c pre-content?) #f])
          bib-entry?]{
 
 Creates a bibliography entry. The @scheme[key] is used to refer to the
@@ -1147,10 +1081,10 @@ Returns @scheme[#t] if @scheme[v] is a bibliography entry created by
 @; ------------------------------------------------------------------------
 @section{Miscellaneous}
 
-@defproc[(t [pre-content any/c] ...) paragraph?]{Wraps the
+@defproc[(t [pre-content pre-content?] ...) paragraph?]{Wraps the
 @tech{decode}d @scheme[pre-content] as a paragraph.}
 
-@defthing[PLaneT string?]{@scheme["PLaneT"] (to help make sure you get
+@defthing[PLaneT element?]{@scheme["PLaneT"] (to help make sure you get
 the letters in the right case).}
 
 @defproc[(hash-lang) element?]{Returns an element for @hash-lang[]
@@ -1160,15 +1094,31 @@ that is hyperlinked to an explanation.}
 
 @defthing[undefined-const element?]{Returns an element for @|undefined-const|.}
 
-@defproc[(centerline [pre-flow any/c] ...) table?]{Produces a
-centered table with the @scheme[pre-flow] parsed by
-@scheme[decode-flow].}
-
-@defproc[(commandline [pre-content any/c] ...) paragraph?]{Produces
+@defproc[(commandline [pre-content pre-content?] ...) paragraph?]{Produces
 an inset command-line example (e.g., in typewriter font).}
 
-@defproc[(margin-note [pre-content any/c] ...) blockquote?]{Produces
-a @tech{blockquote} to be typeset in the margin instead of inlined.}
+@defproc[(centerline [pre-flow pre-flow?] ...) nested-flow?]{
+
+An alias for @scheme[centered] for backward compatibility.}
+
+@defproc[(math [pre-content any/c] ...) element?]{The @tech{decode}d
+@scheme[pre-content] is further transformed:
+
+ @itemize[
+
+  @item{Any immediate @scheme['rsquo] is converted to @scheme['prime].}
+
+  @item{Parentheses and sequences of decimal digits in immediate
+        strings are left as-is, but any other immediate string is
+        italicized.}
+
+  @item{When @litchar{_} appears before a non-empty sequence of numbers
+        and letters, the sequence is typeset as a subscript.}
+
+  @item{When @litchar{^} appears before a non-empty sequence of numbers
+        and letters, the sequence is typeset as a superscript.}
+
+ ]}
 
 @; ------------------------------------------------------------------------
 @section[#:tag "index-entries"]{Index-Entry Descriptions}

@@ -1,6 +1,5 @@
-
 #lang scheme/base
-(require macro-debugger/util/class-iop
+(require unstable/class-iop
          (prefix-in sb: "../syntax-browser/interfaces.ss"))
 (provide (all-defined-out))
 
@@ -15,7 +14,6 @@
                       one-by-one?
                       extra-navigation?
                       debug-catch-errors?
-                      force-letrec-transformation?
                       split-context?)))
 
 (define-interface widget<%> ()

@@ -183,21 +183,45 @@ namespace.
     (check-last 'append (cons a (cons b x)))
     (apply append a b x)))
 
+(define-teach intermediate append
+  (lambda x
+    (if (null? x)
+        null
+        (begin
+          (check-last 'append x)
+          (apply append x)))))
+
 (define-teach beginner error
-  (lambda (sym str)
-    (unless (and (symbol? sym)
-                 (string? str))
+  (lambda stuff0
+    (define-values (f stuff1)
+      (if (and (cons? stuff0) (symbol? (first stuff0)))
+          (values (first stuff0) (rest stuff0))
+          (values false stuff0)))
+    (define str
+      (let loop ([stuff stuff1][frmt ""][pieces '()])
+        (cond
+          [(empty? stuff) (apply format frmt (reverse pieces))]
+          [else 
+           (let ([f (first stuff)]
+                 [r (rest stuff)])
+             (if (string? f)
+                 (loop r (string-append frmt f) pieces)
+                 (loop r (string-append frmt "~e") (cons f pieces))))])))
+    (if f (error f str) (error str)))
+  #;
+  (lambda (str)
+    (unless (string? str)
       (raise
        (make-exn:fail:contract
-        (format "error: expected a symbol and a string, got ~e and ~e"
-                sym str)
+        (format "error: expected a string, got ~e and ~e" str)
         (current-continuation-marks))))
-    (error sym "~a" str)))
+    (error str)))
 
 (define-teach beginner struct?
   (lambda (x)
     (not (or (number? x)
              (boolean? x)
+             (empty? x)
              (pair? x)
              (symbol? x)
              (string? x)
@@ -342,6 +366,7 @@ namespace.
  beginner-cons
  beginner-list*
  beginner-append
+ intermediate-append
  beginner-error
  beginner-struct?
  beginner-exit

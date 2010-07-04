@@ -9,7 +9,7 @@
          scheme/list
          mzlib/trace
          scheme/contract
-         (for-syntax scheme/base stxclass))
+         (for-syntax scheme/base syntax/parse))
 
 (provide fv fv/list
          substitute
@@ -31,7 +31,8 @@
          tc-error/expr
          lookup-fail
          lookup-type-fail
-         combine-results)
+         combine-results
+         current-poly-struct)
 
 
 ;; substitute : Type Name Type -> Type
@@ -168,7 +169,7 @@
 
 
 ;; this structure represents the result of typechecking an expression
-(d-s/c tc-result ([t Type/c] [f FilterSet?] [o Object?]) #:transparent)
+(d-s/c tc-result ([t Type/c] [f FilterSet/c] [o Object?]) #:transparent)
 (d-s/c tc-results ([ts (listof tc-result?)] [drest (or/c (cons/c Type/c symbol?) #f)]) #:transparent)
 
 (define-match-expander tc-result:
@@ -178,9 +179,12 @@
 
 (define-match-expander tc-results:
   (syntax-parser
-   [(_ tp fp op) #'(struct tc-results ((list (struct tc-result (tp fp op)) (... ...)) #f))]
-   [(_ tp fp op dty dbound) #'(struct tc-results ((list (struct tc-result (tp fp op)) (... ...)) (cons dty dbound)))]
-   [(_ tp) #'(struct tc-results ((list (struct tc-result (tp _ _)) (... ...)) #f))]))
+   [(_ tp fp op)
+    #'(struct tc-results ((list (struct tc-result (tp fp op)) (... ...)) #f))]
+   [(_ tp fp op dty dbound) 
+    #'(struct tc-results ((list (struct tc-result (tp fp op)) (... ...)) (cons dty dbound)))]
+   [(_ tp)
+    #'(struct tc-results ((list (struct tc-result (tp _ _)) (... ...)) #f))]))
 
 (define-match-expander tc-result1:
   (syntax-parser
@@ -209,7 +213,7 @@
                 (let ([mk (lambda (t) (make-FilterSet null null))])
                   (make-tc-results
                    (cond [(Type? t)
-                          (list (make-tc-result t (mk t) (make-Empty)))]                       
+                          (list (make-tc-result t (mk t) (make-Empty)))]
                          [else
                           (for/list ([i t])
                             (make-tc-result i (mk t) (make-Empty)))])
@@ -236,12 +240,14 @@
                      (list (make-tc-result t f o)))
                  (cons dty dbound))]))
 
+;(trace ret)
+
 (p/c
  [ret    
   (->d ([t (or/c Type/c (listof Type/c))])
        ([f (if (list? t)
-               (listof (or/c FilterSet? NoFilter?))
-               FilterSet?)]
+               (listof FilterSet/c)
+               FilterSet/c)]
         [o (if (list? t)
                (listof Object?)
                Object?)]
@@ -300,3 +306,7 @@
 
 (define (lookup-type-fail i)
   (tc-error/expr "~a is not bound as a type" (syntax-e i)))
+
+;; a parameter for the current polymorphic structure being defined
+;; to allow us to prevent non-regular datatypes
+(define current-poly-struct (make-parameter #f))

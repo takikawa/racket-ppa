@@ -1,4 +1,5 @@
-#include "../src/schpriv.h"
+#ifndef GC2_OBJHEAD_H
+#define GC2_OBJHEAD_H
 
 #if defined(MZ_PRECISE_GC) && !defined(USE_COMPACT_3M_GC)
 
@@ -8,9 +9,6 @@
 # define LOG_APAGE_SIZE 14
 #endif
 typedef struct objhead {
-# ifdef MZ_USE_PLACES
-  unsigned long owner;
-#endif
   unsigned long hash      : ((8 * sizeof(unsigned long)) - (4+3+LOG_APAGE_SIZE) );
   /* the type and size of the object */
   unsigned long type      : 3;
@@ -32,5 +30,7 @@ XFORM_NONGCING extern int GC_is_allocated(void *p);
 
 #define OBJHEAD_HAS_HASH_BITS
 #define OBJHEAD_HASH_BITS(p) (OBJPTR_TO_OBJHEAD(p)->hash)
+
+#endif
 
 #endif
