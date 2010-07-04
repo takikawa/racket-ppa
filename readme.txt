@@ -1,4 +1,4 @@
-This is the PLT Scheme v4.1.1 source package directory for Unix.
+This is the PLT Scheme v4.1.2 source package directory for Unix.
 
 You must compile MzScheme and MrEd before using the PLT Scheme software
 (including DrScheme).

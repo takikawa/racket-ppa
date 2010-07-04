@@ -3698,6 +3698,13 @@
                         f))])
         ((((contract ctc f 'pos 'neg) 1) 2) 3))))
   
+  (test/spec-passed
+   'recursive-contract5
+   '(contract (recursive-contract #f)
+              #f
+              'pos
+              'neg))
+  
   
 
 ;                                                       
@@ -4510,6 +4517,9 @@ so that propagation occurs.
                             (define-struct s (a b))
                             (struct/c s any/c any/c)))
   
+  (ctest #t contract? 1)
+  (ctest #t contract? (-> 1 1))
+  
   (test-flat-contract '(and/c number? integer?) 1 3/2)
 
   (test-flat-contract '(not/c integer?) #t 1)
@@ -4524,6 +4534,7 @@ so that propagation occurs.
   (test-flat-contract '(real-in 1 10) 3/2 20)
   (test-flat-contract '(string-len/c 3) "ab" "abc")
   (test-flat-contract 'natural-number/c 5 -1)
+  (test-flat-contract 'natural-number/c #e3 #i3.0)
   (test-flat-contract 'false/c #f #t)
   
   (test-flat-contract #t #t "x")
@@ -4540,6 +4551,7 @@ so that propagation occurs.
   (test-flat-contract #rx#".x." #"axq" #"x")
   (test-flat-contract #rx".x." #"axq" #"x")
   (test-flat-contract #rx#".x." "axq" "x")
+  (test-flat-contract ''() '() #f)
   
   (test/spec-passed 'any/c '(contract any/c 1 'pos 'neg))
   (test-flat-contract 'printable/c (vector (cons 1 (box #f))) (lambda (x) x))

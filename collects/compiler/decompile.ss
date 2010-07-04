@@ -75,7 +75,9 @@
                 (if (null? stx-ids) null '(#%stx-array))
                 lift-ids)
                (map (lambda (stx id)
-                      `(define ,id (#%decode-syntax ,(stx-encoded stx))))
+                      `(define ,id ,(if stx
+                                        `(#%decode-syntax ,(stx-encoded stx))
+                                        #f)))
                     stxs stx-ids)))]
     [else (error 'decompile-prefix "huh?: ~e" a-prefix)]))
 
@@ -266,6 +268,7 @@
 
 (define (decompile-lam expr globs stack)
   (match expr
+    [(struct closure (lam gen-id)) (decompile-lam lam globs stack)]
     [(struct lam (name flags num-params rest? closure-map max-let-depth body))
      (let ([vars (for/list ([i (in-range num-params)]) 
                    (gensym (format "arg~a-" i)))]
@@ -303,7 +306,8 @@
                                       + - * / min max bitwise-and bitwise-ior
                                       arithmetic-shift vector-ref string-ref bytes-ref
                                       set-mcar! set-mcdr! cons mcons))]
-             [(4) (memq (car a) '(vector-set! string-set! bytes-set!))]))
+             [(4) (memq (car a) '(vector-set! string-set! bytes-set!))]
+             [else #f]))
       (cons '#%in a)
       a))
 
