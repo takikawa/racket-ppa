@@ -312,7 +312,7 @@ TODO
   (define drs-bindings-keymap-mixin
     (mixin (editor:keymap<%>) (editor:keymap<%>)
       (define/override (get-keymaps)
-        (cons drs-bindings-keymap (super get-keymaps)))
+        (editor:add-after-user-keymap drs-bindings-keymap (super get-keymaps)))
       (super-instantiate ())))
   
   ;; Max length of output queue (user's thread blocks if the
@@ -847,9 +847,9 @@ TODO
           (reset-highlighting))
         (inner (void) after-delete x y))
       
-      (define/override get-keymaps
-        (λ ()
-          (cons scheme-interaction-mode-keymap (super get-keymaps))))
+      (define/override (get-keymaps)
+        (editor:add-after-user-keymap scheme-interaction-mode-keymap
+                                      (super get-keymaps)))
       
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;;                                            ;;;
@@ -1291,6 +1291,10 @@ TODO
                  (update-running #f)
                  (send context set-breakables #f #f)
                  
+                 ;; set this relatively late, so that the 
+                 ;; setup code for the language doesn't use it
+                 ;(current-load/use-compiled drscheme-load/use-compiled-handler)
+                 
                  ;; after this returns, future event dispatches
                  ;; will use the user's break parameterization
                  (initialize-dispatch-handler)
@@ -1695,6 +1699,70 @@ TODO
   
   (define input-delta (make-object style-delta%))
   (send input-delta set-delta-foreground (make-object color% 0 150 0))
+
+  (define drscheme-load/use-compiled-handler
+    (let ([ol (current-load/use-compiled)])
+      (λ (path mod) ;; =User=
+        (verify-file-saved path)
+        (cond
+          [(already-a-compiled-file? path)
+           (ol path mod)]
+          [else
+           (error 'drscheme-load/use-compiled-handler
+                  "time to compile! ~s" path)]))))
+  
+  ;; =User=
+  (define (verify-file-saved path) 
+    (parameterize ([current-eventspace drscheme:init:system-eventspace])
+      (let ([s (make-semaphore 0)])
+        (queue-callback
+         (λ () ;; =Kernel= =Handler=
+           (let ([frame (send (group:get-the-frame-group) locate-file path)])
+             (when frame
+               (send frame offer-to-save-file path)))
+           (semaphore-post s)))
+        (semaphore-wait s))))
+    
+  ;; =User=
+  (define (already-a-compiled-file? path) 
+    (let* ([filename (file-name-from-path path)]
+           [base (path-only path)]
+           [extension (and filename base (filename-extension filename))]
+           [basename (and extension
+                          (let ([pbs (path->bytes filename)])
+                            (subbytes pbs
+                                      0 
+                                      (- (bytes-length pbs)
+                                         (bytes-length extension)
+                                         1 ;; extra one for '.' in there
+                                         ))))]
+           [fm (file-or-directory-modify-seconds path)]
+           [newer-exists?
+            (λ (pot-path)
+              (and (file-exists? pot-path)
+                   (< fm (file-or-directory-modify-seconds pot-path))))])
+      (and basename
+           (ormap 
+            (λ (c-f-p)
+              (or (newer-exists? (build-path base c-f-p 
+                                             (bytes->path
+                                              (bytes-append basename #"_" extension #".zo"))))
+                  (ormap
+                   (λ (ext)
+                     (newer-exists? (build-path base 
+                                                c-f-p 
+                                                "native"
+                                                (system-library-subpath)
+                                                (bytes->path
+                                                 (bytes-append basename #"_" extension ext)))))
+                   '(#".so" #".dll" #".dylib"))))
+            (use-compiled-file-paths)))))
+  
+  (define (path->cache-zo-file-path path)
+    (apply build-path 
+           
+           (cdr (explode-path path))))
+  
   
   ;; insert-error-in-text : (is-a?/c text%)
   ;;                        (union #f (is-a?/c drscheme:rep:text<%>))
@@ -1854,4 +1922,5 @@ TODO
              (drs-autocomplete-mixin 
               (λ (txt) (send txt get-definitions-text))
               (text:foreground-color-mixin
-               text:clever-file-format%)))))))))))))
+               (text:normalize-paste-mixin
+                text:clever-file-format%))))))))))))))

@@ -11,9 +11,12 @@ configuring the @web-server .
 
 @; ------------------------------------------------------------
 @section[#:tag "configuration-table-structs.ss"]{Configuration Table Structure}
-@(require (for-label web-server/configuration/configuration-table-structs))
+@(require (for-label web-server/configuration/configuration-table-structs
+                     web-server/http
+                     net/url
+                     web-server/private/util))
 
-@defmodule[web-server/configuration/configuration-table-structs]
+@defmodule[web-server/configuration/configuration-table-structs]{
 
 @filepath{configuration/configuration-table-structs.ss} provides the following structures that
 represent a standard configuration (see @secref["web-server-unit.ss"]) of the @web-server .
@@ -79,11 +82,14 @@ the configuration table S-expression file format described in
             [mime-types (or/c false/c path-string?)]
             [passwords (or/c false/c path-string?)])]
 
+}
+
 @; ------------------------------------------------------------
 @section[#:tag "configuration-table.ss"]{Configuration Table}
 @(require (for-label web-server/configuration/configuration-table))
+@(require (for-label web-server/dispatchers/dispatch-log))
 
-@defmodule[web-server/configuration/configuration-table]
+@defmodule[web-server/configuration/configuration-table]{
 
 @filepath{configuration/configuration-table.ss} provides functions for
 reading, writing, parsing, and printing @scheme[configuration-table]
@@ -91,13 +97,17 @@ structures.
 
 @defthing[default-configuration-table-path path?]{The default configuration table S-expression file.}
 
-@defproc[(sexpr->configuration-table (sexpr list?))
+@defthing[configuration-table-sexpr? (any . -> . boolean?)]{
+ Equivalent to @scheme[list?].
+}
+
+@defproc[(sexpr->configuration-table (sexpr configuration-table-sexpr?))
          configuration-table?]{
  This function converts a @scheme[configuration-table] from an S-expression.
 }
 
 @defproc[(configuration-table->sexpr (ctable configuration-table?))
-         list?]{
+         configuration-table-sexpr?]{
  This function converts a @scheme[configuration-table] to an S-expression.
 }
 
@@ -113,8 +123,6 @@ structures.
 
 where a @scheme[host-table-sexpr] is:
 
-@; XXX Allowable log-formats?
-@; XXX Where the paths are resolved relative to
 @schemeblock[
 `(host-table
   (default-indices ,string? ...)
@@ -142,6 +150,13 @@ where a @scheme[host-table-sexpr] is:
    (mime-types ,path-string?)
    (password-authentication ,path-string?)))]
 
+In this syntax, the @scheme['messages] paths are relative to the @scheme['configuration-root] directory.
+All the paths in @scheme['paths] are relative to @scheme['host-root] (other than @scheme['host-root] obviously.)
+
+Allowable @scheme['log-format]s are those accepted by @scheme[log-format->format].
+
+Note: You almost always want to leave everything in the @scheme['paths] section the default except the @scheme['host-root].
+
 @defproc[(read-configuration-table (path path-string?))
          configuration-table?]{
 This function reads a @scheme[configuration-table] from @scheme[path].
@@ -151,12 +166,14 @@ This function reads a @scheme[configuration-table] from @scheme[path].
          void]{
 This function writes a @scheme[configuration-table] to @scheme[path].
 }
+              
+}
 
 @; ------------------------------------------------------------
 @section[#:tag "namespace.ss"]{Servlet Namespaces}
 @(require (for-label web-server/configuration/namespace))
 
-@defmodule[web-server/configuration/namespace]
+@defmodule[web-server/configuration/namespace]{
 
 @filepath{configuration/namespace.ss} provides a function to help create the
 @scheme[make-servlet-namespace] procedure needed by the @scheme[make] functions
@@ -184,6 +201,8 @@ Example:
   #:to-be-copied-module-specs `((lib "database.ss" "my-module")))
  ]
 }
+                                  
+}
 
 @subsection{Why this is useful}
 
@@ -204,7 +223,7 @@ of servlets can share different sets of modules.
 @section[#:tag "responders.ss"]{Standard Responders}
 @(require (for-label web-server/configuration/responders))
 
-@defmodule[web-server/configuration/responders]
+@defmodule[web-server/configuration/responders]{
 
 @filepath{configuration/responders.ss} provides some functions that help constructing HTTP responders.
 These functions are used by the default dispatcher constructor (see @secref["web-server-unit.ss"]) to
@@ -266,4 +285,6 @@ the @scheme[header]s as, you guessed it, headers.
 @defproc[(gen-collect-garbage-responder (file path-string?))
          (-> response?)]{
  Returns a function that generates a standard "Garbage collection run" message with content from @scheme[file].
+}
+
 }

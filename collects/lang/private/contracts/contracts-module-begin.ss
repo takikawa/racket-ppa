@@ -3,7 +3,8 @@
   (require "contracts.ss")
   
   (require-for-syntax mzlib/list
-		      syntax/boundmap)
+		      syntax/boundmap
+                      syntax/kerncase)
   
   (provide beginner-module-begin intermediate-module-begin advanced-module-begin)
 
@@ -144,9 +145,9 @@
               [_ (raise-syntax-error 'contract "internal error.5")])))
 	
 	(define local-expand-stop-list 
-          (list 'contract 'define-values 'define-syntaxes 'define-values-for-syntax '#%require
-                '#%provide 'define-data '#%app '#%datum 'define-struct 'begin 'begin0))
-	
+          (append (list #'contract #'#%require #'#%provide language-level-define-data)
+                  (kernel-form-identifier-list)))
+
 	;; parse-contract-expressions 
 	;; takes in a list of top level expressions and a list of contracts, and outputs the correct transformation. 
 	;; 1. expand until we find a definition or a contract
@@ -165,7 +166,7 @@
               [else
                (let ([expanded (car exprs)])
 
-                 (syntax-case expanded (begin define-values define-data)
+                 (syntax-case expanded (begin define-values)
                    [(define-values (func) e1 ...)
                     (contract-defined? cnt-list expanded)
                     (let ([cnt (get-contract cnt-list expanded)])
@@ -175,7 +176,8 @@
                           #,(transform-contract ll-contract cnt expanded)
                           #,(loop (remove cnt cnt-list) (cdr exprs)))))]
                    [(define-data name c1 c2 ...)
-                    (identifier? #'name)
+                    (and (identifier? #'name)
+                         (define-data-stx? expanded))
                     (quasisyntax/loc (car exprs)
                       (begin
                         (#,ll-define-data name c1 c2 ...)
@@ -250,8 +252,10 @@
                    (let ([e2 (local-expand #'e2 'module local-expand-stop-list)])
                      ;; Lift out certain forms to make them visible to the module
                      ;;  expander:
-                     (syntax-case e2 (#%require define-syntaxes define-values-for-syntax define-values begin)
+                     (syntax-case e2 (#%require #%provide define-syntaxes define-values-for-syntax define-values begin)
                        [(#%require . __)
+                        #`(begin #,e2 (frm e3s #,e1s #,def-ids))]
+                       [(#%provide . __)
                         #`(begin #,e2 (frm e3s #,e1s #,def-ids))]
                        [(define-syntaxes (id ...) . _)
                         #`(begin #,e2 (frm e3s #,e1s (id ... . #,def-ids)))]

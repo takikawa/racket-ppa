@@ -2,9 +2,105 @@
 @(require "mz.ss"
           (for-label scheme/port))
 
-@title{More Port Constructors and Events}
+@title[#:tag "port-lib"]{More Port Constructors, Procedures, and Events}
 
-@note-lib-only[scheme/port]
+@note-lib[scheme/port]
+
+@; ----------------------------------------------------------------------
+
+@section{Port String and List Conversions}
+
+@defproc[(port->string [in input-port? (current-input-port)]) string?]{
+
+Reads all characters from @scheme[in] and returns them as a string.}
+
+@defproc[(port->bytes [in input-port? (current-input-port)]) bytes?]{
+
+Reads all bytes from @scheme[in] and returns them as a @tech{byte string}.}
+
+@defproc[(port->lines [in input-port? (current-input-port)]
+                      [#:line-mode line-mode (or/c 'linefeed 'return 'return-linefeed 'any 'any-one) 'any])
+         (listof string?)]{
+
+Read all characters from @scheme[in], breaking them into lines. The
+@scheme[line-mode] argument is the same as the second argument to
+@scheme[read-line], but the default is @scheme['any] instead of
+@scheme['linefeed].}
+
+@defproc[(port->bytes-lines [in input-port? (current-input-port)]
+                            [#:line-mode line-mode (or/c 'linefeed 'return 'return-linefeed 'any 'any-one) 'any])
+         (listof bytes?)]{
+
+Like @scheme[port->lines], but reading bytes and collecting them into
+lines like @scheme[read-bytes-line].}
+
+@defproc[(display-lines [lst list?]
+                        [out output-port? (current-output-port)]
+                        [#:separator separator any/c #"\n"])
+         void?]{
+
+Use @scheme[display] to each each element of @scheme[lst] to @scheme[out], adding
+@scheme[separator] after each element.}
+
+@defproc[(call-with-output-string [proc (output-port? . -> . any)]) string?]{
+
+Calls @scheme[proc] with an output port that accumulates all output
+into a string, and returns the string.
+
+The port passed to @scheme[proc] is like the one created by
+@scheme[open-output-string], except that it is wrapped via
+@scheme[dup-output-port], so that @scheme[proc] cannot access the
+port's content using @scheme[get-output-string]. If control jumps back
+into @scheme[proc], the port continues to accumulate new data, and
+@scheme[call-with-output-string] returns both the old data and newly
+accumulated data.}
+
+@defproc[(call-with-output-bytes [proc (output-port? . -> . any)]) bytes?]{
+
+Like @scheme[call-with-output-string], but returns accumulated results
+in a @tech{byte string} instead of a string. Furthermore, the port's
+content is emptied when @scheme[call-with-output-bytes] returns, so
+that if control jumps back into @scheme[proc] and returns a second
+time, only the newly accumulated bytes are returned.}
+
+@defproc[(with-output-to-string [proc (-> any)]) string?]{
+
+Equivalent to
+
+@schemeblock[(call-with-output-string
+              (lambda (p) (parameterize ([current-output-port p])
+                            (proc))))]}
+
+@defproc[(with-output-to-bytes [proc (-> any)]) bytes?]{
+
+Equivalent to
+
+@schemeblock[(call-with-output-bytes
+              (lambda (p) (parameterize ([current-output-port p])
+                            (proc))))]}
+
+@defproc[(call-with-input-string [str string?][proc (input-port? . -> . any)]) any]{
+
+Equivalent to @scheme[(proc (open-input-string str))].}
+
+@defproc[(call-with-input-bytes [bstr bytes?][proc (input-port? . -> . any)]) any]{
+
+Equivalent to @scheme[(proc (open-input-bytes bstr))].}
+
+@defproc[(with-input-from-string [str string?][proc (-> any)]) any]{
+
+Equivalent to
+
+@schemeblock[(parameterize ([current-input-port (open-input-string str)])
+               (proc))]}
+
+@defproc[(with-input-from-bytes [bstr bytes?][proc (-> any)]) any]{
+
+Equivalent to
+
+@schemeblock[(parameterize ([current-input-port (open-input-bytes str)])
+               (proc))]}
+
 
 @; ----------------------------------------------------------------------
 

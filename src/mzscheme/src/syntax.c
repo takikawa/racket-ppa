@@ -1919,80 +1919,88 @@ ref_syntax (Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec,
   int l, ok;
 
   l = check_form(form, form);
-  if (l != 2)
-    bad_form(form, l);
 
-  rest = SCHEME_STX_CDR(form);
-  name = SCHEME_STX_CAR(rest);
-
-  if (SCHEME_STX_PAIRP(name)) {
-    rest = SCHEME_STX_CAR(name);
-    if (env->genv->phase == 0) {
-      var = scheme_top_stx;
-    } else {
-      var = scheme_datum_to_syntax(SCHEME_STX_VAL(scheme_top_stx), scheme_false, scheme_sys_wraps(env), 0, 0);
-    }
-    ok = scheme_stx_module_eq(rest, var, env->genv->phase);
-  } else 
-    ok = SCHEME_STX_SYMBOLP(name);
-
-  if (!ok) {
-    scheme_wrong_syntax("#%variable-reference", name, 
-			form, 
-			"not an identifier or #%%top form");
-    return NULL;
-  }
-
-  if (SCHEME_STX_PAIRP(name)) {
-    /* FIXME: when using #%top, need to set mutated flag */
+  if (l == 1) {
     if (rec[drec].comp)
-      var = scheme_compile_expr(name, env, rec, drec);
+      var = scheme_make_environment_dummy(env);
     else
-      var = scheme_expand_expr(name, env, rec, drec);
+      var = scheme_void;
   } else {
-    scheme_rec_add_certs(rec, drec, form);
+    if (l != 2)
+      bad_form(form, l);
 
-    var = scheme_lookup_binding(name, env, 
-				SCHEME_REFERENCING 
-				+ SCHEME_GLOB_ALWAYS_REFERENCE
-				+ (rec[drec].dont_mark_local_use 
-				   ? SCHEME_DONT_MARK_USE 
-				   : 0)
-				+ (rec[drec].resolve_module_ids
-				   ? SCHEME_RESOLVE_MODIDS
-				   : 0),
-				rec[drec].certs, env->in_modidx, 
-				&menv, NULL, NULL);
+    rest = SCHEME_STX_CDR(form);
+    name = SCHEME_STX_CAR(rest);
 
-    if (SAME_TYPE(SCHEME_TYPE(var), scheme_variable_type)
-	|| SAME_TYPE(SCHEME_TYPE(var), scheme_module_variable_type)) {
-      int imported = 0;
-      /* It must be in the module being compiled/expanded. */
-      if (env->genv->module) {
-        if (SAME_TYPE(SCHEME_TYPE(var), scheme_module_variable_type)) {
-          if (!SAME_OBJ(((Module_Variable *)var)->modidx, env->genv->module->self_modidx))
-            imported = 1;
-        } else
-          imported = 1;
+    if (SCHEME_STX_PAIRP(name)) {
+      rest = SCHEME_STX_CAR(name);
+      if (env->genv->phase == 0) {
+        var = scheme_top_stx;
       } else {
-        if (SAME_TYPE(SCHEME_TYPE(var), scheme_variable_type)) {
-          if (!SAME_OBJ(((Scheme_Bucket_With_Home *)var)->home, env->genv))
-            imported = 1;
-        } else
-          imported = 1;
+        var = scheme_datum_to_syntax(SCHEME_STX_VAL(scheme_top_stx), scheme_false, scheme_sys_wraps(env), 0, 0);
       }
+      ok = scheme_stx_module_eq(rest, var, env->genv->phase);
+    } else 
+      ok = SCHEME_STX_SYMBOLP(name);
 
-      if (rec[drec].comp) {
-	var = scheme_register_toplevel_in_prefix(var, env, rec, drec);
-        if (!imported && env->genv->module)
-          SCHEME_TOPLEVEL_FLAGS(var) |= SCHEME_TOPLEVEL_MUTATED;
-      }
-    } else {
-      scheme_wrong_syntax(NULL, name, form, "identifier does not refer to a top-level or module variable");
+    if (!ok) {
+      scheme_wrong_syntax("#%variable-reference", name, 
+                          form, 
+                          "not an identifier or #%%top form");
+      return NULL;
     }
 
-    if (rec[drec].comp)
-      scheme_compile_rec_done_local(rec, drec);
+    if (SCHEME_STX_PAIRP(name)) {
+      /* FIXME: when using #%top, need to set mutated flag */
+      if (rec[drec].comp)
+        var = scheme_compile_expr(name, env, rec, drec);
+      else
+        var = scheme_expand_expr(name, env, rec, drec);
+    } else {
+      scheme_rec_add_certs(rec, drec, form);
+
+      var = scheme_lookup_binding(name, env, 
+                                  SCHEME_REFERENCING 
+                                  + SCHEME_GLOB_ALWAYS_REFERENCE
+                                  + (rec[drec].dont_mark_local_use 
+                                     ? SCHEME_DONT_MARK_USE 
+                                     : 0)
+                                  + (rec[drec].resolve_module_ids
+                                     ? SCHEME_RESOLVE_MODIDS
+                                     : 0),
+                                  rec[drec].certs, env->in_modidx, 
+                                  &menv, NULL, NULL);
+
+      if (SAME_TYPE(SCHEME_TYPE(var), scheme_variable_type)
+          || SAME_TYPE(SCHEME_TYPE(var), scheme_module_variable_type)) {
+        int imported = 0;
+        /* It must be in the module being compiled/expanded. */
+        if (env->genv->module) {
+          if (SAME_TYPE(SCHEME_TYPE(var), scheme_module_variable_type)) {
+            if (!SAME_OBJ(((Module_Variable *)var)->modidx, env->genv->module->self_modidx))
+              imported = 1;
+          } else
+            imported = 1;
+        } else {
+          if (SAME_TYPE(SCHEME_TYPE(var), scheme_variable_type)) {
+            if (!SAME_OBJ(((Scheme_Bucket_With_Home *)var)->home, env->genv))
+              imported = 1;
+          } else
+            imported = 1;
+        }
+
+        if (rec[drec].comp) {
+          var = scheme_register_toplevel_in_prefix(var, env, rec, drec);
+          if (!imported && env->genv->module)
+            SCHEME_TOPLEVEL_FLAGS(var) |= SCHEME_TOPLEVEL_MUTATED;
+        }
+      } else {
+        scheme_wrong_syntax(NULL, name, form, "identifier does not refer to a top-level or module variable");
+      }
+
+      if (rec[drec].comp)
+        scheme_compile_rec_done_local(rec, drec);
+    }
   }
 
   if (rec[drec].comp)
@@ -2945,13 +2953,26 @@ static int might_invoke_call_cc(Scheme_Object *value)
   return !is_liftable(value, -1, 10, 0);
 }
 
+static int worth_lifting(Scheme_Object *v)
+{
+  Scheme_Type lhs;
+  lhs = SCHEME_TYPE(v);
+  if ((lhs == scheme_compiled_unclosed_procedure_type)
+      || (lhs == scheme_local_type)
+      || (lhs == scheme_compiled_toplevel_type)
+      || (lhs == scheme_compiled_quote_syntax_type)
+      || (lhs > _scheme_compiled_values_types_))
+    return 1;
+  return 0;
+}
+
 Scheme_Object *
 scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline)
 {
   Optimize_Info *body_info, *rhs_info;
   Scheme_Let_Header *head = (Scheme_Let_Header *)form;
   Scheme_Compiled_Let_Value *clv, *pre_body, *retry_start, *prev_body;
-  Scheme_Object *body, *value;
+  Scheme_Object *body, *value, *ready_pairs = NULL, *rp_last = NULL, *ready_pairs_start;
   int i, j, pos, is_rec, not_simply_let_star = 0;
   int size_before_opt, did_set_value;
   int remove_last_one = 0;
@@ -2962,14 +2983,8 @@ scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline)
   if (!(SCHEME_LET_FLAGS(head) & SCHEME_LET_RECURSIVE) && (head->count == 1) && (head->num_clauses == 1)) {
     clv = (Scheme_Compiled_Let_Value *)head->body;
     if (SAME_TYPE(SCHEME_TYPE(clv->body), scheme_local_type)
-	&& (((Scheme_Local *)clv->body)->position == 0)) {
-      Scheme_Type lhs;
-      lhs = SCHEME_TYPE(clv->value);
-      if ((lhs == scheme_compiled_unclosed_procedure_type)
-          || (lhs == scheme_local_type)
-          || (lhs == scheme_compiled_toplevel_type)
-          || (lhs == scheme_compiled_quote_syntax_type)
-	  || (lhs > _scheme_compiled_values_types_)) {
+        && (((Scheme_Local *)clv->body)->position == 0)) {
+      if (worth_lifting(clv->value)) {
         if (for_inline) {
 	  /* Just drop the inline-introduced let */
 	  return scheme_optimize_expr(clv->value, info);
@@ -3001,6 +3016,16 @@ scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline)
     for (j = pre_body->count; j--; ) {
       if (pre_body->flags[j] & SCHEME_WAS_SET_BANGED) {
 	scheme_optimize_mutated(body_info, pos + j);
+      } else if (is_rec) {
+        /* Indicate that it's not yet ready, so it cannot be inlined: */
+        Scheme_Object *rp;
+        rp = scheme_make_raw_pair(scheme_false, NULL);
+        if (rp_last)
+          SCHEME_CDR(rp_last) = rp;
+        else
+          ready_pairs = rp;
+        rp_last = rp;
+        scheme_optimize_propagate(body_info, pos+j, rp_last, 0);
       }
     }
     pos += pre_body->count;
@@ -3011,6 +3036,7 @@ scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline)
   body = head->body;
   pre_body = NULL;
   retry_start = NULL;
+  ready_pairs_start = NULL;
   did_set_value = 0;
   pos = 0;
   for (i = head->num_clauses; i--; ) {
@@ -3112,6 +3138,12 @@ scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline)
 	     This must be done with respect to body_info, not
 	     rhs_info, because we attach the value to body_info: */
 	  value = scheme_optimize_reverse(body_info, vpos, 1);
+          
+          /* Double-check that the value is ready, because we might be
+             nested in the RHS of a `letrec': */
+          if (value)
+            if (!scheme_optimize_info_is_ready(body_info, SCHEME_LOCAL_POS(value)))
+              value = NULL;
 	}
       }
 
@@ -3126,8 +3158,10 @@ scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline)
       }
     }
 
-    if (!retry_start)
+    if (!retry_start) {
       retry_start = pre_body;
+      ready_pairs_start = ready_pairs;
+    }
 
     /* Re-optimize to inline letrec bindings? */
     if (is_rec
@@ -3142,6 +3176,10 @@ scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline)
            but then assume not for all if any turn out not (i.e., approximate fix point). */
         int flags;
         Scheme_Object *clones, *cl, *cl_first;
+        /* Reset "ready" flags: */
+        for (rp_last = ready_pairs_start; !SAME_OBJ(rp_last, ready_pairs); rp_last = SCHEME_CDR(rp_last)) {
+          SCHEME_CAR(rp_last) = scheme_false;
+        }
         /* Set-flags loop: */
         clones = make_clones(retry_start, pre_body, body_info);
         (void)set_code_flags(retry_start, pre_body, clones,
@@ -3183,7 +3221,7 @@ scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline)
             body_info->letrec_not_twice = 1;
             
             value = scheme_optimize_expr(self_value, body_info);
-            
+
             body_info->letrec_not_twice = 0;
             
             clv->value = value;
@@ -3196,6 +3234,17 @@ scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline)
 	  }
 	  if (clv == pre_body)
 	    break;
+          {
+            /* Since letrec is really letrec*, the variables 
+               for this binding are now ready: */
+            int i;
+            for (i = clv->count; i--; ) {
+              if (!(clv->flags[i] & SCHEME_WAS_SET_BANGED)) {
+                SCHEME_CAR(ready_pairs_start) = scheme_true;
+                ready_pairs_start = SCHEME_CDR(ready_pairs_start);
+              }
+            }
+          }
 	  clv = (Scheme_Compiled_Let_Value *)clv->body;
 	}
         /* Check flags loop: */
@@ -3207,7 +3256,20 @@ scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline)
                              1);
       }
       retry_start = NULL;
+      ready_pairs_start = NULL;
       did_set_value = 0;
+    }
+
+    if (is_rec) {
+      /* Since letrec is really letrec*, the variables 
+         for this binding are now ready: */
+      int i;
+      for (i = pre_body->count; i--; ) {
+        if (!(pre_body->flags[i] & SCHEME_WAS_SET_BANGED)) {
+          SCHEME_CAR(ready_pairs) = scheme_true;
+          ready_pairs = SCHEME_CDR(ready_pairs);
+        }
+      }
     }
 
     if (remove_last_one) {
@@ -3278,17 +3340,74 @@ scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, int for_inline)
     body = pre_body->body;
   }
 
-  scheme_optimize_info_done(body_info);
-
   /* Optimized away all clauses? */
-  if (!head->num_clauses)
+  if (!head->num_clauses) {
+    scheme_optimize_info_done(body_info);
     return head->body;
+  }
   
   if (is_rec && !not_simply_let_star) {
     /* We can simplify letrec to let* */
     SCHEME_LET_FLAGS(head) -= SCHEME_LET_RECURSIVE;
     SCHEME_LET_FLAGS(head) |= SCHEME_LET_STAR;
   }
+
+  {
+    int extract_depth = 0;
+
+    value = NULL;
+    
+    /* Check again for (let ([x <proc>]) x). */
+    if (!is_rec && (head->count == 1) && (head->num_clauses == 1)) {
+      clv = (Scheme_Compiled_Let_Value *)head->body;
+      if (SAME_TYPE(SCHEME_TYPE(clv->body), scheme_local_type)
+          && (((Scheme_Local *)clv->body)->position == 0)) {
+        if (worth_lifting(clv->value)) {
+          value = clv->value;
+          extract_depth = 1;
+        }
+      }
+    }
+
+    /* Check for (let ([unused #f] ...) <proc>) */
+    if (!value) {
+      if (head->count == head->num_clauses) {
+        body = head->body;
+        pos = 0;
+        for (i = head->num_clauses; i--; ) {
+          pre_body = (Scheme_Compiled_Let_Value *)body;
+          if ((pre_body->count != 1)
+              || !SCHEME_FALSEP(pre_body->value)
+              || (pre_body->flags[0] & SCHEME_WAS_USED))
+            break;
+          body = pre_body->body;
+        }
+        if (i < 0) {
+          if (worth_lifting(body)) {
+            value = body;
+            extract_depth = head->count;
+            rhs_info = body_info;
+          }
+        }
+      }
+    }
+    
+    if (value) {
+      value = scheme_optimize_clone(1, value, rhs_info, 0, 0);
+
+      if (value) {
+        info = scheme_optimize_info_add_frame(info, extract_depth, 0, 0);
+        info->inline_fuel = 0;
+        value = scheme_optimize_expr(value, info);
+        info->next->single_result = info->single_result;
+        info->next->preserves_marks = info->preserves_marks;
+        scheme_optimize_info_done(info);
+        return value;
+      }
+    }
+  }
+
+  scheme_optimize_info_done(body_info);
 
   return form;
 }

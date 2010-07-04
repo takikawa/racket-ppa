@@ -76,7 +76,7 @@
              [r6rs:string->number string->number])
 
  ;; 11.8
- not boolean? boolean=?
+ not boolean? (rename-out [r6rs:boolean=? boolean=?])
 
  ;; 11.9
  (rename-out [r5rs:pair? pair?]
@@ -123,7 +123,7 @@
              [r5rs:for-each for-each])
 
  ;; 11.10
- symbol? symbol=?
+ symbol? (rename-out [r6rs:symbol=? symbol=?])
  string->symbol symbol->string
  
  ;; 11.11
@@ -349,6 +349,22 @@
     (and (regexp-match? rx:number s)
          (string->number (regexp-replace* #rx"[|][0-9]+" s "")))))
 
+(define r6rs:symbol=?
+  (case-lambda
+   [(a b) (symbol=? a b)]
+   [(a b . rest) (and (symbol=? a b)
+                      (andmap (lambda (s)
+                                (symbol=? a s))
+                              rest))]))
+
+(define r6rs:boolean=?
+  (case-lambda
+   [(a b) (boolean=? a b)]
+   [(a b . rest) (and (boolean=? a b)
+                      (andmap (lambda (s)
+                                (boolean=? a s))
+                              rest))]))
+
 (define-syntax-rule (make-mapper what for for-each in-val val-length val->list list->result)
   (case-lambda
    [(proc val) (list->result
@@ -489,13 +505,25 @@
     [(_ args . body)
      (syntax/loc stx (r5rs:lambda args (let () . body)))]))
 
+(define-for-syntax (check-label id orig-stx def)
+  (when (eq? 'module (syntax-local-context))
+    (when (identifier-binding id #f)
+      (raise-syntax-error
+       #f
+       "cannot define imported identifier"
+       orig-stx
+       id)))
+  def)
+
 (define-syntax (r6rs:define stx)
   (syntax-case stx ()
     [(_ id) 
      (identifier? #'id)
-     (syntax/loc stx (define id (void)))]
+     (check-label #'id stx (syntax/loc stx (define id (void))))]
     [(_ (name . args) . body)
-     (syntax/loc stx (r5rs:define (name . args) (let () . body)))]
+     (check-label #'name
+                  stx
+                  (syntax/loc stx (r5rs:define (name . args) (let () . body))))]
     [(_ . rest) #'(define . rest)]))
 
 ;; ----------------------------------------
@@ -507,8 +535,10 @@
   (syntax-case stx ()
     [(_ id expr)
      (identifier? #'id)
-     (syntax/loc stx
-       (define-syntax id (wrap-as-needed expr)))]))
+     (check-label #'id
+                  stx
+                  (syntax/loc stx
+                    (define-syntax id (wrap-as-needed expr))))]))
 
 (define-for-syntax (wrap r stx)
   (cond

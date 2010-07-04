@@ -10,33 +10,33 @@
          "web-config-sig.ss"
          "web-server-sig.ss"
          "web-server-unit.ss"
-         (prefix-in http: "private/request.ss"))
+         (prefix-in http: web-server/http/request))
 (provide/contract
  [serve
   (->* (#:dispatch dispatcher/c)
        (#:tcp@ unit?
-               #:port number?
-               #:listen-ip (or/c false/c string?)
-               #:max-waiting number?
-               #:initial-connection-timeout number?)
+        #:port number?
+        #:listen-ip (or/c false/c string?)
+        #:max-waiting number?
+        #:initial-connection-timeout number?)
        (-> void))]
  [serve/ports
   (->* (#:dispatch dispatcher/c)
        (#:tcp@ unit?
-               #:ports (listof number?)
-               #:listen-ip (or/c false/c string?)
-               #:max-waiting number?
-               #:initial-connection-timeout number?)
+        #:ports (listof number?)
+        #:listen-ip (or/c false/c string?)
+        #:max-waiting number?
+        #:initial-connection-timeout number?)
        (-> void))]
  [serve/ips+ports
   (->* (#:dispatch dispatcher/c)
        (#:tcp@ unit?
-               #:ips+ports (listof (cons/c (or/c false/c string?) (listof number?)))
-               #:max-waiting number?
-               #:initial-connection-timeout number?)
+        #:ips+ports (listof (cons/c (or/c false/c string?) (listof number?)))
+        #:max-waiting number?
+        #:initial-connection-timeout number?)
        (-> void))]
  [do-not-return (-> void)]
- [serve/web-config@ (unit? . -> . (-> void?))])
+ [serve/web-config@ ((unit?) (#:tcp@ unit?) . ->* . (-> void?))])
 
 (define (do-not-return)
   (semaphore-wait (make-semaphore 0)))
@@ -59,7 +59,7 @@
     dispatch-server@/tcp@
     (import dispatch-server-config^)
     (export dispatch-server^))
-  
+
   (serve))
 
 (define (serve/ports
@@ -101,7 +101,9 @@
     (for-each apply shutdowns)))
 
 ; serve/config@ : configuration -> (-> void)
-(define (serve/web-config@ config@)
+(define (serve/web-config@ config@ #:tcp@ [tcp@ raw:tcp@])
+  (define-unit-binding a-tcp@
+    tcp@ (import) (export tcp^))
   (define-unit m@ (import web-server^) (export)
     (init-depend web-server^)
     (serve))
@@ -109,5 +111,5 @@
   (invoke-unit
    (compound-unit/infer
     (import)
-    (link raw:tcp@ c@ web-server@ m@)
+    (link a-tcp@ c@ web-server@ m@)
     (export))))

@@ -278,18 +278,18 @@
 
       ((beginner-append append) ((listof any) (listof any) (listof any) ... -> (listof any))
        "to create a single list from several, by juxtaposition of the items")
-      (length (list -> number)
+      (length ((listof any) -> number)
 	"to compute the number of items on a list")
-      (memq (any list -> (union false list))
+      (memq (any (listof any) -> (union false list))
 	"to determine whether some value is on some list"
 	" (comparing values with eq?)")
-      (memv (any list -> (union false list))
+      (memv (any (listof any) -> (union false list))
 	"to determine whether some value is on the list"
 	" (comparing values with eqv?)")
-      ((beginner-member member) (any list -> boolean)
+      ((beginner-member member) (any (listof any)-> boolean)
 	"to determine whether some value is on the list"
 	" (comparing values with equal?)")
-      (reverse (list -> list)
+      (reverse ((listof any) -> list)
 	"to create a reversed version of a list")
       (assq (X (listof (cons X Y)) -> (union false (cons X Y)))
 	"to determine whether some item is the first item of a pair"
@@ -374,35 +374,35 @@
       (string-append (string ... -> string)
 	"to juxtapose the characters of several strings")
     
-      (string=? (string string ... -> boolean)
+      (string=? (string string string ... -> boolean)
 	"to compare two strings character-wise")
-      (string<? (string string ... -> boolean)
+      (string<? (string string string ... -> boolean)
 	"to determine whether one string alphabetically"
 	" precedes another")
-      (string>? (string string ... -> boolean)
+      (string>? (string string string ... -> boolean)
 	"to determine whether one string alphabetically"
 	" succeeds another")
-      (string<=? (string string ... -> boolean)
+      (string<=? (string string string ... -> boolean)
 	"to determine whether one string alphabetically"
 	" precedes another (or is equal to it)")
-      (string>=? (string string ... -> boolean)
+      (string>=? (string string string ... -> boolean)
 	"to determine whether one string alphabetically"
 	" succeeds another (or is equal to it)")
     
-      (string-ci=? (string string ... -> boolean)
+      (string-ci=? (string string string ... -> boolean)
 	"to compare two strings character-wise"
 	" in a case-insensitive manner")
-      (string-ci<? (string string ... -> boolean)
+      (string-ci<? (string string string ... -> boolean)
 	"to determine whether one string alphabetically"
 	" precedes another in a case-insensitive manner")
-      (string-ci>? (string string ... -> boolean)
+      (string-ci>? (string string string ... -> boolean)
 	"to determine whether one string alphabetically"
 	" succeeds another in a case-insensitive manner")
-      (string-ci<=? (string string ... -> boolean)
+      (string-ci<=? (string string string ... -> boolean)
 	"to determine whether one string alphabetically"
 	" precedes another (or is equal to it)"
 	" in a case-insensitive manner")
-      (string-ci>=? (string string ... -> boolean)
+      (string-ci>=? (string string string ... -> boolean)
 	"to determine whether one string alphabetically"
 	" succeeds another (or is equal to it)"
 	" in a case-insensitive manner")

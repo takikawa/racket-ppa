@@ -5,7 +5,57 @@
 
 (define SLEEP-TIME 0.1)
 
-(require mzlib/port)
+(require scheme/port)
+
+;; ----------------------------------------
+
+(let* ([p (lambda () (open-input-string "hello\r\nthere"))])
+  (test "hello\r\nthere" port->string (p))
+  (test #"hello\r\nthere" port->bytes (p))
+  (test '("hello" "there") port->lines (p))
+  (test '(#"hello" #"there") port->bytes-lines (p))
+  (test '("hello\r" "there") port->lines (p) #:line-mode 'linefeed)
+  (test '(#"hello\r" #"there") port->bytes-lines (p) #:line-mode 'linefeed)
+  (test '("hello" "" "there") port->lines (p) #:line-mode 'any-one)
+  (test '(#"hello" #"" #"there") port->bytes-lines (p) #:line-mode 'any-one))
+
+(let* ([x (make-string 50000 #\x)]
+       [p (lambda () (open-input-string x))])
+  (test (string-length x) 'long-string (string-length (port->string (p))))
+  (test (string-length x) 'long-string (bytes-length (port->bytes (p)))))
+
+(let ([p (open-output-bytes)])
+  (display-lines '(1 2 3) p)
+  (test "1\n2\n3\n" get-output-string p))
+(let ([p (open-output-bytes)])
+  (display-lines '(1 2 3) p #:separator #"!!")
+  (test "1!!2!!3!!" get-output-string p))
+
+;; ----------------------------------------
+
+(let ()
+  (define (test-with cw-in cw-out s wrap-in wrap-out)
+    (test 'cat cw-in s (wrap-in (lambda (p) (read p))))
+    (test s cw-out (wrap-out (lambda (p) (write 'cat p)))))
+  (test-with call-with-input-bytes call-with-output-bytes #"cat" values values)
+  (test-with call-with-input-string call-with-output-string "cat" values values)
+  (let ([wrap-in (lambda (f) (lambda () (f (current-input-port))))]
+        [wrap-out (lambda (f) (lambda () (f (current-output-port))))])
+    (test-with with-input-from-bytes with-output-to-bytes #"cat" wrap-in wrap-out)
+    (test-with with-input-from-string with-output-to-string "cat" wrap-in wrap-out)))
+
+(err/rt-test (call-with-input-bytes "x" values))
+(err/rt-test (call-with-input-string #"x" values))
+(err/rt-test (with-input-from-bytes "x" values))
+(err/rt-test (with-input-from-string #"x" values))
+(err/rt-test (call-with-input-bytes #"x" (lambda () 'x)))
+(err/rt-test (call-with-input-string "x" (lambda () 'x)))
+(err/rt-test (with-input-from-bytes #"x" add1))
+(err/rt-test (with-input-from-string "x" add1))
+(err/rt-test (call-with-output-bytes (lambda () 'x)))
+(err/rt-test (call-with-output-string (lambda () 'x)))
+(err/rt-test (with-output-to-bytes add1))
+(err/rt-test (with-output-to-string add1))
 
 ;; ----------------------------------------
 

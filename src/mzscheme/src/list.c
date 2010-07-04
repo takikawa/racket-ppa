@@ -27,6 +27,7 @@
 
 /* globals */
 Scheme_Object scheme_null[1];
+Scheme_Object *scheme_list_proc;
 
 /* locals */
 static Scheme_Object *pair_p_prim (int argc, Scheme_Object *argv[]);
@@ -195,11 +196,15 @@ scheme_init_list (Scheme_Env *env)
 						     "list?",
 						     1, 1),
 			      env);
-  scheme_add_global_constant ("list",
-			      scheme_make_immed_prim(list_prim,
-						     "list",
-						     0, -1),
-			      env);
+
+  REGISTER_SO(scheme_list_proc);
+  p = scheme_make_immed_prim(list_prim, "list", 0, -1);
+  scheme_list_proc = p;
+  SCHEME_PRIM_PROC_FLAGS(p) |= (SCHEME_PRIM_IS_UNARY_INLINED
+                                | SCHEME_PRIM_IS_BINARY_INLINED
+                                | SCHEME_PRIM_IS_NARY_INLINED);
+  scheme_add_global_constant ("list", p, env);
+
   scheme_add_global_constant ("list*",
 			      scheme_make_immed_prim(list_star_prim,
 						     "list*",
@@ -404,11 +409,10 @@ scheme_init_list (Scheme_Env *env)
                                                        1, 1, 1),
 			      env);
 
-  scheme_add_global_constant(BOX,
-			     scheme_make_immed_prim(box,
-						    BOX,
-						    1, 1),
-			     env);
+  p = scheme_make_immed_prim(box, BOX, 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;  
+  scheme_add_global_constant(BOX, p, env);
+
   scheme_add_global_constant("box-immutable",
 			     scheme_make_immed_prim(immutable_box,
 						    "box-immutable",
@@ -683,16 +687,12 @@ Scheme_Object *scheme_make_pair(Scheme_Object *car, Scheme_Object *cdr)
 
 Scheme_Object *scheme_make_mutable_pair(Scheme_Object *car, Scheme_Object *cdr)
 {
-#ifdef MZ_PRECISE_GC
-  return GC_malloc_mutable_pair(car, cdr);
-#else
   Scheme_Object *cons;
   cons = scheme_alloc_object();
   cons->type = scheme_mutable_pair_type;
   SCHEME_CAR(cons) = car;
   SCHEME_CDR(cons) = cdr;
   return cons;
-#endif
 }
 
 Scheme_Object *scheme_make_raw_pair(Scheme_Object *car, Scheme_Object *cdr)
@@ -710,11 +710,7 @@ Scheme_Object *scheme_make_raw_pair(Scheme_Object *car, Scheme_Object *cdr)
   return cons;
 }
 
-#ifdef MZ_PRECISE_GC
-# define cons(car, cdr) GC_malloc_pair(car, cdr)
-#else
 # define cons(car, cdr) scheme_make_pair(car, cdr)
-#endif
 
 Scheme_Object *scheme_build_list(int size, Scheme_Object **argv)
 {
@@ -1010,7 +1006,7 @@ list_p_prim (int argc, Scheme_Object *argv[])
 
 #define LIST_BODY(INIT)                          \
   int i;                                         \
-  Scheme_Object *l;                              \
+  GC_CAN_IGNORE Scheme_Object *l;                \
   INIT;                                          \
   for (i = argc ; i--; ) {                       \
     l = cons(argv[i], l);                        \

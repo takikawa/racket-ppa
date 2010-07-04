@@ -1,8 +1,6 @@
 #lang scheme/base
 (require (planet "test.ss" ("schematics" "schemeunit.plt" 2))
-         web-server/private/response-structs
-         web-server/private/request-structs
-         web-server/servlet/helpers)
+         web-server/servlet)
 (provide helpers-tests)
 
 (define (dehead hs)
@@ -19,10 +17,10 @@
     "with-errors-to-browser"
     (test-case
      "Basic"
-     (check-pred list? (with-errors-to-browser (lambda (x) x) (lambda () (error 'error "Hey!")))))
+     (check-pred list? (let/ec esc (with-errors-to-browser esc (lambda () (error 'error "Hey!"))))))
     (test-case
      "Basic (succ)"
-     (check-true (with-errors-to-browser (lambda (x) x) (lambda () #t)))))
+     (check-true (let/ec esc (with-errors-to-browser esc (lambda () #t))))))
    
    (test-suite
     "redirect-to"

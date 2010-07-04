@@ -1013,13 +1013,13 @@
   (list->cvector args type))
 
 (define* (cvector-ref v i)
-  (if (and (integer? i) (<= 0 i (sub1 (cvector-length v))))
+  (if (and (exact-nonnegative-integer? i) (< i (cvector-length v)))
     (ptr-ref (cvector-ptr v) (cvector-type v) i)
     (error 'cvector-ref "bad index ~e for cvector bounds of 0..~e"
            i (sub1 (cvector-length v)))))
 
 (define* (cvector-set! v i x)
-  (if (and (integer? i) (<= 0 i (sub1 (cvector-length v))))
+  (if (and (exact-nonnegative-integer? i) (< i (cvector-length v)))
     (ptr-set! (cvector-ptr v) (cvector-type v) i x)
     (error 'cvector-ref "bad index ~e for cvector bounds of 0..~e"
            i (sub1 (cvector-length v)))))
@@ -1076,14 +1076,14 @@
                (list->TAG vals))
              (define* (TAG-ref v i)
                (if (TAG? v)
-                   (if (and (integer? i) (< -1 i (TAG-length v)))
+                   (if (and (exact-nonnegative-integer? i) (< i (TAG-length v)))
                        (ptr-ref (TAG-ptr v) type i)
                        (error 'TAG-ref "bad index ~e for ~a bounds of 0..~e"
                               i 'TAG (sub1 (TAG-length v))))
                    (raise-type-error 'TAG-ref TAGname v)))
              (define* (TAG-set! v i x)
                (if (TAG? v)
-                   (if (and (integer? i) (< -1 i (TAG-length v)))
+                   (if (and (exact-nonnegative-integer? i) (< i (TAG-length v)))
                        (ptr-set! (TAG-ptr v) type i x)
                        (error 'TAG-set! "bad index ~e for ~a bounds of 0..~e"
                               i 'TAG (sub1 (TAG-length v))))
@@ -1466,12 +1466,15 @@
                         list->TYPE list*->TYPE TYPE->list TYPE->list*)))))))
   (define (identifiers? stx)
     (andmap identifier? (syntax->list stx)))
-  (define (_-identifier? stx)
-    (and (identifier? stx)
-         (regexp-match #rx"^_.+" (symbol->string (syntax-e stx)))))
+  (define (_-identifier? id stx)
+    (and (identifier? id)
+         (or (regexp-match #rx"^_." (symbol->string (syntax-e id)))
+             (raise-syntax-error #f "cstruct name must begin with a `_'"
+                                 stx id))))
   (syntax-case stx ()
     [(_ _TYPE ([slot slot-type] ...))
-     (and (_-identifier? #'_TYPE) (identifiers? #'(slot ...)))
+     (and (_-identifier? #'_TYPE stx)
+          (identifiers? #'(slot ...)))
      (make-syntax #'_TYPE #f #'(slot ...) #'(slot-type ...))]
     [(_ (_TYPE _SUPER) ([slot slot-type] ...))
      (and (_-identifier? #'_TYPE) (identifiers? #'(slot ...)))
