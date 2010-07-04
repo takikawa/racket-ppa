@@ -470,8 +470,7 @@
         (send remove-button enable lb-selection)
         (send raise-button enable (and lb-selection (not (= lb-selection 0))))
         (send lower-button enable
-              (and lb-selection (not (= lb-selection (- lb-tot 1)))))
-        (update-compilation-on-radio-box-visibility)))
+              (and lb-selection (not (= lb-selection (- lb-tot 1)))))))
     
     (define (add-callback)
       (let ([dir (get-directory (string-constant ml-cp-choose-a-collection-path)

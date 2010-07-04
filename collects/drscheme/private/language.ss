@@ -275,8 +275,6 @@
       (get-debugging-radio-box debugging)
       (dynamic-panel-extras dynamic-panel)
       
-      (dynamic-panel-extras dynamic-panel)
-      
       (case-lambda
         [()
          (make-simple-settings

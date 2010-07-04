@@ -900,9 +900,6 @@ the mask bitmap and the original bitmap are all together in a single bytes!
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-
 (provide make-image image-shape image-bb image-normalized? image%
          
          (struct-out bb)

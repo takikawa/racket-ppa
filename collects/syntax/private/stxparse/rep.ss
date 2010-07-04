@@ -862,7 +862,6 @@
       [_ (values decls chunks)]))
   (loop chunks decls))
 
-;; Keyword Options & Checkers
 
 ;; ----
 

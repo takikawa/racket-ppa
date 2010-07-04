@@ -73,15 +73,6 @@
 (define (get-bottom img) (bb-bottom (send img get-bb)))
 (define (get-baseline img) (bb-baseline (send img get-bb)))
 
-(define (bitmap->image bm [mask-bm (send bm get-loaded-mask)])
-  (let ([w (send bm get-width)]
-        [h (send bm get-height)])
-    (make-image (make-translate (/ w 2)
-                                (/ h 2)
-                                (make-bitmap bm mask-bm 0 1 1 #f #f))
-                (make-bb w h h)
-                #f)))
-
 ;                                              
 ;                                              
 ;                                              
