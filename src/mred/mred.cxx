@@ -3,7 +3,7 @@
  * Purpose:     MrEd main file, including a hodge-podge of global stuff
  * Author:      Matthew Flatt
  * Created:     1995
- * Copyright:   (c) 2004-2008 PLT Scheme Inc.
+ * Copyright:   (c) 2004-2009 PLT Scheme Inc.
  * Copyright:   (c) 1995-2000, Matthew Flatt
  */
 
@@ -2466,10 +2466,12 @@ static Bool RecordInput(void *m, wxEvent *event, void *data)
   media->Insert("\n");
   start = media->GetStartPosition();
   len = start - ioFrame->endpos;
-  s = media->GetTextUTF8(ioFrame->endpos, start);
-  ioFrame->endpos = start;
-
-  scheme_write_byte_string(s, len, stdin_pipe);
+  if (len > 0) {
+    s = media->GetTextUTF8(ioFrame->endpos, start);
+    ioFrame->endpos = start;
+    
+    scheme_write_byte_string(s, len, stdin_pipe);
+  }
 
   return TRUE;
 }

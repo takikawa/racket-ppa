@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2008 PLT Scheme Inc.
+  Copyright (c) 2004-2009 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -544,7 +544,7 @@ void scheme_init_error(Scheme_Env *env)
   /* errors */
   GLOBAL_NONCM_PRIM("error",                      error,                 1, -1, env);
   GLOBAL_NONCM_PRIM("raise-user-error",           raise_user_error,      1, -1, env);
-  GLOBAL_NONCM_PRIM("raise-syntax-error",         raise_syntax_error,    2,  4, env);
+  GLOBAL_NONCM_PRIM("raise-syntax-error",         raise_syntax_error,    2,  5, env);
   GLOBAL_NONCM_PRIM("raise-type-error",           raise_type_error,      3, -1, env);
   GLOBAL_NONCM_PRIM("raise-mismatch-error",       raise_mismatch_error,  3,  3, env);
 
@@ -778,7 +778,7 @@ scheme_signal_error (const char *msg, ...)
   if (scheme_current_thread->current_local_env) {
     char *s2 = " [during expansion]";
     strcpy(buffer + len, s2);
-    len = strlen(s2);
+    len += strlen(s2);
   }
 
   buffer[len] = 0;
@@ -1217,6 +1217,10 @@ char *scheme_make_arity_expect_string(Scheme_Object *proc,
     }
     name = scheme_get_proc_name((Scheme_Object *)proc, &namelen, 1);
 #endif
+  } else if (SCHEME_STRUCTP(proc)) {
+    name = (const char *)proc;
+    mina = -1;
+    maxa = 0;
   } else {
     Scheme_Closure_Data *data;
 
@@ -2007,7 +2011,7 @@ static Scheme_Object *raise_user_error(int argc, Scheme_Object *argv[])
 static Scheme_Object *raise_syntax_error(int argc, Scheme_Object *argv[])
 {
   const char *who;
-  Scheme_Object *str;
+  Scheme_Object *str, *extra_sources = scheme_null;
 
   if (!SCHEME_FALSEP(argv[0]) && !SCHEME_SYMBOLP(argv[0]))
     scheme_wrong_type("raise-syntax-error", "symbol or #f", 0, argc, argv);
@@ -2026,10 +2030,24 @@ static Scheme_Object *raise_syntax_error(int argc, Scheme_Object *argv[])
 						  1);
   }
 
-  scheme_wrong_syntax(who,
-		      (argc > 3) ? argv[3] : NULL,
-		      (argc > 2) ? argv[2] : NULL,
-		      "%T", str);
+  if (argc > 4) {
+    extra_sources = argv[4];
+    while (SCHEME_PAIRP(extra_sources)) {
+      if (!SCHEME_STXP(SCHEME_CAR(extra_sources)))
+        break;
+    }
+    if (!SCHEME_NULLP(extra_sources)) {
+      scheme_wrong_type("raise-syntax-error", "list of syntax", 4, argc, argv);
+      return NULL;
+    }
+    extra_sources = argv[4];
+  }
+
+  scheme_wrong_syntax_with_more_sources(who,
+                                        (argc > 3) ? argv[3] : NULL,
+                                        (argc > 2) ? argv[2] : NULL,
+                                        extra_sources,
+                                        "%T", str);
 
   return NULL;
 }

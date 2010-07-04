@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2008 PLT Scheme Inc.
+  Copyright (c) 2004-2009 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
  
     This library is free software; you can redistribute it and/or
@@ -200,10 +200,6 @@ Scheme_Object *scheme_break_enabled_key;
 
 long scheme_total_gc_time;
 static long start_this_gc_time, end_this_gc_time;
-#ifndef MZ_PRECISE_GC
-extern MZ_DLLIMPORT void (*GC_collect_start_callback)(void);
-extern MZ_DLLIMPORT void (*GC_collect_end_callback)(void);
-#endif
 static void get_ready_for_GC(void);
 static void done_with_GC(void);
 #ifdef MZ_PRECISE_GC
@@ -224,6 +220,7 @@ static int missed_context_switch = 0;
 static int have_activity = 0;
 int scheme_active_but_sleeping = 0;
 static int thread_ended_with_activity;
+int scheme_no_stack_overflow;
 
 static int needs_sleep_cancelled;
 
@@ -437,7 +434,7 @@ extern BOOL WINAPI DllMain(HINSTANCE inst, ULONG reason, LPVOID reserved);
 #endif
 
 #ifdef MZ_PRECISE_GC
-static unsigned long get_current_stack_start(void);
+unsigned long scheme_get_current_thread_stack_start(void);
 #endif
 
 /*========================================================================*/
@@ -904,6 +901,28 @@ static Scheme_Object *current_memory_use(int argc, Scheme_Object *args[])
 /*                              custodians                                */
 /*========================================================================*/
 
+static void adjust_limit_table(Scheme_Custodian *c)
+{
+  /* If a custodian has a limit and any object or children, then it
+     must not be collected and merged with its parent. To prevent
+     collection, we register the custodian in the `limite_custodians'
+     table. */
+  if (c->has_limit) {
+    if (c->elems || CUSTODIAN_FAM(c->children)) {
+      if (!c->recorded) {
+        c->recorded = 1;
+        if (!limited_custodians)
+          limited_custodians = scheme_make_hash_table(SCHEME_hash_ptr);
+        scheme_hash_set(limited_custodians, (Scheme_Object *)c, scheme_true);
+      }
+    } else if (c->recorded) {
+      c->recorded = 0;
+      if (limited_custodians)
+        scheme_hash_set(limited_custodians, (Scheme_Object *)c, NULL);
+    }
+  }
+}
+
 static Scheme_Object *custodian_require_mem(int argc, Scheme_Object *args[])
 {
   long lim;
@@ -979,13 +998,11 @@ static Scheme_Object *custodian_limit_mem(int argc, Scheme_Object *args[])
     }
   }
 
-  if (!limited_custodians)
-    limited_custodians = scheme_make_hash_table(SCHEME_hash_ptr);
-  scheme_hash_set(limited_custodians, args[0], scheme_true);
   ((Scheme_Custodian *)args[0])->has_limit = 1;
+  adjust_limit_table((Scheme_Custodian *)args[0]);
   if (argc > 2) {
-    scheme_hash_set(limited_custodians, args[2], scheme_true);
     ((Scheme_Custodian *)args[2])->has_limit = 1;
+    adjust_limit_table((Scheme_Custodian *)args[2]);
   }
 
 #ifdef NEWGC_BTC_ACCOUNT
@@ -1079,6 +1096,9 @@ static void add_managed_box(Scheme_Custodian *m,
       m->data[i] = data;
       m->mrefs[i] = mref;
 
+      m->elems++;
+      adjust_limit_table(m);
+
       return;
     }
   }
@@ -1089,6 +1109,9 @@ static void add_managed_box(Scheme_Custodian *m,
   m->closers[m->count] = f;
   m->data[m->count] = data;
   m->mrefs[m->count] = mref;
+
+  m->elems++;
+  adjust_limit_table(m);
 
   m->count++;
 }
@@ -1116,6 +1139,8 @@ static void remove_managed(Scheme_Custodian_Reference *mr, Scheme_Object *o,
       if (old_data)
 	*old_data = m->data[i];
       m->data[i] = NULL;
+      --m->elems;
+      adjust_limit_table(m);
       break;
     }
   }
@@ -1167,6 +1192,8 @@ static void adjust_custodian_family(void *mgr, void *skip_move)
 
       m = next;
     }
+
+    adjust_limit_table(parent);
 
     /* Add remaining managed items to parent: */
     if (!skip_move) {
@@ -1225,6 +1252,9 @@ void insert_custodian(Scheme_Custodian *m, Scheme_Custodian *parent)
     CUSTODIAN_FAM(m->global_next) = NULL;
     CUSTODIAN_FAM(m->global_prev) = NULL;
   }
+
+  if (parent)
+    adjust_limit_table(parent);
 }
 
 Scheme_Custodian *scheme_make_custodian(Scheme_Custodian *parent) 
@@ -1471,12 +1501,28 @@ Scheme_Thread *scheme_do_close_managed(Scheme_Custodian *m, Scheme_Exit_Closer_F
       }
     }
 
+#ifdef MZ_PRECISE_GC
+    {
+      Scheme_Object *pr = m->cust_boxes, *wb;
+      Scheme_Custodian_Box *cb;
+      while (pr) {
+        wb = SCHEME_CAR(pr);
+        cb = (Scheme_Custodian_Box *)SCHEME_BOX_VAL(wb);
+        if (cb) cb->v = NULL;
+        pr = SCHEME_CDR(pr);
+      }
+      m->cust_boxes = NULL;
+    }
+#endif
+
     m->count = 0;
     m->alloc = 0;
+    m->elems = 0;
     m->boxes = NULL;
     m->closers = NULL;
     m->data = NULL;
     m->mrefs = NULL;
+    m->shut_down = 1;
     
     if (SAME_OBJ(m, start))
       break;
@@ -1485,9 +1531,7 @@ Scheme_Thread *scheme_do_close_managed(Scheme_Custodian *m, Scheme_Exit_Closer_F
     /* Remove this custodian from its parent */
     adjust_custodian_family(m, m);
 
-    if (m->has_limit) {
-      scheme_hash_set(limited_custodians, (Scheme_Object *)m, NULL);
-    }
+    adjust_limit_table(m);
     
     m = next_m;
   }
@@ -1719,10 +1763,29 @@ static Scheme_Object *make_custodian_box(int argc, Scheme_Object *argv[])
 #ifdef MZ_PRECISE_GC
   /* 3m  */
   {
-    Scheme_Object *wb, *pr;
+    Scheme_Object *wb, *pr, *prev;
     wb = GC_malloc_weak_box(cb, NULL, 0);
     pr = scheme_make_raw_pair(wb, cb->cust->cust_boxes);
     cb->cust->cust_boxes = pr;
+    cb->cust->num_cust_boxes++;
+    
+    /* The GC prunes the list of custodian boxes in accounting mode,
+       but prune here in case accounting is never triggered. */
+    if (cb->cust->num_cust_boxes > 2 * cb->cust->checked_cust_boxes) {
+      prev = pr;
+      pr = SCHEME_CDR(pr);
+      while (pr) {
+        wb = SCHEME_CAR(pr);
+        if (!SCHEME_BOX_VAL(pr)) {
+          SCHEME_CDR(prev) = SCHEME_CDR(pr);
+          --cb->cust->num_cust_boxes;
+        } else {
+          prev = pr;
+        }
+        pr = SCHEME_CDR(pr);
+      } 
+      cb->cust->checked_cust_boxes = cb->cust->num_cust_boxes;
+    }
   }
 #else
   /* CGC */
@@ -2106,10 +2169,10 @@ static Scheme_Thread *make_thread(Scheme_Config *config,
     thread_swap_callbacks = scheme_null;
     thread_swap_out_callbacks = scheme_null;
 
-    GC_collect_start_callback = get_ready_for_GC;
-    GC_collect_end_callback = done_with_GC;
+    GC_set_collect_start_callback(get_ready_for_GC);
+    GC_set_collect_end_callback(done_with_GC);
 #ifdef MZ_PRECISE_GC
-    GC_collect_inform_callback = inform_GC;
+    GC_set_collect_inform_callback(inform_GC);
 #endif
 
 #ifdef LINK_EXTENSIONS_BY_TABLE
@@ -2117,8 +2180,8 @@ static Scheme_Thread *make_thread(Scheme_Config *config,
     scheme_fuel_counter_ptr = &scheme_fuel_counter;
 #endif
     
-#if defined(MZ_PRECISE_GC) || defined(USE_SENORA_GC)
-    GC_get_thread_stack_base = get_current_stack_start;
+#if defined(MZ_PRECISE_GC)
+    GC_set_get_thread_stack_base(scheme_get_current_thread_stack_start);
 #endif
     process->stack_start = stack_base;
 
@@ -3375,13 +3438,16 @@ static int check_sleep(int need_activity, int sleep_now)
 {
   Scheme_Thread *p, *p2;
   int end_with_act;
-  
+
 #if defined(USING_FDS)
   DECL_FDSET(set, 3);
   fd_set *set1, *set2;
 #endif
   void *fds;
 
+  if (scheme_no_stack_overflow)
+    return 0;
+  
   /* Is everything blocked? */
   if (!do_atomic) {
     p = scheme_first_thread;
@@ -3579,7 +3645,7 @@ static int can_break_param(Scheme_Thread *p)
 
 int scheme_can_break(Scheme_Thread *p)
 {
-  if (!p->suspend_break) {
+  if (!p->suspend_break && !scheme_no_stack_overflow) {
     return can_break_param(p);
   } else
     return 0;
@@ -4297,6 +4363,18 @@ void scheme_start_atomic(void)
 void scheme_end_atomic_no_swap(void)
 {
   --do_atomic;
+}
+
+void scheme_start_in_scheduler(void)
+{
+  do_atomic++;
+  scheme_no_stack_overflow++;
+}
+      
+void scheme_end_in_scheduler(void)
+{
+  --do_atomic;
+  --scheme_no_stack_overflow;
 }
 
 void scheme_end_atomic(void)
@@ -7448,7 +7526,7 @@ Scheme_Jumpup_Buf_Holder *scheme_new_jmpupbuf_holder(void)
 }
 
 #ifdef MZ_PRECISE_GC
-static unsigned long get_current_stack_start(void)
+unsigned long scheme_get_current_thread_stack_start(void)
 {
   Scheme_Thread *p;
   p = scheme_current_thread;

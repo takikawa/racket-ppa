@@ -4,7 +4,7 @@
  *
  * Authors: Markus Holzem and Julian Smart
  *
- * Copyright: (C) 2004-2008 PLT Scheme Inc.
+ * Copyright: (C) 2004-2009 PLT Scheme Inc.
  * Copyright: (C) 1995, AIAI, University of Edinburgh (Julian)
  * Copyright: (C) 1995, GNU (Markus)
  *
@@ -1622,7 +1622,7 @@ void wxWindow::ScrollEventHandler(Widget    WXUNUSED(w),
 {
   XfwfScrollInfo *sinfo = (XfwfScrollInfo*)p_XfwfScrollInfo;
   wxScrollEvent *wxevent;
-  int dir = 0;
+  int dir = 0, not_understood = 0;
 
   wxWindow *win = (wxWindow *)GET_SAFEREF(winp);
   if (!win) {
@@ -1661,8 +1661,10 @@ void wxWindow::ScrollEventHandler(Widget    WXUNUSED(w),
       win->SetScrollPos(dir = wxHORIZONTAL, win->hs_pos + win->hs_page);
       break;
     case XfwfSTop:
-    case XfwfSLeftSide:
     case XfwfSBottom:
+      dir = wxVERTICAL;
+      break;
+    case XfwfSLeftSide:
     case XfwfSRightSide:
       dir = wxHORIZONTAL;
       break;
@@ -1678,7 +1680,7 @@ void wxWindow::ScrollEventHandler(Widget    WXUNUSED(w),
       }
       break;
     default:
-      dir = wxHORIZONTAL;
+      not_understood = 1;
       break;
     }
     {
@@ -1719,7 +1721,8 @@ void wxWindow::ScrollEventHandler(Widget    WXUNUSED(w),
       break;
     }
 
-    win->OnScroll(wxevent);
+    if (!not_understood)
+      win->OnScroll(wxevent);
 
     wxevent->eventHandle = NULL;
   }

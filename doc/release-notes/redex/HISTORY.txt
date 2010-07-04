@@ -1,4 +1,25 @@
-v4.2
+v4.1.4
+
+  * added redex-check, a tool for automatically generating test cases
+    for Redex specifications.
+
+  * improved traces for use in generating PostScript:
+
+    - added traces/ps
+
+    - added more coloring arguments to traces: #:scheme-colors? 
+    #:default-arrow-highlight-color, and #:default-arrow-color
+
+    - added the #:layout argument to traces 
+
+    - added term-node-set-position! and related term-node functions
+
+  * Added tracing to metafunctions (see current-traced-metafunctions)
+
+  * added caching-enabled? parameter (changed how set-cache-size! 
+    works)
+
+v4.1.2
 
   - added white-bracket-sizing to control how the brackets
     are typeset when rendering a metafunction.

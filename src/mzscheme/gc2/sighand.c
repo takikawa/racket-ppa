@@ -14,11 +14,42 @@
 
 /* ========== Linux signal handler ========== */
 #if defined(linux)
-# include <signal.h>
+#include <signal.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+static void launchgdb() {
+  pid_t pid = getpid();
+  char inbuffer[10];
+  
+  fprintf(stderr, "pid # %i run gdb \"gdb ./mzscheme3m %i\" or kill process.\n", pid, pid);
+  fflush(stderr);
+
+  while(read(fileno(stdin), inbuffer, 10) <= 0){
+    if(errno != EINTR){
+      fprintf(stderr, "Error detected %i\n", errno);
+    }
+  }
+}
+
 void fault_handler(int sn, struct siginfo *si, void *ctx)
 {
-  if (!designate_modified(si->si_addr))
+  void *p = si->si_addr;
+  if (si->si_code != SEGV_ACCERR) { /*SEGV_MAPERR*/
+    printf("SIGSEGV fault on %p\n", p);
+    launchgdb();
     abort();
+  }
+
+  if (!designate_modified(p)) {
+    if (si->si_code == SEGV_ACCERR) {
+      printf("mprotect fault on %p\n", p);
+    }
+    else {
+      printf("?? %i fault on %p\n", si->si_code, p);
+    }
+    abort();
+  }
 #  define NEED_SIGACTION
 #  define USE_SIGACTON_SIGNAL_KIND SIGSEGV
 }
@@ -118,16 +149,14 @@ static void initialize_signal_handler(GCTYPE *gc)
 # ifdef NEED_SIGWIN
   {
     HMODULE hm;
-    PVOID (WINAPI*aveh)(ULONG, gcPVECTORED_EXCEPTION_HANDLER);
 
     hm = LoadLibrary("kernel32.dll");
-    if (hm)
+    if (hm) {
+      PVOID (WINAPI*aveh)(ULONG, gcPVECTORED_EXCEPTION_HANDLER);
       aveh = (PVOID (WINAPI*)(ULONG, gcPVECTORED_EXCEPTION_HANDLER))GetProcAddress(hm, "AddVectoredExceptionHandler");
-    else
-      aveh = NULL;
-    if (aveh)
       aveh(TRUE, fault_handler);
-    else
+    }
+    else  /* WINDOWS 95 */
       gc->generations_available = 0;
   }
 # endif
@@ -150,15 +179,13 @@ static void remove_signal_handler(GCTYPE *gc)
 # ifdef NEED_SIGWIN
   if (gc->generations_available) {
     HMODULE hm;
-    ULONG (WINAPI*rveh)(gcPVECTORED_EXCEPTION_HANDLER);
 
     hm = LoadLibrary("kernel32.dll");
-    if (hm)
+    if (hm) {
+      ULONG (WINAPI*rveh)(gcPVECTORED_EXCEPTION_HANDLER);
       rveh = (ULONG (WINAPI*)(gcPVECTORED_EXCEPTION_HANDLER))GetProcAddress(hm, "RemoveVectoredExceptionHandler");
-    else
-      rveh = NULL;
-    if (rveh)
       rveh(fault_handler);
+    }
   }
 # endif
 }

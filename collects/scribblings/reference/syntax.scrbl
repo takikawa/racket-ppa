@@ -9,7 +9,9 @@
                               make-provide-transformer)
                      scheme/provide-syntax
                      scheme/provide
-                     scheme/nest))
+                     scheme/nest
+                     scheme/package
+                     scheme/splicing))
 
 @(define cvt (schemefont "CVT"))
 
@@ -26,9 +28,11 @@ See @secref["fully-expanded"] for the core grammar.
 Each syntactic form is described by a BNF-like notation that describes
 a combination of (syntax-wrapped) pairs, symbols, and other data (not
 a sequence of characters). These grammatical specifications are shown
-as follows:
+as in the following specification of a @schemekeywordfont{something}
+form:
 
-@specsubform[(#, @schemekeywordfont{some-form} id ...)]
+@specsubform[(#, @schemekeywordfont{something} id thing-expr ...)
+             #:contracts ([thing-expr number?])]
 
 Within such specifications,
 
@@ -40,26 +44,31 @@ Within such specifications,
  @item{@scheme[...+] indicates one or
        more repetitions of the preceding datum.}
 
- @item{italic meta-identifiers play the role of non-terminals; in
-       particular,
+ @item{Italic meta-identifiers play the role of non-terminals. Some
+       meta-identifier names imply syntactic constraints:
 
       @itemize{
 
-        @item{a meta-identifier that ends in @scheme[_id] stands for an
+        @item{A meta-identifier that ends in @scheme[_id] stands for an
               identifier.}
 
-        @item{a meta-identifier that ends in @scheme[_keyword] stands
+        @item{A meta-identifier that ends in @scheme[_keyword] stands
               for a keyword.}
 
-        @item{a meta-identifier that ends with @scheme[_expr] stands
-              for a sub-form that is expanded as an expression.}
+        @item{A meta-identifier that ends with @scheme[_expr] (such as
+              @scheme[_thing-expr]) stands for a sub-form that is
+              expanded as an expression.}
 
         @item{A meta-identifier that ends with @scheme[_body] stands
               for a sub-form that is expanded in an
               internal-definition context (see
               @secref["intdef-body"]).}
 
-              }} }
+              }} 
+
+ @item{Contracts indicate constraints on sub-expression results. For
+       example, @scheme[_thing-expr #, @elem{:} number?] indicates that
+       the expression @scheme[_thing-expr] must produce a number.}}
 
 @;------------------------------------------------------------------------
 @section[#:tag "module"]{Modules: @scheme[module], ...}
@@ -68,10 +77,13 @@ Within such specifications,
 
 @defform[(module id module-path form ...)]{
 
-Declares a module. If the @scheme[current-module-declare-name]
-parameter is set, the parameter value is used for the module name,
-otherwise @scheme[(#,(scheme quote) id)] is the name of the declared
-module.
+Declares a top-level module. If the
+@scheme[current-module-declare-name] parameter is set, the parameter
+value is used for the module name, otherwise @scheme[(#,(scheme quote)
+id)] is the name of the declared module.
+
+@margin-note/ref{For a @scheme[module]-like form for use @emph{within}
+modules and other contexts, see @scheme[define-package].}
 
 The @scheme[module-path] must be as for @scheme[require], and it
 supplies the initial bindings for the body @scheme[form]s. That is, it
@@ -594,7 +606,7 @@ export name, though the same binding can be specified with the
 multiple symbolic names.}
 
 
-@defform[(for-meta require-spec ...)]{See @scheme[require] and @scheme[provide].}
+@defform[(for-meta phase-level require-spec ...)]{See @scheme[require] and @scheme[provide].}
 @defform[(for-syntax require-spec ...)]{See @scheme[require] and @scheme[provide].}
 @defform[(for-template require-spec ...)]{See @scheme[require] and @scheme[provide].}
 @defform[(for-label require-spec ...)]{See @scheme[require] and @scheme[provide].}
@@ -1244,6 +1256,8 @@ and in the @scheme[body]s.
 
 @defform[(let-syntax ([id trans-expr] ...) body ...+)]{
 
+@margin-note/ref{See also @scheme[splicing-let-syntax].}
+
 Creates a @tech{transformer binding} (see
 @secref["transformer-model"]) of each @scheme[id] with the value of
 @scheme[trans-expr], which is an expression at @tech{phase level} 1
@@ -1261,16 +1275,22 @@ Each @scheme[id] is bound in the @scheme[body]s, and not in other
 
 @defform[(letrec-syntax ([id trans-expr] ...) body ...+)]{
 
+@margin-note/ref{See also @scheme[splicing-letrec-syntax].}
+
 Like @scheme[let-syntax], except that each @scheme[id] is also bound
 within all @scheme[trans-expr]s.}
 
 @defform[(let-syntaxes ([(id ...) trans-expr] ...) body ...+)]{
+
+@margin-note/ref{See also @scheme[splicing-let-syntaxes].}
 
 Like @scheme[let-syntax], but each @scheme[trans-expr] must produce as
 many values as corresponding @scheme[id]s, each of which is bound to
 the corresponding value.}
 
 @defform[(letrec-syntaxes ([(id ...) trans-expr] ...) body ...+)]{
+
+@margin-note/ref{See also @scheme[splicing-letrec-syntaxes].}
 
 Like @scheme[let-syntax], except that each @scheme[id] is also bound
 within all @scheme[trans-expr]s.}
@@ -1322,6 +1342,7 @@ position with respect to the @scheme[if] form.
 @mz-examples[
 (if (positive? -5) (error "doesn't get here") 2)
 (if (positive? 5) 1 (error "doesn't get here"))
+(if 'we-have-no-bananas "yes" "no")
 ]}
 
 @defform/subs[#:literals (else =>)
@@ -1930,6 +1951,9 @@ is similar to @scheme[#%app] and @scheme[#%module-begin], in that it
 provides a hook to control interactive evaluation through
 @scheme[load] (more precisely, the default @tech{load handler}) or
 @scheme[read-eval-print-loop].}
+
+@;------------------------------------------------------------------------
+@include-section["package.scrbl"]
 
 @;------------------------------------------------------------------------
 @section[#:tag "nest"]{Flattening Syntactic Sequences: @scheme[nest]}

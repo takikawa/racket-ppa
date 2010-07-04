@@ -1,165 +1,177 @@
-
 #lang scheme/base
-(require scheme/class)
+(require scheme/class
+         macro-debugger/util/class-iop
+         (for-syntax scheme/base))
 (provide (all-defined-out))
 
-;; displays-manager<%>
-(define displays-manager<%>
-  (interface ()
-    ;; add-syntax-display : display<%> -> void
-    add-syntax-display
+;; Helpers
 
-    ;; remove-all-syntax-displays : -> void
-    remove-all-syntax-displays))
+(define-for-syntax (join . args)
+  (define (->string x)
+    (cond [(string? x) x]
+          [(symbol? x) (symbol->string x)]
+          [(identifier? x) (symbol->string (syntax-e x))]
+          [else (error '->string)]))
+  (string->symbol (apply string-append (map ->string args))))
+
+;; not in notify.ss because notify depends on scheme/gui
+(define-interface-expander methods:notify
+  (lambda (stx)
+    (syntax-case stx ()
+      [(_ name ...)
+       (apply append
+              (for/list ([name (syntax->list #'(name ...))])
+                (list ;; (join "init-" #'name)
+                      (join "get-" name)
+                      (join "set-" name)
+                      (join "listen-" name))))])))
+
+;; Interfaces
+
+;; config<%>
+(define-interface config<%> ()
+  ((methods:notify suffix-option
+                   syntax-font-size
+                   colors
+                   width
+                   height
+                   props-percentage
+                   props-shown?)))
+
+;; displays-manager<%>
+(define-interface displays-manager<%> ()
+  (;; add-syntax-display : display<%> -> void
+   add-syntax-display
+
+   ;; remove-all-syntax-displays : -> void
+   remove-all-syntax-displays))
 
 ;; selection-manager<%>
-(define selection-manager<%>
-  (interface ()
-    ;; selected-syntax : syntax/#f
-    set-selected-syntax
-    get-selected-syntax
-    listen-selected-syntax
-    ))
+(define-interface selection-manager<%> ()
+  (;; selected-syntax : notify-box of syntax/#f
+   (methods:notify selected-syntax)))
 
 ;; mark-manager<%>
 ;; Manages marks, mappings from marks to colors
-(define mark-manager<%>
-  (interface ()
-    ;; get-primary-partition : -> partition
-    get-primary-partition))
+(define-interface mark-manager<%> ()
+  (;; get-primary-partition : -> partition
+   get-primary-partition
+
+   ;; reset-primary-partition : -> void
+   reset-primary-partition))
 
 ;; secondary-partition<%>
-(define secondary-partition<%>
-  (interface (displays-manager<%>)
-    ;; get-secondary-partition : -> partition<%>
-    get-secondary-partition
-
-    ;; set-secondary-partition : partition<%> -> void
-    set-secondary-partition
-
-    ;; listen-secondary-partition : (partition<%> -> void) -> void
-    listen-secondary-partition
-
-    ;; get-identifier=? : -> (cons string procedure)
-    get-identifier=?
-
-    ;; set-identifier=? : (cons string procedure) -> void
-    set-identifier=?
-
-    ;; listen-identifier=? : ((cons string procedure) -> void) -> void
-    listen-identifier=?))
+(define-interface secondary-partition<%> ()
+  (;; secondary-partition : notify-box of partition<%>
+   ;; identifier=? : notify-box of (cons string procedure)
+   (methods:notify secondary-partition
+                   identifier=?)))
 
 ;; controller<%>
-(define controller<%>
-  (interface (displays-manager<%>
-              selection-manager<%>
-              mark-manager<%> 
-              secondary-partition<%>)))
+(define-interface controller<%> (displays-manager<%>
+                                 selection-manager<%>
+                                 mark-manager<%>
+                                 secondary-partition<%>)
+  ())
+
 
 ;; host<%>
-(define host<%>
-  (interface ()
-    ;; get-controller : -> controller<%>
-    get-controller
+(define-interface host<%> ()
+  (;; get-controller : -> controller<%>
+   get-controller
 
-    ;; add-keymap : text snip
-    add-keymap
-    ))
-
+   ;; add-keymap : text snip
+   add-keymap))
 
 ;; display<%>
-(define display<%>
-  (interface ()
-    ;; refresh : -> void
-    refresh
+(define-interface display<%> ()
+  (;; refresh : -> void
+   refresh
 
-    ;; highlight-syntaxes : (list-of syntax) color -> void
-    highlight-syntaxes
+   ;; highlight-syntaxes : (list-of syntax) color -> void
+   highlight-syntaxes
 
-    ;; get-start-position : -> number
-    get-start-position
+   ;; underline-syntaxes : (listof syntax) -> void
+   underline-syntaxes
 
-    ;; get-end-position : -> number
-    get-end-position
+   ;; get-start-position : -> number
+   get-start-position
 
-    ;; get-range : -> range<%>
-    get-range))
+   ;; get-end-position : -> number
+   get-end-position
+
+   ;; get-range : -> range<%>
+   get-range))
 
 ;; range<%>
-(define range<%>
-  (interface ()
-    ;; get-ranges : datum -> (list-of (cons number number))
-    get-ranges
+(define-interface range<%> ()
+  (;; get-ranges : datum -> (list-of (cons number number))
+   get-ranges
 
-    ;; all-ranges : (list-of Range)
-    ;; Sorted outermost-first
-    all-ranges
+   ;; all-ranges : (list-of Range)
+   ;; Sorted outermost-first
+   all-ranges
 
-    ;; get-identifier-list : (list-of identifier)
-    get-identifier-list))
+   ;; get-identifier-list : (list-of identifier)
+   get-identifier-list))
+
 
 ;; A Range is (make-range datum number number)
 (define-struct range (obj start end))
 
 
 ;; syntax-prefs<%>
-(define syntax-prefs<%>
-  (interface ()
-    pref:width
-    pref:height
-    pref:props-percentage
-    pref:props-shown?))
+(define-interface syntax-prefs<%> ()
+  (pref:width
+   pref:height
+   pref:props-percentage
+   pref:props-shown?))
 
 ;; widget-hooks<%>
-(define widget-hooks<%>
-  (interface ()
-    ;; setup-keymap : -> void
-    setup-keymap
+(define-interface widget-hooks<%> ()
+  (;; setup-keymap : -> void
+   setup-keymap
 
-    ;; shutdown : -> void
-    shutdown
-    ))
+   ;; shutdown : -> void
+   shutdown))
 
 ;; keymap-hooks<%>
-(define keymap-hooks<%>
-  (interface ()
-    ;; make-context-menu : -> context-menu<%>
-    make-context-menu
+(define-interface keymap-hooks<%> ()
+  (;; make-context-menu : -> context-menu<%>
+   make-context-menu
 
-    ;; get-context-menu% : -> class
-    get-context-menu%))
+   ;; get-context-menu% : -> class
+   get-context-menu%))
 
 ;; context-menu-hooks<%>
-(define context-menu-hooks<%>
-  (interface ()
-    add-edit-items
-    after-edit-items
-    add-selection-items
-    after-selection-items
-    add-partition-items
-    after-partition-items))
+(define-interface context-menu-hooks<%> ()
+  (add-edit-items
+   after-edit-items
+   add-selection-items
+   after-selection-items
+   add-partition-items
+   after-partition-items))
 
 
 ;;----------
 
 ;; Convenience widget, specialized for displaying stx and not much else
-(define syntax-browser<%>
-  (interface ()
-    add-syntax
-    add-text
-    add-separator
-    erase-all
-    select-syntax
-    get-text
-    ))
+(define-interface syntax-browser<%> ()
+  (add-syntax
+   add-text
+   add-error-text
+   add-clickback
+   add-separator
+   erase-all
+   get-controller
+   get-text))
 
-(define partition<%>
-  (interface ()
-    ;; get-partition : any -> number
-    get-partition
+(define-interface partition<%> ()
+  (;; get-partition : any -> number
+   get-partition
 
-    ;; same-partition? : any any -> number
-    same-partition?
+   ;; same-partition? : any any -> number
+   same-partition?
 
-    ;; count : -> number
-    count))
+   ;; count : -> number
+   count))

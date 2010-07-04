@@ -1,8 +1,9 @@
 
 #lang scheme/base
 (require scheme/class
+         macro-debugger/util/class-iop
          syntax/stx
-         "partition.ss")
+         "interfaces.ss")
 (provide (all-defined-out))
 
 ;; Problem: If stx1 and stx2 are two distinguishable syntax objects, it
@@ -27,7 +28,7 @@
 ;; - 'over-limit        -- suffix > limit
 ;; - 'all-if-over-limit -- suffix > 0 if any over limit
 
-;; syntax->datum/tables : stx [partition% num SuffixOption]
+;; syntax->datum/tables : stx partition% num SuffixOption
 ;;                        -> (values s-expr hashtable hashtable)
 ;; When partition is not false, tracks the partititions that subterms belong to
 ;; When limit is a number, restarts processing with numbering? set to true
@@ -37,10 +38,8 @@
 ;;   - a hashtable mapping S-expressions to syntax objects
 ;;   - a hashtable mapping syntax objects to S-expressions
 ;; Syntax objects which are eq? will map to same flat values
-(define syntax->datum/tables
-  (case-lambda
-    [(stx) (table stx #f #f 'never)]
-    [(stx partition limit suffixopt) (table stx partition limit suffixopt)]))
+(define (syntax->datum/tables stx partition limit suffixopt)
+  (table stx partition limit suffixopt))
 
 ;; table : syntax maybe-partition% maybe-num SuffixOption -> (values s-expr hashtable hashtable)
 (define (table stx partition limit suffixopt)
@@ -48,10 +47,10 @@
     (case suffixopt
       ((never) (unintern (syntax-e id)))
       ((always)
-       (let ([n (send partition get-partition id)])
+       (let ([n (send: partition partition<%> get-partition id)])
          (if (zero? n) (unintern (syntax-e id)) (suffix (syntax-e id) n))))
       ((over-limit)
-       (let ([n (send partition get-partition id)])
+       (let ([n (send: partition partition<%> get-partition id)])
          (if (<= n limit)
              (unintern (syntax-e id))
              (suffix (syntax-e id) n))))))
@@ -64,7 +63,7 @@
                => (lambda (datum) datum)]
               [(and partition (identifier? obj))
                (when (and (eq? suffixopt 'all-if-over-limit)
-                          (> (send partition count) limit))
+                          (> (send: partition partition<%> count) limit))
                  (call-with-values (lambda () (table stx partition #f 'always))
                                    escape))
                (let ([lp-datum (make-identifier-proxy obj)])
@@ -73,7 +72,7 @@
                  lp-datum)]
               [(and (syntax? obj) (check+convert-special-expression obj))
                => (lambda (newobj)
-                    (when partition (send partition get-partition obj))
+                    (when partition (send: partition partition<%> get-partition obj))
                     (let* ([inner (cadr newobj)]
                            [lp-inner-datum (loop inner)]
                            [lp-datum (list (car newobj) lp-inner-datum)])
@@ -83,7 +82,7 @@
                       (hash-set! stx=>flat obj lp-datum)
                       lp-datum))]
               [(syntax? obj)
-               (when partition (send partition get-partition obj))
+               (when partition (send: partition partition<%> get-partition obj))
                (let ([lp-datum (loop (syntax-e obj))])
                  (hash-set! flat=>stx lp-datum obj)
                  (hash-set! stx=>flat obj lp-datum)

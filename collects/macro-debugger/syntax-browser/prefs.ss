@@ -5,13 +5,10 @@
          "interfaces.ss"
          "../util/notify.ss"
          "../util/misc.ss")
-(provide syntax-prefs%
-         syntax-prefs/readonly%
-
-         #;pref:tabify
-         #;pref:height
-         #;pref:width
-         #;pref:props-percentage)
+(provide prefs-base%
+         syntax-prefs-base%
+         syntax-prefs%
+         syntax-prefs/readonly%)
 
 (preferences:set-default 'SyntaxBrowser:Width 700 number?)
 (preferences:set-default 'SyntaxBrowser:Height 600 number?)
@@ -22,13 +19,38 @@
 (pref:get/set pref:height SyntaxBrowser:Height)
 (pref:get/set pref:props-percentage SyntaxBrowser:PropertiesPanelPercentage)
 (pref:get/set pref:props-shown? SyntaxBrowser:PropertiesPanelShown)
-(pref:get/set pref:tabify framework:tabify)
+
+(define prefs-base%
+  (class object%
+    ;; suffix-option : SuffixOption
+    (field/notify suffix-option (new notify-box% (value 'over-limit)))
+
+    ;; syntax-font-size : number/#f
+    ;; When non-false, overrides the default font size
+    (field/notify syntax-font-size (new notify-box% (value #f)))
+
+    ;; colors : (listof string)
+    (field/notify colors 
+      (new notify-box%
+           (value '("black" "red" "blue"
+                    "mediumforestgreen" "darkgreen" 
+                    "darkred"
+                    "cornflowerblue" "royalblue" "steelblue" "darkslategray" "darkblue"
+                    "indigo" "purple" 
+                    "orange" "salmon" "darkgoldenrod" "olive"))))
+
+    (super-new)))
 
 (define syntax-prefs-base%
-  (class object%
+  (class* prefs-base% (config<%>)
+    ;; width, height : number
     (notify-methods width)
     (notify-methods height)
+
+    ;; props-percentage : ...
     (notify-methods props-percentage)
+
+    ;; props-shown? : boolean
     (notify-methods props-shown?)
     (super-new)))
 

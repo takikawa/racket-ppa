@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2008 PLT Scheme Inc.
+  Copyright (c) 2004-2009 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -968,7 +968,7 @@ void scheme_get_substring_indices(const char *name, Scheme_Object *str,
 
   if (SCHEME_VECTORP(str))
     len = SCHEME_VEC_SIZE(str);
-  if (SCHEME_CHAR_STRINGP(str))
+  else if (SCHEME_CHAR_STRINGP(str))
     len = SCHEME_CHAR_STRTAG_VAL(str);
   else
     len = SCHEME_BYTE_STRTAG_VAL(str);
@@ -1940,7 +1940,7 @@ char *scheme_banner(void)
   else
     return "Welcome to MzScheme"
       " v" MZSCHEME_VERSION VERSION_SUFFIX
-      ", Copyright (c) 2004-2008 PLT Scheme Inc.\n";
+      ", Copyright (c) 2004-2009 PLT Scheme Inc.\n";
 }
 
 void scheme_set_banner(char *s)

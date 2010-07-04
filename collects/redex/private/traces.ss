@@ -1,8 +1,8 @@
+#lang scheme/base
+
 ;; should cache the count of new snips -- dont
 ;; use `count-snips'; use something associated with the
 ;; equal hash-table
-
-#lang scheme
 
 (require mrlib/graph
          "reduction-semantics.ss"
@@ -10,6 +10,8 @@
          "size-snip.ss"
          "dot.ss"
          scheme/gui/base
+         scheme/class
+         scheme/file
          framework)
 
 (preferences:set-default 'plt-reducer:show-bottom #t boolean?)
@@ -30,14 +32,86 @@
 (define (term-node-expr term-node) (send (term-node-snip term-node) get-expr))
 (define (term-node-labels term-node) (send (term-node-snip term-node) get-one-step-labels))
 (define (term-node-set-color! term-node r?)
-  (let loop ([snip (term-node-snip term-node)])
-    (parameterize ([current-eventspace (send snip get-my-eventspace)])
-      (queue-callback
-       (λ ()
-         (send (term-node-snip term-node) set-bad r?))))))
+  (snip/eventspace
+   (λ ()
+     (send (term-node-snip term-node) set-bad r?))))
 
 (define (term-node-set-red! term-node r?)
   (term-node-set-color! term-node (and r? "pink")))
+
+(define (term-node-set-position! term-node x y)
+  (snip/eventspace/ed 
+   term-node
+   (λ (ed)
+     (when ed
+       (send ed move-to (term-node-snip term-node) x y)))))
+
+(define (term-node-width term-node)
+  (snip/eventspace/ed 
+   term-node
+   (λ (ed)
+     (let ([lb (box 0)]
+           [rb (box 0)]
+           [snip (term-node-snip term-node)])
+       (if (and (send ed get-snip-location snip lb #f #f)
+                (send ed get-snip-location snip rb #f #t))
+           (- (unbox rb) (unbox lb))
+           0)))))
+
+(define (term-node-height term-node)
+  (snip/eventspace/ed 
+   term-node
+   (λ (ed)
+     (let ([tb (box 0)]
+           [bb (box 0)]
+           [snip (term-node-snip term-node)])
+       (if (and (send ed get-snip-location snip #f tb #f)
+                (send ed get-snip-location snip #f bb #t))
+           (- (unbox bb) (unbox tb))
+           0)))))
+
+(define (term-node-x term-node)
+  (snip/eventspace/ed 
+   term-node
+   (λ (ed)
+     (let ([xb (box 0)]
+           [snip (term-node-snip term-node)])
+       (if (send ed get-snip-location snip xb #f #f)
+           (unbox xb)
+           0)))))
+
+(define (term-node-y term-node)
+  (snip/eventspace/ed 
+   term-node
+   (λ (ed)
+     (let ([yb (box 0)]
+           [snip (term-node-snip term-node)])
+       (if (send ed get-snip-location snip #f yb #f)
+           (unbox yb)
+           0)))))
+
+(define (snip/eventspace/ed term-node f)
+  (snip/eventspace 
+   term-node
+   (λ ()
+     (let* ([snip (term-node-snip term-node)]
+            [admin (send snip get-admin)])
+       (f (and admin (send admin get-editor)))))))
+
+  
+(define (snip/eventspace term-node thunk)
+  (let* ([snip (term-node-snip term-node)]
+         [eventspace (send snip get-my-eventspace)])
+    (cond
+      [(eq? (current-eventspace) eventspace)
+       (thunk)]
+      [else
+       (let ([c (make-channel)])
+         (parameterize ([current-eventspace eventspace])
+           (queue-callback
+            (λ ()
+              (channel-put c (thunk)))))
+         (channel-get c))])))
 
 (define initial-font-size
   (make-parameter
@@ -51,11 +125,117 @@
 (define x-spacing 15)
 (define y-spacing 15)
 
-(define (traces reductions pre-exprs #:multiple? [multiple? #f] #:pred [pred (λ (x) #t)] #:pp [pp default-pretty-printer] #:colors [colors '()])
+(define (traces/ps reductions pre-exprs filename
+                   #:multiple? [multiple? #f] 
+                   #:pred [pred (λ (x) #t)] 
+                   #:pp [pp default-pretty-printer] 
+                   #:scheme-colors? [scheme-colors? #t]
+                   #:colors [colors '()]
+                   #:layout [layout void]
+                   #:edge-label-font [edge-label-font #f]
+                   )
+  (let-values ([(graph-pb canvas)
+                (traces reductions pre-exprs
+                        #:no-show-frame? #t
+                        #:multiple? multiple? 
+                        #:pred pred
+                        #:pp pp
+                        #:scheme-colors? scheme-colors?
+                        #:colors colors
+                        #:layout layout
+                        #:edge-label-font edge-label-font)])
+    (print-to-ps graph-pb canvas filename)))
+
+(define (print-to-ps graph-pb canvas filename)
+  (let ([admin (send graph-pb get-admin)]
+        [printing-admin (new printing-editor-admin% [ed graph-pb])])
+    (send canvas set-editor #f)
+    (send graph-pb set-admin printing-admin)
+    
+    (dynamic-wind
+     void
+     (λ ()
+       (send graph-pb size-cache-invalid)
+       
+       (send graph-pb re-run-layout)
+       
+       (let ([ps-setup (make-object ps-setup%)])
+         (send ps-setup copy-from (current-ps-setup))
+         (send ps-setup set-file filename)
+         (send ps-setup set-mode 'file)
+         (parameterize ([current-ps-setup ps-setup])
+           (send graph-pb print #f #f 'postscript #f #f #t))))
+     
+     (λ ()
+       (send graph-pb set-admin admin)
+       (send canvas set-editor graph-pb)
+       (send printing-admin shutdown) ;; do this early
+       (let loop ([snip (send graph-pb find-first-snip)])
+         (when snip
+           (send snip size-cache-invalid)
+           (loop (send snip next))))
+       (send graph-pb size-cache-invalid)
+       (send graph-pb re-run-layout)))))
+
+(define printing-editor-admin%
+  (class editor-admin%
+    
+    (init-field ed)
+    
+    (define temp-file (make-temporary-file "redex-size-snip-~a"))
+    
+    (define ps-dc
+      (let ([ps-setup (make-object ps-setup%)])
+        (send ps-setup copy-from (current-ps-setup))
+        (send ps-setup set-file temp-file)
+        (parameterize ([current-ps-setup ps-setup])
+          (make-object post-script-dc% #f #f #f #t))))
+    
+    (send ps-dc start-doc "fake dc")
+    (send ps-dc start-page)
+    (super-new)
+    
+    (define/public (shutdown)
+      (send ps-dc end-page)
+      (send ps-dc end-doc)
+      (delete-file temp-file))
+       
+    
+    (define/override (get-dc [x #f] [y #f])
+      (super get-dc x y)
+      ps-dc)
+    (define/override (get-max-view x y w h [full? #f])
+      (get-view x y w h full?))
+    (define/override (get-view x y w h [full? #f])
+      (when x (set-box! x 0.0))
+      (when y (set-box! x 0.0))
+      (when (box? w) (set-box! w 500))
+      (when (box? h) (set-box! h 500)))
+    
+    ;; the following methods are not overridden; they all default to doing nothing.
+    ;;   grab-caret
+    ;;   modified
+    ;;   needs-update
+    ;;   popup-menu
+    ;;   refresh-delayed?
+    ;;   resized
+    ;;   scroll-to
+    ;;   update-cursor
+    ))
+
+(define (traces reductions pre-exprs 
+                #:multiple? [multiple? #f] 
+                #:pred [pred (λ (x) #t)] 
+                #:pp [pp default-pretty-printer] 
+                #:colors [colors '()]
+                #:scheme-colors? [scheme-colors? #t]
+                #:layout [layout void]
+                #:edge-label-font [edge-label-font #f]
+                #:no-show-frame? [no-show-frame? #f])
   (define exprs (if multiple? pre-exprs (list pre-exprs)))
   (define main-eventspace (current-eventspace))
   (define saved-parameterization (current-parameterization))
-  (define graph-pb (new graph-pasteboard% [shrink-down? #t]))
+  (define graph-pb (new graph-pasteboard% [layout layout] [edge-label-font edge-label-font]))
   (define f (instantiate red-sem-frame% ()
               (label "PLT Redex Reduction Graph")
               (style '(toolbar-button))
@@ -95,7 +275,7 @@
                           "Reducing..." 
                           lower-panel
                           (lambda (x y)
-                            (reduce-button-callback))))
+                            (reduce-button-callback #f))))
   (define status-message (instantiate message% ()
                            (label "")
                            (parent lower-panel)
@@ -146,13 +326,19 @@
         (semaphore-wait s)
         ans)))
   
+  (define default-colors (list (dark-pen-color) (light-pen-color) 
+                               (dark-text-color) (light-text-color)
+                               (dark-brush-color) (light-brush-color)))
+  
   ;; only changed on the reduction thread
   ;; frontier : (listof (is-a?/c graph-editor-snip%))
   (define frontier 
-    (map (lambda (expr) (build-snip snip-cache #f expr pred pp 
-                                    (dark-pen-color) (light-pen-color)
-                                    (dark-text-color) (light-text-color) #f))
-         exprs))
+    (filter
+     (λ (x) x)
+     (map (lambda (expr) (apply build-snip
+                                snip-cache #f expr pred pp #f scheme-colors?
+                                default-colors))
+          exprs)))
   
   ;; set-font-size : number -> void
   ;; =eventspace main thread=
@@ -167,41 +353,32 @@
       (let loop ([snip (send graph-pb find-first-snip)])
         (when snip
           (when (is-a? snip reflowing-snip<%>)
-            (send snip shrink-down))
+            (send snip reflow-program))
           (loop (send snip next))))))
   
-  ;; color-spec-list->color-scheme : (list (union string? #f)^4) -> (list string?^4)
-  ;; converts a list of user-specified colors (including false) into a list of color strings, filling in
-  ;; falses with the default colors
-  (define (color-spec-list->color-scheme l)
-    (map (λ (c d) (or c d))
-         l 
-         (list (dark-pen-color) (light-pen-color) (dark-text-color) (light-text-color))))
-  
+  ;; fill-out : (listof X) (listof X) -> (listof X)
+  ;; produces a list whose length matches defaults but
+  (define (fill-out l defaults)
+    (let loop ([l l]
+               [default defaults])
+      (cond
+        [(null? l) defaults]
+        [else 
+         (cons (car l) (loop (cdr l) (cdr defaults)))])))
   
   (define name->color-ht 
     (let ((ht (make-hash)))
       (for-each 
        (λ (c)
-         (hash-set! ht (car c) 
-                    (color-spec-list->color-scheme
-                     (match (cdr c)
-                       [`(,color)
-                        (list color color (dark-text-color) (light-text-color))]
-                       [`(,dark-arrow-color ,light-arrow-color)
-                        (list dark-arrow-color light-arrow-color (dark-text-color) (light-text-color))]
-                       [`(,dark-arrow-color ,light-arrow-color ,text-color) 
-                        (list dark-arrow-color light-arrow-color text-color text-color)]
-                       [`(,_ ,_ ,_ ,_)
-                        (cdr c)]))))
+         (hash-set! ht (car c) (fill-out (cdr c) default-colors)))
        colors)
       ht))
   
-  ;; red->colors : string -> (values string string string string)
+  ;; red->colors : string -> (values string string string string string string)
   (define (red->colors reduction-name)
     (apply values (hash-ref name->color-ht
                             reduction-name 
-                            (λ () (list (dark-pen-color) (light-pen-color) (dark-text-color) (light-text-color))))))
+                            default-colors)))
   
   ;; reduce-frontier : -> void
   ;; =reduction thread=
@@ -223,11 +400,13 @@
                            (let-values ([(name sexp) (apply values red+sexp)])
                              (call-on-eventspace-main-thread
                               (λ ()
-                                (let-values ([(dark-arrow-color light-arrow-color dark-label-color light-label-color) 
+                                (let-values ([(dark-arrow-color light-arrow-color dark-label-color light-label-color
+                                                                dark-pen-color
+                                                                light-pen-color) 
                                               (red->colors name)])
-                                  (build-snip snip-cache snip sexp pred pp 
+                                  (build-snip snip-cache snip sexp pred pp name scheme-colors? 
                                               light-arrow-color dark-arrow-color dark-label-color light-label-color
-                                              name))))))
+                                              dark-pen-color light-pen-color))))))
                          (apply-reduction-relation/tag-with-names reductions (send snip get-expr))))]
                   [new-y 
                    (call-on-eventspace-main-thread
@@ -280,9 +459,10 @@
     (send reduce-button enable #t)
     (send font-size enable #t))
   
-  ;; reduce-button-callback : -> void
+  ;; reduce-button-callback : boolean -> void
   ;; =eventspace main thread=
-  (define (reduce-button-callback)
+  (define (reduce-button-callback show-all-at-once?)
+    (when show-all-at-once? (send graph-pb begin-edit-sequence))
     (send reduce-button enable #f)
     (send reduce-button set-label "Reducing...")
     (thread
@@ -290,6 +470,10 @@
        (do-some-reductions)
        (queue-callback
         (lambda () ;; =eventspace main thread=
+          (send graph-pb begin-edit-sequence)
+          (send graph-pb re-run-layout)
+          (send graph-pb end-edit-sequence)
+          (when show-all-at-once? (send graph-pb end-edit-sequence))
           (scroll-to-rightmost-snip)
           (send reduce-button set-label "Reduce")
           (cond
@@ -366,10 +550,19 @@
               (list bottom-panel)
               null)))
   (out-of-dot-state) ;; make sure the state is initialized right
+  (set-font-size (initial-font-size)) ;; have to call this before 'insert-into' or else it triggers resizing
   (insert-into init-rightmost-x 0 graph-pb frontier)
-  (set-font-size (initial-font-size))
-  (reduce-button-callback)
-  (send f show #t))
+  (cond
+    [no-show-frame?
+     (let ([s (make-semaphore)]) 
+       (thread (λ () 
+                 (do-some-reductions)
+                 (semaphore-post s)))
+       (yield s))
+     (values graph-pb ec)]
+    [else
+     (reduce-button-callback #t)
+     (send f show #t)]))
 
 (define red-sem-frame%
   (class (frame:standard-menus-mixin (frame:basic-mixin frame%))
@@ -395,6 +588,10 @@
 (define graph-pasteboard% 
   (class (resizing-pasteboard-mixin
           (graph-pasteboard-mixin pasteboard%))
+    
+    (init-field layout) ;; (-> (listof term-node) void)
+    ;; this is the function supplied by the :#layout argument to traces or traces/ps
+    
     (define dot-callback #f)
     (define/public (set-dot-callback cb) (set! dot-callback cb))
     (define/override (draw-edges dc left top right bottom dx dy)
@@ -408,6 +605,17 @@
     
     (define/augment (can-interactive-move? evt) mobile?)
     (define/augment (can-interactive-resize? evt) mobile?)
+    
+    (inherit find-first-snip)
+    (define/public (re-run-layout)
+      (layout 
+       (let loop ([snip (find-first-snip)])
+         (cond
+           [(not snip) '()]
+           [(is-a? snip reflowing-snip<%>)
+            (cons (send snip get-term-node)
+                  (loop (send snip next)))]
+           [else (loop (send snip next))]))))
     
     (super-new)))
 
@@ -466,7 +674,7 @@
     (super-new)))
 
 (define program-text%
-  (class scheme:text%
+  (class size-text%
     (define bad-color #f)
     (define/public (set-bad color) (set! bad-color color))
     
@@ -507,34 +715,39 @@
 ;;              sexp
 ;;              sexp -> boolean
 ;;              (any port number -> void)
-;;              color
 ;;              (union #f string)
+;;              color^6
 ;;           -> (union #f (is-a?/c graph-editor-snip%))
 ;; returns #f if a snip corresponding to the expr has already been created.
 ;; also adds in the links to the parent snip
 ;; =eventspace main thread=
-(define (build-snip cache parent-snip expr pred pp light-arrow-color dark-arrow-color dark-label-color light-label-color name)
+(define (build-snip cache parent-snip expr pred pp name scheme-colors?
+                    light-arrow-color dark-arrow-color dark-label-color light-label-color
+                    dark-brush-color light-brush-color)
   (let-values ([(snip new?)
                 (let/ec k
-                  (k
-                   (hash-ref
-                    cache
-                    expr
-                    (lambda ()
-                      (let ([new-snip (make-snip parent-snip expr pred pp)])
-                        (hash-set! cache expr new-snip)
-                        (k new-snip #t))))
-                   #f))])
-    
+                  (values (hash-ref
+                           cache
+                           expr
+                           (lambda ()
+                             (let ([new-snip (make-snip parent-snip expr pred pp scheme-colors?)])
+                               (hash-set! cache expr new-snip)
+                               (k new-snip #t))))
+                          #f))])
+
     (when parent-snip
       (send snip record-edge-label parent-snip name)
       (add-links/text-colors parent-snip snip
                              (send the-pen-list find-or-create-pen dark-arrow-color 0 'solid)
                              (send the-pen-list find-or-create-pen light-arrow-color 0 'solid)
-                             (send the-brush-list find-or-create-brush (dark-brush-color) 'solid)
-                             (send the-brush-list find-or-create-brush (light-brush-color) 'solid)
-                             (make-object color% dark-label-color)
-                             (make-object color% light-label-color)
+                             (send the-brush-list find-or-create-brush dark-brush-color 'solid)
+                             (send the-brush-list find-or-create-brush light-brush-color 'solid)
+                             (if (is-a? dark-label-color color%)
+                                 dark-label-color
+                                 (make-object color% dark-label-color))
+                             (if (is-a? light-label-color color%)
+                                 light-label-color
+                                 (make-object color% light-label-color))
                              0 0
                              name)
       (update-badness pred parent-snip (send parent-snip get-expr)))
@@ -562,7 +775,7 @@
 ;;          -> (is-a?/c graph-editor-snip%)
 ;; unconditionally creates a new graph-editor-snip
 ;; =eventspace main thread=
-(define (make-snip parent-snip expr pred pp)
+(define (make-snip parent-snip expr pred pp scheme-colors?)
   (let* ([text (new program-text%)]
          [es (instantiate graph-editor-snip% ()
                (char-width (initial-char-width))
@@ -571,7 +784,9 @@
                (pp pp)
                (expr expr))])
     (send text set-autowrap-bitmap #f)
+    (send text set-max-width 'none)
     (send text freeze-colorer)
+    (send text stop-colorer (not scheme-colors?))
     (send es format-expr)
     es))
 
@@ -604,12 +819,18 @@
        (unbox bt))))
 
 (provide traces
+         traces/ps
          term-node?
          term-node-parents
          term-node-children
          term-node-labels 
          term-node-set-red!
          term-node-set-color!
+         term-node-set-position!
+         term-node-x
+         term-node-y
+         term-node-width
+         term-node-height
          term-node-expr)
 
 (provide reduction-steps-cutoff initial-font-size

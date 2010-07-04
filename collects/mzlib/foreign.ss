@@ -58,11 +58,11 @@
           (unsafe malloc) (unsafe free) (unsafe end-stubborn-change)
           cpointer? ptr-equal? ptr-add (unsafe ptr-ref) (unsafe ptr-set!)
           ptr-offset ptr-add! offset-ptr? set-ptr-offset!
-          ctype? make-ctype make-cstruct-type (unsafe make-sized-byte-string)
+          ctype? make-ctype make-cstruct-type (unsafe make-sized-byte-string) ctype->layout
           _void _int8 _uint8 _int16 _uint16 _int32 _uint32 _int64 _uint64
           _fixint _ufixint _fixnum _ufixnum
           _float _double _double*
-          _bool _pointer _scheme _fpointer
+          _bool _pointer _scheme _fpointer function-ptr
           (unsafe memcpy) (unsafe memmove) (unsafe memset)
           (unsafe malloc-immobile-cell) (unsafe free-immobile-cell))
 
@@ -468,24 +468,28 @@
 ;; optionally applying a wrapper function to modify the result primitive
 ;; (callouts) or the input procedure (callbacks).
 (define* (_cprocedure itypes otype
-                      #:abi [abi #f] #:wrapper [wrapper #f] #:keep [keep #f])
-  (_cprocedure* itypes otype abi wrapper keep))
+                      #:abi [abi #f] 
+                      #:wrapper [wrapper #f] 
+                      #:keep [keep #f]
+                      #:atomic? [atomic? #f])
+  (_cprocedure* itypes otype abi wrapper keep atomic?))
 
 ;; for internal use
 (define held-callbacks (make-weak-hasheq))
-(define (_cprocedure* itypes otype abi wrapper keep)
+(define (_cprocedure* itypes otype abi wrapper keep atomic?)
   (define-syntax-rule (make-it wrap)
     (make-ctype _fpointer
       (lambda (x)
-        (let ([cb (ffi-callback (wrap x) itypes otype abi)])
-          (cond [(eq? keep #t) (hash-set! held-callbacks x cb)]
-                [(box? keep)
-                 (let ([x (unbox keep)])
-                   (set-box! keep
-                             (if (or (null? x) (pair? x)) (cons cb x) cb)))]
-                [(procedure? keep) (keep cb)])
-          cb))
-      (lambda (x) (wrap (ffi-call x itypes otype abi)))))
+        (and x
+             (let ([cb (ffi-callback (wrap x) itypes otype abi atomic?)])
+               (cond [(eq? keep #t) (hash-set! held-callbacks x cb)]
+                     [(box? keep)
+                      (let ([x (unbox keep)])
+                        (set-box! keep
+                                  (if (or (null? x) (pair? x)) (cons cb x) cb)))]
+                     [(procedure? keep) (keep cb)])
+               cb)))
+      (lambda (x) (and x (wrap (ffi-call x itypes otype abi))))))
   (if wrapper (make-it wrapper) (make-it begin)))
 
 ;; Syntax for the special _fun type:
@@ -513,6 +517,7 @@
   (define xs     #f)
   (define abi    #f)
   (define keep   #f)
+  (define atomic? #f)
   (define inputs #f)
   (define output #f)
   (define bind   '())
@@ -577,9 +582,10 @@
                      (begin (set! var (cadr xs)) (set! xs (cddr xs)) (loop)))]
             ...
             [else (err "unknown keyword" (car xs))]))
-        (when (keyword? k) (kwds [#:abi abi] [#:keep keep]))))
+        (when (keyword? k) (kwds [#:abi abi] [#:keep keep] [#:atomic? atomic?]))))
     (unless abi  (set! abi  #'#f))
     (unless keep (set! keep #'#t))
+    (unless atomic? (set! atomic? #'#f))
     ;; parse known punctuation
     (set! xs (map (lambda (x)
                     (syntax-case* x (-> ::) id=? [:: '::] [-> '->] [_  x]))
@@ -670,17 +676,26 @@
                         (string->symbol (string-append "ffi-wrapper:" n)))
                        body))])
         #`(_cprocedure* (list #,@(filter-map car inputs)) #,(car output)
-                        #,abi (lambda (ffi) #,body) #,keep))
+                        #,abi (lambda (ffi) #,body) #,keep #,atomic?))
       #`(_cprocedure* (list #,@(filter-map car inputs)) #,(car output)
-                      #,abi #f #,keep)))
+                      #,abi #f #,keep #,atomic?)))
   (syntax-case stx ()
     [(_ x ...) (begin (set! xs (syntax->list #'(x ...))) (do-fun))]))
+
+(define (function-ptr p fun-ctype)
+  (if (or (cpointer? p) (procedure? p))
+      (if (eq? (ctype->layout fun-ctype) 'fpointer)
+           (if (procedure? p)
+               ((ctype-scheme->c fun-ctype) p)
+               ((ctype-c->scheme fun-ctype) p))
+          (raise-type-error 'function-ptr "function ctype" fun-ctype))
+      (raise-type-error 'function-ptr "cpointer" p)))
 
 ;; ----------------------------------------------------------------------------
 ;; String types
 
 ;; The internal _string type uses the native ucs-4 encoding, also providing a
-;; utf-16 type (note: these do not use #f as NULL).
+;; utf-16 type
 (provide _string/ucs-4 _string/utf-16)
 
 ;; 8-bit string encodings, #f is NULL
@@ -1477,7 +1492,7 @@
           (identifiers? #'(slot ...)))
      (make-syntax #'_TYPE #f #'(slot ...) #'(slot-type ...))]
     [(_ (_TYPE _SUPER) ([slot slot-type] ...))
-     (and (_-identifier? #'_TYPE) (identifiers? #'(slot ...)))
+     (and (_-identifier? #'_TYPE stx) (identifiers? #'(slot ...)))
      (with-syntax ([super (datum->syntax #'_TYPE 'super #'_TYPE)])
        (make-syntax #'_TYPE #t #'(super slot ...) #'(_SUPER slot-type ...)))]))
 
@@ -1495,12 +1510,32 @@
             [else (msg/fail-thunk)]))))
 
 ;; ----------------------------------------------------------------------------
+;;
+
+(define prim-synonyms
+  #hasheq((double* . double)
+          (fixint . long)
+          (ufixint . ulong)
+          (fixnum . long)
+          (ufixnum . ulong)
+          (path . bytes)
+          (symbol . bytes)
+          (scheme . pointer)))
+
+(define (ctype->layout c)
+  (let ([b (ctype-basetype c)])
+    (cond
+     [(ctype? b) (ctype->layout b)]
+     [(list? b) (map ctype->layout b)]
+     [else (hash-ref prim-synonyms b b)])))
+
+;; ----------------------------------------------------------------------------
 ;; Misc utilities
 
 ;; Used by set-ffi-obj! to get the actual value so it can be kept around
 (define (get-lowlevel-object x type)
   (let ([basetype (ctype-basetype type)])
-    (if basetype
+    (if (ctype? basetype)
       (let ([s->c (ctype-scheme->c type)])
         (get-lowlevel-object (if s->c (s->c x) x) basetype))
       (values x type))))

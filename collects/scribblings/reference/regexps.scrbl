@@ -23,7 +23,7 @@ port, it matches UTF-8 encodings (see @secref["encodings"]) of
 matching character streams; if a byte regexp is used with a character
 string, it matches bytes in the UTF-8 encoding of the string.
 
-Regular expressions can be compiled into a @defterm{regexp value} for
+Regular expressions can be compiled into a @deftech{regexp value} for
 repeated matches. The @scheme[regexp] and @scheme[byte-regexp]
 procedures convert a string or byte string (respectively) into a
 regexp value using one syntax of regular expressions that is most
@@ -103,25 +103,25 @@ arbitrarily large sequence).
 
 @defproc[(regexp? [v any/c]) boolean?]{
 
-Returns @scheme[#t] if @scheme[v] is a regexp value created by
+Returns @scheme[#t] if @scheme[v] is a @tech{regexp value} created by
 @scheme[regexp] or @scheme[pregexp], @scheme[#f] otherwise.}
 
 
 @defproc[(pregexp? [v any/c]) boolean?]{
 
-Returns @scheme[#t] if @scheme[v] is a regexp value created by
+Returns @scheme[#t] if @scheme[v] is a @tech{regexp value} created by
 @scheme[pregexp] (not @scheme[regexp]), @scheme[#f] otherwise.}
 
 
 @defproc[(byte-regexp? [v any/c]) boolean?]{
 
-Returns @scheme[#t] if @scheme[v] is a regexp value created by
+Returns @scheme[#t] if @scheme[v] is a @tech{regexp value} created by
 @scheme[byte-regexp] or @scheme[byte-pregexp], @scheme[#f] otherwise.}
 
 
 @defproc[(byte-pregexp? [v any/c]) boolean?]{
 
-Returns @scheme[#t] if @scheme[v] is a regexp value created by
+Returns @scheme[#t] if @scheme[v] is a @tech{regexp value} created by
 @scheme[byte-pregexp] (not @scheme[byte-regexp]), @scheme[#f]
 otherwise.}
 
@@ -129,15 +129,15 @@ otherwise.}
 @defproc[(regexp [str string?]) regexp?]{
 
 Takes a string representation of a regular expression (using the
-syntax in @secref["regexp-syntax"]) and compiles it into a regexp
-value. Other regular expression procedures accept either a string or a
-regexp value as the matching pattern. If a regular expression string
+syntax in @secref["regexp-syntax"]) and compiles it into a @tech{regexp
+value}. Other regular expression procedures accept either a string or a
+@tech{regexp value} as the matching pattern. If a regular expression string
 is used multiple times, it is faster to compile the string once to a
-regexp value and use it for repeated matches instead of using the
+@tech{regexp value} and use it for repeated matches instead of using the
 string each time.
 
 The @scheme[object-name] procedure returns
-the source string for a regexp value.
+the source string for a @tech{regexp value}.
 
 @examples[
 (regexp "ap*le")
@@ -160,10 +160,10 @@ Like @scheme[regexp], except that it uses a slightly different syntax
 
 Takes a byte-string representation of a regular expression (using the
 syntax in @secref["regexp-syntax"]) and compiles it into a
-byte-regexp value.
+byte-@tech{regexp value}.
 
 The @scheme[object-name] procedure
-returns the source byte string for a regexp value.
+returns the source byte string for a @tech{regexp value}.
 
 @examples[
 (byte-regexp #"ap*le")
@@ -210,8 +210,8 @@ case-sensitively.
                (listof (or/c bytes? #f))
                #f)]{
 
-Attempts to match @scheme[pattern] (a string, byte string, regexp
-value, or byte-regexp value) once to a portion of @scheme[input].  The
+Attempts to match @scheme[pattern] (a string, byte string, @tech{regexp
+value}, or byte-@tech{regexp value}) once to a portion of @scheme[input].  The
 matcher finds a portion of @scheme[input] that matches and is closest
 to the start of the input (after @scheme[start-pos]).
 
@@ -236,7 +236,7 @@ end-of-input @litchar{$} refers to the @scheme[end-pos]th position or
 If the match fails, @scheme[#f] is returned. If the match succeeds, a
 list containing strings or byte string, and possibly @scheme[#f], is
 returned. The list contains strings only if @scheme[input] is a string
-and @scheme[pattern] is not a byte regexp value. Otherwise, the list
+and @scheme[pattern] is not a byte regexp. Otherwise, the list
 contains byte strings (substrings of the UTF-8 encoding of
 @scheme[input], if @scheme[input] is a string).
 
@@ -312,10 +312,13 @@ byte strings corresponding to a sequence of matches of
 results for parenthesized sub-patterns in @scheme[pattern] are not
 returned.)
 
-If @scheme[pattern] matches a zero-length string or byte sequence, and
-if it is at the beginning or end of the input, then the match does not
-count. Otherwise, one character or byte in the input is skipped before
-attempting another match.
+The @scheme[pattern] is used in order to find matches, where each
+match attempt starts at the end of the last match.  Empty matches are
+handled like any matches, returning a zero-length string or byte
+sequence (they are more useful in the complementing
+@scheme[regexp-split] function).  However, the @scheme[pattern] is
+restricted from matching an empty string at the beginning (or right
+after a previous match) or at the end.
 
 If @scheme[input] contains no matches (in the range @scheme[start-pos]
 to @scheme[end-pos]), @scheme[null] is returned. Otherwise, each item
@@ -525,7 +528,7 @@ strings (if @scheme[pattern] is a string or character regexp and
 @scheme[input] that are separated by matches to
 @scheme[pattern]. Adjacent matches are separated with @scheme[""] or
 @scheme[#""]. Zero-length matches are treated the same as in
-@scheme[regexp-match*].
+@scheme[regexp-match*], but are more useful in this case.
 
 If @scheme[input] contains no matches (in the range @scheme[start-pos]
 to @scheme[end-pos]), the result is a list containing @scheme[input]'s
@@ -539,8 +542,11 @@ case splitting goes to the end of @scheme[input] (which corresponds to
 an end-of-file if @scheme[input] is an input port).
 
 @examples[
-(regexp-split #rx"x" "12x4x6")
-(regexp-split #rx"." "12x4x6")
+(regexp-split #rx" +" "12  34")
+(regexp-split #rx"." "12  34")
+(regexp-split #rx"" "12  34")
+(regexp-split #rx" *" "12  34")
+(regexp-split #px"\\b" "12, 13 and 14.")
 ]}
 
 @;------------------------------------------------------------------------

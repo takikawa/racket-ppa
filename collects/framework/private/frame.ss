@@ -1942,6 +1942,13 @@
                       (send text-to-search set-position anchor-pos))))))
             (send tlw hide-search)))))
 
+(send search/replace-keymap map-function "f3" "unhide-search-and-toggle-focus")
+(send search/replace-keymap add-function "unhide-search-and-toggle-focus"
+      (λ (text evt)
+        (let ([tlw (send text get-top-level-window)])
+          (when tlw
+            (send tlw unhide-search-and-toggle-focus)))))
+
 (define searchable-canvas% 
   (class editor-canvas% 
     (inherit refresh get-dc get-client-size)
@@ -1952,7 +1959,6 @@
         (set! red? r?)
         (refresh)))
     (define/override (on-paint)
-      (super on-paint)
       (when red?
         (let ([dc (get-dc)])
           (let-values ([(cw ch) (get-client-size)])
@@ -1962,7 +1968,8 @@
               (send dc set-brush "pink" 'solid)
               (send dc draw-rectangle 0 0 cw ch)
               (send dc set-pen pen)
-              (send dc set-brush brush))))))
+              (send dc set-brush brush)))))
+      (super on-paint))
     (super-new)))
 
 (define-local-member-name 
@@ -1981,19 +1988,7 @@
     (define/public (get-case-sensitive-search?) case-sensitive-search?)
     (define replace-visible? (preferences:get 'framework:replace-visible?))
   
-    (define/override (edit-menu:find-callback menu evt) 
-      (cond
-        [hidden?
-         (unhide-search #t)]
-        [(or (not text-to-search)
-             (send (send text-to-search get-canvas) has-focus?))
-         (send find-edit set-position 0 (send find-edit last-position))
-         (send find-canvas focus)]
-        [else
-         (let ([canvas (send text-to-search get-canvas)])
-           (when canvas
-             (send canvas focus)))])
-      #t)
+    (define/override (edit-menu:find-callback menu evt) (unhide-search-and-toggle-focus) #t)
     (define/override (edit-menu:create-find?) #t)
     
     (define/override (edit-menu:find-next-callback menu evt) (search 'forward) #t)
@@ -2099,6 +2094,19 @@
         (when focus?
           (send find-edit set-position 0 (send find-edit last-position))
           (send (send find-edit get-canvas) focus))))
+    
+    (define/public (unhide-search-and-toggle-focus)
+      (cond
+        [hidden?
+         (unhide-search #t)]
+        [(or (not text-to-search)
+             (send (send text-to-search get-canvas) has-focus?))
+         (send find-edit set-position 0 (send find-edit last-position))
+         (send find-canvas focus)]
+        [else
+         (let ([canvas (send text-to-search get-canvas)])
+           (when canvas
+             (send canvas focus)))]))
     
     (define/public (search searching-direction)
       (unhide-search #f)

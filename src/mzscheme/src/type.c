@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2008 PLT Scheme Inc.
+  Copyright (c) 2004-2009 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -51,7 +51,7 @@ static void init_type_arrays()
   REGISTER_SO(scheme_type_hash2s);
   
   maxtype = _scheme_last_type_;
-  allocmax = maxtype + 10;
+  allocmax = maxtype + 100;
 
   type_names = MALLOC_N(char *, allocmax);
   scheme_type_readers = MALLOC_N_ATOMIC(Scheme_Type_Reader, allocmax);
@@ -577,7 +577,7 @@ void scheme_register_traversers(void)
   GC_REG_TRAV(scheme_svector_type, svector_val);
 
   GC_REG_TRAV(scheme_set_macro_type, small_object);
-  GC_REG_TRAV(scheme_id_macro_type, small_object);
+  GC_REG_TRAV(scheme_id_macro_type, twoptr_obj);
 
   GC_REG_TRAV(scheme_stx_type, stx_val);
   GC_REG_TRAV(scheme_stx_offset_type, stx_off_val);

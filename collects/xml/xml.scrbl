@@ -23,9 +23,9 @@ generating XML. XML can be represented as an instance of the
 @scheme[document] structure type, or as a kind of S-expression that is
 called an @deftech{X-expression}.
 
-The @schememodname[xml] library does not provides Document Type
-Declaration (DTD) processing, validation, expanding user-defined
-entities, or reading user-defined entities in attributes.
+The @schememodname[xml] library does not provide Document Type
+Declaration (DTD) processing, including preservation of DTDs in read documents, or validation.
+It also does not expand user-defined entities or read user-defined entities in attributes.
 
 @; ----------------------------------------------------------------------
 
@@ -103,7 +103,7 @@ Represents an element.}
 
 Returns @scheme[#t] if @scheme[v] is a @scheme[pcdata] instance,
 @scheme[element] instance, an @scheme[entity] instance,
-@scheme[comment], or @scheme[pcdata] instance.}
+@scheme[comment], or @scheme[cdata] instance.}
 
 @defstruct[(attribute source) ([name symbol?] [value string?])]{
 
@@ -235,9 +235,16 @@ like @scheme[display-xml].}
 
 @section{XML and X-expression Conversions}
 
+@defboolparam[permissive? v]{
+ If this is set to non-false, then @scheme[xml->xexpr] will allow
+ non-XML objects, such as other structs, in the content of the converted XML
+ and leave them in place in the resulting ``@tech{X-expression}''.
+}
+                             
 @defproc[(xml->xexpr [content content?]) xexpr?]{
 
-Converts document content into an @tech{X-expression}.}
+Converts document content into an @tech{X-expression}, using
+@scheme[permissive?] to determine if foreign objects are allowed.}
 
 @defproc[(xexpr->xml [xexpr xexpr?]) content?]{
 

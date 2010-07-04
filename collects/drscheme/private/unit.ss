@@ -1334,6 +1334,7 @@ module browser threading seems wrong.
         execute-callback
         get-current-tab
         open-in-new-tab
+        close-current-tab
         on-tab-change
         enable-evaluation
         disable-evaluation
@@ -1343,6 +1344,7 @@ module browser threading seems wrong.
         ensure-rep-shown
         ensure-rep-hidden
         ensure-defs-shown
+        
         
         get-language-menu
         register-toolbar-button
@@ -2505,7 +2507,7 @@ module browser threading seems wrong.
         (define/private (change-to-delta-tab dt)
           (change-to-nth-tab (modulo (+ (send current-tab get-i) dt) (length tabs))))
         
-        (define/private (close-current-tab)
+        (define/public-final (close-current-tab)
           (cond
             [(null? tabs) (void)]
             [(null? (cdr tabs)) (void)]
@@ -2528,6 +2530,7 @@ module browser threading seems wrong.
                                            [else (last tabs)])))
                         (loop (cdr l-tabs))))]))]))
         
+        ;; a helper private method for close-current-tab -- doesn't close an arbitrary tab.
         (define/private (close-tab tab)
           (cond
             [(send tab can-close?)
@@ -3079,7 +3082,7 @@ module browser threading seems wrong.
         
         (define/override (edit-menu:between-find-and-preferences edit-menu)
           (super edit-menu:between-find-and-preferences edit-menu)
-          (new menu-item%
+          (new menu:can-restore-menu-item%
                [label (string-constant complete-word)]
                [shortcut #\/]
                [parent edit-menu]
@@ -3092,6 +3095,22 @@ module browser threading seems wrong.
                [callback (λ (x y)
                            (send (get-edit-target-object) auto-complete))])
           (add-modes-submenu edit-menu))
+        
+        (define/override (edit-menu:between-select-all-and-find edit-menu)
+          (new menu:can-restore-checkable-menu-item%
+               [label (string-constant overwrite-mode)]
+               [parent edit-menu]
+               [demand-callback
+                (λ (mi)
+                  (let ([target (get-edit-target-object)])
+                    (send mi enable (is-a? target text%))
+		    (when (is-a? target text%)
+                      (send mi check (and target (send target get-overwrite-mode))))))]
+               [callback (λ (x y)
+                           (let ([target (get-edit-target-object)])
+                             (send target set-overwrite-mode
+                                   (not (send target get-overwrite-mode)))))])
+          (super edit-menu:between-select-all-and-find edit-menu))
         
         ;; capability-menu-items : hash-table[menu -o> (listof (list menu-item number key)))
         (define capability-menu-items (make-hasheq))
@@ -3289,10 +3308,10 @@ module browser threading seems wrong.
                         (when num
                           (cond
                             [(eq? num #t)
-                             (preferences:set 'drscheme:memory-limit #f)
+                             (preferences:set 'drscheme:child-only-memory-limit #f)
                              (send interactions-text set-custodian-limit #f)]
                             [else
-                             (preferences:set 'drscheme:memory-limit 
+                             (preferences:set 'drscheme:child-only-memory-limit 
                                               (* 1024 1024 num))
                              (send interactions-text set-custodian-limit
                                    (* 1024 1024 num))]))))]))
@@ -3841,7 +3860,7 @@ module browser threading seems wrong.
              [parent hp]
              [init-value (if current-limit
                              (format "~a" current-limit)
-                             "128")]
+                             "64")]
              [stretchable-width #f]
              [min-width 100]
              [callback
@@ -3883,7 +3902,7 @@ module browser threading seems wrong.
         (let* ([n (string->number (send txt get-text))])
           (and n
                (integer? n)
-               (100 . <= . n))))
+               (1 . <= . n))))
       
       (define (background sd)
         (let ([txt (send tb get-editor)])

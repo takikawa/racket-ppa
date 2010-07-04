@@ -1,6 +1,6 @@
 /*
   MzScheme
-  Copyright (c) 2004-2008 PLT Scheme Inc.
+  Copyright (c) 2004-2009 PLT Scheme Inc.
   Copyright (c) 1995-2001 Matthew Flatt
 
     This library is free software; you can redistribute it and/or
@@ -681,26 +681,27 @@ void scheme_install_macro(Scheme_Bucket *b, Scheme_Object *v)
 
 static Scheme_Object *
 define_execute_with_dynamic_state(Scheme_Object *vec, int delta, int defmacro,
-	       Resolve_Prefix *rp, Scheme_Env *dm_env, Scheme_Dynamic_State *dyn_state)
+                                  Resolve_Prefix *rp, Scheme_Env *dm_env, 
+                                  Scheme_Dynamic_State *dyn_state)
 {
-  Scheme_Object *name, *macro, *vals, *var;
+  Scheme_Object *name, *macro, *vals_expr, *vals, *var;
   int i, g, show_any;
   Scheme_Bucket *b;
   Scheme_Object **save_runstack = NULL;
 
-  vals = SCHEME_VEC_ELS(vec)[0];
+  vals_expr = SCHEME_VEC_ELS(vec)[0];
 
   if (dm_env) {
     scheme_prepare_exp_env(dm_env);
 
     save_runstack = scheme_push_prefix(dm_env->exp_env, rp, NULL, NULL, 1, 1);
-    vals = scheme_eval_linked_expr_multi_with_dynamic_state(vals, dyn_state);
+    vals = scheme_eval_linked_expr_multi_with_dynamic_state(vals_expr, dyn_state);
     if (defmacro == 2)
       dm_env = NULL;
     else
       scheme_pop_prefix(save_runstack);
   } else {
-    vals = _scheme_eval_linked_expr_multi(vals);
+    vals = _scheme_eval_linked_expr_multi(vals_expr);
     dm_env = NULL;
   }
 
@@ -735,7 +736,7 @@ define_execute_with_dynamic_state(Scheme_Object *vec, int delta, int defmacro,
 	  scheme_shadow(((Scheme_Bucket_With_Home *)b)->home, (Scheme_Object *)b->key, 1);
 
 	  if (SCHEME_TOPLEVEL_FLAGS(var) & SCHEME_TOPLEVEL_CONST) {
-	    ((Scheme_Bucket_With_Flags *)b)->flags |= GLOB_IS_IMMUTATED;
+            ((Scheme_Bucket_With_Flags *)b)->flags |= GLOB_IS_IMMUTATED;
 	  }
 	}
       }
@@ -767,7 +768,11 @@ define_execute_with_dynamic_state(Scheme_Object *vec, int delta, int defmacro,
       scheme_shadow(((Scheme_Bucket_With_Home *)b)->home, (Scheme_Object *)b->key, 1);
       
       if (SCHEME_TOPLEVEL_FLAGS(var) & SCHEME_TOPLEVEL_CONST) {
-	((Scheme_Bucket_With_Flags *)b)->flags |= GLOB_IS_IMMUTATED;
+        int flags = GLOB_IS_IMMUTATED;
+        if (SCHEME_PROCP(vals_expr) 
+            || SAME_TYPE(SCHEME_TYPE(vals_expr), scheme_unclosed_procedure_type))
+          flags |= GLOB_IS_CONSISTENT;
+        ((Scheme_Bucket_With_Flags *)b)->flags |= flags;
       }
       
       if (defmacro)
@@ -1010,7 +1015,7 @@ define_values_resolve(Scheme_Object *data, Resolve_Info *rslv)
 	&& (!(SCHEME_TOPLEVEL_FLAGS(a) & SCHEME_TOPLEVEL_MUTATED))) {
       a = scheme_toplevel_to_flagged_toplevel(a, SCHEME_TOPLEVEL_CONST);
     }
-    a = scheme_resolve_toplevel(rslv, a);
+    a = scheme_resolve_toplevel(rslv, a, 0);
     SCHEME_CAR(l) = a;
     cnt++;
   }
@@ -1738,8 +1743,7 @@ set_syntax (Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec,
     }
   }
   
-  set_undef = SCHEME_TRUEP(scheme_get_param(scheme_current_config(),
-					    MZCONFIG_ALLOW_SET_UNDEFINED));
+  set_undef = (rec[drec].comp_flags & COMP_ALLOW_SET_UNDEFINED);
   
   return scheme_make_syntax_compiled(SET_EXPD, 
 				     cons(set_undef
@@ -4092,6 +4096,7 @@ gen_let_syntax (Scheme_Object *form, Scheme_Comp_Env *origenv, char *formname,
   Scheme_Object *first = NULL;
   Scheme_Compiled_Let_Value *last = NULL, *lv;
   DupCheckRecord r;
+  int rec_env_already = rec[drec].env_already;
 
   i = scheme_stx_proper_list_length(form);
   if (i < 3)
@@ -4160,8 +4165,14 @@ gen_let_syntax (Scheme_Object *form, Scheme_Comp_Env *origenv, char *formname,
   names = MALLOC_N(Scheme_Object *, num_bindings);
   if (frame_already)
     frame = frame_already;
-  else
-    frame = scheme_new_compilation_frame(num_bindings, 0, origenv, rec[drec].certs);
+  else {
+    frame = scheme_new_compilation_frame(num_bindings, 
+                                         (rec_env_already ? SCHEME_INTDEF_SHADOW : 0),
+                                         origenv, 
+                                         rec[drec].certs);
+    if (rec_env_already)
+      frame_already = frame;
+  }
   env = frame;
 
   recs = MALLOC_N_RT(Scheme_Compile_Info, (num_clauses + 1));
@@ -4172,7 +4183,7 @@ gen_let_syntax (Scheme_Object *form, Scheme_Comp_Env *origenv, char *formname,
 
   defname = scheme_check_name_property(form, defname);
   
-  if (!star) {
+  if (!star && !frame_already) {
     scheme_begin_dup_symbol_check(&r, env);
   }
 
@@ -4216,7 +4227,7 @@ gen_let_syntax (Scheme_Object *form, Scheme_Comp_Env *origenv, char *formname,
       names[k++] = name;
     }
     
-    if (!star) {
+    if (!star && !frame_already) {
       for (m = pre_k; m < k; m++) {
 	scheme_dup_symbol_check(&r, NULL, names[m], "binding", form);
       }
@@ -4319,6 +4330,7 @@ do_let_expand(Scheme_Object *form, Scheme_Comp_Env *origenv, Scheme_Expand_Info 
   Scheme_Comp_Env *use_env, *env;
   Scheme_Expand_Info erec1;
   DupCheckRecord r;
+  int rec_env_already = erec[drec].env_already;
 
   vars = SCHEME_STX_CDR(form);
 
@@ -4385,8 +4397,8 @@ do_let_expand(Scheme_Object *form, Scheme_Comp_Env *origenv, Scheme_Expand_Info 
   }
   
   /* Note: no more letstar handling needed after this point */
-
-  scheme_begin_dup_symbol_check(&r, origenv);
+  if (!env_already && !rec_env_already)
+    scheme_begin_dup_symbol_check(&r, origenv);
 
   vlist = scheme_null;
   vs = vars;
@@ -4405,15 +4417,18 @@ do_let_expand(Scheme_Object *form, Scheme_Comp_Env *origenv, Scheme_Expand_Info 
     {
       DupCheckRecord r2;
       Scheme_Object *names = name;
-      scheme_begin_dup_symbol_check(&r2, origenv);
+      if (!env_already && !rec_env_already)
+        scheme_begin_dup_symbol_check(&r2, origenv);
       while (SCHEME_STX_PAIRP(names)) {
 	name = SCHEME_STX_CAR(names);
 
 	scheme_check_identifier(NULL, name, NULL, origenv, form);
 	vlist = cons(name, vlist);
 
-	scheme_dup_symbol_check(&r2, NULL, name, "clause binding", form);
-	scheme_dup_symbol_check(&r, NULL, name, "binding", form);
+        if (!env_already && !rec_env_already) {
+          scheme_dup_symbol_check(&r2, NULL, name, "clause binding", form);
+          scheme_dup_symbol_check(&r, NULL, name, "binding", form);
+        }
 	
 	names = SCHEME_STX_CDR(names);
       }
@@ -4430,7 +4445,10 @@ do_let_expand(Scheme_Object *form, Scheme_Comp_Env *origenv, Scheme_Expand_Info 
   if (env_already)
     env = env_already;
   else
-    env = scheme_add_compilation_frame(vlist, origenv, 0, erec[drec].certs);
+    env = scheme_add_compilation_frame(vlist, 
+                                       origenv, 
+                                       (rec_env_already ? SCHEME_INTDEF_SHADOW : 0),
+                                       erec[drec].certs);
 
   if (letrec)
     use_env = env;
@@ -5171,6 +5189,10 @@ quote_syntax_syntax(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_In
 
   /* Push all certificates in the environment down to the syntax object. */
   stx = scheme_stx_add_inactive_certs(stx, rec[drec].certs);
+  if (env->genv->module && !rec[drec].no_module_cert) {
+    /* Also certify access to the enclosing module: */
+    stx = scheme_stx_cert(stx, scheme_false, env->genv, NULL, NULL, 0);
+  }
   
   if (rec[drec].comp) {
     return scheme_register_stx_in_prefix(stx, env, rec, drec);
@@ -5277,29 +5299,44 @@ define_for_syntaxes_execute(Scheme_Object *form)
   return do_define_syntaxes_execute(form, NULL, 1);
 }
 
-static Scheme_Object *do_define_syntaxes_jit(Scheme_Object *expr)
+static Scheme_Object *do_define_syntaxes_jit(Scheme_Object *expr, int jit)
 {
-  Scheme_Object *naya;
+  Resolve_Prefix *rp, *orig_rp;
+  Scheme_Object *naya, *rhs;
   
-  naya = scheme_jit_expr(SCHEME_VEC_ELS(expr)[0]);
+  rhs = SCHEME_VEC_ELS(expr)[0];
+  if (jit)
+    naya = scheme_jit_expr(rhs);
+  else
+    naya = rhs;
+
+  orig_rp = (Resolve_Prefix *)SCHEME_VEC_ELS(expr)[1];
+  rp = scheme_prefix_eval_clone(orig_rp);
   
-  if (SAME_OBJ(naya, expr))
+  if (SAME_OBJ(naya, rhs)
+      && SAME_OBJ(orig_rp, rp))
     return expr;
   else {
     expr = clone_vector(expr, 0);
     SCHEME_VEC_ELS(expr)[0] = naya;
+    SCHEME_VEC_ELS(expr)[1] = (Scheme_Object *)rp;
     return expr;
   }
 }
 
 static Scheme_Object *define_syntaxes_jit(Scheme_Object *expr)
 {
-  return do_define_syntaxes_jit(expr);
+  return do_define_syntaxes_jit(expr, 1);
 }
 
 static Scheme_Object *define_for_syntaxes_jit(Scheme_Object *expr)
 {
-  return do_define_syntaxes_jit(expr);
+  return do_define_syntaxes_jit(expr, 1);
+}
+
+Scheme_Object *scheme_syntaxes_eval_clone(Scheme_Object *expr)
+{
+  return do_define_syntaxes_jit(expr, 0);
 }
 
 static void do_define_syntaxes_validate(Scheme_Object *data, Mz_CPort *port, 
@@ -5386,6 +5423,8 @@ static Scheme_Object *do_define_syntaxes_optimize(Scheme_Object *data, Optimize_
   val = SCHEME_CDR(data);
 
   einfo = scheme_optimize_info_create();
+  if (info->inline_fuel < 0)
+    einfo->inline_fuel = -1;
 
   val = scheme_optimize_expr(val, einfo);
 
@@ -5522,10 +5561,13 @@ do_define_syntaxes_syntax(Scheme_Object *form, Scheme_Comp_Env *env,
   rec1.comp = 1;
   rec1.dont_mark_local_use = 0;
   rec1.resolve_module_ids = 0;
+  rec1.no_module_cert = 0;
   rec1.value_name = NULL;
   rec1.certs = rec[drec].certs;
   rec1.observer = NULL;
   rec1.pre_unwrapped = 0;
+  rec1.env_already = 0;
+  rec1.comp_flags = rec[drec].comp_flags;
 
   if (for_stx) {
     names = defn_targets_syntax(names, exp_env, &rec1, 0);
@@ -5590,10 +5632,9 @@ define_for_syntaxes_expand(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Exp
 Scheme_Object *scheme_make_environment_dummy(Scheme_Comp_Env *env)
 { 
   /* Get a prefixed-based accessor for a dummy top-level bucket. It's
-     used to "link" to the right environment at run time. The `begin'
-     symbol is arbitrary; the top-level/prefix support handles a symbol
-     as a "toplevel" specially. */
-  return scheme_register_toplevel_in_prefix(begin_symbol, env, NULL, 0);
+     used to "link" to the right environment at run time. The #f as
+     a toplevel is handled in the prefix linker specially. */
+  return scheme_register_toplevel_in_prefix(scheme_false, env, NULL, 0);
 }
 
 Scheme_Env *scheme_environment_from_dummy(Scheme_Object *dummy)
@@ -5713,10 +5754,13 @@ void scheme_bind_syntaxes(const char *where, Scheme_Object *names, Scheme_Object
   mrec.comp = 1;
   mrec.dont_mark_local_use = 0;
   mrec.resolve_module_ids = 1;
+  mrec.no_module_cert = 1;
   mrec.value_name = NULL;
   mrec.certs = certs;
   mrec.observer = NULL;
   mrec.pre_unwrapped = 0;
+  mrec.env_already = 0;
+  mrec.comp_flags = rec[drec].comp_flags;
 
   a = scheme_compile_expr_lift_to_let(a, eenv, &mrec, 0);
 
@@ -5727,6 +5771,8 @@ void scheme_bind_syntaxes(const char *where, Scheme_Object *names, Scheme_Object
   rp = scheme_resolve_prefix(eenv->genv->phase, eenv->prefix, 0);
 
   oi = scheme_optimize_info_create();
+  if (!(rec[drec].comp_flags & COMP_CAN_INLINE))
+    oi->inline_fuel = -1;
   a = scheme_optimize_expr(a, oi);
 
   ri = scheme_resolve_info_create(rp);
@@ -5805,8 +5851,10 @@ do_letrec_syntaxes(const char *where,
   Scheme_Object *form, *bindings, *var_bindings, *body, *v;
   Scheme_Object *names_to_disappear;
   Scheme_Comp_Env *stx_env, *var_env, *rhs_env;
-  int cnt, stx_cnt, var_cnt, i, j, depth, saw_var;
+  int cnt, stx_cnt, var_cnt, i, j, depth, saw_var, env_already;
   DupCheckRecord r;
+
+  env_already = rec[drec].env_already;
 
   form = SCHEME_STX_CDR(forms);
   if (!SCHEME_STX_PAIRP(form))
@@ -5823,7 +5871,10 @@ do_letrec_syntaxes(const char *where,
 
   scheme_rec_add_certs(rec, drec, forms);
 
-  stx_env = scheme_new_compilation_frame(0, 0, origenv, rec[drec].certs);
+  if (env_already)
+    stx_env = origenv;
+  else
+    stx_env = scheme_new_compilation_frame(0, 0, origenv, rec[drec].certs);
 
   rhs_env = stx_env;
 
@@ -5846,8 +5897,8 @@ do_letrec_syntaxes(const char *where,
   else
     names_to_disappear = NULL;
 
-
-  scheme_begin_dup_symbol_check(&r, stx_env);
+  if (!env_already)
+    scheme_begin_dup_symbol_check(&r, stx_env);
 
   /* Pass 1: Check and Rename */
 
@@ -5881,8 +5932,10 @@ do_letrec_syntaxes(const char *where,
 
       for (l = SCHEME_STX_CAR(a); SCHEME_STX_PAIRP(l); l = SCHEME_STX_CDR(l)) {
 	a = SCHEME_STX_CAR(l);
-	scheme_check_identifier(where, a, NULL, stx_env, forms);
-	scheme_dup_symbol_check(&r, where, a, "binding", forms);
+        if (!env_already) {
+          scheme_check_identifier(where, a, NULL, stx_env, forms);
+          scheme_dup_symbol_check(&r, where, a, "binding", forms);
+        }
 	cnt++;
       }
       if (i)
@@ -5895,30 +5948,35 @@ do_letrec_syntaxes(const char *where,
       var_cnt = cnt - stx_cnt;
   }
 
-  scheme_add_local_syntax(stx_cnt, stx_env);
-  if (saw_var)
-    var_env = scheme_new_compilation_frame(var_cnt, 0, stx_env, rec[drec].certs);
-  else
+  if (!env_already)
+    scheme_add_local_syntax(stx_cnt, stx_env);
+  
+  if (saw_var) {
+    var_env = scheme_new_compilation_frame(var_cnt, 
+                                           (env_already ? SCHEME_INTDEF_SHADOW : 0), 
+                                           stx_env, 
+                                           rec[drec].certs);
+  } else
     var_env = NULL;
 
-  for (i = 0; i < (var_env ? 2 : 1) ; i++) {
+  for (i = (env_already ? 1 : 0); i < (var_env ? 2 : 1) ; i++) {
     cnt = (i ? var_cnt : stx_cnt);
     if (cnt > 0) {
-      /* Add new syntax names to the environment: */
+      /* Add new syntax/variable names to the environment: */
       j = 0;
       for (v = (i ? var_bindings : bindings); SCHEME_STX_PAIRP(v); v = SCHEME_STX_CDR(v)) {
-	Scheme_Object *a, *l;
+        Scheme_Object *a, *l;
 	
-	a = SCHEME_STX_CAR(v);
-	for (l = SCHEME_STX_CAR(a); SCHEME_STX_PAIRP(l); l = SCHEME_STX_CDR(l)) {
-	  a = SCHEME_STX_CAR(l);
-	  if (i) {
-	    /* In compile mode, this will get re-written by the letrec compiler.
-	       But that's ok. We need it now for env_renames. */
-	    scheme_add_compilation_binding(j++, a, var_env);
-	  } else
-	    scheme_set_local_syntax(j++, a, NULL, stx_env);
-	}
+        a = SCHEME_STX_CAR(v);
+        for (l = SCHEME_STX_CAR(a); SCHEME_STX_PAIRP(l); l = SCHEME_STX_CDR(l)) {
+          a = SCHEME_STX_CAR(l);
+          if (i) {
+            /* In compile mode, this will get re-written by the letrec compiler.
+               But that's ok. We need it now for env_renames. */
+            scheme_add_compilation_binding(j++, a, var_env);
+          } else
+            scheme_set_local_syntax(j++, a, NULL, stx_env);
+        }
       }
     }
   }
@@ -5949,29 +6007,31 @@ do_letrec_syntaxes(const char *where,
   
   scheme_prepare_exp_env(stx_env->genv);
 
-  i = 0;
+  if (!env_already) {
+    i = 0;
 
-  for (v = bindings; SCHEME_STX_PAIRP(v); v = SCHEME_STX_CDR(v)) {
-    Scheme_Object *a, *names;
+    for (v = bindings; SCHEME_STX_PAIRP(v); v = SCHEME_STX_CDR(v)) {
+      Scheme_Object *a, *names;
 
-    SCHEME_EXPAND_OBSERVE_NEXT(rec[drec].observer);
+      SCHEME_EXPAND_OBSERVE_NEXT(rec[drec].observer);
 
-    a = SCHEME_STX_CAR(v);
-    names = SCHEME_STX_CAR(a);
-    a = SCHEME_STX_CDR(a);
-    a = SCHEME_STX_CAR(a);
+      a = SCHEME_STX_CAR(v);
+      names = SCHEME_STX_CAR(a);
+      a = SCHEME_STX_CDR(a);
+      a = SCHEME_STX_CAR(a);
 
-    scheme_bind_syntaxes(where, names, a,
-                         stx_env->genv->exp_env,
-                         stx_env->insp,
-                         rec, drec,
-                         stx_env, rhs_env, 
-                         &i);
+      scheme_bind_syntaxes(where, names, a,
+                           stx_env->genv->exp_env,
+                           stx_env->insp,
+                           rec, drec,
+                           stx_env, rhs_env, 
+                           &i);
+    }
   }
 
   SCHEME_EXPAND_OBSERVE_NEXT_GROUP(rec[drec].observer);
 
-  if (names_to_disappear) {
+  if (!env_already && names_to_disappear) {
     /* Need to add renaming for disappeared bindings. If they
        originated for internal definitions, then we need both
        pre-renamed and renamed, since some might have been

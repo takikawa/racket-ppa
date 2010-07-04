@@ -25,12 +25,13 @@ TODO
          scheme/pretty
          scheme/unit
          scheme/list
-         "drsig.ss"
+         
          string-constants
          setup/xref
          scheme/gui/base
          framework
-         browser/external)
+         browser/external
+         "drsig.ss")
 
 (provide rep@ with-stacktrace-name)
 
@@ -866,7 +867,7 @@ TODO
              (memory-killed-thread #f)
              (user-custodian #f)
              (custodian-limit (and (custodian-memory-accounting-available?)
-                                   (preferences:get 'drscheme:memory-limit)))
+                                   (preferences:get 'drscheme:child-only-memory-limit)))
              (user-eventspace-box (make-weak-box #f))
              (user-namespace-box (make-weak-box #f))
              (user-eventspace-main-thread #f)
@@ -924,7 +925,7 @@ TODO
       (field (need-interaction-cleanup? #f))
       
       (define/private (no-user-evaluation-message frame exit-code memory-killed?)
-        (let* ([new-limit (and custodian-limit (+ (* 1024 1024 128) custodian-limit))]
+        (let* ([new-limit (and custodian-limit (+ custodian-limit custodian-limit))]
                [ans (message-box/custom
                      (string-constant evaluation-terminated)
                      (string-append
@@ -952,7 +953,7 @@ TODO
                      )])
           (when (equal? ans 3)
             (set-custodian-limit new-limit)
-            (preferences:set 'drscheme:memory-limit new-limit))
+            (preferences:set 'drscheme:child-only-memory-limit new-limit))
           (set-insertion-point (last-position))
           (insert-warning "\nInteractions disabled")))
       
@@ -1290,10 +1291,6 @@ TODO
                  (set! in-evaluation? #f)
                  (update-running #f)
                  (send context set-breakables #f #f)
-                 
-                 ;; set this relatively late, so that the 
-                 ;; setup code for the language doesn't use it
-                 ;(current-load/use-compiled drscheme-load/use-compiled-handler)
                  
                  ;; after this returns, future event dispatches
                  ;; will use the user's break parameterization
@@ -1699,70 +1696,6 @@ TODO
   
   (define input-delta (make-object style-delta%))
   (send input-delta set-delta-foreground (make-object color% 0 150 0))
-
-  (define drscheme-load/use-compiled-handler
-    (let ([ol (current-load/use-compiled)])
-      (λ (path mod) ;; =User=
-        (verify-file-saved path)
-        (cond
-          [(already-a-compiled-file? path)
-           (ol path mod)]
-          [else
-           (error 'drscheme-load/use-compiled-handler
-                  "time to compile! ~s" path)]))))
-  
-  ;; =User=
-  (define (verify-file-saved path) 
-    (parameterize ([current-eventspace drscheme:init:system-eventspace])
-      (let ([s (make-semaphore 0)])
-        (queue-callback
-         (λ () ;; =Kernel= =Handler=
-           (let ([frame (send (group:get-the-frame-group) locate-file path)])
-             (when frame
-               (send frame offer-to-save-file path)))
-           (semaphore-post s)))
-        (semaphore-wait s))))
-    
-  ;; =User=
-  (define (already-a-compiled-file? path) 
-    (let* ([filename (file-name-from-path path)]
-           [base (path-only path)]
-           [extension (and filename base (filename-extension filename))]
-           [basename (and extension
-                          (let ([pbs (path->bytes filename)])
-                            (subbytes pbs
-                                      0 
-                                      (- (bytes-length pbs)
-                                         (bytes-length extension)
-                                         1 ;; extra one for '.' in there
-                                         ))))]
-           [fm (file-or-directory-modify-seconds path)]
-           [newer-exists?
-            (λ (pot-path)
-              (and (file-exists? pot-path)
-                   (< fm (file-or-directory-modify-seconds pot-path))))])
-      (and basename
-           (ormap 
-            (λ (c-f-p)
-              (or (newer-exists? (build-path base c-f-p 
-                                             (bytes->path
-                                              (bytes-append basename #"_" extension #".zo"))))
-                  (ormap
-                   (λ (ext)
-                     (newer-exists? (build-path base 
-                                                c-f-p 
-                                                "native"
-                                                (system-library-subpath)
-                                                (bytes->path
-                                                 (bytes-append basename #"_" extension ext)))))
-                   '(#".so" #".dll" #".dylib"))))
-            (use-compiled-file-paths)))))
-  
-  (define (path->cache-zo-file-path path)
-    (apply build-path 
-           
-           (cdr (explode-path path))))
-  
   
   ;; insert-error-in-text : (is-a?/c text%)
   ;;                        (union #f (is-a?/c drscheme:rep:text<%>))
