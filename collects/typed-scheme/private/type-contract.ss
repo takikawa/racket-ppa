@@ -20,7 +20,7 @@
  mzlib/trace
  scheme/list
  (only-in scheme/contract -> ->* case-> cons/c flat-rec-contract provide/contract any/c)
- (for-template scheme/base scheme/contract (only-in scheme/class object% is-a?/c subclass?/c)))
+ (for-template scheme/base scheme/contract (utils poly-c) (only-in scheme/class object% is-a?/c subclass?/c)))
 
 (define (define/fixup-contract? stx)
   (or (syntax-property stx 'typechecker:contract-def)
@@ -54,7 +54,9 @@
 (define (type->contract ty fail)
   (define vars (make-parameter '()))
   (let/cc exit
-    (let t->c ([ty ty])
+    (let loop ([ty ty] [pos? #t])
+      (define (t->c t) (loop t pos?))
+      (define (t->c/neg t) (loop t (not pos?)))
       (match ty
         [(or (App: _ _ _) (Name: _)) (t->c (resolve-once ty))]
         [(Univ:) #'any/c]
@@ -63,6 +65,8 @@
          #`(listof #,(t->c elem-ty))]
         [(? (lambda (e) (eq? Any-Syntax e))) #'syntax?]
         [(Base: sym cnt) cnt]
+        [(Refinement: par p? cert)
+         #`(and/c #,(t->c par) (flat-contract #,(cert p?)))]
         [(Union: elems) 
          (with-syntax 
              ([cnts (map t->c elems)])
@@ -74,13 +78,13 @@
              (define-values (dom* rngs* rst)
                (match a
                  [(arr: dom (Values: rngs) #f #f '() _ _)
-                  (values (map t->c dom) (map t->c rngs) #f)]
+                  (values (map t->c/neg dom) (map t->c rngs) #f)]
                  [(arr: dom rng #f #f '() _ _)
-                  (values (map t->c dom) (list (t->c rng)) #f)]
+                  (values (map t->c/neg dom) (list (t->c rng)) #f)]
                  [(arr: dom (Values: rngs) rst #f '() _ _)
-                  (values (map t->c dom) (map t->c rngs) (t->c rst))]
+                  (values (map t->c/neg dom) (map t->c rngs) (t->c/neg rst))]
                  [(arr: dom rng rst #f '() _ _)
-                  (values (map t->c dom) (list (t->c rng)) (t->c rst))]))
+                  (values (map t->c/neg dom) (list (t->c rng)) (t->c/neg rst))]))
              (with-syntax 
                  ([(dom* ...) dom*]
                   [rng* (match rngs*
@@ -101,24 +105,32 @@
         [(Pair: t1 t2)
          #`(cons/c #,(t->c t1) #,(t->c t2))]
         [(Opaque: p? cert)
-         #`(flat-contract #,(cert p?))]
-        [(F: v) (cond [(assoc v (vars)) => cadr]
+         #`(flat-named-contract (quote #,(syntax-e p?)) #,(cert p?))]
+        [(F: v) (cond [(assoc v (vars)) => (if pos? second third)]
                       [else (int-err "unknown var: ~a" v)])]
+	[(Poly: vs (and b (Function: _)))
+         (match-let ([(Poly-names: vs-nm _) ty])
+           (with-syntax ([(vs+ ...) (generate-temporaries (for/list ([v vs-nm]) (symbol-append v '+)))]
+			 [(vs- ...) (generate-temporaries (for/list ([v vs-nm]) (symbol-append v '-)))])
+             (parameterize ([vars (append (map list
+					       vs
+					       (syntax->list #'(vs+ ...))
+					       (syntax->list #'(vs- ...)))
+					  (vars))])
+               #`(poly/c ([vs- vs+] ...) #,(t->c b)))))]
         [(Mu: n b)
          (match-let ([(Mu-name: n-nm _) ty])
            (with-syntax ([(n*) (generate-temporaries (list n-nm))])
-             (parameterize ([vars (cons (list n #'n*) (vars))])
+             (parameterize ([vars (cons (list n #'n* #'n*) (vars))])
                #`(flat-rec-contract n* #,(t->c b)))))]
         [(Value: #f) #'false/c]    
         [(Instance: _) #'(is-a?/c object%)]
         [(Class: _ _ _) #'(subclass?/c object%)]
         [(Value: '()) #'null?]
-        [(Struct: _ _ _ _ #f pred? cert) (cert pred?)]
+        [(Struct: _ _ _ _ #f pred? cert) 
+         #`(flat-named-contract '#,(syntax-e pred?) #,(cert pred?))]
         [(Syntax: (Base: 'Symbol _)) #'identifier?]
-        [(Syntax: t)
-         (if (equal? ty Any-Syntax)
-             #`syntax?
-             #`(syntax/c #,(t->c t)))]
+        [(Syntax: t) #`(syntax/c #,(t->c t))]
         [(Value: v) #`(flat-named-contract #,(format "~a" v) (lambda (x) (equal? x '#,v)))]
         [(Param: in out) #`(parameter/c #,(t->c out))]
 	[(Hashtable: k v) #`hash?]

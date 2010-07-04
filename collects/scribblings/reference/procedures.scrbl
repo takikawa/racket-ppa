@@ -38,7 +38,8 @@ Returns a procedure that composes the given functions, applying the
 last @scheme[proc] first and the first @scheme[proc] last. The
 composed functions can consume and produce any number of values, as
 long as each function produces as many values as the preceding
-function consumes.
+function consumes.  When no @scheme[proc] arguments are given, the
+result is @scheme[values].
 
 @mz-examples[
 ((compose - sqrt) 10)
@@ -103,7 +104,7 @@ by @scheme[proc]. See also @scheme[procedure-arity?].}
 
 A valid arity @scheme[_a] is one of the following:
 
-@itemize{
+@itemize[
 
   @item{An exact non-negative integer, which means that the procedure
         accepts @scheme[_a] arguments, only.}
@@ -116,7 +117,7 @@ A valid arity @scheme[_a] is one of the following:
        instances, which means that the procedure accepts any number of
        arguments that can match one of the elements of @scheme[_a].}
 
-}
+]
 
 @mz-examples[
 (procedure-arity cons)
@@ -421,6 +422,15 @@ applied.}
 @note-lib[scheme/function]
 @(define fun-eval (make-base-eval))
 @(interaction-eval #:eval fun-eval (require scheme/function))
+
+@defproc[(const [v any]) procedure?]{
+
+Returns a procedure that accepts any arguments and returns @scheme[v].
+
+@mz-examples[#:eval fun-eval
+((const 'foo) 1 2 3)
+((const 'foo))
+]}
 
 @defproc[(negate [proc procedure?]) procedure?]{
 

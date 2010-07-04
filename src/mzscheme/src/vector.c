@@ -123,10 +123,10 @@ scheme_init_vector (Scheme_Env *env)
 }
 
 Scheme_Object *
-scheme_make_vector (int size, Scheme_Object *fill)
+scheme_make_vector (long size, Scheme_Object *fill)
 {
   Scheme_Object *vec;
-  int i;
+  long i;
 
   if (size < 0) {
     vec = scheme_make_integer(size);
@@ -331,7 +331,7 @@ list_to_vector (int argc, Scheme_Object *argv[])
 Scheme_Object *
 scheme_list_to_vector (Scheme_Object *list)
 {
-  int len, i;
+  long len, i;
   Scheme_Object *vec, *orig = list;
 
   len = scheme_proper_list_length(list);
@@ -350,13 +350,16 @@ scheme_list_to_vector (Scheme_Object *list)
 static Scheme_Object *
 vector_fill (int argc, Scheme_Object *argv[])
 {
-  int i;
+  int i, sz;
+  Scheme_Object *v;
   
   if (!SCHEME_MUTABLE_VECTORP(argv[0]))
     scheme_wrong_type("vector-fill!", "mutable vector", 0, argc, argv);
 
-  for (i = 0; i < SCHEME_VEC_SIZE(argv[0]); i++) {
-    SCHEME_VEC_ELS(argv[0])[i] = argv[1];
+  v = argv[1];
+  sz = SCHEME_VEC_SIZE(argv[0]);
+  for (i = 0; i < sz; i++) {
+    SCHEME_VEC_ELS(argv[0])[i] = v;
   }
 
   return argv[0];

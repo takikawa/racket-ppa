@@ -483,6 +483,17 @@
           (term ((z z) (z z)))))
   
   (let ()
+    (define-metafunction empty-language
+      [(f number_1)
+       number_1
+       (where number_2 ,(add1 (term number_1)))
+       (where number_3 ,(add1 (term number_2)))
+       (side-condition (and (number? (term number_3))
+                            (= (term number_3) 4)))]
+      [(f any) 0])
+    (test (term (f 2)) 2))
+  
+  (let ()
     (define-language x-lang
       (x variable))
     (define-metafunction x-lang
@@ -545,6 +556,20 @@
       [(f any) any])
     (test (term (f ((((x))))))
           (term x)))
+  
+  (let ()
+    (define-language lamv
+      (z variable hole))
+
+    (define-metafunction lamv
+      foo : z  -> any
+      [(foo hole) dontcare]
+      [(foo variable) docare])
+
+    (test (term (foo hole))
+          (term dontcare))
+    (test (term (foo y))
+          (term docare)))
   
   ;; test that tracing works properly
   ;; note that caching comes into play here (which is why we don't see the recursive calls)
@@ -1116,6 +1141,58 @@
     (test (apply-reduction-relation red2 (term (X b))) (list (term (X (b b)))))
     (test (apply-reduction-relation red2 (term (X q))) (list (term (X z)) 
                                                              (term (X w)))))
+  
+  (test (reduction-relation->rule-names
+         (reduction-relation
+          empty-language
+          (--> x y a)))
+        '(a))
+  
+  (test (reduction-relation->rule-names
+         (reduction-relation
+          empty-language
+          (--> x y a)
+          (--> y z b)
+          (--> z w c)))
+        '(a b c))
+  
+  (test (reduction-relation->rule-names
+         (reduction-relation
+          empty-language
+          (--> x y a)
+          (--> y z b)
+          (--> z w c)
+          (--> p q z)
+          (--> q r y)
+          (--> r p x)))
+        '(a b c z y x))
+  
+  (test (reduction-relation->rule-names
+         (extend-reduction-relation
+          (reduction-relation
+           empty-language
+           (--> x y a)
+           (--> y z b)
+           (--> z w c))
+          empty-language
+          (--> p q z)
+          (--> q r y)
+          (--> r p x)))
+        '(a b c z y x))
+  
+    (test (reduction-relation->rule-names
+           (union-reduction-relations
+            (reduction-relation
+             empty-language
+             (--> x y a)
+             (--> y z b)
+             (--> z w c))
+            (reduction-relation
+             empty-language
+             (--> p q z)
+             (--> q r y)
+             (--> r p x))))
+        '(a b c z y x))
   
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;

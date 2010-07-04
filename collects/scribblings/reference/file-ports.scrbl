@@ -21,7 +21,7 @@ Opens the file specified by @scheme[path] for input. The
 @scheme[mode-flag] argument specifies how the file's bytes are
 translated on input:
 
-@itemize{
+@itemize[
 
  @item{@indexed-scheme['binary] --- bytes are returned from the port
  exactly as they are read from the file.}
@@ -30,7 +30,7 @@ translated on input:
  13) as read from the file are filtered by the port in a platform
  specific manner:
 
-  @itemize{
+  @itemize[
 
   @item{@|AllUnix|: no filtering occurs.}
 
@@ -38,8 +38,8 @@ translated on input:
         by the port as a single linefeed; no filtering occurs for
         return bytes that are not followed by a linefeed, or for a
         linefeed that is not preceded by a return.}
-  }}
-}
+  ]}
+]
 
 Under Windows, @scheme['text] mode works only with regular files;
 attempting to use @scheme['text] with other kinds of files triggers an
@@ -53,7 +53,7 @@ cases, the port is buffered by default.
 The port produced by @scheme[open-input-file] should be explicitly
 closed, either though @scheme[close-input-port] or indirectly via
 @scheme[custodian-shutdown-all], to release the OS-level file
-handle. The input port will not closed automatically if it is
+handle. The input port will not be closed automatically if it is
 otherwise available for garbage collection (see
 @secref["gc-model"]); a @tech{will} could be associated input port
 to close it more automatically (see @secref["willexecutor"]).
@@ -72,7 +72,7 @@ Opens the file specified by @scheme[path] for output. The
 @scheme[mode-flag] argument specifies how bytes written to the port
 are translated when written to the file:
 
-@itemize{
+@itemize[
 
  @item{@scheme['binary] --- bytes are written to the file exactly
  as written to the port.}
@@ -81,7 +81,7 @@ are translated when written to the file:
  to the port is translated to a return-linefeed combination in the
  file; no filtering occurs for returns.}
 
-}
+]
 
 Under Windows, @scheme['text] mode works only with regular files;
 attempting to use @scheme['text] with other kinds of files triggers an
@@ -90,7 +90,7 @@ attempting to use @scheme['text] with other kinds of files triggers an
 The @scheme[exists-flag] argument specifies how to handle/require
 files that already exist:
 
-@itemize{
+@itemize[
 
  @item{@indexed-scheme['error] --- raise @scheme[exn:fail:filesystem]
        if the file exists.}
@@ -123,7 +123,7 @@ files that already exist:
        the file is not required to exist, and the file position is
        immediately set to the end of the file after opening it.}
 
-}
+]
 
 The file specified by @scheme[path] need not be a regular file. It
 might a device that is connected through the filesystem, such as
@@ -134,7 +134,7 @@ terminal, in which case is it line buffered bu default.
 The port produced by @scheme[open-output-port] should be explicitly
 closed, either though @scheme[close-output-port] or indirectly via
 @scheme[custodian-shutdown-all], to release the OS-level file
-handle. The output port will not closed automatically if it is
+handle. The output port will not be closed automatically if it is
 otherwise available for garbage collection (see
 @secref["gc-model"]); a @tech{will} could be associated input port
 to close it more automatically (see @secref["willexecutor"]).
@@ -184,7 +184,7 @@ Analogous to @scheme[call-with-input-file], but passing @scheme[path],
                                 [#:mode mode-flag (or/c 'binary 'text) 'binary])
          any]{
 Like @scheme[call-with-input-file], but the newly opened port is
-closed whenever control escapes the the dynamic extent of the
+closed whenever control escapes the dynamic extent of the
 @scheme[call-with-input-file*] call, whether through @scheme[proc]'s
 return, a continuation application, or a prompt-based abort.}
 
@@ -195,7 +195,7 @@ return, a continuation application, or a prompt-based abort.}
                                                              'replace 'truncate 'truncate/replace) 'error])
          any]{
 Like @scheme[call-with-output-file], but the newly opened port is
-closed whenever control escapes the the dynamic extent of the
+closed whenever control escapes the dynamic extent of the
 @scheme[call-with-output-file*] call, whether through @scheme[proc]'s
 return, a continuation application, or a prompt-based abort.}
 

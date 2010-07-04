@@ -6,6 +6,7 @@
          scheme/port
          scheme/path
          scheme/string
+         scheme/list
          setup/main-collects)
 (provide render-mixin)
 
@@ -31,9 +32,9 @@
 
     (define/override (get-suffix) #".tex")
 
-    (inherit render-flow
-             render-block
+    (inherit render-block
              render-content
+             render-part
              install-file
              format-number
              extract-part-style-files)
@@ -68,9 +69,9 @@
             (render-content (part-title-content d) d ri)
             (printf "}{~a}\n" vers)))
         (render-part d ri)
-        (printf "\\postDoc\n\\end{document}\n")))
+        (printf "\n\n\\postDoc\n\\end{document}\n")))
 
-    (define/override (render-part d ri)
+    (define/override (render-part-content d ri)
       (let ([number (collected-info-number (part-collected-info d ri))])
         (when (and (part-title-content d) (pair? number))
           (when (part-style? d 'index)
@@ -97,7 +98,7 @@
           (printf "}")
           (when (part-style? d 'index) (printf "\n\n")))
         (for ([t (part-tags d)])
-          (printf "\\label{t:~a}" (t-encode (tag-key t ri))))
+          (printf "\\label{t:~a}\n\n" (t-encode (add-current-tag-prefix (tag-key t ri)))))
         (render-flow (part-flow d) d ri #f)
         (for ([sec (part-parts d)]) (render-part sec ri))
         (when (part-style? d 'index) (printf "\\onecolumn\n\n"))
@@ -121,14 +122,12 @@
                               s)))])
         (unless (and (not author?)
                      (equal? style "author"))
-          (printf "\n\n")
           (when (string? style)
             (printf "\\~a{" style))
           (if (toc-paragraph? p)
               (printf "\\newpage \\tableofcontents \\newpage")
               (super render-paragraph p part ri))
-          (when (string? style) (printf "}"))
-          (printf "\n\n")))
+          (when (string? style) (printf "}"))))
       null)
 
     (define/override (render-element e part ri)
@@ -142,7 +141,7 @@
                                                    (link-element? e))])
           (when (target-element? e)
             (printf "\\label{t:~a}"
-                    (t-encode (tag-key (target-element-tag e) ri))))
+                    (t-encode (add-current-tag-prefix (tag-key (target-element-tag e) ri)))))
           (when part-label?
             (printf "\\SecRef{")
             (render-content
@@ -219,7 +218,9 @@
                    (show-link-page-numbers)
                    (not (done-link-page-numbers)))
           (printf ", \\pageref{t:~a}"
-                  (t-encode (tag-key (link-element-tag e) ri))))
+                  (t-encode 
+                   (let ([v (resolve-get part ri (link-element-tag e))])
+                     (and v (last v))))))
         null))
 
     (define/private (t-encode s)
@@ -232,6 +233,16 @@
                 [(char=? c #\space) "_"]
                 [else (format "x~x" (char->integer c))]))
             (string->list (format "~s" s)))))
+
+    (define/override (render-flow p part ri start-inline?)
+      (if (null? (flow-paragraphs p))
+          null
+          (begin
+            (render-block (car (flow-paragraphs p)) part ri start-inline?)
+            (for ([b (in-list (cdr (flow-paragraphs p)))])
+              (printf "\n\n")
+              (render-block b part ri #f))
+            null)))
 
     (define/override (render-table t part ri inline-table?)
       (let* ([boxed? (eq? 'boxed (table-style t))]
@@ -271,7 +282,7 @@
               [index? (printf "\\begin{list}{}{\\parsep=0pt \\itemsep=1pt \\leftmargin=2ex \\itemindent=-2ex}\n")]
               [inline? (void)]
               [else
-               (printf "\n\n~a\\begin{~a}~a{@{}~a}\n~a"
+               (printf "~a\\begin{~a}~a{@{}~a}\n~a"
                        (if (string? (table-style t))
                            (format "\\begin{~a}" (table-style t))
                            "")
@@ -309,7 +320,7 @@
                                                            (assoc 'valignment (table-style t)))])
                                                (and p (cdr p))))])
                   (unless (null? flows)
-                    (when index? (printf "\\item "))
+                    (when index? (printf "\n\\item "))
                     (unless (eq? 'cont (car flows))
                       (let ([cnt (let loop ([flows (cdr flows)][n 1])
                                    (cond [(null? flows) n]
@@ -329,8 +340,7 @@
                 (unless (null? (cdr flowss))
                   (loop (cdr flowss) (cdr row-styles)))))
             (unless inline?
-              (printf "~a\n\n\\end{~a}~a\n"
-                      ""
+              (printf "\\end{~a}~a"
                       tableform
                       (if (string? (table-style t))
                            (format "\\end{~a}" (table-style t))
@@ -372,7 +382,7 @@
                   (printf " ~ \\\\\n"))
                 (loop (cdr ps))))]))
         (when in-table?
-          (printf "\n\\end{tabular}\n"))
+          (printf "\n\\end{tabular}"))
         null))
 
     (define/override (render-itemization t part ri)
@@ -384,7 +394,7 @@
                                 (eq? (styled-itemization-style t) 'ordered))
                            "enumerate"
                            "itemize"))])
-        (printf "\n\n\\begin{~a}\n" mode)
+        (printf "\\begin{~a}" mode)
         (for ([flow (itemization-flows t)])
           (printf "\n\n\\~a" (if style-str
                                   (format "~aItem{" style-str)
@@ -392,15 +402,19 @@
           (render-flow flow part ri #t)
           (when style-str
             (printf "}")))
-        (printf "\n\n\\end{~a}\n" mode)
+        (printf "\\end{~a}" mode)
         null))
 
     (define/override (render-blockquote t part ri)
       (let ([kind (or (blockquote-style t) "quote")])
-        (printf "\n\n\\begin{~a}\n" kind)
+        (if (regexp-match #rx"^[\\]" kind)
+            (printf "~a{" kind)
+            (printf "\\begin{~a}" kind))
         (parameterize ([current-table-mode (list "blockquote" t)])
-          (for ([e (blockquote-paragraphs t)]) (render-block e part ri #f)))
-        (printf "\n\n\\end{~a}\n" kind)
+          (render-flow (make-flow (blockquote-paragraphs t)) part ri #f))
+        (if (regexp-match #rx"^[\\]" kind)
+            (printf "}")
+            (printf "\\end{~a}" kind))
         null))
 
     (define/override (render-other i part ri)
@@ -466,6 +480,7 @@
                  [(#\u03BC) "$\\mu$"]
                  [(#\u03C0) "$\\pi$"]
                  [(#\∞) "$\\infty$"]
+                 [(#\à) "\\`{a}"]
                  [else c])))
             (loop (add1 i))))))
 

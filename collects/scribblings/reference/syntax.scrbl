@@ -13,11 +13,13 @@
                      scheme/package
                      scheme/splicing))
 
+@(define require-eval (make-base-eval))
 @(define syntax-eval
    (lambda ()
      (let ([the-eval (make-base-eval)])
        (the-eval '(require (for-syntax scheme/base)))
        the-eval)))
+@(define meta-in-eval (syntax-eval))
 
 @(define cvt (schemefont "CVT"))
 @(define unquote-id (scheme unquote))
@@ -44,7 +46,7 @@ form:
 
 Within such specifications,
 
-@itemize{
+@itemize[
 
  @item{@scheme[...] indicates zero or more
        repetitions of the preceding datum.}
@@ -55,7 +57,7 @@ Within such specifications,
  @item{Italic meta-identifiers play the role of non-terminals. Some
        meta-identifier names imply syntactic constraints:
 
-      @itemize{
+      @itemize[
 
         @item{A meta-identifier that ends in @scheme[_id] stands for an
               identifier.}
@@ -72,11 +74,11 @@ Within such specifications,
               internal-definition context (see
               @secref["intdef-body"]).}
 
-              }} 
+              ]} 
 
  @item{Contracts indicate constraints on sub-expression results. For
        example, @scheme[_thing-expr #, @elem{:} number?] indicates that
-       the expression @scheme[_thing-expr] must produce a number.}}
+       the expression @scheme[_thing-expr] must produce a number.}]
 
 @;------------------------------------------------------------------------
 @section[#:tag "module"]{Modules: @scheme[module], ...}
@@ -123,7 +125,7 @@ Each @scheme[form] is partially expanded (see
 @secref["partial-expansion"]) in a @tech{module context}. Further
 action depends on the shape of the form:
 
-@itemize{
+@itemize[
 
  @item{If it is a @scheme[begin] form, the sub-forms are flattened
   out into the module's body and immediately processed in place of the
@@ -150,7 +152,7 @@ action depends on the shape of the form:
  @item{Similarly, if the form is an expression, it is
    not expanded further.}
 
-}
+]
 
 After all @scheme[form]s have been partially expanded this way, then
 the remaining expression forms (including those on the right-hand side
@@ -202,11 +204,13 @@ be preserved in marshaled bytecode. See also
 See also @secref["module-eval-model"] and @secref["mod-parse"].
 
 @defexamples[#:eval (syntax-eval)
-(module example-module scheme
-  (provide foo bar)
-  (define foo 2)
-  (define (bar x)
-    (+ x 1)))
+(module duck scheme/base
+  (provide num-eggs quack)
+  (define num-eggs 2)
+  (define (quack n)
+    (unless (zero? n)
+      (printf "quack\n")
+      (quack (sub1 n)))))
 ]
 
 @defform[(#%module-begin form ...)]{
@@ -268,11 +272,12 @@ Legal only in a @tech{module begin context}, and handled by the
                            ((unsyntax (schemeidfont "+")) nat)
                            ((unsyntax (schemeidfont "-")) nat)])]{
 
-In a @tech{top-level context}, @scheme[require] instantiates modules
-(see @secref["module-eval-model"]). In a @tech{module context},
-@scheme[require] @tech{visits} modules (see @secref["mod-parse"]). In
-both contexts, @scheme[require] introduces bindings into a
-@tech{namespace} or a module (see @secref["intro-binding"]). A
+In a @tech{top-level context}, @scheme[require] @tech{instantiates}
+modules (see @secref["module-eval-model"]). In a @tech{top-level
+context} or @tech{module context}, expansion of @scheme[require]
+@tech{visits} modules (see @secref["mod-parse"]). In both contexts and
+both evaluation and expansion, @scheme[require] introduces bindings
+into a @tech{namespace} or a module (see @secref["intro-binding"]).  A
 @scheme[require] form in a @tech{expression context} or
 @tech{internal-definition context} is a syntax error.
 
@@ -284,8 +289,11 @@ identifier. Each identifier also binds at a particular @tech{phase
 level}.
 
 The syntax of @scheme[require-spec] can be extended via
-@scheme[define-require-syntax], but the
-pre-defined forms are as follows.
+@scheme[define-require-syntax], and when multiple
+@scheme[require-spec]s are specified in a @scheme[require], the
+bindings of each @scheme[require-spec] are visible for expanding later
+@scheme[require-spec]s. The pre-defined forms (as exported by
+@scheme[scheme/base]) are as follows:
 
  @specsubform[module-path]{ Imports all exported bindings from the
   named module, using the export identifiers as the local identifiers.
@@ -364,56 +372,34 @@ pre-defined forms are as follows.
   binding that is not for @scheme[phase-level], where @scheme[#f] for
   @scheme[phase-level] corresponds to the @tech{label phase level}.
   
-  This example only imports bindings at @tech{phase level} 1, the
-  transform phase.
+  The following example imports bindings only at @tech{phase level} 1,
+  the transform phase:
 
-  @defexamples[#:eval (syntax-eval)
-  (module test scheme
+  @interaction[#:eval meta-in-eval
+  (module nest scheme
+    (provide (for-syntax meta-eggs)
+             (for-meta 1 meta-chicks)
+             num-eggs)
+    (define-for-syntax meta-eggs 2)
+    (define-for-syntax meta-chicks 3)
+    (define num-eggs 2))
 
-   (provide (for-syntax meta-1a)
-            (for-meta 1 meta-1b)
-            meta-0)
+  (require (only-meta-in 1 'nest))
 
-   (define-for-syntax meta-1a 'a)
-   (define-for-syntax meta-1b 'b)
-   (define meta-0 2))
+  (define-syntax (desc stx)
+    (printf "~s ~s\n" meta-eggs meta-chicks)
+    #'(void))
 
-  (require (only-meta-in 1 'test))
-
-  (define-syntax bar
-   (lambda (stx)
-    (printf "~a\n" meta-1a)
-    (printf "~a\n" meta-1b)
-    #'1))
-
-   (bar)
-   meta-0
+   (desc)
+   num-eggs
   ]
 
-  This example only imports bindings at @tech{phase level} 0, the
+  The following example imports only bindings at @tech{phase level} 0, the
   normal phase.
 
-  @defexamples[#:eval (syntax-eval)
-  (module test scheme
-
-   (provide (for-syntax meta-1a)
-            (for-meta 1 meta-1b)
-            meta-0)
-
-   (define-for-syntax meta-1a 'a)
-   (define-for-syntax meta-1b 'b)
-   (define meta-0 2))
-
-  (require (only-meta-in 0 'test))
-
-  (define-syntax bar
-   (lambda (stx)
-    (printf "~a\n" meta-1a)
-    (printf "~a\n" meta-1b)
-    #'1))
-
-   meta-0
-   (bar)
+  @interaction[#:eval meta-in-eval
+   (require (only-meta-in 0 'nest))
+   num-eggs
   ]}
 
  @specsubform[#:literals (for-meta)
@@ -424,23 +410,15 @@ pre-defined forms are as follows.
   combination that involves @scheme[#f] produces @scheme[#f].
   
   @defexamples[#:eval (syntax-eval)
-  (module test scheme
-    (provide foo)
-    (define foo 2))
-  (require (for-meta 0 'test))
-  foo
-  ]}
-
-  @defexamples[#:eval (syntax-eval)
-  (module test scheme
-    (provide foo)
-    (define foo 2))
-  (require (for-meta 1 'test))
-  (define-syntax bar
-    (lambda (stx)
-      (printf "~a\n" foo)
-      #'1))
-  (bar)
+  (module nest scheme
+    (provide num-eggs)
+    (define num-eggs 2))
+  (require (for-meta 0 'nest))
+  num-eggs
+  (require (for-meta 1 'nest))
+  (define-syntax (roost stx)
+    (datum->syntax stx num-eggs))
+  (roost)
   ]}
 
  @specsubform[#:literals (for-syntax)
@@ -456,7 +434,8 @@ pre-defined forms are as follows.
   @scheme[(for-meta #f require-spec ...)].}
 
  @specsubform[derived-require-spec]{See @scheme[define-require-syntax]
- for information on expanding the set of @scheme[require-spec] forms.}
+ for information on expanding the set of @scheme[require-spec]
+ forms.}
 
 @guideintro["module-paths"]{module paths}
 
@@ -515,7 +494,7 @@ corresponds to the default @tech{module name resolver}.
  The specific interpretation of the path depends on the number and
  shape of the @scheme[rel-string]s:
 
- @itemize{
+ @itemize[
 
     @item{If a single @scheme[rel-string] is provided, and if it
     consists of a single element (i.e., no @litchar{/}) with no file
@@ -523,8 +502,8 @@ corresponds to the default @tech{module name resolver}.
     @tech{collection}, and @filepath{main.ss} is the library file name.
 
     Example: require swindle
-    @defexamples[#:eval (syntax-eval)
-      (require (lib "swindle"))]}
+    @defexamples[#:eval require-eval
+      (eval:alts (require (lib "swindle")) (void))]}
 
     @item{If a single @scheme[rel-string] is provided, and if it
     consists of multiple @litchar{/}-separated elements, then each
@@ -533,8 +512,8 @@ corresponds to the default @tech{module name resolver}.
     no file suffix, @filepath{.ss} is added.
 
     Example: require a file within the swindle collection
-    @defexamples[#:eval (syntax-eval)
-      (require (lib "swindle/turbo"))]}
+    @defexamples[#:eval require-eval
+      (eval:alts (require (lib "swindle/turbo")) (void))]}
 
     @item{If a single @scheme[rel-string] is provided, and if it
     consists of a single element @italic{with} a file suffix (i.e,
@@ -543,8 +522,8 @@ corresponds to the default @tech{module name resolver}.
     compatibility with older version of PLT Scheme.)
 
     Example: require the tar module from mzlib
-    @defexamples[#:eval (syntax-eval)
-      (require (lib "tar.ss"))]}
+    @defexamples[#:eval require-eval
+      (eval:alts (require (lib "tar.ss")) (void))]}
 
     @item{Otherwise, when multiple @scheme[rel-string]s are provided,
     the first @scheme[rel-string] is effectively moved after the
@@ -555,23 +534,23 @@ corresponds to the default @tech{module name resolver}.
     with older version of PLT Scheme.)
 
     Example: require the tar module from mzlib
-    @defexamples[#:eval (syntax-eval)
-      (require (lib "tar.ss" "mzlib"))]}
-  }}
+    @defexamples[#:eval require-eval
+      (eval:alts (require (lib "tar.ss" "mzlib")) (void))]}
+  ]}
 
  @specsubform[id]{A shorthand for a @scheme[lib] form with a single
  @scheme[_rel-string] whose characters are the same as in the symbolic
  form of @scheme[id]. In addition to the constraints of a @scheme[lib]
  @scheme[_rel-string], @scheme[id] must not contain @litchar{.}.
 
- @defexamples[#:eval (syntax-eval)
-   (require scheme/tcp)]}
+ @examples[#:eval require-eval
+   (eval:alts (require scheme/tcp) (void))]}
 
  @defsubform[(file string)]{Similar to the plain @scheme[rel-string]
  case, but @scheme[string] is a path---possibly absolute---using the
  current platform's path conventions and @scheme[expand-user-path].
 
- @scheme[(require (file "~/tmp/x.ss"))]}
+ @examples[(eval:alts (require (file "~/tmp/x.ss")) (void))]}
 
  @defsubform*[((planet id)
                (planet string)
@@ -631,27 +610,22 @@ corresponds to the default @tech{module name resolver}.
  identifiers in a minor-version constraint are recognized
  symbolically.
 
- Example: Load main.ss file package foo owned by bar.
-
- @scheme[(require (planet bar/foo))]
- 
- Example: Load major version 2 of main.ss file package foo owned by bar.
- 
- @scheme[(require (planet bar/foo:2))]
- 
- Example: Load major version 2 and minor version 5 of main.ss file package foo owned by bar.
- 
- @scheme[(require (planet bar/foo:2:5))]
- 
- Example: Load major version 2 and minor version 5 of buz.ss file package foo owned by bar.
- 
- @scheme[(require (planet bar/foo:2:5/buz))]}
+ @examples[
+ (code:comment #, @t{@filepath{main.ss} in package @filepath{farm} by @filepath{mcdonald}:})
+ (eval:alts (require (planet mcdonald/farm)) (void))
+ (code:comment #, @t{@filepath{main.ss} in version >= 2.0 of package @filepath{farm} by @filepath{mcdonald}:})
+ (eval:alts (require (planet mcdonald/farm:2)) (void))
+ (code:comment #, @t{@filepath{main.ss} in version >= 2.5 of package @filepath{farm} by @filepath{mcdonald}:})
+ (eval:alts (require (planet mcdonald/farm:2:5)) (void))
+ (code:comment #, @t{@filepath{duck.ss} in version >= 2.5 of package @filepath{farm} by @filepath{mcdonald}:})
+ (eval:alts (require (planet mcdonald/farm:2:5/duck)) (void))
+ ]}
 
 No identifier can be bound multiple times in a given @tech{phase
 level} by an import, unless all of the bindings refer to the same
 original definition in the same module.  In a @tech{module context},
 an identifier can be either imported or defined for a given
-@tech{phase level}, but not both.}
+@tech{phase level}, but not both.}}
 
 
 @guideintro["module-provide"]{@scheme[provide]}
@@ -697,29 +671,37 @@ follows.
  ambiguous).
 
  @defexamples[#:eval (syntax-eval)
-   (module test scheme
-      (provide foo)
-      (define foo 2))
-   (require 'test)
-   foo
- ]}
+   (module nest scheme
+     (provide num-eggs)
+     (define num-eggs 2))
+   (require 'nest)
+   num-eggs
+ ]
+
+ If @scheme[id] has a transformer binding to a @tech{rename
+ transformer}, then the exported binding is the target identifier of
+ the @tech{rename transformer}, instead of @scheme[id], unless the
+ target identifier has a true value for the
+ @scheme['not-free-identifier=?] @tech{syntax property}.}
 
  @defsubform[(all-defined-out)]{ Exports all identifiers that are
  defined at @tech{phase level} 0 or @tech{phase level} 1 within the
  exporting module, and that have the same lexical context as the
- @scheme[(all-defined-out)] form. The external name for each
- identifier is the symbolic form of the identifier. Only identifiers
- accessible from the lexical context of the @scheme[(all-defined-out)]
- form are included; that is, macro-introduced imports are not
- re-exported, unless the @scheme[(all-defined-out)] form was
- introduced at the same time.
+ @scheme[(all-defined-out)] form, excluding bindings to @tech{rename
+ transformers} where the target identifier has the
+ @scheme['not-provide-all-defined] @tech{syntax property}. The
+ external name for each identifier is the symbolic form of the
+ identifier. Only identifiers accessible from the lexical context of
+ the @scheme[(all-defined-out)] form are included; that is,
+ macro-introduced imports are not re-exported, unless the
+ @scheme[(all-defined-out)] form was introduced at the same time.
 
  @defexamples[#:eval (syntax-eval)
-   (module test scheme
+   (module nest scheme
      (provide (all-defined-out))
-     (define foo 2))
-   (require 'test)
-   foo
+     (define num-eggs 2))
+   (require 'nest)
+   num-eggs
  ]}
 
  @defsubform[(all-from-out module-path ...)]{ Exports all identifiers
@@ -734,14 +716,14 @@ follows.
  @scheme[module-path] was introduced at the same time.
 
  @defexamples[#:eval (syntax-eval)
-   (module a scheme
-     (provide foo)
-     (define foo 2))
-   (module b scheme
-     (require 'a)
-     (provide (all-from-out 'a)))
-   (require 'b)
-   foo
+   (module nest scheme
+     (provide num-eggs)
+     (define num-eggs 2))
+   (module hen-house scheme
+     (require 'nest)
+     (provide (all-from-out 'nest)))
+   (require 'hen-house)
+   num-eggs
  ]}
 
  @defsubform[(rename-out [orig-id export-id] ...)]{ Exports each
@@ -750,12 +732,12 @@ follows.
  @scheme[export-id] instead @scheme[orig-d].
 
  @defexamples[#:eval (syntax-eval)
-   (module a scheme
-     (provide (rename-out (foo myfoo)))
-     (define foo 2))
-   (require 'a)
-   foo
-   myfoo
+   (module nest scheme
+     (provide (rename-out [count num-eggs]))
+     (define count 2))
+   (require 'nest)
+   num-eggs
+   count
  ]}
 
  @defsubform[(except-out provide-spec provide-spec ...)]{ Like the
@@ -766,14 +748,14 @@ follows.
  @scheme[provide-spec]s is ignored; only the bindings are used.
 
  @defexamples[#:eval (syntax-eval)
-   (module a scheme
+   (module nest scheme
      (provide (except-out (all-defined-out)
-			  bar))
-     (define foo 2)
-     (define bar 3))
-   (require 'a)
-   foo
-   bar
+			  num-chicks))
+     (define num-eggs 2)
+     (define num-chicks 3))
+   (require 'nest)
+   num-eggs
+   num-chicks
  ]}
 
  @defsubform[(prefix-out prefix-id provide-spec)]{
@@ -781,11 +763,11 @@ follows.
  @scheme[provide-spec] prefixed with @scheme[prefix-id].
 
  @defexamples[#:eval (syntax-eval)
-   (module a scheme
-     (provide (prefix-out f: foo))
-     (define foo 2))
-   (require 'a)
-   f:foo
+   (module nest scheme
+     (provide (prefix-out chicken: num-eggs))
+     (define num-eggs 2))
+   (require 'nest)
+   chicken:num-eggs
  ]}
 
  @defsubform[(struct-out id)]{Exports the bindings associated with a
@@ -803,28 +785,24 @@ follows.
  included by @scheme[struct-out] for export.
 
  @defexamples[#:eval (syntax-eval)
-   (module a scheme
-     (provide (struct-out foo))
-     (define-struct foo (a b c)))
-   (require 'a)
-   make-foo
-   foo-a
-   foo-b
-   foo-c
-   foo?
+   (module nest scheme
+     (provide (struct-out egg))
+     (define-struct egg (color wt)))
+   (require 'nest)
+   (egg-color (make-egg 'blue 10))
  ]}
 
  @defsubform[(combine-out provide-spec ...)]{ The union of the
  @scheme[provide-spec]s.
 
  @defexamples[#:eval (syntax-eval)
-   (module a scheme
-     (provide (combine-out foo bar))
-     (define foo 2)
-     (define bar 1))
-   (require 'a)
-   foo
-   bar
+   (module nest scheme
+     (provide (combine-out num-eggs num-chicks))
+     (define num-eggs 2)
+     (define num-chicks 1))
+   (require 'nest)
+   num-eggs
+   num-chicks
  ]}
 
  @defsubform[(protect-out provide-spec ...)]{ Like the union of the
@@ -832,31 +810,19 @@ follows.
  @secref["modprotect"]. The @scheme[provide-spec] must specify only
  bindings that are defined within the exporting module.
 
- @defexamples[#:eval (syntax-eval)
-   (module a scheme
-     (provide (protect-out foo))
-     (define foo 1))
+ @examples[#:eval (syntax-eval)
+   (module nest scheme
+     (provide num-eggs (protect-out num-chicks))
+     (define num-eggs 2)
+     (define num-chicks 3))
    (define weak-inspector (make-inspector (current-code-inspector)))
    (define (weak-eval x)
      (parameterize ([current-code-inspector weak-inspector])
        (eval x)))
-   (require 'a)
-   foo
-   (weak-eval 'foo)
- ]
-
- Note that @scheme[require] works within eval as well.
- @defexamples[#:eval (syntax-eval)
-   (module a scheme
-     (provide (protect-out foo))
-     (define foo 1))
-   (define weak-inspector (make-inspector (current-code-inspector)))
-   (define (weak-eval x)
-     (parameterize ([current-code-inspector weak-inspector])
-       (eval x)))
-   (weak-eval '(require 'a))
-   foo
-   (weak-eval 'foo)
+   (require 'nest)
+   (list num-eggs num-chicks)
+   (weak-eval 'num-eggs)
+   (weak-eval 'num-chicks)
  ]}
 
  @specsubform[#:literals (for-meta) 
@@ -1005,30 +971,56 @@ context of the @scheme[phaseless-spec] form.}
 @note-lib-only[scheme/require]
 
 The following forms support more complex selection and manipulation of
-sets of imported identifiers.  Note that a @scheme[require] form is
-expanded before it is used, which means that requiring the library
-itself should be a separate form.  For example, use
-
-@schemeblock[
-  (require scheme/require)
-  (require (matching-identifiers-in #rx"foo" "foo.ss"))
-]
-
-instead of
-
-@schemeblock[
-  (require scheme/require
-           (matching-identifiers-in #rx"foo" "foo.ss"))
-]
+sets of imported identifiers.
 
 @defform[(matching-identifiers-in regexp require-spec)]{ Like
   @scheme[require-spec], but including only imports whose names match
   @scheme[regexp].  The @scheme[regexp] must be a literal regular
-  expression (see @secref["regexp"]).}
+  expression (see @secref["regexp"]).
+
+@defexamples[#:eval (syntax-eval)
+(module zoo scheme/base
+  (provide tunafish swordfish blowfish
+           monkey lizard ant)
+  (define tunafish 1)
+  (define swordfish 2)
+  (define blowfish 3)
+  (define monkey 4)
+  (define lizard 5)
+  (define ant 6))
+(require scheme/require)
+(require (matching-identifiers-in #rx"\\w*fish" 'zoo))
+tunafish
+swordfish
+blowfish
+monkey
+]}
 
 @defform[(subtract-in require-spec subtracted-spec ...)]{ Like
   @scheme[require-spec], but omitting those imports that would be
-  imported by one of the @scheme[subtracted-spec]s.}
+  imported by one of the @scheme[subtracted-spec]s.
+
+@defexamples[#:eval (syntax-eval)
+(module earth scheme
+  (provide land sea air)
+  (define land 1)
+  (define sea 2)
+  (define air 3))
+
+(module mars scheme
+  (provide aliens)
+  (define aliens 4))
+
+(module solar-system scheme
+  (require 'earth 'mars)
+  (provide (all-from-out 'earth)
+           (all-from-out 'mars)))
+
+(require scheme/require)
+(require (subtract-in 'solar-system 'earth))
+land
+aliens
+]}
 
 @defform[(filtered-in proc-expr require-spec)]{ The @scheme[proc-expr]
   should evaluate to a single-argument procedure, which is applied on
@@ -1047,7 +1039,7 @@ instead of
                       #rx"-" (string-titlecase name) "")))
               scheme/base))]
   will get the @scheme[scheme/base] bindings that match the regexp,
-  and renamed to use ``camel case''.}
+  and renamed to use ``camel case.''}
 
 @; --------------------
 
@@ -2051,21 +2043,21 @@ Each @scheme[form] is partially expanded (see
 @secref["partial-expansion"]) to determine one of the following
 classifications:
 
-@itemize{
+@itemize[
 
  @item{@scheme[define] or @scheme[define-values] form: converted to
-       a @scheme[define-for-syntax] form.}
+       a @scheme[define-values-for-syntax] form.}
 
  @item{@scheme[require] form: content is wrapped with
        @scheme[for-syntax].}
 
  @item{expression form @scheme[_expr]: converted to
-       @scheme[(define-values () (begin _expr (values)))], which
+       @scheme[(define-values-for-syntax () (begin _expr (values)))], which
        effectively evaluates the expression at expansion time and, in
        the case of a @tech{module context}, preserves the expression
        for future @tech{visit}s of the module.}
 
-}
+]
 
 }
 
@@ -2109,14 +2101,19 @@ Equivalent to @scheme[(when (not test-expr) expr ...)].
 
 @defform[(set! id expr)]{
 
-If @scheme[id] has a @tech{transformer binding} to an
-@tech{assignment transformer}, as produced by
-@scheme[make-set!-transformer], then this form is expanded by calling
-the assignment transformer with the full expressions. If @scheme[id]
-has a @tech{transformer binding} to a @tech{rename transformer} as
-produced by @scheme[make-rename-transformer], then this form is
-expanded by replacing @scheme[id] with the one provided to
-@scheme[make-rename-transformer].
+If @scheme[id] has a @tech{transformer binding} to an @tech{assignment
+transformer}, as produced by @scheme[make-set!-transformer] or as an
+instance of a structure type with the @scheme[prop:set!-transformer]
+property, then this form is expanded by calling the assignment
+transformer with the full expressions. If @scheme[id] has a
+@tech{transformer binding} to a @tech{rename transformer} as produced
+by @scheme[make-rename-transformer] or as an instance of a structure
+type with the @scheme[prop:rename-transformer] property, then this
+form is expanded by replacing @scheme[id] with the target identifier
+(e.g., the one provided to @scheme[make-rename-transformer]). If a
+transformer binding has both @scheme[prop:set!-transformer] ad
+@scheme[prop:rename-transformer] properties, the latter takes
+precedence.
 
 Otherwise, evaluates @scheme[expr] and installs the result into the
 location for @scheme[id], which must be bound as a local variable or
@@ -2344,3 +2341,7 @@ than a precise prose description:
     [(nest ([form forms ...] . more) body0 body ...)
      (form forms ... (nest more body0 body ...))]))
 ]}
+
+
+@close-eval[require-eval]
+@close-eval[meta-in-eval]

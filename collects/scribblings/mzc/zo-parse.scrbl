@@ -1,6 +1,7 @@
 #lang scribble/doc
 @(require scribble/manual
           (for-label scheme/base
+                     scheme/contract
                      compiler/zo-parse))
 
 @(define-syntax-rule (defstruct+ id fields . rest)
@@ -13,7 +14,7 @@
 @defproc[(zo-parse [in input-port?]) compilation-top?]{
 
 Parses a port (typically the result of opening a @filepath{.zo} file)
-containing byte. Beware that the structure types used to represent the
+containing bytecode. Beware that the structure types used to represent the
 bytecode are subject to frequent changes across PLT Scheme versons.
 
 The parsed bytecode is returned in a @scheme[compilation-top]
@@ -22,7 +23,7 @@ structure will contain a @scheme[mod] structure. For a top-level
 sequence, it will normally contain a @scheme[seq] or @scheme[splice]
 structure with a list of top-level declarations and expressions.
 
-The bytecode representation f an expression is closer to an
+The bytecode representation of an expression is closer to an
 S-expression than a traditional, flat control string. For example, an
 @scheme[if] form is represented by a @scheme[branch] structure that
 has three fields: a test expression, a ``then'' expression, and an
@@ -164,11 +165,11 @@ from before evaluating @scheme[rhs].}
 @defstruct+[(def-syntaxes form) ([ids (listof toplevel?)]
                                  [rhs (or/c expr? seq? indirect? any/c)]
                                  [prefix prefix?]
-                                 [max-let-depth nonnegative-exact-integer?])]
+                                 [max-let-depth exact-nonnegative-integer?])]
 @defstruct+[(def-for-syntax form) ([ids (listof toplevel?)]
                                    [rhs (or/c expr? seq? indirect? any/c)]
                                    [prefix prefix?]
-                                   [max-let-depth nonnegative-exact-integer?])]
+                                   [max-let-depth exact-nonnegative-integer?])]
 )]{
 
 Represents a @scheme[define-syntaxes] or
@@ -179,34 +180,13 @@ values. The @scheme[max-let-depth] field indicates the maximum size of
 the stack that will be created by @scheme[rhs] (not counting
 @scheme[prefix]).}
 
-@defstruct+[(req form) ([reqs (listof module-path?)]
+@defstruct+[(req form) ([reqs syntax?]
                         [dummy toplevel?])]{
 
-Represents a top-level @scheme[require] form (but not one in a
-@scheme[module] form). The @scheme[dummy] variable is used to access
-to the top-level namespace.}
-
-
-@defstruct+[(mod form) ([name symbol?]
-                        [self-modidx module-path-index?]
-                        [prefix prefix?]
-                        [provides (listof symbol?)]
-                        [requires (listof (cons/c (or/c exact-integer? #f) 
-                                                  (listof module-path-index?)))]
-                        [body (listof (or/c form? indirect? any/c))]
-                        [syntax-body (listof (or/c def-syntaxes? def-for-syntax?))]
-                        [max-let-depth exact-nonnegative-integer?])]{
-
-Represents a @scheme[module] declaration. The @scheme[body] forms use
-@scheme[prefix], rather than any prefix in place for the module
-declaration itself (and each @scheme[syntax-body] has its own
-prefix). The @scheme[body] field contains the module's run-time code,
-and @scheme[syntax-body] contains the module's compile-time code. The
-@scheme[max-let-depth] field indicates the maximum stack depth created
-by @scheme[body] forms (not counting the @scheme[prefix] array).
-
-After each form in @scheme[body] is evaluated, the stack is restored
-to its depth from before evaluating the form.}
+Represents a top-level @scheme[#%require] form (but not one in a
+@scheme[module] form) with a sequence of specifications
+@scheme[reqs]. The @scheme[dummy] variable is used to access to the
+top-level namespace.}
 
 
 @defstruct+[(seq form) ([forms (listof (or/c form? indirect? any/c))])]{
@@ -228,6 +208,69 @@ wrapped with a continuation prompt.
 After each form in @scheme[forms] is evaluated, the stack is restored
 to its depth from before evaluating the form.}
 
+
+@defstruct+[(mod form) ([name symbol?]
+                        [self-modidx module-path-index?]
+                        [prefix prefix?]
+                        [provides (listof (list/c (or/c exact-integer? #f)
+                                                  (listof provided?)
+                                                  (listof provided?)))]
+                        [requires (listof (cons/c (or/c exact-integer? #f) 
+                                                  (listof module-path-index?)))]
+                        [body (listof (or/c form? indirect? any/c))]
+                        [syntax-body (listof (or/c def-syntaxes? def-for-syntax?))]
+                        [unexported (list/c (listof symbol?) (listof symbol?) 
+                                            (listof symbol?))]
+                        [max-let-depth exact-nonnegative-integer?]
+                        [dummy toplevel?]
+                        [lang-info (or/c #f (vector/c module-path? symbol? any/c))]
+                        [internal-context (or/c #f #t syntax?)])]{
+
+Represents a @scheme[module] declaration. The @scheme[body] forms use
+@scheme[prefix], rather than any prefix in place for the module
+declaration itself (and each @scheme[syntax-body] has its own
+prefix).
+
+The @scheme[provides] and @scheme[requires] lists are each an
+association list from phases to exports or imports. In the case of
+@scheme[provides], each phase maps to two lists: one for exported
+variables, and another for exported syntax. In the case of
+@scheme[requires], each phase maps to a list of imported module paths.
+
+The @scheme[body] field contains the module's run-time code, and
+@scheme[syntax-body] contains the module's compile-time code.  After
+each form in @scheme[body] or @scheme[syntax-body] is evaluated, the
+stack is restored to its depth from before evaluating the form.
+
+The @scheme[unexported] list contains lists of symbols for unexported
+definitions that can be accessed through macro expansion. The first
+list is phase-0 variables, the second is phase-0 syntax, and the last
+is phase-1 variables.
+
+The @scheme[max-let-depth] field indicates the maximum stack depth
+created by @scheme[body] forms (not counting the @scheme[prefix]
+array).  The @scheme[dummy] variable is used to access to the
+top-level namespace.
+
+The @scheme[lang-info] value specifies an optional module path that
+provides information about the module's implementation language.
+
+The @scheme[internal-module-context] value describes the lexical
+context of the body of the module. This value is used by
+@scheme[module->namespace]. A @scheme[#f] value means that the context
+is unavailable or empty. A @scheme[#t] value means that the context is
+computed by re-importing all required modules. A syntax-object value
+embeds an arbitrary lexical context.}
+
+@defstruct+[provided ([name symbol?]
+                      [src (or/c module-path-index? #f)]
+                      [src-name symbol?]
+                      [nom-mod (or/c module-path-index? #f)]
+                      [src-phase (or/c 0 1)]
+                      [protected? boolean?]
+                      [insp (or #t #f (void))])]{
+
+Describes an individual provided identifier within a @scheme[mod] instance.}
 
 @; --------------------------------------------------
 @section{Expressions}
@@ -308,7 +351,7 @@ from before evaluating @scheme[rhs]. Note that the new slot is created
 before evaluating @scheme[rhs].}
 
 
-@defstruct+[(let-void expr) ([count nonnegative-exact-integer?]
+@defstruct+[(let-void expr) ([count exact-nonnegative-integer?]
                              [boxes? boolean?]
                              [body (or/c expr? seq? indirect? any/c)])]{
 
@@ -317,8 +360,8 @@ Pushes @scheme[count] uninitialized slots onto the stack and then runs
 filled with boxes that contain @|undefined-const|.}
 
 
-@defstruct+[(install-value expr) ([count nonnegative-exact-integer?]
-                                  [pos nonnegative-exact-integer?]
+@defstruct+[(install-value expr) ([count exact-nonnegative-integer?]
+                                  [pos exact-nonnegative-integer?]
                                   [boxes? boolean?]
                                   [rhs (or/c expr? seq? indirect? any/c)]
                                   [body (or/c expr? seq? indirect? any/c)])]{
@@ -337,12 +380,16 @@ from before evaluating @scheme[rhs].}
 
 Represents a @scheme[letrec] form with @scheme[lambda] bindings. It
 allocates a closure shell for each @scheme[lambda] form in
-@scheme[procs], pushes them onto the stack in reverse order, fills out
-each shell's closure using the created shells, and then evaluates
-@scheme[body].}
+@scheme[procs], installs each onto the stack in previously
+allocated slots in reverse order (so that the closure shell for the
+last element of @scheme[procs] is installed at stack position
+@scheme[0]), fills out each shell's closure (where each closure
+normally references some other just-created closures, which is
+possible because the shells have been installed on the stack), and
+then evaluates @scheme[body].}
 
 
-@defstruct+[(boxenv expr) ([pos nonnegative-exact-integer?]
+@defstruct+[(boxenv expr) ([pos exact-nonnegative-integer?]
                            [body (or/c expr? seq? indirect? any/c)])]{
 
 Skips @scheme[pos] elements of the stack, setting the slot afterward
@@ -354,7 +401,7 @@ the value so that it can be mutated later.}
 
 
 @defstruct+[(localref expr) ([unbox? boolean?]
-                             [pos nonnegative-exact-integer?]
+                             [pos exact-nonnegative-integer?]
                              [clear? boolean?]
                              [other-clears? boolean?])]{
 
@@ -368,8 +415,8 @@ that can prevent reclamation of the value as garbage). If
 the same stack slot may clear after reading.}
 
 
-@defstruct+[(toplevel expr) ([depth nonnegative-exact-integer?]
-                             [pos nonnegative-exact-integer?]
+@defstruct+[(toplevel expr) ([depth exact-nonnegative-integer?]
+                             [pos exact-nonnegative-integer?]
                              [const? boolean?]
                              [ready? boolean?])]{
 
@@ -386,9 +433,9 @@ value might change in the future). If @scheme[const?] and
 determine whether the variable is defined.}
 
 
-@defstruct+[(topsyntax expr) ([depth nonnegative-exact-integer?]
-                              [pos nonnegative-exact-integer?]
-                              [midpt nonnegative-exact-integer?])]{
+@defstruct+[(topsyntax expr) ([depth exact-nonnegative-integer?]
+                              [pos exact-nonnegative-integer?]
+                              [midpt exact-nonnegative-integer?])]{
 
 Represents a reference to a quoted syntax object via the
 @scheme[prefix] array. The @scheme[depth] field indicates the number

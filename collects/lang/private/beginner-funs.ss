@@ -44,7 +44,7 @@
 	"to determine the remainder of dividing the first by the second integer (exact or inexact)")
       (modulo (integer integer -> integer)
 	"to find the remainder of the division of the first number by the second; try (modulo 4 3) (modulo 4 -3)") 
-      (sqr (number -> number)
+      ((beginner-sqr sqr) (number -> number)
 	"to compute the square of a number")
       (sqrt (number -> number)
 	"to compute the square root of a number")
@@ -172,9 +172,8 @@
       (integer->char (integer -> char)
 	"to lookup the character that corresponds to the given integer (exact only!) in the ASCII table (if any)")
     
-      (random (integer -> integer)
-	"to generate a random natural number less than some given integer
-	(exact only!)")
+      ((beginner-random random) (integer -> integer)
+	"to generate a random natural number less than some given integer (exact only!)")
     
       (current-seconds (-> integer)
 	"to compute the current time in seconds elapsed"
@@ -359,11 +358,36 @@
       (char->integer (char -> integer)
 	"to lookup the number that corresponds to the"
 	" given character in the ASCII table (if any)"))
+    
     ("Strings"
       (string? (any -> boolean)
 	"to determine whether a value is a string")
       (string-length (string -> nat)
 	"to determine the length of a string")
+      
+      ((beginner-string-ith string-ith) (string -> string)
+        "to extract the ith 1-letter substring from the given one")
+      ((beginner-replicate replicate) (string nat -> string)
+        "to replicate the given string")
+      ((beginner-int->string int->string) (integer -> string)
+        "to convert an integer in [0,55295] or [57344 1114111] to a 1-letter string")
+      ((beginner-string->int string->int) (string -> integer)
+        "to convert a 1-letter string to an integer in [0,55295] or [57344 1114111]")
+      ((beginner-explode explode) (string -> (listof string))
+        "to translate a string into a list of 1-letter strings")
+      ((beginner-implode implode) ((listof string) -> string)
+        "to concatenate the list of 1-letter strings into one string")
+      ((beginner-string-numeric? string-numeric?) (string -> boolean)
+        "to determine whether all 'letters' in the string are numeric")
+      ((beginner-string-alphabetic? string-alphabetic?) (string -> boolean)
+        "to determine whether all 'letters' in the string are alphabetic")
+      ((beginner-string-whitespace? string-whitespace?) (string -> boolean)
+        "to determine whether all 'letters' in the string are white space") 
+      ((beginner-string-upper-case? string-upper-case?) (string -> boolean)
+        "to determine whether all 'letters' in the string are upper case")
+      ((beginner-string-lower-case? string-lower-case?) (string -> boolean)
+        "to determine whether all 'letters' in the string are lower case")
+ 
       (string (char ... -> string)
 	"(string c1 c2 ...) builds a string")
       (make-string (nat char -> string)

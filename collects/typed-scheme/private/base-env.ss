@@ -9,7 +9,7 @@
  (only-in '#%kernel [apply kernel:apply])
  scheme/promise
  (only-in string-constants/private/only-once maybe-print-message)
- (only-in scheme/match/runtime match:error))
+ (only-in scheme/match/runtime match:error matchable? match-equality-test))
 
 [raise (Univ . -> . (Un))]
 
@@ -101,10 +101,14 @@
 [fold-right (-polydots (c a b) ((list ((list c a) (b b) . ->... . c) c (-lst a))
                                 ((-lst b) b) . ->... . c))]
 [foldl
- (-poly (a b c)
+ (-poly (a b c d)
         (cl-> [((a b . -> . b) b (-lst a)) b]
-              [((a b c . -> . c) c (-lst a) (-lst b)) c]))]
-[foldr  (-poly (a b c) ((a b . -> . b) b (-lst a) . -> . b))]
+              [((a b c . -> . c) c (-lst a) (-lst b)) c]
+              [((a b c d . -> . d) d (-lst a) (-lst b) (-lst d)) d]))]
+[foldr  (-poly (a b c d)
+               (cl-> [((a b . -> . b) b (-lst a)) b]
+                     [((a b c . -> . c) c (-lst a) (-lst b)) c]
+                     [((a b c d . -> . d) d (-lst a) (-lst b) (-lst d)) d]))]
 [filter (-poly (a b) (cl->*
                       ((a . -> . B
                           :
@@ -144,6 +148,8 @@
        [(Sym B -Namespace (-> Univ)) Univ])]
 
 [match:error (Univ . -> . (Un))]
+[match-equality-test (-Param (Univ Univ . -> . Univ) (Univ Univ . -> . Univ))]
+[matchable? (make-pred-ty (Un -String -Bytes))]
 [display (cl-> [(Univ) -Void] [(Univ -Port) -Void])]
 [write   (cl-> [(Univ) -Void] [(Univ -Port) -Void])]
 [print   (cl-> [(Univ) -Void] [(Univ -Port) -Void])]
@@ -415,11 +421,12 @@
 [symbol->string (Sym . -> . -String)]
 [vector-length (-poly (a) ((-vec a) . -> . -Integer))]
 
-[call-with-input-file (-poly (a) (cl-> [(-String (-Port . -> . a))  a]
-                                       [(-String (-Port . -> . a) Sym)  a]))]
+[call-with-input-file (-poly (a) (-String (-Input-Port . -> . a) #:mode (Un (-val 'binary) (-val 'text)) #f . ->key .  a))]
+[call-with-output-file (-poly (a) (-String (-Output-Port . -> . a)
+                                   #:exists (one-of/c error 'append 'update 'replace 'truncate 'truncate/replace) #f
+                                   #:mode (Un (-val 'binary) (-val 'text)) #f 
+                                   . ->key .  a))]
 
-[call-with-output-file (-poly (a) (cl-> [(-String (-Port . -> . a))  a]
-                                        [(-String (-Port . -> . a) Sym)  a]))]
 [current-output-port (-Param -Output-Port -Output-Port)]
 [current-error-port (-Param -Output-Port -Output-Port)]
 [current-input-port (-Param -Input-Port -Input-Port)]
@@ -541,11 +548,32 @@
 [list->string ((-lst -Char) . -> . -String)]
 [string->list (-String . -> . (-lst -Char))]
 [sort (-poly (a) ((-lst a) (a a . -> . B) . -> . (-lst a)))]
+[find-system-path (Sym . -> . -Path)]
+
+;; scheme/cmdline
+
+[parse-command-line
+ (let ([mode-sym (one-of/c 'once-each 'once-any 'multi 'final 'help-labels)])
+   (-polydots (b a)
+              (cl->* (-Pathlike 
+                      (Un (-lst -String) (-vec -String))
+                      (-lst (-pair mode-sym (-lst (-lst Univ))))
+                      ((list Univ) [a a] . ->... . b)
+                      (-lst -String)
+                      . -> . b))))]
 
 ;; scheme/list
 [last-pair (-poly (a) ((-mu x (Un a (-val '()) (-pair a x)))
                        . -> . 
                        (Un (-pair a a) (-pair a (-val '())))))]
+[remove-duplicates
+ (-poly (a)
+        (cl->*
+         ((-lst a) . -> . (-lst a))
+         ((-lst a) (a a . -> . Univ) . -> . (-lst a))))]
+[append-map
+ (-polydots (c a b) ((list ((list a) (b b) . ->... . (-lst c)) (-lst a))
+                     ((-lst b) b) . ->... .(-lst c)))]
 
 ;; scheme/tcp
 [tcp-listener? (make-pred-ty -TCP-Listener)]
@@ -572,3 +600,28 @@
 [real->decimal-string (N [-Nat] . ->opt .  -String)]
 
 [current-continuation-marks (-> -Cont-Mark-Set)]
+
+;; scheme/path
+
+[explode-path (-Pathlike . -> . (-lst (Un -Path (-val 'up) (-val 'same))))]
+[find-relative-path (-Pathlike -Pathlike . -> . -Path)]
+[simple-form-path (-Pathlike . -> . -Path)]
+[normalize-path (cl->* (-Pathlike . -> . -Path)
+                       (-Pathlike -Pathlike . -> . -Path))]
+[filename-extension (-Pathlike . -> . (-opt -Bytes))]
+[file-name-from-path (-Pathlike . -> . (-opt -Path))]
+[path-only (-Pathlike . -> . -Path)]
+[some-system-path->string (-Path . -> . -String)]
+[string->some-system-path 
+ (-String (Un (-val 'unix) (-val 'windows)) . -> . -Path)]
+
+;; scheme/math
+
+[sgn (-Real . -> . -Real)]
+[pi N]
+[sqr (N . -> . N)]
+[sgn (N . -> . N)]
+[conjugate (N . -> . N)]
+[sinh (N . -> . N)]
+[cosh (N . -> . N)]
+[tanh (N . -> . N)]

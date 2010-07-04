@@ -1,8 +1,10 @@
 #lang scheme/base
 (require (for-syntax scheme/base
+                     scheme/list
                      syntax/kerncase
                      syntax/boundmap
-                     syntax/define))
+                     syntax/define
+                     syntax/flatten-begin))
 
 (provide define-package
          package-begin
@@ -70,6 +72,10 @@
                                 #f
                                 "misuse of a package name"
                                 stx)))
+
+ (define (generate-hidden id)
+   ;; Like `generate-temporaries', but preserve the symbolic name
+   ((make-syntax-introducer) (datum->syntax #f (syntax-e id))))
  
  (define (reverse-mapping who id exports hidden)
    (or (ormap (lambda (m)
@@ -85,9 +91,15 @@
                      ;; avoid potential duplicate-definition errors
                      ;; when the name is bound in the same context as
                      ;; the package.
-                     (car (generate-temporaries (list id)))))
+                     (generate-hidden id)))
               hidden)
        id)))
+
+(define-for-syntax (move-props orig new)
+  (datum->syntax new
+                 (syntax-e new)
+                 orig
+                 orig))
 
 (define-for-syntax (do-define-package stx exp-stx)
   (syntax-case exp-stx ()
@@ -172,7 +184,7 @@
                                                                     ;; It's not accessible, so just hide the name
                                                                     ;;  to avoid re-binding errors. (Is this necessary,
                                                                     ;;  or would `pre-package-id' take care of it?)
-                                                                    (car (generate-temporaries (list id)))))
+                                                                    (generate-hidden id)))
                                                               (syntax->list #'(export ...)))])
                                             (syntax/loc stx
                                               (define-syntaxes (pack-id)
@@ -208,17 +220,14 @@
                               ids))]
                  [add-package-context (lambda (def-ctxes)
                                         (lambda (stx)
-                                          (for/fold ([stx stx]) 
-                                              ([def-ctx (in-list (reverse def-ctxes))])
-                                            (let ([q (local-expand #`(quote #,stx)
-                                                                   ctx
-                                                                   (list #'quote)
-                                                                   def-ctx)])
-                                              (syntax-case q ()
-                                                [(_ stx) #'stx])))))])
+                                          (let ([q (local-expand #`(quote #,stx)
+                                                                 ctx
+                                                                 (list #'quote)
+                                                                 def-ctxes)])
+                                            (syntax-case q ()
+                                              [(_ stx) #'stx]))))])
              (let loop ([exprs init-exprs]
                         [rev-forms null]
-                        [defined null]
                         [def-ctxes (list def-ctx)])
                (cond
                 [(null? exprs)
@@ -283,16 +292,14 @@
                                     (lambda ()
                                       (list (quote-syntax hidden) ...)))))))))))]
                 [else
-                 (let ([expr ((add-package-context (cdr def-ctxes))
-                              (local-expand ((add-package-context (cdr def-ctxes)) (car exprs))
-                                            ctx
-                                            kernel-forms 
-                                            (car def-ctxes)))])
+                 (let ([expr (local-expand (car exprs)
+                                           ctx
+                                           kernel-forms 
+                                           def-ctxes)])
                    (syntax-case expr (begin)
                      [(begin . rest)
-                      (loop (append (syntax->list #'rest) (cdr exprs))
+                      (loop (append (flatten-begin expr) (cdr exprs))
                             rev-forms
-                            defined
                             def-ctxes)]
                      [(def (id ...) rhs)
                       (and (or (free-identifier=? #'def #'define-syntaxes)
@@ -306,16 +313,15 @@
                               [ids (syntax->list #'(id ...))])
                           (let* ([def-ctx (if star?
                                               (syntax-local-make-definition-context (car def-ctxes))
-                                              (car def-ctxes))]
+                                              (last def-ctxes))]
                                  [ids (if star? 
                                           (map (add-package-context (list def-ctx)) ids)
                                           ids)])
                             (syntax-local-bind-syntaxes ids #'rhs def-ctx)
                             (register-bindings! ids)
                             (loop (cdr exprs)
-                                  (cons #`(define-syntaxes #,ids rhs)
+                                  (cons (move-props expr #`(define-syntaxes #,ids rhs))
                                         rev-forms)
-                                  (cons ids defined)
                                   (if star? (cons def-ctx def-ctxes) def-ctxes)))))]
                      [(def (id ...) rhs)
                       (and (or (free-identifier=? #'def #'define-values)
@@ -324,16 +330,15 @@
                       (let ([star? (free-identifier=? #'def #'-define*-values)]
                             [ids (syntax->list #'(id ...))])
                         (let* ([def-ctx (if star?
-                                            (syntax-local-make-definition-context)
-                                            (car def-ctxes))]
+                                            (syntax-local-make-definition-context (car def-ctxes))
+                                            (last def-ctxes))]
                                [ids (if star? 
                                         (map (add-package-context (list def-ctx)) ids)
                                         ids)])
                           (syntax-local-bind-syntaxes ids #f def-ctx)
                           (register-bindings! ids)
                           (loop (cdr exprs)
-                                (cons #`(define-values #,ids rhs) rev-forms)
-                                (cons ids defined)
+                                (cons (move-props expr #`(define-values #,ids rhs)) rev-forms)
                                 (if star? (cons def-ctx def-ctxes) def-ctxes))))]
                      [else
                       (loop (cdr exprs) 
@@ -342,7 +347,6 @@
                                       expr
                                       #`(define-values () (begin #,expr (values))))
                                   rev-forms)
-                            defined
                             def-ctxes)]))]))))))]))
 
 (define-syntax (define-package stx)
@@ -392,18 +396,20 @@
                                                      (syntax-local-introduce (cdr p))))
                                              ((package-exports v)))]
                          [(h ...) (map syntax-local-introduce ((package-hidden v)))])
-             #`(begin
-                 (#,define-syntaxes-id (intro ...)
-                   (let ([rev-map (lambda (x)
-                                    (reverse-mapping
-                                     'pack-id
-                                     x
-                                     (list (cons (quote-syntax a)
-                                                 (quote-syntax b))
-                                           ...)
-                                     (list (quote-syntax h) ...)))])
-                     (values (make-rename-transformer #'defined rev-map)
-                             ...))))))))]))
+             (syntax-property
+              #`(#,define-syntaxes-id (intro ...)
+                  (let ([rev-map (lambda (x)
+                                   (reverse-mapping
+                                    'pack-id
+                                    x
+                                    (list (cons (quote-syntax a)
+                                                (quote-syntax b))
+                                          ...)
+                                    (list (quote-syntax h) ...)))])
+                    (values (make-rename-transformer #'defined rev-map)
+                            ...)))
+              'disappeared-use
+              (syntax-local-introduce id))))))]))
 
 (define-syntax (open-package stx)
   (do-open stx #'define-syntaxes))

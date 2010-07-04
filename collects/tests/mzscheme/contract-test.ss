@@ -1345,7 +1345,8 @@
    '((contract (->d ([x number?]) () #:rest rst number? any)
                (λ (x . rst) (values 4 5))
                'pos
-               'neg)))
+               'neg)
+     #f))
   
   (test/pos-blame
    '->d-arity1
@@ -5091,6 +5092,7 @@ so that propagation occurs.
   (test-flat-contract '(string-len/c 3) "ab" "abc")
   (test-flat-contract 'natural-number/c 5 -1)
   (test-flat-contract 'natural-number/c #e3 #i3.0)
+  (test-flat-contract 'natural-number/c 0 -1)
   (test-flat-contract 'false/c #f #t)
   
   (test-flat-contract #t #t "x")
@@ -6559,6 +6561,18 @@ so that propagation occurs.
    (λ (x)
      (and (exn? x)
           (regexp-match #rx"cannot set!" (exn-message x)))))
+  
+  (contract-error-test
+   #'(begin
+       (eval '(module pce8-bug1 scheme/base
+                (require scheme/contract)
+                (define (f x) x)
+                (provide/contract [f (-> integer? integer? integer?)])))
+       (eval '(require 'pce8-bug1)))
+   (λ (x)
+     (printf ">> ~s\n" (exn-message x))
+     (and (exn? x)
+          (regexp-match #rx"pce8-bug" (exn-message x)))))
   
   (contract-eval `(,test 'pos guilty-party (with-handlers ((void values)) (contract not #t 'pos 'neg))))
   

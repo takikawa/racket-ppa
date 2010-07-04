@@ -38,7 +38,7 @@ how to use PLaneT by example.
 
 @subsection[#:tag "finding-a-package"]{Finding a Package}
 
-If you are new to PLaneT, the first thing to to is visit
+If you are new to PLaneT, the first thing to do is visit
 @link["http://planet.plt-scheme.org/"]{the PLaneT repository web site}
 and see what packages are available. People contribute new PLaneT
 packages all the time --- if you want to be notified whenever a new or
@@ -88,6 +88,61 @@ name. (They are mandatory for the long-form syntax.) It is also legal
 in the abbreviated syntax to omit a filename to be required entirely;
 in that case, PLaneT requires the file @filepath{main.ss} in the given
 package.
+
+@subsection{Networking troubles}
+
+Sometimes, when PLaneT tries to download and install a
+package for the first time, your operating system may block
+it from access to the network. If you are uncomfortable
+giving DrScheme free access to the network (or if your
+attempts to do so do not seem to work), then you can use
+your browser to manually install a planet package.
+
+To see how this works, lets assume you want to install the PLAI package
+and @schemeblock[(require (planet plai/plai:1))] is not working for you.
+@itemize[
+@item{First, 
+fire up a command-line window and use @tt{planet url} to 
+determine the url for downloading the package. 
+To find the url for version @tt{(1 1)} of the plai package,
+do this:
+
+@tt{% planet url plai plai.plt 1 1}
+
+and get this as a response:
+
+@tt{http://planet.plt-scheme.org/servlets/planet-servlet.ss?lang=%224.1.5.3%22&name=%22plai.plt%22&maj=1&min-lo=1&min-hi=%23f&path=%28%22plai%22%29}}
+
+@item{Copy and paste that url into your browser, which
+should trigger the dowload of a file called
+@tt{plai.plt}. Note that your browser will probably try to
+call the file something else. Rename it to @tt{plai.plt}.}
+
+@item{Now run the command-line tool one more time to install the plt file:
+
+@tt{% planet fileinject plai plai.plt 1 1}
+
+This command should be run from the same directory where you saved @tt{plai.plt}.
+
+This command may fail, since version @tt{(1 1)} of the PLAI
+package depends on @tt{cce/scheme:4:1}. If it does, simply
+repeat the above steps for that package first, and then
+continue with the @tt{fileinject} command for PLAI.}
+
+@item{Finally, to check that the installation is successful,
+run @tt{planet show}. You should see output like this
+(possibly with slightly different version numbers, if the
+packages have been updated since this was written):
+@verbatim{
+Normally-installed packages:
+  cce	scheme.plt	4 1
+  plai	plai.plt	1 1
+}}
+]
+
+Once that is complete, PLaneT will use that version of the
+package for any subsequent @scheme[require]s and won't try
+to use the network.
 
 @subsection{Fine-Grained Control Over Package Imports}
 
@@ -257,7 +312,7 @@ where @italic{command} is a subcommand from the following list, and
 @(define (cmd name desc)
     @item{@(seclink name (exec name)): @desc})
 
-@itemize{
+@itemize[
   @cmd["create"]{create a PLaneT archive from a directory}
   @cmd["install"]{download and install a given package}
   @cmd["remove"]{remove the specified package from the local cache}
@@ -270,7 +325,7 @@ where @italic{command} is a subcommand from the following list, and
   @cmd["url"]{get a URL for the given package}
   @cmd["open"]{unpack the contents of the given package}
   @cmd["structure"]{display the structure of a given .plt archive}
-  @cmd["print"]{display a file within of the given .plt archive}}
+  @cmd["print"]{display a file within of the given .plt archive}]
 
 Each of these commands is described in more detail below. All the
 functionality of the command-line tool is also provided with a programmatic interface by 
@@ -284,9 +339,9 @@ Create a PLaneT archive in the current directory whose contents are the
 directory @exec{<path>}.
 
 @exec{<option>} is one of:
-@itemize{
+@itemize[
   @item{@exec{-f, --force}: force a package to be created even if its info.ss file contains
-    errors.}}
+    errors.}]
 
 @subsection[#:tag "install"]{@exec{install}}
 
@@ -303,9 +358,9 @@ Remove the specified package from the local cache, optionally also removing its
 distribution file.
 
 @exec{<option>} is one of:
-@itemize{
+@itemize[
 	@item{@exec{-e, --erase}: also remove the package's distribution file from the
-    uninstalled-package cache}}
+    uninstalled-package cache}]
 
 @subsection[#:tag "show"]{@exec{show}}
 
@@ -314,10 +369,10 @@ Usage:
 List the packages installed in the local cache.
 
 @exec{<option>} is one of:
-@itemize{
+@itemize[
   @item{@exec{-p, --packages}: show packages only (default)}
   @item{@exec{-l, --linkage}: show linkage table only}
-  @item{@exec{-a, --all}: show packages and linkage}}
+  @item{@exec{-a, --all}: show packages and linkage}]
 
 @subsection[#:tag "clearlinks"]{@exec{clearlinks}}
 
@@ -639,7 +694,7 @@ already-existing package:
 
 PLaneT can distribute whatever programs you write, but keep
 these guidelines in mind as you write:
-@itemize{
+@itemize[
   @item{Organize your code into modules. Since the PLaneT client is
 integrated into the @scheme[require] form, it works best if your code
 is arranged into modules.}
@@ -654,7 +709,7 @@ instead of
 
 @scheme[(require (planet "helper.ss" ("username" "packagename.plt" 1 0)))]
 
-in files that will also be a part of the package.}}
+in files that will also be a part of the package.}]
 
 @subsubsection[#:tag "devlinks"]{Development Links}
 
@@ -709,43 +764,45 @@ PLaneT system (as well as the rest of the PLT Scheme tool suite) will
 look in it for descriptive metadata about your package. The PLaneT
 system looks for certain names in that file:
 
-@itemize{
+@itemize[
 
-@item{The @scheme['blurb] field: If present, the blurb field should contain a list of XHTML fragments 
-encoded as x-expressions (see the xml collection for details) that
-PLaneT will use as a short description of your project.}
+@item{The @indexed-scheme['blurb] field: If present, the blurb field
+should contain a list of XHTML fragments encoded as x-expressions (see
+the xml collection for details) that PLaneT will use as a short
+description of your project.}
 
-@item{The @scheme['release-notes] field: If present, the release-notes field should contain a list of XHTML
-fragments encoded as x-expressions (see the xml collection for 
-details) that PLaneT will use as a short description of what's new
-in this release of your package.}
+@item{The @indexed-scheme['release-notes] field: If present, the
+release-notes field should contain a list of XHTML fragments encoded
+as x-expressions (see the xml collection for details) that PLaneT will
+use as a short description of what's new in this release of your
+package.}
 
-@item{The @scheme['categories] field:
-If present, the categories field should be a list of symbols 
-corresponding to the categories under which this package should be listed.
+@item{The @indexed-scheme['categories] field: If present, the categories
+field should be a list of symbols corresponding to the categories
+under which this package should be listed.
 
 The valid categories are:
 
-@itemize{
-  @item{@scheme['devtools]:         Development Tools}
-  @item{@scheme['net]:              Networking and Protocols}
-  @item{@scheme['media]:            Graphics and Audio}
-  @item{@scheme['xml]:              XML-Related}
-  @item{@scheme['datastructures]:   Data Structures and Algorithms}
-  @item{@scheme['io]:               Input/Output and Filesystem}
-  @item{@scheme['scientific]:       Mathematical and Scientific}
-  @item{@scheme['system]:           Hardware/Operating System-Specific Tools}
-  @item{@scheme['ui]:               Textual and Graphical User Interface}
-  @item{@scheme['metaprogramming]:  Metaprogramming Tools}
-  @item{@scheme['planet]:           PLaneT-Related}
-  @item{@scheme['misc]:             Miscellaneous}}
+@itemize[
+  @item{@indexed-scheme['devtools]:         Development Tools}
+  @item{@indexed-scheme['net]:              Networking and Protocols}
+  @item{@indexed-scheme['media]:            Graphics and Audio}
+  @item{@indexed-scheme['xml]:              XML-Related}
+  @item{@indexed-scheme['datastructures]:   Data Structures and Algorithms}
+  @item{@indexed-scheme['io]:               Input/Output and Filesystem}
+  @item{@indexed-scheme['scientific]:       Mathematical and Scientific}
+  @item{@indexed-scheme['system]:           Hardware/Operating System-Specific Tools}
+  @item{@indexed-scheme['ui]:               Textual and Graphical User Interface}
+  @item{@indexed-scheme['metaprogramming]:  Metaprogramming Tools}
+  @item{@indexed-scheme['planet]:           PLaneT-Related}
+  @item{@indexed-scheme['misc]:             Miscellaneous}]
 
 If you put symbols other than these the categories field, they will be
 ignored. If you put no legal symbols in the categories field or do not
 include this field in your info.ss file, your package will be
 categorized as "Miscellaneous."}
 
-@item{The @scheme['can-be-loaded-with] field:
+@item{The @indexed-scheme['can-be-loaded-with] field:
 If present, the can-be-loaded-with field should be a quoted datum of
 one of the following forms:
 
@@ -764,13 +821,13 @@ particular file and assumes that nothing else writes to that same
 file, then multiple versions of the same package being loaded
 simultaneously may be a problem. This field allows you to specify
 whether your package can be loaded simultaneously with older versions
-of itself. If its value is @scheme['all], then the package may be loaded with
-any older version. If it is @scheme['none], then it may not be loaded with
-older versions at all. If it is @scheme[(list 'all-except VER-SPEC ...)] then
-any package except those that match one of the given VER-SPEC forms
-may be loaded with this package; if it is @scheme[(list 'only VER-SPEC ...)]
-then only packages that match one of the given VER-SPEC forms may be
-loaded with this package.
+of itself. If its value is @indexed-scheme['all], then the package may be
+loaded with any older version. If it is @indexed-scheme['none], then it
+may not be loaded with older versions at all. If it is @scheme[(list
+'all-except VER-SPEC ...)] then any package except those that match
+one of the given VER-SPEC forms may be loaded with this package; if it
+is @scheme[(list 'only VER-SPEC ...)]  then only packages that match
+one of the given VER-SPEC forms may be loaded with this package.
 
 When checking to see if a package may be loaded, PLaneT compares it to
 all other currently-loaded instances of the same package with any
@@ -779,16 +836,16 @@ can-be-loaded-with field allows the older package to be loaded. If all
 such comparisons succeed then the new package may be loaded; otherwise
 PLaneT signals an error.
 
-The default for this field is @scheme['none] as a conservative protection
-measure. For many packages it is safe to set this field to
-@scheme['any].}
+The default for this field is @indexed-scheme['none] as a conservative
+protection measure. For many packages it is safe to set this field to
+@indexed-scheme['any].}
 
-@item{The @scheme['homepage] field:
+@item{The @indexed-scheme['homepage] field:
 If present, the URL field should be a string corresponding to a URL
 for the package. PLaneT provides this link with the description of your
 package on the main PLaneT web page.}
 
-@item{The @scheme['primary-file] field:
+@item{The @indexed-scheme['primary-file] field:
 If present, the primary-file field should be a either a string
 corresponding to the name (without path) of the main Scheme source
 file of your package, or a list of such strings. The PLaneT web page
@@ -801,7 +858,7 @@ If you include only a single string, it will be used as the require
 line printed on your package's page. If you include a list of strings,
 then the first legal file string in the list will be used.}
 
-@item{The @scheme['required-core-version] field: If present, the
+@item{The @indexed-scheme['required-core-version] field: If present, the
 required-core-version field should be a string with the same syntax as
 the output of the @scheme[version] function. Defining this field
 indicates that PLaneT should only allow users of a version of mzscheme
@@ -811,14 +868,14 @@ requirements than its inclusion in a particular repository; for
 instance, setting this field to @scheme["300.2"] would cause the PLaneT server
 not to serve it to MzScheme v300.1 or older clients.}
 
-@item{The @scheme['version] field:
+@item{The @indexed-scheme['version] field:
 If present, the version field should be a string that describes the 
 version number of this code that should be presented to users (e.g., 
 @scheme["0.15 alpha"]). This field does not override or in any way interact 
 with your package's package version number, which is assigned by 
 PLaneT, but may be useful to users.}
 
-@item{The @scheme['repositories] field: If present, the repositories
+@item{The @indexed-scheme['repositories] field: If present, the repositories
 field should be a list consisting of some subset of the strings
 @scheme["4.x"] and @scheme["3xx"]. The string @scheme["4.x"] indicates
 that this package should be included in the v4.x repository (which
@@ -827,13 +884,13 @@ or above version 4.0), and the string @scheme["3xx"] indicates that
 the package should be included in the v3xx repository (containing
 packages intended to run in PLT Scheme versions in the 3xx series). A
 single package (and a single version of a package) may be included in
-multiple repositories with the same PLaneT version number.}}
+multiple repositories with the same PLaneT version number.}]
 
 In addition, PLaneT uses the setup-plt installer to install packages
 on client machines, so most fields it looks for can be included with
-their usual effects. In particular, adding a @scheme['name] field indicates that
-the Scheme files in the package should be compiled during
-installation; it is a good idea to add it.
+their usual effects. In particular, adding a @indexed-scheme['name]
+field indicates that the Scheme files in the package should be
+compiled during installation; it is a good idea to add it.
 
 An example info.ss file looks like this:
 
@@ -896,7 +953,7 @@ of thumb is to remember that modules written to work with the
 previously-released version of your package should unmodified with the
 new package. This means that at a minimum, a backwards compatible
 update should:
-@itemize{
+@itemize[
 @item{Contain all the same Scheme source files in that the previous
 version contained in directories intended for public access}
 @item{In each public file, provide at least all the bindings that the
@@ -904,9 +961,9 @@ previous version provided}
 @item{For each name provided with a contract (see @(secref #:doc '(lib
 "scribblings/guide/guide.scrbl") "contracts" )), provide it
 with a contract that is at least as permissive as the previous
-contract}}
+contract}]
 A backwards-compatible upgrade may, however:
-@itemize{
+@itemize[
 @item{Change any behavior that
 reasonable consumers of your package would not consider guaranteed
 (@italic{e.g.}, by fixing bugs or improving the efficiency of
@@ -915,7 +972,7 @@ operations).}
 sections. By convention, the contents of any directory called
 @filepath{private} are considered private and should not be relied
 upon by external users of your package.}
-@item{Extend the set of names exported by a module.}}
+@item{Extend the set of names exported by a module.}]
 Currently these rules are guidelines only, but in the future some or
 all of them may be enforced programmatically. Ultimately, though, no
 technical device can precisely capture what it means for a package to

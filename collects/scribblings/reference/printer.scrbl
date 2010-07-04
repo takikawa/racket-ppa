@@ -103,7 +103,7 @@ A pair prints starting with @litchar{(} followed by the printed form
 of its @scheme[car]. The rest of the printed form depends on the
 @scheme[cdr]:
 
-@itemize{
+@itemize[
 
  @item{If the @scheme[cdr] is a pair or the empty list, then the
        printed form of the pair completes with the printed form of the
@@ -114,7 +114,7 @@ of its @scheme[car]. The rest of the printed form depends on the
        @litchar{.}, another space, the printed form of the
        @scheme[cdr], and a @litchar{)}.}
 
-}
+]
 
 The printed form of a pair is the same in both @scheme[write] and
 @scheme[display] modes, except as the printed form of the pair's
@@ -180,7 +180,7 @@ When the @scheme[print-struct] parameter is set to @scheme[#t], then
 the way that structures print depends on details of the structure type
 for which the structure is an instance:
 
-@itemize{
+@itemize[
 
  @item{If the structure type is a @techlink{prefab} structure type,
        then it prints using @litchar{#s(} followed by the @tech{prefab}
@@ -198,7 +198,7 @@ for which the structure is an instance:
  @item{For any other structure type, the structure prints as an
        unreadable value; see @secref["print-unreadable"] for more
        information.}
-}
+]
 
 If the @scheme[print-struct] parameter is set to @scheme[#f], then all
 structures without a @scheme[prop:custom-write] property print as
@@ -208,12 +208,12 @@ unreadable values.
 @section[#:tag "print-hashtable"]{Printing Hash Tables}
 
 When the @scheme[print-hash-table] parameter is set to @scheme[#t], a
-hash table prints starting with @litchar{#hash(} or @litchar{#hasheq(}
-for a table using @scheme[equal?] or @scheme[eq?] key comparisons,
+hash table prints starting with @litchar{#hash(}, @litchar{#hasheqv(}, or @litchar{#hasheq(}
+for a table using @scheme[equal?], @scheme[eqv?], or @scheme[eq?] key comparisons,
 respectively. After this prefix, each key--value mapping is shown as
 @litchar{(}, the printed form of a key, a space, @litchar{.}, a space,
 the printed form the corresponding value, and @litchar{)}, with an
-addition space if the key--value pairs is not the last to be printed.
+additional space if the key--value pair is not the last to be printed.
 After all key-value pairs, the printed form completes with
 @litchar{)}.
 

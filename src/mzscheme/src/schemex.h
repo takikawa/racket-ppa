@@ -99,6 +99,7 @@ int (*scheme_in_main_thread)(void);
 void (*scheme_cancel_sleep)(void);
 void (*scheme_start_sleeper_thread)(void (*mzsleep)(float seconds, void *fds), float secs, void *fds, int hit_fd);
 void (*scheme_end_sleeper_thread)();
+void (*scheme_notify_sleep_progress)();
 Scheme_Object *(*scheme_make_thread_cell)(Scheme_Object *def_val, int inherited);
 Scheme_Object *(*scheme_thread_cell_get)(Scheme_Object *cell, Scheme_Thread_Cell_Table *cells);
 void (*scheme_thread_cell_set)(Scheme_Object *cell, Scheme_Thread_Cell_Table *cells, Scheme_Object *v);
@@ -424,7 +425,7 @@ Scheme_Object *(*scheme_make_sized_byte_string)(char *chars, long len, int copy)
 Scheme_Object *(*scheme_make_sized_offset_byte_string)(char *chars, long d, long len, int copy);
 Scheme_Object *(*scheme_make_immutable_sized_byte_string)(char *chars, long len, int copy);
 Scheme_Object *(*scheme_make_byte_string_without_copying)(char *chars);
-Scheme_Object *(*scheme_alloc_byte_string)(int size, char fill);
+Scheme_Object *(*scheme_alloc_byte_string)(long size, char fill);
 Scheme_Object *(*scheme_append_byte_string)(Scheme_Object *, Scheme_Object *);
 Scheme_Object *(*scheme_make_utf8_string)(const char *chars);
 Scheme_Object *(*scheme_make_sized_utf8_string)(char *chars, long len);
@@ -442,10 +443,10 @@ Scheme_Object *(*scheme_make_sized_char_string)(mzchar *chars, long len, int cop
 Scheme_Object *(*scheme_make_sized_offset_char_string)(mzchar *chars, long d, long len, int copy);
 Scheme_Object *(*scheme_make_immutable_sized_char_string)(mzchar *chars, long len, int copy);
 Scheme_Object *(*scheme_make_char_string_without_copying)(mzchar *chars);
-Scheme_Object *(*scheme_alloc_char_string)(int size, mzchar fill);
+Scheme_Object *(*scheme_alloc_char_string)(long size, mzchar fill);
 Scheme_Object *(*scheme_append_char_string)(Scheme_Object *, Scheme_Object *);
 mzchar *(*scheme_string_recase)(mzchar *s, int d, int len, int mode, int inplace, int *_len);
-Scheme_Object *(*scheme_make_vector)(int size, Scheme_Object *fill);
+Scheme_Object *(*scheme_make_vector)(long size, Scheme_Object *fill);
 Scheme_Object *(*scheme_make_integer_value)(long i);
 Scheme_Object *(*scheme_make_integer_value_from_unsigned)(unsigned long i);
 Scheme_Object *(*scheme_make_integer_value_from_long_long)(mzlonglong i);
@@ -886,6 +887,7 @@ long (*scheme_get_seconds)(void);
 long (*scheme_get_milliseconds)(void);
 double (*scheme_get_inexact_milliseconds)(void);
 long (*scheme_get_process_milliseconds)(void);
+long (*scheme_get_thread_milliseconds)(Scheme_Object *thrd);
 char *(*scheme_banner)(void);
 char *(*scheme_version)(void);
 int (*scheme_check_proc_arity)(const char *where, int a,

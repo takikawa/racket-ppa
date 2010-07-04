@@ -90,13 +90,13 @@ positions are initialized with the given @scheme[b]s.
 
 
 @defproc[(subbytes [bstr bytes?] [start exact-nonnegative-integer?]
- [end exact-nonnegative-integer? (bytes-length str)]) bytes?]{
- Returns a new mutable byte string that is @scheme[(- end start)]
- bytes long, and that contains the same bytes
- as @scheme[bstr] from @scheme[start] inclusive to @scheme[end] exclusive.  The
- @scheme[start] and @scheme[end] arguments must be less than the length of
- @scheme[bstr], and @scheme[end] must be greater than or equal to @scheme[bstr],
- otherwise the @exnraise[exn:fail:contract].
+ [end exact-nonnegative-integer? (bytes-length str)]) bytes?]{ Returns
+ a new mutable byte string that is @scheme[(- end start)] bytes long,
+ and that contains the same bytes as @scheme[bstr] from @scheme[start]
+ inclusive to @scheme[end] exclusive.  The @scheme[start] and
+ @scheme[end] arguments must be less than or equal to the length of
+ @scheme[bstr], and @scheme[end] must be greater than or equal to
+ @scheme[start], otherwise the @exnraise[exn:fail:contract].
 
 @mz-examples[(subbytes #"Apple" 1 3)
              (subbytes #"Apple" 1)]}
@@ -342,7 +342,7 @@ instead of a converter.
 
 Certain encoding combinations are always available:
 
- @itemize{
+ @itemize[
 
  @item{@scheme[(bytes-open-converter "UTF-8" "UTF-8")] --- the
    identity conversion, except that encoding errors in the input lead
@@ -391,7 +391,7 @@ Certain encoding combinations are always available:
    @scheme[#xDC00] bits). On all platforms, performance may be poor
    when decoding from an odd offset within an input byte string.}
 
- }
+ ]
 
 A newly opened byte converter is registered with the current custodian
 (see @secref["custodians"]), so that the converter is closed when
@@ -447,7 +447,7 @@ string is no more than @scheme[(- dest-end-pos dest-start-pos)].
 
 The result of @scheme[bytes-convert] is three values:
 
- @itemize{
+ @itemize[
 
  @item{@scheme[_result-bstr] or @scheme[_dest-wrote-amt] --- a byte
  string if @scheme[dest-bstr] is @scheme[#f] or not provided, or the
@@ -460,7 +460,7 @@ The result of @scheme[bytes-convert] is three values:
  @indexed-scheme['aborts], or @indexed-scheme['error] --- indicates
  how conversion terminated:
 
-  @itemize{
+  @itemize[
 
    @item{@scheme['complete]: The entire input was processed, and
     @scheme[_src-read-amt] will be equal to @scheme[(- src-end-pos
@@ -487,8 +487,8 @@ The result of @scheme[bytes-convert] is three values:
    sequence by dropping characters or generating ``?,'' every byte
    sequence is effectively valid.}
 
-  }}
- }
+  ]}
+ ]
 
 Applying a converter accumulates state in the converter (even when the
 third result of @scheme[bytes-convert] is @scheme['complete]). This
@@ -516,7 +516,7 @@ sequence resets the converter to its initial state.
 
 The result of @scheme[bytes-convert-end] is two values:
 
-  @itemize{
+  @itemize[
 
   @item{@scheme[_result-bstr] or @scheme[_dest-wrote-amt] --- a byte string if
   @scheme[dest-bstr] is @scheme[#f] or not provided, or the number of
@@ -529,7 +529,7 @@ The result of @scheme[bytes-convert-end] is two values:
   size or the space in @scheme[dest-bstr], and the first result is
   either an empty byte string or @scheme[0].}
 
-  }
+  ]
 }
 
 

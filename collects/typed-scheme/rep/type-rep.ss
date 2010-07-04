@@ -106,7 +106,7 @@
                          poly?
                          pred-id
                          cert)]
-    [#:key (gensym)])
+    [#:key #f #;(gensym)])
 
 ;; kw : keyword?
 ;; ty : Type
@@ -208,6 +208,17 @@
 ;; key : Type
 ;; value : Type
 (dt Hashtable (key value) [#:key 'hash])
+
+;; parent : Type
+;; pred : Identifier
+;; cert : Certifier
+(dt Refinement (parent pred cert)
+    [#:key (Type-key parent)]
+    [#:intern (list parent (hash-id pred))]
+    [#:fold-rhs (*Refinement (type-rec-id parent) pred cert)]
+    [#:frees (free-vars* parent)
+             (free-idxs* parent)])
+    
 
 ;; t : Type
 (dt Syntax (t) [#:key 'syntax])
@@ -353,8 +364,7 @@
                         (cons (sb (car drest))
                               (if (eq? (cdr drest) name) (+ count outer) (cdr drest)))
                         #f)
-                    (for/list ([kw kws])
-                      (cons (car kw) (sb (cdr kw))))
+                    (map sb kws)
                     (map (lambda (e) (sub-eff sb e)) thn-eff)
                     (map (lambda (e) (sub-eff sb e)) els-eff))]
        [#:ValuesDots tys dty dbound
@@ -399,8 +409,7 @@
                         (cons (sb (car drest))
                               (if (eqv? (cdr drest) (+ count outer)) (F-n image) (cdr drest)))
                         #f)
-                    (for/list ([kw kws])
-                      (cons (car kw) (sb (cdr kw))))
+                    (map sb kws)
                     (map (lambda (e) (sub-eff sb e)) thn-eff)
                     (map (lambda (e) (sub-eff sb e)) els-eff))]
        [#:ValuesDots tys dty dbound

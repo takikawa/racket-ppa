@@ -125,6 +125,8 @@ MZ_EXTERN void scheme_cancel_sleep(void);
 MZ_EXTERN void scheme_start_sleeper_thread(void (*mzsleep)(float seconds, void *fds), float secs, void *fds, int hit_fd);
 MZ_EXTERN void scheme_end_sleeper_thread();
 
+MZ_EXTERN void scheme_notify_sleep_progress();
+
 MZ_EXTERN Scheme_Object *scheme_make_thread_cell(Scheme_Object *def_val, int inherited);
 MZ_EXTERN Scheme_Object *scheme_thread_cell_get(Scheme_Object *cell, Scheme_Thread_Cell_Table *cells);
 MZ_EXTERN void scheme_thread_cell_set(Scheme_Object *cell, Scheme_Thread_Cell_Table *cells, Scheme_Object *v);
@@ -514,7 +516,7 @@ MZ_EXTERN Scheme_Object *scheme_make_sized_byte_string(char *chars, long len, in
 MZ_EXTERN Scheme_Object *scheme_make_sized_offset_byte_string(char *chars, long d, long len, int copy);
 MZ_EXTERN Scheme_Object *scheme_make_immutable_sized_byte_string(char *chars, long len, int copy);
 MZ_EXTERN Scheme_Object *scheme_make_byte_string_without_copying(char *chars);
-MZ_EXTERN Scheme_Object *scheme_alloc_byte_string(int size, char fill);
+MZ_EXTERN Scheme_Object *scheme_alloc_byte_string(long size, char fill);
 MZ_EXTERN Scheme_Object *scheme_append_byte_string(Scheme_Object *, Scheme_Object *);
 
 MZ_EXTERN Scheme_Object *scheme_make_utf8_string(const char *chars);
@@ -536,12 +538,12 @@ MZ_EXTERN Scheme_Object *scheme_make_sized_char_string(mzchar *chars, long len, 
 MZ_EXTERN Scheme_Object *scheme_make_sized_offset_char_string(mzchar *chars, long d, long len, int copy);
 MZ_EXTERN Scheme_Object *scheme_make_immutable_sized_char_string(mzchar *chars, long len, int copy);
 MZ_EXTERN Scheme_Object *scheme_make_char_string_without_copying(mzchar *chars);
-MZ_EXTERN Scheme_Object *scheme_alloc_char_string(int size, mzchar fill);
+MZ_EXTERN Scheme_Object *scheme_alloc_char_string(long size, mzchar fill);
 MZ_EXTERN Scheme_Object *scheme_append_char_string(Scheme_Object *, Scheme_Object *);
 
 MZ_EXTERN mzchar *scheme_string_recase(mzchar *s, int d, int len, int mode, int inplace, int *_len);
 
-MZ_EXTERN Scheme_Object *scheme_make_vector(int size, Scheme_Object *fill);
+MZ_EXTERN Scheme_Object *scheme_make_vector(long size, Scheme_Object *fill);
 MZ_EXTERN Scheme_Object *scheme_make_integer_value(long i);
 MZ_EXTERN Scheme_Object *scheme_make_integer_value_from_unsigned(unsigned long i);
 MZ_EXTERN Scheme_Object *scheme_make_integer_value_from_long_long(mzlonglong i);
@@ -1071,6 +1073,7 @@ MZ_EXTERN long scheme_get_seconds(void);
 MZ_EXTERN long scheme_get_milliseconds(void);
 MZ_EXTERN double scheme_get_inexact_milliseconds(void);
 MZ_EXTERN long scheme_get_process_milliseconds(void);
+MZ_EXTERN long scheme_get_thread_milliseconds(Scheme_Object *thrd);
 
 MZ_EXTERN char *scheme_banner(void);
 MZ_EXTERN char *scheme_version(void);

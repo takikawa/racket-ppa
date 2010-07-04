@@ -146,7 +146,7 @@ must merely start with a chain of at least @scheme[pos] pairs.}
 @defproc*[([(append [lst list?] ...) list?]
            [(append [lst list?] ... [v any/c]) any/c])]{
 
-When given all list arguments, the result is a lists that contains all
+When given all list arguments, the result is a list that contains all
 of the elements of the given lists in order. The last argument is used
 directly in the tail of the result.
 
@@ -176,7 +176,7 @@ Applies @scheme[proc] to the elements of the @scheme[lst]s from the
 
 Similar to @scheme[map], except that
 
-@itemize{
+@itemize[
 
  @item{the result is @scheme[#f] if any application of @scheme[proc] produces
        @scheme[#f], in which case @scheme[proc] is not applied to later
@@ -187,7 +187,7 @@ Similar to @scheme[map], except that
        @scheme[proc] to the last elements in the @scheme[lst]s is in tail
        position with respect to the @scheme[andmap] call.}
 
-}
+]
 
 If the @scheme[lst]s are empty, then @scheme[#t] is returned.}
 
@@ -204,19 +204,19 @@ If the @scheme[lst]s are empty, then @scheme[#t] is returned.}
 
 Similar to @scheme[map], except that
 
-@itemize{
+@itemize[
 
  @item{the result is @scheme[#f] if every application of @scheme[proc] produces
        @scheme[#f]; or}
 
  @item{the result of the first applciation of @scheme[proc] to produces a
        value other than @scheme[#f], in which case @scheme[proc] is not
-       applied to later elements of the @scheme[lst]s; more specifically,
+       applied to later elements of the @scheme[lst]s;
        the application of @scheme[proc] to the last elements in the
        @scheme[lst]s is in tail position with respect to the
-       @scheme[andmap] call.}
+       @scheme[ormap] call.}
 
-}
+]
 
 If the @scheme[lst]s are empty, then @scheme[#f] is returned.}
 
@@ -236,7 +236,7 @@ Similar to @scheme[map], but @scheme[proc] is called only for its
 
 
 @defproc[(foldl [proc procedure?] [init any/c] [lst list?] ...+)
-         list?]{
+         any/c]{
 
 Like @scheme[map], @scheme[foldl] applies a procedure to the
  elements of one or more lists. Whereas @scheme[map] combines the return
@@ -263,7 +263,7 @@ Unlike @scheme[foldr], @scheme[foldl] processes the @scheme[lst]s in
 ]}
 
 @defproc[(foldr [proc procedure?] [init any/c] [lst list?] ...+)
-         list?]{
+         any/c]{
 
 Like @scheme[foldl], but the lists are traversed from right to left.
  Unlike @scheme[foldl], @scheme[foldr] processes the @scheme[lst]s in
@@ -513,6 +513,13 @@ Like @scheme[assoc], but finds an element using the predicate
 @defproc[(last-pair [p pair?]) pair?]{
 Returns the last pair of a (possibly improper) list.}
 
+@defproc[(make-list [k exact-nonnegative-integer?] [v any?]) list?]{
+Returns a newly constructed list of length @scheme[k], holding
+@scheme[v] in all positions.
+
+@mz-examples[#:eval list-eval
+  (make-list 7 'foo)]}
+
 @defproc[(take [lst any/c] [pos exact-nonnegative-integer?]) list?]{
 Returns a fresh list whose elements are the first @scheme[pos] elements of
 @scheme[lst].  If @scheme[lst] has fewer than
@@ -633,6 +640,13 @@ Returns @scheme[(filter (lambda (x) x) (map proc lst ...))], but
 without building the intermediate list.}
 
 
+@defproc[(count [proc procedure?] [lst list?] ...+)
+         list?]{
+
+Returns @scheme[(length (filter proc lst ...))], but
+without building the intermediate list.}
+
+
 @defproc[(partition [pred procedure?] [lst list?])
          (values list? list?)]{
 
@@ -716,7 +730,7 @@ immutable pairs, vectors, boxes, and hash tables.
 Only the following kinds of values are copied and traversed to detect
 placeholders:
 
-@itemize{
+@itemize[
 
  @item{pairs}
 
@@ -731,7 +745,7 @@ placeholders:
  @item{placeholders created by @scheme[make-placeholder] and
        @scheme[make-hash-placeholder]}
 
-}
+]
 
 Due to these restrictions, @scheme[make-reader-graph] creates exactly
 the same sort of cyclic values as @scheme[read].

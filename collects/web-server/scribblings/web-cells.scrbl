@@ -2,7 +2,8 @@
 @(require "web-server.ss")
 
 @title[#:tag "web-cells.ss"]{Web Cells}
-@(require (for-label web-server/servlet/web-cells))
+@(require (for-label web-server/servlet/web-cells
+                     web-server/servlet/web))
 
 @defmodule[web-server/servlet/web-cells]{The
 @schememodname[web-server/servlet/web-cells] library provides the
@@ -83,5 +84,3 @@ transformations of the program into continuation or store passing style.
                   "+")))))))
 ]
 }
-
-@include-section["lang-web-cells.scrbl"]

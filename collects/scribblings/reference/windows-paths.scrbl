@@ -31,18 +31,18 @@ across all drives, as reflected by the @scheme[current-directory]
 parameter). Consequently, Scheme implicitly converts a path like
 @filepath{C:rant.txt} into @filepath["C:\\rant.txt"].
 
-@itemize{
+@itemize[
 
  @item{@|MzAdd| Whenever a path starts with a drive specifier
        @nonterm{letter}@litchar{:} that is not followed by a
        @litchar{/} or @litchar{\}, a @litchar{\} is inserted as
        the path is @tech{cleanse}d.}
 
-}
+]
 
 Otherwise, Scheme follows standard Windows path conventions, but also
  adds @litchar{\\?\REL} and @litchar{\\?\RED} conventions to
- deal with paths inexpressible in the standard conventsion, plus
+ deal with paths inexpressible in the standard convention, plus
  conventions to deal with excessive @litchar{\}s in @litchar{\\?\}
  paths.
 
@@ -54,7 +54,7 @@ characters that does not include @litchar{\} or @litchar{/} , and
 @nonterm{element} stands for any sequence of characters that does not
 include @litchar{\}.
 
- @itemize{
+ @itemize[
 
  @item{Trailing spaces and @litchar{.} in a path element are ignored
        when the element is the last one in the path, unless the path
@@ -184,12 +184,12 @@ include @litchar{\}.
         starting @litchar{\}; converting a path value to a byte
         string preserves the @litchar{\\?\RED} prefix.}
 
-}
+]
 
 Three additional Scheme-specific rules provide meanings to character
 sequences that are otherwise ill-formed as Windows paths:
 
-@itemize{
+@itemize[
 
   @item{@|MzAdd| In a pathname of the form
         @litchar{\\?\}@nonterm{any}@litchar{\\} where
@@ -212,7 +212,7 @@ sequences that are otherwise ill-formed as Windows paths:
         @litchar{\\?\} counts as the path's (non-existent)
         drive.}
 
-}
+]
 
 Outside of Scheme, except for @litchar{\\?\} paths, pathnames are
  typically limited to 259 characters. Scheme internally converts
@@ -276,7 +276,7 @@ part of the result or on any @litchar{\\?\REL\} or
 @litchar{\\?\RED\} or @scheme[_sub-path].  If a
 @litchar{\\?\REL\} or @litchar{\\?\RED\}
 @scheme[_sub-path] is added to a non-@litchar{\\?\}
-@scheme[_base-path], the the @scheme[_base-path] (with any additions up
+@scheme[_base-path], the @scheme[_base-path] (with any additions up
 to the @litchar{\\?\REL\} or @litchar{\\?\RED\}
 @scheme[_sub-path]) is simplified and converted to a
 @litchar{\\?\} path.  In other cases, a @litchar{\} may be

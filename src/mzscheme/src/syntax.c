@@ -1698,12 +1698,12 @@ set_syntax (Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Compile_Info *rec,
     
     if (SAME_TYPE(SCHEME_TYPE(var), scheme_macro_type)) {
       /* Redirect to a macro? */
-      if (SAME_TYPE(SCHEME_TYPE(SCHEME_PTR_VAL(var)), scheme_set_macro_type)) {
+      if (scheme_is_set_transformer(SCHEME_PTR_VAL(var))) {
 	form = scheme_apply_macro(name, menv, SCHEME_PTR_VAL(var), form, env, scheme_false, rec, drec, 1);
 	
 	return scheme_compile_expr(form, env, rec, drec);
-      } else if (SAME_TYPE(SCHEME_TYPE(SCHEME_PTR_VAL(var)), scheme_id_macro_type)) {
-	find_name = SCHEME_PTR_VAL(SCHEME_PTR_VAL(var));
+      } else if (scheme_is_rename_transformer(SCHEME_PTR_VAL(var))) {
+	find_name = scheme_rename_transformer_id(SCHEME_PTR_VAL(var));
 	find_name = scheme_stx_cert(find_name, scheme_false, menv, find_name, NULL, 1);
 	SCHEME_USE_FUEL(1);
 	menv = NULL;
@@ -1787,7 +1787,7 @@ set_expand(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Expand_Info *erec, 
 
     if ((erec[drec].depth != 0) && SAME_TYPE(SCHEME_TYPE(var), scheme_macro_type)) {
       /* Redirect to a macro? */
-      if (SAME_TYPE(SCHEME_TYPE(SCHEME_PTR_VAL(var)), scheme_set_macro_type)) {
+      if (scheme_is_set_transformer(SCHEME_PTR_VAL(var))) {
 
 	SCHEME_EXPAND_OBSERVE_ENTER_MACRO(erec[drec].observer, form);
 
@@ -1801,9 +1801,9 @@ set_expand(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Expand_Info *erec, 
 	erec[drec].value_name = name;
 
 	return scheme_expand_expr(form, env, erec, drec);
-      } else if (SAME_TYPE(SCHEME_TYPE(SCHEME_PTR_VAL(var)), scheme_id_macro_type)) {
+      } else if (scheme_is_rename_transformer(SCHEME_PTR_VAL(var))) {
 	Scheme_Object *new_name;
-	new_name = SCHEME_PTR_VAL(SCHEME_PTR_VAL(var));
+	new_name = scheme_rename_transformer_id(SCHEME_PTR_VAL(var));
 	new_name = scheme_stx_track(new_name, find_name, find_name);
 	new_name = scheme_stx_cert(new_name, scheme_false, menv, find_name, NULL, 1);
 	find_name = new_name;
@@ -2835,6 +2835,46 @@ int scheme_compiled_propagate_ok(Scheme_Object *value, Optimize_Info *info)
   }
 
   return 0;
+}
+
+int scheme_is_statically_proc(Scheme_Object *value, Optimize_Info *info)
+{
+  while (1) {
+    if (SAME_TYPE(SCHEME_TYPE(value), scheme_compiled_unclosed_procedure_type))
+      return 1;
+    else if (SAME_TYPE(SCHEME_TYPE(value), scheme_compiled_syntax_type)) {
+      if (SCHEME_PINT_VAL(value) == CASE_LAMBDA_EXPD)
+        return 1;
+      else
+        break;
+    } else if (SAME_TYPE(SCHEME_TYPE(value), scheme_compiled_let_void_type)) {
+      /* Look for (let ([x <proc>]) <proc>), which is generated for optional arguments. */
+      Scheme_Let_Header *lh = (Scheme_Let_Header *)value;
+      if (lh->num_clauses == 1) {
+        Scheme_Compiled_Let_Value *lv = (Scheme_Compiled_Let_Value *)lh->body;
+        if (scheme_omittable_expr(lv->value, lv->count, 20, 0, NULL)) {
+          value = lv->body;
+          info = NULL;
+        } else
+          break;
+      } else
+        break;
+    } else
+      break;
+  }
+   
+  return 0;
+}
+
+Scheme_Object *scheme_make_noninline_proc(Scheme_Object *e)
+{
+  Scheme_Object *ni;
+
+  ni = scheme_alloc_small_object();
+  ni->type = scheme_noninline_proc_type;
+  SCHEME_PTR_VAL(ni) = e;
+  
+  return ni;
 }
 
 static int is_values_apply(Scheme_Object *e)
@@ -5558,6 +5598,7 @@ do_define_syntaxes_syntax(Scheme_Object *form, Scheme_Comp_Env *env,
   scheme_define_parse(form, &names, &code, 1, env, 0);
 
   scheme_prepare_exp_env(env->genv);
+  scheme_prepare_compile_env(env->genv->exp_env);
 
   if (!for_stx)
     names = scheme_named_map_1(NULL, stx_val, names, (Scheme_Object *)env->genv);
@@ -5613,6 +5654,7 @@ define_syntaxes_expand(Scheme_Object *form, Scheme_Comp_Env *env, Scheme_Expand_
   SCHEME_EXPAND_OBSERVE_PRIM_DEFINE_SYNTAXES(erec[drec].observer);
 
   scheme_prepare_exp_env(env->genv);
+  scheme_prepare_compile_env(env->genv->exp_env);
 
   scheme_define_parse(form, &names, &code, 1, env, 0);
   
@@ -5691,7 +5733,8 @@ static Scheme_Object *eval_letmacro_rhs(Scheme_Object *a, Scheme_Comp_Env *rhs_e
     Scheme_Dynamic_State dyn_state;
 
     scheme_prepare_exp_env(rhs_env->genv);
-  
+    scheme_prepare_compile_env(rhs_env->genv->exp_env);
+
     config = scheme_extend_config(scheme_current_config(),
                                   MZCONFIG_ENV,
                                   (Scheme_Object *)rhs_env->genv->exp_env);
@@ -5732,14 +5775,13 @@ static void *eval_letmacro_rhs_k(void)
   return (void *)eval_letmacro_rhs(a, rhs_env, max_let_depth, rp, phase, certs);
 }
 
-
 void scheme_bind_syntaxes(const char *where, Scheme_Object *names, Scheme_Object *a, 
                           Scheme_Env *exp_env, Scheme_Object *insp, 
                           Scheme_Compile_Expand_Info *rec, int drec,
                           Scheme_Comp_Env *stx_env, Scheme_Comp_Env *rhs_env,
-                          int *_pos)
+                          int *_pos, Scheme_Object *rename_rib)
 {
-  Scheme_Object **results, *l;
+  Scheme_Object **results, *l, *a_expr;
   Scheme_Comp_Env *eenv;
   Scheme_Object *certs;
   Resolve_Prefix *rp;
@@ -5795,7 +5837,8 @@ void scheme_bind_syntaxes(const char *where, Scheme_Object *names, Scheme_Object
 
   SCHEME_EXPAND_OBSERVE_NEXT(rec[drec].observer);
 
-  a = eval_letmacro_rhs(a, rhs_env, ri->max_let_depth, rp, eenv->genv->phase, certs);
+  a_expr = a;
+  a = eval_letmacro_rhs(a_expr, rhs_env, ri->max_let_depth, rp, eenv->genv->phase, certs);
 
   if (SAME_OBJ(a, SCHEME_MULTIPLE_VALUES)) {
     vc = scheme_current_thread->ku.multiple.count;
@@ -5841,10 +5884,16 @@ void scheme_bind_syntaxes(const char *where, Scheme_Object *names, Scheme_Object
     macro->type = scheme_macro_type;
     if (vc == 1)
       SCHEME_PTR_VAL(macro) = a;
-    else
+    else 
       SCHEME_PTR_VAL(macro) = results[j];
     
     scheme_set_local_syntax(i++, name, macro, stx_env);
+
+    if (scheme_is_binding_rename_transformer(SCHEME_PTR_VAL(macro))) {
+      /* Install a free-id=? rename */
+      scheme_install_free_id_rename(name, scheme_rename_transformer_id(SCHEME_PTR_VAL(macro)), rename_rib,
+                                    scheme_make_integer(rhs_env->genv->phase));
+    }
   }
   *_pos = i;
 
@@ -6014,6 +6063,7 @@ do_letrec_syntaxes(const char *where,
   SCHEME_EXPAND_OBSERVE_LETREC_SYNTAXES_RENAMES(rec[drec].observer, bindings, var_bindings, body);
   
   scheme_prepare_exp_env(stx_env->genv);
+  scheme_prepare_compile_env(stx_env->genv->exp_env);
 
   if (!env_already) {
     i = 0;
@@ -6033,7 +6083,7 @@ do_letrec_syntaxes(const char *where,
                            stx_env->insp,
                            rec, drec,
                            stx_env, rhs_env, 
-                           &i);
+                           &i, NULL);
     }
   }
 

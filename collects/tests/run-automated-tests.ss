@@ -33,15 +33,15 @@
 (define tests
   '([no-handler load "mzscheme/quiet.ss" (lib "scheme/init")]
     ;; [require "planet/lang.ss"]
-    [require "typed-scheme/run.ss"]
+    ;; [require "typed-scheme/run.ss"]
     [require "match/plt-match-tests.ss"]
     ;; [require "stepper/automatic-tests.ss" (lib "scheme/base")]
     [require "lazy/main.ss"]
     [require "scribble/main.ss"]
     [require "net/main.ss"]
     [require "file/main.ss"]
+    [require "profile/main.ss"]
     ))
-
 
 (require scheme/runtime-path)
 

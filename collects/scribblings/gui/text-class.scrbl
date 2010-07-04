@@ -324,14 +324,14 @@ See also @method[text% hide-caret].
 
 
 @defmethod*[#:mode extend
-            ([(change-style [delta (or/c (is-a?/c style-delta%) false/c)]
-                            [start (or/c exact-nonnegative-integer? (one/of 'start)) 'start]
-                            [end (or/c exact-nonnegative-integer? (one/of 'end)) 'end]
+            ([(change-style [delta (or/c (is-a?/c style-delta%) #f)]
+                            [start (or/c exact-nonnegative-integer? 'start) 'start]
+                            [end (or/c exact-nonnegative-integer? 'end) 'end]
                             [counts-as-mod? any/c #t])
               void?]
-             [(change-style [style (or/c (is-a?/c style<%>) false/c)]
-                            [start (or/c exact-nonnegative-integer? (one/of 'start)) 'start]
-                            [end (or/c exact-nonnegative-integer? (one/of 'end)) 'end]
+             [(change-style [style (or/c (is-a?/c style<%>) #f)]
+                            [start (or/c exact-nonnegative-integer? 'start) 'start]
+                            [end (or/c exact-nonnegative-integer? 'end) 'end]
                             [counts-as-mod? any/c #t])
               void?])]{
 
@@ -350,10 +350,10 @@ When @scheme[style] is provided: @InStyleListNote[@scheme[style]]
 
 
 @defmethod[#:mode extend
-           (copy [extend? any/c]
-                 [time (and/c exact? integer?)]
-                 [start (or/c exact-nonnegative-integer? (one/of 'start)) 'start]
-                 [end (or/c exact-nonnegative-integer? (one/of 'end)) 'end])
+           (copy [extend? any/c #f]
+                 [time (and/c exact? integer?) 0]
+                 [start (or/c exact-nonnegative-integer? 'start) 'start]
+                 [end (or/c exact-nonnegative-integer? 'end) 'end])
            void?]{
 
 Copies specified range of text into the clipboard. If @scheme[extend?] is
@@ -381,10 +381,10 @@ In addition to the default @xmethod[editor<%> copy-self-to] work,
 
 
 @defmethod[#:mode override
-           (cut [extend? any/c]
-                [time (and/c exact? integer?)]
-                [start (or/c exact-nonnegative-integer? (one/of 'start)) 'start]
-                [end (or/c exact-nonnegative-integer? (one/of 'end)) 'end])
+           (cut [extend? any/c #f]
+                [time (and/c exact? integer?) 0]
+                [start (or/c exact-nonnegative-integer? 'start) 'start]
+                [end (or/c exact-nonnegative-integer? 'end) 'end])
            void?]{
 
 Copies and then deletes the specified range. If @scheme[extend?] is not
@@ -399,8 +399,8 @@ See @|timediscuss| for a discussion of the @scheme[time] argument. If
 }
 
 
-@defmethod*[([(delete [start (or/c exact-nonnegative-integer? (one/of 'start))]
-                      [end (or/c exact-nonnegative-integer? (one/of 'back)) 'back]
+@defmethod*[([(delete [start (or/c exact-nonnegative-integer? 'start)]
+                      [end (or/c exact-nonnegative-integer? 'back) 'back]
                       [scroll-ok? any/c #t])
               void?]
              [(delete)
@@ -422,7 +422,8 @@ Deletes the specified range or the currently selected text (when no
 
 }
 
-@defmethod[(do-copy [start exact-nonnegative-integer?]
+@defmethod[#:mode override
+           (do-copy [start exact-nonnegative-integer?]
                     [end exact-nonnegative-integer?]
                     [time (and/c exact? integer?)]
                     [extend? any/c])
@@ -446,7 +447,8 @@ Copy the data from @scheme[start] to @scheme[end], extending the current
 }}
 
 
-@defmethod[(do-paste [start exact-nonnegative-integer?]
+@defmethod[#:mode override
+           (do-paste [start exact-nonnegative-integer?]
                      [time (and/c exact? integer?)])
            void?]{
 @methspec{
@@ -467,7 +469,8 @@ Pastes into the @techlink{position} @scheme[start].
 }}
 
 
-@defmethod[(do-paste-x-selection [start exact-nonnegative-integer?]
+@defmethod[#:mode override
+           (do-paste-x-selection [start exact-nonnegative-integer?]
                                  [time (and/c exact? integer?)])
            void?]{
 @methspec{
@@ -500,7 +503,7 @@ See also @method[text% delete].
 
 
 @defmethod[(find-line [y real?]
-                      [on-it? (or/c (box/c any/c) false/c) #f])
+                      [on-it? (or/c (box/c any/c) #f) #f])
            exact-nonnegative-integer?]{
 
 Given a @techlink{location} in the editor, returns the line at the
@@ -516,8 +519,17 @@ Given a @techlink{location} in the editor, returns the line at the
 }
 
 
-@defmethod[(find-next-non-string-snip [after (or/c (is-a?/c snip%) false/c)])
-           (or/c (is-a?/c snip%) false/c)]{
+@defmethod[(find-newline [direction (one-of/c 'forward 'backward) 'forward]
+                         [start (or/c exact-nonnegative-integer? 'start) 'start]
+                         [end (or/c exact-nonnegative-integer? 'eof) 'eof])
+           (or/c exact-nonnegative-integer? #f)]{
+
+Like @method[text% find-string], but specifically finds a paragraph
+break (possibly more efficiently than searching text).}
+
+
+@defmethod[(find-next-non-string-snip [after (or/c (is-a?/c snip%) #f)])
+           (or/c (is-a?/c snip%) #f)]{
 
 Given a snip, returns the next snip in the editor (after the given
  one) that is not an instance of @scheme[string-snip%]. If
@@ -530,9 +542,9 @@ Given a snip, returns the next snip in the editor (after the given
 
 @defmethod[(find-position [x real?]
                           [y real?]
-                          [at-eol? (or/c (box/c any/c) false/c) #f]
-                          [on-it? (or/c (box/c any/c) false/c) #f]
-                          [edge-close? (or/c (box/c real?) false/c) #f])
+                          [at-eol? (or/c (box/c any/c) #f) #f]
+                          [on-it? (or/c (box/c any/c) #f) #f]
+                          [edge-close? (or/c (box/c real?) #f) #f])
            exact-nonnegative-integer?]{
 
 Given a @techlink{location} in the editor, returns the @techlink{position} at the
@@ -557,9 +569,9 @@ See @|ateoldiscuss| for a discussion of the @scheme[at-eol?] argument.
 
 @defmethod[(find-position-in-line [line exact-nonnegative-integer?]
                                   [x real?]
-                                  [at-eol? (or/c (box/c any/c) false/c) #f]
-                                  [on-it? (or/c (box/c any/c) false/c) #f]
-                                  [edge-close? (or/c (box/c real?) false/c) #f])
+                                  [at-eol? (or/c (box/c any/c) #f) #f]
+                                  [on-it? (or/c (box/c any/c) #f) #f]
+                                  [edge-close? (or/c (box/c real?) #f) #f])
            exact-nonnegative-integer?]{
 
 Given a @techlink{location} within a line of the editor, returns the
@@ -579,8 +591,8 @@ See @method[text% find-position] for a discussion of
 
 @defmethod[(find-snip [pos exact-nonnegative-integer?]
                       [direction (one-of/c 'before-or-none 'before 'after 'after-or-none)]
-                      [s-pos (or/c (box/c exact-nonnegative-integer?) false/c) #f])
-           (or/c (is-a?/c snip%) false/c)]{
+                      [s-pos (or/c (box/c exact-nonnegative-integer?) #f) #f])
+           (or/c (is-a?/c snip%) #f)]{
 
 Returns the snip at a given @techlink{position}, or @scheme[#f] if an appropriate
  snip cannot be found.
@@ -588,7 +600,7 @@ Returns the snip at a given @techlink{position}, or @scheme[#f] if an appropriat
 If the @techlink{position} @scheme[pos] is between
 two snips, @scheme[direction] specifies which snip to return; @scheme[direction]
 can be any of the following:
-@itemize{
+@itemize[
 
  @item{@scheme['before-or-none] --- returns the snip before the
  @techlink{position}, or @scheme[#f] if @scheme[pos] is @scheme[0]}
@@ -602,7 +614,7 @@ can be any of the following:
  @item{@scheme['after-or-none] -- returns the snip after the
  @techlink{position}, or @scheme[#f] if @scheme[pos] is the last @techlink{position} or larger}
 
-}
+]
 
 @boxisfillnull[(scheme s-pos) @elem{the @techlink{position} where the returned snip starts}]
 
@@ -611,11 +623,11 @@ can be any of the following:
 
 @defmethod[(find-string [str string?]
                         [direction (one-of/c 'forward 'backward) 'forward]
-                        [start (or/c exact-nonnegative-integer? (one/of 'start)) 'start]
-                        [end (or/c exact-nonnegative-integer? (one/of 'eof)) 'eof]
+                        [start (or/c exact-nonnegative-integer? 'start) 'start]
+                        [end (or/c exact-nonnegative-integer? 'eof) 'eof]
                         [get-start? any/c #t]
                         [case-sensitive? any/c #t])
-           (or/c exact-nonnegative-integer? false/c)]{
+           (or/c exact-nonnegative-integer? #f)]{
 
 Finds an exact-match string in the editor and returns its @techlink{position}. 
  If the string is not found, @scheme[#f] is returned.
@@ -643,8 +655,8 @@ If @scheme[case-sensitive?] is @scheme[#f], then an uppercase and lowercase
 
 @defmethod[(find-string-all [str string?]
                             [direction (one-of/c 'forward 'backward) 'forward]
-                            [start (or/c exact-nonnegative-integer? (one/of 'start)) 'start]
-                            [end (or/c exact-nonnegative-integer? (one/of 'eof)) 'eof]
+                            [start (or/c exact-nonnegative-integer? 'start) 'start]
+                            [end (or/c exact-nonnegative-integer? 'eof) 'eof]
                             [get-start? any/c #t]
                             [case-sensitive any/c #t])
            (listof exact-nonnegative-integer?)]{
@@ -656,8 +668,8 @@ Finds all occurrences of a string using @method[text% find-string]. If
 }
 
 
-@defmethod[(find-wordbreak [start (or/c (box/c exact-nonnegative-integer?) false/c)]
-                           [end (or/c (box/c exact-nonnegative-integer?) false/c)]
+@defmethod[(find-wordbreak [start (or/c (box/c exact-nonnegative-integer?) #f)]
+                           [end (or/c (box/c exact-nonnegative-integer?) #f)]
                            [reason (one-of/c 'caret 'line 'selection 'user1 'user2)])
            void?]{
 
@@ -679,13 +691,13 @@ The @scheme[reason] argument specifies more information about what the
  caret may be different from the wordbreaks used to break lines. The
  possible values of @scheme[reason] are:
 
-@itemize{
+@itemize[
 @item{@scheme['caret] --- find a wordbreak suitable for moving the caret}
 @item{@scheme['line] --- find a wordbreak suitable for breaking lines}
 @item{@scheme['selection] --- find a wordbreak suitable for selecting the closest word}
 @item{@scheme['user1] --- for other (not built-in) uses}
 @item{@scheme['user2] --- for other (not built-in) uses}
-}
+]
 
 The actual handling of @scheme[reason] is controlled by the current
  wordbreak procedure; see @method[text% set-wordbreak-func]for
@@ -804,8 +816,8 @@ Returns @scheme[#t] if the editor is in overwrite mode, @scheme[#f]
 }
 
 
-@defmethod[(get-position [start (or/c (box/c exact-nonnegative-integer?) false/c)]
-                         [end (or/c (box/c exact-nonnegative-integer?) false/c) #f])
+@defmethod[(get-position [start (or/c (box/c exact-nonnegative-integer?) #f)]
+                         [end (or/c (box/c exact-nonnegative-integer?) #f) #f])
            void?]{
 
 Returns the current selection range in @techlink{position}s.  If
@@ -823,7 +835,7 @@ and @method[text% get-end-position].
 
 @defmethod[(get-region-data [start exact-nonnegative-integer?]
                             [end exact-nonnegative-integer?])
-           (or/c (is-a?/c editor-data%) false/c)]{
+           (or/c (is-a?/c editor-data%) #f)]{
 
 Gets extra data associated with a given region. See
  @|editordatadiscuss| for more information.
@@ -854,7 +866,7 @@ Returns an inexact number that increments every time the editor is
 
 
 @defmethod[(get-snip-position [snip (is-a?/c snip%)])
-           (or/c exact-nonnegative-integer? false/c)]{
+           (or/c exact-nonnegative-integer? #f)]{
 
 Returns the starting @techlink{position} of a given snip or
  @scheme[#f] if the snip is not in this editor.
@@ -862,9 +874,9 @@ Returns the starting @techlink{position} of a given snip or
 }
 
 @defmethod[(get-snip-position-and-location [snip (is-a?/c snip%)]
-                                           [pos (or/c (box/c exact-nonnegative-integer?) false/c)]
-                                           [x (or/c (box/c real?) false/c) #f]
-                                           [y (or/c (box/c real?) false/c) #f])
+                                           [pos (or/c (box/c exact-nonnegative-integer?) #f)]
+                                           [x (or/c (box/c real?) #f) #f]
+                                           [y (or/c (box/c real?) #f) #f])
            boolean?]{
 
 Gets a snip's @techlink{position} and top left @techlink{location} in editor
@@ -911,9 +923,9 @@ See also @method[text% set-styles-sticky].
 }
 
 
-@defmethod[(get-tabs [length (or/c (box/c exact-nonnegative-integer?) false/c) #f]
-                     [tab-width (or/c (box/c real?) false/c) #f]
-                     [in-units (or/c (box/c any/c) false/c) #f])
+@defmethod[(get-tabs [length (or/c (box/c exact-nonnegative-integer?) #f) #f]
+                     [tab-width (or/c (box/c real?) #f) #f]
+                     [in-units (or/c (box/c any/c) #f) #f])
            (listof real?)]{
 
 Returns the current tab-position array as a list.
@@ -932,7 +944,7 @@ See also
 
 
 @defmethod[(get-text [start exact-nonnegative-integer? 0]
-                     [end (or/c exact-nonnegative-integer? (one/of 'eof)) 'eof]
+                     [end (or/c exact-nonnegative-integer? 'eof) 'eof]
                      [flattened? any/c #f]
                      [force-cr? any/c #f])
            string?]{
@@ -964,8 +976,8 @@ Returns the distance from the top of the editor to the alignment
 }
 
 
-@defmethod[(get-visible-line-range [start (or/c (box/c exact-nonnegative-integer?) false/c)]
-                                   [end (or/c (box/c exact-nonnegative-integer?) false/c)]
+@defmethod[(get-visible-line-range [start (or/c (box/c exact-nonnegative-integer?) #f)]
+                                   [end (or/c (box/c exact-nonnegative-integer?) #f)]
                                    [all? any/c #t])
            void?]{
 
@@ -985,8 +997,8 @@ If the editor is displayed by multiple canvases and @scheme[all?] is
 }
 
 
-@defmethod[(get-visible-position-range [start (or/c (box/c exact-nonnegative-integer?) false/c)]
-                                       [end (or/c (box/c exact-nonnegative-integer?) false/c)]
+@defmethod[(get-visible-position-range [start (or/c (box/c exact-nonnegative-integer?) #f)]
+                                       [end (or/c (box/c exact-nonnegative-integer?) #f)]
                                        [all? any/c #t])
            void?]{
 
@@ -1033,13 +1045,13 @@ See also @method[text% caret-hidden?] and @method[editor<%> lock].
 @defmethod*[#:mode override 
             ([(insert [str string?]
                       [start exact-nonnegative-integer?]
-                      [end (or/c exact-nonnegative-integer? (one/of 'same)) 'same]
+                      [end (or/c exact-nonnegative-integer? 'same) 'same]
                       [scroll-ok? any/c #t])
               void?]
              [(insert [n exact-nonnegative-integer?]
                       [str string?]
                       [start exact-nonnegative-integer?]
-                      [end (or/c exact-nonnegative-integer? (one/of 'same)) 'same]
+                      [end (or/c exact-nonnegative-integer? 'same) 'same]
                       [scroll-ok? any/c #t])
               void?]
              [(insert [str string?])
@@ -1049,7 +1061,7 @@ See also @method[text% caret-hidden?] and @method[editor<%> lock].
               void?]
              [(insert [snip (is-a?/c snip%)]
                       [start exact-nonnegative-integer?]
-                      [end (or/c exact-nonnegative-integer? (one/of 'same)) 'same]
+                      [end (or/c exact-nonnegative-integer? 'same) 'same]
                       [scroll-ok? any/c #t])
               void?]
              [(insert [snip (is-a?/c snip%)])
@@ -1058,7 +1070,7 @@ See also @method[text% caret-hidden?] and @method[editor<%> lock].
               void?]
              [(insert [char char?]
                       [start exact-nonnegative-integer?]
-                      [end (or/c exact-nonnegative-integer? (one/of 'same)) 'same])
+                      [end (or/c exact-nonnegative-integer? 'same) 'same])
               void?])]{
 
 Inserts text or a snip into @this-obj[] at @techlink{position}
@@ -1227,7 +1239,7 @@ If the line starts with invisible @techlink{item}s and @scheme[visible?] is not
 @|FCAMW|
 
 To calculate lines, if the following are true:
-@itemize{
+@itemize[
 
  @item{the editor is not displayed (see @secref["tb:miaoverview"]),}
 
@@ -1235,7 +1247,7 @@ To calculate lines, if the following are true:
 
  @item{the editor has never been viewed}
 
-}
+]
 
 then this method ignores the editor's maximum width and any automatic
  line breaks it might imply.  If the first two of the above conditions
@@ -1256,14 +1268,14 @@ Moves the current selection.
 
 The possible values for @scheme[code] are:
 
-@itemize{
+@itemize[
 @item{@scheme['home] --- go to start of file}
 @item{@scheme['end] --- go to end of file}
 @item{@scheme['right] --- move right}
 @item{@scheme['left] --- move left}
 @item{@scheme['up] --- move up}
 @item{@scheme['down] --- move down}
-}
+]
 
 If @scheme[extend?] is not @scheme[#f], the selection range is
  extended instead of moved.  If anchoring is on (see @method[text%
@@ -1272,12 +1284,12 @@ If @scheme[extend?] is not @scheme[#f], the selection range is
 
 The possible values for @scheme[kind] are:
 
-@itemize{
+@itemize[
 @item{@scheme['simple] --- move one item or line}
 @item{@scheme['word] --- works with @scheme['right] or @scheme['left]}
 @item{@scheme['page] --- works with @scheme['up] or @scheme['down]}
 @item{@scheme['line] --- works with @scheme['right] or @scheme['left]; moves to the start or end of the line}
-}
+]
 
 See also @method[text% set-position].
 
@@ -1317,7 +1329,7 @@ Does nothing.
 
 Handles the following:
 
-@itemize{
+@itemize[
 
  @item{Delete and Backspace --- calls @method[text% delete].} 
 
@@ -1329,7 +1341,7 @@ Handles the following:
  @scheme[(integer->char 255)] --- inserts the character into the
  editor.}
 
-}
+]
 
 Note that an editor's @scheme[editor-canvas%] normally handles mouse
  wheel events (see also @method[editor-canvas% on-char] ).
@@ -1346,7 +1358,7 @@ Tracks clicks on a clickback (see @method[text% set-clickback]) of
  dispatches to a caret-owning snip and detects a click on an
  event-handling snip before calling to this method.
 
-@itemize{
+@itemize[
 
  @item{Clicking on a clickback region starts clickback tracking. See
  @method[text% set-clickback] for more information. Moving over a
@@ -1358,7 +1370,7 @@ Tracks clicks on a clickback (see @method[text% set-clickback]) of
  @item{Dragging extends the selection, scrolling if possible when the
  selection is dragged outside the editor's visible region.}
 
-}
+]
 }
 
 
@@ -1523,7 +1535,9 @@ If the paragraph ends with invisible @techlink{item}s (such as a carriage
 @defmethod[(paragraph-start-line [paragraph exact-nonnegative-integer?])
            exact-nonnegative-integer?]{
 
-Returns the starting line of a given paragraph. @|ParagraphNumbering| @|LineNumbering|
+Returns the starting line of a given paragraph. If @scheme[paragraph]
+is greater than the highest-numbered paragraph, then the editor's end
+@tech{position} is returned. @|ParagraphNumbering| @|LineNumbering|
 
 @|FCAMW| @|EVD|
 
@@ -1547,14 +1561,18 @@ If the paragraph starts with invisible @techlink{item}s and @scheme[visible?] is
 
 
 @defmethod[#:mode override
-           (paste [time (and/c exact? integer?)]
-                  [start (or/c exact-nonnegative-integer? (one/of 'end)) 'end]
-                  [end (or/c exact-nonnegative-integer? (one/of 'same)) 'same])
+           (paste [time (and/c exact? integer?) 0]
+                  [start (or/c exact-nonnegative-integer? 'start 'end) 'start]
+                  [end (or/c exact-nonnegative-integer? 'same) 'same])
            void?]{
 
-Pastes into the specified range. If @scheme[start] is @scheme['end], then
- the current selection end @techlink{position} is used. If @scheme[end] is
- @scheme['same], then @scheme[start] is used for @scheme[end].
+Pastes into the specified range. If @scheme[start] is @scheme['start],
+ then the current selection start @techlink{position} is used. If
+ @scheme[start] is @scheme['end], then the current selection end
+ @techlink{position} is used. If @scheme[end] is @scheme['same], then
+ @scheme[start] is used for @scheme[end], unless @scheme[start] is
+ @scheme['start], in which case the current selection end
+ @techlink{position} is used.
 
 See @|timediscuss| for a discussion of the @scheme[time] argument. If
  @scheme[time] is outside the platform-specific range of times,
@@ -1586,13 +1604,17 @@ If the previous operation on the editor was not a paste, calling
 
 @defmethod[#:mode override
            (paste-x-selection [time (and/c exact? integer?)]
-                              [start (or/c exact-nonnegative-integer? (one/of 'end)) 'end]
-                              [end (or/c exact-nonnegative-integer? (one/of 'same)) 'same])
+                              [start (or/c exact-nonnegative-integer? 'start 'end) 'start]
+                              [end (or/c exact-nonnegative-integer? 'same) 'same])
            void?]{
 
-Pastes into the specified range. If @scheme[start] is @scheme['end], then
- the current selection end @techlink{position} is used. If @scheme[end] is
- @scheme['same], then @scheme[start] is used for @scheme[end].
+Pastes into the specified range. If @scheme[start] is @scheme['start],
+ then the current selection start @techlink{position} is used. If
+ @scheme[start] is @scheme['end], then the current selection end
+ @techlink{position} is used. If @scheme[end] is @scheme['same], then
+ @scheme[start] is used for @scheme[end], unless @scheme[start] is
+ @scheme['start], in which case the current selection end
+ @techlink{position} is used.
 
 See @|timediscuss| for a discussion of the @scheme[time] argument. If
  @scheme[time] is outside the platform-specific range of times,
@@ -1616,8 +1638,8 @@ See @|ateoldiscuss| for a discussion of @scheme[at-eol?].
 
 
 @defmethod[(position-location [start exact-nonnegative-integer?]
-                              [x (or/c (box/c real?) false/c) #f]
-                              [y (or/c (box/c real?) false/c) #f]
+                              [x (or/c (box/c real?) #f) #f]
+                              [y (or/c (box/c real?) #f) #f]
                               [top? any/c #t]
                               [at-eol? any/c #f]
                               [whole-line? any/c #f])
@@ -1647,10 +1669,10 @@ maximum bottom @techlink{location} for the whole line is returned in @scheme[y].
 
 
 @defmethod[(position-locations [start exact-nonnegative-integer?]
-                               [top-x (or/c (box/c real?) false/c) #f]
-                               [top-y (or/c (box/c real?) false/c) #f]
-                               [bottom-x (or/c (box/c real?) false/c) #f]
-                               [bottom-y (or/c (box/c real?) false/c) #f]
+                               [top-x (or/c (box/c real?) #f) #f]
+                               [top-y (or/c (box/c real?) #f) #f]
+                               [bottom-x (or/c (box/c real?) #f) #f]
+                               [bottom-y (or/c (box/c real?) #f) #f]
                                [at-eol? any/c #f]
                                [whole-line? any/c #f])
            void?]{
@@ -1675,8 +1697,8 @@ Returns the paragraph number of the paragraph containing a given @techlink{posit
 
 @defmethod[#:mode extend
            (read-from-file [stream (is-a?/c editor-stream-in%)]
-                           [start (or/c exact-nonnegative-integer? (one/of 'start))]
-                           [overwrite-styles? any/c #t])
+                           [start (or/c exact-nonnegative-integer? 'start)]
+                           [overwrite-styles? any/c #f])
            boolean?]{
 
 New data is inserted at the @techlink{position} indicated by @scheme[start], or at
@@ -1697,7 +1719,7 @@ Removes all clickbacks installed for exactly the range @scheme[start]
 
 @defmethod[(scroll-to-position [start exact-nonnegative-integer?]
                                [at-eol? any/c #f]
-                               [end (or/c exact-nonnegative-integer? (one/of 'same)) 'same]
+                               [end (or/c exact-nonnegative-integer? 'same) 'same]
                                [bias (one-of/c 'start 'end 'none) 'none])
            boolean?]{
 
@@ -1750,8 +1772,8 @@ If @scheme[on?] is not @scheme[#f], then the selection will be
 }
 
 
-@defmethod[(set-autowrap-bitmap [bitmap (or/c (is-a?/c bitmap%) false/c)])
-           (or/c (is-a?/c bitmap%) false/c)]{
+@defmethod[(set-autowrap-bitmap [bitmap (or/c (is-a?/c bitmap%) #f)])
+           (or/c (is-a?/c bitmap%) #f)]{
 
 Sets the bitmap that is drawn at the end of a line when it is
  automatically line-wrapped.
@@ -1790,7 +1812,7 @@ See also
                                        exact-nonnegative-integer?
                                        exact-nonnegative-integer?)
                               . -> . any)]
-                          [hilite-delta (or/c (is-a?/c style-delta%) false/c) #f]
+                          [hilite-delta (or/c (is-a?/c style-delta%) #f) #f]
                           [call-on-down? any/c #f])
            void?]{
 
@@ -1821,11 +1843,11 @@ Set the format of the file saved from this editor.
 
 The legal formats are:
 
-@itemize{
+@itemize[
 @item{@scheme['standard] ---  a standard editor  file}
 @item{@scheme['text] --- a text file}
 @item{@scheme['text-force-cr] --- a text file; when writing, change automatic newlines (from word-wrapping) into real carriage returns}
-}
+]
 
 @MonitorMethod[@elem{The file format of an editor} @elem{the
  system in response to file loading and saving
@@ -1892,7 +1914,7 @@ The first line of the paragraph is indented by @scheme[first-left] points
 
 
 @defmethod[(set-position [start exact-nonnegative-integer?]
-                         [end (or/c exact-nonnegative-integer? (one/of 'same)) 'same]
+                         [end (or/c exact-nonnegative-integer? 'same) 'same]
                          [at-eol? any/c #f]
                          [scroll? any/c #t]
                          [seltype (one-of/c 'default 'x 'local) 'default])
@@ -1910,7 +1932,7 @@ See @|ateoldiscuss| for a discussion of @scheme[at-eol?]. If
 
 The @scheme[seltype] argument is only used when the X Window System
  selection mechanism is enabled. The possible values are:
-@itemize{
+@itemize[
 
  @item{@scheme['default] --- if this window has the keyboard focus
  and given selection is non-empty, make it the current X selection}
@@ -1921,7 +1943,7 @@ The @scheme[seltype] argument is only used when the X Window System
  @item{@scheme['local] --- do not change the
  current X selection}
 
-}
+]
 
 Setting the @techlink{position} is disallowed when the editor is internally
  locked for reflowing (see also @|lockdiscuss|).
@@ -1936,7 +1958,7 @@ See also @scheme[editor-set-x-selection-mode].
 
 @defmethod[(set-position-bias-scroll [bias (one-of/c 'start-only 'start 'none 'end 'end-only)]
                                      [start exact-nonnegative-integer?]
-                                     [end (or/c exact-nonnegative-integer? (one/of 'same)) 'same]
+                                     [end (or/c exact-nonnegative-integer? 'same) 'same]
                                      [ateol? any/c #f]
                                      [scroll? any/c #t]
                                      [seltype (one-of/c 'default 'x 'local) 'default])
@@ -1945,13 +1967,13 @@ See also @scheme[editor-set-x-selection-mode].
 Like  @method[text% set-position], but a scrolling bias can be specified.
 
 The possible values for @scheme[bias] are:
-@itemize{
+@itemize[
 @item{@scheme['start-only] --- only insure that the starting @techlink{position} is visible}
 @item{@scheme['start] --- if the range doesn't fit in the visible area, show the starting @techlink{position}}
 @item{@scheme['none] --- no special scrolling instructions}
 @item{@scheme['end] --- if the range doesn't fit in the visible area, show the ending @techlink{position}}
 @item{@scheme['end-only] --- only insure that the ending @techlink{position} is visible}
-}
+]
 
 See also @method[text% scroll-to-position].
 
@@ -2010,8 +2032,8 @@ Setting tabs is disallowed when the editor is internally locked for
 }
 
 
-@defmethod[(set-wordbreak-func [f ((is-a?/c text%) (or/c (box/c exact-nonnegative-integer?) false/c)
-                                                   (or/c (box/c exact-nonnegative-integer?) false/c)
+@defmethod[(set-wordbreak-func [f ((is-a?/c text%) (or/c (box/c exact-nonnegative-integer?) #f)
+                                                   (or/c (box/c exact-nonnegative-integer?) #f)
                                                    symbol?
                                    . -> . any)])
            void?]{
@@ -2036,7 +2058,7 @@ Since the wordbreak function will be called when line breaks are being
 }
 
 
-@defmethod[(set-wordbreak-map [map (or/c (is-a?/c editor-wordbreak-map%) false/c)])
+@defmethod[(set-wordbreak-map [map (or/c (is-a?/c editor-wordbreak-map%) #f)])
            void?]{
 
 Sets the wordbreaking map that is used by the standard wordbreaking
@@ -2065,7 +2087,7 @@ Splitting a snip is disallowed when the editor is internally locked
 @defmethod[#:mode extend
            (write-to-file [stream (is-a?/c editor-stream-out%)]
                           [start exact-nonnegative-integer? 0]
-                          [end (or/c exact-nonnegative-integer? (one/of 'eof)) 'eof])
+                          [end (or/c exact-nonnegative-integer? 'eof) 'eof])
            boolean?]{
 
 If @scheme[start] is 0 and @scheme[end] is @scheme['eof] negative,

@@ -661,6 +661,9 @@
 (test '#hash(("foo" . (1 2 3 4 5)))
       'qq
       `#hash(("foo" . (1 2 ,(+ 1 2) 4 5))))
+(test '#hash(("foo" . (1 2 (+ 1 2) 4 5)))
+      'qq
+      `#hash(("foo" . (1 2 (+ 1 2) 4 5))))
 (test '#hash(("foo" . (1 2 3 4 5)))
       'qq
       `#hash(("foo" . (1 2 ,@(list 3 4 5)))))
@@ -670,6 +673,12 @@
 (test '#hash((,(read) . 2))
       'qq
       `#hash((,(read) . 1) (,(read) . 2)))
+(test '#hash(("moo" . 3) ("foo" . (1 2)))
+      'qq
+      `#hash(("moo" . ,(+ 1 2)) ("foo" . (1 2))))
+(test '#hash(("moo" . (+ 1 2)) ("foo" . -1))
+      'qq
+      `#hash(("moo" . (+ 1 2)) ("foo" . ,(- 1 2))))
 (syntax-test #'`#hash(("foo" . ,@(list 1 2 3 4 5))))
 (error-test #'(read (open-input-string "`#hash((foo ,@(list 1 2 3 4 5)))")) exn:fail:read?)
 
@@ -1203,7 +1212,123 @@
                                                           (define x 10))
                                   (abcdefg)))
 
+
+;; ----------------------------------------
+
+(test 79 'splicing-let (let ()
+                         (splicing-let ([x 79])
+                           (define (y) x))
+                         (y)))
+(test 77 'splicing-let (let ()
+                         (define q 77)
+                         (splicing-let ([q 8]
+                                        [x q])
+                           (define (z) x))
+                         (z)))
+(test 81 'splicing-letrec (let ()
+                            (define q 77)
+                            (splicing-letrec ([q 81]
+                                              [x q])
+                              (define (z) x))
+                            (z)))
+(test 82 'splicing-letrec (let ()
+                            (define q 77)
+                            (splicing-letrec ([x (lambda () (q))]
+                                              [q (lambda () 82)])
+                              (define (z) x))
+                            ((z))))
+(test 81 'splicing-letrec (eval
+                            '(begin
+                               (define q 77)
+                               (splicing-letrec ([q 81]
+                                                 [x q])
+                                                (define (z) x))
+                               (z))))
+(test 82 'splicing-letrec (eval
+                            '(begin
+                               (define q 77)
+                               (splicing-letrec ([x (lambda () (q))]
+                                                 [q (lambda () 82)])
+                                                (define (z) x))
+                               ((z)))))
+(err/rt-test (eval
+              '(begin
+                 (splicing-letrec ([x q]
+                                   [q 81])
+                  x)))
+             exn:fail:contract:variable?)
+
+(test 82 'splicing-letrec-syntaxes+values
+      (let ()
+        (define q 77)
+        (splicing-letrec-syntaxes+values
+           ([(mx) (lambda (stx) (quote-syntax (x)))]
+            [(m) (lambda (stx) (quote-syntax (mx)))])
+           ([(x) (lambda () (q))]
+            [(q) (lambda () 82)])
+          (define (a) (m)))
+        (a)))
+
+(test 82 'splicing-letrec-syntaxes+values
+      (eval
+       '(begin
+          (define q 77)
+          (splicing-letrec-syntaxes+values
+              ([(mx) (lambda (stx) (quote-syntax (x)))]
+               [(m) (lambda (stx) (quote-syntax (mx)))])
+              ([(x) (lambda () (q))]
+               [(q) (lambda () 82)])
+            (define (a) (m)))
+          (a))))
+
+(test 82 'splicing-local
+      (let ()
+        (define (x) q)
+        (define q 77)
+        (define-syntax (m stx) (quote-syntax (x)))
+        (splicing-local
+            [(define-syntax (m stx) (quote-syntax (mx)))
+             (define (x) (q))
+             (define-syntax (mx stx) (quote-syntax (x)))
+             (define (q) 82)]
+          (define (a) (m)))
+        (a)))
+
+(test 82 'splicing-local
+      (eval
+       '(begin
+          (define (x) q)
+          (define q 77)
+          (define-syntax (m stx) (quote-syntax (x)))
+          (splicing-local
+              [(define-syntax (m stx) (quote-syntax (mx)))
+               (define (x) (q))
+               (define-syntax (mx stx) (quote-syntax (x)))
+               (define (q) 82)]
+            (define (a) (m)))
+          (a))))
+
+;; local names are not visible outside
+(test 77 'splicing-local
+      (let ()
+        (define q 77)
+        (define-syntax (m stx) (quote-syntax (x)))
+        (splicing-local
+            [(define-syntax (m stx) (quote-syntax (q)))
+             (define (q) 82)]
+          (define (a) (m)))
+        (m)))
+(test 77 'splicing-local
+      (eval
+       '(begin
+          (define q 77)
+          (define-syntax (m stx) (quote-syntax (x)))
+          (splicing-local
+              [(define-syntax (m stx) (quote-syntax (q)))
+               (define (q) 82)]
+            (define (a) (m)))
+          (m))))
+
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (report-errs)
-

@@ -121,7 +121,7 @@ expressions, a printed symbol should not be confused with an
 identifier. In particular, the symbol @scheme[(#, @scheme[quote] #,
 @schemeidfont{map})] has nothing to do with the @schemeidfont{map}
 identifier or the predefined function that is bound to
-@schemeidfont{map}, except that the symbol and the identifier happen
+@scheme[map], except that the symbol and the identifier happen
 to be made up of the same letters.
 
 Indeed, the intrinsic value of a symbol is nothing more than its
@@ -203,7 +203,7 @@ we have been simplifying Scheme's true syntax.
 The syntax of Scheme is not defined directly in terms of character
 streams. Instead, the syntax is determined by two layers:
 
-@itemize{
+@itemize[
 
  @item{a @defterm{read} layer, which turns a sequence of characters
        into lists, symbols, and other constants; and}
@@ -211,7 +211,7 @@ streams. Instead, the syntax is determined by two layers:
  @item{an @defterm{expand} layer, which processes the lists, symbols,
        and other constants to parse them as an expression.}
 
-}
+]
 
 The rules for printing and reading go together. For example, a list is
 printed with parentheses, and reading a pair of parentheses produces a

@@ -191,6 +191,7 @@ Scheme_Config *scheme_init_error_escape_proc(Scheme_Config *config)
   %Q = truncated-to-256 Scheme string
   %V = scheme_value
   %D = scheme value to display
+  %_ = skip
 
   %L = line number, -1 means no line
   %e = error number for strerror()
@@ -258,6 +259,7 @@ static long sch_vsprintf(char *s, long maxlen, const char *msg, va_list args, ch
       case 'D':
       case 'T':
       case 'Q':
+      case '_':
 	ptrs[pp++] = mzVA_ARG(args, Scheme_Object*);
 	break;
       default:
@@ -446,6 +448,13 @@ static long sch_vsprintf(char *s, long maxlen, const char *msg, va_list args, ch
             tlen = dlen;
 	  }
 	  break;
+        case '_':
+          {
+            pp++;
+            t = "";
+            tlen = 0;
+          }
+          break;
 	case 'T':
 	case 'Q':
 	  {
@@ -660,6 +669,14 @@ call_error(char *buffer, int len, Scheme_Object *exn)
                  "optimizer constant-fold attempt failed%s: %s",
                  scheme_optimize_context_to_string(scheme_current_thread->constant_folding),
                  buffer);
+    if (SCHEME_STRUCTP(exn)
+        && scheme_is_struct_instance(exn_table[MZEXN_BREAK].type, exn)) {
+      /* remember to re-raise exception */
+      scheme_current_thread->reading_delayed = exn;
+    }
+    scheme_longjmp(scheme_error_buf, 1);
+  } else if (scheme_current_thread->reading_delayed) {
+    scheme_current_thread->reading_delayed = exn;
     scheme_longjmp(scheme_error_buf, 1);
   } else {
     mz_jmp_buf savebuf;
@@ -1592,7 +1609,8 @@ static void do_wrong_syntax(const char *where,
  	  if (scheme_current_thread->current_local_env)
 	    phase = scheme_current_thread->current_local_env->genv->phase;
 	  else phase = 0;
-	  scheme_stx_module_name(&first, scheme_make_integer(phase), &mod, &nomwho, NULL, NULL, NULL);
+	  scheme_stx_module_name(0, &first, scheme_make_integer(phase), &mod, &nomwho, 
+                                 NULL, NULL, NULL, NULL, NULL, NULL);
 	}
       }
     } else {
@@ -1890,17 +1908,25 @@ void scheme_unbound_global(Scheme_Bucket *b)
 
   if (((Scheme_Bucket_With_Home *)b)->home->module) {
     const char *errmsg;
+    char *phase, phase_buf[20];
     
     if (SCHEME_TRUEP(scheme_get_param(scheme_current_config(), MZCONFIG_ERROR_PRINT_SRCLOC)))
-      errmsg = "reference to an identifier before its definition: %S in module: %D";
+      errmsg = "reference to an identifier before its definition: %S in module: %D%s";
     else
-      errmsg = "reference to an identifier before its definition: %S";
+      errmsg = "reference to an identifier before its definition: %S%_%s";
+
+    if (SCHEME_INT_VAL(((Scheme_Bucket_With_Home *)b)->home->phase)) {
+      sprintf(phase_buf, " phase: %ld", SCHEME_INT_VAL(((Scheme_Bucket_With_Home *)b)->home->phase));
+      phase = phase_buf;
+    } else
+      phase = "";
 
     scheme_raise_exn(MZEXN_FAIL_CONTRACT_VARIABLE,
 		     name,
 		     errmsg,
 		     name,
-		     ((Scheme_Bucket_With_Home *)b)->home->module->modname);
+		     ((Scheme_Bucket_With_Home *)b)->home->module->modname,
+                     phase);
   } else {
     scheme_raise_exn(MZEXN_FAIL_CONTRACT_VARIABLE,
 		     name,
@@ -3252,6 +3278,11 @@ do_raise(Scheme_Object *arg, int need_debug, int eb)
                  "warning%s: optimizer constant-fold attempt failed: %s",
                  scheme_optimize_context_to_string(p->constant_folding),
                  msg);
+    }
+    if (SCHEME_STRUCTP(arg)
+        && scheme_is_struct_instance(exn_table[MZEXN_BREAK].type, arg)) {
+      /* remember to re-raise exception */
+      scheme_current_thread->reading_delayed = arg;
     }
     scheme_longjmp (scheme_error_buf, 1);
   }

@@ -21,7 +21,7 @@
           (only-in scheme/private/class-internal make-object do-make-object)))
 (require (r:infer constraint-structs))
 
-(import tc-expr^ tc-lambda^ tc-dots^)
+(import tc-expr^ tc-lambda^ tc-dots^ tc-let^)
 (export tc-app^)
 
 ;; comparators that inform the type system
@@ -576,7 +576,7 @@
       [c:lv-clause
        #:with (#%plain-app reverse n:id) #'c.e
        #:with (v) #'(c.v ...) 
-       #:when (free-identifier=? name #'v)
+       #:when (free-identifier=? name #'n)
        (type-annotation #'v)]
       [_ #f]))
   (syntax-parse stx
@@ -757,8 +757,8 @@
      (match (tc-expr #'fn)
        [(tc-result: (Function: arities)) 
         (tc-keywords form arities (type->list (tc-expr/t #'kws)) #'kw-arg-list #'pos-args expected)]
-       [t (tc-error/expr #:return (ret (Un))
-                         "Cannot apply expression of type ~a, since it is not a function type" t)])]
+       [(tc-result: t) (tc-error/expr #:return (ret (Un))
+                                      "Cannot apply expression of type ~a, since it is not a function type" t)])]
     ;; even more special case for match
     [(#%plain-app (letrec-values ([(lp) (#%plain-lambda args . body)]) lp*) . actuals)
      (and expected (not (andmap type-annotation (syntax->list #'args))) (free-identifier=? #'lp #'lp*))
@@ -779,6 +779,13 @@
          (match-let* ([ft (tc-expr #'f)]
                       [(tc-result: t) (tc/funapp #'f #'(arg) ft (list (ret ty)) #f)])
            (ret (Un (-val #f) t)))))]
+    ;; infer for ((lambda
+    [(#%plain-app (#%plain-lambda (x ...) . body) args ...)
+     (= (length (syntax->list #'(x ...)))
+        (length (syntax->list #'(args ...))))
+     (tc/let-values/check #'((x) ...) #'(args ...) #'body 
+                          #'(let-values ([(x) args] ...) . body)
+                          expected)]
     ;; default case
     [(#%plain-app f args ...) 
      (tc/funapp #'f #'(args ...) (tc-expr #'f) (map tc-expr (syntax->list #'(args ...))) expected)]))
@@ -804,7 +811,11 @@
        (ret expected))]
     ;; special case when argument needs inference
     [_
-     (let ([ts (map (compose generalize tc-expr/t) (syntax->list actuals))])
+     (let ([ts (for/list ([ac (syntax->list actuals)]
+                          [f (syntax->list args)])
+                 (or 
+                  (type-annotation f #:infer #t)
+                  (generalize (tc-expr/t ac))))])
        (tc/rec-lambda/check form args body lp ts expected)
        (ret expected))]))
 

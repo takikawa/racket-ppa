@@ -680,6 +680,7 @@ AS
 AR
 STATIC_AR
 ARFLAGS
+STRIP_DEBUG
 WBUILD
 CC_FOR_BUILD
 REZ
@@ -1367,6 +1368,7 @@ Optional Features:
   --enable-xonx           compile X11 (not Quartz) MrEd for Mac OS X
   --enable-libfw          install Mac OS X frameworks to /Library/Frameworks
   --enable-userfw         install Mac OS X frameworks to ~/Library/Frameworks
+  --enable-macprefix      allow --prefix with a Mac OS X install
 
 Optional Packages:
   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
@@ -2010,6 +2012,11 @@ if test "${enable_libfw+set}" = set; then
   enableval=$enable_libfw;
 fi
 
+# Check whether --enable-macprefix was given.
+if test "${enable_macprefix+set}" = set; then
+  enableval=$enable_macprefix;
+fi
+
 
 
 ###### Get OS Type #######
@@ -2070,6 +2077,17 @@ else
   if test "$OS" = "Darwin" ; then
     enable_quartz=yes
     enable_origtree=yes
+    if test "${prefix}" != "NONE" ; then
+      if test "${enable_macprefix}" != "yes" ; then
+        echo "ERROR: --prefix not allowed for a Mac OS X build, unless either"
+        echo "         --enable-xonx is supplied (to create a Unix-style"
+        echo "           build), or "
+        echo "         --enable-macprefix is supplied (to allow a Mac-style"
+        echo "           installation, even though --prefix is normally used"
+        echo "           for Unix-style installations)"
+        exit 1
+      fi
+    fi
   fi
 fi
 
@@ -2285,6 +2303,8 @@ CGC=cgc
 CGC_INSTALLED=cgc
 CGC_CAP_INSTALLED=CGC
 MAIN_VARIANT=3m
+
+STRIP_DEBUG=":"
 
 ###### OSKit stuff #######
 
@@ -5784,7 +5804,7 @@ case $OS in
     DYN_CFLAGS="-fPIC"
     ;;
   OpenBSD)
-    LIBS="$LIBS -rdynamic"
+    LIBS="$LIBS -rdynamic -Wl,--export-dynamic"
     ;;
   NetBSD)
     LIBS="$LIBS -rdynamic"
@@ -5801,6 +5821,7 @@ case $OS in
     LIBS="$LIBS -ldl -lm -rdynamic"
     DYN_CFLAGS="-fPIC"
     GC_THREADS_FLAG="-DGC_LINUX_THREADS"
+    STRIP_DEBUG="strip -S"
     # PPC: X11 librares are not found
     case `$UNAME -m` in
       #Required for CentOS 4.6
@@ -5871,6 +5892,8 @@ case $OS in
     fi
 
     PREFLAGS="$PREFLAGS -DOS_X -D_DARWIN_UNLIMITED_SELECT"
+
+    STRIP_DEBUG="/usr/bin/strip -S"
 
     # zlib comes with the OS
     ZLIB_A=""
@@ -6038,6 +6061,67 @@ fi
 
 if test "$inline" = "no" ; then
   MZOPTIONS="$MZOPTIONS -DNO_INLINE_KEYWORD"
+fi
+{ echo "$as_me:$LINENO: result: $inline" >&5
+echo "${ECHO_T}$inline" >&6; }
+
+ msg="for noinline attribute"
+{ echo "$as_me:$LINENO: checking $msg" >&5
+echo $ECHO_N "checking $msg... $ECHO_C" >&6; }
+if test "$cross_compiling" = yes; then
+  noinline=no
+else
+  cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+static int foo() __attribute__ ((noinline));
+   static int foo() { return 0; }
+   int main() {
+      return foo();
+   }
+_ACEOF
+rm -f conftest$ac_exeext
+if { (ac_try="$ac_link"
+case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_link") 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } && { ac_try='./conftest$ac_exeext'
+  { (case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_try") 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; }; then
+  noinline=yes
+else
+  echo "$as_me: program exited with status $ac_status" >&5
+echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+( exit $ac_status )
+noinline=no
+fi
+rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext conftest.$ac_objext conftest.$ac_ext
+fi
+
+
+if test "$noinline" = "yes" ; then
+
+cat >>confdefs.h <<\_ACEOF
+#define MZ_USE_NOINLINE 1
+_ACEOF
+
 fi
 { echo "$as_me:$LINENO: result: $inline" >&5
 echo "${ECHO_T}$inline" >&6; }
@@ -11872,6 +11956,7 @@ LIBS="$LIBS $EXTRALIBS"
 
 
 
+
 mk_needed_dir()
 {
   if test ! -d "$1" ; then
@@ -11952,9 +12037,13 @@ if test "${enable_mred}" = "yes" ; then
 
   makefiles="$makefiles
              mred/Makefile
-               mred/wxs/Makefile mred/wxme/Makefile
-               mred/gc2/Makefile
+               mred/wxs/Makefile
+               mred/gc2/Makefile"
+
+  if test "${enable_libpng}" != "yes" ; then
+    makefiles="$makefiles
                wxcommon/libpng/Makefile wxcommon/zlib/Makefile"
+  fi
 
   if test "${enable_quartz}" = "yes" ; then
     makefiles="$makefiles
@@ -12722,6 +12811,7 @@ AS!$AS$ac_delim
 AR!$AR$ac_delim
 STATIC_AR!$STATIC_AR$ac_delim
 ARFLAGS!$ARFLAGS$ac_delim
+STRIP_DEBUG!$STRIP_DEBUG$ac_delim
 WBUILD!$WBUILD$ac_delim
 CC_FOR_BUILD!$CC_FOR_BUILD$ac_delim
 REZ!$REZ$ac_delim
@@ -12752,7 +12842,6 @@ MREDLINKER!$MREDLINKER$ac_delim
 LIBSFX!$LIBSFX$ac_delim
 WXLIBS!$WXLIBS$ac_delim
 WXVARIANT!$WXVARIANT$ac_delim
-ICP!$ICP$ac_delim
 _ACEOF
 
   if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 97; then
@@ -12794,6 +12883,7 @@ _ACEOF
 ac_delim='%!_!# '
 for ac_last_try in false false false false false :; do
   cat >conf$$subs.sed <<_ACEOF
+ICP!$ICP$ac_delim
 MRLIBINSTALL!$MRLIBINSTALL$ac_delim
 LIBFINISH!$LIBFINISH$ac_delim
 MAKE_MRED!$MAKE_MRED$ac_delim
@@ -12835,7 +12925,7 @@ LIBOBJS!$LIBOBJS$ac_delim
 LTLIBOBJS!$LTLIBOBJS$ac_delim
 _ACEOF
 
-  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 39; then
+  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 40; then
     break
   elif $ac_last_try; then
     { { echo "$as_me:$LINENO: error: could not make $CONFIG_STATUS" >&5

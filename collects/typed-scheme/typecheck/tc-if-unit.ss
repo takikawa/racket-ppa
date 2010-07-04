@@ -31,7 +31,7 @@
     ;; type-op : (Type Type -> Type) Type -> _ Type -> Type
     (define ((type-op f t) _ old)
       (let ([new-t (f old t)])
-        ;(printf "new-t ~a~n" new-t)
+        ;(printf "f old t new: ~a\n" (list f old t new-t))
         ;; if this operation produces an uninhabitable type, then this expression can't be executed
         (when (type-equal? new-t (Un))
           ;(printf "setting flag!~n")
@@ -45,7 +45,8 @@
         (syntax-rules ()
           [(check-rest f v)
            (with-update-type/lexical f v (loop (cdr effs)))]
-          [(check-rest f t v) (check-rest (type-op f t) v)]))
+          [(check-rest f t v) 
+           (check-rest (type-op f t) v)]))
       (if (null? effs)
           ;; base case
           (let* ([reachable? (not (unbox flag))])
@@ -83,7 +84,8 @@
             ;; just replace the type of v with (-val #f)
             [(Var-False-Effect: v) (check-rest (lambda (_ old) (-val #f)) v)]
             ;; v cannot have type (-val #f)
-            [(Var-True-Effect: v) (check-rest *remove (-val #f) v)])))))
+            [(Var-True-Effect: v) 
+             (check-rest *remove (-val #f) v)])))))
 
 ;; the main function
 (define (tc/if-twoarm tst thn els)
