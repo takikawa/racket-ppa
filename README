@@ -1,6 +1,9 @@
 The Racket programming language
 ===============================
 
+This is the Racket v5.0 source package for Unix.
+See the build instructions in src/README.
+
 Important executables:
 
 * DrRacket: Racket's integrated development environment (start here!).
@@ -19,8 +22,6 @@ More Information
 Racket comes with extensive documentation: use DrRacket's `Help' menu,
 or run `raco docs'.  Also, visit us at http://racket-lang.org/ for more
 Racket resources.
-
-Instructions for building Racket from source are in src/README.
 
 
 License

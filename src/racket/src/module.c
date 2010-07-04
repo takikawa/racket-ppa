@@ -4430,8 +4430,6 @@ static void do_prepare_compile_env(Scheme_Env *env, int base_phase, int pos)
 
   need_lock = wait_registry(env);
 
-  wait_registry(env);
-
   v = MODCHAIN_AVAIL(env->modchain, pos);
   if (!SCHEME_FALSEP(v)) {
     MODCHAIN_AVAIL(env->modchain, pos) = scheme_false;
