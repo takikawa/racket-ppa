@@ -1,4 +1,4 @@
-(module encode-decode mzscheme
+#lang mzscheme
   (require mzlib/deflate
            mzlib/match
            mzlib/pretty)
@@ -21,7 +21,7 @@
                (λ (oport)
                  (let ([chopped (chop-up (encode-sexp `(begin ,@bodies)))])
                    (fprintf oport "(module ~a mzscheme\n" m)
-                   (fprintf oport "  (require (lib \"encode-decode.ss\" \"framework\" \"private\"))\n")
+                   (fprintf oport "  (require framework/private/encode-decode)\n")
                    (fprintf oport "  (decode ~a" (car chopped))
                    (for-each (lambda (chopped)
                                (fprintf oport "\n          ~a" chopped))
@@ -103,4 +103,4 @@
              (map (λ (x) (symbol->string (syntax-e x)))
                   (syntax->list (syntax (arg ...)))))))
          
-         (datum->syntax-object stx decoded stx))])))
+         (datum->syntax-object stx decoded stx))]))

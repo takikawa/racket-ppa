@@ -1,25 +1,23 @@
 
-(module gif mzscheme
-  (require mzlib/class
-           mzlib/file
-           mred
+(module gif scheme/base
+  (require scheme/gui/base
+           scheme/class
+           scheme/list
            net/gifwrite
-           mzlib/contract
-           mzlib/kw
-           mzlib/etc)
-
+           scheme/contract)
+  
   (provide write-gif
            write-animated-gif)
-
+  
   (define (force-bm bm) (if (procedure? bm) (bm) bm))
-
+  
   (define (split-bytes b len offset)
     (if (= offset (bytes-length b))
         null
         (cons (subbytes b offset (+ offset len))
               (split-bytes b len (+ offset len)))))
-
-  (define (write-gifs bms delay filename one-at-a-time?)
+  
+  (define (write-gifs bms delay filename one-at-a-time? last-frame-delay loop?)
     (let* ([init (force-bm (car bms))]
            [w (send init get-width)]
            [h (send init get-height)])
@@ -40,15 +38,19 @@
              filename
              (lambda (p)
                (let* ([gif (gif-start p w h 0 #f)])
-                 (when delay
+                 (when loop?
                    (gif-add-loop-control gif 0))
-                 (for-each (lambda (argb-thunk)
-                             (let-values ([(pixels colormap transparent)
-                                           (quantize (argb-thunk))])
-                               (when (or transparent delay)
-                                 (gif-add-control gif 'any #f (or delay 0) transparent))
-                               (gif-add-image gif 0 0 w h #f colormap pixels)))
-                           argb-thunks)
+                 (let ([last-argb-thunk (last argb-thunks)])
+                   (for-each (lambda (argb-thunk)
+                               (let-values ([(pixels colormap transparent)
+                                             (quantize (argb-thunk))])
+                                 (when (or transparent delay)
+                                   (gif-add-control gif 'any #f (or delay 0) transparent))
+                                 (gif-add-image gif 0 0 w h #f colormap pixels)
+                                 (when (and last-frame-delay (eq? argb-thunk last-argb-thunk))
+                                   (gif-add-control gif 'any #f last-frame-delay transparent)
+                                   (gif-add-image gif 0 0 w h #f colormap pixels))))
+                             argb-thunks))
                  (gif-end gif))))
             ;; Build images and quantize all at once:
             (let-values ([(pixels colormap transparent)
@@ -59,17 +61,25 @@
                  (let* ([gif (gif-start p w h 0 colormap)])
                    (when delay
                      (gif-add-loop-control gif 0))
-                   (for-each (lambda (pixels)
-                               (when (or transparent delay)
-                                 (gif-add-control gif 'any #f (or delay 0) transparent))
-                               (gif-add-image gif 0 0 w h #f #f pixels))
-                             (split-bytes pixels (* w h) 0))
+                   (let* ([pixelss (split-bytes pixels (* w h) 0)]
+                          [last-pixels (last pixelss)])
+                     (for-each (lambda (pixels)
+                                 (when (or transparent delay)
+                                   (gif-add-control gif 'any #f (or delay 0) transparent))
+                                 (gif-add-image gif 0 0 w h #f #f pixels)
+                                 (when (and last-frame-delay (eq? pixels last-pixels))
+                                   (gif-add-control gif 'any #f last-frame-delay transparent)
+                                   (gif-add-image gif 0 0 w h #f colormap pixels)))
+                               pixelss))
                    (gif-end gif)))))))))
-
+  
   (define (write-gif bm filename)
-    (write-gifs (list bm) #f filename #f))
-
-  (define/kw (write-animated-gif bms delay filename #:key [one-at-a-time? #f])
-    (write-gifs bms delay filename one-at-a-time?))
-
+    (write-gifs (list bm) #f filename #f #f #f))
+  
+  (define (write-animated-gif bms delay filename 
+                              #:one-at-a-time? [one-at-a-time? #f]
+                              #:last-frame-delay [last-frame-delay #f]
+                              #:loop? [loop? (and delay #t)])
+    (write-gifs bms delay filename one-at-a-time? last-frame-delay loop?))
+  
   )

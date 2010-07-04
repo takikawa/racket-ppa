@@ -1,10 +1,10 @@
 #lang scheme/base
 (require mzlib/list
          scheme/contract
-         (lib "session.ss" "web-server" "private")
+         web-server/private/session
          (only-in "../lang/web.ss"
                   initialize-servlet)           
-         (lib "web-cells.ss" "web-server" "lang")
+         web-server/lang/web-cells
          "../private/request-structs.ss"
          "../private/response-structs.ss"
          "dispatch.ss"
@@ -17,13 +17,13 @@
          "../configuration/responders.ss")
 
 (provide/contract
- [interface-version dispatcher-interface-version?]
+ [interface-version dispatcher-interface-version/c]
  [make
-  (->* (#:url->path url-path?)
-       (#:make-servlet-namespace make-servlet-namespace?
+  (->* (#:url->path url-path/c)
+       (#:make-servlet-namespace make-servlet-namespace/c
                                   #:responders-servlet-loading (url? any/c . -> . response?)
                                   #:responders-servlet (url? any/c . -> . response?))
-       dispatcher?)])
+       dispatcher/c)])
 
 ; XXX url->servlet
 ; XXX optional session manager
@@ -31,7 +31,7 @@
 (define (make #:url->path url->path
               #:make-servlet-namespace [make-servlet-namespace (make-make-servlet-namespace)]
               #:responders-servlet-loading [responders-servlet-loading servlet-loading-responder]
-              #:responders-servlet [responders-servlet (gen-servlet-responder "servlet-error.html")])
+              #:responders-servlet [responders-servlet servlet-error-responder])
   
   ;; dispatch : connection request -> void
   (define (dispatch conn req)
@@ -55,10 +55,10 @@
                (define cust (make-custodian (current-server-custodian)))
                (define ns (make-servlet-namespace
                            #:additional-specs
-                           '((lib "web-cells.ss" "web-server" "lang")
-                             (lib "abort-resume.ss" "web-server" "lang")
-                             (lib "session.ss" "web-server" "private")
-                             (lib "request-structs.ss" "web-server" "private"))))
+                           '(web-server/lang/web-cells
+                             web-server/lang/abort-resume
+                             web-server/private/session
+                             web-server/private/request-structs)))
                (define ses (new-session cust ns uri url-servlet-paths))
                (parameterize ([current-custodian cust]
                               [current-directory (directory-part a-path)]

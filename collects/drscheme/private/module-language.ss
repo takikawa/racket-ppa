@@ -19,7 +19,8 @@
   (import [prefix drscheme:language-configuration: drscheme:language-configuration/internal^]
           [prefix drscheme:language: drscheme:language^]
           [prefix drscheme:unit: drscheme:unit^]
-          [prefix drscheme:rep: drscheme:rep^])
+          [prefix drscheme:rep: drscheme:rep^]
+          [prefix drscheme:init: drscheme:init^])
   (export drscheme:module-language^)
   
   (define module-language<%>
@@ -40,15 +41,15 @@
   
   ;; collection-paths : (listof (union 'default string))
   ;; command-line-args : (vectorof string)
+  ;; auto-text : string
   (define-struct (module-language-settings drscheme:language:simple-settings)
-    (collection-paths command-line-args))
+    (collection-paths command-line-args auto-text))
   
   ;; module-mixin : (implements drscheme:language:language<%>)
   ;;             -> (implements drscheme:language:language<%>)
   (define (module-mixin %)
     (class* % (drscheme:language:language<%> module-language<%>)
-      (define/override (use-namespace-require/copy?) #t)
-      (field [iteration-number 0])
+      (define/override (use-namespace-require/copy?) #f)
       
       (define/augment (capability-value key)
         (cond
@@ -68,7 +69,8 @@
                  (append 
                   (vector->list (drscheme:language:simple-settings->vector super-defaults))
                   (list '(default)
-                        #())))))
+                        #()
+                        default-auto-text)))))
       
       ;; default-settings? : -> boolean
       (define/override (default-settings? settings)
@@ -76,107 +78,143 @@
              (equal? (module-language-settings-collection-paths settings)
                      '(default))
              (equal? (module-language-settings-command-line-args settings)
-                     #())))
+                     #())
+             ;; Never show that this is a "custom" language because of the
+             ;; auto-text
+             ;; (equal? (module-language-settings-auto-text settings)
+             ;;         default-auto-text)
+             ))
       
       (define/override (marshall-settings settings)
         (let ([super-marshalled (super marshall-settings settings)])
           (list super-marshalled
                 (module-language-settings-collection-paths settings)
-                (module-language-settings-command-line-args settings))))
+                (module-language-settings-command-line-args settings)
+                (module-language-settings-auto-text settings))))
       
       (define/override (unmarshall-settings marshalled)
-        (and (pair? marshalled)
-             (pair? (cdr marshalled))
-             (pair? (cddr marshalled))
-             (null? (cdddr marshalled))
+        (and (list? marshalled)
+             ;; older formats had no auto-text
+             (<= 3 (length marshalled) 4)
              (list? (cadr marshalled))
-             (vector? (caddr marshalled))
-             (andmap string? (vector->list (caddr marshalled)))
              (andmap (λ (x) (or (string? x) (symbol? x)))
                      (cadr marshalled))
+             (vector? (caddr marshalled))
+             (andmap string? (vector->list (caddr marshalled)))
+             (or (= 3 (length marshalled))
+                 (string? (cadddr marshalled)))
              (let ([super (super unmarshall-settings (car marshalled))])
                (and super
                     (apply make-module-language-settings
                            (append
                             (vector->list (drscheme:language:simple-settings->vector super))
                             (list (cadr marshalled)
-                                  (caddr marshalled))))))))
+                                  (caddr marshalled)
+                                  (if (= 3 (length marshalled))
+                                    default-auto-text
+                                    (cadddr marshalled)))))))))
       
       (define/override (on-execute settings run-in-user-thread)
-        (set! iteration-number 0)
         (super on-execute settings run-in-user-thread)
         (run-in-user-thread
          (λ ()
-           (current-command-line-arguments (module-language-settings-command-line-args settings))
-           (let ([default (current-library-collection-paths)])
-             (current-library-collection-paths
-              (apply 
-               append
-               (map (λ (x) (if (symbol? x)
-                               default
-                               (list x)))
-                    (module-language-settings-collection-paths settings))))))))
+           (current-command-line-arguments
+            (module-language-settings-command-line-args settings))
+           (let* ([default (current-library-collection-paths)]
+                  [cpaths (append-map (λ (x) (if (symbol? x) default (list x)))
+                                      (module-language-settings-collection-paths
+                                       settings))])
+             (when (null? cpaths)
+               (fprintf (current-error-port)
+                        "Warning: your collection paths are empty!\n"))
+             (current-library-collection-paths cpaths)))))
       
       (define/override (get-one-line-summary)
         (string-constant module-language-one-line-summary))
       
+      (define default-auto-text "#lang scheme\n")
+      (define/public (get-auto-text settings)
+        (module-language-settings-auto-text settings))
+      
+      ;; utility for the front-end method: return a function that will return
+      ;; each of the given syntax values on each call, executing thunks when
+      ;; included; when done with the list, send eof.
+      (define (expr-getter . exprs/thunks)
+        (define (loop)
+          (if (null? exprs/thunks)
+            eof
+            (let ([x (car exprs/thunks)])
+              (set! exprs/thunks (cdr exprs/thunks))
+              (if (procedure? x) (begin (x) (loop)) x))))
+        loop)
+      
       (inherit get-reader)
-      (define/override (front-end/interaction port settings)
-        (if (thread-cell-ref hopeless-repl)
-            (begin (fprintf (current-error-port)
-                            "Module Language: ~a\n" hopeless-message)
-                   (λ x eof))
-            (super front-end/interaction port settings)))
+      (define repl-init-thunk (make-thread-cell #f))
       
       (define/override (front-end/complete-program port settings)
-        (let* ([super-thunk (λ () ((get-reader) (object-name port) port))]
-               [path (get-filename port)]
-               [module-name #f]
-               [get-require-module-name
-                (λ ()
-                  ;; "clearing out" the module-name via datum->syntax ensures
-                  ;; that check syntax doesn't think the original module name
-                  ;; is being used in this require (so it doesn't get turned red)
-                  (datum->syntax #'here (syntax-e module-name)))])
-          (λ ()
-            (set! iteration-number (+ iteration-number 1))
-            (case iteration-number
-              [(1)
-               #`(current-module-declare-name
-                  (if #,path
-                      (make-resolved-module-path '#,path)
-                      #f))]
-              [(2)
-               (let ([super-result (super-thunk)])
-                 (if (eof-object? super-result)
-                     (raise-syntax-error 'Module\ Language hopeless-message)
-                     (let-values ([(name new-module)
-                                   (transform-module path super-result)])
-                       (set! module-name name)
-                       new-module)))]
-              [(3)
-               (let ([super-result (super-thunk)])
-                 (if (eof-object? super-result)
-                     #`(current-module-declare-name #f)
-                     (raise-syntax-error
-                      'module-language
-                      "there can only be one expression in the definitions window"
-                      super-result)))]
-              [(4)
-               (if path
-                   #`(begin ((current-module-name-resolver)
-                             (make-resolved-module-path #,path))
-                            (call-with-continuation-prompt
-                             (λ () (dynamic-require #,path #f))))
-                   #`(call-with-continuation-prompt
-                      (λ () (dynamic-require ''#,(get-require-module-name) #f))))]
-              [(5)
-               (if path
-                   #`(#%app current-namespace (#%app module->namespace #,path))
-                   #`(#%app current-namespace
-                            (#%app module->namespace
-                                   ''#,(get-require-module-name))))]
-              [else eof]))))
+        (define (super-thunk) ((get-reader) (object-name port) port))
+        (define path
+          (cond [(get-filename port) => (compose simplify-path cleanse-path)]
+                [else #f]))
+        (define resolved-modpath (and path (make-resolved-module-path path)))
+        (define-values (name lang module-expr)
+          (let ([expr
+                 ;; just reading the definitions might be a syntax error,
+                 ;; possibly due to bad language (eg, no foo/lang/reader)
+                 (with-handlers ([exn? (λ (e) (raise-hopeless-exception
+                                               e "invalid module text"))])
+                   (super-thunk))])
+            (when (eof-object? expr) (raise-hopeless-syntax-error))
+            (let ([more (super-thunk)])
+              (unless (eof-object? more)
+                (raise-hopeless-syntax-error
+                 "there can only be one expression in the definitions window"
+                 more)))
+            (transform-module path expr)))
+        (define modspec (or path `',(syntax-e name)))
+        (define (check-interactive-language)
+          (unless (memq '#%top-interaction (namespace-mapped-symbols))
+            (raise-hopeless-exception
+             #f #f ; no error message, just a suffix
+             (format "~s does not support a REPL (no #%top-interaction)"
+                     (syntax->datum lang)))))
+        ;; We're about to send the module expression to drscheme now, the rest
+        ;; of the setup is done in `front-end/finished-complete-program' below,
+        ;; so use `repl-init-thunk' to store an appropriate continuation for
+        ;; this setup.  Once we send the expression, we'll be called again only
+        ;; if it was evaluated (or expanded) with no errors, so begin with a
+        ;; continuation that deals with an error, and if we're called again,
+        ;; change it to a continuation that initializes the repl for the
+        ;; module.  So the code is split among several thunks that follow.
+        (define (*pre)
+          (thread-cell-set! repl-init-thunk *error)
+          (current-module-declare-name resolved-modpath))
+        (define (*post)
+          (current-module-declare-name #f)
+          (when path ((current-module-name-resolver) resolved-modpath))
+          (thread-cell-set! repl-init-thunk *init))
+        (define (*error)
+          (current-module-declare-name #f)
+          ;; syntax error => try to require the language to get a working repl
+          (with-handlers ([void (λ (e)
+                                  (raise-hopeless-syntax-error
+                                   "invalid language specification"
+                                   lang))])
+            (namespace-require lang))
+          (check-interactive-language))
+        (define (*init)
+          (parameterize ([current-namespace (current-namespace)])
+            ;; the prompt makes it continue after an error
+            (call-with-continuation-prompt
+             (λ () (dynamic-require modspec #f))))
+          (current-namespace (module->namespace modspec))
+          (check-interactive-language))
+        ;; here's where they're all combined with the module expression
+        (expr-getter *pre module-expr *post))
+      
+      (define/override (front-end/finished-complete-program settings)
+        (cond [(thread-cell-ref repl-init-thunk)
+               => (λ (t) (thread-cell-set! repl-init-thunk #f) (t))]))
       
       ;; printer settings are just ignored here.
       (define/override (create-executable setting parent program-filename)
@@ -225,15 +263,46 @@
        [language-position (list "Module")]
        [language-numbers (list -32768)])))
   
-  (define hopeless-repl (make-thread-cell #t))
-  (define hopeless-message
-    (string-append
-     "There must be a module in the\n"
-     "definitions window. Try starting your program with\n"
-     "\n"
-     "  #lang scheme\n"
-     "\n"
-     "and clicking ‘Run’."))
+  ;; can be called with #f to just kill the repl (in case we want to kill it
+  ;; but keep the highlighting of a previous error)
+  (define (raise-hopeless-exception exn [prefix #f] [suffix #f])
+    (define rep (drscheme:rep:current-rep))
+    ;; Throw an error as usual if we don't have the drscheme rep, then we just
+    ;; raise the exception as normal.  (It can happen in some rare cases like
+    ;; having a single empty scheme box in the definitions.)
+    (unless rep (if exn (raise exn) (error "\nInteractions disabled")))
+    (when prefix (fprintf (current-error-port) "Module Language: ~a\n" prefix))
+    (when exn ((error-display-handler) (exn-message exn) exn))
+    ;; these are needed, otherwise the warning can appear before the output
+    (flush-output (current-output-port))
+    (flush-output (current-error-port))
+    ;; do the rep-related work carefully -- using drscheme's eventspace, and
+    ;; wait for it to finish before we continue.
+    (let ([s (make-semaphore 0)]
+          [msg (string-append "\nInteractions disabled"
+                              (if suffix (string-append ": " suffix) "."))])
+      (parameterize ([current-eventspace drscheme:init:system-eventspace])
+        (queue-callback
+         (λ ()
+           (send rep call-without-reset-highlighting
+             (λ ()
+               (send* rep (insert-warning msg)
+                          (set-show-no-user-evaluation-message? #f))))
+           (semaphore-post s))))
+      (semaphore-wait s))
+    (custodian-shutdown-all (send rep get-user-custodian)))
+  (define (raise-hopeless-syntax-error . error-args)
+    (with-handlers ([exn? raise-hopeless-exception])
+      (apply raise-syntax-error '|Module Language|
+             (if (null? error-args)
+               (list (string-append
+                      "There must be a valid module in the\n"
+                      "definitions window.  Try starting your program with\n"
+                      "\n"
+                      "  #lang scheme\n"
+                      "\n"
+                      "and clicking ‘Run’."))
+               error-args))))
   
   ;; module-language-config-panel : panel -> (case-> (-> settings) (settings -> void))
   (define (module-language-config-panel parent)
@@ -244,7 +313,8 @@
            [stretchable-height #f]
            [stretchable-width #f]))
     (define simple-case-lambda
-      (drscheme:language:simple-module-based-language-config-panel new-parent))
+      (drscheme:language:simple-module-based-language-config-panel
+       new-parent #:case-sensitive #t))
     (define cp-panel (new group-box-panel%
                           [parent new-parent]
                           [label (string-constant ml-cp-collection-paths)]))
@@ -257,14 +327,22 @@
                                [label #f]
                                [init-value "#()"]
                                [callback void]))
+    (define auto-text-panel (new group-box-panel%
+                                 [parent new-parent]
+                                 [label "Auto-text"])) ;!! need string-constant
+    (define auto-text-text-box (new text-field%
+                                    [parent auto-text-panel]
+                                    [label #f]
+                                    [init-value ""]
+                                    [callback void]))
     
     ;; data associated with each item in listbox : boolean
     ;; indicates if the entry is the default paths.
-    (define lb (new list-box%
-                    [parent cp-panel]
-                    [choices '("a" "b" "c")]
-                    [label #f]
-                    [callback (λ (x y) (update-buttons))]))
+    (define collection-paths-lb (new list-box%
+                                     [parent cp-panel]
+                                     [choices '("a" "b" "c")]
+                                     [label #f]
+                                     [callback (λ (x y) (update-buttons))]))
     (define button-panel (new horizontal-panel%
                               [parent cp-panel]
                               [alignment '(center center)]
@@ -286,8 +364,8 @@
         (λ (x y) (move-callback +1))))
     
     (define (update-buttons)
-      (let ([lb-selection (send lb get-selection)]
-            [lb-tot (send lb get-number)])
+      (let ([lb-selection (send collection-paths-lb get-selection)]
+            [lb-tot (send collection-paths-lb get-number)])
         (send remove-button enable lb-selection)
         (send raise-button enable (and lb-selection (not (= lb-selection 0))))
         (send lower-button enable
@@ -297,7 +375,7 @@
       (let ([dir (get-directory (string-constant ml-cp-choose-a-collection-path)
                                 (send parent get-top-level-window))])
         (when dir
-          (send lb append (path->string dir) #f)
+          (send collection-paths-lb append (path->string dir) #f)
           (update-buttons))))
     
     (define (add-default-callback)
@@ -306,56 +384,56 @@
                           (string-constant ml-cp-default-already-present)
                           (send parent get-top-level-window))]
             [else
-             (send lb append (string-constant ml-cp-default-collection-path) #t)
+             (send collection-paths-lb append (string-constant ml-cp-default-collection-path) #t)
              (update-buttons)]))
     
     ;; has-default? : -> boolean
     ;; returns #t if the `default' entry has already been added
     (define (has-default?)
-      (let loop ([n (send lb get-number)])
+      (let loop ([n (send collection-paths-lb get-number)])
         (cond [(= n 0) #f]
-              [(send lb get-data (- n 1)) #t]
+              [(send collection-paths-lb get-data (- n 1)) #t]
               [else (loop (- n 1))])))
     
     (define (remove-callback)
-      (let ([to-delete (send lb get-selection)])
-        (send lb delete to-delete)
-        (unless (zero? (send lb get-number))
-          (send lb set-selection (min to-delete (- (send lb get-number) 1))))
+      (let ([to-delete (send collection-paths-lb get-selection)])
+        (send collection-paths-lb delete to-delete)
+        (unless (zero? (send collection-paths-lb get-number))
+          (send collection-paths-lb set-selection (min to-delete (- (send collection-paths-lb get-number) 1))))
         (update-buttons)))
     
     (define (move-callback d)
-      (let* ([sel (send lb get-selection)]
+      (let* ([sel (send collection-paths-lb get-selection)]
              [vec (get-lb-vector)]
              [new (+ sel d)]
              [other (vector-ref vec new)])
         (vector-set! vec new (vector-ref vec sel))
         (vector-set! vec sel other)
         (set-lb-vector vec)
-        (send lb set-selection new)
+        (send collection-paths-lb set-selection new)
         (update-buttons)))
     
     (define (get-lb-vector)
-      (list->vector (for/list ([n (in-range (send lb get-number))])
-                              (cons (send lb get-string n) (send lb get-data n)))))
+      (list->vector (for/list ([n (in-range (send collection-paths-lb get-number))])
+                              (cons (send collection-paths-lb get-string n) (send collection-paths-lb get-data n)))))
     
     (define (set-lb-vector vec)
-      (send lb clear)
+      (send collection-paths-lb clear)
       (for ([x (in-vector vec)] [n (in-naturals)])
-           (send lb append (car x))
-           (send lb set-data n (cdr x))))
+           (send collection-paths-lb append (car x))
+           (send collection-paths-lb set-data n (cdr x))))
     
     (define (get-collection-paths)
-      (for/list ([n (in-range (send lb get-number))])
-                (let ([data (send lb get-data n)])
-                  (if data 'default (send lb get-string n)))))
+      (for/list ([n (in-range (send collection-paths-lb get-number))])
+                (let ([data (send collection-paths-lb get-data n)])
+                  (if data 'default (send collection-paths-lb get-string n)))))
     
     (define (install-collection-paths paths)
-      (send lb clear)
+      (send collection-paths-lb clear)
       (for ([cp paths])
            (if (symbol? cp)
-               (send lb append (string-constant ml-cp-default-collection-path) #t)
-               (send lb append cp #f))))
+               (send collection-paths-lb append (string-constant ml-cp-default-collection-path) #t)
+               (send collection-paths-lb append cp #f))))
     
     (define (get-command-line-args)
       (let* ([str (send args-text-box get-value)]
@@ -371,7 +449,13 @@
             (parameterize ([print-vector-length #f])
               (format "~s" vec))))
     
-    (send lb set '())
+    (define (get-auto-text)
+      (string-append (send auto-text-text-box get-value) "\n"))
+    
+    (define (install-auto-text str)
+      (send auto-text-text-box set-value (regexp-replace #rx"\n$" str "")))
+    
+    (send collection-paths-lb set '())
     (update-buttons)
     
     (case-lambda
@@ -381,37 +465,38 @@
                 (append 
                  (vector->list (drscheme:language:simple-settings->vector simple-settings))
                  (list (get-collection-paths)
-                       (get-command-line-args)))))]
+                       (get-command-line-args)
+                       (get-auto-text)))))]
       [(settings)
        (simple-case-lambda settings)
        (install-collection-paths (module-language-settings-collection-paths settings))
        (install-command-line-args (module-language-settings-command-line-args settings))
+       (install-auto-text (module-language-settings-auto-text settings))
        (update-buttons)]))
   
-  ;; transform-module : (union #f string) syntax
-  ;;   -> (values syntax[name-of-module] syntax[module])
+  ;; transform-module : (union #f path) syntax
+  ;;   -> (values syntax[name-of-module] syntax[lang-of-module] syntax[module])
   ;; = User =
-  ;; in addition to exporting everything, the result module's name
-  ;; is the fully path-expanded name with a directory prefix, 
-  ;; if the file has been saved
   (define (transform-module filename stx)
-    (syntax-case* stx (module) (λ (x y) (eq? (syntax-e x) (syntax-e y)))
-      [(module name lang . rest)
-       (eq? 'module (syntax-e #'module))
-       (let ([v-name #'name])
-         (when filename (check-filename-matches filename v-name stx))
-         (thread-cell-set! hopeless-repl #f)
-         (values
-          v-name
-          ;; rewrite the module to use the scheme/base version of `module'
-          (let ([module (datum->syntax #'here 'module #'form)])
-            (datum->syntax stx `(,module ,#'name ,#'lang . ,#'rest) stx))))]
-      [else (raise-syntax-error
-             'module-language
-             (string-append "only a module expression is allowed, either\n"
-                            "    #lang <language-name>\n or\n"
-                            "    (module <name> <language> ...)\n")
-             stx)]))
+    (define-values (mod name lang body)
+      (syntax-case stx ()
+        [(module name lang . body)
+         (eq? 'module (syntax-e #'module))
+         (values #'module #'name #'lang #'body)]
+        [_ (raise-hopeless-syntax-error
+            (string-append "only a module expression is allowed, either\n"
+                           "    #lang <language-name>\n or\n"
+                           "    (module <name> <language> ...)\n")
+            stx)]))
+    (define name* (syntax-e name))
+    (unless (symbol? name*)
+      (raise-hopeless-syntax-error "bad syntax in name position of module"
+                                   stx name))
+    (when filename (check-filename-matches filename name* stx))
+    (let* (;; rewrite the module to use the scheme/base version of `module'
+           [mod  (datum->syntax #'here 'module mod)]
+           [expr (datum->syntax stx `(,mod ,name ,lang . ,body) stx)])
+      (values name lang expr)))
   
   ;; get-filename : port -> (union string #f)
   ;; extracts the file the definitions window is being saved in, if any.
@@ -433,22 +518,17 @@
                              filename))))))]
         [else #f])))
   
-  ;; check-filename-matches : string syntax syntax -> void
-  (define (check-filename-matches filename name unexpanded-stx)
-    (define datum (syntax-e name))
-    (unless (symbol? datum)
-      (raise-syntax-error 'module-language
-                          "bad syntax in name position of module"
-                          unexpanded-stx name))
+  ;; check-filename-matches : path datum syntax -> void
+  (define (check-filename-matches filename datum unexpanded-stx)
     (let-values ([(base name dir?) (split-path filename)])
       (let ([expected (string->symbol
                        (path->string (path-replace-suffix name #"")))])
         (unless (equal? expected datum)
-          (raise-syntax-error
-           'module-language
-           (format "module name doesn't match saved filename, got ~s and expected ~a"
-                   datum
-                   expected)
+          (raise-hopeless-syntax-error
+           (format
+            "module name doesn't match saved filename, got ~s and expected ~s"
+            datum
+            expected)
            unexpanded-stx)))))
   
   (define module-language-put-file-mixin
@@ -486,7 +566,7 @@
                            [filename-end (skip-to-whitespace filename-start)])
                       (and (not (= filename-start end-module))
                            (string-append (get-text filename-start filename-end)
-                                          ".scm")))))))
+                                          ".ss")))))))
       
       
       (define/private (matches start string)

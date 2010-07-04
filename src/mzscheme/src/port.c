@@ -30,6 +30,7 @@
    ports. */
 
 #include "schpriv.h"
+#include "schmach.h"
 #ifdef UNISTD_INCLUDE
 # include <unistd.h>
 #endif
@@ -242,9 +243,9 @@ typedef struct Scheme_FD {
 
 /* globals */
 Scheme_Object scheme_eof[1];
-Scheme_Object *scheme_orig_stdout_port;
-Scheme_Object *scheme_orig_stderr_port;
-Scheme_Object *scheme_orig_stdin_port;
+THREAD_LOCAL Scheme_Object *scheme_orig_stdout_port;
+THREAD_LOCAL Scheme_Object *scheme_orig_stderr_port;
+THREAD_LOCAL Scheme_Object *scheme_orig_stdin_port;
 
 Scheme_Object *(*scheme_make_stdin)(void) = NULL;
 Scheme_Object *(*scheme_make_stdout)(void) = NULL;
@@ -284,7 +285,8 @@ Scheme_Object *scheme_redirect_output_port_type;
 
 int scheme_force_port_closed;
 
-static int flush_out, flush_err;
+static int flush_out;
+static int flush_err;
 
 #if defined(FILES_HAVE_FDS)
 static int external_event_fd, put_external_event_fd;
@@ -334,7 +336,7 @@ OS_SEMAPHORE_TYPE scheme_break_semaphore;
 
 #ifdef MZ_FDS
 static Scheme_Object *make_fd_input_port(int fd, Scheme_Object *name, int regfile, int textmode, int *refcount, int internal);
-static Scheme_Object *make_fd_output_port(int fd, Scheme_Object *name, int regfile, int textmode, int read_too);
+static Scheme_Object *make_fd_output_port(int fd, Scheme_Object *name, int regfile, int textmode, int read_too, int flush_mode);
 #endif
 #ifdef USE_OSKIT_CONSOLE
 static Scheme_Object *make_oskit_console_input_port();
@@ -487,52 +489,7 @@ scheme_init_port (Scheme_Env *env)
   }
 #endif
 
-  scheme_orig_stdin_port = (scheme_make_stdin
-			    ? scheme_make_stdin()
-#ifdef USE_OSKIT_CONSOLE
-			    : (osk_not_console
-			       ? scheme_make_named_file_input_port(stdin, scheme_intern_symbol("stdin"))
-			       : make_oskit_console_input_port())
-#else
-# ifdef MZ_FDS
-#  ifdef WINDOWS_FILE_HANDLES
-			    : make_fd_input_port((int)GetStdHandle(STD_INPUT_HANDLE), scheme_intern_symbol("stdin"), 0, 0, NULL, 0)
-#  else
-			    : make_fd_input_port(0, scheme_intern_symbol("stdin"), 0, 0, NULL, 0)
-#  endif
-# else
-			    : scheme_make_named_file_input_port(stdin, scheme_intern_symbol("stdin"))
-# endif
-#endif
-			    );
-
-  scheme_orig_stdout_port = (scheme_make_stdout
-			     ? scheme_make_stdout()
-#ifdef MZ_FDS
-# ifdef WINDOWS_FILE_HANDLES
-			     : make_fd_output_port((int)GetStdHandle(STD_OUTPUT_HANDLE), 
-						   scheme_intern_symbol("stdout"), 0, 0, 0)
-# else
-			     : make_fd_output_port(1, scheme_intern_symbol("stdout"), 0, 0, 0)
-# endif
-#else
-			     : scheme_make_file_output_port(stdout)
-#endif
-			     );
-
-  scheme_orig_stderr_port = (scheme_make_stderr
-			     ? scheme_make_stderr()
-#ifdef MZ_FDS
-# ifdef WINDOWS_FILE_HANDLES
-			     : make_fd_output_port((int)GetStdHandle(STD_ERROR_HANDLE), 
-						   scheme_intern_symbol("stderr"), 0, 0, 0)
-# else
-			     : make_fd_output_port(2, scheme_intern_symbol("stderr"), 0, 0, 0)
-# endif
-#else
-			     : scheme_make_file_output_port(stderr)
-#endif
-			     );
+  scheme_init_port_places();
 
   flush_out = SCHEME_TRUEP(scheme_terminal_port_p(1, &scheme_orig_stdout_port));
   flush_err = SCHEME_TRUEP(scheme_terminal_port_p(1, &scheme_orig_stderr_port));
@@ -561,55 +518,77 @@ scheme_init_port (Scheme_Env *env)
 # endif
 #endif
 
-  scheme_init_port_config();
-
   register_port_wait();
 
-  scheme_add_global_constant("subprocess",
-			     scheme_make_prim_w_arity2(subprocess,
-						       "subprocess",
-						       4, -1,
-						       4, 4),
-			     env);
-  scheme_add_global_constant("subprocess-status",
-			     scheme_make_prim_w_arity(subprocess_status,
-						      "subprocess-status",
-						      1, 1),
-			     env);
-  scheme_add_global_constant("subprocess-kill",
-			     scheme_make_prim_w_arity(subprocess_kill,
-						      "subprocess-kill",
-						      2, 2),
-			     env);
-  scheme_add_global_constant("subprocess-pid",
-			     scheme_make_prim_w_arity(subprocess_pid,
-						      "subprocess-pid",
-						      1, 1),
-			     env);
-  scheme_add_global_constant("subprocess?",
-			     scheme_make_prim_w_arity(subprocess_p,
-						      "subprocess?",
-						      1, 1),
-			     env);
-  scheme_add_global_constant("subprocess-wait",
-			     scheme_make_prim_w_arity(subprocess_wait,
-						      "subprocess-wait",
-						      1, 1),
-			     env);
+  scheme_add_global_constant("subprocess", scheme_make_prim_w_arity2(subprocess, "subprocess", 4, -1, 4, 4), env);
+  scheme_add_global_constant("subprocess-status", scheme_make_prim_w_arity(subprocess_status, "subprocess-status", 1, 1), env);
+  scheme_add_global_constant("subprocess-kill", scheme_make_prim_w_arity(subprocess_kill, "subprocess-kill", 2, 2), env);
+  scheme_add_global_constant("subprocess-pid", scheme_make_prim_w_arity(subprocess_pid, "subprocess-pid", 1, 1), env);
+  scheme_add_global_constant("subprocess?", scheme_make_prim_w_arity(subprocess_p, "subprocess?", 1, 1), env);
+  scheme_add_global_constant("subprocess-wait", scheme_make_prim_w_arity(subprocess_wait, "subprocess-wait", 1, 1), env);
 
 
   register_subprocess_wait();
 
-  scheme_add_global_constant("shell-execute",
-			     scheme_make_prim_w_arity(sch_shell_execute,
-						      "shell-execute",
-						      5, 5),
-			     env);
+  scheme_add_global_constant("shell-execute", scheme_make_prim_w_arity(sch_shell_execute, "shell-execute", 5, 5), env);
 
   REGISTER_SO(read_string_byte_buffer);
 
   scheme_add_evt(scheme_progress_evt_type, (Scheme_Ready_Fun)progress_evt_ready, NULL, NULL, 1);
   scheme_add_evt(scheme_write_evt_type, (Scheme_Ready_Fun)rw_evt_ready, rw_evt_wakeup, NULL, 1);
+}
+
+void scheme_init_port_places(void)
+{
+  scheme_orig_stdin_port = (scheme_make_stdin
+			    ? scheme_make_stdin()
+#ifdef USE_OSKIT_CONSOLE
+			    : (osk_not_console
+			       ? scheme_make_named_file_input_port(stdin, scheme_intern_symbol("stdin"))
+			       : make_oskit_console_input_port())
+#else
+# ifdef MZ_FDS
+#  ifdef WINDOWS_FILE_HANDLES
+			    : make_fd_input_port((int)GetStdHandle(STD_INPUT_HANDLE), scheme_intern_symbol("stdin"), 0, 0, NULL, 0)
+#  else
+			    : make_fd_input_port(0, scheme_intern_symbol("stdin"), 0, 0, NULL, 0)
+#  endif
+# else
+			    : scheme_make_named_file_input_port(stdin, scheme_intern_symbol("stdin"))
+# endif
+#endif
+			    );
+
+  scheme_orig_stdout_port = (scheme_make_stdout
+			     ? scheme_make_stdout()
+#ifdef MZ_FDS
+# ifdef WINDOWS_FILE_HANDLES
+			     : make_fd_output_port((int)GetStdHandle(STD_OUTPUT_HANDLE), 
+						   scheme_intern_symbol("stdout"), 0, 0, 0,
+                                                   -1)
+# else
+			     : make_fd_output_port(1, scheme_intern_symbol("stdout"), 0, 0, 0, -1)
+# endif
+#else
+			     : scheme_make_file_output_port(stdout)
+#endif
+			     );
+
+  scheme_orig_stderr_port = (scheme_make_stderr
+			     ? scheme_make_stderr()
+#ifdef MZ_FDS
+# ifdef WINDOWS_FILE_HANDLES
+			     : make_fd_output_port((int)GetStdHandle(STD_ERROR_HANDLE), 
+						   scheme_intern_symbol("stderr"), 0, 0, 0,
+                                                   MZ_FLUSH_ALWAYS)
+# else
+			     : make_fd_output_port(2, scheme_intern_symbol("stderr"), 0, 0, 0,
+                                                   MZ_FLUSH_ALWAYS)
+# endif
+#else
+			     : scheme_make_file_output_port(stderr)
+#endif
+			     );
 }
 
 void scheme_init_port_config(void)
@@ -618,12 +597,9 @@ void scheme_init_port_config(void)
 
   config = scheme_current_config();
 
-  scheme_set_param(config, MZCONFIG_INPUT_PORT,
-		   scheme_orig_stdin_port);
-  scheme_set_param(config, MZCONFIG_OUTPUT_PORT,
-		   scheme_orig_stdout_port);
-  scheme_set_param(config, MZCONFIG_ERROR_PORT,
-		   scheme_orig_stderr_port);
+  scheme_set_param(config, MZCONFIG_INPUT_PORT,   scheme_orig_stdin_port);
+  scheme_set_param(config, MZCONFIG_OUTPUT_PORT,  scheme_orig_stdout_port);
+  scheme_set_param(config, MZCONFIG_ERROR_PORT,   scheme_orig_stderr_port);
 }
 
 Scheme_Object * scheme_make_eof (void)
@@ -2132,7 +2108,7 @@ Scheme_Object *scheme_progress_evt(Scheme_Object *port)
 
 static int progress_evt_ready(Scheme_Object *evt, Scheme_Schedule_Info *sinfo)
 {
-  scheme_set_sync_target(sinfo, SCHEME_PTR2_VAL(evt), evt, NULL, 0, 1);
+  scheme_set_sync_target(sinfo, SCHEME_PTR2_VAL(evt), evt, NULL, 0, 1, NULL);
   return 0;
 }
 
@@ -2639,7 +2615,7 @@ static int rw_evt_ready(Scheme_Object *_rww, Scheme_Schedule_Info *sinfo)
 
     v = ws(op, rww->v, 1);
     if (v) {
-      scheme_set_sync_target(sinfo, scheme_true, NULL, NULL, 0, 0);
+      scheme_set_sync_target(sinfo, scheme_true, NULL, NULL, 0, 0, NULL);
       return 1;
     } else	
       return 0;
@@ -2652,7 +2628,7 @@ static int rw_evt_ready(Scheme_Object *_rww, Scheme_Schedule_Info *sinfo)
     else if (!v && rww->size)
       return 0;
     else {
-      scheme_set_sync_target(sinfo, scheme_make_integer(v), NULL, NULL, 0, 0);
+      scheme_set_sync_target(sinfo, scheme_make_integer(v), NULL, NULL, 0, 0, NULL);
       return 1;
     }
   }
@@ -3853,7 +3829,7 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
 
   regfile = S_ISREG(buf.st_mode);
   scheme_file_open_count++;
-  return make_fd_output_port(fd, scheme_make_path(filename), regfile, 0, and_read);
+  return make_fd_output_port(fd, scheme_make_path(filename), regfile, 0, and_read, -1);
 #else
 # ifdef WINDOWS_FILE_HANDLES
   if (!existsok)
@@ -3939,7 +3915,7 @@ scheme_do_open_output_file(char *name, int offset, int argc, Scheme_Object *argv
   }
 
   scheme_file_open_count++;
-  return make_fd_output_port((int)fd, scheme_make_path(filename), regfile, mode[1] == 't', and_read);
+  return make_fd_output_port((int)fd, scheme_make_path(filename), regfile, mode[1] == 't', and_read, -1);
 # else
   if (scheme_directory_exists(filename)) {
     if (!existsok)
@@ -4020,6 +3996,17 @@ Scheme_Object *scheme_open_output_file(const char *name, const char *who)
   a[0]= scheme_make_path(name);
   a[1] = truncate_replace_symbol;
   return scheme_do_open_output_file((char *)who, 0, 2, a, 0);
+}
+
+Scheme_Object *scheme_open_input_output_file(const char *name, const char *who, Scheme_Object **oport)
+{
+  Scheme_Object *a[2];
+
+  a[0]= scheme_make_path(name);
+  a[1] = truncate_replace_symbol;
+  scheme_do_open_output_file((char *)who, 0, 2, a, 1);
+  *oport = scheme_multiple_array[1];
+  return scheme_multiple_array[0];
 }
 
 Scheme_Object *scheme_open_output_file_with_mode(const char *name, const char *who, int text)
@@ -6249,7 +6236,8 @@ static int fd_output_buffer_mode(Scheme_Port *p, int mode)
 }
 
 static Scheme_Object *
-make_fd_output_port(int fd, Scheme_Object *name, int regfile, int win_textmode, int and_read)
+make_fd_output_port(int fd, Scheme_Object *name, int regfile, int win_textmode, int and_read,
+                    int flush_mode)
 {
   Scheme_FD *fop;
   unsigned char *bfr;
@@ -6276,9 +6264,8 @@ make_fd_output_port(int fd, Scheme_Object *name, int regfile, int win_textmode, 
   fop->regfile = regfile;
   fop->textmode = win_textmode;
 
-  if (fd == 2) {
-    /* No buffering for stderr: */
-    fop->flush = MZ_FLUSH_ALWAYS;
+  if (flush_mode > -1) {
+    fop->flush = flush_mode;
   } else if (is_fd_terminal(fd)) {
     /* Line-buffering for terminal: */
     fop->flush = MZ_FLUSH_BY_LINE;
@@ -6415,7 +6402,7 @@ Scheme_Object *
 scheme_make_fd_output_port(int fd, Scheme_Object *name, int regfile, int textmode, int read_too)
 {
 #ifdef MZ_FDS
-  return make_fd_output_port(fd, name, regfile, textmode, read_too);
+  return make_fd_output_port(fd, name, regfile, textmode, read_too, -1);
 #else
   return NULL;
 #endif
@@ -6649,15 +6636,55 @@ scheme_make_null_output_port(int can_write_special)
 /*                         redirect output ports                          */
 /*========================================================================*/
 
+static Scheme_Object *redirect_write_bytes_k(void);
+
 static long
 redirect_write_bytes(Scheme_Output_Port *op,
 		     const char *str, long d, long len,
 		     int rarely_block, int enable_break)
 {
+  /* arbitrary nesting means we can overflow the stack */
+#ifdef DO_STACK_CHECK
+# include "mzstkchk.h"
+  {
+    Scheme_Thread *p = scheme_current_thread;
+    Scheme_Object *n;
+
+    p->ku.k.p1 = (void *)op;
+    p->ku.k.p2 = (void *)str;
+    p->ku.k.i1 = d;
+    p->ku.k.i2 = len;
+    p->ku.k.i3 = rarely_block;
+    p->ku.k.i4 = enable_break;
+
+    n = scheme_handle_stack_overflow(redirect_write_bytes_k);
+    return SCHEME_INT_VAL(n);
+  }
+#endif
+
   return scheme_put_byte_string("redirect-output",
 				(Scheme_Object *)op->port_data,
 				str, d, len,
 				rarely_block);
+}
+
+static Scheme_Object *redirect_write_bytes_k(void)
+{
+  Scheme_Thread *p = scheme_current_thread;
+  Scheme_Output_Port *op = (Scheme_Output_Port *)p->ku.k.p1;
+  const char *str = (const char *)p->ku.k.p2;
+  long d = p->ku.k.i1;
+  long len = p->ku.k.i2;
+  int rarely_block = p->ku.k.i3;
+  int enable_break = p->ku.k.i4;
+  long n;
+
+  p->ku.k.p1 = NULL;
+  p->ku.k.p2 = NULL;
+
+  n = redirect_write_bytes(op, str, d, len, rarely_block, enable_break);
+
+  return scheme_make_integer(n);
 }
 
 static void
@@ -7451,7 +7478,7 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
   /*--------------------------------------*/
 
   in = (in ? in : make_fd_input_port(from_subprocess[0], scheme_intern_symbol("subprocess-stdout"), 0, 0, NULL, 0));
-  out = (out ? out : make_fd_output_port(to_subprocess[1], scheme_intern_symbol("subprocess-stdin"), 0, 0, 0));
+  out = (out ? out : make_fd_output_port(to_subprocess[1], scheme_intern_symbol("subprocess-stdin"), 0, 0, 0, -1));
   err = (err ? err : make_fd_input_port(err_subprocess[0], scheme_intern_symbol("subprocess-stderr"), 0, 0, NULL, 0));
 
   /*--------------------------------------*/
@@ -8084,6 +8111,7 @@ static long ITimer(void)
   while (1) {
     if (WaitForSingleObject(itimer_semaphore, itimer_delay / 1000) == WAIT_TIMEOUT) {
       scheme_fuel_counter = 0;
+      scheme_jit_stack_boundary = (unsigned long)-1;
       WaitForSingleObject(itimer_semaphore, INFINITE);
     }
   }
@@ -8126,7 +8154,8 @@ static void *run_itimer(void *p)
   while (1) {
     usleep(itimer_delay);
     scheme_fuel_counter = 0;
-    
+    scheme_jit_stack_boundary = (unsigned long)-1;
+
     pthread_mutex_lock(&itimer_mutex);
     if (itimer_continue) {
       itimer_continue = 0;

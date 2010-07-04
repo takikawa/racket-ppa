@@ -30,7 +30,7 @@ direct support for creating launchers.
 
 Creates the launcher @scheme[dest], which starts MrEd with the
 command-line arguments specified as strings in @scheme[args]. Extra
-arguments passed to the launcher at run-time are be appended (modulo
+arguments passed to the launcher at run-time are appended (modulo
 special Unix/X flag handling, as described below) to this list and
 passed on to MrEd. If @scheme[dest] exists already, as either a file
 or directory, it is replaced.
@@ -54,7 +54,7 @@ the following additional associations apply to launchers:
        @scheme['script-cgc] variant) --- provides the base name for a
        @scheme['3m]-/@scheme['cgc]-variant launcher, which the script
        will call ignoring @scheme[args]. If this name is not provided,
-       the script will goes through the MrEd executable as usual.}
+       the script will go through the MrEd executable as usual.}
 
  @item{@scheme['relative?] (all platforms) --- a boolean, where
         @scheme[#t] means that the generated launcher should find the
@@ -258,8 +258,8 @@ The recognized suffixes are as follows:
  @item{@filepath{.filetypes} @'rarr @scheme['file-types] as
        @scheme[read] content (a single S-expression), and
        @scheme['resource-files] as a list constructed by finding
-       @scheme["CFBundleTypeIconFile"] entries in
-       @scheme['file-types]; for use under Mac OS X}
+       @scheme["CFBundleTypeIconFile"] entries in @scheme['file-types]
+       (and filtering duplicates); for use under Mac OS X}
 
  @item{@filepath{.utiexports} @'rarr @scheme['uti-exports] as
        @scheme[read] content (a single S-expression); for use under

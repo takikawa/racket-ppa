@@ -1,32 +1,33 @@
 #lang scheme/base
 
-(require "private/base-env.ss"
-         "private/base-types.ss"
+(require (rename-in "utils/utils.ss" [infer r:infer]))
+
+(require (private #;base-env base-types)
          (for-syntax 
           scheme/base
-          "private/type-utils.ss"
-          "private/typechecker.ss"
-          "private/type-rep.ss"
-          "private/provide-handling.ss"
-          "private/type-environments.ss" 
-          "private/tc-utils.ss"
-          "private/type-name-env.ss"
-          "private/type-alias-env.ss"
-          "private/utils.ss"
-          "private/type-effect-convenience.ss"
-          "private/type-contract.ss"
+	  (private type-utils type-contract type-effect-convenience)
+	  (typecheck typechecker provide-handling)
+	  (env type-environments type-name-env type-alias-env)
+	  (r:infer infer)
+	  (utils tc-utils)
+	  (rep type-rep)
+	  (except-in (utils utils) infer extend)
+          (only-in (r:infer infer-dummy) infer-param)
           scheme/nest
           syntax/kerncase
           scheme/match))
 
 (provide-tnames)
 (provide-extra-tnames)
+(require-extra-tnames "private/base-types.ss")
+(provide (rename-out [All ∀]
+                     [mu Rec]))
 
 
 (provide (rename-out [module-begin #%module-begin]
                      [top-interaction #%top-interaction]
                      [#%plain-lambda lambda]
-                     [#%plain-app #%app]
+                     [#%app #%app]
                      [require require]))
 
 (define-for-syntax catch-errors? #f)
@@ -38,7 +39,9 @@
   (define module-name (syntax-property stx 'enclosing-module-name))
   ;(printf "BEGIN: ~a~n" (syntax->datum stx))
   (with-logging-to-file 
-   (log-file-name (syntax-src stx) module-name)
+   (build-path (find-system-path 'temp-dir) "ts-poly.log")
+   #;
+   (log-file-name (syntax-source stx) module-name)
    (syntax-case stx ()
      [(mb forms ...)
       (nest
@@ -47,7 +50,10 @@
            [with-handlers
                ([(lambda (e) (and catch-errors? (exn:fail? e) (not (exn:fail:syntax? e))))
                  (lambda (e) (tc-error "Internal error: ~a" e))])]
-           [parameterize ([delay-errors? #t]
+           [parameterize (;; a cheat to avoid units
+                          [infer-param infer]
+                          ;; do we report multiple errors
+                          [delay-errors? #t]
                           ;; this parameter is for parsing types
                           [current-tvars initial-tvar-env]
                           ;; this parameter is just for printing types
@@ -65,8 +71,9 @@
            ;; local-expand the module
            ;; pmb = #%plain-module-begin                            
            [with-syntax ([new-mod 
-                          (local-expand #`(#%plain-module-begin 
-                                           forms ...)
+                          (local-expand (syntax/loc stx
+                                          (#%plain-module-begin 
+                                           forms ...))
                                         'module-begin 
                                         null)])]
            [with-syntax ([(pmb body2 ...) #'new-mod])]
@@ -93,7 +100,9 @@
     [(_ . form)     
      (nest
          ([begin (set-box! typed-context? #t)]
-          [parameterize (;; this paramter is for parsing types
+          [parameterize (;; a cheat to avoid units
+                         [infer-param infer]
+                         ;; this paramter is for parsing types
                          [current-tvars initial-tvar-env]
                          ;; this parameter is just for printing types
                          ;; this is a parameter to avoid dependency issues

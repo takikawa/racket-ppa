@@ -1,5 +1,5 @@
+#lang mzscheme
 
-(module eval mzscheme
   (require mred
            mzlib/unit
            mzlib/port
@@ -10,7 +10,7 @@
   
   ;; to ensure this guy is loaded (and the snipclass installed) in the drscheme namespace & eventspace
   ;; these things are for effect only!
-  (require (lib "cache-image-snip.ss" "mrlib")
+  (require mrlib/cache-image-snip
            #;
            (prefix foo htdp/matrix))
   
@@ -46,7 +46,7 @@
                                    (let* ([text (drscheme:language:text/pos-text input)]
                                           [start (drscheme:language:text/pos-start input)]
                                           [end (drscheme:language:text/pos-end input)]
-                                          [text-port (open-input-text-editor text start end values 
+                                          [text-port (open-input-text-editor text start end values
                                                                              (send text get-port-name))])
                                      (port-count-lines! text-port)
                                      (let* ([line (send text position-paragraph start)]
@@ -218,4 +218,4 @@
           [else
            (let ([port (open-input-file filename)])
              (port-count-lines! port)
-             (values port filename))])))))
+             (values port filename))]))))

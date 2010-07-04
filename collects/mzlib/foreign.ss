@@ -1,10 +1,8 @@
 #lang scheme/base
 
 ;; Foreign Scheme interface
-(require '#%foreign
-         setup/dirs
-         (for-syntax scheme/base
-                     syntax/stx))
+(require '#%foreign setup/dirs
+         (for-syntax scheme/base scheme/list syntax/stx))
 
 ;; This module is full of unsafe bindings that are not provided to requiring
 ;; modules.  Instead, an `unsafe!' binding is provided that makes these unsafe
@@ -356,15 +354,8 @@
     (let loop ([args args] [r (list '())])
       (cond [(null? args) (reverse (map reverse r))]
             [(eq? key (car args)) (loop (cdr args) (cons '() r))]
-            [else (loop (cdr args) 
-                        (cons (cons (car args) (car r))
-                              (cdr r)))])))
-
-  (define (filtmap f l)
-    (let loop ([l l] [r '()])
-      (if (null? l)
-        (reverse r)
-        (let ([x (f (car l))]) (loop (cdr l) (if x (cons x r) r))))))
+            [else (loop (cdr args)
+                        (cons (cons (car args) (car r)) (cdr r)))])))
 
   (define (add-renamer body from to)
     (with-syntax ([body body] [from from] [to to])
@@ -476,15 +467,26 @@
 ;; Creates a simple function type that can be used for callouts and callbacks,
 ;; optionally applying a wrapper function to modify the result primitive
 ;; (callouts) or the input procedure (callbacks).
-(define* (_cprocedure itypes otype . wrapper)
-  (let ([wrapper (and (pair? wrapper) (car wrapper))])
-    (if wrapper
-      (make-ctype _fpointer
-        (lambda (x) (ffi-callback (wrapper x) itypes otype))
-        (lambda (x) (wrapper (ffi-call x itypes otype))))
-      (make-ctype _fpointer
-        (lambda (x) (ffi-callback x itypes otype))
-        (lambda (x) (ffi-call x itypes otype))))))
+(define* (_cprocedure itypes otype
+                      #:abi [abi #f] #:wrapper [wrapper #f] #:keep [keep #f])
+  (_cprocedure* itypes otype abi wrapper keep))
+
+;; for internal use
+(define held-callbacks (make-weak-hasheq))
+(define (_cprocedure* itypes otype abi wrapper keep)
+  (define-syntax-rule (make-it wrap)
+    (make-ctype _fpointer
+      (lambda (x)
+        (let ([cb (ffi-callback (wrap x) itypes otype abi)])
+          (cond [(eq? keep #t) (hash-set! held-callbacks x cb)]
+                [(box? keep)
+                 (let ([x (unbox keep)])
+                   (set-box! keep
+                             (if (or (null? x) (pair? x)) (cons cb x) cb)))]
+                [(procedure? keep) (keep cb)])
+          cb))
+      (lambda (x) (wrap (ffi-call x itypes otype abi)))))
+  (if wrapper (make-it wrapper) (make-it begin)))
 
 ;; Syntax for the special _fun type:
 ;; (_fun [{(name ... [. name]) | name} [-> expr] ::]
@@ -508,149 +510,171 @@
 (provide _fun)
 (define-syntax (_fun stx)
   (define (err msg . sub) (apply raise-syntax-error '_fun msg stx sub))
-  (syntax-case stx ()
-    [(_ x ...)
-     (let ([xs (map (lambda (x)
-                      (syntax-case* x (-> ::) id=? [:: '::] [-> '->] [_  x]))
-                    (syntax->list #'(x ...)))]
-           [inputs #f] [output #f] [bind '()] [pre '()] [post '()]
-           [input-names #f] [output-type #f] [output-expr #f]
-           [1st-arg #f] [prev-arg #f])
-       (define (bind! x) (set! bind (append bind (list x))))
-       (define (pre!  x) (set! pre  (append pre  (list x))))
-       (define (post! x) (set! post (append post (list x))))
-       (define ((t-n-e clause) type name expr)
-         (let ([keys (custom-type->keys type err)])
-           (define (getkey key) (cond [(assq key keys) => cdr] [else #f]))
-           (define (arg x . no-expr?)
-             (define use-expr?
-               (and (list? x) (= 2 (length x)) (identifier? (car x))))
-             ;; when the current expr is not used with a (x => ...) form,
-             ;; either check that no expression is given or just make it
-             ;; disappear from the inputs.
-             (unless use-expr?
-               (if (and (pair? no-expr?) (car no-expr?) expr)
-                 (err "got an expression for a custom type that do not use it"
-                      clause)
-                 (set! expr (void))))
-             (set! x (if use-expr? (add-renamer (cadr x) name (car x)) x))
-             (cond [(getkey '1st) =>
-                    (lambda (v)
-                      (if 1st-arg
-                        (set! x (add-renamer x 1st-arg v))
-                        (err "got a custom type that wants 1st arg too early"
-                             clause)))])
-             (cond [(getkey 'prev) =>
-                    (lambda (v)
-                      (if prev-arg
-                        (set! x (add-renamer x prev-arg v))
-                        (err "got a custom type that wants prev arg too early"
-                             clause)))])
-             x)
-           (when keys
-             (set! type (getkey 'type))
-             (cond [(and (not expr) (getkey 'expr)) =>
-                    (lambda (x) (set! expr x))])
-             (cond [(getkey 'bind) =>
-                    (lambda (x) (bind! #`[#,x #,name]))])
-             (cond [(getkey 'pre) =>
-                    (lambda (x) (pre!  #`[#,name #,(arg x #t)]))])
-             (cond [(getkey 'post) =>
-                    (lambda (x) (post! #`[#,name #,(arg x)]))]))
-           ;; turn a #f syntax to #f
-           (set! type (and type (syntax-case type () [#f #f] [_ type])))
-           (when type ; remember these for later usages
-             (unless 1st-arg (set! 1st-arg name))
-             (set! prev-arg name))
-           (list type name expr)))
-       ;; parse "::"
-       (let ([s (split-by ':: xs)])
-         (case (length s)
-           [(0) (err "something bad happened (::)")]
-           [(1) #f]
-           [(2) (if (and (= 1 (length (car s))) (not (eq? '-> (caar s))))
-                  (begin (set! xs (cadr s)) (set! input-names (caar s)))
-                  (err "bad wrapper formals"))]
-           [else (err "saw two or more instances of `::'")]))
-       ;; parse "->"
-       (let ([s (split-by '-> xs)])
-         (case (length s)
-           [(0) (err "something bad happened (->)")]
-           [(1) (err "missing output type")]
-           [(2 3) (set! inputs (car s))
-                  (case (length (cadr s))
-                    [(1) (set! output-type (caadr s))]
-                    [(0) (err "missing output type after `->'")]
-                    [else (err "extraneous output type" (cadadr s))])
-                  (unless (null? (cddr s))
-                    (case (length (caddr s))
-                      [(1) (set! output-expr (caaddr s))]
-                      [(0) (err "missing output expression after `->'")]
-                      [else (err "extraneous output expression"
-                                 (cadr (caddr s)))]))]
-           [else (err "saw three or more instances of `->'")]))
-       (set! inputs
-             (map (lambda (sub temp)
-                    (let ([t-n-e (t-n-e sub)])
-                      (syntax-case* sub (: =) id=?
-                        [(name : type)        (t-n-e #'type #'name #f)]
-                        [(type = expr)        (t-n-e #'type temp   #'expr)]
-                        [(name : type = expr) (t-n-e #'type #'name #'expr)]
-                        [type                 (t-n-e #'type temp   #f)])))
-                  inputs
-                  (generate-temporaries (map (lambda (x) 'tmp) inputs))))
-       ;; when processing the output type, only the post code matters
-       (set! pre! (lambda (x) #f))
-       (set! output
-             (let ([temp (car (generate-temporaries #'(ret)))]
-                   [t-n-e (t-n-e output-type)])
-               (syntax-case* output-type (: =) id=?
-                 [(name : type) (t-n-e #'type #'name output-expr)]
-                 [(type = expr) (if output-expr
-                                  (err "extraneous output expression" #'expr)
-                                  (t-n-e #'type temp #'expr))]
-                 [(name : type = expr)
-                                (if output-expr
-                                  (err "extraneous output expression" #'expr)
-                                  (t-n-e #'type #'name #'expr))]
-                 [type          (t-n-e #'type temp output-expr)])))
-       (if (or (caddr output) input-names (ormap caddr inputs)
-               (ormap (lambda (x) (not (car x))) inputs)
-               (pair? bind) (pair? pre) (pair? post))
-         (let* ([input-names (or input-names
-                                 (filtmap (lambda (i)
+  (define xs     #f)
+  (define abi    #f)
+  (define keep   #f)
+  (define inputs #f)
+  (define output #f)
+  (define bind   '())
+  (define pre    '())
+  (define post   '())
+  (define input-names #f)
+  (define output-type #f)
+  (define output-expr #f)
+  (define 1st-arg     #f)
+  (define prev-arg    #f)
+  (define (bind! x) (set! bind (append bind (list x))))
+  (define (pre!  x) (set! pre  (append pre  (list x))))
+  (define (post! x) (set! post (append post (list x))))
+  (define ((t-n-e clause) type name expr)
+    (let ([keys (custom-type->keys type err)])
+      (define (getkey key) (cond [(assq key keys) => cdr] [else #f]))
+      (define (arg x . no-expr?)
+        (define use-expr?
+          (and (list? x) (= 2 (length x)) (identifier? (car x))))
+        ;; when the current expr is not used with a (x => ...) form,
+        ;; either check that no expression is given or just make it
+        ;; disappear from the inputs.
+        (unless use-expr?
+          (if (and (pair? no-expr?) (car no-expr?) expr)
+            (err "got an expression for a custom type that do not use it"
+                 clause)
+            (set! expr (void))))
+        (set! x (if use-expr? (add-renamer (cadr x) name (car x)) x))
+        (cond [(getkey '1st) =>
+               (lambda (v)
+                 (if 1st-arg
+                   (set! x (add-renamer x 1st-arg v))
+                   (err "got a custom type that wants 1st arg too early"
+                        clause)))])
+        (cond [(getkey 'prev) =>
+               (lambda (v)
+                 (if prev-arg
+                   (set! x (add-renamer x prev-arg v))
+                   (err "got a custom type that wants prev arg too early"
+                        clause)))])
+        x)
+      (when keys
+        (set! type (getkey 'type))
+        (cond [(and (not expr) (getkey 'expr)) => (lambda (x) (set! expr x))])
+        (cond [(getkey 'bind) => (lambda (x) (bind! #`[#,x #,name]))])
+        (cond [(getkey 'pre) => (lambda (x) (pre!  #`[#,name #,(arg x #t)]))])
+        (cond [(getkey 'post) => (lambda (x) (post! #`[#,name #,(arg x)]))]))
+      ;; turn a #f syntax to #f
+      (set! type (and type (syntax-case type () [#f #f] [_ type])))
+      (when type ; remember these for later usages
+        (unless 1st-arg (set! 1st-arg name))
+        (set! prev-arg name))
+      (list type name expr)))
+  (define (do-fun)
+    ;; parse keywords
+    (let loop ()
+      (let ([k (and (pair? xs) (pair? (cdr xs)) (syntax-e (car xs)))])
+        (define-syntax-rule (kwds [key var] ...)
+          (case k
+            [(key) (if var
+                     (err (format "got a second ~s keyword") 'key (car xs))
+                     (begin (set! var (cadr xs)) (set! xs (cddr xs)) (loop)))]
+            ...
+            [else (err "unknown keyword" (car xs))]))
+        (when (keyword? k) (kwds [#:abi abi] [#:keep keep]))))
+    (unless abi  (set! abi  #'#f))
+    (unless keep (set! keep #'#t))
+    ;; parse known punctuation
+    (set! xs (map (lambda (x)
+                    (syntax-case* x (-> ::) id=? [:: '::] [-> '->] [_  x]))
+                  xs))
+    ;; parse "::"
+    (let ([s (split-by ':: xs)])
+      (case (length s)
+        [(0) (err "something bad happened (::)")]
+        [(1) (void)]
+        [(2) (if (and (= 1 (length (car s))) (not (eq? '-> (caar s))))
+               (begin (set! xs (cadr s)) (set! input-names (caar s)))
+               (err "bad wrapper formals"))]
+        [else (err "saw two or more instances of `::'")]))
+    ;; parse "->"
+    (let ([s (split-by '-> xs)])
+      (case (length s)
+        [(0) (err "something bad happened (->)")]
+        [(1) (err "missing output type")]
+        [(2 3) (set! inputs (car s))
+               (case (length (cadr s))
+                 [(1) (set! output-type (caadr s))]
+                 [(0) (err "missing output type after `->'")]
+                 [else (err "extraneous output type" (cadadr s))])
+               (unless (null? (cddr s))
+                 (case (length (caddr s))
+                   [(1) (set! output-expr (caaddr s))]
+                   [(0) (err "missing output expression after `->'")]
+                   [else (err "extraneous output expression"
+                              (cadr (caddr s)))]))]
+        [else (err "saw three or more instances of `->'")]))
+    (set! inputs
+          (map (lambda (sub temp)
+                 (let ([t-n-e (t-n-e sub)])
+                   (syntax-case* sub (: =) id=?
+                     [(name : type)        (t-n-e #'type #'name #f)]
+                     [(type = expr)        (t-n-e #'type temp   #'expr)]
+                     [(name : type = expr) (t-n-e #'type #'name #'expr)]
+                     [type                 (t-n-e #'type temp   #f)])))
+               inputs
+               (generate-temporaries (map (lambda (x) 'tmp) inputs))))
+    ;; when processing the output type, only the post code matters
+    (set! pre! (lambda (x) #f))
+    (set! output
+          (let ([temp (car (generate-temporaries #'(ret)))]
+                [t-n-e (t-n-e output-type)])
+            (syntax-case* output-type (: =) id=?
+              [(name : type) (t-n-e #'type #'name output-expr)]
+              [(type = expr) (if output-expr
+                               (err "extraneous output expression" #'expr)
+                               (t-n-e #'type temp #'expr))]
+              [(name : type = expr)
+                             (if output-expr
+                               (err "extraneous output expression" #'expr)
+                               (t-n-e #'type #'name #'expr))]
+              [type          (t-n-e #'type temp output-expr)])))
+    (if (or (caddr output) input-names (ormap caddr inputs)
+            (ormap (lambda (x) (not (car x))) inputs)
+            (pair? bind) (pair? pre) (pair? post))
+      (let* ([input-names (or input-names
+                              (filter-map (lambda (i)
                                             (and (not (caddr i)) (cadr i)))
                                           inputs))]
-                [output-expr (let ([o (caddr output)])
-                               (or (and (not (void? o)) o)
-                                   (cadr output)))]
-                [args (filtmap (lambda (i) (and (caddr i)
-                                                (not (void? (caddr i)))
-                                                #`[#,(cadr i) #,(caddr i)]))
+             [output-expr (let ([o (caddr output)])
+                            (or (and (not (void? o)) o)
+                                (cadr output)))]
+             [args (filter-map (lambda (i)
+                                 (and (caddr i)
+                                      (not (void? (caddr i)))
+                                      #`[#,(cadr i) #,(caddr i)]))
                                inputs)]
-                [ffi-args (filtmap (lambda (x) (and (car x) (cadr x)))
-                                   inputs)]
-                ;; the actual wrapper body
-                [body (quasisyntax/loc stx
-                        (lambda #,input-names
-                          (let* (#,@args
-                                 #,@bind
-                                 #,@pre
-                                 [#,(cadr output) (ffi #,@ffi-args)]
-                                 #,@post)
-                            #,output-expr)))]
-                ;; if there is a string 'ffi-name property, use it as a name
-                [body (let ([n (cond [(syntax-property stx 'ffi-name)
-                                      => syntax->datum]
-                                     [else #f])])
-                        (if (string? n)
-                          (syntax-property
-                           body 'inferred-name
-                           (string->symbol (string-append "ffi-wrapper:" n)))
-                          body))])
-           #`(_cprocedure (list #,@(filtmap car inputs)) #,(car output)
-               (lambda (ffi) #,body)))
-         #`(_cprocedure (list #,@(filtmap car inputs)) #,(car output))))]))
+             [ffi-args (filter-map (lambda (x) (and (car x) (cadr x))) inputs)]
+             ;; the actual wrapper body
+             [body (quasisyntax/loc stx
+                     (lambda #,input-names
+                       (let* (#,@args
+                              #,@bind
+                              #,@pre
+                              [#,(cadr output) (ffi #,@ffi-args)]
+                              #,@post)
+                         #,output-expr)))]
+             ;; if there is a string 'ffi-name property, use it as a name
+             [body (let ([n (cond [(syntax-property stx 'ffi-name)
+                                   => syntax->datum]
+                                  [else #f])])
+                     (if (string? n)
+                       (syntax-property
+                        body 'inferred-name
+                        (string->symbol (string-append "ffi-wrapper:" n)))
+                       body))])
+        #`(_cprocedure* (list #,@(filter-map car inputs)) #,(car output)
+                        #,abi (lambda (ffi) #,body) #,keep))
+      #`(_cprocedure* (list #,@(filter-map car inputs)) #,(car output)
+                      #,abi #f #,keep)))
+  (syntax-case stx ()
+    [(_ x ...) (begin (set! xs (syntax->list #'(x ...))) (do-fun))]))
 
 ;; ----------------------------------------------------------------------------
 ;; String types
@@ -952,7 +976,7 @@
 
 (define-struct cvector (ptr type length))
 
-(provide* cvector? cvector-length cvector-type
+(provide* cvector? cvector-length cvector-type cvector-ptr
           ;; make-cvector* is a dangerous operation
           (unsafe (rename-out [make-cvector make-cvector*])))
 
@@ -1167,40 +1191,36 @@
            [error-str (format "~a`~a' pointer"
                               (if nullable? "" "non-null ") tag)]
            [error* (lambda (p) (raise-type-error tag->C error-str p))])
-      (let-syntax ([tag-or-error
-                    (syntax-rules ()
-                      [(tag-or-error ptr t)
-                       (let ([p ptr])
-                         (if (cpointer? p)
-                           (unless (cpointer-has-tag? p t) (error* p))
-                           (error* p)))])]
-                   [tag-or-error/null
-                    (syntax-rules ()
-                      [(tag-or-error/null ptr t)
-                       (let ([p ptr])
-                         (if (cpointer? p)
-                           (when p (unless (cpointer-has-tag? p t) (error* p)))
-                           (error* p)))])])
-        (make-ctype (or ptr-type _pointer)
-          ;; bad hack: `if's outside the lambda for efficiency
-          (if nullable?
-            (if scheme->c
-              (lambda (p) (tag-or-error/null (scheme->c p) tag) p)
-              (lambda (p) (tag-or-error/null p tag) p))
-            (if scheme->c
-              (lambda (p) (tag-or-error (scheme->c p) tag) p)
-              (lambda (p) (tag-or-error p tag) p)))
-          (if nullable?
-            (if c->scheme
-              (lambda (p) (when p (cpointer-push-tag! p tag)) (c->scheme p))
-              (lambda (p) (when p (cpointer-push-tag! p tag)) p))
-            (if c->scheme
-              (lambda (p)
-                (if p (cpointer-push-tag! p tag) (error* p))
-                (c->scheme p))
-              (lambda (p)
-                (if p (cpointer-push-tag! p tag) (error* p))
-                p))))))]))
+      (define-syntax-rule (tag-or-error ptr t)
+        (let ([p ptr])
+          (if (cpointer? p)
+            (if (cpointer-has-tag? p t) p (error* p))
+            (error* p))))
+      (define-syntax-rule (tag-or-error/null ptr t)
+        (let ([p ptr])
+          (if (cpointer? p)
+            (and p (if (cpointer-has-tag? p t) p (error* p)))
+            (error* p))))
+      (make-ctype (or ptr-type _pointer)
+        ;; bad hack: `if's outside the lambda for efficiency
+        (if nullable?
+          (if scheme->c
+            (lambda (p) (tag-or-error/null (scheme->c p) tag))
+            (lambda (p) (tag-or-error/null p tag)))
+          (if scheme->c
+            (lambda (p) (tag-or-error (scheme->c p) tag))
+            (lambda (p) (tag-or-error p tag))))
+        (if nullable?
+          (if c->scheme
+            (lambda (p) (when p (cpointer-push-tag! p tag)) (c->scheme p))
+            (lambda (p) (when p (cpointer-push-tag! p tag)) p))
+          (if c->scheme
+            (lambda (p)
+              (if p (cpointer-push-tag! p tag) (error* p))
+              (c->scheme p))
+            (lambda (p)
+              (if p (cpointer-push-tag! p tag) (error* p))
+              p)))))]))
 
 ;; This is a kind of a pointer that gets a specific tag when converted to
 ;; Scheme, and accepts only such tagged pointers when going to C.  An optional
@@ -1221,8 +1241,8 @@
 (provide define-cpointer-type)
 (define-syntax (define-cpointer-type stx)
   (syntax-case stx ()
-    [(_ _TYPE) #'(_ _TYPE #f #f #f)]
-    [(frm _TYPE ptr-type) #'(frm _TYPE ptr-type #f #f)]
+    [(_ _TYPE) #'(define-cpointer-type _TYPE #f #f #f)]
+    [(_ _TYPE ptr-type) #'(define-cpointer-type _TYPE ptr-type #f #f)]
     [(_ _TYPE ptr-type scheme->c c->scheme)
      (and (identifier? #'_TYPE)
           (regexp-match #rx"^_.+" (symbol->string (syntax-e #'_TYPE))))
@@ -1259,10 +1279,13 @@
 ;; Simple structs: call this with a list of types, and get a type that marshals
 ;; C structs to/from Scheme lists.
 (define* (_list-struct . types)
-  (let ([stype (make-cstruct-type types)]
-        [offsets (compute-offsets types)])
+  (let ([stype   (make-cstruct-type types)]
+        [offsets (compute-offsets types)]
+        [len     (length types)])
     (make-ctype stype
       (lambda (vals)
+        (unless (and (list vals) (= len (length vals)))
+          (raise-type-error 'list-struct (format "list of ~a items" len) vals))
         (let ([block (malloc stype)])
           (for-each (lambda (type ofs val) (ptr-set! block type 'abs ofs val))
                     types offsets vals)
@@ -1459,15 +1482,13 @@
 (define cstruct-info
   (let ([table (make-weak-hasheq)])
     (lambda (cstruct msg/fail-thunk . args)
-      (cond [(eq? 'set! msg/fail-thunk) 
+      (cond [(eq? 'set! msg/fail-thunk)
              (hash-set! table cstruct (make-ephemeron cstruct args))]
             [(and cstruct ; might get a #f if there were no slots
                   (hash-ref table cstruct (lambda () #f)))
-             => (lambda (xs) 
+             => (lambda (xs)
                   (let ([v (ephemeron-value xs)])
-                    (if v 
-                        (apply values v)
-                        (msg/fail-thunk))))]
+                    (if v (apply values v) (msg/fail-thunk))))]
             [else (msg/fail-thunk)]))))
 
 ;; ----------------------------------------------------------------------------

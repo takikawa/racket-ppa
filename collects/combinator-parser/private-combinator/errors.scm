@@ -18,7 +18,12 @@
     (define (fail-type->message fail-type message-to-date)
       (let* ([name (fail-type-name fail-type)]
              [a (a/an name)]
-             [msg (lambda (m) (make-err m (fail-type-src fail-type)))])
+             [msg (lambda (m) 
+                    (make-err m
+                              (if (and (list? (fail-type-src fail-type))
+                                       (list? (car (fail-type-src fail-type))))
+                                  (car (fail-type-src fail-type))
+                                  (fail-type-src fail-type))))])
         #;(printf "fail-type->message ~a~n" fail-type)
         (cond
           [(terminal-fail? fail-type)
@@ -56,17 +61,19 @@
                 (collapse-message
                  (add-to-message
                   (msg
-                   (cond 
-                     [(sequence-fail-repeat? fail-type)
-                      (format "Found a repitition of ~a; the required number are present. Expected ~a ~a next."
-                              (sequence-fail-last-seen fail-type) a2 expected)]
-                     [(null? show-sequence)
-                      (format "Expected ~a ~a to begin this ~a, instead found ~a."
-                              a2 expected id-name (input->output-name (sequence-fail-found fail-type)))]
-                     [else
-                      (format "Expected ~a ~a to continue this ~a. Instead, found ~a after ~a."
-                              a2 expected id-name (input->output-name (sequence-fail-found fail-type))
-                              (format-seen show-sequence))]))
+                   (let* ([poss-repeat ((sequence-fail-repeat? fail-type))]
+                          [repeat? (and (res? poss-repeat) (res-a poss-repeat) (res-msg poss-repeat))])
+                     (cond 
+                       [repeat?
+                        (format "Found a repitition of ~a; the required number are present. Expected ~a ~a next."
+                                (sequence-fail-last-seen fail-type) a2 expected)]
+                       [(null? show-sequence)
+                        (format "Expected ~a ~a to begin this ~a, instead found ~a."
+                                a2 expected id-name (input->output-name (sequence-fail-found fail-type)))]
+                       [else
+                        (format "Expected ~a ~a to continue this ~a. Instead, found ~a after ~a."
+                                a2 expected id-name (input->output-name (sequence-fail-found fail-type))
+                                (format-seen show-sequence))])))
                   name curr-id message-to-date))]
                [(misscase) 
                 (collapse-message
@@ -227,11 +234,12 @@
              
              [winners (narrow-opts chance chance-may-winners)])
         #;(printf "all options: ~a~n" opts-list)
-        #;(printf "~a ~a ~a ~a ~n"
+        #;(printf "~a ~a ~a ~a ~a~n"
                   (map fail-type-name opts-list)
                   (map fail-type-chance opts-list)
                   (map fail-type-used opts-list)
-                  (map fail-type-may-use opts-list))
+                  (map fail-type-may-use opts-list)
+                  (map composite opts-list))
         #;(printf "composite round: ~a ~a ~n"
                   (map fail-type-name composite-winners)
                   (map composite composite-winners))

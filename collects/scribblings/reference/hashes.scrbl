@@ -3,6 +3,8 @@
 
 @title[#:tag "hashtables"]{Hash Tables}
 
+@guideintro["hash-tables"]{hash tables}
+
 A @deftech{hash table} (or simply @deftech{hash}) maps each of its
 keys to a single value. For a given hash table, keys are equivalent
 via @scheme[equal?] or @scheme[eq?], and keys are retained either
@@ -19,10 +21,9 @@ table during iteration, then an iteration step may fail with
 keys and values.  See also @scheme[in-hash], @scheme[in-hash-keys],
 @scheme[in-hash-values], and @scheme[in-hash-pairs].
 
-Two hash tables are @scheme[equal?] if they use the same
-key-comparison procedure (@scheme[equal?] or @scheme[eq?]), if they
-both hold keys strongly or weakly, and if they have the same
-mutability.
+Two hash tables cannot be @scheme[equal?] unless they use the same
+key-comparison procedure (@scheme[equal?] or @scheme[eq?]), both hold keys
+strongly or weakly, and have the same mutability.
 
 @bold{Caveats concerning concurrent modification:} A mutable hash
 table can be manipulated with @scheme[hash-ref], @scheme[hash-set!],
@@ -132,7 +133,7 @@ any existing mapping for @scheme[key].}
 
 Functionally extends @scheme[hash] by mapping @scheme[key] to
 @scheme[v], overwriting any existing mapping for @scheme[key], and
-returning an extended hash table.}
+returning the extended hash table.}
 
 
 @defproc[(hash-ref [hash hash?]
@@ -167,7 +168,7 @@ Removes any existing mapping for @scheme[key] in @scheme[hash].}
          (and/c hash? immutable?)]{
 
 Functionally removes any existing mapping for @scheme[key] in
-@scheme[hash], returning the updated hash table.}
+@scheme[hash], returning the fresh hash table.}
 
 
 @defproc[(hash-map [hash hash?]
@@ -192,7 +193,7 @@ caveat above about concurrent modification.}
 
 
 @defproc[(hash-count [hash hash?])
-         nonnegative-exact-integer?]{
+         exact-nonnegative-integer?]{
 
 Returns the number of keys mapped by @scheme[hash]. If
 @scheme[hash] is not created with @scheme['weak], then the
@@ -202,7 +203,7 @@ above about concurrent modification.}
 
 
 @defproc[(hash-iterate-first [hash hash?])
-         (or/c false/c nonnegative-exact-integer?)]{
+         (or/c false/c exact-nonnegative-integer?)]{
 
 Returns @scheme[#f] if @scheme[hash] contains no elements, otherwise
 it returns an integer that is a index to the first element in the hash
@@ -213,8 +214,8 @@ refer to the first item only as long as no items are added to or
 removed from @scheme[hash].}
 
 @defproc[(hash-iterate-next [hash hash?]
-                            [pos nonnegative-exact-integer?])
-         (or/c false/c nonnegative-exact-integer?)]{
+                            [pos exact-nonnegative-integer?])
+         (or/c false/c exact-nonnegative-integer?)]{
 
 Returns either an integer that is an index to the element in
 @scheme[hash] after the element indexed by @scheme[pos] (which is not
@@ -226,7 +227,7 @@ only as long as no items are added to or removed from @scheme[hash].}
 
 
 @defproc[(hash-iterate-key [hash hash?]
-                           [pos nonnegative-exact-integer?])
+                           [pos exact-nonnegative-integer?])
          any]{
 
 Returns the key for the element in @scheme[hash] at index
@@ -235,7 +236,7 @@ Returns the key for the element in @scheme[hash] at index
 
 
 @defproc[(hash-iterate-value [hash hash?]
-                             [pos nonnegative-exact-integer?])
+                             [pos exact-nonnegative-integer?])
          any]{
 
 Returns the value for the element in @scheme[hash] at index

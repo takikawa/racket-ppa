@@ -6,11 +6,14 @@
                      rnrs/base-6
                      rnrs/unicode-6
                      rnrs/exceptions-6
+                     rnrs/conditions-6
                      rnrs/io/simple-6
                      rnrs/r5rs-6
                      (only-in scheme/base
                               lib
-                              current-library-collection-paths)))
+                              current-library-collection-paths
+                              parameterize
+                              uncaught-exception-handler)))
 
 @(define guide-src '(lib "scribblings/guide/guide.scrbl"))
 
@@ -160,7 +163,7 @@ files. Note that this technique does not support accessing
 reference @scheme[(duck)] is treated like @scheme[(duck main)] for
 finding the library, as explained in @secref["libpaths"]. Multiple
 paths can be provided with multiple uses of @DPFlag{path}; the paths
-are search in order, and before the installation's collections.
+are searched in order, and before the installation's collections.
 
 @; ----------------------------------------
 
@@ -172,8 +175,9 @@ a name is converted to a PLT Scheme module pathname (see @secref[#:doc
 guide-src "module-paths"]) by concatenating the symbols with a
 @litchar{/} separator, and then appending the version integers each
 with a preceeding @litchar{-}. As a special case, when an @|r6rs| path
-contains a single symbol followed by a version, a @schemeidfont{main}
-symbol is effectively inserted after the initial symbol.
+contains a single symbol (optionally followed by a version), a
+@schemeidfont{main} symbol is effectively inserted after the initial
+symbol. See below for further encoding considerations.
 
 When an @|r6rs| library or top-level program refers to another
 library, it can supply version constraints rather than naming a
@@ -187,13 +191,41 @@ search order for file extensions is @filepath{.mzscheme.ss},
 resolving version constraints, these extensions are all tried when
 looking for matches.
 
+
+
+To ensure that all @|r6rs| library names can be converted to a unique
+and distinct library module path, the following conversions are
+applied to each symbol before concatenating them:
+
+@itemize{
+
+ @item{The symbol is encoded using UTF-8, and the resulting bytes are
+ treated as Latin-1 encoded characters. ASCII letters, digits,
+ @litchar{+}, @litchar{-}, and @litchar{_} are left as-is; other
+ characters are replaced by @litchar{%} followed by two lowercase
+ hexadecimal digits. Note that UTF-8 encodes ASCII letters, digits,
+ @|etc| as themselves, so typical library names correspond to readable
+ module paths.}
+
+ @item{If the @|r6rs| library reference has two symbol elements and
+ the second one is @schemeidfont{main} followed by any number of
+ underscores, then an extra underscore is added to that symbol. This
+ conversion avoids a collision between an explicit @schemeidfont{main}
+ and the implicit @schemeidfont{main} when a library path has a single
+ symbol element.}
+
+}
+
 Examples (assuming a typical PLT Scheme installation):
 
 @schemeblock[
 (rnrs io simple (6))  #, @elem{means}  (lib "rnrs/io/simple-6.ss")
 (rnrs)                #, @elem{means}  (lib "rnrs/main-6.ss")
+(rnrs main)           #, @elem{means}  (lib "rnrs/main_.ss")
 (rnrs (6))            #, @elem{means}  (lib "rnrs/main-6.ss")
 (scheme base)         #, @elem{means}  (lib "scheme/base.ss")
+(achtung!)            #, @elem{means}  (lib "achtung%21/main.ss")
+(funco new-λ)         #, @elem{means}  (lib "funco/new-%ce%bb.ss")
 ]
 
 
@@ -250,12 +282,18 @@ several known ways:
        raised through @scheme[raise-continuable], a handler can escape
        only through a continuation that is a tail of the current
        continuation, and a continuation captured within the handler
-       cannot be invoked after control escapes from the raise.}
+       cannot be invoked after control escapes from the raise.
 
- @item{Currently, inexact numbers are printed without a precision
-       indicator, and precision indicators are ignored on input (e.g.,
+       The initial exception handler does not return for
+       non-@scheme[&serious] conditions, but @scheme[raise] and
+       @scheme[raise-continuable] both install an uncaught-exception
+       handler (via @scheme[parameterize] and
+       @scheme[uncaught-exception-handler]) to one that returns for
+       non-@scheme[&serious] conditions.}
+
+ @item{Inexact numbers are printed without a precision indicator, and
+       precision indicators are ignored on input (e.g.,
        @schemevalfont{0.5|7} is read the same as @scheme[0.5]).}
-
 
  @item{Word boundaries for @scheme[string-downcase],
        @scheme[string-upcase], and @scheme[string-titlecase] are not
@@ -264,6 +302,18 @@ several known ways:
  @item{When an identifier bound by @scheme[letrec] or @scheme[letrec*]
        is referenced before it is bound, an exception is not raised;
        instead, the reference produces @|undefined-const|.}
+
+ @item{A custom textual port must represent positions using integers,
+       and the positions must correspond to bytes in a UTF-8 encoding
+       of the port's data. For custom ports (byte or character) that
+       support both input and output, beware that buffered input can
+       create a mismatch between the position implemented by the
+       custom procedures and the port's current position; the result
+       from a custom position procedure is automatically adjusted to
+       account for buffering, and setting the port's position flushes
+       all buffered bytes, but writing after a read does @emph{not}
+       automatically reset the port's position to counteract the
+       effects of buffering.}
 
  @item{The bindings in a namespace produced by @scheme[null-environment]
        or @scheme[scheme-report-environment] correspond to @|r5rs| bindings
@@ -647,7 +697,7 @@ several known ways:
              (record-field-mutable? #f "r6rs-lib-Z-H-7.html" "node_idx_360")]
 
 @r6rs-module[rnrs/exceptions-6 (rnrs exceptions (6))
-             "r6rs-lib-Z-H-8.html" "node_idx_364" "Exceptions and Conditions"
+             "r6rs-lib-Z-H-8.html" "node_idx_364" "Exceptions"
              (with-exception-handler #f "r6rs-lib-Z-H-8.html" "node_idx_368")
              (raise-continuable #f "r6rs-lib-Z-H-8.html" "node_idx_378")
              (raise #f "r6rs-lib-Z-H-8.html" "node_idx_376")
@@ -658,7 +708,7 @@ several known ways:
 See also @secref["conformance"].
 
 @r6rs-module[rnrs/conditions-6 (rnrs conditions (6))
-             "r6rs-lib-Z-H-8.html" "node_idx_382" "Exceptions and Conditions"
+             "r6rs-lib-Z-H-8.html" "node_idx_382" "Conditions"
              (who-condition? #f "r6rs-lib-Z-H-8.html" "node_idx_456")
              (warning? #f "r6rs-lib-Z-H-8.html" "node_idx_418")
              (violation? #f "r6rs-lib-Z-H-8.html" "node_idx_436")

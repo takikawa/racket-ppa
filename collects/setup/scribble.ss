@@ -4,11 +4,13 @@
          "dirs.ss"
          "private/path-utils.ss"
          "main-collects.ss"
+         "main-doc.ss"
          scheme/class
          scheme/list
          scheme/file
          scheme/fasl
          scheme/serialize
+         syntax/modread
          scribble/base-render
          scribble/struct
          scribble/basic
@@ -22,19 +24,18 @@
 (define verbose (make-parameter #t))
 
 (define-struct doc (src-dir src-spec src-file dest-dir flags under-main? category))
-(define-struct info (doc sci provides undef searches deps
+(define-struct info (doc get-sci provides undef searches deps known-deps
                      build? time out-time need-run?
                      need-in-write? need-out-write?
                      vers rendered? failed?)
   #:mutable)
 
-(define (user-doc? doc)
-  (or (memq 'user-doc-root (doc-flags doc))
-      (memq 'user-doc (doc-flags doc))))
+(define (main-doc? doc)
+  (pair? (path->main-doc-relative (doc-dest-dir doc))))
 
 (define (filter-user-docs docs make-user?)
   (cond ;; Specifically disabled user stuff, filter
-        [(not make-user?) (filter-not user-doc? docs)]
+        [(not make-user?) (filter main-doc? docs)]
         ;; If we've built user-specific before, keep building
         [(file-exists? (build-path (find-user-doc-dir) "index.html")) docs]
         ;; Otherwise, see if we need it:
@@ -43,7 +44,7 @@
                            (memq 'no-depend-on (doc-flags doc)))))
                 docs)
          docs]
-        [else (filter-not user-doc? docs)])) ; Don't need them, so drop them
+        [else (filter main-doc? docs)])) ; Don't need them, so drop them
 
 (define (setup-scribblings
          only-dirs          ; limits doc builds
@@ -138,28 +139,33 @@
         (let ([one? #f]
               [added? #f]
               [deps (make-hasheq)]
+              [known-deps (make-hasheq)]
               [all-main? (memq 'depends-all-main (doc-flags (info-doc info)))])
+          ;; Convert current deps from paths to infos, keeping paths that have no info
           (set-info-deps!
            info
            (map (lambda (d)
                   (if (info? d) d (or (hash-ref src->info d #f) d)))
                 (info-deps info)))
+          ;; Propagate existing dependencies as expected dependencies:
           (for ([d (info-deps info)])
             (let ([i (if (info? d) d (hash-ref src->info d #f))])
               (if i
-                (hash-set! deps i #t)
-                (unless
-                    (or (memq 'depends-all (doc-flags (info-doc info)))
-                        (and (if (info? d)
-                               (doc-under-main? (info-doc d))
-                               (not (path? (path->main-collects-relative d))))
-                             all-main?))
-                  (set! added? #t)
-                  (when (verbose)
-                    (printf " [Removed Dependency: ~a]\n"
-                            (doc-src-file (info-doc info))))))))
+                  ;; Normal case:
+                  (hash-set! deps i #t)
+                  ;; Path has no info; normally keep it as expected, and it gets
+                  ;; removed later.
+                  (unless (or (memq 'depends-all (doc-flags (info-doc info)))
+                              (and (if (info? d)
+                                       (doc-under-main? (info-doc d))
+                                       (not (path? (path->main-collects-relative d))))
+                                   all-main?))
+                    (set! added? #t)
+                    (when (verbose)
+                      (printf " [Removed Dependency: ~a]\n"
+                              (doc-src-file (info-doc info))))))))
           (when (or (memq 'depends-all (doc-flags (info-doc info))) all-main?)
-            ;; Add all:
+            ;; Add all as expected dependency:
             (when (verbose)
               (printf " [Adding all~a as dependencies: ~a]\n"
                       (if all-main? " main" "")
@@ -171,6 +177,7 @@
                          (not (memq 'no-depend-on (doc-flags (info-doc i)))))
                 (set! added? #t)
                 (hash-set! deps i #t))))
+          ;; Add defeinite dependencies based on referenced keys
           (let ([not-found
                  (lambda (k)
                    (unless (or (memq 'depends-all (doc-flags (info-doc info)))
@@ -185,39 +192,55 @@
             (for ([k (info-undef info)])
               (let ([i (hash-ref ht k #f)])
                 (if i
-                  (when (not (hash-ref deps i #f))
-                    (set! added? #t)
-                    (hash-set! deps i #t))
-                  (when first? (unless (eq? (car k) 'dep) (not-found k))))))
+                    (begin
+                      ;; Record a definite dependency:
+                      (when (not (hash-ref known-deps i #f))
+                        (hash-set! known-deps i #t))
+                      ;; Record also in the expected-dependency list:
+                      (when (not (hash-ref deps i #f))
+                        (set! added? #t)
+                        (when (verbose)
+                          (printf " [Adding... ~a]\n"
+                                  (doc-src-file (info-doc i))))
+                        (hash-set! deps i #t)))
+                    (when first? 
+                      (unless (eq? (car k) 'dep) 
+                        (not-found k))))))
             (when first?
               (for ([(s-key s-ht) (info-searches info)])
                 (unless (ormap (lambda (k) (hash-ref ht k #f))
                                (hash-map s-ht (lambda (k v) k)))
                   (not-found s-key)))))
+          ;; If we added anything (expected or known), then mark as needed to run
           (when added?
             (when (verbose)
               (printf " [Added Dependency: ~a]\n"
                       (doc-src-file (info-doc info))))
             (set-info-deps! info (hash-map deps (lambda (k v) k)))
+            (set-info-known-deps! info (hash-map known-deps (lambda (k v) k)))
             (set-info-need-in-write?! info #t)
             (set-info-need-run?! info #t))))
-      ;; If a dependency changed, then we need a re-run:
+      ;; If any expected dependency changed, then we need a re-run:
       (for ([i infos]
             #:when (not (or (info-need-run? i) (not (info-build? i)))))
         (let ([ch (ormap (lambda (i2)
-                           (or (not (info? i2))
+                           (or (and (not (info? i2))
+                                    i2)
                                (and (>= (info-out-time i2) (info-time i)) i2)))
                          (info-deps i))])
           (when ch
             (when (verbose)
               (printf " [Dependency: ~a\n  <- ~a]\n"
                       (doc-src-file (info-doc i))
-                      (doc-src-file (info-doc ch))))
+                      (if (info? ch)
+                          (doc-src-file (info-doc ch))
+                          ch)))
             (set-info-need-run?! i #t))))
       ;; Iterate, if any need to run:
       (when (and (ormap info-need-run? infos) (iter . < . 30))
         ;; Build again, using dependencies
         (for ([i infos] #:when (info-need-run? i))
+          (set-info-deps! i (filter info? (info-deps i)))
           (set-info-need-run?! i #f)
           (build-again! latex-dest i with-record-error setup-printf))
         ;; If we only build 1, then it reaches it own fixpoint
@@ -302,9 +325,35 @@
       (and (pair? cat)
            (eq? (car cat) 'omit))))
 
+(define (any-order keys)
+  (let ([ht (make-hash)])
+    (for-each (lambda (k) (hash-set! ht k #t)) keys)
+    ht))
 
 (define (read-out-sxref)
   (fasl->s-exp (current-input-port)))
+
+(define (normalized-read)
+  (with-module-reading-parameterization read))
+
+(define (make-sci-cached sci info-out-file setup-printf)
+  (when (verbose)
+    (fprintf (current-error-port) " [Lazy ~a]\n" info-out-file))
+  (let ([b (make-weak-box sci)])
+    (lambda ()
+      (let ([v (weak-box-value b)])
+        (or v
+            (begin
+              (when (verbose)
+                (void)
+                #;
+                (fprintf (current-error-port) " [Re-load ~a]\n" info-out-file))
+              (let ([v (cadr (with-input-from-file info-out-file read-out-sxref))])
+                (set! b (make-weak-box v))
+                v)))))))
+
+(define (make-sci-computed sci)
+  (lambda () sci))
 
 (define ((get-doc-info only-dirs latex-dest auto-main? auto-user?
                        with-record-error setup-printf)
@@ -361,37 +410,31 @@
                                                   auto-user? with-record-error
                                                   setup-printf)
                                     doc))])
-        (let* ([v-in (with-input-from-file info-in-file read)]
+        (let* ([v-in (with-input-from-file info-in-file normalized-read)]
                [v-out (with-input-from-file info-out-file read-out-sxref)])
           (unless (and (equal? (car v-in) (list vers (doc-flags doc)))
                        (equal? (car v-out) (list vers (doc-flags doc))))
             (error "old info has wrong version or flags"))
           (make-info
            doc
-           (list-ref v-out 1) ; sci
+           (make-sci-cached
+            (list-ref v-out 1) ; sci (leave serialized)
+            info-out-file
+            setup-printf)
            (let ([v (list-ref v-out 2)])  ; provides
-             (if (not (and (pair? v) ; temporary compatibility; used to be not serialized
-                           (pair? (car v))
-                           (integer? (caar v))))
-                 v
-                 (with-my-namespace
-                  (lambda ()
-                    (deserialize v)))))
+             (with-my-namespace
+              (lambda ()
+                (deserialize v))))
            (let ([v (list-ref v-in 1)])  ; undef
-             (if (not (and (pair? v) ; temporary compatibility; used to be not serialized
-                           (pair? (car v))
-                           (integer? (caar v))))
-               v
-               (with-my-namespace
-                (lambda ()
-                  (deserialize v)))))
+             (with-my-namespace
+              (lambda ()
+                (deserialize v))))
            (let ([v (list-ref v-in 3)])  ; searches
-             (if (hash? v) ; temporary compatibility; used to be not serialized
-               v
-               (with-my-namespace
-                (lambda ()
-                  (deserialize v)))))
-           (map rel->path (list-ref v-in 2)) ; deps, in case we don't need to build...
+             (with-my-namespace
+              (lambda ()
+                (deserialize v))))
+           (map rel->path (list-ref v-in 2)) ; expected deps, in case we don't need to build...
+           null ; known deps (none at this point)
            can-run?
            my-time info-out-time
            (and can-run? (memq 'always-run (doc-flags doc)))
@@ -421,28 +464,40 @@
                     [defs (send renderer get-defined ci)]
                     [searches (resolve-info-searches ri)]
                     [need-out-write?
-                     (or (not (equal? (list (list vers (doc-flags doc)) sci defs)
-                                      out-v))
+                     (or (not out-v)
+                         (not (equal? (list vers (doc-flags doc))
+                                      (car out-v)))
+                         (not (serialized=? sci (cadr out-v)))
+                         (not (equal? (any-order defs) (any-order (deserialize (caddr out-v)))))
                          (info-out-time . > . (current-seconds)))])
                (when (and (verbose) need-out-write?)
                  (fprintf (current-error-port) " [New out ~a]\n" (doc-src-file doc)))
                (gc-point)
-               (make-info doc
-                          sci
-                          defs
-                          (send renderer get-undefined ri)
-                          searches
-                          null ; no deps, yet
-                          can-run?
-                          -inf.0
-                          (if need-out-write?
-                              (/ (current-inexact-milliseconds) 1000)
-                              info-out-time)
-                          #t
-                          can-run? need-out-write?
-                          vers
-                          #f
-                          #f))))
+               (let ([info
+                      (make-info doc
+                                 (if need-out-write?
+                                     (make-sci-computed sci)
+                                     (make-sci-cached sci info-out-file setup-printf))
+                                 defs
+                                 (send renderer get-undefined ri)
+                                 searches
+                                 null ; no deps, yet
+                                 null ; no known deps, yet
+                                 can-run?
+                                 -inf.0
+                                 (if need-out-write?
+                                     (/ (current-inexact-milliseconds) 1000)
+                                     info-out-time)
+                                 #t
+                                 can-run? need-out-write?
+                                 vers
+                                 #f
+                                 #f)])
+                 (when need-out-write?
+                   (unless latex-dest 
+                     (render-time "xref-out" (write-out info setup-printf)))
+                   (set-info-need-out-write?! info #f))
+                 info))))
          (lambda () #f))
         #f))))
 
@@ -477,18 +532,19 @@
          (render-time
           "deserialize"
           (for ([i (info-deps info)])
-            (with-my-namespace
-             (lambda ()
-               (when (info? i)
-                 (send renderer deserialize-info (info-sci i) ci))))))
+            (when (info? i)
+              (with-my-namespace
+               (lambda ()
+                 (send renderer deserialize-info ((info-get-sci i)) ci))))))
          (let* ([ri (render-time "resolve" (send renderer resolve (list v) (list dest-dir) ci))]
                 [sci (render-time "serialize" (send renderer serialize-info ri))]
                 [defs (render-time "defined" (send renderer get-defined ci))]
                 [undef (render-time "undefined" (send renderer get-undefined ri))]
-                [in-delta? (not (equal? undef (info-undef info)))]
-                [out-delta? (not (equal? (list sci defs)
-                                         (list (info-sci info)
-                                               (info-provides info))))])
+                [in-delta? (not (equal? (any-order undef)
+                                        (any-order (info-undef info))))]
+                [out-delta? (or (not (serialized=? sci ((info-get-sci info))))
+                                (not (equal? (any-order defs)
+                                             (any-order (info-provides info)))))])
            (when (verbose)
              (printf " [~a~afor ~a]\n"
                      (if in-delta? "New in " "")
@@ -498,21 +554,27 @@
                      (doc-src-file doc)))
            (when out-delta?
              (set-info-out-time! info (/ (current-inexact-milliseconds) 1000)))
-           (set-info-sci! info sci)
            (set-info-provides! info defs)
            (set-info-undef! info undef)
-           (when in-delta? (set-info-deps! info null)) ; recompute deps outside
+           (when in-delta? 
+             ;; Reset expected dependencies to known dependencies, and recompute later:
+             (set-info-deps! info (info-known-deps info)))
            (when (or out-delta? (info-need-out-write? info))
+             (set-info-get-sci! info (make-sci-computed sci))
              (unless latex-dest 
-               (render-time "xref-out" (write-out info)))
+               (render-time "xref-out" (write-out info setup-printf)))
              (set-info-need-out-write?! info #f))
            (when in-delta? (set-info-need-in-write?! info #t))
            (unless latex-dest
              (let ([dir (doc-dest-dir doc)])
-               (unless (directory-exists? dir) (make-directory dir))
-               (for ([f (directory-list dir)]
-                     #:when (regexp-match? #"[.]html$" (path-element->bytes f)))
-                 (delete-file (build-path dir f)))))
+               (if (not (directory-exists? dir))
+                 (make-directory dir)
+                 (for ([f (directory-list dir)]
+                       #:when
+                       (and (file-exists? f)
+                            (not (regexp-match? #"[.]sxref$"
+                                                (path-element->bytes f)))))
+                   (delete-file (build-path dir f))))))
            (render-time
             "render"
             (with-record-error
@@ -560,7 +622,7 @@
       (lambda ()
         (sel (lambda ()
                (list (list (info-vers info) (doc-flags doc))
-                     (info-sci info)
+                     ((info-get-sci info))
                      (serialize (info-provides info))))
              (lambda ()
                (list (list (info-vers info) (doc-flags doc))
@@ -573,9 +635,13 @@
                            (info-deps info)))
                      (serialize (info-searches info)))))))))
 
-(define (write-out info)
+(define (write-out info setup-printf)
   (make-directory* (doc-dest-dir (info-doc info)))
-  (write- info "out.sxref" (lambda (o i) (write-bytes (s-exp->fasl (o))))))
+  (write- info "out.sxref" (lambda (o i) (write-bytes (s-exp->fasl (o)))))
+  (set-info-get-sci! info
+                     (make-sci-cached ((info-get-sci info))
+                                      (build-path (doc-dest-dir (info-doc info)) "out.sxref")
+                                      setup-printf)))
 (define (write-in info)
   (make-directory* (doc-dest-dir (info-doc info)))
   (write- info "in.sxref" (lambda (o i) (write (i)))))

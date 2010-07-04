@@ -186,14 +186,16 @@ following expression gets a command line for starting a browser:
 See also @scheme[write-resource].}
 
 @defproc[(get-window-text-extent [string string]
-                                 [font (is-a?/c font%)])
-         (values nonnegative-exact-integer?
-                 nonnegative-exact-integer?)]{
+                                 [font (is-a?/c font%)]
+                                 [combine? any/c #f])
+         (values exact-nonnegative-integer?
+                 exact-nonnegative-integer?)]{
 
 Returns the pixel size of a string drawn as a window's label or value
-when drawn with the given font.
+when drawn with the given font. The optional @scheme[combine?]
+argument is as for @xmethod[dc<%> get-text-extent].
 
-See also @method[dc<%> get-text-extent].
+See also @xmethod[dc<%> get-text-extent].
 }
 
 @defproc[(graphical-read-eval-print-loop [eval-eventspace eventspace #f]
@@ -418,10 +420,16 @@ If the AppleEvent reply contains a value that cannot be
  the method. If no Scheme window is at the given coordinates, or if it
  is covered by a non-Scheme window at (@scheme[x], @scheme[y]),
  @scheme[#f] is returned.
-
-
-
 }
+
+
+@defproc[(system-position-ok-before-cancel?) boolean?]{
+
+Returns @scheme[#t] under Windows---indicating that a dialog with
+@onscreen{OK} and @onscreen{Cancel} buttons should place the
+@onscreen{OK} button on to left of the @onscreen{Cancel} button---and
+returns @scheme[#f] under Mac OS X and X.}
+
 
 @defthing[the-clipboard (is-a?/c clipboard<%>)]{
 

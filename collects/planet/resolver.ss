@@ -544,7 +544,7 @@ subdirectory.
                    (current-time))
            ;; oh man is this a bad hack!
            (parameterize ([current-namespace (make-namespace)])
-             (let ([ipp (dynamic-require '(lib "setup/plt-single-installer.ss")
+             (let ([ipp (dynamic-require 'setup/plt-single-installer
                                          'install-planet-package)])
                (ipp path the-dir (list owner (pkg-spec-name pkg)
                                        extra-path maj min))))))
@@ -628,7 +628,7 @@ subdirectory.
       (min-hi . ,(get pkg-spec-minor-hi))
       (path   . ,(get pkg-spec-path)))))
 
-;; get-http-response-code : header[from net/head] -> string
+;; get-http-response-code : header[from net/head] -> string or #f
 ;; gets the HTTP response code in the given header
 (define (get-http-response-code header)
   (let ([parsed (regexp-match #rx"^HTTP/[^ ]* ([^ ]*)" header)])
@@ -656,7 +656,8 @@ subdirectory.
                [ip                (get-impure-port target)]
                [head              (purify-port ip)]
                [response-code/str (get-http-response-code head)]
-               [response-code     (string->number response-code/str)])
+               [response-code     (and response-code/str 
+                                       (string->number response-code/str))])
 
           (define (abort msg)
             (close-input-port ip)

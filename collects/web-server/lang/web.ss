@@ -1,22 +1,35 @@
-#lang scheme/base
-(require mzlib/serialize
-         mzlib/plt-match
-         net/url           
+#lang scheme
+(require net/url
+         scheme/contract
+         scheme/serialize
+         web-server/private/request-structs
+         web-server/private/response-structs
+         web-server/private/define-closure
          "../private/request-structs.ss"
          "abort-resume.ss"
          "../private/session.ss"
          "stuff-url.ss"
          "../private/url-param.ss")
 
-(provide 
+(provide
  ;; Server Interface
  initialize-servlet
  
  ;; Servlet Interface
  send/suspend/hidden
  send/suspend/url
- extract-proc/url
- embed-proc/url)
+ send/suspend/dispatch)
+
+; These contracts interfere with the continuation safety marks
+#;(provide/contract
+ ;; Server Interface
+ [initialize-servlet ((request? . -> . response?) . -> . (request? . -> . response?))]
+ 
+ ;; Servlet Interface
+ [send/suspend/hidden ((url? list? . -> . response?) . -> . request?)]
+ [send/suspend/url ((url? . -> . response?) . -> . request?)]
+ [send/suspend/dispatch ((((request? . -> . any/c) . -> . url?) . -> . response?)
+                         . -> . any/c)])
 
 ;; initial-servlet : (request -> response) -> (request -> response?)
 (define (initialize-servlet start)
@@ -53,27 +66,13 @@
       (stuff-url k
                  (session-url (current-session)))))))
 
-; XXX Don't use stuff-url, but use the other serialize thing
-(define embed-label "superkont")  
-(define (embed-proc/url k-url proc)
-  (define superkont-url
-    (stuff-url proc                                              
-               (session-url (current-session))))
-  (define result-uri
-    (insert-param k-url embed-label 
-                  (url->string superkont-url)))
-  (begin0 result-uri
-          (when (> (string-length (url->string result-uri))
-                   1024)
-            (error "the url is too big: " (url->string result-uri)))))
-(define (extract-proc/url request)
-  (define req-url (request-uri request))
-  (define maybe-embedding (extract-param req-url embed-label))
-  (if maybe-embedding
-      (let ([proc (unstuff-url
-                   (string->url maybe-embedding))])
-        (proc request))
-      (error 'send/suspend/dispatch "No ~a: ~S!" embed-label)))
+(define-closure embed/url (proc) (k)
+  (stuff-url (kont-append-fun k proc)
+             (session-url (current-session))))
+(define (send/suspend/dispatch response-generator)
+  (send/suspend
+   (lambda (k)
+     (response-generator (make-embed/url (lambda () k))))))
 
 ;; request->continuation: req -> continuation
 ;; decode the continuation from the hidden field of a request

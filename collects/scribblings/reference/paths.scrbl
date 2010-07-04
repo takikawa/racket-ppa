@@ -240,7 +240,7 @@ of @|AllUnix| paths, and see @secref["windowspaths"] for more
 information on the construction of Windows paths.
 
 The following examples assume that the current directory is
-\File{/home/joeuser} for Unix examples and \File{C:\Joe's Files} for
+@filepath{/home/joeuser} for Unix examples and @filepath{C:\Joe's Files} for
 Windows examples.
 
 @schemeblock[
@@ -360,7 +360,7 @@ of the current user.}
 Eliminates redundant path separators (except for a single trailing
 separator), up-directory @litchar{..}, and same-directory @litchar{.}
 indicators in @scheme[path], and changes @litchar{/} separators to
-@litchar["\\"] separators in Windows paths, such that the result
+@litchar{\} separators in Windows paths, such that the result
 accesses the same file or directory (if it exists) as @scheme[path].
 
 In general, the pathname is normalized as much as possible --- without
@@ -378,12 +378,11 @@ that the resulting path refers to the same directory as before).
 When @scheme[use-filesystem?] is @scheme[#f], up-directory indicators
 are removed by deleting a preceding path element, and the result can
 be a relative path with up-directory indicators remaining at the
-beginning of the path or, for @|AllUnix| paths; otherwise,
-up-directory indicators are dropped when they refer to the parent of a
-root directory. Similarly, the result can be the same as
-@scheme[(build-path 'same)] (but with a trailing separator) if
-eliminating up-directory indicators leaves only same-directory
-indicators.
+beginning of the path; up-directory indicators are dropped when they
+refer to the parent of a root directory. Similarly, the result can be
+the same as @scheme[(build-path 'same)] (but with a trailing
+separator) if eliminating up-directory indicators leaves only
+same-directory indicators.
 
 The @scheme[path] argument can be a path for any platform when
 @scheme[use-filesystem?] is @scheme[#f], and the resulting path is for
@@ -406,11 +405,11 @@ information on simplifying Windows paths.}
 Returns @scheme[path] with ``normalized'' case letters. For @|AllUnix|
 paths, this procedure always returns the input path, because
 filesystems for these platforms can be case-sensitive. For Windows
-paths, if @scheme[path] does not start @litchar["\\\\?\\"], the
+paths, if @scheme[path] does not start @litchar{\\?\}, the
 resulting string uses only lowercase letters, based on the current
 locale. In addition, for Windows paths when the path does not start
-@litchar["\\\\?\\"], all @litchar{/}s are converted to
-@litchar["\\"]s, and trailing spaces and @litchar{.}s are removed.
+@litchar{\\?\}, all @litchar{/}s are converted to
+@litchar{\}s, and trailing spaces and @litchar{.}s are removed.
 
 The @scheme[path] argument can be a path for any platform, but beware
 that local-sensitive decoding and conversion of the path may be

@@ -100,6 +100,28 @@
     (define (x) 1)
     (define (y) 2)))
 
+(define to-override2-class%
+  (class to-augment-class%
+    (augride x y)
+    (define (x) 1)
+    (define (y) 1)))
+(define to-augment2-class%
+  (class to-override-class%
+    (overment x y)
+    (define (x) 1)
+    (define (y) 1)))
+
+(define to-override3-class%
+  (class to-override2-class%
+    (oevrride x y)
+    (define (x) 1)
+    (define (y) 1)))
+(define to-augment3-class%
+  (class to-augment2-class%
+    (augment x y)
+    (define (x) 1)
+    (define (y) 1)))
+
 (define (test-method basic? public object% over? aug? super-ok? inner-ok? over-ok? aug-ok?)
   (when basic?
     (teval #`(test #t class? (class #,object% (#,public))))
@@ -128,7 +150,6 @@
 	(begin
 	  (teval #`(err/rt-test (class #,object% (#,public (x x)) (define (x) 1)) exn:fail:object?))
 	  (teval #`(err/rt-test (class #,object% (#,public (x y) (y x)) (define (x) 1) (define (y) 2)) exn:fail:object?)))))
-	
 
   ;; Use of external name for super/inner is always wrong (but
   ;; maybe because super/inner isn't allowed):
@@ -168,19 +189,24 @@
 (test-method #t #'public #'object% #f #f #f #f #f #f)
 (test-method #t #'public-final #'object% #f #f #f #f #f #f)
 (test-method #t #'pubment #'object% #f #f #f #t #f #f)
-(test-method #t #'override #'to-override-class% #t #f #t #f #t #f)
-(test-method #f #'override #'to-augment-class% #t #f #t #f #f #t)
-(test-method #t #'override-final #'to-override-class% #t #f #t #f #t #f)
-(test-method #f #'override-final #'to-augment-class% #t #f #t #f #f #t)
-(test-method #t #'overment #'to-override-class% #t #f #t #t #t #f)
-(test-method #f #'overment #'to-augment-class% #t #f #t #t #f #t)
-(test-method #t #'augment #'to-override-class% #f #t #f #t #t #f)
-(test-method #f #'augment #'to-augment-class% #f #t #f #t #f #t)
-(test-method #t #'augment-final #'to-override-class% #f #t #f #f #t #f)
-(test-method #f #'augment-final #'to-augment-class% #f #t #f #f #f #t)
-(test-method #t #'augride #'to-override-class% #f #t #f #f #t #f)
-(test-method #f #'augride #'to-augment-class% #f #t #f #f #f #t)
 (test-method #t #'private #'object% #f #f #f #f #f #f)
+(define (test-over/aug to-override-class% to-augment-class%)
+  (test-method #t #'override to-override-class% #t #f #t #f #t #f)
+  (test-method #f #'override to-augment-class% #t #f #t #f #f #t)
+  (test-method #t #'override-final to-override-class% #t #f #t #f #t #f)
+  (test-method #f #'override-final to-augment-class% #t #f #t #f #f #t)
+  (test-method #t #'overment to-override-class% #t #f #t #t #t #f)
+  (test-method #f #'overment to-augment-class% #t #f #t #t #f #t)
+  (test-method #t #'augment to-override-class% #f #t #f #t #t #f)
+  (test-method #f #'augment to-augment-class% #f #t #f #t #f #t)
+  (test-method #t #'augment-final to-override-class% #f #t #f #f #t #f)
+  (test-method #f #'augment-final to-augment-class% #f #t #f #f #f #t)
+  (test-method #t #'augride to-override-class% #f #t #f #f #t #f)
+  (test-method #f #'augride to-augment-class% #f #t #f #f #f #t))
+
+(test-over/aug #'to-override-class% #'to-augment-class%)
+(test-over/aug #'to-override2-class% #'to-augment2-class%)
+(test-over/aug #'to-override3-class% #'to-augment3-class%)
 
 (define (test-rename rename object%)
   (teval #`(test #t class? (class #,object% (#,rename))))
@@ -1348,6 +1374,44 @@
 
 (let ([c% (class object% (define foo (lambda () 10)) (define/public (get) foo) (super-new))])
   (test 'foo object-name (send (new c%) get)))
+
+;; ----------------------------------------
+;; Implementing printable<%>
+
+(let ()
+  (define (check w-cycle? d-cycle?)
+    (define c% (class* object% (printable<%>) 
+                 (define/public (custom-write p)
+                   (if w-cycle?
+                       (write this p)
+                       (display "hi" p)))
+                 (define/public (custom-display p) 
+                   (if d-cycle?
+                       (display this p)
+                       (display "HI" p)))
+                 (super-new)))
+
+    (let ([p (open-output-bytes)])
+      (write (new c%) p)
+      (test (if w-cycle? #"#0=#0#" #"hi")
+            get-output-bytes p))
+    (let ([p (open-output-bytes)])
+      (display (new c%) p)
+      (test (if d-cycle? #"#0=#0#" #"HI")
+            get-output-bytes p))
+
+    (let ([p (open-output-bytes)])
+      (write (new (class c%
+                    (define/override (custom-write p)
+                      (write 777 p))
+                    (super-new)))
+             p)
+      (test #"777" get-output-bytes p)))
+
+  (check #f #f)
+  (check #t #f)
+  (check #f #t)
+  (check #t #t))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

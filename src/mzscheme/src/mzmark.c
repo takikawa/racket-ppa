@@ -1636,6 +1636,8 @@ static int thread_val_MARK(void *p) {
   gcMARK(pr->current_local_bindings);
 
   gcMARK(pr->current_mt);
+
+  gcMARK(pr->constant_folding);
   
   gcMARK(pr->overflow_reply);
 
@@ -1737,6 +1739,8 @@ static int thread_val_FIXUP(void *p) {
   gcFIXUP(pr->current_local_bindings);
 
   gcFIXUP(pr->current_mt);
+
+  gcFIXUP(pr->constant_folding);
   
   gcFIXUP(pr->overflow_reply);
 
@@ -2344,6 +2348,8 @@ static int module_val_MARK(void *p) {
 
   gcMARK(m->insp);
 
+  gcMARK(m->lang_info);
+
   gcMARK(m->hints);
   gcMARK(m->ii_src);
 
@@ -2385,6 +2391,8 @@ static int module_val_FIXUP(void *p) {
   gcFIXUP(m->et_accessible);
 
   gcFIXUP(m->insp);
+
+  gcFIXUP(m->lang_info);
 
   gcFIXUP(m->hints);
   gcFIXUP(m->ii_src);
@@ -2637,9 +2645,90 @@ static int mark_pipe_FIXUP(void *p) {
 #define mark_pipe_IS_CONST_SIZE 1
 
 
+static int mark_logger_SIZE(void *p) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Logger));
+}
+
+static int mark_logger_MARK(void *p) {
+  Scheme_Logger *l = (Scheme_Logger *)p;
+  gcMARK(l->name);
+  gcMARK(l->parent);
+  gcMARK(l->readers);
+  gcMARK(l->timestamp);
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Logger));
+}
+
+static int mark_logger_FIXUP(void *p) {
+  Scheme_Logger *l = (Scheme_Logger *)p;
+  gcFIXUP(l->name);
+  gcFIXUP(l->parent);
+  gcFIXUP(l->readers);
+  gcFIXUP(l->timestamp);
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Logger));
+}
+
+#define mark_logger_IS_ATOMIC 0
+#define mark_logger_IS_CONST_SIZE 1
+
+
+static int mark_log_reader_SIZE(void *p) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Log_Reader));
+}
+
+static int mark_log_reader_MARK(void *p) {
+  Scheme_Log_Reader *lr = (Scheme_Log_Reader *)p;
+  gcMARK(lr->sema);
+  gcMARK(lr->head);
+  gcMARK(lr->tail);
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Log_Reader));
+}
+
+static int mark_log_reader_FIXUP(void *p) {
+  Scheme_Log_Reader *lr = (Scheme_Log_Reader *)p;
+  gcFIXUP(lr->sema);
+  gcFIXUP(lr->head);
+  gcFIXUP(lr->tail);
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Log_Reader));
+}
+
+#define mark_log_reader_IS_ATOMIC 0
+#define mark_log_reader_IS_CONST_SIZE 1
+
+
 #endif  /* TYPE */
 
 /**********************************************************************/
+
+#ifdef MARKS_FOR_ENGINE_C
+
+static int engine_val_SIZE(void *p) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Engine));
+}
+
+static int engine_val_MARK(void *p) {
+  Scheme_Engine *en = (Scheme_Engine *)p;
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Engine));
+}
+
+static int engine_val_FIXUP(void *p) {
+  Scheme_Engine *en = (Scheme_Engine *)p;
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Engine));
+}
+
+#define engine_val_IS_ATOMIC 0
+#define engine_val_IS_CONST_SIZE 1
+
+
+#endif  /* ENGINE */
 
 #ifdef MARKS_FOR_ENV_C
 
@@ -2765,6 +2854,7 @@ static int mark_optimize_info_MARK(void *p) {
   gcMARK(i->top_level_consts);
   gcMARK(i->transitive_use);
   gcMARK(i->transitive_use_len);
+  gcMARK(i->context);
 
   return
   gcBYTES_TO_WORDS(sizeof(Optimize_Info));
@@ -2781,6 +2871,7 @@ static int mark_optimize_info_FIXUP(void *p) {
   gcFIXUP(i->top_level_consts);
   gcFIXUP(i->transitive_use);
   gcFIXUP(i->transitive_use_len);
+  gcFIXUP(i->context);
 
   return
   gcBYTES_TO_WORDS(sizeof(Optimize_Info));
@@ -3154,6 +3245,33 @@ static int mark_rb_node_FIXUP(void *p) {
 
 
 #endif  /* HASH */
+
+/**********************************************************************/
+
+#ifdef MARKS_FOR_PLACES_C
+
+static int place_val_SIZE(void *p) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Place));
+}
+
+static int place_val_MARK(void *p) {
+  Scheme_Place *pr = (Scheme_Place *)p;
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Place));
+}
+
+static int place_val_FIXUP(void *p) {
+  Scheme_Place *pr = (Scheme_Place *)p;
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Place));
+}
+
+#define place_val_IS_ATOMIC 0
+#define place_val_IS_CONST_SIZE 1
+
+
+#endif  /* PLACES */
 
 /**********************************************************************/
 
@@ -4121,6 +4239,7 @@ static int mark_syncing_MARK(void *p) {
   gcMARK(w->wrapss);
   gcMARK(w->nackss);
   gcMARK(w->reposts);
+  gcMARK(w->accepts);
   gcMARK(w->disable_break);
 
   return
@@ -4134,6 +4253,7 @@ static int mark_syncing_FIXUP(void *p) {
   gcFIXUP(w->wrapss);
   gcFIXUP(w->nackss);
   gcFIXUP(w->reposts);
+  gcFIXUP(w->accepts);
   gcFIXUP(w->disable_break);
 
   return
@@ -4516,6 +4636,7 @@ static int mark_struct_property_MARK(void *p) {
   Scheme_Struct_Property *i = (Scheme_Struct_Property *)p;
   gcMARK(i->name);
   gcMARK(i->guard);
+  gcMARK(i->supers);
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Struct_Property));
 }
@@ -4524,6 +4645,7 @@ static int mark_struct_property_FIXUP(void *p) {
   Scheme_Struct_Property *i = (Scheme_Struct_Property *)p;
   gcFIXUP(i->name);
   gcFIXUP(i->guard);
+  gcFIXUP(i->supers);
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Struct_Property));
 }

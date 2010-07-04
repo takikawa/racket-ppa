@@ -49,7 +49,7 @@
                 (with-handlers ((exn:fail? (λ (x) (error 'teachpack (missing-tp-message tp)))))
                   (unless (file-exists? (build-path (apply collection-path (cddr tp))
                                                     (cadr tp)))
-                    (error))))
+                    (error "fail"))))
               teachpacks)
              (rewrite-module
               (expand
@@ -92,7 +92,7 @@
     (format "the teachpack '~a' was not found" name)))
 
 ;; rewrite-module : settings syntax (is-a?/c interactions-text<%>) -> syntax
-;; rewrites te module to print out results of non-definitions
+;; rewrites the module to print out results of non-definitions
 (define (rewrite-module stx rep)
   (syntax-case stx (module #%plain-module-begin)
     [(module name lang (#%plain-module-begin bodies ...))

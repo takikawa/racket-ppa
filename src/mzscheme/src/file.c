@@ -5576,6 +5576,10 @@ static Scheme_Object *collpaths_p(int argc, Scheme_Object **argv)
   return collpaths_gen_p(argc, argv, 0);
 }
 
+Scheme_Object *scheme_current_library_collection_paths(int argc, Scheme_Object *argv[]) {
+  return current_library_collection_paths(argc, argv);
+}
+
 static Scheme_Object *current_library_collection_paths(int argc, Scheme_Object *argv[])
 {
   return scheme_param_config("current-library-collection-paths", 
@@ -5624,6 +5628,15 @@ enum {
   id_addon_dir
 };
 
+Scheme_Object *scheme_get_run_cmd(void)
+{
+  if (!run_cmd) {
+    REGISTER_SO(run_cmd);
+    run_cmd = scheme_make_path("mzscheme");
+  }
+  return run_cmd;
+}
+
 static Scheme_Object *
 find_system_path(int argc, Scheme_Object **argv)
 {
@@ -5654,11 +5667,7 @@ find_system_path(int argc, Scheme_Object **argv)
     }
     return exec_cmd;
   } else if (argv[0] == run_file_symbol) {
-    if (!run_cmd) {
-      REGISTER_SO(run_cmd);
-      run_cmd = scheme_make_path("mzscheme");
-    }
-    return run_cmd;
+    return scheme_get_run_cmd();
   } else if (argv[0] == collects_dir_symbol) {
     if (!collects_path) {
       REGISTER_SO(collects_path);

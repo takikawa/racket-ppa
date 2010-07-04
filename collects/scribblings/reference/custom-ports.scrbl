@@ -11,31 +11,31 @@ written.
 
 @defproc[(make-input-port [name any/c]
                           [read-in (bytes? 
-                                    . -> . (one-of/c nonnegative-exact-integer?
+                                    . -> . (one-of/c exact-nonnegative-integer?
                                                      eof-object?
                                                      procedure?
                                                      evt?))]
-                          [peek (bytes? nonnegative-exact-integer? (or/c evt? false/c)
-                                        . -> . (one-of/c nonnegative-exact-integer?
+                          [peek (bytes? exact-nonnegative-integer? (or/c evt? false/c)
+                                        . -> . (one-of/c exact-nonnegative-integer?
                                                          eof-object?
                                                          procedure?
                                                          evt?
                                                          false/c))]
                           [close (-> any)]
                           [get-progress-evt (or/c (-> evt?) false/c) #f]
-                          [commit (or/c (positive-exact-integer? evt? evt? . -> . any)
+                          [commit (or/c (exact-positive-integer? evt? evt? . -> . any)
                                         false/c) 
                                   #f]
                           [get-location (or/c 
                                          (() 
                                           . ->* . 
-                                          ((or/c positive-exact-integer? false/c)
-                                           (or/c nonnegative-exact-integer? false/c)
-                                           (or/c positive-exact-integer? false/c)))
+                                          ((or/c exact-positive-integer? false/c)
+                                           (or/c exact-nonnegative-integer? false/c)
+                                           (or/c exact-positive-integer? false/c)))
                                          false/c)
                                         #f]
                           [count-lines! (-> any) void]
-                          [init-position positive-exact-integer? 1]
+                          [init-position exact-positive-integer? 1]
                           [buffer-mode (or/c (case-> ((one-of/c 'block 'none) . -> . any)
                                                      (-> (one-of/c 'block 'none #f)))
                                              false/c)
@@ -55,7 +55,6 @@ The arguments implement the port as follows:
   @item{@scheme[read-in] --- a procedure that takes a single argument:
     a mutable byte string to receive read bytes. The procedure's
     result is one of the following:
-%
     @itemize{
 
       @item{the number of bytes read, as an exact, non-negative integer;}
@@ -304,13 +303,13 @@ The arguments implement the port as follows:
     and the position for the next item in the port's stream (a
     positive number or @scheme[#f]). See also @secref["linecol"].  
 
-    This procedure is only called if line counting is enabled for the
-    port via @scheme[port-count-lines!] (in which case
-    @scheme[count-lines!] is called). The @scheme[read],
-    @scheme[read-syntax], @scheme[read-honu], and
-    @scheme[read-honu-syntax] procedures assume that reading a
-    non-whitespace character increments the column and position by
-    one.}
+    This procedure is called to implement @scheme[port-next-location],
+    but only if line counting is enabled for the port via
+    @scheme[port-count-lines!] (in which case @scheme[count-lines!] is
+    called). The @scheme[read], @scheme[read-syntax],
+    @scheme[read-honu], and @scheme[read-honu-syntax] procedures
+    assume that reading a non-whitespace character increments the
+    column and position by one.}
 
   @item{@scheme[count-lines!] --- a procedure of no arguments
     that is called if and when line counting is enabled for the port.
@@ -535,7 +534,7 @@ The arguments implement the port as follows:
           [done-evt (caddr r)]
           [ch (cadddr r)]
           [nack (cddddr r)])
-      ;; Note: we don't check that k is $\leq$ the sum of
+      ;; Note: we don't check that k is @scheme[<=] the sum of
       ;;  previous peeks, because the entire stream is actually
       ;;  known, but we could send an exception in that case.
       (choice-evt
@@ -654,12 +653,12 @@ s
 
 @defproc[(make-output-port [name any/c]
                            [evt evt?]
-                           [write-out (bytes? nonnegative-exact-integer?
-                                              nonnegative-exact-integer?
+                           [write-out (bytes? exact-nonnegative-integer?
+                                              exact-nonnegative-integer?
                                               boolean?
                                               boolean?
                                               . -> .
-                                              (or/c nonnegative-exact-integer?
+                                              (or/c exact-nonnegative-integer?
                                                     false/c
                                                     evt?))]
                            [close (-> any)]
@@ -671,8 +670,8 @@ s
                                                     false/c)
                                               #f]
                            [get-write-evt (or/c
-                                           (bytes? nonnegative-exact-integer?
-                                                   nonnegative-exact-integer?
+                                           (bytes? exact-nonnegative-integer?
+                                                   exact-nonnegative-integer?
                                                    . -> .
                                                    evt?)
                                            false/c)
@@ -684,13 +683,13 @@ s
                            [get-location (or/c 
                                           (() 
                                            . ->* . 
-                                           ((or/c positive-exact-integer? false/c)
-                                            (or/c nonnegative-exact-integer? false/c)
-                                            (or/c positive-exact-integer? false/c)))
+                                           ((or/c exact-positive-integer? false/c)
+                                            (or/c exact-nonnegative-integer? false/c)
+                                            (or/c exact-positive-integer? false/c)))
                                           false/c)
                                          #f]
                            [count-lines! (-> any) void]
-                           [init-position positive-exact-integer? 1]
+                           [init-position exact-positive-integer? 1]
                            [buffer-mode (or/c (case-> 
                                                ((one-of/c 'block 'line 'none) . -> . any)
                                                (-> (one-of/c 'block 'line 'none #f)))
@@ -944,8 +943,9 @@ procedures.
     stream (a positive number or @scheme[#f]). See also
     @secref["linecol"].
 
-    This procedure is only called if line counting is enabled for the
-    port via @scheme[port-count-lines!] (in which case
+    This procedure is called to implement @scheme[port-next-location]
+    for the port, but only if line counting is enabled for the port
+    via @scheme[port-count-lines!] (in which case
     @scheme[count-lines!] is called).}
 
   @item{@scheme[count-lines!] --- a procedure of no arguments

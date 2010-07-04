@@ -283,7 +283,7 @@ given file or directory path. On error (e.g., if no such file exists),
 the @exnraise[exn:fail:filesystem]. Under @|AllUnix|, permissions are
 checked for the current effective user instead of the real user.}
 
-@defproc[(file-size [path path-string?]) nonnegative-exact-integer?]{
+@defproc[(file-size [path path-string?]) exact-nonnegative-integer?]{
 
 Returns the (logical) size of the specified file in bytes. Under Mac
 OS X, this size excludes the resource-fork size. On error (e.g., if no
@@ -365,7 +365,7 @@ by @scheme[path]. If @scheme[path] is omitted, a list of files and
 directories in the current directory is returned. Under @|AllUnix|, an
 element of the list can start with @litchar{./~} if it would otherwise
 start with @litchar{~}. Under Windows, an element of the list may
-start with @litchar["\\\\?\\REL\\\\"].}
+start with @litchar{\\?\REL\\}.}
 
 
 @defproc[(filesystem-root-list) (listof path?)]{

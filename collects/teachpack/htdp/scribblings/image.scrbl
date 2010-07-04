@@ -1,14 +1,14 @@
 #lang scribble/doc
 
-@(require scribble/manual
+@(require scribble/manual "shared.ss"
           (for-label scheme
-	  	     teachpack/htdp/image
-		     lang/private/imageeq))
+                     teachpack/htdp/image
+                     lang/private/imageeq))
 
-@title[#:tag "image"]{Manipulating Images: image.ss}
+@teachpack["image"]{Manipulating Images}
 
 
-@declare-exporting[teachpack/htdp/image]
+@declare-exporting[teachpack/htdp/image #:use-sources (htdp/image)]
 
 The teachpack provides primitives for constructing and manipulating
 images. Basic, colored images are created as outlines or solid
@@ -27,15 +27,15 @@ shapes. Additional primitives allow for the composition of images.
 @deftech{Mode} @scheme[(one-of/c 'solid 'outline "solid" "outline")]
 
 A @tech{Mode} is used to specify whether painting a shape fills or
-outlines the form.}
+outlines the form.
 
 @defstruct[color [(red (and/c natural-number/c (<=/c 255)))
-		  (green (and/c natural-number/c (<=/c 255)))
-		  (blue (and/c natural-number/c (<=/c 255)))]]
+                  (green (and/c natural-number/c (<=/c 255)))
+                  (blue (and/c natural-number/c (<=/c 255)))]]
 
 @deftech{RGB} @scheme[color?]
 
-An @tech{RGB} describes a color via share of red, blue, and green colors
+A @tech{RGB} describes a color via a shade of red, blue, and green colors
  (e.g., @scheme[(make-color 100 200 30)]).
 
 @deftech{Color} @scheme[(or/c symbol? string? color?)] 
@@ -53,15 +53,15 @@ In DrScheme, you can insert images from your file system. Use PNG images
 instead whenever possible for insertions. In addition, you can create basic
 shapes with the following functions.
 
-@defproc[(rectangle [w number?] [h number?] [m (unsyntax @tech{Mode})] [c (unsyntax @tech{Color})]) image?]{
+@defproc[(rectangle [w (and/c number? (or/c zero? positive?))] [h (and/c number? (or/c zero? positive?))] [m (unsyntax @tech{Mode})] [c (unsyntax @tech{Color})]) image?]{
  Creates a @scheme[w] by @scheme[h] rectangle, filled in according to
  @scheme[m] and painted in color @scheme[c]}
 
-@defproc[(circle [r number?] [m (unsyntax @tech{Mode})] [c (unsyntax @tech{Color})]) image?]{
+@defproc[(circle [r (and/c number? (or/c zero? positive?))] [m (unsyntax @tech{Mode})] [c (unsyntax @tech{Color})]) image?]{
  Creates a circle or disk of radius @scheme[r], filled in according to
  @scheme[m] and painted in color @scheme[c]}
 
-@defproc[(ellipse [w number?] [h number?] [m (unsyntax @tech{Mode})] [c (unsyntax @tech{Color})]) image?]{
+@defproc[(ellipse [w (and/c number? (or/c zero? positive?))] [h (and/c number? (or/c zero? positive?))] [m (unsyntax @tech{Mode})] [c (unsyntax @tech{Color})]) image?]{
  Creates a @scheme[w] by @scheme[h] ellipse, filled in according to
  @scheme[m] and painted in color @scheme[c]}
 
@@ -71,10 +71,10 @@ shapes with the following functions.
  @scheme[m] and painted in color @scheme[c]}
 
 @defproc[(star [n (and/c number? (>=/c 2))]
-	       [outer (and/c number? (>=/c 1))]
-	       [inner (and/c number? (>=/c 1))]
-	       [m (unsyntax @tech{Mode})]
-	       [c (unsyntax @tech{Color})]) image?]{
+               [outer (and/c number? (>=/c 1))]
+               [inner (and/c number? (>=/c 1))]
+               [m (unsyntax @tech{Mode})]
+               [c (unsyntax @tech{Color})]) image?]{
  Creates a multi-pointed star with @scheme[n] points, an @scheme[outer]
  radius for the max distance of the points to the center, and
  an @scheme[inner] radius for the min distance to the center. }
@@ -91,11 +91,9 @@ angle.
  See @scheme[add-line] below.
 }
 
-@defproc[(text [s (and/c string? (lambda (s) (not (string=? s ""))))] [f (and/c number? positive?)] [c (unsyntax @tech{Color})]) Image]{
+@defproc[(text [s string?] [f (and/c number? positive?)] [c (unsyntax @tech{Color})]) Image]{
  Creates an image of the text @scheme[s] at point size @scheme[f] 
- and painted in color @scheme[c].
- 
- The string @scheme[s] must have at least one character.}
+ and painted in color @scheme[c].}
 
 @;-----------------------------------------------------------------------------
 @section[#:tag "properties"]{Basic Image Properties}
@@ -139,11 +137,11 @@ find out where the pinhole is and place it where convenient.
 Images can be composed, and images can be found within compositions. 
 
 @defproc[(add-line [i image?] 
-		   [x number?]
-		   [y number?]
-		   [z number?]
-		   [u number?]
-		   [c (unsyntax @tech{Color})]) image?]{
+                   [x number?]
+                   [y number?]
+                   [z number?]
+                   [u number?]
+                   [c (unsyntax @tech{Color})]) image?]{
 Creates an image by adding a line (colored @scheme[c]) from @scheme[(x,y)]
 to @scheme[(z,u)] to image @scheme[i].}
 
@@ -155,10 +153,27 @@ first image.
 
 @defproc[(overlay/xy [img image?] [delta-x number?] [delta-y number?] [other image?]) image?]{
 Creates an image by adding the pixels of @scheme[other] to
-@scheme[img]. Instead of lining up on the pinhole, @scheme[other]'s pinhole
-is lined up with an offset of (@scheme[delta-x],@scheme[delta-y]) from the
-pinhole of @scheme[img]. The pinhole of the resulting image is the same
-place as the pinhole in the first image.}
+@scheme[img]. 
+
+Instead of lining the two images up on their pinholes,
+@scheme[other]'s pinhole is lined up on the point:
+@schemeblock[
+(make-posn (+ (pinhole-x img) delta-x)
+           (+ (pinhole-y img) delta-y))
+]
+
+The pinhole of the resulting image is the same
+place as the pinhole in the first image.
+
+The same effect can be had by combining
+@scheme[move-pinhole] and @scheme[overlay],
+@schemeblock[
+(overlay img 
+         (move-pinhole other
+                       (- delta-x)
+                       (- delta-y)))]
+
+}
 
 @defproc[(image-inside? [img image?] [other image?]) boolean?]{
  Determines whether the pixels of the second image appear in the first.
@@ -215,7 +230,7 @@ and converts a list of colors into an image.
 #reader scribble/comment-reader
 (schemeblock
 ;; -- @scheme[empty]
-;; -- @scheme[(cons (unsyntax @tech{Color}) List-of-color)]
+;; -- @scheme[(cons #, @tech{Color} List-of-color)]
 ;; Interpretation: represents a list of colors.
 ))
 
@@ -223,10 +238,10 @@ and converts a list of colors into an image.
  Converts an image to a list of colors.}
 
 @defproc[(color-list->image [l List-of-color]
-	   [width natural-number/c]
-	   [height natural-number/c]
-	   [x natural-number/c]
-	   [y natural-number/c]) image?]{
+           [width natural-number/c]
+           [height natural-number/c]
+           [x natural-number/c]
+           [y natural-number/c]) image?]{
  Converts a list of colors @scheme[l] to an image with the given
  @scheme[width] and @scheme[height] and pinhole (@scheme[x],@scheme[y])
  coordinates, specified with respect to the top-left of the image.}
@@ -237,20 +252,20 @@ indicates fully transparent.
 
 
 @defstruct[alpha-color [(alpha (and/c natural-number/c (<=/c 255)))
-			(red (and/c natural-number/c (<=/c 255)))
-		        (green (and/c natural-number/c (<=/c 255)))
-		        (blue (and/c natural-number/c (<=/c 255)))]]{
+                        (red (and/c natural-number/c (<=/c 255)))
+                        (green (and/c natural-number/c (<=/c 255)))
+                        (blue (and/c natural-number/c (<=/c 255)))]]{
   A structure representing an alpha color.}
 
 @defproc[(image->alpha-color-list [img image?]) (list-of alpha-color?)]{
  to convert an image to a list of alpha colors}
 
  @defproc[(alpha-color-list->image
-	    [l (list-of alpha-color?)]
-	    [width integer?]
-	    [height integer?]
-	    [x integer?]
-	    [y integer?]) image? ]{
+            [l (list-of alpha-color?)]
+            [width integer?]
+            [height integer?]
+            [x integer?]
+            [y integer?]) image?]{
  Converts a list of @scheme[alpha-color]s @scheme[l] to an image with the given
  @scheme[width] and @scheme[height] and pinhole (@scheme[x],@scheme[y])
  coordinates, specified with respect to the top-left of the image.}

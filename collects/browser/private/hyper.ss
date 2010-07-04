@@ -34,10 +34,10 @@ A test case:
          net/url-sig
          net/url-structs
          net/head
-         (lib "mred-sig.ss" "mred")
+         mred/mred-sig
          framework
          string-constants
-         (lib "plt-installer-sig.ss" "setup"))
+         setup/plt-installer-sig)
 
    
 (import html^
@@ -1144,7 +1144,7 @@ A test case:
                   (show #t)
                   (send (send (get-hyper-panel) get-canvas) goto-url start-url #f))])
     (lambda (%)
-      (hyper-no-show-frame-mixin (m %)))))
+      (m (hyper-no-show-frame-mixin %)))))
 
 (define hyper-frame% (hyper-frame-mixin (frame:status-line-mixin frame:basic%)))
 (define hyper-no-show-frame% (hyper-no-show-frame-mixin (frame:status-line-mixin frame:basic%)))

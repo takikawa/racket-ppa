@@ -5,8 +5,6 @@
 
 @guideintro["strings"]{strings}
 
-@local-table-of-contents[]
-
 A @deftech{string} is a fixed-length array of
 @seclink["characters"]{characters}.
 
@@ -145,7 +143,7 @@ contains the concatenated characters of the given @scheme[str]s. If no
 
 @defproc[(string->list [str string?]) (listof char?)]{ Returns a new
  list of characters coresponding to the content of @scheme[str]. That is,
- the length of the list is @scheme[(string-length @scheme[str])], and the
+ the length of the list is @scheme[(string-length str)], and the
  sequence of characters of @scheme[str] are in the same sequence in the
  result list.
 
@@ -154,7 +152,7 @@ contains the concatenated characters of the given @scheme[str]s. If no
 
 @defproc[(list->string [lst (listof char?)]) string?]{ Returns a new
  mutable string whose content is the list of characters in @scheme[lst].
- That is, the length of the string is @scheme[(length @scheme[lst])], and
+ That is, the length of the string is @scheme[(length lst)], and
  the sequence of characters in @scheme[lst] is in the same sequence in
  the result string.
 

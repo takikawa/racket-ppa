@@ -1,5 +1,9 @@
 #lang scheme/base
-(require "type-rep.ss" "effect-rep.ss" "rep-utils.ss" "tc-utils.ss" "planet-requires.ss" scheme/match)
+
+(require "../utils/utils.ss")
+(require (rep type-rep effect-rep rep-utils)
+	 (utils tc-utils)
+	 scheme/match)
 
 ;; do we attempt to find instantiations of polymorphic types to print? 
 ;; FIXME - currently broken
@@ -46,11 +50,19 @@
     (match a
       [(top-arr:)
        (fp "Procedure")]
-      [(arr: dom rng rest thn-eff els-eff)
+      [(arr: dom rng rest drest kws thn-eff els-eff)
        (fp "(")
        (for-each (lambda (t) (fp "~a " t)) dom)
+       (for ([kw kws])
+         (match kw
+           [(Keyword: k t req?)
+            (if req?
+                (fp "~a ~a " k t)
+                (fp "[~a ~a] " k t))]))
        (when rest
-         (fp "~a .. " rest))
+         (fp "~a* " rest))
+       (when drest
+         (fp "~a ... ~a " (car drest) (cdr drest)))
        (fp "-> ~a" rng)
        (unless (and (null? thn-eff) (null? els-eff))
          (fp " : ~a ~a" thn-eff els-eff))
@@ -64,12 +76,11 @@
     (match t
       [(Pair: a e) (cons a (tuple-elems e))]
       [(Value: '()) null]))
-  ;(fp "~a~n" (Type-seq c))
   (match c 
     [(Univ:) (fp "Any")]
     [(? has-name?) (fp "~a" (has-name? c))]
     ;; names are just the printed as the original syntax
-    [(Name: stx) (fp "[~a]" (syntax-e stx))]
+    [(Name: stx) (fp "~a" (syntax-e stx))]
     [(App: rator rands stx) 
      (fp "~a" (cons rator rands))]
     ;; special cases for lists
@@ -95,24 +106,33 @@
        (match arities
          [(list) (fp "(case-lambda)")]
          [(list a) (print-arr a)]
-         [(list a ...) (fp "(case-lambda ") (for-each print-arr a) (fp ")")]))]
-    [(arr: _ _ _ _ _) (print-arr c)]
+         [(list a b ...) (fp "(case-lambda ")
+                         (print-arr a) 
+                         (for-each 
+                          (lambda (e) (fp " ") (print-arr e))
+                          b)
+                         (fp ")")]))]
+    [(arr: _ _ _ _ _ _ _) (print-arr c)]
     [(Vector: e) (fp "(Vectorof ~a)" e)]
     [(Box: e) (fp "(Box ~a)" e)]
     [(Union: elems) (fp "~a" (cons 'U elems))]
     [(Pair: l r) (fp "(Pair ~a ~a)" l r)]
-    [(F: nm) (fp "<~a>" nm)]      
+    [(F: nm) (fp "~a" nm)]      
     [(Values: (list v ...)) (fp "~a" (cons 'values v))]
+    [(ValuesDots: v dty dbound) (fp "~a" (cons 'values (append v (list dty '... dbound))))]
     [(Param: in out) 
      (if (equal? in out)
          (fp "(Parameter ~a)" in)           
          (fp "(Parameter ~a ~a)" in out))]
     [(Hashtable: k v) (fp "(HashTable ~a ~a)" k v)]
-    #;
-    [(Poly-unsafe: n b) (fp "(unsafe-poly ~a ~a ~a)" (Type-seq c) n b)]
+    
+    #;[(Poly-unsafe: n b) (fp "(unsafe-poly ~a ~a ~a)" (Type-seq c) n b)]
     [(Poly-names: names body) 
      #;(fprintf (current-error-port) "POLY SEQ: ~a~n" (Type-seq body))
      (fp "(All ~a ~a)" names body)]
+    #;[(PolyDots-unsafe: n b) (fp "(unsafe-polydots ~a ~a ~a)" (Type-seq c) n b)]
+    [(PolyDots-names: (list names ... dotted) body)
+     (fp "(All ~a ~a)" (append names (list dotted '...)) body)]
     #;
     [(Mu-unsafe: b) (fp "(unsafe-mu ~a ~a)" (Type-seq c) b)]
     [(Mu: x (Syntax: (Union: (list

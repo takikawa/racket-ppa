@@ -50,15 +50,16 @@ Provides contains the following identifiers.
 
 @defmodule[web-server/web-config-unit]
 
-@defproc[(configuration-table->web-config\@ [path path?]
+@defproc[(configuration-table->web-config@ [path path?]
                                            [#:port port (or/c false/c port-number?) #f]
                                            [#:listen-ip listen-ip (or/c false/c string?) #f]
                                            [#:make-servlet-namespace make-servlet-namespace make-servlet-namespace? (make-make-servlet-namespace)])
          (unit? web-config^)]{
- Reads the S-expression at @scheme[path] and calls @scheme[configuration-table-sexpr->web-config\@] appropriately.
+ Reads the S-expression at @scheme[path] and calls
+ @scheme[configuration-table-sexpr->web-config@] appropriately.
 }
 
-@defproc[(configuration-table-sexpr->web-config\@ [sexpr list?]
+@defproc[(configuration-table-sexpr->web-config@ [sexpr list?]
                                                  [#:web-server-root web-server-root path? (directory-part default-configuration-table-path)]
                                                  [#:port port (or/c false/c port-number?) #f]
                                                  [#:listen-ip listen-ip (or/c false/c string?) #f]

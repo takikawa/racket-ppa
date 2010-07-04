@@ -126,6 +126,7 @@
 /* the externals */
 void (*GC_collect_start_callback)(void);
 void (*GC_collect_end_callback)(void);
+void (*GC_collect_inform_callback)(int major_gc, long pre_used, long post_used);
 void (*GC_out_of_memory)(void);
 unsigned long (*GC_get_thread_stack_base)(void);
 void (*GC_mark_xtagged)(void *obj);
@@ -664,13 +665,16 @@ long GC_compute_alloc_size(long sizeb)
 long GC_initial_word(int sizeb)
 {
   struct objhead _info;
+  long w;
 
   sizeb = ALIGN_BYTES_SIZE(gcWORDS_TO_BYTES(gcBYTES_TO_WORDS(sizeb)) + WORD_SIZE);
   
   memset(&_info, 0, sizeof(_info));
   _info.size = (sizeb >> gcLOG_WORD_SIZE);
 
-  return *(long *)(void *)&_info;
+  memcpy(&w, &_info, sizeof(long));
+
+  return w;
 }
 
 long GC_alloc_alignment()
@@ -3026,7 +3030,7 @@ static void garbage_collect(int force_full)
   static unsigned int since_last_full = 0;
   static unsigned int running_finalizers = 0;
   static unsigned long last_full_mem_use = (20 * 1024 * 1024);
-  unsigned long old_mem_use = memory_in_use;
+  unsigned long old_mem_use = memory_in_use, old_gen0 = gen0_current_size;
   int next_gc_full;
   TIME_DECLS();
 
@@ -3177,8 +3181,10 @@ static void garbage_collect(int force_full)
     last_full_mem_use = memory_in_use;
 
   /* inform the system (if it wants us to) that we're done with collection */
-  if(GC_collect_start_callback)
+  if (GC_collect_start_callback)
     GC_collect_end_callback();
+  if (GC_collect_inform_callback)
+    GC_collect_inform_callback(gc_full, old_mem_use + old_gen0, memory_in_use);
 
   TIME_STEP("ended");
 

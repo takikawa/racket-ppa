@@ -391,6 +391,9 @@ please adhere to these guidelines:
  (yes "Yes")
  (no "No")
  
+ ;; saving image (right click on an image to see the text)
+  (save-image "Save image...")
+  
  ;;; preferences
  (preferences "Preferences")
  (error-saving-preferences "Error saving preferences: ~a")
@@ -422,7 +425,6 @@ please adhere to these guidelines:
  (enable-keybindings-in-menus "Enable keybindings in menus")
  (automatically-to-ps "Automatically print to PostScript file")
  (command-as-meta "Treat command key as meta") ;; macos/macos x only
- (separate-dialog-for-searching "Use separate dialog for searching")
  (reuse-existing-frames "Reuse existing frames when opening new files")
  (default-fonts "Default Fonts")
  (basic-gray-paren-match-color "Basic gray parenthesis highlight color") ; in prefs dialog
@@ -499,18 +501,23 @@ please adhere to these guidelines:
   (repl-value-color "Values")
   (repl-error-color "Errors")
   
- ;;; find/replace
- (find-and-replace "Find and Replace")
- (find "Find")
- (replace "Replace")
- (dock "Dock")
- (undock "Undock")
- (replace&find-again "Replace && Find Again") ;;; need double & to get a single &
- (replace-to-end "Replace to End")
- (forward "Forward")
- (backward "Backward")
- (hide "Hide")
- (find-case-sensitive "Case sensitive")  ;; the check box in both the docked & undocked search
+  ;;; find/replace
+  (search-next "Next")
+  (search-previous "Prev")
+  (search-match "Match")  ;;; this one and the next one are singular/plural variants of each other
+  (search-matches "Matches") 
+  (search-replace "Replace")
+  (search-skip "Skip")
+  (search-show-replace "Show Replace")
+  (search-hide-replace "Hide Replace")
+  (find-case-sensitive "Case sensitive")  ;; the check box in both the docked & undocked search
+  (find-anchor-based "Search using anchors")
+
+  ;; these string constants used to be used by searching,
+  ;; but aren't anymore. They are still used by other tools, tho.
+  (hide "Hide")
+  (dock "Dock")
+  (undock "Undock")
   
  ;;; multi-file-search
  (mfs-multi-file-search-menu-item "Search in Files...")
@@ -644,15 +651,28 @@ please adhere to these guidelines:
  (select-all-info "Select the entire document")
  (select-all-menu-item "Select A&ll")
  
- (find-info "Search for a string")
- (find-menu-item "Find...")
+  (find-menu-item "Find") ;; menu item
+  (find-info "Toggles the keyboard focus between the window being searched and the search bar")
+  
+ (find-next-info "Skip to the next occurrence of the string in the find window")
+ (find-next-menu-item "Find Next")
+  
+ (find-previous-info "Skip to the previous occurrence of the string in the find window")
+ (find-previous-menu-item "Find Previous")
+  
+  (show-replace-menu-item "Show Replace")
+  (hide-replace-menu-item "Hide Replace")
+  (show/hide-replace-info "Toggles the visibility of the replace panel")
 
- (find-again-info "Search for the same string as before")
- (find-again-menu-item "Find Again")
- 
- (replace-and-find-again-info "Replace the current text and search for the same string as before")
- (replace-and-find-again-menu-item "Replace && Find Again")
-
+  (replace-menu-item "Replace")
+  (replace-info "Replace the search hit in the dark circle")
+  
+  (replace-all-info "Replace all occurrences of the search string")
+  (replace-all-menu-item "Replace All")
+  
+  (find-case-sensitive-info "Toggles between case-sensitive and case-insensitive search")
+  (find-case-sensitive-menu-item "Find Case Sensitive")
+  
   (complete-word "Complete Word") ; the complete word menu item in the edit menu
   (no-completions "... no completions available") ; shows up in the completions menu when there are no completions (in italics)
   
@@ -677,7 +697,7 @@ please adhere to these guidelines:
  (keybindings-error-installing-file "Error when installing the keybindings ~a:\n\n~a")
   
  (user-defined-keybinding-error "Error running keybinding ~a\n\n~a")
- (user-defined-keybinding-malformed-file "The file ~a does not contain a module written in the (lib \"keybinding-lang.ss\" \"framework\") language.")  
+ (user-defined-keybinding-malformed-file "The file ~a does not contain a module written in the framework/keybinding-lang language.")  
   
  ;; menu items in the "special" menu
  (insert-text-box-item "Insert Text Box")
@@ -700,7 +720,7 @@ please adhere to these guidelines:
  (show-module-browser "Show Module Browser")
  (hide-module-browser "Hide Module Browser")
 
- (help-menu-label "&Help")
+  (help-menu-label "&Help")
  (about-info "Credits and details for this application")
  (about-menu-item "About...")
  
@@ -833,11 +853,11 @@ please adhere to these guidelines:
  (scheme-menu-name "S&cheme")
  (execute-menu-item-label "Run")
  (execute-menu-item-help-string "Restart the program in the definitions window")
- (break-menu-item-label "Stop")
- (break-menu-item-help-string "Break the current evaluation")
- (kill-menu-item-label "Kill")
- (kill-menu-item-help-string "Kill the current evaluation")
- (limit-memory-menu-item-label "Limit memory...")
+ (ask-quit-menu-item-label "Ask the Program to Quit")
+ (ask-quit-menu-item-help-string "Uses break-thread to stop the primary thread of the current evaluation")
+ (force-quit-menu-item-label "Force the Program to Quit")
+ (force-quit-menu-item-help-string "Uses custodian-shutdown-all to abort the current evaluation")
+ (limit-memory-menu-item-label "Limit Memory...")
  (limit-memory-msg-1 "The limit will take effect the next time the program")
  (limit-memory-msg-2 "is Run, and it must be at least 100 megabytes.")
  (limit-memory-unlimited "Unlimited")
@@ -914,7 +934,9 @@ please adhere to these guidelines:
  (whole-part "Whole Part")
  (numerator "Numerator")
  (denominator "Denominator")
- (invalid-number "Invalid number: must be an exact, real, non-integral number.")
+ (insert-number/bad-whole-part "The whole part of the number must be an integral number")
+ (insert-number/bad-numerator "The numerator part of the number must be a non-negative, integral number")
+ (insert-number/bad-denominator "The denominator part of the number must be a positive, integral number")
  (insert-fraction-menu-item-label "Insert Fraction...")
 
  ;; number snip popup menu
@@ -998,8 +1020,8 @@ please adhere to these guidelines:
  (advanced-student "Advanced Student")
  (advanced-one-line-summary "Intermediate plus lambda and mutation")
  (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
- (pretty-big-scheme "Pretty Big (includes MrEd and Advanced Student)")
- (pretty-big-scheme-one-line-summary "Adds syntax and functions from the HtDP languages")
+ (pretty-big-scheme "Pretty Big")
+ (pretty-big-scheme-one-line-summary "Adds syntax and functions from the HtDP languages, mzscheme, & mred/mred")
  (r5rs-language-name "R5RS")
  (r5rs-one-line-summary "R5RS, with no frills")
  (expander "Expander")
@@ -1249,6 +1271,8 @@ please adhere to these guidelines:
   (ml-cp-remove "Remove")
   (ml-cp-raise "Raise")
   (ml-cp-lower "Lower")
+  
+  (ml-always-show-#lang-line "Always show #lang line in the Module language")
 
   ;; Profj
   (profj-java "Java")
@@ -1388,4 +1412,16 @@ please adhere to these guidelines:
   (gui-tool-show-gui-toolbar "Show GUI Toolbar")
   (gui-tool-hide-gui-toolbar "Hide GUI Toolbar")
   (gui-tool-insert-gui "Insert GUI")
+
+  ;; contract violation tracking
+  
+  ; tooltip for new planet icon in drscheme window (must have a planet violation logged to see it)
+  (show-planet-contract-violations "Show PLaneT contract violations")
+
+  ; buttons in the dialog that lists the recorded bug reports
+  (bug-track-report "File Ticket")
+  (bug-track-forget "Forget")
+  (bug-track-forget-all "Forget All")
+    
+
   )

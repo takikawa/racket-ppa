@@ -47,7 +47,7 @@ The keymap for the text field's editor is initialized by calling the
                                           'vertical-label 'horizontal-label 
                                           'deleted)) 
                         '(single)]
-                 [font (is-a?/c font%) @scheme[normal-control-font]]
+                 [font (is-a?/c font%) normal-control-font]
                  [enabled any/c #t]
                  [vert-margin (integer-in 0 1000) 2]
                  [horiz-margin (integer-in 0 1000) 2]
@@ -103,13 +103,13 @@ For a text field, the most useful methods of a @scheme[text%] object
  are the following:
 @itemize{
  
- @item{@scheme[(send a-text @method[text% get-text])] returns
+ @item{@scheme[(send a-text #, @method[text% get-text])] returns
  the current text of the editor.}
 
- @item{@scheme[(send a-text @method[text% erase])] deletes all text from
+ @item{@scheme[(send a-text #, @method[text% erase])] deletes all text from
  the editor.}
 
- @item{@scheme[(send a-text @method[text% insert] _str)] inserts
+ @item{@scheme[(send a-text #, @method[text% insert] _str)] inserts
  @scheme[_str] into the editor at the current caret position.}
 
 }

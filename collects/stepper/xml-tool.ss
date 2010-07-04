@@ -7,8 +7,8 @@
            mzlib/class
            mred
            framework
-           (lib "tool.ss" "drscheme")
-           (lib "xml.ss" "xml")
+           drscheme/tool
+           xml/xml
            string-constants)
   
   (provide xml-tool@)
@@ -79,10 +79,10 @@
                 (when admin
                   (send admin resized this #t)))))
           
-          (define/public (read-special file line col pos)
+          (define/public (read-special source line col pos)
             (xml-read-special eliminate-whitespace-in-empty-tags?
 			      this
-			      file
+			      source
 			      line
 			      col
 			      pos))
@@ -117,7 +117,7 @@
       (send xml-snipclass set-classname "drscheme:xml-snip")
       (send (get-the-snip-class-list) add xml-snipclass)
       
-      ;; this snipclass overrides the actual one in (lib "xml-snipclass.ss" "xml")
+      ;; this snipclass overrides the actual one in xml/xml-snipclass
       ;; as a full-fledged snipclass, for use in DrScheme.
       
       (define lib-xml-snipclass%
@@ -169,8 +169,8 @@
           
           (inherit get-editor)
           
-          (define/public (read-special file line col pos)
-            (scheme-read-special this file line col pos))
+          (define/public (read-special source line col pos)
+            (scheme-read-special this source line col pos))
           
           (define/override (make-editor) (new (get-scheme-box-text%)))
           
@@ -203,7 +203,9 @@
                     (let ([t (new scheme-box-text%)])
                       (copy-self-to t)
                       t))
-                  (super-new))))
+                  (super-new)
+                  (inherit set-max-undo-history)
+                  (set-max-undo-history 'forever))))
         scheme-box-text%)
         
       (define (add-file-keymap-mixin %)
@@ -225,7 +227,7 @@
       (send scheme-snipclass set-classname "drscheme:scheme-snip")
       (send (get-the-snip-class-list) add scheme-snipclass)
       
-      ;; this snipclass overrides the one in (lib "scheme-snipclass.ss" "xml")
+      ;; this snipclass overrides the one in xml/scheme-snipclass
       ;; as a full-fledged snipclass, for use in DrScheme.
       (define lib-scheme-snipclass (make-object scheme-snipclass%))
       (send lib-scheme-snipclass set-version 1)
@@ -311,7 +313,9 @@
                                   (let ([t (new xml-text%)])
                                     (copy-self-to t)
                                     t))
-                                (super-new))))
+                                (super-new)
+                                (inherit set-max-undo-history)
+                                (set-max-undo-history 'forever))))
             xml-text%)))
 
       ;; matching-xml : (is-a?/c text) -> void

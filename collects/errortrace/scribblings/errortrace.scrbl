@@ -252,10 +252,13 @@ The additional exports are as follows:
          compiled-expression?]{
 
 Compiles @scheme[stx] using the compilation handler that was active
-when the @schememodname[errortrace/errortrace-lib] module was executed,
-but first instruments the code for Errortrace information.  The code is
-instrumented only if the namespace is the same as when the module was
-executed. This procedure is suitable for use as a compilation handler.}
+when the @schememodname[errortrace/errortrace-lib] module was
+executed, but first instruments the code for Errortrace information.
+The code is instrumented only if @scheme[(namespace-module-registry
+(current-namespace))] is the same as when the
+@schememodname[errortrace/errortrace-lib] module was executed. This
+procedure is suitable for use as a compilation handler via
+@scheme[current-compile].}
 
 @defproc[(errortrace-error-display-handler (string string?) (exn exn?)) void?]{
 
@@ -269,12 +272,16 @@ a module named @schemeidfont{errortrace-key}, no instrumentation is
 applied. This annotation function is used by
 @scheme[errortrace-compile-handler].}
 
-@defproc[(annotate-top (stx any/c)) any/c]{
+@defproc[(annotate-top [stx any/c][phase-level exact-integer?]) any/c]{
 
-Like @scheme[errortrace-annotate], but without the special case for
-@scheme[errortrace-key]. Also, if @scheme[stx] is a module declaration,
-it is not enriched with imports to explicitly load Errortrace run-time
-support.}
+Like @scheme[errortrace-annotate], but given an explicit phase level
+for @scheme[stx]; @scheme[(namespace-base-phase)] is typically the
+right value for the @scheme[phase-level] argument.
+
+Unlike @scheme[errortrace-annotate], there no special case for
+a module named @scheme[errortrace-key]. Also, if @scheme[stx] is a module
+declaration, it is not enriched with imports to explicitly load
+Errortrace run-time support.}
 
 @; -----------------------------------------------
 
@@ -298,15 +305,16 @@ Imports @scheme[stacktrace-imports^] and exports @scheme[stacktrace^].}
 @defsignature[stacktrace^ ()]{
 
 @deftogether[(
-  @defproc[(annotate (stx syntax?) (trans? boolean?)) syntax?]
-  @defproc[(annotate-top (stx syntax?) (trans? boolean?)) syntax?])]{
+  @defproc[(annotate (stx syntax?) (phase-level exact-integer?)) syntax?]
+  @defproc[(annotate-top (stx syntax?) (phase-level exact-integer?)) syntax?])]{
 
 Annotate expressions with errortrace information. The
 @schemeout[annotate-top] function should be called with a top-level
 expression, and @schemeout[annotate] should be called with a nested
 expression (e.g., by @schemein[initialize-profile-point]).  The
-boolean argument indicates whether the expression is a transformer
-expression (@scheme[#t]) or a normal expression (@scheme[#f]).}
+@scheme[phase-level] argument indicates the phase level of the
+expression, typically @scheme[(namespace-base-phase)] for a top-level
+expression.}
 
 @deftogether[(
   @defproc[(make-st-mark (syntax syntax?)) st-mark?]
@@ -348,7 +356,7 @@ During execution of the program, this is called for each point with
 the key for that program point that was passed to
 @schemein[initialize-test-coverage-point].}
 
-@defproc[(initialize-test-coverage-point (key any/c) (stx any)) void?]{
+@defproc[(initialize-test-coverage-point (key any/c) (stx any/c)) void?]{
 
 During compilation of the program, this function is called with each
 sub-expression of the program. The first argument is a special key

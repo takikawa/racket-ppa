@@ -127,6 +127,18 @@ Returns @scheme[#t] if @scheme[v] is an item produced by
  visible to the enclosing context). Since this form expands to
  @scheme[require], it must be used in a module or top-level context.}
 
+@defproc[(author [auth any/c] ...) block?]{
+
+Generates a @scheme[styled-paragraph] to show the author(s) of a
+document, where each author is represented by an
+@tech{element}. Normally, this function is used after @scheme[title]
+for the beginning of a document. See also @scheme[author+email].}
+
+@defproc[(author+email [author elem] [email string?]) element?]{
+
+Combines an author name with an e-mail address, obscuring the e-mail
+address slightly to avoid address-harvesting robots.}
+
 @defproc[(module-path-prefix->string [mod-path module-path?])
          string?]{
 
@@ -150,7 +162,7 @@ an element with style @scheme[#f].}
 @def-style-proc[subscript]
 @def-style-proc[superscript]
 
-@defproc[(hspace [n nonnegative-exact-integer?]) element?]{
+@defproc[(hspace [n exact-nonnegative-integer?]) element?]{
 
 Produces an element containing @scheme[n] spaces and style
 @scheme['hspace].}
@@ -214,16 +226,23 @@ optional @scheme[tag] argument is used as the index section's tag.}
 
 @section{Tables of Contents}
 
-@defproc[(table-of-contents) delayed-flow-element?]{
+@defproc[(table-of-contents) delayed-block?]{
 
 Returns a delayed flow element that expands to a table of contents for
 the enclosing section. For LaTeX output, however, the table of
 contents currently spans the entire enclosing document.}
 
 
-@defproc[(local-table-of-contents) delayed-flow-element?]{
+@defproc[(local-table-of-contents [#:style style any/c #f])
+         delayed-block?]{
 
 Returns a delayed flow element that may expand to a table of contents
 for the enclosing section, depending on the output type. For
 multi-page HTML output, the flow element is a table of contents; for
-Latex output, the flow element is empty.}
+Latex output, the flow element is empty.
+
+The meaning of the @scheme[style] argument depends on the output type,
+but @scheme['immediate-only] normally creates a table of contents that
+contains only immediate sub-sections of the enclosing section. See
+also the @scheme['quiet] style of @scheme[part], which normally
+suppresses sub-part entries in the table of contents.}

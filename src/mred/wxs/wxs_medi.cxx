@@ -25,6 +25,8 @@
 
 
 
+#define ESCAPE_NO_RET_VAL /*empty*/
+
 
 #include "wxscheme.h"
 #include "wxs_medi.h"
@@ -489,6 +491,7 @@ static Scheme_Object *bundle_symset_bitmapType(int v) {
    Y = Virtual, defined in wxMediaEdit/wxMediaPasteboard
    Z = Virtual, defined in wxMediaBuffer 
 */
+
 
 
 

@@ -417,7 +417,6 @@
   (enable-keybindings-in-menus "Raccourcis clavier dans les menus.")
   (automatically-to-ps "Imprimer automatiquement dans un fichier postscript.")
   (command-as-meta "Utiliser la touche de commande comme touche meta") ;; macos/macos x only
-  (separate-dialog-for-searching "Utiliser un dialogue séparé pour les recherches.")
   (reuse-existing-frames "Réutiliser les fenêtres existantes lors de l'ouverture de nouveaux fichiers")
   (default-fonts "Polices par défaut")
   (basic-gray-paren-match-color "Couleur grise simple de surlignage des parenthèses") ; in prefs dialog
@@ -501,7 +500,6 @@
   (dock "Attacher")
   (undock "Détacher")
   (replace&find-again "Remplacer && chercher à nouveau") ;;; need double & to get a single &
-  (replace-to-end "Remplacer jusqu'à la fin")
   (forward "En avant")
   (backward "En arrière")
   (hide "Cacher")
@@ -672,7 +670,7 @@
   (keybindings-error-installing-file "Erreur durant l'installation des raccourcis clavier provenants du fichier PLaneT ~a:\n\n~a")
   
   (user-defined-keybinding-error "Erreur durant l'exécution du raccourci clavier ~a\n\n~a")
-  (user-defined-keybinding-malformed-file "Le fichier ~a ne contient pas un module écrit dans le langage (lib \"keybinding-lang.ss\" \"framework\").")  
+  (user-defined-keybinding-malformed-file "Le fichier ~a ne contient pas un module écrit dans le langage framework/keybinding-lang.")  
   
   ;; menu items in the "special" menu
   (insert-text-box-item "Insérer une boite texte")

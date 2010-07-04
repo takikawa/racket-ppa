@@ -1,7 +1,6 @@
-
-(module language-configuration mzscheme
+#lang mzscheme
   (require mzlib/unit
-           (lib "hierlist.ss" "hierlist")
+           mrlib/hierlist
            mzlib/class
            mzlib/contract
            mzlib/kw
@@ -14,7 +13,7 @@
            mzlib/list
            mzlib/etc
            mzlib/file
-           (lib "getinfo.ss" "setup")
+           setup/getinfo
            syntax/toplevel)
   
   (define original-output (current-output-port))
@@ -345,19 +344,18 @@
               (if (and i (is-a? i hieritem-language<%>))
                   (something-selected i)
                   (nothing-selected)))
-            ;; this is not used, since all lists are selectable
-            ;; (define/override (on-click i)
-            ;;   (when (and i (is-a? i hierarchical-list-compound-item<%>))
-            ;;     (send i toggle-open/closed)))
-            ;; use this instead
+            ;; this is used only because we set `on-click-always'
+            (define/override (on-click i)
+              (when (and i (is-a? i hierarchical-list-compound-item<%>))
+                (send i toggle-open/closed)))
+            ;; double-click selects a language
             (define/override (on-double-select i)
-              (when i
-                (cond [(is-a? i hierarchical-list-compound-item<%>)
-                       (send i toggle-open/closed)]
-                      [(is-a? i hieritem-language<%>)
-                       (something-selected i)
-                       (ok-handler 'execute)])))
-            (super-instantiate (parent))))
+              (when (and i (is-a? i hieritem-language<%>))
+                (something-selected i)
+                (ok-handler 'execute)))
+            (super-instantiate (parent))
+            ;; do this so we can expand/collapse languages on a single click
+            (send this on-click-always #t)))
         
         (define outermost-panel (make-object horizontal-pane% parent))
         (define languages-hier-list (make-object selectable-hierlist% outermost-panel))
@@ -568,7 +566,7 @@
                                            (send editor change-style section-style-delta 
                                                  (+ pos 1) (send editor last-position)))
                                          x)
-                                       (let* ([new-list (send hier-list new-list 
+                                       (let* ([new-list (send hier-list new-list
                                                               (if second-number
                                                                   (compose second-number-mixin number-mixin)
                                                                   number-mixin))]
@@ -623,7 +621,7 @@
             (super-instantiate ())))
         
         ;; second-number-mixin : (extends object%) -> (extends object%)
-        ;; adds the get/set-number methods to this class
+        ;; adds the get/set-second-number methods to this class
         (define (second-number-mixin %)
           (class* % (second-number<%>)
             (field (second-number 0))
@@ -1787,4 +1785,4 @@
     (define (find-parent-from-snip snip)
       (let* ([admin (send snip get-admin)]
              [ed (send admin get-editor)])
-        (find-parent-from-editor ed)))))
+        (find-parent-from-editor ed))))

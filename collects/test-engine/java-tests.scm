@@ -97,7 +97,7 @@
              (let ([res ((cadr tc))])
                (send test-info complete-testcase res))] ; insert with-handlers
             [(test-method-name? (car tc))
-             (send test-info add-malformed-test (car tc))]
+             (send test-info add-malformed-testcase (car tc))]
             [(close-to-test-name? (car tc))
              (send test-info add-nearly-testcase (car tc))]
             [else (void)]))
@@ -170,13 +170,13 @@
       (inner (void) complete-testcase pass?))
     (define/public (get-current-testcase) current-testcase)
 
-    (define/augment (check-failed msg src)
+    (define/augment (check-failed msg src exn)
       (when current-testcase
         (set-tc-stat-checks!
          current-testcase
-         (cons (make-failed-check src msg)
+         (cons (make-failed-check src msg exn)
                (tc-stat-checks current-testcase))))
-      (inner (void) check-failed msg src))
+      (inner (void) check-failed msg src exn))
 
     (define/public (format-value value)
       (make-java-snip value (make-format-style #t 'field #f)))
@@ -187,13 +187,17 @@
   (class* java-test-info% ()
     (define nearly-tests null)
     (define nearly-testcases null)
+    (define malformed-testcases null)
 
     (define/public (add-nearly-test name)
       (set! nearly-tests (cons name nearly-tests)))
     (define/public (add-nearly-testcase name)
       (set! nearly-testcases (cons name nearly-testcases)))
+    (define/public (add-malformed-testcase name)
+      (set! malformed-testcases (cons name malformed-testcases)))
     (define/public (close-tests) nearly-tests)
     (define/public (close-testcases) nearly-testcases)
+    (define/public (bad-testcases) malformed-testcases)
 
     (super-instantiate ())))
 

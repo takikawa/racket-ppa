@@ -112,7 +112,9 @@ action depends on the shape of the form:
  @item{If it is a @scheme[define-syntaxes] or
   @scheme[define-values-for-syntax] form, then the right-hand side is
   evaluated (in @tech{phase} 1), and the binding is immediately
-  installed for further partial expansion within the module.}
+  installed for further partial expansion within the
+  module. Evaluation of the right-hand side is @scheme[parameterize]d
+  to set @scheme[current-namespace] as in @scheme[let-syntax].}
 
  @item{If the form is a @scheme[require] form, bindings are introduced
    immediately, and the imported modules are @tech{instantiate}d or
@@ -159,7 +161,18 @@ are evaluated in order as they appear within the module; accessing a
 @tech{module-level variable} before it is defined signals a run-time
 error, just like accessing an undefined global variable.
 
-See also @secref["module-eval-model"] and @secref["mod-parse"].}
+See also @secref["module-eval-model"] and @secref["mod-parse"].
+
+When a @tech{syntax object} representing a @scheme[module] form has a
+@indexed-scheme['module-language] @tech{syntax property} attached, and
+when the property value is a vector of three elements where the first
+is a module path (in the sense of @scheme[module-path?]) and the
+second is a symbol, then the property value is preserved in the
+corresponding compiled and/or declared module. The third component of
+the vector should be printable and @scheme[read]able, so that it can
+be preserved in marshaled bytecode. See also
+@scheme[module-compiled-language-info] and
+@scheme[module->language-info].}
 
 @defform[(#%module-begin form ...)]{
 
@@ -323,10 +336,20 @@ corresponds to the default @tech{module name resolver}.
  @litchar{/} is the path delimiter (multiple adjacent @litchar{/}s are
  treated as a single delimiter), @litchar{..} accesses the parent
  directory, and @litchar{.} accesses the current directory. The path
- cannot be empty or contain a leading or trailing slash, path
- elements before than the last one cannot include a file suffix,
+ cannot be empty or contain a leading or trailing slash, path elements
+ before than the last one cannot include a file suffix (i.e., a
+ @litchar{.} in an element other than @litchar{.} or @litchar{..}),
  and the only allowed characters are ASCII letters, ASCII digits,
- @litchar{-}, @litchar{+}, @litchar{_}, @litchar{.}, and @litchar{/}.}
+ @litchar{-}, @litchar{+}, @litchar{_}, @litchar{.}, @litchar{/}, and
+ @litchar{%}. Furthermore, a @litchar{%} is allowed only when followed
+ by two lowercase hexadecimal digits, and the digits must form a
+ number that is not the ASCII value of a letter, digit, @litchar{-},
+ @litchar{+}, or @litchar{_}.
+
+ @margin-note{The @litchar{%} provision is intended to support a
+ one-to-one encoding of arbitrary strings as path elements (after
+ UTF-8 encoding). Such encodings are not decoded to arrive at a
+ filename, but instead preserved in the file access.}}
 
  @defsubform[(lib rel-string ...+)]{A path to a module installed into
  a @tech{collection} (see @secref["collects"]). The @scheme[rel-string]s in
@@ -404,17 +427,19 @@ corresponds to the default @tech{module name resolver}.
  ]
 
  and where an @nonterm{elem} is a non-empty sequence of characters
- that are ASCII letters, ASCII digits, @litchar{-}, @litchar{+}, or
- @litchar{_}, and an @nonterm{int} is a non-empty sequence of ASCII
- digits. As this shorthand is expended, a @filepath{.plt} extension is
- added to @nonterm{pkg}, and a @filepath{.ss} extension is added to
+ that are ASCII letters, ASCII digits, @litchar{-}, @litchar{+},
+ @litchar{_}, or @litchar{%} followed by lowercase hexadecimal digits
+ (that do not encode one of the other allowed characters), and an
+ @nonterm{int} is a non-empty sequence of ASCII digits. As this
+ shorthand is expended, a @filepath{.plt} extension is added to
+ @nonterm{pkg}, and a @filepath{.ss} extension is added to
  @scheme{path}; if no @nonterm{path} is included, @filepath{main.ss}
  is used in the expansion.
 
  A @scheme[(planet string)] form is like a @scheme[(planet id)] form
  with the identifier converted to a string, except that the
- @scheme[string] can optionally end with a file extension for a
- @nonterm{path}.
+ @scheme[string] can optionally end with a file extension (i.e., a
+ @litchar{.}) for a @nonterm{path}.
 
  In the more general last form of a @scheme[planet] module path, the
  @scheme[rel-string]s are similar to the @scheme[lib] form, except
@@ -711,6 +736,25 @@ instead of
   @scheme[require-spec], but omitting those imports that would be
   imported by one of the @scheme[subtracted-spec]s.}
 
+@defform[(filtered-in proc-expr require-spec)]{ The @scheme[proc-expr]
+  should evaluate to a single-argument procedure, which is applied on
+  each of the names (as strings) that are to be required according to
+  @scheme[require-spec].  For each name, the procedure should return
+  either a string (possibly different if you want it renamed), or
+  @scheme[#f] to exclude the name.  (Note that @scheme[proc-expr] is a
+  syntax-time expression.)
+
+  For example,
+  @schemeblock[
+    (require (filtered-in
+              (lambda (name)
+                (and (regexp-match? #rx"^[a-z-]+$" name)
+                     (regexp-replace
+                      #rx"-" (string-titlecase name) "")))
+              scheme/base))]
+  will get the @scheme[scheme/base] bindings that match the regexp,
+  and renamed to use ``caml case''.}
+
 @; --------------------
 
 @subsection{Additional @scheme[provide] Forms}
@@ -721,6 +765,25 @@ instead of
   @scheme[provide-spec], but omitting the export of each binding with
   an external name that matches @scheme[regexp]. The @scheme[regexp]
   must be a literal regular expression (see @secref["regexp"]).}
+
+@defform[(filtered-out proc-expr provide-spec)]{ The
+  @scheme[proc-expr] should evaluate to a single-argument procedure,
+  which is applied on each of the names (as strings) that are to be
+  provided according to @scheme[provide-spec].  For each name, the
+  procedure should return either a string (possibly different if you
+  want it renamed), or @scheme[#f] to exclude the name.  (Note that
+  @scheme[proc-expr] is a syntax-time expression.)
+
+  For example,
+  @schemeblock[
+    (provide (filtered-out
+              (lambda (name)
+                (and (regexp-match? #rx"^[a-z-]+$" name)
+                     (regexp-replace
+                      #rx"-" (string-titlecase name) "")))
+              (all-defined-out)))]
+  will provide all defined bindings that match the regexp, and renamed
+  to use ``caml case''.}
 
 @;------------------------------------------------------------------------
 @section[#:tag "quote"]{Literals: @scheme[quote] and @scheme[#%datum]}
@@ -986,9 +1049,12 @@ as follows:
        list that is associated to @scheme[rest-id].}
 
 The @scheme[kw-formals] identifiers are bound in the
-@scheme[body]s. When the procedure is applied, a new location is
-created for each identifier, and the location is filled with the
-associated argument value.
+@scheme[body]s. When the procedure is applied, a new @tech{location}
+is created for each identifier, and the location is filled with the
+associated argument value. The @tech{locations} are created and filled
+in order, with @scheme[_default-expr]s evaluated as needed to fill
+locations. @margin-note{In other words, argument bindings with
+default-value expressions are evaluated analogous to @scheme[let*].}
 
 If any identifier appears in the @scheme[body]s that is not one of the
 identifiers in @scheme[kw-formals], then it refers to the same
@@ -1178,6 +1244,12 @@ Creates a @tech{transformer binding} (see
 @scheme[trans-expr], which is an expression at @tech{phase level} 1
 relative to the surrounding context. (See @secref["id-model"] for
 information on @tech{phase levels}.)
+
+The evaluation of each @scheme[trans-expr] is @scheme[parameterize]d
+to set @scheme[current-namespace] to a @tech{namespace} that shares
+@tech{bindings} and @tech{variables} with the namespace being used to
+expand the @scheme[let-syntax] form, except that its @tech{base phase}
+is one greater.
 
 Each @scheme[id] is bound in the @scheme[body]s, and not in other
 @scheme[trans-expr]s.}
@@ -1486,8 +1558,10 @@ z
 The first form creates a @tech{transformer binding} (see
 @secref["transformer-model"]) of @scheme[id] with the value of
 @scheme[expr], which is an expression at @tech{phase level} 1 relative
-to the surrounding context. (See @secref["id-model"] for
-information on @tech{phase levels}.)
+to the surrounding context. (See @secref["id-model"] for information
+on @tech{phase levels}.)  Evaluation of @scheme[expr] side is
+@scheme[parameterize]d to set @scheme[current-namespace] as in
+@scheme[let-syntax].
 
 The second form is a shorthand the same as for @scheme[define]; it
 expands to a definition of the first form where the @scheme[expr] is a
@@ -1499,7 +1573,7 @@ expands to a definition of the first form where the @scheme[expr] is a
 Like @scheme[define-syntax], but creates a @tech{transformer binding}
 for each @scheme[id].  The @scheme[expr] should produce as many values
 as @scheme[id]s, and each value is bound to the corresponding
-@scheme[id].}
+@scheme[id]. }
 
 
 @defform*[[(define-for-syntax id expr)
@@ -1508,7 +1582,9 @@ as @scheme[id]s, and each value is bound to the corresponding
 Like @scheme[define], except that the binding is at @tech{phase level}
 1 instead of @tech{phase level} 0 relative to its context. The
 expression for the binding is also at @tech{phase level} 1. (See
-@secref["id-model"] for information on @tech{phase levels}.)}
+@secref["id-model"] for information on @tech{phase levels}.)
+Evaluation of @scheme[expr] side is @scheme[parameterize]d to set
+@scheme[current-namespace] as in @scheme[let-syntax].}
 
 @defform[(define-values-for-syntax (id ...) expr)]{
 
@@ -1522,15 +1598,21 @@ bound (at @tech{phase level} 1).}
 
 @note-lib-only[scheme/require-syntax]
 
-@defform[(define-require-syntax id proc-expr)]{
+@defform*[[(define-require-syntax id expr)
+           (define-require-syntax (id args ...) body ...+)]]{
 
-Like @scheme[define-syntax], but for a @scheme[require] sub-form. The
-@scheme[proc-expr] must produce a procedure that accepts and returns a
-syntax object representing a @scheme[require] sub-form.
+The first form is like @scheme[define-syntax], but for a
+@scheme[require] sub-form. The @scheme[proc-expr] must produce a
+procedure that accepts and returns a syntax object representing a
+@scheme[require] sub-form.
 
 This form expands to @scheme[define-syntax] with a use of
 @scheme[make-require-transformer]; see @secref["require-trans"] for
-more information.}
+more information.
+
+The second form is a shorthand the same as for @scheme[define-syntax]; it
+expands to a definition of the first form where the @scheme[expr] is a
+@scheme[lambda] form.}
 
 @; ----------------------------------------------------------------------
 
@@ -1538,15 +1620,21 @@ more information.}
 
 @note-lib-only[scheme/provide-syntax]
 
-@defform[(define-provide-syntax id proc-expr)]{
+@defform*[[(define-provide-syntax id expr)
+           (define-provide-syntax (id args ...) body ...+)]]{
 
-Like @scheme[define-syntax], but for a @scheme[provide] sub-form. The
-@scheme[proc-expr] must produce a procedure that accepts and returns a
-syntax object representing a @scheme[provide] sub-form.
+The first form is like @scheme[define-syntax], but for a
+@scheme[provide] sub-form. The @scheme[proc-expr] must produce a
+procedure that accepts and returns a syntax object representing a
+@scheme[provide] sub-form.
 
 This form expands to @scheme[define-syntax] with a use of
 @scheme[make-provide-transformer]; see @secref["provide-trans"] for
-more information.}
+more information.
+
+The second form is a shorthand the same as for @scheme[define-syntax]; it
+expands to a definition of the first form where the @scheme[expr] is a
+@scheme[lambda] form.}
 
 @;------------------------------------------------------------------------
 @section[#:tag "begin"]{Sequencing: @scheme[begin], @scheme[begin0], and @scheme[begin-for-syntax]}
@@ -1626,9 +1714,10 @@ classifications:
 
 @defform[(when test-expr expr ...)]{
 
-Evaluates the @scheme[text-expr]. If the result is any value other
-than @scheme[#f], the @scheme[expr]s are evaluated, and the results
-are ignored. No @scheme[expr] is in tail position with respect to the
+Evaluates the @scheme[text-expr]. If the result is @scheme[#f], then
+the result of the @scheme[when] expression is
+@|void-const|. Otherwise, the @scheme[expr]s are evaluated, and the
+last @scheme[expr] is in tail position with respect to the
 @scheme[when] form.
 
 @examples[

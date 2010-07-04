@@ -1,18 +1,25 @@
 #lang scheme/base
 
-(require "type-rep.ss" "parse-type.ss" "tc-utils.ss" "subtype.ss" "utils.ss"
-         "type-env.ss" "type-effect-convenience.ss" "resolve-type.ss" "union.ss"
+(require (except-in "../utils/utils.ss" extend))
+(require (rep type-rep)
+	 (utils tc-utils)
+	 (env type-env)
+	 "parse-type.ss" "subtype.ss"
+         "type-effect-convenience.ss" "resolve-type.ss" "union.ss"
          scheme/match mzlib/trace)
 (provide type-annotation
          get-type
          get-type/infer
          type-label-symbol
          type-ascrip-symbol
+         type-dotted-symbol
          type-ascription
-         check-type)
+         check-type
+         dotted?)
 
 (define type-label-symbol 'type-label)
-(define type-ascrip-symbol 'type-ascription)    
+(define type-ascrip-symbol 'type-ascription)
+(define type-dotted-symbol 'type-dotted)
 
 (define (print-size stx)
   (syntax-case stx ()
@@ -27,7 +34,7 @@
 ;; is let-binding really necessary? - remember to record the bugs!
 (define (type-annotation stx #:infer [let-binding #f])
   (define (pt prop)
-    (print-size prop)
+    #;(print-size prop)
     (if (syntax? prop)
         (parse-type prop)
         (parse-type/id stx prop)))
@@ -48,7 +55,7 @@
 
 (define (type-ascription stx)
   (define (pt prop)
-    (print-size prop)
+    #;(print-size prop)
     (if (syntax? prop)
         (parse-type prop)
         (parse-type/id stx prop)))
@@ -69,10 +76,7 @@
   (parameterize
       ([current-orig-stx stx])
     (cond
-      [(type-annotation stx #:infer #t)
-       => (lambda (x) 
-            (log/ann stx x)
-            x)]
+      [(type-annotation stx #:infer #t)]
       [(not (syntax-original? stx))
        (tc-error "untyped var: ~a" (syntax-e stx))]
       [else
@@ -99,16 +103,19 @@
              (match ty
                [(Values: tys) 
                 (if (not (= (length stxs) (length tys)))
-                    (tc-error/delayed #:ret (map (lambda _ (Un)) stxs) 
+                    (begin
+                      (tc-error/delayed 
                                       "Expression should produce ~a values, but produces ~a values of types ~a"
                                       (length stxs) (length tys) (stringify tys))
+                      (map (lambda _ (Un)) stxs))
                     (map (lambda (stx ty a)
-                           (cond [a => (lambda (ann) (check-type stx ty ann) (log/extra stx ty ann) ann)]
-                                 [else (log/noann stx ty) ty]))
+                           (cond [a => (lambda (ann) (check-type stx ty ann) #;(log/extra stx ty ann) ann)]
+                                 [else #;(log/noann stx ty) ty]))
                          stxs tys anns))]
-               [ty (tc-error/delayed #:ret (map (lambda _ (Un)) stxs) 
-                                     "Expression should produce ~a values, but produces one values of type "
-                                     (length stxs) ty)]))))]))
+               [ty (tc-error/delayed 
+                    "Expression should produce ~a values, but produces one values of type ~a"
+                    (length stxs) ty)
+                   (map (lambda _ (Un)) stxs)]))))]))
 
 
 ;; check that e-type is compatible with ty in context of stx
@@ -121,3 +128,7 @@
       (unless (subtype e-type ty)
         ;(printf "orig-stx: ~a" (syntax->datum stx*))
         (tc-error "Body had type:~n~a~nVariable had type:~n~a~n" e-type ty)))))
+
+(define (dotted? stx)
+  (cond [(syntax-property stx type-dotted-symbol) => syntax-e]
+        [else #f]))

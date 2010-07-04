@@ -1,18 +1,24 @@
 #lang scheme/base  
-(require "type-rep.ss" 
-         "effect-rep.ss"
+(require "../utils/utils.ss")
+
+(require (rep type-rep effect-rep)
+         (utils tc-utils)
          scheme/match
          "type-comparison.ss"
          "type-effect-printer.ss"
          "union.ss"
          "subtype.ss"
          "type-utils.ss" 
-         "tc-utils.ss"
          scheme/promise
+         (for-syntax macro-debugger/stxclass/stxclass)
          (for-syntax scheme/base))
 
-(provide (all-defined-out))
+(provide (all-defined-out) 
+         ;; these should all eventually go away
+         make-Name make-ValuesDots make-Function make-top-arr make-Latent-Restrict-Effect make-Latent-Remove-Effect)
 
+(define (one-of/c . args)
+  (apply Un (map -val args)))
 
 (define (-vet id) (make-Var-True-Effect id))
 (define (-vef id) (make-Var-False-Effect id))
@@ -34,14 +40,17 @@
     [(Latent-Remove-Effect: t) (make-Remove-Effect t v)]
     [(True-Effect:) eff]
     [(False-Effect:) eff]
-    [_ (error 'internal-tc-error "can't add var to effect ~a" eff)]))
+    [_ (int-err "can't add var ~a to effect ~a" v eff)]))
 
-(define-syntax ->
-  (syntax-rules (:)
+(define-syntax (-> stx)
+  (syntax-case* stx (:) (lambda (a b) (eq? (syntax-e a) (syntax-e b)))
     [(_ dom ... rng : eff1 eff2)
-     (->* (list dom ...) rng : eff1 eff2)]
+     #'(->* (list dom ...) rng : eff1 eff2)]
+    [(_ dom ... rng : eff1 eff2)
+     #'(->* (list dom ...) rng : eff1 eff2)]
     [(_ dom ... rng)
-     (->* (list dom ...) rng)]))
+     #'(->* (list dom ...) rng)]))
+
 (define-syntax ->*
   (syntax-rules (:)
     [(_ dom rng)       
@@ -52,6 +61,16 @@
      (make-Function (list (make-arr* dom rng #f eff1 eff2)))]
     [(_ dom rst rng : eff1 eff2)
      (make-Function (list (make-arr* dom rng rst eff1 eff2)))]))
+(define-syntax ->...
+  (syntax-rules (:)
+    [(_ dom rng)
+     (->* dom rng)]
+    [(_ dom (dty dbound) rng)
+     (make-Function (list (make-arr* dom rng #f (cons dty 'dbound) (list) (list))))]
+    [(_ dom rng : eff1 eff2)
+     (->* dom rng : eff1 eff2)]
+    [(_ dom (dty dbound) rng : eff1 eff2)
+     (make-Function (list (make-arr* dom rng #f (cons dty 'dbound) eff1 eff2)))]))
 (define-syntax cl->
   (syntax-rules (:)
     [(_ [(dom ...) rng] ...)
@@ -66,13 +85,34 @@
       [(Function: as) as]))
   (make-Function (map car (map funty-arities args))))
 
-(define make-arr*
-  (case-lambda [(dom rng) (make-arr* dom rng #f (list) (list))]
-               [(dom rng rest) (make-arr dom rng rest (list) (list))]
-               [(dom rng rest eff1 eff2) (make-arr dom rng rest eff1 eff2)]))
+(define-syntax (->key stx)
+  (syntax-parse stx
+                [(_ ty:expr ... ((k:keyword kty:expr opt:boolean)) ...* rng)
+                 #'(make-Function
+                    (list
+                     (make-arr* (list ty ...)
+                                rng
+                                #f
+                                #f
+                                (list (make-Keyword 'k kty opt) ...)
+                                null
+                                null)))]))
 
-(define (make-promise-ty t)
-  (make-Struct (string->uninterned-symbol "Promise") #f (list t) #f #f #'promise? values))
+(define make-arr*
+  (case-lambda [(dom rng) (make-arr dom rng #f #f null (list) (list))]
+               [(dom rng rest) (make-arr dom rng rest #f null (list) (list))]
+               [(dom rng rest eff1 eff2) (make-arr dom rng rest #f null eff1 eff2)]
+               [(dom rng rest drest eff1 eff2) (make-arr dom rng rest drest null eff1 eff2)]
+               [(dom rng rest drest kws eff1 eff2)
+                (make-arr dom rng rest drest (sort #:key Keyword-kw kws keyword<?) eff1 eff2)]))
+
+(define (make-arr-dots dom rng dty dbound)
+  (make-arr* dom rng #f (cons dty dbound) null null))
+
+(define make-promise-ty
+  (let ([s (string->uninterned-symbol "Promise")])
+    (lambda (t)
+      (make-Struct s #f (list t) #f #f #'promise? values))))
 
 (define N (make-Base 'Number))
 (define -Integer (make-Base 'Integer))
@@ -110,6 +150,13 @@
      (let ([vars (-v vars)] ...)
        (make-Poly (list 'vars ...) ty))]))
 
+(define-syntax -polydots
+  (syntax-rules ()
+    [(_ (vars ... dotted) ty)
+     (let ([dotted (-v dotted)]
+           [vars (-v vars)] ...)
+       (make-PolyDots (list 'vars ... 'dotted) ty))]))
+
 (define-syntax -mu
   (syntax-rules ()
     [(_ var ty)
@@ -118,12 +165,6 @@
 
 
 (define -values make-Values)
-
-;; produce the appropriate type of a list of types
-;; that is - if there is exactly one type, just produce it, otherwise produce a values-ty
-;; list[type] -> type
-(define (list->values-ty l)
-  (if (= 1 (length l)) (car l) (-values l)))
 
 (define-syntax *Un
   (syntax-rules ()
@@ -143,9 +184,10 @@
 (define -Sexp (-mu x (*Un Sym N B -String (-val null) (-pair x x))))
 (define -Port (*Un -Input-Port -Output-Port))
 
-(define (-lst* . args) (if (null? args)
-                           (-val null)
-                           (-pair (car args) (apply -lst* (cdr args)))))
+(define (-lst* #:tail [tail (-val null)] . args)
+  (if (null? args)
+      tail
+      (-pair (car args) (apply -lst* #:tail tail (cdr args)))))
 
 
 #;(define NE (-mu x (Un N (make-Listof x))))
@@ -169,6 +211,8 @@
 
 (define (-Tuple l)
   (foldr -pair (-val '()) l))
+(define -box make-Box)
+(define -vec make-Vector)
 
 (define Any-Syntax 
   (-mu x
@@ -197,17 +241,19 @@
                      (identifier? #'nm)
                      #`(list  #'nm ty)]
                     [(e ty extra-mods ...)
-                     #'(list (let ([new-ns
-                                    (let* ([ns (make-empty-namespace)])
-                                      (namespace-attach-module (current-namespace)
-                                                               'scheme/base
-                                                               ns)
-                                      ns)])
-                               (parameterize ([current-namespace new-ns])
-                                 (namespace-require 'scheme/base)
-                                 (namespace-require 'extra-mods) ...
-                                 e))
-                             ty)]))
+                     #'(let ([x (list (let ([new-ns
+                                             (let* ([ns (make-empty-namespace)])
+                                               (namespace-attach-module (current-namespace)
+                                                                        'scheme/base
+                                                                        ns)
+                                               ns)])
+                                        (parameterize ([current-namespace new-ns])
+                                          (namespace-require 'scheme/base)
+                                          (namespace-require 'extra-mods) ...
+                                          e))
+                                      ty)])
+                         ;(display x) (newline)
+                         x)]))
                 (syntax->list #'(e ...))))]))
 
 ;; if t is of the form (Pair t* (Pair t* ... (Listof t*)))
@@ -227,8 +273,5 @@
                (exit t)))]
         [_ (exit t)]))))
 
-(define (tc-error/expr msg #:return [return (Un)] #:stx [stx (current-orig-stx)] . rest)
-  (tc-error/delayed #:stx stx (apply format msg rest))
-  return)
 
 

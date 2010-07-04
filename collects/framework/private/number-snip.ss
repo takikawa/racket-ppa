@@ -1,8 +1,7 @@
-
 #lang scheme/unit
 
   (require "sig.ss"
-           (lib "mred-sig.ss" "mred")
+           mred/mred-sig
            mzlib/class
            "../preferences.ss"
            string-constants)

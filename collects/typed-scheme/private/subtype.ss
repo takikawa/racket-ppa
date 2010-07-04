@@ -1,11 +1,13 @@
 #lang scheme/base
+(require "../utils/utils.ss")
 
-(require "type-rep.ss" "unify.ss" "type-utils.ss"
-         "tc-utils.ss"
-         "effect-rep.ss"
+(require (except-in (rep type-rep effect-rep) sub-eff)
+         (utils tc-utils)
+	 "type-utils.ss"
          "type-comparison.ss"
          "resolve-type.ss"
-         "type-name-env.ss"
+         (env type-name-env)
+         (only-in (infer infer-dummy) unify)
          mzlib/plt-match
          mzlib/trace)
 
@@ -99,10 +101,13 @@
     (match (list s t)
       ;; top for functions is above everything
       [(list _ (top-arr:)) A0]
-      [(list (arr: s1 s2 #f thn-eff els-eff) (arr: t1 t2 #f thn-eff  els-eff))
-       (let ([A1 (subtypes* A0 t1 s1)])
+      [(list (arr: s1 s2 #f #f (list (cons kw s-kw-ty) ...) thn-eff els-eff) 
+             (arr: t1 t2 #f #f (list (cons kw t-kw-ty) ...) thn-eff  els-eff))       
+       (let* ([A1 (subtypes* A0 t1 s1)]
+              [A2 (subtypes* A1 t-kw-ty s-kw-ty)])
          (subtype* A1 s2 t2))]
-      [(list (arr: s1 s2 s3 thn-eff els-eff) (arr: t1 t2 t3 thn-eff* els-eff*))
+      [(list (arr: s1 s2 s3 #f (list (cons kw s-kw-ty) ...) thn-eff els-eff)
+             (arr: t1 t2 t3 #f (list (cons kw t-kw-ty) ...) thn-eff* els-eff*))
        (unless 
            (or (and (null? thn-eff*) (null? els-eff*))
                (and (effects-equal? thn-eff thn-eff*)
@@ -114,10 +119,11 @@
                 (andmap sub-eff els-eff els-eff*)))
          (fail! s t))
        ;; either the effects have to be the same, or the supertype can't have effects
-       (let ([A (subtypes*/varargs A0 t1 s1 s3)])
+       (let* ([A2 (subtypes*/varargs A0 t1 s1 s3)]
+              [A3 (subtypes* A2 t-kw-ty s-kw-ty)])
          (if (not t3)
-             (subtype* A s2 t2)
-             (let ([A1 (subtype* A t3 s3)])
+             (subtype* A3 s2 t2)
+             (let ([A1 (subtype* A3 t3 s3)])
                (subtype* A1 s2 t2))))]
       [else 
        (fail! s t)])))
@@ -200,7 +206,7 @@
               ;; use unification to see if we can use the polytype here
               [(list (Poly: vs b) s)
                (=> unmatch)
-               (if (unify1 s b) A0 (unmatch))]
+               (if (unify vs (list b) (list s)) A0 (unmatch))]              
               [(list s (Poly: vs b))
                (=> unmatch)
                (if (null? (fv b)) (subtype* A0 s b) (unmatch))]

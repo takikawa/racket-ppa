@@ -101,7 +101,12 @@ information on these attributes of a structure type.  The
 multiple times, attaches a property value to the structure type; see
 @secref["structprops"] for more information on properties. The
 @scheme[#:transparent] option is a shorthand for @scheme[#:inspector
-#f]. 
+#f].
+
+@margin-note{Use the @scheme[prop:procedure] to property implement an
+@as-index{applicable structure}, use @scheme[prop:evt] to create a
+structure type whose instances are @tech{synchronizable events}, and
+so on. By convention, property names start with @schemeidfont{prop:}.}
 
 The @scheme[#:prefab] option obtains a @techlink{prefab} (pre-defined,
 globally shared) structure type, as opposed to creating a new
@@ -156,11 +161,14 @@ cp
 This form can only appear as an expression within a
 @scheme[define-struct] form; normally, it is used with
 @scheme[#:property], especially for a property like
-@scheme[prop:procedure]. The result of
+@scheme[prop:procedure]. The result of a @scheme[struct-field-index]
+expression is an exact, non-negative integer that corresponds to the
+position within the structure declaration of the field named by
+@scheme[field-id].
 
 @defexamples[
 #:eval posn-eval
-(define-struct mood-procedure ([base] rating)
+(define-struct mood-procedure (base rating)
                #:property prop:procedure (struct-field-index base))
 (define happy+ (make-mood-procedure add1 10))
 (happy+ 2)

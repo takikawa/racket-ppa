@@ -1,16 +1,8 @@
-#|
-
-;; we don't use the built in debugging, use our own
-;; version here that has no bug icon and only
-;; annotates code that comes from editors.
-
-|#
-
 #lang scheme
 (require string-constants
            framework
-           (prefix-in et: (lib "stacktrace.ss" "errortrace"))
-           (prefix-in tr: (lib "stacktrace.ss" "trace"))
+           (prefix-in et: errortrace/stacktrace)
+           (prefix-in tr: trace/stacktrace)
            mzlib/pretty
            (prefix-in pc: mzlib/pconvert)
            mzlib/file
@@ -20,13 +12,13 @@
            mzlib/struct
            mzlib/compile
            mzlib/struct
-           (lib "tool.ss" "drscheme")
+           drscheme/tool
            mred
-           (lib "bday.ss" "framework" "private")
+           framework/private/bday
            syntax/moddep
-           (lib "cache-image-snip.ss" "mrlib")
+           mrlib/cache-image-snip
            compiler/embed
-           (lib "wxme.ss" "wxme")
+           wxme/wxme
            setup/dirs
            
            ;; this module is shared between the drscheme's namespace (so loaded here) 
@@ -39,8 +31,8 @@
            stepper/private/shared
            
            (only-in test-engine/scheme-gui make-formatter)
-           (only-in test-engine/scheme-tests scheme-test-data test-format test-execute)
-           (lib "test-display.scm" "test-engine")
+           (only-in test-engine/scheme-tests scheme-test-data error-handler test-format test-execute)
+           (lib "test-engine/test-display.scm")
            )
   
   
@@ -55,8 +47,6 @@
   
   (define o (current-output-port))
   (define (oprintf . args) (apply fprintf o args))
-  
-  (define init-eventspace (current-eventspace))
   
   (define user-installed-teachpacks-collection "installed-teachpacks")
   (define teachpack-installation-dir (build-path (find-user-collects-dir) user-installed-teachpacks-collection))
@@ -148,7 +138,7 @@
             (and (list? l)
                  (andmap (λ (x)
                            (and (list? x)
-                                (andmap string? x)))
+                                (andmap (λ (x) (or (string? x) (symbol? x))) x)))
                          l)))
           
           (inherit get-allow-sharing? get-use-function-output-syntax? 
@@ -384,6 +374,7 @@
           (inherit get-manual)
           
           (define/override (extra-repl-information settings port) 
+            (define welcome (drscheme:rep:get-welcome-delta))
             (define (go str sd)
               (let* ([s (make-object string-snip% str)]
                      [sl (editor:get-standard-style-list)]
@@ -395,29 +386,29 @@
             (define tps (htdp-lang-settings-teachpacks settings))
             
             (unless (null? tps)
-              (go "Teachpack" (drscheme:rep:get-welcome-delta))
+              (go "Teachpack" welcome)
               (cond
                 [(= 1 (length tps))
-                 (go ": " (drscheme:rep:get-welcome-delta))
+                 (go ": " welcome)
                  (go (cadr (car tps)) (drscheme:rep:get-dark-green-delta))]
                 [(= 2 (length tps))
-                 (go "s: " (drscheme:rep:get-welcome-delta))
+                 (go "s: " welcome)
                  (go (cadr (car tps)) (drscheme:rep:get-dark-green-delta))
-                 (go " and " (drscheme:rep:get-welcome-delta))
+                 (go " and " welcome)
                  (go (cadr (cadr tps)) (drscheme:rep:get-dark-green-delta))]
                 [else
-                 (go "s: " (drscheme:rep:get-welcome-delta))
+                 (go "s: " welcome)
                  (go (cadr (car tps)) (drscheme:rep:get-dark-green-delta))
                  (let loop ([these-tps (cdr tps)])
                    (cond
                      [(null? (cdr these-tps))
-                      (go ", and " (drscheme:rep:get-welcome-delta))
+                      (go ", and " welcome)
                       (go (cadr (car these-tps)) (drscheme:rep:get-dark-green-delta))]
                      [else
-                      (go ", " (drscheme:rep:get-welcome-delta))
+                      (go ", " welcome)
                       (go (cadr (car these-tps)) (drscheme:rep:get-dark-green-delta))
                       (loop (cdr these-tps))]))])
-              (go "." (drscheme:rep:get-welcome-delta))
+              (go "." welcome)
               (newline port)))
           
           (inherit get-module get-transformer-module get-init-code
@@ -533,6 +524,18 @@
                keywords]
               [(drscheme:teachpack-menu-items) htdp-teachpack-callbacks]
               [(drscheme:special:insert-lambda) #f]
+              #;
+              ;; FIXME: disable context for now, re-enable when it is possible
+              ;; to have the context search the teachpack manual too.
+              [(drscheme:help-context-term)
+               (let* ([m (get-module)]
+                      [m (and m (pair? m) (pair? (cdr m)) (cadr m))]
+                      [m (and m (regexp-match #rx"^(lang/[^/.]+).ss$" m))]
+                      [m (and m (cadr m))])
+                 (if m
+                   (format "L:~a" m)
+                   (error 'drscheme:help-context-term
+                          "internal error: unexpected module spec")))]
               [(tests:test-menu tests:dock-menu) #t]
               [else (inner (drscheme:language:get-capability-default key) 
                            capability-value
@@ -979,7 +982,7 @@
                               '()))]
                        [else '()])])
                 
-                (parameterize ([current-eventspace init-eventspace])
+                (parameterize ([current-eventspace drs-eventspace])
                   (queue-callback
                    (lambda ()
                      ;; need to make sure that the user's eventspace is still the same
@@ -1031,15 +1034,22 @@
             (thread-cell-set! current-test-coverage-info ht)
             (let ([rep (drscheme:rep:current-rep)])
               (when rep
-                (send rep set-test-coverage-info
-                      ht
-                      (let ([s (make-object style-delta%)])
-                        (send s set-delta-foreground "black")
-                        s)
-                      (let ([s (make-object style-delta%)])
-                        (send s set-delta-foreground "firebrick")
-                        s)
-                      #f)))))
+                (let ([s (make-semaphore 0)])
+                  (parameterize ([current-eventspace drs-eventspace])
+                    (queue-callback
+                     (λ ()
+                       (let ([on-sd (make-object style-delta%)]
+                             [off-sd (make-object style-delta%)])
+                         (cond
+                           [(preferences:get 'framework:white-on-black?)
+                            (send on-sd set-delta-foreground "white")
+                            (send off-sd set-delta-foreground "indianred")]
+                           [else
+                            (send on-sd set-delta-foreground "black")
+                            (send off-sd set-delta-foreground "firebrick")])
+                         (send rep set-test-coverage-info ht on-sd off-sd #f))
+                       (semaphore-post s))))
+                  (semaphore-wait s))))))
         (let ([ht (thread-cell-ref current-test-coverage-info)])
           (when ht
             (hash-set! ht key (mcons #f expr)))))
@@ -1116,7 +1126,8 @@
                         [annotated
                          (if is-compiled?
                              exp
-                             (let* ([et-annotated (et:annotate-top (expand exp) #f)]
+                             (let* ([et-annotated (et:annotate-top (expand exp) 
+                                                                   (namespace-base-phase))]
                                     [tr-annotated
                                      (if tracing?
                                          (tr:annotate (expand et-annotated))
@@ -1406,4 +1417,3 @@
         
         (drscheme:get/extend:extend-unit-frame frame-tracing-mixin)
         (drscheme:get/extend:extend-tab tab-tracing-mixin))))
-  

@@ -12,6 +12,8 @@
 
 @title[#:tag "frtime"]{@bold{FrTime}: A Language for Reactive Programs}
 
+@author["Greg Cooper"]
+
 The @scheme[frtime.ss] language supports declarative construction of
 reactive systems in a syntax very similar to that of MzScheme.  To
 interact with FrTime, select FrTime from the "Choose Language" menu.
@@ -318,7 +320,7 @@ the current state of the text field.}
                                           'vertical-label 'horizontal-label 
                                           'deleted)) 
                         '(vertical)]
-                 [selection nonnegative-exact-integer? 0]
+                 [selection exact-nonnegative-integer? 0]
                  [font (is-a?/c font%) normal-control-font]
                  [enabled any/c #t]
                  [vert-margin (integer-in 0 1000) 2]
@@ -345,7 +347,7 @@ the currently selected element in the radio box.}
                  [style (listof (one-of/c 'horizontal-label 'vertical-label
                                           'deleted)) 
                    null]
-                 [selection nonnegative-exact-integer? 0]
+                 [selection exact-nonnegative-integer? 0]
                  [font (is-a?/c font%) @scheme[normal-control-font]]
                  [enabled any/c #t]
                  [vert-margin (integer-in 0 1000) 2]
@@ -373,7 +375,7 @@ the currently selected element in the choice control.}
                                           'vertical-label 'horizontal-label 
                                           'deleted)) 
                         '(single)]
-                 [selection (or/c nonnegative-exact-integer? false/c) #f]
+                 [selection (or/c exact-nonnegative-integer? false/c) #f]
                  [font (is-a?/c font%) @scheme[view-control-font]]
                  [label-font (is-a?/c font%) @scheme[normal-control-font]]
                  [enabled any/c #t]

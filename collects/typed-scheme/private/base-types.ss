@@ -1,9 +1,10 @@
 #lang scheme/base
 
+(require (except-in "../utils/utils.ss" extend))
 (require (for-syntax
           scheme/base
-          "init-envs.ss"
-          (except-in "type-rep.ss" make-arr)
+          (env init-envs)
+          (except-in (rep type-rep) make-arr)
           "type-effect-convenience.ss"
           (only-in "type-effect-convenience.ss" [make-arr* make-arr])
           "union.ss"))
@@ -39,7 +40,7 @@
                       [(_ mod) 
                        (datum->syntax
                         stx
-                        `(require . ,(map (lambda (nm* nms*) (datum->syntax stx `(rename ,#'mod ,nm* ,nms*)))
+                        `(require . ,(map (lambda (nm* nms*) (datum->syntax stx `(rename-in ,#'mod [,nm* ,nms*])))
                                           (list 'nm ...)
                                           (list #'nms ...))))]))                  
                   (define-syntax provider (lambda (stx) #'(begin (provide (rename-out [nms nm])) ...)))
@@ -82,7 +83,7 @@
   
   
   -> U mu Un All Opaque Vectorof
-  Parameter Tuple Class
+  Parameter Tuple Class Values
   )  
 
 (provide-extra-tnames)

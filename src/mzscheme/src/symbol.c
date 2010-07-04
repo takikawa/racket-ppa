@@ -29,6 +29,7 @@
 #endif
 
 #include "schpriv.h"
+#include "mzrt.h"
 #include <string.h>
 #include <ctype.h>
 #include "schgc.h"
@@ -50,6 +51,14 @@ extern int GC_is_marked(void *);
 Scheme_Hash_Table *scheme_symbol_table = NULL;
 Scheme_Hash_Table *scheme_keyword_table = NULL;
 Scheme_Hash_Table *scheme_parallel_symbol_table = NULL;
+
+#ifdef MZ_USE_PLACES
+mzrt_rwlock *symbol_table_lock;
+#else
+# define mzrt_rwlock_rdlock(l) /* empty */
+# define mzrt_rwlock_wrlock(l) /* empty */
+# define mzrt_rwlock_unlock(l) /* empty */
+#endif
 
 unsigned long scheme_max_found_symbol_name;
 
@@ -282,6 +291,10 @@ scheme_init_symbol_table ()
   scheme_keyword_table = init_one_symbol_table();
   scheme_parallel_symbol_table = init_one_symbol_table();
 
+#ifdef MZ_USE_PLACES
+  mzrt_rwlock_create(&symbol_table_lock);
+#endif
+
 #ifndef MZ_PRECISE_GC
   GC_custom_finalize = clean_symbol_table;
 #endif
@@ -300,47 +313,15 @@ scheme_init_symbol (Scheme_Env *env)
   p = scheme_make_folding_prim(symbol_p_prim, "symbol?", 1, 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
   scheme_add_global_constant("symbol?", p, env);
-
-  scheme_add_global_constant("string->symbol",
-			     scheme_make_immed_prim(string_to_symbol_prim,
-						    "string->symbol",
-						    1, 1), env);
-  scheme_add_global_constant("string->uninterned-symbol",
-			     scheme_make_immed_prim(string_to_uninterned_symbol_prim,
-						    "string->uninterned-symbol",
-						    1, 1),
-			     env);
-  scheme_add_global_constant("symbol->string",
-			     scheme_make_immed_prim(symbol_to_string_prim,
-						    "symbol->string",
-						    1, 1),
-			     env);
-
-  scheme_add_global_constant("keyword?",
-			     scheme_make_folding_prim(keyword_p_prim,
-						      "keyword?",
-						      1, 1, 1),
-			     env);
-  scheme_add_global_constant("keyword<?",
-			     scheme_make_folding_prim(keyword_lt,
-						      "keyword<?",
-						      2, -1, 1),
-			     env);
-  scheme_add_global_constant("string->keyword",
-			     scheme_make_immed_prim(string_to_keyword_prim,
-						    "string->keyword",
-						    1, 1), env);
-  scheme_add_global_constant("keyword->string",
-			     scheme_make_immed_prim(keyword_to_string_prim,
-						    "keyword->string",
-						    1, 1),
-			     env);
-
-  scheme_add_global_constant("gensym",
-			     scheme_make_immed_prim(gensym,
-						    "gensym",
-						    0, 1),
-			     env);
+  
+  GLOBAL_IMMED_PRIM("string->symbol",             string_to_symbol_prim,            1, 1, env);
+  GLOBAL_IMMED_PRIM("string->uninterned-symbol",  string_to_uninterned_symbol_prim, 1, 1, env);
+  GLOBAL_IMMED_PRIM("symbol->string",             symbol_to_string_prim,            1, 1, env);
+  GLOBAL_FOLDING_PRIM("keyword?",                 keyword_p_prim,                   1, 1, 1, env);
+  GLOBAL_FOLDING_PRIM("keyword<?",                keyword_lt,                       2, -1, 1, env);
+  GLOBAL_IMMED_PRIM("string->keyword",            string_to_keyword_prim,           1, 1, env);
+  GLOBAL_IMMED_PRIM("keyword->string",            keyword_to_string_prim,           1, 1, env);
+  GLOBAL_IMMED_PRIM("gensym",                     gensym,                           0, 1, env);
 }
 
 static Scheme_Object *
@@ -358,7 +339,6 @@ make_a_symbol(const char *name, unsigned int len, int kind)
 
   if (len > scheme_max_found_symbol_name) {
     scheme_max_found_symbol_name = len;
-    scheme_reset_prepared_error_buffer();
   }
 
   return (Scheme_Object *) sym;
@@ -390,11 +370,20 @@ scheme_intern_exact_symbol_in_table(Scheme_Hash_Table *symbol_table, int kind, c
 {
   Scheme_Object *sym;
 
+  mzrt_rwlock_rdlock(symbol_table_lock);
   sym = symbol_bucket(symbol_table, name, len, NULL);
+  mzrt_rwlock_unlock(symbol_table_lock);
 
   if (!sym) {
-    sym = make_a_symbol(name, len, kind);
-    symbol_bucket(symbol_table, name, len, sym);
+    Scheme_Object *newsymbol;
+    newsymbol = make_a_symbol(name, len, kind);
+    
+    /* we must return the result of this symbol bucket call because another
+     * thread could have inserted the same symbol between the first
+     * :qsymbol_bucket call above and this one */
+    mzrt_rwlock_wrlock(symbol_table_lock);
+    sym = symbol_bucket(symbol_table, name, len, newsymbol);
+    mzrt_rwlock_unlock(symbol_table_lock);
   }
 
   return sym;

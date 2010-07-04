@@ -1635,7 +1635,12 @@ Bool wxMediaEdit::CheckFlow(double maxw, wxDC *dc, double Y,
       hadNewline = FALSE;
     }
 
-    if (scheme_current_thread) SCHEME_USE_FUEL(1);
+    {
+      Scheme_Thread *thread;
+      thread = scheme_get_current_thread();
+      if (thread) SCHEME_USE_FUEL(1);
+      thread = NULL;
+    }
 
     w = 0.0;
     snip->GetExtent(dc, _totalWidth, Y, &w);
@@ -1964,6 +1969,12 @@ void wxMediaEdit::RecalcLines(wxDC *dc, Bool calcGraphics)
 
   if (resized && admin)
     admin->Resized(FALSE);
+
+  OnReflow();
+}
+
+void wxMediaEdit::OnReflow(void)
+{
 }
 
 wxBitmap *wxMediaEdit::SetAutowrapBitmap(wxBitmap *bm)

@@ -331,22 +331,14 @@ bitmap.}
 
 @section{Pict Combiners}
 
-@defproc*[([(vl-append [pict pict?] ...) pict?]
-           [(vl-append [d real?] [pict pict?] ...) pict?]
-           [(vc-append [pict pict?] ...) pict?]
-           [(vc-append [d real?] [pict pict?] ...) pict?]
-           [(vr-append [pict pict?] ...) pict?]
-           [(vr-append [d real?] [pict pict?] ...) pict?]
-           [(ht-append [pict pict?] ...) pict?]
-           [(ht-append [d real?] [pict pict?] ...) pict?]
-           [(htl-append [pict pict?] ...) pict?]
-           [(htl-append [d real?] [pict pict?] ...) pict?]
-           [(hc-append [pict pict?] ...) pict?]
-           [(hc-append [d real?] [pict pict?] ...) pict?]
-           [(hbl-append [pict pict?] ...) pict?]
-           [(hbl-append [d real?] [pict pict?] ...) pict?]
-           [(hb-append [pict pict?] ...) pict?]
-           [(hb-append [d real?] [pict pict?] ...) pict?])]{
+@defproc*[([(vl-append [d real? 0.0] [pict pict?] ...) pict?]
+           [(vc-append [d real? 0.0] [pict pict?] ...) pict?]
+           [(vr-append [d real? 0.0] [pict pict?] ...) pict?]
+           [(ht-append [d real? 0.0] [pict pict?] ...) pict?]
+           [(htl-append [d real? 0.0] [pict pict?] ...) pict?]
+           [(hc-append [d real? 0.0] [pict pict?] ...) pict?]
+           [(hbl-append [d real? 0.0] [pict pict?] ...) pict?]
+           [(hb-append [d real? 0.0] [pict pict?] ...) pict?])]{
 
 Creates a new pict as a column (for @scheme[v...-append]) or row (for
 @scheme[h...-append]) of other picts. The optional @scheme[d] argument
@@ -924,7 +916,7 @@ factor. If the factor is greater tham 1, the color is lightened by
 dividing the gap between the RGB components and 255 by the factor.}
 
 @defproc[(color-series [dc (is-a?/c dc<%>)]
-                       [max-step nonnegative-exact-integer?]
+                       [max-step exact-nonnegative-integer?]
                        [step-delta (and/c exact? positive?)]
                        [start (or/c string? (is-a?/c color%))]
                        [end (or/c string? (is-a?/c color%))]
@@ -978,8 +970,8 @@ repeated calls to @scheme[draw-pict].}
 
 
 @defproc[(show-pict [pict pict?]
-                    [w (or/c false/c nonnegative-exact-integer?) #f] 
-                    [h (or/c false/c nonnegative-exact-integer?) #f])
+                    [w (or/c false/c exact-nonnegative-integer?) #f] 
+                    [h (or/c false/c exact-nonnegative-integer?) #f])
          void?]{
 
 Opens a frame that displays @scheme[pict].  The frame adds one method,

@@ -15,7 +15,8 @@ pluggable through the manager interface.
 
 @; ------------------------------------------------------------
 @section[#:tag "manager.ss"]{General}
-@(require (for-label web-server/managers/manager))
+@(require (for-label web-server/managers/manager)
+          (for-label web-server/servlet/servlet-structs))
 
 @defmodule[web-server/managers/manager]
 
@@ -25,7 +26,7 @@ the users and implementers of managers.
 @defstruct[manager ([create-instance ((-> void) . -> . number?)]
                     [adjust-timeout! (number? number? . -> . void)]
                     [clear-continuations! (number? . -> . void)]
-                    [continuation-store! (number? any/c expiration-handler? . -> . (list/c number? number?))]
+                    [continuation-store! (number? any/c expiration-handler/c . -> . (list/c number? number?))]
                     [continuation-lookup (number? number? number? . -> . any/c)])]{
  @scheme[create-instance] is called to initialize a instance, to hold the
  continuations of one servlet session. It is passed
@@ -48,13 +49,13 @@ the users and implementers of managers.
 }
 
 @defstruct[(exn:fail:servlet-manager:no-instance exn:fail)
-           ([expiration-handler expiration-handler?])]{
+           ([expiration-handler expiration-handler/c])]{
  This exception should be thrown by a manager when an instance is looked
  up that does not exist.
 }
 
 @defstruct[(exn:fail:servlet-manager:no-continuation exn:fail)
-           ([expiration-handler expiration-handler?])]{
+           ([expiration-handler expiration-handler/c])]{
  This exception should be thrown by a manager when a continuation is
  looked up that does not exist.
 }
@@ -67,12 +68,16 @@ the users and implementers of managers.
 
 @filepath{managers/none.ss} defines a manager constructor:
 
-@defproc[(create-none-manager (instance-expiration-handler expiration-handler?))
+@defproc[(create-none-manager (instance-expiration-handler expiration-handler/c))
          manager?]{
  This manager does not actually store any continuation or instance data.
  You could use it if you know your servlet does not use the continuation
  capturing functions and want the server to not allocate meta-data
  structures for each instance.
+ 
+ If you @emph{do} use a continuation capturing function, the continuation is
+ simply not stored. If the URL is visited, the @scheme[instance-expiration-handler]
+ is called with the request.
 }
 
 If you are considering using this manager, also consider using the
@@ -86,7 +91,7 @@ Web Language. (See @secref["lang"].)
 
 @filepath{managers/timeouts.ss} defines a manager constructor:
 
-@defproc[(create-timeout-manager [instance-exp-handler expiration-handler?]
+@defproc[(create-timeout-manager [instance-exp-handler expiration-handler/c]
                                  [instance-timeout number?]
                                  [continuation-timeout number?])
          manager?]{
@@ -117,7 +122,7 @@ deployments of the @web-server .
 @filepath{managers/lru.ss} defines a manager constructor:
 
 @defproc[(create-LRU-manager
-          [instance-expiration-handler expiration-handler?]
+          [instance-expiration-handler expiration-handler/c]
           [check-interval integer?]
           [collect-interval integer?]
           [collect? (-> boolean?)]
@@ -146,15 +151,21 @@ deployments of the @web-server .
  is called if any continuations are expired, with the number of
  continuations expired.
 }
+                  
+The recommended usage of this manager is codified as the following function:
 
-The recommended use of this manager is to pass, as @scheme[collect?], a
-function that checks the memory usage of the system, through
-@scheme[current-memory-use]. Then, @scheme[collect-interval] should be sufficiently
-large compared to @scheme[check-interval]. This way, if the load on the server
-spikes---as indicated by memory usage---the server will quickly expire
-continuations, until the memory is back under control. If the load
-stays low, it will still efficiently expire old continuations.
-
-With @href-link["http://continue.cs.brown.edu/" "Continue"], we went from needing to restart the server a few times
-a week and having many complaints under load, to not having these complaints
-and not needing to restart the server for performance reasons.
+@defproc[(make-threshold-LRU-manager 
+          [instance-expiration-handler expiration-handler/c]
+          [memory-threshold number?])
+         manager?]{
+ This creates an LRU manager with the following behavior:
+ The memory limit is set to @scheme[memory-threshold]. Continuations start with @scheme[24]
+ life points. Life points are deducted at the rate of one every @scheme[10] minutes, or one
+ every @scheme[5] seconds when the memory limit is exceeded. Hence the maximum life time for
+ a continuation is @scheme[4] hours, and the minimum is @scheme[2] minutes.
+ 
+ If the load on the server spikes---as indicated by memory usage---the server will quickly expire
+ continuations, until the memory is back under control. If the load
+ stays low, it will still efficiently expire old continuations.
+}
+ 

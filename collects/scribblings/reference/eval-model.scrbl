@@ -15,17 +15,21 @@
 
 @(define hole (make-element #f (list "[]")))
 @(define (*sub c e) (make-element #f (list c "[" e "]")))
-@(define langle (make-element 'tt (list "<")))
-@(define rangle (make-element 'tt (list ">")))
-@(define comma (make-element 'tt (list ", ")))
 @(define-syntax sub
    (syntax-rules () [(_ a b) (*sub (scheme a) (scheme b))]))
-@(define (*state c e) (make-element #f (list langle c comma e rangle)))
-@(define-syntax state
-   (syntax-rules () [(_ a b) (*state (scheme a) (scheme b))]))
 @(define (frame n)
    (make-element "schemevariable"
                  (list "C" (make-element 'subscript (list (format "~a" n))))))
+@;{
+These are not used; if they do get back in, then it's probably better
+to switch to the usual langle/rangle that is used in syntax definitions.
+@(define langle (make-element 'tt (list "<")))
+@(define rangle (make-element 'tt (list ">")))
+@(define comma (make-element 'tt (list ", ")))
+@(define (*state c e) (make-element #f (list langle c comma e rangle)))
+@(define-syntax state
+   (syntax-rules () [(_ a b) (*state (scheme a) (scheme b))]))
+;}
 
 @;------------------------------------------------------------------------
 @title[#:tag "eval-model"]{Evaluation Model}
@@ -59,7 +63,7 @@ Some simplifications require more than one step. For example:
 
 An expression that is not a @tech{value} can always be partitioned
 into two parts: a @deftech{redex}, which is the part that changed in a
-single-step simplification (show in blue), and the
+single-step simplification (highlighted), and the
 @deftech{continuation}, which is the surrounding expression
 context. In @scheme[(- 4 (+ 1 1))], the redex is @scheme[(+ 1 1)], and
 the continuation is @scheme[(- 4 #, @hole)], where @hole takes the
@@ -516,7 +520,7 @@ definitions.
 For example, given the module declaration
 
 @schemeblock[
-(module m mzscheme
+(module m scheme
   (define x 10))
 ]
 
@@ -525,16 +529,16 @@ and installs @scheme[10] as its value. This @scheme[x] is unrelated to
 any top-level definition of @scheme[x].
 
 @;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-@subsection[#:tag "module-phase"]{Module Phases}
+@subsection[#:tag "module-phase"]{Phases}
 
 A module can be @tech{instantiate}d in multiple @deftech{phases}. A
 phase is an integer that, again, is effectively a prefix on the names
 of module-level definitions. A top-level @scheme[require]
 @tech{instantiates} a module at @tech{phase} 0, if the module is not
 already @tech{instantiate}d at phase 0.  A top-level
-@scheme[require-for-syntax] @tech{instantiates} a module at
+@scheme[(require (for-syntax ....))] @tech{instantiates} a module at
 @tech{phase} 1 (if it is not already @tech{instantiate}d at that
-level); a @scheme[require-for-syntax] also has a different binding
+level); @scheme[for-syntax] also has a different binding
 effect on further program parsing, as described in
 @secref["intro-binding"].
 
@@ -553,18 +557,27 @@ If a module @tech{instantiate}d at @tech{phase} @math{n}
 @scheme[require]s another module, then the @scheme[require]d module is
 first @tech{instantiate}d at phase @math{n}, and so on
 transitively. (Module @scheme[require]s cannot form cycles.) If a
-module @tech{instantiate}d at phase @math{n}
-@scheme[require-for-syntax]es another module, the other module is
-first @tech{instantiate}d at @tech{phase} @math{n+1}, and so on.  If a
+module @tech{instantiate}d at phase @math{n} @scheme[require]s
+@scheme[for-syntax] another module, the other module is first
+@tech{instantiate}d at @tech{phase} @math{n+1}, and so on.  If a
 module @tech{instantiate}d at phase @math{n} for non-zero @math{n}
-@scheme[require-for-template]s another module, the other module is
-first @tech{instantiate}d at @tech{phase} @math{n-1}, and so on.
+@scheme[require]s @scheme[for-template] another module, the other
+module is first @tech{instantiate}d at @tech{phase} @math{n-1}, and so
+on.
 
 A final distinction among module @tech{instantiations} is that
-multiple @tech{instantiations} may exist at phase 1 and higher. These
+multiple @tech{instantiations} may exist at @tech{phase} 1 and higher. These
 @tech{instantiations} are created by the parsing of module forms (see
 @secref["mod-parse"]), and are, again, conceptually distinguished
 by prefixes.
+
+Top-level variables can exist in multiple phases in the same way as
+within modules. For example, @scheme[define-for-syntax] creates a
+@tech{phase} 1 variable. Furthermore, reflective operations like
+@scheme[make-base-namespace] and @scheme[eval] provide access to
+top-level variables in higher @tech{phases}, while module
+@tech{instantiations} (triggered by with @scheme[require]) relative to such
+top-levels are in corresponding higher @tech{phase}s.
 
 @;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 @subsection[#:tag "module-redeclare"]{Module Re-declarations}
@@ -606,7 +619,7 @@ to implement dynamic scope.
 @section[#:tag "prompt-model"]{Prompts, Delimited Continuations, and Barriers}
 
 A @deftech{prompt} is a special kind of continuation frame that is
-annotated with a specific @deftech{prompt-tag} (essentially a
+annotated with a specific @deftech{prompt tag} (essentially a
 continuation mark). Various operations allow the capture of frames in
 the continuation from the redex position out to the nearest enclosing
 prompt with a particular prompt tag; such a continuation is sometimes
@@ -638,9 +651,9 @@ escape-continuation aborts can cross continuation barriers.
 @section[#:tag "thread-model"]{Threads}
 
 Scheme supports multiple, pre-emptive @deftech{threads} of
-evaluation. In terms of the evaluation model, this means that each
-step in evaluation actually consists of multiple concurrent
-expressions, rather than a single expression. The expressions all
+evaluation. Threads are created explicitly by functions such as @scheme[thread]. 
+In terms of the evaluation model, each step in evaluation actually consists of multiple concurrent
+expressions, up to one per thread, rather than a single expression. The expressions all
 share the same objects and top-level variables, so that they can
 communicate through shared state. Most evaluation steps involve a
 single step in a single expression, but certain synchronization
@@ -661,14 +674,15 @@ is created) as all other threads.
 @section[#:tag "parameter-model"]{Parameters}
 
 @deftech{Parameters} are essentially a derived concept in Scheme; they
-are defined in terms of continuation marks and thread cells. However,
-parameters are also built in, in the sense that some primitive
-procedures consult parameter values. For example, the default output
-stream for primitive output operations is determined by a parameter.
+are defined in terms of @tech{continuation marks} and @tech{thread
+cells}. However, parameters are also built in, in the sense that some
+primitive procedures consult parameter values. For example, the
+default output stream for primitive output operations is determined by
+a parameter.
 
 A parameter is a setting that is both thread-specific and
 continuation-specific. In the empty continuation, each parameter
-corresponds to a preserved thread cell; a corresponding
+corresponds to a @tech{preserved} @tech{thread cell}; a corresponding
 @deftech{parameter procedure} accesses and sets the thread cell's
 value for the current thread.
 
@@ -681,8 +695,8 @@ thread yields the parameter's value. A parameter procedure sets or
 accesses the relevant thread cell for its parameter.
 
 Various operations, such as @scheme[parameterize] or
-@scheme[with-parameterization], install a parameterization into the
-current continuation's frame.
+@scheme[call-with-parameterization], install a parameterization into
+the current continuation's frame.
 
 @;------------------------------------------------------------------------
 @section[#:tag "exn-model"]{Exceptions}
@@ -692,19 +706,19 @@ are defined in terms of continuations, prompts, and continuation
 marks.  However, exceptions are also built in, in the sense that
 primitive forms and procedures may raise exceptions.
 
-A handler for uncaught exceptions is designated through a built-in
-parameter. A handler to catch exceptions can be associated with a
-continuation frame though a continuation mark (whose key is not
-directly accessible). When an exception is raised, the current
-continuation's marks determine a chain of handler procedures that are
-consulted to handle the exception.
+An @deftech{exception handler} to catch exceptions can be associated
+with a continuation frame though a @tech{continuation mark} (whose key
+is not directly accessible). When an exception is raised, the current
+continuation's marks determine a chain of @tech{exception handler}
+procedures that are consulted to handle the exception. A handler for
+uncaught exceptions is designated through a built-in @tech{parameter}.
 
-One potential action of an exception handler is to abort the current
-continuation up to an enclosing prompt with a particular tag.  The
-default handler for uncaught exceptions, in particular, aborts to a
-particular tag for which a prompt is always present, because the
-prompt is installed in the outermost frame of the continuation for any
-new thread.
+One potential action of an @tech{exception handler} is to abort the
+current @tech{continuation} up to an enclosing @tech{prompt} with a
+particular @tech{prompt tag}.  The default handler for uncaught
+exceptions, in particular, aborts to a particular tag for which a
+prompt is always present, because the prompt is installed in the
+outermost frame of the continuation for any new thread.
 
 @;------------------------------------------------------------------------
 @section[#:tag "custodian-model"]{Custodians}
@@ -756,7 +770,7 @@ custodian is shut down. The custodian only weakly retains the box
 itself, however (so the box and its content can be collected if there
 are no other references to them).
 
-When MzScheme is compiled with support for per-custodian memory
+When PLT Scheme is compiled with support for per-custodian memory
 accounting (see @scheme[custodian-memory-accounting-available?]), the
 @scheme[current-memory-use] procedure can report a custodian-specific
 result.  This result determines how much memory is occupied by objects

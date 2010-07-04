@@ -1,3 +1,22 @@
+#lang scheme/base
+
+#|
+ workshop experience: 
+
+   stop-when should have a different signature:
+    stop-when : (World -> Boolean) (World -> Image) 
+
+   (stop-when C F) should have this semantics:
+    on each assignment to world,
+    (begin 
+      (set! current-world new-world)
+      (when (C current-world) (render (F current-world))))
+|#
+;; Thu Aug 28 15:54:23 EDT 2008: big-bang can now be re-run after the world
+;;                               has stopped
+
+;; Tue Aug 12 08:54:45 EDT 2008: ke=? changed to key=? 
+;; Fri Jul  4 10:25:47 EDT 2008: added ke=? and key-event? 
 ;; Mon Jun 16 15:38:14 EDT 2008: removed end-of-time and provided stop-when 
 ;;                               also allow repeated setting of callbacks now
 ;;                               If this is changed back, stop-when will fail
@@ -45,16 +64,17 @@ Matthew
 ;; Sat Dec 10 19:39:03 EST 2005: fixed name, changed interface to on-key-event
 ;; Fri Dec  9 21:39:03 EST 2005: remoevd (update ... produce ...); added on-redraw 
 ;; Thu Dec  1 17:03:03 EST 2005: fixed place-image; all coordinates okay now
-#lang scheme
-(require mzlib/class
-         mzlib/kw
-         mzlib/etc
+
+(require scheme/class
+         scheme/local
+         scheme/bool
          mred
          htdp/error
          htdp/image
          (only-in lang/htdp-beginner image?)
          mrlib/cache-image-snip
-         lang/prim)
+         lang/prim
+         (for-syntax scheme/base))
 
 (require mrlib/gif)
 (require mzlib/runtime-path)
@@ -111,6 +131,11 @@ Matthew
 ;; KeyEvent is one of: 
 ;; -- Char 
 ;; -- Symbol 
+
+(provide
+  key-event? ;; Any -> Boolean
+  key=? ;; KeyEvent KeyEvent -> Boolean
+ )
 
 (provide-higher-order-primitive
  on-key-event (control) ;; (World KeyEvent -> World) -> true
@@ -223,7 +248,7 @@ Matthew
    "-- (big-bang <width> <height> <rate> <world0>)\n"
    "-- (big-bang <width> <height> <rate> <world0> <animated-gif>)\n"
    "see Help Desk."))
-
+(define *running?* #f)
 (define big-bang0
   (case-lambda 
     [(w h delta world) (big-bang w h delta world #f)]
@@ -245,7 +270,10 @@ Matthew
                 animated-gif)
      (let ([w (coerce w)]
            [h (coerce h)])
-       (when (vw-init?) (error 'big-bang "big-bang already called once"))
+       (when *running?*  (error 'big-bang "the world is still running"))
+       (set! *running?* #t)
+       (callback-stop!)
+       ;; (when (vw-init?) (error 'big-bang "big-bang already called once"))
        (install-world delta world) ;; call first to establish a visible world
        (set-and-show-frame w h animated-gif) ;; now show it
        (unless animated-gif (set! add-event void)) ;; no recording if image undesired
@@ -272,6 +300,14 @@ Matthew
   (set-redraw-callback f)
   (redraw-callback)
   #t)
+
+(define (key-event? k)
+  (or (char? k) (symbol? k)))
+
+(define (key=? k m)
+  (check-arg 'key=? (key-event? k) 'KeyEvent "first" k)
+  (check-arg 'key=? (key-event? m) 'KeyEvent "first" m)
+  (eqv? k m))
 
 (define (on-key-event f)
   (check-proc 'on-key-event f 2 "on-key-event" "two arguments")
@@ -605,10 +641,15 @@ Matthew
 (define (set-and-show-frame w h animated-gif)
   (define the-play-back-custodian (make-custodian))
   (define frame (create-frame the-play-back-custodian))
+  (set! WIDTH w)
+  (set! HEIGHT h)
   (when animated-gif
     (add-stop-and-image-buttons frame the-play-back-custodian))
   (add-editor-canvas frame visible-world w h)
   (send frame show #t))
+
+(define WIDTH 0) 
+(define HEIGHT 0)
 
 ;; [Box (union false Thread)] -> Frame
 ;; create a frame that shuts down the custodian on close
@@ -627,8 +668,8 @@ Matthew
 ;; adds the stop animation and image creation button, 
 ;; whose callbacks runs as a thread in the custodian
 (define IMAGES "Images")
-(define-runtime-path s:pth '(lib "break.png" "icons"))
-(define-runtime-path i:pth '(lib "file.gif" "icons"))
+(define-runtime-path s:pth '(lib "icons/break.png"))
+(define-runtime-path i:pth '(lib "icons/file.gif"))
 (define (add-stop-and-image-buttons  frame the-play-back-custodian)
   (define p (new horizontal-pane% [parent frame][alignment '(center center)]))
   (define S ((bitmap-label-maker (string-constant break-button-label) s:pth) '_))
@@ -699,6 +740,15 @@ Matthew
 (define (add-event type . stuff)
   (set! event-history (cons (cons type stuff) event-history)))
 
+
+;; zfill: natural-number natural-number -> string
+;; Converts a-num to a string, adding leading zeros to make it at least as long as a-len.
+(define (zfill a-num a-len)
+  (let ([n (number->string a-num)])
+    (string-append (build-string (max (- a-len (string-length n)) 0)
+                                 (lambda (i) #\0))
+                   n)))
+
 ;; --> Void
 ;; re-play the history of events, creating a png per step, create animated gif
 ;; effect: write to user-chosen file 
@@ -725,7 +775,7 @@ Matthew
     (define bm (make-bitmap)) 
     (set! bitmap-list (cons bm bitmap-list))
     (set! image-count (+ image-count 1))
-    (send bm save-file (format "i~a.png" image-count) 'png))
+    (send bm save-file (format "i~a.png" (zfill image-count (string-length (number->string total)))) 'png))
   ;; --- choose place 
   (define target:dir
     (let* ([cd (current-directory)]
@@ -752,7 +802,7 @@ Matthew
   (define intv (if (> +inf.0 *the-delta* 0) (inexact->exact (floor (* 100 *the-delta*))) 5))
   (when (file-exists? ANIMATED-GIF-FILE)
     (delete-file ANIMATED-GIF-FILE))
-  (write-animated-gif bitmap-list intv ANIMATED-GIF-FILE #;one-at-a-time? #t))
+  (write-animated-gif bitmap-list intv ANIMATED-GIF-FILE #:one-at-a-time? #t #:loop? #f))
 
 (define ANIMATED-GIF-FILE "i-animated.gif")
 
@@ -802,8 +852,9 @@ Matthew
   (set! timer-callback void)
   (set! mouse-callback void)
   (set! key-callback void)
-  (set! stop-when-callback (lambda (w) #f))
-  (set! redraw-callback void))
+  (set! stop-when-callback (lambda () #f))
+  (set! redraw-callback void)
+  (set! *running?* #f))
 
 ;; Any -> Boolean
 ;; is the callback set to the default value 
@@ -842,7 +893,6 @@ Matthew
   (define tname (if fname fname 'your-redraw-function))
   (check-result fname boolean? "boolean" result)
   result)
-(set-stop-when-callback (lambda (w) #f))
 
 ;; f : [World KeyEvent -> World]
 ;; esp : EventSpace 
@@ -863,13 +913,16 @@ Matthew
   (parameterize ([current-eventspace evt-space])
     (queue-callback
      (lambda ()
-       (with-handlers ([exn:break? break-handler][exn? exn-handler])
-         (define x (- (send e get-x) INSET))
-         (define y (- (send e get-y) INSET))
-         (define m (mouse-event->symbol e))
-         (set! the-world (f the-world x y m))
-         (add-event MOUSE x y m)
-         (redraw-callback))))))
+       (define x (- (send e get-x) INSET))
+       (define y (- (send e get-y) INSET))
+       (define m (mouse-event->symbol e))
+       (when (and (<= 0 x WIDTH) (<= 0 y HEIGHT))
+	 (with-handlers ([exn:break? break-handler][exn? exn-handler])
+           (let ([new-world (f the-world x y m)])
+             (unless (eq? new-world the-world)
+               (set! the-world new-world)
+               (add-event MOUSE x y m)
+               (redraw-callback)))))))))
 
 ;; MouseEvent -> MouseEventType
 (define (mouse-event->symbol e)

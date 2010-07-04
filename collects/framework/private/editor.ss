@@ -1,12 +1,12 @@
-
 #lang scheme/unit
+
   (require mzlib/class
            string-constants
            "sig.ss"
            "../preferences.ss"
            "../gui-utils.ss"
            mzlib/etc
-           (lib "mred-sig.ss" "mred")
+           mred/mred-sig
            scheme/path)
   
   (import mred^
@@ -38,7 +38,9 @@
       on-close
       can-close?
       close
-      get-filename/untitled-name))
+      get-filename/untitled-name
+      
+      get-pos/text))
   
   (define basic-mixin
     (mixin (editor<%>) (basic<%>)
@@ -48,6 +50,31 @@
       (define/public (close) (if (can-close?)
                                  (begin (on-close) #t)
                                  #f))
+      
+      (define/public (get-pos/text event)
+        (let ([event-x (send event get-x)]
+              [event-y (send event get-y)]
+              [on-it? (box #f)])
+          (let loop ([editor this])
+            (let-values ([(x y) (send editor dc-location-to-editor-location event-x event-y)])
+              (cond
+                [(is-a? editor text%)
+                 (let ([pos (send editor find-position x y #f on-it?)])
+                   (cond
+                     [(not (unbox on-it?)) (values #f #f)]
+                     [else
+                      (let ([snip (send editor find-snip pos 'after-or-none)])
+                        (if (and snip
+                                 (is-a? snip editor-snip%))
+                            (loop (send snip get-editor))
+                            (values pos editor)))]))]
+                [(is-a? editor pasteboard%)
+                 (let ([snip (send editor find-snip x y)])
+                   (if (and snip
+                            (is-a? snip editor-snip%))
+                       (loop (send snip get-editor))
+                       (values editor #f)))]
+                [else (values #f #f)])))))
       
       ;; get-filename/untitled-name : -> string
       ;; returns a string representing the visible name for this file,
@@ -231,8 +258,19 @@
                        [(not snip-admin)
                         (t)] ;; refresh-delayed? is always #t when there is no admin.
                        [(is-a? snip-admin editor-snip-editor-admin<%>)
-                        (send (send (send (send snip-admin get-snip) get-admin) get-editor)
-                              run-after-edit-sequence t sym)]
+                        (let loop ([ed this])
+                          (let ([snip-admin (send ed get-admin)])
+                            (if (is-a? snip-admin editor-snip-editor-admin<%>)
+                                (let ([up-one
+                                       (send (send (send snip-admin get-snip) get-admin) get-editor)])
+                                  (if (is-a? up-one basic<%>)
+                                      (send up-one run-after-edit-sequence t sym)
+                                      (loop up-one)))
+                                
+                                ;; here we are in an embdedded editor that is not
+                                ;; in an edit sequence and the "parents" of the embdedded editor
+                                ;; are all non-basic<%> objects, so we just run the thunk now.
+                                (t))))]
                        [else
                         '(message-box "run-after-edit-sequence error"
                                       (format "refresh-delayed? is #t but snip admin, ~s, is not an editor-snip-editor-admin<%>"
@@ -275,12 +313,16 @@
                (for-each (λ (t) (t)) queue)])))
         (inner (void) after-edit-sequence))
       
-      [define/override on-new-box
-        (λ (type)
-          (cond
-            [(eq? type 'text) (make-object editor-snip% (make-object text:basic%))]
-            [else (make-object editor-snip% (make-object pasteboard:basic%))]))]
+      (define/override (on-new-box type)
+        (cond
+          [(eq? type 'text) (make-object editor-snip% (make-object text:basic%))]
+          [else (make-object editor-snip% (make-object pasteboard:basic%))]))
       
+      (define/override (on-new-image-snip filename kind relative-path? inline?)
+        (super on-new-image-snip 
+               (if (eq? kind 'unknown) 'unknown/mask kind) 
+               relative-path? 
+               inline?))
       
       (define/override (get-file d)
         (parameterize ([finder:dialog-parent-parameter
@@ -291,8 +333,7 @@
                         (get-top-level-window)])
           (finder:put-file f d)))
       
-      
-      (super-instantiate ())))
+      (super-new)))
   
   (define standard-style-list (new style-list%))
   (define (get-standard-style-list) standard-style-list)

@@ -6,7 +6,7 @@
   (define-syntax kernel-syntax-case-internal
     (lambda (stx)
       (syntax-case stx ()
-	[(_ stxv trans? (extras ...) kernel-context clause ...)
+	[(_ stxv phase rel? (extras ...) kernel-context clause ...)
 	 (quasisyntax/loc
 	  stx
 	  (syntax-case* stxv (extras ...
@@ -26,7 +26,22 @@
                                             #%plain-module-begin 
                                             #%require #%provide 
                                             #%variable-reference)))))
-                        (if trans? free-transformer-identifier=? free-identifier=?)
+                        (let ([p phase])
+                          (cond
+                           [(and #,(syntax-e #'rel?) (= p 0)) 
+                            free-identifier=?]
+                           [(and #,(syntax-e #'rel?) (= p 1)) 
+                            free-transformer-identifier=?]
+                           [else (let ([id (namespace-module-identifier p)])
+                                   (lambda (a b)
+                                     (free-identifier=? (datum->syntax id 
+                                                                       (let ([s (syntax-e b)])
+                                                                         (case s
+                                                                           [(#%plain-app) '#%app]
+                                                                           [(#%plain-lambda) 'lambda]
+                                                                           [else s])))
+                                                        a
+                                                        p)))]))
 	    clause ...))])))
   
   (define-syntax kernel-syntax-case
@@ -34,14 +49,28 @@
       (syntax-case stx ()
 	[(_ stxv trans? clause ...)
          (quasisyntax/loc stx
-           (kernel-syntax-case-internal stxv trans? () #,stx clause ...))])))
+           (kernel-syntax-case-internal stxv (if trans? 1 0) #t () #,stx clause ...))])))
 
   (define-syntax kernel-syntax-case*
     (lambda (stx)
       (syntax-case stx ()
 	[(_ stxv trans? (extras ...) clause ...)
          (quasisyntax/loc stx
-           (kernel-syntax-case-internal stxv trans? (extras ...) #,stx clause ...))])))
+           (kernel-syntax-case-internal stxv (if trans? 1 0) #t (extras ...) #,stx clause ...))])))
+
+  (define-syntax kernel-syntax-case/phase
+    (lambda (stx)
+      (syntax-case stx ()
+	[(_ stxv phase clause ...)
+         (quasisyntax/loc stx
+           (kernel-syntax-case-internal stxv phase #f () #,stx clause ...))])))
+
+  (define-syntax kernel-syntax-case*/phase
+    (lambda (stx)
+      (syntax-case stx ()
+	[(_ stxv phase (extras ...) clause ...)
+         (quasisyntax/loc stx
+           (kernel-syntax-case-internal stxv phase #f (extras ...) #,stx clause ...))])))
 
   (define (kernel-form-identifier-list)
     (syntax-e (quote-syntax
@@ -66,4 +95,6 @@
 
   (provide kernel-syntax-case
            kernel-syntax-case*
+           kernel-syntax-case/phase
+           kernel-syntax-case*/phase
            kernel-form-identifier-list))

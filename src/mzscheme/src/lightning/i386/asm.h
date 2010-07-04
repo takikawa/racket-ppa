@@ -325,6 +325,8 @@ typedef _uc		jit_insn;
 #define ADDQrr(RS, RD)			_qO_Mrm		(0x01		,_b11,_r8(RS),_r8(RD)				)
 #define ADDQir(IM, RD)			_qOs_Mrm_sL	(0x81		,_b11,_b000  ,_r8(RD)			,IM	)
 
+#define ADDQiBr(IM, RD)			_qO_Mrm_B	(0x83		,_b11,_b000  ,_r1(RD)			,_su8(IM))
+
 #define ANDBrr(RS, RD)			_O_Mrm		(0x20		,_b11,_r1(RS),_r1(RD)				)
 #define ANDBmr(MD, MB, MI, MS, RD)	_O_r_X		(0x22		     ,_r1(RD)		,MD,MB,MI,MS		)
 #define ANDBrm(RS, MD, MB, MI, MS)	_O_r_X		(0x20		     ,_r1(RS)		,MD,MB,MI,MS		)
@@ -550,7 +552,9 @@ typedef _uc		jit_insn;
                                 ? _OO_D32(0x0f80|(CC), (long)(D) ) \
                                 : (_O_D8(0x70|(nCC), _jit_UL(_jit.x.pc) + 13), JMPm((long)D, 0, 0, 0)))
 #else
-# define JCCim(CC,nCC,D,B,I,S)		((_r0P(B) && _r0P(I)) ? _OO_D32	(0x0f80|(CC)		,(long)(D)		) : \
+# define JCCim(CC,nCC,D,B,I,S)		((_r0P(B) && _r0P(I)) ? (_jitl.tiny_jumps \
+                                                                 ? _O_D8(0x70|(CC), D) \
+                                                                 : _OO_D32	(0x0f80|(CC)		,(long)(D)		)) : \
 								JITFAIL("illegal mode in conditional jump"))
 #endif
 
@@ -594,7 +598,9 @@ typedef _uc		jit_insn;
                         ? _O_D32(0xe9, (long)(D)) \
                         : (MOVQir((D), JIT_REXTMP), _qO_Mrm(0xff,_b11,_b100,_r8(JIT_REXTMP))))
 #else
-# define JMPm(D,B,I,S)			((_r0P(B) && _r0P(I)) ? _O_D32	(0xe9			,(long)(D)		) : \
+# define JMPm(D,B,I,S)			((_r0P(B) && _r0P(I)) ? (_jitl.tiny_jumps \
+                                                                 ? _O_D8(0xeB, D) \
+                                                                 : _O_D32	(0xe9			,(long)(D)		)) : \
 								JITFAIL("illegal mode in direct jump"))
 #endif
 

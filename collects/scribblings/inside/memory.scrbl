@@ -688,7 +688,7 @@ Registers an extension's global variable that can contain Scheme
 
 @function[(int scheme_main_setup
            [int no_auto_statics]
-           [Scheme_Main main]
+           [Scheme_Env_Main main]
            [int argc]
            [char** argv])]{
 
@@ -697,11 +697,11 @@ calling @cpp{scheme_basic_env}, and then calls @var{main} with the
 namespace, @var{argc}, and @var{argv}. (The @var{argc} and @var{argv}
 are just passed on to @var{main}, and are not inspected in any way.)
 
-The @cpp{Scheme_Main} type is defined as follows:
+The @cpp{Scheme_Env_Main} type is defined as follows:
 
 @verbatim[#:indent 4]{
-typedef int (*Scheme_Main)(Scheme_Env *env, 
-                           int argc, char **argv);
+typedef int (*Scheme_Env_Main)(Scheme_Env *env, 
+                               int argc, char **argv);
 }
 
 The result of @var{main} is the result of @cpp{scheme_main_setup}.
@@ -709,6 +709,24 @@ The result of @var{main} is the result of @cpp{scheme_main_setup}.
 If @var{no_auto_statics} is non-zero, then static variables must be
 explicitly registered with the garbage collector; see
 @secref["im:memoryalloc"] for more information.}
+
+
+@function[(int scheme_main_stack_setup
+           [int no_auto_statics]
+           [Scheme_Nested_Main main]
+           [void* data])]{
+
+A more primitive variant of @cpp{scheme_main_setup} that initializes
+the GC stack base but does not create the initial namespace (so an
+embedding application can perform other operations that involve
+garbage-collected data before creating a namespace).
+
+The @var{data} argument is passed through to @var{main}, where the
+@cpp{Scheme_Nested_Main} type is defined as follows:
+
+@verbatim[#:indent 4]{
+typedef int (*Scheme_Nested_Main)(void *data);
+}}
 
 
 @function[(void scheme_set_stack_base
@@ -739,7 +757,7 @@ must be the beginning or end of a local-frame registration. Worse, in
 CGC or 3m, if @cpp{real_main} is declared @cpp{static}, the compiler
 may inline it and place variables containing collectable values deeper
 in the stack than @cpp{dummy}. To avoid these problems, use
-@cpp{scheme_main_setup}, instead.}
+@cpp{scheme_main_setup} or @cpp{scheme_main_stack_setup}, instead.}
 
 @function[(void scheme_set_stack_bounds
            [void* stack_addr]
@@ -788,14 +806,18 @@ Registers the pointer @var{*p} as a weak pointer; when no other
 (non-weak) pointers reference the same memory as @var{*p} references,
 then @var{*p} will be set to @cpp{NULL} by the garbage collector. The
 value in @var{*p} may change, but the pointer remains weak with
-respect to the value of @var{*p} at the time @var{p} was registered.}
+respect to the value of @var{*p} at the time @var{p} was registered.
+
+This function is not available in 3m.}
 
 @function[(void scheme_weak_reference_indirect
            [void** p]
            [void* v])]{
 
-Like @cppi{scheme_weak_reference}, but @var{*p} is cleared
-(regardless of its value) when there are no references to @var{v}.}
+Like @cppi{scheme_weak_reference}, but @var{*p} is set to @cpp{NULL}
+(regardless of its prior value) when there are no references to @var{v}.
+
+This function is not available in 3m.}
 
 @function[(void scheme_register_finalizer
            [void* p]
@@ -917,6 +939,7 @@ See @cpp{scheme_dont_gc_ptr}.}
 
 Forces an immediate garbage-collection.}
 
+
 @function[(void GC_register_traversers
            [short tag]
            [Size_Proc s]
@@ -939,6 +962,30 @@ Each of the three procedures takes a pointer and returns an integer:
 If the result of the size procedure is a constant, then pass a
  non-zero value for @var{is_const_size}. If the mark and fixup
  procedures are no-ops, then pass a non-zero value
- for @var{is_atomic}.
+ for @var{is_atomic}.}
 
-}
+
+@function[(void* GC_resolve [void* p])]{
+
+3m only. Can be called by a size, mark, or fixup procedure that is registered
+with @cpp{GC_register_traversers}. It returns the current address of
+an object @var{p} that might have been moved already, where @var{p}
+corresponds to an object that is referenced directly by the object
+being sized, marked, or fixed. This translation is necessary, for
+example, if the size or structure of an object depends on the content
+of an object it references. For example, the size of a class instance
+usually depends on a field count that is stored in the class. A fixup
+procedure should call this function on a reference @emph{before}
+fixing it.}
+
+
+@function[(void* GC_fixup_self [void* p])]{
+
+3m only. Can be called by a fixup procedure that is registered with
+@cpp{GC_register_traversers}. It returns the final address of @var{p},
+which must be the pointer passed to the fixup procedure. For some
+implementations of the memory manager, the result is the same as
+@var{p}, either because objects are not moved or because the object is
+moved before it is fixed. With other implementations, an object might
+be moved after the fixup process, and the result is the location that
+the object will have after garbage collection finished.}

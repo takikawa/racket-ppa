@@ -287,6 +287,9 @@
  (yes "Ja")
  (no "Nein")
  
+ ;; saving image (right click on an image to see the text)
+ (save-image "Bild abspeichern...")
+
  ;;; preferences
  (preferences "Einstellungen")
  (error-saving-preferences "Fehler beim Speichern der Einstellungen für ~a")
@@ -318,7 +321,6 @@
  (enable-keybindings-in-menus "Tastenbelegung für Menüs")
  (automatically-to-ps "Automatisch in PostScript-Datei drucken")
  (command-as-meta "Command-Taste als Meta behandeln") ;; macos/macos x only
- (separate-dialog-for-searching "Für Textsuche separaten Dialog verwenden")
  (reuse-existing-frames "Existierende Fenster für neu geöffnete Dateien wiederverwenden")
  (default-fonts "Standard-Fonts")
  (basic-gray-paren-match-color "Farbe für Klammern-Hervorhebung \"Grau Standard\"") ; in prefs dialog
@@ -397,18 +399,23 @@
  (repl-value-color "Werte")
  (repl-error-color "Fehler")
  
- ;;; find/replace
- (find-and-replace "Suchen und Ersetzen")
- (find "Suchen")
- (replace "Ersetzen")
+  ;;; find/replace
+ (search-next "Weiter")
+ (search-next "Zurück")
+ (search-match "Fundort")  ;;; this one and the next one are singular/plural variants of each other
+ (search-matches "Fundorte") 
+ (search-replace "Ersetzen")
+ (search-skip "Überspringen")
+ (search-show-replace "Ersetzen einblenden")
+ (search-hide-replace "Ersetzen ausblenden")
+ (find-case-sensitive "Groß-/Kleinschreibung beachten")  ;; the check box in both the docked & undocked search
+ (find-anchor-based "Suchen mit Ankern")
+ 
+ ;; these string constants used to be used by searching,
+ ;; but aren't anymore. They are still used by other tools, tho.
+ (hide "Ausblenden")
  (dock "Andocken")
  (undock "Ablegen")
- (replace&find-again "Nochmals Suchen && Ersetzen") ;;; need double & to get a single &
- (replace-to-end "Ersetzen bis zum Ende")
- (forward "Vorwärts")
- (backward "Rückwärts")
- (hide "Ausblenden")
- (find-case-sensitive "Groß-/Kleinschreibung beachten")
  
  ;;; multi-file-search
  (mfs-multi-file-search-menu-item "In Dateien suchen...")
@@ -539,17 +546,30 @@
  (clear-info "Lösche die Selektion, ohne das Clipboard dabei zu ändern oder etwas einzufügen")
  (clear-menu-item-windows "&Löschen")
 
- (select-all-info "Selektiere das gesamte Dokument")
+ (select-all-info "Gesamtes Dokument selektieren")
  (select-all-menu-item "&Alles selektieren")
  
- (find-info "Suche eine Zeichenkette")
- (find-menu-item "Suche...")
+ (find-info "Zum nächsten Vorkommen der Zeichenkette aus dem Such-Fenster springen")
+ (find-menu-item "Suchen")
 
- (find-again-info "Suche die gleiche Zeichenkette nochmal")
- (find-again-menu-item "Suche nochmal")
+ (find-next-info "Zum nächsten Fundort der Zeichenkette im Suchfenster springen")
+ (find-next-menu-item "Weitersuchen")
+
+ (find-previous-info "Zum vorherigen Vorkommen der Zeichenkette aus dem Such-Fenster springen")
+ (find-previous-menu-item "Rückwärts weitersuchen")
+
+ (show-replace-menu-item "Ersetzen einblenden")
+ (hide-replace-menu-item "Ersetzen ausblenden")
+ (show/hide-replace-info "Wechselt die Sichtbarkeit des Ersetzen-Panels")
  
- (replace-and-find-again-info "Ersetze den aktuellen Text und suche dann das gleiche nochmal")
- (replace-and-find-again-menu-item "Ersetzen && nochmal suchen")
+ (replace-menu-item "Ersetzen")
+ (replace-info " Suchtext im dunklen Kreis ersetzen")
+
+ (replace-all-info "Alle Vorkommen der Such-Zeichenkette ersetzen")
+ (replace-all-menu-item "Alle ersetzen")
+ 
+ (find-case-sensitive-info "Schaltet zwischen Groß-/Kleinschreibung berücksichtigendem und nicht berücksichtigendem Suchen um")
+ (find-case-sensitive-menu-item "Suchen mit Groß-/Kleinschreibung")
 
  (complete-word "Wort vervollständigen") ; the complete word menu item in the edit menu
  (no-completions "... keine Vervollständigungen verfügbar") ; shows up in the completions menu when there are no completions (in italics)
@@ -570,7 +590,7 @@
  (keybindings-choose-user-defined-file "Bitte eine Datei mit den Tastenbelegungen auswählen.")
 
  (user-defined-keybinding-error "Fehler beim Ausführen der Tastenbelegung ~a\n\n~a")
- (user-defined-keybinding-malformed-file "Die Datei ~a enthält kein Modul, das in der Sprache (lib \"keybinding-lang.ss\" \"framework\") geschrieben ist.")  
+ (user-defined-keybinding-malformed-file "Die Datei ~a enthält kein Modul, das in der Sprache framework/keybinding-lang geschrieben ist.")  
  (keybindings-planet-malformed-spec "Die PLaneT-Spezifikation ist fehlerhaft: ~a") ; the string will be what the user typed in
  (keybindings-type-planet-spec "Bitte PLaneT-require-Spezifikation eingeben (ohne das `require')")
   
@@ -729,11 +749,16 @@
  (scheme-menu-name "S&cheme")
  (execute-menu-item-label "Start")
  (execute-menu-item-help-string "Das Programm im Definitionsfenster neu starten")
+
  (break-menu-item-label "Stop")
  (break-menu-item-help-string "Momentane Auswertung unterbrechen")
  (kill-menu-item-label "Abbrechen")
  (kill-menu-item-help-string "Momentante Auswertung abbrechen")
- (limit-memory-menu-item-label "Speicherverbrauch einschänken...")
+ (ask-quit-menu-item-label "Programm bitten aufzuhören")
+ (ask-quit-menu-item-help-string "Benutzt break-thread, um den primären Thread der Auswertung zu stoppen")
+ (force-quit-menu-item-label "Programm zwingen aufzuhören")
+ (force-quit-menu-item-help-string "Benutzt custodian-shutdown-all, um die Auswertung abzubrechen")
+ (limit-memory-menu-item-label "Speicherverbrauch einschränken...")
  (limit-memory-msg-1 "Das Limit wird beim nächsten Programmstart aktiv")
  (limit-memory-msg-2 "und muß mindestens 100 Megabytes betragen.")
  (limit-memory-unlimited "nicht einschränken")
@@ -809,7 +834,10 @@
  (whole-part "Ganzzahliger Anteil")
  (numerator "Zähler")
  (denominator "Nenner")
- (invalid-number "Unzulässige Zahl: muss exakt, reell und nicht ganz sein.")
+ (insert-number/bad-whole-part "Der ganzzahlige Anteil muß eine ganze Zahl sein")
+ (insert-number/bad-numerator "Der Zähler einer Zahl muß eine nichtnegative ganze Zahl sein")
+ (insert-number/bad-denominator "Der Nenner einer Zahl muß eine nichtnegative ganze Zahl sein")
+
  (insert-fraction-menu-item-label "Bruch einfügen...")
 
  ;; number snip popup menu
@@ -893,7 +921,7 @@
  (advanced-student "Fortgeschritten")
  (advanced-one-line-summary "Zwischenstufe plus lambda und Mutation")
  (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
- (pretty-big-scheme "Kombo (enthält MrEd and Fortgeschritten)")
+ (pretty-big-scheme "Kombo")
  (pretty-big-scheme-one-line-summary "Macht Syntax and Prozeduren der HtDP-Sprachen verfügbar")
  (r5rs-language-name "R5RS")
  (r5rs-one-line-summary "R5RS, ohne alles andere")
@@ -1147,6 +1175,8 @@
   (ml-cp-raise "Höher")
   (ml-cp-lower "Tiefer")
 
+  (ml-always-show-#lang-line "#lang-Zeile in der `module'-Sprache immer anzeigen")
+
   ;; Profj
   (profj-java "Java")
   (profj-java-mode "Java-Modus")
@@ -1284,4 +1314,16 @@
   (gui-tool-show-gui-toolbar "GUI-Toolbar einblenden")
   (gui-tool-hide-gui-toolbar "GUI-Toolbar ausblenden")
   (gui-tool-insert-gui "GUI einfügen")
-  )
+
+  
+  ;; contract violation tracking
+  
+  ; tooltip for new planet icon in drscheme window (must have a planet violation logged to see it)
+  (show-planet-contract-violations "PLaneT-Vertragsverletzungen anzeigen")
+
+  ; buttons in the dialog that lists the recorded bug reports
+  (bug-track-report "Ticket einreichen")
+  (bug-track-forget "Vergessen")
+  (bug-track-forget-all "Alles vergessen")
+
+ )

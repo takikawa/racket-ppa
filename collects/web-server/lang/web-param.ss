@@ -1,11 +1,12 @@
 #lang scheme/base
 (require (for-syntax scheme/base)
+         scheme/contract
          "../private/closure.ss"
          mzlib/list)
 
-; XXX Add contract
+(provide/contract
+ [web-parameter? (any/c . -> . boolean?)])
 (provide make-web-parameter
-         web-parameter?
          web-parameterize)
 
 (define (web-parameter? any)
@@ -53,5 +54,6 @@
   (syntax-case stx ()
     [(_ ([wp ve] ...) e ...)
      (with-syntax ([(v ...) (generate-temporaries (syntax->list #'(ve ...)))])
-       #'(let ([v ve] ...)
-           (web-parameterize/values ([wp v] ...) e ...)))]))
+       (syntax/loc stx
+         (let ([v ve] ...)
+           (web-parameterize/values ([wp v] ...) e ...))))]))

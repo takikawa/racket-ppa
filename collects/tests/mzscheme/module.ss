@@ -307,14 +307,24 @@
 (test #t module-path? "hello")
 (test #t module-path? "hello.ss")
 (test #f module-path? "hello*ss")
+(test #t module-path? "hello%2ess")
+(test #t module-path? "hello%00ss")
+(test #f module-path? "hello%2Ess")
+(test #f module-path? "hello%41ss")
+(test #f module-path? "hello%4")
+(test #f module-path? "hello%")
+(test #f module-path? "hello%q0")
+(test #f module-path? "hello%0q")
 (test #f module-path? "foo.ss/hello")
 (test #f module-path? "foo/")
 (test #f module-path? "a/foo/")
 (test #f module-path? "/foo.ss")
 (test #f module-path? "/a/foo.ss")
 (test #f module-path? "a/foo.ss/b")
+(test #t module-path? "a/foo%2ess/b")
 (test #t module-path? "a/_/b")
 (test #t module-path? "a/0123456789+-_/b.---")
+(test #t module-path? "a/0123456789+-_/b.-%2e")
 (test #t module-path? "../foo.ss")
 (test #t module-path? "x/../foo.ss")
 (test #t module-path? "x/./foo.ss")
@@ -324,6 +334,8 @@
 (test #t module-path? 'hello)
 (test #f module-path? 'hello/)
 (test #f module-path? 'hello.ss)
+(test #t module-path? 'hello%2ess)
+(test #f module-path? 'hello%2Ess)
 (test #f module-path? 'hello/a.ss)
 (test #f module-path? '/hello/a.ss)
 (test #f module-path? '/hello)
@@ -356,6 +368,9 @@
 (test #f module-path? '(planet))
 (test #f module-path? '(planet robby))
 (test #t module-path? '(planet robby/redex))
+(test #t module-path? '(planet robby%2e/%2eredex))
+(test #f module-path? '(planet robby%2/redex))
+(test #f module-path? '(planet robby/redex%2))
 (test #f module-path? '(planet robby/redex/))
 (test #f module-path? '(planet robby/redex/foo/))
 (test #f module-path? '(planet /robby/redex/foo))
@@ -373,6 +388,7 @@
 (test #t module-path? '(planet robby/redex:7:8-9/foo))
 (test #t module-path? '(planet robby/redex:7:8-9))
 (test #t module-path? '(planet robby/redex:700:800-00900/foo))
+(test #t module-path? '(planet robby/redex:700:800-00900/foo%2e))
 (test #f module-path? '(planet robby/redex:=7/foo))
 (test #f module-path? '(planet robby/redex::8/foo))
 (test #f module-path? '(planet robby/redex:7:/foo))
@@ -389,6 +405,34 @@
 (test #t module-path? '(planet "foo.ss" ("robby" "redex.plt" 7 8)))
 (test #t module-path? '(planet "foo.ss" ("robby" "redex.plt" 7 (= 8))))
 (test #t module-path? '(planet "foo.ss" ("robby" "redex.plt") "sub" "deeper"))
+(test #t module-path? '(planet "foo%2e.ss" ("robby%2e" "redex%2e.plt") "sub%2e" "%2edeeper"))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check 'module-language, `module-compiled-language-info', and `module->language-info'
+
+(let ([mk (lambda (val)
+            (compile (syntax-property #'(module m scheme/base)
+                                      'module-language
+                                      val)))])
+  (test #f 'info (module-compiled-language-info (mk 10)))
+  (test '#(scheme x "whatever") 'info (module-compiled-language-info (mk '#(scheme x "whatever"))))
+  (let ([ns (make-base-namespace)])
+    (parameterize ([current-namespace ns])
+      (eval mk ns)
+      (eval (mk '#(scheme x "whatever")))
+      (test '#(scheme x "whatever") module->language-info ''m)
+      (let ([path (build-path (collection-path "tests" "mzscheme")
+                              "langm.ss")])
+        (parameterize ([read-accept-reader #t]
+                       [current-module-declare-name (module-path-index-resolve
+                                                     (module-path-index-join path #f))])
+          (eval
+           (read-syntax path
+                        (open-input-string "#lang tests/mzscheme (provide x) (define x 1)"
+                                           path)))
+          ((current-module-name-resolver) (current-module-declare-name))))
+      (test '#(tests/mzscheme/lang/getinfo get-info closure-data)
+            module->language-info 'tests/mzscheme/langm))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

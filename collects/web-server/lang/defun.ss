@@ -1,12 +1,14 @@
 #lang scheme/base
 (require (for-template scheme/base)
          syntax/kerncase
+         syntax/free-vars
+         scheme/contract
          mzlib/list
          mzlib/plt-match
          "util.ss"
-         "freevars.ss"
          "../private/closure.ss")
-(provide defun)
+(provide/contract
+ [defun (syntax? . -> . (values syntax? (listof syntax?)))])
 
 ; make-new-clouse-label : (syntax -> syntax) syntax -> syntax
 (define (make-new-closure-label labeling stx)

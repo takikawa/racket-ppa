@@ -117,9 +117,9 @@ widest line.
 Each list within @scheme[element]s is spliced into the sequence of
 string and pict elements. If @scheme[decode?] is true, then strings
 among the @scheme[element]s are decoded by performing the following
-substitutions: @litchar["---"] @d=> @litchar["\u2014"], @litchar["--"]
-@d=> @litchar["\u2013"], @litchar["``"] @d=> @litchar["\u201C"],
-@litchar["''"] @d=> @litchar["\u201D"], @litchar["'"] @d=>
+substitutions: @litchar{---} @d=> @litchar["\u2014"], @litchar{--}
+@d=> @litchar["\u2013"], @litchar{``} @d=> @litchar["\u201C"],
+@litchar{''} @d=> @litchar["\u201D"], @litchar{'} @d=>
 @litchar["\u2019"].
 
 Strings are split at spaces for word-wrapping to fit the page, and a
@@ -386,7 +386,7 @@ triggered via the @DFlag{condense} command-line flag.}
 
 @section{Configuration}
 
-@defparam[current-font-size n nonnegative-exact-integer?]{
+@defparam[current-font-size n exact-nonnegative-integer?]{
 
 Parameter that determines he font size used by @scheme[t],
 @scheme[para], etc. The default size is @scheme[32].}
@@ -400,13 +400,13 @@ initial values include @scheme['swiss], @scheme["Verdana"], and
 @scheme["Gill Sans"].}
 
 
-@defparam[current-line-sep n nonnegative-exact-integer?]{
+@defparam[current-line-sep n exact-nonnegative-integer?]{
 
 Parameter that controls the amount of space used between lines by
 @scheme[para], @scheme[item], and @scheme[subitem].}
 
 
-@defparam[current-para-width n nonnegative-exact-integer?]{
+@defparam[current-para-width n exact-nonnegative-integer?]{
 
 Parameter that controls the width of a pict created by
 @scheme[para], @scheme[item], and @scheme[subitem].}
@@ -419,7 +419,7 @@ title. The default is @scheme["black"].}
 
 
 @defparam[current-slide-assembler proc ((or/c string? false/c)
-                                        nonnegative-exact-integer?
+                                        exact-nonnegative-integer?
                                         pict?
                                         . -> .
                                         pict?)]{

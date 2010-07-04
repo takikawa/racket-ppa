@@ -1827,6 +1827,13 @@
               (void)))
         count))
 
+;; Letrec must allocate early, though:
+(test #f 'letrec+call/cc
+      (letrec ((x (call-with-current-continuation list)))
+        (if (pair? x)
+            ((car x) (lambda () x))
+            (pair? (x)))))
+
 (arity-test call/cc 1 2)
 (arity-test call/ec 1 1)
 (err/rt-test (call/cc 4))
@@ -2146,6 +2153,9 @@
 (define im-t (make-immutable-hash '(("hello" . 2))))
 (test 2 hash-ref im-t "hello" (lambda () 'none))
 (test #f hash-eq? im-t)
+
+(test #f equal? #hash((x . 0)) #hash((y . 0)))
+(test #t equal? #hash((y . 0)) #hash((y . 0)))
 
 (err/rt-test (hash-set! im-t 1 2))
 (err/rt-test (hash-remove! im-t 1))
