@@ -4,6 +4,7 @@
            (prefix f: (lib "framework.ss" "framework"))
            (lib "pretty.ss")
            "testing-shared.ss"
+           "shared.ss"
 	   (lib "string-constant.ss" "string-constants")
            (lib "bitmap-label.ss" "mrlib"))
 
@@ -13,7 +14,8 @@
    stepper-text%
    snip?
    stepper-warning%
-   finished-text)
+   finished-text
+   vertical-separator-snip-class%)
    
   (define test-dc (make-object bitmap-dc% (make-object bitmap% 1 1)))
   (define reduct-highlight-color (make-object color% 255 255 255))
@@ -36,9 +38,8 @@
   (unless (send red-arrow-bitmap ok?)
     (error 'red-arrow-bitmap "unable to load red-arrow bitmap"))
   
-  (define vertical-separator-snipclass
-    (make-object
-     (class snip-class% ()
+  (define vertical-separator-snip-class%
+    (class snip-class% ()
        (override read)
        
        (define (read s)
@@ -46,11 +47,15 @@
            (send s get size-box)
            (make-object vertical-separator-snip% 100)))
        
-       (super-instantiate ()))))
+       (super-instantiate ())))
+  
+  (define vertical-separator-snipclass
+    (make-object vertical-separator-snip-class%))
+  
   
   (send* vertical-separator-snipclass
     (set-version 1)
-    (set-classname "drscheme:vertical-separator-snip%"))
+    (set-classname (format "~s" `(lib "vertical-separator-snip.ss" "stepper" "private"))))
   
   (send (get-the-snip-class-list) add vertical-separator-snipclass)
   
@@ -483,7 +488,7 @@
   (define (strip-to-sexp stx highlight-table)
     (define (strip-regular stx)
       (let* ([it (if (and (syntax? stx)
-                          (eq? (syntax-property stx 'stepper-hint) 'from-xml))
+                          (eq? (stepper-syntax-property stx 'stepper-hint) 'from-xml))
                      (strip-xml stx)
                      stx)]
              [it
@@ -495,7 +500,7 @@
                     [else it])]
              [it
               (if (and (syntax? stx)
-                       (syntax-property stx 'stepper-highlight))
+                       (stepper-syntax-property stx 'stepper-highlight))
                   (if (pair? it) 
                       (begin
                         (hash-table-put! highlight-table it 'non-confusable)

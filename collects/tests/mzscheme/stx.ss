@@ -194,6 +194,20 @@
 (test #t syntax-original? se)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; paren-shape:
+
+(let ([s (with-syntax ([a (quote-syntax [x y])])
+	   #'[a 10])])
+  (test #f syntax-property #'(x) 'paren-shape)
+  (test #\[ syntax-property #'[x] 'paren-shape)
+  (test #\[ syntax-property s 'paren-shape)
+  (test #\[ syntax-property (syntax-case s () [(b _) #'b]) 'paren-shape))
+
+(let ([s (with-syntax ([(a ...) '(1 2 3)])
+	   #'[a ...])])
+  (test #\[ syntax-property s 'paren-shape))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Two-step macro chain
 
 (define-syntax mcr5
@@ -265,14 +279,13 @@
 (test 10 syntax-property (expand s) 'testing)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Check tracking of primitive expanders
+;; Check tracking of (formerly) primitive expanders
 
 (test '(let) (tree-map syntax-e) (syntax-property (expand #'(let ([x 10]) x)) 'origin))
-(test '(let let*) (tree-map syntax-e) (syntax-property (expand #'(let* ([x 10]) x)) 'origin))
+(test '(let*-values let*) (tree-map syntax-e) (syntax-property (expand #'(let* ([x 10]) x)) 'origin))
 (test '(let) (tree-map syntax-e) (syntax-property (expand #'(let loop ([x 10]) x)) 'origin))
 (test '(letrec) (tree-map syntax-e) (syntax-property (expand #'(letrec ([x 10]) x)) 'origin))
 (test '(let*-values) (tree-map syntax-e) (syntax-property (expand #'(let*-values ([(x) 10]) x)) 'origin))
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Symbol Keys
@@ -637,22 +650,35 @@
        (lambda (expr)
 	 (let ([e (expand expr)])
 	   (syntax-case e ()
-	     [(lv () beg)
+	     [(lv (bind ...) beg)
 	      (let ([db (syntax-property #'beg 'disappeared-binding)])
-		(syntax-case #'beg ()
-		  [(bg e)
-		   (let ([o (syntax-property #'e 'origin)])
-		     (test #t (lambda (db o)
-				(and (list? db)
-				     (list? o)
-				     (= 1 (length db))
-				     (= 1 (length o))
-				     (identifier? (car db))
-				     (identifier? (car o))
-				     (bound-identifier=? (car db) (car o))))
-			   db o))]))])))])
+                (printf "~s\n" (syntax-object->datum #'beg))
+                (let-values ([(bg e)
+                              (syntax-case #'beg (#%app #%top list)
+                                [(bg (#%app (#%top . list) e))
+                                 (values #'bg #'e)]
+                                [(bg e)
+                                 (values #'bg #'e)])])
+                  (let ([o (syntax-property e 'origin)])
+                    (test #t (lambda (db o)
+                               (and (list? db)
+                                    (list? o)
+                                    (<= 1 (length db) 2)
+                                    (= 1 (length o))
+                                    (andmap identifier? db)
+                                    (identifier? (car o))
+                                    (ormap (lambda (db) (bound-identifier=? db (car o))) db)))
+                          db o))))])))])
   (check-expr #'(let () (letrec-syntaxes+values ([(x) (lambda (stx) #'(quote y))]) () x)))
-  (check-expr #'(let () (define-syntax (x stx) #'(quote y)) x)))
+  (check-expr #'(let () (letrec-syntaxes+values ([(x) (lambda (stx) #'(quote y))]) () (list x))))
+  (check-expr #'(let-values () (define-syntax (x stx) #'(quote y)) x))
+  (check-expr #'(let-values () (define-syntax (x stx) #'(quote y)) (list x)))
+  (check-expr #'(let-values ([(y) 2]) (define-syntax (x stx) #'(quote y)) x))
+  (check-expr #'(let-values ([(y) 2]) (define-syntax (x stx) #'(quote y)) (list x)))
+  (check-expr #'(let () (define-syntax (x stx) #'(quote y)) x))
+  (check-expr #'(let () (define-syntax (x stx) #'(quote y)) (list x)))
+  (check-expr #'(let ([z 45]) (define-syntax (x stx) #'(quote y)) x))
+  (check-expr #'(let ([z 45]) (define-syntax (x stx) #'(quote y)) (list x))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; protected identifiers
@@ -1119,6 +1145,28 @@
 	  (set! load-ok? #f)
 	  (test #t eval '(module-identifier=? (f) #'x))
 	  (test #f eval `(module-identifier=? (f) (quote-syntax ,x-id))))))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;  certification example from the manual
+
+(module @-m mzscheme
+  (provide def-go)
+  (define (unchecked-go n x) 
+    (+ n 17))
+  (define-syntax (def-go stx)
+   (syntax-case stx ()
+     [(_ go)
+      #'(define-syntax (go stx)
+          (syntax-case stx ()
+           [(_ x)
+            #'(unchecked-go 8 x)]))])))
+
+(module @-n mzscheme
+  (require @-m)
+  (def-go go)
+  (go 10)) ; access to unchecked-go is allowed
+
+(require @-n)
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

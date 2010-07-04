@@ -3,12 +3,18 @@
            (lib "xml.ss" "xml")
            (lib "kw.ss")
            (lib "list.ss")
-           (lib "contract.ss"))
+           (lib "plt-match.ss")
+           (lib "contract.ss")
+           (lib "uri-codec.ss" "net"))
+  (require (lib "pretty.ss"))         
   (require "dispatch.ss"
-           "../configuration.ss"
-           "../util.ss"
-           "../mime-types.ss"
-           "../response.ss")
+           "../private/configuration.ss"
+           "../private/util.ss"
+           "../private/mime-types.ss"
+           "../private/request.ss"
+           "../private/servlet-helpers.ss"
+           "../private/response.ss"
+           "../response-structs.ss")
   (provide/contract
    [interface-version dispatcher-interface-version?])
   (provide ; XXX contract kw
@@ -32,10 +38,28 @@
       ;; to find the file, including searching for implicit index files, and serve it out
       (define path 
         (url-path->path htdocs-path
-                        (translate-escapes (url-path->string (url-path uri)))))
+                        (uri-decode (url-path->string (url-path uri)))))
       (cond
         [(file-exists? path)
-         (output-file conn path method (get-mime-type path))]
+         (match (headers-assq* #"Range" (request-headers/raw req))
+           [#f
+            (output-file conn path method (get-mime-type path))]
+           [range
+            (match (bytes->string/utf-8 (header-value range))
+              [(regexp "^bytes=(.*)-(.*)$" (list s start end))
+               (define startn
+                 (if (string=? "" start)
+                     0
+                     (string->number start)))
+               (define endn
+                 (if (string=? "" end)
+                     +inf.0
+                     (string->number end)))               
+               (output-file/partial conn path method (get-mime-type path)
+                                    startn endn)]
+              [r
+               ; XXX: Unhandled range: r
+               (output-file conn path method (get-mime-type path))])])]
         [(directory-exists? path)
          (let loop ([dir-defaults indices])
            (cond

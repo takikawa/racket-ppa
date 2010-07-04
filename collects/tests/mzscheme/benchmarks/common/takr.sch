@@ -516,6 +516,10 @@
                  (tak0 (- z 1) x y)))))
  
 ;;; call:  (tak0 18 12 6)
- 
-(time (tak0 18 12 2))
 
+(let ((input (with-input-from-file "input.txt" read)))
+  (time
+   (let loop ((n 500) (v 0))
+     (if (zero? n)
+         v
+         (loop (- n 1) (tak0 18 12 (if input 6 0)))))))

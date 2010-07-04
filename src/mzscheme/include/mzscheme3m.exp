@@ -138,6 +138,7 @@ scheme_temp_dec_mark_depth
 scheme_temp_inc_mark_depth
 scheme_current_continuation_marks
 scheme_extract_one_cc_mark
+scheme_extract_one_cc_mark_to_tag
 scheme_do_eval
 scheme_eval_compiled_stx_string
 scheme_load_compiled_stx_string
@@ -389,6 +390,7 @@ scheme_os_setcwd
 scheme_getdrive
 scheme_split_path
 scheme_build_path
+scheme_path_to_directory_path
 scheme_make_path
 scheme_make_sized_path
 scheme_make_sized_offset_path
@@ -403,6 +405,7 @@ scheme_fdisset
 scheme_add_fd_handle
 scheme_add_fd_eventmask
 scheme_security_check_file
+scheme_security_check_file_link
 scheme_security_check_network
 scheme_get_host_address
 scheme_free_host_address

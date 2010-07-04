@@ -160,7 +160,7 @@ unclosed_proc {
   gcMARK(d->code);
   gcMARK(d->closure_map);
 #ifdef MZ_USE_JIT
-  gcMARK(d->native_code);
+  gcMARK(d->u.native_code);
   gcMARK(d->context);
 #endif
 
@@ -290,7 +290,9 @@ closed_prim_proc {
 
 scm_closure {
   Scheme_Closure *c = (Scheme_Closure *)p;
-  int closure_size = ((Scheme_Closure_Data *)GC_resolve(c->code))->closure_size;
+  int closure_size = (c->code 
+                      ? ((Scheme_Closure_Data *)GC_resolve(c->code))->closure_size
+                      : 0);
 
  mark:
 
@@ -327,14 +329,13 @@ cont_proc {
   Scheme_Cont *c = (Scheme_Cont *)p;
   
   gcMARK(c->dw);
-  gcMARK(c->common);
-  gcMARK(c->ok);
+  gcMARK(c->prompt_tag);
+  gcMARK(c->meta_continuation);
   gcMARK(c->save_overflow);
   gcMARK(c->runstack_copied);
   gcMARK(c->runstack_owner);
   gcMARK(c->cont_mark_stack_copied);
   gcMARK(c->cont_mark_stack_owner);
-  gcMARK(c->orig_mark_segments);
   gcMARK(c->init_config);
   gcMARK(c->init_break_cell);
 #ifdef MZ_USE_JIT
@@ -344,17 +345,40 @@ cont_proc {
   MARK_jmpup(&c->buf);
   MARK_cjs(&c->cjs);
   MARK_stack_state(&c->ss);
+  gcMARK(c->runstack_start);
+  gcMARK(c->runstack_saved);
+
+  /* These shouldn't actually persist across a GC, but
+     just in case... */
+  gcMARK(c->value);
+  gcMARK(c->resume_to);
+  gcMARK(c->use_next_cont);
+  gcMARK(c->extra_marks);
   
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Cont));
+}
+
+meta_cont_proc {
+ mark:
+  Scheme_Meta_Continuation *c = (Scheme_Meta_Continuation *)p;
+  
+  gcMARK(c->prompt_tag);
+  gcMARK(c->overflow);
+  gcMARK(c->next);
+  gcMARK(c->cont_mark_stack_copied);
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Meta_Continuation));
 }
 
 mark_dyn_wind {
  mark:
   Scheme_Dynamic_Wind *dw = (Scheme_Dynamic_Wind *)p;
   
+  gcMARK(dw->id);
   gcMARK(dw->data);
-  gcMARK(dw->cont);
+  gcMARK(dw->prompt_tag);
   gcMARK(dw->prev);
     
   MARK_stack_state(&dw->envss);
@@ -368,23 +392,31 @@ mark_overflow {
   Scheme_Overflow *o = (Scheme_Overflow *)p;
 
   gcMARK(o->prev);
-  MARK_jmpup(&o->cont);
+  gcMARK(o->jmp);
+  gcMARK(o->id);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Overflow));
+}
+
+mark_overflow_jmp {
+ mark:
+  Scheme_Overflow_Jmp *o = (Scheme_Overflow_Jmp *)p;
+
+  MARK_jmpup(&o->cont);
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Overflow_Jmp));
 }
 
 escaping_cont_proc {
  mark:
   Scheme_Escaping_Cont *c = (Scheme_Escaping_Cont *)p;
 
-  gcMARK(c->mark_key);
-  gcMARK(c->marks_prefix);
 #ifdef MZ_USE_JIT
   gcMARK(c->native_trace);
 #endif
 
-  MARK_cjs(&c->cjs);
   MARK_stack_state(&c->envss);
 
  size:
@@ -564,8 +596,6 @@ thread_val {
 
   MARK_cjs(&pr->cjs);
 
-  gcMARK(pr->current_escape_cont_key);
-
   gcMARK(pr->cell_values);
   gcMARK(pr->init_config);
   gcMARK(pr->init_break_cell);
@@ -579,14 +609,17 @@ thread_val {
   gcMARK(pr->runstack_owner);
   gcMARK(pr->runstack_swapped);
   pr->spare_runstack = NULL; /* just in case */
+
+  gcMARK(pr->barrier_prompt);
+  gcMARK(pr->meta_prompt);
+  gcMARK(pr->meta_continuation);
   
   gcMARK(pr->cont_mark_stack_segments);
   gcMARK(pr->cont_mark_stack_owner);
   gcMARK(pr->cont_mark_stack_swapped);
-  
+
   MARK_jmpup(&pr->jmpup_buf);
   
-  gcMARK(pr->cc_ok);
   gcMARK(pr->dw);
   
   gcMARK(pr->nester);
@@ -639,6 +672,16 @@ thread_val {
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Thread));
+}
+
+prompt_val {
+ mark: 
+  Scheme_Prompt *pr = (Scheme_Prompt *)p;
+  gcMARK(pr->boundary_overflow_id);
+  gcMARK(pr->boundary_dw_id);
+  gcMARK(pr->runstack_boundary_start);
+ size:
+  gcBYTES_TO_WORDS(sizeof(Scheme_Prompt));
 }
 
 cont_mark_set_val {
@@ -883,6 +926,7 @@ guard_val {
   gcMARK(g->parent);
   gcMARK(g->file_proc);
   gcMARK(g->network_proc);
+  gcMARK(g->link_proc);
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Security_Guard));
 }
@@ -960,6 +1004,8 @@ mark_resolve_info {
   gcMARK(i->new_pos);
   gcMARK(i->old_stx_pos);
   gcMARK(i->flags);
+  gcMARK(i->lifts);
+  gcMARK(i->lifted);
   gcMARK(i->next);
 
  size:
@@ -994,6 +1040,7 @@ mark_comp_info {
   
   gcMARK(i->value_name);
   gcMARK(i->certs);
+  gcMARK(i->observer);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Compile_Info));
@@ -1001,12 +1048,10 @@ mark_comp_info {
 
 mark_saved_stack {
  mark:
-  Scheme_Saved_Stack *saved = (Scheme_Saved_Stack *) p;
-  Scheme_Object **old = saved->runstack_start;
+  Scheme_Saved_Stack *saved = (Scheme_Saved_Stack *)p;
   
   gcMARK(saved->prev);
-  gcFIXUP_TYPED_NOW(Scheme_Object **, saved->runstack_start);
-  saved->runstack = saved->runstack_start + (saved->runstack - old);
+  gcMARK(saved->runstack_start);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Saved_Stack));
@@ -1678,6 +1723,7 @@ mark_readtable {
   gcMARK(t->mapping);
   gcMARK(t->fast_mapping);
   gcMARK(t->symbol_parser);
+  gcMARK(t->names);
  size:
   gcBYTES_TO_WORDS(sizeof(Readtable));
 }
@@ -1702,6 +1748,7 @@ mark_regexp {
   regexp *r = (regexp *)p;
  mark:
   gcMARK(r->source);
+  gcMARK(r->regstart);
  size:
   gcBYTES_TO_WORDS((sizeof(regexp) + r->regsize));
 }
@@ -1714,7 +1761,9 @@ mark_regwork {
   gcMARK(r->port);
   gcMARK(r->unless_evt);
   gcMARK(r->startp);
+  gcMARK(r->maybep);
   gcMARK(r->endp);
+  gcMARK(r->counters);
   gcMARK(r->peekskip);
  size:
   gcBYTES_TO_WORDS(sizeof(Regwork));
@@ -1825,6 +1874,7 @@ mark_jit_state {
  mark:
   mz_jit_state *j = (mz_jit_state *)p;
   gcMARK(j->mappings);
+  gcMARK(j->self_data);
  size:
   gcBYTES_TO_WORDS(sizeof(mz_jit_state));
 }

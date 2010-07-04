@@ -1,7 +1,7 @@
 ;; A modification of Dave Herman's zip module
 
 (module zip mzscheme
-  (require (lib "deflate.ss") (lib "file.ss"))
+  (require (lib "deflate.ss") (lib "file.ss") (lib "kw.ss"))
 
   ;; ===========================================================================
   ;; DATA DEFINITIONS
@@ -246,9 +246,8 @@
   ;; zip-write : (listof relative-path) ->
   ;; writes a zip file to current-output-port
   (provide zip->output)
-  (define (zip->output files . out)
-    (parameterize ([current-output-port
-                    (if (pair? out) (car out) (current-output-port))])
+  (define/kw (zip->output files #:optional [out (current-output-port)])
+    (parameterize ([current-output-port out])
       (let* ([seekable? (seekable-port? (current-output-port))]
              [headers ; note: MzScheme's `map' is always left-to-right
               (map (lambda (file)

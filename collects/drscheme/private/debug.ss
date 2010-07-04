@@ -189,14 +189,31 @@ profile todo:
                            [(begin expr ...)
                             ;; Found a `begin', so expand/eval each contained 
                             ;; expression one at a time 
+                            
                             (let i-loop ([exprs (syntax->list #'(expr ...))]
                                          [last-one (list (void))])
                               (cond
-                                [(null? exprs) (apply values last-one)]
-                                [else (i-loop (cdr exprs)
-                                              (call-with-values
-                                               (λ () (loop (car exprs)))
-                                               list))]))]
+                                [(null? exprs) 
+                                 (apply values last-one)]
+                                [else 
+                                 (i-loop (cdr exprs)
+                                         (call-with-values (λ () (loop (car exprs)))
+                                                           list))]))
+                            
+                            ;; the version below behaves properly wrt continuations
+                            ;; but doesn't match mzscheme. So, we use the one above.
+                            #;
+                            (let ([exprs (syntax->list #'(expr ...))]
+                                  [last-one (list (void))])
+                              (let i-loop ()
+                                (cond
+                                  [(null? exprs) 
+                                   (apply values last-one)]
+                                  [else 
+                                   (let ([exp (car exprs)])
+                                     (set! exprs (cdr exprs))
+                                     (set! last-one (call-with-values (λ () (loop exp)) list))
+                                     (i-loop))])))]
                            [_else 
                             ;; Not `begin', so proceed with normal expand and eval 
                             (let* ([annotated (annotate-top (expand-syntax top-e) #f)])
@@ -228,12 +245,13 @@ profile todo:
         debug-error-display-handler)
       
       (define (print-bug-to-stderr msg cms)
-        (let ([note% (if (mf-bday?) mf-note% bug-note%)])
-          (when note%
-            (let ([note (new note%)])
-              (send note set-callback (λ () (show-backtrace-window msg cms)))
-              (write-special note (current-error-port))
-              (display #\space (current-error-port))))))
+        (when (port-writes-special? (current-error-port))
+          (let ([note% (if (mf-bday?) mf-note% bug-note%)])
+            (when note%
+              (let ([note (new note%)])
+                (send note set-callback (λ () (show-backtrace-window msg cms)))
+                (write-special note (current-error-port))
+                (display #\space (current-error-port)))))))
       
       (define (show-error-and-highlight msg exn highlight-errors)
         (let ([cms
@@ -282,22 +300,23 @@ profile todo:
                                fn))
                         raw-src)])
           (when (and (path? src) file-note%)
-            (let ([note (new file-note%)])
-              (send note set-callback 
-                    (λ () (open-and-highlight-in-file src-to-display)))
-              (write-special note (current-error-port))
-              (display #\space (current-error-port)) 
-              (display (path->string (find-relative-path (current-directory) src))
-                       (current-error-port))
-              (let ([line (srcloc-line src-to-display)]
-                    [col (srcloc-column src-to-display)]
-                    [pos (srcloc-position src-to-display)])
-                (cond
-                  [(and (number? line) (number? col))
-                   (fprintf (current-error-port) ":~a:~a" line col)]
-                  [pos
-                   (fprintf (current-error-port) "::~a" pos)]))
-              (display ": " (current-error-port))))))
+            (when (port-writes-special? (current-error-port))
+              (let ([note (new file-note%)])
+                (send note set-callback 
+                      (λ () (open-and-highlight-in-file src-to-display)))
+                (write-special note (current-error-port))
+                (display #\space (current-error-port))))
+            (display (path->string (find-relative-path (current-directory) src))
+                     (current-error-port))
+            (let ([line (srcloc-line src-to-display)]
+                  [col (srcloc-column src-to-display)]
+                  [pos (srcloc-position src-to-display)])
+              (cond
+                [(and (number? line) (number? col))
+                 (fprintf (current-error-port) ":~a:~a" line col)]
+                [pos
+                 (fprintf (current-error-port) "::~a" pos)]))
+            (display ": " (current-error-port)))))
       
       ;; find-src-to-display : exn (union #f (listof (list* <src> number number)))
       ;;                    -> (listof srclocs)
@@ -327,18 +346,24 @@ profile todo:
   
       
       (define (show-syntax-error-context port exn)
-        (let ([error-text-style-delta (make-object style-delta%)])
+        (let ([error-text-style-delta (make-object style-delta%)]
+              [send-out
+               (λ (msg f) 
+                 (if (port-writes-special? (current-error-port))
+                     (let ([snp (make-object string-snip% msg)])
+                       (f snp)
+                       (write-special snp (current-error-port)))
+                     (display msg (current-error-port))))])
           (send error-text-style-delta set-delta-foreground (make-object color% 200 0 0))
-          (write-special (make-object string-snip% " in:") (current-error-port))
+          (send-out " in:" void)
           (for-each (λ (expr)
-                      (let ([snp (make-object string-snip%
-                                   (format "~s" (syntax-object->datum expr)))])
-                        (display " " (current-error-port))
-                        (send snp set-style
-                              (send the-style-list find-or-create-style
-                                    (send snp get-style)
-                                    error-text-style-delta))
-                        (write-special snp (current-error-port))))
+                      (display " " (current-error-port))
+                      (send-out (format "~s" (syntax-object->datum expr))
+                                (λ (snp)
+                                  (send snp set-style
+                                        (send the-style-list find-or-create-style
+                                              (send snp get-style)
+                                              error-text-style-delta)))))
                     (exn:fail:syntax-exprs exn))))
       
       ;; make-debug-error-display-handler : (string (union TST exn) -> void) -> string (union TST exn) -> void
@@ -580,7 +605,7 @@ profile todo:
                          (values file void)]
                         [else (error 'insert-context "unknown file spec ~e" file)])])
 	  (when from-text
-	    (let* ([finish (+ start span)]
+	    (let* ([finish (+ start span -1)]
 		   [context-text (copy/highlight-text from-text start finish)])
 	      (send context-text lock #t)
 	      (send context-text hide-caret #t)
@@ -836,6 +861,7 @@ profile todo:
             (set! ask-about-reset? ask?)
             (let* ([edit-sequence-ht (make-hash-table)]
                    [locked-ht (make-hash-table)]
+                   [already-frozen-ht (make-hash-table)]
                    [actions-ht (make-hash-table 'equal)]
                    [on/syntaxes (hash-table-map ht (λ (_ pr) pr))]
 
@@ -927,11 +953,13 @@ profile todo:
                     (internal-clear-test-coverage-display)
                     (set! internal-clear-test-coverage-display #f))
                   
-                  ;; freeze the colorers (possibly re-freeze them)
+                  ;; freeze the colorers, but avoid a second freeze (so we can avoid a second thaw)
                   (hash-table-for-each
                    edit-sequence-ht
                    (λ (src _)
-                     (send src freeze-colorer)))
+                     (if (send src is-frozen?)
+                         (hash-table-put! already-frozen-ht src #t)
+                         (send src freeze-colorer))))
                   
                   ;; set new annotations
                   (for-each
@@ -982,10 +1010,11 @@ profile todo:
                           (hash-table-for-each
                            edit-sequence-ht
                            (λ (txt _) 
-                             (let ([locked? (send txt is-locked?)])
-                               (when locked? (send txt lock #f))
-                               (send txt thaw-colorer)
-                               (when locked? (send txt lock #t)))
+                             (unless (hash-table-get already-frozen-ht txt #f)
+                               (let ([locked? (send txt is-locked?)])
+                                 (when locked? (send txt lock #f))
+                                 (send txt thaw-colorer)
+                                 (when locked? (send txt lock #t))))
                              (send txt end-edit-sequence)))))))))
 
           (inherit get-defs)

@@ -294,7 +294,7 @@ please adhere to these guidelines:
  (plt:hd:refreshing-manuals-finished "Finished.")
  (plt:hd:about-help-desk "About Help Desk")
  (plt:hd:help-desk-about-string
-  "Help Desk is a complete source of information about PLT software, including DrScheme, MzScheme, and MrEd.\n\nVersion ~a\nCopyright (c) 1995-2003 PLT")
+  "Help Desk is a complete source of information about PLT software, including DrScheme, MzScheme, and MrEd.\n\nVersion ~a\nCopyright (c) ~a-~a PLT")
  (plt:hd:help-on-help "Help on Help")
  (plt:hd:help-on-help-details "For help on using Help Desk, follow the `How to use Help Desk' link on Help Desk's home page. (To get to the home page if you're not already there, click the `Home' button at the top of the Help Desk window.)")
   (reload "Reload") ;; refresh the page in a web browser
@@ -386,8 +386,8 @@ please adhere to these guidelines:
  (editor-prefs-panel-label "Editing")
  (general-prefs-panel-label "General")
  (highlight-parens "Highlight between matching parens")
- (fixup-open-parens "Automatically adjust opening parens")
-  (fixup-close-parens "Automatically adjust closing parens")
+ (fixup-open-brackets "Automatically adjust opening square brackets")
+ (fixup-close-parens "Automatically adjust closing parens")
  (flash-paren-match "Flash paren match")
  (auto-save-files "Auto-save files")
  (backup-files "Backup files")
@@ -398,6 +398,8 @@ please adhere to these guidelines:
  (show-status-line "Show status-line")
  (count-columns-from-one "Count column numbers from one")
  (display-line-numbers "Display line numbers in buffer; not character offsets")
+ (show-line-and-column-numbers "Show line & column numbers") ; used for popup menu; right click on line/column box in bottom of drs window
+ (show-character-offsets "Show character offsets") ; used for popup menu; right click on line/column box in bottom of drs window
  (enable-keybindings-in-menus "Enable keybindings in menus")
  (automatically-to-ps "Automatically print to PostScript file")
  (option-as-meta "Treat option key as meta") ;; macos/macos x only
@@ -450,10 +452,15 @@ please adhere to these guidelines:
  (indenting-prefs-panel-label "Indenting")
  (indenting-prefs-extra-regexp "Extra regexp")
 
+ (square-bracket-prefs-panel-label "Square Bracket")
+  
  ; filled with define, lambda, or begin
  (enter-new-keyword "Enter new ~a-like keyword:")
  (x-keyword "~a Keyword")
  (x-like-keywords "~a-like Keywords")
+
+ ; used in Square bracket panel
+ (skip-subexpressions "Number of sub-expressions to skip")
 
  (expected-a-symbol "expected a symbol, found: ~a")
  (already-used-keyword "\"~a\" is already a specially indented keyword")
@@ -621,9 +628,16 @@ please adhere to these guidelines:
  (keybindings-sort-by-name "Sort by Name")
  (keybindings-sort-by-key "Sort by Key")
  (keybindings-add-user-defined-keybindings "Add User-defined Keybindings...")
+ (keybindings-add-user-defined-keybindings/planet "Add User-defined Keybindings from PLaneT...")
  (keybindings-menu-remove "Remove ~a")
  (keybindings-choose-user-defined-file "Please choose a file containing keybindings.")
-
+ (keybindings-planet-malformed-spec "The PLaneT spec is malformed: ~a") ; the string will be what the user typed in
+ (keybindings-type-planet-spec "Please enter a PLaneT require spec (without the `require')")
+  
+ ; first ~a will be a string naming the file or planet package where the keybindings come from;
+ ; second ~a will be an error message
+ (keybindings-error-installing-file "Error when installing the keybindings ~a:\n\n~a")
+  
  (user-defined-keybinding-error "Error running keybinding ~a\n\n~a")
  (user-defined-keybinding-malformed-file "The file ~a does not contain a module written in the (lib \"keybinding-lang.ss\" \"framework\") language.")  
   

@@ -29,7 +29,9 @@ tracing todo:
            
            ;; this module is shared between the drscheme's namespace (so loaded here) 
            ;; and the user's namespace in the teaching languages
-           "private/set-result.ss")
+           "private/set-result.ss"
+           
+           (lib "stepper-language-interface.ss" "stepper"))
   
   (provide tool@)
   
@@ -178,7 +180,7 @@ tracing todo:
              (lambda ()
                (super render-value value settings port))))
           
-          (super-instantiate ())))
+          (super-new)))
       
       ;; sharing/not-config-panel :  boolean boolean parent -> (case-> (-> settings) (settings -> void))
       ;; constructs the config-panel for a language without a sharing option.
@@ -442,11 +444,24 @@ tracing todo:
                            (current-namespace (module->namespace '#%htdp)))))))]
                   [(done) eof]))))
 
+          (define/augment (capability-value key)
+            (case key
+              [(drscheme:special:insert-lambda) #f]
+              [else (inner (drscheme:language:get-capability-default key) 
+                           capability-value
+                           key)]))
+
+          (super-new)))
+      
+      (define (stepper-settings-language %)
+        (class* % (stepper-language<%>)
+          (init-field stepper:enable-let-lifting)
+          (inherit [dontcare stepper:enable-let-lifting?])
+          (define/override (stepper:enable-let-lifting?) stepper:enable-let-lifting)
           (super-new)))
 
       ;; rewrite-module : syntax -> syntax
-      ;; rewrites te module to provide all definitions and 
-      ;; print out all results.
+      ;; rewrites te module to print out results of non-definitions
       (define (rewrite-module stx)
         (syntax-case stx (module #%plain-module-begin)
           [(module name lang (#%plain-module-begin bodies ...))
@@ -914,12 +929,13 @@ tracing todo:
       ;; phase2 : -> void
       (define (phase2)
         (define htdp-language%
-          ((drscheme:language:get-default-mixin)
-           (language-extension
-            (drscheme:language:module-based-language->language-mixin
-             (module-based-language-extension
-              (drscheme:language:simple-module-based-language->module-based-language-mixin
-               simple-htdp-language%))))))
+          (stepper-settings-language
+           ((drscheme:language:get-default-mixin)
+            (language-extension
+             (drscheme:language:module-based-language->language-mixin
+              (module-based-language-extension
+               (drscheme:language:simple-module-based-language->module-based-language-mixin
+                simple-htdp-language%)))))))
         
         (add-htdp-language
          (instantiate htdp-language% ()
@@ -930,10 +946,12 @@ tracing todo:
             (list (string-constant teaching-languages)
                   (string-constant how-to-design-programs)
                   (string-constant advanced-student)))
+           (language-id "plt:advanced-student")
            (language-numbers '(-500 -500 5))
            (sharing-printing #t)
            (abbreviate-cons-as-list #t)
-           (allow-sharing? #t)))
+           (allow-sharing? #t)
+           (stepper:enable-let-lifting #t)))
         
         (add-htdp-language
          (instantiate htdp-language% ()
@@ -944,6 +962,7 @@ tracing todo:
             (list (string-constant teaching-languages)
                   (string-constant how-to-design-programs)
                   (string-constant intermediate-student/lambda)))
+           (language-id "plt:intermediate-student/lambda")
            (style-delta (let ([match (regexp-match-positions
                                       "lambda"
                                       (string-constant intermediate-student/lambda))])
@@ -956,7 +975,8 @@ tracing todo:
            (language-numbers '(-500 -500 4))
            (sharing-printing #f)
            (abbreviate-cons-as-list #t)
-           (allow-sharing? #f)))
+           (allow-sharing? #f)
+           (stepper:enable-let-lifting #t)))
         
         (add-htdp-language
          (instantiate htdp-language% ()
@@ -967,11 +987,13 @@ tracing todo:
             (list (string-constant teaching-languages)
                   (string-constant how-to-design-programs)
                   (string-constant intermediate-student)))
+           (language-id "plt:intermediate-student")
            (language-numbers '(-500 -500 3))
            (sharing-printing #f)
            (abbreviate-cons-as-list #t)
            (allow-sharing? #f)
-           (use-function-output-syntax? #t)))
+           (use-function-output-syntax? #t)
+           (stepper:enable-let-lifting #t)))
         
         (add-htdp-language
          (instantiate htdp-language% ()
@@ -982,10 +1004,12 @@ tracing todo:
             (list (string-constant teaching-languages)
                   (string-constant how-to-design-programs)
                   (string-constant beginning-student/abbrev)))
+           (language-id "plt:beginning-student/abbrev")
            (language-numbers '(-500 -500 2))
            (sharing-printing #f)
            (abbreviate-cons-as-list #t)
-           (allow-sharing? #f)))
+           (allow-sharing? #f)
+           (stepper:enable-let-lifting #t)))
         
         (add-htdp-language
          (instantiate htdp-language% ()
@@ -997,10 +1021,12 @@ tracing todo:
                   (string-constant how-to-design-programs)
                   (string-constant beginning-student)))
            (language-numbers '(-500 -500 1))
+           (language-id "plt:beginning-student")
            (sharing-printing #f)
            (abbreviate-cons-as-list #f)
            (allow-sharing? #f)
-           (accept-quasiquote? #f)))
+           (accept-quasiquote? #f)
+           (stepper:enable-let-lifting #t)))
         
         (drscheme:get/extend:extend-unit-frame frame-tracing-mixin)
         (drscheme:get/extend:extend-tab tab-tracing-mixin)))))

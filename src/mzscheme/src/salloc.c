@@ -79,6 +79,17 @@ void scheme_set_stack_base(void *base, int no_auto_statics)
   use_registered_statics = no_auto_statics;
 }
 
+void scheme_set_stack_bounds(void *base, void *deepest, int no_auto_statics)
+{
+  scheme_set_stack_base(base, no_auto_statics);
+
+#ifdef USE_STACK_BOUNDARY_VAR
+  if (deepest) {
+    scheme_stack_boundary = (unsigned long)deepest;
+  }
+#endif
+}
+
 extern unsigned long scheme_get_stack_base()
 {
 #if !defined(MZ_PRECISE_GC) && !defined(USE_SENORA_GC)
@@ -1005,6 +1016,27 @@ static void print_tagged_value(const char *prefix,
       memcpy(t2 + len, buffer, len2 + 1);
       len += len2;
       type = t2;
+    } else if (!scheme_strncmp(type, "#<continuation", 13)) {
+      char buffer[256];
+      char *t2;
+      int len2;
+	    
+      sprintf(buffer, "[%s%.100s]",
+              (((Scheme_Cont *)v)->composable 
+               ? "delim;"
+               : ""),
+              (((Scheme_Cont *)v)->prompt_tag
+               ? (SCHEME_CDR(((Scheme_Cont *)v)->prompt_tag)
+                  ? SCHEME_SYM_VAL(SCHEME_CDR(((Scheme_Cont *)v)->prompt_tag))
+                  : "<anonymous>")
+               : "NULL"));
+      
+      len2 = strlen(buffer);
+      t2 = (char *)scheme_malloc_atomic(len + len2 + 1);
+      memcpy(t2, type, len);
+      memcpy(t2 + len, buffer, len2 + 1);
+      len += len2;
+      type = t2;
     } else if (!scheme_strncmp(type, "#<namespace", 11)) {
       char buffer[256];
       char *t2;
@@ -1820,11 +1852,6 @@ long scheme_count_memory(Scheme_Object *root, Scheme_Hash_Table *ht)
 
       for (rs = c->runstack_copied; rs; rs = rs->prev) {
 	s += sizeof(Scheme_Saved_Stack);
-	scheme_count_closure(rs->runstack,
-			     rs->runstack_size
-			     - (rs->runstack
-				- rs->runstack_start),
-			     ht);
       }
     }
     break;
@@ -1883,18 +1910,8 @@ long scheme_count_memory(Scheme_Object *root, Scheme_Hash_Table *ht)
 #endif
 
       /* Check stack: */
-      scheme_count_closure(p->runstack, /* p->runstack may be wrong, but count_closure is turned off */
-			   p->runstack_size
-			   - (p->runstack
-			      - p->runstack_start),
-			   ht);
       for (saved = p->runstack_saved; saved; saved = saved->prev) {
 	s += (saved->runstack_size * sizeof(Scheme_Object *));
-	scheme_count_closure(saved->runstack,
-			     saved->runstack_size
-			     - (saved->runstack
-				- saved->runstack_start),
-			     ht);
       }
     }
     break;

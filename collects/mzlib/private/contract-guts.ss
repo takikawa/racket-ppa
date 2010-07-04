@@ -1,9 +1,9 @@
 (module contract-guts mzscheme
-  (require "contract-helpers.scm"
+  (require "contract-helpers.ss"
            (lib "pretty.ss")
            (lib "list.ss"))
 
-  (require-for-syntax "contract-helpers.scm")
+  (require-for-syntax "contract-helpers.ss")
   
   (provide raise-contract-error
            contract-violation->string
@@ -40,7 +40,11 @@
            flat-prop flat-pred? flat-get
            flat-proj
            first-order-prop
-           first-order-get)
+           first-order-get
+           
+           ;; for opters
+           check-flat-contract
+           check-flat-named-contract)
   
 
   ;; define-struct/prop is a define-struct-like macro that
@@ -261,11 +265,10 @@
   ;;  
   
   (define (flat-proj ctc)
-    (let ([predicate ((flat-get ctc) ctc)]
-          [name ((name-get ctc) ctc)])
+    (let ([pred? ((flat-get ctc) ctc)])
       (λ (pos neg src-info orig-str)
         (λ (val)
-          (if (predicate val)
+          (if (pred? val)
               val
               (raise-contract-error
                val
@@ -273,7 +276,7 @@
                pos
                orig-str
                "expected <~a>, given: ~e"
-               name
+               ((name-get ctc) ctc)
                val))))))
   
   (define (double-any-curried-proj ctc) double-any-curred-proj2)
@@ -314,23 +317,26 @@
   (define (contract? x) (proj-pred? x))
   (define (contract-proc ctc) ((proj-get ctc) ctc))
   
-  (define (flat-contract predicate)
+  (define (check-flat-contract predicate)
     (unless (and (procedure? predicate)
                  (procedure-arity-includes? predicate 1))
       (error 'flat-contract
-             "expected procedure of one argument as argument, given ~e"
-             predicate))
+             "expected procedure of arity 1 as argument, given ~e"
+             predicate)))
+  (define (flat-contract predicate)
+    (check-flat-contract predicate)
     (let ([pname (object-name predicate)])
       (if pname
           (flat-named-contract pname predicate)
           (flat-named-contract '??? predicate))))
-  
-  (define (flat-named-contract name predicate)
+  (define (check-flat-named-contract predicate)
     (unless (and (procedure? predicate)
                  (procedure-arity-includes? predicate 1))
       (error 'flat-named-contract
-             "expected procedure of one argument as second argument, given: ~e, fst arg ~e"
-             predicate name))
+             "expected procedure of arity 1 as second argument, given ~e"
+             predicate)))
+  (define (flat-named-contract name predicate)
+    (check-flat-named-contract predicate)
     (build-flat-contract name predicate))
   
   (define (build-flat-contract name predicate) (make-flat-contract name predicate))

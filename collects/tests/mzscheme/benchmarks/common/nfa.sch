@@ -1,5 +1,8 @@
 ; The recursive-nfa benchmark.  (Figure 45, page 143.)
 
+;; Changed by Matthew 2006/08/21 to move string->list out of the loop
+
+  
 (define (recursive-nfa input)
   
   (define (state0 input)
@@ -34,15 +37,17 @@
          (not (null? (cdr input)))
          (char=? (cadr input) #\c)
          'state4))
-  
-  (or (state0 (string->list input))
+
+  (or (state0 input)
       'fail))
 
-(time (let ((input (string-append (make-string 133 #\a) "bc")))
-        (let loop ((n 10000))
-          (unless (zero? n)
-            (recursive-nfa input)
-            (loop (- n 1))))))
+(time (let ((input (string->list (string-append (make-string 133 #\a) "bc"))))
+        (let loop ((n 50000))
+          (if (zero? n)
+              'done
+              (begin
+                (recursive-nfa input)
+                (loop (- n 1)))))))
 
 
 

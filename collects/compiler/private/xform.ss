@@ -612,16 +612,24 @@
                        ""
                        "SET_GC_VARIABLE_STACK(__gc_var_stack__), ")
                    "__gc_var_stack__[1] = (void *)x)~n"))
-          
+
+          ;; Debugging support:
+          (printf "#ifdef MZ_3M_CHECK_VAR_STACK\n")
+          (printf "static int _bad_var_stack_() { *(long *)0x0 = 1; return 0; }\n")
+          (printf "# define CHECK_GC_V_S ((GC_VARIABLE_STACK == __gc_var_stack__) ? 0 : _bad_var_stack_()),\n")
+          (printf "#else\n")
+          (printf "# define CHECK_GC_V_S /*empty*/\n")
+          (printf "#endif\n")
+
           ;; Call a function where the number of registered variables can change in
-          ;;  nested blocks:
-          (printf "#define FUNCCALL_each(setup, x) (setup, x)~n")
+          ;;  nested blocks:          
+          (printf "#define FUNCCALL_each(setup, x) (CHECK_GC_V_S setup, x)~n")
           ;; The same, but a "tail" call:
-          (printf "#define FUNCCALL_EMPTY_each(x) FUNCCALL_each(SET_GC_VARIABLE_STACK((void **)__gc_var_stack__[0]), x)~n")
+          (printf "#define FUNCCALL_EMPTY_each(x) (SET_GC_VARIABLE_STACK((void **)__gc_var_stack__[0]), x)~n")
           ;; The same, but the number of registered variables for this call is definitely
           ;;  the same as for the previous call:
           (printf (if callee-restore?
-                      "#define FUNCCALL_AGAIN_each(x) x~n"
+                      "#define FUNCCALL_AGAIN_each(x) (CHECK_GC_V_S x)~n"
                       "#define FUNCCALL_AGAIN_each(x) FUNCCALL_each(SET_GC_VARIABLE_STACK(__gc_var_stack__), x)~n"))
           
           ;; As above, but when the number of registered variables never changes
@@ -808,7 +816,7 @@
                
                strlen cos sin exp pow log sqrt atan2 
                isnan isinf fpclass _fpclass _isnan __isfinited
-               floor ceil round fmod fabs __maskrune _errno
+               floor ceil round fmod fabs __maskrune _errno __errno
                isalpha isdigit isspace tolower toupper
                fread fwrite socket fcntl setsockopt connect send recv close
                __builtin_next_arg __builtin_saveregs 
@@ -1350,7 +1358,7 @@
                        (ormap (lambda (v) (eq? (tok-n v) 'virtual)) e))  ; can't drop virtual methods!
                    (if palm?
                        (add-segment-label name e)
-                       e)
+		       (clean-proto e))
                    null))]
             [(struct-decl? e)
              (if (braces? (caddr e))
@@ -1572,6 +1580,19 @@
               [(eq? (tok-n (car e)) (car l))
                (loop (cdr e) (cdr l))]
               [else #f])))
+
+	(define (clean-proto e)
+	  ;; Strip __declspec(deprecated(...))
+	  (if (and (eq? '__declspec (tok-n (car e)))
+		   (parens? (cadr e))
+		   (let ([l (seq->list (seq-in (cadr e)))])
+		     (and (= 2 (length l))
+			  (eq? 'deprecated (tok-n (car l)))
+			  (parens? (cadr l)))))
+	      ;; Drop __declspec
+	      (cddr e)
+	      ;; Nothing to drop
+	      e))
         
         ;; e has been determined to be a function prototype.
         ;; Remember the information needed to convert calls
@@ -3078,11 +3099,11 @@
           ;;  because they're blessed by the lifter]
           (let ([e- (reverse e)]
                 [orig-num-calls (live-var-info-num-calls live-vars)])
-            (let loop ([e- e-][result null][live-vars live-vars])
+            (let loop ([e- e-][result null][live-vars live-vars][converted-sub? #f])
               (cond
                 [(null? e-) (values result live-vars)]
                 [(ignored-stuff? e-)
-                 (loop (cdr e-) (cons (car e-) result) live-vars)]
+                 (loop (cdr e-) (cons (car e-) result) live-vars converted-sub?)]
                 [(eq? 'return (tok-n (car e-)))
                  ;; Look forward in result to semicolon, and wrap that:
                  (let rloop ([result result][l null])
@@ -3094,16 +3115,21 @@
                             (if (null? l)
                                 (cons (make-tok RET_NOTHING (tok-line (car e-)) (tok-file (car e-)))
                                       result)
-                                (let ([has-empty-funccall? (let loop ([l l])
-                                                             (cond
-                                                               [(null? l) #f]
-                                                               [(and (call? (car l))
-                                                                     (null? (call-live (car l))))
-                                                                #t]
-                                                               [(seq? (car l))
-                                                                (or (loop (seq->list (seq-in (car l))))
-                                                                    (loop (cdr l)))]
-                                                               [else #f]))])
+                                (let ([has-empty-funccall? 
+                                       ;; All calls must be empty calls, otherwise
+                                       ;; the result might not depend on the empty call
+                                       ;; (e.g., f() && empty(f()) )
+                                       (let loop ([l l][one? #f])
+                                         (cond
+                                          [(null? l) one?]
+                                          [(call? (car l))
+                                           (if (null? (call-live (car l)))
+                                               (loop (cdr l) #t)
+                                               #f)]
+                                          [(seq? (car l))
+                                           (and (loop (seq->list (seq-in (car l))) one?)
+                                                (loop (cdr l) one?))]
+                                          [else #f]))])
                                   (list* (make-tok (if has-empty-funccall?
                                                        RET_VALUE_EMPTY_START 
                                                        RET_VALUE_START)
@@ -3116,7 +3142,8 @@
                                                        RET_VALUE_END)
                                                    (tok-line (car e-)) (tok-file (car e-)))
                                          result)))
-                            live-vars)]
+                            live-vars
+                            converted-sub?)]
                      [else (rloop (cdr result) (cons (car result) l))]))]
                 [(looks-like-call? e-)
                  ;; Looks like a function call, maybe a cast:
@@ -3128,7 +3155,8 @@
                                   (convert-paren-interior (car e-) vars &-vars c++-class live-vars complain-not-in #f)])
                       (loop (cddr e-)
                             (list* (cadr e-) v result)
-                            live-vars)))
+                            live-vars
+                            #t)))
                   (lambda ()
                     ;; It's a function call; find the start
                     (let-values ([(args) (car e-)]
@@ -3233,7 +3261,8 @@
                                                 (or (and (null? (cdr func))
                                                          (memq (tok-n (car func)) non-returning-functions))
                                                     (and (pair? rest-)
-                                                         (eq? 'return (tok-n (car rest-)))))
+                                                         (eq? 'return (tok-n (car rest-)))
+                                                         (not converted-sub?)))
                                                 ;; no arrays of pointers in this scope, or addresses of
                                                 ;; local vars taken in the function.
                                                 (not (or (ormap (lambda (var)
@@ -3260,54 +3289,66 @@
                                 (and (not non-returning?)
                                      (or (pair? pushed-vars)
                                          (live-var-info-nonempty-calls? live-vars)))])
-                          (loop rest-
-                                (let ([call (if (and (null? (cdr func))
-                                                     (hash-table-get non-gcing-functions (tok-n (car func)) (lambda () #f)))
-                                                ;; Call without pointer pushes
-                                                (make-parens
-                                                 "(" #f #f ")"
-                                                 (list->seq (append func (list args))))
-                                                ;; Call with pointer pushes
-						(begin
-						  (set! saw-gcing-call (car e-))
-						  (make-call
-						   "func call"
-						   #f #f
-						   func
-						   args
-						   pushed-vars
-						   (live-var-info-tag orig-live-vars)
-						   this-nonempty?)))])
-                                  (cons (if (null? setups)
-                                            call
-                                            (make-callstage-parens
-                                             "(" #f #f ")"
-                                             (list->seq
-                                              (append
-                                               (apply append setups)
-                                               (list call)))))
-                                        result))
-                                (make-live-var-info (live-var-info-tag live-vars)
-                                                    ;; maxlive is either size for this push or old maxlive:
-                                                    (max (total-push-size (live-var-info-vars orig-live-vars))
-                                                         (live-var-info-maxlive live-vars))
-                                                    ;; note: maxpush calculated at block level
-                                                    (live-var-info-maxpush live-vars)
-                                                    (live-var-info-vars live-vars)
-                                                    (live-var-info-new-vars live-vars)
-                                                    ;; Add newly-pushed variable to pushed set:
-                                                    (let* ([old-pushed (live-var-info-pushed-vars live-vars)]
-                                                           [new-pushed (filter (lambda (x) (not (assq (car x) old-pushed))) pushed-vars)])
-                                                      (append new-pushed old-pushed))
-                                                    (add1 (live-var-info-num-calls live-vars))
-                                                    (+ (if non-returning? 1 0)
-                                                       (live-var-info-num-noreturn-calls live-vars))
-                                                    (or this-nonempty?
-                                                        (live-var-info-nonempty-calls? live-vars)))))))))]
+			  (let ([non-gcing-call?
+				 (and (null? (cdr func))
+				      (hash-table-get non-gcing-functions (tok-n (car func)) (lambda () #f)))])
+			    (loop rest-
+				  (let ([call (if non-gcing-call?
+						  ;; Call without pointer pushes
+						  (make-parens
+						   "(" #f #f ")"
+						   (list->seq (append func (list args))))
+						  ;; Call with pointer pushes
+						  (begin
+						    (set! saw-gcing-call (car e-))
+						    (make-call
+						     "func call"
+						     #f #f
+						     func
+						     args
+						     pushed-vars
+						     (live-var-info-tag orig-live-vars)
+						     this-nonempty?)))])
+				    (cons (if (null? setups)
+					      call
+					      (make-callstage-parens
+					       "(" #f #f ")"
+					       (list->seq
+						(append
+						 (apply append setups)
+						 (list call)))))
+					  result))
+				  (make-live-var-info (live-var-info-tag live-vars)
+						      ;; maxlive is either size for this push or old maxlive:
+						      (max (if non-gcing-call?
+							       0
+							       (total-push-size (live-var-info-vars orig-live-vars)))
+							   (live-var-info-maxlive live-vars))
+						      ;; note: maxpush calculated at block level
+						      (live-var-info-maxpush live-vars)
+						      (live-var-info-vars live-vars)
+						      (live-var-info-new-vars live-vars)
+						      ;; Add newly-pushed variable to pushed set:
+						      (let* ([old-pushed (live-var-info-pushed-vars live-vars)]
+							     [new-pushed (if non-gcing-call?
+									     null
+									     (filter (lambda (x) (not (assq (car x) old-pushed))) 
+										     pushed-vars))])
+							(append new-pushed old-pushed))
+						      (+ (if non-gcing-call? 0 1)
+							 (live-var-info-num-calls live-vars))
+						      (+ (if non-returning? 1 0)
+							 (live-var-info-num-noreturn-calls live-vars))
+						      (or (and this-nonempty? (not non-gcing-call?))
+							  (live-var-info-nonempty-calls? live-vars)))
+				  (or converted-sub?
+				      (null? rest-)
+				      (not (memq (tok-n (car rest-)) '(return else)))))))))))]
                 [(eq? 'goto (tok-n (car e-)))
                  ;; Goto - assume all vars are live
                  (loop (cdr e-) (cons (car e-) result) 
-                       (replace-live-vars live-vars vars))]
+                       (replace-live-vars live-vars vars)
+                       #t)]
                 [(eq? '= (tok-n (car e-)))
                  ;; Check for assignments where the LHS can move due to
                  ;; a function call on the RHS. [Note that special support
@@ -3356,7 +3397,8 @@
                                       (live-var-info-pushed-vars live-vars)
                                       (live-var-info-num-calls live-vars)
                                       (live-var-info-num-noreturn-calls live-vars)
-                                      (live-var-info-nonempty-calls? live-vars))))
+                                      (live-var-info-nonempty-calls? live-vars))
+                                     #t))
                              (begin
                                (when (and (not (null? assignee))
                                           (or (if (brackets? (car assignee))
@@ -3389,8 +3431,8 @@
                                  (log-warning "[ASSIGN] ~a in ~a: suspicious assignment with a function call, LHS ends ~s."
                                               (tok-line (car e-)) (tok-file (car e-))
                                               (tok-n (cadr e-))))
-                               (loop (cdr e-) (cons (car e-) result) live-vars)))))
-                     (loop (cdr e-) (cons (car e-) result) live-vars))]
+                               (loop (cdr e-) (cons (car e-) result) live-vars #t)))))
+                     (loop (cdr e-) (cons (car e-) result) live-vars #t))]
                 [(and (braces? (car e-)) (not braces-are-aggregates?))
                  (let*-values ([(v) (car e-)]
                                ;; do/while/for: we'll need a fixpoint for live-vars
@@ -3477,7 +3519,8 @@
                                  (seq-close v)
                                  (list->seq e)))
                           result)
-                         (filter-live-vars live-vars)))]
+                         (filter-live-vars live-vars)
+                         #t))]
                 [(seq? (car e-))
                  ;; Do nested body.
                  ;; For (v = new x, ...) parens, check for special conversion
@@ -3492,7 +3535,7 @@
                                                            (and (brackets? (car e-))
                                                                 "array access"))
                                                        #f)])
-                     (loop (cdr e-) (cons v result) live-vars)))]
+                     (loop (cdr e-) (cons v result) live-vars #t)))]
                 [(and (assq (tok-n (car e-)) vars)
                       (not (assq (tok-n (car e-)) (live-var-info-vars live-vars))))
                  ;; Add a live variable:
@@ -3500,7 +3543,8 @@
                        (cons (car e-) result)
                        (replace-live-vars live-vars 
                                           (cons (assq (tok-n (car e-)) vars)
-                                                (live-var-info-vars live-vars))))]
+                                                (live-var-info-vars live-vars)))
+                       #t)]
                 [(and (memq (tok-n (car e-)) '(while do for))
                       (case (tok-n (car e-))
                         [(do)
@@ -3512,7 +3556,7 @@
                                   (braces? (cadr result))))]))
                  (log-error "[LOOP] ~a in ~a: while/do/for with body not in braces."
                             (tok-line (car e-)) (tok-file (car e-)))
-                 (loop (cdr e-) (cons (car e-) result) live-vars)]
+                 (loop (cdr e-) (cons (car e-) result) live-vars #t)]
                 [else 
                  (when (and check-arith? (not memcpy?)
                             (positive? (live-var-info-num-calls live-vars)))
@@ -3531,7 +3575,7 @@
                        (log-warning "[ARITH] ~a in ~a: suspicious arithmetic, LHS ends ~s."
                                     (tok-line (car e-)) (tok-file (car e-))
                                     (tok-n (cadr e-))))))
-                 (loop (cdr e-) (cons (car e-) result) live-vars)]))))
+                 (loop (cdr e-) (cons (car e-) result) live-vars converted-sub?)]))))
         
         (define (convert-seq-interior v comma-sep? vars &-vars c++-class live-vars complain-not-in memcpy?)
           (let ([e (seq->list (seq-in v))])

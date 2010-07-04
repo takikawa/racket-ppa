@@ -5,6 +5,7 @@
            
            "private/planet-shared.ss"
            "private/linkage.ss"
+           "resolver.ss"
            (lib "url.ss" "net")
            (lib "pack.ss" "setup")
            (lib "contract.ss")
@@ -15,20 +16,36 @@
   #| The util collection provides a number of useful functions for interacting with the PLaneT system. |#
   
   (provide 
+   
    current-cache-contents
    current-linkage
    make-planet-archive
    get-installed-planet-archives
    get-hard-linked-packages
    remove-pkg
-   unlink-all)
+   unlink-all
+   
+   resolve-planet-path)
   
   (provide/contract
+   [download/install-pkg
+    (-> string? string? natural-number/c natural-number/c (union pkg? false/c))]
    [add-hard-link 
     (-> string? string? natural-number/c natural-number/c path? void?)]
    [remove-hard-link 
-    (-> string? string? natural-number/c natural-number/c void?)])
+    (-> string? string? natural-number/c natural-number/c void?)]
+   [erase-pkg
+    (-> string? string? natural-number/c natural-number/c boolean?)])
 
+  ;; download/install-pkg : string string nat nat -> pkg | #f
+  (define (download/install-pkg owner name maj min)
+    (let* ([pspec (pkg-spec->full-pkg-spec (list owner name maj min) #f)]
+           [upkg (get-package-from-server pspec)])
+      (cond
+        [(uninstalled-pkg? upkg)
+         (pkg-promise->pkg upkg)]
+        [else #f])))
+  
   ;; current-cache-contents : -> ((string ((string ((nat (nat ...)) ...)) ...)) ...)
   ;; returns the packages installed in the local PLaneT cache
   (define (current-cache-contents)
@@ -54,7 +71,8 @@
                 (clean-planet-package path (list owner name '() maj min))))
              (erase-metadata p)
              (delete-directory/files path)
-             (trim-directory (CACHE-DIR) path)))))
+             (trim-directory (CACHE-DIR) path)
+             #t))))
   
   ;; erase-metadata : pkg -> void
   ;; clears out any references to the given package in planet's metadata files
@@ -79,6 +97,20 @@
                   (printf "\n")))
             'truncate/replace)))))
   
+  (define (erase-pkg owner name maj min)
+    (let* ([uninstalled-pkg-dir
+            (build-path (UNINSTALLED-PACKAGE-CACHE) owner name (number->string maj) (number->string min))]
+           [uninstalled-pkg-file (build-path uninstalled-pkg-dir name)])
+      (let ([removed-something? (remove-pkg owner name maj min)]
+            [erased-something?
+             (if (file-exists? uninstalled-pkg-file)
+                 (begin
+                   (delete-file uninstalled-pkg-file)
+                   (trim-directory (UNINSTALLED-PACKAGE-CACHE) uninstalled-pkg-dir)
+                   #t)
+                 #f)])
+        (or removed-something? erased-something?))))
+
   ;; listof X * listof X -> nonempty listof X
   ;; returns de-prefixed version of l2 if l1 is a proper prefix of l2; 
   ;; signals an error otherwise.
@@ -186,7 +218,4 @@
      (lambda (row) 
        (let ([p (row->package row)])
          (when p
-           (erase-metadata p))))))
-
-  
-  )
+           (erase-metadata p)))))))

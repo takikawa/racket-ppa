@@ -1,8 +1,9 @@
 (module dispatch-pathprocedure mzscheme
   (require (lib "contract.ss"))
   (require "dispatch.ss"
-           "../util.ss"
-           "../response.ss")
+           "../private/util.ss"
+           "../private/response.ss"
+           "../response-structs.ss")
   (provide/contract
    [interface-version dispatcher-interface-version?]
    [make (string? (-> response?) . -> . dispatcher?)])

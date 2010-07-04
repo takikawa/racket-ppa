@@ -13,7 +13,8 @@
 	   (lib "thread.ss")
            (lib "etc.ss")
            (lib "surrogate.ss")
-           (lib "scheme-lexer.ss" "syntax-color"))
+           (lib "scheme-lexer.ss" "syntax-color")
+           "../gui-utils.ss")
   
   (provide scheme@)
 
@@ -403,13 +404,13 @@
           (inherit get-styles-fixed)
           (inherit has-focus? find-snip split-snip)
           
-          (public get-limit tabify-on-return? tabify
+          (public tabify-on-return? tabify
                   tabify-all insert-return calc-last-para 
                   box-comment-out-selection comment-out-selection uncomment-selection
-                  get-forward-sexp remove-sexp forward-sexp flash-forward-sexp get-backward-sexp
+                  flash-forward-sexp 
                   flash-backward-sexp backward-sexp find-up-sexp up-sexp find-down-sexp down-sexp
                   remove-parens-forward)
-          (define (get-limit pos) 0)
+          (define/public (get-limit pos) 0)
           
           (define/public (balance-parens key-event)
             (insert-close-paren (get-start-position) 
@@ -483,7 +484,7 @@
                              pos-start))))]
                      [get-proc
                       (λ ()
-			(let ([id-end (forward-match contains (last-position))])
+			(let ([id-end (get-forward-sexp contains)])
 			  (if (and id-end (> id-end contains))
 			      (let* ([text (get-text contains id-end)])
                                 (or (get-keyword-type text)
@@ -491,8 +492,7 @@
                      [procedure-indent
                       (λ ()
                         (case (get-proc)
-                          [(define) 1]
-                          [(begin) 1]
+                          [(begin define) 1]
                           [(lambda) 3]
                           [else 0]))]
                      [special-check
@@ -541,7 +541,7 @@
 		     ;; So far, the S-exp containing "pos" was all on
 		     ;;  one line (possibly not counting the opening paren),
 		     ;;  so indent to follow the first S-exp's end
-                     (let ([name-length (let ([id-end (forward-match contains (last-position))])
+                     (let ([name-length (let ([id-end (get-forward-sexp contains)])
 					  (if id-end
 					      (- id-end contains)
 					      0))])
@@ -743,44 +743,57 @@
                 (delete snip-pos (+ snip-pos 1)))
               (set-position pos pos)))
           
-          [define get-forward-sexp
-            (λ (start-pos)
-              (forward-match start-pos (last-position)))]
-          [define remove-sexp
-            (λ (start-pos)
-              (let ([end-pos (get-forward-sexp start-pos)])
-                (if end-pos 
-                    (kill 0 start-pos end-pos)
-                    (bell)))
-              #t)]
-          [define forward-sexp
-            (λ (start-pos)
-              (let ([end-pos (get-forward-sexp start-pos)])
-                (if end-pos 
-                    (set-position end-pos)
-                    (bell))
-                #t))]
+          
+          (define/public (get-forward-sexp start-pos) 
+            (forward-match start-pos (last-position))
+            
+            ;; the below is my first attempt to get forward/backward sexp 
+            ;;  to work properly with qutoe.
+            ;; it broke the tabber, so I took it out for now.
+            #;
+            (let ([one-forward (forward-match start-pos (last-position))])
+              (cond
+                [(and one-forward (not (= 0 one-forward)))
+                 (let ([bw (backward-match one-forward 0)])
+                   (cond
+                     [(and bw 
+                           (= (- one-forward 1) bw)
+                           (member (get-character bw) '(#\, #\` #\')))
+                      (let ([two-forward (forward-match one-forward (last-position))])
+                        (or two-forward
+                            one-forward))]
+                     [else
+                      one-forward]))]
+                [else one-forward])))
+          
+          (define/public (remove-sexp start-pos)
+            (let ([end-pos (get-forward-sexp start-pos)])
+              (if end-pos 
+                  (kill 0 start-pos end-pos)
+                  (bell)))
+            #t)
+          (define/public (forward-sexp start-pos)
+            (let ([end-pos (get-forward-sexp start-pos)])
+              (if end-pos 
+                  (set-position end-pos)
+                  (bell))
+              #t))
           [define flash-forward-sexp
             (λ (start-pos)
               (let ([end-pos (get-forward-sexp start-pos)])
                 (if end-pos 
                     (flash-on end-pos (add1 end-pos))
                     (bell)) 
-                #t))]	    
-          [define get-backward-sexp
-            (λ (start-pos)
-              (let* ([limit (get-limit start-pos)]
-                     [end-pos
-                      (backward-match start-pos limit)]
-                     [min-pos
-                      (backward-containing-sexp start-pos limit)]
-                     [ans
-                      (if (and end-pos 
-                               (or (not min-pos)
-                                   (>= end-pos min-pos)))
-                          end-pos
-                          #f)])
-                ans))]
+                #t))]
+          (define/public (get-backward-sexp start-pos)
+            (let* ([limit (get-limit start-pos)]
+                   [end-pos (backward-match start-pos limit)]
+                   [min-pos (backward-containing-sexp start-pos limit)])
+              (if (and end-pos 
+                       (or (not min-pos)
+                           (end-pos . >= . min-pos)))
+                  end-pos
+                  #f)))
           [define flash-backward-sexp
             (λ (start-pos)
               (let ([end-pos (get-backward-sexp start-pos)])
@@ -831,17 +844,16 @@
                 #t))]
           [define find-down-sexp
             (λ (start-pos)
-              (let ([last (last-position)])
-                (let loop ([pos start-pos])
-                  (let ([next-pos (forward-match pos last)])
-                    (if (and next-pos (> next-pos pos))
-                        (let ([back-pos
-                               (backward-containing-sexp (sub1 next-pos) pos)])
-                          (if (and back-pos
-                                   (> back-pos pos))
-                              back-pos
-                              (loop next-pos)))
-                        #f)))))]
+              (let loop ([pos start-pos])
+                (let ([next-pos (get-forward-sexp pos)])
+                  (if (and next-pos (> next-pos pos))
+                      (let ([back-pos
+                             (backward-containing-sexp (sub1 next-pos) pos)])
+                        (if (and back-pos
+                                 (> back-pos pos))
+                            back-pos
+                            (loop next-pos)))
+                      #f))))]
           [define down-sexp
             (λ (start-pos)
               (let ([pos (find-down-sexp start-pos)])
@@ -856,7 +868,7 @@
                      [paren? (or (char=? first-char #\( )
                                  (char=? first-char #\[ ))]
                      [closer (if paren? 
-                                 (forward-match pos (last-position)))])
+                                 (get-forward-sexp pos))])
                 (if (and paren? closer)
                     (begin (begin-edit-sequence)
                            (delete pos (add1 pos))
@@ -1234,98 +1246,104 @@
                             ;(printf "change-to, case ~a\n" i)
                             (set! real-char c))]
                [start-pos (send text get-start-position)]
-               [end-pos (send text get-end-position)])
+               [end-pos (send text get-end-position)]
+               [letrec-like-forms (preferences:get 'framework:square-bracket:letrec)])
           (send text begin-edit-sequence #f #f)
           (send text insert "[" start-pos 'same #f)
           (when (eq? (send text classify-position pos) 'parenthesis)
             (let* ([before-whitespace-pos (send text skip-whitespace pos 'backward #t)]
-                   [backward-match (send text backward-match before-whitespace-pos 0)])
-              (let ([b-m-char (and (number? backward-match) (send text get-character backward-match))])
-                (cond
-                  [backward-match
-                   ;; there is an expression before this, at this layer
-                   (let* ([before-whitespace-pos2 (send text skip-whitespace backward-match 'backward #t)]
-                          [backward-match2 (send text backward-match before-whitespace-pos2 0)])
-                     
-                     (cond
-                       ;; we found a new expression, two steps back, so we don't use the sibling
-                       ;; check here -- we just go with square brackets.
-                       [(and backward-match2
-                             (ormap 
-                              (λ (x)
-                                (text-between-equal? x text backward-match2 before-whitespace-pos2))
-                              '("new" "case")))
-                        (void)]
-                       [(member b-m-char '(#\( #\[ #\{))
-                        ;; found a "sibling" parenthesized sequence. use the parens it uses.
-                        (change-to 1 b-m-char)]
-                       [else
-                        ;; there is a sexp before this, but it isn't parenthesized.
-                        ;; if it is the `cond' keyword, we get a square bracket. otherwise not.
-                        (unless (and (beginning-of-sequence? text backward-match)
-                                     (ormap
-                                      (λ (x)
-                                        (text-between-equal? x text backward-match before-whitespace-pos))
-                                      '("case-lambda" "cond" "field" "provide/contract")))
-                          (change-to 2 #\())]))]
-                  [(not (zero? before-whitespace-pos))
-                   ;; this is the first thing in the sequence
-                   ;; pop out one layer and look for a keyword.
-                   (let ([b-w-p-char (send text get-character (- before-whitespace-pos 1))])
-                     (cond
-                       [(equal? b-w-p-char #\()
-                        (let* ([second-before-whitespace-pos (send text skip-whitespace 
-                                                                   (- before-whitespace-pos 1)
-                                                                   'backward
-                                                                   #t)]
-                               [second-backwards-match (send text backward-match
-                                                             second-before-whitespace-pos
-                                                             0)])
-                          (cond
-                            [(not second-backwards-match)
-                             (change-to 3 #\()]
-                            [(and (beginning-of-sequence? text second-backwards-match)
-                                  (ormap (λ (x) (text-between-equal? x
-                                                                     text
-                                                                     second-backwards-match
-                                                                     second-before-whitespace-pos))
-                                         '("let" 
-                                           "let*" "let-values" "let*-values"
-                                           "let-syntax" "let-struct" "let-syntaxes"
-                                           "letrec"
-                                           "letrec-syntaxes" "letrec-syntaxes+values" "letrec-values"
-                                           "parameterize")))
-                             ;; we found a let<mumble> keyword, so we get a square bracket
-                             (void)]
-                            [else
-                             ;; go back one more sexp in the same row, looking for `let loop' pattern
-                             (let* ([second-before-whitespace-pos2 (send text skip-whitespace 
-                                                                         second-backwards-match
-                                                                         'backward
-                                                                         #t)]
-                                    [second-backwards-match2 (send text backward-match
-                                                                   second-before-whitespace-pos2
-                                                                   0)])
-                               (cond
-                                 [(and second-backwards-match2
-                                       (eq? (send text classify-position second-backwards-match)
-                                            ;;; otherwise, this isn't a `let loop', it is a regular let!
-                                            'symbol)
-                                       (ormap (λ (x)
-                                                (text-between-equal? x 
-                                                                     text
-                                                                     second-backwards-match2
-                                                                     second-before-whitespace-pos2))
-                                              '("let")))
-                                  ;; found the `(let loop (' or `case' so we keep the [
-                                  (void)]
-                                 [else
-                                  ;; otherwise, round.
-                                  (change-to 4 #\()]))]))]
-                       [else 
-                        (change-to 5 #\()]))]
-                  [else 
-                   (change-to 6 #\()]))))
+                   [matched-cond-like-keyword
+                    ;; searches backwards for the keyword in the sequence at this level.
+                    ;; if found, it counts how many sexps back it was and then uses that to
+                    ;; check the preferences.
+                    (let loop ([pos before-whitespace-pos]
+                               [n 0])
+                      (let ([backward-match (send text backward-match pos 0)])
+                        (cond
+                          [backward-match
+                           (let ([before-whitespace-pos (send text skip-whitespace backward-match 'backward #t)])
+                             (loop before-whitespace-pos
+                                   (+ n 1)))]
+                          [else
+                           (let* ([afterwards (send text get-forward-sexp pos)]
+                                  [keyword
+                                   (and afterwards
+                                        (send text get-text pos afterwards))])
+                             (and keyword
+                                  (member (list keyword (- n 1))
+                                          (preferences:get 'framework:square-bracket:cond/offset))))])))])
+              (cond
+                [matched-cond-like-keyword
+                 ;; just leave the square backet in, in this case
+                 (void)]
+                [else
+                 (let* ([backward-match (send text backward-match before-whitespace-pos 0)]
+                        [b-m-char (and (number? backward-match) (send text get-character backward-match))])
+                   (cond
+                     [backward-match
+                      ;; there is an expression before this, at this layer
+                      (let* ([before-whitespace-pos2 (send text skip-whitespace backward-match 'backward #t)]
+                             [backward-match2 (send text backward-match before-whitespace-pos2 0)])
+                        
+                        (cond
+                          [(member b-m-char '(#\( #\[ #\{))
+                           ;; found a "sibling" parenthesized sequence. use the parens it uses.
+                           (change-to 1 b-m-char)]
+                          [else
+                           ;; otherwise, we switch to (
+                           (change-to 2 #\()]))]
+                     [(not (zero? before-whitespace-pos))
+                      ;; this is the first thing in the sequence
+                      ;; pop out one layer and look for a keyword.
+                      (let ([b-w-p-char (send text get-character (- before-whitespace-pos 1))])
+                        (cond
+                          [(equal? b-w-p-char #\()
+                           (let* ([second-before-whitespace-pos (send text skip-whitespace 
+                                                                      (- before-whitespace-pos 1)
+                                                                      'backward
+                                                                      #t)]
+                                  [second-backwards-match (send text backward-match
+                                                                second-before-whitespace-pos
+                                                                0)])
+                             (cond
+                               [(not second-backwards-match)
+                                (change-to 3 #\()]
+                               [(and (beginning-of-sequence? text second-backwards-match)
+                                     (ormap (λ (x) (text-between-equal? x
+                                                                        text
+                                                                        second-backwards-match
+                                                                        second-before-whitespace-pos))
+                                            letrec-like-forms))
+                                ;; we found a let<mumble> keyword, so we get a square bracket
+                                (void)]
+                               [else
+                                ;; go back one more sexp in the same row, looking for `let loop' pattern
+                                (let* ([second-before-whitespace-pos2 (send text skip-whitespace 
+                                                                            second-backwards-match
+                                                                            'backward
+                                                                            #t)]
+                                       [second-backwards-match2 (send text backward-match
+                                                                      second-before-whitespace-pos2
+                                                                      0)])
+                                  (cond
+                                    [(and second-backwards-match2
+                                          (eq? (send text classify-position second-backwards-match)
+                                               ;;; otherwise, this isn't a `let loop', it is a regular let!
+                                               'symbol)
+                                          (member "let" letrec-like-forms)
+                                          (text-between-equal? "let"
+                                                               text
+                                                               second-backwards-match2
+                                                               second-before-whitespace-pos2))
+                                     ;; found the `(let loop (' so we keep the [
+                                     (void)]
+                                    [else
+                                     ;; otherwise, round.
+                                     (change-to 4 #\()]))]))]
+                          [else 
+                           (change-to 5 #\()]))]
+                     [else 
+                      (change-to 6 #\()]))])))
           (send text delete pos (+ pos 1) #f)
           (send text end-edit-sequence)
           (send text insert real-char start-pos end-pos)))
@@ -1370,123 +1388,267 @@
         (preferences:add-panel
          (list (string-constant editor-prefs-panel-label) 
                (string-constant indenting-prefs-panel-label))
-         (λ (p)
-           (define get-keywords
-             (λ (hash-table)
-               (letrec ([all-keywords (hash-table-map hash-table list)]
-                        [pick-out (λ (wanted in out)
-                                    (cond
-                                      [(null? in) (sort out string<=?)]
-                                      [else (if (eq? wanted (cadr (car in))) 
-                                                (pick-out wanted (cdr in) (cons (symbol->string (car (car in))) out))
-                                                (pick-out wanted (cdr in) out))]))])
-                 (values  (pick-out 'begin all-keywords null)
-                          (pick-out 'define all-keywords null)
-                          (pick-out 'lambda all-keywords null)))))
-           (define-values (begin-keywords define-keywords lambda-keywords)
-             (get-keywords (car (preferences:get 'framework:tabify))))
-           (define add-button-callback
-             (λ (keyword-type keyword-symbol list-box)
-               (λ (button command)
-                 (let ([new-one
-                        (keymap:call/text-keymap-initializer
-                         (λ ()
-                           (get-text-from-user
-                            (format (string-constant enter-new-keyword) keyword-type)
-                            (format (string-constant x-keyword) keyword-type))))])
-                   (when new-one
-                     (let ([parsed (with-handlers ((exn:fail:read? (λ (x) #f)))
-                                     (read (open-input-string new-one)))])
-                       (cond
-                         [(and (symbol? parsed)
-                               (hash-table-get (car (preferences:get 'framework:tabify))
-                                               parsed
-                                               (λ () #f)))
-                          (message-box (string-constant error)
-                                       (format (string-constant already-used-keyword) parsed))]
-                         [(symbol? parsed)
-                          (let ([ht (car (preferences:get 'framework:tabify))])
-                            (hash-table-put! ht parsed keyword-symbol)
-                            (update-list-boxes ht))]
-                         [else (message-box 
-                                (string-constant error)
-                                (format (string-constant expected-a-symbol) new-one))])))))))
-           (define delete-callback
-             (λ (list-box)
-               (λ (button command)
-                 (let* ([selections (send list-box get-selections)]
-                        [symbols (map (λ (x) (string->symbol (send list-box get-string x))) selections)])
-                   (for-each (λ (x) (send list-box delete x)) (reverse selections))
-                   (let ([ht (car (preferences:get 'framework:tabify))])
-                     (for-each (λ (x) (hash-table-remove! ht x)) symbols))))))
-           (define main-panel (make-object horizontal-panel% p))
-           (define make-column
-             (λ (string symbol keywords bang-regexp)
-               (let* ([vert (make-object vertical-panel% main-panel)]
-                      [_ (make-object message% (format (string-constant x-like-keywords) string) vert)]
-                      [box (make-object list-box% #f keywords vert void '(multiple))]
-                      [button-panel (make-object horizontal-panel% vert)]
-                      [text (new text-field% 
-                                 (label (string-constant indenting-prefs-extra-regexp))
-                                 (callback (λ (tf evt) 
-                                             (let ([str (send tf get-value)])
-                                               (cond
-                                                 [(equal? str "") 
-                                                  (bang-regexp #f)]
-                                                 [else
-                                                  (with-handlers ([exn:fail?
-                                                                   (λ (x)
-                                                                     (color-yellow (send tf get-editor)))])
-                                                    (bang-regexp (regexp str))
-                                                    (clear-color (send tf get-editor)))]))))
-                                 (parent vert))]
-                      [add-button (make-object button% (string-constant add-keyword)
-                                    button-panel (add-button-callback string symbol box))]
-                      [delete-button (make-object button% (string-constant remove-keyword)
-                                       button-panel (delete-callback box))])
-                 (send* button-panel 
-                   (set-alignment 'center 'center)
-                   (stretchable-height #f))
-                 (send add-button min-width (send delete-button get-width))
-                 (values box text))))
-           (define (color-yellow text)
-             (let ([sd (make-object style-delta%)])
-               (send sd set-delta-background "yellow")
-               (send text change-style sd 0 (send text last-position))))
-           (define (clear-color text)
-             (let ([sd (make-object style-delta%)])
-               (send sd set-delta-background "white")
-               (send text change-style sd 0 (send text last-position))))
-           (define-values (begin-list-box begin-regexp-text) 
-             (make-column "Begin"
-                          'begin
-                          begin-keywords
-                          (λ (x) (set-car! (cdr (preferences:get 'framework:tabify)) x))))
-           (define-values (define-list-box define-regexp-text) 
-             (make-column "Define" 
-                          'define 
-                          define-keywords
-                          (λ (x) (set-car! (cddr (preferences:get 'framework:tabify)) x))))
-           (define-values (lambda-list-box lambda-regexp-text)
-             (make-column "Lambda"
-                          'lambda
-                          lambda-keywords
-                          (λ (x) (set-car! (cdddr (preferences:get 'framework:tabify)) x))))
-           (define update-list-boxes
-             (λ (hash-table)
-               (let-values ([(begin-keywords define-keywords lambda-keywords) (get-keywords hash-table)]
-                            [(reset) (λ (list-box keywords)
-                                       (send list-box clear)
-                                       (for-each (λ (x) (send list-box append x)) keywords))])
-                 (reset begin-list-box begin-keywords)
-                 (reset define-list-box define-keywords)
-                 (reset lambda-list-box lambda-keywords)
-                 #t)))
-           (define update-gui
-             (λ (pref)
-               (update-list-boxes (car pref))
-               (send begin-regexp-text set-value (or (object-name (cadr pref)) ""))
-               (send define-regexp-text set-value (or (object-name (caddr pref)) ""))
-               (send lambda-regexp-text set-value (or (object-name (cadddr pref)) ""))))
-           (preferences:add-callback 'framework:tabify (λ (p v) (update-gui v)))
-           main-panel))))))
+         make-indenting-prefs-panel)
+        (preferences:add-panel
+         (list (string-constant editor-prefs-panel-label) 
+               (string-constant square-bracket-prefs-panel-label))
+         make-square-bracket-prefs-panel))
+      
+      (define (make-square-bracket-prefs-panel p)
+        (define main-panel (make-object vertical-panel% p))
+        (define boxes-panel (new horizontal-panel% [parent main-panel]))
+                            
+        (define (mk-list-box sym keyword-type pref->string get-new-one)
+          (letrec ([vp (new vertical-panel% [parent boxes-panel])]
+                   [_ (new message% 
+                           [label (format (string-constant x-like-keywords) keyword-type)]
+                           [parent vp])]
+                   [lb
+                    (new list-box% 
+                         [label #f]
+                         [parent vp]
+                         [choices (map pref->string (preferences:get sym))]
+                         [callback
+                          (λ (lb evt)
+                            (send remove-button enable (pair? (send lb get-selections))))])]
+                   [bp (new horizontal-panel% [parent vp] [stretchable-height #f])]
+                   [add
+                    (new button%
+                         [label (string-constant add-keyword)]
+                         [parent bp]
+                         [callback 
+                          (λ (x y)
+                            (let ([new-one (get-new-one)])
+                              (when new-one
+                                (preferences:set sym (append (preferences:get sym) 
+                                                             (list new-one))))))])]
+                   [remove-button
+                    (new button%
+                         [label (string-constant remove-keyword)]
+                         [parent bp]
+                         [callback 
+                          (λ (x y)
+                            (let ([n (send lb get-selections)])
+                              (when (pair? n)
+                                (preferences:set 
+                                 sym 
+                                 (let loop ([i 0]
+                                            [prefs (preferences:get sym)])
+                                   (cond
+                                     [(= i (car n)) (cdr prefs)]
+                                     [else (cons (car prefs)
+                                                 (loop (+ i 1)
+                                                       (cdr prefs)))])))
+                                (cond
+                                  [(= 0 (send lb get-number))
+                                   (send remove-button enable #f)]
+                                  [else
+                                   (send lb set-selection 
+                                         (if (= (car n) (send lb get-number))
+                                             (- (send lb get-number) 1)
+                                             (car n)))]))))])])
+            (unless (pair? (send lb get-selections))
+              (send remove-button enable #f))
+            (preferences:add-callback sym
+                                      (λ (p v)
+                                        (send lb clear)
+                                        (for-each (λ (x) (send lb append (pref->string x))) v)))))
+        
+        (define (get-new-letrec-keyword)
+          (let ([new-one
+                 (keymap:call/text-keymap-initializer
+                  (λ ()
+                    (get-text-from-user
+                     (format (string-constant enter-new-keyword) "Letrec")
+                     (format (string-constant x-keyword) "Letrec"))))])
+            (and new-one
+                 (let ([parsed (with-handlers ((exn:fail:read? (λ (x) #f)))
+                                 (read (open-input-string new-one)))])
+
+                   (and (symbol? parsed)
+                        (symbol->string parsed))))))
+        
+        (define (get-new-cond-keyword)
+          (define f (new dialog% [label (format (string-constant enter-new-keyword) "Cond")]))
+          (define tb (keymap:call/text-keymap-initializer
+                      (λ ()
+                        (new text-field% 
+                             [parent f]
+                             [label #f]))))
+          (define number-panel (new horizontal-panel% [parent f] [stretchable-height #f]))
+          (define number-label (new message% [parent number-panel] [label (string-constant skip-subexpressions)]))
+          (define number
+            (keymap:call/text-keymap-initializer
+             (λ ()
+               (new text-field% 
+                    [parent number-panel]
+                    [init-value "1"]
+                    [min-width 50]
+                    [label #f]))))
+          
+          (define answers #f)
+          (define bp (new horizontal-panel% 
+                          [parent f] 
+                          [stretchable-height #f]
+                          [alignment '(right center)]))
+          (define (confirm-callback b e)
+            (let ([n (string->number (send number get-value))]
+                  [sym (with-handlers ([exn:fail:read? (λ (x) #f)])
+                         (read (open-input-string (send tb get-value))))])
+              (when (and (number? n)
+                         (symbol? sym))
+                (set! answers (list (symbol->string sym) n)))
+              (send f show #f)))
+                 
+          (define (cancel-callback b e)
+            (send f show #f))
+          
+          (define-values (ok-button cancel-button)
+            (gui-utils:ok/cancel-buttons bp confirm-callback cancel-callback (string-constant ok) (string-constant cancel)))
+          (send f show #t)
+          answers)
+        
+        (define stupid-internal-definition-syntax1
+          (mk-list-box 'framework:square-bracket:letrec "Letrec" values get-new-letrec-keyword))
+        (define stupid-internal-definition-syntax2
+          (mk-list-box 'framework:square-bracket:cond/offset 
+                       "Cond" 
+                       (λ (l) (format "~a (~a)" (car l) (cadr l)))
+                       get-new-cond-keyword))
+        
+        (define check-box (new check-box% 
+                               [parent main-panel]
+                               [label (string-constant fixup-open-brackets)]
+                               [value (preferences:get 'framework:fixup-open-parens)]
+                               [callback 
+                                (λ (x y)
+                                  (preferences:set 'framework:fixup-open-parens (send check-box get-value)))]))
+        (preferences:add-callback
+         'framework:fixup-open-parens
+         (λ (p v)
+           (send check-box set-value v)))
+        
+        main-panel)
+      
+      (define (make-indenting-prefs-panel p)
+        (define get-keywords
+          (λ (hash-table)
+            (letrec ([all-keywords (hash-table-map hash-table list)]
+                     [pick-out (λ (wanted in out)
+                                 (cond
+                                   [(null? in) (sort out string<=?)]
+                                   [else (if (eq? wanted (cadr (car in))) 
+                                             (pick-out wanted (cdr in) (cons (symbol->string (car (car in))) out))
+                                             (pick-out wanted (cdr in) out))]))])
+              (values  (pick-out 'begin all-keywords null)
+                       (pick-out 'define all-keywords null)
+                       (pick-out 'lambda all-keywords null)))))
+        (define-values (begin-keywords define-keywords lambda-keywords)
+          (get-keywords (car (preferences:get 'framework:tabify))))
+        (define add-button-callback
+          (λ (keyword-type keyword-symbol list-box)
+            (λ (button command)
+              (let ([new-one
+                     (keymap:call/text-keymap-initializer
+                      (λ ()
+                        (get-text-from-user
+                         (format (string-constant enter-new-keyword) keyword-type)
+                         (format (string-constant x-keyword) keyword-type))))])
+                (when new-one
+                  (let ([parsed (with-handlers ((exn:fail:read? (λ (x) #f)))
+                                  (read (open-input-string new-one)))])
+                    (cond
+                      [(and (symbol? parsed)
+                            (hash-table-get (car (preferences:get 'framework:tabify))
+                                            parsed
+                                            (λ () #f)))
+                       (message-box (string-constant error)
+                                    (format (string-constant already-used-keyword) parsed))]
+                      [(symbol? parsed)
+                       (let ([ht (car (preferences:get 'framework:tabify))])
+                         (hash-table-put! ht parsed keyword-symbol)
+                         (update-list-boxes ht))]
+                      [else (message-box 
+                             (string-constant error)
+                             (format (string-constant expected-a-symbol) new-one))])))))))
+        (define delete-callback
+          (λ (list-box)
+            (λ (button command)
+              (let* ([selections (send list-box get-selections)]
+                     [symbols (map (λ (x) (string->symbol (send list-box get-string x))) selections)])
+                (for-each (λ (x) (send list-box delete x)) (reverse selections))
+                (let ([ht (car (preferences:get 'framework:tabify))])
+                  (for-each (λ (x) (hash-table-remove! ht x)) symbols))))))
+        (define main-panel (make-object horizontal-panel% p))
+        (define make-column
+          (λ (string symbol keywords bang-regexp)
+            (let* ([vert (make-object vertical-panel% main-panel)]
+                   [_ (make-object message% (format (string-constant x-like-keywords) string) vert)]
+                   [box (make-object list-box% #f keywords vert void '(multiple))]
+                   [button-panel (make-object horizontal-panel% vert)]
+                   [text (new text-field% 
+                              (label (string-constant indenting-prefs-extra-regexp))
+                              (callback (λ (tf evt) 
+                                          (let ([str (send tf get-value)])
+                                            (cond
+                                              [(equal? str "") 
+                                               (bang-regexp #f)]
+                                              [else
+                                               (with-handlers ([exn:fail?
+                                                                (λ (x)
+                                                                  (color-yellow (send tf get-editor)))])
+                                                 (bang-regexp (regexp str))
+                                                 (clear-color (send tf get-editor)))]))))
+                              (parent vert))]
+                   [add-button (make-object button% (string-constant add-keyword)
+                                 button-panel (add-button-callback string symbol box))]
+                   [delete-button (make-object button% (string-constant remove-keyword)
+                                    button-panel (delete-callback box))])
+              (send* button-panel 
+                (set-alignment 'center 'center)
+                (stretchable-height #f))
+              (send add-button min-width (send delete-button get-width))
+              (values box text))))
+        (define (color-yellow text)
+          (let ([sd (make-object style-delta%)])
+            (send sd set-delta-background "yellow")
+            (send text change-style sd 0 (send text last-position))))
+        (define (clear-color text)
+          (let ([sd (make-object style-delta%)])
+            (send sd set-delta-background "white")
+            (send text change-style sd 0 (send text last-position))))
+        (define-values (begin-list-box begin-regexp-text) 
+          (make-column "Begin"
+                       'begin
+                       begin-keywords
+                       (λ (x) (set-car! (cdr (preferences:get 'framework:tabify)) x))))
+        (define-values (define-list-box define-regexp-text) 
+          (make-column "Define" 
+                       'define 
+                       define-keywords
+                       (λ (x) (set-car! (cddr (preferences:get 'framework:tabify)) x))))
+        (define-values (lambda-list-box lambda-regexp-text)
+          (make-column "Lambda"
+                       'lambda
+                       lambda-keywords
+                       (λ (x) (set-car! (cdddr (preferences:get 'framework:tabify)) x))))
+        (define update-list-boxes
+          (λ (hash-table)
+            (let-values ([(begin-keywords define-keywords lambda-keywords) (get-keywords hash-table)]
+                         [(reset) (λ (list-box keywords)
+                                    (send list-box clear)
+                                    (for-each (λ (x) (send list-box append x)) keywords))])
+              (reset begin-list-box begin-keywords)
+              (reset define-list-box define-keywords)
+              (reset lambda-list-box lambda-keywords)
+              #t)))
+        (define update-gui
+          (λ (pref)
+            (update-list-boxes (car pref))
+            (send begin-regexp-text set-value (or (object-name (cadr pref)) ""))
+            (send define-regexp-text set-value (or (object-name (caddr pref)) ""))
+            (send lambda-regexp-text set-value (or (object-name (cadddr pref)) ""))))
+        (preferences:add-callback 'framework:tabify (λ (p v) (update-gui v)))
+        main-panel)
+      
+      )))

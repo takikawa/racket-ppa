@@ -1,15 +1,9 @@
 
 (load-relative "loadtest.ss")
 
-(test "bbb" regexp-replace* "a" "aaa" "b")
+(Section 'basic)
 
-(define (test-weird-offset regexp-match regexp-match-positions)
-  (test #f regexp-match "e" (open-input-string ""))
-  (test #f regexp-match "e" (open-input-string "") (expt 2 100))
-  (test #f regexp-match "e" (open-input-string "") (expt 2 100) (expt 2 101))
-  (test '((3 . 4)) regexp-match-positions "e" (open-input-string "eaae") 2 (expt 2 101)))
-(test-weird-offset regexp-match regexp-match-positions)
-
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (test '() 'null null)
 (test '() 'null ())
@@ -17,10 +11,9 @@
 (let ([f (lambda () #&7)])
   (test #t eq? (f) (f)))
 
-(Section 2 1);; test that all symbol characters are supported.
+;; test that all symbol characters are supported.
 '(+ - ... !.. $.+ %.- &.! *.: /:. :+. <-. =. >. ?. ~. _. ^.)
 
-(Section 3 4)
 (define disjoint-type-functions
   (list boolean? char? null? number? pair? procedure? string? symbol? vector?))
 (define type-examples
@@ -41,7 +34,6 @@
 	   t))
        type-examples))
 
-(Section 6 1)
 (test #f not #t)
 (test #f not 3)
 (test #f not (list 3))
@@ -57,7 +49,6 @@
 (test #f boolean? '())
 (arity-test boolean? 1 1)
 
-(Section 6 2)
 (test #t eqv? 'a 'a)
 (test #f eqv? 'a 'b)
 (test #t eqv? 2 2)
@@ -118,7 +109,6 @@
 (arity-test eqv? 2 2)
 (arity-test equal? 2 2)
 
-(Section 6 3)
 (test '(a b c d e) 'dot '(a . (b . (c . (d . (e . ()))))))
 (define x (list 'a 'b 'c))
 (define y x)
@@ -350,7 +340,14 @@
 (test #t immutable? (string->immutable-string "hi"))
 (test #t immutable? (string->immutable-string (string-copy "hi")))
 
-(Section 6 4)
+(test #t immutable? (make-immutable-hash-table null))
+(test #t immutable? (make-immutable-hash-table '((a . b))))
+(test #t immutable? (make-immutable-hash-table '((a . b)) 'equal))
+(test #f immutable? (make-hash-table))
+(test #f immutable? (make-hash-table 'equal))
+(test #f immutable? (make-hash-table 'weak))
+(test #f immutable? (make-hash-table 'weak 'equal))
+
 (test #t symbol? 'foo)
 (test #t symbol? (car '(a b)))
 (test #f symbol? "bar")
@@ -398,8 +395,6 @@
 #ci(test 'JollyWog string->symbol (symbol->string 'JollyWog))
 
 (arity-test symbol? 1 1)
-
-(Section 6 6)
 
 (define (char-tests)
   (test #t eqv? '#\  #\Space)
@@ -649,7 +644,6 @@
 (test-up/down char-upcase 'char-upcase lowers (map cons lowers uppers))
 (test-up/down char-downcase 'char-downcase uppers (map cons uppers lowers))
 
-(Section 6 7)
 (test #t string? "The word \"recursion\\\" has many meanings.")
 (test #t string? "")
 (arity-test string? 1 1)
@@ -1265,7 +1259,6 @@
 (arity-test regexp-replace 3 3)
 (arity-test regexp-replace* 3 3)
 
-(Section 6 8)
 (test #t vector? '#(0 (2 2 2 2) "Anna"))
 (test #t vector? '#())
 (arity-test vector? 1 1)
@@ -1311,7 +1304,6 @@
 (arity-test vector-fill! 2 2)
 (err/rt-test (vector-fill! '(1 2 3) 0))
 
-(Section 6 9)
 (test #t procedure? car)
 (test #f procedure? 'car)
 (test #t procedure? (lambda (x) (* x x)))
@@ -1368,7 +1360,7 @@
 (map-tests andmap)
 (map-tests ormap)
 
-(test (void) for-each (lambda (x) (values 1 2)) '(1 2))
+(test-values (list (void)) (lambda () (for-each (lambda (x) (values 1 2)) '(1 2))))
 (err/rt-test (map (lambda (x) (values 1 2)) '(1 2)) arity?)
 
 (test #t andmap add1 null)
@@ -1383,8 +1375,8 @@
 (err/rt-test (ormap (lambda (x) (values 1 2)) '(1 2)) arity?)
 (err/rt-test (andmap (lambda (x) (values 1 2)) '(1 2)) arity?)
 
-(err/rt-test (ormap (lambda (x) (values 1 2)) '(1)) arity?)
-(err/rt-test (andmap (lambda (x) (values 1 2)) '(1)) arity?)
+(test-values '(1 2) (lambda () (ormap (lambda (x) (values 1 2)) '(1))))
+(test-values '(1 2) (lambda () (andmap (lambda (x) (values 1 2)) '(1))))
 
 (test -3 call-with-current-continuation
 		(lambda (exit)
@@ -1436,7 +1428,6 @@
 (define (test-cont)
   (newline)
   (display ";testing continuations; ")
-  (Section 6 9)
   (test #t leaf-eq? '(a (b (c))) '((a) b c))
   (test #f leaf-eq? '(a (b (c))) '((a) b c d))
   '(report-errs))
@@ -1546,10 +1537,11 @@
 	     (dynamic-wind
 	      (lambda () (let/cc k (set! c0 k)))
 	      (lambda () (set! x (add1 x)))
-	      (lambda () (set! y (add1 y))
-		      (when c0 ((begin0
-				 c0
-				 (set! c0 #f))))))
+	      (lambda () 
+		(set! y (add1 y))
+		(when c0 ((begin0
+			   c0
+			   (set! c0 #f))))))
 	     (cons x y)))]
 	[ra-b-a-b
 	 (lambda (get-a get-b)
@@ -1733,7 +1725,7 @@
   (try 3 5)
   (try 10 5))
 
-(arity-test call/cc 1 1)
+(arity-test call/cc 1 2)
 (arity-test call/ec 1 1)
 (err/rt-test (call/cc 4))
 (err/rt-test (call/cc (lambda () 0)))
@@ -1776,7 +1768,6 @@
 
 (newline)
 (display ";testing scheme 4 functions; ")
-(Section 6 7)
 (test '(#\P #\space #\l) string->list "P l")
 (test '() string->list "")
 (test "1\\\"" list->string '(#\1 #\\ #\"))
@@ -1787,7 +1778,6 @@
 (err/rt-test (list->string 'hello))
 (err/rt-test (list->string '(#\h . #\e)))
 (err/rt-test (list->string '(#\h 1 #\e)))
-(Section 6 8)
 (test '(dah dah didah) vector->list '#(dah dah didah))
 (test '() vector->list '#())
 (test '#(dididit dah) list->vector '(dididit dah))

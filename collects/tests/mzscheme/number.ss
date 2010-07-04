@@ -3,7 +3,6 @@
 
 (Section 'numbers)
 
-(Section 6 5 5)
 (test #f number? 'a)
 (test #f complex? 'a)
 (test #f real? 'a)
@@ -578,6 +577,9 @@
 (test 1/1024 expt 2 -10)
 (test 1/1024 expt 1/2 10)
 (test (/ 1 (expt 2 10000)) expt 1/2 10000)
+(test 2 expt 4 1/2)
+(test 2.0 expt 4 0.5)
+(test (sqrt 5) expt 5 1/2)
 (arity-test expt 2 2)
 
 (test 31525197391593472 inexact->exact 31525197391593473.0)
@@ -686,6 +688,18 @@
 (test 0 / 0 4+3i)
 (test 0.25+0.0i / 1e300+1e300i (* 4 1e300+1e300i))
 (test 0.25+0.0i / 1e-300+1e-300i (* 4 1e-300+1e-300i))
+(test 1/2-1/2i / 1+1i)
+(test 1/2+1/2i / 1-1i)
+(test 1/5-2/5i / 1+2i)
+(test 1/5+2/5i / 1-2i)
+(test 2/5-1/5i / 2+1i)
+(test 2/5+1/5i / 2-1i)
+(test 0.5-0.5i / 1.0+1.0i)
+(test 0.5+0.5i / 1.0-1.0i)
+(test 0.2-0.4i / 1.0+2.0i)
+(test 0.2+0.4i / 1.0-2.0i)
+(test 0.4-0.2i / 2.0+1.0i)
+(test 0.4+0.2i / 2.0-1.0i)
 
 (test 3 / 1 1/3)
 (test -3 / 1 -1/3)
@@ -1618,7 +1632,6 @@
 (newline)
 (display ";testing inexact numbers; ")
 (newline)
-(Section 6 5 5)
 (test #t inexact? f3.9)
 (test #f exact? f3.9)
 (test #t 'inexact? (inexact? (max f3.9 4)))
@@ -1818,8 +1831,6 @@
 	     (remainder n1 n2)))))
 
 
-(Section 6 5 5)
-
 (test -2147483648 - 2147483648)
 (test 2147483648 - -2147483648)
 (test #f = -2147483648 2147483648)
@@ -1843,7 +1854,6 @@
 
 (test #t 'remainder (tb 281474976710655 65535))
 (test #t 'remainder (tb 281474976710654 65535))
-(Section 6 5 6)
 (test 281474976710655 string->number "281474976710655")
 (test "281474976710655" number->string 281474976710655)
 (test "-4" number->string -4 16)
@@ -1852,7 +1862,6 @@
 (test "30000000" number->string #x30000000 16)
 
 
-(Section 6 5 6)
 (test "0" number->string 0)
 (test "100" number->string 100)
 (test "100" number->string 256 16)
@@ -1986,8 +1995,6 @@
 (arity-test current-evt-pseudo-random-generator 0 1)
 (err/rt-test (current-pseudo-random-generator 10))
 
-
-(Section 'bignum)
 
 (test #t = 0 0)
 (test #f = 0 (expt 2 32))

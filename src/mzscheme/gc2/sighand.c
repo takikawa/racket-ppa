@@ -14,40 +14,23 @@
 /* ========== Linux signal handler ========== */
 #if defined(linux)
 # include <signal.h>
-# include <linux/version.h>
-# if LINUX_VERSION_CODE >= KERNEL_VERSION(2,4,0)
-/* New linux */
 void fault_handler(int sn, struct siginfo *si, void *ctx)
 {
   designate_modified(si->si_addr);
 #  define NEED_SIGACTION
 #  define USE_SIGACTON_SIGNAL_KIND SIGSEGV
 }
-#else
-/* Old linux */
-void fault_handler(int sn, struct sigcontext sc)
-{
-#  if (defined(powerpc) || defined(__powerpc__))
-   /* PowerPC */
-   designate_modified((void *)sc.regs->dar);
-#  else
-   /* x86 */
-   designate_modified((void *)sc.cr2);
-#  endif
-   signal(SIGSEGV, (void (*)(int))fault_handler);
-#  define NEED_SIGSEGV
-}
-# endif
 #endif
 
 /* ========== FreeBSD signal handler ========== */
 #if defined(__FreeBSD__)
 # include <signal.h>
-void fault_handler(int sn, int code, struct sigcontext *sc, char *addr)
+void fault_handler(int sn, siginfo_t *si, void *ctx)
 {
-  designate_modified(addr);
+  designate_modified(si->si_addr);
 }
-# define NEED_SIGBUS
+#  define NEED_SIGACTION
+#  define USE_SIGACTON_SIGNAL_KIND SIGBUS
 #endif
 
 /* ========== Solaris signal handler ========== */
@@ -83,18 +66,27 @@ typedef LONG (WINAPI*gcPVECTORED_EXCEPTION_HANDLER)(LPEXCEPTION_POINTERS e);
 # define NEED_OSX_MACH_HANDLER
 #endif
 
+/* ========== Generic Unix signal handler ========== */
+/* There's little guarantee that this will work, since
+   Unix variants differ in the types of the arguments.
+   When a platform doesn't match, make a special case
+   for it, like all the others above. */
+#if !defined(NEED_SIGACTION) && !defined(NEED_SIGWIN) && !defined(NEED_OSX_MACH_HANDLER)
+# include <signal.h>
+void fault_handler(int sn, siginfo_t *si, void *ctx)
+{
+  designate_modified(si->si_addr);
+#  define NEED_SIGACTION
+#  define USE_SIGACTON_SIGNAL_KIND SIGSEGV
+}
+#endif
+
 /******************************************************************************/
 /*                             init function                                  */
 /******************************************************************************/
 
 static void initialize_signal_handler()
 {
-# ifdef NEED_SIGSEGV
-  signal(SIGSEGV, (void (*)(int))fault_handler);
-# endif
-# ifdef NEED_SIGBUS
-  signal(SIGBUS, (void (*)(int))fault_handler);
-# endif
 # ifdef NEED_OSX_MACH_HANDLER
   macosx_init_exception_handler();
 # endif
@@ -104,6 +96,9 @@ static void initialize_signal_handler()
     memset(&act, sizeof(sigaction), 0);
     act.sa_sigaction = fault_handler;
     sigemptyset(&act.sa_mask);
+    /* In MzScheme, SIGCHLD or SIGINT handling may trigger a write barrier: */
+    sigaddset(&act.sa_mask, SIGINT);
+    sigaddset(&act.sa_mask, SIGCHLD);
     act.sa_flags = SA_SIGINFO;
     sigaction(USE_SIGACTON_SIGNAL_KIND, &act, &oact);
   }

@@ -2,12 +2,11 @@
   (require (lib "contract.ss")
            (lib "etc.ss")
            (lib "xml.ss" "xml"))
-  (require "response.ss"
-           "managers/manager.ss"
+  (require "managers/manager.ss"
            "private/servlet.ss"
            "private/url.ss"
-           "servlet-helpers.ss"
-           "web-cells.ss"
+           "private/servlet-helpers.ss"
+           "private/web-cells.ss"
            "servlet-structs.ss")  
   
   ;; ************************************************************
@@ -41,10 +40,10 @@
    [send/suspend/dispatch ((embed/url? . -> . servlet-response?) . -> . any/c)]
    [send/suspend/callback (xexpr/callback? . -> . any/c)])
   
-  (require "url.ss")
-  (provide (all-from "web-cells.ss")
-           (all-from "servlet-helpers.ss")
-           (all-from "url.ss")
+  (require "private/servlet-url.ss")
+  (provide (all-from "private/web-cells.ss")
+           (all-from "private/servlet-helpers.ss")
+           (all-from "private/servlet-url.ss")
            (all-from "servlet-structs.ss"))
   
   ;; ************************************************************
@@ -71,9 +70,8 @@
   ;; send/back: response -> void
   ;; send a response and don't clear the continuation table
   (define (send/back resp)
-    (define ctxt (servlet-instance-data-context (current-servlet-instance-data)))
-    (output-response (execution-context-connection ctxt) resp)
-    ((execution-context-suspend ctxt)))
+    (define ctxt (thread-cell-ref current-execution-context))
+    ((execution-context-suspend ctxt) resp))
   
   ;; send/finish: response -> void
   ;; send a response and clear the continuation table
@@ -93,15 +91,13 @@
       (with-frame-after
        (let/cc k
          (define instance-id (get-current-servlet-instance-id))
-         (define ctxt (servlet-instance-data-context (current-servlet-instance-data)))
+         (define ctxt (thread-cell-ref current-execution-context))
          (define k-embedding ((manager-continuation-store! (current-servlet-manager)) instance-id k expiration-handler))
          (define k-url ((current-url-transform)
                         (embed-ids 
                          (list* instance-id k-embedding)
                          (request-uri (execution-context-request ctxt)))))
-         (define response (response-generator k-url))
-         (output-response (execution-context-connection ctxt) response)
-         ((execution-context-suspend ctxt))))))
+         (send/back (response-generator k-url))))))
   
   ;; send/forward: (url -> response) [(request -> response)] -> request
   ;; clear the continuation table, then behave like send/suspend

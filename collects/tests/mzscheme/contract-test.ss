@@ -580,7 +580,7 @@
   
   (test/neg-blame
    '->r5
-   '((contract (->r ([x number?]) (<=/c x)) (lambda (x) (+ x 1)) 'pos 'neg) #f))
+   '((contract (->r ([x number?]) any) (lambda (x) (+ x 1)) 'pos 'neg) #f))
   
   (test/pos-blame
    '->r6
@@ -620,7 +620,7 @@
   
   (test/neg-blame
    '->r15
-   '((contract (->r ([x number?]) rest any/c (<=/c x)) (lambda (x . y) (+ x 1)) 'pos 'neg) #f))
+   '((contract (->r ([x number?]) rest any/c any) (lambda (x . y) (+ x 1)) 'pos 'neg) #f))
   
   (test/pos-blame
    '->r16
@@ -887,7 +887,7 @@
   
   (test/neg-blame
    '->r5
-   '((contract (->r ([x number?]) (<=/c x)) (lambda (x) (+ x 1)) 'pos 'neg) #f))
+   '((contract (->r ([x number?]) any) (lambda (x) (+ x 1)) 'pos 'neg) #f))
   
   (test/pos-blame
    '->r6
@@ -927,7 +927,7 @@
   
   (test/neg-blame
    '->r15
-   '((contract (->r ([x number?]) rest any/c (<=/c x)) (lambda (x . y) (+ x 1)) 'pos 'neg) #f))
+   '((contract (->r ([x number?]) rest any/c any) (lambda (x . y) (+ x 1)) 'pos 'neg) #f))
   
   (test/pos-blame
    '->r16
@@ -3578,7 +3578,82 @@
         ((couple-tl (contract c x 'pos 'neg)) -11))))
   
   
+  ;; NOT YET RELEASED
+  #;
+  (test/pos-blame
+   'd-c-s/attr-1
+   '(let ()
+      (define-contract-struct pr (x y))
+      (pr-x
+       (contract (pr/dc [x integer?]
+                        [y integer?]
+                        where
+                        [x-val x]
+                        [y-val y]
+                        and
+                        (= x-val y-val))
+                 (make-pr 4 5)
+                 'pos
+                 'neg))))
   
+  ;; NOT YET RELEASED
+  #;
+  (test/spec-passed
+   'd-c-s/attr-2
+   '(let ()
+      (define-contract-struct pr (x y))
+      (contract (pr/dc [x integer?]
+                       [y integer?]
+                       where
+                       [x-val x]
+                       [y-val y]
+                       and
+                       (= x-val y-val))
+                (make-pr 4 5)
+                'pos
+                'neg)))
+  
+  ;; NOT YET RELEASED
+  #;
+  (let ()
+    (define-contract-struct node (n l r) (make-inspector))
+    
+    (define (get-val n attr)
+      (if (null? n)
+          1
+          (let ([h (synthesized-value n attr)])
+            (if (unknown? h)
+                h
+                (+ h 1)))))
+    
+    (define (full-bbt lo hi)
+      (or/c null?
+            (node/dc [n (between/c lo hi)]
+                     [l (n) (full-bbt lo n)]
+                     [r (n) (full-bbt n hi)]
+                     
+                     where
+                     [lheight (get-val l lheight)]
+                     [rheight (get-val r rheight)]
+                     
+                     and
+                     (<= 0 (- lheight rheight) 1))))
+    
+    (define t (contract (full-bbt -inf.0 +inf.0)
+                        (make-node 0
+                                   (make-node -1 null null) 
+                                   (make-node 2
+                                              (make-node 1 null null) 
+                                              (make-node 3 null null)))
+                        'pos
+                        'neg))
+    (test/spec-passed
+     'd-c-s/attr-3
+     `(,node-l (,node-l ,t)))
+     
+    (test/pos-blame 
+     'd-c-s/attr-4
+     `(,node-r (,node-r (,node-r ,t)))))
   
 
   
@@ -3954,6 +4029,26 @@
                (define-contract-struct couple (hd tl))
                (couple/dc [hd any/c] [tl (hd) any/c])))
   
+  ;; NOT YET RELEASED
+  #;
+  (test-name '(pr/dc [x integer?]
+                     [y integer?]
+                     where
+                     [x-val ...]
+                     [y-val ...]
+                     and
+                     ...)
+             (let ()
+               (define-contract-struct pr (x y))
+               (pr/dc [x integer?]
+                      [y integer?]
+                      where
+                      [x-val x]
+                      [y-val y]
+                      and
+                      (= x-val y-val))))
+             
+  
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;
   ;;  stronger tests
@@ -4042,6 +4137,12 @@
              [hd (<=/c n)]
              [tl (hd) (sorted-list/less-than hd)])))
     
+    ;; for some reason, the `n' makes it harder to optimize. without it, this test isn't as good a test
+    (define (closure-comparison-test n)
+      (couple/dc 
+       [hd any/c]
+       [tl (hd) any/c]))
+    
     (test #t contract-stronger? (couple/c any/c any/c) (couple/c any/c any/c))
     (test #f contract-stronger? (couple/c (>=/c 2) (>=/c 3)) (couple/c (>=/c 4) (>=/c 5)))
     (test #t contract-stronger? (couple/c (>=/c 4) (>=/c 5)) (couple/c (>=/c 2) (>=/c 3)))
@@ -4056,7 +4157,8 @@
     (test #t contract-stronger? (short-sorted-list/less-than 4) (short-sorted-list/less-than 5))
     (test #f contract-stronger? (short-sorted-list/less-than 5) (short-sorted-list/less-than 4))
     (test #t contract-stronger? (sorted-list/less-than 4) (sorted-list/less-than 5))
-    (test #f contract-stronger? (sorted-list/less-than 5) (sorted-list/less-than 4)))
+    (test #f contract-stronger? (sorted-list/less-than 5) (sorted-list/less-than 4))
+    (test #t contract-stronger? (closure-comparison-test 4) (closure-comparison-test 5)))
   
   
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -4235,7 +4337,29 @@
              (or/c (-> (>=/c 5) (>=/c 5)) boolean?))
   (test-name '(or/c (-> (>=/c 5) (>=/c 5)) boolean?)
              (or/c boolean? (-> (>=/c 5) (>=/c 5))))
+
   
+  (test 1
+        length
+        (let ([f (contract (-> integer? any)
+                           (lambda (x) 
+                             (with-continuation-mark 'x 'x
+                               (continuation-mark-set->list (current-continuation-marks) 'x)))
+                           'pos
+                           'neg)])
+          (with-continuation-mark 'x 'x
+            (f 1))))
+  
+  (test 2
+        length
+        (let ([f (contract (-> integer? list?)
+                           (lambda (x) 
+                             (with-continuation-mark 'x 'x
+                               (continuation-mark-set->list (current-continuation-marks) 'x)))
+                           'pos
+                           'neg)])
+          (with-continuation-mark 'x 'x
+            (f 1))))
 
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;
@@ -4243,7 +4367,7 @@
   ;; (at the end, becuase they are slow w/out .zo files)
   ;;
   
-    (test/spec-passed
+  (test/spec-passed
    'provide/contract1
    '(let ()
       (eval '(module contract-test-suite1 mzscheme
@@ -4417,6 +4541,19 @@
                             [s-a 3])))
       (eval '(require n))))
   
+  (test/spec-passed
+   'provide/contract11
+   '(parameterize ([current-namespace (make-namespace)])
+      (eval '(module m mzscheme
+               (require (lib "contract.ss"))
+               (define x 1)
+               (provide/contract [rename x y integer?]
+                                 [rename x z integer?])))
+      (eval '(module n mzscheme
+               (require m)
+               (+ y z)))
+      (eval '(require n))))
+  
   ;; this test is broken, not sure why
   #|
   (test/spec-failed
@@ -4534,12 +4671,48 @@
    #'(parameterize ([current-namespace (make-namespace)])
        (eval '(module bug mzscheme
                 (require (lib "contract.ss"))
-                (define the-defined-variable 'five)
-                (provide/contract [the-defined-variable number?])))
+                (define the-defined-variable1 'five)
+                (provide/contract [the-defined-variable1 number?])))
        (eval '(require bug)))
    (λ (x)
      (and (exn? x)
-          (regexp-match #rx"on the-defined-variable" (exn-message x)))))
+          (regexp-match #rx"on the-defined-variable1" (exn-message x)))))
+  
+  (error-test
+   #'(parameterize ([current-namespace (make-namespace)])
+       (eval '(module bug mzscheme
+                (require (lib "contract.ss"))
+                (define the-defined-variable2 values)
+                (provide/contract [the-defined-variable2 (-> number? any)])))
+       (eval '(require bug))
+       (eval '(the-defined-variable2 #f)))
+   (λ (x)
+     (and (exn? x)
+          (regexp-match #rx"on the-defined-variable2" (exn-message x)))))
+  
+  (error-test
+   #'(parameterize ([current-namespace (make-namespace)])
+       (eval '(module bug mzscheme
+                (require (lib "contract.ss"))
+                (define the-defined-variable3 (λ (x) #f))
+                (provide/contract [the-defined-variable3 (-> any/c number?)])))
+       (eval '(require bug))
+       (eval '(the-defined-variable3 #f)))
+   (λ (x)
+     (and (exn? x)
+          (regexp-match #rx"on the-defined-variable3" (exn-message x)))))
+  
+  (error-test
+   #'(parameterize ([current-namespace (make-namespace)])
+       (eval '(module bug mzscheme
+                (require (lib "contract.ss"))
+                (define the-defined-variable4 (λ (x) #f))
+                (provide/contract [the-defined-variable4 (-> any/c number?)])))
+       (eval '(require bug))
+       (eval '((if #t the-defined-variable4) #f)))
+   (λ (x)
+     (and (exn? x)
+          (regexp-match #rx"on the-defined-variable4" (exn-message x)))))
   
 
   

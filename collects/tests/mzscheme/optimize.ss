@@ -3,6 +3,8 @@
 
 (Section 'optimization)
 
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 ;; Check JIT inlining of primitives:
 (parameterize ([current-namespace (make-namespace)]
 	       [eval-jit-enabled #t])
@@ -137,22 +139,31 @@
     (bin #t '< 100 200)
     (bin #f '< 200 100)
     (bin #f '< 100 100)
+    (bin #t '< -200 100)
+    (bin #f '< 100 -200)
 
     (bin #t '<= 100 200)
     (bin #f '<= 200 100)
     (bin #t '<= 100 100)
+    (bin #t '<= -200 100)
+    (bin #f '<= 100 -200)
 
     (bin #f '> 100 200)
     (bin #t '> 200 100)
     (bin #f '> 100 100)
+    (bin #f '> -200 100)
+    (bin #t '> 100 -200)
 
     (bin #f '>= 100 200)
     (bin #t '>= 200 100)
     (bin #t '>= 100 100)
+    (bin #f '>= -200 100)
+    (bin #t '>= 100 -200)
 
     (bin #f '= 100 200)
     (bin #f '= 200 100)
     (bin #t '= 100 100)
+    (bin #f '= -200 100)
 
     (un 3 'add1 2)
     (un -3 'add1 -4)
@@ -173,6 +184,14 @@
     (bin (expt 2 30) '- (expt 2 29) (- (expt 2 29)))
     (bin (- (expt 2 30)) '- (- (expt 2 29)) (expt 2 29))
     (bin (- 2 (expt 2 31)) '- (- 1 (expt 2 30)) (sub1 (expt 2 30)))
+
+    (bin 3 'min 3 300)
+    (bin -300 'min 3 -300)
+    (bin -400 'min -400 -300)
+
+    (bin 300 'max 3 300)
+    (bin 3 'max 3 -300)
+    (bin -3 'max -3 -300)
 
     (bin-exact 11 'bitwise-and 11 43)
     (bin-exact 0 'bitwise-and 11 32)
@@ -210,6 +229,11 @@
     (un-exact (- -1 (expt 2 30)) 'bitwise-not (expt 2 30))
     (un-exact (- (expt 2 30)) 'bitwise-not (sub1 (expt 2 30)))
     (un-exact (- -1 (expt 2 32)) 'bitwise-not (expt 2 32))
+
+    (bin-exact #t 'char=? #\a #\a)
+    (bin-exact #t 'char=? #\u1034 #\u1034)
+    (bin-exact #f 'char=? #\a #\b)
+    (bin-exact #f 'char=? #\u1034 #\a)
 
     (bin-exact 'a 'vector-ref #(a b c) 0)
     (bin-exact 'b 'vector-ref #(a b c) 1)
@@ -396,5 +420,154 @@
 		  [y 10])
 	      (f y))
 	   '11)
+
+(test-comp '(module m mzscheme
+              (define (f x) (+ x 1))
+              (f 8))
+	   '(module m mzscheme
+              (define (f x) (+ x 1))
+              9))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Check bytecode verification of lifted functions
+
+(let ([check
+       (lambda (expr)
+         (let-values ([(r w) (make-pipe)])
+           (write (compile expr) w)
+           (parameterize ([read-accept-compiled #t])
+             (read r))))])
+  (check '(module m mzscheme
+            (provide f)
+            (define (f x)
+              (let loop ([n 0])
+                (set! x (+ n 1)) ; close over mutated variable
+                (loop n #f)
+                (loop n)))))
+  (check '(module m mzscheme
+            (provide f)
+            (define s (make-string 10))
+            (define (f x)
+              (let loop ([n 0])
+                (set! x (+ n 1)) ; close over mutated variable
+                (loop n s) ; and refer to global
+                (loop n))))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; Make sure "mutated?" flag isn't confused with "ready" flag:
+(module bad-order mzscheme  
+  (define (f) (printf "~a\n" i))
+  (f)
+  (define i 9)
+  (set! i 10))
+(err/rt-test (dynamic-require 'bad-order #f))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; call-with-values optimization
+
+;; should get converted to let:
+(module cwv-1 mzscheme
+  (define (cwv-1-f x)
+    (call-with-values (lambda () (+ x 3))
+      (lambda (y) (+ y 2))))
+  (provide cwv-1-f))
+(require cwv-1)
+(test 15 cwv-1-f 10)
+
+;; known function doesn't expect 1 argument
+(module cwv-2 mzscheme
+  (define (cwv-2-f x)
+    (call-with-values (lambda () (+ x 3))
+      (lambda (y z) (+ y 2))))
+  (provide cwv-2-f))
+(require cwv-2)
+(err/rt-test (cwv-2-f 10) exn:fail:contract:arity?)
+
+;; known function, unknown number of results:
+(module cwv-3 mzscheme
+  (define (cwv-3-f g)
+    (call-with-values (lambda () (g))
+      (lambda (y) (+ y 2))))
+  (provide cwv-3-f))
+(require cwv-3)
+(test 12 cwv-3-f (lambda () 10))
+(err/rt-test (cwv-3-f (lambda () (values 1 2))) exn:fail:contract:arity?)
+
+;; ditto, need 2 results:
+(module cwv-4 mzscheme
+  (define (cwv-4-f g)
+    (call-with-values (lambda () (g))
+      (lambda (y z) (+ y z 2))))
+  (provide cwv-4-f))
+(require cwv-4)
+(test 12 cwv-4-f (lambda () (values 4 6)))
+(err/rt-test (cwv-4-f (lambda () 10)) exn:fail:contract:arity?)
+(err/rt-test (cwv-4-f (lambda () (values 1 2 10))) exn:fail:contract:arity?)
+
+;; unknown first function:
+(module cwv-5 mzscheme
+  (define (cwv-5-f g)
+    (call-with-values g
+      (lambda (y) (+ y 2))))
+  (provide cwv-5-f))
+(require cwv-5)
+(test 12 cwv-5-f (lambda () 10))
+(err/rt-test (cwv-5-f (lambda () (values 1 2))) exn:fail:contract:arity?)
+
+;; ditto, need 2 results:
+(module cwv-6 mzscheme
+  (define (cwv-6-f g)
+    (call-with-values g
+      (lambda (y z) (+ y z 2))))
+  (provide cwv-6-f))
+(require cwv-6)
+(test 12 cwv-6-f (lambda () (values 4 6)))
+(err/rt-test (cwv-6-f (lambda () 10)) exn:fail:contract:arity?)
+(err/rt-test (cwv-6-f (lambda () (values 1 2 10))) exn:fail:contract:arity?)
+
+;; unknown second function:
+(module cwv-2-1 mzscheme
+  (define (cwv-2-1-f x h)
+    (call-with-values (lambda () (+ x 3))
+      h))
+  (provide cwv-2-1-f))
+(require cwv-2-1)
+(test 15 cwv-2-1-f 10 (lambda (y) (+ y 2)))
+
+;; unknown function doesn't expect 1 argument
+(module cwv-2-2 mzscheme
+  (define (cwv-2-2-f x h)
+    (call-with-values (lambda () (+ x 3))
+      h))
+  (provide cwv-2-2-f))
+(require cwv-2-2)
+(err/rt-test (cwv-2-2-f 10 (lambda (y z) (+ y 2))) exn:fail:contract:arity?)
+
+;; known function, unknown number of results:
+(module cwv-2-3 mzscheme
+  (define (cwv-2-3-f g h)
+    (call-with-values (lambda () (g))
+      h))
+  (provide cwv-2-3-f))
+(require cwv-2-3)
+(test 12 cwv-2-3-f (lambda () 10) (lambda (y) (+ y 2)))
+(test 23 cwv-2-3-f (lambda () (values 10 11)) (lambda (y z) (+ y z 2)))
+(err/rt-test (cwv-2-3-f (lambda () (values 1 2)) (lambda (y) (+ y 2))) exn:fail:contract:arity?)
+(err/rt-test (cwv-2-3-f (lambda () 10) (lambda (y z) (+ y 2))) exn:fail:contract:arity?)
+(err/rt-test (cwv-2-3-f (lambda () (values 1 2 3)) (lambda (y z) (+ y 2))) exn:fail:contract:arity?)
+
+;; unknown first function:
+(module cwv-2-5 mzscheme
+  (define (cwv-2-5-f g h)
+    (call-with-values g h))
+  (provide cwv-2-5-f))
+(require cwv-2-5)
+(test 12 cwv-2-5-f (lambda () 10) (lambda (y) (+ y 2)))
+(err/rt-test (cwv-2-5-f (lambda () (values 1 2)) (lambda (y) (+ y 2))) exn:fail:contract:arity?)
+(err/rt-test (cwv-2-5-f (lambda () 1) (lambda (y z) (+ y 2))) exn:fail:contract:arity?)
+(err/rt-test (cwv-2-5-f (lambda () (values 1 2 3)) (lambda (y z) (+ y 2))) exn:fail:contract:arity?)
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (report-errs)

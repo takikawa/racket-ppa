@@ -1,6 +1,6 @@
 ;; Implements the @-reader macro for embedding text in Scheme code.
 (module reader mzscheme
-  (require (lib "string.ss") (lib "readerr.ss" "syntax"))
+  (require (lib "string.ss") (lib "kw.ss") (lib "readerr.ss" "syntax"))
 
   (define cmd-char #\@)
 
@@ -38,9 +38,8 @@
               (hash-table-put! t n s) s))))))
 
   (define (dispatcher char inp source-name line-num col-num position)
-    (define (next-syntax readtable . plain?)
-      (let ([read (if (and (pair? plain?) (car plain?))
-                    read-syntax read-syntax/recursive)])
+    (define/kw (next-syntax readtable #:optional plain?)
+      (let ([read (if plain? read-syntax read-syntax/recursive)])
         (parameterize ([current-readtable readtable])
           (let loop ()
             (let ([x (read source-name inp)])
@@ -108,7 +107,7 @@
                     (set-box! level (add1 (unbox level)))
                     (make-stx (car m)))]
               [(regexp-match-peek-positions sub-start inp)
-               (read-syntax/recursive source-name inp)] ; include comment objs
+               (read-syntax source-name inp)] ; include comment objs
               [(regexp-match/fail-without-reading end-of-line inp)
                => (lambda (m)
                     (if (cadr m) ; backslashes?
@@ -283,13 +282,13 @@
     (port-count-lines! (current-input-port))
     (current-readtable at-readtable))
 
-  (define (*read inp)
+  (define/kw (*read #:optional [inp (current-input-port)])
     (parameterize ([current-readtable at-readtable])
       (read inp)))
 
-  (define (*read-syntax src port)
+  (define/kw (*read-syntax #:optional src [port (current-input-port)])
     (parameterize ([current-readtable at-readtable])
-      (read-syntax src port)))
+      (read-syntax (or src (object-name port)) port)))
 
   (provide (rename *read read) (rename *read-syntax read-syntax))
 

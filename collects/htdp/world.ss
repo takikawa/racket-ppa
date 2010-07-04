@@ -85,12 +85,12 @@
     (check-pos 'rectangle height "second")
     (check-mode 'rectangle mode "third")
     (check-color 'rectangle color "fourth")
-    (move-pinhole (rectangle width height mode color) (/ width -2) (/ height -2)))
+    (put-pinhole (rectangle width height mode color) 0 0))
   
   (define (place-image image x y scene)
     (check-image 'place-image image "first")
-    (check-arg 'place-image (and (number? x) (real? x)) 'number "second" x)
-    (check-arg 'place-image (and (number? y) (real? x)) 'number "third" y)
+    (check-arg 'place-image (and (number? x) (integer? x)) 'integer "second" x)
+    (check-arg 'place-image (and (number? y) (integer? x)) 'integer "third" y)
     (check-image 'place-image scene "fourth" "scene")
     (let ()
       (define sw (image-width scene))
@@ -271,8 +271,8 @@
                          (with-handlers ([exn:break? break-handler]
                                          [exn? exn-handler])
                            (set! the-world (f the-world 
-                                              (send e get-x)
-                                              (send e get-y)
+                                              (- (send e get-x) INSET)
+                                              (- (send e get-y) INSET)
                                               (cond [(send e button-down?) 'button-down]
                                                     [(send e button-up?)   'button-up]
                                                     [(send e dragging?)    'drag]

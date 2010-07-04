@@ -215,7 +215,7 @@
   (plt:hd:refreshing-manuals-finished "完成。")
   (plt:hd:about-help-desk "关于Help Desk")
   (plt:hd:help-desk-about-string
-   "Help Desk是PLT软件的信息来源，其中包含了DrScheme，MzScheme和MrEd的全部信息。\n\n版本~a\n版权所有(c)1995-2006 PLT")
+   "Help Desk是PLT软件的信息来源，其中包含了DrScheme，MzScheme和MrEd的全部信息。\n\n版本~a\n版权所有(c)~a-~a PLT")
   (plt:hd:help-on-help "关于帮助的帮助")
   (plt:hd:help-on-help-details "如果你需要使用Help Desk的帮助，请在Help Desk的主页中点击链接“How to use Help Desk”。（要进入Help Desk的主页，请单击Help Desk窗口上方的“主页”按钮。）")
   (reload "刷新") ;; refresh the page in a web browser
@@ -304,6 +304,7 @@
   (highlight-parens "加亮显示匹配的括号")
   (fixup-open-parens "自动调整开括号")
   (fixup-close-parens "自动调整闭括号")
+  (fixup-open-brackets "自动调整中括号")
   (flash-paren-match "高亮显示括号匹配")
   (auto-save-files "自动保存文件")
   (backup-files "保存备份文件")
@@ -366,10 +367,15 @@
   (indenting-prefs-panel-label "缩进")
   (indenting-prefs-extra-regexp "其他表达式")
   
+  (square-bracket-prefs-panel-label "中括号")
+  
   ; filled with define, lambda, or begin
   (enter-new-keyword "请输入一个类似于~a的关键字：")
   (x-keyword "~a关键字")
   (x-like-keywords "~a类型的关键字")
+  
+  ; used in Square bracket panel
+  (skip-subexpressions "出现在中括号前的表达式数量")
   
   (expected-a-symbol "需要一个符号，得到a")
   (already-used-keyword "“~a”已经是缩进关键字了")
@@ -536,8 +542,13 @@
   (keybindings-sort-by-name "按名称排序")
   (keybindings-sort-by-key "按键名排序")
   (keybindings-add-user-defined-keybindings "添加自定义热键绑定...")
+  (keybindings-add-user-defined-keybindings/planet "从PLaneT添加自定义热键绑定...")
   (keybindings-menu-remove "取消~a")
   (keybindings-choose-user-defined-file "请选择一个包含热键绑定的文件")
+  
+  ; first ~a will be a string naming the file or planet package where the keybindings come from;
+  ; second ~a will be an error message
+  (keybindings-error-installing-file "安装热键绑定~a时出错:\n\n~a")
   
   (user-defined-keybinding-error "热键绑定出错~a\n\n~a")
   (user-defined-keybinding-malformed-file "文件~a并不是一个按照(lib \"keybinding-lang.ss\" \"framework\")语言编写的module.")  

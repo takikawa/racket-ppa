@@ -839,7 +839,7 @@
       (define (pin-under base dx dy target)
 	(cc-superimpose
 	 (place-it 'pin-under #t (ghost base) dx dy target)
-	 base))
+	 (launder base)))
 
       (define black-and-white
 	(make-parameter #f

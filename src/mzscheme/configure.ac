@@ -52,6 +52,8 @@ AC_ARG_ENABLE(float,   [  --enable-float          include support for single-pre
 AC_ARG_ENABLE(floatinstead, [  --enable-floatinstead   compile to use single-precision by default])
 
 AC_ARG_ENABLE(pthread, [  --enable-pthread        link MrEd with pthreads (sometimes needed for GL)])
+AC_ARG_ENABLE(stackup, [  --enable-stackup        assume "up" if stack direction cannot be determined])
+AC_ARG_ENABLE(bigendian, [  --enable-bigendian      assume "big" if endianness cannot be determined])
 
 AC_ARG_ENABLE(oskit,   [  --enable-oskit          compile OSKit-based MzScheme kernel])
 AC_ARG_ENABLE(smalloskit, [  --enable-smalloskit     compile small OSKit-based MzScheme kernel])
@@ -225,11 +227,13 @@ show_explicitly_enabled "${enable_xonx}" "X-on-X"
 show_explicitly_enabled "${enable_shared}" "Shared libraries"
 
 show_explicitly_disabled "${enable_mred}" MrEd
-show_explicitly_disabled "${enable_gl}" OpenGL
-show_explicitly_disabled "${enable_xrender}" Xrender
-show_explicitly_disabled "${enable_cairo}" Cairo
-show_explicitly_disabled "${enable_libpng}" "Use-existing-libpng"
-show_explicitly_disabled "${enable_libjpeg}" "Use-existing-libjpeg"
+if test "${enable_mred}" != "no" ; then
+  show_explicitly_disabled "${enable_gl}" OpenGL
+  show_explicitly_disabled "${enable_xrender}" Xrender
+  show_explicitly_disabled "${enable_cairo}" Cairo
+  show_explicitly_disabled "${enable_libpng}" "Use-existing-libpng"
+  show_explicitly_disabled "${enable_libjpeg}" "Use-existing-libjpeg"
+fi
 
 if test "$LIBTOOLPROG" != "" ; then
   echo "=== Libtool program: $LIBTOOLPROG"
@@ -475,6 +479,7 @@ case $OS in
     ;;
   FreeBSD)
     LIBS="$LIBS -rdynamic"
+    DYN_CFLAGS="-fPIC"
     ;;
   OpenBSD)
     LIBS="$LIBS -rdynamic"
@@ -764,13 +769,16 @@ AC_TRY_RUN(
        return grows_down_p(n - 1, cmp);
    }
    int main() {
-      return grows_down_p();
+      return grows_down_p(0, 0);
    }, stack_direction=up, stack_direction=down, stack_direction=unknown)
 AC_MSG_RESULT($stack_direction) 
 
 if test "${stack_direction}" = "unknown" ; then
-  echo configure: cannot determine stack direction
-  exit 1
+  if test "${enable_stackup}" = "yes" ; then
+    stack_direction=up
+  else
+    echo configure: warning: cannot determine stack direction, assuming down
+  fi
 fi
 
 if test "${stack_direction}" = "up" ; then
@@ -780,10 +788,13 @@ if test "${stack_direction}" = "down" ; then
   AC_DEFINE(STACK_DIRECTION,-1,[Stack direction down])
 fi
 
-AC_C_BIGENDIAN(endianness=big, endianness=little, endiannes=unknown)
+AC_C_BIGENDIAN(endianness=big, endianness=little, endianness=unknown)
 if test "${endianness}" = "unknown" ; then
-  echo configure: cannot determine endianness
-  exit 1
+  if test "${enable_bigendian}" = "yes" ; then
+    endianness=big
+  else
+    echo configure: warning: cannot determine endianness, assuming little
+  fi
 fi
 
 if test "${endianness}" = "big" ; then

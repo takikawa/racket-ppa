@@ -6,7 +6,8 @@
            (lib "plt-match.ss")
            (lib "contract.ss"))
   (require "dispatch.ss"
-           "../servlet-helpers.ss")  
+           "../request-structs.ss"
+           "../private/servlet-helpers.ss")  
   (provide/contract
    [interface-version dispatcher-interface-version?])
   (provide ; XXX contract kw
@@ -18,18 +19,14 @@
                    [log-path #f])
     (if log-path
         (case log-format
-          [(parenthesized-default)
+          [(parenthesized-default extended)
            (let ([log-message (gen-log-message log-format log-path)])
              (lambda (conn req)
-               (let ([host (get-host (request-uri req) (request-headers/raw req))])
-                 (log-message (request-host-ip req)
-                              (request-client-ip req)
-                              (request-method req)
-                              (request-uri req)
-                              host)
-                 (next-dispatcher))))]
+               (log-message req)
+               (next-dispatcher)))]
           [else
-           (lambda (conn req) (next-dispatcher))])
+           (lambda (conn req)
+             (next-dispatcher))])
         (lambda (conn req)
           (next-dispatcher))))
   
@@ -45,25 +42,42 @@
       (thread/suspend-to-kill
        (lambda ()
          (let loop ([log-p #f])
-           (with-handlers ([exn? (lambda (e) (loop #f))])
-             (if (not (and log-p (file-exists? log-path)))
-                 (begin
-                   (unless (eq? log-p #f)
-                     (close-output-port log-p))
-                   (let ([new-log-p (open-output-file log-path 'append)])
-                     (file-stream-buffer-mode new-log-p 'line)
-                     (loop new-log-p)))
-                 (sync
-                  (handle-evt 
-                   log-ch
-                   (match-lambda
-                     [(list host-ip client-ip method uri host)
-                      (display
-                       (format "~s~n"
-                               (list 'from client-ip 'to host-ip 'for (url->string uri) 'at
-                                     (date->string (seconds->date (current-seconds)) #t)))
-                       log-p)
-                      (loop log-p)])))))))))
+           (sync
+            (handle-evt 
+             log-ch
+             (match-lambda
+               [(list req)
+                (with-handlers ([exn? (lambda (e)
+                                        ((error-display-handler) "dispatch-log.ss: Error writing log entry" e)
+                                        (loop #f))])
+                  (define the-log-p
+                    (if (not (and log-p (file-exists? log-path)))
+                        (begin
+                          (unless (eq? log-p #f)
+                            (close-output-port log-p))
+                          (let ([new-log-p (open-output-file log-path 'append)])
+                            (file-stream-buffer-mode new-log-p 'line)
+                            new-log-p))
+                        log-p))
+                  (display
+                   (format "~s~n"
+                           (case log-format
+                             [(parenthesized-default)
+                              (list 'from (request-client-ip req)
+                                    'to (request-host-ip req)
+                                    'for (url->string (request-uri req)) 'at
+                                    (date->string (seconds->date (current-seconds)) #t))]
+                             [(extended)
+                              `((client-ip ,(request-client-ip req))
+                                (host-ip ,(request-host-ip req))
+                                (referer ,(let ([R (headers-assq* #"Referer" (request-headers/raw req))])
+                                            (if R
+                                                (header-value R)
+                                                #f)))                                              
+                                (uri ,(url->string (request-uri req)))
+                                (time ,(current-seconds)))]))
+                   the-log-p)
+                  (loop the-log-p))])))))))
     (lambda args
       (thread-resume log-thread (current-custodian))
       (async-channel-put log-ch args)

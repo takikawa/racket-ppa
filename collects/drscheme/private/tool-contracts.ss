@@ -868,11 +868,13 @@
      (is-a?/c area-container<%>)
      drscheme:language-configuration:language-settings?)
     ((or/c false/c (is-a?/c top-level-window<%>))
-     boolean?)
+     boolean?
+     (-> symbol? void?))
     drscheme:language-configuration:language-settings?)
    ((panel button-panel language-setting)
     ((re-center #f)
-     (manuals? #f)))
+     (manuals? #f)
+     (ok-handler void)))
    "This procedure accepts two parent panels and"
    "fills them with the contents of the language dialog."
    "It is used to include language configuration controls"
@@ -886,7 +888,7 @@
    ""
    "The \\var{language-setting} is the default"
    "language to show in the dialog."
-   
+   ""
    "The \\var{re-center} argument is used when the \\gui{Show Details}"
    "button is clicked. If that argument is a \\iscmintf{top-level-window},"
    "the \\gui{Show Details} callback will recenter the window each time"
@@ -896,7 +898,13 @@
    "in the start up drscheme window and from the Choose Language dialog"
    "created when drscheme is started up) is shown. If it isn't, the dialog"
    "does not have the details and on the right-hand side shows the manual"
-   "ordering for the chosen language. This is used in Help Desk.")
+   "ordering for the chosen language. This is used in Help Desk."
+   ""
+   "\\var{ok-handler} is a function that is in charge of interfacing the OK"
+   "button. It should accept a symbol message: \\scheme{'enable} and"
+   "\\scheme{'disable} to toggle the button, and \\scheme{'execute} to run"
+   "the desired operation. (The language selection dialog also uses an"
+   "internal \\scheme{'enable-sync} message.)")
   
   (drscheme:language:register-capability
    (->r ([s symbol?]
@@ -909,6 +917,8 @@
    ""
    "By default, these capabilities are registered as DrScheme starts up:"
    "\\begin{itemize}"
+   "\\item \\scheme|(drscheme:language:register-capability 'drscheme:check-syntax-button (flat-contract boolean?) #t)|"
+   "--- controls the visiblity of the check syntax button"
    "\\item \\scheme|(drscheme:language:register-capability 'drscheme:language-menu-title (flat-contract string?) (string-constant scheme-menu-name))|"
    " --- controls the name of the menu just to the right of the language menu (defaultly named ``Scheme'')"
    "\\item \\scheme|(drscheme:language:register-capability 'drscheme:define-popup (or/c (cons/c string? string?) false/c) (cons \"(define\" \"(define ...)\"))|"
@@ -966,15 +976,20 @@
   
   
   (drscheme:language:add-snip-value
-   (-> (-> any/c boolean?)
-       (-> any/c (is-a?/c snip%))
-       void?)
-   (test-value convert-value)
+   (opt-> ((-> any/c boolean?)
+           (-> any/c (is-a?/c snip%)))
+          ((-> any/c))
+          void?)
+   ((test-value convert-value)
+    ((setup-thunk void)))
    "Registers a handler to convert values into snips as they are printed in the REPL."
    ""
-   "The \\var{test-snip} argument is called to determine if this handler can convert the value"
-   "and the \\var{convert-value} argument is called to build a snip."
-   "Both functions are called on the user's thread and with the user's settings.")
+   "The \\var{test-snip} argument is called to determine if this handler can convert the value "
+   "and the \\var{convert-value} argument is called to build a snip. "
+   "The (optional) \\var{setup-thunk} is called just after the user's namespace and other "
+   "setings are built, but before any of the user's code is evaluated."
+   ""
+   "All three functions are called on the user's thread and with the user's settings.")
   
   (drscheme:language:extend-language-interface
    (interface?

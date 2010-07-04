@@ -15,6 +15,7 @@ add struct contracts for immutable structs?
            define/contract)
 
   (require-for-syntax mzscheme
+                      "contract-opt-guts.ss"
                       (lib "list.ss")
                       (lib "stx.ss" "syntax")
                       (lib "name.ss" "syntax"))
@@ -24,10 +25,12 @@ add struct contracts for immutable structs?
            (lib "pretty.ss")
            (lib "pconvert.ss")
            "contract-arrow.ss"
-           "contract-guts.ss")
+           "contract-guts.ss"
+           "contract-opt.ss"
+           "contract-opt-guts.ss")
   
-  (require "contract-helpers.scm")
-  (require-for-syntax (prefix a: "contract-helpers.scm"))
+  (require "contract-helpers.ss")
+  (require-for-syntax (prefix a: "contract-helpers.ss"))
 
   
   
@@ -82,35 +85,34 @@ add struct contracts for immutable structs?
   (define-for-syntax (make-provide/contract-transformer contract-id id pos-module-source)
     (make-set!-transformer
      (λ (stx)
-       (with-syntax ([neg-stx (datum->syntax-object stx 'here)]
-		     [contract-id contract-id]
+       (with-syntax ([contract-id contract-id]
 		     [id id]
 		     [pos-module-source pos-module-source])
 	 (syntax-case stx (set!)
-	   [(set! _ body) (raise-syntax-error
+	   [(set! id body) (raise-syntax-error
 			   #f 
 			   "cannot set! provide/contract identifier"
 			   stx
-			   (syntax _))]
-	   [(_ arg ...)
+			   (syntax id))]
+	   [(name arg ...)
 	    (syntax 
 	     ((begin-lifted
                 (-contract contract-id
                            id
                            pos-module-source
-                           (module-source-as-symbol #'neg-stx)
-                           (quote-syntax _)))
+                           (module-source-as-symbol #'name)
+                           (quote-syntax name)))
 	      arg
 	      ...))]
-	   [_
-	    (identifier? (syntax _))
+	   [name
+	    (identifier? (syntax name))
 	    (syntax 
 	     (begin-lifted
                (-contract contract-id
                           id  
                           pos-module-source 
-                          (module-source-as-symbol #'neg-stx)
-                          (quote-syntax _))))])))))
+                          (module-source-as-symbol #'name)
+                          (quote-syntax name))))])))))
   
   ;; (define/contract id contract expr)
   ;; defines `id' with `contract'; initially binding
@@ -552,10 +554,16 @@ add struct contracts for immutable structs?
          ;; builds a begin expression for the entire contract and provide
          ;; the first syntax object is used for source locations
          (define (code-for-one-id/new-name stx id ctrct user-rename-id)
-           (with-syntax ([id-rename (a:mangle-id provide-stx "provide/contract-id" id)]
-                         [contract-id (a:mangle-id provide-stx "provide/contract-contract-id" id)]
-                         [pos-module-source (a:mangle-id provide-stx "provide/contract-pos-module-source" id)]
-                         [pos-stx (datum->syntax-object provide-stx 'here)]
+           (with-syntax ([id-rename (a:mangle-id provide-stx
+                                                 "provide/contract-id" 
+                                                 (or user-rename-id id))]
+                         [contract-id (a:mangle-id provide-stx
+                                                   "provide/contract-contract-id" 
+                                                   (or user-rename-id id))]
+                         [pos-module-source (a:mangle-id provide-stx 
+                                                         "provide/contract-pos-module-source"
+                                                         (or user-rename-id id))]
+                         [pos-stx (datum->syntax-object id 'here)]
                          [id id]
                          [ctrct (syntax-property ctrct 'inferred-name id)]
                          [external-name (or user-rename-id id)]
@@ -722,7 +730,10 @@ add struct contracts for immutable structs?
            box-immutable/c box/c
            promise/c
            struct/c
-	   syntax/c)
+	   syntax/c
+           
+           check-between/c
+           check-unary-between/c)
   
   (define-syntax (flat-rec-contract stx)
     (syntax-case stx  ()
@@ -821,28 +832,40 @@ add struct contracts for immutable structs?
                               [else
                                (loop ho-contracts (cons arg fc/predicates) (cdr args))]))]))])
          (let ([flat-contracts (map (λ (x) (if (flat-contract? x)
-                                                    x
-                                                    (flat-contract x)))
-                                    fc/predicates)])
+                                               x
+                                               (flat-contract x)))
+                                    fc/predicates)]
+               [pred 
+                (cond
+                  [(null? fc/predicates) not]
+                  [else
+                   (let loop ([fst (car fc/predicates)]
+                              [rst (cdr fc/predicates)])
+                     (let ([fst-pred (if (flat-contract? fst)
+                                         ((flat-get fst) fst)
+                                         fst)])
+                       (cond
+                         [(null? rst) fst-pred]
+                         [else 
+                          (let ([r (loop (car rst) (cdr rst))])
+                            (λ (x) (or (fst-pred x) (r x))))])))])])
            (cond
              [(null? ho-contracts)
-              (make-flat-or/c flat-contracts)]
+              (make-flat-or/c pred flat-contracts)]
              [(null? (cdr ho-contracts))
-              (make-or/c flat-contracts (car ho-contracts))]
+              (make-or/c pred flat-contracts (car ho-contracts))]
              [else
               (make-multi-or/c flat-contracts ho-contracts)])))]))
 
-  (define-struct/prop or/c (flat-ctcs ho-ctc)
+  (define-struct/prop or/c (pred flat-ctcs ho-ctc)
     ((proj-prop (λ (ctc)
                   (let ([c-proc ((proj-get (or/c-ho-ctc ctc)) (or/c-ho-ctc ctc))]
-                        [predicates (map (λ (x) ((flat-get x) x))
-                                         (or/c-flat-ctcs ctc))])
+                        [pred (or/c-pred ctc)])
                     (λ (pos-blame neg-blame src-info orig-str)
                       (let ([partial-contract (c-proc pos-blame neg-blame src-info orig-str)])
                         (λ (val)
                           (cond
-                            [(ormap (λ (pred) (pred val)) predicates)
-                             val]
+                            [(pred val) val]
                             [else
                              (partial-contract val)])))))))
      
@@ -869,49 +892,6 @@ add struct contracts for immutable structs?
                     (andmap contract-stronger?
                             this-ctcs
                             that-ctcs))))))))
-  
-  (define (make-multi-or/c-proj pos-proj-get)
-    (λ (ctc)
-      (let* ([ho-contracts (multi-or/c-ho-ctcs ctc)]
-             [c-procs (map (λ (x) ((pos-proj-get x) x)) ho-contracts)]
-             [first-order-checks (map (λ (x) ((first-order-get x) x)) ho-contracts)]
-             [predicates (map (λ (x) ((flat-get x) x))
-                              (multi-or/c-flat-ctcs ctc))])
-        (λ (pos src-info orig-str)
-          (let ([partial-contracts (map (λ (c-proc) (c-proc pos src-info orig-str)) c-procs)])
-            (λ (val)
-              (cond
-                [(ormap (λ (pred) (pred val)) predicates)
-                 val]
-                [else
-                 (let loop ([checks first-order-checks]
-                            [procs partial-contracts]
-                            [contracts ho-contracts]
-                            [candidate-proc #f]
-                            [candidate-contract #f])
-                   (cond
-                     [(null? checks)
-                      (if candidate-proc
-                          (candidate-proc val)
-                          (raise-contract-error val src-info pos orig-str 
-                                                "none of the branches of the or/c matched"))]
-                     [((car checks) val)
-                      (if candidate-proc
-                          (error 'or/c "two arguments, ~s and ~s, might both match ~s"
-                                 (contract-name candidate-contract)
-                                 (contract-name (car contracts))
-                                 val)
-                          (loop (cdr checks)
-                                (cdr procs)
-                                (cdr contracts)
-                                (car procs)
-                                (car contracts)))]
-                     [else
-                      (loop (cdr checks)
-                            (cdr procs)
-                            (cdr contracts)
-                            candidate-proc
-                            candidate-contract)]))])))))))
   
   (define (multi-or/c-proj ctc)
     (let* ([ho-contracts (multi-or/c-ho-ctcs ctc)]
@@ -961,8 +941,8 @@ add struct contracts for immutable structs?
                   (apply build-compound-type-name 
                          'or/c 
                          (append
-                          (multi-or/c-ho-ctcs ctc)
-                          (multi-or/c-flat-ctcs ctc)))))
+                          (multi-or/c-flat-ctcs ctc)
+                          (reverse (multi-or/c-ho-ctcs ctc))))))
      (first-order-prop
       (λ (ctc)
         (let ([flats (map (λ (x) ((flat-get x) x)) (multi-or/c-flat-ctcs ctc))]
@@ -987,7 +967,7 @@ add struct contracts for immutable structs?
                             this-ctcs
                             that-ctcs))))))))
   
-  (define-struct/prop flat-or/c (flat-ctcs)
+  (define-struct/prop flat-or/c (pred flat-ctcs)
     ((proj-prop flat-proj)
      (name-prop (λ (ctc)
                   (apply build-compound-type-name 
@@ -1002,11 +982,75 @@ add struct contracts for immutable structs?
                     (andmap contract-stronger?
                             this-ctcs
                             that-ctcs))))))
-     (flat-prop (λ (ctc) 
-                  (let ([preds
-                         (map (λ (x) ((flat-get x) x))
-                              (flat-or/c-flat-ctcs ctc))])
-                    (λ (x) (ormap (λ (p?) (p? x)) preds)))))))
+     (flat-prop (λ (ctc) (flat-or/c-pred ctc)))))
+    
+  ;;
+  ;; or/c opter
+  ;;
+  (define/opter (or/c opt/i pos neg stx)
+    (define (opt/or-ctc ps)
+      (let ((lift-from-hos null)
+            (partial-from-hos null))
+        (let-values ([(opt-ps lift-ps partial-ps hos ho-ctc)
+                      (let loop ([ps ps]
+                                 [next-ps null]
+                                 [lift-ps null]
+                                 [partial-ps null]
+                                 [hos null]
+                                 [ho-ctc #f])
+                        (cond
+                          [(null? ps) (values next-ps lift-ps partial-ps (reverse hos) ho-ctc)]
+                          [else
+                           (let-values ([(next lift partial flat _)
+                                         (opt/i pos neg (car ps))])
+                             (if flat
+                                 (loop (cdr ps)
+                                       (cons flat next-ps)
+                                       (append lift-ps lift)
+                                       (append partial-ps partial)
+                                       hos
+                                       ho-ctc)
+                                 (if (< (length hos) 1)
+                                     (loop (cdr ps)
+                                           next-ps
+                                           (append lift-ps lift)
+                                           (append partial-ps partial)
+                                           (cons (car ps) hos)
+                                           next)
+                                     (loop (cdr ps)
+                                           next-ps
+                                           lift-ps
+                                           partial-ps
+                                           (cons (car ps) hos)
+                                           ho-ctc))))]))])
+          (with-syntax ((next-ps (with-syntax (((opt-p ...) opt-ps))
+                                   (syntax (or #f opt-p ...)))))
+            (values
+             (cond
+               [(null? hos) (with-syntax ((pos pos))
+                              (syntax
+                               (if next-ps val
+                                   (raise-contract-error val src-info pos orig-str 
+                                                         "none of the branches of the or/c matched"))))]
+               [(= (length hos) 1) (with-syntax ((ho-ctc ho-ctc))
+                                     (syntax
+                                      (if next-ps val ho-ctc)))]
+               [(> (length hos) 1) 
+                (let-values ([(next-hos lift-hos partial-hos _ __)
+                              ((opter 'unknown) opt/i pos neg (cons #'or/c hos))])
+                  (set! lift-from-hos lift-hos)
+                  (set! partial-from-hos partial-hos)
+                  (with-syntax ((next-hos next-hos))
+                    (syntax
+                     (if next-ps val next-hos))))])
+             (append lift-ps lift-from-hos)
+             (append partial-ps partial-from-hos)
+             (if (null? hos) (syntax next-ps) #f)
+             #f)))))
+    
+    (syntax-case stx (or/c)
+      [(or/c p ...)
+       (opt/or-ctc (syntax->list (syntax (p ...))))]))
   
   (define false/c
     (flat-named-contract
@@ -1109,10 +1153,83 @@ add struct contracts for immutable structs?
                     (λ (x) 
                       (and (number? x)
                            (<= n x m))))))))
-  (define (=/c x) (make-between/c x x))
-  (define (<=/c x) (make-between/c -inf.0 x))
-  (define (>=/c x) (make-between/c x +inf.0))
-  (define (between/c x y) (make-between/c x y))
+  
+  (define (check-unary-between/c sym x)
+    (unless (number? x)
+      (error sym "expected a number, got ~e" x)))
+  (define (=/c x) 
+    (check-unary-between/c '=/c x)
+    (make-between/c x x))
+  (define (<=/c x) 
+    (check-unary-between/c '<=/c x)
+    (make-between/c -inf.0 x))
+  (define (>=/c x)
+    (check-unary-between/c '>=/c x)
+    (make-between/c x +inf.0))
+  (define (check-between/c x y)
+    (unless (number? x)
+      (error 'between/c "expected a number as first argument, got ~e, other arg ~e" x y))
+    (unless (number? y)
+      (error 'between/c "expected a number as second argument, got ~e, other arg ~e" y x)))
+  (define (between/c x y)
+    (check-between/c x y)
+    (make-between/c x y))
+  
+  ;;
+  ;; between/c opter helper
+  ;;
+  (define-for-syntax (opt/between-ctc pos stx low high op checker)
+    (let* ((lift-vars (generate-temporaries (syntax (low high error-check))))
+           (lift-low (car lift-vars))
+           (lift-high (cadr lift-vars)))
+      (with-syntax ((pos pos)
+                    (op op)
+                    (n lift-low)
+                    (m lift-high))
+        (values
+         (syntax (if (and (number? val) (op n val m)) val
+                     (raise-contract-error
+                      val
+                      src-info
+                      pos
+                      orig-str
+                      "expected <~a>, given: ~e"
+                      ((name-get ctc) ctc)
+                      val)))
+         (interleave-lifts
+          lift-vars
+          (list low
+                high
+                (cond
+                  [(eq? checker 'between/c) #'(check-between/c n m)]
+                  [(eq? checker '>/c) #'(check-unary-between/c '>/c n)]
+                  [(eq? checker '>=/c) #'(check-unary-between/c '>=/c n)]
+                  [(eq? checker '</c) #'(check-unary-between/c '</c m)]
+                  [(eq? checker '<=/c) #'(check-unary-between/c '<=/c m)])))
+         null
+         (syntax (and (number? val) (op n val m)))
+         #f))))
+  
+  ;;
+  ;; between/c and friends' opters
+  ;;
+  ;; note that the checkers are used by both optimized and normal contracts.
+  ;;
+  (define/opter (between/c opt/i pos neg stx)
+    (syntax-case stx (between/c)
+      [(between/c low high) (opt/between-ctc pos stx #'low #'high #'<= 'between/c)]))
+  (define/opter (>/c opt/i pos neg stx)
+    (syntax-case stx (>/c)
+      [(>/c low) (opt/between-ctc pos stx #'low #'+inf.0 #'< '>/c)]))
+  (define/opter (>=/c opt/i pos neg stx)
+    (syntax-case stx (>=/c)
+      [(>=/c low) (opt/between-ctc pos stx #'low #'+inf.0 #'<= '>=/c)]))
+  (define/opter (</c opt/i pos neg stx)
+    (syntax-case stx (</c)
+      [(</c high) (opt/between-ctc pos stx #'-inf.0 #'high #'< '</c)]))
+  (define/opter (<=/c opt/i pos neg stx)
+    (syntax-case stx (<=/c)
+      [(<=/c high) (opt/between-ctc pos stx #'-inf.0 #'high #'<= '<=/c)]))
 
   (define (</c x)
     (flat-named-contract
@@ -1283,6 +1400,64 @@ add struct contracts for immutable structs?
             (test-proc/flat-contract hdp (car x))
             (test-proc/flat-contract tlp (cdr x))))))
   
+  ;;
+  ;; cons/c opter
+  ;;
+  (define/opter (cons/c opt/i pos neg stx)
+    (define (opt/cons-ctc hdp tlp)
+      (let-values ([(next-hdp lifts-hdp partials-hdp flat-hdp unknown-hdp)
+                    (opt/i pos neg hdp)]
+                   [(next-tlp lifts-tlp partials-tlp flat-tlp unknown-tlp)
+                    (opt/i pos neg tlp)]
+                   [(error-check) (car (generate-temporaries (syntax (error-check))))])
+        (with-syntax ((next (with-syntax ((flat-hdp flat-hdp)
+                                          (flat-tlp flat-tlp))
+                              (syntax
+                               (and (pair? val)
+                                    (let ((val (car val))) flat-hdp)
+                                    (let ((val (cdr val))) flat-tlp))))))
+          (values
+           (with-syntax ((pos pos))
+             (syntax (if next
+                         val
+                         (raise-contract-error
+                          val
+                          src-info
+                          pos
+                          orig-str
+                          "expected <~a>, given: ~e"
+                          ((name-get ctc) ctc)
+                          val))))
+           (append
+            lifts-hdp lifts-tlp
+            (list (cons error-check
+                        (with-syntax ((hdp hdp)
+                                      (tlp tlp)
+                                      (check (with-syntax ((flat-hdp
+                                                            (cond
+                                                              [unknown-hdp
+                                                               (with-syntax ((ctc unknown-hdp))
+                                                                 (syntax (flat-contract/predicate? ctc)))]
+                                                              [else (if flat-hdp #'#t #'#f)]))
+                                                           (flat-tlp
+                                                            (cond
+                                                              [unknown-tlp
+                                                               (with-syntax ((ctc unknown-tlp))
+                                                                 (syntax (flat-contract/predicate? ctc)))]
+                                                              [else (if flat-tlp #'#t #'#f)])))
+                                               (syntax (and flat-hdp flat-tlp)))))
+                          (syntax
+                           (unless check
+                             (error 'cons/c "expected two flat contracts or procedures of arity 1, got: ~e and ~e"
+                                    hdp tlp)))))))
+           (append partials-hdp partials-tlp)
+           (syntax (if next #t #f))
+           #f))))
+    
+    (syntax-case stx (cons/c)
+      [(cons/c hdp tlp)
+       (opt/cons-ctc #'hdp #'tlp)]))
+  
   (define-syntax (*-immutable/c stx)
     (syntax-case stx ()
       [(_ predicate? constructor (arb? selectors ...) type-name name)
@@ -1360,6 +1535,45 @@ add struct contracts for immutable structs?
                                             (λ (n v) (= n (vector-length v)))
                                             immutable-vector
                                             vector-immutable/c))
+  
+  ;;
+  ;; cons-immutable/c opter
+  ;;
+  (define/opter (cons-immutable/c opt/i pos neg stx)
+    (define (opt/cons-immutable-ctc hdp tlp)
+      (let-values ([(next-hdp lifts-hdp partials-hdp flat-hdp unknown-hdp)
+                    (opt/i pos neg hdp)]
+                   [(next-tlp lifts-tlp partials-tlp flat-tlp unknown-tlp)
+                    (opt/i pos neg tlp)])
+        (with-syntax ((check (syntax (and (immutable? val) (pair? val)))))
+          (values
+           (with-syntax ((pos pos)
+                         (next-hdp next-hdp)
+                         (next-tlp next-tlp))
+             (syntax (if check
+                         (cons-immutable (let ((val (car val))) next-hdp)
+                                         (let ((val (cdr val))) next-tlp))
+                         (raise-contract-error
+                          val
+                          src-info
+                          pos
+                          orig-str
+                          "expected <~a>, given: ~e"
+                          ((name-get ctc) ctc)
+                          val))))        
+           (append lifts-hdp lifts-tlp) 
+           (append partials-hdp partials-tlp)
+           (if (and flat-hdp flat-tlp)
+               (with-syntax ((flat-hdp flat-hdp)
+                             (flat-tlp flat-tlp))
+                 (syntax (if (and check
+                                  (let ((val (car val))) flat-hdp)
+                                  (let ((val (cdr val))) flat-tlp)) #t #f)))
+               #f)
+           #f))))
+    
+    (syntax-case stx (cons-immutable/c)
+      [(cons-immutable/c hdp tlp) (opt/cons-immutable-ctc #'hdp #'tlp)]))
        
   (define (list/c . args)
     (unless (andmap flat-contract/predicate? args)

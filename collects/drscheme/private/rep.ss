@@ -33,6 +33,32 @@ TODO
            (lib "default-lexer.ss" "syntax-color"))
   
   (provide rep@)
+
+  (define-syntax stacktrace-name (string->uninterned-symbol "this-is-the-funny-name"))
+  
+  ;; this macro wraps its argument expression in some code in a non-tail manner
+  ;; so that a new name gets put onto the mzscheme stack. DrScheme's exception
+  ;; handlers trims the stack starting at this point to avoid showing drscheme's
+  ;; internals on the stack in the REPL.
+  (define-syntax (with-stacktrace-name stx)
+    (syntax-case stx ()
+      [(_ e)
+       (with-syntax ([my-funny-name (syntax-local-value #'stacktrace-name)])
+         (syntax
+          (let ([my-funny-name (λ () (begin0 e (random 1)))]) 
+            ((if (zero? (random 1)) 
+                 my-funny-name
+                 values)))))]))
+  
+  (define stacktrace-runtime-name
+    (let-syntax ([m (λ (x) (with-syntax ([x (syntax-local-value #'stacktrace-name)])
+                             (syntax 'x)))])
+      (m)))
+
+  (define no-breaks-break-parameterization
+    (parameterize-break 
+     #f
+     (current-break-parameterization)))
   
   (define rep@
     (unit/sig drscheme:rep^
@@ -172,10 +198,11 @@ TODO
       ;; the highlight must be set after the error message, because inserting into the text resets
       ;;     the highlighting.
       (define (drscheme-error-display-handler msg exn)
-        (let* ([srclocs-stack 
-                (if (exn? exn)
-                    (filter values (map cdr (continuation-mark-set->context (exn-continuation-marks exn))))
-                    '())]
+        (let* ([cut-stack (if (and (exn? exn)
+                                   (main-user-eventspace-thread?))
+                              (cut-out-top-of-stack exn)
+                              '())]
+               [srclocs-stack (filter values (map cdr cut-stack))]
                [stack 
                 (filter
                  values
@@ -191,6 +218,16 @@ TODO
                              (if (null? stack)
                                  '()
                                  (list (car srclocs-stack))))])
+          
+          ;; for use in debugging the stack trace stuff
+          #;
+          (when (exn? exn)
+            (print-struct #t)
+            (for-each 
+             (λ (frame) (printf " ~s\n" frame))
+             (continuation-mark-set->context (exn-continuation-marks exn)))
+            (printf "\n"))
+            
           (unless (null? stack)
             (drscheme:debug:print-bug-to-stderr msg stack))
           (for-each drscheme:debug:display-srcloc-in-error src-locs)
@@ -209,27 +246,68 @@ TODO
                          src-locs 
                          (filter (λ (x) (is-a? (car x) text%)) stack)))))))))
       
-      ;; drscheme-error-value->string-handler : TST number -> string
-      (define (drscheme-error-value->string-handler x n)
-        (let ([port (open-output-string)])
-          
-          ;; using a string port here means no snips allowed,
-          ;; even though this string may eventually end up
-          ;; displayed in a place where snips are allowed.
-          (print x port)
-          
-          (let* ([long-string (get-output-string port)])
-            (close-output-port port)
-            (if (<= (string-length long-string) n)
-                long-string
-                (let ([short-string (substring long-string 0 n)]
-                      [trim 3])
-                  (unless (n . <= . trim)
-                    (let loop ([i trim])
-                      (unless (i . <= . 0)
-                        (string-set! short-string (- n i) #\.)
-                        (loop (sub1 i)))))
-                  short-string)))))
+      (define (main-user-eventspace-thread?)
+        (let ([rep (current-rep)])
+          (and rep
+               (eq? (eventspace-handler-thread (send rep get-user-eventspace))
+                    (current-thread)))))
+      
+      (define (cut-out-top-of-stack exn)
+        (let ([initial-stack (continuation-mark-set->context (exn-continuation-marks exn))])
+          (let loop ([stack initial-stack])
+            (cond
+              [(null? stack) 
+               (unless (exn:break? exn)
+                 ;; give break exn's a free pass on this one.
+                 ;; sometimes they get raised in a funny place. 
+                 ;; (see call-with-break-parameterization below)
+                 (fprintf (current-error-port) "ACK! didn't find drscheme's stackframe when filtering\n"))
+               initial-stack]
+              [else 
+               (let ([top (car stack)])
+                 (cond
+                   [(cut-here? top) null]
+                   [else (cons top (loop (cdr stack)))]))]))))
+      
+      ;; is-cut? : any symbol -> boolean
+      ;; determines if this stack entry is really 
+      (define (cut-here? top)
+        (and (pair? top)
+             (let* ([fn-name (car top)]
+                    [srcloc (cdr top)]
+                    [source (and srcloc (srcloc-source srcloc))])
+               (and (eq? fn-name stacktrace-runtime-name) 
+                    (path? source)
+                    (let loop ([path source]
+                               [pieces '(#"rep.ss" #"private" #"drscheme" #"collects")])
+                      (cond
+                        [(null? pieces) #t]
+                        [else
+                         (let-values ([(base name dir?) (split-path path)])
+                           (and (equal? (path-element->bytes name) (car pieces))
+                                (loop base (cdr pieces))))]))))))
+        
+        ;; drscheme-error-value->string-handler : TST number -> string
+        (define (drscheme-error-value->string-handler x n)
+          (let ([port (open-output-string)])
+            
+            ;; using a string port here means no snips allowed,
+            ;; even though this string may eventually end up
+            ;; displayed in a place where snips are allowed.
+            (print x port)
+            
+            (let* ([long-string (get-output-string port)])
+              (close-output-port port)
+              (if (<= (string-length long-string) n)
+                  long-string
+                  (let ([short-string (substring long-string 0 n)]
+                        [trim 3])
+                    (unless (n . <= . trim)
+                      (let loop ([i trim])
+                        (unless (i . <= . 0)
+                          (string-set! short-string (- n i) #\.)
+                          (loop (sub1 i)))))
+                    short-string)))))
 
       (define drs-bindings-keymap (make-object keymap:aug-keymap%))
       
@@ -793,11 +871,10 @@ TODO
               (set! prompt-position (get-unread-start-point))
               (reset-region prompt-position 'end)))
           
-          (define/augment after-delete
-            (lambda (x y)
-              (unless inserting-prompt?
-                (reset-highlighting))
-              (inner (void) after-delete x y)))
+          (define/augment (after-delete x y)
+            (unless inserting-prompt?
+              (reset-highlighting))
+            (inner (void) after-delete x y))
           
           (define/override get-keymaps
             (λ ()
@@ -828,9 +905,9 @@ TODO
           (define/public (get-user-eventspace) (weak-box-value user-eventspace-box))
           (define/public (get-user-thread) (weak-box-value user-thread-box))
           (define/public (get-user-namespace) (weak-box-value user-namespace-box))
-          (define/public (get-user-break-parameterization) user-break-parameterization)
+          (define/pubment (get-user-break-parameterization) user-break-parameterization) ;; final method
           
-          (field (in-evaluation? #f) ; a heursitic for making the Break button send a break
+          (field (in-evaluation? #f)
                  (should-collect-garbage? #f)
                  (ask-about-kill? #f))
           (define/public (get-in-evaluation?) in-evaluation?)
@@ -884,29 +961,32 @@ TODO
           
           (define/augment (on-submit)
             (inner (void) on-submit)
-            ;; the -2 drops the last newline from history (why -2 and not -1?!)
-            (save-interaction-in-history prompt-position (- (last-position) 2))
-            (freeze-colorer)
             
-            (let ([needs-execution (send context needs-execution)])
-              (when (if (preferences:get 'drscheme:execute-warning-once)
-                        (and (not already-warned?)
-                             needs-execution)
-                        needs-execution)
-                (set! already-warned? #t)
-                (insert-warning needs-execution)))
-            
-            ;; lets us know we are done with this one interaction
-            ;; (since there may be multiple expressions at the prompt)
-            (send-eof-to-in-port)
-            
-            (set! prompt-position #f)
-            (evaluate-from-port
-             (get-in-port) 
-             #f
-             (λ ()
-               ;; clear out the eof object if it wasn't consumed
-               (clear-input-port))))
+            (when (and (get-user-thread) 
+                       (thread-running? (get-user-thread)))
+              ;; the -2 drops the last newline from history (why -2 and not -1?!)
+              (save-interaction-in-history prompt-position (- (last-position) 2))
+              (freeze-colorer)
+              
+              (let ([needs-execution (send context needs-execution)])
+                (when (if (preferences:get 'drscheme:execute-warning-once)
+                          (and (not already-warned?)
+                               needs-execution)
+                          needs-execution)
+                  (set! already-warned? #t)
+                  (insert-warning needs-execution)))
+              
+              ;; lets us know we are done with this one interaction
+              ;; (since there may be multiple expressions at the prompt)
+              (send-eof-to-in-port)
+              
+              (set! prompt-position #f)
+              (evaluate-from-port
+               (get-in-port) 
+               #f
+               (λ ()
+                 ;; clear out the eof object if it wasn't consumed
+                 (clear-input-port)))))
           
           ;; prompt-position : (union #f integer)
           ;; the position just after the last prompt
@@ -960,7 +1040,8 @@ TODO
              (λ () ; =User=, =Handler=, =No-Breaks=
                (let* ([settings (current-language-settings)]
                       [lang (drscheme:language-configuration:language-settings-language settings)]
-                      [settings (drscheme:language-configuration:language-settings-settings settings)])
+                      [settings (drscheme:language-configuration:language-settings-settings settings)]
+                      [dummy-value (box #f)])
                  (set! get-sexp/syntax/eof 
                        (if complete-program?
                            (send lang front-end/complete-program port settings user-teachpack-cache)
@@ -981,19 +1062,25 @@ TODO
                         (current-error-escape-k (λ () 
                                                   (set! cleanup? #t)
                                                   (k (void)))))
+                      
                       (λ () 
                         (let loop ()
-                          (let ([sexp/syntax/eof (get-sexp/syntax/eof)])
+                          (let ([sexp/syntax/eof (with-stacktrace-name (get-sexp/syntax/eof))])
                             (unless (eof-object? sexp/syntax/eof)
                               (call-with-break-parameterization
-                               (get-user-break-parameterization)
+                               user-break-parameterization
+                               ;; a break exn may be raised right at this point,
+                               ;; in which case the stack won't be in a trimmable state
+                               ;; so we don't complain (above) when we find an untrimmable 
+                               ;; break exn.
                                (λ ()
                                  (call-with-values
                                   (λ ()
-                                    (eval-syntax sexp/syntax/eof))
+                                    (with-stacktrace-name (eval-syntax sexp/syntax/eof)))
                                   (λ x (display-results x)))))
                               (loop))))
                         (set! cleanup? #t))
+                      
                       (λ () 
                         (current-error-escape-k saved-error-escape-k)
                         (when cleanup?
@@ -1026,8 +1113,6 @@ TODO
             (when user-custodian
               (custodian-shutdown-all user-custodian))
 	    (set! user-custodian #f))
-          
-          (field (user-break-enabled #t))
           
           (field (eval-thread-thunks null)
                  (eval-thread-state-sema 'not-yet-state-sema)
@@ -1074,7 +1159,7 @@ TODO
                      (current-error-escape-k (λ () 
 					       (set! cleanup? #t)
 					       (k (void)))))
-		  (λ () 
+                   (λ () 
                      (thunk) 
                      ; Breaks must be off!
                      (set! cleanup? #t))
@@ -1102,7 +1187,6 @@ TODO
             (set! user-break-parameterization (parameterize-break 
                                                #t 
                                                (current-break-parameterization)))
-            (set! user-break-enabled #t)
             (set! eval-thread-thunks null)
             (set! eval-thread-state-sema (make-semaphore 1))
             (set! eval-thread-queue-sema (make-semaphore 0))
@@ -1130,6 +1214,21 @@ TODO
                     (drscheme:language-configuration:language-settings-settings user-language-settings)
                     (let ([run-on-user-thread (lambda (t) (queue-user/wait t))])
                       run-on-user-thread))
+              
+              ;; setup the special repl values
+              (let ([raised-exn? #f]
+                    [exn #f])
+                (queue-user/wait
+                 (λ () ; =User=, =No-Breaks=
+                   (with-handlers ((void (λ (x) 
+                                           (set! exn x)
+                                           (set! raised-exn? #t))))
+                     (drscheme:language:setup-setup-values))))
+                (when raised-exn?
+                  (fprintf 
+                   (current-error-port)
+                   "copied exn raised when setting up snip values (thunk passed as third argume to drscheme:language:add-snip-value)\n")
+                  (raise exn)))
               
               ;; installs the teachpacks
               ;; must happen after language is initialized.
@@ -1276,7 +1375,6 @@ TODO
               (current-error-port (get-err-port))
               (current-value-port (get-value-port))
               (current-input-port (get-in-box-port))
-              (break-enabled #t)
               (let* ([primitive-dispatch-handler (event-dispatch-handler)])
                 (event-dispatch-handler
                  (rec drscheme-event-dispatch-handler ; <= a name for #<...> printout
@@ -1286,53 +1384,38 @@ TODO
                      ;  the kernel never queues an event in the user's eventspace.
                      (cond
                        [(eq? eventspace (get-user-eventspace))
-                        ; =User=, =Handler=, =No-Breaks=
+                        ; =User=, =Handler=
                         
-                        (let* ([ub? (eq? user-break-enabled 'user)]
-                               [break-ok? (if ub?
-                                              (break-enabled)
-                                              user-break-enabled)])
-                          (break-enabled #f)
-                          
-                          ; We must distinguish between "top-level" events and
-                          ;  those within `yield' in the user's program.
-                          
-                          (cond
-                            [(not in-evaluation?)
-                             (send context reset-offer-kill)
-                             (send context set-breakables (get-user-thread) (get-user-custodian))
-                             
-                             (protect-user-evaluation
-                              ; Run the dispatch:
-                              (λ () ; =User=, =Handler=, =No-Breaks=
-                                ; This procedure is responsible for adjusting breaks to
-                                ;  match the user's expectations:
-                                (dynamic-wind
-                                 (λ () 
-                                   (break-enabled break-ok?)
-                                   (unless ub?
-                                     (set! user-break-enabled 'user)))
-                                   (λ ()
-                                     (primitive-dispatch-handler eventspace))
-                                   (λ ()
-                                     (unless ub?
-                                       (set! user-break-enabled (break-enabled)))
-                                     (break-enabled #f))))
-                              ; Cleanup after dispatch
-                              (λ ()
-                                ;; in principle, the line below might cause
-                                ;; a "race conditions" in the GUI. That is, there might
-                                ;; be many little events that the user won't quite
-                                ;; be able to break.
-                                (send context set-breakables #f #f)))
-                             
-                             ; Restore break:
-                             (when ub?
-                               (break-enabled break-ok?))]
-                            [else
-                             ; Nested dispatch; don't adjust interface, and restore break:
-                             (break-enabled break-ok?)
-                             (primitive-dispatch-handler eventspace)]))]
+                        ; We must distinguish between "top-level" events and
+                        ;  those within `yield' in the user's program.
+                        (cond
+                          [(not in-evaluation?)
+                           ;; at this point, we must not be in a nested dispatch, so we can
+                           ;; just disable breaks and rely on call-with-break-parameterization
+                           ;; to restore them to the user's setting.
+                           
+                           (call-with-break-parameterization
+                            no-breaks-break-parameterization
+                            (λ ()
+                              ; =No-Breaks=
+                              (send context reset-offer-kill)
+                              (send context set-breakables (get-user-thread) (get-user-custodian))
+                              (protect-user-evaluation
+                               ; Run the dispatch:
+                               (λ () ; =User=, =Handler=, =No-Breaks=
+                                 (call-with-break-parameterization
+                                  user-break-parameterization
+                                  (λ () (primitive-dispatch-handler eventspace))))
+                               ; Cleanup after dispatch
+                               (λ ()
+                                 ;; in principle, the line below might cause
+                                 ;; a "race conditions" in the GUI. That is, there might
+                                 ;; be many little events that the user won't quite
+                                 ;; be able to break.
+                                 (send context set-breakables #f #f)))))]
+                          [else
+                           ; Nested dispatch; don't adjust interface
+                           (primitive-dispatch-handler eventspace)])]
                        [else 
                         ; =User=, =Non-Handler=, =No-Breaks=
                         (primitive-dispatch-handler eventspace)])))))))

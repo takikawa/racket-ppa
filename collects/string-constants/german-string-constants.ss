@@ -194,7 +194,7 @@
  (plt:hd:refreshing-manuals-finished "Fertig.")
  (plt:hd:about-help-desk "Über das Hilfezentrum")
  (plt:hd:help-desk-about-string
-  "Das Hilfezentrum ist die primäre Quelle für Information über die PLT-Software,insbesondere DrScheme, MzScheme und MrEd.\n\nVersion ~a\nCopyright (c) 1995-2003 PLT")
+  "Das Hilfezentrum ist die primäre Quelle für Information über die PLT-Software,insbesondere DrScheme, MzScheme und MrEd.\n\nVersion ~a\nCopyright (c) ~a-~a PLT")
  (plt:hd:help-on-help "Hilfe zur Hilfe")
  (plt:hd:help-on-help-details "Hilfe zum Hilfezentrum finden Sie auf der Hilfezentrum-Hompage unter 'Help Desk'. (Um auf diese Homepage zu gelangen, drücken Sie den 'Home'-Knopf oben im Hilfezentrum.)")
   (reload "Aktualisieren") ;; refresh the page in a web browser
@@ -282,8 +282,8 @@
  (editor-prefs-panel-label "Editieren")
  (general-prefs-panel-label "Allgemein")
  (highlight-parens "Geklammerten Text hervorheben")
- (fixup-open-parens "Öffnende Klammern automatisch justieren")
- (fixup-close-parens "Schließende Klammern automatisch justieren")
+ (fixup-open-brackets "Öffnende eckige Klammern automatisch anpassen")
+ (fixup-close-parens "Schließende Klammern automatisch anpassen")
  (flash-paren-match "Passende Klammer anblinken")
  (auto-save-files "Dateien automatisch abspeichern")
  (backup-files "Backup-Dateien")
@@ -294,6 +294,8 @@
  (show-status-line "Status-Zeile anzeigen")
  (count-columns-from-one "Spaltennummern fangen mit 1 an")
  (display-line-numbers "Zeilennummern in Puffern anzeigen, keine Puffer-Indizes")
+ (show-line-and-column-numbers "Zeilen- und Spaltennummern anzeigen") ; used for popup menu; right click on line/column box in bottom of drs window
+ (show-character-offsets "Zeichen-Offsets anzeigen") ; used for popup menu; right click on line/column box in bottom of drs window
  (enable-keybindings-in-menus "Tastenbelegung für Menüs")
  (automatically-to-ps "Automatisch in PostScript-Datei drucken")
  (option-as-meta "Option-Taste als Mera behandeln") ;; macos/macos x only
@@ -346,10 +348,15 @@
  (indenting-prefs-panel-label "Einrücken")
  (indenting-prefs-extra-regexp "Zusätzlicher Regexp")
 
+ (square-bracket-prefs-panel-label "eckige Klammern")
+
  ; filled with define, lambda, or begin
  (enter-new-keyword "Bitte ein Schlüsselwort wie ~a eingeben:")
  (x-keyword "~a-Schlüsselwort")
  (x-like-keywords "Schlüsselwort wie ~a")
+
+ ; used in Square bracket panel
+ (skip-subexpressions "Anzahl zu überspringender Unterausdrücke")
 
  (expected-a-symbol "Symbol erwartet, stattdessen bekommen: ~a")
  (already-used-keyword "\"~a\" ist bereits ein Schlüsselwort mit Spezial-Einrückung")
@@ -517,12 +524,19 @@
  (keybindings-sort-by-name "Nach Name sortieren")
  (keybindings-sort-by-key "Nach Taste sortieren")
  (keybindings-add-user-defined-keybindings "Benutzerdefinierte Tastenbelegungen hinzufügen...")
+ (keybindings-add-user-defined-keybindings/planet "Benutzerdefinierte Tastenbelegungen aus PLaneT hinzufügen...")
  (keybindings-menu-remove "~a entfernen")
  (keybindings-choose-user-defined-file "Bitte eine Datei mit den Tastenbelegungen auswählen.")
 
  (user-defined-keybinding-error "Fehler beim Ausführen der Tastenbelegung ~a\n\n~a")
  (user-defined-keybinding-malformed-file "Die Datei ~a enthält kein Modul, das in der Sprache (lib \"keybinding-lang.ss\" \"framework\") geschrieben ist.")  
-
+ (keybindings-planet-malformed-spec "Die PLaneT-Spezifikation ist fehlerhaft: ~a") ; the string will be what the user typed in
+ (keybindings-type-planet-spec "Bitte PLaneT-require-Spezifikation eingeben (ohne das `require')")
+  
+ ; first ~a will be a string naming the file or planet package where the keybindings come from;
+ ; second ~a will be an error message
+ (keybindings-error-installing-file "Fehler beim Installieren der Tastenbelegungen ~a:\n\n~a")
+  
  ;; menu items in the "special" menu
  (insert-text-box-item "Text-Kasten einfügen")
  (insert-image-item "Bild einfügen...")

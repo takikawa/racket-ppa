@@ -123,7 +123,8 @@ static void init_thread_memory();
 typedef struct Win_FD_Input_Thread {
   /* This is malloced for use in a Win32 thread */
   HANDLE fd;
-  volatile int avail, err, eof, checking;
+  volatile int avail, err, checking;
+  HANDLE eof;
   unsigned char *buffer;
   HANDLE checking_sema, ready_sema, you_clean_up_sema;
 } Win_FD_Input_Thread;
@@ -2246,10 +2247,7 @@ long scheme_get_char_string(const char *who,
   }
 }
 
-static 
-#ifndef NO_INLINE_KEYWORD
-MSC_IZE(inline)
-#endif
+static MZ_INLINE
 long get_one_byte(const char *who,
 		  Scheme_Object *port,
 		  char *buffer, long offset,
@@ -4760,6 +4758,10 @@ static long fd_get_string(Scheme_Input_Port *port,
 	   Extract data made available by the reader thread. */
 	if (fip->th->eof) {
 	  bc = 0;
+	  if (fip->th->eof != INVALID_HANDLE_VALUE) {
+	    ReleaseSemaphore(fip->th->eof, 1, NULL);
+	    fip->th->eof = NULL;
+	  }
 	} else if (fip->th->err) {
 	  bc = -1;
 	  errno = fip->th->err;
@@ -4857,6 +4859,11 @@ fd_close_input(Scheme_Input_Port *port)
     /* -1 for checking means "shut down" */
     fip->th->checking = -1;
     ReleaseSemaphore(fip->th->checking_sema, 1, NULL);
+
+    if (fip->th->eof && (fip->th->eof != INVALID_HANDLE_VALUE)) {
+      ReleaseSemaphore(fip->th->eof, 1, NULL);
+      fip->th->eof = NULL;
+    }
 
     /* Try to get out of cleaning up the records (since they can't be
        cleaned until the thread is also done: */
@@ -5020,7 +5027,7 @@ make_fd_input_port(int fd, Scheme_Object *name, int regfile, int win_textmode, i
     th->fd = (HANDLE)fd;
     th->avail = 0;
     th->err = 0;
-    th->eof = 0;
+    th->eof = NULL;
     th->checking = 0;
     
     sm = CreateSemaphore(NULL, 0, 1, NULL);
@@ -5048,6 +5055,8 @@ START_XFORM_SKIP;
 static long WindowsFDReader(Win_FD_Input_Thread *th)
 {
   DWORD toget, got;
+  int perma_eof = 0;
+  HANDLE eof_wait = NULL;
 
   if (GetFileType((HANDLE)th->fd) == FILE_TYPE_PIPE) {
     /* Reading from a pipe will return early when data is available. */
@@ -5057,7 +5066,7 @@ static long WindowsFDReader(Win_FD_Input_Thread *th)
     toget = 1;
   }
 
-  while (!th->eof && !th->err) {
+  while (!perma_eof && !th->err) {
     /* Wait until we're supposed to look for input: */
     WaitForSingleObject(th->checking_sema, INFINITE);
 
@@ -5066,19 +5075,28 @@ static long WindowsFDReader(Win_FD_Input_Thread *th)
 
     if (ReadFile(th->fd, th->buffer, toget, &got, NULL)) {
       th->avail = got;
-      if (!got)
-	th->eof = 1;
+      if (!got) {
+	/* We interpret a send of 0 bytes as a mid-stream EOF. */
+	eof_wait = CreateSemaphore(NULL, 0, 1, NULL);
+	th->eof = eof_wait;
+      }
     } else {
       int err;
       err = GetLastError();
-      if (err == ERROR_BROKEN_PIPE)
-	th->eof = 1;
-      else
+      if (err == ERROR_BROKEN_PIPE) {
+	th->eof = INVALID_HANDLE_VALUE;
+	perma_eof = 1;
+      } else
 	th->err = err;
     }
 
     /* Notify main program that we found something: */
     ReleaseSemaphore(th->ready_sema, 1, NULL);
+
+    if (eof_wait) {
+      WaitForSingleObject(eof_wait, INFINITE);
+      eof_wait = NULL;
+    }
   }
 
   /* We have to clean up if the main program has abandoned us: */
@@ -7110,7 +7128,7 @@ static Scheme_Object *subprocess(int c, Scheme_Object *args[])
       }
     }
 
-    /* Set real CWD - and hope no other thread changes it! */
+    /* Set real CWD before spawn: */
     tcd = scheme_get_param(scheme_current_config(), MZCONFIG_CURRENT_DIRECTORY);
     scheme_os_setcwd(SCHEME_BYTE_STR_VAL(tcd), 0);
 
@@ -7924,6 +7942,67 @@ void scheme_start_itimer_thread(long usec)
 
   itimer_delay = usec;
   ReleaseSemaphore(itimer_semaphore, 1, NULL);
+}
+
+#endif
+
+#ifdef USE_PTHREAD_THREAD_TIMER
+
+#include <pthread.h>
+
+static int itimer = 0, itimer_continue = 0;
+static pthread_mutex_t itimer_mutex;
+static pthread_cond_t itimer_cond;
+static volatile long itimer_delay;
+
+#ifdef MZ_XFORM
+START_XFORM_SKIP;
+#endif
+static void *run_itimer(void *p)
+{
+  while (1) {
+    usleep(itimer_delay);
+    scheme_fuel_counter = 0;
+    
+    pthread_mutex_lock(&itimer_mutex);
+    if (itimer_continue) {
+      itimer_continue = 0;
+    } else {
+      itimer_continue = -1;
+      pthread_cond_wait(&itimer_cond, &itimer_mutex);
+    }
+    pthread_mutex_unlock(&itimer_mutex);
+  }
+}
+#ifdef MZ_XFORM
+END_XFORM_SKIP;
+#endif
+
+void scheme_start_itimer_thread(long usec)
+{
+  itimer_delay = usec;
+
+  if (!itimer) {
+    pthread_t t;
+    pthread_mutex_init(&itimer_mutex, NULL);
+    pthread_cond_init(&itimer_cond, NULL);
+    pthread_create(&t, NULL, run_itimer,  NULL);
+    itimer = 1;
+  } else {
+    pthread_mutex_lock(&itimer_mutex);
+    if (!itimer_continue) {
+      /* itimer thread is currently running working */
+      itimer_continue = 1;
+    } else if (itimer_continue < 0) {
+      /* itimer thread is waiting on cond */
+      itimer_continue = 0;
+      pthread_cond_signal(&itimer_cond);
+    } else {
+      /* itimer thread is working, and we've already
+         asked it to continue */
+    }
+    pthread_mutex_unlock(&itimer_mutex);
+  }
 }
 
 #endif

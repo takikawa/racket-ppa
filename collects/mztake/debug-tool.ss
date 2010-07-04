@@ -5,7 +5,7 @@
            ;(lib "math.ss")
            (lib "class.ss")
            (lib "unitsig.ss")
-           ;(lib "contract.ss")
+           (lib "contract.ss")
            (lib "mred.ss" "mred")
            (prefix drscheme:arrow: (lib "arrow.ss" "drscheme"))
            (lib "tool.ss" "drscheme")
@@ -44,6 +44,11 @@
 			   (string-constant intermediate-student)
 			   (string-constant intermediate-student/lambda)
 			   (string-constant advanced-student))))
+      
+      (define (robust-vector-ref vec idx)
+        (if (< idx (vector-length vec))
+            (vector-ref vec idx)
+            #f))
       
       (define (break-at bp p)
         (hash-table-get bp p))
@@ -230,7 +235,7 @@
                               (invalidate-bitmap-cache)])
                            (let* ([frames (send (get-tab) get-stack-frames)]
                                   [pos-vec (send (get-tab) get-pos-vec)]
-                                  [id (vector-ref pos-vec pos)]
+                                  [id (robust-vector-ref pos-vec pos)]
                                 #;
                                   [_ (printf "frames = ~a~npos-vec = ~a~nid = ~a~n"
                                              frames pos-vec id)])
@@ -277,15 +282,17 @@
                                     (if (and pc (= pos pc))
                                         (let* ([stat (send (get-tab) get-break-status)]
                                                [f (get-top-level-window)]
-                                               [rendered-value (if (= 2 (length stat))
-                                                                   (render (cadr stat))
-                                                                   (format "~a" (cons 'values 
-                                                                                      (map (lambda (v) (render v)) (rest stat)))))])
+                                               [rendered-value (if (cons? stat)
+								   (if (= 2 (length stat))
+                                                                       (render (cadr stat))
+                                                                       (format "~a" (cons 'values 
+                                                                                          (map (lambda (v) (render v)) (rest stat)))))
+								   "")])
                                           (when (cons? stat)
                                             #;(send (make-object menu-item%
-                                                    (clean-status (format "expr -> ~a" rendered-value))
-                                                    menu
-                                                    void) enable #f)
+                                                      (clean-status (format "expr -> ~a" rendered-value))
+                                                      menu
+                                                      void) enable #f)
                                             (make-object menu-item%
                                               "Print return value to console"
                                               menu
@@ -324,7 +331,7 @@
                                [(invalid)
                                 (let* ([frames (send (get-tab) get-stack-frames)]
                                        [pos-vec (send (get-tab) get-pos-vec)]
-                                       [id (vector-ref pos-vec pos)]
+                                       [id (robust-vector-ref pos-vec pos)]
                                        #;
                                        [_ (printf "frames = ~a~npos-vec = ~a~nid = ~a~n"
                                                     frames pos-vec id)])
@@ -449,72 +456,56 @@
           ;; adds debugging information to `sexp' and calls `oe'
           (define/private (make-debug-eval-handler oe break? break-before break-after)
             (lambda (orig-exp)
-              (if (or (compiled-expression? (if (syntax? orig-exp)
+              (if (compiled-expression? (if (syntax? orig-exp)
                                                 (syntax-e orig-exp)
                                                 orig-exp))
-                      (not (robust-syntax-source orig-exp))
-                      (not (eq? (robust-syntax-source orig-exp)
-                                (send (get-tab) get-defs))))
                   (oe orig-exp)
                   (let loop ([exp (if (syntax? orig-exp)
                                       orig-exp
                                       (namespace-syntax-introduce
                                        (datum->syntax-object #f orig-exp)))])
                     (let ([top-e (expand-syntax-to-top-form exp)])
-                      (syntax-case top-e (begin)
-                        [(begin expr ...)
-                         ;; Found a `begin', so expand/eval each contained 
-                         ;; expression one at a time 
-                         (let i-loop ([exprs (syntax->list #'(expr ...))]
-                                      [last-one (list (void))])
-                           (cond
-                             [(null? exprs) (apply values last-one)]
-                             [else (i-loop (cdr exprs)
-                                           (call-with-values
-                                            (lambda () (loop (car exprs)))
-                                            list))]))]
-                        [_else
-                         ;; Not `begin', so proceed with normal expand and eval 
-                         (parameterize ([current-eval oe])
-                           (eval/annotations
-                            top-e
-                            (lambda (fn m) #f) ; TODO: multiple file support
-                            (lambda (stx)
-                              (let*-values ([(breakpoints) (send (get-tab) get-breakpoints)]
-                                            [(pos-vec) (send (get-tab) get-pos-vec)]
-                                            [(annotated break-posns)
-                                             (annotate-for-single-stepping
-                                              (expand-syntax top-e)
-                                              break?
-                                              break-before
-                                              break-after
-                                              (lambda (type bound binding)
-                                                ;(display-results (list bound))
-                                                (when (eq? (robust-syntax-source bound)
-                                                           (robust-syntax-source exp))
-                                                  (let loop ([i 0])
-                                                    (when (< i (syntax-span bound))
-                                                      (vector-set! pos-vec (+ i (syntax-position bound)) binding)
-                                                      (loop (add1 i))))))
-					      (lambda (mod var val)
-                                                (send (get-tab) add-top-level-binding var val)
-                                                #;
-                                                (printf "top-level binding: ~a ~a ~a~n" mod var val)))])
-                                (hash-table-for-each
-                                 breakpoints
-                                 (lambda (pos status)
-                                   ; possible efficiency problem for large files with many breakpoints
-                                   (when (and (syntax-position top-e)
-                                              (>= pos (syntax-position top-e))
-                                              (< pos (+ (syntax-position top-e) (syntax-span top-e)))
-                                              (not (memq pos break-posns)))
-                                     (hash-table-remove! breakpoints pos))))
-                                (for-each (lambda (posn)
-                                            (hash-table-put!
-                                             breakpoints posn
-                                             (hash-table-get breakpoints posn (lambda () #f)))) break-posns)
-                                ;(display-results (list orig-exp))
-                                annotated))))]))))))
+                      (parameterize ([current-eval oe])
+                        (eval/annotations
+                         top-e
+                         (lambda (fn m) #f) ; TODO: multiple file support
+                         (lambda (stx)
+                           (let*-values ([(breakpoints) (send (get-tab) get-breakpoints)]
+                                         [(pos-vec) (send (get-tab) get-pos-vec)]
+                                         [(annotated break-posns)
+                                          (annotate-for-single-stepping
+                                           (expand-syntax top-e)
+                                           break?
+                                           break-before
+                                           break-after
+                                           (lambda (type bound binding)
+                                             ;(display-results (list bound))
+                                             (when (eq? (robust-syntax-source bound)
+                                                        (robust-syntax-source exp))
+                                               (let loop ([i 0])
+                                                 (when (< i (syntax-span bound))
+                                                   (vector-set! pos-vec (+ i (syntax-position bound)) binding)
+                                                   (loop (add1 i))))))
+                                           (lambda (mod var val)
+                                             (send (get-tab) add-top-level-binding var val)
+                                             #;
+                                             (printf "top-level binding: ~a ~a ~a~n" mod var val))
+                                           (send (get-tab) get-defs))])
+                             (hash-table-for-each
+                              breakpoints
+                              (lambda (pos status)
+                                ; possible efficiency problem for large files with many breakpoints
+                                (when (and (syntax-position top-e)
+                                           (>= pos (syntax-position top-e))
+                                           (< pos (+ (syntax-position top-e) (syntax-span top-e)))
+                                           (not (memq pos break-posns)))
+                                  (hash-table-remove! breakpoints pos))))
+                             (for-each (lambda (posn)
+                                         (hash-table-put!
+                                          breakpoints posn
+                                          (hash-table-get breakpoints posn (lambda () #f)))) break-posns)
+                             ;(display-results (list orig-exp))
+                             annotated)))))))))
           
           (define/override (reset-console)
             (super reset-console)
@@ -877,12 +868,16 @@
 	    (inner (void) on-tab-change old new))
 
 	  (define/public (check-current-language-for-debugger)
-	    (if (debugger-does-not-work-for? (extract-language-level 
-					      (send (get-definitions-text) get-next-settings)))
-		(when (send debug-button is-shown?)
-		  (send (send debug-button get-parent) delete-child debug-button))
-		(unless (send debug-button is-shown?)
-		  (send (send debug-button get-parent) add-child debug-button))))
+            (let* ([settings (send (get-definitions-text) get-next-settings)]
+                   [lang (drscheme:language-configuration:language-settings-language settings)]
+                   [visible? (and (send lang capability-value 'mztake:debug-button)
+                                (not (debugger-does-not-work-for?
+                                      (extract-language-level settings))))])
+              (if visible?
+                  (unless (send debug-button is-shown?)
+                    (send (send debug-button get-parent) add-child debug-button))
+                  (when (send debug-button is-shown?)
+                    (send (send debug-button get-parent) delete-child debug-button)))))
           
           (send (get-button-panel) change-children
                 (lambda (_)
@@ -891,6 +886,7 @@
 
 	  ; hide debug button if it's not supported for the initial language:
 	  (check-current-language-for-debugger)))
+      (drscheme:language:register-capability 'mztake:debug-button (flat-contract boolean?) #t)
       (drscheme:get/extend:extend-definitions-text debug-definitions-text-mixin)
       (drscheme:get/extend:extend-interactions-text debug-interactions-text-mixin)
       (drscheme:get/extend:extend-unit-frame debug-unit-frame-mixin)

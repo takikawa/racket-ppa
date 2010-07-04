@@ -435,7 +435,7 @@ static int unclosed_proc_MARK(void *p) {
   gcMARK(d->code);
   gcMARK(d->closure_map);
 #ifdef MZ_USE_JIT
-  gcMARK(d->native_code);
+  gcMARK(d->u.native_code);
   gcMARK(d->context);
 #endif
 
@@ -450,7 +450,7 @@ static int unclosed_proc_FIXUP(void *p) {
   gcFIXUP(d->code);
   gcFIXUP(d->closure_map);
 #ifdef MZ_USE_JIT
-  gcFIXUP(d->native_code);
+  gcFIXUP(d->u.native_code);
   gcFIXUP(d->context);
 #endif
 
@@ -780,7 +780,9 @@ static int closed_prim_proc_FIXUP(void *p) {
 
 static int scm_closure_SIZE(void *p) {
   Scheme_Closure *c = (Scheme_Closure *)p;
-  int closure_size = ((Scheme_Closure_Data *)GC_resolve(c->code))->closure_size;
+  int closure_size = (c->code 
+                      ? ((Scheme_Closure_Data *)GC_resolve(c->code))->closure_size
+                      : 0);
 
   return
   gcBYTES_TO_WORDS((sizeof(Scheme_Closure)
@@ -789,7 +791,9 @@ static int scm_closure_SIZE(void *p) {
 
 static int scm_closure_MARK(void *p) {
   Scheme_Closure *c = (Scheme_Closure *)p;
-  int closure_size = ((Scheme_Closure_Data *)GC_resolve(c->code))->closure_size;
+  int closure_size = (c->code 
+                      ? ((Scheme_Closure_Data *)GC_resolve(c->code))->closure_size
+                      : 0);
 
 
   int i = closure_size;
@@ -804,7 +808,9 @@ static int scm_closure_MARK(void *p) {
 
 static int scm_closure_FIXUP(void *p) {
   Scheme_Closure *c = (Scheme_Closure *)p;
-  int closure_size = ((Scheme_Closure_Data *)GC_resolve(c->code))->closure_size;
+  int closure_size = (c->code 
+                      ? ((Scheme_Closure_Data *)GC_resolve(c->code))->closure_size
+                      : 0);
 
 
   int i = closure_size;
@@ -876,14 +882,13 @@ static int cont_proc_MARK(void *p) {
   Scheme_Cont *c = (Scheme_Cont *)p;
   
   gcMARK(c->dw);
-  gcMARK(c->common);
-  gcMARK(c->ok);
+  gcMARK(c->prompt_tag);
+  gcMARK(c->meta_continuation);
   gcMARK(c->save_overflow);
   gcMARK(c->runstack_copied);
   gcMARK(c->runstack_owner);
   gcMARK(c->cont_mark_stack_copied);
   gcMARK(c->cont_mark_stack_owner);
-  gcMARK(c->orig_mark_segments);
   gcMARK(c->init_config);
   gcMARK(c->init_break_cell);
 #ifdef MZ_USE_JIT
@@ -893,6 +898,15 @@ static int cont_proc_MARK(void *p) {
   MARK_jmpup(&c->buf);
   MARK_cjs(&c->cjs);
   MARK_stack_state(&c->ss);
+  gcMARK(c->runstack_start);
+  gcMARK(c->runstack_saved);
+
+  /* These shouldn't actually persist across a GC, but
+     just in case... */
+  gcMARK(c->value);
+  gcMARK(c->resume_to);
+  gcMARK(c->use_next_cont);
+  gcMARK(c->extra_marks);
   
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Cont));
@@ -902,14 +916,13 @@ static int cont_proc_FIXUP(void *p) {
   Scheme_Cont *c = (Scheme_Cont *)p;
   
   gcFIXUP(c->dw);
-  gcFIXUP(c->common);
-  gcFIXUP(c->ok);
+  gcFIXUP(c->prompt_tag);
+  gcFIXUP(c->meta_continuation);
   gcFIXUP(c->save_overflow);
   gcFIXUP(c->runstack_copied);
   gcFIXUP(c->runstack_owner);
   gcFIXUP(c->cont_mark_stack_copied);
   gcFIXUP(c->cont_mark_stack_owner);
-  gcFIXUP(c->orig_mark_segments);
   gcFIXUP(c->init_config);
   gcFIXUP(c->init_break_cell);
 #ifdef MZ_USE_JIT
@@ -919,6 +932,15 @@ static int cont_proc_FIXUP(void *p) {
   FIXUP_jmpup(&c->buf);
   FIXUP_cjs(&c->cjs);
   FIXUP_stack_state(&c->ss);
+  gcFIXUP(c->runstack_start);
+  gcFIXUP(c->runstack_saved);
+
+  /* These shouldn't actually persist across a GC, but
+     just in case... */
+  gcFIXUP(c->value);
+  gcFIXUP(c->resume_to);
+  gcFIXUP(c->use_next_cont);
+  gcFIXUP(c->extra_marks);
   
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Cont));
@@ -926,6 +948,39 @@ static int cont_proc_FIXUP(void *p) {
 
 #define cont_proc_IS_ATOMIC 0
 #define cont_proc_IS_CONST_SIZE 1
+
+
+static int meta_cont_proc_SIZE(void *p) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Meta_Continuation));
+}
+
+static int meta_cont_proc_MARK(void *p) {
+  Scheme_Meta_Continuation *c = (Scheme_Meta_Continuation *)p;
+  
+  gcMARK(c->prompt_tag);
+  gcMARK(c->overflow);
+  gcMARK(c->next);
+  gcMARK(c->cont_mark_stack_copied);
+
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Meta_Continuation));
+}
+
+static int meta_cont_proc_FIXUP(void *p) {
+  Scheme_Meta_Continuation *c = (Scheme_Meta_Continuation *)p;
+  
+  gcFIXUP(c->prompt_tag);
+  gcFIXUP(c->overflow);
+  gcFIXUP(c->next);
+  gcFIXUP(c->cont_mark_stack_copied);
+
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Meta_Continuation));
+}
+
+#define meta_cont_proc_IS_ATOMIC 0
+#define meta_cont_proc_IS_CONST_SIZE 1
 
 
 static int mark_dyn_wind_SIZE(void *p) {
@@ -936,8 +991,9 @@ static int mark_dyn_wind_SIZE(void *p) {
 static int mark_dyn_wind_MARK(void *p) {
   Scheme_Dynamic_Wind *dw = (Scheme_Dynamic_Wind *)p;
   
+  gcMARK(dw->id);
   gcMARK(dw->data);
-  gcMARK(dw->cont);
+  gcMARK(dw->prompt_tag);
   gcMARK(dw->prev);
     
   MARK_stack_state(&dw->envss);
@@ -949,8 +1005,9 @@ static int mark_dyn_wind_MARK(void *p) {
 static int mark_dyn_wind_FIXUP(void *p) {
   Scheme_Dynamic_Wind *dw = (Scheme_Dynamic_Wind *)p;
   
+  gcFIXUP(dw->id);
   gcFIXUP(dw->data);
-  gcFIXUP(dw->cont);
+  gcFIXUP(dw->prompt_tag);
   gcFIXUP(dw->prev);
     
   FIXUP_stack_state(&dw->envss);
@@ -972,7 +1029,8 @@ static int mark_overflow_MARK(void *p) {
   Scheme_Overflow *o = (Scheme_Overflow *)p;
 
   gcMARK(o->prev);
-  MARK_jmpup(&o->cont);
+  gcMARK(o->jmp);
+  gcMARK(o->id);
 
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Overflow));
@@ -982,7 +1040,8 @@ static int mark_overflow_FIXUP(void *p) {
   Scheme_Overflow *o = (Scheme_Overflow *)p;
 
   gcFIXUP(o->prev);
-  FIXUP_jmpup(&o->cont);
+  gcFIXUP(o->jmp);
+  gcFIXUP(o->id);
 
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Overflow));
@@ -990,6 +1049,33 @@ static int mark_overflow_FIXUP(void *p) {
 
 #define mark_overflow_IS_ATOMIC 0
 #define mark_overflow_IS_CONST_SIZE 1
+
+
+static int mark_overflow_jmp_SIZE(void *p) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Overflow_Jmp));
+}
+
+static int mark_overflow_jmp_MARK(void *p) {
+  Scheme_Overflow_Jmp *o = (Scheme_Overflow_Jmp *)p;
+
+  MARK_jmpup(&o->cont);
+
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Overflow_Jmp));
+}
+
+static int mark_overflow_jmp_FIXUP(void *p) {
+  Scheme_Overflow_Jmp *o = (Scheme_Overflow_Jmp *)p;
+
+  FIXUP_jmpup(&o->cont);
+
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Overflow_Jmp));
+}
+
+#define mark_overflow_jmp_IS_ATOMIC 0
+#define mark_overflow_jmp_IS_CONST_SIZE 1
 
 
 static int escaping_cont_proc_SIZE(void *p) {
@@ -1000,13 +1086,10 @@ static int escaping_cont_proc_SIZE(void *p) {
 static int escaping_cont_proc_MARK(void *p) {
   Scheme_Escaping_Cont *c = (Scheme_Escaping_Cont *)p;
 
-  gcMARK(c->mark_key);
-  gcMARK(c->marks_prefix);
 #ifdef MZ_USE_JIT
   gcMARK(c->native_trace);
 #endif
 
-  MARK_cjs(&c->cjs);
   MARK_stack_state(&c->envss);
 
   return
@@ -1016,13 +1099,10 @@ static int escaping_cont_proc_MARK(void *p) {
 static int escaping_cont_proc_FIXUP(void *p) {
   Scheme_Escaping_Cont *c = (Scheme_Escaping_Cont *)p;
 
-  gcFIXUP(c->mark_key);
-  gcFIXUP(c->marks_prefix);
 #ifdef MZ_USE_JIT
   gcFIXUP(c->native_trace);
 #endif
 
-  FIXUP_cjs(&c->cjs);
   FIXUP_stack_state(&c->envss);
 
   return
@@ -1480,8 +1560,6 @@ static int thread_val_MARK(void *p) {
 
   MARK_cjs(&pr->cjs);
 
-  gcMARK(pr->current_escape_cont_key);
-
   gcMARK(pr->cell_values);
   gcMARK(pr->init_config);
   gcMARK(pr->init_break_cell);
@@ -1495,14 +1573,17 @@ static int thread_val_MARK(void *p) {
   gcMARK(pr->runstack_owner);
   gcMARK(pr->runstack_swapped);
   pr->spare_runstack = NULL; /* just in case */
+
+  gcMARK(pr->barrier_prompt);
+  gcMARK(pr->meta_prompt);
+  gcMARK(pr->meta_continuation);
   
   gcMARK(pr->cont_mark_stack_segments);
   gcMARK(pr->cont_mark_stack_owner);
   gcMARK(pr->cont_mark_stack_swapped);
-  
+
   MARK_jmpup(&pr->jmpup_buf);
   
-  gcMARK(pr->cc_ok);
   gcMARK(pr->dw);
   
   gcMARK(pr->nester);
@@ -1569,8 +1650,6 @@ static int thread_val_FIXUP(void *p) {
 
   FIXUP_cjs(&pr->cjs);
 
-  gcFIXUP(pr->current_escape_cont_key);
-
   gcFIXUP(pr->cell_values);
   gcFIXUP(pr->init_config);
   gcFIXUP(pr->init_break_cell);
@@ -1584,14 +1663,17 @@ static int thread_val_FIXUP(void *p) {
   gcFIXUP(pr->runstack_owner);
   gcFIXUP(pr->runstack_swapped);
   pr->spare_runstack = NULL; /* just in case */
+
+  gcFIXUP(pr->barrier_prompt);
+  gcFIXUP(pr->meta_prompt);
+  gcFIXUP(pr->meta_continuation);
   
   gcFIXUP(pr->cont_mark_stack_segments);
   gcFIXUP(pr->cont_mark_stack_owner);
   gcFIXUP(pr->cont_mark_stack_swapped);
-  
+
   FIXUP_jmpup(&pr->jmpup_buf);
   
-  gcFIXUP(pr->cc_ok);
   gcFIXUP(pr->dw);
   
   gcFIXUP(pr->nester);
@@ -1648,6 +1730,33 @@ static int thread_val_FIXUP(void *p) {
 
 #define thread_val_IS_ATOMIC 0
 #define thread_val_IS_CONST_SIZE 1
+
+
+static int prompt_val_SIZE(void *p) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Prompt));
+}
+
+static int prompt_val_MARK(void *p) {
+  Scheme_Prompt *pr = (Scheme_Prompt *)p;
+  gcMARK(pr->boundary_overflow_id);
+  gcMARK(pr->boundary_dw_id);
+  gcMARK(pr->runstack_boundary_start);
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Prompt));
+}
+
+static int prompt_val_FIXUP(void *p) {
+  Scheme_Prompt *pr = (Scheme_Prompt *)p;
+  gcFIXUP(pr->boundary_overflow_id);
+  gcFIXUP(pr->boundary_dw_id);
+  gcFIXUP(pr->runstack_boundary_start);
+  return
+  gcBYTES_TO_WORDS(sizeof(Scheme_Prompt));
+}
+
+#define prompt_val_IS_ATOMIC 0
+#define prompt_val_IS_CONST_SIZE 1
 
 
 static int cont_mark_set_val_SIZE(void *p) {
@@ -2250,6 +2359,7 @@ static int guard_val_MARK(void *p) {
   gcMARK(g->parent);
   gcMARK(g->file_proc);
   gcMARK(g->network_proc);
+  gcMARK(g->link_proc);
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Security_Guard));
 }
@@ -2260,6 +2370,7 @@ static int guard_val_FIXUP(void *p) {
   gcFIXUP(g->parent);
   gcFIXUP(g->file_proc);
   gcFIXUP(g->network_proc);
+  gcFIXUP(g->link_proc);
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Security_Guard));
 }
@@ -2431,6 +2542,8 @@ static int mark_resolve_info_MARK(void *p) {
   gcMARK(i->new_pos);
   gcMARK(i->old_stx_pos);
   gcMARK(i->flags);
+  gcMARK(i->lifts);
+  gcMARK(i->lifted);
   gcMARK(i->next);
 
   return
@@ -2445,6 +2558,8 @@ static int mark_resolve_info_FIXUP(void *p) {
   gcFIXUP(i->new_pos);
   gcFIXUP(i->old_stx_pos);
   gcFIXUP(i->flags);
+  gcFIXUP(i->lifts);
+  gcFIXUP(i->lifted);
   gcFIXUP(i->next);
 
   return
@@ -2509,6 +2624,7 @@ static int mark_comp_info_MARK(void *p) {
   
   gcMARK(i->value_name);
   gcMARK(i->certs);
+  gcMARK(i->observer);
 
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Compile_Info));
@@ -2519,6 +2635,7 @@ static int mark_comp_info_FIXUP(void *p) {
   
   gcFIXUP(i->value_name);
   gcFIXUP(i->certs);
+  gcFIXUP(i->observer);
 
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Compile_Info));
@@ -2534,24 +2651,20 @@ static int mark_saved_stack_SIZE(void *p) {
 }
 
 static int mark_saved_stack_MARK(void *p) {
-  Scheme_Saved_Stack *saved = (Scheme_Saved_Stack *) p;
-  Scheme_Object **old = saved->runstack_start;
+  Scheme_Saved_Stack *saved = (Scheme_Saved_Stack *)p;
   
   gcMARK(saved->prev);
-  gcMARK( saved->runstack_start);
-  saved->runstack = saved->runstack_start + (saved->runstack - old);
+  gcMARK(saved->runstack_start);
 
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Saved_Stack));
 }
 
 static int mark_saved_stack_FIXUP(void *p) {
-  Scheme_Saved_Stack *saved = (Scheme_Saved_Stack *) p;
-  Scheme_Object **old = saved->runstack_start;
+  Scheme_Saved_Stack *saved = (Scheme_Saved_Stack *)p;
   
   gcFIXUP(saved->prev);
-  gcFIXUP_TYPED_NOW(Scheme_Object **, saved->runstack_start);
-  saved->runstack = saved->runstack_start + (saved->runstack - old);
+  gcFIXUP(saved->runstack_start);
 
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Saved_Stack));
@@ -4158,6 +4271,7 @@ static int mark_readtable_MARK(void *p) {
   gcMARK(t->mapping);
   gcMARK(t->fast_mapping);
   gcMARK(t->symbol_parser);
+  gcMARK(t->names);
   return
   gcBYTES_TO_WORDS(sizeof(Readtable));
 }
@@ -4167,6 +4281,7 @@ static int mark_readtable_FIXUP(void *p) {
   gcFIXUP(t->mapping);
   gcFIXUP(t->fast_mapping);
   gcFIXUP(t->symbol_parser);
+  gcFIXUP(t->names);
   return
   gcBYTES_TO_WORDS(sizeof(Readtable));
 }
@@ -4217,6 +4332,7 @@ static int mark_regexp_SIZE(void *p) {
 static int mark_regexp_MARK(void *p) {
   regexp *r = (regexp *)p;
   gcMARK(r->source);
+  gcMARK(r->regstart);
   return
   gcBYTES_TO_WORDS((sizeof(regexp) + r->regsize));
 }
@@ -4224,6 +4340,7 @@ static int mark_regexp_MARK(void *p) {
 static int mark_regexp_FIXUP(void *p) {
   regexp *r = (regexp *)p;
   gcFIXUP(r->source);
+  gcFIXUP(r->regstart);
   return
   gcBYTES_TO_WORDS((sizeof(regexp) + r->regsize));
 }
@@ -4244,7 +4361,9 @@ static int mark_regwork_MARK(void *p) {
   gcMARK(r->port);
   gcMARK(r->unless_evt);
   gcMARK(r->startp);
+  gcMARK(r->maybep);
   gcMARK(r->endp);
+  gcMARK(r->counters);
   gcMARK(r->peekskip);
   return
   gcBYTES_TO_WORDS(sizeof(Regwork));
@@ -4257,7 +4376,9 @@ static int mark_regwork_FIXUP(void *p) {
   gcFIXUP(r->port);
   gcFIXUP(r->unless_evt);
   gcFIXUP(r->startp);
+  gcFIXUP(r->maybep);
   gcFIXUP(r->endp);
+  gcFIXUP(r->counters);
   gcFIXUP(r->peekskip);
   return
   gcBYTES_TO_WORDS(sizeof(Regwork));
@@ -4517,6 +4638,7 @@ static int mark_jit_state_SIZE(void *p) {
 static int mark_jit_state_MARK(void *p) {
   mz_jit_state *j = (mz_jit_state *)p;
   gcMARK(j->mappings);
+  gcMARK(j->self_data);
   return
   gcBYTES_TO_WORDS(sizeof(mz_jit_state));
 }
@@ -4524,6 +4646,7 @@ static int mark_jit_state_MARK(void *p) {
 static int mark_jit_state_FIXUP(void *p) {
   mz_jit_state *j = (mz_jit_state *)p;
   gcFIXUP(j->mappings);
+  gcFIXUP(j->self_data);
   return
   gcBYTES_TO_WORDS(sizeof(mz_jit_state));
 }

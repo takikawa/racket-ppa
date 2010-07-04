@@ -225,7 +225,7 @@
                   [(memq k mode-keywords)
                    (cond
                     #; ;(*)
-                    ;; don't throw an error here, it still fine if used with
+                    ;; don't throw an error here, it is still fine if used with
                     ;; #:allow-other-keys (explicit or implicit), also below
                     [(and (null? keys) (null? flags))
                      (serror k-stx "cannot use without #:key/#:flag arguments")]
@@ -283,7 +283,7 @@
                  [clauses '()])
         (if (null? opts)
           ;; fast order: first the all-variable section, then from vars up
-          (cons (with-syntax ([vars (append! (reverse vars) rest)]
+          (cons (with-syntax ([vars (append (reverse vars) rest)]
                               [expr expr])
                   #'[vars expr])
                 (reverse clauses))
@@ -420,36 +420,55 @@
             #'(begin flag-tweaks keys-body)))))
     ;; ------------------------------------------------------------------------
     ;; more sanity tests (see commented code above -- search for "(*)")
-    (let ([r (or all-keys other-keys other-keys+body body rest)])
-      (when (and (not allow-other-keys?) (null? keys))
-        (when r
-          (serror r "cannot use without #:key, #:flag, or #:allow-other-keys"))
-        (when allow-duplicate-keys?
-          (serror #f (string-append "cannot allow duplicate keys without"
-                                    " #:key, #:flag, or #:allow-other-keys"))))
-      (when (and allow-other-keys? (null? keys) (not r))
-        (serror #f "cannout allow other keys without using them in some way")))
+    (when (null? keys)
+      (let ([r (or all-keys other-keys other-keys+body body rest)])
+        (if allow-other-keys?
+          ;; allow-other-keys? ==>
+          (unless r
+            (serror #f "cannout allow other keys ~a"
+                    "without using them in some way"))
+          ;; (not allow-other-keys?) ==>
+          (begin
+            ;; can use #:body with no keys to forbid all keywords
+            (when (and r (not (eq? r body)))
+              (serror r "cannot use without #:key, #:flag, or ~a"
+                      "#:allow-other-keys"))
+            (when allow-duplicate-keys?
+              (serror #f "cannot allow duplicate keys without ~a"
+                      "#:key, #:flag, or #:allow-other-keys"))))))
     ;; ------------------------------------------------------------------------
     ;; body generation starts here
     (cond
      ;; no optionals or keys (or other-keys) => plain lambda
      [(and (null? opts) (null? keys) (not allow-other-keys?))
-      (with-syntax ([vars (append! vars (or rest '()))] [expr expr])
-        (syntax/loc stx (lambda vars expr)))]
+      (if (not body)
+        ;; really just a plain lambda
+        (with-syntax ([vars (append vars (or rest '()))] [expr expr])
+          (syntax/loc stx (lambda vars expr)))
+        ;; has body => forbid keywords
+        (with-syntax ([vars (append vars body)] [expr expr] [body body])
+          (syntax/loc stx
+            (lambda vars
+              (if (and (pair? body) (keyword? (car body)))
+                (error* 'name "unknown keyword: ~e" (car body))
+                expr)))))]
      ;; no keys => make a case-lambda for optionals
-     [(and (null? keys) (not allow-other-keys?))
+     [(and (null? keys) (not (or body allow-other-keys?)))
+      ;; cannot write a special case for having `body' here, because it
+      ;; requires the special pop-non-keywords-for-optionals that is done
+      ;; below, and generalizing that is a hassle with little benefit
       (let ([clauses (make-opt-clauses expr (or rest '()))])
         (with-syntax ([name name] [clauses clauses])
           (syntax/loc stx (letrec ([name (case-lambda . clauses)]) name))))]
      ;; no opts => normal processing of keywords etc
      [(null? opts)
-      (with-syntax ([vars (append! vars rest*)]
+      (with-syntax ([vars (append vars rest*)]
                     [body (make-keys-body expr)])
         (syntax/loc stx (lambda vars body)))]
      ;; both opts and keys => combine the above two
      ;; (the problem with this is that things that follow the required
      ;; arguments are always taken as optionals, even if they're keywords, so
-     ;; the following piece of code is used.)
+     ;; the next piece of code is used.)
      #;
      [else
       (let ([clauses (make-opt-clauses (make-keys-body expr) rest*)])
@@ -459,7 +478,7 @@
      [else
       (with-syntax
           ([rest rest*]
-           [vars (append! vars rest*)]
+           [vars (append vars rest*)]
            [body (make-keys-body expr)]
            [((optvar optexpr) ...)
             (apply append

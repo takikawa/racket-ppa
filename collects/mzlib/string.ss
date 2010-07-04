@@ -6,6 +6,7 @@
 	   read-from-string
 	   read-from-string-all
 	   expr->string
+           real->decimal-string
 	   regexp-quote
 	   regexp-replace-quote
 	   regexp-match*
@@ -109,6 +110,21 @@
 	(get-output-string port))))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+  (define real->decimal-string
+    (opt-lambda (n [digits 2])
+      (let* ([e (expt 10 digits)]
+             [num (round (abs (* e (inexact->exact n))))])
+        (format "~a~a.~a" 
+                (if (negative? n) "-" "")
+                (quotient num e) 
+                (let ([s (number->string (remainder num e))])
+                  (if (= (string-length s) digits)
+                      s
+                      (string-append (make-string (- digits (string-length s)) #\0)
+                                     s)))))))
+
+  ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; Regexp helpers
 
   (define (bstring-length s)
@@ -137,7 +153,7 @@
 	(map
 	 (lambda (c)
 	   (cond 
-	    [(memq c '(#\$ #\| #\\ #\[ #\] #\. #\* #\? #\+ #\( #\) #\^))
+	    [(memq c '(#\$ #\| #\\ #\[ #\] #\. #\* #\? #\+ #\( #\) #\^ #\{ #\}))
 	     (list #\\ c)]
 	    [(and (not case-sens?)
 		  (not (char=? (char-upcase c) (char-downcase c))))

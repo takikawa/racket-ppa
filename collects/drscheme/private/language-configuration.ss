@@ -63,10 +63,23 @@
                (error 'drscheme:language:add-language "expected language ~e to implement ~e, forgot to use drscheme:language:get-default-mixin ?" language i<%>)))
            (drscheme:language:get-language-extensions))
           
+          (ensure-no-duplicate-numbers language languages)
           (set! languages 
                 (if front? 
                     (cons language languages)
                     (append languages (list language))))))
+      
+      (define (ensure-no-duplicate-numbers l1 languages)
+        (for-each
+         (λ (l2)
+           (when (equal? (send l1 get-language-numbers)
+                         (send l2 get-language-numbers))
+             (error 'drscheme:language-configuration:add-language
+                    "found two languages with the same result from get-language-numbers: ~s, ~s and ~s"
+                    (send l1 get-language-numbers)
+                    (send l1 get-language-position)
+                    (send l2 get-language-position))))
+         languages))
       
       ;; get-languages : -> (listof languages)
       (define (get-languages) 
@@ -126,7 +139,7 @@
               (define/override (on-subwindow-char receiver evt)
                 (case (send evt get-key-code)
                   [(escape) (cancel-callback)]
-                  [(#\return numpad-enter) (ok-callback)]
+                  [(#\return numpad-enter) (enter-callback)]
                   [else (super on-subwindow-char receiver evt)]))
               (super-instantiate ())))
           
@@ -144,47 +157,73 @@
           (define welcome-after-panel (instantiate vertical-pane% () 
                                         (parent dialog)
                                         (stretchable-height #f)))
-          
+
           (define button-panel (instantiate horizontal-pane% ()
                                  (parent dialog)
                                  (stretchable-height #f)))
-          
-          (define-values (get-selected-language get-selected-language-settings)
-            (fill-language-dialog language-dialog-meat-panel 
-                                  button-panel 
-                                  language-settings-to-show 
-                                  #f
-                                  manuals?))
-          
+
+          ;; initialized below
+          (define ok-button #f)
+          (define cancel-button #f)
+
           ;; cancelled? : boolean
           ;; flag that indicates if the dialog was cancelled.
           (define cancelled? #t)
-          
+
+          ;; enter-callback : -> bool
+          ;; returns #f if no language is selected (so the event will be
+          ;; processed by the hierlist widget, which will toggle subtrees)
+          (define (enter-callback)
+            (cond [(get-selected-language)
+                   (set! cancelled? #f)
+                   (send dialog show #f)]
+                  [else #f]))
+
 	  ;; ok-callback : -> void
+          ;; similar to the above, but shows an error dialog if no language os
+          ;; selected
           (define (ok-callback)
-            (cond
-              [(get-selected-language)
-               (set! cancelled? #f)
-               (send dialog show #f)]
-              [else
-               (message-box (string-constant drscheme)
-                            (string-constant please-select-a-language))]))
-          
+            (unless (enter-callback)
+              (message-box (string-constant drscheme)
+                           (string-constant please-select-a-language))))
+
           ;; cancel-callback : -> void
 	  (define (cancel-callback)
             (send dialog show #f))
 
-          (define show-details-label (string-constant show-details-button-label))
-          (define hide-details-label (string-constant hide-details-button-label))
-          
-          (define button-gap (make-object horizontal-pane% button-panel))
-	  (define-values (ok-button cancel-button)
-            (gui-utils:ok/cancel-buttons
-             button-panel
-             (λ (x y) (ok-callback))
-             (λ (x y) (cancel-callback))))
-          (define grow-box-spacer (make-object grow-box-spacer-pane% button-panel))
-          
+          ;; a handler for "ok"-related stuff
+          (define ok-handler
+            ;; this is called before the buttons are made: keep track of state
+            ;; in that case
+            (let ([enabled? #t])
+              (define (enable! state)
+                (set! enabled? state)
+                (when ok-button (send ok-button enable state)))
+              (λ (msg)
+                (case msg
+                  [(disable)     (enable! #f)]
+                  [(enable)      (enable! #t)]
+                  [(enable-sync) (enable! enabled?)]
+                  [(execute)     (enter-callback) (void)]
+                  [else (error 'ok-handler "internal error (~e)" msg)]))))
+
+          (define-values (get-selected-language get-selected-language-settings)
+            (fill-language-dialog language-dialog-meat-panel
+                                  button-panel
+                                  language-settings-to-show
+                                  #f
+                                  manuals?
+                                  ok-handler))
+
+          ;; create ok/cancel buttons
+          (make-object horizontal-pane% button-panel)
+	  (set!-values (ok-button cancel-button)
+            (gui-utils:ok/cancel-buttons button-panel
+                                         (λ (x y) (ok-callback))
+                                         (λ (x y) (cancel-callback))))
+          (ok-handler 'enable-sync) ; sync enable status now
+          (make-object grow-box-spacer-pane% button-panel)
+
           (when show-welcome?
             (add-welcome dialog welcome-before-panel welcome-after-panel))
 
@@ -201,13 +240,15 @@
                (get-selected-language-settings)))))
       
       ;; fill-language-dialog :    (vertical-panel panel language-setting -> language-setting)
-      ;;                           (union dialog #f)
+      ;;                           (union dialog #f) [...more stuff...]
       ;;                        -> (-> (union #f language<%>)) (-> settings[corresponding to fst thnk result])
       ;; allows the user to configure their language. The input language-setting is used
       ;; as the defaults in the dialog and the output language setting is the user's choice
       ;; if re-center is a dialog, when the show details button is clicked, the dialog is recenterd.
       (define fill-language-dialog
-        (opt-lambda (parent show-details-parent language-settings-to-show [re-center #f] [manuals? #f])
+        (opt-lambda (parent show-details-parent language-settings-to-show
+                     [re-center #f] [manuals? #f]
+                     [ok-handler void]) ; en/disable button, execute it
 
           (define-values (language-to-show settings-to-show)
             (let ([request-lang-to-show (language-settings-language language-settings-to-show)])
@@ -232,96 +273,91 @@
               (inherit get-selected)
               (define/override (on-char evt)
                 (let ([code (send evt get-key-code)])
-                  (cond
-                    [(eq? code 'up) (select-next sub1 (λ (v) (- (vector-length v) 1)))]
-                    [(eq? code 'down) (select-next add1 (λ (v) 0))]
+                  (case code
+                    [(up)   (select-next sub1)]
+                    [(down) (select-next add1)]
+                    ;; right key is fine, but nicer to close after a left
+                    [(left) (super on-char evt)
+                            (cond [(get-selected)
+                                   => (λ (i)
+                                        (when (is-a? i hierarchical-list-compound-item<%>)
+                                          (send i close)))])]
                     [else (super on-char evt)])))
-              
+
               (inherit get-items)
-              
-              ;; select-next : (int -> int) (vector -> int)
-              ;; finds the next leaf after the selected child,
-              ;; using `inc' and `start' to control the direction of the traversal.
-              (define/private (select-next inc start)
-                (let ([fst-selected (get-selected)])
-                  (when fst-selected
-                    (let loop ([item fst-selected])
-		      (when item
-			(let* ([parent (send item get-parent)]
-			       [siblings (list->vector 
-                                          (if parent
-                                              (send parent get-items)
-                                              (get-items)))])
-			  (let sibling-loop ([index (inc (find-index item siblings))])
-			    (cond
-			      [(and (<= 0 index)
-				    (< index (vector-length siblings)))
-			       (let ([sibling (vector-ref siblings index)])
-				 (cond
-				   [(find-first-leaf sibling inc start)
-				    =>
-				    (λ (child)
-				      (send fst-selected select #f)
-				      (send child select #t)
-				      (open-parents child)
-                                      (make-visible child))]
-				   [else (sibling-loop (inc index))]))]
-			      [else (loop parent)]))))))))
-              
-              ;; find-first-leaf : item (int -> int) (vec -> int)
-              ;; finds the first child, using `inc' and `start' to control
-              ;; the traversal over the children.
-              (define/private (find-first-leaf item inc start)
-                (let loop ([item item])
-                  (cond
-                    [(is-a? item hierarchical-list-compound-item<%>)
-                     (let ([children (list->vector (send item get-items))])
-                       (let child-loop ([i (start children)])
-                         (cond
-                           [(and (<= 0 i) (< i (vector-length children)))
-                            (or (loop (vector-ref children i))
-                                (child-loop (inc i)))]
-                           [else #f])))]
-                    [(send item get-allow-selection?)
-                     item]
-                    [else #f])))
 
-              ;; find-index : tst (vectorof tst) -> int
-              ;; returns the index of `item' in `vec'
-              (define/private (find-index item vec)
-                (let loop ([i 0])
-                  (cond
-                    [(< i (vector-length vec))
-                     (if (eq? (vector-ref vec i) item)
-                         i
-                         (loop (+ i 1)))]
-                    [else (error 'find-index "didn't find ~e in ~e" item vec)])))
+              ;; select-next : (num -> num) -> void
+              ;; finds the next/prev leaf after the selected child on the open
+              ;; fringe using `inc' for a direction.
+              (define/private (select-next inc)
+                (define current (get-selected))
+                (define (choose item)
+                  (when current (send current select #f))
+                  (send item select #t)
+                  ;; make it visible
+                  (let loop ([item item])
+                    (let ([parent (send item get-parent)])
+                      (if parent
+                        (loop parent)
+                        (send item scroll-to))))
+                  (send item scroll-to))
+                (define (selectable? item)
+                  (and (send item get-allow-selection?)
+                       ;; opened all the way to the top
+                       (let loop ([p (send item get-parent)])
+                         (or (not p)
+                             (and (send p is-open?)
+                                  (loop (send p get-parent)))))))
+                (let* ([fringe     (get-fringe)]
+                       [fringe-len (vector-length fringe)]
+                       [n (if current
+                            (let loop ([i (sub1 (vector-length fringe))])
+                              (cond [(< i 0) (error 'select-next "item not found in fringe")]
+                                    [(eq? current (vector-ref fringe i))
+                                     (min (sub1 fringe-len) (max 0 (inc i)))]
+                                    [else (loop (sub1 i))]))
+                            (modulo (inc fringe-len) (add1 fringe-len)))])
+                  ;; need to choose item n, but go on looking for one that is
+                  ;; selectable and open
+                  (let loop ([n n])
+                    (when (< -1 n fringe-len)
+                      (let ([item (vector-ref fringe n)])
+                        (if (selectable? item)
+                          (choose item)
+                          (loop (inc n))))))))
 
-              ;; open-parents : item -> void
-              ;; selects the item and opens all of its parents.
-              (define/private (open-parents item)
-                (let loop ([item (send item get-parent)])
-                  (when item
-                    (send item open)
-                    (loop (send item get-parent)))))
-
-              (define/private (make-visible item)
-                (let loop ([item item])
-                  (let ([parent (send item get-parent)])
-                    (if parent
-                      (loop parent)
-                      (send item scroll-to))))
-                (send item scroll-to))
+              (define cached-fringe #f)
+              (define/public (clear-fringe-cache) (set! cached-fringe #f))
+              (define (get-fringe)
+                (unless cached-fringe
+                  (let ([fringe
+                         (let loop ([items (get-items)])
+                           (apply append
+                                  (map (λ (item)
+                                         (if (is-a? item hierarchical-list-compound-item<%>)
+                                           (cons item
+                                                 (loop (send item get-items)))
+                                           (list item)))
+                                       items)))])
+                    (set! cached-fringe (list->vector fringe))))
+                cached-fringe)
 
               (define/override (on-select i)
-                (cond
-		  [(and i (is-a? i hieritem-language<%>))
-		   (send i selected)]
-                  [else
-		   (nothing-selected)]))
-              (define/override (on-click i)
-                (when (and i (is-a? i hierarchical-list-compound-item<%>))
-                  (send i toggle-open/closed)))
+                (if (and i (is-a? i hieritem-language<%>))
+                  (something-selected i)
+                  (nothing-selected)))
+              ;; this is not used, since all lists are selectable
+              ;; (define/override (on-click i)
+              ;;   (when (and i (is-a? i hierarchical-list-compound-item<%>))
+              ;;     (send i toggle-open/closed)))
+              ;; use this instead
+              (define/override (on-double-select i)
+                (when i
+                  (cond [(is-a? i hierarchical-list-compound-item<%>)
+                         (send i toggle-open/closed)]
+                        [(is-a? i hieritem-language<%>)
+                         (something-selected i)
+                         (ok-handler 'execute)])))
               (super-instantiate (parent))))
 
           (define outermost-panel (make-object horizontal-pane% parent))
@@ -330,14 +366,14 @@
           (define details/manual-parent-panel (make-object vertical-panel% details-outer-panel))
 	  (define details-panel (make-object panel:single% details/manual-parent-panel))
           (define manual-ordering-panel (new vertical-panel% (parent details/manual-parent-panel)))
-          
+
           (define manual-ordering-text (new panel-background-text%))
           (define manual-ordering-canvas (new panel-background-editor-canvas% 
                                               (parent manual-ordering-panel)
                                               (editor manual-ordering-text)
                                               (style '(no-hscroll))
                                               (min-width 300)))
-          
+
           (define one-line-summary-message (instantiate message% ()
                                              (parent parent)
                                              (label "")
@@ -388,7 +424,15 @@
 	    (send details-panel active-child no-details-panel)
             (send one-line-summary-message set-label "")
 	    (set! get/set-selected-language-settings #f)
-	    (set! selected-language #f))
+	    (set! selected-language #f)
+            (ok-handler 'disable)
+            (send details-button enable #f))
+
+          ;; something-selected : item -> void
+          (define (something-selected item)
+            (ok-handler 'enable)
+            (send details-button enable #t)
+            (send item selected))
 
           ;; update-manual-ordering-text : -> void
           ;; updates the manual ordering text with the order the manuals are searched for this language
@@ -472,6 +516,7 @@
                   (error 'drscheme:language
                          "languages position and numbers must be lists of strings and numbers, respectively, must have the same length,  and must each contain at least two elements, got: ~e ~e"
                          positions numbers))
+                (send languages-hier-list clear-fringe-cache)
                 
                 #|
               
@@ -593,7 +638,7 @@
                                            (send new-list set-number number)
                                            (when second-number
                                              (send new-list set-second-number second-number))
-                                           (send new-list set-allow-selection #f)
+                                           (send new-list set-allow-selection #t)
                                            (send new-list open)
                                            (send (send new-list get-editor) insert position)
                                            (hash-table-put! ht (string->symbol position) x)
@@ -1220,6 +1265,7 @@
                                                    (platform-independent-string->path lang-module))
                                                   `(lib ,@lang-module)))
                                       (language-position lang-position)
+                                      (language-id (format "plt:lang-from-module: ~s" lang-module))
                                       (language-numbers lang-numbers)
                                       (one-line-summary one-line-summary)
                                       (language-url url)
@@ -1359,7 +1405,7 @@
                              (use-namespace-require/copy?)))))
                       (super-instantiate ()))))]
                [make-simple
-                (λ (module position numbers mred-launcher? one-line-summary extra-mixin)
+                (λ (module id position numbers mred-launcher? one-line-summary extra-mixin)
                   (let ([%
                          (extra-mixin
                           ((extras-mixin mred-launcher? one-line-summary)
@@ -1369,10 +1415,12 @@
                               drscheme:language:simple-module-based-language%)))))])
                     (instantiate % ()
                       (module module)
+                      (language-id id)
                       (language-position position)
                       (language-numbers numbers))))])
           (add-language
            (make-simple '(lib "plt-mzscheme.ss" "lang") 
+                        "plt:mz"
                         (list (string-constant professional-languages)
                               (string-constant plt)
                               (string-constant mzscheme-w/debug))
@@ -1382,6 +1430,7 @@
                         (λ (x) x)))
           (add-language
            (make-simple '(lib "plt-mred.ss" "lang")
+                        "plt:mred"
                         (list (string-constant professional-languages)
                               (string-constant plt)
                               (string-constant mred-w/debug))
@@ -1391,6 +1440,7 @@
                         (λ (x) x)))
           (add-language
            (make-simple '(lib "plt-pretty-big.ss" "lang")
+                        "plt:pretty-big"
                         (list (string-constant professional-languages)
                               (string-constant plt)
                               (string-constant pretty-big-scheme))
@@ -1400,6 +1450,7 @@
                         (λ (x) x)))
           (add-language
            (make-simple '(lib "plt-mzscheme.ss" "lang")
+                        "plt:expander"
                         (list (string-constant professional-languages)
                               (string-constant plt)
                               (string-constant expander))
@@ -1409,6 +1460,7 @@
                         add-expand-to-front-end))
           (add-language
            (make-simple '(lib "lang.ss" "r5rs")
+                        "plt:r5rs"
                         (list (string-constant professional-languages)
                               (string-constant r5rs-lang-name))
                         (list -1000 -1000)
@@ -1418,6 +1470,7 @@
           
           (add-language
            (make-simple 'mzscheme
+                        "plt:no-language-chosen"
                         (list (string-constant initial-language-category)
                               (string-constant no-language-chosen))
                         (list 10000 1000)
@@ -1439,6 +1492,12 @@
           (define/override (front-end/complete-program input settings teachpack-cache)
             (not-a-language-message)
             (λ () eof))
+          
+          (define/augment (capability-value v)
+            (case v
+              [(drscheme:check-syntax-button) #f]
+              [else (drscheme:language:get-capability-default v)]))
+          
           (super-new)))
       
       ;; used for identification only

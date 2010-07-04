@@ -82,10 +82,12 @@
 	  (if (syntax? p) 
 	      (if (list? (syntax-e p))
 		  #t
-		  (let loop ([l (syntax-e p)])
-		    (if (pair? l)
-			(loop (cdr l))
-			(stx-list? l))))
+		  (letrec-values ([(loop)
+                                   (lambda (l)
+                                     (if (pair? l)
+                                         (loop (cdr l))
+                                         (stx-list? l)))])
+                    (loop (syntax-e p))))
 	      (if (pair? p)
 		  (stx-list? (cdr p))
 		  #f)))))
@@ -109,24 +111,28 @@
     (lambda (e)
       (if (syntax? e)
 	  (syntax->list e)
-	  (let ([flat-end
-		 (let loop ([l e])
-		   (if (null? l) 
-		       #f
-		       (if (pair? l)
-			   (loop (cdr l))
-			   (if (syntax? l) 
-			       (syntax->list l)
-			       #f))))])
+	  (let-values ([(flat-end)
+                        (letrec-values ([(loop)
+                                         (lambda (l)
+                                           (if (null? l) 
+                                               #f
+                                               (if (pair? l)
+                                                   (loop (cdr l))
+                                                   (if (syntax? l) 
+                                                       (syntax->list l)
+                                                       #f))))])
+                          (loop e))])
 	    (if flat-end
 		;; flatten
-		(let loop ([l e])
-		  (if (null? l) 
-		      null
-		      (if (pair? l) 
-			  (cons (car l) (loop (cdr l)))
-			  (if (syntax? l) 
-			      flat-end))))
+		(letrec-values ([(loop)
+                                 (lambda (l)
+                                   (if (null? l) 
+                                       null
+                                       (if (pair? l) 
+                                           (cons (car l) (loop (cdr l)))
+                                           (if (syntax? l) 
+                                               flat-end))))])
+                  (loop e))
 		e)))))
 
   ;; a syntax vector?
@@ -190,19 +196,21 @@
   (define-values (split-stx-list)
     (lambda (s n prop?)
       (let-values ([(pre post m)
-		    (let loop ([s s])
-		      (if (stx-pair? s)
-			  (let-values ([(pre post m) (loop (stx-cdr s))])
-			    (if (< m n)
-				(values '() s (add1 m))
-				(values (cons (stx-car s) pre) post m)))
-			  (values '() s (if prop?
-					    (if (stx-null? s) 
-						0 
-						-inf.0)
-					    (if (stx-null? s)
-						-inf.0
-						1)))))])
+		    (letrec-values ([(loop)
+                                     (lambda (s)
+                                       (if (stx-pair? s)
+                                           (let-values ([(pre post m) (loop (stx-cdr s))])
+                                             (if (< m n)
+                                                 (values '() s (add1 m))
+                                                 (values (cons (stx-car s) pre) post m)))
+                                           (values '() s (if prop?
+                                                             (if (stx-null? s) 
+                                                                 0 
+                                                                 -inf.0)
+                                                             (if (stx-null? s)
+                                                                 -inf.0
+                                                                 1)))))])
+                      (loop s))])
 	(values pre post (= m n)))))
 
   (provide identifier? stx-null? stx-null/#f stx-pair? stx-list?
@@ -217,6 +225,145 @@
 
 (module #%qq-and-or #%kernel
   (require-for-syntax #%stx #%kernel)
+  
+  (define-syntaxes (let let* letrec)
+    (let-values ([(lambda-stx) (quote-syntax lambda-stx)]
+                 [(letrec-values-stx) (quote-syntax letrec-values)])
+      (let-values ([(go)
+                    (lambda (stx named? star? target)
+                      (define-values (stx-cadr) (lambda (x) (stx-car (stx-cdr x))))
+                      (define-values (id-in-list?)
+                        (lambda (id l)
+                          (if (null? l)
+                              #f
+                              (if (bound-identifier=? id (car l)) 
+                                  #t
+                                  (id-in-list? id (cdr l))))))
+                      (define-values (stx-2list?)
+                        (lambda (x)
+                          (if (stx-pair? x)
+                              (if (stx-pair? (stx-cdr x))
+                                  (stx-null? (stx-cdr (stx-cdr x)))
+                                  #f)
+                              #f)))
+                      (if (if (not (stx-list? stx))
+                              #t
+                              (let-values ([(tail1) (stx-cdr stx)])
+                                (if (stx-null? tail1)
+                                    #t
+                                    (if (stx-null? (stx-cdr tail1))
+                                        #t
+                                        (if named?
+                                            (if (symbol? (syntax-e (stx-car tail1)))
+                                                (stx-null? (stx-cdr (stx-cdr tail1)))
+                                                #f)
+                                            #f)))))
+                          (raise-syntax-error #f "bad syntax" stx))
+                      (let-values ([(name) (if named?
+                                               (let-values ([(n) (stx-cadr stx)])
+                                                 (if (symbol? (syntax-e n))
+                                                     n
+                                                     #f))
+                                               #f)])
+                        (let-values ([(bindings) (stx->list (stx-cadr (if name
+                                                                          (stx-cdr stx)
+                                                                          stx)))]
+                                     [(body) (stx-cdr (stx-cdr (if name
+                                                                   (stx-cdr stx)
+                                                                   stx)))])
+                          (if (not bindings)
+                              (raise-syntax-error 
+                               #f 
+                               "bad syntax (not a sequence of identifier--expression bindings)" 
+                               stx
+                               (stx-cadr stx))
+                              (let-values ([(new-bindings)
+                                            (letrec-values ([(loop)
+                                                             (lambda (l)
+                                                               (if (null? l)
+                                                                   null
+                                                                   (let-values ([(binding) (car l)])
+                                                                     (cons-immutable
+                                                                      (if (stx-2list? binding)
+                                                                          (if (symbol? (syntax-e (stx-car binding)))
+                                                                              (if name
+                                                                                  (cons (stx-car binding)
+                                                                                        (stx-cadr binding))
+                                                                                  (datum->syntax-object
+                                                                                   lambda-stx
+                                                                                   (cons-immutable (cons-immutable (stx-car binding)
+                                                                                                                   null)
+                                                                                                   (stx-cdr binding))
+                                                                                   binding))
+                                                                              (raise-syntax-error 
+                                                                               #f 
+                                                                               "bad syntax (not an identifier)" 
+                                                                               stx
+                                                                               (stx-car binding)))
+                                                                          (raise-syntax-error 
+                                                                           #f 
+                                                                           "bad syntax (not an identifier and expression for a binding)" 
+                                                                           stx
+                                                                           binding))
+                                                                      (loop (cdr l))))))])
+                                              (loop bindings))])
+                                (if star?
+                                    (void)
+                                    (if ((length new-bindings) . > . 5)
+                                        (let-values ([(ht) (make-hash-table)])
+                                          (letrec-values ([(check) (lambda (l)
+                                                                     (if (null? l)
+                                                                         (void)
+                                                                         (let*-values ([(id) (if name
+                                                                                                 (caar l)
+                                                                                                 (stx-car (stx-car (car l))))]
+                                                                                       [(idl) (hash-table-get ht (syntax-e id) null)])
+                                                                           (if (id-in-list? id idl)
+                                                                               (raise-syntax-error
+                                                                                #f
+                                                                                "duplicate identifier"
+                                                                                stx
+                                                                                id)
+                                                                               (begin
+                                                                                 (hash-table-put! ht (syntax-e id) (cons id idl))
+                                                                                 (check (cdr l)))))))])
+                                            (check new-bindings)))
+                                        (letrec-values ([(check) (lambda (l accum)
+                                                                   (if (null? l)
+                                                                       (void)
+                                                                       (let-values ([(id) (if name
+                                                                                              (caar l)
+                                                                                              (stx-car (stx-car (car l))))])
+                                                                         (if (id-in-list? id accum)
+                                                                             (raise-syntax-error
+                                                                              #f
+                                                                              "duplicate identifier"
+                                                                              stx
+                                                                              id)
+                                                                             (check (cdr l) (cons id accum))))))])
+                                          (check new-bindings null))))
+                                (datum->syntax-object
+                                 lambda-stx
+                                 (if name
+                                     (apply list-immutable
+                                            (list-immutable 
+                                             (quote-syntax letrec-values)
+                                             (list-immutable
+                                              (list-immutable
+                                               (list-immutable name)
+                                               (list*-immutable (quote-syntax lambda)
+                                                                (apply list-immutable (map car new-bindings))
+                                                                body)))
+                                             name)
+                                            (map cdr new-bindings))
+                                     (list*-immutable target
+                                                      new-bindings
+                                                      body))
+                                 stx))))))])
+        (values
+         (lambda (stx) (go stx #t #f (quote-syntax let-values)))
+         (lambda (stx) (go stx #f #t (quote-syntax let*-values)))
+         (lambda (stx) (go stx #f #f (quote-syntax letrec-values)))))))
 
   (define-values (qq-append)
     (lambda (a b)
@@ -225,9 +372,9 @@
 	  (raise-type-error 'unquote-splicing "proper list" a))))
 
   (define-syntaxes (quasiquote)
-    (let ([here (quote-syntax here)] ; id with module bindings, but not lexical
-	  [unquote-stx (quote-syntax unquote)]
-	  [unquote-splicing-stx (quote-syntax unquote-splicing)])
+    (let-values ([(here) (quote-syntax here)] ; id with module bindings, but not lexical
+                 [(unquote-stx) (quote-syntax unquote)]
+                 [(unquote-splicing-stx) (quote-syntax unquote-splicing)])
       (lambda (in-form)
 	(if (identifier? in-form)
 	    (raise-syntax-error #f "bad syntax" in-form))
@@ -390,11 +537,11 @@
 	   in-form)))))
 
   (define-syntaxes (and)
-    (let ([here (quote-syntax here)])
+    (let-values ([(here) (quote-syntax here)])
       (lambda (x)
 	(if (not (stx-list? x))
 	    (raise-syntax-error #f "bad syntax" x))
-	(let ([e (stx-cdr x)])
+	(let-values ([(e) (stx-cdr x)])
 	  (if (stx-null? e)
 	      (quote-syntax #t)
 	      (if (if (stx-pair? e)
@@ -411,11 +558,11 @@
 		   x)))))))
 
   (define-syntaxes (or)
-    (let ([here (quote-syntax here)])
+    (let-values ([(here) (quote-syntax here)])
       (lambda (x)
 	(if (identifier? x)
 	    (raise-syntax-error #f "bad syntax" x))
-	(let ([e (stx-cdr x)])
+	(let-values ([(e) (stx-cdr x)])
 	  (if (stx-null? e) 
 	      (quote-syntax #f)
 	      (if (if (stx-pair? e)
@@ -423,7 +570,7 @@
 		      #f)
 		  (stx-car e)
 		  (if (stx-list? e)
-		      (let ([tmp 'or-part])
+		      (let-values ([(tmp) 'or-part])
 			(datum->syntax-object
 			 here
 			 (list (quote-syntax let) (list
@@ -441,7 +588,8 @@
 		       "bad syntax"
 		       x))))))))
 
-  (provide quasiquote and or))
+  (provide let let* letrec
+           quasiquote and or))
 
 ;;----------------------------------------------------------------------
 ;; cond
@@ -474,9 +622,9 @@
 			    "bad syntax (clause is not a test-value pair)"
 			    line)
 			   (let* ([test (stx-car line)]
-				  [value (stx-cdr line)]
-				  [else? (and (identifier? test)
-					      (module-identifier=? test (quote-syntax else)))])
+                                  [value (stx-cdr line)]
+                                  [else? (and (identifier? test)
+                                              (module-identifier=? test (quote-syntax else)))])
 			     (if (and else? (stx-pair? rest))
 				 (serror "bad syntax (`else' clause must be last)" line))
 			     (if (and (stx-pair? value)
@@ -485,10 +633,10 @@
 				 (if (and (stx-pair? (stx-cdr value))
 					  (stx-null? (stx-cdr (stx-cdr value))))
 				     (let ([test (if else?
-						     #t 
-						     test)]
-					   [gen (gensym)])
-				       `(,(quote-syntax let) ([,gen ,test])
+                                                     #t 
+                                                     test)]
+                                           [gen (gensym)])
+				       `(,(quote-syntax let-values) ([(,gen) ,test])
 					 (,(quote-syntax if) ,gen
 					  (,(stx-car (stx-cdr value)) ,gen)
 					  ,(loop rest #f))))
@@ -503,7 +651,7 @@
 					 (cons (quote-syntax begin) value))
 				     (if (stx-null? value)
 					 (let ([gen (gensym)])
-					   `(,(quote-syntax let) ([,gen ,test])
+					   `(,(quote-syntax let-values) ([(,gen) ,test])
 					     (,(quote-syntax if) ,gen ,gen ,(loop rest #f))))
 					 (list
 					  (quote-syntax if) test
@@ -816,7 +964,7 @@
 			       ,defined-names
 			       ,(let ([core (make-core name (and inspector 'inspector) super-id/struct: field-names)])
 				  (if inspector
-				      `(let ([inspector ,inspector])
+				      `(let-values ([(inspector) ,inspector])
 					 (if (if inspector (not (inspector? inspector)) #f)
 					     (raise-type-error 'define-struct "inspector or #f" inspector))
 					 ,core)
@@ -839,7 +987,7 @@
 
   (provide (all-from #%qq-and-or)
 	   (all-from #%cond)
-	   (all-from-except #%define-et-al)))
+	   (all-from #%define-et-al)))
 
 ;;----------------------------------------------------------------------
 ;; pattern-matching utilities
@@ -847,6 +995,7 @@
 
 (module #%sc #%kernel
   (require #%stx #%small-scheme)
+  (require-for-template (only #%kernel set!))
 
   ;; Checks whether s is "..."
   (-define (...? s)
@@ -1409,36 +1558,25 @@
 					     (ormap (lambda (i) (bound-identifier=? i r)) l))
 				  (hash-table-put! ht (syntax-e r) (cons r l)))))))])
       (if proto-r
-	  `(lambda (r src)
-	     ,(let ([main `(datum->syntax-object (quote-syntax ,(and dest
-								     ;; In case dest has significant structure...
-								     (datum->syntax-object
-								      dest
-								      'dest
-								      #f)))
-						 ,(apply-to-r l)
-						 src)])
+	  `(lambda (r)
+	     ,(let ([main (let ([build (apply-to-r l)])
+			    (if (and (pair? build)
+				     (eq? (car build) 'pattern-substitute))
+				build
+				(let ([small-dest ;; In case dest has significant structure...
+				       (and dest (datum->syntax-object
+						  dest
+						  'dest
+						  dest
+						  dest))])
+				  `(datum->syntax-object/shape (quote-syntax ,small-dest)
+							       ,build))))])
 		(if (multiple-ellipsis-vars? proto-r)
-		    `(let ([exnh #f])
-		       ((let/ec esc
-			  (dynamic-wind
-			   (lambda ()
-			     (set! exnh (current-exception-handler))
-			     (current-exception-handler
-			      (lambda (exn)
-				(esc
-				 (lambda ()
-				   (if (exn:break? exn)
-				       (raise exn)
-				       (ellipsis-count-error
-					(quote ,p)
-					;; This is a trick to minimize the syntax structure we keep:
-					(quote-syntax ,(datum->syntax-object #f '... p)))))))))
-			   (lambda ()
-			     (let ([v ,main])
-			       (lambda () v)))
-			   (lambda ()
-			     (current-exception-handler exnh))))))
+		    `(catch-ellipsis-error
+		      (lambda () ,main)
+		      (quote ,p)
+		      ;; This is a trick to minimize the syntax structure we keep:
+		      (quote-syntax ,(datum->syntax-object #f '... p)))
 		    main)))
 	  ;; Get list of unique vars:
 	  (apply append (hash-table-map ht (lambda (k v) v))))))
@@ -1470,32 +1608,86 @@
 		(eq? (car t) 'quote-syntax)
 		(eq? (cadr t) (stx-cdr p)))))
       `(quote-syntax ,p)]
-     [(syntax? stx)
-      ;; Keep context and location information
-      (let ([ctx (datum->syntax-object stx 'ctx stx)])
-	`(datum->syntax-object (quote-syntax ,ctx)
-			       ,(apply-cons #f h t p) 
-			       (quote-syntax ,ctx)))]
-     ;; (cons X null) => (list X)
+     [(and (pair? t)
+	   (eq? (car t) 'pattern-substitute))
+      ;; fold h into the existing pattern-substitute:
+      (cond
+       [(and (pair? h)
+	     (eq? (car h) 'quote-syntax)
+	     (eq? (cadr h) (stx-car p)))
+	;; Just extend constant part:
+	`(pattern-substitute
+	  (quote-syntax ,(let ([v (cons (cadr h) (cadadr t))])
+			   ;; We exploit the fact that we're
+			   ;;  building an S-expression to
+			   ;;  preserve the source's distinction
+			   ;;  between (x y) and (x . (y)).
+			   (if (syntax? stx)
+			       (datum->syntax-object stx
+						     v
+						     stx
+						     stx)
+			       v)))
+	  . ,(cddr t))]
+       [(and (pair? h)
+	     (eq? 'pattern-substitute (car h)))
+	;; Combine two pattern substitutions:
+	`(pattern-substitute (quote-syntax ,(let ([v (cons (cadadr h) (cadadr t))])
+					      (if (syntax? stx)
+						  (datum->syntax-object stx
+									v
+									stx
+									stx)
+						  v)))
+			     ,@(cddr h) ;; <-- WARNING: potential quadratic expansion
+			     . ,(cddr t))]
+       [else
+	;; General case: add a substitution:
+	(let* ([id (gensym)]
+	       [expr (cons id (cadadr t))]
+	       [expr (if (syntax? stx)
+			 (datum->syntax-object stx
+					       expr
+					       stx
+					       stx)
+			 expr)])
+	  `(pattern-substitute
+	    (quote-syntax ,expr)
+	    ,id ,h
+	    . ,(cddr t)))])]
      [(eq? t 'null)
-      `(list-immutable ,h)]
-     ;; (cons X (list[*] Y ...)) => (list[*] X Y ...)
+      (apply-cons stx h 
+		  `(pattern-substitute (quote-syntax ()))
+		  p)]
      [(and (pair? t)
-	   (memq (car t) '(list-immutable list*-immutable)))
-      `(,(car t) ,h ,@(cdr t))]
-     ;; (cons X (cons Y Z)) => (list* X Y Z)
-     [(and (pair? t)
-	   (eq? (car t) 'cons-immutable))
-      `(list*-immutable ,h ,@(cdr t))]
-     ;; (cons (car X) (cdr X)) => X
-     [(and (pair? h) (pair? t)
-	   (eq? (car h) 'car)
-	   (eq? (car t) 'cdr)
-	   (symbol? (cadr h))
-	   (eq? (cadr h) (cadr t)))
-      (cadr h)]
+	   (eq? (car t) 'quote-syntax)
+	   (stx-smaller-than? (car t) 10))
+      ;; Shift into `pattern-substitute' mode with an intitial constant.
+      ;; (Only do this for small constants, so we don't traverse
+      ;; big constants when looking for substitutions.)
+      (apply-cons stx h 
+		  `(pattern-substitute ,t)
+		  p)]
      [else
-      `(cons-immutable ,h ,t)]))
+      ;; Shift into `pattern-substitute' with an initial substitution:
+      (apply-cons stx h
+		  (let ([id (gensym)])
+		    `(pattern-substitute (quote-syntax ,id)
+					 ,id ,t))
+		  p)]))
+
+  (-define (stx-smaller-than? stx sz)
+    (sz . > . (stx-size stx (add1 sz))))
+
+  (-define (stx-size stx up-to)
+    (cond
+     [(up-to . < . 1) 0]
+     [(syntax? stx) (stx-size (syntax-e stx) up-to)]
+     [(pair? stx) (let ([s1 (stx-size (car stx) up-to)])
+		    (+ s1 (stx-size (cdr stx) (- up-to s1))))]
+     [(vector? stx) (stx-size (vector->list stx) up-to)]
+     [(box? stx) (add1 (stx-size (unbox stx) (sub1 up-to)))]
+     [else 1]))
 
   ;; Generates a list-ref expression; if use-tail-pos
   ;;  is not #f, then the argument list is really a list*
@@ -1660,7 +1852,32 @@
      [else #t]))
 
   ;; Structure for communicating first-order pattern variable information:
-  (define-struct syntax-mapping (depth valvar))
+  (define-values (struct:syntax-mapping -make-syntax-mapping -syntax-mapping? syntax-mapping-ref syntax-mapping-set!)
+    (make-struct-type 'syntax-mapping #f 2 0 #f null (current-inspector)
+                      (lambda (self stx)
+                        (if (identifier? stx)
+                            (raise-syntax-error
+                             #f
+                             "pattern variable cannot be used outside of a template"
+                             stx)
+                            (raise-syntax-error
+                             #f
+                             "pattern variable cannot be used outside of a template"
+                             stx
+                             (if (module-template-identifier=? (quote-syntax set!) (stx-car stx))
+                                 (stx-car (stx-cdr stx))
+                                 (stx-car stx)))))))
+  (-define -syntax-mapping-depth (make-struct-field-accessor syntax-mapping-ref 0))
+  (-define -syntax-mapping-valvar (make-struct-field-accessor syntax-mapping-ref 1))
+  (-define (make-syntax-mapping depth valvar)
+    (make-set!-transformer (-make-syntax-mapping depth valvar)))
+  (-define (syntax-mapping? v)
+    (and (set!-transformer? v)
+         (-syntax-mapping? (set!-transformer-procedure v))))
+  (-define (syntax-mapping-depth v)
+    (-syntax-mapping-depth (set!-transformer-procedure v)))
+  (-define (syntax-mapping-valvar v)
+    (-syntax-mapping-valvar (set!-transformer-procedure v)))
 
   (provide (protect make-match&env get-match-vars make-pexpand
 		    make-syntax-mapping syntax-mapping?
@@ -1671,15 +1888,139 @@
 ;; syntax-case and syntax
 
 (module #%stxcase #%kernel
-  (require #%stx #%small-scheme)
+  (require #%stx #%small-scheme #%paramz)
   (require-for-syntax #%stx #%small-scheme #%sc #%kernel)
 
-  (-define (ellipsis-count-error sexp sloc)
-    (raise-syntax-error
-     'syntax
-     "incompatible ellipsis match counts for template"
-     sexp
-     sloc))
+  (-define (datum->syntax-object/shape orig datum)
+     (if (syntax? datum)
+	 datum
+	 (let ([stx (datum->syntax-object orig datum orig)])
+	   (let ([shape (syntax-property orig 'paren-shape)])
+	     (if shape
+		 (syntax-property stx 'paren-shape shape)
+		 stx)))))
+
+  (-define (catch-ellipsis-error thunk sexp sloc)
+      ((let/ec esc
+	 (with-continuation-mark
+	     parameterization-key
+	     (extend-parameterization
+	      (continuation-mark-set-first #f parameterization-key)
+	      current-exception-handler
+	      (lambda (exn)
+		(esc
+		 (lambda ()
+		   (if (exn:break? exn)
+		       (raise exn)
+		       (raise-syntax-error
+			'syntax
+			"incompatible ellipsis match counts for template"
+			sexp
+			sloc))))))
+	   (let ([v (thunk)])
+	     (lambda () v))))))
+
+  (-define substitute-stop 'dummy)
+
+  ;; pattern-substitute optimizes a pattern substitution by
+  ;;  merging variables that look up the same simple mapping
+  (-define-syntax pattern-substitute
+    (lambda (stx)
+      (let ([pat (stx-car (stx-cdr stx))]
+	    [subs (stx->list (stx-cdr (stx-cdr stx)))])
+	(let ([ht-common (make-hash-table 'equal)]
+	      [ht-map (make-hash-table)])
+	  ;; Determine merges:
+	  (let loop ([subs subs])
+	    (unless (null? subs)
+	      (let ([id (syntax-e (car subs))]
+		    [expr (cadr subs)])
+		(when (or (identifier? expr)
+			  (and (stx-pair? expr)
+			       (memq (syntax-e (stx-car expr))
+				     '(car cadr caddr cadddr
+					   cdr cddr cdddr cddddr
+					   list-ref list-tail))
+			       (stx-pair? (stx-cdr expr))
+			       (identifier? (stx-car (stx-cdr expr)))))
+		  (let ([s-expr (syntax-object->datum expr)])
+		    (let ([new-id (hash-table-get ht-common s-expr #f)])
+		      (if new-id
+			  (hash-table-put! ht-map id new-id)
+			  (hash-table-put! ht-common s-expr id))))))
+	      (loop (cddr subs))))
+	  ;; Merge:
+	  (let ([new-pattern (if (zero? (hash-table-count ht-map))
+				 pat
+				 (let loop ([stx pat])
+				   (cond
+				    [(pair? stx)
+				     (let ([a (loop (car stx))]
+					   [b (loop (cdr stx))])
+				       (if (and (eq? a (car stx))
+						(eq? b (cdr stx)))
+					   stx
+					   (cons a b)))]
+				    [(symbol? stx)
+				     (let ([new-id (hash-table-get ht-map stx #f)])
+				       (or new-id stx))]
+				    [(syntax? stx) 
+				     (let ([new-e (loop (syntax-e stx))])
+				       (if (eq? (syntax-e stx) new-e)
+					   stx
+					   (datum->syntax-object stx new-e stx stx)))]
+				    [(vector? stx)
+				     (list->vector (map loop (vector->list stx)))]
+				    [(box? stx) (box (loop (unbox stx)))]
+				    [else stx])))])
+	    (datum->syntax-object (quote-syntax here)
+				  `(apply-pattern-substitute
+				    ,new-pattern
+				    (quote ,(let loop ([subs subs])
+					      (cond
+					       [(null? subs) null]
+					       [(hash-table-get ht-map (syntax-e (car subs)) #f)
+						;; Drop mapped id
+						(loop (cddr subs))]
+					       [else
+						(cons (car subs) (loop (cddr subs)))])))
+				    . ,(let loop ([subs subs])
+					 (cond
+					  [(null? subs) null]
+					  [(hash-table-get ht-map (syntax-e (car subs)) #f)
+					   ;; Drop mapped id
+					   (loop (cddr subs))]
+					  [else
+					   (cons (cadr subs) (loop (cddr subs)))])))
+				  stx))))))
+
+  (-define apply-pattern-substitute
+     (lambda (stx sub-ids . sub-vals)
+       (let loop ([stx stx])
+	 (cond
+	  [(pair? stx) (let ([a (loop (car stx))]
+			     [b (loop (cdr stx))])
+			 (if (and (eq? a (car stx))
+				  (eq? b (cdr stx)))
+			     stx
+			     (cons a b)))]
+	  [(symbol? stx)
+	   (let sloop ([sub-ids sub-ids][sub-vals sub-vals])
+	     (cond
+	      [(null? sub-ids) stx]
+	      [(eq? stx (car sub-ids)) (car sub-vals)]
+	      [else (sloop (cdr sub-ids) (cdr sub-vals))]))]
+	  [(syntax? stx) 
+	   (let ([new-e (loop (syntax-e stx))])
+	     (if (eq? (syntax-e stx) new-e)
+		 stx
+                 (syntax-recertify
+                  (datum->syntax-object/shape stx new-e)
+                  stx sub-insp #f)))]
+	  [(vector? stx)
+	   (list->vector (map loop (vector->list stx)))]
+	  [(box? stx) (box (loop (unbox stx)))]
+	  [else stx]))))
 
   (-define-syntax syntax-case**
     (lambda (x)
@@ -1968,10 +2309,10 @@
 				  [(zero? len) (quote-syntax ())]
 				  [(= len 1) (car r)]
 				  [else
-				   (cons (quote-syntax list*) r)]))
-			       (list (quote-syntax quote-syntax)
-				     (datum->syntax-object #f 'srctag x))))))))))
+				   (cons (quote-syntax list*) r)]))))))))))
        x)))
+
+  (-define sub-insp (current-code-inspector))
 
   (provide syntax-case** syntax))
 
@@ -1979,7 +2320,7 @@
 ;; syntax/loc
 
 (module #%stxloc #%kernel
-  (require #%stxcase #%define-et-al)
+  (require #%qq-and-or #%stxcase #%define-et-al)
   (require-for-syntax #%kernel #%stxcase #%sc)
 
   ;; Regular syntax-case
@@ -1999,10 +2340,10 @@
   (-define loc-insp (current-code-inspector))
   (-define (relocate loc stx)
     (if (syntax-source loc)
-	(let ([new-stx (datum->syntax-object
-			stx
-			(syntax-e stx)
-			loc)])
+	(let-values ([(new-stx) (datum->syntax-object
+                                 stx
+                                 (syntax-e stx)
+                                 loc)])
 	  (syntax-recertify new-stx stx loc-insp #f))
 	stx))
 
@@ -2170,16 +2511,22 @@
 
   ;; From Dybvig, mostly:
   (-define-syntax syntax-rules
-    (lambda (x)
-      (syntax-case** syntax-rules #t x () module-identifier=?
+    (lambda (stx)
+      (syntax-case** syntax-rules #t stx () module-identifier=?
 	((_ (k ...) ((keyword . pattern) template) ...)
 	 (andmap identifier? (syntax->list (syntax (k ...))))
 	 (with-syntax (((dummy ...)
-			(map (lambda (x)
+			(map (lambda (id)
+			       (unless (identifier? id)
+				 (raise-syntax-error
+				  #f
+				  "pattern must start with an identifier, found something else"
+				  stx
+				  id))
 			       ;; Preserve the name, in case it's printed out
-			       (string->uninterned-symbol (symbol->string (syntax-e x))))
+			       (string->uninterned-symbol (symbol->string (syntax-e id))))
 			     (syntax->list (syntax (keyword ...))))))
-	   (syntax/loc x
+	   (syntax/loc stx
 	     (lambda (x)
 	       (syntax-case** _ #t x (k ...) module-identifier=?
 		 ((dummy . pattern) (syntax/loc x template))
@@ -2761,6 +3108,42 @@
 	 (thunk)))
      (check-for-break)))
 
+  (define (select-handler/no-breaks e bpz l)
+    (cond
+     [(null? l)
+      (raise e)]
+     [((caar l) e)
+      (begin0
+       ((cdar l) e)
+       (with-continuation-mark 
+	   break-enabled-key
+	   bpz
+	 (check-for-break)))]
+     [else
+      (select-handler/no-breaks e bpz (cdr l))]))
+
+  (define (select-handler/breaks-as-is e bpz l)
+    (cond
+     [(null? l)
+      (raise e)]
+     [((caar l) e)
+      (with-continuation-mark 
+	  break-enabled-key
+	  bpz
+	(begin
+	  (check-for-break)
+	  ((cdar l) e)))]
+     [else
+      (select-handler/breaks-as-is e bpz (cdr l))]))
+
+  (define false-thread-cell (make-thread-cell #f))
+
+
+  (define (check-with-handlers-in-context handler-prompt-key)
+    (unless (continuation-prompt-available? handler-prompt-key) 
+      (error 'with-handlers
+             "exception handler used out of context")))
+
   (define-syntaxes (with-handlers with-handlers*)
     (let ([wh 
 	   (lambda (disable-break?)
@@ -2768,54 +3151,49 @@
 	       (syntax-case stx ()
 		 [(_ () expr1 expr ...) (syntax/loc stx (let () expr1 expr ...))]
 		 [(_ ([pred handler] ...) expr1 expr ...)
-		  (quasisyntax/loc stx
-		    (let ([l (list (cons pred handler) ...)]
-			  [body (lambda () expr1 expr ...)])
-		      ;; Capture current break parameterization, so we can use it to
-		      ;;  evaluate the body
-		      (let ([bpz (continuation-mark-set-first #f break-enabled-key)])
-			;; Disable breaks here, so that when the exception handler jumps
-			;;  to run a handler, breaks are disabled for the handler
-			(with-continuation-mark
-			    break-enabled-key
-			    (make-thread-cell #f)
-			  ((call/ec 
-			    (lambda (k)
-			      ;; Restore the captured break parameterization for
-			      ;;  evaluating the `with-handlers' body. In this
-			      ;;  special case, no check for breaks is needed,
-			      ;;  because bpz is quickly restored past call/ec.
-			      ;;  Thus, `with-handlers' can evaluate its body in
-			      ;;  tail position.
-			      (with-continuation-mark 
-				  break-enabled-key
-				  bpz
-				(parameterize ([current-exception-handler
-						(lambda (e)
-						  (k
-						   (lambda ()
-						     (let loop ([l l])
-						       (cond
-							[(null? l)
-							 (raise e)]
-							[((caar l) e)
-							 #,(if disable-break?
-							       #'(begin0
-								  ((cdar l) e)
-								  (with-continuation-mark 
-								      break-enabled-key
-								      bpz
-								    (check-for-break)))
-							       #'(with-continuation-mark 
-								     break-enabled-key
-								     bpz
-								   (begin
-								     (check-for-break)
-								     ((cdar l) e))))]
-							[else
-							 (loop (cdr l))])))))])
-				  (call-with-values body
-				    (lambda args (lambda () (apply values args)))))))))))))])))])
+		  (with-syntax ([(pred-name ...) (generate-temporaries (map (lambda (x) 'with-handlers-predicate) 
+									    (syntax->list #'(pred ...))))]
+				[(handler-name ...) (generate-temporaries (map (lambda (x) 'with-handlers-handler) 
+									       (syntax->list #'(handler ...))))])
+		    (quasisyntax/loc stx
+		      (let ([pred-name pred] ...
+			    [handler-name handler] ...
+                            [handler-prompt-key (make-continuation-prompt-tag)])
+			;; Capture current break parameterization, so we can use it to
+			;;  evaluate the body
+			(let ([bpz (continuation-mark-set-first #f break-enabled-key)])
+			  ;; Disable breaks here, so that when the exception handler jumps
+			  ;;  to run a handler, breaks are disabled for the handler
+			  (with-continuation-mark
+			      break-enabled-key
+			      false-thread-cell
+			    (call-with-continuation-prompt
+			     (lambda ()
+			       ;; Restore the captured break parameterization for
+			       ;;  evaluating the `with-handlers' body. In this
+			       ;;  special case, no check for breaks is needed,
+			       ;;  because bpz is quickly restored past call/ec.
+			       ;;  Thus, `with-handlers' can evaluate its body in
+			       ;;  tail position.
+			       (with-continuation-mark 
+				   break-enabled-key
+				   bpz
+				 (parameterize ([current-exception-handler
+						 (lambda (e)
+                                                   (check-with-handlers-in-context handler-prompt-key)
+						   ;; Deliver a thunk to the escape handler:
+						   (abort-current-continuation
+                                                    handler-prompt-key
+						    (lambda ()
+						      (#,(if disable-break?
+							     #'select-handler/no-breaks
+							     #'select-handler/breaks-as-is)
+						       e bpz
+						       (list (cons pred-name handler-name) ...)))))])
+				   expr1 expr ...)))
+                             handler-prompt-key
+			     ;; On escape, apply the handler thunk
+			     (lambda (thunk) (thunk))))))))])))])
       (values (wh #t) (wh #f))))
 
   (define-syntax set!-values
@@ -2908,7 +3286,7 @@
 	     (or (relative-path? s)
 		 (absolute-path? s)))))
 
-  (define -re:suffix (byte-regexp #"([.][^.]*|)$"))  
+  (define -re:suffix #rx#"([.][^.]*|)$")
   (define (path-replace-suffix s sfx)
     (unless (path-string? s)
       (raise-type-error 'path-replace-suffix "path or valid-path string" 0 s sfx))
@@ -2979,40 +3357,30 @@
 	   [else (find-between lo hi)])))))
 
   (define (read-eval-print-loop)
-    (let* ([eeh #f]
-	   [jump #f]
-	   [be? #f]
-	   [rep-error-escape-handler (lambda () (jump))])
-      (dynamic-wind
-	  (lambda () (set! eeh (error-escape-handler))
-		  (set! be? (break-enabled))
-		  (error-escape-handler rep-error-escape-handler)
-		  (break-enabled #f))
-	  (lambda ()
-	    (let/ec done
-	      (let repl-loop ()
-		(let/ec k
-		  (dynamic-wind
-		      (lambda ()
-			(break-enabled be?)
-			(set! jump k))
-		      (lambda ()
-			(let ([v ((current-prompt-read))])
-			  (when (eof-object? v) (done (void)))
-			  (call-with-values
-			      (lambda () ((current-eval) (if (syntax? v)
-							     (namespace-syntax-introduce v)
-							     v)))
-			    (lambda results (for-each (current-print) results)))))
-		      (lambda () 
-			(set! be? (break-enabled))
-			(break-enabled #f)
-			(set! jump #f))))
-		(repl-loop))))
-	  (lambda () (error-escape-handler eeh)
-		  (break-enabled be?)
-		  (set! jump #f)
-		  (set! eeh #f)))))
+    (let* ([jump-key (gensym)]
+	   [repl-error-escape-handler
+	    (lambda ()
+	      (let ([jump-k (continuation-mark-set-first #f jump-key)])
+		(if jump-k
+		    (jump-k)
+		    (error 'repl-error-escape-handler "used out of context"))))])
+      ;; This parameterize is outside the loop so that
+      ;;  expressions evaluated in the REPL can set the
+      ;;  error escape handler. That's why we communicate the
+      ;;  actual escape target through a continuation mark.
+      (parameterize ([error-escape-handler repl-error-escape-handler])
+	(let/ec done-k
+	  (let repl-loop ()
+	    (let/ec k
+	      (with-continuation-mark jump-key k
+		(let ([v ((current-prompt-read))])
+		  (when (eof-object? v) (done-k (void)))
+		  (call-with-values
+		      (lambda () ((current-eval) (if (syntax? v)
+						     (namespace-syntax-introduce v)
+						     v)))
+		    (lambda results (for-each (current-print) results))))))
+	    (repl-loop))))))
 
   (define load/cd
     (lambda (n)
@@ -3299,9 +3667,9 @@
   (current-reader-guard (let ([default-reader-guard (lambda (path) path)])
 			  default-reader-guard))
 
-  (define -re:dir (byte-regexp #"(.+?)/+(.*)"))
-  (define -re:auto (byte-regexp #"^,"))
-  (define -re:ok-relpath (byte-regexp #"^[-a-zA-Z0-9_. ]+(/+[-a-zA-Z0-9_. ]+)*$"))
+  (define -re:dir #rx#"(.+?)/+(.*)")
+  (define -re:auto #rx#"^,")
+  (define -re:ok-relpath #rx#"^[-a-zA-Z0-9_. ]+(/+[-a-zA-Z0-9_. ]+)*$")
   (define -module-hash-table-table (make-hash-table 'weak)) ; weak map from namespace to module ht
   (define -path-cache (make-hash-table 'weak 'equal)) ; weak map from `lib' path + corrent-library-paths to symbols
   
@@ -3688,6 +4056,7 @@
   (require #%stxmz-body)
   (require #%qqstx)
   (require #%define)
+  (require #%expobs) ; so it's attached
 
   (provide (all-from #%more-scheme)
 	   (all-from-except #%misc make-standard-module-name-resolver)

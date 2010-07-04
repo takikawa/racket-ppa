@@ -5,7 +5,8 @@
            (lib "list.ss")
            (lib "etc.ss")
            (lib "match.ss")
-           (lib "26.ss" "srfi"))
+           (lib "26.ss" "srfi")
+           (lib "class.ss"))
 
   ; CONTRACTS
   
@@ -87,15 +88,26 @@
    get-set-pair-union-stats ; profiling info
    re-intern-identifier
    finished-xml-box-table
-   >>>)
+   language-level->name
+   
+   stepper-syntax-property)
   
-  ;; eli's debug operator:
-  ;; (I'm sure his version is more elegant.)
-  (define (>>> x . extra)
-    (begin (fprintf (current-error-port) "~a >>> ~v\n" 
-                    (if extra (apply string-append extra) "")
-                    x)
-           x))
+    
+  ;; stepper-syntax-property : like syntax property, but adds properties to an association
+  ;; list associated with the syntax property 'stepper-properties
+  (define stepper-syntax-property
+    (case-lambda 
+      [(stx tag) (let ([stepper-props (syntax-property stx 'stepper-properties)])
+                   (if stepper-props
+                       (let ([table-lookup (assq tag stepper-props)])
+                         (if table-lookup
+                             (cadr table-lookup)
+                             #f))
+                       #f))]
+      [(stx tag new-val) (syntax-property stx 'stepper-properties
+                                          (cons (list tag new-val)
+                                                (or (syntax-property stx 'stepper-properties)
+                                                    null)))]))
   
   ; A step-result is either:
   ; (make-before-after-result finished-exps exp redex reduct)
@@ -306,8 +318,8 @@
             [(and (syntax? ilist) (pair? (syntax-e ilist)))
              (loop (syntax-e ilist))]
             [(null? ilist) null])))
-  
-  ; arglist-flatten : produces a list containing the elements of the ilist
+
+  ;; arglist-flatten : produces a list containing the elements of the ilist
 
   (define (arglist-flatten arglist)
     (let loop ([ilist arglist])
@@ -320,19 +332,22 @@
             [(and (syntax? ilist)
                   (pair? (syntax-e ilist)))
              (loop (syntax-e ilist))])))
-  
-  ; zip : (listof 'a) (listof 'b) (listof 'c) ... -> (listof (list 'a 'b 'c ...))
-  ; zip reshuffles lists of items into a list of item-lists.  Look at the contract, okay?
-  
+
+  ;; zip : (listof 'a) (listof 'b) (listof 'c) ...
+  ;;       -> (listof (list 'a 'b 'c ...))
+  ;; zip reshuffles lists of items into a list of item-lists.  Look at the
+  ;; contract, okay?
+
   (define zip
     (lambda args
       (apply map list args)))
-  
-  (define let-counter (syntax-property #'let-counter 'stepper-binding-type 'stepper-temp))
-  
- 
+
+  (define let-counter
+    (stepper-syntax-property #'let-counter 'stepper-binding-type 'stepper-temp))
+
+
   ; syntax-pair-map (using the def'ns of the MzScheme docs):
-  
+
   (define (syntax-pair-map pair fn)
     (cons (fn (car pair))
           (cond [(syntax? (cdr pair))
@@ -341,138 +356,172 @@
                  (syntax-pair-map (cdr pair) fn)]
                 [(null? (cdr pair))
                  null])))
-  
+
   (define (make-queue)
     (box null))
-  
+
   (define (queue-push queue new)
     (set-box! queue (append (unbox queue) (list new))))
 
   (define (queue-pop queue)
     (if (null? (unbox queue))
-        (error 'queue-pop "no elements in queue")
-        (let ([first (car (unbox queue))])
-          (set-box! queue (cdr (unbox queue)))
-          first)))
-  
+      (error 'queue-pop "no elements in queue")
+      (let ([first (car (unbox queue))])
+        (set-box! queue (cdr (unbox queue)))
+        first)))
+
   (define (queue-length queue)
     (length (unbox queue)))
-  
+
   (define (rebuild-stx new old)
     (syntax-recertify (datum->syntax-object old new old old)
                       old
                       (current-code-inspector)
                       #f))
-  
+
   (define break-kind?
-    (symbols 'normal-break 'normal-break/values 'result-exp-break 'result-value-break 
-             'double-break 'late-let-break 'expr-finished-break 'define-struct-break))
+    (symbols 'normal-break 'normal-break/values 'result-exp-break
+             'result-value-break 'double-break 'late-let-break
+             'expr-finished-break 'define-struct-break))
 
   ; functional update package
 
+  ;; a trace is one of
+  ;; (cons 'car trace)
+  ;; (cons 'cdr trace)
+  ;; (cons 'syntax-e trace)
+  ;; (cons 'both (list trace trace))
+  ;; null
+  
   (define (swap-args 2-arg-fun)
     (lambda (x y)
       (2-arg-fun y x)))
-  
+
   (define second-arg (lambda (dc y) y))
   
-  (define up-mappings
-    `((rebuild ((,car ,(lambda (stx new) (cons new (cdr stx))))
-                (,cdr ,(lambda (stx new) (cons (car stx) new)))
-                (,syntax-e ,(swap-args rebuild-stx))))
-      (discard ((,car ,second-arg)
-                (,cdr ,second-arg)
-                (,syntax-e ,second-arg)))))
+  (define (up-mapping traversal fn)
+    (case traversal
+      [(rebuild) (case fn 
+                   [(car) (lambda (stx new) (cons new (cdr stx)))]
+                   [(cdr) (lambda (stx new) (cons (car stx) new))]
+                   [(syntax-e) (swap-args rebuild-stx)]
+                   [(both-l both-r) (lambda (stx a b) (cons a b))]
+                   [else (error 'up-mapping "unexpected symbol in up-mapping (1)")])]
+      [(discard) (case fn
+                   [(car) second-arg]
+                   [(cdr) second-arg]
+                   [(syntax-e) second-arg]
+                   [(both-l) (lambda (stx a b) a)]
+                   [(both-r) (lambda (stx a b) b)]
+                   [else (error 'up-mapping "unexpected symbol in up-mapping (2)")])]))
   
+  (define (down-mapping fn)
+    (case fn
+      [(car) car]
+      [(cdr) cdr]
+      [(syntax-e) syntax-e]
+      [else (error 'down-mapping "called on something other than 'car, 'cdr, & 'syntax-e: ~v" fn)]))
+
   (define (update fn-list val fn traversal)
     (if (null? fn-list)
         (fn val)
-        (let* ([down (car fn-list)]
-               [up (cadr (assq down (cadr (assq traversal up-mappings))))])
-          (up val (update (cdr fn-list) (down val) fn traversal)))))
- 
+        (let ([up (up-mapping traversal (car fn-list))])
+          (case (car fn-list)
+            [(both-l both-r) (up val 
+                                 (update (cadr fn-list) (car val) fn traversal)
+                                 (update (caddr fn-list) (cdr val) fn traversal))]
+            [else (let ([down (down-mapping (car fn-list))])
+                    (up val (update (cdr fn-list) (down val) fn traversal)))]))))
   
-  ;; skipto/auto : syntax-object? (symbols 'rebuild 'discard) (syntax-object? . -> . syntax-object?)
-  ;; "skips over" part of a tree to find a subtree indicated by the stepper-skipto property.  If the
-  ;; traversal argument is 'rebuild, the result of transformation is embedded again in the same tree.
-  ;; if the traversal argument is 'discard, the result of the transformation is the result of this 
-  ;; function
+  #;(display (equal? (update '(cdr cdr car both-l (car) (cdr))
+                           `(a . (b ((1) c . 2) d))
+                           (lambda (x) (+ x 1))
+                           'rebuild)
+                   `(a . (b ((2) c . 3) d))))
+  
+
+
+  ;; skipto/auto : syntax-object?
+  ;;               (symbols 'rebuild 'discard)
+  ;;               (syntax-object? . -> . syntax-object?)
+  ;; "skips over" part of a tree to find a subtree indicated by the
+  ;; stepper-skipto property.  If the traversal argument is 'rebuild, the
+  ;; result of transformation is embedded again in the same tree.  if the
+  ;; traversal argument is 'discard, the result of the transformation is the
+  ;; result of this function
   (define (skipto/auto stx traversal transformer)
-    (cond [(syntax-property stx 'stepper-skipto) 
+    (cond [(stepper-syntax-property stx 'stepper-skipto)
            =>
            (cut update <> stx (cut skipto/auto <> traversal transformer) traversal)]
           [else (transformer stx)]))
+
+  ;  small test case:
+  #;(display (equal? (syntax-object->datum
+                    (skipto/auto (stepper-syntax-property #`(a #,(stepper-syntax-property #`(b c)
+                                                                          'stepper-skipto
+                                                                          '(syntax-e cdr car)))
+                                                  'stepper-skipto
+                                                  '(syntax-e cdr car))
+                                 'discard
+                                 (lambda (x) x)))
+                   'c))
   
-  
-  ;  small test case: 
-  ;(equal? (syntax-object->datum
-  ;         (skipto/auto (syntax-property #`(a #,(syntax-property #`(b c)
-  ;                                                               'stepper-skipto
-  ;                                                               (list syntax-e cdr car)))
-  ;                                       'stepper-skipto
-  ;                                       (list syntax-e cdr car))
-  ;                      'discard
-  ;                      (lambda (x) x)))
-  ;        'c)
-  
-  
+
   ; BINDING-/VARREF-SET FUNCTIONS
-  
+
   ; note: a BINDING-SET which is not 'all may be used as a VARREF-SET.
   ; this is because they both consist of syntax objects, and a binding
   ; answers true to bound-identifier=? with itself, just like a varref
   ; in the scope of that binding would.
-  
+
   ; binding-set-union: (listof BINDING-SET) -> BINDING-SET
   ; varref-set-union: (listof VARREF-SET) -> VARREF-SET
-  
+
   (define profiling-table (make-hash-table 'equal))
   (define (reset-profiling-table)
     (set! profiling-table (make-hash-table 'equal)))
-  
-  
-  (define (get-set-pair-union-stats) (hash-table-map profiling-table (lambda (k v) (list k (unbox v)))))
-  
-  
-  ; test cases :
-  ; (profiling-table-incr 1 2)
-  ; (profiling-table-incr 2 3)
-  ; (profiling-table-incr 2 1)
-  ; (profiling-table-incr 1 2)
-  ; (profiling-table-incr 2 1)
-  ;
-  ; (equal? (get-set-pair-union-stats)
+
+  (define (get-set-pair-union-stats)
+    (hash-table-map profiling-table (lambda (k v) (list k (unbox v)))))
+
+  ;; test cases :
+  ;; (profiling-table-incr 1 2)
+  ;; (profiling-table-incr 2 3)
+  ;; (profiling-table-incr 2 1)
+  ;; (profiling-table-incr 1 2)
+  ;; (profiling-table-incr 2 1)
+  ;;
+  ;; (equal? (get-set-pair-union-stats)
   ;         `(((2 . 3) 1) ((2 . 1) 2) ((1 . 2) 2)))
-    
-  ; until this remove* goes into list.ss?
-  
+
+  ;; until this remove* goes into list.ss?
+
   (define (set-pair-union a-set b-set comparator)
     (cond [(null? b-set) a-set]
           [(null? a-set) b-set]
           [else (append (remove* a-set b-set comparator) a-set)]))
-  
+
   (define (varref-set-pair-union a-set b-set)
     (set-pair-union a-set b-set free-identifier=?))
-  
+
   (define (binding-set-pair-union a-set b-set)
     (cond [(eq? a-set 'all) 'all]
           [(eq? b-set 'all) 'all]
           [else (set-pair-union a-set b-set eq?)]))
-  
+
   (define (pair-union->many-union fn)
     (lambda (args)
       (foldl fn null args)))
-  
+
   (define binding-set-union
     (pair-union->many-union binding-set-pair-union))
-  
+
   (define varref-set-union
     (pair-union->many-union varref-set-pair-union))
-      
 
   ; binding-set-varref-set-intersect : BINDING-SET VARREF-SET -> BINDING-SET
   ; return the subset of varrefs that appear in the bindings
-  
+
   (define (binding-set-varref-set-intersect bindings varrefs)
     (cond [(eq? bindings 'all) varrefs]
           [else (filter (lambda (varref)
@@ -480,72 +529,49 @@
                                    (bound-identifier=? binding varref))
                                  bindings))
                         varrefs)]))
-  
+
   ; varref-set-remove-bindings : VARREF-SET (BINDING-SET - 'all) -> VARREF-SET
   ; remove bindings from varrefs
-  
+
   (define (varref-set-remove-bindings varrefs bindings)
     (cond [(eq? bindings 'all)
            (error 'varref-set-remove-bindings "binding-set 'all passed as second argument, first argument was: ~s" varrefs)]
           [else (remove* bindings varrefs bound-identifier=?)]))
-  
-  ; sublist returns the list beginning with element <begin> and ending just before element <end>.
-  ; (-> number? number? list? list?)
-  (define (sublist begin end lst) 
-    (if (= end 0) 
+
+  ;; sublist returns the list beginning with element <begin> and ending just
+  ;; before element <end>.
+  ;; (-> number? number? list? list?)
+  (define (sublist begin end lst)
+    (if (= end 0)
         null
         (if (= begin 0)
             (cons (car lst)
                   (sublist 0 (- end 1) (cdr lst)))
             (sublist (- begin 1) (- end 1) (cdr lst)))))
-  
-  
-  ; attach-info : SYNTAX-OBJECT SYNTAX-OBJECT -> SYNTAX-OBJECT
-  ; attach-info attaches to a generated piece of syntax the origin & source information of another.
-  ; we do this so that macro unwinding can tell what reconstructed syntax came from what original syntax
-  
-  (define labels-to-attach
-    `((user-origin origin)
-      (user-stepper-hint stepper-hint)
-      (user-stepper-else stepper-else)
-      (user-stepper-define-type stepper-define-type)
-      (user-stepper-proc-define-name stepper-proc-define-name)
-      (user-stepper-and/or-clauses-consumed stepper-and/or-clauses-consumed)
-      (user-stepper-offset-index stepper-offset-index)
-      (stepper-xml-hint stepper-xml-hint)))  ; I find it mildly worrisome that this breaks the pattern
-                                             ;  by failing to preface the identifier with 'user-'.  JBC, 2005-08
-  
-  ; take info from source expressions to reconstructed expressions 
-  ;  (from native property names to 'user-' style property names)
-  
+
+  ;; take info from source expressions to reconstructed expressions
+
   (define (attach-info to-exp from-exp)
-    (if (syntax-property from-exp 'stepper-offset-index) (>>> (syntax-property from-exp 'stepper-offset-index)))
-    (let* ([attached (foldl (lambda (labels stx)
-                              (match labels
-                                [`(,new-label ,old-label)
-                                  (syntax-property stx new-label (syntax-property from-exp old-label))]))
-                            to-exp
-                            labels-to-attach)]
+    (let* ([attached (syntax-property to-exp 'stepper-properties (append (or (syntax-property from-exp 'stepper-properties)
+                                                                             null)
+                                                                         (or (syntax-property to-exp 'stepper-properties)
+                                                                             null)))]
            [attached (syntax-property attached 'user-source (syntax-source from-exp))]
            [attached (syntax-property attached 'user-position (syntax-position from-exp))])
       attached))
-  
-  ; transfer info from reconstructed expressions to other reconstructed expressions 
-  ;  (from 'user-' style names to 'user-' style names)
-  
-  (define (transfer-info to-stx from-exp)
-    (let* ([attached (foldl (lambda (labels stx)
-                              (match labels
-                              [`(,new-label ,old-label)
-                                (syntax-property stx new-label (syntax-property from-exp new-label))]))
-                            to-stx
-                            labels-to-attach)]
+
+  ;; transfer info from reconstructed expressions to other reconstructed
+  ;; expressions
+
+  (define (transfer-info to-exp from-exp)
+    (let* ([attached (syntax-property to-exp 'stepper-properties (append (or (syntax-property from-exp 'stepper-properties)
+                                                                             null)
+                                                                         (or (syntax-property to-exp 'stepper-properties)
+                                                                             null)))]
            [attached (syntax-property attached 'user-source (syntax-property from-exp 'user-source))]
-           [attached (syntax-property attached 'user-position (syntax-property from-exp 'user-position))]
-           [attached (syntax-property attached 'stepper-highlight (or (syntax-property from-exp 'stepper-highlight)
-                                                                      (syntax-property attached 'stepper-highlight)))])
+           [attached (syntax-property attached 'user-position (syntax-property from-exp 'user-position))])
       attached))
-  
+
   (define (values-map fn . lsts)
   (apply values (apply map list
                        (apply map (lambda args (call-with-values (lambda () (apply fn args)) list))
@@ -589,16 +615,16 @@
                      [else (if (syntax? stx)
                                (syntax-object->datum stx)
                                stx)])])
-        (let* ([it (case (syntax-property stx 'stepper-xml-hint)
+        (let* ([it (case (stepper-syntax-property stx 'stepper-xml-hint)
                      [(from-xml-box) `(xml-box ,datum)]
                      [(from-scheme-box) `(scheme-box ,datum)]
                      [(from-splice-box) `(splice-box ,datum)]
                      [else datum])]
-               [it (case (syntax-property stx 'stepper-xml-value-hint)
+               [it (case (stepper-syntax-property stx 'stepper-xml-value-hint)
                      [(from-xml-box) `(xml-box-value ,it)]
                      [else it])]
                [it (if (and (not ignore-highlight?)
-                            (syntax-property stx 'stepper-highlight))
+                            (stepper-syntax-property stx 'stepper-highlight))
                        `(hilite ,it)
                        it)])
           it))))
@@ -664,12 +690,18 @@
             [`(xml-box ,@(xmlspec ...)) (send scheme-editor insert (construct-xml-box xmlspec))]
             [(? string? text) (send scheme-editor insert text)])
            spec)))))
-
+  
+  
+  (define (language-level->name language)
+    (car (last-pair (send language get-language-position))))
+  
   )
+
   
 ; test cases
 ;(require shared)
-;(load "/Users/clements/plt/tests/mzscheme/testing.ss")
+;(write (collection-path "tests" "mzscheme"))
+;(load (build-path (collection-path "tests" "mzscheme") "testing.ss"))
 ;
 ;(define (a sym) 
 ;  (syntax-object->datum (get-lifted-var sym)))
@@ -717,3 +749,10 @@
 ;                     (list sums diffs)))
 ; `((10 10 10 10 10)
 ;   (-8 -6 -4 -2 0)))
+
+;(test #f stepper-syntax-property #`13 'abc)
+;(test 'yes stepper-syntax-property (stepper-syntax-property #`13 'abc 'yes) 'abc)
+;(test 'yes stepper-syntax-property (stepper-syntax-property (stepper-syntax-property #`13 'abc 'no) 'abc 'yes) 'abc)
+;(test 'yes stepper-syntax-property (stepper-syntax-property (stepper-syntax-property #`13 'abc 'yes) 'def 'arg) 'abc)
+;(test 13 syntax-object->datum (stepper-syntax-property (stepper-syntax-property #`13 'abc 'yes) 'def 'arg))
+

@@ -8,7 +8,7 @@
       ("cheapconcurrency.ss")
       ("echo.ss" . "150000")
       ("except.ss" . "2500000")
-      ("fannkuch.ss")
+      ("fannkuch.ss" . "10")
       ("fasta.ss")
       ("fibo.ss" . "32")
       ("hash.ss" . "100000")
@@ -17,7 +17,7 @@
       ("lists.ss" . "18")
       ("mandelbrot.ss")
       ("matrix.ss" . "600")
-      ("moments.ss" . "200")
+      ("moments.ss") 200 somethings...
       ("nbody.ss")
       ("nestedloop.ss" . "18")
       ("nsieve.ss")

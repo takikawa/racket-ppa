@@ -1,6 +1,9 @@
 
 (module teachhelp mzscheme
-  (require "firstorder.ss")
+  (require "firstorder.ss"
+           (lib "shared.ss" "stepper" "private"))
+
+  (require-for-syntax (lib "shared.ss" "stepper" "private"))
   
   (provide make-undefined-check 
 	   make-first-order-function)
@@ -17,27 +20,27 @@
 	   [(id . args)
 	    (datum->syntax-object
 	     check-proc
-	     (cons (syntax-property
+	     (cons (stepper-syntax-property
 		    (datum->syntax-object
 		     check-proc
 		     (list check-proc 
 			   (list 'quote (syntax id))
 			   tmp-id))
 		    'stepper-skipto
-		    (list syntax-e cdr syntax-e cdr cdr car))
+		    '(syntax-e cdr syntax-e cdr cdr car))
 		   (syntax args))
 	     stx)]
 	   [id
-	    (syntax-property
-	     (datum->syntax-object
-	      check-proc
-	      (list check-proc 
-		    (list 'quote (syntax id))
-		    tmp-id)
-	      stx)
+            (stepper-syntax-property
+             (datum->syntax-object
+              check-proc
+              (list check-proc 
+                    (list 'quote (syntax id))
+                    tmp-id)
+              stx)
              'stepper-skipto
-             (list syntax-e cdr syntax-e cdr cdr car))]))))) ; this may make other stepper-skipto annotations obsolete.
-
+             '(syntax-e cdr syntax-e cdr cdr car))]))))) ; this may make other stepper-skipto annotations obsolete.
+    
   (define (appropriate-use what)
     (case what
      [(constructor)

@@ -1,20 +1,19 @@
-#cs
 (module handin-server mzscheme
   (require (lib "thread.ss")
-	   (lib "port.ss")
-	   (lib "mzssl.ss" "openssl")
-	   (lib "file.ss")
-	   (lib "date.ss")
-	   (lib "list.ss")
-	   (lib "string.ss")
-	   "md5.ss"
-	   "lock.ss"
-	   "web-status-server.ss"
-	   "run-status.ss")
+           (lib "port.ss")
+           (lib "mzssl.ss" "openssl")
+           (lib "file.ss")
+           (lib "date.ss")
+           (lib "list.ss")
+           (lib "string.ss")
+           "private/logger.ss"
+           "private/config.ss"
+           "private/lock.ss"
+           "private/md5.ss"
+           "private/run-status.ss"
+           "web-status-server.ss")
 
-  (define log-port (open-output-file "log.ss" 'append))
-
-  (define current-session (make-parameter 0))
+  (install-logger-port)
 
   (define (write+flush port . xs)
     (for-each (lambda (x) (write x port) (newline port)) xs)
@@ -30,46 +29,20 @@
           [(pair? default) (car default)]
           [else (error (alist-name alist) "no value for `~s'" key)]))
 
-  (provide LOG)
-  (define (LOG str . args)
-    ;; Assemble log into into a single string, to make
-    ;;  interleaved log lines unlikely:
-    (let ([line
-	   (format "(~a ~s ~s)\n"
-		   (current-session)
-		   (parameterize ([date-display-format 'iso-8601])
-		     (date->string (seconds->date (current-seconds)) #t))
-		   (apply format str args))])
-      (display line log-port)
-      (flush-output log-port)))
-
-  (define server-dir (current-directory))
-  (define config-file (build-path server-dir "config.ss"))
-
-  (define (get-config which default)
-    (if (file-exists? config-file)
-      (get-preference which (lambda () default) #f config-file)
-      default))
-
-  (define PORT-NUMBER        (get-config 'port-number 7979))
-  (define HTTPS-PORT-NUMBER  (get-config 'https-port-number (add1 PORT-NUMBER)))
-  (define SESSION-TIMEOUT    (get-config 'session-timeout 300))
-  (define SESSION-MEMORY-LIMIT (get-config 'session-memory-limit 40000000))
-  (define DEFAULT-FILE-NAME  (get-config 'default-file-name "handin.scm"))
-  (define MAX-UPLOAD         (get-config 'max-upload 500000))
-  (define MAX-UPLOAD-KEEP    (get-config 'max-upload-keep 9))
-  (define USER-REGEXP        (get-config 'user-regexp #rx"^[a-z][a-z0-9]+$"))
-  (define USER-DESC          (get-config 'user-desc "alphanumeric string"))
-  (define USERNAME-CASE-SENSITIVE? (get-config 'username-case-sensitive? #f))
-  (define ALLOW-NEW-USERS?   (get-config 'allow-new-users #f))
-  (define ALLOW-CHANGE-INFO? (get-config 'allow-change-info #f))
-  (define MASTER-PASSWD      (get-config 'master-password #f))
-  (define EXTRA-FIELDS
-    (get-config 'extra-fields
-                '(("Full Name" #f #f)
-                  ("ID#" #f #f)
-                  ("Email" #rx"^[^@<>\"`',]+@[a-zA-Z0-9_.-]+[.][a-zA-Z]+$"
-                   "a valid email address"))))
+  (define PORT-NUMBER        (get-config 'port-number))
+  (define HTTPS-PORT-NUMBER  (get-config 'https-port-number))
+  (define SESSION-TIMEOUT    (get-config 'session-timeout))
+  (define SESSION-MEMORY-LIMIT (get-config 'session-memory-limit))
+  (define DEFAULT-FILE-NAME  (get-config 'default-file-name))
+  (define MAX-UPLOAD         (get-config 'max-upload))
+  (define MAX-UPLOAD-KEEP    (get-config 'max-upload-keep))
+  (define USER-REGEXP        (get-config 'user-regexp))
+  (define USER-DESC          (get-config 'user-desc))
+  (define USERNAME-CASE-SENSITIVE? (get-config 'username-case-sensitive?))
+  (define ALLOW-NEW-USERS?   (get-config 'allow-new-users))
+  (define ALLOW-CHANGE-INFO? (get-config 'allow-change-info))
+  (define MASTER-PASSWD      (get-config 'master-password))
+  (define EXTRA-FIELDS       (get-config 'extra-fields))
   ;; separate user-controlled fields, and hidden fields
   (define USER-FIELDS
     (filter (lambda (f) (not (eq? '- (cadr f)))) EXTRA-FIELDS))
@@ -77,15 +50,15 @@
   (define orig-custodian (current-custodian))
 
   ;; On startup, check that the users file is not locked:
-  (put-preferences null null 
-		   (lambda (f)
-		     (delete-file f)
-		     (put-preferences null null 
-				      (lambda (f)
-					(error 'handin-server
-					       "unable to clean up lock file: ~s" f))
-				      "users.ss"))
-		   "users.ss")
+  (put-preferences null null
+    (lambda (f)
+      (delete-file f)
+      (put-preferences null null
+                       (lambda (f)
+                         (error 'handin-server
+                                "unable to clean up lock file: ~s" f))
+                       "users.ss"))
+    "users.ss")
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -96,11 +69,11 @@
   (define (make-success-dir-available n)
     (let ([name (success-dir n)])
       (when (directory-exists? name)
-	(if (< n MAX-UPLOAD-KEEP)
-	    (begin
-	      (make-success-dir-available (add1 n))
-	      (rename-file-or-directory name (success-dir (add1 n))))
-	    (delete-directory/files name)))))
+        (if (< n MAX-UPLOAD-KEEP)
+            (begin
+              (make-success-dir-available (add1 n))
+              (rename-file-or-directory name (success-dir (add1 n))))
+            (delete-directory/files name)))))
 
   (define ATTEMPT-RE (regexp (format "^~a$" ATTEMPT-DIR)))
   (define SUCCESS-RE (regexp (format "^~a$" (success-dir "[0-9]+"))))
@@ -111,35 +84,35 @@
     ;; means that there was a failed submission and the next one will
     ;; re-create ATTEMPT.
     (let* ([dirlist (map path->string (directory-list))]
-	   [dir (sort (filter (lambda (d)
+           [dir (sort (filter (lambda (d)
                                 (and (directory-exists? d)
                                      (regexp-match SUCCESS-RE d)))
                               dirlist)
-		 string<?)]
-	   [dir (and (pair? dir) (car dir))])
+                 string<?)]
+           [dir (and (pair? dir) (car dir))])
       (when dir
-	(unless (member dir SUCCESS-GOOD)
-	  (LOG "*** USING AN UNEXPECTED SUBMISSION DIRECTORY: ~a"
-	       (build-path (current-directory) dir)))
-	;; We have a submission directory -- copy all newer things (extra
-	;; things that exist in the main submission directory but not in
-	;; SUCCESS, or things that are newer in the main submission
-	;; directory are kept (but subdirs in SUCCESS will are copied as
-	;; is))
-	(for-each
-	 (lambda (f)
-	   (define dir/f (build-path dir f))
-	   (cond [(not (or (file-exists? f) (directory-exists? f)))
-		  ;; f is in dir but not in the working directory
-		  (copy-directory/files dir/f f)]
-		 [(or (<= (file-or-directory-modify-seconds f)
-			  (file-or-directory-modify-seconds dir/f))
-		      (and (file-exists? f) (file-exists? dir/f)
-			   (not (= (file-size f) (file-size dir/f)))))
-		  ;; f is newer in dir than in the working directory
-		  (delete-directory/files f)
-		  (copy-directory/files dir/f f)]))
-	 (directory-list dir)))))
+        (unless (member dir SUCCESS-GOOD)
+          (log-line "*** USING AN UNEXPECTED SUBMISSION DIRECTORY: ~a"
+                    (build-path (current-directory) dir)))
+        ;; We have a submission directory -- copy all newer things (extra
+        ;; things that exist in the main submission directory but not in
+        ;; SUCCESS, or things that are newer in the main submission
+        ;; directory are kept (but subdirs in SUCCESS will are copied as
+        ;; is))
+        (for-each
+         (lambda (f)
+           (define dir/f (build-path dir f))
+           (cond [(not (or (file-exists? f) (directory-exists? f)))
+                  ;; f is in dir but not in the working directory
+                  (copy-directory/files dir/f f)]
+                 [(or (<= (file-or-directory-modify-seconds f)
+                          (file-or-directory-modify-seconds dir/f))
+                      (and (file-exists? f) (file-exists? dir/f)
+                           (not (= (file-size f) (file-size dir/f)))))
+                  ;; f is newer in dir than in the working directory
+                  (delete-directory/files f)
+                  (copy-directory/files dir/f f)]))
+         (directory-list dir)))))
 
   (define cleanup-sema (make-semaphore 1))
   (define (cleanup-submission dir)
@@ -149,14 +122,14 @@
     ;; exclusive access to the directory contents.
     (with-handlers ([void
                      (lambda (e)
-                       (LOG "*** ERROR DURING (cleanup-submission ~s) : ~a"
-                            dir (if (exn? e) (exn-message e) e)))])
+                       (log-line "*** ERROR DURING (cleanup-submission ~s) : ~a"
+                                 dir (if (exn? e) (exn-message e) e)))])
       (when (directory-exists? dir) ; submissions can fail before mkdir
         (parameterize ([current-directory dir])
           (call-with-semaphore cleanup-sema cleanup-submission-body)))))
 
   (define (cleanup-all-submissions)
-    (LOG "Cleaning up all submission directories")
+    (log-line "Cleaning up all submission directories")
     (for-each (lambda (top)
                 (when (directory-exists? top)
                   (parameterize ([current-directory top])
@@ -180,11 +153,11 @@
             (let loop ()
               (let loop ([n (+ 20 (random 20))]) ; 10-20 minute delay
                 (when (>= n 0)
-                  (let ([new (map (lambda (x) 
-				    (if (directory-exists? x) 
-					(directory-list x)
-					null))
-				  '("active" "inactive"))])
+                  (let ([new (map (lambda (x)
+                                    (if (directory-exists? x)
+                                      (directory-list x)
+                                      null))
+                                  '("active" "inactive"))])
                     (if (equal? new last-active/inactive)
                       (begin (sleep 30) (loop (sub1 n)))
                       (begin (set! last-active/inactive new)
@@ -211,7 +184,7 @@
     (define len #f)
     (unless (member assignment assignments)
       (error 'handin "not an active assignment: ~a" assignment))
-    (LOG "assignment for ~a: ~a" users assignment)
+    (log-line "assignment for ~a: ~a" users assignment)
     (write+flush w 'ok)
     (set! len (read r-safe))
     (unless (and (number? len) (integer? len) (positive? len))
@@ -263,7 +236,7 @@
           (make-directory ATTEMPT-DIR)
           (save-submission s (build-path ATTEMPT-DIR "handin"))
           (timeout-control 'reset)
-          (LOG "checking ~a for ~a" assignment users)
+          (log-line "checking ~a for ~a" assignment users)
           (let* ([checker* (path->complete-path (build-path 'up "checker.ss"))]
                  [checker* (and (file-exists? checker*)
                                 (parameterize ([current-directory server-dir])
@@ -299,7 +272,7 @@
               (let ([v (read (make-limited-input-port r 50))])
                 (if (eq? v 'check)
                   (begin
-                    (LOG "saving ~a for ~a" assignment users)
+                    (log-line "saving ~a for ~a" assignment users)
                     (parameterize ([current-directory ATTEMPT-DIR])
                       (cond [part (unless (equal? part "handin")
                                     (rename-file-or-directory "handin" part))]
@@ -326,7 +299,7 @@
       (error 'handin "not an active assignment: ~a" assignment))
     (unless (directory-exists? submission-dir)
       (error 'handin "no ~a submission directory for ~a" assignment users))
-    (LOG "retrieving assignment for ~a: ~a" users assignment)
+    (log-line "retrieving assignment for ~a: ~a" users assignment)
     (parameterize ([current-directory (build-path "active" assignment dirname)])
       (define magics '(#"WXME" #"<<<MULTI-SUBMISSION-FILE>>>"))
       (define mlen (apply max (map bytes-length magics)))
@@ -420,7 +393,7 @@
      (lambda (str info) (check-field str (cadr info) (car info) (caddr info)))
      extra-fields EXTRA-FIELDS)
     (wait-for-lock "+newuser+")
-    (LOG "create user: ~a" username)
+    (log-line "create user: ~a" username)
     (put-user-data username (cons passwd extra-fields)))
 
   (define (change-user-info data)
@@ -443,8 +416,8 @@
       (for-each
        (lambda (str info) (check-field str (cadr info) (car info) (caddr info)))
        (cdr new-data) EXTRA-FIELDS)
-      (LOG "change info for ~a ~s -> ~s"
-           (car usernames) (car user-datas) new-data)
+      (log-line "change info for ~a ~s -> ~s"
+                (car usernames) (car user-datas) new-data)
       (put-user-data (car usernames) new-data)))
 
   (define (get-user-info data)
@@ -467,7 +440,7 @@
   (define (has-password? raw md5 passwords)
     (define (good? passwd)
       (define (bad-password msg)
-        (LOG "ERROR: ~a -- ~s" msg passwd)
+        (log-line "ERROR: ~a -- ~s" msg passwd)
         (error 'handin "bad password in user database"))
       (cond [(string? passwd) (equal? md5 passwd)]
             [(and (list? passwd) (= 2 (length passwd))
@@ -553,10 +526,10 @@
                            (a-ref data 'raw-password)
                            (a-ref data 'password)
                            (cons MASTER-PASSWD (map car user-datas)))))
-             (LOG "failed login: ~a" (a-ref data 'username/s))
+             (log-line "failed login: ~a" (a-ref data 'username/s))
              (error 'handin "bad username or password for ~a"
                     (a-ref data 'username/s)))
-           (LOG "login: ~a" usernames))
+           (log-line "login: ~a" usernames))
          (case msg
            [(change-user-info) (change-user-info data)]
            [(save-submission) (accept-specific-submission data r r-safe w)]
@@ -575,7 +548,7 @@
   (define current-timeout-control (make-parameter #f))
   (provide timeout-control)
   (define (timeout-control msg)
-    (LOG "timeout-control: ~s" msg)
+    (log-line "timeout-control: ~s" msg)
     ((current-timeout-control) msg))
 
   (define (with-watcher w proc)
@@ -596,7 +569,7 @@
         (with-handlers ([exn:fail:unsupported?
                          (lambda (x)
                            (set! no-limit-warning? #t)
-                           (LOG "WARNING: per-session memory limit not supported by MrEd"))])
+                           (log-line "WARNING: per-session memory limit not supported by MrEd"))])
           (custodian-limit-memory session-cust SESSION-MEMORY-LIMIT session-cust)))
       (let* ([watcher
               (parameterize ([current-custodian orig-custodian])
@@ -606,17 +579,19 @@
                      (let loop ([timed-out? #f])
                        (cond
                         [(sync/timeout 3 session-thread)
-                         (LOG "session killed ~awhile ~s"
-                              (if timed-out? "(timeout) " "")
-                              (unbox status-box))
-                         (write+flush
-                          w (format "handin terminated due to ~a (program doesn't terminate?)~a"
-                                    (if timed-out? "time limit" "excessive memory use")
-                                    (if (unbox status-box)
-                                      (format " while ~a" (unbox status-box))
-                                      "")))
-                         (close-output-port w)
-                         (channel-put session-channel 'done)]
+                         (let* ([status (unbox status-box)]
+                                [status (if status
+                                          (format " while ~a" status)
+                                          "")])
+                           (log-line "session killed ~a~a"
+                                     (if timed-out? "(timeout) " "(memory)")
+                                     status)
+                           (write+flush
+                            w (format "handin terminated due to ~a (program doesn't terminate?)~a"
+                                      (if timed-out? "time limit" "excessive memory use")
+                                      status))
+                           (close-output-port w)
+                           (channel-put session-channel 'done))]
                         [(let ([t timeout]) ; grab value to avoid races
                            (and t ((current-inexact-milliseconds) . > . t)))
                          ;; Shutdown here to get the handin-terminated error
@@ -626,12 +601,12 @@
                          (loop #t)]
                         [else
                          (collect-garbage)
-                         (LOG "running ~a ~a"
-                              (current-memory-use session-cust)
-                              (if no-limit-warning?
-                                "(total)"
-                                (list (current-memory-use orig-custodian)
-                                      (current-memory-use))))
+                         (log-line "running ~a ~a"
+                                   (current-memory-use session-cust)
+                                   (if no-limit-warning?
+                                     "(total)"
+                                     (list (current-memory-use orig-custodian)
+                                           (current-memory-use))))
                          (loop #f)]))))))])
         ;; Run proc in a thread under session-cust:
         (let ([session-thread
@@ -651,64 +626,62 @@
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-  (LOG "server started ------------------------------")
+  (log-line "server started ------------------------------")
 
-  (define stop-status (serve-status HTTPS-PORT-NUMBER get-config))
+  (define stop-status (serve-status HTTPS-PORT-NUMBER))
 
   (define session-count 0)
 
-  (parameterize ([error-display-handler
-		  (lambda (msg exn)
-		    (LOG msg))])
+  (parameterize ([error-display-handler (lambda (msg exn) (log-line msg))])
     (run-server
      PORT-NUMBER
      (lambda (r w)
        (set! connection-num (add1 connection-num))
        (when ((current-memory-use) . > . SESSION-MEMORY-LIMIT)
-	 (collect-garbage))
-       (parameterize ([current-session (begin
-					 (set! session-count (add1 session-count))
-					 session-count)])
-	 (let-values ([(here there) (ssl-addresses r)])
-	   (LOG "connect from ~a" there))
-	 (with-watcher
-	  w
-	  (lambda (kill-watcher)
-	    (let ([r-safe (make-limited-input-port r 2048)])
-	      (write+flush w 'handin)
-	      ;; Check protocol:
-	      (with-handlers ([exn:fail?
-			       (lambda (exn)
-				 (let ([msg (if (exn? exn)
-						(exn-message exn)
-						(format "~e" exn))])
-				   (kill-watcher)
-				   (LOG "ERROR: ~a" msg)
-				   (write+flush w msg)
-				   ;; see note on close-output-port below
-				   (close-output-port w)))])
+         (collect-garbage))
+       (parameterize ([current-session
+                       (begin (set! session-count (add1 session-count))
+                              session-count)])
+         (let-values ([(here there) (ssl-addresses r)])
+           (log-line "connect from ~a" there))
+         (with-watcher
+          w
+          (lambda (kill-watcher)
+            (let ([r-safe (make-limited-input-port r 2048)])
+              (write+flush w 'handin)
+              ;; Check protocol:
+              (with-handlers ([exn:fail?
+                               (lambda (exn)
+                                 (let ([msg (if (exn? exn)
+                                              (exn-message exn)
+                                              (format "~e" exn))])
+                                   (kill-watcher)
+                                   (log-line "ERROR: ~a" msg)
+                                   (write+flush w msg)
+                                   ;; see note on close-output-port below
+                                   (close-output-port w)))])
                 (let ([protocol (read r-safe)])
-		  (if (eq? protocol 'ver1)
-		      (write+flush w 'ver1)
-		      (error 'handin "unknown protocol: ~s" protocol)))
-		(handle-connection r r-safe w)
-		(LOG "normal exit")
-		(kill-watcher)
-		;; This close-output-port should not be necessary, and it's
-		;; here due to a deficiency in the SLL binding.
-		;; The problem is that a custodian shutdown of w is harsher
-		;; for SSL output than a normal close. A normal close
-		;; flushes an internal buffer that's not supposed to exist, while
-		;; the shutdown gives up immediately.
-		(close-output-port w)))))))
+                  (if (eq? protocol 'ver1)
+                      (write+flush w 'ver1)
+                      (error 'handin "unknown protocol: ~s" protocol)))
+                (handle-connection r r-safe w)
+                (log-line "normal exit")
+                (kill-watcher)
+                ;; This close-output-port should not be necessary, and it's
+                ;; here due to a deficiency in the SLL binding.  The problem is
+                ;; that a custodian shutdown of w is harsher for SSL output
+                ;; than a normal close. A normal close flushes an internal
+                ;; buffer that's not supposed to exist, while the shutdown
+                ;; gives up immediately.
+                (close-output-port w)))))))
      #f ; `with-watcher' handles our timeouts
      (lambda (exn)
        (printf "~a\n" (if (exn? exn) (exn-message exn) exn)))
      (lambda (port-k cnt reuse?)
        (let ([l (ssl-listen port-k cnt #t)])
-	 (ssl-load-certificate-chain! l "server-cert.pem")
-	 (ssl-load-private-key! l "private-key.pem")
-	 l))
+         (ssl-load-certificate-chain! l "server-cert.pem")
+         (ssl-load-private-key! l "private-key.pem")
+         l))
      ssl-close
      ssl-accept
      ssl-accept/enable-break)))

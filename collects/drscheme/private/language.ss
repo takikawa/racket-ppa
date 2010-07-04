@@ -131,7 +131,11 @@
 					   (read-syntax src port))])
                                   (if (eof-object? v)
 				      v
-				      (namespace-syntax-introduce v))))))
+				      (namespace-syntax-introduce v)))))
+                      (language-id (if (pair? language-position)
+                                       (car (last-pair language-position))
+                                       (error 'simple-module-based-language<%>
+                                              "expected non-empty list of strings, got ~e" language-position))))
           (define/public (get-module) module)
 	  (define/public (get-language-position) language-position)
           (define/public (get-language-numbers) language-numbers)
@@ -821,25 +825,29 @@
       
       ;; default-executable-filename : path symbol boolean -> path
       (define (default-executable-filename program-filename mode mred?)
-        (let* ([ext (filename-extension program-filename)]
-               [program-bytename (path->bytes program-filename)]
-               ;; ext-less : bytes
-               [ext-less (if ext
-                             (subbytes program-bytename
-                                       0
-                                       (- (bytes-length program-bytename)
-                                          (bytes-length ext)
-                                          1 ;; sub1 for the period in the extension
-                                          ))
-                             program-bytename)])
-          (let ([ext (let-values ([(extension style filters)
-                                   (mode->put-file-extension+style+filters mode mred?)])
-                       (and extension
-                            (string->bytes/utf-8 (string-append "." extension))))])
-            (bytes->path
-             (if ext
-                 (bytes-append ext-less ext)
-                 ext-less)))))
+        (let-values ([(base name dir) (split-path program-filename)])
+          (let* ([ext (filename-extension name)]
+                 [program-bytename (path-element->bytes name)]
+                 ;; ext-less : bytes
+                 [ext-less (if ext
+                               (subbytes program-bytename
+                                         0
+                                         (- (bytes-length program-bytename)
+                                            (bytes-length ext)
+                                            1 ;; sub1 for the period in the extension
+                                            ))
+                               program-bytename)])
+            (let ([ext (let-values ([(extension style filters)
+                                     (mode->put-file-extension+style+filters mode mred?)])
+                         (and extension
+                              (string->bytes/utf-8 (string-append "." extension))))])
+              (if ext
+                  (if (path? base)
+                      (build-path base (bytes->path-element (bytes-append ext-less ext)))
+                      (bytes->path-element (bytes-append ext-less ext)))
+                  (if (path? base)
+                      (build-path base name)
+                      name))))))
       
       (define (mode->put-file-extension+style+filters mode mred?)
         (case mode
@@ -1128,9 +1136,10 @@
       ;;
       
       (define to-snips null)
-      (define-struct to-snip (predicate? >value))
-      (define (add-snip-value predicate constructor)
-        (set! to-snips (cons (make-to-snip predicate constructor) to-snips)))
+      (define-struct to-snip (predicate? >value setup-thunk))
+      (define add-snip-value
+        (opt-lambda (predicate constructor [setup-thunk void])
+          (set! to-snips (cons (make-to-snip predicate constructor setup-thunk) to-snips))))
       
       (define (value->snip v)
         (ormap (λ (to-snip) (and ((to-snip-predicate? to-snip) v)
@@ -1138,6 +1147,8 @@
                to-snips))
       (define (to-snip-value? v)
         (ormap (λ (to-snip) ((to-snip-predicate? to-snip) v)) to-snips))
+      (define (setup-setup-values) 
+        (for-each (λ (t) ((to-snip-setup-thunk t))) to-snips))
       
       
       (define capabilities '())

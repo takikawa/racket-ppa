@@ -357,9 +357,9 @@ static void uncopy_stack(int ok, Scheme_Jumpup_Buf *b, long *prev)
 
     if (c->cont) {
 #ifdef STACK_GROWS_UP
-      top_delta = ((unsigned long)c->stack_from 
-		   - ((unsigned long)c->cont->buf.stack_from
-		      + c->cont->buf.stack_size));
+      top_delta = (((unsigned long)c->cont->buf.stack_from
+		    + c->cont->buf.stack_size)
+		   - (unsigned long)c->stack_from);
 #else
       bottom_delta = ((unsigned long)c->stack_from 
 		      + c->stack_size
@@ -594,13 +594,6 @@ void scheme_reset_jmpup_buf(Scheme_Jumpup_Buf *b)
   }
 
   memset(&b->buf, 0, sizeof(mz_jmp_buf));
-}
-
-void scheme_ensure_stack_start(Scheme_Thread *p, void *d)
-{
-  if (!p->stack_start 
-      || (STK_COMP((unsigned long)p->stack_start, (unsigned long)d)))
-    p->stack_start = d;
 }
 
 #ifdef USE_MZ_CYGWIN_SETJMP

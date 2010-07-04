@@ -448,6 +448,9 @@ static struct protoent *proto;
 # define mz_gai_strerror gai_strerror
 #else
 # define mzAI_PASSIVE 0
+# ifdef MZ_XFORM
+START_XFORM_SKIP;
+# endif
 static int mz_getaddrinfo(const char *nodename, const char *servname,
 			  const struct mz_addrinfo *hints, struct mz_addrinfo **res)
 {
@@ -501,6 +504,9 @@ const char *mz_gai_strerror(int ecode)
 {
   return hstrerror(ecode);
 }
+# ifdef MZ_XFORM
+END_XFORM_SKIP;
+# endif
 #endif
 
 #if defined(USE_WINSOCK_TCP) || defined(PTHREADS_OK_FOR_GHBN)
@@ -1473,7 +1479,7 @@ static long tcp_write_string(Scheme_Output_Port *port,
     if (data->b.out_bufmode < 2) {
       if (data->b.out_bufmax + len < TCP_BUFFER_SIZE) {
 	memcpy(data->b.out_buffer + data->b.out_bufmax, s + offset, len);
-	data->b.out_bufmax += len;
+	data->b.out_bufmax += (short)len;
 	if (data->b.out_bufmode == 1) {
 	  /* Check for newline */
 	  int i;
@@ -2436,8 +2442,6 @@ int scheme_get_port_socket(Scheme_Object *p, long *_s)
       }
     }
   } else if (SCHEME_INPORTP(p)) {
-    /* Abandon is not really useful on input ports from the Schemer's
-       perspective, but it's here for completeness. */
     Scheme_Input_Port *ip;
     ip = (Scheme_Input_Port *)p;
     if (ip->sub_type == scheme_tcp_input_port_type) {

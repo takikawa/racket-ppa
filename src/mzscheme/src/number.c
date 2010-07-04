@@ -612,11 +612,7 @@ double scheme_real_to_double(Scheme_Object *r)
     return 0.0;
 }
 
-static
-#ifndef NO_INLINE_KEYWORD
-MSC_IZE(inline)
-#endif
-int minus_zero_p(double d)
+static MZ_INLINE int minus_zero_p(double d)
 {
   return (1 / d) < 0;
 }
@@ -1911,6 +1907,11 @@ scheme_expt(int argc, Scheme_Object *argv[])
     /* Power of one: */
     if (SCHEME_NUMBERP(e))
       return n;
+  }
+  if (SCHEME_RATIONALP(e)
+      && (((Scheme_Rational *)e)->num == scheme_exact_one)
+      && (((Scheme_Rational *)e)->denom == scheme_make_integer(2))) {
+    return scheme_sqrt(1, argv);
   }
 
   if (n == zeroi) {

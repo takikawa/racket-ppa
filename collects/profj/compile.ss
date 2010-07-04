@@ -8,7 +8,7 @@
            compilation-unit-code compilation-unit-contains set-compilation-unit-code!
            read-record write-record
            set-syntax-location create-type-record
-           )
+           compile-to-ast)
   
   (define (set-syntax-location so) (syntax-location so))
   
@@ -64,7 +64,7 @@
                  (lambda (port) (compile-java-internal port name type-recs #f level)))))))
         (else
          (compile-java-internal port loc type-recs #f level)))))
-    
+
   ;compile-to-file: port location level -> void
   ;Should have side-effect of writing to file all files needed for compilation
   (define (compile-to-file port location level)
@@ -86,10 +86,11 @@
                     (unless (= (length names) (length syntaxes))
                       ;(printf "Writing a composite file out~n")
                       ;(printf "~a~n~n" (syntax-object->datum (car syntaxes)))
-                      (call-with-output-file* (build-path (send type-recs get-compilation-location)
-                                                          (file-name-from-path
-                                                           (send type-recs get-composite-location (car names))))
-                                              (lambda (port) (write (compile (car syntaxes)) port)) 'truncate/replace)
+                      (call-with-output-zo-file* location
+                                                 (build-path (send type-recs get-compilation-location)
+                                                             (file-name-from-path
+                                                              (send type-recs get-composite-location (car names))))
+                                                 (lambda (port) (write (compile (car syntaxes)) port)) 'truncate/replace)
                       (set! syntaxes (cdr syntaxes)))
                     (unless (= (length names) (length syntaxes) (length locations))
                       (error 'compile-to-file "Internal error: compilation unit not represented as expected"))
@@ -98,9 +99,10 @@
                                 (send type-recs set-location! location)
                                 (let ((directory (send type-recs get-compilation-location)))
                                   (unless (directory-exists? directory) (make-directory directory))
-                                  (call-with-output-file* (build-path directory (string-append name ".zo"))
-                                                          (lambda (port) (write (compile code) port))
-                                                          'truncate/replace)
+                                  (call-with-output-zo-file* location
+                                                             (build-path directory (string-append name ".zo"))
+                                                             (lambda (port) (write (compile code) port))
+                                                             'truncate/replace)
                                   (call-with-output-file* (build-path directory (string-append name ".jinfo"))
                                                           (lambda (port) (write-record (send type-recs get-class-record 
                                                                                              (list name)
@@ -110,6 +112,16 @@
                                                           'truncate/replace)))
                               names syntaxes locations)))
                 (compile-java-internal port location type-recs #t level))))
+
+  ;; call-with-output-zo-file* path-string path-string proc [symbol ...] -> 
+  ;;  Like call-with-output-file*, but takes an extra initial path to use
+  ;;  as a original location, so that marshaled paths in a generated .zo file
+  ;;  can be written as relative paths
+  (define (call-with-output-zo-file* loc name proc . flags)
+    (let ([dir (and (path-string? loc)
+                    (path-only (path->complete-path loc)))])
+      (parameterize ([current-write-relative-directory dir])
+        (apply call-with-output-file* name proc flags))))
   
   (define (class-record-error) (error 'compile-to-file "Internal error: class record not found"))
   
@@ -155,6 +167,19 @@
     (remove-from-packages ast type-recs)
     (order-cus (translate-program ast type-recs)
                type-recs))
+  
+  (define (compile-to-ast port location type-recs file? level)
+    (packages null)
+    (check-list null)
+    (to-file file?)
+    (let ((ast (parse port location level)))
+      (remember-main ast)
+      (load-lang type-recs)
+      (set-importer! type-recs find-implicit-import)
+      (build-info ast level type-recs #f)
+      (unless (null? (check-list))
+        (check-defs (car (check-list)) level type-recs))
+      (remove-from-packages ast type-recs)))             
   
   ;compile-java-internal: port location type-records bool level-> (list compilation-unit)
   (define (compile-java-internal port location type-recs file? level)

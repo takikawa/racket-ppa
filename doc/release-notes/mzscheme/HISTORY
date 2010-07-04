@@ -1,3 +1,42 @@
+Version 360, November 2006
+Continuations:
+ Added delimited continuations: call-with-continuation-prompt,
+  call-with-composable-continuation, etc.
+ Changed call-with-escape-continuation so that its argument is
+  no longer applied in tail position (reverses a change in v350)
+Regexps:
+ Added case-insensitive mode, multi-line mode, lookahead, lookbehind, 
+  non-backtracking, and conditionals to regexp language
+ Added pregexp, byte-pregexp, and #px..., which includes numeric
+  quantifiers, backreferences char classes, and Unicode predicates
+ Added regexp-match?, pregexp?, and byte-pregexp?
+ Improved [p]regexp performance
+Filesystem:
+ Unix and Mac OS X: Changed path operations to use "./~..." as an
+  encoding for a relative path "~..."
+ Changed simplify-path to always normalize path separators,
+  preserve syntactic directoryness, and remove \\?\ from
+  Windows paths when possible
+ Added path-element->bytes and bytes->path-element
+ Changed make-file-or-directory-link to not expand the link
+  content, and changed make-security-guard to have a separate
+  link guard procedure
+Misc:
+ Removed write-image-to-file and read-image-from-file
+ ormap and andmap now tail-apply a given function for the 
+  last list element(s)
+ eval evaluates its argument in tail position
+ Improved compilation of call-with-values and an immediate
+  lambda argument to avoid closure creation
+ Added raise-arity-error
+ Changed bytecode compiler to perform more closure conversion
+  and lifting
+ Changed local-expand; #f stop list means expand only immediate
+MzLib:
+ class.ss: added inherit/inner and inherit/super, to eventually
+  replace rename-super and rename-inner;
+  added member-name-key=?
+
 Version 352, July 2006
 Minor bug fixes
 

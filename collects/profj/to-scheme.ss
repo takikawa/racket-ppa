@@ -153,6 +153,10 @@
                           (else (error 'mangle-method-name (format "Internal Error: given unexptected type ~a" t))))))))
       (format "~a~a" id (apply string-append (map parm-name types)))))
   
+  ;mangle-private-method: string (list type) -> string
+  (define (mangle-private-method name args)
+    (string-append "private-" (mangle-method-name name args)))
+  
   ;constructor? string -> bool
   (define (constructor? name) 
     (equal? name (class-name)))
@@ -337,13 +341,14 @@
         (member (id-string (name-id extend))
                 (map id-string (map def-name ordered-defs)))))
   
-  ;make-composite-name: def -> string
+  ;make-composite-name: string -> string
   (define (make-composite-name d)
-    (build-identifier (string-append (id-string (header-id (def-header d))) "-composite")))
+    (build-identifier (string-append d "-composite")))
   
   ;translate-defs: (list def) type-records -> (values (list syntax) (list reqs))
   (define (translate-defs defs type-recs)
-    (module-name (make-composite-name (car defs)))
+    (let ((sorted-d-list (sort (map (compose id-string def-name) defs) string<?)))                                   
+      (module-name (make-composite-name (car sorted-d-list))))
     (module-require (if (to-file) 
                         (let ((location (build-path (begin (send type-recs set-location! (def-file (car defs)))
                                                            (send type-recs get-compilation-location) "compiled")
@@ -1460,17 +1465,22 @@
             (cons 
              (build-identifier ((if (constructor? (id-string (method-name (car methods))))
                                     build-constructor-name
-                                    mangle-method-name)
+                                    mangle-private-method)
                                 (id-string (method-name (car methods)))
                                 (method-record-atypes (method-rec (car methods)))))
              (make-method-names (cdr methods) minus-methods)))))
+  
   
   ;translate-method: type-spec (list symbol) id (list parm) statement bool 
   ;                  src bool int method-record type-records -> syntax
   (define (translate-method type modifiers id parms block all-tail? src inner? depth rec type-recs)
     (let* ((final (final? modifiers))
-           (ctor? (eq? 'ctor (method-record-rtype rec)));(constructor? (id-string id)))
-           (method-string ((if ctor? build-constructor-name mangle-method-name)
+           (ctor? (eq? 'ctor (method-record-rtype rec)))
+           (priv? (private? modifiers))
+           (method-string ((cond
+                             [ctor? build-constructor-name]
+                             [priv? mangle-private-method]
+                             [else mangle-method-name])
                            (id-string id)
                            (method-record-atypes rec)))
            (method-name (translate-id method-string (id-src id)))
@@ -1491,8 +1501,11 @@
   ;make-static-method-names: (list method) type-recs -> (list string)
   (define (make-static-method-names methods type-recs)
     (map (lambda (m)
-           (build-static-name (mangle-method-name (id-string (method-name m))
-                                                  (method-record-atypes (method-rec m)))))
+           (build-static-name 
+            ((if (memq 'private (method-record-modifiers (method-rec m)))
+                 mangle-private-method mangle-method-name)
+             (id-string (method-name m))
+             (method-record-atypes (method-rec m)))))
          methods))
   
   ;create-static-methods: (list string) (list method) type-records -> (list syntax)
@@ -1525,9 +1538,9 @@
           (void? (eq? (type-spec-name rtype) 'void))
           (native? (memq 'native modifiers))
           (static? (memq 'static modifiers))
-          (native-method-name (build-identifier 
-                               (string-append method-name #;(substring method-name 0 (- (string-length method-name) 2))
-                                              "-native"))))
+          (native-method-name 
+           (build-identifier 
+            (string-append (regexp-replace "private-" method-name "") "-native"))))
             
       (static-method static?)
       (make-syntax #f
@@ -2548,8 +2561,11 @@
          (let* ((static? (and (not (method-contract? method-record))
                               (memq 'static (method-record-modifiers method-record))))
                 (temp (unless (method-contract? method-record)
-                        (mangle-method-name (method-record-name method-record)
-                                            (method-record-atypes method-record))))
+                        (if (memq 'private (method-record-modifiers method-record))
+                            (mangle-private-method (method-record-name method-record)
+                                                   (method-record-atypes method-record))
+                            (mangle-method-name (method-record-name method-record)
+                                                (method-record-atypes method-record)))))
                 (m-name (cond
                           ((method-contract? method-record)
                            (if (method-contract-prefix method-record)

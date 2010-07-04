@@ -1,9 +1,72 @@
 (module full-tests mzscheme
-  (require (lib "profj-testing.ss" "profj")
+  (require "profj-testing.ss"
            (lib "parameters.ss" "profj"))
   
   (prepare-for-tests "Full")
 
+  (execute-test
+   "class AnExceptionThrower {
+      int m() throws Throwable {
+        if (true)
+          throw new Throwable();
+        throw new Exception();
+      }
+    }" 'full #f "Throwable is a subclass of Throwable for purpose of throws clause")
+  
+  (execute-test
+   "class AnotherExceptionThrower {
+     int m() throws Exception {
+        throw new Exception();
+    }}" 'full #f "Throwable is imported when using throw")
+  
+  (interact-test
+   "class YAET {
+      int m() throws Exception {
+        throw new Exception();
+      }
+    }"
+   'full '("check new YAET().m() catch Exception" "check new YAET().m() catch Throwable")
+   '(#t #t) "Check properly catching exceptions")
+  
+  (execute-test
+   "import java.util.*;
+    class Random { }"
+   'full #f "Hiding an import * name with a local class"
+   )
+  
+  (interact-test
+   "import java.util.*;
+    class Random {
+      int getInt() { return 3; }
+   }"
+   'full '("new Random().getInt()") '(3)
+   "Using the local Random and not the imported one")
+  
+  (interact-test
+   "class allPublic {
+      public int x() { return 3; }
+    }
+    class onePrivate {
+      private int x() { return new allPublic().x(); }
+      public int y() { return x(); }
+    }
+    "
+   'full
+   '("new onePrivate().y()") '(3) "Private method calling public method of same name")
+  
+  (execute-test
+   "class withPrivate {
+      withPublic f;
+
+      private int with() { return this.f.with(); }
+    }
+
+    class withPublic {
+      withPrivate r = new withPrivate();
+
+      public int with() { return 3; }
+    }" 'full #f "Potential conflict of names for private method")
+  
   (execute-test 
    "class hasCharArray {  
      char[] b = new char[]{'a'};
@@ -67,7 +130,7 @@
     (interact-test
      "interface I { int m( int x); }
       class C implements I {
-        int m(int x) { return x; }
+        public int m(int x) { return x; }
         boolean n(boolean y) { return !y; }
         dynamic q(I x) { return x; }
       }" 'full
@@ -221,12 +284,12 @@
   (execute-test 
    "interface Bt { int largestNum(); }
 
-    class Leaf implements Bt { int largestNum() {  return 1 ;} }
+    class Leaf implements Bt { public int largestNum() {  return 1 ;} }
 
     class Heap implements Bt {
      Bt left;	
      Bt right; 	
-     int largestNum(){
+     public int largestNum(){
      if(this.left instanceof Heap &&
         this.right instanceof Heap)
        return this.right.largestNum();
@@ -247,7 +310,7 @@
 
                  class Aia implements Gaa {
                    Aia() { }
-                   int foo(int x) { return 3; }
+                   public int foo(int x) { return 3; }
                  }" 'full #f "Extending an interface while overriding a method")
   
   (execute-test 

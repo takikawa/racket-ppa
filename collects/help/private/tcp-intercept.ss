@@ -6,7 +6,6 @@
            (lib "sig.ss" "web-server")
            (lib "tcp-sig.ss" "net")
            (lib "url-sig.ss" "net")
-           (lib "url-structs.ss" "net")
            "internal-hp.ss")
   
   (define-syntax (redefine stx)
@@ -45,6 +44,7 @@
   
   (define raw:tcp-abandon-port tcp-abandon-port)
   (define raw:tcp-accept tcp-accept) 
+  (define raw:tcp-accept/enable-break tcp-accept/enable-break) 
   (define raw:tcp-accept-ready? tcp-accept-ready?)
   (define raw:tcp-addresses tcp-addresses)
   (define raw:tcp-close tcp-close)
@@ -75,6 +75,8 @@
       
       ; : listener -> iport oport
       (define tcp-accept raw:tcp-accept)
+      ; : listener -> iport oport
+      (define tcp-accept/enable-break raw:tcp-accept/enable-break)
       
       ; : tcp-listener -> iport oport
       (define tcp-accept-ready? raw:tcp-accept-ready?)

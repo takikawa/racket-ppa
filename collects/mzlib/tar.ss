@@ -1,5 +1,5 @@
 (module tar mzscheme
-  (require (lib "deflate.ss") (lib "file.ss"))
+  (require (lib "deflate.ss") (lib "file.ss") (lib "kw.ss"))
 
   (define tar-block-size 512)
   (define tar-name-length 100)
@@ -119,9 +119,8 @@
   ;; tar-write : (listof relative-path) ->
   ;; writes a tar file to current-output-port
   (provide tar->output)
-  (define (tar->output files . out)
-    (parameterize ([current-output-port
-                    (if (pair? out) (car out) (current-output-port))])
+  (define/kw (tar->output files #:optional [out (current-output-port)])
+    (parameterize ([current-output-port out])
       (let* ([buf (new-block)] [entry (tar-one-entry buf)])
         (for-each entry files)
         ;; two null blocks end-marker

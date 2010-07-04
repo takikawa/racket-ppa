@@ -476,6 +476,8 @@
 			     (set! did-one? #t)
 			     (printf "  making ~s~n" (path->string p)))])
 	   (map (lambda (file)
+		  (unless (file-exists? file)
+		    (error 'mzc "file does not exist: ~a" file))
 		  (set! did-one? #f)
 		  (let ([name (extract-base-filename/ss file 'mzc)])
 		    (printf "\"~a\":~n" file)
@@ -561,6 +563,9 @@
 			flags))
 	#:collects-path (exe-embedded-collects-path)
 	#:collects-dest (exe-embedded-collects-dest)
+        #:on-extension (lambda (file _loader?)
+                         (fprintf (current-error-port) 
+                                  " Skipping extension: ~a\n" file))
 	#:aux (exe-aux))
        (printf " [output to \"~a\"]~n" dest))]
     [(exe-dir)

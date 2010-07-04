@@ -1281,7 +1281,7 @@ static Scheme_Object *MrEdDoNextEvent(MrEdContext *c, wxDispatch_Check_Fun alt, 
 
     if (alt_wait) {
       Nested_Wait *nw;
-      Scheme_Object *a[2], *v;
+      Scheme_Object *a[2], *v = NULL;
 
       nw = (Nested_Wait *)scheme_malloc_tagged(sizeof(Nested_Wait));
       nw->so.type = mred_nested_wait_type;
@@ -2106,6 +2106,20 @@ void MrEdQueueZoom(wxWindow *wx_window)
   MrEdQueueWindowCallback(wx_window, CAST_SCP call_zoom, wx_window);
 }
 
+static Scheme_Object *call_toolbar(void *d, int, Scheme_Object **argv)
+{
+  wxFrame *w = (wxFrame *)d;
+
+  w->OnToolbarButton();
+
+  return scheme_void;
+}
+
+void MrEdQueueToolbar(wxWindow *wx_window)
+{
+  MrEdQueueWindowCallback(wx_window, CAST_SCP call_toolbar, wx_window);
+}
+
 static Scheme_Object *call_on_size(void *d, int, Scheme_Object **argv)
 {
   wxWindow *w = (wxWindow *)d;
@@ -2511,8 +2525,8 @@ static void MrEdSchemeMessages(char *msg, ...)
     ulen = scheme_utf8_decode_as_prefix((unsigned char *)s, d, l,
 					NULL, 0, -1,
 					&ipos, 0, '?');
-    utf8_leftover_count = (l - ipos);
-    memcpy(utf8_leftover, s + d + ipos, utf8_leftover_count);
+    utf8_leftover_count = (l - (ipos - d));
+    memcpy(utf8_leftover, s + ipos, utf8_leftover_count);
     
     us = (wxchar *)scheme_malloc_atomic(sizeof(wxchar) * ulen);
     scheme_utf8_decode_as_prefix((unsigned char *)s, d, l,
@@ -3202,6 +3216,17 @@ wxFrame *MrEdApp::OnInit(void)
   MrEdContext *mmc;
 
   initialized = 0;
+
+#ifdef wx_mac
+  {
+    TSMDocumentID doc;
+    OSType itfs[1];
+    itfs[0] = kUnicodeDocumentInterfaceType;
+    NewTSMDocument(1, itfs, &doc, 0);
+    UseInputWindow(NULL, TRUE);
+    ActivateTSMDocument(doc);
+  }
+#endif
 
   wxREGGLOB(mred_frames);
   wxREGGLOB(mred_timers);

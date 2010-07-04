@@ -73,7 +73,7 @@
 # undef USE_ITIMER
 #endif
 
-#if defined(USE_ITIMER) || defined(USE_WIN32_THREAD_TIMER)
+#if defined(USE_ITIMER) || defined(USE_WIN32_THREAD_TIMER) || defined(USE_PTHREAD_THREAD_TIMER)
 # define FUEL_AUTODECEREMENTS
 #endif
 
@@ -747,7 +747,7 @@ typedef struct Scheme_Hash_Table
   Scheme_Inclhash_Object iso;
   int size; /* power of 2 */
   int count;
-    Scheme_Object **keys;
+  Scheme_Object **keys;
   Scheme_Object **vals;
   void (*make_hash_indices)(void *v, long *h1, long *h2);
   int (*compare)(void *v1, void *v2);
@@ -836,13 +836,10 @@ typedef struct Scheme_Jumpup_Buf_Holder {
 } Scheme_Jumpup_Buf_Holder;
 
 typedef struct Scheme_Continuation_Jump_State {
-  struct Scheme_Escaping_Cont *jumping_to_continuation;
-  union {
-    Scheme_Object **vals;
-    Scheme_Object *val;
-  } u;
+  struct Scheme_Object *jumping_to_continuation;
+  Scheme_Object *val; /* or **vals */
   mzshort num_vals;
-  short is_kill;
+  short is_kill, is_escape;
 } Scheme_Continuation_Jump_State;
 
 /* A mark position is in odd number, so that it can be
@@ -894,7 +891,6 @@ typedef struct Scheme_Thread {
 
   mz_jmp_buf *error_buf;
   Scheme_Continuation_Jump_State cjs;
-  Scheme_Object *current_escape_cont_key;
 
   Scheme_Thread_Cell_Table *cell_values;
   Scheme_Config *init_config;
@@ -908,9 +904,8 @@ typedef struct Scheme_Thread {
   struct Scheme_Saved_Stack *runstack_saved;
   Scheme_Object **runstack_tmp_keep;
 
-  /* in case of bouncing, we keep a recently
-     released runstack; it's dropped on GC, though */
-  Scheme_Object **spare_runstack;
+  Scheme_Object **spare_runstack;   /* in case of bouncing, we keep a recently
+                                       released runstack; it's dropped on GC, though */
   long spare_runstack_size;
 
   struct Scheme_Thread **runstack_owner;
@@ -920,17 +915,32 @@ typedef struct Scheme_Thread {
   MZ_MARK_STACK_TYPE cont_mark_stack; /* current mark stack position */
   struct Scheme_Cont_Mark **cont_mark_stack_segments;
   int cont_mark_seg_count;
+  int cont_mark_stack_bottom; /* for restored delimited continuations */
+  int cont_mark_pos_bottom;   /* for splicing cont marks in meta continuations */
 
   struct Scheme_Thread **cont_mark_stack_owner;
   struct Scheme_Cont_Mark *cont_mark_stack_swapped;
 
+  struct Scheme_Prompt *barrier_prompt; /* a pseudo-prompt */
+  struct Scheme_Prompt *meta_prompt; /* a pseudo-prompt */
+  
+  struct Scheme_Meta_Continuation *meta_continuation;
+
   long engine_weight;
 
-  void *stack_start, *stack_end;
-  Scheme_Jumpup_Buf jmpup_buf;
+  void *stack_start; /* This is the C stack base of the thread, which 
+                        corresponds to the starting stack address for
+                        paging out the thread, and in 3m corresponds to
+                        the starting stack address for GC marking. In non-3m,
+                        it can be 0, which means that the deepest (non-main)
+                        thread starting address should be used. This value will
+                        change when a continuation is applied under a prompt, 
+                        and it will be changed on stack overflow. */
+  void *stack_end; /* The end of the C stack, for determine stack overflow.
+                      Currently, this is the same for all threads. */
 
-  long *cc_ok;
-  long cc_ok_save;
+  Scheme_Jumpup_Buf jmpup_buf; /* For jumping back to this thread */
+
   struct Scheme_Dynamic_Wind *dw;
 
   int running;
@@ -949,10 +959,7 @@ typedef struct Scheme_Thread {
   char ran_some;
   char suspend_to_kill;
 
-  short overflow_set;
   struct Scheme_Overflow *overflow;
-  mz_jmp_buf *overflow_buf;
-  void *o_start;
 
   struct Scheme_Comp_Env *current_local_env;
   Scheme_Object *current_local_mark;
@@ -984,7 +991,7 @@ typedef struct Scheme_Thread {
     struct {
       Scheme_Object *tail_rator;
       Scheme_Object **tail_rands;
-      int tail_num_rands;
+      long tail_num_rands;
     } apply;
     struct {
       Scheme_Object **array;
@@ -1041,6 +1048,7 @@ typedef void (*Scheme_Kill_Action_Func)(void *);
       savebuf = scheme_current_thread->error_buf; \
       scheme_current_thread->error_buf = &newbuf; \
       if (scheme_setjmp(newbuf)) { \
+        scheme_pop_kill_action(); \
         func(data); \
         scheme_longjmp(*savebuf, 1); \
       } else {
@@ -1145,6 +1153,8 @@ enum {
 
   MZCONFIG_THREAD_SET,
   MZCONFIG_THREAD_INIT_STACK_SIZE,
+
+  MZCONFIG_EXPAND_OBSERVE,
 
   __MZCONFIG_BUILTIN_COUNT__
 };
@@ -1597,6 +1607,7 @@ MZ_EXTERN void scheme_set_original_dir(Scheme_Object *d);
 
 /* Initialization */
 MZ_EXTERN Scheme_Env *scheme_basic_env(void);
+MZ_EXTERN void scheme_reset_overflow(void);
 
 #ifdef USE_MSVC_MD_LIBRARY
 MZ_EXTERN void GC_pre_init(void);
@@ -1612,9 +1623,8 @@ MZ_EXTERN int (*scheme_actual_main)(int argc, char **argv);
 MZ_EXTERN void scheme_set_actual_main(int (*m)(int argc, char **argv));
 
 /* GC registration: */
-#ifdef GC_MIGHT_USE_REGISTERED_STATICS
 MZ_EXTERN void scheme_set_stack_base(void *base, int no_auto_statics);
-#endif
+MZ_EXTERN void scheme_set_stack_bounds(void *base, void *deepest, int no_auto_statics);
 
 MZ_EXTERN void scheme_register_static(void *ptr, long size);
 #if defined(MUST_REGISTER_GLOBALS) || defined(GC_MIGHT_USE_REGISTERED_STATICS)

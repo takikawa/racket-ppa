@@ -27,8 +27,7 @@
            drscheme:font^
            drscheme:modes^
            drscheme:tool-exports^
-           drscheme:tool^
-	   drscheme^)
+           drscheme:tool^)
 
   (define-signature drscheme:modes^
     (add-mode
@@ -149,7 +148,9 @@
      mixin
      basics-mixin
      basics<%>
-     create-root-menubar))
+     create-root-menubar
+     add-keybindings-item
+     planet-spec?))
   
   (define-signature drscheme:program^
     (frame%))
@@ -229,6 +230,7 @@
      simple-module-based-language-config-panel
      
      add-snip-value
+     setup-setup-values
 
      register-capability
      capability-registered?
@@ -277,8 +279,4 @@
      (unit drscheme:help-desk : drscheme:help-desk^)
      (unit drscheme:eval : drscheme:eval^)
      (unit drscheme:teachpack : drscheme:teachpack^)
-     (unit drscheme:modes : drscheme:modes^)))
-
-  (define-signature drscheme^
-    ((unit drscheme:teachpack : drscheme:teachpack^)
-     (unit drscheme:language-configuration : drscheme:language-configuration/internal^))))
+     (unit drscheme:modes : drscheme:modes^))))

@@ -53,10 +53,6 @@ static Scheme_Object *member (int argc, Scheme_Object *argv[]);
 static Scheme_Object *assv (int argc, Scheme_Object *argv[]);
 static Scheme_Object *assq (int argc, Scheme_Object *argv[]);
 static Scheme_Object *assoc (int argc, Scheme_Object *argv[]);
-static Scheme_Object *caar_prim (int argc, Scheme_Object *argv[]);
-static Scheme_Object *cadr_prim (int argc, Scheme_Object *argv[]);
-static Scheme_Object *cdar_prim (int argc, Scheme_Object *argv[]);
-static Scheme_Object *cddr_prim (int argc, Scheme_Object *argv[]);
 static Scheme_Object *caaar_prim (int argc, Scheme_Object *argv[]);
 static Scheme_Object *caadr_prim (int argc, Scheme_Object *argv[]);
 static Scheme_Object *cadar_prim (int argc, Scheme_Object *argv[]);
@@ -130,11 +126,9 @@ scheme_init_list (Scheme_Env *env)
   SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
   scheme_add_global_constant ("pair?", p, env);
 
-  scheme_add_global_constant ("cons",
-			      scheme_make_prim_w_arity(cons_prim,
-						       "cons",
-						       2, 2),
-			      env);
+  p = scheme_make_prim_w_arity(cons_prim, "cons", 2, 2);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_BINARY_INLINED;
+  scheme_add_global_constant ("cons", p, env);
 
   p = scheme_make_noncm_prim(scheme_checked_car, "car", 1, 1);
   SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
@@ -259,26 +253,23 @@ scheme_init_list (Scheme_Env *env)
 						     "assoc",
 						     2, 2),
 			      env);
-  scheme_add_global_constant ("caar",
-			      scheme_make_noncm_prim(caar_prim,
-						     "caar",
-						     1, 1),
-			      env);
-  scheme_add_global_constant ("cadr",
-			      scheme_make_noncm_prim(cadr_prim,
-						     "cadr",
-						     1, 1),
-			      env);
-  scheme_add_global_constant ("cdar",
-			      scheme_make_noncm_prim(cdar_prim,
-						     "cdar",
-						     1, 1),
-			      env);
-  scheme_add_global_constant ("cddr",
-			      scheme_make_noncm_prim(cddr_prim,
-						     "cddr",
-						     1, 1),
-			      env);
+
+  p = scheme_make_noncm_prim(scheme_checked_caar, "caar", 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant ("caar", p, env);
+
+  p = scheme_make_noncm_prim(scheme_checked_cadr, "cadr", 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant ("cadr", p, env);
+
+  p = scheme_make_noncm_prim(scheme_checked_cdar, "cdar", 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant ("cdar", p, env);
+
+  p = scheme_make_noncm_prim(scheme_checked_cddr, "cddr", 1, 1);
+  SCHEME_PRIM_PROC_FLAGS(p) |= SCHEME_PRIM_IS_UNARY_INLINED;
+  scheme_add_global_constant ("cddr", p, env);
+
   scheme_add_global_constant ("caaar",
 			      scheme_make_noncm_prim(caaar_prim,
 						     "caaar",
@@ -530,7 +521,9 @@ scheme_init_list (Scheme_Env *env)
 
 Scheme_Object *scheme_make_pair(Scheme_Object *car, Scheme_Object *cdr)
 {
+#ifndef MZ_PRECISE_GC
   Scheme_Object *cons;
+#endif
 
 #if 0
   if (!car || !cdr
@@ -541,11 +534,15 @@ Scheme_Object *scheme_make_pair(Scheme_Object *car, Scheme_Object *cdr)
     *(long *)0x0 = 1;
 #endif
 
+#ifdef MZ_PRECISE_GC
+  return GC_malloc_pair(car, cdr);
+#else
   cons = scheme_alloc_object();
   cons->type = scheme_pair_type;
   SCHEME_CAR(cons) = car;
   SCHEME_CDR(cons) = cdr;
   return cons;
+#endif
 }
 
 Scheme_Object *scheme_make_raw_pair(Scheme_Object *car, Scheme_Object *cdr)
@@ -823,53 +820,43 @@ list_p_prim (int argc, Scheme_Object *argv[])
   return scheme_false;
 }
 
-static Scheme_Object *
-list_exec (int argc, Scheme_Object *argv[], int star, int immut)
-{
-  int i;
-  Scheme_Object *l;
+#define NORMAL_LIST_INIT() l = scheme_null
+#define STAR_LIST_INIT() --argc; l = argv[argc]
+#ifndef MZ_PRECISE_GC
+# define GC_malloc_pair scheme_make_pair
+#endif
 
-  if (star) {
-    --argc;
-    l = argv[argc];
-  } else
-    l = scheme_null;
-
-  if (immut) {
-    for (i = argc ; i--; ) {
-      l = scheme_make_immutable_pair(argv[i], l);
-    }
-  } else {
-    for (i = argc ; i--; ) {
-      l = scheme_make_pair(argv[i], l);
-    }
-  }
-
-  return l;
-}
+#define LIST_BODY(INIT, scheme_make_pair)        \
+  int i;                                         \
+  Scheme_Object *l;                              \
+  INIT;                                          \
+  for (i = argc ; i--; ) {                       \
+    l = scheme_make_pair(argv[i], l);            \
+  }                                              \
+  return l
 
 static Scheme_Object *
 list_prim (int argc, Scheme_Object *argv[])
 {
-  return list_exec(argc, argv, 0, 0);
+  LIST_BODY(NORMAL_LIST_INIT(), GC_malloc_pair);
 }
 
 static Scheme_Object *
 list_immutable_prim (int argc, Scheme_Object *argv[])
 {
-  return list_exec(argc, argv, 0, 1);
+  LIST_BODY(NORMAL_LIST_INIT(), scheme_make_immutable_pair);
 }
 
 static Scheme_Object *
 list_star_prim (int argc, Scheme_Object *argv[])
 {
-  return list_exec(argc, argv, 1, 0);
+  LIST_BODY(STAR_LIST_INIT(), GC_malloc_pair);
 }
 
 static Scheme_Object *
 list_star_immutable_prim (int argc, Scheme_Object *argv[])
 {
-  return list_exec(argc, argv, 1, 1);
+  LIST_BODY(STAR_LIST_INIT(), scheme_make_immutable_pair);
 }
 
 static Scheme_Object *
@@ -883,7 +870,8 @@ immutablep (int argc, Scheme_Object *argv[])
 	       || SCHEME_VECTORP(v)
 	       || SCHEME_BYTE_STRINGP(v)
 	       || SCHEME_CHAR_STRINGP(v)
-	       || SCHEME_BOXP(v)))
+	       || SCHEME_BOXP(v)
+	       || SCHEME_HASHTP(v)))
 	  ? scheme_true
 	  : scheme_false);
 }
@@ -1176,7 +1164,7 @@ name (int argc, Scheme_Object *argv[]) \
 }
 
 GEN_MEM(memv, memv, scheme_eqv)
-GEN_MEM(memq, memq, scheme_eq)
+GEN_MEM(memq, memq, SAME_OBJ)
 GEN_MEM(member, member, scheme_equal)
 
 #define GEN_ASS(name, scheme_name, comp) \
@@ -1225,12 +1213,12 @@ name (int argc, Scheme_Object *argv[]) \
 }
 
 GEN_ASS(assv, assv, scheme_eqv)
-GEN_ASS(assq, assq, scheme_eq)
+GEN_ASS(assq, assq, SAME_OBJ)
 GEN_ASS(assoc, assoc, scheme_equal)
 
 #define LISTFUNC2(name, C, D) \
-static Scheme_Object * \
-name ## _prim (int argc, Scheme_Object *argv[]) \
+Scheme_Object * \
+scheme_checked_ ## name (int argc, Scheme_Object *argv[]) \
 { \
   if (!(SCHEME_PAIRP(argv[0]) \
 	&& SCHEME_PAIRP(D(argv[0])))) \
@@ -1550,19 +1538,22 @@ int scheme_is_hash_table_equal(Scheme_Object *o)
 
 static Scheme_Object *hash_table_put(int argc, Scheme_Object *argv[])
 {
-  if (!(SCHEME_HASHTP(argv[0]) && SCHEME_MUTABLEP(argv[0])) && !SCHEME_BUCKTP(argv[0]))
-    scheme_wrong_type("hash-table-put!", "mutable hash-table", 0, argc, argv);
+  Scheme_Object *v = argv[0];
 
-  if (SCHEME_BUCKTP(argv[0])) {
-    Scheme_Bucket_Table *t = (Scheme_Bucket_Table *)argv[0];
+  if (SCHEME_BUCKTP(v)) {
+    Scheme_Bucket_Table *t = (Scheme_Bucket_Table *)v;
     if (t->mutex) scheme_wait_sema(t->mutex,0);
     scheme_add_to_table(t, (char *)argv[1], (void *)argv[2], 0);
     if (t->mutex) scheme_post_sema(t->mutex);
-  } else{
-    Scheme_Hash_Table *t = (Scheme_Hash_Table *)argv[0];
-    if (t->mutex) scheme_wait_sema(t->mutex, 0);
+  } else if (!SCHEME_HASHTP(v) || !SCHEME_MUTABLEP(v)) {
+    scheme_wrong_type("hash-table-put!", "mutable hash-table", 0, argc, argv);
+  } else if (((Scheme_Hash_Table *)v)->mutex) {
+    Scheme_Hash_Table *t = (Scheme_Hash_Table *)v;
+    scheme_wait_sema(t->mutex, 0);
     scheme_hash_set(t, argv[1], argv[2]);
-    if (t->mutex) scheme_post_sema(t->mutex);
+    scheme_post_sema(t->mutex);
+  } else {
+    scheme_hash_set((Scheme_Hash_Table *)v, argv[1], argv[2]);
   }
 
   return scheme_void;
@@ -1572,19 +1563,23 @@ static Scheme_Object *hash_table_get(int argc, Scheme_Object *argv[])
 {
   Scheme_Object *v;
 
-  if (!(SCHEME_HASHTP(argv[0]) || SCHEME_BUCKTP(argv[0])))
-    scheme_wrong_type("hash-table-get", "hash-table", 0, argc, argv);
+  v = argv[0];
 
-  if (SCHEME_BUCKTP(argv[0])){
-    Scheme_Bucket_Table *t = (Scheme_Bucket_Table *)argv[0];
+  if (SCHEME_BUCKTP(v)) {
+    Scheme_Bucket_Table *t = (Scheme_Bucket_Table *)v;
     if (t->mutex) scheme_wait_sema(t->mutex, 0);
     v = (Scheme_Object *)scheme_lookup_in_table(t, (char *)argv[1]);
     if (t->mutex) scheme_post_sema(t->mutex);
-  } else {
-    Scheme_Hash_Table *t = (Scheme_Hash_Table *)argv[0];
-    if (t->mutex) scheme_wait_sema(t->mutex, 0);
+  } else if (!SCHEME_HASHTP(v)) {
+    scheme_wrong_type("hash-table-get", "hash-table", 0, argc, argv);
+    return NULL;
+  } else if (((Scheme_Hash_Table *)v)->mutex) {
+    Scheme_Hash_Table *t = (Scheme_Hash_Table *)v;
+    scheme_wait_sema(t->mutex, 0);
     v = scheme_hash_get(t, argv[1]);
-    if (t->mutex) scheme_post_sema(t->mutex);
+    scheme_post_sema(t->mutex);
+  } else {
+    v = scheme_hash_get((Scheme_Hash_Table *)v, argv[1]);
   }
 
   if (v)
@@ -1803,10 +1798,12 @@ static Scheme_Ephemeron *ephemerons, *done_ephemerons; /* not registered as a ro
 extern void *GC_base(void *d);
 # define GC_is_marked(p) GC_base(p)
 # define GC_did_mark_stack_overflow() 0
+# define GC_mark_overflow_recover(ptr) /**/
 #else
 extern MZ_DLLIMPORT void *GC_base(void *);
 extern MZ_DLLIMPORT int GC_is_marked(void *);
 extern MZ_DLLIMPORT int GC_did_mark_stack_overflow(void);
+extern MZ_DLLIMPORT void GC_mark_overflow_recover(void *p);
 #endif
 extern MZ_DLLIMPORT void GC_push_all_stack(void *, void *);
 extern MZ_DLLIMPORT void GC_flush_mark_stack(void);
@@ -1848,21 +1845,16 @@ Scheme_Object *scheme_ephemeron_value(Scheme_Object *o)
 
 #ifndef MZ_PRECISE_GC
 
-static void set_ephemerons(Scheme_Ephemeron *ae, Scheme_Ephemeron *be, Scheme_Ephemeron *ce, Scheme_Ephemeron *de)
+static void set_ephemerons(Scheme_Ephemeron *ae, Scheme_Ephemeron *be)
 {
   if (be) {
     Scheme_Ephemeron *e;
     for (e = be; e->next; e = e->next) { }
-    be->next = ae;
+    e->next = ae;
     ae = be;
   }
 
-  if (ce)
-    set_ephemerons(ae, ce, de, NULL);
-  else if (de)
-    set_ephemerons(ae, de, NULL, NULL);
-  else
-    ephemerons = ae;
+  ephemerons = ae;
 }
 
 static int mark_ephemerons()
@@ -1897,15 +1889,11 @@ static int mark_ephemerons()
 	  ever_done = 1;
 	  GC_push_all_stack(&e->val, &e->val + 1);
 	  if (GC_did_mark_stack_overflow()) {
-	    /* printf("mark stack overflow\n"); */
-	    set_ephemerons(ae, be, done_ephemerons, e);
-	    return 0;
+            GC_mark_overflow_recover(e->val);
 	  } else {
 	    GC_flush_mark_stack();
 	    if (GC_did_mark_stack_overflow()) {
-	      /* printf("mark stack overflow (late)\n"); */
-	      set_ephemerons(ae, be, done_ephemerons, e);
-	      return 0;
+              GC_mark_overflow_recover(e->val);
 	    }
 	  }
 	  /* Done with this one: */
@@ -1920,7 +1908,7 @@ static int mark_ephemerons()
     }
 
     /* Combine ae & be back into ephemerons list: */
-    set_ephemerons(ae, be, NULL, NULL);
+    set_ephemerons(ae, be);
   } while (did_one);
 
   return ever_done;

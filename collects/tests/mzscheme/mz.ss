@@ -3,6 +3,7 @@
 
 (load-relative "basic.ss")
 (load-relative "unicode.ss")
+(load-relative "rx.ss")
 (load-relative "read.ss")
 (load-relative "macro.ss")
 (load-relative "syntax.ss")
@@ -17,6 +18,7 @@
 (load-relative "sync.ss")
 (load-relative "deep.ss")
 (load-relative "contmark.ss")
+(load-relative "prompt.ss")
 (load-relative "will.ss")
 (load-relative "namespac.ss")
 (unless (or building-flat-tests? in-drscheme?)

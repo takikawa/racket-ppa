@@ -70,6 +70,19 @@ which config.ss is found.
 
 The root of the PLaneT client's cache directory.
 
+> (UNINSTALLED-PACKAGE-CACHE) -> directory-string
+> (UNINSTALLED-PACKAGE-CACHE directory-string) -> void
+
+The root of the PLaneT client's uninstalled-packages cache. PLaneT
+stores package distribution files in this directory, and searches for
+them in this directory for them if necessary. Unlike the main PLaneT
+cache, which contains compiled files and is specific to each
+particular version of PLT Scheme, the uninstalled package cache is
+shared by all versions of PLT Scheme that use the same package
+repository, and it is searched if a package is not installed in the
+primary cache. This behavior is intended to primarily benefit users
+who upgrade their PLT Scheme installations frequently.
+
 > (LINKAGE-FILE) file-string
 > (LINKAGE-FILE file-string) -> void
 
@@ -129,6 +142,13 @@ The functions in this module support examination of the pieces of
 PLaneT. They are meant primarily to support debugging and to allow
 easier development of higher-level package-management tools.
 
+> (download/install-pkg string? string? nat nat) -> (union pkg? false/c))
+
+Downloads and installs the package specifed by the given owner name,
+package name, major and minor version number. Returns false if no such
+package is available; otherwise returns a package structure for the
+installed package.
+
 > (current-cache-contents) -> ((string ((string ((nat (nat ...)) ...)) ...)) ...)
 
 Returns a listing of all package names and versions installed in the
@@ -175,6 +195,13 @@ first removes the old link and then adds the new one.
 > (remove-hard-link owner name major-version minor-version) -> void
 
 Removes any hard link that may be associated with the given package.
+
+> (resolve-planet-path quoted-planet-require-spec) -> path
+
+Returns the file system path to the file specified by the given quoted 
+planet require specification. This function downloads and installs the
+specified package if necessary, but does not verify that the actual
+file within it actually exists. 
 
 _The PLaneT search order_
 -------------------------
@@ -235,14 +262,23 @@ would install. In this mode, min can be any s-expression that
 the (require (planet ...)) form can interpret, not just a natural
 number.
 
+This function updates the uninstalled-package cache if it downloads
+a package that already appears there.
+
 -d, --download <owner> <pkg> <maj> <min>
 
 Download the given package file (specified as with the --install
-flag) without installing it.
+flag) without installing it. This function does not update the
+uninstalled-package cache.
 
 -r, --remove <owner> <pkg> <maj> <min>
 
 Remove the specified package from the local cache.
+
+-e, --erase <owner> <pkg> <maj> <min>
+
+Remove the specified package from the local cache and the 
+uninstalled-packages cache.
 
 -p, --packages
 
@@ -439,7 +475,7 @@ If present, this field should be a list of strings representing
 subdirectories of your package. These directories will be used by
 Help Desk as HTML documentation for your package. See
 _Creating Help Desk Documentation in HTML format_ for more information
-on how to useful HTML Help Desk documentation.
+on how to use HTML Help Desk documentation.
 
 The _'homepage field_
 

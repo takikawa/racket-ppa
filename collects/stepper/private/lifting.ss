@@ -48,6 +48,13 @@
                (lambda (offset subtries)
                  (try (lambda (index) (list (+ offset index))) subtries))))
            
+           ;; WHOA: this code uses the template for fully-expanded syntax; what the code
+           ;; actually gets is reconstructed code.  This is a problem, because you can't
+           ;; distinguish a top-level begin from one that's the result of some evaluation. 
+           ;; I think for the moment that it will solve our problem simply to remove the
+           ;; special case for begin at the top level.  JBC, 2006-10-09
+     
+           
            (define (top-level-expr-iterator stx context-so-far)
              (let ([try (try->offset-try (make-try-all-subexprs stx 'top-level context-so-far))])
                (kernel:kernel-syntax-case stx #f
@@ -71,7 +78,9 @@
                   (try 2 `((,expr-iterator ,#'expr)))]
                  [(define-syntaxes (var ...) expr)
                   (try 2 `((,expr-iterator ,#'expr)))]
-                 [(begin . top-level-exprs)
+                 ;; this code is buggy, but I believe it doesn't belong here at all 
+                 ;; per above discussion.  JBC, 2006-10-09
+                 #;[(begin . top-level-exprs)
                   (try 1 (map (lambda (expr) `(,top-level-expr-iterator ,expr))
                               (syntax->list #'exprs)))]
                  [(require . require-specs)
@@ -82,7 +91,7 @@
                   (expr-iterator stx context-so-far)])))
            
            (define (expr-iterator stx context-so-far)
-             (when (syntax-property stx 'stepper-highlight)
+             (when (stepper-syntax-property stx 'stepper-highlight)
                (success-escape (2vals context-so-far stx)))
              (let* ([try (make-try-all-subexprs stx 'expr context-so-far)]
                     [try-exprs (lambda (index-mangler exprs) (try index-mangler (map (lambda (expr) (list expr-iterator expr)) 
@@ -234,9 +243,9 @@
                                                           (lift-helper highlighted #f null)
                                                           (values null highlighted))])
       (let loop ([ctx-list ctx-list]
-                 [so-far-defs (map (lambda (x) (syntax-property x 'stepper-highlight #t)) 
+                 [so-far-defs (map (lambda (x) (stepper-syntax-property x 'stepper-highlight #t)) 
                                    highlighted-defs)]
-                 [body (syntax-property highlighted-body 'stepper-highlight #t)])
+                 [body (stepper-syntax-property highlighted-body 'stepper-highlight #t)])
         (if (null? ctx-list)
             (append so-far-defs (list body))
             (let*-values ([(ctx) (car ctx-list)]
@@ -271,7 +280,7 @@
                 [else (error 'lift-helper "let or letrec does not have expected shape: ~v\n" (syntax-object->datum stx))]))])
     (kernel:kernel-syntax-case stx #f
       [(let-values . dc)
-       (not (eq? (syntax-property stx 'user-stepper-hint) 'comes-from-or))
+       (not (eq? (stepper-syntax-property stx 'stepper-hint) 'comes-from-or))
        (lift)]
       [(letrec-values . dc)
        (lift)]

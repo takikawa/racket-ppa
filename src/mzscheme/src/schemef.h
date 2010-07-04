@@ -279,15 +279,18 @@ MZ_EXTERN void scheme_set_tail_buffer_size(int s);
 MZ_EXTERN Scheme_Object *scheme_force_value(Scheme_Object *);
 MZ_EXTERN Scheme_Object *scheme_force_one_value(Scheme_Object *);
 
-MZ_EXTERN void *scheme_set_cont_mark(Scheme_Object *key, Scheme_Object *val);
+MZ_EXTERN MZ_MARK_STACK_TYPE scheme_set_cont_mark(Scheme_Object *key, Scheme_Object *val);
 MZ_EXTERN void scheme_push_continuation_frame(Scheme_Cont_Frame_Data *);
 MZ_EXTERN void scheme_pop_continuation_frame(Scheme_Cont_Frame_Data *);
 MZ_EXTERN void scheme_temp_dec_mark_depth();
 MZ_EXTERN void scheme_temp_inc_mark_depth();
 
-MZ_EXTERN Scheme_Object *scheme_current_continuation_marks(void);
+MZ_EXTERN Scheme_Object *scheme_current_continuation_marks(Scheme_Object *prompt_tag);
 MZ_EXTERN Scheme_Object *scheme_extract_one_cc_mark(Scheme_Object *mark_set, 
 						    Scheme_Object *key);
+MZ_EXTERN Scheme_Object *scheme_extract_one_cc_mark_to_tag(Scheme_Object *mark_set, 
+                                                           Scheme_Object *key,
+                                                           Scheme_Object *prompt_tag);
 
 /* Internal */
 MZ_EXTERN Scheme_Object *scheme_do_eval(Scheme_Object *obj, int _num_rands, Scheme_Object **rands, int val);
@@ -773,6 +776,7 @@ MZ_EXTERN char *scheme_getdrive(void);
 
 MZ_EXTERN Scheme_Object *scheme_split_path(const char *path, int len, Scheme_Object **base, int *isdir);
 MZ_EXTERN Scheme_Object *scheme_build_path(int argc, Scheme_Object **argv);
+MZ_EXTERN Scheme_Object *scheme_path_to_directory_path(Scheme_Object *p);
 
 MZ_EXTERN Scheme_Object *scheme_make_path(const char *chars);
 MZ_EXTERN Scheme_Object *scheme_make_sized_path(char *chars, long len, int copy);
@@ -795,6 +799,7 @@ MZ_EXTERN void scheme_add_fd_handle(void *h, void *fds, int repost);
 MZ_EXTERN void scheme_add_fd_eventmask(void *fds, int mask);
 
 MZ_EXTERN void scheme_security_check_file(const char *who, const char *filename, int guards);
+MZ_EXTERN void scheme_security_check_file_link(const char *who, const char *filename, const char *content);
 MZ_EXTERN void scheme_security_check_network(const char *who, const char *host, int port, int client);
 
 MZ_EXTERN struct mz_addrinfo *scheme_get_host_address(const char *address, int id, int *err, 

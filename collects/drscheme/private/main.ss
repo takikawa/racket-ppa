@@ -66,14 +66,19 @@
       (preferences:set-default 'drscheme:show-interactions-on-execute #t boolean?)
       (preferences:set-default 'drscheme:open-in-tabs #f boolean?)
       (preferences:set-default 'drscheme:toolbar-shown #t boolean?)
-      (preferences:set-default 'drscheme:user-defined-keybindings '() (λ (x) (and (list? x) (andmap path? x))))
+      (preferences:set-default 'drscheme:user-defined-keybindings
+                               '()
+                               (λ (x) (and (list? x) 
+                                           (andmap (λ (x) (or (path? x) (drscheme:frame:planet-spec? x)))
+                                                   x))))
+
       (preferences:set-un/marshall 
        'drscheme:user-defined-keybindings
-       (λ (in) (map path->bytes in))
-       (λ (ex) (if (and (list? ex)
-                             (andmap bytes? ex))
-                        (map bytes->path ex)
-                        '())))
+       (λ (in) (map (λ (x) (if (path? x) (path->bytes x) x))
+                    in))
+       (λ (ex) (if (list? ex)
+                   (map (λ (x) (if (bytes? x) (bytes->path x) x)) ex)
+                   '())))
       
       (let ([number-between-zero-and-one?
              (λ (x) (and (number? x) (<= 0 x 1)))])
@@ -317,18 +322,22 @@
        (λ (x)
 	 (let ([lang (drscheme:language-configuration:language-settings-language x)]
 	       [settings (drscheme:language-configuration:language-settings-settings x)])
-	   (list (send lang get-language-position)
+	   (list (send lang get-language-numbers)
 		 (send lang marshall-settings settings))))
        (λ (x)
-	 (and (list? x)
+      	 (and (list? x)
 	      (= 2 (length x))
-	      (let* ([lang-position (first x)]
+	      (let* ([lang-nums (first x)]
 		     [marshalled-settings (second x)]
 		     [lang (ormap
 			    (λ (x)
-			      (and (equal? lang-position
-					   (send x get-language-position))
-				   x))
+                              (and (or (equal? (send x get-language-numbers) lang-nums)
+                                       
+                                       ;; this second branch of the `or' corresdponds
+                                       ;; to preferences saved from earlier versions of
+                                       ;; drscheme, for a sort of backwards compatibility
+                                       (equal? (send x get-language-position) lang-nums))
+                                   x))
 			    (drscheme:language-configuration:get-languages))])
 		(and lang
 		     (let ([settings (send lang unmarshall-settings marshalled-settings)])
@@ -360,12 +369,8 @@
       (autosave:restore-autosave-files/gui)
      
       ;; install user's keybindings
-      (with-handlers ([exn? 
-                       (λ (exn)
-                         (message-box (string-constant drscheme)
-                                      (exn-message exn)))])
-        (for-each keymap:add-user-keybindings-file 
-                  (preferences:get 'drscheme:user-defined-keybindings)))
+      (for-each drscheme:frame:add-keybindings-item 
+                (preferences:get 'drscheme:user-defined-keybindings))
       
       ;; the initial window doesn't set the 
       ;; unit object's state correctly, yet.

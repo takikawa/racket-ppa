@@ -20,6 +20,7 @@
 	    '(1000 -400 1))
 	  (define/public (get-language-position)
 	    (list (string-constant experimental-languages) "FrTime" "Minimal"))
+          (define/public (get-langauge-id) "plt:frtime")
 	  (define/public (get-module)
 	    '(lib "frtime.ss" "frtime"))
 	  (define/public (get-one-line-summary)

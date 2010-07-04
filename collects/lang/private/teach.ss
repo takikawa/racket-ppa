@@ -25,7 +25,7 @@
 ;; expression (cond [true + 1 2]), the reported error should ideally
 ;; be for a misuse of "+", not that there are two extra parts in the
 ;; clause. This check requires local-expanding, so it doesn't work
-;; when checkign top-level forms like `define' (because not all of the
+;; when checking top-level forms like `define' (because not all of the
 ;; definitions are ready, yet). For other cases, ensure that the
 ;; expansion is in an expression position (not the top level) and use
 ;; the `local-expand-for-error' function instead of `local-expand' to
@@ -43,7 +43,8 @@
 		      (lib "stx.ss" "syntax")
 		      (lib "struct.ss" "syntax")
 		      (lib "context.ss" "syntax")
-		      (lib "include.ss"))
+		      (lib "include.ss")
+                      (lib "shared.ss" "stepper" "private"))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; run-time helpers
@@ -95,7 +96,7 @@
   
   ;; A consistent pattern for stepper-skipto:
   (define-for-syntax (stepper-ignore-checker stx)
-    (syntax-property stx 'stepper-skipto (list syntax-e cdr syntax-e cdr car)))
+    (stepper-syntax-property stx 'stepper-skipto '(syntax-e cdr syntax-e cdr car)))
 
   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;; syntax implementations
@@ -124,7 +125,7 @@
   ;; reason for this is to allow the implementation of Y to re-use the
   ;; implementation of X (expanding to a use of X would mangle syntax
   ;; error messages), while preserving the binding of X as the one for
-  ;; the syntax definition (so that quasiquote can regonzie unquote,
+  ;; the syntax definition (so that quasiquote can recognize unquote,
   ;; etc.).
 
   (define-syntax-set/provide (beginner-define
@@ -220,9 +221,14 @@
 	(format "~ard" n)]))
 
     ;; At the top level, wrap `defn' to first check for
-    ;; existing definitions of the `names'. The `names'
-    ;; argument is a syntax list of identifiers.
-    (define (check-definitions-new who stx names defn)
+    ;;  existing definitions of the `names'. The `names'
+    ;;  argument is a syntax list of identifiers.
+    ;; In a module context, just check the binding
+    ;;  at compile time.
+    ;; In either context, if `assign?' is true, then
+    ;;  generate an unevaluated assignment that makes
+    ;;  the identifier mutable.
+    (define (check-definitions-new who stx names defn assign)
       (cond
        [(eq? (syntax-local-context) 'top-level)
 	(with-syntax ([defn defn]
@@ -230,19 +236,24 @@
 	  (with-syntax ([(check ...)
 			 (map (lambda (name)
 				(with-syntax ([name name])
-				  ;; Make sure each check has the
-				  ;; source location of the original
-				  ;; expression:
-				  (syntax/loc stx
-				    (check-top-level-not-defined 'who #'name))))
-			      (stx->list names))])
-            ;; this use of stepper-ignore-checker will behave badly on multiple-name defines:
-            (stepper-ignore-checker
+                                  ;; Make sure each check has the
+                                  ;; source location of the original
+                                  ;; expression:
+                                  (syntax/loc stx
+                                    (check-top-level-not-defined 'who #'name))))
+                              names)])
+            (stepper-syntax-property 
 	     (syntax/loc stx
 	       (begin
 		 check ...
-		 defn)))))]
-       [(eq? (syntax-local-context) 'module)
+		 defn)) 
+             'stepper-skipto 
+             (cons 'syntax-e
+                   (let loop ([l names])
+                     (if (null? l)
+                         `(syntax-e cdr car)
+                         (cons 'cdr (loop (cdr l)))))))))]
+       [(memq (syntax-local-context) '(module module-begin))
 	(for-each (lambda (name)
 		    (let ([b (identifier-binding name)])
 		      (when b
@@ -254,12 +265,26 @@
 			     "this name was defined previously and cannot be re-defined"
 			     "this name has a built-in meaning and cannot be re-defined")))))
 		  names)
-	defn]
+        (if assign
+            (with-syntax ([(name ...) (if (eq? assign #t)
+                                          names
+                                          assign)]
+                          [make-up (gensym)]
+                          [defn defn])
+              (with-syntax ([made-up-defn (stepper-syntax-property 
+                                           (syntax (define made-up (lambda () (advanced-set! name 10) ...)))
+                                           'stepper-skip-completely
+                                           #t)])
+                (syntax/loc stx
+                  (begin
+                    made-up-defn ;; (define made-up (lambda () (advanced-set! name 10) ...))
+                    defn))))
+            defn)]
        [else defn]))
-
+    
     ;; Same as above, but for one name
-    (define (check-definition-new who stx name defn)
-      (check-definitions-new who stx (list name) defn))
+    (define (check-definition-new who stx name defn assign)
+      (check-definitions-new who stx (list name) defn assign))
 
     ;; Check context for a `define' before even trying to
     ;; expand
@@ -279,7 +304,7 @@
     (define (ensure-expression stx k)
       (if (memq (syntax-local-context) '(expression))
 	  (k)
-	  (syntax-property #`(begin0 #,stx) 'stepper-skipto (list syntax-e cdr car))))
+	  (stepper-syntax-property #`(begin0 #,stx) 'stepper-skipto '(syntax-e cdr car))))
 
     ;; Use to generate nicer error messages than direct pattern
     ;; matching. The `where' argument is an English description
@@ -352,25 +377,27 @@
     (define (wrap-func-definitions first-order? kinds names argcs k)
       (if first-order?
 	  (let ([name2s (map (make-name-inventer) names)])
-	    (quasisyntax
-	     (begin
-	       #,@(map
-		   (lambda (name name2 kind argc)
-		     #`(define-syntax #,name 
-			 (make-first-order-function '#,kind 
-						    #,argc
-						    (quote-syntax #,name2) 
-						    (quote-syntax #%app))))
-		   names name2s kinds argcs)
-	       #,(k name2s))))
-	  (k names)))
+            (values (quasisyntax
+                     (begin
+                       #,@(map
+                           (lambda (name name2 kind argc)
+                             #`(define-syntax #,name 
+                                 (make-first-order-function '#,kind 
+                                                            #,argc
+                                                            (quote-syntax #,name2) 
+                                                            (quote-syntax #%app))))
+                           names name2s kinds argcs)
+                       #,(k name2s)))
+                    name2s))
+          (values (k names)
+                  names)))
 
       
     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
     ;; define (beginner)
     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-    (define (beginner-or-intermediate-define/proc first-order? stx)
+    (define (define/proc first-order? assign? stx)
 
       (define (wrap-func-definition name argc k)
 	(wrap-func-definitions first-order? 
@@ -405,31 +432,38 @@
 	   (syntax-case (syntax expr) (beginner-lambda)
 	     ;; Well-formed lambda def:
 	     [(beginner-lambda arg-seq lexpr ...)
-	      (begin
-		(check-function-defn-ok stx)
-		(check-definition-new
-		 'define
-		 stx
-		 #'name
-		 (wrap-func-definition
-		  #'name
-		  (length (syntax->list #'arg-seq))
-		  (lambda (name)
-		    (with-syntax ([name name])
-		      (quasisyntax/loc 
-		       stx 
-		       (define name
-			 #,(syntax-property
-			    #`(lambda arg-seq #,(syntax-property #`make-lambda-generative 'stepper-skip-completely #t) lexpr ...)
-			    'stepper-define-type
-			    'lambda-define))))))))]
+              (begin
+                (check-function-defn-ok stx)
+                (let-values ([(defn bind-names)
+                              (wrap-func-definition
+                               #'name
+                               (length (syntax->list #'arg-seq))
+                               (lambda (name)
+                                 (with-syntax ([name name])
+                                   (quasisyntax/loc 
+                                    stx 
+                                    (define name
+                                      #,(stepper-syntax-property
+                                         #`(lambda arg-seq 
+                                             #,(stepper-syntax-property #`make-lambda-generative 
+                                                                       'stepper-skip-completely #t) 
+                                             lexpr ...)
+                                         'stepper-define-type
+                                         'lambda-define))))))])
+                  (check-definition-new
+                   'define
+                   stx
+                   #'name
+                   defn
+                   (and assign? bind-names))))]
 	     ;; Constant def
 	     [_else
               (check-definition-new
                 'define
                 stx
                 (syntax name)
-                (quasisyntax/loc stx (define name expr)))]))]
+                (quasisyntax/loc stx (define name expr))
+                (and assign? (list (syntax name))))]))]
 	;; Function definition:
 	[(_ name-seq expr ...)
 	 (syntax-case (syntax name-seq) () [(name ...) #t][_else #f])
@@ -475,24 +509,27 @@
 				     ;; can't local-expand function body, because
 				     ;;  not all top-level defns are ready:
 				     #f)
-
-           (check-definition-new 
-            'define
-            stx
-            (car names)
-	    (wrap-func-definition
-	     (car (syntax-e #'name-seq))
-	     (length (cdr (syntax->list #'name-seq)))
-	     (lambda (fn)
-	       (with-syntax ([fn fn]
-			     [args (cdr (syntax-e #'name-seq))])
-		 (quasisyntax/loc stx (define fn #,(syntax-property
-						    (syntax-property
-						     #`(lambda args expr ...)
-						     'stepper-define-type
-						     'shortened-proc-define)
-						    'stepper-proc-define-name
-						    #`fn))))))))]
+           
+           (let-values ([(defn bind-names)
+                         (wrap-func-definition
+                          (car (syntax-e #'name-seq))
+                          (length (cdr (syntax->list #'name-seq)))
+                          (lambda (fn)
+                            (with-syntax ([fn fn]
+                                          [args (cdr (syntax-e #'name-seq))])
+                              (quasisyntax/loc stx (define fn #,(stepper-syntax-property
+                                                                 (stepper-syntax-property
+                                                                  #`(lambda args expr ...)
+                                                                  'stepper-define-type
+                                                                  'shortened-proc-define)
+                                                                 'stepper-proc-define-name
+                                                                 #`fn))))))])
+             (check-definition-new 
+              'define
+              stx
+              (car names)
+              defn
+              (and assign? bind-names))))]
 	;; Constant/lambda with too many or too few parts:
 	[(_ name expr ...)
 	 (identifier/non-kw? (syntax name))
@@ -525,10 +562,10 @@
 	 (bad-use-error 'define stx)]))
 
     (define (beginner-define/proc stx)
-      (beginner-or-intermediate-define/proc #t stx))
+      (define/proc #t #f stx))
 
     (define (intermediate-define/proc stx)
-      (beginner-or-intermediate-define/proc #f stx))
+      (define/proc #f #f stx))
 
     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
     ;; lambda (beginner; only works with define)
@@ -672,13 +709,8 @@
 						 #f
 						 "expected an expression, but found a structure name"
 						 stx))))])
-	       (let ([defn
-                      (quasisyntax/loc stx
-			 (begin
-                           #,(syntax-property #`(define-syntaxes (name_) compile-info)
-                                              'stepper-skip-completely
-                                              #t)
-			   #,(wrap-func-definitions 
+               (let-values ([(defn0 bind-names)
+                             (wrap-func-definitions 
 			      first-order? 
 			      (list* 'constructor 
 				     'predicate
@@ -690,16 +722,24 @@
 			      (lambda (def-proc-names)
 				(with-syntax ([(def-proc-name ...) def-proc-names]
 					      [(proc-name ...) proc-names])
-				  (syntax-property #`(define-values (def-proc-name ...)
+				  (stepper-syntax-property #`(define-values (def-proc-name ...)
 						       (let ()
 							 (define-struct name_ (field_ ...) (make-inspector))
 							 (values proc-name ...)))
 						   'stepper-define-struct-hint
-						   stx))))))])
-                 (check-definitions-new 'define-struct
-                                        stx 
-					(cons #'name_ to-define-names)
-					defn)))))]
+						   stx))))])
+                 (let ([defn
+                         (quasisyntax/loc stx
+                           (begin
+                             #,(stepper-syntax-property #`(define-syntaxes (name_) compile-info)
+                                                        'stepper-skip-completely
+                                                        #t)
+                             #,defn0))])
+                   (check-definitions-new 'define-struct
+                                          stx 
+                                          (cons #'name_ to-define-names)
+                                          defn
+                                          (and setters? bind-names)))))))]
 	[(_ name_ something . rest)
 	 (teach-syntax-error
 	  'define-struct
@@ -915,7 +955,7 @@
 				clause
 				"found an `else' clause that isn't the last clause ~
                                     in its `cond' expression"))
-			     (with-syntax ([new-test (syntax-property (syntax #t) 'stepper-else #t)])
+			     (with-syntax ([new-test (stepper-syntax-property (syntax #t) 'stepper-else #t)])
 			       (syntax/loc clause (new-test answer))))]
 			  [(question answer)
 			   (with-syntax ([verified (stepper-ignore-checker (syntax (verify-boolean question 'cond)))])
@@ -1040,8 +1080,8 @@
 				   (case where
 				     [(or) #`#f]
 				     [(and) #`#t])
-				   (syntax-property
-				    (syntax-property
+				   (stepper-syntax-property
+				    (stepper-syntax-property
 				     (quasisyntax/loc 
 					 stx
 				       (if #,(stepper-ignore-checker (quasisyntax/loc stx (verify-boolean #,(car remaining) 'swhere)))
@@ -1174,7 +1214,7 @@
 				   (map (lambda (def-ids)
 					  (map (lambda (def-id)
 						 (list
-						  (syntax-property
+						  (stepper-syntax-property
 						   (datum->syntax-object
 						    #f
 						    (string->uninterned-symbol
@@ -1202,7 +1242,7 @@
 					    mappers
 					    val-defns
 					    (syntax->list (syntax (d-v ...)))))])
-			(syntax-property
+			(stepper-syntax-property
 			 (quasisyntax/loc stx
 			   (let ()
 			     (define #,(gensym) 1) ; this ensures that the expansion of 'local' looks
@@ -1249,7 +1289,7 @@
 			   ;; Generate tmp-ids that at least look like the defined
 			   ;;  ids, for the purposes of error reporting, etc.:
 			   (map (lambda (name)
-				  (syntax-property
+				  (stepper-syntax-property
 				   (datum->syntax-object
 				    #f
 				    (string->uninterned-symbol
@@ -1282,7 +1322,7 @@
 			   ;; Generate tmp-ids that at least look like the defined
 			   ;;  ids, for the purposes of error reporting, etc.:
 			   (map (lambda (name)
-				  (syntax-property
+				  (stepper-syntax-property
 				   (datum->syntax-object
 				    #f
 				    (string->uninterned-symbol
@@ -1307,15 +1347,15 @@
        (lambda ()
 	 (syntax-case stx ()
 	   [(_ () expr)
-	    (syntax-property
+	    (stepper-syntax-property
 	     #`(let () expr)
 	     'stepper-skipto
-	     (list syntax-e cdr cdr car))]
+	     '(syntax-e cdr cdr car))]
 	   [(_ ([name0 rhs-expr0] [name rhs-expr] ...) expr)
 	    (let ([names (syntax->list (syntax (name0 name ...)))])
 	      (andmap identifier/non-kw? names))
 	    (with-syntax ([rhs-expr0 (allow-local-lambda (syntax rhs-expr0))])
-	      (syntax-property
+	      (stepper-syntax-property
 	       (quasisyntax/loc stx
 		 (intermediate-let ([name0 rhs-expr0])
 				   #,(quasisyntax/loc stx 
@@ -1336,7 +1376,7 @@
 	   ;; pattern-match again to pull out the formals:
 	   (syntax-case stx ()
 	     [(_ formals . rest)
-	      (quasisyntax/loc stx (lambda formals #,(syntax-property
+	      (quasisyntax/loc stx (lambda formals #,(stepper-syntax-property
                                                     #`make-lambda-generative
                                                     'stepper-skip-completely
                                                     #t) 
@@ -1441,11 +1481,11 @@
 			      (and (andmap identifier/non-kw? names)
 				   (or empty-ok? (pair? names))
 				   (not (check-duplicate-identifier names)))))
-		       (syntax-property
+		       (stepper-syntax-property
 			(quasisyntax/loc stx
 			  ((intermediate-letrec ([fname
-						  #,(syntax-property
-						     (syntax-property 
+						  #,(stepper-syntax-property
+						     (stepper-syntax-property 
 						      #`(lambda (name ...)
 							  expr)
 						      'stepper-define-type
@@ -1601,7 +1641,7 @@
 	       (with-syntax ([x (loop (syntax x) (sub1 depth))]
 			     [rest (loop (syntax rest) depth)]
 			     [uq-splicing (stx-car (stx-car stx))])
-		 (syntax-property (syntax/loc stx (the-cons (list (quote uq-splicing) x) rest))
+		 (stepper-syntax-property (syntax/loc stx (the-cons (list (quote uq-splicing) x) rest))
                                   'stepper-hint
                                   'quasiquote-the-cons-application)))]
 	  [intermediate-unquote-splicing
@@ -1617,7 +1657,7 @@
 	  [(a . b)
 	   (with-syntax ([a (loop (syntax a) depth)]
 			 [b (loop (syntax b) depth)])
-	     (syntax-property (syntax/loc stx (the-cons a b))
+	     (stepper-syntax-property (syntax/loc stx (the-cons a b))
                               'stepper-hint
                               'quasiquote-the-cons-application))]
 	  [any
@@ -1652,10 +1692,10 @@
 				     stx
 				     (syntax->list (syntax exprs))
 				     null)
-	    (syntax-property 
+	    (stepper-syntax-property 
 	     (syntax/loc stx (time . exprs))
 	     'stepper-skipto
-	     (list syntax-e cdr car syntax-e car syntax-e cdr car syntax-e cdr syntax-e cdr car syntax-e cdr cdr car))]
+             '(syntax-e cdr car syntax-e car syntax-e cdr car syntax-e cdr syntax-e cdr car syntax-e cdr cdr syntax-e car))]
 	   [_else
 	    (bad-use-error 'time stx)]))))
 
@@ -1664,7 +1704,8 @@
     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
     (define (advanced-define/proc stx)
-      ;; Handle the case that doesn't fit into beginner, then dispatch to beginner
+      ;; Handle the case that doesn't fit into intermediate, then dispatch to 
+      ;; the common code that it also used by beginner/intermediate.
       (syntax-case stx ()
 	[(_ (name) expr)
 	 (and (identifier/non-kw? (syntax name))
@@ -1673,19 +1714,20 @@
 	  'define
 	  stx
 	  (syntax name)
-	  (syntax/loc stx (define (name) expr)))]
+	  (syntax/loc stx (define (name) expr))
+          (list #'name))]
 	[(_ (name) expr ...)
 	 (check-single-result-expr (syntax->list (syntax (expr ...)))
 				   #f
 				   stx
 				   (list #'name))]
 	[(_ . rest)
-	 ;; Call transformer beginner-define/proc.
+	 ;; Call transformer define/proc.
 	 ;; Note that we call the transformer instead of producing
-	 ;; new syntax object that is a `beginner-define' form;
+	 ;; new syntax object that is an `intermediate-define' form;
 	 ;; that's important for syntax errors, so that they
 	 ;; report `advanced-define' as the source.
-	 (intermediate-define/proc stx)]
+	 (define/proc #f #t stx)]
 	[_else
 	 (bad-use-error 'define stx)]))
 
@@ -1828,10 +1870,10 @@
 						  exprs
 						  null)
 			 (if continuing?
-			     (syntax-property
+			     (stepper-syntax-property
 			      (syntax/loc stx (begin (set! id expr ...) set!-result))
 			      'stepper-skipto
-			      (list syntax-e cdr syntax-e car))
+			      '(syntax-e cdr syntax-e car))
 			     (stepper-ignore-checker (syntax/loc stx (#%app values (advanced-set!-continue id expr ...))))))]
 		      [(_ id . __)
 		       (teach-syntax-error
@@ -1930,7 +1972,7 @@
 	  #f
 	  "expected a sequence of expressions after `begin', but nothing's there")]
 	[(_ e ...)
-	 (syntax-property (syntax/loc stx (let () e ...))
+	 (stepper-syntax-property (syntax/loc stx (let () e ...))
                           'stepper-hint
                           'comes-from-begin)]
 	[_else

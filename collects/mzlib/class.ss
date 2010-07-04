@@ -22,7 +22,9 @@
 	   define/override define/overment
 	   define/augride define/augment
 	   define/public-final define/override-final define/augment-final
-	   define-local-member-name define-member-name member-name-key generate-member-key
+	   define-local-member-name define-member-name 
+           member-name-key generate-member-key 
+           member-name-key? member-name-key=? member-name-key-hash-code
 	   generic make-generic send-generic
 	   is-a? subclass? implementation? interface-extension?
 	   object-interface object-info object->vector
@@ -36,7 +38,7 @@
 	   pubment overment augride
            public-final override-final augment-final
 	   field init init-field
-	   rename-super rename-inner inherit inherit-field
+	   rename-super rename-inner inherit inherit/super inherit/inner inherit-field
 	   this super inner
 	   super-make-object super-instantiate super-new
 	   inspect))

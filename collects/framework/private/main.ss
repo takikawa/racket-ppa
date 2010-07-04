@@ -21,6 +21,32 @@
       
       (application-preferences-handler (λ () (preferences:show-dialog)))
       
+      (preferences:set-default 'framework:square-bracket:cond/offset
+                               '(("case-lambda" 0)
+                                 ("cond" 0)
+                                 ("field" 0)
+                                 ("provide/contract" 0)
+                                 ("new" 1)
+                                 ("case" 1)
+                                 ("syntax-case" 2)
+                                 ("syntax-case*" 3))
+                               (λ (x) (and (list? x) (andmap (λ (x) (and (pair? x)
+                                                                         (string? (car x))
+                                                                         (pair? (cdr x))
+                                                                         (number? (cadr x))
+                                                                         (null? (cddr x))))
+                                                             x))))
+      
+      (preferences:set-default 'framework:square-bracket:letrec
+                               '("let" 
+                                 "let*" "let-values" "let*-values"
+                                 "let-syntax" "let-struct" "let-syntaxes"
+                                 "letrec"
+                                 "letrec-syntaxes" "letrec-syntaxes+values" "letrec-values"
+                                 "parameterize"
+                                 "with-syntax")
+                               (λ (x) (and (list? x) (andmap string? x))))
+      
       (preferences:set-default 'framework:case-sensitive-search?
                                #f
                                boolean?)

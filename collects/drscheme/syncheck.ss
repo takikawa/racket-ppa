@@ -18,6 +18,7 @@ If the namespace does not, they are colored the unbound color.
 (module syncheck mzscheme
   (require (lib "string-constant.ss" "string-constants")
            (lib "unitsig.ss")
+           (lib "contract.ss")
            (lib "tool.ss" "drscheme")
            (lib "class.ss")
            (lib "list.ss")
@@ -62,7 +63,9 @@ If the namespace does not, they are colored the unbound color.
     
     hide-error-report
     get-error-report-text
-    get-error-report-visible?)
+    get-error-report-visible?
+          
+    update-button-visibility/settings)
   
   (define tool@
     (unit/sig drscheme:tool-exports^
@@ -162,7 +165,7 @@ If the namespace does not, they are colored the unbound color.
           
 	  (super-new)))
       
-      (define make-graphics-text%
+      (define make-syncheck-text%
         (λ (super%)
           (let* ([cursor-arrow (make-object cursor% 'arrow)])
             (class* super% (syncheck-text<%>)
@@ -170,6 +173,7 @@ If the namespace does not, they are colored the unbound color.
                        position-location
                        get-canvas last-position dc-location-to-editor-location
                        find-position begin-edit-sequence end-edit-sequence)
+              
               
               
               ;; arrow-vectors : 
@@ -773,6 +777,12 @@ If the namespace does not, they are colored the unbound color.
                   (when (is-a? frame syncheck-frame<%>)
                     (send frame syncheck:button-callback id-from-def))))
               
+              (define/augment (after-set-next-settings settings)
+                (let ([frame (get-top-level-window)])
+                  (when frame
+                    (send frame update-button-visibility/settings settings)))
+                (inner (void) after-set-next-settings settings))
+              
               (super-new)))))
       
       (define syncheck-bitmap
@@ -858,7 +868,19 @@ If the namespace does not, they are colored the unbound color.
             (if (send new-tab get-error-report-visible?)
                 (show-error-report)
                 (hide-error-report))
-            (send report-error-canvas set-editor (send new-tab get-error-report-text)))
+            (send report-error-canvas set-editor (send new-tab get-error-report-text))
+            (update-button-visibility/tab new-tab))
+          
+          (define/private (update-button-visibility/tab tab)
+            (update-button-visibility/settings (send (send tab get-defs) get-next-settings)))
+          (define/public (update-button-visibility/settings settings)
+            (let* ([lang (drscheme:language-configuration:language-settings-language settings)]
+                   [visible? (send lang capability-value 'drscheme:check-syntax-button)])
+              (send check-syntax-button-parent-panel change-children
+                    (λ (l)
+                      (if visible?
+                          (list check-syntax-button)
+                          '())))))
           
           (define/augment (enable-evaluation)
             (send check-syntax-button enable #t)
@@ -1105,16 +1127,22 @@ If the namespace does not, they are colored the unbound color.
           
           (super-new)
           
+          (define check-syntax-button-parent-panel 
+            (new horizontal-panel%
+                 [parent (get-button-panel)]
+                 [stretchable-width #f]
+                 [stretchable-height #f]))
           (define check-syntax-button
             (new button%
                  (label (syncheck-bitmap this))
-                 (parent (get-button-panel))
+                 (parent check-syntax-button-parent-panel)
                  (callback (λ (button evt) (syncheck:button-callback)))))
           (define/public (syncheck:get-button) check-syntax-button)
           (send (get-button-panel) change-children
                 (λ (l)
-                  (cons check-syntax-button
-                        (remove check-syntax-button l))))))
+                  (cons check-syntax-button-parent-panel
+                        (remove check-syntax-button-parent-panel l))))
+          (update-button-visibility/tab (get-current-tab))))
       
       (define report-error-style (make-object style-delta% 'change-style 'slant))
       (send report-error-style set-delta-foreground "red")
@@ -1213,10 +1241,12 @@ If the namespace does not, they are colored the unbound color.
       ;; is called once for each top-level expression and the second
       ;; value is called once, after all expansion is complete.
       (define (make-traversal)
-        (let* ([tl-binders (make-id-set)]
-               [tl-varrefs (make-id-set)]
+        (let* ([tl-low-binders (make-id-set)]
+               [tl-high-binders (make-id-set)]
+               [tl-low-varrefs (make-id-set)]
                [tl-high-varrefs (make-id-set)]
-               [tl-tops (make-id-set)]
+               [tl-low-tops (make-id-set)]
+               [tl-high-tops (make-id-set)]
                [tl-requires (make-hash-table 'equal)]
                [tl-require-for-syntaxes (make-hash-table 'equal)]
                [expanded-expression
@@ -1227,36 +1257,44 @@ If the namespace does not, they are colored the unbound color.
                                         [else #f])])
                       (cond
                         [is-module?
-                         (let ([binders (make-id-set)]
+                         (let ([low-binders (make-id-set)]
+                               [high-binders (make-id-set)]
                                [varrefs (make-id-set)]
                                [high-varrefs (make-id-set)]
-                               [tops (make-id-set)]
+                               [low-tops (make-id-set)]
+                               [high-tops (make-id-set)]
                                [requires (make-hash-table 'equal)]
                                [require-for-syntaxes (make-hash-table 'equal)])
                            (annotate-basic sexp user-namespace user-directory jump-to-id
-                                           binders varrefs high-varrefs tops
+                                           low-binders high-binders varrefs high-varrefs low-tops high-tops
                                            requires require-for-syntaxes) 
                            (annotate-variables user-namespace
                                                user-directory
-                                               binders
+                                               low-binders
+                                               high-binders
                                                varrefs
                                                high-varrefs
-                                               tops
+                                               low-tops
+                                               high-tops
                                                requires
                                                require-for-syntaxes))]
                         [else
                          (annotate-basic sexp user-namespace user-directory jump-to-id
-                                         tl-binders tl-varrefs tl-high-varrefs tl-tops 
+                                         tl-low-binders tl-high-binders
+                                         tl-low-varrefs tl-high-varrefs 
+                                         tl-low-tops tl-high-tops
                                          tl-requires tl-require-for-syntaxes)]))))]
                [expansion-completed
                 (λ (user-namespace user-directory)
                   (parameterize ([current-load-relative-directory user-directory])
                     (annotate-variables user-namespace
                                         user-directory
-                                        tl-binders
-                                        tl-varrefs
+                                        tl-low-binders
+                                        tl-high-binders
+                                        tl-low-varrefs
                                         tl-high-varrefs
-                                        tl-tops
+                                        tl-low-tops
+                                        tl-high-tops
                                         tl-requires
                                         tl-require-for-syntaxes)))])
           (values expanded-expression expansion-completed)))
@@ -1269,11 +1307,13 @@ If the namespace does not, they are colored the unbound color.
       ;;                  namespace
       ;;                  string[directory]
       ;;                  syntax[id]
-      ;;                  id-set (four of them)
+      ;;                  id-set (six of them)
       ;;                  hash-table[require-spec -> syntax] (two of them)
       ;;               -> void
       (define (annotate-basic sexp user-namespace user-directory jump-to-id
-                              binders low-varrefs high-varrefs tops
+                              low-binders high-binders 
+                              low-varrefs high-varrefs 
+                              low-tops high-tops
                               requires require-for-syntaxes)
         (let ([tail-ht (make-hash-table)]
               [maybe-jump
@@ -1291,6 +1331,8 @@ If the namespace does not, they are colored the unbound color.
                            [high-level? #f])
             (let* ([loop (λ (sexp) (level-loop sexp high-level?))]
                    [varrefs (if high-level? high-varrefs low-varrefs)]
+                   [binders (if high-level? high-binders low-binders)]
+                   [tops (if high-level? high-tops low-tops)]
                    [collect-general-info
                     (λ (stx)
                       (add-origins stx varrefs)
@@ -1300,7 +1342,7 @@ If the namespace does not, they are colored the unbound color.
               (syntax-case* sexp (lambda case-lambda if begin begin0 let-values letrec-values set!
                                    quote quote-syntax with-continuation-mark 
                                    #%app #%datum #%top #%plain-module-begin
-                                   define-values define-syntaxes module
+                                   define-values define-syntaxes define-values-for-syntax module
                                    require require-for-syntax provide)
                 (if high-level? module-transformer-identifier=? module-identifier=?)
                 [(lambda args bodies ...)
@@ -1382,7 +1424,7 @@ If the namespace does not, they are colored the unbound color.
                    ;; tops are used here because a binding free use of a set!'d variable
                    ;; is treated just the same as (#%top . x).
                    (if (identifier-binding (syntax var))
-                       (add-id (if high-level? high-varrefs varrefs) (syntax var))
+                       (add-id varrefs (syntax var))
                        (add-id tops (syntax var)))
                    
                    (loop (syntax e)))]
@@ -1421,6 +1463,12 @@ If the namespace does not, they are colored the unbound color.
                  (begin
                    (annotate-raw-keyword sexp varrefs)
                    (add-binders (syntax names) binders)
+                   (maybe-jump (syntax names))
+                   (level-loop (syntax exp) #t))]
+                [(define-values-for-syntax names exp)
+                 (begin
+                   (annotate-raw-keyword sexp varrefs)
+                   (add-binders (syntax names) high-binders)
                    (maybe-jump (syntax names))
                    (level-loop (syntax exp) #t))]
                 [(module m-name lang (#%plain-module-begin bodies ...))
@@ -1469,12 +1517,13 @@ If the namespace does not, they are colored the unbound color.
                    (add-id varrefs sexp))]
                 [_
                  (begin
-                   '(printf "unknown stx: ~e (datum: ~e) (source: ~e)~n"
-                            sexp
-                            (and (syntax? sexp)
-                                 (syntax-object->datum sexp))
-                            (and (syntax? sexp)
-                                 (syntax-source sexp)))
+                   #;
+                   (printf "unknown stx: ~e (datum: ~e) (source: ~e)~n"
+                           sexp
+                           (and (syntax? sexp)
+                                (syntax-object->datum sexp))
+                           (and (syntax? sexp)
+                                (syntax-source sexp)))
                    (void))])))
           (add-tail-ht-links tail-ht)))
 
@@ -1527,10 +1576,12 @@ If the namespace does not, they are colored the unbound color.
       ;; in the various id-sets
       (define (annotate-variables user-namespace
                                   user-directory
-                                  binders
-                                  varrefs
+                                  low-binders
+                                  high-binders
+                                  low-varrefs
                                   high-varrefs
-                                  tops
+                                  low-tops
+                                  high-tops
                                   requires
                                   require-for-syntaxes)
       
@@ -1539,7 +1590,7 @@ If the namespace does not, they are colored the unbound color.
                (make-hash-table 'equal)]
               [unused-requires (make-hash-table 'equal)]
               [unused-require-for-syntaxes (make-hash-table 'equal)]
-              [id-sets (list binders varrefs high-varrefs tops)])
+              [id-sets (list low-binders high-binders low-varrefs high-varrefs low-tops high-tops)])
           
           (hash-table-for-each requires (λ (k v) (hash-table-put! unused-requires k #t)))
           (hash-table-for-each require-for-syntaxes (λ (k v) (hash-table-put! unused-require-for-syntaxes k #t)))
@@ -1550,45 +1601,52 @@ If the namespace does not, they are colored the unbound color.
                                     (color-variable var identifier-binding)
                                     (record-renamable-var rename-ht var)))
                                 vars))
-                    (get-idss binders))
+                    (append (get-idss high-binders)
+                            (get-idss low-binders)))
           
           (for-each (λ (vars) (for-each 
-                                    (λ (var)
-                                      (color-variable var identifier-binding)
-                                      (connect-identifier var
-                                                          rename-ht
-                                                          binders
-                                                          unused-requires
-                                                          requires
-                                                          identifier-binding
-                                                          id-sets
-                                                          user-namespace 
-                                                          user-directory))
-                                    vars))
-                    (get-idss varrefs))
+                               (λ (var)
+                                 (color-variable var identifier-binding)
+                                 (connect-identifier var
+                                                     rename-ht
+                                                     low-binders
+                                                     unused-requires
+                                                     requires
+                                                     identifier-binding
+                                                     user-namespace 
+                                                     user-directory))
+                               vars))
+                    (get-idss low-varrefs))
           
           (for-each (λ (vars) (for-each 
-                                    (λ (var)
-                                      (color-variable var identifier-transformer-binding)
-                                      (connect-identifier var
-                                                          rename-ht
-                                                          binders 
-                                                          unused-require-for-syntaxes
-                                                          require-for-syntaxes
-                                                          identifier-transformer-binding
-                                                          id-sets
-                                                          user-namespace 
-                                                          user-directory))
-                                    vars))
+                               (λ (var)
+                                 (color-variable var identifier-transformer-binding)
+                                 (connect-identifier var
+                                                     rename-ht
+                                                     high-binders
+                                                     unused-require-for-syntaxes
+                                                     require-for-syntaxes
+                                                     identifier-transformer-binding
+                                                     user-namespace 
+                                                     user-directory))
+                               vars))
                     (get-idss high-varrefs))
           
           (for-each 
            (λ (vars) 
              (for-each
               (λ (var) 
-                (color/connect-top rename-ht user-namespace user-directory binders var id-sets))
+                (color/connect-top rename-ht user-namespace user-directory low-binders var))
               vars))
-           (get-idss tops))
+           (get-idss low-tops))
+          
+          (for-each 
+           (λ (vars) 
+             (for-each
+              (λ (var) 
+                (color/connect-top rename-ht user-namespace user-directory high-binders var))
+              vars))
+           (get-idss high-tops))
           
           (color-unused require-for-syntaxes unused-require-for-syntaxes)
           (color-unused requires unused-requires)
@@ -1619,7 +1677,7 @@ If the namespace does not, they are colored the unbound color.
       ;;                      directory
       ;;                   -> void
       ;; adds arrows and rename menus for binders/bindings
-      (define (connect-identifier var rename-ht all-binders unused requires get-binding id-sets user-namespace user-directory)
+      (define (connect-identifier var rename-ht all-binders unused requires get-binding user-namespace user-directory)
         (connect-identifier/arrow var all-binders unused requires get-binding user-namespace user-directory)
         (when (get-ids all-binders var)
           (record-renamable-var rename-ht var)))
@@ -1672,7 +1730,7 @@ If the namespace does not, they are colored the unbound color.
                   (cons mod-path #f)]))))
       
       ;; color/connect-top : namespace directory id-set syntax -> void
-      (define (color/connect-top rename-ht user-namespace user-directory binders var id-sets)
+      (define (color/connect-top rename-ht user-namespace user-directory binders var)
         (let ([top-bound?
                (or (get-ids binders var)
                    (parameterize ([current-namespace user-namespace])
@@ -1682,7 +1740,7 @@ If the namespace does not, they are colored the unbound color.
           (if top-bound?
               (color var lexically-bound-variable-style-name)
               (color var error-style-name))
-          (connect-identifier var rename-ht binders #f #f identifier-binding id-sets user-namespace user-directory)))
+          (connect-identifier var rename-ht binders #f #f identifier-binding user-namespace user-directory)))
       
       ;; color-variable : syntax (union identifier-binding identifier-transformer-binding) -> void
       (define (color-variable var get-binding)
@@ -2236,6 +2294,7 @@ If the namespace does not, they are colored the unbound color.
       (add-check-syntax-key-bindings (drscheme:rep:get-drs-bindings-keymap))
       (fw:color-prefs:add-to-preferences-panel (string-constant check-syntax)
                                                syncheck-add-to-preferences-panel)
-      (drscheme:get/extend:extend-definitions-text make-graphics-text%)
+      (drscheme:language:register-capability 'drscheme:check-syntax-button (flat-contract boolean?) #t)
+      (drscheme:get/extend:extend-definitions-text make-syncheck-text%)
       (drscheme:get/extend:extend-unit-frame unit-frame-mixin #f)
       (drscheme:get/extend:extend-tab tab-mixin))))

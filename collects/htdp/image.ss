@@ -14,7 +14,7 @@ plt/collects/tests/mzscheme/image-test.ss
 	   (lib "posn.ss" "lang")
            (lib "imageeq.ss" "lang" "private")
            "error.ss")
-
+  
   (provide image-width
 	   image-height
 	   overlay
@@ -30,6 +30,7 @@ plt/collects/tests/mzscheme/image-test.ss
            ellipse
            triangle
            line
+           star
            add-line
            text
            
@@ -222,10 +223,10 @@ plt/collects/tests/mzscheme/image-test.ss
                [bottom (max (+ delta-y b-h) a-h)]
                [new-w (inexact->exact (ceiling (- right left)))]
                [new-h (inexact->exact (ceiling (- bottom top)))]
-               [a-dx (- left)]
-               [a-dy (- top)]
-               [b-dx (- delta-x left)]
-               [b-dy (- delta-y top)]
+               [a-dx (inexact->exact (round (- left)))]
+               [a-dy (inexact->exact (round (- top)))]
+               [b-dx (inexact->exact (round (- delta-x left)))]
+               [b-dy (inexact->exact (round (- delta-y top)))]
                [new-px (- a-px left)]
                [new-py (- a-py top)]
                [combine (lambda (a-f b-f)
@@ -484,6 +485,58 @@ plt/collects/tests/mzscheme/image-test.ss
             [w size]
             [h (+ bottom 1)])
         (make-simple-cache-image-snip w h (floor (/ w 2)) (floor (/ h 2)) draw mask-draw))))
+  
+  (define (star points inner-radius outer-radius mode color)
+    (check 'star
+           (lambda (x) (and (real? x) (< 3 x 10000)))
+           points
+           "positive real number bigger than or equal to 4"
+           "first")
+    (check-size 'star inner-radius "second")
+    (check-size 'star outer-radius "second")
+    (check-mode 'star mode "fourth")
+    (check-image-color 'star color "fifth")
+    (let* ([points (star-points inner-radius outer-radius points)]
+           [draw 
+            (make-color-wrapper
+             color (mode->brush-symbol mode) 'solid
+             (λ (dc dx dy)
+               (send dc draw-polygon points dx dy)))]
+           [mask-draw 
+            (make-color-wrapper
+             'black (mode->brush-symbol mode) 'solid
+             (λ (dc dx dy)
+               (send dc draw-polygon points dx dy)))])
+      (make-simple-cache-image-snip 
+       (* outer-radius 2)
+       (* outer-radius 2)
+       outer-radius
+       outer-radius
+       draw
+       mask-draw)))
+  
+  (define (star-points small-rad large-rad points)
+    (let ([roff (floor (/ large-rad 2))])
+      (let loop ([i points])
+        (cond
+          [(zero? i) '()]
+          [else 
+           (let* ([this-p (- i 1)]
+                  [theta1 (* 2 pi (/ this-p points))]
+                  [theta2 (* 2 pi (/ (- this-p 1/2) points))])
+             (let-values ([(x1 y1) (find-xy small-rad theta1)]
+                          [(x2 y2) (find-xy large-rad theta2)])
+               (let ([p1 (make-object point% 
+                           (+ large-rad x1)
+                           (+ large-rad y1))]
+                     [p2 (make-object point%
+                           (+ large-rad x2)
+                           (+ large-rad y2))])
+                 (list* p1 p2 (loop (- i 1))))))]))))
+    
+  (define (find-xy radius theta)
+    (values (* radius (cos theta))
+            (* radius (sin theta))))
         
   (define (make-simple-cache-image-snip w h px py dc-proc mask-proc)
     (let ([w (inexact->exact (ceiling w))]
@@ -512,6 +565,7 @@ plt/collects/tests/mzscheme/image-test.ss
           (send dc set-pen old-pen)
           (send dc set-brush old-brush)))))
   
+    
   ;; ------------------------------------------------------------
 
   (define (image-inside? i a)

@@ -1,3 +1,15 @@
+Version 360, November 2006
+
+Added get-other-altgr-key-code and get-other-shift-altgr-key-code
+ to key-event%, and adjusted Ctl- (Windows, X) and Cmd- (Mac OS X)
+ mappings to preserve Shift (and Option), moving the unshifted
+ version to the "other" fields; adjusted keymap% matching to use
+ new "other" fields and to more precisely weight matches
+Mac OS X: fixed event handling to support CJK input and input from 
+ the character palette 
+Removed on-scroll from canvas<%> and editor-canvas%
+
+----------------------------------------------------------------------
 
 Version 352, July 2006
 
