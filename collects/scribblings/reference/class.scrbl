@@ -1,8 +1,8 @@
 #lang scribble/doc
 @(require "mz.ss"
-          scheme/class
-          (for-syntax scheme/base)
-          (for-label scheme/trait))
+          racket/class
+          (for-syntax racket/base)
+          (for-label racket/trait))
 
 @(begin
 
@@ -70,14 +70,14 @@
 
 )
 
-@(interaction-eval #:eval class-eval (require scheme/class))
+@(interaction-eval #:eval class-eval (require racket/class))
 
 
 @title[#:tag "mzlib:class" #:style 'toc]{Classes and Objects}
 
 @guideintro["classes"]{classes and objects}
 
-@note-lib[scheme/class #:use-sources (scheme/private/class-internal)]
+@note-lib[racket/class #:use-sources (racket/private/class-internal)]
 
 A @deftech{class} specifies
 
@@ -215,8 +215,9 @@ structure type property's guard, if any).
 
 @defexamples[
 #:eval class-eval
-(define i (interface* () ([prop:custom-write (lambda (obj port write?) (void))])
-                      method1 method2 method3))
+(define i (interface* () ([prop:custom-write 
+                           (lambda (obj port mode) (void))])
+            method1 method2 method3))
 ]}
 
 @; ------------------------------------------------------------------------
@@ -908,7 +909,7 @@ Returns @scheme[#t] for values produced by @scheme[member-name-key]
 and @scheme[generate-member-key], @scheme[#f]
 otherwise.}
 
-@defproc[(member-name-key=? [a-key member-name-key?][b-key member-name-key?]) boolean?]{
+@defproc[(member-name-key=? [a-key member-name-key?] [b-key member-name-key?]) boolean?]{
 
 Produces @scheme[#t] if member-name keys @scheme[a-key] and
 @scheme[b-key] represent the same external name, @scheme[#f]
@@ -1003,7 +1004,7 @@ initialization (unlike objects in C++).
 
 
 
-@defproc[(make-object [class class?][init-v any/c] ...) object?]{
+@defproc[(make-object [class class?] [init-v any/c] ...) object?]{
 
 Creates an instance of @scheme[class]. The @scheme[init-v]s are
 passed as initialization arguments, bound to the initialization
@@ -1168,6 +1169,15 @@ If @scheme[obj-expr] does not produce an object, the
 @exnraise[exn:fail:contract]. If the object has no @scheme[id] method,
 the @exnraise[exn:fail:object].}
 
+@defform[(set-field! id obj-expr expr)]{
+
+Sets the field with (external) name @scheme[id] from the value of
+@scheme[obj-expr] to the value of @scheme[expr].
+
+If @scheme[obj-expr] does not produce an object, the
+@exnraise[exn:fail:contract].  If the object has no @scheme[id] method,
+the @exnraise[exn:fail:object].}
+
 @defform[(field-bound? id obj-expr)]{
 
 Produces @scheme[#t] if the object result of @scheme[obj-expr] has an
@@ -1266,7 +1276,7 @@ Evaluation of a @scheme[mixin] form checks that the
 
 @section[#:tag "trait"]{Traits}
 
-@note-lib-only[scheme/trait]
+@note-lib-only[racket/trait]
 
 A @deftech{trait} is a collection of methods that can be converted to
 a @tech{mixin} and then applied to a @tech{class}. Before a trait is
@@ -1275,7 +1285,7 @@ renamed, and multiple traits can be merged to form a new trait.
 
 @defform/subs[#:literals (public pubment public-final override override-final overment augment augride
                           augment-final private inherit inherit/super inherit/inner rename-super
-                          inherit-field)
+                          field inherit-field)
 
               (trait trait-clause ...)
               ([trait-clause (public maybe-renamed ...)
@@ -1467,6 +1477,156 @@ resulting trait is the same as for @scheme[trait-sum], otherwise the
 @section{Object and Class Contracts}
 
 @defform/subs[
+#:literals (field init init-field inherit inherit-field super inner override augment augride)
+
+(class/c member-spec ...)
+
+([member-spec
+  method-spec
+  (field field-spec ...)
+  (init field-spec ...)
+  (init-field field-spec ...)
+  (inherit method-spec ...)
+  (inherit-field field-spec ...)
+  (super method-spec ...)
+  (inner method-spec ...)
+  (override method-spec ...)
+  (augment method-spec ...)
+  (augride method-spec ...)]
+ 
+ [method-spec
+  method-id
+  (method-id method-contract)]
+ [field-spec
+  field-id
+  (field-id contract-expr)])]{
+Produces a contract for a class.
+
+There are two major categories of contracts listed in a @scheme[class/c]
+form: external and internal contracts. External contracts govern behavior
+when an object is instantiated from a class or when methods or fields are
+accessed via an object of that class. Internal contracts govern behavior
+when method or fields are accessed within the class hierarchy.  This
+separation allows for stronger contracts for class clients and weaker
+contracts for subclasses.
+
+Method contracts must contain an additional initial argument which corresponds
+to the implicit @scheme[this] parameter of the method.  This allows for
+contracts which discuss the state of the object when the method is called
+(or, for dependent contracts, in other parts of the contract).  Alternative
+contract forms, such as @scheme[->m], are provided as a shorthand
+for writing method contracts.
+
+The external contracts are as follows:
+
+@itemize[
+ @item{A method contract without a tag describes the behavior
+   of the implementation of @scheme[method-id] on method sends to an object of the
+   contracted class.  This contract will continue to be checked in subclasses until
+   the contracted class's implementation is no longer the entry point for dynamic
+   dispatch.}
+ @item{A field contract, tagged with @scheme[field], describes the behavior of the
+   value contained in that field when accessed via an object of that class.  Since
+   fields may be mutated, these contracts are checked on any external access and/or
+   mutation of the field.}
+ @item{An initialization argument contract, tagged with @scheme[init], describes the
+   expected behavior of the value paired with that name during class instantiation.
+   The same name can be provided more than once, in which case the first such contract
+   in the @scheme[class/c] form is applied to the first value tagged with that name in
+   the list of initialization arguments, and so on.}
+ @item{The contracts listed in an @scheme[init-field] section are treated as if each
+   contract appeared in an @scheme[init] section and a @scheme[field] section.}
+]
+
+The internal contracts are as follows:
+@itemize[
+ @item{A method contract, tagged with @scheme[inherit], describes the behavior of the
+   method when invoked directly (i.e., via @scheme[inherit]) in any subclass of the
+   contracted class.  This contract, like external method contracts, applies until
+   the contracted class's method implementation is no longer the entry point for dynamic
+   dispatch.}
+ @item{A field contract, tagged with @scheme[inherit-field], describes the behavior of the
+   value contained in that field when accessed directly (i.e., via @scheme[inherit-field])
+   in any subclass of the contracted class.  Since fields may be mutated, these contracts are
+   checked on any access and/or mutation of the field that occurs in such subclasses.}
+ @item{A method contract, tagged with @scheme[super], describes the behavior of
+   @scheme[method-id] when called by the @scheme[super] form in a subclass.  This contract
+   only affects @scheme[super] calls in subclasses which call the contract class's
+   implementation of @scheme[method-id].}
+ @item{A method contract, tagged with @scheme[inner], describes the behavior the class
+   expects of an augmenting method in a subclass.  This contract affects any implementations
+   of @scheme[method-id] in subclasses which can be called via @scheme[inner] from the
+   contracted class.  This means a subclass which implements @scheme[method-id] via
+   @scheme[augment] or @scheme[overment] stop future subclasses from being affected by
+   the contract, since further extension cannot be reached via the contracted class.}
+ @item{A method contract, tagged with @scheme[override], describes the behavior expected by
+   the contracted class for @scheme[method-id] when called directly (i.e. by the application
+   @scheme[(method-id ...)]).  This form can only be used if overriding the method in subclasses
+   will change the entry point to the dynamic dispatch chain (i.e., the method has never been
+   augmentable).}
+ @item{A method contract, tagged with either @scheme[augment] or @scheme[augride], describes the
+   behavior provided by the contracted class for @scheme[method-id] when called directly from
+   subclasses.  These forms can only be used if the method has previously been augmentable, which
+   means that no augmenting or overriding implementation will change the entry point to the
+   dynamic dispatch chain.  @scheme[augment] is used when subclasses can augment the method, and
+   @scheme[augride] is used when subclasses can override the current augmentation.}
+]}
+
+@defform[(->m dom ... range)]{
+Similar to @scheme[->], except that the domain of the resulting contract contains one more element
+than the stated domain, where the first (implicit) argument is contracted with @scheme[any/c].
+This contract is useful for writing simpler method contracts when no properties of @scheme[this]
+need to be checked.}
+                             
+@defform[(->*m (mandatory-dom ...) (optional-dom ...) rest range)]{
+Similar to @scheme[->*], except that the mandatory domain of the resulting contract contains one
+more element than the stated domain, where the first (implicit) argument is contracted with
+@scheme[any/c]. This contract is useful for writing simpler method contracts when no properties
+of @scheme[this] need to be checked.}
+
+@defform[(case->m (-> dom ... rest range) ...)]{
+Similar to @scheme[case->], except that the mandatory domain of each case of the resulting contract
+contains one more element than the stated domain, where the first (implicit) argument is contracted
+with @scheme[any/c]. This contract is useful for writing simpler method contracts when no properties
+of @scheme[this] need to be checked.}
+
+@defform[(->dm (mandatory-dependent-dom ...)
+               (optional-dependent-dom ...)
+               dependent-rest
+               pre-cond
+               dep-range)]{
+Similar to @scheme[->d], except that the mandatory domain of the resulting contract
+contains one more element than the stated domain, where the first (implicit) argument is contracted
+with @scheme[any/c]. In addition, @scheme[this] is appropriately bound in the body of the contract.
+This contract is useful for writing simpler method contracts when no properties
+of @scheme[this] need to be checked.}
+
+@defform/subs[
+#:literals (field)
+
+(object/c member-spec ...)
+
+([member-spec
+  method-spec
+  (field field-spec ...)]
+ 
+ [method-spec
+  method-id
+  (method-id method-contract)]
+ [field-spec
+  field-id
+  (field-id contract-expr)])]{
+Produces a contract for an object.
+
+Unlike the older form @scheme[object-contract], but like
+@scheme[class/c], arbitrary contract expressions are allowed.
+Also, method contracts for @scheme[object/c] follow those for
+@scheme[class/c].  An object wrapped with @scheme[object/c]
+behaves as if its class had been wrapped with the equivalent
+@scheme[class/c] contract.
+}
+                             
+@defform/subs[
 #:literals (field -> ->* ->d)
 
 (object-contract member-spec ...)
@@ -1509,9 +1669,11 @@ the corresponding function contract, but the syntax of the
 method contract must be written directly in the body of the
 object-contract---much like the way that methods in class
 definitions use the same syntax as regular function
-definitions, but cannot be arbitrary procedures.  The only
-exception is that @scheme[->d] contracts implicitly bind
-@scheme[this] to the object itself.}
+definitions, but cannot be arbitrary procedures.  Unlike the
+method contracts for @scheme[class/c], the implicit @scheme[this]
+argument is not part of the contract.  To allow for the use of
+@scheme[this] in dependent contracts, @scheme[->d] contracts
+implicitly bind @scheme[this] to the object itself.}
 
 
 @defthing[mixin-contract contract?]{
@@ -1685,24 +1847,36 @@ The @scheme[externalizable<%>] interface includes only the
 
 @section[#:tag "objectprinting"]{Object Printing}
 
-To customize the way that a class instance is printed by @scheme[write]
-or @scheme[display], implement the @scheme[printable<%>] interface.
+To customize the way that a class instance is printed by
+@racket[print], @scheme[write] and @scheme[display], implement the
+@scheme[printable<%>] interface.
 
 @defthing[printable<%> interface?]{
 
 The @scheme[printable<%>] interface includes only the
-@scheme[custom-write] and @scheme[custom-print] methods. Each accepts
+@scheme[custom-print], @scheme[custom-write], and
+@scheme[custom-display] methods. The @scheme[custom-print] method
+accepts two arguments: the destination port and the current
+@scheme[quaisquote] depth as an exact nonnegative integer. The
+@scheme[custom-write] and @scheme[custom-display] methods each accepts
 a single argument, which is the destination port to @scheme[write] or
 @scheme[display] the object.
 
-Calls to the @scheme[custom-write] or @scheme[custom-display] are like
-calls to a procedure attached to a structure type through the
-@scheme[prop:custom-write] property. In particular, recursive printing
-can trigger an escape from the call.
+Calls to the @racket[custom-print], @scheme[custom-write], or
+@scheme[custom-display] methods are like calls to a procedure attached
+to a structure type through the @scheme[prop:custom-write]
+property. In particular, recursive printing can trigger an escape from
+the call.
 
 See @scheme[prop:custom-write] for more information. The
 @scheme[printable<%>] interface is implemented with
 @scheme[interface*] and @scheme[prop:custom-write].}
+
+@defthing[writable<%> interface?]{
+
+Like @scheme[printable<%>], but includes only the
+@scheme[custom-write] and @scheme[custom-print] methods.
+A @racket[print] request is directed to @scheme[custom-write].}
 
 @; ------------------------------------------------------------------------
 
@@ -1734,7 +1908,7 @@ Determines if two objects are the same object, or not; this procedure uses
 @scheme[eq?], but also works properly with contracts.}
 
 
-@defproc[(object->vector [object object?][opaque-v any/c #f]) vector?]{
+@defproc[(object->vector [object object?] [opaque-v any/c #f]) vector?]{
 
 Returns a vector representing @scheme[object] that shows its
 inspectable fields, analogous to @scheme[struct->vector].}
@@ -1751,32 +1925,32 @@ Returns the interface implicitly defined by the class of
 @scheme[object].}
 
  
-@defproc[(is-a? [v any/c][type (or/c interface? class?)]) boolean?]{
+@defproc[(is-a? [v any/c] [type (or/c interface? class?)]) boolean?]{
 
 Returns @scheme[#t] if @scheme[v] is an instance of a class
 @scheme[type] or a class that implements an interface @scheme[type],
 @scheme[#f] otherwise.}
 
 
-@defproc[(subclass? [v any/c][class class?]) boolean?]{
+@defproc[(subclass? [v any/c] [class class?]) boolean?]{
 
 Returns @scheme[#t] if @scheme[v] is a class derived from (or equal
 to) @scheme[class], @scheme[#f] otherwise.}
 
 
-@defproc[(implementation? [v any/c][interface interface?]) boolean?]{
+@defproc[(implementation? [v any/c] [interface interface?]) boolean?]{
 
 Returns @scheme[#t] if @scheme[v] is a class that implements
 @scheme[interface], @scheme[#f] otherwise.}
 
 
-@defproc[(interface-extension? [v any/c][interface interface?]) boolean?]{
+@defproc[(interface-extension? [v any/c] [interface interface?]) boolean?]{
 
 Returns @scheme[#t] if @scheme[v] is an interface that extends
 @scheme[interface], @scheme[#f] otherwise.}
 
 
-@defproc[(method-in-interface? [sym symbol?][interface interface?]) boolean?]{
+@defproc[(method-in-interface? [sym symbol?] [interface interface?]) boolean?]{
 
 Returns @scheme[#t] if @scheme[interface] (or any of its ancestor
 interfaces) includes a member with the name @scheme[sym], @scheme[#f]
@@ -1791,7 +1965,7 @@ methods whose names are local (i.e., declared with
 @scheme[define-local-member-names]).}
 
 
-@defproc[(object-method-arity-includes? [object object?][sym symbol?][cnt exact-nonnegative-integer?])
+@defproc[(object-method-arity-includes? [object object?] [sym symbol?] [cnt exact-nonnegative-integer?])
          boolean?]{
 
 Returns @scheme[#t] if @scheme[object] has a method named @scheme[sym]

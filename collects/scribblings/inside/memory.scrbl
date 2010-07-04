@@ -6,14 +6,14 @@
 @section-index{memory}
 @section-index{garbage collection}
 
-PLT Scheme uses both @cppi{malloc} and allocation functions provided
+Racket uses both @cppi{malloc} and allocation functions provided
 by a garbage collector. Embedding/extension C/C++ code may use either
 allocation method, keeping in mind that pointers to
 garbage-collectable blocks in @cpp{malloc}ed memory are invisible
 (i.e., such pointers will not prevent the block from being
 garbage-collected).
 
-PLT Scheme CGC uses a conservative garbage collector.  This garbage
+Racket CGC uses a conservative garbage collector.  This garbage
 collector normally only recognizes pointers to the beginning of
 allocated objects. Thus, a pointer into the middle of a GC-allocated
 string will normally not keep the string from being collected. The
@@ -22,7 +22,7 @@ registers may point to the middle of a collectable object.  Thus, it
 is safe to loop over an array by incrementing a local pointer
 variable.
 
-PLT Scheme 3m uses a precise garbage collector that moves objects
+Racket 3m uses a precise garbage collector that moves objects
 during collection, in which case the C code must be instrumented to
 expose local pointer bindings to the collector, and to provide tracing
 procedures for (tagged) records containing pointers. This
@@ -74,8 +74,8 @@ The basic collector allocation functions are:
 
 ]
 
-@index['("globals" "in extension code")]{If} a PLT Scheme extension
-stores Scheme pointers in a global or static variable, then that
+@index['("globals" "in extension code")]{If} a Racket extension
+stores Racket pointers in a global or static variable, then that
 variable must be registered with
 @cppi{scheme_register_extension_global}; this makes the pointer
 visible to the garbage collector. Registered variables need not
@@ -98,8 +98,8 @@ Collectable memory can be temporarily locked from collection by using
 the reference-counting function @cppi{scheme_dont_gc_ptr}. Under 3m,
 such locking does not prevent the object from being moved.
 
-Garbage collection can occur during any call into Scheme or its
-allocator, on anytime that Scheme has control, except during functions
+Garbage collection can occur during any call into Racket or its
+allocator, on anytime that Racket has control, except during functions
 that are documented otherwise.  The predicate and accessor macros
 listed in @secref["im:stdtypes"] never trigger a collection.
 
@@ -115,7 +115,7 @@ content of a word registered as a pointer must contain either
 into an object allocated by @cpp{scheme_malloc_allow_interior}, a
 pointer to an object currently allocated by another memory manager
 (and therefore not into a block that is currently managed by the
-collector), or a pointer to an odd-numbered address (e.g., a Scheme
+collector), or a pointer to an odd-numbered address (e.g., a Racket
 fixnum).
 
 Pointers are registered in three different ways:
@@ -158,7 +158,7 @@ retaining such a pointer can lead to a crash.
 As explained in @secref["im:values+types"], the @cpp{scheme_make_type}
 function can be used to obtain a new tag for a new type of object.
 These new types are in relatively short supply for 3m; the maximum tag
-is 255, and Scheme itself uses nearly 200.
+is 255, and Racket itself uses nearly 200.
 
 After allocating a new tag in 3m (and before creating instances of the
 tag), a @defterm{size procedure}, a @defterm{mark procedure}, and a
@@ -323,7 +323,7 @@ balanced by one call to @cpp{MZ_GC_UNREG}.
 Pointer information need not be initialized with
 @cppi{MZ_GC_VAR_IN_REG} and @cppi{MZ_GC_ARRAY_VAR_IN_REG} before
 calling @cpp{MZ_GC_REG}, and the set of registered pointers can change
-at any time---as long as all relevent pointers are registered when a
+at any time---as long as all relevant pointers are registered when a
 collection might occur. The following example recycles slots and
 completely de-registers information when no pointers are relevant. The
 example also illustrates how @cpp{MZ_GC_UNREG} is not needed when
@@ -434,7 +434,7 @@ is not defined, so the macros can be placed into code to be compiled
 for both conservative and precise collection.
 
 The @cpp{MZ_GC_REG} and @cpp{MZ_GC_UNREG} macros must never be
-used in an OS thread other than Scheme's thread.
+used in an OS thread other than Racket's thread.
 
 @; - -  - -  - -  - -  - -  - -  - -  - -  - -  - -  - -  - - 
 
@@ -447,7 +447,7 @@ For each input file @filepath{@italic{name}.c}, the transformed output
 is @filepath{@italic{name}.3m.c}.
 
 The @DFlag{xform} mode for @|mzc| does not change allocation calls,
-nor does it generate size, mark, or fixup predocures. It merely
+nor does it generate size, mark, or fixup procedures. It merely
 converts the code to register local pointers.
 
 Furthermore, the @DFlag{xform} mode for @|mzc| does not handle all of
@@ -485,7 +485,7 @@ Some specific limitations:
        function name, but it must be bound either as an argument or
        local variable with the form @cpp{@var{type} @var{id}}; the
        syntax @cpp{@var{ret_type} (*@var{id})(...)} is not
-       recgoinzed, so bind the function type to a simple name
+       recognized, so bind the function type to a simple name
        with @cpp{typedef}, first: @cpp{typedef @var{ret_type}
        (*@var{type})(...); .... @var{type} @var{id}}.}
 
@@ -653,6 +653,12 @@ Like @cpp{scheme_malloc}, but in 3m, the type tag determines how the
 Like @cpp{scheme_malloc}, but in 3m, pointers are allowed to
  reference the middle of the object; see @secref["im:memoryalloc"].}
 
+@function[(void* scheme_malloc_atomic_allow_interior
+           [size_t n])]{
+
+Like @cpp{scheme_malloc_atomic}, but in 3m, pointers are allowed to
+ reference the middle of the object; see @secref["im:memoryalloc"].}
+
 @function[(char* scheme_strdup
            [char* str])]{
 
@@ -700,7 +706,7 @@ Frees memory allocated with @cpp{scheme_malloc_code}.}
            [void* ptr]
            [long size])]{
 
-Registers an extension's global variable that can contain Scheme
+Registers an extension's global variable that can contain Racket
  pointers. The address of the global is given in @var{ptr}, and its
  size in bytes in @var{size}.In addition to global variables, this
  function can be used to register any permanent memory that the
@@ -788,7 +794,7 @@ in the stack than @cpp{dummy}. To avoid these problems, use
 
 Like @cpp{scheme_set_stack_base}, except for the extra
 @var{stack_end} argument. If @var{stack_end} is non-@cpp{NULL}, then
-it corresponds to a point of C-stack growth after which Scheme
+it corresponds to a point of C-stack growth after which Racket
 should attempt to handle stack overflow. The @var{stack_end} argument
 should not correspond to the actual stack end, since detecting stack
 overflow may take a few frames, and since handling stack overflow
@@ -801,11 +807,26 @@ under Windows; if this size is greater than 8 MB, then 8 MB is
 assumed, instead; the size is decremented by 50000 bytes to cover a
 large margin of error; finally, the size is subtracted from (for
 stacks that grow down) or added to (for stacks that grow up) the stack
-base in @var{stack_addr} or the auotmatically computed stack
+base in @var{stack_addr} or the automatically computed stack
 base. Note that the 50000-byte margin of error is assumed to cover the
 difference between the actual stack start and the reported stack base,
 in addition to the margin needed for detecting and handling stack
 overflow.}
+
+@function[(void scheme_register_tls_space
+           [void* ptr]
+           [int   tls_index])]{
+
+Only available under Windows; registers @var{ptr} as the address of a
+ thread-local pointer variable that is declared in the main
+ executable. The variable's storage will be used to implement
+ thread-local storage within the Racket run-time. See
+ @secref["embedding"].
+
+The @var{tls_index} argument must be @cpp{0}. It is currently
+ ignored, but a future version may use the argument to allow
+ declaration of the thread-local variable in a dynamically linked
+ DLL.}
 
 @function[(void scheme_register_static
            [void* ptr]
@@ -895,9 +916,9 @@ To remove an added finalizer, use @cpp{scheme_subtract_finalizer}.}
 Installs a ``will''-like finalizer, similar to @scheme[will-register].
  Scheme finalizers are called one at a time, requiring the collector
  to prove that a value has become inaccessible again before calling
- the next Scheme finalizer. Finalizers registered with
+ the next Racket finalizer. Finalizers registered with
  @cpp{scheme_register_finalizer} or @cpp{scheme_add_finalizer} are
- not called until all Scheme finalizers have been exhausted.
+ not called until all Racket finalizers have been exhausted.
 
 See @cpp{scheme_register_finalizer}, above, for information about
  the arguments.

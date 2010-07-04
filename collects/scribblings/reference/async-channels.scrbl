@@ -1,16 +1,16 @@
 #lang scribble/doc
 @(require "mz.ss"
-          (for-label scheme/async-channel))
+          (for-label racket/async-channel))
 
 @(define async-eval
    (lambda ()
      (let ([the-eval (make-base-eval)])
-       (the-eval '(require scheme/async-channel))
+       (the-eval '(require racket/async-channel))
        the-eval)))
 
 @title[#:tag "async-channel"]{Buffered Asynchronous Channels}
 
-@note-lib-only[scheme/async-channel]
+@note-lib-only[racket/async-channel]
 
 @margin-note/ref{See also @secref["threadmbox"].}
 
@@ -48,13 +48,13 @@ returns the first of the values that were put into @scheme[ach]. If
 @scheme[async-channel] is empty, the result is @scheme[#f].}
 
 
-@defproc[(async-channel-put [ach async-channel?][v any/c]) void?]{
+@defproc[(async-channel-put [ach async-channel?] [v any/c]) void?]{
 
 Puts @scheme[v] into @scheme[ach], blocking if @scheme[ach]'s buffer
 is full until space is available.}
 
 
-@defproc[(async-channel-put-evt [async-channel channel?][v any/c]) 
+@defproc[(async-channel-put-evt [async-channel channel?] [v any/c]) 
          evt?]{
 
 Returns a @tech{synchronizable event} that is blocked while
@@ -90,9 +90,10 @@ the event itself. See also @scheme[sync].}
 (async-channel-put to-server 'add)
 (async-channel-put to-server 4)
 (printf "Result is ~a\n" (async-channel-get from-server))
-(printf "Ask server to do a long computation that might take a while\n")
+(printf "Ask server to do a long computation\n")
 (async-channel-put to-server 'long)
 (printf "I can do other stuff\n")
-(printf "Ok, computation from server is ~a\n" (async-channel-get from-server))
+(printf "Ok, computation from server is ~a\n" 
+        (async-channel-get from-server))
 (async-channel-put to-server 'quit)
 ]

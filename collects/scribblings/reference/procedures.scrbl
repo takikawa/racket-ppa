@@ -66,6 +66,13 @@ typically, however, @scheme[name] is not used for reporting errors,
 since the procedure name is typically hard-wired into an internal
 check.}
 
+@defproc[(procedure->method [proc procedure?]) procedure?]{
+
+Returns a procedure that is like @scheme[proc] except that, when applied
+to the wrong number of arguments, the resulting error hides the first
+argument as if the procedure had been compiled with the
+@indexed-scheme['method-arity-error] syntax property.}
+
 @; ----------------------------------------
 @section{Keywords and Arity}
 
@@ -168,8 +175,13 @@ when @scheme[procedure-arity] is applied to the generated
 procedure, it returns a value that is @scheme[equal?] to
 @scheme[arity].
 
-If the @scheme[arity] specification allows arguments that are not
-in @scheme[(procedure-arity proc)], the @exnraise[exn:fail:contract].
+If the @scheme[arity] specification allows arguments that are not in
+@scheme[(procedure-arity proc)], the @exnraise[exn:fail:contract].  If
+@scheme[proc] accepts keyword argument, either the keyword arguments
+must be all optional (and they are not accepted in by the
+arity-reduced procedure) or @scheme[arity] must be the empty list
+(which makes a procedure that cannot be called); otherwise, the
+@exnraise[exn:fail:contract].
 
 @examples[
 (define my+ (procedure-reduce-arity + 2))
@@ -440,7 +452,7 @@ and @scheme[v2], and its result is returned by
 
 A @idefterm{primitive procedure} is a built-in procedure that is
 implemented in low-level language. Not all procedures of
-@schememodname[scheme/base] are primitives, but many are. The
+@schememodname[racket/base] are primitives, but many are. The
 distinction is mainly useful to other low-level code.
 
 @defproc[(primitive? [v any/c]) boolean?]{
@@ -466,9 +478,9 @@ applied.}
 @; ----------------------------------------
 @section{Additional Procedure Functions}
 
-@note-lib[scheme/function]
+@note-lib[racket/function]
 @(define fun-eval (make-base-eval))
-@(interaction-eval #:eval fun-eval (require scheme/function))
+@(interaction-eval #:eval fun-eval (require racket/function))
 
 @defproc[(const [v any]) procedure?]{
 

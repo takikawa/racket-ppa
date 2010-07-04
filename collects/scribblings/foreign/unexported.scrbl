@@ -9,8 +9,8 @@
 
 @declare-exporting['#%foreign]
 
-Parts of the @schememodname[scheme/foreign] library are implemented by
-the MzScheme built-in @schememodname['#%foreign] module.  The
+Parts of the @schememodname[ffi/unsafe] library are implemented by
+the Racket built-in @schememodname['#%foreign] module.  The
 @schememodname['#%foreign] module is not intended for direct use, but
 it exports the following procedures.  If you find any of these useful,
 please let us know.
@@ -19,7 +19,7 @@ please let us know.
                   [lib (or/c ffi-lib? path-string? #f)])
          any]{
 
-Pulls out a foreign object from a library, returning a Scheme value
+Pulls out a foreign object from a library, returning a Racket value
 that can be used as a pointer.  If a name is provided instead of a
 foreign-library value, @scheme[ffi-lib] is used to create a library
 object.}
@@ -48,9 +48,9 @@ cstructs, and another ctype for user-defined ctypes.}
                    [abi (or/c symbol/c #f) #f])
          any]{
 
-The primitive mechanism that creates Scheme ``callout'' values.  The
+The primitive mechanism that creates Racket ``callout'' values.  The
 given @scheme[ptr] (any pointer value, including @scheme[ffi-obj]
-values) is wrapped in a Scheme-callable primitive function that uses
+values) is wrapped in a Racket-callable primitive function that uses
 the types to specify how values are marshaled.
 
 The optional @scheme[abi] argument determines the foreign ABI that is
@@ -66,7 +66,7 @@ especially important on Windows, where most system functions are
                        [atomic? any/c #f])
          ffi-callback?]{
 
-The symmetric counterpart of @scheme[ffi-call].  It receives a Scheme
+The symmetric counterpart of @scheme[ffi-call].  It receives a Racket
 procedure and creates a callback object, which can also be used as a
 pointer.  This object can be used as a C-callable function, which
 invokes @scheme[proc] using the types to specify how values are

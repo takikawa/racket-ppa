@@ -4,24 +4,26 @@
 
 @title[#:tag "pretty-print"]{Pretty Printing}
 
-@note-lib[scheme/pretty]
+@note-lib[racket/pretty]
 
-@defproc[(pretty-print [v any/c] [port output-port? (current-output-port)])
+@defproc[(pretty-print [v any/c] [port output-port? (current-output-port)]
+                       [quote-depth (or/c 0 1) 0])
          void?]{
 
-Pretty-prints the value @scheme[v] using the same printed form as
-@scheme[write], but with newlines and whitespace inserted to avoid
-lines longer than @scheme[(pretty-print-columns)], as controlled by
-@scheme[(pretty-print-current-style-table)]. The printed form ends in
-a newline, unless the @scheme[pretty-print-columns] parameter is set
-to @scheme['infinity].
+Pretty-prints the value @scheme[v] using the same printed form as the
+default @scheme[print] mode, but with newlines and whitespace inserted
+to avoid lines longer than @scheme[(pretty-print-columns)], as
+controlled by @scheme[(pretty-print-current-style-table)]. The printed
+form ends in a newline, unless the @scheme[pretty-print-columns]
+parameter is set to @scheme['infinity].
 
 In addition to the parameters defined in this section,
 @scheme[pretty-print] conforms to the @scheme[print-graph],
 @scheme[print-struct], @scheme[print-hash-table],
-@scheme[print-vector-length], and @scheme[print-box] parameters.
+@scheme[print-vector-length], @scheme[print-box], and
+@scheme[print-as-quasiquote] parameters.
 
-The pretty printer also detects structures that have the
+The pretty printer detects structures that have the
 @scheme[prop:custom-write] property and it calls the corresponding
 custom-write procedure. The custom-write procedure can check the
 parameter @scheme[pretty-printing] to cooperate with the
@@ -37,15 +39,20 @@ called appropriately). Use
 @scheme[make-tentative-pretty-print-output-port] to obtain a port for
 tentative recursive prints (e.g., to check the length of the output).}
 
-
-@defproc[(pretty-display [v any/c][port output-port? (current-output-port)])
+@defproc[(pretty-write [v any/c] [port output-port? (current-output-port)])
          void?]{
 
 Same as @scheme[pretty-print], but @scheme[v] is printed like
-@scheme[display] instead of like @scheme[write].}
+@scheme[write] instead of like @scheme[print].}
+
+@defproc[(pretty-display [v any/c] [port output-port? (current-output-port)])
+         void?]{
+
+Same as @scheme[pretty-print], but @scheme[v] is printed like
+@scheme[display] instead of like @scheme[print].}
 
 
-@defproc[(pretty-format [v any/c][columns exact-nonnegative-integer? (pretty-print-columns)])
+@defproc[(pretty-format [v any/c] [columns exact-nonnegative-integer? (pretty-print-columns)])
          string?]{
 
 Like @scheme[pretty-print], except that it returns a string containing
@@ -199,7 +206,7 @@ the parameter is consulted.
 
 @section{Line-Output Hook}
 
-@defproc[(pretty-print-newline [port out-port?][width exact-nonnegative-integer?]) void?]{
+@defproc[(pretty-print-newline [port out-port?] [width exact-nonnegative-integer?]) void?]{
 
 Calls the procedure associated with the
 @scheme[pretty-print-print-line] parameter to print a newline to
@@ -360,7 +367,7 @@ hook procedures, etc.  Explicitly cancel the tentative print even when
 
  
 @defproc[(tentative-pretty-print-port-transfer 
-          [tentative-out output-port?][orig-out output-port?])
+          [tentative-out output-port?] [orig-out output-port?])
          void?]{
 
 Causes the data written to @scheme[tentative-out] to be transferred as

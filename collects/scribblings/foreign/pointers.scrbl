@@ -11,13 +11,13 @@ strings (used as memory blocks), or some additional internal objects
 (@scheme[ffi-obj]s and callbacks, see @secref["foreign:c-only"]).
 Returns @scheme[#f] for other values.}
 
-@defproc[(ptr-equal? [cptr1 cpointer?][cptr2 cpointer?]) boolean?]{
+@defproc[(ptr-equal? [cptr1 cpointer?] [cptr2 cpointer?]) boolean?]{
 
-Compares the values of the two pointers. Two different Scheme
+Compares the values of the two pointers. Two different Racket
 pointer objects can contain the same pointer.}
 
 
-@defproc[(ptr-add [cptr cpointer?][offset exact-integer?][type ctype? _byte]) 
+@defproc[(ptr-add [cptr cpointer?] [offset exact-integer?] [type ctype? _byte]) 
          cpointer?]{
 
 Returns a cpointer that is like @scheme[cptr] offset by
@@ -48,9 +48,9 @@ offset is always in bytes.}
 
 @; ----------------------------------------------------------------------
 
-@section{Unsafe Pointer Operations}
+@section{Pointer Dereferencing}
 
-@defproc[(set-ptr-offset! [cptr cpointer?][offset exact-integer?][ctype ctype? _byte]) 
+@defproc[(set-ptr-offset! [cptr cpointer?] [offset exact-integer?] [ctype ctype? _byte]) 
          void?]{
 
 Sets the offset component of an offset pointer.  The arguments are
@@ -58,7 +58,7 @@ used in the same way as @scheme[ptr-add].  If @scheme[cptr] has no
 offset, the @scheme[exn:fail:contract] exception is raised.}
 
 
-@defproc[(ptr-add! [cptr cpointer?][offset exact-integer?][ctype ctype? _byte]) 
+@defproc[(ptr-add! [cptr cpointer?] [offset exact-integer?] [ctype ctype? _byte]) 
          void?]{
 
 Like @scheme[ptr-add], but destructively modifies the offset contained
@@ -189,11 +189,11 @@ inclusive).}
 
 @defproc[(cpointer-tag [cptr cpointer?]) any]{
 
-Returns the Scheme object that is the tag of the given @scheme[cptr]
+Returns the Racket object that is the tag of the given @scheme[cptr]
 pointer.}
 
 
-@defproc[(set-cpointer-tag! [cptr cpointer?][tag any/c]) void?]{
+@defproc[(set-cpointer-tag! [cptr cpointer?] [tag any/c]) void?]{
 
 Sets the tag of the given @scheme[cptr]. The @scheme[tag] argument can
 be any arbitrary value; other pointer operations ignore it.  When a
@@ -205,10 +205,10 @@ can contain other information).}
 
 @; ------------------------------------------------------------
 
-@section{Unsafe Memory Management}
+@section{Memory Management}
 
-For general information on C-level memory management with PLT Scheme,
-see @|InsideMzScheme|.
+For general information on C-level memory management with Racket,
+see @|InsideRacket|.
 
 @defproc[(malloc [bytes-or-type (or/c exact-nonnegative-integer? ctype?)]
                  [type-or-bytes (or/c exact-nonnegative-integer? ctype?) @#,elem{absent}]
@@ -223,7 +223,7 @@ see @|InsideMzScheme|.
 Allocates a memory block of a specified size using a specified
 allocation. The result is a @scheme[cpointer] to the allocated
 memory.  Although not reflected above, the four arguments can appear in
-any order since they are all different types of Scheme objects; a size
+any order since they are all different types of Racket objects; a size
 specification is required at minimum:
 
 @itemize[
@@ -243,8 +243,8 @@ specification is required at minimum:
 
   @item{A symbol @scheme[mode] argument can be given, which specifies
   what allocation function to use.  It should be one of
-  @indexed-scheme['nonatomic] (uses @cpp{scheme_malloc} from PLT
-  Scheme's C API), @indexed-scheme['atomic]
+  @indexed-scheme['nonatomic] (uses @cpp{scheme_malloc} from
+  Racket's C API), @indexed-scheme['atomic]
   (@cpp{scheme_malloc_atomic}), @indexed-scheme['stubborn]
   (@cpp{scheme_malloc_stubborn}), @indexed-scheme['uncollectable]
   (@cpp{scheme_malloc_uncollectable}), @indexed-scheme['eternal]
@@ -269,7 +269,7 @@ type, and @scheme['atomic] allocation is used otherwise.}
 Uses the operating system's @cpp{free} function for
 @scheme['raw]-allocated pointers, and for pointers that a foreign
 library allocated and we should free.  Note that this is useful as
-part of a finalizer (see below) procedure hook (e.g., on the Scheme
+part of a finalizer (see below) procedure hook (e.g., on the Racket
 pointer object, freeing the memory when the pointer object is
 collected, but beware of aliasing).}
 
@@ -283,7 +283,7 @@ pointer.}
 @defproc[(malloc-immobile-cell [v any/c]) cpointer?]{
 
 Allocates memory large enough to hold one arbitrary (collectable)
-Scheme value, but that is not itself collectable or moved by the
+Racket value, but that is not itself collectable or moved by the
 memory manager. The cell is initialized with @scheme[v]; use the type
 @scheme[_scheme] with @scheme[ptr-ref] and @scheme[ptr-set!] to get
 or set the cell's value. The cell must be explicitly freed with
@@ -295,10 +295,10 @@ or set the cell's value. The cell must be explicitly freed with
 Frees an immobile cell created by @scheme[malloc-immobile-cell].}
 
 
-@defproc[(register-finalizer [obj any/c][finalizer (any/c . -> . any)]) void?]{
+@defproc[(register-finalizer [obj any/c] [finalizer (any/c . -> . any)]) void?]{
 
 Registers a finalizer procedure @scheme[finalizer-proc] with the given
-@scheme[obj], which can be any Scheme (GC-able) object.  The finalizer
+@scheme[obj], which can be any Racket (GC-able) object.  The finalizer
 is registered with a will executor; see
 @scheme[make-will-executor]. The finalizer is invoked when
 @scheme[obj] is about to be collected.  (This is done by a thread that
@@ -306,9 +306,9 @@ is in charge of triggering these will executors.)
 
 Finalizers are mostly intended to be used with cpointer objects (for
 freeing unused memory that is not under GC control), but it can be
-used with any Scheme object---even ones that have nothing to do with
+used with any Racket object---even ones that have nothing to do with
 foreign code.  Note, however, that the finalizer is registered for the
-@italic{Scheme} object. If you intend to free a pointer object, then
+@italic{Racket} object. If you intend to free a pointer object, then
 you must be careful to not register finalizers for two cpointers that
 point to the same address.  Also, be careful to not make the finalizer
 a closure that holds on to the object.
@@ -319,7 +319,7 @@ string that you should free.  Here is an attempt at creating a suitable type:
 @schemeblock[
 (define bytes/free
   (make-ctype _pointer
-              #f (code:comment @#,t{a Scheme bytes can be used as a pointer})
+              #f (code:comment @#,t{a Racket bytes can be used as a pointer})
               (lambda (x)
                 (let ([b (make-byte-string x)])
                   (register-finalizer x free)
@@ -336,7 +336,7 @@ for debugging:
 @schemeblock[
 (define bytes/free
   (make-ctype _pointer
-              #f (code:comment @#,t{a Scheme bytes can be used as a pointer})
+              #f (code:comment @#,t{a Racket bytes can be used as a pointer})
               (lambda (x)
                 (let ([b (make-byte-string x)])
                   (register-finalizer b
@@ -354,15 +354,15 @@ debugging message also avoids the problem, since the finalization
 procedure would then not close over @scheme[b].)}
 
 
-@defproc[(make-sized-byte-string [cptr cpointer?][length exact-nonnegative-integer?]) 
+@defproc[(make-sized-byte-string [cptr cpointer?] [length exact-nonnegative-integer?]) 
          bytes?]{
 
 Returns a byte string made of the given pointer and the given length.
 No copying is done.  This can be used as an alternative to make
-pointer values accessible in Scheme when the size is known.
+pointer values accessible in Racket when the size is known.
 
 If @scheme[cptr] is an offset pointer created by @scheme[ptr-add], the
 offset is immediately added to the pointer. Thus, this function cannot
-be used with @scheme[ptr-add] to create a substring of a Scheme byte
+be used with @scheme[ptr-add] to create a substring of a Racket byte
 string, because the offset pointer would be to the middle of a
 collectable object (which is not allowed).}

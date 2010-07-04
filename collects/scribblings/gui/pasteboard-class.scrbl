@@ -457,16 +457,16 @@ Returns @scheme[#t].
 
 
 @defmethod*[#:mode override
-            ([(change-style [style (or/c (is-a?/c style<%>) false/c)]
-                            [snip (or/c (is-a?/c snip%) false/c) #f])
-              void?]
-             [(change-style [delta (or/c (is-a?/c style-delta%) false/c)]
-                            [snip (is-a?/c snip%) #f])
+            ([(change-style [style (or/c (is-a?/c style-delta%) (is-a?/c style<%>) #f) #f]
+                            [snip (or/c (is-a?/c snip%) #f) #f])
               void?])]{
 
-Changes the style of @scheme[style] to a specific style or by applying
+Changes the style of @scheme[snip] to a specific style or by applying
  a style delta.  If @scheme[snip] is @scheme[#f], then all currently
- selected snips are changed. See also @xmethod[editor<%> change-style].
+ selected snips are changed. If @scheme[style] is @scheme[#f], then 
+ the default style is used, according to @method[editor<%> default-style-name].
+ 
+ See also @xmethod[editor<%> change-style].
 
 When a @scheme[style] is provided: @InStyleListNote[@scheme[style]]
 
@@ -500,7 +500,7 @@ Deletes @scheme[snip] when provided, or deletes the currently selected
 
 
 @defmethod[#:mode override 
-           (do-copy [time (and/c exact? integer?)]
+           (do-copy [time exact-integer?]
                     [extend? any/c])
            void?]{
 
@@ -525,7 +525,7 @@ Copies the current selection, extending the current clipboard contexts
 
 
 @defmethod[#:mode override
-           (do-paste [time (and/c exact? integer?)])
+           (do-paste [time exact-integer?])
            void?]{
 @methspec{
 
@@ -547,7 +547,7 @@ Pastes.
 
 
 @defmethod[#:mode override
-           (do-paste-x-selection [time (and/c exact? integer?)])
+           (do-paste-x-selection [time exact-integer?])
            void?]{
 @methspec{
 
@@ -611,14 +611,12 @@ The @scheme[x] and @scheme[y] arguments are in editor coordinates. If
 }
 
 
-@defmethod[(get-center [x (box/c real?)]
-                       [y (box/c real?)])
-           void?]{
+@defmethod[(get-center) (values real? real?)]{
 
 Returns the center of the pasteboard in pasteboard coordinates.
 
-The @scheme[x] box is filled with the x-coordinate of the center and
-@scheme[y] is filled with the y-coordinate of the center.
+The first result is the x-coordinate of the center and
+the second result is the y-coordinate of the center.
 
 }
 
@@ -971,7 +969,7 @@ Does nothing.
            (on-reorder [snip (is-a?/c snip%)]
                        [to-snip (is-a?/c snip%)]
                        [before? any/c])
-           boolean?]{
+           void?]{
 @methspec{
 
 Called before a snip is moved in the pasteboard's front-to-back snip

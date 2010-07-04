@@ -1,11 +1,11 @@
 #lang scribble/doc
-@(require "common.ss")
+@(require "common.rkt")
 @(tools-title "frame")
 
-@defclass[drscheme:frame:name-message% canvas% ()]{
+@defclass[drracket:frame:name-message% canvas% ()]{
 
 This class implements the little filename button in the top-right hand
-side of drscheme's frame.
+side of DrRacket's frame.
 
 
 
@@ -31,16 +31,16 @@ hasn't been saved is shown.
 }}}
 
 
-@defmixin[drscheme:frame:mixin (drscheme:frame:basics<%> frame:text-info<%> frame:editor<%>) (drscheme:frame:<%>)]{
+@defmixin[drracket:frame:mixin (drracket:frame:basics<%> frame:text-info<%> frame:editor<%>) (drracket:frame:<%>)]{
 
 Provides an implementation of 
-@scheme[drscheme:frame:<%>] 
+@scheme[drracket:frame:<%>] 
 }
 
 
-@defmixin[drscheme:frame:basics-mixin (frame:standard-menus<%>) (drscheme:frame:basics<%>)]{
+@defmixin[drracket:frame:basics-mixin (frame:standard-menus<%>) (drracket:frame:basics<%>)]{
 
-Use this mixin to establish some common menu items across various DrScheme windows.
+Use this mixin to establish some common menu items across various DrRacket windows.
 
 
 
@@ -88,7 +88,7 @@ adds a
                                    [evt (is-a?/c control-event%)])
            void?]{
 
-Opens a new, empty DrScheme window.
+Opens a new, empty DrRacket window.
 
 
 }
@@ -127,7 +127,7 @@ Returns the empty string.
 @methspec{
 
 Each string in the result of this method is added as a menu
-item to DrScheme's ``Related Web Sites'' menu item. The
+item to DrRacket's ``Related Web Sites'' menu item. The
 first string is the name of the menu item and the second
 string is a url that, when the menu item is chosen, is sent
 to the user's browser.
@@ -145,7 +145,7 @@ Defaultly returns the empty list.
                                      [evt (is-a?/c control-event%)])
            void?]{
 
-Opens an about box for DrScheme.
+Opens an about box for DrRacket.
 
 
 }
@@ -154,7 +154,7 @@ Opens an about box for DrScheme.
            (help-menu:about-string)
            string?]{
 
-Returns the string @scheme["DrScheme"].
+Returns the string @scheme["DrRacket"].
 
 
 }
@@ -163,7 +163,7 @@ Returns the string @scheme["DrScheme"].
            (help-menu:before-about [help-menu (is-a?/c menu%)])
            void?]{
 
-Adds the Help Desk menu item and the Welcome to DrScheme menu item.
+Adds the Help Desk menu item and the Welcome to DrRacket menu item.
 }
 
 @defmethod[#:mode override 
@@ -176,14 +176,14 @@ Returns @scheme[#t].
 }}
 
 
-@definterface[drscheme:frame:basics<%> (frame:standard-menus<%>)]{
+@definterface[drracket:frame:basics<%> (frame:standard-menus<%>)]{
 
-This interface is the result of the @scheme[drscheme:frame:basics-mixin]
+This interface is the result of the @scheme[drracket:frame:basics-mixin]
 
 }
 
 
-@definterface[drscheme:frame:<%> (frame:editor<%> frame:text-info<%> drscheme:frame:basics<%>)]{
+@definterface[drracket:frame:<%> (frame:editor<%> frame:text-info<%> drracket:frame:basics<%>)]{
 
 
 
@@ -196,7 +196,7 @@ menu.  This method is intended to be overridden. It is
 expected to add other Show/Hide menu items to the show menu.
 
 See also
-@method[drscheme:frame:<%> get-show-menu].
+@method[drracket:frame:<%> get-show-menu].
 
 }
 @methimpl{
@@ -212,10 +212,10 @@ Does nothing.
 @index{View menu}
 
 returns the view menu, for use by the
-@method[drscheme:frame:<%> update-shown] method.
+@method[drracket:frame:<%> update-shown] method.
 
 See also
-@method[drscheme:frame:<%> add-show-menu-items].
+@method[drracket:frame:<%> add-show-menu-items].
 
 The method (and others) uses the word @tt{show} to preserve
 backwards compatibility from when the menu itself was named
@@ -243,7 +243,7 @@ that evaluation is taking place in the user's program.
 
 This method is intended to be overridden. It's job is to
 update the @scheme["View"] menu to match the state of the
-visible windows. In the case of the standard DrScheme
+visible windows. In the case of the standard DrRacket
 window, it change the menu items to reflect the visibility of
 the definitions and interaction @scheme[editor-canvas%]s.
 
@@ -251,7 +251,7 @@ Call this method whenever the state of the show menu might
 need to change.
 
 See also
-@method[drscheme:frame:<%> get-show-menu].
+@method[drracket:frame:<%> get-show-menu].
 
 }
 @methimpl{
