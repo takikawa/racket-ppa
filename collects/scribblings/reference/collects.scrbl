@@ -63,7 +63,8 @@ is initialized in @exec{mzscheme} to the result of
 @scheme[(find-library-collection-paths)].
 
 
-@defproc[(find-library-collection-paths [extras (listof path-string?) null]) 
+@defproc[(find-library-collection-paths [pre-extras (listof path-string?) null]
+                                        [post-extras (listof path-string?) null]) 
          (listof path?)]{
 
 Produces a list of paths as follows:
@@ -75,19 +76,32 @@ Produces a list of paths as follows:
   default collection path list, unless the value of the
   @scheme[use-user-specific-search-paths] parameter is @scheme[#f].}
 
- @item{Extra directories provided in @scheme[extras] are included next,
-  converted to complete paths relative to the executable.}
+ @item{Extra directories provided in @scheme[pre-extras] are included
+  next to the default collection path list, converted to complete
+  paths relative to the executable.}
 
  @item{If the directory specified by @scheme[(find-system-path
     'collects-dir)] is absolute, or if it is relative (to the
   executable) and it exists, then it is added to the end of the
   default collection path list.}
 
+ @item{Extra directories provided in @scheme[post-extras] are included
+  last in the default collection path list, converted to complete
+  paths relative to the executable.}
+
  @item{If the @indexed-envvar{PLTCOLLECTS} environment variable is
   defined, it is combined with the default list using
   @scheme[path-list-string->path-list]. If it is not defined, the
   default collection path list (as constructed by the first three
-  bullets above) is used directly.}
+  bullets above) is used directly.
+
+  Note that under @|AllUnix|, paths are separated by @litchar{:}, and
+  under Windows by @litchar{;}.  Also,
+  @scheme[path-list-string->path-list] splices the default paths at an
+  empty path, for example, with many Unix shells you can set
+  @envvar{PLTCOLLECTS} to @tt{":`pwd`"}, @tt{"`pwd`:"}, or
+  @tt{"`pwd`"} to specify search the current directory after, before,
+  or instead of the default paths respectively.}
 
 }}
 

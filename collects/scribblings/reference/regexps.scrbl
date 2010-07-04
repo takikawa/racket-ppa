@@ -14,14 +14,14 @@
 
 @local-table-of-contents[]
 
-Regular expressions are specified as strings or byte strings, using
-the same pattern language as the Unix utility @exec{egrep} or Perl. A
-string-specified pattern produces a character regexp matcher, and a
-byte-string pattern produces a byte regexp matcher. If a character
-regexp is used with a byte string or input port, it matches UTF-8
-encodings (see @secref["encodings"]) of matching character streams;
-if a byte regexp is used with a character string, it matches bytes in
-the UTF-8 encoding of the string.
+@deftech{Regular expressions} are specified as strings or byte
+strings, using the same pattern language as the Unix utility
+@exec{egrep} or Perl. A string-specified pattern produces a character
+regexp matcher, and a byte-string pattern produces a byte regexp
+matcher. If a character regexp is used with a byte string or input
+port, it matches UTF-8 encodings (see @secref["encodings"]) of
+matching character streams; if a byte regexp is used with a character
+string, it matches bytes in the UTF-8 encoding of the string.
 
 Regular expressions can be compiled into a @defterm{regexp value} for
 repeated matches. The @scheme[regexp] and @scheme[byte-regexp]
@@ -204,12 +204,11 @@ case-sensitively.
 @defproc[(regexp-match [pattern (or/c string? bytes? regexp? byte-regexp?)]
                        [input (or/c string? bytes? input-port?)]
                        [start-pos exact-nonnegative-integer? 0]
-                       [end-pos (or/c exact-nonnegative-integer? false/c) #f]
-                       [output-port (or/c output-port? false/c) #f])
-         (or/c (listof (or/c (cons (or/c string? bytes?)
-                                   (or/c string? bytes?))
-                             false/c))
-               false/c)]{
+                       [end-pos (or/c exact-nonnegative-integer? #f) #f]
+                       [output-port (or/c output-port? #f) #f])
+         (or/c (listof (or/c string? #f))
+               (listof (or/c bytes? #f))
+               #f)]{
 
 Attempts to match @scheme[pattern] (a string, byte string, regexp
 value, or byte-regexp value) once to a portion of @scheme[input].  The
@@ -304,8 +303,8 @@ bytes. To avoid such interleaving, use @scheme[regexp-match-peek]
 @defproc[(regexp-match* [pattern (or/c string? bytes? regexp? byte-regexp?)]
                         [input (or/c string? bytes? input-port?)]
                         [start-pos exact-nonnegative-integer? 0]
-                        [end-pos (or/c exact-nonnegative-integer? false/c) #f])
-         (listof (or/c string? bytes?))]{
+                        [end-pos (or/c exact-nonnegative-integer? #f) #f])
+         (or/c (listof string?) (listof bytes?))]{
 
 Like @scheme[regexp-match], but the result is a list of strings or
 byte strings corresponding to a sequence of matches of
@@ -335,12 +334,11 @@ port).
                        [pattern (or/c string? bytes? regexp? byte-regexp?)]
                        [input input-port?]
                        [start-pos exact-nonnegative-integer? 0]
-                       [end-pos (or/c exact-nonnegative-integer? false/c) #f]
-                       [output-port (or/c output-port? false/c) #f])
-         (or/c (listof (or/c (cons (or/c string? bytes?)
-                                   (or/c string? bytes?))
-                             false/c))
-               false/c)]{
+                       [end-pos (or/c exact-nonnegative-integer? #f) #f]
+                       [output-port (or/c output-port? #f) #f])
+         (or/c (listof (or/c string? #f))
+               (listof (or/c bytes? #f))
+               #f)]{
 
 Like @scheme[regexp-match] on input ports, except that if the match
 fails, no characters are read and discarded from @scheme[in].
@@ -356,12 +354,12 @@ fails.}
 @defproc[(regexp-match-positions [pattern (or/c string? bytes? regexp? byte-regexp?)]
                         [input (or/c string? bytes? input-port?)]
                         [start-pos exact-nonnegative-integer? 0]
-                        [end-pos (or/c exact-nonnegative-integer? false/c) #f]
-                        [output-port (or/c output-port? false/c) #f])
-          (or/c (listof (or/c (cons exact-nonnegative-integer?
-                                    exact-nonnegative-integer?)
-                              false/c))
-                false/c)]{
+                        [end-pos (or/c exact-nonnegative-integer? #f) #f]
+                        [output-port (or/c output-port? #f) #f])
+          (or/c (listof (or/c (cons/c exact-nonnegative-integer?
+                                      exact-nonnegative-integer?)
+                              #f))
+                #f)]{
 
 Like @scheme[regexp-match], but returns a list of number pairs (and
 @scheme[#f]) instead of a list of strings. Each pair of numbers refers
@@ -387,9 +385,9 @@ positions indicate the number of bytes that were read, including
 @defproc[(regexp-match-positions* [pattern (or/c string? bytes? regexp? byte-regexp?)]
                         [input (or/c string? bytes? input-port?)]
                         [start-pos exact-nonnegative-integer? 0]
-                        [end-pos (or/c exact-nonnegative-integer? false/c) #f])
-         (listof (cons exact-nonnegative-integer?
-                       exact-nonnegative-integer?))]{
+                        [end-pos (or/c exact-nonnegative-integer? #f) #f])
+         (listof (cons/c exact-nonnegative-integer?
+                         exact-nonnegative-integer?))]{
 
 Like @scheme[regexp-match-positions], but returns multiple matches
 like @scheme[regexp-match*].
@@ -402,8 +400,8 @@ like @scheme[regexp-match*].
 @defproc[(regexp-match? [pattern (or/c string? bytes? regexp? byte-regexp?)]
                         [input (or/c string? bytes? input-port?)]
                         [start-pos exact-nonnegative-integer? 0]
-                        [end-pos (or/c exact-nonnegative-integer? false/c) #f]
-                        [output-port (or/c output-port? false/c) #f])
+                        [end-pos (or/c exact-nonnegative-integer? #f) #f]
+                        [output-port (or/c output-port? #f) #f])
            boolean?]{
 
 Like @scheme[regexp-match], but returns merely @scheme[#t] when the
@@ -431,11 +429,10 @@ entire content of @scheme[input] matches @scheme[pattern].
 @defproc[(regexp-match-peek [pattern (or/c string? bytes? regexp? byte-regexp?)]
                             [input input-port?]
                             [start-pos exact-nonnegative-integer? 0]
-                            [end-pos (or/c exact-nonnegative-integer? false/c) #f]
-                            [progress (or/c evt false/c) #f])
-          (or/c (listof (or/c (cons bytes? bytes?)
-                              false/c))
-                false/c)]{
+                            [end-pos (or/c exact-nonnegative-integer? #f) #f]
+                            [progress (or/c evt #f) #f])
+          (or/c (listof (or/c bytes? #f))
+                #f)]{
 
 Like @scheme[regexp-match] on input ports, but only peeks bytes from
 @scheme[input-port] instead of reading them. Furthermore, instead of
@@ -461,12 +458,12 @@ information if another process meanwhile reads from
 @defproc[(regexp-match-peek-positions [pattern (or/c string? bytes? regexp? byte-regexp?)]
                             [input input-port?]
                             [start-pos exact-nonnegative-integer? 0]
-                            [end-pos (or/c exact-nonnegative-integer? false/c) #f]
-                            [progress (or/c evt false/c) #f])
-          (or/c (listof (or/c (cons exact-nonnegative-integer?
-                                    exact-nonnegative-integer?)
-                              false/c))
-                false/c)]{
+                            [end-pos (or/c exact-nonnegative-integer? #f) #f]
+                            [progress (or/c evt #f) #f])
+          (or/c (listof (or/c (cons/c exact-nonnegative-integer?
+                                      exact-nonnegative-integer?)
+                              #f))
+                #f)]{
 
 Like @scheme[regexp-match-positions] on input ports, but only peeks
 bytes from @scheme[input-port] instead of reading them, and with a
@@ -476,11 +473,10 @@ bytes from @scheme[input-port] instead of reading them, and with a
 @defproc[(regexp-match-peek-immediate [pattern (or/c string? bytes? regexp? byte-regexp?)]
                             [input input-port?]
                             [start-pos exact-nonnegative-integer? 0]
-                            [end-pos (or/c exact-nonnegative-integer? false/c) #f]
-                            [progress (or/c evt false/c) #f])
-          (or/c (listof (or/c (cons bytes? bytes?)
-                              false/c))
-                false/c)]{
+                            [end-pos (or/c exact-nonnegative-integer? #f) #f]
+                            [progress (or/c evt #f) #f])
+          (or/c (listof (or/c bytes? #f))
+                #f)]{
 
 Like @scheme[regexp-match-peek], but it attempts to match only bytes
 that are available from @scheme[input-port] without blocking.  The
@@ -491,12 +487,12 @@ match fails if not-yet-available characters might be used to match
 @defproc[(regexp-match-peek-positions-immediate [pattern (or/c string? bytes? regexp? byte-regexp?)]
                             [input input-port?]
                             [start-pos exact-nonnegative-integer? 0]
-                            [end-pos (or/c exact-nonnegative-integer? false/c) #f]
-                            [progress (or/c evt false/c) #f])
-          (or/c (listof (or/c (cons exact-nonnegative-integer?
-                                    exact-nonnegative-integer?)
-                              false/c))
-                false/c)]{
+                            [end-pos (or/c exact-nonnegative-integer? #f) #f]
+                            [progress (or/c evt #f) #f])
+          (or/c (listof (or/c (cons/c exact-nonnegative-integer?
+                                      exact-nonnegative-integer?)
+                              #f))
+                #f)]{
 
 Like @scheme[regexp-match-peek-positions], but it attempts to match
 only bytes that are available from @scheme[input-port] without
@@ -507,9 +503,9 @@ used to match @scheme[pattern].}
 @defproc[(regexp-match-peek-positions* [pattern (or/c string? bytes? regexp? byte-regexp?)]
                             [input input-port?]
                             [start-pos exact-nonnegative-integer? 0]
-                            [end-pos (or/c exact-nonnegative-integer? false/c) #f])
-         (listof (cons exact-nonnegative-integer?
-                       exact-nonnegative-integer?))]{
+                            [end-pos (or/c exact-nonnegative-integer? #f) #f])
+         (listof (cons/c exact-nonnegative-integer?
+                         exact-nonnegative-integer?))]{
 
 Like @scheme[regexp-match-peek-positions], but returns multiple matches like
 @scheme[regexp-match*].}
@@ -520,7 +516,7 @@ Like @scheme[regexp-match-peek-positions], but returns multiple matches like
 @defproc[(regexp-split [pattern (or/c string? bytes? regexp? byte-regexp?)]
                        [input (or/c string? bytes? input-port?)]
                        [start-pos exact-nonnegative-integer? 0]
-                       [end-pos (or/c exact-nonnegative-integer? false/c) #f])
+                       [end-pos (or/c exact-nonnegative-integer? #f) #f])
          (listof (or/c string? bytes?))]{
 
 The complement of @scheme[regexp-match*]: the result is a list of

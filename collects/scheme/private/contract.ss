@@ -765,16 +765,11 @@ improve method arity mismatch contract violation error messages?
      (syntax (make-proj-contract 
               '(recursive-contract arg) 
               (λ (pos-blame neg-blame src str)
-                (let ([proc (contract-proc arg)])
-                  (λ (val)
-                    ((proc pos-blame neg-blame src str) val))))
+                (let ([ctc (coerce-contract 'recursive-contract arg)])
+                  (let ([proc (contract-proc ctc)])
+                    (λ (val)
+                      ((proc pos-blame neg-blame src str) val)))))
               #f))]))
-
-(define (check-contract ctc)
-  (unless (contract? ctc)
-    (error 'recursive-contract "expected a contract, got ~e" ctc))
-  ctc)
-
 
 ;                                                                                                   
 ;                                                                                                   
@@ -1468,6 +1463,7 @@ improve method arity mismatch contract violation error messages?
    (λ (x)
      (and (number? x)
           (integer? x)
+          (exact? x)
           (x . >= . 0)))))
 
 (define (integer-in start end)

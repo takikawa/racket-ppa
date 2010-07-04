@@ -222,15 +222,15 @@ MZ_EXTERN char *scheme_get_type_name(Scheme_Type type);
 /*========================================================================*/
 
 MZ_EXTERN Scheme_Object scheme_eof[1];
-MZ_EXTERN Scheme_Object *scheme_make_eof(void);
+XFORM_NONGCING MZ_EXTERN Scheme_Object *scheme_make_eof(void);
 MZ_EXTERN Scheme_Object scheme_null[1];
-MZ_EXTERN Scheme_Object *scheme_make_null(void);
+XFORM_NONGCING MZ_EXTERN Scheme_Object *scheme_make_null(void);
 MZ_EXTERN Scheme_Object scheme_true[1];
-MZ_EXTERN Scheme_Object *scheme_make_true(void);
+XFORM_NONGCING MZ_EXTERN Scheme_Object *scheme_make_true(void);
 MZ_EXTERN Scheme_Object scheme_false[1];
-MZ_EXTERN Scheme_Object *scheme_make_false(void);
+XFORM_NONGCING MZ_EXTERN Scheme_Object *scheme_make_false(void);
 MZ_EXTERN Scheme_Object scheme_void[1];
-MZ_EXTERN Scheme_Object *scheme_make_void(void);
+XFORM_NONGCING MZ_EXTERN Scheme_Object *scheme_make_void(void);
 MZ_EXTERN Scheme_Object scheme_undefined[1];
 MZ_EXTERN Scheme_Object *scheme_tail_call_waiting;
 MZ_EXTERN Scheme_Object *scheme_multiple_values;
@@ -358,6 +358,13 @@ MZ_EXTERN void *GC_malloc_uncollectable(size_t size_in_bytes);
 # endif
 #endif
 
+MZ_EXTERN void *scheme_malloc_code(long size);
+MZ_EXTERN void scheme_free_code(void *p);
+#ifndef MZ_PRECISE_GC
+MZ_EXTERN void *scheme_malloc_gcable_code(long size);
+#endif
+
+
 MZ_EXTERN void *scheme_malloc_eternal(size_t n);
 MZ_EXTERN void scheme_end_stubborn_change(void *p);
 
@@ -416,6 +423,7 @@ MZ_EXTERN Scheme_Bucket_Table *scheme_clone_bucket_table(Scheme_Bucket_Table *bt
 
 MZ_EXTERN Scheme_Hash_Table *scheme_make_hash_table(int type);
 MZ_EXTERN Scheme_Hash_Table *scheme_make_hash_table_equal();
+MZ_EXTERN Scheme_Hash_Table *scheme_make_hash_table_eqv();
 MZ_EXTERN void scheme_hash_set(Scheme_Hash_Table *table, Scheme_Object *key, Scheme_Object *val);
 MZ_EXTERN Scheme_Object *scheme_hash_get(Scheme_Hash_Table *table, Scheme_Object *key);
 XFORM_NONGCING MZ_EXTERN Scheme_Object *scheme_eq_hash_get(Scheme_Hash_Table *table, Scheme_Object *key);
@@ -423,15 +431,17 @@ MZ_EXTERN void scheme_hash_set_atomic(Scheme_Hash_Table *table, Scheme_Object *k
 MZ_EXTERN Scheme_Object *scheme_hash_get_atomic(Scheme_Hash_Table *table, Scheme_Object *key);
 MZ_EXTERN int scheme_hash_table_equal(Scheme_Hash_Table *t1, Scheme_Hash_Table *t2);
 MZ_EXTERN int scheme_is_hash_table_equal(Scheme_Object *o);
+MZ_EXTERN int scheme_is_hash_table_eqv(Scheme_Object *o);
 MZ_EXTERN Scheme_Hash_Table *scheme_clone_hash_table(Scheme_Hash_Table *bt);
 
-MZ_EXTERN Scheme_Hash_Tree *scheme_make_hash_tree(int eql);
+MZ_EXTERN Scheme_Hash_Tree *scheme_make_hash_tree(int kind);
 MZ_EXTERN Scheme_Hash_Tree *scheme_hash_tree_set(Scheme_Hash_Tree *tree, Scheme_Object *key, Scheme_Object *val);
 MZ_EXTERN Scheme_Object *scheme_hash_tree_get(Scheme_Hash_Tree *tree, Scheme_Object *key);
 MZ_EXTERN long scheme_hash_tree_next(Scheme_Hash_Tree *tree, long pos);
 MZ_EXTERN int scheme_hash_tree_index(Scheme_Hash_Tree *tree, long pos, Scheme_Object **_key, Scheme_Object **_val);
 MZ_EXTERN int scheme_hash_tree_equal(Scheme_Hash_Tree *t1, Scheme_Hash_Tree *t2);
 MZ_EXTERN int scheme_is_hash_tree_equal(Scheme_Object *o);
+MZ_EXTERN int scheme_is_hash_tree_eqv(Scheme_Object *o);
 
 /*========================================================================*/
 /*                   basic Scheme value constructors                      */
@@ -1004,6 +1014,8 @@ MZ_EXTERN long scheme_equal_hash_key(Scheme_Object *o);
 MZ_EXTERN long scheme_equal_hash_key2(Scheme_Object *o);
 MZ_EXTERN long scheme_recur_equal_hash_key(Scheme_Object *o, void *cycle_data);
 MZ_EXTERN long scheme_recur_equal_hash_key2(Scheme_Object *o, void *cycle_data);
+MZ_EXTERN long scheme_eqv_hash_key(Scheme_Object *o);
+MZ_EXTERN long scheme_eqv_hash_key2(Scheme_Object *o);
 
 MZ_EXTERN void scheme_set_type_equality(Scheme_Type type, 
                                         Scheme_Equal_Proc f,

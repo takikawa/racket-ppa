@@ -4,20 +4,35 @@
 
 @title[#:tag "contracts" #:style 'toc]{Contracts}
 
-This chapter is long on detail and short on the motivation
-and pragmatics of using contracts. See
-@guidesecref["contracts"] in the Guide for more of the
-latter and less of the former.
+@guideintro["contracts"]{contracts}
 
-A @defterm{contract} controls the flow of values to ensure that the
-expectations of one party are met by another party.  The
-@scheme[provide/contract] form is the primary mechanism for
-associating a contract with a binding.
+The contract system guards one part of a program from
+another. Programmers specify the behavior of a module exports via
+@scheme[provide/contract] and the contract system enforces those
+constraints.
 
-Note that all of the combinators that accept contracts as arguments
-use @scheme[coerce-contract], meaning that symbols, booleans, strings,
-bytess, characters, numbers, regular expressions, and predicates
-are all implicitly converted into contracts.
+@deftech{Contracts} come in two forms: those constructed by the
+various operations listed in this section of the manual, and various
+ordinary Scheme values that double as contracts, including 
+@itemize{
+@item{@tech{symbols}, @tech{booleans}, @tech{characters}, and
+@scheme[null], which are treated as contracts that recognize
+themselves, using @scheme[eq?], }
+
+@item{@tech{strings} and @tech{byte strings}, which are treated as contracts
+that recognize themselves using @scheme[equal?], }
+
+@item{@tech{numbers}, which are treated as contracts
+that recognize themselves using @scheme[=],}
+
+@item{@tech{regular expressions}, which are treated as contracts that recognize @tech{byte strings} and @tech{strings} that match the regular expression, and }
+
+@item{predicates: any procedure of arity 1 is treated as a
+predicate. During contract checking, it is applied to the values that
+appear and should return @scheme[#f] to indicate that the contract
+failed, and anything else to indicate it passed.}
+
+}
 
 @note-lib[scheme/contract #:use-sources (scheme/private/contract-ds
                                          scheme/private/contract
@@ -295,7 +310,7 @@ checking will not terminate.}
 
 @defform[(flat-murec-contract ([id flat-contract-expr ...] ...) body ...+)]{
 
-A generalization of @scheme[flat-rec-contracts] for defining several
+A generalization of @scheme[flat-rec-contract] for defining several
 mutually recursive flat contracts simultaneously. Each @scheme[id] is
 visible in the entire @scheme[flat-murec-contract] form, and the
 result of the final @scheme[body] is the result of the entire form.}
@@ -905,19 +920,12 @@ extracts the names from any contracts it is supplied with.}
 
 @defproc[(coerce-contract [id symbol?] [x any/c]) contract?]{
 
-If @scheme[x] is a contract, it returns it. If it is a procedure of
-arity one, it converts that into a contract by treating the result as
-a predicate. If it is a symbol, boolean, or character, it makes a
-contract that accepts values that are @scheme[eq?] to @scheme[x]. If
-@scheme[x] is a string or a bytes, it makes a contract that
-accespts values that are @scheme[equal?] to @scheme[x]. If @scheme[x]
-is a regular expression or a byte regular expression, it makes a
-contract that accepts strings and bytes, as long as they match the
-regular expression.
+Converts a regular scheme value into an instance of a contract struct,
+converting it according to the description of @tech{contracts}.
 
-If @scheme[x] is none of the above, @scheme[coerce-contract]
-signals an error, using the first argument in the error
-message.}
+If @scheme[x] is not one of the coercable values,
+@scheme[coerce-contract] signals an error, using the first argument in
+the error message.}
 
 @defproc[(coerce-contracts [id symbol?] [xs (listof any/c)]) (listof contract?)]{
 
@@ -980,15 +988,20 @@ raised by the contract system.}
 
 @defproc[(contract? [v any/c]) boolean?]{
 
-Returns @scheme[#t] if its argument is a contract (ie, constructed
-with one of the combinators described in this section), @scheme[#f]
-otherwise.}
+Returns @scheme[#t] if its argument is a contract (i.e., constructed
+with one of the combinators described in this section or a value that
+can be used as a contract) and @scheme[#f] otherwise.}
 
 @defproc[(flat-contract? [v any/c]) boolean?]{
 
-Returns @scheme[#t] when its argument is a contract that has been
-constructed with @scheme[flat-contract] (and thus is essentially just
-a predicate), @scheme[#f] otherwise.}
+Returns @scheme[#t] when its argument is a contract that can be
+checked immediately (unlike, say, a function contract). 
+
+For example,
+@scheme[flat-contract] constructs flat contracts from predicates, and
+symbols, booleans, numbers, and other ordinary Scheme values
+(that are defined as @tech{contracts}) are also
+flat contracts.}
 
 @defproc[(flat-contract-predicate [v flat-contract?])
          (any/c . -> . any/c)]{

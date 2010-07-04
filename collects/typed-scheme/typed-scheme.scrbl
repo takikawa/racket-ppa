@@ -457,11 +457,13 @@ The following base types are parameteric in their type arguments.
   @scheme[t] at types @scheme[t1 t2 ...]}
 @defform[(All (v ...) t)]{is a parameterization of type @scheme[t], with
   type variables @scheme[v ...]}
+@defform[(List t ...)]{is the type of the list with one element, in order, 
+  for each type provided to the @scheme[List] type constructor.}
 @defform[(values t ...)]{is the type of a sequence of multiple values, with
 types @scheme[t ...].  This can only appear as the return type of a
 function.}
-@defform/none[v]{where @scheme[v] is a number, boolean or string, is the singleton type containing
-only that value}
+@defform/none[v]{where @scheme[v] is a number, boolean or string, is the singleton type containing only that value}
+@defform/none['sym]{where @scheme[sym] is a symbol, is the singleton type containing only that symbol}
 @defform/none[i]{where @scheme[i] is an identifier can be a reference to a type
 name or a type variable}
 @defform[(Rec n t)]{is a recursive type where @scheme[n] is bound to the
@@ -522,11 +524,12 @@ types.  In most cases, use of @scheme[:] is preferred to use of @scheme[define:]
 (define-struct: name ([f : t] ...))
 (define-struct: (name parent) ([f : t] ...))
 (define-struct: (v ...) name ([f : t] ...))
-(define-struct: (v ...) (name parent) ([f : t] ...))]]
-{Defines a @rtech{structure} with the name @scheme[name], where the fields 
-         @scheme[f] have types @scheme[t].  The second and fourth forms define @scheme[name]
-         to be a substructure of @scheme[parent].  The last two forms define structures that 
-         are polymorphic in the type variables @scheme[v].}
+(define-struct: (v ...) (name parent) ([f : t] ...))]]{
+ Defines a @rtech{structure} with the name @scheme[name], where the
+ fields @scheme[f] have types @scheme[t].  The second and fourth forms
+ define @scheme[name] to be a substructure of @scheme[parent].  The
+ last two forms define structures that are polymorphic in the type
+ variables @scheme[v].}
 
 @subsection{Type Aliases}
 @defform*[[(define-type-alias name t)

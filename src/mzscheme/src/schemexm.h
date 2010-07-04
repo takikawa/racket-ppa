@@ -194,6 +194,11 @@
 #  endif
 # endif
 #endif
+#define scheme_malloc_code (scheme_extension_table->scheme_malloc_code)
+#define scheme_free_code (scheme_extension_table->scheme_free_code)
+#ifndef MZ_PRECISE_GC
+#define scheme_malloc_gcable_code (scheme_extension_table->scheme_malloc_gcable_code)
+#endif
 #define scheme_malloc_eternal (scheme_extension_table->scheme_malloc_eternal)
 #define scheme_end_stubborn_change (scheme_extension_table->scheme_end_stubborn_change)
 #define scheme_calloc (scheme_extension_table->scheme_calloc)
@@ -234,6 +239,7 @@
 #define scheme_clone_bucket_table (scheme_extension_table->scheme_clone_bucket_table)
 #define scheme_make_hash_table (scheme_extension_table->scheme_make_hash_table)
 #define scheme_make_hash_table_equal (scheme_extension_table->scheme_make_hash_table_equal)
+#define scheme_make_hash_table_eqv (scheme_extension_table->scheme_make_hash_table_eqv)
 #define scheme_hash_set (scheme_extension_table->scheme_hash_set)
 #define scheme_hash_get (scheme_extension_table->scheme_hash_get)
 #define scheme_eq_hash_get (scheme_extension_table->scheme_eq_hash_get)
@@ -241,6 +247,7 @@
 #define scheme_hash_get_atomic (scheme_extension_table->scheme_hash_get_atomic)
 #define scheme_hash_table_equal (scheme_extension_table->scheme_hash_table_equal)
 #define scheme_is_hash_table_equal (scheme_extension_table->scheme_is_hash_table_equal)
+#define scheme_is_hash_table_eqv (scheme_extension_table->scheme_is_hash_table_eqv)
 #define scheme_clone_hash_table (scheme_extension_table->scheme_clone_hash_table)
 #define scheme_make_hash_tree (scheme_extension_table->scheme_make_hash_tree)
 #define scheme_hash_tree_set (scheme_extension_table->scheme_hash_tree_set)
@@ -249,6 +256,7 @@
 #define scheme_hash_tree_index (scheme_extension_table->scheme_hash_tree_index)
 #define scheme_hash_tree_equal (scheme_extension_table->scheme_hash_tree_equal)
 #define scheme_is_hash_tree_equal (scheme_extension_table->scheme_is_hash_tree_equal)
+#define scheme_is_hash_tree_eqv (scheme_extension_table->scheme_is_hash_tree_eqv)
 #define scheme_make_prim (scheme_extension_table->scheme_make_prim)
 #define scheme_make_noneternal_prim (scheme_extension_table->scheme_make_noneternal_prim)
 #define scheme_make_prim_w_arity (scheme_extension_table->scheme_make_prim_w_arity)
@@ -572,6 +580,8 @@
 #define scheme_equal_hash_key2 (scheme_extension_table->scheme_equal_hash_key2)
 #define scheme_recur_equal_hash_key (scheme_extension_table->scheme_recur_equal_hash_key)
 #define scheme_recur_equal_hash_key2 (scheme_extension_table->scheme_recur_equal_hash_key2)
+#define scheme_eqv_hash_key (scheme_extension_table->scheme_eqv_hash_key)
+#define scheme_eqv_hash_key2 (scheme_extension_table->scheme_eqv_hash_key2)
 #define scheme_set_type_equality (scheme_extension_table->scheme_set_type_equality)
 #define scheme_recur_equal (scheme_extension_table->scheme_recur_equal)
 #define scheme_build_list (scheme_extension_table->scheme_build_list)
