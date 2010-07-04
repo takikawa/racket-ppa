@@ -32,7 +32,6 @@
                            (lambda () (put-preferences '(test:test-window:docked?) '(#f)) #f))))
     
     (define/public (report-success)
-      (printf "calling report-success~n")
       (when current-rep
         (unless current-tab
           (set! current-tab (send (send current-rep get-definitions-text) get-tab)))
@@ -40,15 +39,10 @@
           (set! drscheme-frame (send current-rep get-top-level-window)))
         (let ([curr-win (and current-tab (send current-tab get-test-window))]
               [content (make-object (editor:standard-style-list-mixin text%))])
-          (printf "current-tab ~a , curr-win ~a ~n" current-tab curr-win) 
           (send this insert-test-results content test-info src-editor)
-          (printf "inserted test results~n")
           (send content lock #t)
-          (printf "locked content~n")
           (when curr-win (send curr-win update-editor content))
-          (printf "updated test-window editor~n")
           (when current-tab (send current-tab current-test-editor content))
-          (printf "editors updated~n")
           (when (and curr-win (docked?))
             (send drscheme-frame display-test-panel content)
             #;(send curr-win show #f))
