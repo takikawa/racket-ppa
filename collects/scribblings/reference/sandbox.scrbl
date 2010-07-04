@@ -19,13 +19,14 @@ particular way and can have restricted resources (memory and time),
 filesystem access, and network access.
 
 @defproc*[([(make-evaluator [language (or/c module-path? 
-                                            (list/c (one-of/c 'special) symbol?)
-                                            (cons/c (one-of/c 'begin) list?))]
+                                            (list/c 'special symbol?)
+                                            (cons/c 'begin list?))]
                             [input-program any/c] ...
                             [#:requires requires (listof (or/c module-path? path?))]
                             [#:allow-read allow (listof (or/c module-path? path?))])
             (any/c . -> . any)]
            [(make-module-evaluator [module-decl (or/c syntax? pair?)]
+                                   [#:language   lang  (or/c #f module-path?)]
                                    [#:allow-read allow (listof (or/c module-path? path?))])
             (any/c . -> . any)])]{
 
@@ -47,7 +48,7 @@ included in the @scheme[allow] list.
 Each @scheme[input-program] or @scheme[module-decl] argument provides
 a program in one of the following forms:
 
-@itemize{
+@itemize[
 
  @item{an input port used to read the program;}
 
@@ -58,8 +59,7 @@ a program in one of the following forms:
  @item{an S-expression or a @tech{syntax object}, which is evaluated
        as with @scheme[eval] (see also
        @scheme[get-uncovered-expressions]).}
-
-}
+]
 
 In the first three cases above, the program is read using
 @scheme[sandbox-reader], with line-counting enabled for sensible error
@@ -82,7 +82,7 @@ effectively concatenated to form a single program. The way that the
 @scheme[input-program]s are evaluated depends on the @scheme[language]
 argument:
 
-@itemize{
+@itemize[
 
  @item{The @scheme[language] argument can be a module path (i.e., a
        datum that matches the grammar for @scheme[_module-path] of
@@ -122,7 +122,7 @@ argument:
        In the new namespace, @scheme[language] is evaluated as an
        expression to further initialize the namespace.}
 
-}
+]
 
 The @scheme[requires] list adds additional imports to the module or
 namespace for the @scheme[input-program]s, even in the case that
@@ -152,7 +152,11 @@ top-level namespace:
 
 The @scheme[make-module-evaluator] function is essentially a
 restriction of @scheme[make-evaluator], where the program must be a
-module, and all imports are part of the program:
+module, and all imports are part of the program.  In some cases it is
+useful to restrict the program to be a module using a spcific module
+in its language position --- use the optional @scheme[lang] argument
+to specify such a restriction (the default, @scheme[#f], means no
+restriction is enforced).
 
 @schemeblock[
 (define base-module-eval2
@@ -165,7 +169,7 @@ module, and all imports are part of the program:
 In all cases, the evaluator operates in an isolated and limited
 environment:
 
-@itemize{
+@itemize[
 
  @item{It uses a new custodian and namespace. When @scheme[gui?] is
        true, it is also runs in its own eventspace.}
@@ -175,7 +179,7 @@ environment:
 
  @item{Each evaluation is wrapped in a @scheme[call-with-limits]; see
        also @scheme[sandbox-eval-limits] and @scheme[set-eval-limits].}
-}
+]
 
 Evaluation can also be instrumented to track coverage information when
 @scheme[sandbox-coverage-enabled] is set. Exceptions (both syntax and
@@ -261,17 +265,17 @@ calls @scheme[read-syntax], accumulating results in a list until it
 receives @scheme[eof].}
 
 
-@defparam[sandbox-input in (or/c false/c
-                                 string? bytes? 
-                                 input-port? 
-                                 (one-of/c 'pipe)
+@defparam[sandbox-input in (or/c #f
+                                 string? bytes?
+                                 input-port?
+                                 'pipe
                                  (-> input-port?))]{
 
 A parameter that determines the initial @scheme[current-input-port]
 setting for a newly created evaluator. It defaults to @scheme[#f],
 which creates an empty port.  The following other values are allowed:
 
-@itemize{
+@itemize[
 
  @item{a string or byte string, which is converted to a port using
        @scheme[open-input-string] or @scheme[open-input-bytes];}
@@ -286,12 +290,14 @@ which creates an empty port.  The following other values are allowed:
        @scheme[current-input-port] means that the evaluator input is
        the same as the calling context's input).}
 
-}}
+]}
 
 
-@defparam[sandbox-output in (or/c false/c
+@defparam[sandbox-output in (or/c #f
                                   output-port? 
-                                  (one-of/c 'pipe 'bytes 'string)
+                                  'pipe
+                                  'bytes
+                                  'string
                                   (-> output-port?))]{
 
 A parameter that determines the initial @scheme[current-output-port]
@@ -299,7 +305,7 @@ setting for a newly created evaluator. It defaults to @scheme[#f],
 which creates a port that discrds all data.  The following other
 values are allowed:
 
-@itemize{
+@itemize[
 
  @item{an output port, which is used as-is;}
 
@@ -318,12 +324,14 @@ values are allowed:
        @scheme[current-output-port] means that the evaluator output is
        not diverted).}
 
-}}
+]}
 
 
-@defparam[sandbox-error-output in (or/c false/c
+@defparam[sandbox-error-output in (or/c #f
                                         output-port? 
-                                        (one-of/c 'pipe 'bytes 'string)
+                                        'pipe
+                                        'bytes
+                                        'string
                                         (-> output-port?))]{
 
 Like @scheme[sandbox-output], but for the initial
@@ -410,8 +418,7 @@ default forbids all filesystem I/O except for things in
 
 
 @defparam[sandbox-path-permissions perms
-          (listof (list/c (one-of/c 'execute 'write 'delete
-                                    'read 'exists)
+          (listof (list/c (or/c 'execute 'write 'delete 'read 'exists)
                           (or/c byte-regexp? bytes? string? path?)))]{
 
 A parameter that configures the behavior of the default sandbox
@@ -440,9 +447,9 @@ collection libraries (including
 
 @defparam[sandbox-network-guard proc
           (symbol?
-           (or/c (and/c string? immutable?) false/c)
-           (or/c (integer-in 1 65535) false/c)
-           (one-of/c 'server 'client)
+           (or/c (and/c string? immutable?) #f)
+           (or/c (integer-in 1 65535) #f)
+           (or/c 'server 'client)
            . -> . any)]{
 
 A parameter that specifieds a procedure to be used (as is) by the
@@ -451,9 +458,9 @@ network connection.}
 
 
 @defparam[sandbox-eval-limits limits
-          (or/c (list/c (or/c exact-nonnegative-integer? false/c)
-                        (or/c exact-nonnegative-integer? false/c))
-                false/c)]{
+          (or/c (list/c (or/c exact-nonnegative-integer? #f)
+                        (or/c exact-nonnegative-integer? #f))
+                #f)]{
 
 A parameter that determines the default limits on @italic{each} use of
 a @scheme[make-evaluator] function, including the initial evaluation
@@ -509,8 +516,8 @@ propagates the break to the evaluator's context.}
 
 
 @defproc[(set-eval-limits [evaluator (any/c . -> . any)]
-                          [secs (or/c exact-nonnegative-integer? false/c)]
-                          [mb (or/c exact-nonnegative-integer? false/c)]) void?]{
+                          [secs (or/c exact-nonnegative-integer? #f)]
+                          [mb (or/c exact-nonnegative-integer? #f)]) void?]{
 
 Changes the per-expression limits that @scheme[evaluator] uses to
 @scheme[sec] seconds and @scheme[mb] megabytes (either one can be
@@ -532,14 +539,14 @@ byte string into the pipe.  It can also be used with @scheme[eof],
 which closes the pipe.}
 
 
-@defproc*[([(get-output [evaluator (any/c . -> . any)]) (or/c input-port? bytes? string?)]
-           [(get-error-output [evaluator (any/c . -> . any)]) (or/c input-port? bytes? string?)])]{
+@defproc*[([(get-output [evaluator (any/c . -> . any)]) (or/c #f input-port? bytes? string?)]
+           [(get-error-output [evaluator (any/c . -> . any)]) (or/c #f input-port? bytes? string?)])]{
 
 Returns the output or error-output of the @scheme[evaluator],
 in a way that depends on the setting of @scheme[(sandbox-output)] or
 @scheme[(sandbox-error-output)] when the evaluator was created:
 
-@itemize{
+@itemize[
 
  @item{if it was @scheme['pipe], then @scheme[get-output] returns the
       input port end of the created pipe;}
@@ -550,7 +557,7 @@ in a way that depends on the setting of @scheme[(sandbox-output)] or
        piece of the evaluator's output);}
 
   @item{otherwise, it returns @scheme[#f].}
-}}
+]}
 
 
 @defproc[(get-uncovered-expressions [evaluator (any/c . -> . any)]
@@ -610,8 +617,8 @@ when the GUI library is available, such as using a new eventspace for
 each evaluator.}
 
 
-@defproc[(call-with-limits [secs (or/c exact-nonnegative-integer? false/c)]
-                           [mb (or/c exact-nonnegative-integer? false/c)]
+@defproc[(call-with-limits [secs (or/c exact-nonnegative-integer? #f)]
+                           [mb (or/c exact-nonnegative-integer? #f)]
                            [thunk (-> any)])
          any]{
 
@@ -638,7 +645,7 @@ A macro version of @scheme[call-with-limits].}
 
 @defproc*[([(exn:fail:resource? [v any/c]) boolean?]
            [(exn:fail:resource-resource [exn exn:fail:resource?])
-            (one-of/c 'time 'memory)])]{
+            (or/c 'time 'memory)])]{
 
 A predicate and accessor for exceptions that are raised by
 @scheme[call-with-limits].  The @scheme[resource] field holds a symbol,

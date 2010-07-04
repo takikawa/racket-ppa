@@ -36,7 +36,7 @@
 
 (let ()
   (define-language lc
-    (e (e e)
+    (e (e e ...)
        (+ e e)
        x
        v)
@@ -56,34 +56,39 @@
   (test (min-prods (car (compiled-lang-lang lang)) (find-base-cases lang))
         (list (car (nt-rhs (car (compiled-lang-lang lang)))))))
 
-(define (make-random nums)
+(define (make-random . nums)
   (let ([nums (box nums)])
-    (λ (m)
+    (λ ([m +inf.0])
       (cond [(null? (unbox nums)) (error 'make-random "out of numbers")]
             [(>= (car (unbox nums)) m) (error 'make-random "number too large")]
             [else (begin0 (car (unbox nums)) (set-box! nums (cdr (unbox nums))))]))))
 
-(test (pick-from-list '(a b c) (make-random '(1))) 'b)
+(test (pick-from-list '(a b c) (make-random 1)) 'b)
 
-(test (pick-length (make-random '(1 1 1 0))) 3)
+(test (pick-number 3 (make-random .5)) 2)
+(test (pick-number 109 (make-random 0 0 .5)) -6)
+(test (pick-number 509 (make-random 0 0 1 .5 .25)) 3/7)
+(test (pick-number 1009 (make-random 0 0 0 .5 1 .5)) 6.0)
+(test (pick-number 2009 (make-random 0 0 0 0 2 .5 1 .5 0 0 .5))
+      (make-rectangular 6.0 -6))
 
 (let* ([lits '("bcd" "cbd")]
        [chars (sort (unique-chars lits) char<=?)])
-  (test (pick-char 0 chars (make-random '(1))) #\c)
-  (test (pick-char 50 chars (make-random '(1 1))) #\c)
-  (test (pick-char 50 chars (make-random '(0 65))) #\a)
-  (test (pick-char 500 chars (make-random '(0 1 65))) #\a)
-  (test (pick-char 500 chars (make-random '(0 0 3))) #\⇒)
-  (test (pick-char 2000 chars (make-random '(0 0 1 3))) #\⇒)
-  (test (pick-char 2000 chars (make-random '(0 0 0 1))) (integer->char #x4E01))
-  (test (pick-char 50 chars (make-random `(0 ,(- (char->integer #\_) #x20)))) #\`)
-  (test (random-string chars lits 3 0 (make-random '(0 1))) "cbd")
-  (test (random-string chars lits 3 0 (make-random '(1 2 1 0))) "dcb")
-  (test (pick-string chars lits 0 (make-random '(1 1 1 0 1 2 1 0))) "dcb")
-  (test (pick-var chars lits null 0 (make-random '(0 0 1 1 2 1 0))) 'dcb)
-  (test (pick-var chars lits '(x) 0 (make-random '(1 0))) 'x)
-  (test (pick-char 0 null (make-random '(65))) #\a)
-  (test (random-string null null 1 0 (make-random '(65))) "a"))
+  (test (pick-char 0 chars (make-random 1)) #\c)
+  (test (pick-char 50 chars (make-random 1 1)) #\c)
+  (test (pick-char 50 chars (make-random 0 65)) #\a)
+  (test (pick-char 500 chars (make-random 0 1 65)) #\a)
+  (test (pick-char 500 chars (make-random 0 0 3)) #\⇒)
+  (test (pick-char 2000 chars (make-random 0 0 1 3)) #\⇒)
+  (test (pick-char 2000 chars (make-random 0 0 0 1)) (integer->char #x4E01))
+  (test (pick-char 50 chars (make-random 0 (- (char->integer #\_) #x20))) #\`)
+  (test (random-string chars lits 3 0 (make-random 0 1)) "cbd")
+  (test (random-string chars lits 3 0 (make-random 1 2 1 0)) "dcb")
+  (test (pick-string chars lits 0 (make-random .5 1 2 1 0)) "dcb")
+  (test (pick-var chars lits null 0 (make-random .01 1 2 1 0)) 'dcb)
+  (test (pick-var chars lits '(x) 0 (make-random .5 0)) 'x)
+  (test (pick-char 0 null (make-random 65)) #\a)
+  (test (random-string null null 1 0 (make-random 65)) "a"))
 
 (define-syntax exn:fail-message
   (syntax-rules ()
@@ -113,9 +118,9 @@
 (define (decisions #:var [var pick-var] 
                    #:nt [nt pick-nt]
                    #:str [str pick-string]
-                   #:num [num pick-from-list]
+                   #:num [num pick-number]
                    #:any [any pick-any]
-                   #:seq [seq pick-length])
+                   #:seq [seq pick-sequence-length])
   (define-syntax decision
     (syntax-rules ()
       [(_ d) (if (procedure? d) (λ () d) (iterator (quote d) d))]))
@@ -216,23 +221,23 @@
    (generate/decisions 
     lang a 2 0
     (decisions #:num (build-list 3 (λ (n) (λ (_) n)))
-               #:seq (list (λ () 2) (λ () 3) (λ () 1))))
+               #:seq (list (λ (_) 2) (λ (_) 3) (λ (_) 1))))
    `(0 1 2 "foo" "foo" "foo" "bar" #t))
-  (test (generate/decisions lang b 5 0 (decisions #:seq (list (λ () 0))))
+  (test (generate/decisions lang b 5 0 (decisions #:seq (list (λ (_) 0))))
         null)
-  (test (generate/decisions lang c 5 0 (decisions #:seq (list (λ () 0))))
+  (test (generate/decisions lang c 5 0 (decisions #:seq (list (λ (_) 0))))
         null)
-  (test (generate/decisions lang d 5 0 (decisions #:seq (list (λ () 2))))
+  (test (generate/decisions lang d 5 0 (decisions #:seq (list (λ (_) 2))))
         '(4 4 4 4 (4 4) (4 4)))
   (test (exn:fail-message (generate lang e 5)) 
         #rx"generate: unable to generate pattern \\(n_1 ..._!_1 n_2 ..._!_1 \\(n_1 n_2\\) ..._3\\)")
-  (test (generate/decisions lang f 5 0 (decisions #:seq (list (λ () 0)))) null)
+  (test (generate/decisions lang f 5 0 (decisions #:seq (list (λ (_) 0)))) null)
   (test (generate/decisions lang ((0 ..._!_1) ... (1 ..._!_1) ...) 5 0
-                  (decisions #:seq (list (λ () 2) (λ () 3) (λ () 4) (λ () 2) (λ () 3) (λ () 4)
-                                         (λ () 2) (λ () 3) (λ () 4) (λ () 1) (λ () 3))))
+                  (decisions #:seq (list (λ (_) 2) (λ (_) 3) (λ (_) 4) (λ (_) 2) (λ (_) 3) (λ (_) 4)
+                                         (λ (_) 2) (λ (_) 3) (λ (_) 4) (λ (_) 1) (λ (_) 3))))
         '((0 0 0) (0 0 0 0) (1 1 1)))
   (test (generate/decisions lang ((0 ..._!_1) ... (1 ..._!_1) ...) 5 0
-                  (decisions #:seq (list (λ () 2) (λ () 3) (λ () 4) (λ () 2) (λ () 3) (λ () 5))))
+                  (decisions #:seq (list (λ (_) 2) (λ (_) 3) (λ (_) 4) (λ (_) 2) (λ (_) 3) (λ (_) 5))))
         '((0 0 0) (0 0 0 0) (1 1 1) (1 1 1 1 1))))
 
 (let ()
@@ -249,7 +254,7 @@
       lc e 10 0
       (decisions #:var (list (λ _ 'x) (λ _ 'y) (λ (c l b a) (k b)))
                  #:nt (patterns first first first third first)
-                 #:seq (list (λ () 2)))))
+                 #:seq (list (λ (_) 2)))))
    '(y x)))
 
 (let ()
@@ -347,7 +352,7 @@
   (test ; bindings within ellipses collected properly
    (let/ec k
      (generate/decisions lang (side-condition (((number_1 3) ...) ...) (k (term ((number_1 ...) ...)))) 5 0
-               (decisions #:seq (list (λ () 2) (λ () 3) (λ () 4))
+               (decisions #:seq (list (λ (_) 2) (λ (_) 3) (λ (_) 4))
                           #:num (build-list 7 (λ (n) (λ (_) n))))))
    '((0 1 2) (3 4 5 6))))
 
@@ -414,11 +419,12 @@
   (define-language four 
     (e 4)
     (f 5))
+  (define-language empty)
   
   ;; `any' pattern
-  (test (call-with-values (λ () (pick-any four (make-random (list 0 1)))) list)
+  (test (call-with-values (λ () (pick-any four (make-random 0 1))) list)
         (list four 'f))
-  (test (call-with-values (λ () (pick-any four (make-random (list 1)))) list)
+  (test (call-with-values (λ () (pick-any four (make-random 1))) list)
         (list sexp 'sexp))
   (test (generate/decisions four any 5 0 (decisions #:any (list (λ _ (values four 'e))))) 4)
   (test (generate/decisions four any 5 0 
@@ -426,7 +432,10 @@
                              #:nt (patterns fifth second second second)
                              #:seq (list (λ _ 3))
                              #:str (list (λ _ "foo") (λ _ "bar") (λ _ "baz"))))
-        '("foo" "bar" "baz")))
+        '("foo" "bar" "baz"))
+  (test (generate/decisions empty any 5 0 (decisions #:nt (patterns first)
+                                                     #:var (list (λ _ 'x))))
+        'x))
 
 ;; `hide-hole' pattern
 (let ()
@@ -460,19 +469,54 @@
       (get-output-string p)
       (close-output-port p))))
 
+;; check
 (let ()
   (define-language lang
     (d 5)
     (e e 4))
-  (test (current-error-port-output (λ () (check lang d 2 0 #f))) 
-        "failed after 1 attempts: 5")
-  (test (check lang d 2 0 #t) #t)
-  (test (check lang (d e) 2 0 (and (eq? (term d) 5) (eq? (term e) 4))) #t)
-  (test (check lang (d ...) 2 0 (zero? (modulo (foldl + 0 (term (d ...))) 5))) #t)
-  (test (current-error-port-output (λ () (check lang (d e) 2 0 #f)))
-        "failed after 1 attempts: (5 4)")
-  (test (exn:fail-message (check lang d 2 0 (error 'pred-raised)))
-        #rx"term 5 raises"))
+  (test (current-error-port-output (λ () (check lang d 2 #f))) 
+        "failed after 1 attempts:\n5\n")
+  (test (check lang d #t) #t)
+  (test (check lang (d e) 2 (and (eq? (term d) 5) (eq? (term e) 4))) #t)
+  (test (check lang (d ...) 2 (zero? (modulo (foldl + 0 (term (d ...))) 5))) #t)
+  (test (current-error-port-output (λ () (check lang (d e) 2 #f)))
+        "failed after 1 attempts:\n(5 4)\n")
+  (test (current-error-port-output (λ () (check lang d 2 (error 'pred-raised))))
+        "failed after 1 attempts:\n5\n"))
+
+;; check-metafunction
+(let ()
+  (define-language empty)
+  (define-metafunction empty
+    f : (side-condition number_1 (odd? (term number_1))) -> number
+    [(f 1) 1]
+    [(f 3) 'NaN])
+  
+  (define-metafunction empty
+    g : number ... -> (any ...)
+    [(g number_1 ... 1 number_2 ...) ()])
+  
+  (define-metafunction empty
+    h : number -> number
+    [(h any) any])
+  
+  (define-metafunction empty
+    [(i any ...) (any ...)])
+  
+  ;; Dom(f) < Ctc(f)
+  (test (current-error-port-output (λ () (check-metafunction f (decisions #:num (list (λ _ 2) (λ _ 5))))))
+        "failed after 1 attempts:\n(5)\n")
+  ;; Rng(f) > Codom(f)
+  (test (current-error-port-output (λ () (check-metafunction f (decisions #:num (list (λ _ 3))))))
+        "failed after 1 attempts:\n(3)\n")
+  ;; LHS matches multiple ways
+  (test (current-error-port-output (λ () (check-metafunction g (decisions #:num (list (λ _ 1) (λ _ 1))
+                                                                          #:seq (list (λ _ 2))))))
+        "failed after 1 attempts:\n(1 1)\n")
+  ;; OK -- generated from Dom(h)
+  (test (check-metafunction h) #t)
+  ;; OK -- generated from pattern (any ...)
+  (test (check-metafunction i) #t))
 
 ;; parse/unparse-pattern
 (let-syntax ([test-match (syntax-rules () [(_ p x) (test (match x [p #t] [_ #f]) #t)])])

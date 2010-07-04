@@ -530,7 +530,7 @@ Scheme_Bucket *scheme_bucket_or_null_from_table(Scheme_Bucket_Table *table, cons
 
 struct Scheme_Hash_Tree
 {
-  Scheme_Inclhash_Object iso; /* 0x1 flag => equal?-based hashing */
+  Scheme_Inclhash_Object iso; /* 0x1 flag => equal?-based hashing; 0x2 flag => eqv?-based hashing */
   int count;
   struct RBNode *root;
   Scheme_Object *elems_box; /* vector in a weak box */
@@ -1007,6 +1007,9 @@ Scheme_Object *scheme_unclose_case_lambda(Scheme_Object *expr, int jit);
 Scheme_Object *scheme_native_stack_trace(void);
 void scheme_clean_native_symtab(void);
 void scheme_clean_cust_box_list(void);
+#ifndef MZ_PRECISE_GC
+void scheme_notify_code_gc(void);
+#endif
 
 /*========================================================================*/
 /*                              control flow                              */
@@ -2631,7 +2634,8 @@ void scheme_add_global_constant_symbol(Scheme_Object *name, Scheme_Object *v, Sc
 
 
 
-Scheme_Object *scheme_tl_id_sym(Scheme_Env *env, Scheme_Object *id, Scheme_Object *bdg, int is_def, Scheme_Object *phase);
+Scheme_Object *scheme_tl_id_sym(Scheme_Env *env, Scheme_Object *id, Scheme_Object *bdg, int is_def, 
+                                Scheme_Object *phase, int *_skipped);
 int scheme_tl_id_is_sym_used(Scheme_Hash_Table *marked_names, Scheme_Object *sym);
 
 Scheme_Object *scheme_sys_wraps(Scheme_Comp_Env *env);
