@@ -347,8 +347,9 @@
             (cons 'release (send version get-value))
             (cons 'description (apply string-append (map (lambda (x) (string-append x "\n")) 
                                                          (get-strings description))))
-            (cons 'how-to-repeat (apply string-append (map (lambda (x) (string-append x "\n")) 
-                                                           (get-strings reproduce))))
+            (cons 'how-to-repeat (apply string-append 
+                                        (map (lambda (x) (string-append x "\n")) 
+                                             (get-strings reproduce))))
             (cons 'platform (get-environment))))
     
     (define (get-environment)
@@ -378,7 +379,7 @@
                 (string->url (format "http://~a:~a/cgi-bin/bug-report"
                                      bug-www-server
                                      bug-www-server-port))]
-               [post-data 
+               [post-data
                 (parameterize ([current-alist-separator-mode 'amp])
                   (string->bytes/utf-8 (alist->form-urlencoded query)))]
                [http-thread

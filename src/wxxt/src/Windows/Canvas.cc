@@ -87,6 +87,8 @@ Bool wxCanvas::Create(wxPanel *panel, int x, int y, int width, int height,
 	 NULL);
     if (!(style & wxINVISIBLE))
       XtManageChild(wgt);
+    else
+      XtRealizeWidget(wgt);
     X->frame = wgt;
     // create scrolled area
     wgt = XtVaCreateManagedWidget
@@ -489,3 +491,10 @@ void wxCanvas::OnChar(wxKeyEvent *event)
     }
 }
 
+Bool wxCanvas::WantsFocus(void)
+{
+  if (GetWindowStyleFlag() & wxNEVER_FOCUS)
+    return FALSE;
+  else
+    return TRUE;
+}

@@ -424,6 +424,97 @@
                 (quote-syntax no!))
            ''ok)
 
+(test-comp '(values 10)
+           10)
+(test-comp '(let ([x (values 10)])
+              (values x))
+           10)
+(test-comp '(let ([x (random)])
+              (values x))
+           '(let ([x (random)])
+              x))
+
+(test-comp '(let-values ([(x y) (values 1 2)])
+              (+ x y))
+           3)
+
+(test-comp '(let-values ([() (values)])
+              5)
+           5)
+
+(test-comp '(letrec-values ([() (values)])
+              5)
+           5)
+
+(test-comp '(let-values ([() (values)]
+                         [(x) 10])
+              x)
+           10)
+
+(test-comp '(letrec-values ([() (values)]
+                            [(x) 10])
+              x)
+           10)
+
+(test-comp '(letrec-values ([(x) 10]
+                            [() (values)])
+              x)
+           10)
+
+(test-comp '(let-values ([(x) 10]
+                         [() (values)])
+              x)
+           10)
+
+(test-comp '(letrec ([x 3]
+                     [f (lambda (y) x)])
+              f)
+           '(letrec ([f (lambda (y) 3)])
+              f))
+
+(test-comp '(letrec ([x 3]
+                     [f (lambda (y) x)])
+              (f 10))
+           3)
+
+(test-comp '(letrec ([f (lambda (y) (f y))])
+              3)
+           3)
+
+(test-comp '(letrec ([len (lambda (l)
+                            (if (null? l)
+                                0
+                                (len (cdr l))))])
+              (len null))
+           0)
+
+(test-comp '(letrec ([foo (lambda ()
+                            (set! foo 10))])
+              0)
+           0)
+
+(test-comp '(letrec ([foo (lambda () 12)]
+                     [goo (lambda () foo)])
+              goo)
+           '(let* ([foo (lambda () 12)]
+                   [goo (lambda () foo)])
+              goo))
+
+(test-comp '(let* ([foo (lambda () 12)]
+                   [goo (lambda () foo)])
+              11)
+           11)
+
+(test-comp '(letrec ([foo (lambda () 12)]
+                     [goo (lambda () foo)])
+              11)
+           11)
+
+(test-comp '(letrec ([goo (lambda () foo)]
+                     [foo (lambda () goo)])
+              15)
+           15)
+
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Check bytecode verification of lifted functions
 

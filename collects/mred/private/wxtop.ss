@@ -42,11 +42,13 @@
 	    [yb (box 0)])
 	(wx:display-origin xb yb advisory?)
 	(values (unbox xb) (unbox yb)))))
-  
-  (define-values (init-top-x init-top-y)
+
+  (define-values (left-margin top-margin init-top-x init-top-y)
     (let-values ([(x y) (get-display-left-top-inset #f)]
 		 [(x2 y2) (get-display-left-top-inset #t)])
-      (values (+ 1 (- x2 x))
+      (values (- x2 x)
+              (- y2 y)
+              (+ 1 (- x2 x))
 	      (+ 1 (- y2 y)))))
 
   (define top-x init-top-x)
@@ -95,7 +97,8 @@
 
        [parent-for-center parent]
 
-       [show-ht (make-hash-table)])
+       [show-ht (make-hash-table)]
+       [fake-show-ht (make-hash-table)])
       
       (override
 	[enable
@@ -196,6 +199,13 @@
 	   (when perform-updates?
 	     (when pending-redraws?
 	       (force-redraw))
+	     (when (positive? (hash-table-count fake-show-ht))
+	       (let ([t fake-show-ht])
+		 (set! fake-show-ht (make-hash-table))
+		 (hash-table-for-each
+		  t
+		  (lambda (win v?)
+		    (send win really-show #t)))))
 	     (when (positive? (hash-table-count show-ht))
 	       (let ([t show-ht])
 		 (set! show-ht (make-hash-table))
@@ -219,6 +229,19 @@
 	   (if perform-updates?
 	       (send child show show?)
 	       (hash-table-put! show-ht child show?)))]
+
+        [show-control
+         (lambda (child on?)
+           (if (or perform-updates?
+                   (not on?)
+                   (child . is-a? . wx-frame%)
+                   (child . is-a? . wx-dialog%))
+	       (begin
+		 (hash-table-remove! fake-show-ht child)
+		 (send child really-show on?))
+               (begin
+		 (hash-table-put! fake-show-ht child #t)
+                 (send child fake-show on?))))]
 
 	;; force-redraw: receives a message from to redraw the
 	;; entire frame.
@@ -390,12 +413,12 @@
 		 (let*-values ([(w) (get-width)]
 			       [(h) (get-height)]
 			       [(sw sh) (get-display-size)]
-			       [(x x-reset?) (if (< (+ top-x w) sw)
+			       [(x x-reset?) (if (< (+ top-x w) (+ sw left-margin))
 						 (values top-x #f)
-						 (values (max 0 (- sw w 10)) #t))]
-			       [(y y-reset?) (if (< (+ top-y h) sh)
+						 (values (max init-top-x (- sw w 10)) #t))]
+			       [(y y-reset?) (if (< (+ top-y h) (+ sh top-margin))
 						 (values top-y #f)
-						 (values (max 0 (- sh h 20)) #t))])
+						 (values (max init-top-y (- sh h 20)) #t))])
 		   (move x y)
 		   (set! top-x (if x-reset? init-top-x (+ top-x 10)))
 		   (set! top-y (if y-reset? init-top-y (+ top-y 20)))))))]

@@ -1075,6 +1075,8 @@ mark_optimize_info {
   gcMARK(i->use);
   gcMARK(i->consts);
   gcMARK(i->top_level_consts);
+  gcMARK(i->transitive_use);
+  gcMARK(i->transitive_use_len);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Optimize_Info));
@@ -1544,6 +1546,7 @@ mark_param_data {
 
   gcMARK(d->key);
   gcMARK(d->guard);
+  gcMARK(d->extract_guard);
   gcMARK(d->defcell);
 
  size:

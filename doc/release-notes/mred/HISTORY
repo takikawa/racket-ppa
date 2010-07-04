@@ -1,3 +1,11 @@
+Version 371, August 2007
+
+Fixed (get-face-list 'mono) for Mac OS X and X11
+Changed begin-container-sequence to delay making windows visible
+Added 'no-focus style for canvas%
+
+----------------------------------------------------------------------
+
 Version 370, May 2007
 
 WXME file format changed to include a #reader() prefix

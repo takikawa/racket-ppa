@@ -1,8 +1,9 @@
 (module url-structs mzscheme
-  (require (lib "contract.ss"))
+  (require (lib "contract.ss")
+           (lib "serialize.ss"))
 
-  (define-struct url (scheme user host port path-absolute? path query fragment))
-  (define-struct path/param (path param))
+  (define-serializable-struct url (scheme user host port path-absolute? path query fragment))
+  (define-serializable-struct path/param (path param))
 
   (provide/contract
    (struct url ([scheme (or/c false/c string?)]
@@ -11,7 +12,7 @@
                 [port (or/c false/c number?)]
                 [path-absolute? boolean?]
                 [path (listof path/param?)]
-                [query (listof (cons/c symbol? string?))]
+                [query (listof (cons/c symbol? (or/c string? false/c)))]
                 [fragment (or/c false/c string?)]))
    (struct path/param ([path (or/c string? (symbols 'up 'same))]
                        [param (listof string?)]))))

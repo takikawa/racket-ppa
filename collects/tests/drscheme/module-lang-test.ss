@@ -103,7 +103,26 @@
                       (provide s)
                       (define-syntax (s stx) e)))
       (format "~s ~s" '(require m) 's)
-      ". module-lang-test-tmp2.ss:1:70: compile: bad syntax; literal data is not allowed, because no #%datum syntax transformer is bound in: 1")))
+      #rx"module-lang-test-tmp2.ss:1:70: compile: bad syntax; literal data is not allowed, because no #%datum syntax transformer is bound in: 1$")
+    
+     (make-test (format "~s"
+                        '(module tmp mzscheme
+                           (provide (rename app #%app)
+                                    (rename -current-namespace current-namespace)
+                                    (rename -module->namespace module->namespace))
+                           (define x 2)
+                           (define -current-namespace error)
+                           (define -module->namespace error)
+                           (define-syntax app
+                             (syntax-rules ()
+                               ((app . x) '(app . x))))))
+                "x"
+                "2")
+     
+     (make-test
+      (format "~s" `(module m (file ,(path->string (build-path this-dir "module-lang-test-tmp.ss"))) 1 2 3))
+      "1" ;; just make sure no errors.
+      "1")))
   
   ;; set up for tests that need external files
   (call-with-output-file (build-path this-dir "module-lang-test-tmp.ss")
@@ -121,6 +140,21 @@
       (write `(module module-lang-test-tmp2 mzscheme
                 (provide e)
                 (define e #'1))
+             port))
+    'truncate
+    'text)
+  
+  (call-with-output-file (build-path this-dir "module-lang-test-tmp3.ss")
+    (lambda (port)
+      (write `(module module-lang-test-tmp3 mzscheme
+                (define-syntax (bug-datum stx)
+                  (syntax-case stx ()
+                    [(dat . thing)
+                     (number? (syntax-e (syntax thing)))
+                     (syntax/loc stx (#%datum . thing))]))
+                
+                (provide #%module-begin [rename bug-datum #%datum]))
+             
              port))
     'truncate
     'text)

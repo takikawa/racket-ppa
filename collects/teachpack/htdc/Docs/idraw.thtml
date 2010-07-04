@@ -18,15 +18,11 @@ import geometry.*;
   | void bigBang(int,int,double)    |       +------------------------------------+
   | World endOfTime(String)         |       | void show()                        |
   | World endOfWorld(String)        |       | void close()                       |
-  | abstract void onTick()          |       | void drawCircle(Posn,int,Color)    |
-  | abstract void onKeyEvent(String)|       | void drawDisk(Posn,int,Color)      |
-  | abstract void draw()            |       | void drawRect(Posn,int,int,Color)  |
-  | abstract void erase()           |       | void drawLine(Posn,Posn,Color)     |
-  +---------------------------------+       | void drawString(Posn,String)       |
-                                            | void clearCircle(Posn,int,Color)   |
-                                            | void clearDisk(Posn,int,Color)     |
-                                            | void clearRect(Posn,int,int,Color) |
-                                            | void clearLine(Posn,Posn,Color)    |
+  | abstract void onTick()          |       | void drawCircle(Posn,int,AColor)   |
+  | abstract void onKeyEvent(String)|       | void drawDisk(Posn,int,AColor)     |
+  | abstract void draw()            |       | void drawRect(Posn,int,int,AColor) |
+  +---------------------------------+       | void drawLine(Posn,Posn,AColor)    |
+                                            | void drawString(Posn,String)       |
                                             +------------------------------------+
 </code>
 </pre>

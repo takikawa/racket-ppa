@@ -100,6 +100,7 @@ static Scheme_Object *andmap (int argc, Scheme_Object *argv[]);
 static Scheme_Object *ormap (int argc, Scheme_Object *argv[]);
 static Scheme_Object *call_cc (int argc, Scheme_Object *argv[]);
 static Scheme_Object *internal_call_cc (int argc, Scheme_Object *argv[]);
+static Scheme_Object *continuation_p (int argc, Scheme_Object *argv[]);
 static Scheme_Object *call_with_continuation_barrier (int argc, Scheme_Object *argv[]);
 static Scheme_Object *call_with_prompt (int argc, Scheme_Object *argv[]);
 static Scheme_Object *call_with_control (int argc, Scheme_Object *argv[]);
@@ -107,6 +108,7 @@ static Scheme_Object *make_prompt_tag (int argc, Scheme_Object *argv[]);
 static Scheme_Object *abort_continuation (int argc, Scheme_Object *argv[]);
 static Scheme_Object *continuation_prompt_available(int argc, Scheme_Object *argv[]);
 static Scheme_Object *get_default_prompt_tag (int argc, Scheme_Object *argv[]);
+static Scheme_Object *prompt_tag_p (int argc, Scheme_Object *argv[]);
 static Scheme_Object *call_with_sema (int argc, Scheme_Object *argv[]);
 static Scheme_Object *call_with_sema_enable_break (int argc, Scheme_Object *argv[]);
 static Scheme_Object *cc_marks (int argc, Scheme_Object *argv[]);
@@ -283,6 +285,12 @@ scheme_init_fun (Scheme_Env *env)
   scheme_add_global_constant("call-with-current-continuation", o, env);
   scheme_add_global_constant("call/cc", o, env);
 
+  scheme_add_global_constant("continuation?",
+                             scheme_make_folding_prim(continuation_p,
+						      "continuation?",
+						      1, 1, 1),
+                             env);
+
   scheme_add_global_constant("call-with-continuation-barrier",
 			     scheme_make_prim_w_arity2(call_with_continuation_barrier,
 						       "call-with-continuation-barrier",
@@ -331,6 +339,11 @@ scheme_init_fun (Scheme_Env *env)
                                                       "default-continuation-prompt-tag",
                                                       0, 0), 
 			     env);
+  scheme_add_global_constant("continuation-prompt-tag?",
+                             scheme_make_folding_prim(prompt_tag_p,
+						      "continuation-prompt-tag?",
+						      1, 1, 1),
+                             env);
 
   scheme_add_global_constant("call-with-semaphore",
 			     scheme_make_prim_w_arity2(call_with_sema,
@@ -4132,11 +4145,10 @@ static Scheme_Cont *grab_continuation(Scheme_Thread *p, int for_prompt, int comp
                                       Scheme_Object *prompt_tag,
                                       Scheme_Cont *sub_cont, Scheme_Prompt *prompt,
                                       Scheme_Meta_Continuation *prompt_cont, MZ_MARK_POS_TYPE prompt_pos,
-                                      Scheme_Prompt *barrier_prompt,
+                                      Scheme_Prompt *barrier_prompt, Scheme_Prompt *effective_barrier_prompt,
                                       Scheme_Meta_Continuation *barrier_cont, MZ_MARK_POS_TYPE barrier_pos)
 {
   Scheme_Cont *cont;
-  Scheme_Prompt *effective_barrier_prompt;
   
   cont = MALLOC_ONE_TAGGED(Scheme_Cont);
   cont->so.type = scheme_cont_type;
@@ -4196,12 +4208,6 @@ static Scheme_Cont *grab_continuation(Scheme_Thread *p, int for_prompt, int comp
   } else
     cont->meta_continuation = p->meta_continuation;
 
-  effective_barrier_prompt = barrier_prompt;
-  if (effective_barrier_prompt && prompt) {
-    if (scheme_is_cm_deeper(barrier_cont, barrier_pos,
-                            prompt_cont, prompt_pos))
-      effective_barrier_prompt = NULL;
-  }
   if (effective_barrier_prompt) {
     cont->barrier_prompt = effective_barrier_prompt;
     scheme_prompt_capture_count++;
@@ -4655,7 +4661,7 @@ internal_call_cc (int argc, Scheme_Object *argv[])
   Scheme_Meta_Continuation *prompt_cont, *barrier_cont;
   MZ_MARK_POS_TYPE prompt_pos, barrier_pos;
   Scheme_Thread *p = scheme_current_thread;
-  Scheme_Prompt *prompt, *barrier_prompt;
+  Scheme_Prompt *prompt, *barrier_prompt, *effective_barrier_prompt;
   GC_CAN_IGNORE void *stack_start;
   int composable;
 
@@ -4691,14 +4697,22 @@ internal_call_cc (int argc, Scheme_Object *argv[])
     }
   }
 
+  effective_barrier_prompt = barrier_prompt;
+  if (effective_barrier_prompt && prompt) {
+    if (scheme_is_cm_deeper(barrier_cont, barrier_pos,
+                            prompt_cont, prompt_pos))
+      effective_barrier_prompt = NULL;
+  }
+
   if (composable)
     sub_cont = NULL;
   else
     sub_cont = (Scheme_Cont *)scheme_extract_one_cc_mark(NULL, cont_key);
   if (sub_cont && ((sub_cont->save_overflow != p->overflow)
 		   || (sub_cont->prompt_tag != prompt_tag)
-		   || (sub_cont->barrier_prompt != barrier_prompt)))
+		   || (sub_cont->barrier_prompt != effective_barrier_prompt))) {
     sub_cont = NULL;
+  }
   if (sub_cont && (sub_cont->ss.cont_mark_pos == MZ_CONT_MARK_POS)) {
     Scheme_Object *argv2[1];
 #ifdef MZ_USE_JIT
@@ -4749,7 +4763,7 @@ internal_call_cc (int argc, Scheme_Object *argv[])
 
   cont = grab_continuation(p, 0, composable, prompt_tag, sub_cont, 
                            prompt, prompt_cont, prompt_pos,
-                           barrier_prompt, barrier_cont, barrier_pos);
+                           barrier_prompt, effective_barrier_prompt, barrier_cont, barrier_pos);
 
   scheme_zero_unneeded_rands(p);
 
@@ -4862,6 +4876,13 @@ internal_call_cc (int argc, Scheme_Object *argv[])
   }
 }
 
+static Scheme_Object *continuation_p (int argc, Scheme_Object *argv[])
+{
+  return ((SCHEME_CONTP(argv[0]) || SCHEME_ECONTP(argv[0]))
+          ? scheme_true
+          : scheme_false);
+}
+
 void scheme_takeover_stacks(Scheme_Thread *p)
      /* When a contination captured in on e thread is invoked in another,
 	the two threads can start using the same runstack, and possibly
@@ -4935,6 +4956,13 @@ static Scheme_Object *make_prompt_tag (int argc, Scheme_Object *argv[])
 static Scheme_Object *get_default_prompt_tag (int argc, Scheme_Object *argv[])
 {
   return scheme_default_prompt_tag;
+}
+
+static Scheme_Object *prompt_tag_p (int argc, Scheme_Object *argv[])
+{
+  return (SAME_TYPE(scheme_prompt_tag_type, SCHEME_TYPE(argv[0]))
+          ? scheme_true
+          : scheme_false);
 }
 
 Scheme_Overflow *scheme_get_thread_end_overflow(void)
@@ -5140,7 +5168,7 @@ static Scheme_Object *compose_continuation(Scheme_Cont *cont, int exec_chain,
 
   /* Grab a continuation so that we capture the current Scheme stack,
      etc.: */
-  saved = grab_continuation(p, 1, 0, NULL, NULL, NULL, NULL, 0, NULL, NULL, 0);
+  saved = grab_continuation(p, 1, 0, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL, 0);
   
   overflow = MALLOC_ONE_RT(Scheme_Overflow);
 #ifdef MZTAG_REQUIRED

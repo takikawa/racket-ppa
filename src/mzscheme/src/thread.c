@@ -330,6 +330,7 @@ static Scheme_Object *namespace_p(int argc, Scheme_Object *args[]);
 static Scheme_Object *parameter_p(int argc, Scheme_Object *args[]);
 static Scheme_Object *parameter_procedure_eq(int argc, Scheme_Object *args[]);
 static Scheme_Object *make_parameter(int argc, Scheme_Object *args[]);
+static Scheme_Object *make_derived_parameter(int argc, Scheme_Object *args[]);
 static Scheme_Object *extend_parameterization(int argc, Scheme_Object *args[]);
 static Scheme_Object *parameterization_p(int argc, Scheme_Object *args[]);
 
@@ -385,8 +386,10 @@ Scheme_Object *mtrace_cmark_key = NULL;
 
 typedef struct {
   MZTAG_IF_REQUIRED
+  short is_derived;
   Scheme_Object *key;
   Scheme_Object *guard;
+  Scheme_Object *extract_guard;
   Scheme_Object *defcell;
 } ParamData;
 
@@ -644,6 +647,11 @@ void scheme_init_thread(Scheme_Env *env)
 						      "make-parameter", 
 						      1, 2), 
 			     env);
+  scheme_add_global_constant("make-derived-parameter", 
+			     scheme_make_prim_w_arity(make_derived_parameter,
+						      "make-derived-parameter", 
+						      3, 3), 
+			     env);
   scheme_add_global_constant("parameter-procedure=?", 
 			     scheme_make_prim_w_arity(parameter_procedure_eq,
 						      "parameter-procedure=?", 
@@ -885,7 +893,7 @@ static Scheme_Object *current_memory_use(int argc, Scheme_Object *args[])
   retval = GC_get_memory_use();
 #endif
   
-  return scheme_make_integer(retval);
+  return scheme_make_integer_value(retval);
 }
 
 
@@ -6026,7 +6034,7 @@ static Scheme_Object *parameterization_p(int argc, Scheme_Object **argv)
 
 static Scheme_Object *extend_parameterization(int argc, Scheme_Object *argv[])
 {
-  Scheme_Object *key, *a[2];
+  Scheme_Object *key, *a[2], *param;
   Scheme_Config *c;
   int i;
 
@@ -6042,13 +6050,22 @@ static Scheme_Object *extend_parameterization(int argc, Scheme_Object *argv[])
       }
       a[0] = argv[i + 1];
       a[1] = scheme_false;
-      if (SCHEME_PRIMP(argv[i])) {
-	Scheme_Prim *proc;
-	proc = (Scheme_Prim *)((Scheme_Primitive_Proc *)argv[i])->prim_val;
-	key = proc(2, a); /* leads to scheme_param_config to set a[1] */
-      } else {
-	/* sets a[1] */
-	key = do_param(((Scheme_Closed_Primitive_Proc *)argv[i])->data, 2, a);
+      param = argv[i];
+      while (1) {
+        if (SCHEME_PRIMP(param)) {
+          Scheme_Prim *proc;
+          proc = (Scheme_Prim *)((Scheme_Primitive_Proc *)param)->prim_val;
+          key = proc(2, a); /* leads to scheme_param_config to set a[1] */
+          break;
+        } else {
+          /* sets a[1] */
+          key = do_param(((Scheme_Closed_Primitive_Proc *)param)->data, 2, a);
+          if (SCHEME_PARAMETERP(key)) {
+            param = key;
+            a[0] = a[1];
+          } else
+            break;
+        }
       }
       c = do_extend_config(c, key, a[1]);
     }
@@ -6066,12 +6083,13 @@ static Scheme_Object *parameter_p(int argc, Scheme_Object **argv)
 	  : scheme_false);
 }
 
-static Scheme_Object *do_param(void *data, int argc, Scheme_Object *argv[])
+static Scheme_Object *do_param(void *_data, int argc, Scheme_Object *argv[])
 {
   Scheme_Object *guard, **argv2, *pos[2];
+  ParamData *data = (ParamData *)_data;
 
   if (argc && argv[0]) {
-    guard = ((ParamData *)data)->guard;
+    guard = data->guard;
     if (guard) {
       Scheme_Object *v;
       
@@ -6080,7 +6098,7 @@ static Scheme_Object *do_param(void *data, int argc, Scheme_Object *argv[])
       if (argc == 2) {
 	/* Special hook for parameterize: */
 	argv[1] = v;
-	return ((ParamData *)data)->key;
+	return data->key;
       }
 
       argv2 = MALLOC_N(Scheme_Object *, argc);
@@ -6089,14 +6107,25 @@ static Scheme_Object *do_param(void *data, int argc, Scheme_Object *argv[])
     } else if (argc == 2) {
       /* Special hook for parameterize: */
       argv[1] = argv[0];
-      return ((ParamData *)data)->key;
+      return data->key;
     } else
       argv2 = argv;
   } else
-    argv2 = argv;    
+    argv2 = argv;
 
-  pos[0] = ((ParamData *)data)->key;
-  pos[1] = ((ParamData *)data)->defcell;
+  if (data->is_derived) {
+    if (!argc) {
+      Scheme_Object *v;
+      v = _scheme_apply(data->key, argc, argv2);
+      pos[0] = v;
+      return _scheme_tail_apply(data->extract_guard, 1, pos);
+    } else {
+      return _scheme_tail_apply(data->key, argc, argv2);
+    }
+  }
+
+  pos[0] = data->key;
+  pos[1] = data->defcell;
   
   return scheme_param_config("parameter-procedure", 
 			     (Scheme_Object *)(void *)pos,
@@ -6123,6 +6152,33 @@ static Scheme_Object *make_parameter(int argc, Scheme_Object **argv)
   cell = scheme_make_thread_cell(argv[0], 1);
   data->defcell = cell;
   data->guard = ((argc > 1) ? argv[1] : NULL);
+
+  p = scheme_make_closed_prim_w_arity(do_param, (void *)data, 
+				      "parameter-procedure", 0, 1);
+  ((Scheme_Primitive_Proc *)p)->pp.flags |= SCHEME_PRIM_IS_PARAMETER;
+
+  return p;
+}
+
+static Scheme_Object *make_derived_parameter(int argc, Scheme_Object **argv)
+{
+  Scheme_Object *p;
+  ParamData *data;
+
+  if (!SCHEME_PARAMETERP(argv[0]))
+    scheme_wrong_type("make-derived-parameter", "parameter", 0, argc, argv);
+
+  scheme_check_proc_arity("make-derived-parameter", 1, 1, argc, argv);
+  scheme_check_proc_arity("make-derived-parameter", 1, 2, argc, argv);
+
+  data = MALLOC_ONE_RT(ParamData);
+#ifdef MZTAG_REQUIRED
+  data->type = scheme_rt_param_data;
+#endif
+  data->is_derived = 1;
+  data->key = argv[0];
+  data->guard = argv[1];
+  data->extract_guard = argv[2];
 
   p = scheme_make_closed_prim_w_arity(do_param, (void *)data, 
 				      "parameter-procedure", 0, 1);
@@ -6200,6 +6256,7 @@ static void make_initial_config(Scheme_Thread *p)
   init_param(cells, paramz, MZCONFIG_CAN_READ_BOX, scheme_true);
   init_param(cells, paramz, MZCONFIG_CAN_READ_PIPE_QUOTE, scheme_true);
   init_param(cells, paramz, MZCONFIG_CAN_READ_DOT, scheme_true);
+  init_param(cells, paramz, MZCONFIG_CAN_READ_INFIX_DOT, scheme_true);
   init_param(cells, paramz, MZCONFIG_CAN_READ_QUASI, scheme_true);
   init_param(cells, paramz, MZCONFIG_READ_DECIMAL_INEXACT, scheme_true);
   init_param(cells, paramz, MZCONFIG_CAN_READ_READER, scheme_false);

@@ -1,6 +1,8 @@
 (module to-scheme mzscheme
   (require "ast.ss"
            "types.ss"
+           "name-utils.scm"
+           "graph-scc.ss"
            "parameters.ss"
            (lib "class.ss")
            (lib "list.ss")
@@ -249,7 +251,8 @@
             (lambda (def)
               (filter (lambda (x) x) (map find (def-uses def)))))
            )
-      (get-strongly-connected-components defs for-each-def get-requires)))
+      (get-scc defs get-requires for-each)
+      #;(get-strongly-connected-components defs for-each-def get-requires)))
   
   ;get-strongly-connected-components: GRAPH (GRAPH (NODE -> void) -> void) (NODE -> (list NODE)) -> (list (list NODE))
   (define (get-strongly-connected-components graph for-each-node get-connected-nodes)
@@ -264,8 +267,7 @@
                (in-current-cycle?
                 (lambda (n) (hash-table-get current-cycle n (lambda () #f))))
                (current-cycle-memq
-                (lambda (nodes)
-                  (ormap in-current-cycle? nodes)))
+                (lambda (nodes) (ormap in-current-cycle? nodes)))
                (add-to-current-cycle
                 (lambda (n) 
                   (set! cur-cycle-length (add1 cur-cycle-length))
@@ -273,10 +275,15 @@
                (retrieve-current-cycle
                 (lambda () (hash-table-map current-cycle (lambda (key v) key))))
                
+               ;; componetize : NODE (list NODE) bool -> void
                (componentize 
                 (lambda (node successors member?)
                   (unless (already-in-cycle? node)
-                    ;(printf "componentize ~a ~a ~a~n" node successors member?)
+                    (printf "componentize ~a ~a ~a~n" 
+                            (id-string (def-name node))
+                            (map id-string (map def-name successors)) 
+                            (map id-string (map def-name (retrieve-current-cycle)))
+                            )
                     (let ((added? #f)
                           (cur-length cur-cycle-length)
                           (old-mark (hash-table-get marks node)))
@@ -290,7 +297,10 @@
                                      (eq? 'in-progress (hash-table-get marks successor)))
                            (componentize successor (get-connected-nodes successor) #f)))
                        successors)
-                      ;(printf "finished successors for ~a~n" node)
+                      (printf "finished successors for ~a~n" (id-string (def-name node)))
+                      (when (not (= cur-length cur-cycle-length))
+                        (add-to-current-cycle node))
+                      
                       (if (or added? (= cur-length cur-cycle-length))
                           (hash-table-put! marks node old-mark)
                           (componentize node successors #f)))))))
@@ -299,14 +309,21 @@
         
         (for-each-node graph
                        (lambda (node)
-                         ;(hash-table-for-each marks (lambda (key val) (printf "~a -> ~a~n" (eq-hash-code key) val)))
-                         ;(printf "Working on ~a~n~n" (eq-hash-code node)) 
+                         #;(hash-table-for-each 
+                          marks 
+                          (lambda (key val) (printf "~a -> ~a~n" (eq-hash-code key) val)))
+                         #;(printf "Working on ~a~n~n" (eq-hash-code node))
+                         #;(printf "node: ~a successors: ~a" (def-name node) (map def-name (get-connected-nodes node)))
                          (when (eq? (hash-table-get marks node) 'no-info)
                            (set! current-cycle (make-hash-table))
                            (add-to-current-cycle node)
+                           (set! cur-cycle-length 0)
+                           (printf "calling componetice ~a~n" (id-string (def-name node)))
                            (for-each (lambda (node) (componentize node (get-connected-nodes node) #f))
                                      (get-connected-nodes node))
-                           (set! strongly-connecteds (cons (retrieve-current-cycle) strongly-connecteds))
+                           (set! strongly-connecteds 
+                                 (cons (retrieve-current-cycle) strongly-connecteds))
+                           (printf "~a~n~n" (map id-string (map def-name (car strongly-connecteds))))
                            (hash-table-for-each
                             current-cycle
                             (lambda (n v) (hash-table-put! marks n 'in-a-cycle))))))
@@ -349,27 +366,24 @@
   (define (translate-defs defs type-recs)
     (let ((sorted-d-list (sort (map (compose id-string def-name) defs) string<?)))                                   
       (module-name (make-composite-name (car sorted-d-list))))
-    (module-require (if (to-file) 
-                        (let ((location (build-path (begin (send type-recs set-location! (def-file (car defs)))
-                                                           (send type-recs get-compilation-location) "compiled")
-                                                    (string-append (symbol->string (module-name)) ".zo"))))
-                          (for-each 
-                           (lambda (def)
-                             (send type-recs set-composite-location (id-string (def-name def)) location))
-                           defs)
-                          `(file ,(path->string (build-path (string-append (symbol->string (module-name)) ".zo")))))
-                        (module-name)))
-    (let* ((translated-defs (map (lambda (d)
-                                   (cond
-                                     ((class-def? d)
-                                      (translate-class d type-recs #f 0))
-                                     ((test-def? d)
-                                      (translate-class d type-recs #t 0))
-                                     (else
-                                      (translate-interface d type-recs))))
-                                 defs))
-           (group-reqs (apply append (map (lambda (d) 
-                                            (map (lambda (r) (list (def-file d) r)) (def-uses d)))
+    (module-require 
+     (if (to-file) 
+         (let ((location (build-path (begin (send type-recs set-location! (def-file (car defs)))
+                                            (send type-recs get-compilation-location) "compiled")
+                                     (string-append (symbol->string (module-name)) ".zo"))))
+           (for-each 
+            (lambda (def) (send type-recs set-composite-location (id-string (def-name def)) location))
+            defs)
+           `(file ,(path->string (build-path (string-append (symbol->string (module-name)) ".zo")))))
+         (module-name)))
+    (let* ((translated-defs 
+            (map (lambda (d)
+                   (cond
+                     ((class-def? d) (translate-class d type-recs #f 0))
+                     ((test-def? d) (translate-class d type-recs #t 0))
+                     (else (translate-interface d type-recs))))
+                 defs))
+           (group-reqs (apply append (map (lambda (d) (map (lambda (r) (list (def-file d) r)) (def-uses d)))
                                           defs)))
            (reqs (filter-reqs group-reqs defs type-recs)))
       (values (if (> (length translated-defs) 1)
@@ -411,7 +425,8 @@
   (define (reference req defs type-recs)
     (and (not (null? defs))
          (or (and (equal? (req-path (cadr req)) (get-package (car defs) type-recs))
-                  (equal? (req-class (cadr req)) (id-string (def-name (car defs)))))
+                  (equal? (get-leading-name (req-class (cadr req)))
+                          (id-string (def-name (car defs)))))
              (reference req (cdr defs) type-recs))))
   
   ;req-member: (list location req) (list (list location req)) -> bool
@@ -846,12 +861,8 @@
               `(define ,name
                  (class ,super-name
                    (init w* p* n* s* c*)
-                   (define-values (wrapped-obj pos-blame neg-blame src* cc-marks) (values null null null null null))
+                   (define wrapped-obj  null)
                    (set! wrapped-obj w*)
-                   (set! pos-blame p*)
-                   (set! neg-blame n*)
-                   (set! src* s*)
-                   (set! cc-marks c*)
                    (super-instantiate (w* p* n* s* c*))
                   
                    ,@(generate-wrapper-fields fields from-dynamic?)
@@ -886,34 +897,44 @@
                   (let* ((name (id-string (field-name field)))
                          (dynamic-access-body
                           (lambda (guard-body scheme-body)
-                            `(if (is-a? wrapped-obj guard-convert-Object)
+                            `(if (is-a? wr* guard-convert-Object)
                                  ,guard-body
                                  ,scheme-body)))
                          (get-name (create-get-name name))
                          (set-name (create-set-name name))
-                         (get-call `(,get-name wrapped-obj))
-                         (set-call `(lambda (new-val) (,set-name wrapped-obj new-val))))
+                         (get-call `(,get-name wr*))
+                         (set-call `(lambda (new-val) (,set-name wr* new-val))))
 
                     (list
                      `(define/public (,(build-identifier  (format "~a-wrapped" get-name)))
-                        ,(convert-value 
-                          (if from-dynamic? 
-                              (assert-value 
-                               (dynamic-access-body get-call `(get-field wrapped-obj (quote ,(build-identifier name))))
-                               (field-type field) #t 'field name)
-                              get-call) (field-type field) from-dynamic?))
+                        (let ([wr* wrapped-obj]
+                              [pb* (send this pos-blame*)]
+                              [nb* (send this neg-blame*)]
+                              [sr* (send this src*)]
+                              [cc* (send this cc-marks*)])
+                          ,(convert-value 
+                            (if from-dynamic? 
+                                (assert-value 
+                                 (dynamic-access-body get-call `(get-field wr* (quote ,(build-identifier name))))
+                                 (field-type field) #t 'field name)
+                                get-call) (field-type field) from-dynamic?)))
                      (if (memq 'final (field-modifiers field))
                          null
                          `(define/public (,(build-identifier (format "~a-wrapped" set-name)) new-val)
-                            (,(if from-dynamic?
-                                  (dynamic-access-body set-call 
-                                                       `(lambda (new-val) 
-                                                          (define set-field null)
-                                                          (set-field wrapped-obj (quote ,(build-identifier name)) new-val)))
-                                  set-call)
-                              ,(convert-value (if (not from-dynamic?)
-                                                  (assert-value 'new-val (field-type field) #t 'field name)
-                                                  'new-val) (field-type field) from-dynamic?)))))))
+                            (let ([wr* wrapped-obj]
+                                  [pb* (send this pos-blame*)]
+                                  [nb* (send this neg-blame*)]
+                                  [sr* (send this src*)]
+                                  [cc* (send this cc-marks*)])
+                              (,(if from-dynamic?
+                                    (dynamic-access-body set-call 
+                                                         `(lambda (new-val) 
+                                                            (define set-field null)
+                                                            (set-field wr* (quote ,(build-identifier name)) new-val)))
+                                    set-call)
+                               ,(convert-value (if (not from-dynamic?)
+                                                   (assert-value 'new-val (field-type field) #t 'field name)
+                                                   'new-val) (field-type field) from-dynamic?))))))))
                 fields)))
                 
   ;generate-wrapper-methods: (list method-record) boolean boolean -> (list sexp)
@@ -929,26 +950,40 @@
                 `(void))
                (from-dynamic?
                 `(define/public (,(build-identifier define-name) ,@list-of-args)
-                    ,(convert-value (assert-value `(send wrapped-obj ,(build-identifier call-name)
-                                                         ,@(map (lambda (arg type) 
-                                                                  (convert-value (assert-value arg type #f) type #f))
-                                                                list-of-args (method-record-atypes method)))
-                                                  (method-record-rtype method) from-dynamic? 'method-ret (method-record-name method))
-                                    (method-record-rtype method)
-                                    from-dynamic?)))
+                   (let ([wr* wrapped-obj]
+                         [pb* (send this pos-blame*)]
+                         [nb* (send this neg-blame*)]
+                         [sr* (send this src*)]
+                         [cc* (send this cc-marks*)])
+                     ,(convert-value 
+                       (assert-value 
+                        `(send wr* ,(build-identifier call-name)
+                               ,@(map (lambda (arg type) 
+                                        (convert-value (assert-value arg type #f) type #f))
+                                      list-of-args (method-record-atypes method)))
+                        (method-record-rtype method) from-dynamic? 
+                        'method-ret (method-record-name method))
+                       (method-record-rtype method)
+                       from-dynamic?))))
                (else
                 `(define/public (,(build-identifier define-name) . args)
-                   (unless (= (length args) ,(length list-of-args))
-                     (raise (make-exn:fail:contract:arity
-                             (format "~a broke the contract with ~a here, method ~a of ~a called with ~a args, instead of ~a"
-                                     neg-blame pos-blame ,(method-record-name method) ,(class-name) (length args) ,(length list-of-args))
-                             cc-marks)))
-                   (let (,@(map (lambda (arg type ref)
-                                  `(,arg ,(convert-value (assert-value `(list-ref args ,ref) type #t 'method-arg (method-record-name method)) type #t)))
-                                list-of-args (method-record-atypes method) (list-from 0 (length list-of-args))))
-                     ,(convert-value `(send wrapped-obj ,(build-identifier call-name)
-                                            ,@list-of-args) (method-record-rtype method) #f)))))))
-         methods))
+                   (let ([wr* wrapped-obj]
+                         [pb* (send this pos-blame*)]
+                         [nb* (send this neg-blame*)]
+                         [sr* (send this src*)]
+                         [cc* (send this cc-marks*)])
+                     (unless (= (length args) ,(length list-of-args))
+                       (raise 
+                        (make-exn:fail:contract:arity
+                         (format "~a broke the contract with ~a here, method ~a of ~a called with ~a args, instead of ~a"
+                                 nb* pb* ,(method-record-name method) ,(class-name) (length args) ,(length list-of-args))
+                         cc*)))
+                     (let (,@(map (lambda (arg type ref)
+                                    `(,arg ,(convert-value (assert-value `(list-ref args ,ref) type #t 'method-arg (method-record-name method)) type #t)))
+                                  list-of-args (method-record-atypes method) (list-from 0 (length list-of-args))))
+                       ,(convert-value `(send wr* ,(build-identifier call-name)
+                                              ,@list-of-args) (method-record-rtype method) #f))))))))
+           methods))
   
   (define (list-from from to)
     (cond
@@ -985,8 +1020,8 @@
       ((dynamic-val? type) value)
       ((array-type? type) value
        #;(if from-dynamic?
-           `(wrap-convert-assert-array ,value pos-blame neg-blame src* cc-marks)
-           `(make-object guard-convert-array ,value pos-blame neg-blame src* cc-marks)))
+           `(wrap-convert-assert-array ,value pb* nb* sr* cc*)
+           `(make-object guard-convert-array ,value pb* nb* sr* cc*)))
       ((ref-type? type) 
        (cond 
          ((and (equal? string-type type) from-dynamic?) `(make-java-string ,value))
@@ -996,9 +1031,9 @@
                         (make-ref-type "PrintStream" '("java" "io"))
                         (make-ref-type "PrintWriter" '("java" "io")))) value)
          (from-dynamic? `(,(build-identifier (string-append "wrap-convert-assert-" (ref-type-class/iface type)))
-                           ,value pos-blame neg-blame src* cc-marks))
+                           ,value pb* nb* sr* cc*))
          (else `(make-object ,(build-identifier (string-append "guard-convert-" (ref-type-class/iface type)))
-                  ,value pos-blame neg-blame src* cc-marks))))
+                  ,value pb* nb* sr* cc*))))
       (else value)))
   
   ;assert-value: sexp type boolean -> sexp
@@ -1010,21 +1045,22 @@
                 (lambda (ok?)
                   `(let ((v-1 ,value))
                      (if (,ok? v-1) v-1
-                         (raise (make-exn:fail
-                                 ,(case kind
-                                    ((unspecified)
-                                     `(format "~a broke the contract with ~a here, type-mismatch expected ~a given ~a"
-                                              neg-blame pos-blame (quote ,type) v-1))
-                                    ((field)
-                                     `(format "~a broke the contract with ~a here, type-mismatch for field ~a of class ~a: expected ~a given ~a"
-                                              neg-blame pos-blame ,name ,(class-name) (quote ,type) v-1))
-                                    ((method-arg)
-                                     `(format "~a broke the contract with ~a here, type-mismatch for method argument of ~a in class ~a: expected ~a given ~a"
-                                              neg-blame pos-blame ,name ,(class-name) (quote ,type) v-1))
-                                    ((method-ret)
-                                     `(format "~a broke the contract with ~a here, type-mismatch for method return of ~a in ~a: expected ~a given ~a"
-                                              neg-blame pos-blame ,name ,(class-name) (quote ,type) v-1)))
-                                 cc-marks)))))))
+                         (raise 
+                          (make-exn:fail
+                           ,(case kind
+                              ((unspecified)
+                               `(format "~a broke the contract with ~a here, type-mismatch expected ~a given ~a"
+                                        nb* pb* (quote ,type) v-1))
+                              ((field)
+                               `(format "~a broke the contract with ~a here, type-mismatch for field ~a of class ~a: expected ~a given ~a"
+                                        nb* pb* ,name ,(class-name) (quote ,type) v-1))
+                              ((method-arg)
+                               `(format "~a broke the contract with ~a here, type-mismatch for method argument of ~a in class ~a: expected ~a given ~a"
+                                        nb* pb* ,name ,(class-name) (quote ,type) v-1))
+                              ((method-ret)
+                               `(format "~a broke the contract with ~a here, type-mismatch for method return of ~a in ~a: expected ~a given ~a"
+                                        nb* pb* ,name ,(class-name) (quote ,type) v-1)))
+                           cc*)))))))
            (case type
              ((int byte short long) (check 'integer?))
              ((float double) (check 'real?))
@@ -2223,11 +2259,13 @@
                                                     (translate-expression (array-access-index expr))
                                                     (expr-src expr)))
       ((post-expr? expr) (translate-post-expr (translate-expression-unannotated (post-expr-expr expr))
+                                              (post-expr-expr expr)
                                               (post-expr-op expr)
                                               (post-expr-key-src expr)
                                               (expr-src expr)))
       ((pre-expr? expr) (translate-pre-expr (pre-expr-op expr)
                                             (translate-expression-unannotated (pre-expr-expr expr))
+                                            (pre-expr-expr expr)
                                             (pre-expr-key-src expr)
                                             (expr-src expr)))
       ((unary? expr) (translate-unary (unary-op expr)
@@ -2445,7 +2483,8 @@
                 (make-syntax #f `(send ,expr ,(translate-id field-string field-src)) (build-src src))
                 (make-syntax #f
                              `(if (null? ,expr)
-                                  (javaRuntime:nullError 'field)
+                                  ,(create-syntax #f '(javaRuntime:nullError 'field (current-continuation-marks))
+                                                 expr)
                                   (send ,expr ,(translate-id field-string field-src)))
                              (build-src src))))
            ((and (eq? (var-access-access access) 'private) #;(or (static-method) (inner-class)))
@@ -2454,7 +2493,10 @@
                    (get-syntax  (if cant-be-null?
                                     (make-syntax #f getter (build-src src))
                                     (make-syntax #f `(if (null? ,expr)
-                                                         (javaRuntime:nullError 'field)
+                                                         ,(create-syntax 
+                                                           #f
+                                                           '(javaRuntime:nullError 'field (current-continuation-marks))
+                                                           expr)
                                                          ,getter)
                                                  (build-src src)))))
               (if (dynamic-val? type)
@@ -2479,9 +2521,11 @@
                       (if cant-be-null?
                           (make-syntax #f `(,id ,expr) (build-src src))
                           (make-syntax #f
-                                       `(if (null? ,expr)
-                                            (javaRuntime:nullError 'field)
-                                            (,id ,expr))
+                                       `(let ([val~1 ,expr])
+                                          (if (null? val~1)
+                                              ,(create-syntax #f '(javaRuntime:nullError 'field (current-continuation-marks))
+                                                             expr)
+                                              (,id val~1)))
                                        (build-src src)))))
                 (if (dynamic-val? type)
                    (let ((access-syntax (cond 
@@ -2546,7 +2590,8 @@
                             (else
                              `(let ((,unique-name ,expression))
                                 (if (null? ,unique-name)
-                                    (javaRuntime:nullError 'method)
+                                    ,(create-syntax #f '(javaRuntime:nullError 'method (current-continuation-marks))
+                                                   expression)
                                     (send-generic ,unique-name ,generic-c-name ,@args)))))
                           (build-src src))
            
@@ -2555,7 +2600,8 @@
                (create-syntax #f 
                               `(let ((,unique-name ,expression))
                                  (if (null? ,unique-name)
-                                     ,(create-syntax #f `(javaRuntime:nullError 'method) expression)
+                                     ,(create-syntax #f `(javaRuntime:nullError 'method (current-continuation-marks))
+                                                     expression)
                                      (send ,unique-name ,c-name ,@translated-args)))
                               (build-src src)))))
           
@@ -2629,7 +2675,9 @@
                          (create-syntax #f
                                         `(let ((,unique-name ,expression))
                                            (if (null? ,unique-name)
-                                               (javaRuntime:nullError 'method)
+                                               (javaRuntime:nullError 'method 
+                                                                      ,(create-syntax #f
+                                                                                      '(current-continuation-marks) expression))
                                                (send ,unique-name ,name ,@translated-args)))
                                         (build-src src))))))
                 (if (or (method-contract? method-record)
@@ -2770,23 +2818,35 @@
       (make-syntax #f `(if ,if? ,then ,else) (build-src src))))
   
   ;converted
-  ;translate-post-expr: syntax symbol src src -> syntax
-  (define (translate-post-expr expr op key src)
-    (make-syntax #f `(begin0
-                       ,expr
-                       (set! ,expr ( ,(create-syntax #f (if (eq? op '++) 'add1 'sub1) (build-src key))
-                                      ,expr)))
-                 (build-src src)))
+  ;translate-post-expr: syntax expression symbol src src -> syntax
+  (define (translate-post-expr expr exp op key src)
+    (let ([setter (cond
+                    [(and (field-access? (access-name exp))
+                          (not (var-access-static? (field-access-access (access-name exp)))))
+                     (create-set-name (id-string (field-access-field (access-name exp)))
+                                   (var-access-class (field-access-access (access-name exp))))]
+                    [else 'set!])])
+      (make-syntax #f `(begin0
+                         ,expr
+                         (,setter ,expr ( ,(create-syntax #f (if (eq? op '++) 'add1 'sub1) (build-src key))
+                                         ,expr)))
+                   (build-src src))))
   
   ;converted
   ;translate-pre-expr: symbol syntax src src -> syntax
-  (define (translate-pre-expr op expr key src)
-    (make-syntax #f
-                 `(begin
-                    (set! ,expr (,(create-syntax #f (if (eq? op '++) 'add1 'sub1) (build-src key))
-                                  ,expr))
-                    ,expr)
-                 (build-src src)))
+  (define (translate-pre-expr op expr exp key src)
+    (let ([setter (cond
+                    [(and (field-access? (access-name exp))
+                          (not (var-access-static? (field-access-access (access-name exp)))))
+                     (create-set-name (id-string (field-access-field (access-name exp)))
+                                   (var-access-class (field-access-access (access-name exp))))]
+                    [else 'set!])])
+      (make-syntax #f
+                   `(begin
+                      (,setter ,expr (,(create-syntax #f (if (eq? op '++) 'add1 'sub1) (build-src key))
+                                      ,expr))
+                      ,expr)
+                   (build-src src))))
   
   ;converted
   ;translate-unary: symbol syntax src src -> syntax

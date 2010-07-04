@@ -160,7 +160,7 @@ improve method arity mismatch contract violation error messages?
 
   
   ;; (provide/contract p/c-ele ...)
-  ;; p/c-ele = (id expr) | (rename id id expr) | (struct (id expr) ...)
+  ;; p/c-ele = (id expr) | (rename id id expr) | (struct id (id expr) ...)
   ;; provides each `id' with the contract `expr'.
   (define-syntax (provide/contract provide-stx)
     (syntax-case provide-stx (struct)
@@ -174,7 +174,8 @@ improve method arity mismatch contract violation error messages?
              [(null? clauses) null]
              [else
               (let ([clause (car clauses)])
-                (syntax-case clause (struct rename)
+                ;; compare raw identifiers for `struct' and `rename' just like provide does
+                (syntax-case* clause (struct rename) (λ (x y) (eq? (syntax-e x) (syntax-e y))) 
                   [(rename this-name new-name contract)
                    (and (identifier? (syntax this-name))
                         (identifier? (syntax new-name)))
@@ -807,7 +808,6 @@ improve method arity mismatch contract violation error messages?
 	   not/c
            =/c >=/c <=/c </c >/c between/c
            integer-in
-           exact-integer-in
 	   real-in
            natural-number/c
 	   string/len
@@ -824,7 +824,8 @@ improve method arity mismatch contract violation error messages?
 	   syntax/c
            
            check-between/c
-           check-unary-between/c)
+           check-unary-between/c
+           parameter/c)
   
   (define-syntax (flat-rec-contract stx)
     (syntax-case stx  ()
@@ -1303,8 +1304,8 @@ improve method arity mismatch contract violation error messages?
       [(_ 'sym x-exp)
        (identifier? #'sym)
        #'(let ([x x-exp])
-           (unless (number? x)
-             (error 'sym "expected a number, got ~e" x)))]))
+           (unless (real? x)
+             (error 'sym "expected a real number, got ~e" x)))]))
   
   (define (=/c x) 
     (check-unary-between/c '=/c x)
@@ -1478,22 +1479,12 @@ improve method arity mismatch contract violation error messages?
   
   (define (integer-in start end)
     (unless (and (integer? start)
-                 (integer? end))
-      (error 'integer-in "expected two integers as arguments, got ~e and ~e" start end))
-    (flat-named-contract 
-     `(integer-in ,start ,end)
-     (λ (x)
-       (and (integer? x)
-            (<= start x end)))))
-  
-  (define (exact-integer-in start end)
-    (unless (and (integer? start)
                  (exact? start)
                  (integer? end)
                  (exact? end))
       (error 'integer-in "expected two exact integers as arguments, got ~e and ~e" start end))
     (flat-named-contract 
-     `(exact-integer-in ,start ,end)
+     `(integer-in ,start ,end)
      (λ (x)
        (and (integer? x)
             (exact? x)
@@ -1975,4 +1966,44 @@ improve method arity mismatch contract violation error messages?
                    (and (predicate-id val)
                         (ctc-pred-x (selector-id val)) ...))))))))]
       [(_ struct-name anything ...)
-       (raise-syntax-error 'struct/c "expected a struct identifier" stx (syntax struct-name))])))
+       (raise-syntax-error 'struct/c "expected a struct identifier" stx (syntax struct-name))]))
+  
+  
+  (define (parameter/c x)
+    (make-parameter/c (coerce-contract 'parameter/c x)))
+  
+  (define-struct/prop parameter/c (ctc)
+    ((proj-prop (λ (ctc)
+                  (let ([c-proc ((proj-get (parameter/c-ctc ctc)) (parameter/c-ctc ctc))])
+                    (λ (pos-blame neg-blame src-info orig-str)
+                      (let ([partial-neg-contract (c-proc neg-blame pos-blame src-info orig-str)]
+                            [partial-pos-contract (c-proc pos-blame neg-blame src-info orig-str)])
+                        (λ (val)
+                          (cond
+                            [(parameter? val)
+                             (make-derived-parameter 
+                              val 
+                              partial-neg-contract
+                              partial-pos-contract)]
+                            [else
+                             (raise-contract-error val src-info pos-blame orig-str 
+                                                   "expected a parameter")])))))))
+     (name-prop (λ (ctc) (build-compound-type-name 'parameter/c (parameter/c-ctc ctc))))
+     (first-order-prop
+      (λ (ctc)
+        (let ([tst ((first-order-get (parameter/c-ctc ctc)) (parameter/c-ctc ctc))])
+          (λ (x)
+            (and (parameter? x)
+                 (tst (x)))))))
+     
+     (stronger-prop
+      (λ (this that)
+        ;; must be invariant (because the library doesn't currently split out pos/neg contracts
+        ;; which could be tested individually ....)
+        (and (parameter/c? that)
+             (contract-stronger? (parameter/c-ctc this) 
+                                 (parameter/c-ctc that))
+             (contract-stronger? (parameter/c-ctc that) 
+                                 (parameter/c-ctc this)))))))
+  
+  )

@@ -2214,13 +2214,17 @@ void wxDC::GetTextExtent(const char *string, double *x, double *y,
     once = 0;
   }
 
-  if (descent || topSpace)
+  if (descent || topSpace || (!len && !ty))
     GetTextMetrics(dc, &tm);
 
   DoneDC(dc);
 
   *x = (double)tx;
-  *y = (double)ty;
+  if (!len && !ty) {
+    *y = (double)tm.tmHeight;
+  } else {
+    *y = (double)ty;
+  }
   if (descent) *descent = (double)tm.tmDescent;
   if (topSpace) *topSpace = (double)tm.tmInternalLeading;
   

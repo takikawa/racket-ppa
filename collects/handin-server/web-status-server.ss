@@ -6,8 +6,10 @@
            (lib "file.ss")
            (lib "etc.ss")
            (lib "web-server-unit.ss" "web-server")
-           (lib "sig.ss" "web-server")
-           (lib "configuration.ss" "web-server")
+           (lib "web-server-sig.ss" "web-server")
+           (lib "web-config-sig.ss" "web-server")
+           (lib "web-config-unit.ss" "web-server")
+           (lib "namespace.ss" "web-server" "configuration")
            "private/config.ss")
 
   (provide serve-status)
@@ -56,8 +58,9 @@
         (virtual-host-table)))
 
     (define configuration
-      (load-configuration-sexpr
-       web-dir config
+      (configuration-table-sexpr->web-config@
+       config
+       #:web-server-root web-dir
        #:make-servlet-namespace
        (make-make-servlet-namespace
         #:to-be-copied-module-specs

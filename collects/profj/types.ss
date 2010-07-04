@@ -261,10 +261,15 @@
 
   ;name->type: name (U (list string) #f) src symbol type-records -> type
   (define (name->type n container-class src level type-recs)
-    (let ((name (id-string (name-id n)))
-          (path (map id-string (name-path n))))
-      (type-exists? name path container-class src level type-recs)
-      (make-ref-type name (if (null? path) (send type-recs lookup-path name (lambda () null)) path)))) 
+    (let* ((name (id-string (name-id n)))
+           (path (map id-string (name-path n)))
+           (rec (type-exists? name path container-class src level type-recs)))
+      (if (class-record? rec)
+          (make-ref-type (car (class-record-name rec))
+                         (cdr (class-record-name rec)))
+          (make-ref-type name (if (null? path)
+                                  (send type-recs lookup-path name (lambda () null)) path)))))
+
   
   ;; type-exists: string (list string) (U (list string) #f) src symbol type-records -> (U record procedure)
   (define (type-exists? name path container-class src level type-recs)
@@ -279,9 +284,10 @@
   ;;Is c1 a subclass of c2?
   ;; is-subclass?: (U type (list string) 'string) ref-type type-records -> boolean
   (define (is-subclass? c1 c2 type-recs)
-    (let ((cr (get-record (send type-recs get-class-record c1) type-recs)))
-      (member (cons (ref-type-class/iface c2) (ref-type-path c2))
-              (class-record-parents cr))))
+    (or (type=? object-type c2)
+        (let ((cr (get-record (send type-recs get-class-record c1) type-recs)))
+          (member (cons (ref-type-class/iface c2) (ref-type-path c2))
+                  (class-record-parents cr)))))
 
   ;Does c1 implement c2?
   ;; implements?: (U type (list string) 'string) ref-type type-records -> boolean
@@ -395,6 +401,7 @@
       ;;                                            (U class-record scheme-record procedure)
       (define/public get-class-record
         (opt-lambda (ctype [container #f] [fail (lambda () null)])
+          ;(printf "get-class-record: ctype->~a container->~a ~n" ctype container)
           (let*-values (((key key-path) (normalize-key ctype))
                         ((key-inner) (when (cons? container) (string-append (car container) "." key)))
                         ((outer-record) (when (cons? container) (get-class-record container)))
@@ -461,13 +468,14 @@
       
       ;add-to-env: string (list string) file -> void
       (define/public (add-to-env class path loc)
-        (hash-table-put! (hash-table-get class-environment loc
-                                         (lambda ()
-                                           (let ((new-t (make-hash-table 'equal)))
-                                             (hash-table-put! class-environment loc new-t)
-                                             new-t)))
-                         class
-                         path))
+        #;(printf "add-to-env class ~a path ~a loc ~a~n~n" class path loc)
+        (unless (hash-table-get (hash-table-get class-environment loc
+                                                (lambda () 
+                                                  (let ([new-t (make-hash-table 'equal)])
+                                                    (hash-table-put! class-environment loc new-t)
+                                                    new-t)))
+                                class (lambda () #f))
+          (hash-table-put! (hash-table-get class-environment loc) class path)))
       
       ;Returns the environment of classes for the current location
       ;get-class-env: -> (list string)
@@ -479,8 +487,8 @@
       
       ;lookup-path: string ( -> 'a) -> (U (list string) #f)
       (define/public (lookup-path class fail)
-        ;(printf "class ~a location ~a~n" class location)
-        ;(printf "lookup ~a~n" class)
+        #;(printf "class ~a location ~a~n" class location)
+        #;(printf "lookup ~a~n" class)
         #;(hash-table-for-each (hash-table-get class-environment location)
                             (lambda (k v) (printf "~a -> ~a~n" k v)))
         (if location

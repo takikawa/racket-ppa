@@ -21,8 +21,8 @@
   (define-struct (terminal-fail fail-type) (kind found))
   ;(make-sequence-fail float fail-src string symbol (list string) string 'a boolean string)
   (define-struct (sequence-fail fail-type) (id kind correct expected found repeat? last-seen))
-  ;(make-choice-fail float fail-src string int (list string) (list fail-type))
-  (define-struct (choice-fail fail-type) (options names messages) (make-inspector))
+  ;(make-choice-fail float fail-src string int (list string) (list fail-type) boolean)
+  (define-struct (choice-fail fail-type) (options names ended? messages) (make-inspector))
   ;(make-options-fail float #f #f (list fail-type))
   (define-struct (options-fail fail-type) (opts))
   
@@ -53,6 +53,7 @@
          (make-choice-fail chance src name used may-use
                            (!!! (choice-fail-options fail))
                            (!!! (choice-fail-names fail))
+                           (!!! (choice-fail-ended? fail))
                            (map !!!-fail (!!! (choice-fail-messages fail))))]
         [(options-fail? fail)
          (make-options-fail chance src name used may-use
@@ -66,8 +67,8 @@
   
   ;(make-res (U #f (listof 'b)) (listof 'a) (U string fail-type) (U string 'a) int) [U #f fail-type] token
   (define-struct res (a rest msg id used possible-error first-tok) (make-inspector))
-  ;make-choice-res string (listof res)
-  (define-struct choice-res (name matches))
+  ;make-choice-res string (listof res fail-type)
+  (define-struct choice-res (name matches errors) (make-inspector))
   ;(make-repeat-res answer (U symbol fail-type))
   (define-struct repeat-res (a stop) (make-inspector))
   

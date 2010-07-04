@@ -25,17 +25,15 @@
 
   (require "list.ss" "kw.ss")
 
-  (define build-relative-path
-    (lambda (p . args)
-      (if (relative-path? p)
-	  (apply build-path p args)
-	  (error 'build-relative-path "base path ~s is absolute" p))))
+  (define (build-relative-path p . args)
+    (if (relative-path? p)
+      (apply build-path p args)
+      (error 'build-relative-path "base path ~s is absolute" p)))
 
-  (define build-absolute-path
-    (lambda (p . args)
-      (if (relative-path? p)
-	  (error 'build-absolute-path "base path ~s is relative" p)
-	  (apply build-path p args))))
+  (define (build-absolute-path p . args)
+    (if (relative-path? p)
+      (error 'build-absolute-path "base path ~s is relative" p)
+      (apply build-path p args)))
 
   ;; Note that normalize-path does not normalize the case
   (define normalize-path
@@ -87,13 +85,13 @@
 		(let normalize ([path (expand-path orig-path)])
 		  (let-values ([(base name dir?) (split-path path)])
 		    (cond
-		     [(eq? name 'up)
-		      (let up ([base (if (eq? base 'relative)
-					 wrt
-					 (resolve-all base wrt))])
-			(if (directory-exists? base)
-			    (let-values ([(prev name dir?) (split-path base)])
-			      (cond
+                      [(eq? name 'up)
+                       (let up ([base (if (eq? base 'relative)
+                                        wrt
+                                        (resolve-all base wrt))])
+                         (if (directory-exists? base)
+                           (let-values ([(prev name dir?) (split-path base)])
+                             (cond
 			       [(not prev) 
 				(error 'normalize-path
 				       "root has no parent directory: ~s"
@@ -101,75 +99,67 @@
 			       [else
 				(let ([prev
 				       (if (eq? prev 'relative)
-					   wrt
-					   (normalize prev))])
+                                         wrt
+                                         (normalize prev))])
 				  (cond
-				   [(eq? name 'same) (up prev)]
-				   [(eq? name 'up) (up (up prev))]
-				   [else prev]))]))
-			    (error-not-a-dir base)))]
-		     [(eq? name 'same)
-		      (cond
-		       [(eq? base 'relative) wrt]
-		       [else (let ([n (normalize base)])
-			       (if (directory-exists? n)
-				   n
-				   (error-not-a-dir n)))])]
-		     [else
-		      (cond
-		       [(not base) (path->complete-path path)]
-		       [else (let* ([base (if (eq? base 'relative)
-					      (normalize wrt)
-					      (normalize base))]
-				    [path (if (directory-exists? base)
-					      (build-path base name)
-					      (error-not-a-dir base))]
-				    [resolved (expand-path (resolve path))])
-			       (cond
-				[(relative-path? resolved)
-				 (normalize (build-path base resolved))]
-				[(complete-path? resolved)
-				 resolved]
-				[else (path->complete-path resolved base)]))])]))))])
+                                    [(eq? name 'same) (up prev)]
+                                    [(eq? name 'up) (up (up prev))]
+                                    [else prev]))]))
+                           (error-not-a-dir base)))]
+                      [(eq? name 'same)
+                       (cond
+                         [(eq? base 'relative) wrt]
+                         [else (let ([n (normalize base)])
+                                 (if (directory-exists? n)
+                                   n
+                                   (error-not-a-dir n)))])]
+                      [(not base) (path->complete-path path)]
+                      [else
+                       (let* ([base (if (eq? base 'relative)
+                                      (normalize wrt)
+                                      (normalize base))]
+                              [path (if (directory-exists? base)
+                                      (build-path base name)
+                                      (error-not-a-dir base))]
+                              [resolved (expand-path (resolve path))])
+                         (cond
+                           [(relative-path? resolved)
+                            (normalize (build-path base resolved))]
+                           [(complete-path? resolved)
+                            resolved]
+                           [else (path->complete-path resolved base)]))]))))])
       normalize-path))
 
   ;; Argument must be in normal form
-  (define do-explode-path
-    (lambda (who orig-path)
-      (let loop ([path orig-path][rest '()])
-	(let-values ([(base name dir?) (split-path path)])
-	  (when (or (and base
-			 (not (path? base)))
-		    (not (path? name)))
-	    (raise-type-error who "path in normal form" orig-path))
-	  (if base
-	      (loop base (cons name rest))
-	      (cons name rest))))))
+  (define (do-explode-path who orig-path)
+    (let loop ([path orig-path][rest '()])
+      (let-values ([(base name dir?) (split-path path)])
+        (when (or (and base (not (path? base)))
+                  (not (path? name)))
+          (raise-type-error who "path in normal form" orig-path))
+        (if base
+          (loop base (cons name rest))
+          (cons name rest)))))
 
-  (define explode-path
-    (lambda (orig-path)
-      (unless (path-string? orig-path)
-	(raise-type-error 'explode-path "path or string" orig-path))
-      (do-explode-path 'explode-path orig-path)))
+  (define (explode-path orig-path)
+    (unless (path-string? orig-path)
+      (raise-type-error 'explode-path "path or string" orig-path))
+    (do-explode-path 'explode-path orig-path))
 
   ;; Arguments must be in normal form
-  (define find-relative-path
-    (lambda (directory filename)
-      (let ([dir (do-explode-path 'find-relative-path directory)]
-	    [file (do-explode-path 'find-relative-path filename)])
-	(if (equal? (car dir) (car file))
-	    (let loop ([dir (cdr dir)]
-		       [file (cdr file)])
-	      (cond
-	       [(null? dir) (if (null? file) filename (apply build-path file))]
-	       [(null? file) (apply build-path (map (lambda (x) 'up) dir))]
-	       [(equal? (car dir) (car file))
-		(loop (cdr dir) (cdr file))]
-	       [else
-		(apply build-path 
-		       (append (map (lambda (x) 'up) dir)
-			       file))]))
-	    filename))))
+  (define (find-relative-path directory filename)
+    (let ([dir (do-explode-path 'find-relative-path directory)]
+          [file (do-explode-path 'find-relative-path filename)])
+      (if (equal? (car dir) (car file))
+        (let loop ([dir (cdr dir)]
+                   [file (cdr file)])
+          (cond [(null? dir) (if (null? file) filename (apply build-path file))]
+                [(null? file) (apply build-path (map (lambda (x) 'up) dir))]
+                [(equal? (car dir) (car file))
+                 (loop (cdr dir) (cdr file))]
+                [else
+                 (apply build-path (append (map (lambda (x) 'up) dir) file))]))
+	    filename)))
 
   (define (file-name who name)
     (unless (path-string? name)
@@ -195,32 +185,40 @@
       (cond [(and name (regexp-match #rx#"[.]([^.]+)$" name)) => cadr]
             [else #f])))
 
+  ;; utility: sorted dirlist so functions are deterministic
+  (define/kw (sorted-dirlist . args)
+    (let* ([ps (apply directory-list args)]
+           [ps (map (lambda (p) (cons (path->string p) p)) ps)]
+           [ps (sort ps (lambda (p1 p2) (string<? (car p1) (car p2))))]
+           [ps (map cdr ps)])
+      ps))
+
   (define (delete-directory/files path)
     (unless (path-string? path)
       (raise-type-error 'delete-directory/files "path or string" path))
     (cond
-     [(or (link-exists? path) (file-exists? path))
-      (delete-file path)]
-     [(directory-exists? path)
-      (for-each (lambda (e) (delete-directory/files (build-path path e)))
-		(directory-list path))
-      (delete-directory path)]
-     [else (error 'delete-directory/files
-		  "encountered ~a, neither a file nor a directory"
-		  path)]))
+      [(or (link-exists? path) (file-exists? path))
+       (delete-file path)]
+      [(directory-exists? path)
+       (for-each (lambda (e) (delete-directory/files (build-path path e)))
+                 (sorted-dirlist path))
+       (delete-directory path)]
+      [else (error 'delete-directory/files
+                   "encountered ~a, neither a file nor a directory"
+                   path)]))
 
   (define (copy-directory/files src dest)
-    (cond
-     [(file-exists? src)
-      (copy-file src dest)]
-     [(directory-exists? src)
-      (make-directory dest)
-      (for-each (lambda (e) (copy-directory/files (build-path src e)
-						  (build-path dest e)))
-		(directory-list src))]
-     [else (error 'copy-directory/files
-		  "encountered ~a, neither a file nor a directory"
-		  src)]))
+    (cond [(file-exists? src)
+           (copy-file src dest)]
+          [(directory-exists? src)
+           (make-directory dest)
+           (for-each (lambda (e)
+                       (copy-directory/files (build-path src e)
+                                             (build-path dest e)))
+                     (sorted-dirlist src))]
+          [else (error 'copy-directory/files
+                       "encountered ~a, neither a file nor a directory"
+                       src)]))
 
   (define (make-directory* dir)
     (let-values ([(base name dir?) (split-path dir)])
@@ -251,10 +249,9 @@
     (let ([tmpdir (find-system-path 'temp-dir)])
       (let loop ([s (current-seconds)][ms (current-milliseconds)])
         (let ([name (let ([n (format template (format "~a~a" s ms))])
-                      (cond
-                        [base-dir (build-path base-dir n)]
-                        [(relative-path? n) (build-path tmpdir n)]
-                        [else n]))])
+                      (cond [base-dir (build-path base-dir n)]
+                            [(relative-path? n) (build-path tmpdir n)]
+                            [else n]))])
           (with-handlers ([exn:fail:filesystem:exists?
                            (lambda (x)
                              ;; try again with a new name
@@ -284,6 +281,7 @@
                    [read-accept-graph #t]
                    [read-decimal-as-inexact #t]
                    [read-accept-dot #t]
+                   [read-accept-infix-dot #t]
                    [read-accept-quasiquote #t]
                    [read-accept-reader #f]
                    [print-struct #f]
@@ -458,21 +456,19 @@
             ;; Release lock:
             (delete-file lock-file))))))
 
-  (define call-with-input-file*
-    (lambda (file thunk . flags)
-      (let ([p (apply open-input-file file flags)])
-	(dynamic-wind
-	    void
-	    (lambda () (thunk p))
-	    (lambda () (close-input-port p))))))	  
+  (define (call-with-input-file* file thunk . flags)
+    (let ([p (apply open-input-file file flags)])
+      (dynamic-wind
+        void
+        (lambda () (thunk p))
+        (lambda () (close-input-port p)))))
 
-  (define call-with-output-file*
-    (lambda (file thunk . flags)
-      (let ([p (apply open-output-file file flags)])
-	(dynamic-wind
-	    void
-	    (lambda () (thunk p))
-	    (lambda () (close-output-port p))))))
+  (define (call-with-output-file* file thunk . flags)
+    (let ([p (apply open-output-file file flags)])
+      (dynamic-wind
+        void
+        (lambda () (thunk p))
+        (lambda () (close-output-port p)))))
 
   ;; fold-files : (pathname sym alpha -> alpha) alpha pathname/#f -> alpha
   (define/kw (fold-files f init #:optional [path #f] [follow-links? #t])
@@ -484,8 +480,7 @@
                          (case-lambda
                            [(acc)
                             (do-paths (map (lambda (p) (build-path path p))
-                                           (sort
-                                            (directory-list path) void))
+                                           (sorted-dirlist path))
                                       acc)]
                            [(acc descend?)
                             (if descend? (descend acc) acc)])])
@@ -496,7 +491,7 @@
     (define (do-paths paths acc)
       (cond [(null? paths) acc]
             [else (do-paths (cdr paths) (do-path (car paths) acc))]))
-    (if path (do-path path init) (do-paths (directory-list) init)))
+    (if path (do-path path init) (do-paths (sorted-dirlist) init)))
 
   (define/kw (find-files f #:optional [path #f])
     (reverse!

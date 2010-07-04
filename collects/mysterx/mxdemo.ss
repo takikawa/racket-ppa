@@ -11,13 +11,14 @@
   (require (lib "mysterx.ss" "mysterx"))
   
   (require (lib "runtime-path.ss")
-           (lib "system.ss"))
+           (lib "process.ss"))
+
   ;; Ensure that DLLs are included with the distibution:
-  (define-runtime-path myspage-dll (so "myspage"))
-  (define-runtime-path myssink-dll (so "myssink"))
+  (define-runtime-path myspage-dll '(so "myspage"))
+  (define-runtime-path myssink-dll '(so "myssink"))
   ;; Register them every time we start:
-  (system* "regsvr32.exe" "/s" myspage-dll)
-  (system* "regsvr32.exe" "/s" myssink-dll)
+  (system* "regsvr32.exe" "/s" (path->string myspage-dll))
+  (system* "regsvr32.exe" "/s" (path->string myssink-dll))
 
   ; the browser with the calendar
   

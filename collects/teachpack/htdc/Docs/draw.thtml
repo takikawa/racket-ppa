@@ -16,16 +16,12 @@ import geometry.*;
  | boolean bigBang(int,int,double)   |       +---------------------------------------+
  | boolean endOfTime(String)         |       | boolean show()                        |
  | World endOfWorld(String)          |       | boolean close()                       |
- |                                   |       | boolean drawCircle(Posn,int,Color)    |
- |                                   |       | boolean drawDisk(Posn,int,Color)      |
- | abstract World onTick()           |       | boolean drawRect(Posn,int,int,Color)  |
- | abstract World onKeyEvent(String) |       | boolean drawLine(Posn,Posn,Color)     |
+ |                                   |       | boolean drawCircle(Posn,int,AColor)   |
+ |                                   |       | boolean drawDisk(Posn,int,AColor)     |
+ | abstract World onTick()           |       | boolean drawRect(Posn,int,int,AColor) |
+ | abstract World onKeyEvent(String) |       | boolean drawLine(Posn,Posn,AColor)    |
  | abstract boolean draw()           |       | boolean drawString(Posn,String)       |
- | abstract boolean erase()          |       | boolean clearCircle(Posn,int,Color)   |
- +-----------------------------------+       | boolean clearDisk(Posn,int,Color)     |
-                                             | boolean clearRect(Posn,int,int,Color) |
-                                             | boolean clearLine(Posn,Posn,Color)    |
-                                             +---------------------------------------+
+ +-----------------------------------+       +---------------------------------------+
 </code>
 </pre>
 
@@ -86,12 +82,6 @@ handlers has been called. Its purpose is to present <code>this World </code>
 graphically on its canvas. If it succeeds, its result is <code>true.</code>
 </li>
 
-<li><code>erase()</code>, which is invoked <em>before</em> one of the two event
- handlers has been called. Its purpose is to erase <code>this World</code>'s
- canvas, as much as needed. If it succeeds, its result is <code>true.</code>
- Simple erase methods just draw a white rectangle of appropriate width and
- height located at the origin. 
-</li>
 </ul>
 A program may, in principle, start several instances of (subclasses of)
 <code>World</code>. If it does, the event handlers are called in a unpredictable
@@ -111,7 +101,8 @@ screen's borders. A program can use the following methods on instances of
   time without calling <code>close</code> before has no effect.  
 </li>
 
-<li><code>close()</code>, which hides the canvas. If it succeeds, it produces <code>true</code>. 
+<li><code>close()</code>, which hides the canvas and erases the current content. 
+If it succeeds, it produces <code>true</code>. 
 
 <p>Closing the Canvas using the display controls does not fully hide the
 canvas; it is still necessary to invoke <code>close</code> before
@@ -138,23 +129,6 @@ Canvas</code> from <code>p0</code> to <code>p1</code> using color
 <li><code>drawString(p,s)</code>, which draws the string <code>s</code> at
 <code>p</code> on <code>this Canvas</code>.  If it succeeds, it produces
 <code>true</code>.</li>
-
-<li><code>clearCircle(p,r,c)</code>, which erases a circle from <code>this
-Canvas</code> at <code>p</code> with radius <code>r</code> and color
-<code>c</code>.  If it succeeds, it produces <code>true</code>.</li>
-
-<li><code>clearDisk(p,r,c)</code>, which erases a disk from
-<code>this Canvas</code> at <code>p</code> with radius <code>r</code> and color
-<code>c</code>.  If it succeeds, it produces <code>true</code>.</li>
-
-<li><code>clearRect(p,w,w,c)</code>, which draws a solid rectangle from <code>this
-Canvas</code> at <code>p</code> with width <code>w</code>, height
-<code>h</code>, and color <code>c</code>.  The rectangle's lines are parallel to
-the canvas's borders. If it succeeds, it produces <code>true</code>.</li>
-
-<li><code>clearLine(Posn p0, Posn p1, Color c)</code>, which erases a line from <code>this
-Canvas</code> from <code>p0</code> to <code>p1</code> using color
-<code>c</code>.  If it succeeds, it produces <code>true</code>.</li>
 
 </ul>
 The methods may fail due to the unavailability of the physical devices,

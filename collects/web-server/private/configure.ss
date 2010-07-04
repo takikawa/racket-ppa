@@ -5,11 +5,8 @@
            (lib "list.ss")
            (lib "pretty.ss")
            (lib "file.ss")
-           (only (lib "configuration.ss" "web-server")
-                 default-configuration-table-path)
-           (lib "configuration-table-structs.ss" "web-server" "private")
-           (lib "parse-table.ss" "web-server" "private")
-           (lib "configuration-util.ss" "web-server" "private")
+           (lib "configuration-table-structs.ss" "web-server" "configuration")
+           (lib "configuration-table.ss" "web-server" "configuration")           
            (lib "util.ss" "web-server" "private"))
   (provide
    interface-version timeout
@@ -29,6 +26,36 @@
   ;     - editing an individual path
   ; - change all configuration paths (in the configure servlet and in the server) to
   ;   use a platform independent representation (i.e. a listof strings)
+  
+  ; to convert a platform dependent path into a listof path parts such that
+  ; (forall x (equal? (path->list x) (path->list (apply build-path (path->list x)))))
+  (define (path->list p)
+    (let loop ([p p] [acc null])
+      (let-values ([(base name must-be-dir?) (split-path p)])
+        (let ([new-acc (cons name acc)])
+          (cond
+            [(string? base) (loop base new-acc)]
+            [else ; conflate 'relative and #f
+             new-acc])))))
+    
+  ; build-suspender : (listof html) (listof html) [(listof (cons sym str))] [(listof (cons sym str))] -> str -> response
+  (define build-suspender
+    (opt-lambda (title content [body-attributes '([bgcolor "white"])] [head-attributes null])
+      (lambda (k-url)
+        `(html (head ,head-attributes
+                     (meta ([http-equiv "Pragma"] [content "no-cache"])) ; don't cache in netscape
+                     (meta ([http-equiv "Expires"] [content "-1"])) ; don't cache in IE
+                     ; one site said to use -1, another said to use 0.
+                     (title . ,title))
+               (body ,body-attributes
+                     (form ([action ,k-url] [method "post"])
+                           ,@content))))))
+  
+  ; write-to-file : str TST -> void
+  (define (write-to-file file-name x)
+    (call-with-output-file file-name
+      (lambda (out) (pretty-print x out))
+      'truncate))
   
   (define default-configuration-path default-configuration-table-path)
   (define (set-config-path! new)
@@ -78,7 +105,7 @@
     (unless (string=? "127.0.0.1" (request-host-ip request))
       (send/finish access-error-page))
     request)
-    
+  
   (define web-base (directory-part default-configuration-path))
   
   ; more here - abstract with static pages?
@@ -150,7 +177,7 @@
         (let loop ([configuration original-configuration])
           (let* ([update-bindings (interact (request-new-configuration-table configuration original-configuration))]
                  [form-configuration
-                  (delete-hosts (update-configuration configuration update-bindings)
+                  (delete-hosts (update-table configuration update-bindings)
                                 (foldr (lambda (b acc)
                                          (if (string=? "Delete" (cdr b))
                                              (cons (symbol->string (car b)) acc)
@@ -176,14 +203,14 @@
   ; doesn't work - the browser doesn't send the port and it wouldn't be reliable anyway
   ; perhaps the server could include it?
   #;(define (switch-to-current-port old)
-     (let ([current-port (url-port (request-uri initial-request))])
-       (and (not (= current-port (configuration-table-port old)))
-            (make-configuration-table
-             current-port
-             (configuration-table-max-waiting old)
-             (configuration-table-initial-connection-timeout old)
-             (configuration-table-default-host old)
-             (configuration-table-virtual-hosts old)))))
+      (let ([current-port (url-port (request-uri initial-request))])
+        (and (not (= current-port (configuration-table-port old)))
+             (make-configuration-table
+              current-port
+              (configuration-table-max-waiting old)
+              (configuration-table-initial-connection-timeout old)
+              (configuration-table-default-host old)
+              (configuration-table-virtual-hosts old)))))
   
   ; send-exn : tst -> doesn't
   (define (send-exn exn)
@@ -352,8 +379,8 @@
   (define (make-field-size type label value size)
     `(input ([type ,type] [name ,(symbol->string label)] [value ,value] [size ,size])))
   
-  ; update-configuration : configuration-table bindings -> configuration-table
-  (define (update-configuration old bindings)
+  ; update-table : configuration-table bindings -> configuration-table
+  (define (update-table old bindings)
     (let ([ubp (un-build-path web-base)]) ;; web-base returned by directory-part is a path
       (make-configuration-table
        (string->nat (extract-binding/single 'port bindings))
@@ -665,7 +692,7 @@
   
   ; read-configuration : path -> configuration-table
   (define (read-configuration configuration-path)
-    (parse-configuration-table (call-with-input-file configuration-path read)))
+    (sexpr->configuration-table (call-with-input-file configuration-path read)))
   
   ; write-configuration : configuration-table path -> void
   ; writes out the new configuration file and

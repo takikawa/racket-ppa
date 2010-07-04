@@ -3,7 +3,7 @@
            (lib "contract.ss"))
   (require "manager.ss")
   (require "../private/timer.ss"
-           "../servlet-structs.ss")
+           "../servlet/servlet-structs.ss")
   (provide/contract
    [create-timeout-manager (expiration-handler? number? number? . -> . manager?)])
   
@@ -28,18 +28,16 @@
     (define instances (make-hash-table))
     (define next-instance-id (make-counter))    
     
-    (define-struct instance (data k-table timer locked?))  
-    (define (create-instance data expire-fn)
+    (define-struct instance (k-table timer))  
+    (define (create-instance expire-fn)
       (define instance-id (next-instance-id))
       (hash-table-put! instances
                        instance-id
-                       (make-instance data
-                                      (create-k-table)
+                       (make-instance (create-k-table)
                                       (start-timer instance-timer-length
                                                    (lambda ()
                                                      (expire-fn)
-                                                     (hash-table-remove! instances instance-id)))
-                                      #t))
+                                                     (hash-table-remove! instances instance-id)))))
       instance-id)
     (define (adjust-timeout! instance-id secs)
       (reset-timer! (instance-timer (instance-lookup instance-id))
@@ -56,26 +54,16 @@
       (increment-timer! (instance-timer instance)
                         instance-timer-length)
       instance)
-    
-    (define (instance-lock! instance-id)
-      (define instance (instance-lookup instance-id))
-      (set-instance-locked?! instance #t))
-    (define (instance-unlock! instance-id)
-      (define instance (instance-lookup instance-id))
-      (set-instance-locked?! instance #f))
-    
+        
     ;; Continuation table
     (define-struct k-table (next-id-fn htable))
     (define (create-k-table)
       (make-k-table (make-counter) (make-hash-table)))
     
-    ;; Interface
-    (define (instance-lookup-data instance-id)
-      (instance-data (instance-lookup instance-id)))
-    
+    ;; Interface    
     (define (clear-continuations! instance-id)
       (match (instance-lookup instance-id)
-        [(struct instance (data (and k-table (struct k-table (next-id-fn htable))) instance-timer locked?))
+        [(struct instance ((and k-table (struct k-table (next-id-fn htable))) instance-timer))
          (hash-table-for-each
           htable
           (match-lambda*
@@ -85,7 +73,7 @@
     
     (define (continuation-store! instance-id k expiration-handler)
       (match (instance-lookup instance-id)
-        [(struct instance (data (struct k-table (next-id-fn htable)) instance-timer locked?))
+        [(struct instance ((struct k-table (next-id-fn htable)) instance-timer))
          (define k-id (next-id-fn))
          (define salt (random 100000000))
          (hash-table-put! htable
@@ -99,7 +87,7 @@
          (list k-id salt)]))
     (define (continuation-lookup instance-id a-k-id a-salt)
       (match (instance-lookup instance-id)
-        [(struct instance (data (struct k-table (next-id-fn htable)) instance-timer locked?))
+        [(struct instance ((struct k-table (next-id-fn htable)) instance-timer))
          (match
              (hash-table-get htable a-k-id
                              (lambda ()
@@ -122,9 +110,6 @@
     
     (make-timeout-manager create-instance 
                           adjust-timeout!
-                          instance-lookup-data
-                          instance-lock!
-                          instance-unlock!
                           clear-continuations!
                           continuation-store!
                           continuation-lookup

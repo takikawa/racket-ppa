@@ -138,6 +138,7 @@
 			      beginner-or
 			      beginner-quote
                               beginner-require
+                              beginner-dots
 			      
 			      intermediate-define
 			      intermediate-define-struct
@@ -905,7 +906,7 @@
 	      'unknown
 	      #'id
 	      #f
-	      "name is not defined, not an argument, and not a primitive name")
+	      "name is not defined, not a parameter, and not a primitive name")
 	     ;; Don't use #%top here; id might have become bound to something
 	     ;;  that isn't a value.
 	     #'id)]))
@@ -1215,6 +1216,28 @@
           #f
           "expected a single module name after `require', but found ~a parts"
           (length (syntax->list #'rest)))]))
+
+    ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+    ;; dots (.. and ... and .... and ..... and ......)
+    ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+    ;; Syntax Identifier -> Expression
+    ;; Produces an expression which raises an error reporting unfinished code.
+    (define (dots-error stx name)
+      (quasisyntax/loc stx
+        (error (quote (unsyntax name))
+               "expected a finished expression, but found a template")))
+
+    ;; Expression -> Expression
+    ;; Transforms unfinished code (... and the like) to code
+    ;; raising an appropriate error.
+    (define beginner-dots/proc
+      (make-set!-transformer
+       (lambda (stx)
+         (syntax-case stx (set!)
+           [(set! form expr) (dots-error stx (syntax form))]
+           [(form . rest) (dots-error stx (syntax form))]
+           [form (dots-error stx stx)]))))
 
     ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
     ;; local

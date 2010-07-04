@@ -154,8 +154,8 @@
                    (and (s:equal? (vector-ref obj1 idx)
                                   (vector-ref obj2 idx))
                         (lp (sub1 idx))))))
-        (and (my-array? obj1)
-             (my-array? obj2)
+        (and (array? obj1)
+             (array? obj2)
              (equal? (array-dimensions obj1) (array-dimensions obj2))
              (s:equal? (array->vector obj1) (array->vector obj2)))
         (and (struct? obj1)
@@ -332,9 +332,10 @@
    
    (make-shared-array
     (->* (array?
-          (unconstrained-domain-> natural-number/c))
+          (unconstrained-domain-> (listof natural-number/c)))
          (listof natural-number/c)
          any))
+   
    (list->array
     (->r ((rank natural-number/c)
           (proto array?)

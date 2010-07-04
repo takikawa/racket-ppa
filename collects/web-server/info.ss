@@ -1,15 +1,14 @@
 (module info (lib "infotab.ss" "setup")
-  (define name "Web Server")
-
-  (define compile-subcollections 
-    (list))
+  (define name "Web Server")  
+  ; XXX Uncomment and change doc-installer
+  #;(define post-install-collection "docs/doc-installer.ss")
   
   (define mzscheme-launcher-libraries
-    (list "private/text-launch.ss" "private/monitor-launch.ss" "private/setup-launch.ss" ))
+    (list "private/launch-text.ss"))
   (define mzscheme-launcher-names
-    (list "PLT Web Server Text" "PLT Web Server Monitor" "PLT Web Server Setup")) 
+    (list "PLT Web Server Text")) 
 
   (define mred-launcher-libraries
-    (list "private/gui-launch.ss"))
+    (list "private/launch-gui.ss"))
   (define mred-launcher-names
     (list "PLT Web Server")))

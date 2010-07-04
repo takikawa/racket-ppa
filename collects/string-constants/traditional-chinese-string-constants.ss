@@ -1,27 +1,27 @@
-           ;                                                       
-;;               ;     ;     ;;       ;;   ;   ;;       
-;;   ;;               ;     ;     ;        ;    ;   ;    ;   
-;    ;;     ;        ;;     ;     ;;       ;    ;   ;    ;   
-;;;;;;;;;;;;;;         ;;;;;;;;;;;;        ; ;  ;   ;    ;   
-;     ;;                     ;            ; ; ;;; ;;; ;;;;    
-;      ;;             ;;;;;;;;;;;;;;;;;   ;; ;              ;  
-;;      ;     ;;              ;    ;  ;   ;;;;;;;;;;;   
-;;;;;;;;;;;;;;;; ;                 ;          ;    ;       ;    
-;;;;               ;;;;;;;;;           ;     ;;;;;;;;    
-; ;; ;                          ;;      ;     ;      ;    
-;  ;;  ;         ;;;;;;;;;;;;;;;;        ;     ;      ;    
-;   ;;   ;;            ;   ;  ;           ;    ;;;;;;;;;    
-;    ;;    ;;;         ;    ;   ;;         ;      ;    ;     
-;;     ;;      ;;      ;;     ;     ;;       ;;     ;;  ;      
-;;       ;;             ;    ;;;;      ;       ;;     ;  ;    ;  
-;;                    ;               ;   ;;; ;; ;;;;   
+;            ;                                                       
+;            ;;               ;     ;     ;;       ;;   ;   ;;       
+;       ;;   ;;               ;     ;     ;        ;    ;   ;    ;   
+;       ;    ;;     ;        ;;     ;     ;;       ;    ;   ;    ;   
+;       ;;;;;;;;;;;;;;         ;;;;;;;;;;;;        ; ;  ;   ;    ;   
+;      ;     ;;                     ;            ; ; ;;; ;;; ;;;;    
+;     ;      ;;             ;;;;;;;;;;;;;;;;;   ;; ;              ;  
+;            ;;      ;     ;;              ;    ;  ;   ;;;;;;;;;;;   
+;    ;;;;;;;;;;;;;;;; ;                 ;          ;    ;       ;    
+;           ;;;;               ;;;;;;;;;           ;     ;;;;;;;;    
+;          ; ;; ;                          ;;      ;     ;      ;    
+;         ;  ;;  ;         ;;;;;;;;;;;;;;;;        ;     ;      ;    
+;        ;   ;;   ;;            ;   ;  ;           ;    ;;;;;;;;;    
+;       ;    ;;    ;;;         ;    ;   ;;         ;      ;    ;     
+;     ;;     ;;      ;;      ;;     ;     ;;       ;;     ;;  ;      
+;   ;;       ;;             ;    ;;;;      ;       ;;     ;  ;    ;  
+;            ;;                    ;               ;   ;;; ;; ;;;;   
 (module traditional-chinese-string-constants "string-constant-lang.ss"
-  (is-this-your-native-language "你的母語是繁體中文嗎？")
+  (is-this-your-native-language "中文是你的母語嗎？")
   
   (are-you-sure-you-want-to-switch-languages
    "為了改變界面語言，現在需要重新啟動DrScheme。你確定嗎？")
   
-  (interact-with-drscheme-in-language "使用簡體中文作DrScheme界面語言")
+  (interact-with-drscheme-in-language "使用繁體中文作DrScheme界面語言")
   
   ;; these two should probably be the same in all languages excepet English.
   ;; they are the button labels (under macos and windows, respectively)
@@ -334,7 +334,7 @@
   (show-character-offsets "顯示字元在文件中的位置") ; used for popup menu; right click on line/column box in bottom of drs window
   (enable-keybindings-in-menus "允許使用菜單中的快捷鍵")
   (automatically-to-ps "自動列印成postscript文件")
-  (option-as-meta "將option鍵當作meta") ;; macos/macos x only
+  (command-as-meta "將command鍵當作meta") ;; macos/macos x only
   (separate-dialog-for-searching "使用單獨的搜索對話框")
   (reuse-existing-frames "在打開新文件時，使用現有的框架")
   (default-fonts "預設字體")
@@ -343,6 +343,7 @@
   (open-files-in-tabs "在不同的標籤下打開多個文件（不使用多個窗口）")
   (show-interactions-on-execute "在運行程序時自動打開交互窗口")
   (switch-to-module-language-automatically "打開module文件時自動切換至module語言")
+  (interactions-beside-definitions "將定義窗口和交互窗口左右放置") ;; in preferences, below the checkbox one line above this one
   (limit-interactions-size "限制交互窗口的大小")
   (background-color "背景顏色")
   (default-text-color "預設顏色") ;; used for configuring colors, but doesn't need the word "color"
@@ -355,10 +356,11 @@
   ; title of the color choosing dialog
   
   ; should have entire alphabet
-  (font-example-string "簡體中文 by 朱崇愷") 
+  (font-example-string "中文 by 朱崇愷") 
   
   (change-font-button-label "更改")
   (fonts "字體")
+  (other... "其他...") ;; used in the font choice menu item
   
   ; filled with type of font, eg modern, swiss, etc.
   (choose-a-new-font "請選擇一種新的「~a」字體")
@@ -725,6 +727,7 @@
   (print-interactions "列印交互...")
   (new-tab "新建標籤")
   (close-tab "關閉標籤") ;; must not have any &s in it.
+  (close-tab-amp "關閉標籤(&C)") ;; like close-tab, but with an ampersand on the same letter as the one in close-menu-item
   
   ;;; edit-menu
   (split-menu-item-label "分屏(&S)")
@@ -950,8 +953,8 @@
   (profiling-choose-low-color "請選擇代表低的顏色")
   (profiling-choose-high-color "請選擇代表高的顏色")
   (profiling "Profiling")
-  (profiling-example-text "(define (理) (理))")
-  (profiling-color-config "Profiling色譜") 
+  (profiling-example-text "(define (馬) (馬))")
+  (profiling-color-config "Profiling色譜")
   (profiling-scale "Profiling的色彩比例")
   (profiling-sqrt "平方根")
   (profiling-linear "線性")
@@ -1054,6 +1057,10 @@
   (module-browser-name-long "長")
   (module-browser-open-all "打開所有這些文件")
   
+  (happy-birthday-matthias "生日快樂，Matthias！")
+  (happy-birthday-matthew "生日快樂，馬曉！")
+  (happy-birthday-shriram "生日快樂，Shriram！")
+  
   (mrflow-using-default-language-title "正在使用預設語言")
   (mrflow-using-default-language "當前使用的語言並不包含定義primitive類型的標。改用R5RS Scheme。")
   (mrflow-button-title "分析")
@@ -1080,10 +1087,6 @@
   (xml-tool-scheme-splice-box "Scheme接合框")
   (xml-tool-switch-to-scheme "轉變成Scheme框")
   (xml-tool-switch-to-scheme-splice "轉變成Scheme接合框")
-  (xml-tool-eliminate-whitespace-in-empty-tags
-   "Eliminiate whitespace in empty tags")
-  (xml-tool-leave-whitespace-alone
-   "Leave whitespace alone")
   
   (show-recent-items-window-menu-item "在單獨窗口中顯示最近使用的文件")
   (show-recent-items-window-label "最近使用的文件")

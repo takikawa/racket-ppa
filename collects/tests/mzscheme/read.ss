@@ -957,6 +957,42 @@
 (err/rt-test (read/recursive (open-input-string ";") #\. #f) exn:fail:read?)
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Some hash-table reading trickyness with readtables
+
+(test #hash((apple . (red round))
+            (banana . (yellow long)))
+      values
+      (parameterize ([current-readtable
+                      (make-readtable #f
+                                      #\! 'terminating-macro (lambda (ch port . args)
+                                                               (read/recursive port)))])
+        (read (open-input-string
+               "!#hash((apple . (red round)) (banana . (yellow long)))"))))
+
+
+(test #hash((apple . (red round))
+            (banana . (yellow long)))
+      values
+      (parameterize ([current-readtable
+                      (make-readtable #f
+                                      #\! 'terminating-macro (lambda (ch port . args)
+                                                               (read/recursive port))
+                                      #\* 'terminating-macro (lambda args
+                                                               (make-special-comment #f)))])
+        (read (open-input-string
+               "!#hash((apple . (red round)) * (banana . (yellow long)))"))))
+
+(test #t hash-table?
+      (parameterize ([current-readtable
+                      (make-readtable #f
+                                      #\% 'terminating-macro
+                                      (lambda (char port . args)
+                                        (let ([v (read-syntax/recursive #f port)])
+                                          v)))])
+        (let ([ht (eval (read-syntax #f (open-input-string "#0=' % % #hash((a . #0#) (b . \"banana\"))")))])
+          (cadr (hash-table-get ht 'a)))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (report-errs)
 

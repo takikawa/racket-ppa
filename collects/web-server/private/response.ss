@@ -1,20 +1,18 @@
 (module response mzscheme
   (require (lib "contract.ss")
            (lib "port.ss")
-           (lib "pretty.ss")
+           (lib "list.ss")
+           (lib "plt-match.ss")
            (lib "xml.ss" "xml")
            "connection-manager.ss"
-           "../response-structs.ss"
+           "../private/request-structs.ss"
+           "../private/response-structs.ss"
            "util.ss")
   
-  ;; Weak contracts for output-response because the response? is checked inside
-  ;; output-response, handled, etc.
   (provide/contract
-   [rename ext:output-response output-response (connection? any/c . -> . any)]
-   [rename ext:output-response/method output-response/method (connection? response? symbol? . -> . any)]
-   [rename ext:output-file output-file (connection? path? symbol? bytes? . -> . any)]
-   ; XXX add contract
-   [rename ext:output-file/partial output-file/partial (connection? path? symbol? bytes? integer? integer? . -> . any)])
+   [rename ext:output-response output-response (connection? response? . -> . void)]
+   [rename ext:output-response/method output-response/method (connection? response? symbol? . -> . void)]
+   [rename ext:output-file output-file (connection? path? symbol? bytes? integer? integer? . -> . void)])
   
   ;; Table 1. head responses:
   ; ------------------------------------------------------------------------------
@@ -54,34 +52,95 @@
   ;; 2. In the case of a chunked response when close? = #f, then the response
   ;;    must be compliant with http 1.0. In this case the chunked response is
   ;;    simply turned into a non-chunked one.
+  
+  (define (output-response conn resp)
+    (output-response/method conn resp 'get))
+  
+  ; XXX Check method in response
+  (define (output-response/method conn resp meth)
+    (define bresp (response->response/basic (connection-close? conn) resp))
+    (output-headers+response/basic conn bresp)
+    (unless (eq? meth 'head)
+      (output-response/basic conn bresp)))
+  
+  (define (response->response/basic close? resp)
+    (cond
+      [(response/full? resp)
+       (make-response/full 
+        (response/basic-code resp)
+        (response/basic-message resp)
+        (response/basic-seconds resp)
+        (response/basic-mime resp)
+        (list* (make-header #"Content-Length" (string->bytes/utf-8 (number->string (response/full->size resp))))
+               (response/basic-headers resp))
+        (response/full-body resp))]
+      [(response/incremental? resp)
+       (if close?
+           resp
+           (make-response/incremental 
+            (response/basic-code resp)
+            (response/basic-message resp)
+            (response/basic-seconds resp)
+            (response/basic-mime resp)
+            (list* (make-header #"Transfer-Encoding" #"chunked")
+                   (response/basic-headers resp))
+            (response/incremental-generator resp)))]
+      [(and (pair? resp) (bytes? (car resp)))
+       (response->response/basic
+        close?
+        (make-response/full 200 "Okay" (current-seconds) (car resp) empty
+                            (cdr resp)))]
+      [else
+       (response->response/basic
+        close?
+        (make-response/full 200 "Okay" (current-seconds) TEXT/HTML-MIME-TYPE empty
+                            (list (xexpr->string resp))))]))
+  
+  ;; Write the headers portion of a response to an output port.
+  ;; NOTE: According to RFC 2145 the server should write HTTP/1.1
+  ;;       header for *all* clients.
+  (define (output-headers+response/basic conn bresp)
+    (define o-port (connection-o-port conn))
+    (fprintf o-port "HTTP/1.1 ~a ~a\r\n" (response/basic-code bresp) (response/basic-message bresp))
+    (for-each (match-lambda
+                [(struct header (field value))
+                 (fprintf o-port "~a: ~a\r\n" field value)])
+              (list* (make-header #"Date" (string->bytes/utf-8 (seconds->gmt-string (current-seconds))))
+                     (make-header #"Last-Modified" (string->bytes/utf-8 (seconds->gmt-string (response/basic-seconds bresp))))
+                     (make-header #"Server" #"PLT Scheme")
+                     (make-header #"Content-Type" (response/basic-mime bresp))
+                     (append (if (connection-close? conn)
+                                 (list (make-header #"Connection" #"close"))
+                                 empty)
+                             (response/basic-headers bresp))))
+    (fprintf o-port "\r\n"))
+  
+  (define (output-response/basic conn bresp)
+    (define o-port (connection-o-port conn))
+    (match bresp
+      [(? response/full?)
+       (for-each
+        (lambda (str) (display str o-port))
+        (response/full-body bresp))]
+      [(? response/incremental?)
+       (if (connection-close? conn)
+           ((response/incremental-generator bresp)
+            (lambda chunks
+              (for-each (lambda (chunk) (display chunk o-port)) chunks)))
+           (begin
+             ((response/incremental-generator bresp)
+              (lambda chunks
+                (fprintf o-port "~x\r\n"
+                         (apply + 0 (map data-length chunks)))                     
+                (for-each (lambda (chunk) (display chunk o-port)) chunks)
+                (fprintf o-port "\r\n")))
+             ; one \r\n ends the last (empty) chunk and the second \r\n ends the (non-existant) trailers
+             (fprintf o-port "0\r\n\r\n")))]))
+  
   (define (data-length x)
     (if (string? x)
         (data-length (string->bytes/utf-8 x))
         (bytes-length x)))
-  
-  ;;**************************************************
-  ;; output-headers: connection number string (listof (listof String))
-  ;;                 number string -> void
-  ;; Write the headers portion of a response to an output port.
-  ;; NOTE: According to RFC 2145 the server should write HTTP/1.1
-  ;;       header for *all* clients.
-  (define (output-headers conn code message extras seconds mime)
-    (let ([o-port (connection-o-port conn)])
-      (for-each
-       (lambda (line)
-         (for-each
-          (lambda (word) (display word o-port))
-          line)
-         (fprintf o-port "\r\n"))
-       (list* `("HTTP/1.1 " ,code " " ,message)
-              `("Date: " ,(seconds->gmt-string (current-seconds)))
-              `("Last-Modified: " ,(seconds->gmt-string seconds))
-              `("Server: PLT Scheme")
-              `("Content-Type: " ,mime)
-              (if (connection-close? conn)
-                  (cons `("Connection: close") extras)
-                  extras)))
-      (fprintf o-port "\r\n")))
   
   ; seconds->gmt-string : Nat -> String
   ; format is rfc1123 compliant according to rfc2068 (http/1.1)
@@ -112,216 +171,46 @@
   
   (define (ext:wrap f)
     (lambda (conn . args)
-      (if (connection-close? conn)
-          (error 'output-response "Attempt to write to closed connection.")
-          (with-handlers ([exn? (lambda (exn)
-                                  (kill-connection! conn)
-                                  (raise exn))])
-            (call-with-semaphore (connection-mutex conn)
-                                 (lambda ()
-                                   (apply f conn args)
-                                   (flush-output (connection-o-port conn))))))))
-  
-  
-  ;; **************************************************
-  ;; output-response: connection response -> void
-  (define (output-response conn resp)
-    (cond
-      [(response/full? resp)
-       (output-response/basic
-        conn resp (response/full->size resp)
-        (lambda (o-port)
-          (for-each
-           (lambda (str) (display str o-port))
-           (response/full-body resp))))]
-      [(response/incremental? resp)
-       (output-response/incremental conn resp)]
-      [(and (pair? resp) (bytes? (car resp)))
-       (output-response/basic
-        conn
-        (make-response/basic 200 "Okay" (current-seconds) (car resp) '())
-        (apply + (map
-                  data-length
-                  (cdr resp)))
-        (lambda (o-port)
-          (for-each
-           (lambda (str) (display str o-port))
-           (cdr resp))))]
-      [else
-       ;; TODO: make a real exception for this.
-       (with-handlers
-           ([exn:invalid-xexpr?
-             (lambda (exn)
-               (output-response/method
-                conn
-                (xexpr-exn->response exn resp)
-                'ignored))]
-            [exn? (lambda (exn)
-                    (raise exn))])
-         (let ([str (and (validate-xexpr resp) (xexpr->string resp))])
-           (output-response/basic
-            conn
-            (make-response/basic 200
-                                 "Okay"
-                                 (current-seconds)
-                                 TEXT/HTML-MIME-TYPE
-                                 '())
-            (add1 (data-length str))
-            (lambda (o-port)
-              (display str o-port)
-              (newline o-port)))))]))
+      (with-handlers ([exn? (lambda (exn)
+                              (kill-connection! conn)
+                              (raise exn))])
+        (apply f conn args)
+        (flush-output (connection-o-port conn)))))
   
   (define ext:output-response
     (ext:wrap output-response))
   
   ;; response/full->size: response/full -> number
-  ;; compute the size for a response/full
-  (define (response/full->size resp/f)
-    (apply + (map
-              data-length
-              (response/full-body resp/f))))
+  (define (response/full->size resp)
+    (apply + (map data-length (response/full-body resp))))
   
-  ;; **************************************************
-  ;; output-file: connection path symbol bytes -> void
-  (define (output-file conn file-path method mime-type)
-    (output-headers conn 200 "Okay"
-                    `(("Content-Length: " ,(file-size file-path)))
-                    (file-or-directory-modify-seconds file-path)
-                    mime-type)
-    (when (eq? method 'get)
-      ; Give it one second per byte.
-      (adjust-connection-timeout! conn (file-size file-path))
-      (with-handlers ([void (lambda (e) (network-error 'output-file (exn-message e)))])
-        (call-with-input-file file-path
-          (lambda (i-port) (copy-port i-port (connection-o-port conn)))))))
-  
-  ;; **************************************************
-  ;; output-file/partial: connection path symbol bytes integer integer -> void
-  (define (output-file/partial conn file-path method mime-type
-                               start end-or-inf)
+  ;; output-file: connection path symbol bytes integer integer -> void
+  (define (output-file conn file-path method mime-type
+                       start end-or-inf)
     (define total-len (file-size file-path))
     (define end (if (equal? +inf.0 end-or-inf)
                     total-len
                     end-or-inf))
     (define len (- end start))
-    (output-headers conn 206 "Okay"
-                    `(("Content-Length: " ,len)
-                      ("Content-Range: " ,(format "bytes ~a-~a/~a" start end total-len)))
-                    (file-or-directory-modify-seconds file-path)
-                    mime-type)
+    (define bresp 
+      (make-response/basic 206 "Okay" (file-or-directory-modify-seconds file-path) mime-type 
+                           (list (make-header #"Content-Length" (string->bytes/utf-8 (number->string len)))
+                                 ; XXX Remove on non-gets?
+                                 (make-header #"Content-Range" (string->bytes/utf-8 (format "bytes ~a-~a/~a" start end total-len))))))
+    (output-headers+response/basic conn bresp)
     (when (eq? method 'get)
-      ; Give it one second per byte.
-      (adjust-connection-timeout! conn len)
+      ; XXX Move out?
+      (adjust-connection-timeout! conn len) ; Give it one second per byte.
       (with-handlers ([void (lambda (e) (network-error 'output-file/partial (exn-message e)))])
         (call-with-input-file file-path
           (lambda (i-port)
             (define _ (file-position i-port start))
             (define i-port/end (make-limited-input-port i-port end #t))
-            (copy-port i-port/end (connection-o-port conn)))))))
+            (copy-port i-port/end (connection-o-port conn))
+            (close-input-port i-port/end))))))
   
   (define ext:output-file
-    (ext:wrap output-file))
-  
-  (define ext:output-file/partial    
-    (ext:wrap output-file/partial))
-  
-  ;; **************************************************
-  ;; output-response/method: connection response/full symbol -> void
-  ;; If it is a head request output headers only, otherwise output as usual
-  (define (output-response/method conn resp meth)
-    (cond
-      [(eqv? meth 'head)
-       (output-headers/response conn resp `(("Content-Length: "
-                                             ,(response/full->size resp))))]
-      [else
-       (output-response conn resp)]))
+    (ext:wrap output-file))  
   
   (define ext:output-response/method
-    (ext:wrap output-response/method))
-  
-  ;; **************************************************
-  ;; output-headers/response: connection response (listof (listof string)) -> void
-  ;; Write the headers for a response to an output port
-  (define (output-headers/response conn resp extras)
-    (output-headers conn
-                    (response/basic-code resp)
-                    (response/basic-message resp)
-                    extras
-                    (response/basic-seconds resp)
-                    (response/basic-mime resp)))
-  
-  ;; **************************************************
-  ;; output-response/basic: connection response number (o-port -> void) -> void
-  ;; Write a normal response to an output port
-  (define (output-response/basic conn resp size responder)
-    (output-headers/response conn resp
-                             `(("Content-Length: " ,size)
-                               . ,(extras->strings resp)))
-    (responder (connection-o-port conn)))
-  
-  ;; **************************************************
-  ;; output-response/incremental: connection response/incremental -> void
-  ;; Write a chunked response to an output port.
-  (define (output-response/incremental conn resp/inc)
-    (let ([o-port (connection-o-port conn)])
-      (cond
-        [(connection-close? conn)
-         (output-headers/response conn resp/inc '())
-         ((response/incremental-generator resp/inc)
-          (lambda chunks
-            (for-each (lambda (chunk) (display chunk o-port)) chunks)))]
-        [else
-         (output-headers/response conn resp/inc
-                                  `(("Transfer-Encoding: chunked")
-                                    . ,(extras->strings resp/inc)))
-         ((response/incremental-generator resp/inc)
-          (lambda chunks
-            (fprintf o-port "~x\r\n"
-                     (apply + 0 (map data-length chunks)))                     
-            (for-each (lambda (chunk) (display chunk o-port)) chunks)
-            (fprintf o-port "\r\n")))
-         ; one \r\n ends the last (empty) chunk and the second \r\n ends the (non-existant) trailers
-         (fprintf o-port "0\r\n\r\n")])))
-  
-  ;; extras->strings: response/basic -> (listof (listof string))
-  ;; convert the response/basic-extras to the form used by output-headers
-  (define (extras->strings r/bas)
-    (map
-     (lambda (xtra)
-       (list (symbol->string (car xtra)) ": " (cdr xtra)))
-     (response/basic-extras r/bas)))
-  
-  ;; Turn an exn:invalid-xexpr into a response.
-  (define (xexpr-exn->response exn x)
-    (make-response/full
-     500 "Servlet Error"
-     (current-seconds)
-     #"text/html"
-     '()
-     (list
-      (string-append
-       "<html><head><title>Erroneous Xexpr</title></head>"
-       "<body><h1>Erroneous Xexpr</h1>"
-       "<p>An Xexpr in the servlet is malformed. The exact error is</p>"
-       "<pre>" (exn-message exn) "</pre>"
-       "<h2>The Full Xexpr Is</h2>"
-       "<pre>"
-       (let ([o (open-output-string)])
-         (parameterize ([current-output-port o])
-           (pretty-print-invalid-xexpr exn x))
-         (get-output-string o))
-       "</pre>"))))
-  
-  (define (pretty-print-invalid-xexpr exn xexpr)
-    (define code (exn:invalid-xexpr-code exn))
-    (parameterize ([pretty-print-size-hook (lambda (v display? out)
-                                             (and (equal? v code)
-                                                  (string-length (format (if display? "~a" "~v") v))))]
-                   [pretty-print-print-hook (lambda (v display? out)
-                                              (fprintf out
-                                                       (string-append
-                                                        "<font color=\"red\">"
-                                                        (if display? "~a" "~v")
-                                                        "</font>")
-                                                       v))])
-      (pretty-print xexpr))))
+    (ext:wrap output-response/method)))

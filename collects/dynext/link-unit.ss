@@ -27,15 +27,17 @@
 	    (find-executable-path "ilink32.exe" #f)))
 
       (define (get-unix-linker)
-	(let ([s (case (string->symbol (path->string (system-library-subpath #f)))
+	(let ([l (case (string->symbol (path->string (system-library-subpath #f)))
                    [(sparc-solaris i386-solaris 
                                    sparc-sunos4
                                    i386-freebsd-2.x
                                    parisc-hpux
                                    i386-cygwin)
-                    "ld"]
-		   [else "cc"])])
-	  (find-executable-path s s)))
+                    '("ld")]
+		   [else '("gcc" "cc")])])
+          (ormap (lambda (s)
+                   (find-executable-path s #f))
+                 l)))
       
       (define (check-valid-linker-path v)
 	(unless (and (file-exists? v)
@@ -139,7 +141,7 @@
 	  [(ppc-macosx ppc-darwin i386-macosx i386-darwin) 
 	   (list "-bundle" "-flat_namespace" "-undefined" "suppress")]
 	  [(i386-cygwin) win-gcc-linker-flags]
-	  [else (list "-shared")]))
+	  [else (list "-fPIC" "-shared")]))
 
       (define (get-env-link-flags)
 	(let ([v (or (getenv "MZSCHEME_DYNEXT_LINKER_FLAGS")

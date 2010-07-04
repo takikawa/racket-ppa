@@ -20,7 +20,7 @@
       t))
   
   ;kind = 'file | 'port
-  ;level = 'beginner | 'intermediate | 'advanced | 'full
+  ;level = 'beginner | 'intermediate | 'intermediate+access | 'advanced | 'full
   
   ;compile: kind kind level (U #f string) (U #f port) (U #f location) -> (U (list compilation-unit) void)
   (define (compile-java src dest level name port loc . type-recs)
@@ -46,7 +46,9 @@
                       (equal? (version) (call-with-input-file compiled-path get-version))
                       (read-record type-path)
                       (> (file-or-directory-modify-seconds compiled-path)
-                         (file-or-directory-modify-seconds (build-path name))))
+                         (file-or-directory-modify-seconds (build-path name)))
+                      (> (file-or-directory-modify-seconds compiled-path)
+                         (file-or-directory-modify-seconds (build-path (collection-path "mzlib") "contract.ss"))))
                (call-with-input-file name (lambda (port) (compile-to-file port name level)))))))
         ((eq? dest 'file)
          (compile-to-file port loc level))
@@ -56,7 +58,9 @@
                  (type-path (build-path path-base "compiled" (path-replace-suffix file ".jinfo"))))
              (unless (or (and (file-exists? compiled-path)
                               (> (file-or-directory-modify-seconds compiled-path)
-                                 (file-or-directory-modify-seconds (build-path name))))
+                                 (file-or-directory-modify-seconds (build-path name)))
+                              (> (file-or-directory-modify-seconds compiled-path)
+                                 (file-or-directory-modify-seconds (build-path (collection-path "mzlib") "contract.ss"))))
                          (and (file-exists? type-path)
                               (read-record type-path)))
                (call-with-input-file 
@@ -165,7 +169,8 @@
     (unless (null? (check-list))
       (check-defs (car (check-list)) level type-recs))
     (remove-from-packages ast type-recs)
-    (order-cus (translate-program ast type-recs)
+    (reverse (translate-program ast type-recs))
+    #;(order-cus (translate-program ast type-recs)
                type-recs))
   
   (define (compile-to-ast port location type-recs file? level)
@@ -194,7 +199,8 @@
       (unless (null? (check-list))
         (check-defs (car (check-list)) level type-recs))
       (remove-from-packages ast type-recs)
-      (order-cus (translate-program ast type-recs) type-recs)))
+      (reverse (translate-program ast type-recs))
+      #;(order-cus (translate-program ast type-recs) type-recs)))
   
   ;compile-interactions: port location type-records level -> syntax
   (define (compile-interactions port location type-recs level)
@@ -307,6 +313,7 @@
             ;(printf "looping in order-cus: ~a ~a ~n" (empty-queue? queue) (length ordered))
             (unless (empty-queue? queue)
               (let ((cu (send queue pop)))
+                ;(printf "cu ~a~n" cu)
                 (if (ok-to-add? cu ordered cus type-recs)
                     (set! ordered (cons cu ordered))
                     (send queue push cu)))

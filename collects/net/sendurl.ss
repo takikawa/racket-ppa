@@ -45,6 +45,9 @@
   ; send-url : str [bool] -> void
   (define/kw (send-url url-str
                        #:optional [separate-window? separate-by-default?])
+    (define stupid-internal-define-syntax1
+      (unless (string? url-str)
+        (error 'send-url "expected a string, got ~e" url-str)))
     (define external (external-browser))
     (define stype (force systype))
     (define preferred '|? ? ?|)
@@ -56,9 +59,7 @@
     (cond
       [(procedure? external) (external url-str)]
       [(eq? stype 'macosx)
-       (browser-process
-        (format "osascript -e 'open location \"~a\"'"
-                url-str))]
+       (browser-process (format "open \"~a\"" url-str))]
       [(eq? stype 'windows)
        (shell-execute #f url-str "" (current-directory) 'SW_SHOWNORMAL)]
       [(not (eq? stype 'unix))
@@ -77,7 +78,8 @@
        => (lambda (exe)
             (browser-process* exe (if separate-window? "-w" "-x") url-str))]
       [(or (use-browser 'netscape)
-           (use-browser 'mozilla))
+           (use-browser 'mozilla)
+           (use-browser 'firefox))
        => (lambda (exe)
             ;; netscape's -remote returns with an error code, if no netscape is
             ;; around.  start a new netscape in that case.

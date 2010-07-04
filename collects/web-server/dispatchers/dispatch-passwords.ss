@@ -1,25 +1,23 @@
 (module dispatch-passwords mzscheme
   (require (lib "kw.ss")
+           (lib "url.ss" "net")
            (lib "contract.ss"))
   (require "dispatch.ss"
            "../private/util.ss"
-           "../private/configuration.ss"
-           "../private/servlet-helpers.ss"
-           "../private/connection-manager.ss"
+           "../configuration/responders.ss"
+           "../private/request-structs.ss"
+           "../servlet/basic-auth.ss"
            "../private/response.ss")  
   (provide/contract
    [interface-version dispatcher-interface-version?])
-  (provide ; XXX contract kw
-   make)
+  (provide make)
   
   (define interface-version 'v1)
   (define/kw (make #:key
+                   ; XXX Take authorized? function
                    [password-file "passwords"]
-                   [password-connection-timeout 300]
                    [authentication-responder 
-                    (gen-authentication-responder "forbidden.html")]
-                   [passwords-refresh-responder
-                    (gen-passwords-refreshed "passwords-refresh.html")])
+                    (gen-authentication-responder "forbidden.html")])
     (define last-read-time (box #f))
     (define password-cache (box #f))
     (define (update-password-cache!)
@@ -29,31 +27,26 @@
                       (cur-mtime . > . (unbox last-read-time))
                       (not (unbox password-cache)))                
               (set-box! last-read-time cur-mtime)
-              ; more here - a malformed password file will kill the connection
               (set-box! password-cache (read-passwords password-file))))))
     (define (read-password-cache)
       (update-password-cache!)
       (unbox password-cache))
-    (lambda (conn req)
-      (define-values (uri method path) (decompose-request req))
+    (define (dispatch conn req)
+      (define uri (request-uri req))
+      (define path (url-path->string (url-path uri)))
+      (define method (request-method req))
       (define denied? (read-password-cache))
       (cond
         [(and denied?
               (access-denied? method path (request-headers/raw req) denied?))
          => (lambda (realm)
-              (adjust-connection-timeout! conn password-connection-timeout)
               (request-authentication conn method uri
                                       authentication-responder
                                       realm))]
-        [(string=? "/conf/refresh-passwords" path)
-         ;; more here - send a nice error page
-         (update-password-cache!)
-         (output-response/method
-          conn
-          (passwords-refresh-responder)
-          method)]
         [else
-         (next-dispatcher)])))
+         (next-dispatcher)]))
+    (values update-password-cache!
+            dispatch))
   
   ;; ****************************************
   ;; ****************************************

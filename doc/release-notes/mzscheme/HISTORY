@@ -1,3 +1,16 @@
+Version 371, August 2007
+Added hash-table-iterate-{first,next,key,value}
+Added keyword<?
+Added make-derived-parameter
+Added make-sibling-inspector
+Added graph? argument to read[-syntax]/recursive
+Added read-accept-infix-dot
+Changed #!<space> and #!/ to general comment forms
+Added continuation?
+Added continuation-prompt-tag?
+Inside MzScheme: GC_{malloc,free}_immobile_box
+foreign.ss: added {malloc,free}-immobile-box
+
 Version 370, May 2007
 Memory management:
  Default build uses 3m instead of CGC

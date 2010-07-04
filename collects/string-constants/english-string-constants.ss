@@ -408,7 +408,7 @@ please adhere to these guidelines:
  (show-character-offsets "Show character offsets") ; used for popup menu; right click on line/column box in bottom of drs window
  (enable-keybindings-in-menus "Enable keybindings in menus")
  (automatically-to-ps "Automatically print to PostScript file")
- (option-as-meta "Treat option key as meta") ;; macos/macos x only
+ (command-as-meta "Treat command key as meta") ;; macos/macos x only
  (separate-dialog-for-searching "Use separate dialog for searching")
  (reuse-existing-frames "Reuse existing frames when opening new files")
  (default-fonts "Default Fonts")
@@ -417,6 +417,7 @@ please adhere to these guidelines:
  (open-files-in-tabs "Open files in separate tabs (not separate windows)")
  (show-interactions-on-execute "Automatically open interactions window when running a program")
   (switch-to-module-language-automatically "Automatically switch to the module language when opening a module")
+  (interactions-beside-definitions "Put the interactions window beside the definitions window") ;; in preferences, below the checkbox one line above this one
  (limit-interactions-size "Limit interactions size")
  (background-color "Background Color")
  (default-text-color "Default text") ;; used for configuring colors, but doesn't need the word "color"
@@ -433,6 +434,7 @@ please adhere to these guidelines:
 
  (change-font-button-label "Change")
  (fonts "Fonts")
+ (other... "Other...") ;; used in the font choice menu item
 
  ; filled with type of font, eg modern, swiss, etc.
  (choose-a-new-font "Please choose a new \"~a\" font")
@@ -799,7 +801,8 @@ please adhere to these guidelines:
  (print-interactions "Print Interactions...")
  (new-tab "New Tab")
  (close-tab "Close Tab") ;; must not have any &s in it.
- 
+ (close-tab-amp "&Close Tab") ;; like close-tab, but with an ampersand on the same letter as the one in close-menu-item
+  
  ;;; edit-menu
  (split-menu-item-label "&Split")
  (collapse-menu-item-label "C&ollapse")
@@ -915,8 +918,11 @@ please adhere to these guidelines:
   (compiling-teachpack "Compiling ~a teachpack ...")
   (teachpack-pre-installed "Preinstalled Teachpacks")
   (teachpack-user-installed "User-installed Teachpacks")
-  (install-teachpack... "Install Teachpack...")
+  (add-teachpack-to-list... "Add Teachpack to List...")
   (teachpack-already-installed "A teachpack with the name '~a' has already been installed. Overwrite it?")
+  ; ~a is filled with a list of language names. Each name is separated by a newline and is indented two spaces (no commas, no 'and')
+  (teachpacks-only-in-languages "Teachpacks are only available in these languages: ~a")
+  
   
  ;;; Language dialog
  (introduction-to-language-dialog
@@ -1238,6 +1244,8 @@ please adhere to these guidelines:
   (profj-advanced-lang-one-line-summary "Java-like Advanced teaching language")
   (profj-intermediate-lang "Intermediate")
   (profj-intermediate-lang-one-line-summary "Java-like Intermediate teaching language")
+  (profj-intermediate-access-lang "Intermediate + access")
+  (profj-intermediate-access-lang-one-line-summary "Java-like Intermediate teaching language, with access modifiers")
   (profj-dynamic-lang "Java+dynamic")
   (profj-dynamic-lang-one-summary "Java with dynamic typing capabilities")
 

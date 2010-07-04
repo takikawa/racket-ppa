@@ -1,12 +1,9 @@
 (module manager mzscheme
   (require (lib "contract.ss"))
-  (require "../servlet-structs.ss")
+  (require "../servlet/servlet-structs.ss")
   
   (define-struct manager (create-instance 
                           adjust-timeout!
-                          instance-lookup-data
-                          instance-lock!
-                          instance-unlock!
                           clear-continuations!
                           continuation-store!
                           continuation-lookup))
@@ -15,11 +12,8 @@
   (define-struct (exn:fail:servlet-manager:no-continuation exn:fail) (expiration-handler))
   
   (provide/contract
-   [struct manager ([create-instance (any/c (-> void) . -> . number?)]
+   [struct manager ([create-instance ((-> void) . -> . number?)]
                     [adjust-timeout! (number? number? . -> . void)]
-                    [instance-lookup-data (number? . -> . any/c)]
-                    [instance-lock! (number? . -> . void)]
-                    [instance-unlock! (number? . -> . void)]
                     [clear-continuations! (number? . -> . void)]
                     [continuation-store! (number? any/c expiration-handler? . -> . (list/c number? number?))]
                     [continuation-lookup (number? number? number? . -> . any/c)])]

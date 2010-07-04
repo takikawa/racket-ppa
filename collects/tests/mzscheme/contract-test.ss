@@ -1538,6 +1538,19 @@
        1)
       x)
    (reverse '(1 3 4 2)))
+
+  (test/neg-blame
+   'parameter/c1
+   '((contract (parameter/c integer?)
+               (make-parameter 1)
+               'pos 'neg)
+     #f))
+  
+  (test/pos-blame
+   'parameter/c1
+   '((contract (parameter/c integer?)
+               (make-parameter 'not-an-int)
+               'pos 'neg)))
   
   (test/spec-passed
    'define/contract1
@@ -3399,13 +3412,47 @@
   
   (contract-eval '(define-contract-struct couple (hd tl)))
   
+  (test/spec-passed
+   'd-c-s-match1
+   '(begin
+      (eval '(module d-c-s-match1 mzscheme
+               (require (lib "contract.ss")
+                        (lib "match.ss"))
+               
+               (define-contract-struct foo (bar baz))
+               
+               (match (make-foo #t #f)
+                 [($ foo bar baz) #t]
+                 [_ #f])))
+      (eval '(require d-c-s-match1))))
+  
+  (test/spec-passed/result
+   'd-c-s-match2
+   '(begin
+      (eval '(module d-c-s-match2 mzscheme
+               (require (lib "contract.ss")
+                        (lib "match.ss"))
+               
+               (define-contract-struct foo (bar baz))
+               
+               (provide d-c-s-match2-f1)
+               (define d-c-s-match2-f1
+                 (match (make-foo 'first 'second)
+                   [($ foo bar baz) (list bar baz)]
+                   [_ #f]))))
+      (eval '(require d-c-s-match2))
+      (eval 'd-c-s-match2-f1))
+   '(first second))
+   
+
+  
   (test/pos-blame 'd-c-s1
                   '(begin
-                     (eval '(module m mzscheme
+                     (eval '(module d-c-s1 mzscheme
                               (require (lib "contract.ss"))
                               (define-contract-struct couple (hd tl))
                               (contract (couple/c any/c any/c) 1 'pos 'neg)))
-                     (eval '(require m))))
+                     (eval '(require d-c-s1))))
   
   (test/spec-passed 'd-c-s2
                     '(contract (couple/c any/c any/c) (make-couple 1 2) 'pos 'neg))
@@ -4086,9 +4133,7 @@ so that propagation occurs.
   (test-flat-contract '(>/c 5) 10 5)
   (test-flat-contract '(integer-in 0 10) 0 11)
   (test-flat-contract '(integer-in 0 10) 10 3/2)
-  (test-flat-contract '(exact-integer-in 0 10) 0 11)
-  (test-flat-contract '(exact-integer-in 0 10) 10 3/2)
-  (test-flat-contract '(exact-integer-in 0 10) 1 1.0)
+  (test-flat-contract '(integer-in 0 10) 1 1.0)
   (test-flat-contract '(real-in 1 10) 3/2 20)
   (test-flat-contract '(string/len 3) "ab" "abc")
   (test-flat-contract 'natural-number/c 5 -1)
@@ -4308,7 +4353,6 @@ so that propagation occurs.
   (test-name '(>/c 5) (>/c 5))
   (test-name '(between/c 5 6) (between/c 5 6))
   (test-name '(integer-in 0 10) (integer-in 0 10))
-  (test-name '(exact-integer-in 0 10) (exact-integer-in 0 10))
   (test-name '(real-in 1 10) (real-in 1 10))
   (test-name '(string/len 3) (string/len 3))
   (test-name 'natural-number/c natural-number/c)
@@ -4363,6 +4407,8 @@ so that propagation occurs.
              (list-immutable/c boolean? (flat-contract integer?)))
   (test-name '(cons-immutable/c (-> boolean? boolean?) (cons-immutable/c integer? null?))
              (list-immutable/c (-> boolean? boolean?) integer?))
+  
+  (test-name '(parameter/c integer?) (parameter/c integer?))
   
   (test-name '(box/c boolean?) (box/c boolean?))
   (test-name '(box/c boolean?) (box/c (flat-contract boolean?)))
@@ -4475,6 +4521,10 @@ so that propagation occurs.
   
   (ctest #t contract-stronger? number? number?)
   (ctest #f contract-stronger? boolean? number?)
+    
+  (ctest #t contract-stronger? (parameter/c (between/c 0 5)) (parameter/c (between/c 0 5)))
+  (ctest #f contract-stronger? (parameter/c (between/c 0 5)) (parameter/c (between/c 1 4)))
+  (ctest #f contract-stronger? (parameter/c (between/c 1 4)) (parameter/c (between/c 0 5)))
   
   (ctest #t contract-stronger? (symbols 'x 'y) (symbols 'x 'y 'z))
   (ctest #f contract-stronger? (symbols 'x 'y 'z) (symbols 'x 'y))
@@ -5088,6 +5138,18 @@ so that propagation occurs.
       (eval 'pc19-ans))
    1)
 
+  ;; test that unit & contract don't collide over the name `struct'
+  (test/spec-passed
+   'provide/contract20
+   '(eval '(module tmp mzscheme
+             (require (lib "contract.ss")
+                      (lib "unit.ss"))
+             
+             (define-struct s (a b))
+             
+             (provide/contract
+              [struct s ([a number?]
+                         [b symbol?])]))))
   
   (contract-error-test
    #'(begin

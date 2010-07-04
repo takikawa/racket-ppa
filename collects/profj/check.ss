@@ -37,16 +37,16 @@
   
   ;;Environment variable properties
   ;;(make-properties bool bool bool bool bool bool)
-  (define-struct properties (parm? field? static? settable? final? usable?))
-  (define parm (make-properties #t #f #f #t #f #t))
-  (define final-parm (make-properties #t #f #f #f #t #t))
-  (define method-var (make-properties #f #f #f #t #f #t))
-  (define final-method-var (make-properties #f #f #f #f #t #t))
-  (define obj-field (make-properties #f #t #f #t #f #t))
-  (define (final-field settable) (make-properties #f #t #f settable #t #t))
-  (define class-field (make-properties #f #t #t #f #t #t))
-  (define (final-class-field settable) (make-properties #f #t #t settable #t #t))
-  (define inherited-conflict (make-properties #f #t #f #f #f #f))
+  (define-struct properties (parm? field? static? settable? final? usable? set?) (make-inspector))
+  (define parm (make-properties #t #f #f #t #f #t #t))
+  (define final-parm (make-properties #t #f #f #f #t #t #t))
+  (define method-var (make-properties #f #f #f #t #f #t #f))
+  (define final-method-var (make-properties #f #f #f #f #t #t #f))
+  (define (obj-field set?) (make-properties #f #t #f #t #f #t set?))
+  (define (final-field settable) (make-properties #f #t #f settable #t #t #f))
+  (define (class-field set?) (make-properties #f #t #t #f #t #t set?))
+  (define (final-class-field settable) (make-properties #f #t #t settable #t #t #f))
+  (define inherited-conflict (make-properties #f #t #f #f #f #f #f))
   
   ;; add-var-to-env: string type properties env -> env
   (define (add-var-to-env name type properties env)
@@ -64,6 +64,16 @@
                      (if (string=? name (var-type-var (car env)))
                          (car env)
                          (lookup (cdr env)))))))
+      (lookup (environment-types env))))
+  
+  (define (lookup-field-in-env name env)
+    (letrec ([lookup
+              (lambda (env)
+                (and (not (null? env))
+                     (if (and (string=? name (var-type-var (car env)))
+                              (properties-field? (var-type-properties (car env))))
+                         (car env)
+                         (lookup (cdr env)))))])
       (lookup (environment-types env))))
 
   ;lookup-specific-this: name env symbol type-records -> bool
@@ -306,6 +316,7 @@
                            check-env
                            type
                            (string->symbol name)
+                           "local variable"
                            type-recs)))
         ((var-decl? prog) (void))
         ((statement? prog)
@@ -428,7 +439,7 @@
   (define (tested-not-found test class src)
     (raise-error
      'tests
-     (format "test ~a does not test class ~a, as the class cannot be found."
+     (format "test ~a cannot test class ~a, as the class cannot be found."
              (id->ext-name test) (path->ext (name->path class)))
      'tests src))
   
@@ -459,9 +470,13 @@
           (let ((member (car rest)))
             (cond
               ((method? member)
-               (if (memq 'static (map modifier-kind (method-modifiers member)))
-                   (check-method member static-env level type-recs c-class #t iface?)
-                   (check-method member field-env level type-recs c-class #f iface?))
+               (cond
+                 [(memq 'static (map modifier-kind (method-modifiers member)))
+                  (check-method member static-env level type-recs c-class #t iface?)]
+                 [(and (eq? level 'beginner) (eq? 'ctor (type-spec-name (method-type member))))
+                  (check-method member fields level type-recs c-class #f iface?)]
+                 [else 
+                  (check-method member field-env level type-recs c-class #f iface?)])
                (loop (cdr rest) statics fields))
               ((initialize? member)
                (if (initialize-static member)
@@ -485,15 +500,16 @@
                                      (if static? statics fields)
                                      type
                                      (string->symbol name)
+                                     "field"
                                      type-recs)
                      (when (field-needs-set? member level abst-class?)
                        (set! setting-fields (cons member setting-fields))))
                  (if static?
                      (loop (cdr rest) 
-                           (add-var-to-env name type class-field statics) 
-                           (add-var-to-env name type class-field fields))
+                           (add-var-to-env name type (class-field (var-init? member)) statics) 
+                           (add-var-to-env name type (class-field (var-init? member)) fields))
                      (loop (cdr rest) statics 
-                           (add-var-to-env name type obj-field fields)))))
+                           (add-var-to-env name type (obj-field (var-init? member)) fields)))))
               ((def? member)
                (check-inner-def member level type-recs c-class field-env)
                (loop (cdr rest) statics fields))
@@ -515,7 +531,7 @@
                          (lambda (assign)
                            (field-set? field assign (car c-class) level #f)) assigns)))
                   setting-fields))))
-    
+      
   ;create-field-env: (list field-record) env string -> env
   (define (create-field-env fields env class)
     (cond
@@ -531,9 +547,9 @@
                          (field-record-type field)
                          (cond
                            ((and in-env? (not current?)) inherited-conflict)
-                           ((and (not static?) (not final?)) obj-field)
+                           ((and (not static?) (not final?)) (obj-field #t))
                            ((and (not static?) final?) (final-field current?))
-                           ((and static? (not final?)) class-field)
+                           ((and static? (not final?)) (class-field #t))
                            ((and static? final?) (final-class-field current?)))
                          (create-field-env (cdr fields) env class))))))
   
@@ -856,18 +872,18 @@
       ((synchronized? body) (reachable-return? (synchronized-stmt body)))
       (else #f)))
 
-  ;check-var-init: expression (exp env -> type/env) type symbol type-records -> type/env
-  (define (check-var-init init check-e env dec-type name type-recs)
+  ;check-var-init: expression (exp env -> type/env) type symbol string type-records -> type/env
+  (define (check-var-init init check-e env dec-type name var-kind type-recs)
     (let ((type (if (array-init? init)
                     (if (array-type? dec-type)
                         (begin
                           (send type-recs add-req (make-req 'array null))
                           (check-array-init (array-init-vals init) check-e env
                                             (array-type-type dec-type) type-recs))
-                        (var-init-error 'array name dec-type #f (array-init-src init)))
+                        (var-init-error 'array var-kind name dec-type #f (array-init-src init)))
                     (check-e init env))))
       (unless (assignment-conversion dec-type (type/env-t type) type-recs)
-        (var-init-error 'other name dec-type (type/env-t type) (expr-src init)))
+        (var-init-error 'other var-kind name dec-type (type/env-t type) (expr-src init)))
       type))
   
   ;check-array-init (U (list array-init) (list exp)) (exp env->type) type type-records -> type/env
@@ -916,16 +932,16 @@
                    ((no-body) (format "Method ~a has no implementation and is not abstract." method)))
                  method src))
   
-  ;var-init-error: symbol symbol type type src -> void
-  (define (var-init-error kind name dec-type given src)
+  ;var-init-error: symbol string symbol type type src -> void
+  (define (var-init-error kind var-kind name dec-type given src)
     (raise-error name
                  (case kind
                    ((array)
-                    (format "Expected ~a to be of declared type ~a, given an array." 
-                            name (type->ext-name dec-type)))
+                    (format "The value of ~a ~a must be a subtype of declared type ~a, given an array." 
+                            var-kind name (type->ext-name dec-type)))
                    ((other)
-                    (format "Expected ~a to be assignable to declared type ~a, given ~a which is unrelated."
-                            name (type->ext-name dec-type) (type->ext-name given))))
+                    (format "The declared type of ~a ~a must be a super type of the expression. ~a is not a super type of ~a."
+                            var-kind name (type->ext-name dec-type) (type->ext-name given))))
                  name src))
 
   ;array-init-error: type type src -> void
@@ -1189,7 +1205,7 @@
       (when (and in-env? (not (properties-field? (var-type-properties in-env?))))
         (illegal-redefinition (field-name local) (field-src local)))
       (if is-var-init?
-          (let ((new-type/env (check-var-init (var-init-init local) check-e env type sym-name type-recs)))
+          (let ((new-type/env (check-var-init (var-init-init local) check-e env type sym-name "local variable" type-recs)))
             (unless (assignment-conversion type (type/env-t new-type/env) type-recs)
               (variable-type-error (field-name local) (type/env-t new-type/env) type (var-init-src local)))
             (add-set-to-env name (new-env (type/env-e new-type/env))))
@@ -1441,7 +1457,7 @@
                                            (expr-src exp)
                                            type-recs
                                            c-class
-                                           env level static?)))
+                                           env level static? interact?)))
         ((inner-alloc? exp)
          (set-expr-type exp
                         (check-inner-alloc exp 
@@ -1720,10 +1736,27 @@
                       (and (null? (cdr field-class))
                            (lookup-local-inner (car field-class) env))))
                 
-                (when (and (memq level '(beginner intermediate))
+                (when (and (memq level '(beginner intermediate intermediate+access))
                            (special-name? obj)
                            (not (lookup-var-in-env fname env)))
                   (access-before-define (string->symbol fname) src))
+                                
+                (when (and (eq? 'beginner level)
+                           assign-left?
+                           (special-name? obj)
+                           (properties-set? (var-type-properties (lookup-field-in-env fname env))))
+                  (assign-twice (string->symbol fname) src))
+                
+                (when (and (eq? 'beginner level)
+                           assign-left?
+                           (special-name? obj))
+                  (set-properties-set?! (var-type-properties (lookup-field-in-env fname env)) #t))
+                
+                (when (and (eq? 'beginner level)
+                           (special-name? obj)
+                           (not (properties-set? (var-type-properties (lookup-field-in-env fname env)))))
+                  (access-before-assign (string->symbol fname) src))
+                           
                 
                 (when (and (field-access-access acc)
                            (var-access-static? (field-access-access acc)))
@@ -1787,6 +1820,12 @@
          (let ((var (lookup-var-in-env (id-string (local-access-name acc)) env)))
            (unless (properties-usable? (var-type-properties var))
              (unusable-var-error (string->symbol (var-type-var var)) (id-src (local-access-name acc))))
+
+           (when (and (eq? level 'beginner)
+                      (not interact?)
+                      (properties-field? (var-type-properties var)))
+             (beginner-field-access-error (string->symbol (var-type-var var))
+                                          (id-src (local-access-name acc))))
            (unless interact?
              (unless assign-left?
                (unless (properties-parm? (var-type-properties var))
@@ -1817,7 +1856,7 @@
                                                                 (cons "scheme"
                                                                       (scheme-record-path (car static-class))))))))
                        (cdr accs))))
-                   ((and (memq level '(beginner intermediate advanced)) (not first-binding) (> (length acc) 1)
+                   ((and (memq level '(beginner intermediate intermediate+access advanced)) (not first-binding) (> (length acc) 1)
                          (with-handlers ((exn:fail:syntax? (lambda (e) #f)))
                            (type-exists? first-acc null c-class (id-src (car acc)) level type-recs)))
                     (build-field-accesses
@@ -2276,8 +2315,8 @@
   
   ;; 15.9
   ;;check-class-alloc: expr (U name identifier) (list exp) (exp env -> type/env) src type-records 
-  ;                   (list string) env symbol bool-> type/env
-  (define (check-class-alloc exp name/def arg-exps check-e src type-recs c-class env level static?)
+  ;                   (list string) env symbol bool bool-> type/env
+  (define (check-class-alloc exp name/def arg-exps check-e src type-recs c-class env level static? interact?)
     (let* ((args/env (check-args arg-exps check-e env))
            (args (car args/env))
            (name (cond
@@ -2294,8 +2333,13 @@
             (if inner-lookup?
                 (inner-rec-record inner-lookup?)
                 (get-record (send type-recs get-class-record type c-class) type-recs)))
-           ;(p (when (null? class-record) (print-struct #t) (printf "~a~n" type)))
-           (methods (get-method-records (id-string (name-id name)) class-record type-recs)))
+           (methods (get-method-records (if inner-lookup?
+                                            (id-string (name-id name)) 
+                                            (car (class-record-name class-record)))
+                                        class-record type-recs)))
+      (unless (equal? (car (class-record-name class-record))
+                      (id-string (name-id name)))
+        (set-id-string! (name-id name) (car (class-record-name class-record))))
       (unless (or (equal? (car (class-record-name class-record)) (ref-type-class/iface type)))
         (set-id-string! (name-id name) (car (class-record-name class-record)))
         (set-class-alloc-class-inner?! exp #t))
@@ -2304,7 +2348,7 @@
         (set-class-alloc-local-inner?! exp #t))
       (unless (or (equal? (ref-type-class/iface type) (car c-class))
                   (equal? (car (class-record-name class-record))
-                          (format "~a.~a" (car c-class) (ref-type-class/iface type)))
+                          (format "~a.~a" (car c-class) (id-string (name-id name))))
                   (class-alloc-class-inner? exp)
                   (class-alloc-local-inner? exp)
                   (inner-alloc? exp))
@@ -2343,7 +2387,7 @@
                       (unless (lookup-exn thrown env type-recs level)
                         (ctor-throws-error (ref-type-class/iface thrown) type src)))
                     (method-record-throws const)))
-        (when (and (memq 'private mods) (not (eq? class-record this)))
+        (when (and (memq 'private mods) (or interact? (not (eq? class-record this))))
           (class-access-error 'pri level type src))
         (when (and (memq 'protected mods) (or (not (is-eq-subclass? this type type-recs)) 
                                               (not (package-members? c-class (cons (ref-type-class/iface type) 
@@ -2620,7 +2664,7 @@
           (instanceof-error 'not-class type exp-type src))
          (else
           (cond
-            ((memq level '(beginner intermediate)) (instanceof-error 'not-ref type exp-type src))
+            ((memq level '(beginner intermediate intermediate+access)) (instanceof-error 'not-ref type exp-type src))
             ((and (array-type? exp-type) (array-type? type)
                   (= (array-type-dim exp-type) (array-type-dim type))
                   (or (assignment-conversion exp-type type type-recs))) 'boolean)
@@ -3000,12 +3044,23 @@
                  (format "Field ~a cannot be accessed before its declaration." name)
                  name src))
   
+  ;assign-twice: symbol src -> void
+  (define (assign-twice name src)
+    (raise-error name
+                 (format "Field ~a has been initialized and cannot be initialized again." name)
+                 name src))
+  
+  (define (access-before-assign name src)
+    (raise-error name
+                 (format "Field ~a cannot be accessed before it is initialized." name)
+                 name src))
+  
   ;not-static-field-access-error symbol symbol src -> void
   (define (not-static-field-access-error name level src)
     (raise-error 
      name
      (case level
-       ((beginner intermediate) 
+       ((beginner intermediate intermediate+access) 
         (format "Field ~a cannot be retrieved from a class, ~a can only be accessed from an instance of the class."
                 name name))
        ((advanced full)
@@ -3067,7 +3122,7 @@
            (format "Attempted to call method ~a on ~a which does not have methods. ~nOnly values with ~a types have methods"
                    n t
                    (case level 
-                     ((beginner intermediate) "class or interface")
+                     ((beginner intermediate intermediate+access) "class or interface")
                      (else "class, interface, or array"))))
        n src)))
   
@@ -3103,8 +3158,8 @@
                    (case kind
                      ((method) 
                       (string-append
-                       (format "This method call uses an unfound method ~a, which is similar to a reserved word~n"
-                               n)
+                       (format "No method ~a for this call can be found. ~a resembles a reserved word.~n"
+                               n n)
                        "Perhaps it is miscapitalized or misspelled"))
                      ((field)
                        (string-append
@@ -3118,7 +3173,7 @@
           (c (string->symbol class)))
       (raise-error n
                    (case level
-                     ((beginner intermediate) (format "Attempt to use class or interface ~a as an object to call method ~a" c n))
+                     ((beginner intermediate intermediate+access) (format "Attempt to use class or interface ~a as an object to call method ~a" c n))
                      ((advanced) (format "Attempt to use method ~a from class ~a as though it were static" n c)))
                    c src)))
   
@@ -3126,7 +3181,7 @@
   (define (beginner-method-access-error name src)
     (let ((n (id->ext-name name)))
       (raise-error n
-                   (format "Method ~a from the current class must be called on 'this'" n)
+                   (format "A call to method ~a requires a target object, such as 'this'." n)
                    n src)))
 
   
@@ -3161,7 +3216,7 @@
       (raise-error n
                    (string-append (format "Method ~a cannot be called in the interactions window.~n" n)
                                   (format "Only ~a methods or methods on objects may be called here." 
-                                          (if (memq level '(beginner intermediate)) "certain library" "static")))
+                                          (if (memq level '(beginner intermediate intermediate+access)) "certain library" "static")))
                    n src)))
 
   
@@ -3291,7 +3346,7 @@
                        ((pro) 
                         (format "method ~a from ~a may only be called by ~a, a subclass, or package member of ~a" 
                                 n t t t))
-                       ((pri) (format "~a does not contain a method named ~a" t n))
+                       ((pri) (format "~a does not contain a visible method named ~a" t n))
                        ((pac) (format "method ~a from ~a may only be called by ~a or a package member of ~a" 
                                       n t t t))))
                  n src)))

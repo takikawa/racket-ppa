@@ -68,15 +68,141 @@
           (for-each (put standard-color-prefs) color-prefs-table)
           (for-each (put coverage-color-panel) coverage-color-prefs)))
       
+      (define mode-surrogate% 
+        (class color:text-mode%
+          (define/override (on-disable-surrogate text)
+            (keymap:remove-chained-keymap text java-keymap)
+            (super on-disable-surrogate text))
+          
+          (define/override (on-enable-surrogate text)
+            (super on-enable-surrogate text)
+            (send (send text get-keymap) chain-to-keymap java-keymap #t))
+          (super-new)))
+      
       ;Create the Java editing mode
       (define mode-surrogate
-        (new color:text-mode%
+        (new mode-surrogate%
              (matches (list (list '|{| '|}|)
                             (list '|(| '|)|)
                             (list '|[| '|]|)))
              (get-token get-syntax-token)
              (token-sym->style short-sym->style-name)))
+
+      (define java-keymap (new keymap:aug-keymap%))
+      (send java-keymap add-function "do-return" (λ (edit event) (send edit do-return)))
+      (send java-keymap map-function "return" "do-return")
+      (send java-keymap map-function "s:return" "do-return")
+      (send java-keymap map-function "s:c:return" "do-return")
+      (send java-keymap map-function "a:return" "do-return")
+      (send java-keymap map-function "s:a:return" "do-return")
+      (send java-keymap map-function "c:a:return" "do-return")
+      (send java-keymap map-function "c:s:a:return" "do-return")
+      (send java-keymap map-function "c:return" "do-return")
+      (send java-keymap map-function "d:return" "do-return")
+      (keymap:send-map-function-meta java-keymap "return" "do-return")
+      (keymap:send-map-function-meta java-keymap "s:return" "do-return")
+      (keymap:send-map-function-meta java-keymap "s:c:return" "do-return")
+      (keymap:send-map-function-meta java-keymap "a:return" "do-return")
+      (keymap:send-map-function-meta java-keymap "s:a:return" "do-return")
+      (keymap:send-map-function-meta java-keymap "c:a:return" "do-return")
+      (keymap:send-map-function-meta java-keymap "c:s:a:return" "do-return")
+      (keymap:send-map-function-meta java-keymap "c:return" "do-return")
+    
+      (send java-keymap add-function "tabify-at-caret" (λ (edit event) (send edit java-tabify-selection)))
+      (send java-keymap map-function "TAB" "tabify-at-caret")
+      
+      (define defs-text-mixin
+        (mixin (color:text<%> editor:keymap<%>) ()
+          (inherit insert classify-position
+                   get-start-position get-end-position get-character delete
+                   backward-match backward-containing-sexp
+                   find-string position-paragraph paragraph-start-position
+                   begin-edit-sequence end-edit-sequence
+                   is-stopped? is-frozen?
+                   skip-whitespace forward-match)
+          
+          (define single-tab-stop 2)
+          (define eol "\n")
+          
+          ;Returns the position immediately following the nearest open, or the start of the buffer
+          ;In some cases of mismatched parens, returns false
+          (define/private (get-sexp-start pos)
+            (let ([sexp-start+whitespace (backward-containing-sexp pos 0)])
+              (and sexp-start+whitespace
+                   (skip-whitespace sexp-start+whitespace 'backward #t))))
+          
+          (define/private (get-indentation start-pos)
+            (letrec ([indent
+                      (if (or (is-stopped?) (is-frozen?))
+                          0
+                          (let* ([base-offset 0]
+                                 [curr-open (get-sexp-start start-pos)])
+                            (cond 
+                              [(and (eq? (classify-position start-pos) 'comment) 
+                                    (eq? (classify-position (add1 start-pos)) 'comment))
+                               base-offset]
+                              [(or (not curr-open) (= curr-open 0)) base-offset]
+                              [else
+                               (let ([previous-line (find-string eol 'backward start-pos 0 #f)])
+                                 (cond 
+                                   [(not previous-line) (+ base-offset single-tab-stop)]
+                                   [else
+                                    (let* ([last-line-start (skip-whitespace previous-line 'forward #f)]
+                                           [last-line-indent 
+                                            (sub1 (if (> last-line-start start-pos)
+                                                      (- start-pos previous-line)
+                                                      (- last-line-start previous-line)))]
+                                           [old-open (get-sexp-start last-line-start)])
+                                      (cond
+                                        [(not old-open) last-line-indent]
+                                        [(and old-open (<= curr-open old-open)) last-line-indent]
+                                        [else (+ single-tab-stop last-line-indent)]))]))])))])
+              (build-string (max indent 0) (λ (x) #\space)))
+            #;(let ([to-insert 0])
+              (let loop ([pos start-pos])
+                (let ([pos-before (backward-containing-sexp pos 0)])
+                  (when pos-before
+                    (let ([brace-pos (find-string "{" 'backward pos-before 0 #f)])
+                      (when brace-pos
+                        (set! to-insert (+ single-tab-stop to-insert))
+                        (loop brace-pos))))))
+              (build-string to-insert (λ (x) #\space))))
             
+          (define/public (do-return)
+            (let ([start-pos (get-start-position)]
+                  [end-pos (get-end-position)])
+              (let ([to-insert ""])
+                (if (= start-pos end-pos)
+                    (insert (string-append "\n" (get-indentation start-pos)))
+                    (insert "\n")))))
+          
+          (define/public (java-tabify-selection)
+            (let ([start-para (position-paragraph (get-start-position))]
+                  [end-para (position-paragraph (get-end-position))])
+              (begin-edit-sequence)
+              (let loop ([para start-para])
+                (let* ([para-start (paragraph-start-position para)]
+                       [insertion (get-indentation (max 0 (sub1 para-start)) #;para-start)]
+                       [closer? #f])
+                  (let loop ()
+                    (let ([c (get-character para-start)])
+                      (cond
+                        [(and (char-whitespace? c)
+                              (not (char=? c #\015))
+                              (not (char=? c #\012)))
+                         (delete para-start (+ para-start 1))
+                         (loop)]
+                        [(char=? #\} c)
+                         (set! closer? #t)])))
+                  (if closer?
+                      (insert (substring insertion 0 (max 0 (- (string-length insertion) single-tab-stop))) para-start para-start)
+                      (insert insertion para-start para-start)))
+                (unless (= para end-para)
+                  (loop (+ para 1))))
+              (end-edit-sequence)))
+
+          (super-new)))
+      
       ;repl-submit: text int -> bool
       ;Determines if the reple should submit or not
       (define (repl-submit text prompt-position)
@@ -137,6 +263,8 @@
          (make-object ((drscheme:language:get-default-mixin) full-lang%)))
         (drscheme:language-configuration:add-language
          (make-object ((drscheme:language:get-default-mixin) advanced-lang%)))
+        (drscheme:language-configuration:add-language 
+         (make-object ((drscheme:language:get-default-mixin) intermediate+access-lang%)))
         (drscheme:language-configuration:add-language
          (make-object ((drscheme:language:get-default-mixin) intermediate-lang%)))
         (drscheme:language-configuration:add-language
@@ -178,13 +306,13 @@
                    (int-list (cons #"profj-intermediate" beg-list)))
               (values (case level
                         ((beginner) beg-list)
-                        ((intermediate) int-list)
+                        ((intermediate intermediate+access) int-list)
                         ((advanced full) (cons #"profj-advanced" int-list)))
                       #f)))
           
           ;default-settings: -> profj-settings
           (define/public (default-settings) 
-            (if (memq level `(beginner intermediate advanced))
+            (if (memq level `(beginner intermediate intermediate+access advanced))
                 (make-profj-settings 'field #f #t #f #t #t null)
                 (make-profj-settings 'type #f #t #t #f #f null)))
           ;default-settings? any -> bool
@@ -635,6 +763,7 @@
                                     (examples (if (testcase-ext?)
                                                   (list (send execute-types get-test-classes) null)
                                                   (find-examples compilation-units))))
+                               #;(printf "ProfJ compilation complete~n")
                                (let ((name-to-require #f)
                                      (tests-run? #f))
                                  (let loop ((mods (order compilation-units))
@@ -688,7 +817,8 @@
                                      (else 
                                       (let-values (((name syn) (get-module-name (expand (car mods)))))
                                         (set! name-to-require name)
-                                        (syntax-as-top (old-current-eval syn))
+                                        (syntax-as-top (eval (compile syn))
+                                         #;(old-current-eval (compile syn)))
                                         (loop (cdr mods) extras #t)))))))))
                           ((parse-java-interactions ex loc)
                            (let ((exp (syntax-object->datum (syntax ex))))
@@ -754,12 +884,15 @@
           (super-instantiate ())))
       
       ;Create the ProfessorJ languages
-      (define full-lang% (java-lang-mixin 'full (string-constant profj-full-lang) 4 (string-constant profj-full-lang-one-line-summary) #f))
-      (define advanced-lang% (java-lang-mixin 'advanced (string-constant profj-advanced-lang) 3 (string-constant profj-advanced-lang-one-line-summary) #f))
+      (define dynamic-lang% (java-lang-mixin 'full (string-constant profj-dynamic-lang) 6 (string-constant profj-dynamic-lang-one-summary) #t))
+      (define full-lang% (java-lang-mixin 'full (string-constant profj-full-lang) 5 (string-constant profj-full-lang-one-line-summary) #f))
+      (define advanced-lang% (java-lang-mixin 'advanced (string-constant profj-advanced-lang) 4 (string-constant profj-advanced-lang-one-line-summary) #f))
+      (define intermediate+access-lang% 
+        (java-lang-mixin 'intermediate+access 
+                         (string-constant profj-intermediate-access-lang) 3 (string-constant profj-intermediate-access-lang-one-line-summary) #f))
       (define intermediate-lang% 
         (java-lang-mixin 'intermediate (string-constant profj-intermediate-lang) 2 (string-constant profj-intermediate-lang-one-line-summary) #f))
       (define beginner-lang% (java-lang-mixin 'beginner (string-constant profj-beginner-lang) 1 (string-constant profj-beginner-lang-one-line-summary) #f))
-      (define dynamic-lang% (java-lang-mixin 'full (string-constant profj-dynamic-lang) 5 (string-constant profj-dynamic-lang-one-summary) #t))
       
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;
@@ -998,6 +1131,7 @@
           (register-capability-menu-item 'profj:special:java-interactions-box (get-special-menu))
           ))
       
+      (drscheme:get/extend:extend-definitions-text defs-text-mixin)
       (drscheme:get/extend:extend-unit-frame java-interactions-box-mixin)
       (drscheme:language:register-capability 'profj:special:java-interactions-box (flat-contract boolean?) #t)
  

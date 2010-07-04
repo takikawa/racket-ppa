@@ -56,6 +56,7 @@ class wxKeymap : public wxObject
   double lastX, lastY;
 
   class wxKeycode *prefix;
+  int prefixed;
 
   char *active_mouse_function;
 
@@ -67,11 +68,11 @@ class wxKeymap : public wxObject
   wxBreakSequenceFunction onBreak;
   void *onBreakData;
 
-  class wxKeycode *FindKey(long, long, long, long, Bool, Bool, Bool, Bool, class wxKeycode *, int *_score);
-  int HandleEvent(long code, long, long, long,
-                  Bool shift, Bool ctrl, Bool alt, Bool meta,
+  class wxKeycode *FindKey(long, long, long, long, long, Bool, Bool, Bool, Bool, Bool, Bool, class wxKeycode *, int *_score);
+  int HandleEvent(long code, long, long, long, long, 
+                  Bool shift, Bool ctrl, Bool alt, Bool meta, Bool cmd, Bool caps,
 		  int score, char **fname, int *fullset);
-  int GetBestScore(long code, long, long, long, Bool shift, Bool ctrl, Bool alt, Bool meta);
+  int GetBestScore(long code, long, long, long, long, Bool shift, Bool ctrl, Bool alt, Bool meta, Bool cmd, Bool caps);
 
   Bool CycleCheck(wxKeymap *km);
 
@@ -110,7 +111,7 @@ class wxKeymap : public wxObject
   void SetBreakSequenceCallback(wxBreakSequenceFunction f, void *data);
 
   class wxKeycode *MapFunction(long code, int shift, int ctrl, 
-			       int alt, int meta, int check_alt,
+			       int alt, int meta, int cmd, int caps, int check_alt,
 			       char *fname, class wxKeycode *prevkey=NULL, 
 			       int keytype = wxKEY_FINAL);
   void MapFunction(wxchar *keyname, char *fname);

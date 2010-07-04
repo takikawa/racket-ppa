@@ -49,6 +49,7 @@ static OSStatus window_evt_handler(EventHandlerCallRef inHandlerCallRef,
 extern char *scheme_mac_spec_to_path(FSSpec *spec);
 
 static int os_x_post_tiger;
+static int zoom_window_hack = 0;
 
 //=============================================================================
 // Public constructors
@@ -133,7 +134,7 @@ wxFrame::wxFrame // Constructor (for frame window)
 	windowClass = kToolbarWindowClass;
 	windowAttributes = kWindowNoAttributes;
       } else {
-	windowClass = kUtilityWindowClass;
+	windowClass = kUtilityWindowClass; /* or kFloatingWindowClass? */
 	windowAttributes = kWindowCloseBoxAttribute;
 	if (!(cStyle & wxNO_RESIZE_BORDER)) {
 	  windowAttributes |= kWindowFullZoomAttribute | kWindowResizableAttribute;
@@ -317,7 +318,7 @@ static OSStatus window_evt_handler(EventHandlerCallRef inHandlerCallRef,
 	/* DragWindow is somehow confused by MrEd. It seems to confuse the struct
 	   and content regions, causing current bounds's height to become
 	   different from the original bound's height. To compensate,
-	   10.3 seems to ignore the hieght, but 10.4 doesn't. So we
+	   10.3 seems to ignore the height, but 10.4 doesn't. So we
 	   explicitly request the old size. */
 	Rect o, n;
 	GetEventParameter(inEvent, kEventParamPreviousBounds, typeQDRectangle, 
@@ -328,7 +329,7 @@ static OSStatus window_evt_handler(EventHandlerCallRef inHandlerCallRef,
 	n.right = n.left + (o.right - o.left);
 	SetEventParameter(inEvent, kEventParamCurrentBounds, typeQDRectangle, 
 			  sizeof(Rect), &n);
-      } else if (!(a & (kWindowBoundsChangeUserResize | kWindowBoundsChangeZoom))) {
+      } else if (!(a & (kWindowBoundsChangeUserResize | (zoom_window_hack ? 0 : kWindowBoundsChangeZoom)))) {
 	Rect n, s, c;
 	WindowRef w;
 
@@ -345,8 +346,17 @@ static OSStatus window_evt_handler(EventHandlerCallRef inHandlerCallRef,
 	     between the real content and structure regions. */
 	  int h, w, hdelta, wdelta;
 
-	  w = f->Width();
-	  h = f->Height();
+          GetEventParameter(inEvent, kEventParamCurrentBounds, typeQDRectangle, 
+			    NULL, sizeof(Rect), NULL, &n);
+	  
+          if (a & kWindowBoundsChangeZoom) {
+            h = n.bottom - n.top;
+            w = n.right - n.left;
+          } else {
+            w = f->Width();
+            h = f->Height();
+          }
+            
 	  {
 	    wxArea *parea;
 	    wxMargin pam;
@@ -356,8 +366,6 @@ static OSStatus window_evt_handler(EventHandlerCallRef inHandlerCallRef,
 	    hdelta = pam.Offset(wxVertical);
 	  }
 
-	  GetEventParameter(inEvent, kEventParamCurrentBounds, typeQDRectangle, 
-			    NULL, sizeof(Rect), NULL, &n);
 	  n.bottom = n.top + h - hdelta;
 	  n.right = n.left + w - wdelta;
 	  SetEventParameter(inEvent, kEventParamCurrentBounds, typeQDRectangle, 
@@ -612,6 +620,7 @@ void wxFrame::Maximize(Bool maximize)
       int oldWindowY = cWindowY;
       int oldWindowWidth = cWindowWidth;
       int oldWindowHeight = cWindowHeight;
+      int pam_dh, pam_dv;
       CGrafPtr theMacGrafPort;
       WindowPtr theMacWindow;
       Point size;
@@ -619,11 +628,35 @@ void wxFrame::Maximize(Bool maximize)
       theMacGrafPort = cMacDC->macGrafPort();
       theMacWindow = GetWindowFromPort(theMacGrafPort);
 
+      {
+        wxArea *parea;
+	wxMargin pam;
+
+	parea = PlatformArea();
+	pam = parea->Margin();
+
+        pam_dh = pam.Offset(wxHorizontal);
+        pam_dv = pam.Offset(wxVertical);
+      }
+
       if (maximize) {
 	Rect rect;
+
 	IsWindowInStandardState(theMacWindow, NULL, &rect);
 	size.h = (rect.right - rect.left);
 	size.v = (rect.bottom - rect.top);
+	
+        if ((size.v + pam_dv == cWindowHeight)
+            && (size.h + pam_dh == cWindowWidth)) {
+          zoom_window_hack = 1;
+        }
+      } else {
+        Rect r;
+	GetWindowIdealUserState(theMacWindow, &r);
+        if (((r.bottom - r.top + pam_dv) == cWindowHeight)
+            && ((r.right - r.left + pam_dh) == cWindowWidth)) {
+          zoom_window_hack = 1;
+        }
       }
 
       ::ZoomWindowIdeal(theMacWindow, maximize ? inZoomOut : inZoomIn, &size);
@@ -632,15 +665,13 @@ void wxFrame::Maximize(Bool maximize)
 	/* MrEd somehow confuses Carbon about structure region versus content region.
 	   Subtract out the difference. */
 	Rect r;
-	wxArea *parea;
-	wxMargin pam;
-	parea = PlatformArea();
-	pam = parea->Margin();
 	GetWindowIdealUserState(theMacWindow, &r);
-	r.right -= pam.Offset(wxHorizontal);
-	r.bottom -= pam.Offset(wxVertical);
+	r.right -= pam_dh;
+	r.bottom -= pam_dv;
 	SetWindowIdealUserState(theMacWindow, &r);
       }
+
+      zoom_window_hack = 0;
 
       wxMacRecalcNewSize();
       
@@ -1199,6 +1230,8 @@ wxFrame *wxFrame::GetSheetParent()
     return NULL; /* No nested sheets */
   else if (cStyle & wxNO_CAPTION)
     return NULL; /* Sheets need a title bar */
+  else if (cStyle & wxFLOAT_FRAME)
+    return NULL; /* Don't use sheets on floating windows */
   else
 #endif
     return this;

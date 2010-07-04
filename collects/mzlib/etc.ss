@@ -1,7 +1,8 @@
 
 (module etc mzscheme
 
-  (require (lib "main-collects.ss" "setup"))
+  (require (lib "main-collects.ss" "setup")
+           "kw.ss")
 
   (require-for-syntax (lib "kerncase.ss" "syntax")
                       (lib "stx.ss" "syntax")

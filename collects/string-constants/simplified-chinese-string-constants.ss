@@ -17,7 +17,7 @@
 ;           #                   #                    #######   
 ;                                                              
 (module simplified-chinese-string-constants "string-constant-lang.ss"
-  (is-this-your-native-language "你的母语是简体中文吗？")
+  (is-this-your-native-language "中文是你的母语吗？")
   
   (are-you-sure-you-want-to-switch-languages
    "为了改变界面语言，现在需要重新启动DrScheme。你确定吗？")
@@ -335,7 +335,7 @@
   (show-character-offsets "显示字符在文件中的位置") ; used for popup menu; right click on line/column box in bottom of drs window
   (enable-keybindings-in-menus "允许使用菜单中的快捷键")
   (automatically-to-ps "自动打印成postscript文件")
-  (option-as-meta "将option键当作meta") ;; macos/macos x only
+  (command-as-meta "将command键当作meta") ;; macos/macos x only
   (separate-dialog-for-searching "使用单独的搜索对话框")
   (reuse-existing-frames "在打开新文件时，使用现有的框架")
   (default-fonts "默认字体")
@@ -344,6 +344,7 @@
   (open-files-in-tabs "在不同的标签下打开多个文件（不使用多个窗口）")
   (show-interactions-on-execute "在运行程序时自动打开交互窗口")
   (switch-to-module-language-automatically "打开module文件时自动切换至module语言")
+  (interactions-beside-definitions "将定义窗口和交互窗口左右放置") ;; in preferences, below the checkbox one line above this one
   (limit-interactions-size "限制交互窗口的大小")
   (background-color "背景颜色")
   (default-text-color "默认颜色") ;; used for configuring colors, but doesn't need the word "color"
@@ -356,10 +357,11 @@
   ; title of the color choosing dialog
   
   ; should have entire alphabet
-  (font-example-string "简体中文 by 朱崇恺") 
+  (font-example-string "中文 by 朱崇恺") 
   
   (change-font-button-label "更改")
   (fonts "字体")
+  (other... "其他...") ;; used in the font choice menu item
   
   ; filled with type of font, eg modern, swiss, etc.
   (choose-a-new-font "请选择一种新的“~a”字体")
@@ -726,6 +728,7 @@
   (print-interactions "打印交互...")
   (new-tab "新建标签")
   (close-tab "关闭标签") ;; must not have any &s in it.
+  (close-tab-amp "关闭标签(&C)") ;; like close-tab, but with an ampersand on the same letter as the one in close-menu-item
   
   ;;; edit-menu
   (split-menu-item-label "分屏(&S)")
@@ -951,8 +954,8 @@
   (profiling-choose-low-color "请选择代表低的颜色")
   (profiling-choose-high-color "请选择代表高的颜色")
   (profiling "Profiling")
-  (profiling-example-text "(define (理) (理))")
-  (profiling-color-config "Profiling色谱") 
+  (profiling-example-text "(define (马) (马))")
+  (profiling-color-config "Profiling色谱")
   (profiling-scale "Profiling的色彩比例")
   (profiling-sqrt "平方根")
   (profiling-linear "线性")
@@ -1055,6 +1058,10 @@
   (module-browser-name-long "长")
   (module-browser-open-all "打开所有这些文件")
   
+  (happy-birthday-matthias "生日快乐，Matthias！")
+  (happy-birthday-matthew "生日快乐，马晓！")
+  (happy-birthday-shriram "生日快乐，Shriram！")
+  
   (mrflow-using-default-language-title "正在使用默认语言")
   (mrflow-using-default-language "当前使用的语言并不包含定义primitive类型的标。改用R5RS Scheme。")
   (mrflow-button-title "分析")
@@ -1081,10 +1088,6 @@
   (xml-tool-scheme-splice-box "Scheme接合框")
   (xml-tool-switch-to-scheme "转变成Scheme框")
   (xml-tool-switch-to-scheme-splice "转变成Scheme接合框")
-  (xml-tool-eliminate-whitespace-in-empty-tags
-   "Eliminiate whitespace in empty tags")
-  (xml-tool-leave-whitespace-alone
-   "Leave whitespace alone")
   
   (show-recent-items-window-menu-item "在单独窗口中显示最近使用的文件")
   (show-recent-items-window-label "最近使用的文件")

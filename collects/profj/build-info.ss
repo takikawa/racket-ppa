@@ -251,6 +251,7 @@
            (suffix (case (unbox new-level)
                      ((beginner) ".bjava")
                      ((intermediate) ".ijava")
+                     ((intermediate+access) ".iajava")
                      ((advanced) ".ajava")
                      ((full) ".java")
                      ((dynamic-full) ".djava")))
@@ -266,11 +267,15 @@
            (send type-recs add-class-record record)
            (send type-recs add-require-syntax class-name (build-require-syntax class path dir #f #f))
            (map (lambda (ancestor)
-                  (import-class (car ancestor) (cdr ancestor)
-                                (find-directory 
-                                 (cdr ancestor)
-                                 (lambda () (error 'internal-error "Compiled parent's directory is not found")))
-                                loc type-recs level caller-src add-to-env))
+                  (let* ([ancestor-name (car ancestor)]
+                         [ancestor-path (if (null? (cdr ancestor))
+                                            (send type-recs lookup-path ancestor-name 
+                                                  (lambda () null))
+                                            (cdr ancestor))])
+                    (import-class ancestor-name ancestor-path
+                                  (find-directory ancestor-path
+                                                  (lambda () (error 'internal-error "Compiled parent's directory is not found")))
+                                  loc type-recs level caller-src add-to-env)))
                 (append (class-record-parents record) (class-record-ifaces record)))
            ))
         ((and (dynamic?) (dir-path-scheme? in-dir) (check-scheme-file-exists? class dir))
@@ -281,6 +286,8 @@
                class-name
                (lambda () 
                  (let ((location (string-append class suffix))
+                       #;(old-type-cloc (send type-recs get-compilation-location))
+                       #;(old-type-loc (send type-recs get-location))
                        (old-dynamic? (dynamic?)))
                    (when (eq? 'dynamic-full (unbox new-level))
                      (dynamic? #t) (set-box! new-level 'full))
@@ -290,10 +297,13 @@
                      (build-info ast (unbox new-level) type-recs 'not_look_up)
                      (begin0 (send type-recs get-class-record class-name #f 
                                    (lambda () 'internal-error "Failed to add record"))
-                             (dynamic? old-dynamic?))
+                             (dynamic? old-dynamic?)
+                             #;(send type-recs set-compilation-location old-type-cloc)
+                             #;(send type-recs set-location! old-type-loc))
                      ))))
          (send type-recs add-require-syntax class-name (build-require-syntax class path dir #t #f)))
-        (else (file-error 'file (cons class path) caller-src level)))
+        (else 
+         (file-error 'file (cons class path) caller-src level)))
       (when add-to-env (send type-recs add-to-env class path loc))
       (send type-recs add-class-req class-name (not add-to-env) loc)))
 
@@ -325,6 +335,7 @@
           (exists? ".djava" 'dynamic-full)
           (exists? ".bjava" 'beginner)
           (exists? ".ijava" 'intermediate)
+          (exists? ".iajava" 'intermediate+access)
           (exists? ".ajava" 'advanced))))
     
   ;check-scheme-file-exists? string path -> bool
@@ -342,14 +353,13 @@
                                     (and (equal? (apply build-path package) cur)
                                          (make-dir-path (build-path 'same) #f))))))
            (classes (if dir (get-class-list dir) null)))
-      ;(printf "~n~nadd-my-package package ~a~n" package)
-      ;(printf "add-my-package: dir ~a class ~a~n" dir classes)
-      (for-each (lambda (c) 
-                  (import-class c package 
-                                (make-dir-path (build-path 'same) #f) loc type-recs level #f #t)
-                  (send type-recs add-to-env c package loc))
-                (filter (lambda (c) (not (contained-in? defs c))) classes))
-      (send type-recs add-package-contents package classes)))
+      ;(printf "~n~nadd-my-package package ~a loc ~a ~n" package loc)
+      ;(printf "add-my-package: dir ~a class ~a~n" (dir-path-path dir) classes)
+      (let ([external-classes (filter (lambda (c) (not (contained-in? defs c))) classes)])
+        (for-each (lambda (c) (send type-recs add-to-env c package loc)) external-classes)
+        (for-each (lambda (c) 
+                    (import-class c package dir loc type-recs level #f #t)) external-classes)
+        (send type-recs add-package-contents package classes))))
       
   ;contained-in? (list definition) definition -> bool
   (define (contained-in? defs class)
@@ -362,7 +372,7 @@
     (lambda ()
       (let ((original-loc (send type-recs get-location))
             (dir (find-directory (cdr name) (lambda () (file-error 'dir (cdr name) call-src level)))))
-        (when (memq level '(beginner intermediate))
+        (when (memq level '(beginner intermediate intermediate+access))
           (file-error 'file name call-src level))
         (import-class (car name) (cdr name) dir original-loc type-recs level call-src #f)
         (begin0 (get-record (send type-recs get-class-record name) type-recs)
@@ -478,6 +488,7 @@
     (when (equal? name child-name)
       (dependence-error 'immediate (name-id n) (name-src n)))
     (let ((record (send type-recs get-class-record name)))
+      #;(printf "~a, ~a~n" name record)
       (cond
         ((class-record? record) record)
         ((procedure? record) 
@@ -537,7 +548,12 @@
                                           (name->list super))))
                       (super-record (get-parent-record super-name super cname level type-recs))
                       (iface-records (map (lambda (i)
-                                            (get-parent-record (name->list i) i #f level type-recs))
+                                            (let ([name-list 
+                                                   (if (null? (name-path i))
+                                                       (cons (id-string (name-id i))
+                                                             (send type-recs lookup-path (id-string (name-id i)) (lambda () null)))
+                                                       (name->list i))])
+                                              (get-parent-record name-list i #f level type-recs)))
                                           (header-implements info)))
                       (members (def-members class))
                       (modifiers (header-modifiers info))
@@ -563,6 +579,9 @@
                    
                  (unless (class-record-class? super-record)
                    (extension-error 'class-iface (header-id info) super (name-src super)))
+                 
+                 #;(printf "~a~n" (header-implements info))
+                 #;(printf "~a~n" iface-records)
                  
                  (when (ormap class-record-class? iface-records)
                    (letrec ((find-class
@@ -591,7 +610,7 @@
                    #;(when (and ctor? (eq? level 'beginner) (memq 'abstract test-mods))
                      (beginner-ctor-error 'abstract (header-id info) (id-src (header-id info))))
 
-                   (valid-field-names? (if (memq level '(beginner intermediate advanced)) 
+                   (valid-field-names? (if (memq level '(beginner intermediate intermediate+access advanced)) 
                                            (append f (class-record-fields super-record)) f)
                                        members m level type-recs)
                    (valid-method-sigs? m members level type-recs)
@@ -763,12 +782,17 @@
              (lambda ()
                (send type-recs add-to-records iname 'in-progress)
                (let* ((super-names (map name->list (header-extends info)))
-                      (super-records (map (lambda (n sc) (get-parent-record n sc iname level type-recs))
-                                          super-names
-                                          (header-extends info)))
+                      (super-records 
+                       (map (lambda (n sc) (get-parent-record n sc iname level type-recs))
+                            super-names
+                            (header-extends info)))
                       (object-methods (class-record-methods (send type-recs get-class-record object-type)))
                       (members (def-members iface))
-                      (reqs (map (lambda (name-list) (make-req (car name-list) (cdr name-list)))
+                      (reqs (map (lambda (name-list)
+                                   (if (= (length name-list) 1)
+                                       (make-req (car name-list)
+                                                 (send type-recs lookup-path (car name-list) (lambda () null)))
+                                       (make-req (car name-list) (cdr name-list))))
                                  super-names))
                       (old-loc (send type-recs get-location)))
                  (send type-recs set-location! (def-file iface))
@@ -809,7 +833,7 @@
                            (apply append (cons f (map class-record-fields super-records)))
                            (apply append (cons m (map class-record-methods super-records)))
                            (apply append (cons i (map class-record-inners super-records)))
-                           (apply append (cons super-names 
+                           (apply append (cons (map class-record-name super-records) 
                                                (map class-record-parents super-records)))
                            null)))
                      (send type-recs add-class-record record)
@@ -874,7 +898,7 @@
                        (add-ctor test 
                                  (lambda (rec) (set! m (cons rec m))) old-methods (header-id info) level))
                    
-                   (valid-field-names? (if (memq level '(beginner intermediate advanced)) 
+                   (valid-field-names? (if (memq level '(beginner intermediate intermediate+access advanced)) 
                                            (append f (class-record-fields super-record)) f)
                                        members m level type-recs)
                    
@@ -998,7 +1022,6 @@
   ;find-member: (U field-record method-record) (list member) symbol type-records -> member
   (define (find-member member-record members level type-recs)
     (when (null? members)
-      (print-struct #t)
       (printf "~a~n" member-record)
       (error 'internal-error "Find-member given a member that is not contained in the member list"))
     (cond
@@ -1023,7 +1046,7 @@
                         (type-spec-to-type (method-type (car members)) (method-record-class member-record) level type-recs)))
            (car members)
            (find-member member-record (cdr members) level type-recs)))
-      ((memq level '(beginner intermediate advanced))
+      ((memq level '(beginner intermediate intermediate+access advanced))
        (let ((given-name ((if (field-record? member-record) field-record-name method-record-name) member-record))
              (looking-at (id-string ((if (field? (car members)) field-name method-name) (car members)))))
          (if (equal? given-name looking-at)
@@ -1059,7 +1082,7 @@
               (m (and (not (eq? 'ctor (method-record-rtype (car methods))))
                       (find-member (car methods) members level type-recs)))
               (class (method-record-class (car methods))))
-          (and res m (memq level '(beginner intermediate))
+          (and res m (memq level '(beginner intermediate intermediate+access))
                (not (type=? (method-record-rtype (car methods))
                             (method-record-rtype res)))
                (method-error 'bad-ret
@@ -1210,23 +1233,23 @@
   
   ;class-fully-implemented? class-record id (list class-record) (list id) (list method) type-records symbol -> bool
   (define (class-fully-implemented? super super-name ifaces ifaces-name methods type-recs level)
-    (when (memq 'abstract (class-record-modifiers super))
-      (let ((unimplemented-iface-methods (get-unimplemented-methods (class-record-methods super)
-                                                                    (class-record-ifaces super)
-                                                                    type-recs)))
-        (andmap (lambda (unimp iface)
-                  (or (null? unimp)
-                      (implements-all? unimp methods iface level)))
-                (car unimplemented-iface-methods) (cadr unimplemented-iface-methods))
+    (let ((unimplemented-iface-methods 
+           (get-unimplemented-methods (class-record-methods super) (class-record-ifaces super)
+                                      ifaces ifaces-name type-recs)))
+      (andmap (lambda (unimp iface)
+                (or (null? unimp)
+                    (implements-all? unimp methods iface level)))
+              (car unimplemented-iface-methods) (cadr unimplemented-iface-methods))
+      (when (memq 'abstract (class-record-modifiers super))
         (implements-all? (get-methods-need-implementing (class-record-methods super))
-                         methods super-name level)))
-    (andmap (lambda (iface iface-name)
-              (or (super-implements? iface (class-record-ifaces super))
-                  (implements-all? (class-record-methods iface) methods iface-name level)))
-            ifaces
-            ifaces-name))
+                         methods super-name level))
+      #;(andmap (lambda (iface iface-name)
+                (or (super-implements? iface (class-record-ifaces super) (class-record-methods super))
+                    (implements-all? (class-record-methods iface) methods iface-name level)))
+              ifaces
+              ifaces-name)))
   
-  ;super-implements?: class-record (list (list string))
+  ;super-implements?: class-record (list (list string)) -> boolean
   (define (super-implements? iface ifaces)
     (member (class-record-name iface) ifaces))
   
@@ -1241,7 +1264,7 @@
                                                                  (ref-type-path t)) #f)
                                                  0 #f))
                   ((array-type? t) (make-type-spec (type-spec-name (type->type-spec (array-type-type t)))
-                                                   (array-type-dim t))))))
+                                                   (array-type-dim t) #f)))))
              (copy-method-record
               (lambda (m)
                 (make-method-record (method-record-name m)
@@ -1265,7 +1288,7 @@
                                                                             ((name? iface) (cons (id-string (name-id iface))
                                                                                                  (map id-string (name-path iface))))))
                                                                         ifaces-name)
-                                                                   (map class-record-name ifaces))) type-recs))))
+                                                                   (map class-record-name ifaces))) null null type-recs))))
       (apply append
              (map (lambda (m-lists)
                     (map (lambda (m)
@@ -1283,8 +1306,9 @@
                          m-lists))
                   unimplemented-iface-methods))))
   
-  ;get-unimplemented-methods: (list method-record) (list (list string)) type-recs -> (list (list (list method-record)) (list string(
-  (define (get-unimplemented-methods methods ifaces type-recs)
+  ;get-unimplemented-methods: (list method-record) (list (list string)) 
+                            ; (list class-record) (list id) type-recs -> (list (list (list method-record)) (list string))
+  (define (get-unimplemented-methods methods ifaces iface-records iface-names type-recs)
     (letrec ((method-req-equal 
               (lambda (mrec1 mrec2)
                 (and (equal? (method-record-name mrec1) (method-record-name mrec2))
@@ -1297,12 +1321,12 @@
                      (or (method-req-equal mrec (car mrecs))
                          (method-rec-mem mrec (cdr mrecs)))))))
       (list (map (lambda (iface)
-                   (let ((iface-rec (send type-recs get-class-record iface)))
-                     (filter (lambda (m) (not (method-rec-mem m methods)))
-                             (class-record-methods iface-rec))))
-                 ifaces)
-            (map (lambda (iface)
-                   (make-name (make-id (car iface) #f) (cdr iface) #f)) ifaces))))
+                   (filter (lambda (m) (not (method-rec-mem m methods))) (class-record-methods iface)))       
+                 (append (map (lambda (iface-spec) (send type-recs get-class-record iface-spec)) ifaces)
+                         iface-records))
+            (append (map (lambda (iface) (make-name (make-id (car iface) #f) (cdr iface) #f)) ifaces)
+                    (map (lambda (iface) 
+                           (if (name? iface) iface (make-name iface null #f))) iface-names)))))
   
   ;get-methods-need-implementing: (list method-record) -> (list method-record)
   (define (get-methods-need-implementing methods)
@@ -1486,7 +1510,7 @@
   
   ;process-inner def (list name) type-records symbol -> inner-record
   (define (process-inner def cname type-recs level)
-    (make-inner-record (filename-extension (id-string (def-name def)))
+    (make-inner-record (bytes->string/locale (filename-extension (id-string (def-name def))))
                        (id-string (def-name def))
                        (map modifier-kind (header-modifiers (def-header def)))
                        (class-def? def)))
@@ -1628,6 +1652,7 @@
        (case level
          ((beginner) '(public final))
          ((intermediate) '(public))
+         ((intermediate+access) '(public protected private))
          ((advanced) '(public protected private static))
          ((full) `(public protected private static final transient volatile))))
      (lambda (x) 'invalid-field)))  
@@ -1637,6 +1662,7 @@
        (case level
          ((beginner) '(public))
          ((intermediate) '(public abstract))
+         ((intermediate+access) '(public protected private abstract))
          ((advanced) `(public protected private abstract static final))
          ((full) '(public protected private abstract static final synchronized native strictfp))
          ((abstract) '(public protected abstract))

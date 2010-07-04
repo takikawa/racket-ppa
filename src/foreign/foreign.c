@@ -423,14 +423,22 @@ static Scheme_Object *foreign_ffi_obj_name(int argc, Scheme_Object *argv[])
  * mzscheme's fixnums are longs. */
 inline int scheme_get_realint_val(Scheme_Object *o, int *v)
 {
-  if (SCHEME_INTP(o)) { *v = (int)(SCHEME_INT_VAL(o)); return 1; }
-  else return 0;
+  if (SCHEME_INTP(o)) {
+    unsigned long lv = SCHEME_INT_VAL(o);
+    int i = (int)lv;
+    if (i != lv)
+      return 0;
+    *v = i;
+    return 1;
+  } else return 0;
 }
 inline int scheme_get_unsigned_realint_val(Scheme_Object *o, unsigned int *v)
 {
   if (SCHEME_INTP(o)) {
-    int i = (int)(SCHEME_INT_VAL(o));
-    if (i < 0) return 0;
+    unsigned long lv = SCHEME_INT_VAL(o);
+    unsigned int i = (unsigned int)lv;
+    if (i != lv)
+      return 0;
     *v = i;
     return 1;
   } else return 0;
@@ -1828,6 +1836,31 @@ static Scheme_Object *foreign_free(int argc, Scheme_Object *argv[])
   return scheme_void;
 }
 
+/* (malloc-immobile-cell v) */
+#undef MYNAME
+#define MYNAME "malloc-immobile-cell"
+static Scheme_Object *foreign_malloc_immobile_cell(int argc, Scheme_Object *argv[])
+{
+  return scheme_make_foreign_cpointer(scheme_malloc_immobile_box(argv[0]));
+}
+
+/* (free-immobile-cell b) */
+#undef MYNAME
+#define MYNAME "free-immobile-cell"
+static Scheme_Object *foreign_free_immobile_cell(int argc, Scheme_Object *argv[])
+{
+  void *ptr;
+  long poff;
+  if (!SCHEME_FFIANYPTRP(argv[0]))
+    scheme_wrong_type(MYNAME, "cpointer", 0, argc, argv);
+  ptr = SCHEME_FFIANYPTR_VAL(argv[0]);
+  poff = SCHEME_FFIANYPTR_OFFSET(argv[0]);
+  if ((ptr == NULL) && (poff == 0))
+    scheme_wrong_type(MYNAME, "non-null-cpointer", 0, argc, argv);
+  scheme_free_immobile_box((void **)W_OFFSET(ptr, poff));
+  return scheme_void;
+}
+
 #define C_LONG_TYPE_STR "exact integer that fits a C long"
 
 /* (ptr-add cptr offset-k [type])
@@ -2631,6 +2664,10 @@ void scheme_init_foreign(Scheme_Env *env)
     scheme_make_prim_w_arity(foreign_end_stubborn_change, "end-stubborn-change", 1, 1), menv);
   scheme_add_global("free",
     scheme_make_prim_w_arity(foreign_free, "free", 1, 1), menv);
+  scheme_add_global("malloc-immobile-cell",
+    scheme_make_prim_w_arity(foreign_malloc_immobile_cell, "malloc-immobile-cell", 1, 1), menv);
+  scheme_add_global("free-immobile-cell",
+    scheme_make_prim_w_arity(foreign_free_immobile_cell, "free-immobile-cell", 1, 1), menv);
   scheme_add_global("ptr-add",
     scheme_make_prim_w_arity(foreign_ptr_add, "ptr-add", 2, 3), menv);
   scheme_add_global("ptr-add!",

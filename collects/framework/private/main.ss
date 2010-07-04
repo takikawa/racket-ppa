@@ -1,8 +1,8 @@
 (module main (lib "a-unit.ss")
   (require (lib "class.ss")
-	   "sig.ss"
+           "sig.ss"
            "../preferences.ss"
-   	   (lib "mred-sig.ss" "mred"))
+           (lib "mred-sig.ss" "mred"))
   
   (import mred^
           [prefix preferences: framework:preferences^]
@@ -35,8 +35,9 @@
                                                                      (number? (cadr x))
                                                                      (null? (cddr x))))
                                                          x))))
-  (preferences:set-default 'framework:white-on-black? #f boolean?)
-  
+  (preferences:set-default 'framework:square-bracket:local
+                           '("local")
+                           (λ (x) (and (list? x) (andmap string? x))))
   (preferences:set-default 'framework:square-bracket:letrec
                            '("let" 
                              "let*" "let-values" "let*-values"
@@ -47,14 +48,16 @@
                              "with-syntax")
                            (λ (x) (and (list? x) (andmap string? x))))
   
+  (preferences:set-default 'framework:white-on-black? #f boolean?)
+  
   (preferences:set-default 'framework:case-sensitive-search?
                            #f
                            boolean?)
   (color-prefs:set-default/color-scheme 'framework:basic-canvas-background "white" "black")
   
-  (preferences:set-default 'framework:special-option-key #f boolean?)
-  (preferences:add-callback 'framework:special-option-key (λ (p v) (special-option-key v)))
-  (special-option-key (preferences:get 'framework:special-option-key))
+  (preferences:set-default 'framework:special-meta-key #f boolean?)
+  (preferences:add-callback 'framework:special-meta-key (λ (p v) (map-command-as-meta-key v)))
+  (map-command-as-meta-key (preferences:get 'framework:special-meta-key))
   
   (preferences:set-default 'framework:fraction-snip-style 'mixed (λ (x) (memq x '(mixed improper))))
   
@@ -165,7 +168,7 @@
   (let ([hash-table (make-hash-table)])
     (for-each (λ (x) 
                 (hash-table-put! hash-table x 'define))
-              '())
+              '(local))
     (for-each (λ (x) 
                 (hash-table-put! hash-table x 'begin))
               '(case-lambda
@@ -206,7 +209,7 @@
                  define-some do opt-lambda
                  send* with-method
                  define-record
-                 local catch shared
+                 catch shared
                  unit/sig unit/lang
                  with-handlers
                  interface
@@ -273,7 +276,7 @@
   (color-prefs:set-default/color-scheme 'framework:delegatee-overview-color
                                         "light blue"
                                         (make-object color% 62 67 155))
-                                        
+  
   
   ;; groups
   

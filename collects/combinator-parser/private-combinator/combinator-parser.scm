@@ -12,17 +12,24 @@
     (export parser^)
     
     (define (sort-used reses)
-      (sort reses (lambda (a b) (> (res-used a) (res-used b)))))
+      (sort reses
+            (lambda (a b) (!!! (> (res-used a) (res-used b))))))
+    (define (sort-repeats repeats)
+      (sort repeats
+            (lambda (a b) (!!! (> (res-used (repeat-res-a a))
+                                  (res-used (repeat-res-a b)))))))
     
     (define (parser start)
       (lambda (input file)
-        (let* ([result (start input)]
+        (let* ([first-src (and src? (pair? input) 
+                               (make-src-lst (position-token-start-pos (car input))
+                                              (position-token-end-pos (car input))))]
+               [result (if first-src (start input first-src) (start input))]
                [out 
                 (cond
                   [(and (res? result) (res-a result) (null? (res-rest result)))
                    (car (res-a (!!! result)))]
-                  [(and (res? result) (res-a result) (res-possible-error result))
-                   (printf "res fail~n")
+                  [(and (res? result) (res-a result) (!!! (res-possible-error result)))
                    (fail-type->message (!!! (res-possible-error result)))]
                   [(and (res? result) (res-a result))
                    (make-err
@@ -30,50 +37,81 @@
                             (!!! (res-msg result)) 
                             (input->output-name (!!! (car (res-rest result)))) input-type)
                     (and src? 
-                         (make-src-lst (position-token-start-pos (!!! (car (res-rest result)))))))]
+                         (make-src-lst (position-token-start-pos (!!! (car (res-rest result))))
+                                       (position-token-end-pos (!!! (car (res-rest result)))))))]
                   [(res? result) 
-                   (printf "res fail2~n")
                    (fail-type->message (res-msg (!!! result)))]
                   [(or (choice-res? result) (pair? result))
+                   #;(printf "choice-res or pair? ~a~n" (choice-res? result))
                    (let* ([options (if (choice-res? result) (choice-res-matches result) result)]
                           [finished-options (filter (lambda (o) 
                                                       (cond [(res? o) (null? (res-rest o))]
                                                             [(repeat-res? o) 
                                                              (eq? (repeat-res-stop o) 'out-of-input)]))
                                                     options)]
-                          [possible-errors (filter res-possible-error 
-                                                   (map (lambda (a) (if (repeat-res? a) (repeat-res-a a) a))
-                                                        options))])
+                          [possible-repeat-errors
+                           (filter (lambda (r) (and (repeat-res? r)
+                                                    (fail-type? (repeat-res-stop r))))
+                                   options)]
+                          [possible-errors 
+                           (filter res-possible-error 
+                                   (map (lambda (a) (if (repeat-res? a) (repeat-res-a a) a))
+                                        options))])
                      (cond 
-                       [(not (null? finished-options)) (car (res-a (!!! (car finished-options))))]
-                       [(not (null? possible-errors))
-                        (printf "choice or pair fail~n")
+                       [(not (null? finished-options)) 
+                        (let ([first-fo (!!! (car finished-options))])
+                          (car (cond 
+                                 [(res? first-fo) (res-a first-fo)]
+                                 [(and (repeat-res? first-fo)
+                                       (res? (repeat-res-a first-fo)))
+                                  (res-a (repeat-res-a first-fo))]
+                                 [else
+                                  (error 'parser-internal-errorcp 
+                                         (format "~a" first-fo))])))]
+                       #;[(not (null? possible-repeat-errors))
+                        (!!! (fail-type->message 
+                              (!!! (car (repeat-res-stop 
+                                         (sort-repeats possible-repeat-errors))))))]
+                       [(and (choice-res? result) (fail-type? (choice-res-errors result)))
                         (!!! (fail-type->message
-                              (res-possible-error (!!! (car (sort-used possible-errors))))))]                
+                              (choice-res-errors result)))]
+                       [(not (null? possible-errors))
+                        ;(printf "choice or pair fail~n")
+                        (!!! (fail-type->message
+                              (res-possible-error (!!! (car (sort-used possible-errors))))))]
                        [else
+                        #;(printf "result ~a~n" result)
                         (let ([used-sort (sort-used options)])
-                          (make-err
-                           (format "Found additional content after ~a, begining with ~a." 
-                                   (!!! (res-msg (car used-sort)))
-                                   (input->output-name (!!! (car (res-rest (car used-sort))))))
-                           (and src?
-                                (make-src-lst (position-token-start-pos 
-                                               (!!! (car (res-rest (car used-sort)))))))))]))]
+                          (if (and (choice-res? result)
+                                   (choice-res-errors result))
+                              (!!! (fail-type->message (choice-res-errors result)))
+                              (make-err
+                               (format "Found additional content after ~a, begining with '~a'." 
+                                       (!!! (res-msg (car used-sort)))
+                                       (input->output-name (!!! (car (res-rest (car used-sort))))))
+                               (and src?
+                                    (make-src-lst (position-token-start-pos 
+                                                   (!!! (car (res-rest (car used-sort)))))
+                                                  (position-token-end-pos
+                                                   (!!! (car (res-rest (car used-sort))))))))))]))]
                   [(and (repeat-res? result) (eq? 'out-of-input (repeat-res-stop (!!! result))))
                    (res-a (repeat-res-a result))]
                   [(and (repeat-res? result) (fail-type? (repeat-res-stop (!!! result))))
-                   (printf "repeat-fail~n")
+                   ;(printf "repeat-fail~n")
                    (!!! (fail-type->message (!!! (repeat-res-stop (!!! result)))))]
                   [else (error 'parser (format "Internal error: recieved unexpected input ~a" 
                                                (!!! result)))])])
           (cond
             [(err? out)
+             #;(printf "returning error")
              (make-err (!!! (err-msg out))
-                       (list (!!! file) 
-                             (!!! (first (err-src out)))
-                             (!!! (second (err-src out)))
-                             (!!! (third (err-src out)))
-                             (!!! (fourth (err-src out)))))]
+                       (if (err-src out)
+                           (list (!!! file) 
+                                 (!!! (first (err-src out)))
+                                 (!!! (second (err-src out)))
+                                 (!!! (third (err-src out)))
+                                 (!!! (fourth (err-src out))))
+                           (list (!!! file) 1 0 1 0)))]
             [else (!!! out)]))))
     )
   
@@ -83,7 +121,7 @@
     (define (rank-choice choices) (apply max choices))
     (define-values 
       (rank-misspell rank-caps rank-class rank-wrong rank-end)
-      (4/5 9/10 2/5 1/5 2/5)))
+      (values 4/5 9/10 2/5 1/5 2/5)))
   
   (define-unit out-struct@
     (import)

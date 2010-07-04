@@ -100,6 +100,8 @@ Bool wxPanel::Create(wxPanel *panel, int x, int y, int width, int height,
 	 NULL);
     if (!(style & wxINVISIBLE))
       XtManageChild(wgt);
+    else
+      XtRealizeWidget(wgt);
     X->frame = wgt;
     // internal representation
     if (style & wxBORDER) {
@@ -269,5 +271,10 @@ void wxPanel::OnDefaultAction(wxItem *WXUNUSED(item))
     event = new wxCommandEvent(wxEVENT_TYPE_BUTTON_COMMAND);
     but->Command(event);
   }
+}
+
+Bool wxPanel::WantsFocus(void)
+{
+  return FALSE;
 }
 

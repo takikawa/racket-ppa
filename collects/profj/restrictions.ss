@@ -34,7 +34,7 @@
     (member (list field class) disallowed-fields))
 
   (define (disallowed-imports level)
-    (let ((teaching-levels (list `("Class" "java" "lang")
+    (let ((teaching-levels null #;(list `("Class" "java" "lang")
                                  `("ClassLoader" "java" "lang")
                                  `("Compiler" "java" "lang")
                                  `("InheritableThreadLocal" "java" "lang")
@@ -61,7 +61,7 @@
       (case level
         ((beginner) (append beginner&intermediate
                             teaching-levels))
-        ((intermediate) (append beginner&intermediate
+        ((intermediate intermediate+access) (append beginner&intermediate
                                 teaching-levels))
         ((advanced) (append null
                             teaching-levels))

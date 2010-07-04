@@ -23,7 +23,7 @@
   (define-signature language-dictionary^ (misspelled misscap missclass))
     
   (define-signature combinator-parser-forms^ 
-    (terminal choice seq repeat
+    (terminal choice seq repeat repeat-greedy
      (define-syntaxes (define-simple-terminals)
        (values 
         (lambda (stx)
@@ -116,7 +116,7 @@
                              (thunk (token-value x))
                              (thunk (token-value x) (car args) (cadr args))))
                        name
-                       (lambda (token) #f)
+                       (lambda (token) 0)
                        (lambda (token) #f))) ...))))]))))
         
      (define-syntaxes (sequence choose ^)
@@ -126,7 +126,8 @@
                            [pos 0]
                            [id-pos 0]
                            [terms null])
-                  (syntax-case term (sequence choose ^)
+                  (syntax-case* term (sequence choose ^) 
+                    (lambda (a b) (eq? (syntax-e a) (syntax-e b)))
                     [((sequence a b) . rest)
                      (loop (syntax rest) (add1 pos) id-pos
                            (cons (quasisyntax (sequence a b #,name)) terms))]
@@ -165,7 +166,7 @@
      (define-syntaxes (eta)
        (values (syntax-rules ()
                  [(_ f)
-                  (opt-lambda (x [c 1]) (f x c))])))
+                  (opt-lambda (x [s (list 0 1 0 1)] [o 1]) (f x s o))])))
      ))
     
   (define-signature parser^ (parser))

@@ -58,7 +58,7 @@ it around flattened out.
                                                 #f
                                                 #t
                                                 stx)]
-              [struct:-name (list-ref struct-names 0)]
+              [struct:-name/val (list-ref struct-names 0)]
               [struct-maker/val (list-ref struct-names 1)]
               [predicate/val (list-ref struct-names 2)]
               [selectors/val (cdddr struct-names)]
@@ -72,6 +72,7 @@ it around flattened out.
                        [struct/dc struct/dc-name/val]
                        [field-count field-count/val]
                        [(selectors ...) selectors/val]
+                       [struct:-name struct:-name/val]
                        [struct-maker struct-maker/val]
                        [predicate predicate/val]
                        [contract-name (add-suffix "-contract")]
@@ -93,6 +94,13 @@ it around flattened out.
                                                       already-there? burrow-in rewrite-fields wrap-get)
                         (values))))
                     (list))
+             
+             (define-syntax name (list-immutable #'struct:-name 
+                                                 #'struct-maker 
+                                                 #'predicate
+                                                 (reverse (list-immutable #'selectors ...))
+                                                 (list-immutable #,@(map (λ (x) #f) (syntax->list #'(selectors ...))))
+                                                 #t))
              
              (define (evaluate-attrs stct contract/info)
                (when (wrap-parent-get stct 0) ;; test to make sure this even has attributes
@@ -251,19 +259,6 @@ it around flattened out.
                                           (cdr synth-setup-stuff))
                                 (wrap-parent-set wrapper 0 (make-synth-info '() ht (car synth-setup-stuff))))))
                           wrapper)])))))
-             
-             (define (already-there/opt? val new-n new-r)
-               (cond
-                 [(and (opt-wrap-predicate val)
-                       (opt-wrap-get val 0))
-                  (let ([old-n (opt-wrap-get val 2)]
-                        [old-r (opt-wrap-get val 3)])
-                    (flattened-stronger old-n old-r new-n new-r))]
-                 [else #f]))
-             
-             (define (flattened-stronger this-val this-rank that-val that-rank)
-               (and (<= this-val that-val)
-                    (>= this-rank that-rank)))
              
              (define (already-there? new-contract/info val depth)
                (cond

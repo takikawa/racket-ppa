@@ -250,6 +250,9 @@ void wxWindow::SetFocus(void)
   if (!IsShownTree())
     return;
 
+  if (!AcceptsExplicitFocus())
+    return;
+
   p = GetTopLevel();
   
   if (p && wxSubType(p->__type, wxTYPE_FRAME)
@@ -286,6 +289,11 @@ void wxWindow::SetFocus(void)
       }
     }
   }
+}
+
+Bool wxWindow::AcceptsExplicitFocus()
+{
+  return TRUE;
 }
 
 /* Enable state flags:
@@ -1792,6 +1800,11 @@ int wxWnd::OnButton(int x, int y, UINT flags, int evttype, int for_nc)
   event->leftDown = (flags & MK_LBUTTON);
   event->middleDown = (flags & MK_MBUTTON);
   event->rightDown = (flags & MK_RBUTTON);
+  {
+    int cd;
+    cd = (::GetKeyState(VK_CAPITAL) >> 1);
+    event->capsDown = cd;
+  }
   event->SetTimestamp(last_msg_time);
 
   if (!for_nc && wx_window && (is_canvas || is_panel)) {
@@ -1937,6 +1950,11 @@ int wxWnd::OnMouseMove(int x, int y, UINT flags, int for_nc)
   event->leftDown = (flags & MK_LBUTTON);
   event->middleDown = (flags & MK_MBUTTON);
   event->rightDown = (flags & MK_RBUTTON);
+  {
+    int cd;
+    cd = (::GetKeyState(VK_CAPITAL) >> 1);
+    event->capsDown = cd;
+  }
   event->SetTimestamp(last_msg_time);
 
   // Window gets a click down message followed by a mouse move
@@ -1984,6 +2002,11 @@ static void wxDoOnMouseEnter(wxWindow *wx_window, int x, int y, UINT flags)
   event->leftDown = (flags & MK_LBUTTON);
   event->middleDown = (flags & MK_MBUTTON);
   event->rightDown = (flags & MK_RBUTTON);
+  {
+    int cd;
+    cd = (::GetKeyState(VK_CAPITAL) >> 1);
+    event->capsDown = cd;
+  }
   event->SetTimestamp(last_msg_time);
 
   if (!wx_window->CallPreOnEvent(wx_window->PreWindow(), event))
@@ -2011,6 +2034,11 @@ static void wxDoOnMouseLeave(wxWindow *wx_window, int x, int y, UINT flags)
   event->leftDown = (flags & MK_LBUTTON);
   event->middleDown = (flags & MK_MBUTTON);
   event->rightDown = (flags & MK_RBUTTON);
+  {
+    int cd;
+    cd = (::GetKeyState(VK_CAPITAL) >> 1);
+    event->capsDown = cd;
+  }
   event->SetTimestamp(last_msg_time);
 
   if (!wx_window->CallPreOnEvent(wx_window->PreWindow(), event))
@@ -2053,10 +2081,11 @@ static void init_sakc()
 wxKeyEvent *wxMakeCharEvent(BOOL just_check, WORD wParam, LPARAM lParam, Bool isASCII, Bool isRelease, HWND handle)
 {
   int id, other_id = 0, other_alt_id = 0, alt_id = 0;
-  Bool tempControlDown, tempAltDown, tempShiftDown;
-
+  Bool tempControlDown, tempAltDown, tempShiftDown, tempCapsDown;
+  
   tempControlDown = (::GetKeyState(VK_CONTROL) >> 1);
   tempShiftDown = (::GetKeyState(VK_SHIFT) >> 1);
+  tempCapsDown = (::GetKeyState(VK_CAPITAL) >> 1);
   tempAltDown = ((HIWORD(lParam) & KF_ALTDOWN) == KF_ALTDOWN);
 
   if (isASCII) {
@@ -2203,6 +2232,8 @@ wxKeyEvent *wxMakeCharEvent(BOOL just_check, WORD wParam, LPARAM lParam, Bool is
       event->controlDown = TRUE;
     if (tempAltDown)
       event->metaDown = TRUE;
+    if (tempCapsDown)
+      event->capsDown = TRUE;
 
     event->keyCode = (isRelease ? WXK_RELEASE : id);
     event->keyUpCode = (isRelease ? id : WXK_PRESS);

@@ -2688,6 +2688,8 @@ static int mark_optimize_info_MARK(void *p) {
   gcMARK(i->use);
   gcMARK(i->consts);
   gcMARK(i->top_level_consts);
+  gcMARK(i->transitive_use);
+  gcMARK(i->transitive_use_len);
 
   return
   gcBYTES_TO_WORDS(sizeof(Optimize_Info));
@@ -2702,6 +2704,8 @@ static int mark_optimize_info_FIXUP(void *p) {
   gcFIXUP(i->use);
   gcFIXUP(i->consts);
   gcFIXUP(i->top_level_consts);
+  gcFIXUP(i->transitive_use);
+  gcFIXUP(i->transitive_use_len);
 
   return
   gcBYTES_TO_WORDS(sizeof(Optimize_Info));
@@ -3808,6 +3812,7 @@ static int mark_param_data_MARK(void *p) {
 
   gcMARK(d->key);
   gcMARK(d->guard);
+  gcMARK(d->extract_guard);
   gcMARK(d->defcell);
 
   return
@@ -3819,6 +3824,7 @@ static int mark_param_data_FIXUP(void *p) {
 
   gcFIXUP(d->key);
   gcFIXUP(d->guard);
+  gcFIXUP(d->extract_guard);
   gcFIXUP(d->defcell);
 
   return

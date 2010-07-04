@@ -115,8 +115,11 @@ fi
 
 if test "${enable_shared}" = "yes" ; then
   if test "$OS" = "Darwin" ; then
-    echo "ERROR: don't use --enable-shared or --enable-dynlib under Mac OS X"
-    exit 1
+    if test "${enable_xonx}" != "yes" ; then
+       echo "ERROR: don't use --enable-shared or --enable-dynlib under Mac OS X,"
+       echo "       unless you also use --enable-xonx"
+       exit 1
+    fi
   fi
 fi
 
@@ -515,6 +518,7 @@ case $OS in
     ;;
   Linux)
     LIBS="$LIBS -rdynamic"
+    DYN_CFLAGS="-fPIC"
     # PPC: X11 librares are not found
     case `$UNAME -m` in
       ppc)
@@ -1155,12 +1159,14 @@ if test "${enable_shared}" = "yes" ; then
   fi
   abssrcdir=`(cd ${srcdir}; pwd)`
 
-  # Try to convert prefix to an absolute path:
-  if test -d "${prefix}" ; then
-    absprefix=`(cd ${prefix}; pwd)`
+  # Try to convert libdir to an absolute path:
+  # (Is this necessary anymore?)
+  if test -d "${libdir}" ; then
+    abslibdir=`(cd ${libdir}; pwd)`
   else
-    absprefix="${prefix}"
+    abslibdir="${libdir}"
   fi
+  
 
   if test "${LIBTOOLPROG}" = "" ; then  
     (cd lt; sh ${abssrcdir}/lt/configure --enable-shared --disable-static)
@@ -1185,15 +1191,15 @@ if test "${enable_shared}" = "yes" ; then
     plt_lib_version=`grep " MZSCHEME_VERSION " ${srcdir}/mzscheme/src/schvers.h | cut -d '"' -f 2`
   fi
 
-  AR="${LIBTOOLPROG} --mode=link $CC${need_gcc_static_libgcc}${ar_libtool_no_undefined} -release ${plt_lib_version} -rpath ${absprefix}/lib -o"
-  STATIC_AR="${LIBTOOLPROG} --mode=link $CC -o"
+  AR="${LIBTOOLPROG} --mode=link --tag=CC $CC${need_gcc_static_libgcc}${ar_libtool_no_undefined} -release ${plt_lib_version} -rpath ${abslibdir} -o"
+  STATIC_AR="${LIBTOOLPROG} --mode=link --tag=CC $CC -o"
   ARFLAGS=""
   RANLIB=":"
-  MZLINKER="${LIBTOOLPROG} --mode=link $CC${need_gcc_static_libgcc} -rpath ${absprefix}/lib"
-  MREDLINKER="${LIBTOOLPROG} --mode=link $CXX${need_gcc_static_libgcc} -rpath ${absprefix}/lib"
+  MZLINKER="${LIBTOOLPROG} --mode=link --tag=CC $CC${need_gcc_static_libgcc} -rpath ${abslibdir}"
+  MREDLINKER="${LIBTOOLPROG} --mode=link --tag=CXX $CXX${need_gcc_static_libgcc} -rpath ${abslibdir}"
   PLAIN_CC="$CC"
-  CC="${LIBTOOLPROG} --mode=compile $CC"
-  CXX="${LIBTOOLPROG} --mode=compile $CXX"
+  CC="${LIBTOOLPROG} --mode=compile --tag=CC $CC"
+  CXX="${LIBTOOLPROG} --mode=compile --tag=CXX $CXX"
   AS="${LIBTOOLPROG} --mode=compile $AS"
   LIBSFX=la
   WXLIBS=WXLIBSDYN
