@@ -90,26 +90,6 @@ The @scheme[gl-config] argument determines properties of an OpenGL
 
 }
 
-@defmethod*[([(accept-tab-focus)
-              boolean?]
-             [(accept-tab-focus [on? any/c])
-              void?])]{
-
-@index['("keyboard focus" "navigation")]{Gets} or sets whether
-tab-focus is enabled for the canvas (assuming that the canvas is
-not created with the @scheme['no-focus] style). When tab-focus is
-enabled, the canvas can receive the keyboard focus when the user
-navigates among a frame or dialog's controls with the Tab and
-arrow keys. By default, tab-focus is disabled.
-
-When tab-focus is enabled for a canvas, Tab, arrow, and Enter keyboard
- events are consumed by a frame's default
-@method[top-level-window<%> on-traverse-char] method. (In addition, a dialog's default method consumes Escape key
- events.) Otherwise,
-@method[top-level-window<%> on-traverse-char] allows the keyboard events to be propagated to the canvas.
-}
-
-
 @defmethod[(get-scroll-page [which (one-of/c 'horizontal 'vertical)])
            (integer-in 1 1000000000)]{
 
@@ -204,7 +184,7 @@ See also
 @method[canvas% init-manual-scrollbars] for information about manual scrollbars. The horizontal and vertical
  scrollbars are always either both manual or both automatic, but they
  are independently enabled. Automatic scrollbars can be
- re-initialized as manual, and vice-versa.
+ re-initialized as manual, and vice versa.
 
 If either @scheme[horiz-pixels] or @scheme[vert-pixels] is
  @scheme[#f], the scrollbar is not enabled in the corresponding
@@ -244,7 +224,7 @@ See also
 @method[canvas% init-auto-scrollbars] for information about automatic scrollbars. The horizontal and vertical
  scrollbars are always either both manual or both automatic, but they
  are independently enabled. Automatic scrollbars can be re-initialized
- as manual, and vice-versa.
+ as manual, and vice versa.
 
 The @scheme[h-length] and @scheme[v-length] arguments specify the length of
  each scrollbar in scroll steps (i.e., the maximum value of each

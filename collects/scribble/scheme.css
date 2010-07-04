@@ -54,7 +54,7 @@
 }
 
 .ScmMeta {
-  color: #262680;
+  color: black;
 }
 
 .ScmMod {
@@ -163,4 +163,26 @@
 .insetpara {
  margin-left: 1em;
  margin-right: 1em;
+}
+
+.Sfilebox {
+  margin-left: 1em;
+  margin-right: 1em;
+}
+
+.Sfiletitle {
+  text-align: right;
+  margin: 0em 0em 0em 0em;
+}
+
+.Sfilename {
+  border-top: 1px solid #6C8585;
+  border-right: 1px solid #6C8585;
+  padding-left: 0.5em;
+  padding-right: 0.5em;
+  background-color: #ECF5F5;
+}
+
+.Sfilecontent {
+  margin: 0em 0em 0em 0em;
 }

@@ -48,8 +48,7 @@ positions are initialized with the given @scheme[b]s.
 
 
 @defproc[(bytes->immutable-bytes [bstr bytes?])
-         (and/c bytes?
-                immutable?)]{
+         (and/c bytes? immutable?)]{
  Returns an immutable byte string with the same content
  as @scheme[bstr], returning @scheme[bstr] itself if @scheme[bstr] is
  immutable.
@@ -390,7 +389,7 @@ string.
 @; ----------------------------------------
 @section{Bytes to Bytes Encoding Conversion}
 
-@defproc[(bytes-open-converter [from-name string?][to-name string?])
+@defproc[(bytes-open-converter [from-name string?] [to-name string?])
          bytes-converter?]{
 
 Produces a @deftech{byte converter} to go from the encoding named by
@@ -459,7 +458,7 @@ guaranteed combinations not involving @scheme[""] under Unix, or if it
 is any of the guaranteed combinations (including @scheme[""]) under
 Windows and Mac OS X.
 
-@margin-note{In PLT's software distributions for Windows, a suitable
+@margin-note{In the Racket software distributions for Windows, a suitable
 @filepath{iconv.dll} is included with @filepath{libmzsch@italic{VERS}.dll}.}
 
 The set of available encodings and combinations varies by platform,

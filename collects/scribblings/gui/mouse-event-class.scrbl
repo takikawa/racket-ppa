@@ -13,19 +13,19 @@ See also @|mousekeydiscuss|.
 
 
 
-@defconstructor[([event-type (one-of/c 'enter 'leave 'left-down 'left-up 
-                                       'middle-down 'middle-up 
-                                       'right-down 'right-up 'motion)]
+@defconstructor[([event-type (or/c 'enter 'leave 'left-down 'left-up 
+                                   'middle-down 'middle-up 
+                                   'right-down 'right-up 'motion)]
                  [left-down any/c #f]
                  [middle-down any/c #f]
                  [right-down any/c #f]
-                 [x (and/c exact? integer?) 0]
-                 [y (and/c exact? integer?) 0]
+                 [x exact-integer? 0]
+                 [y exact-integer? 0]
                  [shift-down any/c #f]
                  [control-down any/c #f]
                  [meta-down any/c #f]
                  [alt-down any/c #f]
-                 [time-stamp (and/c exact? integer?) 0]
+                 [time-stamp exact-integer? 0]
                  [caps-down any/c #f])]{
 
 Creates a mouse event for a particular type of event. The event types
@@ -51,7 +51,7 @@ See the corresponding @schemeidfont{get-} and @schemeidfont{set-}
 
 }
 
-@defmethod[(button-changed? [button (one-of/c 'left 'middle 'right 'any) 'any])
+@defmethod[(button-changed? [button (or/c 'left 'middle 'right 'any) 'any])
            boolean?]{
 
 Returns @scheme[#t] if this was a mouse button press or release event,
@@ -64,7 +64,7 @@ If @scheme[button] is not @scheme['any], then @scheme[#t] is only returned
 
 }
 
-@defmethod[(button-down? [button (one-of/c 'left 'middle 'right 'any) 'any])
+@defmethod[(button-down? [button (or/c 'left 'middle 'right 'any) 'any])
            boolean?]{
 
 Returns @scheme[#t] if the event is for a button press, @scheme[#f]
@@ -75,7 +75,7 @@ If @scheme[button] is not @scheme['any], then @scheme[#t] is only returned
 
 }
 
-@defmethod[(button-up? [button (one-of/c 'left 'middle 'right 'any) 'any])
+@defmethod[(button-up? [button (or/c 'left 'middle 'right 'any) 'any])
            boolean?]{
 
 Returns @scheme[#t] if the event is for a button release, @scheme[#f]
@@ -142,9 +142,9 @@ Under Mac OS X, if a control-key press is combined with a mouse button
 }
 
 @defmethod[(get-event-type)
-           (one-of/c 'enter 'leave 'left-down 'left-up 
-                     'middle-down 'middle-up 
-                     'right-down 'right-up 'motion)]{
+           (or/c 'enter 'leave 'left-down 'left-up 
+                 'middle-down 'middle-up 
+                 'right-down 'right-up 'motion)]{
 
 Returns the type of the event; see @scheme[mouse-event%] for
 information about each event type. See also @method[mouse-event%
@@ -192,7 +192,7 @@ Returns @scheme[#t] if the Shift key was down for the event.
 }
 
 @defmethod[(get-x)
-           (and/c exact? integer?)]{
+           exact-integer?]{
 
 Returns the x-position of the mouse at the time of the event, in the
  target's window's (client-area) coordinate system.
@@ -200,7 +200,7 @@ Returns the x-position of the mouse at the time of the event, in the
 }
 
 @defmethod[(get-y)
-           (and/c exact? integer?)]{
+           exact-integer?]{
 
 Returns the y-position of the mouse at the time of the event in the
  target's window's (client-area) coordinate system.
@@ -254,9 +254,9 @@ Under Mac OS X, if a control-key press is combined with a mouse button
 
 }
 
-@defmethod[(set-event-type [event-type (one-of/c 'enter 'leave 'left-down 'left-up 
-                                                 'middle-down 'middle-up 
-                                                 'right-down 'right-up 'motion)])
+@defmethod[(set-event-type [event-type (or/c 'enter 'leave 'left-down 'left-up 
+                                             'middle-down 'middle-up 
+                                             'right-down 'right-up 'motion)])
            void?]{
 
 Sets the type of the event; see @scheme[mouse-event%] for information
@@ -304,7 +304,7 @@ Sets whether the Shift key was down for the event.
 
 }
 
-@defmethod[(set-x [pos (and/c exact? integer?)])
+@defmethod[(set-x [pos exact-integer?])
            void?]{
 
 Sets the x-position of the mouse at the time of the event in the
@@ -312,7 +312,7 @@ Sets the x-position of the mouse at the time of the event in the
 
 }
 
-@defmethod[(set-y [pos (and/c exact? integer?)])
+@defmethod[(set-y [pos exact-integer?])
            void?]{
 
 Sets the y-position of the mouse at the time of the event in the

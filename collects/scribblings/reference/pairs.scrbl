@@ -1,13 +1,13 @@
 #lang scribble/doc
 @(require "mz.ss"
           scribble/scheme
-          scheme/generator
-          scheme/list
-          (for-syntax scheme/base))
+          racket/generator
+          racket/list
+          (for-syntax racket/base))
 
 @(define (generate-c_r-example proc)
   (define (make-it start n)
-    (generator
+    (generator ()
       (let loop ([start start]
                  [n n])
         (yield (list* n start))
@@ -26,7 +26,7 @@
 
 @(define-syntax (defc_r stx)
    (syntax-case stx ()
-     [(_ x ... example)
+     [(_ x ... example-arg)
       (let ([xs (map syntax-e (syntax->list #'(x ...)))])
         (let ([name (string->symbol
                      (string-append
@@ -58,10 +58,25 @@
                                                              span)))
                                       (datum->syntax #'here c 
                                                      (list (syntax-source stx) 1 pos (add1 pos) 1))))]
-                        [example (datum->syntax #'here (syntax->datum #'example))]
+                        [example (let ([ex #'example-arg])
+                                   (datum->syntax #f
+                                                  (list
+                                                   (datum->syntax #f
+                                                                  name
+                                                                  (vector (syntax-source ex)
+                                                                          (syntax-line ex)
+                                                                          (- (syntax-column ex) 2)
+                                                                          (- (syntax-position ex) 2)
+                                                                          1))
+                                                   ex)
+                                                  (vector (syntax-source ex)
+                                                          (syntax-line ex)
+                                                          (- (syntax-column ex) 3)
+                                                          (- (syntax-position ex) 3)
+                                                          (+ (syntax-span ex) 4))))]
                         [equiv equiv])
             #'(defproc (name [v contract]) any/c
-                "Returns " (to-element 'equiv) (mz-examples (name example))))))]))
+                "Returns " (to-element 'equiv) (mz-examples example)))))]))
 
 
 @title[#:tag "pairs"]{Pairs and Lists}
@@ -107,7 +122,7 @@ the empty list, @scheme[#f] otherwise.
 (null? (cdr (list 1)))
 ]}
 
-@defproc[(cons [a any/c] [d any/c]) pair?]{Returns a pair whose first
+@defproc[(cons [a any/c] [d any/c]) pair?]{Returns a newly allocated pair whose first
 element is @scheme[a] and second element is @scheme[d].
 @mz-examples[
 (cons 1 2)
@@ -415,7 +430,7 @@ Returns a list that is like @scheme[lst], omitting the first element
 
 Returns @scheme[(remove v lst eq?)].
 @mz-examples[
-(remq (list 1 2) (list 1 2 3 4 5))
+(remq 2 (list 1 2 3 4 5))
 ]}
 
 
@@ -648,10 +663,10 @@ Like @scheme[assoc], but finds an element using the predicate
 @; ----------------------------------------
 @section{Additional List Functions and Synonyms}
 
-@note-lib[scheme/list]
+@note-lib[racket/list]
 @(define list-eval (make-base-eval))
 @(interaction-eval #:eval list-eval
-                   (require scheme/list (only-in scheme/function negate)))
+                   (require racket/list (only-in racket/function negate)))
 
 @defthing[empty null?]{The empty list.
 @mz-examples[#:eval list-eval

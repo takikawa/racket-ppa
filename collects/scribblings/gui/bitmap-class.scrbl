@@ -50,7 +50,7 @@ When a @scheme[bits] byte string is provided: Creates a monochrome
                             [y real?]
                             [width (integer-in 1 10000)]
                             [height (integer-in 1 10000)]
-                            [pixels (and/c byte-string? mutable?)]
+                            [pixels (and/c bytes? mutable?)]
                             [alpha? any/c #f])
            void?]{
 
@@ -240,7 +240,7 @@ The given @scheme[gl-config%] object is copied, so that changes to
 
 }
 
-@defmethod[(set-loaded-mask [mask (or/c (is-a?/c bitmap%) false/c)])
+@defmethod[(set-loaded-mask [mask (is-a?/c bitmap%)])
            void?]{
 
 See @method[bitmap% get-loaded-mask].

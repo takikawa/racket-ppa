@@ -72,12 +72,15 @@ expression that were directly present in the original expression, as
 opposed to @tech{syntax object}s inserted by macros.}
 
 
-@defproc[(syntax-source-module [stx syntax?])
-         (or/c module-path-index? symbol? #f)]{
+@defproc[(syntax-source-module [stx syntax?] [source? any/c #f])
+         (or/c module-path-index? symbol? path? #f)]{
 
-Returns a module path index or symbol (see @secref["modpathidx"])
-for the module whose source contains @scheme[stx], or @scheme[#f] if
-@scheme[stx] has no source module.}
+Returns an indication of the module whose source contains
+@scheme[stx], or @scheme[#f] if @scheme[stx] has no source module.  If
+@scheme[source?] is @scheme[#f], then result is a module path index or
+symbol (see @secref["modpathidx"]); if @scheme[source?] is true, the
+result is a path or symbol corresponding to the loaded module's
+source in the sense of @scheme[current-module-declare-source].}
 
 
 @defproc[(syntax-e [stx syntax?]) any]{
@@ -118,8 +121,7 @@ pair-valued @tech{syntax object} @italic{only} for parentheses in the
 source. See @secref["parse-pair"] for more information.}
 
 
-@defproc[(syntax->list [stx syntax?])
-         (or/c list? #f)]{
+@defproc[(syntax->list [stx syntax?]) (or/c list? #f)]{
 
 Returns a list of @tech{syntax object}s or @scheme[#f]. The result is a list
 of @tech{syntax object}s when @scheme[(syntax->datum stx)] would produce a
@@ -145,24 +147,24 @@ needed to strip lexical and source-location information recursively.}
                                       (list/c any/c
                                               (or/c exact-positive-integer? #f)
                                               (or/c exact-nonnegative-integer? #f)
-                                              (or/c exact-nonnegative-integer? #f)
-                                              (or/c exact-positive-integer? #f))
+                                              (or/c exact-positive-integer? #f)
+                                              (or/c exact-nonnegative-integer? #f))
                                       (vector/c any/c
                                                (or/c exact-positive-integer? #f)
                                                (or/c exact-nonnegative-integer? #f)
-                                               (or/c exact-nonnegative-integer? #f)
-                                               (or/c exact-positive-integer? #f)))
+                                               (or/c exact-positive-integer? #f)
+                                               (or/c exact-nonnegative-integer? #f)))
                                 #f]
                         [prop (or/c syntax? #f) #f]
                         [cert (or/c syntax? #f) #f])
           syntax?]{
 
-Converts the @tech{datum} @scheme[v] to a @tech{syntax object}. If
-@scheme[v] is a pair, vector, box, immutable hash table, or immutable
-@tech{prefab} structure, then the contents are recursively converted;
-mutable vectors and boxes are essentially replaced by immutable
-vectors and boxes. @tech{Syntax object}s already in @scheme[v] are
-preserved as-is in the result. For any kind of value other than a
+Converts the @tech{datum} @scheme[v] to a @tech{syntax object}.
+The contents of pairs, vectors, and boxes, the fields of @tech{prefab}
+structures, and the values of immutable hash tables are recursively converted.
+The keys of @tech{prefab} structures and the keys of immutable hash tables are
+not converted. Mutable vectors and boxes are replaced by immutable vectors and
+boxes. For any kind of value other than a
 pair, vector, box, immutable @tech{hash table}, immutable
 @tech{prefab} structure, or @tech{syntax object}, conversion means
 wrapping the value with lexical information, source-location

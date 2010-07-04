@@ -6,7 +6,7 @@
           scheme/sandbox
           (for-label scheme/base
                      scheme/contract
-                     syntax/parse
+                     (except-in syntax/parse ...+)
                      syntax/kerncase))
 
 @(define ellipses @scheme[...])
@@ -66,7 +66,7 @@ For example, here is is a module that defines
 standard @scheme[let] form (including ``named @scheme[let]''):
 
 @schemeblock[
-(module example scheme/base
+(module example racket/base
   (require (for-syntax scheme/base syntax/parse))
   (define-syntax (mylet stx)
     (syntax-parse stx
@@ -82,8 +82,8 @@ The macro is defined as a procedure that takes one argument,
 @scheme[syntax-case], except that there is no literals list between
 the syntax argument and the sequence of clauses.
 
-@bold{Note: } Remember not to put a literals list between the syntax
-argument and the clauses!
+@bold{Note: } Remember not to put a @scheme[syntax-case] style
+literals list between the syntax argument and the clauses!
 
 The patterns contain identifiers consisting of two parts separated by
 a colon character, such as @scheme[loop:id] or @scheme[e:expr]. These
@@ -104,15 +104,15 @@ syntax classes (see @secref{lib} for a list). Programmers can also
 define their own using @scheme[define-syntax-class]:
 
 @schemeblock[
-(module example-syntax scheme/base
+(module example-syntax racket/base
   (require syntax/parse)
   (provide binding)
   (define-syntax-class binding
     #:attributes (x e)
     (pattern (x:id e:expr))))
 
-(module example scheme/base
-  (require (for-syntax scheme/base
+(module example racket/base
+  (require (for-syntax racket/base
                        syntax/parse
                        'example-syntax))
   (define-syntax (mylet stx)
@@ -135,7 +135,7 @@ Alternatively, the syntax class could be made a local definition,
 thus:
 
 @schemeblock[
-(module example scheme/base
+(module example racket/base
   (require (for-syntax scheme/base
                        syntax/parse))
   (define-syntax (mylet stx)
@@ -283,11 +283,15 @@ Two parsing forms are provided: @scheme[syntax-parse] and
               ([parse-option (code:line #:context context-expr)
                              (code:line #:literals (literal ...))
                              (code:line #:literal-sets (literal-set ...))
-                             (code:line #:conventions (convention-id ...))]
+                             (code:line #:conventions (convention-id ...))
+                             (code:line #:local-conventions (convention-rule ...))]
                [literal literal-id
-                        (pattern-id literal-id)]
+                        (pattern-id literal-id)
+                        (pattern-id literal-id #:phase phase-expr)]
                [literal-set literal-set-id
-                            [literal-set-id #:at context-id]]
+                            (literal-set-id literal-set-option ...)]
+               [literal-set-option (code:line #:at context-id)
+                                   (code:line #:phase phase-expr)]
                [clause (syntax-pattern pattern-directive ... expr ...+)])
               #:contracts ([stx-expr syntax?])]{
 
@@ -319,12 +323,12 @@ failures; otherwise @scheme[stx-expr] is used.
 
 @specsubform/subs[(code:line #:literals (literal ...))
                   ([literal literal-id
-                            [pattern-id literal-id]])]{
-
+                            (pattern-id literal-id)
+                            (pattern-id literal-id #:phase phase-expr)])]{
 @margin-note{
   Unlike @scheme[syntax-case], @scheme[syntax-parse] requires all
   literals to have a binding. To match identifiers by their symbolic
-  names, consider using the @scheme[~datum] pattern form instead.
+  names, use the @scheme[~datum] pattern form instead.
 }
 @;
 The @scheme[#:literals] option specifies identifiers that should be
@@ -334,22 +338,36 @@ within the pattern to signify the positions to be matched
 (@scheme[pattern-id]), and the identifier expected to occur in those
 positions (@scheme[literal-id]). If the entry is a single identifier,
 that identifier is used for both purposes.
+
+If the @scheme[#:phase] option is given, then the literal is compared
+at phase @scheme[phase-expr]. Specifically, the binding of the
+@scheme[literal-id] at phase @scheme[phase-expr] must match the
+input's binding at phase @scheme[phase-expr].
 }
 
 @specsubform/subs[(code:line #:literal-sets (literal-set ...))
                   ([literal-set literal-set-id
-                                [literal-set-id #:at context-id]])]{
+                                (literal-set-id literal-set-option ...)]
+                   [literal-set-option (code:line #:at context-id)
+                                       (code:line #:phase phase-expr)])]{
 
 Many literals can be declared at once via one or more @tech{literal
-sets}, imported with the @scheme[#:literal-sets] option. The
-literal-set definition determines the literal identifiers to recognize
-and the names used in the patterns to recognize those literals.
+sets}, imported with the @scheme[#:literal-sets] option. See
+@tech{literal sets} for more information.
 }
 
 @specsubform[(code:line #:conventions (conventions-id ...))]{
 
 Imports @tech{convention}s that give default syntax classes to pattern
 variables that do not explicitly specify a syntax class.
+}
+
+@specsubform[(code:line #:local-conventions (convention-rule ...))]{
+
+Uses the @tech{conventions} specified. The advantage of
+@scheme[#:local-conventions] over @scheme[#:conventions] is that local
+conventions can be in the scope of syntax-class parameter
+bindings. See the section on @tech{conventions} for examples.
 }
 
 Each clause consists of a @tech{syntax pattern}, an optional sequence
@@ -386,7 +404,8 @@ structures can share syntax class definitions.
                  (code:line #:opaque)
                  (code:line #:literals (literal-entry ...))
                  (code:line #:literal-sets (literal-set ...))
-                 (code:line #:conventions (convention-id ...))]
+                 (code:line #:conventions (convention-id ...))
+                 (code:line #:local-conventions (convention-rule ...))]
                 [attr-arity-decl
                  attr-name-id
                  (attr-name-id depth)]
@@ -711,10 +730,44 @@ identifiers the literal matches.
   [(define-values (x:id ...) e:expr) 'v]
   [(define-syntaxes (x:id ...) e:expr) 's])
 ]
+
+The literals in a literal set always refer to the phase-0 bindings of
+the enclosing module. For example:
+
+@myexamples[
+(module common racket/base
+  (define x 'something)
+  (provide x))
+
+(module lits racket/base
+  (require syntax/parse 'common)
+  (define-literal-set common-lits (x))
+  (provide common-lits))
+]
+
+In the literal set @scheme[common-lits], the literal @scheme[x] always
+recognizes identifiers bound to the variable @scheme[x] defined in
+module @schememodname['common].
+
+When a literal set is used with the @scheme[#:phase phase-expr]
+option, the literals' fixed bindings are compared against the binding of
+the input literal at the specified phase. Continuing the example:
+
+@myexamples[
+(require syntax/parse 'lits (for-syntax 'common))
+(syntax-parse #'x #:literal-sets ([common-lits #:phase 1])
+  [x 'yes]
+  [_ 'no])
+]
+
+The occurrence of @scheme[x] in the pattern matches any identifier
+whose binding at phase 1 is the @scheme[x] from module
+@schememodname['common].
 }
 
-@defform/subs[(define-conventions name-id (id-pattern syntax-class) ...)
-              ([name-pattern exact-id
+@defform/subs[(define-conventions name-id convention-rule ...)
+              ([convention-rule (name-pattern syntax-class)]
+               [name-pattern exact-id
                              name-rx]
                [syntax-class syntax-class-id
                              (syntax-class-id expr ...)])]{
@@ -739,6 +792,28 @@ class.
   #:conventions (xn-prefixes)
   [(x0 x ... n0 n ...)
    (syntax->datum #'(x0 (x ...) n0 (n ...)))])
+]
+
+Local conventions, introduced with the @scheme[#:local-conventions]
+keyword argument of @scheme[syntax-parse] and syntax class
+definitions, may refer to local bindings:
+
+@myexamples[
+(define-syntax-class (nat> bound)
+  (pattern n:nat
+           #:fail-unless (> (syntax-e #'n) bound)
+                         (format "expected number > ~s" bound)))
+
+(define-syntax-class (natlist> bound)
+  #:local-conventions ([N (nat> bound)])
+  (pattern (N ...)))
+
+(define (parse-natlist> bound x)
+  (syntax-parse x
+    #:local-conventions ([NS (natlist> bound)])
+    [NS 'ok]))
+(parse-natlist> 0 #'(1 2 3))
+(parse-natlist> 5 #'(8 6 4 2))
 ]
 
 }

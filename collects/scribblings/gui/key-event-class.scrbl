@@ -16,14 +16,14 @@ For a key-press event, a virtual key code is provided by
 See also @|mousekeydiscuss|.
 
 
-@defconstructor[([key-code (or/c char? symbol?) #\nul]
+@defconstructor[([key-code (or/c char? key-code-symbol?) #\nul]
                  [shift-down any/c #f]
                  [control-down any/c #f]
                  [meta-down any/c #f]
                  [alt-down any/c #f]
-                 [x (and/c exact? integer?) 0]
-                 [y (and/c exact? integer?) 0]
-                 [time-stamp (and/c exact? integer?) 0]
+                 [x exact-integer? 0]
+                 [y exact-integer? 0]
+                 [time-stamp exact-integer? 0]
                  [caps-down any/c #f])]{
 
 See the corresponding @schemeidfont{get-} and @schemeidfont{set-}
@@ -62,7 +62,7 @@ Under Mac OS X, if a control-key press is combined with a mouse button
 }
 
 @defmethod[(get-key-code)
-           (or/c char? symbol?)]{
+           (or/c char? key-code-symbol?)]{
 
 Gets the virtual key code for the key event. The virtual key code is
  either a character or a special key symbol, one of the following:
@@ -182,7 +182,7 @@ See also @method[key-event% get-other-shift-key-code].
 }
 
 @defmethod[(get-key-release-code)
-           (or/c char? symbol?)]{
+           (or/c char? key-code-symbol?)]{
 
 Gets the virtual key code for a key-release event; the result is
  @scheme['press] for a key-press event. See @method[key-event%
@@ -199,28 +199,28 @@ Returns @scheme[#t] if the Meta (X), Alt (Windows), or Command (Mac OS
 }
 
 @defmethod[(get-other-altgr-key-code)
-           (or/c char? symbol? false/c)]{
+           (or/c char? key-code-symbol? false/c)]{
 
 See @method[key-event% get-other-shift-key-code].
 
 }
 
 @defmethod[(get-other-caps-key-code)
-           (or/c char? symbol? false/c)]{
+           (or/c char? key-code-symbol? false/c)]{
 
 See @method[key-event% get-other-shift-key-code].
 
 }
 
 @defmethod[(get-other-shift-altgr-key-code)
-           (or/c char? symbol? false/c)]{
+           (or/c char? key-code-symbol? false/c)]{
 
 See @method[key-event% get-other-shift-key-code].
 
 }
 
 @defmethod[(get-other-shift-key-code)
-           (or/c char? symbol? false/c)]{
+           (or/c char? key-code-symbol? false/c)]{
 
 Since keyboard mappings vary, it is sometimes useful in key mappings
  for a program to know the result that the keyboard would have
@@ -264,7 +264,7 @@ Returns @scheme[#t] if the Shift key was down for the event.
 }
 
 @defmethod[(get-x)
-           (and/c exact? integer?)]{
+           exact-integer?]{
 
 Returns the x-position of the mouse at the time of the event, in the
  target's window's (client-area) coordinate system.
@@ -272,7 +272,7 @@ Returns the x-position of the mouse at the time of the event, in the
 }
 
 @defmethod[(get-y)
-           (and/c exact? integer?)]{
+           exact-integer?]{
 
 Returns the y-position of the mouse at the time of the event in the
  target's window's (client-area) coordinate system.
@@ -307,7 +307,7 @@ Under Mac OS X, if a control-key press is combined with a mouse button
 
 }
 
-@defmethod[(set-key-code [code (or/c char? symbol?)])
+@defmethod[(set-key-code [code (or/c char? key-code-symbol?)])
            void?]{
 
 Sets the virtual key code for the event, either a character or one of
@@ -315,7 +315,7 @@ Sets the virtual key code for the event, either a character or one of
 
 }
 
-@defmethod[(set-key-release-code [code (or/c char? symbol?)])
+@defmethod[(set-key-release-code [code (or/c char? key-code-symbol?)])
            void?]{
 
 Sets the virtual key code for a release event, either a character or
@@ -332,7 +332,7 @@ Sets whether the Meta (X), Alt (Windows), or Command (Mac OS X) key
 
 }
 
-@defmethod[(set-other-altgr-key-code [code (or/c char? symbol? false/c)])
+@defmethod[(set-other-altgr-key-code [code (or/c char? key-code-symbol? false/c)])
            void?]{
 
 Sets the key code produced by @method[key-event%
@@ -340,7 +340,7 @@ get-other-altgr-key-code].
 
 }
 
-@defmethod[(set-other-caps-key-code [code (or/c char? symbol? false/c)])
+@defmethod[(set-other-caps-key-code [code (or/c char? key-code-symbol? false/c)])
            void?]{
 
 Sets the key code produced by @method[key-event%
@@ -348,7 +348,7 @@ Sets the key code produced by @method[key-event%
 
 }
 
-@defmethod[(set-other-shift-altgr-key-code [code (or/c char? symbol? false/c)])
+@defmethod[(set-other-shift-altgr-key-code [code (or/c char? key-code-symbol? false/c)])
            void?]{
 
 Sets the key code produced by @method[key-event%
@@ -356,7 +356,7 @@ Sets the key code produced by @method[key-event%
 
 }
 
-@defmethod[(set-other-shift-key-code [code (or/c char? symbol? false/c)])
+@defmethod[(set-other-shift-key-code [code (or/c char? key-code-symbol? false/c)])
            void?]{
 
 Sets the key code produced by @method[key-event%
@@ -371,7 +371,7 @@ Sets whether the Shift key was down for the event.
 
 }
 
-@defmethod[(set-x [pos (and/c exact? integer?)])
+@defmethod[(set-x [pos exact-integer?])
            void?]{
 
 Sets the x-position of the mouse at the time of the event in the
@@ -379,7 +379,7 @@ Sets the x-position of the mouse at the time of the event in the
 
 }
 
-@defmethod[(set-y [pos (and/c exact? integer?)])
+@defmethod[(set-y [pos exact-integer?])
            void?]{
 
 Sets the y-position of the mouse at the time of the event in the

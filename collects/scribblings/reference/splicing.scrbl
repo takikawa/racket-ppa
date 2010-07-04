@@ -1,17 +1,17 @@
 #lang scribble/doc
 @(require "mz.ss"
-          (for-label scheme/splicing
-                     scheme/stxparam
-                     scheme/local))
+          (for-label racket/splicing
+                     racket/stxparam
+                     racket/local))
 
 @(define splice-eval (make-base-eval))
-@interaction-eval[#:eval splice-eval (require scheme/splicing 
-                                              scheme/stxparam
-                                              (for-syntax scheme/base))]
+@interaction-eval[#:eval splice-eval (require racket/splicing 
+                                              racket/stxparam
+                                              (for-syntax racket/base))]
 
 @title[#:tag "splicing"]{Local Binding with Splicing Body}
 
-@note-lib-only[scheme/splicing]
+@note-lib-only[racket/splicing]
 
 @deftogether[(
 @defidform[splicing-let]
@@ -59,15 +59,16 @@ once during compilation as in @scheme[let-syntax], etc.
 
 @defidform[splicing-syntax-parameterize]{
 
-Like @scheme[syntax-parameterize], except that in a definition
-context, the body forms are spliced into the enclosing definition
-context (in the same as as for @scheme[begin]), as long as the body
-forms are valid in an internal-definition context. In particular,
-@scheme[require] and @scheme[provide] forms cannot appear in the body
-of @scheme[splicing-syntax-parameterize], even if
-@scheme[splicing-syntax-parameterize] is used in a @scheme[module]
-body. In a definition context, the body of
+Like @scheme[syntax-parameterize], except that in a definition context, the body
+forms are spliced into the enclosing definition context (in the same way as for
+@scheme[begin]). In a definition context, the body of
 @scheme[splicing-syntax-parameterize] can be empty.
+
+Note that @tech{require transformers} and @tech{provide transformers} are not
+affected by syntax parameterization.  While all uses of @scheme[require] and
+@scheme[provide] will be spliced into the enclosing context, derived import or
+export specifications will expand as if they had not been inside of the
+@scheme[splicing-syntax-parameterize].
 
 @examples[
 #:eval splice-eval

@@ -150,7 +150,7 @@ their arity (preferring a the nullary treatment over the unary one):
 @item{A procedure of arity 0 is simply invoked, and its resulting value is
   used.  The procedure can freely use the input stream to retrieve
   arguments.  For example, here is how to define a standard C function
-  header for use in a MzScheme extension file:
+  header for use in a Racket extension file:
 
 @verbatim[#:indent 2]|{
     @(define (cfunc)
@@ -185,13 +185,13 @@ their arity (preferring a the nullary treatment over the unary one):
        (format "<a href=~s>@tt{~a}</a>" (get-arg) (get-arg)))
     @(define (reftt)
        (format "<a href=~s>~a</a>" (get-arg) (tt)))
-    @ttref{www.plt-scheme.edu}{PLT Scheme}
-    @reftt{www.plt-scheme.edu}{PLT Scheme}
+    @ttref{www.racket-lang.org}{PLT Scheme}
+    @reftt{www.racket-lang.org}{PLT Scheme}
 
   ==>
 
-    <a href="www.plt-scheme.edu"><tt>PLT Scheme</tt></a>
-    <a href="www.plt-scheme.edu"><tt>PLT Scheme</tt></a>
+    <a href="www.racket-lang.org"><tt>PLT Scheme</tt></a>
+    <a href="www.racket-lang.org"><tt>PLT Scheme</tt></a>
 }|
 
   Note that in @scheme[reftt] we use @scheme[tt] without arguments since it will
@@ -204,11 +204,11 @@ their arity (preferring a the nullary treatment over the unary one):
     @defcommand{tt}{X}{<tt>X</tt>}
     @defcommand{ref}{url text}{<a href="url">text</a>}
     @defcommand{ttref}{url text}{<a href="url">@tt{text}</a>}
-    @ttref{www.plt-scheme.edu}{PLT Scheme}
+    @ttref{www.racket-lang.org}{PLT Scheme}
 
   ==>
 
-    <a href="www.plt-scheme.edu"><tt>PLT Scheme</tt></a>
+    <a href="www.racket-lang.org"><tt>PLT Scheme</tt></a>
 }|}
 
   @item{A procedure of arity 1 is invoked differently---it is applied on a

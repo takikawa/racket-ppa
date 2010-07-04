@@ -74,7 +74,7 @@ To define a class of snips that read specially with
 
 
 
-@defconstructor/make[()]{
+@defconstructor[()]{
 
 Creates a plain snip of length 1 with the @scheme["Basic"] style of
  @scheme[the-style-list].
@@ -120,8 +120,7 @@ The drawing context and snip's @techlink{location}s in drawing context
 }
 
 
-@defmethod[#:mode pubment 
-           (can-do-edit-operation? [op (one-of/c 'undo 'redo 'clear 'cut 'copy 
+@defmethod[(can-do-edit-operation? [op (one-of/c 'undo 'redo 'clear 'cut 'copy 
                                                  'paste 'kill 'select-all 
                                                  'insert-text-box 'insert-pasteboard-box 
                                                  'insert-image)]
@@ -151,7 +150,7 @@ Creates and returns a copy of this snip. The @method[snip% copy]
                                             'insert-text-box 'insert-pasteboard-box 
                                             'insert-image)]
                               [recursive? any/c #t]
-                              [time (and/c exact? integer?) 0])
+                              [time exact-integer? 0])
            void?]{
 
 See @xmethod[editor<%> do-edit-operation].
@@ -395,7 +394,7 @@ Returns @scheme[0.0].
 
 
 @defmethod[(get-snipclass)
-           (is-a?/c snip-class%)]{
+           (or/c #f (is-a?/c snip-class%))]{
 
 Returns the snip's class, which is used for file saving and
  cut-and-paste.

@@ -1,3 +1,34 @@
+v5.0
+
+  * added an optional term-equivalence predicate to the test--> and
+    test-->> forms
+
+  * added R6RS and Racket VM models to examples sub-collection
+
+  * fixed minor bugs
+  
+v4.2.5
+
+  * reversed the order in which `where' and `side-condition' clauses
+    appear in typeset definitions
+
+  * added support for `where' and `side-condition' clauses that do not
+    appear in the metafunction's typeset definition
+
+  * added a #:print? flag to redex-check, to control whether it prints
+    or returns its result
+
+  * renamed the #:attempts keyword to #:attempt-num in the `generate-term' form
+
+  * changed typesetting to render `where' clauses as `fresh' clauses
+    when the right-hand side is a call to `variable-not-in' or 
+    `variables-not-in'
+
+  * changed typesetting of meta-variables to render anything following
+    a caret (^) as a superscript
+
+  * minor bug fixes
+
 v4.2.4
 
   * minor bug fixes
@@ -176,7 +207,7 @@ v4.1 (this is the first version that was included in the PLT
 
   - handling of non-terminals uses that have underscores in
     them now works properly (only showed up when using them
-    in the definition of a langauge)
+    in the definition of a language)
 
   - an extended language can now define multiple non-terminals
     together

@@ -16,7 +16,7 @@
 
 @defmodule[test-engine/scheme-tests]
 
-This module provides test forms for use in Scheme programs, as well
+This module provides test forms for use in Racket programs, as well
 as parameters to configure the behavior of test reports.
 
 Each check form may only occur at the top-level; results are collected
@@ -90,7 +90,7 @@ suppress evaluation of test expressions.
 @; FIXME: need to actually list the bindings here, so they're found in
 @; the index
 
-This module requires MrEd and produces an independent window when
+This module requires GRacket and produces an independent window when
 displaying test results.  It provides the same bindings as
 @scheme[test-engine/scheme-tests].
 

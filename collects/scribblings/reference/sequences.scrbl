@@ -1,13 +1,13 @@
 #lang scribble/doc
 @(require "mz.ss"
-          (for-syntax scheme/base)
+          (for-syntax racket/base)
           scribble/scheme
-	  (for-label scheme/generator))
+	  (for-label racket/generator))
 
 @(define generator-eval
    (lambda ()
      (let ([the-eval (make-base-eval)])
-       (the-eval '(require scheme/generator))
+       (the-eval '(require racket/generator))
        the-eval)))
 
 @(define (info-on-seq where what)
@@ -76,7 +76,7 @@ less or equal to @scheme[end] if @scheme[step] is negative.
 
 @defproc[(in-naturals [start exact-nonnegative-integer? 0]) sequence?]{
 Returns an infinite sequence of exact integers starting with
-@scheme[start], where each element is one more than the preceeding
+@scheme[start], where each element is one more than the preceding
 element. @speed[in-naturals "integer"]}
 
 @defproc[(in-list [lst list?]) sequence?]{
@@ -192,6 +192,14 @@ Returns a sequence whose elements are pairs, each containing a key and
 its value from @scheme[hash] (as opposed to using @scheme[hash] directly
 as a sequence to get the key and value as separate values for each
 element).}
+
+@defproc[(in-directory [dir (or/c #f path-string?) #f]) sequence?]{
+
+Return a sequence that produces all of the paths for files,
+directories, and links with @racket[dir]. If @racket[dir] is not
+@racket[#f], then every produced path starts with @racket[dir] as its
+prefix. If @racket[dir] is @racket[#f], then paths in and relative to
+the current directory are produced.}
 
 @defproc[(in-producer [producer procedure?] [stop any/c] [args any/c] ...)
          sequence?]{
@@ -324,15 +332,19 @@ sequence; if no more elements are available, the
 @exnraise[exn:fail:contract].}
 
 @section{Iterator Generators}
-@defmodule[scheme/generator]
-@defform[(generator body ...)]{ Creates a function that returns a
-value, usually through @scheme[yield], each time it is invoked. When
-the generator runs out of values to yield the last value it computed
+@defmodule[racket/generator]
+@defform[(generator () body ...)]{ Creates a function that returns a
+value through @scheme[yield], each time it is invoked. When
+the generator runs out of values to yield, the last value it computed
 will be returned for future invocations of the generator. Generators
 can be safely nested.
 
+Note: The first form must be @scheme[()]. In the future, the
+@scheme[()] position will hold argument names that are used for the
+initial generator call.
+
 @examples[#:eval (generator-eval)
-(define g (generator
+(define g (generator ()
 	    (let loop ([x '(a b c)])
 	      (if (null? x)
 		0
@@ -351,7 +363,7 @@ with a stop-value known to the generator.
 
 @examples[#:eval (generator-eval)
 (define my-stop-value (gensym))
-(define my-generator (generator
+(define my-generator (generator ()
 		       (let loop ([x '(a b c)])
 			 (if (null? x)
 			   my-stop-value
@@ -392,14 +404,71 @@ completes, the generator will end.
   i)
 ]}
 
-@defform[(yield expr)]{ Saves the point of execution inside a generator
-and returns a value.}
+@defform[(yield expr ...)]{ Saves the point of execution inside a generator
+and returns a value. @scheme[yield] can accept any number of arguments and will
+return them using @scheme[values].
 
-@defproc[(sequence->generator [s sequence?]) (-> any?)]{ Returns a generator
-that returns elements from the sequence, @scheme[s], each time the generator
-is invoked.}
+Values can be passed back to the generator after invoking @scheme[yield] by passing
+the arguments to the generator instance. Note that a value cannot be passed back
+to the generator until after the first @scheme[yield] has been invoked.
 
-@defproc[(sequence->repeated-generator [s sequence?]) (-> any?)]{ Returns a generator
-that returns elements from the sequence, @scheme[s], similar to
-@scheme[sequence->generator] but looping over the values in the sequence
-when no more values are left.}
+@examples[#:eval (generator-eval)
+(define my-generator (generator () (yield 1) (yield 2 3 4)))
+(my-generator)
+(my-generator)
+]
+
+@examples[#:eval (generator-eval)
+(define pass-values-generator
+  (generator ()
+    (let* ([from-user (yield 2)]
+           [from-user-again (yield (add1 from-user))])
+      (yield from-user-again))))
+
+(pass-values-generator)
+(pass-values-generator 5)
+(pass-values-generator 12)
+]}
+
+@defproc[(generator-state [g any?]) symbol?]{ Returns a symbol that describes the state
+of the generator.
+
+ @itemize[
+   @item{@scheme['fresh] - The generator has been freshly created and has not
+   been invoked yet. Values cannot be passed to a fresh generator.}
+   @item{@scheme['suspended] - Control within the generator has been suspended due
+   to a call to @scheme[yield]. The generator can be invoked.}
+   @item{@scheme['running] - The generator is currently executing. This state can
+   only be returned if @scheme[generator-state] is invoked inside the generator.}
+   @item{@scheme['done] - The generator has executed its entire body and will not
+   call @scheme[yield] anymore.}
+ ]
+
+@examples[#:eval (generator-eval)
+(define my-generator (generator () (yield 1) (yield 2)))
+(generator-state my-generator)
+(my-generator)
+(generator-state my-generator)
+(my-generator)
+(generator-state my-generator)
+(my-generator)
+(generator-state my-generator)
+
+(define introspective-generator (generator () ((yield 1))))
+(introspective-generator)
+(introspective-generator 
+ (lambda () (generator-state introspective-generator)))
+(generator-state introspective-generator)
+(introspective-generator)
+]}
+
+@defproc[(sequence->generator [s sequence?]) (-> any?)]{
+
+Returns a generator that returns elements from the sequence, @scheme[s],
+each time the generator is invoked.}
+
+@defproc[(sequence->repeated-generator [s sequence?]) (-> any?)]{
+
+Returns a generator that returns elements from the sequence, @scheme[s],
+similar to @scheme[sequence->generator] but looping over the values in
+the sequence when no more values are left.}

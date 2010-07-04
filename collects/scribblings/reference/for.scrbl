@@ -22,9 +22,9 @@ introduce bindings whose scope includes @scheme[body] and that
 determine the number of times that @scheme[body] is evaluated.
 
 In the simple case, each @scheme[for-clause] has one of its first two
-forms, where @scheme[[id seq-expr]] is a shorthand for @scheme[[(id
-...) seq-expr]].  In this simple case, the @scheme[seq-expr]s are
-evaluated left-to-right, and each must produce a sequence value (see
+forms, where @scheme[[id seq-expr]] is a shorthand for @scheme[[(id)
+seq-expr]].  In this simple case, the @scheme[seq-expr]s are evaluated
+left-to-right, and each must produce a sequence value (see
 @secref["sequences"]).
 
 The @scheme[for] form iterates by drawing an element from each
@@ -89,12 +89,14 @@ expression is a list of the results in order.
 @deftogether[(
 @defform[(for/hash (for-clause ...) body ...+)]
 @defform[(for/hasheq (for-clause ...) body ...+)]
+@defform[(for/hasheqv (for-clause ...) body ...+)]
 )]{
 
 Like @scheme[for/list], but the result is an immutable @tech{hash
 table}; @scheme[for/hash] creates a table using @scheme[equal?] to
-distinguish keys, and @scheme[for/hasheq] produces a table using
-@scheme[eq?]. The last expression in the @scheme[body]s must return
+distinguish keys, @scheme[for/hasheq] produces a table using
+@scheme[eq?], and @scheme[for/hasheqv] produces a table using
+@scheme[eqv?]. The last expression in the @scheme[body]s must return
 two values: a key and a value to extend the hash table accumulated by
 the iteration.
 
@@ -212,6 +214,7 @@ nested.
 @defform[(for*/lists (id ...) (for-clause ...) body ...+)]
 @defform[(for*/hash (for-clause ...) body ...+)]
 @defform[(for*/hasheq (for-clause ...) body ...+)]
+@defform[(for*/hasheqv (for-clause ...) body ...+)]
 @defform[(for*/and (for-clause ...) body ...+)]
 @defform[(for*/or (for-clause ...) body ...+)]
 @defform[(for*/first (for-clause ...) body ...+)]

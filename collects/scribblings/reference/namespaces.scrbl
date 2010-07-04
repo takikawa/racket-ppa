@@ -30,7 +30,7 @@ with @scheme[namespace-attach-module].}
 
 @defproc[(make-base-empty-namespace) namespace?]{
 
-Creates a new empty namespace, but with @schememodname[scheme/base]
+Creates a new empty namespace, but with @schememodname[racket/base]
 attached. The namespace's @tech{base phase} is the same as the
 @tech{phase} in which the @scheme[make-base-empty-namespace]
 function was created.}
@@ -38,7 +38,7 @@ function was created.}
 
 @defproc[(make-base-namespace) namespace?]{
 
-Creates a new namespace with @schememodname[scheme/base] attached and
+Creates a new namespace with @schememodname[racket/base] attached and
 @scheme[require]d into the top-level environment. The namespace's
 @tech{base phase} is the same as the @tech{phase} in which the
 @scheme[make-base-namespace] function was created.}
@@ -373,6 +373,16 @@ result is the namespace in which the referenced variable is defined.}
 
 If @scheme[varref] refers to a @tech{module-level variable}, the
 result is a @tech{resolved module path} naming the module.
+
+If @scheme[varref] refers to a @tech{top-level variable}, then the
+result is @scheme[#f].}
+
+@defproc[(variable-reference->module-source [varref variable-reference?])
+         (or/c symbol? (and/c path? complete-path?) #f)]{
+
+If @scheme[varref] refers to a @tech{module-level variable}, the
+result is a path or symbol naming the module's source (which is
+typically, but not always, the same as in the resolved module path).
 
 If @scheme[varref] refers to a @tech{top-level variable}, then the
 result is @scheme[#f].}

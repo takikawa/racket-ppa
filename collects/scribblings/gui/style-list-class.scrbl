@@ -15,14 +15,15 @@ See @|stylediscuss| for more information.
 
 
 
-@defconstructor/make[()]{
+@defconstructor[()]{
 
 The root style, named @scheme["Basic"], is automatically created.
 
 }
 
-@defmethod[(basic-style)
-           (is-a?/c style<%>)]{
+@defmethod[#:mode public-final
+                  (basic-style)
+                  (is-a?/c style<%>)]{
 
 Returns the root style. Each style list has its own root style.
 
@@ -122,7 +123,7 @@ The @scheme[like-style] style must be in this style list, otherwise
 
 }
 
-@defmethod[(notify-on-change [f ((or/c (is-a?/c style<%> false/c)) . -> . any)])
+@defmethod[(notify-on-change [f ((or/c (is-a?/c style<%>) #f) . -> . any)])
            any/c]{
 
 Attaches a callback to the style list. The callback is invoked
