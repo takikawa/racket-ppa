@@ -237,7 +237,7 @@ other. The top and bottom pair of angles is @scheme[angle] and the left and righ
   Constructs an arbitrary regular star polygon (a generalization of the regular polygons). 
   The polygon is enclosed by a regular polygon with @scheme[side-count] sides each
   @scheme[side-length] long. The polygon is actually constructed by going from vertex to
-  vertex around the regular polgon, but skipping over every @scheme[step-count] verticies.
+  vertex around the regular polgon, but skipping over every @scheme[step-count] vertices.
   
   For examples, if @scheme[side-count] is @scheme[5] and @scheme[step-count] is @scheme[2],
   then this function produces a shape just like @scheme[star].
@@ -250,15 +250,15 @@ other. The top and bottom pair of angles is @scheme[angle] and the left and righ
  
 }
                 
-@defproc*[([(polygon [verticies (listof posn?)] 
+@defproc*[([(polygon [vertices (listof posn?)] 
                      [mode mode?]
                      [color image-color?])
             image?]
-           [(polygon [verticies (listof posn?)] 
+           [(polygon [vertices (listof posn?)] 
                      [outline-mode (or/c 'outline "outline")]
                      [pen-or-color (or/c pen? image-color?)])
             image?])]{
-  Constructs a polygon connecting the given verticies.
+  Constructs a polygon connecting the given vertices.
   
   @mode/color-text
   
@@ -600,7 +600,7 @@ Unlike @scheme[scene+curve], if the line passes outside of @scheme[image], the i
   
   }
 
-@defproc[(above/align [y-place y-place?] [i1 image?] [i2 image?] [is image?] ...) image?]{
+@defproc[(above/align [x-place x-place?] [i1 image?] [i2 image?] [is image?] ...) image?]{
   Constructs an image by placing all of the argument images in a vertical row, lined
   up as indicated by the @scheme[x-place] argument. For example, if @scheme[x-place]
   is @scheme["middle"], then the images are placed above each other with their centers 
@@ -621,10 +621,20 @@ Unlike @scheme[scene+curve], if the line passes outside of @scheme[image], the i
   
   }
 
-@section{Placing Images}
+@section{Placing Images & Scenes}
 
 Placing images into scenes is particularly useful when building worlds
 and universes using @scheme[2htdp/universe].
+
+@defproc[(empty-scene [width (and/c real? (not/c negative?))]
+                      [height (and/c real? (not/c negative?))])
+         image?]{
+
+Creates an empty scene, i.e., a rectangle with a black outline.
+
+@image-examples[(empty-scene 160 90)]
+                                                                 
+}
 
 @defproc[(place-image [image image?] [x real?] [y real?] [scene image?]) image?]{
 
@@ -768,7 +778,7 @@ the parts that fit onto @scheme[scene].
           
 }
 
-@defproc[(scale [factor real?] [image image?]) image?]{
+@defproc[(scale [factor (and/c real? positive?)] [image image?]) image?]{
 
   Scales @scheme[image] by @scheme[factor]. 
   
@@ -788,7 +798,7 @@ the parts that fit onto @scheme[scene].
   
 }
 
-@defproc[(scale/xy [x-factor real?] [y-factor real?] [image image?]) image?]{
+@defproc[(scale/xy [x-factor (and/c real? positive?)] [y-factor (and/c real? positive?)] [image image?]) image?]{
   Scales @scheme[image] by @scheme[x-factor] horizontally and by 
   @scheme[y-factor] vertically. 
   

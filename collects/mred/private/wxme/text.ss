@@ -111,14 +111,10 @@
            on-edit-sequence
            after-edit-sequence
            on-display-size)
-
-  (define is-locked-for-read? #f)
-  (define is-locked-for-flow? #f)
-  (define is-locked-for-write? #f)
   
-  (define read-locked? #f)
-  (define flow-locked? #f)
-  (define write-locked? #f)
+  (define read-locked? #t)
+  (define flow-locked? #t)
+  (define write-locked? #t)
 
   (define hilite-on? #t)
 
@@ -333,7 +329,15 @@
   (define tabs (list->vector tab-stops))
   
   (make-only-snip)
-
+  
+  (set! read-locked? #f)
+  (set! flow-locked? #f)
+  (set! write-locked? #f)
+  ;;; from here on, it is only method definitions, 
+  ;;; so we can unlock the editor now. If code with
+  ;;; effects is added below, be sure to move the
+  ;;; unlocking.
+  
   (def/override (~)
     (set! word-break-map standard-wordbreak)
     (let loop ([snip snips])
@@ -652,7 +656,7 @@
 
   (def/override (locked-for-read?)
     read-locked?)
-  (def/override (locked-for-flow?)
+  (def/override-final (locked-for-flow?)
     flow-locked?)
   (def/override (locked-for-write?)
     write-locked?)
@@ -745,7 +749,7 @@
         (not s-admin)
         (send s-admin refresh-delayed?)))
 
-  (def/override (in-edit-sequence?)
+  (def/override-final (in-edit-sequence?)
     (delay-refresh . > . 0))
 
   (def/override (locations-computed?)
@@ -1519,7 +1523,7 @@
                                   (if (and gsnip
                                            (has-flag? (snip->flags gsnip) HARD-NEWLINE)
                                            (eq? (snip->next gsnip) snip))
-                                      ;; preceeding snip was a newline, so the new slip belongs on the next line:
+                                      ;; preceding snip was a newline, so the new slip belongs on the next line:
                                       (let* ([oldline (snip->line gsnip)]
                                              [inserted-new-line?
                                               (if (mline-next oldline)
@@ -1684,6 +1688,13 @@
                            [else
                             (loop start str (+ sp 1) (+ i 1) (+ cnt 1) inserted-line?)])))))))))))
 
+  (define/private (check-len str len)
+    (unless (len . <= . (string-length str))
+      (raise-mismatch-error (method-name 'text% 'insert)
+                            (format "length ~e too large for given string: "
+                                    len)
+                            str)))
+
   (define/override (insert . args)
     (case-args
      args
@@ -1696,12 +1707,14 @@
       (do-insert #f str #f start end scroll-ok?)]
      [([exact-nonnegative-integer? len] 
        [string? str])
-      (do-insert #f str #f startpos endpos #t)]
+      (check-len str len)
+      (do-insert #f (substring str 0 len) #f startpos endpos #t)]
      [([exact-nonnegative-integer? len] 
        [string? str] 
        [exact-nonnegative-integer? start] 
        [(make-alts exact-nonnegative-integer? (symbol-in same)) [end 'same]]
        [any? [scroll-ok? #t]])
+      (check-len str len)
       (do-insert #f (substring str 0 len) #f start end scroll-ok?)]
      [([snip% snip])
       (do-insert snip #f #f startpos endpos #t)]
@@ -4188,7 +4201,7 @@
                    (has-flag? (snip->flags gsnip) NEWLINE)
                    (not (has-flag? (snip->flags gsnip) HARD-NEWLINE)))
               (begin
-                ;; we want the snip on the same line as the preceeding snip:
+                ;; we want the snip on the same line as the preceding snip:
                 (if (snip->next gsnip)
                     (insert-snip (snip->next gsnip) snip)
                     (append-snip snip))

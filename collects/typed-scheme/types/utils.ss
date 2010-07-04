@@ -125,7 +125,7 @@
 
 ;; substitute many variables
 ;; substitution = Listof[U List[Name,Type] List[Name,Listof[Type]]]
-;; subst-all : substition Type -> Type
+;; subst-all : substitution Type -> Type
 (define (subst-all s t)
   (for/fold ([t t]) ([e s])
     (match e
@@ -295,7 +295,7 @@
 ;; error for unbound variables
 (define (lookup-fail e) 
   (match (identifier-binding e)
-    ['lexical (int-err "untyped lexical variable ~a" (syntax-e e))]
+    ['lexical (tc-error/expr "untyped lexical variable ~a" (syntax-e e))]
     [#f (tc-error/expr "untyped top-level identifier ~a" (syntax-e e))]
     [(list _ _ nominal-source-mod nominal-source-id _ _ _)
      (let-values ([(x y) (module-path-index-split nominal-source-mod)])

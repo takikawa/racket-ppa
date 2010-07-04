@@ -76,6 +76,7 @@ static Scheme_Object *os_wxItemSetLabel(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxItem_class);
   objscheme_check_valid(os_wxItem_class, "set-label in item%", n, p);
   string x0 INIT_NULLED_OUT;
 
@@ -100,6 +101,7 @@ static Scheme_Object *os_wxItemGetLabel(int n,  Scheme_Object *p[])
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   nstring r;
+  p[0] = objscheme_unwrap(p[0], os_wxItem_class);
   objscheme_check_valid(os_wxItem_class, "get-label in item%", n, p);
 
   SETUP_VAR_STACK_REMEMBERED(1);
@@ -120,6 +122,7 @@ static Scheme_Object *os_wxItemCommand(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxItem_class);
   objscheme_check_valid(os_wxItem_class, "command in item%", n, p);
   class wxCommandEvent* x0 INIT_NULLED_OUT;
 
@@ -164,7 +167,8 @@ int objscheme_istype_wxItem(Scheme_Object *obj, const char *stop, int nullOK)
 {
   REMEMBER_VAR_STACK();
   if (nullOK && XC_SCHEME_NULLP(obj)) return 1;
-  if (objscheme_is_a(obj,  os_wxItem_class))
+  obj = objscheme_unwrap(obj, os_wxItem_class);
+  if (objscheme_is_a(obj, os_wxItem_class))
     return 1;
   else {
     if (!stop)
@@ -207,6 +211,7 @@ class wxItem *objscheme_unbundle_wxItem(Scheme_Object *obj, const char *where, i
 
   REMEMBER_VAR_STACK();
 
+  obj = objscheme_unwrap(obj, os_wxItem_class);
   (void)objscheme_istype_wxItem(obj, where, nullOK);
   Scheme_Class_Object *o = (Scheme_Class_Object *)obj;
   WITH_REMEMBERED_STACK(objscheme_check_valid(NULL, NULL, 0, &obj));
@@ -604,6 +609,7 @@ static Scheme_Object *os_wxMessageGetFont(int n,  Scheme_Object *p[])
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   class wxFont* r;
+  p[0] = objscheme_unwrap(p[0], os_wxMessage_class);
   objscheme_check_valid(os_wxMessage_class, "get-font in message%", n, p);
 
   SETUP_VAR_STACK_REMEMBERED(1);
@@ -626,6 +632,7 @@ static Scheme_Object *os_wxMessageSetLabel(int n,  Scheme_Object *p[])
   SETUP_PRE_VAR_STACK(1);
   PRE_VAR_STACK_PUSH(0, p);
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxMessage_class);
   objscheme_check_valid(os_wxMessage_class, "set-label in message%", n, p);
   if ((n >= (POFFSET+1)) && WITH_REMEMBERED_STACK(objscheme_istype_wxBitmap(p[POFFSET+0], NULL, 0))) {
     class wxBitmap* x0 INIT_NULLED_OUT;
@@ -672,6 +679,7 @@ static Scheme_Object *os_wxMessageOnDropFile(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxMessage_class);
   objscheme_check_valid(os_wxMessage_class, "on-drop-file in message%", n, p);
   epathname x0 INIT_NULLED_OUT;
 
@@ -699,6 +707,7 @@ static Scheme_Object *os_wxMessagePreOnEvent(int n,  Scheme_Object *p[])
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   Bool r;
+  p[0] = objscheme_unwrap(p[0], os_wxMessage_class);
   objscheme_check_valid(os_wxMessage_class, "pre-on-event in message%", n, p);
   class wxWindow* x0 INIT_NULLED_OUT;
   class wxMouseEvent* x1 INIT_NULLED_OUT;
@@ -729,6 +738,7 @@ static Scheme_Object *os_wxMessagePreOnChar(int n,  Scheme_Object *p[])
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   Bool r;
+  p[0] = objscheme_unwrap(p[0], os_wxMessage_class);
   objscheme_check_valid(os_wxMessage_class, "pre-on-char in message%", n, p);
   class wxWindow* x0 INIT_NULLED_OUT;
   class wxKeyEvent* x1 INIT_NULLED_OUT;
@@ -758,6 +768,7 @@ static Scheme_Object *os_wxMessageOnSize(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxMessage_class);
   objscheme_check_valid(os_wxMessage_class, "on-size in message%", n, p);
   int x0;
   int x1;
@@ -785,6 +796,7 @@ static Scheme_Object *os_wxMessageOnSetFocus(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxMessage_class);
   objscheme_check_valid(os_wxMessage_class, "on-set-focus in message%", n, p);
 
   SETUP_VAR_STACK_REMEMBERED(1);
@@ -808,6 +820,7 @@ static Scheme_Object *os_wxMessageOnKillFocus(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxMessage_class);
   objscheme_check_valid(os_wxMessage_class, "on-kill-focus in message%", n, p);
 
   SETUP_VAR_STACK_REMEMBERED(1);
@@ -1025,7 +1038,8 @@ int objscheme_istype_wxMessage(Scheme_Object *obj, const char *stop, int nullOK)
 {
   REMEMBER_VAR_STACK();
   if (nullOK && XC_SCHEME_NULLP(obj)) return 1;
-  if (objscheme_is_a(obj,  os_wxMessage_class))
+  obj = objscheme_unwrap(obj, os_wxMessage_class);
+  if (objscheme_is_a(obj, os_wxMessage_class))
     return 1;
   else {
     if (!stop)
@@ -1068,6 +1082,7 @@ class wxMessage *objscheme_unbundle_wxMessage(Scheme_Object *obj, const char *wh
 
   REMEMBER_VAR_STACK();
 
+  obj = objscheme_unwrap(obj, os_wxMessage_class);
   (void)objscheme_istype_wxMessage(obj, where, nullOK);
   Scheme_Class_Object *o = (Scheme_Class_Object *)obj;
   WITH_REMEMBERED_STACK(objscheme_check_valid(NULL, NULL, 0, &obj));

@@ -3,8 +3,10 @@
                      scheme/private/sc
                      unstable/syntax
                      unstable/struct
+                     "minimatch.ss"
                      "rep-data.ss"
                      "rep.ss")
+         scheme/list
          syntax/stx
          "parse.ss"
          "runtime.ss"
@@ -17,6 +19,7 @@
          define-conventions
          syntax-class-parse
          syntax-class-attributes
+         syntax-class-possible-errors
 
          debug-rhs
          debug-pattern
@@ -33,7 +36,7 @@
          ~or
          ~not
          ~seq
-         ~bounds
+         ~between
          ~once
          ~optional
          ~rest
@@ -42,6 +45,7 @@
          ~bind
          ~fail
          ~parse
+         ...+
 
          attribute
          this-syntax)
@@ -56,13 +60,15 @@
               (parse-rhs #'rhss #f splicing? #:context stx))])
        (with-syntax ([parser (generate-temporary
                               (format-symbol "parse-~a" (syntax-e #'name)))]
-                     [attrs (rhs-attrs the-rhs)])
+                     [attrs (rhs-attrs the-rhs)]
+                     [commit? (rhs-commit? the-rhs)])
          #`(begin (define-syntax name
                     (make stxclass 'name '(arg ...)
                           'attrs
                           ((syntax-local-certifier) (quote-syntax parser))
                           ((syntax-local-certifier) (quote-syntax description))
-                          '#,splicing?))
+                          '#,splicing?
+                          'commit?))
                   (define-values (parser description)
                     (functions/rhs name (arg ...) attrs rhss #,splicing? #,stx))))))))
 
@@ -86,28 +92,52 @@
 
 (define-syntax (define-conventions stx)
   (syntax-case stx ()
-    [(define-conventions name rule ...)
-     (begin
-       (unless (identifier? #'name)
-         (raise-syntax-error #f "expected identifier" stx #'name))
-       (with-syntax ([([entry (def ...)] ...)
-                      (for/list ([line (check-conventions-rules #'(rule ...) stx)])
-                        (let ([rx (car line)]
-                              [sc (car (cadr line))]
-                              [args (cadr (cadr line))])
-                          (let-values ([(parser description attrs defs splicing?)
-                                        (create-aux-def (list 'stxclass rx sc args))])
-                            (list #`(list (quote #,rx)
-                                          (list (quote #,(if splicing? 'splicing-parser 'parser))
-                                                (quote-syntax #,parser)
-                                                (quote-syntax #,description)
-                                                (quote #,attrs)))
-                                  defs))))])
+    [(define-conventions (name param ...) rule ...)
+     (let ([params (syntax->list #'(param ...))])
+       (for ([x (syntax->list #'(name param ...))])
+         (unless (identifier? x)
+           (raise-syntax-error #f "expected identifier" stx x)))
+       (let ()
+         (define rules (check-conventions-rules #'(rule ...) stx))
+         (define rxs (map car rules))
+         (define dens0 (map cadr rules))
+         (define den+defs-list
+           (for/list ([den0 dens0])
+             (let-values ([(den defs) (create-aux-def den0)])
+               (cons den defs))))
+         (define dens (map car den+defs-list))
+         (define defs (apply append (map cdr den+defs-list)))
+
+         (define/with-syntax (rx ...) rxs)
+         (define/with-syntax (def ...) defs)
+         (define/with-syntax (parser ...)
+           (map den:delayed-parser dens))
+         (define/with-syntax (description ...)
+           (map den:delayed-description dens))
+         (define/with-syntax (class-name ...)
+           (map den:delayed-class dens))
+
          #'(begin
-             def ... ...
              (define-syntax name
                (make-conventions
-                (list entry ...))))))]))
+                (quote-syntax get-procedures)
+                (lambda ()
+                  (let ([class-names (list (quote-syntax class-name) ...)])
+                    (map list
+                         (list 'rx ...)
+                         (map make-den:delayed
+                              (generate-temporaries class-names)
+                              (generate-temporaries class-names)
+                              class-names))))))
+             (define get-procedures
+               (lambda (param ...)
+                 def ...
+                 (values (list parser ...)
+                         (list description ...)))))))]
+
+    [(define-conventions name rule ...)
+     (identifier? #'name)
+     #'(define-conventions (name) rule ...)]))
 
 (define-syntax (define-literal-set stx)
   (syntax-case stx ()
@@ -129,7 +159,8 @@
      (with-disappeared-uses
       (let ([rhs
              (parameterize ((current-syntax-context #'ctx))
-               (parse-rhs #'rhss #t (syntax-e #'splicing?) #:context #'ctx))])
+               (parse-rhs #'rhss (syntax->datum #'attrs) (syntax-e #'splicing?)
+                          #:context #'ctx))])
         #`(let ([get-description
                  (lambda args
                    #,(or (rhs-description rhs)
@@ -165,10 +196,19 @@
                        [(depth ...) (map attr-depth attrs)])
            #'(quote ((a depth) ...)))))]))
 
+(define-syntax (syntax-class-possible-errors stx)
+  (syntax-case stx ()
+    [(_ s)
+     (parameterize ((current-syntax-context stx))
+       (with-syntax ([p (stxclass-parser-name (get-stxclass #'s))])
+         #'(remove-duplicates
+            (map interpret-error-expression
+                 (parser-errors p)))))]))
+
 (define-syntax (debug-rhs stx)
   (syntax-case stx ()
     [(debug-rhs rhs)
-     (let ([rhs (parse-rhs #'rhs #t #:context stx)])
+     (let ([rhs (parse-rhs #'rhs #f #f #:context stx)])
        #`(quote #,rhs))]))
 
 (define-syntax (debug-pattern stx)

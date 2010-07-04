@@ -1,12 +1,12 @@
 #lang scheme/base
 
-(require "test-utils.ss" "planet-requires.ss"
+(require "test-utils.ss"
          (for-syntax scheme/base)
          (for-template scheme/base))
 (require (private base-env prims type-annotation 
 		  base-types-extra
 		  base-env-numeric
-		  base-env-indexing-old)
+		  base-env-indexing)
 	 (typecheck typechecker)
 	 (rep type-rep filter-rep object-rep)
          (rename-in (types utils union convenience)
@@ -15,20 +15,17 @@
          (utils tc-utils utils)
          unstable/mutated-vars
          (env type-name-env type-environments init-envs)
-         (schemeunit)
-         syntax/parse)
-
-(require (for-syntax (utils tc-utils)
+         schemeunit
+         syntax/parse
+         (for-syntax (utils tc-utils)
                      (typecheck typechecker)
 	             (env type-env)
 	             (private base-env base-env-numeric
 			      base-env-indexing-old))
          (for-template (private base-env base-types-new base-types-extra
 				base-env-numeric
-				base-env-indexing-old)))
-
-
-(require (for-syntax syntax/kerncase syntax/parse))
+				base-env-indexing-old))
+         (for-syntax syntax/kerncase syntax/parse))
 
 (provide typecheck-tests g tc-expr/expand)
 
@@ -702,6 +699,7 @@
         [tc-e (filter even? (filter exact-integer? (list 1 2 3 'foo)))
               (-lst -Integer)]
         
+        #|
         [tc-err (plambda: (a ...) [as : a ... a]
                           (apply fold-left (lambda: ([c : Integer] [a : Char] . [xs : a ... a]) c)
                                  3 (list #\c) as))]
@@ -715,7 +713,7 @@
         [tc-e/t (plambda: (a ...) [as : a ... a]
                           (apply fold-left (lambda: ([c : Integer] [a : Char] . [xs : a ... a]) c)
                                  3 (list #\c) (map list as)))
-                (-polydots (a) ((list) (a a) . ->... . -Integer))]
+                (-polydots (a) ((list) (a a) . ->... . -Integer))]|#
         
         ;; First is same as second, but with map explicitly instantiated.
         [tc-e/t (plambda: (a ...) [ys : (a ... a -> Number) *]
@@ -791,6 +789,13 @@
               #:ret (ret -Number (-FS (list) (list (make-Bot)))))
         [tc-e (let ([x 1]) (if x x (add1 x))) 
               #:ret (ret -Pos (-FS (list) (list (make-Bot))))]
+        [tc-e (let: ([x : (U (Vectorof Number) String) (vector 1 2 3)])
+                (if (vector? x) (vector-ref x 0) (string-length x)))
+         -Number]
+        [tc-e (let ()
+                (define: foo : (Integer * -> Integer) +)
+                (foo 1 2 3 4 5))
+              -Integer]
         )
   (test-suite
    "check-type tests"

@@ -366,6 +366,16 @@ via a @tech{weak reference}, then the object can be reclaimed, and the
 @tech{weak reference} is replaced by a different @tech{value}
 (typically @scheme[#f]).
 
+As a special case, a @tech{fixnum} is always considered reachable by
+the garbage collector. Many other values are always reachable due to
+the way they are implemented and used: A @tech{character} in the
+Latin-1 range is always reachable, because @scheme[equal?] Latin-1
+characters are always @scheme[eq?], and all of the Latin-1 characters
+are referenced by an internal module. Similarly, @scheme[null],
+@scheme[#t], @scheme[#f], @scheme[eof], and @|void-const| and are
+always reachable. Values produced by @scheme[quote] remain reachable
+when the @scheme[quote] expression itself is reachable.
+
 @;------------------------------------------------------------------------
 @section{Procedure Applications and Local Variables}
 
@@ -460,7 +470,7 @@ form is evaluated:
  3]
 ]
 
-The substition and @tech{location}-generation step of procedure
+The substitution and @tech{location}-generation step of procedure
 application requires that the argument is a @tech{value}. Therefore,
 in @scheme[((lambda (x) (+ x 10)) (+ 1 2))], the @scheme[(+ 1 2)]
 sub-expression must be simplified to the @tech{value} @scheme[3], and
@@ -668,7 +678,8 @@ escape-continuation aborts can cross continuation barriers.
 Scheme supports multiple @deftech{threads} of evaluation.  Threads run
 concurrently, in the sense that one thread can preempt another without
 its cooperation, but threads currently all run on the same processor
-(i.e., the same underlying OS process and thread).
+(i.e., the same underlying OS process and thread). See also
+@secref["futures"].
 
 Threads are created explicitly by functions such as @scheme[thread]. 
 In terms of the evaluation model, each step in evaluation actually consists of multiple concurrent

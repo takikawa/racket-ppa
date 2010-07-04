@@ -210,7 +210,7 @@
  iworld3)
 
 ;; --- the server representation of a world --- 
-(define-struct iworld (in out name info) #:transparent)
+(define-struct iworld (in out name info) #; #:transparent)
 ;; World = (make-iworld IPort OPort Symbol [Listof Sexp])
 
 (define (iw* n) (make-iworld (current-input-port) (current-output-port) n '()))
@@ -343,7 +343,7 @@
       (let ([make-bundle make-bundle])
         (lambda (state mails bads)
           (check-arg-list 'make-bundle mails mail? "mail" "second")
-          (check-arg-list 'make-bundle bads iworld? "mail" "third")
+          (check-arg-list 'make-bundle bads iworld? "iworld" "third")
           (make-bundle state mails bads))))
 
 ;; Symbol Any (Any -> Boolean) String String -> Void 

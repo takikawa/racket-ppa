@@ -114,7 +114,7 @@ The step from simulations to interactive programs is relatively
  @scheme[_create-image], as a handler for one kind of event: clock ticks.  In
  addition to clock ticks, @tech{world} programs can also deal with two
  other kinds of events: keyboard events and mouse events. A keyboard event
- is triggered when a computer user presses or releases a key on the
+ is triggered when a computer user presses a key on the
  keyboard. Similarly, a mouse event is the  movement of the mouse, a click
  on a mouse button, the crossing of a boundary by a mouse movement, etc.
 
@@ -154,13 +154,14 @@ The design of a world program demands that you come up with a data
 
 @defform/subs[#:id big-bang
               #:literals 
-	      (on-tick on-draw on-key on-mouse on-receive stop-when
+	      (on-tick on-draw on-key on-release on-mouse on-receive stop-when
 	      check-with register record? state name)
               (big-bang state-expr clause ...)
               ([clause
 		 (on-tick tick-expr)
 		 (on-tick tick-expr rate-expr)
 		 (on-key key-expr)
+		 (on-release release-expr)
 		 (on-mouse key-expr)
 		 (on-draw draw-expr)
 		 (on-draw draw-expr width-expr height-expr)
@@ -209,8 +210,7 @@ tell DrScheme to call the @scheme[tick-expr] function on the current
 world every time the clock ticks. The result of the call becomes the
 current world. The clock ticks at the rate of @scheme[rate-expr].}}
 
-@item{A @tech{KeyEvent} represents key board events, e.g., keys pressed or
- released. 
+@item{A @tech{KeyEvent} represents key board events. 
 
 @deftech{KeyEvent} : @scheme[string?]
 
@@ -238,7 +238,6 @@ Second, some keys have multiple-character string representations. Strings
 @item{@scheme["right"] is the right arrow;}
 @item{@scheme["up"] is the up arrow;}
 @item{@scheme["down"] is the down arrow;}
-@item{@scheme["release"] is the event of releasing a key;}
 @item{@scheme["start"]}
 @item{@scheme["cancel"]}
 @item{@scheme["clear"]}
@@ -311,10 +310,10 @@ Second, some keys have multiple-character string representations. Strings
 @defproc[(key=? [x key-event?][y key-event?]) boolean?]{
  compares two @tech{KeyEvent} for equality}
 
-@defform[(on-key change-expr)
+@defform[(on-key key-expr)
          #:contracts
-	  ([change-expr (-> (unsyntax @tech{WorldState}) key-event? (unsyntax @tech{WorldState}))])]{
- tell DrScheme to call @scheme[change-expr] function on the current world and a 
+	  ([key-expr (-> (unsyntax @tech{WorldState}) key-event? (unsyntax @tech{WorldState}))])]{
+ tell DrScheme to call the @scheme[key-expr] function on the current world and a 
  @tech{KeyEvent} for every keystroke the user of the computer makes. The result
  of the call becomes the current world.
 
@@ -332,6 +331,16 @@ Second, some keys have multiple-character string representations. Strings
  }
  The omitted, auxiliary function @emph{world-go} is supposed to consume a
  world and a number and produces a world.
+
+@defform[(on-release release-expr)
+         #:contracts
+	  ([release-expr (-> (unsyntax @tech{WorldState}) key-event? (unsyntax @tech{WorldState}))])]{
+ tell DrScheme to call the @scheme[release-expr] function on the current world and a 
+ @tech{KeyEvent} for every release event on the keyboard. A release event
+ occurs when a user presses the key and then releases it. The second argument
+ indicates which key has been released. The result of the function call
+ becomes the current world.  
+}
 }
 
 @item{ A @tech{MouseEvent} represents mouse events, e.g., mouse movements
@@ -589,8 +598,7 @@ A typical program does not use all three of these functions. Furthermore,
  collection of all these functions is your @tech{world} program. 
 
 @centerline{An extended example is available in 
- @link["http://www.ccs.neu.edu/home/matthias/HtDP2e/"]{How to Design Worlds/2e}.}
-
+ @link["http://www.ccs.neu.edu/home/matthias/HtDP2e/"]{How to Design Programs/2e}.}
 
 @; -----------------------------------------------------------------------------
 @section[#:tag "world2"]{The World is not Enough} 
@@ -669,9 +677,15 @@ As mentioned, all event handlers may return @tech{WorldState}s or
 }
 
 @defform/none[#:literals (on-key)
-              (on-key change-expr)
+              (on-key key-expr)
               #:contracts
-              ([change-expr (-> (unsyntax @tech{WorldState}) key-event? (or/c (unsyntax @tech{WorldState}) package?))])]{
+              ([key-expr (-> (unsyntax @tech{WorldState}) key-event? (or/c (unsyntax @tech{WorldState}) package?))])]{
+}
+
+@defform/none[#:literals (on-release)
+              (on-release release-expr)
+              #:contracts
+              ([release-expr (-> (unsyntax @tech{WorldState}) key-event? (or/c (unsyntax @tech{WorldState}) package?))])]{
 }
 
 @defform/none[#:literals (on-mouse)
@@ -979,10 +993,7 @@ optional handlers:
               (on-tick tick-expr)
               #:contracts
               ([tick-expr (-> (unsyntax @tech{UniverseState}) bundle?)])]{
- tell DrScheme to apply @scheme[tick-expr] to the current list of
- participating worlds and the current state of the
- universe. 
- }
+ tell DrScheme to apply @scheme[tick-expr] to the current state of the universe.}
 
 @defform/none[#:literals (on-tick)
               (on-tick tick-expr rate-expr)
@@ -990,8 +1001,7 @@ optional handlers:
               ([tick-expr (-> (unsyntax @tech{UniverseState}) bundle?)]
                [rate-expr (and/c real? positive?)])]{ 
  tell DrScheme to apply @scheme[tick-expr] as above but use the specified
- clock tick rate instead of the default.
- }
+ clock tick rate instead of the default.}
 }
 
 @item{
@@ -1040,7 +1050,7 @@ optional handlers:
 In order to explore the workings of a universe, it is necessary to launch a
  server and several world programs on one and the same computer. We
  recommend launching one server out of one DrScheme tab and as many worlds
- as necessary out of second lab. For the latter, the teachpack provides a
+ as necessary out of a second tab. For the latter, the teachpack provides a
  special form. 
 
 @defform[(launch-many-worlds expression ...)]{

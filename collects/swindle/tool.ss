@@ -34,6 +34,11 @@
                          v
                          (namespace-syntax-introduce v)))))
                  (super-instantiate ()))))
+        (define/augment (capability-value key)
+          (cond
+           [(eq? key 'macro-stepper:enabled) #t]
+           [else (inner (drscheme:language:get-capability-default key)
+                        capability-value key)]))
         (define/override (use-namespace-require/copy?) #t)
         (define/override (default-settings)
           (drscheme:language:make-simple-settings

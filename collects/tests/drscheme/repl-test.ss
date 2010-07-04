@@ -17,8 +17,6 @@ This produces an ACK message
          mred
          framework)
 
-(provide run-test)
-
 (define-struct loc (line col offset))
 ;; loc = (make-loc number number number)
 ;; all numbers in loc structs start at zero.
@@ -75,13 +73,13 @@ This produces an ACK message
                                  backtrace-image-string
                                  " "
                                  file-image-string
-                                 " ../../mred/private/snipfile.ss:"))
+                                 " .*mred/private/snipfile.ss:"))
                   "[0-9]+:[0-9]+: "
                   (regexp-quote str))))
 
 (define test-data
   (list
-#|   
+
    ;; basic tests
    (mktest "1"
            ("1"
@@ -192,8 +190,8 @@ This produces an ACK message
             "{stop-multi.png} {stop-22x22.png} reference to undefined identifier: xx"
             "{stop-multi.png} {stop-22x22.png} repl-test-tmp3.ss:1:0: reference to undefined identifier: xx"
             "reference to undefined identifier: xx"
-            #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: xx"
-            #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: xx")
+            #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: xx"
+            #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: xx")
            'definitions
            #f
            void
@@ -268,8 +266,8 @@ This produces an ACK message
             "define-values: cannot change constant identifier: +"
             "define-values: cannot change constant identifier: +"
             "define-values: cannot change constant identifier: +"
-            #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: define-values: cannot change constant identifier: \\+"
-            #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: define-values: cannot change constant identifier: \\+")
+            #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: define-values: cannot change constant identifier: \\+"
+            #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: define-values: cannot change constant identifier: \\+")
            'interactions
            #f
            void
@@ -307,8 +305,8 @@ This produces an ACK message
             "{stop-multi.png} {stop-22x22.png} reference to undefined identifier: xx"
             "{stop-multi.png} {stop-22x22.png} repl-test-tmp3.ss:1:7: reference to undefined identifier: xx"
             "reference to undefined identifier: xx"
-            #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: xx"
-            #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: xx")
+            #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: xx"
+            #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: xx")
            'definitions
            #f
            void
@@ -352,8 +350,8 @@ This produces an ACK message
             "{stop-multi.png} {stop-22x22.png} reference to undefined identifier: xx"
             "{stop-multi.png} {stop-22x22.png} repl-test-tmp3.ss:2:0: reference to undefined identifier: xx"
             "reference to undefined identifier: xx"
-            #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: xx"
-            #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: xx")
+            #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: xx"
+            #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: xx")
            'definitions
            #f
            void
@@ -419,8 +417,8 @@ This produces an ACK message
             "{stop-multi.png} {stop-22x22.png} reference to undefined identifier: x"
             "{stop-multi.png} {stop-22x22.png} repl-test-tmp3.ss:1:4: reference to undefined identifier: x"
             "reference to undefined identifier: x"
-            #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: x"
-            #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: x")
+            #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: x"
+            #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: x")
            'definitions
            #f
            void
@@ -459,8 +457,8 @@ This produces an ACK message
             "{stop-multi.png} {stop-22x22.png} expt: expected argument of type <number>; given #<void>"
             "{stop-multi.png} {stop-22x22.png} repl-test-tmp3.ss:1:0: expt: expected argument of type <number>; given #<void>"
             "expt: expected argument of type <number>; given #<void>"
-            #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: expt: expected argument of type <number>; given #<void>"
-            #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: expt: expected argument of type <number>; given #<void>")
+            #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: expt: expected argument of type <number>; given #<void>"
+            #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: expt: expected argument of type <number>; given #<void>")
            'definitions
            #f
            void
@@ -509,8 +507,8 @@ This produces an ACK message
             "{stop-multi.png} {stop-22x22.png} reference to undefined identifier: x"
             "{stop-multi.png} {stop-22x22.png} repl-test-tmp3.ss:1:4: reference to undefined identifier: x"
             "1\n2\nreference to undefined identifier: x"
-            #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: x"
-            #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: x")
+            #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: x"
+            #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: x")
            'definitions
            #f
            void
@@ -622,8 +620,8 @@ This produces an ACK message
      "{stop-multi.png} {stop-22x22.png} expt: expected argument of type <number>; given #f\n15"
      "{stop-multi.png} {stop-22x22.png} repl-test-tmp3.ss:5:19: expt: expected argument of type <number>; given #f\n15"
      "expt: expected argument of type <number>; given #f\n15"
-     #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: expt: expected argument of type <number>; given #f\n15"
-     #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: expt: expected argument of type <number>; given #f\n15")
+     #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: expt: expected argument of type <number>; given #f\n15"
+     #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: expt: expected argument of type <number>; given #f\n15")
     'definitions
     #f
     void
@@ -646,12 +644,12 @@ This produces an ACK message
    
    ;; should produce a syntax object with a turn-down triangle.
    (mktest "(write (list (syntax x)))" 
-           (#rx"({embedded \".#<syntax:.*/collects/tests/drscheme/repl-test-tmp.ss:1:21.*>\"})"
-            #rx"({embedded \".#<syntax:.*/collects/tests/drscheme/repl-test-tmp.ss:1:21.*>\"})"
-            #rx"({embedded \".#<syntax:.*/collects/tests/drscheme/repl-test-tmp3.ss:1:21.*>\"})"
-            #rx"({embedded \".#<syntax:.*/collects/tests/drscheme/repl-test-tmp.ss:1:21.*>\"})"
-            #rx"({embedded \".#<syntax:.*/collects/tests/drscheme/repl-test-tmp.ss:1:21.*>\"})"
-            #rx"({embedded \".#<syntax:.*/collects/tests/drscheme/repl-test-tmp3.ss:1:21.*>\"})")
+           (#rx"({embedded \".#<syntax:.*repl-test-tmp.ss:1:21.*>\"})"
+            #rx"({embedded \".#<syntax:.*repl-test-tmp.ss:1:21.*>\"})"
+            #rx"({embedded \".#<syntax:.*repl-test-tmp3.ss:1:21.*>\"})"
+            #rx"({embedded \".#<syntax:.*repl-test-tmp.ss:1:21.*>\"})"
+            #rx"({embedded \".#<syntax:.*repl-test-tmp.ss:1:21.*>\"})"
+            #rx"({embedded \".#<syntax:.*repl-test-tmp3.ss:1:21.*>\"})")
            'interactions
            #f
            void
@@ -687,12 +685,12 @@ This produces an ACK message
    
    (mktest "(parameterize ([current-output-port (open-output-string)]) (fprintf (current-error-port) \"~e\" #'foot))"
            
-           (#rx"#<syntax:.*/collects/tests/drscheme/repl-test-tmp.ss:1:96.*>"
-            #rx"#<syntax:.*/collects/tests/drscheme/repl-test-tmp.ss:1:96.*>"
-            #rx"#<syntax:.*/collects/tests/drscheme/repl-test-tmp3.ss:1:96.*>"
-            #rx"#<syntax:.*/collects/tests/drscheme/repl-test-tmp.ss:1:96.*>"
-            #rx"#<syntax:.*/collects/tests/drscheme/repl-test-tmp.ss:1:96.*>"
-            #rx"#<syntax:.*/collects/tests/drscheme/repl-test-tmp3.ss:1:96.*>")
+           (#rx"#<syntax:.*repl-test-tmp.ss:1:96.*>"
+            #rx"#<syntax:.*repl-test-tmp.ss:1:96.*>"
+            #rx"#<syntax:.*repl-test-tmp3.ss:1:96.*>"
+            #rx"#<syntax:.*repl-test-tmp.ss:1:96.*>"
+            #rx"#<syntax:.*repl-test-tmp.ss:1:96.*>"
+            #rx"#<syntax:.*repl-test-tmp3.ss:1:96.*>")
            'interactions
            #f
            void
@@ -721,8 +719,8 @@ This produces an ACK message
      "{stop-multi.png} {stop-22x22.png} expt: expected argument of type <number>; given #f"
      "{stop-multi.png} {stop-22x22.png} repl-test-tmp3.ss:6:15: expt: expected argument of type <number>; given #f"
      "expt: expected argument of type <number>; given #f"
-     #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: expt: expected argument of type <number>; given #f"
-     #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: expt: expected argument of type <number>; given #f")
+     #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: expt: expected argument of type <number>; given #f"
+     #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: expt: expected argument of type <number>; given #f")
     'definitions
     #f
     void
@@ -798,8 +796,8 @@ This produces an ACK message
             "{stop-multi.png} {stop-22x22.png} procedure application: expected procedure, given: 3; arguments were: 3"
             "{stop-multi.png} {stop-22x22.png} repl-test-tmp3.ss:3:13: procedure application: expected procedure, given: 3; arguments were: 3"
             "procedure application: expected procedure, given: 3; arguments were: 3"
-            #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: procedure application: expected procedure, given: 3; arguments were: 3"
-            #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: procedure application: expected procedure, given: 3; arguments were: 3")
+            #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: procedure application: expected procedure, given: 3; arguments were: 3"
+            #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: procedure application: expected procedure, given: 3; arguments were: 3")
            'definitions
            #f
            void
@@ -840,21 +838,18 @@ This produces an ACK message
            void
            void)
    
-   |#
-
-(mktest "(new snip%)"
-           ("1"
-            "1"
-            "1"
-            "1"
-            "1"
-            "1")
+   (mktest "(new snip%)"
+           ("{unknown snip: #(struct:object:snip% ...)}\n"
+            "{unknown snip: #(struct:object:snip% ...)}\n"
+            "{unknown snip: #(struct:object:snip% ...)}\n"
+            "{unknown snip: #(struct:object:snip% ...)}\n"
+            "{unknown snip: #(struct:object:snip% ...)}\n"
+            "{unknown snip: #(struct:object:snip% ...)}\n")
            'interactions
            #f 
            void
            void)
-           
-   
+
    ;; graphical lambda tests
    (mktest (list "((" '("Insert" "Insert λ") "(x) x) 1)")
            
@@ -903,8 +898,8 @@ This produces an ACK message
             "{stop-multi.png} {stop-22x22.png} reference to undefined identifier: xx"
             "{stop-multi.png} {stop-22x22.png} repl-test-tmp3.ss:1:0: reference to undefined identifier: xx"
             "reference to undefined identifier: xx"
-            #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: xx"
-            #rx"{stop-multi.png} {stop-22x22.png} ../../mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: xx")
+            #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: xx"
+            #rx"{stop-multi.png} {stop-22x22.png} .*mred/private/snipfile.ss:[0-9]+:[0-9]+: reference to undefined identifier: xx")
            'definitions
            #f
            void
@@ -977,6 +972,21 @@ This produces an ACK message
            void
            void)
    
+   (mktest (format "~s\n~s"
+                   `(require scheme/pretty)
+                   `(parameterize ((pretty-print-exact-as-decimal #t)) (display 1/4)))
+           
+           ("1/4"
+            "1/4"
+            "1/4"
+            "1/4"
+            "1/4"
+            "1/4")
+           'interactions
+           #f
+           void
+           void)
+   
    (mktest
     (string-append
      "(define p (open-output-string))\n"
@@ -999,9 +1009,8 @@ This produces an ACK message
     'interactions
     #f
     void 
-    void)
-   
-   ))
+    void)))
+
 ;; these tests aren't used at the moment.
 #;
 (define xml-tests
@@ -1075,13 +1084,24 @@ This produces an ACK message
 (define backtrace-image-string "{stop-multi.png}")
 (define file-image-string "{stop-22x22.png}")
 
-(define tmp-load-directory
+(define tmp-load-directory (find-system-path 'temp-dir)
+  #;
   (normal-case-path
    (normalize-path 
     (collection-path "tests" "drscheme"))))
 
+(define tmp-load-short-filename "repl-test-tmp.ss")
+(define tmp-load-filename (build-path tmp-load-directory tmp-load-short-filename))
+
+(define tmp-load3-short-filename "repl-test-tmp3.ss")
+(define tmp-load3-filename (build-path tmp-load-directory tmp-load3-short-filename))
+
+(define (cleanup-tmp-files)
+  (when (file-exists? tmp-load-filename) (delete-file tmp-load-filename))
+  (when (file-exists? tmp-load3-filename) (delete-file tmp-load3-filename)))
+
 (define (run-test)
-  
+    
   (define drscheme-frame (wait-for-drscheme-frame))
   
   (define interactions-text (send drscheme-frame get-interactions-text))
@@ -1093,11 +1113,6 @@ This produces an ACK message
   (define wait-for-execute (lambda () (wait-for-button execute-button)))
   (define get-int-pos (lambda () (get-text-pos interactions-text)))
   
-  (define tmp-load-short-filename "repl-test-tmp.ss")
-  (define tmp-load-filename (build-path tmp-load-directory tmp-load-short-filename))
-  
-  (define tmp-load3-short-filename "repl-test-tmp3.ss")
-  (define tmp-load3-filename (build-path tmp-load-directory tmp-load3-short-filename))
   
   (define short-tmp-load-filename
     (let-values ([(base name dir?) (split-path tmp-load-filename)])
@@ -1132,7 +1147,7 @@ This produces an ACK message
   ; given a filename "foo", we perform two operations on the contents 
   ; of the file "foo.ss".  First, we insert its contents into the REPL
   ; directly, and second, we use the load command.  We compare the
-  ; the results of these operations against expected results.
+  ; results of these operations against expected results.
   (define ((run-single-test execute-text-start escape language-cust) in-vector)
     ;(printf "\n>> testing ~s\n" (test-program in-vector))
     (let* ([program (test-program in-vector)]
@@ -1190,12 +1205,14 @@ This produces an ACK message
            (cond
              [(eq? source-location 'definitions)
               (unless (send definitions-canvas has-focus?)
-                (printf "FAILED execute test for ~s\n  expected definitions to have the focus\n"
-                        program))]
+                (fprintf (current-error-port)
+                         "FAILED execute test for ~s\n  expected definitions to have the focus\n"
+                         program))]
              [(eq? source-location 'interactions)
               (unless (send interactions-canvas has-focus?)
-                (printf "FAILED execute test for ~s\n  expected interactions to have the focus\n"
-                        program))]
+                (fprintf (current-error-port)
+                         "FAILED execute test for ~s\n  expected interactions to have the focus\n"
+                         program))]
              [(send definitions-canvas has-focus?)
               (let ([start (car source-location)]
                     [finish (cdr source-location)])
@@ -1207,13 +1224,14 @@ This produces an ACK message
                                (= (+ (srcloc-position error-range) -1) (loc-offset start))
                                (= (+ (srcloc-position error-range) -1 (srcloc-span error-range)) 
                                   (loc-offset finish)))
-                    (printf "FAILED execute test for ~s\n  error-range is ~s\n  expected ~s\n"
-                            program
-                            (and error-range
-                                 (list (+ (srcloc-position error-range) -1)
-                                       (+ (srcloc-position error-range) -1 (srcloc-span error-range))))
-                            (list (loc-offset start)
-                                  (loc-offset finish))))))])])
+                    (fprintf (current-error-port)
+                             "FAILED execute test for ~s\n  error-range is ~s\n  expected ~s\n"
+                             program
+                             (and error-range
+                                  (list (+ (srcloc-position error-range) -1)
+                                        (+ (srcloc-position error-range) -1 (srcloc-span error-range))))
+                             (list (loc-offset start)
+                                   (loc-offset finish))))))])])
         
         ; check text for execute test
         (next-test)
@@ -1224,10 +1242,11 @@ This produces an ACK message
                    (regexp-match execute-answer received-execute)]
                   [else #f])
           (failure)
-          (printf "FAILED execute test for ~s (~a)\n  expected: ~s\n       got: ~s\n"
-                  program
-                  language-cust
-                  execute-answer received-execute))
+          (fprintf (current-error-port)
+                   "FAILED execute test for ~s (~a)\n  expected: ~s\n       got: ~s\n"
+                   program
+                   language-cust
+                   execute-answer received-execute))
         
         (test:new-window interactions-canvas)
         
@@ -1278,9 +1297,10 @@ This produces an ACK message
                                 (regexp-match load-answer received-load)]
                                [else #f])
                        (failure)
-                       (printf "FAILED load test ~a for ~s\n  expected: ~s\n       got: ~s\n"
-                               short-filename
-                               program load-answer received-load)))))])
+                       (fprintf (current-error-port)
+                                "FAILED load test ~a for ~s\n  expected: ~s\n       got: ~s\n"
+                                short-filename
+                                program load-answer received-load)))))])
           (load-test tmp-load-short-filename (make-load-answer in-vector language-cust #f))
           (when (file-exists? tmp-load3-filename)
             (delete-file tmp-load3-filename))
@@ -1291,7 +1311,7 @@ This produces an ACK message
         
         ; check for edit-sequence
         (when (repl-in-edit-sequence?)
-          (printf "FAILED: repl in edit-sequence")
+          (fprintf (current-error-port) "FAILED: repl in edit-sequence")
           (escape)))))
   
   (define tests 0)
@@ -1302,7 +1322,7 @@ This produces an ACK message
   (define (final-report)
     (if (= 0 failures)
         (printf "tests finished: all ~a tests passed\n" tests)
-        (printf "tests finished: ~a failed out of ~a total\n" failures tests)))
+        (fprintf (current-error-port) "tests finished: ~a failed out of ~a total\n" failures tests)))
   
   (define (run-test-in-language-level language-cust)
     (let ([level (list #rx"Pretty Big")])
@@ -1474,8 +1494,7 @@ This produces an ACK message
   (kill-tests)
   (callcc-test)
   (top-interaction-test)
-  (final-report)
-  )
+  (final-report))
 
 (define (insert-in-definitions/newlines drs str)
   (let loop ([strs (regexp-split #rx"\n" str)])
@@ -1508,3 +1527,12 @@ This produces an ACK message
   (if (regexp? b)
       (regexp (string-append (regexp-quote a) (object-name b)))
       (string-append a b)))
+
+
+(exit-handler
+ (let ([eh (exit-handler)])
+   (λ (val)
+      (cleanup-tmp-files)
+      (eh val))))
+
+(fire-up-drscheme-and-run-tests run-test)

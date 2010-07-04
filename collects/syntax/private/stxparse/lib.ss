@@ -3,11 +3,9 @@
 (require "sc.ss"
          "../util.ss"
          syntax/stx
-         syntax/kerncase
          scheme/struct-info
-         scheme/contract/private/helpers
+         unstable/srcloc
          (for-syntax scheme/base
-                     syntax/kerncase
                      "rep.ss"
                      (only-in "rep-data.ss" make-literalset))
          (for-template scheme/base
@@ -42,9 +40,13 @@
 
 (define-pred-stxclass identifier symbol?)
 (define-pred-stxclass boolean boolean?)
-(define-pred-stxclass str string?)
 (define-pred-stxclass character char?)
 (define-pred-stxclass keyword keyword?)
+
+(define-syntax-class str #:attributes () #:opaque
+  #:description "string"
+  (pattern x
+           #:fail-unless (string? (syntax-e #'x)) #f))
 
 (define-pred-stxclass number number?)
 (define-pred-stxclass integer integer?)
@@ -108,16 +110,35 @@
 (define-syntax-class (expr/c ctc)
   #:attributes (c)
   (pattern x:expr
-           #:with c #`(contract #,ctc
-                                x
-                                (quote #,(string->symbol (or (build-src-loc-string #'x) "")))
-                                (quote #,(or '<this-macro>))
-                                (quote-syntax #,(syntax/loc #'x (<there>))))))
+           #:with
+           c #`(contract #,ctc
+                         x
+                         (quote #,(source-location->string #'x "<<unknown>>"))
+                         '<this-macro>
+                         #f
+                         (quote-syntax x))))
 
 ;; Literal sets
-  
-(define-syntax kernel-literals
-  (make-literalset
-   (list* (list '#%plain-module-begin (quote-syntax #%plain-module-begin))
-          (for/list ([id (kernel-form-identifier-list)])
-            (list (syntax-e id) id)))))
+
+(define-literal-set kernel-literals
+  (begin
+   begin0
+   define-values
+   define-syntaxes
+   define-values-for-syntax
+   set!
+   let-values
+   letrec-values
+   #%plain-lambda
+   case-lambda
+   if
+   quote
+   letrec-syntaxes+values
+   with-continuation-mark
+   #%expression
+   #%plain-app
+   #%top
+   #%datum
+   #%variable-reference
+   module #%provide #%require
+   #%plain-module-begin))

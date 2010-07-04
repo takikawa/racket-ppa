@@ -89,7 +89,7 @@ please adhere to these guidelines:
 |#
 
 (module danish-string-constants "string-constant-lang.ss"
-  ;;; when translating this constant, substitute name of actual langauge for `English'
+  ;;; when translating this constant, substitute name of actual language for `English'
   (is-this-your-native-language "Foretrækker du dansk?")
   
   (are-you-sure-you-want-to-switch-languages
@@ -285,7 +285,7 @@ please adhere to these guidelines:
   (plt:hd:manual-installed-date "(~a installeret)")
   ; Help Desk configuration
   ;; refreshing manuals
-  (plt:hd:refresh-clearing-indicies "Renser forgemte indekser")
+  (plt:hd:refresh-clearing-indices "Renser forgemte indekser")
   ;; should not mention `SVN' (plt:hd:refresh-done "Færdig med at opdatere SVN-manualer")
   (plt:hd:refreshing-manuals "Genhenter manualer")
   (plt:hd:refresh-downloading... "Henter ~a...")

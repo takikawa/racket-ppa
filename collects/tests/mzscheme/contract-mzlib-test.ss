@@ -78,13 +78,9 @@ of the contract library does not change over time.
   (define (test/spec-failed name expression blame)
     (let ()
       (define (has-proper-blame? msg)
-        (equal?
-         blame
-         (cond
-           [(regexp-match #rx"(^| )(.*) broke" msg) 
-            =>
-            (λ (x) (caddr x))]
-           [else (format "no blame in error message: \"~a\"" msg)])))
+        (regexp-match?
+         (string-append "(^| )" (regexp-quote blame) " broke")
+         msg))
       (printf "testing: ~s\n" name)
       (contract-eval
        `(,thunk-error-test 
@@ -1656,10 +1652,12 @@ of the contract library does not change over time.
   
   (test/pos-blame
    'object-contract/field2
-   '(contract (object-contract (field x integer?))
-              (new (class object% (field [x #t]) (super-new)))
-              'pos
-              'neg))
+   '(get-field
+     x
+     (contract (object-contract (field x integer?))
+               (new (class object% (field [x #t]) (super-new)))
+               'pos
+               'neg)))
   
   (test/spec-passed/result
    'object-contract/field3
@@ -1673,17 +1671,21 @@ of the contract library does not change over time.
   
   (test/pos-blame
    'object-contract/field4
-   '(contract (object-contract (field x boolean?) (field y boolean?))
-              (new (class object% (field [x #t] [y 'x]) (super-new)))
-              'pos
-              'neg))
+   '(get-field
+     y
+     (contract (object-contract (field x boolean?) (field y boolean?))
+               (new (class object% (field [x #t] [y 'x]) (super-new)))
+               'pos
+               'neg)))
   
   (test/pos-blame
    'object-contract/field5
-   '(contract (object-contract (field x symbol?) (field y symbol?))
-              (new (class object% (field [x #t] [y 'x]) (super-new)))
-              'pos
-              'neg))
+   '(get-field
+     x
+     (contract (object-contract (field x symbol?) (field y symbol?))
+               (new (class object% (field [x #t] [y 'x]) (super-new)))
+               'pos
+               'neg)))
   
   (test/spec-passed/result
    'object-contract/field6
@@ -2714,7 +2716,7 @@ of the contract library does not change over time.
   ;;
   ;; test error message has right format
   ;;
-  
+
   (test/spec-passed/result
    'wrong-method-arity-error-message
    '(with-handlers ([exn:fail? exn-message])
@@ -2726,7 +2728,7 @@ of the contract library does not change over time.
             1
             2))
    "procedure m method: expects 1 argument, given 2: 1 2")
-        
+
   ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
   ;;
   ;; tests object utilities to be sure wrappers work right
@@ -4525,10 +4527,10 @@ so that propagation occurs.
   
   (ctest #f contract-first-order-passes? (flat-rec-contract the-name) 1)
   
-  (ctest #t contract-first-order-passes? 
+  (ctest #f contract-first-order-passes? 
          (object-contract (m (-> integer? integer?)))
          (new object%))
-  (ctest #t contract-first-order-passes? 
+  (ctest #f contract-first-order-passes? 
          (object-contract (m (-> integer? integer?)))
          1)
   
@@ -5127,7 +5129,11 @@ so that propagation occurs.
      (and (exn? x)
           (regexp-match #rx"expected field name to be b, but found string?" (exn-message x)))))
   
-  (contract-eval `(,test 'pos guilty-party (with-handlers ((void values)) (contract not #t 'pos 'neg))))
+  (contract-eval
+   `(,test
+     'pos
+     (compose blame-positive exn:fail:contract:blame-object)
+     (with-handlers ((void values)) (contract not #t 'pos 'neg))))
   
   (report-errs)
   

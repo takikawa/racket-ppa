@@ -1,5 +1,6 @@
 #lang scheme/base
 (require scheme/class
+         scheme/file
          (for-syntax scheme/base)
          "../syntax.ss"
          "cycle.ss"
@@ -18,9 +19,10 @@
          write-styles-to-file)
 
 (define default-size 
-  (case (system-type)
-    [(windows) 10]
-    [else 12]))
+  (or (get-preference 'MrEd:default-font-size)
+      (case (system-type)
+        [(windows) 10]
+        [else 12])))
 
 (define black-color (make-object color% 0 0 0))
 
@@ -621,7 +623,7 @@
   (define/public (s-set-as-basic slist)
     (set! style-list slist)
 
-    (set! name "basic")
+    (set! name "Basic")
     (set! base-style #f)
 
     (set! nonjoin-delta (new style-delta%))

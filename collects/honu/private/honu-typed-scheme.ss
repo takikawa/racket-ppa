@@ -6,92 +6,26 @@
                      syntax/name
                      syntax/define
                      syntax/parse
+                     syntax/parse/experimental
+                     scheme/splicing
                      "contexts.ss"
                      "util.ss"
                      "ops.ss"
+                     "parse.ss"
                      )
+         "literals.ss"
          ;; "typed-utils.ss"
          )
 
+(require (for-meta 2 scheme/base "util.ss"))
+(require (for-meta 3 scheme/base))
+
 (provide (all-defined-out))
 
-;; macro for defining literal tokens that can be used in macros
-(define-syntax-rule (define-literal name)
-  (define-syntax name (lambda (stx)
-                        (raise-syntax-error 'name
-                                            "this is a literal and cannot be used outside a macro"))))
-
-(define-literal honu-return)
-(define-literal \;)
 
 ;; (define-syntax (\; stx) (raise-syntax-error '\; "out of context" stx))
 
 (begin-for-syntax
-
-(define-values (prop:honu-transformer honu-transformer? honu-transformer-ref)
-               (make-struct-type-property 'honu-transformer))
-
-
-(define-values (struct:honu-trans make-honu-trans honu-trans? honu-trans-ref honu-trans-set!)
-               (make-struct-type 'honu-trans #f 1 0 #f 
-                                 (list (list prop:honu-transformer #t))
-                                 (current-inspector) 0))
-
-(define (make-honu-transformer proc)
-  (unless (and (procedure? proc)
-               (procedure-arity-includes? proc 2))
-    (raise-type-error
-      'define-honu-syntax
-      "procedure (arity 2)"
-      proc))
-  (make-honu-trans proc))
-
-
-
-(define operator? 
-  (let ([sym-chars (string->list "+-_=?:<>.!%^&*/~|")])
-    (lambda (stx)
-      (and (identifier? stx)
-           (let ([str (symbol->string (syntax-e stx))])
-             (and (positive? (string-length str))
-                  (memq (string-ref str 0) sym-chars)))))))
-
-(define (get-transformer stx)
-  ;; if its an identifier and bound to a transformer return it
-  (define (bound-transformer stx)
-    (and (stx-pair? stx)
-         (identifier? (stx-car stx))
-         (let ([v (syntax-local-value (stx-car stx) (lambda () #f))])
-           (and (honu-transformer? v) v))))
-  (define (special-transformer stx) 
-    (and (stx-pair? stx)
-         (let ([first (stx-car stx)])
-           (cond
-             [(and (stx-pair? first)
-                   (identifier? (stx-car first))
-                   (delim-identifier=? #'#%parens (stx-car first)))
-              ;; If the stx-car is a list with just one operator symbol,
-              ;;  try using the operator as a transformer
-              (let ([l (cdr (stx->list first))])
-                (let loop ([l l])
-                  (cond
-                    [(null? l) #f]
-                    [(operator? (car l))
-                     (if (ormap operator? (cdr l))
-                       #f
-                       (let ([v (syntax-local-value (car l) (lambda () #f))])
-                         (and (honu-transformer? v)
-                              v)))]
-                    [else (loop (cdr l))])))]
-             [(and (stx-pair? first)
-                   (identifier? (stx-car first))
-                   (free-identifier=? #'#%angles (stx-car first)))
-              (let ([v (syntax-local-value (stx-car first) (lambda () #f))])
-                (and (honu-transformer? v) v))]
-             [else #f]))))
-  ;; (printf "~a bound transformer? ~a\n" stx (bound-transformer stx))
-  (or (bound-transformer stx)
-      (special-transformer stx)))
 
 ;; these functions use parse-block-one 
 ;; (define parse-a-tail-expr #f)
@@ -338,36 +272,12 @@
     [else (call-values parse-one (extract-until body (list #'\;
                                                            )))]))
 
-(define (parse-block-one/2 stx context)
-  (define (parse-one stx context)
-    (define-syntax-class block
-                         [pattern (#%braces statement ...)
-                                  #:with result #'(honu-unparsed-begin statement ...)])
-    (define-syntax-class function
-                         [pattern (type:id name:id (#%parens args ...) body:block . rest)
-                                  #:with result #'(define (name args ...)
-                                                    body.result)])
-    (define-syntax-class expr
-                         [pattern f])
-    (define-splicing-syntax-class call
-                         [pattern (~seq e:expr (#%parens args ...))
-                                  #:with call #'(e args ...)])
-    (define-syntax-class expression
-                         #:literals (\;)
-                         [pattern (call:call \; . rest) #:with result #'call.call]
-                         [pattern (x:number \; . rest) #:with result #'x]
-                         )
-    ;; (printf "~a\n" (syntax-class-parse function stx))
-    (syntax-parse stx
-      [function:function (values #'function.result #'function.rest)]
-      [expr:expression (values #'expr.result #'expr.rest)]
-      [(x:number . rest) (values #'x #'rest)]
-      ))
-  (cond
-    [(stx-null? stx) (values stx '())]
-    [(get-transformer stx) => (lambda (transformer)
-                                (transformer stx context))]
-    [else (parse-one stx context)]))
+#|
+(define-honu-macro (e ... * e ... \;))
+
+(foo . bar ())
+x(2)
+|#
 
 (define (parse-block stx ctx)
   (let loop ([stx stx])
@@ -386,10 +296,10 @@
 )
 
 (define-syntax (define-honu-syntax stx)
-    (let-values ([(id rhs) (normalize-definition stx #'lambda #f)])
-      (with-syntax ([id id]
-		    [rhs rhs])
-	#'(define-syntax id (make-honu-transformer rhs)))))
+  (let-values ([(id rhs) (normalize-definition stx #'lambda #f)])
+    (with-syntax ([id id]
+                  [rhs rhs])
+                 #'(define-syntax id (make-honu-transformer rhs)))))
 
 
 #|
@@ -414,7 +324,7 @@ Then, in the pattern above for 'if', 'then' would be bound to the following synt
   (lambda (stx ctx)
     (define (parse-complete-block stx)
       ;; (printf "Parsing complete block ~a\n" (syntax->datum stx))
-      (with-syntax ([(exprs ...) (parse-block stx ctx)])
+      (with-syntax ([(exprs ...) (parse-block stx the-expression-block-context)])
         #'(begin exprs ...))
       #;
       (let-values ([(a b)
@@ -446,7 +356,7 @@ Then, in the pattern above for 'if', 'then' would be bound to the following synt
       [(_ condition:paren-expr on-true:block else on-false:block . rest)
        ;; (printf "used if with else\n")
        (let ([result #'(if condition.expr on-true.line on-false.line)])
-         (expression-result ctx result #'rest))]
+         (expression-result ctx result (syntax/loc #'rest rest)))]
       [(_ condition:paren-expr on-true:block . rest)
        ;; (printf "used if with no else\n")
        (let ([result #'(when condition.expr on-true.line)])
@@ -538,11 +448,16 @@ if (foo){
 (define-syntax (honu-top stx)
   (raise-syntax-error #f "interactive use is not yet supported"))
 
+(define (display2 x y)
+  (printf "~a ~a" x y))
+
 (define-syntax (honu-unparsed-begin stx)
   ;; (printf "honu unparsed begin: ~a\n" (syntax->datum stx))
   (syntax-case stx ()
     [(_) #'(begin (void))]
     [(_ . body) (let-values ([(code rest) (parse-block-one/2 #'body
+                                                             the-expression-context
+                                                             #;
                                                              the-top-block-context)])
                   ;; (printf "Rest is ~a\n" (syntax->datum rest))
                   (with-syntax ([code code]

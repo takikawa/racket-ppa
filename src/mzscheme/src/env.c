@@ -32,7 +32,7 @@
 #include "schminc.h"
 #include "schmach.h"
 #include "schexpobs.h"
-#ifdef FUTURES_ENABLED
+#ifdef MZ_USE_FUTURES
 # include "future.h"
 #endif
 
@@ -177,7 +177,7 @@ static void init_compile_data(Scheme_Comp_Env *env);
 #define COMPILE_DATA(e) (&((Scheme_Full_Comp_Env *)e)->data)
 
 #define SCHEME_NON_SIMPLE_FRAME (SCHEME_NO_RENAME | SCHEME_CAPTURE_WITHOUT_RENAME \
-                                 | SCHEME_FOR_STOPS | SCHEME_FOR_INTDEF | SCHEME_CAPTURE_LIFTED)
+                                 | SCHEME_FOR_STOPS | SCHEME_CAPTURE_LIFTED)
 
 #define ASSERT_IS_VARIABLE_BUCKET(b) /* if (((Scheme_Object *)b)->type != scheme_variable_type) abort() */
 
@@ -270,6 +270,7 @@ Scheme_Env *scheme_restart_instance() {
   scheme_init_port_config();
   scheme_init_port_fun_config();
   scheme_init_error_config();
+  scheme_init_logger_config();
 #ifndef NO_SCHEME_EXNS
   scheme_init_exn_config();
 #endif
@@ -508,13 +509,15 @@ static Scheme_Env *place_instance_init(void *stack_base, int initial_main_os_thr
 #endif
   scheme_init_error_config();
 
+/* BEGIN PRIMITIVE MODULES */
   scheme_init_memtrace(env);
 #ifndef NO_TCP_SUPPORT
   scheme_init_network(env);
 #endif
-  scheme_init_parameterization(env);
+  scheme_init_paramz(env);
   scheme_init_expand_observe(env);
   scheme_init_place(env);
+/* END PRIMITIVE MODULES */
 #if defined(MZ_USE_PLACES)
   scheme_jit_fill_threadlocal_table();
 #endif
@@ -631,6 +634,7 @@ static void make_kernel_env(void)
 #ifndef NO_REGEXP_UTILS
   MZTIMEIT(regexp, scheme_regexp_initialize(env));
 #endif
+  scheme_init_parameterization();
 
   MARK_START_TIME();
 
@@ -3332,7 +3336,7 @@ static void register_transitive_use(Optimize_Info *info, int pos, int j)
 void scheme_env_make_closure_map(Optimize_Info *info, mzshort *_size, mzshort **_map)
 {
   /* A closure map lists the captured variables for a closure; the
-     indices are resolved two new indicies in the second phase of
+     indices are resolved two new indices in the second phase of
      compilation. */
   Optimize_Info *frame;
   int i, j, pos = 0, lpos = 0, tu;
@@ -3728,6 +3732,8 @@ void scheme_optimize_info_done(Optimize_Info *info)
   info->next->size += info->size;
   info->next->psize += info->psize;
   info->next->vclock = info->vclock;
+  if (info->has_nonleaf)
+    info->next->has_nonleaf = 1;
 }
 
 /*========================================================================*/

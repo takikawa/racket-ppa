@@ -89,7 +89,8 @@ TODO
           (prefix drscheme:text: drscheme:text^)
           (prefix drscheme:help-desk: drscheme:help-desk^)
           (prefix drscheme:debug: drscheme:debug^)
-          [prefix drscheme:eval: drscheme:eval^])
+          [prefix drscheme:eval: drscheme:eval^]
+          [prefix drscheme:module-language: drscheme:module-language^])
   (export (rename drscheme:rep^
                   [-text% text%]
                   [-text<%> text<%>]))
@@ -261,7 +262,18 @@ TODO
          [add-drs-function
           (λ (name f)
             (send drs-bindings-keymap add-function name
-                  (λ (obj evt) (cond [(get-frame obj) => f]))))])
+                  (λ (obj evt) (cond [(get-frame obj) => f]))))]
+         [show-tab
+          (λ (i)
+            (λ (obj evt)
+              (let ([fr (get-frame obj)])
+                (and fr
+                     (is-a? fr drscheme:unit:frame<%>)
+                     (< i (send fr get-tab-count))
+                     (begin (send fr change-to-nth-tab i)
+                            #t)))))])
+    (for ([i (in-range 1 10)])
+      (send drs-bindings-keymap add-function (format "show-tab-~a" i) (show-tab (- i 1))))
     (send drs-bindings-keymap add-function "search-help-desk"
           (λ (obj evt)
             (if (not (and (is-a? obj text%) (get-frame obj))) ; is `get-frame' needed?
@@ -299,6 +311,14 @@ TODO
   
   (send drs-bindings-keymap map-function "c:x;0" "collapse")
   (send drs-bindings-keymap map-function "c:x;2" "split")
+
+  (for ([i (in-range 1 10)])
+    (send drs-bindings-keymap map-function 
+          (format "a:~a" i) 
+          (format "show-tab-~a" i))
+    (send drs-bindings-keymap map-function 
+          (format "m:~a" i) 
+          (format "show-tab-~a" i)))
   
   (define (get-drs-bindings-keymap) drs-bindings-keymap)
   
@@ -402,9 +422,15 @@ TODO
           default-settings?
           (drscheme:language-configuration:language-settings-settings language-settings)))
   
-  (define (extract-language-name language-settings)
-    (send (drscheme:language-configuration:language-settings-language language-settings)
-          get-language-name))
+  (define (extract-language-name language-settings defs-text)
+    (cond
+      [(is-a? (drscheme:language-configuration:language-settings-language language-settings)
+              drscheme:module-language:module-language<%>)
+       (send (drscheme:language-configuration:language-settings-language language-settings)
+             get-users-language-name defs-text)]
+      [else
+       (send (drscheme:language-configuration:language-settings-language language-settings)
+             get-language-name)]))
   (define (extract-language-style-delta language-settings)
     (send (drscheme:language-configuration:language-settings-language language-settings)
           get-style-delta))
@@ -1591,7 +1617,7 @@ TODO
         (let-values (((before after)
                       (insert/delta
                        this
-                       (extract-language-name user-language-settings)
+                       (extract-language-name user-language-settings definitions-text)
                        dark-green-delta
                        (extract-language-style-delta user-language-settings)))
                      ((url) (extract-language-url user-language-settings)))
@@ -1599,13 +1625,13 @@ TODO
             (set-clickback before after (λ args (send-url url))
                            click-delta)))
         (unless (is-default-settings? user-language-settings)
-          (insert/delta this (string-append " " (string-constant custom)) dark-green-delta))
+          (insert/delta this (string-append " [" (string-constant custom) "]") dark-green-delta))
         (when custodian-limit
           (insert/delta this 
                         "; memory limit: "
                         welcome-delta)
           (insert/delta this
-                        (format "~a megabytes" (floor (/ custodian-limit 1024 1024)))
+                        (format "~a MB" (floor (/ custodian-limit 1024 1024)))
                         dark-green-delta))
         (insert/delta this ".\n" welcome-delta)
         
@@ -1622,6 +1648,7 @@ TODO
         (reset-regions (list (list (last-position) (last-position))))
         (set-unread-start-point (last-position))
         (set-insertion-point (last-position))
+        (set! indenting-limit (last-position))
         (set-allow-edits #f)
         (set! repl-header-end #f)
         (end-edit-sequence))
@@ -1656,6 +1683,12 @@ TODO
         (send context enable-evaluation)
         (end-edit-sequence)
         (clear-undos))
+      
+      (define indenting-limit 0)
+      (define/override (get-limit n) 
+        (cond
+          [(< n indenting-limit) 0]
+          [else indenting-limit]))
       
       ;; avoid calling paragraph-start-position very often.
       (define repl-header-end #f)

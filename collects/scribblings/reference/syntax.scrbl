@@ -11,7 +11,8 @@
                      scheme/provide
                      scheme/nest
                      scheme/package
-                     scheme/splicing))
+                     scheme/splicing
+                     scheme/runtime-path))
 
 @(define require-eval (make-base-eval))
 @(define syntax-eval
@@ -95,7 +96,7 @@ id)] is the name of the declared module.
 @margin-note/ref{For a @scheme[module]-like form for use @emph{within}
 modules and other contexts, see @scheme[define-package].}
 
-The @scheme[module-path] must be as for @scheme[require], and it
+The @scheme[module-path] form must be as for @scheme[require], and it
 supplies the initial bindings for the body @scheme[form]s. That is, it
 is treated like a @scheme[(require module-path)] prefix before the
 @scheme[form]s, except that the bindings introduced by
@@ -179,10 +180,13 @@ module, whose full name depends both on @scheme[id] and
 The module body is executed only when the module is explicitly
 @techlink{instantiate}d via @scheme[require] or
 @scheme[dynamic-require]. On invocation, expressions and definitions
-are evaluated in order as they appear within the module; accessing a
-@tech{module-level variable} before it is defined signals a run-time
-error, just like accessing an undefined global variable.
+are evaluated in order as they appear within the module. Each
+evaluation of an expression or definition is wrapped with a
+continuation prompt (see @scheme[call-with-continuation-prompt]) for
+the default continuation and using the default prompt handler.
 
+Accessing a @tech{module-level variable} before it is defined signals
+a run-time error, just like accessing an undefined global variable.
 If a module (in its fully expanded form) does not contain a
 @scheme[set!]  for an identifier that defined within the module, then
 the identifier is a @defterm{constant} after it is defined; its value
@@ -218,8 +222,8 @@ See also @secref["module-eval-model"] and @secref["mod-parse"].
 Legal only in a @tech{module begin context}, and handled by the
 @scheme[module] form.
 
-The pre-defined @scheme[#%module-begin] form wraps every
-top-level expression to print non-@|void-const| results using
+The @scheme[#%module-begin] form of @schememodname[scheme/base] wraps
+every top-level expression to print non-@|void-const| results using
 @scheme[current-print].}
 
 @defform[(#%plain-module-begin form ...)]{
@@ -773,7 +777,7 @@ follows.
  @defsubform[(struct-out id)]{Exports the bindings associated with a
  structure type @scheme[id]. Typically, @scheme[id] is bound with
  @scheme[(define-struct id ....)] or @scheme[(define-struct (id
- super-id) ....)]; more generally, @scheme[id] must have a
+ _super-id) ....)]; more generally, @scheme[id] must have a
  @tech{transformer binding} of structure-type information at
  @tech{phase level} 0; see @secref["structinfo"].  Furthermore, for
  each identifier mentioned in the structure-type information, the
@@ -1075,11 +1079,11 @@ aliens
   will get the @scheme[scheme/base] bindings that match the regexp,
   and renamed to use ``camel case.''}
 
-@defform[(path-up rel-string)]{
+@defform[(path-up rel-string ...)]{
 
-This specifies a path to a module named @scheme[rel-string] in a
-similar way to using @scheme[rel-string] directly, except that if the
-required module file is not found there, it is searched in the parent
+This specifies paths to module named by the @scheme[rel-string]s in a
+similar way to using the @scheme[rel-string]s directly, except that if the
+required module files are not found there, they are searched for in the parent
 directory (in @filepath{../@scheme[_rel-string]}), and then in
 the grand-parent directory, going all the way up to the root.  (Note
 that the usual caveats hold for a macro that depends on files that it
@@ -1089,16 +1093,16 @@ of the compiled form.)
 This form is useful in setting up a ``project environment''.  For
 example, you can write a @filepath{config.ss} file in the root
 directory of your project with:
-@verbatim[#:indent 2]{
-  #lang scheme/base
+@schememod[
+  scheme/base
   (require scheme/require-syntax (for-syntax "utils/in-here.ss"))
   ;; require form for my utilities
   (provide utils-in)
   (define-require-syntax utils-in in-here-transformer)
-}
+]
 and in @filepath{utils/in-here.ss} in the root:
-@verbatim[#:indent 2]{
-  #lang scheme/base
+@schememod[
+  scheme/base
   (require scheme/runtime-path)
   (provide in-here-transformer)
   (define-runtime-path here ".")
@@ -1108,7 +1112,7 @@ and in @filepath{utils/in-here.ss} in the root:
        (identifier? #'sym)
        (let ([path (build-path here (format "~a.ss" (syntax-e #'sym)))])
          (datum->syntax stx `(file ,(path->string path)) stx))]))
-}
+]
 Finally, you can use it via @scheme[path-up]:
 @schemeblock[
   (require scheme/require (path-up "config.ss") (utils-in foo))]

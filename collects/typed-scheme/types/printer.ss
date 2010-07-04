@@ -144,8 +144,12 @@
   (match c 
     [(Univ:) (fp "Any")]
     ;; special case number until something better happens
-    [(Base: 'Number _) (fp "Number")]
+    ;;[(Base: 'Number _) (fp "Number")]
     [(? has-name?) (fp "~a" (has-name? c))]
+    [(StructTop: st) (fp "~a" st)]
+    [(BoxTop:) (fp "Box")]
+    [(VectorTop:) (fp "Vector")]
+    [(MPairTop:) (fp "MPair")]
     ;; names are just the printed as the original syntax
     [(Name: stx) (fp "~a" (syntax-e stx))]
     [(App: rator rands stx) 
@@ -162,8 +166,8 @@
      (fp "~a" (cons 'List (tuple-elems t)))]
     [(Base: n cnt) (fp "~a" n)]      
     [(Opaque: pred _) (fp "(Opaque ~a)" (syntax->datum pred))]
-    [(Struct: 'Promise par (list fld) proc _ _ _) (fp "(Promise ~a)" fld)]      
-    [(Struct: nm par flds proc _ _ _) 
+    [(Struct: 'Promise par (list fld) proc _ _ _ _) (fp "(Promise ~a)" fld)]      
+    [(Struct: nm par flds proc _ _ _ _) 
      (fp "#(struct:~a ~a" nm flds)
      (when proc
        (fp " ~a" proc))
@@ -181,9 +185,9 @@
                          (fp ")")]))]
     [(arr: _ _ _ _ _) (print-arr c)]
     [(Vector: e) (fp "(Vectorof ~a)" e)]
-    [(Box: e) (fp "(Box ~a)" e)]
+    [(Box: e) (fp "(Boxof ~a)" e)]
     [(Union: elems) (fp "~a" (cons 'U elems))]
-    [(Pair: l r) (fp "(Pair ~a ~a)" l r)]
+    [(Pair: l r) (fp "(Pairof ~a ~a)" l r)]
     [(F: nm) (fp "~a" nm)]   
     ;; FIXME
     [(Values: (list v)) (fp "~a" v)]
@@ -191,8 +195,8 @@
     [(ValuesDots: v dty dbound) (fp "~a" (cons 'values (append v (list dty '... dbound))))]
     [(Param: in out) 
      (if (equal? in out)
-         (fp "(Parameter ~a)" in)           
-         (fp "(Parameter ~a ~a)" in out))]
+         (fp "(Parameterof ~a)" in)           
+         (fp "(Parameterof ~a ~a)" in out))]
     [(Hashtable: k v) (fp "(HashTable ~a ~a)" k v)]
     
     #;[(Poly-unsafe: n b) (fp "(unsafe-poly ~a ~a ~a)" (Type-seq c) n b)]

@@ -107,7 +107,7 @@ the empty list, @scheme[#f] otherwise.
 (null? (cdr (list 1)))
 ]}
 
-@defproc[(cons [a any/c] [d any/c]) pair?]{Returns a pair whose first
+@defproc[(cons [a any/c] [d any/c]) pair?]{Returns a newly allocated pair whose first
 element is @scheme[a] and second element is @scheme[d].
 @mz-examples[
 (cons 1 2)
@@ -415,7 +415,7 @@ Returns a list that is like @scheme[lst], omitting the first element
 
 Returns @scheme[(remove v lst eq?)].
 @mz-examples[
-(remq (list 1 2) (list 1 2 3 4 5))
+(remq 2 (list 1 2 3 4 5))
 ]}
 
 

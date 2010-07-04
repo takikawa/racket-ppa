@@ -239,15 +239,30 @@
                                     (string-constant case-sensitive-label)
                                     input-panel
                                     void))]
-             [debugging (instantiate radio-box% ()
-                          (label #f)
-                          (choices 
-                           (list (string-constant no-debugging-or-profiling)
-                                 (string-constant debugging)
-                                 (string-constant debugging-and-profiling)
-                                 (string-constant test-coverage)))
-                          (parent dynamic-panel)
-                          (callback debugging-radio-box-callback))]
+             [debugging-panel (new horizontal-panel%
+                                   [parent dynamic-panel]
+                                   [stretchable-height #f]
+                                   [alignment '(left center)])]
+             [debugging-left (new radio-box%
+                                  (label #f)
+                                  (choices 
+                                   (list (string-constant no-debugging-or-profiling)
+                                         (string-constant debugging)))
+                                  (parent debugging-panel)
+                                  (callback
+                                   (λ (a b)
+                                     (send debugging-right set-selection #f)
+                                     (debugging-radio-box-callback a b))))]
+             [debugging-right (new radio-box%
+                                   (label #f)
+                                   (choices 
+                                    (list (string-constant debugging-and-profiling)
+                                          (string-constant test-coverage)))
+                                   (parent debugging-panel)
+                                   (callback
+                                    (λ (a b)
+                                      (send debugging-left set-selection #f)
+                                      (debugging-radio-box-callback a b))))]
              [output-style (make-object radio-box%
                              (string-constant output-style-label)
                              (list (string-constant constructor-printing-style)
@@ -272,7 +287,7 @@
                                 (string-constant use-pretty-printer-label)
                                 output-panel
                                 void)])
-      (get-debugging-radio-box debugging)
+      (get-debugging-radio-box debugging-left debugging-right)
       (dynamic-panel-extras dynamic-panel)
       
       (case-lambda
@@ -290,11 +305,13 @@
               'mixed-fraction-e)
           (send show-sharing get-value)
           (send insert-newlines get-value)
-          (case (send debugging get-selection)
+          (case (send debugging-left get-selection)
             [(0) 'none]
             [(1) 'debug]
-            [(2) 'debug/profile]
-            [(3) 'test-coverage]))]
+            [(#f)
+             (case (send debugging-right get-selection)
+               [(0) 'debug/profile]
+               [(1) 'test-coverage])]))]
         [(settings)
          (when case-sensitive
            (send case-sensitive set-value
@@ -308,30 +325,31 @@
                                              'repeating-decimal-e))
          (send show-sharing set-value (simple-settings-show-sharing settings))
          (send insert-newlines set-value (simple-settings-insert-newlines settings))
-         (send debugging set-selection
-               (case (simple-settings-annotations settings)
-                 [(none) 0]
-                 [(debug) 1]
-                 [(debug/profile) 2]
-                 [(test-coverage) 3]))])))
+         (case (simple-settings-annotations settings)
+           [(none) (send debugging-right set-selection #f) (send debugging-left set-selection 0)]
+           [(debug) (send debugging-right set-selection #f) (send debugging-left set-selection 1)]
+           [(debug/profile) (send debugging-left set-selection #f) (send debugging-right set-selection 0)]
+           [(test-coverage) (send debugging-left set-selection #f) (send debugging-right set-selection 1)])])))
   
   ;; simple-module-based-language-render-value/format : TST settings port (union #f (snip% -> void)) (union 'infinity number) -> void
   (define (simple-module-based-language-render-value/format value settings port width)
-        (let ([converted-value (simple-module-based-language-convert-value value settings)])
-          (setup-printing-parameters 
-           (λ ()
-             (cond
-               [(simple-settings-insert-newlines settings)
-                (if (number? width)
-                    (parameterize ([pretty-print-columns width])
-                      (pretty-print converted-value port))
-                    (pretty-print converted-value port))]
-               [else
-                (parameterize ([pretty-print-columns 'infinity])
+    (let ([converted-value (simple-module-based-language-convert-value value settings)])
+      (setup-printing-parameters 
+       (λ ()
+         (cond
+           [(simple-settings-insert-newlines settings)
+            (if (number? width)
+                (parameterize ([pretty-print-columns width])
                   (pretty-print converted-value port))
-                (newline port)]))
-           settings
-           width)))
+                (pretty-print converted-value port))]
+           [else
+            (parameterize ([pretty-print-columns 'infinity])
+              (pretty-print converted-value port))
+            (newline port)]))
+       settings
+       width)))
+  
+  (define default-pretty-print-current-style-table (pretty-print-current-style-table))
   
   ;; setup-printing-parameters : (-> void) simple-settings number -> void
   (define (setup-printing-parameters thunk settings width)
@@ -350,7 +368,20 @@
                                                 0)]
                      [pretty-print-pre-print-hook (λ (val port) (void))]
                      [pretty-print-post-print-hook (λ (val port) (void))]
-                     
+                     [pretty-print-exact-as-decimal #f]
+                     [pretty-print-depth #f]
+                     [pretty-print-.-symbol-without-bars #f]
+                     [pretty-print-show-inexactness #f]
+                     [pretty-print-abbreviate-read-macros #t]
+                     [pretty-print-current-style-table default-pretty-print-current-style-table]
+                     [pretty-print-remap-stylable (λ (x) #f)]
+                     [pretty-print-print-line
+                      (lambda (line port offset width)
+                        (when (and (number? width)
+                                   (not (eq? 0 line)))
+                          (newline port))
+                        0)]
+                          
                      [pretty-print-columns width]
                      [pretty-print-size-hook
                       (λ (value display? port)

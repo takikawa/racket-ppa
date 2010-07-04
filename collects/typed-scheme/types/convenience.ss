@@ -2,7 +2,7 @@
 (require "../utils/utils.ss"
          (rep type-rep filter-rep object-rep)
          (utils tc-utils)
-         "abbrev.ss"
+         "abbrev.ss" (only-in scheme/contract current-blame-format)
 	 (types comparison printer union subtype utils)
          scheme/list scheme/match scheme/promise
          (for-syntax syntax/parse scheme/base)
@@ -46,20 +46,18 @@
 
 (define In-Syntax
   (-mu e
-       (*Un -Boolean -Symbol -String -Keyword -Char -Number
+       (*Un (-val null) -Boolean -Symbol -String -Keyword -Char -Number 
             (make-Vector (-Syntax e))
             (make-Box (-Syntax e))
-            (-mu list
-                 (*Un (-val '())
-                      (-pair (-Syntax e)
-                             (*Un (-Syntax e) list)))))))
+            (-lst (-Syntax e))
+            (-pair (-Syntax e) (-Syntax e)))))
 
 (define Any-Syntax (-Syntax In-Syntax))
 
 (define (-Sexpof t)
   (-mu sexp
-       (Un -Number -Boolean -Symbol -String -Keyword -Char
-           (-val '())
+       (Un (-val '())
+           -Number -Boolean -Symbol -String -Keyword -Char           
            (-pair sexp sexp)
            (make-Vector sexp)
            (make-Box sexp)

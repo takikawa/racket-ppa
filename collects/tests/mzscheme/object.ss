@@ -1154,6 +1154,38 @@
   (test 10 'get-field3 (get-field f o))
   (test 11 'get-field3 (get-field g o)))
 
+(syntax-test #'(set-field!))
+(syntax-test #'(set-field! a))
+(syntax-test #'(set-field! a b))
+(syntax-test #'(set-field! 1 b c))
+(syntax-test #'(set-field! a b c d))
+
+(error-test #'(set-field! x 1 2) exn:application:mismatch?)
+(error-test #'(set-field! x (new object%) 2) exn:application:mismatch?)
+(error-test #'(set-field! x (new (class object% (define x 1) (super-new))) 2)
+            exn:application:mismatch?)
+(error-test #'(let ([o (let ()
+                         (define-local-member-name f)
+                         (new (class object%
+                                (field [f 0])
+                                (super-new))))])
+                (set-field! f o 2)))
+(test 1 'set-field!1 (let ([o (new (class object% (field [x 0]) (super-new)))])
+                       (set-field! x o 1)
+                       (get-field x o)))
+(test 1 'set-field!2 (let ()
+                       (define-local-member-name f)
+                       (define o (new (class object% (field [f 0]) (super-new))))
+                       (set-field! f o 1)
+                       (get-field f o)))
+(let ([o (new (class (class object% (field [f 10]) (super-new))
+                (field [g 11])
+                (super-new)))])
+  (test 12 'set-field!3 (begin (set-field! f o 12)
+                               (get-field f o)))
+  (test 14 'set-field!4 (begin (set-field! g o 14)
+                               (get-field g o))))
+
 (syntax-test #'(field-bound?))
 (syntax-test #'(field-bound? a))
 (syntax-test #'(field-bound? 1 b))
@@ -1253,7 +1285,25 @@
 	 (test 1 (mk-f) 1 2)
 	 (let ([f (mk-f)])
 	   (test 1 (mk-f) 1 2)
-	   (check-arity-error (mk-f) #t))))))
+	   (check-arity-error (mk-f) #t))))
+     (let* ([f (lambda (a b) a)]
+            [meth (procedure->method f)]
+            [check-arity-error
+             (lambda (f cl?)
+               (test (if cl? '("no clause matching 0 arguments")  '("expects 1 argument") )
+                     regexp-match #rx"expects 1 argument|no clause matching 0 arguments"
+                     (exn-message (with-handlers ([values values])
+                                    ;; Use `apply' to avoid triggering
+                                    ;; compilation of f:
+                                    (apply f '(1))))))])
+       (test 2 procedure-arity meth)
+       (check-arity-error meth #f)
+       (test 1 meth 1 2)
+       (let* ([f (case-lambda [(a b) a] [(c d) c])]
+              [meth (procedure->method f)])
+	 (test 2 procedure-arity meth)
+	 (check-arity-error meth #t)
+	 (test 1 meth 1 2)))))
  '(#t #f))
 
 ;; ------------------------------------------------------------

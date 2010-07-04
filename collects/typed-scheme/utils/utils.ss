@@ -126,8 +126,6 @@ at least theoretically.
 ;; - 1 printers have to be defined at the same time as the structs
 ;; - 2 we want to support things printing corectly even when the custom printer is off
 
-(define-for-syntax printing? #t)
-
 (define-syntax-rule (defprinter t ...)
   (begin
     (define t (box (lambda _ (error (format "~a not yet defined" 't))))) ...
@@ -150,13 +148,12 @@ at least theoretically.
 (define custom-printer (make-parameter #t))
   
 (define-syntax (define-struct/printer stx)
-  (syntax-case stx ()
-    [(form name (flds ...) printer)
-     #`(define-struct/properties name (flds ...) 
-         #,(if printing?
-               #'([prop:custom-write (lambda (a b c) (if (custom-printer) (printer a b c) (pseudo-printer a b c)))]) 
-               #'([prop:custom-write pseudo-printer]))
-         #f)]))
+  (syntax-parse stx
+    [(form name (flds ...) printer:expr)
+     #`(define-struct name (flds ...) 
+         #:property prop:custom-write 
+         (lambda (a b c) (if (custom-printer) (printer a b c) (pseudo-printer a b c)))
+         #:inspector #f)]))
 
 
 ;; turn contracts on and off - off by default for performance.
@@ -171,11 +168,9 @@ at least theoretically.
         (define-syntax-class clause
           #:literals ()
           #:attributes (i)
-          (pattern [struct nm:id (flds ...)]
-                   #:fail-unless (eq? (syntax-e #'struct) 'struct) #f
+          (pattern [(~datum struct) (~or nm:id (nm:id super:id)) (flds ...)]
 		   #:with i #'(struct-out nm))
-	  (pattern [rename out:id in:id cnt:expr]
-                   #:fail-unless (eq? (syntax-e #'rename) 'rename) #f
+	  (pattern [(~datum rename) out:id in:id cnt:expr]
                    #:with i #'(rename-out [out in]))
           (pattern [i:id cnt:expr]))
         (syntax-parse stx

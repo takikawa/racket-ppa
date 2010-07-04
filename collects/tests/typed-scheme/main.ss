@@ -2,8 +2,7 @@
 
 (provide go go/text)
 
-(require (planet schematics/schemeunit:2/test)
-         (planet schematics/schemeunit:2/text-ui)
+(require schemeunit schemeunit/text-ui
          mzlib/etc scheme/port
          compiler/compiler
          scheme/match
@@ -49,7 +48,7 @@
                  #:when (scheme-file? p)
 		 ;; skip backup files
 		 #:when (not (regexp-match #rx".*~" (path->string p))))
-        (test-case
+        (test-suite
          (path->string p)
          (test
           (build-path path p)
@@ -59,8 +58,7 @@
                            [current-directory path]
                            [current-output-port (open-output-nowhere)])
               (loader p)))))))
-    (apply test-suite dir
-           tests)))
+    (make-test-suite dir tests)))
 
 (define (dr p)
   #;((compile-zos #f) (list p) 'auto)
@@ -74,9 +72,10 @@
                              dr
                              (lambda (p thnk)
                                (define-values (pred info) (exn-pred p))
-                               (with-check-info
-                                (['predicates info])
-                                (check-exn pred thnk)))))
+                               (parameterize ([error-display-handler void])
+                                 (with-check-info
+                                  (['predicates info])
+                                  (check-exn pred thnk))))))
 
 (define int-tests
   (test-suite "Integration tests"
@@ -88,7 +87,7 @@
               unit-tests int-tests))
 
 (define (go) (test/gui tests))
-(define (go/text) (test/text-ui tests))
+(define (go/text) (run-tests tests 'verbose))
 
 (provide go go/text)
 

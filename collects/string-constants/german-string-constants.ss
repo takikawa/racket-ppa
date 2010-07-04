@@ -212,7 +212,7 @@
  (plt:hd:refresh-downloading... "~a herunterladen...")
  (plt:hd:refresh-deleting... "Alte Version von ~a löschen...")
  (plt:hd:refresh-installing... "Neue Version von ~a installieren...")
- (plt:hd:refresh-clearing-indicies "Gecachte Indizes löschen")
+ (plt:hd:refresh-clearing-indices "Gecachte Indizes löschen")
  (plt:hd:refreshing-manuals-finished "Fertig.")
  (plt:hd:about-help-desk "Über das Hilfezentrum")
  (plt:hd:help-desk-about-string
@@ -348,7 +348,7 @@
  (revert-to-defaults "Standardeinstellung wiederherstellen")
 
   (black-on-white-color-scheme "Schwarz auf Weiß") ;; these two appear in the color preferences dialog on butttons
-  (white-on-black-color-scheme "Weiß auf Schwarz") ;; clicking the buttons changes teh color schemes to some defaults that've been set up.
+  (white-on-black-color-scheme "Weiß auf Schwarz") ;; clicking the buttons changes the color schemes to some defaults that've been set up.
 
  ; title of the color choosing dialog
 
@@ -628,6 +628,7 @@
  (most-recent-window "Letztes Fenster")
  (next-tab "Nächster Tab")
  (prev-tab "Vorheriger Tab")
+ (tab-i "Tab ~a: ~a") ;; menu item in the windows menu under mac os x. first ~a is filled with a number between 1 and 9; second one is the filename of the tab
 
  (view-menu-label "&Anzeigen")
  (show-overview "&Programm-Umriss einblenden") 
@@ -951,6 +952,7 @@
  (initial-language-category "Sprache am Anfang")
  (no-language-chosen "Keine Sprache ausgewählt")
 
+ (module-language-name "Sprache aus Quelltext ermitteln")
  (module-language-one-line-summary "List die #lang-Zeile, um die tatsächliche Sprache zu ermitteln.")
   
  (module-language-auto-text "Automatisch Zeile mit #lang") ;; shows up in the details section of the module language
@@ -1081,7 +1083,7 @@
  (module-browser-laying-out-graph-label "Graph-Layout")
  (module-browser-open-file-format "~a öffnen")
  (module-browser "Modul-Browser") ;; frame title
- (module-browser... "Modul-Browser...") ;; menu item title
+ (module-browser... "&Modul-Browser...") ;; menu item title
  (module-browser-error-expanding "Fehler beim Expandieren des Programms:\n\n~a")
  (module-browser-show-lib-paths "Dateien anzeigen, die über (lib ..)-Pfade eingebunden wurden")
  (module-browser-progress "Modul-Browser: ~a") ;; prefix in the status line
@@ -1280,7 +1282,7 @@
  (test-engine-undock-report "Testresultate abdocken")
   ;;Following two appear in Scheme (Java, etc) menu, cause Tests to be Run automatically or not
   (test-engine-enable-tests "Test aktivieren")
-  (test-engine-disable-tests "Tests deaktivieren Tests")
+  (test-engine-disable-tests "Tests deaktivieren")
   
   (test-engine-ran-1-test "1 Test gelaufen.")
   (test-engine-ran-1-check "1 Check gelaufen.")

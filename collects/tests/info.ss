@@ -1,13 +1,14 @@
 #lang setup/infotab
 
 (define name "Test Suites")
-(define tools '(("tool.ss" "drscheme") ("time-keystrokes.ss" "drscheme")))
-(define tool-names '("DrScheme Test Suites" "Time Keystrokes"))
+(define tools '(("time-keystrokes.ss" "drscheme")))
+(define tool-names '("Time Keystrokes"))
 
 (define compile-omit-paths
   '("2htdp"
     "aligned-pasteboard"
     "deinprogramm"
+    "future"
     "honu"
     "match"
     "macro-debugger"
@@ -20,6 +21,7 @@
     "plot"
     "profj"
     "r6rs"
+    "schemeunit"
     "srfi"
     "srpersist"
     "stepper"

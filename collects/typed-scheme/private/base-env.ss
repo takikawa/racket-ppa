@@ -4,16 +4,32 @@
  scheme/tcp
  scheme
  scheme/unsafe/ops
+ scheme/fixnum
  (only-in rnrs/lists-6 fold-left)
  '#%paramz
  "extra-procs.ss"
  (only-in '#%kernel [apply kernel:apply])
  scheme/promise scheme/system
  (only-in string-constants/private/only-once maybe-print-message)
+ (only-in mzscheme make-namespace)
  (only-in scheme/match/runtime match:error matchable? match-equality-test)
- (for-syntax (only-in (types abbrev) [-Number N] [-Boolean B] [-Symbol Sym])))
+ (for-syntax (only-in (types abbrev) [-Number N] [-Boolean B] [-Symbol Sym])
+             (only-in (rep type-rep) make-HashtableTop make-MPairTop make-BoxTop make-VectorTop)))
 
 [raise (Univ . -> . (Un))]
+[raise-syntax-error (cl->* 
+                     (-> (Un (-val #f) -Symbol)
+                               -String
+                               (Un))
+                     (-> (Un (-val #f) -Symbol)
+                               -String
+                               Univ
+                               (Un))
+                     (-> (Un (-val #f) -Symbol)
+                               -String
+                               Univ
+                               Univ
+                               (Un)))]
 
 [car   (-poly (a b) 
               (cl->*
@@ -25,38 +41,48 @@
                (->* (list (-lst a)) (-lst a))))]
 
 [cadr (-poly (a b c)
-             (cl-> [((-pair a (-pair b c))) b]
-                   [((-lst a)) a]))]
-[caddr  (-poly (a) (-> (-lst a) a))]
+             (cl->* [->acc (list (-pair a (-pair b c))) b (list -car -cdr)]
+                    [->  (-lst a) a]))]
+[cddr  (-poly (a b c)
+              (cl->* [->acc (list (-pair a (-pair b c))) c (list -cdr -cdr)]
+                     [-> (-lst a) (-lst a)]))]
+
+[caddr  (-poly (a b c d)
+              (cl->* [->acc (list (-pair a (-pair b (-pair c d)))) c (list -car -cdr -cdr)]
+                     [-> (-lst a) a]))]
+[cdddr (-poly (a b c d)
+              (cl->* [->acc (list (-pair a (-pair b (-pair c d)))) d (list -cdr -cdr -cdr)]
+                     [-> (-lst a) (-lst a)]))]
+
 [cadddr (-poly (a) (-> (-lst a) a))]
-[cddr  (-poly (a) (-> (-lst a) (-lst a)))]
-[cdddr (-poly (a) (-> (-lst a) (-lst a)))]
+[cddddr (-poly (a) (-> (-lst a) (-lst a)))]
+
 
 [first (-poly (a b) 
               (cl->*
-               (->acc (list (-pair a b)) a (list -car))
+               (->acc (list (-pair a (-lst b))) a (list -car))
                (->* (list (-lst a)) a)))]
 [second (-poly (a b c)
-               (cl-> [((-pair a (-pair b c))) b]
-                     [((-lst a)) a]))]
+               (cl->* [->acc (list (-pair a (-pair b (-lst c)))) b (list -car -cdr)]
+                      [->* (list (-lst a)) a]))]
 [third (-poly (a b c d)
-              (cl-> [((-pair a (-pair b (-pair c d)))) c]
-                    [((-lst a)) a]))]
+              (cl->* [->acc (list (-pair a (-pair b (-pair c (-lst d))))) c (list -car -cdr -cdr)]
+                     [->* (list (-lst a)) a]))]
 [fourth (-poly (a) ((-lst a) . -> .  a))]
 [fifth  (-poly (a) ((-lst a) . -> .  a))]
 [sixth  (-poly (a) ((-lst a) . -> .  a))]
 [rest (-poly (a b) 
              (cl->*
-              (->acc (list (-pair a b)) b (list -cdr))
+              (->acc (list (-pair a (-lst b))) (-lst b) (list -cdr))
               (->* (list (-lst a)) (-lst a))))]
 
 [cons (-poly (a b)
-             (cl-> [(a (-lst a)) (-lst a)]
-                   [(a b) (-pair a b)]))]
-[*cons (-poly (a b) (cl->
+             (cl->* [->* (list a (-lst a)) (-lst a)]
+                    [->* (list a b) (-pair a b)]))]
+#;[*cons (-poly (a b) (cl->
                      [(a b) (-pair a b)]
                      [(a (-lst a)) (-lst a)]))]
-[*list? (make-pred-ty (-lst Univ))]
+#;[*list? (make-pred-ty (-lst Univ))]
 
 [null? (make-pred-ty (-val null))]
 [eof-object? (make-pred-ty (-val eof))]
@@ -92,9 +118,9 @@
 [box (-poly (a) (a . -> . (-box a)))]
 [unbox (-poly (a) ((-box a) . -> . a))]
 [set-box! (-poly (a) ((-box a) a . -> . -Void))]
-[box? (make-pred-ty (-box Univ))]
+[box? (make-pred-ty (make-BoxTop))]
 [cons? (make-pred-ty (-pair Univ Univ))]
-[pair? (make-pred-ty (-pair Univ Univ)) #;(-poly (a b) (make-pred-ty (-pair a b)))]
+[pair? (make-pred-ty (-pair Univ Univ))]
 [empty? (make-pred-ty (-val null))]
 [empty (-val null)]
 
@@ -117,9 +143,9 @@
 		 ((-lst b) b) . ->... .(-lst c))))]
 [for-each (-polydots (c a b) ((list ((list a) (b b) . ->... . Univ) (-lst a))
                               ((-lst b) b) . ->... . -Void))]
-[fold-left (-polydots (c a b) ((list ((list c a) (b b) . ->... . c) c (-lst a))
+#;[fold-left (-polydots (c a b) ((list ((list c a) (b b) . ->... . c) c (-lst a))
                                ((-lst b) b) . ->... . c))]
-[fold-right (-polydots (c a b) ((list ((list c a) (b b) . ->... . c) c (-lst a))
+#;[fold-right (-polydots (c a b) ((list ((list c a) (b b) . ->... . c) c (-lst a))
                                 ((-lst b) b) . ->... . c))]
 [foldl
  (-poly (a b c d)
@@ -136,14 +162,14 @@
                        . -> .
                        (-lst b))
                       ((a . -> . Univ) (-lst a) . -> . (-lst a))))]
-[filter-not (-poly (a b) (cl->*
-                          ((a . -> . Univ) (-lst a) . -> . (-lst a))))]
+[filter-not (-poly (a) (cl->*
+                        ((a . -> . Univ) (-lst a) . -> . (-lst a))))]
 [remove  (-poly (a) (a (-lst a) . -> . (-lst a)))]
 [remq    (-poly (a) (a (-lst a) . -> . (-lst a)))]
 [remv    (-poly (a) (a (-lst a) . -> . (-lst a)))]
 [remove* (-poly (a b) ((-lst a) (-lst a) [(a b . -> . B)] . ->opt . (-lst b)))]
-[remq*   (-poly (a b) (cl-> [((-lst a) (-lst a)) (-lst a)]))]
-[remv*   (-poly (a b) (cl-> [((-lst a) (-lst a)) (-lst a)]))]
+[remq*   (-poly (a) (cl-> [((-lst a) (-lst a)) (-lst a)]))]
+[remv*   (-poly (a) (cl-> [((-lst a) (-lst a)) (-lst a)]))]
 
 (error 
  (make-Function (list 
@@ -164,8 +190,6 @@
 [printf (->* (list -String) Univ -Void)]
 [fprintf (->* (list -Output-Port -String) Univ -Void)]
 [format (->* (list -String) Univ -String)]
-[fst (-poly (a b) (-> (-pair a b) a))]
-[snd (-poly (a b) (-> (-pair a b) b))]
 
 [sleep (N . -> . -Void)]
 
@@ -208,6 +232,8 @@
 [char-downcase (-> -Char -Char)]
 [char-titlecase (-> -Char -Char)]
 [char-foldcase (-> -Char -Char)]
+[char->integer (-> -Char -Nat)]
+[integer->char (-> -Nat -Char)]
 
 [string-normalize-nfd (-> -String -String)]
 [string-normalize-nfkd (-> -String -String)]
@@ -330,14 +356,14 @@
 [keyword->string (-Keyword . -> . -String)]
 
 ;; vectors
-[vector? (make-pred-ty (-vec Univ))]
+[vector? (make-pred-ty (make-VectorTop))]
 
 [vector->list (-poly (a) (-> (-vec a) (-lst a)))]
 [list->vector (-poly (a) (-> (-lst a) (-vec a)))]
 [vector-length (-poly (a) ((-vec a) . -> . -Nat))]
 [vector (-poly (a) (->* (list) a (-vec a)))]
 [vector-immutable (-poly (a) (->* (list) a (-vec a)))]
-[vector->vector-immutable (-poly (a) (-> (-vec a) (-vec a)))]
+[vector->immutable-vector (-poly (a) (-> (-vec a) (-vec a)))]
 [vector-fill! (-poly (a) (-> (-vec a) a -Void))]
 ;; [vector->values no good type here]
 
@@ -363,20 +389,45 @@
 [directory-list (cl-> [() (-lst -Path)]
                       [(-Path) (-lst -Path)])]
 
+[hash? (make-pred-ty (make-HashtableTop))]
+[hash-eq? (-> (make-HashtableTop) B)]
+[hash-eqv? (-> (make-HashtableTop) B)]
+[hash-weak? (-> (make-HashtableTop) B)]
 [make-hash (-poly (a b) (-> (-HT a b)))]
 [make-hasheq (-poly (a b) (-> (-HT a b)))]
+[make-hasheqv (-poly (a b) (-> (-HT a b)))]
 [make-weak-hash (-poly (a b) (-> (-HT a b)))]
 [make-weak-hasheq (-poly (a b) (-> (-HT a b)))]
+[make-weak-hasheqv (-poly (a b) (-> (-HT a b)))]
+[make-immutable-hash (-poly (a b) (-> (-lst (-pair a b)) (-HT a b)))]
+[make-immutable-hasheq (-poly (a b) (-> (-lst (-pair a b)) (-HT a b)))]
+[make-immutable-hasheqv (-poly (a b) (-> (-lst (-pair a b)) (-HT a b)))]
 
+[hash-set (-poly (a b) ((-HT a b) a b . -> . (-HT a b)))]
 [hash-set! (-poly (a b) ((-HT a b) a b . -> . -Void))]
 [hash-map (-poly (a b c) ((-HT a b) (a b . -> . c) . -> . (-lst c)))]
 [hash-ref (-poly (a b c)
                  (cl-> [((-HT a b) a) b]
-                       [((-HT a b) a (-> c)) (Un b c)]
-                       [((-HT a b) a c) (Un b c)]))]
+                       [((-HT a b) a (-> c)) (Un b c)]))]
 [hash-ref! (-poly (a b)
-                  (cl-> [((-HT a b) a (-> b)) b]
-                        [((-HT a b) a b) b]))]
+                  (cl-> [((-HT a b) a (-> b)) b]))]
+[hash-has-key? (-poly (a b) (-> (-HT a b) a B))]
+[hash-update! (-poly (a b)
+                     (cl-> [((-HT a b) a (-> b b)) -Void]
+                           [((-HT a b) a (-> b b) (-> b)) -Void]))]
+[hash-update (-poly (a b)
+                    (cl-> [((-HT a b) a (-> b b)) (-HT a b)]
+                          [((-HT a b) a (-> b b) (-> b)) (-HT a b)]))]
+[hash-remove (-poly (a b) ((-HT a b) a . -> . (-HT a b)))]
+[hash-remove! (-poly (a b) ((-HT a b) a . -> . -Void))]
+[hash-map (-poly (a b c) ((-HT a b) (a b . -> . c) . -> . (-lst c)))]
+[hash-for-each (-poly (a b c) (-> (-HT a b) (-> a b c) -Void))]
+[hash-count (-poly (a b) (-> (-HT a b) -Nat))]
+[hash-copy (-poly (a b) (-> (-HT a b) (-HT a b)))]
+[eq-hash-code (-poly (a) (-> a -Integer))]
+[eqv-hash-code (-poly (a) (-> a -Integer))]
+[equal-hash-code (-poly (a) (-> a -Integer))]
+[equal-secondary-hash-code (-poly (a) (-> a -Integer))]
 [hash-iterate-first (-poly (a b)
                            ((-HT a b) . -> . (Un (-val #f) -Integer)))]
 [hash-iterate-next (-poly (a b)
@@ -426,9 +477,6 @@
 
 [make-directory (-> -Path -Void)]
 
-[hash-for-each (-poly (a b c)
-                      (-> (-HT a b) (-> a b c) -Void))]
-
 [delete-file (-> -Pathlike -Void)]
 [make-namespace (->opt [(Un (-val 'empty) (-val 'initial))] -Namespace)]
 [make-base-namespace (-> -Namespace)]
@@ -472,7 +520,7 @@
 
 [syntax->datum (cl->* (-> Any-Syntax -Sexp)
                       (-> (-Syntax Univ) Univ))]
-[syntax-e (-poly (a) (-> (-Syntax a) a))]
+[syntax-e (-poly (a) (->acc (list (-Syntax a)) a (list -syntax-e)))]
 [syntax-original? (-poly (a) (-> (-Syntax a) B))]
 [identifier? (make-pred-ty (-Syntax Sym))]
 [syntax? (make-pred-ty (-Syntax Univ))]
@@ -602,6 +650,7 @@
 
 ;; unsafe
 
+[unsafe-vector-ref (-poly (a) ((-vec a) -Nat . -> . a))]
 [unsafe-vector-length (-poly (a) ((-vec a) . -> . -Nat))]
 [unsafe-car (-poly (a b) 
               (cl->*

@@ -1,3 +1,4 @@
+
 #lang scheme
 
 (require htdp/error)
@@ -70,6 +71,14 @@
     [(symbol? x) (symbol->string x)]
     [else (error 'on-key (format "Unknown event: ~a" x))]))
 
+;; KeyEvent% -> String
+(define (key-release->parts e)
+  (define x (send e get-key-release-code))
+  (cond
+    [(char? x) (string x)]
+    [(symbol? x) (symbol->string x)]
+    [else (error 'on-key (format "Unknown event: ~a" x))]))
+
 ;; -----------------------------------------------------------------------------
 ;; Any -> Symbol 
 (define (name-of draw tag)
@@ -84,6 +93,7 @@
     [(string? x) true]
     [(symbol? x) true]
     [(number? x) true]
+    [(boolean? x) true]
     [(char? x) true]
     [(pair? x) (and (list? x) (andmap sexp? x))]
     [else false]))

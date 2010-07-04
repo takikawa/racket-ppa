@@ -771,7 +771,7 @@ WARNING: printf is rebound in the body of the unit to always
     (define/private (get-font)
       (let* ([style-list (get-style-list)]
              [std (or (send style-list find-named-style "Standard")
-                      (send style-list find-named-style "Basic"))])
+                      (send style-list basic-style))])
         (send std get-font)))
     
     (super-new)))
@@ -1758,6 +1758,9 @@ WARNING: printf is rebound in the body of the unit to always
 (define clever-file-format-mixin
   (mixin ((class->interface text%)) (clever-file-format<%>)
     (inherit get-file-format set-file-format find-first-snip)
+
+    ;; all-string-snips : -> boolean
+    ;; returns #t when it is safe to save this file in 'text mode.
     (define/private (all-string-snips)
       (let loop ([s (find-first-snip)])
         (cond
@@ -1765,6 +1768,7 @@ WARNING: printf is rebound in the body of the unit to always
           [(is-a? s string-snip%)
            (loop (send s next))]
           [else #f])))
+    
     (define/augment (on-save-file name format)
       (let ([all-strings? (all-string-snips)])
         (cond
@@ -2391,13 +2395,13 @@ WARNING: printf is rebound in the body of the unit to always
                    (let ([style-list (get-style-list)])
                      (or (send style-list find-named-style sd)
                          (send style-list find-named-style "Standard")
-                         (send style-list find-named-style "Basic")))]
+                         (send style-list basic-style)))]
                   [sd
                    (let* ([style-list (get-style-list)] 
                           [std (send style-list find-named-style "Standard")])
                      (if std
                          (send style-list find-or-create-style std sd)
-                         (let ([basic (send style-list find-named-style "Basic")])
+                         (let ([basic (send style-list basic-style)])
                            (send style-list find-or-create-style basic sd))))]))]
              [out-style (add-standard (get-out-style-delta))]
              [err-style (add-standard (get-err-style-delta))]

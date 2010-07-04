@@ -22,6 +22,10 @@
          opt->*
          unconstrained-domain->)
 
+(define-struct contracted-function (proc ctc)
+  #:property prop:procedure 0
+  #:property prop:contracted 1)
+
 (define-syntax (unconstrained-domain-> stx)
   (syntax-case stx ()
     [(_ rngs ...)
@@ -30,22 +34,24 @@
                    [(p-app-x ...) (generate-temporaries #'(rngs ...))]
                    [(res-x ...) (generate-temporaries #'(rngs ...))])
        #'(let ([rngs-x (coerce-contract 'unconstrained-domain-> rngs)] ...)
-           (let ([proj-x ((proj-get rngs-x) rngs-x)] ...)
-             (make-proj-contract
-              (build-compound-type-name 'unconstrained-domain-> ((name-get rngs-x) rngs-x) ...)
-              (λ (pos-blame neg-blame src-info orig-str positive-position?)
-                (let ([p-app-x (proj-x pos-blame neg-blame src-info orig-str positive-position?)] ...)
-                  (λ (val)
-                    (if (procedure? val)
-                        (λ args
-                          (let-values ([(res-x ...) (apply val args)])
-                            (values (p-app-x res-x) ...)))
-                        (raise-contract-error val
-                                              src-info
-                                              pos-blame
-                                              orig-str
-                                              "expected a procedure")))))
-              procedure?))))]))
+           (let ([proj-x (contract-projection rngs-x)] ...)
+             (define ctc
+               (make-contract
+                #:name
+                (build-compound-type-name 'unconstrained-domain-> (contract-name rngs-x) ...)
+                #:projection
+                (λ (blame)
+                  (let ([p-app-x (proj-x blame)] ...)
+                    (λ (val)
+                      (if (procedure? val)
+                          (make-contracted-function
+                           (λ args
+                             (let-values ([(res-x ...) (apply val args)])
+                               (values (p-app-x res-x) ...)))
+                           ctc)
+                          (raise-blame-error blame val "expected a procedure")))))
+                #:first-order procedure?))
+             ctc)))]))
 
 (define (build--> name doms doms-rest rngs kwds quoted-kwds rng-any? func)
   (let ([doms/c (map (λ (dom) (coerce-contract name dom)) doms)]
@@ -64,64 +70,67 @@
 ;;        and it produces a wrapper-making function.
 (define-struct -> (rng-any? doms dom-rest rngs kwds quoted-kwds func)
   #:omit-define-syntaxes
-  #:property proj-prop
-  (λ (ctc) 
-    (let* ([doms/c (map (λ (x) ((proj-get x) x)) 
-                        (if (->-dom-rest ctc)
+  #:property prop:contract
+  (build-contract-property
+   #:projection
+   (λ (ctc) 
+      (let* ([doms/c (map contract-projection
+                          (if (->-dom-rest ctc)
                             (append (->-doms ctc) (list (->-dom-rest ctc)))
                             (->-doms ctc)))]
-           [rngs/c (map (λ (x) ((proj-get x) x)) (->-rngs ctc))]
-           [kwds/c (map (λ (x) ((proj-get x) x)) (->-kwds ctc))]
-           [mandatory-keywords (->-quoted-kwds ctc)]
-           [func (->-func ctc)]
-           [dom-length (length (->-doms ctc))]
-           [has-rest? (and (->-dom-rest ctc) #t)])
-      (lambda (pos-blame neg-blame src-info orig-str positive-position?)
-        (let ([partial-doms (map (λ (dom) (dom neg-blame pos-blame src-info orig-str (not positive-position?)))
-                                 doms/c)]
-              [partial-ranges (map (λ (rng) (rng pos-blame neg-blame src-info orig-str positive-position?))
-                                   rngs/c)]
-              [partial-kwds (map (λ (kwd) (kwd neg-blame pos-blame src-info orig-str (not positive-position?)))
-                                 kwds/c)])
-          (apply func
-                 (λ (val)
-                   (if has-rest?
-                       (check-procedure/more val dom-length '() mandatory-keywords src-info pos-blame orig-str)
-                       (check-procedure val dom-length 0 '() mandatory-keywords src-info pos-blame orig-str)))
-                 (append partial-doms partial-ranges partial-kwds))))))
-   
-  #:property name-prop
-  (λ (ctc) (single-arrow-name-maker 
-            (->-doms ctc)
-            (->-dom-rest ctc)
-            (->-kwds ctc)
-            (->-quoted-kwds ctc)
-            (->-rng-any? ctc)
-            (->-rngs ctc)))
-  #:property first-order-prop
-  (λ (ctc)
-    (let ([l (length (->-doms ctc))])
-      (if (->-dom-rest ctc)
+             [rngs/c (map contract-projection (->-rngs ctc))]
+             [kwds/c (map contract-projection (->-kwds ctc))]
+             [mandatory-keywords (->-quoted-kwds ctc)]
+             [func (->-func ctc)]
+             [dom-length (length (->-doms ctc))]
+             [has-rest? (and (->-dom-rest ctc) #t)])
+        (lambda (blame)
+          (let ([partial-doms (map (λ (dom) (dom (blame-swap blame)))
+                                   doms/c)]
+                [partial-ranges (map (λ (rng) (rng blame))
+                                     rngs/c)]
+                [partial-kwds (map (λ (kwd) (kwd (blame-swap blame)))
+                                   kwds/c)])
+            (apply func
+                   (λ (val)
+                      (if has-rest?
+                        (check-procedure/more val dom-length '() mandatory-keywords blame)
+                        (check-procedure val dom-length 0 '() mandatory-keywords blame)))
+                   ctc
+                   (append partial-doms partial-ranges partial-kwds))))))
+
+   #:name
+   (λ (ctc) (single-arrow-name-maker 
+             (->-doms ctc)
+             (->-dom-rest ctc)
+             (->-kwds ctc)
+             (->-quoted-kwds ctc)
+             (->-rng-any? ctc)
+             (->-rngs ctc)))
+   #:first-order
+   (λ (ctc)
+      (let ([l (length (->-doms ctc))])
+        (if (->-dom-rest ctc)
           (λ (x)
-            (and (procedure? x) 
-                 (procedure-accepts-and-more? x l)))
+             (and (procedure? x) 
+                  (procedure-accepts-and-more? x l)))
           (λ (x)
-            (and (procedure? x) 
-                 (procedure-arity-includes? x l)
-                 (no-mandatory-keywords? x))))))
-  #:property stronger-prop
-  (λ (this that)
-    (and (->? that)
-         (= (length (->-doms that))
-            (length (->-doms this)))
-         (andmap contract-stronger?
-                 (->-doms that)
-                 (->-doms this))
-         (= (length (->-rngs that))
-            (length (->-rngs this)))
-         (andmap contract-stronger?
-                 (->-rngs this) 
-                 (->-rngs that)))))
+             (and (procedure? x) 
+                  (procedure-arity-includes? x l)
+                  (no-mandatory-keywords? x))))))
+   #:stronger
+   (λ (this that)
+      (and (->? that)
+           (= (length (->-doms that))
+              (length (->-doms this)))
+           (andmap contract-stronger?
+                   (->-doms that)
+                   (->-doms this))
+           (= (length (->-rngs that))
+              (length (->-rngs this)))
+           (andmap contract-stronger?
+                   (->-rngs this) 
+                   (->-rngs that))))))
 
 (define (single-arrow-name-maker doms/c doms-rest kwds/c kwds rng-any? rngs)
   (cond
@@ -263,10 +272,10 @@
                     [use-any? use-any?])
         (with-syntax ([outer-lambda
                        (syntax
-                        (lambda (chk dom-names ... rng-names ... kwd-names ...)
+                        (lambda (chk ctc dom-names ... rng-names ... kwd-names ...)
                           (lambda (val)
                             (chk val)
-                            inner-lambda)))])
+                            (make-contracted-function inner-lambda ctc))))])
           (values
            (syntax (build--> '->
                              (list dom-ctcs ...)
@@ -323,10 +332,10 @@
                                                    (syntax (lambda args body))))])
                       (with-syntax ([outer-lambda 
                                      (syntax
-                                      (lambda (chk dom-x ... rst-x rng-x ... dom-kwd-ctc-id ...)
+                                      (lambda (chk ctc dom-x ... rst-x rng-x ... dom-kwd-ctc-id ...)
                                         (lambda (val)
                                           (chk val)
-                                          inner-lambda)))])
+                                          (make-contracted-function inner-lambda ctc))))])
                         (values (syntax (build--> '->*
                                                   (list doms ...)
                                                   rst
@@ -353,10 +362,10 @@
                                                  (syntax (lambda args body))))])
                     (with-syntax ([outer-lambda 
                                    (syntax
-                                    (lambda (chk dom-x ... rst-x ignored dom-kwd-ctc-id ...)
+                                    (lambda (chk ctc dom-x ... rst-x ignored dom-kwd-ctc-id ...)
                                       (lambda (val)
                                         (chk val)
-                                        inner-lambda)))])
+                                        (make-contracted-function inner-lambda ctc))))])
                       (values (syntax (build--> '->*
                                                 (list doms ...)
                                                 rst
@@ -455,16 +464,14 @@
                                 (append partials-rngs partial)
                                 (append this-stronger-ribs stronger-ribs)))]))])
       (values
-       (with-syntax ((pos (opt/info-pos opt/info))
-                     (src-info (opt/info-src-info opt/info))
-                     (orig-str (opt/info-orig-str opt/info))
+       (with-syntax ((blame (opt/info-blame opt/info))
                      ((dom-arg ...) dom-vars)
                      ((rng-arg ...) rng-vars)
                      ((next-dom ...) next-doms)
                      (dom-len (length dom-vars))
                      ((next-rng ...) next-rngs))
          (syntax (begin
-                   (check-procedure val dom-len 0 '() '() #| keywords |# src-info pos orig-str)
+                   (check-procedure val dom-len 0 '() '() #| keywords |# blame)
                    (λ (dom-arg ...)
                      (let-values ([(rng-arg ...) (val next-dom ...)])
                        (values next-rng ...))))))
@@ -505,14 +512,12 @@
                                 (append partials-doms partial)
                                 (append this-stronger-ribs stronger-ribs)))]))])
       (values
-       (with-syntax ((pos (opt/info-pos opt/info))
-                     (src-info (opt/info-src-info opt/info))
-                     (orig-str (opt/info-orig-str opt/info))
+       (with-syntax ((blame (opt/info-blame opt/info))
                      ((dom-arg ...) dom-vars)
                      ((next-dom ...) next-doms)
                      (dom-len (length dom-vars)))
          (syntax (begin
-                   (check-procedure val dom-len 0 '() '() #|keywords|# src-info pos orig-str)
+                   (check-procedure val dom-len 0 '() '() #|keywords|# blame)
                    (λ (dom-arg ...)
                      (val next-dom ...)))))
        lifts-doms

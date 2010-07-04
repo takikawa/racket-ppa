@@ -19,10 +19,17 @@
 #ifndef SCHEME_THREADLOCAL_H
 #define SCHEME_THREADLOCAL_H
 
-#if defined(MZ_USE_PLACES) || defined(FUTURES_ENABLED)
-#  define USE_THREAD_LOCAL
+#include "mzconfig.h"
+
+# ifdef __cplusplus
+extern "C" {
+# endif
+
+#if defined(MZ_USE_PLACES) || defined(MZ_USE_FUTURES)
+# define USE_THREAD_LOCAL
 # if _MSC_VER
-#  define THREAD_LOCAL __declspec(thread)
+#  define THREAD_LOCAL /* empty */
+#  define IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS
 # elif defined(OS_X) || (defined(linux) && defined(MZ_USES_SHARED_LIB))
 #  define IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS
 #  if defined(__x86_64__) || defined(__i386__)
@@ -35,7 +42,26 @@
 # define THREAD_LOCAL /* empty */
 #endif
 
-extern void scheme_init_os_thread();
+/* Set up MZ_EXTERN for DLL build */
+#if (defined(__WIN32__) || defined(WIN32) || defined(_WIN32)) \
+    && !defined(LINK_EXTENSIONS_BY_TABLE) \
+    && !defined(SCHEME_EMBEDDED_NO_DLL)
+# define MZ_DLLIMPORT __declspec(dllimport)
+# define MZ_DLLEXPORT __declspec(dllexport)
+# ifdef __mzscheme_private__
+#  define MZ_DLLSPEC __declspec(dllexport)
+# else
+#  define MZ_DLLSPEC __declspec(dllimport)
+# endif
+#else
+# define MZ_DLLSPEC
+# define MZ_DLLIMPORT
+# define MZ_DLLEXPORT
+#endif
+
+#define MZ_EXTERN extern MZ_DLLSPEC
+
+MZ_EXTERN void scheme_init_os_thread();
 
 /* **************************************************************** */
 /* Declarations that we wish were elsewhere, but are needed here to */
@@ -77,13 +103,9 @@ typedef long objhead;
 
 /* **************************************** */
 
-#if FUTURES_ENABLED
-# include <pthread.h>
-#endif
-
 typedef struct Thread_Local_Variables {
   void **GC_variable_stack_;
-  struct NewGC *GC_;
+  struct NewGC *GC_instance_;
   unsigned long GC_gen0_alloc_page_ptr_;
   unsigned long GC_gen0_alloc_page_end_;
   void *bignum_cache_[BIGNUM_CACHE_SIZE];
@@ -133,7 +155,7 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Object *scheme_orig_stdout_port_;
   struct Scheme_Object *scheme_orig_stderr_port_;
   struct Scheme_Object *scheme_orig_stdin_port_;
-  struct fd_set *scheme_fd_set_;
+  struct mz_fd_set *scheme_fd_set_;
   struct Scheme_Custodian *new_port_cust_;
   int external_event_fd_;
   int put_external_event_fd_;
@@ -193,8 +215,8 @@ typedef struct Thread_Local_Variables {
   void *jit_future_storage_[2];
   struct Scheme_Object **scheme_current_runstack_start_;
   struct Scheme_Object **scheme_current_runstack_;
-  MZ_MARK_STACK_TYPE scheme_current_cont_mark_stack_;
-  MZ_MARK_POS_TYPE scheme_current_cont_mark_pos_;
+  long scheme_current_cont_mark_stack_;
+  long scheme_current_cont_mark_pos_;
   struct Scheme_Custodian *main_custodian_;
   struct Scheme_Custodian *last_custodian_;
   struct Scheme_Hash_Table *limited_custodians_;
@@ -215,7 +237,6 @@ typedef struct Thread_Local_Variables {
   struct Scheme_Object *recycle_cell_;
   struct Scheme_Object *maybe_recycle_cell_;
   int recycle_cc_count_;
-  mz_jmp_buf main_init_error_buf_;
   void *gmp_mem_pool_;
   unsigned long max_total_allocation_;
   unsigned long current_total_allocation_;
@@ -226,14 +247,14 @@ typedef struct Thread_Local_Variables {
   int builtin_ref_counter_;
   int env_uid_counter_;
   int scheme_overflow_count_;
-  Scheme_Object *original_pwd_;
+  struct Scheme_Object *original_pwd_;
   long scheme_hash_request_count_;
   long scheme_hash_iteration_count_;
-  Scheme_Env *initial_modules_env_;
+  struct Scheme_Env *initial_modules_env_;
   int num_initial_modules_;
-  Scheme_Object **initial_modules_;
-  Scheme_Object *initial_renames_;
-  Scheme_Bucket_Table *initial_toplevel_;
+  struct Scheme_Object **initial_modules_;
+  struct Scheme_Object *initial_renames_;
+  struct Scheme_Bucket_Table *initial_toplevel_;
   int generate_lifts_count_;
   int special_is_ok_;
   int scheme_force_port_closed_;
@@ -253,13 +274,14 @@ typedef struct Thread_Local_Variables {
   long start_this_gc_time_;
   long end_this_gc_time_;
   volatile short delayed_break_ready_;
-  Scheme_Thread *main_break_target_thread_;
+  struct Scheme_Thread *main_break_target_thread_;
   long scheme_code_page_total_;
   int locale_on_;
-  const mzchar *current_locale_name_;
+  void *current_locale_name_ptr_;
   int gensym_counter_;
-  Scheme_Object *dummy_input_port_;
-  Scheme_Object *dummy_output_port_;
+  struct Scheme_Object *dummy_input_port_;
+  struct Scheme_Object *dummy_output_port_;
+  struct Scheme_Bucket_Table *place_local_modpath_table_;
 /*KPLAKE1*/
 } Thread_Local_Variables;
 
@@ -281,9 +303,9 @@ static inline Thread_Local_Variables *scheme_get_thread_local_variables() {
   Thread_Local_Variables *x = NULL;
 #  if defined(OS_X)
 #   if defined(__x86_64__)
-  asm volatile("movq %%gs:0x8A0, %0" : "=r"(x));
+  asm volatile("movq %%gs:0x60(,%1,8), %0" : "=r"(x) : "r"(scheme_thread_local_key));
 #   else
-  asm volatile("movl %%gs:0x468, %0" : "=r"(x));
+  asm volatile("movl %%gs:0x48(,%1,4), %0" : "=r"(x) : "r"(scheme_thread_local_key));
 #   endif
 #  elif defined(linux) && defined(MZ_USES_SHARED_LIB)
 #   if defined(__x86_64__)
@@ -308,11 +330,50 @@ END_XFORM_SKIP;
 XFORM_GC_VARIABLE_STACK_THROUGH_FUNCTION;
 #  endif
 # endif
+#elif defined(IMPLEMENT_THREAD_LOCAL_VIA_PROCEDURE)
+/* Using external scheme_get_thread_local_variables() procedure */
+MZ_EXTERN Thread_Local_Variables *scheme_get_thread_local_variables();
+# ifdef MZ_XFORM
+XFORM_GC_VARIABLE_STACK_THROUGH_FUNCTION;
+# endif
+#elif defined(IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS)
+# ifdef MZ_XFORM
+START_XFORM_SKIP;
+# endif
+MZ_EXTERN Thread_Local_Variables *scheme_external_get_thread_local_variables();
+# ifdef __mzscheme_private__
+/* In the MzScheme DLL, need thread-local to be fast: */
+MZ_EXTERN unsigned long scheme_tls_delta;
+#  ifdef MZ_USE_WIN_TLS_VIA_DLL
+MZ_EXTERN int scheme_tls_index;
+#  endif
+static __inline Thread_Local_Variables **scheme_get_thread_local_variables_ptr() {
+  __asm { mov eax, FS:[0x2C]
+#  ifdef MZ_USE_WIN_TLS_VIA_DLL
+          add eax, scheme_tls_index
+#  endif
+          mov eax, [eax]
+          add eax, scheme_tls_delta }
+  /* result is in eax */
+}
+static __inline Thread_Local_Variables *scheme_get_thread_local_variables() {
+  return *scheme_get_thread_local_variables_ptr();
+}
+# else
+/* Outside the MzScheme DLL, slower thread-local is ok: */
+static __inline Thread_Local_Variables *scheme_get_thread_local_variables() {
+  return scheme_external_get_thread_local_variables();
+}
+# endif
+# ifdef MZ_XFORM
+END_XFORM_SKIP;
+XFORM_GC_VARIABLE_STACK_THROUGH_FUNCTION;
+# endif
 #else
 /* Using `THREAD_LOCAL' variable: */
 MZ_EXTERN THREAD_LOCAL Thread_Local_Variables scheme_thread_locals;
 # define scheme_get_thread_local_variables() (&scheme_thread_locals)
-#ifdef MZ_XFORM
+# ifdef MZ_XFORM
 XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 # endif
 #endif
@@ -326,7 +387,7 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #endif
 
 #define GC_objhead_template XOA (scheme_get_thread_local_variables()->GC_objhead_template_)
-#define GC XOA (scheme_get_thread_local_variables()->GC_)
+#define GC_instance XOA (scheme_get_thread_local_variables()->GC_instance_)
 #define GC_gen0_alloc_page_ptr XOA (scheme_get_thread_local_variables()->GC_gen0_alloc_page_ptr_)
 #define GC_gen0_alloc_page_end XOA (scheme_get_thread_local_variables()->GC_gen0_alloc_page_end_)
 #define GC_variable_stack XOA (scheme_get_thread_local_variables()->GC_variable_stack_)
@@ -460,7 +521,6 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define recycle_cell XOA (scheme_get_thread_local_variables()->recycle_cell_)
 #define maybe_recycle_cell XOA (scheme_get_thread_local_variables()->maybe_recycle_cell_)
 #define recycle_cc_count XOA (scheme_get_thread_local_variables()->recycle_cc_count_)
-#define main_init_error_buf XOA (scheme_get_thread_local_variables()->main_init_error_buf_)
 #define gmp_mem_pool XOA (scheme_get_thread_local_variables()->gmp_mem_pool_)
 #define max_total_allocation XOA (scheme_get_thread_local_variables()->max_total_allocation_)
 #define current_total_allocation XOA (scheme_get_thread_local_variables()->current_total_allocation_)
@@ -501,10 +561,11 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #define main_break_target_thread XOA (scheme_get_thread_local_variables()->main_break_target_thread_)
 #define scheme_code_page_total XOA (scheme_get_thread_local_variables()->scheme_code_page_total_)
 #define locale_on XOA (scheme_get_thread_local_variables()->locale_on_)
-#define current_locale_name XOA (scheme_get_thread_local_variables()->current_locale_name_)
+#define current_locale_name_ptr XOA (scheme_get_thread_local_variables()->current_locale_name_ptr_)
 #define gensym_counter XOA (scheme_get_thread_local_variables()->gensym_counter_)
 #define dummy_input_port XOA (scheme_get_thread_local_variables()->dummy_input_port_)
 #define dummy_output_port XOA (scheme_get_thread_local_variables()->dummy_output_port_)
+#define place_local_modpath_table XOA (scheme_get_thread_local_variables()->place_local_modpath_table_)
 /*KPLAKE2*/
 
 /* **************************************** */
@@ -514,5 +575,9 @@ XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL;
 #endif
 
 /* **************************************** */
+
+# ifdef __cplusplus
+}
+# endif
 
 #endif

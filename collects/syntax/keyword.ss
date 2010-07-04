@@ -1,5 +1,5 @@
 #lang scheme/base
-(require scheme/contract
+(require scheme/contract/base
          scheme/dict
          "private/keyword.ss")
 
@@ -58,4 +58,5 @@
  [check-expression checker]
  [check-identifier checker]
  [check-stx-string checker]
+ [check-stx-boolean checker]
  [check-stx-listof (-> checker checker)])

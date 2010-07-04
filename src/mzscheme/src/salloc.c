@@ -55,8 +55,13 @@ THREAD_LOCAL_DECL(static int *dgc_count);
 THREAD_LOCAL_DECL(static int dgc_size);
 
 #ifdef USE_THREAD_LOCAL
-# ifdef IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS
+# if defined(IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS)
 pthread_key_t scheme_thread_local_key;
+# elif defined(IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS)
+unsigned long scheme_tls_delta;
+int scheme_tls_index;
+# elif defined(IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS_FUNC)
+DWORD scheme_thread_local_key;
 # else
 SHARED_OK THREAD_LOCAL Thread_Local_Variables scheme_thread_locals;
 # endif
@@ -197,13 +202,23 @@ static int do_main_stack_setup(int no_auto_statics, Scheme_Nested_Main _main, vo
   return return_code;
 }
 
-#if defined(IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS) && defined(INLINE_GETSPECIFIC_ASSEMBLY_CODE)
-static void macosx_get_thread_local_key_for_assembly_code() {
+#if defined(IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS)
+/* This allows for places gc unit tests to switch the Thread_Local_Variables and simulate places */
+void scheme_set_thread_local_variables(Thread_Local_Variables *tlvs) XFORM_SKIP_PROC
+{
+  pthread_setspecific(scheme_thread_local_key, tlvs);
+}
+#endif
+
+#if 0 && defined(IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS) && defined(INLINE_GETSPECIFIC_ASSEMBLY_CODE)
+/* This code is dsiabled */
+static void macosx_get_thread_local_key_for_assembly_code() XFORM_SKIP_PROC
+{
   /* Our [highly questionable] strategy for inlining pthread_getspecific() is taken from 
      the Go implementation (see "http://golang.org/src/libcgo/darwin_386.c").
      In brief, we assume that thread-local variables are going to be
      accessed via the gs segment register at offset 0x48 (i386) or 0x60 (x86_64),
-     and we also hardwire the thread-local key 0x108. Here we have to try to get
+     and we also hardwire the thread-local key 0x110. Here we have to try to get
      that particular key and double-check that it worked. */
   pthread_key_t unwanted[16];
   int num_unwanted = 0;
@@ -213,11 +228,11 @@ static void macosx_get_thread_local_key_for_assembly_code() {
       fprintf(stderr, "pthread key create failed\n");
       abort();
     }
-    if (scheme_thread_local_key == 0x108)
+    if (scheme_thread_local_key == 0x110)
       break;
     else {
-      if (num_unwanted == 16) {
-        fprintf(stderr, "pthread key create never produced 0x108 for inline hack\n");
+      if (num_unwanted == 24) {
+        fprintf(stderr, "pthread key create never produced 0x110 for inline hack\n");
         abort();
       }
       unwanted[num_unwanted++] = scheme_thread_local_key;
@@ -236,35 +251,36 @@ static void macosx_get_thread_local_key_for_assembly_code() {
 }
 #endif
 
-void scheme_setup_thread_local_key_if_needed() {
+#ifdef IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS
+void scheme_register_tls_space(void *tls_space, int tls_index) XFORM_SKIP_PROC
+{
+  scheme_tls_delta = (unsigned long)tls_space;
+  scheme_tls_index = tls_index;
+}
+Thread_Local_Variables *scheme_external_get_thread_local_variables() XFORM_SKIP_PROC
+{
+  return scheme_get_thread_local_variables();
+}
+#endif
+
+void scheme_setup_thread_local_key_if_needed() XFORM_SKIP_PROC
+{
 #ifdef IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS
-# ifdef INLINE_GETSPECIFIC_ASSEMBLY_CODE
-#  if defined(linux)
-    scheme_thread_local_key = 0;
-    if (pthread_key_create(&scheme_thread_local_key, NULL)) {
-      fprintf(stderr, "pthread key create failed\n");
-      abort();
-    }
-    /*
-    if (scheme_thread_local_key != 0) {
-      fprintf(stderr, "pthread getspecific inline hack failed scheme_thread_local_key %i\n", scheme_thread_local_key);
-      abort();
-    }
-    */
-    pthread_setspecific(scheme_thread_local_key, (void *)0xaced);
-    if (scheme_get_thread_local_variables() != (Thread_Local_Variables *)0xaced) {
-      fprintf(stderr, "pthread getspecific inline hack failed to return set data\n");
-      abort();
-    }
-#  else
-    macosx_get_thread_local_key_for_assembly_code();
-#  endif
-# else
-    if (pthread_key_create(&scheme_thread_local_key, NULL)) {
-      fprintf(stderr, "pthread key create failed\n");
-      abort();
-    }
-# endif
+  scheme_thread_local_key = 0;
+  if (pthread_key_create(&scheme_thread_local_key, NULL)) {
+    fprintf(stderr, "pthread key create failed\n");
+    abort();
+  }
+#endif
+#ifdef IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS
+  {
+    void **base;
+
+    __asm { mov ecx, FS:[0x2C]
+            mov base, ecx }
+    scheme_tls_delta -= (unsigned long)base[scheme_tls_index];
+    scheme_tls_index *= sizeof(void*);
+  }
 #endif
 }
 
@@ -327,19 +343,43 @@ void* scheme_dbg_get_thread_local_variables() XFORM_SKIP_PROC {
 }
 #endif
 
-void scheme_init_os_thread() XFORM_SKIP_PROC
+void *scheme_get_os_thread_like()
 {
-#ifdef IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS
+#if defined(IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS) || defined(IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS)
+  return scheme_get_thread_local_variables();
+#else
+  return NULL;
+#endif
+}
+
+void scheme_init_os_thread_like(void *other) XFORM_SKIP_PROC
+{
+#if defined(IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS) || defined(IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS)
   Thread_Local_Variables *vars;
-  vars = (Thread_Local_Variables *)malloc(sizeof(Thread_Local_Variables));
-  memset(vars, 0, sizeof(Thread_Local_Variables));
+  if (other)
+    vars = (Thread_Local_Variables *)other;
+  else {
+    vars = (Thread_Local_Variables *)malloc(sizeof(Thread_Local_Variables));
+    memset(vars, 0, sizeof(Thread_Local_Variables));
+  }
+# ifdef IMPLEMENT_THREAD_LOCAL_VIA_PTHREADS
   pthread_setspecific(scheme_thread_local_key, vars);
+# elif defined(IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS)
+  *scheme_get_thread_local_variables_ptr() = vars;
+# else
+  TlsSetValue(scheme_thread_local_key, vars);
+# endif
 #endif
 #ifdef OS_X
 # ifdef MZ_PRECISE_GC
   GC_attach_current_thread_exceptions_to_handler();
 # endif
 #endif
+}
+
+void scheme_init_os_thread() XFORM_SKIP_PROC
+{
+  return scheme_init_os_thread_like(NULL);
 }
 
 /************************************************************************/

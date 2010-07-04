@@ -89,6 +89,8 @@
                                (finder:default-filters)))
 (application:current-app-name (string-constant drscheme))
 
+(preferences:set-default 'drscheme:logger-gui-tab-panel-level 0 (λ (x) (and (exact-integer? x) (<= 0 x 5)))) 
+
 (preferences:set-default 'drscheme:saved-bug-reports 
                          '() 
                          (λ (ll) 
@@ -152,6 +154,11 @@
                          (λ (x) (and (list? x) 
                                      (andmap (λ (x) (or (path? x) (drscheme:frame:planet-spec? x)))
                                              x))))
+(preferences:set-default 'drscheme:install-plt-dialog
+                         '(#t "" "") ; url-selected?, url string, file string
+                         (λ (x) (and (list? x) (= 3 (length x))
+                                     (boolean? (car x))
+                                     (andmap string? (cdr x)))))
 
 (preferences:set-un/marshall 
  'drscheme:user-defined-keybindings
@@ -556,6 +563,19 @@
                       (let ([frame (find-frame item)])
                         (when frame
                           (send frame next-tab))))])
+     (let ([frame (find-frame windows-menu)])
+       (unless (or (not frame) (= 1 (send frame get-tab-count)))
+         (for ([i (in-range 0 (send frame get-tab-count))]
+               #:when (< i 9))
+           (new menu-item% 
+                [parent windows-menu]
+                [label (format (string-constant tab-i)
+                               (+ i 1)
+                               (send frame get-tab-filename i))]
+                [shortcut (integer->char (+ (char->integer #\1) i))]
+                [callback
+                 (λ (a b)
+                   (send frame change-to-nth-tab i))]))))
      (new separator-menu-item% [parent windows-menu]))))
 
 ;; Check for any files lost last time.

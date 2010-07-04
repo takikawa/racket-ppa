@@ -185,7 +185,12 @@ module browser threading seems wrong.
                                  (let ([kind (filename->kind fn)])
                                    (cond
                                      [kind
-                                      (send (send snip get-bitmap) save-file fn kind)]
+                                      (cond
+                                        [(or (is-a? snip image-snip%)
+                                             (is-a? snip cache-image-snip%))
+                                         (send (send snip get-bitmap) save-file fn kind)]
+                                        [else
+                                         (image-core:save-image-as-bitmap snip fn kind)])]
                                      [else
                                       (message-box 
                                        (string-constant drscheme)
@@ -1523,7 +1528,9 @@ module browser threading seems wrong.
                             [parent logger-panel]
                             [callback
                              (λ (tp evt)
+                               (preferences:set 'drscheme:logger-gui-tab-panel-level (send logger-gui-tab-panel get-selection))
                                (update-logger-window #f))]))
+                 (send logger-gui-tab-panel set-selection (preferences:get 'drscheme:logger-gui-tab-panel-level))
                  (new-logger-text)
                  (set! logger-gui-canvas 
                        (new editor-canvas% [parent logger-gui-tab-panel] [editor logger-gui-text]))
@@ -2080,13 +2087,28 @@ module browser threading seems wrong.
             (unless (equal? label (send tabs-panel get-item-label (send tab get-i)))
               (send tabs-panel set-item-label (send tab get-i) label))))
         
+        (define/public (get-tab-filename i)
+          (get-defs-tab-filename (send (list-ref tabs i) get-defs)))
+        
         (define/private (get-defs-tab-label defs tab)
-          (let ([fn (send defs get-filename)])
-            (add-modified-flag 
+          (let ([fn (send defs get-filename)]
+                [i-prefix (or (for/or ([i (in-list tabs)]
+                                       [n (in-naturals 1)]
+                                       #:when (<= n 9))
+                                (and (eq? i tab)
+                                     (format "~a: " n)))
+                              "")])
+            (add-modified-flag
              defs
-             (if fn
-                 (get-tab-label-from-filename fn)
-                 (send defs get-filename/untitled-name)))))
+             (string-append
+              i-prefix
+              (get-defs-tab-filename defs)))))
+        
+        (define/private (get-defs-tab-filename defs)
+          (let ([fn (send defs get-filename)])
+            (if fn
+                (get-tab-label-from-filename fn)
+                (send defs get-filename/untitled-name))))
         
         (define/private (get-tab-label-from-filename fn)
           (let* ([take-n
@@ -2143,11 +2165,13 @@ module browser threading seems wrong.
               string))
         
         (define/private (get-save-diamond-prefix)
-          (let ([candidate-prefixes (list 
-                                     (case (system-type)
-                                       [(windows) "• "]
-                                       [else "◆ "])
-                                     "* ")])
+          (let ([candidate-prefixes 
+                 ;; be sure asterisk is at the end of each list,
+                 ;; since that's a relatively safe character
+                 (case (system-type)
+                   [(windows) '("• " "★ " "◆ " "* ")]
+                   [(unix) '("★ " "◆ " "* ")]
+                   [else '("◆ " "★ " "* ")])])
             (ormap
              (lambda (candidate)
                (and (andmap (λ (x) (send normal-control-font screen-glyph-exists? x #t))
@@ -2909,7 +2933,8 @@ module browser threading seems wrong.
         (define/public (open-in-new-tab filename)
           (create-new-tab filename))
         
-        (define/private (change-to-nth-tab n)
+        (define/public (get-tab-count) (length tabs))
+        (define/public (change-to-nth-tab n)
           (unless (< n (length tabs))
             (error 'change-to-nth-tab "number too big ~s" n))
           (change-to-tab (list-ref tabs n)))
@@ -3222,7 +3247,7 @@ module browser threading seems wrong.
                  [lang (drscheme:language-configuration:language-settings-language lang/config)]
                  [strs (send lang get-language-position)]
                  [can-browse?
-                  (or (regexp-match #rx"Module" (last strs))
+                  (or (is-a? lang drscheme:module-language:module-language<%>)
                       (ormap (λ (x) (regexp-match #rx"PLT" x))
                              strs))])
             (unless can-browse?

@@ -43,7 +43,7 @@
 
 ;; events->token-generator : (list-of event) -> (-> token)
 (define (events->token-generator events)
-  (let ([pos 0])
+  (let ([pos 1])
     (lambda ()
       (define sig+val (car events))
       (set! events (cdr events))
@@ -64,7 +64,7 @@
   (define events null)
   (define counter 0)
   (define (add! x y)
-    (set! events (cons (cons x y) events)))
+    (set! events (cons (cons (signal->symbol x) y) events)))
   (define add!/check
     (let ([limit (trace-macro-limit)]
           [handler (trace-limit-handler)])
@@ -115,6 +115,7 @@
          (begin
            (emit 'top-non-begin)
            (let ([e (expand-syntax e1)])
+             ;; Must set to void to avoid catching DrScheme's annotations...
              (parameterize ((current-expand-observe void))
                (eval-compile-time-part e))
              e))]))

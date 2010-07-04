@@ -42,7 +42,7 @@
 
 #include "schpriv.h"
 #include "schmach.h"
-#ifdef FUTURES_ENABLED
+#ifdef MZ_USE_FUTURES
 # include "future.h"
 #endif
 #ifdef MZ_USE_DWARF_LIBUNWIND
@@ -166,7 +166,7 @@ SHARED_OK static void *struct_proc_extract_code;
 SHARED_OK static void *bad_app_vals_target;
 SHARED_OK static void *app_values_slow_code, *app_values_multi_slow_code, *app_values_tail_slow_code;
 SHARED_OK static void *finish_tail_call_code, *finish_tail_call_fixup_code;
-SHARED_OK static void *module_run_start_code, *module_start_start_code;
+SHARED_OK static void *module_run_start_code, *module_exprun_start_code, *module_start_start_code;
 SHARED_OK static void *box_flonum_from_stack_code;
 SHARED_OK static void *fl1_fail_code, *fl2rr_fail_code[2], *fl2fr_fail_code[2], *fl2rf_fail_code[2];
 
@@ -2570,7 +2570,7 @@ extern int g_print_prims;
 #include "jit_ts.c"
 
 /* Support for intercepting direct calls to primitives: */
-#ifdef FUTURES_ENABLED
+#ifdef MZ_USE_FUTURES
 # define mz_prepare_direct_prim(n) mz_prepare(n)
 # define mz_finishr_direct_prim(reg, proc) (jit_pusharg_p(reg), (void)mz_finish(proc))
 # define mz_direct_only(p) /* skip this arg, so that total count <= 3 args */
@@ -2689,7 +2689,7 @@ static int generate_pause_for_gc_and_retry(mz_jit_state *jitter,
                                            int gc_reg, /* must not be JIT_R1 */
                                            GC_CAN_IGNORE jit_insn *refagain)
 {
-#ifdef FUTURES_ENABLED
+#ifdef MZ_USE_FUTURES
   GC_CAN_IGNORE jit_insn *refslow = 0, *refpause;
   int i;
 
@@ -3463,6 +3463,12 @@ static int generate_self_tail_call(Scheme_Object *rator, mz_jit_state *jitter, i
   mz_patch_branch(refslow);
   __END_TINY_OR_SHORT_JUMPS__(jmp_tiny, jmp_short);
 
+  generate_pause_for_gc_and_retry(jitter,
+                                  0,  /* in short jumps */
+                                  JIT_R0, /* expose R0 to GC */
+                                  refagain); /* retry code pointer */
+  CHECK_LIMIT();
+
   jitter->flostack_offset = offset;
   jitter->flostack_space = space;
 
@@ -3544,10 +3550,6 @@ static int generate_self_tail_call(Scheme_Object *rator, mz_jit_state *jitter, i
 
   mz_flostack_restore(jitter, 0, 0, 1, 1);
 
-  generate_pause_for_gc_and_retry(jitter,
-                                  0,  /* in short jumps */
-                                  JIT_R0, /* expose R0 to GC */
-                                  refagain); /* retry code pointer */
   CHECK_LIMIT();
 
   if (args_already_in_place) {
@@ -3958,7 +3960,7 @@ static int generate_app(Scheme_App_Rec *app, Scheme_Object **alt_rands, int num_
       int directly;
       jitter->unbox++;
       if (can_unbox_inline(arg, 5, JIT_FPR_NUM-1, 0))
-        directly = 1;
+        directly = 2;
       else if (can_unbox_directly(arg))
         directly = 1;
       else
@@ -4207,7 +4209,7 @@ static int is_unboxing_immediate(Scheme_Object *obj, int unsafely)
 }
 
 static int can_unbox_inline(Scheme_Object *obj, int fuel, int regs, int unsafely)
-/* Assuming that `arg' is unsafely assumed to produce a flonum, can we
+/* Assuming that `arg' is [unsafely] assumed to produce a flonum, can we
    just unbox it without using more than `regs' registers? There
    cannot be any errors or function calls, unless we've specifically
    instrumented them to save/pop floating-point values before
@@ -4255,35 +4257,51 @@ static int can_unbox_directly(Scheme_Object *obj)
 {
   Scheme_Type t;
 
-  t = SCHEME_TYPE(obj);
-  switch (t) {
-  case scheme_application2_type:
-    {
-      Scheme_App2_Rec *app = (Scheme_App2_Rec *)obj;
-      if (is_inline_unboxable_op(app->rator, SCHEME_PRIM_IS_UNARY_INLINED, 1, 1))
-        return 1;
-      if (SCHEME_PRIMP(app->rator)
-          && (SCHEME_PRIM_PROC_FLAGS(app->rator) & SCHEME_PRIM_IS_UNARY_INLINED)) {
-        if (IS_NAMED_PRIM(app->rator, "->fl")
-            || IS_NAMED_PRIM(app->rator, "fx->fl"))
+  while (1) {
+    t = SCHEME_TYPE(obj);
+    switch (t) {
+    case scheme_application2_type:
+      {
+        Scheme_App2_Rec *app = (Scheme_App2_Rec *)obj;
+        if (is_inline_unboxable_op(app->rator, SCHEME_PRIM_IS_UNARY_INLINED, 1, 1))
           return 1;
+        if (SCHEME_PRIMP(app->rator)
+            && (SCHEME_PRIM_PROC_FLAGS(app->rator) & SCHEME_PRIM_IS_UNARY_INLINED)) {
+          if (IS_NAMED_PRIM(app->rator, "->fl")
+              || IS_NAMED_PRIM(app->rator, "fx->fl"))
+            return 1;
+        }
+        return 0;
       }
+      break;
+    case scheme_application3_type:
+      {
+        Scheme_App3_Rec *app = (Scheme_App3_Rec *)obj;
+        if (is_inline_unboxable_op(app->rator, SCHEME_PRIM_IS_BINARY_INLINED, 1, 1))
+          return 1;
+        if (SCHEME_PRIMP(app->rator)
+            && (SCHEME_PRIM_PROC_FLAGS(app->rator) & SCHEME_PRIM_IS_BINARY_INLINED)) {
+          if (IS_NAMED_PRIM(app->rator, "flvector-ref")) return 1;
+        }
+        return 0;
+      }    
+      break;
+    case scheme_let_value_type:
+      obj = ((Scheme_Let_Value *)obj)->body;
+      break;
+    case scheme_let_one_type:
+      obj = ((Scheme_Let_One *)obj)->body;
+      break;
+    case scheme_let_void_type:
+      obj = ((Scheme_Let_Void *)obj)->body;
+      break;
+    case scheme_letrec_type:
+      obj = ((Scheme_Letrec *)obj)->body;
+      break;
+    default:
+      return 0;
     }
-    break;
-  case scheme_application3_type:
-    {
-      Scheme_App3_Rec *app = (Scheme_App3_Rec *)obj;
-      if (is_inline_unboxable_op(app->rator, SCHEME_PRIM_IS_BINARY_INLINED, 1, 1))
-        return 1;
-      if (SCHEME_PRIMP(app->rator)
-          && (SCHEME_PRIM_PROC_FLAGS(app->rator) & SCHEME_PRIM_IS_BINARY_INLINED)) {
-        if (IS_NAMED_PRIM(app->rator, "flvector-ref")) return 1;
-      }
-    }    
-    break;
   }
-
-  return 0;
 }
 
 static jit_insn *generate_arith_slow_path(mz_jit_state *jitter, Scheme_Object *rator, 
@@ -4693,12 +4711,18 @@ static int generate_double_arith(mz_jit_state *jitter, Scheme_Object *rator,
         mz_rs_sync(); /* needed if arguments were unboxed */
         generate_alloc_double(jitter, 0);
         CHECK_LIMIT();
-#if defined(MZ_USE_JIT_I386)
+ #if defined(MZ_USE_JIT_I386)
         if (need_post_pop)
           FSTPr(0);
 #endif
       } else if (unboxed_result) {
         jitter->unbox_depth++;
+ #if defined(MZ_USE_JIT_I386)
+        if (need_post_pop) {
+          FXCHr(1);
+          FSTPr(0);
+        }
+#endif
       }
     } else {
       /* The "anti" variants below invert the branch. Unlike the "un" 
@@ -4901,11 +4925,11 @@ static int generate_arith(mz_jit_state *jitter, Scheme_Object *rator, Scheme_Obj
     }
 
     if (inlined_flonum1)
-      can_direct1 = 1;
+      can_direct1 = 2;
     else
       can_direct1 = can_unbox_directly(rand);
     if (inlined_flonum2)
-      can_direct2 = 1;
+      can_direct2 = 2;
     else 
       can_direct2 = can_unbox_directly(rand2);
 
@@ -5070,7 +5094,8 @@ static int generate_arith(mz_jit_state *jitter, Scheme_Object *rator, Scheme_Obj
         simple_rand = (ok_to_move_local(rand)
                        || SCHEME_INTP(rand));
         if (!simple_rand)
-          simple_rand2 = SAME_TYPE(SCHEME_TYPE(rand2), scheme_local_type);
+          simple_rand2 = (SAME_TYPE(SCHEME_TYPE(rand2), scheme_local_type)
+                          && (SCHEME_GET_LOCAL_FLAGS(rand2) != SCHEME_LOCAL_FLONUM));
         else
           simple_rand2 = 0;
       } else {
@@ -7855,16 +7880,26 @@ static int generate_inlined_nary(mz_jit_state *jitter, Scheme_App_Rec *app, int 
 	}
       }
 
-      if ((which == 3)
-          && (can_unbox_inline(app->args[3], 5, JIT_FPR_NUM-3, 0)
-              || can_unbox_directly(app->args[3])))
-        flonum_arg = 1;
-      else
+      if (which == 3) {
+        if (can_unbox_inline(app->args[3], 5, JIT_FPR_NUM-3, 0))
+          flonum_arg = 2;
+        else if (can_unbox_directly(app->args[3]))
+          flonum_arg = 1;
+        else
+          flonum_arg = 0;
+      } else
         flonum_arg = 0;
+
+# if !defined(INLINE_FP_OPS) || !defined(CAN_INLINE_ALLOC)
+      /* Error handling will have to box flonum, so don't unbox if
+         that cannot be done inline: */
+      if (flonum_arg && !unsafe)
+        flonum_arg = 0;
+# endif
 
       if (flonum_arg) {
         jitter->unbox++;
-        generate_unboxed(app->args[3], jitter, 1, 0);
+        generate_unboxed(app->args[3], jitter, flonum_arg, 0);
         --jitter->unbox;
       } else {
         generate_non_tail(app->args[3], jitter, 0, 1, 0); /* sync'd below */
@@ -8431,7 +8466,7 @@ static int generate_closure_prep(Scheme_Closure_Data *data, mz_jit_state *jitter
       if (CLOSURE_CONTENT_IS_FLONUM(data, j)) {
         pos = mz_remap(map[j]);
         jit_ldxi_p(JIT_R1, JIT_RUNSTACK, WORDS_TO_BYTES(pos));
-        generate_flonum_local_boxing(jitter, pos, map[j], JIT_R0);
+        generate_flonum_local_boxing(jitter, pos, map[j], JIT_R1);
         CHECK_LIMIT();
         retval = 1;
       }
@@ -8690,12 +8725,16 @@ static int generate_non_tail(Scheme_Object *obj, mz_jit_state *jitter,
 }
 
 static int generate_unboxed(Scheme_Object *obj, mz_jit_state *jitter, int inlined_ok, int unbox_anyway)
-/* de-sync's; if refslow, failure jumps conditionally with non-flonum in R0  */
+/* de-sync's; if refslow, failure jumps conditionally with non-flonum in R0;
+   inlined_ok == 2 => can generate directly; inlined_ok == 1 => non-tail unbox */
 {
   int saved;
 
   if (inlined_ok) {
-    return generate(obj, jitter, 0, 1, JIT_R0, NULL);
+    if (inlined_ok == 2)
+      return generate(obj, jitter, 0, 1, JIT_R0, NULL);
+    else
+      return generate_non_tail(obj, jitter, 0, 1, 0);
   }
 
   if (!jitter->unbox || jitter->unbox_depth)
@@ -9618,10 +9657,15 @@ static int generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int m
   case scheme_let_value_type:
     {
       Scheme_Let_Value *lv = (Scheme_Let_Value *)obj;
-      int ab = SCHEME_LET_AUTOBOX(lv), i, pos;
+      int ab = SCHEME_LET_AUTOBOX(lv), i, pos, to_unbox = 0;
       START_JIT_DATA();
 
       LOG_IT(("let...\n"));
+
+      if (jitter->unbox) {
+        to_unbox = jitter->unbox;
+        jitter->unbox = 0;
+      }
 
       if (lv->count == 1) {
 	/* Expect one result: */
@@ -9700,15 +9744,23 @@ static int generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int m
 
       LOG_IT(("...in\n"));
 
+      if (to_unbox)
+        jitter->unbox = to_unbox;
+
       return generate(lv->body, jitter, is_tail, multi_ok, orig_target, for_branch);
     }
   case scheme_let_void_type:
     {
       Scheme_Let_Void *lv = (Scheme_Let_Void *)obj;
-      int c = lv->count;
+      int c = lv->count, to_unbox = 0;
       START_JIT_DATA();
 
       LOG_IT(("letv...\n"));
+
+      if (jitter->unbox) {
+        to_unbox = jitter->unbox;
+        jitter->unbox = 0;
+      }
 
       mz_rs_dec(c);
       CHECK_RUNSTACK_OVERFLOW();
@@ -9735,15 +9787,23 @@ static int generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int m
 
       LOG_IT(("...in\n"));
 
+      if (to_unbox)
+        jitter->unbox = to_unbox;
+
       return generate(lv->body, jitter, is_tail, multi_ok, orig_target, for_branch);
     }
   case scheme_letrec_type:
     {
       Scheme_Letrec *l = (Scheme_Letrec *)obj;
-      int i, nsrs, prepped = 0;
+      int i, nsrs, prepped = 0, to_unbox = 0;
       START_JIT_DATA();
 
       LOG_IT(("letrec...\n"));
+
+      if (jitter->unbox) {
+        to_unbox = jitter->unbox;
+        jitter->unbox = 0;
+      }
 
       mz_rs_sync();
 
@@ -9796,15 +9856,23 @@ static int generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int m
         jitter->need_set_rs = nsrs;
       }
 
+      if (to_unbox)
+        jitter->unbox = to_unbox;
+
       return generate(l->body, jitter, is_tail, multi_ok, orig_target, for_branch);
     }
   case scheme_let_one_type:
     {
       Scheme_Let_One *lv = (Scheme_Let_One *)obj;
-      int flonum;
+      int flonum, to_unbox = 0;
       START_JIT_DATA();
 
       LOG_IT(("leto...\n"));
+
+      if (jitter->unbox) {
+        to_unbox = jitter->unbox;
+        jitter->unbox = 0;
+      }
 
       mz_runstack_skipped(jitter, 1);
 
@@ -9817,12 +9885,15 @@ static int generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int m
       PAUSE_JIT_DATA();
       if (flonum) {
 #ifdef USE_FLONUM_UNBOXING
-        if (can_unbox_inline(lv->value, 5, JIT_FPR_NUM-1, 0)
-            || can_unbox_directly(lv->value)) {
+        if (can_unbox_inline(lv->value, 5, JIT_FPR_NUM-1, 0)) {
+          jitter->unbox++;
+          generate_unboxed(lv->value, jitter, 2, 0);
+        } else {
+          if (0) /* validator should ensure that this is ok */
+            if (!can_unbox_directly(lv->value))
+              scheme_signal_error("internal error: bad FLONUM annotation on let");
           jitter->unbox++;
           generate_unboxed(lv->value, jitter, 1, 0);
-        } else {
-          scheme_signal_error("internal error: bad FLONUM annotation on let");
         }
 #endif
       } else
@@ -9856,6 +9927,9 @@ static int generate(Scheme_Object *obj, mz_jit_state *jitter, int is_tail, int m
       LOG_IT(("...in\n"));
 
       mz_RECORD_STATUS(mz_RS_R0_HAS_RUNSTACK0);
+
+      if (to_unbox)
+        jitter->unbox = to_unbox;
 
       return generate(lv->body, jitter, is_tail, multi_ok, orig_target, for_branch);
     }
@@ -11484,6 +11558,37 @@ static int do_generate_more_common(mz_jit_state *jitter, void *_data)
     register_sub_func(jitter, module_run_start_code, scheme_eof);
   }
 
+  /* *** module_exprun_start_code *** */
+  /* Pushes a module name onto the stack for stack traces. */
+  {
+    int in;
+    
+    module_exprun_start_code = jit_get_ip().ptr;
+    jit_prolog(3);
+    in = jit_arg_p();
+    jit_getarg_p(JIT_R0, in); /* menv */
+    in = jit_arg_p();
+    jit_getarg_i(JIT_R1, in); /* set_ns */
+    in = jit_arg_p();
+    jit_getarg_p(JIT_R2, in); /* &name */
+    CHECK_LIMIT();
+
+    /* Store the name where we can find it */
+    mz_push_locals();
+    mz_set_local_p(JIT_R2, JIT_LOCAL2);
+
+    jit_prepare(2);
+    jit_pusharg_i(JIT_R1);
+    jit_pusharg_p(JIT_R0);
+    (void)mz_finish(scheme_module_exprun_finish);
+    CHECK_LIMIT();
+    mz_pop_locals();
+    jit_ret();
+    CHECK_LIMIT();
+
+    register_sub_func(jitter, module_exprun_start_code, scheme_eof);
+  }
+
   /* *** module_start_start_code *** */
   /* Pushes a module name onto the stack for stack traces. */
   {
@@ -11952,7 +12057,7 @@ static void on_demand_with_args(Scheme_Object **in_argv)
 
 static void on_demand()
 {
-  return on_demand_with_args(MZ_RUNSTACK);
+  on_demand_with_args(MZ_RUNSTACK);
 }
 
 static Scheme_Native_Closure_Data *create_native_lambda(Scheme_Closure_Data *data, int clear_code_after_jit,
@@ -12751,6 +12856,7 @@ static void release_native_code(void *fnlized, void *p)
 #endif
 
 typedef void *(*Module_Run_Proc)(Scheme_Env *menv, Scheme_Env *env, Scheme_Object **name);
+typedef void *(*Module_Exprun_Proc)(Scheme_Env *menv, int set_ns, Scheme_Object **name);
 typedef void *(*Module_Start_Proc)(struct Start_Module_Args *a, Scheme_Object **name);
 
 void *scheme_module_run_start(Scheme_Env *menv, Scheme_Env *env, Scheme_Object *name)
@@ -12760,6 +12866,15 @@ void *scheme_module_run_start(Scheme_Env *menv, Scheme_Env *env, Scheme_Object *
     return proc(menv, env, &name);
   else
     return scheme_module_run_finish(menv, env);
+}
+
+void *scheme_module_exprun_start(Scheme_Env *menv, int set_ns, Scheme_Object *name)
+{
+  Module_Exprun_Proc proc = (Module_Exprun_Proc)module_exprun_start_code;
+  if (proc)
+    return proc(menv, set_ns, &name);
+  else
+    return scheme_module_exprun_finish(menv, set_ns);
 }
 
 void *scheme_module_start_start(struct Start_Module_Args *a, Scheme_Object *name)

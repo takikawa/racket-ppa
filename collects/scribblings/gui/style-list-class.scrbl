@@ -15,14 +15,15 @@ See @|stylediscuss| for more information.
 
 
 
-@defconstructor/make[()]{
+@defconstructor[()]{
 
 The root style, named @scheme["Basic"], is automatically created.
 
 }
 
-@defmethod[(basic-style)
-           (is-a?/c style<%>)]{
+@defmethod[#:mode public-final
+                  (basic-style)
+                  (is-a?/c style<%>)]{
 
 Returns the root style. Each style list has its own root style.
 

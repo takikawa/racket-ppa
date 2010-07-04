@@ -168,6 +168,8 @@
        (lambda (_) (refresh/re-reduce)))
       (listen-extra-navigation?
        (lambda (show?) (show-extra-navigation show?))))
+    (send config listen-pretty-styles
+          (lambda (_) (update/preserve-view)))
 
     (define nav:up
       (new button% (label "Previous term") (parent navigator)
@@ -423,7 +425,7 @@
       (let ([deriv* (adjust-deriv/lift deriv)])
         deriv*))
 
-    ;; adjust-deriv/lift : Derivation -> (list-of Derivation)
+    ;; adjust-deriv/lift : Deriv -> Deriv/#f
     (define/private (adjust-deriv/lift deriv)
       (match deriv
         [(Wrap lift-deriv (e1 e2 first lifted-stx second))
@@ -431,17 +433,18 @@
            (and first
                 (let ([e1 (wderiv-e1 first)])
                   (make-lift-deriv e1 e2 first lifted-stx second))))]
-        [(Wrap ecte (e1 e2 first second))
+        [(Wrap ecte (e1 e2 '() first second locals2))
+         ;; Only adjust if no locals...
          (let ([first (adjust-deriv/lift first)])
            (and first
                 (let ([e1 (wderiv-e1 first)])
-                  (make ecte e1 e2 first second))))]
+                  (make ecte e1 e2 '() first second locals2))))]
         [else (adjust-deriv/top deriv)]))
 
     ;; adjust-deriv/top : Derivation -> Derivation
     (define/private (adjust-deriv/top deriv)
-      (if (or (and #| (syntax-source (wderiv-e1 deriv)) |#
-                   (syntax-original? (wderiv-e1 deriv)))
+      (if (or (not (base? deriv))
+              (syntax-original? (wderiv-e1 deriv))
               (p:module? deriv))
           deriv
           ;; It's not original...

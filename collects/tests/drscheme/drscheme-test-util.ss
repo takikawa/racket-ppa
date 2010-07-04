@@ -1,24 +1,18 @@
-;;; util.ss
+#lang scheme/base
 
-;;; utility functions for DrScheme GUI testing 
-
-;;; Authors: Robby Findler, Paul Steckler
-
-(module drscheme-test-util mzscheme
-  (require (prefix fw: framework)
-           mrlib/hierlist
-           mred
-           mzlib/class
-           mzlib/list
-           mzlib/contract
-           mzlib/etc
-           tests/utils/gui
-           mzlib/contract)
+(require (prefix-in fw: framework)
+         mrlib/hierlist
+         scheme/gui/base
+         scheme/class
+         scheme/contract
+         tests/utils/gui)
 
   (provide/contract 
-   [use-get/put-dialog ((-> any) path? . -> . void?)])
+   [use-get/put-dialog (-> (-> any) path? void?)]
+   [set-module-language! (->* () (boolean?) void?)])
   
-  (provide save-drscheme-window-as
+  (provide fire-up-drscheme-and-run-tests
+           save-drscheme-window-as
            do-execute
            test-util-error
            poll-until
@@ -83,39 +77,36 @@
   ;; waits until pred return a true value and returns that.
   ;; if that doesn't happen by `secs', calls fail and returns that.
   (define poll-until
-    (opt-lambda (pred [secs 10] [fail (lambda ()
-                                        (error 'poll-until 
-                                               "timeout after ~e secs, ~e never returned a true value"
-                                               secs pred))])
+    (lambda (pred [secs 10] [fail (lambda ()
+                                    (error 'poll-until 
+                                           "timeout after ~e secs, ~e never returned a true value"
+                                           secs pred))])
       (let ([step 1/20])
-	(let loop ([counter secs])
-	  (if (<= counter 0)
-	      (fail)
-	      (let ([result (pred)])
-		(or result
-		    (begin
-		      (sleep step)
-		      (loop (- counter step))))))))))
+        (let loop ([counter secs])
+          (if (<= counter 0)
+              (fail)
+              (let ([result (pred)])
+                (or result
+                    (begin
+                      (sleep step)
+                      (loop (- counter step))))))))))
   
   (define (drscheme-frame? frame)
     (method-in-interface? 'get-execute-button (object-interface frame)))
   
-  (define wait-for-drscheme-frame
-    (case-lambda
-     [() (wait-for-drscheme-frame #t)]
-     [(print-message?)
-      (let ([wait-for-drscheme-frame-pred
-             (lambda ()
-               (let ([active (get-top-level-focus-window)])
-                 (if (and active
-                          (drscheme-frame? active))
-                     active
-                     #f)))])
-        (or (wait-for-drscheme-frame-pred)
-            (begin
-              (when print-message?
-                (printf "Select DrScheme frame~n"))
-              (poll-until wait-for-drscheme-frame-pred))))]))
+  (define (wait-for-drscheme-frame [print-message? #f])
+    (let ([wait-for-drscheme-frame-pred
+           (lambda ()
+             (let ([active (get-top-level-focus-window)])
+               (if (and active
+                        (drscheme-frame? active))
+                   active
+                   #f)))])
+      (or (wait-for-drscheme-frame-pred)
+          (begin
+            (when print-message?
+              (printf "Select DrScheme frame~n"))
+            (poll-until wait-for-drscheme-frame-pred)))))
   
   ;; wait-for-new-frame : frame [(listof eventspace) = null] -> frame
   ;; returns the newly opened frame, waiting until old-frame
@@ -321,7 +312,7 @@
   ;; set language level in the frontmost DrScheme frame (resets settings to defaults)
   ;; If `close-dialog?' it #t,
   (define set-language-level! 
-    (opt-lambda (in-language-spec [close-dialog? #t])
+    (lambda (in-language-spec [close-dialog? #t])
       (unless (and (pair? in-language-spec)
                    (list? in-language-spec)
                    (andmap (lambda (x) (or string? regexp?)) in-language-spec))
@@ -365,7 +356,7 @@
                        in-language-spec name))
               (let ([next-item (car which)])
                 (cond
-                  [(null? (rest language-spec))
+                  [(null? (cdr language-spec))
                    (when (is-a? next-item hierarchical-list-compound-item<%>)
                      (error 'set-language-level! "expected no more languages after ~e, but still are, input ~e"
                             name in-language-spec))
@@ -391,7 +382,26 @@
                        "didn't get drscheme frame back, got: ~s (drs-frame ~s)\n"
                        new-frame
                        drs-frame)))))))) 
-
+  (define (set-module-language! [close-dialog? #t])
+    (let ([drs-frame (get-top-level-focus-window)])
+      (fw:test:menu-select "Language" "Choose Language...")
+      (let* ([language-dialog (wait-for-new-frame drs-frame)])
+        (fw:test:set-radio-box-item! "Use the language declared in the source")
+        
+        (with-handlers ([exn:fail? (lambda (x) (void))])
+          (fw:test:button-push "Show Details"))
+        
+        (fw:test:button-push "Revert to Language Defaults")
+        
+        (when close-dialog?
+          (fw:test:button-push "OK")
+          (let ([new-frame (wait-for-new-frame language-dialog)])
+            (unless (eq? new-frame drs-frame)
+              (error 'set-language-level! 
+                     "didn't get drscheme frame back, got: ~s (drs-frame ~s)\n"
+                     new-frame
+                     drs-frame)))))))
+  
   (provide/contract [check-language-level ((or/c string? regexp?) . -> . void?)])
   ;; checks that the language in the drscheme window is set to the given one.
   ;; clears the definitions, clicks execute and checks the interactions window.
@@ -445,6 +455,10 @@
                            
                            ;; return the text of the entire line containing the red text
                            (let ([para (send interactions-text position-paragraph pos)])
+                             (unless (exact-nonnegative-integer? para)
+                               (error 'has-error? "got back a bad result from position-paragraph: ~s ~s\n" 
+                                      para
+                                      (list pos (send interactions-text last-position))))
                              (send interactions-text get-text
                                    (send interactions-text paragraph-start-position para)
                                    (send interactions-text paragraph-end-position para)))
@@ -536,4 +550,41 @@
       (semaphore-wait s)
       (if raised-exn?
           (raise exn)
-          (apply values anss)))))
+          (apply values anss))))
+  
+  ;; this is assumed to not open an windows or anything like that
+  ;; but just to print and return.
+  (define orig-display-handler (error-display-handler))
+  
+  (define (fire-up-drscheme-and-run-tests run-test)
+    (let ()
+      ;; change the preferences system so that it doesn't write to 
+      ;; a file; partly to avoid problems of concurrency in drdr
+      ;; but also to make the test suite easier for everyone to run.
+      (let ([prefs-table (make-hash)])
+	(fw:preferences:low-level-put-preferences
+	 (lambda (names vals)
+	   (for-each (lambda (name val) (hash-set! prefs-table name val))
+		     names vals)))
+	(fw:preferences:low-level-get-preference 
+	 (lambda (name [fail (lambda () #f)])
+	   (hash-ref prefs-table name fail))))
+	 
+      (dynamic-require 'drscheme #f)
+
+      ;; set all preferences to their defaults (some pref values may have
+      ;; been read by this point, but hopefully that won't affect much
+      ;; of the startup of drscheme)
+      (fw:preferences:restore-defaults)
+
+      (thread (λ () 
+		 (let ([orig-display-handler (error-display-handler)])
+		   (uncaught-exception-handler
+		    (λ (x)
+		       (if (exn? x)
+			   (orig-display-handler (exn-message x) x)
+			   (fprintf (current-error-port) "uncaught exception ~s\n" x))
+		       (exit 1))))
+		 (run-test)
+		 (exit)))
+      (yield (make-semaphore 0))))

@@ -15,7 +15,7 @@
 (provide (for-syntax unit/c/core) unit/c)
 
 (define-for-syntax (contract-imports/exports import?)
-  (λ (table-stx import-tagged-infos import-sigs ctc-table pos neg src-info name positive-position?)
+  (λ (table-stx import-tagged-infos import-sigs ctc-table blame-id)
     (define def-table (make-bound-identifier-mapping))
     
     (define (convert-reference var vref ctc sig-ctc rename-bindings)
@@ -25,12 +25,8 @@
                ;; store the result in a local box, then just check the box to
                ;; see if we need to coerce.
                #`(let ([ctc (coerce-contract 'unit/c (letrec-syntax #,rename-bindings #,ctc))])
-                   ((((proj-get ctc) ctc)
-                     #,(if import? neg pos)
-                     #,(if import? pos neg)
-                     #,src-info
-                     #,name
-                     #,(if import? (not positive-position?) positive-position?))
+                   (((contract-projection ctc)
+                     #,(if import? #`(blame-swap #,blame-id) blame-id))
                     #,stx)))])
         (if ctc
             #`(λ ()
@@ -43,9 +39,9 @@
                                                                  var)])
                                    #`(let ([old-v/c (#,vref)])
                                        (contract sig-ctc-stx (car old-v/c)
-                                                 (cdr old-v/c) #,pos
-                                                 #,(id->contract-src-info var)))))
-                              #,neg)
+                                                 (cdr old-v/c) (blame-positive #,blame-id)
+                                                 (quote #,var) (quote-syntax #,var)))))
+                              (blame-negative #,blame-id))
                       (wrap-with-proj ctc #`(#,vref))))
             vref)))
     (for ([tagged-info (in-list import-tagged-infos)]
@@ -57,7 +53,7 @@
                                                #`(vector-ref #,v #,index)))))
     (with-syntax ((((eloc ...) ...)
                    (for/list ([target-sig import-sigs])
-                     (let ([rename-bindings (get-member-bindings def-table target-sig pos)])
+                     (let ([rename-bindings (get-member-bindings def-table target-sig #`(blame-positive #,blame-id))])
                        (for/list ([target-int/ext-name (in-list (car target-sig))]
                                   [sig-ctc (in-list (cadddr target-sig))])
                          (let* ([var (car target-int/ext-name)]
@@ -136,7 +132,8 @@
                            export-tagged-infos)])
          (quasisyntax/loc stx
            (begin
-             (make-proj-contract
+             (make-contract
+              #:name
               (list 'unit/c
                     (cons 'import 
                           (list (cons 'isig
@@ -148,12 +145,10 @@
                                       (map list (list 'e.x ...)
                                            (build-compound-type-name 'e.c ...)))
                                 ...)))
-              (λ (pos neg src-info name positive-position?)
+              #:projection
+              (λ (blame)
                 (λ (unit-tmp)
-                  (unless (unit? unit-tmp)
-                    (raise-contract-error unit-tmp src-info pos name
-                                          "value is not a unit"))
-                  (contract-check-sigs 
+                  (unit/c-first-order-check 
                    unit-tmp
                    (vector-immutable
                     (cons 'import-name
@@ -161,7 +156,7 @@
                    (vector-immutable 
                     (cons 'export-name 
                           (vector-immutable export-key ...)) ...)
-                   src-info pos name)
+                   blame)
                   (make-unit
                    '#,name
                    (vector-immutable (cons 'import-name
@@ -177,34 +172,24 @@
                                              import-tagged-infos
                                              import-sigs
                                              contract-table
-                                             #'pos
-                                             #'neg
-                                             #'src-info
-                                             #'name
-                                             #'positive-position?)))
+                                             #'blame)))
                                #,(contract-exports 
                                   #'export-table
                                   export-tagged-infos
                                   export-sigs
                                   contract-table
-                                  #'pos
-                                  #'neg
-                                  #'src-info
-                                  #'name
-                                  #'positive-position?)))))))
+                                  #'blame)))))))
+              #:first-order
               (λ (v)
-                (and (unit? v)
-                     (with-handlers ([exn:fail:contract? (λ () #f)])
-                       (contract-check-sigs 
-                        v
-                        (vector-immutable
-                         (cons 'import-name
-                               (vector-immutable import-key ...)) ...)
-                        (vector-immutable 
-                         (cons 'export-name 
-                               (vector-immutable export-key ...)) ...)
-                        (list #f "not-used") 'not-used null))
-                     #t)))))))]))
+                (unit/c-first-order-check 
+                 v
+                 (vector-immutable
+                  (cons 'import-name
+                        (vector-immutable import-key ...)) ...)
+                 (vector-immutable 
+                  (cons 'export-name 
+                        (vector-immutable export-key ...)) ...)
+                 #f)))))))]))
 
 (define-syntax/err-param (unit/c stx)
   (syntax-case stx ()
@@ -212,35 +197,38 @@
      (let ([name (syntax-local-infer-name stx)])
        (unit/c/core name #'sstx))]))
 
-(define (contract-check-helper sub-sig super-sig import? val src-info blame ctc)
-  (define t (make-hash))
-  (let loop ([i (sub1 (vector-length sub-sig))])
-    (when (>= i 0)
-      (let ([v (cdr (vector-ref sub-sig i))])
-        (let loop ([j (sub1 (vector-length v))])
-          (when (>= j 0)
-            (let ([vj (vector-ref v j)])
-              (hash-set! t vj
-                               (if (hash-ref t vj #f)
-                                   'amb
-                                   #t)))
-            (loop (sub1 j)))))
-      (loop (sub1 i))))
-  (let loop ([i (sub1 (vector-length super-sig))])
-    (when (>= i 0)
-      (let* ([v0 (vector-ref (cdr (vector-ref super-sig i)) 0)]
-             [r (hash-ref t v0 #f)])
-        (when (not r)
-          (let ([sub-name (car (vector-ref super-sig i))])
-            (raise-contract-error
-             val src-info blame ctc
-             (cond
-               [import?
-                (format "contract does not list import ~a" sub-name)]
-              [else
-                (format "unit must export signature ~a" sub-name)])))))
-      (loop (sub1 i)))))
-
-(define (contract-check-sigs unit expected-imports expected-exports src-info blame ctc)
-    (contract-check-helper expected-imports (unit-import-sigs unit) #t unit src-info blame ctc)
-    (contract-check-helper (unit-export-sigs unit) expected-exports #f unit src-info blame ctc))
+(define (unit/c-first-order-check val expected-imports expected-exports blame)
+  (let/ec return
+    (define (failed str . args)
+      (if blame
+          (apply raise-blame-error blame val str args)
+          (return #f)))
+    (define (check-sig-subset sub-sig super-sig import?)
+      (define t (make-hash))
+      (let loop ([i (sub1 (vector-length sub-sig))])
+        (when (>= i 0)
+          (let ([v (cdr (vector-ref sub-sig i))])
+            (let loop ([j (sub1 (vector-length v))])
+              (when (>= j 0)
+                (let ([vj (vector-ref v j)])
+                  (hash-set! t vj
+                             (if (hash-ref t vj #f)
+                                 'amb
+                                 #t)))
+                (loop (sub1 j)))))
+          (loop (sub1 i))))
+      (let loop ([i (sub1 (vector-length super-sig))])
+        (when (>= i 0)
+          (let* ([v0 (vector-ref (cdr (vector-ref super-sig i)) 0)]
+                 [r (hash-ref t v0 #f)])
+            (when (not r)
+              (let ([sub-name (car (vector-ref super-sig i))])
+                (if import?
+                    (failed "contract does not list import ~a" sub-name)
+                    (failed "unit must export signature ~a" sub-name)))))
+          (loop (sub1 i)))))
+    (unless (unit? val)
+      (failed "not a unit"))
+    (check-sig-subset expected-imports (unit-import-sigs val) #t)
+    (check-sig-subset (unit-export-sigs val) expected-exports #f)
+    #t))

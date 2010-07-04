@@ -89,7 +89,7 @@ please adhere to these guidelines:
 |#
 
 (module japanese-string-constants "string-constant-lang.ss"
- ;;; when translating this constant, substitute name of actual langauge for `English'
+ ;;; when translating this constant, substitute name of actual language for `English'
  (is-this-your-native-language "Is Japanese Your Native Language?")
 
  (are-you-sure-you-want-to-switch-languages
@@ -307,7 +307,7 @@ please adhere to these guidelines:
  (plt:hd:refresh-downloading... "~a をダウンロードしています...")
  (plt:hd:refresh-deleting... "古いバージョンの ~a を削除しています...")
  (plt:hd:refresh-installing... "新しいバージョンの ~a をインストールしています...")
- (plt:hd:refresh-clearing-indicies "キャッシュ内の索引を消去しています")
+ (plt:hd:refresh-clearing-indices "キャッシュ内の索引を消去しています")
  (plt:hd:refreshing-manuals-finished "完了しました。")
  (plt:hd:about-help-desk "ヘルプデスクについて")
  (plt:hd:help-desk-about-string
@@ -445,7 +445,7 @@ please adhere to these guidelines:
  (revert-to-defaults "デフォルトに戻す")
 
   (black-on-white-color-scheme "白地に黒") ;; these two appear in the color preferences dialog on butttons
-  (white-on-black-color-scheme "黒地に白") ;; clicking the buttons changes teh color schemes to some defaults that've been set up.
+  (white-on-black-color-scheme "黒地に白") ;; clicking the buttons changes the color schemes to some defaults that've been set up.
 
  ; title of the color choosing dialog
 

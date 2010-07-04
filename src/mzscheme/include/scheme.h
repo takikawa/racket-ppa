@@ -147,25 +147,6 @@ typedef jmpbuf jmp_buf[1];
 typedef struct FSSpec mzFSSpec;
 #endif
 
-/* Set up MZ_EXTERN for DLL build */
-#if defined(WINDOWS_DYNAMIC_LOAD) \
-    && !defined(LINK_EXTENSIONS_BY_TABLE) \
-    && !defined(SCHEME_EMBEDDED_NO_DLL)
-# define MZ_DLLIMPORT __declspec(dllimport)
-# define MZ_DLLEXPORT __declspec(dllexport)
-# ifdef __mzscheme_private__
-#  define MZ_DLLSPEC __declspec(dllexport)
-# else
-#  define MZ_DLLSPEC __declspec(dllimport)
-# endif
-#else
-# define MZ_DLLSPEC
-# define MZ_DLLIMPORT
-# define MZ_DLLEXPORT
-#endif
-
-#define MZ_EXTERN extern MZ_DLLSPEC
-
 #ifndef MZ_DONT_USE_JIT
 # if defined(MZ_USE_JIT_PPC) || defined(MZ_USE_JIT_I386) || defined(MZ_USE_JIT_X86_64)
 #  define MZ_USE_JIT
@@ -1156,6 +1137,7 @@ typedef void (*Scheme_Kill_Action_Func)(void *);
       thread->error_buf = savebuf; \
       thread = NULL; } }
 
+typedef int (*Scheme_Frozen_Stack_Proc)(void *);
 
 /*========================================================================*/
 /*                             parameters                                 */
@@ -1622,7 +1604,7 @@ void *scheme_malloc(size_t size);
 # define scheme_malloc_weak GC_malloc_weak
 # define scheme_malloc_weak_tagged GC_malloc_one_weak_tagged
 # define scheme_malloc_allow_interior GC_malloc_allow_interior
-# define scheme_malloc_atomic_allow_interior GC_malloc_allow_interior
+# define scheme_malloc_atomic_allow_interior GC_malloc_atomic_allow_interior
 #else
 # ifdef USE_TAGGED_ALLOCATION
 extern void *scheme_malloc_tagged(size_t);
@@ -1794,6 +1776,9 @@ MZ_EXTERN int scheme_main_stack_setup(int no_auto_statics, Scheme_Nested_Main _m
 typedef int (*Scheme_Env_Main)(Scheme_Env *env, int argc, char **argv);
 MZ_EXTERN int scheme_main_setup(int no_auto_statics, Scheme_Env_Main _main, int argc, char **argv);
 
+#ifdef IMPLEMENT_THREAD_LOCAL_VIA_WIN_TLS
+MZ_EXTERN void scheme_register_tls_space(void *tls_space, int _tls_index);
+#endif
 
 MZ_EXTERN void scheme_register_static(void *ptr, long size);
 #if defined(MUST_REGISTER_GLOBALS) || defined(GC_MIGHT_USE_REGISTERED_STATICS)

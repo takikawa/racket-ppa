@@ -3,7 +3,7 @@
 (require "../utils/utils.ss" 
 	 (rep type-rep rep-utils)
 	 (types union subtype resolve convenience utils)
-         scheme/match mzlib/trace)
+         scheme/match mzlib/trace unstable/debug)
 
 (provide (rename-out [*remove remove]) overlap)
 
@@ -50,29 +50,29 @@
          [(or (list (Pair: _ _) _)
               (list _ (Pair: _ _)))
           #f]
-         [(list (Struct: n _ flds _ _ _ _)
-                (Struct: n _ flds* _ _ _ _))
+         [(or (list (Value: '()) (Struct: n _ flds _ _ _ _ _))
+              (list (Struct: n _ flds _ _ _ _ _) (Value: '())))
+          #f]
+         [(list (Struct: n _ flds _ _ _ _ _)
+                (Struct: n _ flds* _ _ _ _ _))
           (for/and ([f flds] [f* flds*]) (overlap f f*))]
          ;; n and n* must be different, so there's no overlap
-         [(list (Struct: n #f flds _ _ _ _)
-                (Struct: n* #f flds* _ _ _ _))
+         [(list (Struct: n #f flds _ _ _ _ _)
+                (Struct: n* #f flds* _ _ _ _ _))
           #f]
-         [(list (Struct: n p flds _ _ _ _)
-                (Struct: n* p* flds* _ _ _ _))
+         [(list (Struct: n p flds _ _ _ _ _)
+                (Struct: n* p* flds* _ _ _ _ _))
           (and (= (length flds) (length flds*)) (for/and ([f flds] [f* flds*]) (overlap f f*)))]
          [else #t])])))
 
 
 ;(trace overlap)
 
-
-;(trace restrict)
-
 ;; also not yet correct
 ;; produces old without the contents of rem
 (define (*remove old rem)
   (define initial
-    (if (subtype old rem) 
+    (if (subtype old rem)
         (Un) ;; the empty type
         (match (list old rem)
           [(list (or (App: _ _ _) (Name: _)) t)
@@ -87,4 +87,3 @@
   (if (subtype old initial) old initial))
 
 ;(trace *remove)
-;(trace restrict)

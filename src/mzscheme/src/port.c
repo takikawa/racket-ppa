@@ -304,7 +304,7 @@ THREAD_LOCAL_DECL(Scheme_Object *scheme_orig_stdout_port);
 THREAD_LOCAL_DECL(Scheme_Object *scheme_orig_stderr_port);
 THREAD_LOCAL_DECL(Scheme_Object *scheme_orig_stdin_port);
 
-THREAD_LOCAL_DECL(fd_set *scheme_fd_set);
+THREAD_LOCAL_DECL(struct mz_fd_set *scheme_fd_set);
 
 HOOK_SHARED_OK Scheme_Object *(*scheme_make_stdin)(void) = NULL;
 HOOK_SHARED_OK Scheme_Object *(*scheme_make_stdout)(void) = NULL;
@@ -680,7 +680,7 @@ Scheme_Object * scheme_make_eof (void)
 void scheme_alloc_global_fdset() {
 #ifdef USE_FAR_MZ_FDCALLS
   REGISTER_SO(scheme_fd_set);
-  scheme_fd_set = scheme_alloc_fdset_array(3, 0);
+  scheme_fd_set = (struct mz_fd_set *)scheme_alloc_fdset_array(3, 0);
 #endif
 }
 
@@ -4815,7 +4815,7 @@ scheme_make_file_input_port(FILE *fp)
 #ifdef MZ_FDS
 
 # ifdef WINDOWS_FILE_HANDLES
-static long WindowsFDReader(Win_FD_Input_Thread *th);
+static long WINAPI WindowsFDReader(Win_FD_Input_Thread *th);
 static void WindowsFDICleanup(Win_FD_Input_Thread *th);
 typedef BOOL (WINAPI* CSI_proc)(HANDLE);
 
@@ -5421,7 +5421,7 @@ make_fd_input_port(int fd, Scheme_Object *name, int regfile, int win_textmode, i
 
 # ifdef WINDOWS_FILE_HANDLES
 
-static long WindowsFDReader(Win_FD_Input_Thread *th)
+static long WINAPI WindowsFDReader(Win_FD_Input_Thread *th)
   XFORM_SKIP_PROC
 {
   DWORD toget, got;
@@ -5811,7 +5811,7 @@ scheme_make_file_output_port(FILE *fp)
 #ifdef MZ_FDS
 
 #ifdef WINDOWS_FILE_HANDLES
-static long WindowsFDWriter(Win_FD_Output_Thread *oth);
+static long WINAPI WindowsFDWriter(Win_FD_Output_Thread *oth);
 static void WindowsFDOCleanup(Win_FD_Output_Thread *oth);
 #endif
 
@@ -6619,7 +6619,7 @@ static void flush_if_output_fds(Scheme_Object *o, Scheme_Close_Custodian_Client 
 
 #ifdef WINDOWS_FILE_HANDLES
 
-static long WindowsFDWriter(Win_FD_Output_Thread *oth)
+static long WINAPI WindowsFDWriter(Win_FD_Output_Thread *oth)
   XFORM_SKIP_PROC
 {
   DWORD towrite, wrote, start;
@@ -8434,16 +8434,24 @@ int scheme_get_external_event_fd(void)
 static HANDLE itimer;
 static OS_SEMAPHORE_TYPE itimer_semaphore;
 static long itimer_delay;
+typedef struct {
+  int volatile *fuel_counter_ptr;
+  unsigned long volatile *jit_stack_boundary_ptr;
+} Win_Itimer_Data;
 
-static long ITimer(void)
+static long WINAPI ITimer(void *data)
   XFORM_SKIP_PROC
 {
+  Win_Itimer_Data *d = (Win_Itimer_Data *)data;
+
   WaitForSingleObject(itimer_semaphore, INFINITE);
+
+  scheme_init_os_thread();
 
   while (1) {
     if (WaitForSingleObject(itimer_semaphore, itimer_delay / 1000) == WAIT_TIMEOUT) {
-      scheme_fuel_counter = 0;
-      scheme_jit_stack_boundary = (unsigned long)-1;
+      *d->fuel_counter_ptr = 0;
+      *d->jit_stack_boundary_ptr = (unsigned long)-1;
       WaitForSingleObject(itimer_semaphore, INFINITE);
     }
   }
@@ -8454,7 +8462,12 @@ static void scheme_start_itimer_thread(long usec)
   DWORD id;
 
   if (!itimer) {
-    itimer = CreateThread(NULL, 4096, (LPTHREAD_START_ROUTINE)ITimer, NULL, 0, &id);
+    Win_Itimer_Data *d;
+    d = malloc(sizeof(Win_Itimer_Data));
+    d->fuel_counter_ptr = &scheme_fuel_counter;
+    d->jit_stack_boundary_ptr = &scheme_jit_stack_boundary;
+    itimer = CreateThread(NULL, 4096, (LPTHREAD_START_ROUTINE)ITimer, 
+			  d, 0, &id);
     itimer_semaphore = CreateSemaphore(NULL, 0, 1, NULL);
     scheme_remember_thread(itimer, 0);
   }
@@ -8678,9 +8691,9 @@ static int slept_fd;
 static void *sleep_fds;
 static void (*sleep_sleep)(float seconds, void *fds);
 
-static void *do_watch()
+static void *do_watch(void *other)
 {
-  scheme_init_os_thread();
+  scheme_init_os_thread_like(other);
   while (1) {
     pt_sema_wait(&sleeping_sema);
 
@@ -8697,7 +8710,7 @@ void scheme_start_sleeper_thread(void (*given_sleep)(float seconds, void *fds), 
     pt_sema_init(&sleeping_sema);
     pt_sema_init(&done_sema);
 
-    if (pthread_create(&watcher, NULL, do_watch, NULL)) {
+    if (pthread_create(&watcher, NULL, do_watch, scheme_get_os_thread_like())) {
       scheme_log_abort("pthread_create failed");
       abort();
     }

@@ -1,16 +1,28 @@
 #lang scheme/base
 
 (require "private/honu-typed-scheme.ss"
+         ;; "private/honu.ss"
+         "private/parse.ss"
+         "private/literals.ss"
          "private/macro.ss")
 
 (provide (rename-out (#%dynamic-honu-module-begin #%module-begin)
-                     (honu-top #%top))
+                     (honu-top #%top)
+                     (semicolon \;)
+                     (honu-+ +)
+                     (honu-* *)
+                     (honu-/ /)
+                     (honu-- -)
+                     (honu-? ?)
+                     (honu-: :)
+                     (honu-comma |,|)
+                     )
          #%datum
          true
          false
          display
+         display2
          newline
-         \;
          else
          (rename-out
            (honu-if if)

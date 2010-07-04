@@ -167,6 +167,7 @@ static Scheme_Object *procedure_arity_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *procedure_arity_includes(int argc, Scheme_Object *argv[]);
 static Scheme_Object *procedure_reduce_arity(int argc, Scheme_Object *argv[]);
 static Scheme_Object *procedure_rename(int argc, Scheme_Object *argv[]);
+static Scheme_Object *procedure_to_method(int argc, Scheme_Object *argv[]);
 static Scheme_Object *procedure_equal_closure_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *primitive_p(int argc, Scheme_Object *argv[]);
 static Scheme_Object *primitive_closure_p(int argc, Scheme_Object *argv[]);
@@ -178,6 +179,10 @@ static Scheme_Object *current_prompt_read(int, Scheme_Object **);
 
 static Scheme_Object *write_compiled_closure(Scheme_Object *obj);
 static Scheme_Object *read_compiled_closure(Scheme_Object *obj);
+static Scheme_Object *
+scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, Scheme_Object *key, 
+                                     Scheme_Object *prompt_tag, Scheme_Meta_Continuation **_meta,
+                                     MZ_MARK_POS_TYPE *_vpos);
 
 typedef void (*DW_PrePost_Proc)(void *);
 
@@ -496,6 +501,11 @@ scheme_init_fun (Scheme_Env *env)
 						      "procedure-rename",
 						      2, 2),
 			     env);
+  scheme_add_global_constant("procedure->method",
+			     scheme_make_prim_w_arity(procedure_to_method,
+						      "procedure->method",
+						      1, 1),
+			     env);
   scheme_add_global_constant("procedure-closure-contents-eq?",
 			     scheme_make_folding_prim(procedure_equal_closure_p,
 						      "procedure-closure-contents-eq?",
@@ -548,9 +558,11 @@ scheme_init_fun (Scheme_Env *env)
   REGISTER_SO(is_method_symbol);
   REGISTER_SO(scheme_inferred_name_symbol);
   REGISTER_SO(cont_key);
+  REGISTER_SO(barrier_prompt_key);
   is_method_symbol = scheme_intern_symbol("method-arity-error");
   scheme_inferred_name_symbol = scheme_intern_symbol("inferred-name");
   cont_key = scheme_make_symbol("k"); /* uninterned */
+  barrier_prompt_key = scheme_make_symbol("bar"); /* uninterned */
   
   REGISTER_SO(scheme_default_prompt_tag);
   {
@@ -970,7 +982,7 @@ typedef struct {
   mzshort base_closure_size; /* doesn't include top-level (if any) */
   mzshort *base_closure_map;
   char *flonum_map; /* NULL when has_flomap set => no flonums */
-  char has_tl, has_flomap;
+  char has_tl, has_flomap, has_nonleaf;
   int body_size, body_psize;
 } Closure_Info;
 
@@ -1042,6 +1054,7 @@ scheme_optimize_closure_compilation(Scheme_Object *_data, Optimize_Info *info, i
     cl->has_tl = 0;
   cl->body_size = info->size;
   cl->body_psize = info->psize;
+  cl->has_nonleaf = info->has_nonleaf;
   
   info->size++;
 
@@ -1234,7 +1247,8 @@ Scheme_Object *scheme_sfs_closure(Scheme_Object *expr, SFS_Info *info, int self_
   return expr;
 }
 
-int scheme_closure_body_size(Scheme_Closure_Data *data, int check_assign, Optimize_Info *info)
+int scheme_closure_body_size(Scheme_Closure_Data *data, int check_assign, 
+                             Optimize_Info *info, int *is_leaf)
 {
   int i;
   Closure_Info *cl;
@@ -1242,16 +1256,15 @@ int scheme_closure_body_size(Scheme_Closure_Data *data, int check_assign, Optimi
   cl = (Closure_Info *)data->closure_map;
 
   if (check_assign) {
-    /* Don't try to inline if there's a rest arg: */
-    if (SCHEME_CLOSURE_DATA_FLAGS(data) & CLOS_HAS_REST)
-      return -1;
-    
     /* Don't try to inline if any arguments are mutated: */
     for (i = data->num_params; i--; ) {
       if (cl->local_flags[i] & SCHEME_WAS_SET_BANGED)
 	return -1;
     }
   }
+
+  if (is_leaf)
+    *is_leaf = !cl->has_nonleaf;
 
   return cl->body_size + ((info && info->use_psize) ? cl->body_psize : 0);
 }
@@ -2153,11 +2166,6 @@ void *scheme_top_level_do_worker(void *(*k)(void), int eb, int new_thread, Schem
       
     if (!new_thread) {
       prompt->is_barrier = 1;
-    }
-
-    if (!barrier_prompt_key) {
-      REGISTER_SO(barrier_prompt_key);
-      barrier_prompt_key = scheme_make_symbol("bar"); /* uninterned */
     }
   }
 
@@ -3649,30 +3657,33 @@ void scheme_init_reduced_proc_struct(Scheme_Env *env)
     scheme_reduced_procedure_struct = scheme_make_proc_struct_type(NULL,
                                                                    NULL,
                                                                    (Scheme_Object *)insp,
-                                                                   3, 0,
+                                                                   4, 0,
                                                                    scheme_false,
                                                                    scheme_make_integer(0),
                                                                    NULL);
   }
 }
 
-static Scheme_Object *make_reduced_proc(Scheme_Object *proc, Scheme_Object *aty, Scheme_Object *name)
+static Scheme_Object *make_reduced_proc(Scheme_Object *proc, Scheme_Object *aty, Scheme_Object *name, Scheme_Object *is_meth)
 {
-  Scheme_Object *a[3];
+  Scheme_Object *a[4];
   
   if (SCHEME_STRUCTP(proc)
       && scheme_is_struct_instance(scheme_reduced_procedure_struct, proc)) {
     /* Don't need the intermediate layer */
     if (!name)
       name = ((Scheme_Structure *)proc)->slots[2];
+    if (!is_meth)
+      is_meth = ((Scheme_Structure *)proc)->slots[3];
     proc = ((Scheme_Structure *)proc)->slots[0];
   }
 
   a[0] = proc;
   a[1] = aty;
   a[2] = (name ? name : scheme_false);
+  a[3] = (is_meth ? is_meth : scheme_false);
 
-  return scheme_make_struct_instance(scheme_reduced_procedure_struct, 3, a);
+  return scheme_make_struct_instance(scheme_reduced_procedure_struct, 4, a);
 }
 
 static Scheme_Object *procedure_reduce_arity(int argc, Scheme_Object *argv[])
@@ -3817,7 +3828,7 @@ static Scheme_Object *procedure_reduce_arity(int argc, Scheme_Object *argv[])
   }
 
   /* Construct a procedure that has the given arity. */
-  return make_reduced_proc(argv[0], aty, NULL);
+  return make_reduced_proc(argv[0], aty, NULL, NULL);
 }
 
 static Scheme_Object *procedure_rename(int argc, Scheme_Object *argv[])
@@ -3834,7 +3845,19 @@ static Scheme_Object *procedure_rename(int argc, Scheme_Object *argv[])
 
   aty = get_or_check_arity(argv[0], -1, NULL);  
 
-  return make_reduced_proc(argv[0], aty, argv[1]);
+  return make_reduced_proc(argv[0], aty, argv[1], NULL);
+}
+
+static Scheme_Object *procedure_to_method(int argc, Scheme_Object *argv[])
+{
+  Scheme_Object *aty;
+
+  if (!SCHEME_PROCP(argv[0]))
+    scheme_wrong_type("procedure->method", "procedure", 0, argc, argv);
+
+  aty = get_or_check_arity(argv[0], -1, NULL);  
+
+  return make_reduced_proc(argv[0], aty, NULL, scheme_true);
 }
 
 static Scheme_Object *procedure_equal_closure_p(int argc, Scheme_Object *argv[])
@@ -5065,9 +5088,9 @@ call_cc (int argc, Scheme_Object *argv[])
 static Scheme_Cont *grab_continuation(Scheme_Thread *p, int for_prompt, int composable,
                                       Scheme_Object *prompt_tag,
                                       Scheme_Cont *sub_cont, Scheme_Prompt *prompt,
-                                      Scheme_Meta_Continuation *prompt_cont, MZ_MARK_POS_TYPE prompt_pos,
-                                      Scheme_Prompt *barrier_prompt, Scheme_Prompt *effective_barrier_prompt,
-                                      Scheme_Meta_Continuation *barrier_cont, MZ_MARK_POS_TYPE barrier_pos)
+                                      Scheme_Meta_Continuation *prompt_cont, 
+                                      Scheme_Prompt *effective_barrier_prompt
+                                      )
 {
   Scheme_Cont *cont;
   
@@ -5605,8 +5628,7 @@ internal_call_cc (int argc, Scheme_Object *argv[])
 
   composable = (argc > 2);
 
-  prompt = (Scheme_Prompt *)scheme_extract_one_cc_mark_with_meta(NULL, SCHEME_PTR_VAL(prompt_tag), 
-                                                                 NULL, &prompt_cont, &prompt_pos);
+  prompt = scheme_get_prompt(SCHEME_PTR_VAL(prompt_tag), &prompt_cont, &prompt_pos);
   if (!prompt && !SAME_OBJ(scheme_default_prompt_tag, prompt_tag)) {
     scheme_arg_mismatch((composable
                          ? "call-with-composable-continuation"
@@ -5704,8 +5726,7 @@ internal_call_cc (int argc, Scheme_Object *argv[])
   }
 
   cont = grab_continuation(p, 0, composable, prompt_tag, sub_cont, 
-                           prompt, prompt_cont, prompt_pos,
-                           barrier_prompt, effective_barrier_prompt, barrier_cont, barrier_pos);
+                           prompt, prompt_cont, effective_barrier_prompt);
 
   scheme_zero_unneeded_rands(p);
 
@@ -5870,11 +5891,21 @@ call_with_continuation_barrier (int argc, Scheme_Object *argv[])
 Scheme_Prompt *scheme_get_barrier_prompt(Scheme_Meta_Continuation **_meta_cont,
                                          MZ_MARK_POS_TYPE *_pos)
 {
-  return (Scheme_Prompt *)scheme_extract_one_cc_mark_with_meta(NULL, 
-                                                               barrier_prompt_key,
-                                                               NULL,
-                                                               _meta_cont,
-                                                               _pos);
+  return (Scheme_Prompt *)scheme_extract_one_cc_mark_with_meta(NULL, barrier_prompt_key, NULL, _meta_cont, _pos);
+}
+
+Scheme_Prompt *scheme_get_prompt(Scheme_Object *prompt_tag,
+                                 Scheme_Meta_Continuation **_meta_cont,
+                                 MZ_MARK_POS_TYPE *_pos)
+{
+  return (Scheme_Prompt *)scheme_extract_one_cc_mark_with_meta(NULL, prompt_tag, NULL, _meta_cont, _pos);
+}
+
+static Scheme_Meta_Continuation *scheme_get_meta_continuation(Scheme_Object *key)
+{
+  Scheme_Meta_Continuation *mc;
+  scheme_extract_one_cc_mark_with_meta(NULL, key, NULL, &mc, NULL);
+  return mc;
 }
 
 
@@ -6111,7 +6142,7 @@ static Scheme_Object *compose_continuation(Scheme_Cont *cont, int exec_chain,
 
   /* Grab a continuation so that we capture the current Scheme stack,
      etc.: */
-  saved = grab_continuation(p, 1, 0, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL, 0);
+  saved = grab_continuation(p, 1, 0, NULL, NULL, NULL, NULL, NULL);
 
   if (p->meta_prompt)
     saved->prompt_stack_start = p->meta_prompt->stack_boundary;
@@ -7143,7 +7174,7 @@ cont_marks(int argc, Scheme_Object *argv[])
       return NULL;
     } else {
       Scheme_Meta_Continuation *mc;
-      scheme_extract_one_cc_mark_with_meta(NULL, argv[0], NULL, &mc, NULL);
+      mc = scheme_get_meta_continuation(argv[0]);
 
       return continuation_marks(scheme_current_thread, NULL, argv[0], mc, prompt_tag, 
                                 "continuation-marks", 0);
@@ -7394,6 +7425,8 @@ scheme_get_stack_trace(Scheme_Object *mark_set)
 
       if (SCHEME_FALSEP(SCHEME_CDR(name)))
         what = "[traversing imports]";
+      else if (SCHEME_VOIDP(SCHEME_CDR(name)))
+        what = "[running expand-time body]";
       else
         what = "[running body]";
 
@@ -7424,7 +7457,7 @@ extract_cc_proc_marks(int argc, Scheme_Object *argv[])
   return scheme_get_stack_trace(argv[0]);
 }
 
-Scheme_Object *
+static Scheme_Object *
 scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, Scheme_Object *key, 
                                      Scheme_Object *prompt_tag, Scheme_Meta_Continuation **_meta,
                                      MZ_MARK_POS_TYPE *_vpos)
@@ -7657,8 +7690,7 @@ extract_one_cc_mark(int argc, Scheme_Object *argv[])
     }
   } 
 
-  r = scheme_extract_one_cc_mark_with_meta(SCHEME_TRUEP(argv[0]) ? argv[0] : NULL, argv[1], 
-                                           prompt_tag, NULL, NULL);
+  r = scheme_extract_one_cc_mark_to_tag(SCHEME_TRUEP(argv[0]) ? argv[0] : NULL, argv[1], prompt_tag);
   if (!r) {
     if (argc > 2)
       r = argv[2];
@@ -7705,7 +7737,7 @@ static Scheme_Object *continuation_prompt_available(int argc, Scheme_Object *arg
         if (SAME_OBJ(scheme_default_prompt_tag, prompt_tag))
           return scheme_true;
 
-        scheme_extract_one_cc_mark_with_meta(NULL, argv[1], NULL, &mc, NULL);
+        mc = scheme_get_meta_continuation(argv[1]);
         
         if (continuation_marks(scheme_current_thread, NULL, argv[1], mc, prompt_tag, 
                                NULL, 0))

@@ -1,6 +1,7 @@
 #lang scheme/base
 
-(provide provide/contract (for-syntax make-provide/contract-transformer))
+(provide provide/contract 
+         (for-syntax make-provide/contract-transformer))
 
 (require (for-syntax scheme/base
                      scheme/list
@@ -8,24 +9,16 @@
          "arrow.ss"
          "base.ss"
          scheme/contract/exists
-         "guts.ss")
+         "guts.ss"
+         unstable/location
+         unstable/srcloc)
 
 (define-syntax (verify-contract stx)
   (syntax-case stx ()
     [(_ name x) (a:known-good-contract? #'x) #'x]
     [(_ name x) #'(coerce-contract name x)]))
 
-;; id->contract-src-info : identifier -> syntax
-;; constructs the last argument to the -contract, given an identifier
-(define-for-syntax (id->contract-src-info id)
-  #`(list (make-srcloc #,id
-                       #,(syntax-line id)
-                       #,(syntax-column id)
-                       #,(syntax-position id)
-                       #,(syntax-span id))
-          #,(format "~s" (syntax->datum id))))
-
-(define-for-syntax (make-provide/contract-transformer contract-id id pos-module-source)
+(define-for-syntax (make-provide/contract-transformer contract-id id external-id pos-module-source)
   (make-set!-transformer
    (let ([saved-id-table (make-hasheq)])
      (λ (stx)
@@ -38,6 +31,7 @@
                         ;; No: lift the contract creation:
                         (with-syntax ([contract-id contract-id]
                                       [id id]
+                                      [external-id external-id]
                                       [pos-module-source pos-module-source]
                                       [id-ref (syntax-case stx (set!)
                                                 [(set! whatever e)
@@ -52,8 +46,9 @@
                             #`(contract contract-id
                                         id
                                         pos-module-source
-                                        (#%variable-reference)
-                                        #,(id->contract-src-info #'id))))))])
+                                        (quote-module-path)
+                                        'external-id
+                                        (quote-srcloc id))))))])
                (when key
                  (hash-set! saved-id-table key lifted-id))
                ;; Expand to a use of the lifted expression:
@@ -73,7 +68,6 @@
            ;; In case of partial expansion for module-level and internal-defn contexts,
            ;; delay expansion until it's a good time to lift expressions:
            (quasisyntax/loc stx (#%expression #,stx)))))))
-
 
 (define-syntax (provide/contract provide-stx)
   (syntax-case provide-stx (struct)
@@ -652,7 +646,7 @@
                 (with-syntax ([code
                                (quasisyntax/loc stx
                                  (begin
-                                   (define pos-module-source (#%variable-reference))
+                                   (define pos-module-source (quote-module-path))
                                    
                                    #,@(if no-need-to-check-ctrct?
                                           (list)
@@ -662,6 +656,7 @@
                                    (define-syntax id-rename
                                      (make-provide/contract-transformer (quote-syntax contract-id)
                                                                         (quote-syntax id)
+                                                                        (quote-syntax external-name)
                                                                         (quote-syntax pos-module-source)))
                                    
                                    (provide (rename-out [id-rename external-name]))))])
@@ -669,7 +664,7 @@
                   (syntax-local-lift-module-end-declaration
                    #`(begin 
                        (unless extra-test
-                         (contract contract-id id pos-module-source 'ignored #,(id->contract-src-info #'id)))
+                         (contract contract-id id pos-module-source 'ignored 'id (quote-srcloc id)))
                        (void)))
                   
                   (syntax (code id-rename))))))]))
@@ -702,7 +697,9 @@
                                                     (contract ctc
                                                               val
                                                               'not-enough-info-for-blame
-                                                              'not-enough-info-for-blame))
+                                                              'not-enough-info-for-blame
+                                                              '#f
+                                                              (build-source-location #f)))
                                                   ctcs
                                                   vals)))))])
     struct:struct-name))

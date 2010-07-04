@@ -94,12 +94,45 @@ This file defines two sorts of primitives. All of them are provided into any mod
                             'typechecker:contract-def)])
          (quasisyntax/loc stx 
            (begin 
-             #,(syntax-property (syntax-property #'(define cnt #f)
-                                                 prop-name #'ty)
+             #,(syntax-property (if (eq? (syntax-local-context) 'top-level)
+                                    (let ([typ (parse-type #'ty)])
+                                      #`(define cnt* 
+                                          #,(type->contract 
+                                             typ 
+                                             ;; this is for a `require/typed', so the value is not from the typed side
+                                             #:typed-side #f 
+                                             (lambda () (tc-error/stx #'ty "Type ~a could not be converted to a contract." typ)))))
+                                    (syntax-property #'(define cnt* #f)
+                                                 prop-name #'ty))
                                 'typechecker:ignore #t)
              #,(internal #'(require/typed-internal nm.nm ty . sm))
-             #,(syntax-property #'(require/contract nm.spec cnt lib)
+             #,(syntax-property #'(require/contract nm.spec cnt* lib)
                                 'typechecker:ignore #t)))))]))
+
+(define-syntax (define-predicate stx)
+  (syntax-parse stx 
+    [(_ name:id ty:expr) 
+     #`(begin
+         #,(syntax-property (if (eq? (syntax-local-context) 'top-level)
+                                (let ([typ (parse-type #'ty)])
+                                  #`(define name 
+                                      #,(type->contract 
+                                         typ 
+                                         ;; must be a flat contract
+                                         #:flat #t
+                                         ;; this is for a `require/typed', so the value is not from the typed side
+                                         #:typed-side #f 
+                                         (lambda () (tc-error/stx #'ty "Type ~a could not be converted to a predicate." typ)))))
+                                (syntax-property #'(define name #f)
+                                                 'typechecker:flat-contract-def #'ty))
+                            'typechecker:ignore #t)
+         ;; not a require, this is just the unchecked declaration syntax
+         #,(internal #'(require/typed-internal name (Any -> Boolean : ty))))]))
+
+(define-syntax (:type stx)
+  (syntax-parse stx
+    [(_ ty:expr)
+     #`(display #,(format "~a\n" (parse-type #'ty)))]))
 
 (define-syntax (require/opaque-type stx)
   (define-syntax-class name-exists-kw
@@ -241,6 +274,25 @@ This file defines two sorts of primitives. All of them are provided into any mod
                         'typechecker:with-handlers
                         #t))]))
 
+(define-syntax (dtsi* stx)
+  (define-syntax-class struct-name
+    #:description "struct name (with optional super-struct name)"
+    #:attributes (name super value)
+    (pattern ((~var name (static struct-info? "struct name")) super:id)
+             #:attr value (attribute name.value))
+    (pattern (~var name (static struct-info? "struct name"))
+             #:attr value (attribute name.value)
+             #:with super #f))
+  (syntax-parse stx
+    [(_ () nm:struct-name . rest)
+     (internal (quasisyntax/loc stx 
+                 (define-typed-struct-internal
+                   #,(syntax-property #'nm 'struct-info (attribute nm.value)) . rest)))]
+    [(_ (vars:id ...) nm:struct-name . rest)
+     (internal (quasisyntax/loc stx 
+                 (define-typed-struct-internal (vars ...)
+                   #,(syntax-property #'nm 'struct-info (attribute nm.value)) . rest)))]))
+
 (define-syntax (define-typed-struct stx)
   (define-syntax-class fld-spec
     #:literals (:)
@@ -259,12 +311,12 @@ This file defines two sorts of primitives. All of them are provided into any mod
                         '())])
        (with-syntax ([d-s (syntax-property (syntax/loc stx (define-struct nm (fs.fld ...) . opts))
                                            'typechecker:ignore #t)]
-                     [dtsi (internal (quasisyntax/loc stx (define-typed-struct-internal nm (fs ...) #,@mutable)))])
+                     [dtsi (quasisyntax/loc stx (dtsi* () nm (fs ...) #,@mutable))])
          #'(begin d-s dtsi)))]
     [(_ (vars:id ...) nm:struct-name (fs:fld-spec ...) . opts)
      (with-syntax ([d-s (syntax-property (syntax/loc stx (define-struct nm (fs.fld ...) . opts))
                                          'typechecker:ignore #t)]
-                   [dtsi (internal (syntax/loc stx (define-typed-struct-internal (vars ...) nm (fs ...))))])
+                   [dtsi (syntax/loc stx (dtsi* (vars ...) nm (fs ...)))])
        #'(begin d-s dtsi))]))
 
 (define-syntax (require-typed-struct stx)
@@ -283,7 +335,7 @@ This file defines two sorts of primitives. All of them are provided into any mod
                                                   (reverse (list #'sel ...))
                                                   (list mut ...)
                                                   #f))))
-                       #,(internal #'(define-typed-struct-internal nm ([fld : ty] ...) #:type-only))
+                       (dtsi* () nm ([fld : ty] ...) #:type-only)
                        #,(ignore #'(require/contract pred (any/c . c-> . boolean?) lib))
                        #,(internal #'(require/typed-internal pred (Any -> Boolean : nm)))
                        (require/typed maker nm lib #:struct-maker #f)
@@ -304,7 +356,7 @@ This file defines two sorts of primitives. All of them are provided into any mod
                                                   (list #'sel ...)
                                                   (list mut ...)
                                                   #f))))
-                       #,(internal #'(define-typed-struct-internal (nm parent) ([fld : ty] ...) #:type-only))
+                       (dtsi* () (nm parent) ([fld : ty] ...) #:type-only)
                        #,(ignore #'(require/contract pred (any/c . c-> . boolean?) lib))
                        #,(internal #'(require/typed-internal pred (Any -> Boolean : nm)))
                        (require/typed maker nm lib #:struct-maker parent)
@@ -340,6 +392,6 @@ This file defines two sorts of primitives. All of them are provided into any mod
   (let ()
     (define ((mk l/c) stx)      
       (syntax-parse stx
-       [(_ k:annotated-name . body)
-	(quasisyntax/loc stx (#,l/c k.name . body))]))
+       [(_ (~var k (param-annotated-name (lambda (s) #`(#,s -> (U))))) . body)
+	(quasisyntax/loc stx (#,l/c k.ann-name . body))]))
     (values (mk #'let/cc) (mk #'let/ec))))

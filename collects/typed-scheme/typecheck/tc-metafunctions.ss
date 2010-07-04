@@ -63,7 +63,8 @@
     [(FilterSet: f+ f-)
      (lcombine
       (apply append (for/list ([f f+]) (abo ids keys f)))
-      (apply append (for/list ([f f-]) (abo ids keys f))))]))
+      (apply append (for/list ([f f-]) (abo ids keys f))))]
+    [(NoFilter:) (lcombine null null)]))
 
 (d/c (abo xs idxs f)
   ((listof identifier?) (listof index/c) Filter/c . -> . (or/c null? (list/c LatentFilter/c)))
@@ -79,9 +80,12 @@
     [(ImpFilter: as cs)
      (let ([a* (apply append (for/list ([f as]) (abo xs idxs f)))]
            [c* (apply append (for/list ([f cs]) (abo xs idxs f)))])
-       (if (< (length a*) (length as)) ;; if we removed some things, we can't be sure
-           null
-           (list (make-LImpFilter a* c*))))]
+       (cond [(< (length a*) (length as)) ;; if we removed some things, we can't be sure
+              null]
+             [(null? c*) ;; this clause is now useless
+              null]
+             [else
+              (list (make-LImpFilter a* c*))]))]
     [_ null]))
 
 (define (merge-filter-sets fs)
@@ -118,8 +122,8 @@
   (define (idx= lf)
     (match lf
       [(LBot:) #t]
-      [(LNotTypeFilter: _ _ idx*) (type-equal? idx* idx)]
-      [(LTypeFilter: _ _ idx*) (type-equal? idx* idx)]))
+      [(LNotTypeFilter: _ _ idx*) (= idx* idx)]
+      [(LTypeFilter: _ _ idx*) (= idx* idx)]))
   (match lf
     [(LFilterSet: lf+ lf-)
      (make-LFilterSet (filter idx= lf+) (filter idx= lf-))]))

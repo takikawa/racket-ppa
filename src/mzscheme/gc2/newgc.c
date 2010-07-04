@@ -77,8 +77,9 @@ enum {
 };
 
 enum {
-  SIZE_CLASS_MED_PAGE   = 1,
-  SIZE_CLASS_BIG_PAGE   = 2,
+  SIZE_CLASS_SMALL_PAGE      = 0,
+  SIZE_CLASS_MED_PAGE        = 1,
+  SIZE_CLASS_BIG_PAGE        = 2,
   SIZE_CLASS_BIG_PAGE_MARKED = 3,
 };
 
@@ -93,6 +94,11 @@ static const char *type_name[PAGE_TYPES] = {
 
 
 #include "newgc.h"
+
+THREAD_LOCAL_DECL(static NewGC *GC_instance);
+#define GCTYPE NewGC
+#define GC_get_GC() (GC_instance)
+#define GC_set_GC(gc) (GC_instance = gc)
 
 #ifdef MZ_USE_PLACES
 static NewGC *MASTERGC;
@@ -109,6 +115,20 @@ inline static int postmaster_and_master_gc(NewGC *gc) {
 inline static int postmaster_and_place_gc(NewGC *gc) {
   return (MASTERGC && gc != MASTERGC);
 }
+static void master_collect_initiate();
+#endif
+
+#if defined(MZ_USE_PLACES)
+/*
+# define DEBUG_GC_PAGES
+# define MASTER_ALLOC_DEBUG
+# define KILLING_DEBUG
+*/
+#endif
+
+#if defined(MZ_USE_PLACES) && defined(DEBUG_GC_PAGES)
+inline static size_t real_page_size(mpage* page);
+
 static FILE *GCVERBOSEFH;
 static FILE* gcdebugOUT() {
   if (GCVERBOSEFH) { fflush(GCVERBOSEFH); }
@@ -116,28 +136,26 @@ static FILE* gcdebugOUT() {
   return GCVERBOSEFH;
 }
 
-inline static size_t real_page_size(mpage* page);
-#ifdef DEBUG_GC_PAGES
-static void GCVERBOSEPAGE(const char *msg, mpage* page) {
-  fprintf(gcdebugOUT(), "%s %p %p %p\n", msg, page, page->addr, (void*)((long)page->addr + real_page_size(page)));
+static void GCVERBOSEprintf(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(gcdebugOUT(), fmt, ap);
+    va_end(ap);
 }
-#else
-#define GCVERBOSEPAGE(msg, page) /* EMPTY */
-#endif
 
-/* #define KILLING_DEBUG */
-#ifdef KILLING_DEBUG
+static void GCVERBOSEPAGE(const char *msg, mpage* page) {
+  NewGC *gc = GC_get_GC();
+  if(postmaster_and_master_gc(gc)) {
+    GCVERBOSEprintf("%s %p %p %p\n", msg, page, page->addr, (void*)((long)page->addr + real_page_size(page)));
+  }
+}
+# ifdef KILLING_DEBUG
 static void killing_debug(NewGC *gc, void *info);
-static void marking_rmp_debug(NewGC *gc, void *info);
-#endif
+# endif
 #else
-#define GCVERBOSEPAGE(msg, page) /* EMPTY */
+# define GCVERBOSEPAGE(msg, page) /* EMPTY */
 #endif
 
-THREAD_LOCAL_DECL(static NewGC *GC);
-#define GCTYPE NewGC
-#define GC_get_GC() (GC)
-#define GC_set_GC(gc) (GC = gc)
 
 
 #include "msgprint.c"
@@ -583,8 +601,7 @@ static inline void* REMOVE_BIG_PAGE_PTR_TAG(void *p) {
 
 void GC_check_master_gc_request() {
 #ifdef MZ_USE_PLACES 
-  NewGC *gc = GC_get_GC();
-  if (MASTERGC && MASTERGC->major_places_gc == 1 && MASTERGCINFO->have_collected[gc->place_id] != 0) {
+  if (MASTERGC && MASTERGC->major_places_gc == 1) {
     GC_gcollect();
   }
 #endif
@@ -594,7 +611,7 @@ static inline void gc_if_needed_account_alloc_size(NewGC *gc, size_t allocate_si
   if((gc->gen0.current_size + allocate_size) >= gc->gen0.max_size) {
 #ifdef MZ_USE_PLACES 
     if (postmaster_and_master_gc(gc)) {
-      MASTERGC->major_places_gc = 1;
+      master_collect_initiate();
     }
     else {
 #endif
@@ -727,7 +744,6 @@ inline static void *medium_page_realloc_dead_slot(NewGC *gc, const int sz, const
   return 0;
 }
 #if defined(linux)
-/* #define MASTER_ALLOC_DEBUG */
 #if defined(MASTER_ALLOC_DEBUG)
 #include <execinfo.h>
 #include <stdio.h>
@@ -786,9 +802,9 @@ static void *allocate_medium(const size_t request_size_bytes, const int type)
 
       objptr = OBJHEAD_TO_OBJPTR(info);
     }
-#ifdef MASTER_ALLOC_DEBUG
+#if defined(DEBUG_GC_PAGES) && defined(MASTER_ALLOC_DEBUG)
   if (postmaster_and_master_gc(gc)) {
-    fprintf(gcdebugOUT(), "MASTERGC_allocate_medium %zi %i %i %i %i %p\n", request_size_bytes, type, sz, pos, 1 << (pos +3), objptr);
+    GCVERBOSEprintf("MASTERGC_allocate_medium %zi %i %i %i %i %p\n", request_size_bytes, type, sz, pos, 1 << (pos +3), objptr);
     /* print_libc_backtrace(gcdebugOUT()); */
   }
 #endif
@@ -956,7 +972,7 @@ inline static void *allocate(const size_t request_size, const int type)
     {
       /* NewGC *gc = GC_get_GC(); */
       void * objptr = OBJHEAD_TO_OBJPTR(info);
-      /* fprintf(gcdebugOUT(), "ALLOCATE page %p %zi %i %p\n", gc->gen0.curr_alloc_page->addr, request_size, type,  objptr); */
+      /* GCVERBOSEprintf("ALLOCATE page %p %zi %i %p\n", gc->gen0.curr_alloc_page->addr, request_size, type,  objptr); */
       ASSERT_VALID_OBJPTR(objptr);
       return objptr;
     }
@@ -1090,8 +1106,9 @@ inline static void resize_gen0(NewGC *gc, unsigned long new_size)
   mpage *prev = NULL;
   unsigned long alloced_size = 0;
 
+
   /* first, make sure the big pages pointer is clean */
-  gc->gen0.big_pages = NULL; 
+  GC_ASSERT(gc->gen0.big_pages == NULL);
 
   /* reset any parts of gen0 we're keeping */
   while(work && (alloced_size < new_size)) {
@@ -1147,6 +1164,13 @@ inline static void resize_gen0(NewGC *gc, unsigned long new_size)
   }
 }
 
+#ifdef MZ_USE_PLACES
+inline static void master_set_max_size(NewGC *gc)
+{
+  gc->gen0.max_size = gc->gen0.current_size + GEN0_INITIAL_SIZE;
+}
+#endif
+
 inline static void reset_nursery(NewGC *gc)
 {
   unsigned long new_gen0_size; 
@@ -1168,15 +1192,23 @@ inline static int marked(NewGC *gc, void *p)
 
   if(!p) return 0;
   if(!(page = pagemap_find_page(gc->page_maps, p))) return 1;
-  if (page->size_class) {
-    if (page->size_class > 1) {
-      return (page->size_class > 2);
-    }
-  } else if (page->generation) {
-    if((NUM(page->addr) + page->previous_size) > NUM(p)) 
+  switch(page->size_class) {
+    case SIZE_CLASS_BIG_PAGE_MARKED:
       return 1;
+    case SIZE_CLASS_SMALL_PAGE:
+      if (page->generation) {
+        if((NUM(page->addr) + page->previous_size) > NUM(p)) 
+          return 1;
+      }
+      /* else FALLTHROUGH */
+    case SIZE_CLASS_MED_PAGE: /* FALLTHROUGH */
+    case SIZE_CLASS_BIG_PAGE:
+      return OBJPTR_TO_OBJHEAD(p)->mark;
+      break;
+    default:
+      fprintf(stderr, "ABORTING! INVALID SIZE_CLASS %i\n", page->size_class);
+      exit(EXIT_FAILURE);
   }
-  return OBJPTR_TO_OBJHEAD(p)->mark;
 }
 
 /*****************************************************************************/
@@ -1400,21 +1432,37 @@ static inline void *get_stack_base(NewGC *gc) {
 
 #include "stack_comp.c"
 
-#define GC_X_variable_stack GC_mark_variable_stack
-#define gcX(a) gcMARK(*a)
+#define GC_X_variable_stack GC_mark2_variable_stack
+#define gcX2(a, gc) gcMARK2(*a, gc)
 #define X_source(stk, p) set_backtrace_source((stk ? stk : p), BT_STACK)
 #include "var_stack.c"
 #undef GC_X_variable_stack
-#undef gcX
+#undef gcX2
 #undef X_source
 
-#define GC_X_variable_stack GC_fixup_variable_stack
-#define gcX(a) gcFIXUP(*a)
+#define GC_X_variable_stack GC_fixup2_variable_stack
+#define gcX2(a, gc) gcFIXUP2(*a, gc)
 #define X_source(stk, p) /* */
 #include "var_stack.c"
 #undef GC_X_variable_stack
-#undef gcX
+#undef gcX2
 #undef X_source
+
+void GC_mark_variable_stack(void **var_stack,
+                            long delta,
+                            void *limit,
+                            void *stack_mem)
+{
+  GC_mark2_variable_stack(var_stack, delta, limit, stack_mem, GC_get_GC());
+}
+
+void GC_fixup_variable_stack(void **var_stack,
+                             long delta,
+                             void *limit,
+                             void *stack_mem)
+{
+  GC_fixup2_variable_stack(var_stack, delta, limit, stack_mem, GC_get_GC());
+}
 
 /*****************************************************************************/
 /* Routines for root sets                                                    */
@@ -1467,16 +1515,16 @@ inline static void mark_finalizer_structs(NewGC *gc)
 
   for(fnl = GC_resolve(gc->finalizers); fnl; fnl = GC_resolve(fnl->next)) { 
     set_backtrace_source(fnl, BT_FINALIZER);
-    gcMARK(fnl->data); 
+    gcMARK2(fnl->data, gc); 
     set_backtrace_source(&gc->finalizers, BT_ROOT);
-    gcMARK(fnl);
+    gcMARK2(fnl, gc);
   }
   for(fnl = gc->run_queue; fnl; fnl = fnl->next) {
     set_backtrace_source(fnl, BT_FINALIZER);
-    gcMARK(fnl->data);
-    gcMARK(fnl->p);
+    gcMARK2(fnl->data, gc);
+    gcMARK2(fnl->p, gc);
     set_backtrace_source(&gc->run_queue, BT_ROOT);
-    gcMARK(fnl);
+    gcMARK2(fnl, gc);
   }
 }  
 
@@ -1485,17 +1533,17 @@ inline static void repair_finalizer_structs(NewGC *gc)
   Fnl *fnl;
 
   /* repair the base parts of the list */
-  gcFIXUP(gc->finalizers); gcFIXUP(gc->run_queue);
+  gcFIXUP2(gc->finalizers, gc); gcFIXUP2(gc->run_queue, gc);
   /* then repair the stuff inside them */
   for(fnl = gc->finalizers; fnl; fnl = fnl->next) {
-    gcFIXUP(fnl->data);
-    gcFIXUP(fnl->p);
-    gcFIXUP(fnl->next);
+    gcFIXUP2(fnl->data, gc);
+    gcFIXUP2(fnl->p, gc);
+    gcFIXUP2(fnl->next, gc);
   }
   for(fnl = gc->run_queue; fnl; fnl = fnl->next) {
-    gcFIXUP(fnl->data);
-    gcFIXUP(fnl->p);
-    gcFIXUP(fnl->next);
+    gcFIXUP2(fnl->data, gc);
+    gcFIXUP2(fnl->p, gc);
+    gcFIXUP2(fnl->next, gc);
   }
 }
 
@@ -1513,7 +1561,7 @@ inline static void check_finalizers(NewGC *gc, int level)
                "CFNL: Level %i finalizer %p on %p queued for finalization.\n",
                work->eager_level, work, work->p));
       set_backtrace_source(work, BT_FINALIZER);
-      gcMARK(work->p);
+      gcMARK2(work->p, gc);
       if(prev) prev->next = next;
       if(!prev) gc->finalizers = next;
       if(gc->last_in_queue) gc->last_in_queue = gc->last_in_queue->next = work;
@@ -1535,7 +1583,7 @@ inline static void check_finalizers(NewGC *gc, int level)
 inline static void do_ordered_level3(NewGC *gc)
 {
   struct finalizer *temp;
-  Mark_Proc *mark_table = gc->mark_table;
+  Mark2_Proc *mark_table = gc->mark_table;
 
   for(temp = GC_resolve(gc->finalizers); temp; temp = GC_resolve(temp->next))
     if(!marked(gc, temp->p)) {
@@ -1543,7 +1591,7 @@ inline static void do_ordered_level3(NewGC *gc)
                "LVL3: %p is not marked. Marking payload (%p)\n", 
                temp, temp->p));
       set_backtrace_source(temp, BT_FINALIZER);
-      if(temp->tagged) mark_table[*(unsigned short*)temp->p](temp->p);
+      if(temp->tagged) mark_table[*(unsigned short*)temp->p](temp->p, gc);
       if(!temp->tagged) GC_mark_xtagged(temp->p);
     }
 }
@@ -1566,7 +1614,7 @@ inline static void mark_weak_finalizer_structs(NewGC *gc)
   GCDEBUG((DEBUGOUTF, "MARKING WEAK FINALIZERS.\n"));
   for(work = gc->weak_finalizers; work; work = work->next) {
     set_backtrace_source(&gc->weak_finalizers, BT_ROOT);
-    gcMARK(work);
+    gcMARK2(work, gc);
   }
 }
 
@@ -1575,16 +1623,16 @@ inline static void repair_weak_finalizer_structs(NewGC *gc)
   Weak_Finalizer *work;
   Weak_Finalizer *prev;
 
-  gcFIXUP(gc->weak_finalizers);
+  gcFIXUP2(gc->weak_finalizers, gc);
   work = gc->weak_finalizers; prev = NULL;
   while(work) {
-    gcFIXUP(work->next);
+    gcFIXUP2(work->next, gc);
     if(!marked(gc, work->p)) {
       if(prev) prev->next = work->next;
       if(!prev) gc->weak_finalizers = work->next;
       work = GC_resolve(work->next);
     } else {
-      gcFIXUP(work->p);
+      gcFIXUP2(work->p, gc);
       prev = work;
       work = work->next;
     }
@@ -1608,7 +1656,7 @@ inline static void reset_weak_finalizers(NewGC *gc)
   for(wfnl = GC_resolve(gc->weak_finalizers); wfnl; wfnl = GC_resolve(wfnl->next)) {
     if(marked(gc, wfnl->p)) {
       set_backtrace_source(wfnl, BT_WEAKLINK);
-      gcMARK(wfnl->saved); 
+      gcMARK2(wfnl->saved, gc); 
     }
     *(void**)(NUM(GC_resolve(wfnl->p)) + wfnl->offset) = wfnl->saved;
     wfnl->saved = NULL;
@@ -1722,7 +1770,7 @@ inline static void reset_pointer_stack(NewGC *gc)
   gc->mark_stack->top = MARK_STACK_START(gc->mark_stack);
 }
 
-static inline void propagate_marks_worker(PageMap pagemap, Mark_Proc *mark_table, void *p);
+static inline void propagate_marks_worker(NewGC *gc, Mark2_Proc *mark_table, void *p);
 
 /*****************************************************************************/
 /* MEMORY ACCOUNTING                                                         */
@@ -1825,6 +1873,7 @@ void GC_write_barrier(void *p)
 static void NewGCMasterInfo_initialize() {
   MASTERGCINFO = ofm_malloc_zero(sizeof(NewGCMasterInfo));
   mzrt_rwlock_create(&MASTERGCINFO->cangc);
+  mzrt_sema_create(&MASTERGCINFO->wait_sema, 0);
 }
 
 static void NewGCMasterInfo_cleanup() {
@@ -1837,52 +1886,97 @@ static void NewGCMasterInfo_set_have_collected(NewGC *gc) {
   MASTERGCINFO->have_collected[gc->place_id] = 1;
 }
 
-static void Master_collect() {
 
-  NewGC *gc = GC_get_GC();
-  if (premaster_or_master_gc(gc)) return; /* master shouldn't attempt to start itself */
-
-  GC_switch_to_master_gc();
-  GC_LOCK_DEBUG("MGCLOCK Master_collect\n");
-  
-  if ( MASTERGC->major_places_gc ) {
+/* signals every place to do a full gc at then end of 
+   garbage_collect the places will call 
+   wait_if_master_in_progress and
+   rendezvous for a master gc */
+static void master_collect_initiate() {
+  if (MASTERGC->major_places_gc == 0) {
     int i = 0;
-    int children_ready = 1;
     int maxid = MASTERGCINFO->next_GC_id;
-    for (i=1; i < maxid; i++) {
-      int have_collected = MASTERGCINFO->have_collected[i];
+    MASTERGC->major_places_gc = 1;
 
-      if (have_collected == 1) {
-        printf("%i READY\n", i);
+    for (i=1; i < maxid; i++) {
+      void *signal_fd = MASTERGCINFO->signal_fds[i];
+      MASTERGCINFO->have_collected[i] = -1;
+      if (signal_fd >= 0 ) { 
+        scheme_signal_received_at(signal_fd);
       }
-      else if ( have_collected == 0) {
-        void *signal_fd = MASTERGCINFO->signal_fds[i];
-        printf("%i NOT COLLECTED\n", i);
-        children_ready = 0;
-        MASTERGCINFO->have_collected[i] = -1;
-        if (signal_fd >= 0 ) { 
-          scheme_signal_received_at(signal_fd);
-        }
-      }
-      else {
-        printf("%i SIGNALED BUT NOT COLLECTED\n", i);
-      }
-    }
-    if (children_ready) {
-      for (i=0; i < maxid; i++) {
-        MASTERGCINFO->have_collected[i] = 0;
-      }
-      printf("START MASTER COLLECTION\n");
-      fprintf(gcdebugOUT(), "START MASTER COLLECTION\n");
-      MASTERGC->major_places_gc = 0;
-      garbage_collect(MASTERGC, 1, 0);
-      printf("END MASTER COLLECTION\n");
-      fprintf(gcdebugOUT(), "END MASTER COLLECTION\n");
+#if defined(DEBUG_GC_PAGES)
+      printf("%i SIGNALED BUT NOT COLLECTED\n", i);
+      GCVERBOSEprintf("%i SIGNALED BUT NOT COLLECTED\n", i);
+#endif
     }
   }
+}
 
-  GC_LOCK_DEBUG("UNMGCLOCK Master_collect\n");
-  GC_switch_back_from_master(gc);
+
+static void wait_if_master_in_progress(NewGC *gc) {
+  if (MASTERGC->major_places_gc == 1) {
+    int last_one_here = 1;
+
+    mzrt_rwlock_wrlock(MASTERGCINFO->cangc);
+    GC_LOCK_DEBUG("MGCLOCK GC_switch_to_master_gc\n");
+    {
+      int i = 0;
+      int maxid = MASTERGCINFO->next_GC_id;
+
+      NewGCMasterInfo_set_have_collected(gc);
+      for (i=1; i < maxid; i++) {
+        int have_collected = MASTERGCINFO->have_collected[i];
+        if (have_collected == 1) {
+#if defined(DEBUG_GC_PAGES)
+            printf("%i READY\n", i);
+            GCVERBOSEprintf("%i READY\n", i);
+#endif
+        }
+        else {
+#if defined(DEBUG_GC_PAGES)
+          printf("%i SIGNALED BUT NOT COLLECTED\n", i);
+          GCVERBOSEprintf("%i SIGNALED BUT NOT COLLECTED\n", i);
+#endif
+          last_one_here = 0; 
+        }
+      }
+    }
+    if (last_one_here) {
+      int i = 0;
+      int maxid = MASTERGCINFO->next_GC_id;
+      NewGC *saved_gc;
+      
+      GC_LOCK_DEBUG("UNMGCLOCK GC_switch_to_master_gc\n");
+      mzrt_rwlock_unlock(MASTERGCINFO->cangc);
+
+
+      saved_gc = GC_switch_to_master_gc();
+      {
+#if defined(DEBUG_GC_PAGES)
+        printf("START MASTER COLLECTION\n");
+        GCVERBOSEprintf("START MASTER COLLECTION\n");
+#endif
+        MASTERGC->major_places_gc = 0;
+        garbage_collect(MASTERGC, 1, 0);
+#if defined(DEBUG_GC_PAGES)
+        printf("END MASTER COLLECTION\n");
+        GCVERBOSEprintf("END MASTER COLLECTION\n");
+#endif
+
+        /* wake everyone back up */  
+        for (i=2; i < maxid; i++) {
+          mzrt_sema_post(MASTERGCINFO->wait_sema);
+        }
+      }
+      GC_switch_back_from_master(saved_gc);
+    }
+    else {
+      GC_LOCK_DEBUG("UNMGCLOCK GC_switch_to_master_gc\n");
+      mzrt_rwlock_unlock(MASTERGCINFO->cangc);
+
+      /* wait on semaphonre */
+      mzrt_sema_wait(MASTERGCINFO->wait_sema);
+    }
+  }
 }
 
 static void NewGCMasterInfo_get_next_id(NewGC *newgc) {
@@ -1918,8 +2012,8 @@ static void NewGC_initialize(NewGC *newgc, NewGC *parentgc) {
 #ifdef MZ_USE_PLACES
     NewGCMasterInfo_initialize();
 #endif
-    newgc->mark_table  = ofm_malloc_zero(NUMBER_OF_TAGS * sizeof (Mark_Proc)); 
-    newgc->fixup_table = ofm_malloc_zero(NUMBER_OF_TAGS * sizeof (Fixup_Proc)); 
+    newgc->mark_table  = ofm_malloc_zero(NUMBER_OF_TAGS * sizeof (Mark2_Proc)); 
+    newgc->fixup_table = ofm_malloc_zero(NUMBER_OF_TAGS * sizeof (Fixup2_Proc)); 
 #ifdef NEWGC_BTC_ACCOUNT
     BTC_initialize_mark_table(newgc);
 #endif
@@ -1975,9 +2069,9 @@ static NewGC *init_type_tags_worker(NewGC *parentgc, int count, int pair, int mu
   resize_gen0(gc, GEN0_INITIAL_SIZE);
 
   if (!parentgc) {
-    GC_register_traversers(gc->weak_box_tag, size_weak_box, mark_weak_box, fixup_weak_box, 0, 0);
-    GC_register_traversers(gc->ephemeron_tag, size_ephemeron, mark_ephemeron, fixup_ephemeron, 0, 0);
-    GC_register_traversers(gc->weak_array_tag, size_weak_array, mark_weak_array, fixup_weak_array, 0, 0);
+    GC_register_traversers2(gc->weak_box_tag, size_weak_box, mark_weak_box, fixup_weak_box, 0, 0);
+    GC_register_traversers2(gc->ephemeron_tag, size_ephemeron, mark_ephemeron, fixup_ephemeron, 0, 0);
+    GC_register_traversers2(gc->weak_array_tag, size_weak_array, mark_weak_array, fixup_weak_array, 0, 0);
   }
   initialize_signal_handler(gc);
   GC_add_roots(&gc->park, (char *)&gc->park + sizeof(gc->park) + 1);
@@ -2085,8 +2179,8 @@ void GC_gcollect(void)
 }
 
 static inline int atomic_mark(void *p) { return 0; }
-void GC_register_traversers(short tag, Size_Proc size, Mark_Proc mark,
-                            Fixup_Proc fixup, int constant_Size, int atomic)
+void GC_register_traversers2(short tag, Size2_Proc size, Mark2_Proc mark,
+                             Fixup2_Proc fixup, int constant_Size, int atomic)
 {
   NewGC *gc = GC_get_GC();
 
@@ -2101,8 +2195,15 @@ void GC_register_traversers(short tag, Size_Proc size, Mark_Proc mark,
   atomic = 0;
 #endif
 
-  gc->mark_table[mark_tag]  = atomic ? (Mark_Proc)PAGE_ATOMIC : mark;
+  gc->mark_table[mark_tag]  = atomic ? (Mark2_Proc)PAGE_ATOMIC : mark;
   gc->fixup_table[tag]      = fixup;
+}
+
+void GC_register_traversers(short tag, Size_Proc size, Mark_Proc mark,
+                            Fixup_Proc fixup, int constant_Size, int atomic)
+{
+  GC_register_traversers2(tag, (Size2_Proc)size, (Mark2_Proc)mark,
+                          (Fixup2_Proc)fixup, constant_Size, atomic);
 }
 
 long GC_get_memory_use(void *o) 
@@ -2125,21 +2226,19 @@ long GC_get_memory_use(void *o)
    we use internally, and it doesn't do nearly as much. */
 
 /* This is the first mark routine. It's a bit complicated. */
-void GC_mark(const void *const_p)
+void GC_mark2(const void *const_p, struct NewGC *gc)
 {
   mpage *page;
   void *p = (void*)const_p;
-  NewGC *gc;
 
   if(!p || (NUM(p) & 0x1)) {
     GCDEBUG((DEBUGOUTF, "Not marking %p (bad ptr)\n", p));
     return;
   }
 
-  gc = GC_get_GC();
   if(!(page = pagemap_find_page(gc->page_maps, p))) {
 #ifdef MZ_USE_PLACES
-    if (!MASTERGC || !(page = pagemap_find_page(MASTERGC->page_maps, p)))
+    if (!MASTERGC || !MASTERGC->major_places_gc || !(page = pagemap_find_page(MASTERGC->page_maps, p)))
 #endif
     {
       GCDEBUG((DEBUGOUTF,"Not marking %p (no page)\n",p));
@@ -2173,6 +2272,8 @@ void GC_mark(const void *const_p)
         if(page->prev) page->prev->next = page->next; else
           gc->gen0.big_pages = page->next;
         if(page->next) page->next->prev = page->prev;
+        
+        GCVERBOSEPAGE("MOVING BIG PAGE TO GEN1", page);
 
         backtrace_new_page(gc, page);
 
@@ -2325,9 +2426,14 @@ void GC_mark(const void *const_p)
   }
 }
 
+void GC_mark(const void *const_p)
+{
+  GC_mark2(const_p, GC_get_GC());
+}
+
 /* this is the second mark routine. It's not quite as complicated. */
 /* this is what actually does mark propagation */
-static inline void propagate_marks_worker(PageMap pagemap, Mark_Proc *mark_table, void *pp)
+static inline void propagate_marks_worker(NewGC *gc, Mark2_Proc *mark_table, void *pp)
 {
   void **start, **end;
   int alloc_type;
@@ -2338,9 +2444,9 @@ static inline void propagate_marks_worker(PageMap pagemap, Mark_Proc *mark_table
   if (IS_BIG_PAGE_PTR(pp)) {
     mpage *page;
     p = REMOVE_BIG_PAGE_PTR_TAG(pp);
-    page = pagemap_find_page(pagemap, p);
+    page = pagemap_find_page(gc->page_maps, p);
 #ifdef MZ_USE_PLACES
-    if (!page) {
+    if (!page && MASTERGC && MASTERGC->major_places_gc) {
       page = pagemap_find_page(MASTERGC->page_maps, p);
     }
 #endif
@@ -2362,12 +2468,12 @@ static inline void propagate_marks_worker(PageMap pagemap, Mark_Proc *mark_table
     case PAGE_TAGGED: 
       {
         const unsigned short tag = *(unsigned short*)start;
-        Mark_Proc markproc;
+        Mark2_Proc markproc;
         ASSERT_TAG(tag);
         markproc = mark_table[tag];
         if(((unsigned long) markproc) >= PAGE_TYPES) {
           GC_ASSERT(markproc);
-          markproc(start);
+          markproc(start, gc);
         }
         break;
       }
@@ -2375,7 +2481,7 @@ static inline void propagate_marks_worker(PageMap pagemap, Mark_Proc *mark_table
       break;
     case PAGE_ARRAY: 
       {
-        while(start < end) gcMARK(*start++); break;
+        while(start < end) gcMARK2(*start++, gc); break;
       }
     case PAGE_TARRAY: 
       {
@@ -2384,7 +2490,7 @@ static inline void propagate_marks_worker(PageMap pagemap, Mark_Proc *mark_table
         end -= INSET_WORDS;
         while(start < end) {
           GC_ASSERT(mark_table[tag]);
-          start += mark_table[tag](start);
+          start += mark_table[tag](start, gc);
         }
         break;
       }
@@ -2396,12 +2502,11 @@ static inline void propagate_marks_worker(PageMap pagemap, Mark_Proc *mark_table
 static void propagate_marks(NewGC *gc) 
 {
   void *p;
-  PageMap pagemap = gc->page_maps;
-  Mark_Proc *mark_table = gc->mark_table;
+  Mark2_Proc *mark_table = gc->mark_table;
 
   while(pop_ptr(gc, &p)) {
     GCDEBUG((DEBUGOUTF, "Popped pointer %p\n", p));
-    propagate_marks_worker(pagemap, mark_table, p);
+    propagate_marks_worker(gc, mark_table, p);
   }
 }
 
@@ -2426,16 +2531,14 @@ void *GC_fixup_self(void *p)
   return p;
 }
 
-void GC_fixup(void *pp)
+void GC_fixup2(void *pp, struct NewGC *gc)
 {
-  NewGC *gc;
   mpage *page;
   void *p = *(void**)pp;
 
   if(!p || (NUM(p) & 0x1))
     return;
 
-  gc = GC_get_GC();
   if((page = pagemap_find_page(gc->page_maps, p))) {
     objhead *info;
 
@@ -2445,6 +2548,11 @@ void GC_fixup(void *pp)
       *(void**)pp = *(void**)p;
     else GCDEBUG((DEBUGOUTF, "Not repairing %p from %p (not moved)\n",p,pp));
   } else GCDEBUG((DEBUGOUTF, "Not repairing %p from %p (no page)\n", p, pp));
+}
+
+void GC_fixup(void *pp)
+{
+  GC_fixup2(pp, GC_get_GC());
 }
 
 /*****************************************************************************/
@@ -2978,7 +3086,7 @@ static void fprintf_debug(NewGC *gc, const char *msg, objhead *info, FILE* file,
           fprintf(file, "RMP %p already freed and out of bounds\n", SCHEME_PATH_VAL(obj));
         }
       default:
-        fprintf_buffer(file, ((char *)obj), (info->size * WORD_SIZE));
+        fprintf_buffer(file, ((char *)obj), (info->size * WORD_SIZE) - sizeof(objhead));
         break;
     }
   }
@@ -2995,18 +3103,20 @@ static void repair_heap(NewGC *gc)
 {
   mpage *page;
   int i;
-  Fixup_Proc *fixup_table = gc->fixup_table;
+  Fixup2_Proc *fixup_table = gc->fixup_table;
 #ifdef MZ_USE_PLACES
   int master_has_switched = postmaster_and_master_gc(gc);
 #endif
 
+  
   for(i = 0; i < PAGE_TYPES; i++) {
     for(page = gc->gen1_pages[i]; page; page = page->next) {
 #ifdef MZ_USE_PLACES
-      if (master_has_switched || page->marked_on) {
+      if (master_has_switched || page->marked_on)
 #else
-      if (page->marked_on) {
+      if (page->marked_on)
 #endif
+      {
         page->has_new = 0;
         /* these are guaranteed not to be protected */
         if(page->size_class)  {
@@ -3023,11 +3133,11 @@ static void repair_heap(NewGC *gc)
           page->size_class = 2; /* remove the mark */
           switch(page->page_type) {
           case PAGE_TAGGED: 
-            fixup_table[*(unsigned short*)start](start); 
+            fixup_table[*(unsigned short*)start](start, gc); 
             break;
           case PAGE_ATOMIC: break;
           case PAGE_ARRAY: 
-            while(start < end) gcFIXUP(*(start++)); 
+            while(start < end) gcFIXUP2(*(start++), gc); 
             break;
           case PAGE_XTAGGED: 
             GC_fixup_xtagged(start); 
@@ -3036,7 +3146,7 @@ static void repair_heap(NewGC *gc)
             unsigned short tag = *(unsigned short *)start;
             ASSERT_TAG(tag);
             end -= INSET_WORDS;
-            while(start < end) start += fixup_table[tag](start);
+            while(start < end) start += fixup_table[tag](start, gc);
             break;
           }
           }
@@ -3059,7 +3169,7 @@ static void repair_heap(NewGC *gc)
                   unsigned short tag = *(unsigned short *)obj_start;
                   ASSERT_TAG(tag);
                   info->mark = 0;
-                  fixup_table[tag](obj_start);
+                  fixup_table[tag](obj_start, gc);
                 } else {
                   info->dead = 1;
                 }
@@ -3082,7 +3192,7 @@ static void repair_heap(NewGC *gc)
                 if(info->mark) {
                   void **tempend = PPTR(info) + info->size;
                   start = OBJHEAD_TO_OBJPTR(start);
-                  while(start < tempend) gcFIXUP(*start++);
+                  while(start < tempend) gcFIXUP2(*start++, gc);
                   info->mark = 0;
                 } else { 
                   info->dead = 1;
@@ -3101,7 +3211,7 @@ static void repair_heap(NewGC *gc)
                   tag = *(unsigned short*)start;
                   ASSERT_TAG(tag);
                   while(start < tempend)
-                    start += fixup_table[tag](start);
+                    start += fixup_table[tag](start, gc);
                   info->mark = 0;
                   start = PPTR(info) + size;
                 } else {
@@ -3128,10 +3238,11 @@ static void repair_heap(NewGC *gc)
   for (i = 0; i < NUM_MED_PAGE_SIZES; i++) {
     for (page = gc->med_pages[i]; page; page = page->next) {
 #ifdef MZ_USE_PLACES
-      if (master_has_switched || page->marked_on) {
+      if (master_has_switched || page->marked_on)
 #else
-      if (page->marked_on) {
+      if (page->marked_on)
 #endif
+      {
         void **start = PPTR(NUM(page->addr) + PREFIX_SIZE);
         void **end = PPTR(NUM(page->addr) + APAGE_SIZE - page->size);
         
@@ -3143,7 +3254,7 @@ static void repair_heap(NewGC *gc)
               {
                 void **tempend = PPTR(info) + info->size;
                 start = OBJHEAD_TO_OBJPTR(start);
-                while(start < tempend) gcFIXUP(*start++);
+                while(start < tempend) gcFIXUP2(*start++, gc);
               }
               break;
             case PAGE_TAGGED:
@@ -3151,7 +3262,7 @@ static void repair_heap(NewGC *gc)
                 void *obj_start = OBJHEAD_TO_OBJPTR(start);
                 unsigned short tag = *(unsigned short *)obj_start;
                 ASSERT_TAG(tag);
-                fixup_table[tag](obj_start);
+                fixup_table[tag](obj_start, gc);
                 start += info->size;
               }
               break;
@@ -3178,7 +3289,7 @@ static void repair_heap(NewGC *gc)
 static inline void gen1_free_mpage(PageMap pagemap, mpage *page) {
   pagemap_remove(pagemap, page);
   free_backtrace(page);
-  free_pages(GC, page->addr, real_page_size(page));
+  free_pages(GC_instance, page->addr, real_page_size(page));
   free_mpage(page);
 }
 
@@ -3202,6 +3313,8 @@ inline static void gen0_free_big_pages(NewGC *gc) {
   PageMap pagemap = gc->page_maps;
 
   for(work = gc->gen0.big_pages; work; work = next) {
+    GCVERBOSEPAGE("FREEING BIG PAGE", work);
+ 
     next = work->next;
     pagemap_remove(pagemap, work);
     free_pages(gc, work->addr, round_to_apage_size(work->size));
@@ -3233,6 +3346,7 @@ static void clean_up_heap(NewGC *gc)
           GCVERBOSEPAGE("Cleaning up BIGPAGE", work);
           gen1_free_mpage(pagemap, work);
         } else {
+          GCVERBOSEPAGE("clean_up_heap BIG PAGE ALIVE", work);
           pagemap_add(pagemap, work);
           work->back_pointers = work->marked_on = 0;
           memory_in_use += work->size;
@@ -3309,6 +3423,7 @@ static void clean_up_heap(NewGC *gc)
   cleanup_vacated_pages(gc);
 }
 
+#ifdef MZ_USE_PLACES
 static void unprotect_old_pages(NewGC *gc)
 {
   Page_Range *protect_range = gc->protect_range;
@@ -3337,6 +3452,8 @@ static void unprotect_old_pages(NewGC *gc)
 
   flush_protect_page_ranges(protect_range, 0);
 }
+#endif
+
 static void protect_old_pages(NewGC *gc)
 {
   Page_Range *protect_range = gc->protect_range;
@@ -3420,7 +3537,11 @@ static void garbage_collect(NewGC *gc, int force_full, int switching_master)
     gc->full_needed_for_finalization= 0;
     gc->gc_full = 1;
   }
-
+#ifdef DEBUG_GC_PAGES
+  if (gc->gc_full == 1) {
+    GCVERBOSEprintf("GC_FULL gc: %p MASTER: %p\n", gc, MASTERGC);
+  }
+#endif
   gc->number_of_gc_runs++; 
   INIT_DEBUG_FILE(); DUMP_HEAP();
 
@@ -3535,6 +3656,9 @@ static void garbage_collect(NewGC *gc, int force_full, int switching_master)
   clean_up_heap(gc);
   TIME_STEP("cleaned heap");
 #ifdef MZ_USE_PLACES
+  if (postmaster_and_master_gc(gc) && !switching_master) {
+    master_set_max_size(gc); 
+  }
   if (premaster_or_place_gc(gc) && !switching_master)
 #endif
     reset_nursery(gc);
@@ -3645,13 +3769,10 @@ static void garbage_collect(NewGC *gc, int force_full, int switching_master)
 
 #ifdef MZ_USE_PLACES
   if (postmaster_and_place_gc(gc)) {
-    if (gc->gc_full) { 
-      NewGCMasterInfo_set_have_collected(gc);
-    }
     /* printf("UN RD MGCLOCK garbage_collect %i\n", gc->place_id); */
     mzrt_rwlock_unlock(MASTERGCINFO->cangc);
     if (gc->gc_full) { 
-      Master_collect();
+       wait_if_master_in_progress(gc);
     }
   }
 #endif
@@ -3670,7 +3791,7 @@ static void dump_stack_pos(void *a)
 }
 
 # define GC_X_variable_stack GC_do_dump_variable_stack
-# define gcX(a) dump_stack_pos(a)
+# define gcX2(a, gc) dump_stack_pos(a)
 # define X_source(stk, p) /* */
 # include "var_stack.c"
 # undef GC_X_variable_stack

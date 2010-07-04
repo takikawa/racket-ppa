@@ -1,6 +1,11 @@
 #lang scheme/gui
 
 #| TODO: 
+   -- yield instead of sync
+   -- run callbacks in user eventspace
+   -- make timer fire just once; restart after on-tick callback finishes
+   -- take out counting; replace by 0.25 delay
+
    -- make window resizable :: why
    -- what if clauses are repeated in world and/or universe descriptions? 
    -- what if the initial world or universe state is omitted? the error message is bad then. 
@@ -39,11 +44,11 @@
   [on-tick (function-with-arity
             1 
             except
-            [(_ x rate) 
-             #'(list (proc> 'on-tick (f2h x) 1) 
-                     (num> 'on-tick rate (lambda (x)
-                                           (and (real? x) (positive? x)))
-                           "pos. number" "rate"))])]
+            [(_ f rate) 
+             #'(list 
+                (proc> 'on-tick (f2h f) 1)
+                (num> 'on-tick rate (lambda (x) (and (real? x) (positive? x)))
+                      "positive number" "rate"))])]
   ;; -- state specifies whether to display the current state 
   [state (expr-with-check bool> "expected a boolean (show state or not)")]
   ;; -- check-with must specify a predicate 
@@ -98,7 +103,6 @@
     "right"
     "up"
     "down"
-    "release"
     "start"
     "cancel"
     "clear"
@@ -141,6 +145,8 @@
   [on-mouse (function-with-arity 4)]
   ;; -- on-key must specify a key event handler 
   [on-key (function-with-arity 2)]
+  ;; -- on-release must specify a release event handler 
+  [on-release (function-with-arity 2)]
   ;; -- on-receive must specify a receive handler 
   [on-receive (function-with-arity 2)]
   ;; -- stop-when must specify a predicate; it may specify a rendering function

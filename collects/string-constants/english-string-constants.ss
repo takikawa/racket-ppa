@@ -89,7 +89,7 @@ please adhere to these guidelines:
 |#
 
 (module english-string-constants "string-constant-lang.ss"
- ;;; when translating this constant, substitute name of actual langauge for `English'
+ ;;; when translating this constant, substitute name of actual language for `English'
  (is-this-your-native-language "Is English Your Native Language?")
 
  (are-you-sure-you-want-to-switch-languages
@@ -312,7 +312,7 @@ please adhere to these guidelines:
  (plt:hd:refresh-downloading... "Downloading ~a...")
  (plt:hd:refresh-deleting... "Deleting old version of ~a...")
  (plt:hd:refresh-installing... "Installing new version of ~a...")
- (plt:hd:refresh-clearing-indicies "Clearing cached indices")
+ (plt:hd:refresh-clearing-indices "Clearing cached indices")
  (plt:hd:refreshing-manuals-finished "Finished.")
  (plt:hd:about-help-desk "About Help Desk")
  (plt:hd:help-desk-about-string
@@ -450,7 +450,7 @@ please adhere to these guidelines:
  (revert-to-defaults "Revert to Defaults")
   
   (black-on-white-color-scheme "Black on White") ;; these two appear in the color preferences dialog on butttons
-  (white-on-black-color-scheme "White on Black") ;; clicking the buttons changes teh color schemes to some defaults that've been set up.
+  (white-on-black-color-scheme "White on Black") ;; clicking the buttons changes the color schemes to some defaults that've been set up.
   
  ; title of the color choosing dialog
 
@@ -730,6 +730,7 @@ please adhere to these guidelines:
  (most-recent-window "Most Recent Window")
   (next-tab "Next Tab")
   (prev-tab "Previous Tab")
+  (tab-i "Tab ~a: ~a") ;; menu item in the windows menu under mac os x. first ~a is filled with a number between 1 and 9; second one is the filename of the tab
 
  (view-menu-label "&View")
  (show-overview "Show &Program Contour") 
@@ -1055,6 +1056,7 @@ please adhere to these guidelines:
   (initial-language-category "Initial language")
   (no-language-chosen "No language chosen")
  
+  (module-language-name "Determine language from source")
  (module-language-one-line-summary "Reads the #lang line to specify the actual language")
   (module-language-auto-text "Automatic #lang line") ;; shows up in the details section of the module language
    
@@ -1183,7 +1185,7 @@ please adhere to these guidelines:
  (module-browser-laying-out-graph-label "Laying out graph")
  (module-browser-open-file-format "Open ~a")
  (module-browser "Module Browser") ;; frame title
- (module-browser... "Module Browser...") ;; menu item title
+ (module-browser... "&Module Browser...") ;; menu item title
  (module-browser-error-expanding "Error expanding the program:\n\n~a")
  (module-browser-show-lib-paths "Show files loaded by (lib ..) paths")
  (module-browser-progress "Module Browser: ~a") ;; prefix in the status line

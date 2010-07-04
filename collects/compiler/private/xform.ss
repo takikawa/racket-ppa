@@ -586,22 +586,24 @@
         
         (define per-block-push? #t)
         (define gc-var-stack-mode
-          (ormap (lambda (e)
-                   (cond
-                    [(and (pragma? e)
-                          (regexp-match #rx"GC_VARIABLE_STACK_THOUGH_TABLE" (pragma-s e)))
-                     'table]
-                    [(and (tok? e)
-                          (eq? (tok-n e) 'XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL))
-                     'thread-local]
-                    [(and (tok? e)
-                          (eq? (tok-n e) 'XFORM_GC_VARIABLE_STACK_THROUGH_GETSPECIFIC))
-                     'getspecific]
-                    [(and (tok? e)
-                          (eq? (tok-n e) 'XFORM_GC_VARIABLE_STACK_THROUGH_FUNCTION))
-                     'function]
-                    [else #f]))
-                 e-raw))
+          (let loop ([e-raw e-raw])
+            (ormap (lambda (e)
+                     (cond
+                      [(and (pragma? e)
+                            (regexp-match #rx"GC_VARIABLE_STACK_THOUGH_TABLE" (pragma-s e)))
+                       'table]
+                      [(and (tok? e)
+                            (eq? (tok-n e) 'XFORM_GC_VARIABLE_STACK_THROUGH_THREAD_LOCAL))
+                       'thread-local]
+                      [(and (tok? e)
+                            (eq? (tok-n e) 'XFORM_GC_VARIABLE_STACK_THROUGH_GETSPECIFIC))
+                       'getspecific]
+                      [(and (tok? e)
+                            (eq? (tok-n e) 'XFORM_GC_VARIABLE_STACK_THROUGH_FUNCTION))
+                       'function]
+                      [(braces? e) (loop (seq->list (seq-in e)))]
+                      [else #f]))
+                   e-raw)))
         
         ;; The code produced by xform uses a number of macros. These macros
         ;; make the transformation about a little easier to debug, and they
@@ -953,7 +955,7 @@
         (define asm-commands
           ;; When outputting, add newline before these syms
           ;; (for __asm blocks in Windows)
-          '(mov shl shld shr shrd sar lock setc))
+          '(mov shl shld shr shrd sar lock setc add))
         
         (define (get-constructor v)
           (cond
@@ -3270,7 +3272,7 @@
         (define (convert-function-calls e vars &-vars c++-class live-vars complain-not-in memcpy? braces-are-aggregates?)
           ;; e is a single statement
           ;; Reverse to calculate live vars as we go.
-          ;; Also, it's easier to look for parens and then inspect preceeding
+          ;; Also, it's easier to look for parens and then inspect preceding
           ;;  to find function calls.
           ;; complain-not-in is ither #f [function calls are ok], a string [not ok, string describes way],
           ;;  or (list ok-exprs ...)) [in a rator position, only ok-expr calls are allowed,
@@ -3606,7 +3608,7 @@
                                                    (not (null? (cdr assignee)))
                                                    ;; ok if name starts with "_stk_"
                                                    (not (regexp-match re:_stk_ (symbol->string (tok-n (car assignee)))))
-                                                   ;; ok if preceeding is else or label terminator
+                                                   ;; ok if preceding is else or label terminator
                                                    (not (memq (tok-n (cadr assignee)) '(else |:|)))
                                                    ;; assignment to field in record is ok
                                                    (not (and (eq? (tok-n (cadr assignee)) '|.|)
@@ -3615,7 +3617,7 @@
                                                              (null? (cdddr assignee))))
                                                    ;; ok if preceded by XFORM_OK_ASSIGN
                                                    (not (eq? (tok-n (cadr assignee)) 'XFORM_OK_ASSIGN))
-                                                   ;; ok if preceeding is `if', `until', etc.
+                                                   ;; ok if preceding is `if', `until', etc.
                                                    (not (and (parens? (cadr assignee))
                                                              (pair? (cddr assignee))
                                                              (memq (tok-n (caddr assignee)) '(if while for until))))))

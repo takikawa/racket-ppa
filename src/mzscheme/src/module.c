@@ -199,6 +199,9 @@ READ_ONLY static Scheme_Object *empty_self_modidx;
 READ_ONLY static Scheme_Object *empty_self_modname;
 
 THREAD_LOCAL_DECL(static Scheme_Bucket_Table *starts_table);
+#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
+THREAD_LOCAL_DECL(static Scheme_Bucket_Table *place_local_modpath_table);
+#endif
 
 /* FIXME eventually theses initial objects should be shared, but work required */
 THREAD_LOCAL_DECL(static Scheme_Env *initial_modules_env);
@@ -408,6 +411,10 @@ void scheme_init_module_resolver(void)
 
   REGISTER_SO(starts_table);
   starts_table = scheme_make_weak_equal_table();
+#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
+  REGISTER_SO(place_local_modpath_table);
+  place_local_modpath_table = scheme_make_weak_equal_table();
+#endif
 
   config = scheme_current_config();
 
@@ -953,9 +960,11 @@ static Scheme_Object *_dynamic_require(int argc, Scheme_Object *argv[],
                 if (!phase) {
                   /* Evaluate id in a fresh namespace */
                   Scheme_Object *a[3], *ns;
+                  Scheme_Config *config;
+                  Scheme_Cont_Frame_Data cframe;
+
                   start_module(m, env, 0, modidx, 0, 1, base_phase, scheme_null);
-                  a[0] = scheme_intern_symbol("empty");
-                  ns = scheme_make_namespace(1, a);
+                  ns = scheme_make_namespace(0, NULL);
                   a[0] = (Scheme_Object *)env;
                   a[1] = srcm->modname;
                   a[2] = ns;
@@ -965,7 +974,19 @@ static Scheme_Object *_dynamic_require(int argc, Scheme_Object *argv[],
                                                            scheme_make_pair(name,
                                                                             scheme_null)));
                   do_namespace_require((Scheme_Env *)ns, 1, a, 0, 0);
-                  return scheme_eval(name, (Scheme_Env *)ns);
+
+                  scheme_push_continuation_frame(&cframe);
+                  config = scheme_extend_config(scheme_current_config(),
+                                                MZCONFIG_ENV,
+                                                ns);
+                  scheme_set_cont_mark(scheme_parameterization_key, 
+                                       (Scheme_Object *)config);
+
+                  ns = scheme_eval(name, (Scheme_Env *)ns);
+
+                  scheme_pop_continuation_frame(&cframe);
+
+                  return ns;
                 } else {
                   scheme_raise_exn(MZEXN_FAIL_CONTRACT,
                                    "%s: name is provided as syntax: %V by module: %V",
@@ -2870,10 +2891,36 @@ Scheme_Object *scheme_intern_resolved_module_path_worker(Scheme_Object *o)
   return return_value;
 }
 
+#if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
+static Scheme_Object *scheme_intern_local_resolved_module_path_worker(Scheme_Object *o)
+{
+  Scheme_Object *rmp;
+  Scheme_Bucket *b;
+  Scheme_Object *return_value;
+
+  rmp = scheme_alloc_small_object();
+  rmp->type = scheme_resolved_module_path_type;
+  SCHEME_PTR_VAL(rmp) = o;
+
+  scheme_start_atomic();
+  b = scheme_bucket_from_table(place_local_modpath_table, (const char *)rmp);
+  scheme_end_atomic_no_swap();
+  if (!b->val)
+    b->val = scheme_true;
+
+  return_value = (Scheme_Object *)HT_EXTRACT_WEAK(b->key);
+
+  return return_value;
+}
+#endif
+
 Scheme_Object *scheme_intern_resolved_module_path(Scheme_Object *o)
 {
 #if defined(MZ_USE_PLACES) && defined(MZ_PRECISE_GC)
   void *return_payload;
+  if (SCHEME_SYMBOLP(o) && SCHEME_SYM_UNINTERNEDP(o)) {
+    return scheme_intern_local_resolved_module_path_worker(o);
+  }
   return_payload = scheme_master_fast_path(1, o);
   return (Scheme_Object*) return_payload;
 #endif
@@ -3701,6 +3748,37 @@ void scheme_module_force_lazy(Scheme_Env *env, int previous)
   /* not anymore */
 }
 
+static void wait_registry(Scheme_Env *env)
+{
+  Scheme_Object *lock, *a[1];
+
+  while (1) {
+    lock = scheme_hash_get(env->module_registry, scheme_false);
+    if (!lock)
+      return;
+
+    a[0] = SCHEME_CAR(lock);
+    a[1] = SCHEME_CDR(lock);
+    (void)scheme_sync(1, a);
+  }
+}
+
+static void lock_registry(Scheme_Env *env)
+{
+  Scheme_Object *lock;
+  lock = scheme_make_pair(scheme_make_sema(0),
+                          scheme_current_thread);
+  scheme_hash_set(env->module_registry, scheme_false, lock);
+}
+
+static void unlock_registry(Scheme_Env *env)
+{
+  Scheme_Object *lock;
+  lock = scheme_hash_get(env->module_registry, scheme_false);
+  scheme_post_sema(SCHEME_CAR(lock));
+  scheme_hash_set(env->module_registry, scheme_false, NULL);
+}
+
 XFORM_NONGCING static long make_key(int base_phase, int eval_exp, int eval_run)
 {
   return ((base_phase << 3) 
@@ -4118,6 +4196,15 @@ static void expstart_module(Scheme_Env *menv, Scheme_Env *env, int restart)
 
 static void run_module_exptime(Scheme_Env *menv, int set_ns)
 {
+#ifdef MZ_USE_JIT
+  (void)scheme_module_exprun_start(menv, set_ns, scheme_make_pair(menv->module->modname, scheme_void));
+#else
+  (void)scheme_module_exprun_finish(menv, set_ns);
+#endif
+}
+
+void *scheme_module_exprun_finish(Scheme_Env *menv, int set_ns)
+{
   int let_depth, for_stx;
   Scheme_Object *names, *e;
   Resolve_Prefix *rp;
@@ -4129,17 +4216,17 @@ static void run_module_exptime(Scheme_Env *menv, int set_ns)
   Scheme_Config *config;
   
   if (menv->module->primitive)
-    return;
+    return NULL;
 
   if (!SCHEME_VEC_SIZE(menv->module->et_body))
-    return;
+    return NULL;
 
   syntax = menv->syntax;
 
   exp_env = menv->exp_env;
 
   if (!exp_env)
-    return;
+    return NULL;
 
   for_stx_globals = exp_env->toplevel;
 
@@ -4175,6 +4262,8 @@ static void run_module_exptime(Scheme_Env *menv, int set_ns)
   if (set_ns) {
     scheme_pop_continuation_frame(&cframe);
   }
+
+  return NULL;
 }
 
 static void do_start_module(Scheme_Module *m, Scheme_Env *menv, Scheme_Env *env, int restart)
@@ -4303,12 +4392,29 @@ static void start_module(Scheme_Module *m, Scheme_Env *env, int restart,
 
 static void do_prepare_compile_env(Scheme_Env *env, int base_phase, int pos)
 {
-  Scheme_Object *v;
+  Scheme_Object *v, *prev;
   Scheme_Env *menv;
+
+  wait_registry(env);
 
   v = MODCHAIN_AVAIL(env->modchain, pos);
   if (!SCHEME_FALSEP(v)) {
     MODCHAIN_AVAIL(env->modchain, pos) = scheme_false;
+
+    /* Reverse order of the list; if X requires Y, Y
+       has been pushed onto the front of the list 
+       before X. */
+    prev = scheme_false;
+    while (SCHEME_NAMESPACEP(v)) {
+      menv = (Scheme_Env *)v;
+      v = menv->available_next[pos];
+      menv->available_next[pos] = prev;
+      prev = (Scheme_Object *)menv;
+    }
+    v = prev;
+
+    lock_registry(env);
+
     while (SCHEME_NAMESPACEP(v)) {
       menv = (Scheme_Env *)v;
       v = menv->available_next[pos];
@@ -4317,6 +4423,8 @@ static void do_prepare_compile_env(Scheme_Env *env, int base_phase, int pos)
                    NULL, 1, 0, base_phase,
                    scheme_null);
     }
+
+    unlock_registry(env);
   }
 }
 
@@ -4368,6 +4476,44 @@ static void eval_module_body(Scheme_Env *menv, Scheme_Env *env)
 #else
   (void)scheme_module_run_finish(menv, env);
 #endif
+}
+
+static Scheme_Object *body_one_expr(void *expr, int argc, Scheme_Object **argv)
+{
+  return _scheme_eval_linked_expr_multi((Scheme_Object *)expr);
+}
+
+static int needs_prompt(Scheme_Object *e)
+{
+  Scheme_Type t;
+  
+  while (1) {
+    t = SCHEME_TYPE(e);
+    if (t > _scheme_values_types_)
+      return 0;
+  
+    switch (t) {
+    case scheme_unclosed_procedure_type:
+    case scheme_toplevel_type:
+    case scheme_local_type:
+    case scheme_local_unbox_type:
+      return 0;
+    case scheme_syntax_type:
+      switch (SCHEME_PINT_VAL(e)) {
+      case CASE_LAMBDA_EXPD:
+        return 0;
+      case DEFINE_VALUES_EXPD:
+        e = (Scheme_Object *)SCHEME_IPTR_VAL(e);
+        e = SCHEME_VEC_ELS(e)[0];
+        break;
+      default:
+        return 1;
+      }
+      break;
+    default:
+      return 1;
+    }
+  }
 }
 
 void *scheme_module_run_finish(Scheme_Env *menv, Scheme_Env *env)
@@ -4426,7 +4572,10 @@ void *scheme_module_run_finish(Scheme_Env *menv, Scheme_Env *env)
     cnt = SCHEME_VEC_SIZE(m->body);
     for (i = 0; i < cnt; i++) {
       body = SCHEME_VEC_ELS(m->body)[i];
-      _scheme_eval_linked_expr_multi(body);
+      if (needs_prompt(body))
+        (void)_scheme_call_with_prompt_multi(body_one_expr, body);
+      else
+        (void)_scheme_eval_linked_expr_multi(body);
     }
 
     if (scheme_module_demand_hook) {
@@ -5207,7 +5356,7 @@ module_optimize(Scheme_Object *data, Optimize_Info *info, int context)
   int start_simltaneous = 0, i_m, cnt;
   Scheme_Object *cl_first = NULL, *cl_last = NULL;
   Scheme_Hash_Table *consts = NULL, *ready_table = NULL, *re_consts = NULL;
-  int cont, next_pos_ready = -1, inline_fuel;
+  int cont, next_pos_ready = -1, inline_fuel, is_proc_def;
 
   old_context = info->context;
   info->context = (Scheme_Object *)m;
@@ -5259,15 +5408,29 @@ module_optimize(Scheme_Object *data, Optimize_Info *info, int context)
 
   for (i_m = 0; i_m < cnt; i_m++) {
     /* Optimize this expression: */
-    if (OPT_DISCOURAGE_EARLY_INLINE) {
+    e = SCHEME_VEC_ELS(m->body)[i_m];
+
+    is_proc_def = 0;
+    if (OPT_DISCOURAGE_EARLY_INLINE && info->enforce_const) {
+      if (SAME_TYPE(SCHEME_TYPE(e), scheme_compiled_syntax_type)
+	  && (SCHEME_PINT_VAL(e) == DEFINE_VALUES_EXPD)) {
+        Scheme_Object *e2;
+        e2 = (Scheme_Object *)SCHEME_IPTR_VAL(e);
+        e2 = SCHEME_CDR(e2);
+        if (SAME_TYPE(SCHEME_TYPE(e2), scheme_compiled_unclosed_procedure_type))
+          is_proc_def = 1;
+      }
+    }
+
+    if (is_proc_def && OPT_DISCOURAGE_EARLY_INLINE) {
       info->use_psize = 1;
       inline_fuel = info->inline_fuel;
       if (inline_fuel > 2)
         info->inline_fuel = 2;
     } else
       inline_fuel = 0;
-    e = scheme_optimize_expr(SCHEME_VEC_ELS(m->body)[i_m], info, 0);
-    if (OPT_DISCOURAGE_EARLY_INLINE) {
+    e = scheme_optimize_expr(e, info, 0);
+    if (is_proc_def && OPT_DISCOURAGE_EARLY_INLINE) {
       info->use_psize = 0;
       info->inline_fuel = inline_fuel;
     }
@@ -5411,7 +5574,7 @@ module_optimize(Scheme_Object *data, Optimize_Info *info, int context)
               sub_e = (Scheme_Object *)SCHEME_IPTR_VAL(e);
               sub_e = SCHEME_CDR(sub_e);
               if (SAME_TYPE(SCHEME_TYPE(sub_e), scheme_compiled_unclosed_procedure_type))
-                old_sz = scheme_closure_body_size((Scheme_Closure_Data *)sub_e, 0, NULL);
+                old_sz = scheme_closure_body_size((Scheme_Closure_Data *)sub_e, 0, NULL, NULL);
               else
                 old_sz = 0;
             } else
@@ -5431,19 +5594,29 @@ module_optimize(Scheme_Object *data, Optimize_Info *info, int context)
               e = (Scheme_Object *)SCHEME_IPTR_VAL(e);
               e = SCHEME_CDR(e);
               if (!scheme_compiled_propagate_ok(e, info)
-                  && scheme_is_statically_proc(e, info))
-                e = scheme_make_noninline_proc(e);
-
-              if (OPT_LIMIT_FUNCTION_RESIZE) {
-                if (SAME_TYPE(SCHEME_TYPE(e), scheme_compiled_unclosed_procedure_type))
-                  new_sz = scheme_closure_body_size((Scheme_Closure_Data *)e, 0, NULL);
+                  && scheme_is_statically_proc(e, info)) {
+                /* If we previously installed a procedure for inlining,
+                   don't replace that with a worse approximation. */
+                Scheme_Object *old_e;
+                old_e = scheme_hash_get(info->top_level_consts, rpos);
+                if (SAME_TYPE(SCHEME_TYPE(old_e), scheme_compiled_unclosed_procedure_type))
+                  e = NULL;
                 else
-                  new_sz = 0;
-              } else
-                new_sz = 0;
+                  e = scheme_make_noninline_proc(e);
+              }
 
-              if (!new_sz || !old_sz || (new_sz < 4 * old_sz))
-                scheme_hash_set(info->top_level_consts, rpos, e);
+              if (e) {
+                if (OPT_LIMIT_FUNCTION_RESIZE) {
+                  if (SAME_TYPE(SCHEME_TYPE(e), scheme_compiled_unclosed_procedure_type))
+                    new_sz = scheme_closure_body_size((Scheme_Closure_Data *)e, 0, NULL, NULL);
+                  else
+                    new_sz = 0;
+                } else
+                  new_sz = 0;
+                
+                if (!new_sz || !old_sz || (new_sz < 4 * old_sz))
+                  scheme_hash_set(info->top_level_consts, rpos, e);
+              }
             }
           }
 

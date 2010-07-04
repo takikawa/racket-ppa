@@ -335,8 +335,10 @@ profile todo:
   
   ;; =User=
   (define (print-planet-icon-to-stderr exn)
-    (when (exn:fail:contract2? exn)
-      (let ([table (parse-gp exn (guilty-party exn))])
+    (when (exn:fail:contract:blame? exn)
+      (let ([table (parse-gp exn
+                             (blame-positive
+                              (exn:fail:contract:blame-object exn)))])
         (when table
           (let ([gp-url (bug-info->ticket-url table)])
             (when planet-note%
@@ -610,7 +612,7 @@ profile todo:
     (let ([dis (if (exn? dis/exn)
                    (cms->srclocs (exn-continuation-marks dis/exn))
                    dis/exn)])
-    (show-backtrace-window/edition-pairs error-text dis (map (λ (x) #f) dis/exn) defs rep)))
+    (show-backtrace-window/edition-pairs error-text dis (map (λ (x) #f) dis) defs rep)))
   
   (define (show-backtrace-window/edition-pairs error-text dis editions defs ints)
     (reset-backtrace-window)

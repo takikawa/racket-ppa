@@ -19,7 +19,7 @@
          ~or
          ~not
          ~seq
-         ~bounds
+         ~between
          ~once
          ~optional
          ~rest
@@ -28,6 +28,7 @@
          ~bind
          ~fail
          ~parse
+         ...+
 
          current-expression
          current-macro-name
@@ -84,7 +85,7 @@
 (define-keyword ~or)
 (define-keyword ~not)
 (define-keyword ~seq)
-(define-keyword ~bounds)
+(define-keyword ~between)
 (define-keyword ~once)
 (define-keyword ~optional)
 (define-keyword ~rest)
@@ -93,6 +94,7 @@
 (define-keyword ~bind)
 (define-keyword ~fail)
 (define-keyword ~parse)
+(define-keyword ...+)
 
 ;; == Parameters & Syntax Parameters
 
@@ -252,8 +254,8 @@ A Dynamic Frontier Context (DFC) is one of
     [(list (make dfc:car pa _) (make dfc:car pb _))
      (compare-idfcs pa pb)]
     [(list (make dfc:cdr pa na) (make dfc:cdr pb nb))
-     (cond [(< na nb) '<]
-           [(> na nb) '>]
+     (cond [(< na nb) (compare-idfcs pa (make dfc:cdr pb (- nb na)))]
+           [(> na nb) (compare-idfcs (make-dfc:cdr pa (- na nb)) pb)]
            [(= na nb) (compare-idfcs pa pb)])]
     [(list (make dfc:pre pa _) (make dfc:pre pb _))
      ;; FIXME: possibly just '= here, treat all sides as equiv
@@ -559,7 +561,7 @@ An Expectation is one of
 (define (frontier->sexpr dfc)
   (match (invert-dfc dfc)
     [(make dfc:empty _) '()]
-    [(make dfc:car p _) (cons 0 (frontier->sexpr p))]
+    [(make dfc:car p _) (cons 'car (frontier->sexpr p))]
     [(make dfc:cdr p n) (cons n (frontier->sexpr p))]
     [(make dfc:pre p _) (cons 'pre (frontier->sexpr p))]
     [(make dfc:post p _) (cons 'post (frontier->sexpr p))]))
@@ -569,3 +571,29 @@ An Expectation is one of
     [(make expect:thing thing '#t chained)
      (make expect:thing thing #t (failure->sexpr chained))]
     [_ expectation]))
+
+
+;;
+
+(provide (struct-out parser))
+
+(define-struct parser (proc errors)
+  #:property prop:procedure (struct-field-index proc))
+
+;;
+
+(provide curried-stxclass-procedures)
+
+(define-syntax (curried-stxclass-procedures stx)
+  (syntax-case stx ()
+    [(cp class (arg ...))
+     (let* ([args (syntax->list #'(arg ...))]
+            [sc (get-stxclass/check-arg-count #'class (length args))])
+       (with-syntax ([parser (stxclass-parser-name sc)]
+                     [get-description (stxclass-description sc)]
+                     [(extra ...)
+                      (if (stxclass-commit? sc)
+                          #'()
+                          #'(k))])
+         #'(values (lambda (x extra ...) (parser x extra ... arg ...))
+                   (lambda () (get-description arg ...)))))]))

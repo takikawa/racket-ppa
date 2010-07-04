@@ -2,12 +2,13 @@
 
 (require "../utils/utils.ss")
 
-(require (rep type-rep object-rep filter-rep)
+(require (rep type-rep object-rep filter-rep rep-utils)
 	 "printer.ss" "utils.ss"
          (utils tc-utils)
          scheme/list
          scheme/match         
          scheme/promise
+         scheme/flonum
          (prefix-in c: scheme/contract)
          (for-syntax scheme/base syntax/parse)
 	 (for-template scheme/base scheme/contract scheme/promise scheme/tcp))
@@ -26,7 +27,7 @@
 (define -box make-Box)
 (define -vec make-Vector)
 (define -LFS make-LFilterSet)
-(define -FS make-FilterSet)
+(define-syntax -FS (make-rename-transformer #'make-FilterSet))
 
 (define-syntax *Un
   (syntax-rules ()
@@ -36,9 +37,7 @@
 (define (make-Listof elem) (-mu list-rec (*Un (-val null) (-pair elem list-rec))))
 
 (define (-lst* #:tail [tail (-val null)] . args)
-  (if (null? args)
-      tail
-      (-pair (car args) (apply -lst* #:tail tail (cdr args)))))
+  (for/fold ([tl tail]) ([a (reverse args)]) (-pair a tl)))
 
 (define (-Tuple l)
   (foldr -pair (-val '()) l))
@@ -68,15 +67,17 @@
   (make-Result t f o))
 
 (d/c (-values args)
-     (c:-> (listof Type/c) Values?)
-     (make-Values (for/list ([i args]) (-result i))))
+     (c:-> (listof Type/c) (or/c Type/c Values?))
+     (match args
+       ;[(list t) t]
+       [_ (make-Values (for/list ([i args]) (-result i)))]))
 
 ;; basic types
 
 (define make-promise-ty
   (let ([s (string->uninterned-symbol "Promise")])
     (lambda (t)
-      (make-Struct s #f (list t) #f #f #'promise? values))))
+      (make-Struct s #f (list t) #f #f #'promise? values (list #'values)))))
 
 (define -Listof (-poly (list-elem) (make-Listof list-elem)))
 
@@ -99,6 +100,8 @@
 (define -Input-Port (make-Base 'Input-Port #'input-port?))
 (define -TCP-Listener (make-Base 'TCP-Listener #'tcp-listener?))
 
+(define -FlVector (make-Base 'FlVector #'flvector?))
+
 (define -Syntax make-Syntax)
 (define -HT make-Hashtable)
 (define -Promise make-promise-ty)
@@ -119,6 +122,7 @@
 
 (define -car (make-CarPE))
 (define -cdr (make-CdrPE))
+(define -syntax-e (make-SyntaxPE))
 
 ;; Numeric hierarchy
 (define -Number (make-Base 'Number #'number?))
@@ -252,8 +256,8 @@
 (define (make-arr-dots dom rng dty dbound)
   (make-arr* dom rng #:drest (cons dty dbound)))
 
-(define (-struct name parent flds [proc #f] [poly #f] [pred #'dummy] [cert values])
-  (make-Struct name parent flds proc poly pred cert))
+(define (-struct name parent flds accs [proc #f] [poly #f] [pred #'dummy] [cert values])
+  (make-Struct name parent flds proc poly pred cert accs))
 
 (define (-filter t [p null] [i 0])
   (make-LTypeFilter t p i))

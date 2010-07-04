@@ -12,7 +12,7 @@
          scheme/match
          mzlib/etc
          mzlib/trace
-	 unstable/sequence unstable/list
+	 unstable/sequence unstable/list unstable/debug
          scheme/list)
 
 (import dmap^ constraints^ promote-demote^)
@@ -20,7 +20,7 @@
 
 (define (empty-set) '())  
 
-(define current-seen (make-parameter (empty-set)))
+(define current-seen (make-parameter (empty-set) #;pair?))
 
 (define (seen-before s t) (cons (Type-seq s) (Type-seq t)))
 (define (remember s t A) (cons (seen-before s t) A))
@@ -254,7 +254,7 @@
     (insert empty X S T))
   (if (seen? S T)
       empty
-      (parameterize ([match-equality-test type-equal?]
+      (parameterize ([match-equality-test (lambda (a b) (if (and (Rep? a) (Rep? b)) (type-equal? a b) (equal? a b)))]
                      [current-seen (remember S T (current-seen))])
         (match* 
             (S T)
@@ -322,7 +322,7 @@
                                (cg S e)))
                             (fail! S T))]
           
-          [((Struct: nm p flds proc _ _ _) (Struct: nm p flds* proc* _ _ _))
+          [((Struct: nm p flds proc _ _ _ _) (Struct: nm p flds* proc* _ _ _ _))
            (let-values ([(flds flds*)
                          (cond [(and proc proc*)
                                 (values (cons proc flds) (cons proc* flds*))]
@@ -387,8 +387,8 @@
           [((Box: e) (Box: e*))
            (cset-meet (cg e e*) (cg e* e))]
           [((Hashtable: s1 s2) (Hashtable: t1 t2))
-           ;; the key is contravariant, the value is invariant
-           (cset-meet* (list (cg t1 s1) (cg t2 s2) (cg s2 t2)))]
+           ;; for mutable hash tables, both are invariant
+           (cset-meet* (list (cg t1 s1) (cg s1 t1) (cg t2 s2) (cg s2 t2)))]
           [((Syntax: s1) (Syntax: s2))
            (cg s1 s2)]
           ;; parameters are just like one-arg functions
@@ -428,7 +428,7 @@
     (match v
       [(struct c (S X T))
        (let ([var (hash-ref (free-vars* R) (or variable X) Constant)])
-         ;(printf "variance was: ~a~nR was ~a~nX was ~a~n" var R (or variable X))
+         ;(printf "variance was: ~a~nR was ~a~nX was ~a~nS T ~a ~a~n" var R (or variable X) S T)
          (evcase var 
                  [Constant S]
                  [Covariant S]
@@ -440,7 +440,7 @@
      (check-vars
       must-vars
       (append 
-       (for/list ([(k dc) dm])
+       (for/list ([(k dc) (in-hash dm)])
          (match dc
            [(struct dcon (fixed rest))
             (list k
@@ -452,7 +452,7 @@
                   (for/list ([f fixed])
                     (constraint->type f #:variable k))
                   (constraint->type rest))]))
-       (for/list ([(k v) cmap])
+       (for/list ([(k v) (in-hash cmap)])
          (list k (constraint->type v)))))]))
 
 (define (cgen/list V X S T)

@@ -17,6 +17,7 @@
 (define show-link-page-numbers (make-parameter #f))
 (define done-link-page-numbers (make-parameter #f))
 (define disable-images (make-parameter #f))
+(define escape-brackets (make-parameter #f))
 
 (define-struct (toc-paragraph paragraph) ())
 
@@ -124,7 +125,8 @@
                     (if no-number? "*" ""))
             (when (not (or (part-style? d 'hidden) no-number?))
               (printf "[")
-              (parameterize ([disable-images #t])
+              (parameterize ([disable-images #t]
+                             [escape-brackets #t])
                 (render-content (part-title-content d) d ri))
               (printf "]")))
           (printf "{")
@@ -183,8 +185,7 @@
         (printf "\n\n")
         (unless (no-noindent? p ri)
           (printf "\\noindent ")))
-      (begin0
-       (super render-intrapara-block p part ri first? last? starting-item?)))
+      (super render-intrapara-block p part ri first? last? starting-item?))
 
     (define/override (render-content e part ri)
       (when (render-element? e)
@@ -598,6 +599,11 @@
                      [(#\{ #\}) (if (rendering-tt)
                                     (format "{\\char`\\~a}" c)
                                     (format "\\~a" c))]
+                     [(#\[ #\]) (if (escape-brackets)
+                                    (if (eq? c #\[)
+                                        "{\\SOpenSq}"
+                                        "{\\SCloseSq}")
+                                    c)]
                      [(#\# #\% #\& #\$) (format "\\~a" c)]
                      [(#\uA0) "~"]
                      [(#\uDF) "{\\ss}"]

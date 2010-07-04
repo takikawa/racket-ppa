@@ -2,19 +2,17 @@
 
 (require scheme/match 
 	 scheme/mpair
-         scheme/control
+         scheme/control scheme/foreign
          (for-syntax scheme/base)
          (prefix-in m: mzlib/match)
-         (only-in srfi/13 string-contains))
-(require (planet "test-compat2.ss" ("schematics" "schemeunit.plt" 2 10)))
-
-
+         (only-in srfi/13 string-contains)
+         schemeunit)
 
 (define-syntax (comp stx)
   (syntax-case stx ()
     [(mytest tst exp)
-     #`(make-test-case (format "test: ~a" (syntax->datum (quote-syntax tst)))
-                       #,(syntax/loc stx (assert-equal? tst exp)))]))
+     #`(test-case (format "test: ~a" (syntax->datum (quote-syntax tst)))
+                       #,(syntax/loc stx (check-equal? tst exp)))]))
 
 (define-struct X (a b c))
 (define-match-expander X:
@@ -56,7 +54,7 @@
 (provide new-tests)
 
 (define new-tests
-  (make-test-suite 
+  (test-suite 
    "new tests for match"
    
    (comp 
@@ -625,5 +623,25 @@
 		  [`#s((bar foo 3) ,x ,y ,z ,w)
 		      (list x y z)])
 	   ))
+   (comp "Gotcha!"
+         (let ()
+           (define-cstruct _pose
+             ([x _double*]
+              [y _double*]
+              [a _double*]))
+           
+           (match (make-pose 1 2 3)
+             [(struct pose (x y a)) "Gotcha!"]
+             [else "Epic fail!"])))
+   
+   (comp #f
+         (match (list 'a 'b 'c)
+           [(or (list a b)
+                (and (app (lambda _ #f) b)
+                     (or (and (app (lambda _ #f) a)
+                              (list))
+                         (list a))))
+            #t]
+           [_ #f]))
 
 ))

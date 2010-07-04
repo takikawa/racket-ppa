@@ -238,7 +238,8 @@ void scheme_init_salloc(void);
 void scheme_init_jit(void);
 #endif
 void scheme_init_memtrace(Scheme_Env *env);
-void scheme_init_parameterization(Scheme_Env *env);
+void scheme_init_paramz(Scheme_Env *env);
+void scheme_init_parameterization();
 void scheme_init_getenv(void);
 void scheme_init_inspector(void);
 
@@ -309,6 +310,9 @@ void scheme_add_embedded_builtins(Scheme_Env *env);
 void scheme_do_add_global_symbol(Scheme_Env *env, Scheme_Object *sym,
 				 Scheme_Object *obj, int constant,
 				 int primitive);
+
+void *scheme_get_os_thread_like();
+void scheme_init_os_thread_like(void *);
 
 /*========================================================================*/
 /*                                constants                               */
@@ -403,6 +407,14 @@ THREAD_LOCAL_DECL(extern volatile int scheme_fuel_counter);
 
 THREAD_LOCAL_DECL(extern Scheme_Thread *scheme_main_thread);
 
+#if defined(MZ_USE_PLACES) || defined(MZ_USE_FUTURES)
+# define MZ_USE_MZRT
+#endif
+
+#ifdef MZ_USE_MZRT
+#include "mzrt.h"
+#endif
+
 #ifdef MZ_USE_PLACES
 THREAD_LOCAL_DECL(extern Scheme_Thread *scheme_current_thread);
 THREAD_LOCAL_DECL(extern Scheme_Thread *scheme_first_thread);
@@ -415,7 +427,6 @@ THREAD_LOCAL_DECL(extern Scheme_Thread *scheme_first_thread);
 #define scheme_jumping_to_continuation (scheme_current_thread->cjs.jumping_to_continuation)
 #define scheme_multiple_count (scheme_current_thread->ku.multiple.count)
 #define scheme_multiple_array (scheme_current_thread->ku.multiple.array)
-#include "mzrt.h"
 extern mz_proc_thread *scheme_master_proc_thread;
 THREAD_LOCAL_DECL(extern mz_proc_thread *proc_thread_self);
 #endif
@@ -1378,11 +1389,6 @@ typedef struct Scheme_Prompt {
 /* Compiler helper: */
 #define ESCAPED_BEFORE_HERE  return NULL
 
-Scheme_Object *scheme_extract_one_cc_mark_with_meta(Scheme_Object *mark_set, 
-                                                    Scheme_Object *key,
-                                                    Scheme_Object *prompt_tag,
-                                                    Scheme_Meta_Continuation **_meta_cont,
-                                                    MZ_MARK_POS_TYPE *_pos);
 Scheme_Object *scheme_compose_continuation(Scheme_Cont *c, int num_rands, Scheme_Object *value);
 Scheme_Overflow *scheme_get_thread_end_overflow(void);
 void scheme_end_current_thread(void);
@@ -1393,6 +1399,8 @@ void scheme_drop_prompt_meta_continuations(Scheme_Object *prompt_tag);
 
 struct Scheme_Prompt *scheme_get_barrier_prompt(struct Scheme_Meta_Continuation **_meta_cont,
                                                 MZ_MARK_POS_TYPE *_pos);
+Scheme_Prompt *scheme_get_prompt(Scheme_Object *prompt_tag, Scheme_Meta_Continuation **_meta_cont,
+                                 MZ_MARK_POS_TYPE *_pos);
 int scheme_is_cm_deeper(struct Scheme_Meta_Continuation *m1, MZ_MARK_POS_TYPE p1,
                         struct Scheme_Meta_Continuation *m2, MZ_MARK_POS_TYPE p2);
 void scheme_recheck_prompt_and_barrier(struct Scheme_Cont *c);
@@ -2020,7 +2028,7 @@ typedef struct Optimize_Info
   /* Propagated up and down the chain: */
   int size, vclock, psize;
   short inline_fuel;
-  char letrec_not_twice, enforce_const, use_psize;
+  char letrec_not_twice, enforce_const, use_psize, has_nonleaf;
   Scheme_Hash_Table *top_level_consts;
 
   /* Set by expression optimization: */
@@ -2300,8 +2308,9 @@ Scheme_Object *scheme_optimize_lets(Scheme_Object *form, Optimize_Info *info, in
 
 #define OPT_CONTEXT_FLONUM_ARG 0x1
 #define OPT_CONTEXT_BOOLEAN    0x2
+#define OPT_CONTEXT_NO_SINGLE  0x4
 
-#define scheme_optimize_result_context(c) (c & (~OPT_CONTEXT_FLONUM_ARG))
+#define scheme_optimize_result_context(c) (c & (~(OPT_CONTEXT_FLONUM_ARG | OPT_CONTEXT_NO_SINGLE)))
 #define scheme_optimize_tail_context(c) scheme_optimize_result_context(c) 
 
 Scheme_Object *scheme_optimize_apply_values(Scheme_Object *f, Scheme_Object *e, 
@@ -2370,7 +2379,7 @@ Scheme_Object *scheme_optimize_shift(Scheme_Object *obj, int delta, int after_de
 Scheme_Object *scheme_clone_closure_compilation(int dup_ok, Scheme_Object *obj, Optimize_Info *info, int delta, int closure_depth);
 Scheme_Object *scheme_shift_closure_compilation(Scheme_Object *obj, int delta, int after_depth);
 
-int scheme_closure_body_size(Scheme_Closure_Data *closure_data, int check_assign, Optimize_Info *info);
+int scheme_closure_body_size(Scheme_Closure_Data *closure_data, int check_assign, Optimize_Info *info, int *is_leaf);
 int scheme_closure_argument_flags(Scheme_Closure_Data *closure_data, int i);
 int scheme_closure_has_top_level(Scheme_Closure_Data *data);
 
@@ -2469,9 +2478,11 @@ struct Start_Module_Args;
 
 #ifdef MZ_USE_JIT
 void *scheme_module_run_start(Scheme_Env *menv, Scheme_Env *env, Scheme_Object *name);
+void *scheme_module_exprun_start(Scheme_Env *menv, int set_ns, Scheme_Object *name);
 void *scheme_module_start_start(struct Start_Module_Args *a, Scheme_Object *name);
 #endif
 void *scheme_module_run_finish(Scheme_Env *menv, Scheme_Env *env);
+void *scheme_module_exprun_finish(Scheme_Env *menv, int set_ns);
 void *scheme_module_start_finish(struct Start_Module_Args *a);
 
 Scheme_Object *scheme_build_closure_name(Scheme_Object *code, Scheme_Compile_Info *rec, int drec);
@@ -2605,7 +2616,8 @@ void scheme_validate_expr(Mz_CPort *port, Scheme_Object *expr,
                           int depth, int letlimit, int delta,
 			  int num_toplevels, int num_stxes, int num_lifts,
                           Scheme_Object *app_rator, int proc_with_refs_ok, 
-                          int result_ignored, struct Validate_Clearing *vc, int tailpos);
+                          int result_ignored, struct Validate_Clearing *vc, 
+                          int tailpos, int need_flonum);
 void scheme_validate_toplevel(Scheme_Object *expr, Mz_CPort *port,
 			      char *stack, Validate_TLS tls,
                               int depth, int delta,
@@ -2822,7 +2834,7 @@ typedef struct Scheme_Module_Phase_Exports
   Scheme_Object *kernel_exclusion;   /* we allow up to two exns, but they must be shadowed */
   Scheme_Object *kernel_exclusion2;
 
-  Scheme_Hash_Table *ht;             /* maps external names to array indicies; created lazily */
+  Scheme_Hash_Table *ht;             /* maps external names to array indices; created lazily */
 } Scheme_Module_Phase_Exports;
 
 typedef struct Scheme_Module_Exports

@@ -4,7 +4,8 @@
 (Section 'optimization)
 
 (require scheme/flonum
-         scheme/fixnum)
+         scheme/fixnum
+         compiler/zo-parse)
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -419,6 +420,8 @@
     (tri 5 'min (lambda () 20) 10 5 void)
     (bin-exact 3.0 'flmin 3.0 4.5)
     (bin-exact 2.5 'flmin 3.0 2.5)
+    (bin0 3.5 '(lambda (x y) (fl+ 1.0 (flmin x y))) 3.0 2.5)
+    (bin0 4.0 '(lambda (x y) (fl+ 1.0 (flmin x y))) 3.0 4.5)
     (bin-exact 30 'fxmin 30 45)
     (bin-exact 25 'fxmin 30 25)
 
@@ -430,6 +433,8 @@
     (tri 50 'max (lambda () 20) 10 50 void)
     (bin-exact 4.5 'flmax 3.0 4.5)
     (bin-exact 3.0 'flmax 3.0 2.5)
+    (bin0 5.5 '(lambda (x y) (fl+ 1.0 (flmax x y))) 3.0 4.5)
+    (bin0 4.0 '(lambda (x y) (fl+ 1.0 (flmax x y))) 3.0 2.5)
     (bin-exact 45 'fxmax 30 45)
     (bin-exact 30 'fxmax 30 25)
 
@@ -533,7 +538,7 @@
     (un0 '#&1 'box 1)
 
     (let ([test-setter
-	   (lambda (make-X def-val set-val set-name set ref)
+	   (lambda (make-X def-val set-val set-name set ref 3rd-all-ok?)
 	     (let ([v (make-X 3 def-val)])
 	       (check-error-message set-name (eval `(lambda (x) (,set-name ,v -1 ,set-val))))
 	       (check-error-message set-name (eval `(lambda (x) (,set-name ,v 3 ,set-val))))
@@ -546,12 +551,12 @@
 					(test def-val ref v (modulo (+ i 1) 3))
 					(test def-val ref v (modulo (+ i 2) 3))
 					(set v i def-val))
-				      #t))
+				      3rd-all-ok?))
 			 '(0 1 2))))])
-      (test-setter make-vector #f 7 'vector-set! vector-set! vector-ref)
-      (test-setter make-bytes 0 7 'bytes-set! bytes-set! bytes-ref)
-      (test-setter make-string #\a #\7 'string-set! string-set! string-ref)
-      (test-setter make-flvector 1.0 7.0 'flvector-set! flvector-set! flvector-ref))
+      (test-setter make-vector #f 7 'vector-set! vector-set! vector-ref #t)
+      (test-setter make-bytes 0 7 'bytes-set! bytes-set! bytes-ref #f)
+      (test-setter make-string #\a #\7 'string-set! string-set! string-ref #f)
+      (test-setter make-flvector 1.0 7.0 'flvector-set! flvector-set! flvector-ref #f))
 
     ))
 
@@ -564,7 +569,9 @@
 	  [t2 (get-output-bytes s2)])
       (or (bytes=? t1 t2)
 	  (begin
-	    (printf "~s\n~s\n" t1 t2)
+	    (printf "~s\n~s\n" 
+                    (zo-parse (open-input-bytes t1))
+                    (zo-parse (open-input-bytes t2)))
 	    #f
 	    )))))
 
@@ -656,6 +663,55 @@
 	   '((lambda (x) x) 3))
 (test-comp '(let ([x 3][y 4]) (+ x y))
 	   '((lambda (x y) (+ x y)) 3 4))
+(test-comp '5
+	   '((lambda ignored 5) 3 4))
+(test-comp '5
+	   '(let ([f (lambda ignored 5)])
+              (f 3 4)))
+(test-comp '5
+	   '(let ([f (lambda (a . ignored) a)])
+              (f 5 3 4)))
+(test-comp '(let ([x (list 3 4)]) x)
+	   '(let ([f (lambda (a . b) b)])
+              (f 5 3 4)))
+(test-comp '(lambda (g)
+              ((let ([r (read)])
+                 (lambda () (+ r r)))))
+           '(lambda (g)
+              (let ([r (read)])
+                (+ r r))))
+(test-comp '(lambda (g)
+              ((let ([r (read)])
+                 (lambda (x) (+ r r)))
+               g))
+           '(lambda (g)
+              (let ([r (read)])
+                (+ r r))))
+
+(test-comp '(lambda (w z)
+              (let ([x (cons w z)])
+                (car x)))
+           '(lambda (w z) w))
+(test-comp '(lambda (w z)
+              (let ([x (cons w z)])
+                (cdr x)))
+           '(lambda (w z) z))
+(test-comp '(lambda (w z)
+              (let ([x (list w z)])
+                (car x)))
+           '(lambda (w z) w))
+(test-comp '(lambda (w z)
+              (let ([x (list* w z)])
+                (car x)))
+           '(lambda (w z) w))
+(test-comp '(lambda (w z)
+              (let ([x (list w z)])
+                (cadr x)))
+           '(lambda (w z) z))
+(test-comp '(lambda (w z)
+              (let ([x (list (cons 1 (cons w z)))])
+                (car (cdr (car x)))))
+           '(lambda (w z) w))
 
 (test-comp '(let ([x 1][y 2]) x)
 	   '1)
@@ -1091,6 +1147,42 @@
 (err/rt-test (cwv-2-5-f (lambda () (values 1 2)) (lambda (y) (+ y 2))) exn:fail:contract:arity?)
 (err/rt-test (cwv-2-5-f (lambda () 1) (lambda (y z) (+ y 2))) exn:fail:contract:arity?)
 (err/rt-test (cwv-2-5-f (lambda () (values 1 2 3)) (lambda (y z) (+ y 2))) exn:fail:contract:arity?)
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Inlining with higher-order functions:
+
+(test 0 'ho1 (let ([x (random 1)])
+               ((let ([fn (add1 (random 1))])
+                  (lambda (c) c))
+                x)))
+(test 0 'ho2 (let ([x (random 1)]
+                   [id (lambda (c) c)])
+               ((let ([fn (add1 (random 1))])
+                  id)
+                x)))
+(test 0 'ho3 (let ([proc (lambda (q)
+                           (let ([fn (add1 (random 1))])
+                             (lambda (c) c)))])
+               (let ([x (random 1)])
+                 ((proc 99) x))))
+(test '(2 0) 'ho4 (let ([y (+ 2 (random 1))])
+                    (let ([x (random 1)])
+                      ((let ([fn (add1 (random 1))])
+                         (lambda (c) (list y c)))
+                       x))))
+(test '(2 0) 'ho5 (let ([y (+ 2 (random 1))])
+                    (let ([x (random 1)]
+                          [id (lambda (c) (list y c))])
+                      ((let ([fn (add1 (random 1))])
+                         id)
+                       x))))
+(test '(2 0) 'ho6 (let ([y (+ 2 (random 1))])
+                    (let ([proc (lambda (q)
+                                  (let ([fn (add1 (random 1))])
+                                    (lambda (c) (list y c))))])
+                      (let ([x (random 1)])
+                        ((proc 98)
+                         x)))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

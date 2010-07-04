@@ -1,9 +1,9 @@
 #lang scheme/base
 
-(require "test-utils.ss" "planet-requires.ss" (for-syntax scheme/base))
-(require (rep type-rep)
+(require "test-utils.ss" (for-syntax scheme/base)
+         (rep type-rep)
 	 (types comparison abbrev union)
-         (schemeunit))
+         schemeunit)
 
 (provide type-equal-tests)
 
@@ -37,10 +37,10 @@
    [(-mu x (Un -Number -Symbol x)) (-mu y (Un -Number -Symbol y))]     
    ;; found bug
    [FAIL (Un (-mu heap-node 
-                  (-struct 'heap-node #f (list (-base 'comparator) -Number (-v a) (Un heap-node (-base 'heap-empty))))) 
+                  (-struct 'heap-node #f (list (-base 'comparator) -Number (-v a) (Un heap-node (-base 'heap-empty))) null)) 
              (-base 'heap-empty))
          (Un (-mu heap-node 
-                  (-struct 'heap-node #f (list (-base 'comparator) -Number (-pair -Number -Number) (Un heap-node (-base 'heap-empty))))) 
+                  (-struct 'heap-node #f (list (-base 'comparator) -Number (-pair -Number -Number) (Un heap-node (-base 'heap-empty))) null)) 
              (-base 'heap-empty))]))
 
 (define-go

@@ -332,8 +332,7 @@ mz-base := "/plt/readme.txt"          ; generated
            (cond (not src) => (collects: "info-domain/")) ; filtered
            (package: "config")
            ;; basic code
-           (collects: "scheme")
-           (collects: "s-exp")
+           (collects: "scheme" "s-exp" "reader")
            ;; include the time-stamp collection when not a public release
            (cond (not release)
                  => (- (collects: "repos-time-stamp/")
@@ -344,7 +343,7 @@ mz-manuals := (scribblings: "main/") ; generates main pages (next line)
               (notes: "COPYING.LIB" "COPYING-libscheme.txt")
               (doc: "doc-license.txt") ; needed (when docs are included)
               (doc+src: "reference/" "guide/" "quick/" "more/"
-                        "foreign/" "inside/" "futures/"
+                        "foreign/" "inside/" "places/"
                         "honu/")
               (doc: "*.{html|css|js|sxref}")
               (scribblings: "{{info|icons}.ss|*.png}" "compiled")
@@ -594,7 +593,6 @@ plt-extras :+= (package: "algol60/")
 ;; -------------------- games
 plt-extras :+= (- (+ (package: "games/" #:executable "plt-games")
                      (doc+src: "gl-board-game/" "cards/"))
-                  "loa/"
                   "paint-by-numbers/{hattori|solution-sets|raw-problems}")
 
 ;; -------------------- texpict & slideshow
@@ -654,5 +652,10 @@ mz-extras :+= (- (package: "unstable")
                  ;; should "gui" mean DrScheme or MrEd? It's not
                  ;; obvious that "framework" is only in DrScheme.
                  (cond (not dr) => (collects: "unstable/gui")))
+
+;; -------------------- plai
+plt-extras :+= (package: "plai/")
+
+plt-extras :+= (package: "schemeunit/")
 
 ;; ============================================================================

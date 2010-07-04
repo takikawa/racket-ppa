@@ -25,8 +25,11 @@
     [(Union: elems) `(make-Union (sort (list ,@(map sub elems)) < #:key Type-seq))]
     [(Base: n cnt) `(make-Base ',n (quote-syntax ,cnt))]
     [(Name: stx) `(make-Name (quote-syntax ,stx))]
-    [(Struct: name parent flds proc poly? pred-id cert)
-     `(make-Struct ,(sub name) ,(sub parent) ,(sub flds) ,(sub proc) ,(sub poly?) (quote-syntax ,pred-id) (syntax-local-certifier))]
+    [(Struct: name parent flds proc poly? pred-id cert acc-ids)
+     `(make-Struct ,(sub name) ,(sub parent) 
+                   ,(sub flds) ,(sub proc) ,(sub poly?)
+                   (quote-syntax ,pred-id) (syntax-local-certifier)
+                   (list ,@(for/list ([a acc-ids]) `(quote-syntax ,a))))]
     [(App: rator rands stx) `(make-App ,(sub rator) ,(sub rands) (quote-syntax ,stx))]
     [(Opaque: pred cert) `(make-Opaque (quote-syntax ,pred) (syntax-local-certifier))]
     [(Refinement: parent pred cert) `(make-Refinement ,(sub parent)
@@ -38,10 +41,10 @@
     [(? (lambda (e) (or (LatentFilter? e)
                         (LatentObject? e)
                         (PathElem? e)))
-        (app (lambda (v) (vector->list (struct->vector v))) (list-rest tag seq vals))) 
+        (app (lambda (v) (vector->list (struct->vector v))) (list-rest tag seq fv fi stx vals)))
      `(,(gen-constructor tag) ,@(map sub vals))]
-    [(? (lambda (e) (or (Type? e)))
-        (app (lambda (v) (vector->list (struct->vector v))) (list-rest tag key seq vals))) 
+    [(? Type?
+        (app (lambda (v) (vector->list (struct->vector v))) (list-rest tag seq fv fi stx key vals)))
      `(,(gen-constructor tag) ,@(map sub vals))]
     [_ (basic v)]))
 

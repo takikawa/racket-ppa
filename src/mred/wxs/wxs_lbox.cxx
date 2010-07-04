@@ -289,6 +289,7 @@ static l_TYPE l_POINT *l_MAKE_ARRAY(Scheme_Object *l, l_INTTYPE *c, char *who)
 
 
 
+
 class os_wxListBox : public wxListBox {
  public:
   Scheme_Object *callback_closure;
@@ -561,6 +562,7 @@ static Scheme_Object *os_wxListBoxGetLabelFont(int n,  Scheme_Object *p[])
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   class wxFont* r;
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "get-label-font in list-box%", n, p);
 
   SETUP_VAR_STACK_REMEMBERED(1);
@@ -581,6 +583,7 @@ static Scheme_Object *os_wxListBoxSetString(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "set-string in list-box%", n, p);
   int x0;
   string x1 INIT_NULLED_OUT;
@@ -606,6 +609,7 @@ static Scheme_Object *os_wxListBoxSetFirstItem(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "set-first-visible-item in list-box%", n, p);
   int x0;
 
@@ -628,6 +632,7 @@ static Scheme_Object *os_wxListBoxSet(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "set in list-box%", n, p);
   int x0;
   string* x1 INIT_NULLED_OUT;
@@ -653,6 +658,7 @@ static Scheme_Object *os_wxListBoxGetSelectionList(int n,  Scheme_Object *p[])
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   Scheme_Object* r;
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "get-selections in list-box%", n, p);
 
   SETUP_VAR_STACK_REMEMBERED(1);
@@ -674,6 +680,7 @@ static Scheme_Object *os_wxListBoxGetFirstItem(int n,  Scheme_Object *p[])
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   int r;
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "get-first-item in list-box%", n, p);
 
   SETUP_VAR_STACK_REMEMBERED(1);
@@ -695,6 +702,7 @@ static Scheme_Object *os_wxListBoxNumberOfVisibleItems(int n,  Scheme_Object *p[
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   int r;
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "number-of-visible-items in list-box%", n, p);
 
   SETUP_VAR_STACK_REMEMBERED(1);
@@ -716,6 +724,7 @@ static Scheme_Object *os_wxListBoxNumber(int n,  Scheme_Object *p[])
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   int r;
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "number in list-box%", n, p);
 
   SETUP_VAR_STACK_REMEMBERED(1);
@@ -737,6 +746,7 @@ static Scheme_Object *os_wxListBoxGetSelection(int n,  Scheme_Object *p[])
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   int r;
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "get-selection in list-box%", n, p);
 
   SETUP_VAR_STACK_REMEMBERED(1);
@@ -757,6 +767,7 @@ static Scheme_Object *os_wxListBoxSetClientData(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "set-data in list-box%", n, p);
   int x0;
   string x1 INIT_NULLED_OUT;
@@ -783,6 +794,7 @@ static Scheme_Object *os_wxListBoxGetClientData(int n,  Scheme_Object *p[])
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   nstring r;
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "get-data in list-box%", n, p);
   int x0;
 
@@ -806,6 +818,7 @@ static Scheme_Object *os_wxListBoxSelected(int n,  Scheme_Object *p[])
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   Bool r;
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "selected? in list-box%", n, p);
   int x0;
 
@@ -828,6 +841,7 @@ static Scheme_Object *os_wxListBoxSetOneSelection(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "set-selection in list-box%", n, p);
   int x0;
 
@@ -850,6 +864,7 @@ static Scheme_Object *os_wxListBoxSetSelection(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "select in list-box%", n, p);
   int x0;
   Bool x1;
@@ -877,6 +892,7 @@ static Scheme_Object *os_wxListBoxDelete(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "delete in list-box%", n, p);
   int x0;
 
@@ -899,6 +915,7 @@ static Scheme_Object *os_wxListBoxClear(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "clear in list-box%", n, p);
 
   SETUP_VAR_STACK_REMEMBERED(1);
@@ -921,6 +938,7 @@ static Scheme_Object *os_wxListBoxAppend(int n,  Scheme_Object *p[])
   SETUP_PRE_VAR_STACK(1);
   PRE_VAR_STACK_PUSH(0, p);
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "append in list-box%", n, p);
   if ((n >= (POFFSET+2)) && WITH_REMEMBERED_STACK(objscheme_istype_string(p[POFFSET+0], NULL)) && 1) {
     string x0 INIT_NULLED_OUT;
@@ -970,6 +988,7 @@ static Scheme_Object *os_wxListBoxOnDropFile(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "on-drop-file in list-box%", n, p);
   epathname x0 INIT_NULLED_OUT;
 
@@ -997,6 +1016,7 @@ static Scheme_Object *os_wxListBoxPreOnEvent(int n,  Scheme_Object *p[])
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   Bool r;
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "pre-on-event in list-box%", n, p);
   class wxWindow* x0 INIT_NULLED_OUT;
   class wxMouseEvent* x1 INIT_NULLED_OUT;
@@ -1027,6 +1047,7 @@ static Scheme_Object *os_wxListBoxPreOnChar(int n,  Scheme_Object *p[])
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   Bool r;
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "pre-on-char in list-box%", n, p);
   class wxWindow* x0 INIT_NULLED_OUT;
   class wxKeyEvent* x1 INIT_NULLED_OUT;
@@ -1056,6 +1077,7 @@ static Scheme_Object *os_wxListBoxOnSize(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "on-size in list-box%", n, p);
   int x0;
   int x1;
@@ -1083,6 +1105,7 @@ static Scheme_Object *os_wxListBoxOnSetFocus(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "on-set-focus in list-box%", n, p);
 
   SETUP_VAR_STACK_REMEMBERED(1);
@@ -1106,6 +1129,7 @@ static Scheme_Object *os_wxListBoxOnKillFocus(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxListBox_class);
   objscheme_check_valid(os_wxListBox_class, "on-kill-focus in list-box%", n, p);
 
   SETUP_VAR_STACK_REMEMBERED(1);
@@ -1263,7 +1287,8 @@ int objscheme_istype_wxListBox(Scheme_Object *obj, const char *stop, int nullOK)
 {
   REMEMBER_VAR_STACK();
   if (nullOK && XC_SCHEME_NULLP(obj)) return 1;
-  if (objscheme_is_a(obj,  os_wxListBox_class))
+  obj = objscheme_unwrap(obj, os_wxListBox_class);
+  if (objscheme_is_a(obj, os_wxListBox_class))
     return 1;
   else {
     if (!stop)
@@ -1306,6 +1331,7 @@ class wxListBox *objscheme_unbundle_wxListBox(Scheme_Object *obj, const char *wh
 
   REMEMBER_VAR_STACK();
 
+  obj = objscheme_unwrap(obj, os_wxListBox_class);
   (void)objscheme_istype_wxListBox(obj, where, nullOK);
   Scheme_Class_Object *o = (Scheme_Class_Object *)obj;
   WITH_REMEMBERED_STACK(objscheme_check_valid(NULL, NULL, 0, &obj));

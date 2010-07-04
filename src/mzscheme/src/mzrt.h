@@ -1,7 +1,7 @@
 #ifndef MZRT_H
 #define MZRT_H
 
-#ifdef MZ_USE_PLACES
+#ifdef MZ_USE_MZRT
 
 /****************** ATOMIC OPERATIONS ************************************/
 /* mzrt_atomic_ops.c */
@@ -23,7 +23,9 @@ void mzrt_set_user_break_handler(void (*user_break_handler)(int));
 
 /****************** PROCESS WEIGHT THREADS ********************************/
 
-#ifdef WIN32
+#if (defined(__WIN32__) || defined(WIN32) || defined(_WIN32))
+# include <winsock2.h>
+# include <windows.h>
 typedef HANDLE mzrt_thread_id;
 #else
 typedef pthread_t mzrt_thread_id;
@@ -36,16 +38,14 @@ typedef struct mz_proc_thread {
 } mz_proc_thread;
 
 
-#ifdef WIN32
-typedef DWORD (WINAPI *mz_proc_thread_start)(void*);
-#else
-typedef void *(mz_proc_thread_start)(void*);
-#endif
+typedef void *(*mz_proc_thread_start)(void*);
 
 mz_proc_thread* mzrt_proc_first_thread_init();
-mz_proc_thread* mz_proc_thread_create(mz_proc_thread_start*, void* data);
+mz_proc_thread* mz_proc_thread_create(mz_proc_thread_start, void* data);
+mz_proc_thread* mz_proc_thread_create_w_stacksize(mz_proc_thread_start, void* data, long stacksize);
 void *mz_proc_thread_wait(mz_proc_thread *thread);
 int mz_proc_thread_detach(mz_proc_thread *thread);
+void mz_proc_thread_exit(void *rc);
 
 void mzrt_sleep(int seconds);
 
@@ -110,7 +110,7 @@ void pt_mbox_recv(pt_mbox *mbox, int *type, void **payload, pt_mbox **origin);
 void pt_mbox_send_recv(pt_mbox *mbox, int type, void *payload, pt_mbox *origin, int *return_type, void **return_payload);
 void pt_mbox_destroy(pt_mbox *mbox);
 
-static inline int mzrt_cas(volatile size_t *addr, size_t old, size_t new_val) {
+static MZ_INLINE int mzrt_cas(volatile size_t *addr, size_t old, size_t new_val) {
 #if defined(__GNUC__) && !defined(__INTEL_COMPILER)
 # if defined(__i386__)
   char result;
@@ -179,12 +179,12 @@ static inline int mzrt_cas(volatile size_t *addr, size_t old, size_t new_val) {
 #endif
 }
 
-static inline void mzrt_ensure_max_cas(unsigned long *atomic_val, unsigned long len) {
+static MZ_INLINE void mzrt_ensure_max_cas(unsigned long *atomic_val, unsigned long len) {
   int set = 0;
   while(!set) {
     unsigned long old_val = *atomic_val;
     if (len > old_val) {
-      set = !mzrt_cas(atomic_val, old_val, len);
+      set = !mzrt_cas((size_t *)atomic_val, old_val, len);
     }
     else {
       set = 1;

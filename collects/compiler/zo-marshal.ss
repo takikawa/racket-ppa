@@ -1,17 +1,26 @@
 #lang scheme/base
-(require compiler/zo-parse
-         scheme/match)
+(require compiler/zo-structs
+         scheme/match
+         scheme/local
+         scheme/list
+         scheme/dict)
 
 (provide zo-marshal)
 
-;; Doesn't write as compactly as MzScheme, since list and pair sequences
-;; are not compacted, and symbols are not written in short form
+#| Unresolved Issues
+  
+  Less sharing occurs than in the C implementation, creating much larger files
 
+  protect-quote caused some things to be sent to write. But there are some things (like paths) that can be read and passed to protect-quote that cannot be 'read' in after 'write', so we turned it off
+|#
+
+(define current-wrapped-ht (make-parameter #f))
 (define (zo-marshal top)
   (match top
     [(struct compilation-top (max-let-depth prefix form))
      (let ([encountered (make-hasheq)]
-           [shared (make-hasheq)])
+           [shared (make-hasheq)]
+           [wrapped (make-hasheq)])
        (let ([visit (lambda (v) 
                       (if (hash-ref shared v #f)
                           #f
@@ -24,34 +33,37 @@
                                 (when (closure? v)
                                   (hash-set! shared v (add1 (hash-count shared))))
                                 #t))))])
-         (traverse-prefix prefix visit)
-         (traverse-form form visit))
+         (parameterize ([current-wrapped-ht wrapped])
+           (traverse-prefix prefix visit)
+           (traverse-form form visit)))
        (let* ([s (open-output-bytes)]
-              [out (make-out s (lambda (v) (hash-ref shared v #f)))]
+              [out (make-out s (lambda (v) (hash-ref shared v #f)) wrapped)]
               [offsets
                (map (lambda (v)
                       (let ([v (cdr v)])
                         (begin0
-                         (file-position s)
-                         (out-anything v (make-out
-                                          s
-                                          (let ([skip? #t])
-                                            (lambda (v2)
-                                              (if (and skip? (eq? v v2))
-                                                  (begin
-                                                    (set! skip? #f)
-                                                    #f)
-                                                  (hash-ref shared v2 #f)))))))))
+                          (file-position s)
+                          (out-anything v (make-out
+                                           s
+                                           (let ([skip? #t])
+                                             (lambda (v2)
+                                               (if (and skip? (eq? v v2))
+                                                   (begin
+                                                     (set! skip? #f)
+                                                     #f)
+                                                   (hash-ref shared v2 #f))))
+                                           wrapped)))))
                     (sort (hash-map shared (lambda (k v) (cons v k)))
                           <
                           #:key car))]
               [post-shared (file-position s)]
               [all-short? (post-shared . < . #xFFFF)])
          (out-data (list* max-let-depth prefix (protect-quote form)) out)
-         (let ([res (get-output-bytes s)])
+         (let ([res (get-output-bytes s)]
+               [version-bs (string->bytes/latin-1 (version))])
            (bytes-append #"#~"
-                         (bytes (string-length (version)))
-                         (string->bytes/latin-1 (version))
+                         (bytes (bytes-length version-bs))
+                         version-bs
                          (int->bytes (add1 (hash-count shared)))
                          (bytes (if all-short?
                                     1
@@ -103,8 +115,14 @@
            (traverse-data modidx visit)))
      (traverse-data sym visit)]))
 
-(define (traverse-stx tl visit)
-  (error "cannot handle syntax objects, yet"))
+(define (traverse-wrapped w visit)
+  (define ew (hash-ref! (current-wrapped-ht) w (lambda () (encode-wrapped w))))
+  (traverse-data ew visit))
+
+(define (traverse-stx s visit)
+  (when s
+    (traverse-wrapped (stx-encoded s) visit)))
+
 
 (define (traverse-form form visit)
   (match form
@@ -166,7 +184,7 @@
      (traverse-expr proc visit)
      (traverse-expr args-expr visit)]
     [(struct seq (exprs))
-     (for-each (lambda (expr) (traverse-expr expr visit)) exprs)]
+     (for-each (lambda (expr) (traverse-form expr visit)) exprs)]
     [(struct beg0 (exprs))
      (for-each (lambda (expr) (traverse-expr expr visit)) exprs)]
     [(struct with-cont-mark (key val body))
@@ -181,21 +199,31 @@
 
 (define (traverse-data expr visit)
   (cond
-   [(or (symbol? expr)
-        (keyword? expr)
-        (string? expr)
-        (bytes? expr)
-        (path? expr))
-    (visit expr)]
-   [(module-path-index? expr)
-    (visit expr)
-    (let-values ([(name base) (module-path-index-split expr)])
-      (traverse-data name visit)
-      (traverse-data base visit))]
-   [(pair? expr)
-    (traverse-data (car expr) visit)
-    (traverse-data (cdr expr) visit)]
-   [else (void)]))
+    [(or (symbol? expr)
+         (keyword? expr)
+         (string? expr)
+         (bytes? expr)
+         (path? expr))
+     (visit expr)]
+    [(module-path-index? expr)
+     (visit expr)
+     (let-values ([(name base) (module-path-index-split expr)])
+       (traverse-data name visit)
+       (traverse-data base visit))]
+    [(pair? expr)
+     (traverse-data (car expr) visit)
+     (traverse-data (cdr expr) visit)]
+    [(vector? expr)
+     (for ([e (in-vector expr)])
+       (traverse-data e visit))]
+    [(box? expr)
+     (traverse-data (unbox expr) visit)]
+    [(stx? expr)
+     (traverse-stx expr visit)]
+    [(wrapped? expr)
+     (traverse-wrapped expr visit)]
+    [else
+     (void)]))
 
 (define (traverse-lam expr visit)
   (match expr
@@ -286,10 +314,29 @@
   APPVALS_EXPD
   SPLICE_EXPD)
 
+(define CPT_SMALL_NUMBER_START 35)
+(define CPT_SMALL_NUMBER_END 60)
+
+(define CPT_SMALL_SYMBOL_START 60)
+(define CPT_SMALL_SYMBOL_END 80)
+
+(define CPT_SMALL_MARSHALLED_START 80)
+(define CPT_SMALL_MARSHALLED_END 92)
+
+(define CPT_SMALL_LIST_MAX 65)
+(define CPT_SMALL_PROPER_LIST_START 92)
+(define CPT_SMALL_PROPER_LIST_END (+ CPT_SMALL_PROPER_LIST_START CPT_SMALL_LIST_MAX))
+
+(define CPT_SMALL_LIST_START CPT_SMALL_PROPER_LIST_END)
+(define CPT_SMALL_LIST_END 192)
+
 (define CPT_SMALL_LOCAL_START 192)
 (define CPT_SMALL_LOCAL_END 207)
 (define CPT_SMALL_LOCAL_UNBOX_START 207)
 (define CPT_SMALL_LOCAL_UNBOX_END 222)
+
+(define CPT_SMALL_SVECTOR_START 222)
+(define CPT_SMALL_SVECTOR_END 247)
 
 (define CPT_SMALL_APPLICATION_START 247)
 (define CPT_SMALL_APPLICATION_END 255)
@@ -299,7 +346,7 @@
 (define CLOS_PRESERVES_MARKS 4)
 (define CLOS_IS_METHOD 16)
 (define CLOS_SINGLE_RESULT 32)
-  
+
 (define BITS_PER_MZSHORT 32)
 
 (define *dummy* #f)
@@ -313,8 +360,7 @@
 (define-struct case-seq (name lams))
 (define-struct (seq0 seq) ())
 
-(define-struct out (s shared-index))
-
+(define-struct out (s shared-index encoded-wraps))
 (define (out-shared v out k)
   (let ([v ((out-shared-index out) v)])
     (if v
@@ -322,6 +368,10 @@
           (out-byte CPT_SYMREF out)
           (out-number v out))
         (k))))
+(define (display-byte b)
+  (if (b . <= . #xf)
+      (printf "0~x" b)
+      (printf "~x" b)))
 
 (define (out-byte v out)
   (write-byte v (out-s out)))
@@ -331,37 +381,40 @@
 
 (define (out-number n out)
   (cond
-   [(n . < . 0)
-    (if (n . > . -32)
-        (out-byte (bitwise-ior #xC0 (- n)) out)
-        (begin
-          (out-byte #xE0 out)
-          (out-bytes (int->bytes (- n)) out)))]
-   [(n . < . 128)
-    (out-byte n out)]
-   [(n . < . #x4000)
-    (out-byte (bitwise-ior #x80 (bitwise-and n #x3F)) out)
-    (out-byte (bitwise-and #xFF (arithmetic-shift n -6)) out)]
-   [else
-    (out-bytes #xF0 out)
-    (out-bytes (int->bytes n) out)]))
+    [(n . < . 0)
+     (if (n . > . -32)
+         (out-byte (bitwise-ior #xC0 (- n)) out)
+         (begin
+           (out-byte #xE0 out)
+           (out-bytes (int->bytes (- n)) out)))]
+    [(n . < . 128)
+     (out-byte n out)]
+    [(n . < . #x4000)
+     (out-byte (bitwise-ior #x80 (bitwise-and n #x3F)) out)
+     (out-byte (bitwise-and #xFF (arithmetic-shift n -6)) out)]
+    [else
+     (out-byte #xF0 out)
+     (out-bytes (int->bytes n) out)]))
 
 (define (out-syntax key val out)
   (out-marshaled syntax-type-num (list* key val) out))
 
 (define (out-marshaled type-num val out)
-  (out-byte CPT_MARSHALLED out)
-  (out-number type-num out)
+  (if (type-num . < . (- CPT_SMALL_MARSHALLED_END CPT_SMALL_MARSHALLED_START))
+      (out-byte (+ CPT_SMALL_MARSHALLED_START type-num) out)
+      (begin
+        (out-byte CPT_MARSHALLED out)
+        (out-number type-num out)))
   (out-data val out))
 
 (define (out-anything v out)
   (cond
-   [(module-variable? v)
-    (out-toplevel v out)]
-   [(closure? v)
-    (out-expr v out)]
-   [else
-    (out-data v out)]))
+    [(module-variable? v)
+     (out-toplevel v out)]
+    [(closure? v)
+     (out-expr v out)]
+    [else
+     (out-data v out)]))
 
 (define (out-prefix a-prefix out)
   (match a-prefix
@@ -401,7 +454,13 @@
                                            (if (andmap (lambda (x) (equal? x default)) l)
                                                #f
                                                (list->vector l)))]
-                        [l (map cdr other-requires)]
+                        [l 
+                         (let loop ([l other-requires])
+                           (match l
+                             [(list)
+                              empty]
+                             [(list-rest (cons phase reqs) rst)
+                              (list* phase reqs (loop rst))]))]
                         [l (cons (length other-requires) l)]
                         [l (cons (lookup-req #f) l)] ; dt-requires
                         [l (cons (lookup-req -1) l)] ; tt-requires
@@ -460,17 +519,99 @@
       out
       (lambda ()
         (out-byte CPT_MODULE_VAR out)
-        (let-values ([(p b) (module-path-index-split modidx)])
-          (if (symbol? p)
-              (out-data p out)
-              (out-data modidx out)))
+        (out-data modidx out)
         (out-data sym out)
         (unless (zero? phase)
           (out-number -2 out))
         (out-number pos out)))]))
 
-(define (out-stx tl out)
-  (error "cannot handle syntax objects, yet"))
+(define (encode-module-bindings module-bindings)
+  (define encode-nominal-path
+    (match-lambda
+      [(struct simple-nominal-path (value))
+       value]
+      [(struct imported-nominal-path (value import-phase))
+       (cons value import-phase)]
+      [(struct phased-nominal-path (value import-phase phase))
+       (cons value (cons import-phase phase))]))
+  (define encoded-bindings (make-vector (* (length module-bindings) 2)))
+  (for ([i (in-naturals)]
+        [(k v) (in-dict module-bindings)])
+    (vector-set! encoded-bindings (* i 2) k)
+    (vector-set! encoded-bindings (add1 (* i 2))
+                 (match v
+                   [(struct simple-module-binding (path))
+                    path]
+                   [(struct exported-module-binding (path export-name))
+                    (cons path export-name)]
+                   [(struct nominal-module-binding (path nominal-path))
+                    (cons path (encode-nominal-path nominal-path))]
+                   [(struct exported-nominal-module-binding (path export-name nominal-path nominal-export-name))
+                    (list* path export-name (encode-nominal-path nominal-path) nominal-export-name)]
+                   [(struct phased-module-binding (path phase export-name nominal-path nominal-export-name))
+                    (list* path phase export-name (encode-nominal-path nominal-path) nominal-export-name)])))
+  encoded-bindings)
+
+(define (encode-all-from-module all)
+  (match all
+    [(struct all-from-module (path phase src-phase exceptions prefix))
+     (if (and (empty? exceptions) (not prefix))
+         (list* path phase src-phase)
+         (list* path phase src-phase (append exceptions prefix)))]))
+
+(define (encode-wraps wraps)
+  (for/list ([wrap (in-list wraps)])
+    (match wrap
+      [(struct phase-shift (amt src dest))
+       (box (vector amt src dest #f))]
+      [(struct module-rename (phase kind set-id unmarshals renames mark-renames plus-kern?))
+       (define encoded-kind (eq? kind 'marked))
+       (define encoded-unmarshals (map encode-all-from-module unmarshals))
+       (define encoded-renames (encode-module-bindings renames))
+       (define-values (maybe-unmarshals maybe-renames) (if (null? encoded-unmarshals) 
+                                                           (values encoded-renames mark-renames)
+                                                           (values encoded-unmarshals (cons encoded-renames mark-renames))))
+       (define mod-rename (list* phase encoded-kind set-id maybe-unmarshals maybe-renames))
+       (if plus-kern?
+           (cons #t mod-rename)
+           mod-rename)]
+      [(struct lexical-rename (bool1 bool2 alist))
+       (define len (length alist))
+       (define vec (make-vector (+ (* 2 len) 2))) ; + 2 for booleans at the beginning
+       (vector-set! vec 0 bool1)
+       (vector-set! vec 1 bool2)
+       (for ([(k v) (in-dict alist)]
+             [i (in-naturals)])
+         (vector-set! vec (+ 2 i) k)
+         (vector-set! vec (+ 2 i len) v))
+       vec]
+      [(struct prune (syms))
+       (box syms)]
+      [(struct wrap-mark (val))
+       (list val)])))
+
+(define (encode-wrapped w)
+  (match w
+    [(struct wrapped (datum wraps certs))
+     (vector
+      (cons
+       datum
+       (encode-wraps wraps))
+      certs)]))
+
+(define (lookup-encoded-wrapped w out)
+  (hash-ref (out-encoded-wraps out) w))
+
+(define (out-wrapped w out)
+  (out-data (lookup-encoded-wrapped w out) out))
+
+(define (out-stx s out)
+  (out-shared s out 
+              (lambda ()
+                (match s
+                  [(struct stx (encoded))
+                   (out-byte CPT_STX out)
+                   (out-wrapped encoded out)]))))
 
 (define (out-form form out)
   (match form
@@ -613,13 +754,14 @@
      (out-expr (protect-quote then) out)
      (out-expr (protect-quote else) out)]
     [(struct application (rator rands))
-     (if ((length rands) . < . (- CPT_SMALL_APPLICATION_END CPT_SMALL_APPLICATION_START))
-         (out-byte (+ CPT_SMALL_APPLICATION_START (length rands)) out)
-         (begin
-           (out-byte CPT_APPLICATION out)
-           (out-number (length rands) out)))
-     (for-each (lambda (e) (out-expr (protect-quote e) out))
-               (cons rator rands))]
+     (let ([len (length rands)]) 
+       (if (len . < . (- CPT_SMALL_APPLICATION_END CPT_SMALL_APPLICATION_START))
+           (out-byte (+ CPT_SMALL_APPLICATION_START (length rands)) out)
+           (begin
+             (out-byte CPT_APPLICATION out)
+             (out-number len out)))
+       (for-each (lambda (e) (out-expr (protect-quote e) out))
+                 (cons rator rands)))]
     [(struct apply-values (proc args-expr))
      (out-syntax APPVALS_EXPD
                  (cons (protect-quote proc)
@@ -648,7 +790,7 @@
                  out)]
     [else (out-value expr out)]))
 
-(define (out-lam expr out)
+(define (out-lam expr out)  
   (match expr
     [(struct indirect (val)) (out-lam val out)]
     [(struct closure (lam gen-id))
@@ -704,121 +846,189 @@
                        l)
                       out))]))
 
-(define (out-as-bytes expr ->bytes CPT len2 out)
+(define (out-as-bytes expr ->bytes CPT len2 out #:before-length [before-length #f])
   (out-shared expr out (lambda ()
                          (let ([s (->bytes expr)])
                            (out-byte CPT out)
+                           (when before-length
+                             (out-number before-length out))
                            (out-number (bytes-length s) out)
                            (when len2 (out-number len2 out))
                            (out-bytes s out)))))
 
 (define (out-data expr out)
   (cond
-   [(prefix? expr) (out-prefix expr out)]
-   [(global-bucket? expr) (out-toplevel expr out)]
-   [(module-variable? expr) (out-toplevel expr out)]
-   [else (out-form expr out)]))
+    [(prefix? expr) (out-prefix expr out)]
+    [(global-bucket? expr) (out-toplevel expr out)]
+    [(module-variable? expr) (out-toplevel expr out)]
+    [else (out-form expr out)]))
 
 (define (out-value expr out)
   (cond
-   [(symbol? expr)
-    (out-as-bytes expr 
-                  (compose string->bytes/utf-8 symbol->string) 
-                  CPT_SYMBOL
-                  #f
-                  out)]
-   [(keyword? expr)
-    (out-as-bytes expr 
-                  (compose string->bytes/utf-8 keyword->string) 
-                  CPT_KEYWORD
-                  #f
-                  out)]
-   [(string? expr)
-    (out-as-bytes expr 
-                  string->bytes/utf-8
-                  CPT_CHAR_STRING
-                  (string-length expr)
-                  out)]
-   [(bytes? expr)
-    (out-as-bytes expr 
-                  values
-                  CPT_BYTE_STRING
-                  #f
-                  out)]
-   [(path? expr)
-    (out-as-bytes expr 
-                  path->bytes
-                  CPT_PATH
-                  #f
-                  out)]
-   [(char? expr)
-    (out-byte CPT_CHAR out)
-    (out-number (char->integer expr) out)]
-   [(and (exact-integer? expr)
-         (and (expr . >= . -1073741824) (expr . <= . 1073741823)))
-    (out-byte CPT_INT out)
-    (out-number expr out)]
-   [(null? expr)
-    (out-byte CPT_NULL out)]
-   [(eq? expr #t)
-    (out-byte CPT_TRUE out)]
-   [(eq? expr #f)
-    (out-byte CPT_FALSE out)]
-   [(void? expr)
-    (out-byte CPT_VOID out)]
-   [(box? expr)
-    (out-byte CPT_BOX out)
-    (out-data (unbox expr) out)]
-   [(pair? expr)
-    (out-byte CPT_LIST out)
-    (out-number 1 out)
-    (out-data (car expr) out)
-    (out-data (cdr expr) out)]
-   [(vector? expr)
-    (out-byte CPT_VECTOR out)
-    (out-number (vector-length expr) out)
-    (for ([v (in-vector expr)])
-      (out-data v out))]
-   [(hash? expr)
-    (out-byte CPT_HASH_TABLE out)
-    (out-number (cond
-                 [(hash-eqv? expr) 2]
-                 [(hash-eq? expr) 0]
-                 [else 1]))
-    (for ([(k v) (in-hash expr)])
-      (out-data k out)
-      (out-data v out))]
-   [(svector? expr)
-    (out-byte CPT_SVECTOR out)
-    (out-number (vector-length (svector-vec expr)) out)
-    (let ([vec (svector-vec expr)])
-      (for ([n (in-range (sub1 (vector-length vec)) -1 -1)])
-        (out-number (vector-ref vec n) out)))]
-   [(module-path-index? expr)
-    (out-shared expr out 
-                (lambda ()
-                  (out-byte CPT_MODULE_INDEX out)
-                  (let-values ([(name base) (module-path-index-split expr)])
-                    (out-data name out)
-                    (out-data base out))))]
-   [(module-decl? expr)
-    (out-marshaled module-type-num
-                   (module-decl-content expr)
+    [(and (symbol? expr) (not (symbol-interned? expr)))
+     (out-as-bytes expr 
+                   #:before-length (if (symbol-unreadable? expr) 0 1)
+                   (compose string->bytes/utf-8 symbol->string) 
+                   CPT_WEIRD_SYMBOL
+                   #f
+                   out)]     
+    [(symbol? expr)
+     (out-shared expr out
+                 (lambda ()
+                   (define bs (string->bytes/utf-8 (symbol->string expr)))
+                   (define len (bytes-length bs))
+                   (if (len . < . (- CPT_SMALL_SYMBOL_END CPT_SMALL_SYMBOL_START))
+                       (out-byte (+ CPT_SMALL_SYMBOL_START len) out)
+                       (begin (out-byte CPT_SYMBOL out)
+                              (out-number len out)))
+                   (out-bytes bs out)))]
+    [(keyword? expr)
+     (out-as-bytes expr 
+                   (compose string->bytes/utf-8 keyword->string) 
+                   CPT_KEYWORD
+                   #f
                    out)]
-   [else
-    (out-byte CPT_QUOTE out)
-    (let ([s (open-output-bytes)])
-      (write (if (quoted? expr) (quoted-v expr) expr) s)
-      (out-byte CPT_ESCAPE out)
-      (let ([bstr (get-output-bytes s)])
-        (out-number (bytes-length bstr) out)
-        (out-bytes bstr out)))]))
+    [(string? expr)
+     (out-as-bytes expr 
+                   string->bytes/utf-8
+                   CPT_CHAR_STRING
+                   (string-length expr)
+                   out)]
+    [(bytes? expr)
+     (out-as-bytes expr 
+                   values
+                   CPT_BYTE_STRING
+                   #f
+                   out)]
+    [(path? expr)
+     (out-as-bytes expr 
+                   path->bytes
+                   CPT_PATH
+                   #f
+                   out)]
+    [(char? expr)
+     (out-byte CPT_CHAR out)
+     (out-number (char->integer expr) out)]
+    [(and (exact-integer? expr)
+          (and (expr . >= . -1073741824) (expr . <= . 1073741823)))
+     (if (and (expr . >= . 0)
+              (expr . < . (- CPT_SMALL_NUMBER_END CPT_SMALL_NUMBER_START)))
+         (out-byte (+ CPT_SMALL_NUMBER_START expr) out)
+         (begin
+           (out-byte CPT_INT out)
+           (out-number expr out)))]
+    [(null? expr)
+     (out-byte CPT_NULL out)]
+    [(eq? expr #t)
+     (out-byte CPT_TRUE out)]
+    [(eq? expr #f)
+     (out-byte CPT_FALSE out)]
+    [(void? expr)
+     (out-byte CPT_VOID out)]
+    [(box? expr)
+     (out-byte CPT_BOX out)
+     (out-data (unbox expr) out)]
+    [(pair? expr)
+     (local [(define seen? (make-hasheq)) ; XXX Maybe this should be global?
+             (define (list-length-before-cycle/improper-end l)
+               (if (hash-has-key? seen? l)
+                   (begin (values 0 #f))
+                   (begin (hash-set! seen? l #t)
+                          (cond
+                            [(null? l)
+                             (values 0 #t)]
+                            [(pair? l)
+                             (let-values ([(len proper?)
+                                           (list-length-before-cycle/improper-end (cdr l))])
+                               (values (add1 len) proper?))]
+                            [else
+                             (values 0 #f)]))))
+             (define-values (len proper?) (list-length-before-cycle/improper-end expr))
+             (define (print-contents-as-proper)
+               (for ([e (in-list expr)])
+                 (out-data e out)))
+             (define (print-contents-as-improper)
+               (let loop ([l expr] [i len])
+                 (cond
+                   [(zero? i)
+                    (out-data l out)]
+                   [else
+                    (out-data (car l) out)
+                    (loop (cdr l) (sub1 i))])))]
+       (if proper?
+           (if (len . < . (- CPT_SMALL_PROPER_LIST_END CPT_SMALL_PROPER_LIST_START))
+               (begin (out-byte (+ CPT_SMALL_PROPER_LIST_START len) out)
+                      (print-contents-as-proper))
+               (begin (out-byte CPT_LIST out)
+                      (out-number len out)
+                      (print-contents-as-proper)
+                      (out-data null out)))
+           (if (len . < . (- CPT_SMALL_LIST_END CPT_SMALL_LIST_START))
+               (begin (out-byte (+ CPT_SMALL_LIST_START len) out)
+                      (print-contents-as-improper))
+               (begin (out-byte CPT_LIST out)
+                      (out-number len out)
+                      (print-contents-as-improper)))))]
+    [(vector? expr)
+     (out-byte CPT_VECTOR out)
+     (out-number (vector-length expr) out)
+     (for ([v (in-vector expr)])
+       (out-data v out))]
+    [(hash? expr)
+     (out-byte CPT_HASH_TABLE out)
+     (out-number (cond
+                   [(hash-eqv? expr) 2]
+                   [(hash-eq? expr) 0]
+                   [else 1])
+                 out)
+     (out-number (hash-count expr) out)
+     (for ([(k v) (in-hash expr)])
+       (out-data k out)
+       (out-data v out))]
+    [(svector? expr)
+     (let* ([vec (svector-vec expr)]
+            [len (vector-length vec)])
+       (if (len . < . (- CPT_SMALL_SVECTOR_END CPT_SMALL_SVECTOR_START))
+           (out-byte (+ CPT_SMALL_SVECTOR_START len) out)
+           (begin (out-byte CPT_SVECTOR out)
+                  (out-number len out)))
+       (for ([n (in-range (sub1 len) -1 -1)])
+         (out-number (vector-ref vec n) out)))]
+    [(module-path-index? expr)
+     (out-shared expr out 
+                 (lambda ()
+                   (out-byte CPT_MODULE_INDEX out)
+                   (let-values ([(name base) (module-path-index-split expr)])
+                     (out-data name out)
+                     (out-data base out))))]
+    [(module-decl? expr)
+     (out-marshaled module-type-num
+                    (module-decl-content expr)
+                    out)]
+    [(stx? expr)
+     (out-stx expr out)]
+    [(wrapped? expr)
+     (out-wrapped expr out)]      
+    [else
+     (out-byte CPT_QUOTE out)
+     (let ([s (open-output-bytes)])
+       (write (if (quoted? expr) 
+                  (quoted-v expr)
+                  expr) s)
+       (out-byte CPT_ESCAPE out)
+       (let ([bstr (get-output-bytes s)])
+         (out-number (bytes-length bstr) out)
+         (out-bytes bstr out)))]))
 
-(define-struct quoted (v))
+
+(define-struct quoted (v) #:prefab)
+
 (define (protect-quote v)
-  (if (or (list? v) (vector? v) (box? v) (hash? v))
-      (make-quoted v)
-      v))
+  v
+  #;(if (or (list? v) (vector? v) (box? v) (hash? v))
+        (make-quoted v)
+        v))
+
 
 (define-struct svector (vec))
 

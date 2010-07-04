@@ -4,10 +4,12 @@
 ;;   John Clements                             -- 2004-08-16
 ;;   Dave Gurnell (string->date, date->string) -- 2007-09-14 
 ;;   Dave Gurnell (time{=,<,>,<=,>=}?)         -- 2009-11-26
+;;   John Clements (nanoseconds off by x100)   -- 2009-12-15
 
-(require srfi/19/time)
+(require scheme/serialize
+         srfi/19/time)
 
-(require schemeunit/test
+(require schemeunit
          schemeunit/text-ui)
 
 (define-check (check-comparisons comparison times expected)
@@ -187,9 +189,26 @@
       (check = 365 (- (date->modified-julian-day (srfi:make-date 0 0 0 0 1 1 2004 0))
                       (date->modified-julian-day (srfi:make-date 0 0 0 0 1 1 2003 0))))
       (let ([test-date (srfi:make-date 0 0 0 0 1 1 2003 -7200)])
-        (check tm:date= test-date (modified-julian-day->date (date->modified-julian-day test-date) -7200))))))
+        (check tm:date= test-date (modified-julian-day->date (date->modified-julian-day test-date) -7200))))
+    
+    (test-case "serialize and deserialize"
+      (check-equal? (deserialize (serialize (make-time time-utc 0 1))) (make-time time-utc 0 1))
+      (check-equal? (deserialize (serialize (make-time time-tai 2 3))) (make-time time-tai 2 3))
+      (check-equal? (deserialize (serialize (srfi:make-date 0 1 2 3 4 5 6 7))) (srfi:make-date 0 1 2 3 4 5 6 7)))
+    
+    ;; nanosecnds off by a factor of 100...
+    (test-case "nanosecond order-of-magnitude"
+               ;; half a second should be within 1/10th of 10^9 / 2 nanoseconds (currently off by a factor of 100)
+               (check-within (let ([t (date-nanosecond (current-date))])
+                               (sleep 0.5)
+                               (abs (- (date-nanosecond (current-date)) t)))
+                             (* 1/2  (expt 10 9))
+                             (* 1/10 (expt 10 9))))))
 
 ; Helper checks and procedures -----------------
+
+(define-simple-check (check-within actual expected epsilon)
+    (< (abs (- actual expected)) epsilon))
 
 (define-check (check-one-utc-tai-edge utc tai-diff tai-last-diff)
   (let* (;; right on the edge they should be the same

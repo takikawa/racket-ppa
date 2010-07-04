@@ -3,6 +3,7 @@
 (require "matcher.ss"
          "struct.ss"
          "term.ss"
+         "fresh.ss"
          "loc-wrapper.ss"
 	 "error.ss"
          mzlib/trace
@@ -211,12 +212,14 @@
 (define-syntax (-reduction-relation stx)
   (syntax-case stx ()
     [(_ lang args ...)
-     (syntax/loc stx (do-reduction-relation reduction-relation empty-reduction-relation #f lang args ...))]))
+     (with-syntax ([orig-stx stx])
+       (syntax/loc stx (do-reduction-relation orig-stx reduction-relation empty-reduction-relation #f lang args ...)))]))
 
 (define-syntax (extend-reduction-relation stx)
   (syntax-case stx ()
     [(_ orig-reduction-relation lang args ...)
-     (syntax/loc stx (do-reduction-relation extend-reduction-relation orig-reduction-relation #t lang args ...))]))
+     (with-syntax ([orig-stx stx])
+       (syntax/loc stx (do-reduction-relation orig-stx extend-reduction-relation orig-reduction-relation #t lang args ...)))]))
 
 ;; the withs, freshs, and side-conditions come in backwards order
 (define-for-syntax (bind-withs orig-name main lang lang-nts stx where-mode body)
@@ -224,9 +227,11 @@
          [body
           (let loop ([stx stx]
                      [to-not-be-in main])
-            (syntax-case stx (side-condition where fresh)
+            (syntax-case stx (fresh)
               [() body]
-              [((where x e) y ...)
+              [((-where x e) y ...)
+               (or (free-identifier=? #'-where #'where)
+                   (free-identifier=? #'-where #'where/hidden))
                (let-values ([(names names/ellipses) (extract-names lang-nts 'reduction-relation #t #'x)])
                  (with-syntax ([(cpat) (generate-temporaries '(compiled-pattern))]
                                [side-conditions-rewritten (rewrite-side-conditions/check-errs
@@ -261,7 +266,9 @@
                                             mtchs)]
                                  [else (error 'unknown-where-mode "~s" where-mode)])
                                #f))))))]
-              [((side-condition s ...) y ...)
+              [((-side-condition s ...) y ...)
+               (or (free-identifier=? #'-side-condition #'side-condition)
+                   (free-identifier=? #'-side-condition #'side-condition/hidden))
                #`(and s ... #,(loop #'(y ...) to-not-be-in))]
               [((fresh x) y ...)
                (identifier? #'x)
@@ -291,16 +298,16 @@
 (define-syntax-set (do-reduction-relation)
   (define (do-reduction-relation/proc stx)
     (syntax-case stx ()
-      [(_ id orig-reduction-relation allow-zero-rules? lang . w/domain-args)
+      [(_ orig-stx id orig-reduction-relation allow-zero-rules? lang . w/domain-args)
        (identifier? #'lang)
        (prune-syntax
         (let-values ([(domain-pattern main-arrow args)
-                      (parse-keywords stx #'id #'w/domain-args)])
+                      (parse-keywords #'orig-stx #'id #'w/domain-args)])
           (with-syntax ([(rules ...) (before-with args)]
                         [(shortcuts ...) (after-with args)])
             (with-syntax ([(lws ...) (map rule->lws (syntax->list #'(rules ...)))])
               (reduction-relation/helper 
-               stx
+               #'orig-stx
                (syntax-e #'id)
                #'orig-reduction-relation
                (syntax lang)
@@ -310,14 +317,16 @@
                (syntax-e #'allow-zero-rules?)
                domain-pattern
                main-arrow)))))]
-      [(_ id orig-reduction-relation allow-zero-rules? lang args ...)
+      [(_ orig-stx id orig-reduction-relation allow-zero-rules? lang args ...)
        (raise-syntax-error (syntax-e #'id) 
                            "expected an identifier for the language name"
                            #'lang)]))
   
+  (define default-arrow #'-->)
+  
   (define (parse-keywords stx id args)
     (let ([domain-contract #'any]
-          [default-arrow #'-->])
+          [main-arrow default-arrow])
       
       ;; ensure no duplicate keywords
       (let ([ht (make-hash)]
@@ -350,7 +359,7 @@
                                stx)]
           [(#:arrow arrow . args)
            (identifier? #'arrow)
-           (begin (set! default-arrow #'arrow)
+           (begin (set! main-arrow #'arrow)
                   (loop #'args))]
           [(#:arrow arrow . args)
            (raise-syntax-error (syntax-e id) 
@@ -363,7 +372,7 @@
                                stx)]
           [_
            (begin
-             (values domain-contract default-arrow args))]))))
+             (values domain-contract main-arrow args))]))))
 
   
   (define (before-with stx)
@@ -397,7 +406,7 @@
                        (cond
                          [(null? stuffs) (values label (reverse scs/withs) (reverse fvars))]
                          [else
-                          (syntax-case (car stuffs) (where fresh variable-not-in)
+                          (syntax-case (car stuffs) (fresh variable-not-in)
                             [(fresh xs ...) 
                              (loop (cdr stuffs)
                                    label
@@ -424,13 +433,17 @@
                                                          #'y)])))
                                                   (syntax->list #'(xs ...))))
                                     fvars))]
-                            [(where x e)
+                            [(-where x e)
+                             (or (free-identifier=? #'-where #'where)
+                                 (free-identifier=? #'-where #'where/hidden))
                              (loop (cdr stuffs)
                                    label
                                    (cons #`(cons #,(to-lw/proc #'x) #,(to-lw/proc #'e))
                                          scs/withs)
                                    fvars)]
-                            [(side-condition sc)
+                            [(-side-condition sc)
+                             (or (free-identifier=? #'-side-condition #'side-condition)
+                                 (free-identifier=? #'-side-condition #'side-condition/hidden))
                              (loop (cdr stuffs)
                                    label
                                    (cons (to-lw/uq/proc #'sc) scs/withs)
@@ -480,6 +493,20 @@
           [withs (make-module-identifier-mapping)])
       (for-each (λ (shortcut)
                   (syntax-case shortcut ()
+                    [((rhs-arrow rhs-from rhs-to)
+                      (lhs-arrow a b))
+                     (not (identifier? #'a))
+                     (raise-syntax-error
+                      orig-name
+                      "malformed shortcut, expected identifier"
+                      shortcut #'a)]
+                    [((rhs-arrow rhs-from rhs-to)
+                      (lhs-arrow a b))
+                     (not (identifier? #'b))
+                     (raise-syntax-error
+                      orig-name
+                      "malformed shortcut, expected identifier"
+                      shortcut #'b)]
                     [((rhs-arrow rhs-from rhs-to)
                       (lhs-arrow lhs-from lhs-to))
                      (begin
@@ -586,7 +613,7 @@
                   (raise-syntax-error orig-name 
                                       (format "no rules use ~a" (syntax->datum id))
                                       stx 
-                                      id))))))))
+                                      (if (equal? id default-arrow) #f id)))))))))
   
   (define (get-tree stx orig-name bm lang case-stx name-table lang-id allow-zero-rules?)
     (syntax-case case-stx ()
@@ -750,7 +777,7 @@
               (cond
                 [(null? extras) '()]
                 [else
-                 (syntax-case (car extras) (side-condition fresh where)
+                 (syntax-case (car extras) (fresh)
                    [name 
                     (or (identifier? (car extras))
                         (string? (syntax-e (car extras))))
@@ -804,11 +831,17 @@
                                                           #'x)]))
                                  (syntax->list #'(var ...)))
                             (loop (cdr extras)))]
-                   [(side-condition exp ...)
+                   [(-side-condition exp ...)
+                    (or (free-identifier=? #'-side-condition #'side-condition)
+                        (free-identifier=? #'-side-condition #'side-condition/hidden))
                     (cons (car extras) (loop (cdr extras)))]
-                   [(where x e)
+                   [(-where x e)
+                    (or (free-identifier=? #'-where #'where)
+                        (free-identifier=? #'-where #'where/hidden))
                     (cons (car extras) (loop (cdr extras)))]
-                   [(where . x)
+                   [(-where . x)
+                    (or (free-identifier=? #'-where #'where)
+                        (free-identifier=? #'-where #'where/hidden))
                     (raise-syntax-error orig-name "malformed where clause" stx (car extras))]
                    [_
                     (raise-syntax-error orig-name "unknown extra" stx (car extras))])]))])
@@ -1015,6 +1048,13 @@
 (define-struct metafunction (proc))
 
 (define-struct metafunc-case (cp rhs lhs-pat src-loc id))
+
+;; Intermediate structures recording clause "extras" for typesetting.
+(define-struct metafunc-extra-side-cond (expr))
+(define-struct (metafunc-extra-side-cond/hidden metafunc-extra-side-cond) ())
+(define-struct metafunc-extra-where (lhs rhs))
+(define-struct (metafunc-extra-where/hidden metafunc-extra-where) ())
+(define-struct metafunc-extra-fresh (vars))
 
 (define-syntax (in-domain? stx)
   (syntax-case stx ()
@@ -1249,11 +1289,33 @@
                                                                          (map (λ (hm)
                                                                                 (map
                                                                                  (λ (lst)
-                                                                                   (syntax-case lst (side-condition where)
+                                                                                   (syntax-case lst (unquote
+                                                                                                     side-condition where
+                                                                                                     side-condition/hidden where/hidden)
+                                                                                     [(where pat (unquote (f _ _)))
+                                                                                      (and (or (identifier? #'pat)
+                                                                                               (andmap identifier? (syntax->list #'pat)))
+                                                                                           (or (free-identifier=? #'f #'variable-not-in)
+                                                                                               (free-identifier=? #'f #'variables-not-in)))
+                                                                                      (with-syntax ([(ids ...)
+                                                                                                     (map to-lw/proc
+                                                                                                          (if (identifier? #'pat)
+                                                                                                              (list #'pat)
+                                                                                                              (syntax->list #'pat)))])
+                                                                                        #`(make-metafunc-extra-fresh
+                                                                                           (list ids ...)))]
                                                                                      [(where pat exp)
-                                                                                      #`(cons #,(to-lw/proc #'pat) #,(to-lw/proc #'exp))]
+                                                                                      #`(make-metafunc-extra-where
+                                                                                         #,(to-lw/proc #'pat) #,(to-lw/proc #'exp))]
+                                                                                     [(where/hidden pat exp)
+                                                                                      #`(make-metafunc-extra-where/hidden
+                                                                                         #,(to-lw/proc #'pat) #,(to-lw/proc #'exp))]
                                                                                      [(side-condition x)
-                                                                                      (to-lw/uq/proc #'x)]))
+                                                                                      #`(make-metafunc-extra-side-cond
+                                                                                         #,(to-lw/uq/proc #'x))]
+                                                                                     [(side-condition/hidden x)
+                                                                                      #`(make-metafunc-extra-side-cond/hidden
+                                                                                         #,(to-lw/uq/proc #'x))]))
                                                                                  (reverse (syntax->list hm))))
                                                                               (syntax->list #'(... seq-of-tl-side-cond/binds)))]
                                                                         
@@ -1265,8 +1327,8 @@
                                                                         
                                                                         [(x-lhs-for-lw ...) #'(... seq-of-lhs-for-lw)])
                                                                      #'(list (list x-lhs-for-lw
-                                                                                   (list (cons bind-id/lw bind-pat/lw) ...
-                                                                                         (cons rhs-bind-id/lw rhs-bind-pat/lw/uq) ...
+                                                                                   (list (make-metafunc-extra-where bind-id/lw bind-pat/lw) ...
+                                                                                         (make-metafunc-extra-where rhs-bind-id/lw rhs-bind-pat/lw/uq) ...
                                                                                          where/sc/lw ...)
                                                                                    rhs/lw)
                                                                              ...)))])
@@ -1379,14 +1441,22 @@
      (λ (stuffs)
        (for-each
         (λ (stuff)
-          (syntax-case stuff (where side-condition)
+          (syntax-case stuff (where side-condition where/hidden side-condition/hidden)
             [(side-condition tl-side-conds ...) 
              (void)]
+            [(side-condition/hidden tl-side-conds ...) 
+             (void)]
             [(where x e)
+             (void)]
+            [(where/hidden x e)
              (void)]
             [(where . args)
              (raise-syntax-error 'define-metafunction 
                                  "malformed where clause"
+                                 stuff)]
+            [(where/hidden . args)
+             (raise-syntax-error 'define-metafunction 
+                                 "malformed where/hidden clause"
                                  stuff)]
             [_
              (raise-syntax-error 'define-metafunction 
@@ -1713,9 +1783,9 @@
     [(_ name orig-lang (names rhs ...) ...)
      (begin
        (unless (identifier? (syntax name))
-         (raise-syntax-error 'define-extended-langauge "expected an identifier" stx #'name))
+         (raise-syntax-error 'define-extended-language "expected an identifier" stx #'name))
        (unless (identifier? (syntax orig-lang))
-         (raise-syntax-error 'define-extended-langauge "expected an identifier" stx #'orig-lang))
+         (raise-syntax-error 'define-extended-language "expected an identifier" stx #'orig-lang))
        (check-rhss-not-empty stx (cdddr (syntax->list stx)))
        (let ([old-names (language-id-nts #'orig-lang 'define-extended-language)])
          (with-syntax ([((new-nt-names orig) ...) (append (pull-out-names 'define-language stx #'(names ...)) 
@@ -1943,61 +2013,6 @@
              (cons this-one (loop (cdr l)))
              (loop (cdr l))))])))
 
-(define re:gen-d #rx".*[^0-9]([0-9]+)$")
-(define (variable-not-in sexp var)
-  (let* ([var-str (symbol->string var)]
-         [var-prefix (let ([m (regexp-match #rx"^(.*[^0-9])[0-9]+$" var-str)])
-                       (if m
-                           (cadr m)
-                           var-str))]
-         [found-exact-var? #f]
-         [nums (let loop ([sexp sexp]
-                          [nums null])
-                 (cond
-                   [(pair? sexp) (loop (cdr sexp) (loop (car sexp) nums))]
-                   [(symbol? sexp) 
-                    (when (eq? sexp var)
-                      (set! found-exact-var? #t))
-                    (let* ([str (symbol->string sexp)]
-                           [match (regexp-match re:gen-d str)])
-                      (if (and match
-                               (is-prefix? var-prefix str))
-                          (cons (string->number (cadr match)) nums)
-                          nums))]
-                   [else nums]))])
-    (cond
-      [(not found-exact-var?) var]
-      [(null? nums) (string->symbol (format "~a1" var))]
-      [else (string->symbol (format "~a~a" var-prefix (find-best-number nums)))])))
-
-(define (find-best-number nums)
-  (let loop ([sorted (sort nums <)]
-             [i 1])
-    (cond
-      [(empty? sorted) i]
-      [else 
-       (let ([fst (car sorted)])
-         (cond
-           [(< i fst) i]
-           [(> i fst) (loop (cdr sorted) i)]
-           [(= i fst) (loop (cdr sorted) (+ i 1))]))])))
-
-(define (variables-not-in sexp vars)
-  (let loop ([vars vars]
-             [sexp sexp])
-    (cond
-      [(null? vars) null]
-      [else 
-       (let ([new-var (variable-not-in sexp (car vars))])
-         (cons new-var
-               (loop (cdr vars)
-                     (cons new-var sexp))))])))
-
-(define (is-prefix? str1 str2)
-  (and (<= (string-length str1) (string-length str2))
-       (equal? str1 (substring str2 0 (string-length str1)))))
-
-
 (define (reduction-relation->rule-names x) 
   (reverse (reduction-relation-rule-names x)))
 
@@ -2168,6 +2183,12 @@
          metafunc-proc-cases
          metafunc-proc?
          (struct-out metafunc-case)
+         
+         (struct-out metafunc-extra-side-cond)
+         (struct-out metafunc-extra-side-cond/hidden)
+         (struct-out metafunc-extra-where)
+         (struct-out metafunc-extra-where/hidden)
+         (struct-out metafunc-extra-fresh)
          
          (struct-out binds))
 

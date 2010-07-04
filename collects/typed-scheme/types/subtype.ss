@@ -24,7 +24,7 @@
 ;; data structures for remembering things on recursive calls
 (define (empty-set) '())
 
-(define current-seen (make-parameter (empty-set)))
+(define current-seen (make-parameter (empty-set) #;pair?))
 
 (define (seen-before s t) (cons (Type-seq s) (Type-seq t)))
 (define (remember s t A) (cons (seen-before s t) A))
@@ -200,7 +200,7 @@
 ;; potentially raises exn:subtype, when the algorithm fails
 ;; is s a subtype of t, taking into account constraints A
 (define (subtype* A s t)
-  (parameterize ([match-equality-test type-equal?]
+  (parameterize ([match-equality-test (lambda (a b) (if (and (Rep? a) (Rep? b)) (type-equal? a b) (equal? a b)))]
                  [current-seen A])
     (let ([ks (Type-key s)] [kt (Type-key t)])
       (cond 
@@ -247,6 +247,8 @@
 	      [((Value: (? real? n)) (== -Real type-equal?)) A0]
 	      [((Value: (? number? n)) (Base: 'Number _)) A0]
 
+              [((Value: (? keyword?)) (Base: 'Keyword _)) A0]
+              [((Value: (? char?)) (Base: 'Char _)) A0]
 	      [((Value: (? boolean? n)) (Base: 'Boolean _)) A0]
 	      [((Value: (? symbol? n)) (Base: 'Symbol _)) A0]
 	      [((Value: (? string? n)) (Base: 'String _)) A0]
@@ -299,19 +301,27 @@
                      (subtype* A0 other t*)
                      (fail! s t)))]
 	      ;; for unions, we check the cross-product
-	      [((Union: es) t) (and (andmap (lambda (elem) (subtype* A0 elem t)) es) A0)]
-	      [(s (Union: es)) (and (ormap (lambda (elem) (subtype*/no-fail A0 s elem)) es) A0)]
+	      [((Union: es) t) (or (and (andmap (lambda (elem) (subtype* A0 elem t)) es) A0)
+                                   (fail! s t))]
+	      [(s (Union: es)) (or (and (ormap (lambda (elem) (subtype*/no-fail A0 s elem)) es) A0)
+                                   (fail! s t))]
 	      ;; subtyping on immutable structs is covariant
-	      [((Struct: nm _ flds #f _ _ _) (Struct: nm _ flds* #f _ _ _))
+	      [((Struct: nm _ flds #f _ _ _ _) (Struct: nm _ flds* #f _ _ _ _))
 	       (subtypes* A0 flds flds*)]
-	      [((Struct: nm _ flds proc _ _ _) (Struct: nm _ flds* proc* _ _ _))
+	      [((Struct: nm _ flds proc _ _ _ _) (Struct: nm _ flds* proc* _ _ _ _))
 	       (subtypes* A0 (cons proc flds) (cons proc* flds*))]
+              [((Struct: _ _ _ _ _ _ _ _) (StructTop: (? (lambda (s2) (type-equal? s2 s)))))
+               A0]
+              [((Box: _) (BoxTop:)) A0]
+              [((Vector: _) (VectorTop:)) A0]
+              [((MPair: _ _) (MPairTop:)) A0]
+              [((Hashtable: _ _) (HashtableTop:)) A0]
 	      ;; subtyping on structs follows the declared hierarchy
-	      [((Struct: nm (? Type? parent) flds proc _ _ _) other) 
+	      [((Struct: nm (? Type? parent) flds proc _ _ _ _) other) 
                ;(printf "subtype - hierarchy : ~a ~a ~a~n" nm parent other)
 	       (subtype* A0 parent other)]
 	      ;; Promises are covariant
-	      [((Struct: 'Promise _ (list t) _ _ _ _) (Struct: 'Promise _ (list t*) _ _ _ _)) (subtype* A0 t t*)]
+	      [((Struct: 'Promise _ (list t) _ _ _ _ _) (Struct: 'Promise _ (list t*) _ _ _ _ _)) (subtype* A0 t t*)]
 	      ;; subtyping on values is pointwise
 	      [((Values: vals1) (Values: vals2)) (subtypes* A0 vals1 vals2)]
               ;; trivial case for Result
@@ -325,6 +335,12 @@
 	       (subtype* A0 t t*)]
 	      [((Instance: t) (Instance: t*))
 	       (subtype* A0 t t*)]
+              [((Class: '() '() (list (and s  (list names  meths )) ...))
+                (Class: '() '() (list (and s* (list names* meths*)) ...)))
+               (for/fold ([A A0]) 
+                         ([n names*] [m meths*])
+                         (cond [(assq n s) => (lambda (spec) (subtype* A (cadr spec) m))]
+                               [else (fail! s t)]))]
 	      ;; otherwise, not a subtype
 	      [(_ _) (fail! s t) #;(printf "failed")])))]))))
 

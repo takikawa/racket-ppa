@@ -41,10 +41,18 @@ static void launchgdb() {
 void fault_handler(int sn, struct siginfo *si, void *ctx)
 {
   void *p = si->si_addr;
+  /* quick access to SIGSEGV info in GDB */
   int c = si->si_code;
+#ifdef MZ_USE_PLACES
   int m = 0;
+#endif
   if (si->si_code != SEGV_ACCERR) { /*SEGV_MAPERR*/
-    printf("SIGSEGV fault on %p\n", p);
+    if (c == SEGV_MAPERR) {
+      printf("SIGSEGV MAPERR si_code %i fault on addr %p\n", c, p);
+    }
+    else {
+      printf("SIGSEGV ?????? SI_CODE %i fault on addr %p\n", c, p);
+    }
 #if WAIT_FOR_GDB
     launchgdb();
 #endif
@@ -56,7 +64,7 @@ void fault_handler(int sn, struct siginfo *si, void *ctx)
 #ifdef MZ_USE_PLACES
       if(pagemap_find_page(MASTERGC->page_maps, p)) {
         m = 1;
-        printf("OWNED BY MASTER %p\n", p);
+        printf("ADDR %p OWNED BY MASTER %i\n", p, m);
       }
 #endif
       printf("mprotect fault on %p\n", p);
@@ -66,6 +74,7 @@ void fault_handler(int sn, struct siginfo *si, void *ctx)
     }
     abort();
   }
+#  define NEED_SIGSTACK
 #  define NEED_SIGACTION
 #  define USE_SIGACTON_SIGNAL_KIND SIGSEGV
 }
@@ -153,6 +162,17 @@ static void initialize_signal_handler(GCTYPE *gc)
   macosx_init_exception_handler(1);
 #  endif
 # endif
+# ifdef NEED_SIGSTACK
+  {
+    stack_t ss;
+    
+    ss.ss_sp = malloc(SIGSTKSZ);
+    ss.ss_size = SIGSTKSZ;
+    ss.ss_flags = 0;
+    
+    sigaltstack(&ss, NULL);
+  }
+# endif
 # ifdef NEED_SIGACTION
   {
     struct sigaction act, oact;
@@ -163,6 +183,9 @@ static void initialize_signal_handler(GCTYPE *gc)
     sigaddset(&act.sa_mask, SIGINT);
     sigaddset(&act.sa_mask, SIGCHLD);
     act.sa_flags = SA_SIGINFO;
+#  ifdef NEED_SIGSTACK
+    act.sa_flags |= SA_ONSTACK;
+#  endif
     sigaction(USE_SIGACTON_SIGNAL_KIND, &act, &oact);
   }
 # endif

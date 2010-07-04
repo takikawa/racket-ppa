@@ -79,20 +79,20 @@
    ;show-syntax-error-context
    ))
 
-(define-signature drscheme:module-langauge-cm^
+(define-signature drscheme:module-language-cm^
   (module-language<%>))
-(define-signature drscheme:module-language^ extends drscheme:module-langauge-cm^
+(define-signature drscheme:module-language^ extends drscheme:module-language-cm^
   (add-module-language
    module-language-put-file-mixin))
 
-(define-signature drscheme:module-langauge-tools-cm^
+(define-signature drscheme:module-language-tools-cm^
   (frame-mixin
    frame<%>
    tab-mixin
    tab<%>
    definitions-text-mixin
    definitions-text<%>))
-(define-signature drscheme:module-language-tools^ extends drscheme:module-langauge-tools-cm^
+(define-signature drscheme:module-language-tools^ extends drscheme:module-language-tools-cm^
   ())
 
 (define-signature drscheme:get-collection-cm^ ())
@@ -283,6 +283,8 @@
    simple-settings->vector
    
    simple-module-based-language-config-panel
+   simple-module-based-language-convert-value
+   setup-printing-parameters
    
    add-snip-value
    setup-setup-values

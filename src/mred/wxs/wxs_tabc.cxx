@@ -274,6 +274,7 @@ static int unbundle_symset_tabStyle(Scheme_Object *v, const char *where) {
 
 
 
+
 class os_wxTabChoice : public wxTabChoice {
  public:
   Scheme_Object *callback_closure;
@@ -546,6 +547,7 @@ static Scheme_Object *os_wxTabChoiceButtonFocus(int n,  Scheme_Object *p[])
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   int r;
+  p[0] = objscheme_unwrap(p[0], os_wxTabChoice_class);
   objscheme_check_valid(os_wxTabChoice_class, "button-focus in tab-group%", n, p);
   int x0;
 
@@ -568,6 +570,7 @@ static Scheme_Object *os_wxTabChoiceSet(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxTabChoice_class);
   objscheme_check_valid(os_wxTabChoice_class, "set in tab-group%", n, p);
   int x0;
   string* x1 INIT_NULLED_OUT;
@@ -595,6 +598,7 @@ static Scheme_Object *os_wxTabChoiceSetLabel(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxTabChoice_class);
   objscheme_check_valid(os_wxTabChoice_class, "set-label in tab-group%", n, p);
   int x0;
   string x1 INIT_NULLED_OUT;
@@ -620,6 +624,7 @@ static Scheme_Object *os_wxTabChoiceDelete(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxTabChoice_class);
   objscheme_check_valid(os_wxTabChoice_class, "delete in tab-group%", n, p);
   int x0;
 
@@ -642,6 +647,7 @@ static Scheme_Object *os_wxTabChoiceAppend(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxTabChoice_class);
   objscheme_check_valid(os_wxTabChoice_class, "append in tab-group%", n, p);
   string x0 INIT_NULLED_OUT;
 
@@ -665,6 +671,7 @@ static Scheme_Object *os_wxTabChoiceEnable(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxTabChoice_class);
   objscheme_check_valid(os_wxTabChoice_class, "enable in tab-group%", n, p);
   Bool x0;
 
@@ -687,6 +694,7 @@ static Scheme_Object *os_wxTabChoiceSetSelection(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxTabChoice_class);
   objscheme_check_valid(os_wxTabChoice_class, "set-selection in tab-group%", n, p);
   int x0;
 
@@ -710,6 +718,7 @@ static Scheme_Object *os_wxTabChoiceNumber(int n,  Scheme_Object *p[])
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   int r;
+  p[0] = objscheme_unwrap(p[0], os_wxTabChoice_class);
   objscheme_check_valid(os_wxTabChoice_class, "number in tab-group%", n, p);
 
   SETUP_VAR_STACK_REMEMBERED(1);
@@ -731,6 +740,7 @@ static Scheme_Object *os_wxTabChoiceGetSelection(int n,  Scheme_Object *p[])
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   int r;
+  p[0] = objscheme_unwrap(p[0], os_wxTabChoice_class);
   objscheme_check_valid(os_wxTabChoice_class, "get-selection in tab-group%", n, p);
 
   SETUP_VAR_STACK_REMEMBERED(1);
@@ -751,6 +761,7 @@ static Scheme_Object *os_wxTabChoiceOnDropFile(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxTabChoice_class);
   objscheme_check_valid(os_wxTabChoice_class, "on-drop-file in tab-group%", n, p);
   epathname x0 INIT_NULLED_OUT;
 
@@ -778,6 +789,7 @@ static Scheme_Object *os_wxTabChoicePreOnEvent(int n,  Scheme_Object *p[])
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   Bool r;
+  p[0] = objscheme_unwrap(p[0], os_wxTabChoice_class);
   objscheme_check_valid(os_wxTabChoice_class, "pre-on-event in tab-group%", n, p);
   class wxWindow* x0 INIT_NULLED_OUT;
   class wxMouseEvent* x1 INIT_NULLED_OUT;
@@ -808,6 +820,7 @@ static Scheme_Object *os_wxTabChoicePreOnChar(int n,  Scheme_Object *p[])
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   Bool r;
+  p[0] = objscheme_unwrap(p[0], os_wxTabChoice_class);
   objscheme_check_valid(os_wxTabChoice_class, "pre-on-char in tab-group%", n, p);
   class wxWindow* x0 INIT_NULLED_OUT;
   class wxKeyEvent* x1 INIT_NULLED_OUT;
@@ -837,6 +850,7 @@ static Scheme_Object *os_wxTabChoiceOnSize(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxTabChoice_class);
   objscheme_check_valid(os_wxTabChoice_class, "on-size in tab-group%", n, p);
   int x0;
   int x1;
@@ -864,6 +878,7 @@ static Scheme_Object *os_wxTabChoiceOnSetFocus(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxTabChoice_class);
   objscheme_check_valid(os_wxTabChoice_class, "on-set-focus in tab-group%", n, p);
 
   SETUP_VAR_STACK_REMEMBERED(1);
@@ -887,6 +902,7 @@ static Scheme_Object *os_wxTabChoiceOnKillFocus(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxTabChoice_class);
   objscheme_check_valid(os_wxTabChoice_class, "on-kill-focus in tab-group%", n, p);
 
   SETUP_VAR_STACK_REMEMBERED(1);
@@ -998,7 +1014,8 @@ int objscheme_istype_wxTabChoice(Scheme_Object *obj, const char *stop, int nullO
 {
   REMEMBER_VAR_STACK();
   if (nullOK && XC_SCHEME_NULLP(obj)) return 1;
-  if (objscheme_is_a(obj,  os_wxTabChoice_class))
+  obj = objscheme_unwrap(obj, os_wxTabChoice_class);
+  if (objscheme_is_a(obj, os_wxTabChoice_class))
     return 1;
   else {
     if (!stop)
@@ -1041,6 +1058,7 @@ class wxTabChoice *objscheme_unbundle_wxTabChoice(Scheme_Object *obj, const char
 
   REMEMBER_VAR_STACK();
 
+  obj = objscheme_unwrap(obj, os_wxTabChoice_class);
   (void)objscheme_istype_wxTabChoice(obj, where, nullOK);
   Scheme_Class_Object *o = (Scheme_Class_Object *)obj;
   WITH_REMEMBERED_STACK(objscheme_check_valid(NULL, NULL, 0, &obj));
@@ -1394,6 +1412,7 @@ static Scheme_Object *os_wxGroupBoxOnDropFile(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxGroupBox_class);
   objscheme_check_valid(os_wxGroupBox_class, "on-drop-file in group-box%", n, p);
   epathname x0 INIT_NULLED_OUT;
 
@@ -1421,6 +1440,7 @@ static Scheme_Object *os_wxGroupBoxPreOnEvent(int n,  Scheme_Object *p[])
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   Bool r;
+  p[0] = objscheme_unwrap(p[0], os_wxGroupBox_class);
   objscheme_check_valid(os_wxGroupBox_class, "pre-on-event in group-box%", n, p);
   class wxWindow* x0 INIT_NULLED_OUT;
   class wxMouseEvent* x1 INIT_NULLED_OUT;
@@ -1451,6 +1471,7 @@ static Scheme_Object *os_wxGroupBoxPreOnChar(int n,  Scheme_Object *p[])
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
   Bool r;
+  p[0] = objscheme_unwrap(p[0], os_wxGroupBox_class);
   objscheme_check_valid(os_wxGroupBox_class, "pre-on-char in group-box%", n, p);
   class wxWindow* x0 INIT_NULLED_OUT;
   class wxKeyEvent* x1 INIT_NULLED_OUT;
@@ -1480,6 +1501,7 @@ static Scheme_Object *os_wxGroupBoxOnSize(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxGroupBox_class);
   objscheme_check_valid(os_wxGroupBox_class, "on-size in group-box%", n, p);
   int x0;
   int x1;
@@ -1507,6 +1529,7 @@ static Scheme_Object *os_wxGroupBoxOnSetFocus(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxGroupBox_class);
   objscheme_check_valid(os_wxGroupBox_class, "on-set-focus in group-box%", n, p);
 
   SETUP_VAR_STACK_REMEMBERED(1);
@@ -1530,6 +1553,7 @@ static Scheme_Object *os_wxGroupBoxOnKillFocus(int n,  Scheme_Object *p[])
 {
   WXS_USE_ARGUMENT(n) WXS_USE_ARGUMENT(p)
   REMEMBER_VAR_STACK();
+  p[0] = objscheme_unwrap(p[0], os_wxGroupBox_class);
   objscheme_check_valid(os_wxGroupBox_class, "on-kill-focus in group-box%", n, p);
 
   SETUP_VAR_STACK_REMEMBERED(1);
@@ -1623,7 +1647,8 @@ int objscheme_istype_wxGroupBox(Scheme_Object *obj, const char *stop, int nullOK
 {
   REMEMBER_VAR_STACK();
   if (nullOK && XC_SCHEME_NULLP(obj)) return 1;
-  if (objscheme_is_a(obj,  os_wxGroupBox_class))
+  obj = objscheme_unwrap(obj, os_wxGroupBox_class);
+  if (objscheme_is_a(obj, os_wxGroupBox_class))
     return 1;
   else {
     if (!stop)
@@ -1666,6 +1691,7 @@ class wxGroupBox *objscheme_unbundle_wxGroupBox(Scheme_Object *obj, const char *
 
   REMEMBER_VAR_STACK();
 
+  obj = objscheme_unwrap(obj, os_wxGroupBox_class);
   (void)objscheme_istype_wxGroupBox(obj, where, nullOK);
   Scheme_Class_Object *o = (Scheme_Class_Object *)obj;
   WITH_REMEMBERED_STACK(objscheme_check_valid(NULL, NULL, 0, &obj));

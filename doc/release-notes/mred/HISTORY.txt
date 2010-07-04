@@ -1,3 +1,11 @@
+Version 4.2.5, March 2010
+
+Changed radio-box% to allow #f as a selection so that no buttons are
+ selected
+Added accept-tab-focus method to canvas<%> and editor-canvas%
+
+----------------------------------------------------------------------
+
 Version 4.2.4, January 2010
 
 Minor bug fixes
@@ -1357,7 +1365,7 @@ System:
     is just the right height to display one line of text.
     inherits from mred:wrapping-canvas%
   mred:frame-title-canvas%
-    updates the title of the frame when it recieves focus
+    updates the title of the frame when it receives focus
     events. inherits from mred:wrapping-canvas%
 - all of the "connection maintenence" ie edits that know which canvses
   they are in, frames that know which canvas is the most recently

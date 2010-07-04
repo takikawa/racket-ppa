@@ -3,7 +3,7 @@
 (begin
   (require
    scheme/tcp
-   scheme scheme/flonum
+   scheme scheme/flonum scheme/fixnum
    scheme/unsafe/ops
    (only-in rnrs/lists-6 fold-left)
    '#%paramz
@@ -16,9 +16,24 @@
   
   (define-for-syntax all-num-types (list -Pos -Nat -Integer -ExactRational -Flonum -Real N))
 
-  (define-for-syntax fl-comp (-> -Flonum -Flonum B))
-  (define-for-syntax fl-op (-> -Flonum -Flonum -Flonum))
-  (define-for-syntax fl-unop (-> -Flonum -Flonum))
+  (define-for-syntax binop 
+    (lambda (t [r t])
+      (t t . -> . r)))
+  
+  (define-for-syntax (unop t) (-> t t))
+  
+  (define-for-syntax fl-comp (binop -Flonum B))
+  (define-for-syntax fl-op (binop -Flonum))
+  (define-for-syntax fl-unop (unop -Flonum))
+  
+  
+  (define-for-syntax int-op (binop -Integer))
+  (define-for-syntax nat-op (binop -Nat))
+  
+  (define-for-syntax fx-comp (binop -Integer B))
+  (define-for-syntax fx-op (cl->* nat-op int-op))
+  (define-for-syntax fx-intop int-op)
+  (define-for-syntax fx-unop (unop -Integer))
 
   (define-for-syntax real-comp (->* (list R R) R B))
   )
@@ -105,8 +120,8 @@
 [imag-part (N . -> . -Real)]
 [magnitude (N . -> . -Real)]
 [angle     (N . -> . -Real)]
-[numerator   (-Real . -> . -Integer)]
-[denominator (-Real . -> . -Integer)]
+[numerator   (-Real . -> . -Real)]
+[denominator (-Real . -> . -Real)]
 [rationalize (-Real -Real . -> . N)]
 [expt (cl->* (-Integer -Integer . -> . -Integer) (N N . -> . N))]
 [sqrt (cl->*
@@ -159,6 +174,56 @@
 [unsafe-fl> fl-comp]
 [unsafe-fl< fl-comp]
 
+
+[unsafe-fx+ fx-op]
+[unsafe-fx- fx-intop]
+[unsafe-fx* fx-op]
+[unsafe-fxquotient fx-intop]
+[unsafe-fxremainder fx-intop]
+[unsafe-fxmodulo fx-intop]
+[unsafe-fxabs (-Integer . -> . -Nat)]
+
+[unsafe-fxand fx-intop]
+[unsafe-fxior fx-intop]
+[unsafe-fxxor fx-intop]
+[unsafe-fxnot fx-unop]
+[unsafe-fxlshift fx-intop]
+[unsafe-fxrshift fx-intop]
+
+[unsafe-fx= fx-comp]
+[unsafe-fx< fx-comp]
+[unsafe-fx> fx-comp]
+[unsafe-fx<= fx-comp]
+[unsafe-fx>= fx-comp]
+[unsafe-fxmin fx-op]
+[unsafe-fxmax fx-op]
+
+;; scheme/fixnum
+
+[fx+ fx-op]
+[fx- fx-intop]
+[fx* fx-op]
+[fxquotient fx-intop]
+[fxremainder fx-intop]
+[fxmodulo fx-intop]
+[fxabs (-Integer . -> . -Nat)]
+
+[fxand fx-intop]
+[fxior fx-intop]
+[fxxor fx-intop]
+[fxnot fx-unop]
+[fxlshift fx-intop]
+[fxrshift fx-intop]
+
+[fx= fx-comp]
+[fx< fx-comp]
+[fx> fx-comp]
+[fx<= fx-comp]
+[fx>= fx-comp]
+[fxmin fx-op]
+[fxmax fx-op]
+
+
 ;; safe flonum ops
 [flabs fl-unop]
 [flsqrt fl-unop]
@@ -171,3 +236,18 @@
 [fl>= fl-comp]
 [fl> fl-comp]
 [fl< fl-comp]
+
+;; safe flvector ops
+
+[flvector? (make-pred-ty -FlVector)]
+[flvector (->* (list) -Flonum -FlVector)]
+[make-flvector (-> -Nat -Flonum -FlVector)]
+[flvector-length (-> -FlVector -Nat)]
+[flvector-ref (-> -FlVector -Nat -Flonum)]
+[flvector-set! (-> -FlVector -Nat -Flonum -Void)]
+
+;; unsafe flvector ops
+
+[unsafe-flvector-length (-> -FlVector -Nat)]
+[unsafe-flvector-ref (-> -FlVector -Nat -Flonum)]
+[unsafe-flvector-set! (-> -FlVector -Nat -Flonum -Void)]

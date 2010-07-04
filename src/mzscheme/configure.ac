@@ -44,7 +44,7 @@ AC_ARG_ENABLE(jit,     [  --enable-jit            compile JIT support (enabled b
 AC_ARG_ENABLE(foreign, [  --enable-foreign        compile foreign support (enabled by default)], , enable_foreign=yes)
 
 AC_ARG_ENABLE(places,  [  --enable-places         compile places support])
-AC_ARG_ENABLE(futures, [  --enable-futures        compile futures support])
+AC_ARG_ENABLE(futures, [  --enable-futures        compile futures support (usually enabled by default)])
 
 AC_ARG_ENABLE(cgcdefault, [  --enable-cgcdefault     use CGC (Boehm or Senora) as default build])
 AC_ARG_ENABLE(sgc,     [  --enable-sgc            use Senora GC instead of the Boehm GC])
@@ -354,7 +354,7 @@ ZLIB_INC='$(ZLIB_INC)'
 PNG_A='$(PNG_A)'
 
 PREFLAGS="$CPPFLAGS"
-PLACE_CGC_FLAGS=""
+MZRT_CGC_FLAGS=""
 LIBATOM="LIBATOM_NONE"
 
 ar_libtool_no_undefined=""
@@ -549,8 +549,9 @@ case $OS in
     EXTRALIBS="-Wl,-brtl,-bE:\$(srcdir)/../mzscheme/include/mzscheme.exp"
     ;;
   FreeBSD)
-    LIBS="$LIBS -rdynamic -pthread"
+    LIBS="$LIBS -rdynamic"
     DYN_CFLAGS="-fPIC"
+    enable_pthread=yes
     ;;
   OpenBSD)
     LIBS="$LIBS -rdynamic -Wl,--export-dynamic"
@@ -575,6 +576,7 @@ case $OS in
     case `$UNAME -m` in
       #Required for CentOS 4.6
       x86_64)
+       enable_futures_by_default=yes
        CGC_X86_64="1"
        if test -d /usr/X11R6/lib64 ; then
          X_LIBS="$X_LIBS -L/usr/X11R6/lib64"
@@ -587,6 +589,9 @@ case $OS in
        ;;
       alpha)
        EXTRA_GMP_OBJ="gmp_alpha_gcc.o"
+       ;;
+      i386|i486|i586|i686)
+       enable_futures_by_default=yes
        ;;
       *)
        ;;
@@ -641,6 +646,14 @@ case $OS in
       LDFLAGS="$LDFLAGS -isysroot ${enable_sdk} -mmacosx-version-min=10.4"
     fi
     
+    case `$UNAME -m` in
+      i386)
+       enable_futures_by_default=yes
+       ;;
+      *)
+       ;;
+    esac
+
     PREFLAGS="$PREFLAGS -DOS_X -D_DARWIN_UNLIMITED_SELECT"
 
     STRIP_DEBUG="/usr/bin/strip -S"
@@ -1130,28 +1143,41 @@ if test "${enable_gl}" = "yes" ; then
   MROPTIONS="$MROPTIONS -DUSE_GL"
 fi
 
-############### pthread ###################
-
-if test "${enable_pthread}" = "yes" ; then
-  PREFLAGS="$PREFLAGS -D_THREAD_SAFE"
-  X_EXTRA_LIBS="$X_EXTRA_LIBS -pthread"
-  MZOPTIONS="$MZOPTIONS -DUSE_PTHREAD_INSTEAD_OF_ITIMER"
-fi
-
 ############### places ###################
 
 if test "${enable_places}" = "yes" ; then
-  PREFLAGS="$PREFLAGS -DMZ_USE_PLACES"
-  PLACE_CGC_FLAGS="$GC_THREADS_FLAG -DTHREAD_LOCAL_ALLOC"
-  LDFLAGS="$LDFLAGS -pthread"
-  LIBATOM="LIBATOM_USE"
+  AC_DEFINE(MZ_USE_PLACES,1,[Places enabled])
+  enable_mzrt=yes
 fi
 
 ############### futures ###################
 
+if test "${enable_futures_by_default}" = "yes" ; then
+  if test "${enable_futures}" = "" ; then
+    enable_futures=yes
+  fi
+fi
+
 if test "${enable_futures}" = "yes" ; then
-  PREFLAGS="$PREFLAGS -DFUTURES_ENABLED -DUSE_PTHREAD_INSTEAD_OF_ITIMER"
+  AC_DEFINE(MZ_USE_FUTURES,1,[Futures enabled])
+  enable_mzrt=yes
+fi
+
+############### OS threads ###################
+
+if test "${enable_mzrt}" = "yes" ; then
+  MZRT_CGC_FLAGS="$GC_THREADS_FLAG -DTHREAD_LOCAL_ALLOC"
+  LIBATOM="LIBATOM_USE"
+  enable_pthread=yes
+fi
+
+############### pthread ###################
+
+if test "${enable_pthread}" = "yes" ; then
+  # FIXME: the following two flags are GCC-specific:
+  PREFLAGS="$PREFLAGS -pthread"
   LDFLAGS="$LDFLAGS -pthread"
+  AC_DEFINE(USE_PTHREAD_INSTEAD_OF_ITIMER, 1, [Pthread timer enabled])
 fi
 
 ################ Xrender ##################
@@ -1432,7 +1458,7 @@ AC_SUBST(FRAMEWORK_REL_INSTALL)
 AC_SUBST(FRAMEWORK_PREFIX)
 AC_SUBST(INSTALL_ORIG_TREE)
 AC_SUBST(EXE_SUFFIX)
-AC_SUBST(PLACE_CGC_FLAGS)
+AC_SUBST(MZRT_CGC_FLAGS)
 AC_SUBST(LIBATOM)
 
 AC_SUBST(MREDLINKER)
