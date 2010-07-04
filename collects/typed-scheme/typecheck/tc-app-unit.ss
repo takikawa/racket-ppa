@@ -2,6 +2,8 @@
 
 (require (only-in "../utils/utils.ss" debug in-syntax printf/log in-pairs rep utils private env [infer r:infer]))
 (require "signatures.ss"
+         stxclass
+         (for-syntax stxclass)
          (rep type-rep effect-rep)
 	 (utils tc-utils)
 	 (private subtype type-utils union type-effect-convenience type-effect-printer resolve-type
@@ -116,26 +118,40 @@
 
 ;(trace tc-args)
 
-(define (stringify-domain dom rst drst)
-  (let ([doms-string (if (null? dom) "" (string-append (stringify dom) " "))])
+(define (stringify-domain dom rst drst [rng #f])
+  (let ([doms-string (if (null? dom) "" (string-append (stringify dom) " "))]
+        [rng-string (if rng (format " -> ~a" rng) "")])
     (cond [drst
-           (format "~a~a ... ~a" doms-string (car drst) (cdr drst))]
+           (format "~a~a ... ~a~a" doms-string (car drst) (cdr drst) rng-string)]
           [rst
-           (format "~a~a *" doms-string rst)]
-          [else (stringify dom)])))
+           (format "~a~a *~a" doms-string rst rng-string)]
+          [else (string-append (stringify dom) rng-string)])))
 
-(define (domain-mismatches ty doms rests drests arg-tys tail-ty tail-bound)
+(define (domain-mismatches ty doms rests drests rngs arg-tys tail-ty tail-bound #:expected [expected #f])
+  (define arguments-str
+    (stringify-domain arg-tys (if (not tail-bound) tail-ty #f) (if tail-bound (cons tail-ty tail-bound) #f)))    
   (cond
     [(null? doms)
      (int-err "How could doms be null: ~a ~a" ty)]
     [(= 1 (length doms))
-     (format "Domain: ~a~nArguments: ~a~n"
+     (format "Domain: ~a~nArguments: ~a~n~a"
              (stringify-domain (car doms) (car rests) (car drests))
-             (stringify-domain arg-tys (if (not tail-bound) tail-ty #f) (if tail-bound (cons tail-ty tail-bound) #f)))]
+             arguments-str
+             (if expected
+                 (format "Result type: ~a~nExpected result: ~a~n"
+                         (car rngs) expected)
+                 ""))]
     [else
-     (format "Domains: ~a~nArguments: ~a~n"
-             (stringify (map stringify-domain doms rests drests) "~n\t")
-             (stringify-domain arg-tys (if (not tail-bound) tail-ty #f) (if tail-bound (cons tail-ty tail-bound) #f)))]))
+     (format "~a: ~a~nArguments: ~a~n~a"
+             (if expected "Types" "Domains")
+             (stringify (if expected 
+                            (map stringify-domain doms rests drests rngs)
+                            (map stringify-domain doms rests drests))
+                        "~n\t")
+             arguments-str
+             (if expected
+                 (format "Expected result: ~a~n" expected)
+                 ""))]))
 
 (define (do-apply-log subst fun arg)
   (match* (fun arg)
@@ -168,7 +184,7 @@
                   (tc-error/expr #:return (ret (Un))
                                  (string-append 
                                   "Bad arguments to function in apply:~n"
-                                  (domain-mismatches f-ty doms rests drests arg-tys tail-ty tail-bound))))]
+                                  (domain-mismatches f-ty doms rests drests rngs arg-tys tail-ty tail-bound))))]
                [(and (car rests*)
                      (let-values ([(tail-ty tail-bound) 
                                    (with-handlers ([exn:fail? (lambda _ (values #f #f))])
@@ -214,7 +230,7 @@
                    (tc-error/expr #:return (ret (Un))
                                  (string-append 
                                   "Bad arguments to polymorphic function in apply:~n"
-                                  (domain-mismatches f-ty doms rests drests arg-tys tail-ty tail-bound)))])]
+                                  (domain-mismatches f-ty doms rests drests rngs arg-tys tail-ty tail-bound)))])]
                ;; the actual work, when we have a * function and a list final argument
                [(and (car rests*)
                      (not tail-bound)
@@ -266,7 +282,7 @@
                    (tc-error/expr #:return (ret (Un))
                                  (string-append 
                                   "Bad arguments to polymorphic function in apply:~n"
-                                  (domain-mismatches f-ty doms rests drests arg-tys tail-ty tail-bound)))])]
+                                  (domain-mismatches f-ty doms rests drests rngs arg-tys tail-ty tail-bound)))])]
                ;; the actual work, when we have a * function and a list final argument
                [(and (car rests*)
                      (not tail-bound)
@@ -326,6 +342,19 @@
                                              drest-bound
                                              (subst-all (alist-delete drest-bound substitution eq?)
                                                         (car rngs*)))))]
+               ;; ... function, (List A B C etc) arg
+               [(and (car drests*)
+                     (not tail-bound)
+                     (eq? (cdr (car drests*)) dotted-var)
+                     (= (length (car doms*))
+                        (length arg-tys))
+                     (untuple tail-ty)
+                     (infer/dots fixed-vars dotted-var (append arg-tys (untuple tail-ty)) (car doms*)
+                                 (car (car drests*)) (car rngs*) (fv (car rngs*))))
+                => (lambda (substitution) 
+                     (define drest-bound (cdr (car drests*)))
+                     (do-apply-log substitution 'dots 'dots)
+                     (ret (subst-all substitution (car rngs*))))]
                ;; if nothing matches, around the loop again
                [else (loop (cdr doms*) (cdr rngs*) (cdr rests*) (cdr drests*))])))]
     [(tc-result: (PolyDots: vars (Function: '())))
@@ -359,7 +388,7 @@
                             "")))))
 
 (define-syntax (handle-clauses stx)
-  (syntax-case stx ()
+  (syntax-parse stx
     [(_  (lsts ... rngs) f-stx pred infer t argtypes expected)
      (with-syntax ([(vars ... rng) (generate-temporaries #'(lsts ... rngs))])
        (syntax/loc stx
@@ -368,11 +397,11 @@
                      (let ([substitution (infer vars ... rng)])
                        (and substitution
                             (log-result substitution)
-                            (or expected
-                                (ret (subst-all substitution rng))))))             
-             (poly-fail t argtypes #:name (and (identifier? f-stx) f-stx)))))]))
+                            (ret (or expected
+                                     (subst-all substitution rng))))))
+             (poly-fail t argtypes #:name (and (identifier? f-stx) f-stx) #:expected expected))))]))
 
-(define (poly-fail t argtypes #:name [name #f])
+(define (poly-fail t argtypes #:name [name #f] #:expected [expected #f])
   (match t
     [(or (Poly-names: msg-vars (Function: (list (arr: msg-doms msg-rngs msg-rests msg-drests '() _ _) ...)))
          (PolyDots-names: msg-vars (Function: (list (arr: msg-doms msg-rngs msg-rests msg-drests '() _ _) ...))))
@@ -389,7 +418,7 @@
            (tc-error/expr #:return (ret (Un))
                           (string-append
                            "Polymorphic " fcn-string " could not be applied to arguments:~n"
-                           (domain-mismatches t msg-doms msg-rests msg-drests argtypes #f #f)
+                           (domain-mismatches t msg-doms msg-rests msg-drests msg-rngs argtypes #f #f #:expected expected)
                            (if (not (for/and ([t (apply append (map fv/list msg-doms))]) (memq t msg-vars)))
                                (string-append "Type Variables: " (stringify msg-vars) "\n")
                                "")))))]))
@@ -442,7 +471,7 @@
                   (tc-error/expr 
                    #:return (ret (Un))
                    (string-append "No function domains matched in function application:\n"
-                                  (domain-mismatches t doms rests drests argtypes #f #f)))]
+                                  (domain-mismatches t doms rests drests rngs argtypes #f #f)))]
                  [(subtypes/varargs argtypes (car doms*) (car rests*)) 
                   (when (car rests*)
                     (printf/log "Simple varargs function application (~a)\n" (syntax->datum f-stx)))
@@ -501,6 +530,40 @@
     (check-below t expected)
     (ret expected))
 
+(define-syntax-class lv-clause
+  #:transparent
+  (pattern [(v:id ...) e:expr]))
+
+(define-syntax-class lv-clauses
+  #:transparent
+  (pattern (cl:lv-clause ...)
+           #:with (e ...) #'(cl.e ...)
+           #:with (vs ...) #'((cl.v ...) ...)))
+
+(define-syntax-class core-expr
+  #:literals (reverse letrec-syntaxes+values let-values #%plain-app
+                      if letrec-values begin #%plain-lambda set! case-lambda
+                      begin0 with-continuation-mark)
+  #:transparent
+  (pattern (let-values cls:lv-clauses body)
+           #:with (expr ...) #'(cls.e ... body))
+  (pattern (letrec-values cls:lv-clauses body)
+           #:with (expr ...) #'(cls.e ... body))
+  (pattern (letrec-syntaxes+values _ cls:lv-clauses body)
+           #:with (expr ...) #'(cls.e ... body))
+  (pattern (#%plain-app expr ...))
+  (pattern (if expr ...))
+  (pattern (with-continuation-mark expr ...))
+  (pattern (begin expr ...))
+  (pattern (begin0 expr ...))
+  (pattern (#%plain-lambda _ e)
+           #:with (expr ...) #'(e))
+  (pattern (case-lambda [_ expr] ...))
+  (pattern (set! _ e)
+           #:with (expr ...) #'(e))
+  (pattern _ 
+           #:with (expr ...) #'()))
+
 ;; expr id -> type or #f
 ;; if there is a binding in stx of the form:
 ;; (let ([x (reverse name)]) e)
@@ -508,28 +571,21 @@
 (define (find-annotation stx name)
   (define (find s) (find-annotation s name))
   (define (match? b)
-    (kernel-syntax-case* b #f (reverse)
-      [[(v) (#%plain-app reverse n)]
-       (free-identifier=? name #'n)
-       (begin ;(printf "found annotation: ~a ~a~n~a~n" (syntax-e name) (syntax-e #'v) (type-annotation #'v))
-              (type-annotation #'v))]
+    (syntax-parse b
+      #:literals (#%plain-app reverse)
+      [c:lv-clause
+       #:with (#%plain-app reverse n:id) #'c.e
+       #:with (v) #'(c.v ...) 
+       #:when (free-identifier=? name #'v)
+       (type-annotation #'v)]
       [_ #f]))
-  (kernel-syntax-case* 
-      stx #f (reverse letrec-syntaxes+values)
-    [(let-values (binding ...) body)
-     (cond [(ormap match? (syntax->list #'(binding ...)))]
-           [else (find #'body)])]
-    [(#%plain-app e ...) (ormap find (syntax->list #'(e ...)))]
-    [(if e1 e2 e3) (ormap find (syntax->list #'(e1 e2 e3)))]
-    [(letrec-values ([(v ...) e] ...) b)
-     (ormap find (syntax->list #'(e ... b)))]
-    [(letrec-syntaxes+values _ ([(v ...) e] ...) b)
-     (ormap find (syntax->list #'(e ... b)))]
-    [(begin . es)
-     (ormap find (syntax->list #'es))]
-    [(#%plain-lambda (v ...) e)
-     (find #'e)]
-    [_ #f]))
+  (syntax-parse stx
+    #:literals (let-values)
+    [(let-values cls:lv-clauses body)
+     (or (ormap match? (syntax->list #'cls))
+	 (find #'body))]
+    [e:core-expr
+     (ormap find (syntax->list #'(e.expr ...)))]))
 
 
 (define (check-do-make-object cl pos-args names named-args)

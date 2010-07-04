@@ -95,6 +95,7 @@
  (cs-mouse-over-import "Bindung ~s importiert aus ~s")
 
  (cs-view-docs "Dokumentation für ~a anschauen")
+ (cs-view-docs-from "~a aus ~a")  ;; a completed version of the line above (cs-view-docs) is put into the first ~a and a list of modules (separated by commas) is put into the second ~a. Use check syntax and right-click on a documented variable (eg, 'require') to see this in use
   
  (cs-lexical-variable "lexikalische Variable")
  (cs-imported-variable "importierte Variable")
@@ -142,6 +143,10 @@
  (logging-to "Protokoll: ")
  (erase-log-directory-contents "Inhalt von Protokoll-Verzeichnisses ~a löschen?")
  (error-erasing-log-directory "Fehler beim Löschen des Protokoll-Verzeichnisses.\n\n~a\n")
+
+  ;; menu items connected to the logger -- also in a button in the planet status line in the drs frame
+  (show-log "&Log anzeigen")
+  (hide-log "&Log ausblenden")
 
  ;; modes
  (mode-submenu-label "Modi")
@@ -619,10 +624,10 @@
  (prev-tab "Vorheriger Tab")
 
  (view-menu-label "&Anzeigen")
- (show-overview "Programm-Umriss einblenden") 
- (hide-overview "Programm-Umriss ausblenden")
- (show-module-browser "Modul-Browser einblenden")
- (hide-module-browser "Modul-Browser ausblenden")
+ (show-overview "&Programm-Umriss einblenden") 
+ (hide-overview "&Programm-Umriss ausblenden")
+ (show-module-browser "&Modul-Browser einblenden")
+ (hide-module-browser "&Modul-Browser ausblenden")
 
  (help-menu-label "&Hilfe")
  (about-info "Mehr über dieses Programm und seine Entstehung")
@@ -880,7 +885,7 @@
  (constructor-printing-style "Konstruktor")
  (quasiquote-printing-style "Quasiquote")
  (write-printing-style "write")
- (print-printing-style "current-print")
+ (print-printing-style "print")
  (sharing-printing-label "Zeige Sharing an")
  (use-pretty-printer-label "Zeilenumbrüche in Ausdruck einfügen")
  (input-syntax "Eingabesyntax")
@@ -942,6 +947,8 @@
 
  (module-language-one-line-summary "Start erzeugt eine REPL im Kontext des Moduls inklusive der deklarierten Sprache des Moduls.")
   
+ (module-language-auto-text "Automatisch Zeile mit #lang") ;; shows up in the details section of the module language
+
   ;;; from the `not a language language' used initially in drscheme.
  (must-choose-language "DrScheme kann keine Programme verarbeiten, bis Sie eine Sprache auswählen.")
  
@@ -1074,7 +1081,7 @@
  (module-browser-progress "Modul-Browser: ~a") ;; prefix in the status line
  (module-browser-compiling-defns "Modul-Browser: Definition compilieren")
  (module-browser-show-lib-paths/short "\"lib\"-requires folgen") ;; check box label in show module browser pane in drscheme window.
- (module-browser-show-planet-paths/short "\"planet\"-requires folgen") ;; check box label in show module browser pane in drscheme window.
+ (module-browser-show-planet-paths/short "\"PLaneT\"-requires folgen") ;; check box label in show module browser pane in drscheme window.
  (module-browser-refresh "Aktualisieren") ;; button label in show module browser pane in drscheme window.
  (module-browser-only-in-plt-and-module-langs
   "Der Modul-Browser ist nur für Programme in den PLT-Sprachen und in der Modul-Sprache verfügbar (und nur für Programme mit Modulen).")
@@ -1333,7 +1340,12 @@
   (bug-track-forget "Vergessen")
   (bug-track-forget-all "Alles vergessen")
 
- 
+  ;; planet status messages in the bottom of the drscheme window; the ~a is filled with the name of the package
+  (planet-downloading "PLaneT: ~a herunterladen ...")
+  (planet-installing "PLaneT: ~a installieren ...")
+  (planet-finished "PLaneT: fertig mit ~a.")
+  (planet-no-status "PLaneT") ;; this can happen when there is status shown in a different and then the user switches to a tab where planet hasn't been used
+
  ;; string normalization. To see this, paste some text with a ligature into DrScheme
  ;; the first three strings are in the dialog that appears. The last one is in the preferences dialog
  (normalize "Normalisieren")

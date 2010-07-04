@@ -78,6 +78,19 @@ Encode a string using the URI encoding rules.}
 
 Decode a string using the URI decoding rules.}
 
+@defproc[(uri-path-segment-encode [str string?]) string?]{
+Encodes a string according to the rules in @cite["RFC3986"] for path segments.
+}
+@defproc[(uri-path-segment-decode [str string?]) string?]{
+Decodes a string according to the rules in @cite["RFC3986"] for path segments.
+}
+@defproc[(uri-userinfo-encode [str string?]) string?]{
+Encodes a string according to the rules in @cite["RFC3986"] for the userinfo field.
+}
+@defproc[(uri-userinfo-decode [str string?]) string?]{
+Decodes a string according to the rules in @cite["RFC3986"] for the userinfo field.
+}
+
 
 @defproc[(form-urlencoded-encode [str string?]) string?]{
 
@@ -85,7 +98,7 @@ Encode a string using the @tt{application/x-www-form-urlencoded}
 encoding rules. The result string contains no non-ASCII characters.}
 
 
-@defproc[(form-urlencoded-deecode [str string?]) string?]{
+@defproc[(form-urlencoded-decode [str string?]) string?]{
 
 Decode a string encoded using the
 @tt{application/x-www-form-urlencoded} encoding rules.}

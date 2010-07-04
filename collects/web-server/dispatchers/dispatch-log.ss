@@ -8,17 +8,19 @@
 (require "dispatch.ss"
          web-server/http)  
 (define format-req/c (request? . -> . string?))
+(define log-format/c (symbols 'parenthesized-default 'extended 'apache-default))
 
 (provide/contract
  [format-req/c contract?]
- [log-format->format (symbol? . -> . format-req/c)]
+ [log-format/c contract?]
+ [log-format->format (log-format/c . -> . format-req/c)]
  [paren-format format-req/c]
  [extended-format format-req/c]
  [apache-default-format format-req/c]
  [interface-version dispatcher-interface-version/c]
  [make (->* ()
             (#:format format-req/c
-                      #:log-path path-string?)
+             #:log-path path-string?)
             dispatcher/c)])
 
 (define interface-version 'v1)
@@ -40,7 +42,7 @@
 
 (define (request-line-raw req)
   (format "~a ~a HTTP/1.1"
-          (string-upcase (symbol->string (request-method req)))
+          (string-upcase (bytes->string/utf-8 (request-method req)))
           (url->string (request-uri req))))
 (define (apache-default-format req)
   (define request-time (srfi-date:current-date))

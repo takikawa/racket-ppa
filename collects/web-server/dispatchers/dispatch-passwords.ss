@@ -16,14 +16,14 @@
  [denied?/c contract?]
  [make (->* (denied?/c)
             (#:authentication-responder
-             (url? header? . -> . response?))
+             (url? header? . -> . response/c))
             dispatcher/c)]
  [authorized?/c contract?]
  [make-basic-denied?/path
   (authorized?/c . -> . denied?/c)]
  [password-file->authorized?
   (path-string? . -> . (values (-> void)
-                        authorized?/c))])
+                               authorized?/c))])
 
 (define interface-version 'v1)
 (define (make denied?
@@ -45,10 +45,9 @@
 (define (make-basic-denied?/path
          authorized?)  
   (lambda (req)
-    (define uri (request-uri req))
-    (define path (url-path->string (url-path uri)))
+    (define path (url-path->string (url-path (request-uri req))))
     (cond
-      [(extract-user-pass (request-headers/raw req))
+      [(request->basic-credentials req)
        => (lambda (user*pass)
             (authorized? path 
                          (car user*pass)
@@ -73,8 +72,11 @@
   (values update-password-cache!
           (lambda (path user pass)
             (define denied? (read-password-cache))
-            (denied? path (if user (lowercase-symbol! user) #f) pass))))
-    
+            (if denied?
+                (denied? path (if user (lowercase-symbol! user) #f) pass)
+                ; Fail un-safe
+                #f))))
+
 ;; pass-entry = (make-pass-entry str regexp (list sym str))
 (define-struct pass-entry (domain pattern users))
 
@@ -137,5 +139,5 @@
    conn
    (authentication-responder
     uri 
-    (make-header #"WWW-Authenticate" (string->bytes/utf-8 (format " Basic realm=\"~a\"" realm))))
+    (make-basic-auth-header realm))
    method))

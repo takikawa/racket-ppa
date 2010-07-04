@@ -17,10 +17,14 @@
 
 (define INEXACT-NUMBERS-FMT
   "check-expect cannot compare inexact numbers. Try (check-within test ~a range).")
+(define FUNCTION-FMT
+  "check-expect cannot compare functions.")
 (define CHECK-ERROR-STR-FMT
   "check-error requires a string for the second argument, representing the expected error message. Given ~s")
 (define CHECK-WITHIN-INEXACT-FMT
   "check-within requires an inexact number for the range. ~a is not inexact.")
+(define CHECK-WITHIN-FUNCTION-FMT
+  "check-within cannot compare functions.")
 
 (define-for-syntax CHECK-EXPECT-STR
   "check-expect requires two expressions. Try (check-expect test expected).")
@@ -62,8 +66,7 @@
                        (syntax-column stx)
                        (syntax-position stx)
                        (syntax-span stx)))))
-  (quasisyntax/loc stx
-    (define #,bogus-name
+  #`(define #,bogus-name
       #,(stepper-syntax-property
          #`(let ([test-info (namespace-variable-value
                              'test~object #f builder (current-namespace))])
@@ -71,23 +74,31 @@
                (insert-test test-info
                             (lambda ()
                               #,(with-stepper-syntax-properties
-                                    (['stepper-hint hint-tag]
-                                     ['stepper-hide-reduction #t]
-                                     ['stepper-use-val-as-final #t])
-                                  (quasisyntax/loc stx
-                                    (#,checker-proc-stx
-                                     #,@embedded-stxes
-                                     #,src-info
-                                     #,(with-stepper-syntax-properties
-                                           (['stepper-no-lifting-info #t]
-                                            ['stepper-hide-reduction #t])
-                                         #'test-info))))))))
+                                 (['stepper-hint hint-tag]
+                                  ['stepper-hide-reduction #t]
+                                  ['stepper-use-val-as-final #t])
+                                 (quasisyntax/loc stx
+                                   (#,checker-proc-stx
+                                    #,(with-stepper-syntax-properties
+                                          (['stepper-hide-reduction #t])
+                                        #`(car 
+                                           #,(with-stepper-syntax-properties
+                                                 (['stepper-hide-reduction #t])
+                                               #`(list
+                                                  (lambda () #,test-expr)
+                                                  #,(syntax/loc stx (void))))))
+                                    #,@embedded-stxes
+                                    #,src-info
+                                    #,(with-stepper-syntax-properties
+                                       (['stepper-no-lifting-info #t]
+                                        ['stepper-hide-reduction #t])
+                                       #'test-info))))))))
          'stepper-skipto
          (append skipto/third ;; let
                  skipto/third skipto/second ;; unless (it expands into a begin)
                  skipto/cdr skipto/third ;; application of insert-test
                  '(syntax-e cdr cdr syntax-e car) ;; lambda
-                 )))))
+                 ))))
 
 (define-for-syntax (check-context?)
   (let ([c (syntax-local-context)])
@@ -107,7 +118,8 @@
 ;; check-values-expected: (-> scheme-val) scheme-val src -> void
 (define (check-values-expected test actual src test-info)
   (error-check (lambda (v) (if (number? v) (exact? v) #t))
-               actual INEXACT-NUMBERS-FMT)
+               actual INEXACT-NUMBERS-FMT #t)
+  (error-check (lambda (v) (not (procedure? v))) actual FUNCTION-FMT #f)
   (send (send test-info get-info) add-check)
   (run-and-check (lambda (v1 v2 _) (beginner-equal? v1 v2))
                  (lambda (src v1 v2 _) (make-unequal src v1 v2))
@@ -125,7 +137,8 @@
     [_ (raise-syntax-error 'check-within CHECK-WITHIN-STR stx)]))
 
 (define (check-values-within test actual within src test-info)
-  (error-check number? within CHECK-WITHIN-INEXACT-FMT)
+  (error-check number? within CHECK-WITHIN-INEXACT-FMT #t)
+  (error-check (lambda (v) (not (procedure? v))) actual CHECK-WITHIN-FUNCTION-FMT #f)
   (send (send test-info get-info) add-check)
   (run-and-check beginner-equal~? make-outofrange test actual within src
                  test-info
@@ -143,7 +156,7 @@
     [_ (raise-syntax-error 'check-error CHECK-ERROR-STR stx)]))
 
 (define (check-values-error test error src test-info)
-  (error-check string? error CHECK-ERROR-STR-FMT)
+  (error-check string? error CHECK-ERROR-STR-FMT #t)
   (send (send test-info get-info) add-check)
   (let ([result (with-handlers ([exn?
                                  (lambda (e)
@@ -161,9 +174,9 @@
         #t)))
 
 
-(define (error-check pred? actual fmt)
+(define (error-check pred? actual fmt fmt-act?)
   (unless (pred? actual)
-    (raise (make-exn:fail:contract (format fmt actual)
+    (raise (make-exn:fail:contract (if fmt-act? (format fmt actual) fmt)
                                    (current-continuation-marks)))))
 
 

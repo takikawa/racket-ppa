@@ -45,8 +45,8 @@
             (cons (reverse requires) l)))))))
                  
         
-  ;; (make-var-info bool bool identifier)
-  (define-struct var-info (syntax? [exported? #:mutable] id))
+  ;; (make-var-info bool bool identifier (U #f syntax-object))
+  (define-struct var-info (syntax? [exported? #:mutable] id [ctc #:mutable]))
   
   (define-syntax define-struct/proc
     (syntax-rules ()
@@ -57,8 +57,11 @@
   ;; - (cons identifier identifier)
   ;; A def is
   ;; - (listof (cons (listof int/ext) syntax-object))
+  ;; A ctc is
+  ;; - syntax-object
+  ;; - #f
   ;; A sig is
-  ;; - (list (listof int/ext) (listof def) (listof def))
+  ;; - (list (listof int/ext) (listof def) (listof def) (listof ctc))
   ;; A tagged-sig is 
   ;; - (listof (cons #f siginfo) (cons #f identifier) sig)
   ;; - (listof (cons symbol siginfo) (cons symbol identifier) sig)
@@ -95,8 +98,9 @@
   ;;                 (listof identifier)
   ;;                 (listof (cons (listof identifier) syntax-object))
   ;;                 (listof (cons (listof identifier) syntax-object))
+  ;;                 (listof (U syntax-object #f))
   ;;                 identifier)
-  (define-struct/proc signature (siginfo vars val-defs stx-defs orig-binder)
+  (define-struct/proc signature (siginfo vars val-defs stx-defs ctcs orig-binder)
     (lambda (_ stx)
       (parameterize ((error-syntax stx))
         (raise-stx-err "illegal use of signature name"))))
@@ -107,16 +111,21 @@
       (parameterize ((error-syntax stx))
         (raise-stx-err "illegal use of signature form"))))
     
-  ;; (make-unit-info identifier (listof (cons symbol identifier)) (listof (cons symbol identifier)) identifier)
-  (define-struct/proc unit-info (unit-id import-sig-ids export-sig-ids deps orig-binder)
+  ;; (make-unit-info identifier (listof (cons symbol identifier)) (listof (cons symbol identifier)) identifier boolean)
+  (define-struct/proc unit-info (unit-id import-sig-ids export-sig-ids deps orig-binder contracted?)
     (lambda (struct stx) 
       (with-syntax ((u (unit-info-unit-id struct)))
         (syntax-case stx (set!)
           ((set! x y)
-           #`(begin 
-               #,(syntax/loc #'y (check-unit y 'set!))
-               #,(syntax/loc #'y (check-sigs y (unit-import-sigs u) (unit-export-sigs u) 'set!))
-               (set! u y)))
+           (if (unit-info-contracted? struct)
+               (raise-syntax-error 'set!
+                                   "cannot set! a contracted unit"
+                                   stx
+                                   (syntax x))
+               #`(begin 
+                   #,(syntax/loc #'y (check-unit y 'set!))
+                   #,(syntax/loc #'y (check-sigs y (unit-import-sigs u) (unit-export-sigs u) 'set!))
+                   (set! u y))))
           ((_ . y)
            (syntax/loc stx (u . y)))
           (x
@@ -219,6 +228,7 @@
            (vars (signature-vars sig))
            (vals (signature-val-defs sig))
            (stxs (signature-stx-defs sig))
+           (ctcs  (signature-ctcs sig))
            (delta-introduce (if bind?
                                 (let ([f (syntax-local-make-delta-introducer
                                           spec)])
@@ -243,7 +253,8 @@
                         (cons (map (λ (id) (cons id id))
                                    (car stx))
                               (cdr stx)))
-                      stxs)))))
+                      stxs)
+                     ctcs))))
   
   (define (sig-names sig)
     (append (car sig)
@@ -264,12 +275,19 @@
                (car def))
           (g (cdr def))))
   
+  ;; map-ctc : (identifier -> identifier) (syntax-object -> syntax-object) ctc -> ctc
+  (define (map-ctc f g ctc)
+    (if ctc
+        (g ctc)
+        ctc))
+  
   ;; map-sig : (identifier -> identifier) (sytnax-object -> syntax-object)  sig -> sig
   ;; applies f to the internal parts, and g to the external parts.
   (define (map-sig f g sig)
     (list (map (lambda (x) (cons (f (car x)) (g (cdr x)))) (car sig))
           (map (lambda (x) (map-def f g x)) (cadr sig))
-          (map (lambda (x) (map-def f g x)) (caddr sig))))
+          (map (lambda (x) (map-def f g x)) (caddr sig))
+          (map (lambda (x) (map-ctc f g x)) (cadddr sig))))
   
   ;; An import-spec is one of
   ;; - signature-name

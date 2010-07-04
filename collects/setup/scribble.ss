@@ -15,11 +15,13 @@
          scribble/struct
          scribble/basic
          scribble/manual ; really shouldn't be here... see dynamic-require-doc
+         scribble/private/run-pdflatex
          (prefix-in html: scribble/html-render)
          (prefix-in latex: scribble/latex-render))
 
 (provide setup-scribblings
-         verbose)
+         verbose
+         run-pdflatex)
 
 (define verbose (make-parameter #t))
 
@@ -310,12 +312,19 @@
     (let ([tag-prefix p]
           [tags (if (member '(part "top") (part-tags v))
                   (part-tags v)
-                  (cons '(part "top") (part-tags v)))])
+                  (cons '(part "top") (part-tags v)))]
+          [style (if (list? (part-style v))
+                     (part-style v)
+                     (list (part-style v)))])
       (make-versioned-part
        tag-prefix
        tags
        (part-title-content v)
-       (part-style v)
+       (if (ormap (lambda (s)
+                    (and (pair? s) (eq? (car s) 'body-id)))
+                  style)
+           style
+           (cons '(body-id "doc-plt-scheme-org") style))
        (part-to-collect v)
        (part-flow v)
        (part-parts v)
@@ -684,4 +693,3 @@
     (if (path? r)
         (path->bytes r)
         r)))
-

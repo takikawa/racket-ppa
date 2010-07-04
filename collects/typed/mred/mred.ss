@@ -22,7 +22,7 @@
                               [alignment (List Symbol Symbol) #t])
                              ()))
 (dt Choice% (Class ()
-                   ([parent Any] [label String] [choices List] [callback Any])
+                   ([parent Any] [label String] [choices (Listof Any)] [callback Any])
                    ([get-string-selection (-> (Option String))]
                     [set-string-selection (String -> Void)])))
 (dt Message% (Class ()
@@ -44,6 +44,24 @@
                        [draw-text (String Number Number -> Void)])))
 (dt Color% (Class () () ([red (-> Number)])))
 
+(dt Text% (Class ()
+		 ()
+		 ([begin-edit-sequence (-> Void)]
+		  [end-edit-sequence (-> Void)]
+		  [lock (Boolean -> Void)]
+		  [last-position (-> Number)]
+		  [last-paragraph (-> Number)]
+		  [delete (Number Number -> Void)]
+		  [auto-wrap (Any -> Void)]
+		  [paragraph-end-position (Number -> Integer)]
+		  [paragraph-start-position (Number -> Integer)]
+		  [get-start-position (-> Integer)]
+		  [get-end-position (-> Integer)]
+		  [while-unlocked ((-> Any) -> Any)]
+		  [get-text (Integer (U Integer 'eof) -> String)]
+		  [insert (String Number Number -> Void)])))
+
+
 
 (require/typed/provide mred/mred
                        [the-font-list (Instance Font-List%)]
@@ -57,5 +75,6 @@
                        [editor-canvas% Editor-Canvas%]
                        [bitmap-dc% Bitmap-DC%]
                        [bitmap% Bitmap%]
-                       [color% Color%])
+                       [color% Color%]
+		       [open-input-text-editor ((Instance Text%) Integer (U 'end Integer) (Any -> Any) Any Any -> Input-Port)])
 

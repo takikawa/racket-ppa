@@ -1,7 +1,10 @@
 #lang scribble/doc
 
-@begin[(require scribble/manual)
-       (require (for-label typed-scheme))]
+@begin[(require scribble/manual scribble/eval
+                scheme/sandbox)
+       (require (for-label typed-scheme
+                           scheme/list srfi/14
+                           version/check))]
 
 @begin[
 (define (item* header . args) (apply item @bold[header]{: } args))
@@ -19,31 +22,41 @@
 @section[#:tag "type-ref"]{Type Reference}
 
 @subsubsub*section{Base Types}
-These types represent primitive Scheme data.
-@defidform[Number]{A @gtech{number}}
-@defidform[Integer]{An @gtech{integer}}
-@defidform[Boolean]{Either @scheme[#t] or @scheme[#f]}
-@defidform[String]{A @gtech{string}}
-@defidform[Keyword]{A literal @gtech{keyword}}
-@defidform[Symbol]{A @gtech{symbol}}
-@defidform[Void]{@|void-const|}
-@defidform[Port]{A @gtech{port}}
-@defidform[Path]{A @rtech{path}}
-@defidform[Char]{A @gtech{character}}
+@deftogether[(
+@defidform[Number]
+@defidform[Integer]
+@defidform[Boolean]
+@defidform[String]
+@defidform[Keyword]
+@defidform[Symbol]
+@defidform[Void]
+@defidform[Input-Port]
+@defidform[Output-Port]
+@defidform[Path]
+@defidform[Regexp]
+@defidform[PRegexp]
+@defidform[Syntax]
+@defidform[Bytes]
+@defidform[Namespace]
+@defidform[EOF]
+@defidform[Char])]{
+These types represent primitive Scheme data.}
 
-@defidform[Any]{Any value}
+@defidform[Any]{Any Scheme value. All other types are subtypes of @scheme[Any].}
 
 The following base types are parameteric in their type arguments.
 
-@defform[(Listof t)]{Homogenous @gtech{lists} of @scheme[t]}
-@defform[(Boxof t)]{A @gtech{box} of @scheme[t]}
-@defform[(Vectorof t)]{Homogenous @gtech{vectors} of @scheme[t]}
+@defform[(Listof t)]{Homogenous @rtech{lists} of @scheme[t]}
+@defform[(Boxof t)]{A @rtech{box} of @scheme[t]}
+@defform[(Vectorof t)]{Homogenous @rtech{vectors} of @scheme[t]}
 @defform[(Option t)]{Either @scheme[t] of @scheme[#f]}
 @defform*[[(Parameter t)
            (Parameter s t)]]{A @rtech{parameter} of @scheme[t].  If two type arguments are supplied, 
                                the first is the type the parameter accepts, and the second is the type returned.}
 @defform[(Pair s t)]{is the pair containing @scheme[s] as the @scheme[car]
   and @scheme[t] as the @scheme[cdr]}
+@defform[(HashTable k v)]{is the type of a @rtech{hash table} with key type
+   @scheme[k] and value type @scheme[v].}
 
 @subsubsub*section{Type Constructors}
 
@@ -100,46 +113,60 @@ creating new types, and annotating expressions.
 @scheme[_loop], @scheme[_f], @scheme[_a], and @scheme[_v] are names, @scheme[_t] is a type.
  @scheme[_e] is an expression and @scheme[_body] is a block.
 
+@defform*[[
+  (let: ([v : t e] ...) . body)
+  (let: loop : t0 ([v : t e] ...) . body)]]{
+Local bindings, like @scheme[let], each with
+associated types.  In the second form, @scheme[_t0] is the type of the
+result of @scheme[_loop] (and thus the result of the entire
+			      expression as well as the final
+				expression in @scheme[body]).}
+@deftogether[[
+@defform[(letrec: ([v : t e] ...) . body)]
+@defform[(let*: ([v : t e] ...) . body)]]]{Type-annotated versions of
+@scheme[letrec] and @scheme[let*].}
+
+@subsection{Anonymous Functions}
+
+@defform/subs[(lambda: formals . body)
+([formals ([v : t] ...) 
+	  ([v : t] ... . [v : t])])]{
+A function of the formal arguments @scheme[v], where each formal
+argument has the associated type.  If a rest argument is present, then
+it has type @scheme[(Listof t)].}
+@defform[(λ: formals . body)]{
+An alias for the same form using @scheme[lambda:].}
+@defform[(plambda: (a ...) formals . body)]{
+A polymorphic function, abstracted over the type variables
+@scheme[a]. The type variables @scheme[a] are bound in both the types
+of the formal, and in any type expressions in the @scheme[body].}
+@defform[(case-lambda: [formals body] ...)]{
+A function of multiple arities.  Note that each @scheme[formals] must have a
+different arity.}
+@defform[(pcase-lambda: (a ...) [formals body] ...)]{
+A polymorphic function of multiple arities.}
+
+@subsection{Definitions}
+
 @defform*[[(define: v : t e)
-	   (define: (f [v : t] ...) : t . body)	   
-	   (define: (a ...) (f [v : t] ...) : t . body)]]{
+	   (define: (f . formals) : t . body)	   
+	   (define: (a ...) (f . formals) : t . body)]]{
 These forms define variables, with annotated types.  The first form
 defines @scheme[v] with type @scheme[t] and value @scheme[e].  The
 second and third forms defines a function @scheme[f] with appropriate
 types.  In most cases, use of @scheme[:] is preferred to use of @scheme[define:].}
 
-@defform*[[
-  (let: ([v : t e] ...) . body)
-  (let: loop : t0 ([v : t e] ...) . body)]]{where @scheme[_t0] is the type of the
-  result of @scheme[_loop] (and thus the result of the entire expression).}
-@defform[
-  (letrec: ([v : t e] ...) . body)]{}
-@defform[
-  (let*: ([v : t e] ...) . body)]{}
-@defform*[[
-  (lambda: ([v : t] ...) . body)
-  (lambda: ([v : t] ... . [v : t]) . body)]]{}
-@defform*[[
-  (plambda: (a ...) ([v : t] ...) . body)
-  (plambda: (a ...) ([v : t] ... . [v : t]) . body)]]{}
-@defform[
-  (case-lambda: [formals body] ...)]{where @scheme[_formals] is like
-  the second element of a @scheme[lambda:]}
-@defform[
-  (pcase-lambda: (a ...) [formals body] ...)]{where @scheme[_formals] is like
-  the second element of a @scheme[lambda:].}
 
 
 @subsection{Structure Definitions}
-@defform*[[
-(define-struct: name ([f : t] ...))
-(define-struct: (name parent) ([f : t] ...))
-(define-struct: (v ...) name ([f : t] ...))
-(define-struct: (v ...) (name parent) ([f : t] ...))]]{
+@defform/subs[
+(define-struct: maybe-type-vars name-spec ([f : t] ...))
+([maybe-type-vars code:blank (v ...)]
+ [name-spec name (name parent)])]{
  Defines a @rtech{structure} with the name @scheme[name], where the
- fields @scheme[f] have types @scheme[t].  The second and fourth forms
- define @scheme[name] to be a substructure of @scheme[parent].  The
- last two forms define structures that are polymorphic in the type
+ fields @scheme[f] have types @scheme[t].  When @scheme[parent], the
+structure is a substructure of @scheme[parent].  When
+@scheme[maybe-type-vars] is present, the structure is polymorphic in the type
  variables @scheme[v].}
 
 @subsection{Type Aliases}
@@ -158,6 +185,9 @@ cycles among type aliases are prohibited.}
 The definition of @scheme[v] must appear after this declaration.  This
 can be used anywhere a definition form may be used.}
 
+@defform[(provide: [v t] ...)]{This declares that the @scheme[v]s have
+the types @scheme[t], and also provides all of the @scheme[v]s.}
+
 @litchar{#{v : t}} This declares that the variable @scheme[v] has type
 @scheme[t].  This is legal only for binding occurences of @scheme[_v].
 
@@ -172,7 +202,7 @@ This is legal only in expression contexts.}
 appropriate number of type variables. This is legal only in expression
 contexts.}
 
-@litchar|{#{e @ t ...}}| This is identical to @scheme[(inst e t ...)].
+@schemevarfont|{#{e @ t ...}}| This is identical to @scheme[(inst e t ...)].
 
 @subsection{Require}
 
@@ -183,7 +213,16 @@ naming a predicate, and @scheme[_r] is an optionally-renamed identifier.
 (require/typed r t m)
 (require/typed m [r t] ...)
 ]]{The first form requires @scheme[r] from module @scheme[m], giving
-it type @scheme[t].  The second form generalizes this to multiple identifiers.}
+it type @scheme[t].  The second form generalizes this to multiple
+identifiers.
+
+In both cases, the identifiers are protected with @rtech{contracts} which
+enforce the type @scheme[t].  If this contract fails, the module
+@scheme[m] is blamed. 
+
+Some types, notably polymorphic types constructed with @scheme[All],
+cannot be converted to contracts and raise a static error when used in
+a @scheme[require/typed] form.}
 
 @defform[(require/opaque-type t pred m)]{
 This defines a new type @scheme[t].  @scheme[pred], imported from
@@ -191,4 +230,67 @@ module @scheme[m], is a predicate for this type.  The type is defined
 as precisely those values to which @scheme[pred] produces
 @scheme[#t].  @scheme[pred] must have type @scheme[(Any -> Boolean)].}
 
-@defform[(require-typed-struct name ([f : t] ...) m)]{}
+@defform*[[(require-typed-struct name ([f : t] ...) m)
+           (require-typed-struct (name parent) ([f : t] ...) m)]]{
+Requires all the functions associated with the structure @scheme[name] from the module @scheme[m],
+with the appropriate types.  The structure predicate has the
+appropriate Typed Scheme filter type so that it may be used as a
+predicate in @scheme[if] expressions in Typed Scheme.  
+
+In the second form, @scheme[parent] must already be a structure type
+known to Typed Scheme, either via @scheme[define-struct:] or
+@scheme[require-typed-struct].  
+}
+
+@defform/subs[(do: : u ([id : t init-expr step-expr-maybe] ...)
+                       (stop?-expr finish-expr ...)
+                expr ...+)
+              ([step-expr-maybe code:blank
+                                step-expr])]{
+Like @scheme[do], but each @scheme[id] having the associated type @scheme[t], and 
+the final body @scheme[expr] having the type @scheme[u].
+}
+
+@section{Libraries Provided With Typed Scheme}
+
+The @schememodname[typed-scheme] language corresponds to the
+@schememodname[scheme/base] language---that is, any identifier provided
+by @schememodname[scheme/base], such as @scheme[mod] is available by default in
+@schememodname[typed-scheme].  
+
+@schememod[typed-scheme
+(modulo 12 2)
+]
+
+Any value provided by @schememodname[scheme] is available by simply
+@scheme[require]ing it; use of @scheme[require/typed] is not
+neccessary.  
+
+@schememod[typed-scheme
+(require scheme/list)
+(display (first (list 1 2 3)))
+]
+
+Some libraries have counterparts in the @schemeidfont{typed}
+collection, which provide the same exports as the untyped versions.
+Such libraries include @schememodname[srfi/14],
+@schememodname[net/url], and many others.  
+
+@schememod[typed-scheme
+(require typed/srfi/14)
+(char-set= (string->char-set "hello")
+           (string->char-set "olleh"))
+]
+
+To participate in making more libraries available, please visit 
+@link["http://www.ccs.neu.edu/home/samth/adapt/"]{here}.
+
+
+Other libraries can be used with Typed Scheme via
+@scheme[require/typed].
+
+@schememod[typed-scheme
+(require/typed version/check
+               [check-version (-> (U Symbol (Listof Any)))])
+(check-version)
+]

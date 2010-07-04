@@ -37,6 +37,7 @@
          make-bind bind? bind-name bind-exp
          
          test-equal
+         test-->>
          test-->
          test-predicate
          test-results)
@@ -66,7 +67,8 @@
  [variable-not-in (any/c symbol? . -> . symbol?)]
  [variables-not-in (any/c (listof symbol?) . -> . (listof symbol?))]
  [check-reduction-relation (->* (reduction-relation? (-> any/c any/c))
-                                (#:attempts natural-number/c)
+                                (#:attempts natural-number/c
+                                 #:retries natural-number/c)
                                 (one-of/c #t (void)))]
  [relation-coverage (parameter/c (or/c false/c coverage?))]
  [make-coverage (-> reduction-relation? coverage?)]

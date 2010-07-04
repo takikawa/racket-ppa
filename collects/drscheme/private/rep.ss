@@ -30,7 +30,13 @@ TODO
          setup/xref
          scheme/gui/base
          framework
-         browser/external)
+         browser/external
+         "drsig.ss"
+         
+         ;; the dynamic-require below loads this module, 
+         ;; so we make the dependency explicit here, even
+         ;; tho nothing is used from this module.
+         planet/terse-info)
 
 (provide rep@ with-stacktrace-name)
 
@@ -226,6 +232,8 @@ TODO
   
   (define (cut-out-top-of-stack exn)
     (let ([initial-stack (continuation-mark-set->context (exn-continuation-marks exn))])
+      initial-stack ;; just give up on trying to trim out DrScheme's frame's from the stack for now.
+      #;
       (let loop ([stack initial-stack])
         (cond
           [(null? stack) 
@@ -477,6 +485,9 @@ TODO
                       (send text change-style delta before after)))
                   deltas)
         (values before after))))
+  
+  (define log-max-size 1000)
+  (define log-entry-max-size 1000)
   
   (define text-mixin
     (mixin ((class->interface text%)
@@ -795,12 +806,11 @@ TODO
       
       (define/override (after-io-insertion)
         (super after-io-insertion)
-        (let ([canvas (get-active-canvas)])
-          (when canvas
-            (let ([frame (send canvas get-top-level-window)])
-              (let ([tab (send definitions-text get-tab)])
-                (when (eq? (send frame get-current-tab) tab)
-                  (send context ensure-rep-shown this)))))))
+        (let ([frame (get-frame)])
+          (when frame
+            (let ([tab (send definitions-text get-tab)])
+              (when (eq? (send frame get-current-tab) tab)
+                (send context ensure-rep-shown this))))))
       
       (define/augment (after-insert start len)
         (inner (void) after-insert start len)
@@ -871,11 +881,12 @@ TODO
              (user-namespace-box (make-weak-box #f))
              (user-eventspace-main-thread #f)
              (user-break-parameterization #f)
+             (user-logger (make-logger))
              
              ;; user-exit-code (union #f (integer-in 0 255))
              ;; #f indicates that exit wasn't called. Integer indicates exit code
              (user-exit-code #f))
-      
+            
       (define/public (get-user-language-settings) user-language-settings)
       (define/public (get-user-custodian) user-custodian)
       (define/public (get-user-eventspace) (weak-box-value user-eventspace-box))
@@ -914,9 +925,7 @@ TODO
           (lock #t)
           (when (and show-no-user-evaluation-message? (not shutting-down?))
             (no-user-evaluation-message
-             (let ([canvas (get-active-canvas)])
-               (and canvas
-                    (send canvas get-top-level-window)))
+             (get-frame)
              user-exit-code
              (not (thread-running? memory-killed-thread))))
           (set! show-no-user-evaluation-message? #t)))
@@ -1226,6 +1235,8 @@ TODO
           (set! eval-thread-queue-sema (make-semaphore 0))
           (set! user-exit-code #f)
           
+          (reset-logger-messages)
+          
           (let* ([init-thread-complete (make-semaphore 0)]
                  [goahead (make-semaphore)])
             
@@ -1239,6 +1250,31 @@ TODO
                  ; No user code has been evaluated yet, so we're in the clear...
                  (break-enabled #f)
                  (set! user-eventspace-main-thread (current-thread))
+                 
+                 (current-logger user-logger)
+                 
+                 (thread
+                  (λ ()
+                    ;; forward system events the the user's logger,
+                    ;; and record any events that happen on the user's logger to show in the GUI
+                    (let ([sys-evt (make-log-receiver drscheme:init:system-logger 'debug)]
+                          [user-evt (make-log-receiver user-logger 'debug)])
+                      (let loop ()
+                        (sync
+                         (handle-evt
+                          sys-evt
+                          (λ (logged)
+                            (log-message user-logger 
+                                         (vector-ref logged 0)
+                                         (vector-ref logged 1)
+                                         (vector-ref logged 2))
+                            (loop)))
+                         (handle-evt
+                          user-evt
+                          (λ (vec)
+                            (parameterize ([current-eventspace drscheme:init:system-eventspace])
+                              (queue-callback (λ () (new-log-message vec))))
+                            (loop))))))))
                  
                  (let ([drscheme-exit-handler
                         (λ (x)
@@ -1258,6 +1294,16 @@ TODO
                              (custodian-shutdown-all user-custodian))))])
                    (exit-handler drscheme-exit-handler))
                  (initialize-parameters snip-classes))))
+            
+
+            ;; register drscheme with the planet-terse-register for the user's namespace
+            ;; must be called after 'initialize-parameters' is called (since it initializes
+            ;; the user's namespace)
+            (planet-terse-set-key (gensym))
+            (planet-terse-register
+             (lambda (tag package)
+               (parameterize ([current-eventspace drscheme:init:system-eventspace])
+                 (queue-callback (λ () (new-planet-info tag package))))))
             
             ;; disable breaks until an evaluation actually occurs
             (send context set-breakables #f #f)
@@ -1394,6 +1440,45 @@ TODO
            (λ ()
              (send context update-running bool)))))
       
+      (define logger-editor #f)
+      (define logger-messages '())
+      (define/public (get-logger-messages) logger-messages)
+      (define/private (new-log-message vec)
+        (let* ([level (vector-ref vec 0)]
+               [str (cond
+                      [(<= (string-length (vector-ref vec 1)) log-entry-max-size)
+                       (vector-ref vec 1)]
+                      [else
+                       (substring (vector-ref vec 1) 0 log-entry-max-size)])]
+               [msg (vector level str)])
+          (cond
+            [(< (length logger-messages) log-max-size)
+             (set! logger-messages (cons msg logger-messages))
+             (update-logger-gui (cons 'add-line msg))]
+            [else
+             (set! logger-messages
+                   (cons
+                    msg
+                    (let loop ([msgs logger-messages])
+                      (cond
+                        [(null? (cdr msgs)) null]
+                        [else (cons (car msgs) (loop (cdr msgs)))]))))
+             (update-logger-gui (cons 'clear-last-line-and-add-line msg))])))
+      
+      (define/private (reset-logger-messages) 
+        (set! logger-messages '())
+        (update-logger-gui #f))
+      
+      (define/private (update-logger-gui command)
+        (let ([tab (send definitions-text get-tab)])
+          (send tab update-logger-window command)))
+                        
+      (define/private (new-planet-info tag package) 
+        (let ([frame (get-frame)])
+          (when frame
+            (send (send frame get-current-tab) new-planet-status tag package))))
+      
+      
       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ;;;                                          ;;;
       ;;;                Execution                 ;;;
@@ -1423,7 +1508,7 @@ TODO
         (current-error-port (get-err-port))
         (current-value-port (get-value-port))
         (current-input-port (get-in-box-port))
-        
+
         (current-print (lambda (v) (display-results (list v)))))
       
       (define/private (initialize-dispatch-handler) ;;; =User=
@@ -1683,6 +1768,22 @@ TODO
                                        (floor (/ width char-width)))])
                 (send dc set-font old-font)
                 (pretty-print-columns new-columns))))))
+
+      
+      ;; get-frame : -> (or/c #f (is-a?/c frame))
+      (define/private (get-frame)
+        (let ([c (get-any-canvas)])
+          (and c (send c get-top-level-window))))
+      
+
+      ;; returns the most recently active canvas or, if no canvas
+      ;; has ever been active, it returns just any canvas
+      (define/private (get-any-canvas)
+        (or (get-active-canvas)
+            (let ([canvases (get-canvases)])
+              (and (not (null? canvases))
+                   (car canvases)))))
+
       (super-new)
       (auto-wrap #t)
       (set-styles-sticky #f)

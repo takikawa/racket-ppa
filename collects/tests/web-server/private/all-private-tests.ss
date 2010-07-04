@@ -1,5 +1,5 @@
 #lang scheme/base
-(require (planet "test.ss" ("schematics" "schemeunit.plt" 2))
+(require (planet schematics/schemeunit:3)
          "request-test.ss"
          "cache-table-test.ss"
          "response-test.ss"
@@ -8,12 +8,14 @@
          "mime-types-test.ss"
          "url-param-test.ss"
          "mod-map-test.ss"
+         "gzip-test.ss"
          "util-test.ss")
 (provide all-private-tests)
 
 (define all-private-tests
   (test-suite
    "Internal"
+   gzip-tests
    cache-table-tests
    connection-manager-tests
    define-closure-tests

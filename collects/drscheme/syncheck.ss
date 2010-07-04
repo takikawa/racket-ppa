@@ -21,8 +21,8 @@ If the namespace does not, they are colored the unbound color.
          scheme/unit
          scheme/contract
          scheme/class
+         scheme/list
          drscheme/tool
-         mzlib/list
          syntax/toplevel
          syntax/boundmap
          mrlib/switchable-button
@@ -141,7 +141,7 @@ If the namespace does not, they are colored the unbound color.
     (define-struct (var-arrow arrow)
       (start-text start-pos-left start-pos-right
                   end-text end-pos-left end-pos-right
-                  actual?))
+                  actual? level)) ;; level is one of 'lexical, 'top-level, 'import
     (define-struct (tail-arrow arrow) (from-text from-pos to-text to-pos))
     
     ;; color : string
@@ -422,11 +422,12 @@ If the namespace does not, they are colored the unbound color.
             ;; syncheck:add-arrow : symbol text number number text number number boolean -> void
             ;; pre: start-editor, end-editor are embedded in `this' (or are `this')
             (define/public (syncheck:add-arrow start-text start-pos-left start-pos-right
-                                               end-text end-pos-left end-pos-right actual?)
+                                               end-text end-pos-left end-pos-right
+                                               actual? level)
               (let* ([arrow (make-var-arrow #f #f #f #f
                                             start-text start-pos-left start-pos-right
                                             end-text end-pos-left end-pos-right
-                                            actual?)])
+                                            actual? level)])
                 (when (add-to-bindings-table
                        start-text start-pos-left start-pos-right
                        end-text end-pos-left end-pos-right)
@@ -685,9 +686,11 @@ If the namespace does not, they are colored the unbound color.
                        (if (and pos (is-a? text text%))
                            (let ([arrow-vector (hash-ref arrow-vectors text (λ () #f))])
                              (when arrow-vector
-                               (let ([vec-ents (vector-ref arrow-vector pos)])
+                               (let ([vec-ents (vector-ref arrow-vector pos)]
+                                     [start-selection (send text get-start-position)]
+                                     [end-selection (send text get-end-position)])
                                  (cond
-                                   [(null? vec-ents)
+                                   [(and (null? vec-ents) (= start-selection end-selection))
                                     (super on-event event)]
                                    [else
                                     (let* ([menu (make-object popup-menu% #f)]
@@ -716,6 +719,39 @@ If the namespace does not, they are colored the unbound color.
                                           jump-to-binding
                                           menu
                                           (λ (item evt) (jump-to-binding-callback arrows))))
+                                      (unless (= start-selection end-selection)
+                                        (let ([arrows-menu
+                                               (make-object menu%
+                                                            "Arrows crossing selection"
+                                                            menu)]
+                                              [callback
+                                               (lambda (accept)
+                                                 (tack-crossing-arrows-callback
+                                                  arrow-vector
+                                                  start-selection
+                                                  end-selection
+                                                  text
+                                                  accept))])
+                                          (make-object menu-item%
+                                                       "Tack arrows"
+                                                       arrows-menu
+                                                       (lambda (item evt)
+                                                         (callback
+                                                          '(lexical top-level imported))))
+                                          (make-object menu-item%
+                                                       "Tack non-import arrows"
+                                                       arrows-menu
+                                                       (lambda (item evt)
+                                                         (callback
+                                                          '(lexical top-level))))
+                                          (make-object menu-item%
+                                                       "Untack arrows"
+                                                       arrows-menu
+                                                       (lambda (item evt)
+                                                         (untack-crossing-arrows
+                                                          arrow-vector
+                                                          start-selection
+                                                          end-selection)))))
                                       (for-each (λ (f) (f menu)) add-menus)
                                       (send (get-canvas) popup-menu menu
                                             (+ 1 (inexact->exact (floor (send event get-x))))
@@ -791,6 +827,30 @@ If the namespace does not, they are colored the unbound color.
                  arrows))
               (invalidate-bitmap-cache))
             
+            (define/private (tack-crossing-arrows-callback arrow-vector start end text kinds)
+              (define (xor a b)
+                (or (and a (not b)) (and (not a) b)))
+              (define (within t p)
+                (and (eq? t text)
+                     (<= start p end)))
+              (for ([position (in-range start end)])
+                (define things (vector-ref arrow-vector position))
+                (for ([va things] #:when (var-arrow? va))
+                  (define va-start (var-arrow-start-pos-left va))
+                  (define va-start-text (var-arrow-start-text va))
+                  (define va-end (var-arrow-end-pos-left va))
+                  (define va-end-text (var-arrow-end-text va))
+                  (when (xor (within va-start-text va-start)
+                             (within va-end-text va-end))
+                    (when (memq (var-arrow-level va) kinds)
+                      (hash-set! tacked-hash-table va #t)))))
+              (invalidate-bitmap-cache))
+
+            (define/private (untack-crossing-arrows arrow-vector start end)
+              (for ([position (in-range start end)])
+                (for ([va (vector-ref arrow-vector position)] #:when (var-arrow? va))
+                  (hash-set! tacked-hash-table va #f))))
+
             ;; syncheck:jump-to-binding-occurrence : text -> void
             ;; jumps to the next occurrence, based on the insertion point
             (define/public (syncheck:jump-to-next-bound-occurrence text)
@@ -1439,7 +1499,7 @@ If the namespace does not, they are colored the unbound color.
              (λ (vars)
                (when jump-to-id
                  (for-each (λ (id)
-                             (let ([binding (identifier-binding id)])
+                             (let ([binding (identifier-binding id 0)])
                                (when (pair? binding)
                                  (let ([nominal-source-id (list-ref binding 3)])
                                    (when (eq? nominal-source-id jump-to-id)
@@ -1538,7 +1598,7 @@ If the namespace does not, they are colored the unbound color.
                  ;; tops are used here because a binding free use of a set!'d variable
                  ;; is treated just the same as (#%top . x).
                  (when (syntax-original? (syntax var))
-                   (if (identifier-binding (syntax var))
+                   (if (identifier-binding (syntax var) 0)
                        (add-id varrefs (syntax var))
                        (add-id tops (syntax var))))
                  
@@ -1753,10 +1813,22 @@ If the namespace does not, they are colored the unbound color.
             [unused-require-for-syntaxes (make-hash)]
             [unused-require-for-templates (make-hash)]
             [unused-require-for-labels (make-hash)]
+            [requires/phases (make-hash)]
+            [unused/phases (make-hash)]
             ;; there is no define-for-template form, thus no for-template binders
             [template-binders (make-id-set)]
             [label-binders (make-id-set)]
             [id-sets (list low-binders high-binders low-varrefs high-varrefs low-tops high-tops)])
+        
+        (hash-set! requires/phases 0 requires)
+        (hash-set! requires/phases 1 require-for-syntaxes)
+        (hash-set! requires/phases -1 require-for-templates)
+        (hash-set! requires/phases #f require-for-labels)
+
+        (hash-set! unused/phases 0 unused-requires)
+        (hash-set! unused/phases 1 unused-require-for-syntaxes)
+        (hash-set! unused/phases -1 unused-require-for-templates)
+        (hash-set! unused/phases #f unused-require-for-labels)
         
         (hash-for-each requires
                        (λ (k v) (hash-set! unused-requires k #t)))
@@ -1770,8 +1842,8 @@ If the namespace does not, they are colored the unbound color.
         (for-each (λ (vars) 
                     (for-each (λ (var)
                                 (when (syntax-original? var)
-                                  (color-variable var identifier-binding)
-                                  (document-variable var identifier-binding)
+                                  (color-variable var 0)
+                                  (document-variable var 0)
                                   (record-renamable-var rename-ht var)))
                               vars))
                   (append (get-idss high-binders)
@@ -1779,14 +1851,14 @@ If the namespace does not, they are colored the unbound color.
         
         (for-each (λ (vars) (for-each 
                              (λ (var)
-                               (color-variable var identifier-binding)
-                               (document-variable var identifier-binding)
+                               (color-variable var 0)
+                               (document-variable var 0)
                                (connect-identifier var
                                                    rename-ht
                                                    low-binders
-                                                   unused-requires
-                                                   requires
-                                                   identifier-binding
+                                                   unused/phases
+                                                   requires/phases
+                                                   0
                                                    user-namespace 
                                                    user-directory
                                                    #t))
@@ -1795,14 +1867,14 @@ If the namespace does not, they are colored the unbound color.
         
         (for-each (λ (vars) (for-each 
                              (λ (var)
-                               (color-variable var identifier-transformer-binding)
-                               (document-variable var identifier-transformer-binding)
+                               (color-variable var 1)
+                               (document-variable var 1)
                                (connect-identifier var
                                                    rename-ht
                                                    high-binders
-                                                   unused-require-for-syntaxes
-                                                   require-for-syntaxes
-                                                   identifier-transformer-binding
+                                                   unused/phases
+                                                   requires/phases
+                                                   1
                                                    user-namespace 
                                                    user-directory
                                                    #t))
@@ -1815,36 +1887,36 @@ If the namespace does not, they are colored the unbound color.
                                     (connect-identifier var
                                                         rename-ht
                                                         low-binders
-                                                        unused-requires
-                                                        requires
-                                                        identifier-binding
+                                                        unused/phases
+                                                        requires/phases
+                                                        0
                                                         user-namespace
                                                         user-directory
                                                         #f)
                                     (connect-identifier var
                                                         rename-ht
                                                         high-binders
-                                                        unused-require-for-syntaxes
-                                                        require-for-syntaxes
-                                                        identifier-transformer-binding
+                                                        unused/phases
+                                                        requires/phases
+                                                        1
                                                         user-namespace
                                                         user-directory
                                                         #f)
                                     (connect-identifier var
                                                         rename-ht
                                                         template-binders ;; dummy; always empty
-                                                        unused-require-for-templates
-                                                        require-for-templates
-                                                        identifier-template-binding
+                                                        unused/phases
+                                                        requires/phases
+                                                        -1
                                                         user-namespace
                                                         user-directory
                                                         #f)
                                     (connect-identifier var
                                                         rename-ht
                                                         label-binders ;; dummy; always empty
-                                                        unused-require-for-labels
-                                                        require-for-labels
-                                                        identifier-label-binding
+                                                        unused/phases
+                                                        requires/phases
+                                                        #f
                                                         user-namespace
                                                         user-directory
                                                         #f))
@@ -1892,7 +1964,7 @@ If the namespace does not, they are colored the unbound color.
     ;;                      id-set 
     ;;                      (union #f hash-table)
     ;;                      (union #f hash-table)
-    ;;                      (union identifier-binding identifier-transformer-binding)
+    ;;                      integer or 'lexical or #f
     ;;                      (listof id-set)
     ;;                      namespace
     ;;                      directory
@@ -1900,11 +1972,26 @@ If the namespace does not, they are colored the unbound color.
     ;;                   -> void
     ;; adds arrows and rename menus for binders/bindings
     (define (connect-identifier var rename-ht all-binders
-                                unused requires get-binding user-namespace user-directory actual?)
+                                unused/phases requires/phases
+                                phase-level user-namespace user-directory actual?)
       (connect-identifier/arrow var all-binders 
-                                unused requires get-binding user-namespace user-directory actual?)
+                                unused/phases requires/phases
+                                phase-level user-namespace user-directory actual?)
       (when (and actual? (get-ids all-binders var))
         (record-renamable-var rename-ht var)))
+    
+    ;; id-level : integer-or-#f-or-'lexical identifier -> symbol
+    (define (id-level phase-level id)
+      (define (self-module? mpi)
+        (let-values ([(a b) (module-path-index-split mpi)])
+          (and (not a) (not b))))
+      (let ([binding (identifier-binding id phase-level)])
+        (cond [(list? binding)
+               (if (self-module? (car binding))
+                   'top-level
+                   'imported)]
+              [(eq? binding 'lexical) 'lexical]
+              [else 'top-level])))
     
     ;; connect-identifier/arrow : syntax
     ;;                            id-set 
@@ -1914,19 +2001,23 @@ If the namespace does not, they are colored the unbound color.
     ;;                            boolean
     ;;                         -> void
     ;; adds the arrows that correspond to binders/bindings
-    (define (connect-identifier/arrow var all-binders unused requires get-binding user-namespace user-directory actual?)
+    (define (connect-identifier/arrow var all-binders unused/phases requires/phases phase-level user-namespace user-directory actual?)
       (let ([binders (get-ids all-binders var)])
         (when binders
           (for-each (λ (x)
                       (when (syntax-original? x)
-                        (connect-syntaxes x var actual?)))
+                        (connect-syntaxes x var actual? (id-level phase-level x))))
                     binders))
         
-        (when (and unused requires)
-          (let ([req-path/pr (get-module-req-path (get-binding var))])
+        (when (and unused/phases requires/phases)
+          (let ([req-path/pr (get-module-req-path (identifier-binding var phase-level)
+                                                  phase-level)])
             (when req-path/pr
-              (let* ([req-path (car req-path/pr)]
-                     [id (cdr req-path/pr)]
+              (let* ([req-path (list-ref req-path/pr 0)]
+                     [id (list-ref req-path/pr 1)]
+                     [req-phase-level (list-ref req-path/pr 2)]
+                     [unused (hash-ref unused/phases req-phase-level)]
+                     [requires (hash-ref requires/phases req-phase-level)]
                      [req-stxes (hash-ref requires req-path (λ () #f))])
                 (when req-stxes
                   (hash-remove! unused req-path)
@@ -1944,7 +2035,8 @@ If the namespace does not, they are colored the unbound color.
                                                  (string-constant cs-mouse-over-import)
                                                  (syntax-e var)
                                                  req-path))
-                                (connect-syntaxes req-stx var actual?)))
+                                (connect-syntaxes req-stx var actual?
+                                                  (id-level phase-level var))))
                             req-stxes))))))))
     
     (define (id/require-match? var id req-stx)
@@ -1969,15 +2061,23 @@ If the namespace does not, they are colored the unbound color.
     
     ;; get-module-req-path : binding -> (union #f (cons require-sexp sym))
     ;; argument is the result of identifier-binding or identifier-transformer-binding
-    (define (get-module-req-path binding)
+    (define (get-module-req-path binding phase-level)
       (and (pair? binding)
+           (or (not (number? phase-level))
+               (= phase-level
+                  (+ (list-ref binding 5)
+                     (list-ref binding 6))))
            (let ([mod-path (list-ref binding 2)])
              (cond
                [(module-path-index? mod-path)
                 (let-values ([(base offset) (module-path-index-split mod-path)])
-                  (cons base (list-ref binding 3)))]
+                  (list base
+                        (list-ref binding 3)
+                        (list-ref binding 5)))]
                [(symbol? mod-path)
-                (cons mod-path (list-ref binding 3))]))))
+                (list mod-path 
+                      (list-ref binding 3)
+                      (list-ref binding 5))]))))
     
     ;; color/connect-top : namespace directory id-set syntax -> void
     (define (color/connect-top rename-ht user-namespace user-directory binders var)
@@ -1990,11 +2090,11 @@ If the namespace does not, they are colored the unbound color.
         (if top-bound?
             (color var lexically-bound-variable-style-name)
             (color var error-style-name))
-        (connect-identifier var rename-ht binders #f #f identifier-binding user-namespace user-directory #t)))
+        (connect-identifier var rename-ht binders #f #f 0 user-namespace user-directory #t)))
     
-    ;; color-variable : syntax (union identifier-binding identifier-transformer-binding) -> void
-    (define (color-variable var get-binding)
-      (let* ([b (get-binding var)]
+    ;; color-variable : syntax phase-level -> void
+    (define (color-variable var phase-level)
+      (let* ([b (identifier-binding var phase-level)]
              [lexical? 
               (or (not b)
                   (eq? b 'lexical)
@@ -2016,9 +2116,9 @@ If the namespace does not, they are colored the unbound color.
                [prev (hash-ref ht key (λ () null))])
           (hash-set! ht key (cons var prev)))))
     
-    ;; connect-syntaxes : syntax[original] syntax[original] boolean -> void
+    ;; connect-syntaxes : syntax[original] syntax[original] boolean symbol -> void
     ;; adds an arrow from `from' to `to', unless they have the same source loc. 
-    (define (connect-syntaxes from to actual?)
+    (define (connect-syntaxes from to actual? level)
       (let ([from-source (find-source-editor from)] 
             [to-source (find-source-editor to)]
             [defs-text (get-defs-text)])
@@ -2036,7 +2136,7 @@ If the namespace does not, they are colored the unbound color.
                   (send defs-text syncheck:add-arrow
                         from-source from-pos-left from-pos-right
                         to-source to-pos-left to-pos-right
-                        actual?))))))))
+                        actual? level))))))))
     
     ;; add-mouse-over : syntax[original] string -> void
     ;; registers the range in the editor so that a mouse over
@@ -2454,12 +2554,12 @@ If the namespace does not, they are colored the unbound color.
 ;                                                                                             
 
     
-    ;; document-variable : stx identifier-binding -> void
-    (define (document-variable stx get-binding)
+    ;; document-variable : stx phase-level -> void
+    (define (document-variable stx phase-level)
       (when (syntax-original? stx)
         (let ([defs-text (currently-processing-definitions-text)])
           (when defs-text
-            (let ([binding-info (get-binding stx)])
+            (let ([binding-info (identifier-binding stx phase-level)])
               (when (and (pair? binding-info)
                          (syntax-position stx)
                          (syntax-span stx))
@@ -2474,7 +2574,8 @@ If the namespace does not, they are colored the unbound color.
                           (when path
                             (let ([index-entry (xref-tag->index-entry xref definition-tag)])
                               (when index-entry
-                                (send defs-text syncheck:add-background-color source-editor "navajowhite" start fin (syntax-e stx))
+                                (send defs-text syncheck:add-background-color
+                                      source-editor "navajowhite" start fin (syntax-e stx))
                                 (send defs-text syncheck:add-menu
                                       source-editor
                                       start 
@@ -2483,7 +2584,7 @@ If the namespace does not, they are colored the unbound color.
                                       (λ (menu)
                                         (instantiate menu-item% ()
                                           (parent menu)
-                                          (label (fw:gui-utils:format-literal-label (string-constant cs-view-docs) (exported-index-desc-name (entry-desc index-entry))))
+                                          (label (build-docs-label (entry-desc index-entry)))
                                           (callback
                                            (λ (x y)
                                               (let* ([url (path->url path)]
@@ -2498,6 +2599,24 @@ If the namespace does not, they are colored the unbound color.
                                                                          tag)
                                                                url)])
                                                 (send-url (url->string url2))))))))))))))))))))))
+    
+    (define (build-docs-label desc)
+      (let ([libs (exported-index-desc-from-libs desc)])
+        (cond
+          [(null? libs)
+           (fw:gui-utils:format-literal-label
+            (string-constant cs-view-docs)
+            (exported-index-desc-name desc))]
+          [else
+           (fw:gui-utils:format-literal-label
+            (string-constant cs-view-docs-from)
+            (format 
+             (string-constant cs-view-docs)
+             (exported-index-desc-name desc))
+            (apply string-append 
+                   (add-between 
+                    (map (λ (x) (format "~s" x)) libs) 
+                    ", ")))])))
     
     
     

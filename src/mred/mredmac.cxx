@@ -298,15 +298,19 @@ static void EnsureWNEReturn()
      dummy AppleEvent and defeat the purpose. */
   if (!pending_self_ae) {
     ProcessSerialNumber psn;
-    AEAddressDesc target;
-    AppleEvent ae;
+    AppleEvent ae, ae_target;
 
-    pending_self_ae = 1;
-
-    GetCurrentProcess(&psn);
-    AECreateDesc(typeProcessSerialNumber, &psn, sizeof(psn), &target);
-    AECreateAppleEvent('MrEd', 'Smug', &target, kAutoGenerateReturnID, kAnyTransactionID, &ae);
-    AESend(&ae, NULL, kAENoReply, kAENormalPriority, kNoTimeOut, NULL, NULL);
+    if (GetCurrentProcess(&psn) == noErr) {
+      if (AECreateDesc(typeProcessSerialNumber, &psn, sizeof(psn), &ae_target) == noErr) {
+        if (AECreateAppleEvent('MrEd', 'Smug', &ae_target, kAutoGenerateReturnID, kAnyTransactionID, &ae) == noErr) {
+          if (AESend(&ae, NULL, kAENoReply, kAENormalPriority, kNoTimeOut, NULL, NULL) == noErr) {
+            pending_self_ae = 1;
+          }
+          AEDisposeDesc(&ae_target);
+        }
+        AEDisposeDesc(&ae);
+      }
+    }
   }
 }
 

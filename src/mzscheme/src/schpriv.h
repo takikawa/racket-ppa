@@ -806,6 +806,8 @@ Scheme_Object *scheme_stx_module_name(Scheme_Object **name, Scheme_Object *phase
 Scheme_Object *scheme_stx_moduleless_env(Scheme_Object *a);
 int scheme_stx_parallel_is_used(Scheme_Object *sym, Scheme_Object *stx);
 
+int scheme_stx_ribs_matter(Scheme_Object *a, Scheme_Object *skip_ribs);
+
 int scheme_stx_bound_eq(Scheme_Object *a, Scheme_Object *b, Scheme_Object *phase);
 int scheme_stx_env_bound_eq(Scheme_Object *a, Scheme_Object *b, Scheme_Object *uid, Scheme_Object *phase);
 
@@ -954,7 +956,7 @@ typedef struct Scheme_Local {
 #define SCHEME_LOCAL_CLEARING_MASK 0x3
 
 typedef struct Scheme_Toplevel {
-  Scheme_Inclhash_Object iso; /* keyex used for const & ready flags */
+  Scheme_Inclhash_Object iso; /* keyex used for flags (and can't be hashed) */
   mzshort depth;
   int position;
 } Scheme_Toplevel;
@@ -964,9 +966,8 @@ typedef struct Scheme_Toplevel {
 #define SCHEME_TOPLEVEL_FLAGS(obj)  MZ_OPT_HASH_KEY(&((Scheme_Toplevel *)(obj))->iso)
 
 #define SCHEME_TOPLEVEL_CONST   0x1
-#define SCHEME_TOPLEVEL_MUTATED 0x2
 #define SCHEME_TOPLEVEL_READY   0x2
-/* MUTATED and READY flags are used in different contexts */
+#define SCHEME_TOPLEVEL_MUTATED 0x4
 
 typedef struct Scheme_Quote_Syntax {
   Scheme_Object so; /* scheme_quote_syntax_type */

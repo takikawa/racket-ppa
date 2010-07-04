@@ -1,7 +1,7 @@
 #lang scheme/base
 
 (require (for-syntax scheme/base) "utils.ss"
-         scheme/file scheme/list scheme/class mred)
+         scheme/file scheme/class mred)
 
 (provide (except-out (all-from-out scheme/base) #%module-begin)
          (all-from-out "utils.ss"))
@@ -20,8 +20,6 @@
                 (cdr e))
          stx))
       (raise-syntax-error #f "bad syntax" stx))))
-
-(define server-dir (current-directory))
 
 (define (error* fmt . args)
   (error (apply format fmt args)))
@@ -336,8 +334,7 @@
            (if (memq unknown vals)
              exn
              (apply (struct-type-make-constructor struct-type)
-                    (string->immutable-string
-                     (format "while evaluating ~s:\n  ~a" expr (car vals)))
+                    (format "while evaluating ~s:\n  ~a" expr (car vals))
                     (cdr vals))))
          exn))))
   (with-handlers ([exn? reraise]) (eval expr)))

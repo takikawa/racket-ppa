@@ -1,8 +1,8 @@
 #lang scheme
-(require (planet "util.ss" ("schematics" "schemeunit.plt" 2))
-         (planet "test.ss" ("schematics" "schemeunit.plt" 2))
+(require (planet schematics/schemeunit:3)
          web-server/private/connection-manager
          web-server/private/timer
+         web-server/http/request
          web-server/http)
 (provide request-tests)
 
@@ -22,14 +22,15 @@
                              ip op (make-custodian) #f)
             headers)))
 
+
 (define (get-bindings post-data)
   (define-values (conn headers) (make-mock-connection&headers post-data))
-  (call-with-values (lambda () (read-bindings&post-data/raw conn 'post #f headers))
+  (call-with-values (lambda () (read-bindings&post-data/raw conn #"POST" #f headers))
                     (lambda (f s) f)))
 
 (define (get-post-data/raw post-data)
   (define-values (conn headers) (make-mock-connection&headers post-data))
-  (call-with-values (lambda () (read-bindings&post-data/raw conn 'post #f headers))
+  (call-with-values (lambda () (read-bindings&post-data/raw conn #"POST" #f headers))
                     (lambda (f s) s)))
 
 
@@ -55,6 +56,18 @@
    ; XXX This needs to be really extensive, see what Apache has
    (test-suite
     "Parsing"
+    (test-suite
+     "URL Query"
+     (test-not-exn "Unfinished URL query"
+                   (lambda ()
+                     (define ip (open-input-string "GET http://127.0.0.1:8080/servlets/examples/hello.ss?a=1&b: HTTP/1.1"))
+                     (read-request
+                      (make-connection 0 (make-timer ip +inf.0 (lambda () (void)))
+                                       ip
+                                       (open-output-bytes) (make-custodian) #f)
+                      8081
+                      (lambda _ (values "s1" "s2"))))))
+    
     (test-suite
      "POST Bindings"
      (test-equal? "simple test 1"
