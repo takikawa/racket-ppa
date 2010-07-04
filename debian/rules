@@ -20,7 +20,7 @@ DEB_BUILDDIR := $(DEB_SRCDIR)/build
 
 binary-post-install/plt-scheme-doc::
 	# release-notes get installed into plt-scheme
-	rm -rf debian/plt-scheme-doc/usr/share/plt/doc/release-notes
+	rm -rf debian/plt-scheme-doc/usr/share/racket/doc/release-notes
 
 cleanbuilddir/plt-scheme::
 	rm -rf build
