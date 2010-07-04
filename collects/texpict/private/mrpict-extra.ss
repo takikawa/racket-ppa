@@ -56,6 +56,7 @@
               (super-instantiate ())))
           (define f (make-object pict-frame% "MrPict"))
           (define c (make-object pict-canvas% f))
+          (send (send c get-dc) set-smoothing 'aligned)
           (send f set-pict p)
           (send f show #t)))
       
@@ -171,7 +172,7 @@
 		[sup? (memq* 'superscript orig-style)])
 	    (let ([s-font (if (or sub? sup?)
 			      (extend-font font
-					   (floor (* 1/2 (send font get-point-size)))
+					   (floor (* 2/3 (send font get-point-size)))
 					   (send font get-style)
 					   (send font get-weight))
 			      font)]
@@ -305,8 +306,6 @@
 		      [find-or-create-pen (the-pen-list find-or-create-pen)]
 		      [find-or-create-brush (the-brush-list find-or-create-brush)])
 
-	  (set-brush (find-or-create-brush "black" 'solid))
-	  
 	  (let loop ([dx dx][dy dy][l l])
 	    (unless (null? l)
 	      (let ([x (car l)])

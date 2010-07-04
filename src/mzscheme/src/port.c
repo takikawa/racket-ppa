@@ -1379,8 +1379,7 @@ long scheme_get_byte_string_unless(const char *who,
       unsigned char *s;
 
       i = ip->ungotten_count;
-      s = (unsigned char *)ip->ungotten;
-      /* s is in reverse order */
+      /* s will be in reverse order */
 
       if (peek) {
 	if (!SCHEME_INTP(peek_skip) || (i < SCHEME_INT_VAL(peek_skip))) {
@@ -1398,9 +1397,11 @@ long scheme_get_byte_string_unless(const char *who,
 	l = size;
 
       size -= l;
+      s = (unsigned char *)ip->ungotten; /* Not GC-safe! */
       while (l--) {
 	buffer[offset + got++] = s[--i];
       }
+      s = NULL;
 
       if (!peek)
 	ip->ungotten_count = i;
@@ -1789,8 +1790,9 @@ static void remove_extra(void *ip_v)
     }
   }
 
-  /* Tell the main commit thread to reset */
-  scheme_post_sema_all(ip->input_giveup);
+  /* Tell the main commit thread (if any) to reset */
+  if (ip->input_giveup)
+    scheme_post_sema_all(ip->input_giveup);
 }
 
 static int complete_peeked_read_via_get(Scheme_Input_Port *ip,
@@ -1861,12 +1863,13 @@ static Scheme_Object *return_data(void *data, int argc, Scheme_Object **argv)
 int scheme_peeked_read_via_get(Scheme_Input_Port *ip,
 			       long _size,
 			       Scheme_Object *unless_evt,
-			       Scheme_Object *target_evt)
+			       Scheme_Object *_target_evt)
 {
-  Scheme_Object *v, *sema, *a[3], **aa, *l;
+  Scheme_Object * volatile v, *sema, *a[3], ** volatile aa, * volatile l;
   volatile long size = _size;
-  int n, current_leader = 0;
+  volatile int n, current_leader = 0;
   Scheme_Type t;
+  Scheme_Object * volatile target_evt = _target_evt;
 
   /* Check whether t's even t value is known to be always itself: */
   t = SCHEME_TYPE(target_evt);
@@ -5535,21 +5538,40 @@ static long flush_fd(Scheme_Output_Port *op,
 	} else
 	  orig_len = 0; /* not used */
 
-	if (WriteFile((HANDLE)fop->fd, bufstr XFORM_OK_PLUS offset, buflen - offset, &winwrote, NULL)) {
-	  if (fop->textmode) {
-	    if (winwrote != buflen) {
-	      /* Trouble! This shouldn't happen. We pick an random error msg. */
-	      errsaved = ERROR_NEGATIVE_SEEK;
-	      len = -1;
-	    } else {
-	      len = orig_len;
-	      buflen = orig_len; /* so we don't loop! */
-	    }
-	  } else
-	    len = winwrote;
-	} else {
-	  errsaved = GetLastError();
-	  len = -1;
+	/* Write bytes. If we try to write too much at once, the result
+	   is ERROR_NOT_ENOUGH_MEMORY (as opposed to a partial write). */
+	{
+	  int ok;
+	  long towrite = buflen - offset;
+
+	  while (1) {
+	    ok = WriteFile((HANDLE)fop->fd, bufstr XFORM_OK_PLUS offset, towrite, &winwrote, NULL);
+	    if (!ok)
+	      errsaved = GetLastError();
+	    
+	    if (!ok && (errsaved == ERROR_NOT_ENOUGH_MEMORY)) {
+	      towrite = towrite >> 1;
+	      if (!towrite)
+		break;
+	    } else
+	      break;
+	  }
+
+	  if (ok) {
+	    if (fop->textmode) {
+	      if (winwrote != buflen) {
+		/* Trouble! This shouldn't happen. We pick an random error msg. */
+		errsaved = ERROR_NEGATIVE_SEEK;
+		len = -1;
+	      } else {
+		len = orig_len;
+		buflen = orig_len; /* so we don't loop! */
+	      }
+	    } else
+	      len = winwrote;
+	  } else {
+	    len = -1;
+	  }
 	}
       } else {
 	errsaved = 0;
@@ -5601,16 +5623,21 @@ static long flush_fd(Scheme_Output_Port *op,
 	         is not partial writes, but giving up entirely when
 	         the other end isn't being read. In other words, if we
 	         try to write too much and nothing is being pulled
-	         from the pipe, winwrote will be set to 0. Account for
-	         this by trying to write less each iteration when the
+	         from the pipe, winwrote will be set to 0. Also, if
+		 we try to write too much at once, the result is a
+		 ERROR_NOT_ENOUGH_MEMORY error. Account for these
+	         behaviors by trying to write less each iteration when the
 	         write fails. (Yuck.) */
 	      while (1) {
 		GetNamedPipeHandleState((HANDLE)fop->fd, &old, NULL, NULL, NULL, NULL, 0);
 		SetNamedPipeHandleState((HANDLE)fop->fd, &nonblock, NULL, NULL);
 		ok = WriteFile((HANDLE)fop->fd, bufstr XFORM_OK_PLUS offset, towrite, &winwrote, NULL);
+		if (!ok)
+		  errsaved = GetLastError();
 		SetNamedPipeHandleState((HANDLE)fop->fd, &old, NULL, NULL);
 
-		if (ok && !winwrote) {
+		if ((ok && !winwrote)
+		    || (!ok && (errsaved == ERROR_NOT_ENOUGH_MEMORY))) {
 		  towrite = towrite >> 1;
 		  if (!towrite) {
 		    break;
@@ -5630,8 +5657,6 @@ static long flush_fd(Scheme_Output_Port *op,
 	      } else {
 		len = winwrote;
 	      }
-	    } else {
-	      errsaved = GetLastError();
 	    }
 	  } else
 	    full_write_buffer = 0; /* and create the writer thread... */
@@ -7276,21 +7301,22 @@ static Scheme_Object *sch_shell_execute(int c, Scheme_Object *argv[])
     scheme_wrong_type("shell-execute", SCHEME_PATH_STRING_STR, 3, c, argv);
   {
     show = 0;
-# define mzseCMP(id) \
-    if (SAME_OBJ(scheme_intern_symbol(# id), argv[4])) \
+# define mzseCMP(id, str)			       \
+    if (SAME_OBJ(scheme_intern_symbol(str), argv[4])   \
+        || SAME_OBJ(scheme_intern_symbol(# id), argv[4])) \
       show = mzseSHOW(id)
-    mzseCMP(SW_HIDE);
-    mzseCMP(SW_MAXIMIZE);
-    mzseCMP(SW_MINIMIZE);
-    mzseCMP(SW_RESTORE);
-    mzseCMP(SW_SHOW);
-    mzseCMP(SW_SHOWDEFAULT);
-    mzseCMP(SW_SHOWMAXIMIZED);
-    mzseCMP(SW_SHOWMINIMIZED);
-    mzseCMP(SW_SHOWMINNOACTIVE);
-    mzseCMP(SW_SHOWNA);
-    mzseCMP(SW_SHOWNOACTIVATE);
-    mzseCMP(SW_SHOWNORMAL);
+    mzseCMP(SW_HIDE, "sw_hide");
+    mzseCMP(SW_MAXIMIZE, "sw_maximize");
+    mzseCMP(SW_MINIMIZE, "sw_minimize");
+    mzseCMP(SW_RESTORE, "sw_restore");
+    mzseCMP(SW_SHOW, "sw_show");
+    mzseCMP(SW_SHOWDEFAULT, "sw_showdefault");
+    mzseCMP(SW_SHOWMAXIMIZED, "sw_showmaximized");
+    mzseCMP(SW_SHOWMINIMIZED, "sw_showminimized");
+    mzseCMP(SW_SHOWMINNOACTIVE, "sw_showminnoactive");
+    mzseCMP(SW_SHOWNA, "sw_showna");
+    mzseCMP(SW_SHOWNOACTIVATE, "sw_shownoactivate");
+    mzseCMP(SW_SHOWNORMAL, "sw_shownormal");
 
     if (!show)
       scheme_wrong_type("shell-execute", "show-mode symbol", 4, c, argv);

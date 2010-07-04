@@ -4,6 +4,7 @@
            (lib "hierlist.ss" "hierlist")
            (lib "class.ss")
 	   (lib "contract.ss")
+           (lib "kw.ss")
            "drsig.ss"
            (lib "string-constant.ss" "string-constants")
 	   (lib "mred.ss" "mred")
@@ -11,7 +12,6 @@
            (lib "list.ss")
            (lib "etc.ss")
            (lib "file.ss")
-           (lib "pconvert.ss")
            (lib "getinfo.ss" "setup")
            (lib "toplevel.ss" "syntax"))
   
@@ -32,12 +32,8 @@
               [drscheme:help-desk : drscheme:help-desk^])
       
       ;; settings-preferences-symbol : symbol
-      ;; the preferences key for the language settings.
-      ;; depends on the version number, so people can use multiple versions
-      ;; of drscheme and maintain separate language settings for each
-      ;; of them.
-      (define settings-preferences-symbol 
-        (string->symbol (format "drscheme:~a-settings" (version:version))))
+      ;; this pref used to depend on `version', but no longer does.
+      (define settings-preferences-symbol 'drscheme:language-settings)
       
       ;; get-settings-preferences-symbol : -> symbol
       (define (get-settings-preferences-symbol) settings-preferences-symbol)
@@ -45,10 +41,9 @@
       ;; default-language-position : (listof string)
       ;; if a language is registered with this position, it is
       ;; considered the default language
-      (define default-language-position
-        (list (string-constant teaching-languages)
-              (string-constant how-to-design-programs)
-              (string-constant beginning-student)))
+      (define initial-language-position
+        (list (string-constant initial-language-category)
+              (string-constant no-language-chosen)))
 
       ;; languages : (listof (instanceof language<%>))
       ;; all of the languages supported in DrScheme
@@ -88,7 +83,7 @@
 	  (error 'get-default-language-settings "no languages registered!"))
 	(let ([lang (or (ormap (λ (x)
 				 (and (equal? (send x get-language-position)
-					      default-language-position)
+					      initial-language-position)
 				      x))
 			       (get-languages))
 			(first (get-languages)))])
@@ -116,9 +111,10 @@
 ;                      ;;;;                   ;;;;                                              ;;;;   
 
       
-      ;; language-dialog : (boolean language-setting -> language-setting)
+      ;; language-dialog : (boolean language-setting -> (union #f language-setting))
       ;;                   (boolean language-setting (union #f (instanceof top-level-window%))
-      ;;                    -> language-setting)
+      ;;                    -> 
+      ;;                    (union #f language-setting))
       ;; allows the user to configure their language. The input language-setting is used
       ;; as the defaults in the dialog and the output language setting is the user's choice
       ;; todo: when button is clicked, ensure language is selected
@@ -135,20 +131,20 @@
           
 	  (define dialog (instantiate ret-dialog% ()
                            (label (if show-welcome?
-                                    (string-constant welcome-to-drscheme)
-                                    (string-constant language-dialog-title)))
+                                      (string-constant welcome-to-drscheme)
+                                      (string-constant language-dialog-title)))
                            (parent parent)
                            (style '(resize-border))))
-          (define welcome-before-panel (instantiate horizontal-panel% ()
+          (define welcome-before-panel (instantiate horizontal-pane% ()
                                          (parent dialog)
                                          (stretchable-height #f)))
-          (define language-dialog-meat-panel (make-object vertical-panel% dialog))
+          (define language-dialog-meat-panel (make-object vertical-pane% dialog))
 
-          (define welcome-after-panel (instantiate vertical-panel% () 
+          (define welcome-after-panel (instantiate vertical-pane% () 
                                         (parent dialog)
                                         (stretchable-height #f)))
           
-          (define button-panel (instantiate horizontal-panel% ()
+          (define button-panel (instantiate horizontal-pane% ()
                                  (parent dialog)
                                  (stretchable-height #f)))
           
@@ -180,7 +176,7 @@
           (define show-details-label (string-constant show-details-button-label))
           (define hide-details-label (string-constant hide-details-button-label))
           
-          (define button-gap (make-object horizontal-panel% button-panel))
+          (define button-gap (make-object horizontal-pane% button-panel))
 	  (define-values (ok-button cancel-button)
             (gui-utils:ok/cancel-buttons
              button-panel
@@ -198,7 +194,7 @@
             (send dialog center 'both))
           (send dialog show #t)
           (if cancelled?
-              language-settings-to-show
+              #f
               (make-language-settings
                (get-selected-language)
                (get-selected-language-settings)))))
@@ -212,9 +208,16 @@
       (define fill-language-dialog
         (opt-lambda (parent show-details-parent language-settings-to-show [re-center #f] [manuals? #f])
 
-	  (define language-to-show (language-settings-language language-settings-to-show))
-	  (define settings-to-show (language-settings-settings language-settings-to-show))
-          
+          (define-values (language-to-show settings-to-show)
+            (let ([request-lang-to-show (language-settings-language language-settings-to-show)])
+              (cond
+                [(equal? initial-language-position (send request-lang-to-show get-language-position))
+                 (values (first (get-languages))
+                         (send (first (get-languages)) default-settings))
+                 (values #f #f)]
+                [else (values request-lang-to-show
+                              (language-settings-settings language-settings-to-show))])))
+
           ;; hier-list items that implement this interface correspond to
 	  ;; actual language selections
 	  (define hieritem-language<%>
@@ -320,9 +323,9 @@
                   (send i toggle-open/closed)))
               (super-instantiate (parent))))
 
-          (define outermost-panel (make-object horizontal-panel% parent))
+          (define outermost-panel (make-object horizontal-pane% parent))
           (define languages-hier-list (make-object selectable-hierlist% outermost-panel))
-          (define details-outer-panel (make-object vertical-panel% outermost-panel))
+          (define details-outer-panel (make-object vertical-pane% outermost-panel))
           (define details/manual-parent-panel (make-object vertical-panel% details-outer-panel))
 	  (define details-panel (make-object panel:single% details/manual-parent-panel))
           (define manual-ordering-panel (new vertical-panel% (parent details/manual-parent-panel)))
@@ -352,16 +355,23 @@
 	  ;; get/set-selected-language-settings (union #f (-> settings))
 	  (define get/set-selected-language-settings #f)
 
-	  ;; language-mixin : (implements language<%>) (implements area-container<%>) get/set ->
+	  (define details-computed? #f)
+          
+          ;; language-mixin : (implements language<%>) 
+          ;;                  (-> (implements area-container<%>))
+          ;;                  get/set 
+          ;;                  ->
           ;;                  ((implements hierlist<%>) -> (implements hierlist<%>))
 	  ;; a mixin that responds to language selections and updates the details-panel
-	  (define (language-mixin language language-details-panel get/set-settings)
+	  (define (language-mixin language get-language-details-panel get/set-settings)
             (λ (%)
               (class* % (hieritem-language<%>)
                 (init-rest args)
                 (public selected)
                 (define (selected)
-                  (send details-panel active-child language-details-panel)
+                  (let ([ldp (get-language-details-panel)])
+                    (when ldp
+                      (send details-panel active-child ldp)))
                   (send one-line-summary-message set-label (send language get-one-line-summary))
                   (send revert-to-defaults-button enable #t)
                   (update-manual-ordering-text language)
@@ -436,6 +446,9 @@
                       n-sp
                       (+ n-ep 1)))))
           
+          ;; construct-details : (union (-> void) #f)
+          (define construct-details void)
+          
           ;; add-language-to-dialog : (instanceof language<%>) -> void
 	  ;; adds the language to the dialog
 	  ;; opens all of the turn-down tags
@@ -444,19 +457,22 @@
           (define (add-language-to-dialog language)
             (let ([positions (send language get-language-position)]
                   [numbers (send language get-language-numbers)])
-              (unless (and (list? positions)
-                           (list? numbers)
-                           (pair? positions)
-                           (pair? numbers)
-                           (andmap number? numbers)
-                           (andmap string? positions)
-                           (= (length positions) (length numbers))
-                           ((length numbers) . >= . 2))
-                (error 'drscheme:language
-                       "languages position and numbers must be lists of strings and numbers, respectively, must have the same length,  and must each contain at least two elements, got: ~e ~e"
-                       positions numbers))
               
-              #|
+              ;; don't show the initial language ...
+              (unless (equal? positions initial-language-position)
+                (unless (and (list? positions)
+                             (list? numbers)
+                             (pair? positions)
+                             (pair? numbers)
+                             (andmap number? numbers)
+                             (andmap string? positions)
+                             (= (length positions) (length numbers))
+                             ((length numbers) . >= . 2))
+                  (error 'drscheme:language
+                         "languages position and numbers must be lists of strings and numbers, respectively, must have the same length,  and must each contain at least two elements, got: ~e ~e"
+                         positions numbers))
+                
+                #|
               
               inline the first level of the tree into just items in the hierlist
               keep track of the starting (see call to sort method below) by
@@ -464,22 +480,36 @@
               what the sorting number is for its level above (in the second-number mixin)
               
               |#
-              
-              (let add-sub-language ([ht languages-table]
-                                     [hier-list languages-hier-list]
-                                     [positions positions]
-                                     [numbers numbers]
-                                     [first? #t]
-                                     [second-number #f]) ;; only non-#f during the second iteration in which case it is the first iterations number
-                (cond
-                  [(null? (cdr positions))
-                   (let-values ([(language-details-panel get/set-settings)
-                                 (make-details-panel language)])
-                     (let* ([position (car positions)]
+                
+                (let add-sub-language ([ht languages-table]
+                                       [hier-list languages-hier-list]
+                                       [positions positions]
+                                       [numbers numbers]
+                                       [first? #t]
+                                       [second-number #f]) ;; only non-#f during the second iteration in which case it is the first iterations number
+                  (cond
+                    [(null? (cdr positions))
+                     (let* ([language-details-panel #f]
+                            [real-get/set-settings 
+                             (case-lambda
+                               [() 
+                                (cond
+                                  [(and language-to-show 
+                                        settings-to-show
+                                        (equal? (send language-to-show get-language-position)
+                                                (send language get-language-position)))
+                                   settings-to-show]
+                                  [else
+                                   (send language default-settings)])]
+                               [(x) (void)])]
+                            [get-language-details-panel
+                             (lambda () language-details-panel)]
+                            [get/set-settings (lambda x (apply real-get/set-settings x))]
+                            [position (car positions)]
                             [number (car numbers)]
                             [mixin (compose
                                     number-mixin
-                                    (language-mixin language language-details-panel get/set-settings))]
+                                    (language-mixin language get-language-details-panel get/set-settings))]
                             [item
                              (send hier-list new-item
                                    (if second-number
@@ -487,6 +517,34 @@
                                        mixin))]
                             [text (send item get-editor)]
                             [delta (send language get-style-delta)])
+                       
+                       (set! construct-details
+                             (let ([old construct-details])
+                               (lambda ()
+                                 (old)
+                                 (let-values ([(language-details-panel-real get/set-settings)
+                                               (make-details-panel language)])
+                                   (set! language-details-panel language-details-panel-real)
+                                   (set! real-get/set-settings get/set-settings))
+                                 
+                                 (let-values ([(vis-lang vis-settings)
+                                               (cond
+                                                 [(or (not selected-language)
+                                                      (eq? selected-language language-to-show))
+                                                  (values language-to-show settings-to-show)]
+                                                 [(and language-to-show settings-to-show)
+                                                  (values selected-language
+                                                          (send selected-language default-settings))]
+                                                 [else (values #f #f)])])
+                                   (cond
+                                     [(not vis-lang) (void)]
+                                     [(equal? (send vis-lang get-language-position)
+                                              (send language get-language-position))
+                                      (get/set-settings vis-settings)
+                                      (send details-panel active-child language-details-panel)]
+                                     [else
+                                      (get/set-settings (send language default-settings))])))))
+                       
                        (send item set-number number)
                        (when second-number
                          (send item set-second-number second-number))
@@ -504,68 +562,62 @@
                             (send text change-style 
                                   (send language get-style-delta)
                                   0
-                                  (send text last-position))])))
-                     (cond
-                       [(equal? (send language-to-show get-language-position)
-                                (send language get-language-position))
-                        (get/set-settings settings-to-show)]
-                       [else
-                        (get/set-settings (send language default-settings))]))]
-                  [else (let* ([position (car positions)]
-                               [number (car numbers)]
-                               [sub-ht/sub-hier-list
-                                (hash-table-get
-                                 ht
-                                 (string->symbol position)
-                                 (λ ()
-                                   (if first?
-                                       (let* ([item (send hier-list new-item number-mixin)]
-                                              [x (list (make-hash-table) hier-list item)])
-                                         (hash-table-put! ht (string->symbol position) x)
-                                         (send item set-number number)
-                                         (send item set-allow-selection #f)
-                                         (let* ([editor (send item get-editor)]
-                                                [pos (send editor last-position)])
-                                           (send editor insert "\n")
-                                           (send editor insert position)
-                                           (send editor change-style small-size-delta pos (+ pos 1))
-                                           (send editor change-style section-style-delta 
-                                                 (+ pos 1) (send editor last-position)))
-                                         x)
-                                       (let* ([new-list (send hier-list new-list 
-                                                              (if second-number
-                                                                  (compose second-number-mixin number-mixin)
-                                                                  number-mixin))]
-                                              [x (list (make-hash-table) new-list #f)])
-                                         (send new-list set-number number)
-                                         (when second-number
-                                           (send new-list set-second-number second-number))
-                                         (send new-list set-allow-selection #f)
-                                         (send new-list open)
-                                         (send (send new-list get-editor) insert position)
-                                         (hash-table-put! ht (string->symbol position) x)
-                                         x))))])
-                          (cond
-                            [first? 
-                             (unless (= number (send (caddr sub-ht/sub-hier-list) get-number))
-                               (error 'add-language "language ~s; expected number for ~e to be ~e, got ~e"
-                                      (send language get-language-name)
-                                      position
-                                      (send (caddr sub-ht/sub-hier-list) get-number)
-                                      number))]
-                            [else
-                             (unless (= number (send (cadr sub-ht/sub-hier-list) get-number))
-                               (error 'add-language "language ~s; expected number for ~e to be ~e, got ~e"
-                                      (send language get-language-name)
-                                      position
-                                      (send (cadr sub-ht/sub-hier-list) get-number)
-                                      number))])
-                          (add-sub-language (car sub-ht/sub-hier-list)
-                                            (cadr sub-ht/sub-hier-list)
-                                            (cdr positions)
-                                            (cdr numbers)
-                                            #f
-                                            (if first? number #f)))]))))
+                                  (send text last-position))])))]
+                    [else (let* ([position (car positions)]
+                                 [number (car numbers)]
+                                 [sub-ht/sub-hier-list
+                                  (hash-table-get
+                                   ht
+                                   (string->symbol position)
+                                   (λ ()
+                                     (if first?
+                                         (let* ([item (send hier-list new-item number-mixin)]
+                                                [x (list (make-hash-table) hier-list item)])
+                                           (hash-table-put! ht (string->symbol position) x)
+                                           (send item set-number number)
+                                           (send item set-allow-selection #f)
+                                           (let* ([editor (send item get-editor)]
+                                                  [pos (send editor last-position)])
+                                             (send editor insert "\n")
+                                             (send editor insert position)
+                                             (send editor change-style small-size-delta pos (+ pos 1))
+                                             (send editor change-style section-style-delta 
+                                                   (+ pos 1) (send editor last-position)))
+                                           x)
+                                         (let* ([new-list (send hier-list new-list 
+                                                                (if second-number
+                                                                    (compose second-number-mixin number-mixin)
+                                                                    number-mixin))]
+                                                [x (list (make-hash-table) new-list #f)])
+                                           (send new-list set-number number)
+                                           (when second-number
+                                             (send new-list set-second-number second-number))
+                                           (send new-list set-allow-selection #f)
+                                           (send new-list open)
+                                           (send (send new-list get-editor) insert position)
+                                           (hash-table-put! ht (string->symbol position) x)
+                                           x))))])
+                            (cond
+                              [first? 
+                               (unless (= number (send (caddr sub-ht/sub-hier-list) get-number))
+                                 (error 'add-language "language ~s; expected number for ~e to be ~e, got ~e"
+                                        (send language get-language-name)
+                                        position
+                                        (send (caddr sub-ht/sub-hier-list) get-number)
+                                        number))]
+                              [else
+                               (unless (= number (send (cadr sub-ht/sub-hier-list) get-number))
+                                 (error 'add-language "language ~s; expected number for ~e to be ~e, got ~e"
+                                        (send language get-language-name)
+                                        position
+                                        (send (cadr sub-ht/sub-hier-list) get-number)
+                                        number))])
+                            (add-sub-language (car sub-ht/sub-hier-list)
+                                              (cadr sub-ht/sub-hier-list)
+                                              (cdr positions)
+                                              (cdr numbers)
+                                              #f
+                                              (if first? number #f)))])))))
 
           (define number<%>
             (interface ()
@@ -625,24 +677,25 @@
 	  ;; opens the tabs that lead to the current language
 	  ;; and selects the current language
 	  (define (open-current-language)
-	    (let loop ([hi languages-hier-list]
-                       
-                       ;; skip the first position, since it is flattened into the dialog
-		       [first-pos (cadr (send language-to-show get-language-position))]
-		       [position (cddr (send language-to-show get-language-position))])
-		 (let ([child
-			;; know that this `car' is okay by construction of the dialog
-			(car 
-			 (filter (λ (x)
-				   (equal? (send (send x get-editor) get-text)
-					   first-pos))
-				 (send hi get-items)))])
-		   (cond
-		     [(null? position)
-		      (send child select #t)]
-		     [else
-		      (send child open)
-		      (loop child (car position) (cdr position))]))))
+            (when (and language-to-show settings-to-show)
+              (let loop ([hi languages-hier-list]
+                         
+                         ;; skip the first position, since it is flattened into the dialog
+                         [first-pos (cadr (send language-to-show get-language-position))]
+                         [position (cddr (send language-to-show get-language-position))])
+                (let ([child
+                       ;; know that this `car' is okay by construction of the dialog
+                       (car 
+                        (filter (λ (x)
+                                  (equal? (send (send x get-editor) get-text)
+                                          first-pos))
+                                (send hi get-items)))])
+                  (cond
+                    [(null? position)
+                     (send child select #t)]
+                    [else
+                     (send child open)
+                     (loop child (car position) (cdr position))])))))
 
           ;; docs-callback : -> void
           (define (docs-callback)
@@ -650,11 +703,14 @@
           
           ;; details-shown? : boolean
           ;; indicates if the details are currently visible in the dialog
-          (define details-shown? (not (send language-to-show default-settings? settings-to-show)))
+          (define details-shown? (and language-to-show
+                                      settings-to-show 
+                                      (not (send language-to-show default-settings? settings-to-show))))
 
           ;; details-callback : -> void
           ;; flips the details-shown? flag and resets the GUI
           (define (details-callback)
+            (do-construct-details)
             (set! details-shown? (not details-shown?))
             (when re-center
               (send re-center begin-container-sequence))
@@ -662,6 +718,15 @@
             (when re-center
               (send re-center center 'both)
               (send re-center end-container-sequence)))
+          
+          ;; do-construct-details : -> void
+          ;; construct the details panels, if they have not been constructed
+          (define (do-construct-details)
+            (when construct-details
+              (send details-button enable #f)
+              (construct-details)
+              (set! construct-details #f)
+              (send details-button enable #t)))
           
           ;; show/hide-details : -> void
           ;; udpates the GUI based on the details-shown? flag
@@ -774,6 +839,8 @@
 	  (send languages-hier-list min-client-height (text-height (send languages-hier-list get-editor)))
           (when get/set-selected-language-settings
             (get/set-selected-language-settings settings-to-show))
+          (when details-shown?
+            (do-construct-details))
           (send languages-hier-list focus)
           (values
            (λ () selected-language)
@@ -1257,8 +1324,8 @@
 			       (drscheme:language:put-executable
 				parent
 				program-filename
-				mred-launcher?
 				#t
+				mred-launcher?
 				(if mred-launcher?
 				    (string-constant save-a-mred-launcher)
 				    (string-constant save-a-mzscheme-launcher)))])
@@ -1322,10 +1389,406 @@
                         (string-constant expander-one-line-summary)
                         add-expand-to-front-end))
           (add-language
-           (make-simple '(lib "r5rs.ss" "lang")
+           (make-simple '(lib "lang.ss" "r5rs")
                         (list (string-constant professional-languages)
                               (string-constant r5rs-lang-name))
                         (list -1000 -1000)
                         #f
                         (string-constant r5rs-one-line-summary)
-                        r5rs-mixin)))))))
+                        r5rs-mixin))
+          
+          (add-language
+           (make-simple 'mzscheme
+                        (list (string-constant initial-language-category)
+                              (string-constant no-language-chosen))
+                        (list 10000 1000)
+                        #f
+                        "Helps the user choose an initial language"
+                        not-a-language-extra-mixin))))
+      
+      (define (not-a-language-extra-mixin %)
+        (class* % (not-a-language-language<%>)
+          (define/override (get-style-delta) drscheme:rep:error-delta)
+          
+          (define/override (first-opened) 
+            (not-a-language-message)
+            (fprintf (current-error-port) "\n"))
+          
+          (define/override (front-end/interaction input settings teachpack-cache)
+            (not-a-language-message)
+            (λ () eof))
+          (define/override (front-end/complete-program input settings teachpack-cache)
+            (not-a-language-message)
+            (λ () eof))
+          (super-new)))
+      
+      ;; used for identification only
+      (define not-a-language-language<%>
+        (interface ()))
+      
+      
+;                                                                                                    
+;                                                                                                    
+;                                              @@                                                    
+;                  @                            @                                                    
+;  @@:@@:   $@$   @@@@@          $@$:           @     $@$: @@:@@:   $@-@@@@  @@   $@$:   $@-@@ -@@$  
+;   @+ :@  $- -$   @               -@           @       -@  @+ :@  $* :@  @   @     -@  $* :@  $  -$ 
+;   @   @  @   @   @     @@@@@  -$@$@  @@@@@    @    -$@$@  @   @  @   @  @   @  -$@$@  @   @  @@@@@ 
+;   @   @  @   @   @            $*  @           @    $*  @  @   @  @   @  @   @  $*  @  @   @  $     
+;   @   @  $- -$   @: :$        @- *@           @    @- *@  @   @  $* :@  @: +@  @- *@  $* :@  +:    
+;  @@@ @@@  $@$    :@@$-        -$$-@@        @@@@@  -$$-@@@@@ @@@  $@:@  :@$-@@ -$$-@@  $@:@   $@@+ 
+;                                                                     -$                   -$        
+;                                                                  -@@$                 -@@$         
+;                                                                                                    
+;                                                                                                    
+
+      
+      (define (not-a-language-message)
+        (define (main)
+          (when (language-still-unchanged?)
+            (o (green-snip (string-constant must-choose-language)))
+            (o "\n")
+            (o (green-snip (string-constant get-guidance-before)))
+            (o (new link-snip%
+                    [words (string-constant get-guidance-during)]
+                    [callback (lambda (snip)
+                                (not-a-language-dialog (find-parent-from-snip snip)))]))
+            (o (green-snip (string-constant get-guidance-after)))))
+        
+        (define (green-snip str)
+          (let ([snp (make-object string-snip% str)])
+            (send snp set-style green-style)
+            snp))
+        
+        (define green-style
+          (let ([list (editor:get-standard-style-list)]
+                [green-style-delta (make-object style-delta% 'change-family 'default)])
+            (send green-style-delta set-delta-foreground "DarkViolet")
+            (send green-style-delta set-delta 'change-italic)
+            (send list
+                  find-or-create-style
+                  (send list find-named-style "Standard")
+                  green-style-delta)))
+        
+        (define (language-still-unchanged?)
+          (let ([rep (drscheme:rep:current-rep)])
+            (cond
+              [rep 
+               (let* ([next-settings (send (send rep get-definitions-text) get-next-settings)]
+                      [next-lang (language-settings-language next-settings)])
+                 (is-a? next-lang not-a-language-language<%>))]
+              
+              ;; if we cannot get the REP
+              ;; (because a tool is processing the progrm like check syntax)
+              ;; then just assume it has not changed.
+              [else #t])))
+        
+        (define o
+          (case-lambda
+            [(arg)
+             (cond
+               [(string? arg)
+                (fprintf (current-error-port) arg)]
+               [(is-a? arg snip%)
+                (write-special arg (current-error-port))])]
+            [args (apply fprintf (current-error-port) args)]))
+        
+        (define arrow-cursor (make-object cursor% 'arrow))
+        
+        (define link-snip%
+          (class editor-snip%
+            (init-field words callback)
+
+            (define/override (adjust-cursor dc x y editorx editory event) arrow-cursor)
+            
+            (define/override (on-event dc x y editorx editory event)
+              (when (send event button-up?)
+                (callback this)))
+            
+            (define/override (copy)
+              (new link-snip% [words words] [callback callback]))
+            
+            (define txt (new text:standard-style-list%))
+            
+            (super-new [editor txt] [with-border? #f]
+                       [left-margin 0]
+                       [right-margin 0]
+                       [top-margin 0]
+                       [bottom-margin 0])
+            (inherit get-flags set-flags set-style)
+            (set-flags (cons 'handles-events (get-flags)))
+            
+            (send txt insert words)
+            (send txt change-style link-sd 0 (send txt last-position))))
+        
+        (define link-sd (make-object style-delta% 'change-underline #t))
+        (define stupid-internal-define-syntax1
+          (begin (send link-sd set-delta-foreground "blue")
+                 (send link-sd set-family 'default)))
+
+        (main))
+      
+      (define (not-a-language-dialog drs-frame)
+        (define dialog (new dialog%
+                            (parent drs-frame)
+                            (label (string-constant drscheme))))
+        (define qa-panel (new vertical-pane% (parent dialog)))
+        (define button-panel (new horizontal-pane% 
+                                  (parent dialog) 
+                                  (stretchable-height #f)
+                                  (alignment '(right center))))
+        
+        (define cancel (new button%
+                           (parent button-panel)
+                           (callback (lambda (x y) (send dialog show #f)))
+                           (label (string-constant cancel))))
+        
+        (define language-chosen? #f)
+        
+        (define (main)
+          (insert-text-pls)
+          (display-plt-schemer)
+          (display-standard-schemer)
+          (space-em-out)
+          (fix-msg-sizes)
+          (send dialog show #t))
+        
+        (define (insert-red-message)
+          (new canvas-message% 
+               (parent qa-panel)
+               (font (get-font #:style 'italic))
+               (label (string-constant must-choose-language))
+               (color (send the-color-database find-color "red"))))
+        
+        (define (space-em-out)
+          (send qa-panel change-children
+                (lambda (l)
+                  (cond
+                    [(null? l) l]
+                    [else
+                     (let loop ([x (car l)]
+                                [r (cdr l)])
+                       (cond
+                         [(null? r) (list x)]
+                         [else (list* x
+                                      (new vertical-pane%
+                                           (parent qa-panel)
+                                           (min-height 5)
+                                           (stretchable-height #f))
+                                      (loop (car r)
+                                            (cdr r)))]))]))))
+                                     
+        (define (insert-text-pls)
+          (for-each
+           display-text-pl
+           (quicksort
+            (apply append (map get-text-pls (find-relevant-directories '(textbook-pls))))
+            (λ (x y)
+              (cond
+                [(string=? (cadr x) (string-constant how-to-design-programs))
+                 #t]
+                [(string=? (string-constant how-to-design-programs) (cadr y))
+                 #f]
+                [else
+                 (string<=? (cadr x) (cadr y))])))))
+        
+        (define (display-plt-schemer)
+          (question/answer (lambda (parent)
+                             (new canvas-message% 
+                                  (parent parent)
+                                  (label (string-constant seasoned-plt-schemer?))))
+                           (list (string-constant professional-languages)
+                                 "(module ...)")
+                           (list "PLT-206-small.png" 
+                                 "icons")))
+        
+        (define (display-standard-schemer)
+          (question/answer (lambda (parent)
+                             (new canvas-message% 
+                                  (parent parent)
+                                  (label (string-constant looking-for-standard-scheme?))))
+                           (list (string-constant professional-languages)
+                                 (string-constant plt)
+                                 (string-constant pretty-big-scheme))
+                           (list "r5rs.png" "icons")))
+        
+        (define (display-text-pl lst)
+          (let ([icon-lst (car lst)]
+                [text-name (cadr lst)]
+                [lang (cddr lst)]
+                [using-before (string-constant using-a-textbook-before)]
+                [using-after (string-constant using-a-textbook-after)])
+            (question/answer (lambda (parent)
+                               (new canvas-message%
+                                    (parent parent)
+                                    (label using-before))
+                               (new canvas-message%
+                                    (parent parent)
+                                    (font (get-font #:style 'italic))
+                                    (label text-name))
+                               (new canvas-message%
+                                    (parent parent)
+                                    (label using-after)))
+                             lang
+                             icon-lst)))
+        
+        (define default-font (send the-font-list find-or-create-font
+                                   12
+                                   'default
+                                   'normal
+                                   'normal))
+        
+        (define/kw (get-font #:key
+                             (point-size (send default-font get-point-size))
+                             (family (send default-font get-family))
+                             (style (send default-font get-style))
+                             (weight (send default-font get-weight))
+                             (underlined (send default-font get-underlined))
+                             (smoothing (send default-font get-smoothing)))
+          (send the-font-list find-or-create-font
+                point-size
+                family
+                style
+                weight
+                underlined
+                smoothing))
+        
+        (define canvas-message%
+          (class canvas%
+            (init-field label
+                        [font (get-font)]
+                        [callback void]
+                        [color (send the-color-database find-color "black")])
+            
+            (define/override (on-event evt)
+              (cond
+                [(send evt button-up?)
+                 (callback)]
+                [else 
+                 (super on-event evt)]))
+            
+            (define/override (on-paint)
+              (let* ([dc (get-dc)]
+                     [old-font (send dc get-font)]
+                     [old-tf (send dc get-text-foreground)])
+                (send dc set-text-foreground color)
+                (send dc set-font font)
+                (send dc draw-text label 0 0 #t)
+                (send dc set-font old-font)
+                (send dc set-text-foreground old-tf)))
+            
+            (super-new [stretchable-width #f]
+                       [stretchable-height #f]
+                       [style '(transparent)])
+            
+            (inherit min-width min-height get-dc)
+            (let-values ([(w h _1 _2) (send (get-dc) get-text-extent label font #t)])
+              (min-width (inexact->exact (floor w)))
+              (min-height (inexact->exact (floor h))))))
+        
+        (define (question/answer line1 lang icon-lst)
+          (display-two-line-choice 
+           icon-lst
+           lang
+           (λ (panel1 panel2)
+             (line1 panel1)
+             (new canvas-message% (parent panel2) (label (string-constant start-with-before)))
+             (new canvas-message%
+                  (parent panel2) 
+                  (label (car (last-pair lang)))
+                  (color (send the-color-database find-color "blue"))
+                  (callback (λ () (change-current-lang-to lang)))
+                  (font (get-font #:underlined #t))))))
+        
+        ;; get-text-pls : path -> (listof (list* string string (listof string))
+        ;; gets the questions from an info.ss file.
+        (define (get-text-pls info-filename)
+          (let ([proc (get-info/full info-filename)])
+            (if proc
+                (let ([qs (proc 'textbook-pls)])
+                  (unless (list? qs)
+                    (error 'splash-questions "expected a list, got ~e" qs))
+                  (for-each 
+                   (lambda (pr)
+                     (unless (and (pair? pr)
+                                  (pair? (cdr pr))
+                                  (pair? (cddr pr))
+                                  (list? (cdddr pr))
+                                  (let ([icon-lst (car pr)])
+                                    (and (list? icon-lst)
+                                         (not (null? icon-lst))
+                                         (andmap string? icon-lst)))
+                                  (andmap string? (cdr pr)))
+                       (error 
+                        'splash-questions
+                        "expected a list of lists, with each inner list being at least three elements long and the first element of the inner list being a list of strings and the rest of the elements being strings, got ~e"
+                        pr)))
+                   qs)
+                  qs)
+                '())))
+        
+        (define msgs '())
+        (define (fix-msg-sizes)
+          (let ([w (apply max (map (λ (x) (send x get-width)) msgs))])
+            (for-each (λ (b) (send b min-width w))
+                      msgs)))
+        
+        (define (display-two-line-choice icon-lst lang proc)
+          (let* ([hp (new horizontal-pane% 
+                          (parent qa-panel)
+                          (alignment '(center top))
+                          (stretchable-height #f))]
+                 [msg (new message%
+                           (label (make-object bitmap%
+                                    (build-path (apply collection-path (cdr icon-lst))
+                                                (car icon-lst))
+                                    'unknown/mask))
+                           (parent hp))]
+                 [vp (new vertical-pane% 
+                          (parent hp)
+                          (alignment '(left top))
+                          (stretchable-height #f))])
+            (set! msgs (cons msg msgs))
+            (proc (new horizontal-pane% (parent vp))
+                  (new horizontal-pane% (parent vp)))))
+              
+        ;; change-current-lang-to : (listof string) -> void
+        ;; closed the guidance dialog and opens the language dialog
+        (define (change-current-lang-to lang-strings)
+          (send dialog show #f)
+          (let ([lang (ormap
+                       (λ (x)
+                         (and (equal? lang-strings (send x get-language-position))
+                              x))
+                       (get-languages))])
+            (unless lang
+              (error 'change-current-lang-to "unknown language! ~s" lang-strings))
+            
+            (let ([new-lang
+                   (language-dialog #f
+                                    (make-language-settings lang
+                                                            (send lang default-settings))
+                                    drs-frame)])
+              (when new-lang
+                (set! language-chosen? #t)
+                (preferences:set settings-preferences-symbol new-lang)
+                (send (send drs-frame get-definitions-text) set-next-settings new-lang)))))
+        
+        (main))
+      
+      ;; find-parent-from-editor : editor -> (union frame #f)
+      (define (find-parent-from-editor ed)
+        (cond
+          [(send ed get-canvas)
+           =>
+           (λ (c) (send c get-top-level-window))]
+          [else
+           (let ([admin (send ed get-admin)])
+             (and (is-a? admin editor-snip-editor-admin<%>)
+                  (find-parent-from-snip (send admin get-snip))))]))
+      
+      ;; find-parent-from-snip : snip -> (union frame #f)
+      (define (find-parent-from-snip snip)
+        (let* ([admin (send snip get-admin)]
+               [ed (send admin get-editor)])
+          (find-parent-from-editor ed))))))

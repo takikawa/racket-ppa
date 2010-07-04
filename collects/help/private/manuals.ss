@@ -25,8 +25,6 @@
                     [find-doc-directories (-> (listof path?))]
                     [find-doc-directory (path? . -> . (union false/c path?))]
                     [find-doc-names (-> (listof (cons/c path? string?)))]
-                    
-                    [goto-manual-link (any/c string? string? . -> . any)]
                     [get-index-file (path? . -> . (union false/c path?))])
   
   (provide find-manuals)
@@ -41,7 +39,9 @@
   ;;   predicate : determines if a manual is in the section (based on its title)
   ;;   breaks -- where to insert newlines
   (define sections
-    (list (make-sec "Getting started" #rx"(Tour)|(Teach Yourself)" '())
+    (list (make-sec "Getting started" 
+                    #rx"(Tour)|(Teach Yourself)"
+                    '())
           (make-sec "Languages"
                     #rx"Language|MrEd"
                     '(#rx"Beginning Student" #rx"ProfessorJ Beginner"))
@@ -50,9 +50,6 @@
           (make-sec "Writing extensions" #rx"Tools|Inside|Foreign" '())
           (make-sec "Other" #rx"" '())))
   
-  (define (goto-manual-link cookie manual index-key)
-    (error 'goto-manual-link "broken ~s ~s ~s\n" cookie manual index-key))
-    
   ;; Creates a "file:" link into the indicated manual.
   ;; The link doesn't go to a particular anchor,
   ;; because "file:" does not support that.
@@ -129,7 +126,7 @@
   
   ; manual is doc collection subdirectory, e.g. "mred"
   (define (main-manual-page manual)
-    (let* ([entry (assoc manual known-docs)]
+    (let* ([entry (assoc (string->path manual) known-docs)]
 	   [name (or (and entry (cdr entry))
                      manual)]
 	   [href (string-append "/doc/" manual "/")])
@@ -226,21 +223,12 @@
   (define re:title (regexp "<[tT][iI][tT][lL][eE]>(.*)</[tT][iI][tT][lL][eE]>"))
 
   (define (find-manuals)
-    (let* ([sys-type (system-type)]
-           [docs (let loop ([l (find-doc-directories)])
+    (let* ([docs (let loop ([l (find-doc-directories)])
                    (cond
                      [(null? l) null]
                      [(get-index-file (car l))
                       (cons (car l) (loop (cdr l)))]
                      [else (loop (cdr l))]))]
-           [compare-docs (lambda (a b)
-                           (let-values ([(_1 a-short _2) (split-path a)]
-                                        [(_3 b-short _4) (split-path b)])
-                             (let ([ap (standard-html-doc-position a-short)]
-                                   [bp (standard-html-doc-position b-short)])
-                               (cond
-                                 [(= ap bp) (string<? (path->string a) (path->string b))]
-                                 [else (< ap bp)]))))]
            [docs (quicksort docs compare-docs)]
            [names (map get-doc-name docs)]
            [names+paths (map cons names docs)])
@@ -384,11 +372,7 @@
                           manual-name)]
            [index-file (get-index-file doc-path)])
       (format "<LI> <A HREF=\"~a\">~a</A>~a"
-              #;manual-name
-              #;(path->string index-file)
-              (get-help-url (build-path doc-path index-file))  
-                
-                
+              (get-help-url (build-path doc-path index-file))
               name
               (if (and (repos-or-nightly-build?)
                        (file-exists? (build-path doc-path index-file)))
@@ -490,7 +474,18 @@
                   (let-values ([(base name dir?) (split-path doc)])
                     (hash-table-remove! ht name)))
                 docs)
-      (hash-table-map ht cons)))
+      (quicksort
+       (hash-table-map ht cons)
+       (λ (a b) (compare-docs (car a) (car b))))))
+  
+  (define (compare-docs a b)
+    (let-values ([(_1 a-short _2) (split-path a)]
+                 [(_3 b-short _4) (split-path b)])
+      (let ([ap (standard-html-doc-position a-short)]
+            [bp (standard-html-doc-position b-short)])
+        (cond
+          [(= ap bp) (string<? (path->string a) (path->string b))]
+          [else (< ap bp)]))))
   
   ;; get-index-file : path -> (union #f path)
   ;; returns the name of the main file, if one can be found

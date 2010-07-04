@@ -65,7 +65,9 @@
                                          the-path)))
                            (lambda ()
                              (make-servlet the-servlet
+                                           (make-custodian)
                                            (i:make-servlet-namespace)
+                                           30
                                            (lambda (request)
                                              `(html (head "Return to the interaction window.")
                                                     (body (p "Return to the interaction window.")))))))

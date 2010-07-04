@@ -143,6 +143,8 @@ Scheme_Config *scheme_init_error_escape_proc(Scheme_Config *config)
   %E = error number for platform-specific error string
   %Z = potential platform-specific error number; additional char*
        is either NULL or a specific error message
+  %N = boolean then error number like %E (if boolean is 0)
+       or error number for scheme_hostname_error()
 */
 
 static long sch_vsprintf(char *s, long maxlen, const char *msg, va_list args)
@@ -185,6 +187,10 @@ static long sch_vsprintf(char *s, long maxlen, const char *msg, va_list args)
 	break;
       case 'e':
       case 'E':
+	ints[ip++] = mzVA_ARG(args, int);
+	break;
+      case 'N':
+	ints[ip++] = mzVA_ARG(args, int);
 	ints[ip++] = mzVA_ARG(args, int);
 	break;
       case 'Z':
@@ -295,15 +301,26 @@ static long sch_vsprintf(char *s, long maxlen, const char *msg, va_list args)
 	case 'e':
 	case 'E':
 	case 'Z':
+	case 'N':
 	  {
-	    int en;
+	    int en, he;
 	    char *es;
+
+	    if (type == 'N') {
+	      he = ints[ip++];
+	      type = 'E';
+	    } else
+	      he = 0;
+
 	    en = ints[ip++];
 
 	    if (type == 'Z')
 	      es = ptrs[pp++];
 	    else
 	      es = NULL;
+
+	    if (he)
+	      es = (char *)scheme_hostname_error(en);
 
 	    if (en || es) {
 #ifdef NO_STRERROR_AVAILABLE
@@ -1277,6 +1294,7 @@ const char *scheme_compile_stx_string = "compile";
 const char *scheme_expand_stx_string = "expand";
 const char *scheme_application_stx_string = "application";
 const char *scheme_set_stx_string = "set!";
+const char *scheme_var_ref_string = "#%variable-reference";
 const char *scheme_begin_stx_string = "begin";
 
 void scheme_wrong_syntax(const char *where,
@@ -1320,6 +1338,7 @@ void scheme_wrong_syntax(const char *where,
     nomwho = who;
     mod = scheme_intern_symbol("mzscheme");
   } else if ((where == scheme_set_stx_string)
+	     || (where == scheme_var_ref_string)
 	     || (where == scheme_begin_stx_string)) {
     who = scheme_intern_symbol(where);
     nomwho = who;

@@ -1,8 +1,9 @@
 
 _texpict_ is a MzScheme/MrEd library for creating pictures using a
 MrEd dc<%> (including post-script-dc% for _PostScript_ output) or
-_LaTeX_ as the back-end. The library was originally designed for LaTeX
-output, hence the name.
+_LaTeX_ as the back-end. The two back-ends are incompatible; picts
+must be created for one or the other. The library was originally
+designed for LaTeX output, hence the name.
 
 Pictures are created as `pict' structures. Some procedures in the
 texpict library create new simple picts (e.g., `hline'). Others build
@@ -108,6 +109,9 @@ The LaTeX texpict function set is loaded by the _texpict.ss_ library.
 The library is available in unit form via _texpictr.ss_, which
 produces a unit with no imports. The _texpicts.ss_ library file
 defines the unit's signature.
+
+Pictures created with this library are incompatible with Slideshow
+and MrEd-based output.
 
 To create a LaTeX picture, assemble a pict and then
 call `pict->string'. This string can be `display'ed to obtain the
@@ -226,7 +230,8 @@ Basic Constructors:
 >  (vline w h) -> pict
 >  (dash-vline w h seg-length) -> pict ; default seg-length is 5
 
-   To draw other kinds of lines, use `picture' or `cons-picture'
+   To draw other kinds of lines, use `dc' [MrEd only] or `picture' or
+   `cons-picture' [LaTeX].
 
 >  (frame pict) -> pict
 >  (dash-frame pict seg-length) -> pict ; default seg-length is 5
@@ -247,11 +252,11 @@ Basic Constructors:
    optional line width
       [MrEd only, in utils.ss]
 
->  (round-frame pict) -> pict
->  (color-round-frame pict color-string) -> pict
->  (color-round-frame pict color-string line-w) -> pict
+>  (round-frame pict radius-w) -> pict
+>  (color-round-frame pict radius-w color-string) -> pict
+>  (color-round-frame pict radius-w color-string line-w) -> pict
 
-   Rounded frames
+   Rounded frames, given a radius for the corners
       [MrEd only, in utils.ss]
 
 >  (circle diameter) -> pict
@@ -453,7 +458,7 @@ Drawing Adjusters:
 
    Apply a color to a picture. If the given picture has a colorized
    sub-picture, the color of the sub-picture is not affected.
-   Be sure to use the LaTeX package `colordvi'.
+   [LaTeX: use the LaTeX package "colordvi"]
 
 >  (colorize pict color%) -> pict
 
@@ -570,12 +575,12 @@ Other constructors:
 >  pin-arrow-line          ; arrow-size pict 
                            ; src-pict (pict pict -> x y)
                            ; dest-pict (pict pict -> x y)
-                           ; [line-w [color-string [lines-under?]]]
+                           ; [line-w [color-string [lines-under? [solid-head?]]]]
                            ; -> pict
 >  pin-arrows-line         ; arrow-size pict 
                            ; src-pict (pict pict -> x y)
                            ; dest-pict (pict pict -> x y)
-                           ; [line-w [color-string [lines-under?]]] 
+                           ; [line-w [color-string [lines-under? [solid-head?]]]] 
                            ; -> pict
 
    Adds a line or line-with-arrows onto a pict, using
@@ -1089,11 +1094,20 @@ The _code^_ unit supplies the following
   combined using `htl-append', so use `code-align' (see below) as
   necessary to add an ascent to ascentless picts.
 
-  An identifier that starts with an underscore is italicized in
-  the pict. Underscores and carets in the middle of a word
-  create superscripts and subscripts (like TeX). For example
-  `foo_^4_ok' is displayed as the identifier "foo" with a "4"
-  superscript and an "ok" subscript.
+  The resulting pict is actually an instance of code-pict, which is a
+  sub-type of `pict'. When an embedded pict in `stx' is a code-pict,
+  then elements (such as closing parens) are added after the code-pict
+  based on the code-pict's bottom line, instead of the code-pict's
+  bounding box. See also `code-pict-bottom-line-pict' and
+  `pict->code-pict'.
+
+  An identifier that starts with an underscore is italicized in the
+  pict and the underscore is dropped, unless the
+  `code-italic-underscore-enabled' parameter is set to false. Also,
+  unless `code-scripts-enabled' is set to false, underscores and
+  carets in the middle of a word create superscripts and subscripts
+  (like TeX); for example `foo^4_ok' is displayed as the identifier
+  "foo" with a "4" superscript and an "ok" subscript.
 
   Further, uses of certain keywords in `stx' typeset specially:
 
@@ -1155,6 +1169,23 @@ The following four are for backward compatibility:
 > code-colorize-quote-enabled - a parameter to control whether everything
   under a quote is colorized as a literal (like DrScheme's Check Syntax,
   and unlike DrScheme's interactive text coloring); the default is #t
+
+> code-italic-underscore-enabled - a boolean parameter to control
+  whether underscore-prefixed identifiers are italicized (dropping
+  the underscore); the default is #t
+
+> code-scripts-enabled - a boolean parameter to control whether
+  TeX-style subscripts and subscripts are recognized in an identifier
+
+> (code-pict-bottom-line-pict pict) - returns a pict inside of the
+  given code-pict that represents the end of the code-pict's bottom
+  line; if `pict' is a pict but not a code-pict, the result is #f
+
+> (pict->code-pict pict bl-pict-or-false) - returns a code-pict if
+  `bl-pict-of-false' is not false; the code-pict is like the given
+  `pict', except that it reports `bl-pict-or-false' as its bottom-line
+  pict (for adding closing parens after, etc.)
+
 
 In addition to the `code@' unit, the "code.ss" module exports a
 `define-code' macro for defining other macros:

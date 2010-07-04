@@ -154,8 +154,8 @@
       (TypeDeclaration
        [(ClassDeclaration) $1]
        [(InterfaceDeclaration) $1]
-       [(INTERACTIONS_BOX) $1]
-       [(CLASS_BOX) (parse-class-box $1 (build-src 1) 'full)]
+       #;[(INTERACTIONS_BOX) $1]
+       #;[(CLASS_BOX) (parse-class-box $1 (build-src 1) 'full)]
        [(TEST_SUITE) $1]
        [(EXAMPLE) $1]
        [(SEMI_COLON) #f])
@@ -639,8 +639,8 @@
        [(continue SEMI_COLON) (make-continue #f (build-src 2))])
        
       (ReturnStatement
-       [(return Expression SEMI_COLON) (make-return $2 #f (build-src 3))]
-       [(return SEMI_COLON) (make-return #f #f (build-src 2))])
+       [(return Expression SEMI_COLON) (make-return $2 #f #f (build-src 3))]
+       [(return SEMI_COLON) (make-return #f #f #f (build-src 2))])
       
       (ThrowStatement
        [(throw Expression SEMI_COLON) (make-throw $2 (build-src 1) (build-src 3))])
@@ -753,7 +753,7 @@
        [(new PrimitiveType Dims ArrayInitializer) (make-array-alloc-init #f (build-src 4) $2 $3 $4)]
        ;; 1.1
        [(new ClassOrInterfaceType Dims ArrayInitializer) 
-        (make-array-alloc-init #f (build-src 4) (make-type-spec $2 (build-src 2 2)) $3 $4)])
+        (make-array-alloc-init #f (build-src 4) (make-type-spec $2  $3 (build-src 2 2)) $3 $4)])
       
       (DimExprs
        [(DimExpr) (list $1)]

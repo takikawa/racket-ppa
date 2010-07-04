@@ -1,5 +1,4 @@
 (module info (lib "infotab.ss" "setup")
-  ;; added a comment, in windows ...
   (define name "DrScheme")
   (define tools (list "syncheck.ss"))
   (define tool-names (list "Check Syntax"))

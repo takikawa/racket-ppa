@@ -1656,7 +1656,7 @@
               (concat "~s: no applicable next method to call"
                       (case (%method-qualifier method)
                         [(:before) " in a `before' method"]
-                        [(:before) " in an `after' method"]
+                        [(:after)  " in an `after' method"]
                         [else ""]))
               (%generic-name generic)))))
 (add-method no-next-method
@@ -1915,9 +1915,16 @@
 ;;>> <null>
 ;;>> <vector>
 ;;>> <char>
+;;>> <string-like>
+;;>> <immutable-string-like>
 ;;>> <string>
 ;;>> <immutable-string>
+;;>> <bytes>
+;;>> <immutable-bytes>
+;;>> <path>
 ;;>> <symbol>
+;;>> <keyword>
+;;>> <real-keyword>
 ;;>> <boolean>
 ;;>> <number>
 ;;>> <exact>
@@ -1945,6 +1952,7 @@
 ;;>> <box>
 ;;>> <weak-box>
 ;;>> <regexp>
+;;>> <byte-regexp>
 ;;>> <parameter>
 ;;>> <promise>
 ;;>> <exn>
@@ -1991,9 +1999,16 @@
 (defprimclass <null> <list>)
 (defprimclass <vector> <sequence>)
 (defprimclass <char>)
-(defprimclass <string> <sequence>)
-(defprimclass <immutable-string> <string> <immutable>)
+(defprimclass <string-like> <sequence>)
+(defprimclass <immutable-string-like> <string-like> <immutable>)
+(defprimclass <string> <string-like>)
+(defprimclass <immutable-string> <immutable-string-like>)
+(defprimclass <bytes> <string-like>)
+(defprimclass <immutable-bytes> <immutable-string-like>)
+(defprimclass <path> <string-like>)
 (defprimclass <symbol>)
+(defprimclass <keyword> <symbol>)
+(defprimclass <real-keyword>)
 (defprimclass <boolean>)
 ;; Have all possible number combinations in any case
 (defprimclass <number>)
@@ -2023,6 +2038,7 @@
 (defprimclass <box>)
 (defprimclass <weak-box> <box>)
 (defprimclass <regexp>)
+(defprimclass <byte-regexp>)
 (defprimclass <parameter>)
 (defprimclass <promise>)
 (defprimclass <exn>)
@@ -2066,21 +2082,19 @@
       (lambda (x)
         ;; If all Schemes were IEEE compliant, the order of these wouldn't
         ;; matter?
-        ;; ELI: changed the order so it fits best the expected results.
+        ;; ELI: changed the order so it fits better the expected results.
         (cond [(instance?    x) (instance-class x)]
               [(procedure?   x) (cond [(parameter? x) <parameter>]
                                       [(primitive? x) <primitive-procedure>]
                                       [else <procedure>])]
-              [(string?      x) (if (immutable? x)
-                                  <immutable-string> <string>)]
+              [(string?      x) (if (immutable? x) <immutable-string> <string>)]
               [(pair?        x) (if (list? x)
                                   (if (immutable? x)
                                     <immutable-nonempty-list> <nonempty-list>)
                                   (if (immutable? x)
                                     <immutable-pair> <pair>))]
               [(null?        x) <null>]
-              [(char?        x) <char>]
-              [(symbol?      x) <symbol>]
+              [(symbol?      x) (if (keyword? x) <keyword> <symbol>)]
               [(number?      x) (if (exact? x)
                                   (cond [(integer?  x) <exact-integer>]
                                         [(rational? x) <exact-rational>]
@@ -2093,6 +2107,9 @@
                                         [(complex?  x) <inexact-complex>]
                                         [else <inexact>]))] ; should not happen
               [(boolean?     x) <boolean>]
+              [(char?        x) <char>]
+              [(bytes?       x) (if (immutable? x) <immutable-bytes> <bytes>)]
+              [(path?        x) <path>]
               [(vector?      x) <vector>]
               [(eof-object?  x) <end-of-file>]
               [(input-port?  x) (if (file-stream-port? x)
@@ -2107,9 +2124,11 @@
               [(box?            x) <box>]
               [(weak-box?       x) <weak-box>]
               [(regexp?         x) <regexp>]
+              [(byte-regexp?    x) <byte-regexp>]
               [(promise?        x) <promise>]
               [(exn?            x) (if (exn:break? x)
                                      <break-exn> <non-break-exn>)]
+              [(real-keyword?   x) <real-keyword>]
               [(semaphore?      x) <semaphore>]
               [(hash-table?     x) <hash-table>]
               [(thread?         x) <thread>]
@@ -2172,14 +2191,20 @@
 ;;>               <immutable-nonempty-list> : <primitive-class>
 ;;>             <null> : <primitive-class>
 ;;>         <vector> : <primitive-class>
-;;>         <string> : <primitive-class>
-;;>           <immutable-string> : <primitive-class>
+;;>         <string-like> : <primitive-class>
+;;>           <string> : <primitive-class>
+;;>           <bytes> : <primitive-class>
+;;>         <path> : <primitive-class>
 ;;>       <immutable> : <primitive-class>
 ;;>         <immutable-nonempty-list> : <primitive-class>
 ;;>         <immutable-pair> : <primitive-class>
-;;>         <immutable-string> : <primitive-class>
+;;>         <immutable-string-like> : <primitive-class>
+;;>           <immutable-string> : <primitive-class>
+;;>           <immutable-bytes> : <primitive-class>
 ;;>       <char> : <primitive-class>
 ;;>       <symbol> : <primitive-class>
+;;>         <keyword> : <primitive-class>
+;;>       <real-keyword> : <primitive-class>
 ;;>       <boolean> : <primitive-class>
 ;;>       <number> : <primitive-class>
 ;;>         <complex> : <primitive-class>
@@ -2217,6 +2242,7 @@
 ;;>       <box> : <primitive-class>
 ;;>         <weak-box> : <primitive-class>
 ;;>       <regexp> : <primitive-class>
+;;>       <byte-regexp> : <primitive-class>
 ;;>       <parameter> : <primitive-class>
 ;;>       <promise> : <primitive-class>
 ;;>       <exn> : <primitive-class>

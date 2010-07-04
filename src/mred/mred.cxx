@@ -235,6 +235,7 @@ static int exit_val = 0;
 MrEdContext *mred_contexts;
 static MrEdContext *mred_main_context;
 static MrEdContext *mred_only_context;
+static int only_context_just_once = 0;
 static MrEdContext *user_main_context;
 static MrEdContextFramesRef mred_frames; /* list of all frames (weak link to invisible ones) */
 static wxTimer *mred_timers;
@@ -417,9 +418,15 @@ MrEdContext *MrEdGetContext(wxObject *w)
 #endif
   }
 
-  if (mred_only_context)
-    return mred_only_context;
-  else
+  if (mred_only_context) {
+    if (only_context_just_once) {
+      MrEdContext *c = mred_only_context;
+      mred_only_context = NULL;
+      only_context_just_once = 0;
+      return c;
+    } else
+      return mred_only_context;
+  } else
     return (MrEdContext *)scheme_get_param(scheme_current_config(), mred_eventspace_param);
 }
 
@@ -1009,7 +1016,7 @@ static int check_eventspace_inactive(void *_c)
 
 void mred_wait_eventspace(void)
 {
-  MrEdContext * volatile c;
+  MrEdContext *c;
   c = MrEdGetContext();
   if (c && (c->handler_running == scheme_current_thread)) {
     wxDispatchEventsUntilWaitable(check_eventspace_inactive, c, NULL);
@@ -1018,6 +1025,9 @@ void mred_wait_eventspace(void)
 
 int mred_current_thread_is_handler(void *ctx)
 {
+  if (!ctx)
+    ctx = MrEdGetContext();
+
   return (((MrEdContext *)ctx)->handler_running == scheme_current_thread);
 }
 
@@ -2179,6 +2189,7 @@ void MrEdQueueInEventspace(void *context, Scheme_Object *thunk)
 
 #if REDIRECT_STDIO || WINDOW_STDIO || WCONSOLE_STDIO
 static void MrEdSchemeMessages(char *, ...);
+static Scheme_Object *stdin_pipe;
 #endif
 
 #if WINDOW_STDIO
@@ -2188,6 +2199,8 @@ static int stdio_kills_prog = 0;
 static Bool RecordInput(void *media, wxEvent *event, void *data);
 static Bool SendBreak(void *media, wxEvent *event, void *data);
 static void break_console_reading_threads();
+static char utf8_leftover[8];
+static int utf8_leftover_count;
 
 class IOMediaEdit : public wxMediaEdit
 {
@@ -2376,8 +2389,6 @@ Bool IOMediaEdit::CanDelete(long start, long)
     return (start >= ioFrame->endpos);
 }
 
-static Scheme_Object *stdin_pipe;
-
 static Bool RecordInput(void *m, wxEvent *event, void *data)
 {
   char *s;
@@ -2439,6 +2450,7 @@ static void MrEdSchemeMessages(char *msg, ...)
       else {
 	/* Set eventspace ... */
 	mred_only_context = mred_main_context;
+	only_context_just_once = 1;
 	ioFrame = new IOFrame;
 	mred_only_context = NULL;
       }
@@ -2472,7 +2484,8 @@ static void MrEdSchemeMessages(char *msg, ...)
     vfprintf(stderr, msg, args);
   } else if (!msg) {
     char *s;
-    long d, l;
+    wxchar *us;
+    long d, l, ulen, ipos;
 
     s = HIDE_FROM_XFORM(va_arg(args, char*));
     d = HIDE_FROM_XFORM(va_arg(args, long));
@@ -2482,11 +2495,31 @@ static void MrEdSchemeMessages(char *msg, ...)
       ioFrame->media->BeginEditSequence();
       ioFrame->beginEditSeq = 1;
     }
-    s = COPYSTRING_TO_ALIGNED(s, d);
-    ioFrame->media->Insert(l, s, ioFrame->endpos);
-    ioFrame->endpos += l;
+    
+    if (utf8_leftover_count) {
+      char *naya;
+      naya = new WXGC_ATOMIC char[l + utf8_leftover_count];
+      memcpy(naya, utf8_leftover, utf8_leftover_count);
+      memcpy(naya + utf8_leftover_count, s + d, l);
+      s = naya;
+      d = 0;
+      l += utf8_leftover_count;
+    }
 
-    if (l != 1 || s[0] == '\n') {
+    ulen = scheme_utf8_decode_as_prefix((unsigned char *)s, d, l,
+					NULL, 0, -1,
+					&ipos, 0, '?');
+    utf8_leftover_count = (l - ipos);
+    memcpy(utf8_leftover, s + d + ipos, utf8_leftover_count);
+    
+    us = (wxchar *)scheme_malloc_atomic(sizeof(wxchar) * ulen);
+    scheme_utf8_decode_as_prefix((unsigned char *)s, d, l,
+				 us, 0, -1,
+				 &ipos, 0, '?');
+    ioFrame->media->Insert(ulen, us, ioFrame->endpos);
+    ioFrame->endpos += ulen;
+
+    if (ulen != 1 || s[0] == '\n') {
       ioFrame->media->EndEditSequence();
       ioFrame->beginEditSeq = 0;
     }
@@ -3812,10 +3845,12 @@ void wxDrop_Runtime(char **argv, int argc)
 
 void wxDrop_Quit()
 {
+#if WINDOW_STDIO
   if (ioFrame) {
     if (ioFrame->OnClose())
       ioFrame->Show(FALSE);
   }
+#endif
 
   wxDo(wxs_app_quit_proc, 0, NULL);
 }

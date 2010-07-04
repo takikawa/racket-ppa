@@ -623,8 +623,15 @@ void wxMediaEdit::OnDefaultChar(wxKeyEvent *event)
 
   switch(code) {
   case WXK_BACK:
-  case WXK_DELETE:
     Delete();
+    return;
+  case WXK_DELETE:
+    if (startpos == endpos) {
+      if (endpos < len) {
+	Delete(endpos, endpos + 1);
+      }
+    } else
+      Delete();
     return;
   case WXK_RIGHT:
   case WXK_LEFT:
@@ -867,10 +874,10 @@ void wxMediaEdit::BeginEditSequence(Bool undoable, Bool interruptSeqs)
 #if ALLOW_X_STYLE_SELECTION
     needXCopy = TRUE;
 #endif
-
+    delayRefresh++;
     OnEditSequence();
-  }
-  delayRefresh++;
+  } else
+    delayRefresh++;
 }
 
 void wxMediaEdit::EndEditSequence(void)
@@ -1570,7 +1577,7 @@ void wxMediaEdit::_Insert(wxSnip *isnip, long strlen, wxchar *str, wxList *snips
 	break;
     }
   } else {
-    int sp;
+    int sp, cnt;
 
     addlen = strlen;
     
@@ -1670,6 +1677,7 @@ void wxMediaEdit::_Insert(wxSnip *isnip, long strlen, wxchar *str, wxList *snips
     snipStartPos = start;
     str = snip->buffer;
     sp = s + snip->dtext;
+    cnt = 0;
     for (i = 0; i < addlen; i++) {
       if (str[sp] == '\r')
 	str[sp] = '\n';
@@ -1759,16 +1767,19 @@ void wxMediaEdit::_Insert(wxSnip *isnip, long strlen, wxchar *str, wxList *snips
 	snipStartPos = i + start + 1;
 	str = snip->buffer;
 	sp = snip->dtext;
-      } else
+	cnt = 0;
+      } else if (cnt > MAX_COUNT_FOR_SNIP) {
+	/* Divide up snip because it's too large: */
+	MakeSnipset(i + start, i + start);
+	snip = (wxTextSnip *)FindSnip(i + start, +1);
+	snipStartPos = i + start;
+	str = snip->buffer;
+	sp = snip->dtext + 1;
+	cnt = 1;
+      } else {
 	sp++;
-    }
-
-    /* Divide up snip if it's too large: */
-    while (snip->count > MAX_COUNT_FOR_SNIP) {
-      long next = snipStartPos + MAX_COUNT_FOR_SNIP - 10;
-      MakeSnipset(snipStartPos, next);
-      snip = (wxTextSnip *)FindSnip(next, +1);
-      snipStartPos = next;
+	cnt++;
+      }
     }
 
     firstLine = lineRoot->First();

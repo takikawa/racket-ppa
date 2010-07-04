@@ -50,6 +50,9 @@ class wxFont: public wxbFont
 
   Bool GlyphAvailableNow(int c, HDC hdc, int screen_font);
   wxFont *Substitute(int c, HDC hdc, int screen_font);
+
+  Bool ScreenGlyphAvailabilityCached(int c, Bool for_label, Bool *avail);
+  void CacheScreenGlyphAvailability(int c, Bool for_label, Bool avail);
 };
 
 class wxColourMap: public wxObject
@@ -122,6 +125,7 @@ class wxBrush: public wxbBrush
 
 // Bitmap
 class wxDC;
+class wxMemoryDC;
 class wxItem;
 class wxGLConfig;
 
@@ -143,6 +147,7 @@ class wxBitmap: public wxObject
   void *accounting;
   wxDC *selectedInto; // So bitmap knows whether it's been selected into
                       // a device context (for error checking)
+  wxMemoryDC *mask_cache; // the cached mask
   Bool selectedIntoDC;
   wxGLConfig *gl_cfg;
 
@@ -188,6 +193,8 @@ class wxBitmap: public wxObject
 
   void SetGLConfig(wxGLConfig *gl_cfg);
   wxGLConfig *GetGLConfig(void);
+
+  void ReleaseCachedMask();
 };
 
 // Cursor

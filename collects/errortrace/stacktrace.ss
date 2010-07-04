@@ -152,6 +152,7 @@
             [(quote-syntax _) (syntax (begin e expr))]
             [(#%datum . d) (syntax (begin e expr))]
             [(#%top . d) (syntax (begin e expr))]
+            [(#%variable-reference . d) (syntax (begin e expr))]
 
             ;; No tail effect, and we want to account for the time
             [(lambda . _) (syntax (begin0 expr e))]
@@ -258,7 +259,7 @@
                            bodys)])
           (rebuild expr (map cons bodys bodyl))))
 
-      (define orig-inspector (current-inspector))
+      (define orig-inspector (current-code-inspector))
 
       (define (certify orig new)
         (syntax-recertify new orig orig-inspector #f))
@@ -347,6 +348,9 @@
               ;; might be undefined/uninitialized
               (with-mark expr expr)]
              [(#%datum . _)
+              ;; no error possible
+              expr]
+	     [(#%variable-reference . _)
               ;; no error possible
               expr]
 

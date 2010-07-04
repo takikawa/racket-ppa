@@ -8,43 +8,39 @@
            "cache-table.ss"
            "response.ss")
   (require (lib "unitsig.ss")
-           (lib "contract.ss")
-           (lib "url.ss" "net")
-           (lib "date.ss"))
-
+           (lib "contract.ss"))
+  
   (provide complete-configuration
            build-developer-configuration
            build-developer-configuration/vhosts ;; added 2/3/05 by Jacob
            default-configuration-table-path
-           update-configuration
-           )
-
+           update-configuration)
+  
   (provide/contract
    [load-configuration (path? . -> . unit/sig?)]
    [load-developer-configuration (path? . -> . unit/sig?)])
-
-
+  
   (define default-configuration-table-path
     (build-path (collection-path "web-server") "configuration-table"))
-
+  
   ; get-configuration : path -> configuration-table
   (define (get-configuration table-file-name)
     (parse-configuration-table (call-with-input-file table-file-name read)))
-
+  
   ; load-configuration : path -> configuration
   (define (load-configuration table-file-name)
     (complete-configuration (directory-part table-file-name) (get-configuration table-file-name)))
-
+  
   ; load-developer-configuration : path -> configuration
   (define (load-developer-configuration table-file-name)
     (complete-developer-configuration (directory-part table-file-name)
                                       (get-configuration table-file-name)))
-
+  
   ; build-developer-configuration : tst -> configuration-table
   (define (build-developer-configuration s-expr)
     (complete-developer-configuration (directory-part default-configuration-table-path)
                                       (parse-configuration-table s-expr)))
-
+  
   ;; added 2/3/05 by Jacob -- Help Desk needs to support virtual hosts
   ; build-developer-configuration/vhosts : tst -> configuration-table
   (define (build-developer-configuration/vhosts s-expr)
@@ -57,11 +53,11 @@
      table     
      (let ([default-host
              (apply-default-functions-to-host-table
-              base (configuration-table-default-host table) ignore-log)]
+              base (configuration-table-default-host table))]
            [expanded-virtual-host-table
             (map (lambda (x)
                    (list (regexp (string-append (car x) "(:[0-9]*)?"))
-                         (apply-default-functions-to-host-table base (cdr x) ignore-log)))
+                         (apply-default-functions-to-host-table base (cdr x))))
                  (configuration-table-virtual-hosts table))])
        (gen-virtual-hosts expanded-virtual-host-table default-host))))
   
@@ -71,22 +67,22 @@
      table
      (let ([default-host
              (apply-default-functions-to-host-table
-              base (configuration-table-default-host table) gen-log-message)]
+              base (configuration-table-default-host table))]
            [expanded-virtual-host-table
             (map (lambda (x)
                    (list (regexp (string-append (car x) "(:[0-9]*)?"))
-                         (apply-default-functions-to-host-table base (cdr x) gen-log-message)))
+                         (apply-default-functions-to-host-table base (cdr x))))
                  (configuration-table-virtual-hosts table))])
        (gen-virtual-hosts expanded-virtual-host-table default-host))))
-
+  
   ; : str configuration-table -> configuration
   (define (complete-developer-configuration base table)
     (build-configuration
      table
      (gen-virtual-hosts null (apply-default-functions-to-host-table
                               base
-                              (configuration-table-default-host table) ignore-log))))
-
+                              (configuration-table-default-host table)))))
+  
   ; : configuration-table host-table -> configuration
   (define (build-configuration table the-virtual-hosts)
     (unit/sig web-config^
@@ -100,11 +96,11 @@
       (define instances (make-hash-table))
       (define scripts (box (make-cache-table)))
       (define make-servlet-namespace the-make-servlet-namespace)))
-
+  
   ; begin stolen from commander.ss, which was stolen from private/drscheme/eval.ss
   ; FIX - abstract this out to a namespace library somewhere (ask Robby and Matthew)
-
-
+  
+  
   (define to-be-copied-module-specs
     '(mzscheme
       ;; allow people (SamTH) to use MrEd primitives from servlets.
@@ -112,8 +108,8 @@
       ;; web-server-text to have a dependency on mred
       ;(lib "mred.ss" "mred")
       (lib "servlet.ss" "web-server")))
-
-
+  
+  
   ; JBC : added error-handler hack; the right answer is only to transfer the 'mred'
   ; module binding when asked to, e.g. by a field in the configuration file.
   ; GregP: put this back in if Sam's code breaks
@@ -122,7 +118,7 @@
   ;                          ; maybe a warning message in the exception-handler?
   ;                          (dynamic-require x #f)))
   ;            to-be-copied-module-specs)
-
+  
   ;; get the names of those modules.
   (define to-be-copied-module-names
     (let ([get-name
@@ -132,7 +128,7 @@
                  ((current-module-name-resolver) spec #f #f)))])
       (map get-name to-be-copied-module-specs)))
   ; end stolen
-
+  
   (define (the-make-servlet-namespace)
     (let ([server-namespace (current-namespace)]
           [new-namespace (make-namespace)])
@@ -140,7 +136,7 @@
         (for-each (lambda (name) (namespace-attach-module server-namespace name))
                   to-be-copied-module-names)
         new-namespace)))
-
+  
   ; : (listof (cons sym TST)) -> configuration
   ; more here - this is ugly.  It also does not catch "unbound identifiers" since I use symbols.
   ; I considered several other solutions:
@@ -149,20 +145,20 @@
   ; - write three different functional updaters and re-compound the unit 1--3 times
   (define (update-configuration configuration flags)
     (compound-unit/sig
-     (import)
-     (link
-      [config : web-config^ (configuration)]
-      [new-config : web-config/local^
-                  ((unit/sig web-config/local^
-                     (import (raw : web-config/local^))
-                     (define port (extract-flag 'port flags raw:port))
-                     (define listen-ip (extract-flag 'ip-address flags raw:listen-ip))
-                     (define instances (extract-flag 'instances flags raw:instances))
-                     (define make-servlet-namespace (extract-flag 'namespace flags raw:make-servlet-namespace)))
-                   (config : web-config/local^))])
-     (export (open (config : web-config/pervasive^))
-             (open (new-config : web-config/local^)))))
-
+      (import)
+      (link
+       [config : web-config^ (configuration)]
+       [new-config : web-config/local^
+                   ((unit/sig web-config/local^
+                      (import (raw : web-config/local^))
+                      (define port (extract-flag 'port flags raw:port))
+                      (define listen-ip (extract-flag 'ip-address flags raw:listen-ip))
+                      (define instances (extract-flag 'instances flags raw:instances))
+                      (define make-servlet-namespace (extract-flag 'namespace flags raw:make-servlet-namespace)))
+                    (config : web-config/local^))])
+      (export (open (config : web-config/pervasive^))
+              (open (new-config : web-config/local^)))))
+  
   ; error-response : nat str str [(cons sym str) ...] -> response
   ; more here - cache files with a refresh option.
   ; The server should still start without the files there, so the
@@ -172,8 +168,7 @@
                         (current-seconds) TEXT/HTML-MIME-TYPE
                         extra-headers
                         (list (read-file text-file))))
-
-
+  
   ; servlet-loading-responder : url tst -> response
   ; more here - parameterize error based on a configurable file, perhaps?
   ; This is slightly tricky since the (interesting) content comes from the exception.
@@ -184,12 +179,12 @@
                         '() ; check
                         (list "Servlet didn't load.\n"
                               (exn->string exn))))
-
+  
   ; gen-servlet-not-found : str -> url -> response
   (define (gen-servlet-not-found file-not-found-file)
     (lambda (url)
       (error-response 404 "Servlet not found" file-not-found-file)))
-
+  
   ; gen-servlet-responder : str -> url tst -> response
   (define (gen-servlet-responder servlet-error-file)
     (lambda (url exn)
@@ -198,28 +193,28 @@
        (format "Servlet exception:\n~a\n" (exn-message exn))
        exn)
       (error-response 500 "Servlet error" servlet-error-file)))
-
+  
   ; gen-servlets-refreshed : str -> -> response
   (define (gen-servlets-refreshed servlet-refresh-file)
     (lambda ()
       (error-response 200 "Servlet cache refreshed" servlet-refresh-file)))
-
+  
   ; gen-passwords-refreshed : str -> -> response
   (define (gen-passwords-refreshed password-refresh-file)
     (lambda ()
       (error-response 200 "Passwords refreshed" password-refresh-file)))
-
+  
   ; gen-authentication-responder : str -> url (cons sym str) -> response
   (define (gen-authentication-responder access-denied-file)
     (lambda (uri recommended-header)
       (error-response 401 "Authorization Required" access-denied-file
                       recommended-header)))
-
+  
   ; gen-protocol-responder : str -> str -> response
   (define (gen-protocol-responder protocol-file)
     (lambda (error-message)
       (error-response 400 "Malformed Request" protocol-file)))
-
+  
   ; gen-file-not-found-responder : str -> url -> response
   (define (gen-file-not-found-responder file-not-found-file)
     (lambda (url)
@@ -228,62 +223,25 @@
   ; gen-collect-garbage-responder : str -> -> response
   (define (gen-collect-garbage-responder file)
     (lambda ()
-      (error-response 200 "Garbage collectedd" file)))
-
+      (error-response 200 "Garbage collected" file)))
+  
   (define servlet?
     (let ([servlets-regexp (regexp "^/servlets/.*")])
       (lambda (str)
         (regexp-match servlets-regexp str))))
-
-  ; access-denied? : str sym str -> (U #f str)
-  ; (define (access-denied? client-ip user-name password) ???)
-  ; The configuration needs a simple way to combine ip and username authentication with
-  ; boolean-and, boolean-or, and perhaps others operations.
-  ; Using quote in the old password system enabled abstraction, which
-  ; I never used.
-  ; ...
-
-  ; gen-log-message : sym str -> str str sym url str -> str
-  ; more here - check apache log configuration formats
-  ; other server's include the original request line,
-  ; including the major and minor HTTP version numbers
-  ; to produce a string that is displayed into the log file
-  (define (gen-log-message log-format log-path)
-    (let ([outsem (make-semaphore 1)]
-          [log-p #f])
-      (lambda (host-ip client-ip method uri host)
-        (call-with-semaphore
-         outsem
-         (lambda ()
-           (with-handlers ([exn? (lambda (e) (set! log-p #f))])
-             (unless (and log-p (file-exists? log-path))
-               (unless (eq? log-p #f)
-                 (close-output-port log-p))
-               (set! log-p (open-output-file log-path 'append))
-               (file-stream-buffer-mode log-p 'line))
-             ; do the display all at once by formating first
-             (when log-p
-               (display
-                (format "~s~n"
-                        (list 'from client-ip 'to host-ip 'for (url->string uri) 'at
-                              (date->string (seconds->date (current-seconds)) #t)))
-                log-p))))))))
   
-  ; ignore-log : sym str -> str str sym url str -> str
-  (define (ignore-log log-format log-path) void)
-
   ; read-file : str -> str
   (define (read-file path)
     (call-with-input-file path
       (lambda (in) (read-string (file-size path) in))))
-
-  ; apply-default-functions-to-host-table : str host-table (sym str -> str str sym url str -> str) -> host
+  
+  ; apply-default-functions-to-host-table : str host-table -> host
   ;; Greg P: web-server-root is the directory-part of the path to the configuration-table (I don't think I like this.)
-  (define (apply-default-functions-to-host-table web-server-root host-table gen-log-message-maybe)
+  (define (apply-default-functions-to-host-table web-server-root host-table)
     (let ([paths (expand-paths web-server-root (host-table-paths host-table))])
       (make-host
        (host-table-indices host-table)
-       (gen-log-message-maybe (host-table-log-format host-table) (paths-log paths))
+       (host-table-log-format host-table) (paths-log paths)
        (paths-passwords paths)
        (let ([m (host-table-messages host-table)]
              [conf (paths-conf paths)])
@@ -298,17 +256,22 @@
           (gen-collect-garbage-responder (build-path-unless-absolute conf (messages-collect-garbage m)))))
        (host-table-timeouts host-table)
        paths)))
-
+  
   ; expand-paths : str paths -> paths
   (define (expand-paths web-server-root paths)
-    (let ([host-base (build-path-unless-absolute web-server-root (paths-host-base paths))])
-      (make-paths (build-path-unless-absolute host-base (paths-conf paths))
-                  host-base
-                  (build-path-unless-absolute host-base (paths-log paths))
-                  (build-path-unless-absolute host-base (paths-htdocs paths))
-                  (build-path-unless-absolute host-base (paths-servlet paths))
-                  (build-path-unless-absolute host-base (paths-passwords paths)))))
-
+    (let ([build-path-unless-absolute
+           (lambda (b p) 
+             (if p 
+                 (build-path-unless-absolute b p)
+                 #f))])
+      (let ([host-base (build-path-unless-absolute web-server-root (paths-host-base paths))])
+        (make-paths (build-path-unless-absolute host-base (paths-conf paths))
+                    host-base
+                    (build-path-unless-absolute host-base (paths-log paths))
+                    (build-path-unless-absolute host-base (paths-htdocs paths))
+                    (build-path-unless-absolute host-base (paths-servlet paths))
+                    (build-path-unless-absolute host-base (paths-passwords paths))))))
+  
   ; gen-virtual-hosts : (listof (list regexp host)) host ->
   ; str -> host-configuration
   (define (gen-virtual-hosts expanded-virtual-host-table default-host)
@@ -317,7 +280,4 @@
                    (and (regexp-match (car x) host-name-possibly-followed-by-a-collon-and-a-port-number)
                         (cadr x)))
                  expanded-virtual-host-table)
-          default-host)))
-
-
-  )
+          default-host))))

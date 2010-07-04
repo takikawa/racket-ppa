@@ -147,6 +147,7 @@
   scheme_extension_table->scheme_load_compiled_stx_string = scheme_load_compiled_stx_string;
   scheme_extension_table->scheme_compiled_stx_symbol = scheme_compiled_stx_symbol;
   scheme_extension_table->scheme_eval_compiled_sized_string = scheme_eval_compiled_sized_string;
+  scheme_extension_table->scheme_eval_compiled_sized_string_with_magic = scheme_eval_compiled_sized_string_with_magic;
 #ifndef SCHEME_NO_GC
 # ifndef SCHEME_NO_GC_PROTO
   scheme_extension_table->GC_malloc = GC_malloc;
@@ -444,6 +445,7 @@
   scheme_extension_table->scheme_print_bytes = scheme_print_bytes;
   scheme_extension_table->scheme_print_utf8 = scheme_print_utf8;
   scheme_extension_table->scheme_print_string = scheme_print_string;
+  scheme_extension_table->scheme_read_byte_string = scheme_read_byte_string;
   scheme_extension_table->scheme_make_namespace = scheme_make_namespace;
   scheme_extension_table->scheme_add_namespace_option = scheme_add_namespace_option;
   scheme_extension_table->scheme_require_from_original_env = scheme_require_from_original_env;
@@ -478,6 +480,8 @@
   scheme_extension_table->scheme_symbol_name = scheme_symbol_name;
   scheme_extension_table->scheme_symbol_name_and_size = scheme_symbol_name_and_size;
   scheme_extension_table->scheme_symbol_val = scheme_symbol_val;
+  scheme_extension_table->scheme_intern_exact_keyword = scheme_intern_exact_keyword;
+  scheme_extension_table->scheme_intern_exact_char_keyword = scheme_intern_exact_char_keyword;
   scheme_extension_table->scheme_make_struct_values = scheme_make_struct_values;
   scheme_extension_table->scheme_make_struct_names = scheme_make_struct_names;
   scheme_extension_table->scheme_make_struct_type = scheme_make_struct_type;
@@ -502,6 +506,7 @@
   scheme_extension_table->scheme_equal_hash_key = scheme_equal_hash_key;
   scheme_extension_table->scheme_equal_hash_key2 = scheme_equal_hash_key2;
   scheme_extension_table->scheme_build_list = scheme_build_list;
+  scheme_extension_table->scheme_build_list_offset = scheme_build_list_offset;
   scheme_extension_table->scheme_make_list_immutable = scheme_make_list_immutable;
   scheme_extension_table->scheme_list_length = scheme_list_length;
   scheme_extension_table->scheme_proper_list_length = scheme_proper_list_length;
@@ -518,6 +523,8 @@
   scheme_extension_table->scheme_unbox = scheme_unbox;
   scheme_extension_table->scheme_set_box = scheme_set_box;
   scheme_extension_table->scheme_make_weak_box = scheme_make_weak_box;
+  scheme_extension_table->scheme_make_ephemeron = scheme_make_ephemeron;
+  scheme_extension_table->scheme_ephemeron_value = scheme_ephemeron_value;
   scheme_extension_table->scheme_load = scheme_load;
   scheme_extension_table->scheme_load_extension = scheme_load_extension;
   scheme_extension_table->scheme_register_extension_global = scheme_register_extension_global;

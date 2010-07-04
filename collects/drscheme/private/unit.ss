@@ -5,10 +5,6 @@ closing:
 
 tab panels new behavior:
   - save all tabs (pr 6689?)
-
-tab panels todo:
-  - changing tabs needs to update all kinds of things, based on new context<%> interface setup
-  - need to update running when switching tabs ...
   
 module browser threading seems wrong.
 
@@ -20,6 +16,7 @@ module browser threading seems wrong.
            (lib "file.ss")
            (lib "etc.ss")
            (lib "list.ss")
+           (lib "port.ss")
            (lib "string-constant.ss" "string-constants")
 	   (lib "framework.ss" "framework")
            (lib "name-message.ss" "mrlib")
@@ -89,7 +86,8 @@ module browser threading seems wrong.
       (define definitions-text<%> 
         (interface ()
           get-tab
-          change-mode-to-match))
+	  get-next-settings
+	  after-set-next-settings))
       
       (keymap:add-to-right-button-menu
        (let ([old (keymap:add-to-right-button-menu)])
@@ -423,7 +421,7 @@ module browser threading seems wrong.
                                                get-language-position))])
                 (let loop ([modes (drscheme:modes:get-modes)])
                   (cond
-                    [(null? modes) (error 'change-mode-to-match-filename
+                    [(null? modes) (error 'change-mode-to-match
                                           "didn't find a matching mode")]
                     [else (let ([mode (car modes)])
                             (if ((drscheme:modes:mode-matches-language mode) language-name)
@@ -470,14 +468,19 @@ module browser threading seems wrong.
             (define/pubment (get-next-settings) next-settings)
             (define/pubment (set-next-settings _next-settings)
               (set! next-settings _next-settings)
-              (change-mode-to-match))
+              (change-mode-to-match)
+	      (after-set-next-settings _next-settings))
+
+	    (define/pubment (after-set-next-settings s)
+	      (inner (void) after-set-next-settings s))
             
-            (define/public (needs-execution?)
+            (define/public (needs-execution)
               (or needs-execution-state
-                  (not (equal? execute-settings next-settings))))
+                  (and (not (equal? execute-settings next-settings))
+                       (string-constant needs-execute-language-changed))))
             
             (define/pubment (teachpack-changed)
-              (set! needs-execution-state #t))
+              (set! needs-execution-state (string-constant needs-execute-teachpack-changed)))
             (define/pubment (just-executed)
               (set! execute-settings next-settings)
               (set! needs-execution-state #f)
@@ -487,10 +490,10 @@ module browser threading seems wrong.
             (define/pubment (already-warned)
               (set! already-warned-state #t))
             (define/augment (after-insert x y)
-              (set! needs-execution-state #t)
+              (set! needs-execution-state (string-constant needs-execute-defns-edited))
               (inner (void) after-insert x y))
             (define/augment (after-delete x y)
-              (set! needs-execution-state #t)
+              (set! needs-execution-state (string-constant needs-execute-defns-edited))
               (inner (void) after-delete x y))
             
             (inherit get-filename)
@@ -560,7 +563,10 @@ module browser threading seems wrong.
             
             (field [error-arrows #f])
             
-            (super-new))))
+            (super-new)
+
+	    (inherit set-max-undo-history)
+	    (set-max-undo-history 5000))))
       
       
                                                        
@@ -904,8 +910,8 @@ module browser threading seems wrong.
                   (let-values ([(base _1 _2) (split-path (mzlib:file:normalize-path filename))])
                     base)
                   #f)))
-          (define/public (needs-execution?)
-            (send defs needs-execution?))
+          (define/public (needs-execution)
+            (send defs needs-execution))
           
           (define/pubment (can-close?)
             (and (send defs can-close?)
@@ -957,7 +963,7 @@ module browser threading seems wrong.
              (string-constant kill)
              (string-constant kill?)
              'diallow-close
-             this))
+             frame))
           
           ;; reset-offer-kill
           (define/public (reset-offer-kill)
@@ -1233,7 +1239,6 @@ module browser threading seems wrong.
             (when execute-menu-item
               (send execute-menu-item enable #f))
             (send execute-button enable #f)
-            ;(send file-menu:create-new-tab-item enable #f)
             (inner (void) disable-evaluation))
           
           (define/public-final (enable-evaluation-in-tab tab)
@@ -1244,7 +1249,6 @@ module browser threading seems wrong.
             (when execute-menu-item
               (send execute-menu-item enable #t))
             (send execute-button enable #t)
-            ;(send file-menu:create-new-tab-item enable #t)
             (inner (void) enable-evaluation))
           
           (inherit set-label)
@@ -1255,9 +1259,10 @@ module browser threading seems wrong.
               (if save-button
                   (unless (eq? mod? (send save-button is-shown?))
                     (send save-button show mod?))
-                  (set! save-init-shown? mod?))))
+                  (set! save-init-shown? mod?))
+              (update-tab-label current-tab)))
 
-          ;; update-save-message : (union #f string) -> void
+          ;; update-save-message : -> void
           ;; sets the save message. If input is #f, uses the frame's
           ;; title.
           (define/public (update-save-message)
@@ -1269,12 +1274,7 @@ module browser threading seems wrong.
             (update-tabs-labels))
           
           (define/private (update-tabs-labels)
-            (for-each
-             (λ (tab)
-               (let* ([label (get-defs-tab-label (send tab get-defs) tab)])
-                 (unless (equal? label (send tabs-panel get-item-label (send tab get-i)))
-                   (send tabs-panel set-item-label (send tab get-i) label))))
-             tabs)
+            (for-each (λ (tab) (update-tab-label tab)) tabs)
             (send tabs-panel set-selection (send current-tab get-i))
             (send (send tabs-panel get-parent)
                   change-children
@@ -1287,19 +1287,27 @@ module browser threading seems wrong.
                            l
                            (cons tabs-panel l))]))))
           
+          (define/private (update-tab-label tab)
+            (let ([label (get-defs-tab-label (send tab get-defs) tab)])
+              (unless (equal? label (send tabs-panel get-item-label (send tab get-i)))
+                (send tabs-panel set-item-label (send tab get-i) label))))
+          
           (define/private (get-defs-tab-label defs tab)
             (let ([fn (send defs get-filename)])
-              (if fn
-                  (get-tab-label-from-filename fn tab)
-                  (send defs get-filename/untitled-name))))
+              (add-modified-flag 
+               defs
+               (if fn
+                   (get-tab-label-from-filename fn)
+                   (send defs get-filename/untitled-name)))))
           
-          (define/private (get-tab-label-from-filename fn tab)
+          (define/private (get-tab-label-from-filename fn)
             (let* ([take-n
                     (λ (n lst)
                       (let loop ([n n]
                                  [lst lst])
                         (cond
                           [(zero? n) null]
+                          [(null? lst) null]
                           [else (cons (car lst) (loop (- n 1) (cdr lst)))])))]
                    [find-exp-diff
                     (λ (p1 p2)
@@ -1316,12 +1324,12 @@ module browser threading seems wrong.
                    [exp (reverse (explode-path fn))]
                    [other-exps
                     (filter
-                     (λ (x) x)
+                     (λ (x) (and x 
+                                 (not (equal? exp x))))
                      (map (λ (other-tab) 
-                            (and (not (eq? other-tab tab))
-                                 (let ([fn (send (send other-tab get-defs) get-filename)])
-                                   (and fn 
-                                        (reverse (explode-path fn))))))
+                            (let ([fn (send (send other-tab get-defs) get-filename)])
+                              (and fn 
+                                   (reverse (explode-path fn)))))
                           tabs))]
                    [size
                     (let loop ([other-exps other-exps]
@@ -1332,6 +1340,23 @@ module browser threading seems wrong.
                                 (loop (cdr other-exps)
                                       (max new-size size)))]))])
               (path->string (apply build-path (reverse (take-n size exp))))))
+          
+          (define/private (add-modified-flag text string)
+            (if (send text is-modified?)
+                (let ([prefix (get-save-diamond-prefix)])
+                  (if prefix
+                      (string-append prefix string)
+                      string))
+                string))
+          
+          (define/private (get-save-diamond-prefix)
+            (let ([candidate-prefixes '("◆ " "* ")])
+              (ormap
+               (lambda (candidate)
+                 (and (andmap (λ (x) (send normal-control-font screen-glyph-exists? x #t))
+                              (string->list candidate))
+                      candidate))
+               candidate-prefixes)))
               
           [define/override get-canvas% (λ () (drscheme:get/extend:get-definitions-canvas))]
           
@@ -1916,13 +1941,20 @@ module browser threading seems wrong.
                                (send definitions-text paragraph-start-position 1)
                                0)])
                 (send definitions-text split-snip start)
-                (let ([prt (open-input-text-editor definitions-text start)])
-                  (port-count-lines! prt)
-                  (send interactions-text evaluate-from-port
-                        prt
-                        #t
-                        (λ ()
-                          (send interactions-text clear-undos)))))))
+                (let ([text-port (open-input-text-editor definitions-text start)])
+                  (port-count-lines! text-port)
+                  (let* ([line (send definitions-text position-paragraph start)]
+                         [column (- start (send definitions-text paragraph-start-position line))]
+                         [relocated-port (relocate-input-port text-port 
+                                                              (+ line 1)
+                                                              column
+                                                              (+ start 1))])
+                    (port-count-lines! relocated-port)
+                    (send interactions-text evaluate-from-port
+                          relocated-port
+                          #t
+                          (λ ()
+                            (send interactions-text clear-undos))))))))
           
           (inherit revert save)
           (define/private (check-if-save-file-up-to-date)
@@ -2007,7 +2039,7 @@ module browser threading seems wrong.
                 (send new-tab set-ints ints)
                 (set! tabs (append tabs (list new-tab)))
                 (send tabs-panel append (if filename
-                                            (get-tab-label-from-filename filename #f)
+                                            (get-tab-label-from-filename filename)
                                             (get-defs-tab-label defs #f)))
                 (init-definitions-text new-tab)
                 (when filename (send defs load-file filename))
@@ -3044,9 +3076,4 @@ module browser threading seems wrong.
                [frame (new drs-frame% (filename filename))])
           (send (send frame get-interactions-text) initialize-console)
           (send frame show #t)
-          frame))
-      
-      (handler:insert-format-handler 
-       "Units"
-       (λ (filename) #t)
-       open-drscheme-window))))
+          frame)))))

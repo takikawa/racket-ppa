@@ -234,6 +234,9 @@ Scheme_Object *(*scheme_eval_compiled_stx_string)(Scheme_Object *expr, Scheme_En
 Scheme_Object *(*scheme_load_compiled_stx_string)(const char *str, long len);
 Scheme_Object *(*scheme_compiled_stx_symbol)(Scheme_Object *stx);
 Scheme_Object *(*scheme_eval_compiled_sized_string)(const char *str, int len, Scheme_Env *env);
+Scheme_Object *(*scheme_eval_compiled_sized_string_with_magic)(const char *str, int len, Scheme_Env *env, 
+								      Scheme_Object *magic_symbol, Scheme_Object *magic_val,
+								      int multi_ok);
 /*========================================================================*/
 /*                           memory management                            */
 /*========================================================================*/
@@ -644,13 +647,15 @@ void (*scheme_add_fd_handle)(void *h, void *fds, int repost);
 void (*scheme_add_fd_eventmask)(void *fds, int mask);
 void (*scheme_security_check_file)(const char *who, const char *filename, int guards);
 void (*scheme_security_check_network)(const char *who, const char *host, int port, int client);
-int (*scheme_get_host_address)(const char *address, int id, void *result);
+struct addrinfo *(*scheme_get_host_address)(const char *address, int id, int *err, 
+						   int family, int passive, int tcp);
 int (*scheme_get_port_file_descriptor)(Scheme_Object *p, long *_fd);
 int (*scheme_get_port_socket)(Scheme_Object *p, long *_s);
 void (*scheme_set_type_printer)(Scheme_Type stype, Scheme_Type_Printer printer);
 void (*scheme_print_bytes)(Scheme_Print_Params *pp, const char *str, int offset, int len);
 void (*scheme_print_utf8)(Scheme_Print_Params *pp, const char *str, int offset, int len);
 void (*scheme_print_string)(Scheme_Print_Params *pp, const mzchar *str, int offset, int len);
+Scheme_Object *(*scheme_read_byte_string)(Scheme_Object *port);
 /*========================================================================*/
 /*                        namespace/environment                           */
 /*========================================================================*/
@@ -696,6 +701,8 @@ Scheme_Object *(*scheme_make_exact_char_symbol)(const mzchar *name, unsigned int
 const char *(*scheme_symbol_name)(Scheme_Object *sym);
 const char *(*scheme_symbol_name_and_size)(Scheme_Object *sym, unsigned int *l, int flags);
 char *(*scheme_symbol_val)(Scheme_Object *sym);
+Scheme_Object *(*scheme_intern_exact_keyword)(const char *name, unsigned int len);
+Scheme_Object *(*scheme_intern_exact_char_keyword)(const mzchar *name, unsigned int len);
 /*========================================================================*/
 /*                                structs                                 */
 /*========================================================================*/
@@ -745,6 +752,7 @@ long (*scheme_hash_key)(Scheme_Object *o);
 long (*scheme_equal_hash_key)(Scheme_Object *o);
 long (*scheme_equal_hash_key2)(Scheme_Object *o);
 Scheme_Object *(*scheme_build_list)(int argc, Scheme_Object **argv);
+Scheme_Object *(*scheme_build_list_offset)(int argc, Scheme_Object **argv, int delta);
 void (*scheme_make_list_immutable)(Scheme_Object *l);
 int (*scheme_list_length)(Scheme_Object *list);
 int (*scheme_proper_list_length)(Scheme_Object *list);
@@ -762,6 +770,8 @@ Scheme_Object *(*scheme_box)(Scheme_Object *v);
 Scheme_Object *(*scheme_unbox)(Scheme_Object *obj);
 void (*scheme_set_box)(Scheme_Object *b, Scheme_Object *v);
 Scheme_Object *(*scheme_make_weak_box)(Scheme_Object *v);
+Scheme_Object *(*scheme_make_ephemeron)(Scheme_Object *key, Scheme_Object *val);
+Scheme_Object *(*scheme_ephemeron_value)(Scheme_Object *o);
 Scheme_Object *(*scheme_load)(const char *file);
 Scheme_Object *(*scheme_load_extension)(const char *filename, Scheme_Env *env);
 void (*scheme_register_extension_global)(void *ptr, long size);

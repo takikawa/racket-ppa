@@ -704,48 +704,26 @@ Bool wxWindow::Show(Bool show)
   return TRUE;
 }
 
+static wxMemoryDC *measure_dc;
+
 void wxWindow::GetTextExtent(const char *string, double *x, double *y,
 			     double *descent, double *externalLeading, 
 			     wxFont *theFont, Bool use16bit)
 {
   wxFont *fontToUse = theFont;
-  HWND hWnd;
-  HDC dc;
-  HFONT fnt = 0; 
-  HFONT was = 0;
-  SIZE sizeRect;
-  TEXTMETRIC tm;
-  int len;
-  wchar_t *ws;
   
   if (!fontToUse)
     fontToUse = font;
-    
-  hWnd = GetHWND();
-  dc = wxwmGetDC(hWnd);
 
-  if (fontToUse && (fnt = fontToUse->GetInternalFont(dc))) 
-    was = (HFONT)SelectObject(dc, fnt); 
-  else {
-    fnt = (HFONT)SendMessage(hWnd, WM_GETFONT, 0, 0L);
-    if (fnt)
-      was = (HFONT)SelectObject(dc, fnt);
+  if (!measure_dc) {
+    wxBitmap *bm;
+    wxREGGLOB(measure_dc);
+    bm = new wxBitmap(1, 1, 0);
+    measure_dc = new wxMemoryDC();
+    measure_dc->SelectObject(bm);
   }
 
-  ws = wxWIDE_STRING((char *)string);
-  len = wx_wstrlen(ws);
-  GetTextExtentPointW(dc, len ? ws : L" ", len ? len : 1, &sizeRect);
-  GetTextMetrics(dc, &tm);
-
-  if (fontToUse && fnt && was) 
-    SelectObject(dc,was); 
-
-  wxwmReleaseDC(hWnd, dc);
-
-  *x = (len ? (double)sizeRect.cx : (double)0.0);
-  *y = (double)sizeRect.cy;
-  if (descent) *descent = (double)tm.tmDescent;
-  if (externalLeading) *externalLeading = (double)tm.tmExternalLeading;
+  measure_dc->GetTextExtent(string, x, y, descent, externalLeading, fontToUse, 1, use16bit);
 }
 
 void wxWindow::Refresh(void)
@@ -885,6 +863,13 @@ static LONG WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam, in
       HWND hwnd = (HWND)lParam;
       wnd->OnActivate(state, minimized, hwnd);
       if (dialog) retval = 0;
+      break;
+    }
+  case WM_NCACTIVATE:
+    {
+      WORD state = LOWORD(wParam);
+      wnd->OnNCActivate(state, hWnd);
+      retval = wnd->DefWindowProc(message, wParam, lParam);
       break;
     }
   case WM_SETFOCUS:
@@ -1449,8 +1434,10 @@ void wxWnd::Create(wxWnd *parent, char *wclass, wxWindow *wx_win, char *title,
 
   if (is_dialog) {
     /* Creating a dialog */
-    handle = ::CreateDialog(wxhInstance, dialog_template, hParent,
-			    (DLGPROC)wxDlgProc);
+    wchar_t *ws;
+    ws = wxWIDE_STRING(dialog_template);
+    handle = ::CreateDialogW(wxhInstance, ws, hParent,
+			     (DLGPROC)wxDlgProc);
     
     if (handle == 0) {
       char buf[300];
@@ -1569,17 +1556,6 @@ BOOL wxWnd::OnActivate(BOOL state, BOOL minimized, HWND WXUNUSED(activate))
     wx_window->OnActivate(((state == WA_ACTIVE) 
 			   || (state == WA_CLICKACTIVE)));
 
-    // If this window is an MDI parent, we must also send an OnActivate message
-    // to the current child.
-    if (wxSubType(wx_window->__type, wxTYPE_FRAME)) {
-      wxFrame *frame = (wxFrame *)wx_window;
-      if (frame->frame_type == wxMDI_PARENT) {
-        wxMDIFrame *mdiFrame = (wxMDIFrame *)this;
-        if (mdiFrame->current_child) {
-          mdiFrame->current_child->OnActivate(state, 0, 0);
-	}
-      }
-    }
     return 0;
   } else 
     return TRUE;
@@ -1684,6 +1660,11 @@ BOOL wxWnd::ProcessMessage(MSG* WXUNUSED(pMsg))
 }
 
 BOOL wxWnd::OnMDIActivate(BOOL WXUNUSED(flag), HWND WXUNUSED(activate), HWND WXUNUSED(deactivate))
+{
+  return 1;
+}
+
+BOOL wxWnd::OnNCActivate(BOOL WXUNUSED(flag), HWND WXUNUSED(activate))
 {
   return 1;
 }

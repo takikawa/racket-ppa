@@ -103,7 +103,7 @@ TODO
           ensure-rep-shown   ;; (interactions-text -> void)
 	  ;; make the rep visible in the frame
 
-          needs-execution?   ;; (-> boolean)
+          needs-execution   ;; (-> boolean)
 	  ;; ask if things have changed that would mean the repl is out
 	  ;; of sync with the program being executed in it.
           
@@ -501,6 +501,7 @@ TODO
                    get-value-port
                    in-edit-sequence?
                    insert
+                   insert-before
                    insert-between
                    invalidate-bitmap-cache
                    is-frozen?
@@ -726,6 +727,7 @@ TODO
           ;;
           
           (define/override (after-io-insertion)
+            (super after-io-insertion)
             (let ([canvas (get-active-canvas)])
               (when canvas
                 (let ([frame (send canvas get-top-level-window)])
@@ -736,17 +738,21 @@ TODO
           (define/augment (after-insert start len)
             (inner (void) after-insert start len)
             (cond
-              [(in-edit-sequence?) (set! had-an-insert? (cons start len))]
+              [(in-edit-sequence?) 
+               (set! had-an-insert (cons (cons start len) had-an-insert))]
               [else (update-after-insert)]))
           
-          (define had-an-insert? #f)
-          
-          (define/augment (on-edit-sequence)
-            (set! had-an-insert? #f))
+          ;; private field
+          (define had-an-insert '())
           
           (define/augment (after-edit-sequence)
-            (when had-an-insert?
-              (update-after-insert (car had-an-insert?) (cdr had-an-insert?))))
+            (inner (void) after-edit-sequence)
+            (let ([to-clean had-an-insert])
+              (set! had-an-insert '())
+              (for-each
+               (lambda (pr)
+                 (update-after-insert (car pr) (cdr pr)))
+               to-clean)))
           
           (define/private (update-after-insert start len)
             (unless inserting-prompt?
@@ -764,7 +770,6 @@ TODO
                     (when (space . > . max-space)
                       (let ([to-delete-end (+ start (- space max-space))])
                         (delete/io start to-delete-end))))))
-              
               (set! prompt-position (get-unread-start-point))
               (reset-region prompt-position 'end)))
           
@@ -810,14 +815,13 @@ TODO
                  (ask-about-kill? #f))
           (define/public (get-in-evaluation?) in-evaluation?)
           
-          (define/private (insert-warning)
+          (define/private (insert-warning message)
             (begin-edit-sequence)
-            (insert-between "\n")
-            (let ([start (get-unread-start-point)])
-              (insert-between
-               (string-constant interactions-out-of-sync))
-              (let ([end (get-unread-start-point)])
+            (let ([start (get-insertion-point)])
+              (insert-before message)
+              (let ([end (get-insertion-point)])
                 (change-style warning-style-delta start end)))
+            (insert-before "\n")
             (end-edit-sequence))
           
           (field (already-warned? #f))
@@ -866,25 +870,24 @@ TODO
             (save-interaction-in-history prompt-position (- (last-position) 2))
             (freeze-colorer)
             
-            (let* ([needs-execution? (send context needs-execution?)])
+            (let ([needs-execution (send context needs-execution)])
               (when (if (preferences:get 'drscheme:execute-warning-once)
                         (and (not already-warned?)
-                             needs-execution?)
-                        needs-execution?)
+                             needs-execution)
+                        needs-execution)
                 (set! already-warned? #t)
-                (insert-warning)))
+                (insert-warning needs-execution)))
             
-            ;; put two eofs in the port; one to terminate a potentially incomplete sexp
-            ;; (or a non-self-terminating one, like a number) and the other to ensure that
-            ;; an eof really does come thru the calls to `read'. 
-            ;; the cleanup thunk clears out the extra eof, if one is still there after evaluation
+            ;; lets us know we are done with this one interaction
+            ;; (since there may be multiple expressions at the prompt)
             (send-eof-to-in-port)
-            (send-eof-to-in-port)
+            
             (set! prompt-position #f)
             (evaluate-from-port
              (get-in-port) 
              #f
              (λ ()
+               ;; clear out the eof object if it wasn't consumed
                (clear-input-port))))
           
           ;; prompt-position : (union #f integer)
@@ -919,6 +922,10 @@ TODO
           (define/public (set-submit-predicate p)
             (set! submit-predicate p))
           
+          ;; record this on an ivar in the class so that
+          ;; continuation jumps into old calls to evaluate-from-port
+          ;; continue to evaluate from the correct port.
+          (define get-sexp/syntax/eof #f)
           (define/public (evaluate-from-port port complete-program? cleanup) ; =Kernel=, =Handler=
               (send context disable-evaluation)
               (send context reset-offer-kill)
@@ -935,11 +942,11 @@ TODO
              (λ () ; =User=, =Handler=, =No-Breaks=
                (let* ([settings (current-language-settings)]
                       [lang (drscheme:language-configuration:language-settings-language settings)]
-                      [settings (drscheme:language-configuration:language-settings-settings settings)]
-                      [get-sexp/syntax/eof 
+                      [settings (drscheme:language-configuration:language-settings-settings settings)])
+                 (set! get-sexp/syntax/eof 
                        (if complete-program?
                            (send lang front-end/complete-program port settings user-teachpack-cache)
-                           (send lang front-end/interaction port settings user-teachpack-cache))])
+                           (send lang front-end/interaction port settings user-teachpack-cache)))
                  
                  ; Evaluate the user's expression. We're careful to turn on
                  ;   breaks as we go in and turn them off as we go out.
@@ -960,13 +967,13 @@ TODO
                         (let loop ()
                           (let ([sexp/syntax/eof (get-sexp/syntax/eof)])
                             (unless (eof-object? sexp/syntax/eof)
-                              (call-with-values
+                              (call-with-break-parameterization
+                               (get-user-break-parameterization)
                                (λ ()
-                                 (call-with-break-parameterization
-                                  (get-user-break-parameterization)
+                                 (call-with-values
                                   (λ ()
-                                    (eval-syntax sexp/syntax/eof))))
-                               (λ x (display-results x)))
+                                    (eval-syntax sexp/syntax/eof))
+                                  (λ x (display-results x)))))
                               (loop))))
                         (set! cleanup? #t))
                       (λ () 
@@ -1066,103 +1073,103 @@ TODO
             (semaphore-post eval-thread-state-sema)
             (semaphore-post eval-thread-queue-sema))
           
-          (define/private init-evaluation-thread ; =Kernel=
-            (λ ()
-              (set! user-language-settings (send definitions-text get-next-settings))
+          (define/private (init-evaluation-thread) ; =Kernel=
+            (set! user-language-settings (send definitions-text get-next-settings))
+            
+            (set! user-custodian (make-custodian))
+            ; (custodian-limit-memory user-custodian 10000000 user-custodian)
+            (set! user-eventspace-box (make-weak-box
+                                       (parameterize ([current-custodian user-custodian])
+                                         (make-eventspace))))
+            (set! user-break-parameterization (parameterize-break 
+                                               #t 
+                                               (current-break-parameterization)))
+            (set! user-break-enabled #t)
+            (set! eval-thread-thunks null)
+            (set! eval-thread-state-sema (make-semaphore 1))
+            (set! eval-thread-queue-sema (make-semaphore 0))
+            
+            (let* ([init-thread-complete (make-semaphore 0)]
+                   [goahead (make-semaphore)])
               
-              (set! user-custodian (make-custodian))
-	      ; (custodian-limit-memory user-custodian 10000000 user-custodian)
-              (set! user-eventspace-box (make-weak-box
-					 (parameterize ([current-custodian user-custodian])
-					   (make-eventspace))))
-              (set! user-break-parameterization (parameterize-break 
-                                                 #t 
-                                                 (current-break-parameterization)))
-              (set! user-break-enabled #t)
-              (set! eval-thread-thunks null)
-              (set! eval-thread-state-sema (make-semaphore 1))
-              (set! eval-thread-queue-sema (make-semaphore 0))
-              
-              (let* ([init-thread-complete (make-semaphore 0)]
-                     [goahead (make-semaphore)]
-                     [queue-user/wait
-                      (λ (thnk)
-                        (let ([wait (make-semaphore 0)])
-                          (parameterize ([current-eventspace (get-user-eventspace)])
-                            (queue-callback
-                             (λ ()
-                               (thnk)
-                               (semaphore-post wait))))
-                          (semaphore-wait wait)))])
-                
-                ; setup standard parameters
-                (let ([snip-classes
-                       ; the snip-classes in the DrScheme eventspace's snip-class-list
-                       (drscheme:eval:get-snip-classes)])
-                  (queue-user/wait
-                   (λ () ; =User=, =No-Breaks=
-                     ; No user code has been evaluated yet, so we're in the clear...
-                     (break-enabled #f)
-                     (set! user-thread-box (make-weak-box (current-thread)))
-                     (initialize-parameters snip-classes))))
-                
-                ;; disable breaks until an evaluation actually occurs
-                (send context set-breakables #f #f)
-                
-                ;; initialize the language
-                (send (drscheme:language-configuration:language-settings-language user-language-settings)
-                      on-execute
-                      (drscheme:language-configuration:language-settings-settings user-language-settings)
-                      queue-user/wait)
-                
-                ;; installs the teachpacks
-                ;; must happen after language is initialized.
+              ; setup standard parameters
+              (let ([snip-classes
+                     ; the snip-classes in the DrScheme eventspace's snip-class-list
+                     (drscheme:eval:get-snip-classes)])
                 (queue-user/wait
                  (λ () ; =User=, =No-Breaks=
-                   (drscheme:teachpack:install-teachpacks 
-                    user-teachpack-cache)))
-                
-                (parameterize ([current-eventspace (get-user-eventspace)])
-                  (queue-callback
-                   (λ ()
-                     (let ([drscheme-error-escape-handler
-                            (λ ()
-			      ((current-error-escape-k)))])
-                       (error-escape-handler drscheme-error-escape-handler))
-                     
-                     (set! in-evaluation? #f)
-                     (update-running #f)
-		     (send context set-breakables #f #f)
-                     
-                     ;; let init-thread procedure return,
-                     ;; now that parameters are set
-                     (semaphore-post init-thread-complete)
-                     
-                     ; We're about to start running user code.
-                     
-                     ; Pause to let killed-thread get initialized
-                     (semaphore-wait goahead)
-                     
-                     (let loop () ; =User=, =Handler=, =No-Breaks=
-                       ; Wait for something to do
-                       (unless (semaphore-try-wait? eval-thread-queue-sema)
-                         ; User event callbacks run here; we turn on
-                         ;  breaks in the dispatch handler.
-                         (yield eval-thread-queue-sema))
-                       ; About to eval something
-                       (semaphore-wait eval-thread-state-sema)
-                       (let ([thunk (car eval-thread-thunks)])
-                         (set! eval-thread-thunks (cdr eval-thread-thunks))
-                         (semaphore-post eval-thread-state-sema)
-                         ; This thunk evals the user's expressions with appropriate
-                         ;   protections.
-                         (thunk))
-                       (loop)))))
-                (semaphore-wait init-thread-complete)
-                ; Start killed-thread
-                (initialize-killed-thread)
-                ; Let user expressions go...
-                (semaphore-post goahead))))
+                   ; No user code has been evaluated yet, so we're in the clear...
+                   (break-enabled #f)
+                   (set! user-thread-box (make-weak-box (current-thread)))
+                   (initialize-parameters snip-classes))))
+              
+              ;; disable breaks until an evaluation actually occurs
+              (send context set-breakables #f #f)
+              
+              ;; initialize the language
+              (send (drscheme:language-configuration:language-settings-language user-language-settings)
+                    on-execute
+                    (drscheme:language-configuration:language-settings-settings user-language-settings)
+                    (let ([run-on-user-thread (lambda (t) (queue-user/wait t))])
+                      run-on-user-thread))
+              
+              ;; installs the teachpacks
+              ;; must happen after language is initialized.
+              (queue-user/wait
+               (λ () ; =User=, =No-Breaks=
+                 (drscheme:teachpack:install-teachpacks 
+                  user-teachpack-cache)))
+              
+              (parameterize ([current-eventspace (get-user-eventspace)])
+                (queue-callback
+                 (λ ()
+                   (let ([drscheme-error-escape-handler
+                          (λ ()
+                            ((current-error-escape-k)))])
+                     (error-escape-handler drscheme-error-escape-handler))
+                   
+                   (set! in-evaluation? #f)
+                   (update-running #f)
+                   (send context set-breakables #f #f)
+                   
+                   ;; let init-thread procedure return,
+                   ;; now that parameters are set
+                   (semaphore-post init-thread-complete)
+                   
+                   ; We're about to start running user code.
+                   
+                   ; Pause to let killed-thread get initialized
+                   (semaphore-wait goahead)
+                   
+                   (let loop () ; =User=, =Handler=, =No-Breaks=
+                     ; Wait for something to do
+                     (unless (semaphore-try-wait? eval-thread-queue-sema)
+                       ; User event callbacks run here; we turn on
+                       ;  breaks in the dispatch handler.
+                       (yield eval-thread-queue-sema))
+                     ; About to eval something
+                     (semaphore-wait eval-thread-state-sema)
+                     (let ([thunk (car eval-thread-thunks)])
+                       (set! eval-thread-thunks (cdr eval-thread-thunks))
+                       (semaphore-post eval-thread-state-sema)
+                       ; This thunk evals the user's expressions with appropriate
+                       ;   protections.
+                       (thunk))
+                     (loop)))))
+              (semaphore-wait init-thread-complete)
+              ; Start killed-thread
+              (initialize-killed-thread)
+              ; Let user expressions go...
+              (semaphore-post goahead)))
+          
+          (define/private (queue-user/wait thnk)
+            (let ([wait (make-semaphore 0)])
+              (parameterize ([current-eventspace (get-user-eventspace)])
+                (queue-callback
+                 (λ ()
+                   (thnk)
+                   (semaphore-post wait))))
+              (semaphore-wait wait)))
           
           (field (shutting-down? #f))
 
@@ -1312,6 +1319,12 @@ TODO
                         ; =User=, =Non-Handler=, =No-Breaks=
                         (primitive-dispatch-handler eventspace)])))))))
           
+          (define/public (new-empty-console)
+            (queue-user/wait
+             (λ () ; =User=, =No-Breaks=
+               (send (drscheme:language-configuration:language-settings-language user-language-settings)
+                     first-opened))))
+            
           (define/public (reset-console)
             (when (thread? thread-killed)
               (kill-thread thread-killed))
@@ -1395,6 +1408,12 @@ TODO
             (thaw-colorer)
             (send context disable-evaluation)
             (reset-console)
+
+            (queue-user/wait
+             (λ () ; =User=, =No-Breaks=
+               (send (drscheme:language-configuration:language-settings-language user-language-settings)
+                     first-opened)))
+
             (insert-prompt)
             (send context enable-evaluation)
             (end-edit-sequence)

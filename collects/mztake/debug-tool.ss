@@ -15,7 +15,7 @@
            "annotator.ss"
            "load-sandbox.ss"
            ;(lib "framework.ss" "framework")
-           #;(lib "string-constant.ss" "string-constants")
+           (lib "string-constant.ss" "string-constants")
            )
   
   (provide tool@)
@@ -23,13 +23,24 @@
   ; QUESTIONS/IDEAS
   ; what is the right way to deal with macros?
   ; how can the three tool classes communicate with each other safely
-  
+
   (define tool@
     (unit/sig drscheme:tool-exports^
       (import drscheme:tool^)
       
       (define phase1 void)
       (define phase2 void)
+
+      (define (extract-language-level settings)
+	(let* ([language (drscheme:language-configuration:language-settings-language settings)])
+	  (car (last-pair (send language get-language-position)))))
+
+      (define (debugger-does-not-work-for? lang)
+	(member lang (list (string-constant beginning-student)
+			   (string-constant beginning-student/abbrev)
+			   (string-constant intermediate-student)
+			   (string-constant intermediate-student/lambda)
+			   (string-constant advanced-student))))
       
       (define (break-at bp p)
         (hash-table-get bp p))
@@ -404,7 +415,11 @@
                             [else    (send dc set-pen pc-pen)
                                      (send dc set-brush pc-brush)]))
                         (drscheme:arrow:draw-arrow dc xm0 ym0 xr ym dx dy)
-                        (loop start-pos (rest marks)))))))))))
+                        (loop start-pos (rest marks)))))))))
+
+	  (define/augment (after-set-next-settings s)
+	    (send (get-top-level-window) check-current-language-for-debugger)
+	    (inner (void) after-set-next-settings s))))
       
       (define (debug-interactions-text-mixin super%)
         (class super%
@@ -506,10 +521,11 @@
                        (case-lambda
                          [(top-mark ccm val)
                           (let* ([debug-marks (continuation-mark-set->list ccm debug-key)])
-                            (send parent suspend oeh (cons top-mark debug-marks) (list 'exit-break val)))]
+                            (car (send parent suspend oeh (cons top-mark debug-marks) (list 'exit-break val))))]
                          [(top-mark ccm . vals) 
                           (let* ([debug-marks (continuation-mark-set->list ccm debug-key)])
-                            (send parent suspend oeh (cons top-mark debug-marks) (cons 'exit-break vals)))])))
+                            (apply values
+				   (send parent suspend oeh (cons top-mark debug-marks) (cons 'exit-break vals))))])))
                      (current-exception-handler
                       (lambda (exn)
                         (if (and (exn:break? exn) (send parent suspend-on-break?))
@@ -557,11 +573,11 @@
             (set! break-status stat))
           (define control-panel #f)
           (define/public (resume)
-	    (let ([v (if (cons? break-status)
-			 (apply values (rest break-status))
-			 #f)])
+	    (let ([v break-status])
 	      (resume-gui)
-	      (channel-put resume-ch v)))
+	      (channel-put resume-ch (if (pair? v)
+					 (cdr v)
+					 #f))))
           (define/public (set-mouse-over-msg msg)
             (when (not (string=? msg (send mouse-over-message get-label)))
               (send mouse-over-message set-label msg)))
@@ -655,7 +671,9 @@
 					       (thunk)
 					       (loop)))))
 		       (semaphore-post suspend-sema))))
-		  #f)))
+		  (if (pair? status)
+		      (cdr status)
+		      #f))))
           
           (define (my-execute debug?)
             (set! want-debug? debug?)
@@ -719,16 +737,16 @@
           
           (define status-message
             (instantiate message% ()
-              [label ""]
+              [label " "]
               [parent debug-panel]
               [stretchable-width #t]))
           
           (define debug-button
             (make-object button%
               ((bitmap-label-maker
-                "Debug"
+		(string-constant debug-tool-button-name)
                 (build-path (collection-path "mztake" "icons") "icon-small.png")) this)
-              (get-button-panel)
+              (make-object vertical-pane% (get-button-panel))
               (lambda (button evt)
                 (my-execute #t))))
           
@@ -775,14 +793,29 @@
 
           (define mouse-over-message
             (instantiate message% ()
-              [label ""]
+              [label " "]
               [parent debug-panel]
               [stretchable-width #t]))
+
+	  (define/augment (on-tab-change old new)
+	    (check-current-language-for-debugger)
+	    (inner (void) on-tab-change old new))
+
+	  (define/public (check-current-language-for-debugger)
+	    (if (debugger-does-not-work-for? (extract-language-level 
+					      (send (get-definitions-text) get-next-settings)))
+		(when (send debug-button is-shown?)
+		  (send (send debug-button get-parent) delete-child debug-button))
+		(unless (send debug-button is-shown?)
+		  (send (send debug-button get-parent) add-child debug-button))))
           
           (send (get-button-panel) change-children
                 (lambda (_)
-                  (cons debug-button
-                        (remq debug-button _))))))
+                  (cons (send debug-button get-parent)
+                        (remq (send debug-button get-parent) _))))
+
+	  ; hide debug button if it's not supported for the initial language:
+	  (check-current-language-for-debugger)))
       (drscheme:get/extend:extend-definitions-text debug-definitions-text-mixin)
       (drscheme:get/extend:extend-interactions-text debug-interactions-text-mixin)
       (drscheme:get/extend:extend-unit-frame debug-unit-frame-mixin))))

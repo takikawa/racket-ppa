@@ -34,6 +34,8 @@ int pen_count, brush_count, font_count, bitmap_count;
 # define COUNT_M(c) 
 #endif
 
+#pragma optimize("", off)
+
 void RegisterGDIObject(HANDLE x);
 void DeleteRegisteredGDIObject(HANDLE x);
 
@@ -171,7 +173,7 @@ static int glyph_exists_in_selected_font(HDC hdc, int c)
   if (wxGetFontUnicodeRanges) {
     DWORD sz;
     sz = wxGetFontUnicodeRanges(hdc, NULL);
-    if (sz && (sz < 4096)) {
+    if (sz) {
       wxGLYPHSET *gs;
       char *bytes;
       int i;
@@ -196,6 +198,8 @@ static int glyph_exists_in_selected_font(HDC hdc, int c)
 typedef struct {
   HDC hdc;
   int c;
+  int just_face;
+  int just_tt;
   wchar_t *face;
 } GlyphFindData;
 
@@ -213,7 +217,15 @@ static int CALLBACK glyph_exists(ENUMLOGFONTW FAR* lpelf,
     /* This font might work...  */
     int ok = 1;
       
-    if (type == TRUETYPE_FONTTYPE) {
+    if (gfd->just_face)
+      ok = !memcmp(gfd->face, lpelf->elfLogFont.lfFaceName, 
+		   wx_wstrlen(gfd->face));
+    else if (gfd->just_tt)
+      ok = (type == TRUETYPE_FONTTYPE);
+    else
+      ok = (type != TRUETYPE_FONTTYPE);
+    
+    if (ok && (type == TRUETYPE_FONTTYPE)) {
       /* Use the unicode bitfield to avoid unnecessary font loading */
       DWORD *usb;
       int x;
@@ -236,7 +248,7 @@ static int CALLBACK glyph_exists(ENUMLOGFONTW FAR* lpelf,
       
       DeleteObject(cfont);
 
-      if (gfd->face) {
+      if (gfd->face && !gfd->just_face) {
 	memcpy(gfd->face, lpelf->elfLogFont.lfFaceName, LF_FACESIZE * sizeof(wchar_t));
       }
       
@@ -257,8 +269,47 @@ Bool wxFont::GlyphAvailable(int c, HDC hdc, int screen_font)
   gfd.hdc = hdc;
   gfd.c = c;
   gfd.face = NULL;
+  gfd.just_face = 0;
 
-  return !EnumFontFamiliesW(hdc, NULL, (FONTENUMPROCW)glyph_exists, (LPARAM)&gfd);
+  gfd.just_tt = 1;
+  if (!EnumFontFamiliesW(hdc, NULL, (FONTENUMPROCW)glyph_exists, (LPARAM)&gfd))
+    return 1;
+
+  gfd.just_tt = 0;
+  if (!EnumFontFamiliesW(hdc, NULL, (FONTENUMPROCW)glyph_exists, (LPARAM)&gfd))
+    return 1;
+
+  return 0;
+}
+
+Bool wxFont::ScreenGlyphAvailabilityCached(int c, Bool for_label, Bool *avail)
+{
+  if (glyph_cache) {
+    Scheme_Hash_Table *ht;
+    Scheme_Object *v;
+    ht = (Scheme_Hash_Table *)glyph_cache;
+    if (for_label)
+      c = -(c + 1);
+    v = scheme_hash_get(ht, scheme_make_integer(c));
+    if (v) {
+      *avail = SCHEME_TRUEP(v);
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+void wxFont::CacheScreenGlyphAvailability(int c, Bool for_label, Bool avail)
+{
+  Scheme_Hash_Table *ht;
+  ht = (Scheme_Hash_Table *)glyph_cache;
+  if (!ht) {
+    ht = scheme_make_hash_table(SCHEME_hash_ptr);
+    glyph_cache = ht;
+  }
+  if (for_label)
+    c = -(c + 1);
+  scheme_hash_set(ht, scheme_make_integer(c), avail ? scheme_true : scheme_false);
 }
 
 Bool wxFont::GlyphAvailableNow(int c, HDC hdc, int screen_font)
@@ -268,26 +319,15 @@ Bool wxFont::GlyphAvailableNow(int c, HDC hdc, int screen_font)
   if (redirect)
     return redirect->GlyphAvailableNow(c, hdc, screen_font);
 
-  if (screen_font && glyph_cache) {
-    Scheme_Hash_Table *ht;
-    Scheme_Object *v;
-    ht = (Scheme_Hash_Table *)glyph_cache;
-    v = scheme_hash_get(ht, scheme_make_integer(c));
-    if (v) {
-      return SCHEME_TRUEP(v);
-    }
+  if (screen_font) {
+    if (ScreenGlyphAvailabilityCached(c, 0, &avail))
+      return avail;
   }
 
   avail = glyph_exists_in_selected_font(hdc, c);
 
   if (screen_font) {
-    Scheme_Hash_Table *ht;
-    ht = (Scheme_Hash_Table *)glyph_cache;
-    if (!ht) {
-      ht = scheme_make_hash_table(SCHEME_hash_ptr);
-      glyph_cache = ht;
-    }
-    scheme_hash_set(ht, scheme_make_integer(c), avail ? scheme_true : scheme_false);
+    CacheScreenGlyphAvailability(c, 0, avail);
   }
 
   return avail;
@@ -296,10 +336,13 @@ Bool wxFont::GlyphAvailableNow(int c, HDC hdc, int screen_font)
 Bool wxFont::ScreenGlyphAvailable(int c, Bool for_label)
 {
   HDC hdc;
-  Bool r;
+  Bool r, avail;
 
   if (redirect)
     return redirect->ScreenGlyphAvailable(c, for_label);
+
+  if (ScreenGlyphAvailabilityCached(c, for_label, &avail))
+    return avail;
 
   hdc = ::GetDC(NULL);
 
@@ -310,11 +353,86 @@ Bool wxFont::ScreenGlyphAvailable(int c, Bool for_label)
     old = (HFONT)::SelectObject(hdc, cfont);
     r = glyph_exists_in_selected_font(hdc, c);
     ::SelectObject(hdc, old);
+
+    if (!r) {
+      /* Look for font links */
+      HKEY key;
+      DWORD nlen, vlen, vlen2;
+      wchar_t value_name[256], *value;
+      char *face;
+      face = wxTheFontNameDirectory->GetScreenName(fontid, weight, style);
+      if (face) {
+	if (ERROR_SUCCESS
+	    == RegOpenKeyExW(HKEY_LOCAL_MACHINE, 
+			     L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\FontLink\\SystemLink",
+			     0, KEY_READ,
+			     &key)) {
+	  int i = 0;
+	  while (1) {
+	    nlen = 256;
+	    vlen = 0;
+	    if (ERROR_SUCCESS
+		!= RegEnumValueW(key, i, value_name, &nlen,
+				 NULL, NULL, NULL, &vlen))
+              break;
+	    if (!strcmp(face, wxNARROW_STRING(value_name))) {
+	      value = (wchar_t *)(new WXGC_ATOMIC char[vlen]);
+	      vlen2 = vlen;
+	      nlen++;
+	      if (ERROR_SUCCESS
+		  == RegEnumValueW(key, i, value_name, &nlen,
+				   NULL, NULL, (BYTE *)value, &vlen2)) {
+		if (vlen2 == vlen) {
+		  int j, k;
+		  vlen >>= 1;
+		  r = 0;
+		  for (j = 0; j < vlen; j++) {
+		    if (value[j] == ',') {
+		      j++;
+		      for (k = j; k < vlen; k++) {
+			if (!value[k])
+			  break;
+		      }
+		      /* Range from j (inclusive) to k (exclusive) is a font name */
+		      {
+			GlyphFindData gfd;
+			wchar_t *face;
+			face = (wchar_t *)(new WXGC_ATOMIC char[(k - j + 1) * sizeof(wchar_t)]);
+			memcpy(face, value + j, (k - j) * sizeof(wchar_t));
+			face[k - j] = 0;
+			
+			gfd.hdc = hdc;
+			gfd.c = c;
+			gfd.face = face;
+			gfd.just_tt = 0;
+			gfd.just_face = 1;
+			
+			if (!EnumFontFamiliesW(hdc, NULL, (FONTENUMPROCW)glyph_exists, (LPARAM)&gfd)) {
+			  r = 1;
+			  break;
+			}
+		      }
+		    }
+		  }
+		  if (r)
+		    break;
+		}
+	      }
+	      break;
+	    }
+	    i++;
+	  }
+	  RegCloseKey(key);
+	}
+      }
+    }
   } else {
     r = GlyphAvailable(c, hdc, 1);
   }
 
   ReleaseDC(NULL, hdc);
+
+  CacheScreenGlyphAvailability(c, for_label, r);
 
   return r;
 }
@@ -338,14 +456,24 @@ wxFont *wxFont::Substitute(int c, HDC dc, Bool screen_font)
   if (node)
     sub = (wxFont *)node->Data();
   else {
+    int found;
     GlyphFindData gfd;
     wchar_t facebuf[LF_FACESIZE];
     
     gfd.hdc = dc;
     gfd.c = c;
     gfd.face = facebuf;
+    gfd.just_face = 0;
+    
+    gfd.just_tt = 1;
+    found = !EnumFontFamiliesW(dc, NULL, (FONTENUMPROCW)glyph_exists, (LPARAM)&gfd);
 
-    if (!EnumFontFamiliesW(dc, NULL, (FONTENUMPROCW)glyph_exists, (LPARAM)&gfd)) {
+    if (!found) {
+      gfd.just_tt = 0;
+      found = !EnumFontFamiliesW(dc, NULL, (FONTENUMPROCW)glyph_exists, (LPARAM)&gfd);
+    }
+
+    if (found) {
       /* Found substitute font */
       int sid;
       sid = wxTheFontNameDirectory->FindOrCreateFontId(wxNARROW_STRING(facebuf), family);
@@ -1722,7 +1850,8 @@ void *wxBitmap::ChangeToDIBSection(Bool copy_old)
   BITMAPINFO bmp;
   HBITMAP bm;
   void *pBits;
-  
+
+  memset(&bmp, 0, sizeof(bmp));
   bmp.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
   bmp.bmiHeader.biWidth = width;
   bmp.bmiHeader.biHeight = height;
@@ -1984,6 +2113,8 @@ Bool wxBitmap::LoadFile(char *bitmap_file, long flags, wxColour *bg)
 wxBitmap::~wxBitmap(void)
 {
   COUNT_M(bitmap_count);
+
+  ReleaseCachedMask();
 
   if (selectedInto) {
     ((wxMemoryDC *)selectedInto)->SelectObject(NULL);

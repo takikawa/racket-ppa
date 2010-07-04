@@ -41,6 +41,7 @@
                     [fake-beginner-wla-render-settings render-settings?]
                     [fake-intermediate-render-settings render-settings?]
                     [fake-intermediate/lambda-render-settings render-settings?]
+                    [fake-advanced-render-settings render-settings?]
                     [fake-mz-render-settings render-settings?])
   
   (define (make-fake-render-to-sexp true/false constructor-style abbreviate)
@@ -52,8 +53,8 @@
         (or (and (procedure? val)
                  (object-name val))
             (print-convert val)))))
-    
-  ; FIXME : #f totally unacceptable as 'render-to-string'
+  
+    ; FIXME : #f totally unacceptable as 'render-to-string'
   (define fake-beginner-render-settings
     (make-render-settings #t #t #f (make-fake-render-to-sexp #t #t #f) #t))
   
@@ -64,6 +65,10 @@
     fake-beginner-wla-render-settings)
   
   (define fake-intermediate/lambda-render-settings
+    fake-beginner-wla-render-settings)
+  
+  ;; this is a guess:
+  (define fake-advanced-render-settings
     fake-beginner-wla-render-settings)
   
   (define fake-mz-render-settings

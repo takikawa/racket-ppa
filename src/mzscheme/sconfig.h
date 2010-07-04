@@ -98,7 +98,9 @@
 # include "uconfig.h"
 
 # define STACK_GROWS_DOWN
-# define SCHEME_BIG_ENDIAN
+# ifndef i386
+#  define SCHEME_BIG_ENDIAN
+# endif
 
 # define USE_EXPLICT_FP_FORM_CHECK
 # define POW_HANDLES_INF_CORRECTLY
@@ -231,6 +233,8 @@
 # define USE_DYNAMIC_FDSET_SIZE
 
 # define USE_TIMEZONE_VAR
+
+# define MZ_TCP_LISTEN_IPV6_ONLY_SOCKOPT
 
 # define FLAGS_ALREADY_SET
 
@@ -1012,6 +1016,19 @@
 
  /* MZ_BINARY is combinaed with other flags in all calls to open();
     it can be defined to O_BINARY in Cygwin, for example. */
+
+ /* MZ_TCP_LISTEN_IPV6_ONLY_SOCKOPT uses IPV6_V6ONLY for IPv6
+    listeners when the same listener has an IPv4 address, which means
+    that the IpV6 listener accepts only IPv6 connections. This is used
+    with Linux, for example, because a port cannot have both an IPv4
+    and IPv6 listener if the IPv6 one doesn't use IPV6_V6ONLY. (The
+    two listeners might be for different interfaces, in which case
+    IPV6_V6ONLY is not necessary, but we must err on the side of being
+    too restrictive. If IPV6_V6ONLY is not #defined or if setting the
+    option doesn't work, then the IPv6 addresses are silently ignored
+    when creating the listener (but only where there is at least once
+    IPv4 address). */
+
 
   /***********************/
  /* Threads & Signals  */

@@ -91,21 +91,21 @@ plt/collects/tests/mzscheme/image-test.ss
       (error (format "cannot make ~a x ~a image" w h))))
   
   (define (mode? x)
-    (or (eq? x 'solid)
-        (eq? x 'outline)))
+    (member x '(solid "solid" outline "outline")))
   
-  (define mode-str "'solid or 'outline")
+  (define mode-str "'solid \"solid\" 'outline or \"outline\"")
   
   (define (mode->brush-symbol m)
-    (case m
-      [(solid) 'solid]
-      [(outline) 'transparent]))
+    (cond
+      [(member m '(solid "solid"))
+       'solid]
+      [(member m '(outline "outline"))
+       'transparent]))
   
   (define (mode->pen-symbol m)
-    (case m
-      [(solid) 'transparent]
-      [(outline) 'solid]))
-  
+    (cond
+      [(member m '(solid "solid")) 'transparent]
+      [(member m '(outline "outline")) 'solid]))
   
   (define (make-color% c)
     (cond
@@ -210,8 +210,8 @@ plt/collects/tests/mzscheme/image-test.ss
                [top (min 0 delta-y)]
                [right (max (+ delta-x b-w) a-w)]
                [bottom (max (+ delta-y b-h) a-h)]
-               [new-w (ceiling (- right left))]
-               [new-h (ceiling (- bottom top))]
+               [new-w (inexact->exact (ceiling (- right left)))]
+               [new-h (inexact->exact (ceiling (- bottom top)))]
                [a-dx (- left)]
                [a-dy (- top)]
                [b-dx (- delta-x left)]
@@ -405,10 +405,14 @@ plt/collects/tests/mzscheme/image-test.ss
                [height th]
                [px 0]
                [py 0])))))
-                    
+
+  (define cached-bdc-for-text-size (make-thread-cell #f))
   (define (get-text-size size string)
-    (let* ([bm (make-object bitmap% 1 1)]
-           [dc (make-object bitmap-dc% bm)])
+    (unless (thread-cell-ref cached-bdc-for-text-size)
+      (let* ([bm (make-object bitmap% 1 1)]
+             [dc (make-object bitmap-dc% bm)])
+        (thread-cell-set! cached-bdc-for-text-size dc)))
+    (let ([dc (thread-cell-ref cached-bdc-for-text-size)])
       (let-values ([(w h _1 _2) (send dc get-text-extent string (get-font size))])
         (values (inexact->exact (ceiling w)) 
                 (inexact->exact (ceiling h))))))
@@ -478,18 +482,20 @@ plt/collects/tests/mzscheme/image-test.ss
         (make-simple-cache-image-snip w h (floor (/ w 2)) (floor (/ h 2)) draw mask-draw))))
         
   (define (make-simple-cache-image-snip w h px py dc-proc mask-proc)
-    (let ([argb-proc 
-           (lambda (argb-vector dx dy)
-             (let ([c-bm (build-bitmap (lambda (dc) (dc-proc dc 0 0)) w h)]
-                   [m-bm (build-bitmap (lambda (dc) (mask-proc dc 0 0)) w h)])
-               (overlay-bitmap argb-vector dx dy c-bm m-bm)))])
-      (new cache-image-snip%
-           [dc-proc dc-proc]
-           [argb-proc argb-proc]
-           [width w]
-           [height h]
-           [px px]
-           [py py])))
+    (let ([w (inexact->exact (ceiling w))]
+	  [h (inexact->exact (ceiling h))])
+      (let ([argb-proc 
+	     (lambda (argb-vector dx dy)
+	       (let ([c-bm (build-bitmap (lambda (dc) (dc-proc dc 0 0)) w h)]
+		     [m-bm (build-bitmap (lambda (dc) (mask-proc dc 0 0)) w h)])
+		 (overlay-bitmap argb-vector dx dy c-bm m-bm)))])
+	(new cache-image-snip%
+	     [dc-proc dc-proc]
+	     [argb-proc argb-proc]
+	     [width w]
+	     [height h]
+	     [px px]
+	     [py py]))))
   
   (define (make-color-wrapper color-in brush pen rest)
     (let ([color (make-color% color-in)])

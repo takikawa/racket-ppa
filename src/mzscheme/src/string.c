@@ -39,6 +39,7 @@
 # include <errno.h>
 # ifdef MACOS_UNICODE_SUPPORT
 #  include <CoreFoundation/CFString.h>
+#  include <CoreFoundation/CFLocale.h>
 # endif
 # ifdef WINDOWS_UNICODE_SUPPORT
 #  include <windows.h>
@@ -75,6 +76,8 @@ static int get_iconv_errno(void)
   a = msvcrt_errno();
   return *a;
 }
+# undef HAVE_CODESET
+# define HAVE_CODESET 1
 # define CODESET 0
 # define ICONV_errno get_iconv_errno()
 static int iconv_ready = 0;
@@ -233,6 +236,7 @@ static Scheme_Object *system_library_subpath(int argc, Scheme_Object *argv[]);
 static Scheme_Object *cmdline_args(int argc, Scheme_Object *argv[]);
 static Scheme_Object *current_locale(int argc, Scheme_Object *argv[]);
 static Scheme_Object *locale_string_encoding(int argc, Scheme_Object *argv[]);
+static Scheme_Object *system_language_country(int argc, Scheme_Object *argv[]);
 
 static Scheme_Object *byte_string_open_converter(int argc, Scheme_Object *argv[]);
 static Scheme_Object *byte_string_close_converter(int argc, Scheme_Object *argv[]);
@@ -512,6 +516,11 @@ scheme_init_string (Scheme_Env *env)
   scheme_add_global_constant("locale-string-encoding",
 			     scheme_make_prim_w_arity(locale_string_encoding,
 						      "locale-string-encoding",
+						      0, 0),
+			     env);
+  scheme_add_global_constant("system-language+country",
+			     scheme_make_prim_w_arity(system_language_country,
+						      "system-language+country",
 						      0, 0),
 			     env);
 
@@ -1870,7 +1879,7 @@ char *scheme_banner(void)
       "3m"
 #endif
       " version " MZSCHEME_VERSION VERSION_SUFFIX
-      ", Copyright (c) 2004-2005 PLT Scheme, Inc.\n";
+      ", Copyright (c) 2004-2005 PLT Scheme Inc.\n";
 }
 
 void scheme_set_banner(char *s)
@@ -2143,7 +2152,89 @@ static Scheme_Object *locale_string_encoding(int argc, Scheme_Object *argv[])
   if (mzLOCALE_IS_UTF_8(current_locale_name) || !locale_on)
     return scheme_make_utf8_string("UTF-8");
   
+#if HAVE_CODESET
   return scheme_make_utf8_string(nl_langinfo(CODESET));
+#else
+  /* nl_langinfo doesn't work, so just make up something */
+  return scheme_make_utf8_string("UTF-8");
+#endif
+}
+
+static Scheme_Object *system_language_country(int argc, Scheme_Object *argv[])
+{
+#ifdef MACOS_UNICODE_SUPPORT
+  /* Mac OS X */
+  CFLocaleRef l;
+  CFStringRef s;
+  int len;
+  char *r;
+
+  l = CFLocaleCopyCurrent();
+  s = CFLocaleGetIdentifier(l);
+
+  len = CFStringGetLength(s);
+  r = (char *)scheme_malloc_atomic(len * 6 + 1);
+  CFStringGetCString(s, r, len * 6 + 1, kCFStringEncodingUTF8);
+
+  CFRelease(l);
+
+  return scheme_make_sized_utf8_string(r, 5);
+#else
+# ifdef WINDOWS_UNICODE_SUPPORT
+  /* Windows */
+  LCID l;
+  int llen, clen;
+  char *lang, *country, *s;
+  l = GetUserDefaultLCID();
+
+  llen = GetLocaleInfo(l, LOCALE_SENGLANGUAGE, NULL, 0);
+  lang = (char *)scheme_malloc_atomic(llen);
+  GetLocaleInfo(l, LOCALE_SENGLANGUAGE, lang, llen);
+  if (llen)
+    llen -= 1; /* drop nul terminator */
+
+  clen = GetLocaleInfo(l, LOCALE_SENGCOUNTRY, NULL, 0);
+  country = (char *)scheme_malloc_atomic(clen);
+  GetLocaleInfo(l, LOCALE_SENGCOUNTRY, country, clen);
+  if (clen)
+    clen -= 1; /* drop nul terminator */
+
+  s = (char *)scheme_malloc_atomic(clen + llen + 1);
+  memcpy(s, lang, llen);
+  memcpy(s + 1 + llen, country, clen);
+  s[llen] = '_';
+  
+  return scheme_make_sized_utf8_string(s, llen + 1 + clen);
+# else
+  /* Unix */
+  char *s;
+  
+  s = getenv("LC_ALL");
+  if (!s)
+    s = getenv("LC_CTYPE");
+  if (!s)
+    s = getenv("LANG");
+  
+  if (s) {
+    /* Check that the environment variable has the form
+       xx_XX[.ENC] */
+    if ((s[0] >= 'a') && (s[0] <= 'z')
+	&& (s[1] >= 'a') && (s[1] <= 'z')
+	&& (s[2] == '_')
+	&& (s[3] >= 'A') && (s[3] <= 'Z')
+	&& (s[4] >= 'A') && (s[4] <= 'Z')
+	&& (!s[5] || s[5] == '.')) {
+      /* Good */
+    } else
+      s = NULL;
+  }
+  
+  if (!s)
+    s = "en_US";
+  
+  return scheme_make_sized_utf8_string(s, 5);
+# endif
+#endif
 }
 
 #ifndef DONT_USE_LOCALE
@@ -4227,8 +4318,8 @@ unsigned short *scheme_ucs4_to_utf16(const mzchar *text, int start, int end,
   for (i = start, j = 0; i < end; i++) {
     v = text[i];
     if (v > 0xFFFF) {
-      utf16[j++] = 0xD8000 | ((v >> 10) & 0x3FF);
-      utf16[j++] = 0xDC000 | (v & 0x3FF);
+      utf16[j++] = 0xD800 | ((v >> 10) & 0x3FF);
+      utf16[j++] = 0xDC00 | (v & 0x3FF);
     } else
       utf16[j++] = v;
   }

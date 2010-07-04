@@ -45,17 +45,16 @@
       ;;  'scheme-object 
       ;;  'scheme-bucket
       ;;  'scheme-per-load-static
-      ;;  'scheme-per-invoke-static
       ;;  'label
       ;;  'prim
+      ;;  'prim-empty
       ;;  'prim-case
+      ;;  'prim-case-empty
       ;;  'begin0-saver
       ;;  'wcm-saver
       (define-struct rep:pointer (to))
       (define-struct rep:struct (name orig-name fields))
       (define-struct rep:struct-field (name orig-name rep))
-
-      (define-struct (rep:atomic/invoke rep:atomic) (module-invoke))
 
       (define (rep:same-shape? a b)
 	(let ([al (rep:struct-fields a)]
@@ -67,10 +66,7 @@
 			   (or (and (rep:atomic? ar)
 				    (rep:atomic? br)
 				    (eq? (rep:atomic-type ar)
-					 (rep:atomic-type br))
-				    (or (not (rep:atomic/invoke? ar))
-					(eq? (rep:atomic/invoke-module-invoke ar)
-					     (rep:atomic/invoke-module-invoke br))))
+					 (rep:atomic-type br)))
 			       (and (rep:struct? ar)
 				    (rep:struct? br)
 				    (eq? (rep:struct-name ar)
@@ -181,21 +177,14 @@
 						 ;; field-name
 						 (if (const:per-load-statics-table? global)
 						     'pls
-						     (if (varref:module-invoke? global)
-							 'pmis
-							 #f))
-						 (if (or (const:per-load-statics-table? global)
-							 (varref:module-invoke? global))
+						     #f)
+						 (if (const:per-load-statics-table? global)
 						     global
 						     (mod-glob-cname global))
 						 ;; field-type
 						 (if (const:per-load-statics-table? global)
 						     (make-rep:atomic 'scheme-per-load-static)
-						     (if (varref:module-invoke? global)
-							 (make-rep:atomic/invoke 
-							  'scheme-per-invoke-static
-							  global)
-							 (make-rep:atomic 'scheme-bucket)))))
+						     (make-rep:atomic 'scheme-bucket))))
 					      (set->list (code-global-vars code))))])
 			   (if (null? fields)
 			       #f ; empty structure - don't use anything
@@ -212,8 +201,12 @@
 				      (make-rep:struct-field 'prim
 							     'prim
 							     (if (= 1 (length (procedure-code-case-codes code)))
-								 (make-rep:atomic 'prim)
-								 (make-rep:atomic 'prim-case))))]
+								 (if struct
+								     (make-rep:atomic 'prim)
+								     (make-rep:atomic 'prim-empty))
+								 (if struct
+								     (make-rep:atomic 'prim-case)
+								     (make-rep:atomic 'prim-case-empty)))))]
 				    [else
 				     (compiler:internal-error
 				      #f

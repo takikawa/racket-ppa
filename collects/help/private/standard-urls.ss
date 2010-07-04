@@ -30,10 +30,11 @@
                       string?))
    (flush-manuals-url string?)
    (flush-manuals-path string?)
-   (make-missing-manual-url (string? string? string? string? . -> . string?))
+   (make-missing-manual-url (string? string? string? . -> . string?))
    (get-hd-location ((lambda (sym) (memq sym hd-location-syms))
                      . -> . 
-                     string))
+                     string?))
+   [prefix-with-server (string? . -> . string?)]
    [make-docs-plt-url (string? . -> . string?)]
    [make-docs-html-url (string? . -> . string?)])
 
@@ -48,7 +49,7 @@
   (define (make-docs-html-url manual-name)
     (format "~a/html/~a/index.htm" (base-docs-url) manual-name))
 
-  (define (prefix-with-server cookie suffix)
+  (define (prefix-with-server suffix)
     (format "http://~a:~a~a" internal-host internal-port suffix))
   
   (define results-url-prefix (format "http://~a:~a/servlets/results.ss?" internal-host internal-port))
@@ -60,7 +61,7 @@
 
   (define home-page-url (format "http://~a:~a/servlets/home.ss" internal-host internal-port))
   
-  (define (make-missing-manual-url cookie coll name link)
+  (define (make-missing-manual-url coll name link)
     (format "http://~a:~a/servlets/missing-manual.ss?manual=~a&name=~a&link=~a"
             internal-host
             internal-port

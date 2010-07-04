@@ -400,7 +400,7 @@
            (static-env (get-static-fields-env field-env))
            (setting-fields null)
            (inherited-fields null))
-      (when (eq? level 'beginner)
+      #;(when (eq? level 'beginner)
         (let ((parent (send type-recs get-class-record (car (class-record-parents class-record)))))
           (when (memq 'abstract (class-record-modifiers parent))
             (set! inherited-fields 
@@ -451,12 +451,12 @@
               ))))
       (let ((assigns (get-assigns members level (car c-class)))
             (static-assigns (get-static-assigns members level)))
-        (when (eq? level 'beginner)
-          (for-each (lambda (f)
-                      (andmap (lambda (assign)
-                                (inherited-field-set? f assign extend-src))
-                              assigns))
-                    inherited-fields))
+        #;(when (eq? level 'beginner)
+            (for-each (lambda (f)
+                        (andmap (lambda (assign)
+                                  (inherited-field-set? f assign extend-src))
+                                assigns))
+                      inherited-fields))
         (for-each (lambda (field)
                     (if (memq 'static (map modifier-kind (field-modifiers field)))
                         (andmap
@@ -515,7 +515,7 @@
   ;field-needs-set?: field symbol bool-> bool
   (define (field-needs-set? field level abst-class?)
     (cond
-      ((and (eq? level 'beginner) (not abst-class?) #t))
+      ((and (memq level '(beginner #;intermediate)) (not abst-class?) #t))
       ((memq 'final (map modifier-kind (field-modifiers field))) #t)
       (else #f)))
   
@@ -938,8 +938,10 @@
                       interactions?
                       type-recs))
         ((return? statement)
-         (check-return (return-expr statement)
+         (check-return statement
+                       (return-expr statement)
                        return
+                       env
                        check-e-no-change
                        (return-src statement)
                        interactions?
@@ -1062,25 +1064,27 @@
          (send type-recs add-req (make-req "Throwable" (list "java" "lang")))))
       exp/env))
     
-  ;check-return: expression type (expression -> type/env) src bool symbol type-records -> type/env
-  (define (check-return ret-expr return check src interact? level type-recs)
+  ;check-return: statement expression type env (expression -> type/env) src bool symbol type-records -> type/env
+  (define (check-return stmt ret-expr return env check src interact? level type-recs)
     (cond
-      (interact? (void))
+      (interact? (check ret-expr))
       ((and ret-expr (not (eq? 'void return)))
-         (let ((ret/env (check ret-expr)))
-           (if (assignment-conversion return (type/env-t ret/env) type-recs)
-               ret/env
-               (return-error 'not-equal (type/env-t ret/env) return src))))
-      ((and ret-expr (eq? 'void return) (not (eq? level 'full)))
+       (set-return-exp-type! stmt return)
+       (let ((ret/env (check ret-expr)))
+         (if (assignment-conversion return (type/env-t ret/env) type-recs)
+             ret/env
+             (return-error 'not-equal (type/env-t ret/env) return src))))
+      ((and ret-expr (eq? 'void return))
        (return-error 'void #f return src))
       ((and (not ret-expr) (not (eq? 'void return)))
-       (return-error 'val #f return src))))
+       (return-error 'val #f return src))
+      (else (make-type/env 'void env))))
   
   ;check-while: type/env  src -> void
   (define (check-while cond/env src check-s loop-body)
     ((check-cond 'while) (type/env-t cond/env) src)
     (check-s loop-body (type/env-e cond/env) #t #f)
-    (make-type/env 'void cond/env))
+    (make-type/env 'void (type/env-t cond/env)))
         
   ;check-do: (exp env -> type/env) exp src type/env -> type/env
   (define (check-do check-e exp src loop/env)
@@ -1517,10 +1521,10 @@
          ((or (and (prim-numeric-type? l) (prim-numeric-type? r))
               (and (eq? 'boolean l) (eq? 'boolean r)))
           'boolean)
-         ((and (reference-type? l) (reference-type? r))
-          (let ((right-to-left (assignment-conversion l r type-recs))
-                (left-to-right (assignment-conversion r l type-recs)))
-            (cond
+         ((and (reference-or-array-type? l) (reference-or-array-type? r))
+          (let ((right-to-left (castable? l r type-recs))
+                (left-to-right (castable? r l type-recs)))
+            (cond 
               ((or right-to-left left-to-right) 'boolean)
               (else (bin-op-equality-error 'both op l r src)))))
          (else 
@@ -1617,7 +1621,7 @@
                          (get-field-record fname class-rec
                                            (lambda () 
                                              (let* ((class? (member fname (send type-recs get-class-env)))
-                                                    (method? (not (null? (get-method-records fname class-rec)))))
+                                                    (method? (not (null? (get-method-records fname class-rec type-recs)))))
                                                (field-lookup-error (if class? 'class-name 
                                                                        (if method? 'method-name 'not-found))
                                                                    (string->symbol fname)
@@ -1690,8 +1694,9 @@
                 (unless (eq? level 'full)
                   (when (is-field-restricted? fname field-class)
                     (restricted-field-access-err (field-access-field acc) field-class src)))
-                (make-type/env (field-record-type record) 
-                               (if (type/env? obj-type/env) (type/env-e obj-type/env) env))))
+                (make-type/env 
+                 (if (eq? 'dynamic (field-record-type record)) (make-dynamic-val #f) (field-record-type record))
+                 (if (type/env? obj-type/env) (type/env-e obj-type/env) env))))
              ((and (dynamic-val? record) (dynamic-val-type record))
               (set-field-access-access! acc (make-var-access #f #t #t 'public 'unknown))
               (make-type/env (field-contract-type (unknown-ref-access (dynamic-val-type record)))
@@ -1785,7 +1790,7 @@
                                (cdr acc))))))
                    (else 
                     (let ((class? (member (id-string (car acc)) (send type-recs get-class-env)))
-                          (method? (not (null? (get-method-records (id-string (car acc)) (lookup-this type-recs env))))))
+                          (method? (not (null? (get-method-records (id-string (car acc)) (lookup-this type-recs env) type-recs)))))
                       (cond
                         ((or class? method?)
                          (variable-not-found-error (if class? 'class-name 'method-name) (car acc) (id-src (car acc))))
@@ -1817,7 +1822,7 @@
            (get-field-record fname obj-record
                              (lambda () 
                                (let* ((class? (member fname (send type-recs get-class-env)))
-                                      (method? (not (null? (get-method-records fname obj-record)))))
+                                      (method? (not (null? (get-method-records fname obj-record type-recs)))))
                                  (field-lookup-error 
                                   (if class? 'class-name 
                                       (if method? 'method-name 'not-found)) name obj-type src))))))
@@ -1934,7 +1939,7 @@
                                                                      (car (class-record-name record))
                                                                      (lambda () null))
                                                                (cdr (class-record-name record))))))
-                       (get-method-records name-string record))
+                       (get-method-records name-string record type-recs))
                       ((scheme-record? record)
                        (module-has-binding? record  name-string 
                                             (lambda () (no-method-error 'class 'not-found
@@ -1965,7 +1970,7 @@
                                                                (send type-recs lookup-path 
                                                                      (car (class-record-name record))
                                                                      (lambda () null)))))
-                           (let ((methods (get-method-records name-string record)))
+                           (let ((methods (get-method-records name-string record type-recs)))
                              (unless (andmap (lambda (x) x) 
                                              (map (lambda (mrec) (memq 'static (method-record-modifiers mrec)))
                                                   methods))
@@ -1981,8 +1986,8 @@
                  (if (string=? n "super")
                      (let ((parent (car (class-record-parents this))))
                        (get-method-records (car parent)
-                                           (get-record (send type-recs get-class-record parent) type-recs)))
-                     (get-method-records (car (class-record-name this)) this))))
+                                           (get-record (send type-recs get-class-record parent) type-recs) type-recs))
+                     (get-method-records (car (class-record-name this)) this type-recs))))
               (else
                (cond
                  ((and (special-name? expr) (equal? (special-name-name expr) "super"))
@@ -1991,7 +1996,7 @@
                   (let ((parent (car (class-record-parents this))))
                     (set! exp-type 'super)
                     (get-method-records name-string
-                                        (send type-recs get-class-record parent))))
+                                        (send type-recs get-class-record parent) type-recs)))
                  (expr
                   (let* ((call-exp/env 
                           (with-handlers ((exn:fail:syntax? handle-call-error))
@@ -2004,10 +2009,12 @@
                     (cond
                       ;List of methods found
                       ((list? call-exp) call-exp)
+                      ((eq? call-exp 'null)
+                       (prim-call-error call-exp name src level))
                       ((array-type? call-exp)
                        (set! exp-type call-exp)
                        (get-method-records name-string
-                                           (send type-recs get-class-record object-type)))
+                                           (send type-recs get-class-record object-type) type-recs))
                       ((dynamic-val? call-exp) 
                        (let ((m-contract (make-method-contract name-string #f #f #f)))
                          (set-dynamic-val-type! call-exp (make-unknown-ref m-contract))
@@ -2021,20 +2028,20 @@
                                                   ((get-importer type-recs) 
                                                    (cons (ref-type-class/iface call-exp) (ref-type-path call-exp))
                                                    type-recs level src))
-                                            type-recs)))
+                                            type-recs) type-recs))
                       (else (prim-call-error call-exp name src level)))))
                  (else 
-                  (if (eq? level 'beginner)
+                  (if (and (eq? level 'beginner) (not interact?))
                       (beginner-method-access-error name (id-src name))
                       (let ((rec (if static? (send type-recs get-class-record c-class) this)))
                         (cond 
-                          ((and (null? rec) (dynamic?) (lookup-var-in-env name-string env)) =>
+                          ((and (dynamic?) (lookup-var-in-env name-string env)) =>
                            (lambda (var-type)
                              (if (eq? 'dynamic (var-type-type var-type))
                                  (list (make-method-contract (string-append name-string "~f") #f #f #f))
                                  null)))
                           ((null? rec) null)
-                          (else (get-method-records name-string rec)))))))))))
+                          (else (get-method-records name-string rec type-recs)))))))))))
       
       (when (null? methods)
         (let* ((rec (if exp-type 
@@ -2055,7 +2062,10 @@
            (cond
              ((close-to-keyword? name-string)
               (close-to-keyword-error 'method name src))
-             (interact? (interaction-call-error name src level))
+             (interact? 
+              (if (or class? field?)
+                  (no-method-error 'interact sub-kind exp-type name src)
+                  (interaction-call-error name src level)))
              (else
               (no-method-error 'this sub-kind exp-type name src)))))))
       
@@ -2183,7 +2193,7 @@
             (if inner-lookup?
                 (inner-rec-record inner-lookup?)
                 (get-record (send type-recs get-class-record type c-class) type-recs)))
-           (methods (get-method-records (id-string (name-id name)) class-record)))
+           (methods (get-method-records (id-string (name-id name)) class-record type-recs)))
       (unless (or (equal? (car (class-record-name class-record)) (ref-type-class/iface type)))
         (set-id-string! (name-id name) (car (class-record-name class-record)))
         (set-class-alloc-class-inner?! exp #t))
@@ -2458,8 +2468,18 @@
           (set-dynamic-val-type! exp-type type)
           type)
          ((eq? 'dynamic type) (make-dynamic-val #f))
-         ((and (reference-type? exp-type) (reference-type? type)) type)
-         ((and (not (reference-type? exp-type)) (not (reference-type? type))) type)
+         ((and (reference-or-array-type? exp-type) (reference-or-array-type? type))               
+          (unless (castable? exp-type type type-recs) (cast-error 'incompatible exp-type type src))
+          type)
+         ((and (not (reference-type? exp-type)) (not (reference-type? type))) 
+          (unless (or (and (prim-numeric-type? exp-type)
+                           (prim-numeric-type? type)
+                           (or (widening-prim-conversion exp-type type)
+                               (widening-prim-conversion type exp-type))) 
+                      (and (eq? 'boolean type)
+                           (eq? 'boolean exp-type)))
+            (cast-error 'incompatible-prim exp-type type src))
+          type)
          ((reference-type? exp-type) (cast-error 'from-prim exp-type type src))
          (else (cast-error 'from-ref exp-type type src)))
        (type/env-e exp-type/env))))
@@ -2487,7 +2507,9 @@
        (cond 
          ((and (ref-type? exp-type) (ref-type? type)
                (or (is-eq-subclass? exp-type type type-recs)
-                   (is-eq-subclass? type exp-type type-recs))) 'boolean)
+                   (is-eq-subclass? type exp-type type-recs)
+                   (implements? exp-type type type-recs)
+                   (implements? type exp-type type-recs))) 'boolean)
          ((and (ref-type? exp-type) (ref-type? type))
           (instanceof-error 'not-related-type type exp-type src))
          ((ref-type? exp-type)
@@ -2611,7 +2633,7 @@
        op
        (case type
          ((both) 
-          (format "~a expects one argument to be assignable to the other, neither ~a nor ~a can be" op lt rt))
+          (format "~a expects one argument to be castable to the other, neither ~a nor ~a can be" op lt rt))
          (else 
           (format "~a expects its arguments to be equivalent types, given non-equivalent ~a and ~a" 
                   op lt rt)))
@@ -2761,12 +2783,13 @@
           (t (type->ext-name exp)))
       (raise-error
        n
-       (format "attempted to call method ~a on ~a which does not have methods. ~nOnly values with ~a types have methods"
-               n t
-               (case level 
-                 ((beginner) "class")
-                 ((intermediate) "class or interface")
-                 (else "class, interface, or array")))
+       (if (eq? exp 'null)
+           (format "Attempted to call method ~a directly on null. The null value does not have any methods." n)
+           (format "Attempted to call method ~a on ~a which does not have methods. ~nOnly values with ~a types have methods"
+                   n t
+                   (case level 
+                     ((beginner intermediate) "class or interface")
+                     (else "class, interface, or array"))))
        n src)))
   
   ;no-method-error: symbol symbol type id src -> void
@@ -2786,11 +2809,11 @@
           (let ((line1 
                  (format "Class ~a is inappropriately being used as a method." n))
                 (line2
-                 "Parenthesis typically follow the class name when creating an instance, perhaps 'new' was forgotten"))
+                 "Parenthesis typically follow the class name when creating an instance, perhaps 'new' was forgotten."))
           (format "~a~n~a" line1 line2)))
          ((field-name)
           (format 
-           "Field ~a is being inappropriately used as a method, parentheses are not used in interacting with a field"
+           "Field ~a is being inappropriately used as a method, parentheses are not used in interacting with a field."
            n)))                     
        n src)))
   
@@ -2801,12 +2824,12 @@
                    (case kind
                      ((method) 
                       (string-append
-                       (format "this method call uses an unfound method ~a, which is similar to a reserved word~n"
+                       (format "This method call uses an unfound method ~a, which is similar to a reserved word~n"
                                n)
                        "Perhaps it is miscapitalized or misspelled"))
                      ((field)
                        (string-append
-                        (format "this unknown variable, ~a, is similar to a reserved word.~n" n)
+                        (format "This unknown variable, ~a, is similar to a reserved word.~n" n)
                         "Perhaps it is miscaptialzed or misspelled")))
                    n src)))
 
@@ -2824,7 +2847,7 @@
   (define (beginner-method-access-error name src)
     (let ((n (id->ext-name name)))
       (raise-error n
-                   (format "method ~a from the current class must be called on 'this'" n)
+                   (format "Method ~a from the current class must be called on 'this'" n)
                    n src)))
 
   
@@ -2832,7 +2855,7 @@
   (define (restricted-method-call name class src)
     (let ((n (id->ext-name name)))
       (raise-error n
-                   (format "method ~a from ~a may not be called" n (car class))
+                   (format "Method ~a from ~a may not be called." n (car class))
                    n src)))
   
   ;ctor-called-error: type id src -> void
@@ -2840,7 +2863,7 @@
     (let ((t (if exp (type->ext-name exp) "the current class"))
           (n (id->ext-name name)))
       (raise-error n
-                   (format "Constructor ~a from ~a cannot be used as a method" n t)
+                   (format "Constructor ~a from ~a cannot be used as a method." n t)
                    n src)))
   
   ;non-static-called-error: id (list string) src bool -> void
@@ -2848,24 +2871,24 @@
     (let ((n (id->ext-name name)))
       (raise-error n
                    (if (memq level '(advanced full))
-                       (format "Non-static method ~a from ~a cannot be called directly from a static context"
+                       (format "Non-static method ~a from ~a cannot be called directly from a static context."
                                n (car class))
-                       (format "Method ~a from ~a cannot be called here" n (car class)))
+                       (format "Method ~a from ~a cannot be called here." n (car class)))
                    n src)))
   
   ;interaction-call-error
   (define (interaction-call-error name src level)
     (let ((n (id->ext-name name)))
       (raise-error n
-                   (string-append (format "method ~a cannot be called in the interactions window.~n" n)
-                                  (format "Only ~a methods or methods on objects may be called here" 
+                   (string-append (format "Method ~a cannot be called in the interactions window.~n" n)
+                                  (format "Only ~a methods or methods on objects may be called here." 
                                           (if (memq level '(beginner intermediate)) "certain library" "static")))
                    n src)))
 
   
   (define (illegal-ctor-call name src level)
     (let ((n (string->symbol name)))
-      (raise-error n (format "calls to ~a may only occur in ~a"
+      (raise-error n (format "Calls to ~a may only occur in ~a"
                              n
                              (if (memq level `(full advanced)) "other constructors" "the super constructor"))
                    n src)))
@@ -2973,7 +2996,7 @@
     (let ((n (id->ext-name name))
           (t (get-call-type exp)))
     (raise-error n
-                 (if (memq level '(beginner abstract))
+                 (if (memq level '(beginner intermediate abstract))
                      (format "~a does not contain a method named ~a" t n)
                      (case kind
                        ((pro) 
@@ -3165,7 +3188,12 @@
         (let ((line1 (format "Illegal cast from class or interface ~a to primitive, ~a."
                              (type->ext-name exp) (type->ext-name cast)))
               (line2 "Class or interface types may not be cast to non-class or interface types"))
-          (format "~a~n~a" line1 line2))))
+          (format "~a~n~a" line1 line2)))
+       ((incompatible)
+        (format "Illegal cast from class or interface ~a to class or interface ~a, incompatible types"
+                (type->ext-name exp) (type->ext-name cast)))
+       ((incompatible-prim)
+         (format "Illegal cast from ~a to ~a, incompatible types" (type->ext-name exp) (type->ext-name cast))))
      'cast src))
   
   ;;Instanceof errors

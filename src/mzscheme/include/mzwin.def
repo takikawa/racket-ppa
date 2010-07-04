@@ -135,6 +135,7 @@ EXPORTS
  scheme_load_compiled_stx_string
  scheme_compiled_stx_symbol
  scheme_eval_compiled_sized_string
+ scheme_eval_compiled_sized_string_with_magic
  scheme_malloc_eternal
  scheme_end_stubborn_change
  scheme_calloc
@@ -387,6 +388,7 @@ EXPORTS
  scheme_print_bytes
  scheme_print_utf8
  scheme_print_string
+ scheme_read_byte_string
  scheme_make_namespace
  scheme_add_namespace_option
  scheme_require_from_original_env
@@ -421,6 +423,8 @@ EXPORTS
  scheme_symbol_name
  scheme_symbol_name_and_size
  scheme_symbol_val
+ scheme_intern_exact_keyword
+ scheme_intern_exact_char_keyword
  scheme_make_struct_values
  scheme_make_struct_names
  scheme_make_struct_type
@@ -442,6 +446,7 @@ EXPORTS
  scheme_equal_hash_key
  scheme_equal_hash_key2
  scheme_build_list
+ scheme_build_list_offset
  scheme_make_list_immutable
  scheme_list_length
  scheme_proper_list_length
@@ -458,6 +463,8 @@ EXPORTS
  scheme_unbox
  scheme_set_box
  scheme_make_weak_box
+ scheme_make_ephemeron
+ scheme_ephemeron_value
  scheme_load
  scheme_load_extension
  scheme_register_extension_global

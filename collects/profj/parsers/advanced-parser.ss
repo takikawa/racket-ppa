@@ -153,8 +153,8 @@
       (TypeDeclaration
        [(ClassDeclaration) $1]
        [(InterfaceDeclaration) $1]
-       [(INTERACTIONS_BOX) $1]
-       [(CLASS_BOX) (parse-class-box $1 (build-src 1) 'advanced)]
+       #;[(INTERACTIONS_BOX) $1]
+         #;[(CLASS_BOX) (parse-class-box $1 (build-src 1) 'advanced)]
        [(TEST_SUITE) $1]
        [(EXAMPLE) $1]
        [(SEMI_COLON) #f])
@@ -169,7 +169,8 @@
        [(protected) (make-modifier 'protected (build-src 1))]
        [(private) (make-modifier 'private (build-src 1))]
        [(static) (make-modifier 'static (build-src 1))]
-       [(abstract) (make-modifier 'abstract (build-src 1))])
+       [(abstract) (make-modifier 'abstract (build-src 1))]
+       [(final) (make-modifier 'final (build-src 1))])
        
       ;; 19.8.1
       (ClassDeclaration
@@ -544,8 +545,8 @@
        [(continue SEMI_COLON) (make-continue #f (build-src 2))])
        
       (ReturnStatement
-       [(return Expression SEMI_COLON) (make-return $2 #f (build-src 3))]
-       [(return SEMI_COLON) (make-return #f #f (build-src 2))])
+       [(return Expression SEMI_COLON) (make-return $2 #f #f (build-src 3))]
+       [(return SEMI_COLON) (make-return #f #f #f (build-src 2))])
       
       ;; 19.12
       

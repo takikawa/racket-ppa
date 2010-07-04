@@ -293,6 +293,9 @@ MZ_EXTERN Scheme_Object *scheme_load_compiled_stx_string(const char *str, long l
 MZ_EXTERN Scheme_Object *scheme_compiled_stx_symbol(Scheme_Object *stx);
 
 MZ_EXTERN Scheme_Object *scheme_eval_compiled_sized_string(const char *str, int len, Scheme_Env *env);
+MZ_EXTERN Scheme_Object *scheme_eval_compiled_sized_string_with_magic(const char *str, int len, Scheme_Env *env, 
+								      Scheme_Object *magic_symbol, Scheme_Object *magic_val,
+								      int multi_ok);
 
 /*========================================================================*/
 /*                           memory management                            */
@@ -773,7 +776,8 @@ MZ_EXTERN void scheme_add_fd_eventmask(void *fds, int mask);
 MZ_EXTERN void scheme_security_check_file(const char *who, const char *filename, int guards);
 MZ_EXTERN void scheme_security_check_network(const char *who, const char *host, int port, int client);
 
-MZ_EXTERN int scheme_get_host_address(const char *address, int id, void *result);
+MZ_EXTERN struct addrinfo *scheme_get_host_address(const char *address, int id, int *err, 
+						   int family, int passive, int tcp);
 
 MZ_EXTERN int scheme_get_port_file_descriptor(Scheme_Object *p, long *_fd);
 MZ_EXTERN int scheme_get_port_socket(Scheme_Object *p, long *_s);
@@ -782,6 +786,8 @@ MZ_EXTERN void scheme_set_type_printer(Scheme_Type stype, Scheme_Type_Printer pr
 MZ_EXTERN void scheme_print_bytes(Scheme_Print_Params *pp, const char *str, int offset, int len);
 MZ_EXTERN void scheme_print_utf8(Scheme_Print_Params *pp, const char *str, int offset, int len);
 MZ_EXTERN void scheme_print_string(Scheme_Print_Params *pp, const mzchar *str, int offset, int len);
+
+MZ_EXTERN Scheme_Object *scheme_read_byte_string(Scheme_Object *port);
 
 /*========================================================================*/
 /*                        namespace/environment                           */
@@ -846,6 +852,9 @@ MZ_EXTERN const char *scheme_symbol_name(Scheme_Object *sym);
 MZ_EXTERN const char *scheme_symbol_name_and_size(Scheme_Object *sym, unsigned int *l, int flags);
 MZ_EXTERN char *scheme_symbol_val(Scheme_Object *sym);
 
+MZ_EXTERN Scheme_Object *scheme_intern_exact_keyword(const char *name, unsigned int len);
+MZ_EXTERN Scheme_Object *scheme_intern_exact_char_keyword(const mzchar *name, unsigned int len);
+
 /*========================================================================*/
 /*                                structs                                 */
 /*========================================================================*/
@@ -905,6 +914,7 @@ MZ_EXTERN long scheme_equal_hash_key(Scheme_Object *o);
 MZ_EXTERN long scheme_equal_hash_key2(Scheme_Object *o);
 
 MZ_EXTERN Scheme_Object *scheme_build_list(int argc, Scheme_Object **argv);
+MZ_EXTERN Scheme_Object *scheme_build_list_offset(int argc, Scheme_Object **argv, int delta);
 MZ_EXTERN void scheme_make_list_immutable(Scheme_Object *l);
 
 MZ_EXTERN int scheme_list_length(Scheme_Object *list);
@@ -929,6 +939,9 @@ MZ_EXTERN Scheme_Object *scheme_unbox(Scheme_Object *obj);
 MZ_EXTERN void scheme_set_box(Scheme_Object *b, Scheme_Object *v);
 
 MZ_EXTERN Scheme_Object *scheme_make_weak_box(Scheme_Object *v);
+
+MZ_EXTERN Scheme_Object *scheme_make_ephemeron(Scheme_Object *key, Scheme_Object *val);
+MZ_EXTERN Scheme_Object *scheme_ephemeron_value(Scheme_Object *o);
 
 MZ_EXTERN Scheme_Object *scheme_load(const char *file);
 MZ_EXTERN Scheme_Object *scheme_load_extension(const char *filename, Scheme_Env *env);

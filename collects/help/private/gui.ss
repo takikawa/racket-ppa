@@ -119,14 +119,16 @@
                       (let* ([path (url-path url)]
                              [coll (and (pair? path)
                                         (pair? (cdr path))
-                                        (cadr path))])
+                                        (cadr path))]
+                             [coll-path (and coll (string->path coll))]
+                             [doc-pr (and coll-path (assoc coll-path known-docs))])
+                        
                         ;; check to see if the docs are installed
-                        (if (and coll
-                                 (assoc coll known-docs)
-                                 (not (has-index-installed? (string->path coll))))
-                            (let ([doc-pr (assoc coll known-docs)]
-                                  [url-str (url->string url)])
-                              (make-missing-manual-url  coll (cdr doc-pr) url-str))
+                        (if (and doc-pr
+                                 (not (has-index-installed? coll-path)))
+                            (let ([url-str (url->string url)])
+                              (string->url 
+                               (make-missing-manual-url coll (cdr doc-pr) url-str)))
                             url))]
                      
                      [(and (equal? addon-host (url-host url))
@@ -494,7 +496,12 @@
             (goto-url link f)
             f)))
       
-      (define (goto-hd-location sym) (goto-url (get-hd-location sym)))
+      (define (goto-hd-location sym)
+        (let ([loc (get-hd-location sym)])
+          (goto-url loc)))
+      
+      (define (goto-manual-link manual index-key)
+        (goto-url (prefix-with-server (finddoc-page-anchor manual index-key))))
       
       (define (search-for-docs search-string search-type match-type lucky? docs)
         (let ([fr (or (find-help-desk-frame)
@@ -547,7 +554,7 @@
                          (lambda (b e)
                            (let ([f (get-file)])
                              (when f
-                               (send t set-value (string-append "file:" f))
+                               (send t set-value (string-append "file:" (path->string f)))
                                (update-ok))))))
         (define spacer (make-object vertical-pane% p))
         (define result #f)

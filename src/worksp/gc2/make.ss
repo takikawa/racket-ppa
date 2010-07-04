@@ -85,9 +85,11 @@
 				       (list "--precompile"))
 				   (list
 				    "--depends"
+				    "--cpp"
 				    (format "cl.exe /MT /E ~a ~a" expand-extra-flags includes)
-				    src
-				    dest)))
+				    "-o"
+				    dest
+				    src)))
 				 void))
         (when (file-exists? dest)
 	  (delete-file dest))
@@ -176,7 +178,7 @@
 	  "/D GC2_AS_EXPORT "
 	  (if accounting-gc?
 	      "/D NEWGC_BTC_ACCOUNT "
-	      "/D USE_COMPACT_3M_GC")
+	      "/D USE_COMPACT_3M_GC ")
 	  mz-inc))
 (compile "../../mzscheme/src/mzsj86.c" "xsrc/mzsj86.obj" '() mz-inc)
 

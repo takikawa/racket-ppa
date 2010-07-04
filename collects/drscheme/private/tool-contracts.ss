@@ -758,6 +758,13 @@
 ;                                  ;    ;                                               
 ;                                   ;;;;                                                
 
+  (drscheme:language-configuration:get-languages
+   (-> (listof (is-a?/c drscheme:language:language<%>)))
+   ()
+   "This can only be called after all of the tools initialization phases have completed."
+   ""
+   "Returns the list of all of the langauges installed in DrScheme.")
+  
   (drscheme:language-configuration:add-language
    ((and/c (is-a?/c drscheme:language:language<%>) language-object)
     . -> . void?)
@@ -823,7 +830,7 @@
     (boolean? drscheme:language-configuration:language-settings?)
     ((union false/c (is-a?/c top-level-window<%>))
      boolean?)
-    drscheme:language-configuration:language-settings?)
+    (union false/c drscheme:language-configuration:language-settings?))
    ((show-welcome? language-settings-to-show)
     ((parent #t)
      (manuals? #f)))
@@ -850,7 +857,10 @@
    ""
    "The \\var{manuals?} argument is passed to"
    "@flink drscheme:language-configuration:fill-language-dialog %"
-   ".")
+   "."
+   ""
+   "The result if \\scheme|#f| when the user cancells the dialog, and"
+   "the selected language if they hit ok.")
   
   (drscheme:language-configuration:fill-language-dialog
    (opt->
@@ -960,7 +970,7 @@
    ".")
   
   (drscheme:language:put-executable
-   ((is-a?/c top-level-window<%>) string? boolean? boolean? string? . -> . (union false/c string?))
+   ((is-a?/c top-level-window<%>) path? boolean? boolean? string? . -> . (union false/c path?))
    (parent program-filename mred? launcher? title)
    "Calls the MrEd primitive"
    "@flink put-file"
@@ -1007,7 +1017,8 @@
    "otherwise it will indicate the user's choice.")
   
   (drscheme:language:create-module-based-stand-alone-executable 
-   (string? string? any/c any/c any/c boolean? boolean?
+   ((union path? string?)
+    (union path? string?) any/c any/c any/c boolean? boolean?
             . -> .
             void?)
    (program-filename
@@ -1044,7 +1055,7 @@
    "\\rawscm{namespace-require}. ")
   
   (drscheme:language:create-module-based-launcher
-   (string? string? any/c any/c any/c boolean? boolean?
+   ((union path? string?) (union path? string?) any/c any/c any/c boolean? boolean?
             . -> .
             void?)
    (program-filename
@@ -1295,7 +1306,7 @@
                     (case-> (any/c . -> . void?) (-> any/c))))
      (create-executable (any/c
                          (union (is-a?/c dialog%) (is-a?/c frame%))
-                         string?
+                         path?
                          drscheme:teachpack:teachpack-cache?
                          . -> .
                          void?))

@@ -4,7 +4,6 @@
 
 ;This module provides functions needed at runtime for compiled Java code
 
-#cs
 (module runtime mzscheme
   
   (require (lib "class.ss")
@@ -15,7 +14,7 @@
            (lib "ClassCastException.ss" "profj" "libs" "java" "lang")
            (lib "NullPointerException.ss" "profj" "libs" "java" "lang"))
   
-  (provide convert-to-string shift not-equal bitwise mod divide-int 
+  (provide convert-to-string shift not-equal bitwise mod divide-dynamic divide-int 
            divide-float and or cast-primitive cast-reference instanceof-array nullError)
   
   ;convert-to-string: (U string int real bool char Object) -> string
@@ -58,6 +57,12 @@
                     (or left right)))
           ((or) (or left right)))))
 
+  ;divide-dynamic: number number -> number
+  (define (divide-dynamic left right)
+    (if (or (inexact? left) (inexact? right))
+        (divide-float left right)
+        (divide-int left right)))
+  
   ;divide-int: int int -> int
   (define (divide-int left right)
     (when (zero? right)
@@ -138,8 +143,8 @@
              (else (raise-class-cast (format "Cast to ~a failed for ~a" type
                                              (send (convert-to-string val) get-mzscheme-string)))))))))
   
-  ;cast-reference: value class int symbol-> value
-  (define (cast-reference val type dim name)
+  ;cast-reference: value class class class int symbol-> value
+  (define (cast-reference val type ca-type gc-type dim name)
     (if (> dim 0)
         (if (send val check-ref-type type dim)
             val
@@ -147,6 +152,8 @@
              (format "Cast to ~a~a failed for ~a" name (make-brackets dim) (send (convert-to-string val) get-mzscheme-string))))
         (cond
           ((and (eq? Object type) (is-a? val ObjectI)) val)
+          ((and (is-a? val convert-assert-Object) (is-a? val ca-type)) val)
+          ((and (is-a? val guard-convert-Object) (is-a? val gc-type)) val)
           ((is-a? val type) val)
           (else (raise-class-cast (format "Cast to ~a failed for ~a" name (send val my-name)))))))
   

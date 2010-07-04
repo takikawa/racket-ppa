@@ -1077,17 +1077,20 @@ static double DrawMeasUnicodeText(const char *text, int d, int theStrlen, int uc
 	  ATSUAttributeValuePtr ll_theValues[2];
 	  ATSLineLayoutOptions ll_attribs;
 
+	  ll_attribs = (kATSLineHasNoHangers
+			| kATSLineHasNoOpticalAlignment);
+
 	  if (qd_spacing) {
-	    ll_attribs = (kATSLineFractDisable 
-			  | kATSLineDisableAutoAdjustDisplayPos
-			  | kATSLineDisableAllLayoutOperations
-			  | kATSLineUseDeviceMetrics
-			  | (use_cgctx ? 0 : kATSLineUseQDRendering));
-	    ll_theTags[cnt] = kATSULineLayoutOptionsTag;
-	    ll_theSizes[cnt] = sizeof(ATSLineLayoutOptions);
-	    ll_theValues[cnt] = &ll_attribs;
-	    cnt++;
+	    ll_attribs |= (kATSLineFractDisable 
+			   | kATSLineDisableAutoAdjustDisplayPos
+			   | kATSLineDisableAllLayoutOperations
+			   | kATSLineUseDeviceMetrics
+			   | (use_cgctx ? 0 : kATSLineUseQDRendering));
 	  }
+	  ll_theTags[cnt] = kATSULineLayoutOptionsTag;
+	  ll_theSizes[cnt] = sizeof(ATSLineLayoutOptions);
+	  ll_theValues[cnt] = &ll_attribs;
+	  cnt++;
 
 	  if (use_cgctx) {
 	    ll_theTags[cnt] = kATSUCGContextTag;
@@ -1140,7 +1143,7 @@ static double DrawMeasUnicodeText(const char *text, int d, int theStrlen, int uc
 
       if (angle != 0.0)
 	ATSUDisposeTextLayout(meas_layout);
-    
+      
       one_res = (Fix2X(bounds.upperRight.x) - Fix2X(bounds.upperLeft.x));
       if (one_res < 0)
 	one_res = 0;

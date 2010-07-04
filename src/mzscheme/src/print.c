@@ -129,6 +129,7 @@ static Scheme_Hash_Table *global_constants_ht;
 # define ZERO_SIZED(closure) closure->zero_sized
 #endif
 
+static Scheme_Hash_Table *cache_ht;
 
 void scheme_init_print(Scheme_Env *env)
 {
@@ -151,6 +152,8 @@ void scheme_init_print(Scheme_Env *env)
 #ifdef MZ_PRECISE_GC
   register_traversers();
 #endif
+
+  REGISTER_SO(cache_ht);
 }
 
 Scheme_Object *scheme_make_svector(mzshort c, mzshort *a)
@@ -694,18 +697,34 @@ static void setup_graph_table(Scheme_Object *obj, Scheme_Hash_Table *ht,
   }
 }
 
+#define CACHE_HT_SIZE_LIMIT 32
+
 Scheme_Hash_Table *scheme_setup_datum_graph(Scheme_Object *o, void *for_print)
 {
   Scheme_Hash_Table *ht;
   int counter = 1;
 
-  ht = scheme_make_hash_table(SCHEME_hash_ptr);
+  if (cache_ht) {
+    ht = cache_ht;
+    cache_ht = NULL;
+  } else
+    ht = scheme_make_hash_table(SCHEME_hash_ptr);
+
   setup_graph_table(o, ht, &counter, (PrintParams *)for_print);
 
   if (counter > 1)
     return ht;
-  else
+  else {
+    if (ht->size < CACHE_HT_SIZE_LIMIT) {
+      int i;
+      for (i = 0; i < ht->size; i++) {
+	ht->keys[i] = NULL;
+	ht->vals[i] = NULL;
+      }
+      cache_ht = ht;
+    }
     return NULL;
+  }
 }
 
 static char *
@@ -1240,10 +1259,14 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
     }
   }
 
-  if (SCHEME_SYMBOLP(obj))
+  if (SCHEME_SYMBOLP(obj)
+      || SCHEME_KEYWORDP(obj))
     {
       int l;
       Scheme_Object *idx;
+      int is_kw;
+
+      is_kw = SCHEME_KEYWORDP(obj);
 
       if (compact)
 	idx = scheme_hash_get(symtab, obj);
@@ -1259,12 +1282,14 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
 
 	weird = SCHEME_SYM_WEIRDP(obj);
 	l = SCHEME_SYM_LEN(obj);
-	if (!weird && (l < CPT_RANGE(SMALL_SYMBOL))) {
+	if (!weird && !is_kw && (l < CPT_RANGE(SMALL_SYMBOL))) {
 	  unsigned char s[1];
 	  s[0] = l + CPT_SMALL_SYMBOL_START;
 	  print_this_string(pp, (char *)s, 0, 1);
 	} else {
-	  print_compact(pp, (weird ? CPT_WEIRD_SYMBOL : CPT_SYMBOL));
+	  print_compact(pp, (is_kw
+			     ? CPT_KEYWORD
+			     : (weird ? CPT_WEIRD_SYMBOL : CPT_SYMBOL)));
 	  if (weird) {
 	    print_compact_number(pp, SCHEME_SYM_UNINTERNEDP(obj) ? 1 : 0);
 	  }
@@ -1283,7 +1308,10 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
       } else if (notdisplay) {
 	if (pp->honu_mode) {
 	  /* Honu symbol... */
-	  print_utf8_string(pp, "sym(", 0, 4);
+	  if (is_kw)
+	    print_utf8_string(pp, "key(", 0, 4);
+	  else
+	    print_utf8_string(pp, "sym(", 0, 4);
 	  {
 	    int i;
 	    /* Check for fast case: */
@@ -1308,16 +1336,23 @@ print(Scheme_Object *obj, int notdisplay, int compact, Scheme_Hash_Table *ht,
 	} else {
 	  const char *s;
 	  
+	  if (is_kw)
+	    print_utf8_string(pp, "#:", 0, 2);
 	  s = scheme_symbol_name_and_size(obj, (unsigned int *)&l, 
 					  ((pp->can_read_pipe_quote 
 					    ? SCHEME_SNF_PIPE_QUOTE
 					    : SCHEME_SNF_NO_PIPE_QUOTE)
 					   | (pp->case_sens
 					      ? 0
-					      : SCHEME_SNF_NEED_CASE)));
+					      : SCHEME_SNF_NEED_CASE)
+					   | (is_kw
+					      ? SCHEME_SNF_KEYWORD
+					      : 0)));
 	  print_utf8_string(pp, s, 0, l);
 	}
       } else {
+	if (is_kw)
+	  print_utf8_string(pp, "#:", 0, 2);
 	print_utf8_string(pp, (char *)obj, ((char *)(SCHEME_SYM_VAL(obj))) - ((char *)obj), 
 			  SCHEME_SYM_LEN(obj));
       }

@@ -386,6 +386,7 @@ typedef void (*Scheme_Type_Printer)(Scheme_Object *v, int for_display, Scheme_Pr
 #define SCHEME_PATH_STRING_STR "path or string"
 
 #define SCHEME_SYMBOLP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_symbol_type)
+#define SCHEME_KEYWORDP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_keyword_type)
 
 #define SCHEME_STRSYMP(obj) (SCHEME_CHAR_STRINGP(obj) || SCHEME_SYMBOLP(obj))
 
@@ -478,6 +479,8 @@ typedef void (*Scheme_Type_Printer)(Scheme_Object *v, int for_display, Scheme_Pr
 #define SCHEME_PATH_LEN(obj)  (((Scheme_Simple_Object *)(obj))->u.byte_str_val.tag_val)
 #define SCHEME_SYM_VAL(obj)  (((Scheme_Symbol *)((Scheme_Simple_Object *)(obj)))->s)
 #define SCHEME_SYM_LEN(obj)  (((Scheme_Symbol *)((Scheme_Simple_Object *)(obj)))->len)
+#define SCHEME_KEYWORD_VAL(obj) SCHEME_SYM_VAL(obj)
+#define SCHEME_KEYWORD_LEN(obj) SCHEME_SYM_LEN(obj)
 
 #define SCHEME_SYMSTR_OFFSET(obj) ((unsigned long)SCHEME_SYM_VAL(obj)-(unsigned long)(obj))
 
@@ -570,6 +573,7 @@ typedef void (*Scheme_Type_Printer)(Scheme_Object *v, int for_display, Scheme_Pr
 #define SCHEME_PRIM_IS_GENERIC 512
 #define SCHEME_PRIM_IS_USER_PARAMETER 1024
 #define SCHEME_PRIM_IS_METHOD 2048
+#define SCHEME_PRIM_IS_POST_DATA 4096
 
 typedef struct Scheme_Object *
 (Scheme_Prim)(int argc, struct Scheme_Object *argv[]);
@@ -605,13 +609,58 @@ typedef struct {
 
 typedef struct {
   Scheme_Closed_Primitive_Proc p;
-  mzshort minr, maxr;
-} Scheme_Closed_Prim_W_Result_Arity;
+  mzshort *cases;
+} Scheme_Closed_Case_Primitive_Proc;
 
 typedef struct {
   Scheme_Closed_Primitive_Proc p;
-  mzshort *cases;
-} Scheme_Closed_Case_Primitive_Proc;
+  mzshort minr, maxr;
+} Scheme_Closed_Prim_W_Result_Arity;
+
+/* ------------------------------------------------- */
+/*                 mzc closure glue
+    The following structures are used by mzc to implement closures
+    where the closure data is allocated as part of the
+    Scheme_Closed_Primitive_Proc record.  In 3m mode, a length must be
+    included, and all of the closur-data elements are assumed to be
+    pointers. Furthermore, in 3m mode, a cases and non-cases closure
+    must have closure data starting at the same point, since two
+    kinds can flow to the same MZC_PARAM_TO_SWITCH().
+*/
+
+typedef struct {
+  union {
+    Scheme_Closed_Primitive_Proc p;
+#ifdef MZ_PRECISE_GC
+    Scheme_Closed_Case_Primitive_Proc other;
+#endif
+  } u;
+#ifdef MZ_PRECISE_GC
+  mzshort len;
+#endif
+} Scheme_Closed_Primitive_Post_Proc;
+
+typedef struct {
+  Scheme_Closed_Primitive_Post_Proc p;
+  void *a[1];
+} Scheme_Closed_Primitive_Post_Ext_Proc;
+
+typedef struct {
+  union {
+    Scheme_Closed_Case_Primitive_Proc p;
+#ifdef MZ_PRECISE_GC
+    Scheme_Closed_Primitive_Proc other;
+#endif
+  } u;
+#ifdef MZ_PRECISE_GC
+  mzshort len;
+#endif
+} Scheme_Closed_Case_Primitive_Post_Proc;
+
+typedef struct {
+  Scheme_Closed_Case_Primitive_Post_Proc p;
+  void *a[1];
+} Scheme_Closed_Case_Primitive_Post_Ext_Proc;
 
 #define _scheme_fill_prim_closure(rec, cfunc, dt, nm, amin, amax, flgs) \
   ((rec)->pp.so.type = scheme_closed_prim_type, \
@@ -623,6 +672,16 @@ typedef struct {
    (rec)->pp.flags = flgs, \
    rec)
 
+#ifdef MZ_PRECISE_GC
+# define _scheme_fill_prim_closure_post(rec, cfunc, dt, nm, amin, amax, flgs, ln) \
+  ((rec)->len = ln,							\
+   _scheme_fill_prim_closure(&(rec)->u.p, cfunc, dt, nm, amin, amax,	\
+			     flgs | SCHEME_PRIM_IS_POST_DATA))
+#else
+# define _scheme_fill_prim_closure_post(rec, cfunc, dt, nm, amin, amax, flgs, ln) \
+  _scheme_fill_prim_closure(&(rec)->u.p, cfunc, dt, nm, amin, amax, flgs)
+#endif
+
 #define _scheme_fill_prim_case_closure(rec, cfunc, dt, nm, ccount, cses, flgs) \
   ((rec)->p.pp.so.type = scheme_closed_prim_type, \
    (rec)->p.prim_val = cfunc, \
@@ -633,6 +692,18 @@ typedef struct {
    (rec)->p.pp.flags = flgs, \
    (rec)->cases = cses, \
    rec)
+
+#ifdef MZ_PRECISE_GC
+# define _scheme_fill_prim_case_closure_post(rec, cfunc, dt, nm, ccount, cses, flgs, ln) \
+  ((rec)->len = ln,							\
+   _scheme_fill_prim_case_closure(&(rec)->u.p, cfunc, dt, nm, ccount, cses, \
+				  flgs | SCHEME_PRIM_IS_POST_DATA))
+#else
+# define _scheme_fill_prim_case_closure_post(rec, cfunc, dt, nm, ccount, cses, flgs, ln) \
+  _scheme_fill_prim_case_closure(&(rec)->u.p, cfunc, dt, nm, ccount, cses, flgs)
+#endif
+
+/* ------------------------------------------------- */
 
 #define SCHEME_PROCP(obj)  (!SCHEME_INTP(obj) && ((_SCHEME_TYPE(obj) >= scheme_prim_type) && (_SCHEME_TYPE(obj) <= scheme_proc_struct_type)))
 #define SCHEME_SYNTAXP(obj)  SAME_TYPE(SCHEME_TYPE(obj), scheme_syntax_compiler_type)
@@ -1382,6 +1453,7 @@ extern void *scheme_malloc_envunbox(size_t);
 # define MZ_GC_ARRAY_VAR_IN_REG(x, v, l) (__gc_var_stack__[x+2] = (void *)0, \
                                           __gc_var_stack__[x+3] = (void *)&(v), \
                                           __gc_var_stack__[x+4] = (void *)l)
+# define MZ_GC_NO_VAR_IN_REG(x) (__gc_var_stack__[x+2] = NULL)
 # define MZ_GC_REG()  (__gc_var_stack__[0] = GC_variable_stack, \
                        GC_variable_stack = __gc_var_stack__)
 # define MZ_GC_UNREG() (GC_variable_stack = __gc_var_stack__[0])
@@ -1389,6 +1461,7 @@ extern void *scheme_malloc_envunbox(size_t);
 # define MZ_GC_DECL_REG(size)            /* empty */
 # define MZ_GC_VAR_IN_REG(x, v)          /* empty */
 # define MZ_GC_ARRAY_VAR_IN_REG(x, v, l) /* empty */
+# define MZ_GC_NO_VAR_IN_REG(x)          /* empty */
 # define MZ_GC_REG()                     /* empty */
 # define MZ_GC_UNREG()                   /* empty */
 #endif
@@ -1546,6 +1619,8 @@ extern Scheme_Extension_Table *scheme_extension_table;
 #define SCHEME_SNF_PIPE_QUOTE 0x2
 #define SCHEME_SNF_NO_PIPE_QUOTE 0x4
 #define SCHEME_SNF_NEED_CASE 0x8
+#define SCHEME_SNF_KEYWORD 0x10
+#define SCHEME_SNF_NO_KEYWORDS 0x20
 
 /* For use with scheme_make_struct_values et al.: */
 #define SCHEME_STRUCT_NO_TYPE 0x01

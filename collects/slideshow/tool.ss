@@ -38,7 +38,7 @@ pict snip :
            get-snp/poss
            build-lib-pict-stx)
 
-  (define orig-inspector (current-inspector))
+  (define orig-inspector (current-code-inspector))
 
   (define-syntax syntax/cert 
     (syntax-rules ()
@@ -563,13 +563,15 @@ pict snip :
             (super update-shown)
             (if slideshow-panel-visible?
                 (begin
-                  (unless slideshow-panel (build-slideshow-panel))
+                  (send slideshow-parent-panel begin-container-sequence)
+		  (unless slideshow-panel (build-slideshow-panel))
                   (when (is-a? view-menu-item menu-item%)
                     (send view-menu-item set-label sc-hide-slideshow-panel))
-                  (send slideshow-parent-panel
+		  (send slideshow-parent-panel
                         change-children
                         (lambda (l)
-                          (list everything-else-panel slideshow-panel))))
+                          (list everything-else-panel slideshow-panel)))
+		  (send slideshow-parent-panel end-container-sequence))
                 (begin
                   (when (is-a? view-menu-item menu-item%)
                     (send view-menu-item set-label sc-show-slideshow-panel))
@@ -651,21 +653,25 @@ pict snip :
             
       (define system-eventspace (current-eventspace))
       
+      (define (ss-dynamic-require lib id)
+	(parameterize ([current-code-inspector orig-inspector])
+	  (dynamic-require lib id)))
+
       ;; send-over : any syntax -> void
       ;; thread: (any) user's thread
       (define (send-over v stx)
         (let ([rep (drscheme:rep:current-rep)])
           (when rep
-            (let ([pict? (dynamic-require '(lib "mrpict.ss" "texpict") 'pict?)])
+            (let ([pict? (ss-dynamic-require '(lib "mrpict.ss" "texpict") 'pict?)])
               (when (pict? v)
-                (let* ([make-pict-drawer (dynamic-require '(lib "mrpict.ss" "texpict") 'make-pict-drawer)]
-                       [width ((dynamic-require '(lib "mrpict.ss" "texpict") 'pict-width) v)]
-                       [height ((dynamic-require '(lib "mrpict.ss" "texpict") 'pict-height) v)]
-                       [pict-drawer (make-pict-drawer v)])
-                  (parameterize ([current-eventspace system-eventspace])
-                    (queue-callback
-                     (lambda ()
-                       (add-pict-drawer stx v pict-drawer width height))))))))))
+		(let* ([make-pict-drawer (ss-dynamic-require '(lib "mrpict.ss" "texpict") 'make-pict-drawer)]
+		       [width ((ss-dynamic-require '(lib "mrpict.ss" "texpict") 'pict-width) v)]
+		       [height ((ss-dynamic-require '(lib "mrpict.ss" "texpict") 'pict-height) v)]
+		       [pict-drawer (make-pict-drawer v)])
+		  (parameterize ([current-eventspace system-eventspace])
+		    (queue-callback
+		     (lambda ()
+		       (add-pict-drawer stx v pict-drawer width height))))))))))
       
       ;; add-pict-drawer : syntax pict-drawer number number -> void
       ;; thread: system eventspace
@@ -883,8 +889,8 @@ pict snip :
       
       
       (drscheme:language:add-snip-value
-       (lambda (x) ((dynamic-require '(lib "mrpict.ss" "texpict") 'pict?) x))
-       (lambda (pict) (new (dynamic-require '(lib "pict-value-snip.ss" "texpict") 'pict-value-snip%) (pict pict))))
+       (lambda (x) ((ss-dynamic-require '(lib "mrpict.ss" "texpict") 'pict?) x))
+       (lambda (pict) (new (ss-dynamic-require '(lib "pict-value-snip.ss" "texpict") 'pict-value-snip%) (pict pict))))
 
         
       (define lib-pict-snipclass (make-object lib-pict-snipclass%))

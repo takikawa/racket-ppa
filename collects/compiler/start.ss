@@ -31,7 +31,8 @@
 	   (lib "compile.ss" "dynext")
 	   (lib "link.ss" "dynext")
 	   (lib "pack.ss" "setup")
-	   (lib "getinfo.ss" "setup"))
+	   (lib "getinfo.ss" "setup")
+	   (lib "plthome.ss" "setup"))
 
   (define dest-dir (make-parameter #f))
   (define auto-dest-dir (make-parameter #f))
@@ -54,8 +55,6 @@
   (define plt-files-plt-home-relative? (make-parameter #f))
   (define plt-setup-collections (make-parameter null))
   (define plt-include-compiled (make-parameter #f))
-
-  (define use-3m (make-parameter #f))
 
   (define (extract-suffix appender)
     (bytes->string/latin-1
@@ -86,7 +85,7 @@
 		   (extract-suffix append-constant-pool-suffix)))]
 	[("-l" "--link-extension")
 	 ,(lambda (f) 'link)
-	 (,(format "Link multiple ~a and ~a files into a ~a file"
+	 (,(format "Link ~a and ~a from Scheme sources into a ~a file"
 		   (extract-suffix append-object-suffix)
 		   (extract-suffix append-constant-pool-suffix)
 		   (extract-suffix append-extension-suffix)))]
@@ -117,6 +116,11 @@
 		   (extract-suffix append-object-suffix)
 		   (extract-suffix append-extension-suffix))
 	  "extension")]
+	[("--xform")
+	 ,(lambda (f) 'xform)
+	 (,(format "Convert for 3m compilation: ~a -> ~a" 
+		   (extract-suffix append-c-suffix)
+		   (extract-suffix append-c-suffix)))]
 	[("--exe")
 	 ,(lambda (f name) (exe-output name) 'exe)
 	 (,(format "Embed module in MzScheme to create <exe>")
@@ -138,7 +142,7 @@
 	 ,(lambda (f) (module-mode #t))
 	 ("Skip eval of top-level syntax, etc. for -e/-c/-o/-z")]
 	[("--3m")
-	 ,(lambda (f) (use-3m #t))
+	 ,(lambda (f) (compiler:option:3m #t))
 	 ("Compile/link for 3m, with -e/-c/-o/etc.")]
 	[("--embedded")
 	 ,(lambda (f) (compiler:option:compile-for-embedded #t))
@@ -161,7 +165,7 @@
 	    (auto-dest-dir #t))
 	 (,(format "Output -z to \"compiled\", -e to ~s"
 		   (path->string
-		    (build-path "compiled" "native" (system-library-subpath)))))]]
+		    (build-path "compiled" "native" (system-library-subpath #f)))))]]
 
        [help-labels
 	"------------------- compiler/linker configuration flags ---------------------"]
@@ -231,6 +235,24 @@
 	    (printf "C linker libraries: ~s~n" (expand-for-link-variant
 						(current-standard-link-libraries))))
 	 ("Show C linker libraries")]]
+       [multi
+	[("++cppf") 
+	 ,(lambda (f v) (current-extension-preprocess-flags
+			 (append (current-extension-preprocess-flags)
+				 (list v))))
+	 ("Add C preprocess (xform) flag" "flag")]
+	[("--cppf") 
+	 ,(lambda (f v) (current-extension-preprocess-flags
+			 (remove v (current-extension-preprocess-flags))))
+	 ("Remove C preprocess (xform) flag" "flag")]
+	[("--cppf-clear") 
+	 ,(lambda (f) (current-extension-preprocess-flags null))
+	 ("Clear C preprocess (xform) flags")]
+	[("--cppf-show") 
+	 ,(lambda (f) 
+	    (printf "C compiler flags: ~s~n" (expand-for-link-variant
+					      (current-extension-preprocess-flags))))
+	 ("Show C preprocess (xform) flags")]]
        [help-labels
 	"--------------------- executable configuration flags ------------------------"]
        [once-each
@@ -361,7 +383,7 @@
 		   (void)))))))
      (list "file/directory/collection" "file/directory/sub-collection")))
 
-  (printf "MzScheme compiler (mzc) version ~a, Copyright (c) 2005 PLT Scheme, Inc.~n"
+  (printf "mzc version ~a, Copyright (c) 2004-2005 PLT Scheme Inc.~n"
 	  (version))
 
   (define-values (mode source-files prefix)
@@ -375,7 +397,7 @@
     (when (compiler:option:compile-for-embedded)
       (error 'mzc "cannot ~a an extension for an embedded MzScheme" action)))
   
-  (when (use-3m)
+  (when (compiler:option:3m)
     (link-variant '3m)
     (compile-variant '3m))
   
@@ -455,6 +477,16 @@
 		       source-files
 		       dest)
        (printf " [output to \"~a\"]~n" dest))]
+    [(xform)
+     (for-each (lambda (file)
+		 (let ([out-file (path-replace-suffix file ".3m.c")])
+		   ((dynamic-require '(lib "xform.ss" "compiler") 'xform)
+		    (not (compiler:option:verbose))
+		    file
+		    out-file
+		    (list (build-path plthome "include")))
+		   (printf " [output to \"~a\"]~n" out-file)))
+	       source-files)]
     [(exe gui-exe)
      (unless (= 1 (length source-files))
        (error 'mzc "expected a single module source file to embed; given: ~e"

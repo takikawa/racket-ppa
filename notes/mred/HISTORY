@@ -1,4 +1,14 @@
 
+Version 300, Decmber 2005
+Changed editor file format to an ASCII encoding
+Changed measurement of text for post-script-dc%
+Changed label->plain-label to strip parenthesized mneumonics
+Added 'package and 'enter-package flags to put-file, and
+ changed Mac OS X put-file to use extension and filters args
+Added on-mdi-activate to frame%
+
+----------------------------------------------------------------------
+
 Version 299.400, September 2005
 
 No MrEd-specific changes

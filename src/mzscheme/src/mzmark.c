@@ -680,8 +680,14 @@ int closed_prim_proc_SIZE(void *p) {
   ((c->pp.flags & SCHEME_PRIM_IS_MULTI_RESULT)
    ? gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Prim_W_Result_Arity))
    : ((c->mina == -2)
-      ? gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Case_Primitive_Proc))
-      : gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Primitive_Proc))));
+      ? ((c->pp.flags & SCHEME_PRIM_IS_POST_DATA)
+	 ? (gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Case_Primitive_Post_Ext_Proc))
+	    + ((Scheme_Closed_Case_Primitive_Post_Proc *)c)->len - 1)
+	 : gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Case_Primitive_Proc)))
+      : ((c->pp.flags & SCHEME_PRIM_IS_POST_DATA)
+	 ? (gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Primitive_Post_Ext_Proc))
+	    + ((Scheme_Closed_Primitive_Post_Proc *)c)->len - 1)
+	 : gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Primitive_Proc)))));
 }
 
 int closed_prim_proc_MARK(void *p) {
@@ -689,13 +695,39 @@ int closed_prim_proc_MARK(void *p) {
 
   gcMARK(c->name);
   gcMARK(SCHEME_CLSD_PRIM_DATA(c));
+  if (c->pp.flags & SCHEME_PRIM_IS_POST_DATA) {
+    if (c->mina == -2) {
+      Scheme_Closed_Case_Primitive_Post_Ext_Proc *cc;
+      int i;
+      cc = (Scheme_Closed_Case_Primitive_Post_Ext_Proc *)c;
+      for (i = cc->p.len; i--; ) {
+	gcMARK(cc->a[i]);
+      }
+    } else {
+      Scheme_Closed_Primitive_Post_Ext_Proc *cc;
+      int i;
+      cc = (Scheme_Closed_Primitive_Post_Ext_Proc *)c;
+      for (i = cc->p.len; i--; ) {
+	gcMARK(cc->a[i]);
+      }
+    }
+  }
+  if (c->mina == -2) {
+    gcMARK(((Scheme_Closed_Case_Primitive_Proc *)c)->cases);
+  }
   
   return
   ((c->pp.flags & SCHEME_PRIM_IS_MULTI_RESULT)
    ? gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Prim_W_Result_Arity))
    : ((c->mina == -2)
-      ? gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Case_Primitive_Proc))
-      : gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Primitive_Proc))));
+      ? ((c->pp.flags & SCHEME_PRIM_IS_POST_DATA)
+	 ? (gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Case_Primitive_Post_Ext_Proc))
+	    + ((Scheme_Closed_Case_Primitive_Post_Proc *)c)->len - 1)
+	 : gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Case_Primitive_Proc)))
+      : ((c->pp.flags & SCHEME_PRIM_IS_POST_DATA)
+	 ? (gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Primitive_Post_Ext_Proc))
+	    + ((Scheme_Closed_Primitive_Post_Proc *)c)->len - 1)
+	 : gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Primitive_Proc)))));
 }
 
 int closed_prim_proc_FIXUP(void *p) {
@@ -703,13 +735,39 @@ int closed_prim_proc_FIXUP(void *p) {
 
   gcFIXUP(c->name);
   gcFIXUP(SCHEME_CLSD_PRIM_DATA(c));
+  if (c->pp.flags & SCHEME_PRIM_IS_POST_DATA) {
+    if (c->mina == -2) {
+      Scheme_Closed_Case_Primitive_Post_Ext_Proc *cc;
+      int i;
+      cc = (Scheme_Closed_Case_Primitive_Post_Ext_Proc *)c;
+      for (i = cc->p.len; i--; ) {
+	gcFIXUP(cc->a[i]);
+      }
+    } else {
+      Scheme_Closed_Primitive_Post_Ext_Proc *cc;
+      int i;
+      cc = (Scheme_Closed_Primitive_Post_Ext_Proc *)c;
+      for (i = cc->p.len; i--; ) {
+	gcFIXUP(cc->a[i]);
+      }
+    }
+  }
+  if (c->mina == -2) {
+    gcFIXUP(((Scheme_Closed_Case_Primitive_Proc *)c)->cases);
+  }
   
   return
   ((c->pp.flags & SCHEME_PRIM_IS_MULTI_RESULT)
    ? gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Prim_W_Result_Arity))
    : ((c->mina == -2)
-      ? gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Case_Primitive_Proc))
-      : gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Primitive_Proc))));
+      ? ((c->pp.flags & SCHEME_PRIM_IS_POST_DATA)
+	 ? (gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Case_Primitive_Post_Ext_Proc))
+	    + ((Scheme_Closed_Case_Primitive_Post_Proc *)c)->len - 1)
+	 : gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Case_Primitive_Proc)))
+      : ((c->pp.flags & SCHEME_PRIM_IS_POST_DATA)
+	 ? (gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Primitive_Post_Ext_Proc))
+	    + ((Scheme_Closed_Primitive_Post_Proc *)c)->len - 1)
+	 : gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Primitive_Proc)))));
 }
 
 #define closed_prim_proc_IS_ATOMIC 0
@@ -3006,36 +3064,34 @@ int mark_print_params_FIXUP(void *p) {
 #ifdef MARKS_FOR_NETWORK_C
 
 int mark_listener_SIZE(void *p) {
+  listener_t *l = (listener_t *)p;
+
   return
-  gcBYTES_TO_WORDS(sizeof(listener_t));
+  gcBYTES_TO_WORDS(sizeof(listener_t) + ((l->count - 1) * sizeof(tcp_t)));
 }
 
 int mark_listener_MARK(void *p) {
   listener_t *l = (listener_t *)p;
 
+
   gcMARK(l->mref);
-#ifdef USE_MAC_TCP
-  gcMARK(l->datas);
-#endif
 
   return
-  gcBYTES_TO_WORDS(sizeof(listener_t));
+  gcBYTES_TO_WORDS(sizeof(listener_t) + ((l->count - 1) * sizeof(tcp_t)));
 }
 
 int mark_listener_FIXUP(void *p) {
   listener_t *l = (listener_t *)p;
 
+
   gcFIXUP(l->mref);
-#ifdef USE_MAC_TCP
-  gcFIXUP(l->datas);
-#endif
 
   return
-  gcBYTES_TO_WORDS(sizeof(listener_t));
+  gcBYTES_TO_WORDS(sizeof(listener_t) + ((l->count - 1) * sizeof(tcp_t)));
 }
 
 #define mark_listener_IS_ATOMIC 0
-#define mark_listener_IS_CONST_SIZE 1
+#define mark_listener_IS_CONST_SIZE 0
 
 
 #ifdef USE_TCP
@@ -3049,10 +3105,6 @@ int mark_tcp_MARK(void *p) {
 
   gcMARK(tcp->b.buffer);
   gcMARK(tcp->b.out_buffer);
-# ifdef USE_MAC_TCP
-  gcMARK(tcp->tcp);
-  gcMARK(tcp->activeRcv);
-# endif
 
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Tcp));
@@ -3063,10 +3115,6 @@ int mark_tcp_FIXUP(void *p) {
 
   gcFIXUP(tcp->b.buffer);
   gcFIXUP(tcp->b.out_buffer);
-# ifdef USE_MAC_TCP
-  gcFIXUP(tcp->tcp);
-  gcFIXUP(tcp->activeRcv);
-# endif
 
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_Tcp));
@@ -3075,35 +3123,6 @@ int mark_tcp_FIXUP(void *p) {
 #define mark_tcp_IS_ATOMIC 0
 #define mark_tcp_IS_CONST_SIZE 1
 
-
-# ifdef USE_MAC_TCP
-int mark_write_data_SIZE(void *p) {
-  return
-  gcBYTES_TO_WORDS(sizeof(WriteData));
-}
-
-int mark_write_data_MARK(void *p) {
-  WriteData *d = (WriteData *)p;
-    
-  gcMARK(d->xpb);
-
-  return
-  gcBYTES_TO_WORDS(sizeof(WriteData));
-}
-
-int mark_write_data_FIXUP(void *p) {
-  WriteData *d = (WriteData *)p;
-    
-  gcFIXUP(d->xpb);
-
-  return
-  gcBYTES_TO_WORDS(sizeof(WriteData));
-}
-
-#define mark_write_data_IS_ATOMIC 0
-#define mark_write_data_IS_CONST_SIZE 1
-
-# endif
 
 # ifdef UDP_IS_SUPPORTED
 int mark_udp_SIZE(void *p) {
@@ -3145,6 +3164,7 @@ int mark_udp_evt_MARK(void *p) {
 
   gcMARK(uw->udp);
   gcMARK(uw->str);
+  gcMARK(uw->dest_addr);
 
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_UDP_Evt));
@@ -3155,6 +3175,7 @@ int mark_udp_evt_FIXUP(void *p) {
 
   gcFIXUP(uw->udp);
   gcFIXUP(uw->str);
+  gcFIXUP(uw->dest_addr);
 
   return
   gcBYTES_TO_WORDS(sizeof(Scheme_UDP_Evt));
@@ -3582,6 +3603,32 @@ int mark_thread_set_FIXUP(void *p) {
 #define mark_thread_set_IS_CONST_SIZE 1
 
 
+int mark_thread_cell_SIZE(void *p) {
+  return
+  gcBYTES_TO_WORDS(sizeof(Thread_Cell));
+}
+
+int mark_thread_cell_MARK(void *p) {
+  Thread_Cell *c = (Thread_Cell *)p;
+ 
+  gcMARK(c->def_val);
+
+  return
+  gcBYTES_TO_WORDS(sizeof(Thread_Cell));
+}
+
+int mark_thread_cell_FIXUP(void *p) {
+  Thread_Cell *c = (Thread_Cell *)p;
+ 
+  gcFIXUP(c->def_val);
+
+  return
+  gcBYTES_TO_WORDS(sizeof(Thread_Cell));
+}
+
+#define mark_thread_cell_IS_ATOMIC 0
+#define mark_thread_cell_IS_CONST_SIZE 1
+
 
 #endif  /* THREAD */
 
@@ -3975,6 +4022,8 @@ int mark_cport_MARK(void *p) {
   gcMARK(cp->ht);
   gcMARK(cp->symtab);
   gcMARK(cp->insp);
+  gcMARK(cp->magic_sym);
+  gcMARK(cp->magic_val);
   return
   gcBYTES_TO_WORDS(sizeof(CPort));
 }
@@ -3986,6 +4035,8 @@ int mark_cport_FIXUP(void *p) {
   gcFIXUP(cp->ht);
   gcFIXUP(cp->symtab);
   gcFIXUP(cp->insp);
+  gcFIXUP(cp->magic_sym);
+  gcFIXUP(cp->magic_val);
   return
   gcBYTES_TO_WORDS(sizeof(CPort));
 }
@@ -4027,6 +4078,8 @@ int mark_read_params_SIZE(void *p) {
 int mark_read_params_MARK(void *p) {
   ReadParams *rp = (ReadParams *)p;
   gcMARK(rp->table);
+  gcMARK(rp->magic_sym);
+  gcMARK(rp->magic_val);
   return
   gcBYTES_TO_WORDS(sizeof(ReadParams));
 }
@@ -4034,6 +4087,8 @@ int mark_read_params_MARK(void *p) {
 int mark_read_params_FIXUP(void *p) {
   ReadParams *rp = (ReadParams *)p;
   gcFIXUP(rp->table);
+  gcFIXUP(rp->magic_sym);
+  gcFIXUP(rp->magic_val);
   return
   gcBYTES_TO_WORDS(sizeof(ReadParams));
 }

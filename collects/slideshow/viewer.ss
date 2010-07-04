@@ -11,6 +11,7 @@
 	   (lib "utils.ss" "texpict")
 	   (lib "math.ss")
 	   (lib "list.ss")
+	   (lib "include-bitmap.ss" "mrlib")
 	   "sig.ss"
 	   "core.ss"
 	   "util.ss")
@@ -415,8 +416,8 @@
 			  [close-bg? #f]
 			  [label "Slideshow Preview"]
 			  [x 0] [y 0]
-			  [width (inexact->exact (floor config:actual-screen-w))]
-			  [height (inexact->exact (quotient (floor config:actual-screen-h) 2))]
+			  [width (inexact->exact (floor (* config:actual-screen-w 8/10 1)))]
+			  [height (inexact->exact (floor (* config:actual-screen-h 8/10 2/3)))]
 			  [style '()]))
       
       (define current-sinset zero-inset)
@@ -730,7 +731,7 @@
 	    (let ([dc (get-dc)])
 	      (let*-values ([(cw ch) (send dc get-size)])
 		(send dc set-scale 
-		      (/ (/ cw 2) (send prefetch-bitmap get-width))
+		      (/ (* cw 1/2) (send prefetch-bitmap get-width))
 		      (/ ch (send prefetch-bitmap get-height)))
 		(send dc set-origin (/ cw 2) 0)
 		(send dc draw-bitmap prefetch-bitmap 0 0)
@@ -751,7 +752,7 @@
 		    (send dc draw-bitmap now-bm 0 0)
 		    (cond
 		     [(equal? prefetched-page (add1 current-page))
-		      (send dc set-origin (/ cw 2) 0)
+		      (send dc set-origin (/ cw 3) 0)
 		      (send dc draw-bitmap prefetch-bitmap 0 0)]
 		     [else
 		      (when (< (add1 current-page) slide-count)
@@ -761,16 +762,33 @@
 			  (send dc set-brush b)))])
 		    (send dc set-scale 1 1))]
 		 [else
-		  (paint-slide dc current-page 1/2 1/2 cw (* 2 ch) cw (* 2 ch) #f)
-		  (send dc set-origin (/ cw 2) 0)
+		  (paint-slide dc current-page 2/3 1 cw ch cw ch #f)
+		  (let ([pen (send dc get-pen)]
+			[brush (send dc get-brush)])
+		    (send dc set-pen "black" 1 'solid)
+		    (send dc set-brush "black" 'solid)
+		    (send dc draw-rectangle
+			  (* cw 2/3)
+			  0
+			  (* cw 1/3)
+			  (* ch 1/6))
+		    (send dc draw-rectangle
+			  (* cw 2/3)
+			  (* ch 5/6)
+			  (* cw 1/3)
+			  (* ch 1/6))
+		    (send dc set-pen pen)
+		    (send dc set-brush brush))
+		  (send dc set-origin (* cw 2/3) (* ch 1/6))
 		  (when (< (add1 current-page) slide-count)
-		    (paint-slide dc
+		    (send dc draw-rectangle (* cw 2/3) 0 (* cw 1/3) ch)
+                    (paint-slide dc
 				 (+ current-page 1)
-				 1/2 1/2
-				 cw (* 2 ch) cw (* 2 ch)
+				 1/3 1/2
+				 cw ch cw ch
 				 #f))])
 		(send dc set-origin 0 0)
-		(send dc draw-line (/ cw 2) 0 (/ cw 2) ch))))
+		(send dc draw-line (* cw 2/3) 0 (* cw 2/3) ch))))
 	  
 	  (inherit get-top-level-window)
 	  (define/override (on-event e)
@@ -1042,12 +1060,18 @@
 
       (refresh-page)
       
-      (let* ([bm (make-object bitmap% (build-path (collection-path "slideshow") "slideshow.png"))]
-	     [mbm (make-object bitmap% (build-path (collection-path "slideshow") "mask.xbm"))])
+      (define slideshow-bm
+	(include-bitmap (lib "slideshow.png" "slideshow")))
+      (define slideshow-mbm
+	(include-bitmap (lib "mask.xbm" "slideshow")))
+
+      (let* ([bm slideshow-bm]
+	     [mbm slideshow-mbm])
 	(when (send bm ok?)
 	  (send f set-icon bm (and (send mbm ok?) mbm) 'both)))
       
-      (when config:commentary?
+      (when (and config:commentary?
+		 (not config:commentary-on-slide?))
 	(send c-frame show #t)
 	(message-box "Instructions"
 		     (format "Keybindings:~
@@ -1064,6 +1088,8 @@
       
       (define (do-print)
 	(let ([ps-dc (dc-for-text-size)])
+	  (when config:smoothing?
+	    (send ps-dc set-smoothing 'aligned)) ; for printer-dc%
 	  (let loop ([start? #f][l (list-tail talk-slide-list current-page)][n current-page])
 	    (unless (null? l)
 	      (set! current-page n)

@@ -1,10 +1,12 @@
 (module types mzscheme
 
-  (require (lib "etc.ss")
-           (lib "pretty.ss")
-           (lib "list.ss")
-           (lib "class.ss")
-           "ast.ss")
+  (require 
+   (only (lib "1.ss" "srfi") lset-intersection)
+   (lib "etc.ss")
+   (lib "pretty.ss")
+   (lib "list.ss")
+   (lib "class.ss")
+   "ast.ss")
   
   (provide (all-defined-except sort number-assign-conversions remove-dups meth-member?
                                generate-require-spec))
@@ -57,6 +59,11 @@
             (unknown-ref? x)
             (ref-type? x) 
             (memq x `(null string)))))
+  
+  ;;reference-or-array-type: 'a -> boolean
+  (define (reference-or-array-type? x)
+    (or (reference-type? x)
+        (array-type? x)))
 
   ;;is-string?: 'a -> boolean
   (define (is-string-type? s)
@@ -147,7 +154,7 @@
   ;; assignment-conversion: type type type-records -> boolean
   (define (assignment-conversion to from type-recs)
     (cond
-      ((dynamic-val? to) 
+      ((dynamic-val? to)
        (cond
          ((dynamic-val-type to) => (lambda (t) (assignment-conversion t from type-recs)))
          (else (set-dynamic-val-type! to from) #t)))
@@ -162,6 +169,64 @@
       (else
        (widening-ref-conversion to from type-recs))))
   
+  ;castable?: reference-type reference-type type-records -> boolean
+  (define (castable? from to type-recs)
+    (or (dynamic-val? from)
+        (dynamic-val? to)
+        (eq? 'dynamic to)
+        (eq? 'null from)
+        (eq? 'null to)
+        (let ((from-record (and (not (array-type? from)) (send type-recs get-class-record from)))
+              (to-record (and (not (array-type? to))
+                              (get-record (send type-recs get-class-record to) type-recs))))
+          (cond
+            ((and to-record from-record
+                  (class-record-class? from-record)
+                  (class-record-class? to-record))
+             (or (is-eq-subclass? from to type-recs)
+                 (is-eq-subclass? to from type-recs)))
+            ((and to-record from-record (class-record-class? from-record))
+             (or (not (memq 'final (class-record-modifiers from-record)))
+                 (implements? from to type-recs)))
+            ((and (not to-record) from-record (class-record-class? from-record))
+             (type=? object-type from))
+            ((and to-record from-record (class-record-class? to-record))
+             (or (not (memq 'final (class-record-modifiers to-record)))
+                 (implements? to from type-recs)))
+            ((and to-record from-record (not (class-record-class? to-record)))
+             (not (signature-conflicts? (class-record-methods to-record)
+                                        (class-record-methods from-record))))
+            ((and (not from-record) to-record (class-record-class? to-record))
+             (type=? object-type to))
+            ((and (not from-record) to-record)
+             (or (type=? serializable-type to type-recs)
+                 (type=? cloneable-type to type-recs)))
+            (else
+             (or (type=? (array-type-type to) (array-type-type from))
+                 (castable? (array-type-type from)
+                            (array-type-type to))))))))
+  
+  ;Do the two lists of method signatures have conflicting methods
+  ;signature-conflicts? (list method-record) (list method-record) -> bool
+  (define (signature-conflicts? methods1 methods2)
+    (let ((same-sigs (lset-intersection signature-equals? methods1 methods2))
+          (same-rets (lset-intersection full-signature-equals? methods1 methods2)))
+      (not (= (length same-sigs) (length same-rets)))))
+
+  ;Do the two methods have same name and argument types
+  ;signature-equals? method-record method-record -> bool
+  (define (signature-equals? m1 m2)
+    (and (equal? (method-record-name m1)
+                 (method-record-name m2))
+         (= (length (method-record-atypes m1))
+            (length (method-record-atypes m2)))
+         (andmap type=? (method-record-atypes m1) (method-record-atypes m2))))
+  ;Do the two methods have the same name, arguments and return types
+  ;full-signagure-equals? method-record method-record -> bool
+  (define (full-signature-equals? m1 m2)
+    (and (signature-equals? m1 m2)
+         (type=? (method-record-rtype m1) (method-record-rtype m2))))
+    
   ;; type-spec-to-type: type-spec (U #f (list string) symbol type-records -> type
   (define (type-spec-to-type ts container-class level type-recs)
     (let* ((ts-name (type-spec-name ts))
@@ -196,12 +261,14 @@
       (member (cons (ref-type-class/iface c2) (ref-type-path c2))
               (class-record-parents cr))))
 
-  ;; subclass?: (U type (list string) 'string) ref-type type-records -> boolean
+  ;Does c1 implement c2?
+  ;; implements?: (U type (list string) 'string) ref-type type-records -> boolean
   (define (implements? c1 c2 type-recs)
     (let ((cr (get-record (send type-recs get-class-record c1) type-recs)))
       (member (cons (ref-type-class/iface c2) (ref-type-path c2))
               (class-record-ifaces cr))))
 
+  ;;Is class1 a subclass or equal to class2?
   ;is-eq-subclass: type type type-records -> boolean
   (define (is-eq-subclass? class1 class2 type-recs)
     (or (type=? class1 class2)
@@ -231,7 +298,7 @@
   ;;                    (list method-records) (list inner-record) (list (list strings)) (list (list strings)))
   ;; After full processing fields and methods should contain all inherited fields 
   ;; and methods.  Also parents and ifaces should contain all super-classes/ifaces
-  (define-struct class-record (name modifiers class? object? fields methods inners parents ifaces))
+  (define-struct class-record (name modifiers class? object? fields methods inners parents ifaces) (make-inspector))
 
   (define interactions-record (make-class-record (list "interactions") null #f #f null null null null null))
   
@@ -248,13 +315,13 @@
   (define-struct scheme-record (name path dir provides))
   
   ;;(make-dynamic-val (U type method-contract unknown-ref))
-  (define-struct dynamic-val (type))
+  (define-struct dynamic-val (type) (make-inspector))
   
   ;;(make-unknown-ref (U method-contract field-contract))
-  (define-struct unknown-ref (access))
+  (define-struct unknown-ref (access) (make-inspector))
   
   ;;(make-method-contract string type (list type) (U #f string))
-  (define-struct method-contract (name return args prefix))
+  (define-struct method-contract (name return args prefix) (make-inspector))
   
   ;;(make-field-contract string type)
   (define-struct field-contract (name type))
@@ -519,11 +586,16 @@
   ;get-field-records: class-record -> (list field-record)
   (define (get-field-records c) (class-record-fields c))
   
-  ;; get-method-records: string class-record -> (list method-record)
-  (define (get-method-records mname c)
+  ;; get-method-records: string class-record type-records -> (list method-record)
+  (define (get-method-records mname c type-recs)
     (filter (lambda (m)
               (string=? (method-record-name m) mname))
-            (class-record-methods c)))
+            (if (class-record-class? c)
+                (class-record-methods c)
+                (append (class-record-methods c) (get-object-methods type-recs)))))
+  
+  (define (get-object-methods type-recs)
+    (class-record-methods (send type-recs get-class-record object-type)))
 
   ;remove-dups: (list method-record) -> (list method-record)
   (define (remove-dups methods)
@@ -655,7 +727,7 @@
 ;                                          
 
   
-  (define type-version "version2")
+  (define type-version "version3")
   (define type-length 10)
   
   ;; read-record: path -> (U class-record #f)

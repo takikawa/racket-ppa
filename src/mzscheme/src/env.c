@@ -100,6 +100,8 @@ static Scheme_Object *read_resolve_prefix(Scheme_Object *obj);
 
 static void skip_certain_things(Scheme_Object *o, Scheme_Close_Custodian_Client *f, void *data);
 
+int scheme_is_module_begin_env(Scheme_Comp_Env *env);
+
 #ifdef MZ_PRECISE_GC
 static void register_traversers(void);
 #endif
@@ -163,6 +165,8 @@ Scheme_Env *scheme_basic_env()
 
     env = scheme_make_empty_env();
     scheme_install_initial_module_set(env);
+    scheme_set_param(scheme_current_config(), MZCONFIG_ENV, 
+		     (Scheme_Object *)env); 
 
     scheme_init_port_config();
     scheme_init_port_fun_config();
@@ -205,6 +209,7 @@ Scheme_Env *scheme_basic_env()
 
 #ifndef MZ_PRECISE_GC
   scheme_init_setjumpup();
+  scheme_init_ephemerons();
 #endif
 
 #ifdef TIME_STARTUP_PROCESS
@@ -276,6 +281,14 @@ Scheme_Env *scheme_basic_env()
     }
   }
 
+#ifdef MZ_PRECISE_GC
+  scheme_register_traversers();
+  register_traversers();
+  scheme_init_hash_key_procs();
+#endif
+
+  scheme_init_true_false();
+
   REGISTER_SO(toplevels_ht);
   REGISTER_SO(locals_ht[0]);
   REGISTER_SO(locals_ht[1]);
@@ -288,14 +301,6 @@ Scheme_Env *scheme_basic_env()
     ht = scheme_make_hash_table(SCHEME_hash_ptr);
     locals_ht[1] = ht;
   }
-
-  scheme_init_true_false();
-
-#ifdef MZ_PRECISE_GC
-  scheme_register_traversers();
-  register_traversers();
-  scheme_init_hash_key_procs();
-#endif
 
 #ifdef TIME_STARTUP_PROCESS
   printf("pre-process @ %ld\n", scheme_get_process_milliseconds());
@@ -1254,7 +1259,9 @@ scheme_add_compilation_frame(Scheme_Object *vals, Scheme_Comp_Env *env, int flag
 
 Scheme_Comp_Env *scheme_no_defines(Scheme_Comp_Env *env)
 {
-  if (scheme_is_toplevel(env))
+  if (scheme_is_toplevel(env)
+      || scheme_is_module_env(env)
+      || scheme_is_module_begin_env(env))
     return scheme_new_compilation_frame(0, 0, env, NULL);
   else
     return env;
@@ -1466,10 +1473,10 @@ static Scheme_Local *get_frame_loc(Scheme_Comp_Env *frame,
 /* Generates a Scheme_Local record for a static distance coodinate, and also
    marks the variable as used for closures. */
 {
-  COMPILE_DATA(frame)->use[i] |= (((flags & (SCHEME_APP_POS | SCHEME_SETTING))
+  COMPILE_DATA(frame)->use[i] |= (((flags & (SCHEME_APP_POS | SCHEME_SETTING | SCHEME_REFERENCING))
 				   ? CONSTRAINED_USE
 				   : ARBITRARY_USE)
-				  | ((flags & (SCHEME_SETTING | SCHEME_LINKING_REF))
+				  | ((flags & (SCHEME_SETTING | SCHEME_REFERENCING | SCHEME_LINKING_REF))
 				     ? WAS_SET_BANGED
 				     : 0));
   
@@ -2235,8 +2242,11 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
 
     if (genv->module && !genv->rename) {
       /* Free variable. Maybe don't continue. */
-      if (flags & SCHEME_SETTING) {
-	scheme_wrong_syntax(scheme_set_stx_string, NULL, src_find_id, "unbound variable in module");
+      if (flags & (SCHEME_SETTING | SCHEME_REFERENCING)) {
+	scheme_wrong_syntax(((flags & SCHEME_SETTING) 
+			     ? scheme_set_stx_string
+			     : scheme_var_ref_string),
+			    NULL, src_find_id, "unbound variable in module");
 	return NULL;
       }
       if (flags & SCHEME_NULL_FOR_UNBOUND)
@@ -2294,10 +2304,13 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
     return NULL;
   }
 
-  if (!modname && (flags & SCHEME_SETTING) && (genv->module && !genv->rename)) {
+  if (!modname && (flags & (SCHEME_SETTING | SCHEME_REFERENCING)) && (genv->module && !genv->rename)) {
     /* Check for set! of unbound variable: */    
     if (!scheme_lookup_in_table(genv->toplevel, (const char *)find_global_id)) {
-      scheme_wrong_syntax(scheme_set_stx_string, NULL, src_find_id, "unbound variable in module");
+      scheme_wrong_syntax(((flags & SCHEME_SETTING) 
+			     ? scheme_set_stx_string
+			     : scheme_var_ref_string), 
+			  NULL, src_find_id, "unbound variable in module");
       return NULL;
     }
   }
@@ -2320,14 +2333,15 @@ scheme_lookup_binding(Scheme_Object *find_id, Scheme_Comp_Env *env, int flags,
 
   /* Used to have `&& !SAME_OBJ(modidx, modname)' below, but that was a bad
      idea, because it causes module instances to be preserved. */
-  if (modname && !(flags & SCHEME_RESOLVE_MODIDS) && !SAME_OBJ(modidx, kernel_symbol)) {
+  if (modname && !(flags & SCHEME_RESOLVE_MODIDS) 
+      && (!SAME_OBJ(modidx, kernel_symbol) || (flags & SCHEME_REFERENCING))) {
     /* Create a module variable reference, so that idx is preserved: */
     return scheme_hash_module_variable(env->genv, modidx, find_id, 
 				       genv->module->insp,
 				       modpos, mod_defn_phase);
   }
 
-  if (!modname && (flags & SCHEME_SETTING) && genv->module) {
+  if (!modname && (flags & (SCHEME_SETTING | SCHEME_REFERENCING)) && genv->module) {
     /* Need to return a variable reference in this case, too. */
     return scheme_hash_module_variable(env->genv, genv->module->self_modidx, find_global_id, 
 				       genv->module->insp,
@@ -3290,14 +3304,16 @@ certifier(void *_data, int argc, Scheme_Object **argv)
     scheme_wrong_type("certifier", "syntax", 0, argc, argv);
 
   if (argc > 2) {
-    if (SCHEME_CLSD_PRIMP(argv[2])
-	&& (((Scheme_Closed_Primitive_Proc *)argv[2])->prim_val == introducer_proc))
-      mark = (Scheme_Object *)((Scheme_Closed_Primitive_Proc *)argv[2])->data;
-    else {
-      scheme_wrong_type("certifier", 
-			"procedure from make-syntax-introducer", 
-			2, argc, argv);
-      return NULL;
+    if (SCHEME_TRUEP(argv[2])) {
+      if (SCHEME_CLSD_PRIMP(argv[2])
+	  && (((Scheme_Closed_Primitive_Proc *)argv[2])->prim_val == introducer_proc))
+	mark = (Scheme_Object *)((Scheme_Closed_Primitive_Proc *)argv[2])->data;
+      else {
+	scheme_wrong_type("certifier", 
+			  "procedure from make-syntax-introducer or #f", 
+			  2, argc, argv);
+	return NULL;
+      }
     }
   }
 
@@ -3305,14 +3321,14 @@ certifier(void *_data, int argc, Scheme_Object **argv)
     s = scheme_stx_cert(s, mark, 
 			(Scheme_Env *)(cert_data[1] ? cert_data[1] : cert_data[2]),
 			cert_data[0],
-			(argc > 1) ? argv[1] : NULL,
+			((argc > 1) && SCHEME_TRUEP(argv[1])) ? argv[1] : NULL,
 			0 /* inactive cert */);
     if (cert_data[1] && cert_data[2] && !SAME_OBJ(cert_data[1], cert_data[2])) {
       /* Have module we're expanding, in addition to module that bound
 	 the expander. */
       s = scheme_stx_cert(s, mark, (Scheme_Env *)cert_data[2],
 			  NULL,
-			  (argc > 1) ? argv[1] : NULL,
+			  ((argc > 1) && SCHEME_TRUEP(argv[1])) ? argv[1] : NULL,
 			  0  /* inactive cert */);
     }
   }
@@ -3485,6 +3501,8 @@ static Scheme_Object *read_toplevel(Scheme_Object *obj)
 }
 
 static Scheme_Object *write_variable(Scheme_Object *obj)
+  /* WARNING: phase-0 module variables and #%kernel references
+     are handled in print.c, instead */
 {
   if (SAME_TYPE(scheme_variable_type, SCHEME_TYPE(obj))) {
     Scheme_Object *sym;
@@ -3517,6 +3535,8 @@ static Scheme_Object *write_variable(Scheme_Object *obj)
 }
 
 static Scheme_Object *read_variable(Scheme_Object *obj)
+  /* WARNING: phase-0 module variables and #%kernel references
+     are handled in read.c, instead */
 {
   Scheme_Env *env;
 
@@ -3543,9 +3563,9 @@ static Scheme_Object *read_variable(Scheme_Object *obj)
 
     varname = SCHEME_CDR(obj);
 
-    if (SAME_OBJ(modname, kernel_symbol) && !mod_phase)
+    if (SAME_OBJ(modname, kernel_symbol) && !mod_phase) {
       return (Scheme_Object *)scheme_global_bucket(varname, scheme_initial_env);
-    else {
+    } else {
       Module_Variable *mv;
       Scheme_Object *insp;
 

@@ -1080,7 +1080,7 @@
                   (send edit begin-edit-sequence)
                   (let ([status (send edit load-file/gui-error
                                       filename
-                                      'same
+                                      'guess
                                       #f)])
                     (if status
                         (begin
@@ -2285,9 +2285,9 @@
         (or (with-handlers ([exn:fail:filesystem?
                              (λ (x) #f)])
               (directory-exists? (collection-path "repos-time-stamp")))
-            (let ([fw (collection-path "framework")])
-              (with-handlers ([exn:fail:filesystem?
-                               (λ (x) #f)])
+            (with-handlers ([exn:fail:filesystem?
+                             (λ (x) #f)])
+              (let ([fw (collection-path "framework")])
                 (or (directory-exists? (build-path fw ".svn"))
                     (directory-exists? (build-path fw "CVS")))))))
       

@@ -253,13 +253,39 @@ closed_prim_proc {
  mark:
   gcMARK(c->name);
   gcMARK(SCHEME_CLSD_PRIM_DATA(c));
+  if (c->pp.flags & SCHEME_PRIM_IS_POST_DATA) {
+    if (c->mina == -2) {
+      Scheme_Closed_Case_Primitive_Post_Ext_Proc *cc;
+      int i;
+      cc = (Scheme_Closed_Case_Primitive_Post_Ext_Proc *)c;
+      for (i = cc->p.len; i--; ) {
+	gcMARK(cc->a[i]);
+      }
+    } else {
+      Scheme_Closed_Primitive_Post_Ext_Proc *cc;
+      int i;
+      cc = (Scheme_Closed_Primitive_Post_Ext_Proc *)c;
+      for (i = cc->p.len; i--; ) {
+	gcMARK(cc->a[i]);
+      }
+    }
+  }
+  if (c->mina == -2) {
+    gcMARK(((Scheme_Closed_Case_Primitive_Proc *)c)->cases);
+  }
   
  size:
   ((c->pp.flags & SCHEME_PRIM_IS_MULTI_RESULT)
    ? gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Prim_W_Result_Arity))
    : ((c->mina == -2)
-      ? gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Case_Primitive_Proc))
-      : gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Primitive_Proc))));
+      ? ((c->pp.flags & SCHEME_PRIM_IS_POST_DATA)
+	 ? (gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Case_Primitive_Post_Ext_Proc))
+	    + ((Scheme_Closed_Case_Primitive_Post_Proc *)c)->len - 1)
+	 : gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Case_Primitive_Proc)))
+      : ((c->pp.flags & SCHEME_PRIM_IS_POST_DATA)
+	 ? (gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Primitive_Post_Ext_Proc))
+	    + ((Scheme_Closed_Primitive_Post_Proc *)c)->len - 1)
+	 : gcBYTES_TO_WORDS(sizeof(Scheme_Closed_Primitive_Proc)))));
 }
 
 scm_closure {
@@ -1204,16 +1230,14 @@ END print;
 START network;
 
 mark_listener {
- mark:
   listener_t *l = (listener_t *)p;
 
+ mark:
+
   gcMARK(l->mref);
-#ifdef USE_MAC_TCP
-  gcMARK(l->datas);
-#endif
 
  size:
-  gcBYTES_TO_WORDS(sizeof(listener_t));
+  gcBYTES_TO_WORDS(sizeof(listener_t) + ((l->count - 1) * sizeof(tcp_t)));
 }
 
 #ifdef USE_TCP
@@ -1223,26 +1247,10 @@ mark_tcp {
 
   gcMARK(tcp->b.buffer);
   gcMARK(tcp->b.out_buffer);
-# ifdef USE_MAC_TCP
-  gcMARK(tcp->tcp);
-  gcMARK(tcp->activeRcv);
-# endif
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_Tcp));
 }
-
-# ifdef USE_MAC_TCP
-mark_write_data {
- mark:
-  WriteData *d = (WriteData *)p;
-    
-  gcMARK(d->xpb);
-
- size:
-  gcBYTES_TO_WORDS(sizeof(WriteData));
-}
-# endif
 
 # ifdef UDP_IS_SUPPORTED
 mark_udp {
@@ -1262,6 +1270,7 @@ mark_udp_evt {
 
   gcMARK(uw->udp);
   gcMARK(uw->str);
+  gcMARK(uw->dest_addr);
 
  size:
   gcBYTES_TO_WORDS(sizeof(Scheme_UDP_Evt));
@@ -1434,6 +1443,15 @@ mark_thread_set {
   gcBYTES_TO_WORDS(sizeof(Scheme_Thread_Set));
 }
 
+mark_thread_cell {
+ mark:
+  Thread_Cell *c = (Thread_Cell *)p;
+ 
+  gcMARK(c->def_val);
+
+ size:
+  gcBYTES_TO_WORDS(sizeof(Thread_Cell));
+}
 
 END thread;
 
@@ -1606,6 +1624,8 @@ mark_cport {
   gcMARK(cp->ht);
   gcMARK(cp->symtab);
   gcMARK(cp->insp);
+  gcMARK(cp->magic_sym);
+  gcMARK(cp->magic_val);
  size:
   gcBYTES_TO_WORDS(sizeof(CPort));
 }
@@ -1623,6 +1643,8 @@ mark_read_params {
  mark:
   ReadParams *rp = (ReadParams *)p;
   gcMARK(rp->table);
+  gcMARK(rp->magic_sym);
+  gcMARK(rp->magic_val);
  size:
   gcBYTES_TO_WORDS(sizeof(ReadParams));
 }

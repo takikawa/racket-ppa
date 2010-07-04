@@ -1,8 +1,4 @@
 
-(define (htdp-syntax-test stx)
-  (syntax-test #`(module m #,current-htdp-lang
-		   #,stx)))
-
 (define body-accum null)
 (define-syntax (htdp-top stx)
   (syntax-case stx (quote)
@@ -14,21 +10,56 @@
 			 null
 			 (cons (car body-accum) (loop (cdr body-accum)))))))
 
+(define htdp-syntax-test
+  (case-lambda
+   [(stx) (htdp-syntax-test stx #rx".")]
+   [(stx rx)
+    (error-test #`(module m #,current-htdp-lang
+		    #,@body-accum
+		    #,stx)
+		(lambda (x)
+		  (and (exn:fail:syntax? x)
+		       (regexp-match rx (exn-message x)))))]))
+
+(require (rename mzscheme mz-let let))
+
 (define-syntax (htdp-test stx)
   (syntax-case stx ()
     [(_ expect f . args)
-     #'(do-htdp-test #'(test expect f . args) #f #f)]))
+     #'(begin
+	 (do-htdp-test #'(test expect f . args) #f #f)
+	 (htdp-try-direct-module f . args))]))
+
+(define-syntax (htdp-try-direct-module stx)
+  (syntax-case stx ()
+    [(_ 'nm expr)
+     ;; double-check that there's no error, at least,
+     ;;  when using the real module-begin:
+     #'(mz-let ([name (gensym)])
+	       (eval
+		#`(module #,name #,current-htdp-lang
+		    #,@body-accum
+		    expr))
+	       (dynamic-require name #f))]
+    [_ 
+     (printf "~s\n" (syntax-object->datum stx))
+     #'(void)]))
+
+(define (htdp-string-to-pred exn?/rx)
+  (if (string? exn?/rx)
+      (lambda (x)
+	(regexp-match exn?/rx (exn-message x)))
+      exn?/rx))
 
 (define-syntax (htdp-err/rt-test stx)
   (syntax-case stx ()
     [(_ expr)
      #'(do-htdp-test #'expr #f exn:application:type?)]
     [(_ expr exn?)
-     #'(do-htdp-test #'expr #f exn?)]))
+     #'(do-htdp-test #'expr #f (htdp-string-to-pred exn?))]))
 
 (define (htdp-error-test stx)
   (do-htdp-test stx #t #f))
-
 
 (module helper mzscheme
   (define-syntax (module-begin stx)

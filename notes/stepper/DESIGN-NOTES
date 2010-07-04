@@ -803,3 +803,69 @@ outside in?  Feh.
 2005-08-02
 
 
+*************
+
+Well, the dang summer is almost over, and I've still got a long, long way to
+go.
+
+The basic change to the model is that instead of storing completed definitions
+as pre-formatted s-expressions, I'm now storing them as 2-element lists
+containing the syntax object associated with the definition and a 'getter'
+which returns the value that the binding refers to.  The actual definition is
+reformatted for each step.  This is a bit silly, but it would be easy to cache
+the definitions along with the present values if this is actually a performance
+bottleneck. I suspect it won't matter a bit.
+
+In the presence of mutation, the existing separators don't make sense, either.
+I'm scrapping them, for the moment.  A nice interface change would be to
+separate only the definitions that had changed. For them moment, they'll all be
+separated.
+
+The first order of business, after mucking around in the model for some time to
+get the flavor of how things will work, is to go and set up the interface so I
+can get things running.
+
+*************
+
+Okay, I've "completed" the google project, but there are still things
+to wrap up.  Right now I'm working on the highlighting for mutated
+bindings, which is inferred from differences in the rendered steps.
+
+So, for instance, if the left-hand-side has (define a 3), and the
+right-hand-side has (define a 4), well then we'd better highlight the
+3 on the left and the 4 on the right, because this binding was
+mutated.
+
+Now, this kind of highlighting--reconstructing highlighting from
+observed differences, rather than obtaining direct evidence of the
+mutation--clearly has some shortcomings.  For instance, concurrent
+code... well, concurrent code is all messed up to begin with; a
+more interesting problem occurs when you have mutations that share
+structure.  So, what if a is mutated from (list 3 4) to (list 4 5).
+Should the whole thing be highlighted?  Certainly that's what you'd
+get from a a normal reduction semantics.  In some sense, though,
+highlighting _just_ the 3 and the 4 (and the 4 and the 5) corresponds
+to a smaller set of changes that produces the same result.
+
+Another problem that's coming out is the problem of "intermediate"
+completed expressions that arise from partially evaluated letrecs
+(and all the things that expand into them).  These should also be
+scanned for mutation, right?  What about the "future" ones?  There
+are other rendering problems with forward mutation in letrecs which
+I haven't tackled, as well.  I find myself leaning toward depending
+on the "user-source" syntax property.  As I've observed before, though,
+the syntax properties form a sort of creeping mush; they don't need
+to be explicitly expressed as arguments or return values, and errors
+of omission in the syntax properties are hard to catch. A lot can
+hide in the "syntax?" contract.
+
+2005-09-21
+
+**************
+
+Time to clean up for v300.  Let's see if we can get begin and begin0 working.
+
+2005-11-14
+
+*************
+

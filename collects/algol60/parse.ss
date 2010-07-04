@@ -1,7 +1,8 @@
 #cs(module parse mzscheme
      (require (lib "lex.ss" "parser-tools")
               (prefix : (lib "lex-sre.ss" "parser-tools"))
-              (lib "yacc.ss" "parser-tools")
+              "cfg-parser.ss"
+	      (lib "yacc.ss" "parser-tools")
               (lib "readerr.ss" "syntax")
               "prims.ss")
      
@@ -120,7 +121,7 @@
         [any-char (token UNPARSEABLE (string->symbol lexeme))]))
      
      (define parse
-       (parser
+       (cfg-parser
         (tokens non-terminals)
         (start <program>)
         (end EOF)
@@ -190,7 +191,7 @@
                                [(IF <Boolean-expression> 
                                     THEN <simple-Boolean> 
                                     ELSE <Boolean-expression>)
-                                (make-a60:if $2 $4 $6)])
+				(make-a60:if $2 $4 $6)])
          ;; -------------------- Designationals --------------------
          (<label> [(<identifier>) $1]
                   [(<unsigned-integer>) $1])
@@ -204,7 +205,7 @@
                                      [(IF <Boolean-expression> 
                                           THEN <simple-designational-expression> 
                                           ELSE <designational-expression>)
-                                      (make-a60:if $2 $4 $6)])
+				      (make-a60:if $2 $4 $6)])
          ;; -------------------- Variables --------------------
          (<subscript-list> [(<arithmetic-expression>) (list $1)]
                            [(<subscript-list> COMMA <arithmetic-expression>) (append $1 (list $3))])

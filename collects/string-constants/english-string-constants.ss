@@ -225,8 +225,14 @@ please adhere to these guidelines:
  (no-full-name-since-not-saved
   "The file does not have a full name because it has not yet been saved.")
  (cannot-open-because-dne "Cannot open ~a because it does not exist.")
- (interactions-out-of-sync
-  "WARNING: Interactions window is out of sync with the definitions window. Click Run.")
+
+  (needs-execute-language-changed
+   "WARNING: The language has changed. Click Run.")
+  (needs-execute-teachpack-changed
+   "WARNING: The teachpacks have changed. Click Run.")
+  (needs-execute-defns-edited
+   "WARNING: The definitions window has changed. Click Run.")
+  
  (file-is-not-saved "The file \"~a\" is not saved.")
  (save "Save")
  (please-choose-either "Please choose either \"~a\" or \"~a\"")
@@ -442,7 +448,7 @@ please adhere to these guidelines:
  (count-columns-from-one "Count column numbers from one")
  (display-line-numbers "Display line numbers in buffer; not character offsets")
  (enable-keybindings-in-menus "Enable keybindings in menus")
- (automatically-to-ps "Automatically print to postscript file")
+ (automatically-to-ps "Automatically print to PostScript file")
  (option-as-meta "Treat option key as meta") ;; macos/macos x only
  (use-mdi "Use MDI Windows") ;;; ms windows only -- use that window in a window thingy
  (separate-dialog-for-searching "Use separate dialog for searching")
@@ -454,7 +460,7 @@ please adhere to these guidelines:
  (open-files-in-tabs "Open files in separate tabs (not separate windows)")
  (show-interactions-on-execute "Automatically open interactions window when running a program")
  (limit-interactions-size "Limit interactions size")
- (background-color "Background color")
+ (background-color "Background Color")
  (default-text-color "Default text") ;; used for configuring colors, but doesn't need the word "color"
  (choose-a-background-color "Please choose a background color")
 
@@ -885,8 +891,8 @@ please adhere to these guidelines:
  (exact-lucky-search-help-desk-for "Exact lucky search in Help Desk for \"~a\"")
 
  ;; collapse and expand popup menu items
- (collapse-sexp "Collapse sexpression")
- (expand-sexp "Expand sexpression")
+ (collapse-sexp "Collapse S-expression")
+ (expand-sexp "Expand S-expression")
  
  ;;; fraction dialog
  (enter-fraction "Enter Fraction")
@@ -945,9 +951,20 @@ please adhere to these guidelines:
  (use-mixed-fractions "Mixed fractions")
  (use-repeating-decimals "Repeating decimals")
  (decimal-notation-for-rationals "Use decimal notation for rationals")
- (please-select-a-language "Please select a language")
 
- 
+ ;; startup wizard screen language selection section
+ (please-select-a-language "Please select a language")
+ (show-all-languages "Show all languages")
+ (show-drscheme-usage-questions "Show DrScheme usage questions")
+  (are-you...-kind-of-drscheme-user "Are you...")
+ (use-with-htdp "... using DrScheme with How to Design Programs?")
+ (use-seasoned "... a seasoned PLT Schemer?")
+ (use-other "... using DrScheme for some other reason?")
+ (use-eopl "... using DrScheme with Essentials of Programming Languages?")
+  (pl-lang-choice-format "Initial language: ~a")
+  (choose-new-language-before-running "Please choose a new language before running.")
+  
+  
  ;;; languages
  (beginning-student "Beginning Student")
  (beginning-one-line-summary "define, cond, structs, constants, and primitives")
@@ -962,7 +979,7 @@ please adhere to these guidelines:
  (full-language "Full") ;; also in the HtDP languages section
  (how-to-design-programs "How to Design Programs") ;; should agree with MIT Press on this one...
  (r5rs-like-languages "R5RS-like")
- (pretty-big-scheme "Pretty Big (includes MrEd and Advanced)")
+ (pretty-big-scheme "Pretty Big (includes MrEd and Advanced Student)")
  (pretty-big-scheme-one-line-summary "Adds syntax and functions from the HtDP languages")
  (r5rs-lang-name "Standard (R5RS)")
  (r5rs-one-line-summary "R5RS, with no frills")
@@ -971,10 +988,31 @@ please adhere to these guidelines:
  (professional-languages "Professional Languages")
  (teaching-languages "Teaching Languages")
  (experimental-languages "Experimental Languages")
+  (initial-language-category "Initial language")
+  (no-language-chosen "No language chosen")
  
  (module-language-one-line-summary "Run creates a REPL in the context of the module, including the module's declared language")
   
+  ;;; from the `not a language language' used initially in drscheme.
+  (must-choose-language "DrScheme cannot process programs until you choose a programming language.")
+  
+  ; next two appear before and after the name of a text book (which will be in italics)
+  (using-a-textbook-before "Using ")
+  (using-a-textbook-after "?")
+  
+  ; next two are before and after a language
+  (start-with-before "Start with ")
+  (start-with-after ".")
 
+  (seasoned-plt-schemer? "Seasoned PLT Schemer?")
+  (looking-for-standard-scheme? "Looking for standard Scheme?")
+
+  ; the three string constants are concatenated together and the middle
+  ; one is hyperlinked to the dialog that suggests various languages
+  (get-guidance-before "Either select the “Choose Language...” item in the “Language” menu, or ")
+  (get-guidance-during "get guidance")
+  (get-guidance-after ".")
+    
  ;;; debug language
  (unknown-debug-frame "[unknown]")
  (backtrace-window-title "Backtrace - DrScheme")
@@ -1021,7 +1059,7 @@ please adhere to these guidelines:
  (tracing-enable-tracing "Enable tracing")
  (tracing-show-tracing-window "Show Tracing")
  (tracing-hide-tracing-window "Hide Tracing")
- (tracing-tracing-nothing-to-show "No tracing results are available. Be sure your language supports tracing and it is enabled.")
+ (tracing-tracing-nothing-to-show "No tracing results are available, yet. (Make sure that your language supports tracing and that tracing is enabled.)")
 
  ;;; repl stuff
  (evaluation-terminated "Evaluation Terminated")
@@ -1165,6 +1203,7 @@ please adhere to these guidelines:
  (stepper-next "Step >")
  (stepper-next-application "Application >|")
  
+ (debug-tool-button-name "Debug")
 
  (wizard-next "Next")
  (wizard-back "Back")
@@ -1257,7 +1296,7 @@ please adhere to these guidelines:
   (profjBoxes-interactions-label "Interactions")
   (profjBoxes-bad-java-id-error "Malformed Java ID")
   (profjBoxes-examples-label "Examples")
-  (profjBoxes-add-new-example-button "Add new example")
+  (profjBoxes-add-new-example-button "Add New Example")
   (profjBoxes-type "Type")
   ;; The Java identifier of an example of data
   (profjBoxes-name "Name")

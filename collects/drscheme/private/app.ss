@@ -1,15 +1,16 @@
 
 (module app mzscheme
-  (require (lib "string-constant.ss" "string-constants")
-           (lib "unitsig.ss")
+  (require (lib "unitsig.ss")
 	   (lib "class.ss")
-	   (lib "mred.ss" "mred")
-           (lib "external.ss" "browser")
-           "drsig.ss"
-           "../acks.ss"
-           (lib "framework.ss" "framework")
+           (lib "list.ss")
            (lib "file.ss")
-           (lib "check-gui.ss" "version"))
+           (lib "string-constant.ss" "string-constants")
+           (lib "mred.ss" "mred")
+           (lib "framework.ss" "framework")
+           (lib "external.ss" "browser")
+           (lib "getinfo.ss" "setup")
+           "drsig.ss"
+           "../acks.ss")
   
   (provide app@)
   (define app@
@@ -37,320 +38,6 @@
           (super-new
             (label (string-constant about-drscheme-frame-title)))))
       
-      ;; check-new-version : -> void
-      (define (check-new-version)
-        (let ([this-version (version)]
-              [last-version (preferences:get 'drscheme:last-version)]
-              [last-language (preferences:get 'drscheme:last-language)])
-          (when (or (not last-version)
-                    (not last-language)
-                    (not (equal? last-version this-version))
-                    (not (equal? last-language (this-language))))
-            (preferences:set 'drscheme:last-version this-version)
-            (preferences:set 'drscheme:last-language (this-language))
-            (show-wizard))))
-
-      ;; show-welcome-dialog : -> void
-      (define (show-v200-welcome-dialog)
-        (let ([new-settings (drscheme:language-configuration:language-dialog
-                             #t
-                             (preferences:get
-                              drscheme:language-configuration:settings-preferences-symbol)
-                             #f)])
-          (when new-settings
-            (preferences:set
-             drscheme:language-configuration:settings-preferences-symbol
-             new-settings))))
-      
-      
-      
-      
-;                                           
-;                                           
-;                                           
-;             ;                           ; 
-;                                         ; 
-;                                         ; 
-;  ;   ;   ;  ;   ;;;;;;  ;;;   ; ;;  ;;; ; 
-;  ;   ;   ;  ;       ;  ;   ;  ;;   ;   ;; 
-;   ; ; ; ;   ;      ;       ;  ;    ;    ; 
-;   ; ; ; ;   ;     ;     ;;;;  ;    ;    ; 
-;   ; ; ; ;   ;    ;     ;   ;  ;    ;    ; 
-;    ;   ;    ;   ;      ;   ;  ;    ;   ;; 
-;    ;   ;    ;   ;;;;;;  ;;;;; ;     ;;; ; 
-;                                           
-;                                           
-;                                           
-
-      
-      (define (show-wizard)
-        (define wizard-image-bitmap
-          (make-object bitmap% (build-path (collection-path "icons") "wizard-image.jpg")))
-        
-        (define bkg-color (make-object color% 0 0 0))
-        (define stupid-internal-define-syntax1
-          (let ([bdc (make-object bitmap-dc% wizard-image-bitmap)])
-            (send bdc get-pixel 0 0 bkg-color)
-            (send bdc set-bitmap #f)))
-        
-        (define bkg-brush (send the-brush-list find-or-create-brush bkg-color 'solid))
-        (define bkg-pen (send the-pen-list find-or-create-pen bkg-color 1 'solid))
-      
-        (define wizard-image-canvas%
-          (class canvas%
-            (inherit get-dc get-client-size)
-            (define/override (on-paint)
-              (let ([dc (get-dc)])
-                (let-values ([(w h) (get-client-size)])
-                  (send dc set-pen bkg-pen)
-                  (send dc set-brush bkg-brush)
-                  (send dc draw-rectangle 0 0 w h)
-                  (send dc draw-bitmap
-                        wizard-image-bitmap
-                        0
-                        (- h (send wizard-image-bitmap get-height))))))
-            
-            (super-new)
-            (inherit stretchable-width min-width min-height)
-            (stretchable-width #f)
-            (min-width (send wizard-image-bitmap get-width))
-            (min-height (send wizard-image-bitmap get-height))))  
-        
-        (define dlg (instantiate dialog% ()
-                      (label (string-constant welcome-to-drscheme))))
-        (define hp (make-object horizontal-panel% dlg))
-        (define c (make-object wizard-image-canvas% hp))
-        (define vp (make-object vertical-panel% hp))
-        (define sp (make-object panel:single% vp))
-        (define bp (instantiate horizontal-panel% ()
-                     (parent vp)
-                     (stretchable-height #f)
-                     (alignment '(right center))))
-        
-        
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ;;                                                        ;;
-        ;;                    State Machine                       ;;
-        ;;                                                        ;;
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        
-        
-        ;; type state = (union 'natural-language 'check-updates 'programming-language)
-        ;; state : state
-        (define state 'natural-language)
-        
-        ;; set-state : state -> void
-        ;; moves the state to `new-state'
-        (define (set-state new-state)
-          (set! state new-state)
-          (cond
-            [(first-state?) (send back-button enable #f)]
-            [else (send back-button enable #t)])
-          (cond
-            [(last-state?) (send next-button set-label
-				 (string-constant wizard-finish))]
-            [else (send next-button set-label (string-constant wizard-next))])
-          (case state
-            [(natural-language) (send sp active-child natural-language-state-panel)]
-            [(check-updates) (send sp active-child check-updates-state-panel)]
-            [(programming-language) (send sp active-child programming-language-state-panel)]))
-        
-        ;; next-state : -> void
-        (define (next-state)
-          (case state
-            [(natural-language)
-             (when (okay-to-leave-nl-state?)
-               (set-state 'check-updates))]
-            [(check-updates)
-             (set-state 'programming-language)]
-            [(programming-language)
-             (cond
-               [(get-selected-language)
-                (send dlg show #f)]
-               [else
-                (message-box (string-constant drscheme)
-                             (string-constant please-select-a-language))])]))
-        
-        ;; prev-state : -> void
-        ;; pre: state != 'natural-language
-        (define (prev-state)
-          (case state
-            [(programming-language) (set-state 'check-updates)]
-            [(check-updates) (set-state 'natural-language)]
-            [else (error 'next-state "no next state from: ~s" state)]))
-        
-        ;; first-state?, last-state? : -> boolean
-        (define (first-state?) (eq? state 'natural-language))
-        (define (last-state?) (eq? state 'programming-language))
-        
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ;;                                                        ;;
-        ;;                 State 1 GUI                            ;;
-        ;;                                                        ;;
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        
-        
-        (define natural-language-state-panel (make-object vertical-panel% sp))
-        
-        (define nl-space-above (make-object horizontal-panel% natural-language-state-panel))
-        
-        (define nl-welcome-panel (instantiate horizontal-panel% ()
-                                   (parent natural-language-state-panel)
-                                   (stretchable-height #f)
-                                   (alignment '(center center))))
-        
-        (define nl-welcome-msg (instantiate message%  ()
-                                 (label (string-constant welcome-to-drscheme))
-                                 (parent nl-welcome-panel)
-				 (font (send the-font-list find-or-create-font 24 'default 'normal 'normal #f))))
-        (define nl-lang-msg (instantiate message%  ()
-                                 (label (format (string-constant version/language)
-                                                (version)
-                                                (this-language)))
-                                 (parent natural-language-state-panel)))
-        
-        (define nl-radio-box
-          (instantiate radio-box% ()
-            (label #f)
-            (choices (string-constants interact-with-drscheme-in-language))
-            (parent natural-language-state-panel)
-            (callback (λ (x y) (void)))))
-        
-        (define stupid-internal-define-syntax3
-	  (let loop ([languages (all-languages)]
-                     [n 0])
-            (cond
-              [(null? languages) (void)]
-              [else (let ([language (car languages)])
-		      (if (eq? (this-language) language)
-			  (send nl-radio-box set-selection n)
-                          (loop (cdr languages) (+ n 1))))])))
-
-        (define nl-space-below (make-object horizontal-panel% natural-language-state-panel))
-        
-        ;; okay-to-leave-nl-state? : -> boolean
-        ;; returns #t if next is okay to proceed, #f if not.
-        (define (okay-to-leave-nl-state?)
-          (let loop ([languages (all-languages)]
-                     [n 0])
-            (cond
-              [(null? languages) (error 'wizard "lost language.2")]
-              [else (let ([language (car languages)])
-                      (if (= n (send nl-radio-box get-selection))
-                          (if (eq? (this-language) language)
-                              #t
-                              (begin (switch-language-to dlg language) 
-                                     #f))
-                          (loop (cdr languages) (+ n 1))))])))
-        
-        
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ;;                                                        ;;
-        ;;                     State 2 GUI                        ;;
-        ;;                                                        ;;
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        
-        (define check-updates-state-panel (instantiate vertical-panel% ()
-                                            (parent sp)
-                                            (alignment '(center center))))
-        (define check-updates-msgs-panel (instantiate vertical-panel% ()
-                                           (parent check-updates-state-panel)
-                                           (stretchable-width #f)
-                                           (stretchable-height #f)
-                                           (alignment '(left center))))
-
-        ;; note that `cu-message' is bound to the last message% object,
-        ;; but it is not used anyway.
-        (define cu-message
-          (let ([add (λ (str)
-                       (instantiate message% ()
-                         (label str)
-                         (parent check-updates-msgs-panel)))])
-            (let loop ([message (format (string-constant vc-wizard-check-note))])
-              (cond [(regexp-match #rx"^(.+?)\n(.+)$" message) =>
-                     (λ (m) (add (cadr m)) (loop (caddr m)))]
-                    [else (add message)]))))
-
-        (define cu-space
-          (instantiate horizontal-panel% ()
-            (parent check-updates-state-panel)
-            (min-height 20)
-            (stretchable-height #f)))
-
-        (define cu-button
-          (instantiate button% ()
-            (label (string-constant vc-wizard-check-button))
-            (parent check-updates-state-panel)
-            (callback (λ (x y) (check-version dlg)))))
-        
-        
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ;;                                                        ;;
-        ;;                     State 3 GUI                        ;;
-        ;;                                                        ;;
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        
-        (define programming-language-state-panel (instantiate vertical-panel% ()
-                                                   (parent sp)
-                                                   (alignment '(center center))))
-        (define pl-main-panel (instantiate vertical-panel% ()
-                                (parent programming-language-state-panel)
-                                (stretchable-width #t)
-                                (stretchable-height #t)))
-        (define pl-choose-language-message
-          (instantiate message% ()
-            (parent pl-main-panel)
-            (label (string-constant please-select-a-language))))
-        (define language-config-panel (make-object vertical-panel% pl-main-panel))
-        (define language-config-button-panel (instantiate horizontal-panel% ()
-                                               (parent pl-main-panel)
-                                               (stretchable-height #f)))
-                                               
-        (define-values (get-selected-language get-selected-language-settings)
-          (drscheme:language-configuration:fill-language-dialog
-           language-config-panel
-           language-config-button-panel
-           (preferences:get
-            drscheme:language-configuration:settings-preferences-symbol)
-           dlg))
-        
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ;;                                                        ;;
-        ;;                         GO                             ;;
-        ;;                                                        ;;
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        
-        (define back-button (instantiate button% ()
-                              (label (string-constant wizard-back))
-                              (parent bp)
-                              (callback (λ (x y) (prev-state)))))
-        (define next-button (instantiate button% ()
-                              (label (if (< (string-length (string-constant wizard-next))
-					    (string-length (string-constant wizard-finish)))
-					 (string-constant wizard-finish)
-					 (string-constant wizard-next)))
-                              (parent bp)
-                              (style '(border))
-                              (callback (λ (x y) (next-state)))))
-        (send next-button focus)
-        
-        (set-state 'natural-language)
-        
-        (send dlg center 'both)
-        (send dlg show #t)
-        
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ;;                                                        ;;
-        ;;              Put in Wizard Choices                     ;;
-        ;;                                                        ;;
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-        (preferences:set
-         (drscheme:language-configuration:get-settings-preferences-symbol)
-         (drscheme:language-configuration:make-language-settings
-          (get-selected-language)
-          (get-selected-language-settings))))
-
       
 ;                                                                   
 ;                                                                   
@@ -457,34 +144,7 @@
                                (λ x
                                  (send f close)))]
                [messages-panel (make-object vertical-panel% left-vp)]
-               
-               [this-version (version)]
-               [last-version (preferences:get 'drscheme:last-version)]
-               [last-language (preferences:get 'drscheme:last-language)]
-               [welcome-to-drs-msg (make-object message% (string-constant welcome-to-drscheme) messages-panel)]
-               [this-version-message (make-object message%
-                                       (format (string-constant version/language)
-                                               this-version 
-                                               (this-language))
-                                       messages-panel)]
-               [last-version-message
-                (let ([msg (cond
-                             [(and last-version
-                                   last-language
-                                   (not (equal? this-version last-version))
-                                   (not (equal? (this-language) last-language)))
-                              (format (string-constant parenthetical-last-version/language)
-                                      last-version last-language)]
-                             [(and last-language
-                                   (not (equal? (this-language) last-language)))
-                              (format (string-constant parenthetical-last-language)
-                                      last-language)]
-                             [(and last-version
-                                   (not (equal? this-version last-version)))
-                              (format (string-constant parenthetical-last-version)
-                                      last-version)]
-                             [else #f])])
-                  (and msg (make-object message% msg messages-panel)))])
+               [welcome-to-drs-msg (make-object message% (string-constant welcome-to-drscheme) messages-panel)])
           (for-each (λ (native-lang-string language)
                       (unless (equal? (this-language) language)
                         (instantiate button% ()
@@ -826,5 +486,23 @@
                           (label native-lang-string)
                           (parent help-menu)
                           (callback (λ (x1 x2) (switch-language-to #f language))))))
-                    (string-constants interact-with-drscheme-in-language)
-                    (all-languages)))))))
+                    good-interact-strings 
+                    languages-with-good-labels)))
+      
+      (define-values (languages-with-good-labels good-interact-strings)
+        (let loop ([langs (all-languages)]
+                   [strs (string-constants interact-with-drscheme-in-language)]
+                   [good-langs '()]
+                   [good-strs '()])
+          (cond
+            [(null? strs) (values (reverse good-langs)
+                                  (reverse good-strs))]
+            [else (let ([str (car strs)]
+                        [lang (car langs)])
+                    (if (andmap (λ (char) (send normal-control-font screen-glyph-exists? char #t))
+                                (string->list str))
+                        (loop (cdr langs) 
+                              (cdr strs)
+                              (cons lang good-langs)
+                              (cons str good-strs))
+                        (loop (cdr langs) (cdr strs) good-langs good-strs)))]))))))

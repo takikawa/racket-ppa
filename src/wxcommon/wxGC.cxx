@@ -29,6 +29,10 @@ Authors: John R. Ellis and Jesse Hull
 #include <stddef.h>
 #include "wxGC.h"
 
+#ifdef COMPACT_BACKTRACE_GC  
+# include <stdio.h>
+#endif
+
 #ifdef MPW_CPLUS
 extern "C" {
   typedef void (*GC_F_PTR)(void *, void *);
@@ -119,12 +123,35 @@ void gc_cleanup::install_cleanup(void)
 # endif
 }
 
+#define SHOW_CLEANUP_TIMES 0
+
+#if SHOW_CLEANUP_TIMES
+extern "C" long scheme_get_process_milliseconds();
+#endif
+
 void GC_cleanup(void *obj, void *)
 {
   gc *clean = (gc *)gcPTR_TO_OBJ(obj);
 
 #ifdef MZ_PRECISE_GC
+# ifdef COMPACT_BACKTRACE_GC  
+#  if SHOW_CLEANUP_TIMES
+  long start;
+  start = scheme_get_process_milliseconds();
+  char *s;
+  s = clean->gcGetName();
+  printf("Cleanup: %s\n", s ? s : "???");
+#  endif
+# endif
+
   GC_cpp_delete(clean);
+
+# ifdef COMPACT_BACKTRACE_GC  
+#  if SHOW_CLEANUP_TIMES
+  start = scheme_get_process_milliseconds() - start;
+  printf("  done %d\n", start);
+#  endif
+# endif
 #else
   clean->~gc();
 #endif
@@ -207,6 +234,11 @@ int GC_is_wx_object(void *v)
 
 # define ZERO_OUT_DISPATCH 1
 
+# ifdef COMPACT_BACKTRACE_GC
+static char *get_xtagged_name(void *p);
+extern char *(*GC_get_xtagged_name)(void *p);
+# endif
+
 typedef struct {
   short tag;
   short filler_used_for_hashing;
@@ -247,6 +279,10 @@ static void initize(void)
   /* Initialize: */
   GC_mark_xtagged = mark_cpp_object;
   GC_fixup_xtagged = fixup_cpp_object;
+
+# ifdef COMPACT_BACKTRACE_GC
+  GC_get_xtagged_name = get_xtagged_name;
+# endif
   
   is_initialized = 1;
 }
@@ -271,9 +307,35 @@ void GC_cpp_delete(gc *v)
 #endif
 }
 
+# ifdef COMPACT_BACKTRACE_GC
+
+static char name_buffer[256];
+
+static char *get_xtagged_name(void *p)
+{
+  char *s;
+  s = ((gc *)gcPTR_TO_OBJ(p))->gcGetName();
+  sprintf(name_buffer, "<%s>", (s ? s : "XTAGGED"));
+  return name_buffer;
+}
+
+char *gc::gcGetName() {
+  return NULL;
+}
+
+# endif
+
 #endif
 
 /**********************************************************************/
+
+/* The accounting shadow serves two purposes. First, it allocates
+   largely untouched atomic memory to reflect the allocation of
+   bitmaps outside the GC space, so that the nominal allocation total
+   is related to the total taking into accoun bitmaps. Second, because
+   bitmaps are released through finalizers, the accounting shadow
+   forces a GC more frequently than might otherwise happen as the
+   total size of bitmaps grows. */
 
 static long total, accum = 1024 * 1024 * 5;
 
@@ -286,7 +348,7 @@ void *GC_malloc_accounting_shadow(long a)
   accum -= a;
   if (accum <= 0) {
     GC_gcollect();
-    accum = total >> 2;
+    accum = total >> 1;
   }
   p = (long *)GC_malloc_atomic(a);
   *p = a;
@@ -295,6 +357,8 @@ void *GC_malloc_accounting_shadow(long a)
 
 void GC_free_accounting_shadow(void *p)
 {
-  if (p)
+  if (p) {
     total -= *(long *)p;
+    accum += *(long *)p;
+  }
 }

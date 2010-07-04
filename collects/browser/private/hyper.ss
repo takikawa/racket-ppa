@@ -56,6 +56,7 @@ A test case:
       
       (define-struct (exn:file-saved-instead exn) (pathname))
       (define-struct (exn:cancelled exn) ())
+      (define-struct (exn:tcp-problem exn) ())
       
       (define history-limit 20)
       
@@ -144,15 +145,7 @@ A test case:
             (opt-lambda (url-string [post-data #f])
               (on-url-click
                (lambda (url-string post-data)
-                 (with-handlers ([(lambda (x) #t)
-                                  (lambda (x)
-                                    (unless (or (exn:break? x)
-                                                (exn:file-saved-instead? x)
-                                                (exn:cancelled? x))
-                                      ((error-display-handler)
-                                       (if (exn? x) (exn-message x) (format "~s" x))
-                                       x)))])
-                   (send (get-canvas) goto-url url-string (get-url) void post-data)))
+                 (send (get-canvas) goto-url url-string (get-url) void post-data))
                url-string
                post-data)))
           
@@ -235,28 +228,55 @@ A test case:
             (send top-level-window close-status-line 'browser:hyper.ss))
           
           (define/public reload
+	    ;; The reload function is called in a non-main thread,
+	    ;;  since this class is instantiated in a non-main thread.
             (opt-lambda ([progress void])
               (when url
-                (init-browser-status-line top-level-window)
-                (update-browser-status-line 
-                 top-level-window 
-                 (format "Visiting ~a"
-                         (cond
-                           [(url? url) (url->string url)]
-                           [else "page"])))
-                (let ([headers (get-headers/read-from-port progress)])
-                  ;; Page is a redirection?
-                  (let ([m (regexp-match "^HTTP/[^ ]+ 301 " headers)])
-                    (when m
-                      (let ([loc (extract-field "location" headers)])
-                        (when loc
-                          (set! redirection 
-                                (cond
-                                  [(url? url)
-                                   (combine-url/relative url loc)]
-                                  [else
-                                   (string->url loc)])))))))
-                (close-browser-status-line top-level-window))))
+		(let ([s (make-semaphore)]
+		      [closer-t #f]
+		      [this-t (current-thread)])
+		  (when top-level-window
+		    (queue-callback
+		     (lambda ()
+		       (init-browser-status-line top-level-window)
+		       (update-browser-status-line 
+			top-level-window 
+			(format "Visiting ~a"
+				(cond
+				 [(url? url) (url->string url)]
+				 [else "page"])))
+		       ;; Yikes! We need to ensure that the browser status
+		       ;;  line is closed, even if the reload thread dies.
+		       ;; We use the usual trick of setting up a watcher
+		       ;;  thread and then killing it off if its work
+		       ;;  is not needed.
+		       (set! closer-t 
+			     (thread (lambda ()
+				       (sync (thread-dead-evt this-t))
+				       (queue-callback
+					(lambda ()
+					  (close-browser-status-line top-level-window))))))
+		       (semaphore-post s)))
+		    (yield s))
+		  (let ([headers (get-headers/read-from-port progress)])
+		    ;; Page is a redirection?
+		    (let ([m (regexp-match "^HTTP/[^ ]+ 301 " headers)])
+		      (when m
+			(let ([loc (extract-field "location" headers)])
+			  (when loc
+			    (set! redirection 
+				  (cond
+				   [(url? url)
+				    (combine-url/relative url loc)]
+				   [else
+				    (string->url loc)])))))))
+		  (when top-level-window
+		    (queue-callback
+		     (lambda ()
+		       (kill-thread closer-t)
+		       (close-browser-status-line top-level-window)
+		       (semaphore-post s)))
+		    (yield s))))))
           
           (define/private (get-headers/read-from-port progress)
             (cond
@@ -267,9 +287,8 @@ A test case:
                (let* ([busy? #t]
                       [stop-busy (lambda ()
                                    (when busy?
-                                     (set! busy? #f)
-                                     (end-busy-cursor)))])
-                 (with-handlers ([(lambda (x) (and #f (exn:fail? x) busy?))
+                                     (set! busy? #f)))])
+                 (with-handlers ([(lambda (x) (and (exn:fail? x) busy?))
                                   (lambda (x) 
                                     (call/input-url 
                                      url
@@ -280,7 +299,8 @@ A test case:
                                          get-pure-port)
                                      (lambda (p)
                                        (stop-busy)
-                                       (read-from-port p empty-header progress))))])
+                                       (read-from-port p empty-header progress)
+				       empty-header)))])
                    (call/input-url 
                     url 
                     (if post-data 
@@ -305,12 +325,23 @@ A test case:
                  (erase)
                  (clear-undos)
                  (let* ([mime-type (extract-field "content-type" mime-headers)]
-                        [html? (and mime-type (regexp-match #rx"text/html" mime-type))])
+			[path-extension (and (not mime-type)
+					     (url? url)
+					     (let ([p (url-path url)])
+					       (and (not (null? p))
+						    (regexp-match #rx"[.][^.]*$"
+								  (car (last-pair p))))))]
+                        [html? (or (and mime-type (regexp-match #rx"text/html" mime-type))
+				   (member path-extension '(".html" ".htm")))]
+                        [text? (or (and mime-type (regexp-match #rx"text/plain" mime-type))
+				   (member path-extension '(".txt"))
+				   (and (url? url)
+					(equal? (url-scheme url) "file")))])
                    (cond
                      [(or (and mime-type (regexp-match #rx"application/" mime-type))
                           (and (url? url)
                                (not (null? (url-path url)))
-                               (regexp-match "[.]plt$" (car (last-pair (url-path url))))
+			       (not text?)
                                ; document-not-found produces HTML:
                                (not html?)))
                       ; Save the file
@@ -371,7 +402,6 @@ A test case:
                                    #f ; should be calling window!
                                    #f
                                    orig-name))])
-                        (begin-busy-cursor) ; turn the cursor back on
                         (when tmp-plt-filename
                           (let* ([d (make-object dialog% (string-constant downloading) top-level-window)]
                                  [message (make-object message% 
@@ -416,7 +446,9 @@ A test case:
                             ; Let thread run only after the dialog is shown
                             (queue-callback (lambda () (semaphore-post wait-to-start)))
                             (send d show #t)
-                            (when exn (raise exn)))
+                            (when exn 
+                              (raise (make-exn:tcp-problem (exn-message exn) 
+                                                           (current-continuation-marks)))))
                           (let ([sema (make-semaphore 0)])
                             (when (and tmp-plt-filename install?)
                               (run-installer tmp-plt-filename
@@ -452,7 +484,19 @@ A test case:
                                   (current-load-relative-directory))])
                         (parameterize ([html-status-handler 
                                         (lambda (s)
-                                          (update-browser-status-line top-level-window s))]
+					  (when top-level-window
+					    (let ([t (current-thread)]
+						  [sema (make-semaphore)])
+					      (queue-callback
+					       (lambda ()
+						 (when (thread-running? t)
+						   ;; Since t is running, the status line hasn't been
+						   ;;  closed by the watcher thread (and there's no
+						   ;;  race, because it can only be closed in the
+						   ;;  handler thread)
+						   (update-browser-status-line top-level-window s))
+						 (semaphore-post sema)))
+					      (yield sema))))]
                                        [current-load-relative-directory directory]
                                        [html-eval-ok (url-allows-evaling? url)])
                           (html-convert p this)))]
@@ -472,7 +516,6 @@ A test case:
                       (end-edit-sequence)])))
                (lambda ()
                  (end-edit-sequence)
-                 (end-busy-cursor)
                  (set! htmling? #f)
                  (set-modified #f)
                  (auto-wrap wrapping-on?)
@@ -651,46 +694,53 @@ A test case:
               (let ([tlw (get-top-level-window)])
                 (when (and tlw
                            (is-a? tlw hyper-frame<%>))
-                  (let ([pre-url (cond
-                                   [(url? in-url) in-url]
-                                   [(port? in-url) in-url]
-                                   [(string? in-url)
-                                    (if relative
-                                        (combine-url/relative relative in-url)
-                                        (string->url in-url))]
-                                   [else (error 'goto-url "unknown url ~e\n" in-url)])]
-                        [killable-cust (make-custodian)]
-                        [hyper-panel (send tlw get-hyper-panel)])
-                    (let-values ([(e url)
-                                  (let ([e-now (get-editor)])
-                                    (cond
-                                      [(and e-now
-                                            (not post-data)
-                                            (same-page-url? pre-url (send e-now get-url)))
-                                       (progress #t)
-                                       (values e-now pre-url)]
-                                      [else
-                                       (send hyper-panel set-stop-callback 
-                                             (lambda ()
-                                               (custodian-shutdown-all killable-cust)))
-                                       (send hyper-panel enable-browsing #f)
-                                       (begin0
-                                         (make-editor/setup-kill killable-cust 
-                                                                 (get-editor%)
-                                                                 tlw
-                                                                 pre-url
-                                                                 progress
-                                                                 post-data
-                                                                 (lambda (x) (remap-url x)))
-                                         (send hyper-panel set-stop-callback void)
-                                         (send hyper-panel enable-browsing #t))]))])
-                      (when e
-                        (let* ([tag-pos (send e find-tag (and (url? url) (url-fragment url)))])
-                          
-                          (unless (and tag-pos (positive? tag-pos))
-                            (send e hide-caret #t))
-                          (set-page (list e (or tag-pos 0) (send e last-position)) #t)
-                          (when tag-pos (send e set-position tag-pos))))))))))
+                  (let* ([pre-url (cond
+                                    [(url? in-url) in-url]
+                                    [(port? in-url) in-url]
+                                    [(string? in-url)
+                                     (if relative
+                                         (combine-url/relative relative in-url)
+                                         (string->url in-url))]
+                                    [else (error 'goto-url "unknown url ~e\n" in-url)])]
+                         [killable-cust (make-custodian)]
+                         [hyper-panel (send tlw get-hyper-panel)]
+                         [result
+                          (let ([e-now (get-editor)])
+                            (cond
+                              [(and e-now
+                                    (not post-data)
+                                    (same-page-url? pre-url (send e-now get-url)))
+                               (progress #t)
+                               (cons e-now pre-url)]
+                              [else
+                               (send hyper-panel set-stop-callback 
+                                     (lambda ()
+                                       (custodian-shutdown-all killable-cust)))
+                               (send hyper-panel enable-browsing #f)
+                               (begin0
+                                 (make-editor/setup-kill killable-cust 
+                                                         (get-editor%)
+                                                         tlw
+                                                         pre-url
+                                                         progress
+                                                         post-data
+                                                         (lambda (x) (remap-url x)))
+                                 (send hyper-panel set-stop-callback void)
+                                 (send hyper-panel enable-browsing #t))]))])
+                    (cond
+                      [(pair? result)
+                       (let* ([e (car result)]
+                              [url (cdr result)]
+                              [tag-pos (send e find-tag (and (url? url) (url-fragment url)))])
+                         (unless (and tag-pos (positive? tag-pos))
+                           (send e hide-caret #t))
+                         (set-page (list e (or tag-pos 0) (send e last-position)) #t)
+                         (when tag-pos (send e set-position tag-pos)))]
+                      [(exn? result) 
+                       (message-box (string-constant drscheme)
+                                    (exn-message result)
+                                    tlw)]
+                      [else (void)]))))))
           
           ;; remap-url : url? -> (union #f url?)
           ;; this method is intended to be overridden so that derived classes can change
@@ -724,34 +774,46 @@ A test case:
       
       ;; make-editor/setup-kill : custodian editor-class frame%-instance 
       ;;                          url (boolean??? -> void) ??? (url -> (union port #f url))
-      ;;                       -> (values (union #f editor) (union #f url))
+      ;;                       -> (union (cons editor (union #f url)) exn #f)
       ;; if cust is shutdown, the url will stop being loaded and a dummy editor is returned.
       (define (make-editor/setup-kill cust html-editor% tlw init-url progress post-data remap-url)
         (let* ([c (make-channel)]
+	       [progs (make-channel)]
+	       [sent-prog? #f]
                [t (parameterize ([current-custodian cust])
                     (thread
                      (lambda ()
-                       (channel-put
-                        c
-                        (make-editor/follow-redirections html-editor%
-                                                         tlw
-                                                         init-url
-                                                         progress
-                                                         post-data
-                                                         remap-url)))))]
+		       (with-handlers ([exn? (lambda (exn)
+					       (channel-put c exn))])
+			 (channel-put
+			  c
+			  (make-editor/follow-redirections html-editor%
+							   tlw
+							   init-url
+							   (lambda (v)
+							     (channel-put progs v))
+							   post-data
+							   remap-url))))))]
                [ans #f])
-          (yield
-           (choice-evt
-            (handle-evt c (lambda (x) (set! ans x)))
-            (handle-evt (thread-dead-evt t)
-                        (lambda (_)
-                          (let ([t (new hyper-text% 
-                                        (url #f)
-                                        (top-level-window tlw)
-                                        (progress void))])
-                            (send t insert "Stopped.")
-                            (set! ans (cons t #f)))))))
-          (values (car ans) (cdr ans))))
+	  (let loop ()
+	    (yield
+	     (choice-evt
+	      (handle-evt c (lambda (x) (set! ans x)))
+	      (handle-evt progs (lambda (v)
+				  (set! sent-prog? #t)
+				  (progress v)
+				  (loop)))
+	      (handle-evt (thread-dead-evt t)
+			  (lambda (_)
+			    (let ([t (new hyper-text% 
+					  (url #f)
+					  (top-level-window #f)
+					  (progress void))])
+			      (send t insert "Stopped.")
+			      (set! ans (cons t #f))))))))
+	  (unless sent-prog?
+	    (progress #f))
+          ans))
       
       ;; make-editor/follow-redirections : editor-class frame%-instance
       ;;                                   url (boolean??? -> void) ??? (url -> (union port #f url))
@@ -760,33 +822,38 @@ A test case:
       ;; but stops after 10 redirections (just in case there are too many
       ;; of these things, give the user a chance to stop)
       (define (make-editor/follow-redirections html-editor% tlw init-url progress post-data remap-url)
-        (let loop ([n 10]
-                   [unmapped-url init-url])
-          (let ([url (if (url? unmapped-url)
-                         (let ([rurl (remap-url unmapped-url)])
-                           (unless (or (url? rurl)
-                                       (input-port? rurl)
-                                       (not rurl))
-                             (error 'remap-url
-                                    "expected a url struct, an input-port, or #f, got ~e"
-                                    rurl))
-                           rurl)
-                         unmapped-url)])
-            (if url
-                (let ([html-editor (new html-editor%
-                                        [url url]
-                                        [top-level-window tlw]
-                                        [progress progress]
-                                        [post-data post-data])])
-                  (cond
-                    [(zero? n) 
-                     (cons html-editor url)]
-                    [(send html-editor get-redirection)
-                     =>
-                     (lambda (new-url) (loop (- n 1) new-url))]
-                    [else
-                     (cons html-editor url)]))
-                (cons #f #f)))))
+        (with-handlers ([(lambda (x) 
+                           (or (exn:file-saved-instead? x)
+                               (exn:cancelled? x)
+                               (exn:tcp-problem? x)))
+                         values])
+          (let loop ([n 10]
+                     [unmapped-url init-url])
+            (let ([url (if (url? unmapped-url)
+                           (let ([rurl (remap-url unmapped-url)])
+                             (unless (or (url? rurl)
+                                         (input-port? rurl)
+                                         (not rurl))
+                               (error 'remap-url
+                                      "expected a url struct, an input-port, or #f, got ~e"
+                                      rurl))
+                             rurl)
+                           unmapped-url)])
+              (if url
+                  (let ([html-editor (new html-editor%
+                                          [url url]
+                                          [top-level-window tlw]
+                                          [progress progress]
+                                          [post-data post-data])])
+                    (cond
+                      [(zero? n) 
+                       (cons html-editor url)]
+                      [(send html-editor get-redirection)
+                       =>
+                       (lambda (new-url) (loop (- n 1) new-url))]
+                      [else
+                       (cons html-editor url)]))
+                  #f)))))
       
       (define hyper-canvas% (hyper-canvas-mixin canvas:basic%))
       
@@ -863,6 +930,7 @@ A test case:
             (cond
               [on?
                (send stop-button enable #f)
+               (when choice (send choice enable #t))
                (update-buttons)]
               [else 
                (send stop-button enable #t)

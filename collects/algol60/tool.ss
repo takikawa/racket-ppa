@@ -6,12 +6,14 @@
            "parse.ss"
            "simplify.ss"
            "compile.ss"
-	   "get-base.ss"
 	   (lib "embed.ss" "compiler")
 	   (lib "string-constant.ss" "string-constants")
 	   (prefix bd: "bd-tool.ss"))
 
   (provide tool@)
+
+  (define base-importing-stx (dynamic-require '(lib "base.ss" "algol60")
+					     'base-importing-stx))
 
   (define tool@
     (unit/sig drscheme:tool-exports^
@@ -47,6 +49,7 @@
 
       (define lang%
         (class* object% (drscheme:language:language<%>)
+          (define/public (first-opened) (void))
           (define/public (config-panel parent)
             (case-lambda
               [() null]
@@ -71,7 +74,9 @@
           (define/public (order-manuals x) 
             (values 
              (list #"drscheme" #"tour" #"help")
-             #f))
+	     ;; We allow doc.txt search results, because the Algol60
+	     ;; docs are in doc.txt:
+             #t))
           (define/public (get-language-name) "Algol 60")
           (define/public (get-language-url) #f)
           (define/public (get-language-numbers) (list 1000 10))

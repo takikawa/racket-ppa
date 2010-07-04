@@ -2098,21 +2098,35 @@ static Scheme_Object *queue_callback(int argc, Scheme_Object **argv)
 
 void *wxSchemeYield(void *sema)
 {
+  int is_handler;
+
   if (!wait_symbol) {
     wxREGGLOB(wait_symbol);
     wait_symbol = scheme_intern_symbol("wait");
   }
 
+  is_handler = mred_current_thread_is_handler(NULL);
+
   if (sema == wait_symbol) {
-    mred_wait_eventspace();
-    return scheme_true;
+    if (is_handler) {
+      mred_wait_eventspace();
+      return scheme_true;
+    } else
+      return scheme_false;
   } else if (sema) {
     if (!scheme_is_evt((Scheme_Object *)sema))
       scheme_wrong_type("yield", "evt or 'wait", -1, 0, (Scheme_Object **)&sema);
 
-    return wxDispatchEventsUntilWaitable((wxDispatch_Check_Fun)NULL, NULL, (Scheme_Object *)sema);
+    if (is_handler)
+      return wxDispatchEventsUntilWaitable((wxDispatch_Check_Fun)NULL, NULL, (Scheme_Object *)sema);
+    else {
+      Scheme_Object *a[1];
+      a[0] = (Scheme_Object *)sema;
+      scheme_sync(1, a);
+      return scheme_false;
+    }
   } else {
-    if (wxYield())
+    if (is_handler && wxYield())
       return scheme_true;
     else
       return scheme_false;
@@ -2869,6 +2883,76 @@ int wxGetBoolPreference(const char *name, int *res)
   }
 
   return 0;
+}
+
+/***********************************************************************/
+/*                         strip menu codes                            */
+/***********************************************************************/
+
+static int starts_paren_accel(char *label, int i)
+{
+  int cnt = 0;
+  while (label[i] == ' ') {
+    i++;
+    cnt++;
+  }
+  if ((label[i] == '(')
+      && (label[i+1] == '&')
+      && label[i+2]
+      && (label[i+3] == ')')) {
+    cnt += 4;
+    i += 4;
+    while (label[i] == ' ') {
+      i++;
+      cnt++;
+    }
+    return cnt;
+  }
+
+  return 0;
+}
+
+char *wxStripMenuCodes(char *label, char *target)
+{
+  int i, j, cnt;
+  char *naya;
+
+  if (!label)
+    return NULL;
+  
+  for (i = 0; label[i]; i++) {
+    if ((label[i] == '&')
+	|| (label[i] == '\t')) {
+      /* Strip it: */
+      if (target)
+	naya = target;
+      else
+	naya = new WXGC_ATOMIC char[strlen(label) + 1];
+      j = 0;
+      for (i = 0; label[i]; i++) {
+        if (label[i] == '&') {
+          if (label[i + 1]) {
+            naya[j++] = label[i + 1];
+            i++;
+          }
+        } else if (label[i] == '\t') {
+	  break;
+	} else if ((cnt = starts_paren_accel(label, i))) {
+	  i += (cnt - 1);
+	} else {
+          naya[j++] = label[i];
+	}
+      }
+      naya[j] = 0;
+      
+      return naya;
+    }
+  }
+
+  if (target)
+    strcpy(target, label);
+  
+  return label;
 }
 
 /***********************************************************************/

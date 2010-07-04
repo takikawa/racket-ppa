@@ -266,6 +266,18 @@ There shouldn't be any error (but add in a bug that triggers one to be sure!)
                 #f
                 void
                 void)
+
+     (make-test "#!/bin/sh\nxx"
+                "reference to undefined identifier: xx"
+                "reference to undefined identifier: xx"
+                #t
+                (cons (make-loc 1 0 10) (make-loc 1 2 12))
+                #f
+                #f
+                #f
+                void
+                void)
+     
      #|
      (make-test (list "#!\n" 
                       '("Special" "Insert XML Box")
@@ -341,6 +353,7 @@ There shouldn't be any error (but add in a bug that triggers one to be sure!)
      |#
      
      ;; eval tests
+
      (make-test "    (eval '(values 1 2))"
                 "1\n2"
                 "1\n2"
@@ -608,6 +621,17 @@ There shouldn't be any error (but add in a bug that triggers one to be sure!)
                 void
                 void)
      
+     (make-test "(write-special 1)"
+                "1#t"
+                "1#t"
+                #f
+                'interactions
+                #f
+                #f
+                #f
+                void
+                void)
+     
      (make-test
       ;; the begin/void combo is to make sure that no value printout
       ;; comes and messes up the source location for the error.
@@ -684,7 +708,7 @@ There shouldn't be any error (but add in a bug that triggers one to be sure!)
                 #f
                 void
                 void)
-
+     
      ;; graphical lambda tests
      (make-test (list "((" '("Special" "Insert λ") "(x) x) 1)")
                 "1"
@@ -1023,7 +1047,13 @@ There shouldn't be any error (but add in a bug that triggers one to be sure!)
       (when (send (send drscheme-frame get-interactions-text) local-edit-sequence?)
         (error 'kill-test3 "in edit-sequence")))
     
-    
+    (define (callcc-test)
+      (error 'callcc-test)
+      "(define kont #f) (let/cc empty (set! kont empty))" ;; in defs
+      "(kont)" ;; in repl 1
+      "x" ;; in repl2
+      ;; make sure error message comes out
+      )
     ;; run the tests
     
     (when (file-exists? tmp-load-filename)
@@ -1032,6 +1062,8 @@ There shouldn't be any error (but add in a bug that triggers one to be sure!)
     
     ;(set-language-level! (list "PLT" "Graphical (MrEd)")) (kill-tests)
     
-    (run-test-in-language-level #t)
     (run-test-in-language-level #f)
+    (run-test-in-language-level #t)
+    (kill-tests)
+    (callcc-test)
     ))

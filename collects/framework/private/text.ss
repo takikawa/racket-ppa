@@ -884,6 +884,7 @@ WARNING: printf is rebound in the body of the unit to always
           set-allow-edits
           get-allow-edits
           insert-between
+          insert-before
           submit-to-port?
           on-submit
           send-eof-to-in-port
@@ -917,6 +918,8 @@ WARNING: printf is rebound in the body of the unit to always
       
       (define (set-box/f! b v) (when (box? b) (set-box! b v)))
       
+      (define arrow-cursor (make-object cursor% 'arrow))
+      
       (define eof-snip%
         (class image-snip%
           (init-field port-text)
@@ -927,9 +930,11 @@ WARNING: printf is rebound in the body of the unit to always
           (define/override (on-event dc x y editorx editory event)
             (when (send event button-up? 'left)
               (send port-text send-eof-to-box-in-port)))
+          (define/override (adjust-cursor dc x y edx edy e)
+            arrow-cursor)
           (super-make-object (icon:get-eof-bitmap))
           (inherit set-flags get-flags)
-          (set-flags (list* 'handles-events 'hard-newline (get-flags)))))
+          (set-flags (list* 'handles-events (get-flags)))))
       
       (define ports-mixin
         (mixin (wide-snip<%>) (ports<%>)
@@ -951,7 +956,11 @@ WARNING: printf is rebound in the body of the unit to always
                    position-paragraph
                    release-snip
                    set-caret-owner
-                   split-snip)
+                   split-snip
+                   get-focus-snip
+                   get-view-size
+                   scroll-to-position
+                   position-location)
           
           ;; private field
           (define eventspace (current-eventspace))
@@ -988,11 +997,21 @@ WARNING: printf is rebound in the body of the unit to always
           (define/public-final (insert-between str/snp)
             (insert str/snp unread-start-point unread-start-point)
             (set! unread-start-point (+ unread-start-point 
-                                        (cond
-                                          [(string? str/snp) (string-length str/snp)]
-                                          [(is-a? str/snp snip%)
-                                           (send str/snp get-count)]))))
-                                           
+                                        (amt-of-space str/snp))))
+          
+          ;; insert-before : string/snp -> void
+          ;; inserts something before both the insertion point and the unread region
+          (define/public-final (insert-before str/snp)
+            (insert str/snp insertion-point insertion-point)
+            (let ([amt (amt-of-space str/snp)])
+              (set! insertion-point (+ insertion-point amt))
+              (set! unread-start-point (+ unread-start-point amt))))
+          
+          (define/private (amt-of-space str/snp)
+            (cond
+              [(string? str/snp) (string-length str/snp)]
+              [(is-a? str/snp snip%)
+               (send str/snp get-count)]))
           
           (define/public-final (get-insertion-point) insertion-point)
           (define/public-final (set-insertion-point ip) (set! insertion-point ip))
@@ -1134,27 +1153,48 @@ WARNING: printf is rebound in the body of the unit to always
                 (lock l?))
               (set! box-input #f)))
           
+          (define/private (adjust-box-input-width)
+            (when box-input
+              (let ([w (box 0)]
+                    [x (box 0)]
+                    [bw (send (icon:get-eof-bitmap) get-width)])
+                (get-view-size w #f)
+                (let ([pos (- (last-position) 2)])
+                  (position-location pos x #f #t
+                                     (not (= pos (paragraph-start-position (position-paragraph pos))))))
+                (let ([size (- (unbox w) (unbox x) bw 24)])
+                  (when (positive? size)
+                    (send box-input set-min-width size))))))
+          
+          (define/augment (on-display-size)
+            (adjust-box-input-width)
+            (inner (void) on-display-size))
+          
           (define/private (on-box-peek)
             (unless box-input
               (let* ([ed (new (get-box-input-text%))]
                      [es (new (get-box-input-editor-snip%) 
                               (editor ed))]
                      [locked? (is-locked?)])
+                (begin-edit-sequence)
                 (send ed set-port-text this)
                 (lock #f)
-                (unless (= unread-start-point (paragraph-start-position (position-paragraph unread-start-point)))
-                  (insert-between "\n"))
+                #;(unless (= unread-start-point (paragraph-start-position (position-paragraph unread-start-point)))
+                    (insert-between "\n"))
                 (insert-between es)
                 (insert-between eof-button)
-                (send (get-canvas) add-wide-snip es)
+                #;(send (get-canvas) add-wide-snip es)
                 (set! box-input es)
+                (adjust-box-input-width)
                 (set-caret-owner es 'display)
-                (lock locked?))))
+                (lock locked?)
+                (end-edit-sequence))))
           
           (define/public (new-box-input ed)
             (when (eq? ed (send box-input get-editor)) ;; just in case things get out of sync.
               (let ([locked? (is-locked?)])
                 (begin-edit-sequence)
+                (send box-input set-min-width 'none)
                 (lock #f)
                 
                 (let ([old-insertion-point insertion-point])
@@ -1167,7 +1207,8 @@ WARNING: printf is rebound in the body of the unit to always
                                        [(is-a? snip string-snip%)
                                         (send snip get-text 0 (send snip get-count))]
                                        [else snip])
-                                     (make-object style-delta%))))
+                                     (make-object style-delta%)))
+                         #t)
                         (loop next))))
                   
                   ;; this is copied code ...
@@ -1183,6 +1224,7 @@ WARNING: printf is rebound in the body of the unit to always
                                   (bytes->list (string->bytes/utf-8 (string s/c))))]))))
                 
                 (lock locked?)
+                (adjust-box-input-width)
                 (end-edit-sequence))))
           
           ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1214,12 +1256,12 @@ WARNING: printf is rebound in the body of the unit to always
             (parameterize ([current-eventspace eventspace])
               (queue-callback
                (λ ()
-                 (do-insertion txts)
+                 (do-insertion txts #f)
                  (sync signal)))))
           
-          ;; do-insertion : (listof (cons (union string snip) style-delta)) -> void
+          ;; do-insertion : (listof (cons (union string snip) style-delta)) boolean -> void
           ;; thread: eventspace main thread
-          (define/private (do-insertion txts)
+          (define/private (do-insertion txts showing-input?)
             (let ([locked? (is-locked?)])
               (begin-edit-sequence)
               (lock #f)
@@ -1245,7 +1287,7 @@ WARNING: printf is rebound in the body of the unit to always
                                    str/snp)
                                old-insertion-point
                                old-insertion-point
-                               #f)
+                               #t)
                        
                        ;; the idea here is that if you made a string snip, you
                        ;; could have made a string and gotten the style, so you
@@ -1255,6 +1297,11 @@ WARNING: printf is rebound in the body of the unit to always
                    (loop (cdr txts))]))
               (set! allow-edits? #f)
               (lock locked?)
+              (unless showing-input?
+                (when box-input
+                  (adjust-box-input-width)
+                  (when (eq? box-input (get-focus-snip))
+                    (scroll-to-position (last-position)))))
               (end-edit-sequence)
               (unless (null? txts)
                 (after-io-insertion))))
@@ -1350,7 +1397,13 @@ WARNING: printf is rebound in the body of the unit to always
                   [(eq? (current-thread) (eventspace-handler-thread eventspace))
                    (error 'write-bytes-proc "cannot write to port on eventspace main thread")]
                   [else
-                   (channel-put write-chan (cons special style))])
+                   (let ([str/snp (cond
+                                    [(string? special) special]
+                                    [(is-a? special snip%) special]
+                                    [else (format "~s" special)])])
+                     (channel-put 
+                      write-chan 
+                      (cons str/snp style)))])
                 #t))
             
             (let* ([add-standard
@@ -1602,9 +1655,7 @@ WARNING: printf is rebound in the body of the unit to always
                            [resp-chan (cdr pr)])
                        (set! positioners (cons pr positioners))
                        (loop))))
-                  (if position
-                      (apply choice-evt (map service-positioner positioners))
-                      never-evt)
+                  (apply choice-evt (map service-positioner positioners))
                   (handle-evt
                    read-chan
                    (λ (ent)
@@ -1695,7 +1746,11 @@ WARNING: printf is rebound in the body of the unit to always
                      [resp-evt (cdr pr)])
                  (handle-evt
                   (choice-evt nack-evt 
-                              (channel-put-evt resp-evt position))
+                              (channel-put-evt resp-evt (or position 
+                                                            
+                                                            ;; a bogus position for when 
+                                                            ;; nothing has happened yet.
+                                                            (list 1 0 1))))
                   (let ([sent-position position])
                     (λ (_)
                       (set! positioners (remq pr positioners))
@@ -1804,20 +1859,23 @@ WARNING: printf is rebound in the body of the unit to always
         (define (peek-proc bstr skip-count progress-evt)
           (poll-guard-evt
            (lambda (polling?)
-             (if polling?
-                 (let ([answer 
-                        (sync
-                         (nack-guard-evt
-                          (λ (nack)
-                            (let ([chan (make-channel)])
-                              (channel-put peek-chan (make-peeker bstr skip-count progress-evt chan nack #t))
-                              chan))))])
-                   (wrap-evt always-evt (λ (_) answer)))
-                 (nack-guard-evt
-                  (λ (nack)
-                    (let ([chan (make-channel)])
-                      (channel-put peek-chan (make-peeker bstr skip-count progress-evt chan nack #f))
-                      chan)))))))
+             (let ([evt 
+                    (nack-guard-evt
+                     (λ (nack)
+                       (let ([chan (make-channel)])
+                         (channel-put peek-chan (make-peeker bstr skip-count progress-evt chan nack polling?))
+                         chan)))])
+               (if polling? 
+                   (let ([v (sync evt)])
+                     (if (eq? v 0)
+                         ;; Don't return 0, because that means something is
+                         ;; probably ready. We want to indicate that nothing is
+                         ;; ready.
+                         never-evt
+                         ;; Even on success, package it as an event, because
+                         ;; `read-bytes-proc' expects an event
+                         (wrap-evt always-evt (lambda (_) v))))
+                   evt)))))
         
         (define (progress-evt-proc)
           (sync

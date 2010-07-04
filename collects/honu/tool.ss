@@ -29,6 +29,7 @@
       
       (define (honu-lang-mixin level)
         (class* object% (drscheme:language:language<%>)
+          (define/public (first-opened) (void))
           (define/public (get-comment-character) (values "//" #\*))
           
           (define/public (default-settings)
@@ -86,13 +87,16 @@
                 (if (eof-object? (peek-char-or-special port))
                     eof
                     (let* ([parsed (level-parser port name)])
-                      (let-values ([(cruft-for-stx compiled-defns) (compile/defns tenv lenv parsed)])
+                      (let-values
+                          ([(cruft-for-stx compiled-defns) (compile/defns tenv lenv parsed)])
                         ;; if we wrap this in something special for the syntax-case below, then
                         ;; Check Syntax breaks (unsurprisingly), so we'll just do special
                         ;; wrappers for the interaction stuff.
-                        (datum->syntax-object #f (list 'begin cruft-for-stx 
-                                                       (datum->syntax-object #f (cons 'begin compiled-defns) #f))
-                                              #f)))))))
+                        (datum->syntax-object
+                         #f
+                         (list 'begin cruft-for-stx 
+                               (datum->syntax-object #f (cons 'begin compiled-defns) #f))
+                         #f)))))))
           (define/public (front-end/interaction port settings teachpack-cache)
             (let ([name (object-name port)])
               (lambda ()
@@ -161,8 +165,8 @@
           
           (super-instantiate ())))
       
-      ;; The following copies the Java mode to make one for Honu, but it's better right now than using
-      ;; the Scheme mode.  Ugh.
+      ;; The following copies the Java mode to make one for Honu, but it's better right now than
+      ;; using the Scheme mode.  Ugh.
       
       ;; matches-language : (union #f (listof string)) -> boolean
       (define (matches-language l)
@@ -218,7 +222,8 @@
                               (fold (lambda (v s)
                                       ;; if there are no objects, then we'll just print out
                                       ;; the list on the same line.
-                                      (string-append s ", " (format-honu-value v settings (+ indent 1))))
+                                      (string-append s ", "
+                                                     (format-honu-value v settings (+ indent 1))))
                                     (format-honu-value (car value) settings (+ indent 1))
                                     (cdr value))
                               ")"))]

@@ -12,7 +12,8 @@
      use-screen-w use-screen-h  ; "pixel" size
      pixel-scale                ; amount the "pixels" are scaled (e.g., for quad)
      condense? printing?        ; mode
-     smoothing?))
+     smoothing?
+     commentary-on-slide?))
      
   ;; Viewer inputs to the core unit:
   (define-signature viewer^
@@ -58,7 +59,7 @@
      itemize itemize* page-itemize page-itemize*
      para para* page-para page-para*
      para/c para/r para*/c para*/r page-para/c page-para/r page-para*/c page-para*/r
-     font-size gap-size current-font-size line-sep title-size 
+     font-size gap-size current-font-size current-line-sep line-sep title-size 
      main-font current-main-font with-font current-title-color
      red green blue purple orange size-in-pixels
      t it bt bit tt titlet tt* rt

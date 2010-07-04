@@ -201,6 +201,9 @@ PREFLAGS="$CPPFLAGS"
 ar_libtool_no_undefined=""
 LIBMZSCHEME_DEP=""
 
+XFT_EXTRA_FLAGS=
+XFT_EXTRA_LIBS=
+
 ###### OSKit stuff #######
 
 if test "${enable_oskit}" = "yes" ; then
@@ -497,6 +500,10 @@ case $OS in
     else
       PREFLAGS="$PREFLAGS -DXONX "
       X_EXTRA_LIBS="$X_EXTRA_LIBS -lz"
+
+      # need help finding fontconfig and freetype headers:
+      XFT_EXTRA_FLAGS="-I/usr/X11R6/include -I/usr/X11R6/include/freetype2"
+      XFT_EXTRA_LIBS="-lfontconfig"
     fi
     ;;
   *)
@@ -543,6 +550,14 @@ if test "$inline" = "no" ; then
   MZOPTIONS="$MZOPTIONS -DNO_INLINE_KEYWORD"
 fi
 AC_MSG_RESULT($inline) 
+
+AC_MSG_CHECKING([for nl_langinfo (CODESET)])
+AC_TRY_LINK([#include <langinfo.h>],
+	[char *codeset = nl_langinfo (CODESET);],
+   AC_DEFINE(HAVE_CODESET,1,[Have nl_langinfo (CODESET)])
+   have_codeset=yes,
+   have_codeset=no)
+AC_MSG_RESULT($have_codeset)
 
 iconv_lib_flag=""
 if test "${enable_iconv}" = "yes" ; then
@@ -794,24 +809,32 @@ if test "${enable_xft}" = "" ; then
 fi
 
 if test "${enable_xft}" = "yes" ; then  
-  xft_config_ok=`xft-config --cflags  2> /dev/null`
-  if test "$xft_config_ok" = "" ; then
+  xft_config_prog="pkg-config xft"
+  xft_config_ok=`$xft_config_prog --cflags  2> /dev/null`
+  if test "$?" != 0 ; then
+    xft_config_prog="xft-config"
+    xft_config_ok=`$xft_config_prog --cflags  2> /dev/null`
+  fi
+  if test "$?" != 0 ; then
+    save_cpp_flags="$CPPFLAGS"
+    CPPFLAGS="$CPPFLAGS $XFT_EXTRA_FLAGS $X_CFLAGS"
     AC_CHECK_HEADER(X11/Xft/Xft.h, enable_xft=yes, enable_xft=no)
     if test "${enable_xft}" = "yes" ; then  
       AC_CHECK_LIB(Xft, XftTextExtents8, enable_xft="yes", enable_xft="no", $X_LIBS -lX11 -lXext -Xrender -lXft)
       if test "${enable_xft}" = "yes" ; then  
-        MROPTIONS="$MROPTIONS -DWX_USE_XFT"
-        X_EXTRA_LIBS="$X_EXTRA_LIBS -lXft"
+        MROPTIONS="$MROPTIONS $XFT_EXTRA_FLAGS -DWX_USE_XFT"
+        X_EXTRA_LIBS="$X_EXTRA_LIBS $XFT_EXTRA_LIBS -lXft"
       else
         echo "no Xft libs; Xft support disabled"
       fi
     else
       echo "no Xft headers; Xft support disabled"
     fi
+    CPPFLAGS="$save_cpp_flags"
   else
-    echo "Using xft-config..."
-    xft_cflags=`xft-config --cflags`
-    xft_libs=`xft-config --libs`
+    echo "Using $xft_config_prog..."
+    xft_cflags=`$xft_config_prog --cflags`
+    xft_libs=`$xft_config_prog --libs`
     echo "Xft flags: $xft_cflags"
     echo "Xft libs: $xft_libs"
     MROPTIONS="$MROPTIONS -DWX_USE_XFT"
@@ -828,7 +851,7 @@ fi
 
 if test "${enable_cairo}" = "yes" ; then  
   cairo_config_ok=`pkg-config --cflags cairo 2> /dev/null`
-  if test "$cairo_config_ok" = "" ; then
+  if test "$?" != 0 ; then
     echo "no information from pkg-config; Cairo support disabled"
   else
     echo "Using pkg-config for Cairo..."

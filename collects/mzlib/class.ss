@@ -26,6 +26,7 @@
 	   generic make-generic send-generic
 	   is-a? subclass? implementation? interface-extension?
 	   object-interface object-info object->vector
+	   object-method-arity-includes?
 	   method-in-interface? interface->method-names class->interface class-info
 	   (struct exn:fail:object ())
 	   make-primitive-class
@@ -35,7 +36,7 @@
 	   pubment overment augride
            public-final override-final augment-final
 	   field init init-field
-	   rename-super rename-inner inherit
+	   rename-super rename-inner inherit inherit-field
 	   this super inner
 	   super-make-object super-instantiate super-new
 	   inspect))

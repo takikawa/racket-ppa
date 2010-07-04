@@ -9,6 +9,36 @@
 				    "invoke-unit: cannot link to undefined identifier: %S", \
 				    (Scheme_Object*)(x)->key);
 
+#ifdef NO_INLINE_KEYWORD
+# define MZC_INLINE /* */
+#else
+# define MZC_INLINE MSC_IZE(inline)
+#endif
+
+#define MZC_GLOBAL_PREPARE(vec, pos) (SCHEME_VEC_ELS(vec)[pos] = SCHEME_PTR_VAL(SCHEME_VEC_ELS(vec)[pos]))
+static MZC_INLINE Scheme_Object *MZC_GLOBAL_LOOKUP(Scheme_Object *vec, int pos) {
+  Scheme_Bucket *bucket = (Scheme_Bucket *)SCHEME_VEC_ELS(vec)[pos];
+  Scheme_Object *o = bucket->val;
+  if (o)
+    return o;
+  else {
+    scheme_unbound_global(bucket);
+    return NULL;
+  }
+}
+
+static MZC_INLINE Scheme_Object *MZC_GLOBAL_ASSIGN(Scheme_Object *vec, int pos, Scheme_Object *val) {
+  Scheme_Bucket *bucket = (Scheme_Bucket *)SCHEME_VEC_ELS(vec)[pos];
+  scheme_set_global_bucket("set!", bucket, val, 0);
+  return scheme_void;
+}
+
+#define MZC_KNOWN_SAFE_VECTOR_REF(vec, pos) (SCHEME_VEC_ELS(vec)[pos])
+
+#define MZC_APPLY_MAGIC(val, n) \
+  scheme_eval_compiled_sized_string_with_magic(top_level_bytecode_ ## n, sizeof(top_level_bytecode_ ## n), NULL, \
+                                               scheme_intern_symbol(top_level_magic_sym_ ## n), val, 1)
+
 #define DO_FUEL_POLL ((scheme_fuel_counter-- <= 0) ? (scheme_process_block(0), 0) : 0)
 
 #define _scheme_direct_apply_primitive_multi_poll(prim, argc, argv) \
@@ -37,14 +67,28 @@ static void closure_alloc_inc()
 # define CLOSURE_ALLOC_PP /**/
 #endif
 
+#ifdef MZ_PRECISE_GC
+# define MZC_INSTALL_DATA_PTR(rec) rec
+# define MZC_PARAM_TO_SWITCH(void_param) *(unsigned int *)((Scheme_Closed_Primitive_Post_Ext_Proc *)void_param)->a
+# define MZC_ENV_POINTER(t, ct, void_param) (&(((const ct *)void_param)->data))
+#else
+# define MZC_INSTALL_DATA_PTR(rec) &rec->data
+# define MZC_PARAM_TO_SWITCH(void_param) *(unsigned int*)void_param
+# define MZC_ENV_POINTER(t, ct, void_param) ((const t *)void_param)
+#endif
+
 #define _scheme_make_c_proc_closure(cfunc, rec, name, amin, amax, flags) \
-  (CLOSURE_ALLOC_PP (Scheme_Object *)_scheme_fill_prim_closure(&rec->prim, cfunc, &rec->data, name, amin, amax, flags))
+  (CLOSURE_ALLOC_PP (Scheme_Object *)_scheme_fill_prim_closure_post(&rec->prim, cfunc, MZC_INSTALL_DATA_PTR(rec), \
+								    name, amin, amax, flags, \
+                                                                    sizeof(rec->data)>>2))
 
 #define _scheme_make_c_proc_closure_empty(cfunc, rec, name, amin, amax, flags) \
   (CLOSURE_ALLOC_PP (Scheme_Object *)_scheme_fill_prim_closure(&rec->prim, cfunc, NULL, name, amin, amax, flags))
 
 #define _scheme_make_c_case_proc_closure(cfunc, rec, name, ccnt, cses, flags) \
-  (CLOSURE_ALLOC_PP (Scheme_Object *)_scheme_fill_prim_case_closure(&rec->prim, cfunc, &rec->data, name, ccnt, cses, flags))
+  (CLOSURE_ALLOC_PP (Scheme_Object *)_scheme_fill_prim_case_closure_post(&rec->prim, cfunc, MZC_INSTALL_DATA_PTR(rec), \
+									 name, ccnt, cses, flags, \
+                                                                         sizeof(rec->data)>>2))
 
 #define _scheme_make_c_case_proc_closure_empty(cfunc, rec, name, ccnt, cses, flags) \
   (CLOSURE_ALLOC_PP (Scheme_Object *)_scheme_fill_prim_case_closure(&rec->prim, cfunc, NULL, name, ccnt, cses, flags))
@@ -271,3 +315,42 @@ static Scheme_Object *DEBUG_CHECK(Scheme_Object *v)
   return v;
 }
 #endif
+
+#ifdef MZ_PRECISE_GC
+START_XFORM_SUSPEND;
+static MZC_INLINE Scheme_Object *
+_mzc_direct_apply_primitive_multi(Scheme_Object *prim, int argc, Scheme_Object **argv)
+{
+  return _scheme_direct_apply_primitive_multi(prim, argc, argv);
+}
+static MZC_INLINE Scheme_Object *
+_mzc_direct_apply_primitive(Scheme_Object *prim, int argc, Scheme_Object **argv)
+{
+  return _scheme_direct_apply_primitive(prim, argc, argv);
+}
+static MZC_INLINE Scheme_Object *
+_mzc_direct_apply_closed_primitive_multi(Scheme_Object *prim, int argc, Scheme_Object **argv)
+{
+  return _scheme_direct_apply_closed_primitive_multi(prim, argc, argv);
+}
+static MZC_INLINE Scheme_Object *
+_mzc_direct_apply_closed_primitive(Scheme_Object *prim, int argc, Scheme_Object **argv)
+{
+  return _scheme_direct_apply_closed_primitive(prim, argc, argv);
+}
+END_XFORM_SUSPEND;
+#else
+# define _mzc_direct_apply_primitive_multi(prim, argc, argv) \
+         _scheme_direct_apply_primitive_multi(prim, argc, argv)
+# define _mzc_direct_apply_primitive(prim, argc, argv) \
+         _scheme_direct_apply_primitive(prim, argc, argv)
+# define _mzc_direct_apply_closed_primitive_multi(prim, argc, argv) \
+         _scheme_direct_apply_closed_primitive_multi(prim, argc, argv)
+# define _mzc_direct_apply_closed_primitive(prim, argc, argv) \
+         _scheme_direct_apply_closed_primitive(prim, argc, argv)
+#endif
+
+#define _mzc_apply(r,n,rs) _scheme_apply(r,n,rs)
+#define _mzc_apply_multi(r,n,rs) _scheme_apply_multi(r,n,rs)
+#define _mzc_apply_known_closed_prim(r,n,rs) _scheme_apply_known_closed_prim(r,n,rs)
+#define _mzc_apply_known_closed_prim_multi(r,n,rs) _scheme_apply_known_closed_prim_multi(r,n,rs)

@@ -24,7 +24,8 @@
 #endif
 
 #ifdef USE_WINSOCK_TCP
-# include <winsock.h>
+# include <winsock2.h>
+# include <ws2tcpip.h>
 # define SOCK_ERRNO() WSAGetLastError()
 # define NOT_WINSOCK(x) 0
 # define WAS_EINPROGRESS(e) ((e == WSAEWOULDBLOCK))
@@ -32,19 +33,18 @@
 # define mz_hstrerror(x) NULL
 #endif
 
+/* stolen from $(PLTHOME}/src/mzscheme/src/network.c */
+/* For getting connection names: */
+#define MZ_SOCK_NAME_MAX_LEN 256
+#define MZ_SOCK_HOST_NAME_MAX_LEN 64
+#define MZ_SOCK_SVC_NAME_MAX_LEN 32
+
 /* stolen from $(PLTHOME}/src/mzscheme/src/schpriv.h */
 #ifdef USE_FCNTL_O_NONBLOCK
 # define MZ_NONBLOCKING O_NONBLOCK
 #else
 # define MZ_NONBLOCKING FNDELAY
 #endif
-
-/* stolen from $(PLTHOME)/src/mzscheme/src/network.c */
-# ifdef PROTOENT_IS_INT
-#  define PROTO_P_PROTO PROTOENT_IS_INT
-# else
-#  define PROTO_P_PROTO proto->p_proto
-# endif
 
 /* stolen from $(PLTHOME)/src/mzscheme/src/schfd.h */
 #ifdef USE_FAR_MZ_FDCALLS
@@ -55,7 +55,6 @@
 # define DECL_FDSET(n, c) fd_set n[c]
 # define INIT_DECL_FDSET(n, c) /* empty */
 #endif
-
 struct sslplt {
 #ifdef MZ_PRECISE_GC
   Scheme_Type type;
@@ -821,7 +820,7 @@ unsigned short check_port_and_convert(const char *name, int argc, Scheme_Object 
   if(SCHEME_INTP(argv[pos]))
     if(SCHEME_INT_VAL(argv[pos]) >= 1)
       if(SCHEME_INT_VAL(argv[pos]) <= 65535)
-	return htons(SCHEME_INT_VAL(argv[pos]));
+	return SCHEME_INT_VAL(argv[pos]);
   scheme_wrong_type(name, "exact integer in [1, 65535]", pos, argc,argv);
   return 0; /* unnessary and wrong, but it makes GCC happy */
 }
@@ -839,13 +838,13 @@ SSL_METHOD *check_encrypt_and_convert(const char *name, int argc, Scheme_Object 
     
   v = argv[pos];
 
-  if(!SAME_OBJ(v, scheme_intern_symbol("sslv2-or-v3"))) {
+  if (SAME_OBJ(v, scheme_intern_symbol("sslv2-or-v3"))) {
     return (c ? SSLv23_client_method() : SSLv23_server_method());
-  } else if(!SAME_OBJ(v, scheme_intern_symbol("sslv2"))) {
+  } else if(SAME_OBJ(v, scheme_intern_symbol("sslv2"))) {
     return (c ? SSLv2_client_method() : SSLv2_server_method());
-  } else if(!SAME_OBJ(v, scheme_intern_symbol("sslv3"))) {
+  } else if(SAME_OBJ(v, scheme_intern_symbol("sslv3"))) {
     return (c ? SSLv3_client_method() : SSLv3_server_method());
-  } else if(!SAME_OBJ(v, scheme_intern_symbol("tls"))) {
+  } else if(SAME_OBJ(v, scheme_intern_symbol("tls"))) {
     return (c ? TLSv1_client_method() : TLSv1_server_method());
   } else {
 #   define ALLOWED_SYMS "'sslv2-or-v3, 'sslv2, 'sslv3, or 'tls"
@@ -1038,11 +1037,8 @@ static Scheme_Object *ssl_connect(int argc, Scheme_Object *argv[])
   int status;
   const char *errstr = "Unknown error";
   int err = 0;
-  GC_CAN_IGNORE struct sockaddr_in addr;
+  GC_CAN_IGNORE struct addrinfo *addr;
   int sock;
-#ifndef PROTOENT_IS_INT
-  struct protoent *proto;
-#endif
 
   address = check_host_and_convert("ssl-connect", argc, argv, 0);
   nport = check_port_and_convert("ssl-connect", argc, argv, 1);
@@ -1061,14 +1057,17 @@ static Scheme_Object *ssl_connect(int argc, Scheme_Object *argv[])
 
   TCP_INIT("ssl-connect");
 
-  /* try to create the socket */
-#ifndef PROTOENT_IS_INT
-  proto = getprotobyname("tcp");
-  if(!proto) { 
-    errstr = "couldn't find tcp protocol id"; goto clean_up_and_die; 
+  /* lookup hostname and get a reasonable structure */
+  addr = scheme_get_host_address(address, nport, &err, -1, 0, 1);
+  if (!addr) {
+    sock = INVALID_SOCKET;
+    errstr = gai_strerror(err);
+    err = 0;
+    goto clean_up_and_die;
   }
-#endif
-  sock = socket(PF_INET, SOCK_STREAM, PROTO_P_PROTO);
+
+  /* try to create the socket */
+  sock = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
   if (sock == INVALID_SOCKET)  { errstr = NULL; err = SOCK_ERRNO(); goto clean_up_and_die; }
 #ifdef USE_WINSOCK_TCP
   {
@@ -1079,14 +1078,9 @@ static Scheme_Object *ssl_connect(int argc, Scheme_Object *argv[])
   fcntl(sock, F_SETFL, MZ_NONBLOCKING);
 #endif
   
-  /* lookup hostname and get a reasonable structure */
-  if (!scheme_get_host_address(address, nport, &addr)) {
-    err = 0; 
-    errstr = "Unknown error resolving address"; 
-    goto clean_up_and_die;
-  }
+  status = connect(sock, (struct sockaddr *)addr->ai_addr, addr->ai_addrlen);
+  freeaddrinfo(addr);
 
-  status = connect(sock, (struct sockaddr *)&addr, sizeof(addr));
   /* here's the complicated bit */
   if (status) {
     int errid;
@@ -1150,9 +1144,6 @@ ssl_listen(int argc, Scheme_Object *argv[])
   int backlog, errid;
   int reuse = 0;
   const char *address = NULL;
-# ifndef PROTOENT_IS_INT
-  struct protoent *proto;
-# endif
   SSL_METHOD *meth;
   SSL_CTX *ctx;
 
@@ -1199,17 +1190,20 @@ ssl_listen(int argc, Scheme_Object *argv[])
     }
   }
 
-# ifndef PROTOENT_IS_INT
-  proto = getprotobyname("tcp");
-  if (proto)
-# endif
   {
-    GC_CAN_IGNORE struct sockaddr_in tcp_listen_addr;
+    GC_CAN_IGNORE struct addrinfo *tcp_listen_addr;
+    int err;
 
-    if (scheme_get_host_address(address, id, &tcp_listen_addr)) {
+    tcp_listen_addr = scheme_get_host_address(address, id, &err,
+					      !address ? PF_INET : -1, 
+					      1, 1);
+    if (tcp_listen_addr) {
       int s;
 
-      s = socket(PF_INET, SOCK_STREAM, PROTO_P_PROTO);
+      s = socket(tcp_listen_addr->ai_family,
+		 tcp_listen_addr->ai_socktype,
+		 tcp_listen_addr->ai_protocol);
+
       if (s != INVALID_SOCKET) {
 #ifdef USE_WINSOCK_TCP
 	unsigned long ioarg = 1;
@@ -1222,7 +1216,7 @@ ssl_listen(int argc, Scheme_Object *argv[])
 	  setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(int));
 	}
       
-	if (!bind(s, (struct sockaddr *)&tcp_listen_addr, sizeof(tcp_listen_addr))) {
+	if (!bind(s, (struct sockaddr *)tcp_listen_addr->ai_addr, tcp_listen_addr->ai_addrlen)) {
 	  if (!listen(s, backlog)) {
 	    listener_t *l;
 
@@ -1239,6 +1233,8 @@ ssl_listen(int argc, Scheme_Object *argv[])
 					1);
 	      l->mref = mref;
 	    }
+
+	    freeaddrinfo(tcp_listen_addr);
 	    
 	    return (Scheme_Object *)l;
 	  }
@@ -1247,22 +1243,20 @@ ssl_listen(int argc, Scheme_Object *argv[])
 	errid = SOCK_ERRNO();
 
 	closesocket(s);
-      } else
+	freeaddrinfo(tcp_listen_addr);
+      } else {
+	freeaddrinfo(tcp_listen_addr);
 	errid = SOCK_ERRNO();
+      }
     } else {
       if (ctx && meth)
 	SSL_CTX_free(ctx);
       scheme_raise_exn(MZEXN_FAIL_NETWORK,
-		       "ssl-listen: host not found: %s",
-		       address);
+		       "ssl-listen: host not found: %s (%N)",
+		       address, 1, err);
       return NULL;
     }
   }
-# ifndef PROTOENT_IS_INT
-  else {
-    errid = SOCK_ERRNO();
-  }
-# endif
 
   if (ctx && meth)
     SSL_CTX_free(ctx);
@@ -1457,7 +1451,7 @@ ssl_mk_ctx(int argc, Scheme_Object *argv[])
   SSL_METHOD *meth;
   SSL_CTX *ctx;
 
-  meth = check_encrypt_and_convert("ssl-make-context", argc, argv, 0, 1, 0);
+  meth = check_encrypt_and_convert("ssl-make-client-context", argc, argv, 0, 1, 0);
 
   c = (mzssl_ctx_t *)scheme_malloc_tagged(sizeof(mzssl_ctx_t));
   c->so.type = ssl_ctx_type;
@@ -1578,10 +1572,7 @@ static Scheme_Object *ssl_addresses(int argc, Scheme_Object *argv[])
   GC_CAN_IGNORE struct sockaddr_in tcp_here_addr, tcp_there_addr;
   int l, closed;
   struct sslplt *wrapper = NULL;
-  unsigned long here_a, there_a;
-  unsigned char *b;
   Scheme_Object *result[2];
-  char sa[20];
   int fd;
 
   if (SCHEME_OUTPORTP(argv[0])) {
@@ -1610,29 +1601,41 @@ static Scheme_Object *ssl_addresses(int argc, Scheme_Object *argv[])
     scheme_raise_exn(MZEXN_FAIL,
 		     "ssl-addresses: port is closed");
 
-  l = sizeof(tcp_here_addr);
-  if (getsockname(fd, (struct sockaddr *)&tcp_here_addr, &l)) {
-    scheme_raise_exn(MZEXN_FAIL_NETWORK,
-		     "ssl-addresses: could not get local address (%e)",
-		     SOCK_ERRNO());
-  }
-  l = sizeof(tcp_there_addr);
-  if (getpeername(fd, (struct sockaddr *)&tcp_there_addr, &l)) {
-    scheme_raise_exn(MZEXN_FAIL_NETWORK,
-		     "ssl-addresses: could not get peer address (%e)",
-		     SOCK_ERRNO());
-  }
-  
-  here_a = *(unsigned long *)&tcp_here_addr.sin_addr;
-  there_a = *(unsigned long *)&tcp_there_addr.sin_addr;
+  {
+    int l;
+    char here[MZ_SOCK_NAME_MAX_LEN], there[MZ_SOCK_NAME_MAX_LEN];
+    char host_buf[MZ_SOCK_HOST_NAME_MAX_LEN];
+    int here_len, there_len;
 
-  b = (unsigned char *)&here_a;
-  sprintf(sa, "%d.%d.%d.%d", b[0], b[1], b[2], b[3]);
-  result[0] = scheme_make_utf8_string(sa);
+    l = sizeof(here);
+    if (getsockname(fd, (struct sockaddr *)here, &l)) {
+      scheme_raise_exn(MZEXN_FAIL_NETWORK,
+		       "tcp-addresses: could not get local address (%e)",
+		       SOCK_ERRNO());
+    }
+    here_len = l;
 
-  b = (unsigned char *)&there_a;
-  sprintf(sa, "%d.%d.%d.%d", b[0], b[1], b[2], b[3]);
-  result[1] = scheme_make_utf8_string(sa);
+    l = sizeof(there);
+    if (getpeername(fd, (struct sockaddr *)there, &l)) {
+      scheme_raise_exn(MZEXN_FAIL_NETWORK,
+		       "tcp-addresses: could not get peer address (%e)",
+		       SOCK_ERRNO());
+    }
+    there_len = l;
+
+    getnameinfo((struct sockaddr *)here, here_len, 
+		host_buf, sizeof(host_buf),
+		NULL, 0,
+		NI_NUMERICHOST | NI_NUMERICSERV);
+    result[0] = scheme_make_utf8_string(host_buf);
+
+    getnameinfo((struct sockaddr *)there, there_len, 
+		host_buf, sizeof(host_buf),
+		NULL, 0,
+		NI_NUMERICHOST | NI_NUMERICSERV);
+    result[1] = scheme_make_utf8_string(host_buf);
+  }
+
 
   return scheme_values(2, result);
 }
@@ -1806,7 +1809,7 @@ Scheme_Object *scheme_reload(Scheme_Env *env)
   v = scheme_make_prim_w_arity(ssl_set_verify,"ssl-set-verify!",2,2);
   scheme_add_global("ssl-set-verify!", v, env);
 
-  v = scheme_make_prim_w_arity(ssl_mk_ctx,"ssl-make-client-context",0,0);
+  v = scheme_make_prim_w_arity(ssl_mk_ctx,"ssl-make-client-context",0,1);
   scheme_add_global("ssl-make-client-context", v, env);
 
   v = scheme_make_prim_w_arity(ssl_ctx_p,"ssl-client-context?",1,1);
@@ -1817,9 +1820,6 @@ Scheme_Object *scheme_reload(Scheme_Env *env)
 
   v = scheme_make_prim_w_arity(ssl_accept_break,"ssl-accept/enable-break",1,1);
   scheme_add_global("ssl-accept/enable-break", v, env);
-
-  v = scheme_make_prim_w_arity(ssl_mk_ctx,"ssl-make-context",0,1);
-  scheme_add_global("ssl-make-context", v, env);
 
   v = scheme_make_prim_w_everything(ssl_addresses, 0, "ssl-addresses", 1, 1, 0, 2, 2);
   scheme_add_global("ssl-addresses", v, env);

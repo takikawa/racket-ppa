@@ -91,6 +91,7 @@
   
   (define-signature drscheme:language-configuration^
     (add-language
+     get-languages
      (struct language-settings (language settings) -setters)
      get-settings-preferences-symbol
      language-dialog
@@ -100,7 +101,6 @@
     (add-info-specified-languages
      get-default-language-settings
      (open drscheme:language-configuration^)
-     get-languages
      settings-preferences-symbol
 
      add-built-in-languages
@@ -174,13 +174,13 @@
      current-language-settings
      current-value-port
      get-drs-bindings-keymap
+     error-delta
      text%
      text<%>
      context<%>))
   
   (define-signature drscheme:app^
-    (check-new-version
-     about-drscheme
+    (about-drscheme
      invite-tour
      add-language-items-to-help-menu
      add-important-urls-to-help-menu

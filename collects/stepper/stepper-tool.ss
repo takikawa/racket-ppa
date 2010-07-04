@@ -1,21 +1,20 @@
 (module stepper-tool mzscheme
+  
   (require (lib "contract.ss")
            (lib "tool.ss" "drscheme")
-           (lib "mred.ss" "mred")  
+           (lib "mred.ss" "mred")
+           (lib "pconvert.ss")
+           (lib "string-constant.ss" "string-constants")
+           (lib "async-channel.ss")
            (prefix frame: (lib "framework.ss" "framework"))
            (lib "unitsig.ss")
            (lib "class.ss")
-           (lib "etc.ss")
            (lib "list.ss")
            (prefix model: "private/model.ss")
 	   "private/my-macros.ss"
            (prefix x: "private/mred-extensions.ss")
            "private/shared.ss"
-           "private/model-settings.ss"
-           (lib "pconvert.ss")
-           (lib "string-constant.ss" "string-constants")
-           (lib "async-channel.ss")
-           (lib "bitmap-label.ss" "mrlib"))
+           "private/model-settings.ss")
 
   ;; mflatt: MINOR HACK - work around temporary
   ;;         print-convert problems
@@ -30,8 +29,9 @@
     (list (string-constant beginning-student)
           (string-constant beginning-student/abbrev)
           (string-constant intermediate-student)
-          (string-constant intermediate-student/lambda)))
-  
+          (string-constant intermediate-student/lambda)
+          #;(string-constant advanced-student)))
+
   (provide stepper-tool@)
   
   (define stepper-tool@
@@ -43,10 +43,21 @@
       (define (phase1) (void))
       (define (phase2) (void))
       
+      ;; this should be a preference
       (define stepper-initial-width 500)
       (define stepper-initial-height 500)
       
       (define drscheme-eventspace (current-eventspace))
+
+      (define (extract-language-level settings)
+	(let* ([language (drscheme:language-configuration:language-settings-language settings)])
+	  (car (last-pair (send language get-language-position)))))
+	       
+      (define (stepper-works-for? language-level)
+	(or (member language-level stepper-works-for)
+	    (getenv "PLTSTEPPERUNSAFE")))
+      
+      ;; the stepper's frame:
       
       (define stepper-frame%
         (class (drscheme:frame:basics-mixin (frame:frame:standard-menus-mixin frame:frame:basic%))
@@ -54,7 +65,7 @@
           (init-field drscheme-frame)
           
           ;; PRINTING-PROC 
-          
+          ;; I frankly don't think that printing (i.e., to a printer) works correctly. 2005-07-01, JBC
           (public set-printing-proc)
           
           (define (set-printing-proc proc)
@@ -72,6 +83,8 @@
           (define/override (file-menu:between-save-as-and-print file-menu) (void))
           
           ;; CUSTODIANS
+          ;; The custodian is used to halt the stepped computation when the stepper window
+          ;; closes.  The custodian is captured when the stepped computation starts.
           
           (define custodian #f)
           (define/public (set-custodian! cust)
@@ -123,19 +136,21 @@
       ;; drscheme-frame : the drscheme frame which is starting the stepper
       ;; program-expander : see "model.ss" for the contract on a program-expander
       ;;  -> returns the new frame%
+
       (define (view-controller-go drscheme-frame program-expander)
         
-       
+        ;; get the language-level name:
         (define language-settings 
           (send (send drscheme-frame get-definitions-text) get-next-settings))
         (define language
           (drscheme:language-configuration:language-settings-language language-settings))
         (define language-level-name
           (car (last-pair (send language get-language-position))))
+                
+        ;; VALUE CONVERSION CODE:
+        
         (define simple-settings
           (drscheme:language-configuration:language-settings-settings language-settings))
-        
-        ;; VALUE CONVERSION CODE:
         
         ;; render-to-string : TST -> string
         (define (render-to-string val)
@@ -147,29 +162,31 @@
                   string-port)
             (get-output-string string-port)))
         
+        ;; WE REALLY WANT TO GET RID OF THIS STUFF (2005-07-01, JBC)
+        
         ;; make-print-convert-hook: simple-settings -> (TST (TST -> TST) (TST -> TST) -> TST)
         ;; this code copied from various locations in language.ss and rep.ss
         (define (make-print-convert-hook simple-settings)
-          (lambda (expr basic-convert sub-convert)
+          (lambda (exp basic-convert sub-convert)
             (cond
-              [(is-a? expr snip%) 
-               (send expr copy)]
-              #;[((drscheme:rep:use-number-snip) expr)
+              [(is-a? exp snip%) 
+               (send exp copy)]
+              #;[((drscheme:rep:use-number-snip) exp)
                (let ([number-snip-type (drscheme:language:simple-settings-fraction-style simple-settings)])
                  (cond
                    [(eq? number-snip-type 'repeating-decimal)
-                    (drscheme:number-snip:make-repeating-decimal-snip expr #f)]
+                    (drscheme:number-snip:make-repeating-decimal-snip exp #f)]
                    [(eq? number-snip-type 'repeating-decimal-e)
-                    (drscheme:number-snip:make-repeating-decimal-snip expr #t)]
+                    (drscheme:number-snip:make-repeating-decimal-snip exp #t)]
                    [(eq? number-snip-type 'mixed-fraction)
-                    (drscheme:number-snip:make-fraction-snip expr #f)]
+                    (drscheme:number-snip:make-fraction-snip exp #f)]
                    [(eq? number-snip-type 'mixed-fraction-e)
-                    (drscheme:number-snip:make-fraction-snip expr #t)]
+                    (drscheme:number-snip:make-fraction-snip exp #t)]
                    [else
                     (error 'which-number-snip
                            "expected either 'repeating-decimal, 'repeating-decimal-e, 'mixed-fraction, or 'mixed-fraction-e got : ~e"
                            number-snip-type)]))]
-              [else (basic-convert expr)])))
+              [else (basic-convert exp)])))
         
         ;; render-to-sexp : TST -> sexp
         (define (render-to-sexp val)
@@ -179,6 +196,10 @@
              simple-settings
              (lambda () 
                (simple-module-based-language-convert-value val simple-settings)))))
+        
+        (define (>>> x) 
+          (fprintf (current-error-port) ">>> ~v\n" x)
+          x)
         
         ; channel for incoming views
         (define view-channel (make-async-channel))
@@ -195,7 +216,7 @@
         (define view 0)
         
         ; whether the stepper is waiting for a new view to become available
-        ; (initially true)
+        ; (initially 'waiting-for-any-step)
         ; possible values: #f, 'waiting-for-any-step, 'waiting-for-application
         (define stepper-is-waiting? 'waiting-for-any-step)
         
@@ -374,32 +395,16 @@
           (let ([step-text
                  (cond [(before-after-result? result) 
                         (instantiate x:stepper-text% () 
-                          [finished-exprs (before-after-result-finished-exprs result)]
-                          [exps (before-after-result-exp result)]
-                          [post-exps (before-after-result-post-exp result)]
-                          [error-msg #f]
-                          [after-exprs (before-after-result-after-exprs result)])]
+                          [left-side (before-after-result-pre-exps result)]
+                          [right-side (before-after-result-post-exps result)])]
                        [(before-error-result? result)
                         (instantiate x:stepper-text% ()
-                          [finished-exprs (before-error-result-finished-exprs result)]
-                          [exps (before-error-result-exp result)]
-                          [post-exps null]
-                          [error-msg (before-error-result-err-msg result)]
-                          [after-exprs (before-error-result-after-exprs result)])]
+                          [left-side (before-error-result-pre-exps result)]
+                          [right-side (before-error-result-err-msg result)])]
                        [(error-result? result)
                         (instantiate x:stepper-text% ()
-                          [finished-exprs (error-result-finished-exprs result)]
-                          [exps null]
-                          [post-exps null]
-                          [error-msg (error-result-err-msg result)]
-                          [after-exprs null])]
-                       [(finished-result? result)
-                        (instantiate x:stepper-text% ()
-                          [finished-exprs (finished-result-finished-exprs result)]
-                          [exps null]
-                          [post-exps null]
-                          [error-msg #f]
-                          [after-exprs null])]
+                          [left-side null]
+                          [right-side (error-result-err-msg result)])]
                        [(finished-stepping? result)
                         x:finished-text])]
                 [step-kind (or (and (before-after-result? result)
@@ -426,16 +431,12 @@
         
         ; START THE MODEL
         (model:go program-expander-prime receive-result (get-render-settings render-to-string render-to-sexp #t)
-                  (not (string=? language-level-name (string-constant intermediate-student/lambda))))
+                  (not (member language-level-name
+                               (list (string-constant intermediate-student/lambda)
+                                     (string-constant advanced-student)))))
         (send s-frame show #t)
         
         s-frame)
-  
-      ;; stepper-bitmap : the image used for the stepper button
-      (define stepper-bitmap
-        (bitmap-label-maker
-         (string-constant stepper-button-label)
-         (build-path (collection-path "icons") "foot.png")))
 
       ;; stepper-unit-frame<%> : the interface that the extended drscheme frame fulfils
       (define stepper-unit-frame<%>
@@ -487,17 +488,16 @@
           (define/public (get-stepper-button) stepper-button)
           (define stepper-button 
             (make-object button%
-              (stepper-bitmap this)
-              (get-button-panel)
+              (x:stepper-bitmap this)
+              (make-object vertical-pane% (get-button-panel))
               (lambda (button evt)
                 (if stepper-frame
                     (send stepper-frame show #t)
-                    (let* ([settings (send (get-definitions-text) get-next-settings)]
-                           [language (drscheme:language-configuration:language-settings-language settings)]
-                           [language-level (car (last-pair (send language get-language-position)))])
-                      (if (member language-level stepper-works-for)
-                          (set! stepper-frame (view-controller-go this program-expander))
-                          (message-box (string-constant stepper-name)
+		    (let ([language-level (extract-language-level
+					   (send (get-definitions-text) get-next-settings))])
+		      (if (stepper-works-for? language-level)
+			  (set! stepper-frame (view-controller-go this program-expander))
+			  (message-box (string-constant stepper-name)
 				       (format (string-constant stepper-language-level-message)
 					       language-level
 					       (car stepper-works-for)
@@ -516,10 +516,26 @@
             (when stepper-frame
               (send stepper-frame original-program-gone))
             (inner (void) on-close))
+
+	  (define/augment (on-tab-change old new)
+	    (check-current-language-for-stepper)
+	    (inner (void) on-tab-change old new))
+
+	  (define/public (check-current-language-for-stepper)
+	    (if (stepper-works-for? (extract-language-level 
+				     (send (get-definitions-text) get-next-settings)))
+		(unless (send stepper-button is-shown?)
+		  (send (send stepper-button get-parent) add-child stepper-button))
+		(when (send stepper-button is-shown?)
+		  (send (send stepper-button get-parent) delete-child stepper-button))))
           
           ; add the stepper button to the button panel:
-          (send (get-button-panel) change-children
-                (lx (cons stepper-button (remq stepper-button _))))))
+	  (let ([p (send stepper-button get-parent)])
+	    (send (get-button-panel) change-children
+		  (lx (cons p (remq p _)))))
+
+	  ; hide stepper button if it's not supported for the initial language:
+	  (check-current-language-for-stepper)))
       
       ;; stepper-definitions-text-mixin : a mixin for the definitions text that alerts thet stepper when the definitions
       ;;  text is altered or destroyed
@@ -541,6 +557,10 @@
           (define/augment (on-delete x y)
             (notify-stepper-frame-of-change)
             (inner (void) on-delete x y))
+
+	  (define/augment (after-set-next-settings s)
+	    (send (get-top-level-window) check-current-language-for-stepper)
+	    (inner (void) after-set-next-settings s))
           
           (super-instantiate ())))
       

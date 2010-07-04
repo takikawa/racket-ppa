@@ -1042,7 +1042,7 @@ static long user_read_result(const char *who, Scheme_Input_Port *port,
       } else if (evt_ok && scheme_is_evt(val)) {
 	/* A peek/read failed, and we were given a evt that unblocks
 	   when the read/peek (at some offset) succeeds. */
-	if (nonblock) {
+	if (nonblock > 0) {
 	  if (sinfo) {
 	    scheme_set_sync_target(sinfo, val, (Scheme_Object *)port, NULL, 0, 1);
 	    return 0;
@@ -1155,6 +1155,7 @@ user_get_or_peek_bytes(Scheme_Input_Port *port,
     fun = uip->read_proc;
 
   while (1) {
+    int nb;
 
     if (uip->reuse_str && (size == SCHEME_BYTE_STRLEN_VAL(uip->reuse_str))) {
       bstr = uip->reuse_str;
@@ -1168,6 +1169,13 @@ user_get_or_peek_bytes(Scheme_Input_Port *port,
     a[1] = peek_skip;
     a[2] = unless ? unless : scheme_false;
 
+    nb = nonblock;
+    if (!nb) {
+      if (scheme_can_break(scheme_current_thread)) {
+	nb = -1;
+      }
+    }
+
     /* Disable breaks while calling the port's function: */
     scheme_push_break_enable(&cframe, 0, 0);
 
@@ -1180,7 +1188,7 @@ user_get_or_peek_bytes(Scheme_Input_Port *port,
     }
 
     r = user_read_result(peek ? "user port peek" : "user port read",
-			 port, val, bstr, peek, nonblock,
+			 port, val, bstr, peek, nb,
 			 1, !!uip->peek_proc, unless && SCHEME_CDR(unless), sinfo);
 
     scheme_pop_break_enable(&cframe, 1);
@@ -2778,7 +2786,7 @@ static Scheme_Object *sch_default_read_handler(void *ignore, int argc, Scheme_Ob
   else
     src = NULL;
 
-  return scheme_internal_read(argv[0], src, -1, 0, 0, 0, -1, NULL);
+  return scheme_internal_read(argv[0], src, -1, 0, 0, 0, -1, NULL, NULL, NULL);
 }
 
 static int extract_recur_args(const char *who, int argc, Scheme_Object **argv, int delta, Scheme_Object **_readtable)
@@ -2829,7 +2837,7 @@ static Scheme_Object *do_read_f(const char *who, int argc, Scheme_Object *argv[]
     if (port == scheme_orig_stdin_port)
       scheme_flush_orig_outputs();
 
-    return scheme_internal_read(port, NULL, -1, 0, honu_mode, recur, pre_char, readtable);
+    return scheme_internal_read(port, NULL, -1, 0, honu_mode, recur, pre_char, readtable, NULL, NULL);
   }
 }
 
@@ -2892,7 +2900,7 @@ static Scheme_Object *do_read_syntax_f(const char *who, int argc, Scheme_Object 
     if (port == scheme_orig_stdin_port)
       scheme_flush_orig_outputs();
 
-    return scheme_internal_read(port, src, -1, 0, honu_mode, recur, pre_char, readtable);
+    return scheme_internal_read(port, src, -1, 0, honu_mode, recur, pre_char, readtable, NULL, NULL);
   }
 }
 
@@ -4061,7 +4069,7 @@ static Scheme_Object *do_load_handler(void *data)
   Scheme_Env *genv;
   int save_count = 0, got_one = 0;
 
-  while ((obj = scheme_internal_read(port, lhd->stxsrc, 1, 0, 0, 0, -1, NULL))
+  while ((obj = scheme_internal_read(port, lhd->stxsrc, 1, 0, 0, 0, -1, NULL, NULL, NULL))
 	 && !SCHEME_EOFP(obj)) {
     save_array = NULL;
     got_one = 1;
@@ -4134,7 +4142,7 @@ static Scheme_Object *do_load_handler(void *data)
       }
 
       /* Check no more expressions: */
-      d = scheme_internal_read(port, lhd->stxsrc, 1, 0, 0, 0, -1, NULL);
+      d = scheme_internal_read(port, lhd->stxsrc, 1, 0, 0, 0, -1, NULL, NULL, NULL);
       if (!SCHEME_EOFP(d)) {
 	scheme_raise_exn(MZEXN_FAIL,
 			 "default-load-handler: expected only a `module' declaration for `%S', but found an extra expression in: %V",

@@ -411,7 +411,8 @@
 	     (and (or (vector? obj)
 		      (pair? obj)
 		      (box? obj)
-		      (custom-write? obj)
+		      (and (custom-write? obj)
+			   (not (struct-type? obj)))
 		      (and (struct? obj) print-struct?)
 		      (and (hash-table? obj) print-hash-table?))
 		  (or (hash-table-get table obj (lambda () #f))
@@ -430,7 +431,8 @@
 				 (or (loop (car obj))
 				     (loop (cdr obj)))]
 				[(box? obj) (loop (unbox obj))]
-				[(custom-write? obj)
+				[(and (custom-write? obj)
+				      (not (struct-type? obj)))
 				 (loop (extract-sub-objects obj pport))]
 				[(struct? obj)
 				 (ormap loop 
@@ -447,13 +449,14 @@
 			  (hash-table-remove! table obj)
 			  cycle)))))))
 
-     (define ::dummy::
+     (define __dummy__
        (when found-cycle
 	 (let loop ([obj obj])
 	   (if (or (vector? obj)
 		   (pair? obj)
 		   (box? obj)
-		   (custom-write? obj)
+		   (and (custom-write? obj)
+			(not (struct-type? obj)))
 		   (and (struct? obj) print-struct?)
 		   (and (hash-table? obj) print-hash-table?))
 	       ;; A little confusing: use #t for not-found
@@ -473,7 +476,8 @@
 			   (loop (car obj))
 			   (loop (cdr obj))]
 			  [(box? obj) (loop (unbox obj))]
-			  [(custom-write? obj)
+			  [(and (custom-write? obj)
+				(not (struct-type? obj)))
 			   (loop (extract-sub-objects obj pport))]
 			  [(struct? obj)
 			   (for-each loop 
@@ -640,7 +644,8 @@
 	      (lambda ()
 		(out "#&") 
 		(wr (unbox obj) (dsub1 depth))))]
-	    [(custom-write? obj) 
+	    [(and (custom-write? obj) 
+		  (not (struct-type? obj)))
 	     (check-expr-found
 	      obj pport #t
 	      #f #f
@@ -718,12 +723,14 @@
 	 (let* ([can-multi (and width
 				(or (pair? obj) (vector? obj) 
 				    (box? obj) 
-				    (custom-write? obj)
+				    (and (custom-write? obj)
+					 (not (struct-type? obj)))
 				    (and (struct? obj) print-struct?)
 				    (and (hash-table? obj) print-hash-table?)))]
 		[graph-ref (if can-multi
 			       (and found (hash-table-get found obj (lambda () #f)))
-			       #f)])
+			       #f)]
+		[old-counter cycle-counter])
 	   (if (and can-multi
 		    (or (not graph-ref) 
 			(not (unbox (mark-def graph-ref)))))
@@ -747,6 +754,7 @@
 		       ;; Doesn't fit on one line, so start over
 		       (begin
 			 (tentative-pretty-print-port-cancel a-pport)
+			 (set! cycle-counter old-counter)
 			 (when graph-ref
 			   (expr-found pport graph-ref))
 			 (pre-print pport obj)
@@ -757,7 +765,8 @@
 			   (when print-vec-length?
 			     (out (number->string (vector-length obj))))
 			   (pp-list (vector->repeatless-list obj) extra pp-expr #f depth)]
-			  [(custom-write? obj)
+			  [(and (custom-write? obj)
+				(not (struct-type? obj)))
 			   (write-custom pp* obj pport depth display? width)]
 			  [(struct? obj) ; print-struct is on if we got here
 			   (out "#")

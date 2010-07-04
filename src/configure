@@ -5131,6 +5131,9 @@ PREFLAGS="$CPPFLAGS"
 ar_libtool_no_undefined=""
 LIBMZSCHEME_DEP=""
 
+XFT_EXTRA_FLAGS=
+XFT_EXTRA_LIBS=
+
 ###### OSKit stuff #######
 
 if test "${enable_oskit}" = "yes" ; then
@@ -8625,6 +8628,10 @@ case $OS in
     else
       PREFLAGS="$PREFLAGS -DXONX "
       X_EXTRA_LIBS="$X_EXTRA_LIBS -lz"
+
+      # need help finding fontconfig and freetype headers:
+      XFT_EXTRA_FLAGS="-I/usr/X11R6/include -I/usr/X11R6/include/freetype2"
+      XFT_EXTRA_LIBS="-lfontconfig"
     fi
     ;;
   *)
@@ -8709,6 +8716,62 @@ if test "$inline" = "no" ; then
 fi
 echo "$as_me:$LINENO: result: $inline" >&5
 echo "${ECHO_T}$inline" >&6
+
+echo "$as_me:$LINENO: checking for nl_langinfo (CODESET)" >&5
+echo $ECHO_N "checking for nl_langinfo (CODESET)... $ECHO_C" >&6
+cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+#include <langinfo.h>
+int
+main ()
+{
+char *codeset = nl_langinfo (CODESET);
+  ;
+  return 0;
+}
+_ACEOF
+rm -f conftest.$ac_objext conftest$ac_exeext
+if { (eval echo "$as_me:$LINENO: \"$ac_link\"") >&5
+  (eval $ac_link) 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } &&
+	 { ac_try='test -z "$ac_c_werror_flag"
+			 || test ! -s conftest.err'
+  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; } &&
+	 { ac_try='test -s conftest$ac_exeext'
+  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; }; then
+
+cat >>confdefs.h <<\_ACEOF
+#define HAVE_CODESET 1
+_ACEOF
+
+   have_codeset=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+have_codeset=no
+fi
+rm -f conftest.err conftest.$ac_objext \
+      conftest$ac_exeext conftest.$ac_ext
+echo "$as_me:$LINENO: result: $have_codeset" >&5
+echo "${ECHO_T}$have_codeset" >&6
 
 iconv_lib_flag=""
 if test "${enable_iconv}" = "yes" ; then
@@ -9879,8 +9942,15 @@ if test "${enable_xft}" = "" ; then
 fi
 
 if test "${enable_xft}" = "yes" ; then
-  xft_config_ok=`xft-config --cflags  2> /dev/null`
-  if test "$xft_config_ok" = "" ; then
+  xft_config_prog="pkg-config xft"
+  xft_config_ok=`$xft_config_prog --cflags  2> /dev/null`
+  if test "$?" != 0 ; then
+    xft_config_prog="xft-config"
+    xft_config_ok=`$xft_config_prog --cflags  2> /dev/null`
+  fi
+  if test "$?" != 0 ; then
+    save_cpp_flags="$CPPFLAGS"
+    CPPFLAGS="$CPPFLAGS $XFT_EXTRA_FLAGS $X_CFLAGS"
     if test "${ac_cv_header_X11_Xft_Xft_h+set}" = set; then
   echo "$as_me:$LINENO: checking for X11/Xft/Xft.h" >&5
 echo $ECHO_N "checking for X11/Xft/Xft.h... $ECHO_C" >&6
@@ -10097,18 +10167,19 @@ else
 fi
 
       if test "${enable_xft}" = "yes" ; then
-        MROPTIONS="$MROPTIONS -DWX_USE_XFT"
-        X_EXTRA_LIBS="$X_EXTRA_LIBS -lXft"
+        MROPTIONS="$MROPTIONS $XFT_EXTRA_FLAGS -DWX_USE_XFT"
+        X_EXTRA_LIBS="$X_EXTRA_LIBS $XFT_EXTRA_LIBS -lXft"
       else
         echo "no Xft libs; Xft support disabled"
       fi
     else
       echo "no Xft headers; Xft support disabled"
     fi
+    CPPFLAGS="$save_cpp_flags"
   else
-    echo "Using xft-config..."
-    xft_cflags=`xft-config --cflags`
-    xft_libs=`xft-config --libs`
+    echo "Using $xft_config_prog..."
+    xft_cflags=`$xft_config_prog --cflags`
+    xft_libs=`$xft_config_prog --libs`
     echo "Xft flags: $xft_cflags"
     echo "Xft libs: $xft_libs"
     MROPTIONS="$MROPTIONS -DWX_USE_XFT"
@@ -10125,7 +10196,7 @@ fi
 
 if test "${enable_cairo}" = "yes" ; then
   cairo_config_ok=`pkg-config --cflags cairo 2> /dev/null`
-  if test "$cairo_config_ok" = "" ; then
+  if test "$?" != 0 ; then
     echo "no information from pkg-config; Cairo support disabled"
   else
     echo "Using pkg-config for Cairo..."

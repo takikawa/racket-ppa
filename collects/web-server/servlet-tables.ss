@@ -4,8 +4,9 @@
            (lib "list.ss")
            "timer.ss")
   (provide (struct exn:servlet:instance ())
+           (struct exn:servlet:no-current-instance ())
            (struct exn:servlet:continuation (expiration-handler))
-           (struct servlet (handler namespace instance-expiration-handler))
+           (struct servlet (handler custodian namespace connection-interval-timeout instance-expiration-handler))
            (struct execution-context (connection request suspend))
            (struct servlet-instance (id k-table custodian context mutex timer))
            current-servlet-instance)
@@ -16,7 +17,7 @@
   ;; will be in affect for the entire dynamic extent of every
   ;; continuation associated with that instance.
   (define current-servlet-instance (make-thread-cell #f))
-  (define-struct servlet (handler namespace instance-expiration-handler))
+  (define-struct servlet (handler custodian namespace connection-interval-timeout instance-expiration-handler))
   (define-struct servlet-instance (id k-table custodian context mutex timer))
   (define-struct execution-context (connection request suspend))
 
@@ -46,6 +47,8 @@
   (define-struct (exn:servlet:instance exn) ())
   ;; not found in the continuatin table
   (define-struct (exn:servlet:continuation exn) (expiration-handler))
+  ;; not in dynamic extent of servlet
+  (define-struct (exn:servlet:no-current-instance exn) ())
 
   (define-values (make-k-table reset-k-table get-k-id!)
     (let ([id-slot 'next-k-id])
@@ -172,8 +175,4 @@
        (url-port in-url)
        new-path
        '()
-       (url-fragment in-url))))
-
-  ;; **************************************************
-
-  )
+       (url-fragment in-url)))))

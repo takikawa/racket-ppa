@@ -787,6 +787,7 @@ void scheme_init_hash_key_procs(void)
   PROC(scheme_byte_string_type, hash_general);
   PROC(scheme_path_type, hash_general);
   PROC(scheme_symbol_type, hash_symbol);
+  PROC(scheme_keyword_type, hash_symbol);
   PROC(scheme_null_type, hash_addr);
   PROC(scheme_pair_type, hash_general);
   PROC(scheme_wrap_chunk_type, hash_general);
@@ -816,6 +817,7 @@ void scheme_init_hash_key_procs(void)
   PROC(scheme_module_registry_type, hash_general);
   PROC(scheme_bucket_table_type, hash_general);
   PROC(scheme_weak_box_type, hash_general);
+  PROC(scheme_ephemeron_type, hash_general);
   PROC(scheme_struct_type_type, hash_general);
   PROC(scheme_set_macro_type, hash_general);
   PROC(scheme_id_macro_type, hash_general);
@@ -823,6 +825,8 @@ void scheme_init_hash_key_procs(void)
   PROC(scheme_namespace_type, hash_general);
   PROC(scheme_config_type, hash_general);
   PROC(scheme_thread_cell_type, hash_general);
+  PROC(scheme_thread_cell_values_type, hash_general);
+  PROC(scheme_global_ref_type, hash_general);
   PROC(scheme_will_executor_type, hash_general);
   PROC(scheme_stx_type, hash_general);
   PROC(scheme_module_index_type, hash_general);
@@ -1089,6 +1093,7 @@ long scheme_equal_hash_key(Scheme_Object *o)
       return k;
     }
 # ifndef MZ_PRECISE_GC
+  case scheme_keyword_type:
   case scheme_symbol_type:
     {
       Scheme_Symbol *s = (Scheme_Symbol *)o;

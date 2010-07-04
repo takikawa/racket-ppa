@@ -35,7 +35,7 @@
 			 pubment overment augment
 			 public-final override-final augment-final
 			 field init init-field
-			 rename-super rename-inner inherit
+			 rename-super rename-inner inherit inherit-field
 			 inspect)
 
   (define-syntax define/provide-context-keyword
@@ -67,7 +67,7 @@
   ;;  class macros
   ;;--------------------------------------------------------------------
 
-  (define-syntaxes (class* :class class/derived)
+  (define-syntaxes (class* _class class/derived)
     (let ()
       ;; Start with Helper functions
 
@@ -1972,7 +1972,7 @@
   
   ;; >> Simplistic implementation for now <<
 
-  (define-syntax :interface
+  (define-syntax _interface
     (lambda (stx)
       (syntax-case stx ()
 	[(_ (interface-expr ...) var ...)
@@ -2708,6 +2708,24 @@
     (unless (object? o)
       (raise-type-error 'object-interface "object" o))
     (class-self-interface (object-ref (unwrap-object o))))
+
+  (define (object-method-arity-includes? o name cnt)
+    (unless (object? o)
+      (raise-type-error 'object-method-arity-includes? "object" o))
+    (unless (symbol? name)
+      (raise-type-error 'object-method-arity-includes? "symbol" name))
+    (unless (and (integer? cnt)
+		 (exact? cnt)
+		 (not (negative? cnt)))
+      (raise-type-error 'object-method-arity-includes? "non-negative exact integer" cnt))
+    (let loop ([o o])
+      (let* ([c (object-ref o)]
+	     [pos (hash-table-get (class-method-ht c) name (lambda () #f))])
+	(cond
+	 [pos (procedure-arity-includes? (vector-ref (class-methods c) pos) 
+					 (add1 cnt))]
+	 [(wrapper-object? o) (loop (wrapper-object-wrapped o))]
+	 [else #f]))))
   
   (define (implementation? v i)
     (unless (interface? i)
@@ -3071,6 +3089,43 @@
   ;;
   ;; mixin
   ;;
+
+  (define (check-mixin-super mixin-name super% from-ids)
+    (let ([mixin-name (or mixin-name 'mixin)])
+      (unless (class? super%)
+	(error mixin-name "argument is not a class: ~e" super%))
+      (for-each (lambda (from-id)
+		  (unless (implementation? super% from-id)
+		    (error mixin-name "argument does not implement ~e: ~e" from-id super%)))
+		from-ids)))
+
+  (define (check-mixin-from-interfaces all-from)
+    (for-each (lambda (from-id)
+		(unless (interface? from-id)
+		  (error 'mixin
+			 "expected from-interface, got: ~e; others ~e"
+			 from-id
+			 all-from)))
+	      all-from))
+
+  (define (check-mixin-to-interfaces all-to)
+    (for-each (lambda (to-id)
+		(unless (interface? to-id)
+		  (error 'mixin
+			 "expected to-interface, got: ~e; others ~e"
+			 to-id
+			 all-to)))
+	      all-to))
+
+
+  (define (check-interface-includes xs from-ids)
+    (for-each
+     (lambda (x)
+       (unless (ormap (lambda (i) (method-in-interface? x i)) from-ids)
+	 (error 'mixin
+		"method `~a' was referenced in definition, but is not in any of the from-interfaces: ~e"
+		x from-ids)))
+     xs))
   
   (define-syntax (mixin stx)
     (syntax-case stx ()
@@ -3130,58 +3185,32 @@
              (with-syntax ([mixin-expr
                             (syntax/loc stx
                               (λ (super%)
-                                (unless (class? super%)
-                                  (error mixin-name "argument ~a not a class" super%))
-                                (unless (implementation? super% from-ids)
-                                  (error mixin-name "argument ~s does not implement ~s" super% from-ids))
-                                ...
+			        (check-mixin-super mixin-name super% (list from-ids ...))
                                 class-expr))])
                
                ;; Finally, build the complete mixin expression:
                (syntax/loc stx
                  (let ([from-ids from] ...)
                    (let ([to-ids to] ...)
-                     
-                     (let ([all-from (list from-ids ...)])
-                       (void)
-                       (unless (interface? from-ids)
-                         (error 'mixin
-                                "expected interfaces for from, got: ~e, others ~e"
-                                from-ids
-                                all-from)) ...)
-                     
-                     (let ([all-to (list to-ids ...)])
-                       (void)
-                       (unless (interface? to-ids)
-                         (error 'mixin
-                                "expected interfaces for to, got: ~e, others ~e"
-                                to-ids
-                                all-to)) ...)
-                     
-                     (let ([ensure-interface-has?
-                            (λ (x)
-                              (unless (or (method-in-interface? x from-ids) ...)
-                                (error 'mixin
-                                       "method `~a' not in any of ~a, but was referenced in definition"
-                                       x (list from-ids ...))))])
-                       (void)
-                       (ensure-interface-has? (quote super-vars)) ...)
-                     
+		     (check-mixin-from-interfaces (list from-ids ...))
+		     (check-mixin-to-interfaces (list to-ids ...))
+                     (check-interface-includes (list (quote super-vars) ...)
+					       (list from-ids ...))
                      mixin-expr)))))))]))
 
   (define externalizable<%>
-    (:interface () externalize internalize))
+    (_interface () externalize internalize))
   
   (provide (protect make-wrapper-class
 		    wrapper-object-wrapped
 		    extract-vtable
 		    extract-method-ht)
            
-           (rename :class class) class* class/derived
+           (rename _class class) class* class/derived
            define-serializable-class define-serializable-class*
            class?
            mixin
-	   (rename :interface interface) interface?
+	   (rename _interface interface) interface?
 	   object% object? object=? externalizable<%>
            new make-object instantiate
            get-field field-bound? field-names
@@ -3198,6 +3227,7 @@
 	   (rename generic/form generic) (rename make-generic/proc make-generic) send-generic
 	   is-a? subclass? implementation? interface-extension?
 	   object-interface object-info object->vector
+           object-method-arity-includes?
 	   method-in-interface? interface->method-names class->interface class-info
 	   (struct exn:fail:object ())
 	   make-primitive-class))

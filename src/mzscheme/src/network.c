@@ -60,12 +60,6 @@ static int mzerrno = 0;
 #endif
 #include "schfd.h"
 
-#ifdef USE_MAC_TCP
-# define USESROUTINEDESCRIPTORS 1
-# include <MacTCP.h>
-# include "macdnr.inc"
-#endif
-
 #ifdef USE_UNIX_SOCKETS_TCP
 # include <netinet/in.h>
 # include <netdb.h>
@@ -81,7 +75,8 @@ static int mzerrno = 0;
 
 #ifdef USE_WINSOCK_TCP
 # include <process.h>
-# include <winsock.h>
+# include <winsock2.h>
+# include <ws2tcpip.h>
 struct SOCKADDR_IN {
   short sin_family;
   unsigned short sin_port;
@@ -96,11 +91,7 @@ struct SOCKADDR_IN {
 extern int scheme_stupid_windows_machine;
 #endif
 
-#ifdef USE_MAC_TCP
-# define TCP_BUFFER_SIZE 16384
-#else
-# define TCP_BUFFER_SIZE 4096
-#endif
+#define TCP_BUFFER_SIZE 4096
 
 #ifdef USE_UNIX_SOCKETS_TCP
 typedef long tcp_t;
@@ -120,31 +111,10 @@ typedef SOCKET tcp_t;
 #ifdef USE_SOCKETS_TCP
 typedef struct {
   Scheme_Object so;
-  tcp_t s;
   Scheme_Custodian_Reference *mref;
-} listener_t;
-#endif
-
-#ifdef USE_MAC_TCP
-typedef struct tcp_t {
-  void *create_pb;
-  void *current_pb; /* prevents GC during async call */
-  StreamPtr stream;
-  int state;
-  int async_errid;
-  Scheme_Object *lock; /* read lock */
-} tcp_t;
-
-typedef struct {
-  Scheme_Object so;
-  int hostid;
-  int portid;
   int count;
-  struct Scheme_Tcp **datas;
-  Scheme_Custodian_Reference *mref;
+  tcp_t s[1];
 } listener_t;
-# define htons(x) x
-# define htonl(x) x
 #endif
 
 typedef struct Scheme_Tcp_Buf {
@@ -160,24 +130,13 @@ typedef struct Scheme_Tcp_Buf {
 typedef struct Scheme_Tcp {
   Scheme_Tcp_Buf b;
   tcp_t tcp;
-#ifdef USE_MAC_TCP
-  struct TCPiopb *activeRcv;
-#endif
   int flags;
 } Scheme_Tcp;
 
 # define MZ_TCP_ABANDON_OUTPUT 0x1
 # define MZ_TCP_ABANDON_INPUT  0x2
 
-#ifdef USE_MAC_TCP
-static int num_tcp_send_buffers = 0;
-static void **tcp_send_buffers;
-#endif
-
-#ifndef USE_MAC_TCP
-/* UDP not supported in Mac OS Classic */
-# define UDP_IS_SUPPORTED
-#endif
+#define UDP_IS_SUPPORTED
 
 #ifdef UDP_IS_SUPPORTED
 
@@ -248,10 +207,6 @@ void scheme_init_network(Scheme_Env *env)
   register_traversers();
 #endif
 
-#ifdef USE_MAC_TCP
-  REGISTER_SO(tcp_send_buffers);
-#endif    
-
   scheme_add_global_constant("tcp-connect", 
 			     scheme_make_prim_w_arity2(tcp_connect,
 						       "tcp-connect", 
@@ -321,7 +276,7 @@ void scheme_init_network(Scheme_Env *env)
   scheme_add_global_constant("udp-open-socket", 
 			     scheme_make_prim_w_arity(make_udp,
 						      "udp-open-socket", 
-						      0, 0), 
+						      0, 2), 
 			     env);
   scheme_add_global_constant("udp-close", 
 			     scheme_make_prim_w_arity(udp_close,
@@ -452,10 +407,10 @@ void scheme_init_network(Scheme_Env *env)
 #define UNREGISTER_SOCKET(s) /**/
 
 #ifdef USE_UNIX_SOCKETS_TCP
-typedef struct sockaddr_in tcp_address;
+typedef struct sockaddr_in mz_unspec_address;
 #endif
 #ifdef USE_WINSOCK_TCP
-typedef struct SOCKADDR_IN tcp_address;
+typedef struct SOCKADDR_IN mz_unspec_address;
 # undef REGISTER_SOCKET
 # undef UNREGISTER_SOCKET
 # define REGISTER_SOCKET(s) winsock_remember(s)
@@ -464,46 +419,25 @@ typedef struct SOCKADDR_IN tcp_address;
 
 /******************************* hostnames ************************************/
 
-static int parse_numerical(const char *address, unsigned long *addr)
-{
-  unsigned char *s = (unsigned char *)address, n[4];
-  int p = 0, v = 0, vs[4];
-  while (*s) {
-    if (isdigit(*s)) {
-      if (v < 256)
-	v = (v * 10) + ((*s) - '0');
-    } else if (*s == '.') {
-      if (p < 4) {
-	vs[p] = v;
-	n[p] = (unsigned char)v;
-	p = p XFORM_OK_PLUS 1;
-      }
-      v = 0;
-    } else
-      break;
-    s = s XFORM_OK_PLUS 1;
-  }
-     
-  if (p == 3) {
-    vs[p] = v;
-    n[p] = (unsigned char)v;
-    p++;
-  }
-     
-  if (!*s && (p == 4)
-      && (vs[0] < 256) && (vs[1] < 256)
-      && (vs[2] < 256) && (vs[3] < 256)) {
-    /* Numerical address */
-    *addr = *(unsigned long *)n;
-    return 1;
-  }
-
-  return 0;
-}
-
 #ifdef OS_X
 # define PTHREADS_OK_FOR_GHBN
 #endif
+
+# ifdef PROTOENT_IS_INT
+#  define PROTO_P_PROTO PROTOENT_IS_INT
+# else
+static struct protoent *proto;
+#  define PROTO_P_PROTO (proto ? proto->p_proto : 0)
+# endif
+
+# ifndef MZ_PF_INET
+#  define MZ_PF_INET PF_INET
+# endif
+
+/* For getting connection names: */
+#define MZ_SOCK_NAME_MAX_LEN 256
+#define MZ_SOCK_HOST_NAME_MAX_LEN 64
+#define MZ_SOCK_SVC_NAME_MAX_LEN 32
 
 #if defined(USE_WINSOCK_TCP) || defined(PTHREADS_OK_FOR_GHBN)
 
@@ -526,11 +460,21 @@ typedef struct {
 # else
   int pin;
 # endif
-  long result;
+  struct addrinfo *result;
+  int err;
   int done;
 } GHBN_Rec;
 
-static char ghbn_hostname[256];
+static struct addrinfo * volatile ghbn_result;
+static volatile int ghbn_err;
+
+/* For in-thread DNS: */
+#define MZ_MAX_HOSTNAME_LEN 128
+#define MZ_MAX_SERVNAME_LEN 32
+
+static char ghbn_hostname[MZ_MAX_HOSTNAME_LEN];
+static char ghbn_servname[MZ_MAX_SERVNAME_LEN];
+static struct addrinfo ghbn_hints;
 # ifdef USE_WINSOCK_TCP
 HANDLE ready_sema;
 # else
@@ -541,16 +485,23 @@ int ready_fd;
 START_XFORM_SKIP;
 #endif
 
-static long gethostbyname_in_thread(void *data)
+static long getaddrinfo_in_thread(void *data)
 {
-  struct hostent *host;
-  char hn_copy[256];
-  long v;
+  int ok;
+  struct addrinfo *res, hints;
+  char hn_copy[MZ_MAX_HOSTNAME_LEN], sn_copy[MZ_MAX_SERVNAME_LEN];
 # ifndef USE_WINSOCK_TCP
   int fd = ready_fd;
 # endif
   
-  memcpy(hn_copy, ghbn_hostname, 256);
+  if (ghbn_result) {
+    freeaddrinfo(ghbn_result);
+    ghbn_result = NULL;
+  }
+
+  strcpy(hn_copy, ghbn_hostname);
+  strcpy(sn_copy, ghbn_servname);
+  memcpy(&hints, &ghbn_hints, sizeof(hints));
 
 # ifdef USE_WINSOCK_TCP
   ReleaseSemaphore(ready_sema, 1, NULL);  
@@ -558,19 +509,22 @@ static long gethostbyname_in_thread(void *data)
   write(fd, "?", 1);
 # endif
 
-  host = gethostbyname(hn_copy);
+  ok = getaddrinfo(hn_copy[0] ? hn_copy : NULL, 
+		   sn_copy[0] ? sn_copy : NULL, 
+		   &hints, &res);
 
-  if (host)
-    v = *(long *) mzALIAS host->h_addr_list[0];
-  else
-    v = 0;
+  ghbn_result = res;
+  ghbn_err = ok;
 
 # ifndef USE_WINSOCK_TCP
-  write(fd, &v, sizeof(v));
-  close(fd);
+  {
+    long v = 1;
+    write(fd, &v, sizeof(v));
+    close(fd);
+  }
 # endif
 
-  return v;
+  return 1;
 }
 
 #ifdef MZ_XFORM
@@ -601,19 +555,19 @@ static int ghbn_thread_done(Scheme_Object *_rec)
 
 # ifdef USE_WINSOCK_TCP
   if (WaitForSingleObject(rec->th, 0) == WAIT_OBJECT_0) {
-    DWORD code;
-
-    GetExitCodeThread(rec->th, &code);
-    rec->result = code;
+    rec->result = ghbn_result;
+    ghbn_result = NULL;
+    rec->err = ghbn_err;
     rec->done = 1;
-
     return 1;
   }
 # else
   {
     long v;
     if (read(rec->pin, &v, sizeof(long)) > 0) {
-      rec->result = v;
+      rec->result = ghbn_result;
+      ghbn_result = NULL;
+      rec->err = ghbn_err;
       rec->done = 1;
       return 1;
     }
@@ -641,14 +595,16 @@ static void ghbn_thread_need_wakeup(Scheme_Object *_rec, void *fds)
 # endif
 }
 
-#define HOST_RESULT_IS_ADDR
-static struct hostent *MZ_GETHOSTBYNAME(const char *name)
+static int MZ_GETADDRINFO(const char *name, const char *svc, struct addrinfo *hints, struct addrinfo **res)
 {
   GHBN_Rec *rec;
   int ok;
 
-  if (strlen(name) > 255)
-    return NULL;
+  if ((name && ((strlen(name) >= MZ_MAX_HOSTNAME_LEN) || !name[0]))
+      || (svc && ((strlen(svc) >= MZ_MAX_SERVNAME_LEN) || !svc[0]))) {
+    /* Give up on a separate thread. */
+    return getaddrinfo(name, svc, hints, res);
+  }
 
   rec = MALLOC_ONE_ATOMIC(GHBN_Rec);
   rec->done = 0;
@@ -657,7 +613,15 @@ static struct hostent *MZ_GETHOSTBYNAME(const char *name)
 
   ghbn_lock = 1;
 
-  strcpy(ghbn_hostname, name);
+  if (name)
+    strcpy(ghbn_hostname, name);
+  else
+    ghbn_hostname[0] = 0;
+  if (svc)
+    strcpy(ghbn_servname, svc);
+  else
+    ghbn_servname[0] = 0;
+  memcpy(&ghbn_hints, hints, sizeof(ghbn_hints));
 
 # ifdef USE_WINSOCK_TCP
   {
@@ -666,7 +630,7 @@ static struct hostent *MZ_GETHOSTBYNAME(const char *name)
     
     ready_sema = CreateSemaphore(NULL, 0, 1, NULL);
     th = _beginthreadex(NULL, 5000, 
-			(MZ_LPTHREAD_START_ROUTINE)gethostbyname_in_thread,
+			(MZ_LPTHREAD_START_ROUTINE)getaddrinfo_in_thread,
 			NULL, 0, &id);
     WaitForSingleObject(ready_sema, INFINITE);
     CloseHandle(ready_sema);
@@ -684,7 +648,7 @@ static struct hostent *MZ_GETHOSTBYNAME(const char *name)
       rec->pin = p[0];
       ready_fd = p[1];
       if (pthread_create(&t, NULL, 
-			 (MZ_LPTHREAD_START_ROUTINE)gethostbyname_in_thread,
+			 (MZ_LPTHREAD_START_ROUTINE)getaddrinfo_in_thread,
 			 NULL)) {
 	close(p[0]);
 	close(p[1]);
@@ -699,9 +663,10 @@ static struct hostent *MZ_GETHOSTBYNAME(const char *name)
     }
 
     if (!ok) {
-      long r;
-      r = gethostbyname_in_thread(rec);
-      rec->result = r;
+      getaddrinfo_in_thread(rec);
+      rec->result = ghbn_result;
+      ghbn_result = NULL;
+      rec->err = ghbn_err;
     }
   }
 # endif
@@ -720,56 +685,58 @@ static struct hostent *MZ_GETHOSTBYNAME(const char *name)
 
   ghbn_lock = 0;
 
-  return (struct hostent *)rec->result;
+  *res = rec->result;
+
+  return rec->err;
 }
 #else
-# define MZ_GETHOSTBYNAME gethostbyname 
+# define MZ_GETADDRINFO getaddrinfo
 #endif
 
 #ifdef USE_SOCKETS_TCP
 
-static unsigned long by_number_id;
-#ifndef HOST_RESULT_IS_ADDR
-static unsigned long *by_number_array[2];
-static struct hostent by_number_host;
-#endif
-
-int scheme_get_host_address(const char *address, int id, void *_result)
+struct addrinfo *scheme_get_host_address(const char *address, int id, int *err, 
+					 int family, int passive, int tcp)
 {
-  tcp_address *result = (tcp_address *)_result;
-  struct hostent *host;
+  char buf[32], *service;
+  int ok;
+  GC_CAN_IGNORE struct addrinfo *r, hints;
 
-  if (address) {
-    if (parse_numerical(address, &by_number_id)) {
-#ifdef HOST_RESULT_IS_ADDR
-      host = (struct hostent *)by_number_id;
-#else
-      by_number_array[0] = &by_number_id;
-      by_number_host.h_addr_list = (char **)by_number_array;
-      by_number_host.h_length = sizeof(long);
-      host = &by_number_host;
-#endif
-    } else {
-      host = MZ_GETHOSTBYNAME(address);
-    }
+  if (id) {
+    service = buf;
+    sprintf(buf, "%d", id);
   } else
-    host = NULL;
+    service = NULL;
+  
+  if (!address && !service) {
+    *err = -1;
+    return NULL;
+  }
 
-  if (!address || host) {
-    result->sin_family = (id ? AF_INET : AF_UNSPEC);
-    result->sin_port = id;
-    memset(&(result->sin_addr), 0, sizeof(result->sin_addr));
-    memset(&(result->sin_zero), 0, sizeof(result->sin_zero));
-    if (host) {
-#ifdef HOST_RESULT_IS_ADDR
-      memcpy(&result->sin_addr, &host, sizeof(long)); 
-#else
-      memcpy(&result->sin_addr, host->h_addr_list[0], host->h_length); 
-#endif
+  memset(&hints, 0, sizeof(struct addrinfo));
+  hints.ai_family = ((family < 0) ? PF_UNSPEC : family);
+  if (passive) {
+    hints.ai_flags |= AI_PASSIVE;
+  }
+  if (tcp) {
+    hints.ai_socktype = SOCK_STREAM;
+# ifndef PROTOENT_IS_INT
+    if (!proto) {
+      proto = getprotobyname("tcp");
     }
-    return 1;
-  } else
-    return 0;
+# endif
+    hints.ai_protocol= PROTO_P_PROTO;
+  } else {
+    hints.ai_socktype = SOCK_DGRAM;
+  }
+
+  ok = MZ_GETADDRINFO(address, service, &hints, &r);
+  *err = ok;
+  
+  if (!ok)
+    return r;
+  else
+    return NULL;
 }
 #endif
 
@@ -859,448 +826,8 @@ static void TCP_INIT(char *name)
 		   name);
 }
 #else
-
-/********************************** Mac ***************************************/
-
-#ifdef USE_MAC_TCP
-
-/* Much of this is derived from (or at least influenced by) GUSI's TCP
-   socket implementation, by Matthias Neeracher, which was derived from
-   a library by Charlie Reiman Tom Milligan */
-
-static short tcpDriverId;
-
-static ProcessSerialNumber tcp_psn;
-
-#define	SOCK_STATE_NO_STREAM 0 /* Socket doesn't have a MacTCP stream yet */
-#define	SOCK_STATE_UNCONNECTED 1 /* Socket is unconnected. */
-#define	SOCK_STATE_LISTENING 2 /* Socket is listening for connection. */
-#define	SOCK_STATE_CONNECTING 4 /* Socket is initiating a connection. */
-#define	SOCK_STATE_CONNECTED 5 /* Socket is connected. */
-#define	SOCK_STATE_EOF_FROM_OTHER 6 /* Socket is half-closed */
-#define	SOCK_STATE_CLOSED 8 /* Socket closed nicely */
-
-typedef struct TCPiopbX {
-  TCPiopb pb;
-  Scheme_Tcp *data;
-  struct TCPiopbX *next;
-} TCPiopbX;
-
-typedef struct {
-  MZTAG_IF_REQUIRED
-  wdsEntry e[2];
-  TCPiopbX *xpb;
-} WriteData;
-
-static TCPiopbX *active_pbs;
-
-static pascal void dnr_done(struct hostInfo *hi, int * done)
-{
-  *done = true;
-  WakeUpProcess(&tcp_psn);
-}
-
-static ResultUPP u_dnr_done;
-
-static pascal void tcp_notify(StreamPtr stream, unsigned short eventCode,
-			      Ptr userDataPtr, unsigned short something,
-			      struct ICMPReport *reportPtr)
-{
-  tcp_t *t = (tcp_t *)userDataPtr;
-
-  switch (eventCode) {
-  case TCPClosing:
-    t->state = SOCK_STATE_EOF_FROM_OTHER;
-    break;
-    
-  case TCPTerminate:
-    if (t->state == SOCK_STATE_LISTENING)
-      t->state = SOCK_STATE_CLOSED;
-    else if (t->state == SOCK_STATE_EOF_FROM_OTHER)
-      t->state = SOCK_STATE_CLOSED;
-    else
-      t->state = SOCK_STATE_UNCONNECTED;
-    break;
-  }
-
-  WakeUpProcess(&tcp_psn);
-}
-
-static TCPNotifyUPP u_tcp_notify;
-
-static void tcp_connect_done(TCPiopbX *pbx)
-{
-  if (!pbx->pb.ioResult)
-    pbx->data->tcp.state = SOCK_STATE_CONNECTED;
-
-  WakeUpProcess(&tcp_psn);
-}
-
-static TCPIOCompletionUPP u_tcp_connect_done;
-
-static void tcp_listen_done(TCPiopbX *pbx)
-{
-  TCPiopb *pb = &pbx->pb;
-  Scheme_Tcp *data = pbx->data;
-
-  switch(pb->ioResult) {
-  case noErr:
-    data->tcp.state = SOCK_STATE_CONNECTED;
-    break;
-    
-  case openFailed:
-  case invalidStreamPtr:
-  case connectionExists:
-  case duplicateSocket:
-  case commandTimeout:
-  default:
-    data->tcp.state = SOCK_STATE_UNCONNECTED;
-    data->tcp.async_errid = -pb->ioResult;
-    break;
-  }
-
-  WakeUpProcess(&tcp_psn);
-}
-
-static TCPIOCompletionUPP u_tcp_listen_done;
-
-static void tcp_recv_done(TCPiopbX *pbx)
-{
-  TCPiopb *pb = &pbx->pb;
-  Scheme_Tcp *data = pbx->data;
-  
-  if (!pb->ioResult)
-    data->b.bufmax = pb->csParam.receive.rcvBuffLen;
-
-  WakeUpProcess(&tcp_psn);
-}
-
-static TCPIOCompletionUPP u_tcp_recv_done;
-
-static void tcp_send_done(TCPiopbX *pbx)
-{
-  TCPiopb *pb = &pbx->pb;
-  Scheme_Tcp *data = pbx->data;
-
-  /* mark it free: */
-  ((WriteData *)(pb->csParam.send.wdsPtr))->xpb = NULL;
-
-  switch (pb->ioResult) {
-  case noErr:
-    break;
-  case ipNoFragMemErr:
-  case connectionClosing:
-  case connectionTerminated:
-  case connectionDoesntExist:
-  case ipDontFragErr:
-  case invalidStreamPtr:
-  case invalidLength:
-  case invalidWDS:
-  default:
-    data->tcp.state = SOCK_STATE_UNCONNECTED;
-    data->tcp.async_errid = -pb->ioResult;
-    break;
-  }
-
-  WakeUpProcess(&tcp_psn);
-}
-
-static TCPIOCompletionUPP u_tcp_send_done;
-
-/************** Mac Set-up *****************/
-
-static void tcp_cleanup(void);
-
-static pascal OSErr (*mzPBOpenSync)(ParmBlkPtr paramBlock);
-static pascal OSErr (*mzPBControlSync)(ParmBlkPtr paramBlock);
-static pascal OSErr (*mzPBControlAsync)(ParmBlkPtr paramBlock);
-
-static void TCP_INIT(char *name)
-{
-  ParamBlockRec pb;
-  short errNo;
-  FSSpec spec;
-  CFragConnectionID connID;
-  OSErr err;
-  void (*f)(...);
-  char *netglue;
-
-  GetCurrentProcess(&tcp_psn);
-
-  netglue = scheme_get_exec_path();
-  if (netglue) {
-    char *file;
-    int i;
-    i = strlen(netglue);
-    file = scheme_malloc_atomic(i + 20);
-    memcpy(file, netglue, i);
-    for (i--; (i >= 0) && (file[i] != ':'); i--) {
-    }
-    memcpy(file + i + 1, "netglue", 8);
-    netglue = file;
-  } else
-    netglue = "netglue";
-
-  if (!scheme_mac_path_to_spec(netglue, &spec))
-    scheme_raise_exn(MZEXN_FAIL_NETWORK,
-		     "%s: TCP initialization error (can't find %q)",
-		     name, netglue);
-
-  err = GetDiskFragment(&spec, 0, 0, 0, kPrivateCFragCopy, &connID, 0, NULL);
-  if (err != noErr)
-    scheme_raise_exn(MZEXN_FAIL_NETWORK,
-		     "%s: TCP initialization error (can't load %q: %e)",
-		     name, netglue, err);
-  err = FindSymbol(connID, "\pFillInNetPointers", (Ptr *)&f, 0);
-  if (err != noErr)
-    scheme_raise_exn(MZEXN_FAIL_NETWORK,
-		     "%s: TCP initialization error (can't get netglue function: %e)",
-		     name, err);
-
-  f(&mzPBOpenSync, &mzPBControlSync, &mzPBControlAsync, 
-    &mzSysEnvirons, &mzGetWDInfo, &mzNewRoutineDescriptor,
-    &mzCallUniversalProc);
-
-  pb.ioParam.ioCompletion = 0L; 
-  pb.ioParam.ioNamePtr = (StringPtr) "\p.IPP"; 
-  pb.ioParam.ioPermssn = fsCurPerm;
-  
-  if ((errNo = mzPBOpenSync(&pb))) {
-    scheme_raise_exn(MZEXN_FAIL_NETWORK,
-		     "%s: TCP initialization error (at .IPP; %e)",
-		     name, (int)errNo);
-  }
-
-  if ((errNo = OpenResolver(NULL))) {
-    scheme_raise_exn(MZEXN_FAIL_NETWORK,
-		     "%s: TCP initialization error (at resolver; %e)",
-		     name, (int)errNo);
-  }
-		
-  tcpDriverId = pb.ioParam.ioRefNum; 
-  
-  u_dnr_done = NewResultProc(dnr_done);
-  u_tcp_notify = NewTCPNotifyProc(tcp_notify);
-  u_tcp_connect_done = NewTCPIOCompletionProc(tcp_connect_done);
-  u_tcp_listen_done = NewTCPIOCompletionProc(tcp_listen_done);
-  u_tcp_recv_done = NewTCPIOCompletionProc(tcp_recv_done);
-  u_tcp_send_done = NewTCPIOCompletionProc(tcp_send_done);
-  
-  REGISTER_SO(active_pbs);
-  
-  atexit(tcp_cleanup);
-}
-
-long scheme_this_ip(void)
-{
-  struct GetAddrParamBlock ipBlock;
-  OSErr      anErr;
- 
-  TCP_INIT("system-type");
-
-  ipBlock.csCode = ipctlGetAddr;
-  ipBlock.ioCRefNum = tcpDriverId;
- 
-  anErr = mzPBControlSync((ParmBlkPtr)&ipBlock);
-  if (anErr == noErr)
-    return ipBlock.ourAddress;
-  else
-    return 0;
-}
-
-static int tcp_addr(const char *address, struct hostInfo *info)
-{
-  int tries = 3;
-  long *done = MALLOC_ONE_ATOMIC(long);
-  
-  /* Check for numerical address: */
-  if (parse_numerical(address, &(info->addr[0])))
-    return 0;
-
- try_again:
-  *done = 0;
-  info->rtnCode = 0;
-  if (StrToAddr((char *)address, info, u_dnr_done, (char *)done) == cacheFault) {
-    /* FIXME: If we get a break, it's possible that `info' and `done' will be
-              GCed before the async call completes. */
-    while (!*done) { scheme_thread_block(0.25); }
-    scheme_current_thread->ran_some = 1;
-  }
-  if (info->rtnCode == cacheFault) {
-    if (--tries)
-      goto try_again;
-  }
-  if (info->rtnCode)
-    return info->rtnCode;
-  if (info->cname[0] == 0)
-    return -42;
-  
-  return 0;
-}
-
-int scheme_get_host_address(const char *address, int id, void *_result)
-{
-  if (tcp_addr(address, (struct hostInfo *)_result)) {
-    return 1;
-  }
-  return 0;
-}
-
-/* Forward prototype: */
-static Scheme_Tcp *make_tcp_port_data(MAKE_TCP_ARG int refcount);
-
-#define STREAM_BUFFER_SIZE 131072
-
-static TCPiopbX *mac_make_xpb(Scheme_Tcp *data)
-{
-  TCPiopbX *xpb;
-
-  /* FIXME, precise GC: no GC tag... */
-  xpb = (TCPiopbX *)scheme_malloc(sizeof(TCPiopbX));
-  
-  memcpy(xpb, data->tcp.create_pb, sizeof(TCPiopb));
-
-  xpb->data = data;
-  
-  data->tcp.current_pb = xpb;
-
-  return xpb;
-}
-
-static int mac_tcp_make(TCPiopbX **_xpb, TCPiopb **_pb, Scheme_Tcp **_data)
-{
-  TCPiopbX *xpb;
-  TCPiopb *pb;
-  Scheme_Tcp *data;
-  int errid;
-
-  data = make_tcp_port_data(2);
-  
-  /* FIXME, precise GC: no GC tag... */
-  xpb = (TCPiopbX *)scheme_malloc(sizeof(TCPiopbX));
-  xpb->next = active_pbs;
-  active_pbs = xpb;
-  
-  pb = (TCPiopb *)xpb;
-
-  pb->ioCRefNum = tcpDriverId;
-  pb->csCode = TCPCreate;
-  pb->csParam.create.rcvBuff = (char *)scheme_malloc_atomic(STREAM_BUFFER_SIZE);
-  pb->csParam.create.rcvBuffLen = STREAM_BUFFER_SIZE;
-  pb->csParam.create.notifyProc = u_tcp_notify;
-  pb->csParam.create.userDataPtr = (char *)&data->tcp;
-  
-  xpb->data = data;
-  
-  if ((errid = mzPBControlSync((ParamBlockRec*)pb)))
-    return errid;
-	
-  data->tcp.create_pb = (void *)pb;
-  data->tcp.stream = pb->tcpStream;
-  data->tcp.async_errid = -1;
-
-  *_xpb = xpb;
-  *_pb = pb;
-  *_data = data;
-
-  return 0;
-}
-
-static void mac_tcp_close(Scheme_Tcp *data, int cls, int rel)
-{
-  TCPiopb *pb;
-  
-  pb = (TCPiopb *)mac_make_xpb(data);
-  
-  if (cls) {
-    pb->ioCompletion = NULL;
-    pb->csCode = TCPClose;
-    pb->csParam.close.validityFlags = timeoutValue | timeoutAction;
-    pb->csParam.close.ulpTimeoutValue = 60 /* seconds */;
-    pb->csParam.close.ulpTimeoutAction = 1 /* 1:abort 0:report */;
-    mzPBControlSync((ParamBlockRec*)pb);
-  }
-
-  if (rel) {
-    pb->csCode = TCPRelease;
-    mzPBControlSync((ParamBlockRec*)pb);
-
-    {
-      TCPiopbX *x, *prev = NULL;
-      x = active_pbs;
-      while (x) {
-	if (x->data->tcp.stream == data->tcp.stream) {
-	  if (!prev)
-	    active_pbs = x->next;
-	  else
-	    prev->next = x->next;
-	  break;
-	} else {
-	  prev = x;
-	  x = x->next;
-	}
-      }
-    }
-  }
-}
-
-static void mac_tcp_close_all(Scheme_Tcp *data)
-{
-  mac_tcp_close(data, 1, 1);
-}
-
-static int mac_tcp_listen(int id, long host_id, Scheme_Tcp **_data)
-{
-  TCPiopbX *xpb;
-  TCPiopb *pb;
-  Scheme_Tcp *data;
-  int errid;
-  
-  if (!(errid = mac_tcp_make(&xpb, &pb, &data))) {
-    data->tcp.state = SOCK_STATE_LISTENING;
-    
-    xpb = mac_make_xpb(data);
-    pb = (TCPiopb *)xpb;
-
-    pb->ioCompletion = u_tcp_listen_done;
-    pb->csCode = TCPPassiveOpen;
-    pb->csParam.open.validityFlags = timeoutValue | timeoutAction;
-    pb->csParam.open.ulpTimeoutValue = 0 /* seconds; 0 = infinity */;
-    pb->csParam.open.ulpTimeoutAction = 0 /* 1:abort 0:report */;
-    pb->csParam.open.commandTimeoutValue = 0 /* seconds; 0 = infinity */;
-    pb->csParam.open.remoteHost = host_id;
-    pb->csParam.open.remotePort = 0;
-    pb->csParam.open.localHost = 0;
-    pb->csParam.open.localPort = id;
-    pb->csParam.open.dontFrag = 0;
-    pb->csParam.open.timeToLive = 0;
-    pb->csParam.open.security = 0;
-    pb->csParam.open.optionCnt = 0;
-
-    if ((errid = mzPBControlAsync((ParmBlkPtr)pb))) {
-      data->tcp.state = SOCK_STATE_UNCONNECTED;
-      mac_tcp_close(data, 1, 1);
-      return errid;
-    } else {
-      *_data = data;
-      return 0;
-    }
-  } else
-    return errid;
-}
-
-static void tcp_cleanup(void)
-{
-  while (active_pbs) {
-    TCPiopbX *pb = active_pbs;
-    active_pbs = active_pbs->next;
-    mac_tcp_close(pb->data, 1, 1);
-  }
-}
-
-#else
-#define TCP_INIT(x) /* nothing */
-#endif
+/* Not Winsock */
+# define TCP_INIT(x) /* nothing */
 #endif
 
 /*========================================================================*/
@@ -1308,10 +835,7 @@ static void tcp_cleanup(void)
 /*========================================================================*/
 
 #ifdef USE_SOCKETS_TCP
-#define LISTENER_WAS_CLOSED(x) (((listener_t *)(x))->s == INVALID_SOCKET)
-#endif
-#ifdef USE_MAC_TCP
-#define LISTENER_WAS_CLOSED(x) !((listener_t *)(x))->datas
+#define LISTENER_WAS_CLOSED(x) (((listener_t *)(x))->s[0] == INVALID_SOCKET)
 #endif
 #ifndef LISTENER_WAS_CLOSED
 #define LISTENER_WAS_CLOSED(x) 0
@@ -1320,14 +844,15 @@ static void tcp_cleanup(void)
 /* Forward declaration */
 static int stop_listener(Scheme_Object *o);
 
-static int tcp_check_accept(Scheme_Object *listener)
+static int tcp_check_accept(Scheme_Object *_listener)
 {
 #ifdef USE_SOCKETS_TCP
-  tcp_t s;
+  tcp_t s, mx;
+  listener_t *listener = (listener_t *)_listener;
   DECL_FDSET(readfds, 1);
   DECL_FDSET(exnfds, 1);
   struct timeval time = {0, 0};
-  int sr;
+  int sr, i;
 
   INIT_DECL_FDSET(readfds, 1);
   INIT_DECL_FDSET(exnfds, 1);
@@ -1335,57 +860,57 @@ static int tcp_check_accept(Scheme_Object *listener)
   if (LISTENER_WAS_CLOSED(listener))
     return 1;
 
-  s = ((listener_t *)listener)->s;
-
   MZ_FD_ZERO(readfds);
   MZ_FD_ZERO(exnfds);
-  MZ_FD_SET(s, readfds);
-  MZ_FD_SET(s, exnfds);
+
+  mx = 0;
+  for (i = 0; i < listener->count; i++) {
+    s = listener->s[i];
+    MZ_FD_SET(s, readfds);
+    MZ_FD_SET(s, exnfds);
+    if (s > mx)
+      mx = s;
+  }
   
   do {
-    sr = select(s + 1, readfds, NULL, exnfds, &time);
+    sr = select(mx + 1, readfds, NULL, exnfds, &time);
   } while ((sr == -1) && (NOT_WINSOCK(errno) == EINTR));
+
+  if (sr) {
+    for (i = 0; i < listener->count; i++) {
+      s = listener->s[i];
+      if (FD_ISSET(s, readfds)
+	  || FD_ISSET(s, exnfds))
+	return i + 1;
+    }
+  }
 
   return sr;
 #endif
-#ifdef USE_MAC_TCP
-  int i, count;
-  Scheme_Tcp **datas;
-
-  if (LISTENER_WAS_CLOSED(listener))
-    return 1;
-
-  count = ((listener_t *)listener)->count;
-  datas = ((listener_t *)listener)->datas;
-
-  for (i = 0; i < count; i++)
-    if (datas[i] && (datas[i]->tcp.state != SOCK_STATE_LISTENING))
-      return 1;
-
-  return 0;
-#endif
 }
 
-static void tcp_accept_needs_wakeup(Scheme_Object *listener, void *fds)
+static void tcp_accept_needs_wakeup(Scheme_Object *_listener, void *fds)
 {
 #ifdef USE_SOCKETS_TCP
-  if (!LISTENER_WAS_CLOSED(listener)) {
-    tcp_t s = ((listener_t *)listener)->s;
+  if (!LISTENER_WAS_CLOSED(_listener)) {
+    listener_t *listener = (listener_t *)_listener;
+    int i;
+    tcp_t s;
     void *fds2;
 
     fds2 = MZ_GET_FDSET(fds, 2);
     
-    MZ_FD_SET(s, (fd_set *)fds);
-    MZ_FD_SET(s, (fd_set *)fds2);
+    for (i = 0; i < listener->count; i++) {
+      s = listener->s[i];
+      MZ_FD_SET(s, (fd_set *)fds);
+      MZ_FD_SET(s, (fd_set *)fds2);
+    }
   }
 #endif
 }
 
 static int tcp_check_connect(Scheme_Object *connector_p)
 {
-#ifdef USE_MAC_TCP
-  return ((TCPiopb *)connector_p)->ioResult != inProgress;
-#else
 #ifdef USE_SOCKETS_TCP
   tcp_t s;
   DECL_FDSET(writefds, 1);
@@ -1399,8 +924,9 @@ static int tcp_check_connect(Scheme_Object *connector_p)
   s = *(tcp_t *)connector_p;
 
   MZ_FD_ZERO(writefds);
-  MZ_FD_SET(s, writefds);
   MZ_FD_ZERO(exnfds);
+
+  MZ_FD_SET(s, writefds);
   MZ_FD_SET(s, exnfds);
     
   do {
@@ -1415,7 +941,6 @@ static int tcp_check_connect(Scheme_Object *connector_p)
     return 1;
 #else
   return 0;
-#endif
 #endif
 }
 
@@ -1432,17 +957,6 @@ static void tcp_connect_needs_wakeup(Scheme_Object *connector_p, void *fds)
   MZ_FD_SET(s, (fd_set *)fds2);
 #endif
 }
-
-#ifdef USE_MAC_TCP
-static void tcp_read_needs_wakeup(Scheme_Object *connector, void *fds)
-{
-}
-
-static int tcp_check_read(Scheme_Object *pb)
-{
-  return (((TCPiopb *)pb)->ioResult != inProgress);
-}
-#endif
 
 static int tcp_check_write(Scheme_Object *port)
 {
@@ -1537,15 +1051,13 @@ static Scheme_Tcp *make_tcp_port_data(MAKE_TCP_ARG int refcount)
   data->b.hiteof = 0;
   data->b.refcount = refcount;
 
-#ifndef USE_MAC_TCP
-# ifdef USE_WINSOCK_TCP
+#ifdef USE_WINSOCK_TCP
   {
     unsigned long ioarg = 1;
     ioctlsocket(tcp, FIONBIO, &ioarg);
   }
-# else
+#else
   fcntl(tcp, F_SETFL, MZ_NONBLOCKING);
-# endif
 #endif
 
   return data;
@@ -1587,27 +1099,6 @@ static int tcp_byte_ready (Scheme_Input_Port *port)
   return sr;
 #endif
 
-#ifdef USE_MAC_TCP
-  if ((data->tcp.state == SOCK_STATE_CONNECTED)) {
-    /* socket is connected */
-    TCPiopbX *xpb;
-    TCPiopb *pb;
-    
-    xpb = mac_make_xpb(data);
-    pb = (TCPiopb *)xpb;
-    
-    pb->csCode = TCPStatus;
-    pb->ioCompletion = NULL;
-
-    if (mzPBControlSync((ParamBlockRec*)pb))
-      return 1;
-      
-    if (pb->csParam.status.amtUnreadData)
-      return 1;
- } else
-   return 1;
-#endif
-
   return 0;
 }
 
@@ -1630,22 +1121,19 @@ static long tcp_get_string(Scheme_Input_Port *port,
   if (data->b.hiteof)
     return EOF;
 
-#ifdef USE_MAC_TCP
-  if (!data->activeRcv)
-#endif
-    if (data->b.bufpos < data->b.bufmax) {
-      int n;
-      n = data->b.bufmax - data->b.bufpos;
-      n = ((size <= n)
-	   ? size
-	   : n);
-      
-      memcpy(buffer + offset, data->b.buffer + data->b.bufpos, n);
-      data->b.bufpos += n;
-
-      return n;
-    }
-
+  if (data->b.bufpos < data->b.bufmax) {
+    int n;
+    n = data->b.bufmax - data->b.bufpos;
+    n = ((size <= n)
+	 ? size
+	 : n);
+    
+    memcpy(buffer + offset, data->b.buffer + data->b.bufpos, n);
+    data->b.bufpos += n;
+    
+    return n;
+  }
+  
   while (!tcp_byte_ready(port)) {
     if (nonblock > 0)
       return 0;
@@ -1702,74 +1190,6 @@ static long tcp_get_string(Scheme_Input_Port *port,
   if ((data->b.bufmax == -1) && WAS_EAGAIN(errid))
     goto top;
 
-#endif
-#ifdef USE_MAC_TCP
-  /* Allow only one read at a time: */
-  if (!data->tcp.lock)
-    data->tcp.lock = scheme_make_sema(0);
-  else {
-    if (!scheme_wait_sema(data->tcp.lock, 1)) {
-      /* Do it the hard way: */
-      scheme_wait_sema(data->tcp.lock, 0);
-      scheme_post_sema(data->tcp.lock);
-      goto top;
-    }
-  }
-  
-  if (data->activeRcv 
-      || (data->tcp.state == SOCK_STATE_CONNECTED)) {
-    /* socket is connected or an old recv is unfinished */
-    TCPiopb *pb;    
-
-    if (data->activeRcv) {
-      pb = data->activeRcv;
-    } else {
-      pb = (TCPiopb *)mac_make_xpb(data);
-    
-      pb->csCode = TCPRcv;
-      pb->ioCompletion = u_tcp_recv_done;
-      pb->csParam.receive.commandTimeoutValue = 0; /* seconds, 0 = blocking */
-      pb->csParam.receive.rcvBuff = data->b.buffer;
-      pb->csParam.receive.rcvBuffLen = read_amt;
-    
-      data->activeRcv = pb;
-
-      mzPBControlAsync((ParamBlockRec*)pb);
-    }
-
-    BEGIN_ESCAPEABLE(scheme_post_sema, data->tcp.lock);
-    /* No need for unless_evt, since we have a lock */
-    scheme_block_until_enable_break(tcp_check_read, tcp_read_needs_wakeup, (Scheme_Object *)pb, 
-				    0.0, nonblock);
-    END_ESCAPEABLE();
-
-    data->activeRcv = NULL;
-    
-    switch((errid = pb->ioResult)) {
-    case noErr:
-    case connectionClosing:
-    case connectionTerminated:
-      errid = 0;
-      break;
-    case commandTimeout:
-    case connectionDoesntExist:
-    case invalidStreamPtr:
-    case invalidLength:
-    case invalidBufPtr:
-    default:
-      break;
-    }
-  } else if (data->tcp.state == SOCK_STATE_EOF_FROM_OTHER 
-             || data->tcp.state == SOCK_STATE_CLOSED) {
-    data->b.bufmax = 0;
-    errid = 0;
-  } else
-    errid = data->tcp.async_errid;
-  
-  if (errid)
-    data->b.bufmax = -1;
-    
-  scheme_post_sema(data->tcp.lock);
 #endif
   
   if (data->b.bufmax == -1) {
@@ -1829,9 +1249,6 @@ static void tcp_close_input(Scheme_Input_Port *port)
 #ifdef USE_SOCKETS_TCP
   UNREGISTER_SOCKET(data->tcp);
   closesocket(data->tcp);
-#endif
-#ifdef USE_MAC_TCP
-  mac_tcp_close(data, 0, 1);
 #endif
 
   --scheme_file_open_count;
@@ -1907,101 +1324,6 @@ static long tcp_do_write_string(Scheme_Output_Port *port,
     }
   } else
     errid = 0;
-#endif
-#ifdef USE_MAC_TCP
-  errid = 0;
-  if ((data->tcp.state == SOCK_STATE_CONNECTED) ||
-      (data->tcp.state == SOCK_STATE_EOF_FROM_OTHER)) {
-    /* socket is connected */
-    TCPiopbX *xpb;
-    TCPiopb *pb;
-    int bytes;
-
-    xpb = mac_make_xpb(data);
-    pb = (TCPiopb *)xpb;
-    
-    pb->csCode = TCPStatus;
-    if ((errid = mzPBControlSync((ParamBlockRec*)pb)))
-      bytes = 0;
-    else {
-      bytes = pb->csParam.status.sendWindow - pb->csParam.status.amtUnackedData;
-      if (bytes < 0)
-	bytes = 0;
-    }
-    
-    if (bytes >= len) {
-      WriteData *wd;
-      wdsEntry *e;
-      int i;
-      
-      wd = NULL;
-      for (i = 0; i < num_tcp_send_buffers; i++) {
-	if (!((WriteData *)(tcp_send_buffers[i]))->xpb) {
-	  wd = (WriteData *)(tcp_send_buffers[i]);
-	  break;
-	}
-      }
-      
-      if (!wd) {
-	void **naya;
-	int nayac;
-	
-	nayac = (2 * num_tcp_send_buffers) + 1;
-	naya = MALLOC_N(void *, nayac);
-	memcpy(naya, tcp_send_buffers, sizeof(void *) * num_tcp_send_buffers);
-	for (i = num_tcp_send_buffers; i < nayac; i++) {
-	  wd = MALLOC_ONE_RT(WriteData);
-#ifdef MZTAG_REQUIRED
-	  wd->so.type = scheme_rt_write_data;
-#endif
-	  wd->xpb = NULL;
-	  e = wd->e;
-	  e[0].ptr = NULL;
-	  e[1].ptr = NULL;
-	  e[1].length = 0;
-	  naya[i] = (void *)e;
-	}
-
-	wd = (WriteData *)naya[num_tcp_send_buffers];
-	
-	tcp_send_buffers = naya;
-	num_tcp_send_buffers = nayac;
-      }
-
-      wd->xpb = xpb;
-      e = wd->e;
-
-      e[0].ptr = (Ptr)scheme_malloc_atomic(len);
-      memcpy(e[0].ptr, s + offset, len);
-      e[0].length = len;
-      e[1].ptr = NULL;
-      e[1].length = 0;
-
-      pb->csCode = TCPSend;
-      pb->ioCompletion = u_tcp_send_done;
-      pb->csParam.send.validityFlags = timeoutValue | timeoutAction;
-      pb->csParam.send.ulpTimeoutValue = 60 /* seconds */;
-      pb->csParam.send.ulpTimeoutAction = 1 /* 0:abort 1:report */;
-      pb->csParam.send.pushFlag = 1;
-      pb->csParam.send.urgentFlag = 0;
-      pb->csParam.send.wdsPtr = (Ptr)e;
-      pb->csParam.send.sendFree = 0;
-      pb->csParam.send.sendLength = 0;
-      
-      errid = mzPBControlAsync((ParamBlockRec*)pb);
-    } else if (!errid) {
-      if (bytes) {
-      	/* Do partial write: */
-        sent = tcp_do_write_string(port, s, offset, bytes, rarely_block, enable_break);
-	if (rarely_block)
-	  return sent;
-        sent = tcp_do_write_string(port, s, offset + bytes, len - bytes, 0, enable_break);
-	sent += bytes;
-      } else
-        would_block = 1;
-    }
-  } else
-    errid = data->tcp.async_errid;
 #endif
 
   if (would_block) {
@@ -2113,12 +1435,6 @@ static void tcp_close_output(Scheme_Output_Port *port)
     shutdown(data->tcp, 1);
 #endif
 
-#ifdef USE_MAC_TCP
-  if (!(data->flags & MZ_TCP_ABANDON_OUTPUT)
-      || (data->b.refcount == 1))
-    mac_tcp_close(data, 1, data->b.refcount == 1);
-#endif
-
   if (--data->b.refcount)
     return;
 
@@ -2198,35 +1514,39 @@ make_tcp_output_port(void *data, const char *name)
 /*                         TCP Scheme interface                           */
 /*========================================================================*/
 
-# ifdef PROTOENT_IS_INT
-#  define PROTO_P_PROTO PROTOENT_IS_INT
-# else
-#  define PROTO_P_PROTO proto->p_proto
-# endif
-
-# ifndef MZ_PF_INET
-#  define MZ_PF_INET PF_INET
-# endif
-
 #ifdef USE_SOCKETS_TCP
-static void closesocket_w_decrement(tcp_t s)
+typedef struct Close_Socket_Data {
+  tcp_t s;
+  struct addrinfo *src_addr, *dest_addr;
+} Close_Socket_Data;
+
+static void closesocket_w_decrement(Close_Socket_Data *csd)
 {
-  closesocket(s);
+  closesocket(csd->s);
+  if (csd->src_addr)
+    freeaddrinfo(csd->src_addr);
+  freeaddrinfo(csd->dest_addr);  
   --scheme_file_open_count;
 }
 #endif
+
+const char *scheme_hostname_error(int err)
+{
+#ifdef USE_SOCKETS_TCP
+  return gai_strerror(err);
+#else
+  return "?";
+#endif
+}
 
 static Scheme_Object *tcp_connect(int argc, Scheme_Object *argv[])
 {
   char * volatile address = "", * volatile src_address, * volatile errmsg = "";
   unsigned short origid, id, src_origid, src_id;
-  int errpart = 0, errid = 0, no_local_spec;
+  int errpart = 0, errid = 0, nameerr = 0, no_local_spec;
   Scheme_Object *bs, *src_bs;
 #ifdef USE_SOCKETS_TCP
-  GC_CAN_IGNORE tcp_address tcp_connect_dest_addr, tcp_connect_src_addr;
-# ifndef PROTOENT_IS_INT
-  struct protoent *proto;
-# endif
+  GC_CAN_IGNORE struct addrinfo *tcp_connect_dest, *tcp_connect_src;
 #endif
 
   if (!SCHEME_CHAR_STRINGP(argv[0]))
@@ -2274,104 +1594,26 @@ static Scheme_Object *tcp_connect(int argc, Scheme_Object *argv[])
   scheme_custodian_check_available(NULL, "tcp-connect", "network");
 
 #ifdef USE_TCP
-  /* Set id in network order: */
-  id = htons(origid);
-  src_id = htons(src_origid);
-#endif
-
-#ifdef USE_MAC_TCP
-  {
-    TCPiopbX *xpb;
-    TCPiopb *pb;
-    Scheme_Tcp *data;
-    int errNo, srchost;
-    struct hostInfo *dest_host;
-    struct hostInfo *src_host;
-    Scheme_Object *v[2];
-    
-    dest_host = MALLOC_ONE_ATOMIC(struct hostInfo);
-    if ((errNo = tcp_addr(address, dest_host))) {
-      errpart = 1;
-      errmsg = "; host not found";
-      goto tcp_error;
-    }
-    if (src_address) {
-      src_host = MALLOC_ONE_ATOMIC(struct hostInfo);
-      if ((errNo = tcp_addr(src_address, src_host))) {
-      errpart = 2;
-      errmsg = "; local host not found";
-      goto tcp_error;
-      }
-      srchost = src_host->addr[0];
-    } else
-      srchost = 0;
-  
-
-    if ((errNo = mac_tcp_make(&xpb, &pb, &data))) {
-      errpart = 3;
-      goto tcp_error;
-    }
-
-    data->tcp.state = SOCK_STATE_CONNECTING;
-    
-    pb->ioCompletion = u_tcp_connect_done;
-    pb->csCode = TCPActiveOpen;
-    pb->csParam.open.validityFlags = timeoutValue | timeoutAction;
-    pb->csParam.open.ulpTimeoutValue = 60 /* seconds */;
-    pb->csParam.open.ulpTimeoutAction = 1 /* 1:abort 0:report */;
-    pb->csParam.open.commandTimeoutValue = 0;
-    pb->csParam.open.remoteHost = dest_host->addr[0];
-    pb->csParam.open.remotePort = id;
-    pb->csParam.open.localHost = srchost;
-    pb->csParam.open.localPort = src_id;
-    pb->csParam.open.dontFrag = 0;
-    pb->csParam.open.timeToLive = 0;
-    pb->csParam.open.security = 0;
-    pb->csParam.open.optionCnt = 0;
-
-    if ((errNo = mzPBControlAsync((ParamBlockRec*)pb))) {
-      errpart = 4;
-      goto tcp_close_and_error;
-    }
-    
-    BEGIN_ESCAPEABLE(mac_tcp_close_all, data);
-    scheme_block_until(tcp_check_connect, tcp_connect_needs_wakeup, (Scheme_Object *)pb, 0);
-    END_ESCAPEABLE();
-    
-    if (data->tcp.state != SOCK_STATE_CONNECTED) {
-      errpart = 5;
-      errNo = pb->ioResult;
-      goto tcp_close_and_error;
-    }
-    
-    v[0] = make_tcp_input_port(data, address);
-    v[1] = make_tcp_output_port(data, address);
-    
-    return scheme_values(2, v);
-    
-  tcp_close_and_error:
-    
-    mac_tcp_close(data, 1, 1);
-    
-  tcp_error:
-    
-    errid = errNo;
-  }
+  id = origid;
+  src_id = src_origid;
 #endif
 
 #ifdef USE_SOCKETS_TCP
-  if (scheme_get_host_address(address, id, &tcp_connect_dest_addr)) {
-    if (scheme_get_host_address(src_address, src_id, &tcp_connect_src_addr)) {
-#ifndef PROTOENT_IS_INT
-      proto = getprotobyname("tcp");
-      if (proto)
-#endif
-      {
-        tcp_t s = socket(MZ_PF_INET, SOCK_STREAM, PROTO_P_PROTO);
-        if (s != INVALID_SOCKET) {
+  tcp_connect_dest = scheme_get_host_address(address, id, &errid, -1, 0, 1);
+  if (tcp_connect_dest) {
+    if (no_local_spec)
+      tcp_connect_src = NULL;
+    else
+      tcp_connect_src = scheme_get_host_address(src_address, src_id, &errid, -1, 1, 1);
+    if (no_local_spec || tcp_connect_src) {
+      GC_CAN_IGNORE struct addrinfo *addr;
+      for (addr = tcp_connect_dest; addr; addr = addr->ai_next) {
+	tcp_t s;
+	s = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
+	if (s != INVALID_SOCKET) {
 	  int status, inprogress;
 	  if (no_local_spec
-	      || !bind(s, (struct sockaddr *)&tcp_connect_src_addr, sizeof(tcp_connect_src_addr))) {
+	      || !bind(s, tcp_connect_src->ai_addr, tcp_connect_src->ai_addrlen)) {
 #ifdef USE_WINSOCK_TCP
 	    unsigned long ioarg = 1;
 	    ioctlsocket(s, FIONBIO, &ioarg);
@@ -2382,7 +1624,7 @@ static Scheme_Object *tcp_connect(int argc, Scheme_Object *argv[])
 	    setsockopt(s, SOL_SOCKET, SO_SNDBUF, (char *)&size, sizeof(int));
 # endif
 #endif
-	    status = connect(s, (struct sockaddr *)&tcp_connect_dest_addr, sizeof(tcp_connect_dest_addr));
+	    status = connect(s, addr->ai_addr, addr->ai_addrlen);
 #ifdef USE_UNIX_SOCKETS_TCP
 	    if (status)
 	      status = errno;
@@ -2400,36 +1642,42 @@ static Scheme_Object *tcp_connect(int argc, Scheme_Object *argv[])
 #endif
 
 	    scheme_file_open_count++;
-	    
+	  
 	    if (inprogress) {
 	      tcp_t *sptr;
+	      Close_Socket_Data *csd;
 
 	      sptr = (tcp_t *)scheme_malloc_atomic(sizeof(tcp_t));
 	      *sptr = s;
 
-	      BEGIN_ESCAPEABLE(closesocket_w_decrement, s);
+	      csd = (Close_Socket_Data *)scheme_malloc_atomic(sizeof(Close_Socket_Data));
+	      csd->s = s;
+	      csd->src_addr = tcp_connect_src;
+	      csd->dest_addr = tcp_connect_dest;
+
+	      BEGIN_ESCAPEABLE(closesocket_w_decrement, csd);
 	      scheme_block_until(tcp_check_connect, tcp_connect_needs_wakeup, (void *)sptr, (float)0.0);
 	      END_ESCAPEABLE();
 
 	      /* Check whether connect succeeded, or get error: */
 	      {
-	        int so_len = sizeof(status);
-	        if (getsockopt(s, SOL_SOCKET, SO_ERROR, (void *)&status, &so_len) != 0) {
-	          status = SOCK_ERRNO();
-	        }
-	        errno = status; /* for error reporting, below */
+		int so_len = sizeof(status);
+		if (getsockopt(s, SOL_SOCKET, SO_ERROR, (void *)&status, &so_len) != 0) {
+		  status = SOCK_ERRNO();
+		}
+		errno = status; /* for error reporting, below */
 	      }
 
 #ifdef USE_WINSOCK_TCP
 	      if (scheme_stupid_windows_machine > 0) {
-	        /* getsockopt() seems not to work in Windows 95, so use the
-	           result from select(), which seems to reliably detect an error condition */
-	        if (!status) {
-	          if (tcp_check_connect((Scheme_Object *)sptr) == -1) {
+		/* getsockopt() seems not to work in Windows 95, so use the
+		   result from select(), which seems to reliably detect an error condition */
+		if (!status) {
+		  if (tcp_check_connect((Scheme_Object *)sptr) == -1) {
 		    status = 1;
 		    errno = WSAECONNREFUSED; /* guess! */
-	          }
-	        }
+		  }
+		}
 	      }
 #endif
 	    }
@@ -2437,6 +1685,10 @@ static Scheme_Object *tcp_connect(int argc, Scheme_Object *argv[])
 	    if (!status) {
 	      Scheme_Object *v[2];
 	      Scheme_Tcp *tcp;
+
+	      if (tcp_connect_src)
+		freeaddrinfo(tcp_connect_src);
+	      freeaddrinfo(tcp_connect_dest);
 
 	      tcp = make_tcp_port_data(s, 2);
 	      
@@ -2452,37 +1704,35 @@ static Scheme_Object *tcp_connect(int argc, Scheme_Object *argv[])
 	      --scheme_file_open_count;
 	      errpart = 6;
 	    }
-          } else {
+	  } else {
 	    errpart = 5;
 	    errid = SOCK_ERRNO();
 	  }
-        } else {
+	} else {
 	  errpart = 4;
 	  errid = SOCK_ERRNO();
-        }
+	}
       }
-#ifndef PROTOENT_IS_INT
-      else {
-        errpart = 3;
-        errid = SOCK_ERRNO();
-      }
-#endif
+      if (tcp_connect_src)
+	freeaddrinfo(tcp_connect_src);
     } else {
       errpart = 2;
-      errid = 0;
+      nameerr = 1;
       errmsg = "; local host not found";
     } 
+    if (tcp_connect_dest)
+      freeaddrinfo(tcp_connect_dest);
   } else {
     errpart = 1;
-    errid = 0;
+    nameerr = 1;
     errmsg = "; host not found";
   }
 #endif
 
 #ifdef USE_TCP
   scheme_raise_exn(MZEXN_FAIL_NETWORK,
-		   "tcp-connect: connection to %s, port %d failed%s (at step %d: %E)",
-		   address, origid, errmsg, errpart, errid);
+		   "tcp-connect: connection to %s, port %d failed%s (at step %d: %N)",
+		   address, origid, errmsg, errpart, nameerr, errid);
 #else
   scheme_raise_exn(MZEXN_FAIL_UNSUPPORTED,
 		   "tcp-connect: not supported on this platform");
@@ -2503,13 +1753,11 @@ tcp_listen(int argc, Scheme_Object *argv[])
   unsigned short id, origid;
   int backlog, errid;
   int reuse = 0;
-  const char *address;
-#ifdef USE_SOCKETS_TCP
-# ifndef PROTOENT_IS_INT
-  struct protoent *proto;
-# endif
+#ifdef MZ_TCP_LISTEN_IPV6_ONLY_SOCKOPT
+  int no_ipv6 = 0;
 #endif
-
+  const char *address;
+  
   if (!CHECK_PORT_ID(argv[0]))
     scheme_wrong_type("tcp-listen", PORT_ID_TYPE, 0, argc, argv);
   if (argc > 1) {
@@ -2543,128 +1791,181 @@ tcp_listen(int argc, Scheme_Object *argv[])
   scheme_custodian_check_available(NULL, "tcp-listen", "network");
 
 #ifdef USE_TCP
-  /* Set id in network order: */
-  id = htons(origid);
+  id = origid;
 #endif
 
-#ifdef USE_MAC_TCP
-  {
-    int i;
-    long hostid;
-    Scheme_Tcp **datas, *data;
-    struct hostInfo *local_host;
-
-    if (address) {
-      local_host = MALLOC_ONE_ATOMIC(struct hostInfo);
-      if ((errid = tcp_addr(address, local_host))) {
-	scheme_raise_exn(MZEXN_FAIL_NETWORK,
-			 "tcp-listen: host not found: %s (%E)",
-			 address, errid);
-	return NULL;
-      }
-      hostid = local_host->addr[0];
-    } else
-      hostid = 0;
-
-
-    datas = MALLOC_N(Scheme_Tcp *, backlog);
-
-    for (i = 0; i < backlog; i++) {
-      if ((errid = mac_tcp_listen(id, hostid, &data))) {
-        /* Close listeners that had succeeded: */
-        int j;
-        for (j = 0; j < i; j++)
-          mac_tcp_close(datas[i], 1, 1);
-	break;
-      }
-      datas[i] = data;
-    }
-
-    if (!errid) {
-      listener_t *l = MALLOC_ONE_TAGGED(listener_t);
-
-      l->so.type = scheme_listener_type;
-      l->portid = id;
-      l->hostid = hostid;
-      l->count = backlog;
-      l->datas = datas;
-      l->mref = scheme_add_managed(NULL,
-				   (Scheme_Object *)l,
-				   (Scheme_Close_Custodian_Client *)stop_listener,
-				   NULL,
-				   1);
-      
-      return (Scheme_Object *)l;
-    }
-  }
+#ifdef MZ_TCP_LISTEN_IPV6_ONLY_SOCKOPT
+ retry:
 #endif
 
-#ifdef USE_SOCKETS_TCP
-# ifndef PROTOENT_IS_INT
-  proto = getprotobyname("tcp");
-  if (proto)
-# endif
   {
-    GC_CAN_IGNORE tcp_address tcp_listen_addr;
+    GC_CAN_IGNORE struct addrinfo *tcp_listen_addr, *addr;
+    int err, count = 0, pos = 0, i;
+    listener_t *l = NULL;
+#ifdef MZ_TCP_LISTEN_IPV6_ONLY_SOCKOPT
+    int any_v4 = 0, any_v6 = 0;
+#endif
 
-    if (scheme_get_host_address(address, id, &tcp_listen_addr)) {
-      tcp_t s;
-
-      s = socket(MZ_PF_INET, SOCK_STREAM, PROTO_P_PROTO);
-      if (s != INVALID_SOCKET) {
-#ifdef USE_WINSOCK_TCP
-	unsigned long ioarg = 1;
-	ioctlsocket(s, FIONBIO, &ioarg);
+    tcp_listen_addr = scheme_get_host_address(address, id, &err, 
+#ifdef MZ_TCP_LISTEN_IPV6_ONLY_SOCKOPT
+					      no_ipv6 ? MZ_PF_INET : -1,
 #else
-	fcntl(s, F_SETFL, MZ_NONBLOCKING);
+					      -1, 
+#endif
+					      1, 1);
+
+    for (addr = tcp_listen_addr; addr; addr = addr->ai_next) {
+#ifdef MZ_TCP_LISTEN_IPV6_ONLY_SOCKOPT
+      if (addr->ai_family == MZ_PF_INET)
+	any_v4 = 1;
+      else if (addr->ai_family == PF_INET6)
+	any_v6 = 1;
+#endif
+      count++;
+    }
+		
+    if (tcp_listen_addr) {
+      tcp_t s;
+#ifdef MZ_TCP_LISTEN_IPV6_ONLY_SOCKOPT
+      /* Try IPv6 listeners first, so we can retry and use just IPv4 if
+	 IPv6 doesn't work right. */
+      int v6_loop = (any_v6 && any_v4), skip_v6 = 0;
 #endif
 
-	if (reuse) {
-	  setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (char *)(&reuse), sizeof(int));
+      errid = 0;
+      for (addr = tcp_listen_addr; addr; ) {
+#ifdef MZ_TCP_LISTEN_IPV6_ONLY_SOCKOPT
+	if ((v6_loop && (addr->ai_family != PF_INET6))
+	    || (skip_v6 && (addr->ai_family == PF_INET6))) {
+	  addr = addr->ai_next;
+	  if (v6_loop && !addr) {
+	    v6_loop = 0;
+	    skip_v6 = 1;
+	    addr = tcp_listen_addr;
+	  }
+	  continue;
 	}
-      
-	if (!bind(s, (struct sockaddr *)&tcp_listen_addr, sizeof(tcp_listen_addr))) {
-	  if (!listen(s, backlog)) {
-	    listener_t *l;
+#endif
 
-	    l = MALLOC_ONE_TAGGED(listener_t);
-	    l->so.type = scheme_listener_type;
-	    l->s = s;
-	    {
-	      Scheme_Custodian_Reference *mref;
-	      mref = scheme_add_managed(NULL,
-					(Scheme_Object *)l,
-					(Scheme_Close_Custodian_Client *)stop_listener,
-					NULL,
-					1);
-	      l->mref = mref;
+	s = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
+
+#ifdef MZ_TCP_LISTEN_IPV6_ONLY_SOCKOPT
+	if (s == INVALID_SOCKET) {
+	  /* Maybe it failed because IPv6 is not available: */
+	  if ((addr->ai_family == PF_INET6) && (errno == EAFNOSUPPORT)) {
+	    if (any_v4 && !pos) {
+	      /* Maybe we can make it work with just IPv4. Try again. */
+	      no_ipv6 = 1;
+	      freeaddrinfo(tcp_listen_addr);
+	      goto retry;
 	    }
-
-	    scheme_file_open_count++;
-	    REGISTER_SOCKET(s);
-
-	    return (Scheme_Object *)l;
 	  }
 	}
+	if (s != INVALID_SOCKET) {
+	  if (any_v4 && (addr->ai_family == PF_INET6)) {
+	    int ok;
+# ifdef IPV6_V6ONLY
+	    int on = 1;
+	    ok = setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof(on));
+# else
+	    ok = -1;
+# endif
+	    if (ok) {
+	      if (!pos) {
+		/* IPV6_V6ONLY doesn't work */
+		no_ipv6 = 1;
+		freeaddrinfo(tcp_listen_addr);
+		goto retry;
+	      } else {
+		errid = errno;
+		closesocket(s);
+		errno = errid;
+		s = INVALID_SOCKET;
+	      }
+	    }
+	  }
+	}
+#endif
 
-	errid = SOCK_ERRNO();
+	if (s != INVALID_SOCKET) {
+#ifdef USE_WINSOCK_TCP
+	  unsigned long ioarg = 1;
+	  ioctlsocket(s, FIONBIO, &ioarg);
+#else
+	  fcntl(s, F_SETFL, MZ_NONBLOCKING);
+#endif
 
+	  if (reuse) {
+	    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (char *)(&reuse), sizeof(int));
+	  }
+      
+	  if (!bind(s, addr->ai_addr, addr->ai_addrlen)) {
+	    if (!listen(s, backlog)) {
+	      if (!pos) {
+		l = scheme_malloc_tagged(sizeof(listener_t) + ((count - 1) * sizeof(tcp_t)));
+		l->so.type = scheme_listener_type;
+		l->count = count;
+		{
+		  Scheme_Custodian_Reference *mref;
+		  mref = scheme_add_managed(NULL,
+					    (Scheme_Object *)l,
+					    (Scheme_Close_Custodian_Client *)stop_listener,
+					    NULL,
+					    1);
+		  l->mref = mref;
+		}
+	      }
+	      l->s[pos++] = s;
+	    
+	      scheme_file_open_count++;
+	      REGISTER_SOCKET(s);
+
+	      if (pos == count) {
+		freeaddrinfo(tcp_listen_addr);
+
+		return (Scheme_Object *)l;
+	      }
+	    } else {
+	      errid = SOCK_ERRNO();
+	      closesocket(s);
+	      break;
+	    }
+	  } else {
+	    errid = SOCK_ERRNO();
+	    closesocket(s);
+	    break;
+	  }
+	} else {
+	  errid = SOCK_ERRNO();
+	  break;
+	}
+
+	addr = addr->ai_next;
+
+#ifdef MZ_TCP_LISTEN_IPV6_ONLY_SOCKOPT
+	if (!addr && v6_loop) {
+	  v6_loop = 0;
+	  skip_v6 = 1;
+	  addr = tcp_listen_addr;
+	}
+#endif
+      }
+
+      for (i = 0; i < pos; i++) {
+	s = l->s[i];
+	UNREGISTER_SOCKET(s);
 	closesocket(s);
-      } else
-	errid = SOCK_ERRNO();
+	--scheme_file_open_count;
+      }
+      
+      freeaddrinfo(tcp_listen_addr);
     } else {
       scheme_raise_exn(MZEXN_FAIL_NETWORK,
-		       "tcp-listen: host not found: %s",
-		       address);
+		       "tcp-listen: host not found: %s (%N)",
+		       address, 1, err);
       return NULL;
     }
   }
-# ifndef PROTOENT_IS_INT
-  else {
-    errid = SOCK_ERRNO();
-  }
-# endif
-#endif
 
 #ifdef USE_TCP
   scheme_raise_exn(MZEXN_FAIL_NETWORK,
@@ -2683,39 +1984,26 @@ static int stop_listener(Scheme_Object *o)
 {
   int was_closed = 0;
 
-#ifdef USE_MAC_TCP
-  { 
-    listener_t *l = (listener_t *)o;
-    int i, count = l->count;
-    Scheme_Tcp **datas = l->datas;
-    if (!datas || !l->count)
-      was_closed = 1;
-    else {
-      l->count = 0;
-      for (i = 0; i < count; i++) {
-	if (datas[i])
-	  mac_tcp_close(datas[i], 1, 1);
-      }
-      scheme_remove_managed(l->mref, (Scheme_Object *)l);
-    }
- }
-#endif
-
 #ifdef USE_SOCKETS_TCP
   {
-    tcp_t s = ((listener_t *)o)->s;
+    listener_t *listener = (listener_t *)o;
+    int i;
+    tcp_t s;
+    s = listener->s[0];
     if (s == INVALID_SOCKET)
       was_closed = 1;
     else {
-      UNREGISTER_SOCKET(s);
-      closesocket(s);
-      ((listener_t *)o)->s = INVALID_SOCKET;
-      --scheme_file_open_count;
+      for (i = 0; i < listener->count; i++) {
+	s = listener->s[i];
+	UNREGISTER_SOCKET(s);
+	closesocket(s);
+	listener->s[i] = INVALID_SOCKET;
+	--scheme_file_open_count;
+      }
       scheme_remove_managed(((listener_t *)o)->mref, o);
     }
   }
 #endif
-
 
   return was_closed;
 }
@@ -2777,17 +2065,12 @@ static Scheme_Object *
 tcp_accept(int argc, Scheme_Object *argv[])
 {
 #ifdef USE_TCP
-  int was_closed = 0, errid;
+  int was_closed = 0, errid, ready_pos;
   Scheme_Object *listener;
 # ifdef USE_SOCKETS_TCP
   tcp_t s;
   int l;
-  tcp_address tcp_accept_addr; /* Use a long name for precise GC's xform.ss */
-# endif
-# ifdef USE_MAC_TCP
-  listener_t *l;
-  int i, count;
-  Scheme_Tcp **datas;
+  GC_CAN_IGNORE char tcp_accept_addr[MZ_SOCK_NAME_MAX_LEN];
 # endif
 
   if (!SAME_TYPE(SCHEME_TYPE(argv[0]), scheme_listener_type))
@@ -2800,11 +2083,14 @@ tcp_accept(int argc, Scheme_Object *argv[])
   was_closed = LISTENER_WAS_CLOSED(listener);
 
   if (!was_closed) {
-    if (!tcp_check_accept(listener)) {
+    ready_pos = tcp_check_accept(listener);
+    if (!ready_pos) {
       scheme_block_until(tcp_check_accept, tcp_accept_needs_wakeup, listener, 0.0);
+      ready_pos = tcp_check_accept(listener);
     }
     was_closed = LISTENER_WAS_CLOSED(listener);
-  }
+  } else
+    ready_pos = 0;
 
   if (was_closed) {
     scheme_raise_exn(MZEXN_FAIL_NETWORK,
@@ -2815,12 +2101,12 @@ tcp_accept(int argc, Scheme_Object *argv[])
   scheme_custodian_check_available(NULL, "tcp-accept", "network");
   
 # ifdef USE_SOCKETS_TCP
-  s = ((listener_t *)listener)->s;
+  s = ((listener_t *)listener)->s[ready_pos-1];
 
   l = sizeof(tcp_accept_addr);
 
   do {
-    s = accept(s, (struct sockaddr *)&tcp_accept_addr, &l);
+    s = accept(s, (struct sockaddr *)tcp_accept_addr, &l);
   } while ((s == -1) && (NOT_WINSOCK(errno) == EINTR));
 
   if (s != INVALID_SOCKET) {
@@ -2846,36 +2132,7 @@ tcp_accept(int argc, Scheme_Object *argv[])
   }
   errid = SOCK_ERRNO();
 # endif
-
-# ifdef USE_MAC_TCP
-  l = (listener_t *)listener;
-  count = l->count;
-  datas = l->datas;
-
-  errid = 0;
-  for (i = 0; i < count; i++) {
-    if (datas[i] && (datas[i]->tcp.state != SOCK_STATE_LISTENING)) {
-      Scheme_Object *v[2];
-      Scheme_Tcp *data;
-      
-      v[0] = make_tcp_input_port(datas[i], "[accepted]");
-      v[1] = make_tcp_output_port(datas[i], "[accepted]");
-      
-      if (!(errid = mac_tcp_listen(l->portid, l->hostid, &data))) {
-        /* new listener at the end of the queue: */
-	memcpy(datas + i, datas + i + 1, sizeof(Scheme_Tcp *) * (count - i - 1));
-	datas[count - 1] = data;
-
-	scheme_file_open_count++;
-      } else {
-      	/* catastophic error; we permanently decrement the listener count */
-        datas[i] = NULL;
-      }
-      return scheme_values(2, v);
-    }
-  }
-# endif
-
+  
   scheme_raise_exn(MZEXN_FAIL_NETWORK,
 		   "tcp-accept: accept from listener failed (%E)", errid);
 #else
@@ -2914,10 +2171,7 @@ static Scheme_Object *tcp_addresses(int argc, Scheme_Object *argv[])
 #ifdef USE_TCP
   Scheme_Tcp *tcp = NULL;
   int closed = 0;
-  unsigned long here_a, there_a;
-  unsigned char *b;
   Scheme_Object *result[2];
-  char sa[20];
 
   if (SCHEME_OUTPORTP(argv[0])) {
     Scheme_Output_Port *op;
@@ -2942,41 +2196,43 @@ static Scheme_Object *tcp_addresses(int argc, Scheme_Object *argv[])
 
 # ifdef USE_SOCKETS_TCP
   {
-    /* Use a long name for precise GC's xform.ss: */
-    tcp_address tcp_here_addr, tcp_there_addr;
     int l;
-    
-    l = sizeof(tcp_here_addr);
-    if (getsockname(tcp->tcp, (struct sockaddr *)&tcp_here_addr, &l)) {
+    char here[MZ_SOCK_NAME_MAX_LEN], there[MZ_SOCK_NAME_MAX_LEN];
+    char host_buf[MZ_SOCK_HOST_NAME_MAX_LEN];
+    int here_len, there_len;
+
+    l = sizeof(here);
+    if (getsockname(tcp->tcp, (struct sockaddr *)here, &l)) {
       scheme_raise_exn(MZEXN_FAIL_NETWORK,
 		       "tcp-addresses: could not get local address (%e)",
 		       SOCK_ERRNO());
     }
-    l = sizeof(tcp_there_addr);
-    if (getpeername(tcp->tcp, (struct sockaddr *)&tcp_there_addr, &l)) {
+    here_len = l;
+
+    l = sizeof(there);
+    if (getpeername(tcp->tcp, (struct sockaddr *)there, &l)) {
       scheme_raise_exn(MZEXN_FAIL_NETWORK,
 		       "tcp-addresses: could not get peer address (%e)",
 		       SOCK_ERRNO());
     }
+    there_len = l;
 
-    here_a = *(unsigned long *)&tcp_here_addr.sin_addr;
-    there_a = *(unsigned long *)&tcp_there_addr.sin_addr;
+    getnameinfo((struct sockaddr *)here, here_len, 
+		host_buf, sizeof(host_buf),
+		NULL, 0,
+		NI_NUMERICHOST | NI_NUMERICSERV);
+    result[0] = scheme_make_utf8_string(host_buf);
+
+    getnameinfo((struct sockaddr *)there, there_len, 
+		host_buf, sizeof(host_buf),
+		NULL, 0,
+		NI_NUMERICHOST | NI_NUMERICSERV);
+    result[1] = scheme_make_utf8_string(host_buf);
   }
+# else
+  result[0] = scheme_make_utf8_string("0.0.0.0");
+  result[1] = result[1];
 # endif
-# ifdef USE_MAC_TCP
-  {
-    here_a = ((TCPOpenPB *)tcp->tcp.create_pb)->localHost;
-    there_a = ((TCPOpenPB *)tcp->tcp.create_pb)->remoteHost;
-  }
-# endif
-
-  b = (unsigned char *)&here_a;
-  sprintf(sa, "%d.%d.%d.%d", b[0], b[1], b[2], b[3]);
-  result[0] = scheme_make_utf8_string(sa);
-
-  b = (unsigned char *)&there_a;
-  sprintf(sa, "%d.%d.%d.%d", b[0], b[1], b[2], b[3]);
-  result[1] = scheme_make_utf8_string(sa);
 
   return scheme_values(2, result);
 #else
@@ -3119,7 +2375,8 @@ typedef struct Scheme_UDP_Evt {
   short for_read, with_addr;
   int offset, len;
   char *str;
-  tcp_address dest_addr;
+  char *dest_addr;
+  int dest_addr_len;
 } Scheme_UDP_Evt;
 
 static int udp_close_it(Scheme_Object *_udp)
@@ -3145,13 +2402,50 @@ static Scheme_Object *make_udp(int argc, Scheme_Object *argv[])
 #ifdef UDP_IS_SUPPORTED
   Scheme_UDP *udp;
   tcp_t s;
+  char *address = "";
+  unsigned short origid, id;
 
   TCP_INIT("udp-open-socket");
 
-  scheme_security_check_network("udp-open-socket", NULL, -1, 1);
+  if ((argc > 0) && !SCHEME_FALSEP(argv[0]) && !SCHEME_CHAR_STRINGP(argv[0]))
+    scheme_wrong_type("udp-open-socket", "string or #f", 0, argc, argv);
+  if ((argc > 1) && !SCHEME_FALSEP(argv[1]) && !CHECK_PORT_ID(argv[1]))
+    scheme_wrong_type("udp-open-socket", PORT_ID_TYPE " or #f", 1, argc, argv);
+
+  if ((argc > 0) && SCHEME_TRUEP(argv[0])) {
+    Scheme_Object *bs;
+    bs = scheme_char_string_to_byte_string(argv[0]);
+    address = SCHEME_BYTE_STR_VAL(bs);
+  } else
+    address = NULL;
+  if ((argc > 1) && SCHEME_TRUEP(argv[1]))
+    origid = (unsigned short)SCHEME_INT_VAL(argv[1]);
+  else
+    origid = 0;
+
+  scheme_security_check_network("udp-open-socket", address, origid, 0);
   scheme_custodian_check_available(NULL, "udp-open-socket", "network");
 
-  s = socket(PF_INET, SOCK_DGRAM, 0);
+  if (address || origid) {
+    int err;
+    GC_CAN_IGNORE struct addrinfo *udp_bind_addr = NULL;
+    if (!origid)
+      origid = 1025;
+    id = origid;
+    udp_bind_addr = scheme_get_host_address(address, id, &err, -1, 1, 0);
+    if (!udp_bind_addr) {
+      scheme_raise_exn(MZEXN_FAIL_NETWORK,
+		       "udp-open-socket: can't resolve address: %s (%N)", 
+		       address ? address : "<unspec>", 1, err);
+      return NULL;
+    }
+    s = socket(udp_bind_addr->ai_family,
+	       udp_bind_addr->ai_socktype,
+	       udp_bind_addr->ai_protocol);
+    freeaddrinfo(udp_bind_addr);
+  } else {
+    s = socket(MZ_PF_INET, SOCK_DGRAM, 0);
+  }
 
   if (s == INVALID_SOCKET) {
     int errid;
@@ -3258,8 +2552,8 @@ static Scheme_Object *udp_bind_or_connect(const char *name, int argc, Scheme_Obj
   Scheme_UDP *udp;
   char *address = "";
   unsigned short origid, id;
-  GC_CAN_IGNORE tcp_address udp_bind_addr;
-  int errid;
+  GC_CAN_IGNORE struct addrinfo *udp_bind_addr;
+  int errid, err;
 
   udp = (Scheme_UDP *)argv[0];
 #endif
@@ -3269,7 +2563,7 @@ static Scheme_Object *udp_bind_or_connect(const char *name, int argc, Scheme_Obj
 
 #ifdef UDP_IS_SUPPORTED
   if (!SCHEME_FALSEP(argv[1]) && !SCHEME_CHAR_STRINGP(argv[1]))
-    scheme_wrong_type(name, (do_bind ? "string or #f" : "string"), 1, argc, argv);
+    scheme_wrong_type(name, "string or #f", 1, argc, argv);
   if ((do_bind || !SCHEME_FALSEP(argv[2])) && !CHECK_PORT_ID(argv[2]))
     scheme_wrong_type(name, (do_bind ? PORT_ID_TYPE : PORT_ID_TYPE " or #f"), 2, argc, argv);
 		      
@@ -3309,13 +2603,18 @@ static Scheme_Object *udp_bind_or_connect(const char *name, int argc, Scheme_Obj
     return NULL;
   }
 
-  /* Set id in network order: */
-  id = htons(origid);
+  id = origid;
 
-  if (scheme_get_host_address(address, id, &udp_bind_addr)) {
+  if (address || id)
+    udp_bind_addr = scheme_get_host_address(address, id, &err, -1, do_bind, 0);
+  else
+    udp_bind_addr = NULL;
+
+  if (udp_bind_addr || !origid) {
     if (do_bind) {
-      if (!bind(udp->s, (struct sockaddr *)&udp_bind_addr, sizeof(udp_bind_addr))) {
+      if (!bind(udp->s, udp_bind_addr->ai_addr, udp_bind_addr->ai_addrlen)) {
 	udp->bound = 1;
+	freeaddrinfo(udp_bind_addr);
 	return scheme_void;
       }
       errid = SOCK_ERRNO();
@@ -3330,7 +2629,21 @@ static Scheme_Object *udp_bind_or_connect(const char *name, int argc, Scheme_Obj
 	  ok = 1;
       } else
 #endif
-	ok = !connect(udp->s, (struct sockaddr *)&udp_bind_addr, sizeof(udp_bind_addr));
+	{
+	  if (udp_bind_addr)
+	    ok = !connect(udp->s, udp_bind_addr->ai_addr, udp_bind_addr->ai_addrlen);
+#ifndef USE_NULL_TO_DISCONNECT_UDP
+	  else {
+	    GC_CAN_IGNORE mz_unspec_address ua;
+	    ua.sin_family = AF_UNSPEC;
+	    ua.sin_port = 0;
+	    memset(&(ua.sin_addr), 0, sizeof(ua.sin_addr));
+	    memset(&(ua.sin_zero), 0, sizeof(ua.sin_zero));
+	    ok = !connect(udp->s, (struct sockaddr *)&ua, sizeof(ua));
+	  }
+#endif
+	}
+      
       if (!ok)
 	errid = SOCK_ERRNO();
       else
@@ -3346,9 +2659,14 @@ static Scheme_Object *udp_bind_or_connect(const char *name, int argc, Scheme_Obj
 	  udp->connected = 1;
 	else
 	  udp->connected = 0;
+	if (udp_bind_addr)
+	  freeaddrinfo(udp_bind_addr);
 	return scheme_void;
       }
     }
+
+    if (udp_bind_addr)
+      freeaddrinfo(udp_bind_addr);
 
     scheme_raise_exn(MZEXN_FAIL_NETWORK,
 		     "%s: can't %s to port: %d on address: %s (%E)", 
@@ -3360,9 +2678,9 @@ static Scheme_Object *udp_bind_or_connect(const char *name, int argc, Scheme_Obj
     return NULL;
   } else {
     scheme_raise_exn(MZEXN_FAIL_NETWORK,
-		     "%s: can't resolve address: %s", 
+		     "%s: can't resolve address: %s (%N)", 
 		     name,
-		     address);
+		     address, 1, err);
     return NULL;
   }
 #else
@@ -3428,7 +2746,7 @@ static void udp_send_needs_wakeup(Scheme_Object *_udp, void *fds)
 
 static Scheme_Object *do_udp_send_it(const char *name, Scheme_UDP *udp,
 				     char *bstr, long start, long end,
-				     tcp_address *dest_addr, int can_block)
+				     char *dest_addr, int dest_addr_len, int can_block)
 {
   long x;
   int errid = 0;
@@ -3456,7 +2774,7 @@ static Scheme_Object *do_udp_send_it(const char *name, Scheme_UDP *udp,
 
     if (dest_addr)
       x = sendto(udp->s, bstr XFORM_OK_PLUS start, end - start, 
-		 0, (struct sockaddr *)dest_addr, sizeof(tcp_address));
+		 0, (struct sockaddr *)dest_addr, dest_addr_len);
     else
       x = send(udp->s, bstr XFORM_OK_PLUS start, end - start, 0);
 
@@ -3499,9 +2817,9 @@ static Scheme_Object *udp_send_it(const char *name, int argc, Scheme_Object *arg
   Scheme_UDP *udp;
   char *address = "";
   long start, end;
-  int delta;
+  int delta, err;
   unsigned short origid, id;
-  GC_CAN_IGNORE tcp_address udp_dest_addr;
+  GC_CAN_IGNORE struct addrinfo *udp_dest_addr;
 
   udp = (Scheme_UDP *)argv[0];
 #endif
@@ -3534,30 +2852,47 @@ static Scheme_Object *udp_send_it(const char *name, int argc, Scheme_Object *arg
 
     scheme_security_check_network(name, address, origid, 1);
 
-    /* Set id in network order: */
-    id = htons(origid);
+    id = origid;
   } else {
     address = NULL;
     id = origid = 0;
   }
 
-  if (!with_addr || scheme_get_host_address(address, id, &udp_dest_addr)) {
+  if (with_addr)
+    udp_dest_addr = scheme_get_host_address(address, id, &err, -1, 0, 0);
+  else
+    udp_dest_addr = NULL;
+
+  if (!with_addr || udp_dest_addr) {
     if (fill_evt) {
+      char *s;
       fill_evt->str = SCHEME_BYTE_STR_VAL(argv[3+delta]);
       fill_evt->offset = start;
       fill_evt->len = end - start;
-      memcpy(&fill_evt->dest_addr, &udp_dest_addr, sizeof(tcp_address));
+      if (udp_dest_addr) {
+	s = (char *)scheme_malloc_atomic(udp_dest_addr->ai_addrlen);
+	memcpy(s, udp_dest_addr->ai_addr, udp_dest_addr->ai_addrlen);
+	fill_evt->dest_addr = s;
+	fill_evt->dest_addr_len = udp_dest_addr->ai_addrlen;
+	freeaddrinfo(udp_dest_addr);
+      }
       return scheme_void;
     } else {
-      return do_udp_send_it(name, udp,
-			    SCHEME_BYTE_STR_VAL(argv[3+delta]), start, end,
-			    (with_addr ? &udp_dest_addr : NULL), can_block);
+      Scheme_Object *r;
+      r = do_udp_send_it(name, udp,
+			 SCHEME_BYTE_STR_VAL(argv[3+delta]), start, end,
+			 (udp_dest_addr ? (char *)udp_dest_addr->ai_addr : NULL),
+			 (udp_dest_addr ? udp_dest_addr->ai_addrlen : 0),
+			 can_block);
+      if (udp_dest_addr)
+	freeaddrinfo(udp_dest_addr);
+      return r;
     }
   } else {
     scheme_raise_exn(MZEXN_FAIL_NETWORK,
-		     "%s: can't resolve address: %s", 
+		     "%s: can't resolve address: %s (%N)", 
 		     name,
-		     address);
+		     address, 1, err);
     return NULL;
   }
 #else
@@ -3648,7 +2983,8 @@ static int do_udp_recv(const char *name, Scheme_UDP *udp, char *bstr, long start
 #ifdef UDP_IS_SUPPORTED
   long x;
   int errid = 0;
-  GC_CAN_IGNORE tcp_address udp_src_addr;
+  char src_addr[MZ_SOCK_NAME_MAX_LEN];
+  int asize = sizeof(src_addr);
 
   if (!udp->bound) {
     scheme_raise_exn(MZEXN_FAIL_NETWORK,
@@ -3668,9 +3004,8 @@ static int do_udp_recv(const char *name, Scheme_UDP *udp, char *bstr, long start
     }
 
     {
-      int asize = sizeof(udp_src_addr);
       x = recvfrom(udp->s, bstr XFORM_OK_PLUS start, end - start, 0,
-		   (struct sockaddr *)&udp_src_addr, &asize);
+		   (struct sockaddr *)src_addr, &asize);
     }
 
     if (x == -1) {
@@ -3695,24 +3030,41 @@ static int do_udp_recv(const char *name, Scheme_UDP *udp, char *bstr, long start
   }
   
   if (x > -1) {
-    int id;
-    char buf[16];
-    unsigned char *a;
+    char host_buf[MZ_SOCK_HOST_NAME_MAX_LEN];
+    char prev_buf[MZ_SOCK_HOST_NAME_MAX_LEN];
+    char svc_buf[MZ_SOCK_SVC_NAME_MAX_LEN];
+    int j, id;
 
     v[0] = scheme_make_integer(x);
 
-    a = (unsigned char *)&udp_src_addr.sin_addr;
-    sprintf(buf, "%d.%d.%d.%d", a[0], a[1], a[2], a[3]);
-    if (udp->previous_from_addr && !strcmp(SCHEME_BYTE_STR_VAL(udp->previous_from_addr), buf)) {
+    getnameinfo((struct sockaddr *)src_addr, asize,
+		host_buf, sizeof(host_buf),
+		svc_buf, sizeof(svc_buf),
+		NI_NUMERICHOST | NI_NUMERICSERV);
+    
+    if (udp->previous_from_addr) {
+      mzchar *s;
+      s = SCHEME_CHAR_STR_VAL(udp->previous_from_addr);
+      for (j = 0; s[j]; j++) {
+	prev_buf[j] = (char)s[j];
+      }
+      prev_buf[j] = 0;
+    }
+
+    if (udp->previous_from_addr && !strcmp(prev_buf, host_buf)) {
       v[1] = udp->previous_from_addr;
     } else {
       Scheme_Object *vv;
-      vv = scheme_make_immutable_sized_byte_string(buf, -1, 1);
+      vv = scheme_make_immutable_sized_utf8_string(host_buf, -1);
       v[1] = vv;
       udp->previous_from_addr = v[1];
     }
 
-    id = ntohs(udp_src_addr.sin_port);
+    id = 0;
+    for (j = 0; svc_buf[j]; j++) {
+      id = (id * 10) + (svc_buf[j] - '0');
+    }
+
     v[2] = scheme_make_integer(id);
 
     return 1;
@@ -3849,12 +3201,10 @@ static int udp_evt_check_ready(Scheme_Object *_uw, Scheme_Schedule_Info *sinfo)
   } else {
     if (uw->str) {
       Scheme_Object *r;
-      GC_CAN_IGNORE tcp_address dest_addr;
-      if (uw->with_addr)
-	memcpy(&dest_addr, &uw->dest_addr, sizeof(tcp_address));
       r = do_udp_send_it("udp-send-evt", uw->udp, 
 			 uw->str, uw->offset, uw->offset + uw->len, 
-			 (uw->with_addr ? &dest_addr : 0), 0);
+			 uw->dest_addr, uw->dest_addr_len,
+			 0);
       if (SCHEME_TRUEP(r)) {
 	scheme_set_sync_target(sinfo, scheme_void, NULL, NULL, 0, 0);
 	return 1;
@@ -3876,8 +3226,6 @@ static void udp_evt_needs_wakeup(Scheme_Object *_uw, void *fds)
 }
 #endif
 
-
-
 /*========================================================================*/
 /*                       precise GC traversers                            */
 /*========================================================================*/
@@ -3893,9 +3241,6 @@ static void register_traversers(void)
 {
 #ifdef USE_TCP
   GC_REG_TRAV(scheme_rt_tcp, mark_tcp);
-# ifdef USE_MAC_TCP
-  GC_REG_TRAV(scheme_rt_write_data, mark_write_data);
-# endif
 # ifdef UDP_IS_SUPPORTED
   GC_REG_TRAV(scheme_udp_type, mark_udp);
   GC_REG_TRAV(scheme_udp_evt_type, mark_udp_evt);
@@ -3909,4 +3254,3 @@ END_XFORM_SKIP;
 #endif
 
 #endif /* !NO_TCP_SUPPORT */
-

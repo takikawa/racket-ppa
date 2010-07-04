@@ -65,6 +65,8 @@
 (htdp-test 9 'app-f (f 4))
 (htdp-top (define f2 (lambda (y) (+ x y))))
 (htdp-test 15 'app-f (f 10))
+(htdp-top-pop 1)
+(htdp-top-pop 1)
 
 (htdp-top (define-struct a0 ()))
 (htdp-top (define-struct a1 (b)))
@@ -93,7 +95,8 @@
 (htdp-test 19 'cond (cond [(zero? 10) 0] [else 19]))
 
 (htdp-err/rt-test (cond [#f 10]) exn:fail?) ;; Should it be a different exception?
-(htdp-err/rt-test (cond [1 10]))
+(define rx:not-true-or-false "not true or false")
+(htdp-err/rt-test (cond [1 10]) rx:not-true-or-false)
 
 (htdp-syntax-test #'if)
 (htdp-syntax-test #'(if))
@@ -101,22 +104,22 @@
 (htdp-syntax-test #'(if #t 1))
 (htdp-syntax-test #'(if #t 1 2 3))
 
-(htdp-err/rt-test (if 1 2 3))
+(htdp-err/rt-test (if 1 2 3) rx:not-true-or-false)
 
 (htdp-syntax-test #'and)
 (htdp-syntax-test #'(and))
 (htdp-syntax-test #'(and #t))
 
-(htdp-err/rt-test (and 1 #t))
-(htdp-err/rt-test (and #t 1))
+(htdp-err/rt-test (and 1 #t) rx:not-true-or-false)
+(htdp-err/rt-test (and #t 1) rx:not-true-or-false)
 (htdp-test #f 'ok-and (and #t #f 1))
 
 (htdp-syntax-test #'or)
 (htdp-syntax-test #'(or))
 (htdp-syntax-test #'(or #t))
 
-(htdp-err/rt-test (or 1 #f))
-(htdp-err/rt-test (or #f 1))
+(htdp-err/rt-test (or 1 #f) rx:not-true-or-false)
+(htdp-err/rt-test (or #f 1) rx:not-true-or-false)
 (htdp-test #t 'ok-or (or #f #t 1))
 
 (htdp-test #t 'empty? (empty? empty))
@@ -145,18 +148,21 @@
 (htdp-error-test #'(define (an-example-structure x) 5))
 (htdp-error-test #'(define-struct an-example-structure (y)))
 (htdp-error-test #'(define-struct an-example (structure y)))
+(htdp-top-pop 1)
 
 (htdp-top (define an-example-value 12))
 (htdp-error-test #'(define an-example-value 5))
 (htdp-error-test #'(define (an-example-value x) 5))
 (htdp-error-test #'(define-struct an-example-value (y)))
 (htdp-error-test #'(define-struct an-example (value y)))
+(htdp-top-pop 1)
 
 (htdp-top (define (an-example-function x) x))
 (htdp-error-test #'(define an-example-function 5))
 (htdp-error-test #'(define (an-example-function x) 5))
 (htdp-error-test #'(define-struct an-example-function (y)))
 (htdp-error-test #'(define-struct an-example (function y)))
+(htdp-top-pop 1)
 
 (htdp-test #t 'equal? (equal? 1 1))
 (htdp-test #t 'equal? (equal? (list 1) (list 1)))
@@ -184,3 +190,18 @@
 (htdp-test #t 'equal~? (equal~? (make-a1 #i2.0) (make-a1 2) #i0.2))
 (htdp-test #f 'equal~? (equal~? (make-a1 #i2.3) (make-a1 2) #i0.2))
 
+(htdp-top-pop 1)
+(htdp-top-pop 1)
+(htdp-top-pop 1)
+
+;; Error messages
+(htdp-top (define my-x 5))
+(htdp-top (define (my-f x) (+ x 5)))
+(htdp-syntax-test #'(cond [true my-x 5]) #rx"found a clause with 3 parts")
+(htdp-syntax-test #'(define foo17 my-x 5) #rx"found one extra part")
+(htdp-syntax-test #'(my-y 17) #rx"not defined, not an argument, and not a primitive name")
+(htdp-syntax-test #'(cond [true my-y 17]) #rx"not defined, not an argument, and not a primitive name")
+(htdp-syntax-test #'(define my-f 12) #rx"cannot be re-defined")
+(htdp-syntax-test #'(define (my-x h) 12) #rx"cannot be re-defined")
+(htdp-top-pop 1)
+(htdp-top-pop 1)

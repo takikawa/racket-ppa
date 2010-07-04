@@ -247,23 +247,31 @@
 		(drscheme:unit:open-drscheme-window filename))])
 	 drscheme-current-create-new-window))
 
+      ;; add a catch-all handler to open drscheme files
+      (handler:insert-format-handler 
+       "Units"
+       (λ (filename) #t)
+       drscheme:unit:open-drscheme-window)
+      
       ;; add a handler to open .plt files.
       (handler:insert-format-handler 
        "PLT Files"
        (λ (filename)
-         (and (equal? "plt" (filename-extension filename))
-              (gui-utils:get-choice 
-               (format (string-constant install-plt-file) filename)
-               (string-constant install-plt-file/yes)
-               (string-constant install-plt-file/no))))
+         (let ([ext (filename-extension filename)])
+           (and ext
+                (or (bytes=? #"PLT" ext)
+                    (bytes=? #"plt" ext))
+                (gui-utils:get-choice 
+                 (format (string-constant install-plt-file) filename)
+                 (string-constant install-plt-file/yes)
+                 (string-constant install-plt-file/no)))))
        (λ (filename)
          (run-installer filename)
 	 #f))
       
       (drscheme:tools:load/invoke-all-tools
-       (λ ()
-         (void))
-       (λ ()
+       (λ () (void))
+       (λ () 
          (drscheme:language-configuration:add-built-in-languages)
          (drscheme:module-language:add-module-language)
          (drscheme:language-configuration:add-info-specified-languages)))
@@ -287,7 +295,7 @@
       ;; test for this preference, reverting back to the default.
       ;; In that case, the default is specified in the pref.ss file
       ;; of the default collection and may not be the default
-      ;; specified below.
+      ;; specified above (of course).
       (preferences:set-un/marshall
        drscheme:language-configuration:settings-preferences-symbol
        (λ (x)
@@ -320,12 +328,6 @@
                  (void))
                (super-new))])
       (handler:set-recent-items-frame-superclass drs-handler-recent-items-super%))
-      
-      ;;
-      ;; Show expanded language dialog when version changes
-      ;; 
-      (preferences:set-default 'drscheme:last-version #f (λ (x) (or (string? x) (not x))))
-      (preferences:set-default 'drscheme:last-language #f (λ (x) (or (symbol? x) (not x))))
 
       (cond
         [(current-eventspace-has-menu-root?)
@@ -334,10 +336,6 @@
         [else
          (preferences:set 'framework:exit-when-no-frames #t)])
       
-      
-      (drscheme:app:check-new-version)
-      
-      ;;
       ;; Check for any files lost last time.
       ;; Ignore the framework's empty frames test, since
       ;;   the autosave information window may appear and then

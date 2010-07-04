@@ -34,7 +34,7 @@
     ;;XHTML '("XHTML 1.0 Transitional"
     ;;   "\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\"")
     ))
-(define* *charset-type*     (make-parameter "ISO-8859-1"))
+(define* *charset-type*     (make-parameter "UTF-8"))
 (define* *prefix*           (make-parameter #f))
 (define* *current-html-obj* (make-parameter #f))
 
@@ -60,13 +60,13 @@
 (define special-eval
   (let ([orig-eval (current-eval)])
     (lambda (expr)
-      (define (:-args x y r)
+      (define (list-args x y r)
         (let loop ([r r] [a (list y x)])
           (syntax-case r (:)
             [(: x . xs) (loop #'xs (cons #'x a))]
             [xs (values (reverse! a) #'xs)])))
       (orig-eval
-       (let loop ([expr (datum->syntax-object #f expr)] [q 0])
+       (let loop ([expr expr] [q 0])
          (syntax-case expr (: _)
            [(_ x _ . r) (string? (syntax-e #'x))
             (let ([strs (map (lambda (s) (datum->syntax-object #'x s))
@@ -83,7 +83,7 @@
                                   [(unquote unquote-splicing) (sub1 q)]))])
               (if (eq? x1 #'x) expr (quasisyntax/loc expr (qop #,x1))))]
            [(x : y . r)
-            (let-values ([(xs rest) (:-args #'x #'y #'r)])
+            (let-values ([(xs rest) (list-args #'x #'y #'r)])
               (loop (if (> q 0)
                       (quasisyntax/loc expr (#,xs . #,rest))
                       (quasisyntax/loc expr ((__infix-:__ . #,xs) . #,rest)))
@@ -119,12 +119,6 @@
 (define (string-quote s)
   (let ([s (format "~s" s)])
     (substring s 1 (sub1 (string-length s)))))
-
-(define* (keyword->string symbol)
-  (and (keyword? symbol)
-       (let ([str (symbol->string symbol)])
-         (and (not (equal? str ":"))
-              (substring str 1 (string-length str))))))
 
 (define* (basename path)
   (let-values ([(_1 name _2) (split-path path)]) (path->string name)))
@@ -459,7 +453,7 @@
   (define (kloop xs)
     (if (and (pair? xs) (pair? (cdr xs)) (symbol? (car xs)))
       (let* ([k (car xs)] [v (cadr xs)]
-             [a (keyword->string k)])
+             [a (and (keyword? k) (keyword->string k))])
         (cond
          [(memq k ks) (kloop (cddr xs))] ; ignore later key values
          [(not a) xs]

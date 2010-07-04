@@ -132,6 +132,7 @@
       (define (java-lang-mixin level name number one-line dyn?)
         (when dyn? (dynamic? #t))
         (class* object% (drscheme:language:language<%>)
+          (define/public (first-opened) (void))
           
           (define/public (order-manuals x)
             (let* ((beg-list '(#"profj-beginner" #"tour" #"drscheme" #"help"))
@@ -351,17 +352,20 @@
                        (datum->syntax-object #f `(parse-java-full-program ,(parse port name level)) #f)))))))
           (define/public (front-end/interaction port settings teachpack-cache)
             (mred? #t)
-            (let ([name (object-name port)])
+            (let ([name (object-name port)]
+                  [executed? #f])
               (lambda ()
-                (if (eof-object? (peek-char-or-special port))
+                (if executed? #;(eof-object? (peek-char-or-special port))
                     eof
-                    (syntax-as-top
-                     (datum->syntax-object 
-                      #f
-                      #;`(compile-interactions-helper ,(lambda (ast) (compile-interactions-ast ast name level execute-types))
-                                                    ,(parse-interactions port name level))
-                      `(parse-java-interactions ,(parse-interactions port name level) ,name)
-                      #f))))))
+                    (begin
+                      (set! executed? #t)
+                      (syntax-as-top
+                       (datum->syntax-object 
+                        #f
+                        #;`(compile-interactions-helper ,(lambda (ast) (compile-interactions-ast ast name level execute-types))
+                                                        ,(parse-interactions port name level))
+                          `(parse-java-interactions ,(parse-interactions port name level) ,name)
+                          #f)))))))
 
           ;process-extras: (list struct) type-record -> (list syntax)
           (define/private (process-extras extras type-recs)
@@ -401,7 +405,7 @@
                                            #f))
                     (_ tc))) (process-extras (cdr extras) type-recs))
                #;(cons (test-case-test (car extras)) (process-extras (cdr extras) type-recs)))
-              ((interact-case? (car extras))
+              #;((interact-case? (car extras))
                (let ((interact-box (interact-case-box (car extras))))
                  (send interact-box set-level level)
                  (send interact-box set-records execute-types)
@@ -543,10 +547,11 @@
               (else (add1 (total-length (cdr lst))))))
               
           (define/public (render-value/format value settings port width) 
-            (render-value value settings port)(newline port))
+            (render-value value settings port)
+            (newline port))
           
           (define/public (create-executable fn parent . args)
-            (printf "create-exe called~n")
+            ;(printf "create-exe called~n")
 	    (message-box "Unsupported"
 			 "Sorry - executables are not supported for Java at this time"
 			 parent))
@@ -696,7 +701,6 @@
       (drscheme:get/extend:extend-unit-frame java-comment-box-mixin)
       
       ;;Java interactions box
-      #;(define ji-gif (include-bitmap (lib "java-interactions-box.gif" "icons")))
       (define ji-gif (include-bitmap (lib "j.gif" "icons")))
       
       (define snipclass-java-interactions%
@@ -757,7 +761,7 @@
                                                                                   (editor-filter #t))
                                                           ed type-recs level))
                                   (reverse inputs-list))))
-;                (printf "~a~n~a~n" syntax-list (map remove-requires syntax-list))
+                ;(printf "~a~n~a~n" syntax-list (map remove-requires syntax-list))
                 (if ret-list?
                     syntax-list
                     (datum->syntax-object #f `(begin ,@(map remove-requires syntax-list)) #f)))))
@@ -909,7 +913,8 @@
                                          (format-java-list (cadr current) full-print? style 
                                                            (cons value already-printed) newline?
                                                            (if newline? 
-                                                               (+ new-tabs (string-length (car current)) 3)
+                                                               (+ new-tabs (if (string? (car current))
+                                                                               (string-length (car current)) 1) 3)
                                                                num-tabs)))
                                      (list (format "~a~a" 
                                                    (if next "," "")

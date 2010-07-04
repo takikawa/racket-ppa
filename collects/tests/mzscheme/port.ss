@@ -550,5 +550,57 @@
     (test-values '(#f #f #f) (lambda () (port-next-location none)))))
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;  Check that if the initial commit thread is killed, then
+;;  another commit thread is broken, that the second doesn't
+;;  assume that the initial commit thread is still there:
+
+(let ()
+  (define-values (r w) (make-pipe))
+  (define ch (make-channel))
+  (display "hi" w)
+  (peek-byte r)
+  (let ([t (thread (lambda ()
+		     (port-commit-peeked 1 (port-progress-evt r) ch r)))])
+    (sleep 0.01)
+    (let ([t2
+	   (thread (lambda ()
+		     (port-commit-peeked 1 (port-progress-evt r) ch r)))])
+      (sleep 0.01)
+      (thread-suspend t2)
+      (break-thread t2)
+      (kill-thread t)
+      (thread-resume t2)
+      (sleep)))
+  (test (char->integer #\h) peek-byte r))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;  Check that breaks are enabled properly:
+
+(let ([try
+       (lambda (read-char)
+	 (let ([p (make-input-port
+		   'test
+		   (lambda (bstr) never-evt)
+		   (lambda (bstr skip-count progress-evt) never-evt)
+		   void)])
+	   (let ([t (thread (lambda () (with-handlers ([exn:break? void])
+					 (read-char p))))])
+	     (sleep 0.1)
+	     (break-thread t)
+	     (sleep 0.1)
+	     (test #f thread-running? t))))])
+  (try sync)
+  (try sync/enable-break)
+  (parameterize-break #f (try sync/enable-break))
+  (try read-char)
+  (try peek-char)
+  (try (lambda (x) (read-bytes-avail! (make-bytes 10) x)))
+  (try (lambda (x) (read-bytes-avail!/enable-break (make-bytes 10) x)))
+  (parameterize-break 
+   #f 
+   (try (lambda (x) (read-bytes-avail!/enable-break (make-bytes 10) x)))))
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 
 (report-errs)
