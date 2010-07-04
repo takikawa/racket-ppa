@@ -5,7 +5,7 @@ Maintainer: Ari Pollak <ari@debian.org>
 Uploaders: James Vega <jamessan@debian.org>
 Standards-Version: 3.8.0
 Build-Depends: cdbs, quilt, debhelper (>= 7.0.0), patchutils,
- libfreetype6-dev, libjpeg62-dev, libpng12-dev, libssl-dev, libxaw7-dev,
+ libfreetype6-dev, libjpeg-dev, libpng12-dev, libssl-dev, libxaw7-dev,
  xbitmaps, libxft-dev, libgl1-mesa-dev | libgl-dev,
  libglu1-mesa-dev | libglu-dev, libx11-dev, libxrender-dev, libcairo2-dev
 Vcs-Svn: svn://svn.debian.org/svn/pkg-plt-scheme/plt-scheme/
